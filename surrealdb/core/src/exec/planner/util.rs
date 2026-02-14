@@ -15,46 +15,97 @@ use crate::val::Number;
 // Literal / Value Conversion
 // ============================================================================
 
+/// Best-effort conversion of a `Literal` to a `Value`.
+///
+/// Handles all scalar types, simple record IDs (Number/String/Uuid keys), and
+/// arrays of convertible expressions. Returns `None` for types that require
+/// async computation or are otherwise unsupported (Object, Set, Generate keys,
+/// Range keys, etc.).
+///
+/// Used by both the planner (for physical expression compilation) and the index
+/// analyzer (for index matching).
+pub(crate) fn try_literal_to_value(
+	lit: &crate::expr::literal::Literal,
+) -> Option<crate::val::Value> {
+	use crate::expr::literal::Literal;
+	use crate::val::Value;
+
+	match lit {
+		Literal::None => Some(Value::None),
+		Literal::Null => Some(Value::Null),
+		Literal::Bool(x) => Some(Value::Bool(*x)),
+		Literal::Float(x) => Some(Value::Number(Number::Float(*x))),
+		Literal::Integer(i) => Some(Value::Number(Number::Int(*i))),
+		Literal::Decimal(d) => Some(Value::Number(Number::Decimal(*d))),
+		Literal::String(s) => Some(Value::String(s.clone())),
+		Literal::Uuid(u) => Some(Value::Uuid(*u)),
+		Literal::Datetime(dt) => Some(Value::Datetime(dt.clone())),
+		Literal::Duration(d) => Some(Value::Duration(*d)),
+		Literal::RecordId(rid) => {
+			// Convert simple record ID literals (Number, String, Uuid keys).
+			// Complex keys (Array, Object, Generate, Range) may contain
+			// expressions requiring async computation and are skipped.
+			use crate::expr::RecordIdKeyLit;
+			let key = match &rid.key {
+				RecordIdKeyLit::Number(n) => crate::val::RecordIdKey::Number(*n),
+				RecordIdKeyLit::String(s) => crate::val::RecordIdKey::String(s.clone()),
+				RecordIdKeyLit::Uuid(u) => crate::val::RecordIdKey::Uuid(*u),
+				_ => return None,
+			};
+			Some(Value::RecordId(crate::val::RecordId::new(rid.table.clone(), key)))
+		}
+		Literal::Array(arr) => {
+			let values: Option<Vec<Value>> = arr.iter().map(try_expr_to_value).collect();
+			values.map(|v| Value::Array(v.into()))
+		}
+		// Types that cannot be converted without async or are unsupported
+		Literal::Bytes(_)
+		| Literal::Regex(_)
+		| Literal::Geometry(_)
+		| Literal::File(_)
+		| Literal::Object(_)
+		| Literal::Set(_)
+		| Literal::UnboundedRange => None,
+	}
+}
+
+/// Try to convert an expression to a constant value.
+pub(crate) fn try_expr_to_value(expr: &Expr) -> Option<crate::val::Value> {
+	match expr {
+		Expr::Literal(lit) => try_literal_to_value(lit),
+		_ => None,
+	}
+}
+
 /// Convert a `Literal` to a `Value` for static (non-computed) cases.
 ///
-/// Note: `Literal::RecordId` is handled directly in `Planner::physical_expr()`
-/// via `RecordIdExpr`, so it should never reach this function. Array, Object,
-/// and Set literals are similarly handled upstream by the planner.
+/// Delegates to [`try_literal_to_value`] for common types, then handles
+/// planner-specific types (UnboundedRange, Bytes, Regex, Geometry, File).
+/// Returns `Error::Internal` for types that should have been handled upstream
+/// by `physical_expr()` (RecordId, Array, Object, Set).
 pub(super) fn literal_to_value(
 	lit: crate::expr::literal::Literal,
 ) -> Result<crate::val::Value, Error> {
 	use crate::expr::literal::Literal;
-	use crate::val::{Number, Range, Value};
+	use crate::val::{Range, Value};
 
+	// Try the shared conversion first (handles scalars, simple RecordIds, arrays)
+	if let Some(value) = try_literal_to_value(&lit) {
+		return Ok(value);
+	}
+
+	// Handle types that try_literal_to_value doesn't cover but are valid here
 	match lit {
-		Literal::None => Ok(Value::None),
-		Literal::Null => Ok(Value::Null),
 		Literal::UnboundedRange => Ok(Value::Range(Box::new(Range::unbounded()))),
-		Literal::Bool(x) => Ok(Value::Bool(x)),
-		Literal::Float(x) => Ok(Value::Number(Number::Float(x))),
-		Literal::Integer(i) => Ok(Value::Number(Number::Int(i))),
-		Literal::Decimal(d) => Ok(Value::Number(Number::Decimal(d))),
-		Literal::String(s) => Ok(Value::String(s)),
 		Literal::Bytes(b) => Ok(Value::Bytes(b)),
 		Literal::Regex(r) => Ok(Value::Regex(r)),
-		Literal::Duration(d) => Ok(Value::Duration(d)),
-		Literal::Datetime(dt) => Ok(Value::Datetime(dt)),
-		Literal::Uuid(u) => Ok(Value::Uuid(u)),
 		Literal::Geometry(g) => Ok(Value::Geometry(g)),
 		Literal::File(f) => Ok(Value::File(f)),
-		// These variants are handled upstream in physical_expr() and should never reach here.
-		Literal::RecordId(_) => Err(Error::Internal(
-			"Literal::RecordId should be handled by RecordIdExpr in physical_expr()".to_string(),
-		)),
-		Literal::Array(_) => Err(Error::Internal(
-			"Array literals should be handled by ArrayLiteral in physical_expr()".to_string(),
-		)),
-		Literal::Set(_) => Err(Error::Internal(
-			"Set literals should be handled by SetLiteral in physical_expr()".to_string(),
-		)),
-		Literal::Object(_) => Err(Error::Internal(
-			"Object literals should be handled by ObjectLiteral in physical_expr()".to_string(),
-		)),
+		// Everything else should be handled upstream in physical_expr()
+		other => Err(Error::Internal(format!(
+			"Literal should be handled upstream in physical_expr(): {:?}",
+			std::mem::discriminant(&other)
+		))),
 	}
 }
 

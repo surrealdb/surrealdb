@@ -63,7 +63,7 @@ mod aggregate;
 mod idiom;
 mod select;
 mod source;
-mod util;
+pub(crate) mod util;
 
 use std::sync::Arc;
 

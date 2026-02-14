@@ -692,13 +692,16 @@ async fn resolve_table_scan_stream(
 				.iter()
 				.filter_map(|p| match p {
 					AccessPath::BTreeScan {
-						index_ref, ..
+						index_ref,
+						..
 					} => Some(index_ref.name.clone()),
 					AccessPath::FullTextSearch {
-						index_ref, ..
+						index_ref,
+						..
 					} => Some(index_ref.name.clone()),
 					AccessPath::KnnSearch {
-						index_ref, ..
+						index_ref,
+						..
 					} => Some(index_ref.name.clone()),
 					_ => None,
 				})
@@ -723,10 +726,8 @@ async fn resolve_table_scan_stream(
 						let batch = batch_result?;
 						let deduped: Vec<Value> = batch.values.into_iter()
 							.filter(|v| {
-								if let Value::Object(obj) = v {
-									if let Some(Value::RecordId(rid)) = obj.get("id") {
-										return seen.insert(rid.clone());
-									}
+								if let Value::Object(obj) = v && let Some(Value::RecordId(rid)) = obj.get("id") {
+									return seen.insert(rid.clone());
 								}
 								true // non-object values pass through
 							})
@@ -777,8 +778,12 @@ fn create_index_stream(
 			access,
 			direction,
 		} => {
-			let operator =
-				IndexScan::new(index_ref.clone(), access.clone(), *direction, cfg.table_name.clone());
+			let operator = IndexScan::new(
+				index_ref.clone(),
+				access.clone(),
+				*direction,
+				cfg.table_name.clone(),
+			);
 			operator.execute(ctx)
 		}
 		AccessPath::FullTextSearch {
@@ -806,9 +811,7 @@ fn create_index_stream(
 		}
 		AccessPath::TableScan | AccessPath::Union(_) => {
 			// These should not appear as sub-paths in a union
-			Err(ControlFlow::Err(anyhow::anyhow!(
-				"Unexpected access path in multi-index union"
-			)))
+			Err(ControlFlow::Err(anyhow::anyhow!("Unexpected access path in multi-index union")))
 		}
 	}
 }

@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use super::access_path::{AccessPath, BTreeAccess, IndexRef, RangeBound, select_access_path};
 use crate::catalog::{Index, IndexDefinition};
+use crate::exec::planner::util::try_literal_to_value;
 use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
@@ -182,14 +183,14 @@ impl<'a> IndexAnalyzer<'a> {
 	) -> Option<SimpleCondition> {
 		let (idiom, value, position) = match (left, right) {
 			(Expr::Idiom(idiom), Expr::Literal(lit)) => {
-				if let Some(value) = literal_to_value(lit) {
+				if let Some(value) = try_literal_to_value(lit) {
 					(idiom.clone(), value, IdiomPosition::Left)
 				} else {
 					return None;
 				}
 			}
 			(Expr::Literal(lit), Expr::Idiom(idiom)) => {
-				if let Some(value) = literal_to_value(lit) {
+				if let Some(value) = try_literal_to_value(lit) {
 					(idiom.clone(), value, IdiomPosition::Right)
 				} else {
 					return None;
@@ -229,11 +230,13 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 
 			// Try to match conditions to index columns in order.
-			// The prefix collects leading equality conditions; once a
-			// non-equality (range) condition is seen we record it and
-			// stop -- columns after a range cannot be used.
+			// The prefix collects leading equality conditions. Non-equality
+			// (range) conditions on later columns are NOT encoded into the
+			// compound key because the key encoding uses variable-length
+			// arrays and mixing different array sizes in range bounds
+			// produces incorrect scan ranges. Range conditions are instead
+			// handled by the Scan operator's predicate filter.
 			let mut prefix_values = Vec::new();
-			let mut range_condition: Option<(BinaryOperator, Value)> = None;
 
 			for col in &ix_def.cols {
 				// Find a condition that matches this column
@@ -241,20 +244,15 @@ impl<'a> IndexAnalyzer<'a> {
 
 				match matching_cond {
 					Some(cond) => {
-						// Check if this is an equality condition
 						let is_equality =
 							matches!(cond.op, BinaryOperator::Equal | BinaryOperator::ExactEqual);
 
-						if range_condition.is_none() && is_equality {
-							// Still in the equality prefix -- add to prefix
+						if is_equality {
+							// Equality condition -- add to prefix
 							prefix_values.push(cond.value.clone());
-						} else if range_condition.is_none() {
-							// First non-equality -- becomes range condition
-							range_condition = Some((cond.op.clone(), cond.value.clone()));
-							// Stop -- can't use columns after a range
-							break;
 						} else {
-							// Already have a range condition, stop
+							// Non-equality -- stop adding to prefix.
+							// This column's range will be filtered by the predicate.
 							break;
 						}
 					}
@@ -265,18 +263,11 @@ impl<'a> IndexAnalyzer<'a> {
 				}
 			}
 
-			// Create compound candidate if we have at least 2 matched columns,
-			// or 1 prefix + 1 range condition
-			let matched_count = prefix_values.len()
-				+ if range_condition.is_some() {
-					1
-				} else {
-					0
-				};
-			if matched_count >= 2 || (!prefix_values.is_empty() && range_condition.is_some()) {
+			// Create compound candidate if we have at least 2 equality columns
+			if prefix_values.len() >= 2 {
 				let access = BTreeAccess::Compound {
 					prefix: prefix_values,
-					range: range_condition,
+					range: None,
 				};
 
 				let index_ref = IndexRef::new(self.indexes.clone(), idx);
@@ -360,14 +351,14 @@ impl<'a> IndexAnalyzer<'a> {
 		// Extract idiom and value from the comparison
 		let (idiom, value, position) = match (left, right) {
 			(Expr::Idiom(idiom), Expr::Literal(lit)) => {
-				if let Some(value) = literal_to_value(lit) {
+				if let Some(value) = try_literal_to_value(lit) {
 					(idiom, value, IdiomPosition::Left)
 				} else {
 					return;
 				}
 			}
 			(Expr::Literal(lit), Expr::Idiom(idiom)) => {
-				if let Some(value) = literal_to_value(lit) {
+				if let Some(value) = try_literal_to_value(lit) {
 					(idiom, value, IdiomPosition::Right)
 				} else {
 					return;
@@ -521,7 +512,7 @@ impl<'a> IndexAnalyzer<'a> {
 		// Extract idiom from left side and query string from right side
 		let (idiom, query) = match (left, right) {
 			(Expr::Idiom(idiom), Expr::Literal(lit)) => {
-				if let Some(Value::String(s)) = literal_to_value(lit) {
+				if let Some(Value::String(s)) = try_literal_to_value(lit) {
 					(idiom, s)
 				} else {
 					return;
@@ -583,7 +574,7 @@ impl<'a> IndexAnalyzer<'a> {
 		// Extract numeric vector from right side
 		let vector = match right {
 			Expr::Literal(lit) => {
-				if let Some(Value::Array(arr)) = literal_to_value(lit) {
+				if let Some(Value::Array(arr)) = try_literal_to_value(lit) {
 					let nums: Vec<Number> = arr
 						.iter()
 						.filter_map(|v| match v {
@@ -815,44 +806,5 @@ fn idiom_matches(expr_idiom: &Idiom, index_col: &Idiom) -> bool {
 	expr_idiom == index_col
 }
 
-/// Convert a literal expression to a Value.
-fn literal_to_value(lit: &crate::expr::Literal) -> Option<Value> {
-	use crate::expr::Literal;
-	match lit {
-		Literal::Integer(i) => Some(Value::from(*i)),
-		Literal::Float(f) => Some(Value::from(*f)),
-		Literal::Decimal(d) => Some(Value::from(*d)),
-		Literal::String(s) => Some(Value::from(s.clone())),
-		Literal::Bool(b) => Some(Value::from(*b)),
-		Literal::Uuid(u) => Some(Value::from(*u)),
-		Literal::Datetime(dt) => Some(Value::from(dt.clone())),
-		Literal::Duration(d) => Some(Value::from(*d)),
-		Literal::None => Some(Value::None),
-		Literal::Null => Some(Value::Null),
-		Literal::RecordId(_rid) => {
-			// RecordIdLit requires async computation to convert to RecordId
-			// For now, skip index matching on record ID literals
-			None
-		}
-		Literal::Array(arr) => {
-			// Convert array elements
-			let values: Option<Vec<Value>> = arr.iter().map(expr_to_value).collect();
-			values.map(|v| Value::Array(v.into()))
-		}
-		Literal::Object(_) => None, // Complex objects not supported for index matching
-		Literal::Regex(_) => None,
-		Literal::Bytes(_) => None,
-		Literal::Set(_) => None,
-		Literal::UnboundedRange => None,
-		Literal::File(_) => None,
-		Literal::Geometry(_) => None,
-	}
-}
-
-/// Try to convert an expression to a constant value.
-fn expr_to_value(expr: &Expr) -> Option<Value> {
-	match expr {
-		Expr::Literal(lit) => literal_to_value(lit),
-		_ => None,
-	}
-}
+// literal_to_value and expr_to_value are imported from crate::exec::planner::util
+// as try_literal_to_value and try_expr_to_value.

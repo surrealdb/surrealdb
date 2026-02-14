@@ -13,7 +13,7 @@ value = "[{ id: t:[3, o:1] }]"
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 1, batches: 1}
 └────> Scan [ctx: Db] [source: t, predicate: id[1] = o:1 AND b = 2025] {rows: 1, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+         actual: [access_method: IndexScan, index: idx, access: Compound([o:1, 2025]), direction: Forward]
 
 Total rows: 1''''
 
@@ -26,7 +26,7 @@ value = "[{ id: t:[4, o:2] }]"
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 1, batches: 1}
 └────> Scan [ctx: Db] [source: t, predicate: id[1] = o:2 AND b > 2022] {rows: 1, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+         actual: [access_method: IndexScan, index: idx, access: Compound([o:2]), direction: Forward]
 
 Total rows: 1''''
 
