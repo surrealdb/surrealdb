@@ -6,33 +6,30 @@ reason = "Test EXPLAIN with basic SELECT queries: table scan, predicates, specif
 value = "'OK'"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: item]
-"'''
+value = ''''Project [ctx: Db]
+└────> TableScan [ctx: Db] [table: item, direction: Forward]
+''''
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: item, predicate: score > 15]
-"'''
+value = ''''Project [ctx: Db]
+└────> Filter [ctx: Db] [predicate: score > 15]
+       └────> TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15]
+''''
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: item:1]
-"'''
+value = ''''Project [ctx: Db]
+└────> DynamicScan [ctx: Db] [source: item:1]
+''''
 
 [[test.results]]
-value = '''
-"ProjectValue [ctx: Db] [expr: name]
-└────> Scan [ctx: Db] [source: item]
-"'''
+value = ''''ProjectValue [ctx: Db] [expr: name]
+└────> TableScan [ctx: Db] [table: item, direction: Forward]
+''''
 
 [[test.results]]
-value = '''"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: item]
-"'''
+value = ''''Project [ctx: Db]
+└────> TableScan [ctx: Db] [table: item, direction: Forward]
+''''
 */
 
 -- Setup test data

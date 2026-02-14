@@ -5,10 +5,9 @@
 value = "'OK'"
 
 [[test.results]]
-value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-└────> Scan [ctx: Db] [source: `table`]
-"'''
+value = ''''Aggregate [ctx: Db] [mode: GROUP ALL]
+└────> TableScan [ctx: Db] [table: table, direction: Forward]
+''''
 
 [[test.results]]
 value = "[{ count: 2 }]"

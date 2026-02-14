@@ -148,6 +148,33 @@ impl ExecOperator for IndexScan {
 		Some(&self.metrics)
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		use crate::exec::operators::SortDirection;
+		use crate::exec::ordering::SortProperty;
+
+		let dir = match self.direction {
+			ScanDirection::Forward => SortDirection::Asc,
+			ScanDirection::Backward => SortDirection::Desc,
+		};
+		let cols: Vec<SortProperty> = self
+			.index_ref
+			.definition()
+			.cols
+			.iter()
+			.filter_map(|idiom| {
+				crate::exec::field_path::FieldPath::try_from(idiom).ok().map(|path| SortProperty {
+					path,
+					direction: dir,
+				})
+			})
+			.collect();
+		if cols.is_empty() {
+			crate::exec::OutputOrdering::Unordered
+		} else {
+			crate::exec::OutputOrdering::Sorted(cols)
+		}
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
 
@@ -179,7 +206,7 @@ impl ExecOperator for IndexScan {
 					.context("Failed to get table")?;
 
 				if let Some(def) = &table_def {
-					convert_permission_to_physical(&def.permissions.select, ctx.ctx())
+					convert_permission_to_physical(&def.permissions.select, ctx.ctx()).await
 						.context("Failed to convert permission")?
 				} else {
 					Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {

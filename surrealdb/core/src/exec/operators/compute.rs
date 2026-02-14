@@ -98,6 +98,10 @@ impl ExecOperator for Compute {
 		self.fields.iter().map(|(name, expr)| (name.as_str(), expr)).collect()
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		self.input.output_ordering()
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// If there are no fields to compute, just pass through
 		if self.fields.is_empty() {

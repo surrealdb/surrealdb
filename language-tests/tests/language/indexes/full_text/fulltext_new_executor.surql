@@ -20,9 +20,9 @@ value = "NONE"
 value = "{ events: {  }, fields: {  }, indexes: { i: 'DEFINE INDEX i ON b FIELDS t FULLTEXT ANALYZER simple BM25(1.2,0.75) HIGHLIGHTS' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: b, predicate: t @1@ 'Hello']
+value = '''"Project [ctx: Db]
+└────> Filter [ctx: Db] [predicate: t @1@ 'Hello']
+       └────> FullTextScan [ctx: Db] [index: i, query: Hello]
 "'''
 
 [[test.results]]
@@ -38,7 +38,7 @@ value = '[{ score: 0.9537026882171631f, title: { "0": [{ e: 7, s: 4 }] } }]'
 value = "[]"
 
 [[test.results]]
-value = "[{ score: 0, title: 'Foo Bar' }]"
+value = "[{ score: 0f, title: 'Foo Bar' }]"
 
 [[test.results]]
 value = "[]"

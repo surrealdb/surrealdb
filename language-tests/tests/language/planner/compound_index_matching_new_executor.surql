@@ -15,13 +15,25 @@ value = "[{ event: 'dummy', id: event:0, name: 'dummy', path: 'D/U/M' }]"
 value = "[{ event: 'event', id: event:1, name: 'someName', path: 'A/B/C' }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: event, predicate: name = 'someName' AND event = 'event' AND path = 'A/B/C'] {rows: 1, batches: 1}\n         actual: [access_method: IndexScan, index: idxNameEvent, access: Compound(['someName', 'event']), direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Filter [ctx: Db] [predicate: name = 'someName' AND event = 'event' AND path = 'A/B/C'] {rows: 1, batches: 1}
+       └────> IndexScan [ctx: Db] [index: idxNameEvent, access: ['someName', 'event'], direction: Forward] {rows: 1, batches: 1}
+
+Total rows: 1"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: event, predicate: name = 'someName' AND event = 'event' AND path = 'A/B/C'] {rows: 1, batches: 1}\n         actual: [access_method: IndexScan, index: idxNameEventPath, access: Compound(['someName', 'event', 'A/B/C']), direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Filter [ctx: Db] [predicate: name = 'someName' AND event = 'event' AND path = 'A/B/C'] {rows: 1, batches: 1}
+       └────> IndexScan [ctx: Db] [index: idxNameEventPath, access: ['someName', 'event', 'A/B/C'], direction: Forward] {rows: 1, batches: 1}
+
+Total rows: 1"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: event, predicate: name = 'someName' AND event = 'event' AND path = 'A/B/C'] {rows: 1, batches: 1}\n         actual: [access_method: IndexScan, index: idxNameEventPath, access: Compound(['someName', 'event', 'A/B/C']), direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Filter [ctx: Db] [predicate: name = 'someName' AND event = 'event' AND path = 'A/B/C'] {rows: 1, batches: 1}
+       └────> IndexScan [ctx: Db] [index: idxNameEventPath, access: ['someName', 'event', 'A/B/C'], direction: Forward] {rows: 1, batches: 1}
+
+Total rows: 1"'''
 
 [[test.results]]
 value = "[{ event: 'event', id: event:1, name: 'someName', path: 'A/B/C' }]"

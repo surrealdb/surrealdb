@@ -9,8 +9,8 @@ value = "'OK'"
 value = ''''Project [ctx: Db] {rows: 3, batches: 1}
 └────> Limit [ctx: Db] [limit: 3] {rows: 3, batches: 1}
        └────> SortTopKByKey [ctx: Db] [sort_keys: v DESC, limit: 3] {rows: 3, batches: 1}
-              └────> Scan [ctx: Db] [source: i, predicate: v > 5] {rows: 10, batches: 1}
-                       actual: [access_method: IndexScan, index: idx, access: Range(>5 ), direction: Forward]
+              └────> Filter [ctx: Db] [predicate: v > 5] {rows: 10, batches: 1}
+                     └────> IndexScan [ctx: Db] [index: idx, access: >5, direction: Forward] {rows: 10, batches: 1}
 
 Total rows: 3''''
 
@@ -21,8 +21,7 @@ value = "[{ v: 15 }, { v: 14 }, { v: 13 }]"
 value = ''''Project [ctx: Db] {rows: 3, batches: 1}
 └────> Limit [ctx: Db] [limit: 3] {rows: 3, batches: 1}
        └────> SortTopKByKey [ctx: Db] [sort_keys: v DESC, limit: 3] {rows: 3, batches: 1}
-              └────> Scan [ctx: Db] [source: i] {rows: 15, batches: 1}
-                       actual: [access_method: IndexScan, index: idx, access: Range( ), direction: Forward]
+              └────> IndexScan [ctx: Db] [index: idx, access: , direction: Forward] {rows: 15, batches: 1}
 
 Total rows: 3''''
 
@@ -32,8 +31,7 @@ value = "[{ v: 15 }, { v: 14 }, { v: 13 }]"
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 15, batches: 1}
 └────> SortByKey [ctx: Db] [sort_keys: v DESC] {rows: 15, batches: 1}
-       └────> Scan [ctx: Db] [source: i] {rows: 15, batches: 1}
-                actual: [access_method: IndexScan, index: idx, access: Range( ), direction: Forward]
+       └────> IndexScan [ctx: Db] [index: idx, access: , direction: Forward] {rows: 15, batches: 1}
 
 Total rows: 15''''
 

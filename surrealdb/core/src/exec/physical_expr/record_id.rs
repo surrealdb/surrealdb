@@ -104,26 +104,6 @@ impl PhysicalRecordIdKey {
 		}
 	}
 
-	/// Returns whether any child expression references the current row value.
-	fn references_current_value(&self) -> bool {
-		match self {
-			PhysicalRecordIdKey::Number(_)
-			| PhysicalRecordIdKey::String(_)
-			| PhysicalRecordIdKey::Uuid(_)
-			| PhysicalRecordIdKey::Generate(_) => false,
-			PhysicalRecordIdKey::Array(elements) => {
-				elements.iter().any(|e| e.references_current_value())
-			}
-			PhysicalRecordIdKey::Object(entries) => {
-				entries.iter().any(|(_, e)| e.references_current_value())
-			}
-			PhysicalRecordIdKey::Range {
-				start,
-				end,
-			} => bound_references_current_value(start) || bound_references_current_value(end),
-		}
-	}
-
 	/// Returns the combined access mode of all child expressions.
 	fn access_mode(&self) -> AccessMode {
 		match self {
@@ -171,13 +151,6 @@ fn bound_required_context(bound: &Bound<Box<PhysicalRecordIdKey>>) -> ContextLev
 	}
 }
 
-fn bound_references_current_value(bound: &Bound<Box<PhysicalRecordIdKey>>) -> bool {
-	match bound {
-		Bound::Unbounded => false,
-		Bound::Included(k) | Bound::Excluded(k) => k.references_current_value(),
-	}
-}
-
 fn bound_access_mode(bound: &Bound<Box<PhysicalRecordIdKey>>) -> AccessMode {
 	match bound {
 		Bound::Unbounded => AccessMode::ReadOnly,
@@ -216,10 +189,6 @@ impl PhysicalExpr for RecordIdExpr {
 			table: self.table.clone(),
 			key,
 		}))
-	}
-
-	fn references_current_value(&self) -> bool {
-		self.key.references_current_value()
 	}
 
 	fn access_mode(&self) -> AccessMode {

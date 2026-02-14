@@ -174,7 +174,7 @@ impl ExecOperator for IndexCountScan {
 					Some(def) => def.permissions.select.clone(),
 					None => Permission::None,
 				};
-				convert_permission_to_physical(&catalog_perm, ctx.ctx())
+				convert_permission_to_physical(&catalog_perm, ctx.ctx()).await
 					.context("Failed to convert permission")?
 			} else {
 				PhysicalPermission::Allow

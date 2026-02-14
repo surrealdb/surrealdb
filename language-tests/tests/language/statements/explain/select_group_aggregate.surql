@@ -11,13 +11,13 @@ value = ''''CountScan [ctx: Db] [source: sale]
 
 [[test.results]]
 value = ''''Aggregate [ctx: Db] [by: region]
-└────> Scan [ctx: Db] [source: sale]
+└────> TableScan [ctx: Db] [table: sale, direction: Forward]
 ''''
 
 [[test.results]]
 value = ''''Sort [ctx: Db] [order_by: total DESC]
 └────> Aggregate [ctx: Db] [by: region]
-       └────> Scan [ctx: Db] [source: sale]
+       └────> TableScan [ctx: Db] [table: sale, direction: Forward]
 ''''
 */
 

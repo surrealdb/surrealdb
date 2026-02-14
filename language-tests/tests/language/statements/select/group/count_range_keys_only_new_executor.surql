@@ -5,17 +5,15 @@
 value = "'OK'"
 
 [[test.results]]
-value = '''
-'CountScan [ctx: Db] [source: table:1..4]
+value = ''''CountScan [ctx: Db] [source: table:1..4]
 ''''
 
 [[test.results]]
 value = "[{ count: 3 }]"
 
 [[test.results]]
-value = '''
-'Project [ctx: Db]
-└────> Scan [ctx: Db] [source: table:1..4]
+value = ''''Project [ctx: Db]
+└────> DynamicScan [ctx: Db] [source: table:1..4]
 ''''
 
 [[test.results]]

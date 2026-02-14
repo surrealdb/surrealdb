@@ -161,10 +161,6 @@ impl PhysicalExpr for BinaryOp {
 		})
 	}
 
-	fn references_current_value(&self) -> bool {
-		self.left.references_current_value() || self.right.references_current_value()
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		// Combine both sides' access modes
 		self.left.access_mode().combine(self.right.access_mode())
@@ -240,10 +236,6 @@ impl PhysicalExpr for UnaryOp {
 		})
 	}
 
-	fn references_current_value(&self) -> bool {
-		self.expr.references_current_value()
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		// Propagate inner expression's access mode
 		self.expr.access_mode()
@@ -317,10 +309,6 @@ impl PhysicalExpr for PostfixOp {
 				)
 			}
 		})
-	}
-
-	fn references_current_value(&self) -> bool {
-		self.expr.references_current_value()
 	}
 
 	fn access_mode(&self) -> AccessMode {

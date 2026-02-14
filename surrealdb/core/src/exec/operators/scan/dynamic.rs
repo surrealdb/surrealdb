@@ -6,12 +6,12 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use tracing::instrument;
 
+use super::{FullTextScan, IndexScan, KnnScan};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Permission};
 use crate::err::Error;
 use crate::exec::index::access_path::{AccessPath, select_access_path};
 use crate::exec::index::analysis::IndexAnalyzer;
-use crate::exec::operators::{FullTextScan, IndexScan, KnnScan};
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 	should_check_perms, validate_record_user_access,
@@ -67,7 +67,7 @@ macro_rules! check_perm {
 /// pipeline overhead and enabling early termination for `WHERE ... LIMIT`
 /// queries.
 #[derive(Debug, Clone)]
-pub struct Scan {
+pub struct DynamicScan {
 	pub(crate) source: Arc<dyn PhysicalExpr>,
 	/// Optional version timestamp for time-travel queries (VERSION clause)
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
@@ -99,7 +99,7 @@ pub struct Scan {
 	pub(crate) knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 }
 
-impl Scan {
+impl DynamicScan {
 	/// Create a new Scan operator with fresh metrics.
 	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
@@ -141,9 +141,9 @@ impl Scan {
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
-impl ExecOperator for Scan {
+impl ExecOperator for DynamicScan {
 	fn name(&self) -> &'static str {
-		"Scan"
+		"DynamicScan"
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
@@ -317,7 +317,7 @@ impl ExecOperator for Scan {
 					Some(def) => def.permissions.select.clone(),
 					None => Permission::None,
 				};
-				convert_permission_to_physical(&catalog_perm, ctx.ctx())
+				convert_permission_to_physical(&catalog_perm, ctx.ctx()).await
 					.context("Failed to convert permission")?
 			} else {
 				PhysicalPermission::Allow
@@ -451,7 +451,7 @@ impl ExecOperator for Scan {
 /// fields, permissions, limit/start) in a single pass with minimal await
 /// boundaries. Limit/start state is tracked across batches so the logic is
 /// written once rather than duplicated in every scan path.
-struct ScanPipeline {
+pub(crate) struct ScanPipeline {
 	permission: PhysicalPermission,
 	predicate: Option<Arc<dyn PhysicalExpr>>,
 	field_state: FieldState,
@@ -469,7 +469,7 @@ struct ScanPipeline {
 }
 
 impl ScanPipeline {
-	fn new(
+	pub(crate) fn new(
 		permission: PhysicalPermission,
 		predicate: Option<Arc<dyn PhysicalExpr>>,
 		field_state: FieldState,
@@ -502,7 +502,7 @@ impl ScanPipeline {
 	/// Process a single batch in-place: filter, compute fields, apply
 	/// permissions, then apply limit/start. Returns `false` when the
 	/// limit has been reached and the caller should stop iterating.
-	async fn process_batch(
+	pub(crate) async fn process_batch(
 		&mut self,
 		batch: &mut Vec<Value>,
 		ctx: &ExecutionContext,
@@ -555,7 +555,7 @@ impl ScanPipeline {
 
 /// Determine scan direction from ORDER BY clause.
 /// Returns Backward if the first ORDER BY is `id DESC`, otherwise Forward.
-fn determine_scan_direction(order: &Option<Ordering>) -> ScanDirection {
+pub(crate) fn determine_scan_direction(order: &Option<Ordering>) -> ScanDirection {
 	use crate::expr::order::Ordering as OrderingType;
 	if let Some(OrderingType::Order(order_list)) = order
 		&& let Some(first) = order_list.0.first()
@@ -574,7 +574,7 @@ fn determine_scan_direction(order: &Option<Ordering>) -> ScanDirection {
 /// before any data is returned, avoiding I/O, allocation, and deserialization
 /// for rows that will be discarded anyway (the fast-path optimisation for
 /// `START` without a pushdown predicate).
-fn kv_scan_stream(
+pub(crate) fn kv_scan_stream(
 	txn: Arc<Transaction>,
 	beg: crate::kvs::Key,
 	end: crate::kvs::Key,
@@ -847,14 +847,17 @@ fn create_index_stream(
 /// Populate runtime attributes through a closure.
 ///
 /// The lock is held only for the duration of the push operations.
-fn record_runtime_attrs(attrs: &RuntimeAttrs, populate: impl FnOnce(&mut Vec<(String, String)>)) {
+pub(crate) fn record_runtime_attrs(
+	attrs: &RuntimeAttrs,
+	populate: impl FnOnce(&mut Vec<(String, String)>),
+) {
 	if let Ok(mut guard) = attrs.lock() {
 		populate(&mut guard);
 	}
 }
 
 /// Format a `BTreeAccess` variant into a human-readable string for runtime attrs.
-fn format_btree_access(access: &crate::exec::index::access_path::BTreeAccess) -> String {
+pub(crate) fn format_btree_access(access: &crate::exec::index::access_path::BTreeAccess) -> String {
 	use surrealdb_types::ToSql;
 
 	use crate::exec::index::access_path::BTreeAccess;
@@ -925,7 +928,7 @@ fn format_btree_access(access: &crate::exec::index::access_path::BTreeAccess) ->
 ///   table permission -> computed fields -> WHERE predicate -> field permissions.
 /// Records that fail any check are compacted out via an in-place swap so the
 /// surviving prefix can be truncated at the end with no extra allocation.
-async fn filter_and_process_batch(
+pub(crate) async fn filter_and_process_batch(
 	batch: &mut Vec<Value>,
 	permission: &PhysicalPermission,
 	predicate: Option<&Arc<dyn PhysicalExpr>>,
@@ -970,7 +973,7 @@ async fn filter_and_process_batch(
 // ---------------------------------------------------------------------------
 
 /// Compute the start key for a range scan.
-fn range_start_key(
+pub(crate) fn range_start_key(
 	ns_id: NamespaceId,
 	db_id: DatabaseId,
 	table: &TableName,
@@ -994,7 +997,7 @@ fn range_start_key(
 }
 
 /// Compute the end key for a range scan.
-fn range_end_key(
+pub(crate) fn range_end_key(
 	ns_id: NamespaceId,
 	db_id: DatabaseId,
 	table: &TableName,
@@ -1018,7 +1021,7 @@ fn range_end_key(
 }
 
 /// Evaluate a limit or start expression to a usize value.
-async fn eval_limit_expr(
+pub(crate) async fn eval_limit_expr(
 	expr: &dyn PhysicalExpr,
 	ctx: &ExecutionContext,
 ) -> Result<usize, ControlFlow> {
@@ -1048,7 +1051,7 @@ async fn eval_limit_expr(
 
 /// Decode a record from its key and value bytes.
 #[inline]
-fn decode_record(key: &[u8], val: Vec<u8>) -> Result<Value, ControlFlow> {
+pub(crate) fn decode_record(key: &[u8], val: Vec<u8>) -> Result<Value, ControlFlow> {
 	let decoded_key =
 		crate::key::record::RecordKey::decode_key(key).context("Failed to decode record key")?;
 
@@ -1074,16 +1077,16 @@ fn decode_record(key: &[u8], val: Vec<u8>) -> Result<Value, ControlFlow> {
 /// Cached state for field processing (computed fields and permissions).
 /// Initialized on first batch and reused for subsequent batches.
 #[derive(Debug)]
-struct FieldState {
+pub(crate) struct FieldState {
 	/// Computed field definitions converted to physical expressions
-	computed_fields: Vec<ComputedFieldDef>,
+	pub(crate) computed_fields: Vec<ComputedFieldDef>,
 	/// Field-level permissions (field name -> permission)
-	field_permissions: HashMap<String, PhysicalPermission>,
+	pub(crate) field_permissions: HashMap<String, PhysicalPermission>,
 }
 
 /// A computed field definition ready for evaluation.
 #[derive(Debug)]
-struct ComputedFieldDef {
+pub(crate) struct ComputedFieldDef {
 	/// The field name where to store the result
 	field_name: String,
 	/// The physical expression to evaluate
@@ -1094,7 +1097,7 @@ struct ComputedFieldDef {
 
 /// Fetch field definitions and build the cached field state.
 #[allow(clippy::type_complexity)]
-async fn build_field_state(
+pub(crate) async fn build_field_state(
 	ctx: &ExecutionContext,
 	table_name: &TableName,
 	check_perms: bool,
@@ -1134,7 +1137,7 @@ async fn build_field_state(
 			dep_map.insert(field_name.clone(), deps.clone());
 
 			let physical_expr =
-				expr_to_physical_expr(expr.clone(), ctx.ctx()).with_context(|| {
+				expr_to_physical_expr(expr.clone(), ctx.ctx()).await.with_context(|| {
 					format!("Computed field '{field_name}' has unsupported expression")
 				})?;
 
@@ -1178,6 +1181,7 @@ async fn build_field_state(
 		for fd in field_defs.iter() {
 			let field_name = fd.name.to_raw_string();
 			let physical_perm = convert_permission_to_physical(&fd.select_permission, ctx.ctx())
+				.await
 				.context("Failed to convert field permission")?;
 			field_permissions.insert(field_name, physical_perm);
 		}
@@ -1190,7 +1194,7 @@ async fn build_field_state(
 }
 
 /// Compute all computed fields for a single value.
-async fn compute_fields_for_value(
+pub(crate) async fn compute_fields_for_value(
 	ctx: &ExecutionContext,
 	state: &FieldState,
 	value: &mut Value,
@@ -1231,7 +1235,7 @@ async fn compute_fields_for_value(
 }
 
 /// Filter fields from a value based on field-level permissions.
-async fn filter_fields_by_permission(
+pub(crate) async fn filter_fields_by_permission(
 	ctx: &ExecutionContext,
 	state: &FieldState,
 	value: &mut Value,
@@ -1271,7 +1275,7 @@ mod tests {
 	use crate::exec::planner::expr_to_physical_expr;
 
 	/// Helper to create a Scan with all fields for testing
-	fn create_test_scan(table_name: &str, with_index_hints: bool) -> Scan {
+	async fn create_test_scan(table_name: &str, with_index_hints: bool) -> DynamicScan {
 		let ctx = std::sync::Arc::new(Context::background());
 		let source = expr_to_physical_expr(
 			crate::expr::Expr::Literal(crate::expr::literal::Literal::String(
@@ -1279,9 +1283,10 @@ mod tests {
 			)),
 			&ctx,
 		)
+		.await
 		.expect("Failed to create physical expression");
 
-		Scan::new(
+		DynamicScan::new(
 			source,
 			None,
 			None,
@@ -1298,32 +1303,32 @@ mod tests {
 		)
 	}
 
-	#[test]
-	fn test_scan_struct_with_index_fields() {
+	#[tokio::test]
+	async fn test_scan_struct_with_index_fields() {
 		// Test that Scan can be created with all fields
-		let scan = create_test_scan("test_table", false);
+		let scan = create_test_scan("test_table", false).await;
 		assert!(scan.cond.is_none());
 		assert!(scan.order.is_none());
 		assert!(scan.with.is_none());
 	}
 
-	#[test]
-	fn test_scan_struct_with_noindex_hint() {
+	#[tokio::test]
+	async fn test_scan_struct_with_noindex_hint() {
 		// Test that Scan can be created with WITH NOINDEX
-		let scan = create_test_scan("test_table", true);
+		let scan = create_test_scan("test_table", true).await;
 		assert!(scan.with.is_some());
 		assert!(matches!(scan.with, Some(With::NoIndex)));
 	}
 
-	#[test]
-	fn test_scan_operator_name() {
-		let scan = create_test_scan("test_table", false);
-		assert_eq!(scan.name(), "Scan");
+	#[tokio::test]
+	async fn test_scan_operator_name() {
+		let scan = create_test_scan("test_table", false).await;
+		assert_eq!(scan.name(), "DynamicScan");
 	}
 
-	#[test]
-	fn test_scan_required_context() {
-		let scan = create_test_scan("test_table", false);
+	#[tokio::test]
+	async fn test_scan_required_context() {
+		let scan = create_test_scan("test_table", false).await;
 		assert!(matches!(scan.required_context(), ContextLevel::Database));
 	}
 

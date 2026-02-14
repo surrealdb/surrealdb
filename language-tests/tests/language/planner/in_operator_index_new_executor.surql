@@ -13,15 +13,15 @@ value = "[{ email: 'c@d', id: user:2 }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: user, predicate: email INSIDE ['a@b', 'e@f']] {rows: 1, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+└────> Filter [ctx: Db] [predicate: email INSIDE ['a@b', 'e@f']] {rows: 1, batches: 1}
+       └────> TableScan [ctx: Db] [table: user, direction: Forward, predicate: email INSIDE ['a@b', 'e@f']] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: user, predicate: email INSIDE ['a@b', 'e@f']] {rows: 1, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+└────> Filter [ctx: Db] [predicate: email INSIDE ['a@b', 'e@f']] {rows: 1, batches: 1}
+       └────> TableScan [ctx: Db] [table: user, direction: Forward, predicate: email INSIDE ['a@b', 'e@f']] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 
@@ -54,8 +54,8 @@ value = "[{ apprenantUid: '00013483-fedd-43e3-a94e-80728d896f6e' }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: apprenants, predicate: apprenantUid INSIDE ['00013483-fedd-43e3-a94e-80728d896f6e']] {rows: 1, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+└────> Filter [ctx: Db] [predicate: apprenantUid INSIDE ['00013483-fedd-43e3-a94e-80728d896f6e']] {rows: 1, batches: 1}
+       └────> TableScan [ctx: Db] [table: apprenants, direction: Forward, predicate: apprenantUid INSIDE ['00013483-fedd-43e3-a94e-80728d896f6e']] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 
@@ -76,22 +76,22 @@ value = "[{ account: accounts:3, id: test:3, type: 'password', value: 'notAValid
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: test, predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+└────> Filter [ctx: Db] [predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1, batches: 1}
+       └────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: test, predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1, batches: 1}
-         actual: [access_method: IndexScan, index: idx_account_type, access: Compound([accounts:1]), direction: Forward]
+└────> Filter [ctx: Db] [predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1, batches: 1}
+       └────> IndexScan [ctx: Db] [index: idx_account_type, access: [accounts:1], direction: Forward] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: test, predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1, batches: 1}
-         actual: [access_method: IndexScan, index: idx_account_type, access: Compound([accounts:1]), direction: Forward]
+└────> Filter [ctx: Db] [predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1, batches: 1}
+       └────> IndexScan [ctx: Db] [index: idx_account_type, access: [accounts:1], direction: Forward] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 

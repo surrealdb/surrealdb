@@ -10,8 +10,8 @@ value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: test, predicate: email CONTAINS 'domain.com'] {rows: 1, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+└────> Filter [ctx: Db] [predicate: email CONTAINS 'domain.com'] {rows: 1, batches: 1}
+       └────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: email CONTAINS 'domain.com'] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 
@@ -20,8 +20,8 @@ value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: test, predicate: 'domain.com' INSIDE email] {rows: 1, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+└────> Filter [ctx: Db] [predicate: 'domain.com' INSIDE email] {rows: 1, batches: 1}
+       └────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: 'domain.com' INSIDE email] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 
@@ -30,8 +30,8 @@ value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: test, predicate: email CONTAINS 'domain.com'] {rows: 1, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+└────> Filter [ctx: Db] [predicate: email CONTAINS 'domain.com'] {rows: 1, batches: 1}
+       └────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: email CONTAINS 'domain.com'] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 

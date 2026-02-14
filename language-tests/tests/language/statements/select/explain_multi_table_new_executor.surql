@@ -12,7 +12,12 @@ value = "[{ id: person:jaime, name: 'Jaime' }]"
 value = "[{ id: software:surreal, name: 'SurrealDB' }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3, batches: 2}\n└────> Union [ctx: Db] {rows: 3, batches: 2}\n       ├────> Scan [ctx: Db] [source: person] {rows: 2, batches: 1}\n       │        actual: [access_method: TableScan, direction: Forward]\n       └────> Scan [ctx: Db] [source: software] {rows: 1, batches: 1}\n                actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 3''''
+value = ''''Project [ctx: Db] {rows: 3, batches: 2}
+└────> Union [ctx: Db] {rows: 3, batches: 2}
+       ├────> TableScan [ctx: Db] [table: person, direction: Forward] {rows: 2, batches: 1}
+       └────> TableScan [ctx: Db] [table: software, direction: Forward] {rows: 1, batches: 1}
+
+Total rows: 3''''
 */
 
 CREATE person:tobie SET name = 'Tobie';

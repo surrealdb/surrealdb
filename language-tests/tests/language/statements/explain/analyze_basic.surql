@@ -7,22 +7,20 @@ value = "'OK'"
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 3, batches: 1}
-└────> Scan [ctx: Db] [source: item] {rows: 3, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+└────> TableScan [ctx: Db] [table: item, direction: Forward] {rows: 3, batches: 1}
 
 Total rows: 3''''
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 2, batches: 1}
-└────> Scan [ctx: Db] [source: item, predicate: score > 15] {rows: 2, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+└────> Filter [ctx: Db] [predicate: score > 15] {rows: 2, batches: 1}
+       └────> TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15] {rows: 2, batches: 1}
 
 Total rows: 2''''
 
 [[test.results]]
 value = ''''ProjectValue [ctx: Db] [expr: name] {rows: 3, batches: 1}
-└────> Scan [ctx: Db] [source: item] {rows: 3, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+└────> TableScan [ctx: Db] [table: item, direction: Forward] {rows: 3, batches: 1}
 
 Total rows: 3''''
 */

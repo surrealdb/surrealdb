@@ -28,9 +28,8 @@ value = "NONE"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2, batches: 1}
-└────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2, batches: 1}
-       └────> Scan [ctx: Db] [source: person, predicate: name = 'Jaime' OR genre = 'm'] {rows: 2, batches: 1}
-                actual: [access_method: IndexScan, index: uniq_name, access: Range( ), direction: Forward]
+└────> Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm'] {rows: 2, batches: 1}
+       └────> IndexScan [ctx: Db] [index: uniq_name, access: , direction: Forward] {rows: 4, batches: 1}
 
 Total rows: 2"'''
 
@@ -39,9 +38,8 @@ value = "[{ name: 'Jaime' }, { name: 'Tobie' }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 1, batches: 1}
-       └────> Scan [ctx: Db] [source: person, predicate: name = 'Jaime' AND genre = 'm'] {rows: 1, batches: 1}
-                actual: [access_method: IndexScan, index: uniq_name, access: Equality('Jaime'), direction: Forward]
+└────> Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm'] {rows: 1, batches: 1}
+       └────> IndexScan [ctx: Db] [index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 
@@ -50,9 +48,8 @@ value = "[{ name: 'Jaime' }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 3, batches: 1}
-└────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 3, batches: 1}
-       └────> Scan [ctx: Db] [source: person, predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3, batches: 1}
-                actual: [access_method: IndexScan, index: uniq_name, access: Range( ), direction: Forward]
+└────> Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3, batches: 1}
+       └────> IndexScan [ctx: Db] [index: uniq_name, access: , direction: Forward] {rows: 4, batches: 1}
 
 Total rows: 3"'''
 
@@ -61,53 +58,8 @@ value = "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 1, batches: 1}
-       └────> Scan [ctx: Db] [source: person, predicate: name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb'] {rows: 1, batches: 1}
-                actual: [access_method: IndexScan, index: uniq_name, access: Equality('Jaime'), direction: Forward]
-
-Total rows: 1"'''
-
-[[test.results]]
-value = "[{ name: 'Jaime' }]"
-
-[[test.results]]
-value = '''"Project [ctx: Db] {rows: 2, batches: 1}
-└────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2, batches: 1}
-       └────> Scan [ctx: Db] [source: person, predicate: name = 'Jaime' OR genre = 'm'] {rows: 2, batches: 1}
-                actual: [access_method: TableScan, direction: Forward]
-
-Total rows: 2"'''
-
-[[test.results]]
-value = "[{ name: 'Jaime' }, { name: 'Tobie' }]"
-
-[[test.results]]
-value = '''"Project [ctx: Db] {rows: 3, batches: 1}
-└────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 3, batches: 1}
-       └────> Scan [ctx: Db] [source: person, predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3, batches: 1}
-                actual: [access_method: IndexScan, index: uniq_name, access: Range( ), direction: Forward]
-
-Total rows: 3"'''
-
-[[test.results]]
-value = "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]"
-
-[[test.results]]
-value = '''"Project [ctx: Db] {rows: 3, batches: 1}
-└────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 3, batches: 1}
-       └────> Scan [ctx: Db] [source: person, predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3, batches: 1}
-                actual: [access_method: TableScan, direction: Forward]
-
-Total rows: 3"'''
-
-[[test.results]]
-value = "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]"
-
-[[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 1, batches: 1}
-       └────> Scan [ctx: Db] [source: person, predicate: name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb'] {rows: 1, batches: 1}
-                actual: [access_method: FullTextScan, index: ft_company, query: surrealdb]
+└────> Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb'] {rows: 1, batches: 1}
+       └────> IndexScan [ctx: Db] [index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 
@@ -117,8 +69,51 @@ value = "[{ name: 'Jaime' }]"
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2, batches: 1}
 └────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2, batches: 1}
-       └────> Scan [ctx: Db] [source: person, predicate: name = 'Jaime' OR genre = 'm'] {rows: 2, batches: 1}
-                actual: [access_method: TableScan, direction: Forward]
+       └────> Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm'] {rows: 2, batches: 1}
+              └────> TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm'] {rows: 2, batches: 1}
+
+Total rows: 2"'''
+
+[[test.results]]
+value = "[{ name: 'Jaime' }, { name: 'Tobie' }]"
+
+[[test.results]]
+value = '''"Project [ctx: Db] {rows: 3, batches: 1}
+└────> Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3, batches: 1}
+       └────> IndexScan [ctx: Db] [index: uniq_name, access: , direction: Forward] {rows: 4, batches: 1}
+
+Total rows: 3"'''
+
+[[test.results]]
+value = "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]"
+
+[[test.results]]
+value = '''"Project [ctx: Db] {rows: 3, batches: 1}
+└────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 3, batches: 1}
+       └────> Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3, batches: 1}
+              └────> TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3, batches: 1}
+
+Total rows: 3"'''
+
+[[test.results]]
+value = "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]"
+
+[[test.results]]
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 1, batches: 1}
+       └────> Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb'] {rows: 1, batches: 1}
+              └────> FullTextScan [ctx: Db] [index: ft_company, query: surrealdb] {rows: 3, batches: 1}
+
+Total rows: 1"'''
+
+[[test.results]]
+value = "[{ name: 'Jaime' }]"
+
+[[test.results]]
+value = '''"Project [ctx: Db] {rows: 2, batches: 1}
+└────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2, batches: 1}
+       └────> Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm'] {rows: 2, batches: 1}
+              └────> TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm'] {rows: 2, batches: 1}
 
 Total rows: 2"'''
 
@@ -128,8 +123,8 @@ value = "[{ name: 'Jaime' }, { name: 'Tobie' }]"
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
 └────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 1, batches: 1}
-       └────> Scan [ctx: Db] [source: person, predicate: name = 'Jaime' AND genre = 'm'] {rows: 1, batches: 1}
-                actual: [access_method: TableScan, direction: Forward]
+       └────> Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm'] {rows: 1, batches: 1}
+              └────> TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' AND genre = 'm'] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 

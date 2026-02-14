@@ -12,8 +12,8 @@ value = "[]"
 
 [[test.results]]
 value = '''"Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: test, predicate: indexedField = 'cake'] {rows: 10, batches: 1}
-         actual: [access_method: IndexScan, index: idx_indexedField, access: Equality('cake'), direction: Forward]
+└────> Filter [ctx: Db] [predicate: indexedField = 'cake'] {rows: 10, batches: 1}
+       └────> IndexScan [ctx: Db] [index: idx_indexedField, access: = 'cake', direction: Forward] {rows: 10, batches: 1}
 
 Total rows: 1"'''
 
@@ -25,8 +25,8 @@ value = "[{ count: 10 }]"
 
 [[test.results]]
 value = '''"Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: test, predicate: indexedField = 'cake' AND unindexedField = false] {rows: 0, batches: 0}
-         actual: [access_method: IndexScan, index: idx_indexedField, access: Equality('cake'), direction: Forward]
+└────> Filter [ctx: Db] [predicate: indexedField = 'cake' AND unindexedField = false] {rows: 0, batches: 0}
+       └────> IndexScan [ctx: Db] [index: idx_indexedField, access: = 'cake', direction: Forward] {rows: 10, batches: 1}
 
 Total rows: 1"'''
 

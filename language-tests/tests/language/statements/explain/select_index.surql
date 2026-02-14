@@ -7,29 +7,29 @@ value = "'OK'"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com'] {rows: 1, batches: 1}
-         actual: [access_method: IndexScan, index: idx_email_uniq, access: Equality('a@test.com'), direction: Forward]
+└────> Filter [ctx: Db] [predicate: email = 'a@test.com'] {rows: 1, batches: 1}
+       └────> IndexScan [ctx: Db] [index: idx_email_uniq, access: = 'a@test.com', direction: Forward] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2, batches: 1}
-└────> Scan [ctx: Db] [source: user, predicate: region = 'EU' AND status = 'active'] {rows: 2, batches: 1}
-         actual: [access_method: IndexScan, index: idx_region_status, access: Compound(['EU', 'active']), direction: Forward]
+└────> Filter [ctx: Db] [predicate: region = 'EU' AND status = 'active'] {rows: 2, batches: 1}
+       └────> IndexScan [ctx: Db] [index: idx_region_status, access: ['EU', 'active'], direction: Forward] {rows: 2, batches: 1}
 
 Total rows: 2"'''
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com'] {rows: 1, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+└────> Filter [ctx: Db] [predicate: email = 'a@test.com'] {rows: 1, batches: 1}
+       └────> TableScan [ctx: Db] [table: user, direction: Forward, predicate: email = 'a@test.com'] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2, batches: 1}
-└────> Scan [ctx: Db] [source: user, predicate: region = 'NA'] {rows: 2, batches: 1}
-         actual: [access_method: IndexScan, index: idx_region_status, access: Compound(['NA']), direction: Forward]
+└────> Filter [ctx: Db] [predicate: region = 'NA'] {rows: 2, batches: 1}
+       └────> IndexScan [ctx: Db] [index: idx_region_status, access: ['NA'], direction: Forward] {rows: 2, batches: 1}
 
 Total rows: 2"'''
 */

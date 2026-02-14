@@ -24,29 +24,29 @@ value = "[{ id: test:{ val: 123 }, val: 456 }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: test, predicate: val = 456] {rows: 1, batches: 1}
-         actual: [access_method: IndexScan, index: doc_val, access: Equality(456), direction: Forward]
+└────> Filter [ctx: Db] [predicate: val = 456] {rows: 1, batches: 1}
+       └────> IndexScan [ctx: Db] [index: doc_val, access: = 456, direction: Forward] {rows: 1, batches: 1}
 
 Total rows: 1''''
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: test, predicate: id.val = 456] {rows: 1, batches: 1}
-         actual: [access_method: TableScan, direction: Forward]
+└────> Filter [ctx: Db] [predicate: id.val = 456] {rows: 1, batches: 1}
+       └────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: id.val = 456] {rows: 1, batches: 1}
 
 Total rows: 1''''
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 0, batches: 0}
-└────> Scan [ctx: Db] [source: test, predicate: id.id().val = 456] {rows: 0, batches: 0}
-         actual: [access_method: IndexScan, index: rid_val, access: Equality(456), direction: Forward]
+└────> Filter [ctx: Db] [predicate: id.id().val = 456] {rows: 0, batches: 0}
+       └────> IndexScan [ctx: Db] [index: rid_val, access: = 456, direction: Forward] {rows: 0, batches: 0}
 
 Total rows: 0''''
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 0, batches: 0}
-└────> Scan [ctx: Db] [source: test, predicate: record::id(id).val = 456] {rows: 0, batches: 0}
-         actual: [access_method: TableScan, direction: Forward]
+└────> Filter [ctx: Db] [predicate: record::id(id).val = 456] {rows: 0, batches: 0}
+       └────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: record::id(id).val = 456] {rows: 0, batches: 0}
 
 Total rows: 0''''
 

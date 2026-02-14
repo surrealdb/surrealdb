@@ -53,7 +53,7 @@ async fn check_permission(
 		.into()),
 		Permission::Specific(expr) => {
 			// Plan and evaluate the permission expression
-			match expr_to_physical_expr(expr.clone(), ctx.exec_ctx.ctx()) {
+			match expr_to_physical_expr(expr.clone(), ctx.exec_ctx.ctx()).await {
 				Ok(phys_expr) => {
 					let result = phys_expr.evaluate(ctx.clone()).await?;
 					if !result.is_truthy() {
@@ -130,11 +130,6 @@ fn args_access_mode(args: &[Arc<dyn PhysicalExpr>]) -> AccessMode {
 	args.iter().map(|e| e.access_mode()).combine_all()
 }
 
-/// Helper to check if any argument references current value.
-fn args_reference_current_value(args: &[Arc<dyn PhysicalExpr>]) -> bool {
-	args.iter().any(|e| e.references_current_value())
-}
-
 /// Helper to compute the maximum required context from arguments.
 fn args_required_context(args: &[Arc<dyn PhysicalExpr>]) -> crate::exec::ContextLevel {
 	args.iter().map(|e| e.required_context()).max().unwrap_or(crate::exec::ContextLevel::Root)
@@ -188,10 +183,6 @@ impl PhysicalExpr for BuiltinFunctionExec {
 		} else {
 			Ok(func.invoke_async(&ctx, args).await?)
 		}
-	}
-
-	fn references_current_value(&self) -> bool {
-		args_reference_current_value(&self.arguments)
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -327,10 +318,6 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 		Ok(validate_return(&func_name, func_def.returns.as_ref(), result)?)
 	}
 
-	fn references_current_value(&self) -> bool {
-		args_reference_current_value(&self.arguments)
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		// Custom functions are always potentially read-write
 		AccessMode::ReadWrite.combine(args_access_mode(&self.arguments))
@@ -413,10 +400,6 @@ impl PhysicalExpr for JsFunctionExec {
 			message: String::from("Embedded functions are not enabled."),
 		}
 		.into())
-	}
-
-	fn references_current_value(&self) -> bool {
-		args_reference_current_value(&self.arguments)
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -640,10 +623,6 @@ impl PhysicalExpr for ModelFunctionExec {
 		.into())
 	}
 
-	fn references_current_value(&self) -> bool {
-		args_reference_current_value(&self.arguments)
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		// Model functions are read-only (inference doesn't mutate)
 		AccessMode::ReadOnly.combine(args_access_mode(&self.arguments))
@@ -789,10 +768,6 @@ impl PhysicalExpr for SurrealismModuleExec {
 		.into())
 	}
 
-	fn references_current_value(&self) -> bool {
-		args_reference_current_value(&self.arguments)
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		// Module functions are always potentially read-write
 		AccessMode::ReadWrite.combine(args_access_mode(&self.arguments))
@@ -850,10 +825,6 @@ impl PhysicalExpr for SiloModuleExec {
 			name
 		)
 		.into())
-	}
-
-	fn references_current_value(&self) -> bool {
-		args_reference_current_value(&self.arguments)
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -920,12 +891,6 @@ impl PhysicalExpr for ClosureExec {
 			body: self.closure.body.clone(),
 			captures,
 		})))
-	}
-
-	fn references_current_value(&self) -> bool {
-		// Closures capture their environment, but don't directly reference current value
-		// The body might, but that's evaluated later when the closure is called
-		false
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -1079,10 +1044,6 @@ impl PhysicalExpr for ClosureCallExec {
 		}
 	}
 
-	fn references_current_value(&self) -> bool {
-		self.target.references_current_value() || args_reference_current_value(&self.arguments)
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		// Closures can potentially do anything, so be conservative
 		AccessMode::ReadWrite
@@ -1141,11 +1102,6 @@ impl PhysicalExpr for ProjectionFunctionExec {
 		} else {
 			Ok(Value::None)
 		}
-	}
-
-	fn references_current_value(&self) -> bool {
-		// Projection functions inherently reference the current document
-		true
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -1220,11 +1176,6 @@ impl PhysicalExpr for IndexFunctionExec {
 	fn required_context(&self) -> crate::exec::ContextLevel {
 		let args_ctx = args_required_context(&self.arguments);
 		args_ctx.max(self.func_required_context)
-	}
-
-	fn references_current_value(&self) -> bool {
-		// Index functions always reference the current document (for RecordId, etc.)
-		true
 	}
 
 	fn access_mode(&self) -> AccessMode {

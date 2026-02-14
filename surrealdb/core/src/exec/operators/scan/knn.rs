@@ -145,7 +145,7 @@ impl ExecOperator for KnnScan {
 
 			// Resolve table permissions
 			let select_permission = if check_perms {
-				convert_permission_to_physical(&table_def.permissions.select, ctx.ctx())
+				convert_permission_to_physical(&table_def.permissions.select, ctx.ctx()).await
 					.context("Failed to convert permission")?
 			} else {
 				PhysicalPermission::Allow

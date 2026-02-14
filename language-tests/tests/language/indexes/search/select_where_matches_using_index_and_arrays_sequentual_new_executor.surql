@@ -12,8 +12,8 @@ value = "NONE"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: blog, predicate: content @1@ 'Hello Bãr'] {rows: 1, batches: 1}
-         actual: [access_method: FullTextScan, index: blog_content, query: Hello Bãr]
+└────> Filter [ctx: Db] [predicate: content @1@ 'Hello Bãr'] {rows: 1, batches: 1}
+       └────> FullTextScan [ctx: Db] [index: blog_content, query: Hello Bãr] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 

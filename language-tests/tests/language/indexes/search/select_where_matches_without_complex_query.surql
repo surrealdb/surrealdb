@@ -26,7 +26,7 @@ value = "NONE"
 value = "[{ id: page:1, sc1: 0f, sc2: 0f }, { id: page:2, sc1: 0f, sc2: 0f }]"
 
 [[test.results]]
-value = """{ children: [{ attributes: { predicate: "host = 'test' AND title @1@ 'dog' OR content @2@ 'dog'", source: 'page' }, context: 'Db', expressions: [{ role: 'source', sql: 'page' }, { role: 'predicate', sql: "host = 'test' AND title @1@ 'dog' OR content @2@ 'dog'" }], operator: 'Scan' }], context: 'Db', expressions: [{ role: 'field', sql: 'id' }, { role: 'field', sql: 'search::score(...)' }, { role: 'field', sql: 'search::score(...)' }], operator: 'Project' }"""
+value = """{ children: [{ attributes: { predicate: "host = 'test' AND title @1@ 'dog' OR content @2@ 'dog'" }, children: [{ attributes: { access: "= 'test'", direction: 'Forward', index: 'page_host' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', expressions: [{ role: 'predicate', sql: "host = 'test' AND title @1@ 'dog' OR content @2@ 'dog'" }], operator: 'Filter' }], context: 'Db', expressions: [{ role: 'field', sql: 'id' }, { role: 'field', sql: 'search::score(...)' }, { role: 'field', sql: 'search::score(...)' }], operator: 'Project' }"""
 
 [[test.results]]
 value = "[{ id: page:1, sc1: 0f, sc2: 0f }, { id: page:2, sc1: 0f, sc2: 0f }]"

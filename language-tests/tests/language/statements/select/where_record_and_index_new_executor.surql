@@ -15,7 +15,11 @@ value = "[{ author: person:tobie, id: post:1 }]"
 value = "[{ author: person:tobie, id: post:2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: post, predicate: author = person:tobie] {rows: 2, batches: 1}\n         actual: [access_method: IndexScan, index: author, access: Equality(person:tobie), direction: Forward]\n\nTotal rows: 2''''
+value = ''''Project [ctx: Db] {rows: 2, batches: 1}
+└────> Filter [ctx: Db] [predicate: author = person:tobie] {rows: 2, batches: 1}
+       └────> IndexScan [ctx: Db] [index: author, access: = person:tobie, direction: Forward] {rows: 2, batches: 1}
+
+Total rows: 2''''
 
 [[test.results]]
 value = "[{ author: person:tobie, id: post:1 }, { author: person:tobie, id: post:2 }]"
@@ -30,7 +34,11 @@ value = "[{ genre: 'm', id: person2:jaime, name: 'Jaime' }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: person2, predicate: name = 'Tobie' AND genre = 'm'] {rows: 1, batches: 1}\n         actual: [access_method: IndexScan, index: person2_name, access: Equality('Tobie'), direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Filter [ctx: Db] [predicate: name = 'Tobie' AND genre = 'm'] {rows: 1, batches: 1}
+       └────> IndexScan [ctx: Db] [index: person2_name, access: = 'Tobie', direction: Forward] {rows: 1, batches: 1}
+
+Total rows: 1"'''
 
 [[test.results]]
 value = "[{ name: 'Tobie' }]"
@@ -45,7 +53,11 @@ value = "[{ genre: 'm', id: person3:jaime, name: 'Jaime' }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: person3, predicate: name = 'Jaime' AND genre = 'm'] {rows: 1, batches: 1}\n         actual: [access_method: IndexScan, index: person3_name, access: Equality('Jaime'), direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm'] {rows: 1, batches: 1}
+       └────> IndexScan [ctx: Db] [index: person3_name, access: = 'Jaime', direction: Forward] {rows: 1, batches: 1}
+
+Total rows: 1"'''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }]"

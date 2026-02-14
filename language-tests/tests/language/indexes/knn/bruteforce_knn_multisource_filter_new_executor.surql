@@ -15,10 +15,8 @@ value = ''''Project [ctx: Db] {rows: 2, batches: 1}
               └────> KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 2] {rows: 2, batches: 1}
                      └────> Filter [ctx: Db] [predicate: active = true] {rows: 3, batches: 2}
                             └────> Union [ctx: Db] {rows: 5, batches: 2}
-                                   ├────> Scan [ctx: Db] [source: pts] {rows: 3, batches: 1}
-                                   │        actual: [access_method: TableScan, direction: Forward]
-                                   └────> Scan [ctx: Db] [source: pts2] {rows: 2, batches: 1}
-                                            actual: [access_method: TableScan, direction: Forward]
+                                   ├────> TableScan [ctx: Db] [table: pts, direction: Forward] {rows: 3, batches: 1}
+                                   └────> TableScan [ctx: Db] [table: pts2, direction: Forward] {rows: 2, batches: 1}
 
 Total rows: 2''''
 */

@@ -60,14 +60,6 @@ impl PhysicalExpr for IfElseExpr {
 		}
 	}
 
-	fn references_current_value(&self) -> bool {
-		// Check if any branch references current value
-		self.branches
-			.iter()
-			.any(|(cond, val)| cond.references_current_value() || val.references_current_value())
-			|| self.otherwise.as_ref().is_some_and(|e| e.references_current_value())
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		// Combine all branches' access modes
 		let branches_mode = self

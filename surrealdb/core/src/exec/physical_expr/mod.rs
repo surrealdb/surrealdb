@@ -250,10 +250,6 @@ pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	/// via the existing `From<anyhow::Error> for ControlFlow` impl.
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value>;
 
-	/// Does this expression reference the current row?
-	/// If false, can be evaluated in scalar context.
-	fn references_current_value(&self) -> bool;
-
 	/// Returns the access mode for this expression.
 	///
 	/// This is critical for plan-based mutability analysis:
@@ -445,22 +441,6 @@ mod tests {
 		};
 		assert_eq!(first_empty, Value::None);
 		assert_eq!(last_empty, Value::None);
-	}
-
-	// =========================================================================
-	// IdiomExpr Tests
-	// =========================================================================
-
-	#[test]
-	fn test_idiom_expr_simple_identifier() {
-		use crate::exec::parts::FieldPart;
-
-		let parts: Vec<Arc<dyn PhysicalExpr>> = vec![Arc::new(FieldPart {
-			name: "test".to_string(),
-		})];
-		let expr = IdiomExpr::new("test".to_string(), None, parts);
-
-		assert!(expr.is_simple_identifier());
 	}
 
 	// =========================================================================

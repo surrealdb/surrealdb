@@ -13,13 +13,21 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = ''''Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: indexPerformance3, predicate: something >= 5000] {rows: 5000, batches: 2}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 1''''
+value = ''''Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1, batches: 1}
+└────> Filter [ctx: Db] [predicate: something >= 5000] {rows: 5000, batches: 2}
+       └────> TableScan [ctx: Db] [table: indexPerformance3, direction: Forward, predicate: something >= 5000] {rows: 5000, batches: 2}
+
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ count: 5000 }]"
 
 [[test.results]]
-value = ''''Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: indexPerformance3, predicate: something >= 5000] {rows: 5000, batches: 5}\n         actual: [access_method: IndexScan, index: somethingIndex, access: Range(>=5000 ), direction: Forward]\n\nTotal rows: 1''''
+value = ''''Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1, batches: 1}
+└────> Filter [ctx: Db] [predicate: something >= 5000] {rows: 5000, batches: 5}
+       └────> IndexScan [ctx: Db] [index: somethingIndex, access: >=5000, direction: Forward] {rows: 5000, batches: 5}
+
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ count: 5000 }]"

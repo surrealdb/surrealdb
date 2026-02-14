@@ -13,8 +13,7 @@ value = ''''Project [ctx: Db] {rows: 2, batches: 1}
 └────> SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2, batches: 1}
        └────> Compute [ctx: Db] [fields: distance = vector::distance::euclidean(...)] {rows: 2, batches: 1}
               └────> KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 2] {rows: 2, batches: 1}
-                     └────> Scan [ctx: Db] [source: pts, predicate: active = true] {rows: 3, batches: 1}
-                              actual: [access_method: TableScan, direction: Forward]
+                     └────> TableScan [ctx: Db] [table: pts, direction: Forward, predicate: active = true] {rows: 3, batches: 1}
 
 Total rows: 2''''
 
@@ -26,8 +25,7 @@ value = ''''Project [ctx: Db] {rows: 2, batches: 1}
 └────> SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2, batches: 1}
        └────> Compute [ctx: Db] [fields: distance = vector::distance::euclidean(...)] {rows: 2, batches: 1}
               └────> KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 2] {rows: 2, batches: 1}
-                     └────> Scan [ctx: Db] [source: pts, predicate: active = true] {rows: 3, batches: 1}
-                              actual: [access_method: TableScan, direction: Forward]
+                     └────> TableScan [ctx: Db] [table: pts, direction: Forward, predicate: active = true] {rows: 3, batches: 1}
 
 Total rows: 2''''
 */

@@ -61,10 +61,6 @@ impl PhysicalExpr for AllPart {
 		futures::future::try_join_all(futures).await
 	}
 
-	fn references_current_value(&self) -> bool {
-		true
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		AccessMode::ReadOnly
 	}
@@ -134,10 +130,6 @@ impl PhysicalExpr for FlattenPart {
 		Ok(evaluate_flatten(&value)?)
 	}
 
-	fn references_current_value(&self) -> bool {
-		true
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		AccessMode::ReadOnly
 	}
@@ -193,10 +185,6 @@ impl PhysicalExpr for FirstPart {
 		}
 	}
 
-	fn references_current_value(&self) -> bool {
-		true
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		AccessMode::ReadOnly
 	}
@@ -233,10 +221,6 @@ impl PhysicalExpr for LastPart {
 			Value::Array(arr) => Ok(arr.last().cloned().unwrap_or(Value::None)),
 			other => Ok(other),
 		}
-	}
-
-	fn references_current_value(&self) -> bool {
-		true
 	}
 
 	fn access_mode(&self) -> AccessMode {

@@ -18,13 +18,21 @@ value = "[{ b: false, i: 2, id: t:2 }]"
 value = "[{ b: true, i: 1, id: t:1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: t, predicate: b == true] {rows: 1, batches: 1}\n         actual: [access_method: IndexScan, index: idx, access: Equality(true), direction: Forward]\n\nTotal rows: 1''''
+value = ''''Project [ctx: Db] {rows: 1, batches: 1}
+└────> Filter [ctx: Db] [predicate: b == true] {rows: 1, batches: 1}
+       └────> IndexScan [ctx: Db] [index: idx, access: = true, direction: Forward] {rows: 1, batches: 1}
+
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ b: false, i: 2, id: t:2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: t, predicate: i == 2] {rows: 1, batches: 1}\n         actual: [access_method: IndexScan, index: uniq, access: Equality(2), direction: Forward]\n\nTotal rows: 1''''
+value = ''''Project [ctx: Db] {rows: 1, batches: 1}
+└────> Filter [ctx: Db] [predicate: i == 2] {rows: 1, batches: 1}
+       └────> IndexScan [ctx: Db] [index: uniq, access: = 2, direction: Forward] {rows: 1, batches: 1}
+
+Total rows: 1''''
 */
 
 DEFINE INDEX idx ON TABLE t COLUMNS b;

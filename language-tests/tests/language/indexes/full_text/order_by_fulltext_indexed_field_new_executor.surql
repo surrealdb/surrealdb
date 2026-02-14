@@ -16,8 +16,7 @@ value = "NONE"
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 2, batches: 1}
 └────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2, batches: 1}
-       └────> Scan [ctx: Db] [source: person] {rows: 2, batches: 1}
-                actual: [access_method: TableScan, direction: Forward]
+       └────> TableScan [ctx: Db] [table: person, direction: Forward] {rows: 2, batches: 1}
 
 Total rows: 2''''
 

@@ -20,45 +20,45 @@ value = "NONE"
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = '''
-'Project [ctx: Db]
-└────> Scan [ctx: Db] [source: t, predicate: v > math::max(...)]
+value = ''''Project [ctx: Db]
+└────> Filter [ctx: Db] [predicate: v > math::max(...)]
+       └────> TableScan [ctx: Db] [table: t, direction: Forward, predicate: v > math::max(...)]
 ''''
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = '''
-'Project [ctx: Db]
-└────> Scan [ctx: Db] [source: t, predicate: v > 3 - math::max(...)]
+value = ''''Project [ctx: Db]
+└────> Filter [ctx: Db] [predicate: v > 3 - math::max(...)]
+       └────> TableScan [ctx: Db] [table: t, direction: Forward, predicate: v > 3 - math::max(...)]
 ''''
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = '''
-'Project [ctx: Db]
-└────> Scan [ctx: Db] [source: t, predicate: v > 3 - math::max(...) - 1]
+value = ''''Project [ctx: Db]
+└────> Filter [ctx: Db] [predicate: v > 3 - math::max(...) - 1]
+       └────> TableScan [ctx: Db] [table: t, direction: Forward, predicate: v > 3 - math::max(...) - 1]
 ''''
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = '''
-'Project [ctx: Db]
-└────> Scan [ctx: Db] [source: t, predicate: v > 3 - math::max(...) + 1]
+value = ''''Project [ctx: Db]
+└────> Filter [ctx: Db] [predicate: v > 3 - math::max(...) + 1]
+       └────> TableScan [ctx: Db] [table: t, direction: Forward, predicate: v > 3 - math::max(...) + 1]
 ''''
 
 [[test.results]]
 value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
-value = '''
-'Project [ctx: Db]
-└────> Scan [ctx: Db] [source: t, predicate: v > $p3 - math::max(...) + $p1]
+value = ''''Project [ctx: Db]
+└────> Filter [ctx: Db] [predicate: v > $p3 - math::max(...) + $p1]
+       └────> TableScan [ctx: Db] [table: t, direction: Forward, predicate: v > $p3 - math::max(...) + $p1]
 ''''
 
 */

@@ -464,14 +464,14 @@ pub(super) fn extract_table_from_context(ctx: &crate::ctx::FrozenContext) -> cra
 ///
 /// Returns a physical expression that, when evaluated at execution time,
 /// produces the version timestamp (u64).
-pub(super) fn extract_version(
+pub(super) async fn extract_version(
 	version_expr: Expr,
-	planner: &super::Planner,
+	planner: &super::Planner<'_>,
 ) -> Result<Option<std::sync::Arc<dyn crate::exec::PhysicalExpr>>, Error> {
 	match version_expr {
 		Expr::Literal(Literal::None) => Ok(None),
 		_ => {
-			let expr = planner.physical_expr(version_expr)?;
+			let expr = planner.physical_expr(version_expr).await?;
 			Ok(Some(expr))
 		}
 	}

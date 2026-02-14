@@ -132,7 +132,7 @@ impl ExecOperator for FullTextScan {
 					.context("Failed to get table")?;
 
 				if let Some(def) = &table_def {
-					convert_permission_to_physical(&def.permissions.select, ctx.ctx())
+					convert_permission_to_physical(&def.permissions.select, ctx.ctx()).await
 						.context("Failed to convert permission")?
 				} else {
 					Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {

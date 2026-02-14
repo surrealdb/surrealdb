@@ -56,10 +56,6 @@ impl PhysicalExpr for OptionalChainPart {
 		Ok(current)
 	}
 
-	fn references_current_value(&self) -> bool {
-		true
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		self.tail.iter().map(|p| p.access_mode()).combine_all()
 	}

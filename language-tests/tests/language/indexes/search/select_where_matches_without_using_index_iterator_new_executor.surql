@@ -15,8 +15,9 @@ value = "NONE"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> Scan [ctx: Db] [source: blog, predicate: title @0@ 'hello' AND identifier > 0 OR title @1@ 'world' AND identifier < 99] {rows: 1, batches: 1}
-         actual: [access_method: MultiIndexUnion, indexes: blog_title, blog_title]
+└────> Filter [ctx: Db] [predicate: title @0@ 'hello' AND identifier > 0 OR title @1@ 'world' AND identifier < 99] {rows: 1, batches: 1}
+       └────> DynamicScan [ctx: Db] [source: blog, predicate: title @0@ 'hello' AND identifier > 0 OR title @1@ 'world' AND identifier < 99] {rows: 1, batches: 1}
+                actual: [access_method: MultiIndexUnion, indexes: blog_title, blog_title]
 
 Total rows: 1"'''
 
