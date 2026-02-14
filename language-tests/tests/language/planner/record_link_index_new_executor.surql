@@ -259,6 +259,7 @@ SELECT * FROM i WHERE t.name IN ['a', 'b'];
 -- With full-text index on remote field
 REMOVE TABLE i;
 REMOVE TABLE t;
+
 DEFINE ANALYZER name TOKENIZERS class FILTERS lowercase,ngram(1,128);
 DEFINE INDEX t_name_search_idx ON TABLE t COLUMNS name FULLTEXT ANALYZER name BM25 HIGHLIGHTS;
 DEFINE INDEX i_t_id ON TABLE i COLUMNS t;

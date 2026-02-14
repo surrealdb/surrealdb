@@ -12,10 +12,18 @@ value = "[{ email: 'a@b', id: user:1 }]"
 value = "[{ email: 'c@d', id: user:2 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: user, predicate: email INSIDE ['a@b', 'e@f']] {rows: 1, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: user, predicate: email INSIDE ['a@b', 'e@f']] {rows: 1, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 1"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: user, predicate: email INSIDE ['a@b', 'e@f']] {rows: 1, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: user, predicate: email INSIDE ['a@b', 'e@f']] {rows: 1, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 1"'''
 
 [[test.results]]
 value = "[{ email: 'a@b', id: user:1 }]"
@@ -45,7 +53,11 @@ value = "[{ apprenantUid: '00013483-fedd-43e3-a94e-80728d896f6e' }]"
 value = "[{ apprenantUid: '00013483-fedd-43e3-a94e-80728d896f6e' }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: apprenants, predicate: apprenantUid INSIDE ['00013483-fedd-43e3-a94e-80728d896f6e']] {rows: 1, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: apprenants, predicate: apprenantUid INSIDE ['00013483-fedd-43e3-a94e-80728d896f6e']] {rows: 1, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 1"'''
 
 [[test.results]]
 value = "NONE"
@@ -63,13 +75,25 @@ value = "[{ account: accounts:2, id: test:2, type: 'password', value: '$argon2id
 value = "[{ account: accounts:3, id: test:3, type: 'password', value: 'notAValidPassword' }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 1"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1, batches: 1}\n         actual: [access_method: IndexScan, index: idx_account_type, access: Compound([accounts:1]), direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1, batches: 1}
+         actual: [access_method: IndexScan, index: idx_account_type, access: Compound([accounts:1]), direction: Forward]
+
+Total rows: 1"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1, batches: 1}\n         actual: [access_method: IndexScan, index: idx_account_type, access: Compound([accounts:1]), direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1, batches: 1}
+         actual: [access_method: IndexScan, index: idx_account_type, access: Compound([accounts:1]), direction: Forward]
+
+Total rows: 1"'''
 
 [[test.results]]
 value = "[{ account: accounts:1, id: test:1, type: 'password', value: '$argon2id$v=19$m=19456,t=2,p=1$qP0Y6ApAaFyeDsGySVD0DQ$Bp/Jv2uwapFUl5NKYk3uMsT5DZV0XPpMMVm3F2ZVfSM' }]"
@@ -82,6 +106,7 @@ value = "[{ account: accounts:1, id: test:1, type: 'password', value: '$argon2id
 
 [[test.results]]
 value = "[{ account: accounts:1, id: test:1, type: 'password', value: '$argon2id$v=19$m=19456,t=2,p=1$qP0Y6ApAaFyeDsGySVD0DQ$Bp/Jv2uwapFUl5NKYk3uMsT5DZV0XPpMMVm3F2ZVfSM' }]"
+
 */
 
 -- Standard index with IN/INSIDE
@@ -97,6 +122,7 @@ SELECT * FROM user WHERE email INSIDE ['a@b', 'e@f'];
 DEFINE INDEX apprenantUid ON apprenants FIELDS apprenantUid UNIQUE;
 CREATE apprenants:1 CONTENT { apprenantUid: "00013483-fedd-43e3-a94e-80728d896f6e" };
 SELECT apprenantUid FROM apprenants WHERE apprenantUid in [];
+
 SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["00013483-fedd-43e3-a94e-80728d896f6e"];
 SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["99999999-aaaa-1111-8888-abcdef012345", "00013483-fedd-43e3-a94e-80728d896f6e"];
 SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["00013483-fedd-43e3-a94e-80728d896f6e", "99999999-aaaa-1111-8888-abcdef012345"];
@@ -127,4 +153,5 @@ EXPLAIN ANALYZE SELECT * FROM test WHERE account = accounts:1 AND type IN ['pass
 SELECT * FROM test WITH INDEX idx_type_value WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
 SELECT * FROM test WITH INDEX idx_account_type WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
 SELECT * FROM test WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];
+
 SELECT * FROM test WITH NOINDEX WHERE account = accounts:1 AND type IN ['password', 'firebasePassword'];

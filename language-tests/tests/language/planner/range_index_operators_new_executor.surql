@@ -21,49 +21,81 @@ value = "[{ id: test:16, year: 2015 }]"
 value = "[{ id: test:20, year: 2020 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year > 2000 AND year < 2020] {rows: 3, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range(>2000 ), direction: Forward]\n\nTotal rows: 3''''
+value = ''''Project [ctx: Db] {rows: 3, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year > 2000 AND year < 2020] {rows: 3, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range(>2000 ), direction: Forward]
+
+Total rows: 3''''
 
 [[test.results]]
 value = "[{ id: test:10 }, { id: test:15 }, { id: test:16 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 4, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year >= 2000 AND year < 2020] {rows: 4, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range(>=2000 ), direction: Forward]\n\nTotal rows: 4''''
+value = ''''Project [ctx: Db] {rows: 4, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year >= 2000 AND year < 2020] {rows: 4, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range(>=2000 ), direction: Forward]
+
+Total rows: 4''''
 
 [[test.results]]
 value = "[{ id: test:0 }, { id: test:10 }, { id: test:15 }, { id: test:16 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 4, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year > 2000 AND year <= 2020] {rows: 4, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range(>2000 ), direction: Forward]\n\nTotal rows: 4''''
+value = ''''Project [ctx: Db] {rows: 4, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year > 2000 AND year <= 2020] {rows: 4, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range(>2000 ), direction: Forward]
+
+Total rows: 4''''
 
 [[test.results]]
 value = "[{ id: test:10 }, { id: test:15 }, { id: test:16 }, { id: test:20 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 5, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year >= 2000 AND year <= 2020] {rows: 5, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range(>=2000 ), direction: Forward]\n\nTotal rows: 5''''
+value = ''''Project [ctx: Db] {rows: 5, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year >= 2000 AND year <= 2020] {rows: 5, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range(>=2000 ), direction: Forward]
+
+Total rows: 5''''
 
 [[test.results]]
 value = "[{ id: test:0 }, { id: test:10 }, { id: test:15 }, { id: test:16 }, { id: test:20 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year < 2015] {rows: 2, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range( <2015), direction: Forward]\n\nTotal rows: 2''''
+value = ''''Project [ctx: Db] {rows: 2, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year < 2015] {rows: 2, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range( <2015), direction: Forward]
+
+Total rows: 2''''
 
 [[test.results]]
 value = "[{ id: test:0 }, { id: test:10 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 4, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year <= 2015] {rows: 4, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range( <=2015), direction: Forward]\n\nTotal rows: 4''''
+value = ''''Project [ctx: Db] {rows: 4, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year <= 2015] {rows: 4, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range( <=2015), direction: Forward]
+
+Total rows: 4''''
 
 [[test.results]]
 value = "[{ id: test:0 }, { id: test:10 }, { id: test:15 }, { id: test:16 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year > 2015] {rows: 1, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range(>2015 ), direction: Forward]\n\nTotal rows: 1''''
+value = ''''Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year > 2015] {rows: 1, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range(>2015 ), direction: Forward]
+
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ id: test:20 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year >= 2015] {rows: 3, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range(>=2015 ), direction: Forward]\n\nTotal rows: 3''''
+value = ''''Project [ctx: Db] {rows: 3, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year >= 2015] {rows: 3, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range(>=2015 ), direction: Forward]
+
+Total rows: 3''''
 
 [[test.results]]
 value = "[{ id: test:15 }, { id: test:16 }, { id: test:20 }]"
@@ -90,49 +122,81 @@ value = "[{ id: test:16, year: 2016 }]"
 value = "[{ id: test:20, year: 2020 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year > 2000 AND year < 2020] {rows: 3, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range(>2000 ), direction: Forward]\n\nTotal rows: 3''''
+value = ''''Project [ctx: Db] {rows: 3, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year > 2000 AND year < 2020] {rows: 3, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range(>2000 ), direction: Forward]
+
+Total rows: 3''''
 
 [[test.results]]
 value = "[{ id: test:10 }, { id: test:15 }, { id: test:16 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 4, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year >= 2000 AND year < 2020] {rows: 4, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range(>=2000 ), direction: Forward]\n\nTotal rows: 4''''
+value = ''''Project [ctx: Db] {rows: 4, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year >= 2000 AND year < 2020] {rows: 4, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range(>=2000 ), direction: Forward]
+
+Total rows: 4''''
 
 [[test.results]]
 value = "[{ id: test:0 }, { id: test:10 }, { id: test:15 }, { id: test:16 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 4, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year > 2000 AND year <= 2020] {rows: 4, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range(>2000 ), direction: Forward]\n\nTotal rows: 4''''
+value = ''''Project [ctx: Db] {rows: 4, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year > 2000 AND year <= 2020] {rows: 4, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range(>2000 ), direction: Forward]
+
+Total rows: 4''''
 
 [[test.results]]
 value = "[{ id: test:10 }, { id: test:15 }, { id: test:16 }, { id: test:20 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 5, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year >= 2000 AND year <= 2020] {rows: 5, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range(>=2000 ), direction: Forward]\n\nTotal rows: 5''''
+value = ''''Project [ctx: Db] {rows: 5, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year >= 2000 AND year <= 2020] {rows: 5, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range(>=2000 ), direction: Forward]
+
+Total rows: 5''''
 
 [[test.results]]
 value = "[{ id: test:0 }, { id: test:10 }, { id: test:15 }, { id: test:16 }, { id: test:20 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year < 2015] {rows: 2, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range( <2015), direction: Forward]\n\nTotal rows: 2''''
+value = ''''Project [ctx: Db] {rows: 2, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year < 2015] {rows: 2, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range( <2015), direction: Forward]
+
+Total rows: 2''''
 
 [[test.results]]
 value = "[{ id: test:0 }, { id: test:10 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year <= 2015] {rows: 3, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range( <=2015), direction: Forward]\n\nTotal rows: 3''''
+value = ''''Project [ctx: Db] {rows: 3, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year <= 2015] {rows: 3, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range( <=2015), direction: Forward]
+
+Total rows: 3''''
 
 [[test.results]]
 value = "[{ id: test:0 }, { id: test:10 }, { id: test:15 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year > 2015] {rows: 2, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range(>2015 ), direction: Forward]\n\nTotal rows: 2''''
+value = ''''Project [ctx: Db] {rows: 2, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year > 2015] {rows: 2, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range(>2015 ), direction: Forward]
+
+Total rows: 2''''
 
 [[test.results]]
 value = "[{ id: test:16 }, { id: test:20 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3, batches: 1}\n└────> Scan [ctx: Db] [source: test, predicate: year >= 2015] {rows: 3, batches: 1}\n         actual: [access_method: IndexScan, index: year, access: Range(>=2015 ), direction: Forward]\n\nTotal rows: 3''''
+value = ''''Project [ctx: Db] {rows: 3, batches: 1}
+└────> Scan [ctx: Db] [source: test, predicate: year >= 2015] {rows: 3, batches: 1}
+         actual: [access_method: IndexScan, index: year, access: Range(>=2015 ), direction: Forward]
+
+Total rows: 3''''
 
 [[test.results]]
 value = "[{ id: test:15 }, { id: test:16 }, { id: test:20 }]"
@@ -162,10 +226,13 @@ SELECT id FROM test WHERE year >= 2000 AND year <= 2020;
 -- Single operators
 EXPLAIN ANALYZE SELECT id FROM test WHERE year < 2015;
 SELECT id FROM test WHERE year < 2015;
+
 EXPLAIN ANALYZE SELECT id FROM test WHERE year <= 2015;
 SELECT id FROM test WHERE year <= 2015;
+
 EXPLAIN ANALYZE SELECT id FROM test WHERE year > 2015;
 SELECT id FROM test WHERE year > 2015;
+
 EXPLAIN ANALYZE SELECT id FROM test WHERE year >= 2015;
 SELECT id FROM test WHERE year >= 2015;
 
@@ -175,12 +242,14 @@ DEFINE INDEX year ON TABLE test COLUMNS year UNIQUE;
 CREATE test:0 SET year = 2000;
 CREATE test:10 SET year = 2010;
 CREATE test:15 SET year = 2015;
+
 CREATE test:16 SET year = 2016;
 CREATE test:20 SET year = 2020;
 
 EXPLAIN ANALYZE SELECT id FROM test WHERE year > 2000 AND year < 2020;
 SELECT id FROM test WHERE year > 2000 AND year < 2020;
 EXPLAIN ANALYZE SELECT id FROM test WHERE year >= 2000 AND year < 2020;
+
 SELECT id FROM test WHERE year >= 2000 AND year < 2020;
 EXPLAIN ANALYZE SELECT id FROM test WHERE year > 2000 AND year <= 2020;
 SELECT id FROM test WHERE year > 2000 AND year <= 2020;
@@ -193,5 +262,6 @@ EXPLAIN ANALYZE SELECT id FROM test WHERE year <= 2015;
 SELECT id FROM test WHERE year <= 2015;
 EXPLAIN ANALYZE SELECT id FROM test WHERE year > 2015;
 SELECT id FROM test WHERE year > 2015;
+
 EXPLAIN ANALYZE SELECT id FROM test WHERE year >= 2015;
 SELECT id FROM test WHERE year >= 2015;

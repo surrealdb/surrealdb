@@ -12,7 +12,11 @@ value = "[{ id: student:2, marks: [{ mark: 50, subject: 'maths' }, { mark: 35, s
 value = "[{ id: student:3, marks: [{ mark: 50, subject: 'maths' }, { mark: 30, subject: 'hindi' }, { mark: 45, subject: 'tamil' }] }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: student, predicate: marks.*.subject CONTAINS 'english'] {rows: 2, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 2"'''
+value = '''"Project [ctx: Db] {rows: 2, batches: 1}
+└────> Scan [ctx: Db] [source: student, predicate: marks.*.subject CONTAINS 'english'] {rows: 2, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:1 }, { id: student:2 }]"
@@ -21,7 +25,11 @@ value = "[{ id: student:1 }, { id: student:2 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: student, predicate: marks.*.subject CONTAINS 'english'] {rows: 2, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 2"'''
+value = '''"Project [ctx: Db] {rows: 2, batches: 1}
+└────> Scan [ctx: Db] [source: student, predicate: marks.subject CONTAINS 'english'] {rows: 2, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:1 }, { id: student:2 }]"
@@ -30,7 +38,11 @@ value = "[{ id: student:1 }, { id: student:2 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: student, predicate: marks.*.subject CONTAINSALL ['hindi', 'maths']] {rows: 2, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 2"'''
+value = '''"Project [ctx: Db] {rows: 2, batches: 1}
+└────> Scan [ctx: Db] [source: student, predicate: marks.*.subject CONTAINSALL ['hindi', 'maths']] {rows: 2, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:2 }, { id: student:3 }]"
@@ -39,7 +51,11 @@ value = "[{ id: student:2 }, { id: student:3 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: student, predicate: marks.*.subject CONTAINSALL ['hindi', 'maths']] {rows: 2, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 2"'''
+value = '''"Project [ctx: Db] {rows: 2, batches: 1}
+└────> Scan [ctx: Db] [source: student, predicate: marks.subject CONTAINSALL ['hindi', 'maths']] {rows: 2, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:2 }, { id: student:3 }]"
@@ -48,7 +64,11 @@ value = "[{ id: student:2 }, { id: student:3 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: student, predicate: marks.*.subject CONTAINSANY ['tamil', 'french']] {rows: 2, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 2"'''
+value = '''"Project [ctx: Db] {rows: 2, batches: 1}
+└────> Scan [ctx: Db] [source: student, predicate: marks.*.subject CONTAINSANY ['tamil', 'french']] {rows: 2, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:1 }, { id: student:3 }]"
@@ -57,7 +77,11 @@ value = "[{ id: student:1 }, { id: student:3 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 2, batches: 1}\n└────> Scan [ctx: Db] [source: student, predicate: marks.*.subject CONTAINSANY ['tamil', 'french']] {rows: 2, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 2"'''
+value = '''"Project [ctx: Db] {rows: 2, batches: 1}
+└────> Scan [ctx: Db] [source: student, predicate: marks.subject CONTAINSANY ['tamil', 'french']] {rows: 2, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:1 }, { id: student:3 }]"
@@ -90,7 +114,9 @@ EXPLAIN ANALYZE SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
 SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
 -- CONTAINS with index
 DEFINE INDEX subject_idx ON student COLUMNS marks.*.subject;
-EXPLAIN ANALYZE SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
+EXPLAIN ANALYZE SELECT id FROM student WHERE marks.
+subject CONTAINS "english";
+
 SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
 
 -- CONTAINSALL without index
@@ -99,7 +125,9 @@ EXPLAIN ANALYZE SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi
 SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"];
 -- CONTAINSALL with index
 DEFINE INDEX subject_idx ON student COLUMNS marks.*.subject;
-EXPLAIN ANALYZE SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"];
+EXPLAIN ANALYZE SELECT id FROM student WHERE marks.
+subject CONTAINSALL ["hindi", "maths"];
+
 SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"];
 
 -- CONTAINSANY without index
@@ -108,5 +136,7 @@ EXPLAIN ANALYZE SELECT id FROM student WHERE marks.*.subject CONTAINSANY ["tamil
 SELECT id FROM student WHERE marks.*.subject CONTAINSANY ["tamil", "french"];
 -- CONTAINSANY with index
 DEFINE INDEX subject_idx ON student COLUMNS marks.*.subject;
-EXPLAIN ANALYZE SELECT id FROM student WHERE marks.*.subject CONTAINSANY ["tamil", "french"];
+EXPLAIN ANALYZE SELECT id FROM student WHERE marks.
+subject CONTAINSANY ["tamil", "french"];
+
 SELECT id FROM student WHERE marks.*.subject CONTAINSANY ["tamil", "french"];

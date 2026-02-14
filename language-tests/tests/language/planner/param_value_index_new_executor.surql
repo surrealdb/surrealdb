@@ -18,7 +18,11 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: person, predicate: name = $nameObj.name] {rows: 1, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 1''''
+value = ''''Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: person, predicate: name = $nameObj.name] {rows: 1, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 1''''
 
 [[test.results]]
 value = "NONE"
@@ -33,10 +37,18 @@ value = "NONE"
 value = "[{ created_at: d'2023-12-25T17:13:01.940183014Z', id: test_user:1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: test_user, predicate: created_at = $now] {rows: 1, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 1''''
+value = ''''Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: test_user, predicate: created_at = $now] {rows: 1, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 1''''
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: test_user, predicate: created_at = d'2023-12-25T17:13:01.940183014Z'] {rows: 1, batches: 1}\n         actual: [access_method: IndexScan, index: createdAt, access: Equality(d'2023-12-25T17:13:01.940183014Z'), direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: test_user, predicate: created_at = d'2023-12-25T17:13:01.940183014Z'] {rows: 1, batches: 1}
+         actual: [access_method: IndexScan, index: createdAt, access: Equality(d'2023-12-25T17:13:01.940183014Z'), direction: Forward]
+
+Total rows: 1"'''
 
 [[test.results]]
 value = "[{ created_at: d'2023-12-25T17:13:01.940183014Z', id: test_user:1 }]"
@@ -54,10 +66,18 @@ value = "[{ id: sessions:1, sessionUid: u'00ad70db-f435-442e-9012-1cd853102084' 
 value = "NONE"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: sessions, predicate: sessionUid = u'00ad70db-f435-442e-9012-1cd853102084'] {rows: 1, batches: 1}\n         actual: [access_method: IndexScan, index: sessionUid, access: Equality(u'00ad70db-f435-442e-9012-1cd853102084'), direction: Forward]\n\nTotal rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: sessions, predicate: sessionUid = u'00ad70db-f435-442e-9012-1cd853102084'] {rows: 1, batches: 1}
+         actual: [access_method: IndexScan, index: sessionUid, access: Equality(u'00ad70db-f435-442e-9012-1cd853102084'), direction: Forward]
+
+Total rows: 1"'''
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 1, batches: 1}\n└────> Scan [ctx: Db] [source: sessions, predicate: sessionUid = $sess.uuid] {rows: 1, batches: 1}\n         actual: [access_method: TableScan, direction: Forward]\n\nTotal rows: 1''''
+value = ''''Project [ctx: Db] {rows: 1, batches: 1}
+└────> Scan [ctx: Db] [source: sessions, predicate: sessionUid = $sess.uuid] {rows: 1, batches: 1}
+         actual: [access_method: TableScan, direction: Forward]
+
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ id: sessions:1, sessionUid: u'00ad70db-f435-442e-9012-1cd853102084' }]"
