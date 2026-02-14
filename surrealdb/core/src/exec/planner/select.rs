@@ -49,7 +49,46 @@ pub(crate) struct SelectPipelineConfig {
 
 impl<'ctx> Planner<'ctx> {
 	/// Plan a SELECT statement.
+	///
+	/// If the statement has `EXPLAIN` or `EXPLAIN FULL`, the explain field is
+	/// extracted first and the inner SELECT is planned normally. The result is
+	/// then wrapped in [`ExplainPlan`] or [`AnalyzePlan`]. This ensures ALL
+	/// internal paths (including the COUNT fast-path) are covered.
 	pub(crate) fn plan_select_statement(
+		&self,
+		mut select: crate::expr::statements::SelectStatement,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		// Extract EXPLAIN before planning so every code path gets wrapped.
+		let explain = select.explain.take();
+		let plan = self.plan_select_core(select)?;
+
+		// ── EXPLAIN rewriting ──────────────────────────────────────
+		// SELECT ... EXPLAIN      → EXPLAIN SELECT ...       (ExplainPlan)
+		// SELECT ... EXPLAIN FULL → EXPLAIN ANALYZE SELECT . (AnalyzePlan)
+		//
+		// Uses JSON format for consistency with the old executor's structured
+		// output format (`[{ detail: ..., operation: ... }]`).
+		match explain {
+			Some(crate::expr::explain::Explain(full)) => {
+				if full {
+					Ok(Arc::new(AnalyzePlan {
+						plan,
+						format: crate::expr::ExplainFormat::Json,
+						redact_duration: self.ctx.redact_duration(),
+					}))
+				} else {
+					Ok(Arc::new(ExplainPlan {
+						plan,
+						format: crate::expr::ExplainFormat::Json,
+					}))
+				}
+			}
+			None => Ok(plan),
+		}
+	}
+
+	/// Core SELECT planning logic, called after EXPLAIN has been extracted.
+	fn plan_select_core(
 		&self,
 		select: crate::expr::statements::SelectStatement,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
@@ -68,7 +107,7 @@ impl<'ctx> Planner<'ctx> {
 			fetch,
 			version,
 			timeout,
-			explain,
+			explain: _, // already extracted by plan_select_statement
 			tempfiles,
 		} = select;
 
@@ -351,34 +390,10 @@ impl<'ctx> Planner<'ctx> {
 			}
 		};
 
-		let result: Arc<dyn ExecOperator> = if only {
-			Arc::new(UnwrapExactlyOne::new(timed, !is_value_source))
+		if only {
+			Ok(Arc::new(UnwrapExactlyOne::new(timed, !is_value_source)))
 		} else {
-			timed
-		};
-
-		// ── EXPLAIN rewriting ──────────────────────────────────────
-		// SELECT ... EXPLAIN      → EXPLAIN SELECT ...       (ExplainPlan)
-		// SELECT ... EXPLAIN FULL → EXPLAIN ANALYZE SELECT . (AnalyzePlan)
-		//
-		// Uses JSON format for consistency with the old executor's structured
-		// output format (`[{ detail: ..., operation: ... }]`).
-		match explain {
-			Some(crate::expr::explain::Explain(full)) => {
-				if full {
-					Ok(Arc::new(AnalyzePlan {
-						plan: result,
-						format: crate::expr::ExplainFormat::Json,
-						redact_duration: self.ctx.redact_duration(),
-					}))
-				} else {
-					Ok(Arc::new(ExplainPlan {
-						plan: result,
-						format: crate::expr::ExplainFormat::Json,
-					}))
-				}
-			}
-			None => Ok(result),
+			Ok(timed)
 		}
 	}
 
