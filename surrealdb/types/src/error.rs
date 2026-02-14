@@ -30,6 +30,11 @@ mod code {
 	pub const DESERIALIZATION_ERROR: i64 = -32008;
 }
 
+/// Default wire code when none is specified (e.g. for deserialization of older wire format).
+fn default_code() -> i64 {
+	code::INTERNAL_ERROR
+}
+
 // -----------------------------------------------------------------------------
 // Public API error type (wire-friendly, non-lossy, supports chaining)
 // -----------------------------------------------------------------------------
@@ -78,6 +83,11 @@ pub enum ErrorKind {
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue, Serialize, Deserialize)]
 #[surreal(crate = "crate")]
 pub struct Error {
+	/// Wire-only error code for RPC backwards compatibility. Not part of the public API; may be
+	/// removed in the next major release. Always present on the wire; defaults to
+	/// [`code::INTERNAL_ERROR`] when not otherwise set.
+	#[serde(default = "default_code")]
+	code: i64,
 	/// Machine-readable error kind.
 	kind: ErrorKind,
 	/// Human-readable error message.
@@ -89,10 +99,6 @@ pub struct Error {
 	/// one".
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	cause: Option<Box<Error>>,
-	/// Wire-only error code for RPC backwards compatibility. Not part of the public API; may be
-	/// removed in the next major release. Only used when serialising to the wire.
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	code: Option<i64>,
 }
 
 impl Error {
@@ -100,11 +106,14 @@ impl Error {
 	/// When `details` is provided, the wire code is set from the variant (e.g. `Parse` →
 	/// `PARSE_ERROR`).
 	pub fn validation(message: String, details: Option<ValidationError>) -> Self {
-		let code = details.as_ref().map(|d| match d {
-			ValidationError::Parse => code::PARSE_ERROR,
-			ValidationError::InvalidRequest => code::INVALID_REQUEST,
-			ValidationError::InvalidParams => code::INVALID_PARAMS,
-		});
+		let code = details
+			.as_ref()
+			.map(|d| match d {
+				ValidationError::Parse => code::PARSE_ERROR,
+				ValidationError::InvalidRequest => code::INVALID_REQUEST,
+				ValidationError::InvalidParams => code::INVALID_PARAMS,
+			})
+			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
 			kind: ErrorKind::Validation,
 			message,
@@ -117,9 +126,12 @@ impl Error {
 	/// Not-allowed error (e.g. method, scripting, function, net target), with optional
 	/// structured details. When `details` is provided, the wire code is set from the variant.
 	pub fn not_allowed(message: String, details: Option<NotAllowedError>) -> Self {
-		let code = details.as_ref().map(|d| match d {
-			NotAllowedError::Method => code::METHOD_NOT_ALLOWED,
-		});
+		let code = details
+			.as_ref()
+			.map(|d| match d {
+				NotAllowedError::Method => code::METHOD_NOT_ALLOWED,
+			})
+			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
 			kind: ErrorKind::NotAllowed,
 			message,
@@ -132,11 +144,14 @@ impl Error {
 	/// Configuration error (feature or config not supported), with optional structured details.
 	/// When `details` is provided, the wire code is set from the variant.
 	pub fn configuration(message: String, details: Option<ConfigurationError>) -> Self {
-		let code = details.as_ref().map(|d| match d {
-			ConfigurationError::LiveQueryNotSupported => code::LIVE_QUERY_NOT_SUPPORTED,
-			ConfigurationError::BadLiveQueryConfig => code::BAD_LIVE_QUERY_CONFIG,
-			ConfigurationError::BadGraphqlConfig => code::BAD_GRAPHQL_CONFIG,
-		});
+		let code = details
+			.as_ref()
+			.map(|d| match d {
+				ConfigurationError::LiveQueryNotSupported => code::LIVE_QUERY_NOT_SUPPORTED,
+				ConfigurationError::BadLiveQueryConfig => code::BAD_LIVE_QUERY_CONFIG,
+				ConfigurationError::BadGraphqlConfig => code::BAD_GRAPHQL_CONFIG,
+			})
+			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
 			kind: ErrorKind::Configuration,
 			message,
@@ -149,21 +164,24 @@ impl Error {
 	/// Authentication or authorisation error, with optional structured details.
 	/// When `details` is provided, the wire code is set from the variant.
 	pub fn auth(message: String, details: Option<AuthError>) -> Self {
-		let code = details.as_ref().map(|d| match d {
-			AuthError::TokenExpired => code::INVALID_AUTH,
-			AuthError::SessionExpired => code::INTERNAL_ERROR,
-			AuthError::InvalidAuth
-			| AuthError::UnexpectedAuth
-			| AuthError::MissingUserOrPass
-			| AuthError::NoSigninTarget
-			| AuthError::InvalidPass
-			| AuthError::TokenMakingFailed
-			| AuthError::InvalidRole(_)
-			| AuthError::NotAllowed {
-				..
-			}
-			| AuthError::InvalidSignup => code::INVALID_AUTH,
-		});
+		let code = details
+			.as_ref()
+			.map(|d| match d {
+				AuthError::TokenExpired => code::INVALID_AUTH,
+				AuthError::SessionExpired => code::INTERNAL_ERROR,
+				AuthError::InvalidAuth
+				| AuthError::UnexpectedAuth
+				| AuthError::MissingUserOrPass
+				| AuthError::NoSigninTarget
+				| AuthError::InvalidPass
+				| AuthError::TokenMakingFailed
+				| AuthError::InvalidRole(_)
+				| AuthError::NotAllowed {
+					..
+				}
+				| AuthError::InvalidSignup => code::INVALID_AUTH,
+			})
+			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
 			kind: ErrorKind::Auth,
 			message,
@@ -178,7 +196,7 @@ impl Error {
 		Self {
 			kind: ErrorKind::Thrown,
 			message,
-			code: Some(code::THROWN),
+			code: code::THROWN,
 			details: None,
 			cause: None,
 		}
@@ -187,11 +205,14 @@ impl Error {
 	/// Query execution error (not executed, timeout, cancelled), with optional structured details.
 	/// When `details` is provided, the wire code is set from the variant.
 	pub fn query(message: String, details: Option<QueryError>) -> Self {
-		let code = details.as_ref().map(|d| match d {
-			QueryError::NotExecuted => code::QUERY_NOT_EXECUTED,
-			QueryError::Timedout => code::QUERY_TIMEDOUT,
-			QueryError::Cancelled => code::QUERY_CANCELLED,
-		});
+		let code = details
+			.as_ref()
+			.map(|d| match d {
+				QueryError::NotExecuted => code::QUERY_NOT_EXECUTED,
+				QueryError::Timedout => code::QUERY_TIMEDOUT,
+				QueryError::Cancelled => code::QUERY_CANCELLED,
+			})
+			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
 			kind: ErrorKind::Query,
 			message,
@@ -204,10 +225,13 @@ impl Error {
 	/// Serialisation or deserialisation error, with optional structured details.
 	/// When `details` is provided, the wire code is set from the variant.
 	pub fn serialization(message: String, details: Option<SerializationError>) -> Self {
-		let code = details.as_ref().map(|d| match d {
-			SerializationError::Serialization => code::SERIALIZATION_ERROR,
-			SerializationError::Deserialization => code::DESERIALIZATION_ERROR,
-		});
+		let code = details
+			.as_ref()
+			.map(|d| match d {
+				SerializationError::Serialization => code::SERIALIZATION_ERROR,
+				SerializationError::Deserialization => code::DESERIALIZATION_ERROR,
+			})
+			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
 			kind: ErrorKind::Serialization,
 			message,
@@ -221,10 +245,13 @@ impl Error {
 	/// structured details. When `details` is `NotFoundError::Method`, the wire code is set to
 	/// `METHOD_NOT_FOUND` for RPC backwards compatibility.
 	pub fn not_found(message: String, details: Option<NotFoundError>) -> Self {
-		let code = details.as_ref().and_then(|d| match d {
-			NotFoundError::Method => Some(code::METHOD_NOT_FOUND),
-			_ => None,
-		});
+		let code = details
+			.as_ref()
+			.and_then(|d| match d {
+				NotFoundError::Method => Some(code::METHOD_NOT_FOUND),
+				_ => None,
+			})
+			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
 			kind: ErrorKind::NotFound,
 			message,
@@ -239,7 +266,7 @@ impl Error {
 		Self {
 			kind: ErrorKind::AlreadyExists,
 			message,
-			code: None,
+			code: code::INTERNAL_ERROR,
 			details: details.map(AlreadyExistsError::into_value),
 			cause: None,
 		}
@@ -251,7 +278,7 @@ impl Error {
 		Self {
 			kind: ErrorKind::Connection,
 			message,
-			code: Some(code::CLIENT_SIDE_ERROR),
+			code: code::CLIENT_SIDE_ERROR,
 			details: details.map(ConnectionError::into_value),
 			cause: None,
 		}
@@ -262,7 +289,7 @@ impl Error {
 		Self {
 			kind: ErrorKind::Internal,
 			message,
-			code: Some(code::INTERNAL_ERROR),
+			code: code::INTERNAL_ERROR,
 			details: None,
 			cause: None,
 		}
@@ -271,7 +298,7 @@ impl Error {
 	/// Sets the wire error code (RPC backwards compatibility). Not part of the public API.
 	#[doc(hidden)]
 	pub fn with_code(mut self, code: i64) -> Self {
-		self.code = Some(code);
+		self.code = code;
 		self
 	}
 
