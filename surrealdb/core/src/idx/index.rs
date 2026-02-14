@@ -299,14 +299,10 @@ impl<'a> IndexOperation<'a> {
 			.get_index_stores()
 			.get_index_hnsw(self.ns, self.db, self.ctx, self.tb, self.ix, p)
 			.await?;
-		let mut hnsw = hnsw.write().await;
-		// Delete the old index data
-		if let Some(o) = self.o.take() {
-			hnsw.remove_document(self.ctx, &self.rid.key, &o).await?;
-		}
-		// Create the new index data
-		if let Some(n) = self.n.take() {
-			hnsw.index_document(self.ctx, &self.rid.key, &n).await?;
+		let old_values = self.o.take();
+		let new_values = self.n.take();
+		if old_values.is_some() || new_values.is_some() {
+			hnsw.index(self.ctx, &self.rid.key, old_values, new_values).await?;
 		}
 		Ok(())
 	}

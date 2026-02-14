@@ -245,7 +245,7 @@ async fn hnsw_concurrent_writes() -> Result<()> {
 
 	// Define the table and the index.
 	dbs.execute(
-		"DEFINE TABLE t; DEFINE INDEX ix ON pts FIELDS v HNSW DIMENSION 20 DIST EUCLIDEAN TYPE F32 EFC 150 M 8; ",
+		"DEFINE TABLE t; DEFINE INDEX ix ON t FIELDS v HNSW DIMENSION 20 DIST EUCLIDEAN TYPE F32 EFC 150 M 8; ",
 		&session,
 		None,
 	)

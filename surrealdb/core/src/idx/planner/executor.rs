@@ -234,7 +234,7 @@ impl InnerQueryExecutor {
 									)
 									.await?;
 								// Ensure the local HNSW index is up to date with the KVS
-								hi.write().await.check_state(ctx).await?;
+								hi.check_state(ctx).await?;
 								// Now we can execute the request
 								let entry = HnswEntry::new(
 									&doc_ctx.db,
@@ -897,11 +897,8 @@ impl HnswEntry {
 		} else {
 			HnswConditionChecker::new()
 		};
-		let res = h
-			.read()
-			.await
-			.knn_search(db, &ctx.tx(), stk, v, n as usize, ef as usize, cond_checker)
-			.await?;
+		let res =
+			h.knn_search(db, &ctx.tx(), stk, v, n as usize, ef as usize, cond_checker).await?;
 		Ok(Self {
 			res,
 		})

@@ -1,16 +1,15 @@
+use std::cmp::Ordering;
+use std::collections::btree_map::Entry;
+use std::collections::{BTreeMap, VecDeque};
+
 use ahash::{HashSet, HashSetExt};
 use revision::revisioned;
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
-use std::cmp::Ordering;
-use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, VecDeque};
-use std::sync::Arc;
 
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::ElementId;
-use crate::val::RecordId;
 
 #[derive(Default, Debug, Clone)]
 pub(super) struct DoublePriorityQueue(BTreeMap<FloatKey, VecDeque<ElementId>>, usize);
@@ -559,12 +558,12 @@ impl KnnResultBuilder {
 			let dl = docs.len();
 			if dl > left {
 				for doc_id in docs.iter().take(left as usize) {
-					sorted_docs.push_back((KnnResultDoc::DocId(doc_id), pr.0));
+					sorted_docs.push_back((doc_id, pr.0));
 				}
 				break;
 			}
 			for doc_id in docs.iter() {
-				sorted_docs.push_back((KnnResultDoc::DocId(doc_id), pr.0));
+				sorted_docs.push_back((doc_id, pr.0));
 			}
 			left -= dl;
 			// We don't expect anymore result, we can leave
@@ -573,16 +572,11 @@ impl KnnResultBuilder {
 			}
 		}
 		trace!("sorted_docs: {:?}", sorted_docs);
-		KnnResult(sorted_docs)
+		sorted_docs
 	}
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
-pub(in crate::idx) enum KnnResultDoc {
-	DocId(DocId),
-	RecordId(Arc<RecordId>),
-}
-pub(in crate::idx) struct KnnResult(pub(in crate::idx) VecDeque<(KnnResultDoc, f64)>);
+pub(crate) type KnnResult = VecDeque<(DocId, f64)>;
 
 #[cfg(test)]
 pub(super) mod tests {
@@ -603,9 +597,7 @@ pub(super) mod tests {
 
 	use crate::catalog::{Distance, VectorType};
 	use crate::idx::seqdocids::DocId;
-	use crate::idx::trees::knn::{
-		DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder, KnnResultDoc,
-	};
+	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::expression::convert_public_value_to_internal;
 	use crate::syn;
@@ -801,16 +793,8 @@ pub(super) mod tests {
 		b.add(0.2, Ids64::Vec2([6, 8]));
 		let res = b.build();
 		assert_eq!(
-			res.0,
-			VecDeque::from([
-				(KnnResultDoc::DocId(5), 0.0),
-				(KnnResultDoc::DocId(0), 0.2),
-				(KnnResultDoc::DocId(1), 0.2),
-				(KnnResultDoc::DocId(2), 0.2),
-				(KnnResultDoc::DocId(3), 0.2),
-				(KnnResultDoc::DocId(6), 0.2),
-				(KnnResultDoc::DocId(8), 0.2)
-			])
+			res,
+			VecDeque::from([(5, 0.0), (0, 0.2), (1, 0.2), (2, 0.2), (3, 0.2), (6, 0.2), (8, 0.2)])
 		);
 	}
 

@@ -105,7 +105,7 @@ impl From<SerializedVector> for Vector {
 }
 
 impl SerializedVector {
-	pub(super) fn try_from_value(t: VectorType, d: usize, v: &Value) -> Result<Self> {
+	pub(super) fn try_from_value(t: VectorType, d: usize, v: Value) -> Result<Self> {
 		let res = match t {
 			VectorType::F64 => {
 				let mut vec = Vec::with_capacity(d);
@@ -136,19 +136,19 @@ impl SerializedVector {
 		Ok(res)
 	}
 
-	fn check_vector_value<T>(value: &Value, vec: &mut Vec<T>) -> Result<()>
+	fn check_vector_value<T>(value: Value, vec: &mut Vec<T>) -> Result<()>
 	where
 		T: TryFrom<Number, Error = Error>,
 	{
 		match value {
 			Value::Array(a) => {
-				for v in a.0.iter() {
+				for v in a.0.into_iter() {
 					Self::check_vector_value(v, vec)?;
 				}
 				Ok(())
 			}
 			Value::Number(n) => {
-				vec.push((*n).try_into()?);
+				vec.push(n.try_into()?);
 				Ok(())
 			}
 			_ => Err(anyhow::Error::new(Error::InvalidVectorValue(value.clone().to_raw_string()))),

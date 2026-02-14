@@ -1,8 +1,3 @@
-use std::collections::VecDeque;
-
-use anyhow::Result;
-use reblessive::tree::Stk;
-
 use crate::catalog::{DatabaseDefinition, HnswParams, TableId, VectorType};
 use crate::ctx::Context;
 use crate::idx::IndexKeyBase;
@@ -17,14 +12,20 @@ use crate::idx::trees::knn::{KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::kvs::Transaction;
 use crate::val::{Number, RecordIdKey, Value};
+use anyhow::Result;
+use reblessive::tree::Stk;
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU32, Ordering};
+use tokio::sync::RwLock;
 
 pub(crate) struct HnswIndex {
 	dim: usize,
 	ikb: IndexKeyBase,
 	vector_type: VectorType,
-	hnsw: HnswFlavor,
-	docs: HnswDocs,
+	hnsw: RwLock<HnswFlavor>,
+	docs: RwLock<HnswDocs>,
 	vec_docs: VecDocs,
+	next_appending_id: AtomicU32,
 }
 
 pub(super) struct HnswCheckedSearchContext<'a> {
@@ -84,17 +85,21 @@ impl HnswIndex {
 		Ok(Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
-			hnsw: HnswFlavor::new(tb, ikb.clone(), p, vector_cache)?,
-			docs: HnswDocs::new(tx, ikb.table().to_string().into(), ikb.clone()).await?,
+			hnsw: RwLock::new(HnswFlavor::new(tb, ikb.clone(), p, vector_cache)?),
+			docs: RwLock::new(
+				HnswDocs::new(tx, ikb.table().to_string().into(), ikb.clone()).await?,
+			),
 			vec_docs: VecDocs::new(ikb.clone(), p.use_hashed_vector),
 			ikb,
+			// TODO should be calculated based on the existing pendings
+			next_appending_id: AtomicU32::new(0),
 		})
 	}
 
-	fn content_to_vectors(&self, content: &[Value]) -> Result<Vec<SerializedVector>> {
+	fn content_to_vectors(&self, content: Vec<Value>) -> Result<Vec<SerializedVector>> {
 		let mut vectors = Vec::with_capacity(content.len());
 		// Index the values
-		for value in content.iter().filter(|v| !v.is_nullish()) {
+		for value in content.into_iter().filter(|v| !v.is_nullish()) {
 			// Extract the vector
 			let vector = SerializedVector::try_from_value(self.vector_type, self.dim, value)?;
 			Vector::check_expected_dimension(vector.dimension(), self.dim)?;
@@ -104,87 +109,70 @@ impl HnswIndex {
 		Ok(vectors)
 	}
 
-	async fn vector_pending_update<F>(
+	pub(crate) async fn index(
 		&self,
 		ctx: &Context,
 		id: &RecordIdKey,
-		content: &[Value],
-		func: F,
-	) -> Result<()>
-	where
-		F: FnOnce(Vec<SerializedVector>) -> VectorPendingUpdate,
-	{
-		let vectors = self.content_to_vectors(content)?;
-		let key = self.ikb.new_hp_key(id);
-		let batch = func(vectors);
-		ctx.tx().put(&key, &batch, None).await?;
-		Ok(())
-	}
-
-	pub(crate) async fn index_document(
-		&mut self,
-		ctx: &Context,
-		id: &RecordIdKey,
-		content: &[Value],
+		old_values: Option<Vec<Value>>,
+		new_values: Option<Vec<Value>>,
 	) -> Result<()> {
-		self.vector_pending_update(ctx, id, content, VectorPendingUpdate::Add).await
-	}
-
-	pub(crate) async fn remove_document(
-		&mut self,
-		ctx: &Context,
-		id: &RecordIdKey,
-		content: &[Value],
-	) -> Result<()> {
-		self.vector_pending_update(ctx, id, content, VectorPendingUpdate::Remove).await
-	}
-
-	async fn index_document_vectors(
-		&mut self,
-		ctx: &Context,
-		id: &RecordIdKey,
-		vectors: Vec<SerializedVector>,
-	) -> Result<()> {
-		let tx = ctx.tx();
-		// Ensure the layers are up-to-date
-		self.hnsw.check_state(ctx).await?;
-		// Resolve the doc_id
-		let doc_id = self.docs.resolve(&tx, id).await?;
-		// Index the values
-		for vector in vectors {
-			// Extract the vector
-			let vector: Vector = vector.into();
-			// Insert the vector
-			self.vec_docs.insert(&tx, vector, doc_id, &mut self.hnsw).await?;
+		if old_values.is_none() && new_values.is_none() {
+			return Ok(());
 		}
-		self.docs.finish(&tx).await?;
+		let old_vectors = if let Some(v) = old_values {
+			self.content_to_vectors(v)?
+		} else {
+			vec![]
+		};
+		let new_vectors = if let Some(v) = new_values {
+			self.content_to_vectors(v)?
+		} else {
+			vec![]
+		};
+		let tx = ctx.tx();
+		let doc_id = self.docs.write().await.resolve(&tx, id).await?;
+		let appending_id = self.next_appending_id.fetch_add(1, Ordering::Relaxed);
+		let key = self.ikb.new_hp_key(appending_id);
+		let pending = VectorPendingUpdate {
+			doc_id,
+			old_vectors,
+			new_vectors,
+		};
+		tx.put(&key, &pending, None).await?;
 		Ok(())
 	}
 
-	async fn remove_document_vectors(
-		&mut self,
+	pub(crate) async fn index_pending(
+		&self,
 		ctx: &Context,
-		id: &RecordIdKey,
-		vectors: Vec<SerializedVector>,
+		pending: VectorPendingUpdate,
 	) -> Result<()> {
 		let tx = ctx.tx();
-		if let Some(doc_id) = self.docs.remove(&tx, id).await? {
-			// Ensure the layers are up-to-date
-			self.hnsw.check_state(ctx).await?;
-			for vector in vectors {
-				// Extract the vector
-				let vector: Vector = vector.into();
-				// Remove the vector
-				self.vec_docs.remove(&tx, &vector, doc_id, &mut self.hnsw).await?;
-			}
-			self.docs.finish(&tx).await?;
+		let mut hnsw = self.hnsw.write().await;
+		// Ensure the layers are up-to-date
+		hnsw.check_state(ctx).await?;
+
+		// Remove old values if any
+		for vector in pending.old_vectors {
+			// Extract the vector
+			let vector = Vector::from(vector);
+			// Remove the vector
+			self.vec_docs.remove(&tx, &vector, pending.doc_id, &mut hnsw).await?;
+		}
+
+		// Index the new values if any
+		for vector in pending.new_vectors {
+			// Extract the vector
+			let vector = Vector::from(vector);
+			// Insert the vector
+			self.vec_docs.insert(&tx, vector, pending.doc_id, &mut hnsw).await?;
 		}
 		Ok(())
 	}
 
 	// Ensure the layers are up-to-date
-	pub(crate) async fn check_state(&mut self, ctx: &Context) -> Result<()> {
-		self.hnsw.check_state(ctx).await
+	pub(crate) async fn check_state(&self, ctx: &Context) -> Result<()> {
+		self.hnsw.write().await.check_state(ctx).await
 	}
 
 	#[expect(clippy::too_many_arguments)]
@@ -204,7 +192,8 @@ impl HnswIndex {
 		let search = HnswSearch::new(vector, k, ef);
 		// Do the search
 		let result = self.search(db, tx, stk, &search, &mut chk).await?;
-		let res = chk.convert_result(tx, &self.docs, result).await?;
+		let docs = self.docs.read().await;
+		let res = chk.convert_result(tx, &docs, result).await?;
 		Ok(res)
 	}
 
@@ -216,22 +205,36 @@ impl HnswIndex {
 		search: &HnswSearch,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<KnnResult> {
-		// Do the HNSW search
+		let hnsw = self.hnsw.read().await;
+		let docs = self.docs.read().await;
+		// Do the search
 		let neighbors = match chk {
-			HnswConditionChecker::Hnsw(_) => self.hnsw.knn_search(tx, search).await?,
+			HnswConditionChecker::Hnsw(_) => hnsw.knn_search(tx, search).await?,
 			HnswConditionChecker::HnswCondition(_) => {
-				self.hnsw
-					.knn_search_checked(db, tx, stk, search, &self.docs, &self.vec_docs, chk)
-					.await?
+				hnsw.knn_search_checked(db, tx, stk, search, &docs, &self.vec_docs, chk).await?
 			}
 		};
-		// Collect the pending vectors
-		self.build_result(tx, neighbors, search.k, chk).await
+		self.build_result(tx, &hnsw, neighbors, search.k, chk).await
+	}
+
+	async fn collect_pending(&self, tx: &Transaction) -> Result<()> {
+		// let rng = self.ikb.new_hp_range()?;
+		// tx.stream_keys_vals(rng, None, None).await?;
+		todo!()
+	}
+
+	async fn collect_pending_checked(
+		&self,
+		tx: &Transaction,
+		chk: &HnswConditionChecker<'_>,
+	) -> Result<()> {
+		todo!()
 	}
 
 	async fn build_result(
 		&self,
 		tx: &Transaction,
+		hnsw: &HnswFlavor,
 		neighbors: Vec<(f64, ElementId)>,
 		n: usize,
 		chk: &mut HnswConditionChecker<'_>,
@@ -239,7 +242,7 @@ impl HnswIndex {
 		let mut builder = KnnResultBuilder::new(n);
 		for (e_dist, e_id) in neighbors {
 			if builder.check_add(e_dist)
-				&& let Some(v) = self.hnsw.get_vector(tx, &e_id).await?
+				&& let Some(v) = hnsw.get_vector(tx, &e_id).await?
 				&& let Some(docs) = self.vec_docs.get_docs(tx, &v).await?
 			{
 				let evicted_docs = builder.add(e_dist, docs);

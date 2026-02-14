@@ -47,7 +47,8 @@ impl HnswDocs {
 			Ok(doc_id)
 		} else {
 			let doc_id = self.next_doc_id();
-			tx.set(&self.ikb.new_hi_key(id), &doc_id, None).await?;
+			let id_key = self.ikb.new_hi_key(id);
+			tx.set(&id_key, &doc_id, None).await?;
 			let doc_key = self.ikb.new_hd_key(doc_id);
 			tx.set(&doc_key, id, None).await?;
 			Ok(doc_id)

@@ -10,7 +10,7 @@ use crate::ctx::FrozenContext;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::index::HnswIndex;
 
-pub(crate) type SharedHnswIndex = Arc<RwLock<HnswIndex>>;
+pub(crate) type SharedHnswIndex = Arc<HnswIndex>;
 
 pub(crate) struct HnswIndexes(Arc<RwLock<HashMap<(TableId, IndexId), SharedHnswIndex>>>);
 
@@ -37,7 +37,7 @@ impl HnswIndexes {
 		let ix = match w.entry(key) {
 			Entry::Occupied(e) => e.get().clone(),
 			Entry::Vacant(e) => {
-				let h = Arc::new(RwLock::new(
+				let h = Arc::new(
 					HnswIndex::new(
 						ctx.get_index_stores().vector_cache().clone(),
 						&ctx.tx(),
@@ -46,7 +46,7 @@ impl HnswIndexes {
 						p,
 					)
 					.await?,
-				));
+				);
 				e.insert(h.clone());
 				h
 			}

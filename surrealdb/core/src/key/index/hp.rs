@@ -1,11 +1,13 @@
+use anyhow::Result;
 use std::borrow::Cow;
-
+use std::ops::Range;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::trees::hnsw::VectorPendingUpdate;
-use crate::kvs::impl_kv_key_storekey;
-use crate::val::{RecordIdKey, TableName};
+use crate::kvs::index::AppendingId;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 #[storekey(format = "()")]
@@ -22,18 +24,18 @@ pub(crate) struct HnswPending<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub id: Cow<'a, RecordIdKey>,
+	pub appending_id: AppendingId,
 }
 
 impl_kv_key_storekey!(HnswPending<'_> => VectorPendingUpdate);
 
 impl<'a> HnswPending<'a> {
-	pub fn new(
+	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a TableName,
 		ix: IndexId,
-		id: &'a RecordIdKey,
+		appending_id: AppendingId,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -48,8 +50,56 @@ impl<'a> HnswPending<'a> {
 			_e: b'!',
 			_f: b'h',
 			_g: b'p',
-			id: Cow::Borrowed(id),
+			appending_id,
 		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode)]
+#[storekey(format = "()")]
+pub(crate) struct HnswPendingPrefix<'a> {
+	__: u8,
+	_a: u8,
+	pub ns: NamespaceId,
+	_b: u8,
+	pub db: DatabaseId,
+	_c: u8,
+	pub tb: Cow<'a, TableName>,
+	_d: u8,
+	pub ix: IndexId,
+	_e: u8,
+	_f: u8,
+	_g: u8,
+}
+
+impl_kv_key_storekey!(HnswPendingPrefix<'_> => ());
+
+impl<'a> HnswPendingPrefix<'a> {
+	pub(crate) fn range(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a TableName,
+		ix: IndexId,
+	) -> Result<Range<Vec<u8>>> {
+		let mut beg = Self {
+			__: b'/',
+			_a: b'*',
+			ns,
+			_b: b'*',
+			db,
+			_c: b'*',
+			tb: Cow::Borrowed(tb),
+			_d: b'+',
+			ix,
+			_e: b'!',
+			_f: b'h',
+			_g: b'p',
+		}
+		.encode_key()?;
+		let mut end = beg.clone();
+		beg.push(0);
+		end.push(0xff);
+		Ok(beg..end)
 	}
 }
 
@@ -61,12 +111,11 @@ mod tests {
 	#[test]
 	fn key() {
 		let tb = TableName::from("testtb");
-		let id = RecordIdKey::String("testid".into());
-		let val = HnswPending::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), &id);
+		let val = HnswPending::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), 7);
 		let enc = HnswPending::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hp\x03testid\0",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hp\x03",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);

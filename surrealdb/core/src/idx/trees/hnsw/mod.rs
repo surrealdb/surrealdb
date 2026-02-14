@@ -17,6 +17,7 @@ use crate::catalog::{DatabaseDefinition, HnswParams, TableId};
 use crate::ctx::Context;
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
+use crate::idx::seqdocids::DocId;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
@@ -68,9 +69,10 @@ impl KVValue for HnswState {
 }
 
 #[revisioned(revision = 1)]
-pub(crate) enum VectorPendingUpdate {
-	Add(Vec<SerializedVector>),
-	Remove(Vec<SerializedVector>),
+pub(crate) struct VectorPendingUpdate {
+	doc_id: DocId,
+	old_vectors: Vec<SerializedVector>,
+	new_vectors: Vec<SerializedVector>,
 }
 
 impl_kv_value_revisioned!(VectorPendingUpdate);
@@ -484,7 +486,7 @@ mod tests {
 	use crate::idx::trees::hnsw::index::HnswIndex;
 	use crate::idx::trees::hnsw::{ElementId, HnswSearch};
 	use crate::idx::trees::knn::tests::{TestCollection, new_vectors_from_file};
-	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder, KnnResultDoc};
+	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
@@ -706,27 +708,27 @@ mod tests {
 				let mut chk = HnswConditionChecker::new();
 				let search = HnswSearch::new(obj.clone(), knn, 500);
 				let res = h.search(db, tx, stk, &search, &mut chk).await.unwrap();
-				if knn == 1 && res.0.len() == 1 && res.0[0].1 > 0.0 {
-					let docs: Vec<KnnResultDoc> = res.0.iter().map(|(d, _)| d.clone()).collect();
+				if knn == 1 && res.len() == 1 && res[0].1 > 0.0 {
+					let docs: Vec<DocId> = res.iter().map(|(d, _)| d.clone()).collect();
 					if collection.is_unique() {
 						assert!(
-							docs.contains(&KnnResultDoc::DocId(*doc_id)),
+							docs.contains(doc_id),
 							"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?}",
 							obj,
 							knn,
 							doc_id,
-							res.0
+							res
 						);
 					}
 				}
 				let expected_len = collection.len().min(knn);
 				assert_eq!(
 					expected_len,
-					res.0.len(),
+					res.len(),
 					"Wrong knn count - Expected: {} - Got: {} - - Docs: {:?} - Collection: {}",
 					expected_len,
-					res.0.len(),
-					res.0,
+					res.len(),
+					res,
 					collection.len(),
 				)
 			}
@@ -983,11 +985,11 @@ mod tests {
 							let hnsw_res =
 								h.search(&db, &tx, stk, &search, &mut chk).await.unwrap();
 							tx.cancel().await.unwrap();
-							assert_eq!(hnsw_res.0.len(), knn, "Different size - knn: {knn}",);
+							assert_eq!(hnsw_res.len(), knn, "Different size - knn: {knn}",);
 							let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
-							let rec = brute_force_res.recall(&hnsw_res);
+							let rec = compute_recall(&brute_force_res, &hnsw_res);
 							if rec == 1.0 {
-								assert_eq!(brute_force_res.0, hnsw_res.0);
+								assert_eq!(brute_force_res, hnsw_res);
 							}
 							total_recall += rec;
 						}
@@ -1064,28 +1066,18 @@ mod tests {
 		}
 	}
 
-	impl KnnResult {
-		fn recall(&self, res: &KnnResult) -> f64 {
-			let mut bits = RoaringTreemap::new();
-			for (doc, _) in &self.0 {
-				if let KnnResultDoc::DocId(doc_id) = doc {
-					bits.insert(*doc_id);
-				} else {
-					panic!("Invalid KnnResultDoc: {doc:?}")
-				}
-			}
-			let mut found = 0;
-			for (doc, _) in &res.0 {
-				if let KnnResultDoc::DocId(doc_id) = doc {
-					if bits.contains(*doc_id) {
-						found += 1;
-					}
-				} else {
-					panic!("Invalid KnnResultDoc: {doc:?}")
-				}
-			}
-			found as f64 / bits.len() as f64
+	fn compute_recall(res1: &KnnResult, res2: &KnnResult) -> f64 {
+		let mut bits = RoaringTreemap::new();
+		for &(doc_id, _) in res1 {
+			bits.insert(doc_id);
 		}
+		let mut found = 0;
+		for &(doc_id, _) in res2 {
+			if bits.contains(doc_id) {
+				found += 1;
+			}
+		}
+		found as f64 / bits.len() as f64
 	}
 
 	fn new_i16_vec(x: isize, y: isize) -> SharedVector {
