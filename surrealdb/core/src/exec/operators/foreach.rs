@@ -12,7 +12,9 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::plan_or_compute::{evaluate_body_expr, evaluate_expr};
+use crate::exec::plan_or_compute::{
+	block_required_context, evaluate_body_expr, evaluate_expr, expr_required_context,
+};
 use crate::exec::{
 	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
 };
@@ -86,9 +88,8 @@ impl ExecOperator for ForeachPlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Conservative: require database context since we don't know
-		// what the inner expressions need without analyzing them
-		ContextLevel::Database
+		// Derive the required context from the range expression and body block
+		expr_required_context(&self.range).max(block_required_context(&self.body))
 	}
 
 	fn access_mode(&self) -> AccessMode {

@@ -144,7 +144,20 @@ impl ExecOperator for Scan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
+		// Scan needs database context for table access, combined with expression contexts
+		let exprs_ctx = [
+			Some(&self.source),
+			self.version.as_ref(),
+			self.predicate.as_ref(),
+			self.limit.as_ref(),
+			self.start.as_ref(),
+		]
+		.into_iter()
+		.flatten()
+		.map(|e| e.required_context())
+		.max()
+		.unwrap_or(ContextLevel::Root);
+		exprs_ctx.max(ContextLevel::Database)
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
@@ -169,9 +182,11 @@ impl ExecOperator for Scan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// Scan is read-only, but the source expression or predicate could contain a subquery
-		// containing a mutation.
+		// Scan is read-only, but expressions could contain subqueries with mutations.
 		let mut mode = self.source.access_mode();
+		if let Some(ref version) = self.version {
+			mode = mode.combine(version.access_mode());
+		}
 		if let Some(ref pred) = self.predicate {
 			mode = mode.combine(pred.access_mode());
 		}

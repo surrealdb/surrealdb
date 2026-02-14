@@ -5,8 +5,6 @@
 
 use std::sync::Arc;
 
-use futures::future::join_all;
-
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::{ControlFlowExt, EvalContext, ExecutionContext, PhysicalExpr};
@@ -70,11 +68,11 @@ pub(crate) async fn evaluate_bound_key(
 	Ok(value_to_record_id_key(val))
 }
 
-/// Fetch full records for a batch of [`RecordId`]s concurrently.
+/// Fetch full records for a batch of [`RecordId`]s in one batch.
 ///
-/// Uses [`futures::future::join_all`] to issue all `get_record` calls in
-/// parallel, amortising per-record round-trip latency across the batch.
-/// Each returned value has its record ID injected via [`Value::def`].
+/// Uses the transaction's batch multi-get (`getm_records`), which is cache-aware
+/// and uses the store's native batch read (e.g. RocksDB `multi_get_opt`) for
+/// cache misses. Each returned value has its record ID injected via [`Value::def`].
 ///
 /// Records that don't exist in the datastore are returned as [`Value::None`].
 pub(crate) async fn fetch_records_batch(
@@ -83,14 +81,10 @@ pub(crate) async fn fetch_records_batch(
 	db_id: DatabaseId,
 	rids: &[RecordId],
 ) -> Result<Vec<Value>, ControlFlow> {
-	let futures: Vec<_> =
-		rids.iter().map(|rid| txn.get_record(ns_id, db_id, &rid.table, &rid.key, None)).collect();
-
-	let results = join_all(futures).await;
+	let records = txn.getm_records(ns_id, db_id, rids).await.context("Failed to fetch records")?;
 
 	let mut values = Vec::with_capacity(rids.len());
-	for (rid, result) in rids.iter().zip(results) {
-		let record = result.context("Failed to fetch record")?;
+	for (rid, record) in rids.iter().zip(records) {
 		if record.data.as_ref().is_none() {
 			values.push(Value::None);
 		} else {
