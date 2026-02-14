@@ -30,18 +30,20 @@ impl<'ctx> Planner<'ctx> {
 		use crate::exec::physical_expr::function::IndexFunctionExec;
 
 		let registry = self.function_registry();
-		let func = registry.get_index_function(name).ok_or_else(|| {
-			Error::PlannerUnimplemented(format!("Index function '{}' not found in registry", name))
+		let func = registry.get_index_function(name).ok_or_else(|| Error::Query {
+			message: format!("Index function '{}' not found in registry", name),
 		})?;
 
 		let match_ref_idx = func.match_ref_arg_index();
 
 		if match_ref_idx >= ast_args.len() {
-			return Err(Error::PlannerUnimplemented(format!(
-				"Index function '{}' requires at least {} arguments",
-				name,
-				match_ref_idx + 1
-			)));
+			return Err(Error::Query {
+				message: format!(
+					"Index function '{}' requires at least {} arguments",
+					name,
+					match_ref_idx + 1
+				),
+			});
 		}
 
 		let match_ref_ast = ast_args.remove(match_ref_idx);
@@ -50,10 +52,12 @@ impl<'ctx> Planner<'ctx> {
 			Expr::Literal(Literal::Integer(n)) => n as u8,
 			Expr::Literal(Literal::Float(n)) => n as u8,
 			_ => {
-				return Err(Error::PlannerUnimplemented(format!(
-					"Index function '{}': match_ref argument must be a literal integer",
-					name
-				)));
+				return Err(Error::Query {
+					message: format!(
+						"Index function '{}': match_ref argument must be a literal integer",
+						name
+					),
+				});
 			}
 		};
 
@@ -62,16 +66,17 @@ impl<'ctx> Planner<'ctx> {
 			phys_args.push(self.physical_expr(arg)?);
 		}
 
-		let matches_ctx = self.ctx.get_matches_context().ok_or_else(|| {
-			Error::PlannerUnimplemented(format!(
+		let matches_ctx = self.ctx.get_matches_context().ok_or_else(|| Error::Query {
+			message: format!(
 				"Index function '{}': no MATCHES clause found in WHERE condition",
 				name
-			))
+			),
 		})?;
 
-		let match_ctx =
-			matches_ctx.resolve(match_ref, extract_table_from_context(self.ctx)).map_err(|e| {
-				Error::PlannerUnimplemented(format!("Index function '{}': {}", name, e))
+		let match_ctx = matches_ctx
+			.resolve(match_ref, extract_table_from_context(self.ctx))
+			.map_err(|e| Error::Query {
+				message: format!("Index function '{}': {}", name, e),
 			})?;
 
 		let func_ctx = func.required_context();

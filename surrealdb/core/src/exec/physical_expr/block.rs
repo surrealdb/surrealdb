@@ -209,7 +209,10 @@ impl BlockPhysicalExpr {
 							message: format!("New executor does not support: {msg}"),
 						})));
 					}
-					Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
+					Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+						if let Error::PlannerUnimplemented(msg) = &e {
+							tracing::warn!("PlannerUnimplemented fallback in block (LET): {msg}");
+						}
 						let (opt, frozen) = get_legacy_context(current_exec_ctx, legacy_ctx)?;
 						let doc =
 							current_value_for_legacy.map(|v| CursorDoc::new(None, None, v.clone()));
@@ -276,7 +279,10 @@ impl BlockPhysicalExpr {
 							message: format!("New executor does not support: {msg}"),
 						})))
 					}
-					Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
+					Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+						if let Error::PlannerUnimplemented(msg) = &e {
+							tracing::warn!("PlannerUnimplemented fallback in block (expr): {msg}");
+						}
 						let (opt, frozen) = get_legacy_context(current_exec_ctx, legacy_ctx)?;
 						let doc =
 							current_value_for_legacy.map(|v| CursorDoc::new(None, None, v.clone()));

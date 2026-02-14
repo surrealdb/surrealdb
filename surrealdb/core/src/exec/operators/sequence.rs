@@ -168,7 +168,10 @@ async fn execute_block_with_context(
 					};
 				}
 			}
-			Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
+			Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+				if let Error::PlannerUnimplemented(msg) = &e {
+					tracing::warn!("PlannerUnimplemented fallback in sequence: {msg}");
+				}
 				// Fallback to legacy compute path
 				let (opt, frozen) = get_legacy_context_cached(&current_ctx, &mut legacy_ctx)
 					.context("Legacy compute fallback context unavailable")?;

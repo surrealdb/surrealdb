@@ -42,18 +42,18 @@ pub(super) fn literal_to_value(
 		Literal::Uuid(u) => Ok(Value::Uuid(u)),
 		Literal::Geometry(g) => Ok(Value::Geometry(g)),
 		Literal::File(f) => Ok(Value::File(f)),
-		// RecordId is handled by RecordIdExpr in physical_expr() before reaching here.
-		Literal::RecordId(_) => Err(Error::PlannerUnimplemented(
+		// These variants are handled upstream in physical_expr() and should never reach here.
+		Literal::RecordId(_) => Err(Error::Internal(
 			"Literal::RecordId should be handled by RecordIdExpr in physical_expr()".to_string(),
 		)),
-		Literal::Array(_) => Err(Error::PlannerUnimplemented(
-			"Array literals in USE statements not yet supported".to_string(),
+		Literal::Array(_) => Err(Error::Internal(
+			"Array literals should be handled by ArrayLiteral in physical_expr()".to_string(),
 		)),
-		Literal::Set(_) => Err(Error::PlannerUnimplemented(
-			"Set literals in USE statements not yet supported".to_string(),
+		Literal::Set(_) => Err(Error::Internal(
+			"Set literals should be handled by SetLiteral in physical_expr()".to_string(),
 		)),
-		Literal::Object(_) => Err(Error::PlannerUnimplemented(
-			"Object literals in USE statements not yet supported".to_string(),
+		Literal::Object(_) => Err(Error::Internal(
+			"Object literals should be handled by ObjectLiteral in physical_expr()".to_string(),
 		)),
 	}
 }
@@ -73,9 +73,13 @@ pub(super) fn key_lit_to_expr(lit: &crate::expr::RecordIdKeyLit) -> Result<Expr,
 		RecordIdKeyLit::Object(entries) => {
 			Ok(Expr::Literal(crate::expr::literal::Literal::Object(entries.clone())))
 		}
-		RecordIdKeyLit::Generate(_) | RecordIdKeyLit::Range(_) => Err(Error::PlannerUnimplemented(
-			"Generated/range keys in graph range bounds".to_string(),
-		)),
+		RecordIdKeyLit::Generate(_) => Err(Error::Query {
+			message: "Generated keys (rand, ulid, uuid) cannot be used in graph range bounds"
+				.to_string(),
+		}),
+		RecordIdKeyLit::Range(_) => Err(Error::Query {
+			message: "Nested range keys cannot be used in graph range bounds".to_string(),
+		}),
 	}
 }
 
@@ -124,32 +128,32 @@ pub(super) fn extract_bruteforce_knn(cond: &Cond) -> Option<BruteForceKnnParams>
 	extract_bruteforce_knn_from_expr(&cond.0).map(|(params, _residual)| params)
 }
 
-/// Strip brute-force KNN (`NearestNeighbor::K`) operators from a WHERE clause,
-/// returning the residual condition.
+/// Strip handled KNN operators from a WHERE clause, returning the residual condition.
 ///
-/// Only `NearestNeighbor::K` is stripped because it is consumed by the `KnnTopK`
-/// operator. Other variants (`KTree`, `Approximate`) are left in place -- the
-/// caller should verify the residual contains no remaining KNN operators and
-/// fall back to the old executor if it does.
+/// Both `NearestNeighbor::K` (consumed by `KnnTopK`) and `NearestNeighbor::Approximate`
+/// (consumed by `KnnScan` via HNSW index) are stripped. `KTree` is left in place --
+/// the caller should verify the residual contains no remaining KNN operators and
+/// return an error if it does.
 pub(super) fn strip_knn_from_condition(cond: &Cond) -> Option<Cond> {
 	strip_knn_from_expr(&cond.0).map(Cond)
 }
 
-/// Recursively strip brute-force KNN (`NearestNeighbor::K`) operator expressions
-/// from an AND-connected expression tree.
+/// Recursively strip handled KNN operator expressions from an AND-connected
+/// expression tree.
 ///
-/// Returns the expression with `NearestNeighbor::K` operators removed, or `None`
-/// if the entire expression was such an operator (nothing left). Other
-/// `NearestNeighbor` variants (`KTree`, `Approximate`) are left unchanged.
+/// Returns the expression with `NearestNeighbor::K` and `NearestNeighbor::Approximate`
+/// operators removed, or `None` if the entire expression was such an operator
+/// (nothing left). `NearestNeighbor::KTree` is left unchanged since it is not
+/// handled by either the `KnnTopK` or `KnnScan` operators.
 fn strip_knn_from_expr(expr: &Expr) -> Option<Expr> {
 	match expr {
-		// Only strip NearestNeighbor::K (brute-force), which is consumed by KnnTopK.
-		// Other variants (KTree, Approximate) are not handled by KnnTopK and must
-		// not be silently dropped.
+		// Strip NearestNeighbor::K (brute-force, consumed by KnnTopK) and
+		// NearestNeighbor::Approximate (HNSW, consumed by KnnScan).
+		// KTree is not supported and is left unchanged.
 		Expr::Binary {
 			op: BinaryOperator::NearestNeighbor(nn),
 			..
-		} if matches!(nn.as_ref(), NearestNeighbor::K(..)) => None,
+		} if matches!(nn.as_ref(), NearestNeighbor::K(..) | NearestNeighbor::Approximate(..)) => None,
 		// AND: strip from either side, keeping the other
 		Expr::Binary {
 			left,

@@ -74,7 +74,10 @@ pub(crate) async fn evaluate_expr(
 			let stream = plan.execute(ctx)?;
 			collect_single_value(stream).await
 		}
-		Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
+		Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+			if let Error::PlannerUnimplemented(msg) = &e {
+				tracing::warn!("PlannerUnimplemented fallback in evaluate_expr: {msg}");
+			}
 			let (opt, frozen) =
 				get_legacy_context(ctx).context("Legacy compute fallback context unavailable")?;
 			let mut stack = TreeStack::new();
@@ -108,7 +111,10 @@ pub(crate) async fn evaluate_body_expr(
 				collect_single_value(stream).await
 			}
 		}
-		Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
+		Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+			if let Error::PlannerUnimplemented(msg) = &e {
+				tracing::warn!("PlannerUnimplemented fallback in evaluate_body_expr: {msg}");
+			}
 			let (opt, frozen) = get_legacy_context_with_param(ctx, param_name, param_value)
 				.context("Legacy compute fallback context unavailable")?;
 			let mut stack = TreeStack::new();

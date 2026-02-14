@@ -241,14 +241,14 @@ impl<'ctx> Planner<'ctx> {
 						// Multi-part idioms (e.g. `t.name`) may traverse record links
 						// to fields on other tables. MatchesOp can only evaluate
 						// MATCHES against a fulltext index on the source table — it
-						// cannot resolve cross-table record links. Fall back to the
-						// old executor which handles joins and record link resolution.
+						// cannot resolve cross-table record links.
 						if idiom.0.len() > 1 {
-							return Err(Error::PlannerUnimplemented(
-								"MATCHES with multi-part field path not yet supported \
-								 in streaming executor"
+							return Err(Error::Query {
+								message: "MATCHES with multi-part field path (e.g. record \
+								 link traversal) is not supported. Use a single-field path \
+								 for full-text search."
 									.to_string(),
-							));
+							});
 						}
 						let idiom_clone = idiom.clone();
 						let query_clone = query.clone();
@@ -519,15 +519,15 @@ impl<'ctx> Planner<'ctx> {
 					plan,
 				}))
 			}
-			Expr::Foreach(_) => Err(Error::PlannerUnimplemented(
-				"FOR loops cannot be used in expression context".to_string(),
-			)),
-			Expr::Sleep(_) => Err(Error::PlannerUnimplemented(
-				"SLEEP statements cannot be used in expression context".to_string(),
-			)),
-			Expr::Let(_) => Err(Error::PlannerUnimplemented(
-				"LET statements cannot be used in expression context".to_string(),
-			)),
+			Expr::Foreach(_) => Err(Error::Query {
+				message: "FOR loops cannot be used in expression context".to_string(),
+			}),
+			Expr::Sleep(_) => Err(Error::Query {
+				message: "SLEEP statements cannot be used in expression context".to_string(),
+			}),
+			Expr::Let(_) => Err(Error::Query {
+				message: "LET statements cannot be used in expression context".to_string(),
+			}),
 			Expr::Explain {
 				format,
 				analyze,

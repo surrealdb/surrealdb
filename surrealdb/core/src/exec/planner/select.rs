@@ -19,9 +19,9 @@ use crate::exec::field_path::FieldPath;
 #[cfg(all(storage, not(target_family = "wasm")))]
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::{
-	Aggregate, Compute, Fetch, FieldSelection, Filter, Limit, Project, ProjectValue, Projection,
-	RandomShuffle, Scan, SelectProject, Sort, SortByKey, SortDirection, SortKey, SortTopK,
-	SortTopKByKey, SourceExpr, Split, Timeout, Union, UnwrapExactlyOne,
+	Aggregate, AnalyzePlan, Compute, ExplainPlan, Fetch, FieldSelection, Filter, Limit, Project,
+	ProjectValue, Projection, RandomShuffle, Scan, SelectProject, Sort, SortByKey, SortDirection,
+	SortKey, SortTopK, SortTopKByKey, SourceExpr, Split, Timeout, Union, UnwrapExactlyOne,
 };
 use crate::exec::{ExecOperator, OperatorMetrics};
 use crate::expr::field::{Field, Fields};
@@ -71,12 +71,6 @@ impl<'ctx> Planner<'ctx> {
 			explain,
 			tempfiles,
 		} = select;
-
-		if explain.is_some() {
-			return Err(Error::PlannerUnimplemented(
-				"SELECT ... EXPLAIN not yet supported in execution plans".to_string(),
-			));
-		}
 
 		let version = extract_version(version, self)?;
 
@@ -182,10 +176,9 @@ impl<'ctx> Planner<'ctx> {
 		// 2. HNSW KNN (`<|k, ef|>`): handled by index analysis at scan time. The scan dispatch
 		//    routes to KnnScan when an HNSW index exists.
 		//
-		// If the WHERE clause contains a KNN operator that we can't
-		// handle (parameter-based vector, missing index, etc.), we
-		// reject with PlannerUnimplemented so the old executor handles
-		// it.
+		// KNN operators are always stripped from the filter predicate (they produce distances,
+		// not booleans). If unsupported KNN variants remain after stripping, an error is
+		// returned.
 		let has_knn = cond.as_ref().is_some_and(|c| has_knn_operator(&c.0));
 		let brute_force_knn = if has_knn {
 			cond.as_ref().and_then(extract_bruteforce_knn)
@@ -193,36 +186,33 @@ impl<'ctx> Planner<'ctx> {
 			None
 		};
 
-		// Determine the effective condition for filter predicates.
-		// If brute-force KNN was detected (and will be handled by KnnTopK),
-		// strip the KNN operator from the filter predicate.
-		let cond_for_filter = if brute_force_knn.is_some() {
-			// Brute-force KNN detected: strip the KNN from the filter
+		// Determine separate conditions for index analysis and filtering.
+		// - cond_for_index: passed to Scan for index analysis (includes KNN for HNSW detection)
+		// - cond_for_filter: used for scan predicate / pipeline filter (KNN always stripped)
+		let (cond_for_index, cond_for_filter) = if has_knn {
 			let stripped = cond.as_ref().and_then(strip_knn_from_condition);
 			// Safety check: if the residual still contains KNN operators
-			// (e.g. KNN nested under OR, or unhandled variants like KTree),
-			// fall back to the old executor rather than leaving them in the
-			// filter where they would be evaluated incorrectly as booleans.
+			// (e.g. KNN nested under OR, or unhandled KTree variants),
+			// return a proper error.
 			if stripped.as_ref().is_some_and(|c| has_knn_operator(&c.0)) {
-				return Err(Error::PlannerUnimplemented(
-					"KNN operators nested in OR/NOT expressions or mixed with \
-					 unsupported KNN variants are not supported in the streaming executor"
+				return Err(Error::Query {
+					message: "KNN operators nested in OR/NOT expressions or mixed with \
+					 unsupported KNN variants are not supported"
 						.to_string(),
-				));
+				});
 			}
-			stripped
-		} else if has_knn {
-			// KNN present but not brute-force (HNSW) -- fall back to old
-			// executor which supports vector::distance::knn(),
-			// HnswConditionChecker, and the multi-stage iteration pattern.
-			return Err(Error::PlannerUnimplemented(
-				"KNN queries with HNSW indexes or parameter-based vectors are not yet fully \
-				 supported in the streaming executor"
-					.to_string(),
-			));
+			if brute_force_knn.is_some() {
+				// Brute-force KNN: index analysis doesn't need to see KNN
+				(stripped.clone(), stripped)
+			} else {
+				// HNSW KNN: keep original condition for index analysis so
+				// it can detect HNSW indexes and route to KnnScan.
+				(cond, stripped)
+			}
 		} else {
-			// No KNN -- use the original condition
-			cond
+			// No KNN: use original condition for both
+			let c = cond;
+			(c.clone(), c)
 		};
 
 		// Compile predicate for pushdown into Scan
@@ -255,11 +245,10 @@ impl<'ctx> Planner<'ctx> {
 		let source = planning_planner.plan_sources(
 			what,
 			version,
-			// Pass the original condition (without KNN stripped) so index
-			// analysis can still detect opportunities for other predicates.
-			// The KNN operator won't cause issues because index analysis
-			// handles NearestNeighbor separately.
-			cond_for_filter.as_ref(),
+			// Pass cond_for_index which includes KNN operators for HNSW
+			// index detection. For brute-force KNN, this is already stripped
+			// since KnnTopK handles it without index support.
+			cond_for_index.as_ref(),
 			order.as_ref(),
 			with.as_ref(),
 			needed_fields,
@@ -347,10 +336,34 @@ impl<'ctx> Planner<'ctx> {
 			}
 		};
 
-		if only {
-			Ok(Arc::new(UnwrapExactlyOne::new(timed, !is_value_source)))
+		let result: Arc<dyn ExecOperator> = if only {
+			Arc::new(UnwrapExactlyOne::new(timed, !is_value_source))
 		} else {
-			Ok(timed)
+			timed
+		};
+
+		// ── EXPLAIN rewriting ──────────────────────────────────────
+		// SELECT ... EXPLAIN      → EXPLAIN SELECT ...       (ExplainPlan)
+		// SELECT ... EXPLAIN FULL → EXPLAIN ANALYZE SELECT . (AnalyzePlan)
+		//
+		// Uses JSON format for consistency with the old executor's structured
+		// output format (`[{ detail: ..., operation: ... }]`).
+		match explain {
+			Some(crate::expr::explain::Explain(full)) => {
+				if full {
+					Ok(Arc::new(AnalyzePlan {
+						plan: result,
+						format: crate::expr::ExplainFormat::Json,
+						redact_duration: self.ctx.redact_duration(),
+					}))
+				} else {
+					Ok(Arc::new(ExplainPlan {
+						plan: result,
+						format: crate::expr::ExplainFormat::Json,
+					}))
+				}
+			}
+			None => Ok(result),
 		}
 	}
 
@@ -1091,41 +1104,57 @@ impl<'ctx> Planner<'ctx> {
 				Ok(vec![idiom])
 			}
 			Expr::FunctionCall(ref call) => match &call.receiver {
-				Function::Normal(name) if name == "type::field" => {
-					let arg = call.arguments.first().ok_or_else(|| {
-						Error::PlannerUnimplemented(
-							"type::field in OMIT/FETCH requires an argument".to_string(),
-						)
-					})?;
-					let s = self.resolve_expr_to_string(arg)?;
-					let idiom: Idiom = crate::syn::idiom(&s)
-						.map_err(|e| {
-							Error::PlannerUnimplemented(format!(
-								"Failed to parse field path '{}': {}",
-								s, e
-							))
-						})?
-						.into();
-					Ok(vec![idiom])
-				}
-				Function::Normal(name) if name == "type::fields" => {
-					let arg = call.arguments.first().ok_or_else(|| {
-						Error::PlannerUnimplemented(
-							"type::fields in OMIT/FETCH requires an argument".to_string(),
-						)
-					})?;
-					let strings = self.resolve_expr_to_string_array(arg)?;
-					let mut idioms = Vec::with_capacity(strings.len());
-					for s in strings {
-						let idiom: Idiom = crate::syn::idiom(&s)
-							.map_err(|e| {
-								Error::PlannerUnimplemented(format!(
-									"Failed to parse field path '{}': {}",
-									s, e
-								))
-							})?
-							.into();
-						idioms.push(idiom);
+				Function::Normal(name) if self.function_registry().is_projection(name) => {
+					// Generic projection function handling: resolve each argument
+					// as a string (single field) or array of strings (multiple fields)
+					// and parse each as an idiom.
+					let mut idioms = Vec::new();
+					for arg in &call.arguments {
+						match self.resolve_expr_to_string(arg) {
+							Ok(s) => {
+								let idiom: Idiom = crate::syn::idiom(&s)
+									.map_err(|e| Error::Query {
+										message: format!(
+											"Failed to parse field path '{}': {}",
+											s, e
+										),
+									})?
+									.into();
+								idioms.push(idiom);
+							}
+							Err(_) => {
+								// Try resolving as an array of strings
+								let strings =
+									self.resolve_expr_to_string_array(arg).map_err(|_| {
+										Error::Query {
+											message: format!(
+												"Projection function '{}' argument could not \
+												 be resolved to a field path",
+												name
+											),
+										}
+									})?;
+								for s in strings {
+									let idiom: Idiom = crate::syn::idiom(&s)
+										.map_err(|e| Error::Query {
+											message: format!(
+												"Failed to parse field path '{}': {}",
+												s, e
+											),
+										})?
+										.into();
+									idioms.push(idiom);
+								}
+							}
+						}
+					}
+					if idioms.is_empty() {
+						return Err(Error::Query {
+							message: format!(
+								"Projection function '{}' requires at least one argument",
+								name
+							),
+						});
 					}
 					Ok(idioms)
 				}
@@ -1145,16 +1174,13 @@ impl<'ctx> Planner<'ctx> {
 			Expr::Param(param) => {
 				let value =
 					self.ctx.value(param.as_str()).cloned().unwrap_or(crate::val::Value::None);
-				value.coerce_to::<String>().map_err(|_| {
-					Error::PlannerUnimplemented(
-						"OMIT/FETCH parameter did not resolve to a string".to_string(),
-					)
+				value.coerce_to::<String>().map_err(|_| Error::Query {
+					message: "OMIT/FETCH parameter did not resolve to a string".to_string(),
 				})
 			}
-			_ => Err(Error::PlannerUnimplemented(
-				"OMIT/FETCH with computed expressions not yet supported in execution plans"
-					.to_string(),
-			)),
+			_ => Err(Error::Query {
+				message: "OMIT/FETCH with computed expressions not yet supported".to_string(),
+			}),
 		}
 	}
 
@@ -1166,16 +1192,14 @@ impl<'ctx> Planner<'ctx> {
 			Expr::Param(param) => {
 				let value =
 					self.ctx.value(param.as_str()).cloned().unwrap_or(crate::val::Value::None);
-				value.coerce_to::<Vec<String>>().map_err(|_| {
-					Error::PlannerUnimplemented(
-						"OMIT/FETCH parameter did not resolve to an array of strings".to_string(),
-					)
+				value.coerce_to::<Vec<String>>().map_err(|_| Error::Query {
+					message: "OMIT/FETCH parameter did not resolve to an array of strings"
+						.to_string(),
 				})
 			}
-			_ => Err(Error::PlannerUnimplemented(
-				"OMIT/FETCH with computed expressions not yet supported in execution plans"
-					.to_string(),
-			)),
+			_ => Err(Error::Query {
+				message: "OMIT/FETCH with computed expressions not yet supported".to_string(),
+			}),
 		}
 	}
 
