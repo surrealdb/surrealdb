@@ -91,10 +91,12 @@ pub struct Error {
 	/// removed in the next major release. Always present on the wire; defaults to
 	/// [`code::INTERNAL_ERROR`] when not otherwise set.
 	#[serde(default = "default_code")]
+	#[surreal(default = "default_code")]
 	code: i64,
 	/// Machine-readable error kind. Defaults to [`Internal`](ErrorKind::Internal) when not
 	/// present (e.g. when deserialising errors from older clients that did not send `kind`).
 	#[serde(default)]
+	#[surreal(default)]
 	kind: ErrorKind,
 	/// Human-readable error message.
 	message: String,

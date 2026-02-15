@@ -3,12 +3,14 @@ use quote::quote;
 use syn::{Ident, Type};
 
 use crate::CratePath;
+use crate::attr::FieldDefault;
 
 #[derive(Debug)]
 pub struct NamedField {
 	pub ident: Ident,
 	pub ty: Type,
 	pub rename: Option<String>,
+	pub default: Option<FieldDefault>,
 }
 
 #[derive(Debug)]
@@ -73,10 +75,28 @@ impl NamedFields {
 						format!("Failed to deserialize field '{}' on type '{}': {}", #field_name_str, #name, e)
 					});
 
-					quote! {
-						let field_value = map.remove(#obj_key).unwrap_or_default();
-						let #field_name = <#ty as SurrealValue>::from_value(field_value)
-							.map_err(|e| #error_internal)?;
+					match &field.default {
+						Some(FieldDefault::UseDefault) => quote! {
+							let #field_name = if let Some(field_value) = map.remove(#obj_key) {
+								<#ty as SurrealValue>::from_value(field_value)
+									.map_err(|e| #error_internal)?
+							} else {
+								<#ty>::default()
+							};
+						},
+						Some(FieldDefault::Path(path)) => quote! {
+							let #field_name = if let Some(field_value) = map.remove(#obj_key) {
+								<#ty as SurrealValue>::from_value(field_value)
+									.map_err(|e| #error_internal)?
+							} else {
+								#path()
+							};
+						},
+						None => quote! {
+							let field_value = map.remove(#obj_key).unwrap_or_default();
+							let #field_name = <#ty as SurrealValue>::from_value(field_value)
+								.map_err(|e| #error_internal)?;
+						},
 					}
 				})
 				.collect()

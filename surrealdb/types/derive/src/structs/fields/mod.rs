@@ -35,6 +35,7 @@ impl Fields {
 							ident: field_name.clone(),
 							ty: field.ty.clone(),
 							rename: field_attrs.rename,
+							default: field_attrs.default,
 						}
 					})
 					.collect();
