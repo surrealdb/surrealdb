@@ -263,9 +263,10 @@ impl MutVisitor for KnnStripper {
 		if let Expr::Binary {
 			op: BinaryOperator::NearestNeighbor(nn),
 			..
-		} = expr
-			&& matches!(nn.as_ref(), NearestNeighbor::K(..) | NearestNeighbor::Approximate(..))
-		{
+		} = expr && matches!(
+			nn.as_ref(),
+			NearestNeighbor::K(..) | NearestNeighbor::Approximate(..)
+		) {
 			*expr = Expr::Literal(Literal::Bool(true));
 			return Ok(());
 		}
@@ -300,8 +301,7 @@ impl MutVisitor for BruteForceKnnExtractor {
 			left,
 			op: BinaryOperator::NearestNeighbor(nn),
 			right,
-		} = expr
-			&& let NearestNeighbor::K(k, dist) = nn.as_ref()
+		} = expr && let NearestNeighbor::K(k, dist) = nn.as_ref()
 			&& let Expr::Idiom(idiom) = left.as_ref()
 			&& let Some(vector) = extract_literal_vector(right)
 		{
@@ -511,8 +511,7 @@ impl Visitor for MatchesCollector {
 			left,
 			op: BinaryOperator::Matches(matches_op),
 			right,
-		} = expr
-			&& let Expr::Idiom(idiom) = left.as_ref()
+		} = expr && let Expr::Idiom(idiom) = left.as_ref()
 			&& let Expr::Literal(Literal::String(s)) = right.as_ref()
 		{
 			let match_ref = matches_op.rf.unwrap_or(0);

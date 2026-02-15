@@ -7,31 +7,31 @@ value = "'OK'"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-└────> SortByKey [ctx: Db] [sort_keys: val ASC]
-       └────> TableScan [ctx: Db] [table: record, direction: Forward]
+  SortByKey [ctx: Db] [sort_keys: val ASC]
+    TableScan [ctx: Db] [table: record, direction: Forward]
 ''''
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-└────> SortByKey [ctx: Db] [sort_keys: val DESC]
-       └────> TableScan [ctx: Db] [table: record, direction: Forward]
+  SortByKey [ctx: Db] [sort_keys: val DESC]
+    TableScan [ctx: Db] [table: record, direction: Forward]
 ''''
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-└────> TableScan [ctx: Db] [table: record, direction: Forward, limit: 5]
+  TableScan [ctx: Db] [table: record, direction: Forward, limit: 5]
 ''''
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-└────> TableScan [ctx: Db] [table: record, direction: Forward, limit: 3, offset: 2]
+  TableScan [ctx: Db] [table: record, direction: Forward, limit: 3, offset: 2]
 ''''
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-└────> Limit [ctx: Db] [limit: 2, offset: 1]
-       └────> SortTopKByKey [ctx: Db] [sort_keys: val DESC, limit: 3]
-              └────> TableScan [ctx: Db] [table: record, direction: Forward]
+  Limit [ctx: Db] [limit: 2, offset: 1]
+    SortTopKByKey [ctx: Db] [sort_keys: val DESC, limit: 3]
+      TableScan [ctx: Db] [table: record, direction: Forward]
 ''''
 */
 

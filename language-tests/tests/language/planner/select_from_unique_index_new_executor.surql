@@ -6,8 +6,8 @@ value = "'OK'"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 3}
-└────> Filter [ctx: Db] [predicate: time > d'2000-01-01T00:00:00Z'] {rows: 3}
-       └────> IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward, limit: 3] {rows: 3}
+  Filter [ctx: Db] [predicate: time > d'2000-01-01T00:00:00Z'] {rows: 3}
+    IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward, limit: 3] {rows: 3}
 
 Total rows: 3"'''
 
@@ -16,8 +16,8 @@ value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, tim
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 4}
-└────> Filter [ctx: Db] [predicate: time > d'2000-01-01T00:00:00Z'] {rows: 4}
-       └────> IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward] {rows: 4}
+  Filter [ctx: Db] [predicate: time > d'2000-01-01T00:00:00Z'] {rows: 4}
+    IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward] {rows: 4}
 
 Total rows: 4"'''
 
@@ -26,7 +26,7 @@ value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, tim
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 3}
-└────> IndexScan [ctx: Db] [index: time, access: , direction: Forward, limit: 3] {rows: 3}
+  IndexScan [ctx: Db] [index: time, access: , direction: Forward, limit: 3] {rows: 3}
 
 Total rows: 3''''
 
@@ -35,7 +35,7 @@ value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, tim
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 4}
-└────> IndexScan [ctx: Db] [index: time, access: , direction: Forward] {rows: 4}
+  IndexScan [ctx: Db] [index: time, access: , direction: Forward] {rows: 4}
 
 Total rows: 4''''
 
@@ -44,9 +44,9 @@ value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, tim
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 3}
-└────> Limit [ctx: Db] [limit: 3] {rows: 3}
-       └────> SortTopKByKey [ctx: Db] [sort_keys: time DESC, limit: 3] {rows: 3}
-              └────> IndexScan [ctx: Db] [index: time, access: , direction: Forward] {rows: 4}
+  Limit [ctx: Db] [limit: 3] {rows: 3}
+    SortTopKByKey [ctx: Db] [sort_keys: time DESC, limit: 3] {rows: 3}
+      IndexScan [ctx: Db] [index: time, access: , direction: Forward] {rows: 4}
 
 Total rows: 3''''
 
@@ -55,8 +55,8 @@ value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, tim
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 4}
-└────> SortByKey [ctx: Db] [sort_keys: time DESC] {rows: 4}
-       └────> IndexScan [ctx: Db] [index: time, access: , direction: Forward] {rows: 4}
+  SortByKey [ctx: Db] [sort_keys: time DESC] {rows: 4}
+    IndexScan [ctx: Db] [index: time, access: , direction: Forward] {rows: 4}
 
 Total rows: 4''''
 

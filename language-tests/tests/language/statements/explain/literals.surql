@@ -9,12 +9,12 @@ Total rows: 1''''
 
 [[test.results]]
 value = ''''Return [ctx: Rt]
-└────> IfElse [ctx: Rt] [branches: 1, has_else: true]
+  IfElse [ctx: Rt] [branches: 1, has_else: true]
 ''''
 
 [[test.results]]
 value = ''''Return [ctx: Rt] {rows: 0}
-└────> IfElse [ctx: Rt] [branches: 1, has_else: true] {rows: 0}
+  IfElse [ctx: Rt] [branches: 1, has_else: true] {rows: 0}
 
 Total rows: 0''''
 

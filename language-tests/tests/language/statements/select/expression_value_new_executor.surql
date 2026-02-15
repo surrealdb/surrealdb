@@ -16,7 +16,7 @@ value = "[false, true]"
 
 [[test.results]]
 value = ''''ProjectValue [ctx: Db] [expr: ! boolean] {rows: 2}
-└────> TableScan [ctx: Db] [table: thing, direction: Forward] {rows: 2}
+  TableScan [ctx: Db] [table: thing, direction: Forward] {rows: 2}
 
 Total rows: 2''''
 */

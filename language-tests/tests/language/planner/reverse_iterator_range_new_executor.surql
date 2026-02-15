@@ -13,9 +13,9 @@ value = "[{ id: t:[9] }, { id: t:[8] }, { id: t:[7] }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 3}
-└────> Limit [ctx: Db] [limit: 3] {rows: 3}
-       └────> SortTopKByKey [ctx: Db] [sort_keys: id DESC, limit: 3] {rows: 3}
-              └────> RecordIdScan [ctx: Db] [record_id: t:[5]..=[10]] {rows: 6}
+  Limit [ctx: Db] [limit: 3] {rows: 3}
+    SortTopKByKey [ctx: Db] [sort_keys: id DESC, limit: 3] {rows: 3}
+      RecordIdScan [ctx: Db] [record_id: t:[5]..=[10]] {rows: 6}
 
 Total rows: 3''''
 */

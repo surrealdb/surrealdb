@@ -11,7 +11,7 @@ value = "[{ id: person:2, name: 'Bob' }]"
 [[test.results]]
 value = '''{ agg: 'CountScan [ctx: Db] [source: person]
 ', select: 'Project [ctx: Db]
-└────> TableScan [ctx: Db] [table: person, direction: Forward]
+  TableScan [ctx: Db] [table: person, direction: Forward]
 ' }'''
 
 */

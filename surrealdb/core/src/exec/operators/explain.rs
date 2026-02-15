@@ -58,7 +58,7 @@ impl ExecOperator for ExplainPlan {
 		let output = match self.format {
 			ExplainFormat::Text => {
 				let mut plan_text = String::new();
-				format_execution_plan(self.plan.as_ref(), &mut plan_text, "", true);
+				format_execution_plan(self.plan.as_ref(), &mut plan_text, "");
 				Value::String(plan_text)
 			}
 			ExplainFormat::Json => {
@@ -160,7 +160,7 @@ impl ExecOperator for AnalyzePlan {
 			let output = match format {
 				ExplainFormat::Text => {
 					let mut plan_text = String::new();
-					format_analyze_plan(plan.as_ref(), &mut plan_text, "", true, redact_volatile_explain_attrs);
+					format_analyze_plan(plan.as_ref(), &mut plan_text, "", redact_volatile_explain_attrs);
 					let _ = writeln!(plan_text);
 					let _ = write!(plan_text, "Total rows: {}", total_rows);
 					Value::String(plan_text)
@@ -190,12 +190,7 @@ impl ExecOperator for AnalyzePlan {
 // =========================================================================
 
 /// Format an execution plan node as a text tree
-fn format_execution_plan(
-	plan: &dyn ExecOperator,
-	output: &mut String,
-	prefix: &str,
-	_is_last: bool,
-) {
+fn format_execution_plan(plan: &dyn ExecOperator, output: &mut String, prefix: &str) {
 	// Get operator name and properties
 	let name = plan.name();
 	let properties = plan.attrs();
@@ -225,31 +220,18 @@ fn format_execution_plan(
 		if !embedded.is_empty() {
 			for (embed_role, embed_plan) in &embedded {
 				let _ = write!(output, "{}  {}.{}: ", prefix, role, embed_role);
-				format_execution_plan(embed_plan.as_ref(), output, &format!("{}  ", prefix), true);
+				format_execution_plan(embed_plan.as_ref(), output, &format!("{}  ", prefix));
 			}
 		}
 	}
 
-	// Format children
+	// Format children with indentation
 	let children = plan.children();
 	if !children.is_empty() {
-		for (i, child) in children.iter().enumerate() {
-			let is_last_child = i == children.len() - 1;
-			// Use proper tree connector with arrow
-			let child_connector = if is_last_child {
-				"└────> "
-			} else {
-				"├────> "
-			};
-			let _ = write!(output, "{}{}", prefix, child_connector);
-			// Calculate next prefix: align under the operator name, with continuation bar if not
-			// last
-			let next_prefix = if is_last_child {
-				format!("{}       ", prefix)
-			} else {
-				format!("{}│      ", prefix)
-			};
-			format_execution_plan(child.as_ref(), output, &next_prefix, is_last_child);
+		let child_prefix = format!("{}  ", prefix);
+		for child in children.iter() {
+			let _ = write!(output, "{}", child_prefix);
+			format_execution_plan(child.as_ref(), output, &child_prefix);
 		}
 	}
 }
@@ -367,7 +349,6 @@ fn format_analyze_plan(
 	plan: &dyn ExecOperator,
 	output: &mut String,
 	prefix: &str,
-	_is_last: bool,
 	redact_volatile_explain_attrs: bool,
 ) {
 	let name = plan.name();
@@ -408,34 +389,22 @@ fn format_analyze_plan(
 					embed_plan.as_ref(),
 					output,
 					&format!("{}  ", prefix),
-					true,
 					redact_volatile_explain_attrs,
 				);
 			}
 		}
 	}
 
-	// Format children
+	// Format children with indentation
 	let children = plan.children();
 	if !children.is_empty() {
-		for (i, child) in children.iter().enumerate() {
-			let is_last_child = i == children.len() - 1;
-			let child_connector = if is_last_child {
-				"└────> "
-			} else {
-				"├────> "
-			};
-			let _ = write!(output, "{}{}", prefix, child_connector);
-			let next_prefix = if is_last_child {
-				format!("{}       ", prefix)
-			} else {
-				format!("{}│      ", prefix)
-			};
+		let child_prefix = format!("{}  ", prefix);
+		for child in children.iter() {
+			let _ = write!(output, "{}", child_prefix);
 			format_analyze_plan(
 				child.as_ref(),
 				output,
-				&next_prefix,
-				is_last_child,
+				&child_prefix,
 				redact_volatile_explain_attrs,
 			);
 		}

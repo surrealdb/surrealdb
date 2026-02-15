@@ -3,30 +3,25 @@
 reason = "Test EXPLAIN with control flow statements (RETURN, THROW, BREAK, CONTINUE)"
 
 [[test.results]]
-value = '''
-"Return [ctx: Rt]
-└────> Expr [ctx: Rt] [expr: 'OK']
+value = '''"Return [ctx: Rt]
+  Expr [ctx: Rt] [expr: 'OK']
 "'''
 
 [[test.results]]
-value = '''
-'Return [ctx: Rt]
-└────> Expr [ctx: Rt] [expr: 1 + 2]
+value = ''''Return [ctx: Rt]
+  Expr [ctx: Rt] [expr: 1 + 2]
 ''''
 
 [[test.results]]
-value = '''
-"Expr [ctx: Rt] [expr: THROW 'error message']
+value = '''"Expr [ctx: Rt] [expr: THROW 'error message']
 "'''
 
 [[test.results]]
-value = '''
-'Expr [ctx: Rt] [expr: BREAK]
+value = ''''Expr [ctx: Rt] [expr: BREAK]
 ''''
 
 [[test.results]]
-value = '''
-'Expr [ctx: Rt] [expr: CONTINUE]
+value = ''''Expr [ctx: Rt] [expr: CONTINUE]
 ''''
 
 */

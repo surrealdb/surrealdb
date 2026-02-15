@@ -13,7 +13,7 @@ value = "[{ id: student:3, marks: [{ mark: 50, subject: 'maths' }, { mark: 30, s
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2}
-└────> TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINS 'english'] {rows: 2}
+  TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINS 'english'] {rows: 2}
 
 Total rows: 2"'''
 
@@ -25,7 +25,7 @@ value = "NONE"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2}
-└────> TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.subject CONTAINS 'english'] {rows: 2}
+  TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.subject CONTAINS 'english'] {rows: 2}
 
 Total rows: 2"'''
 
@@ -37,7 +37,7 @@ value = "NONE"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2}
-└────> TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINSALL ['hindi', 'maths']] {rows: 2}
+  TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINSALL ['hindi', 'maths']] {rows: 2}
 
 Total rows: 2"'''
 
@@ -49,7 +49,7 @@ value = "NONE"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2}
-└────> TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.subject CONTAINSALL ['hindi', 'maths']] {rows: 2}
+  TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.subject CONTAINSALL ['hindi', 'maths']] {rows: 2}
 
 Total rows: 2"'''
 
@@ -61,7 +61,7 @@ value = "NONE"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2}
-└────> TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINSANY ['tamil', 'french']] {rows: 2}
+  TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINSANY ['tamil', 'french']] {rows: 2}
 
 Total rows: 2"'''
 
@@ -73,7 +73,7 @@ value = "NONE"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2}
-└────> TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.subject CONTAINSANY ['tamil', 'french']] {rows: 2}
+  TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.subject CONTAINSANY ['tamil', 'french']] {rows: 2}
 
 Total rows: 2"'''
 
