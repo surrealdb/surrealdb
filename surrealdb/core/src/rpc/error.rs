@@ -35,6 +35,8 @@ pub enum RpcError {
 	SessionNotFound(Option<Uuid>),
 	#[error("Session already exists: {0}")]
 	SessionExists(Uuid),
+	#[error("Too many open transactions")]
+	TooManyTransactions,
 }
 
 impl From<anyhow::Error> for RpcError {

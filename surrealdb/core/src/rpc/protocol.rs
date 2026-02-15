@@ -102,6 +102,8 @@ pub trait RpcProtocol {
 		self.session_map().remove(&Some(*id));
 		// Cleanup live queries
 		self.cleanup_lqs(Some(id)).await;
+		// Cleanup transactions
+		self.cleanup_txns(Some(id)).await;
 	}
 
 	/// Lists all non-default sessions
@@ -122,11 +124,6 @@ pub trait RpcProtocol {
 
 	/// Retrieves a transaction by ID
 	async fn get_tx(&self, _id: Uuid) -> Result<Arc<crate::kvs::Transaction>, RpcError> {
-		Err(RpcError::MethodNotFound)
-	}
-
-	/// Stores a transaction
-	async fn set_tx(&self, _id: Uuid, _tx: Arc<crate::kvs::Transaction>) -> Result<(), RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 
@@ -158,6 +155,19 @@ pub trait RpcProtocol {
 
 	/// Handles the cleanup of all live queries
 	fn cleanup_all_lqs(&self) -> impl std::future::Future<Output = ()> + Send;
+
+	/// Handles the cleanup of transactions for a session
+	fn cleanup_txns(
+		&self,
+		_session_id: Option<&Uuid>,
+	) -> impl std::future::Future<Output = ()> + Send {
+		async {}
+	}
+
+	/// Handles the cleanup of all transactions
+	fn cleanup_all_txns(&self) -> impl std::future::Future<Output = ()> + Send {
+		async {}
+	}
 
 	// ------------------------------
 	// Method execution
@@ -528,6 +538,8 @@ pub trait RpcProtocol {
 		crate::iam::reset::reset(&mut session);
 		// Cleanup live queries
 		self.cleanup_lqs(session_id.as_ref()).await;
+		// Cleanup transactions
+		self.cleanup_txns(session_id.as_ref()).await;
 		// Return nothing on success
 		Ok(DbResult::Other(PublicValue::None))
 	}
