@@ -14,10 +14,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1}
-└────> DynamicScan [ctx: Db] [source: blog, predicate: title @0@ 'hello' AND identifier > 0 OR title @1@ 'world' AND identifier < 99] {rows: 1}
-
-Total rows: 1"'''
+value = '''"Project [ctx: Db] {rows: 1}\n└────> Filter [ctx: Db] [predicate: title @0@ 'hello' AND identifier > 0 OR title @1@ 'world' AND identifier < 99] {rows: 1}\n       └────> UnionIndexScan [ctx: Db] [branches: 2] {rows: 1}\n              ├────> FullTextScan [ctx: Db] [index: blog_title, query: hello] {rows: 1}\n              └────> FullTextScan [ctx: Db] [index: blog_title, query: world] {rows: 1}\n\nTotal rows: 1"'''
 
 [[test.results]]
 value = "[{ id: blog:1, title: 'Hello <em>World</em>!' }]"

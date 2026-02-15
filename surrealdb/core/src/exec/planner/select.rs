@@ -1234,7 +1234,7 @@ impl<'ctx> Planner<'ctx> {
 		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 	) -> Result<PlannedSource, Error> {
-		use crate::exec::operators::{FullTextScan, IndexScan, KnnScan};
+		use crate::exec::operators::{FullTextScan, IndexScan, KnnScan, UnionIndexScan};
 
 		// Optimisation: WHERE id = <RecordId> -> point lookup.
 		// Detects `id = <RecordId literal>` in the top-level AND chain and
@@ -1360,10 +1360,73 @@ impl<'ctx> Planner<'ctx> {
 							limit_pushed,
 						});
 					}
-					AccessPath::Union(_paths) => {
-						// Multi-index union — fall through to generic Scan
-						// which handles union at runtime. The planner can
-						// create this directly in a future iteration.
+					AccessPath::Union(paths) => {
+						// Multi-index union: create a concrete operator for
+						// each OR branch and wrap them in UnionIndexScan,
+						// which deduplicates results by record ID.
+						let mut sub_operators: Vec<Arc<dyn ExecOperator>> =
+							Vec::with_capacity(paths.len());
+						for path in paths {
+							match path {
+								AccessPath::BTreeScan {
+									index_ref,
+									access,
+									direction,
+								} => {
+									sub_operators.push(Arc::new(IndexScan::new(
+										index_ref,
+										access,
+										direction,
+										table.clone(),
+										None,
+										None,
+									)));
+								}
+								AccessPath::FullTextSearch {
+									index_ref,
+									query,
+									operator,
+								} => {
+									sub_operators.push(Arc::new(FullTextScan::new(
+										index_ref,
+										query,
+										operator,
+										table.clone(),
+									)));
+								}
+								AccessPath::KnnSearch {
+									index_ref,
+									vector,
+									k,
+									ef,
+								} => {
+									let residual_cond = cond.and_then(strip_knn_from_condition);
+									sub_operators.push(Arc::new(KnnScan::new(
+										index_ref,
+										vector,
+										k,
+										ef,
+										table.clone(),
+										knn_ctx.clone(),
+										residual_cond,
+									)));
+								}
+								AccessPath::TableScan | AccessPath::Union(_) => {
+									// Should not appear as sub-paths; fall through
+									// to DynamicScan for safety.
+								}
+							}
+						}
+						if !sub_operators.is_empty() {
+							return Ok(PlannedSource {
+								operator: Arc::new(UnionIndexScan::new(sub_operators))
+									as Arc<dyn ExecOperator>,
+								predicate_pushed: false,
+								limit_pushed: false,
+							});
+						}
+						// If no sub-operators were created (unexpected),
+						// fall through to DynamicScan.
 					}
 				}
 			}

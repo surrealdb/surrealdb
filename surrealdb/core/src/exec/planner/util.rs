@@ -264,17 +264,19 @@ impl MutVisitor for KnnStripper {
 			op: BinaryOperator::NearestNeighbor(nn),
 			..
 		} = expr
+			&& matches!(nn.as_ref(), NearestNeighbor::K(..) | NearestNeighbor::Approximate(..))
 		{
-			if matches!(nn.as_ref(), NearestNeighbor::K(..) | NearestNeighbor::Approximate(..)) {
-				*expr = Expr::Literal(Literal::Bool(true));
-				return Ok(());
-			}
+			*expr = Expr::Literal(Literal::Bool(true));
+			return Ok(());
 		}
 		expr.visit_mut(self)
 	}
 
 	// Don't strip KNN inside subqueries -- only top-level WHERE.
-	fn visit_mut_select(&mut self, _: &mut crate::expr::SelectStatement) -> Result<(), Self::Error> {
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
 		Ok(())
 	}
 }
@@ -299,27 +301,27 @@ impl MutVisitor for BruteForceKnnExtractor {
 			op: BinaryOperator::NearestNeighbor(nn),
 			right,
 		} = expr
+			&& let NearestNeighbor::K(k, dist) = nn.as_ref()
+			&& let Expr::Idiom(idiom) = left.as_ref()
+			&& let Some(vector) = extract_literal_vector(right)
 		{
-			if let NearestNeighbor::K(k, dist) = nn.as_ref() {
-				if let Expr::Idiom(idiom) = left.as_ref() {
-					if let Some(vector) = extract_literal_vector(right) {
-						self.params = Some(BruteForceKnnParams {
-							field: idiom.clone(),
-							vector,
-							k: *k,
-							distance: dist.clone(),
-						});
-						*expr = Expr::Literal(Literal::Bool(true));
-						return Ok(());
-					}
-				}
-			}
+			self.params = Some(BruteForceKnnParams {
+				field: idiom.clone(),
+				vector,
+				k: *k,
+				distance: dist.clone(),
+			});
+			*expr = Expr::Literal(Literal::Bool(true));
+			return Ok(());
 		}
 		expr.visit_mut(self)
 	}
 
 	// Don't descend into subqueries.
-	fn visit_mut_select(&mut self, _: &mut crate::expr::SelectStatement) -> Result<(), Self::Error> {
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
 		Ok(())
 	}
 }
@@ -362,7 +364,10 @@ impl MutVisitor for BoolSimplifier {
 	}
 
 	// Don't descend into subqueries.
-	fn visit_mut_select(&mut self, _: &mut crate::expr::SelectStatement) -> Result<(), Self::Error> {
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
 		Ok(())
 	}
 }
@@ -507,19 +512,17 @@ impl Visitor for MatchesCollector {
 			op: BinaryOperator::Matches(matches_op),
 			right,
 		} = expr
+			&& let Expr::Idiom(idiom) = left.as_ref()
+			&& let Expr::Literal(Literal::String(s)) = right.as_ref()
 		{
-			if let Expr::Idiom(idiom) = left.as_ref() {
-				if let Expr::Literal(Literal::String(s)) = right.as_ref() {
-					let match_ref = matches_op.rf.unwrap_or(0);
-					self.0.insert(
-						match_ref,
-						crate::exec::function::MatchInfo {
-							idiom: idiom.clone(),
-							query: s.clone(),
-						},
-					);
-				}
-			}
+			let match_ref = matches_op.rf.unwrap_or(0);
+			self.0.insert(
+				match_ref,
+				crate::exec::function::MatchInfo {
+					idiom: idiom.clone(),
+					query: s.clone(),
+				},
+			);
 		}
 		expr.visit(self)
 	}
@@ -579,7 +582,7 @@ pub(super) fn check_forbidden_group_by_params(fields: &Fields) -> Result<(), Err
 }
 
 fn check_expr_for_forbidden_params(expr: &Expr) -> Result<(), Error> {
-	expr.visit(&mut ForbiddenParamChecker).map_err(|e| e)
+	expr.visit(&mut ForbiddenParamChecker)
 }
 
 /// Visitor that detects `$this`, `$self`, or `$parent` parameters which are
