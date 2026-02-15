@@ -346,7 +346,7 @@ mod ws {
 
 			let error_str = error.to_string();
 
-			assert!(error_str.starts_with("Internal error: Message too long: "), "{error_str}");
+			assert!(error_str.starts_with("Message too long: "), "{error_str}");
 		}
 	}
 
@@ -457,7 +457,7 @@ mod mem {
 			.await
 			.unwrap_err()
 			.to_string(),
-			"Thrown error: There was a problem with authentication",
+			"There was a problem with authentication",
 		);
 	}
 

@@ -28,6 +28,7 @@ use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
+use crate::rpc::types_error_from_anyhow;
 use crate::types::PublicNotification;
 use crate::val::{Array, Value, convert_value_to_public_value};
 use crate::{err, expr, sql};
@@ -890,7 +891,7 @@ impl Executor {
 								// we hit a cancel or commit.
 								self.results.push(QueryResult {
 									time: before.elapsed(),
-									result: Err(TypesError::internal(e.to_string())),
+									result: Err(types_error_from_anyhow(e)),
 									query_type,
 								});
 
@@ -987,7 +988,7 @@ impl Executor {
 				},
 				Err(ControlFlow::Err(e)) => QueryResult {
 					time,
-					result: Err(TypesError::internal(e.to_string())),
+					result: Err(types_error_from_anyhow(e)),
 					query_type: QueryType::Other,
 				},
 				Err(ControlFlow::Continue) | Err(ControlFlow::Break) => QueryResult {
@@ -1086,7 +1087,7 @@ impl Executor {
 					let result = this.execute_bare_statement(kvs, &now, stmt).await;
 					let result = match result {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
-						Err(err) => Err(TypesError::internal(err.to_string())),
+						Err(err) => Err(types_error_from_anyhow(err)),
 					};
 					if !skip_success_results || result.is_err() {
 						this.results.push(QueryResult {

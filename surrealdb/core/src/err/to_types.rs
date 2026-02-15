@@ -73,8 +73,8 @@ pub fn into_types_error(e: Error) -> TypesError {
 		}
 
 		// Validation
-		NsEmpty => TypesError::validation("No namespace specified".to_string(), None),
-		DbEmpty => TypesError::validation("No database specified".to_string(), None),
+		NsEmpty => TypesError::validation("Specify a namespace to use".to_string(), None),
+		DbEmpty => TypesError::validation("Specify a database to use".to_string(), None),
 		InvalidQuery(_) => TypesError::validation("Invalid query syntax".to_string(), None),
 		InvalidParam {
 			..
