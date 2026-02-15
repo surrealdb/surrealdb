@@ -16,8 +16,8 @@ value = "[{ id: test:1, num: 123 }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 1}
-  Filter [ctx: Db] [predicate: num = 123] {rows: 1}
-    IndexScan [ctx: Db] [index: field_num, access: = 123, direction: Forward] {rows: 1}
+    Filter [ctx: Db] [predicate: num = 123] {rows: 1}
+        IndexScan [ctx: Db] [index: field_num, access: = 123, direction: Forward] {rows: 1}
 
 Total rows: 1''''
 

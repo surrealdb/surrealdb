@@ -21,8 +21,8 @@ value = "{ events: {  }, fields: {  }, indexes: { i: 'DEFINE INDEX i ON b FIELDS
 
 [[test.results]]
 value = '''"Project [ctx: Db]
-  Filter [ctx: Db] [predicate: t @1@ 'Hello']
-    FullTextScan [ctx: Db] [index: i, query: Hello]
+    Filter [ctx: Db] [predicate: t @1@ 'Hello']
+        FullTextScan [ctx: Db] [index: i, query: Hello]
 "'''
 
 [[test.results]]

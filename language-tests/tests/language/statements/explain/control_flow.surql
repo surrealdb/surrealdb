@@ -4,12 +4,12 @@ reason = "Test EXPLAIN with control flow statements (RETURN, THROW, BREAK, CONTI
 
 [[test.results]]
 value = '''"Return [ctx: Rt]
-  Expr [ctx: Rt] [expr: 'OK']
+    Expr [ctx: Rt] [expr: 'OK']
 "'''
 
 [[test.results]]
 value = ''''Return [ctx: Rt]
-  Expr [ctx: Rt] [expr: 1 + 2]
+    Expr [ctx: Rt] [expr: 1 + 2]
 ''''
 
 [[test.results]]

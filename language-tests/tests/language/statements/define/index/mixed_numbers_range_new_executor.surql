@@ -9,9 +9,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  SortByKey [ctx: Db] [sort_keys: id ASC]
-    Filter [ctx: Db] [predicate: number > 0 AND number < 2]
-      IndexScan [ctx: Db] [index: index, access: >0, direction: Forward]
+    SortByKey [ctx: Db] [sort_keys: id ASC]
+        Filter [ctx: Db] [predicate: number > 0 AND number < 2]
+            IndexScan [ctx: Db] [index: index, access: >0, direction: Forward]
 ''''
 
 [[test.results]]
@@ -19,9 +19,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  SortByKey [ctx: Db] [sort_keys: id ASC]
-    Filter [ctx: Db] [predicate: number > 0.1f AND number < 2]
-      IndexScan [ctx: Db] [index: index, access: >0.1f, direction: Forward]
+    SortByKey [ctx: Db] [sort_keys: id ASC]
+        Filter [ctx: Db] [predicate: number > 0.1f AND number < 2]
+            IndexScan [ctx: Db] [index: index, access: >0.1f, direction: Forward]
 ''''
 
 [[test.results]]
@@ -29,9 +29,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  SortByKey [ctx: Db] [sort_keys: id ASC]
-    Filter [ctx: Db] [predicate: number > 0.1f AND number < 1.5f]
-      IndexScan [ctx: Db] [index: index, access: >0.1f, direction: Forward]
+    SortByKey [ctx: Db] [sort_keys: id ASC]
+        Filter [ctx: Db] [predicate: number > 0.1f AND number < 1.5f]
+            IndexScan [ctx: Db] [index: index, access: >0.1f, direction: Forward]
 ''''
 
 [[test.results]]
@@ -39,9 +39,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  SortByKey [ctx: Db] [sort_keys: id ASC]
-    Filter [ctx: Db] [predicate: number > 0 AND number < 1.5f]
-      IndexScan [ctx: Db] [index: index, access: >0, direction: Forward]
+    SortByKey [ctx: Db] [sort_keys: id ASC]
+        Filter [ctx: Db] [predicate: number > 0 AND number < 1.5f]
+            IndexScan [ctx: Db] [index: index, access: >0, direction: Forward]
 ''''
 
 [[test.results]]
@@ -49,9 +49,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  SortByKey [ctx: Db] [sort_keys: id ASC]
-    Filter [ctx: Db] [predicate: number > 0.1f]
-      IndexScan [ctx: Db] [index: index, access: >0.1f, direction: Forward]
+    SortByKey [ctx: Db] [sort_keys: id ASC]
+        Filter [ctx: Db] [predicate: number > 0.1f]
+            IndexScan [ctx: Db] [index: index, access: >0.1f, direction: Forward]
 ''''
 
 [[test.results]]
@@ -59,9 +59,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  SortByKey [ctx: Db] [sort_keys: id ASC]
-    Filter [ctx: Db] [predicate: number > 0]
-      IndexScan [ctx: Db] [index: index, access: >0, direction: Forward]
+    SortByKey [ctx: Db] [sort_keys: id ASC]
+        Filter [ctx: Db] [predicate: number > 0]
+            IndexScan [ctx: Db] [index: index, access: >0, direction: Forward]
 ''''
 
 [[test.results]]
@@ -69,9 +69,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  SortByKey [ctx: Db] [sort_keys: id ASC]
-    Filter [ctx: Db] [predicate: number < 2]
-      IndexScan [ctx: Db] [index: index, access: <2, direction: Forward]
+    SortByKey [ctx: Db] [sort_keys: id ASC]
+        Filter [ctx: Db] [predicate: number < 2]
+            IndexScan [ctx: Db] [index: index, access: <2, direction: Forward]
 ''''
 
 [[test.results]]
@@ -79,9 +79,9 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  SortByKey [ctx: Db] [sort_keys: id ASC]
-    Filter [ctx: Db] [predicate: number < 1.9f]
-      IndexScan [ctx: Db] [index: index, access: <1.9f, direction: Forward]
+    SortByKey [ctx: Db] [sort_keys: id ASC]
+        Filter [ctx: Db] [predicate: number < 1.9f]
+            IndexScan [ctx: Db] [index: index, access: <1.9f, direction: Forward]
 ''''
 
 */

@@ -21,10 +21,10 @@ value = "[{ id: person:2, name: 'Jaime', securityNumber: 'ABCDEF' }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1}
-  Filter [ctx: Db] [predicate: name @@ 'Tobie' OR securityNumber == '123456'] {rows: 1}
-    UnionIndexScan [ctx: Db] [branches: 2] {rows: 1}
-      FullTextScan [ctx: Db] [index: idxPersonName, query: Tobie] {rows: 1}
-      IndexScan [ctx: Db] [index: idxSecurityNumber, access: = '123456', direction: Forward] {rows: 1}
+    Filter [ctx: Db] [predicate: name @@ 'Tobie' OR securityNumber == '123456'] {rows: 1}
+        UnionIndexScan [ctx: Db] [branches: 2] {rows: 1}
+            FullTextScan [ctx: Db] [index: idxPersonName, query: Tobie] {rows: 1}
+            IndexScan [ctx: Db] [index: idxSecurityNumber, access: = '123456', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 

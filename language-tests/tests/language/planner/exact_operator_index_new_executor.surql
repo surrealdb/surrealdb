@@ -19,8 +19,8 @@ value = "[{ b: true, i: 1, id: t:1 }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 1}
-  Filter [ctx: Db] [predicate: b == true] {rows: 1}
-    IndexScan [ctx: Db] [index: idx, access: = true, direction: Forward] {rows: 1}
+    Filter [ctx: Db] [predicate: b == true] {rows: 1}
+        IndexScan [ctx: Db] [index: idx, access: = true, direction: Forward] {rows: 1}
 
 Total rows: 1''''
 
@@ -29,8 +29,8 @@ value = "[{ b: false, i: 2, id: t:2 }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 1}
-  Filter [ctx: Db] [predicate: i == 2] {rows: 1}
-    IndexScan [ctx: Db] [index: uniq, access: = 2, direction: Forward] {rows: 1}
+    Filter [ctx: Db] [predicate: i == 2] {rows: 1}
+        IndexScan [ctx: Db] [index: uniq, access: = 2, direction: Forward] {rows: 1}
 
 Total rows: 1''''
 */

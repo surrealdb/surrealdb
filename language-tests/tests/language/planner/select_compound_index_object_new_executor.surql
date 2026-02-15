@@ -12,8 +12,8 @@ value = "[{ id: t:{ id: 3, r: o:1 } }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 1}
-  Filter [ctx: Db] [predicate: id.id().r = o:1 AND b = 2025] {rows: 1}
-    IndexScan [ctx: Db] [index: idx, access: [o:1, 2025], direction: Forward] {rows: 1}
+    Filter [ctx: Db] [predicate: id.id().r = o:1 AND b = 2025] {rows: 1}
+        IndexScan [ctx: Db] [index: idx, access: [o:1, 2025], direction: Forward] {rows: 1}
 
 Total rows: 1''''
 
@@ -25,8 +25,8 @@ value = "[{ id: t:{ id: 4, r: o:2 } }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 1}
-  Filter [ctx: Db] [predicate: id.id().r = o:2 AND b > 2022] {rows: 1}
-    IndexScan [ctx: Db] [index: idx, access: [o:2], direction: Forward] {rows: 2}
+    Filter [ctx: Db] [predicate: id.id().r = o:2 AND b > 2022] {rows: 1}
+        IndexScan [ctx: Db] [index: idx, access: [o:2], direction: Forward] {rows: 2}
 
 Total rows: 1''''
 
@@ -38,8 +38,8 @@ value = "[{ id: t:{ id: 4, r: o:2 } }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 1}
-  Filter [ctx: Db] [predicate: b >= 2025 AND id.id().r = o:2 AND b > 2020] {rows: 1}
-    IndexScan [ctx: Db] [index: idx, access: [o:2], direction: Forward] {rows: 2}
+    Filter [ctx: Db] [predicate: b >= 2025 AND id.id().r = o:2 AND b > 2020] {rows: 1}
+        IndexScan [ctx: Db] [index: idx, access: [o:2], direction: Forward] {rows: 2}
 
 Total rows: 1''''
 
@@ -51,8 +51,8 @@ value = "[{ id: t:{ id: 2, r: o:2 } }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 1}
-  Filter [ctx: Db] [predicate: b > 2020 AND id.id().r = o:2 AND b <= 2024] {rows: 1}
-    IndexScan [ctx: Db] [index: idx, access: [o:2], direction: Forward] {rows: 2}
+    Filter [ctx: Db] [predicate: b > 2020 AND id.id().r = o:2 AND b <= 2024] {rows: 1}
+        IndexScan [ctx: Db] [index: idx, access: [o:2], direction: Forward] {rows: 2}
 
 Total rows: 1''''
 

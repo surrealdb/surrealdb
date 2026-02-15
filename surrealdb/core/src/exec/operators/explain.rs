@@ -18,6 +18,9 @@ use crate::exec::{
 use crate::expr::{ControlFlow, ExplainFormat};
 use crate::val::{Array, Object, Value};
 
+/// Number of spaces used per indentation level in text plan output.
+const INDENT_WIDTH: usize = 4;
+
 /// EXPLAIN operator - formats an execution plan as text.
 ///
 /// This operator wraps an inner statement's planned content and returns
@@ -228,7 +231,7 @@ fn format_execution_plan(plan: &dyn ExecOperator, output: &mut String, prefix: &
 	// Format children with indentation
 	let children = plan.children();
 	if !children.is_empty() {
-		let child_prefix = format!("{}  ", prefix);
+		let child_prefix = format!("{}{:width$}", prefix, "", width = INDENT_WIDTH);
 		for child in children.iter() {
 			let _ = write!(output, "{}", child_prefix);
 			format_execution_plan(child.as_ref(), output, &child_prefix);
@@ -398,7 +401,7 @@ fn format_analyze_plan(
 	// Format children with indentation
 	let children = plan.children();
 	if !children.is_empty() {
-		let child_prefix = format!("{}  ", prefix);
+		let child_prefix = format!("{}{:width$}", prefix, "", width = INDENT_WIDTH);
 		for child in children.iter() {
 			let _ = write!(output, "{}", child_prefix);
 			format_analyze_plan(

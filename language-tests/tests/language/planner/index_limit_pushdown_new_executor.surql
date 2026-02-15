@@ -7,23 +7,23 @@ value = "'OK'"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  IndexScan [ctx: Db] [index: idx_number, access: , direction: Forward, limit: 3]
+    IndexScan [ctx: Db] [index: idx_number, access: , direction: Forward, limit: 3]
 ''''
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  Filter [ctx: Db] [predicate: number > 15]
-    IndexScan [ctx: Db] [index: idx_number, access: >15, direction: Forward, limit: 2]
+    Filter [ctx: Db] [predicate: number > 15]
+        IndexScan [ctx: Db] [index: idx_number, access: >15, direction: Forward, limit: 2]
 ''''
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  TableScan [ctx: Db] [table: record, direction: Forward, limit: 3]
+    TableScan [ctx: Db] [table: record, direction: Forward, limit: 3]
 ''''
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  IndexScan [ctx: Db] [index: idx_number, access: , direction: Forward]
+    IndexScan [ctx: Db] [index: idx_number, access: , direction: Forward]
 ''''
 
 [[test.results]]

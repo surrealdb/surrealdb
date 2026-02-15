@@ -7,15 +7,15 @@ value = "'OK'"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  Split [ctx: Db] [on: tags]
-    TableScan [ctx: Db] [table: post, direction: Forward]
+    Split [ctx: Db] [on: tags]
+        TableScan [ctx: Db] [table: post, direction: Forward]
 ''''
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  SortByKey [ctx: Db] [sort_keys: views DESC]
-    Split [ctx: Db] [on: tags]
-      TableScan [ctx: Db] [table: post, direction: Forward]
+    SortByKey [ctx: Db] [sort_keys: views DESC]
+        Split [ctx: Db] [on: tags]
+            TableScan [ctx: Db] [table: post, direction: Forward]
 ''''
 */
 

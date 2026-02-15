@@ -35,8 +35,8 @@ value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
 value = '''"Project [ctx: Db]
-  Filter [ctx: Db] [predicate: email = 'testA@surrealdb.com']
-    IndexScan [ctx: Db] [index: test, access: = 'testA@surrealdb.com', direction: Forward]
+    Filter [ctx: Db] [predicate: email = 'testA@surrealdb.com']
+        IndexScan [ctx: Db] [index: test, access: = 'testA@surrealdb.com', direction: Forward]
 "'''
 
 [[test.results]]

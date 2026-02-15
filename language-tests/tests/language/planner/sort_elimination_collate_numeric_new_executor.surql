@@ -19,8 +19,8 @@ value = "[{ id: test:5, val: '3' }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  SortByKey [ctx: Db] [sort_keys: val ASC]
-    TableScan [ctx: Db] [table: test, direction: Forward]
+    SortByKey [ctx: Db] [sort_keys: val ASC]
+        TableScan [ctx: Db] [table: test, direction: Forward]
 ''''
 
 [[test.results]]
@@ -28,8 +28,8 @@ value = "[{ val: '1' }, { val: '2' }, { val: '3' }, { val: '10' }, { val: '20' }
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  SortByKey [ctx: Db] [sort_keys: val ASC]
-    TableScan [ctx: Db] [table: test, direction: Forward]
+    SortByKey [ctx: Db] [sort_keys: val ASC]
+        TableScan [ctx: Db] [table: test, direction: Forward]
 ''''
 
 [[test.results]]

@@ -7,7 +7,7 @@ value = "'OK'"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  RecordIdScan [ctx: Db] [record_id: item:1, predicate: id = item:1]
+    RecordIdScan [ctx: Db] [record_id: item:1, predicate: id = item:1]
 ''''
 
 [[test.results]]
@@ -15,7 +15,7 @@ value = "[{ id: item:1, name: 'Alpha', score: 10 }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  RecordIdScan [ctx: Db] [record_id: item:2, predicate: id = item:2 AND score > 15]
+    RecordIdScan [ctx: Db] [record_id: item:2, predicate: id = item:2 AND score > 15]
 ''''
 
 [[test.results]]
@@ -26,7 +26,7 @@ value = "[]"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  TableScan [ctx: Db] [table: item, direction: Forward, predicate: id = item:1 OR score > 15]
+    TableScan [ctx: Db] [table: item, direction: Forward, predicate: id = item:1 OR score > 15]
 ''''
 
 [[test.results]]
@@ -34,7 +34,7 @@ value = "[{ id: item:1, name: 'Alpha', score: 10 }, { id: item:2, name: 'Beta', 
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  RecordIdScan [ctx: Db] [record_id: item:3, predicate: item:3 = id]
+    RecordIdScan [ctx: Db] [record_id: item:3, predicate: item:3 = id]
 ''''
 
 [[test.results]]
@@ -42,7 +42,7 @@ value = "[{ id: item:3, name: 'Gamma', score: 30 }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  RecordIdScan [ctx: Db] [record_id: item:1, predicate: id == item:1]
+    RecordIdScan [ctx: Db] [record_id: item:1, predicate: id == item:1]
 ''''
 
 */

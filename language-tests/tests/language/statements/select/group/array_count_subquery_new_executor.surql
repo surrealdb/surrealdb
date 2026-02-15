@@ -6,7 +6,7 @@ value = "'OK'"
 
 [[test.results]]
 value = ''''Aggregate [ctx: Db] [mode: GROUP ALL]
-  TableScan [ctx: Db] [table: table, direction: Forward]
+    TableScan [ctx: Db] [table: table, direction: Forward]
 ''''
 
 [[test.results]]

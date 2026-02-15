@@ -7,27 +7,27 @@ value = "'OK'"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  TableScan [ctx: Db] [table: item, direction: Forward]
+    TableScan [ctx: Db] [table: item, direction: Forward]
 ''''
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15]
+    TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15]
 ''''
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  RecordIdScan [ctx: Db] [record_id: item:1]
+    RecordIdScan [ctx: Db] [record_id: item:1]
 ''''
 
 [[test.results]]
 value = ''''ProjectValue [ctx: Db] [expr: name]
-  TableScan [ctx: Db] [table: item, direction: Forward]
+    TableScan [ctx: Db] [table: item, direction: Forward]
 ''''
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  TableScan [ctx: Db] [table: item, direction: Forward]
+    TableScan [ctx: Db] [table: item, direction: Forward]
 ''''
 */
 
