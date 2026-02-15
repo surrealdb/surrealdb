@@ -101,11 +101,13 @@ pub struct Error {
 	/// Human-readable error message.
 	message: String,
 	/// Optional structured details (e.g. `{ "name": "users" }` for table not found).
-	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[surreal(skip_serializing_if = "Option::is_none")]
 	details: Option<Value>,
 	/// The underlying cause of this error, if any. Semantically: "this error was caused by that
 	/// one".
-	#[serde(default, skip_serializing_if = "Option::is_none")]
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[surreal(skip_serializing_if = "Option::is_none")]
 	cause: Option<Box<Error>>,
 }
 
