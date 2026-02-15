@@ -626,6 +626,10 @@ impl RpcProtocol for Websocket {
 		_txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
+		// Validate that the session exists if one is specified
+		if session_id.is_some() {
+			self.get_session(&session_id)?;
+		}
 		// Determine the transaction limit for connections
 		let limit = match session_id {
 			Some(_) => *MAX_TRANSACTIONS_PER_SESSION,
