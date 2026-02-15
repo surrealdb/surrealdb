@@ -680,31 +680,37 @@ impl RpcProtocol for Websocket {
 		_session_id: Option<Uuid>,
 		params: Array,
 	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
-		// Extract the transaction ID from params
+		// Extract the transaction ID from params, accepting
+		// both native UUID values and string-encoded UUIDs
+		// as JSON does not have a native UUID type.
 		let mut params_vec = params.into_vec();
-		let Some(Value::Uuid(txn_id)) = params_vec.pop() else {
-			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
-				"Expected transaction UUID".to_string(),
-			));
+		let txn_id = match params_vec.pop() {
+			// Accept a native UUID value
+			Some(Value::Uuid(v)) => v.into_inner(),
+			// Accept a string-encoded UUID value
+			Some(Value::String(ref s)) => s.parse::<Uuid>().map_err(|_| {
+				surrealdb_core::rpc::RpcError::InvalidParams(
+					"Expected transaction UUID".to_string(),
+				)
+			})?,
+			_ => {
+				return Err(surrealdb_core::rpc::RpcError::InvalidParams(
+					"Expected transaction UUID".to_string(),
+				));
+			}
 		};
-
-		let txn_id = txn_id.into_inner();
-
 		// Retrieve and remove the transaction from the map
 		let Some((_, (sid, tx))) = self.transactions.remove(&txn_id) else {
 			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
 				"Transaction not found".to_string(),
 			));
 		};
-
 		// Release the reserved slot
 		if let Some(c) = self.counters.get(&sid) {
 			c.fetch_sub(1, Ordering::Relaxed);
 		}
-
 		// Commit the transaction
 		tx.commit().await?;
-
 		// Return success
 		Ok(DbResult::Other(Value::None))
 	}
@@ -716,31 +722,37 @@ impl RpcProtocol for Websocket {
 		_session_id: Option<Uuid>,
 		params: Array,
 	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
-		// Extract the transaction ID from params
+		// Extract the transaction ID from params, accepting
+		// both native UUID values and string-encoded UUIDs
+		// as JSON does not have a native UUID type.
 		let mut params_vec = params.into_vec();
-		let Some(Value::Uuid(txn_id)) = params_vec.pop() else {
-			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
-				"Expected transaction UUID".to_string(),
-			));
+		let txn_id = match params_vec.pop() {
+			// Accept a native UUID value
+			Some(Value::Uuid(v)) => v.into_inner(),
+			// Accept a string-encoded UUID value
+			Some(Value::String(ref s)) => s.parse::<Uuid>().map_err(|_| {
+				surrealdb_core::rpc::RpcError::InvalidParams(
+					"Expected transaction UUID".to_string(),
+				)
+			})?,
+			_ => {
+				return Err(surrealdb_core::rpc::RpcError::InvalidParams(
+					"Expected transaction UUID".to_string(),
+				));
+			}
 		};
-
-		let txn_id = txn_id.into_inner();
-
 		// Retrieve and remove the transaction from the map
 		let Some((_, (sid, tx))) = self.transactions.remove(&txn_id) else {
 			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
 				"Transaction not found".to_string(),
 			));
 		};
-
 		// Release the reserved slot
 		if let Some(c) = self.counters.get(&sid) {
 			c.fetch_sub(1, Ordering::Relaxed);
 		}
-
 		// Cancel the transaction
 		tx.cancel().await?;
-
 		// Return success
 		Ok(DbResult::Other(Value::None))
 	}
