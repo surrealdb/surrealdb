@@ -456,7 +456,7 @@ impl ExecOperator for DynamicScan {
 			// `applied_pre_skip` tracks how many rows the source will skip
 			// before decoding, so the pipeline can adjust its start accordingly.
 			let (mut source, applied_pre_skip) = {
-				// Table scan (with index selection)
+				// Table scan (with runtime index selection)
 				resolve_table_scan_stream(
 					&ctx, TableScanConfig {
 						ns_id: ns.namespace_id,
@@ -545,9 +545,19 @@ async fn resolve_table_scan_stream(
 		let candidates = analyzer.analyze(cfg.cond.as_ref(), cfg.order.as_ref());
 		if candidates.is_empty() {
 			// No single-index candidates -- try multi-index union for OR conditions
-			analyzer.try_or_union(cfg.cond.as_ref(), cfg.direction)
+			analyzer
+				.try_or_union(cfg.cond.as_ref(), cfg.direction)
+				// Try expanding IN operators into union of equality lookups
+				.or_else(|| analyzer.try_in_expansion(cfg.cond.as_ref(), cfg.direction))
 		} else {
-			Some(select_access_path(candidates, cfg.with.as_ref(), cfg.direction))
+			let path = select_access_path(candidates, cfg.with.as_ref(), cfg.direction);
+			// When the best single-index path is a full-range scan (ORDER BY
+			// only), prefer a multi-index union for OR conditions if available.
+			if path.is_full_range_scan() {
+				analyzer.try_or_union(cfg.cond.as_ref(), cfg.direction).or(Some(path))
+			} else {
+				Some(path)
+			}
 		}
 	};
 
@@ -597,13 +607,15 @@ async fn resolve_table_scan_stream(
 			Ok((stream, 0))
 		}
 
-		// Multi-index union for OR conditions — delegate to UnionIndexScan
+		// Multi-index union for OR conditions — delegate to UnionIndexScan.
+		// Permission handling is done by DynamicScan's ScanPipeline above.
 		Some(AccessPath::Union(paths)) => {
 			let mut sub_operators: Vec<Arc<dyn ExecOperator>> = Vec::with_capacity(paths.len());
 			for path in paths {
 				sub_operators.push(create_index_operator(&path, &cfg));
 			}
-			let union_op = super::UnionIndexScan::new(sub_operators);
+			let union_op =
+				super::UnionIndexScan::new(cfg.table_name.clone(), sub_operators, None, None);
 			let stream = union_op.execute(ctx)?;
 			Ok((stream, 0))
 		}

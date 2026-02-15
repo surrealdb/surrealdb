@@ -109,6 +109,24 @@ pub enum AccessPath {
 	Union(Vec<AccessPath>),
 }
 
+impl AccessPath {
+	/// Returns `true` if this is a B-tree index scan with no WHERE
+	/// selectivity — i.e. a full-range scan that exists only because
+	/// it satisfies ORDER BY.
+	pub fn is_full_range_scan(&self) -> bool {
+		matches!(
+			self,
+			AccessPath::BTreeScan {
+				access: BTreeAccess::Range {
+					from: None,
+					to: None,
+				},
+				..
+			}
+		)
+	}
+}
+
 /// How to access an index.
 #[derive(Debug, Clone)]
 pub enum BTreeAccess {
