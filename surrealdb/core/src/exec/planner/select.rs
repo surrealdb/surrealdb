@@ -8,10 +8,10 @@ use std::sync::Arc;
 use super::Planner;
 use super::util::{
 	all_value_sources, check_forbidden_group_by_params, derive_field_name, extract_bruteforce_knn,
-	extract_count_field_names, extract_matches_context, extract_version,
-	get_effective_limit_literal, has_knn_k_operator, has_knn_operator, has_top_level_or,
-	idiom_to_field_name, idiom_to_field_path, index_covers_ordering, is_count_all_eligible,
-	order_is_scan_compatible, strip_knn_from_condition,
+	extract_count_field_names, extract_matches_context, extract_record_id_point_lookup,
+	extract_version, get_effective_limit_literal, has_knn_k_operator, has_knn_operator,
+	has_top_level_or, idiom_to_field_name, idiom_to_field_path, index_covers_ordering,
+	is_count_all_eligible, order_is_scan_compatible, strip_knn_from_condition,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
@@ -938,13 +938,26 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		let is_value_source = all_value_sources(&what);
-		let primary_table = what.iter().find_map(|e| {
-			if let Expr::Table(t) = e {
-				Some(t.clone())
-			} else {
-				None
-			}
-		});
+		// Prefer literal tables over parameter-resolved tables so that
+		// `FROM $t, article` binds MATCHES context to `article`, not `$t`.
+		let primary_table = what
+			.iter()
+			.find_map(|e| match e {
+				Expr::Table(t) => Some(t.clone()),
+				_ => None,
+			})
+			.or_else(|| {
+				what.iter().find_map(|e| match e {
+					Expr::Param(p) => {
+						if let Some(crate::val::Value::Table(t)) = self.ctx.value(p.as_str()) {
+							Some(t.clone())
+						} else {
+							None
+						}
+					}
+					_ => None,
+				})
+			});
 		let has_knn_early = cond.as_ref().is_some_and(|c| has_knn_operator(&c.0));
 
 		let planning_ctx: std::borrow::Cow<'_, crate::ctx::FrozenContext> =
@@ -1232,6 +1245,32 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<PlannedSource, Error> {
 		use crate::exec::operators::{FullTextScan, IndexScan, KnnScan};
 
+		// Optimisation: WHERE id = <RecordId> -> point lookup.
+		// Detects `id = <RecordId literal>` in the top-level AND chain and
+		// converts the table scan into a RecordIdScan, avoiding index
+		// analysis and full-table iteration entirely.
+		//
+		// Skipped when the condition contains a KNN operator, because the
+		// KNN access path (KnnScan / HNSW) must be resolved by
+		// resolve_access_path() to populate KnnContext correctly.
+		if let Expr::Table(ref table_name) = expr
+			&& !cond.is_some_and(|c| has_knn_operator(&c.0))
+			&& let Some(rid_expr) = cond.and_then(|c| extract_record_id_point_lookup(c, table_name))
+		{
+			let predicate_pushed = scan_predicate.is_some();
+			let record_id_expr = self.physical_expr(rid_expr).await?;
+			return Ok(PlannedSource {
+				operator: Arc::new(RecordIdScan::new(
+					record_id_expr,
+					version,
+					needed_fields,
+					scan_predicate,
+				)) as Arc<dyn ExecOperator>,
+				predicate_pushed,
+				limit_pushed: false,
+			});
+		}
+
 		// When we have a txn and the source is a table, resolve the
 		// access path at plan time and create the concrete operator.
 		if let Expr::Table(ref table_name) = expr
@@ -1330,10 +1369,13 @@ impl<'ctx> Planner<'ctx> {
 							limit_pushed,
 						});
 					}
-					AccessPath::Union(_paths) => {
-						// Multi-index union — fall through to generic Scan
-						// which handles union at runtime. The planner can
-						// create this directly in a future iteration.
+					AccessPath::Union(_) => {
+						// Fall through to DynamicScan so that union index
+						// scans go through the field-permission pipeline
+						// (build_field_state / ScanPipeline::process_batch).
+						// Returning UnionIndexScan directly here would skip
+						// field-level permissions and computed-field
+						// materialization.
 					}
 				}
 			}
@@ -1371,8 +1413,12 @@ impl<'ctx> Planner<'ctx> {
 					.physical_expr(Expr::Literal(crate::expr::literal::Literal::RecordId(rid)))
 					.await?;
 				Ok(PlannedSource {
-					operator: Arc::new(RecordIdScan::new(record_id_expr, version, needed_fields))
-						as Arc<dyn ExecOperator>,
+					operator: Arc::new(RecordIdScan::new(
+						record_id_expr,
+						version,
+						needed_fields,
+						None,
+					)) as Arc<dyn ExecOperator>,
 					predicate_pushed: false,
 					limit_pushed: false,
 				})
@@ -1422,6 +1468,7 @@ impl<'ctx> Planner<'ctx> {
 							record_id_expr,
 							version,
 							needed_fields,
+							None,
 						)) as Arc<dyn ExecOperator>,
 						predicate_pushed: false,
 						limit_pushed: false,

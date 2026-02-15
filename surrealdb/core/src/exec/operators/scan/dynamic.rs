@@ -282,16 +282,93 @@ impl ExecOperator for DynamicScan {
 				}
 				return;
 			}
-				Value::Array(arr) => {
-					yield ValueBatch { values: arr.0 };
+			Value::Array(arr) => {
+				// === ARRAY SOURCE ===
+				// The planner marks predicate/limit/start as consumed for
+				// FunctionCall/Postfix sources, so the outer Filter/Limit
+				// operators are removed. We must apply them here.
+
+				// Evaluate pushed-down LIMIT and START expressions
+				let limit_val: Option<usize> = match &limit_expr {
+					Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+					None => None,
+				};
+				let start_val: usize = match &start_expr {
+					Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+					None => 0,
+				};
+
+				// Early exit if limit is 0
+				if limit_val == Some(0) {
 					return;
 				}
-				// For any other value type, yield as a single row.
-				// This matches legacy FROM behavior for non-table values.
-				other => {
-					yield ValueBatch { values: vec![other] };
+
+				// Apply pushed-down predicate
+				let mut values = arr.0;
+				if let Some(ref pred) = predicate {
+					let mut write_idx = 0;
+					for read_idx in 0..values.len() {
+						let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&values[read_idx]);
+						if pred.evaluate(eval_ctx).await?.is_truthy() {
+							if write_idx != read_idx {
+								values.swap(write_idx, read_idx);
+							}
+							write_idx += 1;
+						}
+					}
+					values.truncate(write_idx);
+				}
+
+				// Apply start offset
+				if start_val > 0 {
+					if start_val >= values.len() {
+						return;
+					}
+					values.drain(..start_val);
+				}
+
+				// Apply limit
+				if let Some(limit) = limit_val {
+					values.truncate(limit);
+				}
+
+				if !values.is_empty() {
+					yield ValueBatch { values };
+				}
+				return;
+			}
+			// For any other value type, yield as a single row.
+			// This matches legacy FROM behavior for non-table values.
+			other => {
+				// === SCALAR SOURCE ===
+				// Same pushdown logic as the array branch above.
+
+				// Evaluate pushed-down LIMIT and START expressions
+				let limit_val: Option<usize> = match &limit_expr {
+					Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+					None => None,
+				};
+				let start_val: usize = match &start_expr {
+					Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+					None => 0,
+				};
+
+				// Early exit if limit is 0 or start skips past the single value
+				if limit_val == Some(0) || start_val > 0 {
 					return;
 				}
+
+				// Apply pushed-down predicate
+				if let Some(ref pred) = predicate {
+					let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&other);
+					if !pred.evaluate(eval_ctx).await?.is_truthy() {
+						return;
+					}
+				}
+
+				yield ValueBatch { values: vec![other] };
+				return;
+			}
 			};
 
 			// === TABLE SCAN PATH ===
@@ -520,36 +597,15 @@ async fn resolve_table_scan_stream(
 			Ok((stream, 0))
 		}
 
-		// Multi-index union for OR conditions
+		// Multi-index union for OR conditions — delegate to UnionIndexScan
 		Some(AccessPath::Union(paths)) => {
-			// Create a stream for each sub-path, then chain and deduplicate
-			let mut sub_streams: Vec<ValueBatchStream> = Vec::with_capacity(paths.len());
+			let mut sub_operators: Vec<Arc<dyn ExecOperator>> = Vec::with_capacity(paths.len());
 			for path in paths {
-				let sub_stream = create_index_stream(ctx, &path, &cfg)?;
-				sub_streams.push(sub_stream);
+				sub_operators.push(create_index_operator(&path, &cfg));
 			}
-
-			// Chain all sub-streams sequentially and deduplicate by record ID
-			let merged: ValueBatchStream = Box::pin(async_stream::try_stream! {
-				let mut seen = std::collections::HashSet::new();
-				for mut sub_stream in sub_streams {
-					while let Some(batch_result) = sub_stream.next().await {
-						let batch = batch_result?;
-						let deduped: Vec<Value> = batch.values.into_iter()
-							.filter(|v| {
-								if let Value::Object(obj) = v && let Some(Value::RecordId(rid)) = obj.get("id") {
-									return seen.insert(rid.clone());
-								}
-								true // non-object values pass through
-							})
-							.collect();
-						if !deduped.is_empty() {
-							yield ValueBatch { values: deduped };
-						}
-					}
-				}
-			});
-			Ok((merged, 0))
+			let union_op = super::UnionIndexScan::new(sub_operators);
+			let stream = union_op.execute(ctx)?;
+			Ok((stream, 0))
 		}
 
 		// Fall back to table KV scan (NOINDEX, etc.)
@@ -573,54 +629,44 @@ async fn resolve_table_scan_stream(
 	}
 }
 
-/// Create an index scan stream for a single access path.
+/// Create an index scan operator for a single access path.
 ///
-/// Used by the multi-index union handler to create individual streams
-/// for each branch of an OR condition.
-fn create_index_stream(
-	ctx: &ExecutionContext,
-	path: &AccessPath,
-	cfg: &TableScanConfig,
-) -> Result<ValueBatchStream, ControlFlow> {
+/// Used by the multi-index union handler to create individual operators
+/// for each branch of an OR condition. The caller (typically
+/// [`UnionIndexScan`](super::UnionIndexScan)) is responsible for
+/// executing the operators and deduplicating results.
+fn create_index_operator(path: &AccessPath, cfg: &TableScanConfig) -> Arc<dyn ExecOperator> {
 	match path {
 		AccessPath::BTreeScan {
 			index_ref,
 			access,
 			direction,
-		} => {
-			let operator = IndexScan::new(
-				index_ref.clone(),
-				access.clone(),
-				*direction,
-				cfg.table_name.clone(),
-				None,
-				None,
-			);
-			operator.execute(ctx)
-		}
+		} => Arc::new(IndexScan::new(
+			index_ref.clone(),
+			access.clone(),
+			*direction,
+			cfg.table_name.clone(),
+			None,
+			None,
+		)),
 		AccessPath::FullTextSearch {
 			index_ref,
 			query,
 			operator,
-		} => {
-			let ft_op = FullTextScan::new(
-				index_ref.clone(),
-				query.clone(),
-				operator.clone(),
-				cfg.table_name.clone(),
-			);
-			ft_op.execute(ctx)
-		}
+		} => Arc::new(FullTextScan::new(
+			index_ref.clone(),
+			query.clone(),
+			operator.clone(),
+			cfg.table_name.clone(),
+		)),
 		AccessPath::KnnSearch {
 			index_ref,
 			vector,
 			k,
 			ef,
 		} => {
-			// Strip KNN operators from the condition to get the residual
-			// (non-KNN predicates) for HNSW pushdown.
 			let residual_cond = cfg.cond.as_ref().and_then(strip_knn_from_condition);
-			let knn_op = KnnScan::new(
+			Arc::new(KnnScan::new(
 				index_ref.clone(),
 				vector.clone(),
 				*k,
@@ -628,13 +674,20 @@ fn create_index_stream(
 				cfg.table_name.clone(),
 				cfg.knn_context.clone(),
 				residual_cond,
-			);
-			knn_op.execute(ctx)
+			))
 		}
-		AccessPath::TableScan | AccessPath::Union(_) => {
-			// These should not appear as sub-paths in a union
-			Err(ControlFlow::Err(anyhow::anyhow!("Unexpected access path in multi-index union")))
-		}
+		// TableScan and nested Union should not appear as sub-paths.
+		// Fall back to a table scan operator which will produce all
+		// records (safe but sub-optimal).
+		AccessPath::TableScan | AccessPath::Union(_) => Arc::new(super::TableScan::new(
+			cfg.table_name.clone(),
+			cfg.direction,
+			None,
+			None,
+			None,
+			None,
+			None,
+		)),
 	}
 }
 
