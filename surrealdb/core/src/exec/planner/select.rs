@@ -1652,10 +1652,10 @@ impl<'ctx> Planner<'ctx> {
 		// branch, which is typically far better than scanning every row
 		// in the index. The outer pipeline adds a Sort when the union
 		// does not satisfy ORDER BY.
-		if path.is_full_range_scan() {
-			if let Some(union_path) = analyzer.try_or_union(cond, direction) {
-				return Ok(Some((union_path, direction)));
-			}
+		if path.is_full_range_scan()
+			&& let Some(union_path) = analyzer.try_or_union(cond, direction)
+		{
+			return Ok(Some((union_path, direction)));
 		}
 
 		Ok(Some((path, direction)))

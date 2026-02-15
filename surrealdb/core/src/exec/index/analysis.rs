@@ -124,12 +124,23 @@ impl<'a> IndexAnalyzer<'a> {
 		Some(AccessPath::Union(branch_paths))
 	}
 
+	/// Maximum number of array elements to expand for `field IN [...]`.
+	///
+	/// Beyond this threshold, the per-operator overhead of creating individual
+	/// `IndexScan` operators inside a `UnionIndexScan` outweighs the benefit
+	/// of targeted lookups. Arrays larger than this fall back to a table scan
+	/// with a predicate filter, which performs a single sequential pass.
+	const MAX_IN_EXPANSION_SIZE: usize = 32;
+
 	/// Try to expand `field IN [v1, v2, ...]` into a union of equality lookups.
 	///
 	/// Walks the condition (through AND nodes) looking for `INSIDE` expressions
 	/// where the right side is a multi-element array literal. For each, if a
 	/// single-column index exists on the field, creates `AccessPath::Union`
 	/// with one `BTreeScan::Equality` per array element.
+	///
+	/// Arrays larger than [`Self::MAX_IN_EXPANSION_SIZE`] are not expanded to
+	/// avoid excessive per-operator overhead.
 	///
 	/// This is a fallback for when `analyze()` and `try_or_union()` both fail
 	/// to find index candidates (e.g. standalone `field IN [1, 2]`).
@@ -149,8 +160,8 @@ impl<'a> IndexAnalyzer<'a> {
 		Self::collect_in_expressions(&cond.0, &mut in_exprs);
 
 		for (idiom, values) in &in_exprs {
-			if values.len() < 2 {
-				continue; // Single-element arrays are handled by match_operator_to_access
+			if values.len() < 2 || values.len() > Self::MAX_IN_EXPANSION_SIZE {
+				continue; // Single-element handled by match_operator_to_access; too-large skipped
 			}
 
 			for (idx, ix_def) in self.indexes.iter().enumerate() {
@@ -167,11 +178,11 @@ impl<'a> IndexAnalyzer<'a> {
 					continue;
 				}
 
-				if let Some(With::Index(names)) = self.with_hints {
-					if !names.contains(&ix_def.name) {
-						continue;
-					}
-				}
+			if let Some(With::Index(names)) = self.with_hints
+				&& !names.contains(&ix_def.name)
+			{
+				continue;
+			}
 
 				if let Some(first_col) = ix_def.cols.first()
 					&& idiom_matches(idiom, first_col)
@@ -209,11 +220,11 @@ impl<'a> IndexAnalyzer<'a> {
 				op: BinaryOperator::Inside,
 				right,
 			} => {
-				if let (Expr::Idiom(idiom), Expr::Literal(lit)) = (left.as_ref(), right.as_ref()) {
-					if let Some(Value::Array(arr)) = try_literal_to_value(lit) {
-						results.push((idiom.clone(), arr.0));
-					}
-				}
+			if let (Expr::Idiom(idiom), Expr::Literal(lit)) = (left.as_ref(), right.as_ref())
+				&& let Some(Value::Array(arr)) = try_literal_to_value(lit)
+			{
+				results.push((idiom.clone(), arr.0));
+			}
 			}
 			Expr::Prefix {
 				expr: inner,
