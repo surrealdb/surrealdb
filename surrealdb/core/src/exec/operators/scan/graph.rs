@@ -140,7 +140,7 @@ impl ExecOperator for GraphEdgeScan {
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
-		let input_stream = buffer_stream(self.input.execute(ctx)?);
+		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
 		let direction = self.direction;
 		let edge_tables = self.edge_tables.clone();
 		let output_mode = self.output_mode;

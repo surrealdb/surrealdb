@@ -160,7 +160,7 @@ impl ExecOperator for KnnTopK {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(self.input.execute(ctx)?);
+		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
 		let field = self.field.clone();
 		let query_vector = self.query_vector.clone();
 		let k = self.k;

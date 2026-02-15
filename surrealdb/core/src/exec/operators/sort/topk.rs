@@ -165,7 +165,7 @@ impl ExecOperator for SortTopK {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(self.input.execute(ctx)?);
+		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
 		let order_by = Arc::new(self.order_by.clone());
 		let limit = self.limit;
 		let ctx = ctx.clone();
@@ -397,7 +397,7 @@ impl ExecOperator for SortTopKByKey {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(self.input.execute(ctx)?);
+		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
 		let sort_keys = Arc::new(self.sort_keys.clone());
 		let limit = self.limit;
 		let cancellation = ctx.cancellation().clone();

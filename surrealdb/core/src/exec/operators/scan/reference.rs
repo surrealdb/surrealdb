@@ -139,7 +139,7 @@ impl ExecOperator for ReferenceScan {
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
-		let input_stream = buffer_stream(self.input.execute(ctx)?);
+		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
 		let referencing_table = self.referencing_table.clone();
 		let referencing_field = self.referencing_field.clone();
 		let output_mode = self.output_mode;

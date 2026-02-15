@@ -78,7 +78,7 @@ impl ExecOperator for ProjectValue {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(self.input.execute(ctx)?);
+		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
 		let expr = self.expr.clone();
 		let ctx = ctx.clone();
 

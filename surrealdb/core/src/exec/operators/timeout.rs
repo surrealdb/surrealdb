@@ -90,7 +90,7 @@ impl ExecOperator for Timeout {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(self.input.execute(ctx)?);
+		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
 
 		// If no timeout is specified, just pass through the input stream
 		let Some(timeout_expr) = &self.timeout else {

@@ -137,7 +137,7 @@ impl ExecOperator for ExternalSort {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(self.input.execute(ctx)?);
+		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
 		let order_by = Arc::new(self.order_by.clone());
 		let temp_dir = self.temp_dir.clone();
 		let ctx = ctx.clone();

@@ -81,7 +81,7 @@ impl ExecOperator for LetPlan {
 		// Execute the value plan and collect results
 		// Handle control flow signals explicitly
 		let stream = match self.value.execute(input) {
-			Ok(s) => buffer_stream(s),
+			Ok(s) => buffer_stream(s, self.value.access_mode()),
 			Err(crate::expr::ControlFlow::Return(v)) => {
 				// If value expression returns early, use that value
 				return Ok(input.with_param(self.name.clone(), v));

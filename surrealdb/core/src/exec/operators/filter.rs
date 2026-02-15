@@ -77,7 +77,7 @@ impl ExecOperator for Filter {
 
 	#[instrument(name = "Filter::execute", level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(self.input.execute(ctx)?);
+		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
 		let predicate = Arc::clone(&self.predicate);
 
 		// Clone all necessary data for the async move closure

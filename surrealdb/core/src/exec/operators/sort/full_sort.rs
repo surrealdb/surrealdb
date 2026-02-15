@@ -130,7 +130,7 @@ impl ExecOperator for Sort {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(self.input.execute(ctx)?);
+		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
 		let order_by = self.order_by.clone();
 		let ctx = ctx.clone();
 
@@ -319,7 +319,7 @@ impl ExecOperator for SortByKey {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(self.input.execute(ctx)?);
+		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
 		let sort_keys = self.sort_keys.clone();
 		let cancellation = ctx.cancellation().clone();
 

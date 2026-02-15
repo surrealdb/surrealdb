@@ -79,7 +79,7 @@ impl ExecOperator for UnwrapExactlyOne {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(self.input.execute(ctx)?);
+		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
 		let none_on_empty = self.none_on_empty;
 
 		let unwrap_stream = async_stream::try_stream! {

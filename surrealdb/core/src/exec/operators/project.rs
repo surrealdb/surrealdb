@@ -198,7 +198,7 @@ impl ExecOperator for Project {
 
 	#[instrument(level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(self.input.execute(ctx)?);
+		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
 		let fields = Arc::clone(&self.fields);
 		let omit = Arc::clone(&self.omit);
 		let include_all = self.include_all;
@@ -597,7 +597,7 @@ impl ExecOperator for SelectProject {
 
 	#[instrument(level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(self.input.execute(ctx)?);
+		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
 		let projections = Arc::clone(&self.projections);
 		let ctx = ctx.clone();
 

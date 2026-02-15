@@ -124,7 +124,7 @@ impl ExecOperator for UnionIndexScan {
 		// so that any setup errors surface immediately.
 		let mut sub_streams: Vec<ValueBatchStream> = Vec::with_capacity(self.inputs.len());
 		for input in &self.inputs {
-			let sub_stream = buffer_stream(input.execute(ctx)?);
+			let sub_stream = buffer_stream(input.execute(ctx)?, input.access_mode());
 			sub_streams.push(sub_stream);
 		}
 
