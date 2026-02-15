@@ -312,6 +312,9 @@ impl From<RpcError> for DbResultError {
 			RpcError::SessionExists(id) => {
 				DbResultError::InternalError(format!("Session already exists: {id}"))
 			}
+			RpcError::TooManyTransactions => {
+				DbResultError::Thrown("Too many open transactions".to_string())
+			}
 		}
 	}
 }

@@ -2802,10 +2802,7 @@ pub async fn transaction_begin_cancel(cfg_server: Option<Format>, cfg_format: Fo
 pub async fn transaction_limit_per_connection(cfg_server: Option<Format>, cfg_format: Format) {
 	// Start server with a low per-connection transaction limit
 	let mut vars = std::collections::HashMap::new();
-	vars.insert(
-		"SURREAL_MAX_TRANSACTIONS_PER_CONNECTION".to_string(),
-		"2".to_string(),
-	);
+	vars.insert("SURREAL_MAX_TRANSACTIONS_PER_CONNECTION".to_string(), "2".to_string());
 	let (addr, mut server) = common::start_server(StartServerArguments {
 		vars: Some(vars),
 		..Default::default()
@@ -2844,10 +2841,7 @@ pub async fn transaction_limit_per_connection(cfg_server: Option<Format>, cfg_fo
 pub async fn transaction_limit_per_session(cfg_server: Option<Format>, cfg_format: Format) {
 	// Start server with a low per-session transaction limit
 	let mut vars = std::collections::HashMap::new();
-	vars.insert(
-		"SURREAL_MAX_TRANSACTIONS_PER_SESSION".to_string(),
-		"2".to_string(),
-	);
+	vars.insert("SURREAL_MAX_TRANSACTIONS_PER_SESSION".to_string(), "2".to_string());
 	let (addr, mut server) = common::start_server(StartServerArguments {
 		vars: Some(vars),
 		..Default::default()
@@ -2867,26 +2861,14 @@ pub async fn transaction_limit_per_session(cfg_server: Option<Format>, cfg_forma
 		.send_request_with_session("signin", json!([{"user": USER, "pass": PASS}]), session1)
 		.await
 		.unwrap();
-	socket
-		.send_request_with_session("use", json!([NS, DB]), session1)
-		.await
-		.unwrap();
+	socket.send_request_with_session("use", json!([NS, DB]), session1).await.unwrap();
 	// Begin two transactions on the session -- both should succeed
-	let res1 = socket
-		.send_request_with_session("begin", json!([]), session1)
-		.await
-		.unwrap();
+	let res1 = socket.send_request_with_session("begin", json!([]), session1).await.unwrap();
 	assert!(res1["result"].is_string(), "First session begin should succeed: {res1:?}");
-	let res2 = socket
-		.send_request_with_session("begin", json!([]), session1)
-		.await
-		.unwrap();
+	let res2 = socket.send_request_with_session("begin", json!([]), session1).await.unwrap();
 	assert!(res2["result"].is_string(), "Second session begin should succeed: {res2:?}");
 	// A third begin on the same session should fail
-	let res3 = socket
-		.send_request_with_session("begin", json!([]), session1)
-		.await
-		.unwrap();
+	let res3 = socket.send_request_with_session("begin", json!([]), session1).await.unwrap();
 	assert!(res3["error"].is_object(), "Third session begin should fail: {res3:?}");
 	let err_msg = res3["error"]["message"].as_str().unwrap_or("");
 	assert!(
@@ -2914,20 +2896,15 @@ pub async fn transaction_cleanup_on_disconnect(cfg_server: Option<Format>, cfg_f
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Create a record
-	let res = socket
-		.send_request("query", json!(["CREATE test:1 SET value = 1"]))
-		.await
-		.unwrap();
+	let res = socket.send_request("query", json!(["CREATE test:1 SET value = 1"])).await.unwrap();
 	assert!(res.get("error").is_none(), "CREATE should succeed: {res:?}");
 	// Begin a transaction
 	let res = socket.send_request("begin", json!([])).await.unwrap();
 	assert!(res["result"].is_string(), "Begin should succeed: {res:?}");
 	let txn_id = res["result"].as_str().unwrap().to_string();
 	// Update the record within the transaction
-	let res = socket
-		.send_request("query", json!(["UPDATE test:1 SET value = 2", txn_id]))
-		.await
-		.unwrap();
+	let res =
+		socket.send_request("query", json!(["UPDATE test:1 SET value = 2", txn_id])).await.unwrap();
 	assert!(res.get("error").is_none(), "UPDATE in transaction should succeed: {res:?}");
 	// Disconnect WITHOUT committing
 	socket.close().await.unwrap();
@@ -2938,10 +2915,7 @@ pub async fn transaction_cleanup_on_disconnect(cfg_server: Option<Format>, cfg_f
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Verify the uncommitted transaction was rolled back
-	let res = socket
-		.send_request("query", json!(["SELECT * FROM test:1"]))
-		.await
-		.unwrap();
+	let res = socket.send_request("query", json!(["SELECT * FROM test:1"])).await.unwrap();
 	assert!(res.get("error").is_none(), "SELECT should succeed: {res:?}");
 	let results = res["result"].as_array().unwrap();
 	let value = &results[0]["result"][0]["value"];
@@ -2950,10 +2924,7 @@ pub async fn transaction_cleanup_on_disconnect(cfg_server: Option<Format>, cfg_f
 	server.finish().unwrap();
 }
 
-pub async fn transaction_cleanup_on_session_detach(
-	cfg_server: Option<Format>,
-	cfg_format: Format,
-) {
+pub async fn transaction_cleanup_on_session_detach(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 	// Connect to WebSocket
@@ -2969,25 +2940,16 @@ pub async fn transaction_cleanup_on_session_detach(
 		.send_request_with_session("signin", json!([{"user": USER, "pass": PASS}]), session1)
 		.await
 		.unwrap();
-	socket
-		.send_request_with_session("use", json!([NS, DB]), session1)
-		.await
-		.unwrap();
+	socket.send_request_with_session("use", json!([NS, DB]), session1).await.unwrap();
 	// Begin a transaction on the named session
-	let res = socket
-		.send_request_with_session("begin", json!([]), session1)
-		.await
-		.unwrap();
+	let res = socket.send_request_with_session("begin", json!([]), session1).await.unwrap();
 	assert!(res["result"].is_string(), "Begin on session should succeed: {res:?}");
 	let txn_id = res["result"].as_str().unwrap().to_string();
 	// Detach the session
 	socket.send_request_with_session("detach", json!([]), session1).await.unwrap();
 	// The transaction should no longer be usable (it was cancelled during cleanup)
 	let res = socket.send_request("commit", json!([txn_id])).await.unwrap();
-	assert!(
-		res["error"].is_object(),
-		"Commit after session detach should fail: {res:?}"
-	);
+	assert!(res["error"].is_object(), "Commit after session detach should fail: {res:?}");
 	// Test passed
 	server.finish().unwrap();
 }

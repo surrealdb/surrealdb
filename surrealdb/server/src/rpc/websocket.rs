@@ -1,5 +1,6 @@
 use core::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::extract::ws::close_code::AGAIN;
@@ -53,8 +54,11 @@ pub struct Websocket {
 	/// The active sessions for this WebSocket connection
 	pub(crate) sessions: HashMap<Option<Uuid>, Arc<RwLock<Session>>>,
 	/// The active transactions for this WebSocket connection.
-	/// Values are (session_id, transaction) tuples to track session association.
+	/// Entries are <transaction_id, (session_id, transaction)> values.
 	pub(crate) transactions: DashMap<Uuid, (Option<Uuid>, Arc<Transaction>)>,
+	/// The active transaction counts for this WebSocket connection.
+	/// Entries are <session_id, count> values.
+	pub(crate) counters: DashMap<Option<Uuid>, AtomicUsize>,
 	/// A cancellation token called when shutting down the server
 	pub(crate) shutdown: CancellationToken,
 	/// A cancellation token for cancelling all spawned tasks
@@ -86,6 +90,7 @@ impl Websocket {
 			canceller: CancellationToken::new(),
 			sessions: HashMap::new(),
 			transactions: DashMap::new(),
+			counters: DashMap::new(),
 			channel: sender.clone(),
 			datastore,
 		});
@@ -579,10 +584,14 @@ impl RpcProtocol for Websocket {
 			.collect();
 		// Cancel and remove each matching transaction
 		for txn_id in txn_ids {
-			if let Some((_, (_, tx))) = self.transactions.remove(&txn_id) {
+			if let Some((_, (sid, tx))) = self.transactions.remove(&txn_id) {
 				trace!("Cancelling transaction {txn_id} during session cleanup");
 				if let Err(err) = tx.cancel().await {
 					error!("Error cancelling transaction {txn_id}: {err}");
+				}
+				// Release the reserved slot
+				if let Some(c) = self.counters.get(&sid) {
+					c.fetch_sub(1, Ordering::Relaxed);
 				}
 			}
 		}
@@ -594,10 +603,14 @@ impl RpcProtocol for Websocket {
 		let txn_ids: Vec<Uuid> = self.transactions.iter().map(|entry| *entry.key()).collect();
 		// Cancel and remove each transaction
 		for txn_id in txn_ids {
-			if let Some((_, (_, tx))) = self.transactions.remove(&txn_id) {
+			if let Some((_, (sid, tx))) = self.transactions.remove(&txn_id) {
 				trace!("Cancelling transaction {txn_id} during connection cleanup");
 				if let Err(err) = tx.cancel().await {
 					error!("Error cancelling transaction {txn_id}: {err}");
+				}
+				// Release the reserved slot
+				if let Some(c) = self.counters.get(&sid) {
+					c.fetch_sub(1, Ordering::Relaxed);
 				}
 			}
 		}
@@ -613,23 +626,42 @@ impl RpcProtocol for Websocket {
 		_txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
-		// Check transaction limits based on session scope
-		let count = self.transactions.iter().filter(|entry| entry.value().0 == session_id).count();
+		// Determine the transaction limit for connections
 		let limit = match session_id {
 			Some(_) => *MAX_TRANSACTIONS_PER_SESSION,
 			None => *MAX_TRANSACTIONS_PER_CONNECTION,
 		};
-		if count >= limit {
+		// Increase the transaction counter for the session
+		let prev = self
+			.counters
+			.entry(session_id)
+			.or_insert_with(|| AtomicUsize::new(0))
+			.fetch_add(1, Ordering::Relaxed);
+		// Check if the transaction limit has been reached
+		if prev >= limit {
+			// Over limit — undo the reservation
+			if let Some(c) = self.counters.get(&session_id) {
+				c.fetch_sub(1, Ordering::Relaxed);
+			}
 			return Err(surrealdb_core::rpc::RpcError::TooManyTransactions);
 		}
 		// Create a new transaction
-		let tx = self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = match self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await {
+			Ok(tx) => tx,
+			Err(e) => {
+				// Undo the reservation on failure
+				if let Some(c) = self.counters.get(&session_id) {
+					c.fetch_sub(1, Ordering::Relaxed);
+				}
+				return Err(e.into());
+			}
+		};
 		// Generate a unique transaction ID
 		let id = Uuid::now_v7();
-		debug!("WebSocket begin: created transaction {id}");
+		trace!("WebSocket begin: created transaction {id}");
 		// Store the transaction in the map with its session association
 		self.transactions.insert(id, (session_id, Arc::new(tx)));
-		debug!(
+		trace!(
 			"WebSocket begin: stored transaction {id}, map now has {} transactions",
 			self.transactions.len()
 		);
@@ -655,11 +687,16 @@ impl RpcProtocol for Websocket {
 		let txn_id = txn_id.into_inner();
 
 		// Retrieve and remove the transaction from the map
-		let Some((_, (_, tx))) = self.transactions.remove(&txn_id) else {
+		let Some((_, (sid, tx))) = self.transactions.remove(&txn_id) else {
 			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
 				"Transaction not found".to_string(),
 			));
 		};
+
+		// Release the reserved slot
+		if let Some(c) = self.counters.get(&sid) {
+			c.fetch_sub(1, Ordering::Relaxed);
+		}
 
 		// Commit the transaction
 		tx.commit().await?;
@@ -686,11 +723,16 @@ impl RpcProtocol for Websocket {
 		let txn_id = txn_id.into_inner();
 
 		// Retrieve and remove the transaction from the map
-		let Some((_, (_, tx))) = self.transactions.remove(&txn_id) else {
+		let Some((_, (sid, tx))) = self.transactions.remove(&txn_id) else {
 			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
 				"Transaction not found".to_string(),
 			));
 		};
+
+		// Release the reserved slot
+		if let Some(c) = self.counters.get(&sid) {
+			c.fetch_sub(1, Ordering::Relaxed);
+		}
 
 		// Cancel the transaction
 		tx.cancel().await?;
