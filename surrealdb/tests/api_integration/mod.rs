@@ -371,6 +371,10 @@ mod ws {
 		let dbn = Ulid::new().to_string();
 		db.use_ns(&ns).use_db(&dbn).await.unwrap();
 
+		// Define the table so that selecting a non-existent record returns
+		// None rather than erroring with "table does not exist".
+		db.query("DEFINE TABLE user SCHEMAFULL").await.unwrap();
+
 		// Run many queries in a tight loop. Before the fix, each query would
 		// leak a PendingRequest entry (~768 bytes). With 1000 iterations this
 		// would accumulate without bound.
