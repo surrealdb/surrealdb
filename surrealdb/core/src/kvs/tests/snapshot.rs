@@ -1,18 +1,13 @@
-use std::sync::Arc;
-
 use uuid::Uuid;
 
 use super::CreateDs;
-use crate::dbs::node::Timestamp;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::kvs::clock::{FakeClock, SizedClock};
 
 pub async fn snapshot(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("056804f2-b379-4397-9ceb-af8ebd527beb").unwrap();
-	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds.create_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Insert an initial key
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.set(&"test", &"some text".as_bytes().to_vec(), None).await.unwrap();
