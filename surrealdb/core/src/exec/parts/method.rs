@@ -85,10 +85,6 @@ impl PhysicalExpr for MethodPart {
 		}
 	}
 
-	fn references_current_value(&self) -> bool {
-		true
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		self.args.iter().map(|a| a.access_mode()).combine_all()
 	}
@@ -247,10 +243,6 @@ impl PhysicalExpr for ClosureFieldCallPart {
 			)
 			.into()),
 		}
-	}
-
-	fn references_current_value(&self) -> bool {
-		true
 	}
 
 	fn access_mode(&self) -> AccessMode {

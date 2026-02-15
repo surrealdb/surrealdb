@@ -776,7 +776,7 @@ pub(super) trait Collector {
 
 		// Create a new iterable range
 		let txn = ctx.tx();
-		let mut stream = txn.stream_keys_vals(rng, opt.version, None, 0, sc);
+		let mut stream = txn.stream_keys_vals(rng, opt.version, None, 0, sc, false);
 
 		// Loop until no more entries
 		let mut count = 0;
@@ -913,7 +913,7 @@ pub(super) trait Collector {
 		};
 		// Create a new iterable range
 		let txn = ctx.tx();
-		let mut stream = txn.stream_keys_vals(rng, None, None, 0, sc);
+		let mut stream = txn.stream_keys_vals(rng, None, None, 0, sc, false);
 		// Loop until no more entries
 		let mut count = 0;
 		'outer: while let Some(res) = stream.next().await {

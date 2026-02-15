@@ -174,7 +174,7 @@ impl ExecOperator for IndexCountScan {
 					Some(def) => def.permissions.select.clone(),
 					None => Permission::None,
 				};
-				convert_permission_to_physical(&catalog_perm, ctx.ctx())
+				convert_permission_to_physical(&catalog_perm, ctx.ctx()).await
 					.context("Failed to convert permission")?
 			} else {
 				PhysicalPermission::Allow
@@ -333,6 +333,7 @@ async fn count_with_filter_fallback(
 		None, // no limit
 		0,    // no skip
 		crate::idx::planner::ScanDirection::Forward,
+		false, // no prefetch for count scans
 	);
 	futures::pin_mut!(kv_stream);
 

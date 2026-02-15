@@ -168,6 +168,14 @@ impl IndexRangeIterator {
 			return Ok(Vec::new());
 		}
 
+		// Save original begin key before the scan mutates it, so exclusive
+		// boundary comparison works correctly on the first batch.
+		let check_exclusive_beg = if self.beg_checked {
+			None
+		} else {
+			Some(self.beg.clone())
+		};
+
 		let res = tx.scan(self.beg.clone()..self.end.clone(), INDEX_BATCH_SIZE, 0, None).await?;
 
 		if res.is_empty() {
@@ -181,12 +189,16 @@ impl IndexRangeIterator {
 			self.beg.push(0x00);
 		}
 
+		// After the first batch, the exclusive boundary has been handled
+		self.beg_checked = true;
+
 		// Decode record IDs, filtering boundary keys if needed
 		let mut records = Vec::with_capacity(res.len());
 		for (key, val) in res {
-			// Skip begin key if exclusive and not yet checked
-			if !self.beg_checked && key == self.beg {
-				self.beg_checked = true;
+			// Skip begin key if exclusive and this is the first batch
+			if let Some(ref exclusive_beg) = check_exclusive_beg
+				&& key == *exclusive_beg
+			{
 				continue;
 			}
 

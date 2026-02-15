@@ -3,55 +3,109 @@
 //! These functions have no dependency on `Planner` or `FrozenContext` and perform
 //! static conversions, validation, or predicate checks.
 
+use crate::catalog::Distance;
 use crate::err::Error;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::expr::field::{Field, Fields};
-use crate::expr::{BinaryOperator, Cond, Expr, Literal};
+use crate::expr::operator::NearestNeighbor;
+use crate::expr::{BinaryOperator, Cond, Expr, Idiom, Literal};
+use crate::val::Number;
 
 // ============================================================================
 // Literal / Value Conversion
 // ============================================================================
 
+/// Best-effort conversion of a `Literal` to a `Value`.
+///
+/// Handles all scalar types, simple record IDs (Number/String/Uuid keys), and
+/// arrays of convertible expressions. Returns `None` for types that require
+/// async computation or are otherwise unsupported (Object, Set, Generate keys,
+/// Range keys, etc.).
+///
+/// Used by both the planner (for physical expression compilation) and the index
+/// analyzer (for index matching).
+pub(crate) fn try_literal_to_value(
+	lit: &crate::expr::literal::Literal,
+) -> Option<crate::val::Value> {
+	use crate::expr::literal::Literal;
+	use crate::val::Value;
+
+	match lit {
+		Literal::None => Some(Value::None),
+		Literal::Null => Some(Value::Null),
+		Literal::Bool(x) => Some(Value::Bool(*x)),
+		Literal::Float(x) => Some(Value::Number(Number::Float(*x))),
+		Literal::Integer(i) => Some(Value::Number(Number::Int(*i))),
+		Literal::Decimal(d) => Some(Value::Number(Number::Decimal(*d))),
+		Literal::String(s) => Some(Value::String(s.clone())),
+		Literal::Uuid(u) => Some(Value::Uuid(*u)),
+		Literal::Datetime(dt) => Some(Value::Datetime(dt.clone())),
+		Literal::Duration(d) => Some(Value::Duration(*d)),
+		Literal::RecordId(rid) => {
+			// Convert simple record ID literals (Number, String, Uuid keys).
+			// Complex keys (Array, Object, Generate, Range) may contain
+			// expressions requiring async computation and are skipped.
+			use crate::expr::RecordIdKeyLit;
+			let key = match &rid.key {
+				RecordIdKeyLit::Number(n) => crate::val::RecordIdKey::Number(*n),
+				RecordIdKeyLit::String(s) => crate::val::RecordIdKey::String(s.clone()),
+				RecordIdKeyLit::Uuid(u) => crate::val::RecordIdKey::Uuid(*u),
+				_ => return None,
+			};
+			Some(Value::RecordId(crate::val::RecordId::new(rid.table.clone(), key)))
+		}
+		Literal::Array(arr) => {
+			let values: Option<Vec<Value>> = arr.iter().map(try_expr_to_value).collect();
+			values.map(|v| Value::Array(v.into()))
+		}
+		// Types that cannot be converted without async or are unsupported
+		Literal::Bytes(_)
+		| Literal::Regex(_)
+		| Literal::Geometry(_)
+		| Literal::File(_)
+		| Literal::Object(_)
+		| Literal::Set(_)
+		| Literal::UnboundedRange => None,
+	}
+}
+
+/// Try to convert an expression to a constant value.
+pub(crate) fn try_expr_to_value(expr: &Expr) -> Option<crate::val::Value> {
+	match expr {
+		Expr::Literal(lit) => try_literal_to_value(lit),
+		_ => None,
+	}
+}
+
 /// Convert a `Literal` to a `Value` for static (non-computed) cases.
 ///
-/// Note: `Literal::RecordId` is handled directly in `Planner::physical_expr()`
-/// via `RecordIdExpr`, so it should never reach this function. Array, Object,
-/// and Set literals are similarly handled upstream by the planner.
+/// Delegates to [`try_literal_to_value`] for common types, then handles
+/// planner-specific types (UnboundedRange, Bytes, Regex, Geometry, File).
+/// Returns `Error::Internal` for types that should have been handled upstream
+/// by `physical_expr()` (RecordId, Array, Object, Set).
 pub(super) fn literal_to_value(
 	lit: crate::expr::literal::Literal,
 ) -> Result<crate::val::Value, Error> {
 	use crate::expr::literal::Literal;
-	use crate::val::{Number, Range, Value};
+	use crate::val::{Range, Value};
 
+	// Try the shared conversion first (handles scalars, simple RecordIds, arrays)
+	if let Some(value) = try_literal_to_value(&lit) {
+		return Ok(value);
+	}
+
+	// Handle types that try_literal_to_value doesn't cover but are valid here
 	match lit {
-		Literal::None => Ok(Value::None),
-		Literal::Null => Ok(Value::Null),
 		Literal::UnboundedRange => Ok(Value::Range(Box::new(Range::unbounded()))),
-		Literal::Bool(x) => Ok(Value::Bool(x)),
-		Literal::Float(x) => Ok(Value::Number(Number::Float(x))),
-		Literal::Integer(i) => Ok(Value::Number(Number::Int(i))),
-		Literal::Decimal(d) => Ok(Value::Number(Number::Decimal(d))),
-		Literal::String(s) => Ok(Value::String(s)),
 		Literal::Bytes(b) => Ok(Value::Bytes(b)),
 		Literal::Regex(r) => Ok(Value::Regex(r)),
-		Literal::Duration(d) => Ok(Value::Duration(d)),
-		Literal::Datetime(dt) => Ok(Value::Datetime(dt)),
-		Literal::Uuid(u) => Ok(Value::Uuid(u)),
 		Literal::Geometry(g) => Ok(Value::Geometry(g)),
 		Literal::File(f) => Ok(Value::File(f)),
-		// RecordId is handled by RecordIdExpr in physical_expr() before reaching here.
-		Literal::RecordId(_) => Err(Error::PlannerUnimplemented(
-			"Literal::RecordId should be handled by RecordIdExpr in physical_expr()".to_string(),
-		)),
-		Literal::Array(_) => Err(Error::PlannerUnimplemented(
-			"Array literals in USE statements not yet supported".to_string(),
-		)),
-		Literal::Set(_) => Err(Error::PlannerUnimplemented(
-			"Set literals in USE statements not yet supported".to_string(),
-		)),
-		Literal::Object(_) => Err(Error::PlannerUnimplemented(
-			"Object literals in USE statements not yet supported".to_string(),
-		)),
+		// Everything else should be handled upstream in physical_expr()
+		other => Err(Error::Internal(format!(
+			"Literal should be handled upstream in physical_expr(): {:?}",
+			std::mem::discriminant(&other)
+		))),
 	}
 }
 
@@ -70,9 +124,13 @@ pub(super) fn key_lit_to_expr(lit: &crate::expr::RecordIdKeyLit) -> Result<Expr,
 		RecordIdKeyLit::Object(entries) => {
 			Ok(Expr::Literal(crate::expr::literal::Literal::Object(entries.clone())))
 		}
-		RecordIdKeyLit::Generate(_) | RecordIdKeyLit::Range(_) => Err(Error::PlannerUnimplemented(
-			"Generated/range keys in graph range bounds".to_string(),
-		)),
+		RecordIdKeyLit::Generate(_) => Err(Error::Query {
+			message: "Generated keys (rand, ulid, uuid) cannot be used in graph range bounds"
+				.to_string(),
+		}),
+		RecordIdKeyLit::Range(_) => Err(Error::Query {
+			message: "Nested range keys cannot be used in graph range bounds".to_string(),
+		}),
 	}
 }
 
@@ -80,8 +138,26 @@ pub(super) fn key_lit_to_expr(lit: &crate::expr::RecordIdKeyLit) -> Result<Expr,
 // Predicate / Validation Helpers
 // ============================================================================
 
-/// Check if an expression contains KNN (vector search) operators.
-pub(super) fn contains_knn_operator(expr: &Expr) -> bool {
+/// Check if a condition has a top-level OR operator.
+///
+/// Used to prevent LIMIT/START pushdown into Scan when the condition may
+/// trigger a multi-index union at runtime. Union streams don't maintain
+/// a global ordering, so pushing LIMIT would truncate results arbitrarily.
+pub(super) fn has_top_level_or(cond: Option<&Cond>) -> bool {
+	match cond {
+		Some(c) => matches!(
+			c.0,
+			Expr::Binary {
+				op: BinaryOperator::Or,
+				..
+			}
+		),
+		None => false,
+	}
+}
+
+/// Check if an expression contains any KNN (nearest neighbor) operators.
+pub(super) fn has_knn_operator(expr: &Expr) -> bool {
 	match expr {
 		Expr::Binary {
 			left,
@@ -91,13 +167,209 @@ pub(super) fn contains_knn_operator(expr: &Expr) -> bool {
 			if matches!(op, BinaryOperator::NearestNeighbor(_)) {
 				return true;
 			}
-			contains_knn_operator(left) || contains_knn_operator(right)
+			has_knn_operator(left) || has_knn_operator(right)
 		}
 		Expr::Prefix {
 			expr: inner,
 			..
-		} => contains_knn_operator(inner),
+		} => has_knn_operator(inner),
 		_ => false,
+	}
+}
+
+/// Check if an expression contains a brute-force KNN operator (`NearestNeighbor::K`).
+///
+/// Used to distinguish between brute-force KNN with parameter-based vectors
+/// (where `extract_bruteforce_knn` fails) and HNSW KNN (`Approximate`).
+pub(super) fn has_knn_k_operator(expr: &Expr) -> bool {
+	match expr {
+		Expr::Binary {
+			left,
+			op: BinaryOperator::NearestNeighbor(nn),
+			right,
+		} => {
+			matches!(nn.as_ref(), NearestNeighbor::K(..))
+				|| has_knn_k_operator(left)
+				|| has_knn_k_operator(right)
+		}
+		Expr::Binary {
+			left,
+			right,
+			..
+		} => has_knn_k_operator(left) || has_knn_k_operator(right),
+		Expr::Prefix {
+			expr: inner,
+			..
+		} => has_knn_k_operator(inner),
+		_ => false,
+	}
+}
+
+/// Parameters extracted from a brute-force KNN expression.
+pub(super) struct BruteForceKnnParams {
+	/// The idiom path to the vector field.
+	pub field: Idiom,
+	/// The query vector.
+	pub vector: Vec<Number>,
+	/// Number of nearest neighbors.
+	pub k: u32,
+	/// Distance metric.
+	pub distance: Distance,
+}
+
+/// Extract brute-force KNN parameters from a WHERE clause.
+///
+/// Returns the parameters if a `NearestNeighbor::K(k, dist)` expression is
+/// found at the top level of AND-connected conditions.
+pub(super) fn extract_bruteforce_knn(cond: &Cond) -> Option<BruteForceKnnParams> {
+	extract_bruteforce_knn_from_expr(&cond.0).map(|(params, _residual)| params)
+}
+
+/// Strip handled KNN operators from a WHERE clause, returning the residual condition.
+///
+/// Both `NearestNeighbor::K` (consumed by `KnnTopK`) and `NearestNeighbor::Approximate`
+/// (consumed by `KnnScan` via HNSW index) are stripped. `KTree` is left in place --
+/// the caller should verify the residual contains no remaining KNN operators and
+/// return an error if it does.
+pub(crate) fn strip_knn_from_condition(cond: &Cond) -> Option<Cond> {
+	strip_knn_from_expr(&cond.0).map(Cond)
+}
+
+/// Recursively strip handled KNN operator expressions from an AND-connected
+/// expression tree.
+///
+/// Returns the expression with `NearestNeighbor::K` and `NearestNeighbor::Approximate`
+/// operators removed, or `None` if the entire expression was such an operator
+/// (nothing left). `NearestNeighbor::KTree` is left unchanged since it is not
+/// handled by either the `KnnTopK` or `KnnScan` operators.
+fn strip_knn_from_expr(expr: &Expr) -> Option<Expr> {
+	match expr {
+		// Strip NearestNeighbor::K (brute-force, consumed by KnnTopK) and
+		// NearestNeighbor::Approximate (HNSW, consumed by KnnScan).
+		// KTree is not supported and is left unchanged.
+		Expr::Binary {
+			op: BinaryOperator::NearestNeighbor(nn),
+			..
+		} if matches!(nn.as_ref(), NearestNeighbor::K(..) | NearestNeighbor::Approximate(..)) => None,
+		// AND: strip from either side, keeping the other
+		Expr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} => {
+			let stripped_left = strip_knn_from_expr(left);
+			let stripped_right = strip_knn_from_expr(right);
+			match (stripped_left, stripped_right) {
+				(Some(l), Some(r)) => Some(Expr::Binary {
+					left: Box::new(l),
+					op: BinaryOperator::And,
+					right: Box::new(r),
+				}),
+				(Some(l), None) => Some(l),
+				(None, Some(r)) => Some(r),
+				(None, None) => None,
+			}
+		}
+		// No KNN found at this level -- keep unchanged
+		_ => Some(expr.clone()),
+	}
+}
+
+/// Recursively extract brute-force KNN from an expression tree.
+///
+/// Returns `(params, residual_expr)` where `residual_expr` is the remaining
+/// condition after removing the KNN predicate.
+fn extract_bruteforce_knn_from_expr(expr: &Expr) -> Option<(BruteForceKnnParams, Option<Expr>)> {
+	match expr {
+		Expr::Binary {
+			left,
+			op: BinaryOperator::NearestNeighbor(nn),
+			right,
+		} => {
+			let NearestNeighbor::K(k, dist) = &**nn else {
+				return None;
+			};
+
+			// Extract idiom from left side
+			let idiom = match left.as_ref() {
+				Expr::Idiom(idiom) => idiom.clone(),
+				_ => return None,
+			};
+
+			// Extract numeric vector from right side
+			let vector = extract_literal_vector(right)?;
+
+			Some((
+				BruteForceKnnParams {
+					field: idiom,
+					vector,
+					k: *k,
+					distance: dist.clone(),
+				},
+				None, // No residual -- the entire expression was the KNN predicate
+			))
+		}
+		Expr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} => {
+			// Try the left side first
+			if let Some((params, residual_left)) = extract_bruteforce_knn_from_expr(left) {
+				let residual = match residual_left {
+					Some(rl) => Some(Expr::Binary {
+						left: Box::new(rl),
+						op: BinaryOperator::And,
+						right: right.clone(),
+					}),
+					None => Some(right.as_ref().clone()),
+				};
+				return Some((params, residual));
+			}
+			// Try the right side
+			if let Some((params, residual_right)) = extract_bruteforce_knn_from_expr(right) {
+				let residual = match residual_right {
+					Some(rr) => Some(Expr::Binary {
+						left: left.clone(),
+						op: BinaryOperator::And,
+						right: Box::new(rr),
+					}),
+					None => Some(left.as_ref().clone()),
+				};
+				return Some((params, residual));
+			}
+			None
+		}
+		_ => None,
+	}
+}
+
+/// Extract a `Vec<Number>` from a literal array expression.
+fn extract_literal_vector(expr: &Expr) -> Option<Vec<Number>> {
+	match expr {
+		Expr::Literal(lit) => {
+			if let Literal::Array(arr) = lit {
+				let mut nums = Vec::with_capacity(arr.len());
+				for elem in arr.iter() {
+					match elem {
+						Expr::Literal(Literal::Integer(i)) => {
+							nums.push(Number::Int(*i));
+						}
+						Expr::Literal(Literal::Float(f)) => {
+							nums.push(Number::Float(*f));
+						}
+						Expr::Literal(Literal::Decimal(d)) => {
+							nums.push(Number::Decimal(*d));
+						}
+						_ => return None,
+					}
+				}
+				Some(nums)
+			} else {
+				None
+			}
+		}
+		_ => None,
 	}
 }
 
@@ -192,14 +464,14 @@ pub(super) fn extract_table_from_context(ctx: &crate::ctx::FrozenContext) -> cra
 ///
 /// Returns a physical expression that, when evaluated at execution time,
 /// produces the version timestamp (u64).
-pub(super) fn extract_version(
+pub(super) async fn extract_version(
 	version_expr: Expr,
-	planner: &super::Planner,
+	planner: &super::Planner<'_>,
 ) -> Result<Option<std::sync::Arc<dyn crate::exec::PhysicalExpr>>, Error> {
 	match version_expr {
 		Expr::Literal(Literal::None) => Ok(None),
 		_ => {
-			let expr = planner.physical_expr(version_expr)?;
+			let expr = planner.physical_expr(version_expr).await?;
 			Ok(Some(expr))
 		}
 	}
@@ -350,20 +622,73 @@ pub(super) fn order_is_scan_compatible(order: &Option<crate::expr::order::Orderi
 	}
 }
 
-/// Check if LIMIT/START can be pushed down into the Scan operator.
+/// Check if an index + scan direction satisfies the given ORDER BY.
 ///
-/// This is safe when no pipeline operator between Scan and Limit changes
-/// row cardinality. Note that WHERE does NOT block pushdown because the
-/// filter predicate is also pushed into Scan.
-pub(super) fn can_push_limit_to_scan(
-	split: &Option<crate::expr::split::Splits>,
-	group: &Option<crate::expr::group::Groups>,
-	order: &Option<crate::expr::order::Ordering>,
+/// Builds the same `SortProperty` vector that `IndexScan::output_ordering()`
+/// would produce and checks whether it satisfies the ORDER BY requirements.
+/// This allows the planner to decide on limit pushdown before the IndexScan
+/// operator is created.
+pub(super) fn index_covers_ordering(
+	index_ref: &crate::exec::index::access_path::IndexRef,
+	direction: crate::idx::planner::ScanDirection,
+	order: &crate::expr::order::Ordering,
 ) -> bool {
-	if split.is_some() || group.is_some() {
+	use crate::exec::operators::SortDirection;
+	use crate::exec::ordering::{OutputOrdering, SortProperty};
+	use crate::expr::order::Ordering;
+
+	let Ordering::Order(order_list) = order else {
+		return false; // Random ordering can't be satisfied by an index
+	};
+
+	// Convert ORDER BY to required SortProperty
+	let required: Vec<SortProperty> = order_list
+		.iter()
+		.filter_map(|field| {
+			crate::exec::field_path::FieldPath::try_from(&field.value).ok().map(|path| {
+				let direction = if field.direction {
+					SortDirection::Asc
+				} else {
+					SortDirection::Desc
+				};
+				SortProperty {
+					path,
+					direction,
+					collate: field.collate,
+					numeric: field.numeric,
+				}
+			})
+		})
+		.collect();
+
+	if required.len() != order_list.len() {
 		return false;
 	}
-	order_is_scan_compatible(order)
+
+	// Build the index ordering (same as IndexScan::output_ordering())
+	let dir = match direction {
+		crate::idx::planner::ScanDirection::Forward => SortDirection::Asc,
+		crate::idx::planner::ScanDirection::Backward => SortDirection::Desc,
+	};
+	let ix_def = index_ref.definition();
+	let cols: Vec<SortProperty> = ix_def
+		.cols
+		.iter()
+		.filter_map(|idiom| {
+			crate::exec::field_path::FieldPath::try_from(idiom).ok().map(|path| SortProperty {
+				path,
+				direction: dir,
+				collate: false,
+				numeric: false,
+			})
+		})
+		.collect();
+
+	if cols.is_empty() {
+		return false;
+	}
+
+	OutputOrdering::Sorted(cols).satisfies(&required)
 }
 
 // ============================================================================

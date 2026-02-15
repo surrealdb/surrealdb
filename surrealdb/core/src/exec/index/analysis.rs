@@ -5,14 +5,15 @@
 
 use std::sync::Arc;
 
-use super::access_path::{AccessPath, BTreeAccess, IndexRef, RangeBound};
+use super::access_path::{AccessPath, BTreeAccess, IndexRef, RangeBound, select_access_path};
 use crate::catalog::{Index, IndexDefinition};
-use crate::expr::operator::MatchesOperator;
+use crate::exec::planner::util::try_literal_to_value;
+use crate::expr::operator::{MatchesOperator, NearestNeighbor};
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Cond, Expr, Idiom};
 use crate::idx::planner::ScanDirection;
-use crate::val::Value;
+use crate::val::{Number, Value};
 
 /// Analyzes query conditions to find matching indexes.
 pub struct IndexAnalyzer<'a> {
@@ -71,6 +72,73 @@ impl<'a> IndexAnalyzer<'a> {
 		candidates
 	}
 
+	/// Try to build a multi-index union access path for OR conditions.
+	///
+	/// For `A OR B OR C`, each branch is analyzed independently. If EVERY branch
+	/// has at least one index candidate, the best candidate from each is combined
+	/// into an `AccessPath::Union`. If any branch lacks an index candidate, the
+	/// union cannot be used and `None` is returned (the caller should fall back
+	/// to a table scan).
+	pub fn try_or_union(
+		&self,
+		cond: Option<&Cond>,
+		direction: ScanDirection,
+	) -> Option<AccessPath> {
+		let cond = cond?;
+
+		// Check for WITH NOINDEX
+		if matches!(self.with_hints, Some(With::NoIndex)) {
+			return None;
+		}
+
+		// Flatten OR branches from the condition tree
+		let mut branches = Vec::new();
+		Self::flatten_or(&cond.0, &mut branches);
+
+		// Need at least 2 branches for a union to make sense
+		if branches.len() < 2 {
+			return None;
+		}
+
+		// Analyze each branch independently
+		let mut branch_paths = Vec::with_capacity(branches.len());
+		for branch_expr in branches {
+			let branch_cond = Cond(branch_expr.clone());
+			let candidates = self.analyze(Some(&branch_cond), None);
+			if candidates.is_empty() {
+				// This branch has no index — cannot use union
+				return None;
+			}
+			let path = select_access_path(candidates, self.with_hints, direction);
+			if matches!(path, AccessPath::TableScan) {
+				// WITH hints rejected all candidates for this branch
+				return None;
+			}
+			branch_paths.push(path);
+		}
+
+		Some(AccessPath::Union(branch_paths))
+	}
+
+	/// Flatten nested OR expressions into a list of branches.
+	///
+	/// `A OR B OR C` (parsed as `(A OR B) OR C`) becomes `[A, B, C]`.
+	fn flatten_or<'b>(expr: &'b Expr, branches: &mut Vec<&'b Expr>) {
+		match expr {
+			Expr::Binary {
+				left,
+				op: BinaryOperator::Or,
+				right,
+			} => {
+				Self::flatten_or(left, branches);
+				Self::flatten_or(right, branches);
+			}
+			_ => {
+				branches.push(expr);
+			}
+		}
+	}
+
 	/// Collect all simple conditions from an AND tree.
 	fn collect_conditions(&self, expr: &Expr, conditions: &mut Vec<SimpleCondition>) {
 		match expr {
@@ -115,14 +183,14 @@ impl<'a> IndexAnalyzer<'a> {
 	) -> Option<SimpleCondition> {
 		let (idiom, value, position) = match (left, right) {
 			(Expr::Idiom(idiom), Expr::Literal(lit)) => {
-				if let Some(value) = literal_to_value(lit) {
+				if let Some(value) = try_literal_to_value(lit) {
 					(idiom.clone(), value, IdiomPosition::Left)
 				} else {
 					return None;
 				}
 			}
 			(Expr::Literal(lit), Expr::Idiom(idiom)) => {
-				if let Some(value) = literal_to_value(lit) {
+				if let Some(value) = try_literal_to_value(lit) {
 					(idiom.clone(), value, IdiomPosition::Right)
 				} else {
 					return None;
@@ -161,10 +229,14 @@ impl<'a> IndexAnalyzer<'a> {
 				continue;
 			}
 
-			// Try to match conditions to index columns in order
+			// Try to match conditions to index columns in order.
+			// The prefix collects leading equality conditions. Non-equality
+			// (range) conditions on later columns are NOT encoded into the
+			// compound key because the key encoding uses variable-length
+			// arrays and mixing different array sizes in range bounds
+			// produces incorrect scan ranges. Range conditions are instead
+			// handled by the Scan operator's predicate filter.
 			let mut prefix_values = Vec::new();
-			let mut range_condition: Option<(BinaryOperator, Value)> = None;
-			let all_equality = true;
 
 			for col in &ix_def.cols {
 				// Find a condition that matches this column
@@ -172,42 +244,30 @@ impl<'a> IndexAnalyzer<'a> {
 
 				match matching_cond {
 					Some(cond) => {
-						// Check if this is an equality condition
 						let is_equality =
 							matches!(cond.op, BinaryOperator::Equal | BinaryOperator::ExactEqual);
 
-						if all_equality && is_equality {
-							// Add to prefix
+						if is_equality {
+							// Equality condition -- add to prefix
 							prefix_values.push(cond.value.clone());
-						} else if all_equality {
-							// First non-equality - becomes range condition
-							range_condition = Some((cond.op.clone(), cond.value.clone()));
-							// Stop - can't use columns after a range
-							break;
 						} else {
-							// Already have a range condition, stop
+							// Non-equality -- stop adding to prefix.
+							// This column's range will be filtered by the predicate.
 							break;
 						}
 					}
 					None => {
-						// No condition for this column - stop looking
+						// No condition for this column -- stop looking
 						break;
 					}
 				}
 			}
 
-			// Create compound candidate if we have at least 2 matched columns,
-			// or 1 prefix + 1 range condition
-			let matched_count = prefix_values.len()
-				+ if range_condition.is_some() {
-					1
-				} else {
-					0
-				};
-			if matched_count >= 2 || (!prefix_values.is_empty() && range_condition.is_some()) {
+			// Create compound candidate if we have at least 2 equality columns
+			if prefix_values.len() >= 2 {
 				let access = BTreeAccess::Compound {
 					prefix: prefix_values,
-					range: range_condition,
+					range: None,
 				};
 
 				let index_ref = IndexRef::new(self.indexes.clone(), idx);
@@ -260,8 +320,8 @@ impl<'a> IndexAnalyzer<'a> {
 						self.try_match_fulltext(left, mo, right, candidates);
 					}
 					// KNN operator for vector search
-					BinaryOperator::NearestNeighbor(_) => {
-						self.try_match_knn(left, right, candidates);
+					BinaryOperator::NearestNeighbor(nn) => {
+						self.try_match_knn(left, right, nn, candidates);
 					}
 					_ => {
 						// Check if this is an indexable comparison
@@ -291,14 +351,14 @@ impl<'a> IndexAnalyzer<'a> {
 		// Extract idiom and value from the comparison
 		let (idiom, value, position) = match (left, right) {
 			(Expr::Idiom(idiom), Expr::Literal(lit)) => {
-				if let Some(value) = literal_to_value(lit) {
+				if let Some(value) = try_literal_to_value(lit) {
 					(idiom, value, IdiomPosition::Left)
 				} else {
 					return;
 				}
 			}
 			(Expr::Literal(lit), Expr::Idiom(idiom)) => {
-				if let Some(value) = literal_to_value(lit) {
+				if let Some(value) = try_literal_to_value(lit) {
 					(idiom, value, IdiomPosition::Right)
 				} else {
 					return;
@@ -327,6 +387,38 @@ impl<'a> IndexAnalyzer<'a> {
 				&& let Some(access) =
 					self.match_operator_to_access(op, &value, position, &ix_def.index)
 			{
+				// For compound indexes (>1 column), a single-column equality
+				// match on the first column must use a prefix scan rather
+				// than a point lookup, because the index key includes all
+				// columns.  E.g. WHERE a = 1 on INDEX (a, b) must scan the
+				// prefix [1] to find all (1, *) entries.
+				let access = if ix_def.cols.len() > 1 {
+					match access {
+						BTreeAccess::Equality(v) => BTreeAccess::Compound {
+							prefix: vec![v],
+							range: None,
+						},
+						BTreeAccess::Range {
+							from,
+							to,
+						} => {
+							// A range on the first column of a compound index
+							// cannot use Compound prefix+range (that's for
+							// equality prefix + range on next column).
+							// Keep it as a simple range -- the IndexScan compound
+							// path won't be reached, but deduplication may
+							// prefer a compound candidate if one exists.
+							BTreeAccess::Range {
+								from,
+								to,
+							}
+						}
+						other => other,
+					}
+				} else {
+					access
+				};
+
 				let index_ref = IndexRef::new(self.indexes.clone(), idx);
 				let candidate = IndexCandidate {
 					index_ref,
@@ -420,7 +512,7 @@ impl<'a> IndexAnalyzer<'a> {
 		// Extract idiom from left side and query string from right side
 		let (idiom, query) = match (left, right) {
 			(Expr::Idiom(idiom), Expr::Literal(lit)) => {
-				if let Some(Value::String(s)) = literal_to_value(lit) {
+				if let Some(Value::String(s)) = try_literal_to_value(lit) {
 					(idiom, s)
 				} else {
 					return;
@@ -459,20 +551,42 @@ impl<'a> IndexAnalyzer<'a> {
 	}
 
 	/// Try to match a KNN expression to an HNSW index.
-	fn try_match_knn(&self, left: &Expr, right: &Expr, candidates: &mut Vec<IndexCandidate>) {
+	fn try_match_knn(
+		&self,
+		left: &Expr,
+		right: &Expr,
+		nn: &NearestNeighbor,
+		candidates: &mut Vec<IndexCandidate>,
+	) {
+		// Only HNSW-backed (Approximate) KNN uses index scan
+		let (k, ef) = match nn {
+			NearestNeighbor::Approximate(k, ef) => (*k, *ef),
+			// K (brute-force) and KTree don't use index analysis
+			_ => return,
+		};
+
 		// Extract idiom from left side
 		let idiom = match left {
 			Expr::Idiom(idiom) => idiom,
 			_ => return,
 		};
 
-		// Validate right side is a numeric vector
-		match right {
+		// Extract numeric vector from right side
+		let vector = match right {
 			Expr::Literal(lit) => {
-				if let Some(Value::Array(arr)) = literal_to_value(lit) {
-					if !arr.iter().all(|v| matches!(v, Value::Number(_))) {
+				if let Some(Value::Array(arr)) = try_literal_to_value(lit) {
+					let nums: Vec<Number> = arr
+						.iter()
+						.filter_map(|v| match v {
+							Value::Number(n) => Some(*n),
+							_ => None,
+						})
+						.collect();
+					if nums.len() != arr.len() {
+						// Not all elements are numbers
 						return;
 					}
+					nums
 				} else {
 					return;
 				}
@@ -497,7 +611,11 @@ impl<'a> IndexAnalyzer<'a> {
 				let index_ref = IndexRef::new(self.indexes.clone(), idx);
 				let candidate = IndexCandidate {
 					index_ref,
-					access: BTreeAccess::Knn,
+					access: BTreeAccess::Knn {
+						vector: vector.clone(),
+						k,
+						ef,
+					},
 					covers_order: false,
 				};
 				candidates.push(candidate);
@@ -615,7 +733,9 @@ impl IndexCandidate {
 				// when the query uses MATCHES
 				score += 800;
 			}
-			BTreeAccess::Knn => {
+			BTreeAccess::Knn {
+				..
+			} => {
 				// KNN search is specialized and should be preferred
 				// when the query uses nearest neighbor operators
 				score += 800;
@@ -640,6 +760,16 @@ impl IndexCandidate {
 				index_ref: self.index_ref.clone(),
 				query: query.clone(),
 				operator: operator.clone(),
+			},
+			BTreeAccess::Knn {
+				vector,
+				k,
+				ef,
+			} => AccessPath::KnnSearch {
+				index_ref: self.index_ref.clone(),
+				vector: vector.clone(),
+				k: *k,
+				ef: *ef,
 			},
 			_ => AccessPath::BTreeScan {
 				index_ref: self.index_ref.clone(),
@@ -670,50 +800,27 @@ struct SimpleCondition {
 }
 
 /// Check if an idiom matches an index column.
+///
+/// Idioms containing `Part::All` (flattened field paths like `marks.*.mark`)
+/// are excluded because the Scan predicate filter cannot correctly evaluate
+/// comparison operators on flattened paths — `[40] = 40` evaluates to false.
+/// Users should use CONTAINS/INSIDE operators for array-aware queries.
 fn idiom_matches(expr_idiom: &Idiom, index_col: &Idiom) -> bool {
-	// Simple equality check for now
-	// TODO: Handle array field matching (Part::All)
-	expr_idiom == index_col
+	use crate::expr::Part;
+
+	if expr_idiom != index_col {
+		return false;
+	}
+
+	// Skip flattened field paths — comparison predicates don't evaluate
+	// correctly on array-valued paths (e.g., marks.*.mark = 40 becomes
+	// [40] = 40 which is false).
+	if index_col.0.iter().any(|p| matches!(p, Part::All)) {
+		return false;
+	}
+
+	true
 }
 
-/// Convert a literal expression to a Value.
-fn literal_to_value(lit: &crate::expr::Literal) -> Option<Value> {
-	use crate::expr::Literal;
-	match lit {
-		Literal::Integer(i) => Some(Value::from(*i)),
-		Literal::Float(f) => Some(Value::from(*f)),
-		Literal::Decimal(d) => Some(Value::from(*d)),
-		Literal::String(s) => Some(Value::from(s.clone())),
-		Literal::Bool(b) => Some(Value::from(*b)),
-		Literal::Uuid(u) => Some(Value::from(*u)),
-		Literal::Datetime(dt) => Some(Value::from(dt.clone())),
-		Literal::Duration(d) => Some(Value::from(*d)),
-		Literal::None => Some(Value::None),
-		Literal::Null => Some(Value::Null),
-		Literal::RecordId(_rid) => {
-			// RecordIdLit requires async computation to convert to RecordId
-			// For now, skip index matching on record ID literals
-			None
-		}
-		Literal::Array(arr) => {
-			// Convert array elements
-			let values: Option<Vec<Value>> = arr.iter().map(expr_to_value).collect();
-			values.map(|v| Value::Array(v.into()))
-		}
-		Literal::Object(_) => None, // Complex objects not supported for index matching
-		Literal::Regex(_) => None,
-		Literal::Bytes(_) => None,
-		Literal::Set(_) => None,
-		Literal::UnboundedRange => None,
-		Literal::File(_) => None,
-		Literal::Geometry(_) => None,
-	}
-}
-
-/// Try to convert an expression to a constant value.
-fn expr_to_value(expr: &Expr) -> Option<Value> {
-	match expr {
-		Expr::Literal(lit) => literal_to_value(lit),
-		_ => None,
-	}
-}
+// literal_to_value and expr_to_value are imported from crate::exec::planner::util
+// as try_literal_to_value and try_expr_to_value.

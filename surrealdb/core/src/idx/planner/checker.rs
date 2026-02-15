@@ -25,15 +25,11 @@ pub enum HnswConditionChecker<'a> {
 }
 
 impl<'a> HnswConditionChecker<'a> {
-	pub(in crate::idx) fn new() -> Self {
+	pub(crate) fn new() -> Self {
 		Self::Hnsw(HnswChecker {})
 	}
 
-	pub(in crate::idx) fn new_cond(
-		ctx: &'a FrozenContext,
-		opt: &'a Options,
-		cond: Arc<Cond>,
-	) -> Self {
+	pub(crate) fn new_cond(ctx: &'a FrozenContext, opt: &'a Options, cond: Arc<Cond>) -> Self {
 		Self::HnswCondition(HnswCondChecker {
 			ctx,
 			opt,

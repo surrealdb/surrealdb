@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 
-use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::{ControlFlowExt, EvalContext, ExecutionContext, PhysicalExpr};
 use crate::expr::ControlFlow;
@@ -114,47 +113,49 @@ pub(crate) async fn resolve_record_batch(
 	}
 }
 
-/// Fetch a single record by ID, inject its `id` field, and apply permission
-/// filtering.
+/// Fetch full records for a batch of [`RecordId`]s in one batch, applying
+/// permission filtering to each record.
 ///
-/// Returns `Ok(Some(value))` when the record exists and passes the permission
-/// check, `Ok(None)` when the record is missing or denied, and `Err` on
-/// hard failures.
+/// Uses the transaction's batch multi-get (`getm_records`), which is
+/// cache-aware and uses the store's native batch read (e.g. RocksDB
+/// `multi_get_opt`) for cache misses.  Records that don't exist or that
+/// fail the permission check are silently skipped.
 ///
-/// Used by [`super::index_scan::IndexScan`] and
-/// [`super::fulltext_scan::FullTextScan`] which share identical
-/// fetch-and-filter logic.
-pub(crate) async fn fetch_and_filter_record(
+/// Used by [`super::index_scan::IndexScan`],
+/// [`super::fulltext_scan::FullTextScan`], and
+/// [`super::knn_scan::KnnScan`].
+pub(crate) async fn fetch_and_filter_records_batch(
 	ctx: &ExecutionContext,
 	txn: &Transaction,
 	ns_id: NamespaceId,
 	db_id: DatabaseId,
-	rid: &RecordId,
+	rids: &[RecordId],
 	select_permission: &crate::exec::permission::PhysicalPermission,
 	check_perms: bool,
-) -> Result<Option<Value>, ControlFlow> {
-	let record = txn
-		.get_record(ns_id, db_id, &rid.table, &rid.key, None)
-		.await
-		.context("Failed to get record")?;
+) -> Result<Vec<Value>, ControlFlow> {
+	let records = txn.getm_records(ns_id, db_id, rids).await.context("Failed to fetch records")?;
 
-	if record.data.as_ref().is_none() {
-		return Ok(None);
-	}
-
-	let mut value = record.data.as_ref().clone();
-	value.def(rid);
-
-	if check_perms {
-		let allowed =
-			crate::exec::permission::check_permission_for_value(select_permission, &value, ctx)
-				.await
-				.context("Failed to check permission")?;
-
-		if !allowed {
-			return Ok(None);
+	let mut values = Vec::with_capacity(rids.len());
+	for (rid, record) in rids.iter().zip(records) {
+		if record.data.as_ref().is_none() {
+			continue;
 		}
-	}
 
-	Ok(Some(value))
+		let mut value = record.data.as_ref().clone();
+		value.def(rid);
+
+		if check_perms {
+			let allowed =
+				crate::exec::permission::check_permission_for_value(select_permission, &value, ctx)
+					.await
+					.context("Failed to check permission")?;
+
+			if !allowed {
+				continue;
+			}
+		}
+
+		values.push(value);
+	}
+	Ok(values)
 }

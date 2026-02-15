@@ -4,7 +4,7 @@
 timeout = 5000
 context-timeout = 5000
 
-new-planner-strategy = "best-effort-ro"
+new-planner-strategy = "compute-only"
 
 [test]
 

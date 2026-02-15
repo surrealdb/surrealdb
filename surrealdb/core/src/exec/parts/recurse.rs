@@ -90,10 +90,6 @@ impl PhysicalExpr for RecursePart {
 		Ok(result)
 	}
 
-	fn references_current_value(&self) -> bool {
-		true
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		self.op.access_mode()
 	}
@@ -175,10 +171,6 @@ impl PhysicalExpr for RepeatRecursePart {
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let value = ctx.current_value.cloned().unwrap_or(Value::None);
 		evaluate_repeat_recurse(&value, ctx).await
-	}
-
-	fn references_current_value(&self) -> bool {
-		true
 	}
 
 	fn access_mode(&self) -> AccessMode {

@@ -144,6 +144,25 @@ impl ExecOperator for SortTopK {
 		self.order_by.iter().map(|f| ("order_by", &f.expr)).collect()
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		use crate::exec::ordering::SortProperty;
+		crate::exec::OutputOrdering::Sorted(
+			self.order_by
+				.iter()
+				.map(|f| {
+					let sql = f.expr.to_sql();
+					let path = crate::exec::field_path::FieldPath::field(sql);
+					SortProperty {
+						path,
+						direction: f.direction,
+						collate: f.collate,
+						numeric: f.numeric,
+					}
+				})
+				.collect(),
+		)
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let order_by = Arc::new(self.order_by.clone());
@@ -359,6 +378,21 @@ impl ExecOperator for SortTopKByKey {
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(&self.metrics)
+	}
+
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		use crate::exec::ordering::SortProperty;
+		crate::exec::OutputOrdering::Sorted(
+			self.sort_keys
+				.iter()
+				.map(|k| SortProperty {
+					path: k.path.clone(),
+					direction: k.direction,
+					collate: k.collate,
+					numeric: k.numeric,
+				})
+				.collect(),
+		)
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {

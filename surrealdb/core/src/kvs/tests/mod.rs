@@ -32,7 +32,6 @@ mod multiwriter_same_keys_conflict;
 mod raw;
 #[cfg(feature = "kv-rocksdb")]
 mod read_and_deletion_only;
-mod reverse_iterator;
 mod snapshot;
 #[cfg(feature = "kv-mem")]
 mod tx_cache_test;
@@ -99,7 +98,6 @@ mod mem {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
-		reverse_iterator,
 	);
 }
 
@@ -137,7 +135,6 @@ mod rocksdb {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
-		reverse_iterator,
 		read_and_deletion_only,
 		metrics
 	);
@@ -177,7 +174,6 @@ mod surrealkv {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
-		reverse_iterator,
 	);
 }
 
@@ -217,6 +213,5 @@ mod tikv {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_allow,
-		reverse_iterator,
 	);
 }

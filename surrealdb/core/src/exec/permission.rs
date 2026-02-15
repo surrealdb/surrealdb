@@ -29,7 +29,7 @@ pub enum PhysicalPermission {
 }
 
 /// Convert a catalog Permission to a PhysicalPermission for execution.
-pub fn convert_permission_to_physical(
+pub async fn convert_permission_to_physical(
 	permission: &Permission,
 	ctx: &FrozenContext,
 ) -> Result<PhysicalPermission, Error> {
@@ -38,7 +38,8 @@ pub fn convert_permission_to_physical(
 		Permission::Full => Ok(PhysicalPermission::Allow),
 		Permission::Specific(expr) => {
 			// Convert Expr to PhysicalExpr using the planner's conversion
-			let physical_expr = crate::exec::planner::expr_to_physical_expr(expr.clone(), ctx)?;
+			let physical_expr =
+				crate::exec::planner::expr_to_physical_expr(expr.clone(), ctx).await?;
 			Ok(PhysicalPermission::Conditional(physical_expr))
 		}
 	}

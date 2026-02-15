@@ -106,10 +106,6 @@ impl PhysicalExpr for LookupPart {
 		futures::future::try_join_all(futures).await
 	}
 
-	fn references_current_value(&self) -> bool {
-		true
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		self.plan.access_mode()
 	}

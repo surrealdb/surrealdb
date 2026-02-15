@@ -6,28 +6,31 @@ reason = "Test EXPLAIN with index-backed queries: standard index, unique index, 
 value = "'OK'"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com']
-"'''
+value = '''"Project [ctx: Db] {rows: 1}
+└────> Filter [ctx: Db] [predicate: email = 'a@test.com'] {rows: 1}
+       └────> IndexScan [ctx: Db] [index: idx_email_uniq, access: = 'a@test.com', direction: Forward] {rows: 1}
+
+Total rows: 1"'''
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: user, predicate: region = 'EU' AND status = 'active']
-"'''
+value = '''"Project [ctx: Db] {rows: 2}
+└────> Filter [ctx: Db] [predicate: region = 'EU' AND status = 'active'] {rows: 2}
+       └────> IndexScan [ctx: Db] [index: idx_region_status, access: ['EU', 'active'], direction: Forward] {rows: 2}
+
+Total rows: 2"'''
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: user, predicate: email = 'a@test.com']
-"'''
+value = '''"Project [ctx: Db] {rows: 1}
+└────> TableScan [ctx: Db] [table: user, direction: Forward, predicate: email = 'a@test.com'] {rows: 1}
+
+Total rows: 1"'''
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: user, predicate: region = 'NA']
-"'''
+value = '''"Project [ctx: Db] {rows: 2}
+└────> Filter [ctx: Db] [predicate: region = 'NA'] {rows: 2}
+       └────> IndexScan [ctx: Db] [index: idx_region_status, access: ['NA'], direction: Forward] {rows: 2}
+
+Total rows: 2"'''
 */
 
 -- Setup schema and data
@@ -43,13 +46,13 @@ value = '''
 };
 
 -- EXPLAIN a query that can use a standard index
-EXPLAIN SELECT * FROM user WHERE email = 'a@test.com';
+EXPLAIN ANALYZE SELECT * FROM user WHERE email = 'a@test.com';
 
 -- EXPLAIN with a compound index
-EXPLAIN SELECT * FROM user WHERE region = 'EU' AND status = 'active';
+EXPLAIN ANALYZE SELECT * FROM user WHERE region = 'EU' AND status = 'active';
 
 -- EXPLAIN with WITH NOINDEX to force table scan
-EXPLAIN SELECT * FROM user WITH NOINDEX WHERE email = 'a@test.com';
+EXPLAIN ANALYZE SELECT * FROM user WITH NOINDEX WHERE email = 'a@test.com';
 
 -- EXPLAIN a range scan on the compound index
-EXPLAIN SELECT * FROM user WHERE region = 'NA';
+EXPLAIN ANALYZE SELECT * FROM user WHERE region = 'NA';

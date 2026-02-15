@@ -5,64 +5,64 @@
 value = "'OK'"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
+value = '''"Project [ctx: Db]
 └────> SortByKey [ctx: Db] [sort_keys: i DESC]
-       └────> Scan [ctx: Db] [source: test, predicate: k1 = 'key1' AND k2 = 'key2']
+       └────> Filter [ctx: Db] [predicate: k1 = 'key1' AND k2 = 'key2']
+              └────> IndexScan [ctx: Db] [index: idx_k1_k2, access: ['key1', 'key2'], direction: Forward]
 "'''
 
 [[test.results]]
 value = "[5, 4, 3, 2, 1]"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
+value = '''"Project [ctx: Db]
 └────> SortByKey [ctx: Db] [sort_keys: i ASC]
-       └────> Scan [ctx: Db] [source: test, predicate: k1 = 'key1' AND k2 = 'key2']
+       └────> Filter [ctx: Db] [predicate: k1 = 'key1' AND k2 = 'key2']
+              └────> IndexScan [ctx: Db] [index: idx_k1_k2, access: ['key1', 'key2'], direction: Forward]
 "'''
 
 [[test.results]]
 value = "[1, 2, 3, 4, 5]"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
+value = '''"Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 1]
        └────> SortTopKByKey [ctx: Db] [sort_keys: i DESC, limit: 1]
-              └────> Scan [ctx: Db] [source: test, predicate: k1 = 'key1' AND k2 = 'key2']
+              └────> Filter [ctx: Db] [predicate: k1 = 'key1' AND k2 = 'key2']
+                     └────> IndexScan [ctx: Db] [index: idx_k1_k2, access: ['key1', 'key2'], direction: Forward]
 "'''
 
 [[test.results]]
 value = "[5]"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
+value = '''"Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 1]
        └────> SortTopKByKey [ctx: Db] [sort_keys: i ASC, limit: 1]
-              └────> Scan [ctx: Db] [source: test, predicate: k1 = 'key1' AND k2 = 'key2']
+              └────> Filter [ctx: Db] [predicate: k1 = 'key1' AND k2 = 'key2']
+                     └────> IndexScan [ctx: Db] [index: idx_k1_k2, access: ['key1', 'key2'], direction: Forward]
 "'''
 
 [[test.results]]
 value = "[1]"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
+value = '''"Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 1, offset: 1]
        └────> SortTopKByKey [ctx: Db] [sort_keys: i DESC, limit: 2]
-              └────> Scan [ctx: Db] [source: test, predicate: k1 = 'key1' AND k2 = 'key2']
+              └────> Filter [ctx: Db] [predicate: k1 = 'key1' AND k2 = 'key2']
+                     └────> IndexScan [ctx: Db] [index: idx_k1_k2, access: ['key1', 'key2'], direction: Forward]
 "'''
 
 [[test.results]]
 value = "[4]"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
+value = '''"Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 1, offset: 1]
        └────> SortTopKByKey [ctx: Db] [sort_keys: i ASC, limit: 2]
-              └────> Scan [ctx: Db] [source: test, predicate: k1 = 'key1' AND k2 = 'key2']
+              └────> Filter [ctx: Db] [predicate: k1 = 'key1' AND k2 = 'key2']
+                     └────> IndexScan [ctx: Db] [index: idx_k1_k2, access: ['key1', 'key2'], direction: Forward]
 "'''
 
 [[test.results]]

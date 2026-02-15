@@ -6,9 +6,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::StreamExt;
 use surrealdb_types::ToSql;
 
-use super::common::{BATCH_SIZE, fetch_and_filter_record};
+use super::common::{BATCH_SIZE, fetch_and_filter_records_batch};
+use super::pipeline::eval_limit_expr;
 use crate::catalog::providers::TableProvider;
 use crate::err::Error;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
@@ -21,7 +23,7 @@ use crate::exec::permission::{
 };
 use crate::exec::{
 	AccessMode, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, ValueBatch, ValueBatchStream, monitor_stream,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::iam::Action;
@@ -32,6 +34,10 @@ use crate::val::{RecordId, Value};
 ///
 /// Retrieves records using an index access path, then fetches the full
 /// record data and applies permission filtering.
+///
+/// When `limit` and/or `start` are provided (pushed down from the planner),
+/// the operator stops iteration early once the limit is reached, avoiding
+/// unnecessary index and record reads.
 #[derive(Debug)]
 pub struct IndexScan {
 	/// Reference to the index definition
@@ -42,6 +48,10 @@ pub struct IndexScan {
 	pub direction: ScanDirection,
 	/// Table name for record fetching
 	pub table_name: crate::val::TableName,
+	/// Pushed-down LIMIT expression (evaluated at execution time).
+	pub(crate) limit: Option<Arc<dyn PhysicalExpr>>,
+	/// Pushed-down START expression (evaluated at execution time).
+	pub(crate) start: Option<Arc<dyn PhysicalExpr>>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -52,12 +62,16 @@ impl IndexScan {
 		access: BTreeAccess,
 		direction: ScanDirection,
 		table_name: crate::val::TableName,
+		limit: Option<Arc<dyn PhysicalExpr>>,
+		start: Option<Arc<dyn PhysicalExpr>>,
 	) -> Self {
 		Self {
 			index_ref,
 			access,
 			direction,
 			table_name,
+			limit,
+			start,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -122,15 +136,24 @@ impl ExecOperator for IndexScan {
 			BTreeAccess::FullText {
 				..
 			}
-			| BTreeAccess::Knn => {
+			| BTreeAccess::Knn {
+				..
+			} => {
 				unreachable!("IndexScan does not support FullText or KNN access")
 			}
 		};
-		vec![
+		let mut attrs = vec![
 			("index".to_string(), self.index_ref.name.clone()),
 			("access".to_string(), access_str),
 			("direction".to_string(), format!("{:?}", self.direction)),
-		]
+		];
+		if let Some(ref limit) = self.limit {
+			attrs.push(("limit".to_string(), limit.to_sql()));
+		}
+		if let Some(ref start) = self.start {
+			attrs.push(("offset".to_string(), start.to_sql()));
+		}
+		attrs
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -138,11 +161,47 @@ impl ExecOperator for IndexScan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
+		let mut mode = AccessMode::ReadOnly;
+		if let Some(ref limit) = self.limit {
+			mode = mode.combine(limit.access_mode());
+		}
+		if let Some(ref start) = self.start {
+			mode = mode.combine(start.access_mode());
+		}
+		mode
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(&self.metrics)
+	}
+
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		use crate::exec::operators::SortDirection;
+		use crate::exec::ordering::SortProperty;
+
+		let dir = match self.direction {
+			ScanDirection::Forward => SortDirection::Asc,
+			ScanDirection::Backward => SortDirection::Desc,
+		};
+		let cols: Vec<SortProperty> = self
+			.index_ref
+			.definition()
+			.cols
+			.iter()
+			.filter_map(|idiom| {
+				crate::exec::field_path::FieldPath::try_from(idiom).ok().map(|path| SortProperty {
+					path,
+					direction: dir,
+					collate: false,
+					numeric: false,
+				})
+			})
+			.collect();
+		if cols.is_empty() {
+			crate::exec::OutputOrdering::Unordered
+		} else {
+			crate::exec::OutputOrdering::Sorted(cols)
+		}
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -158,6 +217,8 @@ impl ExecOperator for IndexScan {
 		let index_ref = self.index_ref.clone();
 		let access = self.access.clone();
 		let table_name = self.table_name.clone();
+		let limit_expr = self.limit.clone();
+		let start_expr = self.start.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -168,6 +229,21 @@ impl ExecOperator for IndexScan {
 			let ns_id = ns.namespace_id;
 			let db_id = db.database_id;
 
+			// Evaluate pushed-down LIMIT and START expressions
+			let limit_val: Option<usize> = match &limit_expr {
+				Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+				None => None,
+			};
+			let start_val: usize = match &start_expr {
+				Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+				None => 0,
+			};
+
+			// Early exit if limit is 0
+			if limit_val == Some(0) {
+				return;
+			}
+
 			// Resolve table permissions
 			let select_permission = if check_perms {
 				let table_def = txn
@@ -176,7 +252,7 @@ impl ExecOperator for IndexScan {
 					.context("Failed to get table")?;
 
 				if let Some(def) = &table_def {
-					convert_permission_to_physical(&def.permissions.select, ctx.ctx())
+					convert_permission_to_physical(&def.permissions.select, ctx.ctx()).await
 						.context("Failed to convert permission")?
 				} else {
 					Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
@@ -192,13 +268,24 @@ impl ExecOperator for IndexScan {
 				return;
 			}
 
+			// Create a ScanPipeline for limit/start tracking.
+			// Permissions are already handled by fetch_and_filter_records_batch,
+			// so we use Allow and an empty FieldState here — the pipeline is
+			// only used for limit/start counting.
+			let mut pipeline = super::pipeline::ScanPipeline::new(
+				PhysicalPermission::Allow,
+				None, // no predicate
+				super::pipeline::FieldState::empty(),
+				false, // permissions handled by fetch_and_filter_records_batch
+				limit_val,
+				start_val,
+			);
+
 			// Create the appropriate iterator based on access type and index uniqueness
 			let is_unique = index_ref.is_unique();
 			let ix = index_ref.definition();
 
-			// Collect record IDs from index and fetch full records
-			let mut batch = Vec::with_capacity(BATCH_SIZE);
-
+			// Collect record IDs from index and batch-fetch full records
 			match (&access, is_unique) {
 				// Unique equality - at most one record
 				(BTreeAccess::Equality(value), true) => {
@@ -208,16 +295,14 @@ impl ExecOperator for IndexScan {
 					let rids = iter.next_batch(&txn).await
 						.context("Failed to iterate index")?;
 
-					for rid in rids {
-						if let Some(value) = fetch_and_filter_record(
-							&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
-						).await? {
-							batch.push(value);
-						}
-					}
+					let mut values = fetch_and_filter_records_batch(
+						&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
+					).await?;
 
-					if !batch.is_empty() {
-						yield ValueBatch { values: batch };
+					pipeline.process_batch(&mut values, &ctx).await?;
+
+					if !values.is_empty() {
+						yield ValueBatch { values };
 					}
 				}
 
@@ -232,102 +317,140 @@ impl ExecOperator for IndexScan {
 						if rids.is_empty() {
 							break;
 						}
-						for rid in rids {
-							if let Some(value) = fetch_and_filter_record(
-								&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
-							).await? {
-								batch.push(value);
-								if batch.len() >= BATCH_SIZE {
-									yield ValueBatch { values: std::mem::take(&mut batch) };
-									batch.reserve(BATCH_SIZE);
-								}
-							}
-						}
-					}
 
-					if !batch.is_empty() {
-						yield ValueBatch { values: batch };
+						let mut values = fetch_and_filter_records_batch(
+							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
+						).await?;
+
+						let cont = pipeline.process_batch(&mut values, &ctx).await?;
+
+						if !values.is_empty() {
+							yield ValueBatch { values };
+						}
+						if !cont {
+							break;
+						}
 					}
 				}
 
-				// Range scan (unique or non-unique — same loop shape)
-				(BTreeAccess::Range { from, to }, unique) => {
-					if unique {
-						let mut iter = UniqueRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref())
-							.context("Failed to create iterator")?;
-						loop {
-							let rids = iter.next_batch(&txn).await
-								.context("Failed to iterate index")?;
-							if rids.is_empty() { break; }
-							for rid in rids {
-								if let Some(value) = fetch_and_filter_record(
-									&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
-								).await? {
-									batch.push(value);
-									if batch.len() >= BATCH_SIZE {
-										yield ValueBatch { values: std::mem::take(&mut batch) };
-										batch.reserve(BATCH_SIZE);
-									}
-								}
-							}
-						}
-					} else {
-						let mut iter = IndexRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref())
-							.context("Failed to create iterator")?;
-						loop {
-							let rids = iter.next_batch(&txn).await
-								.context("Failed to iterate index")?;
-							if rids.is_empty() { break; }
-							for rid in rids {
-								if let Some(value) = fetch_and_filter_record(
-									&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
-								).await? {
-									batch.push(value);
-									if batch.len() >= BATCH_SIZE {
-										yield ValueBatch { values: std::mem::take(&mut batch) };
-										batch.reserve(BATCH_SIZE);
-									}
-								}
-							}
-						}
-					}
+				// Range scan (unique or non-unique).
+				//
+				// Both branches share the same batch-fetch-yield loop; they
+				// differ only in iterator construction.  We keep them as two
+				// explicit `loop` blocks rather than abstracting over the
+				// iterator type because `async_stream` closures cannot
+				// easily hold trait objects or generics.
+				(BTreeAccess::Range { from, to }, true) => {
+					let mut iter = UniqueRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref())
+						.context("Failed to create iterator")?;
+					loop {
+						let rids = iter.next_batch(&txn).await
+							.context("Failed to iterate index")?;
+						if rids.is_empty() { break; }
 
-					if !batch.is_empty() {
-						yield ValueBatch { values: batch };
+						let mut values = fetch_and_filter_records_batch(
+							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
+						).await?;
+
+						let cont = pipeline.process_batch(&mut values, &ctx).await?;
+
+						if !values.is_empty() {
+							yield ValueBatch { values };
+						}
+						if !cont {
+							break;
+						}
 					}
 				}
 
-				// Compound index access
+				(BTreeAccess::Range { from, to }, false) => {
+					let mut iter = IndexRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref())
+						.context("Failed to create iterator")?;
+					loop {
+						let rids = iter.next_batch(&txn).await
+							.context("Failed to iterate index")?;
+						if rids.is_empty() { break; }
+
+						let mut values = fetch_and_filter_records_batch(
+							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
+						).await?;
+
+						let cont = pipeline.process_batch(&mut values, &ctx).await?;
+
+						if !values.is_empty() {
+							yield ValueBatch { values };
+						}
+						if !cont {
+							break;
+						}
+					}
+				}
+
+				// Compound index access (streaming)
 				(BTreeAccess::Compound { prefix, range }, _) => {
 					let (beg, end) = compute_compound_key_range(
 						ns_id, db_id, ix, prefix, range.as_ref(),
 					)?;
 
-					let res = txn.scan(beg..end, u32::MAX, 0, None).await
-						.context("Failed to scan index")?;
+					let kv_stream = txn.stream_keys_vals(
+						beg..end,
+						None,  // no version
+						None,  // no limit
+						0,     // no skip
+						crate::idx::planner::ScanDirection::Forward,
+						true,  // enable prefetching for compound scans
+					);
+					futures::pin_mut!(kv_stream);
 
-					for (_, val) in res {
-						let rid: RecordId = revision::from_slice(&val)
-							.context("Failed to decode record id")?;
+					let mut rid_batch: Vec<RecordId> = Vec::with_capacity(BATCH_SIZE);
+					let mut done = false;
 
-						if let Some(value) = fetch_and_filter_record(
-							&ctx, &txn, ns_id, db_id, &rid, &select_permission, check_perms,
-						).await? {
-							batch.push(value);
-							if batch.len() >= BATCH_SIZE {
-								yield ValueBatch { values: std::mem::take(&mut batch) };
-								batch.reserve(BATCH_SIZE);
+					while let Some(kv_batch_result) = kv_stream.next().await {
+						if done { break; }
+						let kv_batch = kv_batch_result
+							.context("Failed to stream compound index keys")?;
+
+						for (_, val) in kv_batch {
+							let rid: RecordId = revision::from_slice(&val)
+								.context("Failed to decode record id")?;
+
+							rid_batch.push(rid);
+
+							if rid_batch.len() >= BATCH_SIZE {
+								let mut values = fetch_and_filter_records_batch(
+									&ctx, &txn, ns_id, db_id, &rid_batch, &select_permission, check_perms,
+								).await?;
+
+								let cont = pipeline.process_batch(&mut values, &ctx).await?;
+
+								if !values.is_empty() {
+									yield ValueBatch { values };
+								}
+								rid_batch.clear();
+								if !cont {
+									done = true;
+									break;
+								}
 							}
 						}
 					}
 
-					if !batch.is_empty() {
-						yield ValueBatch { values: batch };
+					// Yield remaining batch
+					if !done && !rid_batch.is_empty() {
+						let mut values = fetch_and_filter_records_batch(
+							&ctx, &txn, ns_id, db_id, &rid_batch, &select_permission, check_perms,
+						).await?;
+
+						pipeline.process_batch(&mut values, &ctx).await?;
+
+						if !values.is_empty() {
+							yield ValueBatch { values };
+						}
 					}
 				}
 
 				// FullText and KNN should use dedicated operators
-				(BTreeAccess::FullText { .. }, _) | (BTreeAccess::Knn, _) => {
+				(BTreeAccess::FullText { .. }, _) | (BTreeAccess::Knn { .. }, _) => {
 					Err(ControlFlow::Err(anyhow::anyhow!(
 						"IndexScan does not support FullText or KNN access - use dedicated operators"
 					)))?
@@ -476,15 +599,17 @@ fn compute_compound_key_range(
 			}
 		}
 	} else {
-		// No range operator - scan the entire prefix
-		let beg = key_err(Index::prefix_ids_beg(
+		// No range operator - scan the entire prefix using composite
+		// key functions so the scan correctly captures all entries whose
+		// leading columns match the prefix in a multi-column index.
+		let beg = key_err(Index::prefix_ids_composite_beg(
 			ns_id,
 			db_id,
 			&ix.table_name,
 			ix.index_id,
 			&prefix_array,
 		))?;
-		let end = key_err(Index::prefix_ids_end(
+		let end = key_err(Index::prefix_ids_composite_end(
 			ns_id,
 			db_id,
 			&ix.table_name,

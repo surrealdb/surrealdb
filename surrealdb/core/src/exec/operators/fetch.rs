@@ -70,10 +70,11 @@ impl ExecOperator for Fetch {
 	}
 
 	fn is_scalar(&self) -> bool {
-		// Fetch preserves the scalar nature of its input.
-		// If the input is a scalar expression (e.g., RETURN $var FETCH field),
-		// the result should also be treated as scalar.
 		self.input.is_scalar()
+	}
+
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		self.input.output_ordering()
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -358,13 +359,13 @@ mod tests {
 
 	#[test]
 	fn test_fetch_name() {
-		use crate::exec::operators::scan::Scan;
+		use crate::exec::operators::scan::DynamicScan;
 		use crate::expr::part::Part;
 
 		let fields = vec![Idiom(vec![Part::Field("author".into())])];
 
 		// Create a minimal scan for testing
-		let scan = Arc::new(Scan::new(
+		let scan = Arc::new(DynamicScan::new(
 			Arc::new(Literal(Value::from("test"))) as Arc<dyn crate::exec::PhysicalExpr>,
 			None,
 			None,

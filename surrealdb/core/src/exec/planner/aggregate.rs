@@ -23,7 +23,7 @@ impl<'ctx> Planner<'ctx> {
 	///
 	/// Returns the aggregate fields and the physical expressions for group keys.
 	#[allow(clippy::type_complexity)]
-	pub(crate) fn plan_aggregation(
+	pub(crate) async fn plan_aggregation(
 		&self,
 		fields: &Fields,
 		group_by: &[crate::expr::idiom::Idiom],
@@ -59,7 +59,7 @@ impl<'ctx> Planner<'ctx> {
 			} else {
 				Expr::Idiom(idiom.clone())
 			};
-			let physical_expr = self.physical_expr(expr)?;
+			let physical_expr = self.physical_expr(expr).await?;
 			group_by_exprs.push(physical_expr);
 		}
 
@@ -72,7 +72,7 @@ impl<'ctx> Planner<'ctx> {
 				let (aggregate_expr_info, fallback_expr) = if is_group_key {
 					(None, None)
 				} else {
-					self.extract_aggregate_info(selector.expr.clone())?
+					self.extract_aggregate_info(selector.expr.clone()).await?
 				};
 
 				Ok((
@@ -115,7 +115,7 @@ impl<'ctx> Planner<'ctx> {
 							let (aggregate_expr_info, fallback_expr) = if is_group_key {
 								(None, None)
 							} else {
-								self.extract_aggregate_info(selector.expr.clone())?
+								self.extract_aggregate_info(selector.expr.clone()).await?
 							};
 
 							aggregates.push(AggregateField::new(
@@ -143,7 +143,7 @@ impl<'ctx> Planner<'ctx> {
 	/// leaves the expression unchanged, so we can use it directly for the
 	/// implicit `array::group` fallback without an extra clone.
 	#[allow(clippy::type_complexity)]
-	pub(crate) fn extract_aggregate_info(
+	pub(crate) async fn extract_aggregate_info(
 		&self,
 		mut expr: Expr,
 	) -> Result<(Option<AggregateExprInfo>, Option<Arc<dyn crate::exec::PhysicalExpr>>), Error> {
@@ -158,7 +158,7 @@ impl<'ctx> Planner<'ctx> {
 
 		if extractor.aggregates.is_empty() {
 			// No aggregates found — the visitor left expr unchanged
-			let argument_expr = self.physical_expr(expr)?;
+			let argument_expr = self.physical_expr(expr).await?;
 			let array_group = registry
 				.get_aggregate("array::group")
 				.expect("array::group should always be registered")
@@ -176,33 +176,32 @@ impl<'ctx> Planner<'ctx> {
 			));
 		}
 
-		let extracted_aggregates = extractor
-			.aggregates
-			.into_iter()
-			.map(|(name, call)| {
-				let func = if name.as_str() == "count" {
-					registry.get_count_aggregate(!call.arguments.is_empty())
-				} else {
-					registry.get_aggregate(&name).expect("aggregate function should exist").clone()
-				};
+		let mut extracted_aggregates = Vec::new();
+		for (name, call) in extractor.aggregates {
+			let func = if name.as_str() == "count" {
+				registry.get_count_aggregate(!call.arguments.is_empty())
+			} else {
+				registry.get_aggregate(&name).expect("aggregate function should exist").clone()
+			};
 
-				let mut args = call.arguments.into_iter();
-				let argument_expr = if let Some(first_arg) = args.next() {
-					self.physical_expr(first_arg)
-				} else {
-					self.physical_expr(Expr::Literal(Literal::None))
-				}?;
+			let mut args = call.arguments.into_iter();
+			let argument_expr = if let Some(first_arg) = args.next() {
+				self.physical_expr(first_arg).await
+			} else {
+				self.physical_expr(Expr::Literal(Literal::None)).await
+			}?;
 
-				let extra_args =
-					args.map(|arg| self.physical_expr(arg)).collect::<Result<Vec<_>, _>>()?;
+			let mut extra_args = Vec::new();
+			for arg in args {
+				extra_args.push(self.physical_expr(arg).await?);
+			}
 
-				Ok(ExtractedAggregate {
-					function: func,
-					argument_expr,
-					extra_args,
-				})
-			})
-			.collect::<Result<Vec<_>, Error>>()?;
+			extracted_aggregates.push(ExtractedAggregate {
+				function: func,
+				argument_expr,
+				extra_args,
+			});
+		}
 
 		// expr has been modified by the visitor (aggregate calls replaced with
 		// placeholder idioms like `_a0`)
@@ -214,7 +213,7 @@ impl<'ctx> Planner<'ctx> {
 		let post_expr = if is_direct_single_aggregate {
 			None
 		} else {
-			Some(self.physical_expr(expr)?)
+			Some(self.physical_expr(expr).await?)
 		};
 
 		Ok((

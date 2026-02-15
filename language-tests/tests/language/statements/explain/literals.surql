@@ -3,25 +3,20 @@
 reason = "Test EXPLAIN with literals"
 
 [[test.results]]
-value = """\
-"Expr [ctx: Rt] [expr: 9] {rows: 0, batches: 0, elapsed: 0ns}
+value = ''''Expr [ctx: Rt] [expr: 9] {rows: 0}
 
-Total rows: 1"
-"""
+Total rows: 1''''
 
 [[test.results]]
-value = """\
-"Return [ctx: Rt]
+value = ''''Return [ctx: Rt]
 └────> IfElse [ctx: Rt] [branches: 1, has_else: true]
-""""
+''''
 
 [[test.results]]
-value = """\
-"Return [ctx: Rt] {rows: 0, batches: 0, elapsed: 0ns}
-└────> IfElse [ctx: Rt] [branches: 1, has_else: true] {rows: 0, batches: 0, elapsed: 0ns}
+value = ''''Return [ctx: Rt] {rows: 0}
+└────> IfElse [ctx: Rt] [branches: 1, has_else: true] {rows: 0}
 
-Total rows: 0"
-"""
+Total rows: 0''''
 
 */
 

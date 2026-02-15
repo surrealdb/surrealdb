@@ -11,7 +11,7 @@ use crate::expr::BinaryOperator;
 use crate::expr::operator::MatchesOperator;
 use crate::expr::with::With;
 use crate::idx::planner::ScanDirection;
-use crate::val::Value;
+use crate::val::{Number, Value};
 
 /// A reference to an index definition with its position in the schema.
 ///
@@ -90,6 +90,23 @@ pub enum AccessPath {
 		query: String,
 		operator: MatchesOperator,
 	},
+
+	/// KNN vector search using an HNSW index.
+	KnnSearch {
+		index_ref: IndexRef,
+		/// The query vector to search for nearest neighbors of
+		vector: Vec<Number>,
+		/// Number of nearest neighbors to return
+		k: u32,
+		/// HNSW search expansion factor
+		ef: u32,
+	},
+
+	/// Union of multiple index scans for OR conditions.
+	///
+	/// Each sub-path handles one branch of the OR; results are
+	/// deduplicated by record ID at execution time.
+	Union(Vec<AccessPath>),
 }
 
 /// How to access an index.
@@ -123,8 +140,15 @@ pub enum BTreeAccess {
 		operator: crate::expr::operator::MatchesOperator,
 	},
 
-	/// KNN vector search access
-	Knn,
+	/// KNN vector search access via HNSW index.
+	Knn {
+		/// The query vector
+		vector: Vec<Number>,
+		/// Number of nearest neighbors
+		k: u32,
+		/// HNSW search expansion factor
+		ef: u32,
+	},
 }
 
 /// A bound for a range scan.
