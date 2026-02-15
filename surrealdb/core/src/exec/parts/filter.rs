@@ -54,10 +54,6 @@ impl PhysicalExpr for WherePart {
 		}
 	}
 
-	fn references_current_value(&self) -> bool {
-		true
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		self.predicate.access_mode()
 	}

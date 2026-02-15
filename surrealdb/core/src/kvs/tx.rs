@@ -643,9 +643,10 @@ impl Transaction {
 	/// Retrieve a stream of key-value batches over a specific range in the datastore.
 	///
 	/// This function returns a stream that yields batches of key-value pairs. The scanner:
-	/// - Fetches an initial batch of up to 100 items
+	/// - Fetches an initial batch of up to 100 items (or 500 when `prefetch` is enabled)
 	/// - Fetches subsequent batches of up to 16 MiB (local) or 4 MiB (remote)
-	/// - Prefetches the next batch while the current batch is being processed
+	/// - When `prefetch` is true, prefetches the next batch while the current batch is being
+	///   processed, and uses a larger initial batch size (500 items)
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub fn stream_keys_vals(
 		&self,
@@ -654,6 +655,7 @@ impl Transaction {
 		limit: Option<usize>,
 		skip: u32,
 		dir: ScanDirection,
+		prefetch: bool,
 	) -> impl Stream<Item = Result<Vec<(Key, Val)>>> + '_ {
 		self.tr
 			.stream_keys_vals(
@@ -665,6 +667,7 @@ impl Transaction {
 					ScanDirection::Forward => Direction::Forward,
 					ScanDirection::Backward => Direction::Backward,
 				},
+				prefetch,
 			)
 			.map_err(Error::from)
 			.map_err(Into::into)

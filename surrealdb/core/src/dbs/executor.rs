@@ -500,7 +500,7 @@ impl Executor {
 			// Process all other normal statements
 			TopLevelExpr::Expr(e) => {
 				// Try the new streaming execution path first
-				match crate::exec::planner::try_plan_expr(&e, &self.ctx) {
+				match crate::exec::planner::try_plan_expr(&e, &self.ctx, txn.clone()).await {
 					Ok(plan) => {
 						// Set the transaction on the context
 						ctx_mut!().set_transaction(txn.clone());
@@ -513,7 +513,10 @@ impl Executor {
 						// exec_result is now FlowResult<Value>, propagate directly
 						exec_result
 					}
-					Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
+					Err(err @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+						if let Error::PlannerUnimplemented(msg) = &err {
+							tracing::warn!("PlannerUnimplemented fallback in executor: {msg}");
+						}
 						// Fallback to existing compute path
 						ctx_mut!().set_transaction(txn);
 						let res = self

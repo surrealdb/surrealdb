@@ -12,7 +12,6 @@ use crate::idx::IndexKeyBase;
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::graph::UndirectedGraph;
-use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::hnsw::filter::HnswTruthyDocumentFilter;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
 use crate::idx::trees::hnsw::index::HnswContext;
@@ -112,12 +111,11 @@ where
 		&self,
 		ctx: &HnswContext<'_>,
 		stk: &mut Stk,
-		docs: &HnswDocs,
 		elements: &HnswElements,
 		search: &HnswSearch,
 		ep_dist: f64,
 		ep_id: ElementId,
-		filter: &mut HnswTruthyDocumentFilter,
+		filter: &mut HnswTruthyDocumentFilter<'_>,
 		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<DoublePriorityQueue> {
 		let visited = HashSet::from_iter([ep_id]);
@@ -125,7 +123,6 @@ where
 		let mut w = DoublePriorityQueue::default();
 		Self::add_if_truthy(
 			ctx,
-			docs,
 			stk,
 			search.ef,
 			&mut w,
@@ -139,7 +136,6 @@ where
 		self.search_with_filter(
 			ctx,
 			stk,
-			docs,
 			elements,
 			search,
 			candidates,
@@ -230,13 +226,12 @@ where
 		&self,
 		ctx: &HnswContext<'_>,
 		stk: &mut Stk,
-		docs: &HnswDocs,
 		elements: &HnswElements,
 		search: &HnswSearch,
 		mut candidates: DoublePriorityQueue,
 		mut visited: HashSet<ElementId>,
 		mut w: DoublePriorityQueue,
-		filter: &mut HnswTruthyDocumentFilter,
+		filter: &mut HnswTruthyDocumentFilter<'_>,
 		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<DoublePriorityQueue> {
 		let mut f_dist = w.peek_last_dist().unwrap_or(f64::MAX);
@@ -257,7 +252,6 @@ where
 							candidates.push(e_dist, e_id);
 							if Self::add_if_truthy(
 								ctx,
-								docs,
 								stk,
 								search.ef,
 								&mut w,
@@ -282,25 +276,24 @@ where
 	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn add_if_truthy(
 		ctx: &HnswContext<'_>,
-		docs: &HnswDocs,
 		stk: &mut Stk,
 		efc: usize,
 		w: &mut DoublePriorityQueue,
 		e_pt: &SharedVector,
 		e_dist: f64,
 		e_id: ElementId,
-		filter: &mut HnswTruthyDocumentFilter,
+		filter: &mut HnswTruthyDocumentFilter<'_>,
 		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<bool> {
-		if let Some(e_docs) = ctx.vec_docs.get_docs(&ctx.tx, e_pt).await? {
+		if let Some(docs) = ctx.vec_docs.get_docs(&ctx.tx, e_pt).await? {
 			if let Some(pending_docs) = pending_docs
 				// Check all these docs are currently updated the pending
-				&& Self::check_all_docs_in_pending(&e_docs, pending_docs)
+				&& Self::check_all_docs_in_pending(&docs, pending_docs)
 			{
 				// In this case we ignore the one in the HNSW index
 				return Ok(false);
 			}
-			if filter.check_any_doc_truthy(ctx, docs, stk, e_docs).await? {
+			if filter.check_any_doc_truthy(ctx, stk, docs).await? {
 				w.push(e_dist, e_id);
 				if w.len() > efc
 					&& let Some((_, id)) = w.pop_last()
@@ -527,7 +520,7 @@ where
 		// for each node and take precedence over the Hl data loaded above.
 		let range = self.ikb.new_hn_layer_range(self.level)?;
 		let mut count = 0;
-		let mut stream = tx.stream_keys_vals(range, None, None, 0, ScanDirection::Forward);
+		let mut stream = tx.stream_keys_vals(range, None, None, 0, ScanDirection::Forward, false);
 		while let Some(res) = stream.next().await {
 			let batch = res?;
 			for (k, v) in batch {

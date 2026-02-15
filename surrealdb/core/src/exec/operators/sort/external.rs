@@ -114,6 +114,27 @@ impl ExecOperator for ExternalSort {
 		self.order_by.iter().map(|f| ("order_by", &f.expr)).collect()
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		use crate::exec::ordering::SortProperty;
+		crate::exec::OutputOrdering::Sorted(
+			self.order_by
+				.iter()
+				.map(|f| {
+					// Try to extract a FieldPath from the expression's SQL representation.
+					// This is best-effort -- complex expressions won't match.
+					let sql = f.expr.to_sql();
+					let path = crate::exec::field_path::FieldPath::field(sql);
+					SortProperty {
+						path,
+						direction: f.direction,
+						collate: f.collate,
+						numeric: f.numeric,
+					}
+				})
+				.collect(),
+		)
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = self.input.execute(ctx)?;
 		let order_by = Arc::new(self.order_by.clone());

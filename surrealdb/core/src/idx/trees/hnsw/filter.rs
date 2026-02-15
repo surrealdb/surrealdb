@@ -5,9 +5,11 @@ use std::sync::Arc;
 use ahash::HashMap;
 use anyhow::Result;
 use reblessive::tree::Stk;
+use tokio::sync::RwLockReadGuard;
 
 use crate::catalog::Record;
 use crate::catalog::providers::TableProvider;
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Cond, FlowResultExt as _};
 use crate::idx::planner::iterators::KnnIteratorResult;
@@ -19,14 +21,22 @@ use crate::val::RecordId;
 
 type FilterCache = HashMap<DocId, Option<(Arc<RecordId>, Arc<Record>)>>;
 
-pub(super) struct HnswTruthyDocumentFilter {
+pub(super) struct HnswTruthyDocumentFilter<'a> {
+	opt: &'a Options,
+	docs: RwLockReadGuard<'a, HnswDocs>,
 	cond: Arc<Cond>,
 	cache: FilterCache,
 }
 
-impl HnswTruthyDocumentFilter {
-	pub(super) fn new(cond: Arc<Cond>) -> Self {
+impl<'a> HnswTruthyDocumentFilter<'a> {
+	pub(super) fn new(
+		opt: &'a Options,
+		docs: RwLockReadGuard<'a, HnswDocs>,
+		cond: Arc<Cond>,
+	) -> Self {
 		Self {
+			opt,
+			docs,
 			cond,
 			cache: Default::default(),
 		}
@@ -50,12 +60,11 @@ impl HnswTruthyDocumentFilter {
 	pub(super) async fn check_any_doc_truthy(
 		&mut self,
 		ctx: &HnswContext<'_>,
-		docs: &HnswDocs,
 		stk: &mut Stk,
 		doc_ids: Ids64,
 	) -> Result<bool> {
 		for doc_id in doc_ids.iter() {
-			if self.check_doc_id_truthy(ctx, docs, stk, doc_id).await? {
+			if self.check_doc_id_truthy(ctx, stk, doc_id).await? {
 				return Ok(true);
 			}
 		}
@@ -65,21 +74,21 @@ impl HnswTruthyDocumentFilter {
 	pub(super) async fn check_doc_id_truthy(
 		&mut self,
 		ctx: &HnswContext<'_>,
-		docs: &HnswDocs,
 		stk: &mut Stk,
 		doc_id: DocId,
 	) -> Result<bool> {
 		match self.cache.entry(doc_id) {
 			Entry::Occupied(e) => Ok(e.get().is_some()),
 			Entry::Vacant(e) => {
-				let Some(rid) = docs.get_thing(&ctx.tx, doc_id).await? else {
+				let Some(rid) = self.docs.get_thing(&ctx.tx, doc_id).await? else {
 					// No record ID ? It is not truthy
 					return Ok(false);
 				};
 				let rid = Arc::new(rid);
 				// Is the record truthy?
 				let record =
-					Self::is_record_truthy(ctx, stk, self.cond.clone(), rid.clone()).await?;
+					Self::is_record_truthy(ctx, self.opt, stk, self.cond.clone(), rid.clone())
+						.await?;
 				let truthy = record.is_some();
 				// Store the result in the cache
 				let entry = record.map(|r| (rid, r));
@@ -96,11 +105,12 @@ impl HnswTruthyDocumentFilter {
 		stk: &mut Stk,
 		rid: Arc<RecordId>,
 	) -> Result<bool> {
-		Ok(Self::is_record_truthy(ctx, stk, self.cond.clone(), rid).await?.is_some())
+		Ok(Self::is_record_truthy(ctx, self.opt, stk, self.cond.clone(), rid).await?.is_some())
 	}
 
 	async fn is_record_truthy(
 		ctx: &HnswContext<'_>,
+		opt: &Options,
 		stk: &mut Stk,
 		cond: Arc<Cond>,
 		rid: Arc<RecordId>,
@@ -119,7 +129,7 @@ impl HnswTruthyDocumentFilter {
 			fields_computed: false,
 		};
 		let truthy = stk
-			.run(|stk| cond.0.compute(stk, ctx.ctx, ctx.opt, Some(&cursor_doc)))
+			.run(|stk| cond.0.compute(stk, ctx.ctx, opt, Some(&cursor_doc)))
 			.await
 			.catch_return()?
 			.is_truthy();

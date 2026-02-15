@@ -2,70 +2,86 @@
 
 [test]
 
-[env.capabilities]
-allow-experimental = ["files"]
-
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
 value = "NONE"
+
 [[test.results]]
 value = "NONE"
+
 [[test.results]]
 value = "false"
 
 [[test.results]]
 value = "NONE"
-[[test.results]]
-value = "NONE"
-[[test.results]]
-value = '"abc"'
 
 [[test.results]]
 value = "NONE"
+
 [[test.results]]
-value = '"abc"'
+value = "'abc'"
 
 [[test.results]]
 value = "NONE"
+
 [[test.results]]
-value = '"def"'
+value = "'abc'"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "'def'"
 
 [[test.results]]
 value = "true"
 
 [[test.results]]
 value = "NONE"
-[[test.results]]
-value = '"def"'
 
 [[test.results]]
-value = "NONE"
-[[test.results]]
-value = "NONE"
-[[test.results]]
-value = '"def"'
-[[test.results]]
-value = "NONE"
-[[test.results]]
-value = '"abc"'
+value = "'def'"
 
-[[test.results]]
-value = "NONE"
-[[test.results]]
-value = "NONE"
-[[test.results]]
-value = "NONE"
-[[test.results]]
-value = '"abc"'
-[[test.results]]
-value = "NONE"
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
 value = "NONE"
+
+[[test.results]]
+value = "'def'"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "'abc'"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "'abc'"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[env.capabilities]
+allow-experimental = ["files"]
 */
 
 DEFINE BUCKET test BACKEND "memory";

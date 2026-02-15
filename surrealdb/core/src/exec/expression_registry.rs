@@ -102,7 +102,7 @@ impl ExpressionRegistry {
 	/// If the expression is already registered, returns the existing name.
 	/// If the expression has an alias that doesn't conflict, uses the alias.
 	/// Otherwise, generates a synthetic name (_e0, _e1, etc.).
-	pub fn register(
+	pub async fn register(
 		&mut self,
 		expr: &Expr,
 		compute_point: ComputePoint,
@@ -125,7 +125,7 @@ impl ExpressionRegistry {
 		}
 
 		// Convert to physical expression
-		let physical_expr = expr_to_physical_expr(expr.clone(), ctx)?;
+		let physical_expr = expr_to_physical_expr(expr.clone(), ctx).await?;
 
 		// Determine internal name
 		let internal_name = self.choose_internal_name(&alias);

@@ -84,13 +84,6 @@ impl PhysicalExpr for ScalarSubquery {
 		futures::future::try_join_all(futures).await
 	}
 
-	fn references_current_value(&self) -> bool {
-		// Conservative: subqueries may be correlated (e.g. SELECT ... FROM $this.field),
-		// and we can't statically determine this from the plan tree.
-		// Returning true ensures correlated subqueries get the correct per-row context.
-		true
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		// CRITICAL: Propagate the subquery's access mode!
 		// This is why `SELECT *, (UPSERT person) FROM person` is ReadWrite

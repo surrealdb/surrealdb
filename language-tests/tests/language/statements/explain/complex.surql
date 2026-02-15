@@ -6,71 +6,66 @@ reason = "Test EXPLAIN with complex queries that combine multiple planner operat
 value = "'OK'"
 
 [[test.results]]
-value = '''
-"Limit [ctx: Db] [limit: 2]
-└────> SortTopK [ctx: Db] [order_by: revenue DESC, limit: 2]
-       └────> Aggregate [ctx: Db] [by: category]
-              └────> Scan [ctx: Db] [source: product]
+value = ''''Limit [ctx: Db] [limit: 2]
+    SortTopK [ctx: Db] [order_by: revenue DESC, limit: 2]
+        Aggregate [ctx: Db] [by: category]
+            TableScan [ctx: Db] [table: product, direction: Forward]
+''''
+
+[[test.results]]
+value = ''''Project [ctx: Db]
+    Limit [ctx: Db] [limit: 5]
+        SortTopKByKey [ctx: Db] [sort_keys: rating DESC, limit: 5]
+            Split [ctx: Db] [on: tags]
+                TableScan [ctx: Db] [table: product, direction: Forward, predicate: price < 50]
+''''
+
+[[test.results]]
+value = '''"Project [ctx: Db]
+    Limit [ctx: Db] [limit: 1, offset: 0]
+        SortTopKByKey [ctx: Db] [sort_keys: price ASC, limit: 1]
+            Filter [ctx: Db] [predicate: category = 'electronics' AND brand = 'Acme']
+                IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward]
 "'''
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Limit [ctx: Db] [limit: 5]
-       └────> SortTopKByKey [ctx: Db] [sort_keys: rating DESC, limit: 5]
-              └────> Split [ctx: Db] [on: tags]
-                     └────> Scan [ctx: Db] [source: product, predicate: price < 50]
+value = '''"Project [ctx: Db]
+    Filter [ctx: Db] [predicate: name @1@ 'Widget']
+        FullTextScan [ctx: Db] [index: idx_ft_name, query: Widget]
 "'''
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Limit [ctx: Db] [limit: 1, offset: 0]
-       └────> SortTopKByKey [ctx: Db] [sort_keys: price ASC, limit: 1]
-              └────> Scan [ctx: Db] [source: product, predicate: category = 'electronics' AND brand = 'Acme']
+value = '''"Aggregate [ctx: Db] [mode: GROUP ALL]
+    Filter [ctx: Db] [predicate: category = 'electronics']
+        IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward]
 "'''
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: product, predicate: name @1@ 'Widget']
-"'''
+value = ''''Project [ctx: Db]
+    Limit [ctx: Db] [limit: 5]
+        SortTopKByKey [ctx: Db] [sort_keys: id ASC, limit: 5]
+            Union [ctx: Db]
+                TableScan [ctx: Db] [table: product, direction: Forward]
+                TableScan [ctx: Db] [table: review, direction: Forward]
+''''
 
 [[test.results]]
-value = '''
-"Aggregate [ctx: Db] [mode: GROUP ALL]
-└────> Scan [ctx: Db] [source: product, predicate: category = 'electronics']
-"'''
+value = ''''ProjectValue [ctx: Db] [expr: name]
+    TableScan [ctx: Db] [table: product, direction: Forward, predicate: rating >= 4f, limit: 3]
+''''
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Limit [ctx: Db] [limit: 5]
-       └────> SortTopKByKey [ctx: Db] [sort_keys: id ASC, limit: 5]
-              └────> Union [ctx: Db]
-                     ├────> Scan [ctx: Db] [source: product]
-                     └────> Scan [ctx: Db] [source: review]
-"'''
-
-[[test.results]]
-value = '''
-"ProjectValue [ctx: Db] [expr: name]
-└────> Scan [ctx: Db] [source: product, predicate: rating >= 4f, limit: 3]
-"'''
-
-[[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Filter [ctx: Db] [predicate: tags = ['sale']]
-       └────> Project [ctx: Db]
-              └────> Filter [ctx: Db] [predicate: category = 'electronics']
-                     └────> Union [ctx: Db]
-                            ├────> Project [ctx: Db]
-                            │      └────> Filter [ctx: Db] [predicate: rating >= 4f]
-                            │             └────> Union [ctx: Db]
-                            │                    ├────> Scan [ctx: Db] [source: product]
-                            │                    └────> Scan [ctx: Db] [source: review]
-                            └────> Scan [ctx: Db] [source: product]
+value = '''"Project [ctx: Db]
+    Filter [ctx: Db] [predicate: tags = ['sale']]
+        Project [ctx: Db]
+            Filter [ctx: Db] [predicate: category = 'electronics']
+                Union [ctx: Db]
+                    Project [ctx: Db]
+                        Filter [ctx: Db] [predicate: rating >= 4f]
+                            Union [ctx: Db]
+                                TableScan [ctx: Db] [table: product, direction: Forward]
+                                TableScan [ctx: Db] [table: review, direction: Forward]
+                    IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward]
 "'''
 */
 

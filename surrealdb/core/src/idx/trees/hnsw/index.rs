@@ -40,7 +40,6 @@ pub(crate) struct HnswIndex {
 
 pub(super) struct HnswContext<'a> {
 	pub(super) ctx: &'a FrozenContext,
-	pub(super) opt: &'a Options,
 	pub(super) tx: Arc<Transaction>,
 	pub(super) db: &'a DatabaseDefinition,
 	pub(super) vec_docs: &'a VecDocs,
@@ -49,13 +48,11 @@ pub(super) struct HnswContext<'a> {
 impl<'a> HnswContext<'a> {
 	pub(super) fn new(
 		ctx: &'a FrozenContext,
-		opt: &'a Options,
 		db: &'a DatabaseDefinition,
 		vec_docs: &'a VecDocs,
 	) -> Self {
 		Self {
 			ctx,
-			opt,
 			tx: ctx.tx(),
 			db,
 			vec_docs,
@@ -139,16 +136,14 @@ impl HnswIndex {
 	pub(super) fn new_hnsw_context<'a>(
 		&'a self,
 		ctx: &'a FrozenContext,
-		opt: &'a Options,
 		db: &'a DatabaseDefinition,
 	) -> HnswContext<'a> {
-		HnswContext::new(ctx, opt, db, &self.vec_docs)
+		HnswContext::new(ctx, db, &self.vec_docs)
 	}
 
 	pub(crate) async fn index_pending(
 		&self,
 		ctx: &FrozenContext,
-		opt: &Options,
 		db: &DatabaseDefinition,
 		pending: VectorPendingUpdate,
 	) -> Result<()> {
@@ -156,7 +151,7 @@ impl HnswIndex {
 		// Ensure the layers are up-to-date
 		hnsw.check_state(ctx).await?;
 		// Create a new context
-		let mut ctx = self.new_hnsw_context(ctx, opt, db);
+		let mut ctx = self.new_hnsw_context(ctx, db);
 		// Remove old values if any
 		if let VectorPendingId::DocId(doc_id) = pending.id {
 			for vector in pending.old_vectors {
@@ -196,34 +191,36 @@ impl HnswIndex {
 		&self,
 		db: &DatabaseDefinition,
 		ctx: &FrozenContext,
-		opt: &Options,
 		stk: &mut Stk,
 		pt: &[Number],
 		k: usize,
 		ef: usize,
-		cond: Option<Arc<Cond>>,
+		cond_filter: Option<(&Options, Arc<Cond>)>,
 	) -> Result<VecDeque<KnnIteratorResult>> {
-		// Build a filter is any condition is passed
-		let mut filter = cond.map(|cond| HnswTruthyDocumentFilter::new(cond));
+		// Build a filter if required
+		let mut filter = if let Some((opt, cond)) = cond_filter {
+			Some(HnswTruthyDocumentFilter::new(opt, self.docs.read().await, cond))
+		} else {
+			None
+		};
 		// Extract the vector
 		let vector: SharedVector = Vector::try_from_vector(self.vector_type, pt)?.into();
 		vector.check_dimension(self.dim)?;
 		let search = HnswSearch::new(vector, k, ef);
 		// Get a new HNSW context
-		let ctx = self.new_hnsw_context(ctx, opt, db);
+		let ctx = self.new_hnsw_context(ctx, db);
 
-		let docs = self.docs.read().await;
 		let (pending_result, pending_docs) =
-			self.search_pendings(&ctx, &docs, stk, &search, &mut filter).await?;
+			self.search_pendings(&ctx, stk, &search, &mut filter).await?;
 		println!("PendingResult: {pending_result:?}");
 		// Do the search
-		let result = self.search(&ctx, &docs, stk, &search, pending_docs, &mut filter).await?;
-		let docs = self.docs.read().await;
+		let result = self.search(&ctx, stk, &search, pending_docs, &mut filter).await?;
 		// We build the final result: replacing DocId with RecordIds
 		if let Some(filter) = filter {
 			// If there is a filter, we let the filter building the result
 			return Ok(filter.convert_result(result));
 		}
+		let docs = self.docs.read().await;
 		let mut res = VecDeque::with_capacity(result.len());
 		for (doc_id, dist) in result {
 			if let Some(rid) = docs.get_thing(&ctx.tx, doc_id).await? {
@@ -236,17 +233,16 @@ impl HnswIndex {
 	pub(super) async fn search(
 		&self,
 		ctx: &HnswContext<'_>,
-		docs: &HnswDocs,
 		stk: &mut Stk,
 		search: &HnswSearch,
 		pending_docs: Option<RoaringTreemap>,
-		filter: &mut Option<HnswTruthyDocumentFilter>,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 	) -> Result<KnnResult> {
 		let hnsw = self.hnsw.read().await;
 		// Do the search
 		if let Some(filter) = filter {
 			let neighbours = hnsw
-				.knn_search_with_filter(&ctx, &docs, search, stk, filter, pending_docs.as_ref())
+				.knn_search_with_filter(&ctx, search, stk, filter, pending_docs.as_ref())
 				.await?;
 			self.build_result(&ctx.tx, &hnsw, neighbours, search.k, |evicted_docs| {
 				filter.expires(evicted_docs)
@@ -261,10 +257,9 @@ impl HnswIndex {
 	async fn search_pendings(
 		&self,
 		ctx: &HnswContext<'_>,
-		docs: &HnswDocs,
 		stk: &mut Stk,
 		search: &HnswSearch,
-		filter: &mut Option<HnswTruthyDocumentFilter>,
+		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 	) -> Result<(BTreeMap<FloatKey, VectorPendingId>, Option<RoaringTreemap>)> {
 		let mut all_existing_docs = RoaringTreemap::new();
 		let mut non_deleted_docs = HashMap::default();
@@ -280,6 +275,9 @@ impl HnswIndex {
 			}
 		})
 		.await?;
+		if all_existing_docs.is_empty() && non_deleted_docs.is_empty() {
+			return Ok((BTreeMap::default(), None));
+		}
 		// Second pass, we build the KNN result for non-deleted documents
 		let mut result = BTreeMap::default();
 		for (id, vectors) in non_deleted_docs {
@@ -287,7 +285,7 @@ impl HnswIndex {
 			if let Some(filter) = filter {
 				match &id {
 					VectorPendingId::DocId(doc_id) => {
-						if !filter.check_doc_id_truthy(ctx, docs, stk, *doc_id).await? {
+						if !filter.check_doc_id_truthy(ctx, stk, *doc_id).await? {
 							continue;
 						}
 					}
@@ -325,7 +323,7 @@ impl HnswIndex {
 		F: FnMut(Key, VectorPendingUpdate),
 	{
 		let rng = self.ikb.new_hp_range()?;
-		let mut stream = tx.stream_keys_vals(rng, None, None, 0, ScanDirection::Forward);
+		let mut stream = tx.stream_keys_vals(rng, None, None, 0, ScanDirection::Forward, false);
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {

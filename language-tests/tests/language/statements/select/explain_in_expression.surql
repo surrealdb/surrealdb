@@ -9,12 +9,10 @@ value = "[{ id: person:1, name: 'Alice' }]"
 value = "[{ id: person:2, name: 'Bob' }]"
 
 [[test.results]]
-value = '''{
-	"agg": "CountScan [ctx: Db] [source: person]
-",
-	"select": "Project [ctx: Db]
-└────> Scan [ctx: Db] [source: person]
-" }'''
+value = '''{ agg: 'CountScan [ctx: Db] [source: person]
+', select: 'Project [ctx: Db]
+    TableScan [ctx: Db] [table: person, direction: Forward]
+' }'''
 
 */
 

@@ -151,7 +151,7 @@ jobs:
 
   check-release:
     name: Check workspace (release)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, benchmarking]
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

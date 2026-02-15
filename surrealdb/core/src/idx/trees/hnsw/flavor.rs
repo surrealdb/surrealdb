@@ -7,7 +7,6 @@ use crate::ctx::FrozenContext;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::dynamicset::{AHashSet, ArraySet};
 use crate::idx::trees::hnsw::cache::VectorCache;
-use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::hnsw::filter::HnswTruthyDocumentFilter;
 use crate::idx::trees::hnsw::index::HnswContext;
 use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswSearch};
@@ -195,54 +194,53 @@ impl HnswFlavor {
 	pub(super) async fn knn_search_with_filter(
 		&self,
 		ctx: &HnswContext<'_>,
-		docs: &HnswDocs,
 		search: &HnswSearch,
 		stk: &mut Stk,
-		filter: &mut HnswTruthyDocumentFilter,
+		filter: &mut HnswTruthyDocumentFilter<'_>,
 		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<Vec<(f64, ElementId)>> {
 		match self {
 			HnswFlavor::H5_9(h) => {
-				h.knn_search_with_filter(ctx, docs, search, stk, filter, pending_docs).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H5_17(h) => {
-				h.knn_search_with_filter(ctx, docs, search, stk, filter, pending_docs).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H5_25(h) => {
-				h.knn_search_with_filter(ctx, docs, search, stk, filter, pending_docs).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H5set(h) => {
-				h.knn_search_with_filter(ctx, docs, search, stk, filter, pending_docs).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H9_17(h) => {
-				h.knn_search_with_filter(ctx, docs, search, stk, filter, pending_docs).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H9_25(h) => {
-				h.knn_search_with_filter(ctx, docs, search, stk, filter, pending_docs).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H9set(h) => {
-				h.knn_search_with_filter(ctx, docs, search, stk, filter, pending_docs).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H13_25(h) => {
-				h.knn_search_with_filter(ctx, docs, search, stk, filter, pending_docs).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H13set(h) => {
-				h.knn_search_with_filter(ctx, docs, search, stk, filter, pending_docs).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H17set(h) => {
-				h.knn_search_with_filter(ctx, docs, search, stk, filter, pending_docs).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H21set(h) => {
-				h.knn_search_with_filter(ctx, docs, search, stk, filter, pending_docs).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H25set(h) => {
-				h.knn_search_with_filter(ctx, docs, search, stk, filter, pending_docs).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H29set(h) => {
-				h.knn_search_with_filter(ctx, docs, search, stk, filter, pending_docs).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::Hset(h) => {
-				h.knn_search_with_filter(ctx, docs, search, stk, filter, pending_docs).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 		}
 	}

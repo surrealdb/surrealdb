@@ -891,7 +891,8 @@ impl HnswEntry {
 		ef: u32,
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self> {
-		let res = h.knn_search(db, ctx, opt, stk, v, n as usize, ef as usize, cond).await?;
+		let cond_filter = cond.map(|cond| (opt, cond));
+		let res = h.knn_search(db, ctx, stk, v, n as usize, ef as usize, cond_filter).await?;
 		Ok(Self {
 			res,
 		})

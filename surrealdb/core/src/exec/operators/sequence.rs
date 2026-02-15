@@ -152,7 +152,7 @@ async fn execute_block_with_context(
 		let frozen_ctx = current_ctx.ctx().clone();
 
 		// Try to plan the expression with current context
-		match try_plan_expr(expr, &frozen_ctx) {
+		match try_plan_expr(expr, &frozen_ctx, current_ctx.txn()).await {
 			Ok(plan) => {
 				if plan.mutates_context() {
 					current_ctx = plan.output_context(&current_ctx).await?;
@@ -168,7 +168,10 @@ async fn execute_block_with_context(
 					};
 				}
 			}
-			Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
+			Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+				if let Error::PlannerUnimplemented(msg) = &e {
+					tracing::warn!("PlannerUnimplemented fallback in sequence: {msg}");
+				}
 				// Fallback to legacy compute path
 				let (opt, frozen) = get_legacy_context_cached(&current_ctx, &mut legacy_ctx)
 					.context("Legacy compute fallback context unavailable")?;

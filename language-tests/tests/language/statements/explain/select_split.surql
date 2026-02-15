@@ -6,19 +6,17 @@ reason = "Test EXPLAIN with SPLIT clause"
 value = "'OK'"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Split [ctx: Db] [on: tags]
-       └────> Scan [ctx: Db] [source: post]
-"'''
+value = ''''Project [ctx: Db]
+    Split [ctx: Db] [on: tags]
+        TableScan [ctx: Db] [table: post, direction: Forward]
+''''
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> SortByKey [ctx: Db] [sort_keys: views DESC]
-       └────> Split [ctx: Db] [on: tags]
-              └────> Scan [ctx: Db] [source: post]
-"'''
+value = ''''Project [ctx: Db]
+    SortByKey [ctx: Db] [sort_keys: views DESC]
+        Split [ctx: Db] [on: tags]
+            TableScan [ctx: Db] [table: post, direction: Forward]
+''''
 */
 
 -- Setup test data

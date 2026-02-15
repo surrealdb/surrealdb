@@ -63,8 +63,6 @@ use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::kvs::cache::ds::DatastoreCache;
-use crate::kvs::clock::SizedClock;
-#[expect(unused_imports)]
 use crate::kvs::clock::SystemClock;
 use crate::kvs::ds::requirements::{
 	TransactionBuilderFactoryRequirements, TransactionBuilderRequirements,
@@ -154,8 +152,6 @@ pub struct Metric {
 
 #[derive(Clone)]
 pub(crate) struct TransactionFactory {
-	// Clock for tracking time. It is read-only and accessible to all transactions.
-	clock: Arc<SizedClock>,
 	// The inner datastore type
 	builder: Arc<Box<dyn TransactionBuilder>>,
 	// Async event processing trigger
@@ -164,12 +160,10 @@ pub(crate) struct TransactionFactory {
 
 impl TransactionFactory {
 	pub(super) fn new(
-		clock: Arc<SizedClock>,
 		async_event_trigger: Arc<Notify>,
 		builder: Box<dyn TransactionBuilder>,
 	) -> Self {
 		Self {
-			clock,
 			builder: Arc::new(builder),
 			async_event_trigger,
 		}
@@ -273,18 +267,16 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 /// The `path_valid` helper is used by the CLI to validate the path early and
 /// provide better error messages before starting the runtime.
 pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
-	/// Create a new transaction builder and the clock to use throughout the datastore.
+	/// Create a new transaction builder for the datastore.
 	///
 	/// # Parameters
 	/// - `path`: Database connection path string
-	/// - `clock`: Optional clock for timestamp generation (uses system clock if None)
 	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 	async fn new_transaction_builder(
 		&self,
 		path: &str,
-		clock: Option<Arc<SizedClock>>,
 		canceller: CancellationToken,
-	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)>;
+	) -> Result<Box<dyn TransactionBuilder>>;
 
 	/// Validate a datastore path string.
 	fn path_valid(v: &str) -> Result<String>;
@@ -328,9 +320,8 @@ impl TransactionBuilderFactory for CommunityComposer {
 	async fn new_transaction_builder(
 		&self,
 		path: &str,
-		clock: Option<Arc<SizedClock>>,
 		_canceller: CancellationToken,
-	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)> {
+	) -> Result<Box<dyn TransactionBuilder>> {
 		// Extract query parameters from the path before scheme extraction
 		let (raw_path, query_string) = match path.split_once('?') {
 			Some((p, q)) => (p, Some(q)),
@@ -377,9 +368,8 @@ impl TransactionBuilderFactory for CommunityComposer {
 						super::config::MemoryConfig::from_params(&params).map_err(Error::Kvs)?;
 					// Initialise the storage engine
 					let v = super::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store in {flavour}");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-mem"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -397,9 +387,8 @@ impl TransactionBuilderFactory for CommunityComposer {
 					let v = super::rocksdb::Datastore::new(&path, config)
 						.await
 						.map(DatastoreFlavor::RocksDB)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -417,9 +406,8 @@ impl TransactionBuilderFactory for CommunityComposer {
 					let v = super::surrealkv::Datastore::new(&path, config)
 						.await
 						.map(DatastoreFlavor::SurrealKV)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -430,9 +418,8 @@ impl TransactionBuilderFactory for CommunityComposer {
 				{
 					let v =
 						super::indxdb::Datastore::new(&path).await.map(DatastoreFlavor::IndxDB)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -442,9 +429,8 @@ impl TransactionBuilderFactory for CommunityComposer {
 				#[cfg(feature = "kv-tikv")]
 				{
 					let v = super::tikv::Datastore::new(&path).await.map(DatastoreFlavor::TiKV)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -648,45 +634,20 @@ impl Datastore {
 		path: &str,
 		canceller: CancellationToken,
 	) -> Result<Self> {
-		Self::new_with_clock::<F>(composer, path, None, canceller).await
-	}
-
-	/// Creates a new datastore instance with a custom factory and clock.
-	///
-	/// This is the most flexible constructor, allowing full control over both
-	/// the backend and the clock used for timestamps.
-	///
-	/// # Parameters
-	/// - `factory`: Transaction builder factory for backend selection
-	/// - `path`: Database path (e.g., "memory", "surrealkv://path", "tikv://host:port")
-	/// - `clock`: Optional custom clock for timestamp generation (uses system clock if None)
-	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
-	///
-	/// # Generic parameters
-	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-	pub(crate) async fn new_with_clock<
-		C: TransactionBuilderFactory + BucketStoreProvider + 'static,
-	>(
-		composer: C,
-		path: &str,
-		clock: Option<Arc<SizedClock>>,
-		canceller: CancellationToken,
-	) -> Result<Datastore> {
 		// Initiate the desired datastore
-		let (builder, clock) = composer.new_transaction_builder(path, clock, canceller).await?;
+		let builder = composer.new_transaction_builder(path, canceller).await?;
 		//
 		let buckets = BucketsManager::new(Arc::new(composer));
 		// Set the properties on the datastore
-		Self::new_with_builder(builder, buckets, clock)
+		Self::new_with_builder(builder, buckets)
 	}
 
 	pub(crate) fn new_with_builder(
 		builder: Box<dyn TransactionBuilder>,
 		buckets: BucketsManager,
-		clock: Arc<SizedClock>,
 	) -> Result<Self> {
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(clock, async_event_trigger.clone(), builder);
+		let tf = TransactionFactory::new(async_event_trigger.clone(), builder);
 		let id = Uuid::new_v4();
 		Ok(Self {
 			id,
@@ -861,8 +822,8 @@ impl Datastore {
 		&self.jwks_cache
 	}
 
-	pub(super) async fn clock_now(&self) -> Timestamp {
-		self.transaction_factory.clock.now().await
+	pub(super) fn clock_now(&self) -> Timestamp {
+		SystemClock::new().now()
 	}
 
 	// Used for testing live queries
@@ -1047,7 +1008,7 @@ impl Datastore {
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::Nd::new(self.id);
-		let now = self.clock_now().await;
+		let now = self.clock_now();
 		let node = Node::new(self.id, now, false);
 		let res = run!(txn, txn.put(&key, &node, None).await);
 		match res {
@@ -1083,7 +1044,7 @@ impl Datastore {
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::new(self.id);
-		let now = self.clock_now().await;
+		let now = self.clock_now();
 		let node = Node::new(self.id, now, false);
 		run!(txn, txn.replace(&key, &node).await)
 	}
@@ -1122,7 +1083,7 @@ impl Datastore {
 		let inactive = {
 			let txn = self.transaction(Read, Optimistic).await?;
 			let nds = catch!(txn, txn.all_nodes().await);
-			let now = self.clock_now().await;
+			let now = self.clock_now();
 			catch!(txn, txn.cancel().await);
 			// Filter the inactive nodes
 			nds.iter()
@@ -1836,7 +1797,7 @@ impl Datastore {
 			return Err(DbResultError::InvalidAuth(format!("Anonymous access not allowed: {}", e)));
 		}
 
-		// Create a new query options (currently unused but may be needed for future enhancements)
+		// Create a new query options
 		let opt = self.setup_options(sess);
 
 		// Create a default context

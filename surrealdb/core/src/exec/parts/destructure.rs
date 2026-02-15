@@ -74,10 +74,6 @@ impl PhysicalExpr for DestructurePart {
 		evaluate_destructure(&value, &self.fields, ctx).await
 	}
 
-	fn references_current_value(&self) -> bool {
-		true
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		fn field_access(fields: &[DestructureField]) -> AccessMode {
 			fields

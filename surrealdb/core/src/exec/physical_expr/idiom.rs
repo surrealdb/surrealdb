@@ -50,13 +50,6 @@ impl IdiomExpr {
 			parts,
 		}
 	}
-
-	/// Check if this is a simple identifier (single Field part with no complex parts).
-	/// When used without a current value context, simple identifiers can be
-	/// treated as string literals (e.g., `INFO FOR USER test` where `test` is a name).
-	pub fn is_simple_identifier(&self) -> bool {
-		self.parts.len() == 1 && self.parts[0].name() == "Field"
-	}
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -89,19 +82,6 @@ impl PhysicalExpr for IdiomExpr {
 		};
 
 		evaluate_parts_with_continuation(&self.parts, value, ctx).await
-	}
-
-	fn references_current_value(&self) -> bool {
-		// When we have a start expression, the idiom provides its own base value
-		// and doesn't need the current row value -- but the start expression itself
-		// might reference it.
-		if let Some(ref start) = self.start_expr {
-			return start.references_current_value();
-		}
-		// Simple identifiers (single Field part) can be evaluated without current_value
-		// - they return NONE (undefined variable)
-		// Complex idioms require current_value to provide the base object for field access
-		!self.is_simple_identifier()
 	}
 
 	fn access_mode(&self) -> AccessMode {
