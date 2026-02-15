@@ -85,6 +85,9 @@ impl SurrealValue for QueryResult {
 				status: "ERR",
 				time: string,
 				result: string,
+				kind: string,
+				details: any,
+				cause: any,
 				query_type: (QueryType::kind_of()),
 			}
 		)
@@ -100,15 +103,25 @@ impl SurrealValue for QueryResult {
 	}
 
 	fn into_value(self) -> Value {
-		Value::Object(object! {
+		let mut map = object! {
 			status: Status::from(&self.result).into_value(),
 			time: format!("{:?}", self.time).into_value(),
-			result: match self.result {
-				Ok(v) => v.into_value(),
-				Err(e) => SurrealValue::into_value(e),
-			},
 			type: self.query_type.into_value(),
-		})
+		};
+		match self.result {
+			Ok(v) => {
+				map.insert("result", v);
+			}
+			Err(e) => {
+				let err_val = e.into_query_result_value();
+				if let Value::Object(err_obj) = err_val {
+					for (k, v) in err_obj.into_inner() {
+						map.insert(k, v);
+					}
+				}
+			}
+		}
+		Value::Object(map)
 	}
 
 	fn from_value(value: Value) -> Result<Self, TypesError> {
@@ -140,7 +153,12 @@ impl SurrealValue for QueryResult {
 
 		let result = match status {
 			Status::Ok => Ok(Value::from_value(result)?),
-			Status::Err => Err(TypesError::from_value(result)?),
+			Status::Err => {
+				// Reconstruct error from query-result shape (result string + optional kind,
+				// details, cause)
+				map.insert("result".to_string(), result);
+				Err(TypesError::from_query_result_value(Value::Object(map))?)
+			}
 		};
 
 		Ok(QueryResult {

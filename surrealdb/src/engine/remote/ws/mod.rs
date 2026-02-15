@@ -728,7 +728,8 @@ impl Surreal<Client> {
 mod tests {
 	use std::sync::Arc;
 
-	use surrealdb_core::rpc::{DbResult, DbResultError};
+	use surrealdb_core::rpc::DbResult;
+	use surrealdb_types::Error as TypesError;
 	use tokio::sync::RwLock;
 	use uuid::Uuid;
 
@@ -808,7 +809,7 @@ mod tests {
 
 		// Handle an error response
 		let sink = RwLock::new(futures::sink::drain::<MockMessage>());
-		let error = DbResultError::InternalError("test error".into());
+		let error = TypesError::internal("test error".to_string());
 		let result = handle_response_with_id::<MockMessage, _, _>(
 			request_id,
 			Err(error),

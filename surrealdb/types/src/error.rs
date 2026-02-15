@@ -305,6 +305,65 @@ impl Error {
 		}
 	}
 
+	/// Build an error from the query-result wire shape (message, optional kind, details, cause).
+	/// Used when deserialising query result error payloads that do not include `code`. Uses
+	/// [`default_code`] and defaults `kind` to [`Internal`](ErrorKind::Internal) when not present.
+	pub fn from_parts(
+		message: String,
+		kind: Option<ErrorKind>,
+		details: Option<Value>,
+		cause: Option<Error>,
+	) -> Self {
+		Self {
+			code: default_code(),
+			kind: kind.unwrap_or_default(),
+			message,
+			details,
+			cause: cause.map(Box::new),
+		}
+	}
+
+	/// Serialise this error into the query-result wire shape: `result` (message string), optional
+	/// `kind`, `details`, and `cause`. Does not include `code`. Used for query result responses
+	/// for backwards compatibility (old clients expect `result` to be the message string).
+	pub fn into_query_result_value(&self) -> Value {
+		let mut obj = crate::Object::new();
+		obj.insert("result", self.message().to_string());
+		obj.insert("kind", self.kind().clone());
+		if let Some(d) = self.details() {
+			obj.insert("details", d.clone());
+		}
+		if let Some(c) = self.cause() {
+			obj.insert("cause", c.into_query_result_value());
+		}
+		Value::Object(obj)
+	}
+
+	/// Deserialise an error from the query-result wire shape. Requires `result` (message string).
+	/// `kind` is optional and defaults to [`Internal`](ErrorKind::Internal) when missing.
+	pub fn from_query_result_value(value: Value) -> Result<Self, Self> {
+		let Value::Object(mut map) = value else {
+			return Err(Self::internal("Expected object for query result error".to_string()));
+		};
+		let result_val = map.remove("result").ok_or_else(|| {
+			Self::internal("Missing result (message) for query result error".to_string())
+		})?;
+		let message = result_val.into_string().map_err(|e| Self::internal(e.to_string()))?;
+		let kind = map
+			.remove("kind")
+			.map(ErrorKind::from_value)
+			.transpose()
+			.map_err(|e| Self::internal(e.to_string()))?
+			.unwrap_or_default();
+		let details = map.remove("details");
+		let cause = map
+			.remove("cause")
+			.map(Self::from_query_result_value)
+			.transpose()
+			.map_err(|e| Self::internal(e.to_string()))?;
+		Ok(Self::from_parts(message, Some(kind), details, cause))
+	}
+
 	/// Adds optional structured details to this error.
 	pub fn with_details(mut self, details: impl SurrealValue) -> Self {
 		self.details = Some(details.into_value());
@@ -633,7 +692,7 @@ impl fmt::Display for Error {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "{}", self.message)?;
 		if let Some(cause) = &self.cause {
-			write!(f, ": {}", cause.message)?;
+			write!(f, ": {cause}")?;
 		}
 		Ok(())
 	}
