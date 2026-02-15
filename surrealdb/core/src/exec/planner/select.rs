@@ -52,6 +52,19 @@ pub(crate) struct SelectPipelineConfig {
 	pub filter_pushed: bool,
 }
 
+/// Result of planning FROM sources.
+///
+/// Tracks whether the scan predicate and limit/start were actually pushed
+/// into the source operator, so the caller can avoid duplicating them in
+/// the outer pipeline.
+struct PlannedSource {
+	operator: Arc<dyn ExecOperator>,
+	/// The scan predicate was consumed by the source operator.
+	predicate_pushed: bool,
+	/// The limit and start values were consumed by the source operator.
+	limit_pushed: bool,
+}
+
 impl<'ctx> Planner<'ctx> {
 	/// Plan the SELECT pipeline after the source is determined.
 	pub(crate) async fn plan_pipeline(
@@ -1040,8 +1053,11 @@ impl<'ctx> Planner<'ctx> {
 			(None, None)
 		};
 
-		// Source resolution with plan-time index analysis
-		let source = pp
+		// Source resolution with plan-time index analysis.
+		// The result tracks whether the predicate and limit/start were
+		// consumed by the source operator, so we can avoid duplicating
+		// them in the outer pipeline.
+		let planned = pp
 			.plan_sources(
 				what,
 				version,
@@ -1062,20 +1078,17 @@ impl<'ctx> Planner<'ctx> {
 			// BEFORE ranking by distance. Otherwise rows that don't satisfy
 			// the WHERE clause can consume top-K slots and push out valid rows.
 			//
-			// TableScan and DynamicScan already have the predicate pushed in
-			// via scan_predicate. Concrete operators (IndexScan, FullTextScan)
-			// do not, so we add an explicit Filter for those.
-			let predicate_in_source =
-				source_is_single_scan && matches!(source.name(), "TableScan" | "DynamicScan");
-			let input = if !predicate_in_source {
+			// When the predicate was pushed into the source operator, it is
+			// already applied there. Otherwise we add an explicit Filter.
+			let input = if !planned.predicate_pushed {
 				if let Some(ref c) = cond_for_filter {
 					let pred = pp.physical_expr(c.0.clone()).await?;
-					Arc::new(Filter::new(source, pred)) as Arc<dyn ExecOperator>
+					Arc::new(Filter::new(planned.operator, pred)) as Arc<dyn ExecOperator>
 				} else {
-					source
+					planned.operator
 				}
 			} else {
-				source
+				planned.operator
 			};
 			let knn_ctx = planning_ctx.get_knn_context().cloned();
 			Arc::new(
@@ -1083,15 +1096,14 @@ impl<'ctx> Planner<'ctx> {
 					.with_knn_context(knn_ctx),
 			) as Arc<dyn ExecOperator>
 		} else {
-			source
+			planned.operator
 		};
 
 		// Build pipeline.
-		// If the source is a concrete operator (IndexScan, FullTextScan, etc.)
-		// rather than a generic Scan, the filter was NOT pushed into it and
-		// must remain in the pipeline.
-		let is_generic_scan = source.name() == "Scan";
-		let filter_pushed = is_generic_scan && source_is_single_scan && cond_for_filter.is_some();
+		// When the predicate was pushed into the source, omit it from the
+		// pipeline. Likewise, when limit/start were pushed, omit order,
+		// limit, and start from the pipeline to avoid double application.
+		let filter_pushed = planned.predicate_pushed;
 		let config = SelectPipelineConfig {
 			cond: if filter_pushed || had_bruteforce_knn {
 				None
@@ -1100,17 +1112,17 @@ impl<'ctx> Planner<'ctx> {
 			},
 			split,
 			group,
-			order: if push_limit && is_generic_scan {
+			order: if planned.limit_pushed {
 				None
 			} else {
 				order
 			},
-			limit: if push_limit && is_generic_scan {
+			limit: if planned.limit_pushed {
 				None
 			} else {
 				limit
 			},
-			start: if push_limit && is_generic_scan {
+			start: if planned.limit_pushed {
 				None
 			} else {
 				start
@@ -1150,7 +1162,7 @@ impl<'ctx> Planner<'ctx> {
 		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
+	) -> Result<PlannedSource, Error> {
 		if what.is_empty() {
 			return Err(Error::Query {
 				message: "SELECT requires at least one source".to_string(),
@@ -1176,7 +1188,15 @@ impl<'ctx> Planner<'ctx> {
 		if plans.len() == 1 {
 			Ok(plans.pop().expect("verified non-empty"))
 		} else {
-			Ok(Arc::new(Union::new(plans)))
+			// Multiple sources are combined via Union; pushdowns are not
+			// applicable because source_is_single_scan is false when
+			// what.len() > 1, so scan_predicate/scan_limit are always None.
+			let operators = plans.into_iter().map(|p| p.operator).collect();
+			Ok(PlannedSource {
+				operator: Arc::new(Union::new(operators)),
+				predicate_pushed: false,
+				limit_pushed: false,
+			})
 		}
 	}
 
@@ -1202,7 +1222,7 @@ impl<'ctx> Planner<'ctx> {
 		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
-	) -> Result<Arc<dyn ExecOperator>, Error> {
+	) -> Result<PlannedSource, Error> {
 		use crate::exec::operators::{FullTextScan, IndexScan, KnnScan};
 
 		// When we have a txn and the source is a table, resolve the
@@ -1221,16 +1241,24 @@ impl<'ctx> Planner<'ctx> {
 						access,
 						direction,
 					} => {
-						return Ok(Arc::new(IndexScan::new(index_ref, access, direction, table))
-							as Arc<dyn ExecOperator>);
+						return Ok(PlannedSource {
+							operator: Arc::new(IndexScan::new(index_ref, access, direction, table))
+								as Arc<dyn ExecOperator>,
+							predicate_pushed: false,
+							limit_pushed: false,
+						});
 					}
 					AccessPath::FullTextSearch {
 						index_ref,
 						query,
 						operator,
 					} => {
-						return Ok(Arc::new(FullTextScan::new(index_ref, query, operator, table))
-							as Arc<dyn ExecOperator>);
+						return Ok(PlannedSource {
+							operator: Arc::new(FullTextScan::new(index_ref, query, operator, table))
+								as Arc<dyn ExecOperator>,
+							predicate_pushed: false,
+							limit_pushed: false,
+						});
 					}
 					AccessPath::KnnSearch {
 						index_ref,
@@ -1242,26 +1270,36 @@ impl<'ctx> Planner<'ctx> {
 						// (non-KNN predicates). These are pushed into the HNSW search
 						// so that non-matching rows don't consume top-K slots.
 						let residual_cond = cond.and_then(strip_knn_from_condition);
-						return Ok(Arc::new(KnnScan::new(
-							index_ref,
-							vector,
-							k,
-							ef,
-							table,
-							knn_ctx,
-							residual_cond,
-						)) as Arc<dyn ExecOperator>);
+						return Ok(PlannedSource {
+							operator: Arc::new(KnnScan::new(
+								index_ref,
+								vector,
+								k,
+								ef,
+								table,
+								knn_ctx,
+								residual_cond,
+							)) as Arc<dyn ExecOperator>,
+							predicate_pushed: false,
+							limit_pushed: false,
+						});
 					}
 					AccessPath::TableScan => {
-						return Ok(Arc::new(TableScan::new(
-							table,
-							direction,
-							version,
-							scan_predicate,
-							scan_limit,
-							scan_start,
-							needed_fields,
-						)) as Arc<dyn ExecOperator>);
+						let predicate_pushed = scan_predicate.is_some();
+						let limit_pushed = scan_limit.is_some();
+						return Ok(PlannedSource {
+							operator: Arc::new(TableScan::new(
+								table,
+								direction,
+								version,
+								scan_predicate,
+								scan_limit,
+								scan_start,
+								needed_fields,
+							)) as Arc<dyn ExecOperator>,
+							predicate_pushed,
+							limit_pushed,
+						});
 					}
 					AccessPath::Union(_paths) => {
 						// Multi-index union — fall through to generic Scan
@@ -1277,43 +1315,11 @@ impl<'ctx> Planner<'ctx> {
 
 		match expr {
 			Expr::Table(_) => {
+				let predicate_pushed = scan_predicate.is_some();
+				let limit_pushed = scan_limit.is_some();
 				let table_expr = self.physical_expr(expr).await?;
-				Ok(Arc::new(
-					DynamicScan::new(
-						table_expr,
-						version,
-						cond.cloned(),
-						order.cloned(),
-						with.cloned(),
-						needed_fields,
-						scan_predicate,
-						scan_limit,
-						scan_start,
-					)
-					.with_knn_context(knn_ctx),
-				) as Arc<dyn ExecOperator>)
-			}
-			Expr::Literal(crate::expr::literal::Literal::RecordId(rid)) => {
-				let record_id_expr = self
-					.physical_expr(Expr::Literal(crate::expr::literal::Literal::RecordId(rid)))
-					.await?;
-				Ok(Arc::new(RecordIdScan::new(record_id_expr, version, needed_fields))
-					as Arc<dyn ExecOperator>)
-			}
-			Expr::Select(inner_select) => {
-				if version.is_some() {
-					return Err(Error::Query {
-						message: "VERSION clause cannot be used with a subquery source. \
-								  Place the VERSION clause inside the subquery instead."
-							.to_string(),
-					});
-				}
-				self.plan_select_statement(*inner_select).await
-			}
-			Expr::Param(ref param) => match self.ctx.value(param.as_str()) {
-				Some(crate::val::Value::Table(_)) => {
-					let table_expr = self.physical_expr(expr).await?;
-					Ok(Arc::new(
+				Ok(PlannedSource {
+					operator: Arc::new(
 						DynamicScan::new(
 							table_expr,
 							version,
@@ -1326,41 +1332,114 @@ impl<'ctx> Planner<'ctx> {
 							scan_start,
 						)
 						.with_knn_context(knn_ctx),
-					) as Arc<dyn ExecOperator>)
+					) as Arc<dyn ExecOperator>,
+					predicate_pushed,
+					limit_pushed,
+				})
+			}
+			Expr::Literal(crate::expr::literal::Literal::RecordId(rid)) => {
+				let record_id_expr = self
+					.physical_expr(Expr::Literal(crate::expr::literal::Literal::RecordId(rid)))
+					.await?;
+				Ok(PlannedSource {
+					operator: Arc::new(RecordIdScan::new(record_id_expr, version, needed_fields))
+						as Arc<dyn ExecOperator>,
+					predicate_pushed: false,
+					limit_pushed: false,
+				})
+			}
+			Expr::Select(inner_select) => {
+				if version.is_some() {
+					return Err(Error::Query {
+						message: "VERSION clause cannot be used with a subquery source. \
+								  Place the VERSION clause inside the subquery instead."
+							.to_string(),
+					});
+				}
+				Ok(PlannedSource {
+					operator: self.plan_select_statement(*inner_select).await?,
+					predicate_pushed: false,
+					limit_pushed: false,
+				})
+			}
+			Expr::Param(ref param) => match self.ctx.value(param.as_str()) {
+				Some(crate::val::Value::Table(_)) => {
+					let predicate_pushed = scan_predicate.is_some();
+					let limit_pushed = scan_limit.is_some();
+					let table_expr = self.physical_expr(expr).await?;
+					Ok(PlannedSource {
+						operator: Arc::new(
+							DynamicScan::new(
+								table_expr,
+								version,
+								cond.cloned(),
+								order.cloned(),
+								with.cloned(),
+								needed_fields,
+								scan_predicate,
+								scan_limit,
+								scan_start,
+							)
+							.with_knn_context(knn_ctx),
+						) as Arc<dyn ExecOperator>,
+						predicate_pushed,
+						limit_pushed,
+					})
 				}
 				Some(crate::val::Value::RecordId(_)) => {
 					let record_id_expr = self.physical_expr(expr).await?;
-					Ok(Arc::new(RecordIdScan::new(record_id_expr, version, needed_fields))
-						as Arc<dyn ExecOperator>)
+					Ok(PlannedSource {
+						operator: Arc::new(RecordIdScan::new(
+							record_id_expr,
+							version,
+							needed_fields,
+						)) as Arc<dyn ExecOperator>,
+						predicate_pushed: false,
+						limit_pushed: false,
+					})
 				}
 				Some(_) | None => {
 					let phys_expr = self.physical_expr(expr).await?;
-					Ok(Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>)
+					Ok(PlannedSource {
+						operator: Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>,
+						predicate_pushed: false,
+						limit_pushed: false,
+					})
 				}
 			},
 			Expr::FunctionCall(_)
 			| Expr::Postfix {
 				..
 			} => {
+				let predicate_pushed = scan_predicate.is_some();
+				let limit_pushed = scan_limit.is_some();
 				let source_expr = self.physical_expr(expr).await?;
-				Ok(Arc::new(
-					DynamicScan::new(
-						source_expr,
-						version,
-						cond.cloned(),
-						order.cloned(),
-						with.cloned(),
-						needed_fields,
-						scan_predicate,
-						scan_limit,
-						scan_start,
-					)
-					.with_knn_context(knn_ctx),
-				) as Arc<dyn ExecOperator>)
+				Ok(PlannedSource {
+					operator: Arc::new(
+						DynamicScan::new(
+							source_expr,
+							version,
+							cond.cloned(),
+							order.cloned(),
+							with.cloned(),
+							needed_fields,
+							scan_predicate,
+							scan_limit,
+							scan_start,
+						)
+						.with_knn_context(knn_ctx),
+					) as Arc<dyn ExecOperator>,
+					predicate_pushed,
+					limit_pushed,
+				})
 			}
 			other => {
 				let phys_expr = self.physical_expr(other).await?;
-				Ok(Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>)
+				Ok(PlannedSource {
+					operator: Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>,
+					predicate_pushed: false,
+					limit_pushed: false,
+				})
 			}
 		}
 	}
