@@ -5,7 +5,7 @@
 
 use surrealdb_types::{
 	AlreadyExistsError, AuthError, ConfigurationError, Error as TypesError, NotAllowedError,
-	NotFoundError, QueryError, SerializationError, ToSql,
+	NotFoundError, QueryError, SerializationError,
 };
 
 use crate::err::Error;
@@ -17,50 +17,29 @@ use crate::iam::Error as IamErrorKind;
 /// cloned. For `anyhow::Error`, use `downcast` to consume and recover the core `Error`:
 /// `e.downcast::<Error>().map(into_types_error).unwrap_or_else(|e|
 /// TypesError::internal(e.to_string()))`.
-#[must_use]
-pub fn into_types_error(e: Error) -> TypesError {
+pub fn into_types_error(error: Error) -> TypesError {
 	use Error::*;
-	match e {
+	let message = error.to_string();
+	match error {
 		// Auth
-		ExpiredSession => {
-			TypesError::auth("The session has expired".to_string(), Some(AuthError::SessionExpired))
-		}
-		ExpiredToken => {
-			TypesError::auth("The token has expired".to_string(), Some(AuthError::TokenExpired))
-		}
-		InvalidAuth => {
-			TypesError::auth("Authentication failed".to_string(), Some(AuthError::InvalidAuth))
-		}
-		UnexpectedAuth => TypesError::auth(
-			"Unexpected authentication error".to_string(),
-			Some(AuthError::UnexpectedAuth),
-		),
-		MissingUserOrPass => TypesError::auth(
-			"Missing username or password".to_string(),
-			Some(AuthError::MissingUserOrPass),
-		),
-		NoSigninTarget => TypesError::auth(
-			"No signin target specified".to_string(),
-			Some(AuthError::NoSigninTarget),
-		),
-		InvalidPass => {
-			TypesError::auth("Invalid password".to_string(), Some(AuthError::InvalidPass))
-		}
-		TokenMakingFailed => TypesError::auth(
-			"Failed to create authentication token".to_string(),
-			Some(AuthError::TokenMakingFailed),
-		),
+		ExpiredSession => TypesError::auth(message, Some(AuthError::SessionExpired)),
+		ExpiredToken => TypesError::auth(message, Some(AuthError::TokenExpired)),
+		InvalidAuth => TypesError::auth(message, Some(AuthError::InvalidAuth)),
+		UnexpectedAuth => TypesError::auth(message, Some(AuthError::UnexpectedAuth)),
+		MissingUserOrPass => TypesError::auth(message, Some(AuthError::MissingUserOrPass)),
+		NoSigninTarget => TypesError::auth(message, Some(AuthError::NoSigninTarget)),
+		InvalidPass => TypesError::auth(message, Some(AuthError::InvalidPass)),
+		TokenMakingFailed => TypesError::auth(message, Some(AuthError::TokenMakingFailed)),
 		IamError(iam_err) => match iam_err {
-			IamErrorKind::InvalidRole(role) => TypesError::auth(
-				format!("Invalid role '{role}'"),
-				Some(AuthError::InvalidRole(role)),
-			),
+			IamErrorKind::InvalidRole(role) => {
+				TypesError::auth(message, Some(AuthError::InvalidRole(role)))
+			}
 			IamErrorKind::NotAllowed {
 				actor,
 				action,
 				resource,
 			} => TypesError::auth(
-				"Not enough permissions to perform this action".to_string(),
+				message,
 				Some(AuthError::NotAllowed {
 					actor,
 					action,
@@ -68,136 +47,97 @@ pub fn into_types_error(e: Error) -> TypesError {
 				}),
 			),
 		},
-		InvalidSignup => {
-			TypesError::auth("Signup failed".to_string(), Some(AuthError::InvalidSignup))
-		}
+		InvalidSignup => TypesError::auth(message, Some(AuthError::InvalidSignup)),
 
 		// Validation
-		NsEmpty => TypesError::validation("Specify a namespace to use".to_string(), None),
-		DbEmpty => TypesError::validation("Specify a database to use".to_string(), None),
-		InvalidQuery(_) => TypesError::validation("Invalid query syntax".to_string(), None),
+		NsEmpty => TypesError::validation(message, None),
+		DbEmpty => TypesError::validation(message, None),
+		InvalidQuery(_) => TypesError::validation(message, None),
 		InvalidParam {
 			..
-		} => TypesError::validation("Invalid query variables".to_string(), None),
+		} => TypesError::validation(message, None),
 		InvalidContent {
 			..
-		} => TypesError::validation("Invalid content clause".to_string(), None),
+		} => TypesError::validation(message, None),
 		InvalidMerge {
 			..
-		} => TypesError::validation("Invalid merge clause".to_string(), None),
-		InvalidPatch(_) => TypesError::validation("Invalid patch operation".to_string(), None),
-		Coerce(_) => TypesError::validation("Type coercion error".to_string(), None),
-		Cast(_) => TypesError::validation("Type casting error".to_string(), None),
+		} => TypesError::validation(message, None),
+		InvalidPatch(_) => TypesError::validation(message, None),
+		Coerce(_) => TypesError::validation(message, None),
+		Cast(_) => TypesError::validation(message, None),
 		TryAdd(..) | TrySub(..) | TryMul(..) | TryDiv(..) | TryRem(..) | TryPow(..) | TryNeg(_) => {
-			TypesError::validation("Arithmetic operation error".to_string(), None)
+			TypesError::validation(message, None)
 		}
-		TryFrom(..) => TypesError::validation("Type conversion error".to_string(), None),
+		TryFrom(..) => TypesError::validation(message, None),
 		DuplicatedMatchRef {
 			..
-		} => TypesError::validation("Duplicated match reference".to_string(), None),
+		} => TypesError::validation(message, None),
 
 		// Not allowed (method, scripting, function, net target)
-		ScriptingNotAllowed => TypesError::not_allowed(
-			"Scripting functions are not allowed".to_string(),
-			Some(NotAllowedError::Method),
-		),
-		FunctionNotAllowed(func) => TypesError::not_allowed(
-			format!("Function '{func}' is not allowed"),
-			Some(NotAllowedError::Method),
-		),
-		NetTargetNotAllowed(target) => TypesError::not_allowed(
-			format!("Network target '{target}' is not allowed"),
-			Some(NotAllowedError::Method),
-		),
+		ScriptingNotAllowed => TypesError::not_allowed(message, Some(NotAllowedError::Method)),
+		FunctionNotAllowed(..) => TypesError::not_allowed(message, Some(NotAllowedError::Method)),
+		NetTargetNotAllowed(..) => TypesError::not_allowed(message, Some(NotAllowedError::Method)),
 
 		// Configuration
-		RealtimeDisabled => TypesError::configuration(
-			"Live query not supported".to_string(),
-			Some(ConfigurationError::LiveQueryNotSupported),
-		),
+		RealtimeDisabled => {
+			TypesError::configuration(message, Some(ConfigurationError::LiveQueryNotSupported))
+		}
 
 		// Query
-		QueryTimedout(d) => TypesError::query(format!("{d}"), Some(QueryError::Timedout)),
-		QueryCancelled => TypesError::query(
-			"The query was not executed due to a cancelled transaction".to_string(),
-			Some(QueryError::Cancelled),
-		),
+		QueryTimedout(..) => TypesError::query(message, Some(QueryError::Timedout)),
+		QueryCancelled => TypesError::query(message, Some(QueryError::Cancelled)),
 		QueryNotExecuted {
 			message,
 		} => TypesError::query(message, Some(QueryError::NotExecuted)),
 
 		// Serialization
-		Unencodable => TypesError::serialization("Value cannot be serialized".to_string(), None),
-		Storekey(_) => TypesError::serialization("Key decoding error".to_string(), None),
-		Revision(_) => TypesError::serialization("Versioned data error".to_string(), None),
-		Utf8Error(_) => TypesError::serialization("UTF-8 decoding error".to_string(), None),
-		Serialization(msg) => {
-			TypesError::serialization(msg, Some(SerializationError::Serialization))
+		Unencodable => TypesError::serialization(message, None),
+		Storekey(_) => TypesError::serialization(message, None),
+		Revision(_) => TypesError::serialization(message, None),
+		Utf8Error(_) => TypesError::serialization(message, None),
+		Serialization(..) => {
+			TypesError::serialization(message, Some(SerializationError::Serialization))
 		}
 
 		// Not found
 		NsNotFound {
-			name,
-		} => TypesError::not_found(
-			format!("The namespace '{name}' does not exist"),
-			Some(NotFoundError::Namespace),
-		),
+			..
+		} => TypesError::not_found(message, Some(NotFoundError::Namespace)),
 		DbNotFound {
-			name,
-		} => TypesError::not_found(
-			format!("The database '{name}' does not exist"),
-			Some(NotFoundError::Database),
-		),
+			..
+		} => TypesError::not_found(message, Some(NotFoundError::Database)),
 		TbNotFound {
-			name,
-		} => TypesError::not_found(
-			format!("The table '{name}' does not exist"),
-			Some(NotFoundError::Table),
-		),
+			..
+		} => TypesError::not_found(message, Some(NotFoundError::Table)),
 		IdNotFound {
-			rid,
-		} => TypesError::not_found(
-			format!("The record '{rid}' does not exist"),
-			Some(NotFoundError::Record),
-		),
+			..
+		} => TypesError::not_found(message, Some(NotFoundError::Record)),
 
 		// Already exists
 		DbAlreadyExists {
-			name,
-		} => TypesError::already_exists(
-			format!("The database '{name}' already exists"),
-			Some(AlreadyExistsError::Database),
-		),
+			..
+		} => TypesError::already_exists(message, Some(AlreadyExistsError::Database)),
 		NsAlreadyExists {
-			name,
-		} => TypesError::already_exists(
-			format!("The namespace '{name}' already exists"),
-			Some(AlreadyExistsError::Namespace),
-		),
+			..
+		} => TypesError::already_exists(message, Some(AlreadyExistsError::Namespace)),
 		TbAlreadyExists {
-			name,
-		} => TypesError::already_exists(
-			format!("The table '{name}' already exists"),
-			Some(AlreadyExistsError::Table),
-		),
+			..
+		} => TypesError::already_exists(message, Some(AlreadyExistsError::Table)),
 		RecordExists {
-			record,
-		} => TypesError::already_exists(
-			format!("Database record `{}` already exists", record.to_sql()),
-			Some(AlreadyExistsError::Record),
-		),
+			..
+		} => TypesError::already_exists(message, Some(AlreadyExistsError::Record)),
 		ClAlreadyExists {
 			..
-		} => TypesError::internal("Cluster node already exists".to_string()),
+		} => TypesError::internal(message),
 		ApAlreadyExists {
 			..
-		} => TypesError::internal("API already exists".to_string()),
+		} => TypesError::internal(message),
 		AzAlreadyExists {
 			..
-		} => TypesError::internal("Analyzer already exists".to_string()),
+		} => TypesError::internal(message),
 		BuAlreadyExists {
 			..
-		} => TypesError::internal("Bucket already exists".to_string()),
+		} => TypesError::internal(message),
 		EvAlreadyExists {
 			..
 		}
@@ -254,29 +194,29 @@ pub fn into_types_error(e: Error) -> TypesError {
 		}
 		| IndexingBuildingCancelled {
 			..
-		} => TypesError::internal("Resource already exists".to_string()),
+		} => TypesError::internal(message),
 
 		// Thrown
-		Thrown(msg) => TypesError::thrown(msg),
+		Thrown(..) => TypesError::thrown(message),
 
 		// Internal and everything else
-		Kvs(kvs_err) => TypesError::internal(format!("Key-value store error: {kvs_err}")),
-		Internal(msg) => TypesError::internal(msg),
-		Unimplemented(msg) => TypesError::internal(format!("Unimplemented: {msg}")),
-		Io(io) => TypesError::internal(format!("I/O error: {io}")),
-		Http(msg) => TypesError::internal(format!("HTTP error: {msg}")),
-		Channel(msg) => TypesError::internal(format!("Channel error: {msg}")),
-		CorruptedIndex(_) => TypesError::internal("Index corruption detected".to_string()),
+		Kvs(..) => TypesError::internal(message),
+		Internal(..) => TypesError::internal(message),
+		Unimplemented(..) => TypesError::internal(message),
+		Io(..) => TypesError::internal(message),
+		Http(..) => TypesError::internal(message),
+		Channel(..) => TypesError::internal(message),
+		CorruptedIndex(_) => TypesError::internal(message),
 		NoIndexFoundForMatch {
 			..
-		} => TypesError::internal("No suitable index found".to_string()),
-		AnalyzerError(msg) => TypesError::internal(format!("Analyzer error: {msg}")),
-		HighlightError(msg) => TypesError::internal(format!("Highlight error: {msg}")),
-		FstError(_) => TypesError::internal("FST error".to_string()),
-		ObsError(_) => TypesError::internal("Object store error".to_string()),
-		TimestampOverflow(msg) => TypesError::internal(format!("Timestamp overflow: {msg}")),
-		NoRecordFound => TypesError::internal("No record found".to_string()),
+		} => TypesError::internal(message),
+		AnalyzerError(..) => TypesError::internal(message),
+		HighlightError(..) => TypesError::internal(message),
+		FstError(_) => TypesError::internal(message),
+		ObsError(_) => TypesError::internal(message),
+		TimestampOverflow(..) => TypesError::internal(message),
+		NoRecordFound => TypesError::internal(message),
 
-		other => TypesError::internal(other.to_string()),
+		_ => TypesError::internal(message),
 	}
 }
