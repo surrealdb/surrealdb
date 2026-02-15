@@ -211,8 +211,13 @@ impl HnswIndex {
 		let search = HnswSearch::new(vector, k, ef);
 		// Get a new HNSW context
 		let ctx = self.new_hnsw_context(ctx, opt, db);
+
+		let docs = self.docs.read().await;
+		let (pending_result, pending_docs) =
+			self.search_pendings(&ctx, &docs, stk, &search, &mut filter).await?;
+		println!("PendingResult: {pending_result:?}");
 		// Do the search
-		let result = self.search(&ctx, stk, &search, &mut filter).await?;
+		let result = self.search(&ctx, &docs, stk, &search, pending_docs, &mut filter).await?;
 		let docs = self.docs.read().await;
 		// We build the final result: replacing DocId with RecordIds
 		if let Some(filter) = filter {
@@ -231,17 +236,12 @@ impl HnswIndex {
 	pub(super) async fn search(
 		&self,
 		ctx: &HnswContext<'_>,
+		docs: &HnswDocs,
 		stk: &mut Stk,
 		search: &HnswSearch,
+		pending_docs: Option<RoaringTreemap>,
 		filter: &mut Option<HnswTruthyDocumentFilter>,
 	) -> Result<KnnResult> {
-		let docs = self.docs.read().await;
-		let (pending_result, pending_docs) =
-			self.search_pendings(&ctx, &docs, stk, search, filter).await?;
-
-		println!("pending_result: {:?}", pending_result);
-		println!("pending_docs: {:?}", pending_docs);
-
 		let hnsw = self.hnsw.read().await;
 		// Do the search
 		if let Some(filter) = filter {
