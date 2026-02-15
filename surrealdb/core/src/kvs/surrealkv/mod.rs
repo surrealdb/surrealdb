@@ -1,13 +1,16 @@
 #![cfg(feature = "kv-surrealkv")]
 
 mod cnf;
+mod sync;
 
 use std::ops::Range;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use surrealkv::{
 	Durability, HistoryOptions, LSMIterator, Mode, Transaction as Tx, Tree, TreeBuilder,
 };
+use sync::{BackgroundFlusher, CommitCoordinator};
 use tokio::sync::RwLock;
 
 use super::Direction;
@@ -23,7 +26,10 @@ const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 pub struct Datastore {
 	db: Tree,
 	enable_versions: bool,
-	sync_data: bool,
+	/// Commit coordinator for batching transaction commits when sync=every
+	commit_coordinator: Option<Arc<CommitCoordinator>>,
+	/// Background flusher for periodically flushing WAL when sync=<interval>
+	background_flusher: Option<Arc<BackgroundFlusher>>,
 }
 
 pub struct Transaction {
@@ -35,17 +41,13 @@ pub struct Transaction {
 	enable_versions: bool,
 	/// The underlying datastore transaction
 	inner: RwLock<Tx>,
+	/// Commit coordinator for grouped fsync (when sync=every)
+	commit_coordinator: Option<Arc<CommitCoordinator>>,
 }
 
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str, config: SurrealKvConfig) -> Result<Datastore> {
-		// Determine sync mode: query param overrides env var
-		let sync_data = match config.sync_mode {
-			SyncMode::Every => true,
-			SyncMode::Never => false,
-			SyncMode::Interval(_) => false,
-		};
 		// Configure custom options
 		let builder = TreeBuilder::new();
 
@@ -80,26 +82,55 @@ impl Datastore {
 		// Set the block size
 		info!(target: TARGET, "Setting block size: {}", *cnf::SURREALKV_BLOCK_SIZE);
 		let builder = builder.with_block_size(*cnf::SURREALKV_BLOCK_SIZE);
-		// Log if writes should be synced
-		info!(target: TARGET, "Wait for disk sync acknowledgement: {}", sync_data);
 		// Set the data storage directory
 		let builder = builder.with_path(path.to_string().into());
-		// Create a new datastore
-		match builder.build() {
-			Ok(db) => Ok(Datastore {
-				db,
-				enable_versions: config.versioned,
-				sync_data,
-			}),
-			Err(e) => Err(Error::Datastore(e.to_string())),
-		}
+		// Build the database
+		let db = builder.build().map_err(|e| Error::Datastore(e.to_string()))?;
+
+		// Create sync components based on sync mode
+		let (commit_coordinator, background_flusher) = match config.sync_mode {
+			SyncMode::Every => {
+				info!(target: TARGET, "Sync mode: every transaction commit");
+				let coordinator = Arc::new(CommitCoordinator::new(db.clone())?);
+				(Some(coordinator), None)
+			}
+			SyncMode::Interval(interval) => {
+				info!(target: TARGET, "Sync mode: background syncing on interval ({}ms)", interval.as_millis());
+				let flusher = Arc::new(BackgroundFlusher::new(db.clone(), interval)?);
+				(None, Some(flusher))
+			}
+			SyncMode::Never => {
+				info!(target: TARGET, "Sync mode: never (handled by the OS)");
+				(None, None)
+			}
+		};
+
+		// Create and return the datastore
+		Ok(Datastore {
+			db,
+			enable_versions: config.versioned,
+			commit_coordinator,
+			background_flusher,
+		})
 	}
 
 	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<()> {
-		// Shutdown the database
+		// Wait for the background flusher to finish
+		if let Some(background_flusher) = &self.background_flusher {
+			background_flusher.shutdown()?;
+		}
+		// Wait for the commit coordinator to finish
+		if let Some(commit_coordinator) = &self.commit_coordinator {
+			commit_coordinator.shutdown()?;
+		}
+		// Flush WAL before closing
+		if let Err(e) = self.db.flush_wal(true) {
+			error!(target: TARGET, "An error occurred flushing the WAL buffer to disk: {e}");
+		}
+		// Close the database
 		if let Err(e) = self.db.close().await {
-			error!("An error occured closing the database: {e}");
+			error!(target: TARGET, "An error occurred closing the database: {e}");
 		}
 		// Nothing to do here
 		Ok(())
@@ -112,17 +143,16 @@ impl Datastore {
 			true => self.db.begin_with_mode(Mode::ReadWrite),
 			false => self.db.begin_with_mode(Mode::ReadOnly),
 		}?;
-		// Set the transaction durability
-		match self.sync_data {
-			true => txn.set_durability(Durability::Immediate),
-			false => txn.set_durability(Durability::Eventual),
-		};
+		// For sync=every mode, use Eventual durability and let coordinator handle fsync
+		// For sync=never/interval modes, also use Eventual (OS or background thread handles sync)
+		txn.set_durability(Durability::Eventual);
 		// Return the new transaction
 		Ok(Box::new(Transaction {
 			done: AtomicBool::new(false),
 			write,
 			enable_versions: self.enable_versions,
 			inner: RwLock::new(txn),
+			commit_coordinator: self.commit_coordinator.clone(),
 		}))
 	}
 }
@@ -172,8 +202,12 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Commit this transaction
+		// Commit the transaction (writes to WAL)
 		inner.commit().await?;
+		// If we have a coordinator, wait for the grouped fsync
+		if let Some(coordinator) = &self.commit_coordinator {
+			coordinator.wait_for_sync().await?;
+		}
 		// Continue
 		Ok(())
 	}
