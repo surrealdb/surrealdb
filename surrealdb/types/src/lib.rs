@@ -79,9 +79,13 @@ macro_rules! object {
 /// # Example
 ///
 /// ```rust
-/// use surrealdb_types::set;
+/// use surrealdb_types::{set, Value};
 ///
-/// let set = set! {1, 2, 3};
+/// let set = set! {
+///     Value::Number(1.into()),
+///     Value::Number(2.into()),
+///     Value::Number(3.into()),
+/// };
 /// ```
 #[macro_export]
 macro_rules! set {
