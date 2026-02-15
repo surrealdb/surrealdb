@@ -13,13 +13,19 @@ value = "[{ email: 'c@d', id: user:2 }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1}
-    TableScan [ctx: Db] [table: user, direction: Forward, predicate: email INSIDE ['a@b', 'e@f']] {rows: 1}
+    Filter [ctx: Db] [predicate: email INSIDE ['a@b', 'e@f']] {rows: 1}
+        UnionIndexScan [ctx: Db] [table: user, branches: 2] {rows: 1}
+            IndexScan [ctx: Db] [index: user_email_idx, access: = 'a@b', direction: Forward] {rows: 1}
+            IndexScan [ctx: Db] [index: user_email_idx, access: = 'e@f', direction: Forward] {rows: 0}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1}
-    TableScan [ctx: Db] [table: user, direction: Forward, predicate: email INSIDE ['a@b', 'e@f']] {rows: 1}
+    Filter [ctx: Db] [predicate: email INSIDE ['a@b', 'e@f']] {rows: 1}
+        UnionIndexScan [ctx: Db] [table: user, branches: 2] {rows: 1}
+            IndexScan [ctx: Db] [index: user_email_idx, access: = 'a@b', direction: Forward] {rows: 1}
+            IndexScan [ctx: Db] [index: user_email_idx, access: = 'e@f', direction: Forward] {rows: 0}
 
 Total rows: 1"'''
 
@@ -52,7 +58,8 @@ value = "[{ apprenantUid: '00013483-fedd-43e3-a94e-80728d896f6e' }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1}
-    TableScan [ctx: Db] [table: apprenants, direction: Forward, predicate: apprenantUid INSIDE ['00013483-fedd-43e3-a94e-80728d896f6e']] {rows: 1}
+    Filter [ctx: Db] [predicate: apprenantUid INSIDE ['00013483-fedd-43e3-a94e-80728d896f6e']] {rows: 1}
+        IndexScan [ctx: Db] [index: apprenantUid, access: = '00013483-fedd-43e3-a94e-80728d896f6e', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 

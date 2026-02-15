@@ -23,7 +23,7 @@ value = "[{ id: test:20, year: 2020 }]"
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 3}
     Filter [ctx: Db] [predicate: year > 2000 AND year < 2020] {rows: 3}
-        IndexScan [ctx: Db] [index: year, access: >2000, direction: Forward] {rows: 4}
+        IndexScan [ctx: Db] [index: year, access: >2000 <2020, direction: Forward] {rows: 3}
 
 Total rows: 3''''
 
@@ -33,7 +33,7 @@ value = "[{ id: test:10 }, { id: test:15 }, { id: test:16 }]"
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 4}
     Filter [ctx: Db] [predicate: year >= 2000 AND year < 2020] {rows: 4}
-        IndexScan [ctx: Db] [index: year, access: >=2000, direction: Forward] {rows: 5}
+        IndexScan [ctx: Db] [index: year, access: >=2000 <2020, direction: Forward] {rows: 4}
 
 Total rows: 4''''
 
@@ -43,7 +43,7 @@ value = "[{ id: test:0 }, { id: test:10 }, { id: test:15 }, { id: test:16 }]"
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 4}
     Filter [ctx: Db] [predicate: year > 2000 AND year <= 2020] {rows: 4}
-        IndexScan [ctx: Db] [index: year, access: >2000, direction: Forward] {rows: 4}
+        IndexScan [ctx: Db] [index: year, access: >2000 <=2020, direction: Forward] {rows: 4}
 
 Total rows: 4''''
 
@@ -53,7 +53,7 @@ value = "[{ id: test:10 }, { id: test:15 }, { id: test:16 }, { id: test:20 }]"
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 5}
     Filter [ctx: Db] [predicate: year >= 2000 AND year <= 2020] {rows: 5}
-        IndexScan [ctx: Db] [index: year, access: >=2000, direction: Forward] {rows: 5}
+        IndexScan [ctx: Db] [index: year, access: >=2000 <=2020, direction: Forward] {rows: 5}
 
 Total rows: 5''''
 
@@ -124,7 +124,7 @@ value = "[{ id: test:20, year: 2020 }]"
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 3}
     Filter [ctx: Db] [predicate: year > 2000 AND year < 2020] {rows: 3}
-        IndexScan [ctx: Db] [index: year, access: >2000, direction: Forward] {rows: 4}
+        IndexScan [ctx: Db] [index: year, access: >2000 <2020, direction: Forward] {rows: 3}
 
 Total rows: 3''''
 
@@ -134,7 +134,7 @@ value = "[{ id: test:10 }, { id: test:15 }, { id: test:16 }]"
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 4}
     Filter [ctx: Db] [predicate: year >= 2000 AND year < 2020] {rows: 4}
-        IndexScan [ctx: Db] [index: year, access: >=2000, direction: Forward] {rows: 5}
+        IndexScan [ctx: Db] [index: year, access: >=2000 <2020, direction: Forward] {rows: 4}
 
 Total rows: 4''''
 
@@ -144,7 +144,7 @@ value = "[{ id: test:0 }, { id: test:10 }, { id: test:15 }, { id: test:16 }]"
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 4}
     Filter [ctx: Db] [predicate: year > 2000 AND year <= 2020] {rows: 4}
-        IndexScan [ctx: Db] [index: year, access: >2000, direction: Forward] {rows: 4}
+        IndexScan [ctx: Db] [index: year, access: >2000 <=2020, direction: Forward] {rows: 4}
 
 Total rows: 4''''
 
@@ -154,7 +154,7 @@ value = "[{ id: test:10 }, { id: test:15 }, { id: test:16 }, { id: test:20 }]"
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 5}
     Filter [ctx: Db] [predicate: year >= 2000 AND year <= 2020] {rows: 5}
-        IndexScan [ctx: Db] [index: year, access: >=2000, direction: Forward] {rows: 5}
+        IndexScan [ctx: Db] [index: year, access: >=2000 <=2020, direction: Forward] {rows: 5}
 
 Total rows: 5''''
 
