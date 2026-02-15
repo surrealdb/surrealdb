@@ -265,6 +265,7 @@ impl MutVisitor for KnnStripper {
 	type Error = std::convert::Infallible;
 
 	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		// Replace handled KNN expressions with `true`.
 		if let Expr::Binary {
 			op: BinaryOperator::NearestNeighbor(nn),
 			..
@@ -275,7 +276,19 @@ impl MutVisitor for KnnStripper {
 			*expr = Expr::Literal(Literal::Bool(true));
 			return Ok(());
 		}
-		expr.visit_mut(self)
+		// Only recurse into AND chains. KNN operators nested under OR/NOT
+		// must be preserved so that `has_knn_operator` can detect and reject
+		// those unsupported shapes.
+		if let Expr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} = expr
+		{
+			self.visit_mut_expr(left)?;
+			self.visit_mut_expr(right)?;
+		}
+		Ok(())
 	}
 
 	// Don't strip KNN inside subqueries -- only top-level WHERE.

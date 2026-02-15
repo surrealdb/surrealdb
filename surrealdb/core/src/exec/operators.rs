@@ -50,7 +50,7 @@ pub use r#return::ReturnPlan;
 pub use scan::CountScan;
 pub use scan::{
 	DynamicScan, EdgeTableSpec, FullTextScan, GraphEdgeScan, GraphScanOutput, IndexScan, KnnScan,
-	RecordIdScan, ReferenceScan, ReferenceScanOutput, TableScan, UnionIndexScan,
+	RecordIdScan, ReferenceScan, ReferenceScanOutput, TableScan,
 };
 pub use sequence::SequencePlan;
 pub use sleep::SleepPlan;
