@@ -62,7 +62,7 @@ impl IndexFunction for VectorDistanceKnn {
 	}
 
 	fn signature(&self) -> Signature {
-		Signature::new().returns(Kind::Any)
+		Signature::new().optional("knn_ref", Kind::Number).returns(Kind::Any)
 	}
 
 	fn index_context_kind(&self) -> IndexContextKind {
@@ -70,8 +70,8 @@ impl IndexFunction for VectorDistanceKnn {
 	}
 
 	fn index_ref_arg_index(&self) -> Option<usize> {
-		// No plan-time reference argument needed
-		None
+		// First argument is the optional KNN reference number, extracted at plan time
+		Some(0)
 	}
 
 	fn required_context(&self) -> ContextLevel {

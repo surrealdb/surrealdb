@@ -94,7 +94,7 @@ impl ExecOperator for KnnScan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Root
+		ContextLevel::Database
 	}
 
 	fn access_mode(&self) -> AccessMode {
