@@ -202,6 +202,11 @@ impl Visitor for KnnOperatorChecker {
 		}
 		expr.visit(self)
 	}
+
+	// Don't descend into subqueries -- only check outer WHERE.
+	fn visit_select(&mut self, _: &crate::expr::SelectStatement) -> Result<(), Self::Error> {
+		Ok(())
+	}
 }
 
 /// Parameters extracted from a brute-force KNN expression.
@@ -524,6 +529,11 @@ impl Visitor for MatchesCollector {
 			);
 		}
 		expr.visit(self)
+	}
+
+	// Don't descend into subqueries -- only collect outer MATCHES.
+	fn visit_select(&mut self, _: &crate::expr::SelectStatement) -> Result<(), Self::Error> {
+		Ok(())
 	}
 }
 

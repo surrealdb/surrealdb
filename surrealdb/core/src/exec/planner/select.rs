@@ -938,17 +938,26 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		let is_value_source = all_value_sources(&what);
-		let primary_table = what.iter().find_map(|e| match e {
-			Expr::Table(t) => Some(t.clone()),
-			Expr::Param(p) => {
-				if let Some(crate::val::Value::Table(t)) = self.ctx.value(p.as_str()) {
-					Some(t.clone())
-				} else {
-					None
-				}
-			}
-			_ => None,
-		});
+		// Prefer literal tables over parameter-resolved tables so that
+		// `FROM $t, article` binds MATCHES context to `article`, not `$t`.
+		let primary_table = what
+			.iter()
+			.find_map(|e| match e {
+				Expr::Table(t) => Some(t.clone()),
+				_ => None,
+			})
+			.or_else(|| {
+				what.iter().find_map(|e| match e {
+					Expr::Param(p) => {
+						if let Some(crate::val::Value::Table(t)) = self.ctx.value(p.as_str()) {
+							Some(t.clone())
+						} else {
+							None
+						}
+					}
+					_ => None,
+				})
+			});
 		let has_knn_early = cond.as_ref().is_some_and(|c| has_knn_operator(&c.0));
 
 		let planning_ctx: std::borrow::Cow<'_, crate::ctx::FrozenContext> =
