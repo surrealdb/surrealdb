@@ -202,6 +202,7 @@ impl ExecOperator for RecordIdScan {
 ///
 /// This is the single implementation of RecordId-based data access, shared
 /// by `RecordIdScan` (plan-time) and `DynamicScan` (runtime-discovered).
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_record_lookup(
 	rid: &RecordId,
 	version: Option<u64>,
