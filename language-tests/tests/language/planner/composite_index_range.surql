@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Test composite index with equality prefix and range on next column"
+reason = "Test composite index with equality prefix, range, and residual filter stripping"
 
 [[test.results]]
 value = "NONE"
@@ -56,6 +56,31 @@ Total rows: 2"'''
 [[test.results]]
 value = "[{ age: 40, city: 'paris', id: record:5 }, { age: 60, city: 'paris', id: record:4 }]"
 
+[[test.results]]
+value = "[{ active: true, age: 60, city: 'london', id: record:6 }]"
+
+[[test.results]]
+value = "[{ active: false, age: 65, city: 'london', id: record:7 }]"
+
+[[test.results]]
+value = '''"Project [ctx: Db] {rows: 1}
+    Filter [ctx: Db] [predicate: active = true] {rows: 1}
+        IndexScan [ctx: Db] [index: idx_city_age, access: ['london'] MoreThan 50, direction: Forward] {rows: 4}
+
+Total rows: 1"'''
+
+[[test.results]]
+value = "[{ active: true, age: 60, city: 'london', id: record:6 }]"
+
+[[test.results]]
+value = '''"Project [ctx: Db] {rows: 1}
+    IndexScan [ctx: Db] [index: idx_city_age, access: ['paris', 40], direction: Forward] {rows: 1}
+
+Total rows: 1"'''
+
+[[test.results]]
+value = "[{ age: 40, city: 'paris', id: record:5 }]"
+
 */
 
 -- Composite index on (city, age)
@@ -82,3 +107,16 @@ SELECT * FROM record WHERE city = 'paris' AND age < 50;
 -- Equality on first column + range (<=) on second column
 EXPLAIN ANALYZE SELECT * FROM record WHERE city = 'paris' AND age <= 60;
 SELECT * FROM record WHERE city = 'paris' AND age <= 60;
+
+-- Residual filter: index covers city + age, but active is not indexed.
+-- The Filter should only contain the residual condition (active = true),
+-- not the conditions already handled by the IndexScan.
+CREATE record:6 SET city = 'london', age = 60, active = true;
+CREATE record:7 SET city = 'london', age = 65, active = false;
+EXPLAIN ANALYZE SELECT * FROM record WHERE city = 'london' AND age > 50 AND active = true;
+SELECT * FROM record WHERE city = 'london' AND age > 50 AND active = true;
+
+-- Full coverage: all conditions covered by the composite index.
+-- No Filter operator should appear in the plan.
+EXPLAIN ANALYZE SELECT * FROM record WHERE city = 'paris' AND age = 40;
+SELECT * FROM record WHERE city = 'paris' AND age = 40;
