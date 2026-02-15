@@ -248,7 +248,7 @@ where
 		&& binary.len() > max_size
 	{
 		if response
-			.send(Err(Error::internal(format!("The message is too long: {}", binary.len()))))
+			.send(Err(Error::internal(format!("Message too long: {}", binary.len()))))
 			.await
 			.is_err()
 		{

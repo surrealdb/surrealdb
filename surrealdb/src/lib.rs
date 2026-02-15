@@ -386,6 +386,8 @@ impl OnceLockExt for OnceLock<Router> {
 	}
 }
 
+/// Used by engine code (HTTP, local, any, and WS on wasm) when converting std/io errors.
+#[allow(dead_code)]
 fn std_error_to_types_error(error: impl std::fmt::Display) -> Error {
 	Error::internal(error.to_string())
 }
