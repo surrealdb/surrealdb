@@ -8,7 +8,8 @@ use crate::err::Error;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::expr::field::{Field, Fields};
 use crate::expr::operator::NearestNeighbor;
-use crate::expr::{BinaryOperator, Cond, Expr, Idiom, Literal};
+use crate::expr::visit::{MutVisitor, Visit, VisitMut, Visitor};
+use crate::expr::{BinaryOperator, Cond, Expr, Idiom, Literal, Param};
 use crate::val::Number;
 
 // ============================================================================
@@ -158,23 +159,12 @@ pub(super) fn has_top_level_or(cond: Option<&Cond>) -> bool {
 
 /// Check if an expression contains any KNN (nearest neighbor) operators.
 pub(super) fn has_knn_operator(expr: &Expr) -> bool {
-	match expr {
-		Expr::Binary {
-			left,
-			op,
-			right,
-		} => {
-			if matches!(op, BinaryOperator::NearestNeighbor(_)) {
-				return true;
-			}
-			has_knn_operator(left) || has_knn_operator(right)
-		}
-		Expr::Prefix {
-			expr: inner,
-			..
-		} => has_knn_operator(inner),
-		_ => false,
-	}
+	let mut checker = KnnOperatorChecker {
+		found_any: false,
+		found_k: false,
+	};
+	let _ = checker.visit_expr(expr);
+	checker.found_any
 }
 
 /// Check if an expression contains a brute-force KNN operator (`NearestNeighbor::K`).
@@ -182,26 +172,35 @@ pub(super) fn has_knn_operator(expr: &Expr) -> bool {
 /// Used to distinguish between brute-force KNN with parameter-based vectors
 /// (where `extract_bruteforce_knn` fails) and HNSW KNN (`Approximate`).
 pub(super) fn has_knn_k_operator(expr: &Expr) -> bool {
-	match expr {
-		Expr::Binary {
-			left,
+	let mut checker = KnnOperatorChecker {
+		found_any: false,
+		found_k: false,
+	};
+	let _ = checker.visit_expr(expr);
+	checker.found_k
+}
+
+/// Visitor that detects the presence of KNN operators in an expression tree.
+struct KnnOperatorChecker {
+	found_any: bool,
+	found_k: bool,
+}
+
+impl Visitor for KnnOperatorChecker {
+	type Error = std::convert::Infallible;
+
+	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
+		if let Expr::Binary {
 			op: BinaryOperator::NearestNeighbor(nn),
-			right,
-		} => {
-			matches!(nn.as_ref(), NearestNeighbor::K(..))
-				|| has_knn_k_operator(left)
-				|| has_knn_k_operator(right)
+			..
+		} = expr
+		{
+			self.found_any = true;
+			if matches!(nn.as_ref(), NearestNeighbor::K(..)) {
+				self.found_k = true;
+			}
 		}
-		Expr::Binary {
-			left,
-			right,
-			..
-		} => has_knn_k_operator(left) || has_knn_k_operator(right),
-		Expr::Prefix {
-			expr: inner,
-			..
-		} => has_knn_k_operator(inner),
-		_ => false,
+		expr.visit(self)
 	}
 }
 
@@ -222,7 +221,12 @@ pub(super) struct BruteForceKnnParams {
 /// Returns the parameters if a `NearestNeighbor::K(k, dist)` expression is
 /// found at the top level of AND-connected conditions.
 pub(super) fn extract_bruteforce_knn(cond: &Cond) -> Option<BruteForceKnnParams> {
-	extract_bruteforce_knn_from_expr(&cond.0).map(|(params, _residual)| params)
+	let mut expr = cond.0.clone();
+	let mut extractor = BruteForceKnnExtractor {
+		params: None,
+	};
+	let _ = extractor.visit_mut_expr(&mut expr);
+	extractor.params
 }
 
 /// Strip handled KNN operators from a WHERE clause, returning the residual condition.
@@ -232,115 +236,134 @@ pub(super) fn extract_bruteforce_knn(cond: &Cond) -> Option<BruteForceKnnParams>
 /// the caller should verify the residual contains no remaining KNN operators and
 /// return an error if it does.
 pub(crate) fn strip_knn_from_condition(cond: &Cond) -> Option<Cond> {
-	strip_knn_from_expr(&cond.0).map(Cond)
-}
-
-/// Recursively strip handled KNN operator expressions from an AND-connected
-/// expression tree.
-///
-/// Returns the expression with `NearestNeighbor::K` and `NearestNeighbor::Approximate`
-/// operators removed, or `None` if the entire expression was such an operator
-/// (nothing left). `NearestNeighbor::KTree` is left unchanged since it is not
-/// handled by either the `KnnTopK` or `KnnScan` operators.
-fn strip_knn_from_expr(expr: &Expr) -> Option<Expr> {
-	match expr {
-		// Strip NearestNeighbor::K (brute-force, consumed by KnnTopK) and
-		// NearestNeighbor::Approximate (HNSW, consumed by KnnScan).
-		// KTree is not supported and is left unchanged.
-		Expr::Binary {
-			op: BinaryOperator::NearestNeighbor(nn),
-			..
-		} if matches!(nn.as_ref(), NearestNeighbor::K(..) | NearestNeighbor::Approximate(..)) => None,
-		// AND: strip from either side, keeping the other
-		Expr::Binary {
-			left,
-			op: BinaryOperator::And,
-			right,
-		} => {
-			let stripped_left = strip_knn_from_expr(left);
-			let stripped_right = strip_knn_from_expr(right);
-			match (stripped_left, stripped_right) {
-				(Some(l), Some(r)) => Some(Expr::Binary {
-					left: Box::new(l),
-					op: BinaryOperator::And,
-					right: Box::new(r),
-				}),
-				(Some(l), None) => Some(l),
-				(None, Some(r)) => Some(r),
-				(None, None) => None,
-			}
-		}
-		// No KNN found at this level -- keep unchanged
-		_ => Some(expr.clone()),
+	let mut expr = cond.0.clone();
+	let _ = KnnStripper.visit_mut_expr(&mut expr);
+	let _ = BoolSimplifier.visit_mut_expr(&mut expr);
+	if matches!(expr, Expr::Literal(Literal::Bool(true))) {
+		None
+	} else {
+		Some(Cond(expr))
 	}
 }
 
-/// Recursively extract brute-force KNN from an expression tree.
-///
-/// Returns `(params, residual_expr)` where `residual_expr` is the remaining
-/// condition after removing the KNN predicate.
-fn extract_bruteforce_knn_from_expr(expr: &Expr) -> Option<(BruteForceKnnParams, Option<Expr>)> {
-	match expr {
-		Expr::Binary {
+// ---------------------------------------------------------------------------
+// MutVisitors for KNN condition rewriting
+// ---------------------------------------------------------------------------
+
+/// Replaces handled KNN expressions (`NearestNeighbor::K` and
+/// `NearestNeighbor::Approximate`) with `Literal::Bool(true)`.
+/// Run `BoolSimplifier` afterwards to collapse the resulting
+/// `true AND x` chains.
+struct KnnStripper;
+
+impl MutVisitor for KnnStripper {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		if let Expr::Binary {
+			op: BinaryOperator::NearestNeighbor(nn),
+			..
+		} = expr
+		{
+			if matches!(nn.as_ref(), NearestNeighbor::K(..) | NearestNeighbor::Approximate(..)) {
+				*expr = Expr::Literal(Literal::Bool(true));
+				return Ok(());
+			}
+		}
+		expr.visit_mut(self)
+	}
+
+	// Don't strip KNN inside subqueries -- only top-level WHERE.
+	fn visit_mut_select(&mut self, _: &mut crate::expr::SelectStatement) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
+/// Extracts a single brute-force KNN (`NearestNeighbor::K`) expression,
+/// replacing it with `Literal::Bool(true)`. The extracted parameters are
+/// stashed in `params`.
+struct BruteForceKnnExtractor {
+	params: Option<BruteForceKnnParams>,
+}
+
+impl MutVisitor for BruteForceKnnExtractor {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		// Already found one -- stop looking.
+		if self.params.is_some() {
+			return Ok(());
+		}
+		if let Expr::Binary {
 			left,
 			op: BinaryOperator::NearestNeighbor(nn),
 			right,
-		} => {
-			let NearestNeighbor::K(k, dist) = &**nn else {
-				return None;
-			};
-
-			// Extract idiom from left side
-			let idiom = match left.as_ref() {
-				Expr::Idiom(idiom) => idiom.clone(),
-				_ => return None,
-			};
-
-			// Extract numeric vector from right side
-			let vector = extract_literal_vector(right)?;
-
-			Some((
-				BruteForceKnnParams {
-					field: idiom,
-					vector,
-					k: *k,
-					distance: dist.clone(),
-				},
-				None, // No residual -- the entire expression was the KNN predicate
-			))
+		} = expr
+		{
+			if let NearestNeighbor::K(k, dist) = nn.as_ref() {
+				if let Expr::Idiom(idiom) = left.as_ref() {
+					if let Some(vector) = extract_literal_vector(right) {
+						self.params = Some(BruteForceKnnParams {
+							field: idiom.clone(),
+							vector,
+							k: *k,
+							distance: dist.clone(),
+						});
+						*expr = Expr::Literal(Literal::Bool(true));
+						return Ok(());
+					}
+				}
+			}
 		}
-		Expr::Binary {
+		expr.visit_mut(self)
+	}
+
+	// Don't descend into subqueries.
+	fn visit_mut_select(&mut self, _: &mut crate::expr::SelectStatement) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
+/// Reusable postorder pass that collapses boolean-literal sentinels in AND
+/// chains: `true AND x → x`, `x AND true → x`, `true AND true → true`.
+///
+/// Used after `KnnStripper` / `BruteForceKnnExtractor` to clean up the tree.
+struct BoolSimplifier;
+
+impl MutVisitor for BoolSimplifier {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		// Postorder: recurse first, then simplify this node.
+		expr.visit_mut(self)?;
+
+		if let Expr::Binary {
 			left,
 			op: BinaryOperator::And,
 			right,
-		} => {
-			// Try the left side first
-			if let Some((params, residual_left)) = extract_bruteforce_knn_from_expr(left) {
-				let residual = match residual_left {
-					Some(rl) => Some(Expr::Binary {
-						left: Box::new(rl),
-						op: BinaryOperator::And,
-						right: right.clone(),
-					}),
-					None => Some(right.as_ref().clone()),
-				};
-				return Some((params, residual));
+		} = expr
+		{
+			let l_true = matches!(left.as_ref(), Expr::Literal(Literal::Bool(true)));
+			let r_true = matches!(right.as_ref(), Expr::Literal(Literal::Bool(true)));
+			match (l_true, r_true) {
+				(true, true) => *expr = Expr::Literal(Literal::Bool(true)),
+				(true, false) => {
+					let r = std::mem::replace(right.as_mut(), Expr::Literal(Literal::None));
+					*expr = r;
+				}
+				(false, true) => {
+					let l = std::mem::replace(left.as_mut(), Expr::Literal(Literal::None));
+					*expr = l;
+				}
+				_ => {}
 			}
-			// Try the right side
-			if let Some((params, residual_right)) = extract_bruteforce_knn_from_expr(right) {
-				let residual = match residual_right {
-					Some(rr) => Some(Expr::Binary {
-						left: left.clone(),
-						op: BinaryOperator::And,
-						right: Box::new(rr),
-					}),
-					None => Some(left.as_ref().clone()),
-				};
-				return Some((params, residual));
-			}
-			None
 		}
-		_ => None,
+		Ok(())
+	}
+
+	// Don't descend into subqueries.
+	fn visit_mut_select(&mut self, _: &mut crate::expr::SelectStatement) -> Result<(), Self::Error> {
+		Ok(())
 	}
 }
 
@@ -467,46 +490,38 @@ pub(super) fn all_value_sources(sources: &[Expr]) -> bool {
 
 /// Extract MATCHES clause information from a WHERE condition for index functions.
 pub(super) fn extract_matches_context(cond: &Cond) -> crate::exec::function::MatchesContext {
-	let mut ctx = crate::exec::function::MatchesContext::new();
-	collect_matches(&cond.0, &mut ctx);
-	ctx
+	let mut collector = MatchesCollector(crate::exec::function::MatchesContext::new());
+	let _ = collector.visit_expr(&cond.0);
+	collector.0
 }
 
-fn collect_matches(expr: &Expr, ctx: &mut crate::exec::function::MatchesContext) {
-	match expr {
-		Expr::Binary {
+/// Visitor that collects MATCHES clause entries from expression trees.
+struct MatchesCollector(crate::exec::function::MatchesContext);
+
+impl Visitor for MatchesCollector {
+	type Error = std::convert::Infallible;
+
+	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
+		if let Expr::Binary {
 			left,
 			op: BinaryOperator::Matches(matches_op),
 			right,
-		} => {
+		} = expr
+		{
 			if let Expr::Idiom(idiom) = left.as_ref() {
-				let query = match right.as_ref() {
-					Expr::Literal(Literal::String(s)) => s.clone(),
-					_ => return,
-				};
-				let match_ref = matches_op.rf.unwrap_or(0);
-				ctx.insert(
-					match_ref,
-					crate::exec::function::MatchInfo {
-						idiom: idiom.clone(),
-						query,
-					},
-				);
+				if let Expr::Literal(Literal::String(s)) = right.as_ref() {
+					let match_ref = matches_op.rf.unwrap_or(0);
+					self.0.insert(
+						match_ref,
+						crate::exec::function::MatchInfo {
+							idiom: idiom.clone(),
+							query: s.clone(),
+						},
+					);
+				}
 			}
 		}
-		Expr::Binary {
-			left,
-			right,
-			..
-		} => {
-			collect_matches(left, ctx);
-			collect_matches(right, ctx);
-		}
-		Expr::Prefix {
-			expr: inner,
-			..
-		} => collect_matches(inner, ctx),
-		_ => {}
+		expr.visit(self)
 	}
 }
 
@@ -564,105 +579,30 @@ pub(super) fn check_forbidden_group_by_params(fields: &Fields) -> Result<(), Err
 }
 
 fn check_expr_for_forbidden_params(expr: &Expr) -> Result<(), Error> {
-	match expr {
-		Expr::Param(param) => {
-			let name = param.as_str();
-			if name == "this" || name == "self" {
-				return Err(Error::Query {
-					message: "Found a `$this` parameter refering to the document of a group by select statement\nSelect statements with a group by currently have no defined document to refer to".to_string(),
-				});
-			}
-			if name == "parent" {
-				return Err(Error::Query {
-					message: "Found a `$parent` parameter refering to the document of a GROUP select statement\nSelect statements with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string(),
-				});
-			}
-			Ok(())
+	expr.visit(&mut ForbiddenParamChecker).map_err(|e| e)
+}
+
+/// Visitor that detects `$this`, `$self`, or `$parent` parameters which are
+/// invalid inside GROUP BY projections. The default `visit_expr`
+/// implementation handles all the recursion; we only need to inspect params.
+struct ForbiddenParamChecker;
+
+impl Visitor for ForbiddenParamChecker {
+	type Error = Error;
+
+	fn visit_param(&mut self, param: &Param) -> Result<(), Self::Error> {
+		let name = param.as_str();
+		if name == "this" || name == "self" {
+			return Err(Error::Query {
+				message: "Found a `$this` parameter refering to the document of a group by select statement\nSelect statements with a group by currently have no defined document to refer to".to_string(),
+			});
 		}
-		Expr::Binary {
-			left,
-			right,
-			..
-		} => {
-			check_expr_for_forbidden_params(left)?;
-			check_expr_for_forbidden_params(right)
+		if name == "parent" {
+			return Err(Error::Query {
+				message: "Found a `$parent` parameter refering to the document of a GROUP select statement\nSelect statements with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string(),
+			});
 		}
-		Expr::Prefix {
-			expr,
-			..
-		} => check_expr_for_forbidden_params(expr),
-		Expr::Postfix {
-			expr,
-			..
-		} => check_expr_for_forbidden_params(expr),
-		Expr::FunctionCall(fc) => {
-			for arg in &fc.arguments {
-				check_expr_for_forbidden_params(arg)?;
-			}
-			Ok(())
-		}
-		Expr::Literal(Literal::Array(elements)) => {
-			for elem in elements {
-				check_expr_for_forbidden_params(elem)?;
-			}
-			Ok(())
-		}
-		Expr::Literal(Literal::Object(entries)) => {
-			for entry in entries {
-				check_expr_for_forbidden_params(&entry.value)?;
-			}
-			Ok(())
-		}
-		Expr::Select(select) => match &select.fields {
-			Fields::Value(selector) => check_expr_for_forbidden_params(&selector.expr),
-			Fields::Select(field_list) => {
-				for field in field_list {
-					if let Field::Single(selector) = field {
-						check_expr_for_forbidden_params(&selector.expr)?;
-					}
-				}
-				Ok(())
-			}
-		},
-		Expr::Block(block) => {
-			for stmt in &block.0 {
-				check_expr_for_forbidden_params(stmt)?;
-			}
-			Ok(())
-		}
-		Expr::IfElse(ifelse) => {
-			for (cond, body) in &ifelse.exprs {
-				check_expr_for_forbidden_params(cond)?;
-				check_expr_for_forbidden_params(body)?;
-			}
-			if let Some(close) = &ifelse.close {
-				check_expr_for_forbidden_params(close)?;
-			}
-			Ok(())
-		}
-		Expr::Closure(closure) => check_expr_for_forbidden_params(&closure.body),
-		Expr::Idiom(idiom) => {
-			for part in &idiom.0 {
-				match part {
-					crate::expr::Part::Start(expr)
-					| crate::expr::Part::Where(expr)
-					| crate::expr::Part::Value(expr) => {
-						check_expr_for_forbidden_params(expr)?;
-					}
-					crate::expr::Part::Method(_, args) => {
-						for arg in args {
-							check_expr_for_forbidden_params(arg)?;
-						}
-					}
-					_ => {}
-				}
-			}
-			Ok(())
-		}
-		Expr::Literal(_) | Expr::Constant(_) | Expr::Table(_) | Expr::Break | Expr::Continue => {
-			Ok(())
-		}
-		_ => Ok(()),
+		Ok(())
 	}
 }
 

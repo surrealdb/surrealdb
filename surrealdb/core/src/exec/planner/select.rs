@@ -1240,7 +1240,12 @@ impl<'ctx> Planner<'ctx> {
 		// Detects `id = <RecordId literal>` in the top-level AND chain and
 		// converts the table scan into a RecordIdScan, avoiding index
 		// analysis and full-table iteration entirely.
+		//
+		// Skipped when the condition contains a KNN operator, because the
+		// KNN access path (KnnScan / HNSW) must be resolved by
+		// resolve_access_path() to populate KnnContext correctly.
 		if let Expr::Table(ref table_name) = expr
+			&& !cond.is_some_and(|c| has_knn_operator(&c.0))
 			&& let Some(rid_expr) = cond.and_then(|c| extract_record_id_point_lookup(c, table_name))
 		{
 			let predicate_pushed = scan_predicate.is_some();
