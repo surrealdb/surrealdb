@@ -8,7 +8,7 @@ use std::sync::Arc;
 use super::access_path::{AccessPath, BTreeAccess, IndexRef, RangeBound, select_access_path};
 use crate::catalog::{Index, IndexDefinition};
 use crate::exec::planner::util::try_literal_to_value;
-use crate::expr::operator::{MatchesOperator, NearestNeighbor};
+use crate::expr::operator::{MatchesOperator, NearestNeighbor, PrefixOperator};
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Cond, Expr, Idiom};
@@ -227,10 +227,14 @@ impl<'a> IndexAnalyzer<'a> {
 				}
 			}
 			Expr::Prefix {
+				op,
 				expr: inner,
-				..
 			} => {
-				Self::collect_in_expressions(inner, results);
+				// Do NOT recurse into NOT — expanding `NOT (field IN [...])`
+				// into index lookups would produce the wrong result set.
+				if !matches!(op, PrefixOperator::Not) {
+					Self::collect_in_expressions(inner, results);
+				}
 			}
 			_ => {}
 		}
@@ -281,10 +285,14 @@ impl<'a> IndexAnalyzer<'a> {
 				}
 			}
 			Expr::Prefix {
+				op,
 				expr: inner,
-				..
 			} => {
-				self.collect_conditions(inner, conditions);
+				// Do NOT recurse into NOT — `NOT (field > 5)` must not
+				// generate an index candidate for `field > 5`.
+				if !matches!(op, PrefixOperator::Not) {
+					self.collect_conditions(inner, conditions);
+				}
 			}
 			_ => {}
 		}
@@ -525,12 +533,16 @@ impl<'a> IndexAnalyzer<'a> {
 					}
 				}
 			}
-			// Nested expression in parentheses
+			// Nested expression in parentheses (but NOT negation)
 			Expr::Prefix {
-				op: _,
+				op,
 				expr: inner,
 			} => {
-				self.analyze_condition(inner, candidates);
+				// Do NOT recurse into NOT — negated predicates invert
+				// the result set and index candidates would be wrong.
+				if !matches!(op, PrefixOperator::Not) {
+					self.analyze_condition(inner, candidates);
+				}
 			}
 			_ => {}
 		}

@@ -75,13 +75,6 @@ pub struct DynamicScan {
 	/// KNN distance context, shared with IndexFunctionExec for vector::distance::knn().
 	/// Populated by KnnScan during execution.
 	pub(crate) knn_context: Option<Arc<crate::exec::function::KnnContext>>,
-	/// Pre-resolved source operator (e.g. UnionIndexScan) created at plan time.
-	///
-	/// When set, `execute()` uses this operator as the source stream instead
-	/// of calling `resolve_table_scan_stream()`. The full ScanPipeline
-	/// (field-level permissions, computed fields) is still applied on top.
-	/// The operator is visible in EXPLAIN via `children()`.
-	pub(crate) resolved_source: Option<Arc<dyn ExecOperator>>,
 }
 
 impl DynamicScan {
@@ -110,7 +103,6 @@ impl DynamicScan {
 			start,
 			metrics: Arc::new(OperatorMetrics::new()),
 			knn_context: None,
-			resolved_source: None,
 		}
 	}
 
@@ -120,16 +112,6 @@ impl DynamicScan {
 		knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 	) -> Self {
 		self.knn_context = knn_context;
-		self
-	}
-
-	/// Set a pre-resolved source operator (e.g. UnionIndexScan).
-	///
-	/// When set, `execute()` uses this operator's stream instead of
-	/// performing runtime index analysis. The ScanPipeline (field
-	/// permissions, computed fields) is still applied on top.
-	pub(crate) fn with_resolved_source(mut self, resolved_source: Arc<dyn ExecOperator>) -> Self {
-		self.resolved_source = Some(resolved_source);
 		self
 	}
 }
@@ -153,10 +135,6 @@ impl ExecOperator for DynamicScan {
 			attrs.push(("offset".to_string(), start.to_sql()));
 		}
 		attrs
-	}
-
-	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
-		self.resolved_source.as_ref().into_iter().collect()
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -237,7 +215,6 @@ impl ExecOperator for DynamicScan {
 		let limit_expr = self.limit.clone();
 		let start_expr = self.start.clone();
 		let knn_context = self.knn_context.clone();
-		let resolved_source = self.resolved_source.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -478,13 +455,7 @@ impl ExecOperator for DynamicScan {
 			// Create the source stream based on scan type.
 			// `applied_pre_skip` tracks how many rows the source will skip
 			// before decoding, so the pipeline can adjust its start accordingly.
-			let (mut source, applied_pre_skip) = if let Some(ref resolved) = resolved_source {
-				// Pre-resolved source operator (e.g. UnionIndexScan created at
-				// plan time). Use it directly — the ScanPipeline below still
-				// applies field permissions and computed fields.
-				let stream = resolved.execute(&ctx)?;
-				(stream, 0)
-			} else {
+			let (mut source, applied_pre_skip) = {
 				// Table scan (with runtime index selection)
 				resolve_table_scan_stream(
 					&ctx, TableScanConfig {
@@ -636,13 +607,15 @@ async fn resolve_table_scan_stream(
 			Ok((stream, 0))
 		}
 
-		// Multi-index union for OR conditions — delegate to UnionIndexScan
+		// Multi-index union for OR conditions — delegate to UnionIndexScan.
+		// Permission handling is done by DynamicScan's ScanPipeline above.
 		Some(AccessPath::Union(paths)) => {
 			let mut sub_operators: Vec<Arc<dyn ExecOperator>> = Vec::with_capacity(paths.len());
 			for path in paths {
 				sub_operators.push(create_index_operator(&path, &cfg));
 			}
-			let union_op = super::UnionIndexScan::new(sub_operators);
+			let union_op =
+				super::UnionIndexScan::new(cfg.table_name.clone(), sub_operators, None, None);
 			let stream = union_op.execute(ctx)?;
 			Ok((stream, 0))
 		}

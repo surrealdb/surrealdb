@@ -1433,34 +1433,19 @@ impl<'ctx> Planner<'ctx> {
 							};
 							sub_operators.push(sub_op);
 						}
-						// Wrap UnionIndexScan in a DynamicScan so the
-						// ScanPipeline applies field-level permissions
-						// and computed-field materialization. The
-						// UnionIndexScan is visible in EXPLAIN via
-						// DynamicScan::children().
-						let union_op: Arc<dyn ExecOperator> =
-							Arc::new(UnionIndexScan::new(sub_operators));
-						let predicate_pushed = scan_predicate.is_some();
-						let limit_pushed = scan_limit.is_some();
-						let table_expr = self.physical_expr(Expr::Table(table)).await?;
+						// UnionIndexScan handles field-level permissions
+						// and computed-field materialization internally
+						// (same pattern as TableScan). The outer
+						// pipeline handles Filter, Sort, and Limit.
 						return Ok(PlannedSource {
-							operator: Arc::new(
-								DynamicScan::new(
-									table_expr,
-									version,
-									cond.cloned(),
-									order.cloned(),
-									with.cloned(),
-									needed_fields,
-									scan_predicate,
-									scan_limit,
-									scan_start,
-								)
-								.with_knn_context(knn_ctx)
-								.with_resolved_source(union_op),
-							) as Arc<dyn ExecOperator>,
-							predicate_pushed,
-							limit_pushed,
+							operator: Arc::new(UnionIndexScan::new(
+								table,
+								sub_operators,
+								needed_fields,
+								version,
+							)) as Arc<dyn ExecOperator>,
+							predicate_pushed: false,
+							limit_pushed: false,
 						});
 					}
 				}
