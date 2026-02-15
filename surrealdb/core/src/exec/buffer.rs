@@ -1,92 +1,125 @@
 //! Operator pipeline buffering.
 //!
-//! Wraps a [`ValueBatchStream`] in a spawned tokio task with a bounded channel,
-//! enabling inter-operator pipeline parallelism. Each operator's child stream
-//! runs in its own task, eagerly producing batches into the channel while the
-//! parent operator processes the current batch.
+//! Wraps a [`ValueBatchStream`] in a prefetch buffer that eagerly polls the
+//! inner stream and caches ready results. This smooths out batch delivery and
+//! extends the benefit of the Scanner's KV-level prefetch up through the
+//! operator chain.
+//!
+//! The approach is cooperative (single-task): when the buffer stream is polled,
+//! it greedily drains all immediately-ready items from the inner stream into
+//! an internal ring buffer, then returns the oldest buffered item. This avoids
+//! spawning separate tasks — and the associated lifecycle/cleanup issues —
+//! while still reducing the number of poll round-trips through the operator
+//! tree.
 
-use crate::exec::ValueBatchStream;
+use std::collections::VecDeque;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
-/// Wrap a [`ValueBatchStream`] in a spawned task with a bounded channel buffer.
+use futures::Stream;
+
+use crate::exec::{ValueBatch, ValueBatchStream};
+use crate::expr::FlowResult;
+
+/// Wrap a [`ValueBatchStream`] in a prefetch buffer.
 ///
-/// The inner stream runs in a separate tokio task, producing batches eagerly
-/// into the channel. Returns a receiver stream that the caller polls.
+/// The returned stream eagerly polls the inner stream whenever it is polled
+/// itself, buffering up to `SURREAL_OPERATOR_BUFFER_SIZE` ready items. This
+/// ensures that any data the inner stream can produce without blocking (e.g.
+/// from the Scanner's KV prefetch) is consumed immediately and queued for the
+/// parent operator.
 ///
-/// When `SURREAL_OPERATOR_BUFFER_SIZE` is 0, returns the stream unchanged
-/// (disabling pipeline buffering).
+/// When `SURREAL_OPERATOR_BUFFER_SIZE` is 0, returns the stream unchanged.
 ///
-/// # Backpressure
-///
-/// The bounded channel blocks the producer when the buffer is full, preventing
-/// unbounded memory growth.
-///
-/// # Cancellation
-///
-/// When the consumer drops the returned stream, the spawned task is aborted
-/// immediately via its `JoinHandle`, ensuring that any references held by the
-/// task (e.g. `Arc<Context>`) are released synchronously. This is critical for
-/// context-unfreezing to succeed after timeouts or early termination.
+/// On WASM targets, returns the stream unchanged (no buffering overhead in a
+/// single-threaded environment where there is nothing to overlap with).
 #[cfg(not(target_family = "wasm"))]
 pub(crate) fn buffer_stream(stream: ValueBatchStream) -> ValueBatchStream {
 	let buffer_size = *crate::cnf::OPERATOR_BUFFER_SIZE;
 	if buffer_size == 0 {
 		return stream;
 	}
-	let (tx, rx) = async_channel::bounded(buffer_size);
-	let handle = tokio::spawn(async move {
-		futures::pin_mut!(stream);
-		while let Some(item) = futures::StreamExt::next(&mut stream).await {
-			if tx.send(item).await.is_err() {
-				break; // consumer dropped
-			}
-		}
-	});
-	Box::pin(BufferedStream {
-		rx: Box::pin(rx),
-		handle: handle,
+	Box::pin(PrefetchStream {
+		inner: stream,
+		buffer: VecDeque::with_capacity(buffer_size),
+		buffer_size,
+		exhausted: false,
 	})
 }
 
-/// WASM: no-op — single-threaded runtime cannot benefit from pipeline
-/// parallelism.
+/// WASM: no-op — single-threaded runtime has nothing to overlap with.
 #[cfg(target_family = "wasm")]
 pub(crate) fn buffer_stream(stream: ValueBatchStream) -> ValueBatchStream {
 	stream
 }
 
 // ---------------------------------------------------------------------------
-// BufferedStream — ties the spawned task lifetime to the stream
+// PrefetchStream — cooperative eager-poll buffer
 // ---------------------------------------------------------------------------
 
-/// A stream backed by a bounded channel receiver, with an associated spawned
-/// task that feeds it.
+/// A stream wrapper that eagerly polls its inner stream and buffers ready
+/// results, reducing poll round-trips through the operator tree.
 ///
-/// When this stream is dropped, the spawned task is **aborted** so that any
-/// shared references it holds (contexts, transactions, etc.) are released
-/// immediately rather than lingering until the task notices the channel closed.
+/// On each poll:
+/// 1. Greedily drain all immediately-ready items from the inner stream into the buffer (up to
+///    `buffer_size`).
+/// 2. Return the oldest buffered item, if any.
+/// 3. If the buffer is empty and the inner stream is pending, return pending.
+///
+/// This is purely cooperative — no tasks are spawned, so all lifecycle and
+/// cancellation semantics are preserved. The inner stream is owned directly
+/// and dropped synchronously when this wrapper is dropped.
 #[cfg(not(target_family = "wasm"))]
-struct BufferedStream {
-	/// Channel receiver that yields batches produced by the spawned task.
-	rx: ValueBatchStream,
-	/// Handle to the spawned producer task. Aborted on drop.
-	handle: tokio::task::JoinHandle<()>,
+struct PrefetchStream {
+	/// The wrapped inner stream.
+	inner: ValueBatchStream,
+	/// Ring buffer of prefetched items.
+	buffer: VecDeque<FlowResult<ValueBatch>>,
+	/// Maximum number of items to buffer ahead.
+	buffer_size: usize,
+	/// Whether the inner stream has been exhausted.
+	exhausted: bool,
 }
 
 #[cfg(not(target_family = "wasm"))]
-impl Drop for BufferedStream {
-	fn drop(&mut self) {
-		self.handle.abort();
+impl PrefetchStream {
+	/// Eagerly poll the inner stream, filling the buffer with any
+	/// immediately-ready items (up to `buffer_size`).
+	#[inline]
+	fn fill_buffer(&mut self, cx: &mut Context<'_>) {
+		while self.buffer.len() < self.buffer_size && !self.exhausted {
+			match self.inner.as_mut().poll_next(cx) {
+				Poll::Ready(Some(item)) => self.buffer.push_back(item),
+				Poll::Ready(None) => {
+					self.exhausted = true;
+				}
+				Poll::Pending => break,
+			}
+		}
 	}
 }
 
 #[cfg(not(target_family = "wasm"))]
-impl futures::Stream for BufferedStream {
-	type Item = crate::expr::FlowResult<crate::exec::ValueBatch>;
+impl Stream for PrefetchStream {
+	type Item = FlowResult<ValueBatch>;
 
-	fn poll_next(
-		self: std::pin::Pin<&mut Self>,
-		cx: &mut std::task::Context<'_>,
-	) -> std::task::Poll<Option<Self::Item>> {
-		self.get_mut().rx.as_mut().poll_next(cx)
+	fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+		let this = self.get_mut();
+
+		// Eagerly fill the buffer with any ready items from the inner stream.
+		this.fill_buffer(cx);
+
+		// Return the oldest buffered item.
+		if let Some(item) = this.buffer.pop_front() {
+			// After consuming an item, try to refill the vacated slot so
+			// the buffer stays as full as possible for the next poll.
+			this.fill_buffer(cx);
+			Poll::Ready(Some(item))
+		} else if this.exhausted {
+			Poll::Ready(None)
+		} else {
+			// Buffer empty and inner stream pending — nothing to return yet.
+			Poll::Pending
+		}
 	}
 }
