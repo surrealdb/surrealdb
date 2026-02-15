@@ -27,7 +27,7 @@ value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-└────> TableScan [ctx: Db] [table: t, direction: Forward, predicate: links CONTAINSANY [a:2]]
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: links CONTAINSANY [a:2]]
 ''''
 
 [[test.results]]
@@ -35,7 +35,7 @@ value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-└────> TableScan [ctx: Db] [table: t, direction: Forward, predicate: links CONTAINS a:2]
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: links CONTAINS a:2]
 ''''
 
 [[test.results]]
@@ -43,7 +43,7 @@ value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-└────> TableScan [ctx: Db] [table: t, direction: Forward, predicate: a:2 INSIDE links]
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: a:2 INSIDE links]
 ''''
 
 [[test.results]]
@@ -51,7 +51,7 @@ value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-└────> TableScan [ctx: Db] [table: t, direction: Forward, predicate: [a:2] ANYINSIDE links]
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: [a:2] ANYINSIDE links]
 ''''
 
 */

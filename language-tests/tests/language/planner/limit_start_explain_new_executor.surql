@@ -10,7 +10,7 @@ value = "[]"
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 10}
-└────> TableScan [ctx: Db] [table: item, direction: Forward, limit: 10, offset: 2] {rows: 10}
+    TableScan [ctx: Db] [table: item, direction: Forward, limit: 10, offset: 2] {rows: 10}
 
 Total rows: 10''''
 
@@ -19,7 +19,7 @@ value = "[]"
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 10}
-└────> TableScan [ctx: Db] [table: item2, direction: Forward, limit: 10, offset: 2] {rows: 10}
+    TableScan [ctx: Db] [table: item2, direction: Forward, limit: 10, offset: 2] {rows: 10}
 
 Total rows: 10''''
 

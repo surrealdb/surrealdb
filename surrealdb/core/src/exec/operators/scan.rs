@@ -16,6 +16,7 @@ pub(crate) mod pipeline;
 mod record_id;
 mod reference;
 mod table;
+mod union_index;
 
 pub use count::CountScan;
 pub use dynamic::DynamicScan;
@@ -27,3 +28,4 @@ pub(crate) use pipeline::determine_scan_direction;
 pub use record_id::RecordIdScan;
 pub use reference::{ReferenceScan, ReferenceScanOutput};
 pub use table::TableScan;
+pub use union_index::UnionIndexScan;

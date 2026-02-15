@@ -12,7 +12,7 @@ value = "[{ count: 1, country: 'AUD', max: d'2021-01-01T08:00:00Z', min: d'2021-
 
 [[test.results]]
 value = ''''Aggregate [ctx: Db] [by: country, year]
-└────> TableScan [ctx: Db] [table: temperature, direction: Forward]
+    TableScan [ctx: Db] [table: temperature, direction: Forward]
 ''''
 
 */

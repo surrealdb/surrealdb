@@ -149,6 +149,24 @@ jobs:
       - name: Check workspace
         run: cargo make ci-check
 
+  check-release:
+    name: Check workspace (release)
+    runs-on: [self-hosted, benchmarking]
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Check workspace release
+        run: cargo make ci-check-release
+
   check-msrv:
     name: Check workspace (MSRV)
     runs-on: ubuntu-latest

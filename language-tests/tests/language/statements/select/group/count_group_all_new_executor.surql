@@ -13,7 +13,7 @@ value = "[{ count: 3 }]"
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-└────> TableScan [ctx: Db] [table: table, direction: Forward]
+    TableScan [ctx: Db] [table: table, direction: Forward]
 ''''
 
 [[test.results]]

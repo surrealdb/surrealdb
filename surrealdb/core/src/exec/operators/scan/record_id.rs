@@ -50,6 +50,9 @@ pub struct RecordIdScan {
 	/// Fields needed by the query (projection + WHERE + ORDER + GROUP).
 	/// `None` means all fields are needed (SELECT *).
 	pub(crate) needed_fields: Option<std::collections::HashSet<String>>,
+	/// Compiled WHERE predicate pushed down from the Filter operator.
+	/// Applied after computed fields, before field-level permissions.
+	pub(crate) predicate: Option<Arc<dyn PhysicalExpr>>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -59,11 +62,13 @@ impl RecordIdScan {
 		record_id: Arc<dyn PhysicalExpr>,
 		version: Option<Arc<dyn PhysicalExpr>>,
 		needed_fields: Option<std::collections::HashSet<String>>,
+		predicate: Option<Arc<dyn PhysicalExpr>>,
 	) -> Self {
 		Self {
 			record_id,
 			version,
 			needed_fields,
+			predicate,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -81,6 +86,9 @@ impl ExecOperator for RecordIdScan {
 		if let Some(ref version) = self.version {
 			attrs.push(("version".to_string(), version.to_sql()));
 		}
+		if let Some(ref pred) = self.predicate {
+			attrs.push(("predicate".to_string(), pred.to_sql()));
+		}
 		attrs
 	}
 
@@ -93,6 +101,9 @@ impl ExecOperator for RecordIdScan {
 		if let Some(ref version) = self.version {
 			mode = mode.combine(version.access_mode());
 		}
+		if let Some(ref pred) = self.predicate {
+			mode = mode.combine(pred.access_mode());
+		}
 		mode
 	}
 
@@ -104,6 +115,9 @@ impl ExecOperator for RecordIdScan {
 		let mut exprs = vec![("record_id", &self.record_id)];
 		if let Some(ref version) = self.version {
 			exprs.push(("version", version));
+		}
+		if let Some(ref pred) = self.predicate {
+			exprs.push(("predicate", pred));
 		}
 		exprs
 	}
@@ -136,6 +150,7 @@ impl ExecOperator for RecordIdScan {
 		let record_id_expr = Arc::clone(&self.record_id);
 		let version_expr = self.version.clone();
 		let needed_fields = self.needed_fields.clone();
+		let predicate = self.predicate.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -168,12 +183,9 @@ impl ExecOperator for RecordIdScan {
 			};
 
 			// 3. Delegate to the shared lookup helper
-			// RecordIdScan has no pushed-down predicate/limit/start — the
-			// planner does not mark those as consumed for this operator, so
-			// outer Filter/Limit operators remain in the pipeline.
 			let results = execute_record_lookup(
 				&rid, version, check_perms, needed_fields.as_ref(), &ctx,
-				None, None, 0,
+				predicate.as_ref(), None, 0,
 			).await?;
 
 			if !results.is_empty() {
