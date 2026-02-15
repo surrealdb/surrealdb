@@ -492,11 +492,11 @@ impl RpcProtocol for Websocket {
 		&self,
 		id: Uuid,
 	) -> Result<Arc<surrealdb_core::kvs::Transaction>, surrealdb_core::rpc::RpcError> {
-		debug!("WebSocket get_tx called for transaction {id}");
+		trace!("WebSocket get_tx called for transaction {id}");
 		self.transactions
 			.get(&id)
 			.map(|entry| {
-				debug!("Transaction {id} found in WebSocket transactions map");
+				trace!("Transaction {id} found in WebSocket transactions map");
 				entry.value().1.clone()
 			})
 			.ok_or_else(|| {
