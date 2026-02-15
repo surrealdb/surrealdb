@@ -48,7 +48,6 @@ pub(crate) mod tasklease;
 pub(crate) mod version;
 
 pub use api::{ScanLimit, Transactable};
-pub use clock::SizedClock;
 pub(crate) use ds::TransactionFactory;
 pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
 pub use ds::{
