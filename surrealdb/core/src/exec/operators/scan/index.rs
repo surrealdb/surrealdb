@@ -512,6 +512,7 @@ fn compute_compound_key_range(
 				Ok((beg, end))
 			}
 			MoreThan => {
+				// Exclusive lower bound: start after all entries matching key_array
 				let beg = key_err(Index::prefix_ids_end(
 					ns_id,
 					db_id,
@@ -519,7 +520,8 @@ fn compute_compound_key_range(
 					ix.index_id,
 					&key_array,
 				))?;
-				let end = key_err(Index::prefix_ids_end(
+				// Upper bound: end of the composite prefix range
+				let end = key_err(Index::prefix_ids_composite_end(
 					ns_id,
 					db_id,
 					&ix.table_name,
@@ -529,6 +531,7 @@ fn compute_compound_key_range(
 				Ok((beg, end))
 			}
 			MoreThanEqual => {
+				// Inclusive lower bound: start at first entry matching key_array
 				let beg = key_err(Index::prefix_ids_beg(
 					ns_id,
 					db_id,
@@ -536,7 +539,8 @@ fn compute_compound_key_range(
 					ix.index_id,
 					&key_array,
 				))?;
-				let end = key_err(Index::prefix_ids_end(
+				// Upper bound: end of the composite prefix range
+				let end = key_err(Index::prefix_ids_composite_end(
 					ns_id,
 					db_id,
 					&ix.table_name,
@@ -546,13 +550,15 @@ fn compute_compound_key_range(
 				Ok((beg, end))
 			}
 			LessThan => {
-				let beg = key_err(Index::prefix_ids_beg(
+				// Lower bound: start of the composite prefix range
+				let beg = key_err(Index::prefix_ids_composite_beg(
 					ns_id,
 					db_id,
 					&ix.table_name,
 					ix.index_id,
 					&prefix_array,
 				))?;
+				// Exclusive upper bound: stop before entries matching key_array
 				let end = key_err(Index::prefix_ids_beg(
 					ns_id,
 					db_id,
@@ -563,13 +569,15 @@ fn compute_compound_key_range(
 				Ok((beg, end))
 			}
 			LessThanEqual => {
-				let beg = key_err(Index::prefix_ids_beg(
+				// Lower bound: start of the composite prefix range
+				let beg = key_err(Index::prefix_ids_composite_beg(
 					ns_id,
 					db_id,
 					&ix.table_name,
 					ix.index_id,
 					&prefix_array,
 				))?;
+				// Inclusive upper bound: include all entries matching key_array
 				let end = key_err(Index::prefix_ids_end(
 					ns_id,
 					db_id,
@@ -580,15 +588,15 @@ fn compute_compound_key_range(
 				Ok((beg, end))
 			}
 			_ => {
-				// Other operators - scan full prefix range
-				let beg = key_err(Index::prefix_ids_beg(
+				// Other operators - scan full composite prefix range
+				let beg = key_err(Index::prefix_ids_composite_beg(
 					ns_id,
 					db_id,
 					&ix.table_name,
 					ix.index_id,
 					&prefix_array,
 				))?;
-				let end = key_err(Index::prefix_ids_end(
+				let end = key_err(Index::prefix_ids_composite_end(
 					ns_id,
 					db_id,
 					&ix.table_name,
