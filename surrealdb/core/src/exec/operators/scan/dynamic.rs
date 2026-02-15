@@ -282,16 +282,93 @@ impl ExecOperator for DynamicScan {
 				}
 				return;
 			}
-				Value::Array(arr) => {
-					yield ValueBatch { values: arr.0 };
+			Value::Array(arr) => {
+				// === ARRAY SOURCE ===
+				// The planner marks predicate/limit/start as consumed for
+				// FunctionCall/Postfix sources, so the outer Filter/Limit
+				// operators are removed. We must apply them here.
+
+				// Evaluate pushed-down LIMIT and START expressions
+				let limit_val: Option<usize> = match &limit_expr {
+					Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+					None => None,
+				};
+				let start_val: usize = match &start_expr {
+					Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+					None => 0,
+				};
+
+				// Early exit if limit is 0
+				if limit_val == Some(0) {
 					return;
 				}
-				// For any other value type, yield as a single row.
-				// This matches legacy FROM behavior for non-table values.
-				other => {
-					yield ValueBatch { values: vec![other] };
+
+				// Apply pushed-down predicate
+				let mut values = arr.0;
+				if let Some(ref pred) = predicate {
+					let mut write_idx = 0;
+					for read_idx in 0..values.len() {
+						let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&values[read_idx]);
+						if pred.evaluate(eval_ctx).await?.is_truthy() {
+							if write_idx != read_idx {
+								values.swap(write_idx, read_idx);
+							}
+							write_idx += 1;
+						}
+					}
+					values.truncate(write_idx);
+				}
+
+				// Apply start offset
+				if start_val > 0 {
+					if start_val >= values.len() {
+						return;
+					}
+					values.drain(..start_val);
+				}
+
+				// Apply limit
+				if let Some(limit) = limit_val {
+					values.truncate(limit);
+				}
+
+				if !values.is_empty() {
+					yield ValueBatch { values };
+				}
+				return;
+			}
+			// For any other value type, yield as a single row.
+			// This matches legacy FROM behavior for non-table values.
+			other => {
+				// === SCALAR SOURCE ===
+				// Same pushdown logic as the array branch above.
+
+				// Evaluate pushed-down LIMIT and START expressions
+				let limit_val: Option<usize> = match &limit_expr {
+					Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+					None => None,
+				};
+				let start_val: usize = match &start_expr {
+					Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+					None => 0,
+				};
+
+				// Early exit if limit is 0 or start skips past the single value
+				if limit_val == Some(0) || start_val > 0 {
 					return;
 				}
+
+				// Apply pushed-down predicate
+				if let Some(ref pred) = predicate {
+					let eval_ctx = EvalContext::from_exec_ctx(&ctx).with_value(&other);
+					if !pred.evaluate(eval_ctx).await?.is_truthy() {
+						return;
+					}
+				}
+
+				yield ValueBatch { values: vec![other] };
+				return;
+			}
 			};
 
 			// === TABLE SCAN PATH ===

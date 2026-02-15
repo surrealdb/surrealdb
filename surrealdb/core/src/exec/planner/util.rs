@@ -373,6 +373,70 @@ fn extract_literal_vector(expr: &Expr) -> Option<Vec<Number>> {
 	}
 }
 
+// ============================================================================
+// Record ID Point-Lookup Extraction
+// ============================================================================
+
+/// Check whether a WHERE condition contains `id = <RecordId literal>` in its
+/// top-level AND chain, where the RecordId's table matches the FROM table.
+///
+/// Returns the `RecordId` literal expression when found, `None` otherwise.
+/// Does NOT extract from OR branches (those require a full table scan).
+///
+/// This enables the planner to convert `SELECT * FROM table WHERE id = table:x`
+/// into a direct point lookup (`RecordIdScan`) instead of a full table scan.
+///
+/// Only matches point-key RecordIds (not range keys like `table:1..5`).
+pub(super) fn extract_record_id_point_lookup(
+	cond: &Cond,
+	table_name: &crate::val::TableName,
+) -> Option<Expr> {
+	find_id_equality_in_and_chain(&cond.0, table_name)
+}
+
+/// Walk the top-level AND chain looking for `id = <RecordId literal>`.
+fn find_id_equality_in_and_chain(expr: &Expr, table_name: &crate::val::TableName) -> Option<Expr> {
+	match expr {
+		// AND: check both branches
+		Expr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} => find_id_equality_in_and_chain(left, table_name)
+			.or_else(|| find_id_equality_in_and_chain(right, table_name)),
+
+		// Equality: check for `id = <RecordId>` or `<RecordId> = id`
+		Expr::Binary {
+			left,
+			op: BinaryOperator::Equal | BinaryOperator::ExactEqual,
+			right,
+		} => check_id_recordid_pair(left, right, table_name)
+			.or_else(|| check_id_recordid_pair(right, left, table_name)),
+
+		// Any other node (OR, comparisons, etc.): no match
+		_ => None,
+	}
+}
+
+/// Check if `idiom_side` is the `id` idiom and `lit_side` is a matching
+/// RecordId literal with a non-range key.
+fn check_id_recordid_pair(
+	idiom_side: &Expr,
+	lit_side: &Expr,
+	table_name: &crate::val::TableName,
+) -> Option<Expr> {
+	if let Expr::Idiom(idiom) = idiom_side
+		&& idiom.is_id()
+		&& let Expr::Literal(Literal::RecordId(rid)) = lit_side
+		&& &rid.table == table_name
+		&& !matches!(rid.key, crate::expr::RecordIdKeyLit::Range(_))
+	{
+		Some(lit_side.clone())
+	} else {
+		None
+	}
+}
+
 /// Check if a source expression represents a "value source" (array, primitive).
 pub(super) fn is_value_source_expr(expr: &Expr) -> bool {
 	match expr {
