@@ -168,8 +168,12 @@ impl ExecOperator for RecordIdScan {
 			};
 
 			// 3. Delegate to the shared lookup helper
+			// RecordIdScan has no pushed-down predicate/limit/start — the
+			// planner does not mark those as consumed for this operator, so
+			// outer Filter/Limit operators remain in the pipeline.
 			let results = execute_record_lookup(
 				&rid, version, check_perms, needed_fields.as_ref(), &ctx,
+				None, None, 0,
 			).await?;
 
 			if !results.is_empty() {
@@ -190,14 +194,23 @@ impl ExecOperator for RecordIdScan {
 /// Handles both point lookups (non-range key) and range scans (range key).
 /// Returns the resulting rows after applying permissions and computed fields.
 ///
+/// The optional `predicate`, `limit`, and `start` parameters allow the caller
+/// to push down WHERE / LIMIT / START clauses that would otherwise be handled
+/// by outer pipeline operators. When `DynamicScan` discovers a RecordId at
+/// runtime, it forwards its pushed-down values here so that the results are
+/// correctly filtered and bounded.
+///
 /// This is the single implementation of RecordId-based data access, shared
-/// by `RecordLookup` (plan-time) and `DynamicScan` (runtime-discovered).
+/// by `RecordIdScan` (plan-time) and `DynamicScan` (runtime-discovered).
 pub(crate) async fn execute_record_lookup(
 	rid: &RecordId,
 	version: Option<u64>,
 	check_perms: bool,
 	needed_fields: Option<&std::collections::HashSet<String>>,
 	ctx: &ExecutionContext,
+	predicate: Option<&Arc<dyn PhysicalExpr>>,
+	limit: Option<usize>,
+	start: usize,
 ) -> Result<Vec<Value>, ControlFlow> {
 	let db_ctx = ctx.database().context("RecordLookup requires database context")?;
 	let txn = ctx.txn();
@@ -237,7 +250,8 @@ pub(crate) async fn execute_record_lookup(
 	// Pre-compute whether any post-decode processing is needed
 	let needs_processing = !matches!(select_permission, PhysicalPermission::Allow)
 		|| !field_state.computed_fields.is_empty()
-		|| (check_perms && !field_state.field_permissions.is_empty());
+		|| (check_perms && !field_state.field_permissions.is_empty())
+		|| predicate.is_some();
 
 	// 3. Dispatch based on key type
 	match &rid.key {
@@ -258,11 +272,11 @@ pub(crate) async fn execute_record_lookup(
 
 			let mut pipeline = ScanPipeline::new(
 				select_permission,
-				None, // no predicate for record lookups
+				predicate.cloned(),
 				field_state,
 				check_perms,
-				None, // no limit
-				0,    // no start offset
+				limit,
+				start,
 			);
 
 			let mut results = Vec::new();
@@ -300,12 +314,21 @@ pub(crate) async fn execute_record_lookup(
 				filter_and_process_batch(
 					&mut batch,
 					&select_permission,
-					None, // no predicate
+					predicate,
 					ctx,
 					&field_state,
 					check_perms,
 				)
 				.await?;
+			}
+			// Apply start/limit for point lookups (0-1 rows after filtering).
+			// Start skips the first N post-filter rows; with at most one row,
+			// any non-zero start discards it.
+			if !batch.is_empty() && start > 0 {
+				batch.clear();
+			}
+			if !batch.is_empty() && limit == Some(0) {
+				batch.clear();
 			}
 			Ok(batch)
 		}

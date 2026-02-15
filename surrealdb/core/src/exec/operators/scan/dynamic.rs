@@ -230,37 +230,58 @@ impl ExecOperator for DynamicScan {
 			// Determine scan target: either a table name or a record ID
 			let table_name = match table_value {
 				Value::Table(t) => t,
-				Value::RecordId(rid) => {
-					// === RECORD LOOKUP (point or range) ===
-					// Delegate to the shared execute_record_lookup helper which
-					// handles both point lookups and range scans. For plan-time-
-					// known RecordIds the planner emits RecordLookup directly;
-					// this path handles runtime-discovered RecordIds (e.g. from
-					// `type::thing(...)` or other dynamic expressions).
+			Value::RecordId(rid) => {
+				// === RECORD LOOKUP (point or range) ===
+				// Delegate to the shared execute_record_lookup helper which
+				// handles both point lookups and range scans. For plan-time-
+				// known RecordIds the planner emits RecordLookup directly;
+				// this path handles runtime-discovered RecordIds (e.g. from
+				// `type::thing(...)` or other dynamic expressions).
+				//
+				// The planner marks predicate/limit/start as consumed for
+				// FunctionCall/Postfix sources, so the outer Filter/Limit
+				// operators are removed. We must forward the pushdowns here
+				// to ensure WHERE/LIMIT/START are still applied.
 
-					// Evaluate VERSION expression
-					let version: Option<u64> = match &version {
-						Some(expr) => {
-							let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-							let v = expr.evaluate(eval_ctx).await?;
-							Some(
-								v.cast_to::<crate::val::Datetime>()
-									.map_err(|e| anyhow::anyhow!("{e}"))?
-									.to_version_stamp()?,
-							)
-						}
-						None => None,
-					};
-
-					let results = super::record_id::execute_record_lookup(
-						&rid, version, check_perms, needed_fields.as_ref(), &ctx,
-					).await?;
-
-					if !results.is_empty() {
-						yield ValueBatch { values: results };
+				// Evaluate VERSION expression
+				let version: Option<u64> = match &version {
+					Some(expr) => {
+						let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+						let v = expr.evaluate(eval_ctx).await?;
+						Some(
+							v.cast_to::<crate::val::Datetime>()
+								.map_err(|e| anyhow::anyhow!("{e}"))?
+								.to_version_stamp()?,
+						)
 					}
+					None => None,
+				};
+
+				// Evaluate pushed-down LIMIT and START expressions
+				let limit_val: Option<usize> = match &limit_expr {
+					Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+					None => None,
+				};
+				let start_val: usize = match &start_expr {
+					Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+					None => 0,
+				};
+
+				// Early exit if limit is 0
+				if limit_val == Some(0) {
 					return;
 				}
+
+				let results = super::record_id::execute_record_lookup(
+					&rid, version, check_perms, needed_fields.as_ref(), &ctx,
+					predicate.as_ref(), limit_val, start_val,
+				).await?;
+
+				if !results.is_empty() {
+					yield ValueBatch { values: results };
+				}
+				return;
+			}
 				Value::Array(arr) => {
 					yield ValueBatch { values: arr.0 };
 					return;
