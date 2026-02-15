@@ -8,8 +8,8 @@ value = "'OK'"
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3, batches: 1}
-└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number > 0 AND number < 2] {rows: 3, batches: 1}
+value = ''''Project [ctx: Db] {rows: 3}
+└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number > 0 AND number < 2] {rows: 3}
 
 Total rows: 3''''
 
@@ -17,8 +17,8 @@ Total rows: 3''''
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3, batches: 1}
-└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number > 0.1f AND number < 2] {rows: 3, batches: 1}
+value = ''''Project [ctx: Db] {rows: 3}
+└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number > 0.1f AND number < 2] {rows: 3}
 
 Total rows: 3''''
 
@@ -26,8 +26,8 @@ Total rows: 3''''
 value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 2, batches: 1}
-└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number > 0.1f AND number < 1.5f] {rows: 2, batches: 1}
+value = ''''Project [ctx: Db] {rows: 2}
+└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number > 0.1f AND number < 1.5f] {rows: 2}
 
 Total rows: 2''''
 
@@ -35,8 +35,8 @@ Total rows: 2''''
 value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 2, batches: 1}
-└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number > 0 AND number < 1.5f] {rows: 2, batches: 1}
+value = ''''Project [ctx: Db] {rows: 2}
+└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number > 0 AND number < 1.5f] {rows: 2}
 
 Total rows: 2''''
 
@@ -44,8 +44,8 @@ Total rows: 2''''
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }, { id: test:int2, number: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 4, batches: 1}
-└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number > 0.1f] {rows: 4, batches: 1}
+value = ''''Project [ctx: Db] {rows: 4}
+└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number > 0.1f] {rows: 4}
 
 Total rows: 4''''
 
@@ -53,8 +53,8 @@ Total rows: 4''''
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }, { id: test:int2, number: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 4, batches: 1}
-└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number > 0] {rows: 4, batches: 1}
+value = ''''Project [ctx: Db] {rows: 4}
+└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number > 0] {rows: 4}
 
 Total rows: 4''''
 
@@ -62,8 +62,8 @@ Total rows: 4''''
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int0, number: 0 }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 4, batches: 1}
-└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number < 2] {rows: 4, batches: 1}
+value = ''''Project [ctx: Db] {rows: 4}
+└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number < 2] {rows: 4}
 
 Total rows: 4''''
 
@@ -71,8 +71,8 @@ Total rows: 4''''
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int0, number: 0 }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 4, batches: 1}
-└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number < 1.9f] {rows: 4, batches: 1}
+value = ''''Project [ctx: Db] {rows: 4}
+└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: number < 1.9f] {rows: 4}
 
 Total rows: 4''''
 

@@ -11,9 +11,9 @@ value = "NONE"
 value = "[]"
 
 [[test.results]]
-value = '''"Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1, batches: 1}
-└────> Filter [ctx: Db] [predicate: indexedField = 'cake'] {rows: 10, batches: 1}
-       └────> IndexScan [ctx: Db] [index: idx_indexedField, access: = 'cake', direction: Forward] {rows: 10, batches: 1}
+value = '''"Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1}
+└────> Filter [ctx: Db] [predicate: indexedField = 'cake'] {rows: 10}
+       └────> IndexScan [ctx: Db] [index: idx_indexedField, access: = 'cake', direction: Forward] {rows: 10}
 
 Total rows: 1"'''
 
@@ -24,9 +24,9 @@ value = "[{ count: 10 }]"
 value = "[{ count: 10 }]"
 
 [[test.results]]
-value = '''"Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1, batches: 1}
-└────> Filter [ctx: Db] [predicate: indexedField = 'cake' AND unindexedField = false] {rows: 0, batches: 0}
-       └────> IndexScan [ctx: Db] [index: idx_indexedField, access: = 'cake', direction: Forward] {rows: 10, batches: 1}
+value = '''"Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1}
+└────> Filter [ctx: Db] [predicate: indexedField = 'cake' AND unindexedField = false] {rows: 0}
+       └────> IndexScan [ctx: Db] [index: idx_indexedField, access: = 'cake', direction: Forward] {rows: 10}
 
 Total rows: 1"'''
 

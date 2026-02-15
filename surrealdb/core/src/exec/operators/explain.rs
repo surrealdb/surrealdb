@@ -99,7 +99,7 @@ pub struct AnalyzePlan {
 	pub format: ExplainFormat,
 	/// When true, elapsed durations are omitted from the output, making
 	/// it deterministic for test assertions.
-	pub redact_duration: bool,
+	pub redact_volatile_explain_attrs: bool,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -135,7 +135,7 @@ impl ExecOperator for AnalyzePlan {
 		let mut inner_stream = self.plan.execute(ctx)?;
 		let plan = Arc::clone(&self.plan);
 		let format = self.format;
-		let redact_duration = self.redact_duration;
+		let redact_volatile_explain_attrs = self.redact_volatile_explain_attrs;
 
 		// Create a stream that first drains the inner plan, then formats output
 		let analyze_stream = async_stream::try_stream! {
@@ -160,13 +160,13 @@ impl ExecOperator for AnalyzePlan {
 			let output = match format {
 				ExplainFormat::Text => {
 					let mut plan_text = String::new();
-					format_analyze_plan(plan.as_ref(), &mut plan_text, "", true, redact_duration);
+					format_analyze_plan(plan.as_ref(), &mut plan_text, "", true, redact_volatile_explain_attrs);
 					let _ = writeln!(plan_text);
 					let _ = write!(plan_text, "Total rows: {}", total_rows);
 					Value::String(plan_text)
 				}
 				ExplainFormat::Json => {
-					let mut plan_json = format_analyze_plan_json(plan.as_ref(), redact_duration);
+					let mut plan_json = format_analyze_plan_json(plan.as_ref(), redact_volatile_explain_attrs);
 					plan_json.insert("total_rows".to_string(), Value::from(total_rows as i64));
 					Value::Object(plan_json)
 				}
@@ -336,16 +336,16 @@ fn format_execution_plan_json(plan: &dyn ExecOperator) -> Object {
 
 /// Format metrics as a human-readable string fragment.
 ///
-/// When `redact_duration` is true, elapsed time is omitted so the output
-/// is deterministic for test assertions.
-fn format_metrics_text(metrics: &OperatorMetrics, redact_duration: bool) -> String {
+/// When `redact_volatile_explain_attrs` is true, elapsed time and batch counts are
+/// omitted so the output is deterministic for test assertions.
+fn format_metrics_text(metrics: &OperatorMetrics, redact_volatile_explain_attrs: bool) -> String {
 	let rows = metrics.output_rows();
-	let batches = metrics.output_batches();
 
-	if redact_duration {
-		return format!("rows: {}, batches: {}", rows, batches);
+	if redact_volatile_explain_attrs {
+		return format!("rows: {}", rows);
 	}
 
+	let batches = metrics.output_batches();
 	let elapsed = metrics.elapsed_ns();
 
 	// Format elapsed time in the most readable unit
@@ -368,7 +368,7 @@ fn format_analyze_plan(
 	output: &mut String,
 	prefix: &str,
 	_is_last: bool,
-	redact_duration: bool,
+	redact_volatile_explain_attrs: bool,
 ) {
 	let name = plan.name();
 	let properties = plan.attrs();
@@ -391,7 +391,8 @@ fn format_analyze_plan(
 
 	// Show metrics if available
 	if let Some(metrics) = plan.metrics() {
-		let _ = write!(output, " {{{}}}", format_metrics_text(metrics, redact_duration));
+		let _ =
+			write!(output, " {{{}}}", format_metrics_text(metrics, redact_volatile_explain_attrs));
 	}
 
 	let _ = writeln!(output);
@@ -408,7 +409,7 @@ fn format_analyze_plan(
 					output,
 					&format!("{}  ", prefix),
 					true,
-					redact_duration,
+					redact_volatile_explain_attrs,
 				);
 			}
 		}
@@ -435,14 +436,17 @@ fn format_analyze_plan(
 				output,
 				&next_prefix,
 				is_last_child,
-				redact_duration,
+				redact_volatile_explain_attrs,
 			);
 		}
 	}
 }
 
 /// Format an execution plan node as a JSON object with metrics.
-fn format_analyze_plan_json(plan: &dyn ExecOperator, redact_duration: bool) -> Object {
+fn format_analyze_plan_json(
+	plan: &dyn ExecOperator,
+	redact_volatile_explain_attrs: bool,
+) -> Object {
 	let mut obj = Object::default();
 
 	obj.insert("operator".to_string(), Value::String(plan.name().to_string()));
@@ -466,9 +470,9 @@ fn format_analyze_plan_json(plan: &dyn ExecOperator, redact_duration: bool) -> O
 	if let Some(metrics) = plan.metrics() {
 		let mut metrics_obj = Object::default();
 		metrics_obj.insert("output_rows".to_string(), Value::from(metrics.output_rows() as i64));
-		metrics_obj
-			.insert("output_batches".to_string(), Value::from(metrics.output_batches() as i64));
-		if !redact_duration {
+		if !redact_volatile_explain_attrs {
+			metrics_obj
+				.insert("output_batches".to_string(), Value::from(metrics.output_batches() as i64));
 			metrics_obj.insert("elapsed_ns".to_string(), Value::from(metrics.elapsed_ns() as i64));
 		}
 		obj.insert("metrics".to_string(), Value::Object(metrics_obj));
@@ -495,7 +499,7 @@ fn format_analyze_plan_json(plan: &dyn ExecOperator, redact_duration: bool) -> O
 								"plan".to_string(),
 								Value::Object(format_analyze_plan_json(
 									embed_plan.as_ref(),
-									redact_duration,
+									redact_volatile_explain_attrs,
 								)),
 							);
 							Value::Object(e)
@@ -518,7 +522,12 @@ fn format_analyze_plan_json(plan: &dyn ExecOperator, redact_duration: bool) -> O
 	if !children.is_empty() {
 		let children_array: Vec<Value> = children
 			.iter()
-			.map(|child| Value::Object(format_analyze_plan_json(child.as_ref(), redact_duration)))
+			.map(|child| {
+				Value::Object(format_analyze_plan_json(
+					child.as_ref(),
+					redact_volatile_explain_attrs,
+				))
+			})
 			.collect();
 		obj.insert("children".to_string(), Value::Array(Array::from(children_array)));
 	}

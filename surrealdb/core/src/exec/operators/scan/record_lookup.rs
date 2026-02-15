@@ -73,7 +73,7 @@ impl RecordIdScan {
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for RecordIdScan {
 	fn name(&self) -> &'static str {
-		"RecordIdScan"
+		"RecordLookup"
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {

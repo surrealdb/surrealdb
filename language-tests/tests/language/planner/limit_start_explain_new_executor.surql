@@ -9,8 +9,8 @@ reason = "Test LIMIT and START with EXPLAIN plans and ORDER BY (new executor)"
 value = "[]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 10, batches: 1}
-└────> TableScan [ctx: Db] [table: item, direction: Forward, limit: 10, offset: 2] {rows: 10, batches: 1}
+value = ''''Project [ctx: Db] {rows: 10}
+└────> TableScan [ctx: Db] [table: item, direction: Forward, limit: 10, offset: 2] {rows: 10}
 
 Total rows: 10''''
 
@@ -18,8 +18,8 @@ Total rows: 10''''
 value = "[]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 10, batches: 1}
-└────> TableScan [ctx: Db] [table: item2, direction: Forward, limit: 10, offset: 2] {rows: 10, batches: 1}
+value = ''''Project [ctx: Db] {rows: 10}
+└────> TableScan [ctx: Db] [table: item2, direction: Forward, limit: 10, offset: 2] {rows: 10}
 
 Total rows: 10''''
 

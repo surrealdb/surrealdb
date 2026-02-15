@@ -7,10 +7,11 @@ use std::sync::Arc;
 
 use super::Planner;
 use super::util::{
-	all_value_sources, can_push_limit_to_scan, check_forbidden_group_by_params, derive_field_name,
-	extract_bruteforce_knn, extract_count_field_names, extract_matches_context, extract_version,
+	all_value_sources, check_forbidden_group_by_params, derive_field_name, extract_bruteforce_knn,
+	extract_count_field_names, extract_matches_context, extract_version,
 	get_effective_limit_literal, has_knn_k_operator, has_knn_operator, has_top_level_or,
-	idiom_to_field_name, idiom_to_field_path, is_count_all_eligible, strip_knn_from_condition,
+	idiom_to_field_name, idiom_to_field_path, index_covers_ordering, is_count_all_eligible,
+	order_is_scan_compatible, strip_knn_from_condition,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
@@ -184,7 +185,9 @@ impl<'ctx> Planner<'ctx> {
 			return false; // Random ordering can't be eliminated
 		};
 
-		// Convert the ORDER BY clause to SortProperty requirements
+		// Convert the ORDER BY clause to SortProperty requirements,
+		// including collate/numeric modifiers so that the satisfies
+		// check rejects mismatches against raw key ordering.
 		let required: Vec<SortProperty> = order_list
 			.iter()
 			.filter_map(|field| {
@@ -198,6 +201,8 @@ impl<'ctx> Planner<'ctx> {
 					SortProperty {
 						path,
 						direction,
+						collate: field.collate,
+						numeric: field.numeric,
 					}
 				})
 			})
@@ -866,7 +871,7 @@ impl<'ctx> Planner<'ctx> {
 					Ok(Arc::new(AnalyzePlan {
 						plan,
 						format: crate::expr::ExplainFormat::Json,
-						redact_duration: self.ctx.redact_duration(),
+						redact_volatile_explain_attrs: self.ctx.redact_volatile_explain_attrs(),
 					}))
 				} else {
 					Ok(Arc::new(ExplainPlan {
@@ -1032,13 +1037,17 @@ impl<'ctx> Planner<'ctx> {
 			None
 		};
 
-		let push_limit = source_is_single_scan
+		// Check prerequisites for limit pushdown that don't depend on the
+		// access path. The per-access-path decision (whether the scan
+		// ordering covers the ORDER BY) is made inside plan_source().
+		let can_push_limit = source_is_single_scan
 			&& brute_force_knn.is_none()
 			&& !has_top_level_or(cond_for_filter.as_ref())
 			&& limit.is_some()
-			&& can_push_limit_to_scan(&split, &group, &order);
+			&& split.is_none()
+			&& group.is_none();
 
-		let (scan_limit, scan_start) = if push_limit {
+		let (scan_limit, scan_start) = if can_push_limit {
 			(
 				match limit.as_ref() {
 					Some(l) => Some(pp.physical_expr(l.0.clone()).await?),
@@ -1101,8 +1110,10 @@ impl<'ctx> Planner<'ctx> {
 
 		// Build pipeline.
 		// When the predicate was pushed into the source, omit it from the
-		// pipeline. Likewise, when limit/start were pushed, omit order,
-		// limit, and start from the pipeline to avoid double application.
+		// pipeline. When limit/start were pushed, omit them from the
+		// pipeline to avoid double application. ORDER BY is always passed
+		// through — sort elimination via `can_eliminate_sort()` in
+		// `plan_pipeline()` handles it independently.
 		let filter_pushed = planned.predicate_pushed;
 		let config = SelectPipelineConfig {
 			cond: if filter_pushed || had_bruteforce_knn {
@@ -1112,11 +1123,7 @@ impl<'ctx> Planner<'ctx> {
 			},
 			split,
 			group,
-			order: if planned.limit_pushed {
-				None
-			} else {
-				order
-			},
+			order,
 			limit: if planned.limit_pushed {
 				None
 			} else {
@@ -1241,11 +1248,24 @@ impl<'ctx> Planner<'ctx> {
 						access,
 						direction,
 					} => {
+						// Push limit to IndexScan when the index ordering
+						// covers the ORDER BY (or there is no ORDER BY).
+						let push = scan_limit.is_some()
+							&& match order {
+								None => true,
+								Some(ord) => index_covers_ordering(&index_ref, direction, ord),
+							};
+						let (idx_limit, idx_start, limit_pushed) = if push {
+							(scan_limit.clone(), scan_start.clone(), true)
+						} else {
+							(None, None, false)
+						};
 						return Ok(PlannedSource {
-							operator: Arc::new(IndexScan::new(index_ref, access, direction, table))
-								as Arc<dyn ExecOperator>,
+							operator: Arc::new(IndexScan::new(
+								index_ref, access, direction, table, idx_limit, idx_start,
+							)) as Arc<dyn ExecOperator>,
 							predicate_pushed: false,
-							limit_pushed: false,
+							limit_pushed,
 						});
 					}
 					AccessPath::FullTextSearch {
@@ -1286,15 +1306,24 @@ impl<'ctx> Planner<'ctx> {
 					}
 					AccessPath::TableScan => {
 						let predicate_pushed = scan_predicate.is_some();
-						let limit_pushed = scan_limit.is_some();
+						// TableScan can only provide ordering for `id ASC/DESC`.
+						// Push limit only when ORDER BY is compatible with the
+						// natural KV scan direction.
+						let push =
+							scan_limit.is_some() && order_is_scan_compatible(&order.cloned());
+						let (tbl_limit, tbl_start, limit_pushed) = if push {
+							(scan_limit.clone(), scan_start.clone(), true)
+						} else {
+							(None, None, false)
+						};
 						return Ok(PlannedSource {
 							operator: Arc::new(TableScan::new(
 								table,
 								direction,
 								version,
 								scan_predicate,
-								scan_limit,
-								scan_start,
+								tbl_limit,
+								tbl_start,
 								needed_fields,
 							)) as Arc<dyn ExecOperator>,
 							predicate_pushed,

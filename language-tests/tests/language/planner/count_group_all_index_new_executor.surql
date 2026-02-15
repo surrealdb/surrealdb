@@ -13,8 +13,8 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = ''''Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1, batches: 1}
-└────> TableScan [ctx: Db] [table: indexPerformance3, direction: Forward, predicate: something >= 5000] {rows: 5000, batches: 2}
+value = ''''Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1}
+└────> TableScan [ctx: Db] [table: indexPerformance3, direction: Forward, predicate: something >= 5000] {rows: 5000}
 
 Total rows: 1''''
 
@@ -22,9 +22,9 @@ Total rows: 1''''
 value = "[{ count: 5000 }]"
 
 [[test.results]]
-value = ''''Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1, batches: 1}
-└────> Filter [ctx: Db] [predicate: something >= 5000] {rows: 5000, batches: 5}
-       └────> IndexScan [ctx: Db] [index: somethingIndex, access: >=5000, direction: Forward] {rows: 5000, batches: 5}
+value = ''''Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1}
+└────> Filter [ctx: Db] [predicate: something >= 5000] {rows: 5000}
+       └────> IndexScan [ctx: Db] [index: somethingIndex, access: >=5000, direction: Forward] {rows: 5000}
 
 Total rows: 1''''
 

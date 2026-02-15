@@ -18,9 +18,9 @@ value = "[{ id: t:3, on: true, value: 2 }]"
 value = "[{ id: t:4, on: false, value: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 2, batches: 1}
-└────> Filter [ctx: Db] [predicate: on = true] {rows: 2, batches: 1}
-       └────> IndexScan [ctx: Db] [index: t_idx, access: [true], direction: Forward] {rows: 2, batches: 1}
+value = ''''Project [ctx: Db] {rows: 2}
+└────> Filter [ctx: Db] [predicate: on = true] {rows: 2}
+       └────> IndexScan [ctx: Db] [index: t_idx, access: [true], direction: Forward] {rows: 2}
 
 Total rows: 2''''
 
@@ -28,9 +28,9 @@ Total rows: 2''''
 value = "[{ id: t:1, on: true, value: 1 }, { id: t:3, on: true, value: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 1, batches: 1}
-└────> Filter [ctx: Db] [predicate: on = false AND `value` = 2] {rows: 1, batches: 1}
-       └────> IndexScan [ctx: Db] [index: t_idx, access: [false, 2], direction: Forward] {rows: 1, batches: 1}
+value = ''''Project [ctx: Db] {rows: 1}
+└────> Filter [ctx: Db] [predicate: on = false AND `value` = 2] {rows: 1}
+       └────> IndexScan [ctx: Db] [index: t_idx, access: [false, 2], direction: Forward] {rows: 1}
 
 Total rows: 1''''
 
@@ -56,9 +56,9 @@ value = "[{ id: t:3, on: true, value: 2 }]"
 value = "[{ id: t:4, on: false, value: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 2, batches: 1}
-└────> Filter [ctx: Db] [predicate: on = true] {rows: 2, batches: 1}
-       └────> IndexScan [ctx: Db] [index: t_idx, access: [true], direction: Forward] {rows: 2, batches: 1}
+value = ''''Project [ctx: Db] {rows: 2}
+└────> Filter [ctx: Db] [predicate: on = true] {rows: 2}
+       └────> IndexScan [ctx: Db] [index: t_idx, access: [true], direction: Forward] {rows: 2}
 
 Total rows: 2''''
 
@@ -66,9 +66,9 @@ Total rows: 2''''
 value = "[{ id: t:1, on: true, value: 1 }, { id: t:3, on: true, value: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 1, batches: 1}
-└────> Filter [ctx: Db] [predicate: on = false AND `value` = 2] {rows: 1, batches: 1}
-       └────> IndexScan [ctx: Db] [index: t_idx, access: [false, 2], direction: Forward] {rows: 1, batches: 1}
+value = ''''Project [ctx: Db] {rows: 1}
+└────> Filter [ctx: Db] [predicate: on = false AND `value` = 2] {rows: 1}
+       └────> IndexScan [ctx: Db] [index: t_idx, access: [false, 2], direction: Forward] {rows: 1}
 
 Total rows: 1''''
 

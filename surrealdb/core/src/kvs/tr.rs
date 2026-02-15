@@ -502,9 +502,10 @@ impl Transactor {
 	/// Retrieve a stream of key-value batches over a specific range in the datastore.
 	///
 	/// This function returns a stream that yields batches of key-value pairs. The scanner:
-	/// - Fetches an initial batch of up to 100 items
+	/// - Fetches an initial batch of up to 100 items (or 500 when `prefetch` is enabled)
 	/// - Fetches subsequent batches of up to 16 MiB (local) or 4 MiB (remote)
-	/// - Prefetches the next batch while the current batch is being processed
+	/// - When `prefetch` is true, prefetches the next batch while the current batch is being
+	///   processed, and uses a larger initial batch size (500 items)
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub fn stream_keys_vals<K>(
 		&self,
@@ -513,6 +514,7 @@ impl Transactor {
 		limit: Option<usize>,
 		skip: u32,
 		dir: Direction,
+		prefetch: bool,
 	) -> impl Stream<Item = Result<Vec<(Key, Val)>>> + '_
 	where
 		K: IntoBytes + Debug,
@@ -527,6 +529,12 @@ impl Transactor {
 		// Set the skip
 		if skip > 0 {
 			scanner = scanner.skip(skip);
+		}
+		// Enable prefetching and larger initial batch for full scans
+		if prefetch {
+			scanner = scanner
+				.prefetch(true)
+				.initial_batch_size(ScanLimit::Count(*crate::cnf::NORMAL_FETCH_SIZE));
 		}
 		// Return the stream
 		scanner

@@ -15,6 +15,10 @@ pub struct SortProperty {
 	pub path: FieldPath,
 	/// The direction of the sort (ascending or descending).
 	pub direction: SortDirection,
+	/// Whether the ordering uses collation-aware string comparison.
+	pub collate: bool,
+	/// Whether the ordering uses numeric string comparison.
+	pub numeric: bool,
 }
 
 /// Describes the ordering guarantee of an operator's output stream.
@@ -64,6 +68,8 @@ mod tests {
 		SortProperty {
 			path: FieldPath::field(name),
 			direction: dir,
+			collate: false,
+			numeric: false,
 		}
 	}
 
@@ -118,6 +124,30 @@ mod tests {
 	fn test_path_mismatch() {
 		let ordering = OutputOrdering::Sorted(vec![prop("a", SortDirection::Asc)]);
 		let req = vec![prop("b", SortDirection::Asc)];
+		assert!(!ordering.satisfies(&req));
+	}
+
+	#[test]
+	fn test_collate_mismatch() {
+		let ordering = OutputOrdering::Sorted(vec![prop("a", SortDirection::Asc)]);
+		let req = vec![SortProperty {
+			path: FieldPath::field("a"),
+			direction: SortDirection::Asc,
+			collate: true,
+			numeric: false,
+		}];
+		assert!(!ordering.satisfies(&req));
+	}
+
+	#[test]
+	fn test_numeric_mismatch() {
+		let ordering = OutputOrdering::Sorted(vec![prop("a", SortDirection::Asc)]);
+		let req = vec![SortProperty {
+			path: FieldPath::field("a"),
+			direction: SortDirection::Asc,
+			collate: false,
+			numeric: true,
+		}];
 		assert!(!ordering.satisfies(&req));
 	}
 }

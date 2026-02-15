@@ -20,14 +20,14 @@ value = ''''Project [ctx: Db]
 ''''
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3, batches: 1}
-└────> TableScan [ctx: Db] [table: test, direction: Forward] {rows: 3, batches: 1}
+value = ''''Project [ctx: Db] {rows: 3}
+└────> TableScan [ctx: Db] [table: test, direction: Forward] {rows: 3}
 
 Total rows: 3''''
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3, batches: 1}
-└────> TableScan [ctx: Db] [table: test, direction: Backward] {rows: 3, batches: 1}
+value = ''''Project [ctx: Db] {rows: 3}
+└────> TableScan [ctx: Db] [table: test, direction: Backward] {rows: 3}
 
 Total rows: 3''''
 

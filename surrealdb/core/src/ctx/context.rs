@@ -98,7 +98,7 @@ pub struct Context {
 	// Strategy for the new streaming planner/executor
 	new_planner_strategy: NewPlannerStrategy,
 	// When true, EXPLAIN ANALYZE omits elapsed durations for deterministic test output
-	redact_duration: bool,
+	redact_volatile_explain_attrs: bool,
 	// Matches context for index functions (search::highlight, search::score, etc.)
 	matches_context: Option<Arc<crate::exec::function::MatchesContext>>,
 	// KNN context for index functions (vector::distance::knn)
@@ -157,7 +157,7 @@ impl Context {
 			surrealism_cache: None,
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			new_planner_strategy: NewPlannerStrategy::default(),
-			redact_duration: false,
+			redact_volatile_explain_attrs: false,
 			matches_context: None,
 			knn_context: None,
 		}
@@ -189,7 +189,7 @@ impl Context {
 			surrealism_cache: parent.surrealism_cache.clone(),
 			function_registry: parent.function_registry.clone(),
 			new_planner_strategy: parent.new_planner_strategy.clone(),
-			redact_duration: parent.redact_duration,
+			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			matches_context: parent.matches_context.clone(),
 			knn_context: parent.knn_context.clone(),
 		}
@@ -223,7 +223,7 @@ impl Context {
 			surrealism_cache: parent.surrealism_cache.clone(),
 			function_registry: parent.function_registry.clone(),
 			new_planner_strategy: parent.new_planner_strategy.clone(),
-			redact_duration: parent.redact_duration,
+			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			matches_context: parent.matches_context.clone(),
 			knn_context: parent.knn_context.clone(),
 		}
@@ -257,7 +257,7 @@ impl Context {
 			surrealism_cache: from.surrealism_cache.clone(),
 			function_registry: from.function_registry.clone(),
 			new_planner_strategy: from.new_planner_strategy.clone(),
-			redact_duration: from.redact_duration,
+			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			matches_context: from.matches_context.clone(),
 			knn_context: from.knn_context.clone(),
 		}
@@ -302,7 +302,7 @@ impl Context {
 			surrealism_cache: Some(surrealism_cache),
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			new_planner_strategy: planner_strategy,
-			redact_duration: false,
+			redact_volatile_explain_attrs: false,
 			matches_context: None,
 			knn_context: None,
 		};
@@ -696,8 +696,8 @@ impl Context {
 			self.new_planner_strategy = session.new_planner_strategy.clone();
 		}
 		// Propagate duration redaction flag from session.
-		if session.redact_duration {
-			self.redact_duration = true;
+		if session.redact_volatile_explain_attrs {
+			self.redact_volatile_explain_attrs = true;
 		}
 		if !session.variables.is_empty() {
 			self.attach_variables(session.variables.clone().into())?;
@@ -777,8 +777,8 @@ impl Context {
 	}
 
 	/// Whether EXPLAIN ANALYZE should redact elapsed durations.
-	pub(crate) fn redact_duration(&self) -> bool {
-		self.redact_duration
+	pub(crate) fn redact_volatile_explain_attrs(&self) -> bool {
+		self.redact_volatile_explain_attrs
 	}
 
 	/// Check if scripting is allowed

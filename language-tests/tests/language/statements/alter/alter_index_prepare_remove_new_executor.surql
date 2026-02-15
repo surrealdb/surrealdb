@@ -14,7 +14,7 @@ value = "NONE"
 value = "{ events: [], fields: [], indexes: [{ cols: [], index: 'COUNT', name: 'count_idx', table: 'test' }], lives: [], tables: [] }"
 
 [[test.results]]
-value = ''''CountScan [ctx: Db] [source: test] {rows: 1, batches: 1}
+value = ''''CountScan [ctx: Db] [source: test] {rows: 1}
 
 Total rows: 1''''
 
@@ -28,7 +28,7 @@ value = "NONE"
 value = "{ events: [], fields: [], indexes: [{ cols: [], comment: 'may rebuild instead', index: 'COUNT', name: 'count_idx', prepare_remove: true, table: 'test' }], lives: [], tables: [] }"
 
 [[test.results]]
-value = ''''CountScan [ctx: Db] [source: test] {rows: 1, batches: 1}
+value = ''''CountScan [ctx: Db] [source: test] {rows: 1}
 
 Total rows: 1''''
 

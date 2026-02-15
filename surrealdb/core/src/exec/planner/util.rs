@@ -622,20 +622,73 @@ pub(super) fn order_is_scan_compatible(order: &Option<crate::expr::order::Orderi
 	}
 }
 
-/// Check if LIMIT/START can be pushed down into the Scan operator.
+/// Check if an index + scan direction satisfies the given ORDER BY.
 ///
-/// This is safe when no pipeline operator between Scan and Limit changes
-/// row cardinality. Note that WHERE does NOT block pushdown because the
-/// filter predicate is also pushed into Scan.
-pub(super) fn can_push_limit_to_scan(
-	split: &Option<crate::expr::split::Splits>,
-	group: &Option<crate::expr::group::Groups>,
-	order: &Option<crate::expr::order::Ordering>,
+/// Builds the same `SortProperty` vector that `IndexScan::output_ordering()`
+/// would produce and checks whether it satisfies the ORDER BY requirements.
+/// This allows the planner to decide on limit pushdown before the IndexScan
+/// operator is created.
+pub(super) fn index_covers_ordering(
+	index_ref: &crate::exec::index::access_path::IndexRef,
+	direction: crate::idx::planner::ScanDirection,
+	order: &crate::expr::order::Ordering,
 ) -> bool {
-	if split.is_some() || group.is_some() {
+	use crate::exec::operators::SortDirection;
+	use crate::exec::ordering::{OutputOrdering, SortProperty};
+	use crate::expr::order::Ordering;
+
+	let Ordering::Order(order_list) = order else {
+		return false; // Random ordering can't be satisfied by an index
+	};
+
+	// Convert ORDER BY to required SortProperty
+	let required: Vec<SortProperty> = order_list
+		.iter()
+		.filter_map(|field| {
+			crate::exec::field_path::FieldPath::try_from(&field.value).ok().map(|path| {
+				let direction = if field.direction {
+					SortDirection::Asc
+				} else {
+					SortDirection::Desc
+				};
+				SortProperty {
+					path,
+					direction,
+					collate: field.collate,
+					numeric: field.numeric,
+				}
+			})
+		})
+		.collect();
+
+	if required.len() != order_list.len() {
 		return false;
 	}
-	order_is_scan_compatible(order)
+
+	// Build the index ordering (same as IndexScan::output_ordering())
+	let dir = match direction {
+		crate::idx::planner::ScanDirection::Forward => SortDirection::Asc,
+		crate::idx::planner::ScanDirection::Backward => SortDirection::Desc,
+	};
+	let ix_def = index_ref.definition();
+	let cols: Vec<SortProperty> = ix_def
+		.cols
+		.iter()
+		.filter_map(|idiom| {
+			crate::exec::field_path::FieldPath::try_from(idiom).ok().map(|path| SortProperty {
+				path,
+				direction: dir,
+				collate: false,
+				numeric: false,
+			})
+		})
+		.collect();
+
+	if cols.is_empty() {
+		return false;
+	}
+
+	OutputOrdering::Sorted(cols).satisfies(&required)
 }
 
 // ============================================================================

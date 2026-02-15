@@ -17,7 +17,7 @@ value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 0 } }"
 value = "'OK'"
 
 [[test.results]]
-value = ''''CountScan [ctx: Db] [source: t] {rows: 1, batches: 1}
+value = ''''CountScan [ctx: Db] [source: t] {rows: 1}
 
 Total rows: 1''''
 

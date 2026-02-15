@@ -168,6 +168,7 @@ pub(crate) fn determine_scan_direction(
 /// before any data is returned, avoiding I/O, allocation, and deserialization
 /// for rows that will be discarded anyway (the fast-path optimisation for
 /// `START` without a pushdown predicate).
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn kv_scan_stream(
 	txn: Arc<Transaction>,
 	beg: crate::kvs::Key,
@@ -176,10 +177,11 @@ pub(crate) fn kv_scan_stream(
 	storage_limit: Option<usize>,
 	direction: ScanDirection,
 	pre_skip: usize,
+	prefetch: bool,
 ) -> ValueBatchStream {
 	let skip = pre_skip.min(u32::MAX as usize) as u32;
 	let stream = async_stream::try_stream! {
-		let kv_stream = txn.stream_keys_vals(beg..end, version, storage_limit, skip, direction);
+		let kv_stream = txn.stream_keys_vals(beg..end, version, storage_limit, skip, direction, prefetch);
 		futures::pin_mut!(kv_stream);
 
 		while let Some(result) = kv_stream.next().await {
@@ -380,6 +382,16 @@ pub(crate) struct FieldState {
 	pub(crate) computed_fields: Vec<ComputedFieldDef>,
 	/// Field-level permissions (field name -> permission)
 	pub(crate) field_permissions: HashMap<String, PhysicalPermission>,
+}
+
+impl FieldState {
+	/// Create an empty field state with no computed fields or field permissions.
+	pub(crate) fn empty() -> Self {
+		Self {
+			computed_fields: Vec::new(),
+			field_permissions: HashMap::new(),
+		}
+	}
 }
 
 /// A computed field definition ready for evaluation.

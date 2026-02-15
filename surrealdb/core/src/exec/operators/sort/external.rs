@@ -127,6 +127,8 @@ impl ExecOperator for ExternalSort {
 					SortProperty {
 						path,
 						direction: f.direction,
+						collate: f.collate,
+						numeric: f.numeric,
 					}
 				})
 				.collect(),

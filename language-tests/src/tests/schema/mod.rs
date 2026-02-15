@@ -130,7 +130,7 @@ pub struct TestEnv {
 	/// output deterministic for test assertions. Defaults to true in the
 	/// language test framework. Set to `false` explicitly if you need
 	/// actual elapsed times.
-	pub redact_duration: Option<bool>,
+	pub redact_volatile_explain_attrs: Option<bool>,
 
 	#[serde(skip_serializing)]
 	#[serde(flatten)]

@@ -444,7 +444,7 @@ where
 		// for each node and take precedence over the Hl data loaded above.
 		let range = self.ikb.new_hn_layer_range(self.level)?;
 		let mut count = 0;
-		let mut stream = tx.stream_keys_vals(range, None, None, 0, ScanDirection::Forward);
+		let mut stream = tx.stream_keys_vals(range, None, None, 0, ScanDirection::Forward, false);
 		while let Some(res) = stream.next().await {
 			let batch = res?;
 			for (k, v) in batch {

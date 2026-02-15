@@ -125,6 +125,8 @@ impl ExecOperator for TableScan {
 		OutputOrdering::Sorted(vec![SortProperty {
 			path: crate::exec::field_path::FieldPath::field("id"),
 			direction: dir,
+			collate: false,
+			numeric: false,
 		}])
 	}
 
@@ -229,9 +231,11 @@ impl ExecOperator for TableScan {
 			// Create KV range scan stream
 			let beg = record::prefix(ns.namespace_id, db.database_id, &table_name)?;
 			let end = record::suffix(ns.namespace_id, db.database_id, &table_name)?;
+			// Enable prefetching and larger initial batch for full scans (no limit pushed)
+			let prefetch = effective_storage_limit.is_none();
 			let mut source = kv_scan_stream(
 				Arc::clone(&txn), beg, end, version,
-				effective_storage_limit, direction, pre_skip,
+				effective_storage_limit, direction, pre_skip, prefetch,
 			);
 
 			// Build the pipeline

@@ -588,7 +588,7 @@ impl<'ctx> Planner<'ctx> {
 					Arc::new(AnalyzePlan {
 						plan: inner_plan,
 						format,
-						redact_duration: self.ctx.redact_duration(),
+						redact_volatile_explain_attrs: self.ctx.redact_volatile_explain_attrs(),
 					})
 				} else {
 					Arc::new(ExplainPlan {
@@ -862,7 +862,7 @@ impl<'ctx> Planner<'ctx> {
 			Ok(Arc::new(AnalyzePlan {
 				plan: inner_plan,
 				format,
-				redact_duration: self.ctx.redact_duration(),
+				redact_volatile_explain_attrs: self.ctx.redact_volatile_explain_attrs(),
 			}))
 		} else {
 			Ok(Arc::new(ExplainPlan {

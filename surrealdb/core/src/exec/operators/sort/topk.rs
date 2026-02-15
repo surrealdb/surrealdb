@@ -155,6 +155,8 @@ impl ExecOperator for SortTopK {
 					SortProperty {
 						path,
 						direction: f.direction,
+						collate: f.collate,
+						numeric: f.numeric,
 					}
 				})
 				.collect(),
@@ -386,6 +388,8 @@ impl ExecOperator for SortTopKByKey {
 				.map(|k| SortProperty {
 					path: k.path.clone(),
 					direction: k.direction,
+					collate: k.collate,
+					numeric: k.numeric,
 				})
 				.collect(),
 		)

@@ -10,6 +10,7 @@ use futures::StreamExt;
 use surrealdb_types::ToSql;
 
 use super::common::{BATCH_SIZE, fetch_and_filter_records_batch};
+use super::pipeline::eval_limit_expr;
 use crate::catalog::providers::TableProvider;
 use crate::err::Error;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
@@ -22,7 +23,7 @@ use crate::exec::permission::{
 };
 use crate::exec::{
 	AccessMode, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, ValueBatch, ValueBatchStream, monitor_stream,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::iam::Action;
@@ -33,6 +34,10 @@ use crate::val::{RecordId, Value};
 ///
 /// Retrieves records using an index access path, then fetches the full
 /// record data and applies permission filtering.
+///
+/// When `limit` and/or `start` are provided (pushed down from the planner),
+/// the operator stops iteration early once the limit is reached, avoiding
+/// unnecessary index and record reads.
 #[derive(Debug)]
 pub struct IndexScan {
 	/// Reference to the index definition
@@ -43,6 +48,10 @@ pub struct IndexScan {
 	pub direction: ScanDirection,
 	/// Table name for record fetching
 	pub table_name: crate::val::TableName,
+	/// Pushed-down LIMIT expression (evaluated at execution time).
+	pub(crate) limit: Option<Arc<dyn PhysicalExpr>>,
+	/// Pushed-down START expression (evaluated at execution time).
+	pub(crate) start: Option<Arc<dyn PhysicalExpr>>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -53,12 +62,16 @@ impl IndexScan {
 		access: BTreeAccess,
 		direction: ScanDirection,
 		table_name: crate::val::TableName,
+		limit: Option<Arc<dyn PhysicalExpr>>,
+		start: Option<Arc<dyn PhysicalExpr>>,
 	) -> Self {
 		Self {
 			index_ref,
 			access,
 			direction,
 			table_name,
+			limit,
+			start,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -129,11 +142,18 @@ impl ExecOperator for IndexScan {
 				unreachable!("IndexScan does not support FullText or KNN access")
 			}
 		};
-		vec![
+		let mut attrs = vec![
 			("index".to_string(), self.index_ref.name.clone()),
 			("access".to_string(), access_str),
 			("direction".to_string(), format!("{:?}", self.direction)),
-		]
+		];
+		if let Some(ref limit) = self.limit {
+			attrs.push(("limit".to_string(), limit.to_sql()));
+		}
+		if let Some(ref start) = self.start {
+			attrs.push(("offset".to_string(), start.to_sql()));
+		}
+		attrs
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -141,7 +161,14 @@ impl ExecOperator for IndexScan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
+		let mut mode = AccessMode::ReadOnly;
+		if let Some(ref limit) = self.limit {
+			mode = mode.combine(limit.access_mode());
+		}
+		if let Some(ref start) = self.start {
+			mode = mode.combine(start.access_mode());
+		}
+		mode
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
@@ -165,6 +192,8 @@ impl ExecOperator for IndexScan {
 				crate::exec::field_path::FieldPath::try_from(idiom).ok().map(|path| SortProperty {
 					path,
 					direction: dir,
+					collate: false,
+					numeric: false,
 				})
 			})
 			.collect();
@@ -188,6 +217,8 @@ impl ExecOperator for IndexScan {
 		let index_ref = self.index_ref.clone();
 		let access = self.access.clone();
 		let table_name = self.table_name.clone();
+		let limit_expr = self.limit.clone();
+		let start_expr = self.start.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -197,6 +228,21 @@ impl ExecOperator for IndexScan {
 			let db = Arc::clone(&db_ctx.db);
 			let ns_id = ns.namespace_id;
 			let db_id = db.database_id;
+
+			// Evaluate pushed-down LIMIT and START expressions
+			let limit_val: Option<usize> = match &limit_expr {
+				Some(expr) => Some(eval_limit_expr(&**expr, &ctx).await?),
+				None => None,
+			};
+			let start_val: usize = match &start_expr {
+				Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
+				None => 0,
+			};
+
+			// Early exit if limit is 0
+			if limit_val == Some(0) {
+				return;
+			}
 
 			// Resolve table permissions
 			let select_permission = if check_perms {
@@ -222,6 +268,19 @@ impl ExecOperator for IndexScan {
 				return;
 			}
 
+			// Create a ScanPipeline for limit/start tracking.
+			// Permissions are already handled by fetch_and_filter_records_batch,
+			// so we use Allow and an empty FieldState here — the pipeline is
+			// only used for limit/start counting.
+			let mut pipeline = super::pipeline::ScanPipeline::new(
+				PhysicalPermission::Allow,
+				None, // no predicate
+				super::pipeline::FieldState::empty(),
+				false, // permissions handled by fetch_and_filter_records_batch
+				limit_val,
+				start_val,
+			);
+
 			// Create the appropriate iterator based on access type and index uniqueness
 			let is_unique = index_ref.is_unique();
 			let ix = index_ref.definition();
@@ -236,9 +295,11 @@ impl ExecOperator for IndexScan {
 					let rids = iter.next_batch(&txn).await
 						.context("Failed to iterate index")?;
 
-					let values = fetch_and_filter_records_batch(
+					let mut values = fetch_and_filter_records_batch(
 						&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
 					).await?;
+
+					pipeline.process_batch(&mut values, &ctx).await?;
 
 					if !values.is_empty() {
 						yield ValueBatch { values };
@@ -257,12 +318,17 @@ impl ExecOperator for IndexScan {
 							break;
 						}
 
-						let values = fetch_and_filter_records_batch(
+						let mut values = fetch_and_filter_records_batch(
 							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
 						).await?;
 
+						let cont = pipeline.process_batch(&mut values, &ctx).await?;
+
 						if !values.is_empty() {
 							yield ValueBatch { values };
+						}
+						if !cont {
+							break;
 						}
 					}
 				}
@@ -282,12 +348,17 @@ impl ExecOperator for IndexScan {
 							.context("Failed to iterate index")?;
 						if rids.is_empty() { break; }
 
-						let values = fetch_and_filter_records_batch(
+						let mut values = fetch_and_filter_records_batch(
 							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
 						).await?;
 
+						let cont = pipeline.process_batch(&mut values, &ctx).await?;
+
 						if !values.is_empty() {
 							yield ValueBatch { values };
+						}
+						if !cont {
+							break;
 						}
 					}
 				}
@@ -300,12 +371,17 @@ impl ExecOperator for IndexScan {
 							.context("Failed to iterate index")?;
 						if rids.is_empty() { break; }
 
-						let values = fetch_and_filter_records_batch(
+						let mut values = fetch_and_filter_records_batch(
 							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
 						).await?;
 
+						let cont = pipeline.process_batch(&mut values, &ctx).await?;
+
 						if !values.is_empty() {
 							yield ValueBatch { values };
+						}
+						if !cont {
+							break;
 						}
 					}
 				}
@@ -322,12 +398,15 @@ impl ExecOperator for IndexScan {
 						None,  // no limit
 						0,     // no skip
 						crate::idx::planner::ScanDirection::Forward,
+						true,  // enable prefetching for compound scans
 					);
 					futures::pin_mut!(kv_stream);
 
 					let mut rid_batch: Vec<RecordId> = Vec::with_capacity(BATCH_SIZE);
+					let mut done = false;
 
 					while let Some(kv_batch_result) = kv_stream.next().await {
+						if done { break; }
 						let kv_batch = kv_batch_result
 							.context("Failed to stream compound index keys")?;
 
@@ -338,22 +417,32 @@ impl ExecOperator for IndexScan {
 							rid_batch.push(rid);
 
 							if rid_batch.len() >= BATCH_SIZE {
-								let values = fetch_and_filter_records_batch(
+								let mut values = fetch_and_filter_records_batch(
 									&ctx, &txn, ns_id, db_id, &rid_batch, &select_permission, check_perms,
 								).await?;
+
+								let cont = pipeline.process_batch(&mut values, &ctx).await?;
+
 								if !values.is_empty() {
 									yield ValueBatch { values };
 								}
 								rid_batch.clear();
+								if !cont {
+									done = true;
+									break;
+								}
 							}
 						}
 					}
 
 					// Yield remaining batch
-					if !rid_batch.is_empty() {
-						let values = fetch_and_filter_records_batch(
+					if !done && !rid_batch.is_empty() {
+						let mut values = fetch_and_filter_records_batch(
 							&ctx, &txn, ns_id, db_id, &rid_batch, &select_permission, check_perms,
 						).await?;
+
+						pipeline.process_batch(&mut values, &ctx).await?;
+
 						if !values.is_empty() {
 							yield ValueBatch { values };
 						}

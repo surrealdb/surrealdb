@@ -460,7 +460,7 @@ async fn resolve_table_scan_stream(
 			access,
 			direction,
 		}) => {
-			let operator = IndexScan::new(index_ref, access, direction, cfg.table_name);
+			let operator = IndexScan::new(index_ref, access, direction, cfg.table_name, None, None);
 			let stream = operator.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -535,6 +535,8 @@ async fn resolve_table_scan_stream(
 		_ => {
 			let beg = record::prefix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;
 			let end = record::suffix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;
+			// Enable prefetching for full scans (no limit pushed)
+			let prefetch = cfg.storage_limit.is_none();
 			let stream = kv_scan_stream(
 				txn,
 				beg,
@@ -543,6 +545,7 @@ async fn resolve_table_scan_stream(
 				cfg.storage_limit,
 				cfg.direction,
 				cfg.pre_skip,
+				prefetch,
 			);
 			Ok((stream, cfg.pre_skip))
 		}
@@ -569,6 +572,8 @@ fn create_index_stream(
 				access.clone(),
 				*direction,
 				cfg.table_name.clone(),
+				None,
+				None,
 			);
 			operator.execute(ctx)
 		}
