@@ -17,8 +17,7 @@ value = ''''Project [ctx: Db]
 └────> Limit [ctx: Db] [limit: 5]
        └────> SortTopKByKey [ctx: Db] [sort_keys: rating DESC, limit: 5]
               └────> Split [ctx: Db] [on: tags]
-                     └────> Filter [ctx: Db] [predicate: price < 50]
-                            └────> TableScan [ctx: Db] [table: product, direction: Forward, predicate: price < 50]
+                     └────> TableScan [ctx: Db] [table: product, direction: Forward, predicate: price < 50]
 ''''
 
 [[test.results]]
@@ -52,9 +51,7 @@ value = ''''Project [ctx: Db]
 
 [[test.results]]
 value = ''''ProjectValue [ctx: Db] [expr: name]
-└────> Limit [ctx: Db] [limit: 3]
-       └────> Filter [ctx: Db] [predicate: rating >= 4f]
-              └────> TableScan [ctx: Db] [table: product, direction: Forward, predicate: rating >= 4f, limit: 3]
+└────> TableScan [ctx: Db] [table: product, direction: Forward, predicate: rating >= 4f, limit: 3]
 ''''
 
 [[test.results]]

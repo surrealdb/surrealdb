@@ -19,14 +19,12 @@ value = ''''Project [ctx: Db]
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-└────> Limit [ctx: Db] [limit: 5]
-       └────> TableScan [ctx: Db] [table: record, direction: Forward, limit: 5]
+└────> TableScan [ctx: Db] [table: record, direction: Forward, limit: 5]
 ''''
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-└────> Limit [ctx: Db] [limit: 3, offset: 2]
-       └────> TableScan [ctx: Db] [table: record, direction: Forward, limit: 3, offset: 2]
+└────> TableScan [ctx: Db] [table: record, direction: Forward, limit: 3, offset: 2]
 ''''
 
 [[test.results]]

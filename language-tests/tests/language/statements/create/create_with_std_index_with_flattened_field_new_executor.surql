@@ -12,15 +12,13 @@ value = "[{ id: student:2, marks: [{ mark: 40, subject: 'maths' }, { mark: 40, s
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 0, batches: 0}
-└────> Filter [ctx: Db] [predicate: marks.*.mark = 40] {rows: 0, batches: 0}
-       └────> TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.mark = 40] {rows: 0, batches: 0}
+└────> TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.mark = 40] {rows: 0, batches: 0}
 
 Total rows: 0''''
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 2, batches: 1}
-└────> Filter [ctx: Db] [predicate: 40 INSIDE marks.*.mark] {rows: 2, batches: 1}
-       └────> TableScan [ctx: Db] [table: student, direction: Forward, predicate: 40 INSIDE marks.*.mark] {rows: 2, batches: 1}
+└────> TableScan [ctx: Db] [table: student, direction: Forward, predicate: 40 INSIDE marks.*.mark] {rows: 2, batches: 1}
 
 Total rows: 2''''
 

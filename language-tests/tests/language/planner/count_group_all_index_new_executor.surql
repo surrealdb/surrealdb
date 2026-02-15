@@ -14,8 +14,7 @@ value = "NONE"
 
 [[test.results]]
 value = ''''Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1, batches: 1}
-└────> Filter [ctx: Db] [predicate: something >= 5000] {rows: 5000, batches: 2}
-       └────> TableScan [ctx: Db] [table: indexPerformance3, direction: Forward, predicate: something >= 5000] {rows: 5000, batches: 2}
+└────> TableScan [ctx: Db] [table: indexPerformance3, direction: Forward, predicate: something >= 5000] {rows: 5000, batches: 2}
 
 Total rows: 1''''
 

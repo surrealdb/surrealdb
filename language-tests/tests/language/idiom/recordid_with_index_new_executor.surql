@@ -31,8 +31,7 @@ Total rows: 1''''
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 1, batches: 1}
-└────> Filter [ctx: Db] [predicate: id.val = 456] {rows: 1, batches: 1}
-       └────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: id.val = 456] {rows: 1, batches: 1}
+└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: id.val = 456] {rows: 1, batches: 1}
 
 Total rows: 1''''
 
@@ -45,8 +44,7 @@ Total rows: 0''''
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 0, batches: 0}
-└────> Filter [ctx: Db] [predicate: record::id(id).val = 456] {rows: 0, batches: 0}
-       └────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: record::id(id).val = 456] {rows: 0, batches: 0}
+└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: record::id(id).val = 456] {rows: 0, batches: 0}
 
 Total rows: 0''''
 

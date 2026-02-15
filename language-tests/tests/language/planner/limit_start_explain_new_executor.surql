@@ -9,21 +9,19 @@ reason = "Test LIMIT and START with EXPLAIN plans and ORDER BY (new executor)"
 value = "[]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 8, batches: 1}
-└────> Limit [ctx: Db] [limit: 10, offset: 2] {rows: 8, batches: 1}
-       └────> TableScan [ctx: Db] [table: item, direction: Forward, limit: 10, offset: 2] {rows: 10, batches: 1}
+value = ''''Project [ctx: Db] {rows: 10, batches: 1}
+└────> TableScan [ctx: Db] [table: item, direction: Forward, limit: 10, offset: 2] {rows: 10, batches: 1}
 
-Total rows: 8''''
+Total rows: 10''''
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 8, batches: 1}
-└────> Limit [ctx: Db] [limit: 10, offset: 2] {rows: 8, batches: 1}
-       └────> TableScan [ctx: Db] [table: item2, direction: Forward, limit: 10, offset: 2] {rows: 10, batches: 1}
+value = ''''Project [ctx: Db] {rows: 10, batches: 1}
+└────> TableScan [ctx: Db] [table: item2, direction: Forward, limit: 10, offset: 2] {rows: 10, batches: 1}
 
-Total rows: 8''''
+Total rows: 10''''
 
 [[test.results]]
 value = "[1, 2, 3, 4, 5]"

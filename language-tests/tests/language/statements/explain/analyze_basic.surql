@@ -13,8 +13,7 @@ Total rows: 3''''
 
 [[test.results]]
 value = ''''Project [ctx: Db] {rows: 2, batches: 1}
-└────> Filter [ctx: Db] [predicate: score > 15] {rows: 2, batches: 1}
-       └────> TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15] {rows: 2, batches: 1}
+└────> TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15] {rows: 2, batches: 1}
 
 Total rows: 2''''
 

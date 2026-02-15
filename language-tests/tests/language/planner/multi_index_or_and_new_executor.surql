@@ -69,8 +69,7 @@ value = "[{ name: 'Jaime' }]"
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2, batches: 1}
 └────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2, batches: 1}
-       └────> Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm'] {rows: 2, batches: 1}
-              └────> TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm'] {rows: 2, batches: 1}
+       └────> TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm'] {rows: 2, batches: 1}
 
 Total rows: 2"'''
 
@@ -90,8 +89,7 @@ value = "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]"
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 3, batches: 1}
 └────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 3, batches: 1}
-       └────> Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3, batches: 1}
-              └────> TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3, batches: 1}
+       └────> TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3, batches: 1}
 
 Total rows: 3"'''
 
@@ -112,8 +110,7 @@ value = "[{ name: 'Jaime' }]"
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2, batches: 1}
 └────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2, batches: 1}
-       └────> Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm'] {rows: 2, batches: 1}
-              └────> TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm'] {rows: 2, batches: 1}
+       └────> TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm'] {rows: 2, batches: 1}
 
 Total rows: 2"'''
 
@@ -123,8 +120,7 @@ value = "[{ name: 'Jaime' }, { name: 'Tobie' }]"
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
 └────> SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 1, batches: 1}
-       └────> Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm'] {rows: 1, batches: 1}
-              └────> TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' AND genre = 'm'] {rows: 1, batches: 1}
+       └────> TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' AND genre = 'm'] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 

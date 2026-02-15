@@ -12,13 +12,13 @@ value = "'OK'"
 value = "{ children: [{ attributes: { direction: 'Forward', table: 'item' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'Project' }"
 
 [[test.results]]
-value = "{ children: [{ attributes: { predicate: 'score > 15' }, children: [{ attributes: { direction: 'Forward', predicate: 'score > 15', table: 'item' }, context: 'Db', operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'predicate', sql: 'score > 15' }], operator: 'Filter' }], context: 'Db', operator: 'Project' }"
+value = "{ children: [{ attributes: { direction: 'Forward', predicate: 'score > 15', table: 'item' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'Project' }"
 
 [[test.results]]
 value = "{ children: [{ attributes: { direction: 'Forward', table: 'item' }, context: 'Db', metrics: { output_batches: 1, output_rows: 3 }, operator: 'TableScan' }], context: 'Db', metrics: { output_batches: 1, output_rows: 3 }, operator: 'Project', total_rows: 3 }"
 
 [[test.results]]
-value = "{ children: [{ attributes: { predicate: 'score > 15' }, children: [{ attributes: { direction: 'Forward', predicate: 'score > 15', table: 'item' }, context: 'Db', metrics: { output_batches: 1, output_rows: 2 }, operator: 'TableScan' }], context: 'Db', expressions: [{ role: 'predicate', sql: 'score > 15' }], metrics: { output_batches: 1, output_rows: 2 }, operator: 'Filter' }], context: 'Db', metrics: { output_batches: 1, output_rows: 2 }, operator: 'Project', total_rows: 2 }"
+value = "{ children: [{ attributes: { direction: 'Forward', predicate: 'score > 15', table: 'item' }, context: 'Db', metrics: { output_batches: 1, output_rows: 2 }, operator: 'TableScan' }], context: 'Db', metrics: { output_batches: 1, output_rows: 2 }, operator: 'Project', total_rows: 2 }"
 
 */
 

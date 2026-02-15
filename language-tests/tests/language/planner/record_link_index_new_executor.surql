@@ -25,8 +25,7 @@ value = "[{ id: i:A, t: t:1 }, { id: i:B, t: t:2 }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2, batches: 1}
-└────> Filter [ctx: Db] [predicate: t.name = 'h'] {rows: 2, batches: 1}
-       └────> TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name = 'h'] {rows: 2, batches: 1}
+└────> TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name = 'h'] {rows: 2, batches: 1}
 
 Total rows: 2"'''
 
@@ -62,8 +61,7 @@ value = "[{ id: i:B, t: t:2 }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2, batches: 1}
-└────> Filter [ctx: Db] [predicate: t.name = 'h'] {rows: 2, batches: 1}
-       └────> TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name = 'h'] {rows: 2, batches: 1}
+└────> TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name = 'h'] {rows: 2, batches: 1}
 
 Total rows: 2"'''
 
@@ -102,8 +100,7 @@ value = "[{ id: i:B, t: t:2 }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2, batches: 1}
-└────> Filter [ctx: Db] [predicate: t.name = 'h'] {rows: 2, batches: 1}
-       └────> TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name = 'h'] {rows: 2, batches: 1}
+└────> TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name = 'h'] {rows: 2, batches: 1}
 
 Total rows: 2"'''
 
@@ -142,8 +139,7 @@ value = "[{ id: i:B, t: t:2 }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 2, batches: 1}
-└────> Filter [ctx: Db] [predicate: t.name INSIDE ['a', 'b']] {rows: 2, batches: 1}
-       └────> TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name INSIDE ['a', 'b']] {rows: 2, batches: 1}
+└────> TableScan [ctx: Db] [table: i, direction: Forward, predicate: t.name INSIDE ['a', 'b']] {rows: 2, batches: 1}
 
 Total rows: 2"'''
 

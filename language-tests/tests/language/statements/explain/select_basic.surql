@@ -12,8 +12,7 @@ value = ''''Project [ctx: Db]
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-└────> Filter [ctx: Db] [predicate: score > 15]
-       └────> TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15]
+└────> TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15]
 ''''
 
 [[test.results]]

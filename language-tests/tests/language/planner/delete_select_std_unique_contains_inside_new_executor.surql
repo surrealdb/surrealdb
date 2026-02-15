@@ -10,8 +10,7 @@ value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db]
-└────> Filter [ctx: Db] [predicate: email CONTAINS 'domain.com']
-       └────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: email CONTAINS 'domain.com']
+└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: email CONTAINS 'domain.com']
 "'''
 
 [[test.results]]
@@ -19,8 +18,7 @@ value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db]
-└────> Filter [ctx: Db] [predicate: 'domain.com' INSIDE email]
-       └────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: 'domain.com' INSIDE email]
+└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: 'domain.com' INSIDE email]
 "'''
 
 [[test.results]]
@@ -28,8 +26,7 @@ value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db]
-└────> Filter [ctx: Db] [predicate: email CONTAINS 'domain.com']
-       └────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: email CONTAINS 'domain.com']
+└────> TableScan [ctx: Db] [table: test, direction: Forward, predicate: email CONTAINS 'domain.com']
 "'''
 
 [[test.results]]

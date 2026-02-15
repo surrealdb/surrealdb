@@ -21,8 +21,7 @@ Total rows: 2"'''
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1, batches: 1}
-└────> Filter [ctx: Db] [predicate: email = 'a@test.com'] {rows: 1, batches: 1}
-       └────> TableScan [ctx: Db] [table: user, direction: Forward, predicate: email = 'a@test.com'] {rows: 1, batches: 1}
+└────> TableScan [ctx: Db] [table: user, direction: Forward, predicate: email = 'a@test.com'] {rows: 1, batches: 1}
 
 Total rows: 1"'''
 

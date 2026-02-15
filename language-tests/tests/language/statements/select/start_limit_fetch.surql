@@ -8,7 +8,7 @@ value = "'OK'"
 value = "[{ id: person:jaime, tags: [{ id: tag:js, name: 'JavaScript' }] }]"
 
 [[test.results]]
-value = "[]"
+value = "[{ id: person:tobie, tags: [{ id: tag:rs, name: 'Rust' }, { id: tag:go, name: 'Golang' }, { id: tag:js, name: 'JavaScript' }] }]"
 */
 
 {

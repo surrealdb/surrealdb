@@ -57,7 +57,7 @@ pub(crate) struct SelectPipelineConfig {
 /// Tracks whether the scan predicate and limit/start were actually pushed
 /// into the source operator, so the caller can avoid duplicating them in
 /// the outer pipeline.
-struct PlannedSource {
+pub(crate) struct PlannedSource {
 	operator: Arc<dyn ExecOperator>,
 	/// The scan predicate was consumed by the source operator.
 	predicate_pushed: bool,
