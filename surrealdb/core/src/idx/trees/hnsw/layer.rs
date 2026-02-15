@@ -3,6 +3,7 @@ use anyhow::{Result, bail};
 use futures::StreamExt;
 use reblessive::tree::Stk;
 use revision::revisioned;
+use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 use crate::ctx::Context;
@@ -11,11 +12,12 @@ use crate::idx::IndexKeyBase;
 use crate::idx::planner::ScanDirection;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::graph::UndirectedGraph;
+use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::hnsw::filter::HnswTruthyDocumentFilter;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
-use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
-use crate::idx::trees::hnsw::{ElementId, HnswElements};
-use crate::idx::trees::knn::DoublePriorityQueue;
+use crate::idx::trees::hnsw::index::HnswContext;
+use crate::idx::trees::hnsw::{ElementId, HnswElements, HnswSearch};
+use crate::idx::trees::knn::{DoublePriorityQueue, Ids64};
 use crate::idx::trees::vector::SharedVector;
 use crate::key::index::hn::HnswNode;
 use crate::kvs::Transaction;
@@ -73,22 +75,23 @@ where
 	}
 	pub(super) async fn search_single(
 		&self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		elements: &HnswElements,
 		pt: &SharedVector,
 		ep_dist: f64,
 		ep_id: ElementId,
 		ef: usize,
+		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<DoublePriorityQueue> {
 		let visited = HashSet::from_iter([ep_id]);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let w = candidates.clone();
-		self.search(tx, elements, pt, candidates, visited, w, ef).await
+		self.search(ctx, elements, pt, candidates, visited, w, ef, pending_docs).await
 	}
 
 	pub(super) async fn search_single_with_ignore(
 		&self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		elements: &HnswElements,
 		pt: &SharedVector,
 		ignore_id: ElementId,
@@ -96,34 +99,61 @@ where
 	) -> Result<Option<ElementId>> {
 		let visited = HashSet::from_iter([ignore_id]);
 		let mut candidates = DoublePriorityQueue::default();
-		if let Some(dist) = elements.get_distance(tx, pt, &ignore_id).await? {
+		if let Some(dist) = elements.get_distance(&ctx.tx, pt, &ignore_id).await? {
 			candidates.push(dist, ignore_id);
 		}
 		let w = DoublePriorityQueue::default();
-		let q = self.search(tx, elements, pt, candidates, visited, w, ef).await?;
+		let q = self.search(ctx, elements, pt, candidates, visited, w, ef, None).await?;
 		Ok(q.peek_first().map(|(_, e_id)| e_id))
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn search_single_with_filter(
 		&self,
-		search_ctx: &HnswCheckedSearchContext<'_>,
+		ctx: &HnswContext<'_>,
 		stk: &mut Stk,
+		docs: &HnswDocs,
 		elements: &HnswElements,
-		ep_pt: &SharedVector,
+		search: &HnswSearch,
 		ep_dist: f64,
 		ep_id: ElementId,
 		filter: &mut HnswTruthyDocumentFilter,
+		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<DoublePriorityQueue> {
 		let visited = HashSet::from_iter([ep_id]);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let mut w = DoublePriorityQueue::default();
-		Self::add_if_truthy(search_ctx, stk, &mut w, ep_pt, ep_dist, ep_id, filter).await?;
-		self.search_with_filter(search_ctx, stk, elements, candidates, visited, w, filter).await
+		Self::add_if_truthy(
+			ctx,
+			docs,
+			stk,
+			search.ef,
+			&mut w,
+			&search.pt,
+			ep_dist,
+			ep_id,
+			filter,
+			pending_docs,
+		)
+		.await?;
+		self.search_with_filter(
+			ctx,
+			stk,
+			docs,
+			elements,
+			search,
+			candidates,
+			visited,
+			w,
+			filter,
+			pending_docs,
+		)
+		.await
 	}
 
 	pub(super) async fn search_multi(
 		&self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		elements: &HnswElements,
 		pt: &SharedVector,
 		candidates: DoublePriorityQueue,
@@ -131,12 +161,12 @@ where
 	) -> Result<DoublePriorityQueue> {
 		let w = candidates.clone();
 		let visited = w.to_set();
-		self.search(tx, elements, pt, candidates, visited, w, ef).await
+		self.search(ctx, elements, pt, candidates, visited, w, ef, None).await
 	}
 
 	pub(super) async fn search_multi_with_ignore(
 		&self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		elements: &HnswElements,
 		pt: &SharedVector,
 		ignore_ids: Vec<ElementId>,
@@ -144,25 +174,26 @@ where
 	) -> Result<DoublePriorityQueue> {
 		let mut candidates = DoublePriorityQueue::default();
 		for id in &ignore_ids {
-			if let Some(dist) = elements.get_distance(tx, pt, id).await? {
+			if let Some(dist) = elements.get_distance(&ctx.tx, pt, id).await? {
 				candidates.push(dist, *id);
 			}
 		}
 		let visited = HashSet::from_iter(ignore_ids);
 		let w = DoublePriorityQueue::default();
-		self.search(tx, elements, pt, candidates, visited, w, efc).await
+		self.search(ctx, elements, pt, candidates, visited, w, efc, None).await
 	}
 
 	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn search(
 		&self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		elements: &HnswElements,
 		q: &SharedVector,
 		mut candidates: DoublePriorityQueue, // set of candidates
 		mut visited: HashSet<ElementId>,     // set of visited elements
-		mut w: DoublePriorityQueue,          // dynamic list of found nearest neighbors
+		mut w: DoublePriorityQueue,
 		ef: usize,
+		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<DoublePriorityQueue> {
 		let mut fq_dist = w.peek_last_dist().unwrap_or(f64::MAX);
 		while let Some((cq_dist, doc)) = candidates.pop_first() {
@@ -175,10 +206,12 @@ where
 					if !visited.insert(e_id) {
 						continue;
 					}
-					if let Some(e_pt) = elements.get_vector(tx, &e_id).await? {
+					if let Some(e_pt) = elements.get_vector(&ctx.tx, &e_id).await? {
 						let e_dist = elements.distance(&e_pt, q);
 						if e_dist < fq_dist || w.len() < ef {
-							candidates.push(e_dist, e_id);
+							if Self::are_all_docs_in_pending(ctx, &e_pt, pending_docs).await? {
+								candidates.push(e_dist, e_id);
+							}
 							w.push(e_dist, e_id);
 							if w.len() > ef {
 								w.pop_last();
@@ -192,15 +225,19 @@ where
 		Ok(w)
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn search_with_filter(
 		&self,
-		search_ctx: &HnswCheckedSearchContext<'_>,
+		ctx: &HnswContext<'_>,
 		stk: &mut Stk,
+		docs: &HnswDocs,
 		elements: &HnswElements,
+		search: &HnswSearch,
 		mut candidates: DoublePriorityQueue,
 		mut visited: HashSet<ElementId>,
 		mut w: DoublePriorityQueue,
 		filter: &mut HnswTruthyDocumentFilter,
+		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<DoublePriorityQueue> {
 		let mut f_dist = w.peek_last_dist().unwrap_or(f64::MAX);
 
@@ -214,12 +251,21 @@ where
 					if !visited.insert(e_id) {
 						continue;
 					}
-					if let Some(e_pt) = elements.get_vector(&search_ctx.tx, &e_id).await? {
-						let e_dist = elements.distance(&e_pt, &search_ctx.search.pt);
-						if e_dist < f_dist || w.len() < search_ctx.search.ef {
+					if let Some(e_pt) = elements.get_vector(&ctx.tx, &e_id).await? {
+						let e_dist = elements.distance(&e_pt, &search.pt);
+						if e_dist < f_dist || w.len() < search.ef {
 							candidates.push(e_dist, e_id);
 							if Self::add_if_truthy(
-								search_ctx, stk, &mut w, &e_pt, e_dist, e_id, filter,
+								ctx,
+								docs,
+								stk,
+								search.ef,
+								&mut w,
+								&e_pt,
+								e_dist,
+								e_id,
+								filter,
+								pending_docs,
 							)
 							.await?
 							{
@@ -233,32 +279,72 @@ where
 		Ok(w)
 	}
 
+	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn add_if_truthy(
-		search_ctx: &HnswCheckedSearchContext<'_>,
+		ctx: &HnswContext<'_>,
+		docs: &HnswDocs,
 		stk: &mut Stk,
+		efc: usize,
 		w: &mut DoublePriorityQueue,
 		e_pt: &SharedVector,
 		e_dist: f64,
 		e_id: ElementId,
 		filter: &mut HnswTruthyDocumentFilter,
+		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<bool> {
-		if let Some(docs) = search_ctx.vec_docs.get_docs(&search_ctx.tx, e_pt).await?
-			&& filter.check_any_doc_truthy(search_ctx, stk, docs).await?
-		{
-			w.push(e_dist, e_id);
-			if w.len() > search_ctx.search.ef
-				&& let Some((_, id)) = w.pop_last()
+		if let Some(e_docs) = ctx.vec_docs.get_docs(&ctx.tx, e_pt).await? {
+			if let Some(pending_docs) = pending_docs
+				// Check all these docs are currently updated the pending
+				&& Self::check_all_docs_in_pending(&e_docs, pending_docs)
 			{
-				filter.expire(id);
+				// In this case we ignore the one in the HNSW index
+				return Ok(false);
 			}
-			return Ok(true);
+			if filter.check_any_doc_truthy(ctx, docs, stk, e_docs).await? {
+				w.push(e_dist, e_id);
+				if w.len() > efc
+					&& let Some((_, id)) = w.pop_last()
+				{
+					filter.expire(id);
+				}
+				return Ok(true);
+			}
 		}
 		Ok(false)
 	}
 
+	fn check_all_docs_in_pending(docs: &Ids64, pending_docs: &RoaringTreemap) -> bool {
+		if pending_docs.is_empty() {
+			return false;
+		}
+		for doc_id in docs.iter() {
+			if !pending_docs.contains(doc_id) {
+				return false;
+			}
+		}
+		true
+	}
+
+	async fn are_all_docs_in_pending(
+		search_ctx: &HnswContext<'_>,
+		e_pt: &SharedVector,
+		pending_docs: Option<&RoaringTreemap>,
+	) -> Result<bool> {
+		let Some(pending_docs) = pending_docs else {
+			return Ok(false);
+		};
+		if let Some(docs) = search_ctx.vec_docs.get_docs(&search_ctx.tx, e_pt).await? {
+			if Self::check_all_docs_in_pending(&docs, pending_docs) {
+				return Ok(false);
+			}
+		}
+		Ok(true)
+	}
+
 	pub(super) async fn insert(
 		&mut self,
-		(tx, st): (&Transaction, &mut LayerState),
+		ctx: &HnswContext<'_>,
+		st: &mut LayerState,
 		elements: &HnswElements,
 		heuristic: &Heuristic,
 		efc: usize,
@@ -268,9 +354,9 @@ where
 		let w;
 		let mut neighbors = self.graph.new_edges();
 		{
-			w = self.search_multi(tx, elements, q_pt, eps, efc).await?;
+			w = self.search_multi(ctx, elements, q_pt, eps, efc).await?;
 			eps = w.clone();
-			heuristic.select(tx, elements, self, q_id, q_pt, w, None, &mut neighbors).await?;
+			heuristic.select(&ctx.tx, elements, self, q_id, q_pt, w, None, &mut neighbors).await?;
 		};
 
 		let neighbors = self.graph.add_node_and_bidirectional_edges(q_id, neighbors);
@@ -278,12 +364,12 @@ where
 		for e_id in &neighbors {
 			if let Some(e_conn) = self.graph.get_edges(e_id) {
 				if e_conn.len() > self.m_max
-					&& let Some(e_pt) = elements.get_vector(tx, e_id).await?
+					&& let Some(e_pt) = elements.get_vector(&ctx.tx, e_id).await?
 				{
-					let e_c = self.build_priority_list(tx, elements, *e_id, e_conn).await?;
+					let e_c = self.build_priority_list(&ctx.tx, elements, *e_id, e_conn).await?;
 					let mut e_new_conn = self.graph.new_edges();
 					heuristic
-						.select(tx, elements, self, *e_id, &e_pt, e_c, None, &mut e_new_conn)
+						.select(&ctx.tx, elements, self, *e_id, &e_pt, e_c, None, &mut e_new_conn)
 						.await?;
 					#[cfg(debug_assertions)]
 					assert!(!e_new_conn.contains(e_id));
@@ -298,7 +384,7 @@ where
 		let mut changed_nodes = Vec::with_capacity(neighbors.len() + 1);
 		changed_nodes.push(q_id);
 		changed_nodes.extend_from_slice(&neighbors);
-		self.save_nodes(tx, st, &changed_nodes).await?;
+		self.save_nodes(&ctx.tx, st, &changed_nodes).await?;
 		Ok(eps)
 	}
 
@@ -323,7 +409,7 @@ where
 
 	pub(super) async fn remove(
 		&mut self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		st: &mut LayerState,
 		elements: &HnswElements,
 		heuristic: &Heuristic,
@@ -333,13 +419,22 @@ where
 		if let Some(f_ids) = self.graph.remove_node_and_bidirectional_edges(&e_id) {
 			let mut changed_nodes = Vec::with_capacity(f_ids.len());
 			for &q_id in f_ids.iter() {
-				if let Some(q_pt) = elements.get_vector(tx, &q_id).await? {
+				if let Some(q_pt) = elements.get_vector(&ctx.tx, &q_id).await? {
 					let c = self
-						.search_multi_with_ignore(tx, elements, &q_pt, vec![q_id, e_id], efc)
+						.search_multi_with_ignore(ctx, elements, &q_pt, vec![q_id, e_id], efc)
 						.await?;
 					let mut q_new_conn = self.graph.new_edges();
 					heuristic
-						.select(tx, elements, self, q_id, &q_pt, c, Some(e_id), &mut q_new_conn)
+						.select(
+							&ctx.tx,
+							elements,
+							self,
+							q_id,
+							&q_pt,
+							c,
+							Some(e_id),
+							&mut q_new_conn,
+						)
 						.await?;
 					#[cfg(debug_assertions)]
 					{
@@ -358,8 +453,8 @@ where
 				}
 			}
 			// Delete the removed node's key and save all modified neighbor nodes
-			self.delete_node(tx, e_id).await?;
-			self.save_nodes(tx, st, &changed_nodes).await?;
+			self.delete_node(&ctx.tx, e_id).await?;
+			self.save_nodes(&ctx.tx, st, &changed_nodes).await?;
 			Ok(true)
 		} else {
 			Ok(false)

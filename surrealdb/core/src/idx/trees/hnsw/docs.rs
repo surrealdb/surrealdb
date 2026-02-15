@@ -7,6 +7,7 @@ use crate::idx::IndexKeyBase;
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
+use crate::idx::trees::hnsw::index::HnswContext;
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::{SerializedVector, Vector};
 use crate::kvs::{KVValue, Transaction};
@@ -292,32 +293,32 @@ impl VecDocs {
 	/// Inserts a vector and its associated document ID using its hash.
 	async fn insert_hashed(
 		&self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		o: Vector,
 		ser_vec: SerializedVector,
 		doc_id: DocId,
 		h: &mut HnswFlavor,
 	) -> Result<()> {
 		let key = self.ikb.new_hh_key(ser_vec.compute_hash());
-		match tx.get(&key, None).await? {
+		match ctx.tx.get(&key, None).await? {
 			None => {
 				//  We don't have the vector, we insert it in the graph
-				let element_id = h.insert(tx, o).await?;
+				let element_id = h.insert(ctx, o).await?;
 				let ehd = ElementHashedDocs::new(element_id, ser_vec, doc_id);
-				tx.set(&key, &ehd, None).await?;
+				ctx.tx.set(&key, &ehd, None).await?;
 			}
 			Some(mut ehd) => {
 				if let Some(ed) = ehd.get_element_docs(&ser_vec) {
 					// We already have the vector
 					if let Some(docs) = ed.docs.insert(doc_id) {
 						ed.docs = docs;
-						tx.set(&key, &ehd, None).await?;
+						ctx.tx.set(&key, &ehd, None).await?;
 					};
 				} else {
 					//  We don't have the vector, we insert it in the graph
-					let element_id = h.insert(tx, o).await?;
+					let element_id = h.insert(ctx, o).await?;
 					ehd.add(element_id, ser_vec, doc_id);
-					tx.set(&key, &ehd, None).await?;
+					ctx.tx.set(&key, &ehd, None).await?;
 				}
 			}
 		};
@@ -327,17 +328,17 @@ impl VecDocs {
 	/// Inserts a vector and its associated document ID.
 	pub(super) async fn insert(
 		&self,
-		tx: &Transaction,
+		ctx: &mut HnswContext<'_>,
 		vec: Vector,
 		doc_id: DocId,
 		h: &mut HnswFlavor,
 	) -> Result<()> {
 		let ser_vec = SerializedVector::from(&vec);
 		if self.use_hashed_vector {
-			return self.insert_hashed(tx, vec, ser_vec, doc_id, h).await;
+			return self.insert_hashed(ctx, vec, ser_vec, doc_id, h).await;
 		}
 		let key = self.ikb.new_hv_key(&ser_vec);
-		if let Some(ed) = match tx.get(&key, None).await? {
+		if let Some(ed) = match ctx.tx.get(&key, None).await? {
 			Some(mut ed) => {
 				// We already have the vector
 				ed.docs.insert(doc_id).map(|new_docs| {
@@ -347,12 +348,12 @@ impl VecDocs {
 			}
 			None => {
 				//  We don't have the vector, we insert it in the graph
-				let element_id = h.insert(tx, vec).await?;
+				let element_id = h.insert(ctx, vec).await?;
 				let ed = ElementDocs::new(element_id, doc_id);
 				Some(ed)
 			}
 		} {
-			tx.set(&key, &ed, None).await?;
+			ctx.tx.set(&key, &ed, None).await?;
 		}
 		Ok(())
 	}
@@ -360,22 +361,22 @@ impl VecDocs {
 	/// Removes a vector and its associated document ID using its hash.
 	async fn remove_hashed(
 		&self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		ser_vec: SerializedVector,
 		d: DocId,
 		h: &mut HnswFlavor,
 	) -> Result<()> {
 		let key = self.ikb.new_hh_key(ser_vec.compute_hash());
-		if let Some(mut ehd) = tx.get(&key, None).await? {
+		if let Some(mut ehd) = ctx.tx.get(&key, None).await? {
 			match ehd.remove(&ser_vec, d) {
 				RemoveResult::Empty(deleted_element_id) => {
-					tx.del(&key).await?;
-					h.remove(tx, deleted_element_id).await?;
+					ctx.tx.del(&key).await?;
+					h.remove(ctx, deleted_element_id).await?;
 				}
 				RemoveResult::Updated(deleted_element_id) => {
-					tx.set(&key, &ehd, None).await?;
+					ctx.tx.set(&key, &ehd, None).await?;
 					if let Some(deleted_element_id) = deleted_element_id {
-						h.remove(tx, deleted_element_id).await?;
+						h.remove(ctx, deleted_element_id).await?;
 					}
 				}
 				RemoveResult::Unchanged => {
@@ -389,25 +390,25 @@ impl VecDocs {
 	/// Removes a vector and its associated document ID.
 	pub(super) async fn remove(
 		&self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		o: &Vector,
 		d: DocId,
 		h: &mut HnswFlavor,
 	) -> Result<()> {
 		let ser_vec = o.into();
 		if self.use_hashed_vector {
-			return self.remove_hashed(tx, ser_vec, d, h).await;
+			return self.remove_hashed(ctx, ser_vec, d, h).await;
 		}
 		let key = self.ikb.new_hv_key(&ser_vec);
-		if let Some(mut ed) = tx.get(&key, None).await?
+		if let Some(mut ed) = ctx.tx.get(&key, None).await?
 			&& let Some(new_docs) = ed.docs.remove(d)
 		{
 			if new_docs.is_empty() {
-				tx.del(&key).await?;
-				h.remove(tx, ed.e_id).await?;
+				ctx.tx.del(&key).await?;
+				h.remove(ctx, ed.e_id).await?;
 			} else {
 				ed.docs = new_docs;
-				tx.set(&key, &ed, None).await?;
+				ctx.tx.set(&key, &ed, None).await?;
 			}
 		};
 		Ok(())

@@ -12,18 +12,20 @@ use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
+use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::{HnswParams, TableId};
-use crate::ctx::Context;
+use crate::ctx::FrozenContext;
 use crate::idx::IndexKeyBase;
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::cache::VectorCache;
+use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::filter::HnswTruthyDocumentFilter;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
-use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
+use crate::idx::trees::hnsw::index::HnswContext;
 use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
@@ -130,7 +132,7 @@ where
 		})
 	}
 
-	async fn check_state(&mut self, ctx: &Context) -> Result<()> {
+	async fn check_state(&mut self, ctx: &FrozenContext) -> Result<()> {
 		let tx = ctx.tx();
 		// Read the state
 		let mut st: HnswState = tx.get(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
@@ -171,7 +173,7 @@ where
 
 	async fn insert_level(
 		&mut self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		q_pt: Vector,
 		q_level: usize,
 	) -> Result<ElementId> {
@@ -187,14 +189,14 @@ where
 
 		// Store the vector
 		let pt_ser = SerializedVector::from(&q_pt);
-		let q_pt = self.elements.insert(tx, q_id, q_pt, &pt_ser).await?;
+		let q_pt = self.elements.insert(&ctx.tx, q_id, q_pt, &pt_ser).await?;
 
 		if let Some(ep_id) = self.state.enter_point {
 			// We already have an enter_point, let's insert the element in the layers
-			self.insert_element(tx, q_id, &q_pt, q_level, ep_id, top_up_layers).await?;
+			self.insert_element(ctx, q_id, &q_pt, q_level, ep_id, top_up_layers).await?;
 		} else {
 			// Otherwise is the first element
-			self.insert_first_element(tx, q_id, q_level).await?;
+			self.insert_first_element(&ctx.tx, q_id, q_level).await?;
 		}
 
 		self.state.next_element_id = self.elements.inc_next_element_id();
@@ -230,18 +232,18 @@ where
 
 	async fn insert_element(
 		&mut self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		q_level: usize,
 		mut ep_id: ElementId,
 		top_up_layers: usize,
 	) -> Result<()> {
-		if let Some(mut ep_dist) = self.elements.get_distance(tx, q_pt, &ep_id).await? {
+		if let Some(mut ep_dist) = self.elements.get_distance(&ctx.tx, q_pt, &ep_id).await? {
 			if q_level < top_up_layers {
 				for layer in self.layers[q_level..top_up_layers].iter_mut().rev() {
 					if let Some(ep_dist_id) = layer
-						.search_single(tx, &self.elements, q_pt, ep_dist, ep_id, 1)
+						.search_single(ctx, &self.elements, q_pt, ep_dist, ep_id, 1, None)
 						.await?
 						.peek_first()
 					{
@@ -266,7 +268,8 @@ where
 				{
 					eps = layer
 						.insert(
-							(tx, st),
+							ctx,
+							st,
 							&self.elements,
 							&self.heuristic,
 							self.efc,
@@ -279,7 +282,8 @@ where
 
 			self.layer0
 				.insert(
-					(tx, &mut self.state.layer0),
+					ctx,
+					&mut self.state.layer0,
 					&self.elements,
 					&self.heuristic,
 					self.efc,
@@ -293,7 +297,7 @@ where
 					.iter_mut()
 					.zip(self.state.layers[top_up_layers..q_level].iter_mut())
 				{
-					if !layer.add_empty_node(tx, q_id, st).await? {
+					if !layer.add_empty_node(&ctx.tx, q_id, st).await? {
 						#[cfg(debug_assertions)]
 						unreachable!("Already there {}", q_id);
 					}
@@ -316,18 +320,18 @@ where
 		Ok(())
 	}
 
-	async fn insert(&mut self, tx: &Transaction, q_pt: Vector) -> Result<ElementId> {
+	async fn insert(&mut self, ctx: &HnswContext<'_>, q_pt: Vector) -> Result<ElementId> {
 		let q_level = self.get_random_level();
-		let res = self.insert_level(tx, q_pt, q_level).await?;
-		self.save_state(tx).await?;
+		let res = self.insert_level(ctx, q_pt, q_level).await?;
+		self.save_state(&ctx.tx).await?;
 		Ok(res)
 	}
 
-	async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<bool> {
+	async fn remove(&mut self, ctx: &HnswContext<'_>, e_id: ElementId) -> Result<bool> {
 		let mut removed = false;
 
 		// Do we have the vector?
-		if let Some(e_pt) = self.elements.get_vector(tx, &e_id).await? {
+		if let Some(e_pt) = self.elements.get_vector(&ctx.tx, &e_id).await? {
 			// Check if we are deleted the current enter_point
 			let mut new_enter_point = if Some(e_id) == self.state.enter_point {
 				None
@@ -339,10 +343,10 @@ where
 			for (layer, st) in self.layers.iter_mut().zip(self.state.layers.iter_mut()).rev() {
 				if new_enter_point.is_none() {
 					new_enter_point = layer
-						.search_single_with_ignore(tx, &self.elements, &e_pt, e_id, self.efc)
+						.search_single_with_ignore(ctx, &self.elements, &e_pt, e_id, self.efc)
 						.await?;
 				}
-				if layer.remove(tx, st, &self.elements, &self.heuristic, e_id, self.efc).await? {
+				if layer.remove(ctx, st, &self.elements, &self.heuristic, e_id, self.efc).await? {
 					removed = true;
 				}
 			}
@@ -351,37 +355,53 @@ where
 			if new_enter_point.is_none() {
 				new_enter_point = self
 					.layer0
-					.search_single_with_ignore(tx, &self.elements, &e_pt, e_id, self.efc)
+					.search_single_with_ignore(ctx, &self.elements, &e_pt, e_id, self.efc)
 					.await?;
 			}
 
 			// Remove from layer 0
 			if self
 				.layer0
-				.remove(tx, &mut self.state.layer0, &self.elements, &self.heuristic, e_id, self.efc)
+				.remove(
+					ctx,
+					&mut self.state.layer0,
+					&self.elements,
+					&self.heuristic,
+					e_id,
+					self.efc,
+				)
 				.await?
 			{
 				removed = true;
 			}
 
-			self.elements.remove(tx, e_id).await?;
+			self.elements.remove(&ctx.tx, e_id).await?;
 
 			self.state.enter_point = new_enter_point;
 		}
 
-		self.save_state(tx).await?;
+		self.save_state(&ctx.tx).await?;
 		Ok(removed)
 	}
 
 	async fn knn_search(
 		&self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		search: &HnswSearch,
+		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<Vec<(f64, ElementId)>> {
-		if let Some((ep_dist, ep_id)) = self.search_ep(tx, &search.pt).await? {
+		if let Some((ep_dist, ep_id)) = self.search_ep(ctx, &search.pt, pending_docs).await? {
 			let w = self
 				.layer0
-				.search_single(tx, &self.elements, &search.pt, ep_dist, ep_id, search.ef)
+				.search_single(
+					ctx,
+					&self.elements,
+					&search.pt,
+					ep_dist,
+					ep_id,
+					search.ef,
+					pending_docs,
+				)
 				.await?;
 			Ok(w.to_vec_limit(search.k))
 		} else {
@@ -389,43 +409,48 @@ where
 		}
 	}
 
-	async fn knn_search_checked(
+	async fn knn_search_with_filter(
 		&self,
-		search_ctx: &HnswCheckedSearchContext<'_>,
+		ctx: &HnswContext<'_>,
+		docs: &HnswDocs,
+		search: &HnswSearch,
 		stk: &mut Stk,
 		filter: &mut HnswTruthyDocumentFilter,
+		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<Vec<(f64, ElementId)>> {
-		if let Some((ep_dist, ep_id)) =
-			self.search_ep(&search_ctx.tx, &search_ctx.search.pt).await?
-			&& let Some(ep_pt) = self.elements.get_vector(&search_ctx.tx, &ep_id).await?
+		if let Some((ep_dist, ep_id)) = self.search_ep(&ctx, &search.pt, pending_docs).await?
+			&& self.elements.get_vector(&ctx.tx, &ep_id).await?.is_some()
 		{
 			let w = self
 				.layer0
 				.search_single_with_filter(
-					search_ctx,
+					ctx,
 					stk,
+					docs,
 					&self.elements,
-					&ep_pt,
+					search,
 					ep_dist,
 					ep_id,
 					filter,
+					pending_docs,
 				)
 				.await?;
-			return Ok(w.to_vec_limit(search_ctx.search.k));
+			return Ok(w.to_vec_limit(search.k));
 		}
 		Ok(vec![])
 	}
 
 	async fn search_ep(
 		&self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		pt: &SharedVector,
+		pending_doc: Option<&RoaringTreemap>,
 	) -> Result<Option<(f64, ElementId)>> {
 		if let Some(mut ep_id) = self.state.enter_point {
-			if let Some(mut ep_dist) = self.elements.get_distance(tx, pt, &ep_id).await? {
+			if let Some(mut ep_dist) = self.elements.get_distance(&ctx.tx, pt, &ep_id).await? {
 				for layer in self.layers.iter().rev() {
 					if let Some(ep_dist_id) = layer
-						.search_single(tx, &self.elements, pt, ep_dist, ep_id, 1)
+						.search_single(ctx, &self.elements, pt, ep_dist, ep_id, 1, pending_doc)
 						.await?
 						.peek_first()
 					{
@@ -488,8 +513,9 @@ mod tests {
 	use crate::dbs::Options;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::seqdocids::DocId;
+	use crate::idx::trees::hnsw::docs::VecDocs;
 	use crate::idx::trees::hnsw::flavor::HnswFlavor;
-	use crate::idx::trees::hnsw::index::HnswIndex;
+	use crate::idx::trees::hnsw::index::{HnswContext, HnswIndex};
 	use crate::idx::trees::hnsw::{ElementId, HnswSearch};
 	use crate::idx::trees::knn::tests::{TestCollection, new_vectors_from_file};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
@@ -499,30 +525,34 @@ mod tests {
 	use crate::val::{RecordIdKey, Value};
 
 	async fn insert_collection_hnsw(
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		h: &mut HnswFlavor,
 		collection: &TestCollection,
 	) -> HashMap<ElementId, SharedVector> {
 		let mut map = HashMap::default();
 		for (_, obj) in collection.to_vec_ref() {
 			let obj: SharedVector = obj.clone();
-			let e_id = h.insert(tx, obj.clone_vector()).await.unwrap();
+			let e_id = h.insert(ctx, obj.clone_vector()).await.unwrap();
 			map.insert(e_id, obj);
 			h.check_hnsw_properties(map.len()).await;
 		}
 		map
 	}
 
-	async fn find_collection_hnsw(tx: &Transaction, h: &HnswFlavor, collection: &TestCollection) {
+	async fn find_collection_hnsw(
+		ctx: &HnswContext<'_>,
+		h: &HnswFlavor,
+		collection: &TestCollection,
+	) {
 		let max_knn = 20.min(collection.len());
 		for (_, obj) in collection.to_vec_ref() {
 			for knn in 1..max_knn {
 				let search = HnswSearch::new(obj.clone(), knn, 80);
-				let res = h.knn_search(tx, &search).await.unwrap();
+				let res = h.knn_search(ctx, &search, None).await.unwrap();
 				if collection.is_unique() {
 					let mut found = false;
 					for (_, e_id) in &res {
-						if let Some(v) = h.get_vector(tx, e_id).await.unwrap()
+						if let Some(v) = h.get_vector(&ctx.tx, e_id).await.unwrap()
 							&& v.eq(obj)
 						{
 							found = true;
@@ -556,13 +586,13 @@ mod tests {
 	}
 
 	async fn delete_collection_hnsw(
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		h: &mut HnswFlavor,
 		mut map: HashMap<ElementId, SharedVector>,
 	) {
 		let element_ids: Vec<ElementId> = map.keys().copied().collect();
 		for e_id in element_ids {
-			assert!(h.remove(tx, e_id).await.unwrap());
+			assert!(h.remove(ctx, e_id).await.unwrap());
 			map.remove(&e_id);
 			h.check_hnsw_properties(map.len()).await;
 		}
@@ -570,10 +600,21 @@ mod tests {
 
 	async fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
 		let ds = Datastore::new("memory").await.unwrap();
+		let opt = Arc::new(Options::new(ds.id(), DynamicConfiguration::default()));
 		let ns = NamespaceId(1);
 		let db = DatabaseId(2);
 		let tb = TableId(3);
-		let tb = TableDefinition::new(ns, db, tb, "tb".into());
+		let db = DatabaseDefinition {
+			namespace_id: ns,
+			database_id: db,
+			name: "db".to_string(),
+			comment: None,
+			changefeed: None,
+			strict: false,
+		};
+		let tb = TableDefinition::new(ns, db.database_id, tb, "tb".into());
+		let vec_docs =
+			VecDocs::new(IndexKeyBase::new(ns, db.database_id, "tb".into(), IndexId(4)), false);
 		let mut h = HnswFlavor::new(
 			tb.table_id,
 			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), tb.name.clone(), IndexId(4)),
@@ -582,20 +623,23 @@ mod tests {
 		)
 		.unwrap();
 		let map = {
-			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-			let map = insert_collection_hnsw(&tx, &mut h, collection).await;
-			tx.commit().await.unwrap();
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let ctx = HnswContext::new(&ctx, &opt, &db, &vec_docs);
+			let map = insert_collection_hnsw(&ctx, &mut h, collection).await;
+			ctx.tx.commit().await.unwrap();
 			map
 		};
 		{
-			let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
-			find_collection_hnsw(&tx, &h, collection).await;
-			tx.cancel().await.unwrap();
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let ctx = HnswContext::new(&ctx, &opt, &db, &vec_docs);
+			find_collection_hnsw(&ctx, &h, collection).await;
+			ctx.tx.cancel().await.unwrap();
 		}
 		{
-			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-			delete_collection_hnsw(&tx, &mut h, map).await;
-			tx.commit().await.unwrap();
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let ctx = HnswContext::new(&ctx, &opt, &db, &vec_docs);
+			delete_collection_hnsw(&ctx, &mut h, map).await;
+			ctx.tx.commit().await.unwrap();
 		}
 	}
 
@@ -680,7 +724,7 @@ mod tests {
 	}
 
 	async fn insert_collection_hnsw_index(
-		ctx: &Context,
+		ctx: &FrozenContext,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 	) -> Result<HashMap<SharedVector, HashSet<DocId>>> {
@@ -709,11 +753,12 @@ mod tests {
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 	) {
+		let ctx = h.new_hnsw_context(ctx, opt, db);
 		let max_knn = 20.min(collection.len());
 		for (doc_id, obj) in collection.to_vec_ref() {
 			for knn in 1..max_knn {
 				let search = HnswSearch::new(obj.clone(), knn, 500);
-				let res = h.search(db, ctx, opt, stk, &search, None).await.unwrap();
+				let res = h.search(&ctx, stk, &search, &mut None).await.unwrap();
 				if knn == 1 && res.len() == 1 && res[0].1 > 0.0 {
 					let docs: Vec<DocId> = res.iter().map(|(d, _)| d.clone()).collect();
 					if collection.is_unique() {
@@ -903,18 +948,30 @@ mod tests {
 		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let opt = Options::new(ds.id(), DynamicConfiguration::default());
+		let vec_docs = VecDocs::new(ikb.clone(), false);
+		let db = DatabaseDefinition {
+			namespace_id: ikb.0.ns,
+			database_id: ikb.0.db,
+			name: ikb.table().to_string(),
+			comment: None,
+			changefeed: None,
+			strict: false,
+		};
 		let mut h =
 			HnswFlavor::new(TableId(3), ikb, &p, ds.index_store().vector_cache().clone()).unwrap();
 		{
-			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-			insert_collection_hnsw(&tx, &mut h, &collection).await;
-			tx.commit().await.unwrap();
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let ctx = HnswContext::new(&ctx, &opt, &db, &vec_docs);
+			insert_collection_hnsw(&ctx, &mut h, &collection).await;
+			ctx.tx.commit().await.unwrap();
 		}
 		{
-			let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let ctx = HnswContext::new(&ctx, &opt, &db, &vec_docs);
 			let search = HnswSearch::new(new_i16_vec(-2, -3), 10, 501);
-			let res = h.knn_search(&tx, &search).await.unwrap();
-			tx.cancel().await.unwrap();
+			let res = h.knn_search(&ctx, &search, None).await.unwrap();
+			ctx.tx.cancel().await.unwrap();
 			assert_eq!(res.len(), 10);
 		}
 	}
@@ -930,8 +987,8 @@ mod tests {
 		info!("Build data collection");
 
 		let ds = Arc::new(Datastore::new("memory").await?);
-		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-		let db = tx.ensure_ns_db(None, "myns", "mydb").await.unwrap();
+		let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+		let db = tx.ensure_ns_db(None, "myns", "mydb").await?;
 		tx.commit().await?;
 
 		let collection: Arc<TestCollection> =
@@ -989,10 +1046,9 @@ mod tests {
 							let search = HnswSearch::new(pt.clone(), knn, efs);
 
 							let ctx = new_ctx(&ds, TransactionType::Read).await;
-							let tx = ctx.tx();
-							let hnsw_res =
-								h.search(&db, &ctx, &opt, stk, &search, None).await.unwrap();
-							tx.cancel().await.unwrap();
+							let ctx = h.new_hnsw_context(&ctx, &opt, &db);
+							let hnsw_res = h.search(&ctx, stk, &search, &mut None).await.unwrap();
+							ctx.tx.cancel().await.unwrap();
 							assert_eq!(hnsw_res.len(), knn, "Different size - knn: {knn}",);
 							let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
 							let rec = compute_recall(&brute_force_res, &hnsw_res);
