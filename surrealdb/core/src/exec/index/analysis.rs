@@ -178,11 +178,11 @@ impl<'a> IndexAnalyzer<'a> {
 					continue;
 				}
 
-			if let Some(With::Index(names)) = self.with_hints
-				&& !names.contains(&ix_def.name)
-			{
-				continue;
-			}
+				if let Some(With::Index(names)) = self.with_hints
+					&& !names.contains(&ix_def.name)
+				{
+					continue;
+				}
 
 				if let Some(first_col) = ix_def.cols.first()
 					&& idiom_matches(idiom, first_col)
@@ -220,11 +220,11 @@ impl<'a> IndexAnalyzer<'a> {
 				op: BinaryOperator::Inside,
 				right,
 			} => {
-			if let (Expr::Idiom(idiom), Expr::Literal(lit)) = (left.as_ref(), right.as_ref())
-				&& let Some(Value::Array(arr)) = try_literal_to_value(lit)
-			{
-				results.push((idiom.clone(), arr.0));
-			}
+				if let (Expr::Idiom(idiom), Expr::Literal(lit)) = (left.as_ref(), right.as_ref())
+					&& let Some(Value::Array(arr)) = try_literal_to_value(lit)
+				{
+					results.push((idiom.clone(), arr.0));
+				}
 			}
 			Expr::Prefix {
 				expr: inner,
