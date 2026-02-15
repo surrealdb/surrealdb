@@ -72,7 +72,7 @@ fn spawn_buffered(stream: ValueBatchStream, buffer_size: usize) -> ValueBatchStr
 	});
 	Box::pin(SpawnedBufferedStream {
 		rx: Box::pin(rx),
-		_handle: handle,
+		handle,
 	})
 }
 
@@ -85,13 +85,13 @@ struct SpawnedBufferedStream {
 	/// Channel receiver yielding batches from the spawned task.
 	rx: ValueBatchStream,
 	/// Handle to the spawned producer task — aborted on drop.
-	_handle: tokio::task::JoinHandle<()>,
+	handle: tokio::task::JoinHandle<()>,
 }
 
 #[cfg(not(target_family = "wasm"))]
 impl Drop for SpawnedBufferedStream {
 	fn drop(&mut self) {
-		self._handle.abort();
+		self.handle.abort();
 	}
 }
 
