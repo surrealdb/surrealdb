@@ -545,9 +545,19 @@ async fn resolve_table_scan_stream(
 		let candidates = analyzer.analyze(cfg.cond.as_ref(), cfg.order.as_ref());
 		if candidates.is_empty() {
 			// No single-index candidates -- try multi-index union for OR conditions
-			analyzer.try_or_union(cfg.cond.as_ref(), cfg.direction)
+			analyzer
+				.try_or_union(cfg.cond.as_ref(), cfg.direction)
+				// Try expanding IN operators into union of equality lookups
+				.or_else(|| analyzer.try_in_expansion(cfg.cond.as_ref(), cfg.direction))
 		} else {
-			Some(select_access_path(candidates, cfg.with.as_ref(), cfg.direction))
+			let path = select_access_path(candidates, cfg.with.as_ref(), cfg.direction);
+			// When the best single-index path is a full-range scan (ORDER BY
+			// only), prefer a multi-index union for OR conditions if available.
+			if path.is_full_range_scan() {
+				analyzer.try_or_union(cfg.cond.as_ref(), cfg.direction).or(Some(path))
+			} else {
+				Some(path)
+			}
 		}
 	};
 

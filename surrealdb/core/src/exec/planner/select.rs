@@ -27,7 +27,7 @@ use crate::exec::operators::{
 	Aggregate, AnalyzePlan, Compute, DynamicScan, ExplainPlan, Fetch, FieldSelection, Filter,
 	KnnTopK, Limit, Project, ProjectValue, Projection, RandomShuffle, RecordIdScan, SelectProject,
 	Sort, SortByKey, SortDirection, SortKey, SortTopK, SortTopKByKey, SourceExpr, Split, TableScan,
-	Timeout, Union, UnwrapExactlyOne,
+	Timeout, Union, UnionIndexScan, UnwrapExactlyOne,
 };
 use crate::exec::{ExecOperator, OperatorMetrics};
 use crate::expr::field::{Field, Fields};
@@ -1369,13 +1369,76 @@ impl<'ctx> Planner<'ctx> {
 							limit_pushed,
 						});
 					}
-					AccessPath::Union(_) => {
-						// Fall through to DynamicScan so that union index
-						// scans go through the field-permission pipeline
-						// (build_field_state / ScanPipeline::process_batch).
-						// Returning UnionIndexScan directly here would skip
-						// field-level permissions and computed-field
-						// materialization.
+					AccessPath::Union(paths) => {
+						// Create a UnionIndexScan with a sub-operator for
+						// each OR branch. This is consistent with how
+						// BTreeScan/FullTextSearch/KnnSearch create their
+						// operators at plan time. The residual WHERE
+						// predicate is handled by a Filter above
+						// (predicate_pushed = false).
+						let mut sub_operators: Vec<Arc<dyn ExecOperator>> =
+							Vec::with_capacity(paths.len());
+						for path in paths {
+							let sub_op: Arc<dyn ExecOperator> = match path {
+								AccessPath::BTreeScan {
+									index_ref,
+									access,
+									direction,
+								} => Arc::new(IndexScan::new(
+									index_ref,
+									access,
+									direction,
+									table.clone(),
+									None,
+									None,
+								)),
+								AccessPath::FullTextSearch {
+									index_ref,
+									query,
+									operator,
+								} => Arc::new(FullTextScan::new(
+									index_ref,
+									query,
+									operator,
+									table.clone(),
+								)),
+								AccessPath::KnnSearch {
+									index_ref,
+									vector,
+									k,
+									ef,
+								} => {
+									let residual_cond = cond.and_then(strip_knn_from_condition);
+									Arc::new(KnnScan::new(
+										index_ref,
+										vector,
+										k,
+										ef,
+										table.clone(),
+										knn_ctx.clone(),
+										residual_cond,
+									))
+								}
+								// TableScan and nested Union should not
+								// appear as sub-paths; fall back safely.
+								_ => Arc::new(TableScan::new(
+									table.clone(),
+									direction,
+									None,
+									None,
+									None,
+									None,
+									None,
+								)),
+							};
+							sub_operators.push(sub_op);
+						}
+						return Ok(PlannedSource {
+							operator: Arc::new(UnionIndexScan::new(sub_operators))
+								as Arc<dyn ExecOperator>,
+							predicate_pushed: false,
+							limit_pushed: false,
+						});
 					}
 				}
 			}
@@ -1574,10 +1637,27 @@ impl<'ctx> Planner<'ctx> {
 			if let Some(path) = analyzer.try_or_union(cond, direction) {
 				return Ok(Some((path, direction)));
 			}
+			// Try expanding IN operators into union of equality lookups
+			if let Some(path) = analyzer.try_in_expansion(cond, direction) {
+				return Ok(Some((path, direction)));
+			}
 			return Ok(Some((AccessPath::TableScan, direction)));
 		}
 
 		let path = select_access_path(candidates, with, direction);
+
+		// When the best single-index path is a full-range scan (ORDER BY
+		// only, no WHERE selectivity), also try a multi-index union for
+		// OR conditions. The union reads only matching rows from each
+		// branch, which is typically far better than scanning every row
+		// in the index. The outer pipeline adds a Sort when the union
+		// does not satisfy ORDER BY.
+		if path.is_full_range_scan() {
+			if let Some(union_path) = analyzer.try_or_union(cond, direction) {
+				return Ok(Some((union_path, direction)));
+			}
+		}
+
 		Ok(Some((path, direction)))
 	}
 }
