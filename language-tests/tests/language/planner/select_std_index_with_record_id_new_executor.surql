@@ -11,7 +11,10 @@ value = "[{ id: t:[3, o:1] }]"
 value = "[{ id: t:[3, o:1] }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 1}\n    Filter [ctx: Db] [predicate: id[1] = o:1 AND b = 2025] {rows: 1}\n        IndexScan [ctx: Db] [index: idx, access: [o:1, 2025], direction: Forward] {rows: 1}\n\nTotal rows: 1''''
+value = ''''Project [ctx: Db] {rows: 1}
+    IndexScan [ctx: Db] [index: idx, access: [o:1, 2025], direction: Forward] {rows: 1}
+
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ id: t:[4, o:2] }]"
@@ -20,7 +23,10 @@ value = "[{ id: t:[4, o:2] }]"
 value = "[{ id: t:[4, o:2] }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 1}\n    Filter [ctx: Db] [predicate: id[1] = o:2 AND b > 2022] {rows: 1}\n        IndexScan [ctx: Db] [index: idx, access: [o:2] MoreThan 2022, direction: Forward] {rows: 1}\n\nTotal rows: 1''''
+value = ''''Project [ctx: Db] {rows: 1}
+    IndexScan [ctx: Db] [index: idx, access: [o:2] MoreThan 2022, direction: Forward] {rows: 1}
+
+Total rows: 1''''
 
 */
 

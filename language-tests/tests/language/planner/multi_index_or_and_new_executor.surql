@@ -41,7 +41,7 @@ value = "[{ name: 'Jaime' }, { name: 'Tobie' }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1}
-    Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm'] {rows: 1}
+    Filter [ctx: Db] [predicate: genre = 'm'] {rows: 1}
         IndexScan [ctx: Db] [index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
@@ -65,7 +65,7 @@ value = "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1}
-    Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb'] {rows: 1}
+    Filter [ctx: Db] [predicate: genre = 'm' AND company @@ 'surrealdb'] {rows: 1}
         IndexScan [ctx: Db] [index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1}
 
 Total rows: 1"'''

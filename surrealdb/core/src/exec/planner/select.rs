@@ -11,7 +11,8 @@ use super::util::{
 	extract_count_field_names, extract_matches_context, extract_record_id_point_lookup,
 	extract_version, get_effective_limit_literal, has_knn_k_operator, has_knn_operator,
 	has_top_level_or, idiom_to_field_name, idiom_to_field_path, index_covers_ordering,
-	is_count_all_eligible, order_is_scan_compatible, strip_knn_from_condition,
+	is_count_all_eligible, order_is_scan_compatible, strip_index_conditions,
+	strip_knn_from_condition,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
@@ -53,15 +54,25 @@ pub(crate) struct SelectPipelineConfig {
 	pub filter_pushed: bool,
 }
 
+/// Describes how the WHERE predicate should be handled after source planning.
+pub(crate) enum FilterAction {
+	/// Source did not analyze the predicate. Use the original `cond_for_filter`.
+	UseOriginal,
+	/// All conditions consumed by the source. No Filter needed.
+	FullyConsumed,
+	/// Partial residual remains. Create a Filter with this condition only.
+	Residual(Cond),
+}
+
 /// Result of planning FROM sources.
 ///
-/// Tracks whether the scan predicate and limit/start were actually pushed
-/// into the source operator, so the caller can avoid duplicating them in
-/// the outer pipeline.
+/// Tracks how the WHERE predicate and limit/start were handled by the
+/// source operator, so the caller can avoid duplicating them in the
+/// outer pipeline.
 pub(crate) struct PlannedSource {
 	operator: Arc<dyn ExecOperator>,
-	/// The scan predicate was consumed by the source operator.
-	predicate_pushed: bool,
+	/// How the WHERE predicate was handled by the source.
+	filter_action: FilterAction,
 	/// The limit and start values were consumed by the source operator.
 	limit_pushed: bool,
 }
@@ -1093,6 +1104,16 @@ impl<'ctx> Planner<'ctx> {
 			)
 			.await?;
 
+		// Resolve the pipeline condition from the filter action.
+		// - FullyConsumed: the source handles the entire predicate, no Filter.
+		// - Residual: only the residual part needs a Filter.
+		// - UseOriginal: the source did not analyze the predicate, use as-is.
+		let pipeline_cond = match planned.filter_action {
+			FilterAction::FullyConsumed => None,
+			FilterAction::Residual(residual) => Some(residual),
+			FilterAction::UseOriginal => cond_for_filter,
+		};
+
 		// KNN wrapping
 		let had_bruteforce_knn = brute_force_knn.is_some();
 		let source = if let Some(kp) = brute_force_knn {
@@ -1100,15 +1121,11 @@ impl<'ctx> Planner<'ctx> {
 			// BEFORE ranking by distance. Otherwise rows that don't satisfy
 			// the WHERE clause can consume top-K slots and push out valid rows.
 			//
-			// When the predicate was pushed into the source operator, it is
-			// already applied there. Otherwise we add an explicit Filter.
-			let input = if !planned.predicate_pushed {
-				if let Some(ref c) = cond_for_filter {
-					let pred = pp.physical_expr(c.0.clone()).await?;
-					Arc::new(Filter::new(planned.operator, pred)) as Arc<dyn ExecOperator>
-				} else {
-					planned.operator
-				}
+			// When the predicate was fully consumed by the source operator, it
+			// is already applied there. Otherwise we add an explicit Filter.
+			let input = if let Some(c) = &pipeline_cond {
+				let pred = pp.physical_expr(c.0.clone()).await?;
+				Arc::new(Filter::new(planned.operator, pred)) as Arc<dyn ExecOperator>
 			} else {
 				planned.operator
 			};
@@ -1122,17 +1139,16 @@ impl<'ctx> Planner<'ctx> {
 		};
 
 		// Build pipeline.
-		// When the predicate was pushed into the source, omit it from the
-		// pipeline. When limit/start were pushed, omit them from the
-		// pipeline to avoid double application. ORDER BY is always passed
-		// through — sort elimination via `can_eliminate_sort()` in
-		// `plan_pipeline()` handles it independently.
-		let filter_pushed = planned.predicate_pushed;
+		// When the predicate was consumed (fully or partially) by the source,
+		// use the computed pipeline_cond (which may be None or a residual).
+		// When limit/start were pushed, omit them to avoid double application.
+		// ORDER BY is always passed through — sort elimination via
+		// `can_eliminate_sort()` in `plan_pipeline()` handles it independently.
 		let config = SelectPipelineConfig {
-			cond: if filter_pushed || had_bruteforce_knn {
+			cond: if had_bruteforce_knn {
 				None
 			} else {
-				cond_for_filter
+				pipeline_cond
 			},
 			split,
 			group,
@@ -1150,7 +1166,7 @@ impl<'ctx> Planner<'ctx> {
 			omit,
 			is_value_source,
 			tempfiles,
-			filter_pushed,
+			filter_pushed: false,
 		};
 
 		let projected = pp.plan_pipeline(source, Some(fields), config).await?;
@@ -1214,7 +1230,7 @@ impl<'ctx> Planner<'ctx> {
 			let operators = plans.into_iter().map(|p| p.operator).collect();
 			Ok(PlannedSource {
 				operator: Arc::new(Union::new(operators)),
-				predicate_pushed: false,
+				filter_action: FilterAction::UseOriginal,
 				limit_pushed: false,
 			})
 		}
@@ -1257,7 +1273,11 @@ impl<'ctx> Planner<'ctx> {
 			&& !cond.is_some_and(|c| has_knn_operator(&c.0))
 			&& let Some(rid_expr) = cond.and_then(|c| extract_record_id_point_lookup(c, table_name))
 		{
-			let predicate_pushed = scan_predicate.is_some();
+			let filter_action = if scan_predicate.is_some() {
+				FilterAction::FullyConsumed
+			} else {
+				FilterAction::UseOriginal
+			};
 			let record_id_expr = self.physical_expr(rid_expr).await?;
 			return Ok(PlannedSource {
 				operator: Arc::new(RecordIdScan::new(
@@ -1266,7 +1286,7 @@ impl<'ctx> Planner<'ctx> {
 					needed_fields,
 					scan_predicate,
 				)) as Arc<dyn ExecOperator>,
-				predicate_pushed,
+				filter_action,
 				limit_pushed: false,
 			});
 		}
@@ -1287,6 +1307,17 @@ impl<'ctx> Planner<'ctx> {
 						access,
 						direction,
 					} => {
+						// Strip index-covered conditions from the WHERE
+						// clause. If all conditions are consumed, no Filter
+						// operator will be created in the pipeline.
+						let filter_action = if let Some(c) = cond {
+							match strip_index_conditions(c, &access, &index_ref.cols) {
+								None => FilterAction::FullyConsumed,
+								Some(residual) => FilterAction::Residual(residual),
+							}
+						} else {
+							FilterAction::FullyConsumed
+						};
 						// Push limit to IndexScan when the index ordering
 						// covers the ORDER BY (or there is no ORDER BY).
 						let push = scan_limit.is_some()
@@ -1303,7 +1334,7 @@ impl<'ctx> Planner<'ctx> {
 							operator: Arc::new(IndexScan::new(
 								index_ref, access, direction, table, idx_limit, idx_start,
 							)) as Arc<dyn ExecOperator>,
-							predicate_pushed: false,
+							filter_action,
 							limit_pushed,
 						});
 					}
@@ -1315,7 +1346,7 @@ impl<'ctx> Planner<'ctx> {
 						return Ok(PlannedSource {
 							operator: Arc::new(FullTextScan::new(index_ref, query, operator, table))
 								as Arc<dyn ExecOperator>,
-							predicate_pushed: false,
+							filter_action: FilterAction::UseOriginal,
 							limit_pushed: false,
 						});
 					}
@@ -1339,12 +1370,16 @@ impl<'ctx> Planner<'ctx> {
 								knn_ctx,
 								residual_cond,
 							)) as Arc<dyn ExecOperator>,
-							predicate_pushed: false,
+							filter_action: FilterAction::UseOriginal,
 							limit_pushed: false,
 						});
 					}
 					AccessPath::TableScan => {
-						let predicate_pushed = scan_predicate.is_some();
+						let filter_action = if scan_predicate.is_some() {
+							FilterAction::FullyConsumed
+						} else {
+							FilterAction::UseOriginal
+						};
 						// TableScan can only provide ordering for `id ASC/DESC`.
 						// Push limit only when ORDER BY is compatible with the
 						// natural KV scan direction.
@@ -1365,7 +1400,7 @@ impl<'ctx> Planner<'ctx> {
 								tbl_start,
 								needed_fields,
 							)) as Arc<dyn ExecOperator>,
-							predicate_pushed,
+							filter_action,
 							limit_pushed,
 						});
 					}
@@ -1375,7 +1410,7 @@ impl<'ctx> Planner<'ctx> {
 						// BTreeScan/FullTextSearch/KnnSearch create their
 						// operators at plan time. The residual WHERE
 						// predicate is handled by a Filter above
-						// (predicate_pushed = false).
+						// (filter_action = UseOriginal).
 						let mut sub_operators: Vec<Arc<dyn ExecOperator>> =
 							Vec::with_capacity(paths.len());
 						for path in paths {
@@ -1444,7 +1479,7 @@ impl<'ctx> Planner<'ctx> {
 								needed_fields,
 								version,
 							)) as Arc<dyn ExecOperator>,
-							predicate_pushed: false,
+							filter_action: FilterAction::UseOriginal,
 							limit_pushed: false,
 						});
 					}
@@ -1457,7 +1492,11 @@ impl<'ctx> Planner<'ctx> {
 
 		match expr {
 			Expr::Table(_) => {
-				let predicate_pushed = scan_predicate.is_some();
+				let filter_action = if scan_predicate.is_some() {
+					FilterAction::FullyConsumed
+				} else {
+					FilterAction::UseOriginal
+				};
 				let limit_pushed = scan_limit.is_some();
 				let table_expr = self.physical_expr(expr).await?;
 				Ok(PlannedSource {
@@ -1475,7 +1514,7 @@ impl<'ctx> Planner<'ctx> {
 						)
 						.with_knn_context(knn_ctx),
 					) as Arc<dyn ExecOperator>,
-					predicate_pushed,
+					filter_action,
 					limit_pushed,
 				})
 			}
@@ -1490,7 +1529,7 @@ impl<'ctx> Planner<'ctx> {
 						needed_fields,
 						None,
 					)) as Arc<dyn ExecOperator>,
-					predicate_pushed: false,
+					filter_action: FilterAction::UseOriginal,
 					limit_pushed: false,
 				})
 			}
@@ -1504,13 +1543,17 @@ impl<'ctx> Planner<'ctx> {
 				}
 				Ok(PlannedSource {
 					operator: self.plan_select_statement(*inner_select).await?,
-					predicate_pushed: false,
+					filter_action: FilterAction::UseOriginal,
 					limit_pushed: false,
 				})
 			}
 			Expr::Param(ref param) => match self.ctx.value(param.as_str()) {
 				Some(crate::val::Value::Table(_)) => {
-					let predicate_pushed = scan_predicate.is_some();
+					let filter_action = if scan_predicate.is_some() {
+						FilterAction::FullyConsumed
+					} else {
+						FilterAction::UseOriginal
+					};
 					let limit_pushed = scan_limit.is_some();
 					let table_expr = self.physical_expr(expr).await?;
 					Ok(PlannedSource {
@@ -1528,7 +1571,7 @@ impl<'ctx> Planner<'ctx> {
 							)
 							.with_knn_context(knn_ctx),
 						) as Arc<dyn ExecOperator>,
-						predicate_pushed,
+						filter_action,
 						limit_pushed,
 					})
 				}
@@ -1541,7 +1584,7 @@ impl<'ctx> Planner<'ctx> {
 							needed_fields,
 							None,
 						)) as Arc<dyn ExecOperator>,
-						predicate_pushed: false,
+						filter_action: FilterAction::UseOriginal,
 						limit_pushed: false,
 					})
 				}
@@ -1549,7 +1592,7 @@ impl<'ctx> Planner<'ctx> {
 					let phys_expr = self.physical_expr(expr).await?;
 					Ok(PlannedSource {
 						operator: Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>,
-						predicate_pushed: false,
+						filter_action: FilterAction::UseOriginal,
 						limit_pushed: false,
 					})
 				}
@@ -1558,7 +1601,11 @@ impl<'ctx> Planner<'ctx> {
 			| Expr::Postfix {
 				..
 			} => {
-				let predicate_pushed = scan_predicate.is_some();
+				let filter_action = if scan_predicate.is_some() {
+					FilterAction::FullyConsumed
+				} else {
+					FilterAction::UseOriginal
+				};
 				let limit_pushed = scan_limit.is_some();
 				let source_expr = self.physical_expr(expr).await?;
 				Ok(PlannedSource {
@@ -1576,7 +1623,7 @@ impl<'ctx> Planner<'ctx> {
 						)
 						.with_knn_context(knn_ctx),
 					) as Arc<dyn ExecOperator>,
-					predicate_pushed,
+					filter_action,
 					limit_pushed,
 				})
 			}
@@ -1584,7 +1631,7 @@ impl<'ctx> Planner<'ctx> {
 				let phys_expr = self.physical_expr(other).await?;
 				Ok(PlannedSource {
 					operator: Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>,
-					predicate_pushed: false,
+					filter_action: FilterAction::UseOriginal,
 					limit_pushed: false,
 				})
 			}
