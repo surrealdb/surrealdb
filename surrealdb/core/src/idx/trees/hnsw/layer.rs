@@ -205,7 +205,7 @@ where
 					if let Some(e_pt) = elements.get_vector(&ctx.tx, &e_id).await? {
 						let e_dist = elements.distance(&e_pt, q);
 						if e_dist < fq_dist || w.len() < ef {
-							if Self::are_all_docs_in_pending(ctx, &e_pt, pending_docs).await? {
+							if !Self::are_all_docs_in_pending(ctx, &e_pt, pending_docs).await? {
 								candidates.push(e_dist, e_id);
 							}
 							w.push(e_dist, e_id);
@@ -326,9 +326,14 @@ where
 		let Some(pending_docs) = pending_docs else {
 			return Ok(false);
 		};
+		if pending_docs.is_empty() {
+			return Ok(false);
+		}
 		if let Some(docs) = search_ctx.vec_docs.get_docs(&search_ctx.tx, e_pt).await? {
-			if Self::check_all_docs_in_pending(&docs, pending_docs) {
-				return Ok(false);
+			for doc_id in docs.iter() {
+				if !pending_docs.contains(doc_id) {
+					return Ok(false);
+				}
 			}
 		}
 		Ok(true)
