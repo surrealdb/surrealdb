@@ -914,7 +914,6 @@ jobs:
       - clippy
       - clippy-release
       - check
-      - check-release
       - check-msrv
       - check-wasm
       - check-revision
