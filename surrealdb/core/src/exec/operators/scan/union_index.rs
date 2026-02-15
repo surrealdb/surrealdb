@@ -24,7 +24,7 @@ use crate::exec::permission::{
 };
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
@@ -124,7 +124,7 @@ impl ExecOperator for UnionIndexScan {
 		// so that any setup errors surface immediately.
 		let mut sub_streams: Vec<ValueBatchStream> = Vec::with_capacity(self.inputs.len());
 		for input in &self.inputs {
-			let sub_stream = input.execute(ctx)?;
+			let sub_stream = buffer_stream(input.execute(ctx)?);
 			sub_streams.push(sub_stream);
 		}
 

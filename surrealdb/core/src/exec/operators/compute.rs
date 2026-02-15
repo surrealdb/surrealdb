@@ -17,7 +17,8 @@ use futures::StreamExt;
 
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
+	monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::{Object, Value};
@@ -108,7 +109,7 @@ impl ExecOperator for Compute {
 			return self.input.execute(ctx);
 		}
 
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(self.input.execute(ctx)?);
 		let fields = self.fields.clone();
 		let ctx = ctx.clone();
 

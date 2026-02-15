@@ -19,7 +19,8 @@ use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::parts::fetch_record_with_computed_fields;
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
+	monitor_stream,
 };
 use crate::expr::idiom::Idiom;
 use crate::expr::part::{DestructurePart, Part};
@@ -197,7 +198,7 @@ impl ExecOperator for Project {
 
 	#[instrument(level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(self.input.execute(ctx)?);
 		let fields = Arc::clone(&self.fields);
 		let omit = Arc::clone(&self.omit);
 		let include_all = self.include_all;
@@ -596,7 +597,7 @@ impl ExecOperator for SelectProject {
 
 	#[instrument(level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(self.input.execute(ctx)?);
 		let projections = Arc::clone(&self.projections);
 		let ctx = ctx.clone();
 

@@ -13,7 +13,7 @@ use futures::StreamExt;
 use crate::err::Error;
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream, monitor_stream,
+	ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::Value;
@@ -79,7 +79,7 @@ impl ExecOperator for UnwrapExactlyOne {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(self.input.execute(ctx)?);
 		let none_on_empty = self.none_on_empty;
 
 		let unwrap_stream = async_stream::try_stream! {

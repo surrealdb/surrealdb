@@ -24,7 +24,8 @@ use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 use crate::err::Error;
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
+	monitor_stream,
 };
 use crate::expr::ControlFlowExt;
 use crate::val::Value;
@@ -136,7 +137,7 @@ impl ExecOperator for ExternalSort {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(self.input.execute(ctx)?);
 		let order_by = Arc::new(self.order_by.clone());
 		let temp_dir = self.temp_dir.clone();
 		let ctx = ctx.clone();

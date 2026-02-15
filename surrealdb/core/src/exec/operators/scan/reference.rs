@@ -16,7 +16,7 @@ use super::common::{
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::{
 	AccessMode, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::idx::planner::ScanDirection;
@@ -139,7 +139,7 @@ impl ExecOperator for ReferenceScan {
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(self.input.execute(ctx)?);
 		let referencing_table = self.referencing_table.clone();
 		let referencing_field = self.referencing_field.clone();
 		let output_mode = self.output_mode;

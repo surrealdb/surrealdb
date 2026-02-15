@@ -20,7 +20,8 @@ use tokio::task::spawn_blocking;
 use super::common::{OrderByField, SortDirection, SortKey, compare_keys, compare_records_by_keys};
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
+	monitor_stream,
 };
 #[cfg(not(target_family = "wasm"))]
 use crate::expr::ControlFlowExt;
@@ -129,7 +130,7 @@ impl ExecOperator for Sort {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(self.input.execute(ctx)?);
 		let order_by = self.order_by.clone();
 		let ctx = ctx.clone();
 
@@ -318,7 +319,7 @@ impl ExecOperator for SortByKey {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(self.input.execute(ctx)?);
 		let sort_keys = self.sort_keys.clone();
 		let cancellation = ctx.cancellation().clone();
 

@@ -12,7 +12,7 @@ use futures::StreamExt;
 use crate::err::Error;
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	PhysicalExpr, ValueBatchStream, monitor_stream,
+	PhysicalExpr, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::val::Duration;
@@ -90,7 +90,7 @@ impl ExecOperator for Timeout {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(self.input.execute(ctx)?);
 
 		// If no timeout is specified, just pass through the input stream
 		let Some(timeout_expr) = &self.timeout else {

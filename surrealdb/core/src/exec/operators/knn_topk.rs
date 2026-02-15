@@ -24,7 +24,7 @@ use surrealdb_types::ToSql;
 use crate::catalog::Distance;
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream, monitor_stream,
+	ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::Idiom;
 use crate::val::{Number, Value};
@@ -160,7 +160,7 @@ impl ExecOperator for KnnTopK {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(self.input.execute(ctx)?);
 		let field = self.field.clone();
 		let query_vector = self.query_vector.clone();
 		let k = self.k;

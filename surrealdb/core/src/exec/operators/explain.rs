@@ -14,6 +14,7 @@ use surrealdb_types::ToSql;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{
 	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	buffer_stream,
 };
 use crate::expr::{ControlFlow, ExplainFormat};
 use crate::val::{Array, Object, Value};
@@ -135,7 +136,7 @@ impl ExecOperator for AnalyzePlan {
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// Execute the inner plan to get its stream
-		let mut inner_stream = self.plan.execute(ctx)?;
+		let mut inner_stream = buffer_stream(self.plan.execute(ctx)?);
 		let plan = Arc::clone(&self.plan);
 		let format = self.format;
 		let redact_volatile_explain_attrs = self.redact_volatile_explain_attrs;

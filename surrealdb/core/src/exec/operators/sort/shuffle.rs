@@ -16,7 +16,7 @@ use tokio::task::spawn_blocking;
 
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream, monitor_stream,
+	ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::val::Value;
 
@@ -79,7 +79,7 @@ impl ExecOperator for RandomShuffle {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(self.input.execute(ctx)?);
 		let limit = self.limit;
 		let cancellation = ctx.cancellation().clone();
 

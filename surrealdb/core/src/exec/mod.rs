@@ -71,6 +71,7 @@ pub(crate) type BoxFut<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + 'a
 pub(crate) type BoxFut<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 
 pub(crate) mod access_mode;
+pub(crate) mod buffer;
 pub(crate) mod context;
 pub(crate) mod expression_registry;
 pub(crate) mod field_path;
@@ -87,6 +88,8 @@ pub(crate) mod planner;
 
 // Re-export access mode types
 pub(crate) use access_mode::{AccessMode, CombineAccessModes};
+// Re-export buffer helper
+pub(crate) use buffer::buffer_stream;
 // Re-export context types
 pub(crate) use context::{ContextLevel, DatabaseContext, ExecutionContext};
 // Re-export metrics types

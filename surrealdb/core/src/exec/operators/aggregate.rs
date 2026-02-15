@@ -14,7 +14,7 @@ use futures::StreamExt;
 use crate::exec::function::{Accumulator, AggregateFunction};
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	FlowResultExt as _, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
+	FlowResultExt as _, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
 	monitor_stream,
 };
 use crate::expr::idiom::Idiom;
@@ -304,7 +304,7 @@ impl ExecOperator for Aggregate {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(self.input.execute(ctx)?);
 		let group_by_exprs = self.group_by_exprs.clone();
 		let aggregates = self.aggregates.clone();
 		let ctx = ctx.clone();

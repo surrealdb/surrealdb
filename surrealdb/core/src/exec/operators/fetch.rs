@@ -6,7 +6,7 @@ use futures::StreamExt;
 use crate::catalog::providers::TableProvider;
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream, monitor_stream,
+	ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
@@ -78,7 +78,7 @@ impl ExecOperator for Fetch {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(self.input.execute(ctx)?);
 		let fields = self.fields.clone();
 		let ctx = ctx.clone();
 

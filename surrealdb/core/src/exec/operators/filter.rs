@@ -12,7 +12,7 @@ use tracing::instrument;
 
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 
 /// Filters a stream of values based on a predicate.
@@ -77,7 +77,7 @@ impl ExecOperator for Filter {
 
 	#[instrument(name = "Filter::execute", level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(self.input.execute(ctx)?);
 		let predicate = Arc::clone(&self.predicate);
 
 		// Clone all necessary data for the async move closure
