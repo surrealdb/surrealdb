@@ -20,7 +20,6 @@ use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::idx::ft::highlighter::HighlightParams;
-use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::{
 	IndexCountThingIterator, IndexEqualThingIterator, IndexJoinThingIterator,
 	IndexRangeReverseThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
@@ -892,12 +891,7 @@ impl HnswEntry {
 		ef: u32,
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self> {
-		let cond_checker = if let Some(cond) = cond {
-			HnswConditionChecker::new_cond(ctx, opt, cond)
-		} else {
-			HnswConditionChecker::new()
-		};
-		let res = h.knn_search(db, ctx, stk, v, n as usize, ef as usize, cond_checker).await?;
+		let res = h.knn_search(db, ctx, opt, stk, v, n as usize, ef as usize, cond).await?;
 		Ok(Self {
 			res,
 		})

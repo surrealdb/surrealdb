@@ -664,7 +664,7 @@ pub(super) mod tests {
 			else {
 				panic!("Expected a valid array value");
 			};
-			let vec = Vector::try_from_value(t, array.len(), &Value::Array(array))?.into();
+			let vec = Vector::try_from_value(t, array.len(), Value::Array(array))?.into();
 			res.push((i as DocId, vec));
 		}
 		Ok(res)

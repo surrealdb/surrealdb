@@ -1,6 +1,7 @@
 pub(crate) mod cache;
 pub(crate) mod docs;
 mod elements;
+mod filter;
 mod flavor;
 mod heuristic;
 pub mod index;
@@ -13,15 +14,14 @@ use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseDefinition, HnswParams, TableId};
+use crate::catalog::{HnswParams, TableId};
 use crate::ctx::Context;
 use crate::idx::IndexKeyBase;
-use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::cache::VectorCache;
-use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::elements::HnswElements;
+use crate::idx::trees::hnsw::filter::HnswTruthyDocumentFilter;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
 use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
@@ -389,32 +389,29 @@ where
 		}
 	}
 
-	#[expect(clippy::too_many_arguments)]
 	async fn knn_search_checked(
 		&self,
-		db: &DatabaseDefinition,
-		tx: &Transaction,
+		search_ctx: &HnswCheckedSearchContext<'_>,
 		stk: &mut Stk,
-		search: &HnswSearch,
-		hnsw_docs: &HnswDocs,
-		vec_docs: &VecDocs,
-		chk: &mut HnswConditionChecker<'_>,
+		filter: &mut HnswTruthyDocumentFilter,
 	) -> Result<Vec<(f64, ElementId)>> {
-		if let Some((ep_dist, ep_id)) = self.search_ep(tx, &search.pt).await?
-			&& let Some(ep_pt) = self.elements.get_vector(tx, &ep_id).await?
+		if let Some((ep_dist, ep_id)) =
+			self.search_ep(&search_ctx.tx, &search_ctx.search.pt).await?
+			&& let Some(ep_pt) = self.elements.get_vector(&search_ctx.tx, &ep_id).await?
 		{
-			let search_ctx = HnswCheckedSearchContext::new(
-				&self.elements,
-				hnsw_docs,
-				vec_docs,
-				&search.pt,
-				search.ef,
-			);
 			let w = self
 				.layer0
-				.search_single_checked(db, tx, stk, &search_ctx, &ep_pt, ep_dist, ep_id, chk)
+				.search_single_with_filter(
+					search_ctx,
+					stk,
+					&self.elements,
+					&ep_pt,
+					ep_dist,
+					ep_id,
+					filter,
+				)
 				.await?;
-			return Ok(w.to_vec_limit(search.k));
+			return Ok(w.to_vec_limit(search_ctx.search.k));
 		}
 		Ok(vec![])
 	}
@@ -486,9 +483,10 @@ mod tests {
 		DatabaseDefinition, DatabaseId, Distance, HnswParams, IndexId, NamespaceId,
 		TableDefinition, TableId, VectorType,
 	};
+	use crate::cnf::dynamic::DynamicConfiguration;
 	use crate::ctx::{Context, FrozenContext};
+	use crate::dbs::Options;
 	use crate::idx::IndexKeyBase;
-	use crate::idx::planner::checker::HnswConditionChecker;
 	use crate::idx::seqdocids::DocId;
 	use crate::idx::trees::hnsw::flavor::HnswFlavor;
 	use crate::idx::trees::hnsw::index::HnswIndex;
@@ -689,7 +687,7 @@ mod tests {
 		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::default();
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index_document(ctx, &RecordIdKey::Number(*doc_id as i64), &content).await.unwrap();
+			h.index(ctx, &RecordIdKey::Number(*doc_id as i64), None, Some(content)).await.unwrap();
 			match map.entry(obj.clone()) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().insert(*doc_id);
@@ -704,8 +702,8 @@ mod tests {
 	}
 
 	async fn find_collection_hnsw_index(
-		ctx: &Context,
-		tx: &Transaction,
+		ctx: &FrozenContext,
+		opt: &Options,
 		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		h: &mut HnswIndex,
@@ -714,9 +712,8 @@ mod tests {
 		let max_knn = 20.min(collection.len());
 		for (doc_id, obj) in collection.to_vec_ref() {
 			for knn in 1..max_knn {
-				let mut chk = HnswConditionChecker::new();
 				let search = HnswSearch::new(obj.clone(), knn, 500);
-				let res = h.search(db, ctx, tx, stk, &search, &mut chk).await.unwrap();
+				let res = h.search(db, ctx, opt, stk, &search, None).await.unwrap();
 				if knn == 1 && res.len() == 1 && res[0].1 > 0.0 {
 					let docs: Vec<DocId> = res.iter().map(|(d, _)| d.clone()).collect();
 					if collection.is_unique() {
@@ -753,7 +750,7 @@ mod tests {
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
 			let id = RecordIdKey::Number(*doc_id as i64);
-			h.remove_document(ctx, &id, &content).await?;
+			h.index(ctx, &id, Some(content), None).await?;
 			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
 				let set = e.get_mut();
 				set.remove(doc_id);
@@ -814,13 +811,14 @@ mod tests {
 		{
 			let mut stack = reblessive::tree::TreeStack::new();
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let opt = Options::new(ds.id(), DynamicConfiguration::default());
 			let tx = ctx.tx();
 
 			let db = tx.ensure_ns_db(None, "myns", "mydb").await.unwrap();
 
 			stack
 				.enter(|stk| async {
-					find_collection_hnsw_index(&ctx, &tx, &db, stk, &mut h, &collection).await;
+					find_collection_hnsw_index(&ctx, &opt, &db, stk, &mut h, &collection).await;
 				})
 				.finish()
 				.await;
@@ -944,10 +942,11 @@ mod tests {
 			)?));
 
 		let ctx = new_ctx(&ds, TransactionType::Write).await;
+		let opt = Arc::new(Options::new(ds.id(), DynamicConfiguration::default()));
 		let tx = ctx.tx();
 		let tb = TableId(3);
 		let ix = IndexId(4);
-		let mut h = HnswIndex::new(
+		let h = HnswIndex::new(
 			ctx.get_index_stores().vector_cache().clone(),
 			&tx,
 			IndexKeyBase::new(db.namespace_id, db.database_id, "tb".into(), ix),
@@ -979,6 +978,7 @@ mod tests {
 			let h = h.clone();
 			let ds = ds.clone();
 			let db = db.clone();
+			let opt = opt.clone();
 			let f = tokio::spawn(async move {
 				let mut stack = reblessive::tree::TreeStack::new();
 				stack
@@ -986,13 +986,12 @@ mod tests {
 						let mut total_recall = 0.0;
 						for (_, pt) in queries.to_vec_ref() {
 							let knn = 10;
-							let mut chk = HnswConditionChecker::new();
 							let search = HnswSearch::new(pt.clone(), knn, efs);
 
 							let ctx = new_ctx(&ds, TransactionType::Read).await;
 							let tx = ctx.tx();
 							let hnsw_res =
-								h.search(&db, &ctx, &tx, stk, &search, &mut chk).await.unwrap();
+								h.search(&db, &ctx, &opt, stk, &search, None).await.unwrap();
 							tx.cancel().await.unwrap();
 							assert_eq!(hnsw_res.len(), knn, "Different size - knn: {knn}",);
 							let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);

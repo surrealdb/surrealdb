@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, VecDeque};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use ahash::HashMap;
@@ -9,18 +10,19 @@ use roaring::RoaringTreemap;
 use tokio::sync::RwLock;
 
 use crate::catalog::{DatabaseDefinition, Distance, HnswParams, TableId, VectorType};
-use crate::ctx::Context;
+use crate::ctx::{Context, FrozenContext};
+use crate::dbs::Options;
 use crate::err::Error;
+use crate::expr::Cond;
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::ScanDirection;
-use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
 use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
-use crate::idx::trees::hnsw::elements::HnswElements;
+use crate::idx::trees::hnsw::filter::HnswTruthyDocumentFilter;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::hnsw::{ElementId, HnswSearch, VectorPendingId, VectorPendingUpdate};
-use crate::idx::trees::knn::{FloatKey, KnnResult, KnnResultBuilder};
+use crate::idx::trees::knn::{FloatKey, Ids64, KnnResult, KnnResultBuilder};
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::kvs::{KVValue, Key, Transaction};
 use crate::val::{Number, RecordIdKey, Value};
@@ -37,48 +39,33 @@ pub(crate) struct HnswIndex {
 }
 
 pub(super) struct HnswCheckedSearchContext<'a> {
-	elements: &'a HnswElements,
-	docs: &'a HnswDocs,
-	vec_docs: &'a VecDocs,
-	pt: &'a SharedVector,
-	ef: usize,
+	pub(super) ctx: &'a FrozenContext,
+	pub(super) opt: &'a Options,
+	pub(super) tx: Arc<Transaction>,
+	pub(super) db: &'a DatabaseDefinition,
+	pub(super) docs: &'a HnswDocs,
+	pub(super) vec_docs: &'a VecDocs,
+	pub(super) search: &'a HnswSearch,
 }
 
 impl<'a> HnswCheckedSearchContext<'a> {
 	pub(super) fn new(
-		elements: &'a HnswElements,
+		ctx: &'a FrozenContext,
+		opt: &'a Options,
+		db: &'a DatabaseDefinition,
 		docs: &'a HnswDocs,
 		vec_docs: &'a VecDocs,
-		pt: &'a SharedVector,
-		ef: usize,
+		search: &'a HnswSearch,
 	) -> Self {
 		Self {
-			elements,
+			ctx,
+			opt,
+			tx: ctx.tx(),
+			db,
 			docs,
 			vec_docs,
-			pt,
-			ef,
+			search,
 		}
-	}
-
-	pub(super) fn pt(&self) -> &SharedVector {
-		self.pt
-	}
-
-	pub(super) fn ef(&self) -> usize {
-		self.ef
-	}
-
-	pub(super) fn docs(&self) -> &HnswDocs {
-		self.docs
-	}
-
-	pub(super) fn vec_docs(&self) -> &VecDocs {
-		self.vec_docs
-	}
-
-	pub(super) fn elements(&self) -> &HnswElements {
-		self.elements
 	}
 }
 
@@ -204,59 +191,78 @@ impl HnswIndex {
 	pub(crate) async fn knn_search(
 		&self,
 		db: &DatabaseDefinition,
-		ctx: &Context,
+		ctx: &FrozenContext,
+		opt: &Options,
 		stk: &mut Stk,
 		pt: &[Number],
 		k: usize,
 		ef: usize,
-		mut chk: HnswConditionChecker<'_>,
+		cond: Option<Arc<Cond>>,
 	) -> Result<VecDeque<KnnIteratorResult>> {
+		// Build a filter is any condition is passed
+		let mut filter = cond.map(|cond| HnswTruthyDocumentFilter::new(cond));
 		// Extract the vector
 		let vector: SharedVector = Vector::try_from_vector(self.vector_type, pt)?.into();
 		vector.check_dimension(self.dim)?;
 		let search = HnswSearch::new(vector, k, ef);
 		let tx = ctx.tx();
 		// Do the search
-		let result = self.search(db, ctx, &tx, stk, &search, &mut chk).await?;
+		let result = self.search(db, ctx, opt, stk, &search, filter.as_mut()).await?;
 		let docs = self.docs.read().await;
-		let res = chk.convert_result(&tx, &docs, result).await?;
+		// We build the final result: replacing DocId with RecordIds
+		if let Some(filter) = filter {
+			// If there is a filter, we let the filter building the result
+			return Ok(filter.convert_result(result));
+		}
+		let mut res = VecDeque::with_capacity(result.len());
+		for (doc_id, dist) in result {
+			if let Some(rid) = docs.get_thing(&tx, doc_id).await? {
+				res.push_back((rid.into(), dist, None));
+			}
+		}
 		Ok(res)
 	}
 
 	pub(super) async fn search(
 		&self,
 		db: &DatabaseDefinition,
-		ctx: &Context,
-		tx: &Transaction,
+		ctx: &FrozenContext,
+		opt: &Options,
 		stk: &mut Stk,
 		search: &HnswSearch,
-		chk: &mut HnswConditionChecker<'_>,
+		filter: Option<&mut HnswTruthyDocumentFilter>,
 	) -> Result<KnnResult> {
-		let (pending_result, pending_delete) = self.search_pendings(ctx, tx, search).await?;
-		println!("pending_result: {:?}", pending_result);
-		println!("pending_delete: {:?}", pending_delete);
 		let hnsw = self.hnsw.read().await;
 		let docs = self.docs.read().await;
+
+		let search_ctx = HnswCheckedSearchContext::new(ctx, opt, db, &docs, &self.vec_docs, search);
+
+		let (pending_result, pending_docs) = self.search_pendings(&search_ctx).await?;
+
+		println!("pending_result: {:?}", pending_result);
+		println!("pending_docs: {:?}", pending_docs);
+
 		// Do the search
-		let neighbors = match chk {
-			HnswConditionChecker::Hnsw(_) => hnsw.knn_search(tx, search).await?,
-			HnswConditionChecker::HnswCondition(_) => {
-				hnsw.knn_search_checked(db, tx, stk, search, &docs, &self.vec_docs, chk).await?
-			}
-		};
-		self.build_result(tx, &hnsw, neighbors, search.k, chk).await
+		if let Some(filter) = filter {
+			let neighbours = hnsw.knn_search_checked(&search_ctx, stk, filter).await?;
+			self.build_result(&search_ctx.tx, &hnsw, neighbours, search.k, |evicted_docs| {
+				filter.expires(evicted_docs)
+			})
+			.await
+		} else {
+			let neighbours = hnsw.knn_search(&search_ctx.tx, search).await?;
+			self.build_result(&search_ctx.tx, &hnsw, neighbours, search.k, |_| {}).await
+		}
 	}
 
 	async fn search_pendings(
 		&self,
-		ctx: &Context,
-		tx: &Transaction,
-		search: &HnswSearch,
+		search_ctx: &HnswCheckedSearchContext<'_>,
 	) -> Result<(BTreeMap<FloatKey, VectorPendingId>, RoaringTreemap)> {
 		let mut all_existing_docs = RoaringTreemap::new();
 		let mut non_deleted_docs = HashMap::default();
 		// First pass, identify deleted doc
-		self.collect_pending(ctx, tx, |_, pending| {
+		self.collect_pending(search_ctx.ctx, &search_ctx.tx, |_, pending| {
 			if let VectorPendingId::DocId(doc_id) = pending.id {
 				all_existing_docs.insert(doc_id);
 			};
@@ -272,9 +278,9 @@ impl HnswIndex {
 		for (id, vectors) in non_deleted_docs {
 			for vector in vectors {
 				let vector = Vector::from(vector);
-				let d = self.distance.calculate(&search.pt, &vector);
+				let d = self.distance.calculate(&search_ctx.search.pt, &vector);
 				result.insert(FloatKey::from(d), id.clone());
-				if result.len() > search.k {
+				if result.len() > search_ctx.search.k {
 					result.pop_last();
 				}
 			}
@@ -310,14 +316,17 @@ impl HnswIndex {
 		Ok(())
 	}
 
-	async fn build_result(
+	async fn build_result<F>(
 		&self,
 		tx: &Transaction,
 		hnsw: &HnswFlavor,
 		neighbors: Vec<(f64, ElementId)>,
 		n: usize,
-		chk: &mut HnswConditionChecker<'_>,
-	) -> Result<KnnResult> {
+		mut evited_docs_func: F,
+	) -> Result<KnnResult>
+	where
+		F: FnMut(Ids64),
+	{
 		let mut builder = KnnResultBuilder::new(n);
 		for (e_dist, e_id) in neighbors {
 			if builder.check_add(e_dist)
@@ -325,7 +334,7 @@ impl HnswIndex {
 				&& let Some(docs) = self.vec_docs.get_docs(tx, &v).await?
 			{
 				let evicted_docs = builder.add(e_dist, docs);
-				chk.expires(evicted_docs);
+				evited_docs_func(evicted_docs);
 			}
 		}
 		Ok(builder.build())

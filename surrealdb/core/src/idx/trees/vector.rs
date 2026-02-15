@@ -558,7 +558,7 @@ impl From<&Vector> for Value {
 
 impl Vector {
 	#[cfg(test)]
-	pub(super) fn try_from_value(t: VectorType, d: usize, v: &Value) -> Result<Self> {
+	pub(super) fn try_from_value(t: VectorType, d: usize, v: Value) -> Result<Self> {
 		let res = match t {
 			VectorType::F64 => {
 				let mut vec = Vec::with_capacity(d);

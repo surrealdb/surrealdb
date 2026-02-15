@@ -5,14 +5,13 @@ use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::DatabaseDefinition;
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::ScanDirection;
-use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::graph::UndirectedGraph;
+use crate::idx::trees::hnsw::filter::HnswTruthyDocumentFilter;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
 use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
 use crate::idx::trees::hnsw::{ElementId, HnswElements};
@@ -105,23 +104,21 @@ where
 		Ok(q.peek_first().map(|(_, e_id)| e_id))
 	}
 
-	#[expect(clippy::too_many_arguments)]
-	pub(super) async fn search_single_checked(
+	pub(super) async fn search_single_with_filter(
 		&self,
-		db: &DatabaseDefinition,
-		tx: &Transaction,
+		search_ctx: &HnswCheckedSearchContext<'_>,
 		stk: &mut Stk,
-		search: &HnswCheckedSearchContext<'_>,
+		elements: &HnswElements,
 		ep_pt: &SharedVector,
 		ep_dist: f64,
 		ep_id: ElementId,
-		chk: &mut HnswConditionChecker<'_>,
+		filter: &mut HnswTruthyDocumentFilter,
 	) -> Result<DoublePriorityQueue> {
 		let visited = HashSet::from_iter([ep_id]);
 		let candidates = DoublePriorityQueue::from(ep_dist, ep_id);
 		let mut w = DoublePriorityQueue::default();
-		Self::add_if_truthy(db, tx, stk, search, &mut w, ep_pt, ep_dist, ep_id, chk).await?;
-		self.search_checked(db, tx, stk, search, candidates, visited, w, chk).await
+		Self::add_if_truthy(search_ctx, stk, &mut w, ep_pt, ep_dist, ep_id, filter).await?;
+		self.search_with_filter(search_ctx, stk, elements, candidates, visited, w, filter).await
 	}
 
 	pub(super) async fn search_multi(
@@ -195,23 +192,17 @@ where
 		Ok(w)
 	}
 
-	#[expect(clippy::too_many_arguments)]
-	pub(super) async fn search_checked(
+	pub(super) async fn search_with_filter(
 		&self,
-		db: &DatabaseDefinition,
-		tx: &Transaction,
+		search_ctx: &HnswCheckedSearchContext<'_>,
 		stk: &mut Stk,
-		search: &HnswCheckedSearchContext<'_>,
+		elements: &HnswElements,
 		mut candidates: DoublePriorityQueue,
 		mut visited: HashSet<ElementId>,
 		mut w: DoublePriorityQueue,
-		chk: &mut HnswConditionChecker<'_>,
+		filter: &mut HnswTruthyDocumentFilter,
 	) -> Result<DoublePriorityQueue> {
 		let mut f_dist = w.peek_last_dist().unwrap_or(f64::MAX);
-
-		let ef = search.ef();
-		let pt = search.pt();
-		let elements = search.elements();
 
 		while let Some((dist, doc)) = candidates.pop_first() {
 			if dist > f_dist {
@@ -223,12 +214,12 @@ where
 					if !visited.insert(e_id) {
 						continue;
 					}
-					if let Some(e_pt) = elements.get_vector(tx, &e_id).await? {
-						let e_dist = elements.distance(&e_pt, pt);
-						if e_dist < f_dist || w.len() < ef {
+					if let Some(e_pt) = elements.get_vector(&search_ctx.tx, &e_id).await? {
+						let e_dist = elements.distance(&e_pt, &search_ctx.search.pt);
+						if e_dist < f_dist || w.len() < search_ctx.search.ef {
 							candidates.push(e_dist, e_id);
 							if Self::add_if_truthy(
-								db, tx, stk, search, &mut w, &e_pt, e_dist, e_id, chk,
+								search_ctx, stk, &mut w, &e_pt, e_dist, e_id, filter,
 							)
 							.await?
 							{
@@ -242,26 +233,23 @@ where
 		Ok(w)
 	}
 
-	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn add_if_truthy(
-		db: &DatabaseDefinition,
-		tx: &Transaction,
+		search_ctx: &HnswCheckedSearchContext<'_>,
 		stk: &mut Stk,
-		search: &HnswCheckedSearchContext<'_>,
 		w: &mut DoublePriorityQueue,
 		e_pt: &SharedVector,
 		e_dist: f64,
 		e_id: ElementId,
-		chk: &mut HnswConditionChecker<'_>,
+		filter: &mut HnswTruthyDocumentFilter,
 	) -> Result<bool> {
-		if let Some(docs) = search.vec_docs().get_docs(tx, e_pt).await?
-			&& chk.check_truthy(db, tx, stk, search.docs(), docs).await?
+		if let Some(docs) = search_ctx.vec_docs.get_docs(&search_ctx.tx, e_pt).await?
+			&& filter.check_any_doc_truthy(search_ctx, stk, docs).await?
 		{
 			w.push(e_dist, e_id);
-			if w.len() > search.ef()
+			if w.len() > search_ctx.search.ef
 				&& let Some((_, id)) = w.pop_last()
 			{
-				chk.expire(id);
+				filter.expire(id);
 			}
 			return Ok(true);
 		}
