@@ -1,6 +1,5 @@
 use crate::syn::{self, ParserSettings};
 use crate::types::PublicValue;
-use crate::val::Value;
 
 #[test]
 fn object_with_negative() {
