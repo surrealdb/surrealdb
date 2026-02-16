@@ -1156,7 +1156,7 @@ async fn permissions_checks_remove_table() {
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
 	let check_success = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: { TB: 'DEFINE TABLE `TB` TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -1198,7 +1198,7 @@ async fn permissions_checks_remove_event() {
 	// succeeded and when it failed
 	let check_success =
 		"{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
-	let check_error = "{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN RETURN 'foo'\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
+	let check_error = "{ events: { event: \"DEFINE EVENT event ON `TB` WHEN true THEN RETURN 'foo'\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -1240,7 +1240,7 @@ async fn permissions_checks_remove_field() {
 	// succeeded and when it failed
 	let check_success =
 		"{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
-	let check_error = "{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
+	let check_error = "{ events: {  }, fields: { field: 'DEFINE FIELD field ON `TB` PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -1282,7 +1282,7 @@ async fn permissions_checks_remove_index() {
 	// succeeded and when it failed
 	let check_success =
 		"{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
-	let check_error = "{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }".to_string();
+	let check_error = "{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON `TB` FIELDS field' }, lives: {  }, tables: {  } }".to_string();
 
 	let test_cases = [
 		// Root level

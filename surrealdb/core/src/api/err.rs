@@ -1,4 +1,5 @@
 use http::StatusCode;
+use surrealdb_types::Error as TypesError;
 use thiserror::Error;
 
 use crate::expr::Bytesize;
@@ -125,5 +126,38 @@ impl ApiError {
 			Self::PermissionDenied => StatusCode::FORBIDDEN,
 			Self::NotFound => StatusCode::NOT_FOUND,
 		}
+	}
+
+	pub(crate) fn to_types_error(&self) -> TypesError {
+		let msg = self.to_string();
+		match &self {
+			Self::NotFound => TypesError::not_found(msg, None),
+			Self::PermissionDenied => TypesError::not_allowed(msg, None),
+			Self::MiddlewareRequestParseFailure {
+				..
+			}
+			| Self::FinalActionRequestParseFailure
+			| Self::InvalidRequestBody
+			| Self::BodyDecodeFailure
+			| Self::InvalidFormat
+			| Self::MissingFormat
+			| Self::InvalidStatusCode(_)
+			| Self::InvalidHeaderName(_)
+			| Self::InvalidHeaderValue {
+				..
+			}
+			| Self::HeaderInjectionAttempt(_)
+			| Self::MissingContentType
+			| Self::InvalidContentType(_)
+			| Self::InvalidRequestBodyType {
+				..
+			}
+			| Self::RequestBodyNotBinary => TypesError::validation(msg, None),
+			_ => TypesError::internal(msg),
+		}
+	}
+
+	pub fn into_types_error(self) -> TypesError {
+		self.to_types_error()
 	}
 }

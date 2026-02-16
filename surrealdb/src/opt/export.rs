@@ -2,14 +2,19 @@
 
 use std::path::{Path, PathBuf};
 
+/// Destination for database export operations.
+///
+/// Used to specify where exported data should be written.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum ExportDestination {
+	/// Export to a file at the given path.
 	File(PathBuf),
+	/// Export to memory (in-memory buffer).
 	Memory,
 }
 
-/// A trait for converting inputs into database export locations
+/// Trait for converting inputs into database export locations.
 pub trait IntoExportDestination<R>: into_export_destination::Sealed<R> {}
 
 impl<T> IntoExportDestination<PathBuf> for T where T: AsRef<Path> {}

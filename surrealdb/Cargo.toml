@@ -60,7 +60,8 @@ targets = []
 surrealdb-core = { workspace = true, default-features = false }
 surrealdb-types.workspace = true
 
-# Other crates
+# Other crates (anyhow used for import stream compat with core's execute_import)
+anyhow.workspace = true
 boxcar.workspace = true
 async-channel.workspace = true
 chrono = { workspace = true, features = ["serde"] }
@@ -70,7 +71,6 @@ path-clean.workspace = true
 semver = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-thiserror.workspace = true
 tracing.workspace = true
 tokio-util = { workspace = true, features = ["compat"] }
 url.workspace = true
