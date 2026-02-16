@@ -99,6 +99,17 @@ pub trait RpcProtocol {
 
 	/// Deletes a session
 	async fn del_session(&self, id: &Uuid) {
+		// Get the session lock without removing it from the map yet.
+		let Some(session_lock) = self.session_map().get(&Some(*id)) else {
+			return;
+		};
+		// Acquire the write lock first. This blocks until any concurrent
+		// operation (e.g. begin) that already holds a read lock completes,
+		// and prevents new read locks from being acquired.
+		let _guard = session_lock.write_owned().await;
+		// Now remove the session from the map while holding the write lock.
+		// Any concurrent begin that re-checks session existence after
+		// acquiring its read lock will see the session is gone and abort.
 		self.session_map().remove(&Some(*id));
 		// Cleanup live queries
 		self.cleanup_lqs(Some(id)).await;

@@ -575,43 +575,46 @@ impl RpcProtocol for Websocket {
 
 	/// Handles the cleanup of transactions for a specific session
 	async fn cleanup_txns(&self, session_id: Option<&Uuid>) {
-		// Collect transaction IDs that match the given session
-		let txn_ids: Vec<Uuid> = self
-			.transactions
-			.iter()
-			.filter(|entry| entry.value().0.as_ref() == session_id)
-			.map(|entry| *entry.key())
-			.collect();
-		// Cancel and remove each matching transaction
-		for txn_id in txn_ids {
-			if let Some((_, (sid, tx))) = self.transactions.remove(&txn_id) {
-				trace!("Cancelling transaction {txn_id} during session cleanup");
-				if let Err(err) = tx.cancel().await {
-					error!("Error cancelling transaction {txn_id}: {err}");
-				}
-				// Release the reserved slot
-				if let Some(c) = self.counters.get(&sid) {
-					c.fetch_sub(1, Ordering::Relaxed);
-				}
+		// Atomically collect and remove matching transactions
+		let mut removed = Vec::new();
+		self.transactions.retain(|tid, (sid, tx)| {
+			if sid.as_ref() == session_id {
+				removed.push((*tid, *sid, tx.clone()));
+				false
+			} else {
+				true
+			}
+		});
+		// Cancel the removed transactions
+		for (tid, sid, tx) in removed {
+			trace!("Cancelling transaction {tid} during session cleanup");
+			if let Err(err) = tx.cancel().await {
+				error!("Error cancelling transaction {tid}: {err}");
+			}
+			// Release the reserved slot
+			if let Some(c) = self.counters.get(&sid) {
+				c.fetch_sub(1, Ordering::Relaxed);
 			}
 		}
 	}
 
 	/// Handles the cleanup of all transactions on this connection
 	async fn cleanup_all_txns(&self) {
-		// Collect all transaction IDs
-		let txn_ids: Vec<Uuid> = self.transactions.iter().map(|entry| *entry.key()).collect();
-		// Cancel and remove each transaction
-		for txn_id in txn_ids {
-			if let Some((_, (sid, tx))) = self.transactions.remove(&txn_id) {
-				trace!("Cancelling transaction {txn_id} during connection cleanup");
-				if let Err(err) = tx.cancel().await {
-					error!("Error cancelling transaction {txn_id}: {err}");
-				}
-				// Release the reserved slot
-				if let Some(c) = self.counters.get(&sid) {
-					c.fetch_sub(1, Ordering::Relaxed);
-				}
+		// Atomically collect and remove all transactions
+		let mut removed = Vec::new();
+		self.transactions.retain(|txn_id, (sid, tx)| {
+			removed.push((*txn_id, *sid, tx.clone()));
+			false
+		});
+		// Cancel the removed transactions
+		for (txn_id, sid, tx) in removed {
+			trace!("Cancelling transaction {txn_id} during connection cleanup");
+			if let Err(err) = tx.cancel().await {
+				error!("Error cancelling transaction {txn_id}: {err}");
+			}
+			// Release the reserved slot
+			if let Some(c) = self.counters.get(&sid) {
+				c.fetch_sub(1, Ordering::Relaxed);
 			}
 		}
 	}
@@ -626,10 +629,21 @@ impl RpcProtocol for Websocket {
 		_txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
-		// Validate that the session exists if one is specified
-		if session_id.is_some() {
+		// Acquire a read lock on the session
+		let _session_guard = if session_id.is_some() {
+			// Get the session and the session lock
+			let session_lock = self.get_session(&session_id)?;
+			//
+			let guard = session_lock.read_owned().await;
+			// Check the session still exists after locking.
+			// If another operation removed the session, the session
+			// will have been removed from the map under the write lock.
 			self.get_session(&session_id)?;
-		}
+			// Return the lock guard
+			Some(guard)
+		} else {
+			None
+		};
 		// Determine the transaction limit for connections
 		let limit = match session_id {
 			Some(_) => *MAX_TRANSACTIONS_PER_SESSION,
@@ -666,7 +680,7 @@ impl RpcProtocol for Websocket {
 		// Store the transaction in the map with its session association
 		self.transactions.insert(id, (session_id, Arc::new(tx)));
 		trace!(
-			"WebSocket begin: stored transaction {id}, map now has {} transactions",
+			"WebSocket begin: stored transaction {id}, {} transactions total",
 			self.transactions.len()
 		);
 		// Return the transaction ID to the client
