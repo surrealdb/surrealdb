@@ -2,7 +2,6 @@ use http::StatusCode;
 use surrealdb_types::Error as TypesError;
 use thiserror::Error;
 
-use crate::api::response::status_code_for_error;
 use crate::expr::Bytesize;
 
 #[derive(Error, Debug)]
@@ -94,7 +93,39 @@ pub enum ApiError {
 
 impl ApiError {
 	pub fn status_code(&self) -> StatusCode {
-		status_code_for_error(&self.to_types_error())
+		match self {
+			Self::InvalidRequestBody => StatusCode::BAD_REQUEST,
+			Self::RequestBodyTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
+			Self::BodyDecodeFailure => StatusCode::BAD_REQUEST,
+			Self::BodyEncodeFailure => StatusCode::INTERNAL_SERVER_ERROR,
+			Self::InvalidApiResponse(_) => StatusCode::INTERNAL_SERVER_ERROR,
+			Self::InvalidFormat => StatusCode::BAD_REQUEST,
+			Self::MissingFormat => StatusCode::BAD_REQUEST,
+			Self::Unreachable(_) => StatusCode::INTERNAL_SERVER_ERROR,
+			Self::InvalidStatusCode(_) => StatusCode::BAD_REQUEST,
+			Self::InvalidHeaderName(_) => StatusCode::BAD_REQUEST,
+			Self::InvalidHeaderValue {
+				..
+			} => StatusCode::BAD_REQUEST,
+			Self::HeaderInjectionAttempt(_) => StatusCode::BAD_REQUEST,
+			Self::MissingContentType => StatusCode::BAD_REQUEST,
+			Self::UnsupportedContentType(_) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+			Self::InvalidContentType(_) => StatusCode::BAD_REQUEST,
+			Self::NoOutputStrategy => StatusCode::NOT_ACCEPTABLE,
+			Self::InvalidRequestBodyType {
+				..
+			} => StatusCode::BAD_REQUEST,
+			Self::MiddlewareRequestParseFailure {
+				..
+			} => StatusCode::BAD_REQUEST,
+			Self::MiddlewareFunctionNotFound {
+				..
+			} => StatusCode::INTERNAL_SERVER_ERROR,
+			Self::FinalActionRequestParseFailure => StatusCode::BAD_REQUEST,
+			Self::RequestBodyNotBinary => StatusCode::BAD_REQUEST,
+			Self::PermissionDenied => StatusCode::FORBIDDEN,
+			Self::NotFound => StatusCode::NOT_FOUND,
+		}
 	}
 
 	pub(crate) fn to_types_error(&self) -> TypesError {

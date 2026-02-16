@@ -18,7 +18,7 @@ pub struct ApiResponse {
 }
 
 /// Maps public error kind to HTTP status code for API responses.
-pub(crate) fn status_code_for_error(error: &Error) -> StatusCode {
+fn status_code_for_error(error: &Error) -> StatusCode {
 	match error.kind() {
 		ErrorKind::Validation => StatusCode::BAD_REQUEST,
 		ErrorKind::NotFound => StatusCode::NOT_FOUND,
