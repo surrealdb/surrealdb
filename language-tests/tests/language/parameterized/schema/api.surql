@@ -45,9 +45,6 @@ value = "NONE"
 
 [[test.results]]
 value = "{  }"
-
-[env.capabilities]
-allow-experimental = ["define_api"]
 */
 LET $path = "/test";
 LET $path2 = "/test2";

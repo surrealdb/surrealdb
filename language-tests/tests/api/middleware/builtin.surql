@@ -47,9 +47,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: { test: 'data' }, headers: { 'header1': 'value1', 'header2': 'value2' }, status: 200 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 - api::req::body middleware - JSON strategy

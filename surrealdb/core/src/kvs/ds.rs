@@ -1697,9 +1697,6 @@ impl Datastore {
 		// Process all statements
 
 		let parser_settings = ParserSettings {
-			define_api_enabled: ctx
-				.get_capabilities()
-				.allows_experimental(&ExperimentalTarget::DefineApi),
 			files_enabled: ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
 			surrealism_enabled: ctx
 				.get_capabilities()
