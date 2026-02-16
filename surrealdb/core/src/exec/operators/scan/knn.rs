@@ -24,7 +24,6 @@ use crate::exec::{
 };
 use crate::expr::{Cond, ControlFlow, ControlFlowExt};
 use crate::iam::Action;
-use crate::idx::planner::checker::HnswConditionChecker;
 use crate::val::Number;
 
 /// KNN scan operator using an HNSW index.
@@ -217,8 +216,6 @@ impl ExecOperator for KnnScan {
 
 			// Ensure the HNSW index state is current
 			hnsw_index
-				.write()
-				.await
 				.check_state(frozen_ctx)
 				.await
 				.context("Failed to check HNSW index state")?;
@@ -226,36 +223,29 @@ impl ExecOperator for KnnScan {
 			// Build condition checker. When there are residual (non-KNN) predicates
 			// in the WHERE clause, push them into the HNSW search so that rows
 			// not satisfying the condition do not consume top-K slots.
-			let opt = ctx.options();
-			let cond_checker = match (&residual_cond, opt) {
+			let cond_filter = match (residual_cond, ctx.options()) {
 				(Some(cond), Some(opt)) => {
-					let frozen = &root.ctx;
-					HnswConditionChecker::new_cond(frozen, opt, Arc::new(cond.clone()))
+					Some((opt, Arc::new(cond)))
 				}
-				_ => HnswConditionChecker::new(),
+				_ => None
 			};
 
 			// Execute the KNN search using a TreeStack for recursion safety
 			let knn_results = {
-				let txn_for_search = txn.clone();
 				let mut stack = TreeStack::new();
 				stack
 					.enter(|stk| {
 						let hnsw_index = &hnsw_index;
-						let db_def = &db;
 						let vector = &vector;
 						async move {
 							hnsw_index
-								.read()
-								.await
 								.knn_search(
-									db_def,
-									&txn_for_search,
+									frozen_ctx,
 									stk,
 									vector,
 									k as usize,
 									ef as usize,
-									cond_checker,
+									cond_filter,
 								)
 								.await
 						}

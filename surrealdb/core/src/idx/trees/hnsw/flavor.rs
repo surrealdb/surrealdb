@@ -1,17 +1,24 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
+use roaring::RoaringTreemap;
 
-use crate::catalog::{DatabaseDefinition, HnswParams, TableId};
-use crate::ctx::Context;
+use crate::catalog::{HnswParams, TableId};
+use crate::ctx::FrozenContext;
 use crate::idx::IndexKeyBase;
-use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::{AHashSet, ArraySet};
 use crate::idx::trees::hnsw::cache::VectorCache;
-use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
+use crate::idx::trees::hnsw::filter::HnswTruthyDocumentFilter;
+use crate::idx::trees::hnsw::index::HnswContext;
 use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswSearch};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Transaction;
 
+/// Type-erased dispatch enum for [`Hnsw`] instances with different neighbor set sizes.
+///
+/// Each variant is a concrete `Hnsw<L0, L>` parameterized with fixed-size
+/// `ArraySet` or dynamic `AHashSet` neighbor sets, chosen at construction time
+/// based on the `m` and `m0` HNSW parameters. This avoids dynamic dispatch
+/// overhead while supporting a range of neighbor set capacities.
 pub(super) enum HnswFlavor {
 	H5_9(Hnsw<ArraySet<9>, ArraySet<5>>),
 	H5_17(Hnsw<ArraySet<17>, ArraySet<5>>),
@@ -30,6 +37,11 @@ pub(super) enum HnswFlavor {
 }
 
 impl HnswFlavor {
+	/// Creates a new HNSW graph variant selected by the `m` and `m0` parameters.
+	///
+	/// Chooses the most efficient fixed-size `ArraySet` that can accommodate
+	/// the requested number of connections per layer, falling back to a
+	/// dynamic `AHashSet` for larger values.
 	pub(super) fn new(
 		table_id: TableId,
 		ibk: IndexKeyBase,
@@ -108,7 +120,8 @@ impl HnswFlavor {
 		Ok(res)
 	}
 
-	pub(super) async fn check_state(&mut self, ctx: &Context) -> Result<()> {
+	/// Loads and synchronizes the in-memory graph state from the key-value store.
+	pub(super) async fn check_state(&mut self, ctx: &FrozenContext) -> Result<()> {
 		match self {
 			HnswFlavor::H5_9(h) => h.check_state(ctx).await,
 			HnswFlavor::H5_17(h) => h.check_state(ctx).await,
@@ -127,120 +140,127 @@ impl HnswFlavor {
 		}
 	}
 
-	pub(super) async fn insert(&mut self, tx: &Transaction, q_pt: Vector) -> Result<ElementId> {
+	/// Inserts a vector into the graph and returns its assigned element ID.
+	pub(super) async fn insert(
+		&mut self,
+		ctx: &HnswContext<'_>,
+		q_pt: Vector,
+	) -> Result<ElementId> {
 		match self {
-			HnswFlavor::H5_9(h) => h.insert(tx, q_pt).await,
-			HnswFlavor::H5_17(h) => h.insert(tx, q_pt).await,
-			HnswFlavor::H5_25(h) => h.insert(tx, q_pt).await,
-			HnswFlavor::H5set(h) => h.insert(tx, q_pt).await,
-			HnswFlavor::H9_17(h) => h.insert(tx, q_pt).await,
-			HnswFlavor::H9_25(h) => h.insert(tx, q_pt).await,
-			HnswFlavor::H9set(h) => h.insert(tx, q_pt).await,
-			HnswFlavor::H13_25(h) => h.insert(tx, q_pt).await,
-			HnswFlavor::H13set(h) => h.insert(tx, q_pt).await,
-			HnswFlavor::H17set(h) => h.insert(tx, q_pt).await,
-			HnswFlavor::H21set(h) => h.insert(tx, q_pt).await,
-			HnswFlavor::H25set(h) => h.insert(tx, q_pt).await,
-			HnswFlavor::H29set(h) => h.insert(tx, q_pt).await,
-			HnswFlavor::Hset(h) => h.insert(tx, q_pt).await,
+			HnswFlavor::H5_9(h) => h.insert(ctx, q_pt).await,
+			HnswFlavor::H5_17(h) => h.insert(ctx, q_pt).await,
+			HnswFlavor::H5_25(h) => h.insert(ctx, q_pt).await,
+			HnswFlavor::H5set(h) => h.insert(ctx, q_pt).await,
+			HnswFlavor::H9_17(h) => h.insert(ctx, q_pt).await,
+			HnswFlavor::H9_25(h) => h.insert(ctx, q_pt).await,
+			HnswFlavor::H9set(h) => h.insert(ctx, q_pt).await,
+			HnswFlavor::H13_25(h) => h.insert(ctx, q_pt).await,
+			HnswFlavor::H13set(h) => h.insert(ctx, q_pt).await,
+			HnswFlavor::H17set(h) => h.insert(ctx, q_pt).await,
+			HnswFlavor::H21set(h) => h.insert(ctx, q_pt).await,
+			HnswFlavor::H25set(h) => h.insert(ctx, q_pt).await,
+			HnswFlavor::H29set(h) => h.insert(ctx, q_pt).await,
+			HnswFlavor::Hset(h) => h.insert(ctx, q_pt).await,
 		}
 	}
-	pub(super) async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<bool> {
+	/// Removes an element from the graph. Returns `true` if the element was found and removed.
+	pub(super) async fn remove(&mut self, ctx: &HnswContext<'_>, e_id: ElementId) -> Result<bool> {
 		match self {
-			HnswFlavor::H5_9(h) => h.remove(tx, e_id).await,
-			HnswFlavor::H5_17(h) => h.remove(tx, e_id).await,
-			HnswFlavor::H5_25(h) => h.remove(tx, e_id).await,
-			HnswFlavor::H5set(h) => h.remove(tx, e_id).await,
-			HnswFlavor::H9_17(h) => h.remove(tx, e_id).await,
-			HnswFlavor::H9_25(h) => h.remove(tx, e_id).await,
-			HnswFlavor::H9set(h) => h.remove(tx, e_id).await,
-			HnswFlavor::H13_25(h) => h.remove(tx, e_id).await,
-			HnswFlavor::H13set(h) => h.remove(tx, e_id).await,
-			HnswFlavor::H17set(h) => h.remove(tx, e_id).await,
-			HnswFlavor::H21set(h) => h.remove(tx, e_id).await,
-			HnswFlavor::H25set(h) => h.remove(tx, e_id).await,
-			HnswFlavor::H29set(h) => h.remove(tx, e_id).await,
-			HnswFlavor::Hset(h) => h.remove(tx, e_id).await,
+			HnswFlavor::H5_9(h) => h.remove(ctx, e_id).await,
+			HnswFlavor::H5_17(h) => h.remove(ctx, e_id).await,
+			HnswFlavor::H5_25(h) => h.remove(ctx, e_id).await,
+			HnswFlavor::H5set(h) => h.remove(ctx, e_id).await,
+			HnswFlavor::H9_17(h) => h.remove(ctx, e_id).await,
+			HnswFlavor::H9_25(h) => h.remove(ctx, e_id).await,
+			HnswFlavor::H9set(h) => h.remove(ctx, e_id).await,
+			HnswFlavor::H13_25(h) => h.remove(ctx, e_id).await,
+			HnswFlavor::H13set(h) => h.remove(ctx, e_id).await,
+			HnswFlavor::H17set(h) => h.remove(ctx, e_id).await,
+			HnswFlavor::H21set(h) => h.remove(ctx, e_id).await,
+			HnswFlavor::H25set(h) => h.remove(ctx, e_id).await,
+			HnswFlavor::H29set(h) => h.remove(ctx, e_id).await,
+			HnswFlavor::Hset(h) => h.remove(ctx, e_id).await,
 		}
 	}
+	/// Performs a k-nearest neighbor search on the graph.
 	pub(super) async fn knn_search(
 		&self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		search: &HnswSearch,
+		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<Vec<(f64, ElementId)>> {
 		match self {
-			HnswFlavor::H5_9(h) => h.knn_search(tx, search).await,
-			HnswFlavor::H5_17(h) => h.knn_search(tx, search).await,
-			HnswFlavor::H5_25(h) => h.knn_search(tx, search).await,
-			HnswFlavor::H5set(h) => h.knn_search(tx, search).await,
-			HnswFlavor::H9_17(h) => h.knn_search(tx, search).await,
-			HnswFlavor::H9_25(h) => h.knn_search(tx, search).await,
-			HnswFlavor::H9set(h) => h.knn_search(tx, search).await,
-			HnswFlavor::H13_25(h) => h.knn_search(tx, search).await,
-			HnswFlavor::H13set(h) => h.knn_search(tx, search).await,
-			HnswFlavor::H17set(h) => h.knn_search(tx, search).await,
-			HnswFlavor::H21set(h) => h.knn_search(tx, search).await,
-			HnswFlavor::H25set(h) => h.knn_search(tx, search).await,
-			HnswFlavor::H29set(h) => h.knn_search(tx, search).await,
-			HnswFlavor::Hset(h) => h.knn_search(tx, search).await,
+			HnswFlavor::H5_9(h) => h.knn_search(ctx, search, pending_docs).await,
+			HnswFlavor::H5_17(h) => h.knn_search(ctx, search, pending_docs).await,
+			HnswFlavor::H5_25(h) => h.knn_search(ctx, search, pending_docs).await,
+			HnswFlavor::H5set(h) => h.knn_search(ctx, search, pending_docs).await,
+			HnswFlavor::H9_17(h) => h.knn_search(ctx, search, pending_docs).await,
+			HnswFlavor::H9_25(h) => h.knn_search(ctx, search, pending_docs).await,
+			HnswFlavor::H9set(h) => h.knn_search(ctx, search, pending_docs).await,
+			HnswFlavor::H13_25(h) => h.knn_search(ctx, search, pending_docs).await,
+			HnswFlavor::H13set(h) => h.knn_search(ctx, search, pending_docs).await,
+			HnswFlavor::H17set(h) => h.knn_search(ctx, search, pending_docs).await,
+			HnswFlavor::H21set(h) => h.knn_search(ctx, search, pending_docs).await,
+			HnswFlavor::H25set(h) => h.knn_search(ctx, search, pending_docs).await,
+			HnswFlavor::H29set(h) => h.knn_search(ctx, search, pending_docs).await,
+			HnswFlavor::Hset(h) => h.knn_search(ctx, search, pending_docs).await,
 		}
 	}
-	#[expect(clippy::too_many_arguments)]
-	pub(super) async fn knn_search_checked(
+	/// Performs a k-nearest neighbor search with a conditional document filter.
+	pub(super) async fn knn_search_with_filter(
 		&self,
-		db: &DatabaseDefinition,
-		tx: &Transaction,
-		stk: &mut Stk,
+		ctx: &HnswContext<'_>,
 		search: &HnswSearch,
-		hnsw_docs: &HnswDocs,
-		vec_docs: &VecDocs,
-		chk: &mut HnswConditionChecker<'_>,
+		stk: &mut Stk,
+		filter: &mut HnswTruthyDocumentFilter<'_>,
+		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<Vec<(f64, ElementId)>> {
 		match self {
 			HnswFlavor::H5_9(h) => {
-				h.knn_search_checked(db, tx, stk, search, hnsw_docs, vec_docs, chk).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H5_17(h) => {
-				h.knn_search_checked(db, tx, stk, search, hnsw_docs, vec_docs, chk).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H5_25(h) => {
-				h.knn_search_checked(db, tx, stk, search, hnsw_docs, vec_docs, chk).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H5set(h) => {
-				h.knn_search_checked(db, tx, stk, search, hnsw_docs, vec_docs, chk).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H9_17(h) => {
-				h.knn_search_checked(db, tx, stk, search, hnsw_docs, vec_docs, chk).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H9_25(h) => {
-				h.knn_search_checked(db, tx, stk, search, hnsw_docs, vec_docs, chk).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H9set(h) => {
-				h.knn_search_checked(db, tx, stk, search, hnsw_docs, vec_docs, chk).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H13_25(h) => {
-				h.knn_search_checked(db, tx, stk, search, hnsw_docs, vec_docs, chk).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H13set(h) => {
-				h.knn_search_checked(db, tx, stk, search, hnsw_docs, vec_docs, chk).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H17set(h) => {
-				h.knn_search_checked(db, tx, stk, search, hnsw_docs, vec_docs, chk).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H21set(h) => {
-				h.knn_search_checked(db, tx, stk, search, hnsw_docs, vec_docs, chk).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H25set(h) => {
-				h.knn_search_checked(db, tx, stk, search, hnsw_docs, vec_docs, chk).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::H29set(h) => {
-				h.knn_search_checked(db, tx, stk, search, hnsw_docs, vec_docs, chk).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 			HnswFlavor::Hset(h) => {
-				h.knn_search_checked(db, tx, stk, search, hnsw_docs, vec_docs, chk).await
+				h.knn_search_with_filter(ctx, search, stk, filter, pending_docs).await
 			}
 		}
 	}
+	/// Retrieves the vector associated with the given element ID.
 	pub(super) async fn get_vector(
 		&self,
 		tx: &Transaction,
