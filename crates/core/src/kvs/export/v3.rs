@@ -18,26 +18,23 @@ use crate::{
 
 const CHUNK_SIZE: usize = 1024 * 16;
 
-struct Inner {
+// Writer which buffers writen data into larger chunks.
+// This avoids stressing the channel as well as the consumer of the receiver of the channel's data.
+struct ChannelWriter {
 	buffer: Vec<u8>,
 	channel: Sender<Vec<u8>>,
 }
 
-// Writer which buffers writen data into larger chunks.
-// This avoids stressing the channel as well as the consumer of the receiver of the channel's data.
-#[repr(transparent)]
-struct ChannelWriter(Inner);
-
 impl ChannelWriter {
 	pub fn new(channel: Sender<Vec<u8>>) -> Self {
-		ChannelWriter(Inner {
+		ChannelWriter {
 			buffer: Vec::with_capacity(CHUNK_SIZE),
 			channel,
-		})
+		}
 	}
 
 	fn is_closed(&self) -> bool {
-		self.0.channel.is_closed()
+		self.channel.is_closed()
 	}
 
 	async fn write_bytes(&mut self, mut bytes: &[u8]) {
@@ -46,16 +43,16 @@ impl ChannelWriter {
 				return;
 			}
 
-			let remaining_cap = CHUNK_SIZE - self.0.buffer.len();
+			let remaining_cap = CHUNK_SIZE - self.buffer.len();
 
 			let Some((head, tail)) = bytes.split_at_checked(remaining_cap) else {
-				self.0.buffer.extend_from_slice(bytes);
+				self.buffer.extend_from_slice(bytes);
 				return;
 			};
 
-			self.0.buffer.extend_from_slice(head);
-			let buffer = std::mem::replace(&mut self.0.buffer, Vec::with_capacity(CHUNK_SIZE));
-			if self.0.channel.send(buffer).await.is_err() {
+			self.buffer.extend_from_slice(head);
+			let buffer = std::mem::replace(&mut self.buffer, Vec::with_capacity(CHUNK_SIZE));
+			if self.channel.send(buffer).await.is_err() {
 				return;
 			};
 			bytes = tail;
@@ -64,9 +61,8 @@ impl ChannelWriter {
 
 	pub async fn flush(self) {
 		// Safe because of `#[repr(transparent)]`;
-		let this = unsafe { std::mem::transmute::<Self, Inner>(self) };
-		if !this.buffer.is_empty() {
-			let _ = this.channel.send(this.buffer).await;
+		if !self.buffer.is_empty() {
+			let _ = self.channel.send(self.buffer).await;
 		}
 	}
 }
@@ -311,7 +307,7 @@ async fn export_versioned_data(
 			writer.write_bytes(b";\n").await;
 		} else if is_edge(&v) {
 			writer.write_bytes(b"INSERT RELATION ").await;
-			write_visit(issue_buffer, path, fmt_buf, writer, &v).await;
+			write_visit_rel(issue_buffer, path, fmt_buf, writer, &v).await;
 			writer.write_bytes(b" VERSION d").await;
 			write_fmt(fmt_buf, writer, |s| write!(s, "'{:?}'", ts)).await;
 			writer.write_bytes(b";\n").await;
@@ -367,7 +363,7 @@ async fn export_data(
 					inserting_relation = Some(true);
 				}
 			}
-			write_visit(issue_buffer, path, fmt_buf, writer, &v).await;
+			write_visit_rel(issue_buffer, path, fmt_buf, writer, &v).await;
 		} else {
 			match inserting_relation {
 				Some(true) => {
@@ -433,6 +429,29 @@ async fn write_visit<T: for<'a> Visit<MigratorPass<'a>>>(
 	buf.clear();
 	{
 		let mut pass = MigratorPass::new(issue_buffer, buf, path, PassState::default());
+		let _ = t.visit_self(&mut pass);
+	}
+	writer.write_bytes(buf.as_bytes()).await;
+}
+
+async fn write_visit_rel<T: for<'a> Visit<MigratorPass<'a>>>(
+	issue_buffer: &mut Vec<MigrationIssue>,
+	path: &mut Vec<Value>,
+	buf: &mut String,
+	writer: &mut ChannelWriter,
+	t: &T,
+) {
+	buf.clear();
+	{
+		let mut pass = MigratorPass::new(
+			issue_buffer,
+			buf,
+			path,
+			PassState {
+				skip_relation_field: true,
+				..Default::default()
+			},
+		);
 		let _ = t.visit_self(&mut pass);
 	}
 	writer.write_bytes(buf.as_bytes()).await;

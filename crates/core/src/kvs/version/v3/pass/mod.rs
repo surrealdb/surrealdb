@@ -2255,10 +2255,8 @@ impl Visitor for MigratorPass<'_> {
 
 	fn visit_object(&mut self, obj: &Object) -> Result<(), Self::Error> {
 		self.w.write_str("{")?;
-		for (idx, (k, v)) in obj.0.iter().enumerate() {
-			if self.state.skip_relation_field && k == "__" {
-				continue;
-			}
+		let skip = self.state.skip_relation_field;
+		for (idx, (k, v)) in obj.0.iter().filter(|(k, _)| !skip || *k != "__").enumerate() {
 			if idx != 0 {
 				self.w.write_str(",")?;
 			}
