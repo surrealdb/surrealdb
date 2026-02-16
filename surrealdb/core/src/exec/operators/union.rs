@@ -73,7 +73,11 @@ impl ExecOperator for Union {
 		}
 
 		if self.inputs.len() == 1 {
-			let stream = buffer_stream(self.inputs[0].execute(ctx)?, self.inputs[0].access_mode());
+			let stream = buffer_stream(
+				self.inputs[0].execute(ctx)?,
+				self.inputs[0].access_mode(),
+				self.inputs[0].cardinality_hint(),
+			);
 			return Ok(monitor_stream(stream, "Union", &self.metrics));
 		}
 
@@ -110,7 +114,11 @@ impl ExecOperator for Union {
 
 					match inputs[i].execute(&ctx) {
 						Ok(stream) => {
-							current = Some(buffer_stream(stream, inputs[i].access_mode()))
+							current = Some(buffer_stream(
+								stream,
+								inputs[i].access_mode(),
+								inputs[i].cardinality_hint(),
+							))
 						}
 						Err(e) => return Some((Err(e), (inputs, ctx, idx, None))),
 					}

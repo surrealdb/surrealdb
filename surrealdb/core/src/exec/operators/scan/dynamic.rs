@@ -384,20 +384,6 @@ impl ExecOperator for DynamicScan {
 				None => 0,
 			};
 
-			// Evaluate VERSION expression to a timestamp
-			let version: Option<u64> = match &version {
-				Some(expr) => {
-					let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-					let v = expr.evaluate(eval_ctx).await?;
-					Some(
-						v.cast_to::<crate::val::Datetime>()
-							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp()?,
-					)
-				}
-				None => None,
-			};
-
 			// Early exit if limit is 0
 			if limit_val == Some(0) {
 				return;
@@ -516,7 +502,9 @@ struct TableScanConfig {
 	order: Option<Ordering>,
 	with: Option<With>,
 	direction: ScanDirection,
-	version: Option<u64>,
+	/// VERSION expression for time-travel queries (evaluated inside
+	/// [`resolve_table_scan_stream`] and passed to child operators).
+	version: Option<Arc<dyn PhysicalExpr>>,
 	storage_limit: Option<usize>,
 	/// Number of KV pairs to skip before decoding (fast-path only).
 	pre_skip: usize,
@@ -532,6 +520,21 @@ async fn resolve_table_scan_stream(
 	cfg: TableScanConfig,
 ) -> Result<(ValueBatchStream, usize), ControlFlow> {
 	let txn = ctx.txn();
+
+	// Evaluate VERSION expression once for the fallback KV scan path.
+	// Child operators receive the unevaluated expr and evaluate it themselves.
+	let version_stamp: Option<u64> = match &cfg.version {
+		Some(expr) => {
+			let eval_ctx = EvalContext::from_exec_ctx(ctx);
+			let v = expr.evaluate(eval_ctx).await?;
+			Some(
+				v.cast_to::<crate::val::Datetime>()
+					.map_err(|e| anyhow::anyhow!("{e}"))?
+					.to_version_stamp()?,
+			)
+		}
+		None => None,
+	};
 
 	let access_path = if matches!(&cfg.with, Some(With::NoIndex)) {
 		None
@@ -568,7 +571,15 @@ async fn resolve_table_scan_stream(
 			access,
 			direction,
 		}) => {
-			let operator = IndexScan::new(index_ref, access, direction, cfg.table_name, None, None);
+			let operator = IndexScan::new(
+				index_ref,
+				access,
+				direction,
+				cfg.table_name,
+				None,
+				None,
+				cfg.version,
+			);
 			let stream = operator.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -579,7 +590,7 @@ async fn resolve_table_scan_stream(
 			query,
 			operator,
 		}) => {
-			let ft_op = FullTextScan::new(index_ref, query, operator, cfg.table_name);
+			let ft_op = FullTextScan::new(index_ref, query, operator, cfg.table_name, cfg.version);
 			let stream = ft_op.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -600,6 +611,7 @@ async fn resolve_table_scan_stream(
 				k,
 				ef,
 				cfg.table_name,
+				cfg.version,
 				cfg.knn_context.clone(),
 				residual_cond,
 			);
@@ -614,8 +626,7 @@ async fn resolve_table_scan_stream(
 			for path in paths {
 				sub_operators.push(create_index_operator(&path, &cfg));
 			}
-			let union_op =
-				super::UnionIndexScan::new(cfg.table_name.clone(), sub_operators, None, None);
+			let union_op = super::UnionIndexScan::new(cfg.table_name.clone(), sub_operators, None);
 			let stream = union_op.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -630,7 +641,7 @@ async fn resolve_table_scan_stream(
 				txn,
 				beg,
 				end,
-				cfg.version,
+				version_stamp,
 				cfg.storage_limit,
 				cfg.direction,
 				cfg.pre_skip,
@@ -660,6 +671,7 @@ fn create_index_operator(path: &AccessPath, cfg: &TableScanConfig) -> Arc<dyn Ex
 			cfg.table_name.clone(),
 			None,
 			None,
+			cfg.version.clone(),
 		)),
 		AccessPath::FullTextSearch {
 			index_ref,
@@ -670,6 +682,7 @@ fn create_index_operator(path: &AccessPath, cfg: &TableScanConfig) -> Arc<dyn Ex
 			query.clone(),
 			operator.clone(),
 			cfg.table_name.clone(),
+			cfg.version.clone(),
 		)),
 		AccessPath::KnnSearch {
 			index_ref,
@@ -684,6 +697,7 @@ fn create_index_operator(path: &AccessPath, cfg: &TableScanConfig) -> Arc<dyn Ex
 				*k,
 				*ef,
 				cfg.table_name.clone(),
+				cfg.version.clone(),
 				cfg.knn_context.clone(),
 				residual_cond,
 			))

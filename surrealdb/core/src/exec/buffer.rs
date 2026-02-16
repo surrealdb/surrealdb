@@ -11,7 +11,7 @@
 //!   sequential.
 //!
 //! The public entry point [`buffer_stream`] chooses between them based on
-//! the child operator's [`AccessMode`].
+//! the child operator's [`AccessMode`] and [`CardinalityHint`].
 
 use std::collections::VecDeque;
 use std::pin::Pin;
@@ -20,21 +20,52 @@ use std::task::{Context, Poll};
 use futures::Stream;
 
 use crate::exec::access_mode::AccessMode;
+use crate::exec::cardinality::CardinalityHint;
 use crate::exec::{ValueBatch, ValueBatchStream};
 use crate::expr::FlowResult;
 
+/// Value-count threshold for the [`CardinalityHint::Bounded`] short-circuit.
+///
+/// When an operator declares `Bounded(n)` with `n` at or below this limit, the
+/// output fits in roughly one batch, so spawning a dedicated task cannot
+/// overlap meaningful work. Cooperative prefetch is used instead.
+///
+/// This matches the scan batch size used by most operators (see
+/// [`super::operators::scan::common::BATCH_SIZE`]).
+#[cfg(not(target_family = "wasm"))]
+const SMALL_BOUNDED_THRESHOLD: usize = 1000;
+
 /// Buffer a child operator's stream using the appropriate strategy.
 ///
-/// - `ReadOnly` children use a spawned-task buffer (true pipeline parallelism)
-/// - `ReadWrite` children use cooperative prefetch (preserves mutation ordering)
-/// - `buffer_size == 0` disables buffering entirely
+/// Strategy selection:
+/// 1. `CardinalityHint::AtMostOne` — no buffering (overhead exceeds benefit)
+/// 2. `CardinalityHint::Bounded(n)` where `n` is small — cooperative prefetch (output fits in ~1
+///    batch; spawn overhead would dominate)
+/// 3. `ReadOnly` children — spawned-task buffer (true pipeline parallelism)
+/// 4. `ReadWrite` children — cooperative prefetch (preserves mutation ordering)
+/// 5. `buffer_size == 0` — disables buffering entirely
 ///
 /// On WASM targets, returns the stream unchanged regardless of mode.
 #[cfg(not(target_family = "wasm"))]
-pub(crate) fn buffer_stream(stream: ValueBatchStream, mode: AccessMode) -> ValueBatchStream {
+pub(crate) fn buffer_stream(
+	stream: ValueBatchStream,
+	mode: AccessMode,
+	cardinality: CardinalityHint,
+) -> ValueBatchStream {
 	let buffer_size = *crate::cnf::OPERATOR_BUFFER_SIZE;
 	if buffer_size == 0 {
 		return stream;
+	}
+	// Short-circuit for trivially small streams where buffering overhead
+	// exceeds any possible parallelism benefit.
+	match cardinality {
+		CardinalityHint::AtMostOne => return stream,
+		CardinalityHint::Bounded(n) if n <= SMALL_BOUNDED_THRESHOLD => {
+			// n is a value count, buffer_size is a batch count — use the
+			// batch-denominated buffer_size for the prefetch capacity.
+			return prefetch_buffered(stream, buffer_size);
+		}
+		_ => {}
 	}
 	match mode {
 		AccessMode::ReadOnly => spawn_buffered(stream, buffer_size),
@@ -44,7 +75,11 @@ pub(crate) fn buffer_stream(stream: ValueBatchStream, mode: AccessMode) -> Value
 
 /// WASM: no-op — single-threaded runtime has nothing to overlap with.
 #[cfg(target_family = "wasm")]
-pub(crate) fn buffer_stream(stream: ValueBatchStream, _mode: AccessMode) -> ValueBatchStream {
+pub(crate) fn buffer_stream(
+	stream: ValueBatchStream,
+	_mode: AccessMode,
+	_cardinality: CardinalityHint,
+) -> ValueBatchStream {
 	stream
 }
 

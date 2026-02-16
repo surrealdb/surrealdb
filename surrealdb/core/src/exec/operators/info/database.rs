@@ -27,7 +27,8 @@ use crate::catalog::providers::{
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream,
 };
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::{Action, ResourceKind};
@@ -82,6 +83,10 @@ impl ExecOperator for DatabaseInfoPlan {
 		// Info is inherently read-only, but the version expression
 		// could theoretically contain a mutation subquery.
 		self.version.as_ref().map(|e| e.access_mode()).unwrap_or(AccessMode::ReadOnly)
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {

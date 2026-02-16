@@ -1332,7 +1332,13 @@ impl<'ctx> Planner<'ctx> {
 						};
 						return Ok(PlannedSource {
 							operator: Arc::new(IndexScan::new(
-								index_ref, access, direction, table, idx_limit, idx_start,
+								index_ref,
+								access,
+								direction,
+								table,
+								idx_limit,
+								idx_start,
+								version.clone(),
 							)) as Arc<dyn ExecOperator>,
 							filter_action,
 							limit_pushed,
@@ -1344,8 +1350,13 @@ impl<'ctx> Planner<'ctx> {
 						operator,
 					} => {
 						return Ok(PlannedSource {
-							operator: Arc::new(FullTextScan::new(index_ref, query, operator, table))
-								as Arc<dyn ExecOperator>,
+							operator: Arc::new(FullTextScan::new(
+								index_ref,
+								query,
+								operator,
+								table,
+								version.clone(),
+							)) as Arc<dyn ExecOperator>,
 							filter_action: FilterAction::UseOriginal,
 							limit_pushed: false,
 						});
@@ -1367,6 +1378,7 @@ impl<'ctx> Planner<'ctx> {
 								k,
 								ef,
 								table,
+								version.clone(),
 								knn_ctx,
 								residual_cond,
 							)) as Arc<dyn ExecOperator>,
@@ -1426,6 +1438,7 @@ impl<'ctx> Planner<'ctx> {
 									table.clone(),
 									None,
 									None,
+									version.clone(),
 								)),
 								AccessPath::FullTextSearch {
 									index_ref,
@@ -1436,6 +1449,7 @@ impl<'ctx> Planner<'ctx> {
 									query,
 									operator,
 									table.clone(),
+									version.clone(),
 								)),
 								AccessPath::KnnSearch {
 									index_ref,
@@ -1450,6 +1464,7 @@ impl<'ctx> Planner<'ctx> {
 										k,
 										ef,
 										table.clone(),
+										version.clone(),
 										knn_ctx.clone(),
 										residual_cond,
 									))
@@ -1477,7 +1492,6 @@ impl<'ctx> Planner<'ctx> {
 								table,
 								sub_operators,
 								needed_fields,
-								version,
 							)) as Arc<dyn ExecOperator>,
 							filter_action: FilterAction::UseOriginal,
 							limit_pushed: false,

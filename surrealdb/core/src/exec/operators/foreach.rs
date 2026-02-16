@@ -16,7 +16,8 @@ use crate::exec::plan_or_compute::{
 	block_required_context, evaluate_body_expr, evaluate_expr, expr_required_context,
 };
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream,
 };
 use crate::expr::{Block, ControlFlow, ControlFlowExt, Expr, Param};
 use crate::val::Value;
@@ -102,6 +103,10 @@ impl ExecOperator for ForeachPlan {
 		} else {
 			AccessMode::ReadWrite
 		}
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {

@@ -67,7 +67,11 @@ impl ExecOperator for Split {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = buffer_stream(self.input.execute(ctx)?, self.input.access_mode());
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let idioms = self.idioms.clone();
 
 		let split_stream = input_stream.map(move |batch_result| {

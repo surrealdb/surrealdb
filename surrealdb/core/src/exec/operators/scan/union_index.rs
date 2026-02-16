@@ -24,7 +24,7 @@ use crate::exec::permission::{
 };
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
@@ -47,7 +47,6 @@ pub struct UnionIndexScan {
 	pub(crate) table_name: TableName,
 	pub(crate) inputs: Vec<Arc<dyn ExecOperator>>,
 	pub(crate) needed_fields: Option<HashSet<String>>,
-	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
@@ -56,13 +55,11 @@ impl UnionIndexScan {
 		table_name: TableName,
 		inputs: Vec<Arc<dyn ExecOperator>>,
 		needed_fields: Option<HashSet<String>>,
-		version: Option<Arc<dyn PhysicalExpr>>,
 	) -> Self {
 		Self {
 			table_name,
 			inputs,
 			needed_fields,
-			version,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -124,14 +121,14 @@ impl ExecOperator for UnionIndexScan {
 		// so that any setup errors surface immediately.
 		let mut sub_streams: Vec<ValueBatchStream> = Vec::with_capacity(self.inputs.len());
 		for input in &self.inputs {
-			let sub_stream = buffer_stream(input.execute(ctx)?, input.access_mode());
+			let sub_stream =
+				buffer_stream(input.execute(ctx)?, input.access_mode(), input.cardinality_hint());
 			sub_streams.push(sub_stream);
 		}
 
 		// Clone for the async block
 		let table_name = self.table_name.clone();
 		let needed_fields = self.needed_fields.clone();
-		let version_expr = self.version.clone();
 		let ctx = ctx.clone();
 
 		let stream: ValueBatchStream = Box::pin(async_stream::try_stream! {
@@ -139,20 +136,6 @@ impl ExecOperator for UnionIndexScan {
 			let txn = ctx.txn();
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
-
-			// Evaluate VERSION expression
-			let _version: Option<u64> = match &version_expr {
-				Some(expr) => {
-					let eval_ctx = crate::exec::EvalContext::from_exec_ctx(&ctx);
-					let v = expr.evaluate(eval_ctx).await?;
-					Some(
-						v.cast_to::<crate::val::Datetime>()
-							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp()?,
-					)
-				}
-				None => None,
-			};
 
 			// Check table existence and resolve SELECT permission
 			let table_def = txn
