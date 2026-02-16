@@ -15,10 +15,10 @@ value = "{ id: test:1, num: 123 }"
 value = "[{ id: test:1, num: 123 }]"
 
 [[test.results]]
-value = '''
-'Project [ctx: Db]
-└────> Scan [ctx: Db] [source: test, predicate: num = 123]
-''''
+value = ''''Project [ctx: Db] {rows: 1}
+    IndexScan [ctx: Db] [index: field_num, access: = 123, direction: Forward] {rows: 1}
+
+Total rows: 1''''
 
 [env]
 namespace = "test"
@@ -30,4 +30,4 @@ OPTION IMPORT;
 DEFINE INDEX field_num ON test FIELDS num;
 CREATE ONLY test:1 SET num = 123;
 SELECT * FROM test WHERE num = 123;
-EXPLAIN SELECT * FROM test WHERE num = 123;
+EXPLAIN ANALYZE SELECT * FROM test WHERE num = 123;

@@ -18,8 +18,9 @@ use tracing::instrument;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::exec::parts::fetch_record_with_computed_fields;
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
+	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
+	buffer_stream, monitor_stream,
 };
 use crate::expr::idiom::Idiom;
 use crate::expr::part::{DestructurePart, Part};
@@ -154,12 +155,20 @@ impl ExecOperator for Project {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// When include_all is true, we may need to dereference RecordIds,
-		// which requires database access
+		// Combine field expression contexts with child operator context.
+		// When include_all is true, we additionally need database access
+		// to dereference RecordIds.
+		let fields_ctx = self
+			.fields
+			.iter()
+			.map(|f| f.expr.required_context())
+			.max()
+			.unwrap_or(ContextLevel::Root);
+		let base = self.input.required_context().max(fields_ctx);
 		if self.include_all {
-			ContextLevel::Database.max(self.input.required_context())
+			base.max(ContextLevel::Database)
 		} else {
-			self.input.required_context()
+			base
 		}
 	}
 
@@ -171,6 +180,10 @@ impl ExecOperator for Project {
 		self.input.access_mode().combine(expr_mode)
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.input.cardinality_hint()
+	}
+
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
@@ -179,9 +192,21 @@ impl ExecOperator for Project {
 		Some(&self.metrics)
 	}
 
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		self.fields.iter().map(|f| ("field", &f.expr)).collect()
+	}
+
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		self.input.output_ordering()
+	}
+
 	#[instrument(level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let fields = Arc::clone(&self.fields);
 		let omit = Arc::clone(&self.omit);
 		let include_all = self.include_all;
@@ -566,6 +591,10 @@ impl ExecOperator for SelectProject {
 		self.input.access_mode()
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.input.cardinality_hint()
+	}
+
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
@@ -574,9 +603,17 @@ impl ExecOperator for SelectProject {
 		Some(&self.metrics)
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		self.input.output_ordering()
+	}
+
 	#[instrument(level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let projections = Arc::clone(&self.projections);
 		let ctx = ctx.clone();
 

@@ -1,15 +1,11 @@
-use std::sync::Arc;
-
 use uuid::Uuid;
 
 use super::CreateDs;
-use crate::dbs::node::Timestamp;
-use crate::kvs::clock::{FakeClock, SizedClock};
+
 pub async fn registers_rocksdb_metrics(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("b7afc077-3234-476f-bee0-43d7504f1e0a").unwrap();
-	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds.create_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id).await;
 	let metrics = ds.register_metrics().expect("expected RocksDB metrics");
 	assert_eq!(metrics.name, "surrealdb.rocksdb");
 

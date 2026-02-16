@@ -17,9 +17,9 @@ value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 0 } }"
 value = "'OK'"
 
 [[test.results]]
-value = '''
-"CountScan [ctx: Db] [source: t]
-"'''
+value = ''''CountScan [ctx: Db] [source: t] {rows: 1}
+
+Total rows: 1''''
 
 [[test.results]]
 value = "[{ count: 4 }]"
@@ -54,7 +54,7 @@ INFO FOR INDEX idx ON t;
     RETURN 'OK';
 };
 
-EXPLAIN SELECT count() FROM t GROUP ALL;
+EXPLAIN ANALYZE SELECT count() FROM t GROUP ALL;
 
 SELECT count() FROM t GROUP ALL;
 

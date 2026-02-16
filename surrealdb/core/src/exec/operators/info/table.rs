@@ -17,7 +17,8 @@ use crate::catalog::providers::TableProvider;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream,
 };
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::{Action, ResourceKind};
@@ -72,15 +73,34 @@ impl ExecOperator for TableInfoPlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
+		// Table info needs database context, combined with expression contexts
+		let version_ctx =
+			self.version.as_ref().map(|e| e.required_context()).unwrap_or(ContextLevel::Root);
+		self.table.required_context().max(version_ctx).max(ContextLevel::Database)
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
+		// Info is inherently read-only, but the table/version expressions
+		// could theoretically contain mutation subqueries.
+		let version_mode =
+			self.version.as_ref().map(|e| e.access_mode()).unwrap_or(AccessMode::ReadOnly);
+		self.table.access_mode().combine(version_mode)
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(self.metrics.as_ref())
+	}
+
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		let mut exprs = vec![("table", &self.table)];
+		if let Some(ref v) = self.version {
+			exprs.push(("version", v));
+		}
+		exprs
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {

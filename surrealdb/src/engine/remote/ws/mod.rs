@@ -367,7 +367,7 @@ where
 	S: Sink<M, Error = E> + Unpin,
 	E: std::fmt::Debug,
 {
-	let Some(mut pending) = session_state.pending_requests.get(&id) else {
+	let Some(mut pending) = session_state.pending_requests.take(&id) else {
 		warn!("got response for request with id '{id}', which was not in pending requests");
 		return HandleResult::Ok;
 	};
@@ -502,7 +502,7 @@ async fn handle_parse_error(
 			};
 
 			if let Some(Value::Number(Number::Int(id_num))) = id {
-				if let Some(pending) = session_state.pending_requests.get(&id_num) {
+				if let Some(pending) = session_state.pending_requests.take(&id_num) {
 					let _ = pending.response_channel.send(Err(error.into())).await;
 				} else {
 					warn!(
@@ -702,6 +702,164 @@ impl Surreal<Client> {
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
+		}
+	}
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+	use std::sync::Arc;
+
+	use surrealdb_core::rpc::{DbResult, DbResultError};
+	use tokio::sync::RwLock;
+	use uuid::Uuid;
+
+	use super::{HandleResult, PendingRequest, SessionState, WsMessage, handle_response_with_id};
+	use crate::types::Value;
+
+	/// Mock WebSocket message for testing.
+	#[derive(Clone)]
+	struct MockMessage;
+
+	impl WsMessage for MockMessage {
+		fn binary(_payload: Vec<u8>) -> Self {
+			MockMessage
+		}
+
+		fn as_binary(&self) -> Option<&[u8]> {
+			None
+		}
+	}
+
+	#[tokio::test]
+	async fn handle_response_removes_pending_request() {
+		let session_state = Arc::new(SessionState::default());
+		let session_id = Uuid::new_v4();
+		let request_id: i64 = 1;
+
+		// Insert a pending request
+		let (sender, receiver) = async_channel::bounded(1);
+		session_state.pending_requests.insert(
+			request_id,
+			PendingRequest {
+				command: None,
+				response_channel: sender,
+			},
+		);
+		assert_eq!(session_state.pending_requests.len(), 1);
+
+		// Handle a successful response
+		let sink = RwLock::new(futures::sink::drain::<MockMessage>());
+		let result = handle_response_with_id::<MockMessage, _, _>(
+			request_id,
+			Ok(DbResult::Other(Value::None)),
+			session_id,
+			&session_state,
+			&sink,
+		)
+		.await;
+
+		// Entry should be removed from pending_requests
+		assert_eq!(result, HandleResult::Ok);
+		assert!(
+			session_state.pending_requests.is_empty(),
+			"pending request should be removed after handling response"
+		);
+
+		// Response should have been delivered to the receiver
+		let response = receiver.recv().await.unwrap();
+		assert!(response.is_ok());
+	}
+
+	#[tokio::test]
+	async fn handle_response_error_removes_pending_request() {
+		let session_state = Arc::new(SessionState::default());
+		let session_id = Uuid::new_v4();
+		let request_id: i64 = 1;
+
+		// Insert a pending request (no replayable command, so no token refresh path)
+		let (sender, receiver) = async_channel::bounded(1);
+		session_state.pending_requests.insert(
+			request_id,
+			PendingRequest {
+				command: None,
+				response_channel: sender,
+			},
+		);
+		assert_eq!(session_state.pending_requests.len(), 1);
+
+		// Handle an error response
+		let sink = RwLock::new(futures::sink::drain::<MockMessage>());
+		let error = DbResultError::InternalError("test error".into());
+		let result = handle_response_with_id::<MockMessage, _, _>(
+			request_id,
+			Err(error),
+			session_id,
+			&session_state,
+			&sink,
+		)
+		.await;
+
+		// Entry should be removed from pending_requests
+		assert_eq!(result, HandleResult::Ok);
+		assert!(
+			session_state.pending_requests.is_empty(),
+			"pending request should be removed after handling error response"
+		);
+
+		// Error should have been delivered to the receiver
+		let response = receiver.recv().await.unwrap();
+		assert!(response.is_err());
+	}
+
+	#[tokio::test]
+	async fn handle_multiple_responses_cleans_up_all_entries() {
+		let session_state = Arc::new(SessionState::default());
+		let session_id = Uuid::new_v4();
+		let sink = RwLock::new(futures::sink::drain::<MockMessage>());
+
+		// Insert many pending requests
+		let mut receivers = Vec::new();
+		for id in 0..100i64 {
+			let (sender, receiver) = async_channel::bounded(1);
+			session_state.pending_requests.insert(
+				id,
+				PendingRequest {
+					command: None,
+					response_channel: sender,
+				},
+			);
+			receivers.push(receiver);
+		}
+		assert_eq!(session_state.pending_requests.len(), 100);
+
+		// Handle all responses
+		for id in 0..100i64 {
+			handle_response_with_id::<MockMessage, _, _>(
+				id,
+				Ok(DbResult::Other(Value::None)),
+				session_id,
+				&session_state,
+				&sink,
+			)
+			.await;
+		}
+
+		// All entries should have been removed
+		assert!(
+			session_state.pending_requests.is_empty(),
+			"all pending requests should be removed, but {} remain",
+			session_state.pending_requests.len()
+		);
+
+		// All responses should have been delivered
+		for receiver in &receivers {
+			let response = receiver.recv().await.unwrap();
+			assert!(response.is_ok());
 		}
 	}
 }

@@ -9,8 +9,9 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
+	monitor_stream,
 };
 use crate::expr::ControlFlow;
 
@@ -52,13 +53,17 @@ impl ExecOperator for ProjectValue {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// ProjectValue needs the same context as its input, plus whatever the expression needs
-		self.input.required_context()
+		// Combine the expression's context with the input's context
+		self.expr.required_context().max(self.input.required_context())
 	}
 
 	fn access_mode(&self) -> AccessMode {
 		// Combine input's mode with expression's mode
 		self.input.access_mode().combine(self.expr.access_mode())
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.input.cardinality_hint()
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
@@ -69,8 +74,20 @@ impl ExecOperator for ProjectValue {
 		vec![&self.input]
 	}
 
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		vec![("expr", &self.expr)]
+	}
+
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		self.input.output_ordering()
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let expr = self.expr.clone();
 		let ctx = ctx.clone();
 

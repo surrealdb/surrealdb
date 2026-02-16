@@ -16,8 +16,9 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
+	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
+	buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::{Object, Value};
@@ -69,15 +70,14 @@ impl ExecOperator for Compute {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Compute needs Database for expression evaluation, but also
-		// inherits child requirements (take the maximum)
+		// Combine field expression contexts with child operator context
 		let expr_ctx = self
 			.fields
 			.iter()
 			.map(|(_, expr)| expr.required_context())
 			.max()
 			.unwrap_or(ContextLevel::Root);
-		ContextLevel::Database.max(self.input.required_context()).max(expr_ctx)
+		self.input.required_context().max(expr_ctx)
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -85,6 +85,10 @@ impl ExecOperator for Compute {
 		// An expression could contain a mutation subquery!
 		let expr_mode = self.fields.iter().map(|(_, expr)| expr.access_mode()).combine_all();
 		self.input.access_mode().combine(expr_mode)
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.input.cardinality_hint()
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
@@ -99,13 +103,21 @@ impl ExecOperator for Compute {
 		self.fields.iter().map(|(name, expr)| (name.as_str(), expr)).collect()
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		self.input.output_ordering()
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// If there are no fields to compute, just pass through
 		if self.fields.is_empty() {
 			return self.input.execute(ctx);
 		}
 
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let fields = self.fields.clone();
 		let ctx = ctx.clone();
 

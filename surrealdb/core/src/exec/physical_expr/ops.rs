@@ -3,8 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+use crate::exec::{AccessMode, ExecOperator};
 use crate::expr::FlowResult;
 use crate::val::Value;
 
@@ -161,10 +161,6 @@ impl PhysicalExpr for BinaryOp {
 		})
 	}
 
-	fn references_current_value(&self) -> bool {
-		self.left.references_current_value() || self.right.references_current_value()
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		// Combine both sides' access modes
 		self.left.access_mode().combine(self.right.access_mode())
@@ -172,6 +168,12 @@ impl PhysicalExpr for BinaryOp {
 
 	fn expr_children(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
 		vec![("left", &self.left), ("right", &self.right)]
+	}
+
+	fn embedded_operators(&self) -> Vec<(&str, &Arc<dyn ExecOperator>)> {
+		let mut ops = self.left.embedded_operators();
+		ops.extend(self.right.embedded_operators());
+		ops
 	}
 }
 
@@ -234,10 +236,6 @@ impl PhysicalExpr for UnaryOp {
 		})
 	}
 
-	fn references_current_value(&self) -> bool {
-		self.expr.references_current_value()
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		// Propagate inner expression's access mode
 		self.expr.access_mode()
@@ -245,6 +243,10 @@ impl PhysicalExpr for UnaryOp {
 
 	fn expr_children(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
 		vec![("operand", &self.expr)]
+	}
+
+	fn embedded_operators(&self) -> Vec<(&str, &Arc<dyn ExecOperator>)> {
+		self.expr.embedded_operators()
 	}
 }
 
@@ -309,10 +311,6 @@ impl PhysicalExpr for PostfixOp {
 		})
 	}
 
-	fn references_current_value(&self) -> bool {
-		self.expr.references_current_value()
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		// Propagate inner expression's access mode
 		self.expr.access_mode()
@@ -320,6 +318,10 @@ impl PhysicalExpr for PostfixOp {
 
 	fn expr_children(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
 		vec![("operand", &self.expr)]
+	}
+
+	fn embedded_operators(&self) -> Vec<(&str, &Arc<dyn ExecOperator>)> {
+		self.expr.embedded_operators()
 	}
 }
 

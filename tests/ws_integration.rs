@@ -2121,22 +2121,28 @@ pub async fn temporary_directory(cfg_server: Option<Format>, cfg_format: Format)
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// create records
 	socket.send_message_query("CREATE test:a, test:b").await.unwrap();
-	// These selects use the memory collector
+	// ORDER BY id DESC is satisfied by a backward TableScan (no explicit sort needed)
 	let mut res =
 		socket.send_message_query("SELECT * FROM test ORDER BY id DESC EXPLAIN").await.unwrap();
-	let expected = json!([{"detail": { "direction": "backward", "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "MemoryOrdered" }, "operation": "Collector" }]);
-	assert_eq!(res.remove(0)["result"], expected);
+	let result = &res.remove(0)["result"];
+	// New executor EXPLAIN produces a JSON plan tree
+	assert_eq!(result["operator"], "Project");
+	assert_eq!(result["children"][0]["operator"], "TableScan");
+	assert_eq!(result["children"][0]["attributes"]["direction"], "Backward");
 	// And return the correct result
 	let mut res = socket.send_message_query("SELECT * FROM test ORDER BY id DESC").await.unwrap();
 	let expected = json!([{"id": "test:b" }, { "id": "test:a" }]);
 	assert_eq!(res.remove(0)["result"], expected);
-	// This one should the file collector
+	// TEMPFILES requests file-backed sort, but the planner eliminates the sort
+	// entirely since a backward TableScan already satisfies ORDER BY id DESC.
 	let mut res = socket
 		.send_message_query("SELECT * FROM test ORDER BY id DESC TEMPFILES EXPLAIN")
 		.await
 		.unwrap();
-	let expected = json!([{"detail": { "direction": "backward", "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "TempFiles" }, "operation": "Collector" }]);
-	assert_eq!(res.remove(0)["result"], expected);
+	let result = &res.remove(0)["result"];
+	assert_eq!(result["operator"], "Project");
+	assert_eq!(result["children"][0]["operator"], "TableScan");
+	assert_eq!(result["children"][0]["attributes"]["direction"], "Backward");
 	// And return the correct result
 	let mut res =
 		socket.send_message_query("SELECT * FROM test ORDER BY id DESC TEMPFILES").await.unwrap();

@@ -20,10 +20,13 @@ value = "[{ id: person:1, name: 'Tobie', securityNumber: '123456' }]"
 value = "[{ id: person:2, name: 'Jaime', securityNumber: 'ABCDEF' }]"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> Scan [ctx: Db] [source: person, predicate: name @@ 'Tobie' OR securityNumber == '123456']
-"'''
+value = '''"Project [ctx: Db] {rows: 1}
+    Filter [ctx: Db] [predicate: name @@ 'Tobie' OR securityNumber == '123456'] {rows: 1}
+        UnionIndexScan [ctx: Db] [table: person, branches: 2] {rows: 1}
+            FullTextScan [ctx: Db] [index: idxPersonName, query: Tobie] {rows: 1}
+            IndexScan [ctx: Db] [index: idxSecurityNumber, access: = '123456', direction: Forward] {rows: 1}
+
+Total rows: 1"'''
 
 [[test.results]]
 value = "[{ id: person:1, name: 'Tobie', securityNumber: '123456' }]"
@@ -35,5 +38,5 @@ DEFINE INDEX idxPersonName ON TABLE person COLUMNS name FULLTEXT ANALYZER edgeNg
 DEFINE INDEX idxSecurityNumber ON TABLE person COLUMNS securityNumber UNIQUE;
 CREATE person:1 content {name: 'Tobie', securityNumber: '123456'};
 CREATE person:2 content {name: 'Jaime', securityNumber: 'ABCDEF'};
-EXPLAIN SELECT * FROM person WHERE name @@ 'Tobie' || securityNumber == '123456';
+EXPLAIN ANALYZE SELECT * FROM person WHERE name @@ 'Tobie' || securityNumber == '123456';
 SELECT * FROM person WHERE name @@ 'Tobie' || securityNumber == '123456';

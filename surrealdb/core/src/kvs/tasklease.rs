@@ -247,8 +247,6 @@ mod tests {
 	use tokio::sync::Notify;
 	use uuid::Uuid;
 
-	use crate::dbs::node::Timestamp;
-	use crate::kvs::clock::{FakeClock, SizedClock};
 	use crate::kvs::ds::{DatastoreFlavor, TransactionFactory};
 	use crate::kvs::sequences::Sequences;
 	use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
@@ -330,12 +328,10 @@ mod tests {
 	/// # Parameters
 	/// * `flavor` - The type of datastore to use for the test (memory or RocksDB)
 	async fn task_lease_concurrency(flavor: DatastoreFlavor) {
-		// Create a fake clock for deterministic testing
-		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		// Async event trigger
 		let async_event_trigger = Arc::new(Notify::new());
 		// Create a transaction factory with the specified datastore flavor
-		let tf = TransactionFactory::new(clock, async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
 		// Create a sequence generator for the transaction factory
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 		// Set test to run for 3 seconds
@@ -456,8 +452,6 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_lease_renewal_behavior() {
-		// Create a fake clock for deterministic testing
-		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		// Create a new memory configuration
 		let config = crate::kvs::config::MemoryConfig::default();
 		// Create an in-memory datastore
@@ -466,7 +460,7 @@ mod tests {
 		// Create an async event trigger
 		let async_event_trigger = Arc::new(Notify::new());
 		// Create the transaction factory
-		let tf = TransactionFactory::new(clock, async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Set lease duration to 10 minutes

@@ -23,8 +23,8 @@ impl PhysicalExpr for ScalarSubquery {
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
-		// Subqueries execute against the database
-		crate::exec::ContextLevel::Database
+		// Delegate to the subquery plan's context requirements
+		self.plan.required_context()
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> crate::expr::FlowResult<Value> {
@@ -82,13 +82,6 @@ impl PhysicalExpr for ScalarSubquery {
 		let futures: Vec<_> =
 			values.iter().map(|value| self.evaluate(ctx.with_value(value))).collect();
 		futures::future::try_join_all(futures).await
-	}
-
-	fn references_current_value(&self) -> bool {
-		// Conservative: subqueries may be correlated (e.g. SELECT ... FROM $this.field),
-		// and we can't statically determine this from the plan tree.
-		// Returning true ensures correlated subqueries get the correct per-row context.
-		true
 	}
 
 	fn access_mode(&self) -> AccessMode {

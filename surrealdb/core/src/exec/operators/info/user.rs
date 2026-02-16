@@ -14,7 +14,8 @@ use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream,
 };
 use crate::expr::Base;
 use crate::expr::statements::info::InfoStructure;
@@ -75,15 +76,26 @@ impl ExecOperator for UserInfoPlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		self.context_level_for_base()
+		// Combine the base-level context with the user expression's context
+		self.user.required_context().max(self.context_level_for_base())
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
+		// Info is inherently read-only, but the user expression could
+		// theoretically contain a mutation subquery.
+		self.user.access_mode()
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(self.metrics.as_ref())
+	}
+
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		vec![("user", &self.user)]
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {

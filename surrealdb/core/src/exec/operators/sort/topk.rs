@@ -18,8 +18,9 @@ use futures::StreamExt;
 
 use super::common::{OrderByField, SortDirection, SortKey, compare_keys, compare_records_by_keys};
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
+	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
+	buffer_stream, monitor_stream,
 };
 use crate::val::Value;
 
@@ -117,12 +118,23 @@ impl ExecOperator for SortTopK {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database.max(self.input.required_context())
+		// Combine order-by expression contexts with child operator context
+		let order_ctx = self
+			.order_by
+			.iter()
+			.map(|f| f.expr.required_context())
+			.max()
+			.unwrap_or(ContextLevel::Root);
+		order_ctx.max(self.input.required_context())
 	}
 
 	fn access_mode(&self) -> AccessMode {
 		let expr_mode = self.order_by.iter().map(|f| f.expr.access_mode()).combine_all();
 		self.input.access_mode().combine(expr_mode)
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::Bounded(self.limit)
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
@@ -137,8 +149,31 @@ impl ExecOperator for SortTopK {
 		self.order_by.iter().map(|f| ("order_by", &f.expr)).collect()
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		use crate::exec::ordering::SortProperty;
+		crate::exec::OutputOrdering::Sorted(
+			self.order_by
+				.iter()
+				.map(|f| {
+					let sql = f.expr.to_sql();
+					let path = crate::exec::field_path::FieldPath::field(sql);
+					SortProperty {
+						path,
+						direction: f.direction,
+						collate: f.collate,
+						numeric: f.numeric,
+					}
+				})
+				.collect(),
+		)
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let order_by = Arc::new(self.order_by.clone());
 		let limit = self.limit;
 		let ctx = ctx.clone();
@@ -346,6 +381,10 @@ impl ExecOperator for SortTopKByKey {
 		self.input.access_mode()
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::Bounded(self.limit)
+	}
+
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
@@ -354,8 +393,27 @@ impl ExecOperator for SortTopKByKey {
 		Some(&self.metrics)
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		use crate::exec::ordering::SortProperty;
+		crate::exec::OutputOrdering::Sorted(
+			self.sort_keys
+				.iter()
+				.map(|k| SortProperty {
+					path: k.path.clone(),
+					direction: k.direction,
+					collate: k.collate,
+					numeric: k.numeric,
+				})
+				.collect(),
+		)
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let sort_keys = Arc::new(self.sort_keys.clone());
 		let limit = self.limit;
 		let cancellation = ctx.cancellation().clone();

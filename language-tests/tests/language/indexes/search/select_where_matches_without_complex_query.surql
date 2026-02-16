@@ -26,10 +26,10 @@ value = "NONE"
 value = "[{ id: page:1, sc1: 0f, sc2: 0f }, { id: page:2, sc1: 0f, sc2: 0f }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'page_host', operator: '=', value: 'test' }, table: 'page' }, operation: 'Iterate Index' }, { detail: { plan: { index: 'page_title', operator: '@1@', value: 'dog' }, table: 'page' }, operation: 'Iterate Index' }, { detail: { plan: { index: 'page_content', operator: '@2@', value: 'dog' }, table: 'page' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = """{ children: [{ attributes: { predicate: "title @1@ 'dog' OR content @2@ 'dog'" }, children: [{ attributes: { access: "= 'test'", direction: 'Forward', index: 'page_host' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', expressions: [{ role: 'predicate', sql: "title @1@ 'dog' OR content @2@ 'dog'" }], operator: 'Filter' }], context: 'Db', expressions: [{ role: 'field', sql: 'id' }, { role: 'field', sql: 'search::score(...)' }, { role: 'field', sql: 'search::score(...)' }], operator: 'Project' }"""
 
 [[test.results]]
-value = "[{ id: page:1, sc1: 0f, sc2: -0f }, { id: page:2, sc1: 0f, sc2: 0f }]"
+value = "[{ id: page:1, sc1: 0f, sc2: 0f }, { id: page:2, sc1: 0f, sc2: 0f }]"
 
 [[test.results]]
 value = "[{ id: page:1, sc1: 0f, sc2: 0f }, { id: page:2, sc1: 0f, sc2: 0f }]"

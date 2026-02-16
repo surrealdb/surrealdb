@@ -38,9 +38,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: { path: ['a', 'b', 'c'] }, headers: {}, status: 200 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 - Rest segment at end

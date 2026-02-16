@@ -23,8 +23,9 @@ use super::common::{OrderByField, SortDirection, compare_keys};
 use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 use crate::err::Error;
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
+	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
+	buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlowExt;
 use crate::val::Value;
@@ -87,12 +88,23 @@ impl ExecOperator for ExternalSort {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database.max(self.input.required_context())
+		// Combine order-by expression contexts with child operator context
+		let order_ctx = self
+			.order_by
+			.iter()
+			.map(|f| f.expr.required_context())
+			.max()
+			.unwrap_or(ContextLevel::Root);
+		order_ctx.max(self.input.required_context())
 	}
 
 	fn access_mode(&self) -> AccessMode {
 		let expr_mode = self.order_by.iter().map(|f| f.expr.access_mode()).combine_all();
 		self.input.access_mode().combine(expr_mode)
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.input.cardinality_hint()
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
@@ -107,8 +119,33 @@ impl ExecOperator for ExternalSort {
 		self.order_by.iter().map(|f| ("order_by", &f.expr)).collect()
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		use crate::exec::ordering::SortProperty;
+		crate::exec::OutputOrdering::Sorted(
+			self.order_by
+				.iter()
+				.map(|f| {
+					// Try to extract a FieldPath from the expression's SQL representation.
+					// This is best-effort -- complex expressions won't match.
+					let sql = f.expr.to_sql();
+					let path = crate::exec::field_path::FieldPath::field(sql);
+					SortProperty {
+						path,
+						direction: f.direction,
+						collate: f.collate,
+						numeric: f.numeric,
+					}
+				})
+				.collect(),
+		)
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let order_by = Arc::new(self.order_by.clone());
 		let temp_dir = self.temp_dir.clone();
 		let ctx = ctx.clone();

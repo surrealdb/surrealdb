@@ -126,6 +126,12 @@ pub struct TestEnv {
 	/// - "compute-only": skip new planner entirely
 	pub new_planner_strategy: Option<NewPlannerStrategyConfig>,
 
+	/// Whether EXPLAIN ANALYZE output omits elapsed durations, making
+	/// output deterministic for test assertions. Defaults to true in the
+	/// language test framework. Set to `false` explicitly if you need
+	/// actual elapsed times.
+	pub redact_volatile_explain_attrs: Option<bool>,
+
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
@@ -513,7 +519,6 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
 		};
@@ -576,7 +581,6 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
 		};
@@ -619,7 +623,6 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
 		};

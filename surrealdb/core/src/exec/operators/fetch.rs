@@ -3,9 +3,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
+use crate::catalog::providers::TableProvider;
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
@@ -60,6 +61,10 @@ impl ExecOperator for Fetch {
 		AccessMode::ReadOnly.combine(self.input.access_mode())
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.input.cardinality_hint()
+	}
+
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
@@ -69,14 +74,19 @@ impl ExecOperator for Fetch {
 	}
 
 	fn is_scalar(&self) -> bool {
-		// Fetch preserves the scalar nature of its input.
-		// If the input is a scalar expression (e.g., RETURN $var FETCH field),
-		// the result should also be treated as scalar.
 		self.input.is_scalar()
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		self.input.output_ordering()
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let fields = self.fields.clone();
 		let ctx = ctx.clone();
 
@@ -229,33 +239,33 @@ async fn fetch_value_if_record(
 }
 
 /// Fetch a single record by its ID.
+///
+/// Uses the transaction record cache so repeated fetches of the same record
+/// within a transaction only hit the datastore once.
 pub(crate) async fn fetch_record(
 	ctx: &ExecutionContext,
 	rid: &RecordId,
 ) -> crate::expr::FlowResult<Value> {
-	// Get the database context
 	let db_ctx = ctx.database().map_err(|e| crate::expr::ControlFlow::Err(e.into()))?;
-
-	// Read the record from the datastore
 	let txn = db_ctx.txn();
-	let key = crate::key::record::new(
-		db_ctx.ns_ctx.ns.namespace_id,
-		db_ctx.db.database_id,
-		&rid.table,
-		&rid.key,
-	);
 
-	match txn.get(&key, None).await {
-		Ok(Some(record)) => {
-			// Extract the Value from the Record
-			let mut val = record.data.as_ref().clone();
-			// Inject the record ID
-			val.def(rid);
-			Ok(val)
-		}
-		Ok(None) => Ok(Value::None),
-		Err(e) => Err(crate::expr::ControlFlow::Err(e)),
+	let record = txn
+		.get_record(
+			db_ctx.ns_ctx.ns.namespace_id,
+			db_ctx.db.database_id,
+			&rid.table,
+			&rid.key,
+			None,
+		)
+		.await
+		.map_err(crate::expr::ControlFlow::Err)?;
+
+	let mut val = record.data.as_ref().clone();
+	if val.is_none() {
+		return Ok(Value::None);
 	}
+	val.def(rid);
+	Ok(val)
 }
 
 /// Batch fetch multiple records by their IDs concurrently.
@@ -357,13 +367,13 @@ mod tests {
 
 	#[test]
 	fn test_fetch_name() {
-		use crate::exec::operators::scan::Scan;
+		use crate::exec::operators::scan::DynamicScan;
 		use crate::expr::part::Part;
 
 		let fields = vec![Idiom(vec![Part::Field("author".into())])];
 
 		// Create a minimal scan for testing
-		let scan = Arc::new(Scan::new(
+		let scan = Arc::new(DynamicScan::new(
 			Arc::new(Literal(Value::from("test"))) as Arc<dyn crate::exec::PhysicalExpr>,
 			None,
 			None,

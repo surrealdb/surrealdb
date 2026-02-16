@@ -11,8 +11,9 @@ use futures::StreamExt;
 use tracing::instrument;
 
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
+	monitor_stream,
 };
 
 /// Filters a stream of values based on a predicate.
@@ -49,15 +50,18 @@ impl ExecOperator for Filter {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Filter needs Database for expression evaluation, but also
-		// inherits child requirements (take the maximum)
-		ContextLevel::Database.max(self.input.required_context())
+		// Combine predicate expression context with child operator context
+		self.predicate.required_context().max(self.input.required_context())
 	}
 
 	fn access_mode(&self) -> AccessMode {
 		// Combine input's access mode with predicate's access mode
 		// Predicate could contain a mutation subquery!
 		self.input.access_mode().combine(self.predicate.access_mode())
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.input.cardinality_hint()
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
@@ -72,9 +76,17 @@ impl ExecOperator for Filter {
 		vec![("predicate", &self.predicate)]
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		self.input.output_ordering()
+	}
+
 	#[instrument(name = "Filter::execute", level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let predicate = Arc::clone(&self.predicate);
 
 		// Clone all necessary data for the async move closure

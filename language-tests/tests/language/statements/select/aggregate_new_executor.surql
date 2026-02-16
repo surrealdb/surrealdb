@@ -11,10 +11,9 @@ value = "[{ country: 'GBP', id: temperature:1, time: d'2020-01-01T08:00:00Z', ye
 value = "[{ count: 1, country: 'AUD', max: d'2021-01-01T08:00:00Z', min: d'2021-01-01T08:00:00Z', year: 2021 }, { count: 1, country: 'CHF', max: d'2023-01-01T08:00:00Z', min: d'2023-01-01T08:00:00Z', year: 2023 }, { count: 1, country: 'EUR', max: d'2021-01-01T08:00:00Z', min: d'2021-01-01T08:00:00Z', year: 2021 }, { count: 3, country: 'GBP', max: d'2020-03-01T08:00:00Z', min: d'2020-01-01T08:00:00Z', year: 2020 }, { count: 2, country: 'GBP', max: d'2021-01-01T08:00:00Z', min: d'2021-01-01T08:00:00Z', year: 2021 }, { count: 1, country: 'USD', max: d'2021-01-01T08:00:00Z', min: d'2021-01-01T08:00:00Z', year: 2021 }]"
 
 [[test.results]]
-value = '''
-"Aggregate [ctx: Db] [by: country, year]
-└────> Scan [ctx: Db] [source: temperature]
-"'''
+value = ''''Aggregate [ctx: Db] [by: country, year]
+    TableScan [ctx: Db] [table: temperature, direction: Forward]
+''''
 
 */
 {

@@ -38,10 +38,6 @@ impl PhysicalExpr for ArrayLiteral {
 		Ok(Value::Array(crate::val::Array::from(values)))
 	}
 
-	fn references_current_value(&self) -> bool {
-		self.elements.iter().any(|e| e.references_current_value())
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		self.elements.iter().map(|e| e.access_mode()).combine_all()
 	}
@@ -90,10 +86,6 @@ impl PhysicalExpr for ObjectLiteral {
 		Ok(Value::Object(crate::val::Object(map)))
 	}
 
-	fn references_current_value(&self) -> bool {
-		self.entries.iter().any(|(_, e)| e.references_current_value())
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		self.entries.iter().map(|(_, e)| e.access_mode()).combine_all()
 	}
@@ -140,10 +132,6 @@ impl PhysicalExpr for SetLiteral {
 			set.insert(value);
 		}
 		Ok(Value::Set(set))
-	}
-
-	fn references_current_value(&self) -> bool {
-		self.elements.iter().any(|e| e.references_current_value())
 	}
 
 	fn access_mode(&self) -> AccessMode {

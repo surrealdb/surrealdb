@@ -8,7 +8,7 @@ use tracing::instrument;
 
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatchStream, monitor_stream,
+	OperatorMetrics, PhysicalExpr, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::Value;
@@ -78,8 +78,14 @@ impl ExecOperator for Limit {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Inherit child requirements
-		self.input.required_context()
+		// Combine limit/offset expression contexts with child operator context
+		let exprs_ctx = [self.limit.as_ref(), self.offset.as_ref()]
+			.into_iter()
+			.flatten()
+			.map(|e| e.required_context())
+			.max()
+			.unwrap_or(ContextLevel::Root);
+		exprs_ctx.max(self.input.required_context())
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -110,9 +116,17 @@ impl ExecOperator for Limit {
 		exprs
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		self.input.output_ordering()
+	}
+
 	#[instrument(name = "Limit::execute", level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 
 		let limit_expr = self.limit.clone();
 		let offset_expr = self.offset.clone();

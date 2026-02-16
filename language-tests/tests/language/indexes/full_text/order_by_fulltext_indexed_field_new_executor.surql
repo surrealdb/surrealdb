@@ -14,11 +14,11 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''
-"Project [ctx: Db]
-└────> SortByKey [ctx: Db] [sort_keys: name ASC]
-       └────> Scan [ctx: Db] [source: person]
-"'''
+value = ''''Project [ctx: Db] {rows: 2}
+    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2}
+        TableScan [ctx: Db] [table: person, direction: Forward] {rows: 2}
+
+Total rows: 2''''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }, { name: 'Tobie' }]"
@@ -31,6 +31,6 @@ CREATE person:tobie SET name = 'Tobie', genre='m';
 CREATE person:jaime SET name = 'Jaime', genre='m';
 DEFINE ANALYZER simple TOKENIZERS blank,class FILTERS lowercase;
 DEFINE INDEX ft_name ON TABLE person COLUMNS name FULLTEXT ANALYZER simple BM25(1.2,0.75);
-EXPLAIN SELECT name FROM person ORDER BY name ASC;
+EXPLAIN ANALYZE SELECT name FROM person ORDER BY name ASC;
 SELECT name FROM person ORDER BY name ASC;
 SELECT name FROM person WHERE name @@ 'tobie' ORDER BY name;

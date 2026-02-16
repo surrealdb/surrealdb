@@ -1,6 +1,6 @@
 /**
 [env]
-new-planner-strategy = "best-effort-ro"
+new-planner-strategy = "compute-only"
 
 [test]
 

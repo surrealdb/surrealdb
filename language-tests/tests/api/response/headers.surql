@@ -38,9 +38,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: NULL, headers: { 'from-return': 'return' }, status: 200 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 - Single header via middleware

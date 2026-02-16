@@ -3,55 +3,110 @@
 //! These functions have no dependency on `Planner` or `FrozenContext` and perform
 //! static conversions, validation, or predicate checks.
 
+use crate::catalog::Distance;
 use crate::err::Error;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::expr::field::{Field, Fields};
-use crate::expr::{BinaryOperator, Cond, Expr, Literal};
+use crate::expr::operator::NearestNeighbor;
+use crate::expr::visit::{MutVisitor, Visit, VisitMut, Visitor};
+use crate::expr::{BinaryOperator, Cond, Expr, Idiom, Literal, Param};
+use crate::val::Number;
 
 // ============================================================================
 // Literal / Value Conversion
 // ============================================================================
 
+/// Best-effort conversion of a `Literal` to a `Value`.
+///
+/// Handles all scalar types, simple record IDs (Number/String/Uuid keys), and
+/// arrays of convertible expressions. Returns `None` for types that require
+/// async computation or are otherwise unsupported (Object, Set, Generate keys,
+/// Range keys, etc.).
+///
+/// Used by both the planner (for physical expression compilation) and the index
+/// analyzer (for index matching).
+pub(crate) fn try_literal_to_value(
+	lit: &crate::expr::literal::Literal,
+) -> Option<crate::val::Value> {
+	use crate::expr::literal::Literal;
+	use crate::val::Value;
+
+	match lit {
+		Literal::None => Some(Value::None),
+		Literal::Null => Some(Value::Null),
+		Literal::Bool(x) => Some(Value::Bool(*x)),
+		Literal::Float(x) => Some(Value::Number(Number::Float(*x))),
+		Literal::Integer(i) => Some(Value::Number(Number::Int(*i))),
+		Literal::Decimal(d) => Some(Value::Number(Number::Decimal(*d))),
+		Literal::String(s) => Some(Value::String(s.clone())),
+		Literal::Uuid(u) => Some(Value::Uuid(*u)),
+		Literal::Datetime(dt) => Some(Value::Datetime(dt.clone())),
+		Literal::Duration(d) => Some(Value::Duration(*d)),
+		Literal::RecordId(rid) => {
+			// Convert simple record ID literals (Number, String, Uuid keys).
+			// Complex keys (Array, Object, Generate, Range) may contain
+			// expressions requiring async computation and are skipped.
+			use crate::expr::RecordIdKeyLit;
+			let key = match &rid.key {
+				RecordIdKeyLit::Number(n) => crate::val::RecordIdKey::Number(*n),
+				RecordIdKeyLit::String(s) => crate::val::RecordIdKey::String(s.clone()),
+				RecordIdKeyLit::Uuid(u) => crate::val::RecordIdKey::Uuid(*u),
+				_ => return None,
+			};
+			Some(Value::RecordId(crate::val::RecordId::new(rid.table.clone(), key)))
+		}
+		Literal::Array(arr) => {
+			let values: Option<Vec<Value>> = arr.iter().map(try_expr_to_value).collect();
+			values.map(|v| Value::Array(v.into()))
+		}
+		// Types that cannot be converted without async or are unsupported
+		Literal::Bytes(_)
+		| Literal::Regex(_)
+		| Literal::Geometry(_)
+		| Literal::File(_)
+		| Literal::Object(_)
+		| Literal::Set(_)
+		| Literal::UnboundedRange => None,
+	}
+}
+
+/// Try to convert an expression to a constant value.
+pub(crate) fn try_expr_to_value(expr: &Expr) -> Option<crate::val::Value> {
+	match expr {
+		Expr::Literal(lit) => try_literal_to_value(lit),
+		_ => None,
+	}
+}
+
 /// Convert a `Literal` to a `Value` for static (non-computed) cases.
 ///
-/// Note: `Literal::RecordId` is handled directly in `Planner::physical_expr()`
-/// via `RecordIdExpr`, so it should never reach this function. Array, Object,
-/// and Set literals are similarly handled upstream by the planner.
+/// Delegates to [`try_literal_to_value`] for common types, then handles
+/// planner-specific types (UnboundedRange, Bytes, Regex, Geometry, File).
+/// Returns `Error::Internal` for types that should have been handled upstream
+/// by `physical_expr()` (RecordId, Array, Object, Set).
 pub(super) fn literal_to_value(
 	lit: crate::expr::literal::Literal,
 ) -> Result<crate::val::Value, Error> {
 	use crate::expr::literal::Literal;
-	use crate::val::{Number, Range, Value};
+	use crate::val::{Range, Value};
 
+	// Try the shared conversion first (handles scalars, simple RecordIds, arrays)
+	if let Some(value) = try_literal_to_value(&lit) {
+		return Ok(value);
+	}
+
+	// Handle types that try_literal_to_value doesn't cover but are valid here
 	match lit {
-		Literal::None => Ok(Value::None),
-		Literal::Null => Ok(Value::Null),
 		Literal::UnboundedRange => Ok(Value::Range(Box::new(Range::unbounded()))),
-		Literal::Bool(x) => Ok(Value::Bool(x)),
-		Literal::Float(x) => Ok(Value::Number(Number::Float(x))),
-		Literal::Integer(i) => Ok(Value::Number(Number::Int(i))),
-		Literal::Decimal(d) => Ok(Value::Number(Number::Decimal(d))),
-		Literal::String(s) => Ok(Value::String(s)),
 		Literal::Bytes(b) => Ok(Value::Bytes(b)),
 		Literal::Regex(r) => Ok(Value::Regex(r)),
-		Literal::Duration(d) => Ok(Value::Duration(d)),
-		Literal::Datetime(dt) => Ok(Value::Datetime(dt)),
-		Literal::Uuid(u) => Ok(Value::Uuid(u)),
 		Literal::Geometry(g) => Ok(Value::Geometry(g)),
 		Literal::File(f) => Ok(Value::File(f)),
-		// RecordId is handled by RecordIdExpr in physical_expr() before reaching here.
-		Literal::RecordId(_) => Err(Error::PlannerUnimplemented(
-			"Literal::RecordId should be handled by RecordIdExpr in physical_expr()".to_string(),
-		)),
-		Literal::Array(_) => Err(Error::PlannerUnimplemented(
-			"Array literals in USE statements not yet supported".to_string(),
-		)),
-		Literal::Set(_) => Err(Error::PlannerUnimplemented(
-			"Set literals in USE statements not yet supported".to_string(),
-		)),
-		Literal::Object(_) => Err(Error::PlannerUnimplemented(
-			"Object literals in USE statements not yet supported".to_string(),
-		)),
+		// Everything else should be handled upstream in physical_expr()
+		other => Err(Error::Internal(format!(
+			"Literal should be handled upstream in physical_expr(): {:?}",
+			std::mem::discriminant(&other)
+		))),
 	}
 }
 
@@ -70,9 +125,13 @@ pub(super) fn key_lit_to_expr(lit: &crate::expr::RecordIdKeyLit) -> Result<Expr,
 		RecordIdKeyLit::Object(entries) => {
 			Ok(Expr::Literal(crate::expr::literal::Literal::Object(entries.clone())))
 		}
-		RecordIdKeyLit::Generate(_) | RecordIdKeyLit::Range(_) => Err(Error::PlannerUnimplemented(
-			"Generated/range keys in graph range bounds".to_string(),
-		)),
+		RecordIdKeyLit::Generate(_) => Err(Error::Query {
+			message: "Generated keys (rand, ulid, uuid) cannot be used in graph range bounds"
+				.to_string(),
+		}),
+		RecordIdKeyLit::Range(_) => Err(Error::Query {
+			message: "Nested range keys cannot be used in graph range bounds".to_string(),
+		}),
 	}
 }
 
@@ -80,24 +139,531 @@ pub(super) fn key_lit_to_expr(lit: &crate::expr::RecordIdKeyLit) -> Result<Expr,
 // Predicate / Validation Helpers
 // ============================================================================
 
-/// Check if an expression contains KNN (vector search) operators.
-pub(super) fn contains_knn_operator(expr: &Expr) -> bool {
+/// Check if a condition has a top-level OR operator.
+///
+/// Used to prevent LIMIT/START pushdown into Scan when the condition may
+/// trigger a multi-index union at runtime. Union streams don't maintain
+/// a global ordering, so pushing LIMIT would truncate results arbitrarily.
+pub(super) fn has_top_level_or(cond: Option<&Cond>) -> bool {
+	match cond {
+		Some(c) => matches!(
+			c.0,
+			Expr::Binary {
+				op: BinaryOperator::Or,
+				..
+			}
+		),
+		None => false,
+	}
+}
+
+/// Check if an expression contains any KNN (nearest neighbor) operators.
+pub(super) fn has_knn_operator(expr: &Expr) -> bool {
+	let mut checker = KnnOperatorChecker {
+		found_any: false,
+		found_k: false,
+	};
+	let _ = checker.visit_expr(expr);
+	checker.found_any
+}
+
+/// Check if an expression contains a brute-force KNN operator (`NearestNeighbor::K`).
+///
+/// Used to distinguish between brute-force KNN with parameter-based vectors
+/// (where `extract_bruteforce_knn` fails) and HNSW KNN (`Approximate`).
+pub(super) fn has_knn_k_operator(expr: &Expr) -> bool {
+	let mut checker = KnnOperatorChecker {
+		found_any: false,
+		found_k: false,
+	};
+	let _ = checker.visit_expr(expr);
+	checker.found_k
+}
+
+/// Visitor that detects the presence of KNN operators in an expression tree.
+struct KnnOperatorChecker {
+	found_any: bool,
+	found_k: bool,
+}
+
+impl Visitor for KnnOperatorChecker {
+	type Error = std::convert::Infallible;
+
+	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
+		if let Expr::Binary {
+			op: BinaryOperator::NearestNeighbor(nn),
+			..
+		} = expr
+		{
+			self.found_any = true;
+			if matches!(nn.as_ref(), NearestNeighbor::K(..)) {
+				self.found_k = true;
+			}
+		}
+		expr.visit(self)
+	}
+
+	// Don't descend into subqueries -- only check outer WHERE.
+	fn visit_select(&mut self, _: &crate::expr::SelectStatement) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
+/// Parameters extracted from a brute-force KNN expression.
+pub(super) struct BruteForceKnnParams {
+	/// The idiom path to the vector field.
+	pub field: Idiom,
+	/// The query vector.
+	pub vector: Vec<Number>,
+	/// Number of nearest neighbors.
+	pub k: u32,
+	/// Distance metric.
+	pub distance: Distance,
+}
+
+/// Extract brute-force KNN parameters from a WHERE clause.
+///
+/// Returns the parameters if a `NearestNeighbor::K(k, dist)` expression is
+/// found at the top level of AND-connected conditions.
+pub(super) fn extract_bruteforce_knn(cond: &Cond) -> Option<BruteForceKnnParams> {
+	let mut expr = cond.0.clone();
+	let mut extractor = BruteForceKnnExtractor {
+		params: None,
+	};
+	let _ = extractor.visit_mut_expr(&mut expr);
+	extractor.params
+}
+
+/// Strip handled KNN operators from a WHERE clause, returning the residual condition.
+///
+/// Both `NearestNeighbor::K` (consumed by `KnnTopK`) and `NearestNeighbor::Approximate`
+/// (consumed by `KnnScan` via HNSW index) are stripped. `KTree` is left in place --
+/// the caller should verify the residual contains no remaining KNN operators and
+/// return an error if it does.
+pub(crate) fn strip_knn_from_condition(cond: &Cond) -> Option<Cond> {
+	let mut expr = cond.0.clone();
+	let _ = KnnStripper.visit_mut_expr(&mut expr);
+	let _ = BoolSimplifier.visit_mut_expr(&mut expr);
+	if matches!(expr, Expr::Literal(Literal::Bool(true))) {
+		None
+	} else {
+		Some(Cond(expr))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Index condition stripping
+// ---------------------------------------------------------------------------
+
+/// Strip conditions covered by a BTree index access path from a WHERE clause.
+///
+/// Returns `None` when all conditions are consumed (no Filter needed),
+/// or `Some(residual)` when conditions remain that the index does not cover.
+///
+/// Follows the same pattern as [`strip_knn_from_condition`]: clone the
+/// expression tree, replace matched leaves with `Literal(true)`, then run
+/// [`BoolSimplifier`] to collapse sentinels.
+pub(crate) fn strip_index_conditions(
+	cond: &Cond,
+	access: &crate::exec::index::access_path::BTreeAccess,
+	cols: &[Idiom],
+) -> Option<Cond> {
+	let mut expr = cond.0.clone();
+	let mut stripper = IndexConditionStripper {
+		cols,
+		access,
+	};
+	let _ = stripper.visit_mut_expr(&mut expr);
+	let _ = BoolSimplifier.visit_mut_expr(&mut expr);
+	if matches!(expr, Expr::Literal(Literal::Bool(true))) {
+		None
+	} else {
+		Some(Cond(expr))
+	}
+}
+
+/// Replaces index-covered comparison leaves in an AND tree with
+/// `Literal::Bool(true)`. Run [`BoolSimplifier`] afterwards to collapse
+/// the resulting `true AND x` chains.
+struct IndexConditionStripper<'a> {
+	/// Index columns in definition order.
+	cols: &'a [Idiom],
+	/// The chosen access pattern describing which conditions are covered.
+	access: &'a crate::exec::index::access_path::BTreeAccess,
+}
+
+impl IndexConditionStripper<'_> {
+	/// Check whether a binary comparison leaf is covered by the access pattern.
+	fn matches_access(&self, left: &Expr, op: &BinaryOperator, right: &Expr) -> bool {
+		use crate::exec::index::access_path::BTreeAccess;
+
+		// Extract idiom, value, and the effective operator (normalized so the
+		// idiom is always on the left side of the comparison).
+		let (idiom, value, effective_op) = match (left, right) {
+			(Expr::Idiom(i), Expr::Literal(lit)) => {
+				if let Some(v) = try_literal_to_value(lit) {
+					(i, v, op.clone())
+				} else {
+					return false;
+				}
+			}
+			(Expr::Literal(lit), Expr::Idiom(i)) => {
+				if let Some(v) = try_literal_to_value(lit) {
+					let flipped = match op {
+						BinaryOperator::LessThan => BinaryOperator::MoreThan,
+						BinaryOperator::LessThanEqual => BinaryOperator::MoreThanEqual,
+						BinaryOperator::MoreThan => BinaryOperator::LessThan,
+						BinaryOperator::MoreThanEqual => BinaryOperator::LessThanEqual,
+						other => other.clone(),
+					};
+					(i, v, flipped)
+				} else {
+					return false;
+				}
+			}
+			_ => return false,
+		};
+
+		let is_equality =
+			matches!(effective_op, BinaryOperator::Equal | BinaryOperator::ExactEqual);
+
+		match self.access {
+			BTreeAccess::Compound {
+				prefix,
+				range,
+			} => {
+				// Check equality conditions against prefix values.
+				if is_equality {
+					for (col, val) in self.cols.iter().zip(prefix.iter()) {
+						if idiom == col && value == *val {
+							return true;
+						}
+					}
+				}
+				// Check range condition on the column after the prefix.
+				if let Some((range_op, range_val)) = range
+					&& let Some(col) = self.cols.get(prefix.len())
+					&& idiom == col && effective_op == *range_op
+					&& value == *range_val
+				{
+					return true;
+				}
+				false
+			}
+			BTreeAccess::Equality(val) => {
+				if let Some(col) = self.cols.first() {
+					is_equality && idiom == col && value == *val
+				} else {
+					false
+				}
+			}
+			BTreeAccess::Range {
+				from,
+				to,
+			} => {
+				let Some(col) = self.cols.first() else {
+					return false;
+				};
+				if idiom != col {
+					return false;
+				}
+				// Check the from (lower) bound.
+				if let Some(from) = from {
+					let expected_op = if from.inclusive {
+						BinaryOperator::MoreThanEqual
+					} else {
+						BinaryOperator::MoreThan
+					};
+					if effective_op == expected_op && value == from.value {
+						return true;
+					}
+				}
+				// Check the to (upper) bound.
+				if let Some(to) = to {
+					let expected_op = if to.inclusive {
+						BinaryOperator::LessThanEqual
+					} else {
+						BinaryOperator::LessThan
+					};
+					if effective_op == expected_op && value == to.value {
+						return true;
+					}
+				}
+				false
+			}
+			// FullText and KNN access types have their own stripping logic.
+			_ => false,
+		}
+	}
+}
+
+impl MutVisitor for IndexConditionStripper<'_> {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		match expr {
+			// Recurse into AND branches.
+			Expr::Binary {
+				left,
+				op: BinaryOperator::And,
+				right,
+			} => {
+				self.visit_mut_expr(left)?;
+				self.visit_mut_expr(right)?;
+			}
+			// Leaf comparison — check if the index covers it.
+			Expr::Binary {
+				left,
+				op,
+				right,
+			} => {
+				if self.matches_access(left, op, right) {
+					*expr = Expr::Literal(Literal::Bool(true));
+				}
+			}
+			_ => {}
+		}
+		Ok(())
+	}
+
+	// Don't descend into subqueries.
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// MutVisitors for KNN condition rewriting
+// ---------------------------------------------------------------------------
+
+/// Replaces handled KNN expressions (`NearestNeighbor::K` and
+/// `NearestNeighbor::Approximate`) with `Literal::Bool(true)`.
+/// Run `BoolSimplifier` afterwards to collapse the resulting
+/// `true AND x` chains.
+struct KnnStripper;
+
+impl MutVisitor for KnnStripper {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		// Replace handled KNN expressions with `true`.
+		if let Expr::Binary {
+			op: BinaryOperator::NearestNeighbor(nn),
+			..
+		} = expr && matches!(
+			nn.as_ref(),
+			NearestNeighbor::K(..) | NearestNeighbor::Approximate(..)
+		) {
+			*expr = Expr::Literal(Literal::Bool(true));
+			return Ok(());
+		}
+		// Only recurse into AND chains. KNN operators nested under OR/NOT
+		// must be preserved so that `has_knn_operator` can detect and reject
+		// those unsupported shapes.
+		if let Expr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} = expr
+		{
+			self.visit_mut_expr(left)?;
+			self.visit_mut_expr(right)?;
+		}
+		Ok(())
+	}
+
+	// Don't strip KNN inside subqueries -- only top-level WHERE.
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
+/// Extracts a single brute-force KNN (`NearestNeighbor::K`) expression,
+/// replacing it with `Literal::Bool(true)`. The extracted parameters are
+/// stashed in `params`.
+struct BruteForceKnnExtractor {
+	params: Option<BruteForceKnnParams>,
+}
+
+impl MutVisitor for BruteForceKnnExtractor {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		// Already found one -- stop looking.
+		if self.params.is_some() {
+			return Ok(());
+		}
+		if let Expr::Binary {
+			left,
+			op: BinaryOperator::NearestNeighbor(nn),
+			right,
+		} = expr && let NearestNeighbor::K(k, dist) = nn.as_ref()
+			&& let Expr::Idiom(idiom) = left.as_ref()
+			&& let Some(vector) = extract_literal_vector(right)
+		{
+			self.params = Some(BruteForceKnnParams {
+				field: idiom.clone(),
+				vector,
+				k: *k,
+				distance: dist.clone(),
+			});
+			*expr = Expr::Literal(Literal::Bool(true));
+			return Ok(());
+		}
+		expr.visit_mut(self)
+	}
+
+	// Don't descend into subqueries.
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
+/// Reusable postorder pass that collapses boolean-literal sentinels in AND
+/// chains: `true AND x → x`, `x AND true → x`, `true AND true → true`.
+///
+/// Used after `KnnStripper` / `BruteForceKnnExtractor` to clean up the tree.
+struct BoolSimplifier;
+
+impl MutVisitor for BoolSimplifier {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		// Postorder: recurse first, then simplify this node.
+		expr.visit_mut(self)?;
+
+		if let Expr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} = expr
+		{
+			let l_true = matches!(left.as_ref(), Expr::Literal(Literal::Bool(true)));
+			let r_true = matches!(right.as_ref(), Expr::Literal(Literal::Bool(true)));
+			match (l_true, r_true) {
+				(true, true) => *expr = Expr::Literal(Literal::Bool(true)),
+				(true, false) => {
+					let r = std::mem::replace(right.as_mut(), Expr::Literal(Literal::None));
+					*expr = r;
+				}
+				(false, true) => {
+					let l = std::mem::replace(left.as_mut(), Expr::Literal(Literal::None));
+					*expr = l;
+				}
+				_ => {}
+			}
+		}
+		Ok(())
+	}
+
+	// Don't descend into subqueries.
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
+/// Extract a `Vec<Number>` from a literal array expression.
+fn extract_literal_vector(expr: &Expr) -> Option<Vec<Number>> {
 	match expr {
+		Expr::Literal(lit) => {
+			if let Literal::Array(arr) = lit {
+				let mut nums = Vec::with_capacity(arr.len());
+				for elem in arr.iter() {
+					match elem {
+						Expr::Literal(Literal::Integer(i)) => {
+							nums.push(Number::Int(*i));
+						}
+						Expr::Literal(Literal::Float(f)) => {
+							nums.push(Number::Float(*f));
+						}
+						Expr::Literal(Literal::Decimal(d)) => {
+							nums.push(Number::Decimal(*d));
+						}
+						_ => return None,
+					}
+				}
+				Some(nums)
+			} else {
+				None
+			}
+		}
+		_ => None,
+	}
+}
+
+// ============================================================================
+// Record ID Point-Lookup Extraction
+// ============================================================================
+
+/// Check whether a WHERE condition contains `id = <RecordId literal>` in its
+/// top-level AND chain, where the RecordId's table matches the FROM table.
+///
+/// Returns the `RecordId` literal expression when found, `None` otherwise.
+/// Does NOT extract from OR branches (those require a full table scan).
+///
+/// This enables the planner to convert `SELECT * FROM table WHERE id = table:x`
+/// into a direct point lookup (`RecordIdScan`) instead of a full table scan.
+///
+/// Only matches point-key RecordIds (not range keys like `table:1..5`).
+pub(super) fn extract_record_id_point_lookup(
+	cond: &Cond,
+	table_name: &crate::val::TableName,
+) -> Option<Expr> {
+	find_id_equality_in_and_chain(&cond.0, table_name)
+}
+
+/// Walk the top-level AND chain looking for `id = <RecordId literal>`.
+fn find_id_equality_in_and_chain(expr: &Expr, table_name: &crate::val::TableName) -> Option<Expr> {
+	match expr {
+		// AND: check both branches
 		Expr::Binary {
 			left,
-			op,
+			op: BinaryOperator::And,
 			right,
-		} => {
-			if matches!(op, BinaryOperator::NearestNeighbor(_)) {
-				return true;
-			}
-			contains_knn_operator(left) || contains_knn_operator(right)
-		}
-		Expr::Prefix {
-			expr: inner,
-			..
-		} => contains_knn_operator(inner),
-		_ => false,
+		} => find_id_equality_in_and_chain(left, table_name)
+			.or_else(|| find_id_equality_in_and_chain(right, table_name)),
+
+		// Equality: check for `id = <RecordId>` or `<RecordId> = id`
+		Expr::Binary {
+			left,
+			op: BinaryOperator::Equal | BinaryOperator::ExactEqual,
+			right,
+		} => check_id_recordid_pair(left, right, table_name)
+			.or_else(|| check_id_recordid_pair(right, left, table_name)),
+
+		// Any other node (OR, comparisons, etc.): no match
+		_ => None,
+	}
+}
+
+/// Check if `idiom_side` is the `id` idiom and `lit_side` is a matching
+/// RecordId literal with a non-range key.
+fn check_id_recordid_pair(
+	idiom_side: &Expr,
+	lit_side: &Expr,
+	table_name: &crate::val::TableName,
+) -> Option<Expr> {
+	if let Expr::Idiom(idiom) = idiom_side
+		&& idiom.is_id()
+		&& let Expr::Literal(Literal::RecordId(rid)) = lit_side
+		&& &rid.table == table_name
+		&& !matches!(rid.key, crate::expr::RecordIdKeyLit::Range(_))
+	{
+		Some(lit_side.clone())
+	} else {
+		None
 	}
 }
 
@@ -131,46 +697,40 @@ pub(super) fn all_value_sources(sources: &[Expr]) -> bool {
 
 /// Extract MATCHES clause information from a WHERE condition for index functions.
 pub(super) fn extract_matches_context(cond: &Cond) -> crate::exec::function::MatchesContext {
-	let mut ctx = crate::exec::function::MatchesContext::new();
-	collect_matches(&cond.0, &mut ctx);
-	ctx
+	let mut collector = MatchesCollector(crate::exec::function::MatchesContext::new());
+	let _ = collector.visit_expr(&cond.0);
+	collector.0
 }
 
-fn collect_matches(expr: &Expr, ctx: &mut crate::exec::function::MatchesContext) {
-	match expr {
-		Expr::Binary {
+/// Visitor that collects MATCHES clause entries from expression trees.
+struct MatchesCollector(crate::exec::function::MatchesContext);
+
+impl Visitor for MatchesCollector {
+	type Error = std::convert::Infallible;
+
+	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
+		if let Expr::Binary {
 			left,
 			op: BinaryOperator::Matches(matches_op),
 			right,
-		} => {
-			if let Expr::Idiom(idiom) = left.as_ref() {
-				let query = match right.as_ref() {
-					Expr::Literal(Literal::String(s)) => s.clone(),
-					_ => return,
-				};
-				let match_ref = matches_op.rf.unwrap_or(0);
-				ctx.insert(
-					match_ref,
-					crate::exec::function::MatchInfo {
-						idiom: idiom.clone(),
-						query,
-					},
-				);
-			}
+		} = expr && let Expr::Idiom(idiom) = left.as_ref()
+			&& let Expr::Literal(Literal::String(s)) = right.as_ref()
+		{
+			let match_ref = matches_op.rf.unwrap_or(0);
+			self.0.insert(
+				match_ref,
+				crate::exec::function::MatchInfo {
+					idiom: idiom.clone(),
+					query: s.clone(),
+				},
+			);
 		}
-		Expr::Binary {
-			left,
-			right,
-			..
-		} => {
-			collect_matches(left, ctx);
-			collect_matches(right, ctx);
-		}
-		Expr::Prefix {
-			expr: inner,
-			..
-		} => collect_matches(inner, ctx),
-		_ => {}
+		expr.visit(self)
+	}
+
+	// Don't descend into subqueries -- only collect outer MATCHES.
+	fn visit_select(&mut self, _: &crate::expr::SelectStatement) -> Result<(), Self::Error> {
+		Ok(())
 	}
 }
 
@@ -192,14 +752,14 @@ pub(super) fn extract_table_from_context(ctx: &crate::ctx::FrozenContext) -> cra
 ///
 /// Returns a physical expression that, when evaluated at execution time,
 /// produces the version timestamp (u64).
-pub(super) fn extract_version(
+pub(super) async fn extract_version(
 	version_expr: Expr,
-	planner: &super::Planner,
+	planner: &super::Planner<'_>,
 ) -> Result<Option<std::sync::Arc<dyn crate::exec::PhysicalExpr>>, Error> {
 	match version_expr {
 		Expr::Literal(Literal::None) => Ok(None),
 		_ => {
-			let expr = planner.physical_expr(version_expr)?;
+			let expr = planner.physical_expr(version_expr).await?;
 			Ok(Some(expr))
 		}
 	}
@@ -228,105 +788,30 @@ pub(super) fn check_forbidden_group_by_params(fields: &Fields) -> Result<(), Err
 }
 
 fn check_expr_for_forbidden_params(expr: &Expr) -> Result<(), Error> {
-	match expr {
-		Expr::Param(param) => {
-			let name = param.as_str();
-			if name == "this" || name == "self" {
-				return Err(Error::Query {
-					message: "Found a `$this` parameter refering to the document of a group by select statement\nSelect statements with a group by currently have no defined document to refer to".to_string(),
-				});
-			}
-			if name == "parent" {
-				return Err(Error::Query {
-					message: "Found a `$parent` parameter refering to the document of a GROUP select statement\nSelect statements with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string(),
-				});
-			}
-			Ok(())
+	expr.visit(&mut ForbiddenParamChecker)
+}
+
+/// Visitor that detects `$this`, `$self`, or `$parent` parameters which are
+/// invalid inside GROUP BY projections. The default `visit_expr`
+/// implementation handles all the recursion; we only need to inspect params.
+struct ForbiddenParamChecker;
+
+impl Visitor for ForbiddenParamChecker {
+	type Error = Error;
+
+	fn visit_param(&mut self, param: &Param) -> Result<(), Self::Error> {
+		let name = param.as_str();
+		if name == "this" || name == "self" {
+			return Err(Error::Query {
+				message: "Found a `$this` parameter refering to the document of a group by select statement\nSelect statements with a group by currently have no defined document to refer to".to_string(),
+			});
 		}
-		Expr::Binary {
-			left,
-			right,
-			..
-		} => {
-			check_expr_for_forbidden_params(left)?;
-			check_expr_for_forbidden_params(right)
+		if name == "parent" {
+			return Err(Error::Query {
+				message: "Found a `$parent` parameter refering to the document of a GROUP select statement\nSelect statements with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string(),
+			});
 		}
-		Expr::Prefix {
-			expr,
-			..
-		} => check_expr_for_forbidden_params(expr),
-		Expr::Postfix {
-			expr,
-			..
-		} => check_expr_for_forbidden_params(expr),
-		Expr::FunctionCall(fc) => {
-			for arg in &fc.arguments {
-				check_expr_for_forbidden_params(arg)?;
-			}
-			Ok(())
-		}
-		Expr::Literal(Literal::Array(elements)) => {
-			for elem in elements {
-				check_expr_for_forbidden_params(elem)?;
-			}
-			Ok(())
-		}
-		Expr::Literal(Literal::Object(entries)) => {
-			for entry in entries {
-				check_expr_for_forbidden_params(&entry.value)?;
-			}
-			Ok(())
-		}
-		Expr::Select(select) => match &select.fields {
-			Fields::Value(selector) => check_expr_for_forbidden_params(&selector.expr),
-			Fields::Select(field_list) => {
-				for field in field_list {
-					if let Field::Single(selector) = field {
-						check_expr_for_forbidden_params(&selector.expr)?;
-					}
-				}
-				Ok(())
-			}
-		},
-		Expr::Block(block) => {
-			for stmt in &block.0 {
-				check_expr_for_forbidden_params(stmt)?;
-			}
-			Ok(())
-		}
-		Expr::IfElse(ifelse) => {
-			for (cond, body) in &ifelse.exprs {
-				check_expr_for_forbidden_params(cond)?;
-				check_expr_for_forbidden_params(body)?;
-			}
-			if let Some(close) = &ifelse.close {
-				check_expr_for_forbidden_params(close)?;
-			}
-			Ok(())
-		}
-		Expr::Closure(closure) => check_expr_for_forbidden_params(&closure.body),
-		Expr::Idiom(idiom) => {
-			for part in &idiom.0 {
-				match part {
-					crate::expr::Part::Start(expr)
-					| crate::expr::Part::Where(expr)
-					| crate::expr::Part::Value(expr) => {
-						check_expr_for_forbidden_params(expr)?;
-					}
-					crate::expr::Part::Method(_, args) => {
-						for arg in args {
-							check_expr_for_forbidden_params(arg)?;
-						}
-					}
-					_ => {}
-				}
-			}
-			Ok(())
-		}
-		Expr::Literal(_) | Expr::Constant(_) | Expr::Table(_) | Expr::Break | Expr::Continue => {
-			Ok(())
-		}
-		_ => Ok(()),
+		Ok(())
 	}
 }
 
@@ -350,20 +835,73 @@ pub(super) fn order_is_scan_compatible(order: &Option<crate::expr::order::Orderi
 	}
 }
 
-/// Check if LIMIT/START can be pushed down into the Scan operator.
+/// Check if an index + scan direction satisfies the given ORDER BY.
 ///
-/// This is safe when no pipeline operator between Scan and Limit changes
-/// row cardinality. Note that WHERE does NOT block pushdown because the
-/// filter predicate is also pushed into Scan.
-pub(super) fn can_push_limit_to_scan(
-	split: &Option<crate::expr::split::Splits>,
-	group: &Option<crate::expr::group::Groups>,
-	order: &Option<crate::expr::order::Ordering>,
+/// Builds the same `SortProperty` vector that `IndexScan::output_ordering()`
+/// would produce and checks whether it satisfies the ORDER BY requirements.
+/// This allows the planner to decide on limit pushdown before the IndexScan
+/// operator is created.
+pub(super) fn index_covers_ordering(
+	index_ref: &crate::exec::index::access_path::IndexRef,
+	direction: crate::idx::planner::ScanDirection,
+	order: &crate::expr::order::Ordering,
 ) -> bool {
-	if split.is_some() || group.is_some() {
+	use crate::exec::operators::SortDirection;
+	use crate::exec::ordering::{OutputOrdering, SortProperty};
+	use crate::expr::order::Ordering;
+
+	let Ordering::Order(order_list) = order else {
+		return false; // Random ordering can't be satisfied by an index
+	};
+
+	// Convert ORDER BY to required SortProperty
+	let required: Vec<SortProperty> = order_list
+		.iter()
+		.filter_map(|field| {
+			crate::exec::field_path::FieldPath::try_from(&field.value).ok().map(|path| {
+				let direction = if field.direction {
+					SortDirection::Asc
+				} else {
+					SortDirection::Desc
+				};
+				SortProperty {
+					path,
+					direction,
+					collate: field.collate,
+					numeric: field.numeric,
+				}
+			})
+		})
+		.collect();
+
+	if required.len() != order_list.len() {
 		return false;
 	}
-	order_is_scan_compatible(order)
+
+	// Build the index ordering (same as IndexScan::output_ordering())
+	let dir = match direction {
+		crate::idx::planner::ScanDirection::Forward => SortDirection::Asc,
+		crate::idx::planner::ScanDirection::Backward => SortDirection::Desc,
+	};
+	let ix_def = index_ref.definition();
+	let cols: Vec<SortProperty> = ix_def
+		.cols
+		.iter()
+		.filter_map(|idiom| {
+			crate::exec::field_path::FieldPath::try_from(idiom).ok().map(|path| SortProperty {
+				path,
+				direction: dir,
+				collate: false,
+				numeric: false,
+			})
+		})
+		.collect();
+
+	if cols.is_empty() {
+		return false;
+	}
+
+	OutputOrdering::Sorted(cols).satisfies(&required)
 }
 
 // ============================================================================

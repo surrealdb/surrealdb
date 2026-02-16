@@ -7,12 +7,10 @@
 ))]
 
 use std::future::Future;
-use std::sync::Arc;
 
 use uuid::Uuid;
 
 use super::Datastore;
-use crate::kvs::clock::SizedClock;
 
 macro_rules! include_tests {
 	($new_ds:ident => $($name:ident),* $(,)?) => {
@@ -32,7 +30,6 @@ mod multiwriter_same_keys_conflict;
 mod raw;
 #[cfg(feature = "kv-rocksdb")]
 mod read_and_deletion_only;
-mod reverse_iterator;
 mod snapshot;
 #[cfg(feature = "kv-mem")]
 mod tx_cache_test;
@@ -49,21 +46,17 @@ pub(crate) enum Kvs {
 	SurrealKV,
 }
 
-// This type is unused when no store is enabled.
-#[cfg_attr(not(test), expect(dead_code))]
-type ClockType = Arc<SizedClock>;
-
 trait CreateDs {
-	async fn create_ds(&self, id: Uuid, ty: ClockType) -> (Datastore, Kvs);
+	async fn create_ds(&self, id: Uuid) -> (Datastore, Kvs);
 }
 
 impl<F, Fut> CreateDs for F
 where
-	F: Fn(Uuid, ClockType) -> Fut,
+	F: Fn(Uuid) -> Fut,
 	Fut: Future<Output = (Datastore, Kvs)>,
 {
-	async fn create_ds(&self, id: Uuid, ty: ClockType) -> (Datastore, Kvs) {
-		(self)(id, ty).await
+	async fn create_ds(&self, id: Uuid) -> (Datastore, Kvs) {
+		(self)(id).await
 	}
 }
 
@@ -72,23 +65,18 @@ mod mem {
 	use tokio_util::sync::CancellationToken;
 	use uuid::Uuid;
 
-	use super::{ClockType, Kvs};
+	use super::Kvs;
 	use crate::CommunityComposer;
 	use crate::kvs::Datastore;
 
-	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
+	async fn new_ds(id: Uuid) -> (Datastore, Kvs) {
 		// Use a memory datastore instance
 		let path = "memory";
 		// Setup the in-memory datastore
-		let ds = Datastore::new_with_clock(
-			CommunityComposer(),
-			path,
-			Some(clock),
-			CancellationToken::new(),
-		)
-		.await
-		.unwrap()
-		.with_node_id(id);
+		let ds = Datastore::new_with_factory(CommunityComposer(), path, CancellationToken::new())
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::Mem)
 	}
@@ -99,7 +87,6 @@ mod mem {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
-		reverse_iterator,
 	);
 }
 
@@ -109,24 +96,19 @@ mod rocksdb {
 	use tokio_util::sync::CancellationToken;
 	use uuid::Uuid;
 
-	use super::{ClockType, Kvs};
+	use super::Kvs;
 	use crate::CommunityComposer;
 	use crate::kvs::Datastore;
 
-	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
+	async fn new_ds(id: Uuid) -> (Datastore, Kvs) {
 		// Setup the temporary data storage path
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		let path = format!("rocksdb:{path}");
 		// Setup the RocksDB datastore
-		let ds = Datastore::new_with_clock(
-			CommunityComposer(),
-			&path,
-			Some(clock),
-			CancellationToken::new(),
-		)
-		.await
-		.unwrap()
-		.with_node_id(id);
+		let ds = Datastore::new_with_factory(CommunityComposer(), &path, CancellationToken::new())
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::Rocksdb)
 	}
@@ -137,7 +119,6 @@ mod rocksdb {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
-		reverse_iterator,
 		read_and_deletion_only,
 		metrics
 	);
@@ -149,24 +130,19 @@ mod surrealkv {
 	use tokio_util::sync::CancellationToken;
 	use uuid::Uuid;
 
-	use super::{ClockType, Kvs};
+	use super::Kvs;
 	use crate::CommunityComposer;
 	use crate::kvs::Datastore;
 
-	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
+	async fn new_ds(id: Uuid) -> (Datastore, Kvs) {
 		// Setup the temporary data storage path
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		let path = format!("surrealkv:{path}");
 		// Setup the SurrealKV datastore
-		let ds = Datastore::new_with_clock(
-			CommunityComposer(),
-			&path,
-			Some(clock),
-			CancellationToken::new(),
-		)
-		.await
-		.unwrap()
-		.with_node_id(id);
+		let ds = Datastore::new_with_factory(CommunityComposer(), &path, CancellationToken::new())
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::SurrealKV)
 	}
@@ -177,7 +153,6 @@ mod surrealkv {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
-		reverse_iterator,
 	);
 }
 
@@ -186,23 +161,18 @@ mod tikv {
 	use tokio_util::sync::CancellationToken;
 	use uuid::Uuid;
 
-	use super::{ClockType, Kvs};
+	use super::Kvs;
 	use crate::CommunityComposer;
 	use crate::kvs::{Datastore, LockType, TransactionType};
 
-	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
+	async fn new_ds(id: Uuid) -> (Datastore, Kvs) {
 		// Setup the cluster connection string
 		let path = "tikv:127.0.0.1:2379";
 		// Setup the TiKV datastore
-		let ds = Datastore::new_with_clock(
-			CommunityComposer(),
-			path,
-			Some(clock),
-			CancellationToken::new(),
-		)
-		.await
-		.unwrap()
-		.with_node_id(id);
+		let ds = Datastore::new_with_factory(CommunityComposer(), path, CancellationToken::new())
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Clear any previous test entries
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
 		tx.delr(vec![0u8]..vec![0xffu8]).await.unwrap();
@@ -217,6 +187,5 @@ mod tikv {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_allow,
-		reverse_iterator,
 	);
 }

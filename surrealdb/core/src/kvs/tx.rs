@@ -248,6 +248,101 @@ impl Transaction {
 			.collect()
 	}
 
+	/// Fetch many records by ID in a single batch, with cache awareness.
+	///
+	/// For each record ID, checks the transaction cache first. Cache misses are
+	/// fetched in one batch via the store's multi-get, then results are merged
+	/// and returned in the same order as `rids`. Populates the cache with newly
+	/// fetched records.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub(crate) async fn getm_records(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		rids: &[RecordId],
+		version: Option<u64>,
+	) -> Result<Vec<Arc<Record>>> {
+		if rids.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		// Cache is not versioned — bypass it entirely for historical reads
+		if version.is_some() {
+			let keys: Vec<crate::key::record::RecordKey<'_>> = rids
+				.iter()
+				.map(|rid| crate::key::record::new(ns, db, &rid.table, &rid.key))
+				.collect();
+
+			let values = self.getm(keys, version).await?;
+
+			return values
+				.into_iter()
+				.zip(rids)
+				.map(|(opt_val, rid)| {
+					Ok(match opt_val {
+						Some(mut record) => {
+							record.data.to_mut().def(rid);
+							record.into_read_only()
+						}
+						None => Arc::new(Default::default()),
+					})
+				})
+				.collect::<Result<Vec<_>, _>>();
+		}
+
+		// Phase 1: check cache, collect hits and indices of misses
+		let mut out: Vec<Option<Arc<Record>>> = vec![None; rids.len()];
+		let mut uncached_rids: Vec<(usize, &RecordId)> = Vec::new();
+
+		for (i, rid) in rids.iter().enumerate() {
+			let qey = cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
+			if let Some(entry) = self.cache.get(&qey) {
+				out[i] = Some(entry.try_into_record()?);
+			} else {
+				uncached_rids.push((i, rid));
+			}
+		}
+
+		// Phase 2: batch fetch uncached keys
+		if uncached_rids.is_empty() {
+			return out
+				.into_iter()
+				.map(|o| {
+					o.ok_or_else(|| Error::Internal("missing record in multi-get batch".into()))
+				})
+				.collect::<Result<Vec<_>, _>>()
+				.map_err(Into::into);
+		}
+
+		let keys: Vec<crate::key::record::RecordKey<'_>> = uncached_rids
+			.iter()
+			.map(|(_, rid)| crate::key::record::new(ns, db, &rid.table, &rid.key))
+			.collect();
+
+		let values = self.getm(keys, None).await?;
+
+		// Phase 3: post-process fetched records and merge into output
+		for (j, opt_val) in values.into_iter().enumerate() {
+			let (i, rid) = uncached_rids[j];
+			let record = match opt_val {
+				Some(mut record) => {
+					record.data.to_mut().def(rid);
+					let record = record.into_read_only();
+					let qey = cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
+					self.cache.insert(qey, cache::tx::Entry::Val(record.clone()));
+					record
+				}
+				None => Arc::new(Default::default()),
+			};
+			out[i] = Some(record);
+		}
+
+		out.into_iter()
+			.map(|o| o.ok_or_else(|| Error::Internal("missing record in multi-get batch".into())))
+			.collect::<Result<Vec<_>, _>>()
+			.map_err(Into::into)
+	}
+
 	/// Delete a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn del<K>(&self, key: &K) -> Result<()>
@@ -573,9 +668,10 @@ impl Transaction {
 	/// Retrieve a stream of key-value batches over a specific range in the datastore.
 	///
 	/// This function returns a stream that yields batches of key-value pairs. The scanner:
-	/// - Fetches an initial batch of up to 100 items
+	/// - Fetches an initial batch of up to 100 items (or 500 when `prefetch` is enabled)
 	/// - Fetches subsequent batches of up to 16 MiB (local) or 4 MiB (remote)
-	/// - Prefetches the next batch while the current batch is being processed
+	/// - When `prefetch` is true, prefetches the next batch while the current batch is being
+	///   processed, and uses a larger initial batch size (500 items)
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub fn stream_keys_vals(
 		&self,
@@ -584,6 +680,7 @@ impl Transaction {
 		limit: Option<usize>,
 		skip: u32,
 		dir: ScanDirection,
+		prefetch: bool,
 	) -> impl Stream<Item = Result<Vec<(Key, Val)>>> + '_ {
 		self.tr
 			.stream_keys_vals(
@@ -595,6 +692,7 @@ impl Transaction {
 					ScanDirection::Forward => Direction::Forward,
 					ScanDirection::Backward => Direction::Backward,
 				},
+				prefetch,
 			)
 			.map_err(Error::from)
 			.map_err(Into::into)

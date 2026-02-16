@@ -23,6 +23,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+use crate::exec::plan_or_compute::block_required_context;
 use crate::exec::planner::expr_to_physical_expr;
 use crate::expr::{Block, ControlFlow, Expr, FlowResult};
 use crate::val::Value;
@@ -98,9 +99,8 @@ impl PhysicalExpr for BlockPhysicalExpr {
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
-		// Blocks can contain anything and are planned dynamically,
-		// so we conservatively require database context
-		crate::exec::ContextLevel::Database
+		// Derive the required context from the block's expressions
+		block_required_context(&self.block)
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
@@ -138,12 +138,6 @@ impl PhysicalExpr for BlockPhysicalExpr {
 		}
 
 		Ok(result)
-	}
-
-	fn references_current_value(&self) -> bool {
-		// Conservative: blocks might reference current value
-		// We can't know without analyzing all expressions
-		true
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -186,7 +180,7 @@ impl BlockPhysicalExpr {
 				let frozen_ctx = create_planning_context(current_exec_ctx, local_params);
 
 				// Try to plan and evaluate the value expression
-				let value = match expr_to_physical_expr(set_stmt.what.clone(), &frozen_ctx) {
+				let value = match expr_to_physical_expr(set_stmt.what.clone(), &frozen_ctx).await {
 					Ok(phys_expr) => {
 						let eval_ctx = EvalContext {
 							exec_ctx: current_exec_ctx,
@@ -209,7 +203,10 @@ impl BlockPhysicalExpr {
 							message: format!("New executor does not support: {msg}"),
 						})));
 					}
-					Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
+					Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+						if let Error::PlannerUnimplemented(msg) = &e {
+							tracing::warn!("PlannerUnimplemented fallback in block (LET): {msg}");
+						}
 						let (opt, frozen) = get_legacy_context(current_exec_ctx, legacy_ctx)?;
 						let doc =
 							current_value_for_legacy.map(|v| CursorDoc::new(None, None, v.clone()));
@@ -253,7 +250,7 @@ impl BlockPhysicalExpr {
 				let frozen_ctx = create_planning_context(current_exec_ctx, local_params);
 
 				// Try to plan and evaluate the expression
-				match expr_to_physical_expr(other.clone(), &frozen_ctx) {
+				match expr_to_physical_expr(other.clone(), &frozen_ctx).await {
 					Ok(phys_expr) => {
 						let eval_ctx = EvalContext {
 							exec_ctx: current_exec_ctx,
@@ -276,7 +273,10 @@ impl BlockPhysicalExpr {
 							message: format!("New executor does not support: {msg}"),
 						})))
 					}
-					Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
+					Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+						if let Error::PlannerUnimplemented(msg) = &e {
+							tracing::warn!("PlannerUnimplemented fallback in block (expr): {msg}");
+						}
 						let (opt, frozen) = get_legacy_context(current_exec_ctx, legacy_ctx)?;
 						let doc =
 							current_value_for_legacy.map(|v| CursorDoc::new(None, None, v.clone()));

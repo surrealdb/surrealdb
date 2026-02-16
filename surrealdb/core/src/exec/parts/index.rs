@@ -43,10 +43,6 @@ impl PhysicalExpr for IndexPart {
 		Ok(evaluate_index(&value, &index)?)
 	}
 
-	fn references_current_value(&self) -> bool {
-		true
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		self.expr.access_mode()
 	}
