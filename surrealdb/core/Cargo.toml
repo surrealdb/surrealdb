@@ -40,6 +40,7 @@ kv-surrealkv = [
     "dep:affinitypool",
 ]
 scripting = ["dep:js"]
+ai = ["dep:reqwest"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml-core"]
 jwks = ["dep:reqwest"]

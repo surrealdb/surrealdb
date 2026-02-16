@@ -233,6 +233,7 @@ default = [
     "cli",
 ]
 
+ai = ["surrealdb-server/ai"]
 allocator = ["surrealdb-server/allocator"]
 allocation-tracking = ["surrealdb-server/allocation-tracking"]
 http = ["surrealdb-server/http"]

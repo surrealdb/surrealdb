@@ -91,6 +91,11 @@ pub(crate) enum Error {
 	#[allow(dead_code)]
 	HttpDisabled,
 
+	/// AI functions are not enabled
+	#[error("AI functions are not enabled")]
+	#[allow(dead_code)]
+	AiDisabled,
+
 	/// it is not possible to set a variable with the specified name
 	#[error("'{name}' is a protected variable and cannot be set")]
 	InvalidParam {

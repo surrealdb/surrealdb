@@ -28,6 +28,7 @@ default = [
     "graphql",
     "cli",
 ]
+ai = ["surrealdb-core/ai"]
 http = ["surrealdb-core/http"]
 jwks = ["surrealdb-core/jwks"]
 ml = ["surrealdb/ml"]
