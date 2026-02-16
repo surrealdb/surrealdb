@@ -1368,7 +1368,15 @@ version = "0.6.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.time]]
+version = "0.3.40"
+criteria = "safe-to-deploy"
+
+[[exemptions.time]]
 version = "0.3.47"
+criteria = "safe-to-deploy"
+
+[[exemptions.time-macros]]
+version = "0.2.21"
 criteria = "safe-to-deploy"
 
 [[exemptions.time-macros]]
