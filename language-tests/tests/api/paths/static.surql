@@ -28,9 +28,6 @@ value = "{ body: 'Not found', headers: {  }, status: 404 }"
 skip-api-request-id = true
 value = "{ body: 'Not found', headers: {  }, status: 404 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 // Simple static path

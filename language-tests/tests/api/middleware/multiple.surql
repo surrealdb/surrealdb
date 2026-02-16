@@ -57,9 +57,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: { db1: true, db2: true, method1: true, method2: true }, headers: {}, status: 200 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 - Helper functions for multiple middleware

@@ -44,9 +44,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: { original: 200 }, headers: {}, status: 404 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 // Status code in RETURN object
