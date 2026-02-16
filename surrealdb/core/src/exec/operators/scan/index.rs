@@ -10,6 +10,7 @@ use surrealdb_types::ToSql;
 
 use super::common::fetch_and_filter_records_batch;
 use super::pipeline::eval_limit_expr;
+use super::resolved::ResolvedTableContext;
 use crate::err::Error;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::index::iterator::{
@@ -53,6 +54,9 @@ pub struct IndexScan {
 	pub(crate) start: Option<Arc<dyn PhysicalExpr>>,
 	/// Optional VERSION timestamp for time-travel queries.
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
+	/// Plan-time resolved table context. When present, `execute()` skips
+	/// runtime table def + permission lookup.
+	pub(crate) resolved: Option<ResolvedTableContext>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -75,8 +79,15 @@ impl IndexScan {
 			limit,
 			start,
 			version,
+			resolved: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// Set the plan-time resolved table context.
+	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
+		self.resolved = Some(resolved);
+		self
 	}
 }
 
@@ -223,6 +234,7 @@ impl ExecOperator for IndexScan {
 		let limit_expr = self.limit.clone();
 		let start_expr = self.start.clone();
 		let version_expr = self.version.clone();
+		let resolved = self.resolved.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -262,8 +274,11 @@ impl ExecOperator for IndexScan {
 				return;
 			}
 
-			// Resolve table permissions
-			let select_permission = if check_perms {
+			// Resolve table permissions: plan-time fast path or runtime fallback
+			let select_permission = if let Some(ref res) = resolved {
+				res.resolve_select_permission(check_perms, ctx.ctx()).await
+					.context("Failed to convert permission")?
+			} else if check_perms {
 				let table_def = db_ctx
 					.get_table_def(&table_name)
 					.await

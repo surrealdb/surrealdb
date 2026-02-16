@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use reblessive::TreeStack;
 
 use super::common::fetch_and_filter_records_batch;
+use super::resolved::ResolvedTableContext;
 use crate::catalog::Index;
 use crate::err::Error;
 use crate::exec::index::access_path::IndexRef;
@@ -51,6 +52,9 @@ pub struct FullTextScan {
 	pub table_name: crate::val::TableName,
 	/// Optional VERSION timestamp for time-travel queries.
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
+	/// Plan-time resolved table context. When present, `execute()` skips
+	/// runtime table def + permission lookup.
+	pub(crate) resolved: Option<ResolvedTableContext>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -69,8 +73,15 @@ impl FullTextScan {
 			operator,
 			table_name,
 			version,
+			resolved: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// Set the plan-time resolved table context.
+	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
+		self.resolved = Some(resolved);
+		self
 	}
 }
 
@@ -115,6 +126,7 @@ impl ExecOperator for FullTextScan {
 		let operator = self.operator.clone();
 		let table_name = self.table_name.clone();
 		let version_expr = self.version.clone();
+		let resolved = self.resolved.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -143,8 +155,11 @@ impl ExecOperator for FullTextScan {
 			let frozen_ctx = &root.ctx;
 			let opt = root.options.as_ref().context("FullTextScan requires Options context")?;
 
-			// Resolve table permissions
-			let select_permission = if check_perms {
+			// Resolve table permissions: plan-time fast path or runtime fallback
+			let select_permission = if let Some(ref res) = resolved {
+				res.resolve_select_permission(check_perms, ctx.ctx()).await
+					.context("Failed to convert permission")?
+			} else if check_perms {
 				let table_def = db_ctx
 					.get_table_def(&table_name)
 					.await

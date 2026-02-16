@@ -17,6 +17,7 @@ use futures::StreamExt;
 use tracing::instrument;
 
 use super::pipeline::{ScanPipeline, build_field_state};
+use super::resolved::ResolvedTableContext;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
 	validate_record_user_access,
@@ -46,6 +47,9 @@ pub struct UnionIndexScan {
 	pub(crate) table_name: TableName,
 	pub(crate) inputs: Vec<Arc<dyn ExecOperator>>,
 	pub(crate) needed_fields: Option<HashSet<String>>,
+	/// Plan-time resolved table context. When present, `execute()` skips
+	/// runtime table def + permission lookup and uses pre-built field state.
+	pub(crate) resolved: Option<ResolvedTableContext>,
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
@@ -59,8 +63,15 @@ impl UnionIndexScan {
 			table_name,
 			inputs,
 			needed_fields,
+			resolved: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// Set the plan-time resolved table context.
+	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
+		self.resolved = Some(resolved);
+		self
 	}
 }
 
@@ -128,43 +139,54 @@ impl ExecOperator for UnionIndexScan {
 		// Clone for the async block
 		let table_name = self.table_name.clone();
 		let needed_fields = self.needed_fields.clone();
+		let resolved = self.resolved.clone();
 		let ctx = ctx.clone();
 
 		let stream: ValueBatchStream = Box::pin(async_stream::try_stream! {
 			let db_ctx = ctx.database().context("UnionIndexScan requires database context")?;
 
-			// Check table existence and resolve SELECT permission
-			let table_def = db_ctx
-				.get_table_def(&table_name)
-				.await
-				.context("Failed to get table")?;
-
-			if table_def.is_none() {
-				Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {
-					name: table_name.clone(),
-				})))?;
-			}
-
-			let select_permission = if check_perms {
-				let catalog_perm = match &table_def {
-					Some(def) => def.permissions.select.clone(),
-					None => crate::catalog::Permission::None,
-				};
-				convert_permission_to_physical(&catalog_perm, ctx.ctx()).await
-					.context("Failed to convert permission")?
+			// Resolve table permissions and field state: plan-time fast path or runtime fallback
+			let (select_permission, field_state) = if let Some(ref res) = resolved {
+				let perm = res
+					.resolve_select_permission(check_perms, ctx.ctx())
+					.await
+					.context("Failed to convert permission")?;
+				let fs = res.field_state_for_projection(needed_fields.as_ref());
+				(perm, fs)
 			} else {
-				PhysicalPermission::Allow
+				// Check table existence and resolve SELECT permission
+				let table_def = db_ctx
+					.get_table_def(&table_name)
+					.await
+					.context("Failed to get table")?;
+
+				if table_def.is_none() {
+					Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {
+						name: table_name.clone(),
+					})))?;
+				}
+
+				let select_permission = if check_perms {
+					let catalog_perm = match &table_def {
+						Some(def) => def.permissions.select.clone(),
+						None => crate::catalog::Permission::None,
+					};
+					convert_permission_to_physical(&catalog_perm, ctx.ctx()).await
+						.context("Failed to convert permission")?
+				} else {
+					PhysicalPermission::Allow
+				};
+
+				let field_state = build_field_state(
+					&ctx, &table_name, check_perms, needed_fields.as_ref(),
+				).await?;
+				(select_permission, field_state)
 			};
 
 			// Early exit if denied
 			if matches!(select_permission, PhysicalPermission::Deny) {
 				return;
 			}
-
-			// Build field state (computed fields + field permissions)
-			let field_state = build_field_state(
-				&ctx, &table_name, check_perms, needed_fields.as_ref(),
-			).await?;
 
 			// Build the pipeline (no predicate/limit/start — outer operators handle those)
 			let mut pipeline = ScanPipeline::new(

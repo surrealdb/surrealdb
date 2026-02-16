@@ -433,55 +433,35 @@ pub(crate) struct ComputedFieldDef {
 	kind: Option<crate::expr::Kind>,
 }
 
-/// Fetch field definitions and build the cached field state.
+/// Build field state from raw transaction and context parameters.
 ///
-/// Always builds and caches the *full* field state (all computed fields and
-/// permissions) keyed by `(table, check_perms)`. When `needed_fields` is
-/// `Some`, the cached full state is cheaply filtered to the required subset.
-/// This avoids repeated expensive work (KV lookups, PhysicalExpr compilation,
-/// dependency analysis, topological sort) for projected queries.
-#[allow(clippy::type_complexity)]
-pub(crate) async fn build_field_state(
-	ctx: &ExecutionContext,
+/// This is the core implementation that does the actual work: KV lookup of
+/// field definitions, PhysicalExpr compilation, dependency analysis, and
+/// topological sorting. It takes explicit parameters instead of
+/// `ExecutionContext`, making it usable at both plan time and execution time.
+pub(crate) async fn build_field_state_raw(
+	txn: &Transaction,
+	ctx: &crate::ctx::FrozenContext,
+	ns_id: crate::catalog::NamespaceId,
+	db_id: crate::catalog::DatabaseId,
 	table_name: &TableName,
 	check_perms: bool,
-	needed_fields: Option<&std::collections::HashSet<String>>,
 ) -> Result<FieldState, ControlFlow> {
-	let db_ctx = ctx.database().context("build_field_state requires database context")?;
-	let cache_key = (table_name.clone(), check_perms);
-
-	// Check the cache first (keyed by table name + check_perms flag).
-	// The cache always stores the full (unfiltered) field state so it can
-	// serve both SELECT * and projected queries.
-	if let Ok(cache) = db_ctx.field_state_cache.read() {
-		if let Some(cached) = cache.get(&cache_key) {
-			return Ok(filter_field_state_for_projection(cached, needed_fields));
-		}
-	}
-
-	let txn = ctx.txn();
-
 	let field_defs = txn
-		.all_tb_fields(db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id, table_name, None)
+		.all_tb_fields(ns_id, db_id, table_name, None)
 		.await
 		.context("Failed to get field definitions")?;
 
 	// Fast path: if there are no computed fields and no field-level permissions
-	// that need checking, skip the expensive resolution (expression conversion,
-	// dependency analysis, topological sort).
+	// that need checking, skip the expensive resolution.
 	let has_computed = field_defs.iter().any(|fd| fd.computed.is_some());
 	let has_field_perms =
 		check_perms && field_defs.iter().any(|fd| fd.select_permission.is_specific());
 	if !has_computed && !has_field_perms {
-		let empty = Arc::new(FieldState::empty());
-		if let Ok(mut cache) = db_ctx.field_state_cache.write() {
-			cache.insert(cache_key, empty);
-		}
 		return Ok(FieldState::empty());
 	}
 
-	// Collect ALL computed fields and their dependency metadata (unfiltered).
-	// The full set is cached and filtered per-query via needed_fields.
+	// Collect ALL computed fields and their dependency metadata.
 	let mut raw_computed: Vec<(
 		String,
 		Arc<dyn PhysicalExpr>,
@@ -506,7 +486,7 @@ pub(crate) async fn build_field_state(
 			dep_map.insert(field_name.clone(), deps.clone());
 
 			let physical_expr =
-				expr_to_physical_expr(expr.clone(), ctx.ctx()).await.with_context(|| {
+				expr_to_physical_expr(expr.clone(), ctx).await.with_context(|| {
 					format!("Computed field '{field_name}' has unsupported expression")
 				})?;
 
@@ -534,18 +514,54 @@ pub(crate) async fn build_field_state(
 	if check_perms {
 		for fd in field_defs.iter() {
 			let field_name = fd.name.to_raw_string();
-			let physical_perm = convert_permission_to_physical(&fd.select_permission, ctx.ctx())
+			let physical_perm = convert_permission_to_physical(&fd.select_permission, ctx)
 				.await
 				.context("Failed to convert field permission")?;
 			field_permissions.insert(field_name, physical_perm);
 		}
 	}
 
-	let full_state = FieldState {
+	Ok(FieldState {
 		computed_fields,
 		field_permissions,
 		dep_map,
-	};
+	})
+}
+
+/// Fetch field definitions and build the cached field state.
+///
+/// Always builds and caches the *full* field state (all computed fields and
+/// permissions) keyed by `(table, check_perms)`. When `needed_fields` is
+/// `Some`, the cached full state is cheaply filtered to the required subset.
+/// This avoids repeated expensive work (KV lookups, PhysicalExpr compilation,
+/// dependency analysis, topological sort) for projected queries.
+#[allow(clippy::type_complexity)]
+pub(crate) async fn build_field_state(
+	ctx: &ExecutionContext,
+	table_name: &TableName,
+	check_perms: bool,
+	needed_fields: Option<&std::collections::HashSet<String>>,
+) -> Result<FieldState, ControlFlow> {
+	let db_ctx = ctx.database().context("build_field_state requires database context")?;
+	let cache_key = (table_name.clone(), check_perms);
+
+	// Check the cache first (keyed by table name + check_perms flag).
+	if let Ok(cache) = db_ctx.field_state_cache.read() {
+		if let Some(cached) = cache.get(&cache_key) {
+			return Ok(filter_field_state_for_projection(cached, needed_fields));
+		}
+	}
+
+	// Delegate to the raw implementation
+	let full_state = build_field_state_raw(
+		&ctx.txn(),
+		ctx.ctx(),
+		db_ctx.ns_ctx.ns.namespace_id,
+		db_ctx.db.database_id,
+		table_name,
+		check_perms,
+	)
+	.await?;
 
 	// Cache the full (unfiltered) state
 	let cached = Arc::new(full_state);
@@ -561,7 +577,7 @@ pub(crate) async fn build_field_state(
 /// the given projection. When `needed_fields` is None (SELECT *), returns
 /// a clone of the full state. This is a cheap CPU-only operation with no
 /// KV lookups.
-fn filter_field_state_for_projection(
+pub(crate) fn filter_field_state_for_projection(
 	full_state: &FieldState,
 	needed_fields: Option<&std::collections::HashSet<String>>,
 ) -> FieldState {

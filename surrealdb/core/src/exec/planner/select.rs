@@ -24,6 +24,7 @@ use crate::exec::index::analysis::IndexAnalyzer;
 #[cfg(all(storage, not(target_family = "wasm")))]
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::scan::determine_scan_direction;
+use crate::exec::operators::scan::resolved::resolve_table_context;
 use crate::exec::operators::{
 	Aggregate, AnalyzePlan, Compute, DynamicScan, ExplainPlan, Fetch, FieldSelection, Filter,
 	KnnTopK, Limit, Project, ProjectValue, Projection, RandomShuffle, RecordIdScan, SelectProject,
@@ -1390,10 +1391,37 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		// When we have a txn and the source is a table, resolve the
-		// access path at plan time and create the concrete operator.
+		// access path and table context at plan time.
 		if let Expr::Table(ref table_name) = expr
 			&& let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db)
 		{
+			// Resolve table context (table def + field state) at plan time.
+			// This eliminates runtime KV lookups in the operator's execute().
+			let table_ctx = {
+				let ns_def = txn.get_ns_by_name(ns).await.ok().flatten();
+				let db_def = if let Some(ref _ns_def) = ns_def {
+					txn.get_db_by_name(ns, db).await.ok().flatten()
+				} else {
+					None
+				};
+				if let (Some(ns_def), Some(db_def)) = (ns_def, db_def) {
+					resolve_table_context(
+						txn,
+						self.ctx,
+						ns,
+						db,
+						ns_def.namespace_id,
+						db_def.database_id,
+						table_name,
+					)
+					.await
+					.ok()
+					.flatten()
+				} else {
+					None
+				}
+			};
+
 			let resolved =
 				self.resolve_access_path(txn, ns, db, table_name, cond, order, with).await;
 			if let Ok(Some((access_path, direction))) = resolved {
@@ -1428,16 +1456,20 @@ impl<'ctx> Planner<'ctx> {
 						} else {
 							(None, None, false)
 						};
+						let mut scan = IndexScan::new(
+							index_ref,
+							access,
+							direction,
+							table,
+							idx_limit,
+							idx_start,
+							version.clone(),
+						);
+						if let Some(ref tc) = table_ctx {
+							scan = scan.with_resolved(tc.clone());
+						}
 						return Ok(PlannedSource {
-							operator: Arc::new(IndexScan::new(
-								index_ref,
-								access,
-								direction,
-								table,
-								idx_limit,
-								idx_start,
-								version.clone(),
-							)) as Arc<dyn ExecOperator>,
+							operator: Arc::new(scan) as Arc<dyn ExecOperator>,
 							filter_action,
 							limit_pushed,
 						});
@@ -1447,14 +1479,13 @@ impl<'ctx> Planner<'ctx> {
 						query,
 						operator,
 					} => {
+						let mut scan =
+							FullTextScan::new(index_ref, query, operator, table, version.clone());
+						if let Some(ref tc) = table_ctx {
+							scan = scan.with_resolved(tc.clone());
+						}
 						return Ok(PlannedSource {
-							operator: Arc::new(FullTextScan::new(
-								index_ref,
-								query,
-								operator,
-								table,
-								version.clone(),
-							)) as Arc<dyn ExecOperator>,
+							operator: Arc::new(scan) as Arc<dyn ExecOperator>,
 							filter_action: FilterAction::UseOriginal,
 							limit_pushed: false,
 						});
@@ -1469,17 +1500,21 @@ impl<'ctx> Planner<'ctx> {
 						// (non-KNN predicates). These are pushed into the HNSW search
 						// so that non-matching rows don't consume top-K slots.
 						let residual_cond = cond.and_then(strip_knn_from_condition);
+						let mut scan = KnnScan::new(
+							index_ref,
+							vector,
+							k,
+							ef,
+							table,
+							version.clone(),
+							knn_ctx,
+							residual_cond,
+						);
+						if let Some(ref tc) = table_ctx {
+							scan = scan.with_resolved(tc.clone());
+						}
 						return Ok(PlannedSource {
-							operator: Arc::new(KnnScan::new(
-								index_ref,
-								vector,
-								k,
-								ef,
-								table,
-								version.clone(),
-								knn_ctx,
-								residual_cond,
-							)) as Arc<dyn ExecOperator>,
+							operator: Arc::new(scan) as Arc<dyn ExecOperator>,
 							filter_action: FilterAction::UseOriginal,
 							limit_pushed: false,
 						});
@@ -1500,16 +1535,20 @@ impl<'ctx> Planner<'ctx> {
 						} else {
 							(None, None, false)
 						};
+						let mut scan = TableScan::new(
+							table,
+							direction,
+							version,
+							scan_predicate,
+							tbl_limit,
+							tbl_start,
+							needed_fields,
+						);
+						if let Some(tc) = table_ctx.clone() {
+							scan = scan.with_resolved(tc);
+						}
 						return Ok(PlannedSource {
-							operator: Arc::new(TableScan::new(
-								table,
-								direction,
-								version,
-								scan_predicate,
-								tbl_limit,
-								tbl_start,
-								needed_fields,
-							)) as Arc<dyn ExecOperator>,
+							operator: Arc::new(scan) as Arc<dyn ExecOperator>,
 							filter_action,
 							limit_pushed,
 						});
@@ -1529,26 +1568,38 @@ impl<'ctx> Planner<'ctx> {
 									index_ref,
 									access,
 									direction,
-								} => Arc::new(IndexScan::new(
-									index_ref,
-									access,
-									direction,
-									table.clone(),
-									None,
-									None,
-									version.clone(),
-								)),
+								} => {
+									let mut scan = IndexScan::new(
+										index_ref,
+										access,
+										direction,
+										table.clone(),
+										None,
+										None,
+										version.clone(),
+									);
+									if let Some(ref tc) = table_ctx {
+										scan = scan.with_resolved(tc.clone());
+									}
+									Arc::new(scan)
+								}
 								AccessPath::FullTextSearch {
 									index_ref,
 									query,
 									operator,
-								} => Arc::new(FullTextScan::new(
-									index_ref,
-									query,
-									operator,
-									table.clone(),
-									version.clone(),
-								)),
+								} => {
+									let mut scan = FullTextScan::new(
+										index_ref,
+										query,
+										operator,
+										table.clone(),
+										version.clone(),
+									);
+									if let Some(ref tc) = table_ctx {
+										scan = scan.with_resolved(tc.clone());
+									}
+									Arc::new(scan)
+								}
 								AccessPath::KnnSearch {
 									index_ref,
 									vector,
@@ -1556,7 +1607,7 @@ impl<'ctx> Planner<'ctx> {
 									ef,
 								} => {
 									let residual_cond = cond.and_then(strip_knn_from_condition);
-									Arc::new(KnnScan::new(
+									let mut scan = KnnScan::new(
 										index_ref,
 										vector,
 										k,
@@ -1565,7 +1616,11 @@ impl<'ctx> Planner<'ctx> {
 										version.clone(),
 										knn_ctx.clone(),
 										residual_cond,
-									))
+									);
+									if let Some(ref tc) = table_ctx {
+										scan = scan.with_resolved(tc.clone());
+									}
+									Arc::new(scan)
 								}
 								// TableScan and nested Union should not
 								// appear as sub-paths; fall back safely.
@@ -1585,12 +1640,13 @@ impl<'ctx> Planner<'ctx> {
 						// and computed-field materialization internally
 						// (same pattern as TableScan). The outer
 						// pipeline handles Filter, Sort, and Limit.
+						let mut union_scan =
+							UnionIndexScan::new(table, sub_operators, needed_fields);
+						if let Some(ref tc) = table_ctx {
+							union_scan = union_scan.with_resolved(tc.clone());
+						}
 						return Ok(PlannedSource {
-							operator: Arc::new(UnionIndexScan::new(
-								table,
-								sub_operators,
-								needed_fields,
-							)) as Arc<dyn ExecOperator>,
+							operator: Arc::new(union_scan) as Arc<dyn ExecOperator>,
 							filter_action: FilterAction::UseOriginal,
 							limit_pushed: false,
 						});
