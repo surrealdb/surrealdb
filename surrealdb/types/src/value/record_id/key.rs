@@ -189,7 +189,7 @@ impl SurrealValue for RecordIdKey {
 		}
 	}
 
-	fn from_value(value: Value) -> anyhow::Result<Self> {
+	fn from_value(value: Value) -> Result<Self, crate::Error> {
 		match value {
 			Value::Number(Number::Int(n)) => Ok(RecordIdKey::Number(n)),
 			Value::String(s) => Ok(RecordIdKey::String(s)),
@@ -200,7 +200,7 @@ impl SurrealValue for RecordIdKey {
 				let range = RecordIdKeyRange::from_value(value)?;
 				Ok(RecordIdKey::Range(Box::new(range)))
 			}
-			_ => Err(anyhow::anyhow!("Cannot convert {:?} to RecordIdKey", value)),
+			_ => Err(crate::Error::internal(format!("Cannot convert {:?} to RecordIdKey", value))),
 		}
 	}
 }

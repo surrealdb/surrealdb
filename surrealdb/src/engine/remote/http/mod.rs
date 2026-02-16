@@ -67,6 +67,7 @@ use serde::{Deserialize, Serialize};
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
 use surrealdb_core::iam::Token as CoreToken;
 use surrealdb_core::rpc::{self, DbResponse, DbResult};
+use surrealdb_types::{AuthError, NotAllowedError};
 #[cfg(not(target_family = "wasm"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_family = "wasm"))]
@@ -82,12 +83,11 @@ use wasm_bindgen_futures::spawn_local;
 use crate::conn::{Command, RequestData};
 use crate::engine::SessionError;
 use crate::engine::remote::RouterRequest;
-use crate::err::Error;
 use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
 use crate::opt::IntoEndpoint;
 use crate::opt::auth::{AccessToken, Token};
 use crate::types::{HashMap, SurrealValue, Value};
-use crate::{Connect, Result, Surreal};
+use crate::{Connect, Error, Result, Surreal};
 
 const RPC_PATH: &str = "rpc";
 
@@ -410,8 +410,10 @@ type BackupSender = async_channel::Sender<Result<Vec<u8>>>;
 async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	let mut response = request
 		.send()
-		.await?
-		.error_for_status()?
+		.await
+		.map_err(crate::std_error_to_types_error)?
+		.error_for_status()
+		.map_err(crate::std_error_to_types_error)?
 		.bytes_stream()
 		.map_err(futures::io::Error::other)
 		.into_async_read()
@@ -420,24 +422,26 @@ async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		match OpenOptions::new().write(true).create(true).truncate(true).open(&path).await {
 			Ok(path) => path,
 			Err(error) => {
-				return Err(Error::FileOpen {
-					path,
-					error,
-				});
+				return Err(Error::internal(format!(
+					"Failed to open `{}`: {error}",
+					path.display()
+				)));
 			}
 		};
 	if let Err(error) = io::copy(&mut response, &mut file).await {
-		return Err(Error::FileRead {
-			path,
-			error,
-		});
+		return Err(Error::internal(format!("Failed to read `{}`: {error}", path.display())));
 	}
 
 	Ok(())
 }
 
 async fn export_bytes(request: RequestBuilder, bytes: BackupSender) -> Result<()> {
-	let response = request.send().await?.error_for_status()?;
+	let response = request
+		.send()
+		.await
+		.map_err(crate::std_error_to_types_error)?
+		.error_for_status()
+		.map_err(crate::std_error_to_types_error)?;
 
 	let future = async move {
 		let mut response = response.bytes_stream();
@@ -462,18 +466,19 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	let file = match OpenOptions::new().read(true).open(&path).await {
 		Ok(path) => path,
 		Err(error) => {
-			return Err(Error::FileOpen {
-				path,
-				error,
-			});
+			return Err(Error::internal(format!("Failed to open `{}`: {}", path.display(), error)));
 		}
 	};
 
-	let res =
-		request.header(ACCEPT, surrealdb_core::api::format::FLATBUFFERS).body(file).send().await?;
+	let res = request
+		.header(ACCEPT, surrealdb_core::api::format::FLATBUFFERS)
+		.body(file)
+		.send()
+		.await
+		.map_err(crate::std_error_to_types_error)?;
 
 	if res.error_for_status_ref().is_err() {
-		let res = res.text().await?;
+		let res = res.text().await.map_err(crate::std_error_to_types_error)?;
 
 		match res.parse::<serde_json::Value>() {
 			Ok(body) => {
@@ -481,38 +486,43 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 					"\n{}",
 					serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".into())
 				);
-				return Err(Error::Http(error_msg));
+				return Err(Error::internal(format!("HTTP error: {error_msg}")));
 			}
 			Err(_) => {
-				return Err(Error::Http(res));
+				return Err(Error::internal(format!("HTTP error: {res}")));
 			}
 		}
 	}
 
-	let bytes = res.bytes().await?;
+	let bytes = res.bytes().await.map_err(crate::std_error_to_types_error)?;
 
 	let value: Value = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x:?}"))
-		.map_err(crate::Error::InvalidResponse)?;
+		.map_err(|e| {
+			crate::Error::internal(format!("The server returned an unexpected response: {e}"))
+		})?;
 
 	// Convert Value::Array to Vec<QueryResult>
 	let Value::Array(arr) = value else {
-		return Err(Error::InvalidResponse("Expected array response from import".to_string()));
+		return Err(Error::internal("Expected array response from import".to_string()));
 	};
 
 	for val in arr.into_vec() {
 		let result = QueryResult::from_value(val)
-			.map_err(|e| Error::InvalidResponse(format!("Failed to parse query result: {}", e)))?;
-		if let Err(e) = result.result {
-			return Err(Error::Query(e.to_string()));
-		}
+			.map_err(|e| Error::internal(format!("Failed to parse query result: {e}")))?;
+		result.result?;
 	}
 
 	Ok(())
 }
 
 pub(crate) async fn health(request: RequestBuilder) -> Result<()> {
-	request.send().await?.error_for_status()?;
+	request
+		.send()
+		.await
+		.map_err(crate::std_error_to_types_error)?
+		.error_for_status()
+		.map_err(crate::std_error_to_types_error)?;
 	Ok(())
 }
 
@@ -538,18 +548,29 @@ async fn send_request(
 	let req_value = req.into_value();
 	let body = surrealdb_core::rpc::format::flatbuffers::encode(&req_value)
 		.map_err(|x| format!("Failed to serialize to flatbuffers: {x}"))
-		.map_err(crate::Error::UnserializableValue)?;
+		.map_err(|e| {
+			crate::Error::internal(format!(
+				"Tried to send a value which could not be serialized: {e}"
+			))
+		})?;
 
 	// Include auth header so the server can authenticate the request and maintain
 	// session state. This is essential for token-based auth flows where the server
 	// extracts namespace/database from JWT claims during authenticate().
 	let http_req = client.post(url).headers(headers.clone()).auth(auth).body(body);
-	let response = http_req.send().await?.error_for_status()?;
-	let bytes = response.bytes().await?;
+	let response = http_req
+		.send()
+		.await
+		.map_err(crate::std_error_to_types_error)?
+		.error_for_status()
+		.map_err(crate::std_error_to_types_error)?;
+	let bytes = response.bytes().await.map_err(crate::std_error_to_types_error)?;
 
 	let response: DbResponse = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x}"))
-		.map_err(crate::Error::InvalidResponse)?;
+		.map_err(|e| {
+			crate::Error::internal(format!("The server returned an unexpected response: {e}"))
+		})?;
 
 	match response.result? {
 		DbResult::Query(results) => Ok(results),
@@ -580,7 +601,7 @@ async fn refresh_token(
 		Some(result) => result.clone().result?,
 		None => {
 			error!("received invalid result from server");
-			return Err(Error::InternalError("Received invalid result from server".to_string()));
+			return Err(Error::internal("Received invalid result from server".to_string()));
 		}
 	};
 	Ok((value, results))
@@ -631,8 +652,9 @@ async fn router(
 			{
 				match obj.get("namespace") {
 					Some(Value::String(ns)) => {
-						let header_value = HeaderValue::try_from(ns.as_str())
-							.map_err(|_| Error::InvalidNsName(ns.clone()))?;
+						let header_value = HeaderValue::try_from(ns.as_str()).map_err(|_| {
+							Error::internal(format!("Invalid namespace name: {ns:?}"))
+						})?;
 						headers.insert(&NS, header_value);
 					}
 					_ => {
@@ -641,8 +663,9 @@ async fn router(
 				}
 				match obj.get("database") {
 					Some(Value::String(db)) => {
-						let header_value = HeaderValue::try_from(db.as_str())
-							.map_err(|_| Error::InvalidDbName(db.clone()))?;
+						let header_value = HeaderValue::try_from(db.as_str()).map_err(|_| {
+							Error::internal(format!("Invalid database name: {db:?}"))
+						})?;
 						headers.insert(&DB, header_value);
 					}
 					_ => {
@@ -675,9 +698,7 @@ async fn router(
 				Some(result) => result.clone().result?,
 				None => {
 					error!("received invalid result from server");
-					return Err(Error::InternalError(
-						"Received invalid result from server".to_string(),
-					));
+					return Err(Error::internal("Received invalid result from server".to_string()));
 				}
 			};
 
@@ -693,7 +714,8 @@ async fn router(
 				}
 				Err(err) => {
 					debug!("Error converting Value to Credentials: {err}");
-					let token = Token::from_value(value)?;
+					let token =
+						Token::from_value(value).map_err(|e| Error::internal(e.to_string()))?;
 					*auth = Some(Auth::Bearer {
 						token: token.access,
 					});
@@ -723,7 +745,9 @@ async fn router(
 					Ok(result) => {
 						let value = token.into_value();
 						*session_state.auth.write().await = Some(Auth::Bearer {
-							token: Token::from_value(value.clone())?.access,
+							token: Token::from_value(value.clone())
+								.map_err(|e| Error::internal(e.to_string()))?
+								.access,
 						});
 						*result = value;
 					}
@@ -737,7 +761,9 @@ async fn router(
 						} = &token
 						{
 							// If the error is due to token expiration, attempt automatic refresh
-							if error.to_string().contains("token has expired") {
+							if error.not_allowed_details().is_some_and(|a| {
+								matches!(a, NotAllowedError::Auth(AuthError::TokenExpired))
+							}) {
 								// Call the refresh_token helper to get new tokens
 								let (value, refresh_results) = refresh_token(
 									token,
@@ -750,7 +776,9 @@ async fn router(
 								.await?;
 								// Update the stored authentication with the new access token
 								*session_state.auth.write().await = Some(Auth::Bearer {
-									token: Token::from_value(value)?.access,
+									token: Token::from_value(value)
+										.map_err(|e| Error::internal(e.to_string()))?
+										.access,
 								});
 								// Use the refresh results (which include the new token)
 								results = refresh_results;
@@ -774,7 +802,7 @@ async fn router(
 			)
 			.await?;
 			*session_state.auth.write().await = Some(Auth::Bearer {
-				token: Token::from_value(value)?.access,
+				token: Token::from_value(value).map_err(|e| Error::internal(e.to_string()))?.access,
 			});
 			Ok(results)
 		}
@@ -846,7 +874,10 @@ async fn router(
 			..
 		} => {
 			// TODO: Better error message here, some backups are supported
-			Err(Error::BackupsNotSupported.into())
+			Err(Error::internal(
+				"The protocol or storage engine does not support backups on this architecture"
+					.to_string(),
+			))
 		}
 
 		#[cfg(not(target_family = "wasm"))]
@@ -854,21 +885,21 @@ async fn router(
 			path,
 			config,
 		} => {
-			let req_path = base_url.join("export")?;
+			let req_path = base_url.join("export").map_err(crate::std_error_to_types_error)?;
 			let config = config.unwrap_or_default();
 			let config_value: Value = config.into_value();
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
-			let request = client
-				.post(req_path)
-				.body(
-					rpc::format::json::encode_str(config_value)
-						.map_err(|e| Error::SerializeValue(e.to_string()))?,
-				)
-				.headers(headers.clone())
-				.auth(&auth)
-				.header(CONTENT_TYPE, "application/json")
-				.header(ACCEPT, "application/octet-stream");
+			let request =
+				client
+					.post(req_path)
+					.body(rpc::format::json::encode_str(config_value).map_err(|e| {
+						Error::internal(format!("failed to serialize Value: {}", e))
+					})?)
+					.headers(headers.clone())
+					.auth(&auth)
+					.header(CONTENT_TYPE, "application/json")
+					.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
@@ -876,21 +907,21 @@ async fn router(
 			bytes,
 			config,
 		} => {
-			let req_path = base_url.join("export")?;
+			let req_path = base_url.join("export").map_err(crate::std_error_to_types_error)?;
 			let config = config.unwrap_or_default();
 			let config_value = config.into_value();
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
-			let request = client
-				.post(req_path)
-				.body(
-					rpc::format::json::encode_str(config_value)
-						.map_err(|e| Error::SerializeValue(e.to_string()))?,
-				)
-				.headers(headers.clone())
-				.auth(&auth)
-				.header(CONTENT_TYPE, "application/json")
-				.header(ACCEPT, "application/octet-stream");
+			let request =
+				client
+					.post(req_path)
+					.body(rpc::format::json::encode_str(config_value).map_err(|e| {
+						Error::internal(format!("failed to serialize Value: {}", e))
+					})?)
+					.headers(headers.clone())
+					.auth(&auth)
+					.header(CONTENT_TYPE, "application/json")
+					.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
@@ -899,8 +930,15 @@ async fn router(
 			path,
 			config,
 		} => {
-			let req_path =
-				base_url.join("ml")?.join("export")?.join(&config.name)?.join(&config.version)?;
+			let req_path = base_url
+				.join("ml")
+				.map_err(crate::std_error_to_types_error)?
+				.join("export")
+				.map_err(crate::std_error_to_types_error)?
+				.join(&config.name)
+				.map_err(crate::std_error_to_types_error)?
+				.join(&config.version)
+				.map_err(crate::std_error_to_types_error)?;
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
 			let request = client
@@ -915,8 +953,15 @@ async fn router(
 			bytes,
 			config,
 		} => {
-			let req_path =
-				base_url.join("ml")?.join("export")?.join(&config.name)?.join(&config.version)?;
+			let req_path = base_url
+				.join("ml")
+				.map_err(crate::std_error_to_types_error)?
+				.join("export")
+				.map_err(crate::std_error_to_types_error)?
+				.join(&config.name)
+				.map_err(crate::std_error_to_types_error)?
+				.join(&config.version)
+				.map_err(crate::std_error_to_types_error)?;
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
 			let request = client
@@ -931,7 +976,7 @@ async fn router(
 		Command::ImportFile {
 			path,
 		} => {
-			let req_path = base_url.join("import")?;
+			let req_path = base_url.join("import").map_err(crate::std_error_to_types_error)?;
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
 			let request = client
@@ -946,7 +991,11 @@ async fn router(
 		Command::ImportMl {
 			path,
 		} => {
-			let req_path = base_url.join("ml")?.join("import")?;
+			let req_path = base_url
+				.join("ml")
+				.map_err(crate::std_error_to_types_error)?
+				.join("import")
+				.map_err(crate::std_error_to_types_error)?;
 			let headers = session_state.headers.read().await;
 			let auth = session_state.auth.read().await;
 			let request = client
@@ -959,7 +1008,10 @@ async fn router(
 		}
 		Command::SubscribeLive {
 			..
-		} => Err(Error::LiveQueriesNotSupported),
+		} => Err(Error::internal(
+			"The protocol or storage engine does not support live queries on this architecture"
+				.to_string(),
+		)),
 		Command::Query {
 			txn,
 			query,

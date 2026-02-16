@@ -1106,7 +1106,7 @@ async fn permissions_checks_define_table() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"#.to_string();
+	let check_success = r#"{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: { TB: 'DEFINE TABLE `TB` TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"#.to_string();
 	let check_error = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: { }, tables: {  }, users: {  } }".to_string();
 
 	let test_cases = [
@@ -1147,7 +1147,7 @@ async fn permissions_checks_define_event() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ events: { event: "DEFINE EVENT event ON TB WHEN true THEN RETURN 'foo'" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"#.to_string();
+	let check_success = r#"{ events: { event: "DEFINE EVENT event ON `TB` WHEN true THEN RETURN 'foo'" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"#.to_string();
 	let check_error =
 		"{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
 
@@ -1189,7 +1189,7 @@ async fn permissions_checks_define_field() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"#.to_string();
+	let check_success = r#"{ events: {  }, fields: { field: 'DEFINE FIELD field ON `TB` PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"#.to_string();
 	let check_error =
 		"{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
 
@@ -1231,7 +1231,7 @@ async fn permissions_checks_define_index() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = r#"{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }"#.to_string();
+	let check_success = r#"{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON `TB` FIELDS field' }, lives: {  }, tables: {  } }"#.to_string();
 	let check_error =
 		"{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }".to_string();
 

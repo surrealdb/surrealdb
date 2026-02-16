@@ -40,7 +40,9 @@ impl From<PlannerStrategy> for NewPlannerStrategy {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub enum ExperimentalFeature {
+	/// Enable the Files feature.
 	Files,
+	/// Enable Surrealism feature.
 	Surrealism,
 }
 

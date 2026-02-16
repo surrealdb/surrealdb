@@ -200,7 +200,7 @@ async fn post_handler(
 			// Return the HTTP response
 			Ok(fmt.res_http(match res {
 				Ok(result) => DbResponse::success(None, None, result),
-				Err(err) => DbResponse::failure(None, None, err.into()),
+				Err(err) => DbResponse::failure(None, None, err),
 			})?)
 		}
 		Err(err) => Err(err.into()),

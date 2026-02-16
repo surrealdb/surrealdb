@@ -226,13 +226,13 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 	if err_str.contains("signup_thrown_error") {
 		// Expected thrown error
 	} else {
-		match &err {
-			surrealdb::error::Api::Query(e) => assert!(e.contains("signup")),
-			surrealdb::error::Api::Http(e) => assert_eq!(
-				e,
+		match err.kind() {
+			surrealdb::types::ErrorKind::Query => assert!(err.message().contains("signup")),
+			_ if err.message().contains("HTTP") => assert_eq!(
+				err.message(),
 				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
 			),
-			x => panic!("unexpected error: {x:?}"),
+			x => panic!("unexpected error kind: {x:?}, message: {}", err.message()),
 		}
 	}
 
@@ -254,13 +254,13 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 	if err_str.contains("signin_thrown_error") {
 		// Expected thrown error
 	} else {
-		match &err {
-			surrealdb::error::Api::Query(e) => assert!(e.contains("signin")),
-			surrealdb::error::Api::Http(e) => assert_eq!(
-				e,
+		match err.kind() {
+			surrealdb::types::ErrorKind::Query => assert!(err.message().contains("signin")),
+			_ if err.message().contains("HTTP") => assert_eq!(
+				err.message(),
 				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
 			),
-			x => panic!("unexpected error: {x:?}"),
+			x => panic!("unexpected error kind: {x:?}, message: {}", err.message()),
 		}
 	}
 }
@@ -304,15 +304,15 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 	if err_str.contains("signup query failed") || err_str.contains("signup") {
 		// Expected error
 	} else {
-		match &err {
-			surrealdb::error::Api::Query(e) => {
-				assert_eq!(e, "The record access signup query failed")
+		match err.kind() {
+			surrealdb::types::ErrorKind::Query => {
+				assert_eq!(err.message(), "The record access signup query failed")
 			}
-			surrealdb::error::Api::Http(e) => assert_eq!(
-				e,
+			_ if err.message().contains("HTTP") => assert_eq!(
+				err.message(),
 				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
 			),
-			x => panic!("unexpected error: {x:?}"),
+			x => panic!("unexpected error kind: {x:?}, message: {}", err.message()),
 		}
 	};
 
@@ -334,15 +334,15 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 	if err_str.contains("signin query failed") || err_str.contains("signin") {
 		// Expected error
 	} else {
-		match &err {
-			surrealdb::error::Api::Query(e) => {
-				assert_eq!(e, "The record access signin query failed")
+		match err.kind() {
+			surrealdb::types::ErrorKind::Query => {
+				assert_eq!(err.message(), "The record access signin query failed")
 			}
-			surrealdb::error::Api::Http(e) => assert_eq!(
-				e,
+			_ if err.message().contains("HTTP") => assert_eq!(
+				err.message(),
 				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
 			),
-			x => panic!("unexpected error: {x:?}"),
+			x => panic!("unexpected error kind: {x:?}, message: {}", err.message()),
 		}
 	};
 }
