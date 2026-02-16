@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
@@ -12,17 +11,18 @@ use crate::catalog::providers::TableProvider;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Cond, FlowResultExt as _};
-use crate::idx::planner::iterators::KnnIteratorResult;
-use crate::idx::seqdocids::DocId;
+use crate::idx::IndexKeyBase;
+use crate::idx::trees::hnsw::VectorId;
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::hnsw::index::HnswContext;
 use crate::idx::trees::knn::Ids64;
 use crate::val::RecordId;
 
-type FilterCache = HashMap<DocId, Option<(Arc<RecordId>, Arc<Record>)>>;
+pub(super) type FilterCache = HashMap<VectorId, Option<(Arc<RecordId>, Arc<Record>)>>;
 
 pub(super) struct HnswTruthyDocumentFilter<'a> {
 	opt: &'a Options,
+	ikb: IndexKeyBase,
 	docs: RwLockReadGuard<'a, HnswDocs>,
 	cond: Arc<Cond>,
 	cache: FilterCache,
@@ -31,30 +31,17 @@ pub(super) struct HnswTruthyDocumentFilter<'a> {
 impl<'a> HnswTruthyDocumentFilter<'a> {
 	pub(super) fn new(
 		opt: &'a Options,
+		ikb: IndexKeyBase,
 		docs: RwLockReadGuard<'a, HnswDocs>,
 		cond: Arc<Cond>,
 	) -> Self {
 		Self {
 			opt,
+			ikb,
 			docs,
 			cond,
 			cache: Default::default(),
 		}
-	}
-
-	pub(super) fn convert_result(
-		mut self,
-		res: VecDeque<(DocId, f64)>,
-	) -> VecDeque<KnnIteratorResult> {
-		let mut result = VecDeque::with_capacity(res.len());
-		for (doc_id, dist) in res {
-			if let Some(e) = self.cache.remove(&doc_id)
-				&& let Some((rid, value)) = e
-			{
-				result.push_back((rid, dist, Some(value)))
-			}
-		}
-		result
 	}
 
 	pub(super) async fn check_any_doc_truthy(
@@ -64,25 +51,34 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		doc_ids: Ids64,
 	) -> Result<bool> {
 		for doc_id in doc_ids.iter() {
-			if self.check_doc_id_truthy(ctx, stk, doc_id).await? {
+			if self.check_vector_id_truthy(ctx, stk, VectorId::DocId(doc_id)).await? {
 				return Ok(true);
 			}
 		}
 		Ok(false)
 	}
 
-	pub(super) async fn check_doc_id_truthy(
+	pub(super) async fn check_vector_id_truthy(
 		&mut self,
 		ctx: &HnswContext<'_>,
 		stk: &mut Stk,
-		doc_id: DocId,
+		id: VectorId,
 	) -> Result<bool> {
-		match self.cache.entry(doc_id) {
+		match self.cache.entry(id) {
 			Entry::Occupied(e) => Ok(e.get().is_some()),
 			Entry::Vacant(e) => {
-				let Some(rid) = self.docs.get_thing(&ctx.tx, doc_id).await? else {
-					// No record ID ? It is not truthy
-					return Ok(false);
+				// Collect the RecordId
+				let rid = match e.key() {
+					VectorId::DocId(doc_id) => {
+						let Some(rid) = self.docs.get_thing(&ctx.tx, *doc_id).await? else {
+							// No record ID ? It is not truthy
+							return Ok(false);
+						};
+						rid
+					}
+					VectorId::RecordKey(key) => {
+						RecordId::new(self.ikb.table().clone(), key.as_ref().clone())
+					}
 				};
 				let rid = Arc::new(rid);
 				// Is the record truthy?
@@ -97,15 +93,6 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 				Ok(truthy)
 			}
 		}
-	}
-
-	pub(super) async fn check_record_is_truthy(
-		&mut self,
-		ctx: &HnswContext<'_>,
-		stk: &mut Stk,
-		rid: Arc<RecordId>,
-	) -> Result<bool> {
-		Ok(Self::is_record_truthy(ctx, self.opt, stk, self.cond.clone(), rid).await?.is_some())
 	}
 
 	async fn is_record_truthy(
@@ -139,13 +126,20 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		Ok(None)
 	}
 
-	pub(super) fn expire(&mut self, doc_id: DocId) {
-		self.cache.remove(&doc_id);
+	/// Remove a vector id that has been evicted from the knn result
+	pub(super) fn expire(&mut self, id: &VectorId) {
+		self.cache.remove(id);
 	}
 
-	pub(super) fn expires(&mut self, doc_ids: Ids64) {
-		for doc_id in doc_ids.iter() {
-			self.expire(doc_id);
+	/// Remove a list of vector ids that have been evicted from the knn result
+	pub(super) fn expires(&mut self, ids: &[VectorId]) {
+		for id in ids {
+			self.cache.remove(id);
 		}
+	}
+
+	/// Returns the locked HnswDocs and the cache
+	pub(super) fn release(self) -> (RwLockReadGuard<'a, HnswDocs>, FilterCache) {
+		(self.docs, self.cache)
 	}
 }

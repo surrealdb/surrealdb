@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -21,8 +21,8 @@ use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::filter::HnswTruthyDocumentFilter;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
-use crate::idx::trees::hnsw::{ElementId, HnswSearch, VectorPendingId, VectorPendingUpdate};
-use crate::idx::trees::knn::{FloatKey, Ids64, KnnResult, KnnResultBuilder};
+use crate::idx::trees::hnsw::{ElementId, HnswSearch, VectorId, VectorPendingUpdate};
+use crate::idx::trees::knn::KnnResultBuilder;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::kvs::{KVValue, Key, Transaction};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
@@ -118,9 +118,9 @@ impl HnswIndex {
 		};
 		let tx = ctx.tx();
 		let id = if let Some(doc_id) = self.docs.read().await.get(&tx, &id).await? {
-			VectorPendingId::DocId(doc_id)
+			VectorId::DocId(doc_id)
 		} else {
-			VectorPendingId::Id(id.clone())
+			VectorId::RecordKey(Arc::new(id.clone()))
 		};
 		let appending_id = self.next_appending_id.fetch_add(1, Ordering::Relaxed);
 		let key = self.ikb.new_hp_key(appending_id);
@@ -153,7 +153,7 @@ impl HnswIndex {
 		// Create a new context
 		let mut ctx = self.new_hnsw_context(ctx, db);
 		// Remove old values if any
-		if let VectorPendingId::DocId(doc_id) = pending.id {
+		if let VectorId::DocId(doc_id) = pending.id {
 			for vector in pending.old_vectors {
 				// Extract the vector
 				let vector = Vector::from(vector);
@@ -166,8 +166,8 @@ impl HnswIndex {
 		let mut docs = self.docs.write().await;
 		if pending.new_vectors.is_empty() {
 			let doc_id = match pending.id {
-				VectorPendingId::DocId(doc_id) => doc_id,
-				VectorPendingId::Id(id) => docs.resolve(&ctx.tx, &id).await?,
+				VectorId::DocId(doc_id) => doc_id,
+				VectorId::RecordKey(id) => docs.resolve(&ctx.tx, &id).await?,
 			};
 			for vector in pending.new_vectors {
 				// Extract the vector
@@ -199,7 +199,7 @@ impl HnswIndex {
 	) -> Result<VecDeque<KnnIteratorResult>> {
 		// Build a filter if required
 		let mut filter = if let Some((opt, cond)) = cond_filter {
-			Some(HnswTruthyDocumentFilter::new(opt, self.docs.read().await, cond))
+			Some(HnswTruthyDocumentFilter::new(opt, self.ikb.clone(), self.docs.read().await, cond))
 		} else {
 			None
 		};
@@ -209,48 +209,76 @@ impl HnswIndex {
 		let search = HnswSearch::new(vector, k, ef);
 		// Get a new HNSW context
 		let ctx = self.new_hnsw_context(ctx, db);
+		// Collect the result
+		let mut builder = KnnResultBuilder::new(k);
 
-		let (pending_result, pending_docs) =
-			self.search_pendings(&ctx, stk, &search, &mut filter).await?;
-		println!("PendingResult: {pending_result:?}");
-		// Do the search
-		let result = self.search(&ctx, stk, &search, pending_docs, &mut filter).await?;
+		// Search in the pendings if any
+		let pending_docs =
+			self.search_pendings(&ctx, stk, &search, &mut filter, &mut builder).await?;
+		// Search in the graph
+		self.search_graph(&ctx, stk, &search, pending_docs, &mut filter, &mut builder).await?;
+
 		// We build the final result: replacing DocId with RecordIds
-		if let Some(filter) = filter {
-			// If there is a filter, we let the filter building the result
-			return Ok(filter.convert_result(result));
-		}
-		let docs = self.docs.read().await;
+		let result = builder.collect();
+
+		let (docs, cache) = if let Some(filter) = filter {
+			// If there is a filter, we returns the read-locked HnswDoc
+			// and the record cache
+			let (docs, cache) = filter.release();
+			(docs, Some(cache))
+		} else {
+			(self.docs.read().await, None)
+		};
+		// We can now build the final result
 		let mut res = VecDeque::with_capacity(result.len());
-		for (doc_id, dist) in result {
-			if let Some(rid) = docs.get_thing(&ctx.tx, doc_id).await? {
-				res.push_back((rid.into(), dist, None));
+		for (dist, id) in result {
+			let dist: f64 = dist.into();
+			// Do we have it from the cache?
+			if let Some(cache) = &cache {
+				if let Some(Some((rid, record))) = cache.get(&id) {
+					res.push_back((rid.clone(), dist, Some(record.clone())));
+					continue;
+				}
+			}
+			// Otherwise we get it from the state
+			match id {
+				VectorId::DocId(doc_id) => {
+					if let Some(rid) = docs.get_thing(&ctx.tx, doc_id).await? {
+						res.push_back((Arc::new(rid), dist, None));
+					}
+				}
+				VectorId::RecordKey(key) => {
+					let rid = RecordId::new(self.ikb.table().clone(), key.as_ref().clone());
+					res.push_back((Arc::new(rid), dist, None));
+				}
 			}
 		}
 		Ok(res)
 	}
 
-	pub(super) async fn search(
+	/// Search for results in the HNSW graph
+	pub(super) async fn search_graph(
 		&self,
 		ctx: &HnswContext<'_>,
 		stk: &mut Stk,
 		search: &HnswSearch,
 		pending_docs: Option<RoaringTreemap>,
 		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
-	) -> Result<KnnResult> {
+		builder: &mut KnnResultBuilder,
+	) -> Result<()> {
 		let hnsw = self.hnsw.read().await;
 		// Do the search
 		if let Some(filter) = filter {
 			let neighbours = hnsw
 				.knn_search_with_filter(&ctx, search, stk, filter, pending_docs.as_ref())
 				.await?;
-			self.build_result(&ctx.tx, &hnsw, neighbours, search.k, |evicted_docs| {
-				filter.expires(evicted_docs)
+			self.add_graph_results(&ctx.tx, &hnsw, neighbours, builder, |evicted_docs| {
+				filter.expires(&evicted_docs)
 			})
 			.await
 		} else {
 			let neighbours = hnsw.knn_search(ctx, search, pending_docs.as_ref()).await?;
-			self.build_result(&ctx.tx, &hnsw, neighbours, search.k, |_| {}).await
+			self.add_graph_results(&ctx.tx, &hnsw, neighbours, builder, |_| {}).await
 		}
 	}
 
@@ -260,12 +288,13 @@ impl HnswIndex {
 		stk: &mut Stk,
 		search: &HnswSearch,
 		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
-	) -> Result<(BTreeMap<FloatKey, VectorPendingId>, Option<RoaringTreemap>)> {
+		builder: &mut KnnResultBuilder,
+	) -> Result<Option<RoaringTreemap>> {
 		let mut all_existing_docs = RoaringTreemap::new();
 		let mut non_deleted_docs = HashMap::default();
 		// First pass, identify deleted doc
 		self.collect_pending(ctx.ctx, &ctx.tx, |_, pending| {
-			if let VectorPendingId::DocId(doc_id) = pending.id {
+			if let VectorId::DocId(doc_id) = pending.id {
 				all_existing_docs.insert(doc_id);
 			};
 			if pending.new_vectors.is_empty() {
@@ -276,43 +305,34 @@ impl HnswIndex {
 		})
 		.await?;
 		if all_existing_docs.is_empty() && non_deleted_docs.is_empty() {
-			return Ok((BTreeMap::default(), None));
+			return Ok(None);
 		}
 		// Second pass, we build the KNN result for non-deleted documents
-		let mut result = BTreeMap::default();
 		for (id, vectors) in non_deleted_docs {
 			// If there is a filter, we need to check if the record is truthy
 			if let Some(filter) = filter {
-				match &id {
-					VectorPendingId::DocId(doc_id) => {
-						if !filter.check_doc_id_truthy(ctx, stk, *doc_id).await? {
-							continue;
-						}
-					}
-					VectorPendingId::Id(id) => {
-						let rid = Arc::new(RecordId::new(self.ikb.table().clone(), id.clone()));
-						if !filter.check_record_is_truthy(ctx, stk, rid).await? {
-							continue;
-						}
-					}
+				if !filter.check_vector_id_truthy(ctx, stk, id.clone()).await? {
+					continue;
 				}
 			}
 			for vector in vectors {
 				let vector = Vector::from(vector);
 				let d = self.distance.calculate(&search.pt, &vector);
-				result.insert(FloatKey::from(d), id.clone());
-				if result.len() > search.k {
-					result.pop_last();
+				if builder.check_add(d) {
+					if let Some(evicted_id) = builder.add_vector_id_result(d, id.clone())
+						&& let Some(filter) = filter
+					{
+						filter.expire(&evicted_id);
+					}
 				}
 			}
 		}
-		let all_existing_docs = if all_existing_docs.is_empty() {
-			None
-		} else {
-			Some(all_existing_docs)
-		};
-		Ok((result, all_existing_docs))
+		if all_existing_docs.is_empty() {
+			return Ok(None);
+		}
+		Ok(Some(all_existing_docs))
 	}
+
 	async fn collect_pending<F>(
 		&self,
 		ctx: &Context,
@@ -342,28 +362,27 @@ impl HnswIndex {
 		Ok(())
 	}
 
-	async fn build_result<F>(
+	async fn add_graph_results<F>(
 		&self,
 		tx: &Transaction,
 		hnsw: &HnswFlavor,
 		neighbors: Vec<(f64, ElementId)>,
-		n: usize,
+		builder: &mut KnnResultBuilder,
 		mut evited_docs_func: F,
-	) -> Result<KnnResult>
+	) -> Result<()>
 	where
-		F: FnMut(Ids64),
+		F: FnMut(Vec<VectorId>),
 	{
-		let mut builder = KnnResultBuilder::new(n);
 		for (e_dist, e_id) in neighbors {
 			if builder.check_add(e_dist)
 				&& let Some(v) = hnsw.get_vector(tx, &e_id).await?
 				&& let Some(docs) = self.vec_docs.get_docs(tx, &v).await?
 			{
-				let evicted_docs = builder.add(e_dist, docs);
+				let evicted_docs = builder.add_graph_result(e_dist, docs);
 				evited_docs_func(evicted_docs);
 			}
 		}
-		Ok(builder.build())
+		Ok(())
 	}
 
 	#[cfg(test)]

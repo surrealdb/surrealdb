@@ -295,10 +295,8 @@ where
 			}
 			if filter.check_any_doc_truthy(ctx, stk, docs).await? {
 				w.push(e_dist, e_id);
-				if w.len() > efc
-					&& let Some((_, id)) = w.pop_last()
-				{
-					filter.expire(id);
+				if w.len() > efc {
+					w.pop_last();
 				}
 				return Ok(true);
 			}

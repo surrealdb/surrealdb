@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use ahash::{HashSet, HashSetExt};
 use revision::revisioned;
@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::dynamicset::DynamicSet;
-use crate::idx::trees::hnsw::ElementId;
+use crate::idx::trees::hnsw::{ElementId, VectorId};
 
 #[derive(Default, Debug, Clone)]
 pub(super) struct DoublePriorityQueue(BTreeMap<FloatKey, VecDeque<ElementId>>, usize);
@@ -505,89 +505,90 @@ where
 	}
 }
 
+pub(super) type KnnResult = BTreeSet<(FloatKey, VectorId)>;
+
 pub(super) struct KnnResultBuilder {
-	knn: u64,
-	docs: RoaringTreemap,
-	priority_list: BTreeMap<FloatKey, Ids64>,
+	/// The number of expected results
+	knn: usize,
+	/// The sorted results
+	priority_list: KnnResult,
+	/// Count the number of time a vector id is present in the result
+	vector_id_count: BTreeMap<VectorId, usize>,
 }
 
 impl KnnResultBuilder {
 	pub(super) fn new(knn: usize) -> Self {
 		Self {
-			knn: knn as u64,
-			docs: RoaringTreemap::default(),
-			priority_list: BTreeMap::default(),
+			knn,
+			priority_list: BTreeSet::new(),
+			vector_id_count: BTreeMap::new(),
 		}
 	}
-	pub(super) fn check_add(&self, dist: f64) -> bool {
-		if self.docs.len() >= self.knn
-			&& let Some(pr) = self.priority_list.keys().last()
-			&& dist > pr.0
+
+	/// Check if we accept a new entry with the provided distance.
+	/// We accept only if the list is not full and the distance is closer
+	/// than the farest element in the list
+	pub(super) fn check_add(&self, submitted_dist: f64) -> bool {
+		if self.priority_list.len() >= self.knn
+			&& let Some((max_dist, _)) = self.priority_list.last()
+			&& submitted_dist > max_dist.0
 		{
 			return false;
 		}
 		true
 	}
 
-	pub(super) fn add(&mut self, dist: f64, docs: Ids64) -> Ids64 {
-		let pr = FloatKey(dist);
-		docs.append_to(&mut self.docs);
-		match self.priority_list.entry(pr) {
-			Entry::Vacant(e) => {
-				e.insert(docs.clone());
-			}
-			Entry::Occupied(mut e) => {
-				let d = e.get_mut();
-				if let Some(n) = d.append_from(&docs) {
-					e.insert(n);
-				}
+	/// Add the result to the priority list.
+	/// Returns any evicted ids, so any filter cache can be freed
+	pub(super) fn add_graph_result(&mut self, dist: f64, added_docs: Ids64) -> Vec<VectorId> {
+		let mut evicted_ids = Vec::with_capacity(added_docs.len() as usize);
+		for doc_id in added_docs.iter() {
+			if let Some(evited_id) = self.add_vector_id_result(dist, VectorId::DocId(doc_id)) {
+				evicted_ids.push(evited_id);
 			}
 		}
-
-		// Do possible eviction
-		let docs_len = self.docs.len();
-		if docs_len > self.knn
-			&& let Some((_, d)) = self.priority_list.last_key_value()
-			&& docs_len - d.len() >= self.knn
-			&& let Some((_, evicted_docs)) = self.priority_list.pop_last()
-		{
-			evicted_docs.remove_to(&mut self.docs);
-			return evicted_docs;
-		}
-		Ids64::Empty
+		evicted_ids
 	}
 
-	pub(super) fn build(self) -> KnnResult {
-		let mut sorted_docs = VecDeque::with_capacity(self.knn as usize);
-		let mut left = self.knn;
-		for (pr, docs) in self.priority_list {
-			let dl = docs.len();
-			if dl > left {
-				for doc_id in docs.iter().take(left as usize) {
-					sorted_docs.push_back((doc_id, pr.0));
-				}
-				break;
-			}
-			for doc_id in docs.iter() {
-				sorted_docs.push_back((doc_id, pr.0));
-			}
-			left -= dl;
-			// We don't expect anymore result, we can leave
-			if left == 0 {
-				break;
-			}
+	/// Add the result to the priority list.
+	/// Returns any evicted id, so any filter cache can be freed
+	pub(super) fn add_vector_id_result(&mut self, dist: f64, id: VectorId) -> Option<VectorId> {
+		// Insert the result in the list
+		self.priority_list.insert((FloatKey(dist), id.clone()));
+		// Update the vector count
+		self.vector_id_count.entry(id).and_modify(|c| *c += 1).or_insert(1);
+		// Is the priority list full?
+		if self.priority_list.len() <= self.knn {
+			return None;
 		}
-		trace!("sorted_docs: {:?}", sorted_docs);
-		sorted_docs
+		// We remove the last element
+		let Some((_, id)) = self.priority_list.pop_last() else {
+			return None;
+		};
+		// We update the vector count
+		let Entry::Occupied(mut e) = self.vector_id_count.entry(id) else {
+			return None;
+		};
+		let c = e.get_mut();
+		if *c <= 1 {
+			// This entry does not exist anymore in the result list, it can be evicted
+			let (id, _) = e.remove_entry();
+			Some(id)
+		} else {
+			*c -= 1;
+			None
+		}
+	}
+
+	pub(super) fn collect(self) -> KnnResult {
+		self.priority_list
 	}
 }
-
-pub(crate) type KnnResult = VecDeque<(DocId, f64)>;
 
 #[cfg(test)]
 pub(super) mod tests {
 	use std::cmp::Reverse;
-	use std::collections::{BTreeSet, BinaryHeap, VecDeque};
+	use std::collections::{BTreeSet, BinaryHeap};
 	use std::fs::File;
 	use std::io::{BufRead, BufReader};
 	use std::time::SystemTime;
@@ -603,6 +604,7 @@ pub(super) mod tests {
 
 	use crate::catalog::{Distance, VectorType};
 	use crate::idx::seqdocids::DocId;
+	use crate::idx::trees::hnsw::VectorId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::sql::expression::convert_public_value_to_internal;
@@ -793,14 +795,22 @@ pub(super) mod tests {
 	#[test]
 	fn knn_result_builder_test() {
 		let mut b = KnnResultBuilder::new(7);
-		b.add(0.0, Ids64::One(5));
-		b.add(0.2, Ids64::Vec3([0, 1, 2]));
-		b.add(0.2, Ids64::One(3));
-		b.add(0.2, Ids64::Vec2([6, 8]));
-		let res = b.build();
+		b.add_graph_result(0.0, Ids64::One(5));
+		b.add_graph_result(0.2, Ids64::Vec3([0, 1, 2]));
+		b.add_graph_result(0.2, Ids64::One(3));
+		b.add_graph_result(0.2, Ids64::Vec2([6, 8]));
+		let res = b.collect();
 		assert_eq!(
 			res,
-			VecDeque::from([(5, 0.0), (0, 0.2), (1, 0.2), (2, 0.2), (3, 0.2), (6, 0.2), (8, 0.2)])
+			BTreeSet::from([
+				(FloatKey(0.0), VectorId::DocId(5)),
+				(FloatKey(0.2), VectorId::DocId(0)),
+				(FloatKey(0.2), VectorId::DocId(1)),
+				(FloatKey(0.2), VectorId::DocId(2)),
+				(FloatKey(0.2), VectorId::DocId(3)),
+				(FloatKey(0.2), VectorId::DocId(6)),
+				(FloatKey(0.2), VectorId::DocId(8))
+			])
 		);
 	}
 

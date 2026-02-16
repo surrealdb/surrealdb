@@ -7,6 +7,8 @@ mod heuristic;
 pub mod index;
 mod layer;
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
@@ -72,16 +74,16 @@ impl KVValue for HnswState {
 
 #[revisioned(revision = 1)]
 pub(crate) struct VectorPendingUpdate {
-	id: VectorPendingId,
+	id: VectorId,
 	old_vectors: Vec<SerializedVector>,
 	new_vectors: Vec<SerializedVector>,
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, PartialEq, Hash, Eq, Clone)]
-pub(crate) enum VectorPendingId {
+#[derive(Debug, PartialOrd, Ord, Hash, PartialEq, Eq, Clone)]
+pub(crate) enum VectorId {
 	DocId(DocId),
-	Id(RecordIdKey),
+	RecordKey(Arc<RecordIdKey>),
 }
 
 impl_kv_value_revisioned!(VectorPendingUpdate);
@@ -493,11 +495,10 @@ mod tests {
 	use std::ops::Deref;
 	use std::sync::Arc;
 
-	use ahash::{HashMap, HashSet};
+	use ahash::{HashMap, HashSet, HashSetExt};
 	use anyhow::Result;
 	use ndarray::Array1;
 	use reblessive::tree::Stk;
-	use roaring::RoaringTreemap;
 	use test_log::test;
 
 	use crate::catalog::providers::CatalogProvider;
@@ -511,7 +512,7 @@ mod tests {
 	use crate::idx::trees::hnsw::docs::VecDocs;
 	use crate::idx::trees::hnsw::flavor::HnswFlavor;
 	use crate::idx::trees::hnsw::index::{HnswContext, HnswIndex};
-	use crate::idx::trees::hnsw::{ElementId, HnswSearch};
+	use crate::idx::trees::hnsw::{ElementId, HnswSearch, VectorId};
 	use crate::idx::trees::knn::tests::{TestCollection, new_vectors_from_file};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
@@ -749,15 +750,19 @@ mod tests {
 		let ctx = h.new_hnsw_context(ctx, db);
 		let max_knn = 20.min(collection.len());
 		for (doc_id, obj) in collection.to_vec_ref() {
+			let doc_id = VectorId::DocId(*doc_id);
 			for knn in 1..max_knn {
 				let search = HnswSearch::new(obj.clone(), knn, 500);
-				let res = h.search(&ctx, stk, &search, None, &mut None).await.unwrap();
-				if knn == 1 && res.len() == 1 && res[0].1 > 0.0 {
-					let docs: Vec<DocId> = res.iter().map(|(d, _)| d.clone()).collect();
+				let mut builder = KnnResultBuilder::new(search.k);
+				h.search_graph(&ctx, stk, &search, None, &mut None, &mut builder).await.unwrap();
+				let res = builder.collect();
+				let first_dist: f64 = res.first().unwrap().0.into();
+				if knn == 1 && res.len() == 1 && first_dist > 0.0 {
+					let docs: Vec<VectorId> = res.iter().map(|(_, id)| id.clone()).collect();
 					if collection.is_unique() {
 						assert!(
-							docs.contains(doc_id),
-							"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?}",
+							docs.contains(&doc_id),
+							"Search: {:?} - Knn: {} - Wrong Doc - Expected: {:?} - Got: {:?}",
 							obj,
 							knn,
 							doc_id,
@@ -1036,14 +1041,17 @@ mod tests {
 
 							let ctx = new_ctx(&ds, TransactionType::Read).await;
 							let ctx = h.new_hnsw_context(&ctx, &db);
-							let hnsw_res =
-								h.search(&ctx, stk, &search, None, &mut None).await.unwrap();
+							let mut builder = KnnResultBuilder::new(knn);
+							h.search_graph(&ctx, stk, &search, None, &mut None, &mut builder)
+								.await
+								.unwrap();
 							ctx.tx.cancel().await.unwrap();
-							assert_eq!(hnsw_res.len(), knn, "Different size - knn: {knn}",);
+							let res = builder.collect();
+							assert_eq!(res.len(), knn, "Different size - knn: {knn}",);
 							let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
-							let rec = compute_recall(&brute_force_res, &hnsw_res);
+							let rec = compute_recall(&brute_force_res, &res);
 							if rec == 1.0 {
-								assert_eq!(brute_force_res, hnsw_res);
+								assert_eq!(brute_force_res, res);
 							}
 							total_recall += rec;
 						}
@@ -1113,25 +1121,25 @@ mod tests {
 			for (doc_id, doc_pt) in self.to_vec_ref() {
 				let d = dist.calculate(doc_pt, pt);
 				if b.check_add(d) {
-					b.add(d, Ids64::One(*doc_id));
+					b.add_graph_result(d, Ids64::One(*doc_id));
 				}
 			}
-			b.build()
+			b.collect()
 		}
 	}
 
 	fn compute_recall(res1: &KnnResult, res2: &KnnResult) -> f64 {
-		let mut bits = RoaringTreemap::new();
-		for &(doc_id, _) in res1 {
-			bits.insert(doc_id);
+		let mut docs = HashSet::with_capacity(res1.len());
+		for (_, doc_id) in res1.iter() {
+			docs.insert(doc_id.clone());
 		}
 		let mut found = 0;
-		for &(doc_id, _) in res2 {
-			if bits.contains(doc_id) {
+		for (_, doc_id) in res2.iter() {
+			if docs.contains(doc_id) {
 				found += 1;
 			}
 		}
-		found as f64 / bits.len() as f64
+		found as f64 / docs.len() as f64
 	}
 
 	fn new_i16_vec(x: isize, y: isize) -> SharedVector {
