@@ -37,7 +37,7 @@ pub(crate) use function::{
 pub(crate) use idiom::IdiomExpr;
 pub(crate) use literal::{Literal, MockExpr, Param};
 pub(crate) use matches::MatchesOp;
-pub(crate) use ops::{BinaryOp, PostfixOp, UnaryOp};
+pub(crate) use ops::{BinaryOp, PostfixOp, SimpleBinaryOp, UnaryOp};
 pub(crate) use record_id::RecordIdExpr;
 pub(crate) use subquery::ScalarSubquery;
 
@@ -327,6 +327,24 @@ pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	/// even when the fused Lookup is the last part in the idiom.
 	fn is_fused_lookup(&self) -> bool {
 		false
+	}
+
+	/// Returns the constant value if this expression is a literal.
+	///
+	/// Used at plan/construction time by parent expressions (e.g., `SimpleBinaryOp`)
+	/// to detect constant operands and inline them, avoiding per-record async
+	/// dispatch and `Value::clone()` overhead.
+	fn try_literal(&self) -> Option<&Value> {
+		None
+	}
+
+	/// Returns the simple field name if this is a single-field idiom expression.
+	///
+	/// Used at plan/construction time by parent expressions (e.g., `SimpleBinaryOp`)
+	/// to detect simple field access patterns like `age` and inline them, avoiding
+	/// per-record async dispatch through the full IdiomExpr + FieldPart chain.
+	fn try_simple_field(&self) -> Option<&str> {
+		None
 	}
 }
 

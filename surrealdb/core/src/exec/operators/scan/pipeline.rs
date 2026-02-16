@@ -457,6 +457,17 @@ pub(crate) async fn build_field_state(
 		.await
 		.context("Failed to get field definitions")?;
 
+	// Fast path: if there are no computed fields and no field-level permissions
+	// that need checking, skip the expensive resolution (expression conversion,
+	// dependency analysis, topological sort). This avoids the per-scan overhead
+	// when needed_fields bypasses the cache.
+	let has_computed = field_defs.iter().any(|fd| fd.computed.is_some());
+	let has_field_perms =
+		check_perms && field_defs.iter().any(|fd| fd.select_permission.is_specific());
+	if !has_computed && !has_field_perms {
+		return Ok(FieldState::empty());
+	}
+
 	// Collect computed fields and their dependency metadata
 	let mut raw_computed: Vec<(
 		String,

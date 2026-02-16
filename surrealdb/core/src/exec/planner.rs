@@ -320,6 +320,32 @@ impl<'ctx> Planner<'ctx> {
 				// All other binary operators (and non-standard MATCHES patterns)
 				let left_phys = Box::pin(self.physical_expr(*left)).await?;
 				let right_phys = Box::pin(self.physical_expr(*right)).await?;
+
+				// Optimisation: detect `field op literal` or `literal op field`
+				// patterns and emit a SimpleBinaryOp that inlines field access
+				// and avoids per-record async dispatch + Value cloning.
+				if is_simple_binary_eligible(&op) {
+					if let Some(field) = left_phys.try_simple_field()
+						&& let Some(lit) = right_phys.try_literal()
+					{
+						return Ok(Arc::new(crate::exec::physical_expr::SimpleBinaryOp {
+							field_name: field.to_string(),
+							op,
+							literal: lit.clone(),
+							reversed: false,
+						}));
+					} else if let Some(field) = right_phys.try_simple_field()
+						&& let Some(lit) = left_phys.try_literal()
+					{
+						return Ok(Arc::new(crate::exec::physical_expr::SimpleBinaryOp {
+							field_name: field.to_string(),
+							op,
+							literal: lit.clone(),
+							reversed: true,
+						}));
+					}
+				}
+
 				Ok(Arc::new(BinaryOp {
 					left: left_phys,
 					op,
@@ -1079,6 +1105,40 @@ pub(crate) async fn expr_to_physical_expr(
 // ============================================================================
 // Tests
 // ============================================================================
+
+/// Returns `true` if the binary operator is eligible for `SimpleBinaryOp` optimisation.
+///
+/// Only comparison and containment operators are eligible — these take `(&Value, &Value)`
+/// and produce a boolean result. Operators that produce non-boolean results (arithmetic,
+/// ranges), require short-circuit logic (And, Or, NullCoalescing), or need special index
+/// context (Matches, NearestNeighbor) are excluded.
+fn is_simple_binary_eligible(op: &crate::expr::operator::BinaryOperator) -> bool {
+	use crate::expr::operator::BinaryOperator;
+	matches!(
+		op,
+		BinaryOperator::Equal
+			| BinaryOperator::ExactEqual
+			| BinaryOperator::NotEqual
+			| BinaryOperator::AllEqual
+			| BinaryOperator::AnyEqual
+			| BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual
+			| BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+			| BinaryOperator::Contain
+			| BinaryOperator::NotContain
+			| BinaryOperator::ContainAll
+			| BinaryOperator::ContainAny
+			| BinaryOperator::ContainNone
+			| BinaryOperator::Inside
+			| BinaryOperator::NotInside
+			| BinaryOperator::AllInside
+			| BinaryOperator::AnyInside
+			| BinaryOperator::NoneInside
+			| BinaryOperator::Outside
+			| BinaryOperator::Intersects
+	)
+}
 
 #[cfg(test)]
 mod planner_tests {
