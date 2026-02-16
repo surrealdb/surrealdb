@@ -303,7 +303,7 @@ async fn relate_enforced() -> Result<()> {
 	t.skip_ok(1)?;
 	//
 	t.expect_error_func(|e| {
-		e.kind() == &TypesErrorKind::Internal && e.message() == "The record 'a:1' does not exist"
+		e.kind() == &TypesErrorKind::NotFound && e.message() == "The record 'a:1' does not exist"
 	})?;
 	//
 	t.expect_val("[{ id: a:1 }, { id: a:2 }]")?;
