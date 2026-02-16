@@ -7206,7 +7206,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "surrealdb-types",
@@ -7217,7 +7217,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism-macros"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7226,7 +7226,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism-runtime"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7243,7 +7243,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism-types"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "async-trait",

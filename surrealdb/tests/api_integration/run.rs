@@ -27,11 +27,7 @@ pub async fn run_no_args(new_db: impl CreateDb) {
 	let dbn = Ulid::new().to_string();
 	db.use_ns(&ns).use_db(&dbn).await.unwrap();
 
-	db.query("DEFINE FUNCTION fn::answer() { RETURN 42; }")
-		.await
-		.unwrap()
-		.check()
-		.unwrap();
+	db.query("DEFINE FUNCTION fn::answer() { RETURN 42; }").await.unwrap().check().unwrap();
 
 	let result: i64 = db.run("fn::answer").await.unwrap();
 	assert_eq!(result, 42);
@@ -83,11 +79,7 @@ pub async fn run_builtin_math(new_db: impl CreateDb) {
 	assert_eq!(abs_result, 42);
 
 	// math::max() expects a single array argument, not multiple arguments
-	let max_result: i64 = db
-		.run("math::max")
-		.args(vec![vec![1_i64, 2, 3, 4, 5, 6]])
-		.await
-		.unwrap();
+	let max_result: i64 = db.run("math::max").args(vec![vec![1_i64, 2, 3, 4, 5, 6]]).await.unwrap();
 	assert_eq!(max_result, 6);
 
 	drop(permit);
