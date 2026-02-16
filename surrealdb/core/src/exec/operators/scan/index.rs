@@ -105,35 +105,31 @@ impl ExecOperator for IndexScan {
 				from,
 				to,
 			} => {
-				let from_str = from
-					.as_ref()
-					.map(|r| {
-						format!(
-							"{}{}",
-							if r.inclusive {
-								">="
-							} else {
-								">"
-							},
-							r.value.to_sql()
-						)
-					})
-					.unwrap_or_default();
-				let to_str = to
-					.as_ref()
-					.map(|r| {
-						format!(
-							"{}{}",
-							if r.inclusive {
-								"<="
-							} else {
-								"<"
-							},
-							r.value.to_sql()
-						)
-					})
-					.unwrap_or_default();
-				format!("{} {}", from_str, to_str).trim().to_string()
+				let from_str = match from {
+					Some(r) => format!(
+						"{}{}",
+						if r.inclusive {
+							">="
+						} else {
+							">"
+						},
+						r.value.to_sql()
+					),
+					None => String::new(),
+				};
+				let to_str = match to {
+					Some(r) => format!(
+						"{}{}",
+						if r.inclusive {
+							"<="
+						} else {
+							"<"
+						},
+						r.value.to_sql()
+					),
+					None => String::new(),
+				};
+				format!("{from_str} {to_str}").trim().to_string()
 			}
 			BTreeAccess::Compound {
 				prefix,
@@ -321,6 +317,11 @@ impl ExecOperator for IndexScan {
 			match (&access, is_unique) {
 				// Unique equality - at most one record
 				(BTreeAccess::Equality(value), true) => {
+					if ctx.cancellation().is_cancelled() {
+						Err(ControlFlow::Err(anyhow::anyhow!(
+							crate::err::Error::QueryCancelled
+						)))?;
+					}
 					let mut iter = UniqueEqualIterator::new(ns_id, db_id, ix, value)
 						.context("Failed to create iterator")?;
 
@@ -496,9 +497,11 @@ impl ExecOperator for IndexScan {
 							break;
 						}
 
-						rids = next_rids_result
-							.expect("next_rids_result should be Some when remaining > 0")
-							.context("Failed to iterate compound index")?;
+						rids = match next_rids_result {
+							Some(r) => r.context("Failed to iterate compound index")?,
+							// Iterator exhausted before remaining reached 0 — stop cleanly.
+							None => break,
+						};
 					}
 				}
 
@@ -555,9 +558,11 @@ impl ExecOperator for IndexScan {
 							break;
 						}
 
-						rids = next_rids_result
-							.expect("next_rids_result should be Some when remaining > 0")
-							.context("Failed to iterate compound index")?;
+						rids = match next_rids_result {
+							Some(r) => r.context("Failed to iterate compound index")?,
+							// Iterator exhausted before remaining reached 0 — stop cleanly.
+							None => break,
+						};
 					}
 				}
 

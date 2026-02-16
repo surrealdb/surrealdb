@@ -401,6 +401,13 @@ impl<'ctx> Planner<'ctx> {
 					return Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>);
 				}
 
+				// Bail out early if OMIT contains nested paths — the fast
+				// SelectProject path can't handle them, and checking now
+				// avoids compiling physical expressions we'd throw away.
+				if Self::has_nested_omit(&omit) {
+					return self.plan_projections(fields, omit, input, is_value_source).await;
+				}
+
 				// Classify each field. If any field requires the full Project
 				// operator (projection functions, nested output paths), fall back.
 				let mut projections = Vec::with_capacity(field_list.len());
@@ -486,10 +493,6 @@ impl<'ctx> Planner<'ctx> {
 				}
 
 				if needs_fallback {
-					return self.plan_projections(fields, omit, input, is_value_source).await;
-				}
-
-				if Self::has_nested_omit(&omit) {
 					return self.plan_projections(fields, omit, input, is_value_source).await;
 				}
 

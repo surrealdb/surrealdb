@@ -23,7 +23,7 @@
 //! internally, so we don't use the expression registry for those queries. The consolidated
 //! approach is used for queries without GROUP BY where ORDER BY references SELECT aliases.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use surrealdb_types::ToSql;
@@ -68,13 +68,16 @@ pub struct ExpressionInfo {
 /// operator.
 #[derive(Debug, Default)]
 pub struct ExpressionRegistry {
-	/// Map from expression SQL representation to its info
-	/// Using SQL string as key for deduplication (same expression = same SQL)
+	/// Map from expression SQL representation to its info.
+	/// Using SQL string as key for deduplication (same expression = same SQL).
 	expressions: HashMap<String, ExpressionInfo>,
-	/// Counter for generating synthetic field names
+	/// Counter for generating synthetic field names.
 	counter: usize,
-	/// Track field names that are already in use (from scan/input)
-	reserved_names: Vec<String>,
+	/// Field names that must not be reused as internal names (e.g. scan-output fields).
+	reserved_names: HashSet<String>,
+	/// Internal names already assigned to expressions — enables O(1) conflict checks
+	/// in `choose_internal_name` instead of scanning all `expressions.values()`.
+	used_internal_names: HashSet<String>,
 }
 
 impl ExpressionRegistry {
@@ -83,7 +86,8 @@ impl ExpressionRegistry {
 		Self {
 			expressions: HashMap::new(),
 			counter: 0,
-			reserved_names: Vec::new(),
+			reserved_names: HashSet::new(),
+			used_internal_names: HashSet::new(),
 		}
 	}
 
@@ -92,7 +96,8 @@ impl ExpressionRegistry {
 		Self {
 			expressions: HashMap::new(),
 			counter: 0,
-			reserved_names: names,
+			reserved_names: names.into_iter().collect(),
+			used_internal_names: HashSet::new(),
 		}
 	}
 
@@ -171,11 +176,10 @@ impl ExpressionRegistry {
 	/// Choose an internal name, preferring the alias if available and not conflicting.
 	fn choose_internal_name(&mut self, alias: &Option<String>) -> String {
 		if let Some(name) = alias {
-			// Check if alias conflicts with reserved names or existing internal names
-			let conflicts = self.reserved_names.contains(name)
-				|| self.expressions.values().any(|info| &info.internal_name == name);
-
+			let conflicts =
+				self.reserved_names.contains(name) || self.used_internal_names.contains(name);
 			if !conflicts {
+				self.used_internal_names.insert(name.clone());
 				return name.clone();
 			}
 		}
@@ -183,6 +187,7 @@ impl ExpressionRegistry {
 		// Generate synthetic name
 		let name = format!("_e{}", self.counter);
 		self.counter += 1;
+		self.used_internal_names.insert(name.clone());
 		name
 	}
 
@@ -244,9 +249,7 @@ impl ExpressionRegistry {
 
 	/// Mark a field name as reserved (e.g., fields from the scanned record).
 	pub fn reserve_name(&mut self, name: String) {
-		if !self.reserved_names.contains(&name) {
-			self.reserved_names.push(name);
-		}
+		self.reserved_names.insert(name);
 	}
 
 	/// Get all registered expression infos.
