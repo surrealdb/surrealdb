@@ -28,6 +28,7 @@ use crate::exec::{
 use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
+use crate::kvs::CachePolicy;
 
 /// Index scan operator for B-tree indexes (Idx and Uniq).
 ///
@@ -315,6 +316,7 @@ impl ExecOperator for IndexScan {
 
 					let mut values = fetch_and_filter_records_batch(
 						&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+						CachePolicy::ReadWrite,
 					).await?;
 
 					pipeline.process_batch(&mut values, &ctx).await?;
@@ -338,6 +340,7 @@ impl ExecOperator for IndexScan {
 
 						let mut values = fetch_and_filter_records_batch(
 							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+							CachePolicy::ReadOnly,
 						).await?;
 
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
@@ -368,6 +371,7 @@ impl ExecOperator for IndexScan {
 
 						let mut values = fetch_and_filter_records_batch(
 							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+							CachePolicy::ReadOnly,
 						).await?;
 
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
@@ -391,6 +395,7 @@ impl ExecOperator for IndexScan {
 
 						let mut values = fetch_and_filter_records_batch(
 							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+							CachePolicy::ReadOnly,
 						).await?;
 
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
@@ -429,6 +434,7 @@ impl ExecOperator for IndexScan {
 						let (values_result, next_rids_result) = if remaining > 0 {
 							let fetch_fut = fetch_and_filter_records_batch(
 								&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+								CachePolicy::ReadOnly,
 							);
 							let scan_fut = iter.next_batch(&txn, remaining);
 							let (v, n) = futures::join!(fetch_fut, scan_fut);
@@ -437,6 +443,7 @@ impl ExecOperator for IndexScan {
 							// No more entries needed; skip the prefetch.
 							let v = fetch_and_filter_records_batch(
 								&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+								CachePolicy::ReadOnly,
 							).await;
 							(v, None)
 						};
@@ -479,6 +486,7 @@ impl ExecOperator for IndexScan {
 						let (values_result, next_rids_result) = if remaining > 0 {
 							let fetch_fut = fetch_and_filter_records_batch(
 								&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+								CachePolicy::ReadOnly,
 							);
 							let scan_fut = iter.next_batch(&txn, remaining);
 							let (v, n) = futures::join!(fetch_fut, scan_fut);
@@ -486,6 +494,7 @@ impl ExecOperator for IndexScan {
 						} else {
 							let v = fetch_and_filter_records_batch(
 								&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+								CachePolicy::ReadOnly,
 							).await;
 							(v, None)
 						};

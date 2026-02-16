@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::{ControlFlowExt, EvalContext, ExecutionContext, PhysicalExpr};
 use crate::expr::ControlFlow;
-use crate::kvs::Transaction;
+use crate::kvs::{CachePolicy, Transaction};
 use crate::val::{RecordId, RecordIdKey, Value};
 
 /// Default batch size for collecting records before yielding downstream.
@@ -85,9 +85,12 @@ pub(crate) async fn fetch_records_batch(
 	db_id: DatabaseId,
 	rids: &[RecordId],
 	version: Option<u64>,
+	cache_policy: CachePolicy,
 ) -> Result<Vec<Value>, ControlFlow> {
-	let records =
-		txn.getm_records(ns_id, db_id, rids, version).await.context("Failed to fetch records")?;
+	let records = txn
+		.getm_records(ns_id, db_id, rids, version, cache_policy)
+		.await
+		.context("Failed to fetch records")?;
 
 	let mut values = Vec::with_capacity(rids.len());
 	for record in records {
@@ -117,9 +120,10 @@ pub(crate) async fn resolve_record_batch(
 	rids: &[RecordId],
 	fetch_full: bool,
 	version: Option<u64>,
+	cache_policy: CachePolicy,
 ) -> Result<Vec<Value>, ControlFlow> {
 	if fetch_full {
-		fetch_records_batch(txn, ns_id, db_id, rids, version).await
+		fetch_records_batch(txn, ns_id, db_id, rids, version, cache_policy).await
 	} else {
 		Ok(rids.iter().map(|rid| Value::RecordId(rid.clone())).collect())
 	}
@@ -150,9 +154,12 @@ pub(crate) async fn fetch_and_filter_records_batch(
 	select_permission: &crate::exec::permission::PhysicalPermission,
 	check_perms: bool,
 	version: Option<u64>,
+	cache_policy: CachePolicy,
 ) -> Result<Vec<Value>, ControlFlow> {
-	let records =
-		txn.getm_records(ns_id, db_id, rids, version).await.context("Failed to fetch records")?;
+	let records = txn
+		.getm_records(ns_id, db_id, rids, version, cache_policy)
+		.await
+		.context("Failed to fetch records")?;
 
 	let mut values = Vec::with_capacity(rids.len());
 	for record in records {

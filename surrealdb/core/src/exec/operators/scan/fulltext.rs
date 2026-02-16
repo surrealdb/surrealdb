@@ -27,6 +27,7 @@ use crate::iam::Action;
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::planner::iterators::MatchesHitsIterator;
+use crate::kvs::CachePolicy;
 
 /// Batch size for full-text result batching.
 ///
@@ -243,6 +244,7 @@ impl ExecOperator for FullTextScan {
 								&select_permission,
 								check_perms,
 								version,
+								CachePolicy::ReadOnly,
 							).await?;
 							if !values.is_empty() {
 								yield ValueBatch { values };
@@ -268,6 +270,7 @@ impl ExecOperator for FullTextScan {
 					&select_permission,
 					check_perms,
 					version,
+					CachePolicy::ReadOnly,
 				).await?;
 				if !values.is_empty() {
 					yield ValueBatch { values };

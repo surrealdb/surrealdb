@@ -21,7 +21,7 @@ use crate::exec::{
 };
 use crate::expr::{ControlFlow, Dir};
 use crate::idx::planner::ScanDirection;
-use crate::kvs::KVKey;
+use crate::kvs::{CachePolicy, KVKey};
 use crate::val::{RecordId, TableName};
 
 /// What kind of output the GraphEdgeScan should produce.
@@ -208,6 +208,7 @@ impl ExecOperator for GraphEdgeScan {
 									if rid_batch.len() >= BATCH_SIZE {
 										let values = resolve_record_batch(
 											&txn, ns_id, db_id, &rid_batch, fetch_full, None,
+											CachePolicy::ReadWrite,
 										).await?;
 										yield ValueBatch { values };
 										rid_batch.clear();
@@ -223,6 +224,7 @@ impl ExecOperator for GraphEdgeScan {
 			if !rid_batch.is_empty() {
 				let values = resolve_record_batch(
 					&txn, ns_id, db_id, &rid_batch, fetch_full, None,
+					CachePolicy::ReadWrite,
 				).await?;
 				yield ValueBatch { values };
 			}

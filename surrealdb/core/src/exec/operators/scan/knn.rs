@@ -25,6 +25,7 @@ use crate::exec::{
 use crate::expr::{Cond, ControlFlow, ControlFlowExt};
 use crate::iam::Action;
 use crate::idx::planner::checker::HnswConditionChecker;
+use crate::kvs::CachePolicy;
 use crate::val::Number;
 
 /// KNN scan operator using an HNSW index.
@@ -291,6 +292,7 @@ impl ExecOperator for KnnScan {
 				&select_permission,
 				check_perms,
 				version,
+				CachePolicy::ReadWrite,
 			).await?;
 
 			if !values.is_empty() {
