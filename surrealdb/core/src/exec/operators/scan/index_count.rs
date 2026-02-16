@@ -356,8 +356,8 @@ async fn count_with_filter_fallback(
 			};
 			let mut record = crate::catalog::Record::kv_decode_value(val)
 				.context("Failed to deserialize record")?;
-			record.data.to_mut().def(&rid_val);
-			let value = record.data.into_value();
+			record.data.def(&rid_val);
+			let value = record.data;
 
 			// Check per-record permission first.
 			let perm_allowed = match permission {

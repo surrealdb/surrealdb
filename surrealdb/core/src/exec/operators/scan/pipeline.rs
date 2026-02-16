@@ -213,10 +213,10 @@ pub(crate) fn decode_record(key: &[u8], val: Vec<u8>) -> Result<Value, ControlFl
 		crate::catalog::Record::kv_decode_value(val).context("Failed to deserialize record")?;
 
 	// Inject the id field into the document
-	record.data.to_mut().def(&rid);
+	record.data.def(&rid);
 
-	// Take ownership of the value (zero-cost move for freshly deserialized Mutable data)
-	Ok(record.data.into_value())
+	// Take ownership of the value (zero-cost move for freshly deserialized data)
+	Ok(record.data)
 }
 
 // =============================================================================

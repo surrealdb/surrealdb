@@ -86,10 +86,10 @@ pub(crate) async fn fetch_records_batch(
 
 	let mut values = Vec::with_capacity(rids.len());
 	for (rid, record) in rids.iter().zip(records) {
-		if record.data.as_ref().is_none() {
+		if record.data.is_none() {
 			values.push(Value::None);
 		} else {
-			let mut v = record.data.as_ref().clone();
+			let mut v = record.data.clone();
 			v.def(rid);
 			values.push(v);
 		}
@@ -143,11 +143,11 @@ pub(crate) async fn fetch_and_filter_records_batch(
 
 	let mut values = Vec::with_capacity(rids.len());
 	for (rid, record) in rids.iter().zip(records) {
-		if record.data.as_ref().is_none() {
+		if record.data.is_none() {
 			continue;
 		}
 
-		let mut value = record.data.as_ref().clone();
+		let mut value = record.data.clone();
 		value.def(rid);
 
 		if check_perms {

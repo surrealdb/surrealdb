@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
-use std::mem;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
@@ -9,7 +8,7 @@ use reblessive::tree::Stk;
 
 use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{
-	self, Data, DatabaseDefinition, FieldDefinition, NamespaceDefinition, Permission, Record,
+	self, DatabaseDefinition, FieldDefinition, NamespaceDefinition, Permission, Record,
 	TableDefinition,
 };
 use crate::ctx::{Context, FrozenContext};
@@ -111,7 +110,7 @@ impl CursorDoc {
 	{
 		let ctx = if let Some(doc) = doc {
 			let mut new_ctx = Context::new(ctx);
-			new_ctx.add_value("parent", doc.doc.as_ref().clone().into());
+			new_ctx.add_value("parent", Arc::new(doc.doc.as_ref().clone()));
 			Cow::Owned(new_ctx.freeze())
 		} else {
 			Cow::Borrowed(ctx)
@@ -123,52 +122,55 @@ impl CursorDoc {
 
 /// Wrapper around a Record for cursor operations
 ///
-/// This struct provides a convenient interface for working with records in cursor contexts.
-/// It implements Deref and DerefMut to allow direct access to the underlying Record's methods.
+/// Holds an `Arc<Record>` internally, providing copy-on-write semantics via
+/// `Arc::make_mut` in `DerefMut`. This avoids deep clones when multiple
+/// cursors share the same record (e.g. initial vs current document).
 #[derive(Clone, Debug)]
 pub(crate) struct CursorRecord {
-	/// The underlying record containing data and metadata
-	record: Record,
+	/// The underlying record, shared via Arc for copy-on-write
+	record: Arc<Record>,
 }
 
 impl CursorRecord {
-	/// Returns a mutable reference to the underlying value
+	/// Returns a mutable reference to the underlying value.
 	///
-	/// This method delegates to the Record's data, converting read-only data to mutable if
-	/// necessary.
+	/// Uses copy-on-write: if other `Arc` references exist, the record
+	/// is cloned first so mutations are isolated.
 	pub(crate) fn to_mut(&mut self) -> &mut Value {
-		self.record.data.to_mut()
+		&mut Arc::make_mut(&mut self.record).data
 	}
 
-	/// Converts the data to read-only format and returns an Arc reference
+	/// Returns a new `Arc<Value>` by cloning the underlying value.
 	///
-	/// This method delegates to the Record's data, ensuring the data is in read-only format.
-	pub(crate) fn as_arc(&mut self) -> Arc<Value> {
-		self.record.data.read_only()
+	/// Used for event/live-query contexts where `Arc<Value>` is needed.
+	pub(crate) fn as_arc(&self) -> Arc<Value> {
+		Arc::new(self.record.data.clone())
 	}
 
-	/// Converts the cursor record to a read-only record
-	///
-	/// This method ensures the underlying data is in read-only format for better sharing.
+	/// Returns the inner `Arc<Record>`.
 	pub(crate) fn into_read_only(self) -> Arc<Record> {
-		self.record.into_read_only()
+		self.record
 	}
 
-	/// Returns a reference to the underlying value
-	///
-	/// This method provides uniform access to the value regardless of its storage format.
+	/// Returns a reference to the underlying value.
 	pub(crate) fn as_ref(&self) -> &Value {
-		self.record.data.as_ref()
+		&self.record.data
 	}
 
-	/// Converts the cursor record to an owned Value
+	/// Consumes the cursor record and returns the owned `Value`.
 	///
-	/// This method extracts the underlying value, taking ownership of the data.
-	pub(crate) fn into_owned(mut self) -> Value {
-		match self.record.data {
-			Data::ReadOnly(ref mut arc) => mem::take(Arc::make_mut(arc)),
-			Data::Mutable(value) => value,
+	/// If this is the last `Arc` reference, the value is moved out without
+	/// cloning. Otherwise the value is cloned.
+	pub(crate) fn into_owned(self) -> Value {
+		match Arc::try_unwrap(self.record) {
+			Ok(record) => record.data,
+			Err(arc) => arc.data.clone(),
 		}
+	}
+
+	/// Returns `true` if two `CursorRecord`s point to the same allocation.
+	pub(crate) fn ptr_eq(&self, other: &Self) -> bool {
+		Arc::ptr_eq(&self.record, &other.record)
 	}
 }
 
@@ -181,7 +183,7 @@ impl Deref for CursorRecord {
 
 impl DerefMut for CursorRecord {
 	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.record
+		Arc::make_mut(&mut self.record)
 	}
 }
 
@@ -203,7 +205,7 @@ impl CursorDoc {
 impl From<Record> for CursorRecord {
 	fn from(record: Record) -> Self {
 		Self {
-			record,
+			record: Arc::new(record),
 		}
 	}
 }
@@ -211,7 +213,7 @@ impl From<Record> for CursorRecord {
 impl From<Arc<Record>> for CursorRecord {
 	fn from(arc: Arc<Record>) -> Self {
 		Self {
-			record: arc.as_ref().clone(),
+			record: arc,
 		}
 	}
 }
@@ -219,15 +221,7 @@ impl From<Arc<Record>> for CursorRecord {
 impl From<Value> for CursorRecord {
 	fn from(value: Value) -> Self {
 		Self {
-			record: Record::new(value.into()),
-		}
-	}
-}
-
-impl From<Arc<Value>> for CursorRecord {
-	fn from(arc: Arc<Value>) -> Self {
-		Self {
-			record: Record::new(arc.into()),
+			record: Arc::new(Record::new(value)),
 		}
 	}
 }
@@ -238,17 +232,6 @@ impl From<Value> for CursorDoc {
 			rid: None,
 			ir: None,
 			doc: val.into(),
-			fields_computed: false,
-		}
-	}
-}
-
-impl From<Arc<Value>> for CursorDoc {
-	fn from(doc: Arc<Value>) -> Self {
-		Self {
-			rid: None,
-			ir: None,
-			doc: doc.into(),
 			fields_computed: false,
 		}
 	}
@@ -294,8 +277,14 @@ impl Document {
 		}
 	}
 
-	/// Check if document has changed
+	/// Check if document has changed.
+	///
+	/// Short-circuits via `Arc::ptr_eq` when initial and current still
+	/// share the same allocation (meaning no mutations occurred).
 	pub fn changed(&self) -> bool {
+		if self.initial.doc.ptr_eq(&self.current.doc) {
+			return false;
+		}
 		self.initial.doc.as_ref() != self.current.doc.as_ref()
 	}
 

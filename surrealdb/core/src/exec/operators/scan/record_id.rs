@@ -322,11 +322,11 @@ pub(crate) async fn execute_record_lookup(
 				.await
 				.context("Failed to get record")?;
 
-			if record.data.as_ref().is_none() {
+			if record.data.is_none() {
 				return Ok(vec![]);
 			}
 
-			let mut value = record.data.as_ref().clone();
+			let mut value = record.data.clone();
 			value.def(rid);
 
 			let mut batch = vec![value];

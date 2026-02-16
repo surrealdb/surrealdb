@@ -362,11 +362,11 @@ async fn count_with_perm_fallback(
 					.await
 					.context("Failed to get record")?;
 
-				if record.data.as_ref().is_none() {
+				if record.data.is_none() {
 					return Ok(0);
 				}
 
-				let mut value = record.data.as_ref().clone();
+				let mut value = record.data.clone();
 				value.def(rid);
 				let allowed = check_perm_value(ctx, &value, permission).await?;
 				return Ok(usize::from(allowed));
@@ -404,8 +404,8 @@ async fn count_with_perm_fallback(
 			};
 			let mut record = crate::catalog::Record::kv_decode_value(val)
 				.context("Failed to deserialize record")?;
-			record.data.to_mut().def(&rid_val);
-			let value = record.data.into_value();
+			record.data.def(&rid_val);
+			let value = record.data;
 
 			// Check per-record permission
 			let allowed = match permission {
