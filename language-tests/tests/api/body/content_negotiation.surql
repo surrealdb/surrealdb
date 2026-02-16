@@ -39,9 +39,6 @@ error = false
 skip-api-request-id = true
 value = "{ body: 'No output strategy was possible for this API request', headers: {  }, status: 406 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 - Auto strategy with Accept header - JSON preferred
