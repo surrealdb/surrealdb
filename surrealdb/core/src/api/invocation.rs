@@ -348,17 +348,31 @@ fn create_middleware_closure(
 						}
 					},
 					Err(e) => {
-						let types_err = types_error_from_anyhow(e);
-						if is_initial {
-							error!(
-								request_id = %request_id,
-								middleware = %middleware_name,
-								error = %types_err,
-								"API middleware error; converting to response (ApiError exposed, internal errors masked)"
-							);
-							ApiResponse::from_error_secure(types_err, request_id.clone())
+						// Check if the error is an ApiError to preserve its status code
+						if let Some(api_err) = e.downcast_ref::<ApiError>() {
+							let msg = api_err.to_string();
+							let status = api_err.status_code();
+							let mut res = ApiResponse {
+								status,
+								body: crate::types::PublicValue::String(msg),
+								request_id: request_id.clone(),
+								..Default::default()
+							};
+							res.ensure_request_id_header();
+							res
 						} else {
-							ApiResponse::from_error(types_err, request_id.clone())
+							let types_err = types_error_from_anyhow(e);
+							if is_initial {
+								error!(
+									request_id = %request_id,
+									middleware = %middleware_name,
+									error = %types_err,
+									"API middleware error; converting to response (ApiError exposed, internal errors masked)"
+								);
+								ApiResponse::from_error_secure(types_err, request_id.clone())
+							} else {
+								ApiResponse::from_error(types_err, request_id.clone())
+							}
 						}
 					}
 				};

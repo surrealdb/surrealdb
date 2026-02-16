@@ -10,6 +10,7 @@ use surrealdb_types::{
 };
 use uuid::Uuid;
 
+use crate::api::err::ApiError;
 use crate::err;
 use crate::err::into_types_error;
 
@@ -106,6 +107,10 @@ pub fn session_expired() -> TypesError {
 
 /// Convert an anyhow error to a wire error, downcasting to database errors where possible.
 pub fn types_error_from_anyhow(error: anyhow::Error) -> TypesError {
+	if let Some(api_error) = error.downcast_ref::<ApiError>() {
+		return api_error.to_types_error();
+	}
+	// Try to downcast to database Error
 	error
 		.downcast::<err::Error>()
 		.map(into_types_error)

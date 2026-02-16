@@ -1,4 +1,5 @@
 use http::StatusCode;
+use surrealdb_types::Error as TypesError;
 use thiserror::Error;
 
 use crate::expr::Bytesize;
@@ -127,12 +128,11 @@ impl ApiError {
 		}
 	}
 
-	/// Convert to the public API error type for use in API responses.
-	pub fn into_types_error(self) -> surrealdb_types::Error {
+	pub(crate) fn to_types_error(&self) -> TypesError {
 		let msg = self.to_string();
 		match &self {
-			Self::NotFound => surrealdb_types::Error::not_found(msg, None),
-			Self::PermissionDenied => surrealdb_types::Error::not_allowed(msg, None),
+			Self::NotFound => TypesError::not_found(msg, None),
+			Self::PermissionDenied => TypesError::not_allowed(msg, None),
 			Self::MiddlewareRequestParseFailure {
 				..
 			}
@@ -152,8 +152,12 @@ impl ApiError {
 			| Self::InvalidRequestBodyType {
 				..
 			}
-			| Self::RequestBodyNotBinary => surrealdb_types::Error::validation(msg, None),
-			_ => surrealdb_types::Error::internal(msg),
+			| Self::RequestBodyNotBinary => TypesError::validation(msg, None),
+			_ => TypesError::internal(msg),
 		}
+	}
+
+	pub fn into_types_error(self) -> TypesError {
+		self.to_types_error()
 	}
 }

@@ -216,6 +216,7 @@ pub fn into_types_error(error: Error) -> TypesError {
 		ObsError(_) => TypesError::internal(message),
 		TimestampOverflow(..) => TypesError::internal(message),
 		NoRecordFound => TypesError::internal(message),
+		ApiError(error) => error.into_types_error(),
 
 		_ => TypesError::internal(message),
 	}
