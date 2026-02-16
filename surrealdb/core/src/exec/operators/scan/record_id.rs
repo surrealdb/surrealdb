@@ -327,7 +327,7 @@ pub(crate) async fn execute_record_lookup(
 			}
 
 			let mut value = record.data.clone();
-			value.def(rid);
+			value.def(rid.clone());
 
 			let mut batch = vec![value];
 			if needs_processing {

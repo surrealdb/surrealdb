@@ -90,7 +90,7 @@ pub(crate) async fn fetch_records_batch(
 			values.push(Value::None);
 		} else {
 			let mut v = record.data.clone();
-			v.def(rid);
+			v.def(rid.clone());
 			values.push(v);
 		}
 	}
@@ -148,7 +148,7 @@ pub(crate) async fn fetch_and_filter_records_batch(
 		}
 
 		let mut value = record.data.clone();
-		value.def(rid);
+		value.def(rid.clone());
 
 		if check_perms {
 			let allowed =

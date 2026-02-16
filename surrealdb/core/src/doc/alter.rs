@@ -87,7 +87,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id()?;
 		// Set default field values
-		self.current.doc.to_mut().def(&rid);
+		self.current.doc.to_mut().def(RecordId::clone(&rid));
 		// This is a RELATE statement, so reset fields
 		if let Workable::Relate(l, r, _) = &self.extras {
 			// Mark that this is an edge node
@@ -147,7 +147,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id()?;
 		// Set default field values
-		self.current.doc.to_mut().def(&rid);
+		self.current.doc.to_mut().def(RecordId::clone(&rid));
 		// Process the permitted documents
 		// This is an INSERT statement
 		if let Workable::Insert(v) = &self.extras {

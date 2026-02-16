@@ -281,7 +281,7 @@ impl Transaction {
 				.map(|(opt_val, rid)| {
 					Ok(match opt_val {
 						Some(mut record) => {
-							record.data.def(rid);
+							record.data.def(rid.clone());
 							record.into_read_only()
 						}
 						None => Arc::new(Default::default()),
@@ -326,7 +326,7 @@ impl Transaction {
 			let (i, rid) = uncached_rids[j];
 			let record = match opt_val {
 				Some(mut record) => {
-					record.data.def(rid);
+					record.data.def(rid.clone());
 					let record = record.into_read_only();
 					let qey = cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
 					self.cache.insert(qey, cache::tx::Entry::Val(record.clone()));
@@ -2068,7 +2068,7 @@ impl TableProvider for Transaction {
 						table: tb.to_owned(),
 						key: id.clone(),
 					};
-					record.data.def(&rid);
+					record.data.def(rid);
 					// Convert to read-only format for better sharing and performance
 					Ok(record.into_read_only())
 				}
@@ -2092,7 +2092,7 @@ impl TableProvider for Transaction {
 								table: tb.to_owned(),
 								key: id.clone(),
 							};
-							record.data.def(&rid);
+							record.data.def(rid);
 							// Convert to read-only format for better sharing and performance
 							let record = record.into_read_only();
 							let entry = cache::tx::Entry::Val(record.clone());

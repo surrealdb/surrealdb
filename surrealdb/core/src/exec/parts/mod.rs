@@ -174,7 +174,7 @@ pub(crate) async fn fetch_record_with_computed_fields(
 	}
 
 	// Ensure the record has its ID
-	result.def(rid);
+	result.def(rid.clone());
 
 	Ok(result)
 }

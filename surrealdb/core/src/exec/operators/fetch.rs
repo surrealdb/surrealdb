@@ -264,7 +264,7 @@ pub(crate) async fn fetch_record(
 	if val.is_none() {
 		return Ok(Value::None);
 	}
-	val.def(rid);
+	val.def(rid.clone());
 	Ok(val)
 }
 

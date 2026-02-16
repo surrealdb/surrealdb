@@ -438,7 +438,7 @@ impl Collectable {
 			key: key.id,
 		};
 		// Inject the id field into the document
-		val.data.def(&rid);
+		val.data.def(rid.clone());
 		// Create a new operable value
 		let val = Operable::Value(val.into());
 		// Process the record
