@@ -157,7 +157,9 @@ impl<'ctx> Planner<'ctx> {
 
 		// Shared expression registry for deduplication across sort and projection.
 		// Expressions computed for ORDER BY are reused by the projection step.
-		let mut registry = ExpressionRegistry::new();
+		// Reserve the SELECT field names so that synthetic `_eN` names never
+		// collide with fields the user explicitly selected.
+		let mut registry = ExpressionRegistry::with_reserved_names(collect_field_names(&fields));
 
 		let (sorted, sort_only_omits) = if let Some(order) = order {
 			// Sort elimination: if the input is already sorted in the required
@@ -642,6 +644,7 @@ impl<'ctx> Planner<'ctx> {
 	///
 	/// Uses a shared `ExpressionRegistry` so that expressions computed for sort
 	/// can be reused by downstream projection (avoiding duplicate computation).
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn plan_sort_consolidated(
 		&self,
 		input: Arc<dyn ExecOperator>,
@@ -2042,5 +2045,30 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		Ok(Some((path, direction)))
+	}
+}
+
+/// Collect output field names from a SELECT field list.
+///
+/// These names are passed to `ExpressionRegistry::with_reserved_names` so that
+/// synthetic internal names (`_e0`, `_e1`, ...) do not collide with fields the
+/// user explicitly selected.
+fn collect_field_names(fields: &Fields) -> Vec<String> {
+	match fields {
+		Fields::Value(_) => vec![], // SELECT VALUE has no object fields
+		Fields::Select(field_list) => {
+			let mut names = Vec::with_capacity(field_list.len());
+			for field in field_list {
+				if let Field::Single(selector) = field {
+					let name = if let Some(alias) = &selector.alias {
+						idiom_to_field_name(alias)
+					} else {
+						derive_field_name(&selector.expr)
+					};
+					names.push(name);
+				}
+			}
+			names
+		}
 	}
 }

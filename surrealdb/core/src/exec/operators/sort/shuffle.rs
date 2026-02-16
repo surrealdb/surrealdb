@@ -151,7 +151,7 @@ async fn full_shuffle(mut values: Vec<Value>) -> Vec<Value> {
 		values
 	})
 	.await
-	.unwrap_or_default()
+	.expect("shuffle blocking task should not panic")
 }
 
 /// Perform a full Fisher-Yates shuffle of all values (WASM version).
@@ -169,7 +169,9 @@ async fn full_shuffle(mut values: Vec<Value>) -> Vec<Value> {
 /// The result is also shuffled to ensure random ordering.
 #[cfg(not(target_family = "wasm"))]
 async fn reservoir_sample(values: Vec<Value>, limit: usize) -> Vec<Value> {
-	spawn_blocking(move || reservoir_sample_sync(values, limit)).await.unwrap_or_default()
+	spawn_blocking(move || reservoir_sample_sync(values, limit))
+		.await
+		.expect("reservoir sampling blocking task should not panic")
 }
 
 /// Select a random sample using reservoir sampling (WASM version).

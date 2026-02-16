@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use surrealdb_types::ToSql;
@@ -62,7 +62,10 @@ pub struct RecursionCtx {
 	/// Forward BFS discovery: RepeatRecursePart writes discovered values here.
 	/// When `Some`, `@` writes its input values to this sink and returns
 	/// immediately.
-	pub discovery_sink: Option<Arc<Mutex<Vec<Value>>>>,
+	///
+	/// Uses `parking_lot::Mutex` (not `std::sync::Mutex`) because it does not
+	/// poison on panic, matching the convention used by `DatabaseContext` caches.
+	pub discovery_sink: Option<Arc<parking_lot::Mutex<Vec<Value>>>>,
 	/// Backward assembly: RepeatRecursePart looks up pre-computed results here.
 	/// Maps `value_hash` -> assembled result for the NEXT depth level.
 	/// When `Some`, `@` does a cache lookup instead of recursing.

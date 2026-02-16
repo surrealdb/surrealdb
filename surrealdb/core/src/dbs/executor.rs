@@ -111,7 +111,7 @@ impl Executor {
 			return Some(cached.clone());
 		}
 		let session = self.extract_session_info();
-		self.cached_session = session.clone();
+		self.cached_session.clone_from(&session);
 		session
 	}
 

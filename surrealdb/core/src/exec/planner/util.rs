@@ -928,7 +928,7 @@ pub(super) fn get_effective_limit_literal(
 		})
 		.unwrap_or(Some(0))?;
 
-	Some(start_val + limit_val)
+	start_val.checked_add(limit_val)
 }
 
 // ============================================================================

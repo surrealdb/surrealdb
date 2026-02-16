@@ -10,7 +10,7 @@ use crate::err::Error;
 use crate::exec::ExecOperator;
 use crate::exec::operators::{
 	CurrentValueSource, EdgeTableSpec, Filter, GraphEdgeScan, GraphScanOutput, Limit, OrderByField,
-	ReferenceScan, ReferenceScanOutput, SortDirection,
+	RandomShuffle, ReferenceScan, ReferenceScanOutput, SortDirection,
 };
 use crate::exec::parts::LookupDirection;
 use crate::exec::planner::select::SelectPipelineConfig;
@@ -66,12 +66,16 @@ impl<'ctx> Planner<'ctx> {
 				// Extract the match_ref argument at plan time (not passed at runtime)
 				let match_ref_ast = ast_args.remove(ref_idx);
 				let match_ref = match match_ref_ast {
-					Expr::Literal(Literal::Integer(n)) => n as u8,
-					Expr::Literal(Literal::Float(n)) => n as u8,
+					Expr::Literal(Literal::Integer(n)) if (0..=255).contains(&n) => n as u8,
+					Expr::Literal(Literal::Float(n))
+						if (0.0..=255.0).contains(&n) && n.fract() == 0.0 =>
+					{
+						n as u8
+					}
 					_ => {
 						return Err(Error::Query {
 							message: format!(
-								"Index function '{}': index_ref argument must be a literal integer",
+								"Index function '{}': index_ref argument must be a literal integer in range 0..255",
 								name
 							),
 						});
@@ -332,13 +336,16 @@ impl<'ctx> Planner<'ctx> {
 				filtered
 			};
 
-			let sorted: Arc<dyn ExecOperator> =
-				if let Some(crate::expr::order::Ordering::Order(order_list)) = order {
+			let sorted: Arc<dyn ExecOperator> = match order {
+				Some(crate::expr::order::Ordering::Order(order_list)) => {
 					let order_by = self.convert_order_list(order_list).await?;
 					Arc::new(crate::exec::operators::Sort::new(split_op, order_by))
-				} else {
-					split_op
-				};
+				}
+				Some(crate::expr::order::Ordering::Random) => {
+					Arc::new(RandomShuffle::new(split_op, None))
+				}
+				None => split_op,
+			};
 
 			let limited: Arc<dyn ExecOperator> = if limit.is_some() || start.is_some() {
 				let limit_expr = match limit {

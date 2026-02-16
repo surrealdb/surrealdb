@@ -286,25 +286,28 @@ impl Debug for MatchContext {
 /// (plan-time creation, shared via `Arc`, deferred population at execution time).
 pub struct KnnContext {
 	/// Per-row distances keyed by RecordId, populated by the KNN scan operator.
-	distances: std::sync::RwLock<HashMap<RecordId, Number>>,
+	///
+	/// Uses `parking_lot::RwLock` (not `std::sync::RwLock`) because it does not
+	/// poison on panic, matching the convention used by `DatabaseContext` caches.
+	distances: parking_lot::RwLock<HashMap<RecordId, Number>>,
 }
 
 impl KnnContext {
 	/// Create a new empty KnnContext.
 	pub fn new() -> Self {
 		Self {
-			distances: std::sync::RwLock::new(HashMap::new()),
+			distances: parking_lot::RwLock::new(HashMap::new()),
 		}
 	}
 
 	/// Record the distance for a record. Called by KnnScan after HNSW search.
 	pub fn insert(&self, rid: RecordId, dist: Number) {
-		self.distances.write().expect("KnnContext lock poisoned").insert(rid, dist);
+		self.distances.write().insert(rid, dist);
 	}
 
 	/// Look up the distance for a record. Called by vector::distance::knn().
 	pub fn get(&self, rid: &RecordId) -> Option<Number> {
-		self.distances.read().expect("KnnContext lock poisoned").get(rid).copied()
+		self.distances.read().get(rid).copied()
 	}
 }
 
@@ -316,7 +319,7 @@ impl Default for KnnContext {
 
 impl Debug for KnnContext {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let count = self.distances.read().map(|d| d.len()).unwrap_or(0);
+		let count = self.distances.read().len();
 		f.debug_struct("KnnContext").field("entries", &count).finish()
 	}
 }
