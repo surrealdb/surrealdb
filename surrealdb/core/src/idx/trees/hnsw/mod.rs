@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use rand::prelude::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, SeedableRng, thread_rng};
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use roaring::RoaringTreemap;
@@ -173,7 +173,7 @@ where
 			layer0: HnswLayer::new(ikb.clone(), 0, m0),
 			layers: Vec::default(),
 			elements: HnswElements::new(table_id, ikb.clone(), p.distance.clone(), vector_cache),
-			rng: SmallRng::from_entropy(),
+			rng: SmallRng::from_rng(thread_rng())?,
 			heuristic: p.into(),
 			ikb,
 		})

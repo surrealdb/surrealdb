@@ -6,7 +6,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::trees::hnsw::VectorPendingUpdate;
-use crate::kvs::index::AppendingId;
+use crate::idx::trees::hnsw::index::AppendingId64;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::val::TableName;
 
@@ -25,7 +25,7 @@ pub(crate) struct HnswPending<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub appending_id: AppendingId,
+	pub appending_id: AppendingId64,
 }
 
 impl_kv_key_storekey!(HnswPending<'_> => VectorPendingUpdate);
@@ -36,7 +36,7 @@ impl<'a> HnswPending<'a> {
 		db: DatabaseId,
 		tb: &'a TableName,
 		ix: IndexId,
-		appending_id: AppendingId,
+		appending_id: AppendingId64,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -120,7 +120,7 @@ mod tests {
 		let enc = HnswPending::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hp\x03",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hp\0\0\0\0\0\0\0\x07",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);

@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use ahash::HashMap;
 use anyhow::{Result, bail};
@@ -28,6 +28,8 @@ use crate::key::index::hp::HnswPending;
 use crate::kvs::{KVValue, Key, Transaction};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
 
+pub(crate) type AppendingId64 = u64;
+
 /// High-level HNSW index supporting concurrent reads and writes.
 ///
 /// Writes are handled through a two-phase approach:
@@ -53,10 +55,10 @@ pub(crate) struct HnswIndex {
 	hnsw: RwLock<HnswFlavor>,
 	/// Document-to-ID mappings, protected by a read-write lock.
 	docs: RwLock<HnswDocs>,
-	/// Vector-to-document mappings (not behind a lock; accessed within locked scopes).
+	/// Vector-to-document mappings.
 	vec_docs: VecDocs,
 	/// Monotonically increasing counter for assigning pending update keys.
-	next_appending_id: AtomicU32,
+	next_appending_id: AtomicU64,
 }
 
 /// Contextual state passed through HNSW graph operations.
@@ -113,7 +115,7 @@ impl HnswIndex {
 			),
 			vec_docs: VecDocs::new(ikb.clone(), p.use_hashed_vector),
 			ikb,
-			next_appending_id: AtomicU32::new(next_appending_id),
+			next_appending_id: AtomicU64::new(next_appending_id),
 		})
 	}
 
@@ -163,7 +165,7 @@ impl HnswIndex {
 		} else {
 			VectorId::RecordKey(Arc::new(id.clone()))
 		};
-		let appending_id = self.next_appending_id.fetch_add(1, Ordering::Relaxed);
+		let appending_id = self.next_appending_id.fetch_add(1, Ordering::Release);
 		let key = self.ikb.new_hp_key(appending_id);
 		let pending = VectorPendingUpdate {
 			id,
@@ -212,12 +214,12 @@ impl HnswIndex {
 	/// Acquires write locks on both the graph and document mappings to
 	/// remove old vectors, insert new vectors, and update document state.
 	async fn index_pending(&self, ctx: &FrozenContext, pending: VectorPendingUpdate) -> Result<()> {
+		let mut docs = self.docs.write().await;
 		let mut hnsw = self.hnsw.write().await;
 		// Ensure the layers are up-to-date
 		hnsw.check_state(ctx).await?;
 		// Create a new context
 		let mut ctx = self.new_hnsw_context(ctx);
-		let mut docs = self.docs.write().await;
 		// Remove old values if any
 		if let VectorId::DocId(doc_id) = pending.id {
 			for vector in pending.old_vectors {
@@ -452,7 +454,7 @@ impl HnswIndex {
 		hnsw: &HnswFlavor,
 		neighbors: Vec<(f64, ElementId)>,
 		builder: &mut KnnResultBuilder,
-		mut evited_docs_func: F,
+		mut evicted_docs_func: F,
 	) -> Result<()>
 	where
 		F: FnMut(Vec<VectorId>),
@@ -463,7 +465,7 @@ impl HnswIndex {
 				&& let Some(docs) = self.vec_docs.get_docs(tx, &v).await?
 			{
 				let evicted_docs = builder.add_graph_result(e_dist, docs);
-				evited_docs_func(evicted_docs);
+				evicted_docs_func(evicted_docs);
 			}
 		}
 		Ok(())

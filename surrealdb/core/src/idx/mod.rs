@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::hnsw::ElementId;
+use crate::idx::trees::hnsw::index::AppendingId64;
 use crate::idx::trees::vector::SerializedVector;
 use crate::key::index::dc::Dc;
 use crate::key::index::dl::Dl;
@@ -77,7 +78,7 @@ impl IndexKeyBase {
 		Hi::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
 	}
 
-	fn new_hp_key(&self, appending_id: AppendingId) -> HnswPending<'_> {
+	fn new_hp_key(&self, appending_id: AppendingId64) -> HnswPending<'_> {
 		HnswPending::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, appending_id)
 	}
 
