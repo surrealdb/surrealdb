@@ -252,6 +252,190 @@ pub(crate) fn strip_knn_from_condition(cond: &Cond) -> Option<Cond> {
 }
 
 // ---------------------------------------------------------------------------
+// Index condition stripping
+// ---------------------------------------------------------------------------
+
+/// Strip conditions covered by a BTree index access path from a WHERE clause.
+///
+/// Returns `None` when all conditions are consumed (no Filter needed),
+/// or `Some(residual)` when conditions remain that the index does not cover.
+///
+/// Follows the same pattern as [`strip_knn_from_condition`]: clone the
+/// expression tree, replace matched leaves with `Literal(true)`, then run
+/// [`BoolSimplifier`] to collapse sentinels.
+pub(crate) fn strip_index_conditions(
+	cond: &Cond,
+	access: &crate::exec::index::access_path::BTreeAccess,
+	cols: &[Idiom],
+) -> Option<Cond> {
+	let mut expr = cond.0.clone();
+	let mut stripper = IndexConditionStripper {
+		cols,
+		access,
+	};
+	let _ = stripper.visit_mut_expr(&mut expr);
+	let _ = BoolSimplifier.visit_mut_expr(&mut expr);
+	if matches!(expr, Expr::Literal(Literal::Bool(true))) {
+		None
+	} else {
+		Some(Cond(expr))
+	}
+}
+
+/// Replaces index-covered comparison leaves in an AND tree with
+/// `Literal::Bool(true)`. Run [`BoolSimplifier`] afterwards to collapse
+/// the resulting `true AND x` chains.
+struct IndexConditionStripper<'a> {
+	/// Index columns in definition order.
+	cols: &'a [Idiom],
+	/// The chosen access pattern describing which conditions are covered.
+	access: &'a crate::exec::index::access_path::BTreeAccess,
+}
+
+impl IndexConditionStripper<'_> {
+	/// Check whether a binary comparison leaf is covered by the access pattern.
+	fn matches_access(&self, left: &Expr, op: &BinaryOperator, right: &Expr) -> bool {
+		use crate::exec::index::access_path::BTreeAccess;
+
+		// Extract idiom, value, and the effective operator (normalized so the
+		// idiom is always on the left side of the comparison).
+		let (idiom, value, effective_op) = match (left, right) {
+			(Expr::Idiom(i), Expr::Literal(lit)) => {
+				if let Some(v) = try_literal_to_value(lit) {
+					(i, v, op.clone())
+				} else {
+					return false;
+				}
+			}
+			(Expr::Literal(lit), Expr::Idiom(i)) => {
+				if let Some(v) = try_literal_to_value(lit) {
+					let flipped = match op {
+						BinaryOperator::LessThan => BinaryOperator::MoreThan,
+						BinaryOperator::LessThanEqual => BinaryOperator::MoreThanEqual,
+						BinaryOperator::MoreThan => BinaryOperator::LessThan,
+						BinaryOperator::MoreThanEqual => BinaryOperator::LessThanEqual,
+						other => other.clone(),
+					};
+					(i, v, flipped)
+				} else {
+					return false;
+				}
+			}
+			_ => return false,
+		};
+
+		let is_equality =
+			matches!(effective_op, BinaryOperator::Equal | BinaryOperator::ExactEqual);
+
+		match self.access {
+			BTreeAccess::Compound {
+				prefix,
+				range,
+			} => {
+				// Check equality conditions against prefix values.
+				if is_equality {
+					for (col, val) in self.cols.iter().zip(prefix.iter()) {
+						if idiom == col && value == *val {
+							return true;
+						}
+					}
+				}
+				// Check range condition on the column after the prefix.
+				if let Some((range_op, range_val)) = range
+					&& let Some(col) = self.cols.get(prefix.len())
+					&& idiom == col && effective_op == *range_op
+					&& value == *range_val
+				{
+					return true;
+				}
+				false
+			}
+			BTreeAccess::Equality(val) => {
+				if let Some(col) = self.cols.first() {
+					is_equality && idiom == col && value == *val
+				} else {
+					false
+				}
+			}
+			BTreeAccess::Range {
+				from,
+				to,
+			} => {
+				let Some(col) = self.cols.first() else {
+					return false;
+				};
+				if idiom != col {
+					return false;
+				}
+				// Check the from (lower) bound.
+				if let Some(from) = from {
+					let expected_op = if from.inclusive {
+						BinaryOperator::MoreThanEqual
+					} else {
+						BinaryOperator::MoreThan
+					};
+					if effective_op == expected_op && value == from.value {
+						return true;
+					}
+				}
+				// Check the to (upper) bound.
+				if let Some(to) = to {
+					let expected_op = if to.inclusive {
+						BinaryOperator::LessThanEqual
+					} else {
+						BinaryOperator::LessThan
+					};
+					if effective_op == expected_op && value == to.value {
+						return true;
+					}
+				}
+				false
+			}
+			// FullText and KNN access types have their own stripping logic.
+			_ => false,
+		}
+	}
+}
+
+impl MutVisitor for IndexConditionStripper<'_> {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		match expr {
+			// Recurse into AND branches.
+			Expr::Binary {
+				left,
+				op: BinaryOperator::And,
+				right,
+			} => {
+				self.visit_mut_expr(left)?;
+				self.visit_mut_expr(right)?;
+			}
+			// Leaf comparison — check if the index covers it.
+			Expr::Binary {
+				left,
+				op,
+				right,
+			} => {
+				if self.matches_access(left, op, right) {
+					*expr = Expr::Literal(Literal::Bool(true));
+				}
+			}
+			_ => {}
+		}
+		Ok(())
+	}
+
+	// Don't descend into subqueries.
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
+// ---------------------------------------------------------------------------
 // MutVisitors for KNN condition rewriting
 // ---------------------------------------------------------------------------
 

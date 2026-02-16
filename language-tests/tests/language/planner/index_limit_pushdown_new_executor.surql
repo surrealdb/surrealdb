@@ -12,8 +12,7 @@ value = ''''Project [ctx: Db]
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-    Filter [ctx: Db] [predicate: number > 15]
-        IndexScan [ctx: Db] [index: idx_number, access: >15, direction: Forward, limit: 2]
+    IndexScan [ctx: Db] [index: idx_number, access: >15, direction: Forward, limit: 2]
 ''''
 
 [[test.results]]

@@ -43,8 +43,7 @@ Total rows: 1''''
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1}
-    Filter [ctx: Db] [predicate: created_at = d'2023-12-25T17:13:01.940183014Z'] {rows: 1}
-        IndexScan [ctx: Db] [index: createdAt, access: = d'2023-12-25T17:13:01.940183014Z', direction: Forward] {rows: 1}
+    IndexScan [ctx: Db] [index: createdAt, access: = d'2023-12-25T17:13:01.940183014Z', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
@@ -65,8 +64,7 @@ value = "NONE"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1}
-    Filter [ctx: Db] [predicate: sessionUid = u'00ad70db-f435-442e-9012-1cd853102084'] {rows: 1}
-        IndexScan [ctx: Db] [index: sessionUid, access: = u'00ad70db-f435-442e-9012-1cd853102084', direction: Forward] {rows: 1}
+    IndexScan [ctx: Db] [index: sessionUid, access: = u'00ad70db-f435-442e-9012-1cd853102084', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 

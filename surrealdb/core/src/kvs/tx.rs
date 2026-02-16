@@ -260,9 +260,34 @@ impl Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 		rids: &[RecordId],
+		version: Option<u64>,
 	) -> Result<Vec<Arc<Record>>> {
 		if rids.is_empty() {
 			return Ok(Vec::new());
+		}
+
+		// Cache is not versioned — bypass it entirely for historical reads
+		if version.is_some() {
+			let keys: Vec<crate::key::record::RecordKey<'_>> = rids
+				.iter()
+				.map(|rid| crate::key::record::new(ns, db, &rid.table, &rid.key))
+				.collect();
+
+			let values = self.getm(keys, version).await?;
+
+			return values
+				.into_iter()
+				.zip(rids)
+				.map(|(opt_val, rid)| {
+					Ok(match opt_val {
+						Some(mut record) => {
+							record.data.to_mut().def(rid);
+							record.into_read_only()
+						}
+						None => Arc::new(Default::default()),
+					})
+				})
+				.collect::<Result<Vec<_>, _>>();
 		}
 
 		// Phase 1: check cache, collect hits and indices of misses

@@ -229,6 +229,47 @@ impl Context {
 		}
 	}
 
+	/// Create an independent snapshot of a frozen context.
+	///
+	/// Flattens all values from the parent chain into the snapshot's own
+	/// `values` map and sets `parent: None`, so the returned context does
+	/// **not** hold an `Arc` reference to the original parent.
+	///
+	/// This is used by the streaming executor to give the operator pipeline
+	/// its own `Arc<Context>` that won't interfere with the executor's
+	/// `Arc::get_mut` requirements between statements.
+	pub(crate) fn snapshot(from: &FrozenContext) -> Self {
+		Self {
+			// Flatten all values from the parent chain into this context
+			values: from.collect_values(HashMap::default()),
+			deadline: from.deadline,
+			slow_log: from.slow_log.clone(),
+			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: from.notifications.clone(),
+			query_planner: from.query_planner.clone(),
+			query_executor: from.query_executor.clone(),
+			iteration_stage: from.iteration_stage.clone(),
+			capabilities: from.capabilities.clone(),
+			index_stores: from.index_stores.clone(),
+			cache: from.cache.clone(),
+			index_builder: from.index_builder.clone(),
+			sequences: from.sequences.clone(),
+			#[cfg(storage)]
+			temporary_directory: from.temporary_directory.clone(),
+			transaction: from.transaction.clone(),
+			isolated: false,
+			parent: None, // No parent reference — fully independent
+			buckets: from.buckets.clone(),
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: from.surrealism_cache.clone(),
+			function_registry: from.function_registry.clone(),
+			new_planner_strategy: from.new_planner_strategy.clone(),
+			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
+			matches_context: from.matches_context.clone(),
+			knn_context: from.knn_context.clone(),
+		}
+	}
+
 	/// Create a new context from a frozen parent context.
 	/// This context is not linked to the parent context,
 	/// and won't be cancelled if the parent is cancelled.

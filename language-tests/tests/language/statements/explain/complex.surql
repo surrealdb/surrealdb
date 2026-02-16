@@ -24,7 +24,7 @@ value = ''''Project [ctx: Db]
 value = '''"Project [ctx: Db]
     Limit [ctx: Db] [limit: 1, offset: 0]
         SortTopKByKey [ctx: Db] [sort_keys: price ASC, limit: 1]
-            Filter [ctx: Db] [predicate: category = 'electronics' AND brand = 'Acme']
+            Filter [ctx: Db] [predicate: brand = 'Acme']
                 IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward]
 "'''
 
@@ -36,8 +36,7 @@ value = '''"Project [ctx: Db]
 
 [[test.results]]
 value = '''"Aggregate [ctx: Db] [mode: GROUP ALL]
-    Filter [ctx: Db] [predicate: category = 'electronics']
-        IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward]
+    IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward]
 "'''
 
 [[test.results]]

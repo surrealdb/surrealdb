@@ -13,7 +13,8 @@ use surrealdb_types::ToSql;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream, buffer_stream,
 };
 use crate::expr::{ControlFlow, ExplainFormat};
 use crate::val::{Array, Object, Value};
@@ -55,6 +56,10 @@ impl ExecOperator for ExplainPlan {
 	fn access_mode(&self) -> AccessMode {
 		// EXPLAIN is always read-only - it doesn't execute the inner statement
 		AccessMode::ReadOnly
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -129,13 +134,21 @@ impl ExecOperator for AnalyzePlan {
 		self.plan.access_mode()
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
+	}
+
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.plan]
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// Execute the inner plan to get its stream
-		let mut inner_stream = self.plan.execute(ctx)?;
+		let mut inner_stream = buffer_stream(
+			self.plan.execute(ctx)?,
+			self.plan.access_mode(),
+			self.plan.cardinality_hint(),
+		);
 		let plan = Arc::clone(&self.plan);
 		let format = self.format;
 		let redact_volatile_explain_attrs = self.redact_volatile_explain_attrs;

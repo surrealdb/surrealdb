@@ -52,6 +52,8 @@ pub struct IndexScan {
 	pub(crate) limit: Option<Arc<dyn PhysicalExpr>>,
 	/// Pushed-down START expression (evaluated at execution time).
 	pub(crate) start: Option<Arc<dyn PhysicalExpr>>,
+	/// Optional VERSION timestamp for time-travel queries.
+	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -64,6 +66,7 @@ impl IndexScan {
 		table_name: crate::val::TableName,
 		limit: Option<Arc<dyn PhysicalExpr>>,
 		start: Option<Arc<dyn PhysicalExpr>>,
+		version: Option<Arc<dyn PhysicalExpr>>,
 	) -> Self {
 		Self {
 			index_ref,
@@ -72,6 +75,7 @@ impl IndexScan {
 			table_name,
 			limit,
 			start,
+			version,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -219,6 +223,7 @@ impl ExecOperator for IndexScan {
 		let table_name = self.table_name.clone();
 		let limit_expr = self.limit.clone();
 		let start_expr = self.start.clone();
+		let version_expr = self.version.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -237,6 +242,20 @@ impl ExecOperator for IndexScan {
 			let start_val: usize = match &start_expr {
 				Some(expr) => eval_limit_expr(&**expr, &ctx).await?,
 				None => 0,
+			};
+
+			// Evaluate VERSION expression
+			let version: Option<u64> = match &version_expr {
+				Some(expr) => {
+					let eval_ctx = crate::exec::EvalContext::from_exec_ctx(&ctx);
+					let v = expr.evaluate(eval_ctx).await?;
+					Some(
+						v.cast_to::<crate::val::Datetime>()
+							.map_err(|e| anyhow::anyhow!("{e}"))?
+							.to_version_stamp()?,
+					)
+				}
+				None => None,
 			};
 
 			// Early exit if limit is 0
@@ -296,7 +315,7 @@ impl ExecOperator for IndexScan {
 						.context("Failed to iterate index")?;
 
 					let mut values = fetch_and_filter_records_batch(
-						&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
+						&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
 					).await?;
 
 					pipeline.process_batch(&mut values, &ctx).await?;
@@ -319,7 +338,7 @@ impl ExecOperator for IndexScan {
 						}
 
 						let mut values = fetch_and_filter_records_batch(
-							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
+							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
 						).await?;
 
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
@@ -349,7 +368,7 @@ impl ExecOperator for IndexScan {
 						if rids.is_empty() { break; }
 
 						let mut values = fetch_and_filter_records_batch(
-							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
+							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
 						).await?;
 
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
@@ -372,7 +391,7 @@ impl ExecOperator for IndexScan {
 						if rids.is_empty() { break; }
 
 						let mut values = fetch_and_filter_records_batch(
-							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms,
+							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
 						).await?;
 
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
@@ -394,7 +413,7 @@ impl ExecOperator for IndexScan {
 
 					let kv_stream = txn.stream_keys_vals(
 						beg..end,
-						None,  // no version
+						version,
 						None,  // no limit
 						0,     // no skip
 						crate::idx::planner::ScanDirection::Forward,
@@ -418,7 +437,7 @@ impl ExecOperator for IndexScan {
 
 							if rid_batch.len() >= BATCH_SIZE {
 								let mut values = fetch_and_filter_records_batch(
-									&ctx, &txn, ns_id, db_id, &rid_batch, &select_permission, check_perms,
+									&ctx, &txn, ns_id, db_id, &rid_batch, &select_permission, check_perms, version,
 								).await?;
 
 								let cont = pipeline.process_batch(&mut values, &ctx).await?;
@@ -438,7 +457,7 @@ impl ExecOperator for IndexScan {
 					// Yield remaining batch
 					if !done && !rid_batch.is_empty() {
 						let mut values = fetch_and_filter_records_batch(
-							&ctx, &txn, ns_id, db_id, &rid_batch, &select_permission, check_perms,
+							&ctx, &txn, ns_id, db_id, &rid_batch, &select_permission, check_perms, version,
 						).await?;
 
 						pipeline.process_batch(&mut values, &ctx).await?;
@@ -512,6 +531,7 @@ fn compute_compound_key_range(
 				Ok((beg, end))
 			}
 			MoreThan => {
+				// Exclusive lower bound: start after all entries matching key_array
 				let beg = key_err(Index::prefix_ids_end(
 					ns_id,
 					db_id,
@@ -519,7 +539,8 @@ fn compute_compound_key_range(
 					ix.index_id,
 					&key_array,
 				))?;
-				let end = key_err(Index::prefix_ids_end(
+				// Upper bound: end of the composite prefix range
+				let end = key_err(Index::prefix_ids_composite_end(
 					ns_id,
 					db_id,
 					&ix.table_name,
@@ -529,6 +550,7 @@ fn compute_compound_key_range(
 				Ok((beg, end))
 			}
 			MoreThanEqual => {
+				// Inclusive lower bound: start at first entry matching key_array
 				let beg = key_err(Index::prefix_ids_beg(
 					ns_id,
 					db_id,
@@ -536,7 +558,8 @@ fn compute_compound_key_range(
 					ix.index_id,
 					&key_array,
 				))?;
-				let end = key_err(Index::prefix_ids_end(
+				// Upper bound: end of the composite prefix range
+				let end = key_err(Index::prefix_ids_composite_end(
 					ns_id,
 					db_id,
 					&ix.table_name,
@@ -546,13 +569,15 @@ fn compute_compound_key_range(
 				Ok((beg, end))
 			}
 			LessThan => {
-				let beg = key_err(Index::prefix_ids_beg(
+				// Lower bound: start of the composite prefix range
+				let beg = key_err(Index::prefix_ids_composite_beg(
 					ns_id,
 					db_id,
 					&ix.table_name,
 					ix.index_id,
 					&prefix_array,
 				))?;
+				// Exclusive upper bound: stop before entries matching key_array
 				let end = key_err(Index::prefix_ids_beg(
 					ns_id,
 					db_id,
@@ -563,13 +588,15 @@ fn compute_compound_key_range(
 				Ok((beg, end))
 			}
 			LessThanEqual => {
-				let beg = key_err(Index::prefix_ids_beg(
+				// Lower bound: start of the composite prefix range
+				let beg = key_err(Index::prefix_ids_composite_beg(
 					ns_id,
 					db_id,
 					&ix.table_name,
 					ix.index_id,
 					&prefix_array,
 				))?;
+				// Inclusive upper bound: include all entries matching key_array
 				let end = key_err(Index::prefix_ids_end(
 					ns_id,
 					db_id,
@@ -580,15 +607,15 @@ fn compute_compound_key_range(
 				Ok((beg, end))
 			}
 			_ => {
-				// Other operators - scan full prefix range
-				let beg = key_err(Index::prefix_ids_beg(
+				// Other operators - scan full composite prefix range
+				let beg = key_err(Index::prefix_ids_composite_beg(
 					ns_id,
 					db_id,
 					&ix.table_name,
 					ix.index_id,
 					&prefix_array,
 				))?;
-				let end = key_err(Index::prefix_ids_end(
+				let end = key_err(Index::prefix_ids_composite_end(
 					ns_id,
 					db_id,
 					&ix.table_name,

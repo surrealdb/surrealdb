@@ -28,8 +28,8 @@ use crate::exec::permission::{
 	validate_record_user_access,
 };
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
@@ -113,6 +113,10 @@ impl ExecOperator for CountScan {
 		let version_mode =
 			self.version.as_ref().map(|e| e.access_mode()).unwrap_or(AccessMode::ReadOnly);
 		self.source.access_mode().combine(version_mode)
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	#[instrument(name = "CountScan::execute", level = "trace", skip_all)]

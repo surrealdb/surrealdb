@@ -19,7 +19,7 @@ use crate::exec::permission::{
 };
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream, monitor_stream,
+	PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::operator::MatchesOperator;
 use crate::expr::{ControlFlow, ControlFlowExt};
@@ -49,6 +49,8 @@ pub struct FullTextScan {
 	pub operator: MatchesOperator,
 	/// Table name for record fetching
 	pub table_name: crate::val::TableName,
+	/// Optional VERSION timestamp for time-travel queries.
+	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -59,12 +61,14 @@ impl FullTextScan {
 		query: String,
 		operator: MatchesOperator,
 		table_name: crate::val::TableName,
+		version: Option<Arc<dyn PhysicalExpr>>,
 	) -> Self {
 		Self {
 			index_ref,
 			query,
 			operator,
 			table_name,
+			version,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -110,6 +114,7 @@ impl ExecOperator for FullTextScan {
 		let query = self.query.clone();
 		let operator = self.operator.clone();
 		let table_name = self.table_name.clone();
+		let version_expr = self.version.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -118,6 +123,20 @@ impl ExecOperator for FullTextScan {
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
 			let txn = ctx.txn();
+
+			// Evaluate VERSION expression
+			let version: Option<u64> = match &version_expr {
+				Some(expr) => {
+					let eval_ctx = crate::exec::EvalContext::from_exec_ctx(&ctx);
+					let v = expr.evaluate(eval_ctx).await?;
+					Some(
+						v.cast_to::<crate::val::Datetime>()
+							.map_err(|e| anyhow::anyhow!("{e}"))?
+							.to_version_stamp()?,
+					)
+				}
+				None => None,
+			};
 
 			// Get the FrozenContext and Options from the root context
 			let root = ctx.root();
@@ -223,6 +242,7 @@ impl ExecOperator for FullTextScan {
 								&rid_batch,
 								&select_permission,
 								check_perms,
+								version,
 							).await?;
 							if !values.is_empty() {
 								yield ValueBatch { values };
@@ -247,6 +267,7 @@ impl ExecOperator for FullTextScan {
 					&rid_batch,
 					&select_permission,
 					check_perms,
+					version,
 				).await?;
 				if !values.is_empty() {
 					yield ValueBatch { values };

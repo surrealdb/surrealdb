@@ -86,14 +86,14 @@ Total rows: 1"'''
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1}
-    Filter [ctx: Db] [predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1}
+    Filter [ctx: Db] [predicate: type INSIDE ['password', 'firebasePassword']] {rows: 1}
         IndexScan [ctx: Db] [index: idx_account_type, access: [accounts:1], direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 1}
-    Filter [ctx: Db] [predicate: account = accounts:1 AND type INSIDE ['password', 'firebasePassword']] {rows: 1}
+    Filter [ctx: Db] [predicate: type INSIDE ['password', 'firebasePassword']] {rows: 1}
         IndexScan [ctx: Db] [index: idx_account_type, access: [accounts:1], direction: Forward] {rows: 1}
 
 Total rows: 1"'''

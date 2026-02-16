@@ -13,7 +13,8 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::plan_or_compute::{evaluate_expr, expr_required_context};
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream,
 };
 use crate::expr::Expr;
 use crate::val::Value;
@@ -93,6 +94,10 @@ impl ExecOperator for IfElsePlan {
 		} else {
 			AccessMode::ReadWrite
 		}
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {

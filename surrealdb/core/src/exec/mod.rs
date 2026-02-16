@@ -71,6 +71,8 @@ pub(crate) type BoxFut<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + 'a
 pub(crate) type BoxFut<'a, T> = Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>;
 
 pub(crate) mod access_mode;
+pub(crate) mod buffer;
+pub(crate) mod cardinality;
 pub(crate) mod context;
 pub(crate) mod expression_registry;
 pub(crate) mod field_path;
@@ -87,6 +89,10 @@ pub(crate) mod planner;
 
 // Re-export access mode types
 pub(crate) use access_mode::{AccessMode, CombineAccessModes};
+// Re-export buffer helper
+pub(crate) use buffer::buffer_stream;
+// Re-export cardinality hint
+pub(crate) use cardinality::CardinalityHint;
 // Re-export context types
 pub(crate) use context::{ContextLevel, DatabaseContext, ExecutionContext};
 // Re-export metrics types
@@ -190,6 +196,19 @@ pub(crate) trait ExecOperator: Debug + SendSyncRequirement {
 	/// A `SELECT` with a mutation subquery (e.g., `SELECT *, (UPSERT person) FROM person`)
 	/// must return `ReadWrite` even though it's syntactically a SELECT.
 	fn access_mode(&self) -> AccessMode;
+
+	/// Returns a hint about the expected number of output rows.
+	///
+	/// Used by [`buffer_stream`] to choose an appropriate buffering strategy:
+	/// - `AtMostOne`: skip buffering entirely (no point spawning a task for one row)
+	/// - `Bounded(n)`: use cooperative prefetch when `n` is small
+	/// - `Unbounded`: full buffering based on [`AccessMode`]
+	///
+	/// The default is `Unbounded` (conservative, status-quo behaviour).
+	/// Override in leaf operators with known small cardinality.
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::Unbounded
+	}
 
 	/// Returns true if this plan represents a scalar expression.
 	///
