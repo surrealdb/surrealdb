@@ -40,16 +40,13 @@ pub mod channel {
 	pub use async_channel::{Receiver, Sender, bounded, unbounded};
 }
 
-/// Different error types for embedded and remote databases
-pub mod error {
-	pub use surrealdb_types::Error as Api;
-}
-
 pub mod parse {
 	pub use surrealdb_core::syn::value;
 }
 
+#[doc(inline)]
 pub use method::Stats;
+#[doc(inline)]
 pub use method::query::IndexedResults;
 #[doc(inline)]
 pub use surrealdb_types as types;
@@ -269,6 +266,7 @@ pub struct Surreal<C: Connection> {
 	engine: PhantomData<C>,
 }
 
+#[doc(hidden)]
 impl<C> From<Arc<Inner>> for Surreal<C>
 where
 	C: Connection,
@@ -284,6 +282,7 @@ where
 	}
 }
 
+#[doc(hidden)]
 impl<C> From<(OnceLock<Router>, Waiter, SessionClone)> for Surreal<C>
 where
 	C: Connection,
@@ -298,6 +297,7 @@ where
 	}
 }
 
+#[doc(hidden)]
 impl<C> From<(Router, Waiter, SessionClone)> for Surreal<C>
 where
 	C: Connection,
