@@ -469,7 +469,7 @@ impl Transactor {
 	/// Retrieve a stream of key batches over a specific range in the datastore.
 	///
 	/// This function returns a stream that yields batches of keys. The scanner:
-	/// - Fetches an initial batch of up to 100 items
+	/// - Fetches an initial batch of up to 500 items
 	/// - Fetches subsequent batches of up to 16 MiB (local) or 4 MiB (remote)
 	/// - Prefetches the next batch while the current batch is being processed
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
@@ -502,7 +502,7 @@ impl Transactor {
 	/// Retrieve a stream of key-value batches over a specific range in the datastore.
 	///
 	/// This function returns a stream that yields batches of key-value pairs. The scanner:
-	/// - Fetches an initial batch of up to 100 items (or 500 when `prefetch` is enabled)
+	/// - Fetches an initial batch of up to 500 items (or 1000 when `prefetch` is enabled)
 	/// - Fetches subsequent batches of up to 16 MiB (local) or 4 MiB (remote)
 	/// - When `prefetch` is true, prefetches the next batch while the current batch is being
 	///   processed, and uses a larger initial batch size (500 items)
@@ -530,11 +530,13 @@ impl Transactor {
 		if skip > 0 {
 			scanner = scanner.skip(skip);
 		}
-		// Enable prefetching and larger initial batch for full scans
+		// Enable prefetching and larger initial batch for full scans.
+		// The scanner default is already NORMAL_FETCH_SIZE (500); when
+		// prefetching is active we double it to amortise the overlap cost.
 		if prefetch {
 			scanner = scanner
 				.prefetch(true)
-				.initial_batch_size(ScanLimit::Count(*crate::cnf::NORMAL_FETCH_SIZE));
+				.initial_batch_size(ScanLimit::Count(*crate::cnf::NORMAL_FETCH_SIZE * 2));
 		}
 		// Return the stream
 		scanner

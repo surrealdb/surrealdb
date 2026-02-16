@@ -6,16 +6,16 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::StreamExt;
 use surrealdb_types::ToSql;
 
-use super::common::{BATCH_SIZE, fetch_and_filter_records_batch};
+use super::common::fetch_and_filter_records_batch;
 use super::pipeline::eval_limit_expr;
 use crate::catalog::providers::TableProvider;
 use crate::err::Error;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::index::iterator::{
-	IndexEqualIterator, IndexRangeIterator, UniqueEqualIterator, UniqueRangeIterator,
+	CompoundEqualIterator, CompoundRangeIterator, IndexEqualIterator, IndexRangeIterator,
+	UniqueEqualIterator, UniqueRangeIterator,
 };
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
@@ -28,7 +28,6 @@ use crate::exec::{
 use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
-use crate::val::{RecordId, Value};
 
 /// Index scan operator for B-tree indexes (Idx and Uniq).
 ///
@@ -405,66 +404,105 @@ impl ExecOperator for IndexScan {
 					}
 				}
 
-				// Compound index access (streaming)
-				(BTreeAccess::Compound { prefix, range }, _) => {
-					let (beg, end) = compute_compound_key_range(
-						ns_id, db_id, ix, prefix, range.as_ref(),
-					)?;
+				// Compound index access — equality prefix only (no range)
+				(BTreeAccess::Compound { prefix, range: None }, _) => {
+					let mut iter = CompoundEqualIterator::new(ns_id, db_id, ix, prefix, None)
+						.context("Failed to create compound iterator")?;
 
-					let kv_stream = txn.stream_keys_vals(
-						beg..end,
-						version,
-						None,  // no limit
-						0,     // no skip
-						crate::idx::planner::ScanDirection::Forward,
-						true,  // enable prefetching for compound scans
-					);
-					futures::pin_mut!(kv_stream);
+					// Compute the maximum number of index entries we need.
+					// When a LIMIT + START is pushed down, we cap the scan.
+					let mut remaining: u32 = match limit_val {
+						Some(l) => (l + start_val) as u32,
+						None => u32::MAX,
+					};
 
-					let mut rid_batch: Vec<RecordId> = Vec::with_capacity(BATCH_SIZE);
-					let mut done = false;
+					// Fetch the first batch of record IDs sequentially.
+					let mut rids = iter.next_batch(&txn, remaining).await
+						.context("Failed to iterate compound index")?;
 
-					while let Some(kv_batch_result) = kv_stream.next().await {
-						if done { break; }
-						let kv_batch = kv_batch_result
-							.context("Failed to stream compound index keys")?;
+					while !rids.is_empty() {
+						remaining = remaining.saturating_sub(rids.len() as u32);
 
-						for (_, val) in kv_batch {
-							let rid: RecordId = revision::from_slice(&val)
-								.context("Failed to decode record id")?;
+						// Overlap: fetch records for the current batch while
+						// scanning the next batch of index entries concurrently.
+						// This halves serial latency on TiKV.
+						let (values_result, next_rids_result) = if remaining > 0 {
+							let fetch_fut = fetch_and_filter_records_batch(
+								&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+							);
+							let scan_fut = iter.next_batch(&txn, remaining);
+							let (v, n) = futures::join!(fetch_fut, scan_fut);
+							(v, Some(n))
+						} else {
+							// No more entries needed; skip the prefetch.
+							let v = fetch_and_filter_records_batch(
+								&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+							).await;
+							(v, None)
+						};
 
-							rid_batch.push(rid);
-
-							if rid_batch.len() >= BATCH_SIZE {
-								let mut values = fetch_and_filter_records_batch(
-									&ctx, &txn, ns_id, db_id, &rid_batch, &select_permission, check_perms, version,
-								).await?;
-
-								let cont = pipeline.process_batch(&mut values, &ctx).await?;
-
-								if !values.is_empty() {
-									yield ValueBatch { values };
-								}
-								rid_batch.clear();
-								if !cont {
-									done = true;
-									break;
-								}
-							}
-						}
-					}
-
-					// Yield remaining batch
-					if !done && !rid_batch.is_empty() {
-						let mut values = fetch_and_filter_records_batch(
-							&ctx, &txn, ns_id, db_id, &rid_batch, &select_permission, check_perms, version,
-						).await?;
-
-						pipeline.process_batch(&mut values, &ctx).await?;
+						let mut values = values_result?;
+						let cont = pipeline.process_batch(&mut values, &ctx).await?;
 
 						if !values.is_empty() {
 							yield ValueBatch { values };
 						}
+						if !cont || remaining == 0 {
+							break;
+						}
+
+						rids = next_rids_result
+							.expect("next_rids_result should be Some when remaining > 0")
+							.context("Failed to iterate compound index")?;
+					}
+				}
+
+				// Compound index access — equality prefix with range on next column
+				(BTreeAccess::Compound { prefix, range: Some(range) }, _) => {
+					let mut iter = CompoundRangeIterator::new(ns_id, db_id, ix, prefix, range)
+						.context("Failed to create compound range iterator")?;
+
+					let mut remaining: u32 = match limit_val {
+						Some(l) => (l + start_val) as u32,
+						None => u32::MAX,
+					};
+
+					// Fetch the first batch of record IDs sequentially.
+					let mut rids = iter.next_batch(&txn, remaining).await
+						.context("Failed to iterate compound index")?;
+
+					while !rids.is_empty() {
+						remaining = remaining.saturating_sub(rids.len() as u32);
+
+						// Overlap: fetch records for the current batch while
+						// scanning the next batch of index entries concurrently.
+						let (values_result, next_rids_result) = if remaining > 0 {
+							let fetch_fut = fetch_and_filter_records_batch(
+								&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+							);
+							let scan_fut = iter.next_batch(&txn, remaining);
+							let (v, n) = futures::join!(fetch_fut, scan_fut);
+							(v, Some(n))
+						} else {
+							let v = fetch_and_filter_records_batch(
+								&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+							).await;
+							(v, None)
+						};
+
+						let mut values = values_result?;
+						let cont = pipeline.process_batch(&mut values, &ctx).await?;
+
+						if !values.is_empty() {
+							yield ValueBatch { values };
+						}
+						if !cont || remaining == 0 {
+							break;
+						}
+
+						rids = next_rids_result
+							.expect("next_rids_result should be Some when remaining > 0")
+							.context("Failed to iterate compound index")?;
 					}
 				}
 
@@ -478,171 +516,5 @@ impl ExecOperator for IndexScan {
 		};
 
 		Ok(monitor_stream(Box::pin(stream), "IndexScan", &self.metrics))
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
-
-/// Compute the KV key range `(beg, end)` for a compound index scan.
-///
-/// Extracts the verbose key-construction logic from the stream body so
-/// the match arms stay readable.
-fn compute_compound_key_range(
-	ns_id: crate::catalog::NamespaceId,
-	db_id: crate::catalog::DatabaseId,
-	ix: &crate::catalog::IndexDefinition,
-	prefix: &[Value],
-	range: Option<&(crate::expr::BinaryOperator, Value)>,
-) -> Result<(Vec<u8>, Vec<u8>), ControlFlow> {
-	use crate::key::index::Index;
-	use crate::val::Array;
-
-	/// Shorthand for the repeated error mapping.
-	fn key_err(r: Result<Vec<u8>, impl Into<anyhow::Error>>) -> Result<Vec<u8>, ControlFlow> {
-		r.context("Failed to create index key")
-	}
-
-	let prefix_array = Array::from(prefix.to_vec());
-
-	if let Some((op, val)) = range {
-		let mut key_values: Vec<Value> = prefix.to_vec();
-		key_values.push(val.clone());
-		let key_array = Array::from(key_values);
-
-		use crate::expr::BinaryOperator::*;
-		match op {
-			Equal | ExactEqual => {
-				let beg = key_err(Index::prefix_ids_composite_beg(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&key_array,
-				))?;
-				let end = key_err(Index::prefix_ids_composite_end(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&key_array,
-				))?;
-				Ok((beg, end))
-			}
-			MoreThan => {
-				// Exclusive lower bound: start after all entries matching key_array
-				let beg = key_err(Index::prefix_ids_end(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&key_array,
-				))?;
-				// Upper bound: end of the composite prefix range
-				let end = key_err(Index::prefix_ids_composite_end(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&prefix_array,
-				))?;
-				Ok((beg, end))
-			}
-			MoreThanEqual => {
-				// Inclusive lower bound: start at first entry matching key_array
-				let beg = key_err(Index::prefix_ids_beg(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&key_array,
-				))?;
-				// Upper bound: end of the composite prefix range
-				let end = key_err(Index::prefix_ids_composite_end(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&prefix_array,
-				))?;
-				Ok((beg, end))
-			}
-			LessThan => {
-				// Lower bound: start of the composite prefix range
-				let beg = key_err(Index::prefix_ids_composite_beg(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&prefix_array,
-				))?;
-				// Exclusive upper bound: stop before entries matching key_array
-				let end = key_err(Index::prefix_ids_beg(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&key_array,
-				))?;
-				Ok((beg, end))
-			}
-			LessThanEqual => {
-				// Lower bound: start of the composite prefix range
-				let beg = key_err(Index::prefix_ids_composite_beg(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&prefix_array,
-				))?;
-				// Inclusive upper bound: include all entries matching key_array
-				let end = key_err(Index::prefix_ids_end(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&key_array,
-				))?;
-				Ok((beg, end))
-			}
-			_ => {
-				// Other operators - scan full composite prefix range
-				let beg = key_err(Index::prefix_ids_composite_beg(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&prefix_array,
-				))?;
-				let end = key_err(Index::prefix_ids_composite_end(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&prefix_array,
-				))?;
-				Ok((beg, end))
-			}
-		}
-	} else {
-		// No range operator - scan the entire prefix using composite
-		// key functions so the scan correctly captures all entries whose
-		// leading columns match the prefix in a multi-column index.
-		let beg = key_err(Index::prefix_ids_composite_beg(
-			ns_id,
-			db_id,
-			&ix.table_name,
-			ix.index_id,
-			&prefix_array,
-		))?;
-		let end = key_err(Index::prefix_ids_composite_end(
-			ns_id,
-			db_id,
-			&ix.table_name,
-			ix.index_id,
-			&prefix_array,
-		))?;
-		Ok((beg, end))
 	}
 }

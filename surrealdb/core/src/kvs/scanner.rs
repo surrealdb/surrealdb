@@ -8,6 +8,7 @@ use futures::{Future, FutureExt};
 use super::api::ScanLimit;
 use super::tr::Transactor;
 use super::{Key, Result, Val};
+use crate::cnf::NORMAL_FETCH_SIZE;
 
 #[cfg(not(target_family = "wasm"))]
 type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>>> + 'a + Send>>;
@@ -25,8 +26,8 @@ pub enum Direction {
 /// A batch scanner that streams batches of keys or key-value pairs from a range.
 ///
 /// The scanner fetches data in batches with configurable behavior:
-/// - Initial batch: fetches up to a configurable number of items or bytes
-/// - Subsequent batches: fetches up to a configurable number of items or bytes
+/// - Initial batch: fetches up to NORMAL_FETCH_SIZE items (default 500)
+/// - Subsequent batches: fetches up to 4 MiB of data
 /// - Prefetching: optionally prefetches the next batch concurrently
 ///
 /// Use the builder methods to configure the scanner before using it as a stream:
@@ -60,7 +61,7 @@ pub struct Scanner<'a, I> {
 	version: Option<u64>,
 	/// Whether to enable prefetching of the next batch
 	enable_prefetch: bool,
-	/// The initial batch size (default: 100 items)
+	/// The initial batch size (default: NORMAL_FETCH_SIZE, typically 500 items)
 	initial_batch_size: ScanLimit,
 	/// The subsequent batch size (default: 16 MiB bytes)
 	subsequent_batch_size: ScanLimit,
@@ -76,7 +77,11 @@ impl<'a, I> Scanner<'a, I> {
 	) -> Self {
 		// Check if the range is exhausted
 		let exhausted = range.start >= range.end;
-		// Initialize the scanner with defaults
+		// Initialize the scanner with defaults.
+		// The initial batch size uses NORMAL_FETCH_SIZE (default 500) to
+		// avoid under-fetching on the first round-trip, which is especially
+		// important for remote backends like TiKV where each scan is a
+		// network call.
 		Scanner {
 			store,
 			range,
@@ -89,7 +94,7 @@ impl<'a, I> Scanner<'a, I> {
 			first_batch: true,
 			version: None,
 			enable_prefetch: false,
-			initial_batch_size: ScanLimit::Count(100),
+			initial_batch_size: ScanLimit::Count(*NORMAL_FETCH_SIZE),
 			subsequent_batch_size: ScanLimit::Bytes(4 * 1024 * 1024),
 		}
 	}
@@ -121,7 +126,7 @@ impl<'a, I> Scanner<'a, I> {
 	/// Set the initial batch size for the first batch.
 	///
 	/// The first batch fetched will contain up to this many items or bytes of data.
-	/// Default: 100 items
+	/// Default: NORMAL_FETCH_SIZE (500 items)
 	pub fn initial_batch_size(mut self, size: ScanLimit) -> Self {
 		self.initial_batch_size = size;
 		self
