@@ -110,7 +110,6 @@ impl Value {
 					path,
 					from,
 				} => {
-					// TODO: NUll byte validity
 					let from = from.into_iter().map(Part::Field).collect::<Vec<_>>();
 					let path = path.into_iter().map(Part::Field).collect::<Vec<_>>();
 
