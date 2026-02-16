@@ -719,9 +719,6 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineApiStatement> {
-		if !self.settings.define_api_enabled {
-			bail!("Cannot define an API, as the experimental define api capability is not enabled", @self.last_span);
-		}
 
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));

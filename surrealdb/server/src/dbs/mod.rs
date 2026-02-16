@@ -945,10 +945,10 @@ mod tests {
 			// 7 - Specific experimental feature enabled
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default().with_experimental(ExperimentalTarget::DefineApi.into()),
+					Capabilities::default().with_experimental(ExperimentalTarget::Files.into()),
 				),
 				Session::owner().with_ns("test").with_db("test"),
-				"DEFINE API \"/\" FOR any THEN {};".to_string(),
+				"DEFINE BUCKET test BACKEND \"memory\";".to_string(),
 				true,
 				"NONE".to_string(),
 			),
@@ -956,12 +956,12 @@ mod tests {
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
-						.without_experimental(ExperimentalTarget::DefineApi.into()),
+						.without_experimental(ExperimentalTarget::Files.into()),
 				),
 				Session::owner().with_ns("test").with_db("test"),
-				"DEFINE API \"/\" FOR any THEN {};".to_string(),
+				"DEFINE BUCKET test BACKEND \"memory\";".to_string(),
 				false,
-				"the experimental define api capability is not enabled".to_string(),
+				"the experimental files capability is not enabled".to_string(),
 			),
 			//
 			// 9 - Some functions are not allowed

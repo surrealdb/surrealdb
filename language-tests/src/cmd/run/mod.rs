@@ -486,9 +486,6 @@ async fn run_test_with_dbs(
 
 	let source = &set[id].source;
 	let settings = syn::parser::ParserSettings {
-		define_api_enabled: dbs
-			.get_capabilities()
-			.allows_experimental(&ExperimentalTarget::DefineApi),
 		files_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
 		surrealism_enabled: dbs
 			.get_capabilities()

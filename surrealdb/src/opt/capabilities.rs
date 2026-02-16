@@ -40,7 +40,7 @@ impl From<PlannerStrategy> for NewPlannerStrategy {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub enum ExperimentalFeature {
-	DefineApi,
+	Files,
 	Surrealism,
 }
 
@@ -49,7 +49,7 @@ pub enum ExperimentalFeature {
 impl From<&ExperimentalFeature> for ExperimentalTarget {
 	fn from(feature: &ExperimentalFeature) -> Self {
 		match feature {
-			ExperimentalFeature::DefineApi => ExperimentalTarget::DefineApi,
+			ExperimentalFeature::Files => ExperimentalTarget::Files,
 			ExperimentalFeature::Surrealism => ExperimentalTarget::Surrealism,
 		}
 	}

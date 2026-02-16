@@ -4,7 +4,7 @@ use unicase::UniCase;
 
 use super::{ParseResult, Parser};
 use crate::sql::{Constant, Expr, Function, FunctionCall};
-use crate::syn::error::{MessageKind, bail};
+use crate::syn::error::MessageKind;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{SyntaxError, unexpected};
 use crate::syn::token::{Span, t};
@@ -613,12 +613,7 @@ impl Parser<'_> {
 
 		match PATHS.get_entry(&UniCase::ascii(&buffer)) {
 			Some((_, (PathKind::Constant(x), _))) => Ok(Expr::Constant(x.clone())),
-			Some((k, (PathKind::Function, _))) => {
-				// TODO: Move this out of the parser.
-				if k.to_lowercase().starts_with("api::") && !self.settings.define_api_enabled {
-					bail!("Cannot use the `{k}` method, as the experimental define api capability is not enabled", @start.covers(last_span));
-				}
-
+			Some((_, (PathKind::Function, _))) => {
 				stk.run(|ctx| self.parse_builtin_function(ctx, buffer))
 					.await
 					.map(|x| Expr::FunctionCall(Box::new(x)))

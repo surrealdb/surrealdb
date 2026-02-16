@@ -561,13 +561,13 @@ pub async fn asynchronous(
 		args,
 		"no such builtin function found",
 		//
-		exp(DefineApi) "api::invoke" => api::invoke((stk, ctx, opt)).await,
-		exp(DefineApi) "api::req::body" => api::req::body((stk, ctx, opt, doc)).await,
-		exp(DefineApi) "api::res::body" => api::res::body((stk, ctx, opt, doc)).await,
-		exp(DefineApi) "api::timeout" => api::timeout((stk, ctx, opt, doc)).await,
-		exp(DefineApi) "api::res::status" => api::res::status((stk, ctx, opt, doc)).await,
-		exp(DefineApi) "api::res::header" => api::res::header((stk, ctx, opt, doc)).await,
-		exp(DefineApi) "api::res::headers" => api::res::headers((stk, ctx, opt, doc)).await,
+		"api::invoke" => api::invoke((stk, ctx, opt)).await,
+		"api::req::body" => api::req::body((stk, ctx, opt, doc)).await,
+		"api::res::body" => api::res::body((stk, ctx, opt, doc)).await,
+		"api::timeout" => api::timeout((stk, ctx, opt, doc)).await,
+		"api::res::status" => api::res::status((stk, ctx, opt, doc)).await,
+		"api::res::header" => api::res::header((stk, ctx, opt, doc)).await,
+		"api::res::headers" => api::res::headers((stk, ctx, opt, doc)).await,
 		//
 		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
 		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,
@@ -1728,7 +1728,6 @@ mod tests {
 	use regex::Regex;
 
 	use crate::dbs::Capabilities;
-	use crate::dbs::capabilities::ExperimentalTarget;
 	use crate::sql::{Expr, Function};
 
 	#[tokio::test]
@@ -1764,7 +1763,7 @@ mod tests {
 
 			let res = crate::syn::expr_with_capabilities(
 				&format!("{}()", name),
-				&Capabilities::all().with_experimental(ExperimentalTarget::DefineApi.into()),
+				&Capabilities::all()
 			);
 
 			if let Ok(Expr::FunctionCall(call)) = res {
