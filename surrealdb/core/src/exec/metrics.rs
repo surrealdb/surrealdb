@@ -37,7 +37,12 @@ fn now_ns() -> u64 {
 
 #[cfg(target_family = "wasm")]
 fn now_ns() -> u64 {
-	wasmtimer::std::Instant::now().elapsed().as_nanos() as u64
+	use wasmtimer::std::Instant;
+	// Use a thread-local base instant so we get monotonic, small offsets.
+	thread_local! {
+		static BASE: Instant = Instant::now();
+	}
+	BASE.with(|base| base.elapsed().as_nanos() as u64)
 }
 
 // ---------------------------------------------------------------------------

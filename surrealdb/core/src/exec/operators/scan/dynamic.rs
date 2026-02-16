@@ -272,7 +272,7 @@ impl ExecOperator for DynamicScan {
 
 				let results = super::record_id::execute_record_lookup(
 					&rid, version, check_perms, needed_fields.as_ref(), &ctx,
-					predicate.as_ref(), limit_val, start_val,
+					predicate.as_ref(), limit_val, start_val, None,
 				).await?;
 
 				if !results.is_empty() {
@@ -421,10 +421,9 @@ impl ExecOperator for DynamicScan {
 			// Pre-compute whether any post-decode processing is needed.
 			// When false, the scan loop can skip filter/process calls entirely
 			// (zero async overhead beyond the KV stream poll).
-			let needs_processing = !matches!(select_permission, PhysicalPermission::Allow)
-				|| !field_state.computed_fields.is_empty()
-				|| (check_perms && !field_state.field_permissions.is_empty())
-				|| predicate.is_some();
+			let needs_processing = ScanPipeline::compute_needs_processing(
+				&select_permission, &field_state, check_perms, predicate.as_ref(),
+			);
 
 			// When no processing is needed, push start to the KV layer as pre_skip
 			// so rows are discarded before deserialization.

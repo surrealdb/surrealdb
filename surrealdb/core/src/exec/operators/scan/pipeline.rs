@@ -57,6 +57,26 @@ pub(crate) struct ScanPipeline {
 }
 
 impl ScanPipeline {
+	/// Check whether any post-decode processing (permission filtering,
+	/// computed fields, field-level permissions, or WHERE predicate) is
+	/// needed.
+	///
+	/// Callers use this *before* constructing a `ScanPipeline` to decide
+	/// whether `pre_skip` / `effective_storage_limit` can be pushed to
+	/// the KV layer. The same check is cached internally so that
+	/// [`process_batch`] can skip work when nothing is needed.
+	pub(crate) fn compute_needs_processing(
+		permission: &PhysicalPermission,
+		field_state: &FieldState,
+		check_perms: bool,
+		predicate: Option<&Arc<dyn PhysicalExpr>>,
+	) -> bool {
+		!matches!(permission, PhysicalPermission::Allow)
+			|| !field_state.computed_fields.is_empty()
+			|| (check_perms && !field_state.field_permissions.is_empty())
+			|| predicate.is_some()
+	}
+
 	pub(crate) fn new(
 		permission: PhysicalPermission,
 		predicate: Option<Arc<dyn PhysicalExpr>>,
@@ -65,10 +85,12 @@ impl ScanPipeline {
 		limit: Option<usize>,
 		start: usize,
 	) -> Self {
-		let needs_processing = !matches!(permission, PhysicalPermission::Allow)
-			|| !field_state.computed_fields.is_empty()
-			|| (check_perms && !field_state.field_permissions.is_empty())
-			|| predicate.is_some();
+		let needs_processing = Self::compute_needs_processing(
+			&permission,
+			&field_state,
+			check_perms,
+			predicate.as_ref(),
+		);
 		Self {
 			permission,
 			predicate,
@@ -399,16 +421,20 @@ pub(crate) async fn eval_limit_expr(
 
 /// Cached state for field processing (computed fields and permissions).
 /// Initialized on first batch and reused for subsequent batches.
+///
+/// `field_permissions` and `dep_map` are wrapped in `Arc` so that
+/// [`filter_field_state_for_projection`] can share them across filtered
+/// copies without cloning the underlying `HashMap`.
 #[derive(Debug, Clone)]
 pub(crate) struct FieldState {
 	/// Computed field definitions converted to physical expressions
 	pub(crate) computed_fields: Vec<ComputedFieldDef>,
 	/// Field-level permissions (field name -> permission)
-	pub(crate) field_permissions: HashMap<String, PhysicalPermission>,
+	pub(crate) field_permissions: Arc<HashMap<String, PhysicalPermission>>,
 	/// Dependency map for computed fields, used for projection filtering.
 	/// Stored alongside the cached state so that projected queries can
 	/// cheaply determine the subset of computed fields they need.
-	dep_map: HashMap<String, crate::expr::computed_deps::ComputedDeps>,
+	dep_map: Arc<HashMap<String, crate::expr::computed_deps::ComputedDeps>>,
 }
 
 impl FieldState {
@@ -416,8 +442,8 @@ impl FieldState {
 	pub(crate) fn empty() -> Self {
 		Self {
 			computed_fields: Vec::new(),
-			field_permissions: HashMap::new(),
-			dep_map: HashMap::new(),
+			field_permissions: Arc::new(HashMap::new()),
+			dep_map: Arc::new(HashMap::new()),
 		}
 	}
 }
@@ -523,8 +549,8 @@ pub(crate) async fn build_field_state_raw(
 
 	Ok(FieldState {
 		computed_fields,
-		field_permissions,
-		dep_map,
+		field_permissions: Arc::new(field_permissions),
+		dep_map: Arc::new(dep_map),
 	})
 }
 
@@ -546,7 +572,8 @@ pub(crate) async fn build_field_state(
 	let cache_key = (table_name.clone(), check_perms);
 
 	// Check the cache first (keyed by table name + check_perms flag).
-	if let Ok(cache) = db_ctx.field_state_cache.read() {
+	{
+		let cache = db_ctx.field_state_cache.read();
 		if let Some(cached) = cache.get(&cache_key) {
 			return Ok(filter_field_state_for_projection(cached, needed_fields));
 		}
@@ -565,9 +592,7 @@ pub(crate) async fn build_field_state(
 
 	// Cache the full (unfiltered) state
 	let cached = Arc::new(full_state);
-	if let Ok(mut cache) = db_ctx.field_state_cache.write() {
-		cache.insert(cache_key, Arc::clone(&cached));
-	}
+	db_ctx.field_state_cache.write().insert(cache_key, Arc::clone(&cached));
 
 	// Return filtered if needed_fields is specified
 	Ok(filter_field_state_for_projection(&cached, needed_fields))
@@ -602,8 +627,8 @@ pub(crate) fn filter_field_state_for_projection(
 
 	FieldState {
 		computed_fields,
-		field_permissions: full_state.field_permissions.clone(),
-		dep_map: full_state.dep_map.clone(),
+		field_permissions: Arc::clone(&full_state.field_permissions),
+		dep_map: Arc::clone(&full_state.dep_map),
 	}
 }
 

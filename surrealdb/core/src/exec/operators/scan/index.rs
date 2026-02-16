@@ -276,8 +276,7 @@ impl ExecOperator for IndexScan {
 
 			// Resolve table permissions: plan-time fast path or runtime fallback
 			let select_permission = if let Some(ref res) = resolved {
-				res.resolve_select_permission(check_perms, ctx.ctx()).await
-					.context("Failed to convert permission")?
+				res.select_permission(check_perms)
 			} else if check_perms {
 				let table_def = db_ctx
 					.get_table_def(&table_name)

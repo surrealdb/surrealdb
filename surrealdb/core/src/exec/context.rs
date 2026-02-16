@@ -190,13 +190,13 @@ pub struct DatabaseContext {
 	pub db: Arc<DatabaseDefinition>,
 	/// Cache of field states (computed fields + permissions) keyed by (table, check_perms).
 	/// Avoids repeated KV lookups for the same table within a single query execution.
-	/// Cache of field states (computed fields + permissions) keyed by (table, check_perms).
-	/// Avoids repeated KV lookups for the same table within a single query execution.
 	///
-	/// Uses `RwLock` because the access pattern is heavily read-biased: the first
-	/// scan operator populates the cache, and all subsequent operators only read.
+	/// Uses `parking_lot::RwLock` because the access pattern is heavily read-biased:
+	/// the first scan operator populates the cache, and all subsequent operators
+	/// only read. `parking_lot` does not poison on panic, so we never silently
+	/// bypass the cache.
 	pub(crate) field_state_cache: Arc<
-		std::sync::RwLock<
+		parking_lot::RwLock<
 			HashMap<
 				(crate::val::TableName, bool),
 				Arc<crate::exec::operators::scan::pipeline::FieldState>,
@@ -207,7 +207,7 @@ pub struct DatabaseContext {
 	/// Avoids repeated `get_tb_by_name` KV lookups across scan operators
 	/// within the same query execution.
 	pub(crate) table_def_cache: Arc<
-		std::sync::RwLock<
+		parking_lot::RwLock<
 			HashMap<crate::val::TableName, Option<Arc<crate::catalog::TableDefinition>>>,
 		>,
 	>,
@@ -215,7 +215,7 @@ pub struct DatabaseContext {
 	/// Avoids repeated `all_tb_indexes` KV lookups in DynamicScan's
 	/// runtime index analysis within the same query execution.
 	pub(crate) index_def_cache: Arc<
-		std::sync::RwLock<HashMap<crate::val::TableName, Arc<[crate::catalog::IndexDefinition]>>>,
+		parking_lot::RwLock<HashMap<crate::val::TableName, Arc<[crate::catalog::IndexDefinition]>>>,
 	>,
 }
 
@@ -267,7 +267,8 @@ impl DatabaseContext {
 	) -> anyhow::Result<Option<Arc<crate::catalog::TableDefinition>>> {
 		use crate::catalog::providers::TableProvider;
 		// Check execution-level cache (read lock — concurrent reads allowed)
-		if let Ok(cache) = self.table_def_cache.read() {
+		{
+			let cache = self.table_def_cache.read();
 			if let Some(cached) = cache.get(table) {
 				return Ok(cached.clone());
 			}
@@ -278,9 +279,7 @@ impl DatabaseContext {
 		let result = txn.get_tb_by_name(&self.ns_ctx.ns.name, &self.db.name, table).await?;
 
 		// Populate cache (write lock — brief exclusive access)
-		if let Ok(mut cache) = self.table_def_cache.write() {
-			cache.insert(table.clone(), result.clone());
-		}
+		self.table_def_cache.write().insert(table.clone(), result.clone());
 
 		Ok(result)
 	}
@@ -295,7 +294,8 @@ impl DatabaseContext {
 	) -> anyhow::Result<Arc<[crate::catalog::IndexDefinition]>> {
 		use crate::catalog::providers::TableProvider;
 		// Check execution-level cache (read lock — concurrent reads allowed)
-		if let Ok(cache) = self.index_def_cache.read() {
+		{
+			let cache = self.index_def_cache.read();
 			if let Some(cached) = cache.get(table) {
 				return Ok(Arc::clone(cached));
 			}
@@ -307,9 +307,7 @@ impl DatabaseContext {
 			txn.all_tb_indexes(self.ns_ctx.ns.namespace_id, self.db.database_id, table).await?;
 
 		// Populate cache (write lock — brief exclusive access)
-		if let Ok(mut cache) = self.index_def_cache.write() {
-			cache.insert(table.clone(), Arc::clone(&result));
-		}
+		self.index_def_cache.write().insert(table.clone(), Arc::clone(&result));
 
 		Ok(result)
 	}
@@ -593,9 +591,9 @@ impl ExecutionContext {
 				ns,
 			},
 			db,
-			field_state_cache: Arc::new(std::sync::RwLock::new(HashMap::new())),
-			table_def_cache: Arc::new(std::sync::RwLock::new(HashMap::new())),
-			index_def_cache: Arc::new(std::sync::RwLock::new(HashMap::new())),
+			field_state_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
+			table_def_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
+			index_def_cache: Arc::new(parking_lot::RwLock::new(HashMap::new())),
 		})
 	}
 

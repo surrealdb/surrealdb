@@ -194,8 +194,7 @@ impl ExecOperator for TableScan {
 			let (select_permission, field_state) = if let Some(ref res) = resolved {
 				// Plan-time resolved: use pre-fetched table def + field state.
 				// Only the permission compilation (pure CPU) happens here.
-				let perm = res.resolve_select_permission(check_perms, ctx.ctx()).await
-					.context("Failed to convert permission")?;
+				let perm = res.select_permission(check_perms);
 				let fs = res.field_state_for_projection(needed_fields.as_ref());
 				(perm, fs)
 			} else {
@@ -234,10 +233,9 @@ impl ExecOperator for TableScan {
 			}
 
 			// Pre-compute whether any post-decode processing is needed
-			let needs_processing = !matches!(select_permission, PhysicalPermission::Allow)
-				|| !field_state.computed_fields.is_empty()
-				|| (check_perms && !field_state.field_permissions.is_empty())
-				|| predicate.is_some();
+			let needs_processing = ScanPipeline::compute_needs_processing(
+				&select_permission, &field_state, check_perms, predicate.as_ref(),
+			);
 
 			let pre_skip = if !needs_processing { start_val } else { 0 };
 			let effective_storage_limit = if !needs_processing { limit_val } else { None };

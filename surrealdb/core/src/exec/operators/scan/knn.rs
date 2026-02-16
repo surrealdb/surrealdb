@@ -173,10 +173,7 @@ impl ExecOperator for KnnScan {
 
 			// Resolve table permissions and table_id: plan-time fast path or runtime fallback
 			let (select_permission, table_id) = if let Some(ref res) = resolved {
-				let perm = res
-					.resolve_select_permission(check_perms, ctx.ctx())
-					.await
-					.context("Failed to convert permission")?;
+				let perm = res.select_permission(check_perms);
 				(perm, res.table_def.table_id)
 			} else {
 				let table_def = db_ctx
@@ -299,7 +296,6 @@ impl ExecOperator for KnnScan {
 					rids.push(rid.as_ref().clone());
 				}
 			}
-
 
 			// Batch-fetch all records and apply permission filtering
 			let values = fetch_and_filter_records_batch(

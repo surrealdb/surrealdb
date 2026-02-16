@@ -147,10 +147,7 @@ impl ExecOperator for UnionIndexScan {
 
 			// Resolve table permissions and field state: plan-time fast path or runtime fallback
 			let (select_permission, field_state) = if let Some(ref res) = resolved {
-				let perm = res
-					.resolve_select_permission(check_perms, ctx.ctx())
-					.await
-					.context("Failed to convert permission")?;
+				let perm = res.select_permission(check_perms);
 				let fs = res.field_state_for_projection(needed_fields.as_ref());
 				(perm, fs)
 			} else {

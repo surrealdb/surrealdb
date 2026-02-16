@@ -64,6 +64,7 @@ impl CountScan {
 		version: Option<Arc<dyn PhysicalExpr>>,
 		field_names: Vec<String>,
 	) -> Self {
+		debug_assert!(!field_names.is_empty(), "CountScan requires at least one field name");
 		Self {
 			source,
 			version,

@@ -111,7 +111,7 @@ impl Executor {
 			return Some(cached.clone());
 		}
 		let session = self.extract_session_info();
-		self.cached_session.clone_from(&session);
+		self.cached_session = session.clone();
 		session
 	}
 
@@ -263,13 +263,13 @@ impl Executor {
 						ns: ns_def,
 					},
 					db: db_def,
-					field_state_cache: std::sync::Arc::new(std::sync::RwLock::new(
+					field_state_cache: std::sync::Arc::new(parking_lot::RwLock::new(
 						std::collections::HashMap::new(),
 					)),
-					table_def_cache: std::sync::Arc::new(std::sync::RwLock::new(
+					table_def_cache: std::sync::Arc::new(parking_lot::RwLock::new(
 						std::collections::HashMap::new(),
 					)),
-					index_def_cache: std::sync::Arc::new(std::sync::RwLock::new(
+					index_def_cache: std::sync::Arc::new(parking_lot::RwLock::new(
 						std::collections::HashMap::new(),
 					)),
 				})

@@ -24,7 +24,7 @@ use crate::exec::index::analysis::IndexAnalyzer;
 #[cfg(all(storage, not(target_family = "wasm")))]
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::scan::determine_scan_direction;
-use crate::exec::operators::scan::resolved::resolve_table_context;
+use crate::exec::operators::scan::resolved::{ResolvedTableContext, resolve_table_context};
 use crate::exec::operators::{
 	Aggregate, AnalyzePlan, Compute, DynamicScan, ExplainPlan, Fetch, FieldSelection, Filter,
 	KnnTopK, Limit, Project, ProjectValue, Projection, RandomShuffle, RecordIdScan, SelectProject,
@@ -972,12 +972,25 @@ impl<'ctx> Planner<'ctx> {
 			&& fetch.is_none()
 			&& with.is_none()
 		{
+			// Extract table name from the literal RecordId for plan-time resolution
+			let table_name_for_resolve = match &what[0] {
+				Expr::Literal(Literal::RecordId(rid_lit)) => Some(rid_lit.table.clone()),
+				_ => None,
+			};
 			let rid_expr = match what.into_iter().next() {
 				Some(e @ Expr::Literal(Literal::RecordId(_))) => self.physical_expr(e).await?,
 				_ => unreachable!("verified above"),
 			};
-			let scan: Arc<dyn ExecOperator> =
-				Arc::new(RecordIdScan::new(rid_expr, version, None, None));
+			let mut scan = RecordIdScan::new(rid_expr, version, None, None);
+			// Resolve table context at plan time
+			if let Some(ref tb) = table_name_for_resolve {
+				if let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db) {
+					if let Some(tc) = Self::try_resolve_table_ctx(txn, self.ctx, ns, db, tb).await {
+						scan = scan.with_resolved(tc);
+					}
+				}
+			}
+			let scan: Arc<dyn ExecOperator> = Arc::new(scan);
 			let limited = if limit.is_some() || start.is_some() {
 				let limit_expr = match limit {
 					Some(l) => Some(self.physical_expr(l.0).await?),
@@ -1378,13 +1391,18 @@ impl<'ctx> Planner<'ctx> {
 				FilterAction::UseOriginal
 			};
 			let record_id_expr = self.physical_expr(rid_expr).await?;
+			// Resolve table context at plan time for the point lookup
+			let mut scan =
+				RecordIdScan::new(record_id_expr, version, needed_fields, scan_predicate);
+			if let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db) {
+				if let Some(tc) =
+					Self::try_resolve_table_ctx(txn, self.ctx, ns, db, table_name).await
+				{
+					scan = scan.with_resolved(tc);
+				}
+			}
 			return Ok(PlannedSource {
-				operator: Arc::new(RecordIdScan::new(
-					record_id_expr,
-					version,
-					needed_fields,
-					scan_predicate,
-				)) as Arc<dyn ExecOperator>,
+				operator: Arc::new(scan) as Arc<dyn ExecOperator>,
 				filter_action,
 				limit_pushed: false,
 			});
@@ -1397,30 +1415,8 @@ impl<'ctx> Planner<'ctx> {
 		{
 			// Resolve table context (table def + field state) at plan time.
 			// This eliminates runtime KV lookups in the operator's execute().
-			let table_ctx = {
-				let ns_def = txn.get_ns_by_name(ns).await.ok().flatten();
-				let db_def = if let Some(ref _ns_def) = ns_def {
-					txn.get_db_by_name(ns, db).await.ok().flatten()
-				} else {
-					None
-				};
-				if let (Some(ns_def), Some(db_def)) = (ns_def, db_def) {
-					resolve_table_context(
-						txn,
-						self.ctx,
-						ns,
-						db,
-						ns_def.namespace_id,
-						db_def.database_id,
-						table_name,
-					)
-					.await
-					.ok()
-					.flatten()
-				} else {
-					None
-				}
-			};
+			let table_ctx: Option<ResolvedTableContext> =
+				Self::try_resolve_table_ctx(txn, self.ctx, ns, db, table_name).await;
 
 			let resolved =
 				self.resolve_access_path(txn, ns, db, table_name, cond, order, with).await;
@@ -1804,6 +1800,25 @@ impl<'ctx> Planner<'ctx> {
 				})
 			}
 		}
+	}
+
+	/// Try to resolve a `ResolvedTableContext` for the given table.
+	///
+	/// Returns `None` if namespace/database lookup fails or the table doesn't
+	/// exist. Errors in field state resolution are silently ignored (the
+	/// operator will fall back to runtime resolution).
+	async fn try_resolve_table_ctx(
+		txn: &crate::kvs::Transaction,
+		ctx: &crate::ctx::FrozenContext,
+		ns: &str,
+		db: &str,
+		table_name: &crate::val::TableName,
+	) -> Option<crate::exec::operators::scan::resolved::ResolvedTableContext> {
+		let ns_def = txn.get_ns_by_name(ns).await.ok()??;
+		let db_def = txn.get_db_by_name(ns, db).await.ok()??;
+		resolve_table_context(txn, ctx, ns, db, ns_def.namespace_id, db_def.database_id, table_name)
+			.await
+			.ok()?
 	}
 
 	/// Resolve the optimal access path for a table at plan time.

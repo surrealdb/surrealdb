@@ -21,17 +21,18 @@ use crate::val::TableName;
 
 /// Plan-time resolved table metadata that replaces runtime KV lookups.
 ///
-/// Contains the table definition and pre-built field state (computed fields
-/// + field-level permissions). When an operator has a `ResolvedTableContext`,
-/// its `execute()` skips `get_table_def()` and `build_field_state()` entirely.
-///
-/// Permission checks are still done at execution time since they depend on
-/// the session's auth context, but they use the pre-resolved `table_def`
-/// to avoid the KV lookup for `convert_permission_to_physical()`.
+/// Contains the table definition, pre-compiled SELECT permission, and
+/// pre-built field state. When an operator has a `ResolvedTableContext`,
+/// its `execute()` performs zero async work for metadata resolution --
+/// only the synchronous `should_check_perms` call remains.
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedTableContext {
-	/// The resolved table definition (used for permissions and ns_id/db_id).
+	/// The resolved table definition (used for ns_id/db_id/table_id).
 	pub table_def: Arc<TableDefinition>,
+	/// Pre-compiled SELECT permission (Full/None/Conditional with PhysicalExpr).
+	/// Compiled at plan time so operators don't need to call
+	/// `convert_permission_to_physical` at execute time.
+	pub select_permission: PhysicalPermission,
 	/// Pre-built field state with all computed fields and field-level permissions.
 	/// Stored as Arc for cheap cloning; operators filter by `needed_fields` at use time.
 	pub field_state: Arc<FieldState>,
@@ -46,19 +47,14 @@ impl ResolvedTableContext {
 		filter_field_state_for_projection(&self.field_state, needed_fields)
 	}
 
-	/// Resolve the SELECT permission from the pre-resolved table definition.
-	///
-	/// This avoids the KV lookup for table_def but still compiles the
-	/// permission expression (which is pure CPU, no KV ops).
-	pub async fn resolve_select_permission(
-		&self,
-		check_perms: bool,
-		ctx: &FrozenContext,
-	) -> Result<PhysicalPermission, Error> {
+	/// Get the SELECT permission, respecting the `check_perms` flag.
+	/// When `check_perms` is false, returns `Allow` regardless of the
+	/// pre-compiled permission.
+	pub fn select_permission(&self, check_perms: bool) -> PhysicalPermission {
 		if check_perms {
-			convert_permission_to_physical(&self.table_def.permissions.select, ctx).await
+			self.select_permission.clone()
 		} else {
-			Ok(PhysicalPermission::Allow)
+			PhysicalPermission::Allow
 		}
 	}
 }
@@ -94,6 +90,10 @@ pub(crate) async fn resolve_table_context(
 		None => return Ok(None),
 	};
 
+	// Pre-compile SELECT permission at plan time
+	let select_permission =
+		convert_permission_to_physical(&table_def.permissions.select, ctx).await?;
+
 	// Build field state with permissions enabled (conservative -- the operator
 	// will skip permission evaluation if should_check_perms returns false).
 	let field_state = build_field_state_raw(txn, ctx, ns_id, db_id, table_name, true)
@@ -105,6 +105,7 @@ pub(crate) async fn resolve_table_context(
 
 	Ok(Some(ResolvedTableContext {
 		table_def,
+		select_permission,
 		field_state: Arc::new(field_state),
 	}))
 }
