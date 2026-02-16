@@ -371,18 +371,7 @@ impl<'ctx> Planner<'ctx> {
 					field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
 
 				if is_select_all {
-					// Check if any OMIT path is nested (multi-part idiom).
-					// SelectProject only handles flat Omit; nested paths like
-					// `opts.age` need the full Project operator with
-					// omit_field_sync / omit_nested_field.
-					let has_nested_omit = omit.iter().any(|e| {
-						if let Expr::Idiom(idiom) = e {
-							idiom.len() > 1
-						} else {
-							false
-						}
-					});
-					if has_nested_omit {
+					if Self::has_nested_omit(&omit) {
 						return self.plan_projections(fields, omit, input, is_value_source).await;
 					}
 
@@ -449,21 +438,13 @@ impl<'ctx> Planner<'ctx> {
 									}
 								} else {
 									// Complex expression with alias: compute it
-									let expr_key = selector.expr.to_sql();
-									let internal_name = registry.register_physical(
-										expr_key,
+									Self::register_and_push_projection(
+										&mut projections,
+										registry,
+										selector.expr.to_sql(),
 										physical,
-										ComputePoint::Project,
-										Some(output_name.clone()),
+										output_name,
 									);
-									if internal_name == output_name {
-										projections.push(Projection::Include(output_name));
-									} else {
-										projections.push(Projection::Rename {
-											from: internal_name,
-											to: output_name,
-										});
-									}
 								}
 							} else {
 								// No alias
@@ -482,40 +463,22 @@ impl<'ctx> Planner<'ctx> {
 									// Single-part idiom that didn't match
 									// try_simple_field (e.g. graph traversal).
 									// Register in Compute.
-									let output_name = idiom_to_field_name(idiom);
-									let expr_key = selector.expr.to_sql();
-									let internal_name = registry.register_physical(
-										expr_key,
+									Self::register_and_push_projection(
+										&mut projections,
+										registry,
+										selector.expr.to_sql(),
 										physical,
-										ComputePoint::Project,
-										Some(output_name.clone()),
+										idiom_to_field_name(idiom),
 									);
-									if internal_name == output_name {
-										projections.push(Projection::Include(output_name));
-									} else {
-										projections.push(Projection::Rename {
-											from: internal_name,
-											to: output_name,
-										});
-									}
 								} else {
 									// Non-idiom expression without alias (e.g. function call)
-									let output_name = derive_field_name(&selector.expr);
-									let expr_key = selector.expr.to_sql();
-									let internal_name = registry.register_physical(
-										expr_key,
+									Self::register_and_push_projection(
+										&mut projections,
+										registry,
+										selector.expr.to_sql(),
 										physical,
-										ComputePoint::Project,
-										Some(output_name.clone()),
+										derive_field_name(&selector.expr),
 									);
-									if internal_name == output_name {
-										projections.push(Projection::Include(output_name));
-									} else {
-										projections.push(Projection::Rename {
-											from: internal_name,
-											to: output_name,
-										});
-									}
 								}
 							}
 						}
@@ -526,15 +489,7 @@ impl<'ctx> Planner<'ctx> {
 					return self.plan_projections(fields, omit, input, is_value_source).await;
 				}
 
-				// Check if any OMIT path is nested — fall back to Project if so.
-				let has_nested_omit = omit.iter().any(|e| {
-					if let Expr::Idiom(idiom) = e {
-						idiom.len() > 1
-					} else {
-						false
-					}
-				});
-				if has_nested_omit {
+				if Self::has_nested_omit(&omit) {
 					return self.plan_projections(fields, omit, input, is_value_source).await;
 				}
 
@@ -560,6 +515,49 @@ impl<'ctx> Planner<'ctx> {
 				)) as Arc<dyn ExecOperator>)
 			}
 		}
+	}
+
+	/// Register a complex expression in the `ExpressionRegistry` and push the
+	/// corresponding `Include` or `Rename` projection.
+	///
+	/// Deduplicates the identical pattern that appeared three times in
+	/// `plan_projections_fast` (aliased expr, unaliased idiom, unaliased
+	/// non-idiom).
+	fn register_and_push_projection(
+		projections: &mut Vec<Projection>,
+		registry: &mut ExpressionRegistry,
+		expr_key: String,
+		physical: Arc<dyn crate::exec::PhysicalExpr>,
+		output_name: String,
+	) {
+		let internal_name = registry.register_physical(
+			expr_key,
+			physical,
+			ComputePoint::Project,
+			Some(output_name.clone()),
+		);
+		if internal_name == output_name {
+			projections.push(Projection::Include(output_name));
+		} else {
+			projections.push(Projection::Rename {
+				from: internal_name,
+				to: output_name,
+			});
+		}
+	}
+
+	/// Check whether any OMIT expression contains a nested (multi-part) idiom.
+	///
+	/// `SelectProject` only handles flat `Projection::Omit`; nested paths like
+	/// `opts.age` require the full `Project` operator with `omit_nested_field`.
+	fn has_nested_omit(omit: &[Expr]) -> bool {
+		omit.iter().any(|e| {
+			if let Expr::Idiom(idiom) = e {
+				idiom.len() > 1
+			} else {
+				false
+			}
+		})
 	}
 
 	/// Plan OMIT fields — convert expressions to idioms.
@@ -1131,9 +1129,10 @@ impl<'ctx> Planner<'ctx> {
 			// Resolve table context at plan time
 			if let Some(ref tb) = table_name_for_resolve
 				&& let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db)
-					&& let Some(tc) = Self::try_resolve_table_ctx(txn, self.ctx, ns, db, tb).await {
-						scan = scan.with_resolved(tc);
-					}
+				&& let Some(tc) = Self::try_resolve_table_ctx(txn, self.ctx, ns, db, tb).await
+			{
+				scan = scan.with_resolved(tc);
+			}
 			let scan: Arc<dyn ExecOperator> = Arc::new(scan);
 			let limited = if limit.is_some() || start.is_some() {
 				let limit_expr = match limit {
@@ -1541,9 +1540,9 @@ impl<'ctx> Planner<'ctx> {
 			if let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db)
 				&& let Some(tc) =
 					Self::try_resolve_table_ctx(txn, self.ctx, ns, db, table_name).await
-				{
-					scan = scan.with_resolved(tc);
-				}
+			{
+				scan = scan.with_resolved(tc);
+			}
 			return Ok(PlannedSource {
 				operator: Arc::new(scan) as Arc<dyn ExecOperator>,
 				filter_action,

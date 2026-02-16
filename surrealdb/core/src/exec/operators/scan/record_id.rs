@@ -301,15 +301,31 @@ pub(crate) async fn execute_record_lookup(
 			// --- Range scan ---
 			let beg = range_start_key(ns.namespace_id, db.database_id, &rid.table, &range.start)?;
 			let end = range_end_key(ns.namespace_id, db.database_id, &rid.table, &range.end)?;
+
+			// When no post-decode processing is needed (no permissions,
+			// no predicates, no computed fields), push START to the
+			// storage layer to skip rows without deserializing them.
+			let pre_skip = if !needs_processing {
+				start
+			} else {
+				0
+			};
+			let effective_storage_limit = if !needs_processing {
+				limit
+			} else {
+				None
+			};
+			let prefetch = effective_storage_limit.is_none();
+
 			let mut source = kv_scan_stream(
 				Arc::clone(&txn),
 				beg,
 				end,
 				version,
-				None, // no storage limit for range scans
+				effective_storage_limit,
 				crate::idx::planner::ScanDirection::Forward,
-				0,     // no pre-skip
-				false, // no prefetch for small lookups
+				pre_skip,
+				prefetch,
 			);
 
 			let mut pipeline = ScanPipeline::new(
@@ -318,7 +334,7 @@ pub(crate) async fn execute_record_lookup(
 				field_state,
 				check_perms,
 				limit,
-				start,
+				start.saturating_sub(pre_skip),
 			);
 
 			let mut results = Vec::new();

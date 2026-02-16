@@ -345,6 +345,11 @@ impl ExecOperator for IndexScan {
 						.context("Failed to create iterator")?;
 
 					loop {
+						if ctx.cancellation().is_cancelled() {
+							Err(ControlFlow::Err(anyhow::anyhow!(
+								crate::err::Error::QueryCancelled
+							)))?;
+						}
 						let rids = iter.next_batch(&txn).await
 							.context("Failed to iterate index")?;
 						if rids.is_empty() {
@@ -378,6 +383,11 @@ impl ExecOperator for IndexScan {
 					let mut iter = UniqueRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref())
 						.context("Failed to create iterator")?;
 					loop {
+						if ctx.cancellation().is_cancelled() {
+							Err(ControlFlow::Err(anyhow::anyhow!(
+								crate::err::Error::QueryCancelled
+							)))?;
+						}
 						let rids = iter.next_batch(&txn).await
 							.context("Failed to iterate index")?;
 						if rids.is_empty() { break; }
@@ -402,6 +412,11 @@ impl ExecOperator for IndexScan {
 					let mut iter = IndexRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref())
 						.context("Failed to create iterator")?;
 					loop {
+						if ctx.cancellation().is_cancelled() {
+							Err(ControlFlow::Err(anyhow::anyhow!(
+								crate::err::Error::QueryCancelled
+							)))?;
+						}
 						let rids = iter.next_batch(&txn).await
 							.context("Failed to iterate index")?;
 						if rids.is_empty() { break; }
@@ -428,10 +443,15 @@ impl ExecOperator for IndexScan {
 						.context("Failed to create compound iterator")?;
 
 					// Compute the maximum number of index entries we need.
-					// When a LIMIT + START is pushed down, we cap the scan.
-					let mut remaining: u32 = match limit_val {
-						Some(l) => (l + start_val) as u32,
-						None => u32::MAX,
+					// When a LIMIT + START is pushed down AND permissions
+					// won't filter rows, we can cap the scan at limit+start
+					// index entries. With conditional permissions, rows may
+					// be denied after fetch, so we must not cap — let the
+					// pipeline's limit/start tracking terminate the loop.
+					let can_cap = !matches!(select_permission, PhysicalPermission::Conditional(_));
+					let mut remaining: u32 = match (limit_val, can_cap) {
+						(Some(l), true) => l.saturating_add(start_val).min(u32::MAX as usize) as u32,
+						_ => u32::MAX,
 					};
 
 					// Fetch the first batch of record IDs sequentially.
@@ -439,6 +459,11 @@ impl ExecOperator for IndexScan {
 						.context("Failed to iterate compound index")?;
 
 					while !rids.is_empty() {
+						if ctx.cancellation().is_cancelled() {
+							Err(ControlFlow::Err(anyhow::anyhow!(
+								crate::err::Error::QueryCancelled
+							)))?;
+						}
 						remaining = remaining.saturating_sub(rids.len() as u32);
 
 						// Overlap: fetch records for the current batch while
@@ -482,9 +507,12 @@ impl ExecOperator for IndexScan {
 					let mut iter = CompoundRangeIterator::new(ns_id, db_id, ix, prefix, range)
 						.context("Failed to create compound range iterator")?;
 
-					let mut remaining: u32 = match limit_val {
-						Some(l) => (l + start_val) as u32,
-						None => u32::MAX,
+					// Same cap logic as the equality-only compound branch:
+					// only cap when permissions won't filter rows post-fetch.
+					let can_cap = !matches!(select_permission, PhysicalPermission::Conditional(_));
+					let mut remaining: u32 = match (limit_val, can_cap) {
+						(Some(l), true) => l.saturating_add(start_val).min(u32::MAX as usize) as u32,
+						_ => u32::MAX,
 					};
 
 					// Fetch the first batch of record IDs sequentially.
@@ -492,6 +520,11 @@ impl ExecOperator for IndexScan {
 						.context("Failed to iterate compound index")?;
 
 					while !rids.is_empty() {
+						if ctx.cancellation().is_cancelled() {
+							Err(ControlFlow::Err(anyhow::anyhow!(
+								crate::err::Error::QueryCancelled
+							)))?;
+						}
 						remaining = remaining.saturating_sub(rids.len() as u32);
 
 						// Overlap: fetch records for the current batch while
