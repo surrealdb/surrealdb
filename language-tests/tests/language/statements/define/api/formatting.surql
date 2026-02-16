@@ -13,9 +13,6 @@ value = '''{ "/test": "DEFINE API '/test' FOR any MIDDLEWARE api::req::max_body(
 [[test.results]]
 value = '''{ API: "API MIDDLEWARE api::req::max_body('1mb') PERMISSIONS FULL" }'''
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 DEFINE CONFIG API
