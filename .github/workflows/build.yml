@@ -99,7 +99,7 @@ jobs:
           push: true
           tags: ${{ steps.image.outputs.name }}:${{ steps.image.outputs.tag }}
           build-args: |
-            RUST_VERSION=1.88
+            RUST_VERSION=1.86
 
   build:
     name: Build ${{ matrix.arch }} binary
@@ -309,13 +309,13 @@ jobs:
         with:
           ref: ${{ inputs.release-branch }}
 
-      - name: Install Rust 1.88 toolchain
-        uses: dtolnay/rust-toolchain@1.88.0
+      - name: Install Rust 1.86 toolchain
+        uses: dtolnay/rust-toolchain@1.86.0
         with:
           targets: ${{ matrix.arch }}
 
-      - name: Add target for Rust 1.88 toolchain
-        run: rustup target add ${{ matrix.arch }} --toolchain 1.88
+      - name: Add target for Rust 1.86 toolchain
+        run: rustup target add ${{ matrix.arch }} --toolchain 1.86
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # (Actions must be pinned by commit hash) v4.0.2
@@ -339,9 +339,7 @@ jobs:
       - name: Build step
         env:
           SURREAL_BUILD_METADATA: ${{ inputs.build-metadata }}
-          RUSTUP_TOOLCHAIN: "1.88"
-          # ort build script (vswhom_sys) needs Advapi32.lib for Windows Registry APIs; target rustflags are not applied to build scripts
-          RUSTFLAGS: ${{ matrix.arch == 'x86_64-pc-windows-msvc' && '-C link-arg=/DEFAULTLIB:Advapi32.lib' || '' }}
+          RUSTUP_TOOLCHAIN: "1.86"
         run: ${{ matrix.build-step }}
 
       - name: Upload artifacts
