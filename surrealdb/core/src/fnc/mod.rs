@@ -572,6 +572,7 @@ pub async fn asynchronous(
 		"api::res::headers" => api::res::headers((stk, ctx, opt, doc)).await,
 		//
 		"ai::embed" => ai::embed(ctx).await,
+		"ai::generate" => ai::generate(ctx).await,
 		//
 		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
 		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,

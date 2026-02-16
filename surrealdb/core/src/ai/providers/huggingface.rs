@@ -1,26 +1,26 @@
-//! HuggingFace embedding provider.
+//! HuggingFace AI provider.
 //!
-//! Calls the HuggingFace Inference API to generate embeddings using any
-//! sentence-transformer or embedding model hosted on the Hub.
+//! Calls the HuggingFace Inference API for embeddings and text generation.
 //!
 //! # Configuration
 //!
 //! - `SURREAL_AI_HUGGINGFACE_API_KEY` — Required. A HuggingFace API token.
 //! - `SURREAL_AI_HUGGINGFACE_BASE_URL` — Optional. Defaults to
-//!   `https://api-inference.huggingface.co/pipeline/feature-extraction`.
+//!   `https://api-inference.huggingface.co/pipeline/feature-extraction` for embeddings.
 //!
 //! # Usage
 //!
 //! ```sql
 //! ai::embed('huggingface:BAAI/bge-small-en-v1.5', 'hello world')
-//! ai::embed('huggingface:sentence-transformers/all-MiniLM-L6-v2', 'hello world')
+//! ai::generate('huggingface:mistralai/Mistral-7B-Instruct-v0.3', 'Hello')
 //! ```
 use anyhow::{Result, bail};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::ai::provider::EmbeddingProvider;
+use crate::ai::provider::{EmbeddingProvider, GenerationConfig, GenerationProvider};
 
 const DEFAULT_BASE_URL: &str = "https://api-inference.huggingface.co/pipeline/feature-extraction";
+const DEFAULT_GENERATION_BASE_URL: &str = "https://api-inference.huggingface.co/models";
 
 /// An embedding provider that calls the HuggingFace Inference API.
 pub struct HuggingFaceProvider {
@@ -55,6 +55,14 @@ impl HuggingFaceProvider {
 	/// Build the full URL for a model's feature-extraction endpoint.
 	fn model_url(&self, model: &str) -> String {
 		let base = self.base_url.trim_end_matches('/');
+		format!("{base}/{model}")
+	}
+
+	/// Build the full URL for a model's text-generation endpoint.
+	fn generation_url(&self, model: &str) -> String {
+		let base = std::env::var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL")
+			.unwrap_or_else(|_| DEFAULT_GENERATION_BASE_URL.to_owned());
+		let base = base.trim_end_matches('/');
 		format!("{base}/{model}")
 	}
 }
@@ -131,6 +139,115 @@ impl EmbeddingProvider for HuggingFaceProvider {
 		bail!(
 			"Failed to parse HuggingFace Inference API response as embeddings. \
 			 Expected a JSON array of numbers."
+		)
+	}
+}
+
+/// Request body for the HuggingFace text generation API.
+#[derive(Serialize)]
+struct GenerationRequest<'a> {
+	inputs: &'a str,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	parameters: Option<GenerationParameters>,
+}
+
+/// Parameters for text generation.
+#[derive(Serialize)]
+struct GenerationParameters {
+	#[serde(skip_serializing_if = "Option::is_none")]
+	temperature: Option<f64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	max_new_tokens: Option<u64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	top_p: Option<f64>,
+	/// Return only the newly generated text (not the prompt).
+	return_full_text: bool,
+}
+
+/// A single generation result from the HuggingFace API.
+#[derive(Deserialize)]
+struct GenerationResponse {
+	generated_text: String,
+}
+
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+impl GenerationProvider for HuggingFaceProvider {
+	async fn generate(
+		&self,
+		model: &str,
+		prompt: &str,
+		config: &GenerationConfig,
+	) -> Result<String> {
+		let url = self.generation_url(model);
+
+		let parameters = if config.temperature.is_some()
+			|| config.max_tokens.is_some()
+			|| config.top_p.is_some()
+		{
+			Some(GenerationParameters {
+				temperature: config.temperature,
+				max_new_tokens: config.max_tokens,
+				top_p: config.top_p,
+				return_full_text: false,
+			})
+		} else {
+			Some(GenerationParameters {
+				temperature: None,
+				max_new_tokens: None,
+				top_p: None,
+				return_full_text: false,
+			})
+		};
+
+		let body = GenerationRequest {
+			inputs: prompt,
+			parameters,
+		};
+
+		let mut request = reqwest::Client::new()
+			.post(&url)
+			.header("Content-Type", "application/json")
+			.json(&body);
+
+		if !self.api_key.is_empty() {
+			request = request.header("Authorization", format!("Bearer {}", self.api_key));
+		}
+
+		let response = request
+			.send()
+			.await
+			.map_err(|e| {
+				anyhow::anyhow!("Failed to call HuggingFace text generation API: {e}")
+			})?;
+
+		if !response.status().is_success() {
+			let status = response.status();
+			let body = response.text().await.unwrap_or_default();
+			bail!("HuggingFace text generation API returned {status}: {body}");
+		}
+
+		let text = response.text().await.map_err(|e| {
+			anyhow::anyhow!("Failed to read HuggingFace text generation API response: {e}")
+		})?;
+
+		// The text-generation pipeline returns an array of objects:
+		// [{"generated_text": "..."}]
+		if let Ok(results) = serde_json::from_str::<Vec<GenerationResponse>>(&text) {
+			let result = results.into_iter().next().ok_or_else(|| {
+				anyhow::anyhow!("HuggingFace text generation response contained no results")
+			})?;
+			return Ok(result.generated_text);
+		}
+
+		// Some models return a single object instead of an array
+		if let Ok(result) = serde_json::from_str::<GenerationResponse>(&text) {
+			return Ok(result.generated_text);
+		}
+
+		bail!(
+			"Failed to parse HuggingFace text generation API response. \
+			 Expected a JSON array of objects with 'generated_text' field."
 		)
 	}
 }
@@ -270,6 +387,119 @@ mod tests {
 		assert!(
 			err_msg.contains("Failed to parse"),
 			"Expected parse error in error: {err_msg}"
+		);
+
+		server.verify().await;
+	}
+
+	#[test]
+	fn generation_url_default() {
+		let provider = HuggingFaceProvider::with_config(String::new(), DEFAULT_BASE_URL.into());
+		// Clear any env override
+		std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL");
+		assert_eq!(
+			provider.generation_url("mistralai/Mistral-7B-Instruct-v0.3"),
+			"https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
+		);
+	}
+
+	#[test]
+	fn deserialize_generation_response() {
+		let json = r#"[{"generated_text": "Hello! How can I help you?"}]"#;
+		let result: Vec<GenerationResponse> = serde_json::from_str(json).unwrap();
+		assert_eq!(result.len(), 1);
+		assert_eq!(result[0].generated_text, "Hello! How can I help you?");
+	}
+
+	#[tokio::test]
+	async fn generate_returns_text_from_mock_api() {
+		use wiremock::matchers::{method, path};
+		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		let server = MockServer::start().await;
+
+		let response_body =
+			serde_json::json!([{"generated_text": "The capital of France is Paris."}]);
+
+		Mock::given(method("POST"))
+			.and(path("/mistralai/Mistral-7B"))
+			.respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+			.expect(1)
+			.mount(&server)
+			.await;
+
+		std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", &server.uri());
+
+		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
+		let config = GenerationConfig::default();
+		let result = provider
+			.generate("mistralai/Mistral-7B", "What is the capital of France?", &config)
+			.await;
+
+		std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL");
+
+		let text = result.expect("generate should succeed with mock server");
+		assert_eq!(text, "The capital of France is Paris.");
+
+		server.verify().await;
+	}
+
+	#[tokio::test]
+	async fn generate_returns_error_on_500() {
+		use wiremock::matchers::method;
+		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		let server = MockServer::start().await;
+
+		Mock::given(method("POST"))
+			.respond_with(
+				ResponseTemplate::new(500).set_body_string(r#"{"error":"model is loading"}"#),
+			)
+			.expect(1)
+			.mount(&server)
+			.await;
+
+		std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", &server.uri());
+
+		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
+		let config = GenerationConfig::default();
+		let result = provider.generate("test-model", "Hello", &config).await;
+
+		std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL");
+
+		assert!(result.is_err());
+		let err_msg = result.unwrap_err().to_string();
+		assert!(err_msg.contains("500"), "Expected 500 in error: {err_msg}");
+
+		server.verify().await;
+	}
+
+	#[tokio::test]
+	async fn generate_returns_error_on_empty_results() {
+		use wiremock::matchers::method;
+		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		let server = MockServer::start().await;
+
+		Mock::given(method("POST"))
+			.respond_with(ResponseTemplate::new(200).set_body_string("[]"))
+			.expect(1)
+			.mount(&server)
+			.await;
+
+		std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", &server.uri());
+
+		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
+		let config = GenerationConfig::default();
+		let result = provider.generate("test-model", "Hello", &config).await;
+
+		std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL");
+
+		assert!(result.is_err());
+		let err_msg = result.unwrap_err().to_string();
+		assert!(
+			err_msg.contains("no results"),
+			"Expected 'no results' in error: {err_msg}"
 		);
 
 		server.verify().await;
