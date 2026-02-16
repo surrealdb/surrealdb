@@ -132,15 +132,17 @@ pub fn session_expired() -> TypesError {
 /// 4. Fallback — wrap the display string as an internal error.
 pub fn types_error_from_anyhow(error: anyhow::Error) -> TypesError {
 	// If the error is already a TypesError, return it directly (preserves kind/details/cause)
-	if let Ok(types_error) = error.downcast::<TypesError>() {
-		return types_error;
+	match error.downcast::<TypesError>() {
+		Ok(types_error) => types_error,
+		Err(error) => {
+			if let Some(api_error) = error.downcast_ref::<ApiError>() {
+				return api_error.to_types_error();
+			}
+			// Try to downcast to database Error
+			error
+				.downcast::<err::Error>()
+				.map(into_types_error)
+				.unwrap_or_else(|error| TypesError::internal(error.to_string()))
+		}
 	}
-	if let Some(api_error) = error.downcast_ref::<ApiError>() {
-		return api_error.to_types_error();
-	}
-	// Try to downcast to database Error
-	error
-		.downcast::<err::Error>()
-		.map(into_types_error)
-		.unwrap_or_else(|error| TypesError::internal(error.to_string()))
 }

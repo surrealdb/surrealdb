@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use surrealdb_types::{HashMap, object};
 use tokio::sync::RwLock;
 use uuid::Uuid;
