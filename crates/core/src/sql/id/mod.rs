@@ -5,7 +5,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{escape::EscapeRidKey, Array, Number, Object, Strand, Thing, Uuid, Value};
-use nanoid::nanoid;
+use rand::seq::SliceRandom;
 use range::IdRange;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -181,7 +181,9 @@ impl From<Thing> for Id {
 impl Id {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
-		Self::String(nanoid!(20, &ID_CHARS))
+		let mut rng = rand::thread_rng();
+		let id: String = (0..20).map(|_| *ID_CHARS.choose(&mut rng).unwrap_or(&'0')).collect();
+		Self::String(id)
 	}
 	/// Generate a new random ULID
 	pub fn ulid() -> Self {
