@@ -34,7 +34,7 @@ value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
 value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
-value = '''"Project [ctx: Db]
+value = '''"SelectProject [ctx: Db] [projections: *]
     IndexScan [ctx: Db] [index: test, access: = 'testA@surrealdb.com', direction: Forward]
 "'''
 

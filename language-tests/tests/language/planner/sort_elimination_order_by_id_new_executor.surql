@@ -15,18 +15,18 @@ value = "[{ id: test:3, val: 'b' }]"
 value = "[{ id: test:1, val: 'c' }, { id: test:2, val: 'a' }, { id: test:3, val: 'b' }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: test, direction: Forward]
 ''''
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3}
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 3}
     TableScan [ctx: Db] [table: test, direction: Forward] {rows: 3}
 
 Total rows: 3''''
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3}
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 3}
     TableScan [ctx: Db] [table: test, direction: Backward] {rows: 3}
 
 Total rows: 3''''

@@ -1,9 +1,21 @@
 //! SELECT statement planning for the planner.
 //!
 //! Handles the full SELECT pipeline: source → filter → split → aggregate →
-//! sort → limit → fetch → project → timeout.
+//! sort → limit → project → fetch → timeout.
+//!
+//! Projection uses a fast path that classifies SELECT fields at plan time:
+//! - **Simple field paths** (e.g. `name`, `age`): handled by `SelectProject` with synchronous field
+//!   selection — zero async/expression overhead.
+//! - **Complex expressions** (e.g. `math::sum(scores) AS total`): pre-evaluated by a `Compute`
+//!   operator, then picked by `SelectProject`.
+//! - **Projection functions** or **nested output paths**: fall back to the full `Project` operator.
+//!
+//! An `ExpressionRegistry` is shared between ORDER BY and projection planning
+//! to deduplicate expressions that appear in both clauses.
 
 use std::sync::Arc;
+
+use surrealdb_types::ToSql;
 
 use super::Planner;
 use super::util::{
@@ -143,6 +155,10 @@ impl<'ctx> Planner<'ctx> {
 			(split_op, false)
 		};
 
+		// Shared expression registry for deduplication across sort and projection.
+		// Expressions computed for ORDER BY are reused by the projection step.
+		let mut registry = ExpressionRegistry::new();
+
 		let (sorted, sort_only_omits) = if let Some(order) = order {
 			// Sort elimination: if the input is already sorted in the required
 			// order, skip creating a Sort operator entirely.
@@ -155,8 +171,16 @@ impl<'ctx> Planner<'ctx> {
 				// individual rows rather than grouped arrays.
 				(self.plan_sort(grouped, order, &start, &limit, tempfiles).await?, vec![])
 			} else {
-				self.plan_sort_consolidated(grouped, order, &fields, &start, &limit, tempfiles)
-					.await?
+				self.plan_sort_consolidated(
+					grouped,
+					order,
+					&fields,
+					&start,
+					&limit,
+					tempfiles,
+					&mut registry,
+				)
+				.await?
 			}
 		} else {
 			(grouped, vec![])
@@ -189,7 +213,8 @@ impl<'ctx> Planner<'ctx> {
 				limited
 			}
 		} else {
-			self.plan_projections(fields, all_omit, limited, is_value_source).await?
+			self.plan_projections_fast(fields, all_omit, limited, is_value_source, &mut registry)
+				.await?
 		};
 
 		Ok(projected)
@@ -321,6 +346,222 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
+	/// Plan projections with the fast path: use SelectProject for simple field
+	/// selection and Compute for complex expressions, avoiding the full
+	/// IdiomExpr/PhysicalExpr/async evaluation chain in Project.
+	///
+	/// Falls back to `plan_projections` when projection functions or nested
+	/// output paths are present, as those require the full Project operator.
+	pub(crate) async fn plan_projections_fast(
+		&self,
+		fields: Fields,
+		omit: Vec<Expr>,
+		input: Arc<dyn ExecOperator>,
+		is_value_source: bool,
+		registry: &mut ExpressionRegistry,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		match fields {
+			Fields::Value(selector) => {
+				let expr = self.physical_expr(selector.expr).await?;
+				Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>)
+			}
+
+			Fields::Select(ref field_list) => {
+				let is_select_all =
+					field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
+
+				if is_select_all {
+					// Check if any OMIT path is nested (multi-part idiom).
+					// SelectProject only handles flat Omit; nested paths like
+					// `opts.age` need the full Project operator with
+					// omit_field_sync / omit_nested_field.
+					let has_nested_omit = omit.iter().any(|e| {
+						if let Expr::Idiom(idiom) = e {
+							idiom.len() > 1
+						} else {
+							false
+						}
+					});
+					if has_nested_omit {
+						return self.plan_projections(fields, omit, input, is_value_source).await;
+					}
+
+					let mut projections = vec![Projection::All];
+					for expr in &omit {
+						if let Expr::Idiom(idiom) = expr {
+							projections.push(Projection::Omit(idiom_to_field_name(idiom)));
+						}
+					}
+					return Ok(Arc::new(SelectProject::new(
+						input,
+						projections,
+						Arc::new(OperatorMetrics::new()),
+					)) as Arc<dyn ExecOperator>);
+				}
+
+				// SELECT VALUE $param fast path
+				let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
+				if is_value_source
+					&& !has_wildcard
+					&& field_list.len() == 1
+					&& let Some(Field::Single(selector)) = field_list.first()
+					&& selector.alias.is_none()
+					&& let Expr::Param(_) = &selector.expr
+				{
+					let expr = self.physical_expr(selector.expr.clone()).await?;
+					return Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>);
+				}
+
+				// Classify each field. If any field requires the full Project
+				// operator (projection functions, nested output paths), fall back.
+				let mut projections = Vec::with_capacity(field_list.len());
+				let mut needs_fallback = false;
+
+				if has_wildcard {
+					projections.push(Projection::All);
+				}
+
+				for field in field_list {
+					match field {
+						Field::All => {} // Already handled via has_wildcard
+						Field::Single(selector) => {
+							let physical = self.physical_expr(selector.expr.clone()).await?;
+
+							// Projection functions produce dynamic field bindings
+							// and require the full Project operator.
+							if physical.is_projection_function() {
+								needs_fallback = true;
+								break;
+							}
+
+							if let Some(alias) = &selector.alias {
+								let output_name = idiom_to_field_name(alias);
+
+								if let Some(field_name) = physical.try_simple_field() {
+									// Simple aliased field: rename
+									if field_name == output_name {
+										projections.push(Projection::Include(output_name));
+									} else {
+										projections.push(Projection::Rename {
+											from: field_name.to_string(),
+											to: output_name,
+										});
+									}
+								} else {
+									// Complex expression with alias: compute it
+									let expr_key = selector.expr.to_sql();
+									let internal_name = registry.register_physical(
+										expr_key,
+										physical,
+										ComputePoint::Project,
+										Some(output_name.clone()),
+									);
+									if internal_name == output_name {
+										projections.push(Projection::Include(output_name));
+									} else {
+										projections.push(Projection::Rename {
+											from: internal_name,
+											to: output_name,
+										});
+									}
+								}
+							} else {
+								// No alias
+								if let Some(field_name) = physical.try_simple_field() {
+									// Simple field: include directly
+									projections.push(Projection::Include(field_name.to_string()));
+								} else if let Expr::Idiom(idiom) = &selector.expr {
+									let path = idiom_to_field_path(idiom);
+									if path.len() > 1 {
+										// Multi-part idiom → nested output path.
+										// SelectProject doesn't support nested paths,
+										// so fall back to Project.
+										needs_fallback = true;
+										break;
+									}
+									// Single-part idiom that didn't match
+									// try_simple_field (e.g. graph traversal).
+									// Register in Compute.
+									let output_name = idiom_to_field_name(idiom);
+									let expr_key = selector.expr.to_sql();
+									let internal_name = registry.register_physical(
+										expr_key,
+										physical,
+										ComputePoint::Project,
+										Some(output_name.clone()),
+									);
+									if internal_name == output_name {
+										projections.push(Projection::Include(output_name));
+									} else {
+										projections.push(Projection::Rename {
+											from: internal_name,
+											to: output_name,
+										});
+									}
+								} else {
+									// Non-idiom expression without alias (e.g. function call)
+									let output_name = derive_field_name(&selector.expr);
+									let expr_key = selector.expr.to_sql();
+									let internal_name = registry.register_physical(
+										expr_key,
+										physical,
+										ComputePoint::Project,
+										Some(output_name.clone()),
+									);
+									if internal_name == output_name {
+										projections.push(Projection::Include(output_name));
+									} else {
+										projections.push(Projection::Rename {
+											from: internal_name,
+											to: output_name,
+										});
+									}
+								}
+							}
+						}
+					}
+				}
+
+				if needs_fallback {
+					return self.plan_projections(fields, omit, input, is_value_source).await;
+				}
+
+				// Check if any OMIT path is nested — fall back to Project if so.
+				let has_nested_omit = omit.iter().any(|e| {
+					if let Expr::Idiom(idiom) = e {
+						idiom.len() > 1
+					} else {
+						false
+					}
+				});
+				if has_nested_omit {
+					return self.plan_projections(fields, omit, input, is_value_source).await;
+				}
+
+				// Add OMIT projections (all simple / top-level)
+				for expr in &omit {
+					if let Expr::Idiom(idiom) = expr {
+						projections.push(Projection::Omit(idiom_to_field_name(idiom)));
+					}
+				}
+
+				// Create Compute operator if any complex expressions were registered
+				let computed = if registry.has_expressions_for_point(ComputePoint::Project) {
+					let compute_fields = registry.get_expressions_for_point(ComputePoint::Project);
+					Arc::new(Compute::new(input, compute_fields)) as Arc<dyn ExecOperator>
+				} else {
+					input
+				};
+
+				Ok(Arc::new(SelectProject::new(
+					computed,
+					projections,
+					Arc::new(OperatorMetrics::new()),
+				)) as Arc<dyn ExecOperator>)
+			}
+		}
+	}
+
 	/// Plan OMIT fields — convert expressions to idioms.
 	pub(crate) async fn plan_omit(
 		&self,
@@ -397,6 +638,9 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// Plan ORDER BY with consolidated expression evaluation.
+	///
+	/// Uses a shared `ExpressionRegistry` so that expressions computed for sort
+	/// can be reused by downstream projection (avoiding duplicate computation).
 	pub(crate) async fn plan_sort_consolidated(
 		&self,
 		input: Arc<dyn ExecOperator>,
@@ -405,6 +649,7 @@ impl<'ctx> Planner<'ctx> {
 		start: &Option<crate::expr::start::Start>,
 		limit: &Option<crate::expr::limit::Limit>,
 		#[allow(unused)] tempfiles: bool,
+		registry: &mut ExpressionRegistry,
 	) -> Result<(Arc<dyn ExecOperator>, Vec<String>), Error> {
 		use crate::expr::order::Ordering;
 		use crate::expr::part::Part;
@@ -418,7 +663,6 @@ impl<'ctx> Planner<'ctx> {
 				))
 			}
 			Ordering::Order(order_list) => {
-				let mut registry = ExpressionRegistry::new();
 				let mut sort_keys = Vec::with_capacity(order_list.len());
 				let mut sort_only_fields: Vec<String> = Vec::new();
 
@@ -521,104 +765,6 @@ impl<'ctx> Planner<'ctx> {
 					Arc::new(SortByKey::new(computed, sort_keys)) as Arc<dyn ExecOperator>,
 					sort_only_fields,
 				))
-			}
-		}
-	}
-
-	/// Plan SELECT projections with consolidated approach.
-	#[allow(dead_code)]
-	pub(crate) async fn plan_projections_consolidated(
-		&self,
-		input: Arc<dyn ExecOperator>,
-		fields: &Fields,
-		omit: &[Expr],
-		computed_fields: &[(String, String)],
-	) -> Result<Arc<dyn ExecOperator>, Error> {
-		match fields {
-			Fields::Value(selector) => {
-				if !omit.is_empty() {
-					return Err(Error::Query {
-						message: "OMIT clause with SELECT VALUE not supported".to_string(),
-					});
-				}
-				let expr = self.physical_expr(selector.expr.clone()).await?;
-				Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>)
-			}
-
-			Fields::Select(field_list) => {
-				let is_select_all =
-					field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
-
-				if is_select_all {
-					let omit_names: Vec<String> = omit
-						.iter()
-						.filter_map(|e| {
-							if let Expr::Idiom(idiom) = e {
-								Some(idiom_to_field_name(idiom))
-							} else {
-								None
-							}
-						})
-						.collect();
-					let projections: Vec<Projection> = std::iter::once(Projection::All)
-						.chain(omit_names.into_iter().map(Projection::Omit))
-						.collect();
-					return Ok(Arc::new(SelectProject::new(
-						input,
-						projections,
-						Arc::new(OperatorMetrics::new()),
-					)) as Arc<dyn ExecOperator>);
-				}
-
-				let mut projections = Vec::with_capacity(field_list.len());
-				let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
-
-				if has_wildcard {
-					projections.push(Projection::All);
-				}
-
-				for field in field_list {
-					match field {
-						Field::All => {}
-						Field::Single(selector) => {
-							let output_name = if let Some(alias) = &selector.alias {
-								idiom_to_field_name(alias)
-							} else {
-								derive_field_name(&selector.expr)
-							};
-
-							let maybe_computed =
-								computed_fields.iter().find(|(_, out)| out == &output_name);
-
-							if let Some((internal_name, _)) = maybe_computed {
-								if internal_name != &output_name {
-									projections.push(Projection::Rename {
-										from: internal_name.clone(),
-										to: output_name,
-									});
-								} else {
-									projections.push(Projection::Include(output_name));
-								}
-							} else {
-								projections.push(Projection::Include(output_name));
-							}
-						}
-					}
-				}
-
-				if !omit.is_empty() {
-					for e in omit {
-						if let Expr::Idiom(idiom) = e {
-							projections.push(Projection::Omit(idiom_to_field_name(idiom)));
-						}
-					}
-				}
-
-				Ok(Arc::new(SelectProject::new(
-					input,
-					projections,
-					Arc::new(OperatorMetrics::new()),
-				)) as Arc<dyn ExecOperator>)
 			}
 		}
 	}

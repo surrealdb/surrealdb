@@ -6,7 +6,7 @@ reason = "WHERE id = record_id should use RecordIdScan instead of a full table s
 value = "'OK'"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     RecordIdScan [ctx: Db] [record_id: item:1, predicate: id = item:1]
 ''''
 
@@ -14,7 +14,7 @@ value = ''''Project [ctx: Db]
 value = "[{ id: item:1, name: 'Alpha', score: 10 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     RecordIdScan [ctx: Db] [record_id: item:2, predicate: id = item:2 AND score > 15]
 ''''
 
@@ -25,7 +25,7 @@ value = "[{ id: item:2, name: 'Beta', score: 20 }]"
 value = "[]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: item, direction: Forward, predicate: id = item:1 OR score > 15]
 ''''
 
@@ -33,7 +33,7 @@ value = ''''Project [ctx: Db]
 value = "[{ id: item:1, name: 'Alpha', score: 10 }, { id: item:2, name: 'Beta', score: 20 }, { id: item:3, name: 'Gamma', score: 30 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     RecordIdScan [ctx: Db] [record_id: item:3, predicate: item:3 = id]
 ''''
 
@@ -41,7 +41,7 @@ value = ''''Project [ctx: Db]
 value = "[{ id: item:3, name: 'Gamma', score: 30 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     RecordIdScan [ctx: Db] [record_id: item:1, predicate: id == item:1]
 ''''
 

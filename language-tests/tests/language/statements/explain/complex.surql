@@ -13,7 +13,7 @@ value = ''''Limit [ctx: Db] [limit: 2]
 ''''
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 5]
         SortTopKByKey [ctx: Db] [sort_keys: rating DESC, limit: 5]
             Split [ctx: Db] [on: tags]
@@ -21,7 +21,7 @@ value = ''''Project [ctx: Db]
 ''''
 
 [[test.results]]
-value = '''"Project [ctx: Db]
+value = '''"SelectProject [ctx: Db] [projections: name, price, rating]
     Limit [ctx: Db] [limit: 1, offset: 0]
         SortTopKByKey [ctx: Db] [sort_keys: price ASC, limit: 1]
             Filter [ctx: Db] [predicate: brand = 'Acme']
@@ -29,7 +29,7 @@ value = '''"Project [ctx: Db]
 "'''
 
 [[test.results]]
-value = '''"Project [ctx: Db]
+value = '''"SelectProject [ctx: Db] [projections: id, name]
     Filter [ctx: Db] [predicate: name @1@ 'Widget']
         FullTextScan [ctx: Db] [index: idx_ft_name, query: Widget]
 "'''
@@ -40,7 +40,7 @@ value = '''"Aggregate [ctx: Db] [mode: GROUP ALL]
 "'''
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 5]
         SortTopKByKey [ctx: Db] [sort_keys: id ASC, limit: 5]
             Union [ctx: Db]
@@ -54,12 +54,12 @@ value = ''''ProjectValue [ctx: Db] [expr: name]
 ''''
 
 [[test.results]]
-value = '''"Project [ctx: Db]
+value = '''"SelectProject [ctx: Db] [projections: *]
     Filter [ctx: Db] [predicate: tags = ['sale']]
-        Project [ctx: Db]
+        SelectProject [ctx: Db] [projections: *]
             Filter [ctx: Db] [predicate: category = 'electronics']
                 Union [ctx: Db]
-                    Project [ctx: Db]
+                    SelectProject [ctx: Db] [projections: *]
                         Filter [ctx: Db] [predicate: rating >= 4f]
                             Union [ctx: Db]
                                 TableScan [ctx: Db] [table: product, direction: Forward]

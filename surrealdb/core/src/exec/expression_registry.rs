@@ -37,7 +37,6 @@ use crate::expr::{Expr, Idiom};
 
 /// Identifies when an expression must be computed in the execution pipeline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[allow(dead_code)] // Variants used for future expansion
 pub enum ComputePoint {
 	/// Compute before Filter (expressions used in WHERE)
 	Filter = 0,
@@ -45,11 +44,12 @@ pub enum ComputePoint {
 	Aggregate = 1,
 	/// Compute before Sort (ORDER BY keys, SELECT expressions)
 	Sort = 2,
+	/// Compute before Project (complex SELECT expressions)
+	Project = 3,
 }
 
 /// Information about a registered expression.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Fields used for future expansion
 pub struct ExpressionInfo {
 	/// The internal field name (e.g., "city_population" or "_e0")
 	pub internal_name: String,
@@ -77,7 +77,6 @@ pub struct ExpressionRegistry {
 	reserved_names: Vec<String>,
 }
 
-#[allow(dead_code)] // Methods used for future expansion
 impl ExpressionRegistry {
 	/// Create a new empty registry.
 	pub fn new() -> Self {
@@ -208,6 +207,23 @@ impl ExpressionRegistry {
 	/// Check if there are any expressions registered for a specific compute point.
 	pub fn has_expressions_for_point(&self, point: ComputePoint) -> bool {
 		self.expressions.values().any(|info| info.compute_point == point)
+	}
+
+	/// Get all expressions that need to be computed at or before a specific point.
+	pub fn get_expressions_up_to_point(
+		&self,
+		point: ComputePoint,
+	) -> Vec<(String, Arc<dyn PhysicalExpr>)> {
+		self.expressions
+			.values()
+			.filter(|info| info.compute_point <= point)
+			.map(|info| (info.internal_name.clone(), Arc::clone(&info.expr)))
+			.collect()
+	}
+
+	/// Check if there are any expressions registered at or before a specific point.
+	pub fn has_expressions_up_to_point(&self, point: ComputePoint) -> bool {
+		self.expressions.values().any(|info| info.compute_point <= point)
 	}
 
 	/// Get the total number of registered expressions.

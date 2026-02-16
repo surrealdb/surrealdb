@@ -5,7 +5,7 @@
 value = "'OK'"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: i, direction: Forward, limit: 3, offset: 2]
 ''''
 
@@ -13,7 +13,7 @@ value = ''''Project [ctx: Db]
 value = "[{ b: true, id: i:2 }, { b: true, id: i:3 }, { b: true, id: i:4 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: i, direction: Forward, predicate: b = true, limit: 3, offset: 2]
 ''''
 
