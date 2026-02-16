@@ -22,7 +22,9 @@
 use anyhow::Result;
 
 use super::openai::OpenAiProvider;
-use crate::ai::provider::{EmbeddingProvider, GenerationConfig, GenerationProvider};
+use crate::ai::provider::{
+	ChatMessage, ChatProvider, EmbeddingProvider, GenerationConfig, GenerationProvider,
+};
 
 const DEFAULT_BASE_URL: &str = "https://api.voyageai.com/v1";
 
@@ -73,6 +75,19 @@ impl GenerationProvider for VoyageProvider {
 		config: &GenerationConfig,
 	) -> Result<String> {
 		self.0.generate(model, prompt, config).await
+	}
+}
+
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+impl ChatProvider for VoyageProvider {
+	async fn chat(
+		&self,
+		model: &str,
+		messages: &[ChatMessage],
+		config: &GenerationConfig,
+	) -> Result<String> {
+		self.0.chat(model, messages, config).await
 	}
 }
 

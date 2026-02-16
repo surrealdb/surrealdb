@@ -584,6 +584,51 @@ macro_rules! define_async_function {
 		}
 	};
 
+	// Two required + one optional: (a: T1, b: T2, ?c: T3) -> ReturnType
+	(
+		$struct_name:ident,
+		$func_name:literal,
+		($arg1_name:ident : $arg1_type:ident, $arg2_name:ident : $arg2_type:ident, ? $arg3_name:ident : $arg3_type:ident) -> $ret:ident,
+		$impl_fn:expr
+	) => {
+		#[derive(Debug, Clone, Copy, Default)]
+		pub struct $struct_name;
+
+		impl $crate::exec::function::ScalarFunction for $struct_name {
+			fn name(&self) -> &'static str {
+				$func_name
+			}
+
+			fn signature(&self) -> $crate::exec::function::Signature {
+				$crate::exec::function::Signature::new()
+					.arg(stringify!($arg1_name), $crate::expr::Kind::$arg1_type)
+					.arg(stringify!($arg2_name), $crate::expr::Kind::$arg2_type)
+					.optional(stringify!($arg3_name), $crate::expr::Kind::$arg3_type)
+					.returns($crate::expr::Kind::$ret)
+			}
+
+			fn is_pure(&self) -> bool {
+				false
+			}
+
+			fn is_async(&self) -> bool {
+				true
+			}
+
+			fn invoke(&self, _args: Vec<$crate::val::Value>) -> anyhow::Result<$crate::val::Value> {
+				Err(anyhow::anyhow!("Function '{}' requires async execution", self.name()))
+			}
+
+			fn invoke_async<'a>(
+				&'a self,
+				ctx: &'a $crate::exec::physical_expr::EvalContext<'_>,
+				args: Vec<$crate::val::Value>,
+			) -> $crate::exec::BoxFut<'a, anyhow::Result<$crate::val::Value>> {
+				Box::pin(async move { $impl_fn(ctx, args).await })
+			}
+		}
+	};
+
 	// One required + two optional: (req: Type1, ?opt1: Type2, ?opt2: Type3) -> ReturnType
 	(
 		$struct_name:ident,

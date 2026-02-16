@@ -21,7 +21,9 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::ai::provider::{EmbeddingProvider, GenerationConfig, GenerationProvider};
+use crate::ai::provider::{
+	ChatMessage, ChatProvider, EmbeddingProvider, GenerationConfig, GenerationProvider,
+};
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -165,6 +167,27 @@ struct CandidatePart {
 }
 
 // =========================================================================
+// Chat types
+// =========================================================================
+
+/// Request body for Google generateContent API with chat messages.
+#[derive(Serialize)]
+struct ChatContentRequest<'a> {
+	contents: Vec<ChatContentBody<'a>>,
+	#[serde(skip_serializing_if = "Option::is_none", rename = "systemInstruction")]
+	system_instruction: Option<ContentBody<'a>>,
+	#[serde(skip_serializing_if = "Option::is_none", rename = "generationConfig")]
+	generation_config: Option<GoogleGenerationConfig>,
+}
+
+/// A single content entry in a chat request, including the role.
+#[derive(Serialize)]
+struct ChatContentBody<'a> {
+	role: &'a str,
+	parts: Vec<PartBody<'a>>,
+}
+
+// =========================================================================
 // Trait implementations
 // =========================================================================
 
@@ -239,6 +262,116 @@ impl GenerationProvider for GoogleProvider {
 					text: prompt,
 				}],
 			}],
+			generation_config,
+		};
+
+		let client = reqwest::Client::new();
+		let response = client
+			.post(&url)
+			.header("Content-Type", "application/json")
+			.json(&body)
+			.send()
+			.await
+			.map_err(|e| anyhow::anyhow!("Failed to call Google generateContent API: {e}"))?;
+
+		if !response.status().is_success() {
+			let status = response.status();
+			let body = response.text().await.unwrap_or_default();
+			bail!("Google generateContent API returned {status}: {body}");
+		}
+
+		let result: GenerateContentResponse = response.json().await.map_err(|e| {
+			anyhow::anyhow!("Failed to parse Google generateContent response: {e}")
+		})?;
+
+		let candidate = result
+			.candidates
+			.into_iter()
+			.next()
+			.ok_or_else(|| anyhow::anyhow!("Google generateContent response contained no candidates"))?;
+
+		let text = candidate
+			.content
+			.parts
+			.into_iter()
+			.filter_map(|p| p.text)
+			.collect::<Vec<_>>()
+			.join("");
+
+		if text.is_empty() {
+			bail!("Google generateContent response contained no text");
+		}
+
+		Ok(text)
+	}
+}
+
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+impl ChatProvider for GoogleProvider {
+	async fn chat(
+		&self,
+		model: &str,
+		messages: &[ChatMessage],
+		config: &GenerationConfig,
+	) -> Result<String> {
+		let url = self.generate_url(model);
+
+		let generation_config =
+			if config.temperature.is_some()
+				|| config.max_tokens.is_some()
+				|| config.top_p.is_some()
+				|| config.stop.is_some()
+			{
+				Some(GoogleGenerationConfig {
+					temperature: config.temperature,
+					max_output_tokens: config.max_tokens,
+					top_p: config.top_p,
+					stop_sequences: config.stop.clone(),
+				})
+			} else {
+				None
+			};
+
+		// Extract system messages into system_instruction, translate the rest.
+		// Google uses "user" and "model" roles; OpenAI uses "user" and "assistant".
+		let system_instruction = {
+			let system_parts: Vec<PartBody<'_>> = messages
+				.iter()
+				.filter(|m| m.role == "system")
+				.map(|m| PartBody {
+					text: &m.content,
+				})
+				.collect();
+			if system_parts.is_empty() {
+				None
+			} else {
+				Some(ContentBody {
+					parts: system_parts,
+				})
+			}
+		};
+
+		let contents: Vec<ChatContentBody<'_>> = messages
+			.iter()
+			.filter(|m| m.role != "system")
+			.map(|m| {
+				let role = match m.role.as_str() {
+					"assistant" => "model",
+					other => other,
+				};
+				ChatContentBody {
+					role,
+					parts: vec![PartBody {
+						text: &m.content,
+					}],
+				}
+			})
+			.collect();
+
+		let body = ChatContentRequest {
+			contents,
+			system_instruction,
 			generation_config,
 		};
 
@@ -484,6 +617,50 @@ mod tests {
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
 		assert!(err_msg.contains("403"), "Expected 403 in error: {err_msg}");
+
+		server.verify().await;
+	}
+
+	#[tokio::test]
+	async fn chat_returns_text_from_mock_api() {
+		use wiremock::matchers::{method, path};
+		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		let server = MockServer::start().await;
+
+		let response_body = serde_json::json!({
+			"candidates": [{
+				"content": {
+					"parts": [{"text": "SurrealDB is a multi-model database."}],
+					"role": "model"
+				},
+				"finishReason": "STOP"
+			}]
+		});
+
+		Mock::given(method("POST"))
+			.and(path("/models/gemini-2.0-flash:generateContent"))
+			.respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+			.expect(1)
+			.mount(&server)
+			.await;
+
+		let provider = GoogleProvider::new("test-key".into(), server.uri());
+		let config = GenerationConfig::default();
+		let messages = vec![
+			ChatMessage {
+				role: "system".to_string(),
+				content: "You are a helpful assistant.".to_string(),
+			},
+			ChatMessage {
+				role: "user".to_string(),
+				content: "What is SurrealDB?".to_string(),
+			},
+		];
+		let result = provider.chat("gemini-2.0-flash", &messages, &config).await;
+
+		let text = result.expect("chat should succeed with mock Google server");
+		assert_eq!(text, "SurrealDB is a multi-model database.");
 
 		server.verify().await;
 	}

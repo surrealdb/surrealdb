@@ -17,7 +17,10 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::ai::provider::{EmbeddingProvider, GenerationConfig, GenerationProvider};
+use crate::ai::provider::{
+	ChatMessage as ProviderChatMessage, ChatProvider, EmbeddingProvider, GenerationConfig,
+	GenerationProvider,
+};
 
 const DEFAULT_BASE_URL: &str = "https://api-inference.huggingface.co/pipeline/feature-extraction";
 const DEFAULT_GENERATION_BASE_URL: &str = "https://api-inference.huggingface.co/models";
@@ -64,6 +67,14 @@ impl HuggingFaceProvider {
 			.unwrap_or_else(|_| DEFAULT_GENERATION_BASE_URL.to_owned());
 		let base = base.trim_end_matches('/');
 		format!("{base}/{model}")
+	}
+
+	/// Build the full URL for a model's chat completions endpoint.
+	fn chat_url(&self, model: &str) -> String {
+		let base = std::env::var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL")
+			.unwrap_or_else(|_| DEFAULT_GENERATION_BASE_URL.to_owned());
+		let base = base.trim_end_matches('/');
+		format!("{base}/{model}/v1/chat/completions")
 	}
 }
 
@@ -249,6 +260,116 @@ impl GenerationProvider for HuggingFaceProvider {
 			"Failed to parse HuggingFace text generation API response. \
 			 Expected a JSON array of objects with 'generated_text' field."
 		)
+	}
+}
+
+// =========================================================================
+// Chat types (OpenAI-compatible format used by HuggingFace chat endpoint)
+// =========================================================================
+
+/// A single message in the HuggingFace chat completions format.
+#[derive(Serialize)]
+struct HfChatMessage<'a> {
+	role: &'a str,
+	content: &'a str,
+}
+
+/// Request body for the HuggingFace chat completions API.
+#[derive(Serialize)]
+struct HfChatCompletionRequest<'a> {
+	model: &'a str,
+	messages: Vec<HfChatMessage<'a>>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	temperature: Option<f64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	max_tokens: Option<u64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	top_p: Option<f64>,
+}
+
+/// Top-level response from the HuggingFace chat completions API.
+#[derive(Deserialize)]
+struct HfChatCompletionResponse {
+	choices: Vec<HfChatChoice>,
+}
+
+/// A single choice within the chat completion response.
+#[derive(Deserialize)]
+struct HfChatChoice {
+	message: HfChatChoiceMessage,
+}
+
+/// The message content within a chat completion choice.
+#[derive(Deserialize)]
+struct HfChatChoiceMessage {
+	content: Option<String>,
+}
+
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+impl ChatProvider for HuggingFaceProvider {
+	async fn chat(
+		&self,
+		model: &str,
+		messages: &[ProviderChatMessage],
+		config: &GenerationConfig,
+	) -> Result<String> {
+		let url = self.chat_url(model);
+
+		let body = HfChatCompletionRequest {
+			model,
+			messages: messages
+				.iter()
+				.map(|m| HfChatMessage {
+					role: &m.role,
+					content: &m.content,
+				})
+				.collect(),
+			temperature: config.temperature,
+			max_tokens: config.max_tokens,
+			top_p: config.top_p,
+		};
+
+		let mut request = reqwest::Client::new()
+			.post(&url)
+			.header("Content-Type", "application/json")
+			.json(&body);
+
+		if !self.api_key.is_empty() {
+			request = request.header("Authorization", format!("Bearer {}", self.api_key));
+		}
+
+		let response = request
+			.send()
+			.await
+			.map_err(|e| {
+				anyhow::anyhow!("Failed to call HuggingFace chat completions API: {e}")
+			})?;
+
+		if !response.status().is_success() {
+			let status = response.status();
+			let body = response.text().await.unwrap_or_default();
+			bail!("HuggingFace chat completions API returned {status}: {body}");
+		}
+
+		let result: HfChatCompletionResponse = response.json().await.map_err(|e| {
+			anyhow::anyhow!("Failed to parse HuggingFace chat completions response: {e}")
+		})?;
+
+		let choice = result
+			.choices
+			.into_iter()
+			.next()
+			.ok_or_else(|| {
+				anyhow::anyhow!("HuggingFace chat completions response contained no choices")
+			})?;
+
+		choice
+			.message
+			.content
+			.ok_or_else(|| {
+				anyhow::anyhow!("HuggingFace chat completions response contained no content")
+			})
 	}
 }
 
@@ -501,6 +622,53 @@ mod tests {
 			err_msg.contains("no results"),
 			"Expected 'no results' in error: {err_msg}"
 		);
+
+		server.verify().await;
+	}
+
+	#[tokio::test]
+	async fn chat_returns_text_from_mock_api() {
+		use wiremock::matchers::{method, path};
+		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		let server = MockServer::start().await;
+
+		let response_body = serde_json::json!({
+			"id": "chatcmpl-abc123",
+			"object": "chat.completion",
+			"choices": [{
+				"index": 0,
+				"message": {
+					"role": "assistant",
+					"content": "SurrealDB is a multi-model database."
+				},
+				"finish_reason": "stop"
+			}]
+		});
+
+		Mock::given(method("POST"))
+			.and(path("/mistralai/Mistral-7B/v1/chat/completions"))
+			.respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+			.expect(1)
+			.mount(&server)
+			.await;
+
+		std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", &server.uri());
+
+		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
+		let config = GenerationConfig::default();
+		let messages = vec![
+			ProviderChatMessage {
+				role: "user".to_string(),
+				content: "What is SurrealDB?".to_string(),
+			},
+		];
+		let result = provider.chat("mistralai/Mistral-7B", &messages, &config).await;
+
+		std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL");
+
+		let text = result.expect("chat should succeed with mock server");
+		assert_eq!(text, "SurrealDB is a multi-model database.");
 
 		server.verify().await;
 	}

@@ -11,7 +11,10 @@
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
-use crate::ai::provider::{EmbeddingProvider, GenerationConfig, GenerationProvider};
+use crate::ai::provider::{
+	ChatMessage as ProviderChatMessage, ChatProvider, EmbeddingProvider, GenerationConfig,
+	GenerationProvider,
+};
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 
@@ -182,6 +185,68 @@ impl GenerationProvider for OpenAiProvider {
 				role: "user",
 				content: prompt,
 			}],
+			temperature: config.temperature,
+			max_tokens: config.max_tokens,
+			top_p: config.top_p,
+			stop: config.stop.clone(),
+		};
+
+		let client = reqwest::Client::new();
+		let response = client
+			.post(&url)
+			.header("Authorization", format!("Bearer {}", self.api_key))
+			.header("Content-Type", "application/json")
+			.json(&body)
+			.send()
+			.await
+			.map_err(|e| anyhow::anyhow!("Failed to call OpenAI chat completions API: {e}"))?;
+
+		if !response.status().is_success() {
+			let status = response.status();
+			let body = response.text().await.unwrap_or_default();
+			bail!("OpenAI chat completions API returned {status}: {body}");
+		}
+
+		let result: ChatCompletionResponse = response
+			.json()
+			.await
+			.map_err(|e| {
+				anyhow::anyhow!("Failed to parse OpenAI chat completions response: {e}")
+			})?;
+
+		let choice = result
+			.choices
+			.into_iter()
+			.next()
+			.ok_or_else(|| anyhow::anyhow!("OpenAI chat completions response contained no choices"))?;
+
+		choice
+			.message
+			.content
+			.ok_or_else(|| anyhow::anyhow!("OpenAI chat completions response contained no content"))
+	}
+}
+
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+impl ChatProvider for OpenAiProvider {
+	async fn chat(
+		&self,
+		model: &str,
+		messages: &[ProviderChatMessage],
+		config: &GenerationConfig,
+	) -> Result<String> {
+		let url = self.chat_completions_url();
+
+		let body = ChatCompletionRequest {
+			model,
+			messages: messages
+				.iter()
+				.map(|m| ChatMessage {
+					role: &m.role,
+					content: &m.content,
+				})
+				.collect(),
 			temperature: config.temperature,
 			max_tokens: config.max_tokens,
 			top_p: config.top_p,
@@ -519,6 +584,60 @@ mod tests {
 			err_msg.contains("no choices"),
 			"Expected 'no choices' in error: {err_msg}"
 		);
+
+		server.verify().await;
+	}
+
+	#[tokio::test]
+	async fn chat_returns_text_from_mock_api() {
+		use wiremock::matchers::{header, method, path};
+		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		let server = MockServer::start().await;
+
+		let response_body = serde_json::json!({
+			"id": "chatcmpl-abc123",
+			"object": "chat.completion",
+			"choices": [{
+				"index": 0,
+				"message": {
+					"role": "assistant",
+					"content": "SurrealDB is a multi-model database."
+				},
+				"finish_reason": "stop"
+			}],
+			"usage": {
+				"prompt_tokens": 20,
+				"completion_tokens": 7,
+				"total_tokens": 27
+			}
+		});
+
+		Mock::given(method("POST"))
+			.and(path("/chat/completions"))
+			.and(header("Authorization", "Bearer test-key"))
+			.and(header("Content-Type", "application/json"))
+			.respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+			.expect(1)
+			.mount(&server)
+			.await;
+
+		let provider = OpenAiProvider::new("test-key".into(), server.uri());
+		let config = GenerationConfig::default();
+		let messages = vec![
+			ProviderChatMessage {
+				role: "system".to_string(),
+				content: "You are a helpful assistant.".to_string(),
+			},
+			ProviderChatMessage {
+				role: "user".to_string(),
+				content: "What is SurrealDB?".to_string(),
+			},
+		];
+		let result = provider.chat("gpt-4-turbo", &messages, &config).await;
+
+		let text = result.expect("chat should succeed with mock server");
+		assert_eq!(text, "SurrealDB is a multi-model database.");
 
 		server.verify().await;
 	}

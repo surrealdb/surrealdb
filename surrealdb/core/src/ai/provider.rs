@@ -55,3 +55,36 @@ pub trait GenerationProvider: Send + Sync {
 		config: &GenerationConfig,
 	) -> Result<String>;
 }
+
+/// A single message in a chat conversation.
+#[derive(Debug, Clone)]
+pub struct ChatMessage {
+	/// The role of the message sender (e.g. `"system"`, `"user"`, `"assistant"`).
+	pub role: String,
+	/// The text content of the message.
+	pub content: String,
+}
+
+/// A provider that can conduct multi-turn chat conversations using an LLM.
+///
+/// Implementations must be thread-safe (`Send + Sync`) since they may be
+/// shared across concurrent SurrealQL queries.
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+pub trait ChatProvider: Send + Sync {
+	/// Generate a response from a list of chat messages using the specified model.
+	///
+	/// # Arguments
+	/// * `model` — The model name (without the provider prefix).
+	/// * `messages` — The conversation history as a slice of [`ChatMessage`].
+	/// * `config` — Optional generation parameters.
+	///
+	/// # Returns
+	/// The assistant's response text as a `String`.
+	async fn chat(
+		&self,
+		model: &str,
+		messages: &[ChatMessage],
+		config: &GenerationConfig,
+	) -> Result<String>;
+}
