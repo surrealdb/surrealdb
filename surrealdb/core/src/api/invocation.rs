@@ -18,7 +18,6 @@ use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResultExt as _};
 use crate::fnc::args::{Any, FromArgs, FromPublic};
 use crate::iam::{Action, AuthLimit};
-use crate::rpc::types_error_from_anyhow;
 use crate::syn::function_with_capabilities;
 use crate::val::{Closure, Value};
 
@@ -86,10 +85,7 @@ pub async fn process_api_request_with_stack(
 				method = ?req.method,
 				"No matching handler or fallback for API request"
 			);
-			let res = ApiResponse::from_error(
-				ApiError::NotFound.into_types_error(),
-				req.request_id.clone(),
-			);
+			let res = ApiResponse::from_error(ApiError::NotFound.into(), req.request_id.clone());
 			return Ok(res);
 		}
 	};
@@ -116,7 +112,7 @@ pub async fn process_api_request_with_stack(
 						"API request denied by PERMISSIONS NONE"
 					);
 					let res = ApiResponse::from_error(
-						ApiError::PermissionDenied.into_types_error(),
+						ApiError::PermissionDenied.into(),
 						req.request_id.clone(),
 					);
 					return Ok(res);
@@ -137,7 +133,7 @@ pub async fn process_api_request_with_stack(
 							"API request denied by PERMISSIONS WHERE clause"
 						);
 						let res = ApiResponse::from_error(
-							ApiError::PermissionDenied.into_types_error(),
+							ApiError::PermissionDenied.into(),
 							req.request_id.clone(),
 						);
 						return Ok(res);
@@ -236,9 +232,7 @@ fn create_final_action_closure(request_id: String, action_expr: Expr) -> Closure
 				let mut res = match res {
 					Ok(res) => ApiResponse::try_from(res)
 						.unwrap_or_else(|e| ApiResponse::from_error(e, request_id.clone())),
-					Err(e) => {
-						ApiResponse::from_error(types_error_from_anyhow(e), request_id.clone())
-					}
+					Err(e) => ApiResponse::from_error(e, request_id.clone()),
 				};
 				res.request_id.clone_from(&request_id);
 				res.ensure_request_id_header();
@@ -360,19 +354,16 @@ fn create_middleware_closure(
 							};
 							res.ensure_request_id_header();
 							res
+						} else if is_initial {
+							error!(
+								request_id = %request_id,
+								middleware = %middleware_name,
+								error = %e,
+								"API middleware error; converting to response (ApiError exposed, internal errors masked)"
+							);
+							ApiResponse::from_error_secure(e, request_id.clone())
 						} else {
-							let types_err = types_error_from_anyhow(e);
-							if is_initial {
-								error!(
-									request_id = %request_id,
-									middleware = %middleware_name,
-									error = %types_err,
-									"API middleware error; converting to response (ApiError exposed, internal errors masked)"
-								);
-								ApiResponse::from_error_secure(types_err, request_id.clone())
-							} else {
-								ApiResponse::from_error(types_err, request_id.clone())
-							}
+							ApiResponse::from_error(e, request_id.clone())
 						}
 					}
 				};

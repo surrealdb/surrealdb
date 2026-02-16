@@ -2158,7 +2158,7 @@ impl Datastore {
 				);
 				tx.cancel().await?;
 				return Ok(ApiResponse::from_error(
-					ApiError::NotFound.into_types_error(),
+					ApiError::NotFound.into(),
 					req.request_id.clone(),
 				));
 			}
