@@ -673,6 +673,8 @@ async fn apply_projections(
 				other => return Ok(other),
 			}
 		}
+		// Geometry values expose GeoJSON fields (type, coordinates, etc.)
+		Value::Geometry(geo) if has_all || has_includes => geo.as_object(),
 		_ => return Ok(value.clone()),
 	};
 

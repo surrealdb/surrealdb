@@ -151,11 +151,15 @@ async fn compute_batch(
 	fields: &[(String, Arc<dyn PhysicalExpr>)],
 	eval_ctx: EvalContext<'_>,
 ) -> Result<ValueBatch, ControlFlow> {
-	// Initialize output objects from input values
+	// Initialize output objects from input values.
+	// Geometry values are converted to their GeoJSON object representation
+	// so that downstream operators (SelectProject) can access fields like
+	// `type` and `coordinates` directly.
 	let mut objects: Vec<Object> = values
 		.iter()
 		.map(|v| match v {
 			Value::Object(o) => o.clone(),
+			Value::Geometry(geo) => geo.as_object(),
 			_ => Object::default(),
 		})
 		.collect();

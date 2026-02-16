@@ -35,6 +35,17 @@ use crate::val::{Datetime, Value};
 /// Parameters passed to queries (e.g., `$param` values).
 pub(crate) type Parameters = HashMap<Cow<'static, str>, Arc<Value>>;
 
+/// Shared cache of [`FieldState`](crate::exec::operators::scan::pipeline::FieldState)
+/// keyed by `(table_name, check_perms)`.
+pub(crate) type FieldStateCache = Arc<
+	parking_lot::RwLock<
+		HashMap<
+			(crate::val::TableName, bool),
+			Arc<crate::exec::operators::scan::pipeline::FieldState>,
+		>,
+	>,
+>;
+
 /// The minimum context level required by an execution plan.
 ///
 /// Used for pre-flight validation: the executor checks that the current session
@@ -195,14 +206,7 @@ pub struct DatabaseContext {
 	/// the first scan operator populates the cache, and all subsequent operators
 	/// only read. `parking_lot` does not poison on panic, so we never silently
 	/// bypass the cache.
-	pub(crate) field_state_cache: Arc<
-		parking_lot::RwLock<
-			HashMap<
-				(crate::val::TableName, bool),
-				Arc<crate::exec::operators::scan::pipeline::FieldState>,
-			>,
-		>,
-	>,
+	pub(crate) field_state_cache: FieldStateCache,
 	/// Cache of table definitions keyed by table name.
 	/// Avoids repeated `get_tb_by_name` KV lookups across scan operators
 	/// within the same query execution.

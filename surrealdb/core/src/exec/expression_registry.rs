@@ -187,15 +187,21 @@ impl ExpressionRegistry {
 	}
 
 	/// Get all expressions that need to be computed at a specific point.
+	///
+	/// Returns expressions sorted by internal name for deterministic
+	/// iteration order (HashMap iteration is non-deterministic).
 	pub fn get_expressions_for_point(
 		&self,
 		point: ComputePoint,
 	) -> Vec<(String, Arc<dyn PhysicalExpr>)> {
-		self.expressions
+		let mut exprs: Vec<_> = self
+			.expressions
 			.values()
 			.filter(|info| info.compute_point == point)
 			.map(|info| (info.internal_name.clone(), Arc::clone(&info.expr)))
-			.collect()
+			.collect();
+		exprs.sort_by(|(a, _), (b, _)| a.cmp(b));
+		exprs
 	}
 
 	/// Check if an expression is already registered and return its internal name.

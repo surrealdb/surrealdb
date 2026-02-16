@@ -1129,13 +1129,11 @@ impl<'ctx> Planner<'ctx> {
 			};
 			let mut scan = RecordIdScan::new(rid_expr, version, None, None);
 			// Resolve table context at plan time
-			if let Some(ref tb) = table_name_for_resolve {
-				if let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db) {
-					if let Some(tc) = Self::try_resolve_table_ctx(txn, self.ctx, ns, db, tb).await {
+			if let Some(ref tb) = table_name_for_resolve
+				&& let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db)
+					&& let Some(tc) = Self::try_resolve_table_ctx(txn, self.ctx, ns, db, tb).await {
 						scan = scan.with_resolved(tc);
 					}
-				}
-			}
 			let scan: Arc<dyn ExecOperator> = Arc::new(scan);
 			let limited = if limit.is_some() || start.is_some() {
 				let limit_expr = match limit {
@@ -1540,13 +1538,12 @@ impl<'ctx> Planner<'ctx> {
 			// Resolve table context at plan time for the point lookup
 			let mut scan =
 				RecordIdScan::new(record_id_expr, version, needed_fields, scan_predicate);
-			if let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db) {
-				if let Some(tc) =
+			if let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db)
+				&& let Some(tc) =
 					Self::try_resolve_table_ctx(txn, self.ctx, ns, db, table_name).await
 				{
 					scan = scan.with_resolved(tc);
 				}
-			}
 			return Ok(PlannedSource {
 				operator: Arc::new(scan) as Arc<dyn ExecOperator>,
 				filter_action,

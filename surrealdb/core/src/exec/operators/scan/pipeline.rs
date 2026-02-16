@@ -31,6 +31,10 @@ use crate::key::record;
 use crate::kvs::{KVKey, KVValue, Transaction};
 use crate::val::{RecordIdKey, TableName, Value};
 
+/// A raw computed field entry before topological sorting:
+/// `(field_name, physical_expr, optional_kind, dependency_field_names)`.
+type RawComputedField = (String, Arc<dyn PhysicalExpr>, Option<crate::expr::Kind>, Vec<String>);
+
 // =============================================================================
 // ScanPipeline
 // =============================================================================
@@ -488,12 +492,7 @@ pub(crate) async fn build_field_state_raw(
 	}
 
 	// Collect ALL computed fields and their dependency metadata.
-	let mut raw_computed: Vec<(
-		String,
-		Arc<dyn PhysicalExpr>,
-		Option<crate::expr::Kind>,
-		Vec<String>,
-	)> = Vec::new();
+	let mut raw_computed: Vec<RawComputedField> = Vec::new();
 	let mut dep_map: HashMap<String, crate::expr::computed_deps::ComputedDeps> = HashMap::new();
 
 	for fd in field_defs.iter() {
