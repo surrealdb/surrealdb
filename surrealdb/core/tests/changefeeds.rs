@@ -599,7 +599,7 @@ async fn test_changefeed_gc_cycle_kept() -> Result<()> {
 		SHOW CHANGES FOR TABLE t SINCE 0;
 	"#;
 	let mut res = db.execute(src, &ses, None).await?;
-	let res1 = dbg!(res.remove(0).result.unwrap());
+	let res1 = res.remove(0).result.unwrap();
 	assert_eq!(
 		res1.get(0).get("changes"),
 		syn::value(

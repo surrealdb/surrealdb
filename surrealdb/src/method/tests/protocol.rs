@@ -20,7 +20,7 @@ impl into_endpoint::Sealed<Test> for () {
 	type Client = Client;
 
 	fn into_endpoint(self) -> Result<Endpoint> {
-		Ok(Endpoint::new(Url::parse("test://")?))
+		Ok(Endpoint::new(Url::parse("test://").map_err(crate::std_error_to_types_error)?))
 	}
 }
 

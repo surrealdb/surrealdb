@@ -2,14 +2,12 @@ use std::collections::HashSet;
 
 use async_channel::{Receiver, Sender};
 use surrealdb_core::dbs::QueryResult;
-use surrealdb_core::rpc::DbResultError;
 use uuid::Uuid;
 
-use crate::err::Error;
 use crate::method::BoxFuture;
 use crate::opt::Endpoint;
 use crate::types::{SurrealValue, Value};
-use crate::{ExtraFeatures, Result, Surreal};
+use crate::{Error, ExtraFeatures, Result, Surreal};
 
 pub(crate) mod cmd;
 pub(crate) use cmd::Command;
@@ -29,7 +27,7 @@ pub(crate) struct Route {
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) request: RequestData,
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
-	pub(crate) response: Sender<std::result::Result<Vec<QueryResult>, DbResultError>>,
+	pub(crate) response: Sender<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>,
 }
 
 /// Message router
@@ -47,7 +45,10 @@ impl Router {
 		&self,
 		session_id: Uuid,
 		command: Command,
-	) -> BoxFuture<'_, Result<Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>>> {
+	) -> BoxFuture<
+		'_,
+		Result<Receiver<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>>,
+	> {
 		Box::pin(async move {
 			let (sender, receiver) = async_channel::bounded(1);
 			let route = Route {
@@ -60,7 +61,7 @@ impl Router {
 			self.sender
 				.send(route)
 				.await
-				.map_err(|e| Error::InternalError(format!("Failed to send command: {}", e)))?;
+				.map_err(|e| crate::Error::internal(format!("Failed to send command: {e}")))?;
 			Ok(receiver)
 		})
 	}
@@ -68,20 +69,24 @@ impl Router {
 	/// Receive responses for all methods except `query`
 	pub(crate) fn recv_value(
 		&self,
-		receiver: Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>,
+		receiver: Receiver<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>,
 	) -> BoxFuture<'_, std::result::Result<Value, Error>> {
 		Box::pin(async move {
-			let response = receiver.recv().await.map_err(|_| Error::ConnectionUninitialised)?;
-			// The response already uses DbResultError, so we just convert directly
-			let mut results = response.map_err(Error::from)?;
+			let response = receiver.recv().await.map_err(|_| {
+				crate::Error::connection(
+					"Connection uninitialised".to_string(),
+					Some(crate::types::ConnectionError::Uninitialised),
+				)
+			})?;
+			let mut results = response?;
 
 			match results.len() {
 				0 => Ok(Value::None),
 				1 => {
 					let result = results.remove(0);
-					result.result.map_err(Error::from)
+					result.result
 				}
-				_ => Err(Error::InternalError(
+				_ => Err(crate::Error::internal(
 					"expected the database to return one or no results".to_string(),
 				)),
 			}
@@ -91,11 +96,15 @@ impl Router {
 	/// Receive the response of the `query` method
 	pub(crate) fn recv_results(
 		&self,
-		receiver: Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>,
+		receiver: Receiver<std::result::Result<Vec<QueryResult>, surrealdb_types::Error>>,
 	) -> BoxFuture<'_, Result<Vec<QueryResult>>> {
 		Box::pin(async move {
-			let results = receiver.recv().await.map_err(|_| Error::ConnectionUninitialised)?;
-			results.map_err(Error::from)
+			receiver.recv().await.map_err(|_| {
+				crate::Error::connection(
+					"Connection uninitialised".to_string(),
+					Some(crate::types::ConnectionError::Uninitialised),
+				)
+			})?
 		})
 	}
 
@@ -115,7 +124,7 @@ impl Router {
 				}
 				v => R::from_value(v),
 			};
-			Ok(result?)
+			result.map_err(|e| crate::Error::internal(e.to_string()))
 		})
 	}
 
@@ -137,13 +146,21 @@ impl Router {
 					0 => Ok(None),
 					// Single-element array: extract and return the element
 					// This happens when operating on a record ID
-					1 => Ok(Some(R::from_value(
-						array.into_iter().next().expect("array has exactly one element"),
-					)?)),
+					1 => Ok(Some(
+						R::from_value(
+							array.into_iter().next().expect("array has exactly one element"),
+						)
+						.map_err(|e| crate::Error::internal(e.to_string()))?,
+					)),
 					// Multiple elements should not happen for operations expecting Option<T>
-					_ => Ok(Some(R::from_value(Value::Array(array))?)),
+					_ => Ok(Some(
+						R::from_value(Value::Array(array))
+							.map_err(|e| crate::Error::internal(e.to_string()))?,
+					)),
 				},
-				value => Ok(Some(R::from_value(value)?)),
+				value => Ok(Some(
+					R::from_value(value).map_err(|e| crate::Error::internal(e.to_string()))?,
+				)),
 			}
 		})
 	}
@@ -163,9 +180,11 @@ impl Router {
 				Value::None | Value::Null => Ok(Vec::new()),
 				Value::Array(array) => array
 					.into_iter()
-					.map(|v| R::from_value(v).map_err(Into::into))
+					.map(|v| R::from_value(v).map_err(|e| crate::Error::internal(e.to_string())))
 					.collect::<Result<Vec<R>>>(),
-				value => Ok(vec![R::from_value(value)?]),
+				value => Ok(vec![
+					R::from_value(value).map_err(|e| crate::Error::internal(e.to_string()))?,
+				]),
 			}
 		})
 	}
@@ -181,10 +200,9 @@ impl Router {
 			match self.recv_value(rx).await? {
 				Value::None | Value::Null => Ok(()),
 				Value::Array(array) if array.is_empty() => Ok(()),
-				value => Err(Error::FromValue {
-					value,
-					error: "expected the database to return nothing".to_owned(),
-				}),
+				_value => Err(crate::Error::internal(
+					"expected the database to return nothing".to_string(),
+				)),
 			}
 		})
 	}

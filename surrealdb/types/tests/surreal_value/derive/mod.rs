@@ -342,3 +342,64 @@ fn test_test_default(#[case] value: Value, #[case] expected: TestDefault) {
 	let parsed = TestDefault::from_value(value).unwrap();
 	assert_eq!(parsed, expected);
 }
+
+////////////////////////////////////////////////////
+//////// Per-field #[surreal(default)] //////////////
+////////////////////////////////////////////////////
+
+/// Used by #[surreal(default = "default_code_for_test")] in tests.
+fn default_code_for_test() -> i64 {
+	-32000
+}
+
+#[derive(Clone, Debug, SurrealValue, PartialEq)]
+struct StructWithFieldDefaults {
+	#[surreal(default = "default_code_for_test")]
+	code: i64,
+	#[surreal(default)]
+	optional: Option<String>,
+	message: String,
+}
+
+#[test]
+fn test_per_field_default_missing_optional_fields() {
+	// Only message present: code and optional get their defaults
+	let value = Value::Object(object! { message: "Something went wrong".to_string() });
+	let parsed = StructWithFieldDefaults::from_value(value).unwrap();
+	assert_eq!(parsed.code, -32000, "code should use default_code_for_test()");
+	assert_eq!(parsed.optional, None, "optional should use Default::default()");
+	assert_eq!(parsed.message, "Something went wrong");
+}
+
+#[test]
+fn test_per_field_default_all_fields_present() {
+	let value = Value::Object(object! {
+		code: 123,
+		optional: Some("detail".to_string()),
+		message: "Bad input".to_string(),
+	});
+	let parsed = StructWithFieldDefaults::from_value(value).unwrap();
+	assert_eq!(parsed.code, 123);
+	assert_eq!(parsed.optional, Some("detail".to_string()));
+	assert_eq!(parsed.message, "Bad input");
+}
+
+#[test]
+fn test_per_field_default_required_field_missing_fails() {
+	// Missing required field "message" should fail
+	let value = Value::Object(object! { code: 1 });
+	let result = StructWithFieldDefaults::from_value(value);
+	assert!(result.is_err());
+}
+
+#[test]
+fn test_per_field_default_roundtrip() {
+	let s = StructWithFieldDefaults {
+		code: -32000,
+		optional: None,
+		message: "hello".to_string(),
+	};
+	let value = s.clone().into_value();
+	let parsed = StructWithFieldDefaults::from_value(value).unwrap();
+	assert_eq!(parsed, s);
+}

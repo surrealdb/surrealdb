@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Result, anyhow, bail};
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
-use surrealdb_types::ToSql;
+use surrealdb_types::{Error as TypesError, QueryError, ToSql};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tracing::instrument;
@@ -28,7 +28,7 @@ use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
-use crate::rpc::DbResultError;
+use crate::rpc::types_error_from_anyhow;
 use crate::types::PublicNotification;
 use crate::val::{Array, Value, convert_value_to_public_value};
 use crate::{err, expr, sql};
@@ -646,9 +646,10 @@ impl Executor {
 
 				self.results.push(QueryResult {
 					time: Duration::ZERO,
-					result: Err(DbResultError::QueryNotExecuted(
+					result: Err(TypesError::query(
 						"Tried to start a transaction while another transaction was open"
 							.to_string(),
+						Some(QueryError::NotExecuted),
 					)),
 					query_type: QueryType::Other,
 				});
@@ -688,7 +689,10 @@ impl Executor {
 
 				for res in &mut self.results[start_results..] {
 					res.query_type = QueryType::Other;
-					res.result = Err(DbResultError::QueryCancelled);
+					res.result = Err(TypesError::query(
+						"The query was not executed due to a cancelled transaction".to_string(),
+						Some(QueryError::Cancelled),
+					));
 				}
 
 				while let Some(stmt) = stream.next().await {
@@ -701,10 +705,17 @@ impl Executor {
 					self.results.push(QueryResult {
 						time: Duration::ZERO,
 						result: Err(match done {
-							Reason::Timedout(d) => {
-								DbResultError::QueryTimedout(format!("Timed out: {d}"))
-							}
-							Reason::Canceled => DbResultError::QueryCancelled,
+							Reason::Timedout(d) => TypesError::query(
+								format!("Timed out: {d}"),
+								Some(QueryError::TimedOut {
+									duration: d.0,
+								}),
+							),
+							Reason::Canceled => TypesError::query(
+								"The query was not executed due to a cancelled transaction"
+									.to_string(),
+								Some(QueryError::Cancelled),
+							),
 						}),
 						query_type: QueryType::Other,
 					});
@@ -734,15 +745,18 @@ impl Executor {
 
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(DbResultError::QueryNotExecuted(format!(
-							"The query was not executed due to a failed transaction: {}",
-							stmt.to_sql()
-						)));
+						res.result = Err(TypesError::query(
+							format!(
+								"The query was not executed due to a failed transaction: {}",
+								stmt.to_sql()
+							),
+							Some(QueryError::NotExecuted),
+						));
 					}
 
 					self.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Err(DbResultError::InternalError(
+						result: Err(TypesError::internal(
 							"Tried to start a transaction while another transaction was open"
 								.to_string(),
 						)),
@@ -760,10 +774,13 @@ impl Executor {
 
 						self.results.push(QueryResult {
 							time: Duration::ZERO,
-							result: Err(DbResultError::QueryNotExecuted(format!(
-								"The query was not executed due to a failed transaction: {}",
-								stmt.to_sql()
-							))),
+							result: Err(TypesError::query(
+								format!(
+									"The query was not executed due to a failed transaction: {}",
+									stmt.to_sql()
+								),
+								Some(QueryError::NotExecuted),
+							)),
 							query_type: QueryType::Other,
 						});
 					}
@@ -777,7 +794,10 @@ impl Executor {
 					// update the results indicating cancelation.
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(DbResultError::QueryCancelled);
+						res.result = Err(TypesError::query(
+							"The query was not executed due to a cancelled transaction".to_string(),
+							Some(QueryError::Cancelled),
+						));
 					}
 
 					self.opt.broker = None;
@@ -826,8 +846,7 @@ impl Executor {
 					// failed to commit
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result =
-							Err(DbResultError::InternalError(format!("Query not executed: {}", e)));
+						res.result = Err(TypesError::internal(format!("Query not executed: {e}")));
 					}
 
 					self.opt.broker = None;
@@ -844,7 +863,7 @@ impl Executor {
 						});
 						continue;
 					}
-					Err(e) => Err(DbResultError::InternalError(e.to_string())),
+					Err(e) => Err(TypesError::internal(e.to_string())),
 				},
 				stmt => {
 					// reintroduce planner later.
@@ -863,9 +882,10 @@ impl Executor {
 							Err(ControlFlow::Err(e)) => {
 								for res in &mut self.results[start_results..] {
 									res.query_type = QueryType::Other;
-									res.result = Err(DbResultError::QueryNotExecuted(
+									res.result = Err(TypesError::query(
 										"The query was not executed due to a failed transaction"
 											.to_string(),
+										Some(QueryError::NotExecuted),
 									));
 								}
 
@@ -873,7 +893,7 @@ impl Executor {
 								// we hit a cancel or commit.
 								self.results.push(QueryResult {
 									time: before.elapsed(),
-									result: Err(DbResultError::InternalError(e.to_string())),
+									result: Err(types_error_from_anyhow(e)),
 									query_type,
 								});
 
@@ -890,8 +910,9 @@ impl Executor {
 
 									self.results.push(QueryResult {
 										time: Duration::ZERO,
-										result: Err(DbResultError::QueryNotExecuted(
-												"The query was not executed due to a cancelled transaction".to_string(),
+										result: Err(TypesError::query(
+											"The query was not executed due to a cancelled transaction".to_string(),
+											Some(QueryError::Cancelled),
 										)),
 										query_type: QueryType::Other,
 									});
@@ -905,7 +926,7 @@ impl Executor {
 
 					match r {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
-						Err(err) => Err(DbResultError::InternalError(err.to_string())),
+						Err(err) => Err(TypesError::internal(err.to_string())),
 					}
 				}
 			};
@@ -923,7 +944,7 @@ impl Executor {
 
 		for res in &mut self.results[start_results..] {
 			res.query_type = QueryType::Other;
-			res.result = Err(DbResultError::InternalError("Missing COMMIT statement".to_string()));
+			res.result = Err(TypesError::internal("Missing COMMIT statement".to_string()));
 		}
 
 		self.opt.broker = None;
@@ -964,17 +985,17 @@ impl Executor {
 				Ok(value) | Err(ControlFlow::Return(value)) => QueryResult {
 					time,
 					result: crate::val::convert_value_to_public_value(value)
-						.map_err(|e| crate::rpc::DbResultError::InternalError(e.to_string())),
+						.map_err(|e| TypesError::internal(e.to_string())),
 					query_type: QueryType::Other,
 				},
 				Err(ControlFlow::Err(e)) => QueryResult {
 					time,
-					result: Err(DbResultError::InternalError(e.to_string())),
+					result: Err(types_error_from_anyhow(e)),
 					query_type: QueryType::Other,
 				},
 				Err(ControlFlow::Continue) | Err(ControlFlow::Break) => QueryResult {
 					time,
-					result: Err(DbResultError::InternalError("Invalid control flow".to_string())),
+					result: Err(TypesError::internal("Invalid control flow".to_string())),
 					query_type: QueryType::Other,
 				},
 			};
@@ -1025,7 +1046,7 @@ impl Executor {
 				Err(e) => {
 					this.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Err(DbResultError::InternalError(e.to_string())),
+						result: Err(TypesError::internal(e.to_string())),
 						query_type: QueryType::Other,
 					});
 
@@ -1054,7 +1075,7 @@ impl Executor {
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
 						this.results.push(QueryResult {
 							time: Duration::ZERO,
-							result: Err(DbResultError::InternalError(e.to_string())),
+							result: Err(TypesError::internal(e.to_string())),
 							query_type: QueryType::Other,
 						});
 
@@ -1068,7 +1089,7 @@ impl Executor {
 					let result = this.execute_bare_statement(kvs, &now, stmt).await;
 					let result = match result {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
-						Err(err) => Err(DbResultError::InternalError(err.to_string())),
+						Err(err) => Err(types_error_from_anyhow(err)),
 					};
 					if !skip_success_results || result.is_err() {
 						this.results.push(QueryResult {

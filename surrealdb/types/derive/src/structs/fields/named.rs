@@ -3,12 +3,14 @@ use quote::quote;
 use syn::{Ident, Type};
 
 use crate::CratePath;
+use crate::attr::FieldDefault;
 
 #[derive(Debug)]
 pub struct NamedField {
 	pub ident: Ident,
 	pub ty: Type,
 	pub rename: Option<String>,
+	pub default: Option<FieldDefault>,
 }
 
 #[derive(Debug)]
@@ -34,8 +36,6 @@ impl NamedFields {
 	}
 
 	pub fn map_retrievals(&self, name: &String, crate_path: &CratePath) -> Vec<TokenStream2> {
-		let anyhow_macro = crate_path.anyhow_macro();
-
 		if self.default {
 			// When default is set, create a default instance and overlay present fields
 			let field_assignments: Vec<TokenStream2> = self
@@ -46,16 +46,14 @@ impl NamedFields {
 					let field_name_str = field.ident.to_string();
 					let obj_key = field.rename.as_ref().unwrap_or(&field_name_str);
 					let ty = &field.ty;
+					let error_internal = crate_path.error_internal(quote! {
+						format!("Failed to deserialize field '{}' on type '{}': {}", #field_name_str, #name, e)
+					});
 
 					quote! {
 						if let Some(field_value) = map.remove(#obj_key) {
 							result.#field_name = <#ty as SurrealValue>::from_value(field_value)
-								.map_err(|e| {
-									#anyhow_macro!(
-										"Failed to deserialize field '{}' on type '{}': {}",
-										#field_name_str, #name, e
-									)
-								})?;
+								.map_err(|e| #error_internal)?;
 						}
 					}
 				})
@@ -73,16 +71,32 @@ impl NamedFields {
 					let field_name_str = field.ident.to_string();
 					let obj_key = field.rename.as_ref().unwrap_or(&field_name_str);
 					let ty = &field.ty;
+					let error_internal = crate_path.error_internal(quote! {
+						format!("Failed to deserialize field '{}' on type '{}': {}", #field_name_str, #name, e)
+					});
 
-					quote! {
-						let field_value = map.remove(#obj_key).unwrap_or_default();
-						let #field_name = <#ty as SurrealValue>::from_value(field_value)
-							.map_err(|e| {
-								#anyhow_macro!(
-									"Failed to deserialize field '{}' on type '{}': {}",
-									#field_name_str, #name, e
-								)
-							})?;
+					match &field.default {
+						Some(FieldDefault::UseDefault) => quote! {
+							let #field_name = if let Some(field_value) = map.remove(#obj_key) {
+								<#ty as SurrealValue>::from_value(field_value)
+									.map_err(|e| #error_internal)?
+							} else {
+								<#ty>::default()
+							};
+						},
+						Some(FieldDefault::Path(path)) => quote! {
+							let #field_name = if let Some(field_value) = map.remove(#obj_key) {
+								<#ty as SurrealValue>::from_value(field_value)
+									.map_err(|e| #error_internal)?
+							} else {
+								#path()
+							};
+						},
+						None => quote! {
+							let field_value = map.remove(#obj_key).unwrap_or_default();
+							let #field_name = <#ty as SurrealValue>::from_value(field_value)
+								.map_err(|e| #error_internal)?;
+						},
 					}
 				})
 				.collect()

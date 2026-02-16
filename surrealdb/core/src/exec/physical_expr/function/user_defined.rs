@@ -43,10 +43,9 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
 		let func_name = format!("fn::{}", self.name);
 
-		// 1. Require database context
-		let db_ctx = ctx.exec_ctx.database().map_err(|_| {
-			anyhow::anyhow!("Custom function '{}' requires database context", func_name)
-		})?;
+		// 1. Require database context (propagate core Error so it downcasts to Validation)
+		let db_ctx =
+			ctx.exec_ctx.database().map_err(|e| ControlFlow::Err(anyhow::Error::new(e)))?;
 
 		// 2. Check if function is allowed by capabilities
 		if !ctx.capabilities().allows_function_name(&func_name) {

@@ -54,7 +54,8 @@ impl Enum {
 		crate_path: &CratePath,
 	) -> TokenStream2 {
 		let value_ty = crate_path.value();
-		let anyhow_macro = crate_path.anyhow_macro();
+		let error_no_variants_matched = crate_path
+			.error_internal(quote! { format!("Failed to decode {}, no variants matched", #name) });
 
 		let mut with_map = WithMap::new();
 
@@ -102,6 +103,17 @@ impl Enum {
 			},
 		};
 
+		// If a variant is marked with #[surreal(other)], use it as the fallback
+		// instead of returning an error when no variants match. This enables
+		// forward compatibility: unknown values on the wire fall back to the
+		// designated variant rather than failing deserialization.
+		let fallback = if let Some(other) = self.variants.iter().find(|v| v.is_other()) {
+			let ident = &other.ident;
+			quote! { Ok(Self::#ident) }
+		} else {
+			quote! { Err(#error_no_variants_matched) }
+		};
+
 		quote! {
 			match value {
 				#match_map
@@ -110,7 +122,7 @@ impl Enum {
 				#match_value
 			};
 
-			Err(#anyhow_macro!("Failed to decode {}, no variants matched", #name))
+			#fallback
 		}
 	}
 

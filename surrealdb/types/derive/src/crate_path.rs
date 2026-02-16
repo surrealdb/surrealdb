@@ -86,16 +86,17 @@ impl CratePath {
 		quote! { #base::TypeError }
 	}
 
-	/// Get the token stream for anyhow::Result
-	pub fn anyhow_result(&self) -> TokenStream {
+	/// Get the token stream for `Result<Self, Error>` (used as the return type of `from_value`).
+	pub fn error_result(&self) -> TokenStream {
 		let base = &self.path;
-		quote! { #base::anyhow::Result }
+		quote! { std::result::Result<Self, #base::Error> }
 	}
 
-	/// Get the token stream for anyhow::anyhow!
-	pub fn anyhow_macro(&self) -> TokenStream {
+	/// Get the token stream for `Error::internal(msg)`. The passed token stream must
+	/// produce a value that converts to String (e.g. `format!(...)` or `"msg".to_string()`).
+	pub fn error_internal(&self, msg: TokenStream) -> TokenStream {
 		let base = &self.path;
-		quote! { #base::anyhow::anyhow }
+		quote! { #base::Error::internal(#msg) }
 	}
 
 	/// Get the token stream for Value::from_t function
