@@ -955,13 +955,12 @@ mod tests {
 			// 8 - Specific experimental feature disabled
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.without_experimental(ExperimentalTarget::Files.into()),
+					Capabilities::default().without_experimental(ExperimentalTarget::Files.into()),
 				),
 				Session::owner().with_ns("test").with_db("test"),
 				"DEFINE BUCKET test BACKEND \"memory\";".to_string(),
 				false,
-				"the experimental files capability is not enabled".to_string(),
+				"expected the experimental files feature to be enabled".to_string(),
 			),
 			//
 			// 9 - Some functions are not allowed

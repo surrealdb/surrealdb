@@ -613,11 +613,10 @@ impl Parser<'_> {
 
 		match PATHS.get_entry(&UniCase::ascii(&buffer)) {
 			Some((_, (PathKind::Constant(x), _))) => Ok(Expr::Constant(x.clone())),
-			Some((_, (PathKind::Function, _))) => {
-				stk.run(|ctx| self.parse_builtin_function(ctx, buffer))
-					.await
-					.map(|x| Expr::FunctionCall(Box::new(x)))
-			}
+			Some((_, (PathKind::Function, _))) => stk
+				.run(|ctx| self.parse_builtin_function(ctx, buffer))
+				.await
+				.map(|x| Expr::FunctionCall(Box::new(x))),
 			None => {
 				if let Some(suggest) = find_suggestion(&buffer) {
 					Err(SyntaxError::new(format_args!(

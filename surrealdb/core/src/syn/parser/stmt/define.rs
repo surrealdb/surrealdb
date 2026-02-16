@@ -719,7 +719,6 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineApiStatement> {
-
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));

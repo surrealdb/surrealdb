@@ -23,9 +23,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: { default: 'status' }, headers: {}, status: 200 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 // Basic API definition with GET handler

@@ -34,9 +34,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: NONE, headers: {  }, status: 500 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 - No handler for method (should return NONE)

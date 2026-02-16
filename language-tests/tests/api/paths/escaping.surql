@@ -29,9 +29,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: { path: '/both/:colon/*star' }, headers: {}, status: 200 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 - Escaped colon in path
