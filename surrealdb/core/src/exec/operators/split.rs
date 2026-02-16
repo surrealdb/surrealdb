@@ -118,30 +118,38 @@ fn split_value_on_idiom(value: Value, idiom: &Idiom, output: &mut Vec<Value>) {
 	match field_value {
 		Value::Array(arr) => {
 			if arr.is_empty() {
-				// Empty array - keep the original value with the field as-is
 				output.push(value);
 			} else {
-				// For each element in the array, create a copy of the value
-				// with that field replaced by the element
-				for element in arr.iter() {
+				let len = arr.len();
+				for (i, element) in arr.into_iter().enumerate() {
+					if i == len - 1 {
+						// Last element: move value instead of cloning
+						let mut val = value;
+						val.put(idiom, element);
+						output.push(val);
+						return;
+					}
 					let mut cloned = value.clone();
-					// Set the field to the individual element (synchronous)
-					cloned.put(idiom, element.clone());
+					cloned.put(idiom, element);
 					output.push(cloned);
 				}
 			}
 		}
 		Value::Set(set) => {
 			if set.is_empty() {
-				// Empty set - keep the original value with the field as-is
 				output.push(value);
 			} else {
-				// For each element in the set, create a copy of the value
-				// with that field replaced by the element
-				for element in set.iter() {
+				let len = set.len();
+				for (i, element) in set.into_iter().enumerate() {
+					if i == len - 1 {
+						// Last element: move value instead of cloning
+						let mut val = value;
+						val.put(idiom, element);
+						output.push(val);
+						return;
+					}
 					let mut cloned = value.clone();
-					// Set the field to the individual element (synchronous)
-					cloned.put(idiom, element.clone());
+					cloned.put(idiom, element);
 					output.push(cloned);
 				}
 			}

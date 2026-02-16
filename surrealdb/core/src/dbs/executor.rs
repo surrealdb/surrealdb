@@ -20,6 +20,7 @@ use crate::dbs::response::QueryResult;
 use crate::dbs::{Force, Options, QueryType};
 use crate::doc::DefaultBroker;
 use crate::err::Error;
+use crate::exec::planner::try_plan_expr;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
@@ -41,6 +42,9 @@ pub struct Executor {
 	results: Vec<QueryResult>,
 	opt: Options,
 	ctx: FrozenContext,
+	/// Cached session info to avoid re-extracting from context on every query.
+	/// Session values don't change between statements in the same executor batch.
+	cached_session: Option<Arc<crate::exec::context::SessionInfo>>,
 }
 
 impl Executor {
@@ -65,6 +69,7 @@ impl Executor {
 			results: Vec::new(),
 			opt,
 			ctx,
+			cached_session: None,
 		}
 	}
 
@@ -95,6 +100,19 @@ impl Executor {
 		if let Some(slow_log) = self.ctx.slow_log() {
 			slow_log.check_log(&self.ctx, start, stm);
 		}
+	}
+
+	/// Get the cached session info, extracting it on first call.
+	///
+	/// Session values don't change between statements in the same
+	/// executor batch, so we extract once and reuse.
+	fn get_session_info(&mut self) -> Option<Arc<crate::exec::context::SessionInfo>> {
+		if let Some(ref cached) = self.cached_session {
+			return Some(cached.clone());
+		}
+		let session = self.extract_session_info();
+		self.cached_session.clone_from(&session);
+		session
 	}
 
 	/// Extract session information from the FrozenContext.
@@ -170,7 +188,7 @@ impl Executor {
 	/// This builds an ExecutionContext from the current session state and executes
 	/// the streaming operator plan, collecting all results into an array.
 	async fn execute_operator_plan(
-		&self,
+		&mut self,
 		plan: Arc<dyn crate::exec::ExecOperator>,
 		txn: Arc<Transaction>,
 	) -> FlowResult<Value> {
@@ -205,13 +223,9 @@ impl Executor {
 			}))
 		});
 
-		// Build the root context.
-		// Create a snapshot rather than Arc-cloning self.ctx. The snapshot
-		// flattens all values from the parent chain and sets parent: None,
-		// giving the operator pipeline its own independent Arc<Context>.
-		// Spawned buffer tasks hold references to this snapshot, not to
-		// self.ctx, so ctx_mut!() can still get exclusive access between
-		// statements.
+		// Build the root context using cached session info. The context
+		// snapshot must be fresh per-query because it contains the
+		// transaction reference which changes between statements.
 		let root_ctx = RootContext {
 			ctx: Context::snapshot(&self.ctx).freeze(),
 			options: Some(self.opt.clone()),
@@ -219,7 +233,7 @@ impl Executor {
 			cancellation,
 			auth: self.opt.auth.clone(),
 			auth_enabled: self.opt.auth_enabled,
-			session: self.extract_session_info(),
+			session: self.get_session_info(),
 			current_value: None,
 		};
 
@@ -249,6 +263,9 @@ impl Executor {
 						ns: ns_def,
 					},
 					db: db_def,
+					field_state_cache: std::sync::Arc::new(std::sync::Mutex::new(
+						std::collections::HashMap::new(),
+					)),
 				})
 			}
 		};
@@ -406,6 +423,9 @@ impl Executor {
 					ctx.add_value("session", session.into());
 				}
 
+				// Invalidate cached session info since USE changes ns/db
+				self.cached_session = None;
+
 				// Return the current namespace and database
 				Ok(Value::from(map! {
 					"namespace".to_string() => self.opt.ns.clone().map(|x| Value::String(x.to_string())).unwrap_or(Value::None),
@@ -503,7 +523,7 @@ impl Executor {
 			// Process all other normal statements
 			TopLevelExpr::Expr(e) => {
 				// Try the new streaming execution path first
-				match crate::exec::planner::try_plan_expr(&e, &self.ctx, txn.clone()).await {
+				match try_plan_expr!(&e, &self.ctx, txn.clone()) {
 					Ok(plan) => {
 						// Set the transaction on the context
 						ctx_mut!().set_transaction(txn.clone());

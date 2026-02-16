@@ -303,14 +303,12 @@ impl ExecOperator for Project {
 								.await?;
 							}
 						} else {
-							// Per-row evaluation with document_root set so
-							// dynamic index expressions (e.g. `[field]`)
-							// resolve against the full document.
-							let mut field_values = Vec::with_capacity(batch_len);
-							for value in &batch.values {
-								let row_ctx = eval_ctx.with_value_and_doc(value);
-								field_values.push(field.expr.evaluate(row_ctx).await?);
-							}
+							// Batch evaluation: use evaluate_batch which allows
+							// I/O-bound expressions (subqueries, lookups) to
+							// parallelize. For simple field accesses, the default
+							// sequential implementation is used.
+							let field_values =
+								field.expr.evaluate_batch(eval_ctx.clone(), &batch.values).await?;
 							for (i, field_value) in field_values.into_iter().enumerate() {
 								set_field_on_object(
 									&mut objects[i],

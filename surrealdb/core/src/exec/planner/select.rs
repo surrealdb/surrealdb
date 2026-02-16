@@ -948,6 +948,50 @@ impl<'ctx> Planner<'ctx> {
 			};
 		}
 
+		// Fast path: SELECT [*|fields] FROM <literal RecordId>
+		if what.len() == 1
+			&& matches!(&what[0], Expr::Literal(Literal::RecordId(_)))
+			&& cond.is_none()
+			&& order.is_none()
+			&& group.is_none()
+			&& split.is_none()
+			&& fetch.is_none()
+			&& with.is_none()
+		{
+			let rid_expr = match what.into_iter().next() {
+				Some(e @ Expr::Literal(Literal::RecordId(_))) => self.physical_expr(e).await?,
+				_ => unreachable!("verified above"),
+			};
+			let scan: Arc<dyn ExecOperator> =
+				Arc::new(RecordIdScan::new(rid_expr, version, None, None));
+			let limited = if limit.is_some() || start.is_some() {
+				let limit_expr = match limit {
+					Some(l) => Some(self.physical_expr(l.0).await?),
+					None => None,
+				};
+				let start_expr = match start {
+					Some(s) => Some(self.physical_expr(s.0).await?),
+					None => None,
+				};
+				Arc::new(Limit::new(scan, limit_expr, start_expr)) as Arc<dyn ExecOperator>
+			} else {
+				scan
+			};
+			let projected = self.plan_projections(fields, omit, limited, false).await?;
+			let timed = match timeout {
+				Expr::Literal(Literal::None) => projected,
+				te => {
+					let tp = self.physical_expr(te).await?;
+					Arc::new(Timeout::new(projected, Some(tp))) as Arc<dyn ExecOperator>
+				}
+			};
+			return if only {
+				Ok(Arc::new(UnwrapExactlyOne::new(timed, true)))
+			} else {
+				Ok(timed)
+			};
+		}
+
 		let is_value_source = all_value_sources(&what);
 		// Prefer literal tables over parameter-resolved tables so that
 		// `FROM $t, article` binds MATCHES context to `article`, not `$t`.
@@ -1071,6 +1115,13 @@ impl<'ctx> Planner<'ctx> {
 			&& split.is_none()
 			&& group.is_none();
 
+		let can_soft_push_limit = !can_push_limit
+			&& source_is_single_scan
+			&& brute_force_knn.is_none()
+			&& limit.is_some()
+			&& split.is_some()
+			&& group.is_none();
+
 		let (scan_limit, scan_start) = if can_push_limit {
 			(
 				match limit.as_ref() {
@@ -1082,6 +1133,14 @@ impl<'ctx> Planner<'ctx> {
 					None => None,
 				},
 			)
+		} else if can_soft_push_limit {
+			(
+				match limit.as_ref() {
+					Some(l) => Some(pp.physical_expr(l.0.clone()).await?),
+					None => None,
+				},
+				None,
+			)
 		} else {
 			(None, None)
 		};
@@ -1090,7 +1149,7 @@ impl<'ctx> Planner<'ctx> {
 		// The result tracks whether the predicate and limit/start were
 		// consumed by the source operator, so we can avoid duplicating
 		// them in the outer pipeline.
-		let planned = pp
+		let mut planned = pp
 			.plan_sources(
 				what,
 				version,
@@ -1103,6 +1162,10 @@ impl<'ctx> Planner<'ctx> {
 				scan_start,
 			)
 			.await?;
+
+		if can_soft_push_limit {
+			planned.limit_pushed = false;
+		}
 
 		// Resolve the pipeline condition from the filter action.
 		// - FullyConsumed: the source handles the entire predicate, no Filter.

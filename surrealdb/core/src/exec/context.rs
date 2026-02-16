@@ -188,6 +188,16 @@ pub struct DatabaseContext {
 	pub ns_ctx: NamespaceContext,
 	/// The selected database definition
 	pub db: Arc<DatabaseDefinition>,
+	/// Cache of field states (computed fields + permissions) keyed by (table, check_perms).
+	/// Avoids repeated KV lookups for the same table within a single query execution.
+	pub(crate) field_state_cache: Arc<
+		std::sync::Mutex<
+			HashMap<
+				(crate::val::TableName, bool),
+				Arc<crate::exec::operators::scan::pipeline::FieldState>,
+			>,
+		>,
+	>,
 }
 
 impl std::fmt::Debug for DatabaseContext {
@@ -195,6 +205,7 @@ impl std::fmt::Debug for DatabaseContext {
 		f.debug_struct("DatabaseContext")
 			.field("ns_ctx", &self.ns_ctx)
 			.field("db", &self.db)
+			.field("field_state_cache", &"<cache>")
 			.finish()
 	}
 }
@@ -422,6 +433,7 @@ impl ExecutionContext {
 					ns: d.ns_ctx.ns.clone(),
 				},
 				db: d.db.clone(),
+				field_state_cache: d.field_state_cache.clone(),
 			}),
 		}
 	}
@@ -501,6 +513,7 @@ impl ExecutionContext {
 				ns,
 			},
 			db,
+			field_state_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
 		})
 	}
 

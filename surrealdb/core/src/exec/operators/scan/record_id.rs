@@ -107,6 +107,13 @@ impl ExecOperator for RecordIdScan {
 		mode
 	}
 
+	fn cardinality_hint(&self) -> crate::exec::CardinalityHint {
+		// RecordIdScan produces at most one row for point lookups.
+		// Range scans could produce more, but the planner only routes
+		// literal RecordId expressions here (ranges go through DynamicScan).
+		crate::exec::CardinalityHint::AtMostOne
+	}
+
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(&self.metrics)
 	}

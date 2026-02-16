@@ -258,6 +258,29 @@ pub(crate) async fn filter_and_process_batch(
 	check_perms: bool,
 ) -> Result<(), ControlFlow> {
 	let needs_perm_filter = !matches!(permission, PhysicalPermission::Allow);
+
+	// Fast path: when only the predicate is active (no permissions, no
+	// computed fields), use evaluate_batch for potentially better throughput.
+	if !needs_perm_filter
+		&& state.computed_fields.is_empty()
+		&& (!check_perms || state.field_permissions.is_empty())
+		&& let Some(pred) = predicate
+	{
+		let eval_ctx = EvalContext::from_exec_ctx(ctx);
+		let results = pred.evaluate_batch(eval_ctx, &batch[..]).await?;
+		let mut write_idx = 0;
+		for (read_idx, result) in results.into_iter().enumerate() {
+			if result.is_truthy() {
+				if write_idx != read_idx {
+					batch.swap(write_idx, read_idx);
+				}
+				write_idx += 1;
+			}
+		}
+		batch.truncate(write_idx);
+		return Ok(());
+	}
+
 	let mut write_idx = 0;
 	for read_idx in 0..batch.len() {
 		// Table-level permission (skip if Allow)
@@ -376,7 +399,7 @@ pub(crate) async fn eval_limit_expr(
 
 /// Cached state for field processing (computed fields and permissions).
 /// Initialized on first batch and reused for subsequent batches.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct FieldState {
 	/// Computed field definitions converted to physical expressions
 	pub(crate) computed_fields: Vec<ComputedFieldDef>,
@@ -395,7 +418,7 @@ impl FieldState {
 }
 
 /// A computed field definition ready for evaluation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ComputedFieldDef {
 	/// The field name where to store the result
 	field_name: String,
@@ -414,6 +437,19 @@ pub(crate) async fn build_field_state(
 	needed_fields: Option<&std::collections::HashSet<String>>,
 ) -> Result<FieldState, ControlFlow> {
 	let db_ctx = ctx.database().context("build_field_state requires database context")?;
+
+	// Check the cache first (keyed by table name + check_perms flag).
+	// Only use the cache when needed_fields is None (SELECT *), because
+	// different projections may require different subsets of computed fields.
+	if needed_fields.is_none() {
+		let cache_key = (table_name.clone(), check_perms);
+		if let Ok(cache) = db_ctx.field_state_cache.lock() {
+			if let Some(cached) = cache.get(&cache_key) {
+				return Ok(cached.as_ref().clone());
+			}
+		}
+	}
+
 	let txn = ctx.txn();
 
 	let field_defs = txn
@@ -497,10 +533,20 @@ pub(crate) async fn build_field_state(
 		}
 	}
 
-	Ok(FieldState {
+	let state = FieldState {
 		computed_fields,
 		field_permissions,
-	})
+	};
+
+	// Populate the cache for SELECT * queries
+	if needed_fields.is_none() {
+		let cache_key = (table_name.clone(), check_perms);
+		if let Ok(mut cache) = db_ctx.field_state_cache.lock() {
+			cache.insert(cache_key, Arc::new(state.clone()));
+		}
+	}
+
+	Ok(state)
 }
 
 /// Compute all computed fields for a single value.
