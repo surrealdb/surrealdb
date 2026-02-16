@@ -23,8 +23,8 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::Distance;
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::Idiom;
 use crate::val::{Number, Value};
@@ -151,6 +151,10 @@ impl ExecOperator for KnnTopK {
 		self.input.access_mode()
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::Bounded(self.k)
+	}
+
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
@@ -160,7 +164,11 @@ impl ExecOperator for KnnTopK {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let field = self.field.clone();
 		let query_vector = self.query_vector.clone();
 		let k = self.k;

@@ -79,8 +79,10 @@ pub(crate) async fn fetch_records_batch(
 	ns_id: NamespaceId,
 	db_id: DatabaseId,
 	rids: &[RecordId],
+	version: Option<u64>,
 ) -> Result<Vec<Value>, ControlFlow> {
-	let records = txn.getm_records(ns_id, db_id, rids).await.context("Failed to fetch records")?;
+	let records =
+		txn.getm_records(ns_id, db_id, rids, version).await.context("Failed to fetch records")?;
 
 	let mut values = Vec::with_capacity(rids.len());
 	for (rid, record) in rids.iter().zip(records) {
@@ -105,9 +107,10 @@ pub(crate) async fn resolve_record_batch(
 	db_id: DatabaseId,
 	rids: &[RecordId],
 	fetch_full: bool,
+	version: Option<u64>,
 ) -> Result<Vec<Value>, ControlFlow> {
 	if fetch_full {
-		fetch_records_batch(txn, ns_id, db_id, rids).await
+		fetch_records_batch(txn, ns_id, db_id, rids, version).await
 	} else {
 		Ok(rids.iter().map(|rid| Value::RecordId(rid.clone())).collect())
 	}
@@ -124,6 +127,7 @@ pub(crate) async fn resolve_record_batch(
 /// Used by [`super::index_scan::IndexScan`],
 /// [`super::fulltext_scan::FullTextScan`], and
 /// [`super::knn_scan::KnnScan`].
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn fetch_and_filter_records_batch(
 	ctx: &ExecutionContext,
 	txn: &Transaction,
@@ -132,8 +136,10 @@ pub(crate) async fn fetch_and_filter_records_batch(
 	rids: &[RecordId],
 	select_permission: &crate::exec::permission::PhysicalPermission,
 	check_perms: bool,
+	version: Option<u64>,
 ) -> Result<Vec<Value>, ControlFlow> {
-	let records = txn.getm_records(ns_id, db_id, rids).await.context("Failed to fetch records")?;
+	let records =
+		txn.getm_records(ns_id, db_id, rids, version).await.context("Failed to fetch records")?;
 
 	let mut values = Vec::with_capacity(rids.len());
 	for (rid, record) in rids.iter().zip(records) {

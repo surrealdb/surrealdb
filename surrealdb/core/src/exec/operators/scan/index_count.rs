@@ -35,8 +35,8 @@ use crate::exec::permission::{
 	validate_record_user_access,
 };
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::cond::Cond;
 use crate::expr::{ControlFlow, ControlFlowExt};
@@ -122,6 +122,10 @@ impl ExecOperator for IndexCountScan {
 
 	fn access_mode(&self) -> AccessMode {
 		self.source.access_mode().combine(self.predicate.access_mode())
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	#[instrument(name = "IndexCountScan::execute", level = "trace", skip_all)]

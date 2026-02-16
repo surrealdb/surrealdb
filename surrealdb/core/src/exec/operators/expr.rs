@@ -12,7 +12,8 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream,
 };
 
 /// Expr operator - evaluates a scalar expression.
@@ -53,6 +54,10 @@ impl ExecOperator for ExprPlan {
 
 	fn access_mode(&self) -> AccessMode {
 		self.expr.access_mode()
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {

@@ -14,8 +14,8 @@ use trice::Instant;
 use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, RootProvider};
-use crate::ctx::FrozenContext;
 use crate::ctx::reason::Reason;
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::response::QueryResult;
 use crate::dbs::{Force, Options, QueryType};
 use crate::doc::DefaultBroker;
@@ -206,11 +206,14 @@ impl Executor {
 		});
 
 		// Build the root context.
-		// The FrozenContext is the single source of truth for params, txn,
-		// capabilities, and other context fields. We only extract auth and
-		// session info which are not trivially accessible from FrozenContext.
+		// Create a snapshot rather than Arc-cloning self.ctx. The snapshot
+		// flattens all values from the parent chain and sets parent: None,
+		// giving the operator pipeline its own independent Arc<Context>.
+		// Spawned buffer tasks hold references to this snapshot, not to
+		// self.ctx, so ctx_mut!() can still get exclusive access between
+		// statements.
 		let root_ctx = RootContext {
-			ctx: self.ctx.clone(),
+			ctx: Context::snapshot(&self.ctx).freeze(),
 			options: Some(self.opt.clone()),
 			datastore: None,
 			cancellation,

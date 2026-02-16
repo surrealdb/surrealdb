@@ -9,8 +9,7 @@ value = "'OK'"
 value = ''''Project [ctx: Db] {rows: 3}
     Limit [ctx: Db] [limit: 3] {rows: 3}
         SortTopKByKey [ctx: Db] [sort_keys: v DESC, limit: 3] {rows: 3}
-            Filter [ctx: Db] [predicate: v > 5] {rows: 10}
-                IndexScan [ctx: Db] [index: idx, access: >5, direction: Forward] {rows: 10}
+            IndexScan [ctx: Db] [index: idx, access: >5, direction: Forward] {rows: 10}
 
 Total rows: 3''''
 

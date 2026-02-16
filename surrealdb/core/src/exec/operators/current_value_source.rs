@@ -11,8 +11,8 @@ use futures::stream;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
-	monitor_stream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream, monitor_stream,
 };
 use crate::val::Value;
 
@@ -56,6 +56,10 @@ impl ExecOperator for CurrentValueSource {
 
 	fn access_mode(&self) -> AccessMode {
 		AccessMode::ReadOnly
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
