@@ -4,9 +4,9 @@ use crate::sql::uuid::Uuid;
 use crate::sql::value::Value;
 use crate::sql::{Datetime, Duration, Number};
 use chrono::{TimeZone, Utc};
-use nanoid::nanoid;
 use rand::distributions::{Alphanumeric, DistString};
 use rand::prelude::IteratorRandom;
+use rand::seq::SliceRandom;
 use rand::Rng;
 use ulid::Ulid;
 
@@ -82,7 +82,9 @@ pub fn guid((arg1, arg2): (Option<i64>, Option<i64>)) -> Result<Value, Error> {
 	};
 
 	// Generate the random guid
-	Ok(nanoid!(len, &ID_CHARS).into())
+	let mut rng = rand::thread_rng();
+	let id: String = (0..len).map(|_| *ID_CHARS.choose(&mut rng).unwrap_or(&'0')).collect();
+	Ok(Value::from(id))
 }
 
 pub fn int((range,): (Option<(i64, i64)>,)) -> Result<Value, Error> {
@@ -244,6 +246,34 @@ pub fn uuid((timestamp,): (Option<Datetime>,)) -> Result<Value, Error> {
 		None => Uuid::new(),
 	};
 	Ok(uuid.into())
+}
+
+#[cfg(test)]
+mod tests {
+	use std::thread;
+
+	use super::*;
+
+	#[test]
+	fn test_rand_guid_concurrency() {
+		let mut handles = vec![];
+		for _ in 0..100 {
+			handles.push(thread::spawn(|| {
+				for _ in 0..1000 {
+					let _ = guid((Some(0), Some(10))).unwrap();
+				}
+			}));
+		}
+		for handle in handles {
+			handle.join().unwrap();
+		}
+	}
+
+	#[test]
+	fn test_rand_guid_len_0() {
+		let res = guid((Some(0), Some(0))).unwrap();
+		assert_eq!(res, Value::from(""));
+	}
 }
 
 pub mod uuid {
