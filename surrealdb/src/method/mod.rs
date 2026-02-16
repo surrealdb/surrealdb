@@ -29,7 +29,6 @@ mod insert_relation;
 mod invalidate;
 mod merge;
 mod patch;
-mod run;
 mod select;
 mod set;
 mod signin;
@@ -62,7 +61,6 @@ pub use invalidate::Invalidate;
 pub use merge::Merge;
 pub use patch::Patch;
 pub use query::{IntoVariables, Query, QueryStream};
-pub use run::{IntoFn, Run};
 pub use select::Select;
 pub use set::Set;
 pub use signin::Signin;
@@ -1391,6 +1389,6 @@ fn validate_data(data: &Value, error_message: &str) -> crate::Result<()> {
 	match data {
 		Value::Object(_) => Ok(()),
 		Value::Array(v) if v.iter().all(Value::is_object) => Ok(()),
-		_ => Err(crate::err::Error::InvalidParams(error_message.to_owned())),
+		_ => Err(crate::Error::validation(error_message.to_owned(), None)),
 	}
 }

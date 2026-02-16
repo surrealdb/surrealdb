@@ -50,18 +50,17 @@ impl Stream for IntervalStream {
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-enum SessionError {
+pub(crate) enum SessionError {
 	NotFound(Uuid),
 	Remote(String),
 }
 
-impl From<SessionError> for crate::Error {
-	fn from(error: SessionError) -> Self {
-		match error {
-			SessionError::NotFound(id) => {
-				crate::Error::InternalError(format!("Session not found: {id}"))
-			}
-			SessionError::Remote(error) => crate::Error::InternalError(error),
+/// Convert a session error into the public error type.
+pub(crate) fn session_error_to_error(e: SessionError) -> surrealdb_types::Error {
+	match e {
+		SessionError::NotFound(id) => {
+			surrealdb_types::Error::internal(format!("Session not found: {id}"))
 		}
+		SessionError::Remote(msg) => surrealdb_types::Error::internal(msg),
 	}
 }
