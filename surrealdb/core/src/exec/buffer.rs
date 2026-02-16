@@ -13,15 +13,22 @@
 //! The public entry point [`buffer_stream`] chooses between them based on
 //! the child operator's [`AccessMode`] and [`CardinalityHint`].
 
+#[cfg(not(target_family = "wasm"))]
 use std::collections::VecDeque;
+#[cfg(not(target_family = "wasm"))]
 use std::pin::Pin;
+#[cfg(not(target_family = "wasm"))]
 use std::task::{Context, Poll};
 
+#[cfg(not(target_family = "wasm"))]
 use futures::Stream;
 
+#[cfg(not(target_family = "wasm"))]
+use crate::exec::ValueBatch;
+use crate::exec::ValueBatchStream;
 use crate::exec::access_mode::AccessMode;
 use crate::exec::cardinality::CardinalityHint;
-use crate::exec::{ValueBatch, ValueBatchStream};
+#[cfg(not(target_family = "wasm"))]
 use crate::expr::FlowResult;
 
 /// Value-count threshold for the [`CardinalityHint::Bounded`] short-circuit.
