@@ -141,7 +141,22 @@ impl HnswIndex {
 		HnswContext::new(ctx, db, &self.vec_docs)
 	}
 
-	pub(crate) async fn index_pending(
+	pub(super) async fn index_pendings(
+		&self,
+		ctx: &FrozenContext,
+		db: &DatabaseDefinition,
+	) -> Result<usize> {
+		let tx = ctx.tx();
+		let count = self
+			.collect_pending(ctx, &tx, async |_, pending| {
+				self.index_pending(ctx, db, pending).await
+			})
+			.await?;
+		tx.delr(self.ikb.new_hp_range()?).await?;
+		Ok(count)
+	}
+
+	async fn index_pending(
 		&self,
 		ctx: &FrozenContext,
 		db: &DatabaseDefinition,
@@ -164,7 +179,7 @@ impl HnswIndex {
 
 		// Index the new values if any
 		let mut docs = self.docs.write().await;
-		if pending.new_vectors.is_empty() {
+		if !pending.new_vectors.is_empty() {
 			let doc_id = match pending.id {
 				VectorId::DocId(doc_id) => doc_id,
 				VectorId::RecordKey(id) => docs.resolve(&ctx.tx, &id).await?,
@@ -293,7 +308,7 @@ impl HnswIndex {
 		let mut all_existing_docs = RoaringTreemap::new();
 		let mut non_deleted_docs = HashMap::default();
 		// First pass, identify deleted doc
-		self.collect_pending(ctx.ctx, &ctx.tx, |_, pending| {
+		self.collect_pending(ctx.ctx, &ctx.tx, async |_, pending| {
 			if let VectorId::DocId(doc_id) = pending.id {
 				all_existing_docs.insert(doc_id);
 			};
@@ -302,6 +317,7 @@ impl HnswIndex {
 			} else {
 				non_deleted_docs.insert(pending.id, pending.new_vectors);
 			}
+			Ok(())
 		})
 		.await?;
 		if all_existing_docs.is_empty() && non_deleted_docs.is_empty() {
@@ -338,9 +354,9 @@ impl HnswIndex {
 		ctx: &Context,
 		tx: &Transaction,
 		mut collector: F,
-	) -> Result<()>
+	) -> Result<usize>
 	where
-		F: FnMut(Key, VectorPendingUpdate),
+		F: AsyncFnMut(Key, VectorPendingUpdate) -> Result<()>,
 	{
 		let rng = self.ikb.new_hp_range()?;
 		let mut stream = tx.stream_keys_vals(rng, None, None, 0, ScanDirection::Forward, false);
@@ -354,12 +370,12 @@ impl HnswIndex {
 					bail!(Error::QueryCancelled)
 				}
 				let pending = VectorPendingUpdate::kv_decode_value(v)?;
-				collector(k, pending);
+				collector(k, pending).await?;
 				// Parse the data from the store
 				count += 1;
 			}
 		}
-		Ok(())
+		Ok(count)
 	}
 
 	async fn add_graph_results<F>(

@@ -1011,6 +1011,11 @@ mod tests {
 			let content = vec![Value::from(obj.deref())];
 			h.index(&ctx, &RecordIdKey::Number(*doc_id as i64), None, Some(content)).await?;
 		}
+
+		info!("Index pendings");
+		assert_eq!(h.index_pendings(&ctx, &db).await?, collection.len());
+		assert_eq!(h.index_pendings(&ctx, &db).await?, 0);
+
 		tx.commit().await?;
 
 		let h = Arc::new(h);
