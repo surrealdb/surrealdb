@@ -19,7 +19,7 @@ use futures::{Sink, SinkExt};
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
 use surrealdb_core::iam::token::Token;
 use surrealdb_core::rpc::{DbResponse, DbResult};
-use surrealdb_types::Error as TypesError;
+use surrealdb_types::{AuthError, Error as TypesError, NotAllowedError};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -421,8 +421,8 @@ where
 				&& let Token::WithRefresh {
 					..
 				} = &token && error
-				.auth_details()
-				.is_some_and(|a| matches!(a, surrealdb_types::AuthError::TokenExpired))
+				.not_allowed_details()
+				.is_some_and(|a| matches!(a, NotAllowedError::Auth(AuthError::TokenExpired)))
 			{
 				// Attempt automatic refresh
 				let refresh_request = RouterRequest {

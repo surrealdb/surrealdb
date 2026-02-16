@@ -67,6 +67,7 @@ use serde::{Deserialize, Serialize};
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
 use surrealdb_core::iam::Token as CoreToken;
 use surrealdb_core::rpc::{self, DbResponse, DbResult};
+use surrealdb_types::{AuthError, NotAllowedError};
 #[cfg(not(target_family = "wasm"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_family = "wasm"))]
@@ -760,8 +761,8 @@ async fn router(
 						} = &token
 						{
 							// If the error is due to token expiration, attempt automatic refresh
-							if error.auth_details().is_some_and(|a| {
-								matches!(a, surrealdb_types::AuthError::TokenExpired)
+							if error.not_allowed_details().is_some_and(|a| {
+								matches!(a, NotAllowedError::Auth(AuthError::TokenExpired))
 							}) {
 								// Call the refresh_token helper to get new tokens
 								let (value, refresh_results) = refresh_token(

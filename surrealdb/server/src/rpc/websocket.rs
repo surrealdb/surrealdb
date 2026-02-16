@@ -438,7 +438,9 @@ impl Websocket {
 		if !method.is_valid() {
 			return Err(TypesError::not_found(
 				"Method not found".to_string(),
-				Some(surrealdb_types::NotFoundError::Method),
+				Some(surrealdb_types::NotFoundError::Method {
+					name: method.to_string(),
+				}),
 			));
 		}
 		// Execute the specified method

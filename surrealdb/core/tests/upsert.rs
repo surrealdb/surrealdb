@@ -53,7 +53,7 @@ async fn upsert_merge_and_content() -> Result<()> {
 	//
 	let tmp = res.remove(0).result;
 	assert!(matches!(
-		dbg!(tmp.err()),
+		tmp.err(),
 		Some(e) if e.to_string() == r#"Cannot use 'some content' in a CONTENT clause"#
 	));
 	//

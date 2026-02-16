@@ -589,7 +589,7 @@ async fn router(
 			let signup_data = {
 				iam::signup::signup(kvs, &mut *state.session.write().await, credentials.into())
 					.await
-					.map_err(|e| TypesError::auth(e.to_string(), None))?
+					.map_err(|e| TypesError::not_allowed(e.to_string(), None))?
 			};
 			let token = match signup_data {
 				iam::Token::Access(token) => Token {
@@ -614,7 +614,7 @@ async fn router(
 			let signin_data = {
 				iam::signin::signin(kvs, &mut *state.session.write().await, credentials.into())
 					.await
-					.map_err(|e| TypesError::auth(e.to_string(), None))?
+					.map_err(|e| TypesError::not_allowed(e.to_string(), None))?
 			};
 			let token = match signin_data {
 				iam::Token::Access(token) => Token {

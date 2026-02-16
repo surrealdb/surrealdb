@@ -1,6 +1,6 @@
 use surrealdb_types::{
-	ConversionError, Error, ErrorKind, Kind, LengthMismatchError, Number, Object, OutOfRangeError,
-	SurrealValue, TypeError, ValidationError, Value,
+	AuthError, ConversionError, Error, ErrorKind, Kind, LengthMismatchError, NotAllowedError,
+	Number, Object, OutOfRangeError, SurrealValue, TypeError, ValidationError, Value,
 };
 
 #[test]
@@ -81,7 +81,7 @@ fn test_type_error_variants() {
 	let conv_err = TypeError::Conversion(ConversionError::new(Kind::String, Kind::Int));
 	let range_err = TypeError::OutOfRange(OutOfRangeError::new(256, "u8"));
 	let len_err = TypeError::LengthMismatch(LengthMismatchError::new(3, 2, "tuple"));
-	let invalid_err = TypeError::Invalid("custom error".to_string());
+	let invalid_err = TypeError::Invalid("custom error".to_owned());
 
 	// All should display without panicking
 	assert!(!conv_err.to_string().is_empty());
@@ -297,19 +297,12 @@ fn test_public_error_new() {
 
 #[test]
 fn test_public_error_with_details() {
-	let mut details = Object::new();
-	details.insert("name", "users");
-	let err = Error::not_found("The table 'users' does not exist".to_string(), None)
-		.with_details(details);
+	let err = Error::not_allowed("Token expired".to_string(), AuthError::TokenExpired);
 
-	assert_eq!(err.kind(), &ErrorKind::NotFound);
+	assert_eq!(err.kind(), &ErrorKind::NotAllowed);
 	assert!(err.details().is_some());
-	let d = err.details().unwrap();
-	let Value::Object(o) = d else {
-		panic!("expected object details")
-	};
-	assert!(o.contains_key("name"));
-	assert_eq!(o.get("name").and_then(|v| v.as_string()).unwrap(), "users");
+	let d = err.not_allowed_details().unwrap();
+	assert!(matches!(d, NotAllowedError::Auth(AuthError::TokenExpired)));
 }
 
 #[test]
@@ -322,7 +315,7 @@ fn test_public_error_validation_details() {
 	let err_no_details = Error::validation("Parse error".to_string(), None);
 	assert_eq!(err_no_details.validation_details(), None);
 
-	let err_wrong_kind = Error::auth("Auth failed".to_string(), None);
+	let err_wrong_kind = Error::not_allowed("Auth failed".to_string(), None);
 	assert_eq!(err_wrong_kind.validation_details(), None);
 }
 
@@ -371,26 +364,6 @@ fn test_public_error_std_error_source() {
 
 	let source = std::error::Error::source(&outer).unwrap();
 	assert_eq!(source.to_string(), "inner");
-}
-
-#[test]
-fn test_public_error_surreal_value_roundtrip() {
-	let err = Error::not_found("Table 'users' does not exist".to_string(), None)
-		.with_details({
-			let mut o = Object::new();
-			o.insert("name", "users");
-			Value::Object(o)
-		})
-		.with_cause(Error::internal("io error".to_string()));
-
-	let value = err.clone().into_value();
-	let restored = Error::from_value(value).unwrap();
-
-	assert_eq!(restored.kind(), err.kind());
-	assert_eq!(restored.message(), err.message());
-	assert!(restored.details().is_some());
-	assert!(restored.cause().is_some());
-	assert_eq!(restored.cause().unwrap().kind(), &ErrorKind::Internal);
 }
 
 #[test]

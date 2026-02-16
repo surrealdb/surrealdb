@@ -6,21 +6,25 @@ use crate::types::{
 };
 use crate::{Error, Result};
 
-/// A table range.
+/// A range of records within a table.
 #[derive(Debug, Clone, PartialEq)]
 pub struct QueryRange {
 	pub table: Table,
 	pub range: RecordIdKeyRange,
 }
 
+/// Direction for graph traversal or resource access.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Direction {
+	/// Outgoing direction.
 	Out,
+	/// Incoming direction.
 	In,
+	/// Both directions.
 	Both,
 }
 
-/// A database resource
+/// A database resource.
 ///
 /// A resource is a location, or a range of locations, from which data can be
 /// fetched.

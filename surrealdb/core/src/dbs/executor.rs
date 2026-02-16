@@ -707,7 +707,9 @@ impl Executor {
 						result: Err(match done {
 							Reason::Timedout(d) => TypesError::query(
 								format!("Timed out: {d}"),
-								Some(QueryError::Timedout),
+								Some(QueryError::TimedOut {
+									duration: d.0,
+								}),
 							),
 							Reason::Canceled => TypesError::query(
 								"The query was not executed due to a cancelled transaction"

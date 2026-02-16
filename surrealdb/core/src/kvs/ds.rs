@@ -1616,15 +1616,22 @@ impl Datastore {
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Check if the session has expired
 		if sess.expired() {
-			return Err(TypesError::auth(
+			return Err(TypesError::not_allowed(
 				"The session has expired".to_string(),
-				Some(AuthError::SessionExpired),
+				AuthError::SessionExpired,
 			));
 		}
 
 		// Check if anonymous actors can execute queries when auth is enabled
 		if let Err(e) = self.check_anon(sess) {
-			return Err(TypesError::auth(format!("Anonymous access not allowed: {e}"), None));
+			return Err(TypesError::not_allowed(
+				format!("Anonymous access not allowed: {e}"),
+				AuthError::NotAllowed {
+					actor: "anonymous".to_owned(),
+					action: "process".to_owned(),
+					resource: "query".to_owned(),
+				},
+			));
 		}
 
 		// Create a new query options
@@ -1781,16 +1788,23 @@ impl Datastore {
 	) -> Result<Vec<QueryResult>, TypesError> {
 		// Check if the session has expired
 		if sess.expired() {
-			return Err(TypesError::auth(
+			return Err(TypesError::not_allowed(
 				"The session has expired".to_string(),
-				Some(AuthError::SessionExpired),
+				AuthError::SessionExpired,
 			));
 		}
 
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if let Err(e) = self.check_anon(sess) {
-			return Err(TypesError::auth(format!("Anonymous access not allowed: {e}"), None));
+			return Err(TypesError::not_allowed(
+				format!("Anonymous access not allowed: {e}"),
+				AuthError::NotAllowed {
+					actor: "anonymous".to_owned(),
+					action: "process".to_owned(),
+					resource: "query".to_owned(),
+				},
+			));
 		}
 
 		// Create a new query options

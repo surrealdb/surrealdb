@@ -130,7 +130,7 @@ pub trait RpcProtocol {
 		&self,
 		_id: Uuid,
 	) -> Result<Arc<crate::kvs::Transaction>, surrealdb_types::Error> {
-		Err(method_not_found())
+		Err(method_not_allowed(Method::Unknown.to_string()))
 	}
 
 	/// Stores a transaction
@@ -139,7 +139,7 @@ pub trait RpcProtocol {
 		_id: Uuid,
 		_tx: Arc<crate::kvs::Transaction>,
 	) -> Result<(), surrealdb_types::Error> {
-		Err(method_not_found())
+		Err(method_not_found(Method::Unknown.to_string()))
 	}
 
 	// ------------------------------
@@ -188,7 +188,7 @@ pub trait RpcProtocol {
 			method,
 		}) {
 			warn!("Capabilities denied RPC method call attempt, target: '{method}'");
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(method.to_string()));
 		}
 		// Execute the desired method
 		match method {
@@ -226,7 +226,7 @@ pub trait RpcProtocol {
 			Method::Relate => self.relate(txn, session, params).await,
 			Method::Run => self.run(txn, session, params).await,
 			Method::InsertRelation => self.insert_relation(txn, session, params).await,
-			_ => Err(method_not_found()),
+			_ => Err(method_not_found(method.to_string())),
 		}
 	}
 
@@ -260,7 +260,7 @@ pub trait RpcProtocol {
 			let session = session_lock.read().await;
 			// Check if the user is allowed to query
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-				return Err(method_not_allowed());
+				return Err(method_not_allowed(Method::Use.to_string()));
 			}
 		}
 
@@ -612,7 +612,7 @@ pub trait RpcProtocol {
 			let session = session_lock.read().await;
 			// Check if the user is allowed to query
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-				return Err(method_not_allowed());
+				return Err(method_not_allowed(Method::Set.to_string()));
 			}
 		}
 
@@ -654,7 +654,7 @@ pub trait RpcProtocol {
 			let session = session_lock.read().await;
 			// Check if the user is allowed to query
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-				return Err(method_not_allowed());
+				return Err(method_not_allowed(Method::Unset.to_string()));
 			}
 		}
 
@@ -684,7 +684,7 @@ pub trait RpcProtocol {
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(Method::Kill.to_string()));
 		}
 		// Process the method arguments
 		let (id,) = extract_args::<(PublicValue,)>(params.into_vec())
@@ -716,7 +716,7 @@ pub trait RpcProtocol {
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(Method::Live.to_string()));
 		}
 		// Process the method arguments
 		let (what, diff) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
@@ -770,7 +770,7 @@ pub trait RpcProtocol {
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(Method::Select.to_string()));
 		}
 		// Process the method arguments
 		let (what,) = extract_args::<(PublicValue,)>(params.into_vec())
@@ -835,7 +835,7 @@ pub trait RpcProtocol {
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(Method::Insert.to_string()));
 		}
 		// Process the method arguments
 		let (what, data) = extract_args::<(PublicValue, PublicValue)>(params.into_vec())
@@ -880,7 +880,7 @@ pub trait RpcProtocol {
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(Method::InsertRelation.to_string()));
 		}
 		// Process the method arguments
 		let (what, data) = extract_args::<(PublicValue, PublicValue)>(params.to_vec())
@@ -931,7 +931,7 @@ pub trait RpcProtocol {
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(Method::Create.to_string()));
 		}
 		// Process the method arguments
 		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
@@ -985,7 +985,7 @@ pub trait RpcProtocol {
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(Method::Upsert.to_string()));
 		}
 		// Process the method arguments
 		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
@@ -1043,7 +1043,7 @@ pub trait RpcProtocol {
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(Method::Update.to_string()));
 		}
 		// Process the method arguments
 		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
@@ -1098,7 +1098,7 @@ pub trait RpcProtocol {
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(Method::Merge.to_string()));
 		}
 		// Process the method arguments
 		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
@@ -1152,7 +1152,7 @@ pub trait RpcProtocol {
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(Method::Patch.to_string()));
 		}
 		// Process the method arguments
 		let (what, data, diff) =
@@ -1217,7 +1217,7 @@ pub trait RpcProtocol {
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(Method::Relate.to_string()));
 		}
 		// Process the method arguments
 		let (from, kind, with, data) =
@@ -1274,7 +1274,7 @@ pub trait RpcProtocol {
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(Method::Delete.to_string()));
 		}
 		// Process the method arguments
 		let (what,) = extract_args::<(PublicValue,)>(params.into_vec())
@@ -1330,7 +1330,7 @@ pub trait RpcProtocol {
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(Method::Query.to_string()));
 		}
 		// Process the method arguments
 		let (query, vars) =
@@ -1377,7 +1377,7 @@ pub trait RpcProtocol {
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(method_not_allowed());
+			return Err(method_not_allowed(Method::Run.to_string()));
 		}
 		// Process the method arguments
 		let (name, version, args) = extract_args::<(
@@ -1523,7 +1523,7 @@ pub trait RpcProtocol {
 		_txn: Option<Uuid>,
 		_session_id: Option<Uuid>,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		Err(method_not_found())
+		Err(method_not_allowed(Method::Begin.to_string()))
 	}
 
 	/// Commit a transaction
@@ -1533,7 +1533,7 @@ pub trait RpcProtocol {
 		_session_id: Option<Uuid>,
 		_params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		Err(method_not_found())
+		Err(method_not_allowed(Method::Commit.to_string()))
 	}
 
 	/// Cancel a transaction
@@ -1543,7 +1543,7 @@ pub trait RpcProtocol {
 		_session_id: Option<Uuid>,
 		_params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		Err(method_not_found())
+		Err(method_not_allowed(Method::Cancel.to_string()))
 	}
 }
 

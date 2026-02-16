@@ -16,27 +16,37 @@ use crate::err::into_types_error;
 
 /// Parse error (invalid message format).
 pub fn parse_error() -> TypesError {
-	TypesError::validation("Parse error".to_string(), Some(ValidationError::Parse))
+	TypesError::validation("Parse error".to_string(), ValidationError::Parse)
 }
 
 /// Invalid request structure.
 pub fn invalid_request() -> TypesError {
-	TypesError::validation("Invalid request".to_string(), Some(ValidationError::InvalidRequest))
+	TypesError::validation("Invalid request".to_string(), ValidationError::InvalidRequest)
 }
 
 /// Method not found.
-pub fn method_not_found() -> TypesError {
-	TypesError::not_found("Method not found".to_string(), Some(NotFoundError::Method))
+pub fn method_not_found(name: String) -> TypesError {
+	TypesError::not_found(
+		"Method not found".to_string(),
+		NotFoundError::Method {
+			name,
+		},
+	)
 }
 
 /// Method not allowed.
-pub fn method_not_allowed() -> TypesError {
-	TypesError::not_allowed("Method not allowed".to_string(), Some(NotAllowedError::Method))
+pub fn method_not_allowed(name: String) -> TypesError {
+	TypesError::not_allowed(
+		"Method not allowed".to_string(),
+		NotAllowedError::Method {
+			name,
+		},
+	)
 }
 
 /// Invalid params with a custom message.
 pub fn invalid_params(msg: impl Into<String>) -> TypesError {
-	TypesError::validation(msg.into(), Some(ValidationError::InvalidParams))
+	TypesError::validation(msg.into(), ValidationError::InvalidParams)
 }
 
 /// Internal error (wraps anyhow).
@@ -48,7 +58,7 @@ pub fn internal_error(err: anyhow::Error) -> TypesError {
 pub fn lq_not_supported() -> TypesError {
 	TypesError::configuration(
 		"Live query not supported".to_string(),
-		Some(ConfigurationError::LiveQueryNotSupported),
+		ConfigurationError::LiveQueryNotSupported,
 	)
 }
 
@@ -56,7 +66,7 @@ pub fn lq_not_supported() -> TypesError {
 pub fn bad_lq_config() -> TypesError {
 	TypesError::configuration(
 		"Bad live query config".to_string(),
-		Some(ConfigurationError::BadLiveQueryConfig),
+		ConfigurationError::BadLiveQueryConfig,
 	)
 }
 
@@ -64,7 +74,7 @@ pub fn bad_lq_config() -> TypesError {
 pub fn bad_gql_config() -> TypesError {
 	TypesError::configuration(
 		"Bad GraphQL config".to_string(),
-		Some(ConfigurationError::BadGraphqlConfig),
+		ConfigurationError::BadGraphqlConfig,
 	)
 }
 
@@ -75,34 +85,41 @@ pub fn thrown(msg: impl Into<String>) -> TypesError {
 
 /// Serialization error.
 pub fn serialize(msg: impl Into<String>) -> TypesError {
-	TypesError::serialization(msg.into(), Some(SerializationError::Serialization))
+	TypesError::serialization(msg.into(), SerializationError::Serialization)
 }
 
 /// Deserialization error.
 pub fn deserialize(msg: impl Into<String>) -> TypesError {
-	TypesError::serialization(msg.into(), Some(SerializationError::Deserialization))
+	TypesError::serialization(msg.into(), SerializationError::Deserialization)
 }
 
 /// Session not found.
 pub fn session_not_found(id: Option<Uuid>) -> TypesError {
-	let message = match id {
-		Some(id) => format!("Session not found: {id:?}"),
-		None => "Default session not found".to_string(),
+	let (message, id_str) = match id {
+		Some(id) => (format!("Session not found: {id:?}"), Some(id.to_string())),
+		None => ("Default session not found".to_string(), None),
 	};
-	TypesError::not_found(message, Some(NotFoundError::Session))
+	TypesError::not_found(
+		message,
+		NotFoundError::Session {
+			id: id_str,
+		},
+	)
 }
 
 /// Session already exists.
 pub fn session_exists(id: Uuid) -> TypesError {
 	TypesError::already_exists(
 		format!("Session already exists: {id}"),
-		Some(AlreadyExistsError::Session),
+		AlreadyExistsError::Session {
+			id: id.to_string(),
+		},
 	)
 }
 
 /// Session has expired (auth detail).
 pub fn session_expired() -> TypesError {
-	TypesError::auth("The session has expired".to_string(), Some(AuthError::SessionExpired))
+	TypesError::not_allowed("The session has expired".to_string(), AuthError::SessionExpired)
 }
 
 /// Convert an anyhow error to a wire error, downcasting to database errors where possible.

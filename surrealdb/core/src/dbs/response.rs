@@ -3,7 +3,9 @@ use std::time::{Duration, Instant};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{Error as TypesError, Kind, SurrealValue, Value, kind, object};
+use surrealdb_types::{
+	Error as TypesError, ErrorKind, Kind, Object, SurrealValue, Value, kind, object,
+};
 
 use crate::expr::TopLevelExpr;
 
@@ -73,6 +75,47 @@ impl QueryResult {
 	}
 }
 
+/// Serialise this error into the query-result wire shape: `result` (message string), optional
+/// `kind`, `details`, and `cause`. Does not include `code`. Used for query result responses
+/// for backwards compatibility (old clients expect `result` to be the message string).
+fn into_query_result_value(error: &TypesError) -> Value {
+	let mut obj = Object::new();
+	obj.insert("result", error.message().to_string());
+	obj.insert("kind", error.kind().clone());
+	if let Some(d) = error.details() {
+		obj.insert("details", d.clone());
+	}
+	if let Some(c) = error.cause() {
+		obj.insert("cause", into_query_result_value(c));
+	}
+	Value::Object(obj)
+}
+
+/// Deserialise an error from the query-result wire shape. Requires `result` (message string).
+/// `kind` is optional and defaults to [`Internal`](ErrorKind::Internal) when missing.
+fn from_query_result_value(value: Value) -> Result<TypesError, TypesError> {
+	let Value::Object(mut map) = value else {
+		return Err(TypesError::internal("Expected object for query result error".to_string()));
+	};
+	let result_val = map.remove("result").ok_or_else(|| {
+		TypesError::internal("Missing result (message) for query result error".to_string())
+	})?;
+	let message = result_val.into_string().map_err(|e| TypesError::internal(e.to_string()))?;
+	let kind = map
+		.remove("kind")
+		.map(ErrorKind::from_value)
+		.transpose()
+		.map_err(|e| TypesError::internal(e.to_string()))?
+		.unwrap_or_default();
+	let details = map.remove("details");
+	let cause = map
+		.remove("cause")
+		.map(from_query_result_value)
+		.transpose()
+		.map_err(|e| TypesError::internal(e.to_string()))?;
+	Ok(TypesError::from_parts(message, Some(kind), details, cause))
+}
+
 impl SurrealValue for QueryResult {
 	fn kind_of() -> Kind {
 		kind!(
@@ -113,7 +156,7 @@ impl SurrealValue for QueryResult {
 				map.insert("result", v);
 			}
 			Err(e) => {
-				let err_val = e.into_query_result_value();
+				let err_val = into_query_result_value(&e);
 				if let Value::Object(err_obj) = err_val {
 					for (k, v) in err_obj.into_inner() {
 						map.insert(k, v);
@@ -157,7 +200,7 @@ impl SurrealValue for QueryResult {
 				// Reconstruct error from query-result shape (result string + optional kind,
 				// details, cause)
 				map.insert("result".to_string(), result);
-				Err(TypesError::from_query_result_value(Value::Object(map))?)
+				Err(from_query_result_value(Value::Object(map))?)
 			}
 		};
 
