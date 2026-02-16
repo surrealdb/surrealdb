@@ -75,7 +75,11 @@ pub enum ErrorKind {
 	Connection,
 	/// Internal or unexpected error (server or client).
 	/// Used for unexpected failures.
+	///
+	/// Also used as the fallback for unknown error kinds from the wire (forward compat).
 	#[default]
+	#[serde(other)]
+	#[surreal(other)]
 	Internal,
 }
 

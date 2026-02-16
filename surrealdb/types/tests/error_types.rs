@@ -367,14 +367,16 @@ fn test_public_error_std_error_source() {
 }
 
 #[test]
-fn test_error_kind_unknown_fails_deserialization() {
-	// Unknown wire kind strings cause deserialization to fail; server should send only known kinds.
+fn test_error_kind_unknown_falls_back_to_internal() {
+	// Forward compatibility: unknown wire kind strings fall back to Internal
+	// so that older SDKs can still deserialize errors from newer servers.
 	let mut obj = Object::new();
 	obj.insert("kind", "future_kind");
 	obj.insert("message", "Message");
 	let value = Value::Object(obj);
-	let result = Error::from_value(value);
-	assert!(result.is_err());
+	let err = Error::from_value(value).unwrap();
+	assert_eq!(err.kind(), &ErrorKind::Internal);
+	assert_eq!(err.message(), "Message");
 }
 
 #[test]
