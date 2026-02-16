@@ -798,7 +798,7 @@ mod tests {
 		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::default();
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index(ctx, &RecordIdKey::Number(*doc_id as i64), None, Some(content)).await.unwrap();
+			h.index(ctx, &RecordIdKey::Number(*doc_id as i64), None, Some(content)).await?;
 			match map.entry(obj.clone()) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().insert(*doc_id);
@@ -807,6 +807,7 @@ mod tests {
 					e.insert(HashSet::from_iter([*doc_id]));
 				}
 			}
+			h.index_pendings(&ctx).await?;
 			h.check_hnsw_properties(map.len()).await;
 		}
 		Ok(map)
@@ -856,7 +857,7 @@ mod tests {
 	}
 
 	async fn delete_hnsw_index_collection(
-		ctx: &Context,
+		ctx: &FrozenContext,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 		mut map: HashMap<SharedVector, HashSet<DocId>>,
@@ -872,6 +873,7 @@ mod tests {
 					e.remove();
 				}
 			}
+			h.index_pendings(ctx).await?;
 			// Check properties
 			h.check_hnsw_properties(map.len()).await;
 		}
@@ -956,7 +958,7 @@ mod tests {
 			// (Distance::Jaccard, 100),
 			(Distance::Manhattan, 5),
 			(Distance::Minkowski(2.into()), 5),
-			// (Distance::Pearson, 5),
+			(Distance::Pearson, 5),
 		] {
 			for vt in [
 				VectorType::F64,
