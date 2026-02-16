@@ -27,7 +27,6 @@ use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
 use crate::key::index::ig::IndexAppending;
 use crate::key::record;
@@ -895,7 +894,7 @@ impl Building {
 		if !*rc {
 			return Ok(());
 		}
-		FullTextIndex::trigger_compaction(&self.ikb, tx, self.opt.id()).await?;
+		IndexOperation::compaction_trigger(&self.ikb, tx, self.opt.id()).await?;
 		*rc = false;
 		Ok(())
 	}

@@ -225,7 +225,7 @@ async fn collect_query(
 	let mut results = Vec::with_capacity(vectors.len());
 	for (_, v) in vectors {
 		let mut res = dbs
-			.execute(&format!("SELECT id FROM t WHERE v <|10,150|> {v};"), &session, None)
+			.execute(&format!("SELECT id FROM t WHERE v <|10,150|> {v};"), session, None)
 			.await?;
 		let res = res.remove(0).result?;
 		let Value::Array(res) = res else {

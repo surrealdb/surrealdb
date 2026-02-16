@@ -24,7 +24,7 @@ pub(crate) struct AllIndexRoot<'a> {
 
 impl_kv_key_storekey!(AllIndexRoot<'_> => Vec<u8>);
 
-pub fn new(ns: NamespaceId, db: DatabaseId, tb: &TableName, ix: IndexId) -> AllIndexRoot {
+pub fn new(ns: NamespaceId, db: DatabaseId, tb: &TableName, ix: IndexId) -> AllIndexRoot<'_> {
 	AllIndexRoot::new(ns, db, tb, ix)
 }
 

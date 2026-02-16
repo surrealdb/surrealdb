@@ -236,12 +236,10 @@ impl ExecOperator for KnnScan {
 				stack
 					.enter(|stk| {
 						let hnsw_index = &hnsw_index;
-						let db_def = &db;
 						let vector = &vector;
 						async move {
 							hnsw_index
 								.knn_search(
-									db_def,
 									frozen_ctx,
 									stk,
 									vector,

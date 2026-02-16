@@ -9,7 +9,7 @@ use reblessive::tree::Stk;
 use roaring::RoaringTreemap;
 use tokio::sync::RwLock;
 
-use crate::catalog::{DatabaseDefinition, Distance, HnswParams, TableId, VectorType};
+use crate::catalog::{Distance, HnswParams, TableId, VectorType};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::err::Error;
@@ -41,20 +41,16 @@ pub(crate) struct HnswIndex {
 pub(super) struct HnswContext<'a> {
 	pub(super) ctx: &'a FrozenContext,
 	pub(super) tx: Arc<Transaction>,
-	pub(super) db: &'a DatabaseDefinition,
+	pub(super) ikb: IndexKeyBase,
 	pub(super) vec_docs: &'a VecDocs,
 }
 
 impl<'a> HnswContext<'a> {
-	pub(super) fn new(
-		ctx: &'a FrozenContext,
-		db: &'a DatabaseDefinition,
-		vec_docs: &'a VecDocs,
-	) -> Self {
+	pub(super) fn new(ctx: &'a FrozenContext, ikb: IndexKeyBase, vec_docs: &'a VecDocs) -> Self {
 		Self {
 			ctx,
 			tx: ctx.tx(),
-			db,
+			ikb,
 			vec_docs,
 		}
 	}
@@ -117,7 +113,7 @@ impl HnswIndex {
 			vec![]
 		};
 		let tx = ctx.tx();
-		let id = if let Some(doc_id) = self.docs.read().await.get(&tx, &id).await? {
+		let id = if let Some(doc_id) = self.docs.read().await.get_doc_id(&tx, id).await? {
 			VectorId::DocId(doc_id)
 		} else {
 			VectorId::RecordKey(Arc::new(id.clone()))
@@ -133,40 +129,26 @@ impl HnswIndex {
 		Ok(())
 	}
 
-	pub(super) fn new_hnsw_context<'a>(
-		&'a self,
-		ctx: &'a FrozenContext,
-		db: &'a DatabaseDefinition,
-	) -> HnswContext<'a> {
-		HnswContext::new(ctx, db, &self.vec_docs)
+	pub(super) fn new_hnsw_context<'a>(&'a self, ctx: &'a FrozenContext) -> HnswContext<'a> {
+		HnswContext::new(ctx, self.ikb.clone(), &self.vec_docs)
 	}
 
-	pub(super) async fn index_pendings(
-		&self,
-		ctx: &FrozenContext,
-		db: &DatabaseDefinition,
-	) -> Result<usize> {
+	pub(in crate::idx) async fn index_pendings(&self, ctx: &FrozenContext) -> Result<usize> {
 		let tx = ctx.tx();
 		let count = self
-			.collect_pending(ctx, &tx, async |_, pending| {
-				self.index_pending(ctx, db, pending).await
-			})
+			.collect_pending(ctx, &tx, async |_, pending| self.index_pending(ctx, pending).await)
 			.await?;
 		tx.delr(self.ikb.new_hp_range()?).await?;
 		Ok(count)
 	}
 
-	async fn index_pending(
-		&self,
-		ctx: &FrozenContext,
-		db: &DatabaseDefinition,
-		pending: VectorPendingUpdate,
-	) -> Result<()> {
+	async fn index_pending(&self, ctx: &FrozenContext, pending: VectorPendingUpdate) -> Result<()> {
 		let mut hnsw = self.hnsw.write().await;
 		// Ensure the layers are up-to-date
 		hnsw.check_state(ctx).await?;
 		// Create a new context
-		let mut ctx = self.new_hnsw_context(ctx, db);
+		let mut ctx = self.new_hnsw_context(ctx);
+		let mut docs = self.docs.write().await;
 		// Remove old values if any
 		if let VectorId::DocId(doc_id) = pending.id {
 			for vector in pending.old_vectors {
@@ -175,10 +157,13 @@ impl HnswIndex {
 				// Remove the vector
 				self.vec_docs.remove(&ctx, &vector, doc_id, &mut hnsw).await?;
 			}
+			if pending.new_vectors.is_empty() {
+				// Remove the doc
+				docs.remove(&ctx.tx, doc_id).await?;
+			}
 		}
 
 		// Index the new values if any
-		let mut docs = self.docs.write().await;
 		if !pending.new_vectors.is_empty() {
 			let doc_id = match pending.id {
 				VectorId::DocId(doc_id) => doc_id,
@@ -201,10 +186,8 @@ impl HnswIndex {
 		self.hnsw.write().await.check_state(ctx).await
 	}
 
-	#[expect(clippy::too_many_arguments)]
 	pub(crate) async fn knn_search(
 		&self,
-		db: &DatabaseDefinition,
 		ctx: &FrozenContext,
 		stk: &mut Stk,
 		pt: &[Number],
@@ -223,7 +206,7 @@ impl HnswIndex {
 		vector.check_dimension(self.dim)?;
 		let search = HnswSearch::new(vector, k, ef);
 		// Get a new HNSW context
-		let ctx = self.new_hnsw_context(ctx, db);
+		let ctx = self.new_hnsw_context(ctx);
 		// Collect the result
 		let mut builder = KnnResultBuilder::new(k);
 
@@ -249,11 +232,11 @@ impl HnswIndex {
 		for (dist, id) in result {
 			let dist: f64 = dist.into();
 			// Do we have it from the cache?
-			if let Some(cache) = &cache {
-				if let Some(Some((rid, record))) = cache.get(&id) {
-					res.push_back((rid.clone(), dist, Some(record.clone())));
-					continue;
-				}
+			if let Some(cache) = &cache
+				&& let Some(Some((rid, record))) = cache.get(&id)
+			{
+				res.push_back((rid.clone(), dist, Some(record.clone())));
+				continue;
 			}
 			// Otherwise we get it from the state
 			match id {
@@ -285,7 +268,7 @@ impl HnswIndex {
 		// Do the search
 		if let Some(filter) = filter {
 			let neighbours = hnsw
-				.knn_search_with_filter(&ctx, search, stk, filter, pending_docs.as_ref())
+				.knn_search_with_filter(ctx, search, stk, filter, pending_docs.as_ref())
 				.await?;
 			self.add_graph_results(&ctx.tx, &hnsw, neighbours, builder, |evicted_docs| {
 				filter.expires(&evicted_docs)
@@ -326,20 +309,19 @@ impl HnswIndex {
 		// Second pass, we build the KNN result for non-deleted documents
 		for (id, vectors) in non_deleted_docs {
 			// If there is a filter, we need to check if the record is truthy
-			if let Some(filter) = filter {
-				if !filter.check_vector_id_truthy(ctx, stk, id.clone()).await? {
-					continue;
-				}
+			if let Some(filter) = filter
+				&& !filter.check_vector_id_truthy(ctx, stk, id.clone()).await?
+			{
+				continue;
 			}
 			for vector in vectors {
 				let vector = Vector::from(vector);
 				let d = self.distance.calculate(&search.pt, &vector);
-				if builder.check_add(d) {
-					if let Some(evicted_id) = builder.add_vector_id_result(d, id.clone())
-						&& let Some(filter) = filter
-					{
-						filter.expire(&evicted_id);
-					}
+				if builder.check_add(d)
+					&& let Some(evicted_id) = builder.add_vector_id_result(d, id.clone())
+					&& let Some(filter) = filter
+				{
+					filter.expire(&evicted_id);
 				}
 			}
 		}

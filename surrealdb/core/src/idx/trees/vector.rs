@@ -142,7 +142,7 @@ impl SerializedVector {
 	{
 		match value {
 			Value::Array(a) => {
-				for v in a.0.into_iter() {
+				for v in a.0 {
 					Self::check_vector_value(v, vec)?;
 				}
 				Ok(())
@@ -151,7 +151,7 @@ impl SerializedVector {
 				vec.push(n.try_into()?);
 				Ok(())
 			}
-			_ => Err(anyhow::Error::new(Error::InvalidVectorValue(value.clone().to_raw_string()))),
+			_ => Err(anyhow::Error::new(Error::InvalidVectorValue(value.to_raw_string()))),
 		}
 	}
 

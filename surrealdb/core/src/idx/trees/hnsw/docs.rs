@@ -43,7 +43,11 @@ impl HnswDocs {
 		})
 	}
 
-	pub(super) async fn get(&self, tx: &Transaction, id: &RecordIdKey) -> Result<Option<DocId>> {
+	pub(super) async fn get_doc_id(
+		&self,
+		tx: &Transaction,
+		id: &RecordIdKey,
+	) -> Result<Option<DocId>> {
 		tx.get(&self.ikb.new_hi_key(id), None).await
 	}
 
@@ -72,7 +76,7 @@ impl HnswDocs {
 		}
 	}
 
-	pub(in crate::idx) async fn get_thing(
+	pub(super) async fn get_thing(
 		&self,
 		tx: &Transaction,
 		doc_id: DocId,
@@ -91,12 +95,15 @@ impl HnswDocs {
 	pub(super) async fn remove(
 		&mut self,
 		tx: &Transaction,
-		id: &RecordIdKey,
+		doc_id: DocId,
 	) -> Result<Option<DocId>> {
-		let id_key = self.ikb.new_hi_key(id);
+		let doc_key = self.ikb.new_hd_key(doc_id);
+		let Some(id) = tx.get(&doc_key, None).await? else {
+			return Ok(None);
+		};
+		tx.del(&doc_key).await?;
+		let id_key = self.ikb.new_hi_key(&id);
 		if let Some(doc_id) = tx.get(&id_key, None).await? {
-			let doc_key = self.ikb.new_hd_key(doc_id);
-			tx.del(&doc_key).await?;
 			tx.del(&id_key).await?;
 			self.state.available.insert(doc_id);
 			Ok(Some(doc_id))

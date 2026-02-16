@@ -200,151 +200,6 @@ impl Ids64 {
 		matches!(self, Self::Empty)
 	}
 
-	fn append_to(&self, to: &mut RoaringTreemap) {
-		match &self {
-			Self::Empty => {}
-			Self::One(d) => {
-				to.insert(*d);
-			}
-			Self::Vec2(a) => {
-				for d in a {
-					to.insert(*d);
-				}
-			}
-			Self::Vec3(a) => {
-				for d in a {
-					to.insert(*d);
-				}
-			}
-			Self::Vec4(a) => {
-				for d in a {
-					to.insert(*d);
-				}
-			}
-			Self::Vec5(a) => {
-				for d in a {
-					to.insert(*d);
-				}
-			}
-			Self::Vec6(a) => {
-				for d in a {
-					to.insert(*d);
-				}
-			}
-			Self::Vec7(a) => {
-				for d in a {
-					to.insert(*d);
-				}
-			}
-			Self::Vec8(a) => {
-				for d in a {
-					to.insert(*d);
-				}
-			}
-			Self::Bits(b) => {
-				for d in b {
-					to.insert(d);
-				}
-			}
-		}
-	}
-
-	fn remove_to(&self, to: &mut RoaringTreemap) {
-		match &self {
-			Self::Empty => {}
-			Self::One(d) => {
-				to.remove(*d);
-			}
-			Self::Vec2(a) => {
-				for &d in a {
-					to.remove(d);
-				}
-			}
-			Self::Vec3(a) => {
-				for &d in a {
-					to.remove(d);
-				}
-			}
-			Self::Vec4(a) => {
-				for &d in a {
-					to.remove(d);
-				}
-			}
-			Self::Vec5(a) => {
-				for &d in a {
-					to.remove(d);
-				}
-			}
-			Self::Vec6(a) => {
-				for &d in a {
-					to.remove(d);
-				}
-			}
-			Self::Vec7(a) => {
-				for &d in a {
-					to.remove(d);
-				}
-			}
-			Self::Vec8(a) => {
-				for &d in a {
-					to.remove(d);
-				}
-			}
-			Self::Bits(b) => {
-				for d in b {
-					to.remove(d);
-				}
-			}
-		}
-	}
-
-	fn append_iter_ref<'a, I>(&mut self, docs: I) -> Option<Self>
-	where
-		I: Iterator<Item = &'a DocId>,
-	{
-		let mut new_doc: Option<Self> = None;
-		for &doc in docs {
-			if let Some(ref mut nd) = new_doc {
-				let nd = nd.insert(doc);
-				if nd.is_some() {
-					new_doc = nd;
-				};
-			} else {
-				new_doc = self.insert(doc);
-			}
-		}
-		new_doc
-	}
-
-	fn append_iter<I>(&mut self, docs: I) -> Option<Self>
-	where
-		I: Iterator<Item = DocId>,
-	{
-		let mut new_doc: Option<Self> = None;
-		for doc in docs {
-			if let Some(mut nd) = new_doc {
-				new_doc = nd.insert(doc);
-			} else {
-				new_doc = self.insert(doc);
-			}
-		}
-		new_doc
-	}
-	fn append_from(&mut self, from: &Ids64) -> Option<Self> {
-		match from {
-			Self::Empty => None,
-			Self::One(d) => self.insert(*d),
-			Self::Vec2(a) => self.append_iter_ref(a.iter()),
-			Self::Vec3(a) => self.append_iter_ref(a.iter()),
-			Self::Vec4(a) => self.append_iter_ref(a.iter()),
-			Self::Vec5(a) => self.append_iter_ref(a.iter()),
-			Self::Vec6(a) => self.append_iter_ref(a.iter()),
-			Self::Vec7(a) => self.append_iter_ref(a.iter()),
-			Self::Vec8(a) => self.append_iter_ref(a.iter()),
-			Self::Bits(a) => self.append_iter(a.iter()),
-		}
-	}
-
 	pub(in crate::idx) fn iter(&self) -> Box<dyn Iterator<Item = DocId> + Send + '_> {
 		match &self {
 			Self::Empty => Box::new(EmptyIterator {}),
@@ -562,22 +417,18 @@ impl KnnResultBuilder {
 			return None;
 		}
 		// We remove the last element
-		let Some((_, id)) = self.priority_list.pop_last() else {
-			return None;
-		};
-		// We update the vector count
-		let Entry::Occupied(mut e) = self.vector_id_count.entry(id) else {
-			return None;
-		};
-		let c = e.get_mut();
-		if *c <= 1 {
-			// This entry does not exist anymore in the result list, it can be evicted
-			let (id, _) = e.remove_entry();
-			Some(id)
-		} else {
+		if let Some((_, id)) = self.priority_list.pop_last()
+			&& let Entry::Occupied(mut e) = self.vector_id_count.entry(id)
+		{
+			let c = e.get_mut();
+			if *c <= 1 {
+				// This entry does not exist anymore in the result list, it can be evicted
+				let (id, _) = e.remove_entry();
+				return Some(id);
+			}
 			*c -= 1;
-			None
 		}
+		None
 	}
 
 	pub(super) fn collect(self) -> KnnResult {

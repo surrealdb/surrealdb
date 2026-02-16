@@ -7,9 +7,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{
-	DatabaseDefinition, DatabaseId, Distance, Index, IndexDefinition, NamespaceId,
-};
+use crate::catalog::{DatabaseId, Distance, Index, IndexDefinition, NamespaceId};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, NsDbTbCtx};
@@ -196,7 +194,6 @@ impl InnerQueryExecutor {
 								if let PerIndexReferenceIndex::Hnsw(hi) = e.get() {
 									Some(
 										HnswEntry::new(
-											&doc_ctx.db,
 											stk,
 											ctx,
 											opt,
@@ -236,7 +233,6 @@ impl InnerQueryExecutor {
 								hi.check_state(ctx).await?;
 								// Now we can execute the request
 								let entry = HnswEntry::new(
-									&doc_ctx.db,
 									stk,
 									ctx,
 									opt,
@@ -881,7 +877,6 @@ pub(super) struct HnswEntry {
 impl HnswEntry {
 	#[expect(clippy::too_many_arguments)]
 	async fn new(
-		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
@@ -892,7 +887,7 @@ impl HnswEntry {
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self> {
 		let cond_filter = cond.map(|cond| (opt, cond));
-		let res = h.knn_search(db, ctx, stk, v, n as usize, ef as usize, cond_filter).await?;
+		let res = h.knn_search(ctx, stk, v, n as usize, ef as usize, cond_filter).await?;
 		Ok(Self {
 			res,
 		})

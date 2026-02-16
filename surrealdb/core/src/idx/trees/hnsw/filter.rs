@@ -102,10 +102,7 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		cond: Arc<Cond>,
 		rid: Arc<RecordId>,
 	) -> Result<Option<Arc<Record>>> {
-		let val = ctx
-			.tx
-			.get_record(ctx.db.namespace_id, ctx.db.database_id, &rid.table, &rid.key, None)
-			.await?;
+		let val = ctx.tx.get_record(ctx.ikb.0.ns, ctx.ikb.0.db, &rid.table, &rid.key, None).await?;
 		if val.data.as_ref().is_nullish() {
 			return Ok(None);
 		}

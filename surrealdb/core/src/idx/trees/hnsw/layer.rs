@@ -72,6 +72,7 @@ where
 		self.save_nodes(tx, st, &[node]).await?;
 		Ok(true)
 	}
+	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn search_single(
 		&self,
 		ctx: &HnswContext<'_>,
@@ -337,6 +338,7 @@ where
 		Ok(true)
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub(super) async fn insert(
 		&mut self,
 		ctx: &HnswContext<'_>,

@@ -418,7 +418,7 @@ where
 		filter: &mut HnswTruthyDocumentFilter<'_>,
 		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<Vec<(f64, ElementId)>> {
-		if let Some((ep_dist, ep_id)) = self.search_ep(&ctx, &search.pt, pending_docs).await?
+		if let Some((ep_dist, ep_id)) = self.search_ep(ctx, &search.pt, pending_docs).await?
 			&& self.elements.get_vector(&ctx.tx, &ep_id).await?.is_some()
 		{
 			let w = self
@@ -503,8 +503,8 @@ mod tests {
 
 	use crate::catalog::providers::CatalogProvider;
 	use crate::catalog::{
-		DatabaseDefinition, DatabaseId, Distance, HnswParams, IndexId, NamespaceId,
-		TableDefinition, TableId, VectorType,
+		DatabaseId, Distance, HnswParams, IndexId, NamespaceId, TableDefinition, TableId,
+		VectorType,
 	};
 	use crate::ctx::{Context, FrozenContext};
 	use crate::idx::IndexKeyBase;
@@ -599,17 +599,9 @@ mod tests {
 		let ns = NamespaceId(1);
 		let db = DatabaseId(2);
 		let tb = TableId(3);
-		let db = DatabaseDefinition {
-			namespace_id: ns,
-			database_id: db,
-			name: "db".to_string(),
-			comment: None,
-			changefeed: None,
-			strict: false,
-		};
-		let tb = TableDefinition::new(ns, db.database_id, tb, "tb".into());
-		let vec_docs =
-			VecDocs::new(IndexKeyBase::new(ns, db.database_id, "tb".into(), IndexId(4)), false);
+		let tb = TableDefinition::new(ns, db, tb, "tb".into());
+		let ikb = IndexKeyBase::new(ns, db, "tb".into(), IndexId(4));
+		let vec_docs = VecDocs::new(ikb.clone(), false);
 		let mut h = HnswFlavor::new(
 			tb.table_id,
 			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), tb.name.clone(), IndexId(4)),
@@ -619,20 +611,20 @@ mod tests {
 		.unwrap();
 		let map = {
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
-			let ctx = HnswContext::new(&ctx, &db, &vec_docs);
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
 			let map = insert_collection_hnsw(&ctx, &mut h, collection).await;
 			ctx.tx.commit().await.unwrap();
 			map
 		};
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			let ctx = HnswContext::new(&ctx, &db, &vec_docs);
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
 			find_collection_hnsw(&ctx, &h, collection).await;
 			ctx.tx.cancel().await.unwrap();
 		}
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
-			let ctx = HnswContext::new(&ctx, &db, &vec_docs);
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
 			delete_collection_hnsw(&ctx, &mut h, map).await;
 			ctx.tx.commit().await.unwrap();
 		}
@@ -742,12 +734,11 @@ mod tests {
 
 	async fn find_collection_hnsw_index(
 		ctx: &FrozenContext,
-		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 	) {
-		let ctx = h.new_hnsw_context(ctx, db);
+		let ctx = h.new_hnsw_context(ctx);
 		let max_knn = 20.min(collection.len());
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let doc_id = VectorId::DocId(*doc_id);
@@ -856,11 +847,9 @@ mod tests {
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
 
-			let db = tx.ensure_ns_db(None, "myns", "mydb").await.unwrap();
-
 			stack
 				.enter(|stk| async {
-					find_collection_hnsw_index(&ctx, &db, stk, &mut h, &collection).await;
+					find_collection_hnsw_index(&ctx, stk, &mut h, &collection).await;
 				})
 				.finish()
 				.await;
@@ -946,25 +935,18 @@ mod tests {
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
 		let vec_docs = VecDocs::new(ikb.clone(), false);
-		let db = DatabaseDefinition {
-			namespace_id: ikb.0.ns,
-			database_id: ikb.0.db,
-			name: ikb.table().to_string(),
-			comment: None,
-			changefeed: None,
-			strict: false,
-		};
 		let mut h =
-			HnswFlavor::new(TableId(3), ikb, &p, ds.index_store().vector_cache().clone()).unwrap();
+			HnswFlavor::new(TableId(3), ikb.clone(), &p, ds.index_store().vector_cache().clone())
+				.unwrap();
 		{
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
-			let ctx = HnswContext::new(&ctx, &db, &vec_docs);
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
 			insert_collection_hnsw(&ctx, &mut h, &collection).await;
 			ctx.tx.commit().await.unwrap();
 		}
 		{
 			let ctx = new_ctx(&ds, TransactionType::Read).await;
-			let ctx = HnswContext::new(&ctx, &db, &vec_docs);
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
 			let search = HnswSearch::new(new_i16_vec(-2, -3), 10, 501);
 			let res = h.knn_search(&ctx, &search, None).await.unwrap();
 			ctx.tx.cancel().await.unwrap();
@@ -1013,8 +995,8 @@ mod tests {
 		}
 
 		info!("Index pendings");
-		assert_eq!(h.index_pendings(&ctx, &db).await?, collection.len());
-		assert_eq!(h.index_pendings(&ctx, &db).await?, 0);
+		assert_eq!(h.index_pendings(&ctx).await?, collection.len());
+		assert_eq!(h.index_pendings(&ctx).await?, 0);
 
 		tx.commit().await?;
 
@@ -1034,7 +1016,6 @@ mod tests {
 			let collection = collection.clone();
 			let h = h.clone();
 			let ds = ds.clone();
-			let db = db.clone();
 			let f = tokio::spawn(async move {
 				let mut stack = reblessive::tree::TreeStack::new();
 				stack
@@ -1045,7 +1026,7 @@ mod tests {
 							let search = HnswSearch::new(pt.clone(), knn, efs);
 
 							let ctx = new_ctx(&ds, TransactionType::Read).await;
-							let ctx = h.new_hnsw_context(&ctx, &db);
+							let ctx = h.new_hnsw_context(&ctx);
 							let mut builder = KnnResultBuilder::new(knn);
 							h.search_graph(&ctx, stk, &search, None, &mut None, &mut builder)
 								.await
