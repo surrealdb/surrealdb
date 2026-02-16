@@ -122,8 +122,19 @@ pub fn session_expired() -> TypesError {
 	TypesError::not_allowed("The session has expired".to_string(), AuthError::SessionExpired)
 }
 
-/// Convert an anyhow error to a wire error, downcasting to database errors where possible.
+/// Convert an anyhow error to a wire error, downcasting to preserve structured
+/// error information where possible.
+///
+/// Tries, in order:
+/// 1. `TypesError` — already a wire error, return as-is.
+/// 2. `ApiError` — convert via `to_types_error()`.
+/// 3. `err::Error` (core database error) — convert via `into_types_error()`.
+/// 4. Fallback — wrap the display string as an internal error.
 pub fn types_error_from_anyhow(error: anyhow::Error) -> TypesError {
+	// If the error is already a TypesError, return it directly (preserves kind/details/cause)
+	if let Ok(types_error) = error.downcast::<TypesError>() {
+		return types_error;
+	}
 	if let Some(api_error) = error.downcast_ref::<ApiError>() {
 		return api_error.to_types_error();
 	}

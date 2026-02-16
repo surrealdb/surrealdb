@@ -1562,14 +1562,16 @@ async fn run_query<T>(
 where
 	T: RpcProtocol + ?Sized,
 {
-	let session_lock = this.get_session(&session_id).map_err(|e| anyhow::anyhow!("{}", e))?;
+	let session_lock = this.get_session(&session_id).map_err(anyhow::Error::from)?;
 	let session = session_lock.read().await;
-	ensure!(T::LQ_SUPPORT || !session.rt, anyhow::anyhow!("{}", bad_lq_config()));
+	if !T::LQ_SUPPORT && session.rt {
+		return Err(bad_lq_config().into());
+	}
 
 	// If a transaction UUID is provided, retrieve it and execute with it
 	let res = if let Some(txn_id) = txn {
 		// Retrieve the transaction - fail if not found
-		let tx = this.get_tx(txn_id).await.map_err(|e| anyhow::anyhow!("{}", e))?;
+		let tx = this.get_tx(txn_id).await.map_err(anyhow::Error::from)?;
 		// Execute with the existing transaction by passing it through context
 		match query {
 			QueryForm::Text(query) => {

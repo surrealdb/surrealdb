@@ -342,19 +342,7 @@ fn create_middleware_closure(
 						}
 					},
 					Err(e) => {
-						// Check if the error is an ApiError to preserve its status code
-						if let Some(api_err) = e.downcast_ref::<ApiError>() {
-							let msg = api_err.to_string();
-							let status = api_err.status_code();
-							let mut res = ApiResponse {
-								status,
-								body: crate::types::PublicValue::String(msg),
-								request_id: request_id.clone(),
-								..Default::default()
-							};
-							res.ensure_request_id_header();
-							res
-						} else if is_initial {
+						if is_initial {
 							error!(
 								request_id = %request_id,
 								middleware = %middleware_name,
