@@ -13,21 +13,33 @@ use crate::idx::trees::vector::{SerializedVector, Vector};
 use crate::kvs::{KVValue, Transaction};
 use crate::val::{RecordId, RecordIdKey, TableName};
 
+/// Manages the bidirectional mapping between record IDs and internal document IDs.
+///
+/// Maintains a pool of available (recycled) doc IDs and a monotonic counter
+/// for allocating new ones, persisting the state to the key-value store.
 pub(in crate::idx) struct HnswDocs {
+	/// The table name, used to reconstruct full record IDs.
 	tb: TableName,
+	/// Key base for generating storage keys.
 	ikb: IndexKeyBase,
+	/// Whether the state has been modified and needs to be persisted.
 	state_updated: bool,
+	/// The persisted document allocation state.
 	state: HnswDocsState,
 }
 
+/// Persisted state for document ID allocation.
 #[revisioned(revision = 1)]
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub(crate) struct HnswDocsState {
+	/// Pool of recycled doc IDs available for reuse.
 	available: RoaringTreemap,
+	/// The next doc ID to allocate when the pool is empty.
 	next_doc_id: DocId,
 }
 
 impl HnswDocs {
+	/// Creates a new `HnswDocs`, loading existing state from the key-value store.
 	pub(in crate::idx) async fn new(
 		tx: &Transaction,
 		tb: TableName,
@@ -43,6 +55,7 @@ impl HnswDocs {
 		})
 	}
 
+	/// Looks up the internal doc ID for a given record key, if it exists.
 	pub(super) async fn get_doc_id(
 		&self,
 		tx: &Transaction,
@@ -51,6 +64,7 @@ impl HnswDocs {
 		tx.get(&self.ikb.new_hi_key(id), None).await
 	}
 
+	/// Resolves a record key to its internal doc ID, creating a new mapping if needed.
 	pub(super) async fn resolve(&mut self, tx: &Transaction, id: &RecordIdKey) -> Result<DocId> {
 		if let Some(doc_id) = tx.get(&self.ikb.new_hi_key(id), None).await? {
 			Ok(doc_id)
@@ -64,6 +78,7 @@ impl HnswDocs {
 		}
 	}
 
+	/// Allocates the next available doc ID, reusing a recycled one if possible.
 	fn next_doc_id(&mut self) -> DocId {
 		self.state_updated = true;
 		if let Some(doc_id) = self.state.available.iter().next() {
@@ -76,6 +91,7 @@ impl HnswDocs {
 		}
 	}
 
+	/// Retrieves the full record ID for a given internal doc ID.
 	pub(super) async fn get_thing(
 		&self,
 		tx: &Transaction,
@@ -92,6 +108,8 @@ impl HnswDocs {
 		}
 	}
 
+	/// Removes the mapping for a doc ID, recycling it for future reuse.
+	/// Returns the removed doc ID if it existed.
 	pub(super) async fn remove(
 		&mut self,
 		tx: &Transaction,
@@ -112,6 +130,7 @@ impl HnswDocs {
 		}
 	}
 
+	/// Persists the document allocation state if it has been modified.
 	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
 		if self.state_updated {
 			let state_key = self.ikb.new_hd_root_key();
@@ -159,9 +178,13 @@ pub(crate) struct ElementHashedDocs {
 	vectors: Vec<(SerializedVector, ElementDocs)>,
 }
 
+/// Result of removing a document from an [`ElementHashedDocs`] entry.
 enum RemoveResult {
+	/// The vector has no remaining documents; the element should be removed from the graph.
 	Empty(ElementId),
+	/// The entry was updated; optionally contains an element ID to remove from the graph.
 	Updated(Option<ElementId>),
+	/// The document was not found; no changes were made.
 	Unchanged,
 }
 
@@ -259,6 +282,7 @@ pub(in crate::idx) struct VecDocs {
 }
 
 impl VecDocs {
+	/// Creates a new `VecDocs` with the given index key base and hashing mode.
 	pub(super) fn new(ikb: IndexKeyBase, use_hashed_vector: bool) -> Self {
 		Self {
 			ikb,

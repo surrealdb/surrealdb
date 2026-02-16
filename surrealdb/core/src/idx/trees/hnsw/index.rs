@@ -27,21 +27,49 @@ use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::kvs::{KVValue, Key, Transaction};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
 
+/// High-level HNSW index supporting concurrent reads and writes.
+///
+/// Writes are handled through a two-phase approach:
+/// 1. **Enqueueing**: The [`index`](Self::index) method converts document changes into
+///    [`VectorPendingUpdate`] entries stored in the key-value store, using an [`AtomicU32`] counter
+///    for lock-free sequencing.
+/// 2. **Applying**: A background task calls [`index_pendings`](Self::index_pendings) to drain and
+///    apply all pending updates to the HNSW graph under a write lock.
+///
+/// Reads via [`knn_search`](Self::knn_search) first scan pending (not-yet-applied)
+/// updates, then search the committed graph under a read lock, merging both
+/// result sets into a single k-nearest neighbor response.
 pub(crate) struct HnswIndex {
+	/// Expected vector dimensionality.
 	dim: usize,
+	/// Distance metric used for similarity computation.
 	distance: Distance,
+	/// Key base for generating index-related storage keys.
 	ikb: IndexKeyBase,
+	/// The type of vector stored in this index.
 	vector_type: VectorType,
+	/// The HNSW graph, protected by a read-write lock for concurrent access.
 	hnsw: RwLock<HnswFlavor>,
+	/// Document-to-ID mappings, protected by a read-write lock.
 	docs: RwLock<HnswDocs>,
+	/// Vector-to-document mappings (not behind a lock; accessed within locked scopes).
 	vec_docs: VecDocs,
+	/// Monotonically increasing counter for assigning pending update keys.
 	next_appending_id: AtomicU32,
 }
 
+/// Contextual state passed through HNSW graph operations.
+///
+/// Bundles the frozen query context, transaction, index key base, and
+/// vector-document mappings needed by the graph and document layers.
 pub(super) struct HnswContext<'a> {
+	/// The frozen query context.
 	pub(super) ctx: &'a FrozenContext,
+	/// The current transaction.
 	pub(super) tx: Arc<Transaction>,
+	/// Key base for generating index-related storage keys.
 	pub(super) ikb: IndexKeyBase,
+	/// Reference to the vector-document mappings.
 	pub(super) vec_docs: &'a VecDocs,
 }
 
@@ -57,6 +85,7 @@ impl<'a> HnswContext<'a> {
 }
 
 impl HnswIndex {
+	/// Creates a new HNSW index, loading existing document state from the transaction.
 	pub(crate) async fn new(
 		vector_cache: VectorCache,
 		tx: &Transaction,
@@ -79,6 +108,7 @@ impl HnswIndex {
 		})
 	}
 
+	/// Converts content values into serialized vectors, validating dimensionality.
 	fn content_to_vectors(&self, content: Vec<Value>) -> Result<Vec<SerializedVector>> {
 		let mut vectors = Vec::with_capacity(content.len());
 		// Index the values
@@ -92,6 +122,12 @@ impl HnswIndex {
 		Ok(vectors)
 	}
 
+	/// Enqueues a vector update for later application to the HNSW graph.
+	///
+	/// Converts old/new document values into serialized vectors, resolves the
+	/// document identity, and writes a [`VectorPendingUpdate`] to the key-value
+	/// store. This method is lock-free on the HNSW graph itself, only requiring
+	/// a brief read lock on `docs` to check for an existing doc ID.
 	pub(crate) async fn index(
 		&self,
 		ctx: &Context,
@@ -129,10 +165,16 @@ impl HnswIndex {
 		Ok(())
 	}
 
+	/// Creates an [`HnswContext`] from the current index state and a frozen context.
 	pub(super) fn new_hnsw_context<'a>(&'a self, ctx: &'a FrozenContext) -> HnswContext<'a> {
 		HnswContext::new(ctx, self.ikb.clone(), &self.vec_docs)
 	}
 
+	/// Drains and applies all pending vector updates to the HNSW graph.
+	///
+	/// Streams pending updates from the key-value store, applies each one
+	/// (inserting/removing vectors and updating document mappings), then
+	/// deletes the consumed pending entries. Returns the number of updates applied.
 	pub(in crate::idx) async fn index_pendings(&self, ctx: &FrozenContext) -> Result<usize> {
 		let tx = ctx.tx();
 		let rng = self.ikb.new_hp_range()?;
@@ -156,6 +198,10 @@ impl HnswIndex {
 		Ok(count)
 	}
 
+	/// Applies a single pending vector update to the HNSW graph.
+	///
+	/// Acquires write locks on both the graph and document mappings to
+	/// remove old vectors, insert new vectors, and update document state.
 	async fn index_pending(&self, ctx: &FrozenContext, pending: VectorPendingUpdate) -> Result<()> {
 		let mut hnsw = self.hnsw.write().await;
 		// Ensure the layers are up-to-date
@@ -195,11 +241,17 @@ impl HnswIndex {
 		Ok(())
 	}
 
-	// Ensure the layers are up-to-date
+	/// Ensures the in-memory graph layers are up-to-date with the persisted state.
 	pub(crate) async fn check_state(&self, ctx: &FrozenContext) -> Result<()> {
 		self.hnsw.write().await.check_state(ctx).await
 	}
 
+	/// Performs a k-nearest neighbor search, combining pending and committed results.
+	///
+	/// First searches through pending (not-yet-applied) updates, then queries
+	/// the committed HNSW graph under a read lock. Results from both sources
+	/// are merged and the final k-nearest neighbors are returned with their
+	/// associated record IDs and distances.
 	pub(crate) async fn knn_search(
 		&self,
 		ctx: &FrozenContext,
@@ -268,7 +320,10 @@ impl HnswIndex {
 		Ok(res)
 	}
 
-	/// Search for results in the HNSW graph
+	/// Searches for nearest neighbors in the committed HNSW graph.
+	///
+	/// Acquires a read lock on the graph and performs KNN search, optionally
+	/// excluding documents that are present in `pending_docs`.
 	pub(super) async fn search_graph(
 		&self,
 		ctx: &HnswContext<'_>,
@@ -294,6 +349,12 @@ impl HnswIndex {
 		}
 	}
 
+	/// Searches through pending (not-yet-applied) updates for nearest neighbors.
+	///
+	/// Scans all pending updates to identify active (non-deleted) vectors,
+	/// computes distances against the search query, and adds matches to the
+	/// result builder. Returns a bitmap of doc IDs seen in pending updates
+	/// so the graph search can exclude them to avoid duplicate results.
 	async fn search_pendings(
 		&self,
 		ctx: &HnswContext<'_>,
@@ -344,6 +405,7 @@ impl HnswIndex {
 		Ok(Some(all_existing_docs))
 	}
 
+	/// Streams all pending updates from the key-value store and passes them to a collector.
 	async fn collect_pending<F>(
 		&self,
 		ctx: &Context,
@@ -373,6 +435,8 @@ impl HnswIndex {
 		Ok(())
 	}
 
+	/// Converts graph search results (element IDs) into document-level results
+	/// and adds them to the KNN result builder.
 	async fn add_graph_results<F>(
 		&self,
 		tx: &Transaction,

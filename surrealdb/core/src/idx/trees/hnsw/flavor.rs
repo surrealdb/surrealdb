@@ -13,6 +13,12 @@ use crate::idx::trees::hnsw::{ElementId, Hnsw, HnswSearch};
 use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Transaction;
 
+/// Type-erased dispatch enum for [`Hnsw`] instances with different neighbor set sizes.
+///
+/// Each variant is a concrete `Hnsw<L0, L>` parameterized with fixed-size
+/// `ArraySet` or dynamic `AHashSet` neighbor sets, chosen at construction time
+/// based on the `m` and `m0` HNSW parameters. This avoids dynamic dispatch
+/// overhead while supporting a range of neighbor set capacities.
 pub(super) enum HnswFlavor {
 	H5_9(Hnsw<ArraySet<9>, ArraySet<5>>),
 	H5_17(Hnsw<ArraySet<17>, ArraySet<5>>),
@@ -31,6 +37,11 @@ pub(super) enum HnswFlavor {
 }
 
 impl HnswFlavor {
+	/// Creates a new HNSW graph variant selected by the `m` and `m0` parameters.
+	///
+	/// Chooses the most efficient fixed-size `ArraySet` that can accommodate
+	/// the requested number of connections per layer, falling back to a
+	/// dynamic `AHashSet` for larger values.
 	pub(super) fn new(
 		table_id: TableId,
 		ibk: IndexKeyBase,
@@ -109,6 +120,7 @@ impl HnswFlavor {
 		Ok(res)
 	}
 
+	/// Loads and synchronizes the in-memory graph state from the key-value store.
 	pub(super) async fn check_state(&mut self, ctx: &FrozenContext) -> Result<()> {
 		match self {
 			HnswFlavor::H5_9(h) => h.check_state(ctx).await,
@@ -128,6 +140,7 @@ impl HnswFlavor {
 		}
 	}
 
+	/// Inserts a vector into the graph and returns its assigned element ID.
 	pub(super) async fn insert(
 		&mut self,
 		ctx: &HnswContext<'_>,
@@ -150,6 +163,7 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.insert(ctx, q_pt).await,
 		}
 	}
+	/// Removes an element from the graph. Returns `true` if the element was found and removed.
 	pub(super) async fn remove(&mut self, ctx: &HnswContext<'_>, e_id: ElementId) -> Result<bool> {
 		match self {
 			HnswFlavor::H5_9(h) => h.remove(ctx, e_id).await,
@@ -168,6 +182,7 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.remove(ctx, e_id).await,
 		}
 	}
+	/// Performs a k-nearest neighbor search on the graph.
 	pub(super) async fn knn_search(
 		&self,
 		ctx: &HnswContext<'_>,
@@ -191,6 +206,7 @@ impl HnswFlavor {
 			HnswFlavor::Hset(h) => h.knn_search(ctx, search, pending_docs).await,
 		}
 	}
+	/// Performs a k-nearest neighbor search with a conditional document filter.
 	pub(super) async fn knn_search_with_filter(
 		&self,
 		ctx: &HnswContext<'_>,
@@ -244,6 +260,7 @@ impl HnswFlavor {
 			}
 		}
 	}
+	/// Retrieves the vector associated with the given element ID.
 	pub(super) async fn get_vector(
 		&self,
 		tx: &Transaction,

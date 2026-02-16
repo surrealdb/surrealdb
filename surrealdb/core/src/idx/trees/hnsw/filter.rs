@@ -18,13 +18,24 @@ use crate::idx::trees::hnsw::index::HnswContext;
 use crate::idx::trees::knn::Ids64;
 use crate::val::RecordId;
 
+/// Cache of evaluated filter results, mapping vector IDs to their record data
+/// (if truthy) or `None` (if not truthy or not found).
 pub(super) type FilterCache = HashMap<VectorId, Option<(Arc<RecordId>, Arc<Record>)>>;
 
+/// Filter that evaluates a `WHERE` condition against documents during KNN search.
+///
+/// Holds a read lock on [`HnswDocs`] and caches evaluation results to avoid
+/// redundant record lookups and condition evaluations across candidates.
 pub(super) struct HnswTruthyDocumentFilter<'a> {
+	/// Query options for condition evaluation.
 	opt: &'a Options,
+	/// Key base for record lookups.
 	ikb: IndexKeyBase,
+	/// Read-locked document mappings.
 	docs: RwLockReadGuard<'a, HnswDocs>,
+	/// The filter condition to evaluate.
 	cond: Arc<Cond>,
+	/// Cache of previously evaluated filter results.
 	cache: FilterCache,
 }
 
@@ -44,6 +55,7 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		}
 	}
 
+	/// Returns `true` if any of the given document IDs satisfies the filter condition.
 	pub(super) async fn check_any_doc_truthy(
 		&mut self,
 		ctx: &HnswContext<'_>,
@@ -58,6 +70,9 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		Ok(false)
 	}
 
+	/// Checks whether the document identified by a vector ID satisfies the filter condition.
+	///
+	/// Results are cached so repeated checks for the same vector ID are free.
 	pub(super) async fn check_vector_id_truthy(
 		&mut self,
 		ctx: &HnswContext<'_>,
@@ -95,6 +110,8 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		}
 	}
 
+	/// Fetches a record and evaluates the filter condition against it.
+	/// Returns the record data if truthy, or `None` otherwise.
 	async fn is_record_truthy(
 		ctx: &HnswContext<'_>,
 		opt: &Options,

@@ -33,9 +33,13 @@ use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::kvs::{KVValue, Transaction, impl_kv_value_revisioned};
 use crate::val::RecordIdKey;
 
+/// Parameters for a k-nearest neighbor search on the HNSW graph.
 struct HnswSearch {
+	/// The query vector to search for.
 	pt: SharedVector,
+	/// The number of nearest neighbors to return.
 	k: usize,
+	/// The size of the dynamic candidate list during search (exploration factor).
 	ef: usize,
 }
 
@@ -49,12 +53,21 @@ impl HnswSearch {
 	}
 }
 
+/// Persisted state of the HNSW graph, stored in the key-value store.
+///
+/// Tracks the current entry point, element ID counter, and per-layer state.
+/// This state is loaded at startup and saved after each mutation to ensure
+/// consistency across concurrent transactions.
 #[revisioned(revision = 1)]
 #[derive(Default, Serialize, Deserialize)]
 pub(crate) struct HnswState {
+	/// The entry point element for graph traversal, or `None` if the graph is empty.
 	enter_point: Option<ElementId>,
+	/// The next available element ID for new insertions.
 	next_element_id: ElementId,
+	/// State of layer 0 (the base layer containing all elements).
 	layer0: LayerState,
+	/// State of the upper layers (layers 1..N with progressively fewer elements).
 	layers: Vec<LayerState>,
 }
 
@@ -72,39 +85,71 @@ impl KVValue for HnswState {
 	}
 }
 
+/// A pending vector update queued for later application to the HNSW graph.
+///
+/// During concurrent writes, vector updates are not applied directly to the graph.
+/// Instead, they are serialized to the key-value store as pending updates and later
+/// applied in batch by a background task via [`HnswIndex::index_pendings`].
 #[revisioned(revision = 1)]
 pub(crate) struct VectorPendingUpdate {
+	/// Identifies the document being updated (by doc ID if known, or record key if new).
 	id: VectorId,
+	/// The previous vectors to remove from the index (empty for new documents).
 	old_vectors: Vec<SerializedVector>,
+	/// The new vectors to insert into the index (empty for deletions).
 	new_vectors: Vec<SerializedVector>,
 }
 
+/// Identifies a vector's owning document, either by its internal doc ID or its record key.
+///
+/// When a document is first indexed, its doc ID may not yet be assigned, so the
+/// record key is used. Once the pending update is applied, the doc ID is resolved.
 #[revisioned(revision = 1)]
 #[derive(Debug, PartialOrd, Ord, Hash, PartialEq, Eq, Clone)]
 pub(crate) enum VectorId {
+	/// A previously resolved internal document ID.
 	DocId(DocId),
+	/// A record key for a document whose doc ID has not yet been resolved.
 	RecordKey(Arc<RecordIdKey>),
 }
 
 impl_kv_value_revisioned!(VectorPendingUpdate);
 
+/// Core HNSW (Hierarchical Navigable Small World) graph implementation.
+///
+/// The graph is organized into multiple layers: a base layer (layer 0) that contains
+/// all elements, and upper layers with progressively fewer elements for fast
+/// long-range traversal. The type parameters `L0` and `L` control the neighbor
+/// set implementation for layer 0 and upper layers respectively, allowing
+/// compile-time optimization based on the `m` (max connections) parameter.
 struct Hnsw<L0, L>
 where
 	L0: DynamicSet,
 	L: DynamicSet,
 {
+	/// Key base for generating index-related storage keys.
 	ikb: IndexKeyBase,
+	/// Persisted graph state (entry point, element counter, layer states).
 	state: HnswState,
+	/// Maximum number of connections per element in upper layers.
 	m: usize,
+	/// Size of the dynamic candidate list during construction.
 	efc: usize,
+	/// Level multiplier used in the random level generation formula.
 	ml: f64,
+	/// The base layer (layer 0) containing all elements.
 	layer0: HnswLayer<L0>,
+	/// Upper layers (1..N), each containing a subset of elements.
 	layers: Vec<HnswLayer<L>>,
+	/// Storage and cache for element vectors.
 	elements: HnswElements,
+	/// Random number generator for level assignment.
 	rng: SmallRng,
+	/// Heuristic strategy for neighbor selection.
 	heuristic: Heuristic,
 }
 
+/// Unique identifier for an element (vector) in the HNSW graph.
 pub(crate) type ElementId = u64;
 
 impl<L0, L> Hnsw<L0, L>
@@ -112,6 +157,7 @@ where
 	L0: DynamicSet,
 	L: DynamicSet,
 {
+	/// Creates a new HNSW graph with the given parameters.
 	fn new(
 		table_id: TableId,
 		ikb: IndexKeyBase,
@@ -133,6 +179,11 @@ where
 		})
 	}
 
+	/// Loads and synchronizes the in-memory graph state from the key-value store.
+	///
+	/// Compares the stored layer versions with the current in-memory versions,
+	/// reloading any layers that have changed. Also handles layer migration
+	/// from the legacy `Hl` format to the current `Hn` format.
 	async fn check_state(&mut self, ctx: &FrozenContext) -> Result<()> {
 		let tx = ctx.tx();
 		// Read the state
@@ -172,6 +223,10 @@ where
 		Ok(())
 	}
 
+	/// Inserts a vector into the graph at the specified level.
+	///
+	/// Assigns a new element ID, creates any missing upper layers, stores
+	/// the vector, and connects it to its nearest neighbors at each layer.
 	async fn insert_level(
 		&mut self,
 		ctx: &HnswContext<'_>,
@@ -204,11 +259,13 @@ where
 		Ok(q_id)
 	}
 
+	/// Generates a random level for a new element using the level multiplier `ml`.
 	fn get_random_level(&mut self) -> usize {
 		let unif: f64 = self.rng.r#gen(); // generate a uniform random number between 0 and 1
 		(-unif.ln() * self.ml).floor() as usize // calculate the layer
 	}
 
+	/// Inserts the very first element into an empty graph, setting it as the entry point.
 	async fn insert_first_element(
 		&mut self,
 		tx: &Transaction,
@@ -231,6 +288,12 @@ where
 		Ok(())
 	}
 
+	/// Inserts an element into the graph when an entry point already exists.
+	///
+	/// Traverses the upper layers to find the closest entry point, then inserts
+	/// the element into each layer from `q_level` down to layer 0, connecting
+	/// it to its nearest neighbors. Updates the entry point if the new element
+	/// is assigned to a higher layer than the current entry point.
 	async fn insert_element(
 		&mut self,
 		ctx: &HnswContext<'_>,
@@ -315,12 +378,14 @@ where
 		Ok(())
 	}
 
+	/// Persists the current graph state to the key-value store.
 	async fn save_state(&self, tx: &Transaction) -> Result<()> {
 		let state_key = self.ikb.new_hs_key();
 		tx.set(&state_key, &self.state, None).await?;
 		Ok(())
 	}
 
+	/// Inserts a vector into the graph at a randomly chosen level and persists the state.
 	async fn insert(&mut self, ctx: &HnswContext<'_>, q_pt: Vector) -> Result<ElementId> {
 		let q_level = self.get_random_level();
 		let res = self.insert_level(ctx, q_pt, q_level).await?;
@@ -328,6 +393,8 @@ where
 		Ok(res)
 	}
 
+	/// Removes an element from the graph, reconnecting its neighbors and updating
+	/// the entry point if necessary. Returns `true` if the element was found and removed.
 	async fn remove(&mut self, ctx: &HnswContext<'_>, e_id: ElementId) -> Result<bool> {
 		let mut removed = false;
 
@@ -385,6 +452,10 @@ where
 		Ok(removed)
 	}
 
+	/// Performs a k-nearest neighbor search on the graph without filtering.
+	///
+	/// Optionally excludes documents present in `pending_docs` (those with
+	/// pending updates that have already been searched separately).
 	async fn knn_search(
 		&self,
 		ctx: &HnswContext<'_>,
@@ -410,6 +481,10 @@ where
 		}
 	}
 
+	/// Performs a k-nearest neighbor search with a conditional document filter.
+	///
+	/// Similar to [`knn_search`](Self::knn_search), but additionally applies a
+	/// user-defined filter to exclude non-matching documents from the results.
 	async fn knn_search_with_filter(
 		&self,
 		ctx: &HnswContext<'_>,
@@ -439,6 +514,10 @@ where
 		Ok(vec![])
 	}
 
+	/// Finds the best entry point for a search by traversing the upper layers.
+	///
+	/// Starting from the graph's entry point, greedily descends through the upper
+	/// layers to find the closest element to the query vector `pt`.
 	async fn search_ep(
 		&self,
 		ctx: &HnswContext<'_>,
@@ -468,6 +547,7 @@ where
 		Ok(None)
 	}
 
+	/// Retrieves the vector associated with the given element ID.
 	async fn get_vector(&self, tx: &Transaction, e_id: &ElementId) -> Result<Option<SharedVector>> {
 		self.elements.get_vector(tx, e_id).await
 	}
