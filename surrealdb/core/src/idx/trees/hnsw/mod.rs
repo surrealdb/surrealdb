@@ -807,7 +807,7 @@ mod tests {
 					e.insert(HashSet::from_iter([*doc_id]));
 				}
 			}
-			h.index_pendings(&ctx).await?;
+			h.index_pendings(ctx).await?;
 			h.check_hnsw_properties(map.len()).await;
 		}
 		Ok(map)

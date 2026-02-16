@@ -54,6 +54,10 @@ impl<'a> HnswPending<'a> {
 			appending_id,
 		}
 	}
+
+	pub(crate) fn decode_key(k: &[u8]) -> Result<HnswPending<'_>> {
+		Ok(storekey::decode_borrow(k)?)
+	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode)]

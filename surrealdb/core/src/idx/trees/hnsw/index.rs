@@ -24,6 +24,7 @@ use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::hnsw::{ElementId, HnswSearch, VectorId, VectorPendingUpdate};
 use crate::idx::trees::knn::KnnResultBuilder;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
+use crate::key::index::hp::HnswPending;
 use crate::kvs::{KVValue, Key, Transaction};
 use crate::val::{Number, RecordId, RecordIdKey, Value};
 
@@ -93,6 +94,15 @@ impl HnswIndex {
 		tb: TableId,
 		p: &HnswParams,
 	) -> Result<Self> {
+		// Compute the last appending.
+		let rng = ikb.new_hp_range()?;
+		let scan = tx.keysr(rng, 1, 0, None).await?;
+		let next_appending_id = if let Some(key) = scan.last() {
+			let hp = HnswPending::decode_key(key)?;
+			hp.appending_id + 1
+		} else {
+			0
+		};
 		Ok(Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
@@ -103,8 +113,7 @@ impl HnswIndex {
 			),
 			vec_docs: VecDocs::new(ikb.clone(), p.use_hashed_vector),
 			ikb,
-			// TODO should be calculated based on the existing pendings
-			next_appending_id: AtomicU32::new(0),
+			next_appending_id: AtomicU32::new(next_appending_id),
 		})
 	}
 
