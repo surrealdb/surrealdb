@@ -23,8 +23,7 @@ pub struct OpenAiProvider {
 
 impl OpenAiProvider {
 	/// Create a new provider with explicit configuration.
-	#[cfg(test)]
-	pub fn new(api_key: String, base_url: String) -> Self {
+	pub(crate) fn new(api_key: String, base_url: String) -> Self {
 		Self {
 			api_key,
 			base_url,

@@ -4,8 +4,10 @@ use anyhow::Result;
 use crate::err::Error;
 
 use super::provider::{GenerationConfig, GenerationProvider};
+use super::providers::google::GoogleProvider;
 use super::providers::huggingface::HuggingFaceProvider;
 use super::providers::openai::OpenAiProvider;
+use super::providers::voyage::VoyageProvider;
 
 /// Parse a model identifier into `(provider, model_name)`.
 ///
@@ -43,10 +45,19 @@ pub async fn generate(
 			let provider = HuggingFaceProvider::new();
 			provider.generate(model_name, prompt, config).await
 		}
+		"voyage" | "claude" | "anthropic" => {
+			let provider = VoyageProvider::from_env()?;
+			provider.generate(model_name, prompt, config).await
+		}
+		"google" | "gemini" => {
+			let provider = GoogleProvider::from_env()?;
+			provider.generate(model_name, prompt, config).await
+		}
 		other => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 			name: "ai::generate".to_owned(),
 			message: format!(
-				"Unknown provider '{other}'. Supported providers: 'openai', 'huggingface'"
+				"Unknown provider '{other}'. Supported providers: \
+				 'openai', 'huggingface', 'voyage' (or 'claude'/'anthropic'), 'google' (or 'gemini')"
 			),
 		})),
 	}

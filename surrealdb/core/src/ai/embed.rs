@@ -4,8 +4,10 @@ use anyhow::Result;
 use crate::err::Error;
 
 use super::provider::EmbeddingProvider;
+use super::providers::google::GoogleProvider;
 use super::providers::huggingface::HuggingFaceProvider;
 use super::providers::openai::OpenAiProvider;
+use super::providers::voyage::VoyageProvider;
 
 /// Parse a model identifier into `(provider, model_name)`.
 ///
@@ -39,10 +41,19 @@ pub async fn embed(model_id: &str, input: &str) -> Result<Vec<f64>> {
 			let provider = HuggingFaceProvider::new();
 			provider.embed(model_name, input).await
 		}
+		"voyage" | "claude" | "anthropic" => {
+			let provider = VoyageProvider::from_env()?;
+			provider.embed(model_name, input).await
+		}
+		"google" | "gemini" => {
+			let provider = GoogleProvider::from_env()?;
+			provider.embed(model_name, input).await
+		}
 		other => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 			name: "ai::embed".to_owned(),
 			message: format!(
-				"Unknown provider '{other}'. Supported providers: 'openai', 'huggingface'"
+				"Unknown provider '{other}'. Supported providers: \
+				 'openai', 'huggingface', 'voyage' (or 'claude'/'anthropic'), 'google' (or 'gemini')"
 			),
 		})),
 	}
