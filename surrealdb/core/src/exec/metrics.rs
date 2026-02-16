@@ -10,7 +10,7 @@
 
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::task::{Context, Poll};
 
 use futures::Stream;
@@ -49,8 +49,15 @@ fn now_ns() -> u64 {
 /// All counters are atomically updated so that concurrent polling of the
 /// same stream (should it ever happen) is safe. The typical access pattern
 /// is single-writer (the stream) / single-reader (the ANALYZE formatter).
+///
+/// When `enabled` is false, [`monitor_stream`] returns the inner stream
+/// directly without wrapping, eliminating all per-batch timing, atomic
+/// counter, and tracing span overhead on the hot path.
 #[derive(Debug)]
 pub(crate) struct OperatorMetrics {
+	/// Whether metrics collection is active. When false, `monitor_stream`
+	/// bypasses the MetricsStream wrapper entirely for zero overhead.
+	enabled: AtomicBool,
 	/// Total number of rows emitted.
 	output_rows: AtomicU64,
 	/// Total number of batches emitted.
@@ -60,13 +67,27 @@ pub(crate) struct OperatorMetrics {
 }
 
 impl OperatorMetrics {
-	/// Create a new zeroed metrics instance.
+	/// Create a disabled metrics instance (zero overhead at runtime).
+	///
+	/// Use this for normal query execution where EXPLAIN ANALYZE is not active.
+	/// [`monitor_stream`] will return the inner stream directly, skipping all
+	/// per-batch timing and tracing work.
 	pub(crate) fn new() -> Self {
 		Self {
+			enabled: AtomicBool::new(false),
 			output_rows: AtomicU64::new(0),
 			output_batches: AtomicU64::new(0),
 			elapsed_ns: AtomicU64::new(0),
 		}
+	}
+
+	/// Enable metrics collection on this instance.
+	///
+	/// Called by `AnalyzePlan` to activate recording before execution.
+	/// After this call, [`monitor_stream`] will wrap streams with the
+	/// full timing/counting/tracing instrumentation.
+	pub(crate) fn enable(&self) {
+		self.enabled.store(true, Ordering::Relaxed);
 	}
 
 	/// Total output rows recorded so far.
@@ -163,11 +184,18 @@ impl Stream for MetricsStream {
 /// Every yielded batch updates the given `metrics` and emits a `trace`-level
 /// tracing span. This is the single point of instrumentation for all
 /// operators.
+///
+/// When `metrics` is disabled (the default from [`OperatorMetrics::new()`]),
+/// the stream is returned directly without any wrapper, eliminating all
+/// per-batch overhead (timing, atomic counters, tracing spans).
 pub(crate) fn monitor_stream(
 	stream: ValueBatchStream,
 	name: &'static str,
 	metrics: &Arc<OperatorMetrics>,
 ) -> ValueBatchStream {
+	if !metrics.enabled.load(Ordering::Relaxed) {
+		return stream;
+	}
 	Box::pin(MetricsStream {
 		inner: stream,
 		metrics: Arc::clone(metrics),

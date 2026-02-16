@@ -190,13 +190,32 @@ pub struct DatabaseContext {
 	pub db: Arc<DatabaseDefinition>,
 	/// Cache of field states (computed fields + permissions) keyed by (table, check_perms).
 	/// Avoids repeated KV lookups for the same table within a single query execution.
+	/// Cache of field states (computed fields + permissions) keyed by (table, check_perms).
+	/// Avoids repeated KV lookups for the same table within a single query execution.
+	///
+	/// Uses `RwLock` because the access pattern is heavily read-biased: the first
+	/// scan operator populates the cache, and all subsequent operators only read.
 	pub(crate) field_state_cache: Arc<
-		std::sync::Mutex<
+		std::sync::RwLock<
 			HashMap<
 				(crate::val::TableName, bool),
 				Arc<crate::exec::operators::scan::pipeline::FieldState>,
 			>,
 		>,
+	>,
+	/// Cache of table definitions keyed by table name.
+	/// Avoids repeated `get_tb_by_name` KV lookups across scan operators
+	/// within the same query execution.
+	pub(crate) table_def_cache: Arc<
+		std::sync::RwLock<
+			HashMap<crate::val::TableName, Option<Arc<crate::catalog::TableDefinition>>>,
+		>,
+	>,
+	/// Cache of index definitions keyed by table name.
+	/// Avoids repeated `all_tb_indexes` KV lookups in DynamicScan's
+	/// runtime index analysis within the same query execution.
+	pub(crate) index_def_cache: Arc<
+		std::sync::RwLock<HashMap<crate::val::TableName, Arc<[crate::catalog::IndexDefinition]>>>,
 	>,
 }
 
@@ -206,6 +225,7 @@ impl std::fmt::Debug for DatabaseContext {
 			.field("ns_ctx", &self.ns_ctx)
 			.field("db", &self.db)
 			.field("field_state_cache", &"<cache>")
+			.field("table_def_cache", &"<cache>")
 			.finish()
 	}
 }
@@ -234,6 +254,64 @@ impl DatabaseContext {
 	/// Get the datastore (if available)
 	pub fn datastore(&self) -> Option<&Datastore> {
 		self.ns_ctx.datastore()
+	}
+
+	/// Look up a table definition, checking the execution-level cache first.
+	///
+	/// This avoids repeated `get_tb_by_name` KV roundtrips for the same table
+	/// across multiple scan operators within the same query execution (e.g.,
+	/// repeated record lookups).
+	pub(crate) async fn get_table_def(
+		&self,
+		table: &crate::val::TableName,
+	) -> anyhow::Result<Option<Arc<crate::catalog::TableDefinition>>> {
+		use crate::catalog::providers::TableProvider;
+		// Check execution-level cache (read lock — concurrent reads allowed)
+		if let Ok(cache) = self.table_def_cache.read() {
+			if let Some(cached) = cache.get(table) {
+				return Ok(cached.clone());
+			}
+		}
+
+		// Cache miss — look up via the transaction
+		let txn = self.txn();
+		let result = txn.get_tb_by_name(&self.ns_ctx.ns.name, &self.db.name, table).await?;
+
+		// Populate cache (write lock — brief exclusive access)
+		if let Ok(mut cache) = self.table_def_cache.write() {
+			cache.insert(table.clone(), result.clone());
+		}
+
+		Ok(result)
+	}
+
+	/// Look up all index definitions for a table, checking the execution-level cache first.
+	///
+	/// This avoids repeated `all_tb_indexes` KV roundtrips for the same table
+	/// across multiple DynamicScan operations within the same query execution.
+	pub(crate) async fn get_table_indexes(
+		&self,
+		table: &crate::val::TableName,
+	) -> anyhow::Result<Arc<[crate::catalog::IndexDefinition]>> {
+		use crate::catalog::providers::TableProvider;
+		// Check execution-level cache (read lock — concurrent reads allowed)
+		if let Ok(cache) = self.index_def_cache.read() {
+			if let Some(cached) = cache.get(table) {
+				return Ok(Arc::clone(cached));
+			}
+		}
+
+		// Cache miss — look up via the transaction
+		let txn = self.txn();
+		let result =
+			txn.all_tb_indexes(self.ns_ctx.ns.namespace_id, self.db.database_id, table).await?;
+
+		// Populate cache (write lock — brief exclusive access)
+		if let Ok(mut cache) = self.index_def_cache.write() {
+			cache.insert(table.clone(), Arc::clone(&result));
+		}
+
+		Ok(result)
 	}
 }
 
@@ -434,6 +512,8 @@ impl ExecutionContext {
 				},
 				db: d.db.clone(),
 				field_state_cache: d.field_state_cache.clone(),
+				table_def_cache: d.table_def_cache.clone(),
+				index_def_cache: d.index_def_cache.clone(),
 			}),
 		}
 	}
@@ -513,7 +593,9 @@ impl ExecutionContext {
 				ns,
 			},
 			db,
-			field_state_cache: Arc::new(std::sync::Mutex::new(HashMap::new())),
+			field_state_cache: Arc::new(std::sync::RwLock::new(HashMap::new())),
+			table_def_cache: Arc::new(std::sync::RwLock::new(HashMap::new())),
+			index_def_cache: Arc::new(std::sync::RwLock::new(HashMap::new())),
 		})
 	}
 

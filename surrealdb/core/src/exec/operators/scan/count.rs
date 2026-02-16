@@ -167,8 +167,8 @@ impl ExecOperator for CountScan {
 			};
 
 			// Verify that the table exists.
-			let table_def = txn
-				.get_tb_by_name(&ns.name, &db.name, &table_name)
+			let table_def = db_ctx
+				.get_table_def(&table_name)
 				.await
 				.context("Failed to get table")?;
 

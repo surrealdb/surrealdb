@@ -10,7 +10,6 @@ use reblessive::TreeStack;
 
 use super::common::fetch_and_filter_records_batch;
 use crate::catalog::Index;
-use crate::catalog::providers::TableProvider;
 use crate::err::Error;
 use crate::exec::index::access_path::IndexRef;
 use crate::exec::permission::{
@@ -146,8 +145,8 @@ impl ExecOperator for FullTextScan {
 
 			// Resolve table permissions
 			let select_permission = if check_perms {
-				let table_def = txn
-					.get_tb_by_name(&ns.name, &db.name, &table_name)
+				let table_def = db_ctx
+					.get_table_def(&table_name)
 					.await
 					.context("Failed to get table")?;
 

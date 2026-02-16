@@ -263,7 +263,13 @@ impl Executor {
 						ns: ns_def,
 					},
 					db: db_def,
-					field_state_cache: std::sync::Arc::new(std::sync::Mutex::new(
+					field_state_cache: std::sync::Arc::new(std::sync::RwLock::new(
+						std::collections::HashMap::new(),
+					)),
+					table_def_cache: std::sync::Arc::new(std::sync::RwLock::new(
+						std::collections::HashMap::new(),
+					)),
+					index_def_cache: std::sync::Arc::new(std::sync::RwLock::new(
 						std::collections::HashMap::new(),
 					)),
 				})

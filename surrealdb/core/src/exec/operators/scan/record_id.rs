@@ -238,8 +238,7 @@ pub(crate) async fn execute_record_lookup(
 	let db = Arc::clone(&db_ctx.db);
 
 	// 1. Check table existence and resolve SELECT permission
-	let table_def =
-		txn.get_tb_by_name(&ns.name, &db.name, &rid.table).await.context("Failed to get table")?;
+	let table_def = db_ctx.get_table_def(&rid.table).await.context("Failed to get table")?;
 
 	if table_def.is_none() {
 		return Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {

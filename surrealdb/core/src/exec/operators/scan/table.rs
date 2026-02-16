@@ -11,7 +11,6 @@ use futures::StreamExt;
 use tracing::instrument;
 
 use super::pipeline::{ScanPipeline, build_field_state, eval_limit_expr, kv_scan_stream};
-use crate::catalog::providers::TableProvider;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
 	validate_record_user_access,
@@ -186,8 +185,8 @@ impl ExecOperator for TableScan {
 			}
 
 			// Check table existence and resolve SELECT permission
-			let table_def = txn
-				.get_tb_by_name(&ns.name, &db.name, &table_name)
+			let table_def = db_ctx
+				.get_table_def(&table_name)
 				.await
 				.context("Failed to get table")?;
 

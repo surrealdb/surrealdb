@@ -10,7 +10,6 @@ use surrealdb_types::ToSql;
 
 use super::common::fetch_and_filter_records_batch;
 use super::pipeline::eval_limit_expr;
-use crate::catalog::providers::TableProvider;
 use crate::err::Error;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::index::iterator::{
@@ -265,8 +264,8 @@ impl ExecOperator for IndexScan {
 
 			// Resolve table permissions
 			let select_permission = if check_perms {
-				let table_def = txn
-					.get_tb_by_name(&ns.name, &db.name, &table_name)
+				let table_def = db_ctx
+					.get_table_def(&table_name)
 					.await
 					.context("Failed to get table")?;
 

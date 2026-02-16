@@ -405,6 +405,10 @@ pub(crate) struct FieldState {
 	pub(crate) computed_fields: Vec<ComputedFieldDef>,
 	/// Field-level permissions (field name -> permission)
 	pub(crate) field_permissions: HashMap<String, PhysicalPermission>,
+	/// Dependency map for computed fields, used for projection filtering.
+	/// Stored alongside the cached state so that projected queries can
+	/// cheaply determine the subset of computed fields they need.
+	dep_map: HashMap<String, crate::expr::computed_deps::ComputedDeps>,
 }
 
 impl FieldState {
@@ -413,6 +417,7 @@ impl FieldState {
 		Self {
 			computed_fields: Vec::new(),
 			field_permissions: HashMap::new(),
+			dep_map: HashMap::new(),
 		}
 	}
 }
@@ -429,6 +434,12 @@ pub(crate) struct ComputedFieldDef {
 }
 
 /// Fetch field definitions and build the cached field state.
+///
+/// Always builds and caches the *full* field state (all computed fields and
+/// permissions) keyed by `(table, check_perms)`. When `needed_fields` is
+/// `Some`, the cached full state is cheaply filtered to the required subset.
+/// This avoids repeated expensive work (KV lookups, PhysicalExpr compilation,
+/// dependency analysis, topological sort) for projected queries.
 #[allow(clippy::type_complexity)]
 pub(crate) async fn build_field_state(
 	ctx: &ExecutionContext,
@@ -437,16 +448,14 @@ pub(crate) async fn build_field_state(
 	needed_fields: Option<&std::collections::HashSet<String>>,
 ) -> Result<FieldState, ControlFlow> {
 	let db_ctx = ctx.database().context("build_field_state requires database context")?;
+	let cache_key = (table_name.clone(), check_perms);
 
 	// Check the cache first (keyed by table name + check_perms flag).
-	// Only use the cache when needed_fields is None (SELECT *), because
-	// different projections may require different subsets of computed fields.
-	if needed_fields.is_none() {
-		let cache_key = (table_name.clone(), check_perms);
-		if let Ok(cache) = db_ctx.field_state_cache.lock() {
-			if let Some(cached) = cache.get(&cache_key) {
-				return Ok(cached.as_ref().clone());
-			}
+	// The cache always stores the full (unfiltered) field state so it can
+	// serve both SELECT * and projected queries.
+	if let Ok(cache) = db_ctx.field_state_cache.read() {
+		if let Some(cached) = cache.get(&cache_key) {
+			return Ok(filter_field_state_for_projection(cached, needed_fields));
 		}
 	}
 
@@ -459,16 +468,20 @@ pub(crate) async fn build_field_state(
 
 	// Fast path: if there are no computed fields and no field-level permissions
 	// that need checking, skip the expensive resolution (expression conversion,
-	// dependency analysis, topological sort). This avoids the per-scan overhead
-	// when needed_fields bypasses the cache.
+	// dependency analysis, topological sort).
 	let has_computed = field_defs.iter().any(|fd| fd.computed.is_some());
 	let has_field_perms =
 		check_perms && field_defs.iter().any(|fd| fd.select_permission.is_specific());
 	if !has_computed && !has_field_perms {
+		let empty = Arc::new(FieldState::empty());
+		if let Ok(mut cache) = db_ctx.field_state_cache.write() {
+			cache.insert(cache_key, empty);
+		}
 		return Ok(FieldState::empty());
 	}
 
-	// Collect computed fields and their dependency metadata
+	// Collect ALL computed fields and their dependency metadata (unfiltered).
+	// The full set is cached and filtered per-query via needed_fields.
 	let mut raw_computed: Vec<(
 		String,
 		Arc<dyn PhysicalExpr>,
@@ -481,7 +494,6 @@ pub(crate) async fn build_field_state(
 		if let Some(ref expr) = fd.computed {
 			let field_name = fd.name.to_raw_string();
 
-			// Get deps: use stored deps, or extract on the fly for legacy fields
 			let deps = if let Some(ref cd) = fd.computed_deps {
 				crate::expr::computed_deps::ComputedDeps {
 					fields: cd.fields.clone(),
@@ -502,29 +514,14 @@ pub(crate) async fn build_field_state(
 		}
 	}
 
-	// Determine which computed fields are actually needed
-	let needed_computed = if let Some(needed) = needed_fields {
-		crate::expr::computed_deps::resolve_required_computed_fields(needed, &dep_map)
-	} else {
-		// SELECT * -- compute all
-		None
-	};
-
-	// Filter to only needed computed fields
-	let filtered: Vec<_> = if let Some(ref required) = needed_computed {
-		raw_computed.into_iter().filter(|(name, _, _, _)| required.contains(name)).collect()
-	} else {
-		raw_computed
-	};
-
-	// Topologically sort for correct evaluation order
+	// Topologically sort ALL computed fields for correct evaluation order
 	let topo_input: Vec<(String, Vec<String>)> =
-		filtered.iter().map(|(name, _, _, deps)| (name.clone(), deps.clone())).collect();
+		raw_computed.iter().map(|(name, _, _, deps)| (name.clone(), deps.clone())).collect();
 	let sorted_indices = crate::expr::computed_deps::topological_sort_computed_fields(&topo_input);
 
 	let mut computed_fields = Vec::with_capacity(sorted_indices.len());
 	for idx in sorted_indices {
-		let (field_name, expr, kind, _) = &filtered[idx];
+		let (field_name, expr, kind, _) = &raw_computed[idx];
 		computed_fields.push(ComputedFieldDef {
 			field_name: field_name.clone(),
 			expr: Arc::clone(expr),
@@ -544,20 +541,54 @@ pub(crate) async fn build_field_state(
 		}
 	}
 
-	let state = FieldState {
+	let full_state = FieldState {
 		computed_fields,
 		field_permissions,
+		dep_map,
 	};
 
-	// Populate the cache for SELECT * queries
-	if needed_fields.is_none() {
-		let cache_key = (table_name.clone(), check_perms);
-		if let Ok(mut cache) = db_ctx.field_state_cache.lock() {
-			cache.insert(cache_key, Arc::new(state.clone()));
-		}
+	// Cache the full (unfiltered) state
+	let cached = Arc::new(full_state);
+	if let Ok(mut cache) = db_ctx.field_state_cache.write() {
+		cache.insert(cache_key, Arc::clone(&cached));
 	}
 
-	Ok(state)
+	// Return filtered if needed_fields is specified
+	Ok(filter_field_state_for_projection(&cached, needed_fields))
+}
+
+/// Filter a full FieldState down to only the computed fields required by
+/// the given projection. When `needed_fields` is None (SELECT *), returns
+/// a clone of the full state. This is a cheap CPU-only operation with no
+/// KV lookups.
+fn filter_field_state_for_projection(
+	full_state: &FieldState,
+	needed_fields: Option<&std::collections::HashSet<String>>,
+) -> FieldState {
+	let Some(needed) = needed_fields else {
+		return full_state.clone();
+	};
+
+	// Determine which computed fields are required by the projection
+	let required =
+		crate::expr::computed_deps::resolve_required_computed_fields(needed, &full_state.dep_map);
+
+	let computed_fields = if let Some(ref required_set) = required {
+		full_state
+			.computed_fields
+			.iter()
+			.filter(|cf| required_set.contains(&cf.field_name))
+			.cloned()
+			.collect()
+	} else {
+		full_state.computed_fields.clone()
+	};
+
+	FieldState {
+		computed_fields,
+		field_permissions: full_state.field_permissions.clone(),
+		dep_map: full_state.dep_map.clone(),
+	}
 }
 
 /// Compute all computed fields for a single value.

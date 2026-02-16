@@ -52,6 +52,11 @@ pub(crate) struct SelectPipelineConfig {
 	/// Currently informational; the actual guard is `cond: None` in the config.
 	#[allow(dead_code)]
 	pub filter_pushed: bool,
+	/// Pre-compiled predicate. When set, `plan_pipeline` uses this directly
+	/// instead of re-compiling `cond` into a new PhysicalExpr. This avoids
+	/// duplicate compilation when the same predicate was already compiled
+	/// for scan pushdown but ended up not being consumed by the source.
+	pub precompiled_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 }
 
 /// Describes how the WHERE predicate should be handled after source planning.
@@ -96,9 +101,13 @@ impl<'ctx> Planner<'ctx> {
 			is_value_source,
 			tempfiles,
 			filter_pushed: _,
+			precompiled_predicate,
 		} = config;
 
-		let filtered = if let Some(cond) = cond {
+		let filtered = if let Some(predicate) = precompiled_predicate {
+			// Use the pre-compiled predicate to avoid duplicate compilation
+			Arc::new(Filter::new(source, predicate)) as Arc<dyn ExecOperator>
+		} else if let Some(cond) = cond {
 			let predicate = self.physical_expr(cond.0).await?;
 			Arc::new(Filter::new(source, predicate)) as Arc<dyn ExecOperator>
 		} else {
@@ -139,6 +148,10 @@ impl<'ctx> Planner<'ctx> {
 			if self.can_eliminate_sort(&grouped, &order) {
 				(grouped, vec![])
 			} else if skip_projections {
+				// GROUP BY queries use the legacy sort path because the
+				// consolidated approach's Compute operator would try to
+				// evaluate aggregate expressions (e.g., math::sum) on
+				// individual rows rather than grouped arrays.
 				(self.plan_sort(grouped, order, &start, &limit, tempfiles).await?, vec![])
 			} else {
 				self.plan_sort_consolidated(grouped, order, &fields, &start, &limit, tempfiles)
@@ -1145,6 +1158,12 @@ impl<'ctx> Planner<'ctx> {
 			(None, None)
 		};
 
+		// Keep a clone of the scan predicate so we can reuse it as a
+		// precompiled predicate for the pipeline Filter when the source
+		// does not consume it (FilterAction::UseOriginal). This avoids
+		// compiling the same AST expression into a PhysicalExpr twice.
+		let scan_predicate_for_reuse = scan_predicate.clone();
+
 		// Source resolution with plan-time index analysis.
 		// The result tracks whether the predicate and limit/start were
 		// consumed by the source operator, so we can avoid duplicating
@@ -1171,10 +1190,21 @@ impl<'ctx> Planner<'ctx> {
 		// - FullyConsumed: the source handles the entire predicate, no Filter.
 		// - Residual: only the residual part needs a Filter.
 		// - UseOriginal: the source did not analyze the predicate, use as-is.
-		let pipeline_cond = match planned.filter_action {
-			FilterAction::FullyConsumed => None,
-			FilterAction::Residual(residual) => Some(residual),
-			FilterAction::UseOriginal => cond_for_filter,
+		//
+		// When UseOriginal and we already compiled a scan_predicate from the
+		// same expression, reuse it as precompiled_predicate to avoid paying
+		// the PhysicalExpr compilation cost a second time.
+		let (pipeline_cond, precompiled_predicate) = match planned.filter_action {
+			FilterAction::FullyConsumed => (None, None),
+			FilterAction::Residual(residual) => (Some(residual), None),
+			FilterAction::UseOriginal => {
+				if scan_predicate_for_reuse.is_some() {
+					// Reuse the already-compiled predicate
+					(None, scan_predicate_for_reuse)
+				} else {
+					(cond_for_filter, None)
+				}
+			}
 		};
 
 		// KNN wrapping
@@ -1230,6 +1260,11 @@ impl<'ctx> Planner<'ctx> {
 			is_value_source,
 			tempfiles,
 			filter_pushed: false,
+			precompiled_predicate: if had_bruteforce_knn {
+				None
+			} else {
+				precompiled_predicate
+			},
 		};
 
 		let projected = pp.plan_pipeline(source, Some(fields), config).await?;

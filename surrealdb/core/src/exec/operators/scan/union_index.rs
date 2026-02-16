@@ -17,7 +17,6 @@ use futures::StreamExt;
 use tracing::instrument;
 
 use super::pipeline::{ScanPipeline, build_field_state};
-use crate::catalog::providers::TableProvider;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
 	validate_record_user_access,
@@ -133,13 +132,10 @@ impl ExecOperator for UnionIndexScan {
 
 		let stream: ValueBatchStream = Box::pin(async_stream::try_stream! {
 			let db_ctx = ctx.database().context("UnionIndexScan requires database context")?;
-			let txn = ctx.txn();
-			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
-			let db = Arc::clone(&db_ctx.db);
 
 			// Check table existence and resolve SELECT permission
-			let table_def = txn
-				.get_tb_by_name(&ns.name, &db.name, &table_name)
+			let table_def = db_ctx
+				.get_table_def(&table_name)
 				.await
 				.context("Failed to get table")?;
 
