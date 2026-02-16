@@ -19,8 +19,8 @@ use crate::exec::permission::{
 	validate_record_user_access,
 };
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::{Cond, ControlFlow, ControlFlowExt};
 use crate::iam::Action;
@@ -43,6 +43,8 @@ pub struct KnnScan {
 	pub ef: u32,
 	/// Table name for record fetching
 	pub table_name: crate::val::TableName,
+	/// Optional VERSION timestamp for time-travel queries.
+	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 	/// KNN distance context, shared with IndexFunctionExec for vector::distance::knn().
@@ -55,12 +57,14 @@ pub struct KnnScan {
 }
 
 impl KnnScan {
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		index_ref: IndexRef,
 		vector: Vec<Number>,
 		k: u32,
 		ef: u32,
 		table_name: crate::val::TableName,
+		version: Option<Arc<dyn PhysicalExpr>>,
 		knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 		residual_cond: Option<Cond>,
 	) -> Self {
@@ -70,6 +74,7 @@ impl KnnScan {
 			k,
 			ef,
 			table_name,
+			version,
 			metrics: Arc::new(OperatorMetrics::new()),
 			knn_context,
 			residual_cond,
@@ -101,6 +106,10 @@ impl ExecOperator for KnnScan {
 		AccessMode::ReadOnly
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::Bounded(self.k as usize)
+	}
+
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(&self.metrics)
 	}
@@ -120,6 +129,7 @@ impl ExecOperator for KnnScan {
 		let k = self.k;
 		let ef = self.ef;
 		let table_name = self.table_name.clone();
+		let version_expr = self.version.clone();
 		let knn_context = self.knn_context.clone();
 		let residual_cond = self.residual_cond.clone();
 		let ctx = ctx.clone();
@@ -130,6 +140,20 @@ impl ExecOperator for KnnScan {
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
 			let txn = ctx.txn();
+
+			// Evaluate VERSION expression
+			let version: Option<u64> = match &version_expr {
+				Some(expr) => {
+					let eval_ctx = crate::exec::EvalContext::from_exec_ctx(&ctx);
+					let v = expr.evaluate(eval_ctx).await?;
+					Some(
+						v.cast_to::<crate::val::Datetime>()
+							.map_err(|e| anyhow::anyhow!("{e}"))?
+							.to_version_stamp()?,
+					)
+				}
+				None => None,
+			};
 
 			// Get the FrozenContext from the root context
 			let root = ctx.root();
@@ -266,6 +290,7 @@ impl ExecOperator for KnnScan {
 				&rids,
 				&select_permission,
 				check_perms,
+				version,
 			).await?;
 
 			if !values.is_empty() {

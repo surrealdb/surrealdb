@@ -6,8 +6,7 @@ value = "'OK'"
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 4}
-    Filter [ctx: Db] [predicate: time > d'2000-01-01T00:00:00Z'] {rows: 4}
-        IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward, limit: 4] {rows: 4}
+    IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward, limit: 4] {rows: 4}
 
 Total rows: 4"'''
 
@@ -16,8 +15,7 @@ value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, tim
 
 [[test.results]]
 value = '''"Project [ctx: Db] {rows: 4}
-    Filter [ctx: Db] [predicate: time > d'2000-01-01T00:00:00Z'] {rows: 4}
-        IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward] {rows: 4}
+    IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward] {rows: 4}
 
 Total rows: 4"'''
 

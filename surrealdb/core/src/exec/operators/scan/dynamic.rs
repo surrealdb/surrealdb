@@ -384,20 +384,6 @@ impl ExecOperator for DynamicScan {
 				None => 0,
 			};
 
-			// Evaluate VERSION expression to a timestamp
-			let version: Option<u64> = match &version {
-				Some(expr) => {
-					let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-					let v = expr.evaluate(eval_ctx).await?;
-					Some(
-						v.cast_to::<crate::val::Datetime>()
-							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp()?,
-					)
-				}
-				None => None,
-			};
-
 			// Early exit if limit is 0
 			if limit_val == Some(0) {
 				return;
@@ -456,7 +442,7 @@ impl ExecOperator for DynamicScan {
 			// `applied_pre_skip` tracks how many rows the source will skip
 			// before decoding, so the pipeline can adjust its start accordingly.
 			let (mut source, applied_pre_skip) = {
-				// Table scan (with index selection)
+				// Table scan (with runtime index selection)
 				resolve_table_scan_stream(
 					&ctx, TableScanConfig {
 						ns_id: ns.namespace_id,
@@ -516,7 +502,9 @@ struct TableScanConfig {
 	order: Option<Ordering>,
 	with: Option<With>,
 	direction: ScanDirection,
-	version: Option<u64>,
+	/// VERSION expression for time-travel queries (evaluated inside
+	/// [`resolve_table_scan_stream`] and passed to child operators).
+	version: Option<Arc<dyn PhysicalExpr>>,
 	storage_limit: Option<usize>,
 	/// Number of KV pairs to skip before decoding (fast-path only).
 	pre_skip: usize,
@@ -533,6 +521,21 @@ async fn resolve_table_scan_stream(
 ) -> Result<(ValueBatchStream, usize), ControlFlow> {
 	let txn = ctx.txn();
 
+	// Evaluate VERSION expression once for the fallback KV scan path.
+	// Child operators receive the unevaluated expr and evaluate it themselves.
+	let version_stamp: Option<u64> = match &cfg.version {
+		Some(expr) => {
+			let eval_ctx = EvalContext::from_exec_ctx(ctx);
+			let v = expr.evaluate(eval_ctx).await?;
+			Some(
+				v.cast_to::<crate::val::Datetime>()
+					.map_err(|e| anyhow::anyhow!("{e}"))?
+					.to_version_stamp()?,
+			)
+		}
+		None => None,
+	};
+
 	let access_path = if matches!(&cfg.with, Some(With::NoIndex)) {
 		None
 	} else {
@@ -545,9 +548,19 @@ async fn resolve_table_scan_stream(
 		let candidates = analyzer.analyze(cfg.cond.as_ref(), cfg.order.as_ref());
 		if candidates.is_empty() {
 			// No single-index candidates -- try multi-index union for OR conditions
-			analyzer.try_or_union(cfg.cond.as_ref(), cfg.direction)
+			analyzer
+				.try_or_union(cfg.cond.as_ref(), cfg.direction)
+				// Try expanding IN operators into union of equality lookups
+				.or_else(|| analyzer.try_in_expansion(cfg.cond.as_ref(), cfg.direction))
 		} else {
-			Some(select_access_path(candidates, cfg.with.as_ref(), cfg.direction))
+			let path = select_access_path(candidates, cfg.with.as_ref(), cfg.direction);
+			// When the best single-index path is a full-range scan (ORDER BY
+			// only), prefer a multi-index union for OR conditions if available.
+			if path.is_full_range_scan() {
+				analyzer.try_or_union(cfg.cond.as_ref(), cfg.direction).or(Some(path))
+			} else {
+				Some(path)
+			}
 		}
 	};
 
@@ -558,7 +571,15 @@ async fn resolve_table_scan_stream(
 			access,
 			direction,
 		}) => {
-			let operator = IndexScan::new(index_ref, access, direction, cfg.table_name, None, None);
+			let operator = IndexScan::new(
+				index_ref,
+				access,
+				direction,
+				cfg.table_name,
+				None,
+				None,
+				cfg.version,
+			);
 			let stream = operator.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -569,7 +590,7 @@ async fn resolve_table_scan_stream(
 			query,
 			operator,
 		}) => {
-			let ft_op = FullTextScan::new(index_ref, query, operator, cfg.table_name);
+			let ft_op = FullTextScan::new(index_ref, query, operator, cfg.table_name, cfg.version);
 			let stream = ft_op.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -590,6 +611,7 @@ async fn resolve_table_scan_stream(
 				k,
 				ef,
 				cfg.table_name,
+				cfg.version,
 				cfg.knn_context.clone(),
 				residual_cond,
 			);
@@ -597,13 +619,14 @@ async fn resolve_table_scan_stream(
 			Ok((stream, 0))
 		}
 
-		// Multi-index union for OR conditions — delegate to UnionIndexScan
+		// Multi-index union for OR conditions — delegate to UnionIndexScan.
+		// Permission handling is done by DynamicScan's ScanPipeline above.
 		Some(AccessPath::Union(paths)) => {
 			let mut sub_operators: Vec<Arc<dyn ExecOperator>> = Vec::with_capacity(paths.len());
 			for path in paths {
 				sub_operators.push(create_index_operator(&path, &cfg));
 			}
-			let union_op = super::UnionIndexScan::new(sub_operators);
+			let union_op = super::UnionIndexScan::new(cfg.table_name.clone(), sub_operators, None);
 			let stream = union_op.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -618,7 +641,7 @@ async fn resolve_table_scan_stream(
 				txn,
 				beg,
 				end,
-				cfg.version,
+				version_stamp,
 				cfg.storage_limit,
 				cfg.direction,
 				cfg.pre_skip,
@@ -648,6 +671,7 @@ fn create_index_operator(path: &AccessPath, cfg: &TableScanConfig) -> Arc<dyn Ex
 			cfg.table_name.clone(),
 			None,
 			None,
+			cfg.version.clone(),
 		)),
 		AccessPath::FullTextSearch {
 			index_ref,
@@ -658,6 +682,7 @@ fn create_index_operator(path: &AccessPath, cfg: &TableScanConfig) -> Arc<dyn Ex
 			query.clone(),
 			operator.clone(),
 			cfg.table_name.clone(),
+			cfg.version.clone(),
 		)),
 		AccessPath::KnnSearch {
 			index_ref,
@@ -672,6 +697,7 @@ fn create_index_operator(path: &AccessPath, cfg: &TableScanConfig) -> Arc<dyn Ex
 				*k,
 				*ef,
 				cfg.table_name.clone(),
+				cfg.version.clone(),
 				cfg.knn_context.clone(),
 				residual_cond,
 			))

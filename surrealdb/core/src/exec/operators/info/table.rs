@@ -17,7 +17,8 @@ use crate::catalog::providers::TableProvider;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream,
 };
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::{Action, ResourceKind};
@@ -84,6 +85,10 @@ impl ExecOperator for TableInfoPlan {
 		let version_mode =
 			self.version.as_ref().map(|e| e.access_mode()).unwrap_or(AccessMode::ReadOnly);
 		self.table.access_mode().combine(version_mode)
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {

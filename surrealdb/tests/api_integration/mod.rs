@@ -350,6 +350,43 @@ mod ws {
 		}
 	}
 
+	/// Test that repeated WebSocket queries don't leak pending request entries.
+	///
+	/// This is a regression test for #6822 where each WS query left an entry
+	/// in the pending_requests map, causing unbounded memory growth.
+	#[test_log::test(tokio::test)]
+	async fn repeated_queries_no_leak() {
+		use ulid::Ulid;
+
+		let permit = PERMITS.acquire().await.unwrap();
+		let config = Config::new();
+		let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await.unwrap();
+		db.signin(Root {
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
+		})
+		.await
+		.unwrap();
+		let ns = Ulid::new().to_string();
+		let dbn = Ulid::new().to_string();
+		db.use_ns(&ns).use_db(&dbn).await.unwrap();
+
+		// Define the table so that selecting a non-existent record returns
+		// None rather than erroring with "table does not exist".
+		db.query("DEFINE TABLE user SCHEMAFULL").await.unwrap();
+
+		// Run many queries in a tight loop. Before the fix, each query would
+		// leak a PendingRequest entry (~768 bytes). With 1000 iterations this
+		// would accumulate without bound.
+		for i in 0..1000u32 {
+			let result: Option<super::RecordName> = db.select(("user", "test")).await.unwrap();
+			// The record doesn't exist, so we expect None
+			assert!(result.is_none(), "iteration {i}: expected None for non-existent record");
+		}
+
+		drop(permit);
+	}
+
 	include_tests!(new_db => basic, serialisation, live, session_isolation);
 }
 

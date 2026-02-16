@@ -8,7 +8,7 @@ use std::sync::Arc;
 use super::access_path::{AccessPath, BTreeAccess, IndexRef, RangeBound, select_access_path};
 use crate::catalog::{Index, IndexDefinition};
 use crate::exec::planner::util::try_literal_to_value;
-use crate::expr::operator::{MatchesOperator, NearestNeighbor};
+use crate::expr::operator::{MatchesOperator, NearestNeighbor, PrefixOperator};
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Cond, Expr, Idiom};
@@ -66,6 +66,10 @@ impl<'a> IndexAnalyzer<'a> {
 			candidates.retain(|c| names.contains(&c.index_ref.name));
 		}
 
+		// Merge half-bounded ranges on the same index into bounded ranges
+		// (e.g. field > 5 AND field < 10 → Range(>5, <10))
+		self.merge_range_candidates(&mut candidates);
+
 		// Deduplicate candidates - prefer compound over simple
 		self.deduplicate_candidates(&mut candidates);
 
@@ -120,6 +124,122 @@ impl<'a> IndexAnalyzer<'a> {
 		Some(AccessPath::Union(branch_paths))
 	}
 
+	/// Maximum number of array elements to expand for `field IN [...]`.
+	///
+	/// Beyond this threshold, the per-operator overhead of creating individual
+	/// `IndexScan` operators inside a `UnionIndexScan` outweighs the benefit
+	/// of targeted lookups. Arrays larger than this fall back to a table scan
+	/// with a predicate filter, which performs a single sequential pass.
+	const MAX_IN_EXPANSION_SIZE: usize = 32;
+
+	/// Try to expand `field IN [v1, v2, ...]` into a union of equality lookups.
+	///
+	/// Walks the condition (through AND nodes) looking for `INSIDE` expressions
+	/// where the right side is a multi-element array literal. For each, if a
+	/// single-column index exists on the field, creates `AccessPath::Union`
+	/// with one `BTreeScan::Equality` per array element.
+	///
+	/// Arrays larger than [`Self::MAX_IN_EXPANSION_SIZE`] are not expanded to
+	/// avoid excessive per-operator overhead.
+	///
+	/// This is a fallback for when `analyze()` and `try_or_union()` both fail
+	/// to find index candidates (e.g. standalone `field IN [1, 2]`).
+	pub fn try_in_expansion(
+		&self,
+		cond: Option<&Cond>,
+		direction: ScanDirection,
+	) -> Option<AccessPath> {
+		let cond = cond?;
+
+		if matches!(self.with_hints, Some(With::NoIndex)) {
+			return None;
+		}
+
+		// Collect IN expressions from the condition
+		let mut in_exprs = Vec::new();
+		Self::collect_in_expressions(&cond.0, &mut in_exprs);
+
+		for (idiom, values) in &in_exprs {
+			if values.len() < 2 || values.len() > Self::MAX_IN_EXPANSION_SIZE {
+				continue; // Single-element handled by match_operator_to_access; too-large skipped
+			}
+
+			for (idx, ix_def) in self.indexes.iter().enumerate() {
+				if ix_def.prepare_remove {
+					continue;
+				}
+				if !matches!(ix_def.index, crate::catalog::Index::Idx | crate::catalog::Index::Uniq)
+				{
+					continue;
+				}
+				// Only handle single-column indexes for IN expansion.
+				// Compound indexes would need prefix handling.
+				if ix_def.cols.len() != 1 {
+					continue;
+				}
+
+				if let Some(With::Index(names)) = self.with_hints
+					&& !names.contains(&ix_def.name)
+				{
+					continue;
+				}
+
+				if let Some(first_col) = ix_def.cols.first()
+					&& idiom_matches(idiom, first_col)
+				{
+					let index_ref = IndexRef::new(self.indexes.clone(), idx);
+					let paths: Vec<AccessPath> = values
+						.iter()
+						.map(|v| AccessPath::BTreeScan {
+							index_ref: index_ref.clone(),
+							access: BTreeAccess::Equality(v.clone()),
+							direction,
+						})
+						.collect();
+					return Some(AccessPath::Union(paths));
+				}
+			}
+		}
+
+		None
+	}
+
+	/// Collect `field INSIDE [values]` expressions from an AND tree.
+	fn collect_in_expressions(expr: &Expr, results: &mut Vec<(Idiom, Vec<Value>)>) {
+		match expr {
+			Expr::Binary {
+				left,
+				op: BinaryOperator::And,
+				right,
+			} => {
+				Self::collect_in_expressions(left, results);
+				Self::collect_in_expressions(right, results);
+			}
+			Expr::Binary {
+				left,
+				op: BinaryOperator::Inside,
+				right,
+			} => {
+				if let (Expr::Idiom(idiom), Expr::Literal(lit)) = (left.as_ref(), right.as_ref())
+					&& let Some(Value::Array(arr)) = try_literal_to_value(lit)
+				{
+					results.push((idiom.clone(), arr.0));
+				}
+			}
+			Expr::Prefix {
+				op,
+				expr: inner,
+			} => {
+				// Do NOT recurse into NOT — expanding `NOT (field IN [...])`
+				// into index lookups would produce the wrong result set.
+				if !matches!(op, PrefixOperator::Not) {
+					Self::collect_in_expressions(inner, results);
+				}
+			}
+			_ => {}
+		}
+	}
+
 	/// Flatten nested OR expressions into a list of branches.
 	///
 	/// `A OR B OR C` (parsed as `(A OR B) OR C`) becomes `[A, B, C]`.
@@ -165,10 +285,14 @@ impl<'a> IndexAnalyzer<'a> {
 				}
 			}
 			Expr::Prefix {
+				op,
 				expr: inner,
-				..
 			} => {
-				self.collect_conditions(inner, conditions);
+				// Do NOT recurse into NOT — `NOT (field > 5)` must not
+				// generate an index candidate for `field > 5`.
+				if !matches!(op, PrefixOperator::Not) {
+					self.collect_conditions(inner, conditions);
+				}
 			}
 			_ => {}
 		}
@@ -208,6 +332,13 @@ impl<'a> IndexAnalyzer<'a> {
 	}
 
 	/// Analyze conditions to find compound index opportunities.
+	///
+	/// Collects leading equality conditions into a prefix, and optionally
+	/// captures a single range condition on the next column after the
+	/// equality prefix. This allows the index scan to narrow the key range
+	/// (e.g. `city = 'london' AND age > 50` on index `(city, age)` scans
+	/// only keys matching both conditions rather than all `city = 'london'`
+	/// entries).
 	fn analyze_compound_conditions(
 		&self,
 		conditions: &[SimpleCondition],
@@ -230,13 +361,12 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 
 			// Try to match conditions to index columns in order.
-			// The prefix collects leading equality conditions. Non-equality
-			// (range) conditions on later columns are NOT encoded into the
-			// compound key because the key encoding uses variable-length
-			// arrays and mixing different array sizes in range bounds
-			// produces incorrect scan ranges. Range conditions are instead
-			// handled by the Scan operator's predicate filter.
+			// The prefix collects leading equality conditions. After the
+			// equality prefix, a single range condition on the next column
+			// is captured and encoded into the compound key range so the
+			// index scan is narrowed at the storage level.
 			let mut prefix_values = Vec::new();
+			let mut range_condition: Option<(BinaryOperator, Value)> = None;
 
 			for col in &ix_def.cols {
 				// Find a condition that matches this column
@@ -251,8 +381,12 @@ impl<'a> IndexAnalyzer<'a> {
 							// Equality condition -- add to prefix
 							prefix_values.push(cond.value.clone());
 						} else {
-							// Non-equality -- stop adding to prefix.
-							// This column's range will be filtered by the predicate.
+							// Non-equality (range) -- capture the range condition
+							// on this column and stop. The range narrows the scan
+							// beyond the equality prefix.
+							if let Some(op) = normalize_range_op(&cond.op, cond.position) {
+								range_condition = Some((op, cond.value.clone()));
+							}
 							break;
 						}
 					}
@@ -263,11 +397,13 @@ impl<'a> IndexAnalyzer<'a> {
 				}
 			}
 
-			// Create compound candidate if we have at least 2 equality columns
-			if prefix_values.len() >= 2 {
+			// Create compound candidate if we have at least 2 equality columns,
+			// or at least 1 equality column with a range on the next column.
+			if prefix_values.len() >= 2 || (!prefix_values.is_empty() && range_condition.is_some())
+			{
 				let access = BTreeAccess::Compound {
 					prefix: prefix_values,
-					range: None,
+					range: range_condition,
 				};
 
 				let index_ref = IndexRef::new(self.indexes.clone(), idx);
@@ -279,6 +415,86 @@ impl<'a> IndexAnalyzer<'a> {
 				};
 				candidates.push(candidate);
 			}
+		}
+	}
+
+	/// Merge half-bounded range candidates on the same index into bounded ranges.
+	///
+	/// When the WHERE clause contains `field > A AND field < B`, the analyzer
+	/// produces two separate half-bounded Range candidates for the same index.
+	/// This pass merges them into a single `Range { from: >A, to: <B }` which
+	/// narrows the index scan and avoids scanning rows only to filter them out.
+	fn merge_range_candidates(&self, candidates: &mut Vec<IndexCandidate>) {
+		// Sort by index so candidates on the same index are adjacent
+		candidates.sort_by_key(|c| c.index_ref.idx);
+
+		let mut i = 0;
+		while i < candidates.len() {
+			let mut j = i + 1;
+			while j < candidates.len() && candidates[j].index_ref.idx == candidates[i].index_ref.idx
+			{
+				// Try to merge candidates[i] and candidates[j]
+				let merged = Self::try_merge_ranges(&candidates[i].access, &candidates[j].access);
+				if let Some(merged_access) = merged {
+					// Keep the merged result in slot i, remove slot j
+					let covers_order = candidates[i].covers_order || candidates[j].covers_order;
+					candidates[i].access = merged_access;
+					candidates[i].covers_order = covers_order;
+					candidates.remove(j);
+					// Don't increment j — the next candidate shifted into slot j
+				} else {
+					j += 1;
+				}
+			}
+			i += 1;
+		}
+	}
+
+	/// Try to merge two BTreeAccess::Range values into a single bounded range.
+	///
+	/// Returns `Some(merged)` if one provides a `from` bound and the other a
+	/// `to` bound. Returns `None` if the ranges cannot be merged (e.g. both
+	/// have `from` bounds, or they are not Range variants).
+	fn try_merge_ranges(a: &BTreeAccess, b: &BTreeAccess) -> Option<BTreeAccess> {
+		match (a, b) {
+			(
+				BTreeAccess::Range {
+					from: from_a,
+					to: to_a,
+				},
+				BTreeAccess::Range {
+					from: from_b,
+					to: to_b,
+				},
+			) => {
+				// Merge when one has from and the other has to
+				let merged_from = match (from_a, from_b) {
+					(Some(_), Some(_)) => return None, // both have from — can't merge
+					(Some(f), None) => Some(f.clone()),
+					(None, Some(f)) => Some(f.clone()),
+					(None, None) => None,
+				};
+				let merged_to = match (to_a, to_b) {
+					(Some(_), Some(_)) => return None, // both have to — can't merge
+					(Some(t), None) => Some(t.clone()),
+					(None, Some(t)) => Some(t.clone()),
+					(None, None) => None,
+				};
+				// Only produce a merge if the result is strictly more bounded
+				// than either input (i.e. we actually combined something).
+				if merged_from.is_some()
+					&& merged_to.is_some()
+					&& (from_a.is_none() || to_a.is_none() || from_b.is_none() || to_b.is_none())
+				{
+					Some(BTreeAccess::Range {
+						from: merged_from,
+						to: merged_to,
+					})
+				} else {
+					None
+				}
+			}
+			_ => None,
 		}
 	}
 
@@ -329,12 +545,16 @@ impl<'a> IndexAnalyzer<'a> {
 					}
 				}
 			}
-			// Nested expression in parentheses
+			// Nested expression in parentheses (but NOT negation)
 			Expr::Prefix {
-				op: _,
+				op,
 				expr: inner,
 			} => {
-				self.analyze_condition(inner, candidates);
+				// Do NOT recurse into NOT — negated predicates invert
+				// the result set and index candidates would be wrong.
+				if !matches!(op, PrefixOperator::Not) {
+					self.analyze_condition(inner, candidates);
+				}
 			}
 			_ => {}
 		}
@@ -493,8 +713,14 @@ impl<'a> IndexAnalyzer<'a> {
 
 			// IN clause (field IN [values])
 			(BinaryOperator::Inside, IdiomPosition::Left) => {
-				// Value should be an array - return None, let union handling deal with it
-				None
+				// Single-element array: treat as equality (field IN [v] → field = v)
+				if let Value::Array(arr) = value
+					&& arr.len() == 1
+				{
+					Some(BTreeAccess::Equality(arr[0].clone()))
+				} else {
+					None
+				}
 			}
 
 			_ => None,
@@ -710,10 +936,14 @@ impl IndexCandidate {
 			}
 			BTreeAccess::Compound {
 				prefix,
-				..
+				range,
 			} => {
 				// More prefix columns = better selectivity
 				score += 400 + (prefix.len() as u32 * 50);
+				// Bonus for having a range condition that narrows the scan
+				if range.is_some() {
+					score += 25;
+				}
 			}
 			BTreeAccess::Range {
 				from,
@@ -795,7 +1025,6 @@ struct SimpleCondition {
 	idiom: Idiom,
 	op: BinaryOperator,
 	value: Value,
-	#[allow(dead_code)]
 	position: IdiomPosition,
 }
 
@@ -820,6 +1049,33 @@ fn idiom_matches(expr_idiom: &Idiom, index_col: &Idiom) -> bool {
 	}
 
 	true
+}
+
+/// Normalize a range operator based on the position of the idiom in the
+/// comparison expression.
+///
+/// When the idiom is on the left (`field > value`), the operator is already
+/// correct. When on the right (`value < field`), the operator must be
+/// flipped so it describes the condition from the field's perspective.
+///
+/// Returns `None` for non-range operators (equality, MATCHES, etc.).
+fn normalize_range_op(op: &BinaryOperator, position: IdiomPosition) -> Option<BinaryOperator> {
+	match position {
+		IdiomPosition::Left => match op {
+			BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+			| BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual => Some(op.clone()),
+			_ => None,
+		},
+		IdiomPosition::Right => match op {
+			BinaryOperator::LessThan => Some(BinaryOperator::MoreThan),
+			BinaryOperator::LessThanEqual => Some(BinaryOperator::MoreThanEqual),
+			BinaryOperator::MoreThan => Some(BinaryOperator::LessThan),
+			BinaryOperator::MoreThanEqual => Some(BinaryOperator::LessThanEqual),
+			_ => None,
+		},
+	}
 }
 
 // literal_to_value and expr_to_value are imported from crate::exec::planner::util

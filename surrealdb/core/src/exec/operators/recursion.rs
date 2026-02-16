@@ -51,8 +51,8 @@ use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::exec::parts::recurse::PhysicalRecurseInstruction;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, ExecOperator, ExecutionContext,
+	FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::val::Value;
 
@@ -200,6 +200,10 @@ impl ExecOperator for RecursionOp {
 		};
 
 		path_mode.combine(instruction_mode)
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
