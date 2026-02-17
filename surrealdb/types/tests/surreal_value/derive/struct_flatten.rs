@@ -1,4 +1,4 @@
-use surrealdb_types::{Object, SurrealValue, Value, object};
+use surrealdb_types::{SurrealValue, Value, object};
 
 // -------------------------------------------------
 // Basic flatten: inner struct merged into parent
@@ -91,17 +91,6 @@ enum Status {
 	Suspended {
 		reason: String,
 	},
-}
-
-impl Status {
-	fn kind_str(&self) -> &'static str {
-		match self {
-			Self::Active => "Active",
-			Self::Suspended {
-				..
-			} => "Suspended",
-		}
-	}
 }
 
 #[derive(SurrealValue, Debug, PartialEq)]
