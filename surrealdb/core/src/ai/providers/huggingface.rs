@@ -5,8 +5,8 @@
 //! # Configuration
 //!
 //! - `SURREAL_AI_HUGGINGFACE_API_KEY` — Required. A HuggingFace API token.
-//! - `SURREAL_AI_HUGGINGFACE_BASE_URL` — Optional. Defaults to
-//!   `https://api-inference.huggingface.co/pipeline/feature-extraction` for embeddings.
+//! - `SURREAL_AI_HUGGINGFACE_BASE_URL` — Optional. Defaults to `https://api-inference.huggingface.co/pipeline/feature-extraction`
+//!   for embeddings.
 //!
 //! # Usage
 //!
@@ -29,15 +29,30 @@ const DEFAULT_GENERATION_BASE_URL: &str = "https://api-inference.huggingface.co/
 pub struct HuggingFaceProvider {
 	api_key: String,
 	base_url: String,
+	client: reqwest::Client,
+}
+
+/// Default HTTP request timeout for provider API calls (in seconds).
+const HTTP_TIMEOUT_SECS: u64 = 60;
+
+impl Default for HuggingFaceProvider {
+	fn default() -> Self {
+		Self::new()
+	}
 }
 
 impl HuggingFaceProvider {
 	/// Create a new provider with explicit configuration.
 	#[cfg(test)]
 	pub fn with_config(api_key: String, base_url: String) -> Self {
+		let client = reqwest::Client::builder()
+			.timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+			.build()
+			.unwrap_or_default();
 		Self {
 			api_key,
 			base_url,
+			client,
 		}
 	}
 
@@ -49,9 +64,15 @@ impl HuggingFaceProvider {
 		let base_url = std::env::var("SURREAL_AI_HUGGINGFACE_BASE_URL")
 			.unwrap_or_else(|_| DEFAULT_BASE_URL.to_owned());
 
+		let client = reqwest::Client::builder()
+			.timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+			.build()
+			.unwrap_or_default();
+
 		Self {
 			api_key,
 			base_url,
+			client,
 		}
 	}
 
@@ -94,10 +115,8 @@ impl EmbeddingProvider for HuggingFaceProvider {
 			inputs: input,
 		};
 
-		let mut request = reqwest::Client::new()
-			.post(&url)
-			.header("Content-Type", "application/json")
-			.json(&body);
+		let mut request =
+			self.client.post(&url).header("Content-Type", "application/json").json(&body);
 
 		if !self.api_key.is_empty() {
 			request = request.header("Authorization", format!("Bearer {}", self.api_key));
@@ -216,10 +235,8 @@ impl GenerationProvider for HuggingFaceProvider {
 			parameters,
 		};
 
-		let mut request = reqwest::Client::new()
-			.post(&url)
-			.header("Content-Type", "application/json")
-			.json(&body);
+		let mut request =
+			self.client.post(&url).header("Content-Type", "application/json").json(&body);
 
 		if !self.api_key.is_empty() {
 			request = request.header("Authorization", format!("Bearer {}", self.api_key));
@@ -228,9 +245,7 @@ impl GenerationProvider for HuggingFaceProvider {
 		let response = request
 			.send()
 			.await
-			.map_err(|e| {
-				anyhow::anyhow!("Failed to call HuggingFace text generation API: {e}")
-			})?;
+			.map_err(|e| anyhow::anyhow!("Failed to call HuggingFace text generation API: {e}"))?;
 
 		if !response.status().is_success() {
 			let status = response.status();
@@ -322,7 +337,7 @@ impl ChatProvider for HuggingFaceProvider {
 				.iter()
 				.map(|m| HfChatMessage {
 					role: &m.role,
-					content: &m.content,
+					content: m.content.as_deref().unwrap_or(""),
 				})
 				.collect(),
 			temperature: config.temperature,
@@ -330,10 +345,8 @@ impl ChatProvider for HuggingFaceProvider {
 			top_p: config.top_p,
 		};
 
-		let mut request = reqwest::Client::new()
-			.post(&url)
-			.header("Content-Type", "application/json")
-			.json(&body);
+		let mut request =
+			self.client.post(&url).header("Content-Type", "application/json").json(&body);
 
 		if !self.api_key.is_empty() {
 			request = request.header("Authorization", format!("Bearer {}", self.api_key));
@@ -342,9 +355,7 @@ impl ChatProvider for HuggingFaceProvider {
 		let response = request
 			.send()
 			.await
-			.map_err(|e| {
-				anyhow::anyhow!("Failed to call HuggingFace chat completions API: {e}")
-			})?;
+			.map_err(|e| anyhow::anyhow!("Failed to call HuggingFace chat completions API: {e}"))?;
 
 		if !response.status().is_success() {
 			let status = response.status();
@@ -356,20 +367,13 @@ impl ChatProvider for HuggingFaceProvider {
 			anyhow::anyhow!("Failed to parse HuggingFace chat completions response: {e}")
 		})?;
 
-		let choice = result
-			.choices
-			.into_iter()
-			.next()
-			.ok_or_else(|| {
-				anyhow::anyhow!("HuggingFace chat completions response contained no choices")
-			})?;
+		let choice = result.choices.into_iter().next().ok_or_else(|| {
+			anyhow::anyhow!("HuggingFace chat completions response contained no choices")
+		})?;
 
-		choice
-			.message
-			.content
-			.ok_or_else(|| {
-				anyhow::anyhow!("HuggingFace chat completions response contained no content")
-			})
+		choice.message.content.ok_or_else(|| {
+			anyhow::anyhow!("HuggingFace chat completions response contained no content")
+		})
 	}
 }
 
@@ -388,12 +392,11 @@ mod tests {
 
 	#[test]
 	fn model_url_custom() {
-		let provider =
-			HuggingFaceProvider::with_config(String::new(), "https://custom.example.com/v1/".into());
-		assert_eq!(
-			provider.model_url("my-model"),
-			"https://custom.example.com/v1/my-model"
+		let provider = HuggingFaceProvider::with_config(
+			String::new(),
+			"https://custom.example.com/v1/".into(),
 		);
+		assert_eq!(provider.model_url("my-model"), "https://custom.example.com/v1/my-model");
 	}
 
 	#[test]
@@ -420,9 +423,7 @@ mod tests {
 
 		Mock::given(method("POST"))
 			.and(path("/my-model"))
-			.respond_with(
-				ResponseTemplate::new(200).set_body_string("[0.1, 0.2, 0.3, 0.4, 0.5]"),
-			)
+			.respond_with(ResponseTemplate::new(200).set_body_string("[0.1, 0.2, 0.3, 0.4, 0.5]"))
 			.expect(1)
 			.mount(&server)
 			.await;
@@ -505,10 +506,7 @@ mod tests {
 
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
-		assert!(
-			err_msg.contains("Failed to parse"),
-			"Expected parse error in error: {err_msg}"
-		);
+		assert!(err_msg.contains("Failed to parse"), "Expected parse error in error: {err_msg}");
 
 		server.verify().await;
 	}
@@ -517,7 +515,7 @@ mod tests {
 	fn generation_url_default() {
 		let provider = HuggingFaceProvider::with_config(String::new(), DEFAULT_BASE_URL.into());
 		// Clear any env override
-		std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL");
+		unsafe { std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL") };
 		assert_eq!(
 			provider.generation_url("mistralai/Mistral-7B-Instruct-v0.3"),
 			"https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
@@ -549,7 +547,7 @@ mod tests {
 			.mount(&server)
 			.await;
 
-		std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", &server.uri());
+		unsafe { std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", server.uri()) };
 
 		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
 		let config = GenerationConfig::default();
@@ -557,7 +555,7 @@ mod tests {
 			.generate("mistralai/Mistral-7B", "What is the capital of France?", &config)
 			.await;
 
-		std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL");
+		unsafe { std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL") };
 
 		let text = result.expect("generate should succeed with mock server");
 		assert_eq!(text, "The capital of France is Paris.");
@@ -580,13 +578,13 @@ mod tests {
 			.mount(&server)
 			.await;
 
-		std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", &server.uri());
+		unsafe { std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", server.uri()) };
 
 		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
 		let config = GenerationConfig::default();
 		let result = provider.generate("test-model", "Hello", &config).await;
 
-		std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL");
+		unsafe { std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL") };
 
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
@@ -608,20 +606,17 @@ mod tests {
 			.mount(&server)
 			.await;
 
-		std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", &server.uri());
+		unsafe { std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", server.uri()) };
 
 		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
 		let config = GenerationConfig::default();
 		let result = provider.generate("test-model", "Hello", &config).await;
 
-		std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL");
+		unsafe { std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL") };
 
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
-		assert!(
-			err_msg.contains("no results"),
-			"Expected 'no results' in error: {err_msg}"
-		);
+		assert!(err_msg.contains("no results"), "Expected 'no results' in error: {err_msg}");
 
 		server.verify().await;
 	}
@@ -653,19 +648,14 @@ mod tests {
 			.mount(&server)
 			.await;
 
-		std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", &server.uri());
+		unsafe { std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", server.uri()) };
 
 		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
 		let config = GenerationConfig::default();
-		let messages = vec![
-			ProviderChatMessage {
-				role: "user".to_string(),
-				content: "What is SurrealDB?".to_string(),
-			},
-		];
+		let messages = vec![ProviderChatMessage::text("user", "What is SurrealDB?")];
 		let result = provider.chat("mistralai/Mistral-7B", &messages, &config).await;
 
-		std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL");
+		unsafe { std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL") };
 
 		let text = result.expect("chat should succeed with mock server");
 		assert_eq!(text, "SurrealDB is a multi-model database.");

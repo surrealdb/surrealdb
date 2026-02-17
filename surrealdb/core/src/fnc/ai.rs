@@ -17,19 +17,13 @@ use crate::val::Value;
 ///
 /// Returns an `array<float>` containing the embedding vector.
 #[cfg(not(feature = "ai"))]
-pub async fn embed(
-	_: &FrozenContext,
-	(_model_id, _input): (String, String),
-) -> Result<Value> {
+pub async fn embed(_: &FrozenContext, (_model_id, _input): (String, String)) -> Result<Value> {
 	anyhow::bail!(Error::AiDisabled)
 }
 
 /// Generate an embedding vector for a text input using a provider-prefixed model.
 #[cfg(feature = "ai")]
-pub async fn embed(
-	_ctx: &FrozenContext,
-	(model_id, input): (String, String),
-) -> Result<Value> {
+pub async fn embed(_ctx: &FrozenContext, (model_id, input): (String, String)) -> Result<Value> {
 	let embedding = crate::ai::embed::embed(&model_id, &input).await?;
 	let array: Vec<Value> = embedding.into_iter().map(Value::from).collect();
 	Ok(Value::Array(array.into()))
@@ -61,7 +55,7 @@ pub async fn generate(
 ) -> Result<Value> {
 	let config = parse_generation_config("ai::generate", config.0)?;
 	let text = crate::ai::generate::generate(&model_id, &prompt, &config).await?;
-	Ok(Value::String(text.into()))
+	Ok(Value::String(text))
 }
 
 /// Conduct a multi-turn chat conversation using a provider-prefixed model.
@@ -96,7 +90,7 @@ pub async fn chat(
 	let messages = parse_chat_messages(&messages)?;
 	let config = parse_generation_config("ai::chat", config.0)?;
 	let text = crate::ai::chat::chat(&model_id, &messages, &config).await?;
-	Ok(Value::String(text.into()))
+	Ok(Value::String(text))
 }
 
 /// Parse a SurrealQL array value into a `Vec<ChatMessage>`.
@@ -142,7 +136,7 @@ fn parse_chat_messages(value: &Value) -> Result<Vec<crate::ai::provider::ChatMes
 		};
 
 		let role = match obj.get("role") {
-			Some(Value::String(s)) => s.to_string(),
+			Some(Value::String(s)) => s.clone(),
 			Some(v) => {
 				anyhow::bail!(Error::InvalidFunctionArguments {
 					name: "ai::chat".to_owned(),
@@ -161,7 +155,7 @@ fn parse_chat_messages(value: &Value) -> Result<Vec<crate::ai::provider::ChatMes
 		};
 
 		let content = match obj.get("content") {
-			Some(Value::String(s)) => s.to_string(),
+			Some(Value::String(s)) => s.clone(),
 			Some(v) => {
 				anyhow::bail!(Error::InvalidFunctionArguments {
 					name: "ai::chat".to_owned(),
@@ -179,10 +173,7 @@ fn parse_chat_messages(value: &Value) -> Result<Vec<crate::ai::provider::ChatMes
 			}
 		};
 
-		messages.push(ChatMessage {
-			role,
-			content,
-		});
+		messages.push(ChatMessage::text(role, content));
 	}
 
 	Ok(messages)
@@ -237,13 +228,12 @@ fn parse_generation_config(
 					let mut stops = Vec::new();
 					for v in arr.iter() {
 						match v {
-							Value::String(s) => stops.push(s.to_string()),
+							Value::String(s) => stops.push(s.clone()),
 							_ => {
 								anyhow::bail!(Error::InvalidFunctionArguments {
 									name: fn_name.to_owned(),
-									message:
-										"The 'stop' config field must be an array of strings"
-											.to_owned(),
+									message: "The 'stop' config field must be an array of strings"
+										.to_owned(),
 								})
 							}
 						}
@@ -269,10 +259,7 @@ fn parse_generation_config(
 		Some(v) => {
 			anyhow::bail!(Error::InvalidFunctionArguments {
 				name: fn_name.to_owned(),
-				message: format!(
-					"The config argument must be an object, got: {}",
-					v.kind_of()
-				),
+				message: format!("The config argument must be an object, got: {}", v.kind_of()),
 			})
 		}
 	}

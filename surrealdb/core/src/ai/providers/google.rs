@@ -8,8 +8,7 @@
 //! # Configuration
 //!
 //! - `SURREAL_AI_GOOGLE_API_KEY` — Required. A Google AI API key.
-//! - `SURREAL_AI_GOOGLE_BASE_URL` — Optional. Defaults to
-//!   `https://generativelanguage.googleapis.com/v1beta`.
+//! - `SURREAL_AI_GOOGLE_BASE_URL` — Optional. Defaults to `https://generativelanguage.googleapis.com/v1beta`.
 //!
 //! # Usage
 //!
@@ -31,15 +30,24 @@ const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta
 pub struct GoogleProvider {
 	api_key: String,
 	base_url: String,
+	client: reqwest::Client,
 }
+
+/// Default HTTP request timeout for provider API calls (in seconds).
+const HTTP_TIMEOUT_SECS: u64 = 60;
 
 impl GoogleProvider {
 	/// Create a new provider with explicit configuration.
 	#[cfg(test)]
 	pub fn new(api_key: String, base_url: String) -> Self {
+		let client = reqwest::Client::builder()
+			.timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+			.build()
+			.unwrap_or_default();
 		Self {
 			api_key,
 			base_url,
+			client,
 		}
 	}
 
@@ -58,22 +66,28 @@ impl GoogleProvider {
 		let base_url = std::env::var("SURREAL_AI_GOOGLE_BASE_URL")
 			.unwrap_or_else(|_| DEFAULT_BASE_URL.to_owned());
 
+		let client = reqwest::Client::builder()
+			.timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+			.build()
+			.map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))?;
+
 		Ok(Self {
 			api_key,
 			base_url,
+			client,
 		})
 	}
 
 	/// Build the URL for the embedContent endpoint.
 	fn embed_url(&self, model: &str) -> String {
 		let base = self.base_url.trim_end_matches('/');
-		format!("{base}/models/{model}:embedContent?key={}", self.api_key)
+		format!("{base}/models/{model}:embedContent")
 	}
 
 	/// Build the URL for the generateContent endpoint.
 	fn generate_url(&self, model: &str) -> String {
 		let base = self.base_url.trim_end_matches('/');
-		format!("{base}/models/{model}:generateContent?key={}", self.api_key)
+		format!("{base}/models/{model}:generateContent")
 	}
 }
 
@@ -205,10 +219,11 @@ impl EmbeddingProvider for GoogleProvider {
 			},
 		};
 
-		let client = reqwest::Client::new();
+		let client = self.client.clone();
 		let response = client
 			.post(&url)
 			.header("Content-Type", "application/json")
+			.header("x-goog-api-key", &self.api_key)
 			.json(&body)
 			.send()
 			.await
@@ -240,21 +255,20 @@ impl GenerationProvider for GoogleProvider {
 	) -> Result<String> {
 		let url = self.generate_url(model);
 
-		let generation_config =
-			if config.temperature.is_some()
-				|| config.max_tokens.is_some()
-				|| config.top_p.is_some()
-				|| config.stop.is_some()
-			{
-				Some(GoogleGenerationConfig {
-					temperature: config.temperature,
-					max_output_tokens: config.max_tokens,
-					top_p: config.top_p,
-					stop_sequences: config.stop.clone(),
-				})
-			} else {
-				None
-			};
+		let generation_config = if config.temperature.is_some()
+			|| config.max_tokens.is_some()
+			|| config.top_p.is_some()
+			|| config.stop.is_some()
+		{
+			Some(GoogleGenerationConfig {
+				temperature: config.temperature,
+				max_output_tokens: config.max_tokens,
+				top_p: config.top_p,
+				stop_sequences: config.stop.clone(),
+			})
+		} else {
+			None
+		};
 
 		let body = GenerateContentRequest {
 			contents: vec![GenerateContentBody {
@@ -265,10 +279,11 @@ impl GenerationProvider for GoogleProvider {
 			generation_config,
 		};
 
-		let client = reqwest::Client::new();
+		let client = self.client.clone();
 		let response = client
 			.post(&url)
 			.header("Content-Type", "application/json")
+			.header("x-goog-api-key", &self.api_key)
 			.json(&body)
 			.send()
 			.await
@@ -280,23 +295,17 @@ impl GenerationProvider for GoogleProvider {
 			bail!("Google generateContent API returned {status}: {body}");
 		}
 
-		let result: GenerateContentResponse = response.json().await.map_err(|e| {
-			anyhow::anyhow!("Failed to parse Google generateContent response: {e}")
+		let result: GenerateContentResponse = response
+			.json()
+			.await
+			.map_err(|e| anyhow::anyhow!("Failed to parse Google generateContent response: {e}"))?;
+
+		let candidate = result.candidates.into_iter().next().ok_or_else(|| {
+			anyhow::anyhow!("Google generateContent response contained no candidates")
 		})?;
 
-		let candidate = result
-			.candidates
-			.into_iter()
-			.next()
-			.ok_or_else(|| anyhow::anyhow!("Google generateContent response contained no candidates"))?;
-
-		let text = candidate
-			.content
-			.parts
-			.into_iter()
-			.filter_map(|p| p.text)
-			.collect::<Vec<_>>()
-			.join("");
+		let text =
+			candidate.content.parts.into_iter().filter_map(|p| p.text).collect::<Vec<_>>().join("");
 
 		if text.is_empty() {
 			bail!("Google generateContent response contained no text");
@@ -317,21 +326,20 @@ impl ChatProvider for GoogleProvider {
 	) -> Result<String> {
 		let url = self.generate_url(model);
 
-		let generation_config =
-			if config.temperature.is_some()
-				|| config.max_tokens.is_some()
-				|| config.top_p.is_some()
-				|| config.stop.is_some()
-			{
-				Some(GoogleGenerationConfig {
-					temperature: config.temperature,
-					max_output_tokens: config.max_tokens,
-					top_p: config.top_p,
-					stop_sequences: config.stop.clone(),
-				})
-			} else {
-				None
-			};
+		let generation_config = if config.temperature.is_some()
+			|| config.max_tokens.is_some()
+			|| config.top_p.is_some()
+			|| config.stop.is_some()
+		{
+			Some(GoogleGenerationConfig {
+				temperature: config.temperature,
+				max_output_tokens: config.max_tokens,
+				top_p: config.top_p,
+				stop_sequences: config.stop.clone(),
+			})
+		} else {
+			None
+		};
 
 		// Extract system messages into system_instruction, translate the rest.
 		// Google uses "user" and "model" roles; OpenAI uses "user" and "assistant".
@@ -339,8 +347,10 @@ impl ChatProvider for GoogleProvider {
 			let system_parts: Vec<PartBody<'_>> = messages
 				.iter()
 				.filter(|m| m.role == "system")
-				.map(|m| PartBody {
-					text: &m.content,
+				.filter_map(|m| {
+					m.content.as_deref().map(|c| PartBody {
+						text: c,
+					})
 				})
 				.collect();
 			if system_parts.is_empty() {
@@ -363,7 +373,7 @@ impl ChatProvider for GoogleProvider {
 				ChatContentBody {
 					role,
 					parts: vec![PartBody {
-						text: &m.content,
+						text: m.content.as_deref().unwrap_or(""),
 					}],
 				}
 			})
@@ -375,10 +385,11 @@ impl ChatProvider for GoogleProvider {
 			generation_config,
 		};
 
-		let client = reqwest::Client::new();
+		let client = self.client.clone();
 		let response = client
 			.post(&url)
 			.header("Content-Type", "application/json")
+			.header("x-goog-api-key", &self.api_key)
 			.json(&body)
 			.send()
 			.await
@@ -390,23 +401,17 @@ impl ChatProvider for GoogleProvider {
 			bail!("Google generateContent API returned {status}: {body}");
 		}
 
-		let result: GenerateContentResponse = response.json().await.map_err(|e| {
-			anyhow::anyhow!("Failed to parse Google generateContent response: {e}")
+		let result: GenerateContentResponse = response
+			.json()
+			.await
+			.map_err(|e| anyhow::anyhow!("Failed to parse Google generateContent response: {e}"))?;
+
+		let candidate = result.candidates.into_iter().next().ok_or_else(|| {
+			anyhow::anyhow!("Google generateContent response contained no candidates")
 		})?;
 
-		let candidate = result
-			.candidates
-			.into_iter()
-			.next()
-			.ok_or_else(|| anyhow::anyhow!("Google generateContent response contained no candidates"))?;
-
-		let text = candidate
-			.content
-			.parts
-			.into_iter()
-			.filter_map(|p| p.text)
-			.collect::<Vec<_>>()
-			.join("");
+		let text =
+			candidate.content.parts.into_iter().filter_map(|p| p.text).collect::<Vec<_>>().join("");
 
 		if text.is_empty() {
 			bail!("Google generateContent response contained no text");
@@ -586,10 +591,7 @@ mod tests {
 
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
-		assert!(
-			err_msg.contains("no candidates"),
-			"Expected 'no candidates' in error: {err_msg}"
-		);
+		assert!(err_msg.contains("no candidates"), "Expected 'no candidates' in error: {err_msg}");
 
 		server.verify().await;
 	}
@@ -648,14 +650,8 @@ mod tests {
 		let provider = GoogleProvider::new("test-key".into(), server.uri());
 		let config = GenerationConfig::default();
 		let messages = vec![
-			ChatMessage {
-				role: "system".to_string(),
-				content: "You are a helpful assistant.".to_string(),
-			},
-			ChatMessage {
-				role: "user".to_string(),
-				content: "What is SurrealDB?".to_string(),
-			},
+			ChatMessage::text("system", "You are a helpful assistant."),
+			ChatMessage::text("user", "What is SurrealDB?"),
 		];
 		let result = provider.chat("gemini-2.0-flash", &messages, &config).await;
 

@@ -34,13 +34,13 @@ async fn ai_embed_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value
 					"The first argument should be a string model ID (e.g. 'openai:text-embedding-3-small'), got: {}",
 					v.kind_of()
 				),
-			}))
+			}));
 		}
 		None => {
 			return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
 				name: "ai::embed".to_owned(),
 				message: "Missing model ID argument".to_string(),
-			}))
+			}));
 		}
 	};
 
@@ -53,13 +53,13 @@ async fn ai_embed_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value
 					"The second argument should be a string of text to embed, got: {}",
 					v.kind_of()
 				),
-			}))
+			}));
 		}
 		None => {
 			return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
 				name: "ai::embed".to_owned(),
 				message: "Missing text input argument".to_string(),
-			}))
+			}));
 		}
 	};
 
@@ -90,13 +90,13 @@ async fn ai_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Va
 					"The first argument should be a string model ID (e.g. 'openai:gpt-4-turbo'), got: {}",
 					v.kind_of()
 				),
-			}))
+			}));
 		}
 		None => {
 			return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
 				name: "ai::generate".to_owned(),
 				message: "Missing model ID argument".to_string(),
-			}))
+			}));
 		}
 	};
 
@@ -109,13 +109,13 @@ async fn ai_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Va
 					"The second argument should be a string prompt, got: {}",
 					v.kind_of()
 				),
-			}))
+			}));
 		}
 		None => {
 			return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
 				name: "ai::generate".to_owned(),
 				message: "Missing prompt argument".to_string(),
-			}))
+			}));
 		}
 	};
 
@@ -124,12 +124,10 @@ async fn ai_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Va
 			let temperature = match obj.get("temperature") {
 				Some(Value::Number(n)) => Some(n.as_float()),
 				Some(_) => {
-					return Err(anyhow::anyhow!(
-						crate::err::Error::InvalidFunctionArguments {
-							name: "ai::generate".to_owned(),
-							message: "The 'temperature' config field must be a number".to_owned(),
-						}
-					))
+					return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+						name: "ai::generate".to_owned(),
+						message: "The 'temperature' config field must be a number".to_owned(),
+					}));
 				}
 				None => None,
 			};
@@ -137,12 +135,10 @@ async fn ai_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Va
 			let max_tokens = match obj.get("max_tokens") {
 				Some(Value::Number(n)) => Some(n.as_int() as u64),
 				Some(_) => {
-					return Err(anyhow::anyhow!(
-						crate::err::Error::InvalidFunctionArguments {
-							name: "ai::generate".to_owned(),
-							message: "The 'max_tokens' config field must be a number".to_owned(),
-						}
-					))
+					return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+						name: "ai::generate".to_owned(),
+						message: "The 'max_tokens' config field must be a number".to_owned(),
+					}));
 				}
 				None => None,
 			};
@@ -150,12 +146,10 @@ async fn ai_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Va
 			let top_p = match obj.get("top_p") {
 				Some(Value::Number(n)) => Some(n.as_float()),
 				Some(_) => {
-					return Err(anyhow::anyhow!(
-						crate::err::Error::InvalidFunctionArguments {
-							name: "ai::generate".to_owned(),
-							message: "The 'top_p' config field must be a number".to_owned(),
-						}
-					))
+					return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+						name: "ai::generate".to_owned(),
+						message: "The 'top_p' config field must be a number".to_owned(),
+					}));
 				}
 				None => None,
 			};
@@ -170,17 +164,14 @@ async fn ai_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Va
 		Some(v) => {
 			return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
 				name: "ai::generate".to_owned(),
-				message: format!(
-					"The config argument must be an object, got: {}",
-					v.kind_of()
-				),
-			}))
+				message: format!("The config argument must be an object, got: {}", v.kind_of()),
+			}));
 		}
 		None => GenerationConfig::default(),
 	};
 
 	let text = crate::ai::generate::generate(&model_id, &prompt, &config).await?;
-	Ok(Value::String(text.into()))
+	Ok(Value::String(text))
 }
 
 #[cfg(not(feature = "ai"))]
@@ -205,94 +196,75 @@ async fn ai_chat_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value>
 					"The first argument should be a string model ID (e.g. 'openai:gpt-4-turbo'), got: {}",
 					v.kind_of()
 				),
-			}))
+			}));
 		}
 		None => {
 			return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
 				name: "ai::chat".to_owned(),
 				message: "Missing model ID argument".to_string(),
-			}))
+			}));
 		}
 	};
 
 	let messages = match args.get(1) {
 		Some(Value::Array(arr)) => {
 			if arr.is_empty() {
-				return Err(anyhow::anyhow!(
-					crate::err::Error::InvalidFunctionArguments {
-						name: "ai::chat".to_owned(),
-						message: "The messages array must not be empty".to_owned(),
-					}
-				));
+				return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+					name: "ai::chat".to_owned(),
+					message: "The messages array must not be empty".to_owned(),
+				}));
 			}
 			let mut msgs = Vec::with_capacity(arr.len());
 			for (i, item) in arr.iter().enumerate() {
 				let obj = match item {
 					Value::Object(obj) => obj,
 					v => {
-						return Err(anyhow::anyhow!(
-							crate::err::Error::InvalidFunctionArguments {
-								name: "ai::chat".to_owned(),
-								message: format!(
-									"Message at index {i} must be an object, got: {}",
-									v.kind_of()
-								),
-							}
-						))
+						return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+							name: "ai::chat".to_owned(),
+							message: format!(
+								"Message at index {i} must be an object, got: {}",
+								v.kind_of()
+							),
+						}));
 					}
 				};
 				let role = match obj.get("role") {
-					Some(Value::String(s)) => s.to_string(),
+					Some(Value::String(s)) => s.clone(),
 					Some(v) => {
-						return Err(anyhow::anyhow!(
-							crate::err::Error::InvalidFunctionArguments {
-								name: "ai::chat".to_owned(),
-								message: format!(
-									"Message at index {i}: 'role' must be a string, got: {}",
-									v.kind_of()
-								),
-							}
-						))
+						return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+							name: "ai::chat".to_owned(),
+							message: format!(
+								"Message at index {i}: 'role' must be a string, got: {}",
+								v.kind_of()
+							),
+						}));
 					}
 					None => {
-						return Err(anyhow::anyhow!(
-							crate::err::Error::InvalidFunctionArguments {
-								name: "ai::chat".to_owned(),
-								message: format!(
-									"Message at index {i} is missing the 'role' field"
-								),
-							}
-						))
+						return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+							name: "ai::chat".to_owned(),
+							message: format!("Message at index {i} is missing the 'role' field"),
+						}));
 					}
 				};
 				let content = match obj.get("content") {
-					Some(Value::String(s)) => s.to_string(),
+					Some(Value::String(s)) => s.clone(),
 					Some(v) => {
-						return Err(anyhow::anyhow!(
-							crate::err::Error::InvalidFunctionArguments {
-								name: "ai::chat".to_owned(),
-								message: format!(
-									"Message at index {i}: 'content' must be a string, got: {}",
-									v.kind_of()
-								),
-							}
-						))
+						return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+							name: "ai::chat".to_owned(),
+							message: format!(
+								"Message at index {i}: 'content' must be a string, got: {}",
+								v.kind_of()
+							),
+						}));
 					}
 					None => {
-						return Err(anyhow::anyhow!(
-							crate::err::Error::InvalidFunctionArguments {
-								name: "ai::chat".to_owned(),
-								message: format!(
-									"Message at index {i} is missing the 'content' field"
-								),
-							}
-						))
+						return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+							name: "ai::chat".to_owned(),
+							message: format!("Message at index {i} is missing the 'content' field"),
+						}));
 					}
 				};
-				msgs.push(ChatMessage {
-					role,
-					content,
-				});
+				msgs.push(ChatMessage::text(role, content));
 			}
 			msgs
 		}
@@ -303,13 +275,13 @@ async fn ai_chat_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value>
 					"The second argument should be an array of message objects, got: {}",
 					v.kind_of()
 				),
-			}))
+			}));
 		}
 		None => {
 			return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
 				name: "ai::chat".to_owned(),
 				message: "Missing messages argument".to_string(),
-			}))
+			}));
 		}
 	};
 
@@ -318,12 +290,10 @@ async fn ai_chat_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value>
 			let temperature = match obj.get("temperature") {
 				Some(Value::Number(n)) => Some(n.as_float()),
 				Some(_) => {
-					return Err(anyhow::anyhow!(
-						crate::err::Error::InvalidFunctionArguments {
-							name: "ai::chat".to_owned(),
-							message: "The 'temperature' config field must be a number".to_owned(),
-						}
-					))
+					return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+						name: "ai::chat".to_owned(),
+						message: "The 'temperature' config field must be a number".to_owned(),
+					}));
 				}
 				None => None,
 			};
@@ -331,12 +301,10 @@ async fn ai_chat_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value>
 			let max_tokens = match obj.get("max_tokens") {
 				Some(Value::Number(n)) => Some(n.as_int() as u64),
 				Some(_) => {
-					return Err(anyhow::anyhow!(
-						crate::err::Error::InvalidFunctionArguments {
-							name: "ai::chat".to_owned(),
-							message: "The 'max_tokens' config field must be a number".to_owned(),
-						}
-					))
+					return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+						name: "ai::chat".to_owned(),
+						message: "The 'max_tokens' config field must be a number".to_owned(),
+					}));
 				}
 				None => None,
 			};
@@ -344,12 +312,10 @@ async fn ai_chat_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value>
 			let top_p = match obj.get("top_p") {
 				Some(Value::Number(n)) => Some(n.as_float()),
 				Some(_) => {
-					return Err(anyhow::anyhow!(
-						crate::err::Error::InvalidFunctionArguments {
-							name: "ai::chat".to_owned(),
-							message: "The 'top_p' config field must be a number".to_owned(),
-						}
-					))
+					return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+						name: "ai::chat".to_owned(),
+						message: "The 'top_p' config field must be a number".to_owned(),
+					}));
 				}
 				None => None,
 			};
@@ -364,17 +330,14 @@ async fn ai_chat_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value>
 		Some(v) => {
 			return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
 				name: "ai::chat".to_owned(),
-				message: format!(
-					"The config argument must be an object, got: {}",
-					v.kind_of()
-				),
-			}))
+				message: format!("The config argument must be an object, got: {}", v.kind_of()),
+			}));
 		}
 		None => GenerationConfig::default(),
 	};
 
 	let text = crate::ai::chat::chat(&model_id, &messages, &config).await?;
-	Ok(Value::String(text.into()))
+	Ok(Value::String(text))
 }
 
 #[cfg(not(feature = "ai"))]
@@ -386,9 +349,9 @@ async fn ai_chat_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<Value
 // Function definitions using the macro
 // =========================================================================
 
-define_async_function!(AiChat, "ai::chat", (model_id: String, messages: Array, ?config: Object) -> Any, ai_chat_impl);
+define_async_function!(AiChat, "ai::chat", (model_id: String, messages: Any, ?config: Any) -> Any, ai_chat_impl);
 define_async_function!(AiEmbed, "ai::embed", (model_id: String, input: String) -> Any, ai_embed_impl);
-define_async_function!(AiGenerate, "ai::generate", (model_id: String, prompt: String, ?config: Object) -> Any, ai_generate_impl);
+define_async_function!(AiGenerate, "ai::generate", (model_id: String, prompt: String, ?config: Any) -> Any, ai_generate_impl);
 
 // =========================================================================
 // Registration

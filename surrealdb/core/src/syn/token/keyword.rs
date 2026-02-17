@@ -1,7 +1,7 @@
 macro_rules! keyword {
 	($($name:ident => $value:tt),* $(,)?) => {
 
-		#[repr(u8)]
+		#[repr(u16)]
 		#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 		pub enum Keyword{
 			$($name,)*
@@ -26,6 +26,7 @@ macro_rules! keyword {
 keyword! {
 	Access => "ACCESS",
 	After => "AFTER",
+	Agent => "AGENT",
 	Algorithm => "ALGORITHM",
 	All => "ALL",
 	Alter => "ALTER",

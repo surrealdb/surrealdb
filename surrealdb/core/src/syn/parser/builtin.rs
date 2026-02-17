@@ -31,6 +31,7 @@ pub(crate) static PATHS: phf::Map<
 		UniCase::ascii("api::res::header") => (PathKind::Function, None),
 		UniCase::ascii("api::res::headers") => (PathKind::Function, None),
 		//
+		UniCase::ascii("ai::agent::run") => (PathKind::Function, None),
 		UniCase::ascii("ai::chat") => (PathKind::Function, None),
 		UniCase::ascii("ai::embed") => (PathKind::Function, None),
 		UniCase::ascii("ai::generate") => (PathKind::Function, None),

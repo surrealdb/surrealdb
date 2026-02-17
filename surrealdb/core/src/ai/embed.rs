@@ -1,13 +1,12 @@
 //! Core embedding logic: provider prefix parsing, routing, and result conversion.
 use anyhow::Result;
 
-use crate::err::Error;
-
 use super::provider::EmbeddingProvider;
 use super::providers::google::GoogleProvider;
 use super::providers::huggingface::HuggingFaceProvider;
 use super::providers::openai::OpenAiProvider;
 use super::providers::voyage::VoyageProvider;
+use crate::err::Error;
 
 /// Parse a model identifier into `(provider, model_name)`.
 ///
@@ -107,10 +106,7 @@ mod tests {
 		let result = embed("just-a-model-name", "hello").await;
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
-		assert!(
-			err_msg.contains("provider:model"),
-			"Expected format hint in error: {err_msg}"
-		);
+		assert!(err_msg.contains("provider:model"), "Expected format hint in error: {err_msg}");
 	}
 
 	#[tokio::test]
@@ -139,14 +135,18 @@ mod tests {
 			.await;
 
 		// Point the OpenAI provider at the mock server via env vars
-		std::env::set_var("SURREAL_AI_OPENAI_API_KEY", "test-key");
-		std::env::set_var("SURREAL_AI_OPENAI_BASE_URL", &server.uri());
+		unsafe {
+			std::env::set_var("SURREAL_AI_OPENAI_API_KEY", "test-key");
+			std::env::set_var("SURREAL_AI_OPENAI_BASE_URL", server.uri());
+		}
 
 		let result = embed("openai:text-embedding-3-small", "hello world").await;
 
 		// Clean up env vars
-		std::env::remove_var("SURREAL_AI_OPENAI_API_KEY");
-		std::env::remove_var("SURREAL_AI_OPENAI_BASE_URL");
+		unsafe {
+			std::env::remove_var("SURREAL_AI_OPENAI_API_KEY");
+			std::env::remove_var("SURREAL_AI_OPENAI_BASE_URL");
+		}
 
 		let embedding = result.expect("embed should succeed via mock");
 		assert_eq!(embedding, vec![0.1, 0.2, 0.3]);

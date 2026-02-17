@@ -1,8 +1,8 @@
 use reblessive::Stk;
 
 use crate::sql::statements::remove::{
-	RemoveAnalyzerStatement, RemoveApiStatement, RemoveBucketStatement, RemoveModuleStatement,
-	RemoveSequenceStatement,
+	RemoveAgentStatement, RemoveAnalyzerStatement, RemoveApiStatement, RemoveBucketStatement,
+	RemoveModuleStatement, RemoveSequenceStatement,
 };
 use crate::sql::statements::{
 	RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
@@ -313,6 +313,20 @@ impl Parser<'_> {
 				let name = stk.run(|stk| self.parse_expr_field(stk)).await?;
 
 				RemoveStatement::Bucket(RemoveBucketStatement {
+					name,
+					if_exists,
+				})
+			}
+			t!("AGENT") => {
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+				let name = self.parse_ident()?;
+
+				RemoveStatement::Agent(RemoveAgentStatement {
 					name,
 					if_exists,
 				})

@@ -1,5 +1,6 @@
 mod access;
 use surrealdb_types::{SqlFormat, ToSql};
+mod agent;
 mod analyzer;
 mod api;
 mod bucket;
@@ -17,6 +18,7 @@ mod table;
 mod user;
 
 pub(crate) use access::RemoveAccessStatement;
+pub(crate) use agent::RemoveAgentStatement;
 pub(crate) use analyzer::RemoveAnalyzerStatement;
 pub(crate) use api::RemoveApiStatement;
 pub(crate) use bucket::RemoveBucketStatement;
@@ -53,6 +55,7 @@ pub(crate) enum RemoveStatement {
 	Bucket(RemoveBucketStatement),
 	Sequence(RemoveSequenceStatement),
 	Module(RemoveModuleStatement),
+	Agent(RemoveAgentStatement),
 }
 
 impl ToSql for RemoveStatement {
@@ -74,6 +77,7 @@ impl ToSql for RemoveStatement {
 			Self::Bucket(v) => v.fmt_sql(f, fmt),
 			Self::Sequence(v) => v.fmt_sql(f, fmt),
 			Self::Module(v) => v.fmt_sql(f, fmt),
+			Self::Agent(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -97,6 +101,7 @@ impl From<RemoveStatement> for crate::expr::statements::RemoveStatement {
 			RemoveStatement::Bucket(v) => Self::Bucket(v.into()),
 			RemoveStatement::Sequence(v) => Self::Sequence(v.into()),
 			RemoveStatement::Module(v) => Self::Module(v.into()),
+			RemoveStatement::Agent(v) => Self::Agent(v.into()),
 		}
 	}
 }
@@ -120,6 +125,7 @@ impl From<crate::expr::statements::RemoveStatement> for RemoveStatement {
 			crate::expr::statements::RemoveStatement::Bucket(v) => Self::Bucket(v.into()),
 			crate::expr::statements::RemoveStatement::Sequence(v) => Self::Sequence(v.into()),
 			crate::expr::statements::RemoveStatement::Module(v) => Self::Module(v.into()),
+			crate::expr::statements::RemoveStatement::Agent(v) => Self::Agent(v.into()),
 		}
 	}
 }

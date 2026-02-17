@@ -12,8 +12,8 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::ai::provider::{
-	ChatMessage as ProviderChatMessage, ChatProvider, EmbeddingProvider, GenerationConfig,
-	GenerationProvider,
+	ChatMessage as ProviderChatMessage, ChatProvider, ChatResponse, EmbeddingProvider,
+	GenerationConfig, GenerationProvider, ToolCall as ProviderToolCall, ToolDefinition,
 };
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
@@ -22,14 +22,23 @@ const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 pub struct OpenAiProvider {
 	api_key: String,
 	base_url: String,
+	client: reqwest::Client,
 }
+
+/// Default HTTP request timeout for provider API calls (in seconds).
+const HTTP_TIMEOUT_SECS: u64 = 60;
 
 impl OpenAiProvider {
 	/// Create a new provider with explicit configuration.
 	pub(crate) fn new(api_key: String, base_url: String) -> Self {
+		let client = reqwest::Client::builder()
+			.timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+			.build()
+			.unwrap_or_default();
 		Self {
 			api_key,
 			base_url,
+			client,
 		}
 	}
 
@@ -48,9 +57,15 @@ impl OpenAiProvider {
 		let base_url = std::env::var("SURREAL_AI_OPENAI_BASE_URL")
 			.unwrap_or_else(|_| DEFAULT_BASE_URL.to_owned());
 
+		let client = reqwest::Client::builder()
+			.timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+			.build()
+			.map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))?;
+
 		Ok(Self {
 			api_key,
 			base_url,
+			client,
 		})
 	}
 
@@ -97,7 +112,7 @@ impl EmbeddingProvider for OpenAiProvider {
 			input,
 		};
 
-		let client = reqwest::Client::new();
+		let client = self.client.clone();
 		let response = client
 			.post(&url)
 			.header("Authorization", format!("Bearer {}", self.api_key))
@@ -130,16 +145,53 @@ impl EmbeddingProvider for OpenAiProvider {
 
 /// A single message in the OpenAI chat completions format.
 #[derive(Serialize)]
-struct ChatMessage<'a> {
-	role: &'a str,
-	content: &'a str,
+struct ChatMessage {
+	role: String,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	content: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	tool_calls: Option<Vec<RequestToolCall>>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	tool_call_id: Option<String>,
+}
+
+/// A tool call in the request format (for feeding back assistant messages).
+#[derive(Serialize)]
+struct RequestToolCall {
+	id: String,
+	#[serde(rename = "type")]
+	call_type: String,
+	function: RequestToolCallFunction,
+}
+
+/// The function details of a tool call.
+#[derive(Serialize, Deserialize)]
+struct RequestToolCallFunction {
+	name: String,
+	arguments: String,
+}
+
+/// OpenAI tool definition format.
+#[derive(Serialize)]
+struct OpenAiTool {
+	#[serde(rename = "type")]
+	tool_type: String,
+	function: OpenAiToolFunction,
+}
+
+/// The function details of an OpenAI tool definition.
+#[derive(Serialize)]
+struct OpenAiToolFunction {
+	name: String,
+	description: String,
+	parameters: serde_json::Value,
 }
 
 /// Request body for the OpenAI chat completions API.
 #[derive(Serialize)]
-struct ChatCompletionRequest<'a> {
-	model: &'a str,
-	messages: Vec<ChatMessage<'a>>,
+struct ChatCompletionRequest {
+	model: String,
+	messages: Vec<ChatMessage>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	temperature: Option<f64>,
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -148,6 +200,8 @@ struct ChatCompletionRequest<'a> {
 	top_p: Option<f64>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	stop: Option<Vec<String>>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	tools: Option<Vec<OpenAiTool>>,
 }
 
 /// Top-level response from the OpenAI chat completions API.
@@ -166,6 +220,60 @@ struct ChatChoice {
 #[derive(Deserialize)]
 struct ChatChoiceMessage {
 	content: Option<String>,
+	tool_calls: Option<Vec<ResponseToolCall>>,
+}
+
+/// A tool call returned by the OpenAI API.
+#[derive(Deserialize)]
+struct ResponseToolCall {
+	id: String,
+	function: RequestToolCallFunction,
+}
+
+impl OpenAiProvider {
+	/// Convert provider messages to OpenAI format.
+	fn convert_messages(messages: &[ProviderChatMessage]) -> Vec<ChatMessage> {
+		messages
+			.iter()
+			.map(|m| {
+				let tool_calls = m.tool_calls.as_ref().map(|calls| {
+					calls
+						.iter()
+						.map(|c| RequestToolCall {
+							id: c.id.clone(),
+							call_type: "function".to_string(),
+							function: RequestToolCallFunction {
+								name: c.name.clone(),
+								arguments: c.arguments.to_string(),
+							},
+						})
+						.collect()
+				});
+
+				ChatMessage {
+					role: m.role.clone(),
+					content: m.content.clone(),
+					tool_calls,
+					tool_call_id: m.tool_call_id.clone(),
+				}
+			})
+			.collect()
+	}
+
+	/// Convert tool definitions to OpenAI format.
+	fn convert_tools(tools: &[ToolDefinition]) -> Vec<OpenAiTool> {
+		tools
+			.iter()
+			.map(|t| OpenAiTool {
+				tool_type: "function".to_string(),
+				function: OpenAiToolFunction {
+					name: t.name.clone(),
+					description: t.description.clone(),
+					parameters: t.parameters.clone(),
+				},
+			})
+			.collect()
+	}
 }
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
@@ -180,18 +288,21 @@ impl GenerationProvider for OpenAiProvider {
 		let url = self.chat_completions_url();
 
 		let body = ChatCompletionRequest {
-			model,
+			model: model.to_string(),
 			messages: vec![ChatMessage {
-				role: "user",
-				content: prompt,
+				role: "user".to_string(),
+				content: Some(prompt.to_string()),
+				tool_calls: None,
+				tool_call_id: None,
 			}],
 			temperature: config.temperature,
 			max_tokens: config.max_tokens,
 			top_p: config.top_p,
 			stop: config.stop.clone(),
+			tools: None,
 		};
 
-		let client = reqwest::Client::new();
+		let client = self.client.clone();
 		let response = client
 			.post(&url)
 			.header("Authorization", format!("Bearer {}", self.api_key))
@@ -207,18 +318,13 @@ impl GenerationProvider for OpenAiProvider {
 			bail!("OpenAI chat completions API returned {status}: {body}");
 		}
 
-		let result: ChatCompletionResponse = response
-			.json()
-			.await
-			.map_err(|e| {
-				anyhow::anyhow!("Failed to parse OpenAI chat completions response: {e}")
-			})?;
+		let result: ChatCompletionResponse = response.json().await.map_err(|e| {
+			anyhow::anyhow!("Failed to parse OpenAI chat completions response: {e}")
+		})?;
 
-		let choice = result
-			.choices
-			.into_iter()
-			.next()
-			.ok_or_else(|| anyhow::anyhow!("OpenAI chat completions response contained no choices"))?;
+		let choice = result.choices.into_iter().next().ok_or_else(|| {
+			anyhow::anyhow!("OpenAI chat completions response contained no choices")
+		})?;
 
 		choice
 			.message
@@ -239,21 +345,16 @@ impl ChatProvider for OpenAiProvider {
 		let url = self.chat_completions_url();
 
 		let body = ChatCompletionRequest {
-			model,
-			messages: messages
-				.iter()
-				.map(|m| ChatMessage {
-					role: &m.role,
-					content: &m.content,
-				})
-				.collect(),
+			model: model.to_string(),
+			messages: Self::convert_messages(messages),
 			temperature: config.temperature,
 			max_tokens: config.max_tokens,
 			top_p: config.top_p,
 			stop: config.stop.clone(),
+			tools: None,
 		};
 
-		let client = reqwest::Client::new();
+		let client = self.client.clone();
 		let response = client
 			.post(&url)
 			.header("Authorization", format!("Bearer {}", self.api_key))
@@ -269,23 +370,98 @@ impl ChatProvider for OpenAiProvider {
 			bail!("OpenAI chat completions API returned {status}: {body}");
 		}
 
-		let result: ChatCompletionResponse = response
-			.json()
-			.await
-			.map_err(|e| {
-				anyhow::anyhow!("Failed to parse OpenAI chat completions response: {e}")
-			})?;
+		let result: ChatCompletionResponse = response.json().await.map_err(|e| {
+			anyhow::anyhow!("Failed to parse OpenAI chat completions response: {e}")
+		})?;
 
-		let choice = result
-			.choices
-			.into_iter()
-			.next()
-			.ok_or_else(|| anyhow::anyhow!("OpenAI chat completions response contained no choices"))?;
+		let choice = result.choices.into_iter().next().ok_or_else(|| {
+			anyhow::anyhow!("OpenAI chat completions response contained no choices")
+		})?;
 
 		choice
 			.message
 			.content
 			.ok_or_else(|| anyhow::anyhow!("OpenAI chat completions response contained no content"))
+	}
+
+	async fn chat_with_tools(
+		&self,
+		model: &str,
+		messages: &[ProviderChatMessage],
+		tools: &[ToolDefinition],
+		config: &GenerationConfig,
+	) -> Result<ChatResponse> {
+		let url = self.chat_completions_url();
+
+		let openai_tools = if tools.is_empty() {
+			None
+		} else {
+			Some(Self::convert_tools(tools))
+		};
+
+		let body = ChatCompletionRequest {
+			model: model.to_string(),
+			messages: Self::convert_messages(messages),
+			temperature: config.temperature,
+			max_tokens: config.max_tokens,
+			top_p: config.top_p,
+			stop: config.stop.clone(),
+			tools: openai_tools,
+		};
+
+		let client = self.client.clone();
+		let response = client
+			.post(&url)
+			.header("Authorization", format!("Bearer {}", self.api_key))
+			.header("Content-Type", "application/json")
+			.json(&body)
+			.send()
+			.await
+			.map_err(|e| anyhow::anyhow!("Failed to call OpenAI chat completions API: {e}"))?;
+
+		if !response.status().is_success() {
+			let status = response.status();
+			let body = response.text().await.unwrap_or_default();
+			bail!("OpenAI chat completions API returned {status}: {body}");
+		}
+
+		let result: ChatCompletionResponse = response.json().await.map_err(|e| {
+			anyhow::anyhow!("Failed to parse OpenAI chat completions response: {e}")
+		})?;
+
+		let choice = result.choices.into_iter().next().ok_or_else(|| {
+			anyhow::anyhow!("OpenAI chat completions response contained no choices")
+		})?;
+
+		// Check for tool calls
+		if let Some(tool_calls) = choice.message.tool_calls
+			&& !tool_calls.is_empty()
+		{
+			let mut calls = Vec::with_capacity(tool_calls.len());
+			for tc in tool_calls {
+				let args: serde_json::Value = serde_json::from_str(&tc.function.arguments)
+					.map_err(|e| {
+						anyhow::anyhow!(
+							"Failed to parse tool call arguments for '{}': {e}",
+							tc.function.name
+						)
+					})?;
+				calls.push(ProviderToolCall {
+					id: tc.id,
+					name: tc.function.name,
+					arguments: args,
+				});
+			}
+			return Ok(ChatResponse::ToolCalls(calls));
+		}
+
+		// No tool calls, return text message
+		let content = choice
+			.message
+			.content
+			.ok_or_else(|| anyhow::anyhow!("OpenAI response contained no content or tool calls"))?;
+
+		Ok(ChatResponse::Message(content))
 	}
 }
 
@@ -301,8 +477,7 @@ mod tests {
 
 	#[test]
 	fn embeddings_url_custom_with_trailing_slash() {
-		let provider =
-			OpenAiProvider::new("test".into(), "https://custom.example.com/v1/".into());
+		let provider = OpenAiProvider::new("test".into(), "https://custom.example.com/v1/".into());
 		assert_eq!(provider.embeddings_url(), "https://custom.example.com/v1/embeddings");
 	}
 
@@ -435,16 +610,12 @@ mod tests {
 	#[test]
 	fn chat_completions_url_default() {
 		let provider = OpenAiProvider::new("test".into(), DEFAULT_BASE_URL.into());
-		assert_eq!(
-			provider.chat_completions_url(),
-			"https://api.openai.com/v1/chat/completions"
-		);
+		assert_eq!(provider.chat_completions_url(), "https://api.openai.com/v1/chat/completions");
 	}
 
 	#[test]
 	fn chat_completions_url_custom_with_trailing_slash() {
-		let provider =
-			OpenAiProvider::new("test".into(), "https://custom.example.com/v1/".into());
+		let provider = OpenAiProvider::new("test".into(), "https://custom.example.com/v1/".into());
 		assert_eq!(
 			provider.chat_completions_url(),
 			"https://custom.example.com/v1/chat/completions"
@@ -580,10 +751,7 @@ mod tests {
 
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
-		assert!(
-			err_msg.contains("no choices"),
-			"Expected 'no choices' in error: {err_msg}"
-		);
+		assert!(err_msg.contains("no choices"), "Expected 'no choices' in error: {err_msg}");
 
 		server.verify().await;
 	}
@@ -625,14 +793,8 @@ mod tests {
 		let provider = OpenAiProvider::new("test-key".into(), server.uri());
 		let config = GenerationConfig::default();
 		let messages = vec![
-			ProviderChatMessage {
-				role: "system".to_string(),
-				content: "You are a helpful assistant.".to_string(),
-			},
-			ProviderChatMessage {
-				role: "user".to_string(),
-				content: "What is SurrealDB?".to_string(),
-			},
+			ProviderChatMessage::text("system", "You are a helpful assistant."),
+			ProviderChatMessage::text("user", "What is SurrealDB?"),
 		];
 		let result = provider.chat("gpt-4-turbo", &messages, &config).await;
 

@@ -10,6 +10,7 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::val::{RecordId, Value};
+pub mod agent;
 pub mod ai;
 pub mod api;
 pub mod args;
@@ -570,6 +571,8 @@ pub async fn asynchronous(
 		"api::res::status" => api::res::status((stk, ctx, opt, doc)).await,
 		"api::res::header" => api::res::header((stk, ctx, opt, doc)).await,
 		"api::res::headers" => api::res::headers((stk, ctx, opt, doc)).await,
+		//
+		"ai::agent::run" => agent::run((ctx, opt)).await,
 		//
 		"ai::chat" => ai::chat(ctx).await,
 		"ai::embed" => ai::embed(ctx).await,

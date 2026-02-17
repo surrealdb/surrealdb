@@ -3,6 +3,7 @@
 //! This module registers all built-in functions with the registry.
 //! Functions are organized by category (math, string, array, etc.).
 
+mod agent;
 pub mod aggregates;
 mod ai;
 mod api;
@@ -40,6 +41,7 @@ use super::FunctionRegistry;
 /// Register all built-in functions with the registry.
 pub fn register_all(registry: &mut FunctionRegistry) {
 	// Scalar functions
+	agent::register(registry);
 	ai::register(registry);
 	api::register(registry);
 	array::register(registry);

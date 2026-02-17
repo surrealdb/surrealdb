@@ -1,20 +1,19 @@
 //! Core chat completion logic: provider routing and result conversion.
 use anyhow::Result;
 
-use crate::err::Error;
-
 use super::provider::{ChatMessage, ChatProvider, GenerationConfig};
 use super::providers::google::GoogleProvider;
 use super::providers::huggingface::HuggingFaceProvider;
 use super::providers::openai::OpenAiProvider;
 use super::providers::voyage::VoyageProvider;
+use crate::err::Error;
 
 /// Parse a model identifier into `(provider, model_name)`.
 ///
 /// Model identifiers use the format `provider:model_name`, e.g.:
 /// - `openai:gpt-4-turbo`
 /// - `google:gemini-2.0-flash`
-fn parse_model_id(model_id: &str) -> Result<(&str, &str)> {
+pub fn parse_model_id(model_id: &str) -> Result<(&str, &str)> {
 	model_id.split_once(':').ok_or_else(|| {
 		anyhow::Error::new(Error::InvalidFunctionArguments {
 			name: "ai::chat".to_owned(),
@@ -24,6 +23,23 @@ fn parse_model_id(model_id: &str) -> Result<(&str, &str)> {
 			),
 		})
 	})
+}
+
+/// Get a chat provider for the given provider name.
+pub fn get_provider(provider_name: &str) -> Result<Box<dyn ChatProvider>> {
+	match provider_name {
+		"openai" => Ok(Box::new(OpenAiProvider::from_env()?)),
+		"huggingface" => Ok(Box::new(HuggingFaceProvider::new())),
+		"voyage" | "claude" | "anthropic" => Ok(Box::new(VoyageProvider::from_env()?)),
+		"google" | "gemini" => Ok(Box::new(GoogleProvider::from_env()?)),
+		other => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
+			name: "ai::chat".to_owned(),
+			message: format!(
+				"Unknown provider '{other}'. Supported providers: \
+				 'openai', 'huggingface', 'voyage' (or 'claude'/'anthropic'), 'google' (or 'gemini')"
+			),
+		})),
+	}
 }
 
 /// Conduct a multi-turn chat conversation using the specified model.
@@ -98,10 +114,7 @@ mod tests {
 	#[tokio::test]
 	async fn chat_unknown_provider_returns_error() {
 		let config = GenerationConfig::default();
-		let messages = vec![ChatMessage {
-			role: "user".to_string(),
-			content: "hello".to_string(),
-		}];
+		let messages = vec![ChatMessage::text("user", "hello")];
 		let result = chat("badprovider:some-model", &messages, &config).await;
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
@@ -114,17 +127,11 @@ mod tests {
 	#[tokio::test]
 	async fn chat_missing_prefix_returns_error() {
 		let config = GenerationConfig::default();
-		let messages = vec![ChatMessage {
-			role: "user".to_string(),
-			content: "hello".to_string(),
-		}];
+		let messages = vec![ChatMessage::text("user", "hello")];
 		let result = chat("just-a-model-name", &messages, &config).await;
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
-		assert!(
-			err_msg.contains("provider:model"),
-			"Expected format hint in error: {err_msg}"
-		);
+		assert!(err_msg.contains("provider:model"), "Expected format hint in error: {err_msg}");
 	}
 
 	#[tokio::test]
@@ -159,24 +166,22 @@ mod tests {
 			.mount(&server)
 			.await;
 
-		std::env::set_var("SURREAL_AI_OPENAI_API_KEY", "test-key");
-		std::env::set_var("SURREAL_AI_OPENAI_BASE_URL", &server.uri());
+		unsafe {
+			std::env::set_var("SURREAL_AI_OPENAI_API_KEY", "test-key");
+			std::env::set_var("SURREAL_AI_OPENAI_BASE_URL", server.uri());
+		}
 
 		let config = GenerationConfig::default();
 		let messages = vec![
-			ChatMessage {
-				role: "system".to_string(),
-				content: "You are a helpful assistant.".to_string(),
-			},
-			ChatMessage {
-				role: "user".to_string(),
-				content: "What is SurrealDB?".to_string(),
-			},
+			ChatMessage::text("system", "You are a helpful assistant."),
+			ChatMessage::text("user", "What is SurrealDB?"),
 		];
 		let result = chat("openai:gpt-4-turbo", &messages, &config).await;
 
-		std::env::remove_var("SURREAL_AI_OPENAI_API_KEY");
-		std::env::remove_var("SURREAL_AI_OPENAI_BASE_URL");
+		unsafe {
+			std::env::remove_var("SURREAL_AI_OPENAI_API_KEY");
+			std::env::remove_var("SURREAL_AI_OPENAI_BASE_URL");
+		}
 
 		let text = result.expect("chat should succeed via mock");
 		assert_eq!(text, "SurrealDB is a multi-model database.");

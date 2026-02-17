@@ -1,4 +1,5 @@
 mod access;
+mod agent;
 mod analyzer;
 mod api;
 mod bucket;
@@ -17,6 +18,7 @@ mod table;
 mod user;
 
 pub(crate) use access::DefineAccessStatement;
+pub(crate) use agent::DefineAgentStatement;
 pub(crate) use analyzer::DefineAnalyzerStatement;
 use anyhow::Result;
 pub(crate) use api::{ApiAction, DefineApiStatement};
@@ -69,6 +71,7 @@ pub(crate) enum DefineStatement {
 	Bucket(DefineBucketStatement),
 	Sequence(DefineSequenceStatement),
 	Module(DefineModuleStatement),
+	Agent(DefineAgentStatement),
 }
 
 impl DefineStatement {
@@ -99,6 +102,7 @@ impl DefineStatement {
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Module(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Agent(v) => v.compute(stk, ctx, opt, doc).await,
 		}
 	}
 }

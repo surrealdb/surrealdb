@@ -26,18 +26,18 @@ use crate::expr::statements::remove::{
 	RemoveApiStatement, RemoveBucketStatement, RemoveSequenceStatement,
 };
 use crate::expr::statements::{
-	AccessStatement, AlterStatement, CreateStatement, DefineAccessStatement,
+	AccessStatement, AlterStatement, CreateStatement, DefineAccessStatement, DefineAgentStatement,
 	DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement, DefineEventStatement,
 	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
 	DefineModuleStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
 	DefineTableStatement, DefineUserStatement, DeleteStatement, ForeachStatement, IfelseStatement,
 	InfoStatement, InsertStatement, KillStatement, LiveFields, LiveStatement, OptionStatement,
-	OutputStatement, RelateStatement, RemoveAccessStatement, RemoveAnalyzerStatement,
-	RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
-	RemoveIndexStatement, RemoveModelStatement, RemoveModuleStatement, RemoveNamespaceStatement,
-	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
-	SelectStatement, SetStatement, ShowStatement, SleepStatement, UpdateStatement, UpsertStatement,
-	UseStatement,
+	OutputStatement, RelateStatement, RemoveAccessStatement, RemoveAgentStatement,
+	RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
+	RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement, RemoveModuleStatement,
+	RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
+	RemoveUserStatement, SelectStatement, SetStatement, ShowStatement, SleepStatement,
+	UpdateStatement, UpsertStatement, UseStatement,
 };
 use crate::expr::{
 	AccessType, Block, ClosureExpr, Data, Expr, Field, Fields, Function, FunctionCall, Idiom,
@@ -560,7 +560,14 @@ implement_visitor! {
 			RemoveStatement::Module(r) => {
 				this.visit_remove_module(r)?;
 			},
+			RemoveStatement::Agent(r) => {
+				this.visit_remove_agent(r)?;
+			},
 		}
+		Ok(())
+	}
+
+	fn visit_remove_agent(this, r: &RemoveAgentStatement){
 		Ok(())
 	}
 
@@ -791,6 +798,9 @@ implement_visitor! {
 			},
 			DefineStatement::Module(d) => {
 				this.visit_define_module(d)?;
+			},
+			DefineStatement::Agent(d) => {
+				this.visit_define_agent(d)?;
 			},
 		}
 		Ok(())
@@ -1099,6 +1109,18 @@ implement_visitor! {
 		if let Some(k) = d.returns.as_ref(){
 			this.visit_kind(k)?;
 		}
+		Ok(())
+	}
+
+	fn visit_define_agent(this, d: &DefineAgentStatement){
+		for tool in d.tools.iter() {
+			for (_, k) in tool.args.iter() {
+				this.visit_kind(k)?;
+			}
+			this.visit_block(&tool.block)?;
+		}
+		this.visit_permission(&d.permissions)?;
+		this.visit_expr(&d.comment)?;
 		Ok(())
 	}
 
@@ -1965,7 +1987,14 @@ implement_visitor_mut! {
 			RemoveStatement::Module(r) => {
 				this.visit_mut_remove_module(r)?;
 			},
+			RemoveStatement::Agent(r) => {
+				this.visit_mut_remove_agent(r)?;
+			},
 		}
+		Ok(())
+	}
+
+	fn visit_mut_remove_agent(this, r: &mut RemoveAgentStatement){
 		Ok(())
 	}
 
@@ -2196,6 +2225,9 @@ implement_visitor_mut! {
 			},
 			DefineStatement::Module(d) => {
 				this.visit_mut_define_module(d)?;
+			},
+			DefineStatement::Agent(d) => {
+				this.visit_mut_define_agent(d)?;
 			},
 		}
 		Ok(())
@@ -2501,6 +2533,18 @@ implement_visitor_mut! {
 		if let Some(k) = d.returns.as_mut(){
 			this.visit_mut_kind(k)?;
 		}
+		Ok(())
+	}
+
+	fn visit_mut_define_agent(this, d: &mut DefineAgentStatement){
+		for tool in d.tools.iter_mut() {
+			for (_, k) in tool.args.iter_mut() {
+				this.visit_mut_kind(k)?;
+			}
+			this.visit_mut_block(&mut tool.block)?;
+		}
+		this.visit_mut_permission(&mut d.permissions)?;
+		this.visit_mut_expr(&mut d.comment)?;
 		Ok(())
 	}
 

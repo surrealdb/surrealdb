@@ -47,7 +47,6 @@ pub mod str;
 mod surrealism;
 mod sys;
 
-#[cfg(feature = "ai")]
 pub mod ai;
 pub mod api;
 pub mod catalog;

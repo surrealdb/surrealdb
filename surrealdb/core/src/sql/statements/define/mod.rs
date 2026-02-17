@@ -1,4 +1,5 @@
 mod access;
+mod agent;
 mod analyzer;
 mod api;
 mod bucket;
@@ -17,6 +18,7 @@ mod table;
 pub mod user;
 
 pub(crate) use access::DefineAccessStatement;
+pub(crate) use agent::DefineAgentStatement;
 pub(crate) use analyzer::DefineAnalyzerStatement;
 pub(crate) use api::{ApiAction, DefineApiStatement};
 pub(crate) use bucket::DefineBucketStatement;
@@ -86,6 +88,8 @@ pub(crate) enum DefineStatement {
 	Sequence(DefineSequenceStatement),
 	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Module(DefineModuleStatement),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
+	Agent(DefineAgentStatement),
 }
 
 impl ToSql for DefineStatement {
@@ -108,6 +112,7 @@ impl ToSql for DefineStatement {
 			Self::Bucket(v) => v.fmt_sql(f, fmt),
 			Self::Sequence(v) => v.fmt_sql(f, fmt),
 			Self::Module(v) => v.fmt_sql(f, fmt),
+			Self::Agent(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -132,6 +137,7 @@ impl From<DefineStatement> for crate::expr::statements::DefineStatement {
 			DefineStatement::Bucket(v) => Self::Bucket(v.into()),
 			DefineStatement::Sequence(v) => Self::Sequence(v.into()),
 			DefineStatement::Module(v) => Self::Module(v.into()),
+			DefineStatement::Agent(v) => Self::Agent(v.into()),
 		}
 	}
 }
@@ -156,6 +162,7 @@ impl From<crate::expr::statements::DefineStatement> for DefineStatement {
 			crate::expr::statements::DefineStatement::Bucket(v) => Self::Bucket(v.into()),
 			crate::expr::statements::DefineStatement::Sequence(v) => Self::Sequence(v.into()),
 			crate::expr::statements::DefineStatement::Module(v) => Self::Module(v.into()),
+			crate::expr::statements::DefineStatement::Agent(v) => Self::Agent(v.into()),
 		}
 	}
 }

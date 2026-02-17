@@ -256,6 +256,12 @@ pub(crate) enum Error {
 		name: String,
 	},
 
+	/// The requested agent does not exist
+	#[error("The agent '{name}' does not exist")]
+	AgNotFound {
+		name: String,
+	},
+
 	/// The requested function does not exist
 	#[error("The function 'fn::{name}' does not exist")]
 	FcNotFound {
@@ -799,6 +805,12 @@ pub(crate) enum Error {
 	/// The requested field already exists
 	#[error("The field '{name}' already exists")]
 	FdAlreadyExists {
+		name: String,
+	},
+
+	/// The requested agent already exists
+	#[error("The agent '{name}' already exists")]
+	AgAlreadyExists {
 		name: String,
 	},
 

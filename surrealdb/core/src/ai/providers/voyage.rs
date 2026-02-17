@@ -23,7 +23,8 @@ use anyhow::Result;
 
 use super::openai::OpenAiProvider;
 use crate::ai::provider::{
-	ChatMessage, ChatProvider, EmbeddingProvider, GenerationConfig, GenerationProvider,
+	ChatMessage, ChatProvider, ChatResponse, EmbeddingProvider, GenerationConfig,
+	GenerationProvider, ToolDefinition,
 };
 
 const DEFAULT_BASE_URL: &str = "https://api.voyageai.com/v1";
@@ -88,6 +89,16 @@ impl ChatProvider for VoyageProvider {
 		config: &GenerationConfig,
 	) -> Result<String> {
 		self.0.chat(model, messages, config).await
+	}
+
+	async fn chat_with_tools(
+		&self,
+		model: &str,
+		messages: &[ChatMessage],
+		tools: &[ToolDefinition],
+		config: &GenerationConfig,
+	) -> Result<ChatResponse> {
+		self.0.chat_with_tools(model, messages, tools, config).await
 	}
 }
 

@@ -1,13 +1,12 @@
 //! Core text generation logic: provider routing and result conversion.
 use anyhow::Result;
 
-use crate::err::Error;
-
 use super::provider::{GenerationConfig, GenerationProvider};
 use super::providers::google::GoogleProvider;
 use super::providers::huggingface::HuggingFaceProvider;
 use super::providers::openai::OpenAiProvider;
 use super::providers::voyage::VoyageProvider;
+use crate::err::Error;
 
 /// Parse a model identifier into `(provider, model_name)`.
 ///
@@ -29,11 +28,7 @@ fn parse_model_id(model_id: &str) -> Result<(&str, &str)> {
 /// Generate text from a prompt using the specified model.
 ///
 /// Routes to the appropriate provider based on the model identifier prefix.
-pub async fn generate(
-	model_id: &str,
-	prompt: &str,
-	config: &GenerationConfig,
-) -> Result<String> {
+pub async fn generate(model_id: &str, prompt: &str, config: &GenerationConfig) -> Result<String> {
 	let (provider_name, model_name) = parse_model_id(model_id)?;
 
 	match provider_name {
@@ -114,10 +109,7 @@ mod tests {
 		let result = generate("just-a-model-name", "hello", &config).await;
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
-		assert!(
-			err_msg.contains("provider:model"),
-			"Expected format hint in error: {err_msg}"
-		);
+		assert!(err_msg.contains("provider:model"), "Expected format hint in error: {err_msg}");
 	}
 
 	#[tokio::test]
@@ -152,14 +144,18 @@ mod tests {
 			.mount(&server)
 			.await;
 
-		std::env::set_var("SURREAL_AI_OPENAI_API_KEY", "test-key");
-		std::env::set_var("SURREAL_AI_OPENAI_BASE_URL", &server.uri());
+		unsafe {
+			std::env::set_var("SURREAL_AI_OPENAI_API_KEY", "test-key");
+			std::env::set_var("SURREAL_AI_OPENAI_BASE_URL", server.uri());
+		}
 
 		let config = GenerationConfig::default();
 		let result = generate("openai:gpt-4-turbo", "Hello", &config).await;
 
-		std::env::remove_var("SURREAL_AI_OPENAI_API_KEY");
-		std::env::remove_var("SURREAL_AI_OPENAI_BASE_URL");
+		unsafe {
+			std::env::remove_var("SURREAL_AI_OPENAI_API_KEY");
+			std::env::remove_var("SURREAL_AI_OPENAI_BASE_URL");
+		}
 
 		let text = result.expect("generate should succeed via mock");
 		assert_eq!(text, "Hello! How can I help you?");
