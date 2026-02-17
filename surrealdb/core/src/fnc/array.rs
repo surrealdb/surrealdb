@@ -722,7 +722,7 @@ pub fn repeat((value, count): (Value, i64)) -> Result<Value> {
 		}
 	);
 
-	// TODO: Fix signed to unsigned casting here.
+	// FIXME: Fix signed to unsigned casting here.
 	let count = count as usize;
 	limit("array::repeat", mem::size_of::<Value>().saturating_mul(count))?;
 	Ok(Array(std::iter::repeat_n(value, count).collect()).into())

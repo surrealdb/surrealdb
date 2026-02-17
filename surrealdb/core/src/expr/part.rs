@@ -55,7 +55,6 @@ impl Part {
 	///
 	/// Already marked as deprecated for the full release to remind that this
 	/// behavior should be fixed.
-	#[deprecated(since = "3.0.0")]
 	pub(crate) fn as_old_index(&self) -> Option<usize> {
 		match self {
 			Part::Value(Expr::Literal(l)) => match l {

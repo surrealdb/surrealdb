@@ -1204,7 +1204,7 @@ impl Document {
 		// do via statements. So instead we create a document and pretend to run be the right
 		// statement query and just run events immediatly.
 		// Updating views prevents premissions from being run anyway so there shouldn't be a
-		// probelm.
+		// problem.
 		//
 		// Generate a document so that we can run the events.
 
