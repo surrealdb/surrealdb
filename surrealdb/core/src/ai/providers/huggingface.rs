@@ -46,6 +46,15 @@ impl HuggingFaceProvider {
 	/// Create a new provider with explicit configuration.
 	#[cfg(test)]
 	pub fn with_config(api_key: String, base_url: String, generation_base_url: String) -> Self {
+		Self::new_with_urls(api_key, base_url, generation_base_url)
+	}
+
+	/// Create a new provider with explicit API key and base URLs.
+	pub(crate) fn new_with_urls(
+		api_key: String,
+		base_url: String,
+		generation_base_url: String,
+	) -> Self {
 		let client = reqwest::Client::builder()
 			.timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
 			.build()

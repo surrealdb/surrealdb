@@ -1,6 +1,10 @@
 //! Core text generation logic: provider routing and result conversion.
 use anyhow::Result;
 
+use super::config::{
+	AiConfigOverlay, google_credentials, huggingface_credentials, openai_credentials,
+	voyage_credentials,
+};
 use super::provider::{GenerationConfig, GenerationProvider};
 use super::providers::google::GoogleProvider;
 use super::providers::huggingface::HuggingFaceProvider;
@@ -28,24 +32,36 @@ fn parse_model_id(model_id: &str) -> Result<(&str, &str)> {
 /// Generate text from a prompt using the specified model.
 ///
 /// Routes to the appropriate provider based on the model identifier prefix.
-pub async fn generate(model_id: &str, prompt: &str, config: &GenerationConfig) -> Result<String> {
+/// When `ai_config` is `Some`, provider credentials and base URLs are taken
+/// from the overlay first, then fall back to environment variables.
+pub async fn generate(
+	model_id: &str,
+	prompt: &str,
+	config: &GenerationConfig,
+	ai_config: Option<&AiConfigOverlay>,
+) -> Result<String> {
 	let (provider_name, model_name) = parse_model_id(model_id)?;
 
 	match provider_name {
 		"openai" => {
-			let provider = OpenAiProvider::from_env()?;
+			let (api_key, base_url) = openai_credentials(ai_config)?;
+			let provider = OpenAiProvider::new(api_key, base_url);
 			provider.generate(model_name, prompt, config).await
 		}
 		"huggingface" => {
-			let provider = HuggingFaceProvider::new();
+			let (api_key, base_url, generation_base_url) = huggingface_credentials(ai_config)?;
+			let provider =
+				HuggingFaceProvider::new_with_urls(api_key, base_url, generation_base_url);
 			provider.generate(model_name, prompt, config).await
 		}
 		"voyage" | "claude" | "anthropic" => {
-			let provider = VoyageProvider::from_env()?;
+			let (api_key, base_url) = voyage_credentials(ai_config)?;
+			let provider = VoyageProvider::new(api_key, base_url);
 			provider.generate(model_name, prompt, config).await
 		}
 		"google" | "gemini" => {
-			let provider = GoogleProvider::from_env()?;
+			let (api_key, base_url) = google_credentials(ai_config)?;
+			let provider = GoogleProvider::new(api_key, base_url);
 			provider.generate(model_name, prompt, config).await
 		}
 		other => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
@@ -94,7 +110,7 @@ mod tests {
 	#[tokio::test]
 	async fn generate_unknown_provider_returns_error() {
 		let config = GenerationConfig::default();
-		let result = generate("badprovider:some-model", "hello", &config).await;
+		let result = generate("badprovider:some-model", "hello", &config, None).await;
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
 		assert!(
@@ -106,7 +122,7 @@ mod tests {
 	#[tokio::test]
 	async fn generate_missing_prefix_returns_error() {
 		let config = GenerationConfig::default();
-		let result = generate("just-a-model-name", "hello", &config).await;
+		let result = generate("just-a-model-name", "hello", &config, None).await;
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
 		assert!(err_msg.contains("provider:model"), "Expected format hint in error: {err_msg}");

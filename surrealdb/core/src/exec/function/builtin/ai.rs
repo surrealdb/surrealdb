@@ -2,9 +2,13 @@
 //!
 //! These provide AI functionality (embeddings, text generation, etc.).
 //! Note: AI functions require the "ai" feature to be enabled.
+//!
+//! When a database is selected and has DEFINE CONFIG AI, those credentials
+//! override environment variables for that database.
 
 use anyhow::Result;
 
+use crate::catalog::providers::DatabaseProvider;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::physical_expr::EvalContext;
 use crate::val::Value;
@@ -19,12 +23,34 @@ async fn ai_disabled() -> Result<Value> {
 	Err(anyhow::anyhow!(crate::err::Error::AiDisabled))
 }
 
+#[cfg(feature = "ai")]
+async fn ai_config_overlay_from_ctx(
+	ctx: &EvalContext<'_>,
+) -> Option<crate::ai::config::AiConfigOverlay> {
+	let db_ctx = ctx.exec_ctx.database().ok()?;
+	let txn = ctx.exec_ctx.txn();
+	let ns = db_ctx.db.namespace_id;
+	let db = db_ctx.db.database_id;
+	let config = txn.get_db_config(ns, db, "ai").await.ok().flatten()?;
+	let catalog_ai = config.try_as_ai().ok()?;
+	Some(crate::ai::config::AiConfigOverlay {
+		openai_api_key: catalog_ai.openai_api_key.clone(),
+		openai_base_url: catalog_ai.openai_base_url.clone(),
+		google_api_key: catalog_ai.google_api_key.clone(),
+		google_base_url: catalog_ai.google_base_url.clone(),
+		voyage_api_key: catalog_ai.voyage_api_key.clone(),
+		voyage_base_url: catalog_ai.voyage_base_url.clone(),
+		huggingface_api_key: catalog_ai.huggingface_api_key.clone(),
+		huggingface_base_url: catalog_ai.huggingface_base_url.clone(),
+	})
+}
+
 // =========================================================================
 // AI Embed
 // =========================================================================
 
 #[cfg(feature = "ai")]
-async fn ai_embed_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+async fn ai_embed_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 	let model_id = match args.first() {
 		Some(Value::String(s)) => s.clone(),
 		Some(v) => {
@@ -63,7 +89,8 @@ async fn ai_embed_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value
 		}
 	};
 
-	let embedding = crate::ai::embed::embed(&model_id, &input).await?;
+	let ai_config = ai_config_overlay_from_ctx(ctx).await;
+	let embedding = crate::ai::embed::embed(&model_id, &input, ai_config.as_ref()).await?;
 	let array: Vec<Value> = embedding.into_iter().map(Value::from).collect();
 	Ok(Value::Array(array.into()))
 }
@@ -78,7 +105,7 @@ async fn ai_embed_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<Valu
 // =========================================================================
 
 #[cfg(feature = "ai")]
-async fn ai_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+async fn ai_generate_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 	use crate::ai::provider::GenerationConfig;
 
 	let model_id = match args.first() {
@@ -170,7 +197,9 @@ async fn ai_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Va
 		None => GenerationConfig::default(),
 	};
 
-	let text = crate::ai::generate::generate(&model_id, &prompt, &config).await?;
+	let ai_config = ai_config_overlay_from_ctx(ctx).await;
+	let text =
+		crate::ai::generate::generate(&model_id, &prompt, &config, ai_config.as_ref()).await?;
 	Ok(Value::String(text))
 }
 
@@ -184,7 +213,7 @@ async fn ai_generate_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<V
 // =========================================================================
 
 #[cfg(feature = "ai")]
-async fn ai_chat_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+async fn ai_chat_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 	use crate::ai::provider::{ChatMessage, GenerationConfig};
 
 	let model_id = match args.first() {
@@ -336,7 +365,8 @@ async fn ai_chat_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value>
 		None => GenerationConfig::default(),
 	};
 
-	let text = crate::ai::chat::chat(&model_id, &messages, &config).await?;
+	let ai_config = ai_config_overlay_from_ctx(ctx).await;
+	let text = crate::ai::chat::chat(&model_id, &messages, &config, ai_config.as_ref()).await?;
 	Ok(Value::String(text))
 }
 

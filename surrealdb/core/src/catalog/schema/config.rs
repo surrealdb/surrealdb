@@ -10,12 +10,14 @@ use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{TableName, Value};
 
 /// The config struct as it is stored on disk.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ConfigDefinition {
 	Default(DefaultConfig),
 	GraphQL(GraphQLConfig),
 	Api(ApiConfigDefinition),
+	#[revision(start = 2)]
+	Ai(AiConfig),
 }
 impl_kv_value_revisioned!(ConfigDefinition);
 
@@ -26,6 +28,7 @@ impl ConfigDefinition {
 			ConfigDefinition::Default(_) => ConfigKind::Default.to_string(),
 			ConfigDefinition::GraphQL(_) => ConfigKind::GraphQL.to_string(),
 			ConfigDefinition::Api(_) => ConfigKind::Api.to_string(),
+			ConfigDefinition::Ai(_) => ConfigKind::Ai.to_string(),
 		}
 	}
 
@@ -44,6 +47,13 @@ impl ConfigDefinition {
 			c => fail!("found {} when a api config was expected", c.to_sql()),
 		}
 	}
+
+	pub fn try_as_ai(&self) -> Result<&AiConfig> {
+		match self {
+			ConfigDefinition::Ai(a) => Ok(a),
+			c => fail!("found {} when an ai config was expected", c.to_sql()),
+		}
+	}
 }
 
 impl ToSql for ConfigDefinition {
@@ -56,6 +66,11 @@ impl ToSql for ConfigDefinition {
 				sql_config.fmt_sql(f, fmt)
 			}
 			ConfigDefinition::Api(v) => v.fmt_sql(f, fmt),
+			ConfigDefinition::Ai(v) => {
+				let sql_config: crate::sql::statements::define::config::ai::AiConfig =
+					v.clone().into();
+				sql_config.fmt_sql(f, fmt)
+			}
 		}
 	}
 }
@@ -71,6 +86,9 @@ impl InfoStructure for ConfigDefinition {
 			)),
 			ConfigDefinition::Api(v) => Value::from(map!(
 				"api" => v.structure()
+			)),
+			ConfigDefinition::Ai(v) => Value::from(map!(
+				"ai" => v.structure()
 			)),
 		}
 	}
@@ -196,6 +214,69 @@ impl InfoStructure for DefaultConfig {
 		Value::from(map!(
 			"namespace", if let Some(x) = self.namespace => Value::String(x),
 			"database", if let Some(x) = self.database => Value::String(x),
+		))
+	}
+}
+
+/// AI provider API keys and base URLs for a database.
+///
+/// Stored via DEFINE CONFIG AI ON DATABASE. When set, these override
+/// the corresponding environment variables for ai::embed, ai::generate, ai::chat.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub struct AiConfig {
+	pub openai_api_key: Option<String>,
+	pub openai_base_url: Option<String>,
+	pub google_api_key: Option<String>,
+	pub google_base_url: Option<String>,
+	pub voyage_api_key: Option<String>,
+	pub voyage_base_url: Option<String>,
+	pub huggingface_api_key: Option<String>,
+	pub huggingface_base_url: Option<String>,
+}
+
+impl ToSql for AiConfig {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "AI ON DATABASE");
+		let escape = |s: &str| s.replace('\'', "''");
+		if let Some(v) = &self.openai_api_key {
+			write_sql!(f, fmt, " OPENAI_API_KEY '{}'", escape(v));
+		}
+		if let Some(v) = &self.openai_base_url {
+			write_sql!(f, fmt, " OPENAI_BASE_URL '{}'", escape(v));
+		}
+		if let Some(v) = &self.google_api_key {
+			write_sql!(f, fmt, " GOOGLE_API_KEY '{}'", escape(v));
+		}
+		if let Some(v) = &self.google_base_url {
+			write_sql!(f, fmt, " GOOGLE_BASE_URL '{}'", escape(v));
+		}
+		if let Some(v) = &self.voyage_api_key {
+			write_sql!(f, fmt, " VOYAGE_API_KEY '{}'", escape(v));
+		}
+		if let Some(v) = &self.voyage_base_url {
+			write_sql!(f, fmt, " VOYAGE_BASE_URL '{}'", escape(v));
+		}
+		if let Some(v) = &self.huggingface_api_key {
+			write_sql!(f, fmt, " HUGGINGFACE_API_KEY '{}'", escape(v));
+		}
+		if let Some(v) = &self.huggingface_base_url {
+			write_sql!(f, fmt, " HUGGINGFACE_BASE_URL '{}'", escape(v));
+		}
+	}
+}
+
+impl InfoStructure for AiConfig {
+	fn structure(self) -> Value {
+		Value::from(map!(
+			"openai_api_key", if let Some(x) = self.openai_api_key => Value::String(x),
+			"openai_base_url", if let Some(x) = self.openai_base_url => Value::String(x),
+			"google_api_key", if let Some(x) = self.google_api_key => Value::String(x),
+			"google_base_url", if let Some(x) = self.google_base_url => Value::String(x),
+			"voyage_api_key", if let Some(x) = self.voyage_api_key => Value::String(x),
+			"voyage_base_url", if let Some(x) = self.voyage_base_url => Value::String(x),
+			"huggingface_api_key", if let Some(x) = self.huggingface_api_key => Value::String(x),
+			"huggingface_base_url", if let Some(x) = self.huggingface_base_url => Value::String(x),
 		))
 	}
 }

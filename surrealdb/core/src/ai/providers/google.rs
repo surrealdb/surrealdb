@@ -38,8 +38,7 @@ const HTTP_TIMEOUT_SECS: u64 = 60;
 
 impl GoogleProvider {
 	/// Create a new provider with explicit configuration.
-	#[cfg(test)]
-	pub fn new(api_key: String, base_url: String) -> Self {
+	pub(crate) fn new(api_key: String, base_url: String) -> Self {
 		let client = reqwest::Client::builder()
 			.timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
 			.build()

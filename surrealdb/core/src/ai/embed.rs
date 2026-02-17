@@ -1,6 +1,10 @@
 //! Core embedding logic: provider prefix parsing, routing, and result conversion.
 use anyhow::Result;
 
+use super::config::{
+	AiConfigOverlay, google_credentials, huggingface_credentials, openai_credentials,
+	voyage_credentials,
+};
 use super::provider::EmbeddingProvider;
 use super::providers::google::GoogleProvider;
 use super::providers::huggingface::HuggingFaceProvider;
@@ -28,24 +32,35 @@ fn parse_model_id(model_id: &str) -> Result<(&str, &str)> {
 /// Generate an embedding for the given text using the specified model.
 ///
 /// Routes to the appropriate provider based on the model identifier prefix.
-pub async fn embed(model_id: &str, input: &str) -> Result<Vec<f64>> {
+/// When `config` is `Some`, provider credentials and base URLs are taken from
+/// the overlay first, then fall back to environment variables.
+pub async fn embed(
+	model_id: &str,
+	input: &str,
+	config: Option<&AiConfigOverlay>,
+) -> Result<Vec<f64>> {
 	let (provider_name, model_name) = parse_model_id(model_id)?;
 
 	match provider_name {
 		"openai" => {
-			let provider = OpenAiProvider::from_env()?;
+			let (api_key, base_url) = openai_credentials(config)?;
+			let provider = OpenAiProvider::new(api_key, base_url);
 			provider.embed(model_name, input).await
 		}
 		"huggingface" => {
-			let provider = HuggingFaceProvider::new();
+			let (api_key, base_url, generation_base_url) = huggingface_credentials(config)?;
+			let provider =
+				HuggingFaceProvider::new_with_urls(api_key, base_url, generation_base_url);
 			provider.embed(model_name, input).await
 		}
 		"voyage" | "claude" | "anthropic" => {
-			let provider = VoyageProvider::from_env()?;
+			let (api_key, base_url) = voyage_credentials(config)?;
+			let provider = VoyageProvider::new(api_key, base_url);
 			provider.embed(model_name, input).await
 		}
 		"google" | "gemini" => {
-			let provider = GoogleProvider::from_env()?;
+			let (api_key, base_url) = google_credentials(config)?;
+			let provider = GoogleProvider::new(api_key, base_url);
 			provider.embed(model_name, input).await
 		}
 		other => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
@@ -92,7 +107,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn embed_unknown_provider_returns_error() {
-		let result = embed("badprovider:some-model", "hello").await;
+		let result = embed("badprovider:some-model", "hello", None).await;
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
 		assert!(
@@ -103,7 +118,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn embed_missing_prefix_returns_error() {
-		let result = embed("just-a-model-name", "hello").await;
+		let result = embed("just-a-model-name", "hello", None).await;
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
 		assert!(err_msg.contains("provider:model"), "Expected format hint in error: {err_msg}");

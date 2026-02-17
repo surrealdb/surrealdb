@@ -16,6 +16,7 @@ use crate::expr::statements::alter::{
 	AlterNamespaceStatement, AlterSequenceStatement, AlterSystemStatement, AlterTableStatement,
 };
 use crate::expr::statements::define::config::ConfigInner;
+use crate::expr::statements::define::config::ai::AiConfig as AiConfigExpr;
 use crate::expr::statements::define::config::api::ApiConfig;
 use crate::expr::statements::define::config::defaults::DefaultConfig;
 use crate::expr::statements::define::{
@@ -860,6 +861,9 @@ implement_visitor! {
 			ConfigInner::Default(default_config) => {
 				this.visit_default_config(default_config)?;
 			},
+			ConfigInner::Ai(ai_config) => {
+				this.visit_ai_config(ai_config)?;
+			},
 		}
 		Ok(())
 	}
@@ -882,6 +886,18 @@ implement_visitor! {
 	fn visit_default_config(this, d: &DefaultConfig) {
 		this.visit_expr(&d.namespace)?;
 		this.visit_expr(&d.database)?;
+		Ok(())
+	}
+
+	fn visit_ai_config(this, d: &AiConfigExpr) {
+		this.visit_expr(&d.openai_api_key)?;
+		this.visit_expr(&d.openai_base_url)?;
+		this.visit_expr(&d.google_api_key)?;
+		this.visit_expr(&d.google_base_url)?;
+		this.visit_expr(&d.voyage_api_key)?;
+		this.visit_expr(&d.voyage_base_url)?;
+		this.visit_expr(&d.huggingface_api_key)?;
+		this.visit_expr(&d.huggingface_base_url)?;
 		Ok(())
 	}
 
@@ -2289,6 +2305,9 @@ implement_visitor_mut! {
 			ConfigInner::Default(default_config) => {
 				this.visit_mut_default_config(default_config)?;
 			},
+			ConfigInner::Ai(ai_config) => {
+				this.visit_mut_ai_config(ai_config)?;
+			},
 		}
 		Ok(())
 	}
@@ -2306,6 +2325,18 @@ implement_visitor_mut! {
 	fn visit_mut_default_config(this, d: &mut DefaultConfig) {
 		this.visit_mut_expr(&mut d.namespace)?;
 		this.visit_mut_expr(&mut d.database)?;
+		Ok(())
+	}
+
+	fn visit_mut_ai_config(this, d: &mut AiConfigExpr) {
+		this.visit_mut_expr(&mut d.openai_api_key)?;
+		this.visit_mut_expr(&mut d.openai_base_url)?;
+		this.visit_mut_expr(&mut d.google_api_key)?;
+		this.visit_mut_expr(&mut d.google_base_url)?;
+		this.visit_mut_expr(&mut d.voyage_api_key)?;
+		this.visit_mut_expr(&mut d.voyage_base_url)?;
+		this.visit_mut_expr(&mut d.huggingface_api_key)?;
+		this.visit_mut_expr(&mut d.huggingface_base_url)?;
 		Ok(())
 	}
 

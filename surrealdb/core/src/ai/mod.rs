@@ -13,6 +13,8 @@ pub mod agent;
 #[cfg(feature = "ai")]
 pub mod chat;
 #[cfg(feature = "ai")]
+pub mod config;
+#[cfg(feature = "ai")]
 pub mod embed;
 #[cfg(feature = "ai")]
 pub mod generate;

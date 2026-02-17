@@ -140,7 +140,7 @@ async fn run_inner(
 		}
 
 		// Call the LLM with tools
-		let provider = crate::ai::chat::get_provider(provider_name)?;
+		let provider = crate::ai::chat::get_provider(provider_name, None)?;
 		let response = provider.chat_with_tools(model_name, &messages, &tool_defs, &config).await?;
 
 		match response {

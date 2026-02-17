@@ -7,6 +7,7 @@ use crate::sql::base::Base;
 use crate::sql::filter::Filter;
 use crate::sql::index::{Distance, HnswParams, VectorType};
 use crate::sql::kind::KindLiteral;
+use crate::sql::statements::define::config::ai::AiConfig;
 use crate::sql::statements::define::config::api::{ApiConfig, Middleware};
 use crate::sql::statements::define::config::defaults::DefaultConfig;
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
@@ -1444,6 +1445,7 @@ impl Parser<'_> {
 		let next = self.next();
 		let inner = match next.kind {
 			t!("API") => self.parse_api_config(stk).await.map(ConfigInner::Api)?,
+			t!("AI") => self.parse_ai_config(stk).await.map(ConfigInner::Ai)?,
 			t!("GRAPHQL") => self.parse_graphql_config().map(ConfigInner::GraphQL)?,
 			t!("DEFAULT") => self.parse_default_config(stk).await.map(ConfigInner::Default)?,
 			_ => unexpected!(self, next, "a type of config"),
@@ -1477,6 +1479,50 @@ impl Parser<'_> {
 					config.database = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				}
 				_ => break,
+			}
+		}
+		Ok(config)
+	}
+
+	pub(crate) async fn parse_ai_config(&mut self, stk: &mut Stk) -> ParseResult<AiConfig> {
+		expected!(self, t!("ON"));
+		expected!(self, t!("DATABASE"));
+		let mut config = AiConfig::default();
+		loop {
+			let peek = self.peek();
+			let TokenKind::Identifier = &peek.kind else {
+				break;
+			};
+			let ident = self.span_str(peek.span).to_string();
+			let known = ident.eq_ignore_ascii_case("OPENAI_API_KEY")
+				|| ident.eq_ignore_ascii_case("OPENAI_BASE_URL")
+				|| ident.eq_ignore_ascii_case("GOOGLE_API_KEY")
+				|| ident.eq_ignore_ascii_case("GOOGLE_BASE_URL")
+				|| ident.eq_ignore_ascii_case("VOYAGE_API_KEY")
+				|| ident.eq_ignore_ascii_case("VOYAGE_BASE_URL")
+				|| ident.eq_ignore_ascii_case("HUGGINGFACE_API_KEY")
+				|| ident.eq_ignore_ascii_case("HUGGINGFACE_BASE_URL");
+			if !known {
+				break;
+			}
+			self.pop_peek();
+			let value = stk.run(|stk| self.parse_expr_field(stk)).await?;
+			if ident.eq_ignore_ascii_case("OPENAI_API_KEY") {
+				config.openai_api_key = value;
+			} else if ident.eq_ignore_ascii_case("OPENAI_BASE_URL") {
+				config.openai_base_url = value;
+			} else if ident.eq_ignore_ascii_case("GOOGLE_API_KEY") {
+				config.google_api_key = value;
+			} else if ident.eq_ignore_ascii_case("GOOGLE_BASE_URL") {
+				config.google_base_url = value;
+			} else if ident.eq_ignore_ascii_case("VOYAGE_API_KEY") {
+				config.voyage_api_key = value;
+			} else if ident.eq_ignore_ascii_case("VOYAGE_BASE_URL") {
+				config.voyage_base_url = value;
+			} else if ident.eq_ignore_ascii_case("HUGGINGFACE_API_KEY") {
+				config.huggingface_api_key = value;
+			} else {
+				config.huggingface_base_url = value;
 			}
 		}
 		Ok(config)

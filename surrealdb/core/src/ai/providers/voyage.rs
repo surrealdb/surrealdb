@@ -34,8 +34,7 @@ pub struct VoyageProvider(OpenAiProvider);
 
 impl VoyageProvider {
 	/// Create a new provider with explicit configuration.
-	#[cfg(test)]
-	pub fn new(api_key: String, base_url: String) -> Self {
+	pub(crate) fn new(api_key: String, base_url: String) -> Self {
 		Self(OpenAiProvider::new(api_key, base_url))
 	}
 

@@ -27,6 +27,7 @@ keyword! {
 	Access => "ACCESS",
 	After => "AFTER",
 	Agent => "AGENT",
+	Ai => "AI",
 	Algorithm => "ALGORITHM",
 	All => "ALL",
 	Alter => "ALTER",

@@ -1,6 +1,8 @@
+pub mod ai;
 pub mod api;
 pub mod defaults;
 
+use ai::AiConfig as AiConfigExpr;
 use anyhow::{Result, bail};
 use api::ApiConfig;
 use defaults::DefaultConfig;
@@ -30,6 +32,7 @@ pub(crate) enum ConfigInner {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfig),
 	Default(DefaultConfig),
+	Ai(AiConfigExpr),
 }
 
 impl ConfigInner {
@@ -38,6 +41,7 @@ impl ConfigInner {
 			ConfigInner::Default(_) => ConfigKind::Default,
 			ConfigInner::GraphQL(_) => ConfigKind::GraphQL,
 			ConfigInner::Api(_) => ConfigKind::Api,
+			ConfigInner::Ai(_) => ConfigKind::Ai,
 		}
 	}
 
@@ -54,6 +58,7 @@ impl ConfigInner {
 			ConfigInner::Default(d) => {
 				ConfigDefinition::Default(d.compute(stk, ctx, opt, doc).await?)
 			}
+			ConfigInner::Ai(a) => ConfigDefinition::Ai(a.compute(stk, ctx, opt, doc).await?),
 		})
 	}
 }
@@ -78,6 +83,7 @@ impl DefineConfigStatement {
 			ConfigInner::GraphQL(_) => "graphql",
 			ConfigInner::Api(_) => "api",
 			ConfigInner::Default(_) => "default",
+			ConfigInner::Ai(_) => "ai",
 		};
 
 		match base {

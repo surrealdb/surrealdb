@@ -39,13 +39,15 @@ pub enum ResourceKind {
 	Actor,
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ConfigKind {
 	GraphQL,
 	Api,
 	Default,
+	#[revision(start = 2)]
+	Ai,
 }
 
 impl ConfigKind {
@@ -54,6 +56,7 @@ impl ConfigKind {
 			ConfigKind::Default => Base::Root,
 			ConfigKind::GraphQL => Base::Db,
 			ConfigKind::Api => Base::Db,
+			ConfigKind::Ai => Base::Db,
 		}
 	}
 }
@@ -93,6 +96,7 @@ impl std::fmt::Display for ConfigKind {
 			ConfigKind::GraphQL => write!(f, "GraphQL"),
 			ConfigKind::Api => write!(f, "API"),
 			ConfigKind::Default => write!(f, "Default"),
+			ConfigKind::Ai => write!(f, "AI"),
 		}
 	}
 }

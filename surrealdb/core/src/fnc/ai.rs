@@ -24,7 +24,7 @@ pub async fn embed(_: &FrozenContext, (_model_id, _input): (String, String)) -> 
 /// Generate an embedding vector for a text input using a provider-prefixed model.
 #[cfg(feature = "ai")]
 pub async fn embed(_ctx: &FrozenContext, (model_id, input): (String, String)) -> Result<Value> {
-	let embedding = crate::ai::embed::embed(&model_id, &input).await?;
+	let embedding = crate::ai::embed::embed(&model_id, &input, None).await?;
 	let array: Vec<Value> = embedding.into_iter().map(Value::from).collect();
 	Ok(Value::Array(array.into()))
 }
@@ -54,7 +54,7 @@ pub async fn generate(
 	(model_id, prompt, config): (String, String, Optional<Value>),
 ) -> Result<Value> {
 	let config = parse_generation_config("ai::generate", config.0)?;
-	let text = crate::ai::generate::generate(&model_id, &prompt, &config).await?;
+	let text = crate::ai::generate::generate(&model_id, &prompt, &config, None).await?;
 	Ok(Value::String(text))
 }
 
@@ -89,7 +89,7 @@ pub async fn chat(
 ) -> Result<Value> {
 	let messages = parse_chat_messages(&messages)?;
 	let config = parse_generation_config("ai::chat", config.0)?;
-	let text = crate::ai::chat::chat(&model_id, &messages, &config).await?;
+	let text = crate::ai::chat::chat(&model_id, &messages, &config, None).await?;
 	Ok(Value::String(text))
 }
 
