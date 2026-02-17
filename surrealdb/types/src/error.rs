@@ -489,31 +489,23 @@ impl SurrealValue for ErrorDetails {
 	}
 
 	fn from_value(value: Value) -> Result<Self, Error> {
-		// Fallback slow path: try each variant in order.
-		// Prefer ErrorDetails::from_value_with_kind when ErrorKind is available.
-		if let Ok(v) = ValidationError::from_value(value.clone()) {
-			return Ok(Self::Validation(v));
-		}
-		if let Ok(v) = ConfigurationError::from_value(value.clone()) {
-			return Ok(Self::Configuration(v));
-		}
-		if let Ok(v) = QueryError::from_value(value.clone()) {
-			return Ok(Self::Query(v));
-		}
-		if let Ok(v) = SerializationError::from_value(value.clone()) {
-			return Ok(Self::Serialization(v));
-		}
-		if let Ok(v) = NotAllowedError::from_value(value.clone()) {
-			return Ok(Self::NotAllowed(v));
-		}
-		if let Ok(v) = NotFoundError::from_value(value.clone()) {
-			return Ok(Self::NotFound(v));
-		}
-		if let Ok(v) = AlreadyExistsError::from_value(value.clone()) {
-			return Ok(Self::AlreadyExists(v));
-		}
-		if let Ok(v) = ConnectionError::from_value(value) {
-			return Ok(Self::Connection(v));
+		// The detail variant's "kind" field (e.g. "TokenExpired", "Table") doesn't tell us
+		// which ErrorKind it belongs to, so we try each one. Each attempt is cheap -- it
+		// just checks the kind string against the enum's known variants and fails fast.
+		// Prefer from_value_with_kind() when the ErrorKind is available (e.g. on Error).
+		for error_kind in [
+			ErrorKind::Validation,
+			ErrorKind::Configuration,
+			ErrorKind::Query,
+			ErrorKind::Serialization,
+			ErrorKind::NotAllowed,
+			ErrorKind::NotFound,
+			ErrorKind::AlreadyExists,
+			ErrorKind::Connection,
+		] {
+			if let Ok(details) = Self::from_value_with_kind(&error_kind, value.clone()) {
+				return Ok(details);
+			}
 		}
 		Err(Error::internal("Failed to decode ErrorDetails".to_string()))
 	}
