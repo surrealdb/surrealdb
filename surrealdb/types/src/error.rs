@@ -585,7 +585,7 @@ impl SurrealValue for ErrorDetails {
 	/// When flattened into Error, this merges `kind` and `details` into the parent object.
 	fn into_value(self) -> Value {
 		let mut obj = Object::new();
-		obj.insert("kind", Value::from(self.kind_str()));
+		obj.insert("kind", Value::String(self.kind_str().to_string()));
 		match self {
 			Self::Validation(Some(d)) => {
 				obj.insert("details", d.into_value());

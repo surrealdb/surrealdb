@@ -79,7 +79,7 @@ impl QueryResult {
 fn into_query_result_value(error: &TypesError) -> Value {
 	let mut obj = Object::new();
 	obj.insert("result", error.message().to_string());
-	obj.insert("kind", Value::from(error.kind_str()));
+	obj.insert("kind", Value::String(error.kind_str().to_string()));
 	let details = error.details();
 	if details.has_details() {
 		obj.insert("details", details.clone().into_value());
