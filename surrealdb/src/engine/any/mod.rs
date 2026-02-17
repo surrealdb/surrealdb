@@ -194,19 +194,19 @@ impl IntoEndpoint for &str {}
 impl into_endpoint::Sealed for &str {
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (url, path) = match self {
-			// Handle bare "memory" and "mem://" (no query params)
+			// Handle bare "memory" and "mem://" (no query params) — path format: mem://
 			"memory" | "mem://" => {
-				(Url::parse("mem://").expect("valid memory url"), "memory".to_owned())
+				(Url::parse("mem://").expect("valid memory url"), "mem://".to_owned())
 			}
 			// Handle "memory?..." with query parameters
 			url if url.starts_with("memory?") => {
 				let query = &url["memory?".len()..];
-				(Url::parse("mem://").expect("valid memory url"), format!("memory?{query}"))
+				(Url::parse("mem://").expect("valid memory url"), format!("mem://?{query}"))
 			}
 			// Handle "mem://?..." with query parameters
 			url if url.starts_with("mem://?") => {
 				let query = &url["mem://?".len()..];
-				(Url::parse("mem://").expect("valid memory url"), format!("memory?{query}"))
+				(Url::parse("mem://").expect("valid memory url"), format!("mem://?{query}"))
 			}
 			url if url.starts_with("ws") | url.starts_with("http") | url.starts_with("tikv") => (
 				Url::parse(url).map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?,
@@ -310,8 +310,12 @@ impl Surreal<Any> {
 /// // Connect using HTTPS
 /// let db = connect("https://cloud.surrealdb.com").await?;
 ///
-/// // Instantiate an in-memory instance
+/// // Instantiate an in-memory instance (no persistence)
 /// let db = connect("mem://").await?;
+/// // Or use the "memory" alias: connect("memory").await?;
+///
+/// // In-memory with persistence to disk (e.g. mem:///tmp/data?versioned=true)
+/// let db = connect("mem:///tmp/data").await?;
 ///
 /// // Instantiate a RocksDB-backed instance
 /// let db = connect("rocksdb://path/to/database-folder").await?;
