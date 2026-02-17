@@ -259,11 +259,7 @@ impl Error {
 	/// Used when deserialising query result error payloads that do not include `code`. Uses
 	/// [`default_code`] and defaults kind to "Internal" when not present.
 	#[doc(hidden)]
-	pub fn from_parts(
-		message: String,
-		kind: Option<&str>,
-		details: Option<Value>,
-	) -> Self {
+	pub fn from_parts(message: String, kind: Option<&str>, details: Option<Value>) -> Self {
 		let kind_str = kind.unwrap_or("Internal");
 		let typed_details = match details {
 			Some(v) => ErrorDetails::from_value_with_kind_str(kind_str, v)
@@ -358,7 +354,8 @@ impl Error {
 		}
 	}
 
-	/// Returns structured configuration error details, if this is a configuration error with specifics.
+	/// Returns structured configuration error details, if this is a configuration error with
+	/// specifics.
 	pub fn configuration_details(&self) -> Option<&ConfigurationError> {
 		match &self.details {
 			ErrorDetails::Configuration(d) => d.as_ref(),
@@ -366,7 +363,8 @@ impl Error {
 		}
 	}
 
-	/// Returns structured serialization error details, if this is a serialization error with specifics.
+	/// Returns structured serialization error details, if this is a serialization error with
+	/// specifics.
 	pub fn serialization_details(&self) -> Option<&SerializationError> {
 		match &self.details {
 			ErrorDetails::Serialization(d) => d.as_ref(),
@@ -390,7 +388,8 @@ impl Error {
 		}
 	}
 
-	/// Returns structured already-exists error details, if this is an already-exists error with specifics.
+	/// Returns structured already-exists error details, if this is an already-exists error with
+	/// specifics.
 	pub fn already_exists_details(&self) -> Option<&AlreadyExistsError> {
 		match &self.details {
 			ErrorDetails::AlreadyExists(d) => d.as_ref(),
@@ -542,9 +541,7 @@ impl ErrorDetails {
 			"NotAllowed" => {
 				NotAllowedError::from_value(value).map(|v| ErrorDetails::NotAllowed(Some(v)))
 			}
-			"NotFound" => {
-				NotFoundError::from_value(value).map(|v| ErrorDetails::NotFound(Some(v)))
-			}
+			"NotFound" => NotFoundError::from_value(value).map(|v| ErrorDetails::NotFound(Some(v))),
 			"AlreadyExists" => {
 				AlreadyExistsError::from_value(value).map(|v| ErrorDetails::AlreadyExists(Some(v)))
 			}

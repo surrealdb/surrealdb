@@ -1,8 +1,8 @@
 use surrealdb_types::{
 	AlreadyExistsError, AuthError, ConfigurationError, ConnectionError, ConversionError, Error,
-	ErrorDetails, Kind, LengthMismatchError, NotAllowedError, NotFoundError, Number,
-	Object, OutOfRangeError, QueryError, SerializationError, SurrealValue, TypeError,
-	ValidationError, Value,
+	ErrorDetails, Kind, LengthMismatchError, NotAllowedError, NotFoundError, Number, Object,
+	OutOfRangeError, QueryError, SerializationError, SurrealValue, TypeError, ValidationError,
+	Value,
 };
 
 #[test]

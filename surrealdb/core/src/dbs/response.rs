@@ -97,12 +97,10 @@ fn from_query_result_value(value: Value) -> Result<TypesError, TypesError> {
 		TypesError::internal("Missing result (message) for query result error".to_string())
 	})?;
 	let message = result_val.into_string().map_err(|e| TypesError::internal(e.to_string()))?;
-	let kind_str = map
-		.remove("kind")
-		.and_then(|v| match v {
-			Value::String(s) => Some(s),
-			_ => None,
-		});
+	let kind_str = map.remove("kind").and_then(|v| match v {
+		Value::String(s) => Some(s),
+		_ => None,
+	});
 	let details = map.remove("details");
 	Ok(TypesError::from_parts(message, kind_str.as_deref(), details))
 }

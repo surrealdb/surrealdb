@@ -133,7 +133,8 @@ impl NamedFields {
 				}
 			}
 
-			// Regular fields first (extracting from map), then flattened fields (using remaining map)
+			// Regular fields first (extracting from map), then flattened fields (using remaining
+			// map)
 			regular.extend(flattened);
 			regular
 		}
