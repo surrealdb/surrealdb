@@ -5,6 +5,10 @@ members = [
     ".",
     # SurrealDB crates
     "surrealdb",
+    "surrealdb/common",
+    "surrealdb/ast",
+    "surrealdb/token",
+    "surrealdb/parser",
     "surrealdb/core",
     "surrealdb/server",
     "surrealdb/types",
