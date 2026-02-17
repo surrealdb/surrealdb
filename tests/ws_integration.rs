@@ -2909,9 +2909,11 @@ pub async fn transaction_cleanup_on_disconnect(cfg_server: Option<Format>, cfg_f
 	let res = socket.send_request("begin", json!([])).await.unwrap();
 	assert!(res["result"].is_string(), "Begin should succeed: {res:?}");
 	let txn_id = res["result"].as_str().unwrap().to_string();
-	// Update the record within the transaction
-	let res =
-		socket.send_request("query", json!(["UPDATE test:1 SET value = 2", txn_id])).await.unwrap();
+	// Update the record within the transaction (txn in request envelope, not params)
+	let res = socket
+		.send_request_with_txn("query", json!(["UPDATE test:1 SET value = 2"]), Some(&txn_id))
+		.await
+		.unwrap();
 	assert!(res.get("error").is_none(), "UPDATE in transaction should succeed: {res:?}");
 	// Disconnect WITHOUT committing
 	socket.close().await.unwrap();
