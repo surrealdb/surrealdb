@@ -1344,7 +1344,7 @@ mod tests {
 	#[case::uuid(
 		PublicValue::Uuid(PublicUuid::max()),
 		json!("ffffffff-ffff-ffff-ffff-ffffffffffff"),
-		PublicValue::String("ffffffff-ffff-ffff-ffff-ffffffffffff".into()),
+		PublicValue::Uuid(PublicUuid::max()),
 	)]
 	#[case::bytes(
 		PublicValue::Bytes(PublicBytes::default()),
