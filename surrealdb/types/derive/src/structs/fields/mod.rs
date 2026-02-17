@@ -433,23 +433,23 @@ impl Fields {
 						} => {
 							panic!("Tag key strategy cannot be used with unnamed fields");
 						}
-					Strategy::TagContentKeys {
-						tag,
-						variant,
-						content,
-						..
-					} => With::Map(quote! {{
-						if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
-							if let Some(value) = map.remove(#content) {
-								#retrieve
-							} else {
-								let err = #type_error_ty::Invalid(
-									format!("Expected content key '{}' for variant '{}'", #content, #variant)
-								);
-								return Err(err.into())
+						Strategy::TagContentKeys {
+							tag,
+							variant,
+							content,
+							..
+						} => With::Map(quote! {{
+							if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
+								if let Some(value) = map.remove(#content) {
+									#retrieve
+								} else {
+									let err = #type_error_ty::Invalid(
+										format!("Expected content key '{}' for variant '{}'", #content, #variant)
+									);
+									return Err(err.into())
+								}
 							}
-						}
-					}}),
+						}}),
 						// For an enum, we check first if the variant matches, then decode
 						Strategy::Value {
 							variant: Some(_),
