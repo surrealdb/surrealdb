@@ -15,6 +15,7 @@ use super::pipeline::{
 	ScanPipeline, build_field_state, filter_and_process_batch, kv_scan_stream, range_end_key,
 	range_start_key,
 };
+use super::resolved::ResolvedTableContext;
 use crate::catalog::providers::TableProvider;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
@@ -53,6 +54,9 @@ pub struct RecordIdScan {
 	/// Compiled WHERE predicate pushed down from the Filter operator.
 	/// Applied after computed fields, before field-level permissions.
 	pub(crate) predicate: Option<Arc<dyn PhysicalExpr>>,
+	/// Plan-time resolved table context. When present, `execute_record_lookup`
+	/// skips runtime `get_table_def()` and `build_field_state()` entirely.
+	pub(crate) resolved: Option<ResolvedTableContext>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -69,8 +73,15 @@ impl RecordIdScan {
 			version,
 			needed_fields,
 			predicate,
+			resolved: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// Set the plan-time resolved table context.
+	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
+		self.resolved = Some(resolved);
+		self
 	}
 }
 
@@ -105,6 +116,13 @@ impl ExecOperator for RecordIdScan {
 			mode = mode.combine(pred.access_mode());
 		}
 		mode
+	}
+
+	fn cardinality_hint(&self) -> crate::exec::CardinalityHint {
+		// RecordIdScan produces at most one row for point lookups.
+		// Range scans could produce more, but the planner only routes
+		// literal RecordId expressions here (ranges go through DynamicScan).
+		crate::exec::CardinalityHint::AtMostOne
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
@@ -151,6 +169,7 @@ impl ExecOperator for RecordIdScan {
 		let version_expr = self.version.clone();
 		let needed_fields = self.needed_fields.clone();
 		let predicate = self.predicate.clone();
+		let resolved = self.resolved.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -185,7 +204,7 @@ impl ExecOperator for RecordIdScan {
 			// 3. Delegate to the shared lookup helper
 			let results = execute_record_lookup(
 				&rid, version, check_perms, needed_fields.as_ref(), &ctx,
-				predicate.as_ref(), None, 0,
+				predicate.as_ref(), None, 0, resolved.as_ref(),
 			).await?;
 
 			if !results.is_empty() {
@@ -224,32 +243,43 @@ pub(crate) async fn execute_record_lookup(
 	predicate: Option<&Arc<dyn PhysicalExpr>>,
 	limit: Option<usize>,
 	start: usize,
+	resolved: Option<&ResolvedTableContext>,
 ) -> Result<Vec<Value>, ControlFlow> {
 	let db_ctx = ctx.database().context("RecordLookup requires database context")?;
 	let txn = ctx.txn();
 	let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 	let db = Arc::clone(&db_ctx.db);
 
-	// 1. Check table existence and resolve SELECT permission
-	let table_def =
-		txn.get_tb_by_name(&ns.name, &db.name, &rid.table).await.context("Failed to get table")?;
-
-	if table_def.is_none() {
-		return Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {
-			name: rid.table.clone(),
-		})));
-	}
-
-	let select_permission = if check_perms {
-		let catalog_perm = match &table_def {
-			Some(def) => def.permissions.select.clone(),
-			None => crate::catalog::Permission::None,
-		};
-		convert_permission_to_physical(&catalog_perm, ctx.ctx())
-			.await
-			.context("Failed to convert permission")?
+	// 1. Check table existence and resolve SELECT permission.
+	// Use plan-time resolved context if available, otherwise runtime lookups.
+	let (select_permission, field_state) = if let Some(res) = resolved {
+		let perm = res.select_permission(check_perms);
+		let fs = res.field_state_for_projection(needed_fields);
+		(perm, fs)
 	} else {
-		PhysicalPermission::Allow
+		// Runtime fallback
+		let table_def = db_ctx.get_table_def(&rid.table).await.context("Failed to get table")?;
+
+		if table_def.is_none() {
+			return Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {
+				name: rid.table.clone(),
+			})));
+		}
+
+		let perm = if check_perms {
+			let catalog_perm = match &table_def {
+				Some(def) => def.permissions.select.clone(),
+				None => crate::catalog::Permission::None,
+			};
+			convert_permission_to_physical(&catalog_perm, ctx.ctx())
+				.await
+				.context("Failed to convert permission")?
+		} else {
+			PhysicalPermission::Allow
+		};
+
+		let fs = build_field_state(ctx, &rid.table, check_perms, needed_fields).await?;
+		(perm, fs)
 	};
 
 	// Early exit if denied
@@ -257,14 +287,13 @@ pub(crate) async fn execute_record_lookup(
 		return Ok(vec![]);
 	}
 
-	// 2. Build field state (computed fields + field permissions)
-	let field_state = build_field_state(ctx, &rid.table, check_perms, needed_fields).await?;
-
 	// Pre-compute whether any post-decode processing is needed
-	let needs_processing = !matches!(select_permission, PhysicalPermission::Allow)
-		|| !field_state.computed_fields.is_empty()
-		|| (check_perms && !field_state.field_permissions.is_empty())
-		|| predicate.is_some();
+	let needs_processing = ScanPipeline::compute_needs_processing(
+		&select_permission,
+		&field_state,
+		check_perms,
+		predicate,
+	);
 
 	// 3. Dispatch based on key type
 	match &rid.key {
@@ -272,15 +301,31 @@ pub(crate) async fn execute_record_lookup(
 			// --- Range scan ---
 			let beg = range_start_key(ns.namespace_id, db.database_id, &rid.table, &range.start)?;
 			let end = range_end_key(ns.namespace_id, db.database_id, &rid.table, &range.end)?;
+
+			// When no post-decode processing is needed (no permissions,
+			// no predicates, no computed fields), push START to the
+			// storage layer to skip rows without deserializing them.
+			let pre_skip = if !needs_processing {
+				start
+			} else {
+				0
+			};
+			let effective_storage_limit = if !needs_processing {
+				limit
+			} else {
+				None
+			};
+			let prefetch = effective_storage_limit.is_none();
+
 			let mut source = kv_scan_stream(
 				Arc::clone(&txn),
 				beg,
 				end,
 				version,
-				None, // no storage limit for range scans
+				effective_storage_limit,
 				crate::idx::planner::ScanDirection::Forward,
-				0,     // no pre-skip
-				false, // no prefetch for small lookups
+				pre_skip,
+				prefetch,
 			);
 
 			let mut pipeline = ScanPipeline::new(
@@ -289,7 +334,7 @@ pub(crate) async fn execute_record_lookup(
 				field_state,
 				check_perms,
 				limit,
-				start,
+				start.saturating_sub(pre_skip),
 			);
 
 			let mut results = Vec::new();
@@ -315,12 +360,12 @@ pub(crate) async fn execute_record_lookup(
 				.await
 				.context("Failed to get record")?;
 
-			if record.data.as_ref().is_none() {
+			if record.data.is_none() {
 				return Ok(vec![]);
 			}
 
-			let mut value = record.data.as_ref().clone();
-			value.def(rid);
+			let mut value = record.data.clone();
+			value.def(rid.clone());
 
 			let mut batch = vec![value];
 			if needs_processing {

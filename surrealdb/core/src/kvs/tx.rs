@@ -36,6 +36,22 @@ use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
 use crate::kvs::{KVKey, KVValue, Transactor, cache};
 use crate::val::{RecordId, RecordIdKey, TableName};
 
+/// Controls whether `getm_records` populates the transaction cache on miss.
+///
+/// Point lookups and graph traversals benefit from caching (records are
+/// likely re-accessed within the same transaction). Large sequential scans
+/// (index range scans, full-text hits) read each record once, so populating
+/// the cache wastes time and evicts useful entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CachePolicy {
+	/// Check cache on read **and** populate on miss.
+	/// Use for point lookups, graph traversal, KNN, and unique-index equality.
+	ReadWrite,
+	/// Check cache on read but **skip** population on miss.
+	/// Use for index range scans, non-unique equality scans, and full-text scans.
+	ReadOnly,
+}
+
 pub struct Transaction {
 	/// Is this is a local datastore transaction?
 	local: bool,
@@ -252,8 +268,12 @@ impl Transaction {
 	///
 	/// For each record ID, checks the transaction cache first. Cache misses are
 	/// fetched in one batch via the store's multi-get, then results are merged
-	/// and returned in the same order as `rids`. Populates the cache with newly
-	/// fetched records.
+	/// and returned in the same order as `rids`.
+	///
+	/// When `cache_policy` is [`CachePolicy::ReadWrite`], newly fetched records
+	/// are inserted into the cache. When [`CachePolicy::ReadOnly`], fetched
+	/// records are returned but **not** cached, avoiding eviction churn during
+	/// large sequential scans.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub(crate) async fn getm_records(
 		&self,
@@ -261,6 +281,7 @@ impl Transaction {
 		db: DatabaseId,
 		rids: &[RecordId],
 		version: Option<u64>,
+		cache_policy: CachePolicy,
 	) -> Result<Vec<Arc<Record>>> {
 		if rids.is_empty() {
 			return Ok(Vec::new());
@@ -281,7 +302,7 @@ impl Transaction {
 				.map(|(opt_val, rid)| {
 					Ok(match opt_val {
 						Some(mut record) => {
-							record.data.to_mut().def(rid);
+							record.data.def(rid.clone());
 							record.into_read_only()
 						}
 						None => Arc::new(Default::default()),
@@ -321,15 +342,19 @@ impl Transaction {
 
 		let values = self.getm(keys, None).await?;
 
-		// Phase 3: post-process fetched records and merge into output
+		// Phase 3: post-process fetched records and merge into output.
+		// Only populate the cache when the caller requests ReadWrite; ReadOnly
+		// avoids eviction churn during large sequential scans.
 		for (j, opt_val) in values.into_iter().enumerate() {
 			let (i, rid) = uncached_rids[j];
 			let record = match opt_val {
 				Some(mut record) => {
-					record.data.to_mut().def(rid);
+					record.data.def(rid.clone());
 					let record = record.into_read_only();
-					let qey = cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
-					self.cache.insert(qey, cache::tx::Entry::Val(record.clone()));
+					if matches!(cache_policy, CachePolicy::ReadWrite) {
+						let qey = cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
+						self.cache.insert(qey, cache::tx::Entry::Val(record.clone()));
+					}
 					record
 				}
 				None => Arc::new(Default::default()),
@@ -2068,7 +2093,7 @@ impl TableProvider for Transaction {
 						table: tb.to_owned(),
 						key: id.clone(),
 					};
-					record.data.to_mut().def(&rid);
+					record.data.def(rid);
 					// Convert to read-only format for better sharing and performance
 					Ok(record.into_read_only())
 				}
@@ -2092,7 +2117,7 @@ impl TableProvider for Transaction {
 								table: tb.to_owned(),
 								key: id.clone(),
 							};
-							record.data.to_mut().def(&rid);
+							record.data.def(rid);
 							// Convert to read-only format for better sharing and performance
 							let record = record.into_read_only();
 							let entry = cache::tx::Entry::Val(record.clone());

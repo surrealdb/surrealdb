@@ -120,7 +120,7 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		rid: Arc<RecordId>,
 	) -> Result<Option<Arc<Record>>> {
 		let val = ctx.tx.get_record(ctx.ikb.0.ns, ctx.ikb.0.db, &rid.table, &rid.key, None).await?;
-		if val.data.as_ref().is_nullish() {
+		if val.data.is_nullish() {
 			return Ok(None);
 		}
 		let cursor_doc = CursorDoc {

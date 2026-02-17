@@ -6,13 +6,13 @@ reason = "Test EXPLAIN ANALYZE with basic SELECT queries - executes and shows me
 value = "'OK'"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3}
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 3}
     TableScan [ctx: Db] [table: item, direction: Forward] {rows: 3}
 
 Total rows: 3''''
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 2}
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 2}
     TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15] {rows: 2}
 
 Total rows: 2''''

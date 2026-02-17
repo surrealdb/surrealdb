@@ -18,7 +18,7 @@ value = "[{ id: test:4, val: '1' }]"
 value = "[{ id: test:5, val: '3' }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     SortByKey [ctx: Db] [sort_keys: val ASC]
         TableScan [ctx: Db] [table: test, direction: Forward]
 ''''
@@ -27,7 +27,7 @@ value = ''''Project [ctx: Db]
 value = "[{ val: '1' }, { val: '2' }, { val: '3' }, { val: '10' }, { val: '20' }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     SortByKey [ctx: Db] [sort_keys: val ASC]
         TableScan [ctx: Db] [table: test, direction: Forward]
 ''''

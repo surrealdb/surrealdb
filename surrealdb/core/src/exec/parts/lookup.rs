@@ -79,8 +79,9 @@ impl PhysicalExpr for LookupPart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.cloned().unwrap_or(Value::None);
-		Ok(evaluate_lookup(&value, self, ctx).await?)
+		let none = Value::None;
+		let value = ctx.current_value.unwrap_or(&none);
+		Ok(evaluate_lookup(value, self, ctx).await?)
 	}
 
 	/// Parallel batch evaluation for graph/reference lookups.

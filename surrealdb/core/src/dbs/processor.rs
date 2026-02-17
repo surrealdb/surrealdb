@@ -218,7 +218,7 @@ impl Collectable {
 	#[instrument(level = "trace", skip_all)]
 	async fn process_range_key(doc_ctx: NsDbTbCtx, key: Key) -> Result<Processable> {
 		let key = record::RecordKey::decode_key(&key)?;
-		let val = Record::new(Value::Null.into());
+		let val = Record::new(Value::Null);
 		let rid = RecordId {
 			table: key.tb.into_owned(),
 			key: key.id,
@@ -251,7 +251,7 @@ impl Collectable {
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
-			val: Operable::Value(Record::new(Value::Null.into()).into_read_only()),
+			val: Operable::Value(Record::new(Value::Null).into_read_only()),
 		};
 		Ok(pro)
 	}
@@ -327,7 +327,7 @@ impl Collectable {
 	) -> Result<Processable> {
 		// if it is skippable we only need the record id
 		let val = if rid_only {
-			Record::new(Value::Null.into()).into_read_only()
+			Record::new(Value::Null).into_read_only()
 		} else {
 			txn.get_record(
 				doc_ctx.ns.namespace_id,
@@ -380,7 +380,7 @@ impl Collectable {
 			generate: None,
 			rid,
 			ir: None,
-			val: Operable::Value(Record::new(v.into()).into_read_only()),
+			val: Operable::Value(Record::new(v).into_read_only()),
 		}
 	}
 
@@ -438,7 +438,7 @@ impl Collectable {
 			key: key.id,
 		};
 		// Inject the id field into the document
-		val.data.to_mut().def(&rid);
+		val.data.def(rid.clone());
 		// Create a new operable value
 		let val = Operable::Value(val.into());
 		// Process the record
@@ -474,9 +474,7 @@ impl Collectable {
 			doc_ctx: DocumentContext::NsDbTbCtx(doc_ctx),
 			rid: Some(t),
 			ir: Some(Arc::new(ir)),
-			val: Operable::Value(
-				v.unwrap_or_else(|| Record::new(Value::Null.into()).into_read_only()),
-			),
+			val: Operable::Value(v.unwrap_or_else(|| Record::new(Value::Null).into_read_only())),
 		}
 	}
 
@@ -494,7 +492,7 @@ impl Collectable {
 			v
 		} else if rid_only {
 			// if it is skippable we only need the record id
-			Record::new(Value::Null.into()).into_read_only()
+			Record::new(Value::Null).into_read_only()
 		} else {
 			txn.get_record(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &t.table, &t.key, None)
 				.await?

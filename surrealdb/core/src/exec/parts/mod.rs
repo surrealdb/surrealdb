@@ -67,7 +67,7 @@ pub(crate) async fn fetch_record_with_computed_fields(
 		.await
 		.map_err(|e| anyhow::anyhow!("Failed to fetch record: {}", e))?;
 
-	let mut result = record.data.as_ref().clone();
+	let mut result = record.data.clone();
 
 	// If the record doesn't exist (e.g. was deleted), return None early.
 	// Don't proceed to evaluate computed fields on a non-existent record.
@@ -174,7 +174,7 @@ pub(crate) async fn fetch_record_with_computed_fields(
 	}
 
 	// Ensure the record has its ID
-	result.def(rid);
+	result.def(rid.clone());
 
 	Ok(result)
 }

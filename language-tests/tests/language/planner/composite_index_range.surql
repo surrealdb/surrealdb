@@ -21,7 +21,7 @@ value = "[{ age: 60, city: 'paris', id: record:4 }]"
 value = "[{ age: 40, city: 'paris', id: record:5 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 2}
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 2}
     IndexScan [ctx: Db] [index: idx_city_age, access: ['london'] MoreThan 50, direction: Forward] {rows: 2}
 
 Total rows: 2"'''
@@ -30,7 +30,7 @@ Total rows: 2"'''
 value = "[{ age: 55, city: 'london', id: record:2 }, { age: 70, city: 'london', id: record:3 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 2}
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 2}
     IndexScan [ctx: Db] [index: idx_city_age, access: ['london'] MoreThanEqual 55, direction: Forward] {rows: 2}
 
 Total rows: 2"'''
@@ -39,7 +39,7 @@ Total rows: 2"'''
 value = "[{ age: 55, city: 'london', id: record:2 }, { age: 70, city: 'london', id: record:3 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1}
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 1}
     IndexScan [ctx: Db] [index: idx_city_age, access: ['paris'] LessThan 50, direction: Forward] {rows: 1}
 
 Total rows: 1"'''
@@ -48,7 +48,7 @@ Total rows: 1"'''
 value = "[{ age: 40, city: 'paris', id: record:5 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 2}
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 2}
     IndexScan [ctx: Db] [index: idx_city_age, access: ['paris'] LessThanEqual 60, direction: Forward] {rows: 2}
 
 Total rows: 2"'''
@@ -63,7 +63,7 @@ value = "[{ active: true, age: 60, city: 'london', id: record:6 }]"
 value = "[{ active: false, age: 65, city: 'london', id: record:7 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1}
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 1}
     Filter [ctx: Db] [predicate: active = true] {rows: 1}
         IndexScan [ctx: Db] [index: idx_city_age, access: ['london'] MoreThan 50, direction: Forward] {rows: 4}
 
@@ -73,7 +73,7 @@ Total rows: 1"'''
 value = "[{ active: true, age: 60, city: 'london', id: record:6 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1}
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 1}
     IndexScan [ctx: Db] [index: idx_city_age, access: ['paris', 40], direction: Forward] {rows: 1}
 
 Total rows: 1"'''

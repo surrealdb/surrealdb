@@ -12,7 +12,7 @@ value = ''''Project [ctx: Db]
 
 [[test.results]]
 value = ''''Project [ctx: Db]
-  field.lookup: Project [ctx: Db]
+  field.lookup: SelectProject [ctx: Db] [projections: *]
       Filter [ctx: Db] [predicate: age > 30]
           GraphEdgeScan [ctx: Db] [direction: <-, tables: person, output: FullEdge]
               GraphEdgeScan [ctx: Db] [direction: ->, tables: likes, output: TargetId]

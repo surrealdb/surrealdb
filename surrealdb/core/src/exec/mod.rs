@@ -227,6 +227,22 @@ pub(crate) trait ExecOperator: Debug + SendSyncRequirement {
 		None
 	}
 
+	/// Recursively enable metrics collection on this operator and all
+	/// its children.
+	///
+	/// Called by `AnalyzePlan` before execution so that `monitor_stream`
+	/// wraps each operator's output with timing/counting instrumentation.
+	/// For normal (non-ANALYZE) queries, metrics remain disabled and
+	/// `monitor_stream` returns the inner stream directly with zero overhead.
+	fn enable_metrics(&self) {
+		if let Some(m) = self.metrics() {
+			m.enable();
+		}
+		for child in self.children() {
+			child.enable_metrics();
+		}
+	}
+
 	/// Returns named references to physical expressions owned by this operator.
 	///
 	/// Used by `EXPLAIN` / `EXPLAIN ANALYZE` to display the expression tree

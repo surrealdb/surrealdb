@@ -260,11 +260,11 @@ pub(crate) async fn fetch_record(
 		.await
 		.map_err(crate::expr::ControlFlow::Err)?;
 
-	let mut val = record.data.as_ref().clone();
+	let mut val = record.data.clone();
 	if val.is_none() {
 		return Ok(Value::None);
 	}
-	val.def(rid);
+	val.def(rid.clone());
 	Ok(val)
 }
 

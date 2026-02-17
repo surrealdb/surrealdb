@@ -364,24 +364,24 @@ impl Transaction {
 			table: k.tb.into_owned(),
 			key: k.id,
 		};
-		record.data.to_mut().def(&rid);
+		record.data.def(rid);
 		// Match on the value to determine if it is a graph edge record or a normal record.
 		if record.is_edge()
-			&& let crate::val::Value::RecordId(_) = record.data.as_ref().pick(&*IN)
-			&& let crate::val::Value::RecordId(_) = record.data.as_ref().pick(&*OUT)
+			&& let crate::val::Value::RecordId(_) = record.data.pick(&*IN)
+			&& let crate::val::Value::RecordId(_) = record.data.pick(&*OUT)
 		{
 			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
 			// Write the value to the records_relate string.
 			if !records_relate.is_empty() {
 				records_relate.push_str(", ");
 			}
-			records_relate.push_str(&record.data.as_ref().to_sql());
+			records_relate.push_str(&record.data.to_sql());
 		} else {
 			// If the value is a normal record, write it to the records_normal string.
 			if !records_normal.is_empty() {
 				records_normal.push_str(", ");
 			}
-			records_normal.push_str(&record.data.as_ref().to_sql());
+			records_normal.push_str(&record.data.to_sql());
 		}
 	}
 

@@ -6,7 +6,7 @@ reason = "Verify NOT (field INSIDE [...]) is NOT expanded into index lookups and
 value = "'OK'"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 2}
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 2}
     TableScan [ctx: Db] [table: items, direction: Forward, predicate: ! val INSIDE [1, 2]] {rows: 2}
 
 Total rows: 2''''

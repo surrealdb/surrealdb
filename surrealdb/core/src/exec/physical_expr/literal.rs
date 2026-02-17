@@ -40,6 +40,10 @@ impl PhysicalExpr for Literal {
 		// Literals are always read-only
 		AccessMode::ReadOnly
 	}
+
+	fn try_literal(&self) -> Option<&Value> {
+		Some(&self.0)
+	}
 }
 
 impl ToSql for Literal {

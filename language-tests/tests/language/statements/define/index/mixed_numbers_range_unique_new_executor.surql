@@ -8,7 +8,7 @@ value = "'OK'"
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     SortByKey [ctx: Db] [sort_keys: id ASC]
         IndexScan [ctx: Db] [index: index, access: >0 <2, direction: Forward]
 ''''
@@ -17,7 +17,7 @@ value = ''''Project [ctx: Db]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     SortByKey [ctx: Db] [sort_keys: id ASC]
         IndexScan [ctx: Db] [index: index, access: >0.1f <2, direction: Forward]
 ''''
@@ -26,7 +26,7 @@ value = ''''Project [ctx: Db]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     SortByKey [ctx: Db] [sort_keys: id ASC]
         IndexScan [ctx: Db] [index: index, access: >0.1f <1.5f, direction: Forward]
 ''''
@@ -35,7 +35,7 @@ value = ''''Project [ctx: Db]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     SortByKey [ctx: Db] [sort_keys: id ASC]
         IndexScan [ctx: Db] [index: index, access: >0 <1.5f, direction: Forward]
 ''''
@@ -44,7 +44,7 @@ value = ''''Project [ctx: Db]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }, { id: test:int2, number: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     SortByKey [ctx: Db] [sort_keys: id ASC]
         IndexScan [ctx: Db] [index: index, access: >0.1f, direction: Forward]
 ''''
@@ -53,7 +53,7 @@ value = ''''Project [ctx: Db]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }, { id: test:int2, number: 2 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     SortByKey [ctx: Db] [sort_keys: id ASC]
         IndexScan [ctx: Db] [index: index, access: >0, direction: Forward]
 ''''
@@ -62,7 +62,7 @@ value = ''''Project [ctx: Db]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int0, number: 0 }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     SortByKey [ctx: Db] [sort_keys: id ASC]
         IndexScan [ctx: Db] [index: index, access: <2, direction: Forward]
 ''''
@@ -71,7 +71,7 @@ value = ''''Project [ctx: Db]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int0, number: 0 }, { id: test:int1, number: 1 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     SortByKey [ctx: Db] [sort_keys: id ASC]
         IndexScan [ctx: Db] [index: index, access: <1.9f, direction: Forward]
 ''''

@@ -35,8 +35,9 @@ impl PhysicalExpr for FieldPart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.cloned().unwrap_or(Value::None);
-		Ok(evaluate_field(&value, &self.name, ctx).await?)
+		let none = Value::None;
+		let value = ctx.current_value.unwrap_or(&none);
+		Ok(evaluate_field(value, &self.name, ctx).await?)
 	}
 
 	/// Parallel batch evaluation for field access.
@@ -63,6 +64,10 @@ impl PhysicalExpr for FieldPart {
 
 	fn access_mode(&self) -> AccessMode {
 		AccessMode::ReadOnly
+	}
+
+	fn try_simple_field(&self) -> Option<&str> {
+		Some(&self.name)
 	}
 }
 

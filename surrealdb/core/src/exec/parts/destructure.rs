@@ -70,8 +70,9 @@ impl PhysicalExpr for DestructurePart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.cloned().unwrap_or(Value::None);
-		evaluate_destructure(&value, &self.fields, ctx).await
+		let none = Value::None;
+		let value = ctx.current_value.unwrap_or(&none);
+		evaluate_destructure(value, &self.fields, ctx).await
 	}
 
 	fn access_mode(&self) -> AccessMode {

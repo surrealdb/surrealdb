@@ -1,9 +1,21 @@
 //! SELECT statement planning for the planner.
 //!
 //! Handles the full SELECT pipeline: source → filter → split → aggregate →
-//! sort → limit → fetch → project → timeout.
+//! sort → limit → project → fetch → timeout.
+//!
+//! Projection uses a fast path that classifies SELECT fields at plan time:
+//! - **Simple field paths** (e.g. `name`, `age`): handled by `SelectProject` with synchronous field
+//!   selection — zero async/expression overhead.
+//! - **Complex expressions** (e.g. `math::sum(scores) AS total`): pre-evaluated by a `Compute`
+//!   operator, then picked by `SelectProject`.
+//! - **Projection functions** or **nested output paths**: fall back to the full `Project` operator.
+//!
+//! An `ExpressionRegistry` is shared between ORDER BY and projection planning
+//! to deduplicate expressions that appear in both clauses.
 
 use std::sync::Arc;
+
+use surrealdb_types::ToSql;
 
 use super::Planner;
 use super::util::{
@@ -24,6 +36,7 @@ use crate::exec::index::analysis::IndexAnalyzer;
 #[cfg(all(storage, not(target_family = "wasm")))]
 use crate::exec::operators::ExternalSort;
 use crate::exec::operators::scan::determine_scan_direction;
+use crate::exec::operators::scan::resolved::{ResolvedTableContext, resolve_table_context};
 use crate::exec::operators::{
 	Aggregate, AnalyzePlan, Compute, DynamicScan, ExplainPlan, Fetch, FieldSelection, Filter,
 	KnnTopK, Limit, Project, ProjectValue, Projection, RandomShuffle, RecordIdScan, SelectProject,
@@ -52,6 +65,11 @@ pub(crate) struct SelectPipelineConfig {
 	/// Currently informational; the actual guard is `cond: None` in the config.
 	#[allow(dead_code)]
 	pub filter_pushed: bool,
+	/// Pre-compiled predicate. When set, `plan_pipeline` uses this directly
+	/// instead of re-compiling `cond` into a new PhysicalExpr. This avoids
+	/// duplicate compilation when the same predicate was already compiled
+	/// for scan pushdown but ended up not being consumed by the source.
+	pub precompiled_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 }
 
 /// Describes how the WHERE predicate should be handled after source planning.
@@ -96,9 +114,13 @@ impl<'ctx> Planner<'ctx> {
 			is_value_source,
 			tempfiles,
 			filter_pushed: _,
+			precompiled_predicate,
 		} = config;
 
-		let filtered = if let Some(cond) = cond {
+		let filtered = if let Some(predicate) = precompiled_predicate {
+			// Use the pre-compiled predicate to avoid duplicate compilation
+			Arc::new(Filter::new(source, predicate)) as Arc<dyn ExecOperator>
+		} else if let Some(cond) = cond {
 			let predicate = self.physical_expr(cond.0).await?;
 			Arc::new(Filter::new(source, predicate)) as Arc<dyn ExecOperator>
 		} else {
@@ -133,16 +155,34 @@ impl<'ctx> Planner<'ctx> {
 			(split_op, false)
 		};
 
+		// Shared expression registry for deduplication across sort and projection.
+		// Expressions computed for ORDER BY are reused by the projection step.
+		// Reserve the SELECT field names so that synthetic `_eN` names never
+		// collide with fields the user explicitly selected.
+		let mut registry = ExpressionRegistry::with_reserved_names(collect_field_names(&fields));
+
 		let (sorted, sort_only_omits) = if let Some(order) = order {
 			// Sort elimination: if the input is already sorted in the required
 			// order, skip creating a Sort operator entirely.
 			if self.can_eliminate_sort(&grouped, &order) {
 				(grouped, vec![])
 			} else if skip_projections {
+				// GROUP BY queries use the legacy sort path because the
+				// consolidated approach's Compute operator would try to
+				// evaluate aggregate expressions (e.g., math::sum) on
+				// individual rows rather than grouped arrays.
 				(self.plan_sort(grouped, order, &start, &limit, tempfiles).await?, vec![])
 			} else {
-				self.plan_sort_consolidated(grouped, order, &fields, &start, &limit, tempfiles)
-					.await?
+				self.plan_sort_consolidated(
+					grouped,
+					order,
+					&fields,
+					&start,
+					&limit,
+					tempfiles,
+					&mut registry,
+				)
+				.await?
 			}
 		} else {
 			(grouped, vec![])
@@ -175,7 +215,8 @@ impl<'ctx> Planner<'ctx> {
 				limited
 			}
 		} else {
-			self.plan_projections(fields, all_omit, limited, is_value_source).await?
+			self.plan_projections_fast(fields, all_omit, limited, is_value_source, &mut registry)
+				.await?
 		};
 
 		Ok(projected)
@@ -307,6 +348,223 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
+	/// Plan projections with the fast path: use SelectProject for simple field
+	/// selection and Compute for complex expressions, avoiding the full
+	/// IdiomExpr/PhysicalExpr/async evaluation chain in Project.
+	///
+	/// Falls back to `plan_projections` when projection functions or nested
+	/// output paths are present, as those require the full Project operator.
+	pub(crate) async fn plan_projections_fast(
+		&self,
+		fields: Fields,
+		omit: Vec<Expr>,
+		input: Arc<dyn ExecOperator>,
+		is_value_source: bool,
+		registry: &mut ExpressionRegistry,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		match fields {
+			Fields::Value(selector) => {
+				let expr = self.physical_expr(selector.expr).await?;
+				Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>)
+			}
+
+			Fields::Select(ref field_list) => {
+				let is_select_all =
+					field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
+
+				if is_select_all {
+					if Self::has_nested_omit(&omit) {
+						return self.plan_projections(fields, omit, input, is_value_source).await;
+					}
+
+					let mut projections = vec![Projection::All];
+					for expr in &omit {
+						if let Expr::Idiom(idiom) = expr {
+							projections.push(Projection::Omit(idiom_to_field_name(idiom)));
+						}
+					}
+					return Ok(Arc::new(SelectProject::new(
+						input,
+						projections,
+						Arc::new(OperatorMetrics::new()),
+					)) as Arc<dyn ExecOperator>);
+				}
+
+				// SELECT VALUE $param fast path
+				let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
+				if is_value_source
+					&& !has_wildcard
+					&& field_list.len() == 1
+					&& let Some(Field::Single(selector)) = field_list.first()
+					&& selector.alias.is_none()
+					&& let Expr::Param(_) = &selector.expr
+				{
+					let expr = self.physical_expr(selector.expr.clone()).await?;
+					return Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>);
+				}
+
+				// Bail out early if OMIT contains nested paths — the fast
+				// SelectProject path can't handle them, and checking now
+				// avoids compiling physical expressions we'd throw away.
+				if Self::has_nested_omit(&omit) {
+					return self.plan_projections(fields, omit, input, is_value_source).await;
+				}
+
+				// Classify each field. If any field requires the full Project
+				// operator (projection functions, nested output paths), fall back.
+				let mut projections = Vec::with_capacity(field_list.len());
+				let mut needs_fallback = false;
+
+				if has_wildcard {
+					projections.push(Projection::All);
+				}
+
+				for field in field_list {
+					match field {
+						Field::All => {} // Already handled via has_wildcard
+						Field::Single(selector) => {
+							let physical = self.physical_expr(selector.expr.clone()).await?;
+
+							// Projection functions produce dynamic field bindings
+							// and require the full Project operator.
+							if physical.is_projection_function() {
+								needs_fallback = true;
+								break;
+							}
+
+							if let Some(alias) = &selector.alias {
+								let output_name = idiom_to_field_name(alias);
+
+								if let Some(field_name) = physical.try_simple_field() {
+									// Simple aliased field: rename
+									if field_name == output_name {
+										projections.push(Projection::Include(output_name));
+									} else {
+										projections.push(Projection::Rename {
+											from: field_name.to_string(),
+											to: output_name,
+										});
+									}
+								} else {
+									// Complex expression with alias: compute it
+									Self::register_and_push_projection(
+										&mut projections,
+										registry,
+										selector.expr.to_sql(),
+										physical,
+										output_name,
+									);
+								}
+							} else {
+								// No alias
+								if let Some(field_name) = physical.try_simple_field() {
+									// Simple field: include directly
+									projections.push(Projection::Include(field_name.to_string()));
+								} else if let Expr::Idiom(idiom) = &selector.expr {
+									let path = idiom_to_field_path(idiom);
+									if path.len() > 1 {
+										// Multi-part idiom → nested output path.
+										// SelectProject doesn't support nested paths,
+										// so fall back to Project.
+										needs_fallback = true;
+										break;
+									}
+									// Single-part idiom that didn't match
+									// try_simple_field (e.g. graph traversal).
+									// Register in Compute.
+									Self::register_and_push_projection(
+										&mut projections,
+										registry,
+										selector.expr.to_sql(),
+										physical,
+										idiom_to_field_name(idiom),
+									);
+								} else {
+									// Non-idiom expression without alias (e.g. function call)
+									Self::register_and_push_projection(
+										&mut projections,
+										registry,
+										selector.expr.to_sql(),
+										physical,
+										derive_field_name(&selector.expr),
+									);
+								}
+							}
+						}
+					}
+				}
+
+				if needs_fallback {
+					return self.plan_projections(fields, omit, input, is_value_source).await;
+				}
+
+				// Add OMIT projections (all simple / top-level)
+				for expr in &omit {
+					if let Expr::Idiom(idiom) = expr {
+						projections.push(Projection::Omit(idiom_to_field_name(idiom)));
+					}
+				}
+
+				// Create Compute operator if any complex expressions were registered
+				let computed = if registry.has_expressions_for_point(ComputePoint::Project) {
+					let compute_fields = registry.get_expressions_for_point(ComputePoint::Project);
+					Arc::new(Compute::new(input, compute_fields)) as Arc<dyn ExecOperator>
+				} else {
+					input
+				};
+
+				Ok(Arc::new(SelectProject::new(
+					computed,
+					projections,
+					Arc::new(OperatorMetrics::new()),
+				)) as Arc<dyn ExecOperator>)
+			}
+		}
+	}
+
+	/// Register a complex expression in the `ExpressionRegistry` and push the
+	/// corresponding `Include` or `Rename` projection.
+	///
+	/// Deduplicates the identical pattern that appeared three times in
+	/// `plan_projections_fast` (aliased expr, unaliased idiom, unaliased
+	/// non-idiom).
+	fn register_and_push_projection(
+		projections: &mut Vec<Projection>,
+		registry: &mut ExpressionRegistry,
+		expr_key: String,
+		physical: Arc<dyn crate::exec::PhysicalExpr>,
+		output_name: String,
+	) {
+		let internal_name = registry.register_physical(
+			expr_key,
+			physical,
+			ComputePoint::Project,
+			Some(output_name.clone()),
+		);
+		if internal_name == output_name {
+			projections.push(Projection::Include(output_name));
+		} else {
+			projections.push(Projection::Rename {
+				from: internal_name,
+				to: output_name,
+			});
+		}
+	}
+
+	/// Check whether any OMIT expression contains a nested (multi-part) idiom.
+	///
+	/// `SelectProject` only handles flat `Projection::Omit`; nested paths like
+	/// `opts.age` require the full `Project` operator with `omit_nested_field`.
+	fn has_nested_omit(omit: &[Expr]) -> bool {
+		omit.iter().any(|e| {
+			if let Expr::Idiom(idiom) = e {
+				idiom.len() > 1
+			} else {
+				false
+			}
+		})
+	}
+
 	/// Plan OMIT fields — convert expressions to idioms.
 	pub(crate) async fn plan_omit(
 		&self,
@@ -383,6 +641,10 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// Plan ORDER BY with consolidated expression evaluation.
+	///
+	/// Uses a shared `ExpressionRegistry` so that expressions computed for sort
+	/// can be reused by downstream projection (avoiding duplicate computation).
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) async fn plan_sort_consolidated(
 		&self,
 		input: Arc<dyn ExecOperator>,
@@ -391,6 +653,7 @@ impl<'ctx> Planner<'ctx> {
 		start: &Option<crate::expr::start::Start>,
 		limit: &Option<crate::expr::limit::Limit>,
 		#[allow(unused)] tempfiles: bool,
+		registry: &mut ExpressionRegistry,
 	) -> Result<(Arc<dyn ExecOperator>, Vec<String>), Error> {
 		use crate::expr::order::Ordering;
 		use crate::expr::part::Part;
@@ -404,7 +667,6 @@ impl<'ctx> Planner<'ctx> {
 				))
 			}
 			Ordering::Order(order_list) => {
-				let mut registry = ExpressionRegistry::new();
 				let mut sort_keys = Vec::with_capacity(order_list.len());
 				let mut sort_only_fields: Vec<String> = Vec::new();
 
@@ -507,104 +769,6 @@ impl<'ctx> Planner<'ctx> {
 					Arc::new(SortByKey::new(computed, sort_keys)) as Arc<dyn ExecOperator>,
 					sort_only_fields,
 				))
-			}
-		}
-	}
-
-	/// Plan SELECT projections with consolidated approach.
-	#[allow(dead_code)]
-	pub(crate) async fn plan_projections_consolidated(
-		&self,
-		input: Arc<dyn ExecOperator>,
-		fields: &Fields,
-		omit: &[Expr],
-		computed_fields: &[(String, String)],
-	) -> Result<Arc<dyn ExecOperator>, Error> {
-		match fields {
-			Fields::Value(selector) => {
-				if !omit.is_empty() {
-					return Err(Error::Query {
-						message: "OMIT clause with SELECT VALUE not supported".to_string(),
-					});
-				}
-				let expr = self.physical_expr(selector.expr.clone()).await?;
-				Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>)
-			}
-
-			Fields::Select(field_list) => {
-				let is_select_all =
-					field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
-
-				if is_select_all {
-					let omit_names: Vec<String> = omit
-						.iter()
-						.filter_map(|e| {
-							if let Expr::Idiom(idiom) = e {
-								Some(idiom_to_field_name(idiom))
-							} else {
-								None
-							}
-						})
-						.collect();
-					let projections: Vec<Projection> = std::iter::once(Projection::All)
-						.chain(omit_names.into_iter().map(Projection::Omit))
-						.collect();
-					return Ok(Arc::new(SelectProject::new(
-						input,
-						projections,
-						Arc::new(OperatorMetrics::new()),
-					)) as Arc<dyn ExecOperator>);
-				}
-
-				let mut projections = Vec::with_capacity(field_list.len());
-				let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
-
-				if has_wildcard {
-					projections.push(Projection::All);
-				}
-
-				for field in field_list {
-					match field {
-						Field::All => {}
-						Field::Single(selector) => {
-							let output_name = if let Some(alias) = &selector.alias {
-								idiom_to_field_name(alias)
-							} else {
-								derive_field_name(&selector.expr)
-							};
-
-							let maybe_computed =
-								computed_fields.iter().find(|(_, out)| out == &output_name);
-
-							if let Some((internal_name, _)) = maybe_computed {
-								if internal_name != &output_name {
-									projections.push(Projection::Rename {
-										from: internal_name.clone(),
-										to: output_name,
-									});
-								} else {
-									projections.push(Projection::Include(output_name));
-								}
-							} else {
-								projections.push(Projection::Include(output_name));
-							}
-						}
-					}
-				}
-
-				if !omit.is_empty() {
-					for e in omit {
-						if let Expr::Idiom(idiom) = e {
-							projections.push(Projection::Omit(idiom_to_field_name(idiom)));
-						}
-					}
-				}
-
-				Ok(Arc::new(SelectProject::new(
-					input,
-					projections,
-					Arc::new(OperatorMetrics::new()),
-				)) as Arc<dyn ExecOperator>)
 			}
 		}
 	}
@@ -948,6 +1112,62 @@ impl<'ctx> Planner<'ctx> {
 			};
 		}
 
+		// Fast path: SELECT [*|fields] FROM <literal RecordId>
+		if what.len() == 1
+			&& matches!(&what[0], Expr::Literal(Literal::RecordId(_)))
+			&& cond.is_none()
+			&& order.is_none()
+			&& group.is_none()
+			&& split.is_none()
+			&& fetch.is_none()
+			&& with.is_none()
+		{
+			// Extract table name from the literal RecordId for plan-time resolution
+			let table_name_for_resolve = match &what[0] {
+				Expr::Literal(Literal::RecordId(rid_lit)) => Some(rid_lit.table.clone()),
+				_ => None,
+			};
+			let rid_expr = match what.into_iter().next() {
+				Some(e @ Expr::Literal(Literal::RecordId(_))) => self.physical_expr(e).await?,
+				_ => unreachable!("verified above"),
+			};
+			let mut scan = RecordIdScan::new(rid_expr, version, None, None);
+			// Resolve table context at plan time
+			if let Some(ref tb) = table_name_for_resolve
+				&& let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db)
+				&& let Some(tc) = Self::try_resolve_table_ctx(txn, self.ctx, ns, db, tb).await
+			{
+				scan = scan.with_resolved(tc);
+			}
+			let scan: Arc<dyn ExecOperator> = Arc::new(scan);
+			let limited = if limit.is_some() || start.is_some() {
+				let limit_expr = match limit {
+					Some(l) => Some(self.physical_expr(l.0).await?),
+					None => None,
+				};
+				let start_expr = match start {
+					Some(s) => Some(self.physical_expr(s.0).await?),
+					None => None,
+				};
+				Arc::new(Limit::new(scan, limit_expr, start_expr)) as Arc<dyn ExecOperator>
+			} else {
+				scan
+			};
+			let projected = self.plan_projections(fields, omit, limited, false).await?;
+			let timed = match timeout {
+				Expr::Literal(Literal::None) => projected,
+				te => {
+					let tp = self.physical_expr(te).await?;
+					Arc::new(Timeout::new(projected, Some(tp))) as Arc<dyn ExecOperator>
+				}
+			};
+			return if only {
+				Ok(Arc::new(UnwrapExactlyOne::new(timed, true)))
+			} else {
+				Ok(timed)
+			};
+		}
+
 		let is_value_source = all_value_sources(&what);
 		// Prefer literal tables over parameter-resolved tables so that
 		// `FROM $t, article` binds MATCHES context to `article`, not `$t`.
@@ -1071,6 +1291,13 @@ impl<'ctx> Planner<'ctx> {
 			&& split.is_none()
 			&& group.is_none();
 
+		let can_soft_push_limit = !can_push_limit
+			&& source_is_single_scan
+			&& brute_force_knn.is_none()
+			&& limit.is_some()
+			&& split.is_some()
+			&& group.is_none();
+
 		let (scan_limit, scan_start) = if can_push_limit {
 			(
 				match limit.as_ref() {
@@ -1082,15 +1309,29 @@ impl<'ctx> Planner<'ctx> {
 					None => None,
 				},
 			)
+		} else if can_soft_push_limit {
+			(
+				match limit.as_ref() {
+					Some(l) => Some(pp.physical_expr(l.0.clone()).await?),
+					None => None,
+				},
+				None,
+			)
 		} else {
 			(None, None)
 		};
+
+		// Keep a clone of the scan predicate so we can reuse it as a
+		// precompiled predicate for the pipeline Filter when the source
+		// does not consume it (FilterAction::UseOriginal). This avoids
+		// compiling the same AST expression into a PhysicalExpr twice.
+		let scan_predicate_for_reuse = scan_predicate.clone();
 
 		// Source resolution with plan-time index analysis.
 		// The result tracks whether the predicate and limit/start were
 		// consumed by the source operator, so we can avoid duplicating
 		// them in the outer pipeline.
-		let planned = pp
+		let mut planned = pp
 			.plan_sources(
 				what,
 				version,
@@ -1104,14 +1345,29 @@ impl<'ctx> Planner<'ctx> {
 			)
 			.await?;
 
+		if can_soft_push_limit {
+			planned.limit_pushed = false;
+		}
+
 		// Resolve the pipeline condition from the filter action.
 		// - FullyConsumed: the source handles the entire predicate, no Filter.
 		// - Residual: only the residual part needs a Filter.
 		// - UseOriginal: the source did not analyze the predicate, use as-is.
-		let pipeline_cond = match planned.filter_action {
-			FilterAction::FullyConsumed => None,
-			FilterAction::Residual(residual) => Some(residual),
-			FilterAction::UseOriginal => cond_for_filter,
+		//
+		// When UseOriginal and we already compiled a scan_predicate from the
+		// same expression, reuse it as precompiled_predicate to avoid paying
+		// the PhysicalExpr compilation cost a second time.
+		let (pipeline_cond, precompiled_predicate) = match planned.filter_action {
+			FilterAction::FullyConsumed => (None, None),
+			FilterAction::Residual(residual) => (Some(residual), None),
+			FilterAction::UseOriginal => {
+				if scan_predicate_for_reuse.is_some() {
+					// Reuse the already-compiled predicate
+					(None, scan_predicate_for_reuse)
+				} else {
+					(cond_for_filter, None)
+				}
+			}
 		};
 
 		// KNN wrapping
@@ -1167,6 +1423,11 @@ impl<'ctx> Planner<'ctx> {
 			is_value_source,
 			tempfiles,
 			filter_pushed: false,
+			precompiled_predicate: if had_bruteforce_knn {
+				None
+			} else {
+				precompiled_predicate
+			},
 		};
 
 		let projected = pp.plan_pipeline(source, Some(fields), config).await?;
@@ -1279,23 +1540,32 @@ impl<'ctx> Planner<'ctx> {
 				FilterAction::UseOriginal
 			};
 			let record_id_expr = self.physical_expr(rid_expr).await?;
+			// Resolve table context at plan time for the point lookup
+			let mut scan =
+				RecordIdScan::new(record_id_expr, version, needed_fields, scan_predicate);
+			if let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db)
+				&& let Some(tc) =
+					Self::try_resolve_table_ctx(txn, self.ctx, ns, db, table_name).await
+			{
+				scan = scan.with_resolved(tc);
+			}
 			return Ok(PlannedSource {
-				operator: Arc::new(RecordIdScan::new(
-					record_id_expr,
-					version,
-					needed_fields,
-					scan_predicate,
-				)) as Arc<dyn ExecOperator>,
+				operator: Arc::new(scan) as Arc<dyn ExecOperator>,
 				filter_action,
 				limit_pushed: false,
 			});
 		}
 
 		// When we have a txn and the source is a table, resolve the
-		// access path at plan time and create the concrete operator.
+		// access path and table context at plan time.
 		if let Expr::Table(ref table_name) = expr
 			&& let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db)
 		{
+			// Resolve table context (table def + field state) at plan time.
+			// This eliminates runtime KV lookups in the operator's execute().
+			let table_ctx: Option<ResolvedTableContext> =
+				Self::try_resolve_table_ctx(txn, self.ctx, ns, db, table_name).await;
+
 			let resolved =
 				self.resolve_access_path(txn, ns, db, table_name, cond, order, with).await;
 			if let Ok(Some((access_path, direction))) = resolved {
@@ -1330,16 +1600,20 @@ impl<'ctx> Planner<'ctx> {
 						} else {
 							(None, None, false)
 						};
+						let mut scan = IndexScan::new(
+							index_ref,
+							access,
+							direction,
+							table,
+							idx_limit,
+							idx_start,
+							version.clone(),
+						);
+						if let Some(ref tc) = table_ctx {
+							scan = scan.with_resolved(tc.clone());
+						}
 						return Ok(PlannedSource {
-							operator: Arc::new(IndexScan::new(
-								index_ref,
-								access,
-								direction,
-								table,
-								idx_limit,
-								idx_start,
-								version.clone(),
-							)) as Arc<dyn ExecOperator>,
+							operator: Arc::new(scan) as Arc<dyn ExecOperator>,
 							filter_action,
 							limit_pushed,
 						});
@@ -1349,14 +1623,13 @@ impl<'ctx> Planner<'ctx> {
 						query,
 						operator,
 					} => {
+						let mut scan =
+							FullTextScan::new(index_ref, query, operator, table, version.clone());
+						if let Some(ref tc) = table_ctx {
+							scan = scan.with_resolved(tc.clone());
+						}
 						return Ok(PlannedSource {
-							operator: Arc::new(FullTextScan::new(
-								index_ref,
-								query,
-								operator,
-								table,
-								version.clone(),
-							)) as Arc<dyn ExecOperator>,
+							operator: Arc::new(scan) as Arc<dyn ExecOperator>,
 							filter_action: FilterAction::UseOriginal,
 							limit_pushed: false,
 						});
@@ -1371,17 +1644,21 @@ impl<'ctx> Planner<'ctx> {
 						// (non-KNN predicates). These are pushed into the HNSW search
 						// so that non-matching rows don't consume top-K slots.
 						let residual_cond = cond.and_then(strip_knn_from_condition);
+						let mut scan = KnnScan::new(
+							index_ref,
+							vector,
+							k,
+							ef,
+							table,
+							version.clone(),
+							knn_ctx,
+							residual_cond,
+						);
+						if let Some(ref tc) = table_ctx {
+							scan = scan.with_resolved(tc.clone());
+						}
 						return Ok(PlannedSource {
-							operator: Arc::new(KnnScan::new(
-								index_ref,
-								vector,
-								k,
-								ef,
-								table,
-								version.clone(),
-								knn_ctx,
-								residual_cond,
-							)) as Arc<dyn ExecOperator>,
+							operator: Arc::new(scan) as Arc<dyn ExecOperator>,
 							filter_action: FilterAction::UseOriginal,
 							limit_pushed: false,
 						});
@@ -1402,16 +1679,20 @@ impl<'ctx> Planner<'ctx> {
 						} else {
 							(None, None, false)
 						};
+						let mut scan = TableScan::new(
+							table,
+							direction,
+							version,
+							scan_predicate,
+							tbl_limit,
+							tbl_start,
+							needed_fields,
+						);
+						if let Some(tc) = table_ctx.clone() {
+							scan = scan.with_resolved(tc);
+						}
 						return Ok(PlannedSource {
-							operator: Arc::new(TableScan::new(
-								table,
-								direction,
-								version,
-								scan_predicate,
-								tbl_limit,
-								tbl_start,
-								needed_fields,
-							)) as Arc<dyn ExecOperator>,
+							operator: Arc::new(scan) as Arc<dyn ExecOperator>,
 							filter_action,
 							limit_pushed,
 						});
@@ -1431,26 +1712,38 @@ impl<'ctx> Planner<'ctx> {
 									index_ref,
 									access,
 									direction,
-								} => Arc::new(IndexScan::new(
-									index_ref,
-									access,
-									direction,
-									table.clone(),
-									None,
-									None,
-									version.clone(),
-								)),
+								} => {
+									let mut scan = IndexScan::new(
+										index_ref,
+										access,
+										direction,
+										table.clone(),
+										None,
+										None,
+										version.clone(),
+									);
+									if let Some(ref tc) = table_ctx {
+										scan = scan.with_resolved(tc.clone());
+									}
+									Arc::new(scan)
+								}
 								AccessPath::FullTextSearch {
 									index_ref,
 									query,
 									operator,
-								} => Arc::new(FullTextScan::new(
-									index_ref,
-									query,
-									operator,
-									table.clone(),
-									version.clone(),
-								)),
+								} => {
+									let mut scan = FullTextScan::new(
+										index_ref,
+										query,
+										operator,
+										table.clone(),
+										version.clone(),
+									);
+									if let Some(ref tc) = table_ctx {
+										scan = scan.with_resolved(tc.clone());
+									}
+									Arc::new(scan)
+								}
 								AccessPath::KnnSearch {
 									index_ref,
 									vector,
@@ -1458,7 +1751,7 @@ impl<'ctx> Planner<'ctx> {
 									ef,
 								} => {
 									let residual_cond = cond.and_then(strip_knn_from_condition);
-									Arc::new(KnnScan::new(
+									let mut scan = KnnScan::new(
 										index_ref,
 										vector,
 										k,
@@ -1467,7 +1760,11 @@ impl<'ctx> Planner<'ctx> {
 										version.clone(),
 										knn_ctx.clone(),
 										residual_cond,
-									))
+									);
+									if let Some(ref tc) = table_ctx {
+										scan = scan.with_resolved(tc.clone());
+									}
+									Arc::new(scan)
 								}
 								// TableScan and nested Union should not
 								// appear as sub-paths; fall back safely.
@@ -1487,12 +1784,13 @@ impl<'ctx> Planner<'ctx> {
 						// and computed-field materialization internally
 						// (same pattern as TableScan). The outer
 						// pipeline handles Filter, Sort, and Limit.
+						let mut union_scan =
+							UnionIndexScan::new(table, sub_operators, needed_fields);
+						if let Some(ref tc) = table_ctx {
+							union_scan = union_scan.with_resolved(tc.clone());
+						}
 						return Ok(PlannedSource {
-							operator: Arc::new(UnionIndexScan::new(
-								table,
-								sub_operators,
-								needed_fields,
-							)) as Arc<dyn ExecOperator>,
+							operator: Arc::new(union_scan) as Arc<dyn ExecOperator>,
 							filter_action: FilterAction::UseOriginal,
 							limit_pushed: false,
 						});
@@ -1652,6 +1950,25 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
+	/// Try to resolve a `ResolvedTableContext` for the given table.
+	///
+	/// Returns `None` if namespace/database lookup fails or the table doesn't
+	/// exist. Errors in field state resolution are silently ignored (the
+	/// operator will fall back to runtime resolution).
+	async fn try_resolve_table_ctx(
+		txn: &crate::kvs::Transaction,
+		ctx: &crate::ctx::FrozenContext,
+		ns: &str,
+		db: &str,
+		table_name: &crate::val::TableName,
+	) -> Option<crate::exec::operators::scan::resolved::ResolvedTableContext> {
+		let ns_def = txn.get_ns_by_name(ns).await.ok()??;
+		let db_def = txn.get_db_by_name(ns, db).await.ok()??;
+		resolve_table_context(txn, ctx, ns, db, ns_def.namespace_id, db_def.database_id, table_name)
+			.await
+			.ok()?
+	}
+
 	/// Resolve the optimal access path for a table at plan time.
 	///
 	/// Performs index analysis using the WHERE condition and ORDER BY clause.
@@ -1728,5 +2045,30 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		Ok(Some((path, direction)))
+	}
+}
+
+/// Collect output field names from a SELECT field list.
+///
+/// These names are passed to `ExpressionRegistry::with_reserved_names` so that
+/// synthetic internal names (`_e0`, `_e1`, ...) do not collide with fields the
+/// user explicitly selected.
+fn collect_field_names(fields: &Fields) -> Vec<String> {
+	match fields {
+		Fields::Value(_) => vec![], // SELECT VALUE has no object fields
+		Fields::Select(field_list) => {
+			let mut names = Vec::with_capacity(field_list.len());
+			for field in field_list {
+				if let Field::Single(selector) = field {
+					let name = if let Some(alias) = &selector.alias {
+						idiom_to_field_name(alias)
+					} else {
+						derive_field_name(&selector.expr)
+					};
+					names.push(name);
+				}
+			}
+			names
+		}
 	}
 }

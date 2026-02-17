@@ -20,7 +20,7 @@ use uuid::Uuid as UuidExt;
 
 use super::super::*;
 use crate::catalog::auth::AuthLimit;
-use crate::catalog::record::{Data, Record, RecordType};
+use crate::catalog::record::{Record, RecordType};
 use crate::catalog::schema::base::Base;
 use crate::catalog::{
 	ApiActionDefinition, ApiConfigDefinition, ApiMethod, DatabaseId, IndexId, ModuleDefinition,
@@ -694,77 +694,77 @@ pub fn user_with_durations() -> UserDefinition {
 
 /// Record with None value
 pub fn record_none() -> Record {
-	Record::new(Data::from(Value::None))
+	Record::new(Value::None)
 }
 
 /// Record with Null value
 pub fn record_null() -> Record {
-	Record::new(Data::from(Value::Null))
+	Record::new(Value::Null)
 }
 
 /// Record with boolean data
 pub fn record_bool() -> Record {
-	Record::new(Data::from(Value::Bool(true)))
+	Record::new(Value::Bool(true))
 }
 
 /// Record with int number data
 pub fn record_number_int() -> Record {
-	Record::new(Data::from(Value::Number(Number::Int(42))))
+	Record::new(Value::Number(Number::Int(42)))
 }
 
 /// Record with float number data
 pub fn record_number_float() -> Record {
-	Record::new(Data::from(Value::Number(Number::Float(42.0))))
+	Record::new(Value::Number(Number::Float(42.0)))
 }
 
 /// Record with decimal number data
 pub fn record_number_decimal() -> Record {
-	Record::new(Data::from(Value::Number(Number::Decimal(Decimal::from(42)))))
+	Record::new(Value::Number(Number::Decimal(Decimal::from(42))))
 }
 
 /// Record with string data
 pub fn record_string() -> Record {
-	Record::new(Data::from(Value::String("test data".to_string())))
+	Record::new(Value::String("test data".to_string()))
 }
 
 /// Record with bytes data
 pub fn record_bytes() -> Record {
-	Record::new(Data::from(Value::Bytes(Bytes::from(vec![0x01, 0x02, 0x03, 0x04]))))
+	Record::new(Value::Bytes(Bytes::from(vec![0x01, 0x02, 0x03, 0x04])))
 }
 
 /// Record with duration data
 pub fn record_duration() -> Record {
-	Record::new(Data::from(Value::Duration(ValDuration::from_secs(3600))))
+	Record::new(Value::Duration(ValDuration::from_secs(3600)))
 }
 
 /// Record with datetime data
 pub fn record_datetime() -> Record {
-	Record::new(Data::from(Value::Datetime(Datetime::MIN_UTC)))
+	Record::new(Value::Datetime(Datetime::MIN_UTC))
 }
 
 /// Record with UUID data
 pub fn record_uuid() -> Record {
-	Record::new(Data::from(Value::Uuid(Uuid(
+	Record::new(Value::Uuid(Uuid(
 		uuid::Uuid::from_str("123e4567-e89b-12d3-a456-426614174000").unwrap(),
-	))))
+	)))
 }
 
 /// Record with geometry data (point)
 pub fn record_geometry_point() -> Record {
-	Record::new(Data::from(Value::Geometry(Geometry::Point(Point::new(1.0, 2.0)))))
+	Record::new(Value::Geometry(Geometry::Point(Point::new(1.0, 2.0))))
 }
 
 /// Record with geometry data (line)
 pub fn record_geometry_line() -> Record {
-	Record::new(Data::from(Value::Geometry(Geometry::Line(LineString::new(vec![
+	Record::new(Value::Geometry(Geometry::Line(LineString::new(vec![
 		coord! { x: 1.0, y: 2.0 },
 		coord! { x: 3.0, y: 4.0 },
-	])))))
+	]))))
 }
 
 /// Record with geometry data (polygon)
 pub fn record_geometry_polygon() -> Record {
-	Record::new(Data::from(Value::Geometry(Geometry::Polygon(Polygon::new(
+	Record::new(Value::Geometry(Geometry::Polygon(Polygon::new(
 		LineString::new(vec![
 			coord! { x: 1.0, y: 2.0 },
 			coord! { x: 3.0, y: 4.0 },
@@ -775,28 +775,28 @@ pub fn record_geometry_polygon() -> Record {
 			coord! { x: 9.0, y: 10.0 },
 			coord! { x: 11.0, y: 12.0 },
 		])],
-	)))))
+	))))
 }
 
 /// Record with geometry data (multi point)
 pub fn record_geometry_multi_point() -> Record {
-	Record::new(Data::from(Value::Geometry(Geometry::MultiPoint(MultiPoint::new(vec![
+	Record::new(Value::Geometry(Geometry::MultiPoint(MultiPoint::new(vec![
 		Point::new(1.0, 2.0),
 		Point::new(3.0, 4.0),
-	])))))
+	]))))
 }
 
 /// Record with geometry data (multi line)
 pub fn record_geometry_multi_line() -> Record {
-	Record::new(Data::from(Value::Geometry(Geometry::MultiLine(MultiLineString::new(vec![
+	Record::new(Value::Geometry(Geometry::MultiLine(MultiLineString::new(vec![
 		LineString::new(vec![coord! { x: 1.0, y: 2.0 }, coord! { x: 3.0, y: 4.0 }]),
 		LineString::new(vec![coord! { x: 5.0, y: 6.0 }, coord! { x: 7.0, y: 8.0 }]),
-	])))))
+	]))))
 }
 
 /// Record with geometry data (multi polygon)
 pub fn record_geometry_multi_polygon() -> Record {
-	Record::new(Data::from(Value::Geometry(Geometry::MultiPolygon(MultiPolygon::new(vec![
+	Record::new(Value::Geometry(Geometry::MultiPolygon(MultiPolygon::new(vec![
 		Polygon::new(
 			LineString::new(vec![
 				coord! { x: 1.0, y: 2.0 },
@@ -813,12 +813,12 @@ pub fn record_geometry_multi_polygon() -> Record {
 			]),
 			vec![],
 		),
-	])))))
+	]))))
 }
 
 /// Record with geometry data (collection)
 pub fn record_geometry_collection() -> Record {
-	Record::new(Data::from(Value::Geometry(Geometry::Collection(vec![
+	Record::new(Value::Geometry(Geometry::Collection(vec![
 		Geometry::Point(Point::new(1.0, 2.0)),
 		Geometry::Line(LineString::new(vec![coord! { x: 3.0, y: 4.0 }, coord! { x: 5.0, y: 6.0 }])),
 		Geometry::Polygon(Polygon::new(
@@ -829,49 +829,49 @@ pub fn record_geometry_collection() -> Record {
 			]),
 			vec![],
 		)),
-	]))))
+	])))
 }
 
 /// Record with table data
 pub fn record_table() -> Record {
-	Record::new(Data::from(Value::Table(TableName::from("users"))))
+	Record::new(Value::Table(TableName::from("users")))
 }
 
 /// Record with record ID data
 pub fn record_recordid() -> Record {
-	Record::new(Data::from(Value::RecordId(RecordId::new(TableName::from("users"), 123))))
+	Record::new(Value::RecordId(RecordId::new(TableName::from("users"), 123)))
 }
 
 /// Record with file data
 pub fn record_file() -> Record {
-	Record::new(Data::from(Value::File(File::new("bucket".to_string(), "key".to_string()))))
+	Record::new(Value::File(File::new("bucket".to_string(), "key".to_string())))
 }
 
 /// Record with range data
 pub fn record_range_unbounded() -> Record {
-	Record::new(Data::from(Value::Range(Box::new(Range::unbounded()))))
+	Record::new(Value::Range(Box::new(Range::unbounded())))
 }
 
 /// Record with range data
 pub fn record_range_bounded() -> Record {
-	Record::new(Data::from(Value::Range(Box::new(Range {
+	Record::new(Value::Range(Box::new(Range {
 		start: Bound::Included(Value::Number(Number::Int(123))),
 		end: Bound::Excluded(Value::Number(Number::Int(456))),
-	}))))
+	})))
 }
 
 /// Record with regex data
 pub fn record_regex() -> Record {
-	Record::new(Data::from(Value::Regex(Regex::from_str("^test.*").unwrap())))
+	Record::new(Value::Regex(Regex::from_str("^test.*").unwrap()))
 }
 
 /// Record with array data
 pub fn record_array() -> Record {
-	Record::new(Data::from(Value::Array(Array::from(vec![
+	Record::new(Value::Array(Array::from(vec![
 		Value::String("item1".to_string()),
 		Value::Number(Number::Int(123)),
 		Value::Bool(true),
-	]))))
+	])))
 }
 
 /// Record with object data
@@ -880,21 +880,21 @@ pub fn record_object() -> Record {
 	obj.insert("name".to_string(), Value::String("Alice".to_string()));
 	obj.insert("age".to_string(), Value::Number(Number::Int(30)));
 	obj.insert("active".to_string(), Value::Bool(true));
-	Record::new(Data::from(Value::Object(obj)))
+	Record::new(Value::Object(obj))
 }
 
 /// Record with set data
 pub fn record_set() -> Record {
-	Record::new(Data::from(Value::Set(Set::from(vec![
+	Record::new(Value::Set(Set::from(vec![
 		Value::String("tag1".to_string()),
 		Value::String("tag2".to_string()),
 		Value::String("tag3".to_string()),
-	]))))
+	])))
 }
 
 /// Record with metadata (Edge type)
 pub fn record_with_metadata() -> Record {
-	let mut record = Record::new(Data::from(Value::Object(Object::default())));
+	let mut record = Record::new(Value::Object(Object::default()));
 	record.set_record_type(RecordType::Edge);
 	record
 }

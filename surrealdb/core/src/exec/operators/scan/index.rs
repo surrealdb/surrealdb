@@ -6,16 +6,16 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use futures::StreamExt;
 use surrealdb_types::ToSql;
 
-use super::common::{BATCH_SIZE, fetch_and_filter_records_batch};
+use super::common::fetch_and_filter_records_batch;
 use super::pipeline::eval_limit_expr;
-use crate::catalog::providers::TableProvider;
+use super::resolved::ResolvedTableContext;
 use crate::err::Error;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::index::iterator::{
-	IndexEqualIterator, IndexRangeIterator, UniqueEqualIterator, UniqueRangeIterator,
+	CompoundEqualIterator, CompoundRangeIterator, IndexEqualIterator, IndexRangeIterator,
+	UniqueEqualIterator, UniqueRangeIterator,
 };
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
@@ -28,7 +28,7 @@ use crate::exec::{
 use crate::expr::ControlFlow;
 use crate::iam::Action;
 use crate::idx::planner::ScanDirection;
-use crate::val::{RecordId, Value};
+use crate::kvs::CachePolicy;
 
 /// Index scan operator for B-tree indexes (Idx and Uniq).
 ///
@@ -54,6 +54,9 @@ pub struct IndexScan {
 	pub(crate) start: Option<Arc<dyn PhysicalExpr>>,
 	/// Optional VERSION timestamp for time-travel queries.
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
+	/// Plan-time resolved table context. When present, `execute()` skips
+	/// runtime table def + permission lookup.
+	pub(crate) resolved: Option<ResolvedTableContext>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -76,8 +79,15 @@ impl IndexScan {
 			limit,
 			start,
 			version,
+			resolved: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// Set the plan-time resolved table context.
+	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
+		self.resolved = Some(resolved);
+		self
 	}
 }
 
@@ -95,35 +105,31 @@ impl ExecOperator for IndexScan {
 				from,
 				to,
 			} => {
-				let from_str = from
-					.as_ref()
-					.map(|r| {
-						format!(
-							"{}{}",
-							if r.inclusive {
-								">="
-							} else {
-								">"
-							},
-							r.value.to_sql()
-						)
-					})
-					.unwrap_or_default();
-				let to_str = to
-					.as_ref()
-					.map(|r| {
-						format!(
-							"{}{}",
-							if r.inclusive {
-								"<="
-							} else {
-								"<"
-							},
-							r.value.to_sql()
-						)
-					})
-					.unwrap_or_default();
-				format!("{} {}", from_str, to_str).trim().to_string()
+				let from_str = match from {
+					Some(r) => format!(
+						"{}{}",
+						if r.inclusive {
+							">="
+						} else {
+							">"
+						},
+						r.value.to_sql()
+					),
+					None => String::new(),
+				};
+				let to_str = match to {
+					Some(r) => format!(
+						"{}{}",
+						if r.inclusive {
+							"<="
+						} else {
+							"<"
+						},
+						r.value.to_sql()
+					),
+					None => String::new(),
+				};
+				format!("{from_str} {to_str}").trim().to_string()
 			}
 			BTreeAccess::Compound {
 				prefix,
@@ -224,6 +230,7 @@ impl ExecOperator for IndexScan {
 		let limit_expr = self.limit.clone();
 		let start_expr = self.start.clone();
 		let version_expr = self.version.clone();
+		let resolved = self.resolved.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -263,10 +270,12 @@ impl ExecOperator for IndexScan {
 				return;
 			}
 
-			// Resolve table permissions
-			let select_permission = if check_perms {
-				let table_def = txn
-					.get_tb_by_name(&ns.name, &db.name, &table_name)
+			// Resolve table permissions: plan-time fast path or runtime fallback
+			let select_permission = if let Some(ref res) = resolved {
+				res.select_permission(check_perms)
+			} else if check_perms {
+				let table_def = db_ctx
+					.get_table_def(&table_name)
 					.await
 					.context("Failed to get table")?;
 
@@ -308,6 +317,11 @@ impl ExecOperator for IndexScan {
 			match (&access, is_unique) {
 				// Unique equality - at most one record
 				(BTreeAccess::Equality(value), true) => {
+					if ctx.cancellation().is_cancelled() {
+						Err(ControlFlow::Err(anyhow::anyhow!(
+							crate::err::Error::QueryCancelled
+						)))?;
+					}
 					let mut iter = UniqueEqualIterator::new(ns_id, db_id, ix, value)
 						.context("Failed to create iterator")?;
 
@@ -316,6 +330,7 @@ impl ExecOperator for IndexScan {
 
 					let mut values = fetch_and_filter_records_batch(
 						&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+						CachePolicy::ReadWrite,
 					).await?;
 
 					pipeline.process_batch(&mut values, &ctx).await?;
@@ -331,6 +346,11 @@ impl ExecOperator for IndexScan {
 						.context("Failed to create iterator")?;
 
 					loop {
+						if ctx.cancellation().is_cancelled() {
+							Err(ControlFlow::Err(anyhow::anyhow!(
+								crate::err::Error::QueryCancelled
+							)))?;
+						}
 						let rids = iter.next_batch(&txn).await
 							.context("Failed to iterate index")?;
 						if rids.is_empty() {
@@ -339,6 +359,7 @@ impl ExecOperator for IndexScan {
 
 						let mut values = fetch_and_filter_records_batch(
 							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+							CachePolicy::ReadOnly,
 						).await?;
 
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
@@ -363,12 +384,18 @@ impl ExecOperator for IndexScan {
 					let mut iter = UniqueRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref())
 						.context("Failed to create iterator")?;
 					loop {
+						if ctx.cancellation().is_cancelled() {
+							Err(ControlFlow::Err(anyhow::anyhow!(
+								crate::err::Error::QueryCancelled
+							)))?;
+						}
 						let rids = iter.next_batch(&txn).await
 							.context("Failed to iterate index")?;
 						if rids.is_empty() { break; }
 
 						let mut values = fetch_and_filter_records_batch(
 							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+							CachePolicy::ReadOnly,
 						).await?;
 
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
@@ -386,12 +413,18 @@ impl ExecOperator for IndexScan {
 					let mut iter = IndexRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref())
 						.context("Failed to create iterator")?;
 					loop {
+						if ctx.cancellation().is_cancelled() {
+							Err(ControlFlow::Err(anyhow::anyhow!(
+								crate::err::Error::QueryCancelled
+							)))?;
+						}
 						let rids = iter.next_batch(&txn).await
 							.context("Failed to iterate index")?;
 						if rids.is_empty() { break; }
 
 						let mut values = fetch_and_filter_records_batch(
 							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+							CachePolicy::ReadOnly,
 						).await?;
 
 						let cont = pipeline.process_batch(&mut values, &ctx).await?;
@@ -405,66 +438,131 @@ impl ExecOperator for IndexScan {
 					}
 				}
 
-				// Compound index access (streaming)
-				(BTreeAccess::Compound { prefix, range }, _) => {
-					let (beg, end) = compute_compound_key_range(
-						ns_id, db_id, ix, prefix, range.as_ref(),
-					)?;
+				// Compound index access — equality prefix only (no range)
+				(BTreeAccess::Compound { prefix, range: None }, _) => {
+					let mut iter = CompoundEqualIterator::new(ns_id, db_id, ix, prefix, None)
+						.context("Failed to create compound iterator")?;
 
-					let kv_stream = txn.stream_keys_vals(
-						beg..end,
-						version,
-						None,  // no limit
-						0,     // no skip
-						crate::idx::planner::ScanDirection::Forward,
-						true,  // enable prefetching for compound scans
-					);
-					futures::pin_mut!(kv_stream);
+					// Compute the maximum number of index entries we need.
+					// When a LIMIT + START is pushed down AND permissions
+					// won't filter rows, we can cap the scan at limit+start
+					// index entries. With conditional permissions, rows may
+					// be denied after fetch, so we must not cap — let the
+					// pipeline's limit/start tracking terminate the loop.
+					let can_cap = !matches!(select_permission, PhysicalPermission::Conditional(_));
+					let mut remaining: u32 = match (limit_val, can_cap) {
+						(Some(l), true) => l.saturating_add(start_val).min(u32::MAX as usize) as u32,
+						_ => u32::MAX,
+					};
 
-					let mut rid_batch: Vec<RecordId> = Vec::with_capacity(BATCH_SIZE);
-					let mut done = false;
+					// Fetch the first batch of record IDs sequentially.
+					let mut rids = iter.next_batch(&txn, remaining).await
+						.context("Failed to iterate compound index")?;
 
-					while let Some(kv_batch_result) = kv_stream.next().await {
-						if done { break; }
-						let kv_batch = kv_batch_result
-							.context("Failed to stream compound index keys")?;
-
-						for (_, val) in kv_batch {
-							let rid: RecordId = revision::from_slice(&val)
-								.context("Failed to decode record id")?;
-
-							rid_batch.push(rid);
-
-							if rid_batch.len() >= BATCH_SIZE {
-								let mut values = fetch_and_filter_records_batch(
-									&ctx, &txn, ns_id, db_id, &rid_batch, &select_permission, check_perms, version,
-								).await?;
-
-								let cont = pipeline.process_batch(&mut values, &ctx).await?;
-
-								if !values.is_empty() {
-									yield ValueBatch { values };
-								}
-								rid_batch.clear();
-								if !cont {
-									done = true;
-									break;
-								}
-							}
+					while !rids.is_empty() {
+						if ctx.cancellation().is_cancelled() {
+							Err(ControlFlow::Err(anyhow::anyhow!(
+								crate::err::Error::QueryCancelled
+							)))?;
 						}
-					}
+						remaining = remaining.saturating_sub(rids.len() as u32);
 
-					// Yield remaining batch
-					if !done && !rid_batch.is_empty() {
-						let mut values = fetch_and_filter_records_batch(
-							&ctx, &txn, ns_id, db_id, &rid_batch, &select_permission, check_perms, version,
-						).await?;
+						// Overlap: fetch records for the current batch while
+						// scanning the next batch of index entries concurrently.
+						// This halves serial latency on TiKV.
+						let (values_result, next_rids_result) = if remaining > 0 {
+							let fetch_fut = fetch_and_filter_records_batch(
+								&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+								CachePolicy::ReadOnly,
+							);
+							let scan_fut = iter.next_batch(&txn, remaining);
+							let (v, n) = futures::join!(fetch_fut, scan_fut);
+							(v, Some(n))
+						} else {
+							// No more entries needed; skip the prefetch.
+							let v = fetch_and_filter_records_batch(
+								&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+								CachePolicy::ReadOnly,
+							).await;
+							(v, None)
+						};
 
-						pipeline.process_batch(&mut values, &ctx).await?;
+						let mut values = values_result?;
+						let cont = pipeline.process_batch(&mut values, &ctx).await?;
 
 						if !values.is_empty() {
 							yield ValueBatch { values };
 						}
+						if !cont || remaining == 0 {
+							break;
+						}
+
+						rids = match next_rids_result {
+							Some(r) => r.context("Failed to iterate compound index")?,
+							// Iterator exhausted before remaining reached 0 — stop cleanly.
+							None => break,
+						};
+					}
+				}
+
+				// Compound index access — equality prefix with range on next column
+				(BTreeAccess::Compound { prefix, range: Some(range) }, _) => {
+					let mut iter = CompoundRangeIterator::new(ns_id, db_id, ix, prefix, range)
+						.context("Failed to create compound range iterator")?;
+
+					// Same cap logic as the equality-only compound branch:
+					// only cap when permissions won't filter rows post-fetch.
+					let can_cap = !matches!(select_permission, PhysicalPermission::Conditional(_));
+					let mut remaining: u32 = match (limit_val, can_cap) {
+						(Some(l), true) => l.saturating_add(start_val).min(u32::MAX as usize) as u32,
+						_ => u32::MAX,
+					};
+
+					// Fetch the first batch of record IDs sequentially.
+					let mut rids = iter.next_batch(&txn, remaining).await
+						.context("Failed to iterate compound index")?;
+
+					while !rids.is_empty() {
+						if ctx.cancellation().is_cancelled() {
+							Err(ControlFlow::Err(anyhow::anyhow!(
+								crate::err::Error::QueryCancelled
+							)))?;
+						}
+						remaining = remaining.saturating_sub(rids.len() as u32);
+
+						// Overlap: fetch records for the current batch while
+						// scanning the next batch of index entries concurrently.
+						let (values_result, next_rids_result) = if remaining > 0 {
+							let fetch_fut = fetch_and_filter_records_batch(
+								&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+								CachePolicy::ReadOnly,
+							);
+							let scan_fut = iter.next_batch(&txn, remaining);
+							let (v, n) = futures::join!(fetch_fut, scan_fut);
+							(v, Some(n))
+						} else {
+							let v = fetch_and_filter_records_batch(
+								&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+								CachePolicy::ReadOnly,
+							).await;
+							(v, None)
+						};
+
+						let mut values = values_result?;
+						let cont = pipeline.process_batch(&mut values, &ctx).await?;
+
+						if !values.is_empty() {
+							yield ValueBatch { values };
+						}
+						if !cont || remaining == 0 {
+							break;
+						}
+
+						rids = match next_rids_result {
+							Some(r) => r.context("Failed to iterate compound index")?,
+							// Iterator exhausted before remaining reached 0 — stop cleanly.
+							None => break,
+						};
 					}
 				}
 
@@ -478,171 +576,5 @@ impl ExecOperator for IndexScan {
 		};
 
 		Ok(monitor_stream(Box::pin(stream), "IndexScan", &self.metrics))
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
-
-/// Compute the KV key range `(beg, end)` for a compound index scan.
-///
-/// Extracts the verbose key-construction logic from the stream body so
-/// the match arms stay readable.
-fn compute_compound_key_range(
-	ns_id: crate::catalog::NamespaceId,
-	db_id: crate::catalog::DatabaseId,
-	ix: &crate::catalog::IndexDefinition,
-	prefix: &[Value],
-	range: Option<&(crate::expr::BinaryOperator, Value)>,
-) -> Result<(Vec<u8>, Vec<u8>), ControlFlow> {
-	use crate::key::index::Index;
-	use crate::val::Array;
-
-	/// Shorthand for the repeated error mapping.
-	fn key_err(r: Result<Vec<u8>, impl Into<anyhow::Error>>) -> Result<Vec<u8>, ControlFlow> {
-		r.context("Failed to create index key")
-	}
-
-	let prefix_array = Array::from(prefix.to_vec());
-
-	if let Some((op, val)) = range {
-		let mut key_values: Vec<Value> = prefix.to_vec();
-		key_values.push(val.clone());
-		let key_array = Array::from(key_values);
-
-		use crate::expr::BinaryOperator::*;
-		match op {
-			Equal | ExactEqual => {
-				let beg = key_err(Index::prefix_ids_composite_beg(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&key_array,
-				))?;
-				let end = key_err(Index::prefix_ids_composite_end(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&key_array,
-				))?;
-				Ok((beg, end))
-			}
-			MoreThan => {
-				// Exclusive lower bound: start after all entries matching key_array
-				let beg = key_err(Index::prefix_ids_end(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&key_array,
-				))?;
-				// Upper bound: end of the composite prefix range
-				let end = key_err(Index::prefix_ids_composite_end(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&prefix_array,
-				))?;
-				Ok((beg, end))
-			}
-			MoreThanEqual => {
-				// Inclusive lower bound: start at first entry matching key_array
-				let beg = key_err(Index::prefix_ids_beg(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&key_array,
-				))?;
-				// Upper bound: end of the composite prefix range
-				let end = key_err(Index::prefix_ids_composite_end(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&prefix_array,
-				))?;
-				Ok((beg, end))
-			}
-			LessThan => {
-				// Lower bound: start of the composite prefix range
-				let beg = key_err(Index::prefix_ids_composite_beg(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&prefix_array,
-				))?;
-				// Exclusive upper bound: stop before entries matching key_array
-				let end = key_err(Index::prefix_ids_beg(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&key_array,
-				))?;
-				Ok((beg, end))
-			}
-			LessThanEqual => {
-				// Lower bound: start of the composite prefix range
-				let beg = key_err(Index::prefix_ids_composite_beg(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&prefix_array,
-				))?;
-				// Inclusive upper bound: include all entries matching key_array
-				let end = key_err(Index::prefix_ids_end(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&key_array,
-				))?;
-				Ok((beg, end))
-			}
-			_ => {
-				// Other operators - scan full composite prefix range
-				let beg = key_err(Index::prefix_ids_composite_beg(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&prefix_array,
-				))?;
-				let end = key_err(Index::prefix_ids_composite_end(
-					ns_id,
-					db_id,
-					&ix.table_name,
-					ix.index_id,
-					&prefix_array,
-				))?;
-				Ok((beg, end))
-			}
-		}
-	} else {
-		// No range operator - scan the entire prefix using composite
-		// key functions so the scan correctly captures all entries whose
-		// leading columns match the prefix in a multi-column index.
-		let beg = key_err(Index::prefix_ids_composite_beg(
-			ns_id,
-			db_id,
-			&ix.table_name,
-			ix.index_id,
-			&prefix_array,
-		))?;
-		let end = key_err(Index::prefix_ids_composite_end(
-			ns_id,
-			db_id,
-			&ix.table_name,
-			ix.index_id,
-			&prefix_array,
-		))?;
-		Ok((beg, end))
 	}
 }

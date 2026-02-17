@@ -6,19 +6,32 @@ reason = "Test that FETCH clause works with WHERE + LIMIT and that LIMIT is push
 value = "'OK'"
 
 [[test.results]]
-value = '''"Fetch [ctx: Db] [fields: friend]\n    Project [ctx: Db]\n        IndexScan [ctx: Db] [index: idx_city, access: = 'london', direction: Forward, limit: 2]\n"'''
+value = '''"Fetch [ctx: Db] [fields: friend]
+    SelectProject [ctx: Db] [projections: *]
+        IndexScan [ctx: Db] [index: idx_city, access: = 'london', direction: Forward, limit: 2]
+"'''
 
 [[test.results]]
 value = "[{ city: 'london', friend: { city: 'london', friend: person:charlie, id: person:bob }, id: person:alice }, { city: 'london', friend: { city: 'london', friend: person:alice, id: person:charlie }, id: person:bob }]"
 
 [[test.results]]
-value = '''"Fetch [ctx: Db] [fields: friend] {rows: 2}\n    Project [ctx: Db] {rows: 2}\n        IndexScan [ctx: Db] [index: idx_city, access: = 'london', direction: Forward, limit: 2] {rows: 2}\n\nTotal rows: 2"'''
+value = '''"Fetch [ctx: Db] [fields: friend] {rows: 2}
+    SelectProject [ctx: Db] [projections: *] {rows: 2}
+        IndexScan [ctx: Db] [index: idx_city, access: = 'london', direction: Forward, limit: 2] {rows: 2}
+
+Total rows: 2"'''
 
 [[test.results]]
-value = '''"Fetch [ctx: Db] [fields: friend]\n    Project [ctx: Db]\n        TableScan [ctx: Db] [table: person, direction: Forward, predicate: city = 'london', limit: 2]\n"'''
+value = '''"Fetch [ctx: Db] [fields: friend]
+    SelectProject [ctx: Db] [projections: *]
+        TableScan [ctx: Db] [table: person, direction: Forward, predicate: city = 'london', limit: 2]
+"'''
 
 [[test.results]]
-value = ''''Fetch [ctx: Db] [fields: friend]\n    Project [ctx: Db]\n        TableScan [ctx: Db] [table: person, direction: Forward, limit: 3]\n''''
+value = ''''Fetch [ctx: Db] [fields: friend]
+    SelectProject [ctx: Db] [projections: *]
+        TableScan [ctx: Db] [table: person, direction: Forward, limit: 3]
+''''
 */
 
 -- Setup: define index first, then create data so the index is populated
