@@ -26,7 +26,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2024"
 license-file = "LICENSE"
 publish = false
-version = "3.0.0-beta"
+version = "3.0.0"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
@@ -41,11 +41,11 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # SurrealDB crates
-surrealdb = { version = "3.0.0-beta", path = "surrealdb" }
-surrealdb-core = { version = "3.0.0-beta", path = "surrealdb/core", default-features = false }
-surrealdb-server = { version = "3.0.0-beta", path = "surrealdb/server", default-features = false }
-surrealdb-types = { version = "3.0.0-beta", path = "surrealdb/types" }
-surrealdb-types-derive = { version = "3.0.0-beta", path = "surrealdb/types/derive" }
+surrealdb = { version = "3.0.0", path = "surrealdb" }
+surrealdb-core = { version = "3.0.0", path = "surrealdb/core", default-features = false }
+surrealdb-server = { version = "3.0.0", path = "surrealdb/server", default-features = false }
+surrealdb-types = { version = "3.0.0", path = "surrealdb/types" }
+surrealdb-types-derive = { version = "3.0.0", path = "surrealdb/types/derive" }
 # SurrealML crates
 surrealml-core = { version = "0.1", path = "surrealml/core" }
 # Surrealism crates
