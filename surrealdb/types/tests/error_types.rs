@@ -2,7 +2,7 @@ use surrealdb_types::{
 	AlreadyExistsError, AuthError, ConfigurationError, ConnectionError, ConversionError, Error,
 	ErrorKind, Kind, LengthMismatchError, NotAllowedError, NotFoundError, Number, Object,
 	OutOfRangeError, QueryError, SerializationError, SurrealValue, TypeError, ValidationError,
-	Value, object,
+	Value,
 };
 
 #[test]
