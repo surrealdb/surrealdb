@@ -630,7 +630,7 @@ fn test_error_snapshot_not_allowed_auth_invalid_role() {
 	let details = parsed.not_allowed_details().unwrap();
 	assert!(matches!(
 		details,
-		NotAllowedError::Auth(AuthError::InvalidRole { ref name }) if name == "admin"
+		NotAllowedError::Auth(AuthError::InvalidRole { name }) if name == "admin"
 	));
 }
 
@@ -662,7 +662,7 @@ fn test_error_snapshot_not_found_table() {
 	let details = parsed.not_found_details().unwrap();
 	assert!(matches!(
 		details,
-		NotFoundError::Table { ref name } if name == "users"
+		NotFoundError::Table { name } if name == "users"
 	));
 }
 
@@ -745,7 +745,7 @@ fn test_error_snapshot_already_exists_record() {
 	let details = parsed.already_exists_details().unwrap();
 	assert!(matches!(
 		details,
-		AlreadyExistsError::Record { ref id } if id == "users:123"
+		AlreadyExistsError::Record { id } if id == "users:123"
 	));
 }
 
@@ -776,7 +776,7 @@ fn test_error_snapshot_not_allowed_method() {
 	let details = parsed.not_allowed_details().unwrap();
 	assert!(matches!(
 		details,
-		NotAllowedError::Method { ref name } if name == "begin"
+		NotAllowedError::Method { name } if name == "begin"
 	));
 }
 

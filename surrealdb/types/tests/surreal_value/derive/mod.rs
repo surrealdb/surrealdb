@@ -5,6 +5,7 @@ mod enum_tagged_tag_content;
 mod enum_tagged_variant;
 mod enum_unit_value;
 mod enum_untagged;
+mod struct_flatten;
 
 use rstest::rstest;
 use surrealdb_types::{Array, Object, SurrealValue, Uuid, Value, object};
