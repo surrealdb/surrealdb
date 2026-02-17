@@ -41,7 +41,6 @@ impl Document {
 					Some(data) => match data.rid() {
 						Value::None => RecordId::random_for_table(tb.clone()),
 						// Generate a new id from the id field
-						// TODO: Handle null byte
 						id => id.generate(tb.clone(), false)?,
 						// Generate a new random table id
 					},

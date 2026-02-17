@@ -76,7 +76,6 @@ impl Parser<'_> {
 	/// All operators in SurrealQL which are parsed by the functions in this
 	/// module are left associative or have no defined associativity.
 	fn infix_binding_power(&mut self, token: TokenKind) -> Option<BindingPower> {
-		// TODO: Look at ordering of operators.
 		match token {
 			// assigment operators have the lowest binding power.
 			//t!("+=") | t!("-=") | t!("+?=") => Some((2, 1)),
@@ -405,7 +404,6 @@ impl Parser<'_> {
 	) -> ParseResult<Expr> {
 		let token = self.next();
 		let operator = match token.kind {
-			// TODO: change operator name?
 			t!("||") | t!("OR") => BinaryOperator::Or,
 			t!("&&") | t!("AND") => BinaryOperator::And,
 			t!("?:") => BinaryOperator::TenaryCondition,

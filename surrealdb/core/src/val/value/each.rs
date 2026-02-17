@@ -53,8 +53,6 @@ impl Value {
 				}
 				Part::First => {
 					if !v.is_empty() {
-						// NOTE: We previously did not add an index into the resulting path here.
-						// That seemed like an bug but it might not be.
 						accum.push(Part::index_int(0));
 						v[0]._each(rest, accum, build);
 						accum.pop();
@@ -63,8 +61,6 @@ impl Value {
 				Part::Last => {
 					let len = v.len();
 					if len > 0 {
-						// NOTE: We previously did not add an index into the resulting path here.
-						// That seemed like an bug but it might not be.
 						accum.push(Part::index_int(len as i64 - 1));
 						v[len]._each(rest, accum, build);
 						accum.pop();
@@ -73,8 +69,6 @@ impl Value {
 				x => {
 					if let Some(idx) = x.as_old_index() {
 						if let Some(v) = v.get(idx) {
-							// NOTE: We previously did not add an index into the resulting path
-							// here. That seemed like an bug but it might not be.
 							accum.push(x.clone());
 							v._each(rest, accum, build);
 							accum.pop();

@@ -61,7 +61,7 @@ pub enum TableConfig {
 
 // TODO: This should probably be removed
 // This is not a good from implementation,
-// It is not directly create what true and false mean when converted to a table config.
+// It is not direct: What true and false mean when converted to a table config?
 impl From<bool> for TableConfig {
 	fn from(value: bool) -> Self {
 		match value {
