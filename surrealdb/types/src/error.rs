@@ -468,7 +468,7 @@ impl Error {
 
 /// Auth failure reason for [`ErrorKind::NotAllowed`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate")]
+#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum AuthError {
 	/// The token used for authentication has expired.
@@ -513,7 +513,7 @@ impl From<AuthError> for Option<NotAllowedError> {
 
 /// Validation failure reason for [`ErrorKind::Validation`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate")]
+#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum ValidationError {
 	/// Parse error (invalid message or request format).
@@ -544,11 +544,8 @@ pub enum ValidationError {
 }
 
 /// Not-allowed reason for [`ErrorKind::NotAllowed`] errors.
-///
-/// Serialized as a string in `Error.details` so clients can detect the reason without parsing
-/// the message string.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate")]
+#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum NotAllowedError {
 	/// Scripting not allowed.
@@ -573,11 +570,8 @@ pub enum NotAllowedError {
 }
 
 /// Configuration failure reason for [`ErrorKind::Configuration`] errors.
-///
-/// Serialized as a string in `Error.details` so clients can detect the reason without parsing
-/// the message string.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate")]
+#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum ConfigurationError {
 	/// Live query not supported.
@@ -589,11 +583,8 @@ pub enum ConfigurationError {
 }
 
 /// Serialisation failure reason for [`ErrorKind::Serialization`] errors.
-///
-/// Serialized as a string in `Error.details` so clients can detect the reason without parsing
-/// the message string.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate")]
+#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum SerializationError {
 	/// Serialisation error.
@@ -603,11 +594,8 @@ pub enum SerializationError {
 }
 
 /// Not-found reason for [`ErrorKind::NotFound`] errors.
-///
-/// Serialized as a string in `Error.details` (e.g. `"Session"`) so clients can detect
-/// what was not found without parsing the message string.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate")]
+#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum NotFoundError {
 	/// RPC method not found.
@@ -645,11 +633,8 @@ pub enum NotFoundError {
 }
 
 /// Query failure reason for [`ErrorKind::Query`] errors.
-///
-/// Serialized as a string in `Error.details` (e.g. `"Timedout"`) so clients can detect
-/// the reason without parsing the message string.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate")]
+#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum QueryError {
 	/// Query was not executed.
@@ -664,11 +649,8 @@ pub enum QueryError {
 }
 
 /// Already-exists reason for [`ErrorKind::AlreadyExists`] errors.
-///
-/// Serialized as a string in `Error.details` (e.g. `"Session"`) so clients can detect
-/// what already exists without parsing the message string.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate")]
+#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum AlreadyExistsError {
 	/// Session already exists.
@@ -699,12 +681,9 @@ pub enum AlreadyExistsError {
 }
 
 /// Connection failure reason for [`ErrorKind::Connection`] errors.
-///
-/// Serialized as a string in `Error.details` (e.g. `"Uninitialised"`) so clients can detect
-/// the reason without parsing the message string. Used in the SDK for client-side connection
-/// state errors.
+/// Used in the SDK for client-side connection state errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate")]
+#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum ConnectionError {
 	/// Connection was used before being initialised.

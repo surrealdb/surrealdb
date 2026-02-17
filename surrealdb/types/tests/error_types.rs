@@ -1,6 +1,8 @@
 use surrealdb_types::{
-	AuthError, ConversionError, Error, ErrorKind, Kind, LengthMismatchError, NotAllowedError,
-	Number, Object, OutOfRangeError, SurrealValue, TypeError, ValidationError, Value,
+	AlreadyExistsError, AuthError, ConfigurationError, ConnectionError, ConversionError, Error,
+	ErrorKind, Kind, LengthMismatchError, NotAllowedError, NotFoundError, Number, Object,
+	OutOfRangeError, QueryError, SerializationError, SurrealValue, TypeError, ValidationError,
+	Value, object,
 };
 
 #[test]
@@ -389,4 +391,534 @@ fn test_error_deserialize_without_kind_defaults_to_internal() {
 	let err = Error::from_value(value).unwrap();
 	assert_eq!(err.kind(), &ErrorKind::Internal);
 	assert_eq!(err.message(), "Something went wrong");
+}
+
+// -----------------------------------------------------------------------------
+// Detail enum wire format: { kind, details? } pattern
+// -----------------------------------------------------------------------------
+
+#[test]
+fn test_detail_wire_format_unit_variant() {
+	// Unit variants produce { "kind": "VariantName" } with no details field
+	let val = AuthError::TokenExpired.into_value();
+	let Value::Object(obj) = &val else {
+		panic!("Expected object, got {val:?}");
+	};
+	assert_eq!(obj.get("kind"), Some(&Value::String("TokenExpired".into())));
+	assert!(!obj.contains_key("details"), "Unit variant should not have details field");
+
+	// Round-trip
+	let parsed = AuthError::from_value(val).unwrap();
+	assert_eq!(parsed, AuthError::TokenExpired);
+}
+
+#[test]
+fn test_detail_wire_format_struct_variant() {
+	// Struct variants produce { "kind": "VariantName", "details": { fields... } }
+	let val = AuthError::InvalidRole {
+		name: "admin".into(),
+	}
+	.into_value();
+	let Value::Object(obj) = &val else {
+		panic!("Expected object, got {val:?}");
+	};
+	assert_eq!(obj.get("kind"), Some(&Value::String("InvalidRole".into())));
+	let Some(Value::Object(details)) = obj.get("details") else {
+		panic!("Expected details object");
+	};
+	assert_eq!(details.get("name"), Some(&Value::String("admin".into())));
+
+	// Round-trip
+	let parsed = AuthError::from_value(val).unwrap();
+	assert_eq!(
+		parsed,
+		AuthError::InvalidRole {
+			name: "admin".into()
+		}
+	);
+}
+
+#[test]
+fn test_detail_wire_format_newtype_variant() {
+	// Newtype variant (Auth wrapping AuthError) produces nested { kind, details? }
+	let val = NotAllowedError::Auth(AuthError::TokenExpired).into_value();
+	let Value::Object(obj) = &val else {
+		panic!("Expected object, got {val:?}");
+	};
+	assert_eq!(obj.get("kind"), Some(&Value::String("Auth".into())));
+	let Some(Value::Object(inner)) = obj.get("details") else {
+		panic!("Expected details object with inner auth error");
+	};
+	assert_eq!(inner.get("kind"), Some(&Value::String("TokenExpired".into())));
+	assert!(!inner.contains_key("details"), "Inner unit variant should not have details");
+
+	// Round-trip
+	let parsed = NotAllowedError::from_value(val).unwrap();
+	assert_eq!(parsed, NotAllowedError::Auth(AuthError::TokenExpired));
+}
+
+#[test]
+fn test_detail_wire_format_newtype_with_struct_inner() {
+	// Auth wrapping a struct variant
+	let val = NotAllowedError::Auth(AuthError::NotAllowed {
+		actor: "user:john".into(),
+		action: "edit".into(),
+		resource: "table:secrets".into(),
+	})
+	.into_value();
+	let Value::Object(obj) = &val else {
+		panic!("Expected object");
+	};
+	assert_eq!(obj.get("kind"), Some(&Value::String("Auth".into())));
+	let Some(Value::Object(inner)) = obj.get("details") else {
+		panic!("Expected details");
+	};
+	assert_eq!(inner.get("kind"), Some(&Value::String("NotAllowed".into())));
+	let Some(Value::Object(inner_details)) = inner.get("details") else {
+		panic!("Expected inner details");
+	};
+	assert_eq!(inner_details.get("actor"), Some(&Value::String("user:john".into())));
+
+	// Round-trip
+	let parsed = NotAllowedError::from_value(val).unwrap();
+	assert!(matches!(parsed, NotAllowedError::Auth(AuthError::NotAllowed { .. })));
+}
+
+#[test]
+fn test_detail_wire_format_all_flat_enums() {
+	// Verify all flat detail enums produce the { kind, details? } pattern
+
+	// ValidationError unit
+	let val = ValidationError::Parse.into_value();
+	let parsed = ValidationError::from_value(val).unwrap();
+	assert_eq!(parsed, ValidationError::Parse);
+
+	// ValidationError struct
+	let val = ValidationError::InvalidParameter {
+		name: "x".into(),
+	}
+	.into_value();
+	let parsed = ValidationError::from_value(val).unwrap();
+	assert_eq!(
+		parsed,
+		ValidationError::InvalidParameter {
+			name: "x".into()
+		}
+	);
+
+	// ConfigurationError unit
+	let val = ConfigurationError::LiveQueryNotSupported.into_value();
+	let parsed = ConfigurationError::from_value(val).unwrap();
+	assert_eq!(parsed, ConfigurationError::LiveQueryNotSupported);
+
+	// SerializationError unit
+	let val = SerializationError::Deserialization.into_value();
+	let parsed = SerializationError::from_value(val).unwrap();
+	assert_eq!(parsed, SerializationError::Deserialization);
+
+	// NotFoundError struct
+	let val = NotFoundError::Table {
+		name: "users".into(),
+	}
+	.into_value();
+	let Value::Object(obj) = &val else {
+		panic!("Expected object");
+	};
+	assert_eq!(obj.get("kind"), Some(&Value::String("Table".into())));
+	let parsed = NotFoundError::from_value(val).unwrap();
+	assert_eq!(
+		parsed,
+		NotFoundError::Table {
+			name: "users".into()
+		}
+	);
+
+	// NotFoundError unit
+	let val = NotFoundError::Transaction.into_value();
+	let parsed = NotFoundError::from_value(val).unwrap();
+	assert_eq!(parsed, NotFoundError::Transaction);
+
+	// AlreadyExistsError struct
+	let val = AlreadyExistsError::Record {
+		id: "users:123".into(),
+	}
+	.into_value();
+	let parsed = AlreadyExistsError::from_value(val).unwrap();
+	assert_eq!(
+		parsed,
+		AlreadyExistsError::Record {
+			id: "users:123".into()
+		}
+	);
+
+	// ConnectionError unit
+	let val = ConnectionError::Uninitialised.into_value();
+	let parsed = ConnectionError::from_value(val).unwrap();
+	assert_eq!(parsed, ConnectionError::Uninitialised);
+}
+
+#[test]
+fn test_detail_wire_format_full_error_round_trip() {
+	// Full Error with details round-trips through into_value/from_value
+	let err = Error::not_allowed(
+		"Token expired".to_string(),
+		AuthError::TokenExpired,
+	);
+	let val = err.clone().into_value();
+	let parsed = Error::from_value(val).unwrap();
+	assert_eq!(parsed.kind(), &ErrorKind::NotAllowed);
+	assert_eq!(parsed.message(), "Token expired");
+	let details = parsed.not_allowed_details().unwrap();
+	assert!(matches!(details, NotAllowedError::Auth(AuthError::TokenExpired)));
+}
+
+#[test]
+fn test_detail_wire_format_query_timeout() {
+	use std::time::Duration;
+	let val = QueryError::TimedOut {
+		duration: Duration::from_secs(5),
+	}
+	.into_value();
+	let Value::Object(obj) = &val else {
+		panic!("Expected object");
+	};
+	assert_eq!(obj.get("kind"), Some(&Value::String("TimedOut".into())));
+	assert!(obj.contains_key("details"), "Struct variant should have details field");
+
+	let parsed = QueryError::from_value(val).unwrap();
+	assert!(matches!(parsed, QueryError::TimedOut { duration } if duration == Duration::from_secs(5)));
+}
+
+// -----------------------------------------------------------------------------
+// Error serialization snapshots: verify exact wire format and round-trip
+// -----------------------------------------------------------------------------
+
+#[test]
+fn test_error_snapshot_not_allowed_auth_token_expired() {
+	let err = Error::not_allowed("Token expired".to_string(), AuthError::TokenExpired);
+	let val = err.into_value();
+
+	let expected = Value::Object(object! {
+		code: -32002i64,
+		kind: "NotAllowed",
+		message: "Token expired",
+		details: Value::Object(object! {
+			kind: "Auth",
+			details: Value::Object(object! {
+				kind: "TokenExpired"
+			})
+		})
+	});
+	assert_eq!(val, expected);
+
+	// Round-trip back to Error
+	let parsed = Error::from_value(val).unwrap();
+	assert_eq!(parsed.kind(), &ErrorKind::NotAllowed);
+	assert_eq!(parsed.message(), "Token expired");
+	let details = parsed.not_allowed_details().unwrap();
+	assert!(matches!(details, NotAllowedError::Auth(AuthError::TokenExpired)));
+}
+
+#[test]
+fn test_error_snapshot_not_allowed_auth_invalid_role() {
+	let err = Error::not_allowed(
+		"Bad role".to_string(),
+		AuthError::InvalidRole {
+			name: "admin".into(),
+		},
+	);
+	let val = err.into_value();
+
+	let expected = Value::Object(object! {
+		code: -32002i64,
+		kind: "NotAllowed",
+		message: "Bad role",
+		details: Value::Object(object! {
+			kind: "Auth",
+			details: Value::Object(object! {
+				kind: "InvalidRole",
+				details: Value::Object(object! {
+					name: "admin"
+				})
+			})
+		})
+	});
+	assert_eq!(val, expected);
+
+	// Round-trip
+	let parsed = Error::from_value(val).unwrap();
+	let details = parsed.not_allowed_details().unwrap();
+	assert!(matches!(
+		details,
+		NotAllowedError::Auth(AuthError::InvalidRole { name }) if name == "admin"
+	));
+}
+
+#[test]
+fn test_error_snapshot_not_found_table() {
+	let err = Error::not_found(
+		"Table not found".to_string(),
+		NotFoundError::Table {
+			name: "users".into(),
+		},
+	);
+	let val = err.into_value();
+
+	let expected = Value::Object(object! {
+		code: -32000i64,
+		kind: "NotFound",
+		message: "Table not found",
+		details: Value::Object(object! {
+			kind: "Table",
+			details: Value::Object(object! {
+				name: "users"
+			})
+		})
+	});
+	assert_eq!(val, expected);
+
+	// Round-trip
+	let parsed = Error::from_value(val).unwrap();
+	assert_eq!(parsed.kind(), &ErrorKind::NotFound);
+	let details = parsed.not_found_details().unwrap();
+	assert!(matches!(
+		details,
+		NotFoundError::Table { name } if name == "users"
+	));
+}
+
+#[test]
+fn test_error_snapshot_validation_parse() {
+	let err = Error::validation("Parse error".to_string(), ValidationError::Parse);
+	let val = err.into_value();
+
+	let expected = Value::Object(object! {
+		code: -32700i64,
+		kind: "Validation",
+		message: "Parse error",
+		details: Value::Object(object! {
+			kind: "Parse"
+		})
+	});
+	assert_eq!(val, expected);
+
+	// Verify details has NO "details" key inside (unit variant)
+	let Value::Object(ref obj) = val else {
+		panic!();
+	};
+	let Some(Value::Object(inner)) = obj.get("details") else {
+		panic!();
+	};
+	assert!(!inner.contains_key("details"), "Unit variant should not have inner details key");
+
+	// Round-trip
+	let parsed = Error::from_value(val).unwrap();
+	assert_eq!(parsed.validation_details(), Some(ValidationError::Parse));
+}
+
+#[test]
+fn test_error_snapshot_query_timed_out() {
+	use std::time::Duration;
+	let err = Error::query(
+		"Timed out".to_string(),
+		QueryError::TimedOut {
+			duration: Duration::from_secs(5),
+		},
+	);
+	let val = err.into_value();
+
+	let Value::Object(ref obj) = val else {
+		panic!("Expected object");
+	};
+	assert_eq!(obj.get("kind"), Some(&Value::String("Query".into())));
+	assert_eq!(obj.get("message"), Some(&Value::String("Timed out".into())));
+
+	// Verify details structure
+	let Some(Value::Object(details)) = obj.get("details") else {
+		panic!("Expected details");
+	};
+	assert_eq!(details.get("kind"), Some(&Value::String("TimedOut".into())));
+	assert!(details.contains_key("details"), "Struct variant should have details");
+
+	// Round-trip
+	let parsed = Error::from_value(val).unwrap();
+	assert_eq!(parsed.kind(), &ErrorKind::Query);
+	let details = parsed.query_details().unwrap();
+	assert!(matches!(
+		details,
+		QueryError::TimedOut { duration } if duration == Duration::from_secs(5)
+	));
+}
+
+#[test]
+fn test_error_snapshot_already_exists_record() {
+	let err = Error::already_exists(
+		"Record exists".to_string(),
+		AlreadyExistsError::Record {
+			id: "users:123".into(),
+		},
+	);
+	let val = err.into_value();
+
+	let expected = Value::Object(object! {
+		code: -32000i64,
+		kind: "AlreadyExists",
+		message: "Record exists",
+		details: Value::Object(object! {
+			kind: "Record",
+			details: Value::Object(object! {
+				id: "users:123"
+			})
+		})
+	});
+	assert_eq!(val, expected);
+
+	// Round-trip
+	let parsed = Error::from_value(val).unwrap();
+	assert_eq!(parsed.kind(), &ErrorKind::AlreadyExists);
+	let details = parsed.already_exists_details().unwrap();
+	assert!(matches!(
+		details,
+		AlreadyExistsError::Record { id } if id == "users:123"
+	));
+}
+
+#[test]
+fn test_error_snapshot_not_allowed_method() {
+	let err = Error::not_allowed(
+		"Method blocked".to_string(),
+		NotAllowedError::Method {
+			name: "begin".into(),
+		},
+	);
+	let val = err.into_value();
+
+	let expected = Value::Object(object! {
+		code: -32602i64,
+		kind: "NotAllowed",
+		message: "Method blocked",
+		details: Value::Object(object! {
+			kind: "Method",
+			details: Value::Object(object! {
+				name: "begin"
+			})
+		})
+	});
+	assert_eq!(val, expected);
+
+	// Round-trip
+	let parsed = Error::from_value(val).unwrap();
+	let details = parsed.not_allowed_details().unwrap();
+	assert!(matches!(
+		details,
+		NotAllowedError::Method { name } if name == "begin"
+	));
+}
+
+#[test]
+fn test_error_snapshot_with_cause_chain() {
+	let inner = Error::internal("connection lost".to_string());
+	let outer =
+		Error::query("Query failed".to_string(), QueryError::Cancelled).with_cause(inner);
+	let val = outer.into_value();
+
+	let Value::Object(ref obj) = val else {
+		panic!("Expected object");
+	};
+	assert_eq!(obj.get("kind"), Some(&Value::String("Query".into())));
+
+	// Verify cause is present and has correct structure
+	let Some(Value::Object(cause)) = obj.get("cause") else {
+		panic!("Expected cause object");
+	};
+	assert_eq!(cause.get("kind"), Some(&Value::String("Internal".into())));
+	assert_eq!(cause.get("message"), Some(&Value::String("connection lost".into())));
+
+	// Round-trip
+	let parsed = Error::from_value(val).unwrap();
+	assert_eq!(parsed.kind(), &ErrorKind::Query);
+	let cause = parsed.cause().unwrap();
+	assert_eq!(cause.kind(), &ErrorKind::Internal);
+	assert_eq!(cause.message(), "connection lost");
+}
+
+#[test]
+fn test_error_snapshot_internal_no_details() {
+	let err = Error::internal("Unexpected".to_string());
+	let val = err.into_value();
+
+	let Value::Object(ref obj) = val else {
+		panic!("Expected object");
+	};
+	assert_eq!(obj.get("kind"), Some(&Value::String("Internal".into())));
+	assert_eq!(obj.get("message"), Some(&Value::String("Unexpected".into())));
+	// details should be absent (not null, not empty -- just missing)
+	assert!(!obj.contains_key("details"), "No details should be present for internal errors");
+	// cause should be absent
+	assert!(!obj.contains_key("cause"), "No cause should be present");
+
+	// Round-trip
+	let parsed = Error::from_value(val).unwrap();
+	assert_eq!(parsed.kind(), &ErrorKind::Internal);
+	assert_eq!(parsed.message(), "Unexpected");
+	assert!(parsed.details().is_none());
+	assert!(parsed.cause().is_none());
+}
+
+#[test]
+fn test_error_snapshot_thrown_no_cause() {
+	let err = Error::thrown("custom error".to_string());
+	let val = err.into_value();
+
+	let expected = Value::Object(object! {
+		code: -32006i64,
+		kind: "Thrown",
+		message: "custom error"
+	});
+	assert_eq!(val, expected);
+
+	// Verify no details or cause keys
+	let Value::Object(ref obj) = val else {
+		panic!();
+	};
+	assert!(!obj.contains_key("details"));
+	assert!(!obj.contains_key("cause"));
+
+	// Round-trip
+	let parsed = Error::from_value(val).unwrap();
+	assert_eq!(parsed.kind(), &ErrorKind::Thrown);
+	assert_eq!(parsed.message(), "custom error");
+	assert!(parsed.details().is_none());
+	assert!(parsed.cause().is_none());
+}
+
+#[test]
+fn test_error_snapshot_not_allowed_scripting_unit() {
+	let err =
+		Error::not_allowed("Scripting not allowed".to_string(), NotAllowedError::Scripting);
+	let val = err.into_value();
+
+	let expected = Value::Object(object! {
+		code: -32602i64,
+		kind: "NotAllowed",
+		message: "Scripting not allowed",
+		details: Value::Object(object! {
+			kind: "Scripting"
+		})
+	});
+	assert_eq!(val, expected);
+
+	// Verify the Scripting detail is a unit variant (no inner details key)
+	let Value::Object(ref obj) = val else {
+		panic!();
+	};
+	let Some(Value::Object(details)) = obj.get("details") else {
+		panic!();
+	};
+	assert!(!details.contains_key("details"), "Unit variant should not have inner details");
+
+	// Round-trip
+	let parsed = Error::from_value(val).unwrap();
+	let details = parsed.not_allowed_details().unwrap();
+	assert_eq!(details, NotAllowedError::Scripting);
 }

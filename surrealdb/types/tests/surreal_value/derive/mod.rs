@@ -1,4 +1,5 @@
 mod enum_mixed_with_value;
+mod enum_tagged_skip_content;
 mod enum_tagged_tag;
 mod enum_tagged_tag_content;
 mod enum_tagged_variant;
