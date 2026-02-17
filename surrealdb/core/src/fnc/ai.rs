@@ -2,9 +2,38 @@
 use anyhow::Result;
 
 use crate::ctx::FrozenContext;
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::fnc::args::Optional;
 use crate::val::Value;
+
+/// Load the AI config overlay from the database context, if available.
+///
+/// When a database has `DEFINE CONFIG AI ON DATABASE`, the stored credentials
+/// override environment variables. Returns `None` when no config exists or
+/// when the context has no database.
+#[cfg(feature = "ai")]
+async fn ai_config_overlay(
+	ctx: &FrozenContext,
+	opt: &Options,
+) -> Option<crate::ai::config::AiConfigOverlay> {
+	use crate::catalog::providers::DatabaseProvider;
+
+	let (ns, db) = ctx.try_ns_db_ids(opt).await.ok().flatten()?;
+	let txn = ctx.tx();
+	let config = txn.get_db_config(ns, db, "ai").await.ok().flatten()?;
+	let catalog_ai = config.try_as_ai().ok()?;
+	Some(crate::ai::config::AiConfigOverlay {
+		openai_api_key: catalog_ai.openai_api_key.clone(),
+		openai_base_url: catalog_ai.openai_base_url.clone(),
+		google_api_key: catalog_ai.google_api_key.clone(),
+		google_base_url: catalog_ai.google_base_url.clone(),
+		voyage_api_key: catalog_ai.voyage_api_key.clone(),
+		voyage_base_url: catalog_ai.voyage_base_url.clone(),
+		huggingface_api_key: catalog_ai.huggingface_api_key.clone(),
+		huggingface_base_url: catalog_ai.huggingface_base_url.clone(),
+	})
+}
 
 /// Generate an embedding vector for a text input using a provider-prefixed model.
 ///
@@ -17,14 +46,21 @@ use crate::val::Value;
 ///
 /// Returns an `array<float>` containing the embedding vector.
 #[cfg(not(feature = "ai"))]
-pub async fn embed(_: &FrozenContext, (_model_id, _input): (String, String)) -> Result<Value> {
+pub async fn embed(
+	_: (&FrozenContext, &Options),
+	(_model_id, _input): (String, String),
+) -> Result<Value> {
 	anyhow::bail!(Error::AiDisabled)
 }
 
 /// Generate an embedding vector for a text input using a provider-prefixed model.
 #[cfg(feature = "ai")]
-pub async fn embed(_ctx: &FrozenContext, (model_id, input): (String, String)) -> Result<Value> {
-	let embedding = crate::ai::embed::embed(&model_id, &input, None).await?;
+pub async fn embed(
+	(ctx, opt): (&FrozenContext, &Options),
+	(model_id, input): (String, String),
+) -> Result<Value> {
+	let ai_config = ai_config_overlay(ctx, opt).await;
+	let embedding = crate::ai::embed::embed(&model_id, &input, ai_config.as_ref()).await?;
 	let array: Vec<Value> = embedding.into_iter().map(Value::from).collect();
 	Ok(Value::Array(array.into()))
 }
@@ -41,7 +77,7 @@ pub async fn embed(_ctx: &FrozenContext, (model_id, input): (String, String)) ->
 /// Returns a `string` containing the generated text.
 #[cfg(not(feature = "ai"))]
 pub async fn generate(
-	_: &FrozenContext,
+	_: (&FrozenContext, &Options),
 	(_model_id, _prompt, _config): (String, String, Optional<Value>),
 ) -> Result<Value> {
 	anyhow::bail!(Error::AiDisabled)
@@ -50,11 +86,13 @@ pub async fn generate(
 /// Generate text from a prompt using a provider-prefixed model.
 #[cfg(feature = "ai")]
 pub async fn generate(
-	_ctx: &FrozenContext,
+	(ctx, opt): (&FrozenContext, &Options),
 	(model_id, prompt, config): (String, String, Optional<Value>),
 ) -> Result<Value> {
+	let ai_config = ai_config_overlay(ctx, opt).await;
 	let config = parse_generation_config("ai::generate", config.0)?;
-	let text = crate::ai::generate::generate(&model_id, &prompt, &config, None).await?;
+	let text =
+		crate::ai::generate::generate(&model_id, &prompt, &config, ai_config.as_ref()).await?;
 	Ok(Value::String(text))
 }
 
@@ -75,7 +113,7 @@ pub async fn generate(
 /// Returns a `string` containing the assistant's response.
 #[cfg(not(feature = "ai"))]
 pub async fn chat(
-	_: &FrozenContext,
+	_: (&FrozenContext, &Options),
 	(_model_id, _messages, _config): (String, Value, Optional<Value>),
 ) -> Result<Value> {
 	anyhow::bail!(Error::AiDisabled)
@@ -84,12 +122,13 @@ pub async fn chat(
 /// Conduct a multi-turn chat conversation using a provider-prefixed model.
 #[cfg(feature = "ai")]
 pub async fn chat(
-	_ctx: &FrozenContext,
+	(ctx, opt): (&FrozenContext, &Options),
 	(model_id, messages, config): (String, Value, Optional<Value>),
 ) -> Result<Value> {
+	let ai_config = ai_config_overlay(ctx, opt).await;
 	let messages = parse_chat_messages(&messages)?;
 	let config = parse_generation_config("ai::chat", config.0)?;
-	let text = crate::ai::chat::chat(&model_id, &messages, &config, None).await?;
+	let text = crate::ai::chat::chat(&model_id, &messages, &config, ai_config.as_ref()).await?;
 	Ok(Value::String(text))
 }
 

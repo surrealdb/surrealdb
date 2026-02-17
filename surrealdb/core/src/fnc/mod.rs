@@ -574,9 +574,9 @@ pub async fn asynchronous(
 		//
 		"ai::agent::run" => agent::run((ctx, opt)).await,
 		//
-		"ai::chat" => ai::chat(ctx).await,
-		"ai::embed" => ai::embed(ctx).await,
-		"ai::generate" => ai::generate(ctx).await,
+		"ai::chat" => ai::chat((ctx, opt)).await,
+		"ai::embed" => ai::embed((ctx, opt)).await,
+		"ai::generate" => ai::generate((ctx, opt)).await,
 		//
 		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
 		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,

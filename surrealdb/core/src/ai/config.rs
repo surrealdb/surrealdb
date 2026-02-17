@@ -140,3 +140,232 @@ pub fn huggingface_credentials(
 		}
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use std::sync::Mutex;
+
+	use super::*;
+
+	// Env-var tests must run sequentially to avoid data races on the process env.
+	static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+	// ---- OpenAI ----
+
+	#[test]
+	fn openai_no_config_no_env_returns_error() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::remove_var("SURREAL_AI_OPENAI_API_KEY");
+			std::env::remove_var("SURREAL_AI_OPENAI_BASE_URL");
+		}
+		let result = openai_credentials(None);
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(msg.contains("SURREAL_AI_OPENAI_API_KEY"), "unexpected error: {msg}");
+	}
+
+	#[test]
+	fn openai_env_fallback_returns_env_key() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::set_var("SURREAL_AI_OPENAI_API_KEY", "sk-env-test");
+			std::env::remove_var("SURREAL_AI_OPENAI_BASE_URL");
+		}
+		let (key, base) = openai_credentials(None).expect("should succeed with env key");
+		assert_eq!(key, "sk-env-test");
+		assert_eq!(base, OPENAI_DEFAULT_BASE_URL);
+		unsafe {
+			std::env::remove_var("SURREAL_AI_OPENAI_API_KEY");
+		}
+	}
+
+	#[test]
+	fn openai_env_fallback_custom_base_url() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::set_var("SURREAL_AI_OPENAI_API_KEY", "sk-env-test");
+			std::env::set_var("SURREAL_AI_OPENAI_BASE_URL", "https://custom.example.com/v1");
+		}
+		let (key, base) = openai_credentials(None).expect("should succeed");
+		assert_eq!(key, "sk-env-test");
+		assert_eq!(base, "https://custom.example.com/v1");
+		unsafe {
+			std::env::remove_var("SURREAL_AI_OPENAI_API_KEY");
+			std::env::remove_var("SURREAL_AI_OPENAI_BASE_URL");
+		}
+	}
+
+	#[test]
+	fn openai_overlay_takes_priority_over_env() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::set_var("SURREAL_AI_OPENAI_API_KEY", "sk-env-ignored");
+		}
+		let overlay = AiConfigOverlay {
+			openai_api_key: Some("sk-from-config".into()),
+			..Default::default()
+		};
+		let (key, base) = openai_credentials(Some(&overlay)).expect("should succeed");
+		assert_eq!(key, "sk-from-config");
+		assert_eq!(base, OPENAI_DEFAULT_BASE_URL);
+		unsafe {
+			std::env::remove_var("SURREAL_AI_OPENAI_API_KEY");
+		}
+	}
+
+	#[test]
+	fn openai_overlay_with_no_key_returns_config_error() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::remove_var("SURREAL_AI_OPENAI_API_KEY");
+		}
+		let overlay = AiConfigOverlay::default();
+		let result = openai_credentials(Some(&overlay));
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(msg.contains("DEFINE CONFIG AI"), "expected config hint in: {msg}");
+	}
+
+	// ---- Google ----
+
+	#[test]
+	fn google_no_config_no_env_returns_error() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::remove_var("SURREAL_AI_GOOGLE_API_KEY");
+			std::env::remove_var("SURREAL_AI_GOOGLE_BASE_URL");
+		}
+		let result = google_credentials(None);
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(msg.contains("SURREAL_AI_GOOGLE_API_KEY"), "unexpected error: {msg}");
+	}
+
+	#[test]
+	fn google_env_fallback_returns_env_key() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::set_var("SURREAL_AI_GOOGLE_API_KEY", "google-env-key");
+			std::env::remove_var("SURREAL_AI_GOOGLE_BASE_URL");
+		}
+		let (key, base) = google_credentials(None).expect("should succeed with env key");
+		assert_eq!(key, "google-env-key");
+		assert_eq!(base, GOOGLE_DEFAULT_BASE_URL);
+		unsafe {
+			std::env::remove_var("SURREAL_AI_GOOGLE_API_KEY");
+		}
+	}
+
+	#[test]
+	fn google_overlay_takes_priority_over_env() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::set_var("SURREAL_AI_GOOGLE_API_KEY", "google-env-ignored");
+		}
+		let overlay = AiConfigOverlay {
+			google_api_key: Some("google-from-config".into()),
+			..Default::default()
+		};
+		let (key, _) = google_credentials(Some(&overlay)).expect("should succeed");
+		assert_eq!(key, "google-from-config");
+		unsafe {
+			std::env::remove_var("SURREAL_AI_GOOGLE_API_KEY");
+		}
+	}
+
+	// ---- Voyage ----
+
+	#[test]
+	fn voyage_no_config_no_env_returns_error() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::remove_var("SURREAL_AI_VOYAGE_API_KEY");
+			std::env::remove_var("SURREAL_AI_VOYAGE_BASE_URL");
+		}
+		let result = voyage_credentials(None);
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(msg.contains("SURREAL_AI_VOYAGE_API_KEY"), "unexpected error: {msg}");
+	}
+
+	#[test]
+	fn voyage_env_fallback_returns_env_key() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::set_var("SURREAL_AI_VOYAGE_API_KEY", "voyage-env-key");
+			std::env::remove_var("SURREAL_AI_VOYAGE_BASE_URL");
+		}
+		let (key, base) = voyage_credentials(None).expect("should succeed with env key");
+		assert_eq!(key, "voyage-env-key");
+		assert_eq!(base, VOYAGE_DEFAULT_BASE_URL);
+		unsafe {
+			std::env::remove_var("SURREAL_AI_VOYAGE_API_KEY");
+		}
+	}
+
+	#[test]
+	fn voyage_overlay_takes_priority_over_env() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::set_var("SURREAL_AI_VOYAGE_API_KEY", "voyage-env-ignored");
+		}
+		let overlay = AiConfigOverlay {
+			voyage_api_key: Some("voyage-from-config".into()),
+			..Default::default()
+		};
+		let (key, _) = voyage_credentials(Some(&overlay)).expect("should succeed");
+		assert_eq!(key, "voyage-from-config");
+		unsafe {
+			std::env::remove_var("SURREAL_AI_VOYAGE_API_KEY");
+		}
+	}
+
+	// ---- HuggingFace ----
+
+	#[test]
+	fn huggingface_no_config_no_env_returns_empty_key() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::remove_var("SURREAL_AI_HUGGINGFACE_API_KEY");
+			std::env::remove_var("SURREAL_AI_HUGGINGFACE_BASE_URL");
+			std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL");
+		}
+		let (key, base, gen_base) = huggingface_credentials(None).expect("huggingface never fails");
+		assert_eq!(key, "");
+		assert_eq!(base, HUGGINGFACE_DEFAULT_BASE_URL);
+		assert_eq!(gen_base, HUGGINGFACE_DEFAULT_GENERATION_BASE_URL);
+	}
+
+	#[test]
+	fn huggingface_env_fallback_returns_env_key() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::set_var("SURREAL_AI_HUGGINGFACE_API_KEY", "hf-env-key");
+			std::env::remove_var("SURREAL_AI_HUGGINGFACE_BASE_URL");
+			std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL");
+		}
+		let (key, _, _) = huggingface_credentials(None).expect("should succeed");
+		assert_eq!(key, "hf-env-key");
+		unsafe {
+			std::env::remove_var("SURREAL_AI_HUGGINGFACE_API_KEY");
+		}
+	}
+
+	#[test]
+	fn huggingface_overlay_takes_priority_over_env() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::set_var("SURREAL_AI_HUGGINGFACE_API_KEY", "hf-env-ignored");
+		}
+		let overlay = AiConfigOverlay {
+			huggingface_api_key: Some("hf-from-config".into()),
+			..Default::default()
+		};
+		let (key, _, _) = huggingface_credentials(Some(&overlay)).expect("should succeed");
+		assert_eq!(key, "hf-from-config");
+		unsafe {
+			std::env::remove_var("SURREAL_AI_HUGGINGFACE_API_KEY");
+		}
+	}
+}

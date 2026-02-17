@@ -27,10 +27,20 @@ async fn ai_disabled() -> Result<Value> {
 async fn ai_config_overlay_from_ctx(
 	ctx: &EvalContext<'_>,
 ) -> Option<crate::ai::config::AiConfigOverlay> {
-	let db_ctx = ctx.exec_ctx.database().ok()?;
 	let txn = ctx.exec_ctx.txn();
-	let ns = db_ctx.db.namespace_id;
-	let db = db_ctx.db.database_id;
+
+	// Try to get namespace/database IDs, either from the database-level
+	// execution context or (when the planner sets Root context for statements
+	// like RETURN) via the legacy Options stored in the root context.
+	let (ns, db) = if let Ok(db_ctx) = ctx.exec_ctx.database() {
+		(db_ctx.db.namespace_id, db_ctx.db.database_id)
+	} else if let Some(opt) = ctx.exec_ctx.root().options.as_ref() {
+		let root_ctx = ctx.exec_ctx.root();
+		root_ctx.ctx.try_ns_db_ids(opt).await.ok().flatten()?
+	} else {
+		return None;
+	};
+
 	let config = txn.get_db_config(ns, db, "ai").await.ok().flatten()?;
 	let catalog_ai = config.try_as_ai().ok()?;
 	Some(crate::ai::config::AiConfigOverlay {
