@@ -7,7 +7,7 @@ mod types;
 pub mod vis;
 mod visit;
 
-pub use types::{Node, NodeId, NodeList, NodeListId, Spanned};
+pub use types::{Node, NodeId, NodeList, NodeListId, Spanned, UniqueNode};
 
 use crate::mac::ast_type;
 use crate::types::AstSpan;
@@ -27,24 +27,37 @@ library! {
 
 		exprs: Vec<Expr>,
 
-		builtins: Vec<Spanned<Builtin>>,
+		builtin: Vec<Builtin>,
 		floats: Vec<Spanned<f64>>,
 		integer: Vec<Integer>,
-		decimals: Vec<Spanned<Decimal>>,
+		decimal: Vec<Spanned<Decimal>>,
+
+		point: Vec<Point>,
 
 		binary: Vec<BinaryExpr>,
 		postfix: Vec<PostfixExpr>,
 		prefix: Vec<PrefixExpr>,
+		idiom: Vec<IdiomExpr>,
 
-		path: Vec<NodeListId<Ident>>,
+		destructure: Vec<Destructure>,
+		destructures: Vec<NodeList<Destructure>>,
+
+		path: Vec<Path>,
+		path_segment: Vec<PathSegment>,
+		path_segments: Vec<NodeList<PathSegment>>,
+
 		params: Vec<Ident>,
-		idents: Vec<Ident>,
+		ident: Vec<Ident>,
+		idents: Vec<NodeListId<Ident>>,
 		#[set]
 		strings: NodeSet<String>,
 	}
 }
-
 pub type Ast = types::Ast<Library>;
+
+impl UniqueNode for String {}
+impl Node for f64 {}
+impl Node for Decimal {}
 
 ast_type! {
 	pub struct Query {
@@ -179,6 +192,23 @@ pub enum BinaryOperator {
 }
 
 #[derive(Debug)]
+pub enum DestructureOperator {
+	/// { field.* }
+	All,
+	/// { field : EXPR }
+	Expr(NodeId<Expr>),
+	/// { field.{ .. } }
+	Destructure(Option<NodeListId<Destructure>>),
+}
+
+ast_type! {
+	pub struct Destructure {
+		pub field: NodeId<Ident>,
+		pub op: Option<Spanned<DestructureOperator>>,
+	}
+}
+
+#[derive(Debug)]
 pub enum IdiomOperator {
 	/// [*] | .*
 	All,
@@ -194,6 +224,8 @@ pub enum IdiomOperator {
 	Option,
 	/// .@
 	Repeat,
+	/// .{ .. }
+	Destructure(Option<NodeListId<Destructure>>),
 }
 
 #[derive(Debug)]
@@ -277,7 +309,7 @@ ast_type! {
 ast_type! {
 	pub struct PrefixExpr {
 		pub op: PrefixOperator,
-		pub left: NodeId<Expr>,
+		pub right: NodeId<Expr>,
 	}
 }
 
@@ -289,8 +321,11 @@ ast_type! {
 		Builtin(NodeId<Builtin>),
 		Float(NodeId<Spanned<f64>>),
 		Integer(NodeId<Integer>),
+		Decimal(NodeId<Spanned<Decimal>>),
 
-		Path(NodeListId<Ident>),
+		Point(NodeId<Point>),
+
+		Path(NodeId<Path>),
 		Param(NodeId<Param>),
 
 		Binary(NodeId<BinaryExpr>),
@@ -335,5 +370,34 @@ ast_type! {
 		Use(NodeId<UseStatement>),
 		Option(NodeId<OptionStatement>),
 		Expr(NodeId<Expr>),
+	}
+}
+
+ast_type! {
+	pub struct Point{
+		pub x: f64,
+		pub y: f64,
+	}
+}
+
+ast_type! {
+	pub struct Path{
+		pub start: NodeId<Ident>,
+		pub parts: Option<NodeListId<PathSegment>>,
+	}
+}
+
+ast_type! {
+	pub enum PathSegment{
+		Ident(NodeId<Ident>),
+		Version(Spanned<Version>),
+	}
+}
+
+ast_type! {
+	pub struct Version{
+		pub major: u64,
+		pub minor: u64,
+		pub patch: u64,
 	}
 }

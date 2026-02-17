@@ -66,10 +66,15 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 
 		if OFFSET == 0 {
 			if self.read != self.write {
-				return Some(unsafe { self.peek[(self.read & Self::MASK) as usize].assume_init() });
+				return Some(unsafe {
+					self.peek.get_unchecked_mut((self.read & Self::MASK) as usize).assume_init()
+				});
 			} else {
 				let x = self.lex_token()?;
-				self.peek[(self.write & Self::MASK) as usize] = MaybeUninit::new(x);
+				unsafe {
+					*self.peek.get_unchecked_mut((self.write & Self::MASK) as usize) =
+						MaybeUninit::new(x)
+				};
 				self.write = self.write.wrapping_add(1);
 				Some(x)
 			}
@@ -96,7 +101,9 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 	#[inline]
 	pub fn peek_span(&mut self) -> Span {
 		if self.read != self.write {
-			match unsafe { self.peek.get_unchecked(self.read as usize).assume_init_ref() } {
+			match unsafe {
+				self.peek.get_unchecked((self.read & Self::MASK) as usize).assume_init_ref()
+			} {
 				Ok(x) => x.span,
 				Err(e) => e.span(),
 			}
@@ -115,7 +122,8 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 		if self.read == self.write {
 			return self.lex_token();
 		}
-		let res = unsafe { self.peek[(self.read & Self::MASK) as usize].assume_init() };
+		let res =
+			unsafe { self.peek.get_unchecked((self.read & Self::MASK) as usize).assume_init() };
 		self.read = self.read.wrapping_add(1);
 		Some(res)
 	}
