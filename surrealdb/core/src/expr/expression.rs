@@ -291,7 +291,7 @@ impl Expr {
 				// This is not correct as functions like http::get are not 'pure' but this is
 				// replicating previous behavior.
 				//
-				// TODO: Fix this discrepency and weird static/non-static behavior.
+				// FIXME: Fix this discrepency and weird static/non-static behavior.
 				x.arguments.iter().all(|x| x.is_static())
 			}
 			Expr::Param(_)
@@ -555,7 +555,7 @@ impl Expr {
 		doc: Option<&CursorDoc>,
 		expr: &Expr,
 	) -> FlowResult<Value> {
-		// TODO: The structure here is somewhat convoluted, because knn needs to have
+		// NOTE: The structure here is somewhat convoluted, because knn needs to have
 		// access to the expression itself instead of just the op and left/right
 		// expressions we need to pass in the parent expression when encountering a
 		// binary expression and then match again here. Ideally knn should be able to
@@ -828,7 +828,6 @@ impl DeserializeRevisioned for Expr {
 		let expr = crate::syn::parse_with_settings(
 			query.as_bytes(),
 			crate::syn::parser::ParserSettings {
-				define_api_enabled: true,
 				files_enabled: true,
 				surrealism_enabled: true,
 				..Default::default()

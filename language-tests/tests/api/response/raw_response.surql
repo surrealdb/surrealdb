@@ -29,9 +29,6 @@ value = "NONE"
 match = "type::is_bytes($result.body) AND $result.headers['content-type'] == 'application/octet-stream' AND $result.status == 200"
 error = false
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 - Raw bytes response

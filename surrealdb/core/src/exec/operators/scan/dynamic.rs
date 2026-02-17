@@ -8,7 +8,6 @@ use super::pipeline::{
 	build_field_state, determine_scan_direction, eval_limit_expr, kv_scan_stream,
 };
 use super::{FullTextScan, IndexScan, KnnScan};
-use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Permission};
 use crate::err::Error;
 use crate::exec::index::access_path::{AccessPath, select_access_path};
@@ -219,7 +218,6 @@ impl ExecOperator for DynamicScan {
 
 		let stream = async_stream::try_stream! {
 			let db_ctx = ctx.database().context("Scan requires database context")?;
-			let txn = ctx.txn();
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
 
@@ -274,7 +272,7 @@ impl ExecOperator for DynamicScan {
 
 				let results = super::record_id::execute_record_lookup(
 					&rid, version, check_perms, needed_fields.as_ref(), &ctx,
-					predicate.as_ref(), limit_val, start_val,
+					predicate.as_ref(), limit_val, start_val, None,
 				).await?;
 
 				if !results.is_empty() {
@@ -384,28 +382,14 @@ impl ExecOperator for DynamicScan {
 				None => 0,
 			};
 
-			// Evaluate VERSION expression to a timestamp
-			let version: Option<u64> = match &version {
-				Some(expr) => {
-					let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-					let v = expr.evaluate(eval_ctx).await?;
-					Some(
-						v.cast_to::<crate::val::Datetime>()
-							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp()?,
-					)
-				}
-				None => None,
-			};
-
 			// Early exit if limit is 0
 			if limit_val == Some(0) {
 				return;
 			}
 
 			// Check table existence and resolve SELECT permission
-			let table_def = txn
-				.get_tb_by_name(&ns.name, &db.name, &table_name)
+			let table_def = db_ctx
+				.get_table_def(&table_name)
 				.await
 				.context("Failed to get table")?;
 
@@ -437,10 +421,9 @@ impl ExecOperator for DynamicScan {
 			// Pre-compute whether any post-decode processing is needed.
 			// When false, the scan loop can skip filter/process calls entirely
 			// (zero async overhead beyond the KV stream poll).
-			let needs_processing = !matches!(select_permission, PhysicalPermission::Allow)
-				|| !field_state.computed_fields.is_empty()
-				|| (check_perms && !field_state.field_permissions.is_empty())
-				|| predicate.is_some();
+			let needs_processing = ScanPipeline::compute_needs_processing(
+				&select_permission, &field_state, check_perms, predicate.as_ref(),
+			);
 
 			// When no processing is needed, push start to the KV layer as pre_skip
 			// so rows are discarded before deserialization.
@@ -516,7 +499,9 @@ struct TableScanConfig {
 	order: Option<Ordering>,
 	with: Option<With>,
 	direction: ScanDirection,
-	version: Option<u64>,
+	/// VERSION expression for time-travel queries (evaluated inside
+	/// [`resolve_table_scan_stream`] and passed to child operators).
+	version: Option<Arc<dyn PhysicalExpr>>,
 	storage_limit: Option<usize>,
 	/// Number of KV pairs to skip before decoding (fast-path only).
 	pre_skip: usize,
@@ -533,13 +518,28 @@ async fn resolve_table_scan_stream(
 ) -> Result<(ValueBatchStream, usize), ControlFlow> {
 	let txn = ctx.txn();
 
+	// Evaluate VERSION expression once for the fallback KV scan path.
+	// Child operators receive the unevaluated expr and evaluate it themselves.
+	let version_stamp: Option<u64> = match &cfg.version {
+		Some(expr) => {
+			let eval_ctx = EvalContext::from_exec_ctx(ctx);
+			let v = expr.evaluate(eval_ctx).await?;
+			Some(
+				v.cast_to::<crate::val::Datetime>()
+					.map_err(|e| anyhow::anyhow!("{e}"))?
+					.to_version_stamp()?,
+			)
+		}
+		None => None,
+	};
+
 	let access_path = if matches!(&cfg.with, Some(With::NoIndex)) {
 		None
 	} else {
-		let indexes = txn
-			.all_tb_indexes(cfg.ns_id, cfg.db_id, &cfg.table_name)
-			.await
-			.context("Failed to fetch indexes")?;
+		let db_ctx =
+			ctx.database().context("DynamicScan index analysis requires database context")?;
+		let indexes =
+			db_ctx.get_table_indexes(&cfg.table_name).await.context("Failed to fetch indexes")?;
 
 		let analyzer = IndexAnalyzer::new(indexes, cfg.with.as_ref());
 		let candidates = analyzer.analyze(cfg.cond.as_ref(), cfg.order.as_ref());
@@ -568,7 +568,15 @@ async fn resolve_table_scan_stream(
 			access,
 			direction,
 		}) => {
-			let operator = IndexScan::new(index_ref, access, direction, cfg.table_name, None, None);
+			let operator = IndexScan::new(
+				index_ref,
+				access,
+				direction,
+				cfg.table_name,
+				None,
+				None,
+				cfg.version,
+			);
 			let stream = operator.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -579,7 +587,7 @@ async fn resolve_table_scan_stream(
 			query,
 			operator,
 		}) => {
-			let ft_op = FullTextScan::new(index_ref, query, operator, cfg.table_name);
+			let ft_op = FullTextScan::new(index_ref, query, operator, cfg.table_name, cfg.version);
 			let stream = ft_op.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -600,6 +608,7 @@ async fn resolve_table_scan_stream(
 				k,
 				ef,
 				cfg.table_name,
+				cfg.version,
 				cfg.knn_context.clone(),
 				residual_cond,
 			);
@@ -614,8 +623,7 @@ async fn resolve_table_scan_stream(
 			for path in paths {
 				sub_operators.push(create_index_operator(&path, &cfg));
 			}
-			let union_op =
-				super::UnionIndexScan::new(cfg.table_name.clone(), sub_operators, None, None);
+			let union_op = super::UnionIndexScan::new(cfg.table_name.clone(), sub_operators, None);
 			let stream = union_op.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -630,7 +638,7 @@ async fn resolve_table_scan_stream(
 				txn,
 				beg,
 				end,
-				cfg.version,
+				version_stamp,
 				cfg.storage_limit,
 				cfg.direction,
 				cfg.pre_skip,
@@ -660,6 +668,7 @@ fn create_index_operator(path: &AccessPath, cfg: &TableScanConfig) -> Arc<dyn Ex
 			cfg.table_name.clone(),
 			None,
 			None,
+			cfg.version.clone(),
 		)),
 		AccessPath::FullTextSearch {
 			index_ref,
@@ -670,6 +679,7 @@ fn create_index_operator(path: &AccessPath, cfg: &TableScanConfig) -> Arc<dyn Ex
 			query.clone(),
 			operator.clone(),
 			cfg.table_name.clone(),
+			cfg.version.clone(),
 		)),
 		AccessPath::KnnSearch {
 			index_ref,
@@ -684,6 +694,7 @@ fn create_index_operator(path: &AccessPath, cfg: &TableScanConfig) -> Arc<dyn Ex
 				*k,
 				*ef,
 				cfg.table_name.clone(),
+				cfg.version.clone(),
 				cfg.knn_context.clone(),
 				residual_cond,
 			))

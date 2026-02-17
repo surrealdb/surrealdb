@@ -18,13 +18,13 @@ use crate::utils::escape::QuoteStr;
 /// need to be SQL compatible but it may happen to be.
 /// `ToSql` should be used for SQL compatible output.
 ///
-/// A good example is Datetime:
+/// Example usage:
 /// ```rust
 /// use surrealdb_types::ToSql;
 /// use surrealdb_types::Datetime;
 /// use chrono::{TimeZone, Utc};
-///
-/// let datetime = Datetime::new(Utc.with_ymd_and_hms(2025, 10, 3, 10, 2, 32).unwrap() + chrono::Duration::microseconds(873077));
+/// let dt = Utc.with_ymd_and_hms(2025, 10, 3, 10, 2, 32).unwrap() + chrono::Duration::microseconds(873077);
+/// let datetime = Datetime::from(dt);
 /// assert_eq!(datetime.to_string(), "2025-10-03T10:02:32.873077Z");
 /// assert_eq!(datetime.to_sql(), "d'2025-10-03T10:02:32.873077Z'");
 /// ```

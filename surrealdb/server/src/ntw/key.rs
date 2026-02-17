@@ -86,7 +86,7 @@ async fn execute_and_return(
 	match db.execute(sql, session, Some(vars)).await {
 		Ok(res) => match accept {
 			// Simple serialization
-			Some(Accept::ApplicationJson) => {
+			None | Some(Accept::ApplicationJson) => {
 				let v = Value::Array(Array::from(
 					res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
 				));
@@ -105,8 +105,8 @@ async fn execute_and_return(
 				));
 				Ok(Output::flatbuffers(&v))
 			}
-			// An incorrect content-type was requested
-			_ => Err(NetError::InvalidType.into()),
+			// An unsupported content-type was requested
+			Some(_) => Err(NetError::InvalidType.into()),
 		},
 		// There was an error when executing the query
 		Err(err) => Err(err.into()),

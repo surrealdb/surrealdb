@@ -332,6 +332,13 @@ impl<'a> IndexAnalyzer<'a> {
 	}
 
 	/// Analyze conditions to find compound index opportunities.
+	///
+	/// Collects leading equality conditions into a prefix, and optionally
+	/// captures a single range condition on the next column after the
+	/// equality prefix. This allows the index scan to narrow the key range
+	/// (e.g. `city = 'london' AND age > 50` on index `(city, age)` scans
+	/// only keys matching both conditions rather than all `city = 'london'`
+	/// entries).
 	fn analyze_compound_conditions(
 		&self,
 		conditions: &[SimpleCondition],
@@ -354,13 +361,12 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 
 			// Try to match conditions to index columns in order.
-			// The prefix collects leading equality conditions. Non-equality
-			// (range) conditions on later columns are NOT encoded into the
-			// compound key because the key encoding uses variable-length
-			// arrays and mixing different array sizes in range bounds
-			// produces incorrect scan ranges. Range conditions are instead
-			// handled by the Scan operator's predicate filter.
+			// The prefix collects leading equality conditions. After the
+			// equality prefix, a single range condition on the next column
+			// is captured and encoded into the compound key range so the
+			// index scan is narrowed at the storage level.
 			let mut prefix_values = Vec::new();
+			let mut range_condition: Option<(BinaryOperator, Value)> = None;
 
 			for col in &ix_def.cols {
 				// Find a condition that matches this column
@@ -375,8 +381,12 @@ impl<'a> IndexAnalyzer<'a> {
 							// Equality condition -- add to prefix
 							prefix_values.push(cond.value.clone());
 						} else {
-							// Non-equality -- stop adding to prefix.
-							// This column's range will be filtered by the predicate.
+							// Non-equality (range) -- capture the range condition
+							// on this column and stop. The range narrows the scan
+							// beyond the equality prefix.
+							if let Some(op) = normalize_range_op(&cond.op, cond.position) {
+								range_condition = Some((op, cond.value.clone()));
+							}
 							break;
 						}
 					}
@@ -387,11 +397,13 @@ impl<'a> IndexAnalyzer<'a> {
 				}
 			}
 
-			// Create compound candidate if we have at least 2 equality columns
-			if prefix_values.len() >= 2 {
+			// Create compound candidate if we have at least 2 equality columns,
+			// or at least 1 equality column with a range on the next column.
+			if prefix_values.len() >= 2 || (!prefix_values.is_empty() && range_condition.is_some())
+			{
 				let access = BTreeAccess::Compound {
 					prefix: prefix_values,
-					range: None,
+					range: range_condition,
 				};
 
 				let index_ref = IndexRef::new(self.indexes.clone(), idx);
@@ -924,10 +936,14 @@ impl IndexCandidate {
 			}
 			BTreeAccess::Compound {
 				prefix,
-				..
+				range,
 			} => {
 				// More prefix columns = better selectivity
 				score += 400 + (prefix.len() as u32 * 50);
+				// Bonus for having a range condition that narrows the scan
+				if range.is_some() {
+					score += 25;
+				}
 			}
 			BTreeAccess::Range {
 				from,
@@ -1009,7 +1025,6 @@ struct SimpleCondition {
 	idiom: Idiom,
 	op: BinaryOperator,
 	value: Value,
-	#[allow(dead_code)]
 	position: IdiomPosition,
 }
 
@@ -1034,6 +1049,33 @@ fn idiom_matches(expr_idiom: &Idiom, index_col: &Idiom) -> bool {
 	}
 
 	true
+}
+
+/// Normalize a range operator based on the position of the idiom in the
+/// comparison expression.
+///
+/// When the idiom is on the left (`field > value`), the operator is already
+/// correct. When on the right (`value < field`), the operator must be
+/// flipped so it describes the condition from the field's perspective.
+///
+/// Returns `None` for non-range operators (equality, MATCHES, etc.).
+fn normalize_range_op(op: &BinaryOperator, position: IdiomPosition) -> Option<BinaryOperator> {
+	match position {
+		IdiomPosition::Left => match op {
+			BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+			| BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual => Some(op.clone()),
+			_ => None,
+		},
+		IdiomPosition::Right => match op {
+			BinaryOperator::LessThan => Some(BinaryOperator::MoreThan),
+			BinaryOperator::LessThanEqual => Some(BinaryOperator::MoreThanEqual),
+			BinaryOperator::MoreThan => Some(BinaryOperator::LessThan),
+			BinaryOperator::MoreThanEqual => Some(BinaryOperator::LessThanEqual),
+			_ => None,
+		},
+	}
 }
 
 // literal_to_value and expr_to_value are imported from crate::exec::planner::util

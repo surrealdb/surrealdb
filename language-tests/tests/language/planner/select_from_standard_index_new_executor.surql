@@ -5,9 +5,8 @@
 value = "'OK'"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 4}
-    Filter [ctx: Db] [predicate: time > d'2000-01-01T00:00:00Z'] {rows: 4}
-        IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward, limit: 4] {rows: 4}
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 4}
+    IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward, limit: 4] {rows: 4}
 
 Total rows: 4"'''
 
@@ -15,9 +14,8 @@ Total rows: 4"'''
 value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 4}
-    Filter [ctx: Db] [predicate: time > d'2000-01-01T00:00:00Z'] {rows: 4}
-        IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward] {rows: 4}
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 4}
+    IndexScan [ctx: Db] [index: time, access: >d'2000-01-01T00:00:00Z', direction: Forward] {rows: 4}
 
 Total rows: 4"'''
 
@@ -25,7 +23,7 @@ Total rows: 4"'''
 value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 4}
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 4}
     IndexScan [ctx: Db] [index: time, access: , direction: Forward, limit: 4] {rows: 4}
 
 Total rows: 4''''
@@ -34,7 +32,7 @@ Total rows: 4''''
 value = "[{ id: session:3, other: 'test' }, { id: session:4, time: NULL }, { id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 6}
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 6}
     IndexScan [ctx: Db] [index: time, access: , direction: Forward] {rows: 6}
 
 Total rows: 6''''
@@ -43,7 +41,7 @@ Total rows: 6''''
 value = "[{ id: session:3, other: 'test' }, { id: session:4, time: NULL }, { id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 4}
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 4}
     Limit [ctx: Db] [limit: 4] {rows: 4}
         SortTopKByKey [ctx: Db] [sort_keys: time DESC, limit: 4] {rows: 4}
             IndexScan [ctx: Db] [index: time, access: , direction: Forward] {rows: 6}
@@ -54,7 +52,7 @@ Total rows: 4''''
 value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:2, time: d'2024-06-30T23:00:00Z' }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 6}
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 6}
     SortByKey [ctx: Db] [sort_keys: time DESC] {rows: 6}
         IndexScan [ctx: Db] [index: time, access: , direction: Forward] {rows: 6}
 

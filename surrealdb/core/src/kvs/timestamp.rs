@@ -327,7 +327,7 @@ mod tests {
 		let epoch = Utc.timestamp_opt(0, 0).unwrap();
 		let ts = ts_impl.from_datetime(epoch).unwrap();
 		let recovered = ts.as_datetime();
-		assert_eq!(epoch.timestamp_nanos(), recovered.timestamp_nanos());
+		assert_eq!(epoch.timestamp_nanos_opt(), recovered.timestamp_nanos_opt());
 
 		// Test a known timestamp
 		let known_time = Utc.timestamp_opt(1700000000, 123456789).unwrap();

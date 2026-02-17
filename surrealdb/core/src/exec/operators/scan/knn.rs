@@ -10,8 +10,8 @@ use async_trait::async_trait;
 use reblessive::TreeStack;
 
 use super::common::fetch_and_filter_records_batch;
+use super::resolved::ResolvedTableContext;
 use crate::catalog::Index;
-use crate::catalog::providers::TableProvider;
 use crate::err::Error;
 use crate::exec::index::access_path::IndexRef;
 use crate::exec::permission::{
@@ -19,12 +19,12 @@ use crate::exec::permission::{
 	validate_record_user_access,
 };
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::{Cond, ControlFlow, ControlFlowExt};
 use crate::iam::Action;
-use crate::idx::planner::checker::HnswConditionChecker;
+use crate::kvs::CachePolicy;
 use crate::val::Number;
 
 /// KNN scan operator using an HNSW index.
@@ -43,6 +43,11 @@ pub struct KnnScan {
 	pub ef: u32,
 	/// Table name for record fetching
 	pub table_name: crate::val::TableName,
+	/// Optional VERSION timestamp for time-travel queries.
+	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
+	/// Plan-time resolved table context. When present, `execute()` skips
+	/// runtime table def + permission lookup.
+	pub(crate) resolved: Option<ResolvedTableContext>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 	/// KNN distance context, shared with IndexFunctionExec for vector::distance::knn().
@@ -55,12 +60,14 @@ pub struct KnnScan {
 }
 
 impl KnnScan {
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		index_ref: IndexRef,
 		vector: Vec<Number>,
 		k: u32,
 		ef: u32,
 		table_name: crate::val::TableName,
+		version: Option<Arc<dyn PhysicalExpr>>,
 		knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 		residual_cond: Option<Cond>,
 	) -> Self {
@@ -70,10 +77,18 @@ impl KnnScan {
 			k,
 			ef,
 			table_name,
+			version,
+			resolved: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 			knn_context,
 			residual_cond,
 		}
+	}
+
+	/// Set the plan-time resolved table context.
+	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
+		self.resolved = Some(resolved);
+		self
 	}
 }
 
@@ -101,6 +116,10 @@ impl ExecOperator for KnnScan {
 		AccessMode::ReadOnly
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::Bounded(self.k as usize)
+	}
+
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(&self.metrics)
 	}
@@ -120,8 +139,10 @@ impl ExecOperator for KnnScan {
 		let k = self.k;
 		let ef = self.ef;
 		let table_name = self.table_name.clone();
+		let version_expr = self.version.clone();
 		let knn_context = self.knn_context.clone();
 		let residual_cond = self.residual_cond.clone();
+		let resolved = self.resolved.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -131,32 +152,51 @@ impl ExecOperator for KnnScan {
 			let db = Arc::clone(&db_ctx.db);
 			let txn = ctx.txn();
 
+			// Evaluate VERSION expression
+			let version: Option<u64> = match &version_expr {
+				Some(expr) => {
+					let eval_ctx = crate::exec::EvalContext::from_exec_ctx(&ctx);
+					let v = expr.evaluate(eval_ctx).await?;
+					Some(
+						v.cast_to::<crate::val::Datetime>()
+							.map_err(|e| anyhow::anyhow!("{e}"))?
+							.to_version_stamp()?,
+					)
+				}
+				None => None,
+			};
+
 			// Get the FrozenContext from the root context
 			let root = ctx.root();
 			let frozen_ctx = &root.ctx;
 
-			// Look up the table definition (needed for both permissions and table_id)
-			let table_def = txn
-				.get_tb_by_name(&ns.name, &db.name, &table_name)
-				.await
-				.context("Failed to get table")?;
-
-			let table_def = match table_def {
-				Some(def) => def,
-				None => {
-					Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
-						name: table_name.clone(),
-					})))?;
-					unreachable!()
-				}
-			};
-
-			// Resolve table permissions
-			let select_permission = if check_perms {
-				convert_permission_to_physical(&table_def.permissions.select, ctx.ctx()).await
-					.context("Failed to convert permission")?
+			// Resolve table permissions and table_id: plan-time fast path or runtime fallback
+			let (select_permission, table_id) = if let Some(ref res) = resolved {
+				let perm = res.select_permission(check_perms);
+				(perm, res.table_def.table_id)
 			} else {
-				PhysicalPermission::Allow
+				let table_def = db_ctx
+					.get_table_def(&table_name)
+					.await
+					.context("Failed to get table")?;
+
+				let table_def = match table_def {
+					Some(def) => def,
+					None => {
+						Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
+							name: table_name.clone(),
+						})))?;
+						unreachable!()
+					}
+				};
+
+				let select_permission = if check_perms {
+					convert_permission_to_physical(&table_def.permissions.select, ctx.ctx()).await
+						.context("Failed to convert permission")?
+				} else {
+					PhysicalPermission::Allow
+				};
+				(select_permission, table_def.table_id)
 			};
 
 			// Early exit if denied
@@ -184,7 +224,7 @@ impl ExecOperator for KnnScan {
 					ns.namespace_id,
 					db.database_id,
 					frozen_ctx,
-					table_def.table_id,
+					table_id,
 					index_def,
 					hnsw_params,
 				)
@@ -193,8 +233,6 @@ impl ExecOperator for KnnScan {
 
 			// Ensure the HNSW index state is current
 			hnsw_index
-				.write()
-				.await
 				.check_state(frozen_ctx)
 				.await
 				.context("Failed to check HNSW index state")?;
@@ -202,36 +240,29 @@ impl ExecOperator for KnnScan {
 			// Build condition checker. When there are residual (non-KNN) predicates
 			// in the WHERE clause, push them into the HNSW search so that rows
 			// not satisfying the condition do not consume top-K slots.
-			let opt = ctx.options();
-			let cond_checker = match (&residual_cond, opt) {
+			let cond_filter = match (residual_cond, ctx.options()) {
 				(Some(cond), Some(opt)) => {
-					let frozen = &root.ctx;
-					HnswConditionChecker::new_cond(frozen, opt, Arc::new(cond.clone()))
+					Some((opt, Arc::new(cond)))
 				}
-				_ => HnswConditionChecker::new(),
+				_ => None
 			};
 
 			// Execute the KNN search using a TreeStack for recursion safety
 			let knn_results = {
-				let txn_for_search = txn.clone();
 				let mut stack = TreeStack::new();
 				stack
 					.enter(|stk| {
 						let hnsw_index = &hnsw_index;
-						let db_def = &db;
 						let vector = &vector;
 						async move {
 							hnsw_index
-								.read()
-								.await
 								.knn_search(
-									db_def,
-									&txn_for_search,
+									frozen_ctx,
 									stk,
 									vector,
 									k as usize,
 									ef as usize,
-									cond_checker,
+									cond_filter,
 								)
 								.await
 						}
@@ -247,7 +278,7 @@ impl ExecOperator for KnnScan {
 			// downstream projection evaluation.
 			if let Some(ref knn_ctx) = knn_context {
 				for (rid, distance, _) in &knn_results {
-					knn_ctx.insert(rid.as_ref().clone(), Number::Float(*distance));
+					knn_ctx.insert(rid.as_ref().clone(), Number::Float(*distance)).await;
 					rids.push(rid.as_ref().clone());
 				}
 			} else {
@@ -255,7 +286,6 @@ impl ExecOperator for KnnScan {
 					rids.push(rid.as_ref().clone());
 				}
 			}
-
 
 			// Batch-fetch all records and apply permission filtering
 			let values = fetch_and_filter_records_batch(
@@ -266,6 +296,8 @@ impl ExecOperator for KnnScan {
 				&rids,
 				&select_permission,
 				check_perms,
+				version,
+				CachePolicy::ReadWrite,
 			).await?;
 
 			if !values.is_empty() {

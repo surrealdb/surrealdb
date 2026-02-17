@@ -36,8 +36,9 @@ impl PhysicalExpr for AllPart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.cloned().unwrap_or(Value::None);
-		Ok(evaluate_all(&value, ctx).await?)
+		let none = Value::None;
+		let value = ctx.current_value.unwrap_or(&none);
+		Ok(evaluate_all(value, ctx).await?)
 	}
 
 	/// Parallel batch evaluation for `[*]` / `.*`.
@@ -126,8 +127,9 @@ impl PhysicalExpr for FlattenPart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.cloned().unwrap_or(Value::None);
-		Ok(evaluate_flatten(&value)?)
+		let none = Value::None;
+		let value = ctx.current_value.unwrap_or(&none);
+		Ok(evaluate_flatten(value)?)
 	}
 
 	fn access_mode(&self) -> AccessMode {

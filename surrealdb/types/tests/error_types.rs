@@ -1,5 +1,6 @@
 use surrealdb_types::{
-	ConversionError, Kind, LengthMismatchError, Number, OutOfRangeError, TypeError, Value,
+	AuthError, ConversionError, Error, ErrorKind, Kind, LengthMismatchError, NotAllowedError,
+	Number, Object, OutOfRangeError, SurrealValue, TypeError, ValidationError, Value,
 };
 
 #[test]
@@ -80,7 +81,7 @@ fn test_type_error_variants() {
 	let conv_err = TypeError::Conversion(ConversionError::new(Kind::String, Kind::Int));
 	let range_err = TypeError::OutOfRange(OutOfRangeError::new(256, "u8"));
 	let len_err = TypeError::LengthMismatch(LengthMismatchError::new(3, 2, "tuple"));
-	let invalid_err = TypeError::Invalid("custom error".to_string());
+	let invalid_err = TypeError::Invalid("custom error".to_owned());
 
 	// All should display without panicking
 	assert!(!conv_err.to_string().is_empty());
@@ -234,19 +235,16 @@ fn test_nested_conversion_error() {
 }
 
 #[test]
-fn test_error_converts_to_anyhow() {
-	// Ensure our errors work with anyhow
+fn test_conversion_errors_implement_std_error() {
+	// Ensure our conversion errors implement std::error::Error and have non-empty display
 	let conv_err = ConversionError::new(Kind::String, Kind::Int);
-	let anyhow_err: anyhow::Error = conv_err.into();
-	assert!(!anyhow_err.to_string().is_empty());
+	assert!(!conv_err.to_string().is_empty());
 
 	let range_err = OutOfRangeError::new(300, "i8");
-	let anyhow_err: anyhow::Error = range_err.into();
-	assert!(!anyhow_err.to_string().is_empty());
+	assert!(!range_err.to_string().is_empty());
 
 	let len_err = LengthMismatchError::new(3, 2, "tuple");
-	let anyhow_err: anyhow::Error = len_err.into();
-	assert!(!anyhow_err.to_string().is_empty());
+	assert!(!len_err.to_string().is_empty());
 }
 
 #[test]
@@ -281,4 +279,114 @@ fn test_error_message_quality() {
 	assert!(err_msg.contains("String") || err_msg.contains("string"));
 
 	println!("Error message: {}", err_msg);
+}
+
+// -----------------------------------------------------------------------------
+// Public API Error type (wire-friendly, chaining)
+// -----------------------------------------------------------------------------
+
+#[test]
+fn test_public_error_new() {
+	let err = Error::not_found("The table 'users' does not exist".to_string(), None);
+
+	assert_eq!(err.kind(), &ErrorKind::NotFound);
+	assert_eq!(err.message(), "The table 'users' does not exist");
+	assert!(err.details().is_none());
+	assert!(err.cause().is_none());
+}
+
+#[test]
+fn test_public_error_with_details() {
+	let err = Error::not_allowed("Token expired".to_string(), AuthError::TokenExpired);
+
+	assert_eq!(err.kind(), &ErrorKind::NotAllowed);
+	assert!(err.details().is_some());
+	let d = err.not_allowed_details().unwrap();
+	assert!(matches!(d, NotAllowedError::Auth(AuthError::TokenExpired)));
+}
+
+#[test]
+fn test_public_error_validation_details() {
+	let err =
+		Error::validation("Invalid request".to_string(), Some(ValidationError::InvalidRequest));
+	assert_eq!(err.kind(), &ErrorKind::Validation);
+	assert_eq!(err.validation_details(), Some(ValidationError::InvalidRequest));
+
+	let err_no_details = Error::validation("Parse error".to_string(), None);
+	assert_eq!(err_no_details.validation_details(), None);
+
+	let err_wrong_kind = Error::not_allowed("Auth failed".to_string(), None);
+	assert_eq!(err_wrong_kind.validation_details(), None);
+}
+
+#[test]
+fn test_public_error_with_cause() {
+	let root = Error::internal("connection refused".to_string());
+	let top = Error::query("Failed to execute query".to_string(), None).with_cause(root);
+
+	assert_eq!(top.kind(), &ErrorKind::Query);
+	assert!(top.cause().is_some());
+	let cause = top.cause().unwrap();
+	assert_eq!(cause.kind(), &ErrorKind::Internal);
+	assert_eq!(cause.message(), "connection refused");
+	assert!(cause.cause().is_none());
+}
+
+#[test]
+fn test_public_error_chain() {
+	let root = Error::internal("root".to_string());
+	let mid = Error::validation("mid".to_string(), None).with_cause(root);
+	let top = Error::not_allowed("top".to_string(), None).with_cause(mid);
+
+	let chain: Vec<_> = top.chain().collect();
+	assert_eq!(chain.len(), 3);
+	assert_eq!(chain[0].kind(), &ErrorKind::NotAllowed);
+	assert_eq!(chain[1].kind(), &ErrorKind::Validation);
+	assert_eq!(chain[2].kind(), &ErrorKind::Internal);
+}
+
+#[test]
+fn test_public_error_display() {
+	let err = Error::thrown("Something went wrong".to_string());
+	assert!(err.to_string().contains("Something went wrong"));
+
+	let with_cause = Error::validation("outer".to_string(), None)
+		.with_cause(Error::internal("inner".to_string()));
+	let display = with_cause.to_string();
+	assert!(display.contains("outer"));
+	assert!(display.contains("inner"));
+}
+
+#[test]
+fn test_public_error_std_error_source() {
+	let inner = Error::internal("inner".to_string());
+	let outer = Error::query("outer".to_string(), None).with_cause(inner);
+
+	let source = std::error::Error::source(&outer).unwrap();
+	assert_eq!(source.to_string(), "inner");
+}
+
+#[test]
+fn test_error_kind_unknown_falls_back_to_internal() {
+	// Forward compatibility: unknown wire kind strings fall back to Internal
+	// so that older SDKs can still deserialize errors from newer servers.
+	let mut obj = Object::new();
+	obj.insert("kind", "future_kind");
+	obj.insert("message", "Message");
+	let value = Value::Object(obj);
+	let err = Error::from_value(value).unwrap();
+	assert_eq!(err.kind(), &ErrorKind::Internal);
+	assert_eq!(err.message(), "Message");
+}
+
+#[test]
+fn test_error_deserialize_without_kind_defaults_to_internal() {
+	// Backwards compatibility: wire format without "kind" (e.g. older clients) defaults to Internal
+	// when deserialising via SurrealValue::from_value (#[surreal(default)]).
+	let mut obj = Object::new();
+	obj.insert("message", "Something went wrong");
+	let value = Value::Object(obj);
+	let err = Error::from_value(value).unwrap();
+	assert_eq!(err.kind(), &ErrorKind::Internal);
+	assert_eq!(err.message(), "Something went wrong");
 }

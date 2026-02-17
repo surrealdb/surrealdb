@@ -69,7 +69,7 @@ pub(crate) async fn evaluate_expr(
 	expr: &Expr,
 	ctx: &ExecutionContext,
 ) -> crate::expr::FlowResult<Value> {
-	match try_plan_expr(expr, ctx.ctx(), ctx.txn()).await {
+	match try_plan_expr!(expr, ctx.ctx(), ctx.txn()) {
 		Ok(plan) => {
 			let stream = plan.execute(ctx)?;
 			collect_single_value(stream).await
@@ -101,7 +101,7 @@ pub(crate) async fn evaluate_body_expr(
 ) -> crate::expr::FlowResult<Value> {
 	let frozen_ctx = ctx.ctx().clone();
 
-	match try_plan_expr(expr, &frozen_ctx, ctx.txn()).await {
+	match try_plan_expr!(expr, &frozen_ctx, ctx.txn()) {
 		Ok(plan) => {
 			if plan.mutates_context() {
 				*ctx = plan.output_context(ctx).await.map_err(|e| ControlFlow::Err(e.into()))?;

@@ -6,23 +6,22 @@ reason = "Test limit pushdown to IndexScan when index covers ORDER BY"
 value = "'OK'"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     IndexScan [ctx: Db] [index: idx_number, access: , direction: Forward, limit: 3]
 ''''
 
 [[test.results]]
-value = ''''Project [ctx: Db]
-    Filter [ctx: Db] [predicate: number > 15]
-        IndexScan [ctx: Db] [index: idx_number, access: >15, direction: Forward, limit: 2]
+value = ''''SelectProject [ctx: Db] [projections: *]
+    IndexScan [ctx: Db] [index: idx_number, access: >15, direction: Forward, limit: 2]
 ''''
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: record, direction: Forward, limit: 3]
 ''''
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     IndexScan [ctx: Db] [index: idx_number, access: , direction: Forward]
 ''''
 

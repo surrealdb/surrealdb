@@ -183,6 +183,194 @@ impl ToSql for BinaryOp {
 	}
 }
 
+/// Optimised binary comparison for the common `field op literal` pattern.
+///
+/// Eliminates async_trait dispatch and per-record `Value::clone()` by inlining
+/// field access and storing the literal value directly. Created at plan time
+/// when the planner detects a simple `IdiomExpr(FieldPart)` on one side and a
+/// `Literal` on the other.
+#[derive(Debug, Clone)]
+pub struct SimpleBinaryOp {
+	pub(crate) field_name: String,
+	pub(crate) op: crate::expr::operator::BinaryOperator,
+	pub(crate) literal: Value,
+	/// When true, the literal is on the left: `literal op field`.
+	/// The operand order is swapped for non-commutative operators.
+	pub(crate) reversed: bool,
+}
+
+#[cfg_attr(target_family = "wasm", async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait)]
+impl PhysicalExpr for SimpleBinaryOp {
+	fn name(&self) -> &'static str {
+		"SimpleBinaryOp"
+	}
+
+	fn required_context(&self) -> crate::exec::ContextLevel {
+		// Field access may trigger record fetch when applied to a RecordId,
+		// so we conservatively require database context.
+		crate::exec::ContextLevel::Database
+	}
+
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
+		use crate::expr::operator::BinaryOperator;
+		use crate::fnc::operate;
+
+		let none = Value::None;
+		let current = ctx.current_value.unwrap_or(&none);
+
+		// Fast path: direct object field lookup (covers table scan records).
+		// Slow path: fall back to evaluate_field for RecordId auto-fetch, arrays, etc.
+		let (field_ref, _owned);
+		let field_val: &Value = if let Value::Object(obj) = current {
+			field_ref = obj.get(&self.field_name).unwrap_or(&none);
+			field_ref
+		} else {
+			_owned = crate::exec::parts::field::evaluate_field(current, &self.field_name, ctx)
+				.await
+				.map_err(crate::expr::ControlFlow::Err)?;
+			&_owned
+		};
+
+		let (left, right) = if self.reversed {
+			(&self.literal, field_val)
+		} else {
+			(field_val, &self.literal)
+		};
+
+		Ok(match &self.op {
+			BinaryOperator::Equal => operate::equal(left, right)?,
+			BinaryOperator::ExactEqual => operate::exact(left, right)?,
+			BinaryOperator::NotEqual => operate::not_equal(left, right)?,
+			BinaryOperator::AllEqual => operate::all_equal(left, right)?,
+			BinaryOperator::AnyEqual => operate::any_equal(left, right)?,
+
+			BinaryOperator::LessThan => operate::less_than(left, right)?,
+			BinaryOperator::LessThanEqual => operate::less_than_or_equal(left, right)?,
+			BinaryOperator::MoreThan => operate::more_than(left, right)?,
+			BinaryOperator::MoreThanEqual => operate::more_than_or_equal(left, right)?,
+
+			BinaryOperator::Contain => operate::contain(left, right)?,
+			BinaryOperator::NotContain => operate::not_contain(left, right)?,
+			BinaryOperator::ContainAll => operate::contain_all(left, right)?,
+			BinaryOperator::ContainAny => operate::contain_any(left, right)?,
+			BinaryOperator::ContainNone => operate::contain_none(left, right)?,
+			BinaryOperator::Inside => operate::inside(left, right)?,
+			BinaryOperator::NotInside => operate::not_inside(left, right)?,
+			BinaryOperator::AllInside => operate::inside_all(left, right)?,
+			BinaryOperator::AnyInside => operate::inside_any(left, right)?,
+			BinaryOperator::NoneInside => operate::inside_none(left, right)?,
+
+			BinaryOperator::Outside => operate::outside(left, right)?,
+			BinaryOperator::Intersects => operate::intersects(left, right)?,
+
+			// Unsupported operators should never reach here; the planner only
+			// creates SimpleBinaryOp for the operators listed above.
+			_ => unreachable!("SimpleBinaryOp created for unsupported operator {:?}", self.op),
+		})
+	}
+
+	/// Batch evaluation that avoids per-record async dispatch overhead.
+	///
+	/// Uses the fast Object-field-lookup path for all records. If any record
+	/// is not an Object (e.g., a RecordId requiring async fetch), falls back
+	/// to per-record `evaluate` for that record.
+	async fn evaluate_batch(
+		&self,
+		ctx: EvalContext<'_>,
+		values: &[Value],
+	) -> FlowResult<Vec<Value>> {
+		use crate::expr::operator::BinaryOperator;
+		use crate::fnc::operate;
+
+		// Check if all values are Objects (the common case for table scans).
+		// If any value requires async field resolution (e.g., RecordId fetch),
+		// fall back to the default sequential evaluate.
+		let all_objects = values.iter().all(|v| matches!(v, Value::Object(_)));
+		if !all_objects {
+			let mut results = Vec::with_capacity(values.len());
+			for value in values {
+				results.push(self.evaluate(ctx.with_value(value)).await?);
+			}
+			return Ok(results);
+		}
+
+		let none = Value::None;
+		let mut results = Vec::with_capacity(values.len());
+
+		// All values are Objects — use fast synchronous field lookup.
+		macro_rules! apply_op {
+			($op_fn:expr) => {
+				for value in values {
+					let field_val = match value {
+						Value::Object(obj) => obj.get(&self.field_name).unwrap_or(&none),
+						_ => unreachable!("checked all_objects above"),
+					};
+					let (left, right) = if self.reversed {
+						(&self.literal, field_val)
+					} else {
+						(field_val, &self.literal)
+					};
+					results.push($op_fn(left, right)?);
+				}
+			};
+		}
+
+		match &self.op {
+			BinaryOperator::Equal => apply_op!(operate::equal),
+			BinaryOperator::ExactEqual => apply_op!(operate::exact),
+			BinaryOperator::NotEqual => apply_op!(operate::not_equal),
+			BinaryOperator::AllEqual => apply_op!(operate::all_equal),
+			BinaryOperator::AnyEqual => apply_op!(operate::any_equal),
+
+			BinaryOperator::LessThan => apply_op!(operate::less_than),
+			BinaryOperator::LessThanEqual => apply_op!(operate::less_than_or_equal),
+			BinaryOperator::MoreThan => apply_op!(operate::more_than),
+			BinaryOperator::MoreThanEqual => apply_op!(operate::more_than_or_equal),
+
+			BinaryOperator::Contain => apply_op!(operate::contain),
+			BinaryOperator::NotContain => apply_op!(operate::not_contain),
+			BinaryOperator::ContainAll => apply_op!(operate::contain_all),
+			BinaryOperator::ContainAny => apply_op!(operate::contain_any),
+			BinaryOperator::ContainNone => apply_op!(operate::contain_none),
+			BinaryOperator::Inside => apply_op!(operate::inside),
+			BinaryOperator::NotInside => apply_op!(operate::not_inside),
+			BinaryOperator::AllInside => apply_op!(operate::inside_all),
+			BinaryOperator::AnyInside => apply_op!(operate::inside_any),
+			BinaryOperator::NoneInside => apply_op!(operate::inside_none),
+
+			BinaryOperator::Outside => apply_op!(operate::outside),
+			BinaryOperator::Intersects => apply_op!(operate::intersects),
+
+			_ => unreachable!("SimpleBinaryOp created for unsupported operator {:?}", self.op),
+		}
+
+		Ok(results)
+	}
+
+	fn access_mode(&self) -> AccessMode {
+		AccessMode::ReadOnly
+	}
+}
+
+impl ToSql for SimpleBinaryOp {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		if self.reversed {
+			self.literal.fmt_sql(f, fmt);
+			f.push(' ');
+			write_sql!(f, fmt, "{}", self.op);
+			f.push(' ');
+			f.push_str(&self.field_name);
+		} else {
+			f.push_str(&self.field_name);
+			f.push(' ');
+			write_sql!(f, fmt, "{}", self.op);
+			f.push(' ');
+			self.literal.fmt_sql(f, fmt);
+		}
+	}
+}
+
 /// Unary/Prefix operation - op expr (e.g., -5, !true, +x)
 #[derive(Debug, Clone)]
 pub struct UnaryOp {

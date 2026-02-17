@@ -25,7 +25,7 @@
 //! let plan = planner.plan(expr)?;
 //! ```
 //!
-//! For backwards compatibility, [`try_plan_expr`] delegates to `Planner::plan()`.
+//! For backwards compatibility, [`try_plan_expr!`] delegates to `Planner::plan()`.
 //!
 //! # SELECT Pipeline
 //!
@@ -320,6 +320,32 @@ impl<'ctx> Planner<'ctx> {
 				// All other binary operators (and non-standard MATCHES patterns)
 				let left_phys = Box::pin(self.physical_expr(*left)).await?;
 				let right_phys = Box::pin(self.physical_expr(*right)).await?;
+
+				// Optimisation: detect `field op literal` or `literal op field`
+				// patterns and emit a SimpleBinaryOp that inlines field access
+				// and avoids per-record async dispatch + Value cloning.
+				if is_simple_binary_eligible(&op) {
+					if let Some(field) = left_phys.try_simple_field()
+						&& let Some(lit) = right_phys.try_literal()
+					{
+						return Ok(Arc::new(crate::exec::physical_expr::SimpleBinaryOp {
+							field_name: field.to_string(),
+							op,
+							literal: lit.clone(),
+							reversed: false,
+						}));
+					} else if let Some(field) = right_phys.try_simple_field()
+						&& let Some(lit) = left_phys.try_literal()
+					{
+						return Ok(Arc::new(crate::exec::physical_expr::SimpleBinaryOp {
+							field_name: field.to_string(),
+							op,
+							literal: lit.clone(),
+							reversed: true,
+						}));
+					}
+				}
+
 				Ok(Arc::new(BinaryOp {
 					left: left_phys,
 					op,
@@ -1008,15 +1034,41 @@ impl<'ctx> Planner<'ctx> {
 // Public API Wrappers
 // ============================================================================
 
+macro_rules! try_plan_expr {
+	($expr:expr, $ctx:expr, $txn:expr) => {{
+		let __expr: &$crate::expr::Expr = $expr;
+		if matches!(
+			__expr,
+			$crate::expr::Expr::Create(_)
+				| $crate::expr::Expr::Update(_)
+				| $crate::expr::Expr::Upsert(_)
+				| $crate::expr::Expr::Delete(_)
+				| $crate::expr::Expr::Insert(_)
+				| $crate::expr::Expr::Relate(_)
+				| $crate::expr::Expr::Define(_)
+				| $crate::expr::Expr::Remove(_)
+				| $crate::expr::Expr::Rebuild(_)
+				| $crate::expr::Expr::Alter(_)
+		) {
+			Err($crate::err::Error::PlannerUnsupported(String::new()))
+		} else if *$ctx.new_planner_strategy() == $crate::dbs::NewPlannerStrategy::ComputeOnly {
+			Err($crate::err::Error::PlannerUnsupported(String::new()))
+		} else {
+			$crate::exec::planner::plan_expr_inner(__expr, $ctx, $txn).await
+		}
+	}};
+}
+
+pub(crate) use try_plan_expr;
+
 /// Plan an expression into an executable operator tree.
 ///
-/// This is the main entry point for the planner, delegating to `Planner::plan()`.
-/// Returns `Error::PlannerUnsupported` when `ComputeOnly` strategy is active.
-/// Plan an expression into an executable operator tree.
+/// This is the inner planning function called by the `try_plan_expr!` macro
+/// after DML/DDL rejection and ComputeOnly checks have been performed inline.
 ///
 /// When a transaction is provided, the planner resolves table definitions
 /// and indexes at plan time, enabling sort elimination and concrete scan operators.
-pub(crate) async fn try_plan_expr(
+pub(crate) async fn plan_expr_inner(
 	expr: &Expr,
 	ctx: &FrozenContext,
 	txn: Arc<crate::kvs::Transaction>,
@@ -1036,11 +1088,6 @@ pub(crate) async fn try_plan_expr(
 				_ => None,
 			}
 		});
-	if *ctx.new_planner_strategy() == NewPlannerStrategy::ComputeOnly {
-		return Err(Error::PlannerUnsupported(
-			"ComputeOnly strategy: skipping new planner".to_string(),
-		));
-	}
 	Planner::with_txn(ctx, txn, ns, db).plan(expr).await
 }
 
@@ -1058,6 +1105,40 @@ pub(crate) async fn expr_to_physical_expr(
 // ============================================================================
 // Tests
 // ============================================================================
+
+/// Returns `true` if the binary operator is eligible for `SimpleBinaryOp` optimisation.
+///
+/// Only comparison and containment operators are eligible — these take `(&Value, &Value)`
+/// and produce a boolean result. Operators that produce non-boolean results (arithmetic,
+/// ranges), require short-circuit logic (And, Or, NullCoalescing), or need special index
+/// context (Matches, NearestNeighbor) are excluded.
+fn is_simple_binary_eligible(op: &crate::expr::operator::BinaryOperator) -> bool {
+	use crate::expr::operator::BinaryOperator;
+	matches!(
+		op,
+		BinaryOperator::Equal
+			| BinaryOperator::ExactEqual
+			| BinaryOperator::NotEqual
+			| BinaryOperator::AllEqual
+			| BinaryOperator::AnyEqual
+			| BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual
+			| BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+			| BinaryOperator::Contain
+			| BinaryOperator::NotContain
+			| BinaryOperator::ContainAll
+			| BinaryOperator::ContainAny
+			| BinaryOperator::ContainNone
+			| BinaryOperator::Inside
+			| BinaryOperator::NotInside
+			| BinaryOperator::AllInside
+			| BinaryOperator::AnyInside
+			| BinaryOperator::NoneInside
+			| BinaryOperator::Outside
+			| BinaryOperator::Intersects
+	)
+}
 
 #[cfg(test)]
 mod planner_tests {

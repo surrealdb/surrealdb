@@ -718,26 +718,6 @@ impl FullTextIndex {
 		Ok(r1 || r2)
 	}
 
-	/// Triggers compaction for the full-text index
-	///
-	/// This method adds an entry to the index compaction queue by creating an
-	/// `Ic` key for the specified index. The index compaction thread will
-	/// later process this entry and perform the actual compaction of the
-	/// index.
-	///
-	/// Compaction helps optimize full-text index performance by consolidating
-	/// term frequency data and document length information, which can become
-	/// fragmented after many updates to the index.
-	pub(crate) async fn trigger_compaction(
-		ikb: &IndexKeyBase,
-		tx: &Transaction,
-		nid: Uuid,
-	) -> Result<()> {
-		let ic = ikb.new_ic_key(nid);
-		tx.put(&ic, &(), None).await?;
-		Ok(())
-	}
-
 	/// Highlights search terms in a document
 	///
 	/// This method highlights the occurrences of search terms in the document
@@ -973,6 +953,7 @@ mod tests {
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::offset::Offset;
+	use crate::idx::index::IndexOperation;
 	use crate::kvs::LockType::*;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use crate::sql::Expr;
@@ -1107,7 +1088,7 @@ mod tests {
 				.unwrap();
 
 			if require_compaction {
-				FullTextIndex::trigger_compaction(&self.ikb, &tx, self.nid).await.unwrap();
+				IndexOperation::compaction_trigger(&self.ikb, &tx, self.nid).await.unwrap();
 			}
 
 			tx.commit().await.unwrap();

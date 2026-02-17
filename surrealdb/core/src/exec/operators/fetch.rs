@@ -5,8 +5,8 @@ use futures::StreamExt;
 
 use crate::catalog::providers::TableProvider;
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
@@ -61,6 +61,10 @@ impl ExecOperator for Fetch {
 		AccessMode::ReadOnly.combine(self.input.access_mode())
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.input.cardinality_hint()
+	}
+
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
@@ -78,7 +82,11 @@ impl ExecOperator for Fetch {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let fields = self.fields.clone();
 		let ctx = ctx.clone();
 
@@ -252,11 +260,11 @@ pub(crate) async fn fetch_record(
 		.await
 		.map_err(crate::expr::ControlFlow::Err)?;
 
-	let mut val = record.data.as_ref().clone();
+	let mut val = record.data.clone();
 	if val.is_none() {
 		return Ok(Value::None);
 	}
-	val.def(rid);
+	val.def(rid.clone());
 	Ok(val)
 }
 

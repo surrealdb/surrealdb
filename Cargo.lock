@@ -6841,6 +6841,7 @@ dependencies = [
 name = "surrealdb"
 version = "3.0.0-beta"
 dependencies = [
+ "anyhow",
  "async-channel",
  "boxcar",
  "chrono",
@@ -6873,7 +6874,6 @@ dependencies = [
  "surrealdb-types",
  "temp-dir",
  "test-log",
- "thiserror 2.0.18",
  "time",
  "tokio",
  "tokio-tungstenite",
@@ -7206,7 +7206,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "surrealdb-types",
@@ -7217,7 +7217,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism-macros"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7226,7 +7226,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism-runtime"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7243,7 +7243,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism-types"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7253,9 +7253,9 @@ dependencies = [
 
 [[package]]
 name = "surrealkv"
-version = "0.20.0"
+version = "0.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a35535cfbc1f80fea194db48d3d99da4788910aea9e614e052846a83c43f0208"
+checksum = "a6c1dd97851edc773c24afb282d6a17eb1bc798fafac53ea0d2951458854d472"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -7270,7 +7270,6 @@ dependencies = [
  "integer-encoding",
  "log",
  "lz4_flex",
- "memmap2",
  "parking_lot",
  "quick_cache",
  "rand 0.9.2",
@@ -7282,7 +7281,7 @@ dependencies = [
 
 [[package]]
 name = "surrealml-core"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "bytes",
  "futures",
@@ -7297,9 +7296,9 @@ dependencies = [
 
 [[package]]
 name = "surrealmx"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "471704eb963b9b4545d0f32bd910466201b3eb2b259565332b5775684628a454"
+checksum = "703077c9f8bdce4053dce39c5f5ef71b79b8fffe1e59dbd629b455340586814e"
 dependencies = [
  "arc-swap",
  "bincode",

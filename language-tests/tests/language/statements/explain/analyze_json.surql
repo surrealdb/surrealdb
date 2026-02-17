@@ -6,7 +6,7 @@ reason = "Test EXPLAIN ANALYZE FORMAT JSON - JSON output with metrics"
 value = "'OK'"
 
 [[test.results]]
-value = "{ children: [{ attributes: { direction: 'Forward', table: 'item' }, context: 'Db', metrics: { output_rows: 3 }, operator: 'TableScan' }], context: 'Db', metrics: { output_rows: 3 }, operator: 'Project', total_rows: 3 }"
+value = "{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', table: 'item' }, context: 'Db', metrics: { output_rows: 3 }, operator: 'TableScan' }], context: 'Db', metrics: { output_rows: 3 }, operator: 'SelectProject', total_rows: 3 }"
 */
 
 -- Setup test data

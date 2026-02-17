@@ -92,7 +92,7 @@ pub fn impl_struct(
 
 	let value_ty = crate_path.value();
 	let kind_ty = crate_path.kind();
-	let anyhow_result = crate_path.anyhow_result();
+	let error_result = crate_path.error_result();
 
 	quote! {
 		impl #impl_generics SurrealValue for #name #type_generics #where_clause {
@@ -101,7 +101,7 @@ pub fn impl_struct(
 				#into_value
 			}
 
-			fn from_value(value: #value_ty) -> #anyhow_result<Self> {
+			fn from_value(value: #value_ty) -> #error_result {
 				#from_value
 			}
 

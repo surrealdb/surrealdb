@@ -16,8 +16,9 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
+	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
+	buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::{Object, Value};
@@ -86,6 +87,10 @@ impl ExecOperator for Compute {
 		self.input.access_mode().combine(expr_mode)
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.input.cardinality_hint()
+	}
+
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
@@ -108,7 +113,11 @@ impl ExecOperator for Compute {
 			return self.input.execute(ctx);
 		}
 
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let fields = self.fields.clone();
 		let ctx = ctx.clone();
 
@@ -142,11 +151,15 @@ async fn compute_batch(
 	fields: &[(String, Arc<dyn PhysicalExpr>)],
 	eval_ctx: EvalContext<'_>,
 ) -> Result<ValueBatch, ControlFlow> {
-	// Initialize output objects from input values
+	// Initialize output objects from input values.
+	// Geometry values are converted to their GeoJSON object representation
+	// so that downstream operators (SelectProject) can access fields like
+	// `type` and `coordinates` directly.
 	let mut objects: Vec<Object> = values
 		.iter()
 		.map(|v| match v {
 			Value::Object(o) => o.clone(),
+			Value::Geometry(geo) => geo.as_object(),
 			_ => Object::default(),
 		})
 		.collect();

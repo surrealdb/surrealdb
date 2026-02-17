@@ -1,13 +1,13 @@
 use std::fmt;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{Kind, SurrealValue, Value, kind, object};
+use surrealdb_types::{
+	Error as TypesError, ErrorKind, Kind, Object, SurrealValue, Value, kind, object,
+};
 
 use crate::expr::TopLevelExpr;
-use crate::rpc::DbResultError;
 
 #[revisioned(revision = 1)]
 #[derive(
@@ -62,7 +62,7 @@ impl QueryType {
 #[derive(Debug, Clone)]
 pub struct QueryResult {
 	pub time: Duration,
-	pub result: Result<Value, DbResultError>,
+	pub result: Result<Value, TypesError>,
 	// Record the query type in case processing the response is necessary (such as tracking live
 	// queries).
 	pub query_type: QueryType,
@@ -70,9 +70,50 @@ pub struct QueryResult {
 
 impl QueryResult {
 	/// Retrieve the response as a normal result
-	pub fn output(self) -> Result<Value> {
-		self.result.map_err(|err| anyhow::anyhow!(err.to_string()))
+	pub fn output(self) -> Result<Value, TypesError> {
+		self.result
 	}
+}
+
+/// Serialise this error into the query-result wire shape: `result` (message string), optional
+/// `kind`, `details`, and `cause`. Does not include `code`. Used for query result responses
+/// for backwards compatibility (old clients expect `result` to be the message string).
+fn into_query_result_value(error: &TypesError) -> Value {
+	let mut obj = Object::new();
+	obj.insert("result", error.message().to_string());
+	obj.insert("kind", error.kind().clone());
+	if let Some(d) = error.details() {
+		obj.insert("details", d.clone());
+	}
+	if let Some(c) = error.cause() {
+		obj.insert("cause", into_query_result_value(c));
+	}
+	Value::Object(obj)
+}
+
+/// Deserialise an error from the query-result wire shape. Requires `result` (message string).
+/// `kind` is optional and defaults to [`Internal`](ErrorKind::Internal) when missing.
+fn from_query_result_value(value: Value) -> Result<TypesError, TypesError> {
+	let Value::Object(mut map) = value else {
+		return Err(TypesError::internal("Expected object for query result error".to_string()));
+	};
+	let result_val = map.remove("result").ok_or_else(|| {
+		TypesError::internal("Missing result (message) for query result error".to_string())
+	})?;
+	let message = result_val.into_string().map_err(|e| TypesError::internal(e.to_string()))?;
+	let kind = map
+		.remove("kind")
+		.map(ErrorKind::from_value)
+		.transpose()
+		.map_err(|e| TypesError::internal(e.to_string()))?
+		.unwrap_or_default();
+	let details = map.remove("details");
+	let cause = map
+		.remove("cause")
+		.map(from_query_result_value)
+		.transpose()
+		.map_err(|e| TypesError::internal(e.to_string()))?;
+	Ok(TypesError::from_parts(message, Some(kind), details, cause))
 }
 
 impl SurrealValue for QueryResult {
@@ -87,6 +128,9 @@ impl SurrealValue for QueryResult {
 				status: "ERR",
 				time: string,
 				result: string,
+				kind: string,
+				details: any,
+				cause: any,
 				query_type: (QueryType::kind_of()),
 			}
 		)
@@ -102,30 +146,40 @@ impl SurrealValue for QueryResult {
 	}
 
 	fn into_value(self) -> Value {
-		Value::Object(object! {
+		let mut map = object! {
 			status: Status::from(&self.result).into_value(),
 			time: format!("{:?}", self.time).into_value(),
-			result: match self.result {
-				Ok(v) => v.into_value(),
-				Err(e) => Value::from_string(e.to_string()),
-			},
 			type: self.query_type.into_value(),
-		})
+		};
+		match self.result {
+			Ok(v) => {
+				map.insert("result", v);
+			}
+			Err(e) => {
+				let err_val = into_query_result_value(&e);
+				if let Value::Object(err_obj) = err_val {
+					for (k, v) in err_obj.into_inner() {
+						map.insert(k, v);
+					}
+				}
+			}
+		}
+		Value::Object(map)
 	}
 
-	fn from_value(value: Value) -> anyhow::Result<Self> {
+	fn from_value(value: Value) -> Result<Self, TypesError> {
 		// Assert required fields
 		let Value::Object(mut map) = value else {
-			anyhow::bail!("Expected object for QueryResult");
+			return Err(TypesError::internal("Expected object for QueryResult".to_string()));
 		};
 		let Some(status) = map.remove("status") else {
-			anyhow::bail!("Expected status for QueryResult");
+			return Err(TypesError::internal("Expected status for QueryResult".to_string()));
 		};
 		let Some(time) = map.remove("time") else {
-			anyhow::bail!("Expected time for QueryResult");
+			return Err(TypesError::internal("Expected time for QueryResult".to_string()));
 		};
 		let Some(result) = map.remove("result") else {
-			anyhow::bail!("Expected result for QueryResult");
+			return Err(TypesError::internal("Expected result for QueryResult".to_string()));
 		};
 
 		// Grab status, query type and time
@@ -133,13 +187,21 @@ impl SurrealValue for QueryResult {
 		let query_type =
 			map.remove("type").map(QueryType::from_value).transpose()?.unwrap_or_default();
 
-		let time = humantime::parse_duration(&time.into_string()?)?;
+		let time = humantime::parse_duration(
+			&time.into_string().map_err(|e| TypesError::internal(e.to_string()))?,
+		)
+		.map_err(|e| TypesError::internal(e.to_string()))?;
 
 		// Grab result based on status
 
 		let result = match status {
 			Status::Ok => Ok(Value::from_value(result)?),
-			Status::Err => Err(DbResultError::from_value(result)?),
+			Status::Err => {
+				// Reconstruct error from query-result shape (result string + optional kind,
+				// details, cause)
+				map.insert("result".to_string(), result);
+				Err(from_query_result_value(Value::Object(map))?)
+			}
 		};
 
 		Ok(QueryResult {
@@ -152,7 +214,7 @@ impl SurrealValue for QueryResult {
 
 pub struct QueryResultBuilder {
 	start_time: Instant,
-	result: Result<Value, DbResultError>,
+	result: Result<Value, TypesError>,
 	query_type: QueryType,
 }
 
@@ -173,7 +235,7 @@ impl QueryResultBuilder {
 		}
 	}
 
-	pub fn with_result(mut self, result: Result<Value, DbResultError>) -> Self {
+	pub fn with_result(mut self, result: Result<Value, TypesError>) -> Self {
 		self.result = result;
 		self
 	}
@@ -191,7 +253,7 @@ impl QueryResultBuilder {
 		}
 	}
 
-	pub fn finish_with_result(self, result: Result<Value, DbResultError>) -> QueryResult {
+	pub fn finish_with_result(self, result: Result<Value, TypesError>) -> QueryResult {
 		QueryResult {
 			time: self.start_time.elapsed(),
 			result,

@@ -1,3 +1,4 @@
+
 # cargo-vet config file
 
 [cargo-vet]
@@ -1535,11 +1536,7 @@ version = "0.3.0-surreal.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.surrealkv]]
-version = "0.20.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.surrealmx]]
-version = "0.16.0"
+version = "0.20.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.symbolic-common]]

@@ -59,6 +59,7 @@ pub(crate) use key::{KVKey, KVValue, impl_kv_key_storekey, impl_kv_value_revisio
 pub use scanner::{Direction, Scanner};
 pub use timestamp::{DefaultTimestamp, HlcTimestamp, TimeStamp, TimeStampImpl};
 pub use tr::{LockType, TransactionType, Transactor};
+pub(crate) use tx::CachePolicy;
 pub use tx::Transaction;
 
 /// The key part of a key-value pair. An alias for [`Vec<u8>`].

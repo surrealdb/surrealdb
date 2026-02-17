@@ -1,4 +1,3 @@
-pub mod checker;
 pub(crate) mod executor;
 pub(crate) mod iterators;
 pub(in crate::idx) mod knn;

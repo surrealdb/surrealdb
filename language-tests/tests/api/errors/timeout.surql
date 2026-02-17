@@ -23,9 +23,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: 'deadline has elapsed', headers: {  }, status: 500 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 // Timeout that will be exceeded

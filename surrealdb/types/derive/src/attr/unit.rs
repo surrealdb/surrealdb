@@ -6,6 +6,10 @@ use syn::{Attribute, Lit};
 #[derive(Debug, Default)]
 pub struct UnitAttributes {
 	pub value: Option<UnitValue>,
+	/// When true, this variant acts as a catch-all fallback during deserialization.
+	/// If no other variant matches, this variant is returned instead of an error.
+	/// Only valid on unit variants. At most one variant per enum should have this.
+	pub other: bool,
 }
 
 impl UnitAttributes {
@@ -21,6 +25,8 @@ impl UnitAttributes {
 						};
 
 						variant_attrs.value = Some(UnitValue::parse(value));
+					} else if meta.path.is_ident("other") {
+						variant_attrs.other = true;
 					}
 
 					Ok(())

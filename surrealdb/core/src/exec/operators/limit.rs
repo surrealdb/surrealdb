@@ -8,7 +8,7 @@ use tracing::instrument;
 
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatchStream, monitor_stream,
+	OperatorMetrics, PhysicalExpr, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::Value;
@@ -122,7 +122,11 @@ impl ExecOperator for Limit {
 
 	#[instrument(name = "Limit::execute", level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 
 		let limit_expr = self.limit.clone();
 		let offset_expr = self.offset.clone();

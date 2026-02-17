@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use anyhow::{Result, ensure};
+use anyhow::Result;
 use surrealdb_types::{HashMap, object};
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -8,11 +8,13 @@ use uuid::Uuid;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, RootProvider};
 use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget};
 use crate::dbs::{QueryResult, QueryType, Session};
-use crate::err::Error;
 use crate::iam::token::Token;
 use crate::kvs::{Datastore, LockType, TransactionType};
 use crate::rpc::args::extract_args;
-use crate::rpc::{DbResult, Method, RpcError};
+use crate::rpc::{
+	DbResult, Method, bad_lq_config, invalid_params, method_not_allowed, method_not_found,
+	session_exists, session_expired, session_not_found, types_error_from_anyhow,
+};
 use crate::sql::statements::live::LiveFields;
 use crate::sql::{
 	Ast, CreateStatement, Data as SqlData, DeleteStatement, Expr, Fields, Function, FunctionCall,
@@ -58,37 +60,40 @@ pub trait RpcProtocol {
 	fn session_map(&self) -> &HashMap<Option<Uuid>, Arc<RwLock<Session>>>;
 
 	/// Registers a new session with the given ID
-	async fn attach(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
+	async fn attach(&self, session_id: Option<Uuid>) -> Result<DbResult, surrealdb_types::Error> {
 		let mut session = Session::default().with_rt(Self::LQ_SUPPORT);
 		session.id = session_id;
 		match session_id {
 			Some(id) => {
 				if self.session_map().contains_key(&Some(id)) {
-					return Err(RpcError::SessionExists(id));
+					return Err(session_exists(id));
 				}
 				self.session_map().insert(Some(id), Arc::new(RwLock::new(session)));
 				Ok(DbResult::Other(PublicValue::None))
 			}
-			None => Err(RpcError::InvalidParams("Expected a session ID".to_string())),
+			None => Err(invalid_params("Expected a session ID")),
 		}
 	}
 
 	/// Detaches a session from the given ID
-	async fn detach(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
+	async fn detach(&self, session_id: Option<Uuid>) -> Result<DbResult, surrealdb_types::Error> {
 		match session_id {
 			Some(id) => {
 				self.del_session(&id).await;
 				Ok(DbResult::Other(PublicValue::None))
 			}
-			None => Err(RpcError::InvalidParams("Expected a session ID".to_string())),
+			None => Err(invalid_params("Expected a session ID")),
 		}
 	}
 
 	/// The current session for this RPC context
-	fn get_session(&self, id: &Option<Uuid>) -> Result<Arc<RwLock<Session>>, RpcError> {
+	fn get_session(
+		&self,
+		id: &Option<Uuid>,
+	) -> Result<Arc<RwLock<Session>>, surrealdb_types::Error> {
 		match self.session_map().get(id) {
 			Some(session) => Ok(session),
-			None => Err(RpcError::SessionNotFound(*id)),
+			None => Err(session_not_found(*id)),
 		}
 	}
 
@@ -118,7 +123,7 @@ pub trait RpcProtocol {
 	}
 
 	/// Lists all non-default sessions
-	async fn sessions(&self) -> Result<DbResult, RpcError> {
+	async fn sessions(&self) -> Result<DbResult, surrealdb_types::Error> {
 		let array = self
 			.session_map()
 			.to_vec()
@@ -134,8 +139,20 @@ pub trait RpcProtocol {
 	// ------------------------------
 
 	/// Retrieves a transaction by ID
-	async fn get_tx(&self, _id: Uuid) -> Result<Arc<crate::kvs::Transaction>, RpcError> {
-		Err(RpcError::MethodNotFound)
+	async fn get_tx(
+		&self,
+		_id: Uuid,
+	) -> Result<Arc<crate::kvs::Transaction>, surrealdb_types::Error> {
+		Err(method_not_allowed(Method::Unknown.to_string()))
+	}
+
+	/// Stores a transaction
+	async fn set_tx(
+		&self,
+		_id: Uuid,
+		_tx: Arc<crate::kvs::Transaction>,
+	) -> Result<(), surrealdb_types::Error> {
+		Err(method_not_found(Method::Unknown.to_string()))
 	}
 
 	// ------------------------------
@@ -191,13 +208,13 @@ pub trait RpcProtocol {
 		session: Option<Uuid>,
 		method: Method,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		// Check if capabilities allow executing the requested RPC method
 		if !self.kvs().allows_rpc_method(&MethodTarget {
 			method,
 		}) {
 			warn!("Capabilities denied RPC method call attempt, target: '{method}'");
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(method.to_string()));
 		}
 		// Execute the desired method
 		match method {
@@ -235,7 +252,7 @@ pub trait RpcProtocol {
 			Method::Relate => self.relate(txn, session, params).await,
 			Method::Run => self.run(txn, session, params).await,
 			Method::InsertRelation => self.insert_relation(txn, session, params).await,
-			_ => Err(RpcError::MethodNotFound),
+			_ => Err(method_not_found(method.to_string())),
 		}
 	}
 
@@ -261,7 +278,7 @@ pub trait RpcProtocol {
 		&self,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 
 		// Check permissions with read lock
@@ -269,7 +286,7 @@ pub trait RpcProtocol {
 			let session = session_lock.read().await;
 			// Check if the user is allowed to query
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-				return Err(RpcError::MethodNotAllowed);
+				return Err(method_not_allowed(Method::Use.to_string()));
 			}
 		}
 
@@ -278,7 +295,7 @@ pub trait RpcProtocol {
 		// To be able to select a namespace, and then list resources in that namespace,
 		// as an example
 		let (ns, db) = extract_args::<(PublicValue, PublicValue)>(params.into_vec())
-			.ok_or(RpcError::InvalidParams("Expected (ns, db)".to_string()))?;
+			.ok_or(invalid_params("Expected (ns, db)".to_string()))?;
 		// Get a write lock on the session to modify it
 		let mut session = session_lock.write().await;
 		// Empty USE call: apply defaults only if session doesn't already have ns/db
@@ -287,25 +304,49 @@ pub trait RpcProtocol {
 			if session.ns.is_none() {
 				// Fetch defaults from database configuration
 				let kvs = self.kvs();
-				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-				let (ns, db) = if let Some(x) = catch_into!(tx, tx.get_default_config().await) {
+				let tx = kvs
+					.transaction(TransactionType::Write, LockType::Optimistic)
+					.await
+					.map_err(types_error_from_anyhow)?;
+				let (ns, db) = if let Some(x) = match tx.get_default_config().await {
+					Err(e) => {
+						let _ = tx.cancel().await;
+						return Err(types_error_from_anyhow(e));
+					}
+					Ok(v) => v,
+				} {
 					(x.namespace.clone(), x.database.clone())
 				} else {
 					(None, None)
 				};
 
 				if let Some(ns) = ns {
-					catch_into!(tx, tx.get_or_add_ns(None, &ns).await);
+					match tx.get_or_add_ns(None, &ns).await {
+						Err(e) => {
+							let _ = tx.cancel().await;
+							return Err(types_error_from_anyhow(e));
+						}
+						Ok(v) => v,
+					};
 
 					if let Some(db) = db {
-						catch_into!(tx, tx.ensure_ns_db(None, &ns, &db).await);
+						match tx.ensure_ns_db(None, &ns, &db).await {
+							Err(e) => {
+								let _ = tx.cancel().await;
+								return Err(types_error_from_anyhow(e));
+							}
+							Ok(v) => v,
+						};
 						session.db = Some(db);
 					}
 
 					session.ns = Some(ns);
 				}
 
-				catch_into!(tx, tx.commit().await);
+				if let Err(e) = tx.commit().await {
+					let _ = tx.cancel().await;
+					return Err(types_error_from_anyhow(e));
+				}
 			}
 		} else {
 			// Update the selected namespace
@@ -314,12 +355,15 @@ pub trait RpcProtocol {
 				PublicValue::Null => session.ns = None,
 				PublicValue::String(ns) => {
 					let kvs = self.kvs();
-					let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-					run!(tx, tx.get_or_add_ns(None, &ns).await)?;
+					let tx = kvs
+						.transaction(TransactionType::Write, LockType::Optimistic)
+						.await
+						.map_err(types_error_from_anyhow)?;
+					run!(tx, tx.get_or_add_ns(None, &ns).await).map_err(types_error_from_anyhow)?;
 					session.ns = Some(ns)
 				}
 				unexpected => {
-					return Err(RpcError::InvalidParams(format!(
+					return Err(invalid_params(format!(
 						"Expected ns to be string, got {unexpected:?}"
 					)));
 				}
@@ -333,12 +377,14 @@ pub trait RpcProtocol {
 					let tx = self
 						.kvs()
 						.transaction(TransactionType::Write, LockType::Optimistic)
-						.await?;
-					run!(tx, tx.ensure_ns_db(None, &ns, &db).await)?;
+						.await
+						.map_err(types_error_from_anyhow)?;
+					run!(tx, tx.ensure_ns_db(None, &ns, &db).await)
+						.map_err(types_error_from_anyhow)?;
 					session.db = Some(db)
 				}
 				unexpected => {
-					return Err(RpcError::InvalidParams(format!(
+					return Err(invalid_params(format!(
 						"Expected db to be string, got {unexpected:?}"
 					)));
 				}
@@ -366,10 +412,10 @@ pub trait RpcProtocol {
 		&self,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		// Process the method arguments
 		let Some(PublicValue::Object(params)) = extract_args(params.into_vec()) else {
-			return Err(RpcError::InvalidParams("Expected (params:object)".to_string()));
+			return Err(invalid_params("Expected (params:object)".to_string()));
 		};
 		// Get a write lock on the session
 		let session_lock = self.get_session(&session_id)?;
@@ -380,17 +426,17 @@ pub trait RpcProtocol {
 				.await
 				.map(SurrealValue::into_value);
 		// Return the signup result
-		out.map(DbResult::Other).map_err(Into::into)
+		out.map(DbResult::Other).map_err(types_error_from_anyhow)
 	}
 
 	async fn signin(
 		&self,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		// Process the method arguments
 		let Some(PublicValue::Object(params)) = extract_args(params.into_vec()) else {
-			return Err(RpcError::InvalidParams("Expected (params:object)".to_string()));
+			return Err(invalid_params("Expected (params:object)".to_string()));
 		};
 		// Get a write lock on the session
 		let session_lock = self.get_session(&session_id)?;
@@ -401,17 +447,17 @@ pub trait RpcProtocol {
 				.await
 				.map(SurrealValue::into_value);
 		// Return the signin result
-		out.map(DbResult::Other).map_err(From::from)
+		out.map(DbResult::Other).map_err(types_error_from_anyhow)
 	}
 
 	async fn authenticate(
 		&self,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		// Process the method arguments
 		let Some(PublicValue::String(token)) = extract_args(params.into_vec()) else {
-			return Err(RpcError::InvalidParams("Expected (token:string)".to_string()));
+			return Err(invalid_params("Expected (token:string)".to_string()));
 		};
 		// Get a write lock on the session
 		let session_lock = self.get_session(&session_id)?;
@@ -432,7 +478,7 @@ pub trait RpcProtocol {
 			session_id, session.ns, session.db
 		);
 		// Return nothing on success
-		out.map(DbResult::Other).map_err(From::from)
+		out.map(DbResult::Other).map_err(types_error_from_anyhow)
 	}
 
 	/// Refreshes an access token using a refresh token.
@@ -465,9 +511,9 @@ pub trait RpcProtocol {
 		&self,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		// Process the method arguments
-		let unexpected = || RpcError::InvalidParams("Expected (token:Token)".to_string());
+		let unexpected = || invalid_params("Expected (token:Token)".to_string());
 		let Some(value) = extract_args(params.into_vec()) else {
 			return Err(unexpected());
 		};
@@ -485,15 +531,18 @@ pub trait RpcProtocol {
 		let out: Result<PublicValue> =
 			token.refresh(self.kvs(), &mut session).await.map(Token::into_value);
 		// Return the new token pair
-		out.map(DbResult::Other).map_err(From::from)
+		out.map(DbResult::Other).map_err(types_error_from_anyhow)
 	}
 
-	async fn invalidate(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
+	async fn invalidate(
+		&self,
+		session_id: Option<Uuid>,
+	) -> Result<DbResult, surrealdb_types::Error> {
 		// Get a write lock on the session
 		let session_lock = self.get_session(&session_id)?;
 		let mut session = session_lock.write().await;
 		// Clear the current session
-		crate::iam::clear::clear(&mut session)?;
+		crate::iam::clear::clear(&mut session).map_err(types_error_from_anyhow)?;
 		// Return nothing on success
 		Ok(DbResult::Other(PublicValue::None))
 	}
@@ -525,9 +574,9 @@ pub trait RpcProtocol {
 	/// - The token parameter is missing or invalid
 	/// - The token doesn't contain a refresh component
 	/// - The token doesn't contain valid namespace/database/access information
-	async fn revoke(&self, params: PublicArray) -> Result<DbResult, RpcError> {
+	async fn revoke(&self, params: PublicArray) -> Result<DbResult, surrealdb_types::Error> {
 		// Process the method arguments
-		let unexpected = || RpcError::InvalidParams("Expected (token:Token)".to_string());
+		let unexpected = || invalid_params("Expected (token:Token)".to_string());
 		let Some(value) = extract_args(params.into_vec()) else {
 			return Err(unexpected());
 		};
@@ -536,12 +585,12 @@ pub trait RpcProtocol {
 		};
 		// Revoke the refresh token by removing the grant record from the database.
 		// This prevents the refresh token from being used to obtain new access tokens.
-		token.revoke_refresh_token(self.kvs()).await?;
+		token.revoke_refresh_token(self.kvs()).await.map_err(types_error_from_anyhow)?;
 		// Return nothing on success
 		Ok(DbResult::Other(PublicValue::None))
 	}
 
-	async fn reset(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
+	async fn reset(&self, session_id: Option<Uuid>) -> Result<DbResult, surrealdb_types::Error> {
 		// Get a write lock on the session
 		let session_lock = self.get_session(&session_id)?;
 		let mut session = session_lock.write().await;
@@ -563,7 +612,7 @@ pub trait RpcProtocol {
 		&self,
 		_txn: Option<Uuid>,
 		session_id: Option<Uuid>,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		let vars = Some(session.variables.clone());
@@ -583,7 +632,7 @@ pub trait RpcProtocol {
 		&self,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 
 		// Check permissions with read lock
@@ -591,7 +640,7 @@ pub trait RpcProtocol {
 			let session = session_lock.read().await;
 			// Check if the user is allowed to query
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-				return Err(RpcError::MethodNotAllowed);
+				return Err(method_not_allowed(Method::Set.to_string()));
 			}
 		}
 
@@ -599,14 +648,14 @@ pub trait RpcProtocol {
 		let Some((PublicValue::String(key), val)) =
 			extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
 		else {
-			return Err(RpcError::InvalidParams("Expected (key:string, value:Value)".to_string()));
+			return Err(invalid_params("Expected (key:string, value:Value)".to_string()));
 		};
 
 		// Get a write lock on the session
 		let mut session = session_lock.write().await;
 
 		if session.expired() {
-			return Err(anyhow::Error::new(Error::ExpiredSession).into());
+			return Err(session_expired());
 		}
 
 		match val {
@@ -625,7 +674,7 @@ pub trait RpcProtocol {
 		&self,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 
 		// Check permissions with read lock
@@ -633,13 +682,13 @@ pub trait RpcProtocol {
 			let session = session_lock.read().await;
 			// Check if the user is allowed to query
 			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-				return Err(RpcError::MethodNotAllowed);
+				return Err(method_not_allowed(Method::Unset.to_string()));
 			}
 		}
 
 		// Process the method arguments
 		let Some(PublicValue::String(key)) = extract_args(params.into_vec()) else {
-			return Err(RpcError::InvalidParams("Expected (key)".to_string()));
+			return Err(invalid_params("Expected (key)".to_string()));
 		};
 
 		// Get a write lock on the session
@@ -658,16 +707,16 @@ pub trait RpcProtocol {
 		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(Method::Kill.to_string()));
 		}
 		// Process the method arguments
 		let (id,) = extract_args::<(PublicValue,)>(params.into_vec())
-			.ok_or(RpcError::InvalidParams("Expected (id)".to_string()))?;
+			.ok_or(invalid_params("Expected (id)".to_string()))?;
 
 		// Specify the SQL query string
 		let ast = Ast {
@@ -678,7 +727,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let vars = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars)
+			.await
+			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
 		Ok(DbResult::Other(res.remove(0).result?))
 	}
@@ -688,16 +739,16 @@ pub trait RpcProtocol {
 		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(Method::Live.to_string()));
 		}
 		// Process the method arguments
 		let (what, diff) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
-			.ok_or(RpcError::InvalidParams("Expected (what, diff)".to_string()))?;
+			.ok_or(invalid_params("Expected (what, diff)".to_string()))?;
 
 		// If value is a strand, handle it as if it was a table.
 		let what = match what {
@@ -724,7 +775,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let vars = Some(session.variables.clone());
 
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars)
+			.await
+			.map_err(types_error_from_anyhow)?;
 
 		// Extract the first query result
 		let first = res.remove(0).result?;
@@ -740,16 +793,16 @@ pub trait RpcProtocol {
 		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(Method::Select.to_string()));
 		}
 		// Process the method arguments
 		let (what,) = extract_args::<(PublicValue,)>(params.into_vec())
-			.ok_or(RpcError::InvalidParams("Expected (what:Value)".to_string()))?;
+			.ok_or(invalid_params("Expected (what:Value)".to_string()))?;
 
 		// If the what is a single record with a non range value, make it return only a
 		// single result.
@@ -788,7 +841,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let vars = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars)
+			.await
+			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
 		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
@@ -803,16 +858,16 @@ pub trait RpcProtocol {
 		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(Method::Insert.to_string()));
 		}
 		// Process the method arguments
 		let (what, data) = extract_args::<(PublicValue, PublicValue)>(params.into_vec())
-			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
+			.ok_or(invalid_params("Expected (what:Value, data:Value)".to_string()))?;
 
 		let into = match what {
 			PublicValue::Null | PublicValue::None => None,
@@ -835,7 +890,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+			.await
+			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
 		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
@@ -846,16 +903,16 @@ pub trait RpcProtocol {
 		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(Method::InsertRelation.to_string()));
 		}
 		// Process the method arguments
 		let (what, data) = extract_args::<(PublicValue, PublicValue)>(params.to_vec())
-			.ok_or(RpcError::InvalidParams("Expected (what, data)".to_string()))?;
+			.ok_or(invalid_params("Expected (what, data)".to_string()))?;
 
 		let table_name = match what {
 			PublicValue::Null | PublicValue::None => None,
@@ -880,7 +937,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+			.await
+			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
 		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
@@ -895,16 +954,16 @@ pub trait RpcProtocol {
 		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(Method::Create.to_string()));
 		}
 		// Process the method arguments
 		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
-			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
+			.ok_or(invalid_params("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
 			PublicValue::String(_) => true,
@@ -932,7 +991,9 @@ pub trait RpcProtocol {
 		};
 		let ast = Ast::single_expr(Expr::Create(Box::new(sql)));
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), None).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), None)
+			.await
+			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
 		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
@@ -947,16 +1008,16 @@ pub trait RpcProtocol {
 		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(Method::Upsert.to_string()));
 		}
 		// Process the method arguments
 		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
-			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
+			.ok_or(invalid_params("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
 			PublicValue::RecordId(ref x) => !matches!(x.key, PublicRecordIdKey::Range(_)),
@@ -988,7 +1049,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+			.await
+			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
 		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
@@ -1003,16 +1066,16 @@ pub trait RpcProtocol {
 		_txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(Method::Update.to_string()));
 		}
 		// Process the method arguments
 		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
-			.ok_or(RpcError::InvalidParams("Expected (what, data)".to_string()))?;
+			.ok_or(invalid_params("Expected (what, data)".to_string()))?;
 
 		let only = match what {
 			PublicValue::RecordId(ref x) => !matches!(x.key, PublicRecordIdKey::Range(_)),
@@ -1058,16 +1121,16 @@ pub trait RpcProtocol {
 		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(Method::Merge.to_string()));
 		}
 		// Process the method arguments
 		let (what, data) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
-			.ok_or(RpcError::InvalidParams("Expected (what:Value, data:Value)".to_string()))?;
+			.ok_or(invalid_params("Expected (what:Value, data:Value)".to_string()))?;
 
 		let only = match what {
 			PublicValue::RecordId(ref x) => !matches!(x.key, PublicRecordIdKey::Range(_)),
@@ -1095,7 +1158,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+			.await
+			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
 		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
@@ -1110,21 +1175,19 @@ pub trait RpcProtocol {
 		_txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(Method::Patch.to_string()));
 		}
 		// Process the method arguments
 		let (what, data, diff) =
 			extract_args::<(PublicValue, Option<PublicValue>, Option<PublicValue>)>(
 				params.into_vec(),
 			)
-			.ok_or(RpcError::InvalidParams(
-				"Expected (what:Value, data:Value, diff:Value)".to_string(),
-			))?;
+			.ok_or(invalid_params("Expected (what:Value, data:Value, diff:Value)".to_string()))?;
 
 		// Process the method arguments
 		let only = match what {
@@ -1177,19 +1240,19 @@ pub trait RpcProtocol {
 		_txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(Method::Relate.to_string()));
 		}
 		// Process the method arguments
 		let (from, kind, with, data) =
 			extract_args::<(PublicValue, PublicValue, PublicValue, Option<PublicValue>)>(
 				params.to_vec(),
 			)
-			.ok_or(RpcError::InvalidParams(
+			.ok_or(invalid_params(
 				"Expected (from:Value, kind:Value, with:Value, data:Value)".to_string(),
 			))?;
 
@@ -1234,16 +1297,16 @@ pub trait RpcProtocol {
 		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(Method::Delete.to_string()));
 		}
 		// Process the method arguments
 		let (what,) = extract_args::<(PublicValue,)>(params.into_vec())
-			.ok_or(RpcError::InvalidParams("Expected (what:Value)".to_string()))?;
+			.ok_or(invalid_params("Expected (what:Value)".to_string()))?;
 		// Specify the SQL query string
 		let sql = Expr::Delete(Box::new(DeleteStatement {
 			only: singular(&what),
@@ -1258,7 +1321,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var)
+			.await
+			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
 		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
@@ -1268,10 +1333,14 @@ pub trait RpcProtocol {
 	// Methods for getting info
 	// ------------------------------
 
-	async fn version(&self, _txn: Option<Uuid>, params: PublicArray) -> Result<DbResult, RpcError> {
+	async fn version(
+		&self,
+		_txn: Option<Uuid>,
+		params: PublicArray,
+	) -> Result<DbResult, surrealdb_types::Error> {
 		match params.len() {
 			0 => Ok(self.version_data()),
-			_ => Err(RpcError::InvalidParams("Expected 0 arguments".to_string())),
+			_ => Err(invalid_params("Expected 0 arguments".to_string())),
 		}
 	}
 
@@ -1284,21 +1353,20 @@ pub trait RpcProtocol {
 		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(Method::Query.to_string()));
 		}
 		// Process the method arguments
-		let (query, vars) = extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
-			.ok_or(RpcError::InvalidParams(
-			"Expected (query:string, vars:object)".to_string(),
-		))?;
+		let (query, vars) =
+			extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
+				.ok_or(invalid_params("Expected (query:string, vars:object)".to_string()))?;
 
 		let PublicValue::String(query) = query else {
-			return Err(RpcError::InvalidParams("Expected query to be string".to_string()));
+			return Err(invalid_params("Expected query to be string".to_string()));
 		};
 
 		// Specify the query variables
@@ -1310,13 +1378,17 @@ pub trait RpcProtocol {
 			}
 			None | Some(PublicValue::None | PublicValue::Null) => Some(session.variables.clone()),
 			unexpected => {
-				return Err(RpcError::InvalidParams(format!(
+				return Err(invalid_params(format!(
 					"Expected vars to be object, got {unexpected:?}"
 				)));
 			}
 		};
 
-		Ok(DbResult::Query(run_query(self, txn, session_id, QueryForm::Text(&query), vars).await?))
+		Ok(DbResult::Query(
+			run_query(self, txn, session_id, QueryForm::Text(&query), vars)
+				.await
+				.map_err(types_error_from_anyhow)?,
+		))
 	}
 
 	// ------------------------------
@@ -1328,26 +1400,25 @@ pub trait RpcProtocol {
 		_txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
-	) -> Result<DbResult, RpcError> {
+	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+			return Err(method_not_allowed(Method::Run.to_string()));
 		}
 		// Process the method arguments
-		let (name, version, args) =
-			extract_args::<(PublicValue, Option<PublicValue>, Option<PublicValue>)>(
-				params.into_vec(),
-			)
-			.ok_or(RpcError::InvalidParams(
-				"Expected (name:string, version:string, args:array)".to_string(),
-			))?;
+		let (name, version, args) = extract_args::<(
+			PublicValue,
+			Option<PublicValue>,
+			Option<PublicValue>,
+		)>(params.into_vec())
+		.ok_or(invalid_params("Expected (name:string, version:string, args:array)".to_string()))?;
 		// Parse the function name argument
 		let name = match name {
 			PublicValue::String(v) => v,
 			unexpected => {
-				return Err(RpcError::InvalidParams(format!(
+				return Err(invalid_params(format!(
 					"Expected name to be string, got {unexpected:?}"
 				)));
 			}
@@ -1357,7 +1428,7 @@ pub trait RpcProtocol {
 			Some(PublicValue::String(v)) => Some(v),
 			None | Some(PublicValue::None | PublicValue::Null) => None,
 			unexpected => {
-				return Err(RpcError::InvalidParams(format!(
+				return Err(invalid_params(format!(
 					"Expected version to be string, got {unexpected:?}"
 				)));
 			}
@@ -1369,7 +1440,7 @@ pub trait RpcProtocol {
 			}
 			None | Some(PublicValue::None | PublicValue::Null) => vec![],
 			unexpected => {
-				return Err(RpcError::InvalidParams(format!(
+				return Err(invalid_params(format!(
 					"Expected args to be array, got {unexpected:?}"
 				)));
 			}
@@ -1384,13 +1455,13 @@ pub trait RpcProtocol {
 					.get_capabilities()
 					.allows_experimental(&ExperimentalTarget::Surrealism)
 				{
-					return Err(RpcError::InvalidParams(
+					return Err(invalid_params(
 						"Experimental capability `surrealism` is not enabled".to_string(),
 					));
 				}
 
 				let Some(name) = segments.get(1).map(|x| (*x).to_string()) else {
-					return Err(RpcError::InvalidParams("Expected module name".to_string()));
+					return Err(invalid_params("Expected module name".to_string()));
 				};
 
 				let sub = segments.get(2).map(|x| (*x).to_string());
@@ -1403,39 +1474,31 @@ pub trait RpcProtocol {
 					.get_capabilities()
 					.allows_experimental(&ExperimentalTarget::Surrealism)
 				{
-					return Err(RpcError::InvalidParams(
+					return Err(invalid_params(
 						"Experimental capability `surrealism` is not enabled".to_string(),
 					));
 				}
 
 				let Some(org) = segments.get(1).map(|x| (*x).to_string()) else {
-					return Err(RpcError::InvalidParams(
-						"Expected silo organisation name".to_string(),
-					));
+					return Err(invalid_params("Expected silo organisation name".to_string()));
 				};
 
 				let Some(pkg) = segments.get(2).map(|x| (*x).to_string()) else {
-					return Err(RpcError::InvalidParams("Expected silo package name".to_string()));
+					return Err(invalid_params("Expected silo package name".to_string()));
 				};
 
 				let Some(version) = version else {
-					return Err(RpcError::InvalidParams("Expected silo version".to_string()));
+					return Err(invalid_params("Expected silo version".to_string()));
 				};
 				let mut split = version.split('.');
 				let major = split.next().and_then(|s| s.parse::<u32>().ok()).ok_or_else(|| {
-					RpcError::InvalidParams(
-						"Expected major version (u32) in version string".to_string(),
-					)
+					invalid_params("Expected major version (u32) in version string".to_string())
 				})?;
 				let minor = split.next().and_then(|s| s.parse::<u32>().ok()).ok_or_else(|| {
-					RpcError::InvalidParams(
-						"Expected minor version (u32) in version string".to_string(),
-					)
+					invalid_params("Expected minor version (u32) in version string".to_string())
 				})?;
 				let patch = split.next().and_then(|s| s.parse::<u32>().ok()).ok_or_else(|| {
-					RpcError::InvalidParams(
-						"Expected patch version (u32) in version string".to_string(),
-					)
+					invalid_params("Expected patch version (u32) in version string".to_string())
 				})?;
 
 				let sub = segments.get(3).map(|x| (*x).to_string());
@@ -1453,7 +1516,7 @@ pub trait RpcProtocol {
 				let name = segments[1..].join("::");
 				Function::Model(Model {
 					name,
-					version: version.ok_or(RpcError::InvalidParams(
+					version: version.ok_or(invalid_params(
 						"Expected version to be set for model function".to_string(),
 					))?,
 				})
@@ -1470,7 +1533,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the function on the database
-		let mut res = run_query(self, None, session_id, QueryForm::Parsed(ast), var).await?;
+		let mut res = run_query(self, None, session_id, QueryForm::Parsed(ast), var)
+			.await
+			.map_err(types_error_from_anyhow)?;
 		// Extract the first query result
 		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
@@ -1485,8 +1550,8 @@ pub trait RpcProtocol {
 		&self,
 		_txn: Option<Uuid>,
 		_session_id: Option<Uuid>,
-	) -> Result<DbResult, RpcError> {
-		Err(RpcError::MethodNotFound)
+	) -> Result<DbResult, surrealdb_types::Error> {
+		Err(method_not_allowed(Method::Begin.to_string()))
 	}
 
 	/// Commit a transaction
@@ -1495,8 +1560,8 @@ pub trait RpcProtocol {
 		_txn: Option<Uuid>,
 		_session_id: Option<Uuid>,
 		_params: PublicArray,
-	) -> Result<DbResult, RpcError> {
-		Err(RpcError::MethodNotFound)
+	) -> Result<DbResult, surrealdb_types::Error> {
+		Err(method_not_allowed(Method::Commit.to_string()))
 	}
 
 	/// Cancel a transaction
@@ -1505,8 +1570,8 @@ pub trait RpcProtocol {
 		_txn: Option<Uuid>,
 		_session_id: Option<Uuid>,
 		_params: PublicArray,
-	) -> Result<DbResult, RpcError> {
-		Err(RpcError::MethodNotFound)
+	) -> Result<DbResult, surrealdb_types::Error> {
+		Err(method_not_allowed(Method::Cancel.to_string()))
 	}
 }
 
@@ -1525,14 +1590,16 @@ async fn run_query<T>(
 where
 	T: RpcProtocol + ?Sized,
 {
-	let session_lock = this.get_session(&session_id)?;
+	let session_lock = this.get_session(&session_id).map_err(anyhow::Error::from)?;
 	let session = session_lock.read().await;
-	ensure!(T::LQ_SUPPORT || !session.rt, RpcError::BadLQConfig);
+	if !T::LQ_SUPPORT && session.rt {
+		return Err(bad_lq_config().into());
+	}
 
 	// If a transaction UUID is provided, retrieve it and execute with it
 	let res = if let Some(txn_id) = txn {
 		// Retrieve the transaction - fail if not found
-		let tx = this.get_tx(txn_id).await?;
+		let tx = this.get_tx(txn_id).await.map_err(anyhow::Error::from)?;
 		// Execute with the existing transaction by passing it through context
 		match query {
 			QueryForm::Text(query) => {

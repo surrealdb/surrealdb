@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Result, anyhow, bail};
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
-use surrealdb_types::ToSql;
+use surrealdb_types::{Error as TypesError, QueryError, ToSql};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tracing::instrument;
@@ -14,12 +14,13 @@ use trice::Instant;
 use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, RootProvider};
-use crate::ctx::FrozenContext;
 use crate::ctx::reason::Reason;
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::response::QueryResult;
 use crate::dbs::{Force, Options, QueryType};
 use crate::doc::DefaultBroker;
 use crate::err::Error;
+use crate::exec::planner::try_plan_expr;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
@@ -28,7 +29,7 @@ use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
-use crate::rpc::DbResultError;
+use crate::rpc::types_error_from_anyhow;
 use crate::types::PublicNotification;
 use crate::val::{Array, Value, convert_value_to_public_value};
 use crate::{err, expr, sql};
@@ -41,6 +42,9 @@ pub struct Executor {
 	results: Vec<QueryResult>,
 	opt: Options,
 	ctx: FrozenContext,
+	/// Cached session info to avoid re-extracting from context on every query.
+	/// Session values don't change between statements in the same executor batch.
+	cached_session: Option<Arc<crate::exec::context::SessionInfo>>,
 }
 
 impl Executor {
@@ -65,6 +69,7 @@ impl Executor {
 			results: Vec::new(),
 			opt,
 			ctx,
+			cached_session: None,
 		}
 	}
 
@@ -95,6 +100,19 @@ impl Executor {
 		if let Some(slow_log) = self.ctx.slow_log() {
 			slow_log.check_log(&self.ctx, start, stm);
 		}
+	}
+
+	/// Get the cached session info, extracting it on first call.
+	///
+	/// Session values don't change between statements in the same
+	/// executor batch, so we extract once and reuse.
+	fn get_session_info(&mut self) -> Option<Arc<crate::exec::context::SessionInfo>> {
+		if let Some(ref cached) = self.cached_session {
+			return Some(cached.clone());
+		}
+		let session = self.extract_session_info();
+		self.cached_session.clone_from(&session);
+		session
 	}
 
 	/// Extract session information from the FrozenContext.
@@ -170,7 +188,7 @@ impl Executor {
 	/// This builds an ExecutionContext from the current session state and executes
 	/// the streaming operator plan, collecting all results into an array.
 	async fn execute_operator_plan(
-		&self,
+		&mut self,
 		plan: Arc<dyn crate::exec::ExecOperator>,
 		txn: Arc<Transaction>,
 	) -> FlowResult<Value> {
@@ -205,18 +223,17 @@ impl Executor {
 			}))
 		});
 
-		// Build the root context.
-		// The FrozenContext is the single source of truth for params, txn,
-		// capabilities, and other context fields. We only extract auth and
-		// session info which are not trivially accessible from FrozenContext.
+		// Build the root context using cached session info. The context
+		// snapshot must be fresh per-query because it contains the
+		// transaction reference which changes between statements.
 		let root_ctx = RootContext {
-			ctx: self.ctx.clone(),
+			ctx: Context::snapshot(&self.ctx).freeze(),
 			options: Some(self.opt.clone()),
 			datastore: None,
 			cancellation,
 			auth: self.opt.auth.clone(),
 			auth_enabled: self.opt.auth_enabled,
-			session: self.extract_session_info(),
+			session: self.get_session_info(),
 			current_value: None,
 		};
 
@@ -246,6 +263,15 @@ impl Executor {
 						ns: ns_def,
 					},
 					db: db_def,
+					field_state_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+						std::collections::HashMap::new(),
+					)),
+					table_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+						std::collections::HashMap::new(),
+					)),
+					index_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+						std::collections::HashMap::new(),
+					)),
 				})
 			}
 		};
@@ -403,6 +429,9 @@ impl Executor {
 					ctx.add_value("session", session.into());
 				}
 
+				// Invalidate cached session info since USE changes ns/db
+				self.cached_session = None;
+
 				// Return the current namespace and database
 				Ok(Value::from(map! {
 					"namespace".to_string() => self.opt.ns.clone().map(|x| Value::String(x.to_string())).unwrap_or(Value::None),
@@ -500,7 +529,7 @@ impl Executor {
 			// Process all other normal statements
 			TopLevelExpr::Expr(e) => {
 				// Try the new streaming execution path first
-				match crate::exec::planner::try_plan_expr(&e, &self.ctx, txn.clone()).await {
+				match try_plan_expr!(&e, &self.ctx, txn.clone()) {
 					Ok(plan) => {
 						// Set the transaction on the context
 						ctx_mut!().set_transaction(txn.clone());
@@ -643,9 +672,10 @@ impl Executor {
 
 				self.results.push(QueryResult {
 					time: Duration::ZERO,
-					result: Err(DbResultError::QueryNotExecuted(
+					result: Err(TypesError::query(
 						"Tried to start a transaction while another transaction was open"
 							.to_string(),
+						Some(QueryError::NotExecuted),
 					)),
 					query_type: QueryType::Other,
 				});
@@ -685,7 +715,10 @@ impl Executor {
 
 				for res in &mut self.results[start_results..] {
 					res.query_type = QueryType::Other;
-					res.result = Err(DbResultError::QueryCancelled);
+					res.result = Err(TypesError::query(
+						"The query was not executed due to a cancelled transaction".to_string(),
+						Some(QueryError::Cancelled),
+					));
 				}
 
 				while let Some(stmt) = stream.next().await {
@@ -698,10 +731,17 @@ impl Executor {
 					self.results.push(QueryResult {
 						time: Duration::ZERO,
 						result: Err(match done {
-							Reason::Timedout(d) => {
-								DbResultError::QueryTimedout(format!("Timed out: {d}"))
-							}
-							Reason::Canceled => DbResultError::QueryCancelled,
+							Reason::Timedout(d) => TypesError::query(
+								format!("Timed out: {d}"),
+								Some(QueryError::TimedOut {
+									duration: d.0,
+								}),
+							),
+							Reason::Canceled => TypesError::query(
+								"The query was not executed due to a cancelled transaction"
+									.to_string(),
+								Some(QueryError::Cancelled),
+							),
 						}),
 						query_type: QueryType::Other,
 					});
@@ -731,15 +771,18 @@ impl Executor {
 
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(DbResultError::QueryNotExecuted(format!(
-							"The query was not executed due to a failed transaction: {}",
-							stmt.to_sql()
-						)));
+						res.result = Err(TypesError::query(
+							format!(
+								"The query was not executed due to a failed transaction: {}",
+								stmt.to_sql()
+							),
+							Some(QueryError::NotExecuted),
+						));
 					}
 
 					self.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Err(DbResultError::InternalError(
+						result: Err(TypesError::internal(
 							"Tried to start a transaction while another transaction was open"
 								.to_string(),
 						)),
@@ -757,10 +800,13 @@ impl Executor {
 
 						self.results.push(QueryResult {
 							time: Duration::ZERO,
-							result: Err(DbResultError::QueryNotExecuted(format!(
-								"The query was not executed due to a failed transaction: {}",
-								stmt.to_sql()
-							))),
+							result: Err(TypesError::query(
+								format!(
+									"The query was not executed due to a failed transaction: {}",
+									stmt.to_sql()
+								),
+								Some(QueryError::NotExecuted),
+							)),
 							query_type: QueryType::Other,
 						});
 					}
@@ -774,7 +820,10 @@ impl Executor {
 					// update the results indicating cancelation.
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(DbResultError::QueryCancelled);
+						res.result = Err(TypesError::query(
+							"The query was not executed due to a cancelled transaction".to_string(),
+							Some(QueryError::Cancelled),
+						));
 					}
 
 					self.opt.broker = None;
@@ -823,8 +872,7 @@ impl Executor {
 					// failed to commit
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result =
-							Err(DbResultError::InternalError(format!("Query not executed: {}", e)));
+						res.result = Err(TypesError::internal(format!("Query not executed: {e}")));
 					}
 
 					self.opt.broker = None;
@@ -841,7 +889,7 @@ impl Executor {
 						});
 						continue;
 					}
-					Err(e) => Err(DbResultError::InternalError(e.to_string())),
+					Err(e) => Err(TypesError::internal(e.to_string())),
 				},
 				stmt => {
 					// reintroduce planner later.
@@ -860,9 +908,10 @@ impl Executor {
 							Err(ControlFlow::Err(e)) => {
 								for res in &mut self.results[start_results..] {
 									res.query_type = QueryType::Other;
-									res.result = Err(DbResultError::QueryNotExecuted(
+									res.result = Err(TypesError::query(
 										"The query was not executed due to a failed transaction"
 											.to_string(),
+										Some(QueryError::NotExecuted),
 									));
 								}
 
@@ -870,7 +919,7 @@ impl Executor {
 								// we hit a cancel or commit.
 								self.results.push(QueryResult {
 									time: before.elapsed(),
-									result: Err(DbResultError::InternalError(e.to_string())),
+									result: Err(types_error_from_anyhow(e)),
 									query_type,
 								});
 
@@ -887,8 +936,9 @@ impl Executor {
 
 									self.results.push(QueryResult {
 										time: Duration::ZERO,
-										result: Err(DbResultError::QueryNotExecuted(
-												"The query was not executed due to a cancelled transaction".to_string(),
+										result: Err(TypesError::query(
+											"The query was not executed due to a cancelled transaction".to_string(),
+											Some(QueryError::Cancelled),
 										)),
 										query_type: QueryType::Other,
 									});
@@ -902,7 +952,7 @@ impl Executor {
 
 					match r {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
-						Err(err) => Err(DbResultError::InternalError(err.to_string())),
+						Err(err) => Err(TypesError::internal(err.to_string())),
 					}
 				}
 			};
@@ -920,7 +970,7 @@ impl Executor {
 
 		for res in &mut self.results[start_results..] {
 			res.query_type = QueryType::Other;
-			res.result = Err(DbResultError::InternalError("Missing COMMIT statement".to_string()));
+			res.result = Err(TypesError::internal("Missing COMMIT statement".to_string()));
 		}
 
 		self.opt.broker = None;
@@ -961,17 +1011,17 @@ impl Executor {
 				Ok(value) | Err(ControlFlow::Return(value)) => QueryResult {
 					time,
 					result: crate::val::convert_value_to_public_value(value)
-						.map_err(|e| crate::rpc::DbResultError::InternalError(e.to_string())),
+						.map_err(|e| TypesError::internal(e.to_string())),
 					query_type: QueryType::Other,
 				},
 				Err(ControlFlow::Err(e)) => QueryResult {
 					time,
-					result: Err(DbResultError::InternalError(e.to_string())),
+					result: Err(types_error_from_anyhow(e)),
 					query_type: QueryType::Other,
 				},
 				Err(ControlFlow::Continue) | Err(ControlFlow::Break) => QueryResult {
 					time,
-					result: Err(DbResultError::InternalError("Invalid control flow".to_string())),
+					result: Err(TypesError::internal("Invalid control flow".to_string())),
 					query_type: QueryType::Other,
 				},
 			};
@@ -1022,7 +1072,7 @@ impl Executor {
 				Err(e) => {
 					this.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Err(DbResultError::InternalError(e.to_string())),
+						result: Err(TypesError::internal(e.to_string())),
 						query_type: QueryType::Other,
 					});
 
@@ -1051,7 +1101,7 @@ impl Executor {
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
 						this.results.push(QueryResult {
 							time: Duration::ZERO,
-							result: Err(DbResultError::InternalError(e.to_string())),
+							result: Err(TypesError::internal(e.to_string())),
 							query_type: QueryType::Other,
 						});
 
@@ -1065,7 +1115,7 @@ impl Executor {
 					let result = this.execute_bare_statement(kvs, &now, stmt).await;
 					let result = match result {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
-						Err(err) => Err(DbResultError::InternalError(err.to_string())),
+						Err(err) => Err(types_error_from_anyhow(err)),
 					};
 					if !skip_success_results || result.is_err() {
 						this.results.push(QueryResult {

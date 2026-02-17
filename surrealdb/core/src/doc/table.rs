@@ -6,7 +6,7 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::aggregation::{self, AggregateFields, AggregationAnalysis, AggregationStat};
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{Data, Metadata, Record, RecordType, ViewDefinition};
+use crate::catalog::{Metadata, Record, RecordType, ViewDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::{Action, CursorDoc, Document, DocumentContext, NsDbTbCtx};
@@ -122,7 +122,7 @@ impl Document {
 
 				if set {
 					let data = fields.compute(stk, ctx, opt, Some(&self.current)).await?;
-					let record = Arc::new(Record::new(data.into()));
+					let record = Arc::new(Record::new(data));
 
 					ctx.tx()
 						.set_record(db.namespace_id, db.database_id, table_name, id, record, None)
@@ -328,7 +328,7 @@ impl Document {
 		} else {
 			action = Action::Create;
 			Record {
-				data: Data::Mutable(Value::None),
+				data: Value::None,
 				metadata: Some(Metadata {
 					record_type: RecordType::Table,
 					aggregation_stats: aggr.aggregations.iter().map(|x| x.to_stat()).collect(),
@@ -370,7 +370,7 @@ impl Document {
 			}
 		};
 
-		record.data = data.into();
+		record.data = data;
 		let record = Arc::new(record);
 
 		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None)
@@ -741,7 +741,7 @@ impl Document {
 			}
 		};
 
-		record.data = data.into();
+		record.data = data;
 		let record = Arc::new(record);
 
 		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None)
@@ -1148,7 +1148,7 @@ impl Document {
 			}
 		};
 
-		record.data = data.into();
+		record.data = data;
 		let record = Arc::new(record);
 
 		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None)
@@ -1204,7 +1204,7 @@ impl Document {
 		// do via statements. So instead we create a document and pretend to run be the right
 		// statement query and just run events immediatly.
 		// Updating views prevents premissions from being run anyway so there shouldn't be a
-		// probelm.
+		// problem.
 		//
 		// Generate a document so that we can run the events.
 

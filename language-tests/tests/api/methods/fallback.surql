@@ -38,9 +38,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: { handler: 'fallback', middleware: 'fallback_mw' }, headers: {}, status: 200 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 - Fallback only (no method-specific handlers)

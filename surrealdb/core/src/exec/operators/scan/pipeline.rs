@@ -31,6 +31,10 @@ use crate::key::record;
 use crate::kvs::{KVKey, KVValue, Transaction};
 use crate::val::{RecordIdKey, TableName, Value};
 
+/// A raw computed field entry before topological sorting:
+/// `(field_name, physical_expr, optional_kind, dependency_field_names)`.
+type RawComputedField = (String, Arc<dyn PhysicalExpr>, Option<crate::expr::Kind>, Vec<String>);
+
 // =============================================================================
 // ScanPipeline
 // =============================================================================
@@ -57,6 +61,26 @@ pub(crate) struct ScanPipeline {
 }
 
 impl ScanPipeline {
+	/// Check whether any post-decode processing (permission filtering,
+	/// computed fields, field-level permissions, or WHERE predicate) is
+	/// needed.
+	///
+	/// Callers use this *before* constructing a `ScanPipeline` to decide
+	/// whether `pre_skip` / `effective_storage_limit` can be pushed to
+	/// the KV layer. The same check is cached internally so that
+	/// [`process_batch`] can skip work when nothing is needed.
+	pub(crate) fn compute_needs_processing(
+		permission: &PhysicalPermission,
+		field_state: &FieldState,
+		check_perms: bool,
+		predicate: Option<&Arc<dyn PhysicalExpr>>,
+	) -> bool {
+		!matches!(permission, PhysicalPermission::Allow)
+			|| !field_state.computed_fields.is_empty()
+			|| (check_perms && !field_state.field_permissions.is_empty())
+			|| predicate.is_some()
+	}
+
 	pub(crate) fn new(
 		permission: PhysicalPermission,
 		predicate: Option<Arc<dyn PhysicalExpr>>,
@@ -65,10 +89,12 @@ impl ScanPipeline {
 		limit: Option<usize>,
 		start: usize,
 	) -> Self {
-		let needs_processing = !matches!(permission, PhysicalPermission::Allow)
-			|| !field_state.computed_fields.is_empty()
-			|| (check_perms && !field_state.field_permissions.is_empty())
-			|| predicate.is_some();
+		let needs_processing = Self::compute_needs_processing(
+			&permission,
+			&field_state,
+			check_perms,
+			predicate.as_ref(),
+		);
 		Self {
 			permission,
 			predicate,
@@ -213,10 +239,10 @@ pub(crate) fn decode_record(key: &[u8], val: Vec<u8>) -> Result<Value, ControlFl
 		crate::catalog::Record::kv_decode_value(val).context("Failed to deserialize record")?;
 
 	// Inject the id field into the document
-	record.data.to_mut().def(&rid);
+	record.data.def(rid);
 
-	// Take ownership of the value (zero-cost move for freshly deserialized Mutable data)
-	Ok(record.data.into_value())
+	// Take ownership of the value (zero-cost move for freshly deserialized data)
+	Ok(record.data)
 }
 
 // =============================================================================
@@ -258,6 +284,29 @@ pub(crate) async fn filter_and_process_batch(
 	check_perms: bool,
 ) -> Result<(), ControlFlow> {
 	let needs_perm_filter = !matches!(permission, PhysicalPermission::Allow);
+
+	// Fast path: when only the predicate is active (no permissions, no
+	// computed fields), use evaluate_batch for potentially better throughput.
+	if !needs_perm_filter
+		&& state.computed_fields.is_empty()
+		&& (!check_perms || state.field_permissions.is_empty())
+		&& let Some(pred) = predicate
+	{
+		let eval_ctx = EvalContext::from_exec_ctx(ctx);
+		let results = pred.evaluate_batch(eval_ctx, &batch[..]).await?;
+		let mut write_idx = 0;
+		for (read_idx, result) in results.into_iter().enumerate() {
+			if result.is_truthy() {
+				if write_idx != read_idx {
+					batch.swap(write_idx, read_idx);
+				}
+				write_idx += 1;
+			}
+		}
+		batch.truncate(write_idx);
+		return Ok(());
+	}
+
 	let mut write_idx = 0;
 	for read_idx in 0..batch.len() {
 		// Table-level permission (skip if Allow)
@@ -376,12 +425,20 @@ pub(crate) async fn eval_limit_expr(
 
 /// Cached state for field processing (computed fields and permissions).
 /// Initialized on first batch and reused for subsequent batches.
-#[derive(Debug)]
+///
+/// `field_permissions` and `dep_map` are wrapped in `Arc` so that
+/// [`filter_field_state_for_projection`] can share them across filtered
+/// copies without cloning the underlying `HashMap`.
+#[derive(Debug, Clone)]
 pub(crate) struct FieldState {
 	/// Computed field definitions converted to physical expressions
 	pub(crate) computed_fields: Vec<ComputedFieldDef>,
 	/// Field-level permissions (field name -> permission)
-	pub(crate) field_permissions: HashMap<String, PhysicalPermission>,
+	pub(crate) field_permissions: Arc<HashMap<String, PhysicalPermission>>,
+	/// Dependency map for computed fields, used for projection filtering.
+	/// Stored alongside the cached state so that projected queries can
+	/// cheaply determine the subset of computed fields they need.
+	dep_map: Arc<HashMap<String, crate::expr::computed_deps::ComputedDeps>>,
 }
 
 impl FieldState {
@@ -389,13 +446,14 @@ impl FieldState {
 	pub(crate) fn empty() -> Self {
 		Self {
 			computed_fields: Vec::new(),
-			field_permissions: HashMap::new(),
+			field_permissions: Arc::new(HashMap::new()),
+			dep_map: Arc::new(HashMap::new()),
 		}
 	}
 }
 
 /// A computed field definition ready for evaluation.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ComputedFieldDef {
 	/// The field name where to store the result
 	field_name: String,
@@ -405,36 +463,42 @@ pub(crate) struct ComputedFieldDef {
 	kind: Option<crate::expr::Kind>,
 }
 
-/// Fetch field definitions and build the cached field state.
-#[allow(clippy::type_complexity)]
-pub(crate) async fn build_field_state(
-	ctx: &ExecutionContext,
+/// Build field state from raw transaction and context parameters.
+///
+/// This is the core implementation that does the actual work: KV lookup of
+/// field definitions, PhysicalExpr compilation, dependency analysis, and
+/// topological sorting. It takes explicit parameters instead of
+/// `ExecutionContext`, making it usable at both plan time and execution time.
+pub(crate) async fn build_field_state_raw(
+	txn: &Transaction,
+	ctx: &crate::ctx::FrozenContext,
+	ns_id: crate::catalog::NamespaceId,
+	db_id: crate::catalog::DatabaseId,
 	table_name: &TableName,
 	check_perms: bool,
-	needed_fields: Option<&std::collections::HashSet<String>>,
 ) -> Result<FieldState, ControlFlow> {
-	let db_ctx = ctx.database().context("build_field_state requires database context")?;
-	let txn = ctx.txn();
-
 	let field_defs = txn
-		.all_tb_fields(db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id, table_name, None)
+		.all_tb_fields(ns_id, db_id, table_name, None)
 		.await
 		.context("Failed to get field definitions")?;
 
-	// Collect computed fields and their dependency metadata
-	let mut raw_computed: Vec<(
-		String,
-		Arc<dyn PhysicalExpr>,
-		Option<crate::expr::Kind>,
-		Vec<String>,
-	)> = Vec::new();
+	// Fast path: if there are no computed fields and no field-level permissions
+	// that need checking, skip the expensive resolution.
+	let has_computed = field_defs.iter().any(|fd| fd.computed.is_some());
+	let has_field_perms =
+		check_perms && field_defs.iter().any(|fd| fd.select_permission.is_specific());
+	if !has_computed && !has_field_perms {
+		return Ok(FieldState::empty());
+	}
+
+	// Collect ALL computed fields and their dependency metadata.
+	let mut raw_computed: Vec<RawComputedField> = Vec::new();
 	let mut dep_map: HashMap<String, crate::expr::computed_deps::ComputedDeps> = HashMap::new();
 
 	for fd in field_defs.iter() {
 		if let Some(ref expr) = fd.computed {
 			let field_name = fd.name.to_raw_string();
 
-			// Get deps: use stored deps, or extract on the fly for legacy fields
 			let deps = if let Some(ref cd) = fd.computed_deps {
 				crate::expr::computed_deps::ComputedDeps {
 					fields: cd.fields.clone(),
@@ -447,7 +511,7 @@ pub(crate) async fn build_field_state(
 			dep_map.insert(field_name.clone(), deps.clone());
 
 			let physical_expr =
-				expr_to_physical_expr(expr.clone(), ctx.ctx()).await.with_context(|| {
+				expr_to_physical_expr(expr.clone(), ctx).await.with_context(|| {
 					format!("Computed field '{field_name}' has unsupported expression")
 				})?;
 
@@ -455,29 +519,14 @@ pub(crate) async fn build_field_state(
 		}
 	}
 
-	// Determine which computed fields are actually needed
-	let needed_computed = if let Some(needed) = needed_fields {
-		crate::expr::computed_deps::resolve_required_computed_fields(needed, &dep_map)
-	} else {
-		// SELECT * -- compute all
-		None
-	};
-
-	// Filter to only needed computed fields
-	let filtered: Vec<_> = if let Some(ref required) = needed_computed {
-		raw_computed.into_iter().filter(|(name, _, _, _)| required.contains(name)).collect()
-	} else {
-		raw_computed
-	};
-
-	// Topologically sort for correct evaluation order
+	// Topologically sort ALL computed fields for correct evaluation order
 	let topo_input: Vec<(String, Vec<String>)> =
-		filtered.iter().map(|(name, _, _, deps)| (name.clone(), deps.clone())).collect();
+		raw_computed.iter().map(|(name, _, _, deps)| (name.clone(), deps.clone())).collect();
 	let sorted_indices = crate::expr::computed_deps::topological_sort_computed_fields(&topo_input);
 
 	let mut computed_fields = Vec::with_capacity(sorted_indices.len());
 	for idx in sorted_indices {
-		let (field_name, expr, kind, _) = &filtered[idx];
+		let (field_name, expr, kind, _) = &raw_computed[idx];
 		computed_fields.push(ComputedFieldDef {
 			field_name: field_name.clone(),
 			expr: Arc::clone(expr),
@@ -490,7 +539,7 @@ pub(crate) async fn build_field_state(
 	if check_perms {
 		for fd in field_defs.iter() {
 			let field_name = fd.name.to_raw_string();
-			let physical_perm = convert_permission_to_physical(&fd.select_permission, ctx.ctx())
+			let physical_perm = convert_permission_to_physical(&fd.select_permission, ctx)
 				.await
 				.context("Failed to convert field permission")?;
 			field_permissions.insert(field_name, physical_perm);
@@ -499,8 +548,87 @@ pub(crate) async fn build_field_state(
 
 	Ok(FieldState {
 		computed_fields,
-		field_permissions,
+		field_permissions: Arc::new(field_permissions),
+		dep_map: Arc::new(dep_map),
 	})
+}
+
+/// Fetch field definitions and build the cached field state.
+///
+/// Always builds and caches the *full* field state (all computed fields and
+/// permissions) keyed by `(table, check_perms)`. When `needed_fields` is
+/// `Some`, the cached full state is cheaply filtered to the required subset.
+/// This avoids repeated expensive work (KV lookups, PhysicalExpr compilation,
+/// dependency analysis, topological sort) for projected queries.
+#[allow(clippy::type_complexity)]
+pub(crate) async fn build_field_state(
+	ctx: &ExecutionContext,
+	table_name: &TableName,
+	check_perms: bool,
+	needed_fields: Option<&std::collections::HashSet<String>>,
+) -> Result<FieldState, ControlFlow> {
+	let db_ctx = ctx.database().context("build_field_state requires database context")?;
+	let cache_key = (table_name.clone(), check_perms);
+
+	// Check the cache first (keyed by table name + check_perms flag).
+	{
+		let cache = db_ctx.field_state_cache.read().await;
+		if let Some(cached) = cache.get(&cache_key) {
+			return Ok(filter_field_state_for_projection(cached, needed_fields));
+		}
+	}
+
+	// Delegate to the raw implementation
+	let full_state = build_field_state_raw(
+		&ctx.txn(),
+		ctx.ctx(),
+		db_ctx.ns_ctx.ns.namespace_id,
+		db_ctx.db.database_id,
+		table_name,
+		check_perms,
+	)
+	.await?;
+
+	// Cache the full (unfiltered) state
+	let cached = Arc::new(full_state);
+	db_ctx.field_state_cache.write().await.insert(cache_key, Arc::clone(&cached));
+
+	// Return filtered if needed_fields is specified
+	Ok(filter_field_state_for_projection(&cached, needed_fields))
+}
+
+/// Filter a full FieldState down to only the computed fields required by
+/// the given projection. When `needed_fields` is None (SELECT *), returns
+/// a clone of the full state. This is a cheap CPU-only operation with no
+/// KV lookups.
+pub(crate) fn filter_field_state_for_projection(
+	full_state: &FieldState,
+	needed_fields: Option<&std::collections::HashSet<String>>,
+) -> FieldState {
+	let Some(needed) = needed_fields else {
+		return full_state.clone();
+	};
+
+	// Determine which computed fields are required by the projection
+	let required =
+		crate::expr::computed_deps::resolve_required_computed_fields(needed, &full_state.dep_map);
+
+	let computed_fields = if let Some(ref required_set) = required {
+		full_state
+			.computed_fields
+			.iter()
+			.filter(|cf| required_set.contains(&cf.field_name))
+			.cloned()
+			.collect()
+	} else {
+		full_state.computed_fields.clone()
+	};
+
+	FieldState {
+		computed_fields,
+		field_permissions: Arc::clone(&full_state.field_permissions),
+		dep_map: Arc::clone(&full_state.dep_map),
+	}
 }
 
 /// Compute all computed fields for a single value.

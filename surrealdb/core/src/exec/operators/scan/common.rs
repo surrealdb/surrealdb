@@ -8,7 +8,7 @@ use std::sync::Arc;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::{ControlFlowExt, EvalContext, ExecutionContext, PhysicalExpr};
 use crate::expr::ControlFlow;
-use crate::kvs::Transaction;
+use crate::kvs::{CachePolicy, Transaction};
 use crate::val::{RecordId, RecordIdKey, Value};
 
 /// Default batch size for collecting records before yielding downstream.
@@ -71,7 +71,12 @@ pub(crate) async fn evaluate_bound_key(
 ///
 /// Uses the transaction's batch multi-get (`getm_records`), which is cache-aware
 /// and uses the store's native batch read (e.g. RocksDB `multi_get_opt`) for
-/// cache misses. Each returned value has its record ID injected via [`Value::def`].
+/// cache misses.
+///
+/// The record ID is already injected into the data by `getm_records`, so no
+/// additional `def()` call is needed here.  When the `Arc<Record>` has a
+/// reference count of 1 (e.g. uncached / versioned reads), the data is moved
+/// out without cloning.
 ///
 /// Records that don't exist in the datastore are returned as [`Value::None`].
 pub(crate) async fn fetch_records_batch(
@@ -79,17 +84,26 @@ pub(crate) async fn fetch_records_batch(
 	ns_id: NamespaceId,
 	db_id: DatabaseId,
 	rids: &[RecordId],
+	version: Option<u64>,
+	cache_policy: CachePolicy,
 ) -> Result<Vec<Value>, ControlFlow> {
-	let records = txn.getm_records(ns_id, db_id, rids).await.context("Failed to fetch records")?;
+	let records = txn
+		.getm_records(ns_id, db_id, rids, version, cache_policy)
+		.await
+		.context("Failed to fetch records")?;
 
 	let mut values = Vec::with_capacity(rids.len());
-	for (rid, record) in rids.iter().zip(records) {
-		if record.data.as_ref().is_none() {
+	for record in records {
+		if record.data.is_none() {
 			values.push(Value::None);
 		} else {
-			let mut v = record.data.as_ref().clone();
-			v.def(rid);
-			values.push(v);
+			// Move data out of the Arc when possible (refcount == 1),
+			// otherwise fall back to cloning.
+			let value = match Arc::try_unwrap(record) {
+				Ok(rec) => rec.data,
+				Err(arc) => arc.data.clone(),
+			};
+			values.push(value);
 		}
 	}
 	Ok(values)
@@ -105,9 +119,11 @@ pub(crate) async fn resolve_record_batch(
 	db_id: DatabaseId,
 	rids: &[RecordId],
 	fetch_full: bool,
+	version: Option<u64>,
+	cache_policy: CachePolicy,
 ) -> Result<Vec<Value>, ControlFlow> {
 	if fetch_full {
-		fetch_records_batch(txn, ns_id, db_id, rids).await
+		fetch_records_batch(txn, ns_id, db_id, rids, version, cache_policy).await
 	} else {
 		Ok(rids.iter().map(|rid| Value::RecordId(rid.clone())).collect())
 	}
@@ -121,9 +137,14 @@ pub(crate) async fn resolve_record_batch(
 /// `multi_get_opt`) for cache misses.  Records that don't exist or that
 /// fail the permission check are silently skipped.
 ///
+/// The record ID is already injected into the data by `getm_records`, so
+/// no additional `def()` call is needed.  When the `Arc<Record>` has a
+/// reference count of 1, the data is moved out without cloning.
+///
 /// Used by [`super::index_scan::IndexScan`],
 /// [`super::fulltext_scan::FullTextScan`], and
 /// [`super::knn_scan::KnnScan`].
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn fetch_and_filter_records_batch(
 	ctx: &ExecutionContext,
 	txn: &Transaction,
@@ -132,29 +153,42 @@ pub(crate) async fn fetch_and_filter_records_batch(
 	rids: &[RecordId],
 	select_permission: &crate::exec::permission::PhysicalPermission,
 	check_perms: bool,
+	version: Option<u64>,
+	cache_policy: CachePolicy,
 ) -> Result<Vec<Value>, ControlFlow> {
-	let records = txn.getm_records(ns_id, db_id, rids).await.context("Failed to fetch records")?;
+	let records = txn
+		.getm_records(ns_id, db_id, rids, version, cache_policy)
+		.await
+		.context("Failed to fetch records")?;
 
 	let mut values = Vec::with_capacity(rids.len());
-	for (rid, record) in rids.iter().zip(records) {
-		if record.data.as_ref().is_none() {
+	for record in records {
+		if record.data.is_none() {
 			continue;
 		}
 
-		let mut value = record.data.as_ref().clone();
-		value.def(rid);
-
 		if check_perms {
-			let allowed =
-				crate::exec::permission::check_permission_for_value(select_permission, &value, ctx)
-					.await
-					.context("Failed to check permission")?;
+			// Permission checks need a reference; avoid moving data out of
+			// the Arc until we know the record is allowed.
+			let allowed = crate::exec::permission::check_permission_for_value(
+				select_permission,
+				&record.data,
+				ctx,
+			)
+			.await
+			.context("Failed to check permission")?;
 
 			if !allowed {
 				continue;
 			}
 		}
 
+		// Move data out of the Arc when possible (refcount == 1),
+		// otherwise fall back to cloning.
+		let value = match Arc::try_unwrap(record) {
+			Ok(rec) => rec.data,
+			Err(arc) => arc.data.clone(),
+		};
 		values.push(value);
 	}
 	Ok(values)

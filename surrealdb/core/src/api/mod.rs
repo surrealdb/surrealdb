@@ -13,6 +13,8 @@ pub const X_SURREAL_REQUEST_ID: HeaderName = HeaderName::from_static("x-surreal-
 pub mod format {
 	//! MIME type string constants for use in HTTP headers
 
+	pub const ANY: &str = "*/*";
+
 	pub const JSON: &str = "application/json";
 	pub const CBOR: &str = "application/cbor";
 	pub const FLATBUFFERS: &str = "application/vnd.surrealdb.flatbuffers";

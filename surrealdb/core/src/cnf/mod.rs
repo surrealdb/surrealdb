@@ -89,6 +89,13 @@ pub static COUNT_BATCH_SIZE: LazyLock<u32> =
 pub static INDEXING_BATCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_INDEXING_BATCH_SIZE", u32, 250);
 
+/// The number of batches each operator buffers ahead of downstream demand.
+/// Set to 0 to disable operator-level pipeline buffering.
+/// (default: 2)
+#[cfg(not(target_family = "wasm"))]
+pub static OPERATOR_BUFFER_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_OPERATOR_BUFFER_SIZE", usize, 2);
+
 /// The maximum size of the priority queue triggering usage of the priority
 /// queue for the result collector.
 pub static MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE: LazyLock<u32> =

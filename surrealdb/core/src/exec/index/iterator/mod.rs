@@ -6,4 +6,7 @@
 
 pub mod btree;
 
-pub use btree::{IndexEqualIterator, IndexRangeIterator, UniqueEqualIterator, UniqueRangeIterator};
+pub use btree::{
+	CompoundEqualIterator, CompoundRangeIterator, IndexEqualIterator, IndexRangeIterator,
+	UniqueEqualIterator, UniqueRangeIterator,
+};

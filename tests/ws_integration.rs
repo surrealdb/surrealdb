@@ -1370,7 +1370,8 @@ pub async fn session_expiration(cfg_server: Option<Format>, cfg_format: Format) 
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 	// Sign in again using the same session
 	let res = socket
 		.send_request(
@@ -1477,7 +1478,8 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 	// Test operations that SHOULD NOT work with an expired session
 	let operations_ko = vec![
 		socket.send_request("let", json!(["let_var", "let_value",])),
@@ -1603,7 +1605,8 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 	let res = socket
 		.send_request(
 			"signin",
@@ -1632,7 +1635,8 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 
 	// This needs to be last operation as the session will no longer expire
 	// afterwards
@@ -1811,7 +1815,8 @@ pub async fn session_reauthentication_expired(cfg_server: Option<Format>, cfg_fo
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 	// Authenticate using the root token, which has not expired yet
 	socket.send_request("authenticate", json!([root_token,])).await.unwrap();
 	// Check that we have root access and the session is not expired
@@ -2126,7 +2131,7 @@ pub async fn temporary_directory(cfg_server: Option<Format>, cfg_format: Format)
 		socket.send_message_query("SELECT * FROM test ORDER BY id DESC EXPLAIN").await.unwrap();
 	let result = &res.remove(0)["result"];
 	// New executor EXPLAIN produces a JSON plan tree
-	assert_eq!(result["operator"], "Project");
+	assert_eq!(result["operator"], "SelectProject");
 	assert_eq!(result["children"][0]["operator"], "TableScan");
 	assert_eq!(result["children"][0]["attributes"]["direction"], "Backward");
 	// And return the correct result
@@ -2140,7 +2145,7 @@ pub async fn temporary_directory(cfg_server: Option<Format>, cfg_format: Format)
 		.await
 		.unwrap();
 	let result = &res.remove(0)["result"];
-	assert_eq!(result["operator"], "Project");
+	assert_eq!(result["operator"], "SelectProject");
 	assert_eq!(result["children"][0]["operator"], "TableScan");
 	assert_eq!(result["children"][0]["attributes"]["direction"], "Backward");
 	// And return the correct result
@@ -2282,7 +2287,8 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 			let res = res.unwrap();
 			assert!(res.is_object(), "result: {res:?}");
 			let res = res.as_object().unwrap();
-			assert_eq!(res["error"], json!({"code": -32602, "message": "Method not allowed"}));
+			assert_eq!(res["error"]["code"], -32602);
+			assert_eq!(res["error"]["message"], "Method not allowed");
 		}
 
 		// Test operations that SHOULD work with the provided capabilities
@@ -2439,7 +2445,8 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 			let res = res.unwrap();
 			assert!(res.is_object(), "result: {res:?}");
 			let res = res.as_object().unwrap();
-			assert_eq!(res["error"], json!({"code": -32602, "message": "Method not allowed"}));
+			assert_eq!(res["error"]["code"], -32602);
+			assert_eq!(res["error"]["message"], "Method not allowed");
 		}
 
 		// Test operations that SHOULD work with the provided capabilities

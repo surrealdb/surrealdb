@@ -12,7 +12,6 @@ fuzz_target!(|query: Ast| {
 		ParserSettings {
 			object_recursion_limit: 1_000_000,
 			query_recursion_limit: 1_000_000,
-			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
 			..ParserSettings::default()

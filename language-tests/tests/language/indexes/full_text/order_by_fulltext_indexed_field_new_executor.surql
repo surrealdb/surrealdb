@@ -14,7 +14,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 2}
+value = ''''SelectProject [ctx: Db] [projections: name] {rows: 2}
     SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2}
         TableScan [ctx: Db] [table: person, direction: Forward] {rows: 2}
 

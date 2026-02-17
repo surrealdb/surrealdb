@@ -14,7 +14,7 @@ use crate::catalog::{Permission, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::{DatabaseContext, EvalContext, ExecutionContext, PhysicalExpr};
-use crate::iam::Action;
+use crate::iam::{Action, Auth};
 use crate::val::Value;
 
 /// Result of a permission check.
@@ -78,6 +78,53 @@ pub fn resolve_delete_permission(table_def: Option<&TableDefinition>) -> &Permis
 		Some(def) => &def.permissions.delete,
 		None => &Permission::None,
 	}
+}
+
+/// Check if permission should be checked for the given action.
+///
+/// Standalone version that works with raw `Auth` + ns/db names, usable at
+/// plan time without a `DatabaseContext`.
+pub fn should_check_perms_raw(
+	auth: &Auth,
+	auth_enabled: bool,
+	ns: &str,
+	db: &str,
+	action: Action,
+) -> bool {
+	if !auth_enabled && auth.is_anon() {
+		return false;
+	}
+	let (has_role, in_level) = match action {
+		Action::Edit => (
+			auth.has_editor_role(),
+			auth.is_root() || auth.is_ns_check(ns) || auth.is_db_check(ns, db),
+		),
+		Action::View => (
+			auth.has_viewer_role(),
+			auth.is_root() || auth.is_ns_check(ns) || auth.is_db_check(ns, db),
+		),
+	};
+	!has_role || !in_level
+}
+
+/// Validate that a record user has access to the given namespace and database.
+///
+/// Standalone version usable at plan time without a `DatabaseContext`.
+pub fn validate_record_user_access_raw(auth: &Auth, ns: &str, db: &str) -> Result<(), Error> {
+	if !auth.is_record() {
+		return Ok(());
+	}
+	if auth.level().ns() != Some(ns) {
+		return Err(Error::NsNotAllowed {
+			ns: ns.into(),
+		});
+	}
+	if auth.level().db() != Some(db) {
+		return Err(Error::DbNotAllowed {
+			db: db.into(),
+		});
+	}
+	Ok(())
 }
 
 /// Check if permission should be checked for the given action.

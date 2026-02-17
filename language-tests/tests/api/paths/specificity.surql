@@ -33,9 +33,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: { matched: 'more_specific' }, headers: {}, status: 200 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 // Fixed path (most specific)

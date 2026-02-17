@@ -68,6 +68,14 @@ impl PhysicalExpr for IdiomExpr {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> crate::expr::FlowResult<Value> {
+		// Fast path: single-part idiom without a start expression (e.g., simple
+		// field access like `age`). Delegates directly to the part's evaluate,
+		// which can work with a reference to current_value and avoids cloning
+		// the entire record into an owned Value for evaluate_parts_with_continuation.
+		if self.start_expr.is_none() && self.parts.len() == 1 {
+			return self.parts[0].evaluate(ctx).await;
+		}
+
 		// Determine the base value for the idiom evaluation.
 		// If we have a start expression (e.g. `(INFO FOR KV).namespaces`), evaluate
 		// it first to produce the base value. Otherwise use the current row value.
@@ -90,6 +98,17 @@ impl PhysicalExpr for IdiomExpr {
 			parts_mode.combine(start.access_mode())
 		} else {
 			parts_mode
+		}
+	}
+
+	fn try_simple_field(&self) -> Option<&str> {
+		// A simple field access is an IdiomExpr with no start expression and
+		// exactly one part that is a FieldPart. Delegate to the part's own
+		// try_simple_field to extract the raw field name.
+		if self.start_expr.is_none() && self.parts.len() == 1 {
+			self.parts[0].try_simple_field()
+		} else {
+			None
 		}
 	}
 

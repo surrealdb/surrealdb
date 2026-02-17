@@ -6,29 +6,26 @@ reason = "Test EXPLAIN with index-backed queries: standard index, unique index, 
 value = "'OK'"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1}
-    Filter [ctx: Db] [predicate: email = 'a@test.com'] {rows: 1}
-        IndexScan [ctx: Db] [index: idx_email_uniq, access: = 'a@test.com', direction: Forward] {rows: 1}
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 1}
+    IndexScan [ctx: Db] [index: idx_email_uniq, access: = 'a@test.com', direction: Forward] {rows: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 2}
-    Filter [ctx: Db] [predicate: region = 'EU' AND status = 'active'] {rows: 2}
-        IndexScan [ctx: Db] [index: idx_region_status, access: ['EU', 'active'], direction: Forward] {rows: 2}
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 2}
+    IndexScan [ctx: Db] [index: idx_region_status, access: ['EU', 'active'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1}
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 1}
     TableScan [ctx: Db] [table: user, direction: Forward, predicate: email = 'a@test.com'] {rows: 1}
 
 Total rows: 1"'''
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 2}
-    Filter [ctx: Db] [predicate: region = 'NA'] {rows: 2}
-        IndexScan [ctx: Db] [index: idx_region_status, access: ['NA'], direction: Forward] {rows: 2}
+value = '''"SelectProject [ctx: Db] [projections: *] {rows: 2}
+    IndexScan [ctx: Db] [index: idx_region_status, access: ['NA'], direction: Forward] {rows: 2}
 
 Total rows: 2"'''
 */

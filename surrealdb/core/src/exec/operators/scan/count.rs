@@ -28,8 +28,8 @@ use crate::exec::permission::{
 	validate_record_user_access,
 };
 use crate::exec::{
-	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
 };
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::iam::Action;
@@ -64,6 +64,7 @@ impl CountScan {
 		version: Option<Arc<dyn PhysicalExpr>>,
 		field_names: Vec<String>,
 	) -> Self {
+		debug_assert!(!field_names.is_empty(), "CountScan requires at least one field name");
 		Self {
 			source,
 			version,
@@ -115,6 +116,10 @@ impl ExecOperator for CountScan {
 		self.source.access_mode().combine(version_mode)
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
+	}
+
 	#[instrument(name = "CountScan::execute", level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
@@ -163,8 +168,8 @@ impl ExecOperator for CountScan {
 			};
 
 			// Verify that the table exists.
-			let table_def = txn
-				.get_tb_by_name(&ns.name, &db.name, &table_name)
+			let table_def = db_ctx
+				.get_table_def(&table_name)
 				.await
 				.context("Failed to get table")?;
 
@@ -358,12 +363,12 @@ async fn count_with_perm_fallback(
 					.await
 					.context("Failed to get record")?;
 
-				if record.data.as_ref().is_none() {
+				if record.data.is_none() {
 					return Ok(0);
 				}
 
-				let mut value = record.data.as_ref().clone();
-				value.def(rid);
+				let mut value = record.data.clone();
+				value.def(rid.clone());
 				let allowed = check_perm_value(ctx, &value, permission).await?;
 				return Ok(usize::from(allowed));
 			}
@@ -400,8 +405,8 @@ async fn count_with_perm_fallback(
 			};
 			let mut record = crate::catalog::Record::kv_decode_value(val)
 				.context("Failed to deserialize record")?;
-			record.data.to_mut().def(&rid_val);
-			let value = record.data.into_value();
+			record.data.def(rid_val);
+			let value = record.data;
 
 			// Check per-record permission
 			let allowed = match permission {

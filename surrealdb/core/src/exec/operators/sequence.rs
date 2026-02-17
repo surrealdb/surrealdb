@@ -22,7 +22,8 @@ use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::plan_or_compute::{block_required_context, collect_stream};
 use crate::exec::planner::try_plan_expr;
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream,
 };
 use crate::expr::{Block, ControlFlow, ControlFlowExt, Expr};
 use crate::val::{Array, Value};
@@ -79,6 +80,10 @@ impl ExecOperator for SequencePlan {
 		} else {
 			AccessMode::ReadWrite
 		}
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -152,7 +157,7 @@ async fn execute_block_with_context(
 		let frozen_ctx = current_ctx.ctx().clone();
 
 		// Try to plan the expression with current context
-		match try_plan_expr(expr, &frozen_ctx, current_ctx.txn()).await {
+		match try_plan_expr!(expr, &frozen_ctx, current_ctx.txn()) {
 			Ok(plan) => {
 				if plan.mutates_context() {
 					current_ctx = plan.output_context(&current_ctx).await?;
