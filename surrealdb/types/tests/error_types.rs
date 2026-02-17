@@ -1504,10 +1504,7 @@ fn test_error_wire_configuration_live_query() {
 
 	let parsed = Error::from_value(val).unwrap();
 	assert!(parsed.is_configuration());
-	assert_eq!(
-		parsed.configuration_details(),
-		Some(&ConfigurationError::LiveQueryNotSupported)
-	);
+	assert_eq!(parsed.configuration_details(), Some(&ConfigurationError::LiveQueryNotSupported));
 }
 
 #[test]
@@ -1525,10 +1522,7 @@ fn test_error_wire_configuration_bad_graphql() {
 
 	let parsed = Error::from_value(val).unwrap();
 	assert!(parsed.is_configuration());
-	assert_eq!(
-		parsed.configuration_details(),
-		Some(&ConfigurationError::BadGraphqlConfig)
-	);
+	assert_eq!(parsed.configuration_details(), Some(&ConfigurationError::BadGraphqlConfig));
 }
 
 #[test]
@@ -1540,18 +1534,12 @@ fn test_error_wire_serialization_error() {
 	//   "kind": "Serialization",
 	//   "details": { "kind": "Serialization" }
 	// }
-	let err = Error::serialization(
-		"Failed to serialize".into(),
-		SerializationError::Serialization,
-	);
+	let err = Error::serialization("Failed to serialize".into(), SerializationError::Serialization);
 	let val = err.into_value();
 
 	let parsed = Error::from_value(val).unwrap();
 	assert!(parsed.is_serialization());
-	assert_eq!(
-		parsed.serialization_details(),
-		Some(&SerializationError::Serialization)
-	);
+	assert_eq!(parsed.serialization_details(), Some(&SerializationError::Serialization));
 }
 
 #[test]
@@ -1563,10 +1551,8 @@ fn test_error_wire_deserialization_error() {
 	//   "kind": "Serialization",
 	//   "details": { "kind": "Deserialization" }
 	// }
-	let err = Error::serialization(
-		"Failed to deserialize".into(),
-		SerializationError::Deserialization,
-	);
+	let err =
+		Error::serialization("Failed to deserialize".into(), SerializationError::Deserialization);
 	let val = err.into_value();
 
 	let Value::Object(ref obj) = val else {
@@ -1576,10 +1562,7 @@ fn test_error_wire_deserialization_error() {
 
 	let parsed = Error::from_value(val).unwrap();
 	assert!(parsed.is_serialization());
-	assert_eq!(
-		parsed.serialization_details(),
-		Some(&SerializationError::Deserialization)
-	);
+	assert_eq!(parsed.serialization_details(), Some(&SerializationError::Deserialization));
 }
 
 #[test]
@@ -1602,10 +1585,7 @@ fn test_error_wire_connection_uninitialised() {
 
 	let parsed = Error::from_value(val).unwrap();
 	assert!(parsed.is_connection());
-	assert_eq!(
-		parsed.connection_details(),
-		Some(&ConnectionError::Uninitialised)
-	);
+	assert_eq!(parsed.connection_details(), Some(&ConnectionError::Uninitialised));
 }
 
 #[test]
@@ -1622,10 +1602,7 @@ fn test_error_wire_connection_already_connected() {
 
 	let parsed = Error::from_value(val).unwrap();
 	assert!(parsed.is_connection());
-	assert_eq!(
-		parsed.connection_details(),
-		Some(&ConnectionError::AlreadyConnected)
-	);
+	assert_eq!(parsed.connection_details(), Some(&ConnectionError::AlreadyConnected));
 }
 
 #[test]
