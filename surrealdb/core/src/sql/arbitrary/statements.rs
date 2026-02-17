@@ -165,7 +165,6 @@ impl<'a> arbitrary::Arbitrary<'a> for InsertStatement {
 			output: u.arbitrary()?,
 			timeout: u.arbitrary()?,
 			relation: u.arbitrary()?,
-			version: u.arbitrary()?,
 		})
 	}
 }

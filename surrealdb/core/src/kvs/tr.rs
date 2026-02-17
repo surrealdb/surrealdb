@@ -8,7 +8,7 @@ use super::api::{ScanLimit, Transactable};
 use super::batch::Batch;
 use super::scanner::{Direction, Scanner};
 use super::{IntoBytes, Key, Result, Val};
-use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
+use crate::kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 
 /// Specifies whether the transaction is read-only or writeable.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -564,12 +564,12 @@ impl Transactor {
 	// --------------------------------------------------
 
 	/// Get the current monotonic timestamp
-	pub async fn timestamp(&self) -> Result<TimeStamp> {
+	pub async fn timestamp(&self) -> Result<BoxTimeStamp> {
 		self.inner.timestamp().await
 	}
 
 	/// Returns the implementation of timestamp that this transaction uses.
-	pub fn timestamp_impl(&self) -> TimeStampImpl {
+	pub fn timestamp_impl(&self) -> BoxTimeStampImpl {
 		self.inner.timestamp_impl()
 	}
 }
