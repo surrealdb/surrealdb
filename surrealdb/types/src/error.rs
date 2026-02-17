@@ -94,15 +94,11 @@ pub struct Error {
 	/// Wire-only error code for RPC backwards compatibility.
 	#[serde(default = "default_code")]
 	code: i64,
-	/// The kind of error (validation, configuration, thrown, query, serialization, not allowed,
-	/// not found, already exists, connection, internal).
-	#[serde(default)]
-	kind: ErrorKind,
 	/// Human-readable error message describing the error.
 	message: String,
-	/// Optional typed structured details for the error. The variant matches the `kind` field.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	details: Option<ErrorDetails>,
+	/// The error kind and optional structured details. The kind is derived from the variant.
+	/// Always present -- replaces the separate `kind` field.
+	details: ErrorDetails,
 }
 
 impl Error {
@@ -131,10 +127,9 @@ impl Error {
 			})
 			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
-			kind: ErrorKind::Validation,
 			message,
 			code,
-			details: details.map(ErrorDetails::Validation),
+			details: ErrorDetails::Validation(details),
 		}
 	}
 
@@ -175,10 +170,9 @@ impl Error {
 			})
 			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
-			kind: ErrorKind::NotAllowed,
 			message,
 			code,
-			details: details.map(ErrorDetails::NotAllowed),
+			details: ErrorDetails::NotAllowed(details),
 		}
 	}
 
@@ -195,20 +189,18 @@ impl Error {
 			})
 			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
-			kind: ErrorKind::Configuration,
 			message,
 			code,
-			details: details.map(ErrorDetails::Configuration),
+			details: ErrorDetails::Configuration(details),
 		}
 	}
 
 	/// User-thrown error (e.g. from THROW in SurrealQL). Sets wire code for RPC.
 	pub fn thrown(message: String) -> Self {
 		Self {
-			kind: ErrorKind::Thrown,
 			message,
 			code: code::THROWN,
-			details: None,
+			details: ErrorDetails::Thrown,
 		}
 	}
 
@@ -227,10 +219,9 @@ impl Error {
 			})
 			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
-			kind: ErrorKind::Query,
 			message,
 			code,
-			details: details.map(ErrorDetails::Query),
+			details: ErrorDetails::Query(details),
 		}
 	}
 
@@ -246,10 +237,9 @@ impl Error {
 			})
 			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
-			kind: ErrorKind::Serialization,
 			message,
 			code,
-			details: details.map(ErrorDetails::Serialization),
+			details: ErrorDetails::Serialization(details),
 		}
 	}
 
@@ -268,10 +258,9 @@ impl Error {
 			})
 			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
-			kind: ErrorKind::NotFound,
 			message,
 			code,
-			details: details.map(ErrorDetails::NotFound),
+			details: ErrorDetails::NotFound(details),
 		}
 	}
 
@@ -279,10 +268,9 @@ impl Error {
 	pub fn already_exists(message: String, details: impl Into<Option<AlreadyExistsError>>) -> Self {
 		let details = details.into();
 		Self {
-			kind: ErrorKind::AlreadyExists,
 			message,
 			code: code::INTERNAL_ERROR,
-			details: details.map(ErrorDetails::AlreadyExists),
+			details: ErrorDetails::AlreadyExists(details),
 		}
 	}
 
@@ -291,20 +279,18 @@ impl Error {
 	pub fn connection(message: String, details: impl Into<Option<ConnectionError>>) -> Self {
 		let details = details.into();
 		Self {
-			kind: ErrorKind::Connection,
 			message,
 			code: code::CLIENT_SIDE_ERROR,
-			details: details.map(ErrorDetails::Connection),
+			details: ErrorDetails::Connection(details),
 		}
 	}
 
 	/// Internal or unexpected error (server or client). Sets wire code for RPC.
 	pub fn internal(message: String) -> Self {
 		Self {
-			kind: ErrorKind::Internal,
 			message,
 			code: code::INTERNAL_ERROR,
-			details: None,
+			details: ErrorDetails::Internal,
 		}
 	}
 
@@ -318,19 +304,21 @@ impl Error {
 		details: Option<Value>,
 	) -> Self {
 		let kind = kind.unwrap_or_default();
-		let typed_details =
-			details.and_then(|v| ErrorDetails::from_value_with_kind(&kind, v).ok());
+		let typed_details = match details {
+			Some(v) => ErrorDetails::from_value_with_kind(&kind, v)
+				.unwrap_or_else(|_| ErrorDetails::from_kind_only(&kind)),
+			None => ErrorDetails::from_kind_only(&kind),
+		};
 		Self {
 			code: default_code(),
-			kind,
 			message,
 			details: typed_details,
 		}
 	}
 
-	/// Returns the machine-readable error kind.
-	pub fn kind(&self) -> &ErrorKind {
-		&self.kind
+	/// Returns the machine-readable error kind, derived from the details variant.
+	pub fn kind(&self) -> ErrorKind {
+		self.details.kind()
 	}
 
 	/// Returns the human-readable error message.
@@ -338,71 +326,71 @@ impl Error {
 		&self.message
 	}
 
-	/// Returns optional typed structured details, if any.
-	pub fn details(&self) -> Option<&ErrorDetails> {
-		self.details.as_ref()
+	/// Returns the error details (always present). The variant determines the error kind.
+	pub fn details(&self) -> &ErrorDetails {
+		&self.details
 	}
 
-	/// Returns structured validation error details, if this is a validation error with details.
+	/// Returns structured validation error details, if this is a validation error with specifics.
 	pub fn validation_details(&self) -> Option<&ValidationError> {
 		match &self.details {
-			Some(ErrorDetails::Validation(d)) => Some(d),
+			ErrorDetails::Validation(d) => d.as_ref(),
 			_ => None,
 		}
 	}
 
-	/// Returns structured not-allowed error details, if this is a not-allowed error with details.
+	/// Returns structured not-allowed error details, if this is a not-allowed error with specifics.
 	pub fn not_allowed_details(&self) -> Option<&NotAllowedError> {
 		match &self.details {
-			Some(ErrorDetails::NotAllowed(d)) => Some(d),
+			ErrorDetails::NotAllowed(d) => d.as_ref(),
 			_ => None,
 		}
 	}
 
-	/// Returns structured configuration error details, if this is a configuration error with details.
+	/// Returns structured configuration error details, if this is a configuration error with specifics.
 	pub fn configuration_details(&self) -> Option<&ConfigurationError> {
 		match &self.details {
-			Some(ErrorDetails::Configuration(d)) => Some(d),
+			ErrorDetails::Configuration(d) => d.as_ref(),
 			_ => None,
 		}
 	}
 
-	/// Returns structured serialization error details, if this is a serialization error with details.
+	/// Returns structured serialization error details, if this is a serialization error with specifics.
 	pub fn serialization_details(&self) -> Option<&SerializationError> {
 		match &self.details {
-			Some(ErrorDetails::Serialization(d)) => Some(d),
+			ErrorDetails::Serialization(d) => d.as_ref(),
 			_ => None,
 		}
 	}
 
-	/// Returns structured not-found error details, if this is a not-found error with details.
+	/// Returns structured not-found error details, if this is a not-found error with specifics.
 	pub fn not_found_details(&self) -> Option<&NotFoundError> {
 		match &self.details {
-			Some(ErrorDetails::NotFound(d)) => Some(d),
+			ErrorDetails::NotFound(d) => d.as_ref(),
 			_ => None,
 		}
 	}
 
-	/// Returns structured query error details, if this is a query error with details.
+	/// Returns structured query error details, if this is a query error with specifics.
 	pub fn query_details(&self) -> Option<&QueryError> {
 		match &self.details {
-			Some(ErrorDetails::Query(d)) => Some(d),
+			ErrorDetails::Query(d) => d.as_ref(),
 			_ => None,
 		}
 	}
 
-	/// Returns structured already-exists error details, if this is an already-exists error with details.
+	/// Returns structured already-exists error details, if this is an already-exists error with specifics.
 	pub fn already_exists_details(&self) -> Option<&AlreadyExistsError> {
 		match &self.details {
-			Some(ErrorDetails::AlreadyExists(d)) => Some(d),
+			ErrorDetails::AlreadyExists(d) => d.as_ref(),
 			_ => None,
 		}
 	}
 
-	/// Returns structured connection error details, if this is a connection error with details.
+	/// Returns structured connection error details, if this is a connection error with specifics.
 	pub fn connection_details(&self) -> Option<&ConnectionError> {
 		match &self.details {
-			Some(ErrorDetails::Connection(d)) => Some(d),
+			ErrorDetails::Connection(d) => d.as_ref(),
 			_ => None,
 		}
 	}
@@ -412,56 +400,122 @@ impl Error {
 // ErrorDetails enum (typed wrapper for all detail variants)
 // -----------------------------------------------------------------------------
 
-/// Typed error details. Each variant wraps the detail enum for a specific
-/// [`ErrorKind`]. This allows Rust users to pattern-match on details directly
-/// instead of working with raw `Value`.
+/// Typed error details. Each variant represents an error kind and optionally
+/// wraps the detail enum for that kind. This replaces the separate `kind` field
+/// on [`Error`] -- the kind is derived from the variant.
+///
+/// Rust users can pattern-match directly:
+/// ```ignore
+/// match error.details() {
+///     ErrorDetails::NotAllowed(Some(NotAllowedError::Auth(AuthError::TokenExpired))) => ...,
+///     ErrorDetails::NotFound(Some(NotFoundError::Table { name })) => ...,
+///     ErrorDetails::Internal => ...,
+///     _ => ...,
+/// }
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ErrorDetails {
-	/// Validation error details.
-	Validation(ValidationError),
-	/// Configuration error details.
-	Configuration(ConfigurationError),
-	/// Query error details.
-	Query(QueryError),
-	/// Serialization error details.
-	Serialization(SerializationError),
-	/// Not-allowed error details.
-	NotAllowed(NotAllowedError),
-	/// Not-found error details.
-	NotFound(NotFoundError),
-	/// Already-exists error details.
-	AlreadyExists(AlreadyExistsError),
-	/// Connection error details.
-	Connection(ConnectionError),
+	/// Validation error (parse error, invalid request/params).
+	Validation(Option<ValidationError>),
+	/// Configuration error (feature/config not supported).
+	Configuration(Option<ConfigurationError>),
+	/// Query execution error (timeout, cancelled, not executed).
+	Query(Option<QueryError>),
+	/// Serialization/deserialization error.
+	Serialization(Option<SerializationError>),
+	/// Permission or authorization error.
+	NotAllowed(Option<NotAllowedError>),
+	/// Resource not found.
+	NotFound(Option<NotFoundError>),
+	/// Duplicate resource.
+	AlreadyExists(Option<AlreadyExistsError>),
+	/// Client connection error (SDK-side).
+	Connection(Option<ConnectionError>),
+	/// User-thrown error (THROW in SurrealQL). No detail type.
+	Thrown,
+	/// Internal/unexpected error. No detail type.
+	Internal,
 }
 
 impl ErrorDetails {
+	/// Returns the [`ErrorKind`] for this details variant.
+	pub fn kind(&self) -> ErrorKind {
+		match self {
+			Self::Validation(_) => ErrorKind::Validation,
+			Self::Configuration(_) => ErrorKind::Configuration,
+			Self::Query(_) => ErrorKind::Query,
+			Self::Serialization(_) => ErrorKind::Serialization,
+			Self::NotAllowed(_) => ErrorKind::NotAllowed,
+			Self::NotFound(_) => ErrorKind::NotFound,
+			Self::AlreadyExists(_) => ErrorKind::AlreadyExists,
+			Self::Connection(_) => ErrorKind::Connection,
+			Self::Thrown => ErrorKind::Thrown,
+			Self::Internal => ErrorKind::Internal,
+		}
+	}
+
+	/// Create an `ErrorDetails` from just an [`ErrorKind`], with no inner details.
+	pub(crate) fn from_kind_only(kind: &ErrorKind) -> Self {
+		match kind {
+			ErrorKind::Validation => Self::Validation(None),
+			ErrorKind::Configuration => Self::Configuration(None),
+			ErrorKind::Query => Self::Query(None),
+			ErrorKind::Serialization => Self::Serialization(None),
+			ErrorKind::NotAllowed => Self::NotAllowed(None),
+			ErrorKind::NotFound => Self::NotFound(None),
+			ErrorKind::AlreadyExists => Self::AlreadyExists(None),
+			ErrorKind::Connection => Self::Connection(None),
+			ErrorKind::Thrown => Self::Thrown,
+			ErrorKind::Internal => Self::Internal,
+		}
+	}
+
 	/// Deserialize details using the error kind to select the right variant.
 	/// O(1) dispatch -- no trial-and-error parsing.
 	pub(crate) fn from_value_with_kind(kind: &ErrorKind, value: Value) -> Result<Self, Error> {
 		match kind {
 			ErrorKind::Validation => {
-				ValidationError::from_value(value).map(ErrorDetails::Validation)
+				ValidationError::from_value(value).map(|v| ErrorDetails::Validation(Some(v)))
 			}
 			ErrorKind::Configuration => {
-				ConfigurationError::from_value(value).map(ErrorDetails::Configuration)
+				ConfigurationError::from_value(value).map(|v| ErrorDetails::Configuration(Some(v)))
 			}
-			ErrorKind::Query => QueryError::from_value(value).map(ErrorDetails::Query),
+			ErrorKind::Query => {
+				QueryError::from_value(value).map(|v| ErrorDetails::Query(Some(v)))
+			}
 			ErrorKind::Serialization => {
-				SerializationError::from_value(value).map(ErrorDetails::Serialization)
+				SerializationError::from_value(value).map(|v| ErrorDetails::Serialization(Some(v)))
 			}
 			ErrorKind::NotAllowed => {
-				NotAllowedError::from_value(value).map(ErrorDetails::NotAllowed)
+				NotAllowedError::from_value(value).map(|v| ErrorDetails::NotAllowed(Some(v)))
 			}
-			ErrorKind::NotFound => NotFoundError::from_value(value).map(ErrorDetails::NotFound),
+			ErrorKind::NotFound => {
+				NotFoundError::from_value(value).map(|v| ErrorDetails::NotFound(Some(v)))
+			}
 			ErrorKind::AlreadyExists => {
-				AlreadyExistsError::from_value(value).map(ErrorDetails::AlreadyExists)
+				AlreadyExistsError::from_value(value).map(|v| ErrorDetails::AlreadyExists(Some(v)))
 			}
 			ErrorKind::Connection => {
-				ConnectionError::from_value(value).map(ErrorDetails::Connection)
+				ConnectionError::from_value(value).map(|v| ErrorDetails::Connection(Some(v)))
 			}
-			_ => Err(Error::internal("No details type for this error kind".to_string())),
+			ErrorKind::Thrown => Ok(Self::Thrown),
+			ErrorKind::Internal => Ok(Self::Internal),
+		}
+	}
+
+	/// Returns true if this variant has inner detail data.
+	pub(crate) fn has_details(&self) -> bool {
+		match self {
+			Self::Validation(d) => d.is_some(),
+			Self::Configuration(d) => d.is_some(),
+			Self::Query(d) => d.is_some(),
+			Self::Serialization(d) => d.is_some(),
+			Self::NotAllowed(d) => d.is_some(),
+			Self::NotFound(d) => d.is_some(),
+			Self::AlreadyExists(d) => d.is_some(),
+			Self::Connection(d) => d.is_some(),
+			Self::Thrown | Self::Internal => false,
 		}
 	}
 }
@@ -477,22 +531,22 @@ impl SurrealValue for ErrorDetails {
 
 	fn into_value(self) -> Value {
 		match self {
-			Self::Validation(d) => d.into_value(),
-			Self::Configuration(d) => d.into_value(),
-			Self::Query(d) => d.into_value(),
-			Self::Serialization(d) => d.into_value(),
-			Self::NotAllowed(d) => d.into_value(),
-			Self::NotFound(d) => d.into_value(),
-			Self::AlreadyExists(d) => d.into_value(),
-			Self::Connection(d) => d.into_value(),
+			Self::Validation(Some(d)) => d.into_value(),
+			Self::Configuration(Some(d)) => d.into_value(),
+			Self::Query(Some(d)) => d.into_value(),
+			Self::Serialization(Some(d)) => d.into_value(),
+			Self::NotAllowed(Some(d)) => d.into_value(),
+			Self::NotFound(Some(d)) => d.into_value(),
+			Self::AlreadyExists(Some(d)) => d.into_value(),
+			Self::Connection(Some(d)) => d.into_value(),
+			// No inner data to serialize
+			_ => Value::None,
 		}
 	}
 
 	fn from_value(value: Value) -> Result<Self, Error> {
-		// The detail variant's "kind" field (e.g. "TokenExpired", "Table") doesn't tell us
-		// which ErrorKind it belongs to, so we try each one. Each attempt is cheap -- it
-		// just checks the kind string against the enum's known variants and fails fast.
-		// Prefer from_value_with_kind() when the ErrorKind is available (e.g. on Error).
+		// Try each error kind. Each attempt is cheap (string comparison on kind field).
+		// Prefer from_value_with_kind() when ErrorKind is available.
 		for error_kind in [
 			ErrorKind::Validation,
 			ErrorKind::Configuration,
@@ -770,10 +824,10 @@ impl SurrealValue for Error {
 	fn into_value(self) -> Value {
 		let mut obj = Object::new();
 		obj.insert("code", Value::from(self.code));
-		obj.insert("kind", self.kind.into_value());
+		obj.insert("kind", self.details.kind().into_value());
 		obj.insert("message", Value::from(self.message));
-		if let Some(details) = self.details {
-			obj.insert("details", details.into_value());
+		if self.details.has_details() {
+			obj.insert("details", self.details.into_value());
 		}
 		Value::Object(obj)
 	}
@@ -803,12 +857,13 @@ impl SurrealValue for Error {
 			.ok()
 			.flatten()
 			.unwrap_or_default();
-		let details = map
-			.remove("details")
-			.and_then(|v| ErrorDetails::from_value_with_kind(&kind, v).ok());
+		let details = match map.remove("details") {
+			Some(v) => ErrorDetails::from_value_with_kind(&kind, v)
+				.unwrap_or_else(|_| ErrorDetails::from_kind_only(&kind)),
+			None => ErrorDetails::from_kind_only(&kind),
+		};
 		Ok(Self {
 			code,
-			kind,
 			message,
 			details,
 		})

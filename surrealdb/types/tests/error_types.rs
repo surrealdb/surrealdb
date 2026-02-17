@@ -291,17 +291,16 @@ fn test_error_message_quality() {
 fn test_public_error_new() {
 	let err = Error::not_found("The table 'users' does not exist".to_string(), None);
 
-	assert_eq!(err.kind(), &ErrorKind::NotFound);
+	assert_eq!(err.kind(), ErrorKind::NotFound);
 	assert_eq!(err.message(), "The table 'users' does not exist");
-	assert!(err.details().is_none());
+	assert!(err.not_found_details().is_none());
 }
 
 #[test]
 fn test_public_error_with_details() {
 	let err = Error::not_allowed("Token expired".to_string(), AuthError::TokenExpired);
 
-	assert_eq!(err.kind(), &ErrorKind::NotAllowed);
-	assert!(err.details().is_some());
+	assert_eq!(err.kind(), ErrorKind::NotAllowed);
 	let d = err.not_allowed_details().unwrap();
 	assert!(matches!(d, NotAllowedError::Auth(AuthError::TokenExpired)));
 }
@@ -310,11 +309,12 @@ fn test_public_error_with_details() {
 fn test_public_error_validation_details() {
 	let err =
 		Error::validation("Invalid request".to_string(), Some(ValidationError::InvalidRequest));
-	assert_eq!(err.kind(), &ErrorKind::Validation);
+	assert_eq!(err.kind(), ErrorKind::Validation);
 	assert_eq!(err.validation_details(), Some(&ValidationError::InvalidRequest));
 
 	let err_no_details = Error::validation("Parse error".to_string(), None);
 	assert_eq!(err_no_details.validation_details(), None);
+	assert_eq!(err_no_details.kind(), ErrorKind::Validation); // kind is still Validation
 
 	let err_wrong_kind = Error::not_allowed("Auth failed".to_string(), None);
 	assert_eq!(err_wrong_kind.validation_details(), None);
@@ -337,7 +337,7 @@ fn test_public_error_details_pattern_matching() {
 
 	// Users can pattern match on ErrorDetails directly
 	match err.details() {
-		Some(ErrorDetails::NotFound(NotFoundError::Table {
+		ErrorDetails::NotFound(Some(NotFoundError::Table {
 			name,
 		})) => assert_eq!(name, "users"),
 		_ => panic!("Expected NotFound Table details"),
@@ -353,7 +353,7 @@ fn test_error_kind_unknown_falls_back_to_internal() {
 	obj.insert("message", "Message");
 	let value = Value::Object(obj);
 	let err = Error::from_value(value).unwrap();
-	assert_eq!(err.kind(), &ErrorKind::Internal);
+	assert_eq!(err.kind(), ErrorKind::Internal);
 	assert_eq!(err.message(), "Message");
 }
 
@@ -365,7 +365,7 @@ fn test_error_deserialize_without_kind_defaults_to_internal() {
 	obj.insert("message", "Something went wrong");
 	let value = Value::Object(obj);
 	let err = Error::from_value(value).unwrap();
-	assert_eq!(err.kind(), &ErrorKind::Internal);
+	assert_eq!(err.kind(), ErrorKind::Internal);
 	assert_eq!(err.message(), "Something went wrong");
 }
 
@@ -539,7 +539,7 @@ fn test_detail_wire_format_full_error_round_trip() {
 	let err = Error::not_allowed("Token expired".to_string(), AuthError::TokenExpired);
 	let val = err.into_value();
 	let parsed = Error::from_value(val).unwrap();
-	assert_eq!(parsed.kind(), &ErrorKind::NotAllowed);
+	assert_eq!(parsed.kind(), ErrorKind::NotAllowed);
 	assert_eq!(parsed.message(), "Token expired");
 	let details = parsed.not_allowed_details().unwrap();
 	assert!(matches!(details, NotAllowedError::Auth(AuthError::TokenExpired)));
@@ -593,7 +593,7 @@ fn test_error_snapshot_not_allowed_auth_token_expired() {
 
 	// Round-trip back to Error
 	let parsed = Error::from_value(val).unwrap();
-	assert_eq!(parsed.kind(), &ErrorKind::NotAllowed);
+	assert_eq!(parsed.kind(), ErrorKind::NotAllowed);
 	assert_eq!(parsed.message(), "Token expired");
 	let details = parsed.not_allowed_details().unwrap();
 	assert!(matches!(details, NotAllowedError::Auth(AuthError::TokenExpired)));
@@ -658,7 +658,7 @@ fn test_error_snapshot_not_found_table() {
 
 	// Round-trip
 	let parsed = Error::from_value(val).unwrap();
-	assert_eq!(parsed.kind(), &ErrorKind::NotFound);
+	assert_eq!(parsed.kind(), ErrorKind::NotFound);
 	let details = parsed.not_found_details().unwrap();
 	assert!(matches!(
 		details,
@@ -709,7 +709,7 @@ fn test_error_snapshot_query_timed_out() {
 
 	// Round-trip
 	let parsed = Error::from_value(val).unwrap();
-	assert_eq!(parsed.kind(), &ErrorKind::Query);
+	assert_eq!(parsed.kind(), ErrorKind::Query);
 	let details = parsed.query_details().unwrap();
 	assert!(matches!(
 		details,
@@ -741,7 +741,7 @@ fn test_error_snapshot_already_exists_record() {
 
 	// Round-trip
 	let parsed = Error::from_value(val).unwrap();
-	assert_eq!(parsed.kind(), &ErrorKind::AlreadyExists);
+	assert_eq!(parsed.kind(), ErrorKind::AlreadyExists);
 	let details = parsed.already_exists_details().unwrap();
 	assert!(matches!(
 		details,
@@ -796,9 +796,9 @@ fn test_error_snapshot_internal_no_details() {
 
 	// Round-trip
 	let parsed = Error::from_value(val).unwrap();
-	assert_eq!(parsed.kind(), &ErrorKind::Internal);
+	assert_eq!(parsed.kind(), ErrorKind::Internal);
 	assert_eq!(parsed.message(), "Unexpected");
-	assert!(parsed.details().is_none());
+	assert!(matches!(parsed.details(), ErrorDetails::Internal));
 }
 
 #[test]
@@ -816,9 +816,9 @@ fn test_error_snapshot_thrown_no_details() {
 
 	// Round-trip
 	let parsed = Error::from_value(val).unwrap();
-	assert_eq!(parsed.kind(), &ErrorKind::Thrown);
+	assert_eq!(parsed.kind(), ErrorKind::Thrown);
 	assert_eq!(parsed.message(), "custom error");
-	assert!(parsed.details().is_none());
+	assert!(matches!(parsed.details(), ErrorDetails::Thrown));
 }
 
 #[test]

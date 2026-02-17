@@ -210,7 +210,7 @@ fn excessive_cast_chain_depth() -> Result<()> {
 		//
 		let tmp = res.next().unwrap();
 		let err = tmp.unwrap_err();
-		assert_eq!(err.kind(), &TypesErrorKind::Internal);
+		assert_eq!(err.kind(), TypesErrorKind::Internal);
 		assert_eq!(
 			err.message(),
 			"Reached excessive computation depth due to functions, subqueries, or computed values"
