@@ -31,12 +31,13 @@ impl Fields {
 						let field_name =
 							field.ident.as_ref().expect("Named field must have an identifier");
 						let field_attrs = FieldAttributes::parse(field);
-						NamedField {
-							ident: field_name.clone(),
-							ty: field.ty.clone(),
-							rename: field_attrs.rename,
-							default: field_attrs.default,
-						}
+					NamedField {
+						ident: field_name.clone(),
+						ty: field.ty.clone(),
+						rename: field_attrs.rename,
+						default: field_attrs.default,
+						flatten: field_attrs.flatten,
+					}
 					})
 					.collect();
 

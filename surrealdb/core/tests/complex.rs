@@ -5,7 +5,7 @@ use anyhow::Result;
 use helpers::{new_ds, with_enough_stack};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_types::{Error as TypesError, ErrorKind as TypesErrorKind, Value};
+use surrealdb_types::{Error as TypesError, Value};
 
 /* Removed because of <future> removal, not yet relevant for the initial COMPUTED implementation.
  * Once we start to analyze query dependencies up front we can error on cyclic dependencies again.
@@ -210,7 +210,7 @@ fn excessive_cast_chain_depth() -> Result<()> {
 		//
 		let tmp = res.next().unwrap();
 		let err = tmp.unwrap_err();
-		assert_eq!(err.kind(), TypesErrorKind::Internal);
+		assert!(err.is_internal());
 		assert_eq!(
 			err.message(),
 			"Reached excessive computation depth due to functions, subqueries, or computed values"

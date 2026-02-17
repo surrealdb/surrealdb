@@ -1,8 +1,6 @@
 use std::fmt;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
-
 use crate::{Kind, Object, SurrealValue, ToSql, Value};
 
 // -----------------------------------------------------------------------------
@@ -40,64 +38,27 @@ fn default_code() -> i64 {
 // Public API error type (wire-friendly, non-lossy, supports chaining)
 // -----------------------------------------------------------------------------
 
-/// A SurrealDB error kind
-#[derive(Clone, Debug, Default, PartialEq, Eq, SurrealValue, Serialize, Deserialize)]
-#[surreal(crate = "crate")]
-#[surreal(untagged)]
-#[non_exhaustive]
-pub enum ErrorKind {
-	/// Invalid input: parse error, invalid request or params.
-	/// Used for validation failures.
-	Validation,
-	/// Feature or config not supported (e.g. live query, GraphQL config).
-	/// Used for configuration errors.
-	Configuration,
-	/// User-thrown error (e.g. from THROW in SurrealQL).
-	/// Used for errors thrown by user code.
-	Thrown,
-	/// Query execution failure (not executed, timeout, cancelled).
-	/// Used for query errors.
-	Query,
-	/// Serialisation or deserialisation error.
-	/// Used for serialization errors.
-	Serialization,
-	/// Operation or feature not allowed (e.g. RPC method, scripting, function, net target).
-	/// Used for permission or method errors.
-	NotAllowed,
-	/// Resource not found (e.g. table, record, namespace).
-	/// Used for missing resources.
-	NotFound,
-	/// Resource already exists (e.g. table, record).
-	/// Used for duplicate resources.
-	AlreadyExists,
-	/// Connection error (e.g. uninitialised, already connected). Used in the SDK.
-	/// Used for client connection errors.
-	Connection,
-	/// Internal or unexpected error (server or client).
-	/// Used for unexpected failures.
-	///
-	/// Also used as the fallback for unknown error kinds from the wire (forward compat).
-	#[default]
-	#[serde(other)]
-	#[surreal(other)]
-	Internal,
-}
-
 /// Represents an error in SurrealDB
 ///
 /// Designed to be returned from public APIs (including over the wire). It is
 /// wire-friendly and non-lossy: serialization preserves `kind`, `message`,
-/// `details`, and the cause chain. Use this type whenever an error crosses
+/// and optional `details`. Use this type whenever an error crosses
 /// an API boundary (e.g. server response, SDK method return).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// The `details` field is flattened into the serialized object, so the wire
+/// format contains `kind` (string) and optionally `details` (object) at the
+/// same level as `code` and `message`.
+#[derive(Debug, Clone, PartialEq, Eq, SurrealValue)]
+#[surreal(crate = "crate")]
 pub struct Error {
 	/// Wire-only error code for RPC backwards compatibility.
-	#[serde(default = "default_code")]
+	#[surreal(default = "default_code")]
 	code: i64,
 	/// Human-readable error message describing the error.
 	message: String,
 	/// The error kind and optional structured details. The kind is derived from the variant.
-	/// Always present -- replaces the separate `kind` field.
+	/// Flattened into the parent object: contributes `kind` and optionally `details` fields.
+	#[surreal(flatten)]
 	details: ErrorDetails,
 }
 
@@ -294,20 +255,20 @@ impl Error {
 		}
 	}
 
-	/// Build an error from the query-result wire shape (message, optional kind, details).
+	/// Build an error from the query-result wire shape (message, optional kind string, details).
 	/// Used when deserialising query result error payloads that do not include `code`. Uses
-	/// [`default_code`] and defaults `kind` to [`Internal`](ErrorKind::Internal) when not present.
+	/// [`default_code`] and defaults kind to "Internal" when not present.
 	#[doc(hidden)]
 	pub fn from_parts(
 		message: String,
-		kind: Option<ErrorKind>,
+		kind: Option<&str>,
 		details: Option<Value>,
 	) -> Self {
-		let kind = kind.unwrap_or_default();
+		let kind_str = kind.unwrap_or("Internal");
 		let typed_details = match details {
-			Some(v) => ErrorDetails::from_value_with_kind(&kind, v)
-				.unwrap_or_else(|_| ErrorDetails::from_kind_only(&kind)),
-			None => ErrorDetails::from_kind_only(&kind),
+			Some(v) => ErrorDetails::from_value_with_kind_str(kind_str, v)
+				.unwrap_or_else(|_| ErrorDetails::from_kind_str(kind_str)),
+			None => ErrorDetails::from_kind_str(kind_str),
 		};
 		Self {
 			code: default_code(),
@@ -316,9 +277,9 @@ impl Error {
 		}
 	}
 
-	/// Returns the machine-readable error kind, derived from the details variant.
-	pub fn kind(&self) -> ErrorKind {
-		self.details.kind()
+	/// Returns the kind string for this error (e.g. "NotAllowed", "Internal").
+	pub fn kind_str(&self) -> &'static str {
+		self.details.kind_str()
 	}
 
 	/// Returns the human-readable error message.
@@ -329,6 +290,56 @@ impl Error {
 	/// Returns the error details (always present). The variant determines the error kind.
 	pub fn details(&self) -> &ErrorDetails {
 		&self.details
+	}
+
+	/// Returns true if this is a validation error.
+	pub fn is_validation(&self) -> bool {
+		self.details.is_validation()
+	}
+
+	/// Returns true if this is a configuration error.
+	pub fn is_configuration(&self) -> bool {
+		self.details.is_configuration()
+	}
+
+	/// Returns true if this is a query error.
+	pub fn is_query(&self) -> bool {
+		self.details.is_query()
+	}
+
+	/// Returns true if this is a serialization error.
+	pub fn is_serialization(&self) -> bool {
+		self.details.is_serialization()
+	}
+
+	/// Returns true if this is a not-allowed error.
+	pub fn is_not_allowed(&self) -> bool {
+		self.details.is_not_allowed()
+	}
+
+	/// Returns true if this is a not-found error.
+	pub fn is_not_found(&self) -> bool {
+		self.details.is_not_found()
+	}
+
+	/// Returns true if this is an already-exists error.
+	pub fn is_already_exists(&self) -> bool {
+		self.details.is_already_exists()
+	}
+
+	/// Returns true if this is a connection error.
+	pub fn is_connection(&self) -> bool {
+		self.details.is_connection()
+	}
+
+	/// Returns true if this is a user-thrown error.
+	pub fn is_thrown(&self) -> bool {
+		self.details.is_thrown()
+	}
+
+	/// Returns true if this is an internal error.
+	pub fn is_internal(&self) -> bool {
+		self.details.is_internal()
 	}
 
 	/// Returns structured validation error details, if this is a validation error with specifics.
@@ -439,73 +450,114 @@ pub enum ErrorDetails {
 }
 
 impl ErrorDetails {
-	/// Returns the [`ErrorKind`] for this details variant.
-	pub fn kind(&self) -> ErrorKind {
+	/// Returns the kind string for wire serialization (e.g. "NotAllowed", "Internal").
+	pub fn kind_str(&self) -> &'static str {
 		match self {
-			Self::Validation(_) => ErrorKind::Validation,
-			Self::Configuration(_) => ErrorKind::Configuration,
-			Self::Query(_) => ErrorKind::Query,
-			Self::Serialization(_) => ErrorKind::Serialization,
-			Self::NotAllowed(_) => ErrorKind::NotAllowed,
-			Self::NotFound(_) => ErrorKind::NotFound,
-			Self::AlreadyExists(_) => ErrorKind::AlreadyExists,
-			Self::Connection(_) => ErrorKind::Connection,
-			Self::Thrown => ErrorKind::Thrown,
-			Self::Internal => ErrorKind::Internal,
+			Self::Validation(_) => "Validation",
+			Self::Configuration(_) => "Configuration",
+			Self::Query(_) => "Query",
+			Self::Serialization(_) => "Serialization",
+			Self::NotAllowed(_) => "NotAllowed",
+			Self::NotFound(_) => "NotFound",
+			Self::AlreadyExists(_) => "AlreadyExists",
+			Self::Connection(_) => "Connection",
+			Self::Thrown => "Thrown",
+			Self::Internal => "Internal",
 		}
 	}
 
-	/// Create an `ErrorDetails` from just an [`ErrorKind`], with no inner details.
-	pub(crate) fn from_kind_only(kind: &ErrorKind) -> Self {
+	/// Returns true if this is a validation error.
+	pub fn is_validation(&self) -> bool {
+		matches!(self, Self::Validation(_))
+	}
+	/// Returns true if this is a configuration error.
+	pub fn is_configuration(&self) -> bool {
+		matches!(self, Self::Configuration(_))
+	}
+	/// Returns true if this is a query error.
+	pub fn is_query(&self) -> bool {
+		matches!(self, Self::Query(_))
+	}
+	/// Returns true if this is a serialization error.
+	pub fn is_serialization(&self) -> bool {
+		matches!(self, Self::Serialization(_))
+	}
+	/// Returns true if this is a not-allowed error.
+	pub fn is_not_allowed(&self) -> bool {
+		matches!(self, Self::NotAllowed(_))
+	}
+	/// Returns true if this is a not-found error.
+	pub fn is_not_found(&self) -> bool {
+		matches!(self, Self::NotFound(_))
+	}
+	/// Returns true if this is an already-exists error.
+	pub fn is_already_exists(&self) -> bool {
+		matches!(self, Self::AlreadyExists(_))
+	}
+	/// Returns true if this is a connection error.
+	pub fn is_connection(&self) -> bool {
+		matches!(self, Self::Connection(_))
+	}
+	/// Returns true if this is a user-thrown error.
+	pub fn is_thrown(&self) -> bool {
+		matches!(self, Self::Thrown)
+	}
+	/// Returns true if this is an internal error.
+	pub fn is_internal(&self) -> bool {
+		matches!(self, Self::Internal)
+	}
+
+	/// Create an `ErrorDetails` from a kind string, with no inner details.
+	/// Unknown kind strings fall back to `Internal` (forward compatibility).
+	pub(crate) fn from_kind_str(kind: &str) -> Self {
 		match kind {
-			ErrorKind::Validation => Self::Validation(None),
-			ErrorKind::Configuration => Self::Configuration(None),
-			ErrorKind::Query => Self::Query(None),
-			ErrorKind::Serialization => Self::Serialization(None),
-			ErrorKind::NotAllowed => Self::NotAllowed(None),
-			ErrorKind::NotFound => Self::NotFound(None),
-			ErrorKind::AlreadyExists => Self::AlreadyExists(None),
-			ErrorKind::Connection => Self::Connection(None),
-			ErrorKind::Thrown => Self::Thrown,
-			ErrorKind::Internal => Self::Internal,
+			"Validation" => Self::Validation(None),
+			"Configuration" => Self::Configuration(None),
+			"Query" => Self::Query(None),
+			"Serialization" => Self::Serialization(None),
+			"NotAllowed" => Self::NotAllowed(None),
+			"NotFound" => Self::NotFound(None),
+			"AlreadyExists" => Self::AlreadyExists(None),
+			"Connection" => Self::Connection(None),
+			"Thrown" => Self::Thrown,
+			// Unknown kinds fall back to Internal (forward compat)
+			_ => Self::Internal,
 		}
 	}
 
-	/// Deserialize details using the error kind to select the right variant.
+	/// Deserialize details using the kind string to select the right variant.
 	/// O(1) dispatch -- no trial-and-error parsing.
-	pub(crate) fn from_value_with_kind(kind: &ErrorKind, value: Value) -> Result<Self, Error> {
+	pub(crate) fn from_value_with_kind_str(kind: &str, value: Value) -> Result<Self, Error> {
 		match kind {
-			ErrorKind::Validation => {
+			"Validation" => {
 				ValidationError::from_value(value).map(|v| ErrorDetails::Validation(Some(v)))
 			}
-			ErrorKind::Configuration => {
+			"Configuration" => {
 				ConfigurationError::from_value(value).map(|v| ErrorDetails::Configuration(Some(v)))
 			}
-			ErrorKind::Query => {
-				QueryError::from_value(value).map(|v| ErrorDetails::Query(Some(v)))
-			}
-			ErrorKind::Serialization => {
+			"Query" => QueryError::from_value(value).map(|v| ErrorDetails::Query(Some(v))),
+			"Serialization" => {
 				SerializationError::from_value(value).map(|v| ErrorDetails::Serialization(Some(v)))
 			}
-			ErrorKind::NotAllowed => {
+			"NotAllowed" => {
 				NotAllowedError::from_value(value).map(|v| ErrorDetails::NotAllowed(Some(v)))
 			}
-			ErrorKind::NotFound => {
+			"NotFound" => {
 				NotFoundError::from_value(value).map(|v| ErrorDetails::NotFound(Some(v)))
 			}
-			ErrorKind::AlreadyExists => {
+			"AlreadyExists" => {
 				AlreadyExistsError::from_value(value).map(|v| ErrorDetails::AlreadyExists(Some(v)))
 			}
-			ErrorKind::Connection => {
+			"Connection" => {
 				ConnectionError::from_value(value).map(|v| ErrorDetails::Connection(Some(v)))
 			}
-			ErrorKind::Thrown => Ok(Self::Thrown),
-			ErrorKind::Internal => Ok(Self::Internal),
+			"Thrown" => Ok(Self::Thrown),
+			_ => Ok(Self::Internal),
 		}
 	}
 
 	/// Returns true if this variant has inner detail data.
-	pub(crate) fn has_details(&self) -> bool {
+	pub fn has_details(&self) -> bool {
 		match self {
 			Self::Validation(d) => d.is_some(),
 			Self::Configuration(d) => d.is_some(),
@@ -529,39 +581,58 @@ impl SurrealValue for ErrorDetails {
 		matches!(value, Value::Object(_))
 	}
 
+	/// Serializes as `{ "kind": "<variant>", "details": <inner> }`.
+	/// When flattened into Error, this merges `kind` and `details` into the parent object.
 	fn into_value(self) -> Value {
+		let mut obj = Object::new();
+		obj.insert("kind", Value::from(self.kind_str()));
 		match self {
-			Self::Validation(Some(d)) => d.into_value(),
-			Self::Configuration(Some(d)) => d.into_value(),
-			Self::Query(Some(d)) => d.into_value(),
-			Self::Serialization(Some(d)) => d.into_value(),
-			Self::NotAllowed(Some(d)) => d.into_value(),
-			Self::NotFound(Some(d)) => d.into_value(),
-			Self::AlreadyExists(Some(d)) => d.into_value(),
-			Self::Connection(Some(d)) => d.into_value(),
-			// No inner data to serialize
-			_ => Value::None,
+			Self::Validation(Some(d)) => {
+				obj.insert("details", d.into_value());
+			}
+			Self::Configuration(Some(d)) => {
+				obj.insert("details", d.into_value());
+			}
+			Self::Query(Some(d)) => {
+				obj.insert("details", d.into_value());
+			}
+			Self::Serialization(Some(d)) => {
+				obj.insert("details", d.into_value());
+			}
+			Self::NotAllowed(Some(d)) => {
+				obj.insert("details", d.into_value());
+			}
+			Self::NotFound(Some(d)) => {
+				obj.insert("details", d.into_value());
+			}
+			Self::AlreadyExists(Some(d)) => {
+				obj.insert("details", d.into_value());
+			}
+			Self::Connection(Some(d)) => {
+				obj.insert("details", d.into_value());
+			}
+			// No inner data -- just kind, no details field
+			_ => {}
 		}
+		Value::Object(obj)
 	}
 
+	/// Deserializes from `{ "kind": "<variant>", "details"?: <inner> }`.
 	fn from_value(value: Value) -> Result<Self, Error> {
-		// Try each error kind. Each attempt is cheap (string comparison on kind field).
-		// Prefer from_value_with_kind() when ErrorKind is available.
-		for error_kind in [
-			ErrorKind::Validation,
-			ErrorKind::Configuration,
-			ErrorKind::Query,
-			ErrorKind::Serialization,
-			ErrorKind::NotAllowed,
-			ErrorKind::NotFound,
-			ErrorKind::AlreadyExists,
-			ErrorKind::Connection,
-		] {
-			if let Ok(details) = Self::from_value_with_kind(&error_kind, value.clone()) {
-				return Ok(details);
-			}
+		let Value::Object(mut map) = value else {
+			return Err(Error::internal("Expected object for ErrorDetails".to_string()));
+		};
+		let kind_str = map
+			.remove("kind")
+			.and_then(|v| match v {
+				Value::String(s) => Some(s),
+				_ => None,
+			})
+			.unwrap_or_else(|| "Internal".to_string());
+		match map.remove("details") {
+			Some(v) => Self::from_value_with_kind_str(&kind_str, v),
+			None => Ok(Self::from_kind_str(&kind_str)),
 		}
-		Err(Error::internal("Failed to decode ErrorDetails".to_string()))
 	}
 }
 
@@ -811,64 +882,6 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
-
-impl SurrealValue for Error {
-	fn kind_of() -> Kind {
-		Kind::Object
-	}
-
-	fn is_value(value: &Value) -> bool {
-		matches!(value, Value::Object(_))
-	}
-
-	fn into_value(self) -> Value {
-		let mut obj = Object::new();
-		obj.insert("code", Value::from(self.code));
-		obj.insert("kind", self.details.kind().into_value());
-		obj.insert("message", Value::from(self.message));
-		if self.details.has_details() {
-			obj.insert("details", self.details.into_value());
-		}
-		Value::Object(obj)
-	}
-
-	fn from_value(value: Value) -> Result<Self, Error> {
-		let Value::Object(mut map) = value else {
-			return Err(Error::internal("Expected object for Error".to_string()));
-		};
-		let code = map
-			.remove("code")
-			.map(i64::from_value)
-			.transpose()
-			.ok()
-			.flatten()
-			.unwrap_or(default_code());
-		let kind = map
-			.remove("kind")
-			.map(ErrorKind::from_value)
-			.transpose()
-			.ok()
-			.flatten()
-			.unwrap_or_default();
-		let message = map
-			.remove("message")
-			.map(String::from_value)
-			.transpose()
-			.ok()
-			.flatten()
-			.unwrap_or_default();
-		let details = match map.remove("details") {
-			Some(v) => ErrorDetails::from_value_with_kind(&kind, v)
-				.unwrap_or_else(|_| ErrorDetails::from_kind_only(&kind)),
-			None => ErrorDetails::from_kind_only(&kind),
-		};
-		Ok(Self {
-			code,
-			message,
-			details,
-		})
-	}
-}
 
 // -----------------------------------------------------------------------------
 // Type conversion errors (internal to the types layer)

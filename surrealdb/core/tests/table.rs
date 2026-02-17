@@ -3,8 +3,6 @@ use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_types::ErrorKind as TypesErrorKind;
-
 use crate::helpers::skip_ok;
 
 #[tokio::test]
@@ -146,7 +144,7 @@ async fn define_foreign_table() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result.unwrap_err();
-	assert_eq!(tmp.kind(), TypesErrorKind::Internal);
+	assert!(tmp.is_internal());
 	assert_eq!(
 		tmp.message(),
 		"Incorrect arguments for function math::mean(). Argument 1 was the wrong type. Expected `number` but found `'test'`"
