@@ -468,7 +468,8 @@ impl Error {
 
 /// Auth failure reason for [`ErrorKind::NotAllowed`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(crate = "crate")]
+#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum AuthError {
 	/// The token used for authentication has expired.
@@ -513,7 +514,8 @@ impl From<AuthError> for Option<NotAllowedError> {
 
 /// Validation failure reason for [`ErrorKind::Validation`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(crate = "crate")]
+#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum ValidationError {
 	/// Parse error (invalid message or request format).
@@ -545,7 +547,8 @@ pub enum ValidationError {
 
 /// Not-allowed reason for [`ErrorKind::NotAllowed`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(crate = "crate")]
+#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum NotAllowedError {
 	/// Scripting not allowed.
@@ -571,7 +574,8 @@ pub enum NotAllowedError {
 
 /// Configuration failure reason for [`ErrorKind::Configuration`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(crate = "crate")]
+#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum ConfigurationError {
 	/// Live query not supported.
@@ -584,7 +588,8 @@ pub enum ConfigurationError {
 
 /// Serialisation failure reason for [`ErrorKind::Serialization`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(crate = "crate")]
+#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum SerializationError {
 	/// Serialisation error.
@@ -595,7 +600,8 @@ pub enum SerializationError {
 
 /// Not-found reason for [`ErrorKind::NotFound`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(crate = "crate")]
+#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum NotFoundError {
 	/// RPC method not found.
@@ -634,7 +640,8 @@ pub enum NotFoundError {
 
 /// Query failure reason for [`ErrorKind::Query`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(crate = "crate")]
+#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum QueryError {
 	/// Query was not executed.
@@ -650,7 +657,8 @@ pub enum QueryError {
 
 /// Already-exists reason for [`ErrorKind::AlreadyExists`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(crate = "crate")]
+#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum AlreadyExistsError {
 	/// Session already exists.
@@ -683,7 +691,8 @@ pub enum AlreadyExistsError {
 /// Connection failure reason for [`ErrorKind::Connection`] errors.
 /// Used in the SDK for client-side connection state errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
-#[surreal(crate = "crate", tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(crate = "crate")]
+#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 #[non_exhaustive]
 pub enum ConnectionError {
 	/// Connection was used before being initialised.
