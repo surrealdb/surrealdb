@@ -62,7 +62,36 @@ const LOG: &str = "surrealdb::net";
 /// Factory for constructing the top-level Axum Router used by the HTTP server.
 ///
 /// Embedders can provide their own implementation to add or remove routes, or wrap
-/// additional middleware. The default binary uses `DefaultRouterFactory`.
+/// additional middleware. The default binary uses [`CommunityComposer`].
+///
+/// # Example
+///
+/// The following shows how an embedder can extend the default community router with
+/// additional routes:
+///
+/// ```rust,ignore
+/// use std::sync::Arc;
+/// use axum::{Router, routing::get};
+/// use surreal::RouterFactory;
+/// use surreal::rpc::RpcState;
+/// use surreal::core::CommunityComposer;
+///
+/// struct MyComposer;
+///
+/// impl RouterFactory for MyComposer {
+///     fn configure_router() -> Router<Arc<RpcState>> {
+///         // Start from the standard community routes
+///         let router = CommunityComposer::configure_router();
+///         // Merge custom routes
+///         router.merge(
+///             Router::new()
+///                 .route("/custom", get(|| async { "Hello from custom route" }))
+///         )
+///     }
+/// }
+/// ```
+///
+/// [`CommunityComposer`]: surrealdb_core::CommunityComposer
 pub trait RouterFactory {
 	/// Build and return the base Router. The server will attach shared state and layers.
 	fn configure_router() -> Router<Arc<RpcState>>;
