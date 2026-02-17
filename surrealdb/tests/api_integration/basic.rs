@@ -225,17 +225,15 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 	let err_str = err.to_string();
 	if err_str.contains("signup_thrown_error") {
 		// Expected thrown error
+	} else if err.is_query() {
+		assert!(err.message().contains("signup"));
+	} else if err.message().contains("HTTP") {
+		assert_eq!(
+			err.message(),
+			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+		);
 	} else {
-		if err.is_query() {
-			assert!(err.message().contains("signup"));
-		} else if err.message().contains("HTTP") {
-			assert_eq!(
-				err.message(),
-				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
-			);
-		} else {
-			panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
-		}
+		panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
 	}
 
 	let err = db
@@ -255,17 +253,15 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 	let err_str = err.to_string();
 	if err_str.contains("signin_thrown_error") {
 		// Expected thrown error
+	} else if err.is_query() {
+		assert!(err.message().contains("signin"));
+	} else if err.message().contains("HTTP") {
+		assert_eq!(
+			err.message(),
+			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+		);
 	} else {
-		if err.is_query() {
-			assert!(err.message().contains("signin"));
-		} else if err.message().contains("HTTP") {
-			assert_eq!(
-				err.message(),
-				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
-			);
-		} else {
-			panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
-		}
+		panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
 	}
 }
 
@@ -307,17 +303,15 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 	let err_str = err.to_string();
 	if err_str.contains("signup query failed") || err_str.contains("signup") {
 		// Expected error
+	} else if err.is_query() {
+		assert_eq!(err.message(), "The record access signup query failed");
+	} else if err.message().contains("HTTP") {
+		assert_eq!(
+			err.message(),
+			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
+		);
 	} else {
-		if err.is_query() {
-			assert_eq!(err.message(), "The record access signup query failed");
-		} else if err.message().contains("HTTP") {
-			assert_eq!(
-				err.message(),
-				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
-			);
-		} else {
-			panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
-		}
+		panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
 	};
 
 	let err = db
@@ -337,17 +331,15 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 	let err_str = err.to_string();
 	if err_str.contains("signin query failed") || err_str.contains("signin") {
 		// Expected error
+	} else if err.is_query() {
+		assert_eq!(err.message(), "The record access signin query failed");
+	} else if err.message().contains("HTTP") {
+		assert_eq!(
+			err.message(),
+			"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
+		);
 	} else {
-		if err.is_query() {
-			assert_eq!(err.message(), "The record access signin query failed");
-		} else if err.message().contains("HTTP") {
-			assert_eq!(
-				err.message(),
-				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
-			);
-		} else {
-			panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
-		}
+		panic!("unexpected error kind: {:?}, message: {}", err.kind_str(), err.message());
 	};
 }
 
