@@ -1,3 +1,4 @@
+
 # cargo-vet config file
 
 [cargo-vet]
@@ -1116,14 +1117,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.proptest]]
 version = "1.9.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.prost]]
-version = "0.12.6"
-criteria = "safe-to-deploy"
-
-[[exemptions.prost]]
-version = "0.14.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.prost-build]]

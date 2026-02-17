@@ -207,6 +207,18 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-10-05"
 end = "2026-10-12"
 
+[[trusted.anymap2]]
+criteria = "safe-to-deploy"
+user-id = 3991 # Azriel Hoh (azriel91)
+start = "2021-04-10"
+end = "2027-02-17"
+
+[[trusted.anymap3]]
+criteria = "safe-to-deploy"
+user-id = 25132 # reivilibre
+start = "2024-01-01"
+end = "2027-02-17"
+
 [[trusted.argon2]]
 criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
@@ -483,11 +495,29 @@ user-id = 176367
 start = "2023-03-12"
 end = "2026-02-26"
 
+[[trusted.downcast-rs]]
+criteria = "safe-to-deploy"
+user-id = 3135 # Ashish Myles (marcianx)
+start = "2019-04-09"
+end = "2027-02-17"
+
 [[trusted.dtoa]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-05-02"
 end = "2026-10-12"
+
+[[trusted.dyn-clone]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-12-23"
+end = "2027-02-17"
+
+[[trusted.dyn-hash]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2023-11-03"
+end = "2027-02-17"
 
 [[trusted.echodb]]
 criteria = "safe-to-deploy"
@@ -705,6 +735,12 @@ user-id = 1 # Alex Crichton (alexcrichton)
 start = "2019-03-04"
 end = "2026-10-30"
 
+[[trusted.kstring]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2020-03-16"
+end = "2027-02-17"
+
 [[trusted.lexicmp]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
@@ -740,6 +776,30 @@ criteria = "safe-to-deploy"
 user-id = 6825 # Dan Gohman (sunfishcode)
 start = "2021-06-12"
 end = "2026-10-30"
+
+[[trusted.liquid]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2019-07-05"
+end = "2027-02-17"
+
+[[trusted.liquid-core]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2020-03-16"
+end = "2027-02-17"
+
+[[trusted.liquid-derive]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2019-07-05"
+end = "2027-02-17"
+
+[[trusted.liquid-lib]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2020-03-16"
+end = "2027-02-17"
 
 [[trusted.loom]]
 criteria = "safe-to-deploy"
@@ -837,6 +897,18 @@ user-id = 356 # bluss (bluss)
 start = "2019-09-23"
 end = "2026-05-06"
 
+[[trusted.nom]]
+criteria = "safe-to-deploy"
+user-id = 959 # Geoffroy Couprie (Geal)
+start = "2019-02-27"
+end = "2027-02-17"
+
+[[trusted.nom-language]]
+criteria = "safe-to-deploy"
+user-id = 959 # Geoffroy Couprie (Geal)
+start = "2024-12-08"
+end = "2027-02-17"
+
 [[trusted.num]]
 criteria = "safe-to-deploy"
 user-id = 539 # Josh Stone (cuviper)
@@ -909,6 +981,12 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-03-19"
 end = "2025-08-06"
 
+[[trusted.pastey]]
+criteria = "safe-to-deploy"
+user-id = 261504 # Aditya Kumar (AS1100K)
+start = "2025-03-09"
+end = "2027-02-17"
+
 [[trusted.pathdiff]]
 criteria = "safe-to-deploy"
 user-id = 1139 # Manish Goregaokar (Manishearth)
@@ -920,6 +998,24 @@ criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
 start = "2020-06-10"
 end = "2026-05-06"
+
+[[trusted.pest_derive]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:pest-parser/pest"
+start = "2025-11-21"
+end = "2027-02-17"
+
+[[trusted.pest_generator]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:pest-parser/pest"
+start = "2025-11-21"
+end = "2027-02-17"
+
+[[trusted.pest_meta]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:pest-parser/pest"
+start = "2025-11-21"
+end = "2027-02-17"
 
 [[trusted.phf]]
 criteria = "safe-to-deploy"
@@ -1004,6 +1100,18 @@ criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2022-01-04"
 end = "2025-08-06"
+
+[[trusted.primal-check]]
+criteria = "safe-to-deploy"
+user-id = 539 # Josh Stone (cuviper)
+start = "2020-06-18"
+end = "2027-02-17"
+
+[[trusted.prost]]
+criteria = "safe-to-deploy"
+user-id = 3959 # Lucio Franco (LucioFranco)
+start = "2021-07-08"
+end = "2027-02-17"
 
 [[trusted.psl-types]]
 criteria = "safe-to-deploy"
@@ -1101,6 +1209,12 @@ user-id = 30606 # Michele d'Amico (la10736)
 start = "2022-05-15"
 end = "2026-05-01"
 
+[[trusted.rustfft]]
+criteria = "safe-to-deploy"
+user-id = 6727 # Elliott Mahler (ejmahler)
+start = "2019-12-28"
+end = "2027-02-17"
+
 [[trusted.rustix]]
 criteria = "safe-to-deploy"
 user-id = 6825 # Dan Gohman (sunfishcode)
@@ -1112,6 +1226,12 @@ criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-05-02"
 end = "2025-08-06"
+
+[[trusted.safetensors]]
+criteria = "safe-to-deploy"
+user-id = 79201 # Nicolas Patry (Narsil)
+start = "2022-12-13"
+end = "2027-02-17"
 
 [[trusted.salsa20]]
 criteria = "safe-to-deploy"
@@ -1226,6 +1346,18 @@ criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2025-09-03"
 end = "2026-09-10"
+
+[[trusted.strength_reduce]]
+criteria = "safe-to-deploy"
+user-id = 6727 # Elliott Mahler (ejmahler)
+start = "2019-06-12"
+end = "2027-02-17"
+
+[[trusted.string-interner]]
+criteria = "safe-to-deploy"
+user-id = 4876 # Robin Freyler (Robbepop)
+start = "2019-09-01"
+end = "2027-02-17"
 
 [[trusted.surrealdb]]
 criteria = "safe-to-deploy"
@@ -1508,6 +1640,54 @@ criteria = "safe-to-deploy"
 user-id = 172786 # Hayden Stainsby (hds)
 start = "2024-11-29"
 end = "2026-12-15"
+
+[[trusted.tract-core]]
+criteria = "safe-to-deploy"
+user-id = 999 # Mathieu Poumeyrol (kali)
+start = "2019-03-28"
+end = "2027-02-17"
+
+[[trusted.tract-data]]
+criteria = "safe-to-deploy"
+user-id = 999 # Mathieu Poumeyrol (kali)
+start = "2020-10-26"
+end = "2027-02-17"
+
+[[trusted.tract-hir]]
+criteria = "safe-to-deploy"
+user-id = 999 # Mathieu Poumeyrol (kali)
+start = "2020-02-19"
+end = "2027-02-17"
+
+[[trusted.tract-linalg]]
+criteria = "safe-to-deploy"
+user-id = 999 # Mathieu Poumeyrol (kali)
+start = "2019-03-28"
+end = "2027-02-17"
+
+[[trusted.tract-nnef]]
+criteria = "safe-to-deploy"
+user-id = 999 # Mathieu Poumeyrol (kali)
+start = "2020-08-14"
+end = "2027-02-17"
+
+[[trusted.tract-onnx]]
+criteria = "safe-to-deploy"
+user-id = 999 # Mathieu Poumeyrol (kali)
+start = "2019-03-28"
+end = "2027-02-17"
+
+[[trusted.tract-onnx-opl]]
+criteria = "safe-to-deploy"
+user-id = 999 # Mathieu Poumeyrol (kali)
+start = "2020-09-17"
+end = "2027-02-17"
+
+[[trusted.transpose]]
+criteria = "safe-to-deploy"
+user-id = 6727 # Elliott Mahler (ejmahler)
+start = "2021-03-31"
+end = "2027-02-17"
 
 [[trusted.trice]]
 criteria = "safe-to-deploy"

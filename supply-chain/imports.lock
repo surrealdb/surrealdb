@@ -9,6 +9,26 @@ audited_as = "3.0.0-alpha.18"
 version = "3.0.0-beta"
 audited_as = "3.0.0-alpha.18"
 
+[[unpublished.surrealism]]
+version = "0.1.9"
+audited_as = "0.1.8"
+
+[[unpublished.surrealism-macros]]
+version = "0.1.9"
+audited_as = "0.1.8"
+
+[[unpublished.surrealism-runtime]]
+version = "0.1.9"
+audited_as = "0.1.8"
+
+[[unpublished.surrealism-types]]
+version = "0.1.9"
+audited_as = "0.1.8"
+
+[[unpublished.surrealml-core]]
+version = "0.2.0"
+audited_as = "0.1.10"
+
 [[publisher.addr]]
 version = "0.15.6"
 when = "2022-08-31"
@@ -71,6 +91,19 @@ when = "2025-09-19"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
+
+[[publisher.anymap2]]
+version = "0.13.0"
+when = "2021-04-10"
+user-id = 3991
+user-login = "azriel91"
+user-name = "Azriel Hoh"
+
+[[publisher.anymap3]]
+version = "1.0.1"
+when = "2024-11-09"
+user-id = 25132
+user-login = "reivilibre"
 
 [[publisher.arbitrary]]
 version = "1.4.2"
@@ -375,9 +408,30 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
+[[publisher.downcast-rs]]
+version = "1.2.1"
+when = "2024-04-07"
+user-id = 3135
+user-login = "marcianx"
+user-name = "Ashish Myles"
+
 [[publisher.dtoa]]
 version = "1.0.11"
 when = "2025-12-27"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
+[[publisher.dyn-clone]]
+version = "1.0.20"
+when = "2025-07-27"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
+[[publisher.dyn-hash]]
+version = "0.2.2"
+when = "2025-03-03"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
@@ -564,6 +618,13 @@ user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
+[[publisher.kstring]]
+version = "2.0.2"
+when = "2024-07-25"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
+
 [[publisher.lexicmp]]
 version = "0.2.0"
 when = "2025-04-11"
@@ -591,6 +652,34 @@ when = "2025-09-09"
 user-id = 6825
 user-login = "sunfishcode"
 user-name = "Dan Gohman"
+
+[[publisher.liquid]]
+version = "0.26.11"
+when = "2025-02-04"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
+
+[[publisher.liquid-core]]
+version = "0.26.11"
+when = "2025-02-04"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
+
+[[publisher.liquid-derive]]
+version = "0.26.10"
+when = "2025-02-04"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
+
+[[publisher.liquid-lib]]
+version = "0.26.11"
+when = "2025-02-04"
+user-id = 6743
+user-login = "epage"
+user-name = "Ed Page"
 
 [[publisher.mach2]]
 version = "0.4.3"
@@ -626,6 +715,27 @@ when = "2025-02-19"
 user-id = 5
 user-login = "sfackler"
 user-name = "Steven Fackler"
+
+[[publisher.ndarray]]
+version = "0.16.1"
+when = "2024-08-14"
+user-id = 356
+user-login = "bluss"
+user-name = "bluss"
+
+[[publisher.nom]]
+version = "8.0.0"
+when = "2025-01-26"
+user-id = 959
+user-login = "Geal"
+user-name = "Geoffroy Couprie"
+
+[[publisher.nom-language]]
+version = "0.1.0"
+when = "2025-01-26"
+user-id = 959
+user-login = "Geal"
+user-name = "Geoffroy Couprie"
 
 [[publisher.num-bigint]]
 version = "0.4.6"
@@ -667,6 +777,12 @@ when = "2026-01-07"
 user-id = 152041
 user-login = "decahedron1"
 
+[[publisher.ort-tract]]
+version = "0.2.0+0.22"
+when = "2026-01-07"
+user-id = 152041
+user-login = "decahedron1"
+
 [[publisher.parking_lot]]
 version = "0.12.5"
 when = "2025-10-03"
@@ -688,12 +804,34 @@ user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
 
+[[publisher.pastey]]
+version = "0.1.1"
+when = "2025-08-12"
+user-id = 261504
+user-login = "AS1100K"
+user-name = "Aditya Kumar"
+
 [[publisher.pbkdf2]]
 version = "0.12.2"
 when = "2023-07-08"
 user-id = 267
 user-login = "tarcieri"
 user-name = "Tony Arcieri"
+
+[[publisher.pest_derive]]
+version = "2.8.5"
+when = "2026-01-03"
+trusted-publisher = "github:pest-parser/pest"
+
+[[publisher.pest_generator]]
+version = "2.8.5"
+when = "2026-01-03"
+trusted-publisher = "github:pest-parser/pest"
+
+[[publisher.pest_meta]]
+version = "2.8.5"
+when = "2026-01-03"
+trusted-publisher = "github:pest-parser/pest"
 
 [[publisher.phf]]
 version = "0.11.3"
@@ -814,6 +952,34 @@ user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
+[[publisher.primal-check]]
+version = "0.3.4"
+when = "2024-06-07"
+user-id = 539
+user-login = "cuviper"
+user-name = "Josh Stone"
+
+[[publisher.prost]]
+version = "0.11.9"
+when = "2023-04-12"
+user-id = 3959
+user-login = "LucioFranco"
+user-name = "Lucio Franco"
+
+[[publisher.prost]]
+version = "0.12.6"
+when = "2024-05-17"
+user-id = 3959
+user-login = "LucioFranco"
+user-name = "Lucio Franco"
+
+[[publisher.prost]]
+version = "0.14.3"
+when = "2026-01-10"
+user-id = 3959
+user-login = "LucioFranco"
+user-name = "Lucio Franco"
+
 [[publisher.psl-types]]
 version = "2.0.11"
 when = "2022-08-10"
@@ -887,6 +1053,13 @@ user-id = 30606
 user-login = "la10736"
 user-name = "Michele d'Amico"
 
+[[publisher.rustfft]]
+version = "6.4.1"
+when = "2025-09-18"
+user-id = 6727
+user-login = "ejmahler"
+user-name = "Elliott Mahler"
+
 [[publisher.rustix]]
 version = "0.38.44"
 when = "2025-01-21"
@@ -900,6 +1073,13 @@ when = "2025-12-23"
 user-id = 6825
 user-login = "sunfishcode"
 user-name = "Dan Gohman"
+
+[[publisher.safetensors]]
+version = "0.6.2"
+when = "2025-08-08"
+user-id = 79201
+user-login = "Narsil"
+user-name = "Nicolas Patry"
 
 [[publisher.same-file]]
 version = "1.0.6"
@@ -971,13 +1151,6 @@ user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
-[[publisher.socks]]
-version = "0.3.4"
-when = "2022-02-19"
-user-id = 5
-user-login = "sfackler"
-user-name = "Steven Fackler"
-
 [[publisher.storekey]]
 version = "0.11.0"
 when = "2025-12-08"
@@ -991,6 +1164,20 @@ when = "2025-12-08"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
+
+[[publisher.strength_reduce]]
+version = "0.2.4"
+when = "2022-11-08"
+user-id = 6727
+user-login = "ejmahler"
+user-name = "Elliott Mahler"
+
+[[publisher.string-interner]]
+version = "0.15.0"
+when = "2024-02-07"
+user-id = 4876
+user-login = "Robbepop"
+user-name = "Robin Freyler"
 
 [[publisher.surrealdb]]
 version = "3.0.0-alpha.18"
@@ -1188,6 +1375,62 @@ user-id = 172786
 user-login = "hds"
 user-name = "Hayden Stainsby"
 
+[[publisher.tract-core]]
+version = "0.22.0"
+when = "2025-08-26"
+user-id = 999
+user-login = "kali"
+user-name = "Mathieu Poumeyrol"
+
+[[publisher.tract-data]]
+version = "0.22.0"
+when = "2025-08-26"
+user-id = 999
+user-login = "kali"
+user-name = "Mathieu Poumeyrol"
+
+[[publisher.tract-hir]]
+version = "0.22.0"
+when = "2025-08-26"
+user-id = 999
+user-login = "kali"
+user-name = "Mathieu Poumeyrol"
+
+[[publisher.tract-linalg]]
+version = "0.22.0"
+when = "2025-08-26"
+user-id = 999
+user-login = "kali"
+user-name = "Mathieu Poumeyrol"
+
+[[publisher.tract-nnef]]
+version = "0.22.0"
+when = "2025-08-26"
+user-id = 999
+user-login = "kali"
+user-name = "Mathieu Poumeyrol"
+
+[[publisher.tract-onnx]]
+version = "0.22.0"
+when = "2025-08-26"
+user-id = 999
+user-login = "kali"
+user-name = "Mathieu Poumeyrol"
+
+[[publisher.tract-onnx-opl]]
+version = "0.22.0"
+when = "2025-08-26"
+user-id = 999
+user-login = "kali"
+user-name = "Mathieu Poumeyrol"
+
+[[publisher.transpose]]
+version = "0.2.3"
+when = "2024-02-20"
+user-id = 6727
+user-login = "ejmahler"
+user-name = "Elliott Mahler"
+
 [[publisher.trice]]
 version = "0.4.0"
 when = "2024-01-04"
@@ -1201,6 +1444,13 @@ when = "2024-09-29"
 user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
+
+[[publisher.unicode-normalization]]
+version = "0.1.25"
+when = "2025-10-30"
+user-id = 1139
+user-login = "Manishearth"
+user-name = "Manish Goregaokar"
 
 [[publisher.unicode-segmentation]]
 version = "1.12.0"
@@ -2706,6 +2956,12 @@ criteria = "safe-to-deploy"
 delta = "1.13.2 -> 1.14.0"
 notes = "Minor new feature, nothing out of the ordinary."
 
+[[audits.bytecode-alliance.audits.static_assertions]]
+who = "Andrew Brown <andrew.brown@intel.com>"
+criteria = "safe-to-deploy"
+version = "1.1.0"
+notes = "No dependencies and completely a compile-time crate as advertised. Uses `unsafe` in one module as a compile-time check only: `mem::transmute` and `ptr::write` are wrapped in an impossible-to-run closure."
+
 [[audits.bytecode-alliance.audits.terminal_size]]
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
@@ -2898,6 +3154,12 @@ https://github.com/signalapp/libsignal/blob/main/rust/bridge/jni/Cargo.toml
 - https://github.com/jni-rs/jni-rs/issues/405 - discusses the ease with which
   code may expose the JVM to invalid booleans with undefined behaviour
 """
+
+[[audits.embark-studios.audits.scan_fmt]]
+who = "Johan Andersson <opensource@embark-studios.com>"
+criteria = "safe-to-deploy"
+version = "0.2.6"
+notes = "No unsafe usage or ambient capabilities"
 
 [[audits.embark-studios.audits.strum]]
 who = "Johan Andersson <opensource@embark-studios.com>"
@@ -3814,6 +4076,15 @@ end = "2025-10-23"
 notes = "I, Henri Sivonen, wrote encoding_rs for Gecko and have reviewed contributions by others. There are two caveats to the certification: 1) The crate does things that are documented to be UB but that do not appear to actually be UB due to integer types differing from the general rule; https://github.com/hsivonen/encoding_rs/issues/79 . 2) It would be prudent to re-review the code that reinterprets buffers of integers as SIMD vectors; see https://github.com/hsivonen/encoding_rs/issues/87 ."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
+[[audits.mozilla.wildcard-audits.unicode-normalization]]
+who = "Manish Goregaokar <manishsmail@gmail.com>"
+criteria = "safe-to-deploy"
+user-id = 1139 # Manish Goregaokar (Manishearth)
+start = "2019-11-06"
+end = "2026-02-01"
+notes = "All code written or reviewed by Manish"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
 [[audits.mozilla.wildcard-audits.unicode-segmentation]]
 who = "Manish Goregaokar <manishsmail@gmail.com>"
 criteria = "safe-to-deploy"
@@ -3948,6 +4219,26 @@ who = "Emilio Cobos Álvarez <emilio@crisal.io>"
 criteria = "safe-to-deploy"
 delta = "0.69.4 -> 0.72.0"
 notes = "I'm the primary maintainer of this crate."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.bit-set]]
+who = "Aria Beingessner <a.beingessner@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.5.2"
+notes = "Another crate I own via contain-rs that is ancient and maintenance mode, no known issues."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.bit-set]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "0.5.2 -> 0.5.3"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.bit-vec]]
+who = "Aria Beingessner <a.beingessner@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.6.3"
+notes = "Another crate I own via contain-rs that is ancient and in maintenance mode but otherwise perfectly fine."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.bitflags]]
@@ -4550,6 +4841,16 @@ aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-ch
 who = "Max Leonard Inden <mail@max-inden.de>"
 criteria = "safe-to-deploy"
 delta = "0.5.12 -> 0.5.13"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.rand_distr]]
+who = "Ben Dean-Kawamura <bdk@mozilla.com>"
+criteria = "safe-to-deploy"
+version = "0.4.3"
+notes = """
+Simple crate that extends `rand`.  It has little unsafe code and uses Miri to test it.
+As far as I can tell, it does not have any file IO or network access.
+"""
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.rayon]]
