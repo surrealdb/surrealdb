@@ -3,7 +3,7 @@
 reason = "Test that ai::chat returns an error when the messages argument is not a valid array of objects"
 
 [[test.results]]
-error = "The messages argument must be an array of objects"
+error = "Incorrect arguments for function ai::chat(). The second argument should be an array of message objects, got: string"
 
 [env]
 namespace = "test"

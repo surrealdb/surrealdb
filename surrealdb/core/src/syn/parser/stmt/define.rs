@@ -1896,8 +1896,9 @@ impl Parser<'_> {
 										}
 										let param = self.next_token_value::<Param>()?.into_string();
 										expected!(self, t!(":"));
-										let kind =
-											stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
+										let kind = stk
+											.run(|ctx| self.parse_inner_single_kind(ctx))
+											.await?;
 										tool_args.push((param, kind));
 										if !self.eat(t!(",")) {
 											expected!(self, t!("|"));

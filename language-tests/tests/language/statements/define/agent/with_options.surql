@@ -36,7 +36,7 @@ DEFINE AGENT researcher
             name: 'get_article',
             description: 'Get a specific article by ID',
             function: |$id: string| {
-                SELECT * FROM articles WHERE id = type::thing('articles', $id)
+                SELECT * FROM articles WHERE id = type::record('articles', $id)
             },
             parameters: [
                 { name: 'id', description: 'The article record ID' }
