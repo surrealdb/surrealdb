@@ -103,6 +103,21 @@ impl NamedFields {
 		}
 	}
 
+	/// Generates `let field_name = Default::default();` for each field.
+	/// Used as a fallback when content is missing during deserialization with `skip_content_if`.
+	pub fn default_initializers(&self) -> Vec<TokenStream2> {
+		self.fields
+			.iter()
+			.map(|field| {
+				let field_name = &field.ident;
+				let ty = &field.ty;
+				quote! {
+					let #field_name = <#ty as Default>::default();
+				}
+			})
+			.collect()
+	}
+
 	/// Requires a mutable variable `valid` which defaults to true
 	pub fn field_checks(&self) -> Vec<TokenStream2> {
 		self.fields

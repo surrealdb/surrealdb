@@ -50,6 +50,21 @@ impl UnnamedFields {
 			.collect()
 	}
 
+	/// Generates `let field_N = Default::default();` for each field.
+	/// Used as a fallback when content is missing during deserialization with `skip_content_if`.
+	pub fn default_initializers(&self) -> Vec<TokenStream2> {
+		self.fields
+			.iter()
+			.enumerate()
+			.map(|(i, ty)| {
+				let ident = Ident::new(&format!("field_{}", i), Span::call_site());
+				quote! {
+					let #ident = <#ty as Default>::default();
+				}
+			})
+			.collect()
+	}
+
 	pub fn field_checks(&self) -> Vec<TokenStream2> {
 		self.fields
 			.iter()

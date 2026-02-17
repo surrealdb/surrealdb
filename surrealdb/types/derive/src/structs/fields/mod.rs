@@ -349,26 +349,28 @@ impl Fields {
 							#final_ok
 						}
 					}}),
-					Strategy::TagContentKeys {
-						tag,
-						variant,
-						content,
-						skip_content_if,
-					} => {
-						if skip_content_if.is_some() {
-							// When skip_content_if is set, accept missing content by falling
-							// back to Default::default() for all fields
-							With::Map(quote! {{
-								if map.get(#tag).is_some_and(|v| v == Value::String(#variant.to_string())) {
-									if let Some(#value_ty::Object(mut map)) = map.remove(#content) {
-										#(#map_retrievals)*
-										#final_ok
-									} else {
-										#final_ok
-									}
+				Strategy::TagContentKeys {
+					tag,
+					variant,
+					content,
+					skip_content_if,
+				} => {
+					if skip_content_if.is_some() {
+						// When skip_content_if is set, accept missing content by falling
+						// back to Default::default() for all fields
+						let default_inits = fields.default_initializers();
+						With::Map(quote! {{
+							if map.get(#tag).is_some_and(|v| v == Value::String(#variant.to_string())) {
+								if let Some(#value_ty::Object(mut map)) = map.remove(#content) {
+									#(#map_retrievals)*
+									#final_ok
+								} else {
+									#(#default_inits)*
+									#final_ok
 								}
-							}})
-						} else {
+							}
+						}})
+					} else {
 							With::Map(quote! {{
 								if map.get(#tag).is_some_and(|v| v == Value::String(#variant.to_string())) {
 									if let Some(#value_ty::Object(mut map)) = map.remove(#content) {
@@ -508,34 +510,36 @@ impl Fields {
 						} => {
 							panic!("Tag key strategy cannot be used with unnamed fields");
 						}
-						Strategy::TagContentKeys {
-							tag,
-							variant,
-							content,
-							skip_content_if,
-						} => {
-							if skip_content_if.is_some() {
-								With::Map(quote! {{
-									if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
-										if let Some(value) = map.remove(#content) {
-											#retrieve_value
-										} else {
-											#ok
-										}
+					Strategy::TagContentKeys {
+						tag,
+						variant,
+						content,
+						skip_content_if,
+					} => {
+						if skip_content_if.is_some() {
+							let default_inits = fields.default_initializers();
+							With::Map(quote! {{
+								if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
+									if let Some(value) = map.remove(#content) {
+										#retrieve_value
+									} else {
+										#(#default_inits)*
+										#ok
 									}
-								}})
-							} else {
-								With::Map(quote! {{
-									if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
-										if let Some(value) = map.remove(#content) {
-											#retrieve_value
-										} else {
-											return Err(#error_expected_content)
-										}
+								}
+							}})
+						} else {
+							With::Map(quote! {{
+								if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
+									if let Some(value) = map.remove(#content) {
+										#retrieve_value
+									} else {
+										return Err(#error_expected_content)
 									}
-								}})
-							}
+								}
+							}})
 						}
+					}
 						// For an enum, we check first if the variant matches, then decode
 						Strategy::Value {
 							variant: Some(_),
