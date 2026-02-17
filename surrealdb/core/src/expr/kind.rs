@@ -196,8 +196,8 @@ impl Kind {
 	/// and union types where every non-none variant permits sub-field access.
 	pub(crate) fn allows_sub_fields(&self) -> bool {
 		match self {
-			Kind::Any | Kind::Object => true,
-			Kind::Literal(KindLiteral::Object(_)) => true,
+			Kind::Any | Kind::Object | Kind::Array(..) | Kind::Set(..) => true,
+			Kind::Literal(KindLiteral::Object(_) | KindLiteral::Array(_)) => true,
 			Kind::Either(kinds) => {
 				kinds.iter().all(|k| matches!(k, Kind::None) || k.allows_sub_fields())
 			}
