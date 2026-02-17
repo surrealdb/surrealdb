@@ -388,17 +388,75 @@ async fn ai_chat_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<Value
 }
 
 // =========================================================================
+// AI Sentiment
+// =========================================================================
+
+#[cfg(feature = "ai")]
+async fn ai_sentiment_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+	let model_id = match args.first() {
+		Some(Value::String(s)) => s.clone(),
+		Some(v) => {
+			return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+				name: "ai::sentiment".to_owned(),
+				message: format!(
+					"The first argument should be a string model ID (e.g. 'openai:gpt-4-turbo'), got: {}",
+					v.kind_of()
+				),
+			}));
+		}
+		None => {
+			return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+				name: "ai::sentiment".to_owned(),
+				message: "Missing model ID argument".to_string(),
+			}));
+		}
+	};
+
+	let text = match args.get(1) {
+		Some(Value::String(s)) => s.clone(),
+		Some(v) => {
+			return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+				name: "ai::sentiment".to_owned(),
+				message: format!(
+					"The second argument should be a string of text to analyse, got: {}",
+					v.kind_of()
+				),
+			}));
+		}
+		None => {
+			return Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
+				name: "ai::sentiment".to_owned(),
+				message: "Missing text argument".to_string(),
+			}));
+		}
+	};
+
+	let ai_config = ai_config_overlay_from_ctx(ctx).await;
+	let prompt = crate::fnc::ai::build_sentiment_prompt(&text);
+	let config = crate::fnc::ai::sentiment_generation_config();
+	let raw =
+		crate::ai::generate::generate(&model_id, &prompt, &config, ai_config.as_ref()).await?;
+	crate::fnc::ai::parse_sentiment_response(&raw)
+}
+
+#[cfg(not(feature = "ai"))]
+async fn ai_sentiment_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<Value> {
+	ai_disabled().await
+}
+
+// =========================================================================
 // Function definitions using the macro
 // =========================================================================
 
 define_async_function!(AiChat, "ai::chat", (model_id: String, messages: Any, ?config: Any) -> Any, ai_chat_impl);
 define_async_function!(AiEmbed, "ai::embed", (model_id: String, input: String) -> Any, ai_embed_impl);
 define_async_function!(AiGenerate, "ai::generate", (model_id: String, prompt: String, ?config: Any) -> Any, ai_generate_impl);
+define_async_function!(AiSentiment, "ai::sentiment", (model_id: String, text: String) -> Any, ai_sentiment_impl);
 
 // =========================================================================
 // Registration
 // =========================================================================
 
 pub fn register(registry: &mut FunctionRegistry) {
-	register_functions!(registry, AiChat, AiEmbed, AiGenerate,);
+	register_functions!(registry, AiChat, AiEmbed, AiGenerate, AiSentiment,);
 }

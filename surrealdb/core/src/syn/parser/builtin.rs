@@ -35,6 +35,7 @@ pub(crate) static PATHS: phf::Map<
 		UniCase::ascii("ai::chat") => (PathKind::Function, None),
 		UniCase::ascii("ai::embed") => (PathKind::Function, None),
 		UniCase::ascii("ai::generate") => (PathKind::Function, None),
+		UniCase::ascii("ai::sentiment") => (PathKind::Function, None),
 		//
 		UniCase::ascii("array::add") => (PathKind::Function, None),
 		UniCase::ascii("array::all") => (PathKind::Function, None),

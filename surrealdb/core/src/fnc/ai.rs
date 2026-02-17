@@ -134,6 +134,163 @@ pub async fn chat(
 	Ok(Value::String(text))
 }
 
+/// Analyse the sentiment of a text input using a provider-prefixed model.
+///
+/// # SurrealQL
+///
+/// ```surql
+/// ai::sentiment('openai:gpt-4-turbo', 'I love this product!')
+/// -- Returns: { sentiment: 0.9, summary: 'positive' }
+/// ```
+///
+/// Returns an `object` with `sentiment` (number from -1 to 1) and
+/// `summary` (`'positive'`, `'negative'`, or `'mixed'`).
+#[cfg(not(feature = "ai"))]
+pub async fn sentiment(
+	_: (&FrozenContext, &Options),
+	(_model_id, _text): (String, String),
+) -> Result<Value> {
+	anyhow::bail!(Error::AiDisabled)
+}
+
+/// Analyse the sentiment of a text input using a provider-prefixed model.
+#[cfg(feature = "ai")]
+pub async fn sentiment(
+	(ctx, opt): (&FrozenContext, &Options),
+	(model_id, text): (String, String),
+) -> Result<Value> {
+	let ai_config = ai_config_overlay(ctx, opt).await;
+	let prompt = build_sentiment_prompt(&text);
+	let config = sentiment_generation_config();
+	let raw =
+		crate::ai::generate::generate(&model_id, &prompt, &config, ai_config.as_ref()).await?;
+	parse_sentiment_response(&raw)
+}
+
+/// Build the prompt that instructs the model to return structured sentiment JSON.
+#[cfg(feature = "ai")]
+pub(crate) fn build_sentiment_prompt(text: &str) -> String {
+	format!(
+		"Analyze the sentiment of the following text and respond with ONLY a valid JSON object \
+		 containing exactly two fields:\n\
+		 - \"sentiment\": a number from -1.0 (most negative) to 1.0 (most positive), where 0.0 is neutral\n\
+		 - \"summary\": exactly one of \"positive\", \"negative\", or \"mixed\"\n\n\
+		 Do not include any other text, markdown formatting, or explanation. Output only the JSON object.\n\n\
+		 Text: {text}"
+	)
+}
+
+/// Return a `GenerationConfig` tuned for deterministic, concise sentiment responses.
+#[cfg(feature = "ai")]
+pub(crate) fn sentiment_generation_config() -> crate::ai::provider::GenerationConfig {
+	crate::ai::provider::GenerationConfig {
+		temperature: Some(0.1),
+		max_tokens: Some(100),
+		top_p: None,
+		stop: None,
+	}
+}
+
+/// Parse the raw model response into a validated sentiment `Value::Object`.
+///
+/// Returns an error if the response is not valid JSON, is missing required
+/// fields, or contains out-of-range / unexpected values.
+#[cfg(feature = "ai")]
+pub(crate) fn parse_sentiment_response(raw: &str) -> Result<Value> {
+	use std::collections::BTreeMap;
+
+	use crate::val::Object;
+
+	let trimmed = raw.trim();
+
+	// Strip markdown code fences if the model wrapped its output.
+	let json_str = if trimmed.starts_with("```") {
+		let inner = trimmed
+			.strip_prefix("```json")
+			.or_else(|| trimmed.strip_prefix("```"))
+			.unwrap_or(trimmed);
+		inner.strip_suffix("```").unwrap_or(inner).trim()
+	} else {
+		trimmed
+	};
+
+	let parsed: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
+		anyhow::anyhow!(Error::InvalidFunctionArguments {
+			name: "ai::sentiment".to_owned(),
+			message: format!(
+				"The model returned a response that is not valid JSON: {e}. Raw response: {raw}"
+			),
+		})
+	})?;
+
+	let obj = parsed.as_object().ok_or_else(|| {
+		anyhow::anyhow!(Error::InvalidFunctionArguments {
+			name: "ai::sentiment".to_owned(),
+			message: format!(
+				"Expected a JSON object from the model, got: {}",
+				serde_json::to_string(&parsed).unwrap_or_default()
+			),
+		})
+	})?;
+
+	// Extract and validate `sentiment`
+	let sentiment_val = obj.get("sentiment").ok_or_else(|| {
+		anyhow::anyhow!(Error::InvalidFunctionArguments {
+			name: "ai::sentiment".to_owned(),
+			message: "The model response is missing the 'sentiment' field".to_owned(),
+		})
+	})?;
+
+	let sentiment = sentiment_val.as_f64().ok_or_else(|| {
+		anyhow::anyhow!(Error::InvalidFunctionArguments {
+			name: "ai::sentiment".to_owned(),
+			message: format!("The 'sentiment' field must be a number, got: {sentiment_val}"),
+		})
+	})?;
+
+	if !(-1.0..=1.0).contains(&sentiment) {
+		anyhow::bail!(Error::InvalidFunctionArguments {
+			name: "ai::sentiment".to_owned(),
+			message: format!(
+				"The 'sentiment' field must be between -1.0 and 1.0, got: {sentiment}"
+			),
+		});
+	}
+
+	// Extract and validate `summary`
+	let summary_val = obj.get("summary").ok_or_else(|| {
+		anyhow::anyhow!(Error::InvalidFunctionArguments {
+			name: "ai::sentiment".to_owned(),
+			message: "The model response is missing the 'summary' field".to_owned(),
+		})
+	})?;
+
+	let summary = summary_val.as_str().ok_or_else(|| {
+		anyhow::anyhow!(Error::InvalidFunctionArguments {
+			name: "ai::sentiment".to_owned(),
+			message: format!("The 'summary' field must be a string, got: {summary_val}"),
+		})
+	})?;
+
+	match summary {
+		"positive" | "negative" | "mixed" => {}
+		other => {
+			anyhow::bail!(Error::InvalidFunctionArguments {
+				name: "ai::sentiment".to_owned(),
+				message: format!(
+					"The 'summary' field must be one of 'positive', 'negative', or 'mixed', got: '{other}'"
+				),
+			});
+		}
+	}
+
+	// Build the result object
+	let mut result = BTreeMap::new();
+	result.insert("sentiment".to_string(), Value::from(sentiment));
+	result.insert("summary".to_string(), Value::from(summary.to_owned()));
+	Ok(Value::Object(Object::from(result)))
+}
+
 /// Parse a SurrealQL array value into a `Vec<ChatMessage>`.
 ///
 /// Each element must be an object with `role` (string) and `content` (string) fields.

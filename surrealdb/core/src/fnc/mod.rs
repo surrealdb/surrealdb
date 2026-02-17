@@ -577,6 +577,7 @@ pub async fn asynchronous(
 		"ai::chat" => ai::chat((ctx, opt)).await,
 		"ai::embed" => ai::embed((ctx, opt)).await,
 		"ai::generate" => ai::generate((ctx, opt)).await,
+		"ai::sentiment" => ai::sentiment((ctx, opt)).await,
 		//
 		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
 		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,

@@ -3966,3 +3966,12 @@ async fn function_ai_chat_disabled() -> Result<()> {
 	Test::new(sql).await?.expect_error("AI functions are not enabled")?;
 	Ok(())
 }
+
+/// When the `ai` feature is not enabled, ai::sentiment should return AiDisabled.
+#[cfg(not(feature = "ai"))]
+#[tokio::test]
+async fn function_ai_sentiment_disabled() -> Result<()> {
+	let sql = "RETURN ai::sentiment('openai:gpt-4-turbo', 'I love this product!');";
+	Test::new(sql).await?.expect_error("AI functions are not enabled")?;
+	Ok(())
+}
