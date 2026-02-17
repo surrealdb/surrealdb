@@ -29,6 +29,7 @@ const DEFAULT_GENERATION_BASE_URL: &str = "https://api-inference.huggingface.co/
 pub struct HuggingFaceProvider {
 	api_key: String,
 	base_url: String,
+	generation_base_url: String,
 	client: reqwest::Client,
 }
 
@@ -44,7 +45,7 @@ impl Default for HuggingFaceProvider {
 impl HuggingFaceProvider {
 	/// Create a new provider with explicit configuration.
 	#[cfg(test)]
-	pub fn with_config(api_key: String, base_url: String) -> Self {
+	pub fn with_config(api_key: String, base_url: String, generation_base_url: String) -> Self {
 		let client = reqwest::Client::builder()
 			.timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
 			.build()
@@ -52,6 +53,7 @@ impl HuggingFaceProvider {
 		Self {
 			api_key,
 			base_url,
+			generation_base_url,
 			client,
 		}
 	}
@@ -64,6 +66,9 @@ impl HuggingFaceProvider {
 		let base_url = std::env::var("SURREAL_AI_HUGGINGFACE_BASE_URL")
 			.unwrap_or_else(|_| DEFAULT_BASE_URL.to_owned());
 
+		let generation_base_url = std::env::var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL")
+			.unwrap_or_else(|_| DEFAULT_GENERATION_BASE_URL.to_owned());
+
 		let client = reqwest::Client::builder()
 			.timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
 			.build()
@@ -72,6 +77,7 @@ impl HuggingFaceProvider {
 		Self {
 			api_key,
 			base_url,
+			generation_base_url,
 			client,
 		}
 	}
@@ -84,17 +90,13 @@ impl HuggingFaceProvider {
 
 	/// Build the full URL for a model's text-generation endpoint.
 	fn generation_url(&self, model: &str) -> String {
-		let base = std::env::var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL")
-			.unwrap_or_else(|_| DEFAULT_GENERATION_BASE_URL.to_owned());
-		let base = base.trim_end_matches('/');
+		let base = self.generation_base_url.trim_end_matches('/');
 		format!("{base}/{model}")
 	}
 
 	/// Build the full URL for a model's chat completions endpoint.
 	fn chat_url(&self, model: &str) -> String {
-		let base = std::env::var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL")
-			.unwrap_or_else(|_| DEFAULT_GENERATION_BASE_URL.to_owned());
-		let base = base.trim_end_matches('/');
+		let base = self.generation_base_url.trim_end_matches('/');
 		format!("{base}/{model}/v1/chat/completions")
 	}
 }
@@ -383,7 +385,11 @@ mod tests {
 
 	#[test]
 	fn model_url_default() {
-		let provider = HuggingFaceProvider::with_config(String::new(), DEFAULT_BASE_URL.into());
+		let provider = HuggingFaceProvider::with_config(
+			String::new(),
+			DEFAULT_BASE_URL.into(),
+			DEFAULT_GENERATION_BASE_URL.into(),
+		);
 		assert_eq!(
 			provider.model_url("BAAI/bge-small-en-v1.5"),
 			"https://api-inference.huggingface.co/pipeline/feature-extraction/BAAI/bge-small-en-v1.5"
@@ -395,6 +401,7 @@ mod tests {
 		let provider = HuggingFaceProvider::with_config(
 			String::new(),
 			"https://custom.example.com/v1/".into(),
+			DEFAULT_GENERATION_BASE_URL.into(),
 		);
 		assert_eq!(provider.model_url("my-model"), "https://custom.example.com/v1/my-model");
 	}
@@ -428,7 +435,11 @@ mod tests {
 			.mount(&server)
 			.await;
 
-		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
+		let provider = HuggingFaceProvider::with_config(
+			"test-token".into(),
+			server.uri(),
+			DEFAULT_GENERATION_BASE_URL.into(),
+		);
 		let result = provider.embed("my-model", "hello world").await;
 
 		let embedding = result.expect("embed should succeed with flat response");
@@ -453,7 +464,11 @@ mod tests {
 			.mount(&server)
 			.await;
 
-		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
+		let provider = HuggingFaceProvider::with_config(
+			"test-token".into(),
+			server.uri(),
+			DEFAULT_GENERATION_BASE_URL.into(),
+		);
 		let result = provider.embed("test-model", "hello").await;
 
 		let embedding = result.expect("embed should succeed with nested response");
@@ -478,7 +493,11 @@ mod tests {
 			.mount(&server)
 			.await;
 
-		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
+		let provider = HuggingFaceProvider::with_config(
+			"test-token".into(),
+			server.uri(),
+			DEFAULT_GENERATION_BASE_URL.into(),
+		);
 		let result = provider.embed("test-model", "hello").await;
 
 		assert!(result.is_err());
@@ -501,7 +520,11 @@ mod tests {
 			.mount(&server)
 			.await;
 
-		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
+		let provider = HuggingFaceProvider::with_config(
+			"test-token".into(),
+			server.uri(),
+			DEFAULT_GENERATION_BASE_URL.into(),
+		);
 		let result = provider.embed("test-model", "hello").await;
 
 		assert!(result.is_err());
@@ -513,9 +536,11 @@ mod tests {
 
 	#[test]
 	fn generation_url_default() {
-		let provider = HuggingFaceProvider::with_config(String::new(), DEFAULT_BASE_URL.into());
-		// Clear any env override
-		unsafe { std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL") };
+		let provider = HuggingFaceProvider::with_config(
+			String::new(),
+			DEFAULT_BASE_URL.into(),
+			DEFAULT_GENERATION_BASE_URL.into(),
+		);
 		assert_eq!(
 			provider.generation_url("mistralai/Mistral-7B-Instruct-v0.3"),
 			"https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3"
@@ -547,15 +572,12 @@ mod tests {
 			.mount(&server)
 			.await;
 
-		unsafe { std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", server.uri()) };
-
-		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
+		let provider =
+			HuggingFaceProvider::with_config("test-token".into(), server.uri(), server.uri());
 		let config = GenerationConfig::default();
 		let result = provider
 			.generate("mistralai/Mistral-7B", "What is the capital of France?", &config)
 			.await;
-
-		unsafe { std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL") };
 
 		let text = result.expect("generate should succeed with mock server");
 		assert_eq!(text, "The capital of France is Paris.");
@@ -578,13 +600,10 @@ mod tests {
 			.mount(&server)
 			.await;
 
-		unsafe { std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", server.uri()) };
-
-		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
+		let provider =
+			HuggingFaceProvider::with_config("test-token".into(), server.uri(), server.uri());
 		let config = GenerationConfig::default();
 		let result = provider.generate("test-model", "Hello", &config).await;
-
-		unsafe { std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL") };
 
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
@@ -606,13 +625,10 @@ mod tests {
 			.mount(&server)
 			.await;
 
-		unsafe { std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", server.uri()) };
-
-		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
+		let provider =
+			HuggingFaceProvider::with_config("test-token".into(), server.uri(), server.uri());
 		let config = GenerationConfig::default();
 		let result = provider.generate("test-model", "Hello", &config).await;
-
-		unsafe { std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL") };
 
 		assert!(result.is_err());
 		let err_msg = result.unwrap_err().to_string();
@@ -648,14 +664,11 @@ mod tests {
 			.mount(&server)
 			.await;
 
-		unsafe { std::env::set_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL", server.uri()) };
-
-		let provider = HuggingFaceProvider::with_config("test-token".into(), server.uri());
+		let provider =
+			HuggingFaceProvider::with_config("test-token".into(), server.uri(), server.uri());
 		let config = GenerationConfig::default();
 		let messages = vec![ProviderChatMessage::text("user", "What is SurrealDB?")];
 		let result = provider.chat("mistralai/Mistral-7B", &messages, &config).await;
-
-		unsafe { std::env::remove_var("SURREAL_AI_HUGGINGFACE_GENERATION_BASE_URL") };
 
 		let text = result.expect("chat should succeed with mock server");
 		assert_eq!(text, "SurrealDB is a multi-model database.");

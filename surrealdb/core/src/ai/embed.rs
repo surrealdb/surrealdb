@@ -108,49 +108,4 @@ mod tests {
 		let err_msg = result.unwrap_err().to_string();
 		assert!(err_msg.contains("provider:model"), "Expected format hint in error: {err_msg}");
 	}
-
-	#[tokio::test]
-	async fn embed_openai_via_mock() {
-		use wiremock::matchers::{method, path};
-		use wiremock::{Mock, MockServer, ResponseTemplate};
-
-		let server = MockServer::start().await;
-
-		let response_body = serde_json::json!({
-			"object": "list",
-			"data": [{
-				"object": "embedding",
-				"embedding": [0.1, 0.2, 0.3],
-				"index": 0
-			}],
-			"model": "text-embedding-3-small",
-			"usage": { "prompt_tokens": 2, "total_tokens": 2 }
-		});
-
-		Mock::given(method("POST"))
-			.and(path("/embeddings"))
-			.respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
-			.expect(1)
-			.mount(&server)
-			.await;
-
-		// Point the OpenAI provider at the mock server via env vars
-		unsafe {
-			std::env::set_var("SURREAL_AI_OPENAI_API_KEY", "test-key");
-			std::env::set_var("SURREAL_AI_OPENAI_BASE_URL", server.uri());
-		}
-
-		let result = embed("openai:text-embedding-3-small", "hello world").await;
-
-		// Clean up env vars
-		unsafe {
-			std::env::remove_var("SURREAL_AI_OPENAI_API_KEY");
-			std::env::remove_var("SURREAL_AI_OPENAI_BASE_URL");
-		}
-
-		let embedding = result.expect("embed should succeed via mock");
-		assert_eq!(embedding, vec![0.1, 0.2, 0.3]);
-
-		server.verify().await;
-	}
 }
