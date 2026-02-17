@@ -560,10 +560,7 @@ fn test_detail_wire_format_all_flat_enums() {
 #[test]
 fn test_detail_wire_format_full_error_round_trip() {
 	// Full Error with details round-trips through into_value/from_value
-	let err = Error::not_allowed(
-		"Token expired".to_string(),
-		AuthError::TokenExpired,
-	);
+	let err = Error::not_allowed("Token expired".to_string(), AuthError::TokenExpired);
 	let val = err.clone().into_value();
 	let parsed = Error::from_value(val).unwrap();
 	assert_eq!(parsed.kind(), &ErrorKind::NotAllowed);
@@ -586,7 +583,9 @@ fn test_detail_wire_format_query_timeout() {
 	assert!(obj.contains_key("details"), "Struct variant should have details field");
 
 	let parsed = QueryError::from_value(val).unwrap();
-	assert!(matches!(parsed, QueryError::TimedOut { duration } if duration == Duration::from_secs(5)));
+	assert!(
+		matches!(parsed, QueryError::TimedOut { duration } if duration == Duration::from_secs(5))
+	);
 }
 
 // -----------------------------------------------------------------------------
@@ -818,8 +817,7 @@ fn test_error_snapshot_not_allowed_method() {
 #[test]
 fn test_error_snapshot_with_cause_chain() {
 	let inner = Error::internal("connection lost".to_string());
-	let outer =
-		Error::query("Query failed".to_string(), QueryError::Cancelled).with_cause(inner);
+	let outer = Error::query("Query failed".to_string(), QueryError::Cancelled).with_cause(inner);
 	let val = outer.into_value();
 
 	let Value::Object(ref obj) = val else {
@@ -894,8 +892,7 @@ fn test_error_snapshot_thrown_no_cause() {
 
 #[test]
 fn test_error_snapshot_not_allowed_scripting_unit() {
-	let err =
-		Error::not_allowed("Scripting not allowed".to_string(), NotAllowedError::Scripting);
+	let err = Error::not_allowed("Scripting not allowed".to_string(), NotAllowedError::Scripting);
 	let val = err.into_value();
 
 	let expected = Value::Object(object! {

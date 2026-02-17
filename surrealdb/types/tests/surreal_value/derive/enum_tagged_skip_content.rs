@@ -55,9 +55,7 @@ fn test_skip_content_unit_is_value() {
 		object! { kind: "UnitA", details: Value::Object(object! {}) }
 	)));
 	// Wrong kind
-	assert!(!TestSkipContent::is_value(&Value::Object(
-		object! { kind: "NotAVariant" }
-	)));
+	assert!(!TestSkipContent::is_value(&Value::Object(object! { kind: "NotAVariant" })));
 }
 
 // -- Named struct variants --
