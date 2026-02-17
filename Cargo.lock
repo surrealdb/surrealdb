@@ -7297,8 +7297,9 @@ dependencies = [
 
 [[package]]
 name = "surrealmx"
-version = "0.16.0"
-source = "git+https://github.com/surrealdb/surrealmx.git?rev=2f875b60800ff97b3a7e28daa6ba8c0cf6aaba90#2f875b60800ff97b3a7e28daa6ba8c0cf6aaba90"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "703077c9f8bdce4053dce39c5f5ef71b79b8fffe1e59dbd629b455340586814e"
 dependencies = [
  "arc-swap",
  "bincode",
