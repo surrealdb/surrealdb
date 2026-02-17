@@ -204,12 +204,11 @@ fn test_skip_content_named_missing_content_uses_default() {
 }
 
 #[test]
-fn test_skip_content_single_missing_content_uses_default() {
-	// When skip_content_if is set and content is missing for a newtype variant,
-	// deserialization should fall back to Default::default() for the inner type
+fn test_skip_content_single_missing_content_errors() {
+	// Newtype variants require content -- no Default fallback since the inner
+	// type may not implement Default
 	let val = Value::Object(object! { kind: "Single" });
-	let parsed = TestSkipContentWithDefault::from_value(val).unwrap();
-	assert_eq!(parsed, TestSkipContentWithDefault::Single(String::default()));
+	assert!(TestSkipContentWithDefault::from_value(val).is_err());
 }
 
 #[test]
