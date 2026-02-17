@@ -1982,14 +1982,14 @@ impl Parser<'_> {
 
 		// Validate required fields
 		if model.model_id.is_empty() {
-			return Err(
-				crate::syn::parser::SyntaxError::new("DEFINE AGENT requires a MODEL clause")
-			);
+			return Err(crate::syn::parser::SyntaxError::new(
+				"DEFINE AGENT requires a MODEL clause",
+			));
 		}
 		if prompt.is_empty() {
-			return Err(
-				crate::syn::parser::SyntaxError::new("DEFINE AGENT requires a PROMPT clause")
-			);
+			return Err(crate::syn::parser::SyntaxError::new(
+				"DEFINE AGENT requires a PROMPT clause",
+			));
 		}
 
 		// Validate tool name uniqueness
