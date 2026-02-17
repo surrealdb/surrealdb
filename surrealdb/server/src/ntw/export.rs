@@ -22,7 +22,7 @@ use super::error::ResponseError;
 use super::headers::ContentType;
 use crate::ntw::error::Error as NetError;
 
-pub(super) fn router<S>() -> Router<S>
+pub fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
