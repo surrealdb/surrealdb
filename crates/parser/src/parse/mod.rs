@@ -99,7 +99,7 @@ bitflags! {
 
 bitflags! {
 	#[derive(Clone,Copy)]
-	struct ParserState: u8 {
+	pub struct ParserState: u8 {
 		/// Is the parser in a cancelable transaction.
 		const TRANSACTION = 1 << 0;
 		/// Is the parser in a control flow loop.
@@ -193,7 +193,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			if let Some(x) = runner.step() {
 				return x.map_err(|e| {
 					e.to_diagnostic()
-						.expect("Parser internal error made it outside of a speculative context")
+						.expect("A parser internal error was returned outside of the context where such errors should be generated.")
 				});
 			}
 
@@ -284,17 +284,6 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		res
 	}
 
-	// Returns ParseError::recover if the parser is in partial mode and the next token is either
-	// invalid, followed by eof, or eof itself.
-	pub fn recover_eof(&mut self) -> ParseResult<()> {
-		if self.settings.contains(ParserSettings::PARTIAL) {
-			if self.lex.peek::<0>().is_none() {
-				return Err(ParseError::recover_error());
-			}
-		}
-		Ok(())
-	}
-
 	/// Modifies the parser state within the given closure, reseting the parser state to the old
 	/// result after the closure returns.
 	pub async fn with_state<F1, F2, R>(&mut self, state_cb: F1, cb: F2) -> ParseResult<R>
@@ -313,7 +302,13 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	pub fn peek(&mut self) -> ParseResult<Option<Token>> {
 		match self.lex.peek::<0>() {
 			Some(Ok(x)) => Ok(Some(x)),
-			None => Ok(None),
+			None => {
+				if self.settings.contains(ParserSettings::PARTIAL) {
+					return Err(ParseError::missing_data_error());
+				} else {
+					Ok(None)
+				}
+			}
 			Some(Err(e)) => Err(self.lex_error(e)),
 		}
 	}
@@ -325,7 +320,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			Some(Ok(x)) => Ok(x),
 			None => {
 				if self.settings.contains(ParserSettings::PARTIAL) {
-					Err(ParseError::recover_error())
+					Err(ParseError::missing_data_error())
 				} else {
 					Err(self.error(format!("Unexpected end of query, expected {expected}")))
 				}
@@ -338,7 +333,13 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	pub fn peek1(&mut self) -> ParseResult<Option<Token>> {
 		match self.lex.peek::<1>() {
 			Some(Ok(x)) => Ok(Some(x)),
-			None => Ok(None),
+			None => {
+				if self.settings.contains(ParserSettings::PARTIAL) {
+					return Err(ParseError::missing_data_error());
+				} else {
+					Ok(None)
+				}
+			}
 			Some(Err(e)) => Err(self.lex_error(e)),
 		}
 	}
@@ -347,7 +348,13 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	pub fn peek2(&mut self) -> ParseResult<Option<Token>> {
 		match self.lex.peek::<2>() {
 			Some(Ok(x)) => Ok(Some(x)),
-			None => Ok(None),
+			None => {
+				if self.settings.contains(ParserSettings::PARTIAL) {
+					return Err(ParseError::missing_data_error());
+				} else {
+					Ok(None)
+				}
+			}
 			Some(Err(e)) => Err(self.lex_error(e)),
 		}
 	}
@@ -359,7 +366,13 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				self.last_span = x.span;
 				Ok(Some(x))
 			}
-			None => Ok(None),
+			None => {
+				if self.settings.contains(ParserSettings::PARTIAL) {
+					return Err(ParseError::missing_data_error());
+				} else {
+					Ok(None)
+				}
+			}
 			Some(Err(e)) => Err(self.lex_error(e)),
 		}
 	}
@@ -371,7 +384,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			Ok(x)
 		} else {
 			if self.settings.contains(ParserSettings::PARTIAL) {
-				Err(ParseError::recover_error())
+				Err(ParseError::missing_data_error())
 			} else {
 				Err(self.error(format!("Unexpected end of query, expected {expected}")))
 			}
@@ -395,8 +408,8 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	///
 	/// Also returns None if the token was not joined to the previous token.
 	pub fn peek_joined1(&mut self) -> ParseResult<Option<Token>> {
-		match self.lex.peek::<1>() {
-			Some(Ok(x)) => {
+		match self.peek1()? {
+			Some(x) => {
 				if let Joined::Joined = x.joined {
 					Ok(Some(x))
 				} else {
@@ -404,7 +417,6 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				}
 			}
 			None => Ok(None),
-			Some(Err(e)) => Err(self.lex_error(e)),
 		}
 	}
 
@@ -412,8 +424,8 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	///
 	/// Also returns None if the token was not joined to the previous token.
 	pub fn peek_joined2(&mut self) -> ParseResult<Option<Token>> {
-		match self.lex.peek::<2>() {
-			Some(Ok(x)) => {
+		match self.peek2()? {
+			Some(x) => {
 				if let Joined::Joined = x.joined {
 					Ok(Some(x))
 				} else {
@@ -421,7 +433,6 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				}
 			}
 			None => Ok(None),
-			Some(Err(e)) => Err(self.lex_error(e)),
 		}
 	}
 
@@ -443,10 +454,16 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// and the token if it is.
 	pub fn expect(&mut self, kind: BaseTokenKind) -> ParseResult<Token> {
 		let Some(token) = self.peek()? else {
-			return Err(self.unexpected(kind.as_str()));
+			if self.state.contains(ParserState::SPECULATING) {
+				return Err(ParseError::speculate_error());
+			}
+			return Err(self.unexpected(kind.description()));
 		};
 		if token.token != kind {
-			return Err(self.unexpected(kind.as_str()));
+			if self.state.contains(ParserState::SPECULATING) {
+				return Err(ParseError::speculate_error());
+			}
+			return Err(self.unexpected(kind.description()));
 		}
 		self.lex.pop_peek();
 		self.last_span = token.span;
@@ -463,12 +480,22 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	pub fn unexpected(&mut self, expected: &str) -> ParseError {
 		match self.peek() {
 			Err(e) => e,
-			Ok(Some(token)) => self.error(format!(
-				"Unexpected token `{}`, expected `{}`",
-				self.slice(token.span),
-				expected
-			)),
-			Ok(None) => self.error(format!("Unexpected end of query, expected `{}`", expected)),
+			Ok(Some(token)) => {
+				if self.state.contains(ParserState::SPECULATING) {
+					return ParseError::speculate_error();
+				}
+				self.error(format!(
+					"Unexpected token `{}`, expected `{}`",
+					self.slice(token.span),
+					expected
+				))
+			}
+			Ok(None) => {
+				if self.state.contains(ParserState::SPECULATING) {
+					return ParseError::speculate_error();
+				}
+				self.error(format!("Unexpected end of query, expected `{}`", expected))
+			}
 		}
 	}
 
@@ -481,6 +508,10 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			Ok(x) => x,
 			Err(e) => return e,
 		};
+
+		if self.state.contains(ParserState::SPECULATING) {
+			return ParseError::speculate_error();
+		}
 
 		let message = match peek {
 			Some(token) => {
@@ -678,6 +709,16 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// Returns the span of that points to the end of the source.
 	pub fn eof_span(&mut self) -> Span {
 		self.lex.eof_span()
+	}
+
+	#[track_caller]
+	pub fn todo<T>(&mut self) -> ParseResult<T> {
+		let loc = std::panic::Location::caller();
+		Err(self.error(format!(
+			"hit an unimplemented path in the parser: {}:{}",
+			loc.file(),
+			loc.line()
+		)))
 	}
 }
 

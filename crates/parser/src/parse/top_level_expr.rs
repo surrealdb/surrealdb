@@ -2,16 +2,15 @@ use ast::{Query, TopLevelExpr, Transaction, UseStatementKind};
 use common::source_error::{AnnotationKind, Level};
 use token::T;
 
-use crate::parse::ParserState;
-
 use super::{Parse, ParseResult, ParseSync, Parser};
+use crate::parse::ParserState;
 
 impl Parse for ast::Query {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let span = parser.peek_span();
 
 		let mut exprs = None;
-		let mut tail = None;
+		let mut cur = None;
 		while let Some(next) = parser.peek()? {
 			if exprs.is_some() {
 				if parser.eat(T![;])?.is_none() {
@@ -31,17 +30,17 @@ impl Parse for ast::Query {
 							.to_diagnostic()
 					}));
 				}
-
-				if parser.eof() {
-					break;
-				}
 			}
 
 			// eat all the empty statements.
 			while parser.eat(T![;])?.is_some() {}
 
+			if parser.eof() {
+				break;
+			}
+
 			let expr = parser.parse().await?;
-			parser.push_list(expr, &mut exprs, &mut tail);
+			parser.push_list(expr, &mut exprs, &mut cur);
 		}
 
 		let span = parser.span_since(span);
@@ -121,7 +120,6 @@ impl Parse for ast::Transaction {
 		let mut tail = None;
 		let (end, commits) = loop {
 			if parser.eat(T![;])?.is_none() {
-				parser.recover_eof()?;
 				let span = parser.peek_span();
 				return Err(parser.with_error(|parser| {
 					Level::Error
@@ -141,7 +139,6 @@ impl Parse for ast::Transaction {
 			}
 
 			let Some(next) = parser.peek()? else {
-				parser.recover_eof()?;
 				let span = parser.peek_span();
 				return Err(parser.with_error(|parser| {
 					Level::Error
@@ -217,7 +214,6 @@ impl ParseSync for ast::UseStatement {
 
 			(UseStatementKind::Database(db), start.extend(parser[db].span))
 		} else {
-			parser.recover_eof()?;
 			return Err(parser.unexpected("either `NAMESPACE` or `DATABASE`"));
 		};
 

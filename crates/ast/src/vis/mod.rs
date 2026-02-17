@@ -5,11 +5,9 @@ mod implement;
 
 use std::fmt::{self, Arguments};
 
-use crate::{
-	Node, NodeId, Spanned,
-	mac::impl_vis_debug,
-	types::{Ast, NodeLibrary},
-};
+use crate::mac::impl_vis_debug;
+use crate::types::{Ast, NodeLibrary};
+use crate::{Node, NodeId, Spanned};
 
 pub fn visualize_ast<N, L, W>(root: NodeId<N>, ast: &Ast<L>, writer: W) -> fmt::Result
 where
@@ -17,10 +15,7 @@ where
 	L: NodeLibrary,
 	W: fmt::Write,
 {
-	let mut fmt = AstFormatter {
-		writer,
-		indent: 0,
-	};
+	let mut fmt = AstFormatter::new(writer);
 	ast[root].fmt(ast, &mut fmt)
 }
 
@@ -35,17 +30,40 @@ where
 pub struct AstFormatter<W> {
 	writer: W,
 	indent: usize,
+	new_line: bool,
 }
 
 impl<W> AstFormatter<W>
 where
 	W: fmt::Write,
 {
+	pub fn new(w: W) -> Self {
+		AstFormatter {
+			writer: w,
+			indent: 0,
+			new_line: false,
+		}
+	}
+
 	pub fn fmt_args(&mut self, args: Arguments<'_>) -> fmt::Result {
+		if self.new_line {
+			self.writer.write_char('\n')?;
+			for _ in 0..self.indent {
+				self.writer.write_char(' ')?;
+			}
+			self.new_line = false;
+		}
 		self.writer.write_fmt(args)
 	}
 
 	pub fn fmt_debug<D: fmt::Debug>(&mut self, dbg: &D) -> fmt::Result {
+		if self.new_line {
+			self.writer.write_char('\n')?;
+			for _ in 0..self.indent {
+				self.writer.write_char(' ')?;
+			}
+			self.new_line = false;
+		}
 		write!(self.writer, "{:?}", dbg)
 	}
 
@@ -56,7 +74,7 @@ where
 	{
 		self.write_str(name)?;
 		self.indent += 4;
-		self.write_str("\n")?;
+		self.new_line();
 		let fmt = unsafe { std::mem::transmute::<&mut Self, &mut AstStructFormatter<W>>(self) };
 		f(ast, fmt)?;
 		self.indent -= 4;
@@ -74,17 +92,33 @@ where
 		Ok(())
 	}
 
+	pub fn indent<L, F>(&mut self, ast: &Ast<L>, f: F) -> fmt::Result
+	where
+		L: NodeLibrary,
+		F: FnOnce(&Ast<L>, &mut AstFormatter<W>) -> fmt::Result,
+	{
+		self.indent += 4;
+		let res = f(ast, self);
+		self.indent -= 4;
+		res
+	}
+
 	fn write_str(&mut self, s: &str) -> fmt::Result {
-		for (idx, l) in s.split("\n").enumerate() {
-			if idx != 0 {
-				self.writer.write_char('\n')?;
-				for _ in 0..self.indent {
-					self.writer.write_char(' ')?;
-				}
+		if self.new_line {
+			self.writer.write_char('\n')?;
+			for _ in 0..self.indent {
+				self.writer.write_char(' ')?;
 			}
+			self.new_line = false;
+		}
+		for l in s.split("\n") {
 			self.writer.write_str(l)?;
 		}
 		Ok(())
+	}
+
+	fn new_line(&mut self) {
+		self.new_line = true;
 	}
 }
 
@@ -110,15 +144,17 @@ where
 		L: NodeLibrary,
 		N: AstVis<L, W>,
 	{
+		self.0.write_str(".")?;
 		self.0.write_str(name)?;
 		self.0.write_str(": ")?;
 		let fmt = unsafe { std::mem::transmute::<&mut Self, &mut AstFormatter<W>>(self) };
 		n.fmt(ast, fmt)?;
-		self.0.write_str("\n")?;
+		self.0.new_line();
 		Ok(self)
 	}
 
 	pub fn finish(&mut self) -> Result<(), fmt::Error> {
+		self.0.new_line();
 		Ok(())
 	}
 }
@@ -138,10 +174,11 @@ where
 		self.0.write_str("::")?;
 		self.0.write_str(name)?;
 		self.0.indent += 4;
-		self.0.write_str("\n")?;
+		self.0.new_line();
 		let fmt = unsafe { std::mem::transmute::<&mut Self, &mut AstStructFormatter<W>>(self) };
 		cb(ast, fmt)?;
 		self.0.indent -= 4;
+		self.0.new_line();
 		Ok(())
 	}
 
