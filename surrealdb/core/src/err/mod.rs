@@ -483,6 +483,12 @@ pub(crate) enum Error {
 		name: String,
 	},
 
+	/// The permissions do not allow this agent to be run
+	#[error("You don't have permission to run the {name} agent")]
+	AgentPermissions {
+		name: String,
+	},
+
 	/// The permissions do not allow this query to be run on this table
 	#[error("You don't have permission to {op} this file in the `{name}` bucket")]
 	BucketPermissions {

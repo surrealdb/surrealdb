@@ -5,10 +5,55 @@
 
 use anyhow::Result;
 
+#[cfg(feature = "ai")]
+use crate::catalog::Permission;
+#[cfg(feature = "ai")]
+use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::physical_expr::EvalContext;
+#[cfg(feature = "ai")]
+use crate::exec::planner::expr_to_physical_expr;
+#[cfg(feature = "ai")]
+use crate::expr::ControlFlow;
 use crate::val::Value;
 use crate::{define_async_function, register_functions};
+
+#[cfg(feature = "ai")]
+async fn check_agent_permission(
+	permission: &Permission,
+	agent_name: &str,
+	ctx: &EvalContext<'_>,
+) -> Result<()> {
+	match permission {
+		Permission::Full => Ok(()),
+		Permission::None => Err(Error::AgentPermissions {
+			name: agent_name.to_string(),
+		}
+		.into()),
+		Permission::Specific(expr) => {
+			match expr_to_physical_expr(expr.clone(), ctx.exec_ctx.ctx()).await {
+				Ok(phys_expr) => {
+					let result = phys_expr.evaluate(ctx.clone()).await.map_err(|cf| match cf {
+						ControlFlow::Err(e) => e,
+						other => anyhow::anyhow!("{other}"),
+					})?;
+					if !result.is_truthy() {
+						Err(Error::AgentPermissions {
+							name: agent_name.to_string(),
+						}
+						.into())
+					} else {
+						Ok(())
+					}
+				}
+				Err(_) => Err(Error::AgentPermissions {
+					name: agent_name.to_string(),
+				}
+				.into()),
+			}
+		}
+	}
+}
 
 #[cfg(feature = "ai")]
 async fn agent_run_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
@@ -82,6 +127,9 @@ async fn agent_run_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value
 	let txn = frozen_ctx.tx();
 	let (ns, db) = frozen_ctx.get_ns_db_ids(opt).await?;
 	let agent = txn.get_db_agent(ns, db, &agent_name).await?;
+
+	// Check agent permissions
+	check_agent_permission(&agent.permissions, &agent_name, ctx).await?;
 
 	let agent_input = AgentInput {
 		message,

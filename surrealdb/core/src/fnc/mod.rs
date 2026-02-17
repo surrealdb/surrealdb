@@ -572,7 +572,7 @@ pub async fn asynchronous(
 		"api::res::header" => api::res::header((stk, ctx, opt, doc)).await,
 		"api::res::headers" => api::res::headers((stk, ctx, opt, doc)).await,
 		//
-		"ai::agent::run" => agent::run((ctx, opt)).await,
+		"ai::agent::run" => agent::run((stk, ctx, opt)).await,
 		//
 		"ai::chat" => ai::chat((ctx, opt)).await,
 		"ai::embed" => ai::embed((ctx, opt)).await,

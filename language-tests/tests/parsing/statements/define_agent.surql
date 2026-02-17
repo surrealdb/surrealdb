@@ -17,6 +17,15 @@ value = "NONE"
 [[test.results]]
 value = "NONE"
 
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
 */
 
 -- Minimal agent definition
@@ -61,6 +70,15 @@ DEFINE AGENT full_agent
         }
     ]
     COMMENT 'A fully configured agent';
+
+-- Agent with PERMISSIONS NONE
+DEFINE AGENT restricted MODEL 'openai:gpt-4' PROMPT 'Restricted' PERMISSIONS NONE;
+
+-- Agent with PERMISSIONS FULL
+DEFINE AGENT open_agent MODEL 'openai:gpt-4' PROMPT 'Open' PERMISSIONS FULL;
+
+-- Agent with PERMISSIONS WHERE clause
+DEFINE AGENT conditional MODEL 'openai:gpt-4' PROMPT 'Conditional' PERMISSIONS WHERE $auth.role = 'admin';
 
 -- Remove agent parses correctly
 REMOVE AGENT IF EXISTS full_agent;

@@ -1,5 +1,6 @@
 //! SurrealQL `agent::*` function implementations.
 use anyhow::Result;
+use reblessive::tree::Stk;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -15,7 +16,7 @@ use crate::val::Value;
 /// ```
 #[cfg(not(feature = "ai"))]
 pub async fn run(
-	(_ctx, _opt): (&FrozenContext, &Options),
+	(_stk, _ctx, _opt): (&mut Stk, &FrozenContext, &Options),
 	(_agent_name, _input): (String, Value),
 ) -> Result<Value> {
 	anyhow::bail!(Error::AiDisabled)
@@ -24,11 +25,13 @@ pub async fn run(
 /// Run an agent with the given input.
 #[cfg(feature = "ai")]
 pub async fn run(
-	(ctx, opt): (&FrozenContext, &Options),
+	(stk, ctx, opt): (&mut Stk, &FrozenContext, &Options),
 	(agent_name, input): (String, Value),
 ) -> Result<Value> {
 	use crate::ai::agent::engine::{AgentInput, run as run_agent};
+	use crate::catalog::Permission;
 	use crate::catalog::providers::DatabaseProvider;
+	use crate::expr::ControlFlow;
 
 	// Parse input object
 	let input_obj = match &input {
@@ -61,6 +64,27 @@ pub async fn run(
 	let txn = ctx.tx();
 	let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 	let agent = txn.get_db_agent(ns, db, &agent_name).await?;
+
+	// Check agent permissions
+	match &agent.permissions {
+		Permission::Full => {}
+		Permission::None => anyhow::bail!(Error::AgentPermissions {
+			name: agent_name.clone(),
+		}),
+		Permission::Specific(e) => {
+			let opt = &opt.new_with_perms(false);
+			let val =
+				stk.run(|stk| e.compute(stk, ctx, opt, None)).await.map_err(|cf| match cf {
+					ControlFlow::Err(e) => e,
+					other => anyhow::anyhow!("{other}"),
+				})?;
+			if !val.is_truthy() {
+				anyhow::bail!(Error::AgentPermissions {
+					name: agent_name.clone(),
+				});
+			}
+		}
+	}
 
 	let agent_input = AgentInput {
 		message,
