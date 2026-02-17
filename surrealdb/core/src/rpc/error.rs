@@ -21,10 +21,7 @@ pub fn parse_error() -> TypesError {
 
 /// Too many open transactions for the session or connection.
 pub fn too_many_transactions() -> TypesError {
-	TypesError::validation(
-		"Too many open transactions".to_string(),
-		ValidationError::InvalidParams,
-	)
+	TypesError::validation("Too many open transactions".to_string(), ValidationError::InvalidParams)
 }
 
 /// Invalid request structure.

@@ -715,11 +715,9 @@ impl RpcProtocol for Websocket {
 			// Accept a native UUID value
 			Some(Value::Uuid(v)) => v.into_inner(),
 			// Accept a string-encoded UUID value
-			Some(Value::String(ref s)) => {
-				s.parse::<Uuid>().map_err(|_| {
-					surrealdb_core::rpc::invalid_params("Expected transaction UUID")
-				})?
-			}
+			Some(Value::String(ref s)) => s
+				.parse::<Uuid>()
+				.map_err(|_| surrealdb_core::rpc::invalid_params("Expected transaction UUID"))?,
 			_ => {
 				return Err(surrealdb_core::rpc::invalid_params("Expected transaction UUID"));
 			}
@@ -733,9 +731,7 @@ impl RpcProtocol for Websocket {
 			c.fetch_sub(1, Ordering::Relaxed);
 		}
 		// Commit the transaction
-		tx.commit()
-			.await
-			.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
+		tx.commit().await.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
 		// Return success
 		Ok(DbResult::Other(Value::None))
 	}
@@ -755,11 +751,9 @@ impl RpcProtocol for Websocket {
 			// Accept a native UUID value
 			Some(Value::Uuid(v)) => v.into_inner(),
 			// Accept a string-encoded UUID value
-			Some(Value::String(ref s)) => {
-				s.parse::<Uuid>().map_err(|_| {
-					surrealdb_core::rpc::invalid_params("Expected transaction UUID")
-				})?
-			}
+			Some(Value::String(ref s)) => s
+				.parse::<Uuid>()
+				.map_err(|_| surrealdb_core::rpc::invalid_params("Expected transaction UUID"))?,
 			_ => {
 				return Err(surrealdb_core::rpc::invalid_params("Expected transaction UUID"));
 			}
@@ -773,9 +767,7 @@ impl RpcProtocol for Websocket {
 			c.fetch_sub(1, Ordering::Relaxed);
 		}
 		// Cancel the transaction
-		tx.cancel()
-			.await
-			.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
+		tx.cancel().await.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
 		// Return success
 		Ok(DbResult::Other(Value::None))
 	}
