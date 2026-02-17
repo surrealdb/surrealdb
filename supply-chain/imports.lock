@@ -3017,24 +3017,6 @@ criteria = "safe-to-deploy"
 version = "0.2.4"
 notes = "Implements a concurrency primitive with atomics, and is not obviously incorrect"
 
-[[audits.bytecode-alliance.audits.ureq]]
-who = "Andrew Brown <andrew.brown@intel.com>"
-criteria = "safe-to-deploy"
-delta = "2.9.6 -> 2.10.0"
-notes = "No `unsafe` changes; this audit observed mainly license and documentation changes."
-
-[[audits.bytecode-alliance.audits.ureq]]
-who = "Chris Fallin <chris@cfallin.org>"
-criteria = "safe-to-deploy"
-delta = "2.10.0 -> 3.1.4"
-notes = "Network protocol library with no unsafe code."
-
-[[audits.bytecode-alliance.audits.ureq-proto]]
-who = "Chris Fallin <chris@cfallin.org>"
-criteria = "safe-to-deploy"
-version = "0.5.3"
-notes = "Network protocol library with no unsafe code."
-
 [[audits.bytecode-alliance.audits.utf-8]]
 who = "Chris Fallin <chris@cfallin.org>"
 criteria = "safe-to-deploy"

@@ -683,10 +683,6 @@ criteria = "safe-to-deploy"
 version = "0.12.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.hmac-sha256]]
-version = "1.1.12"
-criteria = "safe-to-deploy"
-
 [[exemptions.home]]
 version = "0.5.12"
 criteria = "safe-to-deploy"
@@ -853,10 +849,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.lz4_flex]]
 version = "0.12.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.lzma-rust2]]
-version = "0.15.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.mac]]
@@ -1717,10 +1709,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.unty]]
 version = "0.0.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.ureq]]
-version = "2.9.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.url]]
