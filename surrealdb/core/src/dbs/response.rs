@@ -76,17 +76,14 @@ impl QueryResult {
 }
 
 /// Serialise this error into the query-result wire shape: `result` (message string), optional
-/// `kind`, `details`, and `cause`. Does not include `code`. Used for query result responses
+/// `kind` and `details`. Does not include `code`. Used for query result responses
 /// for backwards compatibility (old clients expect `result` to be the message string).
 fn into_query_result_value(error: &TypesError) -> Value {
 	let mut obj = Object::new();
 	obj.insert("result", error.message().to_string());
 	obj.insert("kind", error.kind().clone());
 	if let Some(d) = error.details() {
-		obj.insert("details", d.clone());
-	}
-	if let Some(c) = error.cause() {
-		obj.insert("cause", into_query_result_value(c));
+		obj.insert("details", d.clone().into_value());
 	}
 	Value::Object(obj)
 }
@@ -108,12 +105,7 @@ fn from_query_result_value(value: Value) -> Result<TypesError, TypesError> {
 		.map_err(|e| TypesError::internal(e.to_string()))?
 		.unwrap_or_default();
 	let details = map.remove("details");
-	let cause = map
-		.remove("cause")
-		.map(from_query_result_value)
-		.transpose()
-		.map_err(|e| TypesError::internal(e.to_string()))?;
-	Ok(TypesError::from_parts(message, Some(kind), details, cause))
+	Ok(TypesError::from_parts(message, Some(kind), details))
 }
 
 impl SurrealValue for QueryResult {
@@ -130,7 +122,6 @@ impl SurrealValue for QueryResult {
 				result: string,
 				kind: string,
 				details: any,
-				cause: any,
 				query_type: (QueryType::kind_of()),
 			}
 		)

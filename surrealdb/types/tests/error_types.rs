@@ -1,8 +1,8 @@
 use surrealdb_types::{
 	AlreadyExistsError, AuthError, ConfigurationError, ConnectionError, ConversionError, Error,
-	ErrorKind, Kind, LengthMismatchError, NotAllowedError, NotFoundError, Number, Object,
-	OutOfRangeError, QueryError, SerializationError, SurrealValue, TypeError, ValidationError,
-	Value,
+	ErrorDetails, ErrorKind, Kind, LengthMismatchError, NotAllowedError, NotFoundError, Number,
+	Object, OutOfRangeError, QueryError, SerializationError, SurrealValue, TypeError,
+	ValidationError, Value,
 };
 
 #[test]
@@ -294,7 +294,6 @@ fn test_public_error_new() {
 	assert_eq!(err.kind(), &ErrorKind::NotFound);
 	assert_eq!(err.message(), "The table 'users' does not exist");
 	assert!(err.details().is_none());
-	assert!(err.cause().is_none());
 }
 
 #[test]
@@ -312,7 +311,7 @@ fn test_public_error_validation_details() {
 	let err =
 		Error::validation("Invalid request".to_string(), Some(ValidationError::InvalidRequest));
 	assert_eq!(err.kind(), &ErrorKind::Validation);
-	assert_eq!(err.validation_details(), Some(ValidationError::InvalidRequest));
+	assert_eq!(err.validation_details(), Some(&ValidationError::InvalidRequest));
 
 	let err_no_details = Error::validation("Parse error".to_string(), None);
 	assert_eq!(err_no_details.validation_details(), None);
@@ -322,50 +321,27 @@ fn test_public_error_validation_details() {
 }
 
 #[test]
-fn test_public_error_with_cause() {
-	let root = Error::internal("connection refused".to_string());
-	let top = Error::query("Failed to execute query".to_string(), None).with_cause(root);
-
-	assert_eq!(top.kind(), &ErrorKind::Query);
-	assert!(top.cause().is_some());
-	let cause = top.cause().unwrap();
-	assert_eq!(cause.kind(), &ErrorKind::Internal);
-	assert_eq!(cause.message(), "connection refused");
-	assert!(cause.cause().is_none());
-}
-
-#[test]
-fn test_public_error_chain() {
-	let root = Error::internal("root".to_string());
-	let mid = Error::validation("mid".to_string(), None).with_cause(root);
-	let top = Error::not_allowed("top".to_string(), None).with_cause(mid);
-
-	let chain: Vec<_> = top.chain().collect();
-	assert_eq!(chain.len(), 3);
-	assert_eq!(chain[0].kind(), &ErrorKind::NotAllowed);
-	assert_eq!(chain[1].kind(), &ErrorKind::Validation);
-	assert_eq!(chain[2].kind(), &ErrorKind::Internal);
-}
-
-#[test]
 fn test_public_error_display() {
 	let err = Error::thrown("Something went wrong".to_string());
 	assert!(err.to_string().contains("Something went wrong"));
-
-	let with_cause = Error::validation("outer".to_string(), None)
-		.with_cause(Error::internal("inner".to_string()));
-	let display = with_cause.to_string();
-	assert!(display.contains("outer"));
-	assert!(display.contains("inner"));
 }
 
 #[test]
-fn test_public_error_std_error_source() {
-	let inner = Error::internal("inner".to_string());
-	let outer = Error::query("outer".to_string(), None).with_cause(inner);
+fn test_public_error_details_pattern_matching() {
+	let err = Error::not_found(
+		"Table not found".to_string(),
+		NotFoundError::Table {
+			name: "users".into(),
+		},
+	);
 
-	let source = std::error::Error::source(&outer).unwrap();
-	assert_eq!(source.to_string(), "inner");
+	// Users can pattern match on ErrorDetails directly
+	match err.details() {
+		Some(ErrorDetails::NotFound(NotFoundError::Table {
+			name,
+		})) => assert_eq!(name, "users"),
+		_ => panic!("Expected NotFound Table details"),
+	}
 }
 
 #[test]
@@ -597,14 +573,14 @@ fn test_error_snapshot_not_allowed_auth_token_expired() {
 	let err = Error::not_allowed("Token expired".to_string(), AuthError::TokenExpired);
 	let val = err.into_value();
 
-	// Note: cause is serialized as None (SurrealValue doesn't support skip_serializing_if
-	// on named struct fields, so Option::None becomes Value::None in the output)
 	let Value::Object(ref obj) = val else {
 		panic!("Expected object");
 	};
 	assert_eq!(obj.get("kind"), Some(&Value::String("NotAllowed".into())));
 	assert_eq!(obj.get("message"), Some(&Value::String("Token expired".into())));
-	// Verify details has the new { kind, details? } structure
+	// No cause field in output (removed from Error struct)
+	assert!(!obj.contains_key("cause"));
+	// Verify details has the { kind, details? } structure
 	let Some(Value::Object(details)) = obj.get("details") else {
 		panic!("Expected details object");
 	};
@@ -654,7 +630,7 @@ fn test_error_snapshot_not_allowed_auth_invalid_role() {
 	let details = parsed.not_allowed_details().unwrap();
 	assert!(matches!(
 		details,
-		NotAllowedError::Auth(AuthError::InvalidRole { name }) if name == "admin"
+		NotAllowedError::Auth(AuthError::InvalidRole { ref name }) if name == "admin"
 	));
 }
 
@@ -686,7 +662,7 @@ fn test_error_snapshot_not_found_table() {
 	let details = parsed.not_found_details().unwrap();
 	assert!(matches!(
 		details,
-		NotFoundError::Table { name } if name == "users"
+		NotFoundError::Table { ref name } if name == "users"
 	));
 }
 
@@ -707,7 +683,7 @@ fn test_error_snapshot_validation_parse() {
 
 	// Round-trip
 	let parsed = Error::from_value(val).unwrap();
-	assert_eq!(parsed.validation_details(), Some(ValidationError::Parse));
+	assert_eq!(parsed.validation_details(), Some(&ValidationError::Parse));
 }
 
 #[test]
@@ -737,7 +713,7 @@ fn test_error_snapshot_query_timed_out() {
 	let details = parsed.query_details().unwrap();
 	assert!(matches!(
 		details,
-		QueryError::TimedOut { duration } if duration == Duration::from_secs(5)
+		QueryError::TimedOut { duration } if *duration == Duration::from_secs(5)
 	));
 }
 
@@ -769,7 +745,7 @@ fn test_error_snapshot_already_exists_record() {
 	let details = parsed.already_exists_details().unwrap();
 	assert!(matches!(
 		details,
-		AlreadyExistsError::Record { id } if id == "users:123"
+		AlreadyExistsError::Record { ref id } if id == "users:123"
 	));
 }
 
@@ -800,34 +776,8 @@ fn test_error_snapshot_not_allowed_method() {
 	let details = parsed.not_allowed_details().unwrap();
 	assert!(matches!(
 		details,
-		NotAllowedError::Method { name } if name == "begin"
+		NotAllowedError::Method { ref name } if name == "begin"
 	));
-}
-
-#[test]
-fn test_error_snapshot_with_cause_chain() {
-	let inner = Error::internal("connection lost".to_string());
-	let outer = Error::query("Query failed".to_string(), QueryError::Cancelled).with_cause(inner);
-	let val = outer.into_value();
-
-	let Value::Object(ref obj) = val else {
-		panic!("Expected object");
-	};
-	assert_eq!(obj.get("kind"), Some(&Value::String("Query".into())));
-
-	// Verify cause is present and has correct structure
-	let Some(Value::Object(cause)) = obj.get("cause") else {
-		panic!("Expected cause object");
-	};
-	assert_eq!(cause.get("kind"), Some(&Value::String("Internal".into())));
-	assert_eq!(cause.get("message"), Some(&Value::String("connection lost".into())));
-
-	// Round-trip
-	let parsed = Error::from_value(val).unwrap();
-	assert_eq!(parsed.kind(), &ErrorKind::Query);
-	let cause = parsed.cause().unwrap();
-	assert_eq!(cause.kind(), &ErrorKind::Internal);
-	assert_eq!(cause.message(), "connection lost");
 }
 
 #[test]
@@ -840,20 +790,19 @@ fn test_error_snapshot_internal_no_details() {
 	};
 	assert_eq!(obj.get("kind"), Some(&Value::String("Internal".into())));
 	assert_eq!(obj.get("message"), Some(&Value::String("Unexpected".into())));
-	// details is None (serialized as Value::None since SurrealValue doesn't skip None fields)
-	assert_eq!(obj.get("details"), Some(&Value::None));
-	assert_eq!(obj.get("cause"), Some(&Value::None));
+	// details and cause should be absent (manual SurrealValue impl skips None fields)
+	assert!(!obj.contains_key("details"), "No details should be present");
+	assert!(!obj.contains_key("cause"), "No cause field should exist");
 
 	// Round-trip
 	let parsed = Error::from_value(val).unwrap();
 	assert_eq!(parsed.kind(), &ErrorKind::Internal);
 	assert_eq!(parsed.message(), "Unexpected");
 	assert!(parsed.details().is_none());
-	assert!(parsed.cause().is_none());
 }
 
 #[test]
-fn test_error_snapshot_thrown_no_cause() {
+fn test_error_snapshot_thrown_no_details() {
 	let err = Error::thrown("custom error".to_string());
 	let val = err.into_value();
 
@@ -862,15 +811,14 @@ fn test_error_snapshot_thrown_no_cause() {
 	};
 	assert_eq!(obj.get("kind"), Some(&Value::String("Thrown".into())));
 	assert_eq!(obj.get("message"), Some(&Value::String("custom error".into())));
-	assert_eq!(obj.get("details"), Some(&Value::None));
-	assert_eq!(obj.get("cause"), Some(&Value::None));
+	assert!(!obj.contains_key("details"));
+	assert!(!obj.contains_key("cause"));
 
 	// Round-trip
 	let parsed = Error::from_value(val).unwrap();
 	assert_eq!(parsed.kind(), &ErrorKind::Thrown);
 	assert_eq!(parsed.message(), "custom error");
 	assert!(parsed.details().is_none());
-	assert!(parsed.cause().is_none());
 }
 
 #[test]
@@ -891,5 +839,5 @@ fn test_error_snapshot_not_allowed_scripting_unit() {
 	// Round-trip
 	let parsed = Error::from_value(val).unwrap();
 	let details = parsed.not_allowed_details().unwrap();
-	assert_eq!(details, NotAllowedError::Scripting);
+	assert_eq!(details, &NotAllowedError::Scripting);
 }
