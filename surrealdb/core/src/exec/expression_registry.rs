@@ -224,11 +224,11 @@ impl ExpressionRegistry {
 	/// avoid both `reserved_names` (to protect document fields) and
 	/// `used_internal_names` (to prevent inter-expression collisions).
 	fn choose_internal_name(&mut self, alias: &Option<String>) -> String {
-		if let Some(name) = alias {
-			if !self.used_internal_names.contains(name) {
-				self.used_internal_names.insert(name.clone());
-				return name.clone();
-			}
+		if let Some(name) = alias
+			&& !self.used_internal_names.contains(name)
+		{
+			self.used_internal_names.insert(name.clone());
+			return name.clone();
 		}
 
 		// Generate synthetic name, skipping any that collide with reserved

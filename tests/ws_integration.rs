@@ -2131,7 +2131,7 @@ pub async fn temporary_directory(cfg_server: Option<Format>, cfg_format: Format)
 		socket.send_message_query("SELECT * FROM test ORDER BY id DESC EXPLAIN").await.unwrap();
 	let result = &res.remove(0)["result"];
 	// New executor EXPLAIN produces a JSON plan tree
-	assert_eq!(result["operator"], "Project");
+	assert_eq!(result["operator"], "SelectProject");
 	assert_eq!(result["children"][0]["operator"], "TableScan");
 	assert_eq!(result["children"][0]["attributes"]["direction"], "Backward");
 	// And return the correct result
@@ -2145,7 +2145,7 @@ pub async fn temporary_directory(cfg_server: Option<Format>, cfg_format: Format)
 		.await
 		.unwrap();
 	let result = &res.remove(0)["result"];
-	assert_eq!(result["operator"], "Project");
+	assert_eq!(result["operator"], "SelectProject");
 	assert_eq!(result["children"][0]["operator"], "TableScan");
 	assert_eq!(result["children"][0]["attributes"]["direction"], "Backward");
 	// And return the correct result
