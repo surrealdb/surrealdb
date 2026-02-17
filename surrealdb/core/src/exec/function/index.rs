@@ -287,27 +287,27 @@ impl Debug for MatchContext {
 pub struct KnnContext {
 	/// Per-row distances keyed by RecordId, populated by the KNN scan operator.
 	///
-	/// Uses `parking_lot::RwLock` (not `std::sync::RwLock`) because it does not
-	/// poison on panic, matching the convention used by `DatabaseContext` caches.
-	distances: parking_lot::RwLock<HashMap<RecordId, Number>>,
+	/// Uses `tokio::sync::RwLock` so lock acquisition is async and cannot
+	/// block the tokio runtime.
+	distances: tokio::sync::RwLock<HashMap<RecordId, Number>>,
 }
 
 impl KnnContext {
 	/// Create a new empty KnnContext.
 	pub fn new() -> Self {
 		Self {
-			distances: parking_lot::RwLock::new(HashMap::new()),
+			distances: tokio::sync::RwLock::new(HashMap::new()),
 		}
 	}
 
 	/// Record the distance for a record. Called by KnnScan after HNSW search.
-	pub fn insert(&self, rid: RecordId, dist: Number) {
-		self.distances.write().insert(rid, dist);
+	pub async fn insert(&self, rid: RecordId, dist: Number) {
+		self.distances.write().await.insert(rid, dist);
 	}
 
 	/// Look up the distance for a record. Called by vector::distance::knn().
-	pub fn get(&self, rid: &RecordId) -> Option<Number> {
-		self.distances.read().get(rid).copied()
+	pub async fn get(&self, rid: &RecordId) -> Option<Number> {
+		self.distances.read().await.get(rid).copied()
 	}
 }
 
@@ -319,8 +319,10 @@ impl Default for KnnContext {
 
 impl Debug for KnnContext {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		let count = self.distances.read().len();
-		f.debug_struct("KnnContext").field("entries", &count).finish()
+		match self.distances.try_read() {
+			Ok(guard) => f.debug_struct("KnnContext").field("entries", &guard.len()).finish(),
+			Err(_) => f.debug_struct("KnnContext").field("entries", &"<locked>").finish(),
+		}
 	}
 }
 

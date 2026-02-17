@@ -278,7 +278,7 @@ impl ExecOperator for KnnScan {
 			// downstream projection evaluation.
 			if let Some(ref knn_ctx) = knn_context {
 				for (rid, distance, _) in &knn_results {
-					knn_ctx.insert(rid.as_ref().clone(), Number::Float(*distance));
+					knn_ctx.insert(rid.as_ref().clone(), Number::Float(*distance)).await;
 					rids.push(rid.as_ref().clone());
 				}
 			} else {

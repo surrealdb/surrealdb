@@ -263,13 +263,13 @@ impl Executor {
 						ns: ns_def,
 					},
 					db: db_def,
-					field_state_cache: std::sync::Arc::new(parking_lot::RwLock::new(
+					field_state_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
 						std::collections::HashMap::new(),
 					)),
-					table_def_cache: std::sync::Arc::new(parking_lot::RwLock::new(
+					table_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
 						std::collections::HashMap::new(),
 					)),
-					index_def_cache: std::sync::Arc::new(parking_lot::RwLock::new(
+					index_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
 						std::collections::HashMap::new(),
 					)),
 				})

@@ -572,7 +572,7 @@ pub(crate) async fn build_field_state(
 
 	// Check the cache first (keyed by table name + check_perms flag).
 	{
-		let cache = db_ctx.field_state_cache.read();
+		let cache = db_ctx.field_state_cache.read().await;
 		if let Some(cached) = cache.get(&cache_key) {
 			return Ok(filter_field_state_for_projection(cached, needed_fields));
 		}
@@ -591,7 +591,7 @@ pub(crate) async fn build_field_state(
 
 	// Cache the full (unfiltered) state
 	let cached = Arc::new(full_state);
-	db_ctx.field_state_cache.write().insert(cache_key, Arc::clone(&cached));
+	db_ctx.field_state_cache.write().await.insert(cache_key, Arc::clone(&cached));
 
 	// Return filtered if needed_fields is specified
 	Ok(filter_field_state_for_projection(&cached, needed_fields))
