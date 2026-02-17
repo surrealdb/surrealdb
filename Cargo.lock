@@ -7066,6 +7066,7 @@ dependencies = [
  "bitflags 2.9.0",
  "logos",
  "reblessive",
+ "rust_decimal",
  "surrealdb-ast",
  "surrealdb-common",
  "surrealdb-token",

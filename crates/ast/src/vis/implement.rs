@@ -2,14 +2,15 @@ use core::fmt;
 use std::any::Any;
 
 use common::span::Span;
+use rust_decimal::Decimal;
 
 use super::AstFormatter;
 use crate::mac::impl_vis_debug;
 use crate::types::{Ast, NodeLibrary};
 use crate::vis::AstVis;
 use crate::{
-	BinaryOperator, IdiomOperator, Integer, NodeId, NodeListId, PostfixOperator, Sign, Spanned,
-	UseStatementKind,
+	BinaryOperator, DestructureOperator, IdiomOperator, Integer, NodeId, NodeListId,
+	PostfixOperator, Sign, Spanned, UseStatementKind,
 };
 
 impl_vis_debug!(BinaryOperator);
@@ -78,6 +79,27 @@ where
 			IdiomOperator::Where(i) => {
 				fmt.variant(ast, "Where", |ast, fmt| fmt.field(ast, "expr", i)?.finish())
 			}
+			IdiomOperator::Destructure(x) => {
+				fmt.variant(ast, "Destructure", |ast, fmt| fmt.field(ast, "op", x)?.finish())
+			}
+		})
+	}
+}
+
+impl<L, W> AstVis<L, W> for DestructureOperator
+where
+	L: NodeLibrary,
+	W: fmt::Write,
+{
+	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
+		fmt.fmt_enum(ast, "DestructureOperator", |ast, fmt| match self {
+			DestructureOperator::All => fmt.unit_variant("All"),
+			DestructureOperator::Expr(x) => {
+				fmt.variant(ast, "Expr", |ast, fmt| fmt.field(ast, "expr", x)?.finish())
+			}
+			DestructureOperator::Destructure(x) => {
+				fmt.variant(ast, "Destructure", |ast, fmt| fmt.field(ast, "op", x)?.finish())
+			}
 		})
 	}
 }
@@ -101,6 +123,7 @@ where
 {
 	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
 		for n in ast.iter_list(Some(*self)) {
+			fmt.write_str("-")?;
 			n.fmt(ast, fmt)?;
 		}
 		Ok(())
@@ -126,9 +149,9 @@ where
 {
 	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
 		if let Some(x) = self.as_ref() {
-			fmt.write_str("Some(")?;
-			x.fmt(ast, fmt)?;
-			fmt.write_str(")")
+			fmt.write_str("Some")?;
+			fmt.new_line();
+			fmt.indent(ast, |ast, fmt| x.fmt(ast, fmt))
 		} else {
 			fmt.write_str("None")
 		}
@@ -167,6 +190,7 @@ where
 		}
 	}
 }
+impl_vis_debug!(Decimal);
 
 impl_vis_debug!(bool);
 impl_vis_debug!(usize);

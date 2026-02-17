@@ -67,10 +67,11 @@ async fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 			PrefixOperator::Positive(token.span)
 		}
 		T![<] => match parser.peek_joined1()?.map(|x| x.token) {
-			Some(T![-] | T![->]) => todo!(),
+			Some(T![-] | T![->]) => return parser.todo(),
 			_ => return parse_prime(parser).await,
 		},
 		T![..] => {
+			let _ = parser.next();
 			if parser.eat_joined(T![=])?.is_some() {
 				PrefixOperator::RangeInclusive(parser.span_since(token.span))
 			} else {
@@ -86,7 +87,7 @@ async fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 	let span = parser.span_since(token.span);
 	let expr = parser.push(PrefixExpr {
 		op,
-		left: expr,
+		right: expr,
 		span,
 	});
 	Ok(Expr::Prefix(expr))
@@ -356,6 +357,8 @@ async fn parse_bracket_postfix(
 			Ok(Some(Expr::Idiom(postfix)))
 		}
 		T![*] => {
+			let _ = parser.next();
+
 			let left = parser.push(lhs);
 			let close =
 				parser.expect_closing_delimiter(BaseTokenKind::CloseBracket, open_token.span)?;
@@ -370,6 +373,8 @@ async fn parse_bracket_postfix(
 			Ok(Some(Expr::Idiom(postfix)))
 		}
 		T![$] => {
+			let _ = parser.next();
+
 			let left = parser.push(lhs);
 			let close =
 				parser.expect_closing_delimiter(BaseTokenKind::CloseBracket, open_token.span)?;
@@ -404,12 +409,138 @@ async fn parse_bracket_postfix(
 	}
 }
 
+impl Parse for ast::Destructure {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start = parser.peek_span();
+		let field = parser.parse_sync_push()?;
+
+		let peek = parser.peek_expect("`}`")?;
+		match peek.token {
+			T![:] => {
+				let _ = parser.next();
+				let expr = parser.parse_enter_push().await?;
+
+				Ok(ast::Destructure {
+					field,
+					op: Some(Spanned {
+						value: ast::DestructureOperator::Expr(expr),
+						span: parser.span_since(peek.span),
+					}),
+					span: parser.span_since(start),
+				})
+			}
+			T![.] => {
+				let Some(peek) = parser.peek_joined1()? else {
+					return Err(parser.unexpected("`.*` or `.{`"));
+				};
+
+				match peek.token {
+					T![*] => {
+						let _ = parser.next();
+						let _ = parser.next();
+
+						return Ok(ast::Destructure {
+							field,
+							op: Some(Spanned {
+								value: ast::DestructureOperator::All,
+								span: parser.span_since(peek.span),
+							}),
+							span: parser.span_since(start),
+						});
+					}
+					BaseTokenKind::OpenBrace => {
+						let _ = parser.next();
+						let _ = parser.next();
+
+						let mut head = None;
+						let mut tail = None;
+						loop {
+							if parser.eat(BaseTokenKind::CloseBrace)?.is_some() {
+								break;
+							}
+
+							let item = parser.parse_enter::<ast::Destructure>().await?;
+							parser.push_list(item, &mut head, &mut tail);
+
+							if parser.eat(T![,])?.is_none() {
+								let _ = parser.expect_closing_delimiter(
+									BaseTokenKind::CloseBrace,
+									peek.span,
+								)?;
+								break;
+							}
+						}
+
+						return Ok(ast::Destructure {
+							field,
+							op: Some(Spanned {
+								value: ast::DestructureOperator::Destructure(head),
+								span: parser.span_since(peek.span),
+							}),
+							span: parser.span_since(start),
+						});
+					}
+					_ => {
+						return Err(parser.unexpected("`.*` or `.{`"));
+					}
+				}
+			}
+			_ => Ok(ast::Destructure {
+				field,
+				op: None,
+				span: start,
+			}),
+		}
+	}
+}
+
 async fn parse_dot_brace_postfix(
 	parser: &mut Parser<'_, '_>,
 	lhs: Expr,
 	lhs_span: Span,
+	dot_span: Span,
 ) -> ParseResult<Expr> {
-	todo!()
+	let brace_token = parser.expect(BaseTokenKind::OpenBrace)?;
+
+	let peek = parser.peek_expect("`*`, `..` or an identifier")?;
+	match peek.token {
+		T![*] => parser.todo(),
+		T![..] => parser.todo(),
+		BaseTokenKind::Int => parser.todo(),
+		x @ BaseTokenKind::CloseBrace | x if x.is_identifier() => {
+			let left = parser.push(lhs);
+
+			let mut head = None;
+			let mut cur = None;
+			loop {
+				if parser.eat(BaseTokenKind::CloseBrace)?.is_some() {
+					break;
+				}
+
+				let item = parser.parse::<ast::Destructure>().await?;
+				parser.push_list(item, &mut head, &mut cur);
+
+				if parser.eat(T![,])?.is_none() {
+					let _ = parser
+						.expect_closing_delimiter(BaseTokenKind::CloseBrace, brace_token.span)?;
+					break;
+				}
+			}
+
+			let op = IdiomOperator::Destructure(head);
+			let expr = IdiomExpr {
+				left,
+				op: Spanned {
+					value: op,
+					span: parser.span_since(dot_span),
+				},
+				span: parser.span_since(lhs_span),
+			};
+			let expr = parser.push(expr);
+			Ok(Expr::Idiom(expr))
+		}
+		_ => Err(parser.unexpected("`*`, `..` or an identifier")),
+	}
 }
 
 async fn parse_dot_postfix(
@@ -417,10 +548,7 @@ async fn parse_dot_postfix(
 	lhs: Expr,
 	lhs_span: Span,
 ) -> ParseResult<Option<Expr>> {
-	let Some(dot_token) = parser.next()? else {
-		unreachable!()
-	};
-
+	let dot_token = parser.expect(T![.])?;
 	let peek = parser.peek_expect("*, ?, .@, {, or an identifier")?;
 
 	fn reject_seperated(
@@ -432,15 +560,19 @@ async fn parse_dot_postfix(
 			return Ok(());
 		};
 
-		Err(parser.with_error(|parser|{
-			Level::Error.title("Unexpected token `.` expected token to be followed by `*`, `.`, `?`, `{`, `@` or an identifier")
-				.snippet(parser.snippet().annotate(AnnotationKind::Primary.span(dot_span))).to_diagnostic()
+		Err(parser.with_error(|parser| {
+			Level::Error
+				.title("Unexpected token `.` expected `.*`, `..`, `.?`, `.{`, `.@`")
+				.snippet(parser.snippet().annotate(AnnotationKind::Primary.span(dot_span)))
+				.to_diagnostic()
 		}))
 	}
 
 	match peek.token {
+		// TODO: Make these token kinds?
 		T![*] => {
 			reject_seperated(parser, dot_token.span, peek.joined)?;
+			let _ = parser.next();
 
 			let left = parser.push(lhs);
 			let idiom = parser.push(IdiomExpr {
@@ -455,6 +587,7 @@ async fn parse_dot_postfix(
 		}
 		T![?] => {
 			reject_seperated(parser, dot_token.span, peek.joined)?;
+			let _ = parser.next();
 
 			let left = parser.push(lhs);
 			let idiom = parser.push(IdiomExpr {
@@ -469,6 +602,7 @@ async fn parse_dot_postfix(
 		}
 		T![@] => {
 			reject_seperated(parser, dot_token.span, peek.joined)?;
+			let _ = parser.next();
 
 			let left = parser.push(lhs);
 			let idiom = parser.push(IdiomExpr {
@@ -484,7 +618,7 @@ async fn parse_dot_postfix(
 		BaseTokenKind::OpenBrace => {
 			reject_seperated(parser, dot_token.span, peek.joined)?;
 
-			parse_dot_brace_postfix(parser, lhs, lhs_span).await.map(Some)
+			parse_dot_brace_postfix(parser, lhs, lhs_span, dot_token.span).await.map(Some)
 		}
 		x if x.is_identifier() => {
 			let _ = parser.next();

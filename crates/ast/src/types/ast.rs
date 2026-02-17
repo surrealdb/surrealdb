@@ -1,12 +1,8 @@
-use std::{
-	any::Any,
-	ops::{Index, IndexMut},
-};
+use std::any::Any;
+use std::ops::{Index, IndexMut};
 
-use crate::{
-	Node, NodeId, NodeList, NodeListId,
-	types::{NodeLibrary, UniqueNode},
-};
+use crate::types::{NodeLibrary, UniqueNode};
+use crate::{Node, NodeId, NodeList, NodeListId};
 
 #[derive(Debug)]
 pub struct Ast<L> {
@@ -40,11 +36,11 @@ impl<L: NodeLibrary> Ast<L> {
 			next: None,
 		}));
 
-		if tail.is_none() {
-			*tail = Some(list_entry)
+		if head.is_none() {
+			*head = Some(list_entry)
 		}
 
-		if let Some(prev) = head.replace(list_entry) {
+		if let Some(prev) = tail.replace(list_entry) {
 			self[prev].next = Some(list_entry);
 		}
 	}

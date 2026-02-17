@@ -1,9 +1,9 @@
-use common::{id, span::Span};
-use std::{
-	any::Any,
-	hash::Hash,
-	ops::{Deref, DerefMut},
-};
+use std::any::Any;
+use std::hash::Hash;
+use std::ops::{Deref, DerefMut};
+
+use common::id;
+use common::span::Span;
 
 mod ast;
 mod collections;
@@ -40,9 +40,6 @@ pub trait NodeSet<T: UniqueNode>: NodeCollection<T> {
 pub trait Node: Any {}
 /// Trait for types which can be part of the ast in a hash-consed set.
 pub trait UniqueNode: Any + Eq + Hash {}
-
-impl UniqueNode for String {}
-impl Node for f64 {}
 
 #[derive(Debug)]
 pub struct Spanned<T> {

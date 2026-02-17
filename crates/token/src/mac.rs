@@ -805,9 +805,6 @@ macro_rules! T {
 	(FLOAT) => {
 		$crate::BaseTokenKind::KwFloat
 	};
-	(fn) => {
-		$crate::BaseTokenKind::KwFn
-	};
 	(INT) => {
 		$crate::BaseTokenKind::KwInt
 	};
