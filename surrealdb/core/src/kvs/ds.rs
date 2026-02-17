@@ -13,7 +13,7 @@ use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use reblessive::TreeStack;
-use surrealdb_types::{SurrealValue, object};
+use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
 use tokio::sync::Notify;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
@@ -55,8 +55,6 @@ use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevel
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
-use crate::idx::IndexKeyBase;
-use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::ic::IndexCompactionKey;
@@ -72,7 +70,6 @@ use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{KVValue, LockType, TransactionType};
-use crate::rpc::DbResultError;
 use crate::sql::Ast;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
@@ -358,14 +355,14 @@ impl TransactionBuilderFactory for CommunityComposer {
 		// Initiate the desired datastore
 		match (flavour, path) {
 			// Initiate an in-memory datastore
-			(flavour @ "memory", _) => {
+			(flavour @ "memory", path) => {
 				#[cfg(feature = "kv-mem")]
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
-					// Parse SurrealMX configuration from query parameters
-					let config =
-						super::config::MemoryConfig::from_params(&params).map_err(Error::Kvs)?;
+					// Parse SurrealMX configuration from URL path and query parameters
+					let config = super::config::MemoryConfig::from_path_and_params(&path, &params)
+						.map_err(Error::Kvs)?;
 					// Initialise the storage engine
 					let v = super::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem)?;
 					info!(target: TARGET, "Started kvs store in {flavour}");
@@ -1411,7 +1408,7 @@ impl Datastore {
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running index compaction process");
 			// Create a new transaction
-			let txn = self.transaction(Write, Optimistic).await?;
+			let txn = Arc::new(self.transaction(Write, Optimistic).await?);
 			// Collect every item in the queue
 			let (beg, end) = IndexCompactionKey::range();
 			let range = beg..end;
@@ -1433,25 +1430,35 @@ impl Datastore {
 				{
 					Some(ix) if !ix.prepare_remove => match &ix.index {
 						Index::FullText(p) => {
-							let ft = catch!(
+							catch!(
 								txn,
-								FullTextIndex::new(
+								IndexOperation::index_fulltext_compaction(
 									&self.index_stores,
+									&ic,
 									&txn,
-									IndexKeyBase::new(
-										ic.ns,
-										ic.db,
-										ix.table_name.clone(),
-										ix.index_id
-									),
-									p,
+									p
 								)
 								.await
 							);
-							catch!(txn, ft.compaction(&txn).await);
 						}
 						Index::Count(_) => {
 							catch!(txn, IndexOperation::index_count_compaction(&ic, &txn).await);
+						}
+						Index::Hnsw(p) => {
+							let mut ctx = self.setup_ctx()?;
+							ctx.set_transaction(txn.clone());
+							let ctx = ctx.freeze();
+							catch!(
+								txn,
+								IndexOperation::index_hnsw_compaction(
+									&ctx,
+									&self.index_stores,
+									&ic,
+									&ix,
+									p
+								)
+								.await
+							);
 						}
 						_ => {
 							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
@@ -1582,10 +1589,10 @@ impl Datastore {
 		txt: &str,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)
-			.map_err(|e| DbResultError::ParseError(e.to_string()))?;
+			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}
@@ -1598,10 +1605,10 @@ impl Datastore {
 		sess: &Session,
 		vars: Option<PublicVariables>,
 		tx: Arc<Transaction>,
-	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)
-			.map_err(|e| DbResultError::ParseError(e.to_string()))?;
+			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST with the transaction
 		self.process_with_transaction(ast, sess, vars, tx).await
 	}
@@ -1614,36 +1621,40 @@ impl Datastore {
 		sess: &Session,
 		vars: Option<PublicVariables>,
 		tx: Arc<Transaction>,
-	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Check if the session has expired
 		if sess.expired() {
-			return Err(DbResultError::InvalidAuth("The session has expired".to_string()));
+			return Err(TypesError::not_allowed(
+				"The session has expired".to_string(),
+				AuthError::SessionExpired,
+			));
 		}
 
 		// Check if anonymous actors can execute queries when auth is enabled
 		if let Err(e) = self.check_anon(sess) {
-			return Err(DbResultError::InvalidAuth(format!("Anonymous access not allowed: {}", e)));
+			return Err(TypesError::not_allowed(
+				format!("Anonymous access not allowed: {e}"),
+				AuthError::NotAllowed {
+					actor: "anonymous".to_owned(),
+					action: "process".to_owned(),
+					resource: "query".to_owned(),
+				},
+			));
 		}
 
 		// Create a new query options
 		let opt = self.setup_options(sess);
 
 		// Create a default context
-		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
-			Some(Error::ExpiredSession) => {
-				DbResultError::InvalidAuth("The session has expired".to_string())
-			}
-			_ => DbResultError::InternalError(e.to_string()),
+		let mut ctx = self.setup_ctx().map_err(|e| {
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})?;
 
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into()).map_err(|e| match e {
-				Error::InvalidParam {
-					..
-				} => DbResultError::InvalidParams("Invalid query variables".to_string()),
-				_ => DbResultError::InternalError(e.to_string()),
-			})?;
+			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
 		}
 
 		// Set the transaction in the context
@@ -1651,12 +1662,9 @@ impl Datastore {
 
 		// Process all statements with the transaction
 		Executor::execute_plan_with_transaction(ctx.freeze(), opt, ast.into()).await.map_err(|e| {
-			match e.downcast_ref::<Error>() {
-				Some(Error::ExpiredSession) => {
-					DbResultError::InvalidAuth("The session has expired".to_string())
-				}
-				_ => DbResultError::InternalError(e.to_string()),
-			}
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})
 	}
 
@@ -1772,7 +1780,7 @@ impl Datastore {
 		ast: Ast,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		//TODO: Insert planner here.
 		self.process_plan(ast.into(), sess, vars).await
 	}
@@ -1782,256 +1790,51 @@ impl Datastore {
 		plan: LogicalPlan,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-	) -> Result<Vec<QueryResult>, DbResultError> {
+	) -> Result<Vec<QueryResult>, TypesError> {
 		// Check if the session has expired
 		if sess.expired() {
-			return Err(DbResultError::InvalidAuth("The session has expired".to_string()));
+			return Err(TypesError::not_allowed(
+				"The session has expired".to_string(),
+				AuthError::SessionExpired,
+			));
 		}
 
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if let Err(e) = self.check_anon(sess) {
-			return Err(DbResultError::InvalidAuth(format!("Anonymous access not allowed: {}", e)));
+			return Err(TypesError::not_allowed(
+				format!("Anonymous access not allowed: {e}"),
+				AuthError::NotAllowed {
+					actor: "anonymous".to_owned(),
+					action: "process".to_owned(),
+					resource: "query".to_owned(),
+				},
+			));
 		}
 
 		// Create a new query options
 		let opt = self.setup_options(sess);
 
 		// Create a default context
-		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
-			Some(Error::ExpiredSession) => {
-				DbResultError::InvalidAuth("The session has expired".to_string())
-			}
-			Some(Error::InvalidAuth) => {
-				DbResultError::InvalidAuth("Authentication failed".to_string())
-			}
-			Some(Error::UnexpectedAuth) => {
-				DbResultError::InvalidAuth("Unexpected authentication error".to_string())
-			}
-			Some(Error::MissingUserOrPass) => {
-				DbResultError::InvalidAuth("Missing username or password".to_string())
-			}
-			Some(Error::InvalidPass) => DbResultError::InvalidAuth("Invalid password".to_string()),
-			Some(Error::NoSigninTarget) => {
-				DbResultError::InvalidAuth("No signin target specified".to_string())
-			}
-			Some(Error::TokenMakingFailed) => {
-				DbResultError::InvalidAuth("Failed to create authentication token".to_string())
-			}
-			Some(Error::IamError(iam_err)) => {
-				DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
-			}
-			Some(Error::Kvs(kvs_err)) => {
-				DbResultError::InternalError(format!("Key-value store error: {}", kvs_err))
-			}
-			Some(Error::InvalidQuery(_)) => {
-				DbResultError::ParseError("Invalid query syntax".to_string())
-			}
-			Some(Error::Internal(msg)) => DbResultError::InternalError(msg.clone()),
-			Some(Error::Unimplemented(msg)) => {
-				DbResultError::InternalError(format!("Unimplemented: {}", msg))
-			}
-			Some(Error::Io(e)) => DbResultError::InternalError(format!("I/O error: {}", e)),
-			Some(Error::Http(msg)) => DbResultError::InternalError(format!("HTTP error: {}", msg)),
-			Some(Error::Channel(msg)) => {
-				DbResultError::InternalError(format!("Channel error: {}", msg))
-			}
-			Some(Error::QueryTimedout(msg)) => DbResultError::QueryTimedout(format!("{}", msg)),
-			Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
-			Some(Error::QueryNotExecuted {
-				message,
-			}) => DbResultError::QueryNotExecuted(format!("{message} - plan: {plan:?}")),
-			Some(Error::ScriptingNotAllowed) => {
-				DbResultError::MethodNotAllowed("Scripting functions are not allowed".to_string())
-			}
-			Some(Error::FunctionNotAllowed(func)) => {
-				DbResultError::MethodNotAllowed(format!("Function '{}' is not allowed", func))
-			}
-			Some(Error::NetTargetNotAllowed(target)) => DbResultError::MethodNotAllowed(format!(
-				"Network target '{}' is not allowed",
-				target
-			)),
-			Some(Error::Thrown(msg)) => DbResultError::Thrown(msg.clone()),
-			_ => DbResultError::InternalError(e.to_string()),
+		let mut ctx = self.setup_ctx().map_err(|e| {
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})?;
 
 		// Start an execution context
-		ctx.attach_session(sess).map_err(|e| match e {
-			Error::ExpiredSession => {
-				DbResultError::InvalidAuth("The session has expired".to_string())
-			}
-			Error::InvalidAuth => DbResultError::InvalidAuth("Authentication failed".to_string()),
-			Error::UnexpectedAuth => {
-				DbResultError::InvalidAuth("Unexpected authentication error".to_string())
-			}
-			Error::IamError(iam_err) => {
-				DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
-			}
-			_ => DbResultError::InternalError(e.to_string()),
-		})?;
+		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
 
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into()).map_err(|e| match e {
-				Error::InvalidParam {
-					..
-				} => DbResultError::InvalidParams("Invalid query variables".to_string()),
-				Error::Internal(msg) => DbResultError::InternalError(msg),
-				_ => DbResultError::InternalError(e.to_string()),
-			})?;
+			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
 		}
 
 		// Process all statements
 		Executor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
-			match e.downcast_ref::<Error>() {
-				Some(Error::ExpiredSession) => {
-					DbResultError::InvalidAuth("The session has expired".to_string())
-				}
-				Some(Error::InvalidAuth) => {
-					DbResultError::InvalidAuth("Authentication failed".to_string())
-				}
-				Some(Error::UnexpectedAuth) => {
-					DbResultError::InvalidAuth("Unexpected authentication error".to_string())
-				}
-				Some(Error::MissingUserOrPass) => {
-					DbResultError::InvalidAuth("Missing username or password".to_string())
-				}
-				Some(Error::InvalidPass) => {
-					DbResultError::InvalidAuth("Invalid password".to_string())
-				}
-				Some(Error::NoSigninTarget) => {
-					DbResultError::InvalidAuth("No signin target specified".to_string())
-				}
-				Some(Error::TokenMakingFailed) => {
-					DbResultError::InvalidAuth("Failed to create authentication token".to_string())
-				}
-				Some(Error::IamError(iam_err)) => {
-					DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
-				}
-				Some(Error::Kvs(kvs_err)) => {
-					DbResultError::InternalError(format!("Key-value store error: {}", kvs_err))
-				}
-				Some(Error::NsEmpty) => {
-					DbResultError::InvalidParams("No namespace specified".to_string())
-				}
-				Some(Error::DbEmpty) => {
-					DbResultError::InvalidParams("No database specified".to_string())
-				}
-				Some(Error::InvalidQuery(_)) => {
-					DbResultError::ParseError("Invalid query syntax".to_string())
-				}
-				Some(Error::InvalidContent {
-					..
-				}) => DbResultError::InvalidParams("Invalid content clause".to_string()),
-				Some(Error::InvalidMerge {
-					..
-				}) => DbResultError::InvalidParams("Invalid merge clause".to_string()),
-				Some(Error::InvalidPatch(_)) => {
-					DbResultError::InvalidParams("Invalid patch operation".to_string())
-				}
-				Some(Error::Internal(msg)) => DbResultError::InternalError(msg.clone()),
-				Some(Error::Unimplemented(msg)) => {
-					DbResultError::InternalError(format!("Unimplemented: {}", msg))
-				}
-				Some(Error::Io(e)) => DbResultError::InternalError(format!("I/O error: {}", e)),
-				Some(Error::Http(msg)) => {
-					DbResultError::InternalError(format!("HTTP error: {}", msg))
-				}
-				Some(Error::Channel(msg)) => {
-					DbResultError::InternalError(format!("Channel error: {}", msg))
-				}
-				Some(Error::QueryTimedout(timeout)) => {
-					DbResultError::QueryTimedout(format!("Timed out: {}", timeout))
-				}
-				Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
-				Some(Error::QueryNotExecuted {
-					message,
-				}) => DbResultError::QueryNotExecuted(message.clone()),
-				Some(Error::ScriptingNotAllowed) => DbResultError::MethodNotAllowed(
-					"Scripting functions are not allowed".to_string(),
-				),
-				Some(Error::FunctionNotAllowed(func)) => {
-					DbResultError::MethodNotAllowed(format!("Function '{}' is not allowed", func))
-				}
-				Some(Error::NetTargetNotAllowed(target)) => DbResultError::MethodNotAllowed(
-					format!("Network target '{}' is not allowed", target),
-				),
-				Some(Error::Thrown(msg)) => DbResultError::Thrown(msg.clone()),
-				Some(Error::Coerce(_)) => {
-					DbResultError::InvalidParams("Type coercion error".to_string())
-				}
-				Some(Error::Cast(_)) => {
-					DbResultError::InvalidParams("Type casting error".to_string())
-				}
-				Some(Error::TryAdd(_, _))
-				| Some(Error::TrySub(_, _))
-				| Some(Error::TryMul(_, _))
-				| Some(Error::TryDiv(_, _))
-				| Some(Error::TryRem(_, _))
-				| Some(Error::TryPow(_, _))
-				| Some(Error::TryNeg(_)) => {
-					DbResultError::InvalidParams("Arithmetic operation error".to_string())
-				}
-				Some(Error::TryFrom(_, _)) => {
-					DbResultError::InvalidParams("Type conversion error".to_string())
-				}
-				Some(Error::Unencodable) => {
-					DbResultError::SerializationError("Value cannot be serialized".to_string())
-				}
-				Some(Error::Storekey(_)) => {
-					DbResultError::DeserializationError("Key decoding error".to_string())
-				}
-				Some(Error::Revision(_)) => {
-					DbResultError::DeserializationError("Versioned data error".to_string())
-				}
-				Some(Error::CorruptedIndex(_)) => {
-					DbResultError::InternalError("Index corruption detected".to_string())
-				}
-				Some(Error::NoIndexFoundForMatch {
-					..
-				}) => DbResultError::InternalError("No suitable index found".to_string()),
-				Some(Error::AnalyzerError(msg)) => {
-					DbResultError::InternalError(format!("Analyzer error: {}", msg))
-				}
-				Some(Error::HighlightError(msg)) => {
-					DbResultError::InternalError(format!("Highlight error: {}", msg))
-				}
-				Some(Error::FstError(_)) => DbResultError::InternalError("FST error".to_string()),
-				Some(Error::Utf8Error(_)) => {
-					DbResultError::DeserializationError("UTF-8 decoding error".to_string())
-				}
-				Some(Error::ObsError(_)) => {
-					DbResultError::InternalError("Object store error".to_string())
-				}
-				Some(Error::DuplicatedMatchRef {
-					..
-				}) => DbResultError::InvalidParams("Duplicated match reference".to_string()),
-				Some(Error::TimestampOverflow(msg)) => {
-					DbResultError::InternalError(format!("Timestamp overflow: {}", msg))
-				}
-				Some(Error::NoRecordFound) => {
-					DbResultError::InternalError("No record found".to_string())
-				}
-				Some(Error::InvalidSignup) => {
-					DbResultError::InvalidAuth("Signup failed".to_string())
-				}
-				Some(Error::ClAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Cluster node already exists".to_string()),
-				Some(Error::ApAlreadyExists {
-					..
-				}) => DbResultError::InternalError("API already exists".to_string()),
-				Some(Error::AzAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Analyzer already exists".to_string()),
-				Some(Error::BuAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Bucket already exists".to_string()),
-				Some(Error::DbAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Database already exists".to_string()),
-				_ => DbResultError::InternalError(e.to_string()),
-			}
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})
 	}
 
@@ -2244,14 +2047,14 @@ impl Datastore {
 		session: &mut Session,
 		namespace: Option<String>,
 		database: Option<String>,
-	) -> std::result::Result<QueryResult, DbResultError> {
+	) -> std::result::Result<QueryResult, TypesError> {
 		let new_tx = || async {
 			self.transaction(Write, Optimistic)
 				.await
-				.map_err(|err| DbResultError::InternalError(err.to_string()))
+				.map_err(|err| TypesError::internal(err.to_string()))
 		};
 		let commit_tx = |txn: Transaction| async move {
-			txn.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))
+			txn.commit().await.map_err(|err| TypesError::internal(err.to_string()))
 		};
 
 		let query_result = QueryResultBuilder::started_now();
@@ -2260,7 +2063,7 @@ impl Datastore {
 				let tx = new_tx().await?;
 				tx.ensure_ns_db(ctx, &ns, &db)
 					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+					.map_err(|err| TypesError::internal(err.to_string()))?;
 				commit_tx(tx).await?;
 				session.ns = Some(ns);
 				session.db = Some(db);
@@ -2269,20 +2072,21 @@ impl Datastore {
 				let tx = new_tx().await?;
 				tx.get_or_add_ns(ctx, &ns)
 					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+					.map_err(|err| TypesError::internal(err.to_string()))?;
 				commit_tx(tx).await?;
 				session.ns = Some(ns);
 			}
 			(None, Some(db)) => {
 				let Some(ns) = session.ns.clone() else {
-					return Err(DbResultError::InvalidRequest(
+					return Err(TypesError::validation(
 						"Cannot use database without namespace".to_string(),
+						None,
 					));
 				};
 				let tx = new_tx().await?;
 				tx.ensure_ns_db(ctx, &ns, &db)
 					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+					.map_err(|err| TypesError::internal(err.to_string()))?;
 				commit_tx(tx).await?;
 				session.db = Some(db);
 			}

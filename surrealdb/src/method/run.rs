@@ -89,10 +89,13 @@ impl into_fn::Sealed for String {
 		match self.split_once('<') {
 			Some((name, rest)) => match rest.strip_suffix('>') {
 				Some(version) => Ok((name.to_owned(), Some(version.to_owned()))),
-				None => Err(crate::error::Api::InvalidParams(format!(
-					"Invalid function syntax '{}': function version is missing a closing '>'",
-					self
-				))),
+				None => Err(crate::Error::validation(
+					format!(
+						"Invalid function syntax '{}': function version is missing a closing '>'",
+						self
+					),
+					Some(crate::types::ValidationError::InvalidParams),
+				)),
 			},
 			None => Ok((self, None)),
 		}
@@ -105,10 +108,13 @@ impl into_fn::Sealed for &str {
 		match self.split_once('<') {
 			Some((name, rest)) => match rest.strip_suffix('>') {
 				Some(version) => Ok((name.to_owned(), Some(version.to_owned()))),
-				None => Err(crate::error::Api::InvalidParams(format!(
-					"Invalid function syntax '{}': function version is missing a closing '>'",
-					self
-				))),
+				None => Err(crate::Error::validation(
+					format!(
+						"Invalid function syntax '{}': function version is missing a closing '>'",
+						self
+					),
+					Some(crate::types::ValidationError::InvalidParams),
+				)),
 			},
 			None => Ok((self.to_owned(), None)),
 		}

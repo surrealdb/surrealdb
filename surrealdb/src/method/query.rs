@@ -9,17 +9,17 @@ use futures::future::Either;
 use futures::stream::SelectAll;
 use indexmap::IndexMap;
 use surrealdb_core::dbs::QueryType;
-use surrealdb_core::rpc::{DbResultError, DbResultStats};
+use surrealdb_core::rpc::DbResultStats;
+use surrealdb_types::Error as TypesError;
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
 use crate::conn::Command;
-use crate::err::Error;
 use crate::method::live::Stream;
 use crate::method::{BoxFuture, OnceLockExt, Stats, WithStats};
 use crate::notification::Notification;
 use crate::types::{SurrealValue, Value, Variables};
-use crate::{Connection, Result, Surreal, opt};
+use crate::{Connection, Error, Result, Surreal, opt};
 
 /// A query future
 #[derive(Debug)]
@@ -54,7 +54,7 @@ impl<T: SurrealValue> IntoVariables for T {
 				let mut vars = Variables::new();
 				for v in arr.chunks(2) {
 					let key = v[0].clone().into_string().map_err(|_| {
-						Error::InvalidParams("Variable key must be a string".to_string())
+						Error::validation("Variable key must be a string".to_string(), None)
 					})?;
 					let value = v[1].clone();
 					vars.insert(key, value);
@@ -62,7 +62,7 @@ impl<T: SurrealValue> IntoVariables for T {
 				Ok(vars)
 			}
 			unexpected => {
-				Err(Error::InvalidParams(format!("Invalid variables type: {unexpected:?}")))
+				Err(Error::validation(format!("Invalid variables type: {unexpected:?}"), None))
 			}
 		}
 	}
@@ -126,7 +126,9 @@ where
 						indexed_results.results.insert(index, (stats, result.result));
 					}
 					QueryType::Live => {
-						let live_query_id = result.result?.into_uuid()?;
+						let value = result.result?;
+						let live_query_id =
+							value.into_uuid().map_err(|e| Error::internal(e.to_string()))?;
 						let live_stream = crate::method::live::register(
 							router,
 							live_query_id.into(),
@@ -235,7 +237,7 @@ where
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
 pub struct IndexedResults {
-	pub(crate) results: IndexMap<usize, (DbResultStats, std::result::Result<Value, DbResultError>)>,
+	pub(crate) results: IndexMap<usize, (DbResultStats, std::result::Result<Value, TypesError>)>,
 	pub(crate) live_queries: IndexMap<usize, Result<Stream<Value>>>,
 }
 
@@ -412,7 +414,7 @@ impl IndexedResults {
 		let mut errors = HashMap::with_capacity(keys.len());
 		for key in keys {
 			if let Some((_, Err(error))) = self.results.swap_remove(&key) {
-				errors.insert(key, error.into());
+				errors.insert(key, error);
 			}
 		}
 		errors
@@ -444,7 +446,7 @@ impl IndexedResults {
 		if let Some(key) = first_error
 			&& let Some((_, Err(error))) = self.results.swap_remove(&key)
 		{
-			return Err(error.into());
+			return Err(error);
 		}
 		Ok(self)
 	}
@@ -572,7 +574,7 @@ impl WithStats<IndexedResults> {
 				let stats = Stats {
 					execution_time: db_stats.execution_time,
 				};
-				errors.insert(key, (stats, error.into()));
+				errors.insert(key, (stats, error));
 			}
 		}
 		errors
@@ -639,8 +641,8 @@ mod tests {
 	}
 
 	fn to_map(
-		vec: Vec<std::result::Result<Value, DbResultError>>,
-	) -> IndexMap<usize, (DbResultStats, std::result::Result<Value, DbResultError>)> {
+		vec: Vec<std::result::Result<Value, TypesError>>,
+	) -> IndexMap<usize, (DbResultStats, std::result::Result<Value, TypesError>)> {
 		vec.into_iter()
 			.map(|result| match result {
 				Ok(result) => {
@@ -674,7 +676,7 @@ mod tests {
 	#[test]
 	fn take_from_an_errored_query() {
 		let mut response = IndexedResults {
-			results: to_map(vec![Err(DbResultError::InternalError(
+			results: to_map(vec![Err(TypesError::internal(
 				"Unimportant error message".to_string(),
 			))]),
 			..IndexedResults::new()
@@ -908,16 +910,11 @@ mod tests {
 		let Err(e) = response.take::<Option<bool>>(0) else {
 			panic!("silently dropping records not allowed");
 		};
-		let Error::LossyTake(boxed) = e else {
-			panic!("silently dropping records not allowed");
-		};
-		let IndexedResults {
-			results: mut map,
-			..
-		} = *boxed;
-
-		let records = map.swap_remove(&0).unwrap().1.unwrap();
-		assert_eq!(records, Value::from_vec(vec![Value::from_bool(true), Value::from_bool(false)]));
+		assert!(
+			e.message().contains("Tried to take only a single result"),
+			"expected lossy take error, got: {}",
+			e.message()
+		);
 	}
 
 	#[test]
@@ -926,14 +923,14 @@ mod tests {
 			Ok(Value::from_int(0)),
 			Ok(Value::from_int(1)),
 			Ok(Value::from_int(2)),
-			Err(DbResultError::InternalError("test".to_string())),
+			Err(TypesError::internal("test".to_string())),
 			Ok(Value::from_int(3)),
 			Ok(Value::from_int(4)),
 			Ok(Value::from_int(5)),
-			Err(DbResultError::InternalError("test".to_string())),
+			Err(TypesError::internal("test".to_string())),
 			Ok(Value::from_int(6)),
 			Ok(Value::from_int(7)),
-			Err(DbResultError::InternalError("test".to_string())),
+			Err(TypesError::internal("test".to_string())),
 		];
 		let response = IndexedResults {
 			results: to_map(response),
@@ -941,7 +938,7 @@ mod tests {
 		};
 		let err = response.check().unwrap_err();
 
-		assert!(matches!(err, Error::InternalError(msg) if msg == "test"));
+		assert_eq!(err.message(), "test");
 	}
 
 	#[test]
@@ -950,14 +947,14 @@ mod tests {
 			Ok(Value::from_int(0)),
 			Ok(Value::from_int(1)),
 			Ok(Value::from_int(2)),
-			Err(DbResultError::InternalError("test".to_string())),
+			Err(TypesError::internal("test".to_string())),
 			Ok(Value::from_int(3)),
 			Ok(Value::from_int(4)),
 			Ok(Value::from_int(5)),
-			Err(DbResultError::InternalError("test".to_string())),
+			Err(TypesError::internal("test".to_string())),
 			Ok(Value::from_int(6)),
 			Ok(Value::from_int(7)),
-			Err(DbResultError::InternalError("test".to_string())),
+			Err(TypesError::internal("test".to_string())),
 		];
 		let mut response = IndexedResults {
 			results: to_map(response),
@@ -966,9 +963,9 @@ mod tests {
 		let errors = response.take_errors();
 		assert_eq!(response.num_statements(), 8);
 		assert_eq!(errors.len(), 3);
-		assert!(matches!(&errors[&10], Error::InternalError(msg) if msg == "test"));
-		assert!(matches!(&errors[&7], Error::InternalError(msg) if msg == "test"));
-		assert!(matches!(&errors[&3], Error::InternalError(msg) if msg == "test"));
+		assert_eq!(errors[&10].message(), "test");
+		assert_eq!(errors[&7].message(), "test");
+		assert_eq!(errors[&3].message(), "test");
 		let Some(value): Option<i32> = response.take(2).unwrap() else {
 			panic!("statement not found");
 		};

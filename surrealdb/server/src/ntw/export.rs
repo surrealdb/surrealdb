@@ -60,7 +60,8 @@ async fn post_handler(
 		}
 	};
 
-	let cfg = export::Config::from_value(val).map_err(ResponseError)?;
+	let cfg =
+		export::Config::from_value(val).map_err(|e| ResponseError(anyhow::anyhow!("{}", e)))?;
 	handle_inner(state, session, cfg).await
 }
 

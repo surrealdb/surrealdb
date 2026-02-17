@@ -1329,22 +1329,22 @@ mod tests {
 	#[case::datetime(
 		PublicValue::Datetime(PublicDatetime::MIN_UTC),
 		json!("-262143-01-01T00:00:00Z"),
-		PublicValue::String("-262143-01-01T00:00:00Z".into()),
+		PublicValue::Datetime(PublicDatetime::MIN_UTC),
 	)]
 	#[case::datetime(
 		PublicValue::Datetime(PublicDatetime::MAX_UTC),
 		json!("+262142-12-31T23:59:59.999999999Z"),
-		PublicValue::String("+262142-12-31T23:59:59.999999999Z".into()),
+		PublicValue::Datetime(PublicDatetime::MAX_UTC),
 	)]
 	#[case::uuid(
 		PublicValue::Uuid(PublicUuid::nil()),
 		json!("00000000-0000-0000-0000-000000000000"),
-		PublicValue::String("00000000-0000-0000-0000-000000000000".into()),
+		PublicValue::Uuid(PublicUuid::nil()),
 	)]
 	#[case::uuid(
 		PublicValue::Uuid(PublicUuid::max()),
 		json!("ffffffff-ffff-ffff-ffff-ffffffffffff"),
-		PublicValue::String("ffffffff-ffff-ffff-ffff-ffffffffffff".into()),
+		PublicValue::Uuid(PublicUuid::max()),
 	)]
 	#[case::bytes(
 		PublicValue::Bytes(PublicBytes::default()),

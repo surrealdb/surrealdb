@@ -67,9 +67,9 @@ impl CreateInfo {
 		let ds = match self.backend {
 			Backend::Memory => {
 				let ds = if versioned {
-					Datastore::new(&format!("memory?versioned=true")).await?
+					Datastore::new("mem://?versioned=true").await?
 				} else {
-					Datastore::new("memory").await?
+					Datastore::new("mem://").await?
 				};
 				ds
 			}

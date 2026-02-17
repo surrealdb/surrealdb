@@ -45,6 +45,7 @@ mod backup;
 mod backup_version;
 mod basic;
 mod live;
+mod run;
 mod serialisation;
 mod session_isolation;
 mod version;
@@ -135,7 +136,7 @@ mod any {
 		(permit, db)
 	}
 
-	include_tests!(new_db => basic, serialisation, backup, session_isolation);
+	include_tests!(new_db => basic, serialisation, backup, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -174,7 +175,7 @@ mod http {
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, backup, session_isolation);
+	include_tests!(new_db => basic, serialisation, backup, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -346,7 +347,7 @@ mod ws {
 
 			let error_str = error.to_string();
 
-			assert!(error_str.starts_with("Internal error: Message too long: "), "{error_str}");
+			assert!(error_str.starts_with("Message too long: "), "{error_str}");
 		}
 	}
 
@@ -387,7 +388,7 @@ mod ws {
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, live, session_isolation);
+	include_tests!(new_db => basic, serialisation, live, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -457,7 +458,7 @@ mod mem {
 			.await
 			.unwrap_err()
 			.to_string(),
-			"Thrown error: There was a problem with authentication",
+			"There was a problem with authentication",
 		);
 	}
 
@@ -510,7 +511,7 @@ mod mem {
 		db.query(surql).await.unwrap().check().unwrap();
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -556,7 +557,7 @@ mod rocksdb {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -604,7 +605,7 @@ mod surrealkv {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -638,7 +639,7 @@ mod tikv {
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -674,7 +675,7 @@ mod mem_versioned {
 		surrealdb::engine::any::connect("memory?versioned=true").await.unwrap();
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, version, backup_version);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run, version, backup_version);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -724,5 +725,5 @@ mod surrealkv_versioned {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, version, backup_version);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run, version, backup_version);
 }

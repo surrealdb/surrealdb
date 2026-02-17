@@ -18,17 +18,17 @@ use async_channel::Sender;
 use futures::{Sink, SinkExt};
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
 use surrealdb_core::iam::token::Token;
-use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError};
+use surrealdb_core::rpc::{DbResponse, DbResult};
+use surrealdb_types::{AuthError, Error as TypesError, NotAllowedError};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::conn::{Command, RequestData, Route};
-use crate::engine::SessionError;
 use crate::engine::remote::RouterRequest;
-use crate::err::Error;
+use crate::engine::{SessionError, session_error_to_error};
 use crate::opt::IntoEndpoint;
 use crate::types::{Array, HashMap, Notification, Number, SurrealValue, Value};
-use crate::{Connect, Surreal};
+use crate::{Connect, Error, Surreal};
 
 pub(crate) const PATH: &str = "rpc";
 const PING_INTERVAL: Duration = Duration::from_secs(5);
@@ -42,7 +42,7 @@ struct PendingRequest {
 	/// The command to register for replay on success
 	command: Option<Command>,
 	/// The channel to send the result of the request into.
-	response_channel: Sender<Result<Vec<QueryResult>, DbResultError>>,
+	response_channel: Sender<Result<Vec<QueryResult>, TypesError>>,
 }
 
 /// Per-session state for WebSocket connections
@@ -181,14 +181,14 @@ where
 	let session_state = match sessions.get(&session_id) {
 		Some(Ok(state)) => state,
 		Some(Err(error)) => {
-			if response.send(Err(Error::from(error).into())).await.is_err() {
+			if response.send(Err(session_error_to_error(error))).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			return HandleResult::Ok;
 		}
 		None => {
-			let error = Error::from(SessionError::NotFound(session_id));
-			if response.send(Err(error.into())).await.is_err() {
+			let error = session_error_to_error(SessionError::NotFound(session_id));
+			if response.send(Err(error)).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			return HandleResult::Ok;
@@ -200,8 +200,8 @@ where
 
 	// Check for duplicate request IDs
 	if session_state.pending_requests.contains_key(&id) {
-		let error = Error::DuplicateRequestId(id);
-		if response.send(Err(error.into())).await.is_err() {
+		let error = Error::internal(format!("Duplicate request ID: {id}"));
+		if response.send(Err(error)).await.is_err() {
 			trace!("Receiver dropped");
 		}
 		return HandleResult::Ok;
@@ -230,7 +230,13 @@ where
 	// Serialize the request
 	let Some(router_request) = command.clone().into_router_request(Some(id), Some(session_id))
 	else {
-		response.send(Err(Error::BackupsNotSupported.into())).await.ok();
+		response
+			.send(Err(Error::internal(
+				"The protocol or storage engine does not support backups on this architecture"
+					.to_string(),
+			)))
+			.await
+			.ok();
 		return HandleResult::Ok;
 	};
 
@@ -241,7 +247,11 @@ where
 		&& let Some(binary) = message.as_binary()
 		&& binary.len() > max_size
 	{
-		if response.send(Err(Error::MessageTooLong(binary.len()).into())).await.is_err() {
+		if response
+			.send(Err(Error::internal(format!("Message too long: {}", binary.len()))))
+			.await
+			.is_err()
+		{
 			trace!("Receiver dropped");
 		}
 		return HandleResult::Ok;
@@ -263,8 +273,8 @@ where
 			);
 		}
 		Err(error) => {
-			let err = Error::Ws(format!("{:?}", error));
-			if response.send(Err(err.into())).await.is_err() {
+			let err = Error::internal(format!("WebSocket error: {:?}", error));
+			if response.send(Err(err)).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			return HandleResult::Disconnected;
@@ -306,7 +316,9 @@ where
 
 	match DbResponse::from_bytes(binary) {
 		Ok(response) => handle_db_response::<M, S, E>(response, sessions, sink).await,
-		Err(error) => handle_parse_error(error.into(), binary, sessions).await,
+		Err(error) => {
+			handle_parse_error(Error::internal(error.to_string()), binary, sessions).await
+		}
 	}
 }
 
@@ -357,7 +369,7 @@ where
 /// Handle a response that has an ID (normal request/response).
 async fn handle_response_with_id<M, S, E>(
 	id: i64,
-	result: Result<DbResult, DbResultError>,
+	result: Result<DbResult, TypesError>,
 	session_id: Uuid,
 	session_state: &Arc<SessionState>,
 	sink: &RwLock<S>,
@@ -408,7 +420,9 @@ where
 			}) = pending.command
 				&& let Token::WithRefresh {
 					..
-				} = &token && error.to_string().contains("token has expired")
+				} = &token && error
+				.not_allowed_details()
+				.is_some_and(|a| matches!(a, NotAllowedError::Auth(AuthError::TokenExpired)))
 			{
 				// Attempt automatic refresh
 				let refresh_request = RouterRequest {
@@ -444,7 +458,7 @@ where
 
 /// Handle a live query notification.
 async fn handle_live_notification<M, S, E>(
-	result: Result<DbResult, DbResultError>,
+	result: Result<DbResult, TypesError>,
 	session_id: Uuid,
 	session_state: &Arc<SessionState>,
 	sink: &RwLock<S>,
@@ -503,7 +517,7 @@ async fn handle_parse_error(
 
 			if let Some(Value::Number(Number::Int(id_num))) = id {
 				if let Some(pending) = session_state.pending_requests.take(&id_num) {
-					let _ = pending.response_channel.send(Err(error.into())).await;
+					let _ = pending.response_channel.send(Err(error)).await;
 				} else {
 					warn!(
 						"got response for request with id '{id_num}', which was not in pending requests"
@@ -632,8 +646,8 @@ async fn clear_pending_requests(sessions: &HashMap<Uuid, Result<Arc<SessionState
 	for state in sessions.values().into_iter().flatten() {
 		for request in state.pending_requests.values() {
 			let error = std::io::Error::from(std::io::ErrorKind::ConnectionReset);
-			let err = crate::err::Error::from(error);
-			request.response_channel.send(Err(err.into())).await.ok();
+			let err = crate::Error::internal(format!("{error}"));
+			request.response_channel.send(Err(err)).await.ok();
 			request.response_channel.close();
 		}
 		state.pending_requests.clear();
@@ -645,7 +659,7 @@ async fn clear_live_queries(sessions: &HashMap<Uuid, Result<Arc<SessionState>, S
 	for state in sessions.values().into_iter().flatten() {
 		for sender in state.live_queries.values() {
 			let error = std::io::Error::from(std::io::ErrorKind::ConnectionReset);
-			sender.send(Err(error.into())).await.ok();
+			sender.send(Err(crate::Error::internal(error.to_string()))).await.ok();
 			sender.close();
 		}
 		state.live_queries.clear();
@@ -714,7 +728,8 @@ impl Surreal<Client> {
 mod tests {
 	use std::sync::Arc;
 
-	use surrealdb_core::rpc::{DbResult, DbResultError};
+	use surrealdb_core::rpc::DbResult;
+	use surrealdb_types::Error as TypesError;
 	use tokio::sync::RwLock;
 	use uuid::Uuid;
 
@@ -794,7 +809,7 @@ mod tests {
 
 		// Handle an error response
 		let sink = RwLock::new(futures::sink::drain::<MockMessage>());
-		let error = DbResultError::InternalError("test error".into());
+		let error = TypesError::internal("test error".to_string());
 		let result = handle_response_with_id::<MockMessage, _, _>(
 			request_id,
 			Err(error),
