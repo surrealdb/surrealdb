@@ -1,12 +1,19 @@
 //! Defines the session module for the execution module.
-#[cfg(feature = "gpu")]
-use ort::execution_providers::CUDAExecutionProvider;
-#[cfg(feature = "gpu")]
-use ort::execution_providers::ExecutionProvider;
+use std::sync::Once;
+
 use ort::session::Session;
 
 use crate::errors::error::{SurrealError, SurrealErrorStatus};
 use crate::safe_eject;
+
+static INIT_ORT_BACKEND: Once = Once::new();
+
+/// Ensures the ort-tract (pure Rust) backend is set before any ort API is used.
+fn ensure_ort_backend() {
+	INIT_ORT_BACKEND.call_once(|| {
+		ort::set_api(ort_tract::api());
+	});
+}
 
 /// Creates a session for a model.
 ///
@@ -16,21 +23,8 @@ use crate::safe_eject;
 /// # Returns
 /// A session object.
 pub fn get_session(model_bytes: Vec<u8>) -> Result<Session, SurrealError> {
-	#[cfg(feature = "gpu")]
-	let mut builder = safe_eject!(Session::builder(), SurrealErrorStatus::Unknown);
-
-	#[cfg(not(feature = "gpu"))]
+	ensure_ort_backend();
 	let builder = safe_eject!(Session::builder(), SurrealErrorStatus::Unknown);
-
-	#[cfg(feature = "gpu")]
-	{
-		let cuda = CUDAExecutionProvider::default();
-		if let Err(e) = cuda.register(&mut builder) {
-			eprintln!("Failed to register CUDA: {:?}. Falling back to CPU.", e);
-		} else {
-			println!("CUDA registered successfully");
-		}
-	}
 	let session: Session =
 		safe_eject!(builder.commit_from_memory(&model_bytes), SurrealErrorStatus::Unknown);
 	Ok(session)

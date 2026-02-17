@@ -885,6 +885,12 @@ user-id = 152041 # decahedron1
 start = "2023-11-12"
 end = "2026-05-06"
 
+[[trusted.ort-tract]]
+criteria = "safe-to-deploy"
+user-id = 152041 # decahedron1
+start = "2025-06-04"
+end = "2026-05-06"
+
 [[trusted.parking_lot]]
 criteria = "safe-to-deploy"
 user-id = 2915 # Amanieu d'Antras (Amanieu)

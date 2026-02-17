@@ -47,7 +47,7 @@ surrealdb-server = { version = "3.0.0-beta", path = "surrealdb/server", default-
 surrealdb-types = { version = "3.0.0-beta", path = "surrealdb/types" }
 surrealdb-types-derive = { version = "3.0.0-beta", path = "surrealdb/types/derive" }
 # SurrealML crates
-surrealml-core = { version = "0.1", path = "surrealml/core" }
+surrealml-core = { version = "0.2", path = "surrealml/core" }
 # Surrealism crates
 surrealism = { version = "0.1", path = "surrealism" }
 surrealism-macros = { version = "0.1", path = "surrealism/macros", default-features = false }
@@ -193,8 +193,9 @@ time = "0.3.47"
 tracing-subscriber = "0.3.22"
 wiremock = "0.6.5"
 
-# SurrealML specific dependencies
-ort = { version = "2.0.0-rc.11", features = ["cuda", "ndarray"] }
+# SurrealML specific dependencies (pure Rust ONNX via tract backend)
+ort = { version = "=2.0.0-rc.11", default-features = false, features = ["alternative-backend", "ndarray"] }
+ort-tract = "0.2"
 
 # Surrealism specific dependencies
 tar = "0.4.44"
