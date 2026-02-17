@@ -1496,6 +1496,8 @@ impl Parser<'_> {
 			let ident = self.span_str(peek.span).to_string();
 			let known = ident.eq_ignore_ascii_case("OPENAI_API_KEY")
 				|| ident.eq_ignore_ascii_case("OPENAI_BASE_URL")
+				|| ident.eq_ignore_ascii_case("ANTHROPIC_API_KEY")
+				|| ident.eq_ignore_ascii_case("ANTHROPIC_BASE_URL")
 				|| ident.eq_ignore_ascii_case("GOOGLE_API_KEY")
 				|| ident.eq_ignore_ascii_case("GOOGLE_BASE_URL")
 				|| ident.eq_ignore_ascii_case("VOYAGE_API_KEY")
@@ -1511,6 +1513,10 @@ impl Parser<'_> {
 				config.openai_api_key = value;
 			} else if ident.eq_ignore_ascii_case("OPENAI_BASE_URL") {
 				config.openai_base_url = value;
+			} else if ident.eq_ignore_ascii_case("ANTHROPIC_API_KEY") {
+				config.anthropic_api_key = value;
+			} else if ident.eq_ignore_ascii_case("ANTHROPIC_BASE_URL") {
+				config.anthropic_base_url = value;
 			} else if ident.eq_ignore_ascii_case("GOOGLE_API_KEY") {
 				config.google_api_key = value;
 			} else if ident.eq_ignore_ascii_case("GOOGLE_BASE_URL") {

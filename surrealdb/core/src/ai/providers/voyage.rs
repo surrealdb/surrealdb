@@ -4,9 +4,6 @@
 //! this provider is a thin wrapper around [`OpenAiProvider`] with Voyage-specific
 //! defaults and environment variable names.
 //!
-//! The `voyage:` prefix is the canonical name. `claude:` and `anthropic:` are
-//! accepted as aliases since Voyage is Anthropic's recommended embedding provider.
-//!
 //! # Configuration
 //!
 //! - `SURREAL_AI_VOYAGE_API_KEY` — Required. A Voyage AI API key.
@@ -16,8 +13,6 @@
 //!
 //! ```sql
 //! ai::embed('voyage:voyage-3.5', 'hello world')
-//! ai::embed('claude:voyage-3.5', 'hello world')   -- alias
-//! ai::embed('anthropic:voyage-3.5', 'hello world') -- alias
 //! ```
 use anyhow::Result;
 
@@ -46,7 +41,7 @@ impl VoyageProvider {
 		let api_key = std::env::var("SURREAL_AI_VOYAGE_API_KEY").map_err(|_| {
 			anyhow::anyhow!(
 				"SURREAL_AI_VOYAGE_API_KEY environment variable is not set. \
-				 Set it to your Voyage AI API key to use 'voyage:', 'claude:', or 'anthropic:' models."
+				 Set it to your Voyage AI API key to use 'voyage:' models."
 			)
 		})?;
 

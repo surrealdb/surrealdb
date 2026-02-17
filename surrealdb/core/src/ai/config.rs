@@ -14,6 +14,8 @@ use anyhow::Result;
 pub struct AiConfigOverlay {
 	pub openai_api_key: Option<String>,
 	pub openai_base_url: Option<String>,
+	pub anthropic_api_key: Option<String>,
+	pub anthropic_base_url: Option<String>,
 	pub google_api_key: Option<String>,
 	pub google_base_url: Option<String>,
 	pub voyage_api_key: Option<String>,
@@ -23,6 +25,7 @@ pub struct AiConfigOverlay {
 }
 
 const OPENAI_DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
+const ANTHROPIC_DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1";
 const GOOGLE_DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
 const VOYAGE_DEFAULT_BASE_URL: &str = "https://api.voyageai.com/v1";
 const HUGGINGFACE_DEFAULT_BASE_URL: &str =
@@ -51,6 +54,33 @@ pub fn openai_credentials(config: Option<&AiConfigOverlay>) -> Result<(String, S
 		anyhow::anyhow!(
 			"SURREAL_AI_OPENAI_API_KEY is not set (environment or DEFINE CONFIG AI). \
 			 Set it to use 'openai:' models."
+		)
+	})?;
+	Ok((api_key, base_url))
+}
+
+/// Resolve Anthropic API key and base URL from overlay or environment.
+pub fn anthropic_credentials(config: Option<&AiConfigOverlay>) -> Result<(String, String)> {
+	let (api_key, base_url) = match config {
+		Some(c) => (
+			c.anthropic_api_key.clone(),
+			c.anthropic_base_url.clone().unwrap_or_else(|| ANTHROPIC_DEFAULT_BASE_URL.to_owned()),
+		),
+		None => (
+			Some(std::env::var("SURREAL_AI_ANTHROPIC_API_KEY").map_err(|_| {
+				anyhow::anyhow!(
+					"SURREAL_AI_ANTHROPIC_API_KEY environment variable is not set. \
+						 Set it to use 'anthropic:' or 'claude:' models."
+				)
+			})?),
+			std::env::var("SURREAL_AI_ANTHROPIC_BASE_URL")
+				.unwrap_or_else(|_| ANTHROPIC_DEFAULT_BASE_URL.to_owned()),
+		),
+	};
+	let api_key = api_key.ok_or_else(|| {
+		anyhow::anyhow!(
+			"SURREAL_AI_ANTHROPIC_API_KEY is not set (environment or DEFINE CONFIG AI). \
+			 Set it to use 'anthropic:' or 'claude:' models."
 		)
 	})?;
 	Ok((api_key, base_url))
@@ -94,7 +124,7 @@ pub fn voyage_credentials(config: Option<&AiConfigOverlay>) -> Result<(String, S
 			Some(std::env::var("SURREAL_AI_VOYAGE_API_KEY").map_err(|_| {
 				anyhow::anyhow!(
 					"SURREAL_AI_VOYAGE_API_KEY environment variable is not set. \
-						 Set it to use 'voyage:', 'claude:', or 'anthropic:' models."
+						 Set it to use 'voyage:' models."
 				)
 			})?),
 			std::env::var("SURREAL_AI_VOYAGE_BASE_URL")
@@ -104,7 +134,7 @@ pub fn voyage_credentials(config: Option<&AiConfigOverlay>) -> Result<(String, S
 	let api_key = api_key.ok_or_else(|| {
 		anyhow::anyhow!(
 			"SURREAL_AI_VOYAGE_API_KEY is not set (environment or DEFINE CONFIG AI). \
-			 Set it to use 'voyage:', 'claude:', or 'anthropic:' models."
+			 Set it to use 'voyage:' models."
 		)
 	})?;
 	Ok((api_key, base_url))
@@ -271,6 +301,53 @@ mod tests {
 		assert_eq!(key, "google-from-config");
 		unsafe {
 			std::env::remove_var("SURREAL_AI_GOOGLE_API_KEY");
+		}
+	}
+
+	// ---- Anthropic ----
+
+	#[test]
+	fn anthropic_no_config_no_env_returns_error() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::remove_var("SURREAL_AI_ANTHROPIC_API_KEY");
+			std::env::remove_var("SURREAL_AI_ANTHROPIC_BASE_URL");
+		}
+		let result = anthropic_credentials(None);
+		assert!(result.is_err());
+		let msg = result.unwrap_err().to_string();
+		assert!(msg.contains("SURREAL_AI_ANTHROPIC_API_KEY"), "unexpected error: {msg}");
+	}
+
+	#[test]
+	fn anthropic_env_fallback_returns_env_key() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::set_var("SURREAL_AI_ANTHROPIC_API_KEY", "sk-ant-env-key");
+			std::env::remove_var("SURREAL_AI_ANTHROPIC_BASE_URL");
+		}
+		let (key, base) = anthropic_credentials(None).expect("should succeed with env key");
+		assert_eq!(key, "sk-ant-env-key");
+		assert_eq!(base, ANTHROPIC_DEFAULT_BASE_URL);
+		unsafe {
+			std::env::remove_var("SURREAL_AI_ANTHROPIC_API_KEY");
+		}
+	}
+
+	#[test]
+	fn anthropic_overlay_takes_priority_over_env() {
+		let _guard = ENV_LOCK.lock().unwrap();
+		unsafe {
+			std::env::set_var("SURREAL_AI_ANTHROPIC_API_KEY", "sk-ant-env-ignored");
+		}
+		let overlay = AiConfigOverlay {
+			anthropic_api_key: Some("sk-ant-from-config".into()),
+			..Default::default()
+		};
+		let (key, _) = anthropic_credentials(Some(&overlay)).expect("should succeed");
+		assert_eq!(key, "sk-ant-from-config");
+		unsafe {
+			std::env::remove_var("SURREAL_AI_ANTHROPIC_API_KEY");
 		}
 	}
 

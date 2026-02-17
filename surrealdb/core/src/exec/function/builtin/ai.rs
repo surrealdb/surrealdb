@@ -46,6 +46,8 @@ async fn ai_config_overlay_from_ctx(
 	Some(crate::ai::config::AiConfigOverlay {
 		openai_api_key: catalog_ai.openai_api_key.clone(),
 		openai_base_url: catalog_ai.openai_base_url.clone(),
+		anthropic_api_key: catalog_ai.anthropic_api_key.clone(),
+		anthropic_base_url: catalog_ai.anthropic_base_url.clone(),
 		google_api_key: catalog_ai.google_api_key.clone(),
 		google_base_url: catalog_ai.google_base_url.clone(),
 		voyage_api_key: catalog_ai.voyage_api_key.clone(),

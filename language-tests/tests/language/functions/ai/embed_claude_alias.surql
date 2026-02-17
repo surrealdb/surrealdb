@@ -1,15 +1,9 @@
 /**
 [test]
-reason = "Test ai::embed with claude: alias routes to Voyage provider"
-wip = true
-
-# To run this test manually:
-# 1. Build with the 'ai' feature enabled
-# 2. Set SURREAL_AI_VOYAGE_API_KEY to a valid Voyage AI API key
-# 3. Run: cargo run run ai/embed_claude_alias
+reason = "Test ai::embed with claude: alias routes to Anthropic provider"
 
 [[test.results]]
-match = "array::len($) > 0"
+error = "SURREAL_AI_ANTHROPIC_API_KEY environment variable is not set. Set it to use 'anthropic:' or 'claude:' models."
 
 [env]
 namespace = "test"
@@ -17,5 +11,5 @@ database = "test"
 
 */
 
--- The claude: prefix should route to Voyage AI
-RETURN ai::embed('claude:voyage-3.5', 'SurrealDB is a multi-model database');
+-- The claude: prefix should route to Anthropic provider (not Voyage)
+RETURN ai::embed('claude:claude-sonnet-4-20250514', 'SurrealDB is a multi-model database');

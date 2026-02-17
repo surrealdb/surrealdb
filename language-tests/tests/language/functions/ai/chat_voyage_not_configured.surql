@@ -3,7 +3,7 @@
 reason = "Test that ai::chat returns appropriate error when the Voyage API key is not configured"
 
 [[test.results]]
-error = "SURREAL_AI_VOYAGE_API_KEY environment variable is not set. Set it to use 'voyage:', 'claude:', or 'anthropic:' models."
+error = "SURREAL_AI_VOYAGE_API_KEY environment variable is not set. Set it to use 'voyage:' models."
 
 [env]
 namespace = "test"

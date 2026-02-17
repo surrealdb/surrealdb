@@ -2,10 +2,11 @@
 use anyhow::Result;
 
 use super::config::{
-	AiConfigOverlay, google_credentials, huggingface_credentials, openai_credentials,
-	voyage_credentials,
+	AiConfigOverlay, anthropic_credentials, google_credentials, huggingface_credentials,
+	openai_credentials, voyage_credentials,
 };
 use super::provider::EmbeddingProvider;
+use super::providers::anthropic::AnthropicProvider;
 use super::providers::google::GoogleProvider;
 use super::providers::huggingface::HuggingFaceProvider;
 use super::providers::openai::OpenAiProvider;
@@ -53,7 +54,12 @@ pub async fn embed(
 				HuggingFaceProvider::new_with_urls(api_key, base_url, generation_base_url);
 			provider.embed(model_name, input).await
 		}
-		"voyage" | "claude" | "anthropic" => {
+		"anthropic" | "claude" => {
+			let (api_key, base_url) = anthropic_credentials(config)?;
+			let provider = AnthropicProvider::new(api_key, base_url);
+			provider.embed(model_name, input).await
+		}
+		"voyage" => {
 			let (api_key, base_url) = voyage_credentials(config)?;
 			let provider = VoyageProvider::new(api_key, base_url);
 			provider.embed(model_name, input).await
@@ -67,7 +73,7 @@ pub async fn embed(
 			name: "ai::embed".to_owned(),
 			message: format!(
 				"Unknown provider '{other}'. Supported providers: \
-				 'openai', 'huggingface', 'voyage' (or 'claude'/'anthropic'), 'google' (or 'gemini')"
+				 'openai', 'anthropic' (or 'claude'), 'google' (or 'gemini'), 'voyage', 'huggingface'"
 			),
 		})),
 	}

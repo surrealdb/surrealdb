@@ -7,6 +7,8 @@ use crate::sql::{Expr, Literal};
 pub(crate) struct AiConfig {
 	pub openai_api_key: Expr,
 	pub openai_base_url: Expr,
+	pub anthropic_api_key: Expr,
+	pub anthropic_base_url: Expr,
 	pub google_api_key: Expr,
 	pub google_base_url: Expr,
 	pub voyage_api_key: Expr,
@@ -20,6 +22,8 @@ impl Default for AiConfig {
 		Self {
 			openai_api_key: Expr::Literal(Literal::None),
 			openai_base_url: Expr::Literal(Literal::None),
+			anthropic_api_key: Expr::Literal(Literal::None),
+			anthropic_base_url: Expr::Literal(Literal::None),
 			google_api_key: Expr::Literal(Literal::None),
 			google_base_url: Expr::Literal(Literal::None),
 			voyage_api_key: Expr::Literal(Literal::None),
@@ -38,6 +42,12 @@ impl ToSql for AiConfig {
 		}
 		if !matches!(&self.openai_base_url, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " OPENAI_BASE_URL {}", self.openai_base_url);
+		}
+		if !matches!(&self.anthropic_api_key, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " ANTHROPIC_API_KEY {}", self.anthropic_api_key);
+		}
+		if !matches!(&self.anthropic_base_url, Expr::Literal(Literal::None)) {
+			write_sql!(f, fmt, " ANTHROPIC_BASE_URL {}", self.anthropic_base_url);
 		}
 		if !matches!(&self.google_api_key, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " GOOGLE_API_KEY {}", self.google_api_key);
@@ -69,6 +79,14 @@ impl From<crate::catalog::AiConfig> for AiConfig {
 				.unwrap_or(Expr::Literal(Literal::None)),
 			openai_base_url: v
 				.openai_base_url
+				.map(|s| Expr::Literal(Literal::String(s)))
+				.unwrap_or(Expr::Literal(Literal::None)),
+			anthropic_api_key: v
+				.anthropic_api_key
+				.map(|s| Expr::Literal(Literal::String(s)))
+				.unwrap_or(Expr::Literal(Literal::None)),
+			anthropic_base_url: v
+				.anthropic_base_url
 				.map(|s| Expr::Literal(Literal::String(s)))
 				.unwrap_or(Expr::Literal(Literal::None)),
 			google_api_key: v
@@ -104,6 +122,8 @@ impl From<AiConfig> for crate::expr::statements::define::config::ai::AiConfig {
 		Self {
 			openai_api_key: v.openai_api_key.into(),
 			openai_base_url: v.openai_base_url.into(),
+			anthropic_api_key: v.anthropic_api_key.into(),
+			anthropic_base_url: v.anthropic_base_url.into(),
 			google_api_key: v.google_api_key.into(),
 			google_base_url: v.google_base_url.into(),
 			voyage_api_key: v.voyage_api_key.into(),
@@ -119,6 +139,8 @@ impl From<crate::expr::statements::define::config::ai::AiConfig> for AiConfig {
 		Self {
 			openai_api_key: v.openai_api_key.into(),
 			openai_base_url: v.openai_base_url.into(),
+			anthropic_api_key: v.anthropic_api_key.into(),
+			anthropic_base_url: v.anthropic_base_url.into(),
 			google_api_key: v.google_api_key.into(),
 			google_base_url: v.google_base_url.into(),
 			voyage_api_key: v.voyage_api_key.into(),

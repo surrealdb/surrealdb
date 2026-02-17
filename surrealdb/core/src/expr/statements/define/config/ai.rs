@@ -11,6 +11,8 @@ use crate::val::Value;
 pub(crate) struct AiConfig {
 	pub openai_api_key: Expr,
 	pub openai_base_url: Expr,
+	pub anthropic_api_key: Expr,
+	pub anthropic_base_url: Expr,
 	pub google_api_key: Expr,
 	pub google_base_url: Expr,
 	pub voyage_api_key: Expr,
@@ -24,6 +26,8 @@ impl Default for AiConfig {
 		Self {
 			openai_api_key: Expr::Literal(Literal::None),
 			openai_base_url: Expr::Literal(Literal::None),
+			anthropic_api_key: Expr::Literal(Literal::None),
+			anthropic_base_url: Expr::Literal(Literal::None),
 			google_api_key: Expr::Literal(Literal::None),
 			google_base_url: Expr::Literal(Literal::None),
 			voyage_api_key: Expr::Literal(Literal::None),
@@ -65,6 +69,16 @@ impl AiConfig {
 				.await?,
 			openai_base_url: expr_to_optional_string(stk, ctx, opt, doc, &self.openai_base_url)
 				.await?,
+			anthropic_api_key: expr_to_optional_string(stk, ctx, opt, doc, &self.anthropic_api_key)
+				.await?,
+			anthropic_base_url: expr_to_optional_string(
+				stk,
+				ctx,
+				opt,
+				doc,
+				&self.anthropic_base_url,
+			)
+			.await?,
 			google_api_key: expr_to_optional_string(stk, ctx, opt, doc, &self.google_api_key)
 				.await?,
 			google_base_url: expr_to_optional_string(stk, ctx, opt, doc, &self.google_base_url)

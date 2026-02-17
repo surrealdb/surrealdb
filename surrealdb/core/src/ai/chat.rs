@@ -2,10 +2,11 @@
 use anyhow::Result;
 
 use super::config::{
-	AiConfigOverlay, google_credentials, huggingface_credentials, openai_credentials,
-	voyage_credentials,
+	AiConfigOverlay, anthropic_credentials, google_credentials, huggingface_credentials,
+	openai_credentials, voyage_credentials,
 };
 use super::provider::{ChatMessage, ChatProvider, GenerationConfig};
+use super::providers::anthropic::AnthropicProvider;
 use super::providers::google::GoogleProvider;
 use super::providers::huggingface::HuggingFaceProvider;
 use super::providers::openai::OpenAiProvider;
@@ -46,7 +47,11 @@ pub fn get_provider(
 			let (api_key, base_url, generation_base_url) = huggingface_credentials(config)?;
 			Ok(Box::new(HuggingFaceProvider::new_with_urls(api_key, base_url, generation_base_url)))
 		}
-		"voyage" | "claude" | "anthropic" => {
+		"anthropic" | "claude" => {
+			let (api_key, base_url) = anthropic_credentials(config)?;
+			Ok(Box::new(AnthropicProvider::new(api_key, base_url)))
+		}
+		"voyage" => {
 			let (api_key, base_url) = voyage_credentials(config)?;
 			Ok(Box::new(VoyageProvider::new(api_key, base_url)))
 		}
@@ -58,7 +63,7 @@ pub fn get_provider(
 			name: "ai::chat".to_owned(),
 			message: format!(
 				"Unknown provider '{other}'. Supported providers: \
-				 'openai', 'huggingface', 'voyage' (or 'claude'/'anthropic'), 'google' (or 'gemini')"
+				 'openai', 'anthropic' (or 'claude'), 'google' (or 'gemini'), 'voyage', 'huggingface'"
 			),
 		})),
 	}

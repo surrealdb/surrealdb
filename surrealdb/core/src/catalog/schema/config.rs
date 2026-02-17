@@ -227,6 +227,8 @@ impl InfoStructure for DefaultConfig {
 pub struct AiConfig {
 	pub openai_api_key: Option<String>,
 	pub openai_base_url: Option<String>,
+	pub anthropic_api_key: Option<String>,
+	pub anthropic_base_url: Option<String>,
 	pub google_api_key: Option<String>,
 	pub google_base_url: Option<String>,
 	pub voyage_api_key: Option<String>,
@@ -244,6 +246,12 @@ impl ToSql for AiConfig {
 		}
 		if let Some(v) = &self.openai_base_url {
 			write_sql!(f, fmt, " OPENAI_BASE_URL '{}'", escape(v));
+		}
+		if let Some(v) = &self.anthropic_api_key {
+			write_sql!(f, fmt, " ANTHROPIC_API_KEY '{}'", escape(v));
+		}
+		if let Some(v) = &self.anthropic_base_url {
+			write_sql!(f, fmt, " ANTHROPIC_BASE_URL '{}'", escape(v));
 		}
 		if let Some(v) = &self.google_api_key {
 			write_sql!(f, fmt, " GOOGLE_API_KEY '{}'", escape(v));
@@ -271,6 +279,8 @@ impl InfoStructure for AiConfig {
 		Value::from(map!(
 			"openai_api_key", if let Some(x) = self.openai_api_key => Value::String(x),
 			"openai_base_url", if let Some(x) = self.openai_base_url => Value::String(x),
+			"anthropic_api_key", if let Some(x) = self.anthropic_api_key => Value::String(x),
+			"anthropic_base_url", if let Some(x) = self.anthropic_base_url => Value::String(x),
 			"google_api_key", if let Some(x) = self.google_api_key => Value::String(x),
 			"google_base_url", if let Some(x) = self.google_base_url => Value::String(x),
 			"voyage_api_key", if let Some(x) = self.voyage_api_key => Value::String(x),
