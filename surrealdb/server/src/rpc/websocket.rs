@@ -522,7 +522,7 @@ impl RpcProtocol for Websocket {
 		id: Uuid,
 		tx: Arc<surrealdb_core::kvs::Transaction>,
 	) -> Result<(), surrealdb_types::Error> {
-		self.transactions.insert(id, (None, Arc::new(tx)));
+		self.transactions.insert(id, (None, tx));
 		Ok(())
 	}
 
