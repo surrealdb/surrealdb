@@ -992,20 +992,6 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
-[[publisher.surrealdb]]
-version = "3.0.0-alpha.18"
-when = "2025-12-15"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
-[[publisher.surrealdb-core]]
-version = "3.0.0-alpha.18"
-when = "2025-12-15"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
 [[publisher.surrealdb-librocksdb-sys]]
 version = "0.17.3+10.6.2"
 when = "2025-10-31"
@@ -1023,41 +1009,6 @@ user-name = "Tobie Morgan Hitchcock"
 [[publisher.surrealdb-rocksdb]]
 version = "0.24.0-surreal.1"
 when = "2025-10-31"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
-[[publisher.surrealism]]
-version = "0.1.8"
-when = "2026-02-05"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
-[[publisher.surrealism-macros]]
-version = "0.1.8"
-when = "2026-02-05"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
-[[publisher.surrealism-runtime]]
-version = "0.1.8"
-when = "2026-02-05"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
-[[publisher.surrealism-types]]
-version = "0.1.8"
-when = "2026-02-05"
-user-id = 145457
-user-login = "tobiemh"
-user-name = "Tobie Morgan Hitchcock"
-
-[[publisher.surrealml-core]]
-version = "0.1.10"
-when = "2026-02-05"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
