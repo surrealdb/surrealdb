@@ -561,7 +561,7 @@ fn test_detail_wire_format_all_flat_enums() {
 fn test_detail_wire_format_full_error_round_trip() {
 	// Full Error with details round-trips through into_value/from_value
 	let err = Error::not_allowed("Token expired".to_string(), AuthError::TokenExpired);
-	let val = err.clone().into_value();
+	let val = err.into_value();
 	let parsed = Error::from_value(val).unwrap();
 	assert_eq!(parsed.kind(), &ErrorKind::NotAllowed);
 	assert_eq!(parsed.message(), "Token expired");

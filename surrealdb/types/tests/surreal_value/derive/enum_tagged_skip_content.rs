@@ -1,8 +1,8 @@
 use surrealdb_types::{Number, SurrealValue, Value, array, object};
 
-////////////////////////////////////////////////////
-////// Enum with tag + content + skip_content_if ///
-////////////////////////////////////////////////////
+// -------------------------------------------------
+// Enum with tag + content + skip_content_if
+// -------------------------------------------------
 
 #[derive(SurrealValue, Debug, PartialEq)]
 #[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
@@ -172,9 +172,9 @@ fn test_skip_content_rejects_unknown_kind() {
 	assert!(TestSkipContent::from_value(val).is_err());
 }
 
-////////////////////////////////////////////////////
-//// Default fallback when content is missing //////
-////////////////////////////////////////////////////
+// -------------------------------------------------
+// Default fallback when content is missing
+// -------------------------------------------------
 
 #[derive(SurrealValue, Debug, PartialEq, Default)]
 #[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
@@ -229,9 +229,9 @@ fn test_skip_content_named_with_content_still_works() {
 	);
 }
 
-////////////////////////////////////////////////////
-//// Enum WITHOUT skip_content_if (old behavior) ///
-////////////////////////////////////////////////////
+// -------------------------------------------------
+// Enum WITHOUT skip_content_if (old behavior)
+// -------------------------------------------------
 
 #[derive(SurrealValue, Debug, PartialEq)]
 #[surreal(tag = "kind", content = "details")]
