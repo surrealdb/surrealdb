@@ -1536,7 +1536,7 @@ version = "0.3.0-surreal.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.surrealkv]]
-version = "0.20.1"
+version = "0.20.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.symbolic-common]]

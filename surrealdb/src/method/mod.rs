@@ -29,6 +29,7 @@ mod insert_relation;
 mod invalidate;
 mod merge;
 mod patch;
+mod run;
 mod select;
 mod set;
 mod signin;
@@ -61,6 +62,7 @@ pub use invalidate::Invalidate;
 pub use merge::Merge;
 pub use patch::Patch;
 pub use query::{IntoVariables, Query, QueryStream};
+pub use run::{IntoFn, Run};
 pub use select::Select;
 pub use set::Set;
 pub use signin::Signin;
@@ -1270,6 +1272,35 @@ where
 	pub fn version(&'_ self) -> Version<'_, C> {
 		Version {
 			client: Cow::Borrowed(self),
+		}
+	}
+
+	/// Runs a function
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// // Specify no args by not calling `.args()`
+	/// let foo: usize = db.run("fn::foo").await?; // fn::foo()
+	/// // A single value will be turned into one argument
+	/// let bar: usize = db.run("fn::bar").args(42).await?; // fn::bar(42)
+	/// // Arrays are treated as single arguments
+	/// let count: usize = db.run("count").args(vec![1,2,3]).await?;
+	/// // Specify multiple args using a tuple
+	/// let two: usize = db.run("math::log").args((100, 10)).await?; // math::log(100, 10)
+	///
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn run<R>(&'_ self, function: impl IntoFn) -> Run<'_, C, R> {
+		Run {
+			client: Cow::Borrowed(self),
+			function: function.into_fn(),
+			args: Value::None,
+			response_type: PhantomData,
 		}
 	}
 

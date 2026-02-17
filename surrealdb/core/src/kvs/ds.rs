@@ -355,14 +355,14 @@ impl TransactionBuilderFactory for CommunityComposer {
 		// Initiate the desired datastore
 		match (flavour, path) {
 			// Initiate an in-memory datastore
-			(flavour @ "memory", _) => {
+			(flavour @ "memory", path) => {
 				#[cfg(feature = "kv-mem")]
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
-					// Parse SurrealMX configuration from query parameters
-					let config =
-						super::config::MemoryConfig::from_params(&params).map_err(Error::Kvs)?;
+					// Parse SurrealMX configuration from URL path and query parameters
+					let config = super::config::MemoryConfig::from_path_and_params(&path, &params)
+						.map_err(Error::Kvs)?;
 					// Initialise the storage engine
 					let v = super::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem)?;
 					info!(target: TARGET, "Started kvs store in {flavour}");

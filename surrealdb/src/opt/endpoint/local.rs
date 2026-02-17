@@ -65,8 +65,9 @@ impl<R> Connect<Db, R> {
 	/// Set the disk sync mode.
 	///
 	/// Controls how and when data is flushed to disk. Supported by `SurrealKv`,
-	/// `RocksDb`, and `Mem` engines (the `Mem` engine requires `persist()`
-	/// to be set for sync to take effect).
+	/// `RocksDb`, and `Mem` engines (the `Mem` engine requires a persist path,
+	/// e.g. `Surreal::new::<Mem>("/tmp/data")` or `connect("mem:///tmp/data")`,
+	/// for sync to take effect).
 	///
 	/// The `mode` argument can be any type that implements `Display`. The
 	/// canonical type is `SyncMode`:
@@ -113,40 +114,10 @@ impl<R> Connect<Db, R> {
 		self
 	}
 
-	/// Set the persistence directory for the `Mem` engine.
-	///
-	/// When set, the in-memory database persists data to disk using AOL and/or snapshots.
-	///
-	/// # Examples
-	///
-	/// ```no_run
-	/// # #[tokio::main]
-	/// # async fn main() -> surrealdb::Result<()> {
-	/// use surrealdb::Surreal;
-	/// use surrealdb::engine::local::Mem;
-	///
-	/// let db = Surreal::new::<Mem>(())
-	///     .persist("/tmp/data")
-	///     .await?;
-	/// # Ok(())
-	/// # }
-	/// ```
-	pub fn persist(mut self, path: &str) -> Self {
-		self.address = self.address.and_then(|mut endpoint| match endpoint.url.scheme() {
-			"mem" => {
-				endpoint.append_query_param("persist", path);
-				Ok(endpoint)
-			}
-			scheme => Err(Error::internal(format!(
-				"The 'persist' option is only supported by the 'mem' engine, not '{scheme}'"
-			))),
-		});
-		self
-	}
-
 	/// Set the AOL (Append-Only Log) mode for the `Mem` engine.
 	///
-	/// Requires `persist()` to be set.
+	/// Requires a persist path (e.g. `Surreal::new::<Mem>("/tmp/data")` or
+	/// `connect("mem:///tmp/data")`).
 	///
 	/// - `MemAolMode::Never` - never use AOL (default).
 	/// - `MemAolMode::Sync` - write synchronously to AOL on every commit.
@@ -166,7 +137,7 @@ impl<R> Connect<Db, R> {
 
 	/// Set the snapshot interval for the `Mem` engine.
 	///
-	/// Requires `persist()` to be set. Periodic snapshots are created at the given interval.
+	/// Requires a persist path. Periodic snapshots are created at the given interval.
 	///
 	/// - `SnapshotMode::Never` - never use snapshots (default).
 	/// - `SnapshotMode::Interval(duration)` - take snapshots at the given interval.
