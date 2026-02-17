@@ -1,26 +1,26 @@
-mod api;
+pub mod api;
 mod auth;
 pub mod client_ip;
 pub mod error;
-mod export;
+pub mod export;
 #[cfg(feature = "graphql")]
-mod gql;
+pub mod gql;
 pub(crate) mod headers;
-mod health;
-mod import;
+pub mod health;
+pub mod import;
 mod input;
-mod key;
-mod ml;
+pub mod key;
+pub mod ml;
 pub(crate) mod output;
 mod params;
-mod rpc;
+pub mod rpc;
 mod signals;
-mod signin;
-mod signup;
-mod sql;
-mod sync;
+pub mod signin;
+pub mod signup;
+pub mod sql;
+pub mod sync;
 mod tracer;
-mod version;
+pub mod version;
 
 use std::io;
 use std::net::SocketAddr;
@@ -64,10 +64,9 @@ const LOG: &str = "surrealdb::net";
 /// Embedders can provide their own implementation to add or remove routes, or wrap
 /// additional middleware. The default binary uses [`CommunityComposer`].
 ///
-/// # Example
+/// # Examples
 ///
-/// The following shows how an embedder can extend the default community router with
-/// additional routes:
+/// Extend the default community router with additional custom routes:
 ///
 /// ```rust,ignore
 /// use std::sync::Arc;
@@ -80,13 +79,32 @@ const LOG: &str = "surrealdb::net";
 ///
 /// impl RouterFactory for MyComposer {
 ///     fn configure_router() -> Router<Arc<RpcState>> {
-///         // Start from the standard community routes
 ///         let router = CommunityComposer::configure_router();
-///         // Merge custom routes
 ///         router.merge(
 ///             Router::new()
 ///                 .route("/custom", get(|| async { "Hello from custom route" }))
 ///         )
+///     }
+/// }
+/// ```
+///
+/// Build a minimal router from individual endpoint routers:
+///
+/// ```rust,ignore
+/// use std::sync::Arc;
+/// use axum::Router;
+/// use surreal::RouterFactory;
+/// use surreal::rpc::RpcState;
+/// use surreal::ntw::{health, sql, rpc};
+///
+/// struct MinimalComposer;
+///
+/// impl RouterFactory for MinimalComposer {
+///     fn configure_router() -> Router<Arc<RpcState>> {
+///         Router::new()
+///             .merge(health::router())
+///             .merge(sql::router())
+///             .merge(rpc::router())
 ///     }
 /// }
 /// ```

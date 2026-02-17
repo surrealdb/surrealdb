@@ -9,7 +9,7 @@ use tower_http::limit::RequestBodyLimitLayer;
 use crate::cnf::HTTP_MAX_ML_BODY_SIZE;
 
 /// The router definition for the ML API endpoints.
-pub(super) fn router<S>() -> Router<S>
+pub fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {

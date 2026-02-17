@@ -18,7 +18,7 @@ use crate::cnf::HTTP_MAX_IMPORT_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::ntw::output::Output;
 
-pub(super) fn router<S>() -> Router<S>
+pub fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {

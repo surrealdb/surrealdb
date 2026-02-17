@@ -6,7 +6,7 @@ use surrealdb_core::dbs::capabilities::RouteTarget;
 use super::AppState;
 use crate::ntw::error::Error as NetError;
 
-pub(super) fn router<S>() -> Router<S>
+pub fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
