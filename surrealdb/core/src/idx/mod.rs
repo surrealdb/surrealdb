@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::hnsw::ElementId;
+use crate::idx::trees::hnsw::index::AppendingId64;
 use crate::idx::trees::vector::SerializedVector;
 use crate::key::index::dc::Dc;
 use crate::key::index::dl::Dl;
@@ -23,6 +24,7 @@ use crate::key::index::hh::Hh;
 use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
 use crate::key::index::hn::HnswNode;
+use crate::key::index::hp::{HnswPending, HnswPendingPrefix};
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
 use crate::key::index::ib::Ib;
@@ -72,8 +74,16 @@ impl IndexKeyBase {
 		He::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, element_id)
 	}
 
-	fn new_hi_key(&self, id: RecordIdKey) -> Hi<'_> {
+	fn new_hi_key<'a>(&'a self, id: &'a RecordIdKey) -> Hi<'a> {
 		Hi::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
+	}
+
+	fn new_hp_key(&self, appending_id: AppendingId64) -> HnswPending<'_> {
+		HnswPending::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, appending_id)
+	}
+
+	fn new_hp_range(&self) -> Result<Range<Key>> {
+		HnswPendingPrefix::range(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	fn new_hl_key(&self, layer: u16, chunk: u32) -> Hl<'_> {

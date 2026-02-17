@@ -55,8 +55,6 @@ use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevel
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
-use crate::idx::IndexKeyBase;
-use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::ic::IndexCompactionKey;
@@ -357,14 +355,14 @@ impl TransactionBuilderFactory for CommunityComposer {
 		// Initiate the desired datastore
 		match (flavour, path) {
 			// Initiate an in-memory datastore
-			(flavour @ "memory", _) => {
+			(flavour @ "memory", path) => {
 				#[cfg(feature = "kv-mem")]
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
-					// Parse SurrealMX configuration from query parameters
-					let config =
-						super::config::MemoryConfig::from_params(&params).map_err(Error::Kvs)?;
+					// Parse SurrealMX configuration from URL path and query parameters
+					let config = super::config::MemoryConfig::from_path_and_params(&path, &params)
+						.map_err(Error::Kvs)?;
 					// Initialise the storage engine
 					let v = super::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem)?;
 					info!(target: TARGET, "Started kvs store in {flavour}");
@@ -1410,7 +1408,7 @@ impl Datastore {
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running index compaction process");
 			// Create a new transaction
-			let txn = self.transaction(Write, Optimistic).await?;
+			let txn = Arc::new(self.transaction(Write, Optimistic).await?);
 			// Collect every item in the queue
 			let (beg, end) = IndexCompactionKey::range();
 			let range = beg..end;
@@ -1432,25 +1430,35 @@ impl Datastore {
 				{
 					Some(ix) if !ix.prepare_remove => match &ix.index {
 						Index::FullText(p) => {
-							let ft = catch!(
+							catch!(
 								txn,
-								FullTextIndex::new(
+								IndexOperation::index_fulltext_compaction(
 									&self.index_stores,
+									&ic,
 									&txn,
-									IndexKeyBase::new(
-										ic.ns,
-										ic.db,
-										ix.table_name.clone(),
-										ix.index_id
-									),
-									p,
+									p
 								)
 								.await
 							);
-							catch!(txn, ft.compaction(&txn).await);
 						}
 						Index::Count(_) => {
 							catch!(txn, IndexOperation::index_count_compaction(&ic, &txn).await);
+						}
+						Index::Hnsw(p) => {
+							let mut ctx = self.setup_ctx()?;
+							ctx.set_transaction(txn.clone());
+							let ctx = ctx.freeze();
+							catch!(
+								txn,
+								IndexOperation::index_hnsw_compaction(
+									&ctx,
+									&self.index_stores,
+									&ic,
+									&ix,
+									p
+								)
+								.await
+							);
 						}
 						_ => {
 							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);

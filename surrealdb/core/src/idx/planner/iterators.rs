@@ -1639,6 +1639,9 @@ where
 	}
 }
 
+/// For earch KNN result we have the RecordID, the distance (f64), and an optional record.
+/// Optimisation: The optional record is present if a filter has checked if the record is truthy has
+/// been used
 pub(crate) type KnnIteratorResult = (Arc<RecordId>, f64, Option<Arc<Record>>);
 
 pub(crate) struct KnnIterator {
