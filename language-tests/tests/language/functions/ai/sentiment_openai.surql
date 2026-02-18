@@ -9,8 +9,7 @@ wip = true
 # 3. Run: cargo run run ai/sentiment_openai
 
 [[test.results]]
-# The result should be an object with sentiment (number) and summary (string)
-match = "type::is::object($) AND $['sentiment'] >= -1 AND $['sentiment'] <= 1 AND ($['summary'] = 'positive' OR $['summary'] = 'negative' OR $['summary'] = 'mixed')"
+match = "type::is::object($) AND $['sentiment'] >= -1 AND $['sentiment'] <= 1 AND $['confidence'] >= 0 AND $['confidence'] <= 1 AND $['summary'] IN ['positive', 'negative', 'neutral']"
 
 [env]
 namespace = "test"

@@ -140,11 +140,14 @@ pub async fn chat(
 ///
 /// ```surql
 /// ai::sentiment('openai:gpt-4-turbo', 'I love this product!')
-/// -- Returns: { sentiment: 0.9, summary: 'positive' }
+/// -- Returns: { confidence: 0.95, sentiment: 0.9, summary: 'positive' }
 /// ```
 ///
-/// Returns an `object` with `sentiment` (number from -1 to 1) and
-/// `summary` (`'positive'`, `'negative'`, or `'mixed'`).
+/// Returns an `object` with `sentiment` (number from -1 to 1),
+/// `confidence` (number from 0 to 1), and `summary` (`'positive'`,
+/// `'negative'`, or `'neutral'`). The `summary` is derived from the
+/// `sentiment` score: values above 0.1 are `'positive'`, below -0.1
+/// are `'negative'`, and everything in between is `'neutral'`.
 #[cfg(not(feature = "ai"))]
 pub async fn sentiment(
 	_: (&FrozenContext, &Options),
@@ -174,7 +177,7 @@ pub(crate) fn build_sentiment_prompt(text: &str) -> String {
 		"Analyze the sentiment of the following text and respond with ONLY a valid JSON object \
 		 containing exactly two fields:\n\
 		 - \"sentiment\": a number from -1.0 (most negative) to 1.0 (most positive), where 0.0 is neutral\n\
-		 - \"summary\": exactly one of \"positive\", \"negative\", or \"mixed\"\n\n\
+		 - \"confidence\": a number from 0.0 to 1.0 indicating how confident you are in the analysis\n\n\
 		 Do not include any other text, markdown formatting, or explanation. Output only the JSON object.\n\n\
 		 Text: {text}"
 	)
@@ -257,37 +260,44 @@ pub(crate) fn parse_sentiment_response(raw: &str) -> Result<Value> {
 		});
 	}
 
-	// Extract and validate `summary`
-	let summary_val = obj.get("summary").ok_or_else(|| {
+	// Extract and validate `confidence`
+	let confidence_val = obj.get("confidence").ok_or_else(|| {
 		anyhow::anyhow!(Error::InvalidFunctionArguments {
 			name: "ai::sentiment".to_owned(),
-			message: "The model response is missing the 'summary' field".to_owned(),
+			message: "The model response is missing the 'confidence' field".to_owned(),
 		})
 	})?;
 
-	let summary = summary_val.as_str().ok_or_else(|| {
+	let confidence = confidence_val.as_f64().ok_or_else(|| {
 		anyhow::anyhow!(Error::InvalidFunctionArguments {
 			name: "ai::sentiment".to_owned(),
-			message: format!("The 'summary' field must be a string, got: {summary_val}"),
+			message: format!("The 'confidence' field must be a number, got: {confidence_val}"),
 		})
 	})?;
 
-	match summary {
-		"positive" | "negative" | "mixed" => {}
-		other => {
-			anyhow::bail!(Error::InvalidFunctionArguments {
-				name: "ai::sentiment".to_owned(),
-				message: format!(
-					"The 'summary' field must be one of 'positive', 'negative', or 'mixed', got: '{other}'"
-				),
-			});
-		}
+	if !(0.0..=1.0).contains(&confidence) {
+		anyhow::bail!(Error::InvalidFunctionArguments {
+			name: "ai::sentiment".to_owned(),
+			message: format!(
+				"The 'confidence' field must be between 0.0 and 1.0, got: {confidence}"
+			),
+		});
 	}
+
+	// Derive `summary` from the sentiment score
+	let summary = if sentiment > 0.1 {
+		"positive"
+	} else if sentiment < -0.1 {
+		"negative"
+	} else {
+		"neutral"
+	};
 
 	// Build the result object
 	let mut result = BTreeMap::new();
+	result.insert("confidence".to_string(), Value::from(confidence));
 	result.insert("sentiment".to_string(), Value::from(sentiment));
-	result.insert("summary".to_string(), Value::from(summary.to_owned()));
+	result.insert("summary".to_string(), Value::from(summary));
 	Ok(Value::Object(Object::from(result)))
 }
 
