@@ -4,12 +4,17 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::catalog::providers::TableProvider;
+use crate::exec::permission::{
+	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
+	resolve_select_permission, should_check_perms,
+};
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
+use crate::iam::Action;
 use crate::val::{RecordId, Value};
 
 /// Fetches related records for specified fields.
@@ -238,7 +243,8 @@ async fn fetch_value_if_record(
 	Ok(())
 }
 
-/// Fetch a single record by its ID.
+/// Fetch a single record by its ID, applying table-level and field-level
+/// permission checks.
 ///
 /// Uses the transaction record cache so repeated fetches of the same record
 /// within a transaction only hit the datastore once.
@@ -265,6 +271,36 @@ pub(crate) async fn fetch_record(
 		return Ok(Value::None);
 	}
 	val.def(rid.clone());
+
+	let check_perms = should_check_perms(&db_ctx, Action::View)
+		.map_err(|e| crate::expr::ControlFlow::Err(e.into()))?;
+
+	if check_perms {
+		let table_def =
+			db_ctx.get_table_def(&rid.table).await.map_err(crate::expr::ControlFlow::Err)?;
+		let catalog_perm = resolve_select_permission(table_def.as_deref());
+		let select_perm = convert_permission_to_physical(catalog_perm, ctx.ctx())
+			.await
+			.map_err(|e| crate::expr::ControlFlow::Err(e.into()))?;
+
+		match &select_perm {
+			PhysicalPermission::Deny => return Ok(Value::None),
+			PhysicalPermission::Allow => {}
+			PhysicalPermission::Conditional(_) => {
+				let allowed = check_permission_for_value(&select_perm, &val, ctx)
+					.await
+					.map_err(|e| crate::expr::ControlFlow::Err(e.into()))?;
+				if !allowed {
+					return Ok(Value::None);
+				}
+			}
+		}
+
+		let field_state =
+			super::scan::pipeline::build_field_state(ctx, &rid.table, true, None).await?;
+		super::scan::pipeline::filter_fields_by_permission(ctx, &field_state, &mut val).await?;
+	}
+
 	Ok(val)
 }
 

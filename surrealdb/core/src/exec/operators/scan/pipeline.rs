@@ -483,10 +483,13 @@ pub(crate) async fn build_field_state_raw(
 		.context("Failed to get field definitions")?;
 
 	// Fast path: if there are no computed fields and no field-level permissions
-	// that need checking, skip the expensive resolution.
+	// that need checking, skip the expensive resolution. Both Permission::None
+	// (deny) and Permission::Specific (conditional) require enforcement.
 	let has_computed = field_defs.iter().any(|fd| fd.computed.is_some());
-	let has_field_perms =
-		check_perms && field_defs.iter().any(|fd| fd.select_permission.is_specific());
+	let has_field_perms = check_perms
+		&& field_defs
+			.iter()
+			.any(|fd| !matches!(fd.select_permission, crate::catalog::Permission::Full));
 	if !has_computed && !has_field_perms {
 		return Ok(FieldState::empty());
 	}

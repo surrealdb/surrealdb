@@ -176,6 +176,65 @@ pub(crate) async fn fetch_record_with_computed_fields(
 	// Ensure the record has its ID
 	result.def(rid.clone());
 
+	// Apply table-level and field-level permission checks
+	let db_ctx = ctx.exec_ctx.database().map_err(|e| anyhow::anyhow!("{}", e))?;
+	let check_perms =
+		crate::exec::permission::should_check_perms(&db_ctx, crate::iam::Action::View)
+			.map_err(|e| anyhow::anyhow!("{}", e))?;
+
+	if check_perms {
+		let table_def = db_ctx
+			.get_table_def(&rid.table)
+			.await
+			.map_err(|e| anyhow::anyhow!("Failed to get table definition: {}", e))?;
+		let catalog_perm = crate::exec::permission::resolve_select_permission(table_def.as_deref());
+		let select_perm = crate::exec::permission::convert_permission_to_physical(
+			catalog_perm,
+			ctx.exec_ctx.ctx(),
+		)
+		.await
+		.map_err(|e| anyhow::anyhow!("{}", e))?;
+
+		match &select_perm {
+			crate::exec::permission::PhysicalPermission::Deny => return Ok(Value::None),
+			crate::exec::permission::PhysicalPermission::Allow => {}
+			crate::exec::permission::PhysicalPermission::Conditional(_) => {
+				let allowed = crate::exec::permission::check_permission_for_value(
+					&select_perm,
+					&result,
+					ctx.exec_ctx,
+				)
+				.await
+				.map_err(|e| anyhow::anyhow!("{}", e))?;
+				if !allowed {
+					return Ok(Value::None);
+				}
+			}
+		}
+
+		let field_state = crate::exec::operators::scan::pipeline::build_field_state(
+			ctx.exec_ctx,
+			&rid.table,
+			true,
+			None,
+		)
+		.await
+		.map_err(|cf| match cf {
+			crate::expr::ControlFlow::Err(e) => e,
+			other => anyhow::anyhow!("{}", other),
+		})?;
+		crate::exec::operators::scan::pipeline::filter_fields_by_permission(
+			ctx.exec_ctx,
+			&field_state,
+			&mut result,
+		)
+		.await
+		.map_err(|cf| match cf {
+			crate::expr::ControlFlow::Err(e) => e,
+			other => anyhow::anyhow!("{}", other),
+		})?;
+	}
+
 	Ok(result)
 }
 
