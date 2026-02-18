@@ -18,7 +18,7 @@ use crate::cnf::HTTP_MAX_IMPORT_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::ntw::output::Output;
 
-pub(super) fn router<S>() -> Router<S>
+pub fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
@@ -51,7 +51,7 @@ async fn handler(
 		Ok(res) => {
 			match accept.as_deref() {
 				// Simple serialization
-				Some(Accept::ApplicationJson) => {
+				None | Some(Accept::ApplicationJson) => {
 					// TODO(3.0): This code here is using the wrong serialization method which might
 					// result in some values of the code being serialized wrong.
 					//
@@ -72,8 +72,8 @@ async fn handler(
 					let res = res.into_value();
 					Ok(Output::flatbuffers(&res))
 				}
-				// An incorrect content-type was requested
-				_ => Err(NetError::InvalidType.into()),
+				// An unsupported content-type was requested
+				Some(_) => Err(NetError::InvalidType.into()),
 			}
 		}
 		// There was an error when executing the query

@@ -8,99 +8,96 @@ auth = { namespace = "test", database = "test", access = "user", rid = "user:tes
 [test]
 reason = "Test API permission checks for record users at method-level, route-level, and global config levels"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 # Method-Level Permissions Tests
 # 0 - Method-level PERMISSIONS NONE should deny (returns ApiResponse with 403)
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'Permission denied: You are not allowed to access this resource', context: {  }, headers: {  }, status: 403 }"
+value = "{ body: 'Permission denied: You are not allowed to access this resource', headers: {  }, status: 403 }"
 
 # 1 - Method-level PERMISSIONS FULL should allow
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { allowed: true }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { allowed: true }, headers: {}, status: 200 }"
 
 # 2 - Method-level PERMISSIONS WHERE true should allow
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { allowed: true }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { allowed: true }, headers: {}, status: 200 }"
 
 # 3 - Method-level PERMISSIONS WHERE false should deny (returns ApiResponse with 403)
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'Permission denied: You are not allowed to access this resource', context: {  }, headers: {  }, status: 403 }"
+value = "{ body: 'Permission denied: You are not allowed to access this resource', headers: {  }, status: 403 }"
 
 # Route-Level Permissions Tests
 # 4 - Route-level PERMISSIONS NONE should deny (returns ApiResponse with 403)
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'Permission denied: You are not allowed to access this resource', context: {  }, headers: {  }, status: 403 }"
+value = "{ body: 'Permission denied: You are not allowed to access this resource', headers: {  }, status: 403 }"
 
 # 5 - Route-level PERMISSIONS FULL should allow
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { allowed: true }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { allowed: true }, headers: {}, status: 200 }"
 
 # 6 - Route-level PERMISSIONS WHERE true should allow
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { allowed: true }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { allowed: true }, headers: {}, status: 200 }"
 
 # 7 - Route-level PERMISSIONS WHERE false should deny (returns ApiResponse with 403)
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'Permission denied: You are not allowed to access this resource', context: {  }, headers: {  }, status: 403 }"
+value = "{ body: 'Permission denied: You are not allowed to access this resource', headers: {  }, status: 403 }"
 
 # Global API Config Permissions Tests
 # 8 - Global config PERMISSIONS NONE was set, but then reset to FULL before invocation
 # Note: Global config is checked at runtime, so this API allows because global config is FULL when invoked
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: {}, context: {  }, headers: {}, status: 200 }"
+value = "{ body: {}, headers: {}, status: 200 }"
 
 # 9 - Global config PERMISSIONS WHERE true should allow
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { allowed: true }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { allowed: true }, headers: {}, status: 200 }"
 
 # 10 - Global config PERMISSIONS WHERE false was set, but then reset to FULL before invocation
 # Note: Global config is checked at runtime, so this API allows because global config is FULL when invoked
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: {}, context: {  }, headers: {}, status: 200 }"
+value = "{ body: {}, headers: {}, status: 200 }"
 
 # Permission Evaluation Order Tests
 # 11 - Method-level NONE blocks even if route-level is FULL (returns ApiResponse with 403)
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'Permission denied: You are not allowed to access this resource', context: {  }, headers: {  }, status: 403 }"
+value = "{ body: 'Permission denied: You are not allowed to access this resource', headers: {  }, status: 403 }"
 
 # 12 - Route-level NONE blocks even if global config is FULL (returns ApiResponse with 403)
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'Permission denied: You are not allowed to access this resource', context: {  }, headers: {  }, status: 403 }"
+value = "{ body: 'Permission denied: You are not allowed to access this resource', headers: {  }, status: 403 }"
 
 # 13 - Method-level WHERE false blocks even if route-level is FULL (returns ApiResponse with 403)
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'Permission denied: You are not allowed to access this resource', context: {  }, headers: {  }, status: 403 }"
+value = "{ body: 'Permission denied: You are not allowed to access this resource', headers: {  }, status: 403 }"
 
 # 14 - Route-level WHERE false blocks even if global config is FULL (returns ApiResponse with 403)
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'Permission denied: You are not allowed to access this resource', context: {  }, headers: {  }, status: 403 }"
+value = "{ body: 'Permission denied: You are not allowed to access this resource', headers: {  }, status: 403 }"
 
 # 15 - All levels FULL should allow
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { allowed: true }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { allowed: true }, headers: {}, status: 200 }"
 
 # 16 - Method-level WHERE true, route-level WHERE true, global FULL should allow
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { allowed: true }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { allowed: true }, headers: {}, status: 200 }"
 */
 
 // ============================================================================

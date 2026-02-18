@@ -2,7 +2,6 @@ mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
 use surrealdb_types::{Array, Number, Table, Value};
 
@@ -3884,10 +3883,9 @@ async fn function_outside_database() -> Result<()> {
 	let ses = Session::owner().with_ns("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
-	assert_eq!(
-		res.remove(0).result.unwrap_err(),
-		DbResultError::InternalError("Specify a database to use".to_string())
-	);
+	let err = res.remove(0).result.unwrap_err();
+	assert!(err.is_validation());
+	assert_eq!(err.message(), "Specify a database to use");
 
 	Ok(())
 }

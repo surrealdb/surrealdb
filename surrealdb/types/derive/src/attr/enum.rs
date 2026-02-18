@@ -8,6 +8,10 @@ pub struct EnumAttributes {
 	pub tag: Option<String>,
 	/// Content field name for adjacently tagged enums
 	pub content: Option<String>,
+	/// Optional function path to check whether to skip the content field during serialization.
+	/// When set, the function is called with `&Value` for non-unit variants; unit variants
+	/// always skip the content field. Used with adjacently tagged enums (`tag` + `content`).
+	pub skip_content_if: Option<String>,
 	/// Whether to transform variant names to uppercase
 	pub casing: Option<Casing>,
 }
@@ -32,6 +36,12 @@ impl EnumAttributes {
 							&& let Ok(lit_str) = value.parse::<LitStr>()
 						{
 							enum_attrs.content = Some(lit_str.value());
+						}
+					} else if meta.path.is_ident("skip_content_if") {
+						if let Ok(value) = meta.value()
+							&& let Ok(lit_str) = value.parse::<LitStr>()
+						{
+							enum_attrs.skip_content_if = Some(lit_str.value());
 						}
 					} else if meta.path.is_ident("uppercase") {
 						enum_attrs.casing = Some(Casing::Uppercase);

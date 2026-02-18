@@ -1,8 +1,10 @@
-use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::{NewPlannerStrategy, Session};
 use surrealdb_core::dbs::capabilities::{Capabilities, Targets};
 use surrealdb_types::Value as SurValue;
 
-use crate::tests::schema::{AuthLevel, BoolOr, SchemaTarget, TestAuth, TestConfig};
+use crate::tests::schema::{
+	AuthLevel, BoolOr, NewPlannerStrategyConfig, SchemaTarget, TestAuth, TestConfig,
+};
 
 /// Creates the right core capabilities from a test config.
 pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
@@ -64,7 +66,12 @@ pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
 /// Creates the right core capabilities from a test config.
 pub fn session_from_test_config(config: &TestConfig) -> Session {
 	let Some(env) = config.env.as_ref() else {
-		return Session::owner().with_ns("test").with_db("test");
+		let mut session = Session::owner()
+			.with_ns("test")
+			.with_db("test")
+			.new_planner_strategy(NewPlannerStrategy::AllReadOnlyStatements);
+		session.redact_volatile_explain_attrs = true;
+		return session;
 	};
 
 	let ns = env.namespace();
@@ -120,6 +127,25 @@ pub fn session_from_test_config(config: &TestConfig) -> Session {
 
 	session.ns = ns.map(|x| x.to_owned());
 	session.db = db.map(|x| x.to_owned());
+
+	// Set the new planner strategy.
+	// Language tests default to AllReadOnlyStatements so that any read-only
+	// statement that can't be planned by the new executor is a hard error.
+	// Individual tests can override this via [env] new-planner-strategy.
+	session.new_planner_strategy = match &env.new_planner_strategy {
+		Some(NewPlannerStrategyConfig::BestEffortRo) => {
+			NewPlannerStrategy::BestEffortReadOnlyStatements
+		}
+		Some(NewPlannerStrategyConfig::ComputeOnly) => NewPlannerStrategy::ComputeOnly,
+		Some(NewPlannerStrategyConfig::AllRo) | None => {
+			NewPlannerStrategy::AllReadOnlyStatements
+		}
+	};
+
+	// Default to redacting durations for deterministic EXPLAIN ANALYZE output.
+	// Tests can override with `redact-volatile-explain-attrs = false` in [env] if they need
+	// actual elapsed times.
+	session.redact_volatile_explain_attrs = env.redact_volatile_explain_attrs.unwrap_or(true);
 
 	session
 }

@@ -1,6 +1,7 @@
 use chrono::offset::TimeZone;
 use chrono::{NaiveDate, Offset, Utc};
 
+use crate::catalog::EventKind;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::{
 	AccessType, BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccess, JwtAccessIssue,
@@ -1246,7 +1247,7 @@ fn parse_define_access_record() {
 			}))),
 		);
 	}
-	// TODO: Parameterization broke the guarentee that token duration is not none.
+	// TODO: Parameterization broke the guarantee that token duration is not none.
 	/*
 	// kjjification with JWT is explicitly defined only with symmetric key. Token
 	// duration is none.
@@ -1570,7 +1571,7 @@ fn parse_define_table() {
 		Expr::Define(Box::new(DefineStatement::Table(DefineTableStatement {
 			kind: DefineKind::Default,
 			id: None,
-			name: Expr::Idiom(Idiom::field("name".to_string())),
+			name: Expr::Table("name".to_string()),
 			drop: true,
 			full: true,
 			view: Some(crate::sql::View {
@@ -1606,7 +1607,8 @@ fn parse_define_table() {
 #[test]
 fn parse_define_event() {
 	let res = syn::parse_with(
-		r#"DEFINE EVENT event ON TABLE table WHEN null THEN null,none"#.as_bytes(),
+		r#"DEFINE EVENT event ON TABLE table WHEN null THEN null,none ASYNC RETRY 5 MAXDEPTH 64"#
+			.as_bytes(),
 		async |parser, stk| parser.parse_expr_inherit(stk).await,
 	)
 	.unwrap();
@@ -1616,10 +1618,14 @@ fn parse_define_event() {
 		Expr::Define(Box::new(DefineStatement::Event(DefineEventStatement {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field("event".to_string())),
-			target_table: Expr::Idiom(Idiom::field("table".to_string())),
+			target_table: Expr::Table("table".to_string()),
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: Expr::Literal(Literal::None),
+			event_kind: EventKind::Async {
+				retry: 5,
+				max_depth: 64,
+			}
 		})))
 	)
 }
@@ -1640,7 +1646,7 @@ fn parse_define_field() {
 					Part::All,
 					Part::Flatten,
 				])),
-				what: Expr::Idiom(Idiom::field("bar".to_string())),
+				what: Expr::Table("bar".to_string()),
 				field_kind: Some(Kind::Either(vec![
 					Kind::None,
 					Kind::Number,
@@ -1687,7 +1693,7 @@ fn parse_define_index() {
 		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field("index".to_string())),
-			what: Expr::Idiom(Idiom::field("table".to_string())),
+			what: Expr::Table("table".to_string()),
 			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())])),],
 			index: Index::FullText(FullTextParams {
 				az: "ana".to_owned(),
@@ -1713,7 +1719,7 @@ fn parse_define_index() {
 		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field("index".to_string())),
-			what: Expr::Idiom(Idiom::field("table".to_string())),
+			what: Expr::Table("table".to_string()),
 			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
 			index: Index::Uniq,
 			comment: Expr::Literal(Literal::None),
@@ -1728,7 +1734,7 @@ fn parse_define_index() {
 		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field("index".to_string())),
-			what: Expr::Idiom(Idiom::field("table".to_string())),
+			what: Expr::Table("table".to_string()),
 			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
 			index: Index::Hnsw(HnswParams {
 				dimension: 128,
@@ -1933,11 +1939,7 @@ fn parse_info() {
 	.unwrap();
 	assert_eq!(
 		res,
-		Expr::Info(Box::new(InfoStatement::Tb(
-			Expr::Idiom(Idiom::field("table".to_string())),
-			false,
-			None
-		)))
+		Expr::Info(Box::new(InfoStatement::Tb(Expr::Table("table".to_string()), false, None)))
 	);
 
 	let res = syn::parse_with("INFO FOR USER user".as_bytes(), async |parser, stk| {

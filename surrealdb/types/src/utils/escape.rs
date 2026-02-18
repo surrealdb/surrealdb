@@ -4,6 +4,10 @@ use crate::{SqlFormat, ToSql};
 
 pub struct EscapeWriter<W> {
 	escape_char: char,
+	/// When true, newline characters are written literally instead of being
+	/// escaped as `\n`. This produces more readable output while remaining
+	/// valid SurrealQL (the parser accepts literal newlines in strings).
+	preserve_newlines: bool,
 	writer: W,
 }
 
@@ -11,6 +15,16 @@ impl<'a> EscapeWriter<&'a mut String> {
 	fn escape<D: Display + ?Sized>(into: &'a mut String, escape: char, display: &D) {
 		Self {
 			escape_char: escape,
+			preserve_newlines: false,
+			writer: into,
+		}
+		.write(display)
+	}
+
+	fn escape_pretty<D: Display + ?Sized>(into: &'a mut String, escape: char, display: &D) {
+		Self {
+			escape_char: escape,
+			preserve_newlines: true,
 			writer: into,
 		}
 		.write(display)
@@ -40,6 +54,9 @@ impl<W: Write> Write for EscapeWriter<W> {
 			'\t' => {
 				self.writer.write_str("\\t")?;
 			}
+			'\n' if self.preserve_newlines => {
+				self.writer.write_char('\n')?;
+			}
 			'\n' => {
 				self.writer.write_str("\\n")?;
 			}
@@ -66,7 +83,7 @@ impl<W: Write> Write for EscapeWriter<W> {
 
 pub struct QuoteStr<'a>(pub &'a str);
 impl ToSql for QuoteStr<'_> {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let s = self.0;
 		let quote = if s.contains('\'') {
 			'\"'
@@ -75,7 +92,11 @@ impl ToSql for QuoteStr<'_> {
 		};
 
 		f.push(quote);
-		EscapeWriter::escape(f, quote, self.0);
+		if fmt.is_pretty() {
+			EscapeWriter::escape_pretty(f, quote, self.0);
+		} else {
+			EscapeWriter::escape(f, quote, self.0);
+		}
 		f.push(quote);
 	}
 }

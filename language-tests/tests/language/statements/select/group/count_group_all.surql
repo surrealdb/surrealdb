@@ -1,4 +1,7 @@
 /**
+[env]
+new-planner-strategy = "compute-only"
+
 [test]
 
 [[test.results]]

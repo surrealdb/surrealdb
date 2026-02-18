@@ -3,17 +3,46 @@
 use std::collections::HashSet;
 use std::mem;
 
+use surrealdb_core::dbs::NewPlannerStrategy;
 use surrealdb_core::dbs::capabilities::{
 	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, ParseFuncTargetError,
 	ParseNetTargetError, Targets,
 };
 
+/// Strategy for the streaming query planner.
+///
+/// Controls how the new streaming planner/executor is used for query processing.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum PlannerStrategy {
+	/// Try the new planner for read-only statements, fall back to compute on unimplemented.
+	/// This is the default.
+	BestEffort,
+	/// Skip the new planner entirely; always use the compute executor.
+	ComputeOnly,
+	/// Require the new planner for all read-only statements.
+	/// Unimplemented features become hard errors instead of falling back.
+	AllReadOnly,
+}
+
+/// Not public API
+#[doc(hidden)]
+impl From<PlannerStrategy> for NewPlannerStrategy {
+	fn from(strategy: PlannerStrategy) -> Self {
+		match strategy {
+			PlannerStrategy::BestEffort => NewPlannerStrategy::BestEffortReadOnlyStatements,
+			PlannerStrategy::ComputeOnly => NewPlannerStrategy::ComputeOnly,
+			PlannerStrategy::AllReadOnly => NewPlannerStrategy::AllReadOnlyStatements,
+		}
+	}
+}
+
 /// A list of features that are still experimental
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub enum ExperimentalFeature {
-	GraphQl,
-	DefineApi,
+	/// Enable the Files feature.
+	Files,
+	/// Enable Surrealism feature.
 	Surrealism,
 }
 
@@ -22,8 +51,7 @@ pub enum ExperimentalFeature {
 impl From<&ExperimentalFeature> for ExperimentalTarget {
 	fn from(feature: &ExperimentalFeature) -> Self {
 		match feature {
-			ExperimentalFeature::GraphQl => ExperimentalTarget::GraphQL,
-			ExperimentalFeature::DefineApi => ExperimentalTarget::DefineApi,
+			ExperimentalFeature::Files => ExperimentalTarget::Files,
 			ExperimentalFeature::Surrealism => ExperimentalTarget::Surrealism,
 		}
 	}
@@ -183,6 +211,21 @@ impl Capabilities {
 	pub fn with_live_query_notifications(self, enabled: bool) -> Self {
 		Self {
 			cap: self.cap.with_live_query_notifications(enabled),
+		}
+	}
+
+	/// Set the planner strategy for query processing.
+	///
+	/// Controls how the streaming query planner/executor is used:
+	/// - [`PlannerStrategy::BestEffort`] (default): Try the new planner for read-only statements,
+	///   fall back to compute on unimplemented features.
+	/// - [`PlannerStrategy::ComputeOnly`]: Skip the new planner entirely; always use the compute
+	///   executor.
+	/// - [`PlannerStrategy::AllReadOnly`]: Require the new planner for all read-only statements.
+	///   Unimplemented features become hard errors.
+	pub fn with_planner_strategy(self, strategy: PlannerStrategy) -> Self {
+		Self {
+			cap: self.cap.with_planner_strategy(strategy.into()),
 		}
 	}
 

@@ -35,7 +35,7 @@ impl Datetime {
 		Self(Utc::now())
 	}
 
-	/// Convert into the inner DateTime<Utc>
+	/// Convert into the inner `DateTime<Utc>`
 	pub fn into_inner(self) -> DateTime<Utc> {
 		self.0
 	}

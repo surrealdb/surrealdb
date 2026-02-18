@@ -21,6 +21,9 @@ use rocksdb::{
 };
 use tokio::sync::Mutex;
 
+use super::Direction;
+use super::api::ScanLimit;
+use super::config::{RocksDbConfig, SyncMode};
 use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
@@ -66,7 +69,7 @@ pub struct Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new(path: &str) -> Result<Datastore> {
+	pub(crate) async fn new(path: &str, config: RocksDbConfig) -> Result<Datastore> {
 		// Configure custom options
 		let mut opts = Options::default();
 		// Ensure we use fdatasync
@@ -155,8 +158,6 @@ impl Datastore {
 		// Improve concurrency from write batch mutex
 		info!(target: TARGET, "Allow adaptive write thread yielding: true");
 		opts.set_enable_write_thread_adaptive_yield(true);
-		// Log if writes should be synced
-		info!(target: TARGET, "Wait for disk sync acknowledgement: {}", *cnf::SYNC_DATA);
 		// Set the delete compaction factory
 		info!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
 			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
@@ -203,10 +204,15 @@ impl Datastore {
 		let memory_manager = Arc::new(MemoryManager::configure(&mut opts)?);
 		// Pre-configure the disk space manager
 		let should_create_disk_space_manager = DiskSpaceManager::configure(&mut opts)?;
-		// Pre-configure the background flusher
-		let should_create_background_flusher = BackgroundFlusher::configure(&mut opts)?;
-		// Pre-configure the commit coordinator
-		let should_create_commit_coordinator = CommitCoordinator::configure(&mut opts)?;
+		// Pre-configure WAL options based on the resolved sync mode
+		match config.sync_mode {
+			// Pre-configure the background flusher
+			SyncMode::Interval(_) => BackgroundFlusher::configure(&mut opts, &config),
+			// Pre-configure the commit coordinator
+			SyncMode::Every => CommitCoordinator::configure(&mut opts, &config),
+			// No configuration needed
+			SyncMode::Never => {}
+		};
 		// Create the disk space manager if enabled
 		let disk_space_manager = if should_create_disk_space_manager {
 			Some(Arc::new(DiskSpaceManager::new(&mut opts)?))
@@ -215,18 +221,27 @@ impl Datastore {
 		};
 		// Open the database
 		let db = Arc::pin(OptimisticTransactionDB::open(&opts, path)?);
-		// Create the background flusher if enabled
-		let background_flusher = if should_create_background_flusher {
-			Some(Arc::new(BackgroundFlusher::new(db.clone())?))
-		} else {
-			None
-		};
 		// Create the commit coordinator if enabled
-		let commit_coordinator = if should_create_commit_coordinator {
+		let commit_coordinator = if let SyncMode::Every = config.sync_mode {
 			Some(Arc::new(CommitCoordinator::new(db.clone())?))
 		} else {
 			None
 		};
+		// Create the background flusher if enabled
+		let background_flusher = if let SyncMode::Interval(interval) = config.sync_mode {
+			Some(Arc::new(BackgroundFlusher::new(db.clone(), interval)?))
+		} else {
+			None
+		};
+		// Defer to the operating system buffers for disk sync. This means that the
+		// transaction commits are written to WAL on commit, but are then flushed
+		// to disk by the operating system at an unspecified time. In the event of
+		// a system crash, data may be lost if the operating system has not yet
+		// synced the data to disk.
+		if let SyncMode::Never = config.sync_mode {
+			info!(target: TARGET, "Sync mode: never (handled by the OS");
+			opts.set_manual_wal_flush(false);
+		}
 		// Register the memory manager with the global allocator tracker
 		memory_manager.register_with_allocator_tracker();
 		// Return the datastore
@@ -318,12 +333,10 @@ impl Datastore {
 		to.set_snapshot(true);
 		// Set the write options
 		let mut wo = WriteOptions::default();
-		// If the user has enabled synced transaction writes and disabled grouped commit,
-		// we enable per-transaction sync. This means that the transaction commits are written
-		// to WAL on commit, and are then flushed to disk before the transaction is considered
-		// completed. In the event of a system crash, data will not be lost after a transaction
-		// has been confirmed to be committed.
-		wo.set_sync(*cnf::SYNC_DATA && !*cnf::ROCKSDB_GROUPED_COMMIT);
+		// Per-transaction sync is never used. When sync=every is configured, the commit
+		// coordinator handles grouped fsync after parallel transaction commits. When
+		// sync=<interval> or sync=never, no per-transaction fsync is needed either.
+		wo.set_sync(false);
 		// Create a new transaction
 		let inner = self.db.transaction_opt(&wo, &to);
 		// SAFETY: The transaction lifetime is tied to the database through the db field.
@@ -696,7 +709,11 @@ impl Transactable for Transaction {
 
 	/// Count the total number of keys within a range.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn count(&self, rng: Range<Key>) -> Result<usize> {
+	async fn count(&self, rng: Range<Key>, version: Option<u64>) -> Result<usize> {
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -740,7 +757,13 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keys(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
 		// RocksDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
@@ -749,8 +772,6 @@ impl Transactable for Transaction {
 		if self.closed() {
 			return Err(Error::TransactionFinished);
 		}
-		// Create result set
-		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -770,16 +791,8 @@ impl Transactable for Transaction {
 		let mut iter = inner.raw_iterator_opt(ro);
 		// Seek to the start key
 		iter.seek(&rng.start);
-		// Check the scan limit
-		while res.len() < limit as usize {
-			// Check the key and value
-			if let Some(k) = iter.key() {
-				res.push(k.to_vec());
-				iter.next();
-			} else {
-				break;
-			}
-		}
+		// Consume the iterator
+		let res = consume_keys(&mut iter, limit, skip, Direction::Forward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -788,7 +801,13 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys, in reverse.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keysr(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
 		// RocksDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
@@ -797,8 +816,6 @@ impl Transactable for Transaction {
 		if self.closed() {
 			return Err(Error::TransactionFinished);
 		}
-		// Create result set
-		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -818,16 +835,8 @@ impl Transactable for Transaction {
 		let mut iter = inner.raw_iterator_opt(ro);
 		// Seek to the start key
 		iter.seek_for_prev(&rng.end);
-		// Check the scan limit
-		while res.len() < limit as usize {
-			// Check the key and value
-			if let Some(k) = iter.key() {
-				res.push(k.to_vec());
-				iter.prev();
-			} else {
-				break;
-			}
-		}
+		// Consume the iterator
+		let res = consume_keys(&mut iter, limit, skip, Direction::Backward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -839,7 +848,8 @@ impl Transactable for Transaction {
 	async fn scan(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// RocksDB does not support versioned queries.
@@ -850,8 +860,6 @@ impl Transactable for Transaction {
 		if self.closed() {
 			return Err(Error::TransactionFinished);
 		}
-		// Create result set
-		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -871,16 +879,8 @@ impl Transactable for Transaction {
 		let mut iter = inner.raw_iterator_opt(ro);
 		// Seek to the start key
 		iter.seek(&rng.start);
-		// Check the scan limit
-		while res.len() < limit as usize {
-			// Check the key and value
-			if let Some((k, v)) = iter.item() {
-				res.push((k.to_vec(), v.to_vec()));
-				iter.next();
-			} else {
-				break;
-			}
-		}
+		// Consume the iterator
+		let res = consume_vals(&mut iter, limit, skip, Direction::Forward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -892,7 +892,8 @@ impl Transactable for Transaction {
 	async fn scanr(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// RocksDB does not support versioned queries.
@@ -903,8 +904,6 @@ impl Transactable for Transaction {
 		if self.closed() {
 			return Err(Error::TransactionFinished);
 		}
-		// Create result set
-		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -924,16 +923,8 @@ impl Transactable for Transaction {
 		let mut iter = inner.raw_iterator_opt(ro);
 		// Seek to the start key
 		iter.seek_for_prev(&rng.end);
-		// Check the scan limit
-		while res.len() < limit as usize {
-			// Check the key and value
-			if let Some((k, v)) = iter.item() {
-				res.push((k.to_vec(), v.to_vec()));
-				iter.prev();
-			} else {
-				break;
-			}
-		}
+		// Consume the iterator
+		let res = consume_vals(&mut iter, limit, skip, Direction::Backward);
 		// Drop the iterator
 		drop(iter);
 		// Return result
@@ -970,5 +961,175 @@ impl Transactable for Transaction {
 		};
 		self.db.compact_range(start, end);
 		Ok(())
+	}
+}
+
+// Consume and iterate over only keys
+fn consume_keys<D: rocksdb::DBAccess>(
+	iter: &mut rocksdb::DBRawIteratorWithThreadMode<'_, D>,
+	limit: ScanLimit,
+	skip: u32,
+	dir: Direction,
+) -> Vec<Key> {
+	// Skip entries efficiently without allocation
+	for _ in 0..skip {
+		if iter.item().is_some() {
+			match dir {
+				Direction::Forward => iter.next(),
+				Direction::Backward => iter.prev(),
+			}
+		} else {
+			return Vec::new();
+		}
+	}
+	match limit {
+		ScanLimit::Count(c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Check that we don't exceed the count limit
+			while res.len() < c as usize {
+				// Check the key and value
+				if let Some((k, _)) = iter.item() {
+					res.push(k.to_vec());
+					match dir {
+						Direction::Forward => iter.next(),
+						Direction::Backward => iter.prev(),
+					};
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::Bytes(b) => {
+			// Create the result set
+			let mut res = Vec::with_capacity((b as usize / 128).min(4096)); // Assuming 128 bytes per entry
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the byte limit
+			while bytes_fetched < b as usize {
+				// Check the key and value
+				if let Some((k, _)) = iter.item() {
+					bytes_fetched += k.len();
+					res.push(k.to_vec());
+					match dir {
+						Direction::Forward => iter.next(),
+						Direction::Backward => iter.prev(),
+					};
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::BytesOrCount(b, c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the count limit AND the byte limit
+			while res.len() < c as usize && bytes_fetched < b as usize {
+				// Check the key and value
+				if let Some((k, _)) = iter.item() {
+					bytes_fetched += k.len();
+					res.push(k.to_vec());
+					match dir {
+						Direction::Forward => iter.next(),
+						Direction::Backward => iter.prev(),
+					};
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+	}
+}
+
+// Consume and iterate over keys and values
+fn consume_vals<D: rocksdb::DBAccess>(
+	iter: &mut rocksdb::DBRawIteratorWithThreadMode<'_, D>,
+	limit: ScanLimit,
+	skip: u32,
+	dir: Direction,
+) -> Vec<(Key, Val)> {
+	// Skip entries efficiently without allocation
+	for _ in 0..skip {
+		if iter.item().is_some() {
+			match dir {
+				Direction::Forward => iter.next(),
+				Direction::Backward => iter.prev(),
+			}
+		} else {
+			return Vec::new();
+		}
+	}
+	match limit {
+		ScanLimit::Count(c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Check that we don't exceed the count limit
+			while res.len() < c as usize {
+				// Check the key and value
+				if let Some((k, v)) = iter.item() {
+					res.push((k.to_vec(), v.to_vec()));
+					match dir {
+						Direction::Forward => iter.next(),
+						Direction::Backward => iter.prev(),
+					};
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::Bytes(b) => {
+			// Create the result set
+			let mut res = Vec::with_capacity((b as usize / 512).min(4096)); // Assuming 512 bytes per entry
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the byte limit
+			while bytes_fetched < b as usize {
+				// Check the key and value
+				if let Some((k, v)) = iter.item() {
+					bytes_fetched += k.len() + v.len();
+					res.push((k.to_vec(), v.to_vec()));
+					match dir {
+						Direction::Forward => iter.next(),
+						Direction::Backward => iter.prev(),
+					};
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::BytesOrCount(b, c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the count limit AND the byte limit
+			while res.len() < c as usize && bytes_fetched < b as usize {
+				// Check the key and value
+				if let Some((k, v)) = iter.item() {
+					bytes_fetched += k.len() + v.len();
+					res.push((k.to_vec(), v.to_vec()));
+					match dir {
+						Direction::Forward => iter.next(),
+						Direction::Backward => iter.prev(),
+					};
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
 	}
 }

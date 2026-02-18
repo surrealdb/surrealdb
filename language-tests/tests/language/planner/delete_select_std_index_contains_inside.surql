@@ -1,4 +1,6 @@
 /**
+[env]
+new-planner-strategy = "compute-only"
 
 [test]
 

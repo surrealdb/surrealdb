@@ -1,9 +1,11 @@
 [package]
 name = "surrealml-core"
-version = "0.1.9"
-edition = "2021"
+version = "0.1.11"
+edition.workspace = true
 description = "The core machine learning library for SurrealML that enables SurrealDB to store and load ML models"
-license-file = "LICENSE"
+repository.workspace = true
+homepage.workspace = true
+license-file.workspace = true
 
 [features]
 default = []

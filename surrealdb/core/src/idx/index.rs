@@ -16,7 +16,9 @@
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
+use uuid::Uuid;
 
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{
 	DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition, NamespaceId, TableId,
 };
@@ -27,6 +29,7 @@ use crate::expr::{Cond, Part};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::planner::iterators::IndexCountThingIterator;
+use crate::idx::trees::store::IndexStores;
 use crate::key;
 use crate::key::index::iu::IndexCountKey;
 use crate::key::root::ic::IndexCompactionKey;
@@ -85,7 +88,7 @@ impl<'a> IndexOperation<'a> {
 			Index::Uniq => self.index_unique().await,
 			Index::Idx => self.index_non_unique().await,
 			Index::FullText(p) => self.index_fulltext(stk, p, require_compaction).await,
-			Index::Hnsw(p) => self.index_hnsw(p).await,
+			Index::Hnsw(p) => self.index_hnsw(p, require_compaction).await,
 			Index::Count(c) => self.index_count(stk, c.as_ref(), require_compaction).await,
 		}
 	}
@@ -235,6 +238,38 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
+	pub(crate) async fn index_fulltext_compaction(
+		ixs: &IndexStores,
+		ic: &IndexCompactionKey<'_>,
+		tx: &Transaction,
+		p: &FullTextParams,
+	) -> Result<()> {
+		let ft = FullTextIndex::new(
+			ixs,
+			tx,
+			IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix),
+			p,
+		)
+		.await?;
+		ft.compaction(tx).await?;
+		Ok(())
+	}
+
+	pub(crate) async fn index_hnsw_compaction(
+		ctx: &FrozenContext,
+		ixs: &IndexStores,
+		ic: &IndexCompactionKey<'_>,
+		ix: &IndexDefinition,
+		p: &HnswParams,
+	) -> Result<()> {
+		let tx = ctx.tx();
+		if let Some(tb) = tx.get_tb(ic.ns, ic.db, &ic.tb).await? {
+			let hnsw = ixs.get_index_hnsw(ic.ns, ic.db, ctx, tb.table_id, ix, p).await?;
+			hnsw.index_pendings(ctx).await?;
+		}
+		Ok(())
+	}
+
 	pub(crate) async fn index_count_compaction(
 		ic: &IndexCompactionKey<'_>,
 		tx: &Transaction,
@@ -290,24 +325,40 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	pub(crate) async fn trigger_compaction(&self) -> Result<()> {
-		FullTextIndex::trigger_compaction(&self.ikb, &self.ctx.tx(), self.opt.id()).await
+		IndexOperation::compaction_trigger(&self.ikb, &self.ctx.tx(), self.opt.id()).await
 	}
 
-	async fn index_hnsw(&mut self, p: &HnswParams) -> Result<()> {
-		let txn = self.ctx.tx();
+	/// Triggers index compaction
+	///
+	/// This method adds an entry to the index compaction queue by creating an
+	/// `Ic` key for the specified index. The index compaction thread will
+	/// later process this entry and perform the actual compaction of the
+	/// index.
+	///
+	/// Compaction helps optimize full-text index performance by consolidating
+	/// term frequency data and document length information, which can become
+	/// fragmented after many updates to the index.
+	pub(crate) async fn compaction_trigger(
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+		nid: Uuid,
+	) -> Result<()> {
+		let ic = ikb.new_ic_key(nid);
+		tx.put(&ic, &(), None).await?;
+		Ok(())
+	}
+
+	async fn index_hnsw(&mut self, p: &HnswParams, require_compaction: &mut bool) -> Result<()> {
 		let hnsw = self
 			.ctx
 			.get_index_stores()
 			.get_index_hnsw(self.ns, self.db, self.ctx, self.tb, self.ix, p)
 			.await?;
-		let mut hnsw = hnsw.write().await;
-		// Delete the old index data
-		if let Some(o) = self.o.take() {
-			hnsw.remove_document(&txn, self.rid.key.clone(), &o).await?;
-		}
-		// Create the new index data
-		if let Some(n) = self.n.take() {
-			hnsw.index_document(&txn, &self.rid.key, &n).await?;
+		let old_values = self.o.take();
+		let new_values = self.n.take();
+		if old_values.is_some() || new_values.is_some() {
+			hnsw.index(self.ctx, &self.rid.key, old_values, new_values).await?;
+			*require_compaction = true;
 		}
 		Ok(())
 	}

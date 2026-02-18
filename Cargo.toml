@@ -1,24 +1,24 @@
 [workspace]
 resolver = "3"
 members = [
-	# Root package
-	".",
-	# SurrealDB crates
-	"surrealdb",
-	"surrealdb/core",
-	"surrealdb/server",
-	"surrealdb/types",
-	"surrealdb/types/derive",
+    # Root package
+    ".",
+    # SurrealDB crates
+    "surrealdb",
+    "surrealdb/core",
+    "surrealdb/server",
+    "surrealdb/types",
+    "surrealdb/types/derive",
     # SurrealML crates
-	"surrealml/core",
-	# Surrealism crates
-	"surrealism",
-	"surrealism/demo",
-	"surrealism/macros",
-	"surrealism/runtime",
-	"surrealism/types",
-	# Other
-	"profiling",
+    "surrealml/core",
+    # Surrealism crates
+    "surrealism",
+    "surrealism/demo",
+    "surrealism/macros",
+    "surrealism/runtime",
+    "surrealism/types",
+    # Other
+    "profiling",
 ]
 
 [workspace.package]
@@ -26,7 +26,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2024"
 license-file = "LICENSE"
 publish = false
-version = "3.0.0-beta"
+version = "3.1.0-alpha"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
@@ -41,13 +41,13 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # SurrealDB crates
-surrealdb = { version = "3.0.0-beta", path = "surrealdb" }
-surrealdb-core = { version = "3.0.0-beta", path = "surrealdb/core", default-features = false }
-surrealdb-server = { version = "3.0.0-beta", path = "surrealdb/server", default-features = false }
-surrealdb-types = { version = "3.0.0-beta", path = "surrealdb/types" }
-surrealdb-types-derive = { version = "3.0.0-beta", path = "surrealdb/types/derive" }
+surrealdb = { version = "3.1.0-alpha", path = "surrealdb" }
+surrealdb-core = { version = "3.1.0-alpha", path = "surrealdb/core", default-features = false }
+surrealdb-server = { version = "3.1.0-alpha", path = "surrealdb/server", default-features = false }
+surrealdb-types = { version = "3.1.0-alpha", path = "surrealdb/types" }
+surrealdb-types-derive = { version = "3.1.0-alpha", path = "surrealdb/types/derive" }
 # SurrealML crates
-surrealml-core = { version = "0.1.9", path = "surrealml/core" }
+surrealml-core = { version = "0.1", path = "surrealml/core" }
 # Surrealism crates
 surrealism = { version = "0.1", path = "surrealism" }
 surrealism-macros = { version = "0.1", path = "surrealism/macros", default-features = false }
@@ -70,8 +70,8 @@ revision = { version = "0.17.0", features = [
     "uuid",
 ] }
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
-surrealkv = "0.17.1"
-surrealmx = "0.15.0"
+surrealkv = "0.20.2"
+surrealmx = "0.17.0"
 trice = "0.4.0"
 vart = "0.9.3"
 ## Maintained by @Delskayn
@@ -93,6 +93,7 @@ argon2 = "0.5.3"
 arrayvec = "0.7.6"
 async-channel = "2.5.0"
 async-executor = "1.13.3"
+async-stream = "0.3.6"
 async-graphql = { version = "7.2.0", default-features = false, features = ["custom-error-conversion"] }
 async-graphql-axum = "7.2.0"
 async-trait = "0.1.89"
@@ -100,7 +101,7 @@ base64 = "0.22.1"
 bcrypt = "0.18.0"
 blake3 = "1.8.3"
 boxcar = "0.2.14"
-bytes = "1.11.0"
+bytes = "1.11.1"
 castaway = "0.2.4"
 chrono = "0.4.43"
 ciborium = "0.2.2"
@@ -124,10 +125,9 @@ humantime = "2.3.0"
 indexmap = "2.13.0"
 ipnet = "2.11.0"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
-jsonwebtoken = { version = "10.2.0", default-features = false, features = ["use_pem"] }
+jsonwebtoken = { version = "10.3.0", default-features = false, features = ["use_pem"] }
 md-5 = "0.10.6"
 mimalloc = "0.1.48"
-nanoid = "0.4.0"
 native-tls = "0.2.14"
 ndarray = "0.17.2"
 ndarray-stats = "0.7.0"
@@ -145,7 +145,7 @@ pin-project-lite = "0.2.16"
 pprof = "0.15.0"
 quick_cache = "0.6.18"
 radix_trie = "0.3.0" # TODO: Look at the use of this dependency. Last update 4 years ago, unmaintained.
-rand = "0.8.5"
+rand = { version = "0.8.5", features = ["small_rng"] }
 rayon = "1.11.0"
 regex = "1.12.2"
 regex-syntax = "0.8.8"
@@ -189,7 +189,7 @@ rstest = "0.26.1"
 serial_test = "3.3.1"
 temp-dir = "0.1.16"
 test-log = "0.2.19"
-time = "0.3.45"
+time = "0.3.47"
 tracing-subscriber = "0.3.22"
 wiremock = "0.6.5"
 

@@ -2,14 +2,17 @@
 
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
-use surrealmx::{Database, DatabaseOptions, Transaction as Tx};
+use surrealmx::{Database, DatabaseOptions, KeyIterator, ScanIterator, Transaction as Tx};
 use tokio::sync::RwLock;
 
+use super::api::ScanLimit;
+use super::config::{AolMode, MemoryConfig, SnapshotMode, SyncMode};
 use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
-use crate::kvs::{Key, Val, Version};
+use crate::kvs::{Key, Val};
 
 pub struct Datastore {
 	db: Database,
@@ -26,15 +29,47 @@ pub struct Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new() -> Result<Datastore> {
+	pub(crate) async fn new(config: MemoryConfig) -> Result<Datastore> {
 		// Create new configuration options
 		let opts = DatabaseOptions {
-			enable_gc: true,
+			enable_gc: config.retention_ns > 0,
 			enable_cleanup: true,
 			..Default::default()
 		};
-		// Create a new in-memory database
-		let db = Database::new_with_options(opts);
+		// Create the database, optionally with persistence
+		let db = if let Some(ref persist_path) = config.persist_path {
+			// Build persistence options from config
+			let mut persistence_opts = surrealmx::PersistenceOptions::new(persist_path);
+			// Map AOL mode
+			persistence_opts.aol_mode = match config.aol_mode {
+				AolMode::Never => surrealmx::AolMode::Never,
+				AolMode::Sync => surrealmx::AolMode::SynchronousOnCommit,
+				AolMode::Async => surrealmx::AolMode::AsynchronousAfterCommit,
+			};
+			// Map snapshot mode
+			persistence_opts.snapshot_mode = match config.snapshot_mode {
+				SnapshotMode::Never => surrealmx::SnapshotMode::Never,
+				SnapshotMode::Interval(interval) => surrealmx::SnapshotMode::Interval(interval),
+			};
+			// Map sync mode to fsync mode
+			persistence_opts.fsync_mode = match config.sync_mode {
+				SyncMode::Never => surrealmx::FsyncMode::Never,
+				SyncMode::Every => surrealmx::FsyncMode::EveryAppend,
+				SyncMode::Interval(d) => surrealmx::FsyncMode::Interval(d),
+			};
+			// Create a persistent database
+			Database::new_with_persistence(opts, persistence_opts)
+				.map_err(|e| Error::Datastore(e.to_string()))?
+		} else {
+			// Create a non-persistent database
+			Database::new_with_options(opts)
+		};
+		// Configure GC retention if a retention period is specified
+		let db = if config.retention_ns > 0 {
+			db.with_gc_history(Duration::from_nanos(config.retention_ns))
+		} else {
+			db
+		};
 		// Return the new datastore
 		Ok(Datastore {
 			db,
@@ -339,7 +374,7 @@ impl Transactable for Transaction {
 
 	/// Count the total number of keys within a range.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn count(&self, rng: Range<Key>) -> Result<usize> {
+	async fn count(&self, rng: Range<Key>, version: Option<u64>) -> Result<usize> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -352,7 +387,10 @@ impl Transactable for Transaction {
 		// Execute on the blocking threadpool
 		let res = affinitypool::spawn_local(move || -> Result<_> {
 			// Count the items in the range
-			let res = inner.total(beg..end, None, None)?;
+			let res = match version {
+				Some(ts) => inner.total_at_version(beg..end, None, None, ts)?,
+				None => inner.total(beg..end, None, None)?,
+			};
 			// Return result
 			Ok(res)
 		})
@@ -363,7 +401,13 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keys(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -373,18 +417,26 @@ impl Transactable for Transaction {
 		let end = rng.end;
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Retrieve the scan range
-		let res = match version {
-			Some(ts) => inner.keys_at_version(beg..end, None, Some(limit as usize), ts)?,
-			None => inner.keys(beg..end, None, Some(limit as usize))?,
+		// Create a forward iterator
+		let mut iter = match version {
+			Some(ts) => inner.keys_iter_at_version(beg..end, ts)?,
+			None => inner.keys_iter(beg..end)?,
 		};
+		// Consume the iterator
+		let res = consume_keys(&mut iter, limit, skip);
 		// Return result
-		Ok(res.into_iter().map(Key::from).collect())
+		Ok(res)
 	}
 
 	/// Retrieve a range of keys, in reverse.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keysr(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -394,13 +446,15 @@ impl Transactable for Transaction {
 		let end = rng.end;
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Retrieve the scan range
-		let res = match version {
-			Some(ts) => inner.keys_at_version_reverse(beg..end, None, Some(limit as usize), ts)?,
-			None => inner.keys_reverse(beg..end, None, Some(limit as usize))?,
+		// Create a reverse iterator
+		let mut iter = match version {
+			Some(ts) => inner.keys_iter_at_version_reverse(beg..end, ts)?,
+			None => inner.keys_iter_reverse(beg..end)?,
 		};
+		// Consume the iterator
+		let res = consume_keys(&mut iter, limit, skip);
 		// Return result
-		Ok(res.into_iter().map(Key::from).collect())
+		Ok(res)
 	}
 
 	/// Retrieve a range of key-value pairs.
@@ -408,7 +462,8 @@ impl Transactable for Transaction {
 	async fn scan(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -420,13 +475,15 @@ impl Transactable for Transaction {
 		let end = rng.end;
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Retrieve the scan range
-		let res = match version {
-			Some(ts) => inner.scan_at_version(beg..end, None, Some(limit as usize), ts)?,
-			None => inner.scan(beg..end, None, Some(limit as usize))?,
+		// Create a forward iterator
+		let mut iter = match version {
+			Some(ts) => inner.scan_iter_at_version(beg..end, ts)?,
+			None => inner.scan_iter(beg..end)?,
 		};
+		// Consume the iterator
+		let res = consume_vals(&mut iter, limit, skip);
 		// Return result
-		Ok(res.into_iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect())
+		Ok(res)
 	}
 
 	/// Retrieve a range of key-value pairs, in reverse.
@@ -434,7 +491,8 @@ impl Transactable for Transaction {
 	async fn scanr(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
@@ -446,40 +504,13 @@ impl Transactable for Transaction {
 		let end = rng.end;
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Retrieve the scan range
-		let res = match version {
-			Some(ts) => inner.scan_at_version_reverse(beg..end, None, Some(limit as usize), ts)?,
-			None => inner.scan_reverse(beg..end, None, Some(limit as usize))?,
+		// Create a reverse iterator
+		let mut iter = match version {
+			Some(ts) => inner.scan_iter_at_version_reverse(beg..end, ts)?,
+			None => inner.scan_iter_reverse(beg..end)?,
 		};
-		// Return result
-		Ok(res.into_iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect())
-	}
-
-	/// Retrieve all the versions from a range of keys.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn scan_all_versions(
-		&self,
-		rng: Range<Key>,
-		limit: u32,
-	) -> Result<Vec<(Key, Val, Version, bool)>> {
-		// Check to see if transaction is closed
-		if self.closed() {
-			return Err(Error::TransactionFinished);
-		}
-		// Set the key range
-		let beg = rng.start;
-		let end = rng.end;
-		// Load the inner transaction
-		let inner = self.inner.read().await;
-		// Retrieve the scan range
-		let res = inner
-			.scan_all_versions(beg..end, None, Some(limit as usize))?
-			.into_iter()
-			.map(|(k, ts, v)| match v {
-				Some(v) => (k.to_vec(), v.to_vec(), ts, false),
-				None => (k.to_vec(), vec![], ts, true),
-			})
-			.collect::<Vec<_>>();
+		// Consume the iterator
+		let res = consume_vals(&mut iter, limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -499,5 +530,125 @@ impl Transactable for Transaction {
 	/// Release the last save point.
 	async fn release_last_save_point(&self) -> Result<()> {
 		Ok(())
+	}
+}
+
+// Consume and iterate over only keys
+fn consume_keys(cursor: &mut KeyIterator<'_>, limit: ScanLimit, skip: u32) -> Vec<Key> {
+	// Skip entries efficiently without allocation
+	for _ in 0..skip {
+		if cursor.next().is_none() {
+			return Vec::new();
+		}
+	}
+	match limit {
+		ScanLimit::Count(c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Check that we don't exceed the count limit
+			while res.len() < c as usize {
+				if let Some(k) = cursor.next() {
+					res.push(k.to_vec());
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::Bytes(b) => {
+			// Create the result set
+			let mut res = Vec::with_capacity((b as usize / 128).min(4096)); // Assuming 128 bytes per entry
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the byte limit
+			while bytes_fetched < b as usize {
+				if let Some(k) = cursor.next() {
+					bytes_fetched += k.len();
+					res.push(k.to_vec());
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::BytesOrCount(b, c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the count limit AND the byte limit
+			while res.len() < c as usize && bytes_fetched < b as usize {
+				if let Some(k) = cursor.next() {
+					bytes_fetched += k.len();
+					res.push(k.to_vec());
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+	}
+}
+
+// Consume and iterate over keys and values
+fn consume_vals(cursor: &mut ScanIterator<'_>, limit: ScanLimit, skip: u32) -> Vec<(Key, Val)> {
+	// Skip entries efficiently without allocation
+	for _ in 0..skip {
+		if cursor.next().is_none() {
+			return Vec::new();
+		}
+	}
+	match limit {
+		ScanLimit::Count(c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Check that we don't exceed the count limit
+			while res.len() < c as usize {
+				if let Some((k, v)) = cursor.next() {
+					res.push((k.to_vec(), v.to_vec()));
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::Bytes(b) => {
+			// Create the result set
+			let mut res = Vec::with_capacity((b as usize / 512).min(4096)); // Assuming 512 bytes per entry
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the byte limit
+			while bytes_fetched < b as usize {
+				if let Some((k, v)) = cursor.next() {
+					bytes_fetched += k.len() + v.len();
+					res.push((k.to_vec(), v.to_vec()));
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::BytesOrCount(b, c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the count limit AND the byte limit
+			while res.len() < c as usize && bytes_fetched < b as usize {
+				if let Some((k, v)) = cursor.next() {
+					bytes_fetched += k.len() + v.len();
+					res.push((k.to_vec(), v.to_vec()));
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
 	}
 }

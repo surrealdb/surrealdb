@@ -25,7 +25,7 @@ value = "NONE"
 # 5
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { db_middleware: true }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { db_middleware: true }, headers: {}, status: 200 }"
 
 # 6
 [[test.results]]
@@ -34,7 +34,7 @@ value = "NONE"
 # 7
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { db_middleware: true, route_middleware: true }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { db_middleware: true, route_middleware: true }, headers: {}, status: 200 }"
 
 # 8
 [[test.results]]
@@ -43,10 +43,7 @@ value = "NONE"
 # 9
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { db_middleware: true, method_middleware: true }, context: {  }, headers: {}, status: 200 }"
-
-[env.capabilities]
-allow-experimental = ["define_api"]
+value = "{ body: { db_middleware: true, method_middleware: true }, headers: {}, status: 200 }"
 
 */
 

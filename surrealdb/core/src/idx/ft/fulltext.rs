@@ -83,7 +83,7 @@ impl DocLengthAndCount {
 }
 
 /// Represents the terms in a search query and their associated document sets
-pub(in crate::idx) struct QueryTerms {
+pub(crate) struct QueryTerms {
 	/// The tokenized query terms
 	#[allow(dead_code)]
 	tokens: Tokens,
@@ -96,11 +96,11 @@ pub(in crate::idx) struct QueryTerms {
 }
 
 impl QueryTerms {
-	pub(in crate::idx) fn is_empty(&self) -> bool {
+	pub(crate) fn is_empty(&self) -> bool {
 		self.tokens.list().is_empty()
 	}
 
-	pub(in crate::idx) fn contains_doc(&self, doc_id: DocId) -> bool {
+	pub(crate) fn contains_doc(&self, doc_id: DocId) -> bool {
 		for d in self.docs.iter().flatten() {
 			if d.contains(doc_id) {
 				return true;
@@ -376,7 +376,7 @@ impl FullTextIndex {
 	/// This method tokenizes the query string and retrieves the document sets
 	/// for each term. It returns a QueryTerms object containing the tokens and
 	/// their associated document sets.
-	pub(in crate::idx) async fn extract_querying_terms(
+	pub(crate) async fn extract_querying_terms(
 		&self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
@@ -438,7 +438,7 @@ impl FullTextIndex {
 		let mut deltas: HashMap<DocId, i64> = HashMap::new();
 
 		// Scan all term-document transaction logs for this term
-		for k in tx.keys(beg..end, u32::MAX, None).await? {
+		for k in tx.keys(beg..end, u32::MAX, 0, None).await? {
 			let tt = Tt::decode_key(&k)?;
 			let entry = deltas.entry(tt.doc_id).or_default();
 			// Increment or decrement the counter based on whether we're adding or removing
@@ -521,7 +521,7 @@ impl FullTextIndex {
 		let mut has_log = false;
 
 		// Process all term transaction logs, grouped by term
-		for k in tx.keys(range.clone(), u32::MAX, None).await? {
+		for k in tx.keys(range.clone(), u32::MAX, 0, None).await? {
 			let tt = Tt::decode_key(&k)?;
 			has_log = true;
 
@@ -563,7 +563,7 @@ impl FullTextIndex {
 	///
 	/// This method creates an iterator over the documents that match all query
 	/// terms. It returns None if any term has no matching documents.
-	pub(in crate::idx) fn new_hits_iterator(
+	pub(crate) fn new_hits_iterator(
 		&self,
 		qt: &QueryTerms,
 		bo: BooleanOperator,
@@ -643,7 +643,7 @@ impl FullTextIndex {
 		}
 	}
 
-	pub(in crate::idx) async fn get_doc_id(
+	pub(crate) async fn get_doc_id(
 		&self,
 		tx: &Transaction,
 		rid: &RecordId,
@@ -653,7 +653,7 @@ impl FullTextIndex {
 		}
 		self.doc_ids.get_doc_id(tx, &rid.key).await
 	}
-	pub(in crate::idx) async fn new_scorer(&self, ctx: &FrozenContext) -> Result<Option<Scorer>> {
+	pub(crate) async fn new_scorer(&self, ctx: &FrozenContext) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
 			let dlc = self.compute_doc_length_and_count(&ctx.tx(), None).await?;
 			let sc = Scorer::new(dlc, bm25.clone());
@@ -718,32 +718,12 @@ impl FullTextIndex {
 		Ok(r1 || r2)
 	}
 
-	/// Triggers compaction for the full-text index
-	///
-	/// This method adds an entry to the index compaction queue by creating an
-	/// `Ic` key for the specified index. The index compaction thread will
-	/// later process this entry and perform the actual compaction of the
-	/// index.
-	///
-	/// Compaction helps optimize full-text index performance by consolidating
-	/// term frequency data and document length information, which can become
-	/// fragmented after many updates to the index.
-	pub(crate) async fn trigger_compaction(
-		ikb: &IndexKeyBase,
-		tx: &Transaction,
-		nid: Uuid,
-	) -> Result<()> {
-		let ic = ikb.new_ic_key(nid);
-		tx.put(&ic, &(), None).await?;
-		Ok(())
-	}
-
 	/// Highlights search terms in a document
 	///
 	/// This method highlights the occurrences of search terms in the document
 	/// value. It uses the provided highlighting parameters to format the
 	/// highlighted text.
-	pub(in crate::idx) async fn highlight(
+	pub(crate) async fn highlight(
 		&self,
 		tx: &Transaction,
 		thg: &RecordId,
@@ -777,7 +757,7 @@ impl FullTextIndex {
 		tx.get(&key, None).await
 	}
 
-	pub(in crate::idx) async fn read_offsets(
+	pub(crate) async fn read_offsets(
 		&self,
 		tx: &Transaction,
 		thg: &RecordId,
@@ -851,7 +831,7 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 }
 
 /// Implements BM25 scoring for relevance ranking of search results
-pub(in crate::idx) struct Scorer {
+pub(crate) struct Scorer {
 	/// precomputed BM25 scoring parameters
 	k1: f64,
 	k1_plus_1: f64,
@@ -973,6 +953,7 @@ mod tests {
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::offset::Offset;
+	use crate::idx::index::IndexOperation;
 	use crate::kvs::LockType::*;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use crate::sql::Expr;
@@ -1107,7 +1088,7 @@ mod tests {
 				.unwrap();
 
 			if require_compaction {
-				FullTextIndex::trigger_compaction(&self.ikb, &tx, self.nid).await.unwrap();
+				IndexOperation::compaction_trigger(&self.ikb, &tx, self.nid).await.unwrap();
 			}
 
 			tx.commit().await.unwrap();
@@ -1204,8 +1185,8 @@ mod tests {
 		// Check that logs have been compacted:
 		let tx = test.new_tx(TransactionType::Read).await;
 		let (beg, end) = test.ikb.new_tt_terms_range().unwrap();
-		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
+		assert_eq!(tx.count(beg..end, None).await.unwrap(), 0);
 		let (beg, end) = test.ikb.new_dc_range().unwrap();
-		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
+		assert_eq!(tx.count(beg..end, None).await.unwrap(), 0);
 	}
 }

@@ -2,6 +2,7 @@ use bytes::BytesMut;
 use chrono::offset::TimeZone;
 use chrono::{NaiveDate, Offset, Utc};
 
+use crate::catalog::EventKind;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::{
 	AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess,
@@ -64,7 +65,7 @@ static SOURCE: &str = r#"
 	DEFINE ACCESS a ON DATABASE TYPE RECORD WITH JWT ALGORITHM EDDSA KEY "foo" COMMENT "bar";
 	DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null;
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
-	DEFINE EVENT event ON TABLE table WHEN null THEN null,none;
+	DEFINE EVENT event ON TABLE table ASYNC RETRY 5 MAXDEPTH 64 WHEN null THEN null,none;
 	DEFINE FIELD foo.*[*]... ON TABLE bar TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true;
 	DEFINE INDEX index ON TABLE table FIELDS a FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS;
 	DEFINE INDEX index ON TABLE table FIELDS a UNIQUE;
@@ -256,7 +257,7 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Table(DefineTableStatement {
 			kind: DefineKind::Default,
 			id: None,
-			name: Expr::Idiom(Idiom::field("name".to_string())),
+			name: Expr::Table("name".to_string()),
 			drop: true,
 			full: true,
 			view: Some(crate::sql::View {
@@ -289,10 +290,14 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Event(DefineEventStatement {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field("event".to_string())),
-			target_table: Expr::Idiom(Idiom::field("table".to_string())),
+			target_table: Expr::Table("table".to_string()),
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: Expr::Literal(Literal::None),
+			event_kind: EventKind::Async {
+				retry: 5,
+				max_depth: 64,
+			},
 		})))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
 			kind: DefineKind::Default,
@@ -302,7 +307,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				Part::All,
 				Part::Flatten,
 			])),
-			what: Expr::Idiom(Idiom::field("bar".to_string())),
+			what: Expr::Table("bar".to_string()),
 			field_kind: Some(Kind::Either(vec![
 				Kind::None,
 				Kind::Number,
@@ -326,7 +331,7 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field("index".to_string())),
-			what: Expr::Idiom(Idiom::field("table".to_string())),
+			what: Expr::Table("table".to_string()),
 			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
 			index: Index::FullText(FullTextParams {
 				az: "ana".to_owned(),
@@ -342,7 +347,7 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field("index".to_string())),
-			what: Expr::Idiom(Idiom::field("table".to_string())),
+			what: Expr::Table("table".to_string()),
 			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
 			index: Index::Uniq,
 			comment: Expr::Literal(Literal::None),

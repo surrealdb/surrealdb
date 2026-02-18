@@ -2,13 +2,13 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 
-use chrono::{DateTime, Utc};
 use futures::stream::Stream;
 
-use super::api::Transactable;
+use super::api::{ScanLimit, Transactable};
 use super::batch::Batch;
 use super::scanner::{Direction, Scanner};
-use super::{IntoBytes, Key, Result, Val, Version};
+use super::{IntoBytes, Key, Result, Val};
+use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
 
 /// Specifies whether the transaction is read-only or writeable.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -60,7 +60,7 @@ impl Drop for Transactor {
 
 impl Transactor {
 	/// Get the underlying datastore kind.
-	fn kind(&self) -> &'static str {
+	pub(super) fn kind(&self) -> &'static str {
 		self.inner.kind()
 	}
 
@@ -69,7 +69,7 @@ impl Transactor {
 	/// If the transaction has been cancelled or committed,
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
-	/// in a [`kvs::Error::TransactionFinished`] error.
+	/// in a [`crate::kvs::Error::TransactionFinished`] error.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub fn closed(&self) -> bool {
 		self.inner.closed()
@@ -81,8 +81,8 @@ impl Transactor {
 	/// transaction, then this function will return [`true`].
 	/// This fuction can be used to check whether a transaction
 	/// allows data to be modified, and if not then the function
-	/// will return a [`kvs::Error::TransactionReadonly`] error w
-	/// hen attempting to modify any data within the transaction.
+	/// will return a [`crate::kvs::Error::TransactionReadonly`] error when
+	/// attempting to modify any data within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub fn writeable(&self) -> bool {
 		self.inner.writeable()
@@ -319,27 +319,11 @@ impl Transactor {
 	/// This function fetches the full range of keys without values, in a single
 	/// request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn keys<K>(&self, rng: Range<K>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		if beg > end {
-			return Ok(vec![]);
-		}
-		self.inner.keys(beg..end, limit, version).await
-	}
-
-	/// Retrieve a specific range of keys from the datastore.
-	///
-	/// This function fetches the full range of keys without values, in a single
-	/// request to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn keysr<K>(
+	pub async fn keys<K>(
 		&self,
 		rng: Range<K>,
-		limit: u32,
+		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>>
 	where
@@ -350,7 +334,30 @@ impl Transactor {
 		if beg > end {
 			return Ok(vec![]);
 		}
-		self.inner.keysr(beg..end, limit, version).await
+		self.inner.keys(beg..end, limit, skip, version).await
+	}
+
+	/// Retrieve a specific range of keys from the datastore.
+	///
+	/// This function fetches the full range of keys without values, in a single
+	/// request to the underlying datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn keysr<K>(
+		&self,
+		rng: Range<K>,
+		limit: ScanLimit,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>>
+	where
+		K: IntoBytes + Debug,
+	{
+		let beg = rng.start.into_vec();
+		let end = rng.end.into_vec();
+		if beg > end {
+			return Ok(vec![]);
+		}
+		self.inner.keysr(beg..end, limit, skip, version).await
 	}
 
 	/// Retrieve a specific range of key-value pairs from the datastore.
@@ -361,7 +368,8 @@ impl Transactor {
 	pub async fn scan<K>(
 		&self,
 		rng: Range<K>,
-		limit: u32,
+		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>
 	where
@@ -372,7 +380,7 @@ impl Transactor {
 		if beg > end {
 			return Ok(vec![]);
 		}
-		self.inner.scan(beg..end, limit, version).await
+		self.inner.scan(beg..end, limit, skip, version).await
 	}
 
 	/// Retrieve a specific range of key-value pairs from the datastore.
@@ -383,7 +391,8 @@ impl Transactor {
 	pub async fn scanr<K>(
 		&self,
 		rng: Range<K>,
-		limit: u32,
+		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>
 	where
@@ -394,7 +403,7 @@ impl Transactor {
 		if beg > end {
 			return Ok(vec![]);
 		}
-		self.inner.scanr(beg..end, limit, version).await
+		self.inner.scanr(beg..end, limit, skip, version).await
 	}
 
 	/// Count the total number of keys within a range in the datastore.
@@ -402,13 +411,13 @@ impl Transactor {
 	/// This function fetches the total count, in batches, with multiple
 	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn count<K>(&self, rng: Range<K>) -> Result<usize>
+	pub async fn count<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<usize>
 	where
 		K: IntoBytes + Debug,
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
-		self.inner.count(beg..end).await
+		self.inner.count(beg..end, version).await
 	}
 
 	// --------------------------------------------------
@@ -453,115 +462,84 @@ impl Transactor {
 		self.inner.batch_keys_vals(beg..end, batch, version).await
 	}
 
-	/// Retrieve a batched scan of all versions over a specific range of keys in
-	/// the datastore.
-	///
-	/// This function fetches key-value-version pairs, in batches, with multiple
-	/// requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn batch_keys_vals_versions<K>(
-		&self,
-		rng: Range<K>,
-		batch: u32,
-	) -> Result<Batch<(Key, Val, Version, bool)>>
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		self.inner.batch_keys_vals_versions(beg..end, batch).await
-	}
-
 	// --------------------------------------------------
 	// Stream functions
 	// --------------------------------------------------
 
-	/// Retrieve a stream over a specific range of keys in the datastore.
+	/// Retrieve a stream of key batches over a specific range in the datastore.
 	///
-	/// This function fetches keys in batches, with multiple requests to the
-	/// underlying datastore. The Scanner uses adaptive batch sizing, starting
-	/// at 100 items and doubling up to MAX_BATCH_SIZE. Prefetching is enabled
-	/// by default for optimal read throughput.
+	/// This function returns a stream that yields batches of keys. The scanner:
+	/// - Fetches an initial batch of up to 500 items
+	/// - Fetches subsequent batches of up to 16 MiB (local) or 4 MiB (remote)
+	/// - Prefetches the next batch while the current batch is being processed
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub fn stream_keys<K>(
 		&self,
 		rng: Range<K>,
 		version: Option<u64>,
 		limit: Option<usize>,
+		skip: u32,
 		dir: Direction,
-	) -> impl Stream<Item = Result<Key>> + '_
+	) -> impl Stream<Item = Result<Vec<Key>>> + '_
 	where
 		K: IntoBytes + Debug,
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
-		Scanner::<Key>::new(self, beg..end, version, limit, dir, true)
+		let mut scanner = Scanner::<Key>::new(self, beg..end, limit, dir);
+		// Set the version
+		if let Some(v) = version {
+			scanner = scanner.version(v);
+		}
+		// Set the skip
+		if skip > 0 {
+			scanner = scanner.skip(skip);
+		}
+		// Return the stream
+		scanner
 	}
 
-	/// Retrieve a stream over a specific range of key-value pairs in the datastore.
+	/// Retrieve a stream of key-value batches over a specific range in the datastore.
 	///
-	/// This function fetches the key-value pairs in batches, with multiple
-	/// requests to the underlying datastore. The Scanner uses adaptive batch
-	/// sizing, starting at 100 items and doubling up to MAX_BATCH_SIZE.
-	/// Prefetching is enabled by default for optimal read throughput.
+	/// This function returns a stream that yields batches of key-value pairs. The scanner:
+	/// - Fetches an initial batch of up to 500 items (or 1000 when `prefetch` is enabled)
+	/// - Fetches subsequent batches of up to 16 MiB (local) or 4 MiB (remote)
+	/// - When `prefetch` is true, prefetches the next batch while the current batch is being
+	///   processed, and uses a larger initial batch size (500 items)
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub fn stream_keys_vals<K>(
 		&self,
 		rng: Range<K>,
 		version: Option<u64>,
 		limit: Option<usize>,
+		skip: u32,
 		dir: Direction,
-	) -> impl Stream<Item = Result<(Key, Val)>> + '_
+		prefetch: bool,
+	) -> impl Stream<Item = Result<Vec<(Key, Val)>>> + '_
 	where
 		K: IntoBytes + Debug,
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
-		Scanner::<(Key, Val)>::new(self, beg..end, version, limit, dir, true)
-	}
-
-	/// Retrieve a stream over a specific range of keys in the datastore without
-	/// prefetching.
-	///
-	/// This variant disables prefetching, making it more suitable for scenarios
-	/// where each key will be processed with write operations (e.g., delete, update)
-	/// and prefetching would waste work on errors.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub fn stream_keys_no_prefetch<K>(
-		&self,
-		rng: Range<K>,
-		version: Option<u64>,
-		limit: Option<usize>,
-		dir: Direction,
-	) -> impl Stream<Item = Result<Key>> + '_
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		Scanner::<Key>::new(self, beg..end, version, limit, dir, false)
-	}
-
-	/// Retrieve a stream over a specific range of keys in the datastore without
-	/// prefetching.
-	///
-	/// This variant disables prefetching, making it more suitable for scenarios
-	/// where each key will be processed with write operations (e.g., delete, update)
-	/// and prefetching would waste work on errors.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub fn stream_keys_vals_no_prefetch<K>(
-		&self,
-		rng: Range<K>,
-		version: Option<u64>,
-		limit: Option<usize>,
-		dir: Direction,
-	) -> impl Stream<Item = Result<(Key, Val)>> + '_
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		Scanner::<(Key, Val)>::new(self, beg..end, version, limit, dir, false)
+		let mut scanner = Scanner::<(Key, Val)>::new(self, beg..end, limit, dir);
+		// Set the version
+		if let Some(v) = version {
+			scanner = scanner.version(v);
+		}
+		// Set the skip
+		if skip > 0 {
+			scanner = scanner.skip(skip);
+		}
+		// Enable prefetching and larger initial batch for full scans.
+		// The scanner default is already NORMAL_FETCH_SIZE (500); when
+		// prefetching is active we double it to amortise the overlap cost.
+		if prefetch {
+			scanner = scanner
+				.prefetch(true)
+				.initial_batch_size(ScanLimit::Count(*crate::cnf::NORMAL_FETCH_SIZE * 2));
+		}
+		// Return the stream
+		scanner
 	}
 
 	// --------------------------------------------------
@@ -588,17 +566,12 @@ impl Transactor {
 	// --------------------------------------------------
 
 	/// Get the current monotonic timestamp
-	pub async fn timestamp(&self) -> Result<Box<dyn super::Timestamp>> {
+	pub async fn timestamp(&self) -> Result<TimeStamp> {
 		self.inner.timestamp().await
 	}
 
-	/// Convert a versionstamp to timestamp bytes for this storage engine
-	pub async fn timestamp_bytes_from_versionstamp(&self, version: u128) -> Result<Vec<u8>> {
-		self.inner.timestamp_bytes_from_versionstamp(version).await
-	}
-
-	/// Convert a datetime to timestamp bytes for this storage engine
-	pub async fn timestamp_bytes_from_datetime(&self, datetime: DateTime<Utc>) -> Result<Vec<u8>> {
-		self.inner.timestamp_bytes_from_datetime(datetime).await
+	/// Returns the implementation of timestamp that this transaction uses.
+	pub fn timestamp_impl(&self) -> TimeStampImpl {
+		self.inner.timestamp_impl()
 	}
 }

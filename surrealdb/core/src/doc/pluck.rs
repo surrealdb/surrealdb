@@ -106,7 +106,7 @@ impl Document {
 					// FAST PATH: For COUNT operations, skip all field computation and permissions
 					// COUNT operations create synthetic documents with only the count value
 					if matches!(self.record_strategy, RecordStrategy::Count) {
-						Ok(self.current.doc.data.as_ref().clone())
+						Ok(self.current.doc.as_ref().clone())
 					} else {
 						// Process the permitted documents
 						let current = if self.reduced(stk, ctx, opt, Current).await? {
@@ -119,7 +119,7 @@ impl Document {
 
 						if stmt.group.is_some() {
 							// Field computation with groups is defered to collection.
-							Ok(current.doc.data.as_ref().clone())
+							Ok(current.doc.as_ref().clone())
 						} else {
 							// Process the SELECT statement fields
 							stmt.fields
@@ -209,7 +209,7 @@ impl Document {
 			// FAST PATH: For COUNT operations, skip all field computation and permissions
 			// COUNT operations create synthetic documents with only the count value
 			if matches!(self.record_strategy, RecordStrategy::Count) {
-				Ok(self.current.doc.data.as_ref().clone())
+				Ok(self.current.doc.as_ref().clone())
 			} else {
 				// Process the permitted documents
 				let current = if self.reduced(stk, ctx, opt, Current).await? {
@@ -222,7 +222,7 @@ impl Document {
 
 				if stmt.group.is_some() {
 					// Field computation with groups is deferred to collection.
-					Ok(current.doc.data.as_ref().clone())
+					Ok(current.doc.as_ref().clone())
 				} else {
 					// Process the SELECT statement fields
 					stmt.fields

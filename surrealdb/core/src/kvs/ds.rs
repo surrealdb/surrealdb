@@ -13,7 +13,8 @@ use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use reblessive::TreeStack;
-use surrealdb_types::{SurrealValue, object};
+use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
+use tokio::sync::Notify;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
@@ -46,6 +47,7 @@ use crate::dbs::capabilities::{
 };
 use crate::dbs::node::{Node, Timestamp};
 use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
+use crate::doc::AsyncEventRecord;
 use crate::err::Error;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
@@ -53,16 +55,12 @@ use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevel
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
-use crate::idx::IndexKeyBase;
-use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::kvs::cache::ds::DatastoreCache;
-use crate::kvs::clock::SizedClock;
-#[expect(unused_imports)]
 use crate::kvs::clock::SystemClock;
 use crate::kvs::ds::requirements::{
 	TransactionBuilderFactoryRequirements, TransactionBuilderRequirements,
@@ -72,7 +70,6 @@ use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{KVValue, LockType, TransactionType};
-use crate::rpc::DbResultError;
 use crate::sql::Ast;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
@@ -128,6 +125,8 @@ pub struct Datastore {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Arc<SurrealismCache>,
+	// Async event processing trigger
+	async_event_trigger: Arc<Notify>,
 }
 
 /// Represents a collection of metrics for a specific datastore flavor.
@@ -149,18 +148,21 @@ pub struct Metric {
 }
 
 #[derive(Clone)]
-pub(super) struct TransactionFactory {
-	// Clock for tracking time. It is read-only and accessible to all transactions.
-	clock: Arc<SizedClock>,
+pub(crate) struct TransactionFactory {
 	// The inner datastore type
 	builder: Arc<Box<dyn TransactionBuilder>>,
+	// Async event processing trigger
+	async_event_trigger: Arc<Notify>,
 }
 
 impl TransactionFactory {
-	pub(super) fn new(clock: Arc<SizedClock>, builder: Box<dyn TransactionBuilder>) -> Self {
+	pub(super) fn new(
+		async_event_trigger: Arc<Notify>,
+		builder: Box<dyn TransactionBuilder>,
+	) -> Self {
 		Self {
-			clock,
 			builder: Arc::new(builder),
+			async_event_trigger,
 		}
 	}
 
@@ -191,6 +193,7 @@ impl TransactionFactory {
 		Ok(Transaction::new(
 			local,
 			sequences,
+			self.async_event_trigger.clone(),
 			Transactor {
 				inner,
 			},
@@ -261,18 +264,16 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 /// The `path_valid` helper is used by the CLI to validate the path early and
 /// provide better error messages before starting the runtime.
 pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
-	/// Create a new transaction builder and the clock to use throughout the datastore.
+	/// Create a new transaction builder for the datastore.
 	///
 	/// # Parameters
 	/// - `path`: Database connection path string
-	/// - `clock`: Optional clock for timestamp generation (uses system clock if None)
 	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 	async fn new_transaction_builder(
 		&self,
 		path: &str,
-		clock: Option<Arc<SizedClock>>,
 		canceller: CancellationToken,
-	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)>;
+	) -> Result<Box<dyn TransactionBuilder>>;
 
 	/// Validate a datastore path string.
 	fn path_valid(v: &str) -> Result<String>;
@@ -316,11 +317,24 @@ impl TransactionBuilderFactory for CommunityComposer {
 	async fn new_transaction_builder(
 		&self,
 		path: &str,
-		clock: Option<Arc<SizedClock>>,
 		_canceller: CancellationToken,
-	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)> {
-		let (flavour, path) = match path.split_once("://").or_else(|| path.split_once(':')) {
-			None if path == "memory" => ("memory", ""),
+	) -> Result<Box<dyn TransactionBuilder>> {
+		// Extract query parameters from the path before scheme extraction
+		let (raw_path, query_string) = match path.split_once('?') {
+			Some((p, q)) => (p, Some(q)),
+			None => (path, None),
+		};
+
+		// Parse any query parameters into a map
+		let params = query_string.map(super::config::parse_query_params).unwrap_or_default();
+
+		// Extract the scheme and path components
+		let (flavour, path) = match raw_path.split_once("://").or_else(|| raw_path.split_once(':'))
+		{
+			None if raw_path == "memory" => ("memory", ""),
+			// Treat "mem" as an alias for "memory"
+			None if raw_path == "mem" => ("memory", ""),
+			Some(("mem", path)) => ("memory", path),
 			Some((flavour, path)) => (flavour, path),
 			// Validated already in the CLI, should never happen
 			_ => bail!(Error::Unreachable("Provide a valid database path parameter".to_owned())),
@@ -341,40 +355,21 @@ impl TransactionBuilderFactory for CommunityComposer {
 		// Initiate the desired datastore
 		match (flavour, path) {
 			// Initiate an in-memory datastore
-			(flavour @ "memory", _) => {
+			(flavour @ "memory", path) => {
 				#[cfg(feature = "kv-mem")]
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
+					// Parse SurrealMX configuration from URL path and query parameters
+					let config = super::config::MemoryConfig::from_path_and_params(&path, &params)
+						.map_err(Error::Kvs)?;
 					// Initialise the storage engine
-					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					let v = super::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem)?;
 					info!(target: TARGET, "Started kvs store in {flavour}");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-mem"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
-			// Initiate a File (RocksDB) datastore
-			(flavour @ "file", path) => {
-				#[cfg(feature = "kv-rocksdb")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-					// Initialise the storage engine
-					warn!(
-						"file:// is deprecated, please use surrealkv:// or surrealkv+versioned:// or rocksdb://"
-					);
-
-					let v = super::rocksdb::Datastore::new(&path)
-						.await
-						.map(DatastoreFlavor::RocksDB)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
-				}
-				#[cfg(not(feature = "kv-rocksdb"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// Initiate a RocksDB datastore
 			(flavour @ "rocksdb", path) => {
@@ -382,47 +377,34 @@ impl TransactionBuilderFactory for CommunityComposer {
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
+					// Parse RocksDB-specific configuration from query parameters
+					let config =
+						super::config::RocksDbConfig::from_params(&params).map_err(Error::Kvs)?;
 					// Initialise the storage engine
-					let v = super::rocksdb::Datastore::new(&path)
+					let v = super::rocksdb::Datastore::new(&path, config)
 						.await
 						.map(DatastoreFlavor::RocksDB)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
-			// Initiate a SurrealKV versioned database
-			(flavour @ "surrealkv+versioned", path) => {
-				#[cfg(feature = "kv-surrealkv")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-					// Initialise the storage engine
-					let v = super::surrealkv::Datastore::new(&path, true)
-						.await
-						.map(DatastoreFlavor::SurrealKV)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store with versions enabled");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
-				}
-				#[cfg(not(feature = "kv-surrealkv"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
-			// Initiate a SurrealKV non-versioned database
+			// Initiate a SurrealKV database
 			(flavour @ "surrealkv", path) => {
 				#[cfg(feature = "kv-surrealkv")]
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
+					// Parse SurrealKV-specific configuration from query parameters
+					let config =
+						super::config::SurrealKvConfig::from_params(&params).map_err(Error::Kvs)?;
 					// Initialise the storage engine
-					let v = super::surrealkv::Datastore::new(&path, false)
+					let v = super::surrealkv::Datastore::new(&path, config)
 						.await
 						.map(DatastoreFlavor::SurrealKV)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store with versions not enabled");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					info!(target: TARGET, "Started {flavour} kvs store");
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -433,9 +415,8 @@ impl TransactionBuilderFactory for CommunityComposer {
 				{
 					let v =
 						super::indxdb::Datastore::new(&path).await.map(DatastoreFlavor::IndxDB)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -445,9 +426,8 @@ impl TransactionBuilderFactory for CommunityComposer {
 				#[cfg(feature = "kv-tikv")]
 				{
 					let v = super::tikv::Datastore::new(&path).await.map(DatastoreFlavor::TiKV)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -463,13 +443,16 @@ impl TransactionBuilderFactory for CommunityComposer {
 	}
 
 	fn path_valid(v: &str) -> Result<String> {
-		match v {
+		// Strip query parameters before validating the scheme
+		let scheme_part = v.split_once('?').map(|(s, _)| s).unwrap_or(v);
+		match scheme_part {
 			"memory" => Ok(v.to_string()),
-			v if v.starts_with("file:") => Ok(v.to_string()),
-			v if v.starts_with("rocksdb:") => Ok(v.to_string()),
-			v if v.starts_with("surrealkv:") => Ok(v.to_string()),
-			v if v.starts_with("surrealkv+versioned:") => Ok(v.to_string()),
-			v if v.starts_with("tikv:") => Ok(v.to_string()),
+			"mem" => Ok(v.to_string()),
+			v_s if v_s.starts_with("file:") => Ok(v.to_string()),
+			v_s if v_s.starts_with("rocksdb:") => Ok(v.to_string()),
+			v_s if v_s.starts_with("surrealkv:") => Ok(v.to_string()),
+			v_s if v_s.starts_with("mem:") => Ok(v.to_string()),
+			v_s if v_s.starts_with("tikv:") => Ok(v.to_string()),
 			_ => bail!("Provide a valid database path parameter"),
 		}
 	}
@@ -648,44 +631,20 @@ impl Datastore {
 		path: &str,
 		canceller: CancellationToken,
 	) -> Result<Self> {
-		Self::new_with_clock::<F>(composer, path, None, canceller).await
-	}
-
-	/// Creates a new datastore instance with a custom factory and clock.
-	///
-	/// This is the most flexible constructor, allowing full control over both
-	/// the backend and the clock used for timestamps.
-	///
-	/// # Parameters
-	/// - `factory`: Transaction builder factory for backend selection
-	/// - `path`: Database path (e.g., "memory", "surrealkv://path", "tikv://host:port")
-	/// - `clock`: Optional custom clock for timestamp generation (uses system clock if None)
-	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
-	///
-	/// # Generic parameters
-	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-	pub(crate) async fn new_with_clock<
-		C: TransactionBuilderFactory + BucketStoreProvider + 'static,
-	>(
-		composer: C,
-		path: &str,
-		clock: Option<Arc<SizedClock>>,
-		canceller: CancellationToken,
-	) -> Result<Datastore> {
 		// Initiate the desired datastore
-		let (builder, clock) = composer.new_transaction_builder(path, clock, canceller).await?;
+		let builder = composer.new_transaction_builder(path, canceller).await?;
 		//
 		let buckets = BucketsManager::new(Arc::new(composer));
 		// Set the properties on the datastore
-		Self::new_with_builder(builder, buckets, clock)
+		Self::new_with_builder(builder, buckets)
 	}
 
 	pub(crate) fn new_with_builder(
 		builder: Box<dyn TransactionBuilder>,
 		buckets: BucketsManager,
-		clock: Arc<SizedClock>,
 	) -> Result<Self> {
-		let tf = TransactionFactory::new(clock, builder);
+		let async_event_trigger = Arc::new(Notify::new());
+		let tf = TransactionFactory::new(async_event_trigger.clone(), builder);
 		let id = Uuid::new_v4();
 		Ok(Self {
 			id,
@@ -707,6 +666,7 @@ impl Datastore {
 			sequences: Sequences::new(tf, id),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			async_event_trigger,
 		})
 	}
 
@@ -748,6 +708,7 @@ impl Datastore {
 			transaction_factory: self.transaction_factory,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			async_event_trigger: self.async_event_trigger,
 		}
 	}
 
@@ -858,8 +819,8 @@ impl Datastore {
 		&self.jwks_cache
 	}
 
-	pub(super) async fn clock_now(&self) -> Timestamp {
-		self.transaction_factory.clock.now().await
+	pub(super) fn clock_now(&self) -> Timestamp {
+		SystemClock::new().now()
 	}
 
 	// Used for testing live queries
@@ -902,7 +863,7 @@ impl Datastore {
 			None => {
 				// Fetch any keys immediately following the version key
 				let rng = crate::key::version::proceeding();
-				let keys = catch!(txn, txn.keys(rng, 1, None).await);
+				let keys = catch!(txn, txn.keys(rng, 1, 0, None).await);
 				// Check the storage if there are any other keys set
 				let version = if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database
@@ -1044,7 +1005,7 @@ impl Datastore {
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::Nd::new(self.id);
-		let now = self.clock_now().await;
+		let now = self.clock_now();
 		let node = Node::new(self.id, now, false);
 		let res = run!(txn, txn.put(&key, &node, None).await);
 		match res {
@@ -1080,7 +1041,7 @@ impl Datastore {
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::new(self.id);
-		let now = self.clock_now().await;
+		let now = self.clock_now();
 		let node = Node::new(self.id, now, false);
 		run!(txn, txn.replace(&key, &node).await)
 	}
@@ -1119,7 +1080,7 @@ impl Datastore {
 		let inactive = {
 			let txn = self.transaction(Read, Optimistic).await?;
 			let nds = catch!(txn, txn.all_nodes().await);
-			let now = self.clock_now().await;
+			let now = self.clock_now();
 			catch!(txn, txn.cancel().await);
 			// Filter the inactive nodes
 			nds.iter()
@@ -1365,14 +1326,14 @@ impl Datastore {
 	/// Performs changefeed garbage collection as a background task.
 	///
 	/// This method is responsible for cleaning up old changefeed data across
-	/// all databases. It uses a distributed task lease mechanism to ensure
-	/// that only one node in a cluster performs this maintenance operation at
-	/// a time, preventing duplicate work and potential conflicts.
+	/// all databases. It uses a distributed task lease mechanism to coordinate
+	/// which node performs this maintenance operation. Once a batch starts it
+	/// runs to completion even if the lease expires, so brief overlap is
+	/// possible.
 	///
 	/// The process involves:
 	/// 1. Acquiring a lease for the ChangeFeedCleanup task
-	/// 2. Calculating the current system time
-	/// 4. Cleaning up old changefeed data from all databases
+	/// 2. Cleaning up old changefeed data from all databases
 	///
 	/// # Arguments
 	/// * `interval` - The interval between compaction runs, to calculate the lease duration
@@ -1412,8 +1373,9 @@ impl Datastore {
 	///
 	/// This method is called periodically by the index compaction thread to
 	/// process indexes that have been marked for compaction. It acquires a
-	/// distributed lease to ensure only one node in a cluster performs the
-	/// compaction at a time.
+	/// distributed lease to coordinate compaction across the cluster. Once a
+	/// batch starts it runs to completion even if the lease expires, so brief
+	/// overlap is possible.
 	///
 	/// The method scans the index compaction queue (stored as `Ic` keys) and
 	/// processes each index that needs compaction. Currently, only full-text
@@ -1438,7 +1400,7 @@ impl Datastore {
 		)?;
 		// We continue without interruptions while there are keys and the lease
 		loop {
-			// Attempt to acquire a lease for the ChangeFeedCleanup task
+			// Attempt to acquire a lease for the IndexCompaction task
 			// If we don't get the lease, another node is handling this task
 			if !lh.has_lease().await? {
 				return Ok(());
@@ -1446,7 +1408,7 @@ impl Datastore {
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running index compaction process");
 			// Create a new transaction
-			let txn = self.transaction(Write, Optimistic).await?;
+			let txn = Arc::new(self.transaction(Write, Optimistic).await?);
 			// Collect every item in the queue
 			let (beg, end) = IndexCompactionKey::range();
 			let range = beg..end;
@@ -1468,25 +1430,35 @@ impl Datastore {
 				{
 					Some(ix) if !ix.prepare_remove => match &ix.index {
 						Index::FullText(p) => {
-							let ft = catch!(
+							catch!(
 								txn,
-								FullTextIndex::new(
+								IndexOperation::index_fulltext_compaction(
 									&self.index_stores,
+									&ic,
 									&txn,
-									IndexKeyBase::new(
-										ic.ns,
-										ic.db,
-										ix.table_name.clone(),
-										ix.index_id
-									),
-									p,
+									p
 								)
 								.await
 							);
-							catch!(txn, ft.compaction(&txn).await);
 						}
 						Index::Count(_) => {
 							catch!(txn, IndexOperation::index_count_compaction(&ic, &txn).await);
+						}
+						Index::Hnsw(p) => {
+							let mut ctx = self.setup_ctx()?;
+							ctx.set_transaction(txn.clone());
+							let ctx = ctx.freeze();
+							catch!(
+								txn,
+								IndexOperation::index_hnsw_compaction(
+									&ctx,
+									&self.index_stores,
+									&ic,
+									&ix,
+									p
+								)
+								.await
+							);
 						}
 						_ => {
 							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
@@ -1508,6 +1480,38 @@ impl Datastore {
 		}
 	}
 
+	/// Process queued async events using a distributed lease to coordinate batches.
+	/// Once a batch starts it runs to completion even if the lease expires, so
+	/// brief overlap is possible.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn event_processing(&self, interval: Duration) -> Result<()> {
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Attempting event processing process");
+		// Create a new lease handler
+		let lh = LeaseHandler::new(
+			self.sequences.clone(),
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::EventProcessing,
+			interval * 2,
+		)?;
+		// We continue without interruptions while there are keys and the lease
+		loop {
+			// Attempt to acquire a lease for the EventProcessing task
+			// If we don't get the lease, another node is handling this task
+			if !lh.has_lease().await? {
+				return Ok(());
+			}
+			// Output function invocation details to logs
+			trace!(target: TARGET, "Running event processing process");
+			if AsyncEventRecord::process_next_events_batch(self, Some(&lh)).await? == 0 {
+				// The last batch didn't have any events to process,
+				// we can sleep until the next wake-up call
+				return Ok(());
+			}
+		}
+	}
+
 	// --------------------------------------------------
 	// Other functions
 	// --------------------------------------------------
@@ -1520,7 +1524,7 @@ impl Datastore {
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("file://database.db").await?;
+	///     let ds = Datastore::new("rocksdb://database.db").await?;
 	///     let mut tx = ds.transaction(Write, Optimistic).await?;
 	///     tx.cancel().await?;
 	///     Ok(())
@@ -1528,6 +1532,17 @@ impl Datastore {
 	/// ```
 	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
 		self.transaction_factory.transaction(write, lock, self.sequences.clone()).await
+	}
+
+	pub(crate) fn sequences(&self) -> &Sequences {
+		&self.sequences
+	}
+
+	pub(crate) fn transaction_factory(&self) -> &TransactionFactory {
+		&self.transaction_factory
+	}
+	pub fn async_event_trigger(&self) -> &Arc<Notify> {
+		&self.async_event_trigger
 	}
 
 	pub async fn health_check(&self) -> Result<()> {
@@ -1574,10 +1589,10 @@ impl Datastore {
 		txt: &str,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)
-			.map_err(|e| DbResultError::ParseError(e.to_string()))?;
+			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}
@@ -1590,10 +1605,10 @@ impl Datastore {
 		sess: &Session,
 		vars: Option<PublicVariables>,
 		tx: Arc<Transaction>,
-	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)
-			.map_err(|e| DbResultError::ParseError(e.to_string()))?;
+			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST with the transaction
 		self.process_with_transaction(ast, sess, vars, tx).await
 	}
@@ -1606,36 +1621,40 @@ impl Datastore {
 		sess: &Session,
 		vars: Option<PublicVariables>,
 		tx: Arc<Transaction>,
-	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Check if the session has expired
 		if sess.expired() {
-			return Err(DbResultError::InvalidAuth("The session has expired".to_string()));
+			return Err(TypesError::not_allowed(
+				"The session has expired".to_string(),
+				AuthError::SessionExpired,
+			));
 		}
 
 		// Check if anonymous actors can execute queries when auth is enabled
 		if let Err(e) = self.check_anon(sess) {
-			return Err(DbResultError::InvalidAuth(format!("Anonymous access not allowed: {}", e)));
+			return Err(TypesError::not_allowed(
+				format!("Anonymous access not allowed: {e}"),
+				AuthError::NotAllowed {
+					actor: "anonymous".to_owned(),
+					action: "process".to_owned(),
+					resource: "query".to_owned(),
+				},
+			));
 		}
 
 		// Create a new query options
 		let opt = self.setup_options(sess);
 
 		// Create a default context
-		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
-			Some(Error::ExpiredSession) => {
-				DbResultError::InvalidAuth("The session has expired".to_string())
-			}
-			_ => DbResultError::InternalError(e.to_string()),
+		let mut ctx = self.setup_ctx().map_err(|e| {
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})?;
 
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into()).map_err(|e| match e {
-				Error::InvalidParam {
-					..
-				} => DbResultError::InvalidParams("Invalid query variables".to_string()),
-				_ => DbResultError::InternalError(e.to_string()),
-			})?;
+			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
 		}
 
 		// Set the transaction in the context
@@ -1643,12 +1662,9 @@ impl Datastore {
 
 		// Process all statements with the transaction
 		Executor::execute_plan_with_transaction(ctx.freeze(), opt, ast.into()).await.map_err(|e| {
-			match e.downcast_ref::<Error>() {
-				Some(Error::ExpiredSession) => {
-					DbResultError::InvalidAuth("The session has expired".to_string())
-				}
-				_ => DbResultError::InternalError(e.to_string()),
-			}
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})
 	}
 
@@ -1689,9 +1705,6 @@ impl Datastore {
 		// Process all statements
 
 		let parser_settings = ParserSettings {
-			define_api_enabled: ctx
-				.get_capabilities()
-				.allows_experimental(&ExperimentalTarget::DefineApi),
 			files_enabled: ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
 			surrealism_enabled: ctx
 				.get_capabilities()
@@ -1767,7 +1780,7 @@ impl Datastore {
 		ast: Ast,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		//TODO: Insert planner here.
 		self.process_plan(ast.into(), sess, vars).await
 	}
@@ -1777,256 +1790,51 @@ impl Datastore {
 		plan: LogicalPlan,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-	) -> Result<Vec<QueryResult>, DbResultError> {
+	) -> Result<Vec<QueryResult>, TypesError> {
 		// Check if the session has expired
 		if sess.expired() {
-			return Err(DbResultError::InvalidAuth("The session has expired".to_string()));
+			return Err(TypesError::not_allowed(
+				"The session has expired".to_string(),
+				AuthError::SessionExpired,
+			));
 		}
 
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if let Err(e) = self.check_anon(sess) {
-			return Err(DbResultError::InvalidAuth(format!("Anonymous access not allowed: {}", e)));
+			return Err(TypesError::not_allowed(
+				format!("Anonymous access not allowed: {e}"),
+				AuthError::NotAllowed {
+					actor: "anonymous".to_owned(),
+					action: "process".to_owned(),
+					resource: "query".to_owned(),
+				},
+			));
 		}
 
 		// Create a new query options
 		let opt = self.setup_options(sess);
 
 		// Create a default context
-		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
-			Some(Error::ExpiredSession) => {
-				DbResultError::InvalidAuth("The session has expired".to_string())
-			}
-			Some(Error::InvalidAuth) => {
-				DbResultError::InvalidAuth("Authentication failed".to_string())
-			}
-			Some(Error::UnexpectedAuth) => {
-				DbResultError::InvalidAuth("Unexpected authentication error".to_string())
-			}
-			Some(Error::MissingUserOrPass) => {
-				DbResultError::InvalidAuth("Missing username or password".to_string())
-			}
-			Some(Error::InvalidPass) => DbResultError::InvalidAuth("Invalid password".to_string()),
-			Some(Error::NoSigninTarget) => {
-				DbResultError::InvalidAuth("No signin target specified".to_string())
-			}
-			Some(Error::TokenMakingFailed) => {
-				DbResultError::InvalidAuth("Failed to create authentication token".to_string())
-			}
-			Some(Error::IamError(iam_err)) => {
-				DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
-			}
-			Some(Error::Kvs(kvs_err)) => {
-				DbResultError::InternalError(format!("Key-value store error: {}", kvs_err))
-			}
-			Some(Error::InvalidQuery(_)) => {
-				DbResultError::ParseError("Invalid query syntax".to_string())
-			}
-			Some(Error::Internal(msg)) => DbResultError::InternalError(msg.clone()),
-			Some(Error::Unimplemented(msg)) => {
-				DbResultError::InternalError(format!("Unimplemented: {}", msg))
-			}
-			Some(Error::Io(e)) => DbResultError::InternalError(format!("I/O error: {}", e)),
-			Some(Error::Http(msg)) => DbResultError::InternalError(format!("HTTP error: {}", msg)),
-			Some(Error::Channel(msg)) => {
-				DbResultError::InternalError(format!("Channel error: {}", msg))
-			}
-			Some(Error::QueryTimedout(msg)) => DbResultError::QueryTimedout(format!("{}", msg)),
-			Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
-			Some(Error::QueryNotExecuted {
-				message,
-			}) => DbResultError::QueryNotExecuted(format!("{message} - plan: {plan:?}")),
-			Some(Error::ScriptingNotAllowed) => {
-				DbResultError::MethodNotAllowed("Scripting functions are not allowed".to_string())
-			}
-			Some(Error::FunctionNotAllowed(func)) => {
-				DbResultError::MethodNotAllowed(format!("Function '{}' is not allowed", func))
-			}
-			Some(Error::NetTargetNotAllowed(target)) => DbResultError::MethodNotAllowed(format!(
-				"Network target '{}' is not allowed",
-				target
-			)),
-			Some(Error::Thrown(msg)) => DbResultError::Thrown(msg.clone()),
-			_ => DbResultError::InternalError(e.to_string()),
+		let mut ctx = self.setup_ctx().map_err(|e| {
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})?;
 
 		// Start an execution context
-		ctx.attach_session(sess).map_err(|e| match e {
-			Error::ExpiredSession => {
-				DbResultError::InvalidAuth("The session has expired".to_string())
-			}
-			Error::InvalidAuth => DbResultError::InvalidAuth("Authentication failed".to_string()),
-			Error::UnexpectedAuth => {
-				DbResultError::InvalidAuth("Unexpected authentication error".to_string())
-			}
-			Error::IamError(iam_err) => {
-				DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
-			}
-			_ => DbResultError::InternalError(e.to_string()),
-		})?;
+		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
 
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into()).map_err(|e| match e {
-				Error::InvalidParam {
-					..
-				} => DbResultError::InvalidParams("Invalid query variables".to_string()),
-				Error::Internal(msg) => DbResultError::InternalError(msg),
-				_ => DbResultError::InternalError(e.to_string()),
-			})?;
+			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
 		}
 
 		// Process all statements
 		Executor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
-			match e.downcast_ref::<Error>() {
-				Some(Error::ExpiredSession) => {
-					DbResultError::InvalidAuth("The session has expired".to_string())
-				}
-				Some(Error::InvalidAuth) => {
-					DbResultError::InvalidAuth("Authentication failed".to_string())
-				}
-				Some(Error::UnexpectedAuth) => {
-					DbResultError::InvalidAuth("Unexpected authentication error".to_string())
-				}
-				Some(Error::MissingUserOrPass) => {
-					DbResultError::InvalidAuth("Missing username or password".to_string())
-				}
-				Some(Error::InvalidPass) => {
-					DbResultError::InvalidAuth("Invalid password".to_string())
-				}
-				Some(Error::NoSigninTarget) => {
-					DbResultError::InvalidAuth("No signin target specified".to_string())
-				}
-				Some(Error::TokenMakingFailed) => {
-					DbResultError::InvalidAuth("Failed to create authentication token".to_string())
-				}
-				Some(Error::IamError(iam_err)) => {
-					DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
-				}
-				Some(Error::Kvs(kvs_err)) => {
-					DbResultError::InternalError(format!("Key-value store error: {}", kvs_err))
-				}
-				Some(Error::NsEmpty) => {
-					DbResultError::InvalidParams("No namespace specified".to_string())
-				}
-				Some(Error::DbEmpty) => {
-					DbResultError::InvalidParams("No database specified".to_string())
-				}
-				Some(Error::InvalidQuery(_)) => {
-					DbResultError::ParseError("Invalid query syntax".to_string())
-				}
-				Some(Error::InvalidContent {
-					..
-				}) => DbResultError::InvalidParams("Invalid content clause".to_string()),
-				Some(Error::InvalidMerge {
-					..
-				}) => DbResultError::InvalidParams("Invalid merge clause".to_string()),
-				Some(Error::InvalidPatch(_)) => {
-					DbResultError::InvalidParams("Invalid patch operation".to_string())
-				}
-				Some(Error::Internal(msg)) => DbResultError::InternalError(msg.clone()),
-				Some(Error::Unimplemented(msg)) => {
-					DbResultError::InternalError(format!("Unimplemented: {}", msg))
-				}
-				Some(Error::Io(e)) => DbResultError::InternalError(format!("I/O error: {}", e)),
-				Some(Error::Http(msg)) => {
-					DbResultError::InternalError(format!("HTTP error: {}", msg))
-				}
-				Some(Error::Channel(msg)) => {
-					DbResultError::InternalError(format!("Channel error: {}", msg))
-				}
-				Some(Error::QueryTimedout(timeout)) => {
-					DbResultError::QueryTimedout(format!("Timed out: {}", timeout))
-				}
-				Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
-				Some(Error::QueryNotExecuted {
-					message,
-				}) => DbResultError::QueryNotExecuted(message.clone()),
-				Some(Error::ScriptingNotAllowed) => DbResultError::MethodNotAllowed(
-					"Scripting functions are not allowed".to_string(),
-				),
-				Some(Error::FunctionNotAllowed(func)) => {
-					DbResultError::MethodNotAllowed(format!("Function '{}' is not allowed", func))
-				}
-				Some(Error::NetTargetNotAllowed(target)) => DbResultError::MethodNotAllowed(
-					format!("Network target '{}' is not allowed", target),
-				),
-				Some(Error::Thrown(msg)) => DbResultError::Thrown(msg.clone()),
-				Some(Error::Coerce(_)) => {
-					DbResultError::InvalidParams("Type coercion error".to_string())
-				}
-				Some(Error::Cast(_)) => {
-					DbResultError::InvalidParams("Type casting error".to_string())
-				}
-				Some(Error::TryAdd(_, _))
-				| Some(Error::TrySub(_, _))
-				| Some(Error::TryMul(_, _))
-				| Some(Error::TryDiv(_, _))
-				| Some(Error::TryRem(_, _))
-				| Some(Error::TryPow(_, _))
-				| Some(Error::TryNeg(_)) => {
-					DbResultError::InvalidParams("Arithmetic operation error".to_string())
-				}
-				Some(Error::TryFrom(_, _)) => {
-					DbResultError::InvalidParams("Type conversion error".to_string())
-				}
-				Some(Error::Unencodable) => {
-					DbResultError::SerializationError("Value cannot be serialized".to_string())
-				}
-				Some(Error::Storekey(_)) => {
-					DbResultError::DeserializationError("Key decoding error".to_string())
-				}
-				Some(Error::Revision(_)) => {
-					DbResultError::DeserializationError("Versioned data error".to_string())
-				}
-				Some(Error::CorruptedIndex(_)) => {
-					DbResultError::InternalError("Index corruption detected".to_string())
-				}
-				Some(Error::NoIndexFoundForMatch {
-					..
-				}) => DbResultError::InternalError("No suitable index found".to_string()),
-				Some(Error::AnalyzerError(msg)) => {
-					DbResultError::InternalError(format!("Analyzer error: {}", msg))
-				}
-				Some(Error::HighlightError(msg)) => {
-					DbResultError::InternalError(format!("Highlight error: {}", msg))
-				}
-				Some(Error::FstError(_)) => DbResultError::InternalError("FST error".to_string()),
-				Some(Error::Utf8Error(_)) => {
-					DbResultError::DeserializationError("UTF-8 decoding error".to_string())
-				}
-				Some(Error::ObsError(_)) => {
-					DbResultError::InternalError("Object store error".to_string())
-				}
-				Some(Error::DuplicatedMatchRef {
-					..
-				}) => DbResultError::InvalidParams("Duplicated match reference".to_string()),
-				Some(Error::TimestampOverflow(msg)) => {
-					DbResultError::InternalError(format!("Timestamp overflow: {}", msg))
-				}
-				Some(Error::NoRecordFound) => {
-					DbResultError::InternalError("No record found".to_string())
-				}
-				Some(Error::InvalidSignup) => {
-					DbResultError::InvalidAuth("Signup failed".to_string())
-				}
-				Some(Error::ClAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Cluster node already exists".to_string()),
-				Some(Error::ApAlreadyExists {
-					..
-				}) => DbResultError::InternalError("API already exists".to_string()),
-				Some(Error::AzAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Analyzer already exists".to_string()),
-				Some(Error::BuAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Bucket already exists".to_string()),
-				Some(Error::DbAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Database already exists".to_string()),
-				_ => DbResultError::InternalError(e.to_string()),
-			}
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})
 	}
 
@@ -2239,14 +2047,14 @@ impl Datastore {
 		session: &mut Session,
 		namespace: Option<String>,
 		database: Option<String>,
-	) -> std::result::Result<QueryResult, DbResultError> {
+	) -> std::result::Result<QueryResult, TypesError> {
 		let new_tx = || async {
 			self.transaction(Write, Optimistic)
 				.await
-				.map_err(|err| DbResultError::InternalError(err.to_string()))
+				.map_err(|err| TypesError::internal(err.to_string()))
 		};
 		let commit_tx = |txn: Transaction| async move {
-			txn.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))
+			txn.commit().await.map_err(|err| TypesError::internal(err.to_string()))
 		};
 
 		let query_result = QueryResultBuilder::started_now();
@@ -2255,7 +2063,7 @@ impl Datastore {
 				let tx = new_tx().await?;
 				tx.ensure_ns_db(ctx, &ns, &db)
 					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+					.map_err(|err| TypesError::internal(err.to_string()))?;
 				commit_tx(tx).await?;
 				session.ns = Some(ns);
 				session.db = Some(db);
@@ -2264,20 +2072,21 @@ impl Datastore {
 				let tx = new_tx().await?;
 				tx.get_or_add_ns(ctx, &ns)
 					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+					.map_err(|err| TypesError::internal(err.to_string()))?;
 				commit_tx(tx).await?;
 				session.ns = Some(ns);
 			}
 			(None, Some(db)) => {
 				let Some(ns) = session.ns.clone() else {
-					return Err(DbResultError::InvalidRequest(
+					return Err(TypesError::validation(
 						"Cannot use database without namespace".to_string(),
+						None,
 					));
 				};
 				let tx = new_tx().await?;
 				tx.ensure_ns_db(ctx, &ns, &db)
 					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+					.map_err(|err| TypesError::internal(err.to_string()))?;
 				commit_tx(tx).await?;
 				session.db = Some(db);
 			}

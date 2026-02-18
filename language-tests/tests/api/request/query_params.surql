@@ -9,7 +9,7 @@ value = "NONE"
 # 1
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { query: { name: 'test', value: '123' } }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { query: { name: 'test', value: '123' } }, headers: {}, status: 200 }"
 
 # 2
 [[test.results]]
@@ -18,7 +18,7 @@ value = "NONE"
 # 3
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { query: { page: '1', limit: '10' } }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { query: { page: '1', limit: '10' } }, headers: {}, status: 200 }"
 
 # 4
 [[test.results]]
@@ -27,10 +27,7 @@ value = "NONE"
 # 5
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { query: {} }, context: {  }, headers: {}, status: 200 }"
-
-[env.capabilities]
-allow-experimental = ["define_api"]
+value = "{ body: { query: {} }, headers: {}, status: 200 }"
 
 */
 

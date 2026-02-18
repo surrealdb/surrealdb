@@ -1,6 +1,6 @@
 use reblessive::Stk;
 
-use crate::catalog::ApiMethod;
+use crate::catalog::{ApiMethod, EventDefinition, EventKind};
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
@@ -634,7 +634,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let name = stk.run(|ctx| self.parse_expr_table(ctx)).await?;
 		let mut res = DefineTableStatement {
 			name,
 			permissions: Permissions::none(),
@@ -719,10 +719,6 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineApiStatement> {
-		if !self.settings.define_api_enabled {
-			bail!("Cannot define an API, as the experimental define api capability is not enabled", @self.last_span);
-		}
-
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -833,7 +829,7 @@ impl Parser<'_> {
 		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let what = stk.run(|ctx| self.parse_expr_table(ctx)).await?;
 
 		let mut res = DefineEventStatement {
 			kind,
@@ -842,6 +838,7 @@ impl Parser<'_> {
 			when: Expr::Literal(Literal::Bool(true)),
 			then: Vec::new(),
 			comment: Expr::Literal(Literal::None),
+			event_kind: EventKind::Sync,
 		};
 
 		loop {
@@ -851,22 +848,58 @@ impl Parser<'_> {
 					res.when = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
 				t!("THEN") => {
-					self.pop_peek();
+					let token = self.pop_peek();
 					res.then = vec![stk.run(|ctx| self.parse_expr_field(ctx)).await?];
 					while self.eat(t!(",")) {
 						res.then.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+					}
+					if res.then.is_empty() {
+						bail!("Expected at least one `THEN` statement", @token.span => "`THEN` statement required");
 					}
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 				}
+				t!("ASYNC") => {
+					self.pop_peek();
+					res.event_kind = EventKind::Async {
+						retry: EventDefinition::DEFAULT_RETRY,
+						max_depth: EventDefinition::DEFAULT_MAX_DEPTH,
+					};
+				}
+				t!("RETRY") => {
+					let token = self.pop_peek();
+					if let EventKind::Async {
+						retry,
+						..
+					} = &mut res.event_kind
+					{
+						*retry = self.next_token_value()?;
+					} else {
+						bail!("Unexpected token `RETRY`", @token.span => "RETRY must be set after ASYNC");
+					}
+				}
+				t!("MAXDEPTH") => {
+					let token = self.pop_peek();
+					if let EventKind::Async {
+						max_depth,
+						..
+					} = &mut res.event_kind
+					{
+						*max_depth = self.next_token_value()?;
+					} else {
+						bail!("Unexpected token `MAXDEPTH`", @token.span => "MAXDEPTH must be set after ASYNC");
+					}
+				}
 				_ => break,
 			}
 		}
+		if res.then.is_empty() {
+			bail!("Expected at least one `THEN` statement", @self.last_span => "`THEN` statement required");
+		}
 		Ok(res)
 	}
-
 	pub(crate) async fn parse_define_field(
 		&mut self,
 		stk: &mut Stk,
@@ -883,7 +916,7 @@ impl Parser<'_> {
 		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let what = stk.run(|ctx| self.parse_expr_table(ctx)).await?;
 
 		let mut res = DefineFieldStatement {
 			name,
@@ -992,7 +1025,7 @@ impl Parser<'_> {
 		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		let what = stk.run(|ctx| self.parse_expr_table(ctx)).await?;
 
 		let mut res = DefineIndexStatement {
 			name,
@@ -1488,9 +1521,12 @@ impl Parser<'_> {
 	}
 
 	fn parse_graphql_config(&mut self) -> ParseResult<GraphQLConfig> {
-		use graphql::{FunctionsConfig, TablesConfig};
+		use graphql::{FunctionsConfig, IntrospectionConfig, TablesConfig};
 		let mut tmp_tables = Option::<TablesConfig>::None;
 		let mut tmp_fncs = Option::<FunctionsConfig>::None;
+		let mut tmp_depth = Option::<u32>::None;
+		let mut tmp_complexity = Option::<u32>::None;
+		let mut tmp_introspection = Option::<IntrospectionConfig>::None;
 		loop {
 			match self.peek_kind() {
 				t!("NONE") => {
@@ -1540,6 +1576,31 @@ impl Parser<'_> {
 						_ => unexpected!(self, next, "`NONE`, `AUTO`"),
 					}
 				}
+				TokenKind::Identifier => {
+					let token = self.peek();
+					let ident = self.span_str(token.span);
+					if ident.eq_ignore_ascii_case("DEPTH") {
+						self.pop_peek();
+						tmp_depth = Some(self.next_token_value::<u32>()?);
+					} else if ident.eq_ignore_ascii_case("COMPLEXITY") {
+						self.pop_peek();
+						tmp_complexity = Some(self.next_token_value::<u32>()?);
+					} else if ident.eq_ignore_ascii_case("INTROSPECTION") {
+						self.pop_peek();
+						let next = self.next();
+						match next.kind {
+							t!("AUTO") => {
+								tmp_introspection = Some(IntrospectionConfig::Auto);
+							}
+							t!("NONE") => {
+								tmp_introspection = Some(IntrospectionConfig::None);
+							}
+							_ => unexpected!(self, next, "`AUTO` or `NONE`"),
+						}
+					} else {
+						break;
+					}
+				}
 				_ => break,
 			}
 		}
@@ -1547,6 +1608,9 @@ impl Parser<'_> {
 		Ok(GraphQLConfig {
 			tables: tmp_tables.unwrap_or_default(),
 			functions: tmp_fncs.unwrap_or_default(),
+			depth_limit: tmp_depth,
+			complexity_limit: tmp_complexity,
+			introspection: tmp_introspection.unwrap_or_default(),
 		})
 	}
 

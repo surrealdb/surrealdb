@@ -158,7 +158,7 @@ impl Closure {
 				if arg_spec.len() > args.len()
 					&& let Some(x) = arg_spec[args.len()..].iter().find(|x| !x.1.can_be_none())
 				{
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "ANONYMOUS".to_string(),
 						message: format!("Expected a value for {}", x.0.to_sql()),
 					})
@@ -168,7 +168,7 @@ impl Closure {
 					if let Ok(val) = val.coerce_to_kind(kind) {
 						ctx.add_value(name.clone().into_string(), val.into());
 					} else {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "ANONYMOUS".to_string(),
 							message: format!(
 								"Expected a value of type '{}' for argument {}",

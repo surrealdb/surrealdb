@@ -35,6 +35,8 @@ impl Fields {
 							ident: field_name.clone(),
 							ty: field.ty.clone(),
 							rename: field_attrs.rename,
+							default: field_attrs.default,
+							flatten: field_attrs.flatten,
 						}
 					})
 					.collect();
@@ -126,17 +128,34 @@ impl Fields {
 						tag,
 						variant,
 						content,
+						skip_content_if,
 					} => {
-						quote! {{
-							let mut map = #object_ty::new();
-							map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
-							map.insert(#content.to_string(), {
+						if let Some(func) = skip_content_if {
+							quote! {{
 								let mut map = #object_ty::new();
-								#(#map_assignments)*
+								map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
+								let content_value = {
+									let mut map = #object_ty::new();
+									#(#map_assignments)*
+									#value_ty::Object(map)
+								};
+								if !#func(&content_value) {
+									map.insert(#content.to_string(), content_value);
+								}
 								#value_ty::Object(map)
-							});
-							#value_ty::Object(map)
-						}}
+							}}
+						} else {
+							quote! {{
+								let mut map = #object_ty::new();
+								map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
+								map.insert(#content.to_string(), {
+									let mut map = #object_ty::new();
+									#(#map_assignments)*
+									#value_ty::Object(map)
+								});
+								#value_ty::Object(map)
+							}}
+						}
 					}
 					Strategy::Value {
 						..
@@ -180,13 +199,26 @@ impl Fields {
 						tag,
 						variant,
 						content,
+						skip_content_if,
 					} => {
-						quote! {{
-							let mut map = #object_ty::new();
-							map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
-							map.insert(#content.to_string(), #value);
-							#value_ty::Object(map)
-						}}
+						if let Some(func) = skip_content_if {
+							quote! {{
+								let mut map = #object_ty::new();
+								map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
+								let content_value = #value;
+								if !#func(&content_value) {
+									map.insert(#content.to_string(), content_value);
+								}
+								#value_ty::Object(map)
+							}}
+						} else {
+							quote! {{
+								let mut map = #object_ty::new();
+								map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
+								map.insert(#content.to_string(), #value);
+								#value_ty::Object(map)
+							}}
+						}
 					}
 					Strategy::Value {
 						..
@@ -225,17 +257,27 @@ impl Fields {
 					tag,
 					variant,
 					content,
+					skip_content_if,
 				} => {
 					if attrs.value.is_some() {
 						panic!("Unit variants can only have a value with untagged enums");
 					}
 
-					quote! {{
-						let mut map = #object_ty::new();
-						map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
-						map.insert(#content.to_string(), #value_ty::Object(#object_ty::new()));
-						#value_ty::Object(map)
-					}}
+					if skip_content_if.is_some() {
+						// Unit variant has no data -- skip the content field entirely
+						quote! {{
+							let mut map = #object_ty::new();
+							map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
+							#value_ty::Object(map)
+						}}
+					} else {
+						quote! {{
+							let mut map = #object_ty::new();
+							map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
+							map.insert(#content.to_string(), #value_ty::Object(#object_ty::new()));
+							#value_ty::Object(map)
+						}}
+					}
 				}
 				Strategy::Value {
 					variant,
@@ -270,7 +312,8 @@ impl Fields {
 		let kind_ty = crate_path.kind();
 		let conversion_error_ty = crate_path.conversion_error();
 		let type_error_ty = crate_path.type_error();
-		let anyhow_macro = crate_path.anyhow_macro();
+		let error_expected_content =
+			crate_path.error_internal(quote!("Expected content key".to_string()));
 		match self {
 			Fields::Named(fields) => {
 				let map_retrievals = fields.map_retrievals(name, crate_path);
@@ -311,19 +354,39 @@ impl Fields {
 						tag,
 						variant,
 						content,
-					} => With::Map(quote! {{
-						if map.get(#tag).is_some_and(|v| v == Value::String(#variant.to_string())) {
-							if let Some(#value_ty::Object(mut map)) = map.remove(#content) {
-								#(#map_retrievals)*
-								#final_ok
-							} else {
-								let err = #type_error_ty::Invalid(
-									format!("Expected object under content key '{}' for variant '{}'", #content, #variant)
-								);
-								return Err(err.into())
-							}
+						skip_content_if,
+					} => {
+						if skip_content_if.is_some() {
+							// When skip_content_if is set, accept missing content by falling
+							// back to Default::default() for all fields
+							let default_inits = fields.default_initializers();
+							With::Map(quote! {{
+								if map.get(#tag).is_some_and(|v| v == Value::String(#variant.to_string())) {
+									if let Some(#value_ty::Object(mut map)) = map.remove(#content) {
+										#(#map_retrievals)*
+										#final_ok
+									} else {
+										#(#default_inits)*
+										#final_ok
+									}
+								}
+							}})
+						} else {
+							With::Map(quote! {{
+								if map.get(#tag).is_some_and(|v| v == Value::String(#variant.to_string())) {
+									if let Some(#value_ty::Object(mut map)) = map.remove(#content) {
+										#(#map_retrievals)*
+										#final_ok
+									} else {
+										let err = #type_error_ty::Invalid(
+											format!("Expected object under content key '{}' for variant '{}'", #content, #variant)
+										);
+										return Err(err.into())
+									}
+								}
+							}})
 						}
-					}}),
+					}
 					// For an enum, we check first if the variant matches, then decode
 					Strategy::Value {
 						variant: Some(_),
@@ -375,6 +438,7 @@ impl Fields {
 							tag,
 							variant,
 							content,
+							..
 						} => With::Map(quote! {{
 							if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
 								if let Some(value) = map.remove(#content) {
@@ -436,15 +500,32 @@ impl Fields {
 							tag,
 							variant,
 							content,
-						} => With::Map(quote! {{
-							if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
-								if let Some(value) = map.remove(#content) {
-									#retrieve_value
-								} else {
-									return Err(#anyhow_macro!("Expected content key"))
-								}
+							skip_content_if,
+						} => {
+							if skip_content_if.is_some() {
+								let default_inits = fields.default_initializers();
+								With::Map(quote! {{
+									if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
+										if let Some(value) = map.remove(#content) {
+											#retrieve_value
+										} else {
+											#(#default_inits)*
+											#ok
+										}
+									}
+								}})
+							} else {
+								With::Map(quote! {{
+									if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
+										if let Some(value) = map.remove(#content) {
+											#retrieve_value
+										} else {
+											return Err(#error_expected_content)
+										}
+									}
+								}})
 							}
-						}}),
+						}
 						// For an enum, we check first if the variant matches, then decode
 						Strategy::Value {
 							variant: Some(_),
@@ -489,18 +570,34 @@ impl Fields {
 						tag,
 						variant,
 						content,
-					} => With::Map(quote! {{
-						if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
-							if map.get(#content).is_some_and(|v| v.is_object_and(|o| o.is_empty())) {
-								#ok
-							} else {
-								let err = #type_error_ty::Invalid(
-									format!("Expected empty object under content key '{}' for variant '{}'", #content, #variant)
-								);
-								return Err(err.into())
-							}
+						skip_content_if,
+					} => {
+						if skip_content_if.is_some() {
+							// Accept both { kind: "X" } and { kind: "X", details: {} }
+							With::Map(quote! {{
+								if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
+									if !map.contains_key(#content)
+										|| map.get(#content).is_some_and(|v| v.is_object_and(|o| o.is_empty()))
+									{
+										#ok
+									}
+								}
+							}})
+						} else {
+							With::Map(quote! {{
+								if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
+									if map.get(#content).is_some_and(|v| v.is_object_and(|o| o.is_empty())) {
+										#ok
+									} else {
+										let err = #type_error_ty::Invalid(
+											format!("Expected empty object under content key '{}' for variant '{}'", #content, #variant)
+										);
+										return Err(err.into())
+									}
+								}
+							}})
 						}
-					}}),
+					}
 					// For an enum, we check first if the variant matches, then decode
 					Strategy::Value {
 						variant: Some(variant),
@@ -593,6 +690,7 @@ impl Fields {
 						tag,
 						variant,
 						content,
+						..
 					} => With::Map(quote! {{
 						if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
 							if let Some(#value_ty::Object(map)) = map.get(#content) {
@@ -638,6 +736,7 @@ impl Fields {
 							tag,
 							variant,
 							content,
+							..
 						} => With::Map(quote! {{
 							if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
 								if let Some(value) = map.get(#content) {
@@ -683,6 +782,7 @@ impl Fields {
 							tag,
 							variant,
 							content,
+							..
 						} => With::Map(quote! {{
 							if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
 								if let Some(value) = map.get(#content) {
@@ -724,13 +824,28 @@ impl Fields {
 					tag,
 					variant,
 					content,
-				} => With::Map(quote! {{
-					if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) &&
-						map.get(#content).is_some_and(|v| v.is_object_and(|o| o.is_empty()))
-					{
-						return true;
+					skip_content_if,
+				} => {
+					if skip_content_if.is_some() {
+						// Accept both { kind: "X" } and { kind: "X", details: {} }
+						With::Map(quote! {{
+							if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) &&
+								(!map.contains_key(#content)
+									|| map.get(#content).is_some_and(|v| v.is_object_and(|o| o.is_empty())))
+							{
+								return true;
+							}
+						}})
+					} else {
+						With::Map(quote! {{
+							if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) &&
+								map.get(#content).is_some_and(|v| v.is_object_and(|o| o.is_empty()))
+							{
+								return true;
+							}
+						}})
 					}
-				}}),
+				}
 				Strategy::Value {
 					variant,
 				} => {
@@ -798,6 +913,7 @@ impl Fields {
 						tag,
 						variant,
 						content,
+						..
 					} => {
 						quote! {{
 							let mut map = std::collections::BTreeMap::new();
@@ -854,6 +970,7 @@ impl Fields {
 						tag,
 						variant,
 						content,
+						..
 					} => {
 						quote! {{
 							let mut obj = std::collections::BTreeMap::new();
@@ -891,6 +1008,7 @@ impl Fields {
 					tag,
 					variant,
 					content,
+					..
 				} => {
 					quote! {{
 						let mut obj = std::collections::BTreeMap::new();

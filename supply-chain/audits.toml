@@ -479,7 +479,7 @@ end = "2026-04-09"
 
 [[trusted.double-ended-peekable]]
 criteria = "safe-to-deploy"
-user-id = 176367 # Edoardo Morandi (dodomorandi)
+user-id = 176367
 start = "2023-03-12"
 end = "2026-02-26"
 
@@ -1328,6 +1328,12 @@ criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2023-10-31"
 end = "2026-05-06"
+
+[[trusted.surrealmx]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-10-06"
+end = "2027-02-17"
 
 [[trusted.syn]]
 criteria = "safe-to-deploy"

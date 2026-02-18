@@ -37,7 +37,7 @@ value = "NONE"
 # 8
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { db1: true, db2: true }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { db1: true, db2: true }, headers: {}, status: 200 }"
 
 # 9
 [[test.results]]
@@ -46,7 +46,7 @@ value = "NONE"
 # 10
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { db1: true, db2: true, route1: true, route2: true }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { db1: true, db2: true, route1: true, route2: true }, headers: {}, status: 200 }"
 
 # 11
 [[test.results]]
@@ -55,10 +55,7 @@ value = "NONE"
 # 12
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { db1: true, db2: true, method1: true, method2: true }, context: {  }, headers: {}, status: 200 }"
-
-[env.capabilities]
-allow-experimental = ["define_api"]
+value = "{ body: { db1: true, db2: true, method1: true, method2: true }, headers: {}, status: 200 }"
 
 */
 

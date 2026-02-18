@@ -89,14 +89,22 @@ pub async fn invoke(
 		req.headers.insert(ACCEPT, "application/vnd.surrealdb.native;q=0.9, */*;q=0.8".try_into()?);
 	}
 
-	if let Some((api, params)) = ApiDefinition::find_definition(&apis, segments, req.method) {
-		req.params = params.try_into()?;
-		process_api_request_with_stack(stk, ctx, opt, api, req).await.map(Into::into)
-	} else {
-		trace!(request_id = %request_id, path = %path, "No API definition found for path");
-		let res = ApiResponse::from_error(ApiError::NotFound.into(), request_id);
-		Ok(res.into())
-	}
+	let mut value: Value =
+		if let Some((api, params)) = ApiDefinition::find_definition(&apis, segments, req.method) {
+			req.params = params.try_into()?;
+			process_api_request_with_stack(stk, ctx, opt, api, req).await?.into()
+		} else {
+			trace!(request_id = %request_id, path = %path, "No API definition found for path");
+			ApiResponse::from_error(ApiError::NotFound.into(), request_id).into()
+		};
+
+	let Value::Object(ref mut obj) = value else {
+		fail!("ApiResponse converts into an object");
+	};
+
+	// Context is internal state
+	obj.remove("context");
+	Ok(value)
 }
 
 /// Middleware function that sets a timeout for API request processing.

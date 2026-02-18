@@ -47,6 +47,7 @@ Temporary Items
 
 .idea/
 .vscode/
+.cursor/plans/
 /result
 /bin/
 /.direnv/

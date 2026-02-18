@@ -9,7 +9,7 @@ value = "NONE"
 # 1
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { handler: 'fallback' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { handler: 'fallback' }, headers: {}, status: 200 }"
 
 # 2
 [[test.results]]
@@ -18,12 +18,12 @@ value = "NONE"
 # 3
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { handler: 'get' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { handler: 'get' }, headers: {}, status: 200 }"
 
 # 4
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { handler: 'fallback' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { handler: 'fallback' }, headers: {}, status: 200 }"
 
 # 5
 [[test.results]]
@@ -36,10 +36,7 @@ value = "NONE"
 # 7
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { handler: 'fallback', middleware: 'fallback_mw' }, context: {  }, headers: {}, status: 200 }"
-
-[env.capabilities]
-allow-experimental = ["define_api"]
+value = "{ body: { handler: 'fallback', middleware: 'fallback_mw' }, headers: {}, status: 200 }"
 
 */
 

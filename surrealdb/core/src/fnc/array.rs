@@ -21,7 +21,7 @@ use crate::val::{Array, Closure, Value};
 /// Returns an error if an array of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<(), Error> {
 	if n > *GENERATION_ALLOCATION_LIMIT {
-		Err(Error::InvalidArguments {
+		Err(Error::InvalidFunctionArguments {
 			name: name.to_owned(),
 			message: format!("Output must not exceed {} bytes.", *GENERATION_ALLOCATION_LIMIT),
 		})
@@ -215,24 +215,26 @@ pub fn fill(
 	};
 
 	let range = if let Some(end) = end {
-		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::fill"),
-			message: format!("Argument 1 was the wrong type. {e}"),
-		})?;
+		let start =
+			range_start.coerce_to::<i64>().map_err(|e| Error::InvalidFunctionArguments {
+				name: String::from("array::fill"),
+				message: format!("Argument 1 was the wrong type. {e}"),
+			})?;
 
 		TypedRange::from_range(start..end)
 	} else if range_start.is_range() {
 		// Condition checked above, cannot fail
 		let range = range_start.into_range().expect("is_range() check passed");
-		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
+		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidFunctionArguments {
 			name: String::from("array::fill"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?
 	} else {
-		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::fill"),
-			message: format!("Argument 1 was the wrong type. {e}"),
-		})?;
+		let start =
+			range_start.coerce_to::<i64>().map_err(|e| Error::InvalidFunctionArguments {
+				name: String::from("array::fill"),
+				message: format!("Argument 1 was the wrong type. {e}"),
+			})?;
 		TypedRange::from_range(start..)
 	};
 
@@ -614,10 +616,11 @@ pub fn push((mut array, value): (Array, Value)) -> Result<Value> {
 
 pub fn range((start_range, Optional(end)): (Value, Optional<i64>)) -> Result<Value> {
 	let range = if let Some(end) = end {
-		let start = start_range.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
-			message: format!("Argument 1 was the wrong type. {e}"),
-		})?;
+		let start =
+			start_range.coerce_to::<i64>().map_err(|e| Error::InvalidFunctionArguments {
+				name: String::from("array::range"),
+				message: format!("Argument 1 was the wrong type. {e}"),
+			})?;
 
 		TypedRange {
 			start: Bound::Included(start),
@@ -626,15 +629,16 @@ pub fn range((start_range, Optional(end)): (Value, Optional<i64>)) -> Result<Val
 	} else if start_range.is_range() {
 		// Condition checked above, cannot fail
 		let range = start_range.into_range().expect("is_range() check passed");
-		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
+		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidFunctionArguments {
 			name: String::from("array::range"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?
 	} else {
-		let start = start_range.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
-			message: format!("Argument 1 was the wrong type. {e}"),
-		})?;
+		let start =
+			start_range.coerce_to::<i64>().map_err(|e| Error::InvalidFunctionArguments {
+				name: String::from("array::range"),
+				message: format!("Argument 1 was the wrong type. {e}"),
+			})?;
 		TypedRange {
 			start: Bound::Included(start),
 			end: Bound::Unbounded,
@@ -712,13 +716,13 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value> {
 pub fn repeat((value, count): (Value, i64)) -> Result<Value> {
 	ensure!(
 		count >= 0,
-		Error::InvalidArguments {
+		Error::InvalidFunctionArguments {
 			name: "array::repeat".to_owned(),
 			message: "Expected argument 2 to be a positive number".to_owned()
 		}
 	);
 
-	// TODO: Fix signed to unsigned casting here.
+	// FIXME: Fix signed to unsigned casting here.
 	let count = count as usize;
 	limit("array::repeat", mem::size_of::<Value>().saturating_mul(count))?;
 	Ok(Array(std::iter::repeat_n(value, count).collect()).into())
@@ -743,10 +747,11 @@ pub fn slice(
 	};
 
 	let range = if let Some(end) = end {
-		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
-			message: format!("Argument 1 was the wrong type. {e}"),
-		})?;
+		let start =
+			range_start.coerce_to::<i64>().map_err(|e| Error::InvalidFunctionArguments {
+				name: String::from("array::range"),
+				message: format!("Argument 1 was the wrong type. {e}"),
+			})?;
 
 		TypedRange {
 			start: Bound::Included(start),
@@ -755,15 +760,16 @@ pub fn slice(
 	} else if range_start.is_range() {
 		// Condition checked above, cannot fail
 		let range = range_start.into_range().expect("is_range() check passed");
-		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
+		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidFunctionArguments {
 			name: String::from("array::range"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?
 	} else {
-		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
-			message: format!("Argument 1 was the wrong type. {e}"),
-		})?;
+		let start =
+			range_start.coerce_to::<i64>().map_err(|e| Error::InvalidFunctionArguments {
+				name: String::from("array::range"),
+				message: format!("Argument 1 was the wrong type. {e}"),
+			})?;
 		TypedRange {
 			start: Bound::Included(start),
 			end: Bound::Unbounded,
@@ -894,18 +900,20 @@ pub fn swap((mut array, from, to): (Array, i64, i64)) -> Result<Value> {
 	let to = to as isize;
 
 	let from = match from {
-		from if from < negative_max || from >= max as isize => Err(Error::InvalidArguments {
-			name: String::from("array::swap"),
-			message: format!(
-				"Argument 1 is out of range. Expected a number between {negative_max} and {max}"
-			),
-		}),
+		from if from < negative_max || from >= max as isize => {
+			Err(Error::InvalidFunctionArguments {
+				name: String::from("array::swap"),
+				message: format!(
+					"Argument 1 is out of range. Expected a number between {negative_max} and {max}"
+				),
+			})
+		}
 		from if negative_max <= from && from < min => Ok((from + max as isize) as usize),
 		from => Ok(from as usize),
 	}?;
 
 	let to = match to {
-		to if to < negative_max || to >= max as isize => Err(Error::InvalidArguments {
+		to if to < negative_max || to >= max as isize => Err(Error::InvalidFunctionArguments {
 			name: String::from("array::swap"),
 			message: format!(
 				"Argument 2 is out of range. Expected a number between {negative_max} and {max}"

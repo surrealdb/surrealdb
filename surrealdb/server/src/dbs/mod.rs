@@ -12,11 +12,11 @@ use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 
 use crate::cli::Config;
-use crate::core::dbs::Session;
 use crate::core::dbs::capabilities::{
 	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget, Targets,
 };
+use crate::core::dbs::{NewPlannerStrategy, Session};
 
 const TARGET: &str = "surreal::dbs";
 
@@ -262,6 +262,13 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::route_targets)]
 	deny_http: Option<Targets<RouteTarget>>,
+
+	#[arg(
+		help = "Strategy for the streaming query planner: 'best-effort' (default), 'compute-only', or 'all-read-only'"
+	)]
+	#[arg(env = "SURREAL_PLANNER_STRATEGY", long = "planner-strategy")]
+	#[arg(default_value = "best-effort")]
+	planner_strategy: NewPlannerStrategy,
 }
 
 impl DbsCapabilities {
@@ -581,6 +588,7 @@ fn merge_capabilities(initial: Capabilities, caps: DbsCapabilities) -> Capabilit
 		.without_experimental(caps.get_deny_experimental())
 		.with_arbitrary_query(caps.get_allow_arbitrary_query())
 		.without_arbitrary_query(caps.get_deny_arbitrary_query())
+		.with_planner_strategy(caps.planner_strategy)
 }
 
 impl From<DbsCapabilities> for Capabilities {
@@ -937,23 +945,22 @@ mod tests {
 			// 7 - Specific experimental feature enabled
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default().with_experimental(ExperimentalTarget::DefineApi.into()),
+					Capabilities::default().with_experimental(ExperimentalTarget::Files.into()),
 				),
 				Session::owner().with_ns("test").with_db("test"),
-				"DEFINE API \"/\" FOR any THEN {};".to_string(),
+				"DEFINE BUCKET test BACKEND \"memory\";".to_string(),
 				true,
 				"NONE".to_string(),
 			),
 			// 8 - Specific experimental feature disabled
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.without_experimental(ExperimentalTarget::DefineApi.into()),
+					Capabilities::default().without_experimental(ExperimentalTarget::Files.into()),
 				),
 				Session::owner().with_ns("test").with_db("test"),
-				"DEFINE API \"/\" FOR any THEN {};".to_string(),
+				"DEFINE BUCKET test BACKEND \"memory\";".to_string(),
 				false,
-				"the experimental define api capability is not enabled".to_string(),
+				"expected the experimental files feature to be enabled".to_string(),
 			),
 			//
 			// 9 - Some functions are not allowed
@@ -1102,19 +1109,23 @@ mod tests {
 			),
 			// - 17
 			(
-				// Ensure redirect fails
+				// Ensure connecting via localhost is denied when all IPs are blocked
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::All)
 						.without_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str("127.0.0.1/0").unwrap()].into(),
+							[
+								NetTarget::from_str("127.0.0.1/0").unwrap(),
+								NetTarget::from_str("::/0").unwrap(),
+							]
+							.into(),
 						)),
 				),
 				Session::owner(),
 				format!("RETURN http::get('http://localhost:{}')", server1.address().port()),
 				false,
-				"Access to network target '127.0.0.1/32' is not allowed".to_string(),
+				"is not allowed".to_string(),
 			),
 			// 18 - Ensure redirect succeed
 			(
@@ -1211,6 +1222,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
+			planner_strategy: NewPlannerStrategy::default(),
 		};
 		assert_eq!(caps.get_allow_experimental(), Targets::All);
 		assert_eq!(caps.get_allow_arbitrary_query(), Targets::All);
@@ -1241,6 +1253,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
+			planner_strategy: NewPlannerStrategy::default(),
 		};
 		assert_eq!(
 			caps.get_allow_funcs(),
@@ -1271,6 +1284,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: Some(Targets::All),
+			planner_strategy: NewPlannerStrategy::default(),
 		};
 		assert_eq!(
 			caps.get_allow_http(),
@@ -1301,6 +1315,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
+			planner_strategy: NewPlannerStrategy::default(),
 		};
 		assert_eq!(
 			caps.get_allow_funcs(),

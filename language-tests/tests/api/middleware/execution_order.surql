@@ -17,7 +17,7 @@ value = "NONE"
 # 3
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { order: ['db', 'any', 'get'] }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { order: ['db', 'any', 'get'] }, headers: {}, status: 200 }"
 
 # 4
 [[test.results]]
@@ -26,7 +26,7 @@ value = "NONE"
 # 5
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { order: ['db', 'any', 'post'] }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { order: ['db', 'any', 'post'] }, headers: {}, status: 200 }"
 
 # 6
 [[test.results]]
@@ -35,10 +35,7 @@ value = "NONE"
 # 7
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { order: ['db', 'any'] }, context: {  }, headers: {}, status: 200 }"
-
-[env.capabilities]
-allow-experimental = ["define_api"]
+value = "{ body: { order: ['db', 'any'] }, headers: {}, status: 200 }"
 
 */
 

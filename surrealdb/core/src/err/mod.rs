@@ -27,6 +27,9 @@ use crate::kvs::Error as KvsError;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::val::{CastError, CoerceError, Duration, RecordId, TableName, Value};
 
+mod to_types;
+pub(crate) use to_types::into_types_error;
+
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)]
@@ -138,7 +141,15 @@ pub(crate) enum Error {
 	/// The wrong quantity or magnitude of arguments was given for the specified
 	/// function
 	#[error("Incorrect arguments for function {name}(). {message}")]
-	InvalidArguments {
+	InvalidFunctionArguments {
+		name: String,
+		message: String,
+	},
+
+	/// The wrong quantity or magnitude of arguments was given for the specified
+	/// function
+	#[error("Incorrect arguments for method {name}(). {message}")]
+	InvalidMethodArguments {
 		name: String,
 		message: String,
 	},
@@ -683,6 +694,16 @@ pub(crate) enum Error {
 	#[error("Unimplemented functionality: {0}")]
 	Unimplemented(String),
 
+	/// The planner does not support this statement type (e.g. DML/DDL).
+	/// Callers should always fall back to the compute path.
+	#[error("Planner unsupported: {0}")]
+	PlannerUnsupported(String),
+
+	/// The planner intends to support this but it is not yet implemented.
+	/// Callers fall back in BestEffort mode; hard error in AllReadOnlyStatements mode.
+	#[error("Planner not yet implemented: {0}")]
+	PlannerUnimplemented(String),
+
 	/// Represents an underlying IAM error
 	#[error("IAM error: {0}")]
 	IamError(#[from] IamError),
@@ -1063,6 +1084,12 @@ pub(crate) enum Error {
 	#[error("Cannot construct a recursion plan when an instruction is provided")]
 	RecursionInstructionPlanConflict,
 
+	/// Encountered a non-record-id value during recursive graph traversal
+	#[error("Expected a record ID during recursive graph traversal, but found `{value}`")]
+	InvalidRecursionTarget {
+		value: String,
+	},
+
 	/// The record cannot be deleted as it's still referenced elsewhere
 	#[error("Cannot delete `{0}` as it is referenced by `{1}` with an ON DELETE REJECT clause")]
 	DeleteRejectedByReference(String, String),
@@ -1143,6 +1170,10 @@ pub(crate) enum Error {
 	#[error("Cannot define field `{0}` as `COMPUTED` fields must be top-level.")]
 	ComputedNestedField(String),
 
+	/// Cyclic dependency detected among computed fields
+	#[error("Cyclic dependency detected among computed fields: {0}")]
+	ComputedFieldCycle(String),
+
 	/// Cannot use the `{0}` keyword on the `id` field
 	#[error("Cannot use the `{0}` keyword on the `id` field.")]
 	IdFieldKeywordConflict(String),
@@ -1150,6 +1181,19 @@ pub(crate) enum Error {
 	/// Cannot use the `{0}` keyword on the `id` field
 	#[error("Cannot use the `{0}` type on the `id` field, as that's not a valid record id key.")]
 	IdFieldUnsupportedKind(String),
+
+	#[error(
+		"Error with the event {0}. The ID of the namespace `{1}` does not match the namespace this event has been generated from."
+	)]
+	EvNamespaceMismatch(String, String),
+
+	#[error(
+		"Error with the event {0}. The ID of the database `{1}` does not match the database this event has been generated from."
+	)]
+	EvDatabaseMismatch(String, String),
+
+	#[error("The event {0} reached the max async event nesting depth: {1}.")]
+	EvReachMaxDepth(String, u16),
 }
 
 impl Error {
@@ -1169,6 +1213,27 @@ impl Error {
 				| Error::FieldValue { .. }
 				| Error::FieldReadonly { .. }
 				| Error::FieldUndefined { .. }
+		)
+	}
+
+	/// Returns true if this error represents a data-shape problem
+	/// (type mismatch, coercion failure, etc.) that can be safely
+	/// treated as NONE in expression evaluation contexts.
+	///
+	/// Returns false for system errors (storage, I/O, timeout,
+	/// permissions) that must always propagate.
+	pub fn is_ignorable(&self) -> bool {
+		matches!(
+			self,
+			Error::Coerce(_)
+				| Error::Cast(_)
+				| Error::InvalidFunctionArguments { .. }
+				| Error::TryAdd(..)
+				| Error::TrySub(..)
+				| Error::TryMul(..)
+				| Error::TryDiv(..)
+				| Error::TryPow(..)
+				| Error::TryNeg(..)
 		)
 	}
 }

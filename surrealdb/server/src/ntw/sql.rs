@@ -20,7 +20,7 @@ use crate::cnf::HTTP_MAX_SQL_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::ntw::input::bytes_to_utf8;
 
-pub(super) fn router<S>() -> Router<S>
+pub fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
@@ -54,7 +54,7 @@ async fn post_handler(
 	match db.execute(sql, &session, Some(vars)).await {
 		Ok(res) => match output.as_deref() {
 			// Simple serialization
-			Some(Accept::ApplicationJson) => {
+			None | Some(Accept::ApplicationJson) => {
 				let v = Value::Array(Array::from(
 					res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
 				));
@@ -71,8 +71,8 @@ async fn post_handler(
 				let v = res.into_value();
 				Ok(Output::flatbuffers(&v))
 			}
-			// An incorrect content-type was requested
-			_ => Err(NetError::InvalidType.into()),
+			// An unsupported content-type was requested
+			Some(_) => Err(NetError::InvalidType.into()),
 		},
 		// There was an error when executing the query
 		Err(err) => Err(ResponseError(err.into())),

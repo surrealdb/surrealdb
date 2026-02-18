@@ -1,26 +1,26 @@
-mod api;
+pub mod api;
 mod auth;
 pub mod client_ip;
 pub mod error;
-mod export;
+pub mod export;
 #[cfg(feature = "graphql")]
-mod gql;
+pub mod gql;
 pub(crate) mod headers;
-mod health;
-mod import;
+pub mod health;
+pub mod import;
 mod input;
-mod key;
-mod ml;
+pub mod key;
+pub mod ml;
 pub(crate) mod output;
 mod params;
-mod rpc;
+pub mod rpc;
 mod signals;
-mod signin;
-mod signup;
-mod sql;
-mod sync;
+pub mod signin;
+pub mod signup;
+pub mod sql;
+pub mod sync;
 mod tracer;
-mod version;
+pub mod version;
 
 use std::io;
 use std::net::SocketAddr;
@@ -36,7 +36,6 @@ use axum_server::tls_rustls::RustlsConfig;
 use http::header;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use surrealdb_core::CommunityComposer;
-use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::kvs::Datastore;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
@@ -63,7 +62,54 @@ const LOG: &str = "surrealdb::net";
 /// Factory for constructing the top-level Axum Router used by the HTTP server.
 ///
 /// Embedders can provide their own implementation to add or remove routes, or wrap
-/// additional middleware. The default binary uses `DefaultRouterFactory`.
+/// additional middleware. The default binary uses [`CommunityComposer`].
+///
+/// # Examples
+///
+/// Extend the default community router with additional custom routes:
+///
+/// ```rust,ignore
+/// use std::sync::Arc;
+/// use axum::{Router, routing::get};
+/// use surreal::RouterFactory;
+/// use surreal::rpc::RpcState;
+/// use surreal::core::CommunityComposer;
+///
+/// struct MyComposer;
+///
+/// impl RouterFactory for MyComposer {
+///     fn configure_router() -> Router<Arc<RpcState>> {
+///         let router = CommunityComposer::configure_router();
+///         router.merge(
+///             Router::new()
+///                 .route("/custom", get(|| async { "Hello from custom route" }))
+///         )
+///     }
+/// }
+/// ```
+///
+/// Build a minimal router from individual endpoint routers:
+///
+/// ```rust,ignore
+/// use std::sync::Arc;
+/// use axum::Router;
+/// use surreal::RouterFactory;
+/// use surreal::rpc::RpcState;
+/// use surreal::ntw::{health, sql, rpc};
+///
+/// struct MinimalComposer;
+///
+/// impl RouterFactory for MinimalComposer {
+///     fn configure_router() -> Router<Arc<RpcState>> {
+///         Router::new()
+///             .merge(health::router())
+///             .merge(sql::router())
+///             .merge(rpc::router())
+///     }
+/// }
+/// ```
+///
+/// [`CommunityComposer`]: surrealdb_core::CommunityComposer
 pub trait RouterFactory {
 	/// Build and return the base Router. The server will attach shared state and layers.
 	fn configure_router() -> Router<Arc<RpcState>>;
@@ -206,12 +252,6 @@ pub async fn init<F: RouterFactory>(
 		);
 
 	let axum_app = F::configure_router();
-
-	if ds.get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
-		warn!(
-			"❌🔒IMPORTANT: GraphQL is a pre-release feature with known security flaws. This is not recommended for production use.🔒❌"
-		);
-	}
 
 	let axum_app = axum_app.layer(service);
 

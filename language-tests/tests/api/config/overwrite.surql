@@ -7,7 +7,7 @@ value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { version: 'first' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { version: 'first' }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
@@ -17,24 +17,21 @@ value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { version: 'second' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { version: 'second' }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { version: 'first' }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { version: 'first' }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { version: 'second' }, context: {  }, headers: {}, status: 200 }"
-
-[env.capabilities]
-allow-experimental = ["define_api"]
+value = "{ body: { version: 'second' }, headers: {}, status: 200 }"
 
 */
 

@@ -14,6 +14,7 @@
 //!   database
 //! - `mem`: in-memory database
 
+pub mod config;
 pub mod export;
 
 mod api;
@@ -46,8 +47,8 @@ pub(crate) mod slowlog;
 pub(crate) mod tasklease;
 pub(crate) mod version;
 
-pub use api::Transactable;
-pub use clock::SizedClock;
+pub use api::{ScanLimit, Transactable};
+pub(crate) use ds::TransactionFactory;
 pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
 pub use ds::{
 	Datastore, DatastoreFlavor, Metric, Metrics, TransactionBuilder, TransactionBuilderFactory,
@@ -56,8 +57,9 @@ pub use err::{Error, Result};
 pub use into::IntoBytes;
 pub(crate) use key::{KVKey, KVValue, impl_kv_key_storekey, impl_kv_value_revisioned};
 pub use scanner::{Direction, Scanner};
-pub use timestamp::{HlcTimestamp, IncTimestamp, Timestamp};
+pub use timestamp::{DefaultTimestamp, HlcTimestamp, TimeStamp, TimeStampImpl};
 pub use tr::{LockType, TransactionType, Transactor};
+pub(crate) use tx::CachePolicy;
 pub use tx::Transaction;
 
 /// The key part of a key-value pair. An alias for [`Vec<u8>`].

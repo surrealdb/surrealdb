@@ -319,7 +319,7 @@ impl DefineTableStatement {
 			};
 
 			let key = key::record::new(ns, db, view_table_name, &id.key);
-			let record = Arc::new(Record::new(Value::Object(o).into()));
+			let record = Arc::new(Record::new(Value::Object(o)));
 			tx.put(&key, &record, None).await?;
 
 			let ns = doc_ctx.ns();
@@ -739,7 +739,7 @@ impl DefineTableStatement {
 					record_type: RecordType::Table,
 					aggregation_stats: stats,
 				}),
-				data: data.into(),
+				data,
 			});
 
 			let key = RecordIdKey::Array(Array(group));

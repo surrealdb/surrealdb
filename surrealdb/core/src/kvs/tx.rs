@@ -1,17 +1,19 @@
 use std::any::Any;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Deref, Range};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use futures::future::try_join_all;
 use futures::stream::Stream;
+use tokio::sync::{Mutex, MutexGuard, Notify};
 use uuid::Uuid;
 
 use super::batch::Batch;
-use super::{Key, Val, Version, util};
+use super::{Key, Val, util};
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BucketProvider, CatalogProvider, DatabaseProvider,
 	NamespaceProvider, NodeProvider, RootProvider, TableProvider, UserProvider,
@@ -27,10 +29,28 @@ use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use crate::key::database::sq::Sq;
 use crate::kvs::cache::tx::TransactionCache;
+use crate::kvs::index::{BatchId, BatchIdsCleanQueue, SharedIndexKey};
 use crate::kvs::scanner::Direction;
 use crate::kvs::sequences::Sequences;
+use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
 use crate::kvs::{KVKey, KVValue, Transactor, cache};
 use crate::val::{RecordId, RecordIdKey, TableName};
+
+/// Controls whether `getm_records` populates the transaction cache on miss.
+///
+/// Point lookups and graph traversals benefit from caching (records are
+/// likely re-accessed within the same transaction). Large sequential scans
+/// (index range scans, full-text hits) read each record once, so populating
+/// the cache wastes time and evicts useful entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CachePolicy {
+	/// Check cache on read **and** populate on miss.
+	/// Use for point lookups, graph traversal, KNN, and unique-index equality.
+	ReadWrite,
+	/// Check cache on read but **skip** population on miss.
+	/// Use for index range scans, non-unique equality scans, and full-text scans.
+	ReadOnly,
+}
 
 pub struct Transaction {
 	/// Is this is a local datastore transaction?
@@ -41,8 +61,15 @@ pub struct Transaction {
 	cache: TransactionCache,
 	/// The sequences for this store
 	sequences: Sequences,
-	// The changefeed buffer
+	/// The changefeed buffer
 	cf: crate::cf::Writer,
+	/// Async event trigger
+	async_event_trigger: Arc<Notify>,
+	/// Do we have to trigger async events after the commit?
+	trigger_async_event: AtomicBool,
+	/// Per index, track the pending append batch for cleanup after rollback (cancel or failed
+	/// commit).
+	pending_index_batches: Mutex<HashMap<SharedIndexKey, (BatchId, BatchIdsCleanQueue)>>,
 }
 
 impl Deref for Transaction {
@@ -55,14 +82,28 @@ impl Deref for Transaction {
 
 impl Transaction {
 	/// Create a new query store
-	pub fn new(local: bool, sequences: Sequences, tr: Transactor) -> Transaction {
+	pub fn new(
+		local: bool,
+		sequences: Sequences,
+		async_event_trigger: Arc<Notify>,
+		tr: Transactor,
+	) -> Transaction {
 		Transaction {
 			local,
 			tr,
 			cache: TransactionCache::new(),
 			sequences,
 			cf: crate::cf::Writer::new(),
+			async_event_trigger,
+			trigger_async_event: AtomicBool::new(false),
+			pending_index_batches: Mutex::new(HashMap::new()),
 		}
+	}
+
+	pub(super) async fn lock_pending_index_batches<'a>(
+		&'a self,
+	) -> MutexGuard<'a, HashMap<SharedIndexKey, (BatchId, BatchIdsCleanQueue)>> {
+		self.pending_index_batches.lock().await
 	}
 
 	/// Check if the transaction is local or remote
@@ -80,7 +121,7 @@ impl Transaction {
 	/// If the transaction has been cancelled or committed,
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
-	/// in a [`kvs::Error::TransactionFinished`] error.
+	/// in a [`crate::kvs::Error::TransactionFinished`] error.
 	pub fn closed(&self) -> bool {
 		self.tr.closed()
 	}
@@ -92,6 +133,9 @@ impl Transaction {
 	pub async fn cancel(&self) -> Result<()> {
 		// Clear any buffered changefeed entries
 		self.cf.clear();
+		// Enqueue pending index batches for deferred cleanup after rollback (cancel or failed
+		// commit).
+		self.cleanup_index_batches().await;
 		// Cancel the transaction
 		Ok(self.tr.cancel().await.map_err(Error::from)?)
 	}
@@ -109,7 +153,28 @@ impl Transaction {
 			return Err(e);
 		}
 		// Commit the transaction
-		Ok(self.tr.commit().await.map_err(Error::from)?)
+		if let Err(e) = self.tr.commit().await {
+			// Enqueue pending index batches for deferred cleanup after commit failure.
+			self.cleanup_index_batches().await;
+			anyhow::bail!(e);
+		}
+		if self.trigger_async_event.load(Ordering::Relaxed) {
+			// Notify after commit so queued events are visible to workers.
+			self.async_event_trigger.notify_one();
+		}
+		Ok(())
+	}
+
+	/// Enqueue pending index batches for deferred cleanup after rollback (cancel or failed commit).
+	async fn cleanup_index_batches(&self) {
+		let batches = {
+			let mut pending = self.lock_pending_index_batches().await;
+			std::mem::take(&mut *pending)
+		};
+		for (_, (batch_id, clean_queue)) in batches {
+			// Enqueue batch ids for cleaning
+			clean_queue.lock().await.push(batch_id);
+		}
 	}
 
 	/// Check if a key exists in the datastore.
@@ -197,6 +262,110 @@ impl Transaction {
 			.into_iter()
 			.map(|(k, v)| Ok((k, K::ValueType::kv_decode_value(v)?)))
 			.collect()
+	}
+
+	/// Fetch many records by ID in a single batch, with cache awareness.
+	///
+	/// For each record ID, checks the transaction cache first. Cache misses are
+	/// fetched in one batch via the store's multi-get, then results are merged
+	/// and returned in the same order as `rids`.
+	///
+	/// When `cache_policy` is [`CachePolicy::ReadWrite`], newly fetched records
+	/// are inserted into the cache. When [`CachePolicy::ReadOnly`], fetched
+	/// records are returned but **not** cached, avoiding eviction churn during
+	/// large sequential scans.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	pub(crate) async fn getm_records(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		rids: &[RecordId],
+		version: Option<u64>,
+		cache_policy: CachePolicy,
+	) -> Result<Vec<Arc<Record>>> {
+		if rids.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		// Cache is not versioned — bypass it entirely for historical reads
+		if version.is_some() {
+			let keys: Vec<crate::key::record::RecordKey<'_>> = rids
+				.iter()
+				.map(|rid| crate::key::record::new(ns, db, &rid.table, &rid.key))
+				.collect();
+
+			let values = self.getm(keys, version).await?;
+
+			return values
+				.into_iter()
+				.zip(rids)
+				.map(|(opt_val, rid)| {
+					Ok(match opt_val {
+						Some(mut record) => {
+							record.data.def(rid.clone());
+							record.into_read_only()
+						}
+						None => Arc::new(Default::default()),
+					})
+				})
+				.collect::<Result<Vec<_>, _>>();
+		}
+
+		// Phase 1: check cache, collect hits and indices of misses
+		let mut out: Vec<Option<Arc<Record>>> = vec![None; rids.len()];
+		let mut uncached_rids: Vec<(usize, &RecordId)> = Vec::new();
+
+		for (i, rid) in rids.iter().enumerate() {
+			let qey = cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
+			if let Some(entry) = self.cache.get(&qey) {
+				out[i] = Some(entry.try_into_record()?);
+			} else {
+				uncached_rids.push((i, rid));
+			}
+		}
+
+		// Phase 2: batch fetch uncached keys
+		if uncached_rids.is_empty() {
+			return out
+				.into_iter()
+				.map(|o| {
+					o.ok_or_else(|| Error::Internal("missing record in multi-get batch".into()))
+				})
+				.collect::<Result<Vec<_>, _>>()
+				.map_err(Into::into);
+		}
+
+		let keys: Vec<crate::key::record::RecordKey<'_>> = uncached_rids
+			.iter()
+			.map(|(_, rid)| crate::key::record::new(ns, db, &rid.table, &rid.key))
+			.collect();
+
+		let values = self.getm(keys, None).await?;
+
+		// Phase 3: post-process fetched records and merge into output.
+		// Only populate the cache when the caller requests ReadWrite; ReadOnly
+		// avoids eviction churn during large sequential scans.
+		for (j, opt_val) in values.into_iter().enumerate() {
+			let (i, rid) = uncached_rids[j];
+			let record = match opt_val {
+				Some(mut record) => {
+					record.data.def(rid.clone());
+					let record = record.into_read_only();
+					if matches!(cache_policy, CachePolicy::ReadWrite) {
+						let qey = cache::tx::Lookup::Record(ns, db, rid.table.as_str(), &rid.key);
+						self.cache.insert(qey, cache::tx::Entry::Val(record.clone()));
+					}
+					record
+				}
+				None => Arc::new(Default::default()),
+			};
+			out[i] = Some(record);
+		}
+
+		out.into_iter()
+			.map(|o| o.ok_or_else(|| Error::Internal("missing record in multi-get batch".into())))
+			.collect::<Result<Vec<_>, _>>()
+			.map_err(Into::into)
 	}
 
 	/// Delete a key from the datastore.
@@ -347,23 +516,30 @@ impl Transaction {
 		Ok(self.tr.replace(key, val).await.map_err(Error::from)?)
 	}
 
+	// --------------------------------------------------
+	// Range functions
+	// --------------------------------------------------
+
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys, in a single request to the
 	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn keys<K>(&self, rng: Range<K>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>
+	pub async fn keys<K>(
+		&self,
+		rng: Range<K>,
+		limit: u32,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>>
 	where
 		K: KVKey + Debug,
 	{
 		let beg = rng.start.encode_key()?;
 		let end = rng.end.encode_key()?;
-		Ok(self.tr.keys(beg..end, limit, version).await.map_err(Error::from)?)
+		let limit = limit.into();
+		Ok(self.tr.keys(beg..end, limit, skip, version).await.map_err(Error::from)?)
 	}
-
-	// --------------------------------------------------
-	// Range functions
-	// --------------------------------------------------
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///
@@ -374,6 +550,7 @@ impl Transaction {
 		&self,
 		rng: Range<K>,
 		limit: u32,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>>
 	where
@@ -381,7 +558,8 @@ impl Transaction {
 	{
 		let beg = rng.start.encode_key()?;
 		let end = rng.end.encode_key()?;
-		Ok(self.tr.keysr(beg..end, limit, version).await.map_err(Error::from)?)
+		let limit = limit.into();
+		Ok(self.tr.keysr(beg..end, limit, skip, version).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -393,6 +571,7 @@ impl Transaction {
 		&self,
 		rng: Range<K>,
 		limit: u32,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>
 	where
@@ -400,7 +579,8 @@ impl Transaction {
 	{
 		let beg = rng.start.encode_key()?;
 		let end = rng.end.encode_key()?;
-		Ok(self.tr.scan(beg..end, limit, version).await.map_err(Error::from)?)
+		let limit = limit.into();
+		Ok(self.tr.scan(beg..end, limit, skip, version).await.map_err(Error::from)?)
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
@@ -408,6 +588,7 @@ impl Transaction {
 		&self,
 		rng: Range<K>,
 		limit: u32,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>
 	where
@@ -415,7 +596,8 @@ impl Transaction {
 	{
 		let beg = rng.start.encode_key()?;
 		let end = rng.end.encode_key()?;
-		Ok(self.tr.scanr(beg..end, limit, version).await.map_err(Error::from)?)
+		let limit = limit.into();
+		Ok(self.tr.scanr(beg..end, limit, skip, version).await.map_err(Error::from)?)
 	}
 
 	/// Count the total number of keys within a range in the datastore.
@@ -423,13 +605,13 @@ impl Transaction {
 	/// This function fetches the total count, in batches, with multiple
 	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn count<K>(&self, rng: Range<K>) -> Result<usize>
+	pub async fn count<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<usize>
 	where
 		K: KVKey + Debug,
 	{
 		let beg = rng.start.encode_key()?;
 		let end = rng.end.encode_key()?;
-		Ok(self.tr.count(beg..end).await.map_err(Error::from)?)
+		Ok(self.tr.count(beg..end, version).await.map_err(Error::from)?)
 	}
 
 	// --------------------------------------------------
@@ -474,47 +656,31 @@ impl Transaction {
 		Ok(self.tr.batch_keys_vals(beg..end, batch, version).await.map_err(Error::from)?)
 	}
 
-	/// Retrieve a batched scan over a specific range of keys in the datastore.
-	///
-	/// This function fetches the key-value-version pairs in batches, with
-	/// multiple requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn batch_keys_vals_versions<K>(
-		&self,
-		rng: Range<K>,
-		batch: u32,
-	) -> Result<Batch<(Key, Val, Version, bool)>>
-	where
-		K: KVKey + Debug,
-	{
-		let beg = rng.start.encode_key()?;
-		let end = rng.end.encode_key()?;
-		Ok(self.tr.batch_keys_vals_versions(beg..end, batch).await.map_err(Error::from)?)
-	}
-
 	// --------------------------------------------------
 	// Stream functions
 	// --------------------------------------------------
 
-	/// Retrieve a stream over a specific range of keys in the datastore.
+	/// Retrieve a stream of key batches over a specific range in the datastore.
 	///
-	/// This function fetches keys in batches, with multiple requests to the
-	/// underlying datastore. The Scanner uses adaptive batch sizing, starting
-	/// at 100 items and doubling up to MAX_BATCH_SIZE. Prefetching is enabled
-	/// by default for optimal read throughput.
+	/// This function returns a stream that yields batches of keys. The scanner:
+	/// - Fetches an initial batch of up to 100 items
+	/// - Fetches subsequent batches of up to 16 MiB (local) or 4 MiB (remote)
+	/// - Prefetches the next batch while the current batch is being processed
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub fn stream_keys(
 		&self,
 		rng: Range<Key>,
 		version: Option<u64>,
 		limit: Option<usize>,
+		skip: u32,
 		dir: ScanDirection,
-	) -> impl Stream<Item = Result<Key>> + '_ {
+	) -> impl Stream<Item = Result<Vec<Key>>> + '_ {
 		self.tr
 			.stream_keys(
 				rng,
 				version,
 				limit,
+				skip,
 				match dir {
 					ScanDirection::Forward => Direction::Forward,
 					ScanDirection::Backward => Direction::Backward,
@@ -524,85 +690,34 @@ impl Transaction {
 			.map_err(Into::into)
 	}
 
-	/// Retrieve a stream over a specific range of key-value pairs in the datastore.
+	/// Retrieve a stream of key-value batches over a specific range in the datastore.
 	///
-	/// This function fetches the key-value pairs in batches, with multiple
-	/// requests to the underlying datastore. The Scanner uses adaptive batch
-	/// sizing, starting at 100 items and doubling up to MAX_BATCH_SIZE.
-	/// Prefetching is enabled by default for optimal read throughput.
+	/// This function returns a stream that yields batches of key-value pairs. The scanner:
+	/// - Fetches an initial batch of up to 100 items (or 500 when `prefetch` is enabled)
+	/// - Fetches subsequent batches of up to 16 MiB (local) or 4 MiB (remote)
+	/// - When `prefetch` is true, prefetches the next batch while the current batch is being
+	///   processed, and uses a larger initial batch size (500 items)
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub fn stream_keys_vals(
 		&self,
 		rng: Range<Key>,
 		version: Option<u64>,
 		limit: Option<usize>,
+		skip: u32,
 		dir: ScanDirection,
-	) -> impl Stream<Item = Result<(Key, Val)>> + '_ {
+		prefetch: bool,
+	) -> impl Stream<Item = Result<Vec<(Key, Val)>>> + '_ {
 		self.tr
 			.stream_keys_vals(
 				rng,
 				version,
 				limit,
+				skip,
 				match dir {
 					ScanDirection::Forward => Direction::Forward,
 					ScanDirection::Backward => Direction::Backward,
 				},
-			)
-			.map_err(Error::from)
-			.map_err(Into::into)
-	}
-
-	/// Retrieve a stream over a specific range of keys in the datastore without
-	/// prefetching.
-	///
-	/// This variant disables prefetching, making it more suitable for scenarios
-	/// where each key will be processed with write operations (e.g., delete, update)
-	/// and prefetching would waste work on errors.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub fn stream_keys_no_prefetch(
-		&self,
-		rng: Range<Key>,
-		version: Option<u64>,
-		limit: Option<usize>,
-		dir: ScanDirection,
-	) -> impl Stream<Item = Result<Key>> + '_ {
-		self.tr
-			.stream_keys_no_prefetch(
-				rng,
-				version,
-				limit,
-				match dir {
-					ScanDirection::Forward => Direction::Forward,
-					ScanDirection::Backward => Direction::Backward,
-				},
-			)
-			.map_err(Error::from)
-			.map_err(Into::into)
-	}
-
-	/// Retrieve a stream over a specific range of key-value pairs in the datastore without
-	/// prefetching.
-	///
-	/// This variant disables prefetching, making it more suitable for scenarios
-	/// where each key will be processed with write operations (e.g., delete, update)
-	/// and prefetching would waste work on errors.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub fn stream_keys_vals_no_prefetch(
-		&self,
-		rng: Range<Key>,
-		version: Option<u64>,
-		limit: Option<usize>,
-		dir: ScanDirection,
-	) -> impl Stream<Item = Result<(Key, Val)>> + '_ {
-		self.tr
-			.stream_keys_vals_no_prefetch(
-				rng,
-				version,
-				limit,
-				match dir {
-					ScanDirection::Forward => Direction::Forward,
-					ScanDirection::Backward => Direction::Backward,
-				},
+				prefetch,
 			)
 			.map_err(Error::from)
 			.map_err(Into::into)
@@ -632,18 +747,13 @@ impl Transaction {
 	// --------------------------------------------------
 
 	/// Get the current monotonic timestamp
-	async fn timestamp(&self) -> Result<Box<dyn crate::kvs::Timestamp>> {
+	pub async fn timestamp(&self) -> Result<TimeStamp> {
 		Ok(self.tr.timestamp().await.map_err(Error::from)?)
 	}
 
-	/// Convert a versionstamp to timestamp bytes for this storage engine
-	pub async fn timestamp_bytes_from_versionstamp(&self, version: u128) -> Result<Vec<u8>> {
-		Ok(self.tr.timestamp_bytes_from_versionstamp(version).await.map_err(Error::from)?)
-	}
-
-	/// Convert a datetime to timestamp bytes for this storage engine
-	pub async fn timestamp_bytes_from_datetime(&self, datetime: DateTime<Utc>) -> Result<Vec<u8>> {
-		Ok(self.tr.timestamp_bytes_from_datetime(datetime).await.map_err(Error::from)?)
+	/// Returns the implementation of timestamp that this transaction uses.
+	pub fn timestamp_impl(&self) -> TimeStampImpl {
+		self.tr.timestamp_impl()
 	}
 
 	// --------------------------------------------------
@@ -709,7 +819,7 @@ impl Transaction {
 			return Ok(());
 		}
 		// Get the current transaction timestamp
-		let ts = self.timestamp().await?.to_ts_bytes();
+		let ts = self.timestamp().await?.as_ts_bytes();
 		// Convert the timestamp bytes to a slice
 		let ts = ts.as_slice();
 		// Collect all changefeed write operations as futures
@@ -761,6 +871,11 @@ impl Transaction {
 			None => None,
 		};
 		self.tr.inner.compact(rng).await
+	}
+
+	/// Mark this transaction to wake the async event processor after commit.
+	pub(crate) fn trigger_async_event(&self) {
+		self.trigger_async_event.store(true, Ordering::Relaxed);
 	}
 }
 
@@ -902,6 +1017,10 @@ impl NamespaceProvider for Transaction {
 		let key = crate::key::root::ns::new(&ns.name);
 		self.set(&key, &ns, None).await?;
 
+		// Invalidate the cached list of all namespaces
+		let list_key = cache::tx::Lookup::Nss;
+		self.cache.remove(list_key);
+
 		// Populate cache
 		let cached_ns = Arc::new(ns.clone());
 
@@ -1022,6 +1141,10 @@ impl DatabaseProvider for Transaction {
 		let key = crate::key::namespace::db::new(db.namespace_id, &db.name);
 		self.set(&key, &db, None).await?;
 
+		// Invalidate the cached list of all databases for this namespace
+		let list_key = cache::tx::Lookup::Dbs(db.namespace_id);
+		self.cache.remove(list_key);
+
 		// Populate cache
 		let cached_db = Arc::new(db.clone());
 
@@ -1045,6 +1168,14 @@ impl DatabaseProvider for Transaction {
 			self.del(&key).await?;
 			self.delp(&database_root).await?
 		};
+
+		// Invalidate the cached list of all databases for this namespace
+		let list_key = cache::tx::Lookup::Dbs(db.namespace_id);
+		self.cache.remove(list_key);
+
+		// Invalidate the cached database entry
+		let db_key = cache::tx::Lookup::DbByName(ns, &db.name);
+		self.cache.remove(db_key);
 
 		Ok(Some(()))
 	}
@@ -1324,7 +1455,7 @@ impl DatabaseProvider for Transaction {
 		}
 	}
 
-	/// Retrieve a specific function definition from a database.
+	/// Retrieve a specific param definition from a database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_db_param(
 		&self,
@@ -1381,6 +1512,16 @@ impl DatabaseProvider for Transaction {
 	) -> Result<()> {
 		let key = crate::key::database::fc::new(ns, db, &fc.name);
 		self.set(&key, fc, None).await?;
+
+		// Invalidate the cached list of all functions for this database
+		let list_key = cache::tx::Lookup::Fcs(ns, db);
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Fc(ns, db, &fc.name);
+		let entry = cache::tx::Entry::Any(Arc::new(fc.clone()));
+		self.cache.insert(qey, entry);
+
 		Ok(())
 	}
 
@@ -1393,6 +1534,16 @@ impl DatabaseProvider for Transaction {
 		let name = md.get_storage_name()?;
 		let key = crate::key::database::md::new(ns, db, &name);
 		self.set(&key, md, None).await?;
+
+		// Invalidate the cached list of all modules for this database
+		let list_key = cache::tx::Lookup::Mds(ns, db);
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Md(ns, db, &name);
+		let entry = cache::tx::Entry::Any(Arc::new(md.clone()));
+		self.cache.insert(qey, entry);
+
 		Ok(())
 	}
 
@@ -1404,6 +1555,16 @@ impl DatabaseProvider for Transaction {
 	) -> Result<()> {
 		let key = crate::key::database::pa::new(ns, db, &pa.name);
 		self.set(&key, pa, None).await?;
+
+		// Invalidate the cached list of all params for this database
+		let list_key = cache::tx::Lookup::Pas(ns, db);
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Pa(ns, db, &pa.name);
+		let entry = cache::tx::Entry::Any(Arc::new(pa.clone()));
+		self.cache.insert(qey, entry);
+
 		Ok(())
 	}
 }
@@ -1557,6 +1718,10 @@ impl TableProvider for Transaction {
 			}
 		}
 
+		// Invalidate the cached list of all tables for this database
+		let list_key = cache::tx::Lookup::Tbs(tb.namespace_id, tb.database_id);
+		self.cache.remove(list_key);
+
 		// Populate cache
 		let cached_tb = Arc::new(tb.clone());
 		let cached_entry =
@@ -1582,6 +1747,10 @@ impl TableProvider for Transaction {
 		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
 		self.del(&key).await?;
 
+		// Invalidate the cached list of all tables for this database
+		let list_key = cache::tx::Lookup::Tbs(tb.namespace_id, tb.database_id);
+		self.cache.remove(list_key);
+
 		// Clear the cache
 		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
 		self.cache.remove(qey);
@@ -1601,6 +1770,10 @@ impl TableProvider for Transaction {
 
 		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
 		self.clr(&key).await?;
+
+		// Invalidate the cached list of all tables for this database
+		let list_key = cache::tx::Lookup::Tbs(tb.namespace_id, tb.database_id);
+		self.cache.remove(list_key);
 
 		// Clear the cache
 		let qey = cache::tx::Lookup::Tb(tb.namespace_id, tb.database_id, &tb.name);
@@ -1788,6 +1961,15 @@ impl TableProvider for Transaction {
 		let name = fd.name.to_raw_string();
 		let key = crate::key::table::fd::new(ns, db, tb, &name);
 		self.set(&key, fd, None).await?;
+
+		// Invalidate the cached list of all fields for this table
+		let list_key = cache::tx::Lookup::Fds(ns, db, tb.as_ref());
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Fd(ns, db, tb, &name);
+		let entry = cache::tx::Entry::Any(Arc::new(fd.clone()));
+		self.cache.insert(qey, entry);
 		Ok(())
 	}
 
@@ -1845,6 +2027,10 @@ impl TableProvider for Transaction {
 			crate::key::table::ix::IndexNameLookupKey::new(ns, db, tb, ix.index_id);
 		self.set(&name_lookup_key, &ix.name, None).await?;
 
+		// Invalidate the cached list of all indexes for this table
+		let list_key = cache::tx::Lookup::Ixs(ns, db, tb.as_ref());
+		self.cache.remove(list_key);
+
 		// Set the entry in the cache
 		let qey = cache::tx::Lookup::Ix(ns, db, tb, &ix.name);
 		let entry = cache::tx::Entry::Any(Arc::new(ix.clone()));
@@ -1871,6 +2057,14 @@ impl TableProvider for Transaction {
 		// Delete the definition
 		let key = crate::key::table::ix::new(ns, db, tb, &ix.name);
 		self.del(&key).await?;
+
+		// Invalidate the cached list of all indexes for this table
+		let list_key = cache::tx::Lookup::Ixs(ns, db, tb.as_ref());
+		self.cache.remove(list_key);
+
+		// Invalidate the cached index entry
+		let index_key = cache::tx::Lookup::Ix(ns, db, tb.as_ref(), &ix.name);
+		self.cache.remove(index_key);
 
 		Ok(())
 	}
@@ -1899,7 +2093,7 @@ impl TableProvider for Transaction {
 						table: tb.to_owned(),
 						key: id.clone(),
 					};
-					record.data.to_mut().def(&rid);
+					record.data.def(rid);
 					// Convert to read-only format for better sharing and performance
 					Ok(record.into_read_only())
 				}
@@ -1923,7 +2117,7 @@ impl TableProvider for Transaction {
 								table: tb.to_owned(),
 								key: id.clone(),
 							};
-							record.data.to_mut().def(&rid);
+							record.data.def(rid);
 							// Convert to read-only format for better sharing and performance
 							let record = record.into_read_only();
 							let entry = cache::tx::Entry::Val(record.clone());
@@ -2144,12 +2338,32 @@ impl UserProvider for Transaction {
 	async fn put_root_user(&self, us: &catalog::UserDefinition) -> Result<()> {
 		let key = crate::key::root::us::new(&us.name);
 		self.set(&key, us, None).await?;
+
+		// Invalidate the cached list of all root users
+		let list_key = cache::tx::Lookup::Rus;
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Ru(&us.name);
+		let entry = cache::tx::Entry::Any(Arc::new(us.clone()));
+		self.cache.insert(qey, entry);
+
 		Ok(())
 	}
 
 	async fn put_ns_user(&self, ns: NamespaceId, us: &catalog::UserDefinition) -> Result<()> {
 		let key = crate::key::namespace::us::new(ns, &us.name);
 		self.set(&key, us, None).await?;
+
+		// Invalidate the cached list of all namespace users
+		let list_key = cache::tx::Lookup::Nus(ns);
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Nu(ns, &us.name);
+		let entry = cache::tx::Entry::Any(Arc::new(us.clone()));
+		self.cache.insert(qey, entry);
+
 		Ok(())
 	}
 
@@ -2161,6 +2375,16 @@ impl UserProvider for Transaction {
 	) -> Result<()> {
 		let key = crate::key::database::us::new(ns, db, &us.name);
 		self.set(&key, us, None).await?;
+
+		// Invalidate the cached list of all database users
+		let list_key = cache::tx::Lookup::Dus(ns, db);
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Du(ns, db, &us.name);
+		let entry = cache::tx::Entry::Any(Arc::new(us.clone()));
+		self.cache.insert(qey, entry);
+
 		Ok(())
 	}
 }
@@ -2434,7 +2658,17 @@ impl AuthorisationProvider for Transaction {
 		// Delete any associated data including access grants.
 		let key = crate::key::root::access::all::new(ra);
 		self.delp(&key).await?;
-		// Return result
+
+		// Invalidate the cached list of all root accesses
+		let list_key = cache::tx::Lookup::Ras;
+		self.cache.remove(list_key);
+
+		// Invalidate the cached access entry and grants
+		let access_key = cache::tx::Lookup::Ra(ra);
+		self.cache.remove(access_key);
+		let grants_key = cache::tx::Lookup::Rgs(ra);
+		self.cache.remove(grants_key);
+
 		Ok(())
 	}
 
@@ -2445,7 +2679,17 @@ impl AuthorisationProvider for Transaction {
 		// Delete any associated data including access grants.
 		let key = crate::key::namespace::access::all::new(ns, na);
 		self.delp(&key).await?;
-		// Return result
+
+		// Invalidate the cached list of all namespace accesses
+		let list_key = cache::tx::Lookup::Nas(ns);
+		self.cache.remove(list_key);
+
+		// Invalidate the cached access entry and grants
+		let access_key = cache::tx::Lookup::Na(ns, na);
+		self.cache.remove(access_key);
+		let grants_key = cache::tx::Lookup::Ngs(ns, na);
+		self.cache.remove(grants_key);
+
 		Ok(())
 	}
 
@@ -2456,7 +2700,17 @@ impl AuthorisationProvider for Transaction {
 		// Delete any associated data including access grants.
 		let key = crate::key::database::access::all::new(ns, db, da);
 		self.delp(&key).await?;
-		// Return result
+
+		// Invalidate the cached list of all database accesses
+		let list_key = cache::tx::Lookup::Das(ns, db);
+		self.cache.remove(list_key);
+
+		// Invalidate the cached access entry and grants
+		let access_key = cache::tx::Lookup::Da(ns, db, da);
+		self.cache.remove(access_key);
+		let grants_key = cache::tx::Lookup::Dgs(ns, db, da);
+		self.cache.remove(grants_key);
+
 		Ok(())
 	}
 }
@@ -2511,7 +2765,16 @@ impl ApiProvider for Transaction {
 		let name = ap.path.to_string();
 		let key = crate::key::database::ap::new(ns, db, &name);
 		self.set(&key, ap, None).await?;
-		// Return result
+
+		// Invalidate the cached list of all APIs for this database
+		let list_key = cache::tx::Lookup::Aps(ns, db);
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Ap(ns, db, &name);
+		let entry = cache::tx::Entry::Any(Arc::new(ap.clone()));
+		self.cache.insert(qey, entry);
+
 		Ok(())
 	}
 }
@@ -2519,7 +2782,7 @@ impl ApiProvider for Transaction {
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 impl BucketProvider for Transaction {
-	/// Retrieve all analyzer definitions for a specific database.
+	/// Retrieve all bucket definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_db_buckets(
 		&self,
@@ -2541,7 +2804,7 @@ impl BucketProvider for Transaction {
 		}
 	}
 
-	/// Retrieve a specific api definition.
+	/// Retrieve a specific bucket definition from a database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_db_bucket(
 		&self,

@@ -99,7 +99,7 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 		Value::Object(obj)
 	}
 
-	fn from_value(value: Value) -> crate::types::anyhow::Result<Self> {
+	fn from_value(value: Value) -> Result<Self, crate::Error> {
 		if let Value::Object(mut obj) = value {
 			let namespace = obj
 				.remove("ns")
@@ -110,7 +110,7 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 						None
 					}
 				})
-				.ok_or_else(|| crate::types::anyhow::anyhow!("Missing 'ns' field"))?;
+				.ok_or_else(|| crate::Error::internal("Missing 'ns' field".to_string()))?;
 			let database = obj
 				.remove("db")
 				.and_then(|v| {
@@ -120,7 +120,7 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 						None
 					}
 				})
-				.ok_or_else(|| crate::types::anyhow::anyhow!("Missing 'db' field"))?;
+				.ok_or_else(|| crate::Error::internal("Missing 'db' field".to_string()))?;
 			let access = obj
 				.remove("ac")
 				.and_then(|v| {
@@ -130,7 +130,7 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 						None
 					}
 				})
-				.ok_or_else(|| crate::types::anyhow::anyhow!("Missing 'ac' field"))?;
+				.ok_or_else(|| crate::Error::internal("Missing 'ac' field".to_string()))?;
 
 			// The remaining fields go into params
 			let params = P::from_value(Value::Object(obj))?;
@@ -142,7 +142,7 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 				params,
 			})
 		} else {
-			Err(crate::types::anyhow::anyhow!("Expected an object for Record"))
+			Err(crate::Error::internal("Expected an object for Record".to_string()))
 		}
 	}
 }
@@ -224,7 +224,7 @@ impl SurrealValue for Token {
 		}
 	}
 
-	fn from_value(value: Value) -> crate::types::anyhow::Result<Self> {
+	fn from_value(value: Value) -> Result<Self, crate::Error> {
 		match value {
 			Value::String(string) => Ok(Token::from(string)),
 			value => {

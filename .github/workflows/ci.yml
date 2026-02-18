@@ -47,7 +47,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -72,7 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Lookup the nightly toolchain
         id: info
@@ -98,7 +98,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -117,7 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -136,7 +136,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -151,10 +151,10 @@ jobs:
 
   check-release:
     name: Check workspace (release)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, benchmarking]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -174,7 +174,7 @@ jobs:
       msrv: "1.90" # This should be updated if the MSRV is updated.
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -193,7 +193,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -212,7 +212,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -230,7 +230,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -250,7 +250,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -271,7 +271,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -296,7 +296,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -314,7 +314,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -332,7 +332,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -350,7 +350,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -368,7 +368,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -387,10 +387,10 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [ runner-amd64-2xlarge ]
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Test workspace
         uses: ./.github/actions/test-workspace
@@ -410,7 +410,7 @@ jobs:
         engine: [mem, rocksdb, surrealkv, tikv]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -440,7 +440,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -464,7 +464,7 @@ jobs:
         engine: [any, ws, http, mem, rocksdb, surrealkv, tikv]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -494,7 +494,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -517,7 +517,7 @@ jobs:
         engine: [mem, surrealkv, rocksdb, tikv]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -560,7 +560,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Setup environment
         uses: ./.github/actions/setup-environment
@@ -577,28 +577,29 @@ jobs:
           cargo build --features upgrade
 
   #    - name: Run SurrealQL test suite
-        #run: |
-        #  cd language-tests
-        #  ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
+  #run: |
+  #  cd language-tests
+  #  ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
 
   # ----------------------------------------
   # Other SDK tests
   # ----------------------------------------
 
   sdk-javascript:
-    name: SDK - JavaScript (${{ matrix.version }})
+    name: SDK - JavaScript (${{ matrix.version }}, ${{ matrix.protocol }})
     runs-on: ubuntu-latest
     needs: build
-    outputs:
-      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
         version:
           - latest
+        protocol:
+          - http
+          - ws
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
         with:
           repository: "surrealdb/surrealdb.js"
 
@@ -619,47 +620,27 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Run JavaScript tests (HTTP)
-        id: test-http
-        continue-on-error: true
-        run: bun test
+      - name: Run JavaScript tests (${{ matrix.protocol }})
+        run: bun test --timeout 10000
         env:
-          SURREAL_PROTOCOL: http
-          SURREAL_VERSION_CHECK: "false"
+          SURREAL_PROTOCOL: ${{ matrix.protocol }}
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
-
-      - name: Run JavaScript tests (WebSocket)
-        id: test-ws
-        continue-on-error: true
-        run: bun test
-        env:
-          SURREAL_PROTOCOL: ws
-          SURREAL_VERSION_CHECK: "false"
-          SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
-
-      - name: ${{ (steps.test-http.outcome != 'success' || steps.test-ws.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
-        id: check-failures
-        run: |
-          if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
-            echo "failed=true" >> $GITHUB_OUTPUT
-          else
-            echo "failed=false" >> $GITHUB_OUTPUT
-          fi
 
   sdk-golang:
-    name: SDK - Golang (${{ matrix.version }})
+    name: SDK - Golang (${{ matrix.version }}, ${{ matrix.protocol }})
     runs-on: ubuntu-latest
     needs: build
-    outputs:
-      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
         version:
           - 1.23
+        protocol:
+          - http
+          - ws
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
         with:
           repository: "surrealdb/surrealdb.go"
 
@@ -701,45 +682,27 @@ jobs:
             exit 1
           fi
 
-      - name: Run Golang tests (HTTP)
-        id: test-http
+      - name: Run Golang tests (${{ matrix.protocol }})
         timeout-minutes: 5
-        continue-on-error: true
         run: go test -v -cover ./...
         env:
-          SURREALDB_URL: http://localhost:8000/rpc
-
-      - name: Run Golang tests (WebSocket)
-        id: test-ws
-        timeout-minutes: 5
-        continue-on-error: true
-        run: go test -v -cover ./...
-        env:
-          SURREALDB_URL: ws://localhost:8000/rpc
-
-      - name: ${{ (steps.test-http.outcome != 'success' || steps.test-ws.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
-        id: check-failures
-        run: |
-          if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
-            echo "failed=true" >> $GITHUB_OUTPUT
-          else
-            echo "failed=false" >> $GITHUB_OUTPUT
-          fi
+          SURREALDB_URL: ${{ matrix.protocol }}://localhost:8000/rpc
 
   sdk-python:
-    name: SDK - Python (${{ matrix.version }})
+    name: SDK - Python (${{ matrix.version }}, ${{ matrix.protocol }})
     runs-on: ubuntu-latest
     needs: build
-    outputs:
-      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
         version:
           - 3.13
+        protocol:
+          - http
+          - ws
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
         with:
           repository: "surrealdb/surrealdb.py"
 
@@ -788,43 +751,19 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
-      - name: Run Python tests (HTTP)
-        id: test-http
+      - name: Run Python tests (${{ matrix.protocol }})
         timeout-minutes: 5
-        continue-on-error: true
         run: uv run pytest
         env:
           PYTHONPATH: ./src
-          SURREALDB_URL: http://localhost:8000
+          SURREALDB_URL: ${{ matrix.protocol }}://localhost:8000
           SURREALDB_VERSION: ${{ matrix.version }}
           PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
-
-      - name: Run Python tests (WebSocket)
-        id: test-ws
-        timeout-minutes: 5
-        continue-on-error: true
-        run: uv run pytest
-        env:
-          PYTHONPATH: ./src
-          SURREALDB_URL: ws://localhost:8000
-          SURREALDB_VERSION: ${{ matrix.version }}
-          PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
-
-      - name: ${{ (steps.test-http.outcome != 'success' || steps.test-ws.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
-        id: check-failures
-        run: |
-          if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
-            echo "failed=true" >> $GITHUB_OUTPUT
-          else
-            echo "failed=false" >> $GITHUB_OUTPUT
-          fi
 
   sdk-php:
     name: SDK - PHP (${{ matrix.version }})
     runs-on: ubuntu-latest
     needs: build
-    outputs:
-      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
@@ -832,7 +771,7 @@ jobs:
           - 8.2
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
         with:
           repository: "surrealdb/surrealdb.php"
 
@@ -878,26 +817,14 @@ jobs:
           fi
 
       - name: Run PHP tests
-        id: test-php
         timeout-minutes: 5
         continue-on-error: true
         run: composer test-coverage-v2
-
-      - name: ${{ (steps.test-php.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
-        id: check-failures
-        run: |
-          if [ "${{ steps.test-php.outcome }}" != "success" ]; then
-            echo "failed=true" >> $GITHUB_OUTPUT
-          else
-            echo "failed=false" >> $GITHUB_OUTPUT
-          fi
 
   sdk-dotnet:
     name: SDK - .NET (${{ matrix.version }})
     runs-on: ubuntu-latest
     needs: build
-    outputs:
-      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
@@ -905,7 +832,7 @@ jobs:
           - 10.0.x
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
         with:
           repository: "surrealdb/surrealdb.net"
 
@@ -955,42 +882,31 @@ jobs:
           fi
 
       - name: Run .NET tests
-        id: test-main
         timeout-minutes: 5
         continue-on-error: true
         run: >
-          dotnet test
-          ./SurrealDb.Net.Tests/SurrealDb.Net.Tests.csproj
+          dotnet run
+          --project ./SurrealDb.Net.Tests/SurrealDb.Net.Tests.csproj
           --no-restore
           --no-build
 
       - name: Run .NET tests (Live Query)
-        id: test-live
         timeout-minutes: 5
         continue-on-error: true
         run: >
-          dotnet test
-          ./SurrealDb.Net.LiveQuery.Tests/SurrealDb.Net.LiveQuery.Tests.csproj
+          dotnet run
+          --project ./SurrealDb.Net.LiveQuery.Tests/SurrealDb.Net.LiveQuery.Tests.csproj
           --no-restore
           --no-build
 
-      - name: ${{ (steps.test-main.outcome != 'success' || steps.test-live.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
-        id: check-failures
-        run: |
-          if [ "${{ steps.test-main.outcome }}" != "success" ] || [ "${{ steps.test-live.outcome }}" != "success" ]; then
-            echo "failed=true" >> $GITHUB_OUTPUT
-          else
-            echo "failed=false" >> $GITHUB_OUTPUT
-          fi
-
   # ----------------------------------------
-  # SDK output
+  # SDK summary (fails if any SDK test job failed; not in required-checks yet)
   # ----------------------------------------
 
   sdk-output:
-    name: ${{ (needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true') && '❌ SDK tests failed' || '✅ SDK tests passed' }}
+    name: SDK test summary
     runs-on: ubuntu-latest
-    if: success() || failure()
+    if: always()
     needs:
       - sdk-javascript
       - sdk-golang
@@ -998,21 +914,25 @@ jobs:
       - sdk-php
       - sdk-dotnet
     steps:
-      - name: Output SDK test results
+      - name: SDK test results
         run: |
-          echo "JavaScript: ${{ needs.sdk-javascript.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
-          echo "Golang: ${{ needs.sdk-golang.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
-          echo "Python: ${{ needs.sdk-python.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
-          echo "PHP: ${{ needs.sdk-php.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
-          echo ".NET: ${{ needs.sdk-dotnet.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
+          echo "JavaScript: ${{ needs.sdk-javascript.result == 'success' && '✅ Passed' || '❌ Failed' }}"
+          echo "Golang: ${{ needs.sdk-golang.result == 'success' && '✅ Passed' || '❌ Failed' }}"
+          echo "Python: ${{ needs.sdk-python.result == 'success' && '✅ Passed' || '❌ Failed' }}"
+          echo "PHP: ${{ needs.sdk-php.result == 'success' && '✅ Passed' || '❌ Failed' }}"
+          echo ".NET: ${{ needs.sdk-dotnet.result == 'success' && '✅ Passed' || '❌ Failed' }}"
 
-      - name: Output SDK test summary
+      - name: Fail if any SDK tests failed
         run: |
-          if [[ "${{ needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true' }}" == "true" ]]; then
-            echo "❌ Some SDK tests failed"
-          else
-            echo "✅ All SDK tests passed successfully"
+          if [[ "${{ needs.sdk-javascript.result }}" == "failure" ]] || \
+             [[ "${{ needs.sdk-golang.result }}" == "failure" ]] || \
+             [[ "${{ needs.sdk-python.result }}" == "failure" ]] || \
+             [[ "${{ needs.sdk-php.result }}" == "failure" ]] || \
+             [[ "${{ needs.sdk-dotnet.result }}" == "failure" ]]; then
+            echo "❌ One or more SDK test jobs failed"
+            exit 1
           fi
+          echo "✅ All SDK tests passed"
 
   # ----------------------------------------
   # Required checks

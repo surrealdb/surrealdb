@@ -14,6 +14,7 @@ pub enum Strategy {
 		tag: String,
 		variant: String,
 		content: String,
+		skip_content_if: Option<syn::Path>,
 	},
 	Value {
 		variant: Option<String>,
@@ -46,6 +47,10 @@ impl Strategy {
 					tag: tag.to_string(),
 					variant,
 					content: content.to_string(),
+					skip_content_if: attrs
+						.skip_content_if
+						.as_ref()
+						.map(|s| syn::parse_str(s).expect("skip_content_if must be a valid path")),
 				};
 			}
 

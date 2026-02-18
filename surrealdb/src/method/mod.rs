@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use crate::opt::auth::{Credentials, Token};
 use crate::opt::{IntoEndpoint, IntoExportDestination, WaitFor, auth};
@@ -79,7 +80,7 @@ pub use version::Version;
 use super::opt::{CreateResource, IntoResource};
 
 /// A alias for an often used type of future returned by async methods in this
-/// library.
+/// library
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
 
 /// Machine learning model marker type for import and export types
@@ -93,6 +94,14 @@ pub struct Live;
 
 /// Relation marker type
 pub struct Relation;
+
+/// Query execution statistics
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub struct Stats {
+	/// The time taken to execute the query
+	pub execution_time: Option<Duration>,
+}
 
 /// Responses returned with statistics
 #[derive(Debug)]
@@ -1266,6 +1275,35 @@ where
 		}
 	}
 
+	/// Runs a function
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// // Specify no args by not calling `.args()`
+	/// let foo: usize = db.run("fn::foo").await?; // fn::foo()
+	/// // A single value will be turned into one argument
+	/// let bar: usize = db.run("fn::bar").args(42).await?; // fn::bar(42)
+	/// // Arrays are treated as single arguments
+	/// let count: usize = db.run("count").args(vec![1,2,3]).await?;
+	/// // Specify multiple args using a tuple
+	/// let two: usize = db.run("math::log").args((100, 10)).await?; // math::log(100, 10)
+	///
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn run<R>(&'_ self, function: impl IntoFn) -> Run<'_, C, R> {
+		Run {
+			client: Cow::Borrowed(self),
+			function: function.into_fn(),
+			args: Value::None,
+			response_type: PhantomData,
+		}
+	}
+
 	/// Checks whether the server is healthy or not
 	///
 	/// # Examples
@@ -1382,6 +1420,6 @@ fn validate_data(data: &Value, error_message: &str) -> crate::Result<()> {
 	match data {
 		Value::Object(_) => Ok(()),
 		Value::Array(v) if v.iter().all(Value::is_object) => Ok(()),
-		_ => Err(crate::err::Error::InvalidParams(error_message.to_owned())),
+		_ => Err(crate::Error::validation(error_message.to_owned(), None)),
 	}
 }

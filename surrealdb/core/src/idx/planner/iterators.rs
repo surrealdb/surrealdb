@@ -299,7 +299,7 @@ impl IndexEqualThingIterator {
 	) -> Result<Vec<(Key, Val)>> {
 		let min = beg.clone();
 		let max = end.to_owned();
-		let res = tx.scan(min..max, limit, None).await?;
+		let res = tx.scan(min..max, limit, 0, None).await?;
 		// Update the begin key for the next scan to avoid duplicates and enable
 		// pagination
 		if let Some((key, _)) = res.last() {
@@ -702,7 +702,7 @@ impl IndexRangeThingIterator {
 	/// (by appending 0x00), which works with lexicographic ordering to ensure
 	/// the next call starts strictly after the last result.
 	async fn next_scan(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<(Key, Val)>> {
-		let res = tx.scan(self.r.range(), limit, None).await?;
+		let res = tx.scan(self.r.range(), limit, 0, None).await?;
 		if let Some((key, _)) = res.last() {
 			self.r.beg.clone_from(key);
 			// Advance begin key one byte past the last returned key to avoid
@@ -718,7 +718,7 @@ impl IndexRangeThingIterator {
 	/// mirrors `next_scan` but avoids fetching values for count-only
 	/// operations.
 	async fn next_keys(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<Key>> {
-		let res = tx.keys(self.r.range(), limit, None).await?;
+		let res = tx.keys(self.r.range(), limit, 0, None).await?;
 		if let Some(key) = res.last() {
 			self.r.beg.clone_from(key);
 			// Same pagination technique as in next_scan: move begin strictly past
@@ -819,7 +819,7 @@ impl IndexRangeReverseThingIterator {
 
 		// Do we have enough limit left to collect additional records?
 		let res = if limit > 0 {
-			tx.scanr(self.r.r.range(), limit, None).await?
+			tx.scanr(self.r.r.range(), limit, 0, None).await?
 		} else {
 			vec![]
 		};
@@ -862,7 +862,7 @@ impl IndexRangeReverseThingIterator {
 
 		// Do we have enough limit left to collect additional records?
 		let res = if limit > 0 {
-			tx.keysr(self.r.r.range(), limit, None).await?
+			tx.keysr(self.r.r.range(), limit, 0, None).await?
 		} else {
 			vec![]
 		};
@@ -1267,7 +1267,7 @@ impl UniqueRangeThingIterator {
 			return Ok(B::empty());
 		}
 		limit += 1;
-		let res = tx.scan(self.r.range(), limit, None).await?;
+		let res = tx.scan(self.r.range(), limit, 0, None).await?;
 		let mut records = B::with_capacity(res.len());
 		for (k, v) in res {
 			limit -= 1;
@@ -1296,7 +1296,7 @@ impl UniqueRangeThingIterator {
 			return Ok(0);
 		}
 		limit += 1;
-		let res = tx.keys(self.r.range(), limit, None).await?;
+		let res = tx.keys(self.r.range(), limit, 0, None).await?;
 		let mut count = 0;
 		for k in res {
 			limit -= 1;
@@ -1376,7 +1376,7 @@ impl UniqueRangeReverseThingIterator {
 		} else {
 			None
 		};
-		let mut res = tx.scanr(self.r.r.range(), limit, None).await?;
+		let mut res = tx.scanr(self.r.r.range(), limit, 0, None).await?;
 		if let Some((k, _)) = res.last() {
 			// We set the ending for the next batch
 			self.r.r.end.clone_from(k);
@@ -1419,7 +1419,7 @@ impl UniqueRangeReverseThingIterator {
 				}
 			}
 		}
-		let mut res = tx.keysr(self.r.r.range(), limit, None).await?;
+		let mut res = tx.keysr(self.r.r.range(), limit, 0, None).await?;
 		if let Some(k) = res.last() {
 			// We set the ending for the next batch
 			self.r.r.end.clone_from(k);
@@ -1639,6 +1639,9 @@ where
 	}
 }
 
+/// For earch KNN result we have the RecordID, the distance (f64), and an optional record.
+/// Optimisation: The optional record is present if a filter has checked if the record is truthy has
+/// been used
 pub(crate) type KnnIteratorResult = (Arc<RecordId>, f64, Option<Arc<Record>>);
 
 pub(crate) struct KnnIterator {

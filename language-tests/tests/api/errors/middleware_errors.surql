@@ -9,10 +9,7 @@ value = "NONE"
 # 1
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: NONE, context: {  }, headers: {  }, status: 500 }"
-
-[env.capabilities]
-allow-experimental = ["define_api"]
+value = "{ body: NONE, headers: {  }, status: 500 }"
 
 */
 

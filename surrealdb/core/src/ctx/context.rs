@@ -30,8 +30,9 @@ use crate::ctx::reason::Reason;
 use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, Options, Session, Variables};
+use crate::dbs::{Capabilities, NewPlannerStrategy, Options, Session, Variables};
 use crate::err::Error;
+use crate::exec::function::FunctionRegistry;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
@@ -92,6 +93,16 @@ pub struct Context {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Option<Arc<SurrealismCache>>,
+	// Function registry for built-in and custom functions
+	function_registry: Arc<FunctionRegistry>,
+	// Strategy for the new streaming planner/executor
+	new_planner_strategy: NewPlannerStrategy,
+	// When true, EXPLAIN ANALYZE omits elapsed durations for deterministic test output
+	redact_volatile_explain_attrs: bool,
+	// Matches context for index functions (search::highlight, search::score, etc.)
+	matches_context: Option<Arc<crate::exec::function::MatchesContext>>,
+	// KNN context for index functions (vector::distance::knn)
+	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 }
 
 impl Default for Context {
@@ -144,6 +155,11 @@ impl Context {
 			buckets: None,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: None,
+			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			new_planner_strategy: NewPlannerStrategy::default(),
+			redact_volatile_explain_attrs: false,
+			matches_context: None,
+			knn_context: None,
 		}
 	}
 
@@ -171,6 +187,11 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
+			function_registry: parent.function_registry.clone(),
+			new_planner_strategy: parent.new_planner_strategy.clone(),
+			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
+			matches_context: parent.matches_context.clone(),
+			knn_context: parent.knn_context.clone(),
 		}
 	}
 
@@ -200,6 +221,52 @@ impl Context {
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
+			function_registry: parent.function_registry.clone(),
+			new_planner_strategy: parent.new_planner_strategy.clone(),
+			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
+			matches_context: parent.matches_context.clone(),
+			knn_context: parent.knn_context.clone(),
+		}
+	}
+
+	/// Create an independent snapshot of a frozen context.
+	///
+	/// Flattens all values from the parent chain into the snapshot's own
+	/// `values` map and sets `parent: None`, so the returned context does
+	/// **not** hold an `Arc` reference to the original parent.
+	///
+	/// This is used by the streaming executor to give the operator pipeline
+	/// its own `Arc<Context>` that won't interfere with the executor's
+	/// `Arc::get_mut` requirements between statements.
+	pub(crate) fn snapshot(from: &FrozenContext) -> Self {
+		Self {
+			// Flatten all values from the parent chain into this context
+			values: from.collect_values(HashMap::default()),
+			deadline: from.deadline,
+			slow_log: from.slow_log.clone(),
+			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: from.notifications.clone(),
+			query_planner: from.query_planner.clone(),
+			query_executor: from.query_executor.clone(),
+			iteration_stage: from.iteration_stage.clone(),
+			capabilities: from.capabilities.clone(),
+			index_stores: from.index_stores.clone(),
+			cache: from.cache.clone(),
+			index_builder: from.index_builder.clone(),
+			sequences: from.sequences.clone(),
+			#[cfg(storage)]
+			temporary_directory: from.temporary_directory.clone(),
+			transaction: from.transaction.clone(),
+			isolated: false,
+			parent: None, // No parent reference — fully independent
+			buckets: from.buckets.clone(),
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: from.surrealism_cache.clone(),
+			function_registry: from.function_registry.clone(),
+			new_planner_strategy: from.new_planner_strategy.clone(),
+			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
+			matches_context: from.matches_context.clone(),
+			knn_context: from.knn_context.clone(),
 		}
 	}
 
@@ -229,6 +296,11 @@ impl Context {
 			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
+			function_registry: from.function_registry.clone(),
+			new_planner_strategy: from.new_planner_strategy.clone(),
+			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
+			matches_context: from.matches_context.clone(),
+			knn_context: from.knn_context.clone(),
 		}
 	}
 
@@ -246,6 +318,7 @@ impl Context {
 		buckets: BucketsManager,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
 	) -> Result<Context> {
+		let planner_strategy = capabilities.planner_strategy().clone();
 		let mut ctx = Self {
 			values: HashMap::default(),
 			parent: None,
@@ -268,6 +341,11 @@ impl Context {
 			buckets: Some(buckets),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Some(surrealism_cache),
+			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			new_planner_strategy: planner_strategy,
+			redact_volatile_explain_attrs: false,
+			matches_context: None,
+			knn_context: None,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -618,6 +696,25 @@ impl Context {
 		}
 	}
 
+	/// Collect context values into the provided map, walking up parent contexts
+	/// unless this context is isolated.
+	pub(crate) fn collect_values(
+		&self,
+		map: HashMap<Cow<'static, str>, Arc<Value>>,
+	) -> HashMap<Cow<'static, str>, Arc<Value>> {
+		let mut map = if !self.isolated
+			&& let Some(p) = &self.parent
+		{
+			p.collect_values(map)
+		} else {
+			map
+		};
+		self.values.iter().for_each(|(k, v)| {
+			map.insert(k.clone(), v.clone());
+		});
+		map
+	}
+
 	/// Get a 'static view into the cancellation status.
 	#[cfg(feature = "scripting")]
 	pub(crate) fn cancellation(&self) -> crate::ctx::cancellation::Cancellation {
@@ -633,6 +730,16 @@ impl Context {
 	/// context.
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
 		self.add_values(session.values());
+		// Only override the planner strategy if the session explicitly sets a
+		// non-default value (e.g. language tests). Otherwise the capability-level
+		// strategy (set via from_ds) is preserved.
+		if session.new_planner_strategy != NewPlannerStrategy::default() {
+			self.new_planner_strategy = session.new_planner_strategy.clone();
+		}
+		// Propagate duration redaction flag from session.
+		if session.redact_volatile_explain_attrs {
+			self.redact_volatile_explain_attrs = true;
+		}
 		if !session.variables.is_empty() {
 			self.attach_variables(session.variables.clone().into())?;
 		}
@@ -676,6 +783,43 @@ impl Context {
 	/// Get the capabilities for this context
 	pub(crate) fn get_capabilities(&self) -> Arc<Capabilities> {
 		self.capabilities.clone()
+	}
+
+	/// Get the function registry for this context
+	pub(crate) fn function_registry(&self) -> &Arc<FunctionRegistry> {
+		&self.function_registry
+	}
+
+	/// Set the matches context for index functions (search::highlight, etc.)
+	pub(crate) fn set_matches_context(&mut self, ctx: crate::exec::function::MatchesContext) {
+		self.matches_context = Some(Arc::new(ctx));
+	}
+
+	/// Get the matches context for index functions
+	pub(crate) fn get_matches_context(
+		&self,
+	) -> Option<&Arc<crate::exec::function::MatchesContext>> {
+		self.matches_context.as_ref()
+	}
+
+	/// Set the KNN context for index functions (vector::distance::knn)
+	pub(crate) fn set_knn_context(&mut self, ctx: Arc<crate::exec::function::KnnContext>) {
+		self.knn_context = Some(ctx);
+	}
+
+	/// Get the KNN context for index functions
+	pub(crate) fn get_knn_context(&self) -> Option<&Arc<crate::exec::function::KnnContext>> {
+		self.knn_context.as_ref()
+	}
+
+	/// Get the new planner strategy for this context
+	pub(crate) fn new_planner_strategy(&self) -> &NewPlannerStrategy {
+		&self.new_planner_strategy
+	}
+
+	/// Whether EXPLAIN ANALYZE should redact elapsed durations.
+	pub(crate) fn redact_volatile_explain_attrs(&self) -> bool {
+		self.redact_volatile_explain_attrs
 	}
 
 	/// Check if scripting is allowed

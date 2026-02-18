@@ -1,0 +1,28 @@
+/**
+[test]
+
+[[test.results]]
+value = "[{ content: { content: 'Be Bop', tags: ['Foo', 'Bãr'], title: 'Hello World!' }, id: blog:1 }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = '''"SelectProject [ctx: Db] [projections: id] {rows: 1}
+    Filter [ctx: Db] [predicate: content @1@ 'Hello Bãr'] {rows: 1}
+        FullTextScan [ctx: Db] [index: blog_content, query: Hello Bãr] {rows: 1}
+
+Total rows: 1"'''
+
+[[test.results]]
+value = "[{ content: ['Be Bop', 'Foo', '<em>Bãr</em>', '<em>Hello</em> World!'], id: blog:1 }]"
+
+*/
+CREATE blog:1 SET content = {{ 'title':'Hello World!', 'content':'Be Bop', 'tags': ['Foo', 'Bãr'] }};
+DEFINE ANALYZER simple TOKENIZERS blank,class;
+DEFINE INDEX blog_content ON blog FIELDS content FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
+EXPLAIN ANALYZE SELECT id FROM blog WHERE content @1@ 'Hello Bãr';
+SELECT id, search::highlight('<em>', '</em>', 1) AS content FROM blog WHERE content @1@ 'Hello Bãr';

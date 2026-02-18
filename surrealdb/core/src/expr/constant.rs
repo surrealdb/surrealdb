@@ -1,4 +1,3 @@
-use anyhow::Result;
 use chrono::{TimeZone, Utc};
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -73,12 +72,12 @@ impl Constant {
 		}
 	}
 	/// Process this type returning a computed simple Value
-	pub(crate) fn compute(&self) -> Result<Value> {
-		Ok(match self.value() {
+	pub(crate) fn compute(&self) -> Value {
+		match self.value() {
 			ConstantValue::Datetime(d) => d.into(),
 			ConstantValue::Float(f) => f.into(),
 			ConstantValue::Duration(d) => d.into(),
-		})
+		}
 	}
 }
 

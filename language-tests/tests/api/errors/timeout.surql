@@ -7,24 +7,21 @@ value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'The query was not executed because it exceeded the timeout: 1ns', context: {  }, headers: {  }, status: 500 }"
+value = "{ body: 'The query was not executed because it exceeded the timeout: 1ns', headers: {  }, status: 500 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { completed: true }, context: {  }, headers: {}, status: 200 }"
+value = "{ body: { completed: true }, headers: {}, status: 200 }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: 'deadline has elapsed', context: {  }, headers: {  }, status: 500 }"
-
-[env.capabilities]
-allow-experimental = ["define_api"]
+value = "{ body: 'deadline has elapsed', headers: {  }, status: 500 }"
 
 */
 
