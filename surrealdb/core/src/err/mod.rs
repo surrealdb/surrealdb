@@ -1194,6 +1194,12 @@ pub(crate) enum Error {
 
 	#[error("The event {0} reached the max async event nesting depth: {1}.")]
 	EvReachMaxDepth(String, u16),
+
+	#[error("Computed fields cannot be indexed. Index: '{index}' - Field: '{field}'")]
+	ComputedFieldCannotBeIndexed {
+		field: String,
+		index: String,
+	},
 }
 
 impl Error {
