@@ -528,6 +528,8 @@ jobs:
 
       - name: Install tools
         uses: ./.github/actions/install-tools
+        with:
+          tools: ${{ matrix.engine == 'mem' && 'cargo-make,cargo-llvm-cov' || 'cargo-make' }}
 
       - name: Setup databases
         uses: ./.github/actions/setup-databases
@@ -535,7 +537,23 @@ jobs:
           tikv: ${{ matrix.engine == 'tikv' }}
 
       - name: Run language tests
+        if: matrix.engine != 'mem'
         run: cargo make ci-lang-test-${{ matrix.engine }}
+
+      - name: Run language tests with coverage
+        if: matrix.engine == 'mem'
+        run: cargo make ci-lang-test-coverage
+
+      - name: Upload language test coverage to Codecov
+        if: matrix.engine == 'mem'
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # (Actions must be pinned by commit hash) v5.5.1
+        with:
+          files: language-tests-lcov.info
+          fail_ci_if_error: false
+          flags: language-tests
+          name: language-test-coverage
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   upgrade-tests:
     name: SurrealQL upgrade tests
