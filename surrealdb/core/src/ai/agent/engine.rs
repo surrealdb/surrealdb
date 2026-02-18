@@ -132,6 +132,9 @@ async fn run_inner(
 	let max_rounds =
 		agent_config.and_then(|c| c.max_rounds).unwrap_or_else(|| guardrails.max_llm_rounds());
 
+	// Create the provider once for all LLM round-trips
+	let provider = crate::ai::chat::get_provider(provider_name, None)?;
+
 	// Decision loop
 	loop {
 		llm_rounds += 1;
@@ -139,8 +142,6 @@ async fn run_inner(
 			anyhow::bail!("Agent '{}' exceeded maximum LLM rounds ({max_rounds})", agent.name);
 		}
 
-		// Call the LLM with tools
-		let provider = crate::ai::chat::get_provider(provider_name, None)?;
 		let response = provider.chat_with_tools(model_name, &messages, &tool_defs, &config).await?;
 
 		match response {
