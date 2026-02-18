@@ -17,10 +17,12 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
-use crate::expr::{Base, Expr, FlowResultExt, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
+use crate::expr::{
+	Base, Expr, FlowResultExt, Idiom, Kind, KindLiteral, Literal, Part, RecordIdKeyLit,
+};
 use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::kvs::Transaction;
-use crate::val::Value;
+use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) enum DefineDefault {
@@ -75,11 +77,11 @@ impl DefineFieldStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<catalog::FieldDefinition> {
-		fn convert_permission(permission: &Permission) -> catalog::Permission {
+		fn convert_permission(permission: &Permission) -> Permission {
 			match permission {
-				Permission::None => catalog::Permission::None,
-				Permission::Full => catalog::Permission::Full,
-				Permission::Specific(expr) => catalog::Permission::Specific(expr.clone()),
+				Permission::None => Permission::None,
+				Permission::Full => Permission::Full,
+				Permission::Specific(expr) => Permission::Specific(expr.clone()),
 			}
 		}
 
@@ -98,9 +100,26 @@ impl DefineFieldStatement {
 			}
 		});
 
-		Ok(catalog::FieldDefinition {
-			name: expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?,
-			table: expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?.into(),
+		let name: Idiom = expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?;
+		let table: TableName =
+			expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?.into();
+		// Computed fields cannot be indexed. Check if any existing index references
+		// this field (or has it as a prefix for sub-field paths).
+		if self.computed.is_some() {
+			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+			for ix in ctx.tx().all_tb_indexes(ns, db, &table).await?.iter() {
+				if ix.cols.iter().any(|col| col.starts_with(&name)) {
+					bail!(Error::ComputedFieldCannotBeIndexed {
+						index: ix.name.clone(),
+						field: name.to_raw_string(),
+					})
+				}
+			}
+		}
+
+		Ok(FieldDefinition {
+			name,
+			table,
 			field_kind: self.field_kind.clone(),
 			flexible: self.flexible,
 			readonly: self.readonly,
