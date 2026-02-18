@@ -18,8 +18,8 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::ai::provider::{
-	ChatMessage as ProviderChatMessage, ChatProvider, EmbeddingProvider, GenerationConfig,
-	GenerationProvider,
+	ChatMessage as ProviderChatMessage, ChatProvider, ChatResponse, EmbeddingProvider,
+	GenerationConfig, GenerationProvider, ToolCall as ProviderToolCall, ToolDefinition,
 };
 
 const DEFAULT_BASE_URL: &str = "https://api-inference.huggingface.co/pipeline/feature-extraction";
@@ -107,6 +107,50 @@ impl HuggingFaceProvider {
 	fn chat_url(&self, model: &str) -> String {
 		let base = self.generation_base_url.trim_end_matches('/');
 		format!("{base}/{model}/v1/chat/completions")
+	}
+
+	/// Convert provider messages to the enriched HuggingFace format for tool-calling.
+	fn convert_messages(messages: &[ProviderChatMessage]) -> Vec<HfToolChatMessage> {
+		messages
+			.iter()
+			.map(|m| {
+				let tool_calls = m.tool_calls.as_ref().map(|calls| {
+					calls
+						.iter()
+						.map(|c| HfRequestToolCall {
+							id: c.id.clone(),
+							call_type: "function".to_string(),
+							function: HfRequestToolCallFunction {
+								name: c.name.clone(),
+								arguments: c.arguments.to_string(),
+							},
+						})
+						.collect()
+				});
+
+				HfToolChatMessage {
+					role: m.role.clone(),
+					content: m.content.clone(),
+					tool_calls,
+					tool_call_id: m.tool_call_id.clone(),
+				}
+			})
+			.collect()
+	}
+
+	/// Convert tool definitions to the OpenAI-compatible format.
+	fn convert_tools(tools: &[ToolDefinition]) -> Vec<HfTool> {
+		tools
+			.iter()
+			.map(|t| HfTool {
+				tool_type: "function".to_string(),
+				function: HfToolFunction {
+					name: t.name.clone(),
+					description: t.description.clone(),
+					parameters: t.parameters.clone(),
+				},
+			})
+			.collect()
 	}
 }
 
@@ -329,6 +373,84 @@ struct HfChatChoice {
 #[derive(Deserialize)]
 struct HfChatChoiceMessage {
 	content: Option<String>,
+	tool_calls: Option<Vec<HfResponseToolCall>>,
+}
+
+// =========================================================================
+// Tool-calling types (OpenAI-compatible format)
+// =========================================================================
+
+/// An OpenAI-compatible tool definition.
+#[derive(Serialize)]
+struct HfTool {
+	#[serde(rename = "type")]
+	tool_type: String,
+	function: HfToolFunction,
+}
+
+/// The function details within a tool definition.
+#[derive(Serialize)]
+struct HfToolFunction {
+	name: String,
+	description: String,
+	parameters: serde_json::Value,
+}
+
+/// An enriched chat message that supports tool calls and tool results.
+#[derive(Serialize)]
+struct HfToolChatMessage {
+	role: String,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	content: Option<String>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	tool_calls: Option<Vec<HfRequestToolCall>>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	tool_call_id: Option<String>,
+}
+
+/// A tool call in the request format (replaying an assistant's tool call).
+#[derive(Serialize)]
+struct HfRequestToolCall {
+	id: String,
+	#[serde(rename = "type")]
+	call_type: String,
+	function: HfRequestToolCallFunction,
+}
+
+/// The function details of a request tool call.
+#[derive(Serialize)]
+struct HfRequestToolCallFunction {
+	name: String,
+	arguments: String,
+}
+
+/// Request body for HuggingFace chat completions with tool support.
+#[derive(Serialize)]
+struct HfToolChatCompletionRequest {
+	model: String,
+	messages: Vec<HfToolChatMessage>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	temperature: Option<f64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	max_tokens: Option<u64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	top_p: Option<f64>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	tools: Option<Vec<HfTool>>,
+}
+
+/// A tool call returned in a response choice.
+#[derive(Deserialize)]
+struct HfResponseToolCall {
+	id: String,
+	function: HfResponseToolCallFunction,
+}
+
+/// The function details of a response tool call.
+#[derive(Deserialize)]
+struct HfResponseToolCallFunction {
+	name: String,
+	arguments: String,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
@@ -385,6 +507,84 @@ impl ChatProvider for HuggingFaceProvider {
 		choice.message.content.ok_or_else(|| {
 			anyhow::anyhow!("HuggingFace chat completions response contained no content")
 		})
+	}
+
+	async fn chat_with_tools(
+		&self,
+		model: &str,
+		messages: &[ProviderChatMessage],
+		tools: &[ToolDefinition],
+		config: &GenerationConfig,
+	) -> Result<ChatResponse> {
+		let url = self.chat_url(model);
+
+		let hf_tools = if tools.is_empty() {
+			None
+		} else {
+			Some(Self::convert_tools(tools))
+		};
+
+		let body = HfToolChatCompletionRequest {
+			model: model.to_string(),
+			messages: Self::convert_messages(messages),
+			temperature: config.temperature,
+			max_tokens: config.max_tokens,
+			top_p: config.top_p,
+			tools: hf_tools,
+		};
+
+		let mut request =
+			self.client.post(&url).header("Content-Type", "application/json").json(&body);
+
+		if !self.api_key.is_empty() {
+			request = request.header("Authorization", format!("Bearer {}", self.api_key));
+		}
+
+		let response = request
+			.send()
+			.await
+			.map_err(|e| anyhow::anyhow!("Failed to call HuggingFace chat completions API: {e}"))?;
+
+		if !response.status().is_success() {
+			let status = response.status();
+			let body = response.text().await.unwrap_or_default();
+			bail!("HuggingFace chat completions API returned {status}: {body}");
+		}
+
+		let result: HfChatCompletionResponse = response.json().await.map_err(|e| {
+			anyhow::anyhow!("Failed to parse HuggingFace chat completions response: {e}")
+		})?;
+
+		let choice = result.choices.into_iter().next().ok_or_else(|| {
+			anyhow::anyhow!("HuggingFace chat completions response contained no choices")
+		})?;
+
+		if let Some(tool_calls) = choice.message.tool_calls
+			&& !tool_calls.is_empty()
+		{
+			let mut calls = Vec::with_capacity(tool_calls.len());
+			for tc in tool_calls {
+				let args: serde_json::Value = serde_json::from_str(&tc.function.arguments)
+					.map_err(|e| {
+						anyhow::anyhow!(
+							"Failed to parse tool call arguments for '{}': {e}",
+							tc.function.name
+						)
+					})?;
+				calls.push(ProviderToolCall {
+					id: tc.id,
+					name: tc.function.name,
+					arguments: args,
+				});
+			}
+			return Ok(ChatResponse::ToolCalls(calls));
+		}
+
+		let content = choice.message.content.ok_or_else(|| {
+			anyhow::anyhow!("HuggingFace response contained no content or tool calls")
+		})?;
+
+		Ok(ChatResponse::Message(content))
 	}
 }
 
@@ -681,6 +881,156 @@ mod tests {
 
 		let text = result.expect("chat should succeed with mock server");
 		assert_eq!(text, "SurrealDB is a multi-model database.");
+
+		server.verify().await;
+	}
+
+	#[test]
+	fn deserialize_tool_call_response() {
+		let json = r#"{
+			"id": "chatcmpl-abc123",
+			"object": "chat.completion",
+			"choices": [{
+				"index": 0,
+				"message": {
+					"role": "assistant",
+					"content": null,
+					"tool_calls": [{
+						"id": "call_abc123",
+						"type": "function",
+						"function": {
+							"name": "search",
+							"arguments": "{\"query\": \"SurrealDB\"}"
+						}
+					}]
+				},
+				"finish_reason": "tool_calls"
+			}]
+		}"#;
+		let response: HfChatCompletionResponse = serde_json::from_str(json).unwrap();
+		assert_eq!(response.choices.len(), 1);
+		let tc = response.choices[0].message.tool_calls.as_ref().unwrap();
+		assert_eq!(tc.len(), 1);
+		assert_eq!(tc[0].id, "call_abc123");
+		assert_eq!(tc[0].function.name, "search");
+		assert_eq!(tc[0].function.arguments, r#"{"query": "SurrealDB"}"#);
+	}
+
+	#[tokio::test]
+	async fn chat_with_tools_returns_tool_calls() {
+		use wiremock::matchers::{method, path};
+		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		let server = MockServer::start().await;
+
+		let response_body = serde_json::json!({
+			"id": "chatcmpl-abc123",
+			"object": "chat.completion",
+			"choices": [{
+				"index": 0,
+				"message": {
+					"role": "assistant",
+					"content": null,
+					"tool_calls": [{
+						"id": "call_abc123",
+						"type": "function",
+						"function": {
+							"name": "search",
+							"arguments": "{\"query\": \"SurrealDB\"}"
+						}
+					}]
+				},
+				"finish_reason": "tool_calls"
+			}]
+		});
+
+		Mock::given(method("POST"))
+			.and(path("/mistralai/Mistral-7B/v1/chat/completions"))
+			.respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+			.expect(1)
+			.mount(&server)
+			.await;
+
+		let provider =
+			HuggingFaceProvider::with_config("test-token".into(), server.uri(), server.uri());
+		let config = GenerationConfig::default();
+		let messages = vec![ProviderChatMessage::text("user", "Search for SurrealDB")];
+		let tools = vec![ToolDefinition {
+			name: "search".to_string(),
+			description: "Search the web".to_string(),
+			parameters: serde_json::json!({
+				"type": "object",
+				"properties": {"query": {"type": "string"}}
+			}),
+		}];
+
+		let result =
+			provider.chat_with_tools("mistralai/Mistral-7B", &messages, &tools, &config).await;
+		let response = result.expect("chat_with_tools should succeed");
+
+		match response {
+			ChatResponse::ToolCalls(calls) => {
+				assert_eq!(calls.len(), 1);
+				assert_eq!(calls[0].id, "call_abc123");
+				assert_eq!(calls[0].name, "search");
+				assert_eq!(calls[0].arguments["query"], "SurrealDB");
+			}
+			ChatResponse::Message(_) => panic!("Expected tool calls, got message"),
+		}
+
+		server.verify().await;
+	}
+
+	#[tokio::test]
+	async fn chat_with_tools_returns_message_when_no_calls() {
+		use wiremock::matchers::{method, path};
+		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		let server = MockServer::start().await;
+
+		let response_body = serde_json::json!({
+			"id": "chatcmpl-abc123",
+			"object": "chat.completion",
+			"choices": [{
+				"index": 0,
+				"message": {
+					"role": "assistant",
+					"content": "SurrealDB is a multi-model database."
+				},
+				"finish_reason": "stop"
+			}]
+		});
+
+		Mock::given(method("POST"))
+			.and(path("/mistralai/Mistral-7B/v1/chat/completions"))
+			.respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+			.expect(1)
+			.mount(&server)
+			.await;
+
+		let provider =
+			HuggingFaceProvider::with_config("test-token".into(), server.uri(), server.uri());
+		let config = GenerationConfig::default();
+		let messages = vec![ProviderChatMessage::text("user", "What is SurrealDB?")];
+		let tools = vec![ToolDefinition {
+			name: "search".to_string(),
+			description: "Search the web".to_string(),
+			parameters: serde_json::json!({
+				"type": "object",
+				"properties": {"query": {"type": "string"}}
+			}),
+		}];
+
+		let result =
+			provider.chat_with_tools("mistralai/Mistral-7B", &messages, &tools, &config).await;
+		let response = result.expect("chat_with_tools should succeed");
+
+		match response {
+			ChatResponse::Message(text) => {
+				assert_eq!(text, "SurrealDB is a multi-model database.");
+			}
+			ChatResponse::ToolCalls(_) => panic!("Expected message, got tool calls"),
+		}
 
 		server.verify().await;
 	}

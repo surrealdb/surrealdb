@@ -21,7 +21,8 @@ use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
 
 use crate::ai::provider::{
-	ChatMessage, ChatProvider, EmbeddingProvider, GenerationConfig, GenerationProvider,
+	ChatMessage, ChatProvider, ChatResponse, EmbeddingProvider, GenerationConfig,
+	GenerationProvider, ToolCall as ProviderToolCall, ToolDefinition,
 };
 
 const DEFAULT_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";
@@ -87,6 +88,130 @@ impl GoogleProvider {
 	fn generate_url(&self, model: &str) -> String {
 		let base = self.base_url.trim_end_matches('/');
 		format!("{base}/models/{model}:generateContent")
+	}
+
+	/// Convert tool definitions to Google's function declaration format.
+	fn convert_tools(tools: &[ToolDefinition]) -> Vec<GoogleToolBlock> {
+		vec![GoogleToolBlock {
+			function_declarations: tools
+				.iter()
+				.map(|t| GoogleFunctionDeclaration {
+					name: t.name.clone(),
+					description: t.description.clone(),
+					parameters: t.parameters.clone(),
+				})
+				.collect(),
+		}]
+	}
+
+	/// Convert provider messages to Google's format for tool-calling requests.
+	///
+	/// Returns `(system_instruction, contents)`. System messages are extracted
+	/// into `system_instruction`; the remaining messages are translated to
+	/// Google roles (`model` instead of `assistant`, `function` instead of
+	/// `tool`) with the appropriate part types.
+	fn convert_messages_with_tools(
+		messages: &[ChatMessage],
+	) -> (Option<ToolChatTextContent>, Vec<ToolChatContentBody>) {
+		let system_parts: Vec<ToolChatTextPart> = messages
+			.iter()
+			.filter(|m| m.role == "system")
+			.filter_map(|m| {
+				m.content.as_ref().map(|c| ToolChatTextPart {
+					text: c.clone(),
+				})
+			})
+			.collect();
+		let system_instruction = if system_parts.is_empty() {
+			None
+		} else {
+			Some(ToolChatTextContent {
+				parts: system_parts,
+			})
+		};
+
+		let mut contents = Vec::new();
+		for m in messages.iter().filter(|m| m.role != "system") {
+			match m.role.as_str() {
+				"assistant" if m.tool_calls.is_some() => {
+					let mut parts = Vec::new();
+					if let Some(text) = &m.content
+						&& !text.is_empty()
+					{
+						parts.push(ToolChatPart::Text {
+							text: text.clone(),
+						});
+					}
+					if let Some(calls) = &m.tool_calls {
+						for call in calls {
+							parts.push(ToolChatPart::FunctionCall {
+								function_call: FunctionCallBody {
+									name: call.name.clone(),
+									args: call.arguments.clone(),
+								},
+							});
+						}
+					}
+					contents.push(ToolChatContentBody {
+						role: "model".to_string(),
+						parts,
+					});
+				}
+				"assistant" => {
+					contents.push(ToolChatContentBody {
+						role: "model".to_string(),
+						parts: vec![ToolChatPart::Text {
+							text: m.content.clone().unwrap_or_default(),
+						}],
+					});
+				}
+				"tool" => {
+					let tool_name = Self::find_tool_name(messages, m.tool_call_id.as_deref());
+					contents.push(ToolChatContentBody {
+						role: "function".to_string(),
+						parts: vec![ToolChatPart::FunctionResponse {
+							function_response: FunctionResponseBody {
+								name: tool_name,
+								response: serde_json::json!({
+									"result": m.content.clone().unwrap_or_default()
+								}),
+							},
+						}],
+					});
+				}
+				other => {
+					contents.push(ToolChatContentBody {
+						role: other.to_string(),
+						parts: vec![ToolChatPart::Text {
+							text: m.content.clone().unwrap_or_default(),
+						}],
+					});
+				}
+			}
+		}
+
+		(system_instruction, contents)
+	}
+
+	/// Find the tool name for a given tool_call_id by scanning previous messages.
+	///
+	/// Google's API correlates function calls and responses by name rather than
+	/// by opaque ID, so we need to recover the function name from the
+	/// assistant message that originally requested the tool call.
+	fn find_tool_name(messages: &[ChatMessage], tool_call_id: Option<&str>) -> String {
+		let Some(id) = tool_call_id else {
+			return String::new();
+		};
+		for m in messages {
+			if let Some(calls) = &m.tool_calls {
+				for call in calls {
+					if call.id == id {
+						return call.name.clone();
+					}
+				}
+			}
+		}
+		String::new()
 	}
 }
 
@@ -174,9 +299,20 @@ struct CandidateContent {
 }
 
 /// A single part within candidate content.
+///
+/// May contain either a text response or a function call request from the model.
 #[derive(Deserialize)]
 struct CandidatePart {
 	text: Option<String>,
+	#[serde(rename = "functionCall")]
+	function_call: Option<CandidateFunctionCall>,
+}
+
+/// A function call returned by the model in a candidate part.
+#[derive(Deserialize)]
+struct CandidateFunctionCall {
+	name: String,
+	args: serde_json::Value,
 }
 
 // =========================================================================
@@ -198,6 +334,90 @@ struct ChatContentRequest<'a> {
 struct ChatContentBody<'a> {
 	role: &'a str,
 	parts: Vec<PartBody<'a>>,
+}
+
+// =========================================================================
+// Tool-calling types (function calling for agents)
+// =========================================================================
+
+/// A function declaration presented to the model.
+#[derive(Serialize)]
+struct GoogleFunctionDeclaration {
+	name: String,
+	description: String,
+	parameters: serde_json::Value,
+}
+
+/// A tool block containing one or more function declarations.
+#[derive(Serialize)]
+struct GoogleToolBlock {
+	#[serde(rename = "functionDeclarations")]
+	function_declarations: Vec<GoogleFunctionDeclaration>,
+}
+
+/// Request body for Google generateContent API with tool support.
+#[derive(Serialize)]
+struct ToolChatRequest {
+	contents: Vec<ToolChatContentBody>,
+	#[serde(skip_serializing_if = "Option::is_none", rename = "systemInstruction")]
+	system_instruction: Option<ToolChatTextContent>,
+	#[serde(skip_serializing_if = "Option::is_none", rename = "generationConfig")]
+	generation_config: Option<GoogleGenerationConfig>,
+	#[serde(skip_serializing_if = "Option::is_none")]
+	tools: Option<Vec<GoogleToolBlock>>,
+}
+
+/// Owned text-only content (used for system instructions in tool-calling requests).
+#[derive(Serialize)]
+struct ToolChatTextContent {
+	parts: Vec<ToolChatTextPart>,
+}
+
+/// An owned text part.
+#[derive(Serialize)]
+struct ToolChatTextPart {
+	text: String,
+}
+
+/// A content entry that supports text, function call, and function response parts.
+#[derive(Serialize)]
+struct ToolChatContentBody {
+	role: String,
+	parts: Vec<ToolChatPart>,
+}
+
+/// A part within a tool-calling content body.
+///
+/// Google's API uses inline keys (`text`, `functionCall`, `functionResponse`)
+/// rather than a `type` discriminator, so we use `#[serde(untagged)]`.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum ToolChatPart {
+	Text {
+		text: String,
+	},
+	FunctionCall {
+		#[serde(rename = "functionCall")]
+		function_call: FunctionCallBody,
+	},
+	FunctionResponse {
+		#[serde(rename = "functionResponse")]
+		function_response: FunctionResponseBody,
+	},
+}
+
+/// A function call within an outgoing part (replaying a model's previous call).
+#[derive(Serialize)]
+struct FunctionCallBody {
+	name: String,
+	args: serde_json::Value,
+}
+
+/// A function response within an outgoing part (providing tool execution results).
+#[derive(Serialize)]
+struct FunctionResponseBody {
+	name: String,
+	response: serde_json::Value,
 }
 
 // =========================================================================
@@ -417,6 +637,96 @@ impl ChatProvider for GoogleProvider {
 		}
 
 		Ok(text)
+	}
+
+	async fn chat_with_tools(
+		&self,
+		model: &str,
+		messages: &[ChatMessage],
+		tools: &[ToolDefinition],
+		config: &GenerationConfig,
+	) -> Result<ChatResponse> {
+		let url = self.generate_url(model);
+
+		let generation_config = if config.temperature.is_some()
+			|| config.max_tokens.is_some()
+			|| config.top_p.is_some()
+			|| config.stop.is_some()
+		{
+			Some(GoogleGenerationConfig {
+				temperature: config.temperature,
+				max_output_tokens: config.max_tokens,
+				top_p: config.top_p,
+				stop_sequences: config.stop.clone(),
+			})
+		} else {
+			None
+		};
+
+		let google_tools = if tools.is_empty() {
+			None
+		} else {
+			Some(Self::convert_tools(tools))
+		};
+
+		let (system_instruction, contents) = Self::convert_messages_with_tools(messages);
+
+		let body = ToolChatRequest {
+			contents,
+			system_instruction,
+			generation_config,
+			tools: google_tools,
+		};
+
+		let client = self.client.clone();
+		let response = client
+			.post(&url)
+			.header("Content-Type", "application/json")
+			.header("x-goog-api-key", &self.api_key)
+			.json(&body)
+			.send()
+			.await
+			.map_err(|e| anyhow::anyhow!("Failed to call Google generateContent API: {e}"))?;
+
+		if !response.status().is_success() {
+			let status = response.status();
+			let body = response.text().await.unwrap_or_default();
+			bail!("Google generateContent API returned {status}: {body}");
+		}
+
+		let result: GenerateContentResponse = response
+			.json()
+			.await
+			.map_err(|e| anyhow::anyhow!("Failed to parse Google generateContent response: {e}"))?;
+
+		let candidate = result.candidates.into_iter().next().ok_or_else(|| {
+			anyhow::anyhow!("Google generateContent response contained no candidates")
+		})?;
+
+		let function_calls: Vec<&CandidateFunctionCall> =
+			candidate.content.parts.iter().filter_map(|p| p.function_call.as_ref()).collect();
+
+		if !function_calls.is_empty() {
+			let calls: Vec<ProviderToolCall> = function_calls
+				.iter()
+				.enumerate()
+				.map(|(i, fc)| ProviderToolCall {
+					id: format!("call_{}_{i}", fc.name),
+					name: fc.name.clone(),
+					arguments: fc.args.clone(),
+				})
+				.collect();
+			return Ok(ChatResponse::ToolCalls(calls));
+		}
+
+		let text =
+			candidate.content.parts.into_iter().filter_map(|p| p.text).collect::<Vec<_>>().join("");
+
+		if text.is_empty() {
+			bail!("Google generateContent response contained no text or function calls");
+		}
+
+		Ok(ChatResponse::Message(text))
 	}
 }
 
@@ -656,6 +966,124 @@ mod tests {
 
 		let text = result.expect("chat should succeed with mock Google server");
 		assert_eq!(text, "SurrealDB is a multi-model database.");
+
+		server.verify().await;
+	}
+
+	#[test]
+	fn deserialize_function_call_response() {
+		let json = r#"{
+			"candidates": [{
+				"content": {
+					"parts": [{"functionCall": {"name": "get_weather", "args": {"location": "SF"}}}],
+					"role": "model"
+				},
+				"finishReason": "STOP"
+			}]
+		}"#;
+		let response: GenerateContentResponse = serde_json::from_str(json).unwrap();
+		assert_eq!(response.candidates.len(), 1);
+		let fc = response.candidates[0].content.parts[0].function_call.as_ref().unwrap();
+		assert_eq!(fc.name, "get_weather");
+		assert_eq!(fc.args["location"], "SF");
+	}
+
+	#[tokio::test]
+	async fn chat_with_tools_returns_tool_calls() {
+		use wiremock::matchers::{method, path};
+		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		let server = MockServer::start().await;
+
+		let response_body = serde_json::json!({
+			"candidates": [{
+				"content": {
+					"parts": [{"functionCall": {"name": "search", "args": {"query": "SurrealDB"}}}],
+					"role": "model"
+				},
+				"finishReason": "STOP"
+			}]
+		});
+
+		Mock::given(method("POST"))
+			.and(path("/models/gemini-2.0-flash:generateContent"))
+			.respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+			.expect(1)
+			.mount(&server)
+			.await;
+
+		let provider = GoogleProvider::new("test-key".into(), server.uri());
+		let config = GenerationConfig::default();
+		let messages = vec![ChatMessage::text("user", "Search for SurrealDB")];
+		let tools = vec![ToolDefinition {
+			name: "search".to_string(),
+			description: "Search the web".to_string(),
+			parameters: serde_json::json!({
+				"type": "object",
+				"properties": {"query": {"type": "string"}}
+			}),
+		}];
+
+		let result = provider.chat_with_tools("gemini-2.0-flash", &messages, &tools, &config).await;
+		let response = result.expect("chat_with_tools should succeed");
+
+		match response {
+			ChatResponse::ToolCalls(calls) => {
+				assert_eq!(calls.len(), 1);
+				assert_eq!(calls[0].name, "search");
+				assert_eq!(calls[0].arguments["query"], "SurrealDB");
+			}
+			ChatResponse::Message(_) => panic!("Expected tool calls, got message"),
+		}
+
+		server.verify().await;
+	}
+
+	#[tokio::test]
+	async fn chat_with_tools_returns_message_when_no_calls() {
+		use wiremock::matchers::{method, path};
+		use wiremock::{Mock, MockServer, ResponseTemplate};
+
+		let server = MockServer::start().await;
+
+		let response_body = serde_json::json!({
+			"candidates": [{
+				"content": {
+					"parts": [{"text": "SurrealDB is a multi-model database."}],
+					"role": "model"
+				},
+				"finishReason": "STOP"
+			}]
+		});
+
+		Mock::given(method("POST"))
+			.and(path("/models/gemini-2.0-flash:generateContent"))
+			.respond_with(ResponseTemplate::new(200).set_body_json(&response_body))
+			.expect(1)
+			.mount(&server)
+			.await;
+
+		let provider = GoogleProvider::new("test-key".into(), server.uri());
+		let config = GenerationConfig::default();
+		let messages = vec![ChatMessage::text("user", "What is SurrealDB?")];
+		let tools = vec![ToolDefinition {
+			name: "search".to_string(),
+			description: "Search the web".to_string(),
+			parameters: serde_json::json!({
+				"type": "object",
+				"properties": {"query": {"type": "string"}}
+			}),
+		}];
+
+		let result = provider.chat_with_tools("gemini-2.0-flash", &messages, &tools, &config).await;
+		let response = result.expect("chat_with_tools should succeed");
+
+		match response {
+			ChatResponse::Message(text) => {
+				assert_eq!(text, "SurrealDB is a multi-model database.");
+			}
+			ChatResponse::ToolCalls(_) => panic!("Expected message, got tool calls"),
+		}
 
 		server.verify().await;
 	}
