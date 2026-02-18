@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt::{self, Display};
 #[cfg(storage)]
 use std::path::PathBuf;
@@ -14,6 +16,7 @@ use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use reblessive::TreeStack;
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
+use tokio::spawn;
 use tokio::sync::Notify;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
@@ -55,6 +58,7 @@ use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevel
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
+use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::ic::IndexCompactionKey;
@@ -1386,15 +1390,15 @@ impl Datastore {
 	///
 	/// # Arguments
 	/// * `interval` - The interval between compaction runs, to calculate the lease duration
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs))]
+	pub async fn index_compaction(dbs: Arc<Datastore>, interval: Duration) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting index compaction process");
 		// Create a new lease handler
 		let lh = LeaseHandler::new(
-			self.sequences.clone(),
-			self.id,
-			self.transaction_factory.clone(),
+			dbs.sequences.clone(),
+			dbs.id,
+			dbs.transaction_factory.clone(),
 			TaskLeaseType::IndexCompaction,
 			interval * 2,
 		)?;
@@ -1407,71 +1411,50 @@ impl Datastore {
 			}
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running index compaction process");
-			// Create a new transaction
-			let txn = Arc::new(self.transaction(Write, Optimistic).await?);
+			// Create a new transaction managing the batch
+			let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
 			// Collect every item in the queue
 			let (beg, end) = IndexCompactionKey::range();
 			let range = beg..end;
-			let mut previous: Option<IndexCompactionKey<'static>> = None;
+			let mut concurrent_compactions = HashMap::new();
 			let mut count = 0;
 			// Returns an ordered list of indexes that require compaction
 			let items = catch!(txn, txn.getr(range.clone(), None).await);
 			for (k, _) in items {
-				count += 1;
 				lh.try_maintain_lease().await?;
 				let ic = IndexCompactionKey::decode_key(&k)?;
-				// If the index has already been compacted, we can ignore the task
-				if let Some(p) = &previous
-					&& p.index_matches(&ic)
-				{
-					continue;
+				let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
+				match concurrent_compactions.entry(ikb.clone()) {
+					// Compaction is actually not running for this index,
+					// let's spawn it
+					Entry::Vacant(e) => {
+						let dbs = dbs.clone();
+						let ic = ic.into_owned();
+						let jh = spawn(async move {
+							let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
+							catch!(txn, dbs.process_index_compaction(txn.clone(), &ikb).await);
+							catch!(txn, txn.commit().await);
+							Ok(ic)
+						});
+						e.insert(jh);
+					}
+					// If we already have an entry, the index is already compacting, we can just
+					// ignore the request
+					Entry::Occupied(_) => catch!(txn, txn.del(&ic).await),
 				}
-				match catch!(txn, txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await)
-				{
-					Some(ix) if !ix.prepare_remove => match &ix.index {
-						Index::FullText(p) => {
-							catch!(
-								txn,
-								IndexOperation::index_fulltext_compaction(
-									&self.index_stores,
-									&ic,
-									&txn,
-									p
-								)
-								.await
-							);
-						}
-						Index::Count(_) => {
-							catch!(txn, IndexOperation::index_count_compaction(&ic, &txn).await);
-						}
-						Index::Hnsw(p) => {
-							let mut ctx = self.setup_ctx()?;
-							ctx.set_transaction(txn.clone());
-							let ctx = ctx.freeze();
-							catch!(
-								txn,
-								IndexOperation::index_hnsw_compaction(
-									&ctx,
-									&self.index_stores,
-									&ic,
-									&ix,
-									p
-								)
-								.await
-							);
-						}
-						_ => {
-							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
-						}
-					},
-					_ => {
-						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
+			}
+			for (ikb, jh) in concurrent_compactions {
+				match jh.await? {
+					Ok(ic) => {
+						catch!(txn, txn.del(&ic).await);
+						count += 1;
+					}
+					Err(e) => {
+						error!("Index compaction {ikb} fails: {e}")
 					}
 				}
-				previous = Some(ic.into_owned());
 			}
 			if count > 0 {
-				catch!(txn, txn.delr(range).await);
 				catch!(txn, txn.commit().await);
 			} else {
 				txn.cancel().await?;
@@ -1480,6 +1463,37 @@ impl Datastore {
 		}
 	}
 
+	async fn process_index_compaction(
+		&self,
+		txn: Arc<Transaction>,
+		ikb: &IndexKeyBase,
+	) -> Result<()> {
+		match txn.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index()).await? {
+			Some(ix) if !ix.prepare_remove => match &ix.index {
+				Index::FullText(p) => {
+					IndexOperation::index_fulltext_compaction(&self.index_stores, ikb, &txn, p)
+						.await?;
+				}
+				Index::Count(_) => {
+					IndexOperation::index_count_compaction(ikb, &txn).await?;
+				}
+				Index::Hnsw(p) => {
+					let mut ctx = self.setup_ctx()?;
+					ctx.set_transaction(txn.clone());
+					let ctx = ctx.freeze();
+					IndexOperation::index_hnsw_compaction(&ctx, &self.index_stores, ikb, &ix, p)
+						.await?;
+				}
+				_ => {
+					trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ikb);
+				}
+			},
+			_ => {
+				trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ikb);
+			}
+		}
+		Ok(())
+	}
 	/// Process queued async events using a distributed lease to coordinate batches.
 	/// Once a batch starts it runs to completion even if the lease expires, so
 	/// brief overlap is possible.

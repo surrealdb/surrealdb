@@ -281,7 +281,7 @@ async fn hnsw_concurrent_writes() -> Result<()> {
 	let results1 = collect_query(&dbs, &session, &vectors).await?;
 
 	// Clean the HNSW compaction queue
-	dbs.index_compaction(Duration::from_secs(1)).await?;
+	Datastore::index_compaction(dbs.clone(), Duration::from_secs(1)).await?;
 
 	// Collect the results once the pending queue is cleaned
 	let results2 = collect_query(&dbs, &session, &vectors).await?;

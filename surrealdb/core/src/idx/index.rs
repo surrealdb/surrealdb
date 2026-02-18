@@ -32,7 +32,6 @@ use crate::idx::planner::iterators::IndexCountThingIterator;
 use crate::idx::trees::store::IndexStores;
 use crate::key;
 use crate::key::index::iu::IndexCountKey;
-use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::Transaction;
 use crate::val::{Array, RecordId, Value};
 
@@ -240,17 +239,11 @@ impl<'a> IndexOperation<'a> {
 
 	pub(crate) async fn index_fulltext_compaction(
 		ixs: &IndexStores,
-		ic: &IndexCompactionKey<'_>,
+		ikb: &IndexKeyBase,
 		tx: &Transaction,
 		p: &FullTextParams,
 	) -> Result<()> {
-		let ft = FullTextIndex::new(
-			ixs,
-			tx,
-			IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix),
-			p,
-		)
-		.await?;
+		let ft = FullTextIndex::new(ixs, tx, ikb.clone(), p).await?;
 		ft.compaction(tx).await?;
 		Ok(())
 	}
@@ -258,23 +251,22 @@ impl<'a> IndexOperation<'a> {
 	pub(crate) async fn index_hnsw_compaction(
 		ctx: &FrozenContext,
 		ixs: &IndexStores,
-		ic: &IndexCompactionKey<'_>,
+		ikb: &IndexKeyBase,
 		ix: &IndexDefinition,
 		p: &HnswParams,
 	) -> Result<()> {
 		let tx = ctx.tx();
-		if let Some(tb) = tx.get_tb(ic.ns, ic.db, &ic.tb).await? {
-			let hnsw = ixs.get_index_hnsw(ic.ns, ic.db, ctx, tb.table_id, ix, p).await?;
+		if let Some(tb) = tx.get_tb(ikb.0.ns, ikb.0.db, ikb.table()).await? {
+			let hnsw = ixs.get_index_hnsw(ikb.0.ns, ikb.0.db, ctx, tb.table_id, ix, p).await?;
 			hnsw.index_pendings(ctx).await?;
 		}
 		Ok(())
 	}
 
-	pub(crate) async fn index_count_compaction(
-		ic: &IndexCompactionKey<'_>,
-		tx: &Transaction,
-	) -> Result<()> {
-		IndexCountThingIterator::new(ic.ns, ic.db, ic.tb.as_ref(), ic.ix)?.compaction(ic, tx).await
+	pub(crate) async fn index_count_compaction(ikb: &IndexKeyBase, tx: &Transaction) -> Result<()> {
+		IndexCountThingIterator::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index())?
+			.compaction(ikb, tx)
+			.await
 	}
 
 	/// Construct a consistent uniqueness violation error message.

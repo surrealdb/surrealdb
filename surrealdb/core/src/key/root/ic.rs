@@ -84,10 +84,6 @@ impl<'key> IndexCompactionKey<'key> {
 		)
 	}
 
-	pub(crate) fn index_matches(&self, other: &IndexCompactionKey<'_>) -> bool {
-		self.ns == other.ns && self.db == other.db && self.tb == other.tb && self.ix == other.ix
-	}
-
 	pub(crate) fn range() -> (Vec<u8>, Vec<u8>) {
 		(b"/!ic\0".to_vec(), b"/!ic\0xff".to_vec())
 	}
