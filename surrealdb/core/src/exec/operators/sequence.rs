@@ -13,13 +13,12 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream;
-use reblessive::tree::TreeStack;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::{Context, FrozenContext};
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::plan_or_compute::{block_required_context, collect_stream};
+use crate::exec::plan_or_compute::{block_required_context, collect_stream, legacy_compute};
 use crate::exec::planner::try_plan_expr;
 use crate::exec::{
 	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
@@ -182,11 +181,7 @@ async fn execute_block_with_context(
 					.context("Legacy compute fallback context unavailable")?;
 
 				if let Expr::Let(set_stmt) = expr {
-					let mut stack = TreeStack::new();
-					let value = stack
-						.enter(|stk| set_stmt.what.compute(stk, &frozen, opt, None))
-						.finish()
-						.await?;
+					let value = legacy_compute(&set_stmt.what, &frozen, opt, None).await?;
 
 					// Update context with the new variable
 					current_ctx = current_ctx.with_param(set_stmt.name.clone(), value.clone());
@@ -198,9 +193,7 @@ async fn execute_block_with_context(
 					}
 					result = Value::None;
 				} else {
-					let mut stack = TreeStack::new();
-					result =
-						stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await?;
+					result = legacy_compute(expr, &frozen, opt, None).await?;
 				}
 			}
 			Err(e) => return Err(ControlFlow::Err(e.into())),

@@ -20,7 +20,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::instrument;
 
-use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Permission};
 use crate::err::Error;
 use crate::exec::permission::{
@@ -358,17 +357,11 @@ async fn count_with_perm_fallback(
 			}
 			_ => {
 				// Single record – do a point check with permission evaluation
-				let record = txn
-					.get_record(ns_id, db_id, table_name, &rid.key, version)
-					.await
-					.context("Failed to get record")?;
-
-				if record.data.is_none() {
+				let Some(value) =
+					crate::exec::operators::fetch::fetch_raw_record(ctx, rid, version).await?
+				else {
 					return Ok(0);
-				}
-
-				let mut value = record.data.clone();
-				value.def(rid.clone());
+				};
 				let allowed = check_perm_value(ctx, &value, permission).await?;
 				return Ok(usize::from(allowed));
 			}

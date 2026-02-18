@@ -9,7 +9,6 @@
 
 use std::sync::Arc;
 
-use crate::catalog::providers::TableProvider;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::expr::FlowResult;
 // Re-export recursion utilities from the canonical definitions in `expr::idiom::recursion`.
@@ -42,141 +41,19 @@ pub(crate) use recurse::{PhysicalRecurseInstruction, RecursePart, RepeatRecurseP
 // Shared utilities
 // ============================================================================
 
-/// Fetch a record and evaluate any computed fields on it.
+/// Fetch a record, evaluate computed fields, and apply permissions.
 ///
-/// This is necessary for computed fields that reference other computed fields
-/// to work correctly (e.g., `DEFINE FIELD subproducts ON product COMPUTED ->contains->product.*`).
+/// Delegates to the unified [`fetch_record`](crate::exec::operators::fetch::fetch_record)
+/// which handles raw fetching, computed field evaluation, and table/field-level
+/// permission checks in one place.
 pub(crate) async fn fetch_record_with_computed_fields(
 	rid: &RecordId,
 	ctx: EvalContext<'_>,
 ) -> anyhow::Result<Value> {
-	use reblessive::TreeStack;
-
-	let db_ctx = ctx.exec_ctx.database().map_err(|e| anyhow::anyhow!("{}", e))?;
-	let txn = ctx.exec_ctx.txn();
-
-	// Fetch the raw record from storage
-	let record = txn
-		.get_record(
-			db_ctx.ns_ctx.ns.namespace_id,
-			db_ctx.db.database_id,
-			&rid.table,
-			&rid.key,
-			None,
-		)
-		.await
-		.map_err(|e| anyhow::anyhow!("Failed to fetch record: {}", e))?;
-
-	let mut result = record.data.clone();
-
-	// If the record doesn't exist (e.g. was deleted), return None early.
-	// Don't proceed to evaluate computed fields on a non-existent record.
-	if result.is_none() {
-		return Ok(Value::None);
-	}
-
-	// Get the table's field definitions to check for computed fields
-	let fields = txn
-		.all_tb_fields(db_ctx.ns_ctx.ns.namespace_id, db_ctx.db.database_id, &rid.table, None)
-		.await
-		.map_err(|e| anyhow::anyhow!("Failed to get field definitions: {}", e))?;
-
-	// Check if any fields have computed values
-	let has_computed = fields.iter().any(|fd| fd.computed.is_some());
-
-	if has_computed {
-		// We need to evaluate computed fields using the legacy compute path
-		// Get the Options from the context (if available)
-		let root = ctx.exec_ctx.root();
-		if let Some(ref opt) = root.options {
-			let frozen = &root.ctx;
-			let rid_arc = std::sync::Arc::new(rid.clone());
-			let fields_clone = fields.clone();
-
-			// Collect computed fields with their deps for topological sorting
-			let computed_with_deps: Vec<(String, Vec<String>)> = fields_clone
-				.iter()
-				.filter(|fd| fd.computed.is_some())
-				.map(|fd| {
-					let name = fd.name.to_raw_string();
-					let deps = if let Some(ref cd) = fd.computed_deps {
-						cd.fields.clone()
-					} else if let Some(ref expr) = fd.computed {
-						crate::expr::computed_deps::extract_computed_deps(expr).fields
-					} else {
-						Vec::new()
-					};
-					(name, deps)
-				})
-				.collect();
-
-			let sorted_indices =
-				crate::expr::computed_deps::topological_sort_computed_fields(&computed_with_deps);
-
-			// Build a map from field name to index in the original fields_clone
-			let computed_fields_ordered: Vec<_> = {
-				let name_to_fd: std::collections::HashMap<
-					String,
-					&crate::catalog::FieldDefinition,
-				> = fields_clone
-					.iter()
-					.filter(|fd| fd.computed.is_some())
-					.map(|fd| (fd.name.to_raw_string(), fd))
-					.collect();
-				sorted_indices
-					.iter()
-					.filter_map(|&idx| {
-						let (ref name, _) = computed_with_deps[idx];
-						name_to_fd.get(name.as_str()).copied()
-					})
-					.collect()
-			};
-
-			// Use TreeStack for stack management during recursive computation
-			let mut stack = TreeStack::new();
-			result = stack
-				.enter(|stk| async move {
-					let mut doc_value = result;
-					for fd in computed_fields_ordered {
-						if let Some(computed) = &fd.computed {
-							// Evaluate the computed expression using the legacy compute method
-							// The document context is the current result value
-							let doc = crate::doc::CursorDoc::new(
-								Some(rid_arc.clone()),
-								None,
-								doc_value.clone(),
-							);
-							match computed.compute(stk, frozen, opt, Some(&doc)).await {
-								Ok(val) => {
-									// Coerce to the field's type if specified
-									let coerced_val = if let Some(kind) = fd.field_kind.as_ref() {
-										val.clone().coerce_to_kind(kind).unwrap_or(val)
-									} else {
-										val
-									};
-									doc_value.put(&fd.name, coerced_val);
-								}
-								Err(crate::expr::ControlFlow::Return(val)) => {
-									doc_value.put(&fd.name, val);
-								}
-								Err(_) => {
-									// If computation fails, leave the field as-is or set to None
-									doc_value.put(&fd.name, Value::None);
-								}
-							}
-						}
-					}
-					doc_value
-				})
-				.finish()
-				.await;
-		}
-	}
-
-	// Ensure the record has its ID
-	result.def(rid.clone());
-
-	Ok(result)
+	crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, rid).await.map_err(|cf| match cf {
+		crate::expr::ControlFlow::Err(e) => e,
+		other => anyhow::anyhow!("{}", other),
+	})
 }
 
 /// Evaluate a path of PhysicalExpr parts against a value.
