@@ -995,7 +995,8 @@ pub(super) fn idiom_to_field_path(idiom: &crate::expr::idiom::Idiom) -> FieldPat
 		let name = idiom_to_field_name(idiom);
 		// FIXME: This should be implemented in a way that requries first formating to a string.
 		// It should instead manually figure out the parts of the field.
-		// This will probably break if a field name has a dot in the name like in valid path "foo.`a.b`"
+		// This will probably break if a field name has a dot in the name like in valid path
+		// "foo.`a.b`"
 		if name.contains('.') && !name.contains(['[', '(', ' ']) {
 			return FieldPath(
 				name.split('.').map(|s| FieldPathPart::Field(s.to_string())).collect(),
