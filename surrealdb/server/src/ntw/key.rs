@@ -33,7 +33,7 @@ struct QueryOptions {
 	pub fields: Option<Vec<String>>,
 }
 
-pub(super) fn router<S>() -> Router<S>
+pub fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
