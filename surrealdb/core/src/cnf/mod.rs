@@ -188,3 +188,15 @@ pub static SURREALDB_USER_AGENT: LazyLock<String> =
 /// The maximum size of the HNSW vector cache (default: 256 MiB)
 pub static HNSW_CACHE_SIZE: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_HNSW_CACHE_SIZE", u64, 256 * 1024 * 1024);
+
+/// The default timeout for agent execution in nanoseconds (default: 120s).
+pub static AGENT_DEFAULT_TIMEOUT: LazyLock<u64> =
+	lazy_env_parse!(duration, "SURREAL_AGENT_DEFAULT_TIMEOUT", u64, || {
+		std::time::Duration::from_secs(120).as_nanos() as u64
+	});
+
+/// The default timeout for individual agent tool execution in nanoseconds (default: 120s).
+pub static AGENT_DEFAULT_TOOL_TIMEOUT: LazyLock<u64> =
+	lazy_env_parse!(duration, "SURREAL_AGENT_DEFAULT_TOOL_TIMEOUT", u64, || {
+		std::time::Duration::from_secs(120).as_nanos() as u64
+	});

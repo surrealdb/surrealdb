@@ -1901,8 +1901,8 @@ impl Parser<'_> {
 								cfg.max_rounds = Some(val as u32);
 							}
 							"timeout" => {
-								let val: u64 = self.next_token_value()?;
-								cfg.timeout = Some(val);
+								let val = self.next_token_value::<PublicDuration>()?;
+								cfg.timeout = Some(val.into());
 							}
 							_ => {}
 						}
@@ -1928,6 +1928,7 @@ impl Parser<'_> {
 						let mut tool_args = Vec::new();
 						let mut tool_block = None;
 						let mut param_descriptions: BTreeMap<String, String> = BTreeMap::new();
+						let mut tool_timeout: Option<crate::val::Duration> = None;
 
 						loop {
 							let tkey = self.parse_ident()?;
@@ -1995,6 +1996,10 @@ impl Parser<'_> {
 										}
 									}
 								}
+								"timeout" => {
+									let val = self.next_token_value::<PublicDuration>()?;
+									tool_timeout = Some(val.into());
+								}
 								_ => {}
 							}
 
@@ -2013,6 +2018,7 @@ impl Parser<'_> {
 							args: tool_args.into_iter().map(|(n, k)| (n, k.into())).collect(),
 							block: block.into(),
 							param_descriptions,
+							timeout: tool_timeout,
 						});
 
 						if !self.eat(t!(",")) {

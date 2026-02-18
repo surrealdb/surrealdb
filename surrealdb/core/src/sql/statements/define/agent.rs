@@ -76,7 +76,7 @@ impl ToSql for DefineAgentStatement {
 				if !first {
 					f.push(',');
 				}
-				write_sql!(f, fmt, " timeout: {t}s");
+				write_sql!(f, fmt, " timeout: {t}");
 			}
 			write_sql!(f, fmt, " }}");
 		}
@@ -115,6 +115,9 @@ impl ToSql for DefineAgentStatement {
 						);
 					}
 					f.push(']');
+				}
+				if let Some(ref t) = tool.timeout {
+					write_sql!(f, fmt, ", timeout: {t}");
 				}
 			}
 			f.push_str(" }}]");

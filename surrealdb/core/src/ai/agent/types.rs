@@ -19,7 +19,7 @@ pub struct AgentModel {
 ///
 /// Passed as the optional `CONFIG { ... }` block on `DEFINE AGENT`.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AgentConfig {
 	/// Sampling temperature (0.0 = deterministic, higher = more random).
 	pub temperature: Option<OrderedFloat>,
@@ -31,8 +31,8 @@ pub struct AgentConfig {
 	pub stop: Option<Vec<String>>,
 	/// Maximum LLM round-trips per invocation (prevents infinite loops).
 	pub max_rounds: Option<u32>,
-	/// Maximum wall-clock time per invocation (in seconds).
-	pub timeout: Option<u64>,
+	/// Maximum wall-clock time per invocation.
+	pub timeout: Option<crate::val::Duration>,
 }
 
 /// Wrapper for f64 that implements Eq and Hash via total ordering.
@@ -74,7 +74,7 @@ impl From<OrderedFloat> for f64 {
 /// Each tool has an inline function body (args + block) that is executed
 /// when the LLM requests it. The tool is presented to the LLM with a
 /// name, description, and auto-generated parameter schema.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AgentTool {
 	/// Tool name as presented to the LLM.
@@ -88,6 +88,9 @@ pub struct AgentTool {
 	/// Optional per-parameter descriptions for the LLM's JSON Schema.
 	/// Keyed by parameter name (without `$` prefix).
 	pub param_descriptions: BTreeMap<String, String>,
+	/// Optional wall-clock timeout for this tool's execution.
+	#[revision(start = 2)]
+	pub timeout: Option<crate::val::Duration>,
 }
 
 /// Memory configuration for an agent.

@@ -71,6 +71,10 @@ impl<'a> ToolExecutor<'a> {
 	}
 
 	/// Execute a tool call using the inline function block.
+	///
+	/// Each tool execution is bounded by a timeout: either the tool's own
+	/// `timeout` value (from `DEFINE AGENT ... TOOLS [{ ..., timeout: N }]`)
+	/// or the server-wide default `SURREAL_AGENT_DEFAULT_TOOL_TIMEOUT`.
 	pub(crate) async fn execute(&self, call: &ToolCall) -> Result<Value> {
 		let tool = self
 			.tools
@@ -79,7 +83,16 @@ impl<'a> ToolExecutor<'a> {
 			.ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", call.name))?;
 
 		let args = parse_tool_args(&call.arguments, &tool.args)?;
-		execute_block(self.ctx, self.opt, &tool.args, &tool.block, args).await
+		let default_timeout =
+			crate::val::Duration::from_nanos(*crate::cnf::AGENT_DEFAULT_TOOL_TIMEOUT);
+		let timeout = tool.timeout.unwrap_or(default_timeout);
+
+		tokio::time::timeout(
+			*timeout,
+			execute_block(self.ctx, self.opt, &tool.args, &tool.block, args),
+		)
+		.await
+		.map_err(|_| anyhow::anyhow!("Tool '{}' timed out after {timeout}", call.name))?
 	}
 }
 

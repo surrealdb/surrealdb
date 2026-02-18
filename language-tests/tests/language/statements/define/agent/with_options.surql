@@ -1,6 +1,9 @@
 /**
 [test]
-reason = "Test DEFINE AGENT with CONFIG object, multiple tools, and parameter descriptions"
+reason = "Test DEFINE AGENT with CONFIG object, multiple tools, parameter descriptions, and tool timeouts"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "NONE"
@@ -44,6 +47,29 @@ DEFINE AGENT researcher
         }
     ]
     COMMENT 'Research assistant agent with article tools';
+
+-- Agent with tool timeouts
+DEFINE AGENT timed_researcher
+    MODEL 'openai:gpt-4-turbo'
+    PROMPT 'You are a research assistant with time-limited tools.'
+    TOOLS [
+        {
+            name: 'quick_lookup',
+            timeout: 5s
+            description: 'Fast key-value lookup',
+            function: |$key: string| {
+                RETURN $key
+            },
+        },
+        {
+            name: 'deep_search',
+            timeout: 1m
+            description: 'Deep search that may take longer',
+            function: |$query: string| {
+                RETURN $query
+            },
+        }
+    ];
 
 -- Agent with no tools and no config (just a chat wrapper)
 DEFINE AGENT simple_chat

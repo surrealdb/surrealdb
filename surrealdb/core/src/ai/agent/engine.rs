@@ -47,9 +47,6 @@ impl From<AgentOutput> for Value {
 	}
 }
 
-/// Default timeout for agent execution (in seconds).
-const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 120;
-
 /// Runs an agent with the given input.
 ///
 /// This is the main entry point for agent execution. It:
@@ -60,7 +57,7 @@ const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 120;
 /// 5. Returns the agent's response
 ///
 /// The entire execution is bounded by a timeout (from `AgentConfig.timeout`
-/// or a default of 120 seconds).
+/// or the server-wide `SURREAL_AGENT_DEFAULT_TIMEOUT_SECS` default).
 pub async fn run(
 	ctx: &FrozenContext,
 	opt: &Options,
@@ -68,12 +65,12 @@ pub async fn run(
 	input: AgentInput,
 ) -> Result<AgentOutput> {
 	let agent_config = agent.config.as_ref();
-	let timeout_secs = agent_config.and_then(|c| c.timeout).unwrap_or(DEFAULT_AGENT_TIMEOUT_SECS);
-	let timeout = std::time::Duration::from_secs(timeout_secs);
+	let default_timeout = crate::val::Duration::from_nanos(*crate::cnf::AGENT_DEFAULT_TIMEOUT);
+	let timeout = agent_config.and_then(|c| c.timeout).unwrap_or(default_timeout);
 
-	tokio::time::timeout(timeout, run_inner(ctx, opt, agent, input))
+	tokio::time::timeout(*timeout, run_inner(ctx, opt, agent, input))
 		.await
-		.map_err(|_| anyhow::anyhow!("Agent '{}' timed out after {timeout_secs}s", agent.name))?
+		.map_err(|_| anyhow::anyhow!("Agent '{}' timed out after {timeout}", agent.name))?
 }
 
 /// Inner agent execution, called by `run()` under a timeout.

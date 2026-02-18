@@ -26,6 +26,9 @@ value = "NONE"
 [[test.results]]
 value = "NONE"
 
+[[test.results]]
+value = "NONE"
+
 */
 
 -- Minimal agent definition
@@ -79,6 +82,21 @@ DEFINE AGENT open_agent MODEL 'openai:gpt-4' PROMPT 'Open' PERMISSIONS FULL;
 
 -- Agent with PERMISSIONS WHERE clause
 DEFINE AGENT conditional MODEL 'openai:gpt-4' PROMPT 'Conditional' PERMISSIONS WHERE $auth.role = 'admin';
+
+-- Agent with tool timeout
+DEFINE AGENT timed_tool
+    MODEL 'openai:gpt-4'
+    PROMPT 'Agent with tool timeout'
+    TOOLS [
+        {
+            name: 'slow_query',
+            timeout: 30s
+            description: 'A potentially slow query',
+            function: |$id: string| {
+                SELECT * FROM large_table WHERE id = $id
+            },
+        }
+    ];
 
 -- Remove agent parses correctly
 REMOVE AGENT IF EXISTS full_agent;
