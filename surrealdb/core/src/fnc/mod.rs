@@ -16,6 +16,7 @@ pub mod api;
 pub mod args;
 pub mod array;
 pub mod bytes;
+pub mod chunk;
 pub mod count;
 pub mod crypto;
 pub mod duration;
@@ -575,6 +576,11 @@ pub async fn asynchronous(
 		"ai::agent::run" => agent::run((stk, ctx, opt)).await,
 		//
 		"ai::chat" => ai::chat((ctx, opt)).await,
+		"ai::chunk::fixed" => chunk::fixed::run,
+		"ai::chunk::paragraph" => chunk::paragraph::run,
+		"ai::chunk::recursive" => chunk::recursive::run,
+		"ai::chunk::semantic" => chunk::semantic::run((ctx, opt)).await,
+		"ai::chunk::sentence" => chunk::sentence::run,
 		"ai::embed" => ai::embed((ctx, opt)).await,
 		"ai::generate" => ai::generate((ctx, opt)).await,
 		"ai::sentiment" => ai::sentiment((ctx, opt)).await,
