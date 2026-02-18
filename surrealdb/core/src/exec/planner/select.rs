@@ -59,6 +59,8 @@ pub(crate) struct SelectPipelineConfig {
 	pub limit: Option<crate::expr::limit::Limit>,
 	pub start: Option<crate::expr::start::Start>,
 	pub omit: Vec<Expr>,
+	/// Is the `FROM` clause equivalent only values, i.e. for SELECT * FROM [1,2,3,4],"a"
+	/// this field is true.
 	pub is_value_source: bool,
 	pub tempfiles: bool,
 	/// True when the WHERE predicate has been pushed into the Scan operator.

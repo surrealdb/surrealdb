@@ -649,6 +649,32 @@ run_task = { name = [
     "stop-surrealdb",
 ], fork = true }
 
+[tasks.ci-lang-test-coverage]
+category = "CI - COVERAGE"
+description = "Run language tests with code coverage for core crates"
+script = """
+    #!/bin/bash -ex
+    cd language-tests
+    
+    # Set up LLVM coverage instrumentation environment
+    eval "$(cargo llvm-cov show-env --export-prefix)"
+    
+    # Clean previous coverage artifacts
+    cargo llvm-cov clean --workspace
+    
+    # Build language-tests with instrumentation
+    cargo build
+    
+    # Run the language tests (this exercises surrealdb-core)
+    ./target/debug/surrealql-test --color always run --no-wip --jobs 3 --backend memory
+    
+    # Generate coverage report, excluding the harness code
+    cargo llvm-cov report \
+        --lcov \
+        --output-path ../language-tests-lcov.info \
+        --ignore-filename-regex 'language-tests/src/'
+"""
+
 # --------------------------------------------------
 # Services
 # --------------------------------------------------
