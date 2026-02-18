@@ -1417,9 +1417,12 @@ impl Datastore {
 			let (beg, end) = IndexCompactionKey::range();
 			let range = beg..end;
 			let mut concurrent_compactions = HashMap::new();
-			let mut count = 0;
 			// Returns an ordered list of indexes that require compaction
 			let items = catch!(txn, txn.getr(range.clone(), None).await);
+			if items.is_empty() {
+				catch!(txn, txn.cancel().await);
+				return Ok(());
+			}
 			for (k, _) in items {
 				lh.try_maintain_lease().await?;
 				let ic = IndexCompactionKey::decode_key(&k)?;
@@ -1431,6 +1434,7 @@ impl Datastore {
 						let dbs = dbs.clone();
 						let ic = ic.into_owned();
 						let jh = spawn(async move {
+							// Each compaction task run on its own transaction
 							let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
 							catch!(txn, dbs.process_index_compaction(txn.clone(), &ikb).await);
 							catch!(txn, txn.commit().await);
@@ -1444,22 +1448,13 @@ impl Datastore {
 				}
 			}
 			for (ikb, jh) in concurrent_compactions {
-				match jh.await? {
-					Ok(ic) => {
-						catch!(txn, txn.del(&ic).await);
-						count += 1;
-					}
-					Err(e) => {
-						error!("Index compaction {ikb} fails: {e}")
-					}
+				if let Err(e) = jh.await? {
+					error!("Index compaction {ikb} fails: {e}")
 				}
 			}
-			if count > 0 {
-				catch!(txn, txn.commit().await);
-			} else {
-				txn.cancel().await?;
-				return Ok(());
-			}
+			// We can now delete the range
+			catch!(txn, txn.delr(range).await);
+			catch!(txn, txn.commit().await);
 		}
 	}
 
