@@ -15,6 +15,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
+use crate::exec::parts::fetch_record_with_computed_fields;
 use crate::exec::{
 	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
 	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
@@ -155,14 +156,25 @@ async fn compute_batch(
 	// Geometry values are converted to their GeoJSON object representation
 	// so that downstream operators (SelectProject) can access fields like
 	// `type` and `coordinates` directly.
-	let mut objects: Vec<Object> = values
-		.iter()
-		.map(|v| match v {
+	let mut objects: Vec<Object> = Vec::with_capacity(values.len());
+
+	for v in values.iter() {
+		let o = match v {
 			Value::Object(o) => o.clone(),
 			Value::Geometry(geo) => geo.as_object(),
+			Value::RecordId(rid) => {
+				if let Value::Object(v) =
+					fetch_record_with_computed_fields(rid, eval_ctx.clone()).await?
+				{
+					v
+				} else {
+					Object::default()
+				}
+			}
 			_ => Object::default(),
-		})
-		.collect();
+		};
+		objects.push(o);
+	}
 
 	// Batch each field expression across all rows
 	for (name, expr) in fields {
