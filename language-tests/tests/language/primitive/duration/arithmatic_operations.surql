@@ -11,7 +11,10 @@ value = "NaN"
 value = "NaN"
 
 [[test.results]]
-value = "NaN"
+value = "1m"
+
+[[test.results]]
+value = "30s"
 
 [[test.results]]
 value = "NaN"
@@ -35,7 +38,7 @@ error = 'Failed to compute: "0ns - 1ns", as the operation results in a negative 
 error = 'Failed to compute: "584942417355y3w5d7h15s999ms999µs999ns + 1ns", as the operation results in an arithmetic overflow.'
 
 [[test.results]]
-error = "Cannot perform multiplication with '1s' and '20'"
+value = "20s"
 
 [[test.results]]
 error = "Cannot perform multiplication with '1s' and '2s'"
@@ -55,12 +58,19 @@ error = "Cannot negate the value '1s'"
 [[test.results]]
 value = "1s"
 
+[[test.results]]
+error = "Cannot multiply 584942417355y3w5d7h15s999ms999µs999ns with 2, as the operation would result in overflow."
+
+[[test.results]]
+value = "292471208677y27w6d15h30m7s999ms999µs999ns"
+
 */
 
 1h / 1s;
 1m / 1s;
 1s / 1s;
 1m / 1;
+1m / 2;
 1 / 1m;
 
 1s + 1s;
@@ -82,3 +92,5 @@ value = "1s"
 -(1s);
 +(1s);
 
+duration::max * 2;
+duration::max / 2;

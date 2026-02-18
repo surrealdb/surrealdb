@@ -645,10 +645,23 @@ pub(crate) trait TryMul<Rhs = Self> {
 impl TryMul for Value {
 	type Output = Self;
 	fn try_mul(self, other: Self) -> Result<Self> {
-		Ok(match (self, other) {
-			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_mul(w)?),
+		match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Ok(Self::Number(v.try_mul(w)?)),
+			(Self::Duration(d), Self::Number(Number::Int(i))) => {
+				if i >= 0 {
+					let as_u32 = i as u32;
+					let Some(res) = d.checked_mul(as_u32) else {
+						bail!(
+							"Cannot multiply {d} with {i}, as the operation would result in overflow."
+						)
+					};
+					Ok(Value::Duration(Duration(res)))
+				} else {
+					bail!("Cannot multiply a duration with a negative number");
+				}
+			}
 			(v, w) => bail!(Error::TryMul(v.to_raw_string(), w.to_raw_string())),
-		})
+		}
 	}
 }
 
@@ -662,10 +675,19 @@ pub(crate) trait TryDiv<Rhs = Self> {
 impl TryDiv for Value {
 	type Output = Self;
 	fn try_div(self, other: Self) -> Result<Self> {
-		Ok(match (self, other) {
-			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_div(w)?),
+		match (self, other) {
+			(Self::Number(v), Self::Number(w)) => Ok(Self::Number(v.try_div(w)?)),
+			(Self::Duration(d), Self::Number(Number::Int(i))) => {
+				if i > 0 {
+					let as_u32 = i as u32;
+					let res = d.0 / as_u32;
+					Ok(Value::Duration(Duration(res)))
+				} else {
+					bail!("A duration can only be divided by an integer of at least 1.");
+				}
+			}
 			(v, w) => bail!(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
-		})
+		}
 	}
 }
 
