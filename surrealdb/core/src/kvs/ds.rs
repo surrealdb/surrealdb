@@ -1382,14 +1382,20 @@ impl Datastore {
 	/// overlap is possible.
 	///
 	/// The method scans the index compaction queue (stored as `Ic` keys) and
-	/// processes each index that needs compaction. Currently, only full-text
-	/// indexes support compaction, which helps optimize their performance by
-	/// consolidating changes and removing unnecessary data.
+	/// spawns compaction tasks in parallel — one per distinct index. Indexes
+	/// that support compaction include full-text, count, and HNSW indexes.
+	/// Each compaction task runs on its own write transaction, while a
+	/// separate outer transaction manages the queue. Duplicate entries for
+	/// the same index are removed immediately without spawning additional
+	/// tasks.
 	///
-	/// After processing an index, it is removed from the compaction queue.
+	/// Once all compaction tasks have completed, the entire queue range is
+	/// deleted and the outer transaction is committed. Compaction failures
+	/// are logged but do not prevent other indexes from being processed.
 	///
 	/// # Arguments
-	/// * `interval` - The interval between compaction runs, to calculate the lease duration
+	/// * `dbs` - The shared datastore instance, cloned into each spawned compaction task
+	/// * `interval` - The interval between compaction runs, used to calculate the lease duration
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs))]
 	pub async fn index_compaction(dbs: Arc<Datastore>, interval: Duration) -> Result<()> {
 		// Output function invocation details to logs
@@ -1411,16 +1417,16 @@ impl Datastore {
 			}
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running index compaction process");
-			// Create a new transaction managing the batch
-			let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
 			// Collect every item in the queue
 			let (beg, end) = IndexCompactionKey::range();
 			let range = beg..end;
 			let mut concurrent_compactions = HashMap::new();
+			// Create a new transaction managing the batch
+			let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
 			// Returns an ordered list of indexes that require compaction
 			let items = catch!(txn, txn.getr(range.clone(), None).await);
 			if items.is_empty() {
-				catch!(txn, txn.cancel().await);
+				txn.cancel().await?;
 				return Ok(());
 			}
 			for (k, _) in items {
@@ -1434,7 +1440,7 @@ impl Datastore {
 						let dbs = dbs.clone();
 						let ic = ic.into_owned();
 						let jh = spawn(async move {
-							// Each compaction task run on its own transaction
+							// Each compaction task runs on its own transaction
 							let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
 							catch!(txn, dbs.process_index_compaction(txn.clone(), &ikb).await);
 							catch!(txn, txn.commit().await);
@@ -1458,6 +1464,12 @@ impl Datastore {
 		}
 	}
 
+	/// Performs the actual compaction of a single index.
+	///
+	/// Looks up the index definition identified by `ikb` and dispatches to the
+	/// appropriate compaction implementation based on the index type:
+	/// full-text, count, or HNSW. Indexes that are being removed
+	/// (`prepare_remove`) or that do not support compaction are skipped.
 	async fn process_index_compaction(
 		&self,
 		txn: Arc<Transaction>,
