@@ -1,5 +1,6 @@
 /**
 [env]
+new-planner-strategy = "all-ro"
 
 [test]
 
@@ -14,8 +15,6 @@ value = ''''SelectProject [ctx: Db] [projections: id, ref]\n    Compute [ctx: Db
 
 [[test.results]]
 value = "[{ id: Test:1, ref: NONE }, { id: Test:2, ref: { id: Test:1 } }]"
-#new-planner-strategy = "compute-only"
-
 */
 
 CREATE Test:1 SET name="my name";
