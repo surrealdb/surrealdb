@@ -26,7 +26,7 @@ use tokio::sync::Notify;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, instrument, trace};
+use tracing::{debug, instrument, trace, warn};
 use uuid::Uuid;
 
 use super::api::Transactable;
@@ -845,7 +845,10 @@ impl Datastore {
 		let (version, is_new) = self.get_version().await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
-			bail!(Error::OutdatedStorageVersion);
+			bail!(Error::OutdatedStorageVersion {
+				expected: MajorVersion::latest().into(),
+				actual: version.into(),
+			});
 		}
 		// Everything ok
 		Ok((version, is_new))
@@ -878,7 +881,15 @@ impl Datastore {
 					// There are no keys set in storage, so this is a new database
 					MajorVersion::latest()
 				} else {
-					// There were keys in storage, so this is an upgrade
+					// There were keys in storage, so this is an upgrade.
+					// Log the first key found for diagnostic purposes.
+					warn!(
+						target: TARGET,
+						first_key = ?keys.first().map(|k| format!("{:?}", k)),
+						"No version key found but existing data detected in storage. \
+						 This storage contains data from a previous SurrealDB version. \
+						 The server will not start until the data is migrated or removed."
+					);
 					MajorVersion::v1()
 				};
 				// Attempt to set the current version in storage

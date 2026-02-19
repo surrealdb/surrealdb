@@ -1041,9 +1041,14 @@ pub(crate) enum Error {
 
 	/// There was an outdated storage version stored in the database
 	#[error(
-		"The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation"
+		"The data stored on disk is out-of-date with this version (Expected: {expected}, Actual: {actual}). \
+		 Please follow the upgrade guides in the documentation, \
+		 or use a clean storage directory if this is intended to be a new instance"
 	)]
-	OutdatedStorageVersion,
+	OutdatedStorageVersion {
+		expected: u16,
+		actual: u16,
+	},
 
 	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]
 	QueryTooLarge,

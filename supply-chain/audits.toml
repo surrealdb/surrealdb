@@ -1225,7 +1225,7 @@ end = "2026-09-10"
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-07-19"
-end = "2026-02-13"
+end = "2027-02-18"
 
 [[trusted.surrealdb-async-graphql-axum]]
 criteria = "safe-to-deploy"
@@ -1237,7 +1237,7 @@ end = "2025-08-07"
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2024-01-30"
-end = "2026-02-13"
+end = "2027-02-18"
 
 [[trusted.surrealdb-derive]]
 criteria = "safe-to-deploy"
