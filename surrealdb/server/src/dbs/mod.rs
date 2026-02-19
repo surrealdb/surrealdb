@@ -13,8 +13,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::cli::Config;
 use crate::core::dbs::capabilities::{
-	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
-	RouteTarget, Targets,
+	AiTarget, ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget,
+	NetTarget, RouteTarget, Targets,
 };
 use crate::core::dbs::{NewPlannerStrategy, Session};
 
@@ -121,6 +121,18 @@ Function names must be in the form <family>[::<name>]. For example:
 	allow_experimental: Option<Targets<ExperimentalTarget>>,
 
 	#[arg(
+		help = "Allow all AI providers and agents except for targets that are specifically denied. Alternatively, you can provide a comma-separated list of AI targets to allow",
+		long_help = r#"Allow all AI providers and agents except for targets that are specifically denied. Alternatively, you can provide a comma-separated list of AI targets to allow.
+Specifically denied AI targets prevail over any other allowed AI target.
+Targets use the format "provider:<name>" or "agent:<name>", e.g. "provider:openai", "agent:support".
+"#
+	)]
+	#[arg(env = "SURREAL_CAPS_ALLOW_AI", long)]
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(value_parser = super::cli::validator::ai_targets)]
+	allow_ai: Option<Targets<AiTarget>>,
+
+	#[arg(
 		help = "Allow execution of arbitrary queries by certain user groups except when specifically denied.",
 		long_help = r#"Allow execution of arbitrary queries by certain user groups except when specifically denied. Alternatively, you can provide a comma-separated list of user groups to allow
 Specifically denied user groups prevail over any other allowed user group.
@@ -211,6 +223,18 @@ Function names must be in the form <family>[::<name>]. For example:
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::experimental_targets)]
 	deny_experimental: Option<Targets<ExperimentalTarget>>,
+
+	#[arg(
+		help = "Deny specific AI providers or agents except when specifically allowed. Alternatively, you can provide a comma-separated list of AI targets to deny",
+		long_help = r#"Deny specific AI providers or agents except when specifically allowed. Alternatively, you can provide a comma-separated list of AI targets to deny.
+Specifically allowed AI targets prevail over a general denial of AI target.
+Targets use the format "provider:<name>" or "agent:<name>", e.g. "provider:openai", "agent:support".
+"#
+	)]
+	#[arg(env = "SURREAL_CAPS_DENY_AI", long)]
+	#[arg(default_missing_value_os = "", num_args = 0..)]
+	#[arg(value_parser = super::cli::validator::ai_targets)]
+	deny_ai: Option<Targets<AiTarget>>,
 
 	#[arg(
 		help = "Deny execution of arbitrary queries by certain user groups except when specifically allowed.",
@@ -556,6 +580,33 @@ impl DbsCapabilities {
 		}
 	}
 
+	fn get_allow_ai(&self) -> Targets<AiTarget> {
+		if self.deny_all {
+			return self.allow_ai.clone().unwrap_or(Targets::None);
+		}
+
+		if let Some(Targets::All) = self.deny_ai {
+			match &self.allow_ai {
+				Some(t @ Targets::Some(_)) => return t.clone(),
+				_ => return Targets::None,
+			}
+		}
+
+		if self.allow_all {
+			return Targets::All;
+		}
+
+		self.allow_ai.clone().unwrap_or(Targets::All)
+	}
+
+	fn get_deny_ai(&self) -> Targets<AiTarget> {
+		if let Some(t @ Targets::Some(_)) = &self.deny_ai {
+			t.clone()
+		} else {
+			Targets::None
+		}
+	}
+
 	fn get_deny_arbitrary_query(&self) -> Targets<ArbitraryQueryTarget> {
 		// Allowed arbitrary queryies already consider a global deny and a general deny
 		// for arbitr On top of what is explicitly allowed, we deny what is
@@ -586,6 +637,8 @@ fn merge_capabilities(initial: Capabilities, caps: DbsCapabilities) -> Capabilit
 		.without_http_routes(caps.get_deny_http())
 		.with_experimental(caps.get_allow_experimental())
 		.without_experimental(caps.get_deny_experimental())
+		.with_ai_targets(caps.get_allow_ai())
+		.without_ai_targets(caps.get_deny_ai())
 		.with_arbitrary_query(caps.get_allow_arbitrary_query())
 		.without_arbitrary_query(caps.get_deny_arbitrary_query())
 		.with_planner_strategy(caps.planner_strategy)
@@ -1209,6 +1262,7 @@ mod tests {
 			allow_guests: false,
 			allow_funcs: None,
 			allow_experimental: Some(Targets::All),
+			allow_ai: None,
 			allow_arbitrary_query: Some(Targets::All),
 			allow_net: None,
 			allow_rpc: None,
@@ -1218,6 +1272,7 @@ mod tests {
 			deny_guests: false,
 			deny_funcs: None,
 			deny_experimental: None,
+			deny_ai: None,
 			deny_arbitrary_query: None,
 			deny_net: None,
 			deny_rpc: None,
@@ -1239,6 +1294,7 @@ mod tests {
 			allow_guests: false,
 			allow_funcs: Some(Targets::All),
 			allow_experimental: None,
+			allow_ai: None,
 			allow_arbitrary_query: None,
 			allow_net: None,
 			allow_rpc: None,
@@ -1249,6 +1305,7 @@ mod tests {
 			deny_guests: false,
 			deny_funcs: Some(Targets::All),
 			deny_experimental: None,
+			deny_ai: None,
 			deny_arbitrary_query: None,
 			deny_net: None,
 			deny_rpc: None,
@@ -1270,6 +1327,7 @@ mod tests {
 			allow_guests: false,
 			allow_funcs: None,
 			allow_experimental: None,
+			allow_ai: None,
 			allow_arbitrary_query: None,
 			allow_net: None,
 			allow_rpc: None,
@@ -1280,6 +1338,7 @@ mod tests {
 			deny_guests: false,
 			deny_funcs: None,
 			deny_experimental: None,
+			deny_ai: None,
 			deny_arbitrary_query: None,
 			deny_net: None,
 			deny_rpc: None,
@@ -1301,6 +1360,7 @@ mod tests {
 			allow_guests: false,
 			allow_funcs: Some(Targets::None),
 			allow_experimental: None,
+			allow_ai: None,
 			allow_arbitrary_query: None,
 			allow_net: None,
 			allow_rpc: None,
@@ -1311,6 +1371,7 @@ mod tests {
 			deny_guests: false,
 			deny_funcs: Some(Targets::All),
 			deny_experimental: None,
+			deny_ai: None,
 			deny_arbitrary_query: None,
 			deny_net: None,
 			deny_rpc: None,

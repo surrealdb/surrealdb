@@ -8,7 +8,12 @@
 
 use anyhow::Result;
 
+#[cfg(feature = "ai")]
 use crate::catalog::providers::DatabaseProvider;
+#[cfg(feature = "ai")]
+use crate::dbs::capabilities::ExperimentalTarget;
+#[cfg(feature = "ai")]
+use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::physical_expr::EvalContext;
 use crate::val::Value;
@@ -21,6 +26,36 @@ use crate::{define_async_function, register_functions};
 #[cfg(not(feature = "ai"))]
 async fn ai_disabled() -> Result<Value> {
 	Err(anyhow::anyhow!(crate::err::Error::AiDisabled))
+}
+
+#[cfg(feature = "ai")]
+fn check_ai_experimental(ctx: &EvalContext<'_>, fn_name: &str) -> Result<()> {
+	if !ctx.capabilities().allows_experimental(&ExperimentalTarget::Ai) {
+		return Err(Error::InvalidFunction {
+			name: fn_name.to_string(),
+			message: "Experimental capability `ai` is not enabled".to_string(),
+		}
+		.into());
+	}
+	Ok(())
+}
+
+#[cfg(feature = "ai")]
+fn check_ai_provider(ctx: &EvalContext<'_>, model_id: &str) -> Result<()> {
+	let (provider_name, _) = crate::ai::chat::parse_model_id(model_id)?;
+	let frozen_ctx = ctx.exec_ctx.ctx();
+	crate::ai::chat::check_ai_provider_allowed(frozen_ctx, provider_name)
+}
+
+#[cfg(feature = "ai")]
+async fn check_ai_net(
+	ctx: &EvalContext<'_>,
+	model_id: &str,
+	ai_config: Option<&crate::ai::config::AiConfigOverlay>,
+) -> Result<()> {
+	let (provider_name, _) = crate::ai::chat::parse_model_id(model_id)?;
+	let frozen_ctx = ctx.exec_ctx.ctx();
+	crate::ai::chat::check_provider_net_allowed(frozen_ctx, provider_name, ai_config).await
 }
 
 #[cfg(feature = "ai")]
@@ -63,6 +98,7 @@ async fn ai_config_overlay_from_ctx(
 
 #[cfg(feature = "ai")]
 async fn ai_embed_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+	check_ai_experimental(ctx, "ai::embed")?;
 	let model_id = match args.first() {
 		Some(Value::String(s)) => s.clone(),
 		Some(v) => {
@@ -101,7 +137,9 @@ async fn ai_embed_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value>
 		}
 	};
 
+	check_ai_provider(ctx, &model_id)?;
 	let ai_config = ai_config_overlay_from_ctx(ctx).await;
+	check_ai_net(ctx, &model_id, ai_config.as_ref()).await?;
 	let embedding = crate::ai::embed::embed(&model_id, &input, ai_config.as_ref()).await?;
 	let array: Vec<Value> = embedding.into_iter().map(Value::from).collect();
 	Ok(Value::Array(array.into()))
@@ -118,6 +156,7 @@ async fn ai_embed_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<Valu
 
 #[cfg(feature = "ai")]
 async fn ai_generate_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+	check_ai_experimental(ctx, "ai::generate")?;
 	use crate::ai::provider::GenerationConfig;
 
 	let model_id = match args.first() {
@@ -138,6 +177,8 @@ async fn ai_generate_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Val
 			}));
 		}
 	};
+
+	check_ai_provider(ctx, &model_id)?;
 
 	let prompt = match args.get(1) {
 		Some(Value::String(s)) => s.clone(),
@@ -210,6 +251,7 @@ async fn ai_generate_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Val
 	};
 
 	let ai_config = ai_config_overlay_from_ctx(ctx).await;
+	check_ai_net(ctx, &model_id, ai_config.as_ref()).await?;
 	let text =
 		crate::ai::generate::generate(&model_id, &prompt, &config, ai_config.as_ref()).await?;
 	Ok(Value::String(text))
@@ -226,6 +268,7 @@ async fn ai_generate_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<V
 
 #[cfg(feature = "ai")]
 async fn ai_chat_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+	check_ai_experimental(ctx, "ai::chat")?;
 	use crate::ai::provider::{ChatMessage, GenerationConfig};
 
 	let model_id = match args.first() {
@@ -246,6 +289,8 @@ async fn ai_chat_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> 
 			}));
 		}
 	};
+
+	check_ai_provider(ctx, &model_id)?;
 
 	let messages = match args.get(1) {
 		Some(Value::Array(arr)) => {
@@ -378,6 +423,7 @@ async fn ai_chat_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> 
 	};
 
 	let ai_config = ai_config_overlay_from_ctx(ctx).await;
+	check_ai_net(ctx, &model_id, ai_config.as_ref()).await?;
 	let text = crate::ai::chat::chat(&model_id, &messages, &config, ai_config.as_ref()).await?;
 	Ok(Value::String(text))
 }
@@ -393,6 +439,7 @@ async fn ai_chat_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Result<Value
 
 #[cfg(feature = "ai")]
 async fn ai_sentiment_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+	check_ai_experimental(ctx, "ai::sentiment")?;
 	let model_id = match args.first() {
 		Some(Value::String(s)) => s.clone(),
 		Some(v) => {
@@ -411,6 +458,8 @@ async fn ai_sentiment_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Va
 			}));
 		}
 	};
+
+	check_ai_provider(ctx, &model_id)?;
 
 	let text = match args.get(1) {
 		Some(Value::String(s)) => s.clone(),
@@ -432,6 +481,7 @@ async fn ai_sentiment_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Va
 	};
 
 	let ai_config = ai_config_overlay_from_ctx(ctx).await;
+	check_ai_net(ctx, &model_id, ai_config.as_ref()).await?;
 	let prompt = crate::fnc::ai::build_sentiment_prompt(&text);
 	let config = crate::fnc::ai::sentiment_generation_config();
 	let raw =

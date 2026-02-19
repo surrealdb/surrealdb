@@ -59,6 +59,15 @@ async fn check_agent_permission(
 async fn agent_run_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 	use crate::ai::agent::engine::{AgentInput, run as run_agent};
 	use crate::catalog::providers::DatabaseProvider;
+	use crate::dbs::capabilities::ExperimentalTarget;
+
+	if !ctx.capabilities().allows_experimental(&ExperimentalTarget::Ai) {
+		return Err(Error::InvalidFunction {
+			name: "ai::agent::run".to_string(),
+			message: "Experimental capability `ai` is not enabled".to_string(),
+		}
+		.into());
+	}
 
 	let agent_name = match args.first() {
 		Some(Value::String(s)) => s.clone(),
@@ -117,6 +126,10 @@ async fn agent_run_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value
 	});
 
 	let frozen_ctx = ctx.exec_ctx.ctx();
+
+	// Check agent is allowed by capabilities
+	crate::ai::chat::check_ai_agent_allowed(frozen_ctx, &agent_name)?;
+
 	let opt = ctx.exec_ctx.options().ok_or_else(|| {
 		anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
 			name: "ai::agent::run".to_owned(),
@@ -127,6 +140,10 @@ async fn agent_run_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value
 	let txn = frozen_ctx.tx();
 	let (ns, db) = frozen_ctx.get_ns_db_ids(opt).await?;
 	let agent = txn.get_db_agent(ns, db, &agent_name).await?;
+
+	// Check agent's provider is allowed by capabilities
+	let (provider_name, _) = crate::ai::chat::parse_model_id(&agent.model.model_id)?;
+	crate::ai::chat::check_ai_provider_allowed(frozen_ctx, provider_name)?;
 
 	// Check agent permissions
 	check_agent_permission(&agent.permissions, &agent_name, ctx).await?;

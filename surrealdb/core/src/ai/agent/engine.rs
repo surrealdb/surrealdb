@@ -119,6 +119,12 @@ async fn run_inner(
 	// Parse model ID into provider and model name
 	let (provider_name, model_name) = crate::ai::chat::parse_model_id(&agent.model.model_id)?;
 
+	// Check AI provider is allowed by capabilities
+	crate::ai::chat::check_ai_provider_allowed(ctx, provider_name)?;
+
+	// Check network target is allowed for the provider
+	crate::ai::chat::check_provider_net_allowed(ctx, provider_name, None).await?;
+
 	// Build generation config from agent config
 	let agent_config = agent.config.as_ref();
 	let config = GenerationConfig {

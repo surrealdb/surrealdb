@@ -61,7 +61,10 @@ pub async fn embed(
 	(ctx, opt): (&FrozenContext, &Options),
 	(model_id, input): (String, String),
 ) -> Result<Value> {
+	let (provider_name, _) = crate::ai::chat::parse_model_id(&model_id)?;
+	crate::ai::chat::check_ai_provider_allowed(ctx, provider_name)?;
 	let ai_config = ai_config_overlay(ctx, opt).await;
+	crate::ai::chat::check_provider_net_allowed(ctx, provider_name, ai_config.as_ref()).await?;
 	let embedding = crate::ai::embed::embed(&model_id, &input, ai_config.as_ref()).await?;
 	let array: Vec<Value> = embedding.into_iter().map(Value::from).collect();
 	Ok(Value::Array(array.into()))
@@ -91,7 +94,10 @@ pub async fn generate(
 	(ctx, opt): (&FrozenContext, &Options),
 	(model_id, prompt, config): (String, String, Optional<Value>),
 ) -> Result<Value> {
+	let (provider_name, _) = crate::ai::chat::parse_model_id(&model_id)?;
+	crate::ai::chat::check_ai_provider_allowed(ctx, provider_name)?;
 	let ai_config = ai_config_overlay(ctx, opt).await;
+	crate::ai::chat::check_provider_net_allowed(ctx, provider_name, ai_config.as_ref()).await?;
 	let config = parse_generation_config("ai::generate", config.0)?;
 	let text =
 		crate::ai::generate::generate(&model_id, &prompt, &config, ai_config.as_ref()).await?;
@@ -127,7 +133,10 @@ pub async fn chat(
 	(ctx, opt): (&FrozenContext, &Options),
 	(model_id, messages, config): (String, Value, Optional<Value>),
 ) -> Result<Value> {
+	let (provider_name, _) = crate::ai::chat::parse_model_id(&model_id)?;
+	crate::ai::chat::check_ai_provider_allowed(ctx, provider_name)?;
 	let ai_config = ai_config_overlay(ctx, opt).await;
+	crate::ai::chat::check_provider_net_allowed(ctx, provider_name, ai_config.as_ref()).await?;
 	let messages = parse_chat_messages(&messages)?;
 	let config = parse_generation_config("ai::chat", config.0)?;
 	let text = crate::ai::chat::chat(&model_id, &messages, &config, ai_config.as_ref()).await?;
@@ -162,7 +171,10 @@ pub async fn sentiment(
 	(ctx, opt): (&FrozenContext, &Options),
 	(model_id, text): (String, String),
 ) -> Result<Value> {
+	let (provider_name, _) = crate::ai::chat::parse_model_id(&model_id)?;
+	crate::ai::chat::check_ai_provider_allowed(ctx, provider_name)?;
 	let ai_config = ai_config_overlay(ctx, opt).await;
+	crate::ai::chat::check_provider_net_allowed(ctx, provider_name, ai_config.as_ref()).await?;
 	let prompt = build_sentiment_prompt(&text);
 	let config = sentiment_generation_config();
 	let raw =

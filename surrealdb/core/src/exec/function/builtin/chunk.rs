@@ -5,6 +5,10 @@
 
 use anyhow::Result;
 
+#[cfg(feature = "ai")]
+use crate::dbs::capabilities::ExperimentalTarget;
+#[cfg(feature = "ai")]
+use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
 use crate::exec::physical_expr::EvalContext;
 use crate::val::Value;
@@ -17,6 +21,18 @@ use crate::{define_async_function, register_functions};
 #[cfg(not(feature = "ai"))]
 async fn ai_disabled() -> Result<Value> {
 	Err(anyhow::anyhow!(crate::err::Error::AiDisabled))
+}
+
+#[cfg(feature = "ai")]
+fn check_ai_experimental(ctx: &EvalContext<'_>, fn_name: &str) -> Result<()> {
+	if !ctx.capabilities().allows_experimental(&ExperimentalTarget::Ai) {
+		return Err(Error::InvalidFunction {
+			name: fn_name.to_string(),
+			message: "Experimental capability `ai` is not enabled".to_string(),
+		}
+		.into());
+	}
+	Ok(())
 }
 
 #[cfg(feature = "ai")]
@@ -35,7 +51,8 @@ fn extract_i64(fn_name: &str, field: &str, val: &Value) -> Result<i64> {
 // =========================================================================
 
 #[cfg(feature = "ai")]
-async fn ai_chunk_fixed_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+async fn ai_chunk_fixed_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+	check_ai_experimental(ctx, "ai::chunk::fixed")?;
 	use crate::fnc::args::Optional;
 
 	let text = match args.first() {
@@ -82,7 +99,8 @@ async fn ai_chunk_fixed_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Resul
 // =========================================================================
 
 #[cfg(feature = "ai")]
-async fn ai_chunk_sentence_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+async fn ai_chunk_sentence_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+	check_ai_experimental(ctx, "ai::chunk::sentence")?;
 	use crate::fnc::args::Optional;
 
 	let text = match args.first() {
@@ -122,7 +140,8 @@ async fn ai_chunk_sentence_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> Re
 // =========================================================================
 
 #[cfg(feature = "ai")]
-async fn ai_chunk_paragraph_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+async fn ai_chunk_paragraph_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+	check_ai_experimental(ctx, "ai::chunk::paragraph")?;
 	use crate::fnc::args::Optional;
 
 	let text = match args.first() {
@@ -162,7 +181,8 @@ async fn ai_chunk_paragraph_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> R
 // =========================================================================
 
 #[cfg(feature = "ai")]
-async fn ai_chunk_recursive_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+async fn ai_chunk_recursive_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+	check_ai_experimental(ctx, "ai::chunk::recursive")?;
 	use crate::fnc::args::Optional;
 
 	let text = match args.first() {
@@ -211,6 +231,7 @@ async fn ai_chunk_recursive_impl(_ctx: &EvalContext<'_>, _args: Vec<Value>) -> R
 
 #[cfg(feature = "ai")]
 async fn ai_chunk_semantic_impl(ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
+	check_ai_experimental(ctx, "ai::chunk::semantic")?;
 	use crate::catalog::providers::DatabaseProvider;
 
 	let model_id = match args.first() {

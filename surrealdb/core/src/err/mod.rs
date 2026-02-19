@@ -489,6 +489,14 @@ pub(crate) enum Error {
 		name: String,
 	},
 
+	/// The AI provider is not allowed by capabilities
+	#[error("AI provider '{0}' is not allowed by server capabilities")]
+	AiProviderNotAllowed(String),
+
+	/// The AI agent is not allowed by capabilities
+	#[error("AI agent '{0}' is not allowed by server capabilities")]
+	AiAgentNotAllowed(String),
+
 	/// The agent timed out during execution
 	#[error("The agent '{name}' timed out after {timeout}")]
 	AgentTimeout {

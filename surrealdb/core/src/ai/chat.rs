@@ -11,7 +11,64 @@ use super::providers::google::GoogleProvider;
 use super::providers::huggingface::HuggingFaceProvider;
 use super::providers::openai::OpenAiProvider;
 use super::providers::voyage::VoyageProvider;
+use crate::ctx::FrozenContext;
 use crate::err::Error;
+
+/// Check that an AI provider is allowed by capabilities.
+pub fn check_ai_provider_allowed(ctx: &FrozenContext, provider_name: &str) -> Result<()> {
+	let target = format!("provider:{provider_name}");
+	if !ctx.get_capabilities().allows_ai_target(&target) {
+		anyhow::bail!(Error::AiProviderNotAllowed(provider_name.to_string()));
+	}
+	Ok(())
+}
+
+/// Check that an AI agent is allowed by capabilities.
+pub fn check_ai_agent_allowed(ctx: &FrozenContext, agent_name: &str) -> Result<()> {
+	let target = format!("agent:{agent_name}");
+	if !ctx.get_capabilities().allows_ai_target(&target) {
+		anyhow::bail!(Error::AiAgentNotAllowed(agent_name.to_string()));
+	}
+	Ok(())
+}
+
+/// Resolve the base URL for a provider and check it against network capabilities.
+///
+/// This ensures AI provider outbound HTTP calls respect `--allow-net`/`--deny-net`.
+#[cfg(feature = "http")]
+pub async fn check_provider_net_allowed(
+	ctx: &FrozenContext,
+	provider_name: &str,
+	config: Option<&AiConfigOverlay>,
+) -> Result<()> {
+	let base_url = match provider_name {
+		"openai" => openai_credentials(config).map(|(_, url)| url).ok(),
+		"anthropic" | "claude" => anthropic_credentials(config).map(|(_, url)| url).ok(),
+		"google" | "gemini" => google_credentials(config).map(|(_, url)| url).ok(),
+		"voyage" => voyage_credentials(config).map(|(_, url)| url).ok(),
+		"huggingface" => huggingface_credentials(config).map(|(_, url, _)| url).ok(),
+		_ => return Ok(()),
+	};
+
+	let Some(base_url) = base_url else {
+		return Ok(());
+	};
+
+	let url = url::Url::parse(&base_url)
+		.map_err(|e| anyhow::anyhow!("Invalid base URL for AI provider '{provider_name}': {e}"))?;
+
+	ctx.check_allowed_net(&url).await?;
+	Ok(())
+}
+
+#[cfg(not(feature = "http"))]
+pub async fn check_provider_net_allowed(
+	_ctx: &FrozenContext,
+	_provider_name: &str,
+	_config: Option<&AiConfigOverlay>,
+) -> Result<()> {
+	Ok(())
+}
 
 /// Parse a model identifier into `(provider, model_name)`.
 ///

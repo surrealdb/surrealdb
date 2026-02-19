@@ -60,10 +60,17 @@ pub async fn run(
 		_ => None,
 	});
 
+	// Check agent is allowed by capabilities
+	crate::ai::chat::check_ai_agent_allowed(ctx, &agent_name)?;
+
 	// Load agent definition
 	let txn = ctx.tx();
 	let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 	let agent = txn.get_db_agent(ns, db, &agent_name).await?;
+
+	// Check agent's provider is allowed by capabilities
+	let (provider_name, _) = crate::ai::chat::parse_model_id(&agent.model.model_id)?;
+	crate::ai::chat::check_ai_provider_allowed(ctx, provider_name)?;
 
 	// Check agent permissions
 	match &agent.permissions {

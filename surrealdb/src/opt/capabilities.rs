@@ -5,8 +5,8 @@ use std::mem;
 
 use surrealdb_core::dbs::NewPlannerStrategy;
 use surrealdb_core::dbs::capabilities::{
-	Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, ParseFuncTargetError,
-	ParseNetTargetError, Targets,
+	AiTarget, Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, ParseAiTargetError,
+	ParseFuncTargetError, ParseNetTargetError, Targets,
 };
 
 /// Strategy for the streaming query planner.
@@ -44,6 +44,8 @@ pub enum ExperimentalFeature {
 	Files,
 	/// Enable Surrealism feature.
 	Surrealism,
+	/// Enable AI feature (ai::* functions, DEFINE AGENT).
+	Ai,
 }
 
 /// Not public API
@@ -53,6 +55,7 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 		match feature {
 			ExperimentalFeature::Files => ExperimentalTarget::Files,
 			ExperimentalFeature::Surrealism => ExperimentalTarget::Surrealism,
+			ExperimentalFeature::Ai => ExperimentalTarget::Ai,
 		}
 	}
 }
@@ -635,6 +638,122 @@ impl Capabilities {
 	pub fn with_no_experimental_features_denied(mut self) -> Self {
 		self.deny_no_experimental_features();
 		self
+	}
+
+	/// Set the allow list to allow all AI targets
+	pub fn allow_all_ai_targets(&mut self) -> &mut Self {
+		*self.cap.allowed_ai_targets_mut() = Targets::All;
+		self
+	}
+
+	/// Set the allow list to allow all AI targets
+	pub fn with_all_ai_targets_allowed(mut self) -> Self {
+		self.allow_all_ai_targets();
+		self
+	}
+
+	/// Set the deny list to deny all AI targets
+	pub fn deny_all_ai_targets(&mut self) -> &mut Self {
+		*self.cap.denied_ai_targets_mut() = Targets::All;
+		self
+	}
+
+	/// Set the deny list to deny all AI targets
+	pub fn with_all_ai_targets_denied(mut self) -> Self {
+		self.deny_all_ai_targets();
+		self
+	}
+
+	/// Set the allow list to allow no AI targets
+	pub fn allow_no_ai_targets(&mut self) -> &mut Self {
+		*self.cap.allowed_ai_targets_mut() = Targets::None;
+		self
+	}
+
+	/// Set the allow list to allow no AI targets
+	pub fn with_no_ai_targets_allowed(mut self) -> Self {
+		self.allow_no_ai_targets();
+		self
+	}
+
+	/// Set the deny list to deny no AI targets
+	pub fn deny_no_ai_targets(&mut self) -> &mut Self {
+		*self.cap.denied_ai_targets_mut() = Targets::None;
+		self
+	}
+
+	/// Set the deny list to deny no AI targets
+	pub fn with_no_ai_targets_denied(mut self) -> Self {
+		self.deny_no_ai_targets();
+		self
+	}
+
+	/// Add an AI target to the allow list.
+	///
+	/// Format: `"provider:openai"`, `"agent:support"`, `"provider:*"`, etc.
+	pub fn allow_ai_target<S: AsRef<str>>(
+		&mut self,
+		target: S,
+	) -> Result<&mut Self, ParseAiTargetError> {
+		self.allow_ai_target_str(target.as_ref())
+	}
+
+	/// Add an AI target to the allow list.
+	pub fn with_ai_target_allowed<S: AsRef<str>>(
+		mut self,
+		target: S,
+	) -> Result<Self, ParseAiTargetError> {
+		self.allow_ai_target(target)?;
+		Ok(self)
+	}
+
+	fn allow_ai_target_str(&mut self, s: &str) -> Result<&mut Self, ParseAiTargetError> {
+		let target: AiTarget = s.parse()?;
+		match self.cap.allowed_ai_targets_mut() {
+			Targets::None | Targets::All => {
+				let mut set = HashSet::new();
+				set.insert(target);
+				self.cap = mem::take(&mut self.cap).with_ai_targets(Targets::Some(set));
+			}
+			Targets::Some(x) => {
+				x.insert(target);
+			}
+		}
+		Ok(self)
+	}
+
+	/// Add an AI target to the deny list.
+	///
+	/// Format: `"provider:openai"`, `"agent:support"`, `"provider:*"`, etc.
+	pub fn deny_ai_target<S: AsRef<str>>(
+		&mut self,
+		target: S,
+	) -> Result<&mut Self, ParseAiTargetError> {
+		self.deny_ai_target_str(target.as_ref())
+	}
+
+	/// Add an AI target to the deny list.
+	pub fn with_ai_target_denied<S: AsRef<str>>(
+		mut self,
+		target: S,
+	) -> Result<Self, ParseAiTargetError> {
+		self.deny_ai_target(target)?;
+		Ok(self)
+	}
+
+	fn deny_ai_target_str(&mut self, s: &str) -> Result<&mut Self, ParseAiTargetError> {
+		let target: AiTarget = s.parse()?;
+		match self.cap.denied_ai_targets_mut() {
+			Targets::None | Targets::All => {
+				let mut set = HashSet::new();
+				set.insert(target);
+				*self.cap.denied_ai_targets_mut() = Targets::Some(set);
+			}
+			Targets::Some(x) => {
+				x.insert(target);
+			}
+		}
+		Ok(self)
 	}
 }
 
