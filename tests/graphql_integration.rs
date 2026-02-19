@@ -5422,7 +5422,7 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"query { test { id } }"#}).to_string())
+				.body(json!({"query": r#"query { test { id type } }"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
@@ -5433,6 +5433,7 @@ mod graphql_integration {
 				body["errors"]
 			);
 			assert_eq!(body["data"]["test"][0]["id"], "test:one");
+			assert_eq!(body["data"]["test"][0]["type"], "TEST_TYPE_ENUM_1");
 		}
 
 		Ok(())

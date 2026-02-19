@@ -52,7 +52,9 @@ use surrealdb_types::ToSql;
 
 use super::error::{GqlError, resolver_error};
 use super::relations::{RelationDirection, RelationInfo};
-use super::schema::{SchemaContext, gql_to_sql_kind, sql_value_to_gql_value};
+use super::schema::{
+	SchemaContext, gql_to_sql_kind, sql_value_to_gql_value, sql_value_to_gql_value_with_kind,
+};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{FieldDefinition, TableDefinition};
 use crate::dbs::Session;
@@ -65,7 +67,7 @@ use crate::expr::{
 	LogicalPlan, Start, TopLevelExpr,
 };
 use crate::gql::error::internal_error;
-use crate::gql::schema::{geometry_gql_type_name, kind_to_type, unwrap_type};
+use crate::gql::schema::{geometry_gql_type_name, kind_to_type_with_enum_prefix, unwrap_type};
 use crate::gql::utils::{GqlValueUtils, execute_plan};
 use crate::kvs::Datastore;
 use crate::val::{Array as SurArray, Datetime, Object as SurObject, RecordId, TableName, Value};
@@ -483,8 +485,9 @@ fn make_nested_object_type(
 		let Some(ref kind) = sf.kind else {
 			continue;
 		};
-		let fd_type = kind_to_type(kind.clone(), types, false)?;
-		let resolver = make_sub_field_resolver(sf.name.clone(), sf.kind.clone());
+		let enum_scope = format!("{type_name}_{}", sf.name);
+		let fd_type = kind_to_type_with_enum_prefix(kind.clone(), types, false, Some(&enum_scope))?;
+		let resolver = make_sub_field_resolver(sf.name.clone(), sf.kind.clone(), Some(enum_scope));
 		let mut field = Field::new(&sf.name, fd_type, resolver);
 		if let Some(ref comment) = sf.comment {
 			field = field.description(comment.clone());
@@ -502,10 +505,12 @@ fn make_nested_object_type(
 fn make_sub_field_resolver(
 	field_name: String,
 	kind: Option<Kind>,
+	enum_scope: Option<String>,
 ) -> impl for<'a> Fn(ResolverContext<'a>) -> FieldFuture<'a> + Send + Sync + 'static {
 	move |ctx: ResolverContext| {
 		let field_name = field_name.clone();
 		let field_kind = kind.clone();
+		let enum_scope = enum_scope.clone();
 		FieldFuture::new(async move {
 			let obj = ctx.parent_value.try_downcast_ref::<SurObject>()?;
 
@@ -538,8 +543,12 @@ fn make_sub_field_resolver(
 						Ok(Some(field_val))
 					}
 					v => {
-						let gql_val = sql_value_to_gql_value(v.clone())
-							.map_err(async_graphql::Error::from)?;
+						let gql_val = sql_value_to_gql_value_with_kind(
+							v.clone(),
+							field_kind.as_ref(),
+							enum_scope.as_deref(),
+						)
+						.map_err(async_graphql::Error::from)?;
 						Ok(Some(FieldValue::value(gql_val)))
 					}
 				},
@@ -914,7 +923,7 @@ fn build_table_type(
 		.field(Field::new(
 			"id",
 			TypeRef::named_nn(TypeRef::ID),
-			make_table_field_resolver("id", Some(Kind::Record(vec![tb_name.clone()]))),
+			make_table_field_resolver("id", Some(Kind::Record(vec![tb_name.clone()])), None),
 		))
 		.implement("record");
 
@@ -977,7 +986,8 @@ fn build_table_type(
 		}
 
 		// Handle regular fields
-		let fd_type = kind_to_type(kind.clone(), types, false)?;
+		let enum_scope = format!("{}_{}", tb_name_str, fd_name);
+		let fd_type = kind_to_type_with_enum_prefix(kind.clone(), types, false, Some(&enum_scope))?;
 		orderable = orderable.item(fd_name.to_string());
 
 		let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
@@ -986,8 +996,12 @@ fn build_table_type(
 			_ => false,
 		});
 		if !filter_already_exists {
-			let type_filter =
-				Type::InputObject(filter_from_type(kind.clone(), type_filter_name.clone(), types)?);
+			let type_filter = Type::InputObject(filter_from_type(
+				kind.clone(),
+				type_filter_name.clone(),
+				types,
+				Some(&enum_scope),
+			)?);
 			trace!("\n{type_filter:?}\n");
 			types.push(type_filter);
 		}
@@ -997,7 +1011,11 @@ fn build_table_type(
 			.field(Field::new(
 				fd.name.to_sql(),
 				fd_type,
-				make_table_field_resolver(fd_name.as_str(), fd.field_kind.clone()),
+				make_table_field_resolver(
+					fd_name.as_str(),
+					fd.field_kind.clone(),
+					Some(enum_scope),
+				),
 			))
 			.description(if let Some(ref c) = fd.comment {
 				c.clone()
@@ -1139,11 +1157,13 @@ pub async fn process_tbs(
 fn make_table_field_resolver(
 	fd_name: impl Into<String>,
 	kind: Option<Kind>,
+	enum_scope: Option<String>,
 ) -> impl for<'a> Fn(ResolverContext<'a>) -> FieldFuture<'a> + Send + Sync + 'static {
 	let fd_name = fd_name.into();
 	move |ctx: ResolverContext| {
 		let fd_name = fd_name.clone();
 		let field_kind = kind.clone();
+		let enum_scope = enum_scope.clone();
 		FieldFuture::new({
 			async move {
 				// ── Fast path: extract field from CachedRecord ──
@@ -1153,8 +1173,14 @@ fn make_table_field_resolver(
 				// memory. Extract the requested field directly instead of
 				// issuing a separate database query.
 				if let Ok(cached) = ctx.parent_value.try_downcast_ref::<CachedRecord>() {
-					return resolve_field_from_cached_record(&ctx, cached, &fd_name, &field_kind)
-						.await;
+					return resolve_field_from_cached_record(
+						&ctx,
+						cached,
+						&fd_name,
+						&field_kind,
+						enum_scope.as_deref(),
+					)
+					.await;
 				}
 
 				// ── Slow path: fetch field via database query ──
@@ -1175,7 +1201,15 @@ fn make_table_field_resolver(
 				// Build SELECT VALUE <field> FROM ONLY <record_id>
 				let stmt = select_field_from_record(&rid, &fd_name, &version);
 				let val = execute_select(ds, sess, stmt).await?;
-				resolve_field_value(&ctx, val, &fd_name, &field_kind, &version).await
+				resolve_field_value(
+					&ctx,
+					val,
+					&fd_name,
+					&field_kind,
+					&version,
+					enum_scope.as_deref(),
+				)
+				.await
 			}
 		})
 	}
@@ -1192,6 +1226,7 @@ async fn resolve_field_value(
 	fd_name: &str,
 	field_kind: &Option<Kind>,
 	version: &Option<Datetime>,
+	enum_scope: Option<&str>,
 ) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
 	match val {
 		Value::RecordId(target_rid) if fd_name != "id" => {
@@ -1236,7 +1271,8 @@ async fn resolve_field_value(
 		}
 		Value::None | Value::Null => Ok(None),
 		v => {
-			let out = sql_value_to_gql_value(v).map_err(async_graphql::Error::from)?;
+			let out = sql_value_to_gql_value_with_kind(v, field_kind.as_ref(), enum_scope)
+				.map_err(async_graphql::Error::from)?;
 			Ok(Some(FieldValue::value(out)))
 		}
 	}
@@ -1252,9 +1288,10 @@ async fn resolve_field_from_cached_record(
 	cached: &CachedRecord,
 	fd_name: &str,
 	field_kind: &Option<Kind>,
+	enum_scope: Option<&str>,
 ) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
 	let val = cached.data.get(fd_name).cloned().unwrap_or(Value::None);
-	resolve_field_value(ctx, val, fd_name, field_kind, &cached.version).await
+	resolve_field_value(ctx, val, fd_name, field_kind, &cached.version, enum_scope).await
 }
 
 /// Build a GraphQL field for a relation on a table type.
@@ -1410,6 +1447,7 @@ fn filter_from_type(
 	kind: Kind,
 	filter_name: String,
 	types: &mut Vec<Type>,
+	enum_scope: Option<&str>,
 ) -> Result<InputObject, GqlError> {
 	// Normalise `option<record<T>>` (Kind::Either([None, Record([T])])) down to the
 	// inner record kind so filters are generated correctly with ID-based filtering.
@@ -1433,7 +1471,7 @@ fn filter_from_type(
 			)),
 			_ => TypeRef::named(TypeRef::ID),
 		},
-		k => unwrap_type(kind_to_type(k.clone(), types, true)?),
+		k => unwrap_type(kind_to_type_with_enum_prefix(k.clone(), types, true, enum_scope)?),
 	};
 
 	// All types get eq and ne
