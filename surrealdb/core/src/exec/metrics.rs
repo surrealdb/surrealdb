@@ -23,22 +23,10 @@ use crate::exec::{FlowResult, ValueBatch, ValueBatchStream};
 
 /// Returns a monotonic timestamp in nanoseconds.
 ///
-/// On native targets this uses `std::time::Instant`; on WASM it falls back
-/// to `performance.now()` (millisecond resolution, converted to ns).
-#[cfg(not(target_family = "wasm"))]
+/// Uses `web_time::Instant` which resolves to `std::time::Instant` on native
+/// targets and `performance.now()` on WASM (millisecond resolution, converted to ns).
 fn now_ns() -> u64 {
-	use std::time::Instant;
-	// Use a thread-local base instant so we get monotonic, small offsets.
-	thread_local! {
-		static BASE: Instant = Instant::now();
-	}
-	BASE.with(|base| base.elapsed().as_nanos() as u64)
-}
-
-#[cfg(target_family = "wasm")]
-fn now_ns() -> u64 {
-	use wasmtimer::std::Instant;
-	// Use a thread-local base instant so we get monotonic, small offsets.
+	use web_time::Instant;
 	thread_local! {
 		static BASE: Instant = Instant::now();
 	}

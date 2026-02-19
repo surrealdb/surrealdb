@@ -9,9 +9,9 @@ use surrealdb_types::{Error as TypesError, QueryError, ToSql};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tracing::instrument;
-use trice::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
+use web_time::Instant;
 
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, RootProvider};
 use crate::ctx::reason::Reason;

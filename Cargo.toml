@@ -71,8 +71,8 @@ revision = { version = "0.17.0", features = [
 ] }
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
 surrealkv = "0.20.2"
-surrealmx = "0.17.0"
-trice = "0.4.0"
+surrealmx = "0.18.0"
+web-time = "1.1.0"
 vart = "0.9.3"
 ## Maintained by @Delskayn
 js = { version = "0.11.0", package = "rquickjs", features = ["rust-alloc"] }
@@ -266,6 +266,7 @@ nix = { workspace = true, features = ["signal", "user"] }
 [dev-dependencies]
 assert_fs = "1.1.3"
 chrono.workspace = true
+web-time.workspace = true
 ciborium.workspace = true
 futures.workspace = true
 futures-util.workspace = true
@@ -323,6 +324,11 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 ] }
 
 [workspace.lints.clippy]
+
+# Checks for usage of disallowed types as defined in `.clippy.toml`.
+# Enforces `web_time` over `std::time::Instant` and `std::time::SystemTime` for WASM compatibility.
+# https://rust-lang.github.io/rust-clippy/master/#disallowed_types
+disallowed_types = "deny"
 
 # Checks for usage of `#[allow]` attribute and suggests replacing it with `#[expect]`.
 # `#[expect]` attributes suppress the lint emission, but emit a warning if the expectation is unfulfilled.

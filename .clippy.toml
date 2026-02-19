@@ -7,4 +7,12 @@ disallowed-methods = [
   { path = "rust_decimal::Decimal::parse", reason = "Must use a normalized method to ensure decimal values are represented consistently.", allow-invalid = true },
 ]
 
+# Enforce `web_time` over raw `std::time` for `Instant` and `SystemTime`.
+# `web_time` is a drop-in replacement that works on both native (re-exports std::time)
+# and WASM (uses Performance.now() / Date.now()). `std::time::Duration` is unaffected.
+disallowed-types = [
+  { path = "std::time::Instant", reason = "Use `web_time::Instant` for WASM compatibility. See `.clippy.toml`." },
+  { path = "std::time::SystemTime", reason = "Use `web_time::SystemTime` for WASM compatibility. See `.clippy.toml`." },
+]
+
 allow-unwrap-in-tests = true

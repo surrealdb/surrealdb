@@ -1,8 +1,8 @@
 use std::sync::LazyLock;
-use std::time::Instant;
 
 use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
 use opentelemetry::{Context as TelemetryContext, KeyValue, global};
+use web_time::Instant;
 
 use crate::cnf::TELEMETRY_NAMESPACE;
 

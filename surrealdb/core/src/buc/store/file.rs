@@ -1,13 +1,13 @@
 use std::future::Future;
 use std::path::{Path as OsPath, PathBuf};
 use std::pin::Pin;
-use std::time::SystemTime;
 
 use bytes::Bytes;
 use path_clean::PathClean;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use url::Url;
+use web_time::SystemTime;
 
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 use crate::cnf::BUCKET_FOLDER_ALLOWLIST;

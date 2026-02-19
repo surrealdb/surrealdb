@@ -1,9 +1,10 @@
 use std::fmt;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{Error as TypesError, Kind, Object, SurrealValue, Value, kind, object};
+use web_time::Instant;
 
 use crate::expr::TopLevelExpr;
 
@@ -82,7 +83,14 @@ fn into_query_result_value(error: &TypesError) -> Value {
 	obj.insert("kind", Value::String(error.kind_str().to_string()));
 	let details = error.details();
 	if details.has_details() {
-		obj.insert("details", details.clone().into_value());
+		// Extract the inner detail value from the ErrorDetails serialisation.
+		// ErrorDetails::into_value() produces { kind: "...", details: <inner> },
+		// but `kind` is already a top-level field, so we only want `details`.
+		if let Value::Object(mut details_obj) = details.clone().into_value() {
+			if let Some(inner) = details_obj.remove("details") {
+				obj.insert("details", inner);
+			}
+		}
 	}
 	Value::Object(obj)
 }
