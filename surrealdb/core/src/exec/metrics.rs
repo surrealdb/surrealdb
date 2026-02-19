@@ -23,7 +23,7 @@ use crate::exec::{FlowResult, ValueBatch, ValueBatchStream};
 
 /// Returns a monotonic timestamp in nanoseconds.
 ///
-/// Uses `web_time::Instant` which resolves to `std::time::Instant` on native
+/// Uses `web_time::Instant` which delegates to the standard library on native
 /// targets and `performance.now()` on WASM (millisecond resolution, converted to ns).
 fn now_ns() -> u64 {
 	use web_time::Instant;

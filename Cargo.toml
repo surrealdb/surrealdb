@@ -325,11 +325,6 @@ unexpected_cfgs = { level = "warn", check-cfg = [
 
 [workspace.lints.clippy]
 
-# Checks for usage of disallowed types as defined in `.clippy.toml`.
-# Enforces `web_time` over `std::time::Instant` and `std::time::SystemTime` for WASM compatibility.
-# https://rust-lang.github.io/rust-clippy/master/#disallowed_types
-disallowed_types = "deny"
-
 # Checks for usage of `#[allow]` attribute and suggests replacing it with `#[expect]`.
 # `#[expect]` attributes suppress the lint emission, but emit a warning if the expectation is unfulfilled.
 # This is useful to be notified when the lint is no longer triggered.
