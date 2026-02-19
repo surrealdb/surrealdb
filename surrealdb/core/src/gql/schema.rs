@@ -19,6 +19,7 @@
 //!   `bytes`, `object`, `any`, `JSON`, and `null`.
 
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::sync::Arc;
 
 use async_graphql::dynamic::indexmap::IndexMap;
@@ -365,6 +366,38 @@ fn record_id_to_raw(t: &SurRecordId) -> String {
 	format!("{}:{}", t.table, key_str)
 }
 
+/// Encode an arbitrary literal string to a GraphQL-safe identifier component.
+///
+/// The output is deterministic, ASCII-only, and always starts with a letter.
+fn encode_gql_identifier_component(raw: &str) -> String {
+	let mut out = String::with_capacity(1 + (raw.len() * 2));
+	out.push('S');
+	for byte in raw.as_bytes() {
+		let _ = write!(&mut out, "{byte:02X}");
+	}
+	out
+}
+
+fn literal_enum_item_name(literal: &str) -> String {
+	format!("LIT_{}", encode_gql_identifier_component(literal))
+}
+
+fn literal_enum_type_name(literals: &[String]) -> String {
+	let parts: Vec<String> = literals.iter().map(|s| encode_gql_identifier_component(s)).collect();
+	format!("Literal_{}", parts.join("_or_"))
+}
+
+fn enum_token_to_literal(ks: &[Kind], token: &str) -> Option<String> {
+	for kind in ks {
+		if let Kind::Literal(KindLiteral::String(lit)) = kind
+			&& literal_enum_item_name(lit) == token
+		{
+			return Some(lit.clone());
+		}
+	}
+	None
+}
+
 /// Map a SurrealDB [`Kind`] to a GraphQL [`TypeRef`].
 ///
 /// This is the central type-mapping function: it translates SurrealDB's type
@@ -494,8 +527,12 @@ pub fn kind_to_type(
 					})
 					.collect();
 
-				let mut tmp = Enum::new(vals.join("_or_"));
-				tmp = tmp.items(vals);
+				let enum_name = literal_enum_type_name(&vals);
+				let enum_items: Vec<String> =
+					vals.iter().map(|v| literal_enum_item_name(v)).collect();
+
+				let mut tmp = Enum::new(enum_name);
+				tmp = tmp.items(enum_items);
 
 				let enum_ty = tmp.type_name().to_string();
 
@@ -963,6 +1000,9 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 					Err(resolver_error("binary input for Either is not yet supported"))
 				}
 				GqlValue::Enum(n) => {
+					if let Some(literal) = enum_token_to_literal(ks, n.as_str()) {
+						return Ok(SurValue::String(literal));
+					}
 					either_try_kind!(ks, &GqlValue::String(n.to_string()), Kind::String);
 					Err(type_error(kind, val))
 				}

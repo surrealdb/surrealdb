@@ -5382,4 +5382,59 @@ mod graphql_integration {
 
 		Ok(())
 	}
+
+	#[test(tokio::test)]
+	async fn either_string_literals_with_invalid_identifier_chars()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE test SCHEMAFULL;
+					DEFINE FIELD OVERWRITE type ON test TYPE "enum-1" | "enum-2";
+					CREATE test:one SET type = "enum-1";
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Regression for #6941: GraphQL schema generation must not emit invalid
+		// identifiers for string-literal either types (e.g. containing '-').
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"query { test { id } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected schema generation and query execution to succeed, got errors: {:?}",
+				body["errors"]
+			);
+			assert_eq!(body["data"]["test"][0]["id"], "test:one");
+		}
+
+		Ok(())
+	}
 }
