@@ -349,6 +349,29 @@ pub(crate) fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> 
 	Ok(out)
 }
 
+/// Convert a SurrealDB runtime value to GraphQL, using field kind metadata when available.
+///
+/// For string-literal `Either` kinds, this emits a GraphQL enum token instead
+/// of a raw string so enum fields resolve correctly.
+pub(crate) fn sql_value_to_gql_value_with_kind(
+	v: SurValue,
+	kind: Option<&Kind>,
+	enum_scope: Option<&str>,
+) -> Result<GqlValue, GqlError> {
+	if let SurValue::String(s) = &v
+		&& let Some(Kind::Either(ks)) = kind
+	{
+		for k in ks {
+			if let Kind::Literal(KindLiteral::String(lit)) = k
+				&& lit == s
+			{
+				return Ok(GqlValue::Enum(Name::new(literal_enum_item_name(enum_scope, lit))));
+			}
+		}
+	}
+	sql_value_to_gql_value(v)
+}
+
 /// Formats a `RecordId` as a raw string without SQL-specific escaping.
 ///
 /// Produces `table:key` where the key is the raw value (no backtick/angle-bracket
@@ -363,6 +386,71 @@ fn record_id_to_raw(t: &SurRecordId) -> String {
 		_ => t.key.to_sql(),
 	};
 	format!("{}:{}", t.table, key_str)
+}
+
+fn sanitize_gql_identifier_component(raw: &str) -> String {
+	let mut out = String::with_capacity(raw.len() + 1);
+	let mut last_was_underscore = false;
+	for c in raw.chars() {
+		if c.is_ascii_alphanumeric() {
+			out.push(c.to_ascii_uppercase());
+			last_was_underscore = false;
+		} else if !last_was_underscore && !out.is_empty() {
+			out.push('_');
+			last_was_underscore = true;
+		}
+	}
+	while out.ends_with('_') {
+		out.pop();
+	}
+	if out.is_empty() || !out.as_bytes()[0].is_ascii_alphabetic() {
+		out.insert(0, 'V');
+	}
+	out
+}
+
+fn literal_enum_item_name(scope: Option<&str>, literal: &str) -> String {
+	let literal_component = sanitize_gql_identifier_component(literal);
+	match scope {
+		Some(s) if !s.is_empty() => {
+			let scope_component = sanitize_gql_identifier_component(s);
+			format!("{scope_component}_{literal_component}")
+		}
+		_ => format!("VALUE_{literal_component}"),
+	}
+}
+
+fn literal_enum_type_name(scope: Option<&str>, literals: &[String]) -> String {
+	let parts: Vec<String> =
+		literals.iter().map(|s| sanitize_gql_identifier_component(s)).collect();
+	let joined = parts.join("_OR_");
+	match scope {
+		Some(s) if !s.is_empty() => {
+			let scope_component = sanitize_gql_identifier_component(s);
+			format!("{scope_component}_ENUM_{joined}")
+		}
+		_ => format!("Literal_{joined}"),
+	}
+}
+
+fn token_matches_literal(token: &str, literal: &str) -> bool {
+	let literal_component = sanitize_gql_identifier_component(literal);
+	token == literal_component || token.ends_with(&format!("_{literal_component}"))
+}
+
+fn enum_token_to_literal(ks: &[Kind], token: &str) -> Option<String> {
+	let mut out = None;
+	for kind in ks {
+		if let Kind::Literal(KindLiteral::String(lit)) = kind
+			&& token_matches_literal(token, lit)
+		{
+			if out.is_some() {
+				return None;
+			}
+			out = Some(lit.clone());
+		}
+	}
+	out
 }
 
 /// Map a SurrealDB [`Kind`] to a GraphQL [`TypeRef`].
@@ -381,6 +469,19 @@ pub fn kind_to_type(
 	kind: Kind,
 	types: &mut Vec<Type>,
 	is_input: bool,
+) -> Result<TypeRef, GqlError> {
+	kind_to_type_with_enum_prefix(kind, types, is_input, None)
+}
+
+/// Map a SurrealDB [`Kind`] to a GraphQL [`TypeRef`], with optional enum naming scope.
+///
+/// When `enum_scope` is provided, string-literal unions (`Kind::Either` with
+/// `Kind::Literal(String)`) use this scope when generating enum type/item names.
+pub fn kind_to_type_with_enum_prefix(
+	kind: Kind,
+	types: &mut Vec<Type>,
+	is_input: bool,
+	enum_scope: Option<&str>,
 ) -> Result<TypeRef, GqlError> {
 	let optional = kind.can_be_none();
 	let out_ty = match kind {
@@ -469,7 +570,7 @@ pub fn kind_to_type(
 			// to avoid creating a single-member union.
 			if ks.len() == 1 {
 				let inner = ks.into_iter().next().expect("checked len == 1");
-				let inner_ty = kind_to_type(inner, types, is_input)?;
+				let inner_ty = kind_to_type_with_enum_prefix(inner, types, is_input, enum_scope)?;
 				// Unwrap any NonNull wrapper — the outer optional flag will re-apply
 				// nullability as needed.
 				return Ok(match optional {
@@ -494,8 +595,12 @@ pub fn kind_to_type(
 					})
 					.collect();
 
-				let mut tmp = Enum::new(vals.join("_or_"));
-				tmp = tmp.items(vals);
+				let enum_name = literal_enum_type_name(enum_scope, &vals);
+				let enum_items: Vec<String> =
+					vals.iter().map(|v| literal_enum_item_name(enum_scope, v)).collect();
+
+				let mut tmp = Enum::new(enum_name);
+				tmp = tmp.items(enum_items);
 
 				let enum_ty = tmp.type_name().to_string();
 
@@ -508,8 +613,10 @@ pub fn kind_to_type(
 				None
 			};
 
-			let pos_names: Result<Vec<TypeRef>, GqlError> =
-				others.into_iter().map(|k| kind_to_type(k, types, is_input)).collect();
+			let pos_names: Result<Vec<TypeRef>, GqlError> = others
+				.into_iter()
+				.map(|k| kind_to_type_with_enum_prefix(k, types, is_input, enum_scope))
+				.collect();
 			let pos_names: Vec<String> = pos_names?.into_iter().map(|tr| tr.to_string()).collect();
 			let ty_name = pos_names.join("_or_");
 
@@ -526,7 +633,9 @@ pub fn kind_to_type(
 			TypeRef::named(ty_name)
 		}
 		Kind::Set(_, _) => return Err(schema_error("Kind::Set is not yet supported")),
-		Kind::Array(k, _) => TypeRef::List(Box::new(kind_to_type(*k, types, is_input)?)),
+		Kind::Array(k, _) => {
+			TypeRef::List(Box::new(kind_to_type_with_enum_prefix(*k, types, is_input, enum_scope)?))
+		}
 		Kind::Function(_, _) => return Err(schema_error("Kind::Function is not yet supported")),
 		Kind::Range => return Err(schema_error("Kind::Range is not yet supported")),
 		// TODO(raphaeldarley): check if union is of literals and generate enum
@@ -963,6 +1072,9 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 					Err(resolver_error("binary input for Either is not yet supported"))
 				}
 				GqlValue::Enum(n) => {
+					if let Some(literal) = enum_token_to_literal(ks, n.as_str()) {
+						return Ok(SurValue::String(literal));
+					}
 					either_try_kind!(ks, &GqlValue::String(n.to_string()), Kind::String);
 					Err(type_error(kind, val))
 				}

@@ -19,7 +19,7 @@ use async_graphql::{Name, Value as GqlValue};
 use surrealdb_types::ToSql;
 
 use super::error::{GqlError, resolver_error};
-use super::schema::{SchemaContext, gql_to_sql_kind, kind_to_type, unwrap_type};
+use super::schema::{SchemaContext, gql_to_sql_kind, kind_to_type_with_enum_prefix, unwrap_type};
 use super::tables::{CachedRecord, cond_from_filter};
 use super::utils::{GqlValueUtils, execute_plan};
 use crate::catalog::providers::TableProvider;
@@ -99,7 +99,11 @@ fn gql_input_to_sql_object(
 /// This differs from `kind_to_type(kind, types, true)` in that `record<target>`
 /// fields are mapped to `ID` (the user passes a record ID string) rather than
 /// the target table's output Object type (which is not a valid input type).
-fn kind_to_input_type_ref(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
+fn kind_to_input_type_ref(
+	kind: Kind,
+	types: &mut Vec<Type>,
+	enum_scope: Option<&str>,
+) -> Result<TypeRef, GqlError> {
 	let optional = kind.can_be_none();
 
 	// Check if the kind (after stripping option) is a record type.
@@ -129,7 +133,7 @@ fn kind_to_input_type_ref(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, 
 	}
 
 	// For all other kinds, delegate to the standard kind_to_type with is_input=true
-	kind_to_type(kind, types, true)
+	kind_to_type_with_enum_prefix(kind, types, true, enum_scope)
 }
 
 /// Generate Create/Update/Upsert input types for a table and return their names.
@@ -184,12 +188,14 @@ fn generate_input_types(
 		}
 
 		// For create and upsert: use the field's input type (preserving non-null)
-		let create_type = kind_to_input_type_ref(kind.clone(), types)?;
+		let enum_scope = format!("{}_{}", tb_name, fd_name);
+		let create_type = kind_to_input_type_ref(kind.clone(), types, Some(&enum_scope))?;
 		create_input = create_input.field(InputValue::new(&fd_name, create_type.clone()));
 		upsert_input = upsert_input.field(InputValue::new(&fd_name, create_type));
 
 		// For update: all fields are optional (strip NonNull)
-		let update_type = unwrap_type(kind_to_input_type_ref(kind.clone(), types)?);
+		let update_type =
+			unwrap_type(kind_to_input_type_ref(kind.clone(), types, Some(&enum_scope))?);
 		update_input = update_input.field(InputValue::new(&fd_name, update_type));
 	}
 

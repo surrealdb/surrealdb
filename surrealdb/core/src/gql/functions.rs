@@ -13,12 +13,12 @@ use std::sync::Arc;
 use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, Object, Type};
 
 use super::GqlError;
-use super::schema::{gql_to_sql_kind, sql_value_to_gql_value};
+use super::schema::{gql_to_sql_kind, sql_value_to_gql_value_with_kind};
 use super::utils::execute_plan;
 use crate::catalog::FunctionDefinition;
 use crate::dbs::Session;
 use crate::expr::{Expr, FunctionCall, Kind, LogicalPlan, TopLevelExpr};
-use crate::gql::schema::kind_to_type;
+use crate::gql::schema::kind_to_type_with_enum_prefix;
 use crate::kvs::Datastore;
 use crate::val::Value;
 
@@ -50,7 +50,12 @@ pub async fn process_fns(
 
 		let mut field = Field::new(
 			format!("fn_{}", fnd.name),
-			kind_to_type(kind.clone(), types, false)?,
+			kind_to_type_with_enum_prefix(
+				kind.clone(),
+				types,
+				false,
+				Some(&format!("fn_{}_return", fnd.name)),
+			)?,
 			move |ctx| {
 				let sess1 = sess1.clone();
 				let kvs1 = kvs1.clone();
@@ -95,7 +100,11 @@ pub async fn process_fns(
 							Some(field_val)
 						}
 						Value::None => None,
-						_ => Some(FieldValue::value(sql_value_to_gql_value(res)?)),
+						_ => Some(FieldValue::value(sql_value_to_gql_value_with_kind(
+							res,
+							fnd1.returns.as_ref(),
+							Some(&format!("fn_{}_return", fnd1.name)),
+						)?)),
 					};
 
 					Ok(gql_res)
@@ -105,7 +114,12 @@ pub async fn process_fns(
 
 		// Register each function argument as a GraphQL input value
 		for (arg_name, arg_kind) in fnd.args.iter() {
-			let arg_ty = kind_to_type(arg_kind.clone(), types, true)?;
+			let arg_ty = kind_to_type_with_enum_prefix(
+				arg_kind.clone(),
+				types,
+				true,
+				Some(&format!("fn_{}_{}", fnd.name, arg_name)),
+			)?;
 			field = field.argument(InputValue::new(arg_name, arg_ty))
 		}
 
