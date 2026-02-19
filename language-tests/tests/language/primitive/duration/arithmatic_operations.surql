@@ -59,7 +59,7 @@ error = "Cannot negate the value '1s'"
 value = "1s"
 
 [[test.results]]
-error = "Cannot multiply 584942417355y3w5d7h15s999ms999µs999ns with 2, as the operation would result in overflow."
+error = 'Failed to compute: "584942417355y3w5d7h15s999ms999µs999ns * 2", as the operation results in an arithmetic overflow.'
 
 [[test.results]]
 value = "292471208677y27w6d15h30m7s999ms999µs999ns"
