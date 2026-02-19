@@ -120,6 +120,7 @@ criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
 parking_lot.workspace = true
+web-time.workspace = true
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 radix_trie.workspace = true
 rand.workspace = true

@@ -157,7 +157,7 @@ subtle.workspace = true
 sysinfo.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-trice.workspace = true
+web-time.workspace = true
 ulid = { workspace = true, features = ["serde"] }
 unicase.workspace = true
 url.workspace = true

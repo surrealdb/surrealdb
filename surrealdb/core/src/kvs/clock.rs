@@ -1,8 +1,4 @@
-#[cfg(not(target_family = "wasm"))]
-use std::time::{SystemTime, UNIX_EPOCH};
-
-#[cfg(target_family = "wasm")]
-use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+use web_time::{SystemTime, UNIX_EPOCH};
 
 use crate::dbs::node::Timestamp;
 
