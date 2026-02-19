@@ -1,5 +1,6 @@
 use core::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::extract::ws::close_code::AGAIN;
@@ -25,8 +26,9 @@ use uuid::Uuid;
 
 use super::RpcState;
 use crate::cnf::{
-	PKG_NAME, PKG_VERSION, WEBSOCKET_PING_FREQUENCY, WEBSOCKET_RESPONSE_BUFFER_SIZE,
-	WEBSOCKET_RESPONSE_CHANNEL_SIZE, WEBSOCKET_RESPONSE_FLUSH_PERIOD,
+	MAX_TRANSACTIONS_PER_CONNECTION, MAX_TRANSACTIONS_PER_SESSION, PKG_NAME, PKG_VERSION,
+	WEBSOCKET_PING_FREQUENCY, WEBSOCKET_RESPONSE_BUFFER_SIZE, WEBSOCKET_RESPONSE_CHANNEL_SIZE,
+	WEBSOCKET_RESPONSE_FLUSH_PERIOD,
 };
 use crate::rpc::CONN_CLOSED_ERR;
 use crate::rpc::format::WsFormat;
@@ -51,8 +53,12 @@ pub struct Websocket {
 	pub(crate) datastore: Arc<Datastore>,
 	/// The active sessions for this WebSocket connection
 	pub(crate) sessions: HashMap<Option<Uuid>, Arc<RwLock<Session>>>,
-	/// The active transactions for this WebSocket connection
-	pub(crate) transactions: DashMap<Uuid, Arc<Transaction>>,
+	/// The active transactions for this WebSocket connection.
+	/// Entries are <transaction_id, (session_id, transaction)> values.
+	pub(crate) transactions: DashMap<Uuid, (Option<Uuid>, Arc<Transaction>)>,
+	/// The active transaction counts for this WebSocket connection.
+	/// Entries are <session_id, count> values.
+	pub(crate) counters: DashMap<Option<Uuid>, AtomicUsize>,
 	/// A cancellation token called when shutting down the server
 	pub(crate) shutdown: CancellationToken,
 	/// A cancellation token for cancelling all spawned tasks
@@ -84,6 +90,7 @@ impl Websocket {
 			canceller: CancellationToken::new(),
 			sessions: HashMap::new(),
 			transactions: DashMap::new(),
+			counters: DashMap::new(),
 			channel: sender.clone(),
 			datastore,
 		});
@@ -130,6 +137,8 @@ impl Websocket {
 		trace!("WebSocket {id} disconnected");
 		// Cleanup the live queries for this WebSocket
 		rpc.cleanup_all_lqs().await;
+		// Cleanup any open transactions for this WebSocket
+		rpc.cleanup_all_txns().await;
 		// Remove this WebSocket from the list
 		state.web_sockets.write().await.remove(&id);
 		// Stop telemetry metrics for this connection
@@ -494,9 +503,9 @@ impl RpcProtocol for Websocket {
 		debug!("WebSocket get_tx called for transaction {id}");
 		self.transactions
 			.get(&id)
-			.map(|tx| {
-				debug!("Transaction {id} found in WebSocket transactions map");
-				tx.clone()
+			.map(|entry| {
+				trace!("Transaction {id} found in WebSocket transactions map");
+				entry.value().1.clone()
 			})
 			.ok_or_else(|| {
 				warn!(
@@ -513,7 +522,7 @@ impl RpcProtocol for Websocket {
 		id: Uuid,
 		tx: Arc<surrealdb_core::kvs::Transaction>,
 	) -> Result<(), surrealdb_types::Error> {
-		self.transactions.insert(id, tx);
+		self.transactions.insert(id, (None, tx));
 		Ok(())
 	}
 
@@ -577,6 +586,52 @@ impl RpcProtocol for Websocket {
 		}
 	}
 
+	/// Handles the cleanup of transactions for a specific session
+	async fn cleanup_txns(&self, session_id: Option<&Uuid>) {
+		// Atomically collect and remove matching transactions
+		let mut removed = Vec::new();
+		self.transactions.retain(|tid, (sid, tx)| {
+			if sid.as_ref() == session_id {
+				removed.push((*tid, *sid, tx.clone()));
+				false
+			} else {
+				true
+			}
+		});
+		// Cancel the removed transactions
+		for (tid, sid, tx) in removed {
+			trace!("Cancelling transaction {tid} during session cleanup");
+			if let Err(err) = tx.cancel().await {
+				error!("Error cancelling transaction {tid}: {err}");
+			}
+			// Release the reserved slot
+			if let Some(c) = self.counters.get(&sid) {
+				c.fetch_sub(1, Ordering::Relaxed);
+			}
+		}
+	}
+
+	/// Handles the cleanup of all transactions on this connection
+	async fn cleanup_all_txns(&self) {
+		// Atomically collect and remove all transactions
+		let mut removed = Vec::new();
+		self.transactions.retain(|txn_id, (sid, tx)| {
+			removed.push((*txn_id, *sid, tx.clone()));
+			false
+		});
+		// Cancel the removed transactions
+		for (txn_id, sid, tx) in removed {
+			trace!("Cancelling transaction {txn_id} during connection cleanup");
+			if let Err(err) = tx.cancel().await {
+				error!("Error cancelling transaction {txn_id}: {err}");
+			}
+			// Release the reserved slot
+			if let Some(c) = self.counters.get(&sid) {
+				c.fetch_sub(1, Ordering::Relaxed);
+			}
+		}
+	}
+
 	// ------------------------------
 	// Methods for transactions
 	// ------------------------------
@@ -585,21 +640,60 @@ impl RpcProtocol for Websocket {
 	async fn begin(
 		&self,
 		_txn: Option<Uuid>,
-		_session_id: Option<Uuid>,
+		session_id: Option<Uuid>,
 	) -> Result<DbResult, surrealdb_types::Error> {
+		// Acquire a read lock on the session
+		let _session_guard = if session_id.is_some() {
+			// Get the session and the session lock
+			let session_lock = self.get_session(&session_id)?;
+			//
+			let guard = session_lock.read_owned().await;
+			// Check the session still exists after locking.
+			// If another operation removed the session, the session
+			// will have been removed from the map under the write lock.
+			self.get_session(&session_id)?;
+			// Return the lock guard
+			Some(guard)
+		} else {
+			None
+		};
+		// Determine the transaction limit for connections
+		let limit = match session_id {
+			Some(_) => *MAX_TRANSACTIONS_PER_SESSION,
+			None => *MAX_TRANSACTIONS_PER_CONNECTION,
+		};
+		// Increase the transaction counter for the session
+		let prev = self
+			.counters
+			.entry(session_id)
+			.or_insert_with(|| AtomicUsize::new(0))
+			.fetch_add(1, Ordering::Relaxed);
+		// Check if the transaction limit has been reached
+		if prev >= limit {
+			// Over limit — undo the reservation
+			if let Some(c) = self.counters.get(&session_id) {
+				c.fetch_sub(1, Ordering::Relaxed);
+			}
+			return Err(surrealdb_core::rpc::too_many_transactions());
+		}
 		// Create a new transaction
-		let tx = self
-			.kvs()
-			.transaction(TransactionType::Write, LockType::Optimistic)
-			.await
-			.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
+		let tx = match self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await {
+			Ok(tx) => tx,
+			Err(e) => {
+				// Undo the reservation on failure
+				if let Some(c) = self.counters.get(&session_id) {
+					c.fetch_sub(1, Ordering::Relaxed);
+				}
+				return Err(surrealdb_core::rpc::types_error_from_anyhow(e));
+			}
+		};
 		// Generate a unique transaction ID
 		let id = Uuid::now_v7();
-		debug!("WebSocket begin: created transaction {id}");
-		// Store the transaction in the map
-		self.transactions.insert(id, Arc::new(tx));
-		debug!(
-			"WebSocket begin: stored transaction {id}, map now has {} transactions",
+		trace!("WebSocket begin: created transaction {id}");
+		// Store the transaction in the map with its session association
+		self.transactions.insert(id, (session_id, Arc::new(tx)));
+		trace!(
+			"WebSocket begin: stored transaction {id}, {} transactions total",
 			self.transactions.len()
 		);
 		// Return the transaction ID to the client
@@ -613,22 +707,31 @@ impl RpcProtocol for Websocket {
 		_session_id: Option<Uuid>,
 		params: Array,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		// Extract the transaction ID from params
+		// Extract the transaction ID from params, accepting
+		// both native UUID values and string-encoded UUIDs
+		// as JSON does not have a native UUID type.
 		let mut params_vec = params.into_vec();
-		let Some(Value::Uuid(txn_id)) = params_vec.pop() else {
-			return Err(surrealdb_core::rpc::invalid_params("Expected transaction UUID"));
+		let txn_id = match params_vec.pop() {
+			// Accept a native UUID value
+			Some(Value::Uuid(v)) => v.into_inner(),
+			// Accept a string-encoded UUID value
+			Some(Value::String(ref s)) => s
+				.parse::<Uuid>()
+				.map_err(|_| surrealdb_core::rpc::invalid_params("Expected transaction UUID"))?,
+			_ => {
+				return Err(surrealdb_core::rpc::invalid_params("Expected transaction UUID"));
+			}
 		};
-
-		let txn_id = txn_id.into_inner();
-
 		// Retrieve and remove the transaction from the map
-		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
+		let Some((_, (sid, tx))) = self.transactions.remove(&txn_id) else {
 			return Err(surrealdb_core::rpc::invalid_params("Transaction not found"));
 		};
-
+		// Release the reserved slot
+		if let Some(c) = self.counters.get(&sid) {
+			c.fetch_sub(1, Ordering::Relaxed);
+		}
 		// Commit the transaction
 		tx.commit().await.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
-
 		// Return success
 		Ok(DbResult::Other(Value::None))
 	}
@@ -640,22 +743,31 @@ impl RpcProtocol for Websocket {
 		_session_id: Option<Uuid>,
 		params: Array,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		// Extract the transaction ID from params
+		// Extract the transaction ID from params, accepting
+		// both native UUID values and string-encoded UUIDs
+		// as JSON does not have a native UUID type.
 		let mut params_vec = params.into_vec();
-		let Some(Value::Uuid(txn_id)) = params_vec.pop() else {
-			return Err(surrealdb_core::rpc::invalid_params("Expected transaction UUID"));
+		let txn_id = match params_vec.pop() {
+			// Accept a native UUID value
+			Some(Value::Uuid(v)) => v.into_inner(),
+			// Accept a string-encoded UUID value
+			Some(Value::String(ref s)) => s
+				.parse::<Uuid>()
+				.map_err(|_| surrealdb_core::rpc::invalid_params("Expected transaction UUID"))?,
+			_ => {
+				return Err(surrealdb_core::rpc::invalid_params("Expected transaction UUID"));
+			}
 		};
-
-		let txn_id = txn_id.into_inner();
-
 		// Retrieve and remove the transaction from the map
-		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
+		let Some((_, (sid, tx))) = self.transactions.remove(&txn_id) else {
 			return Err(surrealdb_core::rpc::invalid_params("Transaction not found"));
 		};
-
+		// Release the reserved slot
+		if let Some(c) = self.counters.get(&sid) {
+			c.fetch_sub(1, Ordering::Relaxed);
+		}
 		// Cancel the transaction
 		tx.cancel().await.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
-
 		// Return success
 		Ok(DbResult::Other(Value::None))
 	}
