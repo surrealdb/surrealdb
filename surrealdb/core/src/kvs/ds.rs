@@ -1,4 +1,6 @@
+#[cfg(not(target_family = "wasm"))]
 use std::collections::HashMap;
+#[cfg(not(target_family = "wasm"))]
 use std::collections::hash_map::Entry;
 use std::fmt::{self, Display};
 #[cfg(storage)]
@@ -16,6 +18,7 @@ use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use reblessive::TreeStack;
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
+#[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::Notify;
 #[cfg(feature = "jwks")]
@@ -25,10 +28,10 @@ use tracing::{debug, instrument, trace};
 use uuid::Uuid;
 
 use super::api::Transactable;
-use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
+use super::{Key, Val, export};
 use crate::api::err::ApiError;
 use crate::api::invocation::process_api_request;
 use crate::api::request::ApiRequest;
@@ -1420,7 +1423,6 @@ impl Datastore {
 			// Collect every item in the queue
 			let (beg, end) = IndexCompactionKey::range();
 			let range = beg..end;
-			let mut concurrent_compactions = HashMap::new();
 			// Create a new transaction managing the batch
 			let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
 			// Returns an ordered list of indexes that require compaction
@@ -1429,39 +1431,69 @@ impl Datastore {
 				txn.cancel().await?;
 				return Ok(());
 			}
-			for (k, _) in items {
-				lh.try_maintain_lease().await?;
-				let ic = IndexCompactionKey::decode_key(&k)?;
-				let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
-				match concurrent_compactions.entry(ikb.clone()) {
-					// Compaction is actually not running for this index,
-					// let's spawn it
-					Entry::Vacant(e) => {
-						let dbs = dbs.clone();
-						let ic = ic.into_owned();
-						let jh = spawn(async move {
-							// Each compaction task runs on its own transaction
-							let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
-							catch!(txn, dbs.process_index_compaction(txn.clone(), &ikb).await);
-							catch!(txn, txn.commit().await);
-							Ok(ic)
-						});
-						e.insert(jh);
-					}
-					// If we already have an entry, the index is already compacting, we can just
-					// ignore the request
-					Entry::Occupied(_) => catch!(txn, txn.del(&ic).await),
-				}
-			}
-			for (ikb, jh) in concurrent_compactions {
-				if let Err(e) = jh.await? {
-					error!("Index compaction {ikb} fails: {e}")
-				}
-			}
+			catch!(txn, Self::index_compaction_loop(dbs.clone(), &lh, items).await);
 			// We can now delete the range
 			catch!(txn, txn.delr(range).await);
 			catch!(txn, txn.commit().await);
 		}
+	}
+
+	#[cfg(not(target_family = "wasm"))]
+	async fn index_compaction_loop(
+		dbs: Arc<Datastore>,
+		lh: &LeaseHandler,
+		items: Vec<(Key, Val)>,
+	) -> Result<()> {
+		let mut concurrent_compactions = HashMap::new();
+		for (k, _) in items {
+			lh.try_maintain_lease().await?;
+			let ic = IndexCompactionKey::decode_key(&k)?;
+			let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
+			if let Entry::Vacant(e) = concurrent_compactions.entry(ikb.clone()) {
+				// Compaction is actually not running for this index,
+				// let's spawn it
+				let dbs = dbs.clone();
+				let jh = spawn(async move {
+					// Each compaction task runs on its own transaction
+					let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
+					catch!(txn, dbs.process_index_compaction(txn.clone(), &ikb).await);
+					catch!(txn, txn.commit().await);
+					Ok(())
+				});
+				e.insert(jh);
+			}
+		}
+		for (ikb, jh) in concurrent_compactions {
+			if let Err(e) = jh.await? {
+				error!("Index compaction {ikb} fails: {e}")
+			}
+		}
+		Ok(())
+	}
+
+	#[cfg(target_family = "wasm")]
+	async fn index_compaction_loop(
+		dbs: Arc<Datastore>,
+		lh: &LeaseHandler,
+		items: Vec<(Key, Val)>,
+	) -> Result<()> {
+		for (k, _) in items {
+			lh.try_maintain_lease().await?;
+			let ic = IndexCompactionKey::decode_key(&k)?;
+			let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
+			// Each compaction task runs on its own transaction
+			let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
+			match dbs.process_index_compaction(txn.clone(), &ikb).await {
+				Err(e) => {
+					error!("Index compaction {ikb} fails: {e}");
+					txn.cancel().await?;
+				}
+				Ok(_) => {
+					catch!(txn, txn.commit().await);
+				}
+			}
+		}
+		Ok(())
 	}
 
 	/// Performs the actual compaction of a single index.
