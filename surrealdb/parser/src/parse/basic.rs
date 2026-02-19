@@ -60,7 +60,12 @@ impl ParseSync for ast::Path {
 
 			let peek = parser.peek_expect("a version or a identifier")?;
 			let v = match peek.token {
-				T![<] => return parser.todo(),
+				T![<] => {
+					let _ = parser.next();
+					let v = parser.parse_sync()?;
+					let _ = parser.expect(T![>])?;
+					PathSegment::Version(v)
+				}
 				x if x.is_identifier() => {
 					let ident = parser.parse_sync_push()?;
 					PathSegment::Ident(ident)
