@@ -37,6 +37,8 @@ pub(crate) enum Lookup<'a> {
 	Azs(NamespaceId, DatabaseId),
 	/// A cache key for buckets (on a database)
 	Bus(NamespaceId, DatabaseId),
+	/// A cache key for agents (on a database)
+	Ags(NamespaceId, DatabaseId),
 	/// A cache key for functions (on a database)
 	Fcs(NamespaceId, DatabaseId),
 	/// A cache key for modules (on a database)
@@ -93,6 +95,8 @@ pub(crate) enum Lookup<'a> {
 	Az(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a bucket (on a database)
 	Bu(NamespaceId, DatabaseId, &'a str),
+	/// A cache key for an agent (on a database)
+	Ag(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a function (on a database)
 	Fc(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a module (on a database)
@@ -139,6 +143,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Aps(la, lb), Key::Aps(ka, kb)) => la == ka && lb == kb,
 			(Self::Azs(la, lb), Key::Azs(ka, kb)) => la == ka && lb == kb,
 			(Self::Bus(la, lb), Key::Bus(ka, kb)) => la == ka && lb == kb,
+			(Self::Ags(la, lb), Key::Ags(ka, kb)) => la == ka && lb == kb,
 			(Self::Fcs(la, lb), Key::Fcs(ka, kb)) => la == ka && lb == kb,
 			(Self::Mds(la, lb), Key::Mds(ka, kb)) => la == ka && lb == kb,
 			(Self::Mls(la, lb), Key::Mls(ka, kb)) => la == ka && lb == kb,
@@ -168,6 +173,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Ap(la, lb, lc), Key::Ap(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Az(la, lb, lc), Key::Az(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Bu(la, lb, lc), Key::Bu(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::Ag(la, lb, lc), Key::Ag(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Fc(la, lb, lc), Key::Fc(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Md(la, lb, lc), Key::Md(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Ml(la, lb, lc, ld), Key::Ml(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
@@ -229,6 +235,11 @@ mod tests {
 		true
 	)]
 	#[case(
+		Lookup::Ags(NamespaceId(1), DatabaseId(1)),
+		Key::Ags(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
 		Lookup::Fcs(NamespaceId(1), DatabaseId(1)),
 		Key::Fcs(NamespaceId(1), DatabaseId(1)),
 		true
@@ -273,6 +284,7 @@ mod tests {
 	#[case(Lookup::Ap(NamespaceId(1), DatabaseId(1), "test"), Key::Ap(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Az(NamespaceId(1), DatabaseId(1), "test"), Key::Az(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Bu(NamespaceId(1), DatabaseId(1), "test"), Key::Bu(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Ag(NamespaceId(1), DatabaseId(1), "test"), Key::Ag(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Fc(NamespaceId(1), DatabaseId(1), "test"), Key::Fc(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
 	#[case(Lookup::Ml(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Ml(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
 	#[case(Lookup::Cg(NamespaceId(1), DatabaseId(1), "test"), Key::Cg(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]

@@ -158,6 +158,13 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		db: DatabaseId,
 	) -> Result<Arc<[catalog::SequenceDefinition]>>;
 
+	/// Retrieve all agent definitions for a specific database.
+	async fn all_db_agents(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<[catalog::AgentDefinition]>>;
+
 	/// Retrieve all function definitions for a specific database.
 	async fn all_db_functions(
 		&self,
@@ -216,6 +223,25 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		db: DatabaseId,
 		sq: &str,
 	) -> Result<Arc<catalog::SequenceDefinition>>;
+
+	/// Retrieve a specific agent definition from a database.
+	async fn get_db_agent(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ag: &str,
+	) -> Result<Arc<catalog::AgentDefinition>>;
+
+	/// Put an agent definition into a database.
+	async fn put_db_agent(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ag: &catalog::AgentDefinition,
+	) -> Result<()>;
+
+	/// Delete an agent definition from a database.
+	async fn del_db_agent(&self, ns: NamespaceId, db: DatabaseId, ag: &str) -> Result<()>;
 
 	/// Retrieve a specific function definition from a database.
 	async fn get_db_function(

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use super::Level;
 use crate::catalog::base::Base;
 
-#[revisioned(revision = 5)]
+#[revisioned(revision = 6)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ResourceKind {
@@ -33,6 +33,8 @@ pub enum ResourceKind {
 	Bucket,
 	#[revision(start = 5)]
 	Sequence,
+	#[revision(start = 6)]
+	Agent,
 	// IAM
 	Actor,
 }
@@ -80,6 +82,7 @@ impl std::fmt::Display for ResourceKind {
 			ResourceKind::Config(c) => write!(f, "Config::{c}"),
 			ResourceKind::Bucket => write!(f, "Bucket"),
 			ResourceKind::Sequence => write!(f, "Sequence"),
+			ResourceKind::Agent => write!(f, "Agent"),
 		}
 	}
 }

@@ -2,6 +2,7 @@ use revision::revisioned;
 use surrealdb_types::ToSql;
 
 mod access;
+mod agent;
 mod analyzer;
 mod api;
 pub(crate) mod base;
@@ -19,6 +20,7 @@ mod user;
 use std::fmt::{Display, Formatter};
 
 pub use access::*;
+pub use agent::*;
 pub use analyzer::*;
 pub use api::*;
 pub use bucket::*;

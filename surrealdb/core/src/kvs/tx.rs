@@ -1226,6 +1226,26 @@ impl DatabaseProvider for Transaction {
 
 	/// Retrieve all function definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	async fn all_db_agents(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<[catalog::AgentDefinition]>> {
+		let qey = cache::tx::Lookup::Ags(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_ags(),
+			None => {
+				let beg = crate::key::database::ag::prefix(ns, db)?;
+				let end = crate::key::database::ag::suffix(ns, db)?;
+				let val = self.getr(beg..end, None).await?;
+				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+				let entry = cache::tx::Entry::Ags(val.clone());
+				self.cache.insert(qey, entry);
+				Ok(val)
+			}
+		}
+	}
+
 	async fn all_db_functions(
 		&self,
 		ns: NamespaceId,
@@ -1407,6 +1427,30 @@ impl DatabaseProvider for Transaction {
 		}
 	}
 
+	/// Retrieve a specific agent definition from a database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	async fn get_db_agent(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ag: &str,
+	) -> Result<Arc<catalog::AgentDefinition>> {
+		let qey = cache::tx::Lookup::Ag(ns, db, ag);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_type(),
+			None => {
+				let key = crate::key::database::ag::new(ns, db, ag);
+				let val = self.get(&key, None).await?.ok_or_else(|| Error::AgNotFound {
+					name: ag.to_owned(),
+				})?;
+				let val = Arc::new(val);
+				let entry = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entry);
+				Ok(val)
+			}
+		}
+	}
+
 	/// Retrieve a specific function definition from a database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_db_function(
@@ -1502,6 +1546,42 @@ impl DatabaseProvider for Transaction {
 				}
 			}
 		}
+	}
+
+	async fn put_db_agent(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ag: &catalog::AgentDefinition,
+	) -> Result<()> {
+		let key = crate::key::database::ag::new(ns, db, &ag.name);
+		self.set(&key, ag, None).await?;
+
+		// Invalidate the cached list of all agents for this database
+		let list_key = cache::tx::Lookup::Ags(ns, db);
+		self.cache.remove(list_key);
+
+		// Set the entry in the cache
+		let qey = cache::tx::Lookup::Ag(ns, db, &ag.name);
+		let entry = cache::tx::Entry::Any(Arc::new(ag.clone()));
+		self.cache.insert(qey, entry);
+
+		Ok(())
+	}
+
+	async fn del_db_agent(&self, ns: NamespaceId, db: DatabaseId, ag: &str) -> Result<()> {
+		let key = crate::key::database::ag::new(ns, db, ag);
+		self.del(&key).await?;
+
+		// Invalidate the cached list of all agents for this database
+		let list_key = cache::tx::Lookup::Ags(ns, db);
+		self.cache.remove(list_key);
+
+		// Remove the individual entry from cache
+		let qey = cache::tx::Lookup::Ag(ns, db, ag);
+		self.cache.remove(qey);
+
+		Ok(())
 	}
 
 	async fn put_db_function(

@@ -94,6 +94,11 @@ pub(crate) enum Error {
 	#[allow(dead_code)]
 	HttpDisabled,
 
+	/// AI functions are not enabled
+	#[error("AI functions are not enabled")]
+	#[allow(dead_code)]
+	AiDisabled,
+
 	/// it is not possible to set a variable with the specified name
 	#[error("'{name}' is a protected variable and cannot be set")]
 	InvalidParam {
@@ -251,6 +256,12 @@ pub(crate) enum Error {
 	/// The requested event does not exist
 	#[error("The event '{name}' does not exist")]
 	EvNotFound {
+		name: String,
+	},
+
+	/// The requested agent does not exist
+	#[error("The agent '{name}' does not exist")]
+	AgNotFound {
 		name: String,
 	},
 
@@ -797,6 +808,12 @@ pub(crate) enum Error {
 	/// The requested field already exists
 	#[error("The field '{name}' already exists")]
 	FdAlreadyExists {
+		name: String,
+	},
+
+	/// The requested agent already exists
+	#[error("The agent '{name}' already exists")]
+	AgAlreadyExists {
 		name: String,
 	},
 

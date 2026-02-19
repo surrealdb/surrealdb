@@ -13,11 +13,11 @@ use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig
 use crate::sql::statements::define::config::{ConfigInner, graphql};
 use crate::sql::statements::define::user::PassType;
 use crate::sql::statements::define::{
-	ApiAction, DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement,
-	DefineBucketStatement, DefineConfigStatement, DefineDatabaseStatement, DefineDefault,
-	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineSequenceStatement,
-	DefineStatement, DefineTableStatement, DefineUserStatement,
+	ApiAction, DefineAccessStatement, DefineAgentStatement, DefineAnalyzerStatement,
+	DefineApiStatement, DefineBucketStatement, DefineConfigStatement, DefineDatabaseStatement,
+	DefineDefault, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
+	DefineIndexStatement, DefineKind, DefineNamespaceStatement, DefineParamStatement,
+	DefineSequenceStatement, DefineStatement, DefineTableStatement, DefineUserStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
@@ -46,6 +46,7 @@ impl Parser<'_> {
 			}
 			t!("DATABASE") => self.parse_define_database(stk).await.map(DefineStatement::Database),
 			t!("FUNCTION") => self.parse_define_function(stk).await.map(DefineStatement::Function),
+			t!("AGENT") => self.parse_define_agent(stk).await.map(DefineStatement::Agent),
 			t!("USER") => self.parse_define_user(stk).await.map(DefineStatement::User),
 			t!("PARAM") => self.parse_define_param(stk).await.map(DefineStatement::Param),
 			t!("TABLE") => self.parse_define_table(stk).await.map(DefineStatement::Table),
@@ -1760,5 +1761,261 @@ impl Parser<'_> {
 		}
 
 		Ok(res)
+	}
+
+	pub(crate) async fn parse_define_agent(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineAgentStatement> {
+		use std::collections::BTreeMap;
+
+		use crate::ai::agent::types::{AgentConfig, AgentModel, AgentTool, OrderedFloat};
+
+		let kind = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			DefineKind::IfNotExists
+		} else if self.eat(t!("OVERWRITE")) {
+			DefineKind::Overwrite
+		} else {
+			DefineKind::Default
+		};
+
+		let name = self.parse_ident()?;
+
+		let mut model = AgentModel::default();
+		let mut prompt = String::new();
+		let mut config: Option<AgentConfig> = None;
+		let mut tools = Vec::new();
+		let mut comment = crate::sql::Expr::Literal(crate::sql::Literal::None);
+		let mut permissions = crate::sql::Permission::Full;
+
+		loop {
+			// Check if the next token can be parsed as an identifier.
+			// This covers both plain identifiers (PROMPT, CONFIG, TOOLS)
+			// and existing keywords used as clause names (MODEL, COMMENT, PERMISSIONS).
+			let pk = self.peek_kind();
+			if !matches!(pk, TokenKind::Identifier) && !Self::kind_is_keyword_like(pk) {
+				break;
+			}
+
+			let key = self.parse_ident()?;
+			match key.to_ascii_uppercase().as_str() {
+				"MODEL" => {
+					model.model_id = self.parse_string_lit()?;
+				}
+				"PROMPT" => {
+					prompt = self.parse_string_lit()?;
+				}
+				"CONFIG" => {
+					let mut cfg = AgentConfig::default();
+					expected!(self, t!("{"));
+					loop {
+						if self.eat(t!("}")) {
+							break;
+						}
+						let cfg_key = self.parse_ident()?;
+						expected!(self, t!(":"));
+						match cfg_key.as_str() {
+							"temperature" => {
+								let val: f64 = self.next_token_value()?;
+								cfg.temperature = Some(OrderedFloat(val));
+							}
+							"max_tokens" => {
+								let val: u64 = self.next_token_value()?;
+								cfg.max_tokens = Some(val);
+							}
+							"top_p" => {
+								let val: f64 = self.next_token_value()?;
+								cfg.top_p = Some(OrderedFloat(val));
+							}
+							"stop" => {
+								expected!(self, t!("["));
+								let mut stops = Vec::new();
+								loop {
+									if self.eat(t!("]")) {
+										break;
+									}
+									stops.push(self.parse_string_lit()?);
+									if !self.eat(t!(",")) {
+										expected!(self, t!("]"));
+										break;
+									}
+								}
+								cfg.stop = Some(stops);
+							}
+							"max_rounds" => {
+								let val: u64 = self.next_token_value()?;
+								cfg.max_rounds = Some(val as u32);
+							}
+							"timeout" => {
+								let val: u64 = self.next_token_value()?;
+								cfg.timeout = Some(val);
+							}
+							_ => {}
+						}
+						if !self.eat(t!(",")) {
+							if !self.eat(t!("}")) {
+								expected!(self, t!("}"));
+							}
+							break;
+						}
+					}
+					config = Some(cfg);
+				}
+				"TOOLS" => {
+					let arr_open = expected!(self, t!("[")).span;
+					loop {
+						if self.eat(t!("]")) {
+							break;
+						}
+
+						let obj_open = expected!(self, t!("{")).span;
+						let mut tool_name = String::new();
+						let mut tool_desc = String::new();
+						let mut tool_args = Vec::new();
+						let mut tool_block = None;
+						let mut param_descriptions: BTreeMap<String, String> = BTreeMap::new();
+
+						loop {
+							let tkey = self.parse_ident()?;
+							expected!(self, t!(":"));
+
+							match tkey.as_str() {
+								"name" => {
+									tool_name = self.parse_string_lit()?;
+								}
+								"description" => {
+									tool_desc = self.parse_string_lit()?;
+								}
+								"function" => {
+									expected!(self, t!("|"));
+									loop {
+										if self.eat(t!("|")) {
+											break;
+										}
+										let param = self.next_token_value::<Param>()?.into_string();
+										expected!(self, t!(":"));
+										let kind =
+											stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
+										tool_args.push((param, kind));
+										if !self.eat(t!(",")) {
+											expected!(self, t!("|"));
+											break;
+										}
+									}
+									let block_open = expected!(self, t!("{")).span;
+									tool_block = Some(self.parse_block(stk, block_open).await?);
+								}
+								"parameters" => {
+									let params_open = expected!(self, t!("[")).span;
+									loop {
+										if self.eat(t!("]")) {
+											break;
+										}
+										expected!(self, t!("{"));
+										let mut p_name = String::new();
+										let mut p_desc = String::new();
+										loop {
+											let pk = self.parse_ident()?;
+											expected!(self, t!(":"));
+											match pk.as_str() {
+												"name" => {
+													p_name = self.parse_string_lit()?;
+												}
+												"description" => {
+													p_desc = self.parse_string_lit()?;
+												}
+												_ => {}
+											}
+											if !self.eat(t!(",")) {
+												break;
+											}
+										}
+										expected!(self, t!("}"));
+										if !p_name.is_empty() {
+											param_descriptions.insert(p_name, p_desc);
+										}
+										if !self.eat(t!(",")) {
+											self.expect_closing_delimiter(t!("]"), params_open)?;
+											break;
+										}
+									}
+								}
+								_ => {}
+							}
+
+							if !self.eat(t!(",")) {
+								break;
+							}
+						}
+
+						self.expect_closing_delimiter(t!("}"), obj_open)?;
+
+						let block: crate::sql::Block =
+							tool_block.unwrap_or_else(|| crate::sql::Block(Vec::new()));
+						tools.push(AgentTool {
+							name: tool_name,
+							description: tool_desc,
+							args: tool_args.into_iter().map(|(n, k)| (n, k.into())).collect(),
+							block: block.into(),
+							param_descriptions,
+						});
+
+						if !self.eat(t!(",")) {
+							self.expect_closing_delimiter(t!("]"), arr_open)?;
+							break;
+						}
+					}
+				}
+				"COMMENT" => {
+					comment = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				}
+				"PERMISSIONS" => {
+					permissions = stk.run(|ctx| self.parse_permission_value(ctx)).await?;
+				}
+				_ => {
+					break;
+				}
+			}
+		}
+
+		// Validate required fields
+		if model.model_id.is_empty() {
+			return Err(crate::syn::parser::SyntaxError::new(
+				"DEFINE AGENT requires a MODEL clause",
+			));
+		}
+		if prompt.is_empty() {
+			return Err(crate::syn::parser::SyntaxError::new(
+				"DEFINE AGENT requires a PROMPT clause",
+			));
+		}
+
+		// Validate tool name uniqueness
+		{
+			let mut seen = std::collections::HashSet::new();
+			for tool in &tools {
+				if !seen.insert(&tool.name) {
+					return Err(crate::syn::parser::SyntaxError::new(format!(
+						"Duplicate tool name '{}' in DEFINE AGENT",
+						tool.name
+					)));
+				}
+			}
+		}
+
+		Ok(DefineAgentStatement {
+			kind,
+			name,
+			model,
+			prompt,
+			config,
+			tools,
+			memory: None,
+			guardrails: None,
+			comment,
+			permissions,
+		})
 	}
 }
