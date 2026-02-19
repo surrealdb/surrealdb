@@ -18,6 +18,8 @@ mod error;
 mod expr;
 mod peek;
 pub mod prime;
+mod special;
+mod stmt;
 mod top_level_expr;
 mod unescape;
 mod utils;
@@ -108,6 +110,8 @@ bitflags! {
 		const SPECULATING = 1 << 2;
 	}
 }
+
+pub type BaseLexer<'src> = Lexer<'src, BaseTokenKind>;
 
 /// The parser, holds the lexer, parsing state and configurations as well as some reusable buffers.
 pub struct Parser<'source, 'ast> {
@@ -404,6 +408,20 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		Ok(None)
 	}
 
+	/// Consumes the next token and returns it, if the token has the same kind as the argument and
+	/// it was joined to previous token.
+	pub fn eat_joined(&mut self, kind: BaseTokenKind) -> ParseResult<Option<Token>> {
+		let peek = self.peek()?;
+		if let Some(token) = peek {
+			if token.token == kind && token.joined == Joined::Joined {
+				self.lex.pop_peek();
+				self.last_span = token.span;
+				return Ok(Some(token));
+			}
+		}
+		Ok(None)
+	}
+
 	/// Returns the next token after the first in the lexer without consuming it.
 	///
 	/// Also returns None if the token was not joined to the previous token.
@@ -434,20 +452,6 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			}
 			None => Ok(None),
 		}
-	}
-
-	/// Consumes the next token and returns it, if the token has the same kind as the argument and
-	/// it was joined to previous token.
-	pub fn eat_joined(&mut self, kind: BaseTokenKind) -> ParseResult<Option<Token>> {
-		let peek = self.peek()?;
-		if let Some(token) = peek {
-			if token.token == kind && token.joined == Joined::Joined {
-				self.lex.pop_peek();
-				self.last_span = token.span;
-				return Ok(Some(token));
-			}
-		}
-		Ok(None)
 	}
 
 	/// Expect a specific token to be next in the lexer, returning an error if this is not the case
@@ -532,21 +536,6 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		})
 	}
 
-	/// Access the lexer within the parser.
-	///
-	/// Can be used to use the lexer in cases where the base tokens are not sufficient for parsing.
-	///
-	/// # Panic
-	/// This function will panic if the lexer has peeked tokens and thus the lexer cannot be used
-	/// currently.
-	pub fn lex<F, R>(&mut self, mut f: F) -> ParseResult<R>
-	where
-		F: FnMut(&mut Lexer<'source, BaseTokenKind>) -> ParseResult<R>,
-	{
-		assert!(self.lex.is_empty(), "Tried to access lexer with active peeked tokens");
-		f(self.lex.lexer())
-	}
-
 	/// Parse an ast node that might require recursion.
 	pub async fn parse<P: Parse>(&mut self) -> ParseResult<P> {
 		P::parse(self).await
@@ -587,6 +576,18 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		F: AsyncFnOnce(&mut Self) -> R,
 	{
 		Stk::enter_run(|_| cb(self)).await
+	}
+
+	pub fn lex<T, F>(&mut self, f: F) -> ParseResult<T>
+	where
+		F: FnOnce(BaseLexer<'source>) -> ParseResult<(BaseLexer<'source>, T)>,
+	{
+		assert!(self.lex.is_empty(), "Lexing special tokens requires the lexer to be empty");
+
+		let lexer = self.lex.lexer().clone();
+		let (lex, t) = f(lexer)?;
+		*self.lex.lexer() = lex;
+		Ok(t)
 	}
 
 	/// Returns sub string of full source that corresponds to the given span.
