@@ -181,6 +181,9 @@ impl Error {
 				}
 				| NotAllowedError::Target {
 					..
+				}
+				| NotAllowedError::Agent {
+					..
 				} => code::METHOD_NOT_ALLOWED,
 			})
 			.unwrap_or(code::INTERNAL_ERROR);
@@ -570,6 +573,11 @@ pub enum NotAllowedError {
 		/// Name of the net target.
 		name: String,
 	},
+	/// Agent not allowed.
+	Agent {
+		/// Name of the agent.
+		name: String,
+	},
 }
 
 /// Configuration failure reason for [`ErrorKind::Configuration`] errors.
@@ -642,6 +650,11 @@ pub enum NotFoundError {
 	},
 	/// Transaction not found.
 	Transaction,
+	/// Agent not found.
+	Agent {
+		/// Name of the agent.
+		name: String,
+	},
 }
 
 /// Query failure reason for [`ErrorKind::Query`] errors.
@@ -694,6 +707,11 @@ pub enum AlreadyExistsError {
 	/// Database already exists.
 	Database {
 		/// Name of the database.
+		name: String,
+	},
+	/// Agent already exists.
+	Agent {
+		/// Name of the agent.
 		name: String,
 	},
 }

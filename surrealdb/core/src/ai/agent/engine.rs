@@ -12,6 +12,7 @@ use crate::ai::provider::{ChatMessage, ChatResponse, GenerationConfig};
 use crate::catalog::AgentDefinition;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
+use crate::err::Error;
 use crate::val::Value;
 
 /// Input to an agent invocation.
@@ -57,7 +58,7 @@ impl From<AgentOutput> for Value {
 /// 5. Returns the agent's response
 ///
 /// The entire execution is bounded by a timeout (from `AgentConfig.timeout`
-/// or the server-wide `SURREAL_AGENT_DEFAULT_TIMEOUT_SECS` default).
+/// or the server-wide `SURREAL_AGENT_DEFAULT_TIMEOUT` default).
 pub async fn run(
 	ctx: &FrozenContext,
 	opt: &Options,
@@ -68,9 +69,12 @@ pub async fn run(
 	let default_timeout = crate::val::Duration::from_nanos(*crate::cnf::AGENT_DEFAULT_TIMEOUT);
 	let timeout = agent_config.and_then(|c| c.timeout).unwrap_or(default_timeout);
 
-	tokio::time::timeout(*timeout, run_inner(ctx, opt, agent, input))
-		.await
-		.map_err(|_| anyhow::anyhow!("Agent '{}' timed out after {timeout}", agent.name))?
+	tokio::time::timeout(*timeout, run_inner(ctx, opt, agent, input)).await.map_err(|_| {
+		anyhow::anyhow!(Error::AgentTimeout {
+			name: agent.name.clone(),
+			timeout,
+		})
+	})?
 }
 
 /// Inner agent execution, called by `run()` under a timeout.
@@ -80,8 +84,8 @@ async fn run_inner(
 	agent: &AgentDefinition,
 	input: AgentInput,
 ) -> Result<AgentOutput> {
-	let guardrails = GuardrailChecker::new(&agent.guardrails);
-	let tool_executor = ToolExecutor::new(ctx, opt, &agent.tools);
+	let guardrails = GuardrailChecker::new(&agent.name, &agent.guardrails);
+	let tool_executor = ToolExecutor::new(&agent.name, ctx, opt, &agent.tools);
 	let memory_manager = MemoryManager::new(&agent.memory);
 
 	// Build tool definitions for the LLM
@@ -130,16 +134,32 @@ async fn run_inner(
 		agent_config.and_then(|c| c.max_rounds).unwrap_or_else(|| guardrails.max_llm_rounds());
 
 	// Create the provider once for all LLM round-trips
-	let provider = crate::ai::chat::get_provider(provider_name, None)?;
+	let provider = crate::ai::chat::get_provider(provider_name, None).map_err(|e| {
+		anyhow::anyhow!(Error::AiProviderError {
+			provider: provider_name.to_string(),
+			message: e.to_string(),
+		})
+	})?;
 
 	// Decision loop
 	loop {
 		llm_rounds += 1;
 		if llm_rounds > max_rounds {
-			anyhow::bail!("Agent '{}' exceeded maximum LLM rounds ({max_rounds})", agent.name);
+			anyhow::bail!(Error::AgentMaxRounds {
+				name: agent.name.clone(),
+				max_rounds,
+			});
 		}
 
-		let response = provider.chat_with_tools(model_name, &messages, &tool_defs, &config).await?;
+		let response = provider
+			.chat_with_tools(model_name, &messages, &tool_defs, &config)
+			.await
+			.map_err(|e| {
+			anyhow::anyhow!(Error::AiProviderError {
+				provider: provider_name.to_string(),
+				message: e.to_string(),
+			})
+		})?;
 
 		match response {
 			ChatResponse::Message(text) => {
@@ -175,7 +195,7 @@ async fn run_inner(
 					let result_text = match result {
 						Ok(Value::String(s)) => s.clone(),
 						Ok(val) => val.to_sql(),
-						Err(e) => format!("{{\"error\": \"{e}\"}}"),
+						Err(e) => serde_json::json!({"error": e.to_string()}).to_string(),
 					};
 
 					messages.push(ChatMessage {

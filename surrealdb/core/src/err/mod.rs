@@ -489,6 +489,57 @@ pub(crate) enum Error {
 		name: String,
 	},
 
+	/// The agent timed out during execution
+	#[error("The agent '{name}' timed out after {timeout}")]
+	AgentTimeout {
+		name: String,
+		timeout: Duration,
+	},
+
+	/// The agent exceeded the maximum number of LLM rounds
+	#[error("The agent '{name}' exceeded the maximum of {max_rounds} LLM round-trips")]
+	AgentMaxRounds {
+		name: String,
+		max_rounds: u32,
+	},
+
+	/// The LLM requested a tool that doesn't exist on the agent
+	#[error("The agent '{agent}' received a call for unknown tool '{tool}'")]
+	AgentToolNotFound {
+		agent: String,
+		tool: String,
+	},
+
+	/// A tool execution timed out
+	#[error("The tool '{tool}' on agent '{agent}' timed out after {timeout}")]
+	AgentToolTimeout {
+		agent: String,
+		tool: String,
+		timeout: Duration,
+	},
+
+	/// A tool call was denied by guardrails
+	#[error("The tool '{tool}' is denied by guardrails on agent '{agent}'")]
+	AgentToolDenied {
+		agent: String,
+		tool: String,
+	},
+
+	/// Invalid arguments passed to an agent tool by the LLM
+	#[error("Invalid arguments for tool '{tool}' on agent '{agent}': {message}")]
+	AgentToolInvalidArgs {
+		agent: String,
+		tool: String,
+		message: String,
+	},
+
+	/// An AI provider returned an error
+	#[error("The AI provider '{provider}' returned an error: {message}")]
+	AiProviderError {
+		provider: String,
+		message: String,
+	},
+
 	/// The permissions do not allow this query to be run on this table
 	#[error("You don't have permission to {op} this file in the `{name}` bucket")]
 	BucketPermissions {

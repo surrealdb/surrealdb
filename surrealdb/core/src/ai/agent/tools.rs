@@ -9,10 +9,12 @@ use crate::ai::agent::types::AgentTool;
 use crate::ai::provider::{ToolCall, ToolDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
+use crate::err::Error;
 use crate::val::Value;
 
 /// Executes tool calls using the inline function blocks defined on the agent.
 pub struct ToolExecutor<'a> {
+	agent_name: &'a str,
 	ctx: &'a FrozenContext,
 	opt: &'a Options,
 	tools: &'a [AgentTool],
@@ -20,8 +22,14 @@ pub struct ToolExecutor<'a> {
 
 impl<'a> ToolExecutor<'a> {
 	/// Create a new tool executor.
-	pub fn new(ctx: &'a FrozenContext, opt: &'a Options, tools: &'a [AgentTool]) -> Self {
+	pub fn new(
+		agent_name: &'a str,
+		ctx: &'a FrozenContext,
+		opt: &'a Options,
+		tools: &'a [AgentTool],
+	) -> Self {
 		Self {
+			agent_name,
 			ctx,
 			opt,
 			tools,
@@ -76,13 +84,20 @@ impl<'a> ToolExecutor<'a> {
 	/// `timeout` value (from `DEFINE AGENT ... TOOLS [{ ..., timeout: N }]`)
 	/// or the server-wide default `SURREAL_AGENT_DEFAULT_TOOL_TIMEOUT`.
 	pub(crate) async fn execute(&self, call: &ToolCall) -> Result<Value> {
-		let tool = self
-			.tools
-			.iter()
-			.find(|t| t.name == call.name)
-			.ok_or_else(|| anyhow::anyhow!("Unknown tool: {}", call.name))?;
+		let tool = self.tools.iter().find(|t| t.name == call.name).ok_or_else(|| {
+			anyhow::anyhow!(Error::AgentToolNotFound {
+				agent: self.agent_name.to_string(),
+				tool: call.name.clone(),
+			})
+		})?;
 
-		let args = parse_tool_args(&call.arguments, &tool.args)?;
+		let args = parse_tool_args(&call.arguments, &tool.args).map_err(|e| {
+			anyhow::anyhow!(Error::AgentToolInvalidArgs {
+				agent: self.agent_name.to_string(),
+				tool: call.name.clone(),
+				message: e.to_string(),
+			})
+		})?;
 		let default_timeout =
 			crate::val::Duration::from_nanos(*crate::cnf::AGENT_DEFAULT_TOOL_TIMEOUT);
 		let timeout = tool.timeout.unwrap_or(default_timeout);
@@ -92,7 +107,13 @@ impl<'a> ToolExecutor<'a> {
 			execute_block(self.ctx, self.opt, &tool.args, &tool.block, args),
 		)
 		.await
-		.map_err(|_| anyhow::anyhow!("Tool '{}' timed out after {timeout}", call.name))?
+		.map_err(|_| {
+			anyhow::anyhow!(Error::AgentToolTimeout {
+				agent: self.agent_name.to_string(),
+				tool: call.name.clone(),
+				timeout,
+			})
+		})?
 	}
 }
 

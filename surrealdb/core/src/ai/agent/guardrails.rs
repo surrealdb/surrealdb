@@ -4,19 +4,22 @@
 use anyhow::Result;
 
 use crate::ai::agent::types::AgentGuardrails;
+use crate::err::Error;
 
 /// Default maximum LLM round-trips per invocation.
 const DEFAULT_MAX_LLM_ROUNDS: u32 = 15;
 
 /// Checks guardrail constraints during agent execution.
 pub struct GuardrailChecker<'a> {
+	agent_name: &'a str,
 	config: &'a Option<AgentGuardrails>,
 }
 
 impl<'a> GuardrailChecker<'a> {
 	/// Create a new guardrail checker with the given configuration.
-	pub fn new(config: &'a Option<AgentGuardrails>) -> Self {
+	pub fn new(agent_name: &'a str, config: &'a Option<AgentGuardrails>) -> Self {
 		Self {
+			agent_name,
 			config,
 		}
 	}
@@ -31,7 +34,10 @@ impl<'a> GuardrailChecker<'a> {
 		if let Some(guardrails) = self.config {
 			// Check deny list
 			if guardrails.deny_tools.iter().any(|t| t == tool_name) {
-				anyhow::bail!("Tool '{tool_name}' is denied by agent guardrails");
+				anyhow::bail!(Error::AgentToolDenied {
+					agent: self.agent_name.to_string(),
+					tool: tool_name.to_string(),
+				});
 			}
 
 			// Check approval requirement
