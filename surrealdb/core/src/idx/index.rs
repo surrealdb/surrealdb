@@ -320,16 +320,17 @@ impl<'a> IndexOperation<'a> {
 		IndexOperation::compaction_trigger(&self.ikb, &self.ctx.tx(), self.opt.id()).await
 	}
 
-	/// Triggers index compaction
+	/// Triggers index compaction.
 	///
 	/// This method adds an entry to the index compaction queue by creating an
 	/// `Ic` key for the specified index. The index compaction thread will
-	/// later process this entry and perform the actual compaction of the
-	/// index.
+	/// later process this entry and perform the actual compaction via
+	/// [`Datastore::index_compaction`].
 	///
-	/// Compaction helps optimize full-text index performance by consolidating
-	/// term frequency data and document length information, which can become
-	/// fragmented after many updates to the index.
+	/// Compaction helps optimize index performance after many mutations.
+	/// For full-text indexes it consolidates term frequency and document
+	/// length data; for HNSW indexes it processes pending vector operations;
+	/// for count indexes it reconciles count tracking entries.
 	pub(crate) async fn compaction_trigger(
 		ikb: &IndexKeyBase,
 		tx: &Transaction,
