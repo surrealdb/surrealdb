@@ -2,7 +2,67 @@ use ast::{Builtin, Expr, Integer, Point, Sign, Spanned};
 use common::source_error::{AnnotationKind, Level};
 use token::{BaseTokenKind, T};
 
+use crate::Parse;
 use crate::parse::{ParseResult, Parser};
+
+impl Parse for ast::Array {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start = parser.expect(BaseTokenKind::OpenBracket)?;
+		let mut head = None;
+		let mut tail = None;
+		loop {
+			if parser.eat(BaseTokenKind::CloseBracket)?.is_some() {
+				break;
+			}
+
+			let expr = parser.parse_enter::<ast::Expr>().await?;
+			parser.push_list(expr, &mut head, &mut tail);
+
+			if parser.eat(T![,])?.is_none() {
+				let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseBracket, start.span)?;
+				break;
+			}
+		}
+
+		Ok(ast::Array {
+			entries: head,
+			span: parser.span_since(start.span),
+		})
+	}
+}
+
+impl Parse for ast::Block {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start = parser.expect(BaseTokenKind::OpenBrace)?;
+		let mut head = None;
+		let mut tail = None;
+
+		// Eat empty statements.
+		while parser.eat(T![;])?.is_some() {}
+
+		loop {
+			if parser.eat(BaseTokenKind::CloseBrace)?.is_some() {
+				break;
+			}
+
+			let expr = parser.parse_enter::<ast::Expr>().await?;
+			parser.push_list(expr, &mut head, &mut tail);
+
+			if parser.eat(T![;])?.is_none() {
+				let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseBrace, start.span)?;
+				break;
+			}
+
+			// Eat empty statements.
+			while parser.eat(T![;])?.is_some() {}
+		}
+
+		Ok(ast::Block {
+			exprs: head,
+			span: parser.span_since(start.span),
+		})
+	}
+}
 
 /// Parse a prime expression
 ///
@@ -21,6 +81,18 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			let _ = parser.next();
 
 			let builtin = parser.push(Builtin::False(peek.span));
+			Ok(Expr::Builtin(builtin))
+		}
+		T![NONE] => {
+			let _ = parser.next();
+
+			let builtin = parser.push(Builtin::None(peek.span));
+			Ok(Expr::Builtin(builtin))
+		}
+		T![NULL] => {
+			let _ = parser.next();
+
+			let builtin = parser.push(Builtin::Null(peek.span));
 			Ok(Expr::Builtin(builtin))
 		}
 		BaseTokenKind::Int => {
@@ -74,6 +146,10 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			let dec = parser.parse_sync_push()?;
 			Ok(Expr::Decimal(dec))
 		}
+		BaseTokenKind::OpenBracket => {
+			let p = parser.parse_push().await?;
+			Ok(Expr::Array(p))
+		}
 		BaseTokenKind::OpenParen => {
 			let _ = parser.next();
 
@@ -109,6 +185,10 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			let expr = parser.parse_enter_push().await?;
 			let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, peek.span)?;
 			Ok(Expr::Covered(expr))
+		}
+		T![IF] => {
+			let expr = parser.parse_push().await?;
+			Ok(Expr::If(expr))
 		}
 		BaseTokenKind::Ident => {
 			let path = parser.parse_sync_push()?;
