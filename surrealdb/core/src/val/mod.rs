@@ -3,6 +3,7 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Bound;
+use std::time::Duration as StdDuration;
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
@@ -648,17 +649,48 @@ impl TryMul for Value {
 		match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Ok(Self::Number(v.try_mul(w)?)),
 			(Self::Duration(d), Self::Number(Number::Int(i))) => {
-				if i >= 0 {
-					let as_u32 = i as u32;
-					let Some(res) = d.checked_mul(as_u32) else {
-						bail!(
-							"Cannot multiply {d} with {i}, as the operation would result in overflow."
-						)
-					};
-					Ok(Value::Duration(Duration(res)))
-				} else {
+				if i < 0 {
 					bail!("Cannot multiply a duration with a negative number");
 				}
+
+				let factor: u32 = i.try_into()?;
+
+				let res =
+					d.0.checked_mul(factor)
+						.ok_or_else(|| Error::ArithmeticOverflow(format!("{d} * {i}")))?;
+
+				Ok(Value::Duration(Duration(res)))
+			}
+			(Self::Duration(d), Self::Number(Number::Float(f))) => {
+				if !(f.is_finite() && f >= 0.0) {
+					bail!("Cannot multiply a duration with a non-finite or negative number");
+				}
+
+				let secs = d.0.as_secs_f64() * f;
+				let res = StdDuration::try_from_secs_f64(secs)
+					.map_err(|_| Error::ArithmeticOverflow(format!("{d} * {f}")))?;
+
+				Ok(Value::Duration(Duration(res)))
+			}
+			(Self::Duration(d), Self::Number(Number::Decimal(dec))) => {
+				if !dec.is_sign_positive() && !dec.is_zero() {
+					bail!("Cannot multiply a duration with a negative number");
+				}
+
+				let nanos: Decimal = d.nanos().into();
+				let scaled = (nanos * dec).trunc();
+
+				let scaled_nanos: u128 = scaled
+					.to_u128()
+					.ok_or_else(|| Error::ArithmeticOverflow(format!("{d} * {dec}")))?;
+
+				let secs: u64 = (scaled_nanos / 1_000_000_000)
+					.try_into()
+					.map_err(|_| Error::ArithmeticOverflow(format!("{d} * {dec}")))?;
+
+				let subsec_nanos: u32 = (scaled_nanos % 1_000_000_000).try_into()?;
+
+				Ok(Value::Duration(Duration(StdDuration::new(secs, subsec_nanos))))
 			}
 			(v, w) => bail!(Error::TryMul(v.to_raw_string(), w.to_raw_string())),
 		}
@@ -678,14 +710,45 @@ impl TryDiv for Value {
 		match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Ok(Self::Number(v.try_div(w)?)),
 			(Self::Duration(d), Self::Number(Number::Int(i))) => {
-				if i > 0 {
-					let as_u32 = i as u32;
-					let res = d.0 / as_u32;
-					Ok(Value::Duration(Duration(res)))
-				} else {
-					bail!("A duration can only be divided by an integer of at least 1.");
+				if i <= 0 {
+					bail!("A duration can only be divided by a value greater than 0.");
 				}
+
+				let denom: u32 = i.try_into()?;
+				let res = d.0 / denom;
+				Ok(Value::Duration(Duration(res)))
 			}
+			(Self::Duration(d), Self::Number(Number::Float(f))) => {
+				if !(f.is_finite() && f > 0.0) {
+					bail!("A duration can only be divided by a finite value greater than 0.");
+				}
+				let secs = d.as_secs_f64() / f;
+
+				let res = StdDuration::try_from_secs_f64(secs)?;
+				Ok(Value::Duration(Duration(res)))
+			}
+			(Self::Duration(d), Self::Number(Number::Decimal(dec))) => {
+				if !dec.is_sign_positive() || dec.is_zero() {
+					bail!("A duration can only be divided by a value greater than 0.");
+				}
+
+				let nanos: Decimal = d.nanos().into();
+
+				let divided = (nanos / dec).trunc();
+
+				let divided_nanos: u128 = divided
+					.to_u128()
+					.ok_or_else(|| anyhow::anyhow!("Resulting duration is out of range"))?;
+
+				let secs: u64 = (divided_nanos / 1_000_000_000)
+					.try_into()
+					.map_err(|_| anyhow::anyhow!("Resulting duration seconds out of range"))?;
+
+				let subsec_nanos: u32 = (divided_nanos % 1_000_000_000).try_into()?;
+
+				Ok(Value::Duration(Duration(StdDuration::new(secs, subsec_nanos))))
+			}
+
 			(v, w) => bail!(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
 		}
 	}

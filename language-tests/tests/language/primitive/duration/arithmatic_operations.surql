@@ -64,6 +64,23 @@ error = "Cannot multiply 584942417355y3w5d7h15s999ms999µs999ns with 2, as the o
 [[test.results]]
 value = "292471208677y27w6d15h30m7s999ms999µs999ns"
 
+[[test.results]]
+value = "10m"
+
+[[test.results]]
+value = "24m"
+
+[[test.results]]
+value = "24m"
+
+[[test.results]]
+value = "5h"
+
+[[test.results]]
+value = "5h30m"
+
+[[test.results]]
+value = "5h30m"
 */
 
 1h / 1s;
@@ -94,3 +111,11 @@ value = "292471208677y27w6d15h30m7s999ms999µs999ns"
 
 duration::max * 2;
 duration::max / 2;
+
+1h / 6;
+1h / 2.5;
+1h / 2.5dec;
+
+1h * 5;
+1h * 5.5;
+1h * 5.5dec;
