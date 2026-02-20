@@ -9,6 +9,10 @@ use logos::Lexer;
 #[macro_use]
 mod mac;
 mod base;
+mod version;
+pub use version::VersionTokenKind;
+mod escaped;
+pub use escaped::EscapeTokenKind;
 
 pub use crate::base::BaseTokenKind;
 

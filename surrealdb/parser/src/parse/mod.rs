@@ -288,6 +288,27 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		res
 	}
 
+	/// Marks a branch as possibly happening due to missing data.
+	/// This will return a missing_data_error error if the parser is in PARTIAL mode.
+	///
+	/// # Usage
+	/// Use of this function is mostly unnessacry as most function interacting with tokens
+	/// implemented on `Parser` will handle possible missing data already.
+	///
+	/// This function should be used in context where we stop using the parser provided function,
+	/// like parsing special tokens.
+	pub fn might_lack_data(&self) -> ParseResult<()> {
+		if self.settings.contains(ParserSettings::PARTIAL) {
+			return Err(ParseError::missing_data_error());
+		}
+		Ok(())
+	}
+
+	/// Returns if the parser is in partial mode.
+	pub fn partial(&self) -> bool {
+		self.settings.contains(ParserSettings::PARTIAL)
+	}
+
 	/// Modifies the parser state within the given closure, reseting the parser state to the old
 	/// result after the closure returns.
 	pub async fn with_state<F1, F2, R>(&mut self, state_cb: F1, cb: F2) -> ParseResult<R>
