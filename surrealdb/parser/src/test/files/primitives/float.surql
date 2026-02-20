@@ -1,0 +1,36 @@
+1.0;
+1.0e10;
+1e10;
+1.0e-10;
+-Infinity;
+Infinity;
+NaN;
+1f
+/* ===== result =====
+Query
+    .exprs: Some
+        -TopLevelExpr::Expr
+            Expr::Float
+                1.0
+        -TopLevelExpr::Expr
+            Expr::Float
+                10000000000.0
+        -TopLevelExpr::Expr
+            Expr::Float
+                10000000000.0
+        -TopLevelExpr::Expr
+            Expr::Float
+                1e-10
+        -TopLevelExpr::Expr
+            Expr::Float
+                -inf
+        -TopLevelExpr::Expr
+            Expr::Float
+                inf
+        -TopLevelExpr::Expr
+            Expr::Float
+                NaN
+        -TopLevelExpr::Expr
+            Expr::Float
+                1.0
+*/

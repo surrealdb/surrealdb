@@ -1,0 +1,29 @@
+[package]
+name = "surrealdb-parser"
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+publish.workspace = true
+version.workspace = true
+#rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+common.workspace = true
+ast.workspace = true
+token.workspace = true
+
+bitflags.workspace = true
+reblessive.workspace = true
+logos = { version = "0.16" }
+rust_decimal.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+ast = { workspace = true, features = ["visualize"] }
