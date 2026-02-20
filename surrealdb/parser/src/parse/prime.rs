@@ -190,9 +190,17 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			let expr = parser.parse_push().await?;
 			Ok(Expr::If(expr))
 		}
+		T![LET] => {
+			let expr = parser.parse_push().await?;
+			Ok(Expr::Let(expr))
+		}
 		BaseTokenKind::Ident => {
 			let path = parser.parse_sync_push()?;
 			Ok(Expr::Path(path))
+		}
+		BaseTokenKind::Param => {
+			let path = parser.parse_sync_push()?;
+			Ok(Expr::Param(path))
 		}
 		_ => Err(parser.with_error(|parser| {
 			Level::Error

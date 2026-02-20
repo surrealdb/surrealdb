@@ -25,7 +25,13 @@ library! {
 
 		transactions: Vec<Transaction>,
 
-		exprs: Vec<Expr>,
+		if_stmt: Vec<If>,
+		let_stmt: Vec<Let>,
+
+		expr: Vec<Expr>,
+		exprs: Vec<NodeList<Expr>>,
+
+		block: Vec<Block>,
 
 		builtin: Vec<Builtin>,
 		floats: Vec<Spanned<f64>>,
@@ -33,6 +39,7 @@ library! {
 		decimal: Vec<Spanned<Decimal>>,
 
 		point: Vec<Point>,
+		array: Vec<Array>,
 
 		binary: Vec<BinaryExpr>,
 		postfix: Vec<PostfixExpr>,
@@ -46,7 +53,7 @@ library! {
 		path_segment: Vec<PathSegment>,
 		path_segments: Vec<NodeList<PathSegment>>,
 
-		params: Vec<Ident>,
+		params: Vec<Param>,
 		ident: Vec<Ident>,
 		idents: Vec<NodeListId<Ident>>,
 		#[set]
@@ -74,6 +81,12 @@ ast_type! {
 ast_type! {
 	pub struct Param {
 		pub text: NodeId<String>,
+	}
+}
+
+ast_type! {
+	pub struct Block{
+		pub exprs: Option<NodeListId<Expr>>,
 	}
 }
 
@@ -315,6 +328,13 @@ ast_type! {
 
 ast_type! {
 	#[derive(Copy, Clone)]
+	pub struct Array{
+		pub entries: Option<NodeListId<Expr>>,
+	}
+}
+
+ast_type! {
+	#[derive(Copy, Clone)]
 	pub enum Expr {
 		Covered(NodeId<Expr>),
 
@@ -325,6 +345,10 @@ ast_type! {
 
 		Point(NodeId<Point>),
 
+		Array(NodeId<Array>),
+
+		Block(NodeId<Block>),
+
 		Path(NodeId<Path>),
 		Param(NodeId<Param>),
 
@@ -334,6 +358,8 @@ ast_type! {
 		Prefix(NodeId<PrefixExpr>),
 
 		Throw(NodeId<Expr>),
+		If(NodeId<If>),
+		Let(NodeId<Let>),
 	}
 }
 
@@ -341,6 +367,22 @@ ast_type! {
 	pub struct Transaction {
 		pub statements: Option<NodeListId<TopLevelExpr>>,
 		pub commits: bool,
+	}
+}
+
+ast_type! {
+	pub struct If{
+		pub condition: NodeId<Expr>,
+		pub then: NodeId<Expr>,
+		pub otherwise: Option<NodeId<Expr>>,
+	}
+}
+
+ast_type! {
+	pub struct Let{
+		pub param: NodeId<Param>,
+		// TODO: Kind,
+		pub expr: NodeId<Expr>,
 	}
 }
 
@@ -390,7 +432,7 @@ ast_type! {
 ast_type! {
 	pub enum PathSegment{
 		Ident(NodeId<Ident>),
-		Version(Spanned<Version>),
+		Version(Version),
 	}
 }
 

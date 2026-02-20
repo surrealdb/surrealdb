@@ -1,5 +1,5 @@
 use ast::Expr;
-use token::{BaseTokenKind, T};
+use token::T;
 
 use super::Parser;
 use crate::Parse;
@@ -60,5 +60,28 @@ impl Parse for ast::If {
 				span,
 			})
 		}
+	}
+}
+
+impl Parse for ast::Let {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start = parser.expect(T![LET])?;
+
+		let param = parser.parse_sync_push()?;
+
+		if parser.eat(T![:])?.is_some() {
+			return parser.todo();
+		}
+
+		let _ = parser.expect(T![=])?;
+
+		let expr = parser.parse_enter_push().await?;
+		let span = parser.span_since(start.span);
+
+		Ok(ast::Let {
+			param,
+			expr,
+			span,
+		})
 	}
 }

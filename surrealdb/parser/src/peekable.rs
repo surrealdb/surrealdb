@@ -152,8 +152,8 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 	pub fn eof_span(&self) -> Span {
 		let offset = self.lexer.source().len() as u32;
 		Span {
-			start: offset - 1,
-			end: offset - 1,
+			start: offset.saturating_sub(1),
+			end: offset.saturating_sub(1),
 		}
 	}
 }
