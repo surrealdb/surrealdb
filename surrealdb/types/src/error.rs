@@ -255,6 +255,18 @@ impl Error {
 		}
 	}
 
+	/// Build an error from a message and pre-parsed [`ErrorDetails`].
+	/// Uses [`default_code`] for the wire code. Intended for deserialization paths
+	/// that already have a typed `ErrorDetails` (e.g. via `ErrorDetails::from_value`).
+	#[doc(hidden)]
+	pub fn from_details(message: String, details: ErrorDetails) -> Self {
+		Self {
+			code: default_code(),
+			message,
+			details,
+		}
+	}
+
 	/// Build an error from the query-result wire shape (message, optional kind string, details).
 	/// Used when deserialising query result error payloads that do not include `code`. Uses
 	/// [`default_code`] and defaults kind to "Internal" when not present.
@@ -423,8 +435,10 @@ impl Error {
 ///     _ => ...,
 /// }
 /// ```
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
 #[non_exhaustive]
+#[surreal(crate = "crate")]
+#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 pub enum ErrorDetails {
 	/// Validation error (parse error, invalid request/params).
 	Validation(Option<ValidationError>),
@@ -445,6 +459,8 @@ pub enum ErrorDetails {
 	/// User-thrown error (THROW in SurrealQL). No detail type.
 	Thrown,
 	/// Internal/unexpected error. No detail type.
+	/// Acts as a catch-all for unknown kinds during deserialization (forward compatibility).
+	#[surreal(other)]
 	Internal,
 }
 
@@ -565,70 +581,6 @@ impl ErrorDetails {
 			Self::AlreadyExists(d) => d.is_some(),
 			Self::Connection(d) => d.is_some(),
 			Self::Thrown | Self::Internal => false,
-		}
-	}
-}
-
-impl SurrealValue for ErrorDetails {
-	fn kind_of() -> Kind {
-		Kind::Object
-	}
-
-	fn is_value(value: &Value) -> bool {
-		matches!(value, Value::Object(_))
-	}
-
-	/// Serializes as `{ "kind": "<variant>", "details": <inner> }`.
-	/// When flattened into Error, this merges `kind` and `details` into the parent object.
-	fn into_value(self) -> Value {
-		let mut obj = Object::new();
-		obj.insert("kind", Value::String(self.kind_str().to_string()));
-		match self {
-			Self::Validation(Some(d)) => {
-				obj.insert("details", d.into_value());
-			}
-			Self::Configuration(Some(d)) => {
-				obj.insert("details", d.into_value());
-			}
-			Self::Query(Some(d)) => {
-				obj.insert("details", d.into_value());
-			}
-			Self::Serialization(Some(d)) => {
-				obj.insert("details", d.into_value());
-			}
-			Self::NotAllowed(Some(d)) => {
-				obj.insert("details", d.into_value());
-			}
-			Self::NotFound(Some(d)) => {
-				obj.insert("details", d.into_value());
-			}
-			Self::AlreadyExists(Some(d)) => {
-				obj.insert("details", d.into_value());
-			}
-			Self::Connection(Some(d)) => {
-				obj.insert("details", d.into_value());
-			}
-			// No inner data -- just kind, no details field
-			_ => {}
-		}
-		Value::Object(obj)
-	}
-
-	/// Deserializes from `{ "kind": "<variant>", "details"?: <inner> }`.
-	fn from_value(value: Value) -> Result<Self, Error> {
-		let Value::Object(mut map) = value else {
-			return Err(Error::internal("Expected object for ErrorDetails".to_string()));
-		};
-		let kind_str = map
-			.remove("kind")
-			.and_then(|v| match v {
-				Value::String(s) => Some(s),
-				_ => None,
-			})
-			.unwrap_or_else(|| "Internal".to_string());
-		match map.remove("details") {
-			Some(v) => Self::from_value_with_kind_str(&kind_str, v),
-			None => Ok(Self::from_kind_str(&kind_str)),
 		}
 	}
 }
