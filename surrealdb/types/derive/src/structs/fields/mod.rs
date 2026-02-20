@@ -741,18 +741,25 @@ impl Fields {
 						tag,
 						variant,
 						content,
-						..
-					} => With::Map(quote! {{
-						if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
-							if let Some(#value_ty::Object(map)) = map.get(#content) {
-								let mut valid = true;
-								#(#field_checks)*
-								return valid;
-							}
+						skip_content,
+					} => {
+						let on_missing = if skip_content.is_some() {
+							quote!(return true;)
+						} else {
+							quote!(return false;)
+						};
+						With::Map(quote! {{
+							if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
+								if let Some(#value_ty::Object(map)) = map.get(#content) {
+									let mut valid = true;
+									#(#field_checks)*
+									return valid;
+								}
 
-							return false;
-						}
-					}}),
+								#on_missing
+							}
+						}})
+					}
 					Strategy::Value {
 						..
 					} => With::Map(quote! {{
@@ -846,16 +853,24 @@ impl Fields {
 							tag,
 							variant,
 							content,
-							..
-						} => With::Map(quote! {{
-							if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
-								if let Some(value) = map.get(#content) {
-									let mut valid = true;
-									#check_value
-									return valid;
+							skip_content,
+						} => {
+							let on_missing = if skip_content.is_some() {
+								quote!(return true;)
+							} else {
+								quote!()
+							};
+							With::Map(quote! {{
+								if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
+									if let Some(value) = map.get(#content) {
+										let mut valid = true;
+										#check_value
+										return valid;
+									}
+									#on_missing
 								}
-							}
-						}}),
+							}})
+						}
 						Strategy::Value {
 							..
 						} => With::Arr(quote! {{

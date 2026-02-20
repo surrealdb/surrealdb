@@ -158,6 +158,18 @@ fn test_skip_content_tuple_is_value() {
 	})));
 }
 
+// -- is_value with absent content (skip_content_if) --
+
+#[test]
+fn test_skip_content_named_is_value_absent_content() {
+	assert!(TestSkipContent::is_value(&Value::Object(object! { kind: "Named" })));
+}
+
+#[test]
+fn test_skip_content_tuple_is_value_absent_content() {
+	assert!(TestSkipContent::is_value(&Value::Object(object! { kind: "Tuple" })));
+}
+
 // -- Rejection --
 
 #[test]
