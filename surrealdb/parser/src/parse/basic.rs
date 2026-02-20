@@ -23,6 +23,19 @@ impl ParseSync for ast::Ident {
 	}
 }
 
+impl ParseSync for ast::Param {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let token = parser.expect(BaseTokenKind::Param)?;
+		let str_value = parser.unescape_param(token)?.to_owned();
+		let text = parser.push_set(str_value);
+
+		Ok(ast::Param {
+			text,
+			span: token.span,
+		})
+	}
+}
+
 impl ParseSync for f64 {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
 		let token = parser.expect(BaseTokenKind::Float)?;

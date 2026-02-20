@@ -56,6 +56,29 @@ impl Span {
 	}
 
 	#[inline]
+	pub fn from_usize_range<R>(r: R) -> Option<Self>
+	where
+		R: RangeBounds<usize>,
+	{
+		let start = match r.start_bound() {
+			std::ops::Bound::Included(x) => u32::try_from(*x).ok()?,
+			std::ops::Bound::Excluded(x) => u32::try_from(*x).ok()?.saturating_add(1),
+			std::ops::Bound::Unbounded => u32::MAX,
+		};
+
+		let end = match r.end_bound() {
+			std::ops::Bound::Excluded(x) => u32::try_from(*x).ok()?,
+			std::ops::Bound::Included(x) => u32::try_from(*x).ok()?.saturating_add(1),
+			std::ops::Bound::Unbounded => u32::MAX,
+		};
+
+		Some(Span {
+			start,
+			end,
+		})
+	}
+
+	#[inline]
 	pub fn to_range(&self) -> Range<u32> {
 		self.start..self.end
 	}
@@ -79,6 +102,19 @@ impl Span {
 		Span {
 			start: self.start.min(other.start),
 			end: self.end.max(other.end),
+		}
+	}
+
+	/// Returns a span for the range of bytes specified by the given span as sub span with in the
+	/// current span.
+	///
+	/// # Panic
+	/// Will panic if the sub span is not fully within the current span.
+	pub fn sub_span(&self, other: Span) -> Self {
+		assert!(self.start + other.end <= self.end);
+		Span {
+			start: self.start + other.start,
+			end: self.start + other.end,
 		}
 	}
 }
