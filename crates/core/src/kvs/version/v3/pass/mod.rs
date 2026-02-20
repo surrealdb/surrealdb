@@ -1678,7 +1678,7 @@ impl Visitor for MigratorPass<'_> {
 					}
 					self.visit_idiom(&v.0)?;
 					write!(self.w, " {} ", v.1)?;
-					self.visit_value(&v.2)?;
+					self.with_state(|s| s.with_breaking_storage(), |this| this.visit_value(&v.2))?;
 				}
 			}
 			Data::UnsetExpression(idioms) => {
@@ -1692,19 +1692,19 @@ impl Visitor for MigratorPass<'_> {
 			}
 			Data::PatchExpression(value) => {
 				self.w.write_str("PATCH ")?;
-				self.visit_value(value)?;
+				self.with_state(|s| s.with_breaking_storage(), |this| this.visit_value(value))?;
 			}
 			Data::MergeExpression(value) => {
 				self.w.write_str("MERGE ")?;
-				self.visit_value(value)?;
+				self.with_state(|s| s.with_breaking_storage(), |this| this.visit_value(value))?;
 			}
 			Data::ReplaceExpression(value) => {
 				self.w.write_str("REPLACE ")?;
-				self.visit_value(value)?;
+				self.with_state(|s| s.with_breaking_storage(), |this| this.visit_value(value))?;
 			}
 			Data::ContentExpression(value) => {
 				self.w.write_str("CONTENT ")?;
-				self.visit_value(value)?;
+				self.with_state(|s| s.with_breaking_storage(), |this| this.visit_value(value))?;
 			}
 			Data::SingleExpression(value) => {
 				self.visit_value(value)?;
@@ -1730,7 +1730,10 @@ impl Visitor for MigratorPass<'_> {
 						if idx != 0 {
 							self.w.write_str(",")?;
 						}
-						self.visit_value(&i.1)?;
+						self.with_state(
+							|s| s.with_breaking_storage(),
+							|this| this.visit_value(&i.1),
+						)?;
 					}
 					self.w.write_str(")")?;
 				}
@@ -1745,7 +1748,7 @@ impl Visitor for MigratorPass<'_> {
 					self.w.write_char(' ')?;
 					self.visit_operator(&v.1)?;
 					self.w.write_char(' ')?;
-					self.visit_value(&v.2)?;
+					self.with_state(|s| s.with_breaking_storage(), |this| this.visit_value(&v.2))?;
 				}
 			}
 		}
@@ -2017,7 +2020,14 @@ impl Visitor for MigratorPass<'_> {
 					if idx != 0 {
 						self.w.write_str(", ")?;
 					}
-					self.visit_value(e)?;
+					self.with_state(
+						|s| PassState {
+							breaking_futures: false,
+							breaking_closures: false,
+							..s
+						},
+						|this| this.visit_value(e),
+					)?;
 				}
 				self.w.write_char(')')?;
 				let after = self.w.location();
@@ -2030,7 +2040,14 @@ impl Visitor for MigratorPass<'_> {
 					if idx != 0 {
 						self.w.write_str(", ")?;
 					}
-					self.visit_value(e)?;
+					self.with_state(
+						|s| PassState {
+							breaking_futures: false,
+							breaking_closures: false,
+							..s
+						},
+						|this| this.visit_value(e),
+					)?;
 				}
 				self.w.write_char(')')
 			}
@@ -2040,7 +2057,14 @@ impl Visitor for MigratorPass<'_> {
 					if idx != 0 {
 						self.w.write_str(", ")?;
 					}
-					self.visit_value(e)?;
+					self.with_state(
+						|s| PassState {
+							breaking_futures: false,
+							breaking_closures: false,
+							..s
+						},
+						|this| this.visit_value(e),
+					)?;
 				}
 				self.w.write_str("){")?;
 				self.w.write_str(s.0.as_str())?;
@@ -2055,7 +2079,14 @@ impl Visitor for MigratorPass<'_> {
 					if idx != 0 {
 						self.w.write_str(",")?;
 					}
-					self.visit_value(e)?;
+					self.with_state(
+						|s| PassState {
+							breaking_futures: false,
+							breaking_closures: false,
+							..s
+						},
+						|this| this.visit_value(e),
+					)?;
 				}
 				self.w.write_char(')')
 			}
@@ -2174,7 +2205,18 @@ impl Visitor for MigratorPass<'_> {
 				self.w.write_char('(')?;
 			}
 
-			self.visit_entry(e)?;
+			if idx != value.0.len() - 1 {
+				self.with_state(
+					|s| PassState {
+						breaking_futures: false,
+						breaking_closures: false,
+						..s
+					},
+					|this| this.visit_entry(e),
+				)?;
+			} else {
+				self.visit_entry(e)?;
+			}
 
 			if escape {
 				self.w.write_char(')')?;
@@ -2454,6 +2496,8 @@ impl Visitor for MigratorPass<'_> {
 				self.with_state(
 					|s| PassState {
 						non_expression_idiom: false,
+						breaking_futures: false,
+						breaking_closures: false,
 						..s
 					},
 					|this| this.visit_value(value),
@@ -2466,6 +2510,8 @@ impl Visitor for MigratorPass<'_> {
 				self.with_state(
 					|s| PassState {
 						non_expression_idiom: false,
+						breaking_futures: false,
+						breaking_closures: false,
 						..s
 					},
 					|this| this.visit_value(value),
@@ -2491,6 +2537,8 @@ impl Visitor for MigratorPass<'_> {
 					self.with_state(
 						|s| PassState {
 							non_expression_idiom: false,
+							breaking_futures: false,
+							breaking_closures: false,
 							..s
 						},
 						|this| this.visit_value(v),

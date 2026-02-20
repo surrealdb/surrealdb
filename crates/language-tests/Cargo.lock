@@ -2061,15 +2061,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nanoid"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ffa00dec017b5b1a8b7cf5e2c008bfda1aa7e0697ac1508b491fdf2622fb4d8"
-dependencies = [
- "rand 0.8.5",
-]
-
-[[package]]
 name = "ndarray"
 version = "0.15.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3380,7 +3371,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surrealdb-core"
-version = "2.6.0"
+version = "2.6.2"
 dependencies = [
  "addr",
  "affinitypool",
@@ -3418,7 +3409,6 @@ dependencies = [
  "lexicmp",
  "linfa-linalg",
  "md-5",
- "nanoid",
  "ndarray",
  "ndarray-stats",
  "num-traits",
