@@ -592,26 +592,35 @@ impl ErrorDetails {
 /// Auth failure reason for [`ErrorKind::NotAllowed`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
 #[surreal(crate = "crate")]
-#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(tag = "kind", content = "details")]
 #[non_exhaustive]
 pub enum AuthError {
 	/// The token used for authentication has expired.
+	#[surreal(skip_content)]
 	TokenExpired,
 	/// The session has expired.
+	#[surreal(skip_content)]
 	SessionExpired,
 	/// Authentication failed (invalid credentials or similar).
+	#[surreal(skip_content)]
 	InvalidAuth,
 	/// Unexpected error while performing authentication.
+	#[surreal(skip_content)]
 	UnexpectedAuth,
 	/// Username or password was not provided.
+	#[surreal(skip_content)]
 	MissingUserOrPass,
 	/// No signin target (SC, DB, NS, or KV) specified.
+	#[surreal(skip_content)]
 	NoSigninTarget,
 	/// The password did not verify.
+	#[surreal(skip_content)]
 	InvalidPass,
 	/// Failed to create the authentication token.
+	#[surreal(skip_content)]
 	TokenMakingFailed,
 	/// Signup failed.
+	#[surreal(skip_content)]
 	InvalidSignup,
 	/// Invalid role (IAM). Carries the role name.
 	InvalidRole {
@@ -638,18 +647,23 @@ impl From<AuthError> for Option<NotAllowedError> {
 /// Validation failure reason for [`ErrorKind::Validation`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
 #[surreal(crate = "crate")]
-#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(tag = "kind", content = "details")]
 #[non_exhaustive]
 pub enum ValidationError {
 	/// Parse error (invalid message or request format).
+	#[surreal(skip_content)]
 	Parse,
 	/// Invalid request structure.
+	#[surreal(skip_content)]
 	InvalidRequest,
 	/// Invalid parameters.
+	#[surreal(skip_content)]
 	InvalidParams,
 	/// Namespace is empty.
+	#[surreal(skip_content)]
 	NamespaceEmpty,
 	/// Database is empty.
+	#[surreal(skip_content)]
 	DatabaseEmpty,
 	/// Invalid parameter with name.
 	InvalidParameter {
@@ -671,10 +685,11 @@ pub enum ValidationError {
 /// Not-allowed reason for [`ErrorKind::NotAllowed`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
 #[surreal(crate = "crate")]
-#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(tag = "kind", content = "details")]
 #[non_exhaustive]
 pub enum NotAllowedError {
 	/// Scripting not allowed.
+	#[surreal(skip_content)]
 	Scripting,
 	/// Authentication or authorisation failure.
 	Auth(AuthError),
@@ -698,7 +713,7 @@ pub enum NotAllowedError {
 /// Configuration failure reason for [`ErrorKind::Configuration`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
 #[surreal(crate = "crate")]
-#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(tag = "kind", skip_content)]
 #[non_exhaustive]
 pub enum ConfigurationError {
 	/// Live query not supported.
@@ -712,7 +727,7 @@ pub enum ConfigurationError {
 /// Serialisation failure reason for [`ErrorKind::Serialization`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
 #[surreal(crate = "crate")]
-#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(tag = "kind", skip_content)]
 #[non_exhaustive]
 pub enum SerializationError {
 	/// Serialisation error.
@@ -724,7 +739,7 @@ pub enum SerializationError {
 /// Not-found reason for [`ErrorKind::NotFound`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
 #[surreal(crate = "crate")]
-#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(tag = "kind", content = "details")]
 #[non_exhaustive]
 pub enum NotFoundError {
 	/// RPC method not found.
@@ -758,16 +773,18 @@ pub enum NotFoundError {
 		name: String,
 	},
 	/// Transaction not found.
+	#[surreal(skip_content)]
 	Transaction,
 }
 
 /// Query failure reason for [`ErrorKind::Query`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
 #[surreal(crate = "crate")]
-#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(tag = "kind", content = "details")]
 #[non_exhaustive]
 pub enum QueryError {
 	/// Query was not executed.
+	#[surreal(skip_content)]
 	NotExecuted,
 	/// Query timed out.
 	TimedOut {
@@ -775,13 +792,14 @@ pub enum QueryError {
 		duration: Duration,
 	},
 	/// Query was cancelled.
+	#[surreal(skip_content)]
 	Cancelled,
 }
 
 /// Already-exists reason for [`ErrorKind::AlreadyExists`] errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
 #[surreal(crate = "crate")]
-#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(tag = "kind", content = "details")]
 #[non_exhaustive]
 pub enum AlreadyExistsError {
 	/// Session already exists.
@@ -815,7 +833,7 @@ pub enum AlreadyExistsError {
 /// Used in the SDK for client-side connection state errors.
 #[derive(Clone, Debug, PartialEq, Eq, SurrealValue)]
 #[surreal(crate = "crate")]
-#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+#[surreal(tag = "kind", skip_content)]
 #[non_exhaustive]
 pub enum ConnectionError {
 	/// Connection was used before being initialised.

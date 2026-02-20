@@ -19,6 +19,7 @@ pub struct NamedField {
 pub struct NamedFields {
 	pub fields: Vec<NamedField>,
 	pub default: bool,
+	pub skip_content: Option<crate::SkipContent>,
 }
 
 impl NamedFields {
@@ -141,7 +142,7 @@ impl NamedFields {
 	}
 
 	/// Generates `let field_name = Default::default();` for each field.
-	/// Used as a fallback when content is missing during deserialization with `skip_content_if`.
+	/// Used as a fallback when content is missing during deserialization with `skip_content`.
 	pub fn default_initializers(&self) -> Vec<TokenStream2> {
 		self.fields
 			.iter()

@@ -8,6 +8,8 @@ pub struct EnumAttributes {
 	pub tag: Option<String>,
 	/// Content field name for adjacently tagged enums
 	pub content: Option<String>,
+	/// When true, always skip content for all variants (enum-level `skip_content`).
+	pub skip_content: bool,
 	/// Optional function path to check whether to skip the content field during serialization.
 	/// When set, the function is called with `&Value` for non-unit variants; unit variants
 	/// always skip the content field. Used with adjacently tagged enums (`tag` + `content`).
@@ -37,7 +39,19 @@ impl EnumAttributes {
 						{
 							enum_attrs.content = Some(lit_str.value());
 						}
+					} else if meta.path.is_ident("skip_content") {
+						if enum_attrs.skip_content_if.is_some() {
+							panic!(
+								"Cannot use both skip_content and skip_content_if on the same enum"
+							);
+						}
+						enum_attrs.skip_content = true;
 					} else if meta.path.is_ident("skip_content_if") {
+						if enum_attrs.skip_content_if.is_some() || enum_attrs.skip_content {
+							panic!(
+								"Cannot use both skip_content and skip_content_if on the same enum"
+							);
+						}
 						if let Ok(value) = meta.value()
 							&& let Ok(lit_str) = value.parse::<LitStr>()
 						{

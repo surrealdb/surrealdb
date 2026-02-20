@@ -10,6 +10,9 @@ pub struct UnitAttributes {
 	/// If no other variant matches, this variant is returned instead of an error.
 	/// Only valid on unit variants. At most one variant per enum should have this.
 	pub other: bool,
+	/// When true, always skip the content field for this variant.
+	/// Valid with `tag + content` enums. Overrides enum-level `skip_content_if`.
+	pub skip_content: bool,
 }
 
 impl UnitAttributes {
@@ -25,9 +28,13 @@ impl UnitAttributes {
 						};
 
 						variant_attrs.value = Some(UnitValue::parse(value));
-					} else if meta.path.is_ident("other") {
-						variant_attrs.other = true;
-					}
+				} else if meta.path.is_ident("other") {
+					variant_attrs.other = true;
+				} else if meta.path.is_ident("skip_content") {
+					variant_attrs.skip_content = true;
+				} else if meta.path.is_ident("skip_content_if") {
+					panic!("skip_content_if is not valid on unit variants (there is no content to check); use skip_content instead");
+				}
 
 					Ok(())
 				})

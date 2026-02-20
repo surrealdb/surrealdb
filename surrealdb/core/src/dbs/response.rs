@@ -3,9 +3,7 @@ use std::time::Duration;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{
-	Error as TypesError, ErrorDetails, Kind, SurrealValue, Value, kind, object,
-};
+use surrealdb_types::{Error as TypesError, ErrorDetails, Kind, SurrealValue, Value, kind, object};
 use web_time::Instant;
 
 use crate::expr::TopLevelExpr;
@@ -383,7 +381,7 @@ mod tests {
 	fn query_result_error_round_trip_no_inner_details() {
 		let err = TypesError::internal("Something went wrong".into());
 		let qr = error_query_result(err);
-		let val = qr.clone().into_value();
+		let val = qr.into_value();
 
 		let Value::Object(ref obj) = val else {
 			panic!("Expected object");

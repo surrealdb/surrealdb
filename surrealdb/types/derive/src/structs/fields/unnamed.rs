@@ -7,10 +7,15 @@ pub struct UnnamedFields {
 	pub fields: Vec<syn::Type>,
 	pub field_names: Vec<Ident>,
 	pub tuple: bool,
+	pub skip_content: Option<crate::SkipContent>,
 }
 
 impl UnnamedFields {
-	pub fn new(fields: Vec<syn::Type>, tuple: bool) -> Self {
+	pub fn new(
+		fields: Vec<syn::Type>,
+		tuple: bool,
+		skip_content: Option<crate::SkipContent>,
+	) -> Self {
 		let field_names = fields
 			.iter()
 			.enumerate()
@@ -21,6 +26,7 @@ impl UnnamedFields {
 			fields,
 			field_names,
 			tuple,
+			skip_content,
 		}
 	}
 
@@ -51,7 +57,7 @@ impl UnnamedFields {
 	}
 
 	/// Generates `let field_N = Default::default();` for each field.
-	/// Used as a fallback when content is missing during deserialization with `skip_content_if`.
+	/// Used as a fallback when content is missing during deserialization with `skip_content`.
 	pub fn default_initializers(&self) -> Vec<TokenStream2> {
 		self.fields
 			.iter()

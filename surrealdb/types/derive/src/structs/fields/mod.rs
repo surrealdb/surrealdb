@@ -8,8 +8,8 @@ use syn::Attribute;
 pub use unnamed::*;
 
 use crate::{
-	CratePath, FieldAttributes, NamedFieldsAttributes, Strategy, UnitAttributes, UnitValue,
-	UnnamedFieldsAttributes, With,
+	CratePath, FieldAttributes, NamedFieldsAttributes, SkipContent, Strategy, UnitAttributes,
+	UnitValue, UnnamedFieldsAttributes, With,
 };
 
 #[derive(Debug)]
@@ -44,13 +44,18 @@ impl Fields {
 				Fields::Named(NamedFields {
 					fields,
 					default: container_attrs.default,
+					skip_content: container_attrs.skip_content,
 				})
 			}
 			syn::Fields::Unnamed(unnamed_fields) => {
 				let unnamed_field_attrs = UnnamedFieldsAttributes::parse(attrs);
 				let fields = unnamed_fields.unnamed.iter().map(|field| field.ty.clone()).collect();
 
-				Fields::Unnamed(UnnamedFields::new(fields, unnamed_field_attrs.tuple))
+				Fields::Unnamed(UnnamedFields::new(
+					fields,
+					unnamed_field_attrs.tuple,
+					unnamed_field_attrs.skip_content,
+				))
 			}
 			syn::Fields::Unit => Fields::Unit(UnitAttributes::parse(attrs)),
 		}
@@ -61,6 +66,16 @@ impl Fields {
 			Fields::Named(_) => true,
 			Fields::Unnamed(_) => true,
 			Fields::Unit(_) => false,
+		}
+	}
+
+	/// Returns the per-variant skip_content setting, if any.
+	pub fn skip_content(&self) -> Option<&SkipContent> {
+		match self {
+			Fields::Named(f) => f.skip_content.as_ref(),
+			Fields::Unnamed(f) => f.skip_content.as_ref(),
+			Fields::Unit(a) if a.skip_content => Some(&SkipContent::Always),
+			Fields::Unit(_) => None,
 		}
 	}
 
@@ -128,9 +143,16 @@ impl Fields {
 						tag,
 						variant,
 						content,
-						skip_content_if,
-					} => {
-						if let Some(func) = skip_content_if {
+						skip_content,
+					} => match skip_content {
+						Some(SkipContent::Always) => {
+							quote! {{
+								let mut map = #object_ty::new();
+								map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
+								#value_ty::Object(map)
+							}}
+						}
+						Some(SkipContent::If(func)) => {
 							quote! {{
 								let mut map = #object_ty::new();
 								map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
@@ -144,7 +166,8 @@ impl Fields {
 								}
 								#value_ty::Object(map)
 							}}
-						} else {
+						}
+						None => {
 							quote! {{
 								let mut map = #object_ty::new();
 								map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
@@ -156,7 +179,7 @@ impl Fields {
 								#value_ty::Object(map)
 							}}
 						}
-					}
+					},
 					Strategy::Value {
 						..
 					} => {
@@ -199,9 +222,16 @@ impl Fields {
 						tag,
 						variant,
 						content,
-						skip_content_if,
-					} => {
-						if let Some(func) = skip_content_if {
+						skip_content,
+					} => match skip_content {
+						Some(SkipContent::Always) => {
+							quote! {{
+								let mut map = #object_ty::new();
+								map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
+								#value_ty::Object(map)
+							}}
+						}
+						Some(SkipContent::If(func)) => {
 							quote! {{
 								let mut map = #object_ty::new();
 								map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
@@ -211,7 +241,8 @@ impl Fields {
 								}
 								#value_ty::Object(map)
 							}}
-						} else {
+						}
+						None => {
 							quote! {{
 								let mut map = #object_ty::new();
 								map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
@@ -219,7 +250,7 @@ impl Fields {
 								#value_ty::Object(map)
 							}}
 						}
-					}
+					},
 					Strategy::Value {
 						..
 					} => value,
@@ -257,14 +288,13 @@ impl Fields {
 					tag,
 					variant,
 					content,
-					skip_content_if,
+					skip_content,
 				} => {
 					if attrs.value.is_some() {
 						panic!("Unit variants can only have a value with untagged enums");
 					}
 
-					if skip_content_if.is_some() {
-						// Unit variant has no data -- skip the content field entirely
+					if skip_content.is_some() {
 						quote! {{
 							let mut map = #object_ty::new();
 							map.insert(#tag.to_string(), #value_ty::String(#variant.to_string()));
@@ -354,11 +384,9 @@ impl Fields {
 						tag,
 						variant,
 						content,
-						skip_content_if,
+						skip_content,
 					} => {
-						if skip_content_if.is_some() {
-							// When skip_content_if is set, accept missing content by falling
-							// back to Default::default() for all fields
+						if skip_content.is_some() {
 							let default_inits = fields.default_initializers();
 							With::Map(quote! {{
 								if map.get(#tag).is_some_and(|v| v == Value::String(#variant.to_string())) {
@@ -438,19 +466,34 @@ impl Fields {
 							tag,
 							variant,
 							content,
-							..
-						} => With::Map(quote! {{
-							if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
-								if let Some(value) = map.remove(#content) {
-									#retrieve
-								} else {
-									let err = #type_error_ty::Invalid(
-										format!("Expected content key '{}' for variant '{}'", #content, #variant)
-									);
-									return Err(err.into())
-								}
+							skip_content,
+						} => {
+							if skip_content.is_some() {
+								With::Map(quote! {{
+									if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
+										if let Some(value) = map.remove(#content) {
+											#retrieve
+										} else {
+											let field_0 = <#ty as Default>::default();
+											#ok
+										}
+									}
+								}})
+							} else {
+								With::Map(quote! {{
+									if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
+										if let Some(value) = map.remove(#content) {
+											#retrieve
+										} else {
+											let err = #type_error_ty::Invalid(
+												format!("Expected content key '{}' for variant '{}'", #content, #variant)
+											);
+											return Err(err.into())
+										}
+									}
+								}})
 							}
-						}}),
+						}
 						// For an enum, we check first if the variant matches, then decode
 						Strategy::Value {
 							variant: Some(_),
@@ -500,9 +543,9 @@ impl Fields {
 							tag,
 							variant,
 							content,
-							skip_content_if,
+							skip_content,
 						} => {
-							if skip_content_if.is_some() {
+							if skip_content.is_some() {
 								let default_inits = fields.default_initializers();
 								With::Map(quote! {{
 									if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
@@ -570,10 +613,9 @@ impl Fields {
 						tag,
 						variant,
 						content,
-						skip_content_if,
+						skip_content,
 					} => {
-						if skip_content_if.is_some() {
-							// Accept both { kind: "X" } and { kind: "X", details: {} }
+						if skip_content.is_some() {
 							With::Map(quote! {{
 								if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
 									if !map.contains_key(#content)
@@ -736,14 +778,27 @@ impl Fields {
 							tag,
 							variant,
 							content,
-							..
-						} => With::Map(quote! {{
-							if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
-								if let Some(value) = map.get(#content) {
-									return #check;
-								}
+							skip_content,
+						} => {
+							if skip_content.is_some() {
+								With::Map(quote! {{
+									if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
+										if let Some(value) = map.get(#content) {
+											return #check;
+										}
+										return true;
+									}
+								}})
+							} else {
+								With::Map(quote! {{
+									if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) {
+										if let Some(value) = map.get(#content) {
+											return #check;
+										}
+									}
+								}})
 							}
-						}}),
+						}
 						Strategy::Value {
 							..
 						} => With::Value(quote! {{
@@ -824,10 +879,9 @@ impl Fields {
 					tag,
 					variant,
 					content,
-					skip_content_if,
+					skip_content,
 				} => {
-					if skip_content_if.is_some() {
-						// Accept both { kind: "X" } and { kind: "X", details: {} }
+					if skip_content.is_some() {
 						With::Map(quote! {{
 							if map.get(#tag).is_some_and(|v| v.is_string_and(|s| s == #variant)) &&
 								(!map.contains_key(#content)
