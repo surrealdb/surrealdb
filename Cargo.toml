@@ -71,8 +71,8 @@ revision = { version = "0.17.0", features = [
 ] }
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
 surrealkv = "0.20.2"
-surrealmx = "0.17.0"
-trice = "0.4.0"
+surrealmx = "0.18.0"
+web-time = "1.1.0"
 vart = "0.9.3"
 ## Maintained by @Delskayn
 js = { version = "0.11.0", package = "rquickjs", features = ["rust-alloc"] }
@@ -266,6 +266,7 @@ nix = { workspace = true, features = ["signal", "user"] }
 [dev-dependencies]
 assert_fs = "1.1.3"
 chrono.workspace = true
+web-time.workspace = true
 ciborium.workspace = true
 futures.workspace = true
 futures-util.workspace = true
