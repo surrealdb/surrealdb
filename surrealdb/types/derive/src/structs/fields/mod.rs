@@ -390,12 +390,21 @@ impl Fields {
 							let default_inits = fields.default_initializers();
 							With::Map(quote! {{
 								if map.get(#tag).is_some_and(|v| v == Value::String(#variant.to_string())) {
-									if let Some(#value_ty::Object(mut map)) = map.remove(#content) {
-										#(#map_retrievals)*
-										#final_ok
-									} else {
-										#(#default_inits)*
-										#final_ok
+									match map.remove(#content) {
+										Some(#value_ty::Object(mut map)) => {
+											#(#map_retrievals)*
+											#final_ok
+										}
+										None => {
+											#(#default_inits)*
+											#final_ok
+										}
+										Some(other) => {
+											let err = #type_error_ty::Invalid(
+												format!("Expected object or absent content for variant '{}', got {:?}", #variant, other.kind())
+											);
+											return Err(err.into())
+										}
 									}
 								}
 							}})

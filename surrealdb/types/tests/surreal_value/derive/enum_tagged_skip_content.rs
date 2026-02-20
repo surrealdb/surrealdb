@@ -230,6 +230,21 @@ fn test_skip_content_named_with_content_still_works() {
 }
 
 // -------------------------------------------------
+// Invalid content should error, not silently default
+// -------------------------------------------------
+
+#[test]
+fn test_skip_content_named_invalid_content_errors() {
+	// Content is present but is a String instead of an Object -- should error,
+	// not silently fall back to defaults.
+	let val = Value::Object(object! { kind: "Named", details: "not_an_object" });
+	assert!(
+		TestSkipContentWithDefault::from_value(val).is_err(),
+		"Named variant with non-Object content should error, not silently default"
+	);
+}
+
+// -------------------------------------------------
 // Enum WITHOUT skip_content_if (old behavior)
 // -------------------------------------------------
 
