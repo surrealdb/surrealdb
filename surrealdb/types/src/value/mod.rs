@@ -764,6 +764,22 @@ impl ToSql for Value {
 	}
 }
 
+impl std::fmt::Display for Value {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		match self {
+			Value::None => write!(f, "NONE"),
+			Value::Null => write!(f, "NULL"),
+			Value::Bool(v) => write!(f, "{}", v),
+			Value::Number(v) => write!(f, "{}", v),
+			Value::String(s) => write!(f, "{}", s),
+			Value::Duration(v) => write!(f, "{}", v),
+			Value::Datetime(v) => write!(f, "{}", v),
+			Value::Uuid(v) => write!(f, "{}", v),
+			_ => write!(f, "<unknown>"),
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use std::collections::BTreeMap;
