@@ -1,7 +1,7 @@
 use std::fmt;
 use std::time::Duration;
 
-use crate::{Kind, Object, SurrealValue, ToSql, Value};
+use crate::{Kind, SurrealValue, ToSql, Value};
 
 // -----------------------------------------------------------------------------
 // JSON-RPC 2.0 and SurrealDB-specific error codes (wire backwards compatibility)

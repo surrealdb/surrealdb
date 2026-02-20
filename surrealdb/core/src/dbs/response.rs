@@ -4,7 +4,7 @@ use std::time::Duration;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{
-	Error as TypesError, ErrorDetails, Kind, Object, SurrealValue, Value, kind, object,
+	Error as TypesError, ErrorDetails, Kind, SurrealValue, Value, kind, object,
 };
 use web_time::Instant;
 
@@ -84,14 +84,13 @@ fn into_query_result_value(error: &TypesError) -> Value {
 
 	if let Value::Object(ref mut obj) = details {
 		obj.insert("result", error.message().to_string());
+		details
 	} else {
-		return Value::Object(object! {
+		Value::Object(object! {
 			result: "Failed to serialise error",
 			kind: "Internal",
-		});
+		})
 	}
-
-	return details;
 }
 
 /// Deserialise an error from the query-result wire shape. Requires `result` (message string).
@@ -304,8 +303,9 @@ impl<'de> Deserialize<'de> for QueryResult {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use surrealdb_types::{AuthError, NotAllowedError, NotFoundError, ValidationError};
+
+	use super::*;
 
 	fn error_query_result(error: TypesError) -> QueryResult {
 		QueryResult {
