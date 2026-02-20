@@ -1,5 +1,6 @@
-use ast::{Builtin, Expr, Integer, Point, Sign, Spanned};
+use ast::{Builtin, Expr, Integer, NodeList, ObjectEntry, Point, Sign, Spanned};
 use common::source_error::{AnnotationKind, Level};
+use common::span::Span;
 use token::{BaseTokenKind, T};
 
 use crate::Parse;
@@ -29,6 +30,212 @@ impl Parse for ast::Array {
 			span: parser.span_since(start.span),
 		})
 	}
+}
+
+pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
+	let start = parser.expect(BaseTokenKind::OpenBrace)?;
+
+	let token = parser.peek_expect("`}`")?;
+	let expr = match token.token {
+		BaseTokenKind::String | BaseTokenKind::Ident => {
+			if let Some(T![:]) = parser.peek1()?.map(|x| x.token) {
+				let obj = parse_object_continue(parser, start.span).await?;
+				let obj = parser.push(obj);
+				return Ok(Expr::Object(obj));
+			}
+			parser.parse_enter().await?
+		}
+		BaseTokenKind::CloseBrace => {
+			let _ = parser.next();
+			let span = parser.span_since(start.span);
+			let obj = parser.push(ast::Object {
+				entries: None,
+				span,
+			});
+			return Ok(Expr::Object(obj));
+		}
+		T![;] => {
+			let _ = parser.next();
+			let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseBrace, start.span)?;
+			let span = parser.span_since(start.span);
+			let obj = parser.push(ast::Block {
+				exprs: None,
+				span,
+			});
+			return Ok(Expr::Block(obj));
+		}
+		T![,] => {
+			let _ = parser.next();
+			let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseBrace, start.span)?;
+			let span = parser.span_since(start.span);
+			let obj = parser.push(ast::Set {
+				entries: None,
+				span,
+			});
+			return Ok(Expr::Set(obj));
+		}
+		_ => parser.parse_enter::<Expr>().await?,
+	};
+
+	let mut head = None;
+	let mut tail = None;
+	parser.push_list(expr, &mut head, &mut tail);
+
+	let token = parser.peek_expect("`}`")?;
+	match token.token {
+		T![;] => {
+			let _ = parser.next();
+			loop {
+				while parser.eat(T![;])?.is_some() {}
+
+				if parser.eat(BaseTokenKind::CloseBrace)?.is_some() {
+					break;
+				}
+
+				let expr = parser.parse_enter().await?;
+				parser.push_list(expr, &mut head, &mut tail);
+
+				if parser.eat(T![;])?.is_none() {
+					let _ =
+						parser.expect_closing_delimiter(BaseTokenKind::CloseBrace, start.span)?;
+					break;
+				}
+			}
+			let span = parser.span_since(start.span);
+			let obj = parser.push(ast::Block {
+				exprs: head,
+				span,
+			});
+			Ok(Expr::Block(obj))
+		}
+		T![,] => {
+			let _ = parser.next();
+
+			loop {
+				if parser.eat(BaseTokenKind::CloseBrace)?.is_some() {
+					break;
+				}
+
+				let expr = parser.parse_enter().await?;
+				parser.push_list(expr, &mut head, &mut tail);
+
+				if parser.eat(T![,])?.is_none() {
+					let _ =
+						parser.expect_closing_delimiter(BaseTokenKind::CloseBrace, start.span)?;
+					break;
+				}
+			}
+			let span = parser.span_since(start.span);
+			let obj = parser.push(ast::Set {
+				entries: head,
+				span,
+			});
+			Ok(Expr::Set(obj))
+		}
+		_ => {
+			let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseBrace, start.span)?;
+
+			let span = parser.span_since(start.span);
+			let obj = parser.push(ast::Block {
+				exprs: head,
+				span,
+			});
+			Ok(Expr::Block(obj))
+		}
+	}
+}
+
+async fn parse_object_continue(
+	parser: &mut Parser<'_, '_>,
+	start_span: Span,
+) -> ParseResult<ast::Object> {
+	let next = parser.next()?.expect("there should be an object key in this function");
+
+	let key = match next.token {
+		BaseTokenKind::Ident => {
+			let str = parser.unescape_ident(next)?;
+			let str = str.to_owned();
+			parser.push_set(str)
+		}
+		BaseTokenKind::String => {
+			let str = parser.unescape_str(next)?;
+			let str = str.to_owned();
+			parser.push_set(str)
+		}
+		_ => unreachable!(),
+	};
+
+	let _ = parser.expect(T![:])?;
+
+	let expr = parser.parse_enter_push::<Expr>().await?;
+
+	let entry_span = parser.span_since(next.span);
+
+	let mut head = None;
+	let mut tail = None;
+	parser.push_list(
+		ObjectEntry {
+			key,
+			value: expr,
+			span: entry_span,
+		},
+		&mut head,
+		&mut tail,
+	);
+
+	if parser.eat(T![,])?.is_some() {
+		loop {
+			if parser.eat(BaseTokenKind::CloseBrace)?.is_some() {
+				break;
+			}
+
+			let peek = parser.peek_expect("an object key")?;
+			let key = match peek.token {
+				BaseTokenKind::Ident => {
+					let _ = parser.next();
+					let str = parser.unescape_ident(peek)?;
+					let str = str.to_owned();
+					parser.push_set(str)
+				}
+				BaseTokenKind::String => {
+					let _ = parser.next();
+					let str = parser.unescape_str(peek)?;
+					let str = str.to_owned();
+					parser.push_set(str)
+				}
+				_ => return Err(parser.unexpected("an object key")),
+			};
+
+			let _ = parser.expect(T![:])?;
+
+			let expr = parser.parse_enter_push::<Expr>().await?;
+
+			let entry_span = parser.span_since(peek.span);
+
+			parser.push_list(
+				ObjectEntry {
+					key,
+					value: expr,
+					span: entry_span,
+				},
+				&mut head,
+				&mut tail,
+			);
+
+			if parser.eat(T![,])?.is_none() {
+				let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseBrace, start_span)?;
+				break;
+			}
+		}
+	} else {
+		let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseBrace, start_span)?;
+	}
+
+	let span = parser.span_since(start_span);
+	Ok(ast::Object {
+		entries: head,
+		span,
+	})
 }
 
 impl Parse for ast::Block {
@@ -150,6 +357,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			let p = parser.parse_push().await?;
 			Ok(Expr::Array(p))
 		}
+		BaseTokenKind::OpenBrace => parse_object_like(parser).await,
 		BaseTokenKind::OpenParen => {
 			let _ = parser.next();
 

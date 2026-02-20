@@ -40,6 +40,9 @@ library! {
 
 		point: Vec<Point>,
 		array: Vec<Array>,
+		object: Vec<Object>,
+		object_entry: Vec<ObjectEntry>,
+		object_entrys: Vec<NodeList<ObjectEntry>>,
 
 		binary: Vec<BinaryExpr>,
 		postfix: Vec<PostfixExpr>,
@@ -335,6 +338,28 @@ ast_type! {
 
 ast_type! {
 	#[derive(Copy, Clone)]
+	pub struct Set{
+		pub entries: Option<NodeListId<Expr>>,
+	}
+}
+
+ast_type! {
+	#[derive(Copy, Clone)]
+	pub struct Object{
+		pub entries: Option<NodeListId<ObjectEntry>>,
+	}
+}
+
+ast_type! {
+	#[derive(Copy, Clone)]
+	pub struct ObjectEntry{
+		pub key: NodeId<String>,
+		pub value: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	#[derive(Copy, Clone)]
 	pub enum Expr {
 		Covered(NodeId<Expr>),
 
@@ -346,6 +371,8 @@ ast_type! {
 		Point(NodeId<Point>),
 
 		Array(NodeId<Array>),
+		Object(NodeId<Object>),
+		Set(NodeId<Set>),
 
 		Block(NodeId<Block>),
 
