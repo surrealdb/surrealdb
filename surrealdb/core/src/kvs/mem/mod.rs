@@ -37,6 +37,7 @@ impl Datastore {
 			..Default::default()
 		};
 		// Create the database, optionally with persistence
+		#[cfg(not(target_family = "wasm"))]
 		let db = if let Some(ref persist_path) = config.persist_path {
 			// Build persistence options from config
 			let mut persistence_opts = surrealmx::PersistenceOptions::new(persist_path);
@@ -64,6 +65,8 @@ impl Datastore {
 			// Create a non-persistent database
 			Database::new_with_options(opts)
 		};
+		#[cfg(target_family = "wasm")]
+		let db = Database::new_with_options(opts);
 		// Configure GC retention if a retention period is specified
 		let db = if config.retention_ns > 0 {
 			db.with_gc_history(Duration::from_nanos(config.retention_ns))

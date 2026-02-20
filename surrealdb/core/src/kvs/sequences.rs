@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::ops::Range;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Result;
 use rand::{Rng, thread_rng};
@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
 use uuid::Uuid;
+use web_time::Instant;
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};

@@ -1,9 +1,10 @@
 use std::fmt;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{Error as TypesError, Kind, Object, SurrealValue, Value, kind, object};
+use web_time::Instant;
 
 use crate::expr::TopLevelExpr;
 

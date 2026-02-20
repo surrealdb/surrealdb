@@ -50,7 +50,7 @@ pub(super) fn bench_routine<R>(
 			routine.setup(ds.clone(), session.clone(), num_ops);
 
 			// Run and time the routine
-			let now = std::time::Instant::now();
+			let now = web_time::Instant::now();
 			routine.run(ds.clone(), session.clone(), num_ops);
 			total += now.elapsed();
 

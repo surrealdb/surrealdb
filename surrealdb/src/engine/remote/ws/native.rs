@@ -345,12 +345,12 @@ pub(crate) async fn run_router(
 #[cfg(test)]
 mod tests {
 	use std::io::Write;
-	use std::time::SystemTime;
 
 	use flate2::Compression;
 	use flate2::write::GzEncoder;
 	use rand::{Rng, thread_rng};
 	use surrealdb_core::rpc;
+	use web_time::SystemTime;
 
 	use crate::types::{Array, Value};
 
