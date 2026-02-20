@@ -1005,7 +1005,6 @@ when = "2026-02-17"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
-
 [[publisher.surrealdb-librocksdb-sys]]
 version = "0.17.3+10.6.2"
 when = "2025-10-31"
@@ -1061,7 +1060,6 @@ when = "2026-02-17"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
-
 [[publisher.surrealmx]]
 version = "0.17.0"
 when = "2026-02-17"
