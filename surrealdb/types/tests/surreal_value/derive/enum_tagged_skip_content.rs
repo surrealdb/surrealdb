@@ -158,6 +158,18 @@ fn test_skip_content_tuple_is_value() {
 	})));
 }
 
+// -- is_value with absent content (skip_content_if) --
+
+#[test]
+fn test_skip_content_named_is_value_absent_content() {
+	assert!(TestSkipContent::is_value(&Value::Object(object! { kind: "Named" })));
+}
+
+#[test]
+fn test_skip_content_tuple_is_value_absent_content() {
+	assert!(TestSkipContent::is_value(&Value::Object(object! { kind: "Tuple" })));
+}
+
 // -- Rejection --
 
 #[test]
@@ -204,11 +216,12 @@ fn test_skip_content_named_missing_content_uses_default() {
 }
 
 #[test]
-fn test_skip_content_single_missing_content_errors() {
-	// Newtype variants require content -- no Default fallback since the inner
-	// type may not implement Default
+fn test_skip_content_single_missing_content_uses_default() {
+	// With skip_content_if, newtype variants fall back to Default::default()
+	// when content is missing (String::default() == "")
 	let val = Value::Object(object! { kind: "Single" });
-	assert!(TestSkipContentWithDefault::from_value(val).is_err());
+	let parsed = TestSkipContentWithDefault::from_value(val).unwrap();
+	assert_eq!(parsed, TestSkipContentWithDefault::Single(String::default()));
 }
 
 #[test]
@@ -225,6 +238,21 @@ fn test_skip_content_named_with_content_still_works() {
 			name: "hello".into(),
 			count: 5
 		}
+	);
+}
+
+// -------------------------------------------------
+// Invalid content should error, not silently default
+// -------------------------------------------------
+
+#[test]
+fn test_skip_content_named_invalid_content_errors() {
+	// Content is present but is a String instead of an Object -- should error,
+	// not silently fall back to defaults.
+	let val = Value::Object(object! { kind: "Named", details: "not_an_object" });
+	assert!(
+		TestSkipContentWithDefault::from_value(val).is_err(),
+		"Named variant with non-Object content should error, not silently default"
 	);
 }
 
@@ -271,4 +299,169 @@ fn test_no_skip_content_named_roundtrip() {
 			name: "test".into()
 		}
 	);
+}
+
+// -------------------------------------------------
+// Newtype with Option<T> and skip_content_if (ErrorDetails pattern)
+// -------------------------------------------------
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+enum TestSkipContentOption {
+	WithInner(Option<String>),
+	AnotherUnit,
+}
+
+#[test]
+fn test_skip_content_option_some_serialization() {
+	let val = TestSkipContentOption::WithInner(Some("hello".into())).into_value();
+	let expected = Value::Object(object! { kind: "WithInner", details: "hello" });
+	assert_eq!(val, expected);
+}
+
+#[test]
+fn test_skip_content_option_none_serialization() {
+	let val = TestSkipContentOption::WithInner(None).into_value();
+	let expected = Value::Object(object! { kind: "WithInner" });
+	assert_eq!(val, expected);
+}
+
+#[test]
+fn test_skip_content_option_some_roundtrip() {
+	let original = TestSkipContentOption::WithInner(Some("hello".into()));
+	let val = original.into_value();
+	let parsed = TestSkipContentOption::from_value(val).unwrap();
+	assert_eq!(parsed, TestSkipContentOption::WithInner(Some("hello".into())));
+}
+
+#[test]
+fn test_skip_content_option_none_roundtrip() {
+	let original = TestSkipContentOption::WithInner(None);
+	let val = original.into_value();
+	let parsed = TestSkipContentOption::from_value(val).unwrap();
+	assert_eq!(parsed, TestSkipContentOption::WithInner(None));
+}
+
+#[test]
+fn test_skip_content_option_none_from_bare_kind() {
+	let val = Value::Object(object! { kind: "WithInner" });
+	let parsed = TestSkipContentOption::from_value(val).unwrap();
+	assert_eq!(parsed, TestSkipContentOption::WithInner(None));
+}
+
+#[test]
+fn test_skip_content_option_is_value() {
+	assert!(TestSkipContentOption::is_value(&Value::Object(
+		object! { kind: "WithInner", details: "hello" }
+	)));
+	assert!(TestSkipContentOption::is_value(&Value::Object(object! { kind: "WithInner" })));
+}
+
+// -------------------------------------------------
+// Per-variant #[surreal(skip_content)] (no enum-level attr)
+// -------------------------------------------------
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(tag = "kind", content = "details")]
+enum TestPerVariantSkip {
+	#[surreal(skip_content)]
+	UnitSkipped,
+	UnitNotSkipped,
+	Named {
+		name: String,
+	},
+}
+
+#[test]
+fn test_per_variant_skip_unit_serialization() {
+	let val = TestPerVariantSkip::UnitSkipped.into_value();
+	let expected = Value::Object(object! { kind: "UnitSkipped" });
+	assert_eq!(val, expected);
+	let obj = val.into_object().unwrap();
+	assert!(!obj.contains_key("details"));
+}
+
+#[test]
+fn test_per_variant_skip_unit_roundtrip() {
+	let val = Value::Object(object! { kind: "UnitSkipped" });
+	let parsed = TestPerVariantSkip::from_value(val).unwrap();
+	assert_eq!(parsed, TestPerVariantSkip::UnitSkipped);
+}
+
+#[test]
+fn test_per_variant_no_skip_unit_still_has_details() {
+	let val = TestPerVariantSkip::UnitNotSkipped.into_value();
+	let expected = Value::Object(object! {
+		kind: "UnitNotSkipped",
+		details: Value::Object(object! {})
+	});
+	assert_eq!(val, expected);
+}
+
+#[test]
+fn test_per_variant_skip_named_unaffected() {
+	let original = TestPerVariantSkip::Named {
+		name: "test".into(),
+	};
+	let val = original.into_value();
+	let expected = Value::Object(object! {
+		kind: "Named",
+		details: Value::Object(object! { name: "test" })
+	});
+	assert_eq!(val, expected);
+
+	let parsed = TestPerVariantSkip::from_value(val).unwrap();
+	assert_eq!(
+		parsed,
+		TestPerVariantSkip::Named {
+			name: "test".into()
+		}
+	);
+}
+
+#[test]
+fn test_per_variant_skip_is_value() {
+	assert!(TestPerVariantSkip::is_value(&Value::Object(object! { kind: "UnitSkipped" })));
+	assert!(TestPerVariantSkip::is_value(&Value::Object(
+		object! { kind: "UnitNotSkipped", details: Value::Object(object! {}) }
+	)));
+}
+
+// -------------------------------------------------
+// Per-variant skip_content overrides enum-level skip_content_if
+// -------------------------------------------------
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
+enum TestOverrideSkip {
+	#[surreal(skip_content)]
+	AlwaysSkipped(Option<String>),
+	ConditionallySkipped(Option<String>),
+}
+
+#[test]
+fn test_override_always_skipped_with_some() {
+	// Even with Some content, skip_content (Always) means no content key
+	let val = TestOverrideSkip::AlwaysSkipped(Some("hello".into())).into_value();
+	let obj = val.into_object().unwrap();
+	assert_eq!(obj.get("kind"), Some(&Value::String("AlwaysSkipped".into())));
+	assert!(!obj.contains_key("details"));
+}
+
+#[test]
+fn test_override_conditionally_skipped_with_some() {
+	// With enum-level skip_content_if, Some content is NOT empty so it's included
+	let val = TestOverrideSkip::ConditionallySkipped(Some("hello".into())).into_value();
+	let obj = val.into_object().unwrap();
+	assert_eq!(obj.get("kind"), Some(&Value::String("ConditionallySkipped".into())));
+	assert_eq!(obj.get("details"), Some(&Value::String("hello".into())));
+}
+
+#[test]
+fn test_override_conditionally_skipped_with_none() {
+	// None is empty, so skip_content_if skips it
+	let val = TestOverrideSkip::ConditionallySkipped(None).into_value();
+	let obj = val.into_object().unwrap();
+	assert_eq!(obj.get("kind"), Some(&Value::String("ConditionallySkipped".into())));
+	assert!(!obj.contains_key("details"));
 }
