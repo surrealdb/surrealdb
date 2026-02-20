@@ -22,12 +22,12 @@ impl UnitAttributes {
 		for attr in attrs {
 			if attr.path().is_ident("surreal") {
 				attr.parse_nested_meta(|meta| {
-					if meta.path.is_ident("value") {
-						let Ok(value) = meta.value() else {
-							panic!("Failed to parse value attribute");
-						};
+				if meta.path.is_ident("value") {
+					let Ok(value) = meta.value() else {
+						panic!("Failed to parse value attribute");
+					};
 
-						variant_attrs.value = Some(UnitValue::parse(value));
+					variant_attrs.value = Some(UnitValue::parse(value));
 				} else if meta.path.is_ident("other") {
 					variant_attrs.other = true;
 				} else if meta.path.is_ident("skip_content") {
@@ -36,8 +36,8 @@ impl UnitAttributes {
 					panic!("skip_content_if is not valid on unit variants (there is no content to check); use skip_content instead");
 				}
 
-					Ok(())
-				})
+				Ok(())
+			})
 				.ok();
 			}
 		}

@@ -84,6 +84,7 @@ fn into_query_result_value(error: &TypesError) -> Value {
 		obj.insert("result", error.message().to_string());
 		details
 	} else {
+		warn!("ErrorDetails::into_value() did not produce an Object; this is a bug");
 		Value::Object(object! {
 			result: "Failed to serialise error",
 			kind: "Internal",

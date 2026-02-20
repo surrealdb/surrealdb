@@ -71,20 +71,11 @@ impl Strategy {
 
 		if let Some(tag) = attrs.tag.as_ref() {
 			if let Some(content) = attrs.content.as_ref() {
-				let skip_content = if attrs.skip_content {
-					Some(SkipContent::Always)
-				} else {
-					attrs.skip_content_if.as_ref().map(|s| {
-						SkipContent::If(
-							syn::parse_str(s).expect("skip_content_if must be a valid path"),
-						)
-					})
-				};
 				return Self::TagContentKeys {
 					tag: tag.to_string(),
 					variant,
 					content: content.to_string(),
-					skip_content,
+					skip_content: attrs.skip_content.clone(),
 				};
 			}
 
