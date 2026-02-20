@@ -866,7 +866,7 @@ impl BaseTokenKind {
 			BaseTokenKind::StarStar => todo!(),
 			BaseTokenKind::Equal => todo!(),
 			BaseTokenKind::EqualEqual => todo!(),
-			BaseTokenKind::Colon => todo!(),
+			BaseTokenKind::Colon => "`:`",
 			BaseTokenKind::ColonColon => todo!(),
 			BaseTokenKind::Dollar => todo!(),
 			BaseTokenKind::Times => todo!(),

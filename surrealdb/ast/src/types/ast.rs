@@ -24,6 +24,10 @@ impl<L: NodeLibrary> Ast<L> {
 		self.library.insert_set(value)
 	}
 
+	pub fn push_list_item<T: Node>(&mut self, list: NodeList<T>) -> NodeListId<T>{
+		NodeListId(self.push(list))
+	}
+
 	pub fn push_list<T: Node>(
 		&mut self,
 		value: T,
