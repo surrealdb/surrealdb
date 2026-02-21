@@ -3,7 +3,6 @@
 use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use super::fetch_record_with_computed_fields;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, ContextLevel};
 use crate::expr::FlowResult;
@@ -35,9 +34,8 @@ impl PhysicalExpr for FieldPart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let none = Value::None;
-		let value = ctx.current_value.unwrap_or(&none);
-		Ok(evaluate_field(value, &self.name, ctx).await?)
+		let value = ctx.current_value.unwrap_or(&Value::NONE);
+		evaluate_field(value, &self.name, ctx).await
 	}
 
 	/// Parallel batch evaluation for field access.
@@ -86,13 +84,12 @@ pub(crate) async fn evaluate_field(
 	value: &Value,
 	name: &str,
 	ctx: EvalContext<'_>,
-) -> anyhow::Result<Value> {
+) -> FlowResult<Value> {
 	match value {
 		Value::Object(obj) => Ok(obj.get(name).cloned().unwrap_or(Value::None)),
 
 		Value::RecordId(rid) => {
-			// Fetch the record with computed fields evaluated.
-			let fetched = fetch_record_with_computed_fields(rid, ctx).await?;
+			let fetched = crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, rid).await?;
 			match fetched {
 				Value::Object(obj) => Ok(obj.get(name).cloned().unwrap_or(Value::None)),
 				_ => Ok(Value::None),

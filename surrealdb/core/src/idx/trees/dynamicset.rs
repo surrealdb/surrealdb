@@ -61,9 +61,11 @@ pub struct ArraySet<const N: usize> {
 }
 
 impl<const N: usize> DynamicSet for ArraySet<N> {
-	fn with_capacity(_capacity: usize) -> Self {
+	fn with_capacity(
+		#[cfg_attr(not(debug_assertions), allow(unused_variables))] capacity: usize,
+	) -> Self {
 		#[cfg(debug_assertions)]
-		assert!(_capacity <= N);
+		assert!(capacity <= N);
 		Self {
 			array: [0; N],
 			size: 0,

@@ -4200,7 +4200,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "trice",
  "ulid",
  "unicase",
  "url",
@@ -4208,6 +4207,7 @@ dependencies = [
  "vart",
  "wasm-bindgen-futures",
  "wasmtimer",
+ "web-time",
 ]
 
 [[package]]
@@ -4351,9 +4351,9 @@ dependencies = [
 
 [[package]]
 name = "surrealmx"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "703077c9f8bdce4053dce39c5f5ef71b79b8fffe1e59dbd629b455340586814e"
+checksum = "6508449a7d1379a92a51ba49391b48ccab0b60dd11a4277c0dda965d8c99dbff"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -4368,6 +4368,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.18",
  "tracing",
+ "web-time",
 ]
 
 [[package]]

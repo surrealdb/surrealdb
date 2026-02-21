@@ -396,6 +396,10 @@ large_types_passed_by_value = "warn"
 # https://rust-lang.github.io/rust-clippy/master/#lossy_float_literal
 lossy_float_literal = "warn"
 
+# Checks for binding to underscore prefixed variable without side-effects.
+# https://rust-lang.github.io/rust-clippy/master/index.html#no_effect_underscore_binding
+no_effect_underscore_binding = "warn"
+
 # Checks for usage of `.as_ref().cloned()` and suggests `.cloned()` instead.
 # Using `.cloned()` directly is more concise and easier to read.
 # https://rust-lang.github.io/rust-clippy/master/#option_as_ref_cloned
@@ -427,6 +431,10 @@ unused_async = "allow"
 # Checks for `.unwrap()` or `.unwrap_err()` calls on Results and `.unwrap()` call on `Option`s.
 # https://rust-lang.github.io/rust-clippy/master/index.html#unwrap_used
 unwrap_used = "warn"
+
+# Checks for the use of bindings with a single leading underscore.
+# https://rust-lang.github.io/rust-clippy/master/index.html#used_underscore_binding
+used_underscore_binding = "warn"
 
 # Profiles
 [profile.release]

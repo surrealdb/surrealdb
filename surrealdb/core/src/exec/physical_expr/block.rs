@@ -13,7 +13,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use reblessive::tree::TreeStack;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
@@ -23,7 +22,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::plan_or_compute::block_required_context;
+use crate::exec::plan_or_compute::{block_required_context, legacy_compute};
 use crate::exec::planner::expr_to_physical_expr;
 use crate::expr::{Block, ControlFlow, Expr, FlowResult};
 use crate::val::Value;
@@ -210,11 +209,7 @@ impl BlockPhysicalExpr {
 						let (opt, frozen) = get_legacy_context(current_exec_ctx, legacy_ctx)?;
 						let doc =
 							current_value_for_legacy.map(|v| CursorDoc::new(None, None, v.clone()));
-						let mut stack = TreeStack::new();
-						stack
-							.enter(|stk| set_stmt.what.compute(stk, &frozen, opt, doc.as_ref()))
-							.finish()
-							.await?
+						legacy_compute(&set_stmt.what, &frozen, opt, doc.as_ref()).await?
 					}
 					Err(e) => {
 						return Err(ControlFlow::Err(e.into()));
@@ -280,11 +275,7 @@ impl BlockPhysicalExpr {
 						let (opt, frozen) = get_legacy_context(current_exec_ctx, legacy_ctx)?;
 						let doc =
 							current_value_for_legacy.map(|v| CursorDoc::new(None, None, v.clone()));
-						let mut stack = TreeStack::new();
-						stack
-							.enter(|stk| other.compute(stk, &frozen, opt, doc.as_ref()))
-							.finish()
-							.await
+						legacy_compute(other, &frozen, opt, doc.as_ref()).await
 					}
 					Err(e) => Err(ControlFlow::Err(e.into())),
 				}

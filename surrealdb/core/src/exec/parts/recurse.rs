@@ -169,8 +169,7 @@ impl PhysicalExpr for RepeatRecursePart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let none = Value::None;
-		let value = ctx.current_value.unwrap_or(&none);
+		let value = ctx.current_value.unwrap_or(&Value::NONE);
 		evaluate_repeat_recurse(value, ctx).await
 	}
 
