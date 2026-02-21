@@ -14,7 +14,7 @@ use crate::expr::FlowResult;
 // Re-export recursion utilities from the canonical definitions in `expr::idiom::recursion`.
 // These are shared between the legacy compute path and the streaming execution engine.
 pub(crate) use crate::expr::idiom::recursion::{clean_iteration, get_final, is_final};
-use crate::val::{RecordId, Value};
+use crate::val::Value;
 
 pub(crate) mod array_ops;
 pub(crate) mod destructure;
@@ -40,21 +40,6 @@ pub(crate) use recurse::{PhysicalRecurseInstruction, RecursePart, RepeatRecurseP
 // ============================================================================
 // Shared utilities
 // ============================================================================
-
-/// Fetch a record, evaluate computed fields, and apply permissions.
-///
-/// Delegates to the unified [`fetch_record`](crate::exec::operators::fetch::fetch_record)
-/// which handles raw fetching, computed field evaluation, and table/field-level
-/// permission checks in one place.
-pub(crate) async fn fetch_record_with_computed_fields(
-	rid: &RecordId,
-	ctx: EvalContext<'_>,
-) -> anyhow::Result<Value> {
-	crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, rid).await.map_err(|cf| match cf {
-		crate::expr::ControlFlow::Err(e) => e,
-		other => anyhow::anyhow!("{}", other),
-	})
-}
 
 /// Evaluate a path of PhysicalExpr parts against a value.
 ///

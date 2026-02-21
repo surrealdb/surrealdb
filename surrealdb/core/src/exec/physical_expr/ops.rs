@@ -226,9 +226,8 @@ impl PhysicalExpr for SimpleBinaryOp {
 			field_ref = obj.get(&self.field_name).unwrap_or(&none);
 			field_ref
 		} else {
-			_owned = crate::exec::parts::field::evaluate_field(current, &self.field_name, ctx)
-				.await
-				.map_err(crate::expr::ControlFlow::Err)?;
+			_owned =
+				crate::exec::parts::field::evaluate_field(current, &self.field_name, ctx).await?;
 			&_owned
 		};
 
