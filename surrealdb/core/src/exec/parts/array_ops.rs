@@ -35,8 +35,7 @@ impl PhysicalExpr for AllPart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let none = Value::None;
-		let value = ctx.current_value.unwrap_or(&none);
+		let value = ctx.current_value.unwrap_or(&Value::NONE);
 		evaluate_all(value, ctx).await
 	}
 
@@ -118,8 +117,7 @@ impl PhysicalExpr for FlattenPart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let none = Value::None;
-		let value = ctx.current_value.unwrap_or(&none);
+		let value = ctx.current_value.unwrap_or(&Value::NONE);
 		Ok(evaluate_flatten(value)?)
 	}
 

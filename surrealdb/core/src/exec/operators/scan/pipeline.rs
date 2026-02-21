@@ -563,7 +563,6 @@ pub(crate) async fn build_field_state_raw(
 /// `Some`, the cached full state is cheaply filtered to the required subset.
 /// This avoids repeated expensive work (KV lookups, PhysicalExpr compilation,
 /// dependency analysis, topological sort) for projected queries.
-#[allow(clippy::type_complexity)]
 pub(crate) async fn build_field_state(
 	ctx: &ExecutionContext,
 	table_name: &TableName,

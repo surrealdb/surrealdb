@@ -19,11 +19,11 @@ pub enum FieldPathPart {
 	Field(String),
 	/// Literal integer index: `[0]`, `[1]`
 	Index(usize),
-	/// First element: `[0]` or `$first`
+	/// First element: `[0]`
 	First,
-	/// Last element: `[$]` or `$last`
+	/// Last element: `[$]`
 	Last,
-	/// Graph traversal key: `->table` or `<-table`
+	/// Graph traversal key: `->table`, `<-table`, `<->table`
 	Lookup(String),
 }
 

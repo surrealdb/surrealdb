@@ -79,8 +79,7 @@ impl PhysicalExpr for LookupPart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let none = Value::None;
-		let value = ctx.current_value.unwrap_or(&none);
+		let value = ctx.current_value.unwrap_or(&Value::NONE);
 		Ok(evaluate_lookup(value, self, ctx).await?)
 	}
 

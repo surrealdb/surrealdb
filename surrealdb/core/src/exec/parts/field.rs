@@ -34,8 +34,7 @@ impl PhysicalExpr for FieldPart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let none = Value::None;
-		let value = ctx.current_value.unwrap_or(&none);
+		let value = ctx.current_value.unwrap_or(&Value::NONE);
 		evaluate_field(value, &self.name, ctx).await
 	}
 
