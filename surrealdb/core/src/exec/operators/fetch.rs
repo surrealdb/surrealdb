@@ -319,7 +319,7 @@ pub(crate) async fn process_fetched_record(
 		super::scan::pipeline::build_field_state(ctx, &rid.table, check_perms, None).await?;
 
 	// 3. Evaluate computed fields via the modern PhysicalExpr path
-	super::scan::pipeline::compute_fields_for_value(ctx, &field_state, val).await?;
+	super::scan::pipeline::compute_fields_for_value(ctx, &field_state, val, false).await?;
 
 	// 4. Apply field-level permissions
 	if check_perms {
@@ -345,7 +345,7 @@ pub(crate) async fn fetch_record_no_perms(
 	};
 	let field_state =
 		super::scan::pipeline::build_field_state(ctx, &rid.table, false, None).await?;
-	super::scan::pipeline::compute_fields_for_value(ctx, &field_state, &mut val).await?;
+	super::scan::pipeline::compute_fields_for_value(ctx, &field_state, &mut val, true).await?;
 	Ok(val)
 }
 

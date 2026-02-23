@@ -319,7 +319,7 @@ pub(crate) async fn filter_and_process_batch(
 			batch.swap(write_idx, read_idx);
 		}
 		// Computed fields (must run before predicate)
-		compute_fields_for_value(ctx, state, &mut batch[write_idx]).await?;
+		compute_fields_for_value(ctx, state, &mut batch[write_idx], false).await?;
 		// Field-level permissions (must run before the WHERE predicate so that
 		// restricted fields are removed before the condition is evaluated,
 		// matching the old compute path's behaviour).
@@ -635,16 +635,24 @@ pub(crate) fn filter_field_state_for_projection(
 }
 
 /// Compute all computed fields for a single value.
+///
+/// When `skip_fetch_perms` is `true`, any RecordId dereferences inside
+/// computed field expressions will bypass permission checks (using
+/// `fetch_record_no_perms`).  This must be set when computing fields
+/// during permission predicate evaluation to prevent reentrant permission
+/// checks on cyclic record links.
 pub(crate) async fn compute_fields_for_value(
 	ctx: &ExecutionContext,
 	state: &FieldState,
 	value: &mut Value,
+	skip_fetch_perms: bool,
 ) -> Result<(), ControlFlow> {
 	if state.computed_fields.is_empty() {
 		return Ok(());
 	}
 
-	let eval_ctx = EvalContext::from_exec_ctx(ctx);
+	let mut eval_ctx = EvalContext::from_exec_ctx(ctx);
+	eval_ctx.skip_fetch_perms = skip_fetch_perms;
 
 	for cf in &state.computed_fields {
 		// Evaluate with the current value as context
