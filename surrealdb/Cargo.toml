@@ -59,6 +59,7 @@ targets = []
 # workspace internal dependencies
 surrealdb-core = { workspace = true, default-features = false }
 surrealdb-types.workspace = true
+surrealdb-types-derive = { workspace = true, features = ["sdk-path"] }
 
 # Other crates (anyhow used for import stream compat with core's execute_import)
 anyhow.workspace = true

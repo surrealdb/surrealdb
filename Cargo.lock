@@ -1969,6 +1969,7 @@ name = "demo"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "surrealdb",
  "surrealdb-types",
  "surrealism",
 ]
@@ -6873,6 +6874,7 @@ dependencies = [
  "serial_test",
  "surrealdb-core",
  "surrealdb-types",
+ "surrealdb-types-derive",
  "temp-dir",
  "test-log",
  "time",

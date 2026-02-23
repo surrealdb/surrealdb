@@ -495,6 +495,7 @@ async fn handle_parse_error(
 	sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>,
 ) -> HandleResult {
 	#[derive(SurrealValue)]
+	#[surreal(crate = "crate::types")]
 	struct ErrorResponse {
 		id: Option<Value>,
 		#[surreal(rename = "session")]
