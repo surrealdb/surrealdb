@@ -15,10 +15,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ age: 25, friend: person:b, id: person:a }]"
+value = "NONE"
 
 [[test.results]]
-value = "[{ age: 30, friend: person:a, id: person:b }]"
+value = "[{ age: 25, can_drive: true, friend: person:b, id: person:a }]"
+
+[[test.results]]
+value = "[{ age: 30, can_drive: true, friend: person:a, id: person:b }]"
 
 */
 
@@ -29,10 +32,11 @@ DEFINE ACCESS user ON DATABASE TYPE RECORD
 
 DEFINE TABLE OVERWRITE person SCHEMAFULL
 	PERMISSIONS
-		FOR select WHERE friend.age > 0
+		FOR select WHERE friend.can_drive = true
 		FOR create, update, delete FULL;
 
 DEFINE FIELD age ON person TYPE int;
+DEFINE FIELD can_drive ON person VALUE age >= 18;
 DEFINE FIELD friend ON person TYPE option<record<person>>;
 
 CREATE person:a SET age = 25, friend = person:b;

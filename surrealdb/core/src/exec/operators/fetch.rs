@@ -329,19 +329,24 @@ pub(crate) async fn process_fetched_record(
 	Ok(true)
 }
 
-/// Fetch a single record by its ID without permission checks.
+/// Fetch a single record by its ID without permission checks, but with
+/// computed fields evaluated.
 ///
 /// Used during permission predicate evaluation to prevent reentrant
 /// permission checks that would recurse infinitely on cyclic links.
-/// Returns the raw stored data (no computed fields, no permission filtering).
+/// Computed fields are still evaluated so that permission expressions
+/// referencing computed fields on linked records work correctly.
 pub(crate) async fn fetch_record_no_perms(
 	ctx: &ExecutionContext,
 	rid: &RecordId,
 ) -> crate::expr::FlowResult<Value> {
-	match fetch_raw_record(ctx, rid, None).await? {
-		Some(val) => Ok(val),
-		None => Ok(Value::None),
-	}
+	let Some(mut val) = fetch_raw_record(ctx, rid, None).await? else {
+		return Ok(Value::None);
+	};
+	let field_state =
+		super::scan::pipeline::build_field_state(ctx, &rid.table, false, None).await?;
+	super::scan::pipeline::compute_fields_for_value(ctx, &field_state, &mut val).await?;
+	Ok(val)
 }
 
 /// Fetch a single record by its ID, evaluating computed fields and applying
