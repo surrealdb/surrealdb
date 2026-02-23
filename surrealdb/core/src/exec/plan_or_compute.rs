@@ -135,7 +135,14 @@ pub(crate) async fn evaluate_body_expr(
 			}
 			let (opt, frozen) = get_legacy_context_with_param(ctx, param_name, param_value)
 				.context("Legacy compute fallback context unavailable")?;
-			legacy_compute(expr, &frozen, opt, None).await
+
+			if let Expr::Let(set_stmt) = expr {
+				let value = legacy_compute(&set_stmt.what, &frozen, opt, None).await?;
+				*ctx = ctx.with_param(set_stmt.name.clone(), value);
+				Ok(Value::None)
+			} else {
+				legacy_compute(expr, &frozen, opt, None).await
+			}
 		}
 		Err(e) => Err(ControlFlow::Err(e.into())),
 	}
