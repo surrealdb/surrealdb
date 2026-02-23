@@ -191,6 +191,7 @@ impl BlockPhysicalExpr {
 							},
 							recursion_ctx: None,
 							document_root: ctx.document_root,
+							skip_fetch_perms: ctx.skip_fetch_perms,
 						};
 						phys_expr.evaluate(eval_ctx).await?
 					}
@@ -257,6 +258,7 @@ impl BlockPhysicalExpr {
 							},
 							recursion_ctx: None,
 							document_root: ctx.document_root,
+							skip_fetch_perms: ctx.skip_fetch_perms,
 						};
 						phys_expr.evaluate(eval_ctx).await
 					}

@@ -205,8 +205,8 @@ pub async fn check_permission_for_value(
 		PhysicalPermission::Deny => Ok(false),
 		PhysicalPermission::Allow => Ok(true),
 		PhysicalPermission::Conditional(physical_expr) => {
-			// Evaluate physical expression directly (no spawn_blocking needed)
-			let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(value);
+			let mut eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(value);
+			eval_ctx.skip_fetch_perms = true;
 
 			let result = physical_expr
 				.evaluate(eval_ctx)

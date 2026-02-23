@@ -194,7 +194,11 @@ async fn evaluate_destructure(
 			Ok(Value::Object(crate::val::Object(result)))
 		}
 		Value::RecordId(rid) => {
-			let fetched = crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, rid).await?;
+			let fetched = if ctx.skip_fetch_perms {
+				crate::exec::operators::fetch::fetch_record_no_perms(ctx.exec_ctx, rid).await?
+			} else {
+				crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, rid).await?
+			};
 			if fetched.is_none() {
 				return Ok(Value::None);
 			}

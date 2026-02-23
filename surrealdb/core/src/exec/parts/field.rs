@@ -89,7 +89,11 @@ pub(crate) async fn evaluate_field(
 		Value::Object(obj) => Ok(obj.get(name).cloned().unwrap_or(Value::None)),
 
 		Value::RecordId(rid) => {
-			let fetched = crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, rid).await?;
+			let fetched = if ctx.skip_fetch_perms {
+				crate::exec::operators::fetch::fetch_record_no_perms(ctx.exec_ctx, rid).await?
+			} else {
+				crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, rid).await?
+			};
 			match fetched {
 				Value::Object(obj) => Ok(obj.get(name).cloned().unwrap_or(Value::None)),
 				_ => Ok(Value::None),

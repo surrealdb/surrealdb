@@ -137,7 +137,24 @@ pub(crate) async fn evaluate_body_expr(
 				.context("Legacy compute fallback context unavailable")?;
 
 			if let Expr::Let(set_stmt) = expr {
+				if set_stmt.is_protected_set() {
+					return Err(Error::InvalidParam {
+						name: set_stmt.name.clone(),
+					}
+					.into());
+				}
+
 				let value = legacy_compute(&set_stmt.what, &frozen, opt, None).await?;
+
+				let value = if let Some(kind) = &set_stmt.kind {
+					value.coerce_to_kind(kind).map_err(|e| Error::SetCoerce {
+						name: set_stmt.name.clone(),
+						error: Box::new(e),
+					})?
+				} else {
+					value
+				};
+
 				*ctx = ctx.with_param(set_stmt.name.clone(), value);
 				Ok(Value::None)
 			} else {

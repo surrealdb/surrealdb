@@ -89,7 +89,11 @@ pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> FlowRes
 		}
 		Value::Object(_) => Ok(value.clone()),
 		Value::RecordId(rid) => {
-			crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, rid).await
+			if ctx.skip_fetch_perms {
+				crate::exec::operators::fetch::fetch_record_no_perms(ctx.exec_ctx, rid).await
+			} else {
+				crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, rid).await
+			}
 		}
 		other => Ok(Value::Array(vec![other.clone()].into())),
 	}
