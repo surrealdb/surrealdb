@@ -442,7 +442,6 @@ pub(super) mod tests {
 	use std::collections::{BTreeSet, BinaryHeap};
 	use std::fs::File;
 	use std::io::{BufRead, BufReader};
-	use std::time::SystemTime;
 
 	use ahash::HashSet;
 	use anyhow::Result;
@@ -452,6 +451,7 @@ pub(super) mod tests {
 	use roaring::RoaringTreemap;
 	use rust_decimal::prelude::Zero;
 	use test_log::test;
+	use web_time::SystemTime;
 
 	use crate::catalog::{Distance, VectorType};
 	use crate::idx::seqdocids::DocId;

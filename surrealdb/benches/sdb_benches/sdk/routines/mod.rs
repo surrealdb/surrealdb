@@ -47,7 +47,7 @@ pub(super) fn bench_routine<R>(
 			routine.setup(db, num_ops);
 
 			// Run and time the routine
-			let now = std::time::Instant::now();
+			let now = web_time::Instant::now();
 			routine.run(db, num_ops);
 			total += now.elapsed();
 

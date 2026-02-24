@@ -134,6 +134,7 @@ tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["io"] }
 tracing.workspace = true
 uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
+web-time.workspace = true
 
 # Optional crates
 pprof = { workspace = true, features = [

@@ -81,6 +81,7 @@ Located in `surrealdb/tests/` and `tests/`. Follow standard Rust testing convent
 - Propagate datastore errors via `crate::err::Error`
 - Performance matters: think about impact of every change
 - WASM compatibility: maintain `#[cfg_attr]` patterns (e.g., `async_trait(?Send)`)
+- Use `web_time::Instant` and `web_time::SystemTime` instead of `std::time` equivalents (WASM-safe, enforced by clippy)
 - Don't add dependencies without confirmation
 - Instrument public async functions with `#[instrument(...)]`
 - Never log sensitive user data or credentials

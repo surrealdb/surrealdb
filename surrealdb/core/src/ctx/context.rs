@@ -13,9 +13,9 @@ use async_channel::Sender;
 use surrealism_runtime::controller::Runtime;
 #[cfg(feature = "surrealism")]
 use surrealism_runtime::package::SurrealismPackage;
-use trice::Instant;
 #[cfg(feature = "http")]
 use url::Url;
+use web_time::Instant;
 
 use crate::buc::manager::BucketsManager;
 #[cfg(feature = "surrealism")]

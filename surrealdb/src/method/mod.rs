@@ -59,6 +59,7 @@ pub use health::Health;
 pub use import::Import;
 pub use insert::Insert;
 pub use invalidate::Invalidate;
+pub use live::Stream;
 pub use merge::Merge;
 pub use patch::Patch;
 pub use query::{IntoVariables, Query, QueryStream};

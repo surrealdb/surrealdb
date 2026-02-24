@@ -204,6 +204,39 @@ install_crate = "cargo-machete"
 command = "cargo"
 args = ["machete"]
 
+[tasks.ci-check-imports]
+category = "CI - CHECK"
+description = "Check for disallowed std::time imports (use web_time instead)"
+script = '''
+    #!/bin/bash
+    set -euo pipefail
+
+    # Scan for direct use of std::time::Instant or std::time::SystemTime in Rust source files.
+    # These should be imported from web_time instead for WASM compatibility.
+    # std::time::Duration is fine and not flagged.
+    # language-tests/ and fuzz/ are excluded (separate workspaces).
+
+    MATCHES=$(grep -rn --include='*.rs' \
+        -E 'std::time::(Instant|SystemTime)' \
+        --exclude-dir=target \
+        --exclude-dir=language-tests \
+        --exclude-dir=fuzz \
+        . || true)
+
+    if [ -n "$MATCHES" ]; then
+        echo "$MATCHES" | while IFS= read -r match; do
+            echo "error: $match"
+            echo "  --> Use web_time::{Instant,SystemTime} instead of std::time for WASM compatibility."
+            echo ""
+        done
+        COUNT=$(echo "$MATCHES" | wc -l | tr -d ' ')
+        echo "Found $COUNT disallowed std::time import(s). Use web_time instead."
+        exit 1
+    fi
+
+    echo "No disallowed std::time imports found."
+'''
+
 [tasks.ci-check-wasm]
 # Note: On Mac, Apple ships its own version of LLVM which does not cross-compile to WASM.
 # To build this on a Mac, you need to install the upstream LLVM Clang.
@@ -894,6 +927,7 @@ dependencies = [
     "ci-clippy",
     "ci-check",
     "ci-check-wasm",
+    "ci-check-imports",
     "ci-feature-check",
     "ci-unused-deps",
     "ci-docs",

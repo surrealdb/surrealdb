@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::time::Instant;
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Utc};
@@ -10,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
 use tracing::trace;
 use uuid::Uuid;
+use web_time::Instant;
 
 use crate::err::Error;
 use crate::key::root::tl::Tl;
