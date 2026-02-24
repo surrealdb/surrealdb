@@ -61,7 +61,7 @@ pub mod is {
 		match opt {
 			Some(opt) => {
 				// Cast the input value to a RecordId, returning an error if the cast fails
-				let rid = RecordId::cast(arg).map_err(|_| Error::InvalidArguments {
+				let rid = RecordId::cast(arg).map_err(|_| Error::InvalidFunctionArguments {
 					name: "record::is_edge".to_owned(),
 					message: "Expected a record ID".to_owned(),
 				})?;

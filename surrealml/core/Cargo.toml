@@ -1,6 +1,6 @@
 [package]
 name = "surrealml-core"
-version = "0.1.10"
+version = "0.1.11"
 edition.workspace = true
 description = "The core machine learning library for SurrealML that enables SurrealDB to store and load ML models"
 repository.workspace = true

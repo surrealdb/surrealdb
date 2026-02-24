@@ -216,6 +216,10 @@ impl Parser<'_> {
 				let stmt = self.parse_create_stmt(stk).await?;
 				Expr::Create(Box::new(stmt))
 			}
+			t!("EXPLAIN") => {
+				self.pop_peek();
+				self.parse_explain_expr(stk).await?
+			}
 			t!("UPDATE") => {
 				self.pop_peek();
 				let stmt = self.parse_update_stmt(stk).await?;

@@ -307,7 +307,7 @@ fn validate_args(name: &str, args: &[Value], sig: &[Kind]) -> FlowResult<()> {
 	// Check the necessary arguments are passed
 	//TODO(planner): Move this check out of the call.
 	if !(min_args_len..=max_args_len).contains(&args.len()) {
-		return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidArguments {
+		return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidFunctionArguments {
 			name: name.to_string(),
 			message: match (min_args_len, max_args_len) {
 				(1, 1) => String::from("The function expects 1 argument."),

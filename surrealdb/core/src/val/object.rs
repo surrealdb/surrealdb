@@ -43,6 +43,12 @@ impl From<BTreeMap<String, String>> for Object {
 	}
 }
 
+impl From<Vec<(String, Value)>> for Object {
+	fn from(v: Vec<(String, Value)>) -> Self {
+		Self(v.into_iter().collect())
+	}
+}
+
 impl From<HashMap<&str, Value>> for Object {
 	fn from(v: HashMap<&str, Value>) -> Self {
 		Self(v.into_iter().map(|(key, val)| (key.to_string(), val)).collect())

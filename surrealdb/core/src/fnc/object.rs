@@ -31,7 +31,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value> {
 						v => v.to_sql(),
 					},
 					_ => {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "object::from_entries".to_string(),
 							message: "Expected entries, found invalid entry".to_string(),
 						})
@@ -41,7 +41,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value> {
 				let value = match entry.get(1) {
 					Some(v) => v,
 					_ => {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "object::from_entries".to_string(),
 							message: "Expected entries, found invalid entry".to_string(),
 						})
@@ -51,7 +51,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value> {
 				obj.insert(key, value.to_owned());
 			}
 			_ => {
-				bail!(Error::InvalidArguments {
+				bail!(Error::InvalidFunctionArguments {
 					name: "object::from_entries".to_string(),
 					message: format!("Expected entries, found {}", v.kind_of()),
 				})
@@ -95,7 +95,7 @@ pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
 		Value::Array(targets) => {
 			for target in targets {
 				let Value::String(s) = target else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "object::remove".to_string(),
 						message: format!(
 							"'{}' cannot be used as a key. Please use a string instead.",
@@ -107,7 +107,7 @@ pub fn remove((mut object, targets): (Object, Value)) -> Result<Value> {
 			}
 		}
 		other => {
-			bail!(Error::InvalidArguments {
+			bail!(Error::InvalidFunctionArguments {
 				name: "object::remove".to_string(),
 				message: format!(
 					"'{}' cannot be used as a key. Please use a string instead.",

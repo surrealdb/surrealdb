@@ -161,9 +161,8 @@ use std::marker::PhantomData;
 
 use url::Url;
 
-use crate::err::Error;
 use crate::opt::{Config, Endpoint, path_to_string};
-use crate::{Connect, Result, Surreal};
+use crate::{Connect, Error, Result, Surreal};
 
 /// A trait for converting inputs to a server address object
 pub trait IntoEndpoint: into_endpoint::Sealed {}
@@ -195,18 +194,31 @@ impl IntoEndpoint for &str {}
 impl into_endpoint::Sealed for &str {
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (url, path) = match self {
+			// Handle bare "memory" and "mem://" (no query params) — path format: mem://
 			"memory" | "mem://" => {
-				(Url::parse("mem://").expect("valid memory url"), "memory".to_owned())
+				(Url::parse("mem://").expect("valid memory url"), "mem://".to_owned())
 			}
-			url if url.starts_with("ws") | url.starts_with("http") | url.starts_with("tikv") => {
-				(Url::parse(url).map_err(|_| Error::InvalidUrl(self.to_owned()))?, String::new())
+			// Handle "memory?..." with query parameters
+			url if url.starts_with("memory?") => {
+				let query = &url["memory?".len()..];
+				(Url::parse("mem://").expect("valid memory url"), format!("mem://?{query}"))
 			}
+			// Handle "mem://?..." with query parameters
+			url if url.starts_with("mem://?") => {
+				let query = &url["mem://?".len()..];
+				(Url::parse("mem://").expect("valid memory url"), format!("mem://?{query}"))
+			}
+			url if url.starts_with("ws") | url.starts_with("http") | url.starts_with("tikv") => (
+				Url::parse(url).map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?,
+				String::new(),
+			),
 
 			_ => {
 				let (scheme, path) = split_url(self);
 				let protocol = format!("{scheme}://");
 				(
-					Url::parse(&protocol).map_err(|_| Error::InvalidUrl(self.to_owned()))?,
+					Url::parse(&protocol)
+						.map_err(|_| Error::internal(format!("Invalid URL: {}", self)))?,
 					path_to_string(&protocol, path),
 				)
 			}
@@ -298,11 +310,12 @@ impl Surreal<Any> {
 /// // Connect using HTTPS
 /// let db = connect("https://cloud.surrealdb.com").await?;
 ///
-/// // Instantiate an in-memory instance
+/// // Instantiate an in-memory instance (no persistence)
 /// let db = connect("mem://").await?;
+/// // Or use the "memory" alias: connect("memory").await?;
 ///
-/// // Instantiate a file-backed instance (currently uses RocksDB)
-/// let db = connect("file://path/to/database-folder").await?;
+/// // In-memory with persistence to disk (e.g. mem:///tmp/data?versioned=true)
+/// let db = connect("mem:///tmp/data").await?;
 ///
 /// // Instantiate a RocksDB-backed instance
 /// let db = connect("rocksdb://path/to/database-folder").await?;

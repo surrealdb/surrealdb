@@ -218,7 +218,7 @@ impl Collectable {
 	#[instrument(level = "trace", skip_all)]
 	async fn process_range_key(doc_ctx: NsDbTbCtx, key: Key) -> Result<Processable> {
 		let key = record::RecordKey::decode_key(&key)?;
-		let val = Record::new(Value::Null.into());
+		let val = Record::new(Value::Null);
 		let rid = RecordId {
 			table: key.tb.into_owned(),
 			key: key.id,
@@ -251,7 +251,7 @@ impl Collectable {
 			generate: None,
 			rid: Some(rid.into()),
 			ir: None,
-			val: Operable::Value(Record::new(Value::Null.into()).into_read_only()),
+			val: Operable::Value(Record::new(Value::Null).into_read_only()),
 		};
 		Ok(pro)
 	}
@@ -327,7 +327,7 @@ impl Collectable {
 	) -> Result<Processable> {
 		// if it is skippable we only need the record id
 		let val = if rid_only {
-			Record::new(Value::Null.into()).into_read_only()
+			Record::new(Value::Null).into_read_only()
 		} else {
 			txn.get_record(
 				doc_ctx.ns.namespace_id,
@@ -380,7 +380,7 @@ impl Collectable {
 			generate: None,
 			rid,
 			ir: None,
-			val: Operable::Value(Record::new(v.into()).into_read_only()),
+			val: Operable::Value(Record::new(v).into_read_only()),
 		}
 	}
 
@@ -438,7 +438,7 @@ impl Collectable {
 			key: key.id,
 		};
 		// Inject the id field into the document
-		val.data.to_mut().def(&rid);
+		val.data.def(rid.clone());
 		// Create a new operable value
 		let val = Operable::Value(val.into());
 		// Process the record
@@ -474,9 +474,7 @@ impl Collectable {
 			doc_ctx: DocumentContext::NsDbTbCtx(doc_ctx),
 			rid: Some(t),
 			ir: Some(Arc::new(ir)),
-			val: Operable::Value(
-				v.unwrap_or_else(|| Record::new(Value::Null.into()).into_read_only()),
-			),
+			val: Operable::Value(v.unwrap_or_else(|| Record::new(Value::Null).into_read_only())),
 		}
 	}
 
@@ -494,7 +492,7 @@ impl Collectable {
 			v
 		} else if rid_only {
 			// if it is skippable we only need the record id
-			Record::new(Value::Null.into()).into_read_only()
+			Record::new(Value::Null).into_read_only()
 		} else {
 			txn.get_record(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &t.table, &t.key, None)
 				.await?
@@ -641,7 +639,9 @@ pub(super) trait Collector {
 			// For Table and Range iterables, the RecordStrategy determines whether we
 			// collect only keys, keys+values, or just a count without materializing records.
 			Iterable::Range(doc_ctx, tb, v, rs, sc) => match rs {
-				RecordStrategy::Count => self.collect_range_count(ctx, doc_ctx, &tb, v).await?,
+				RecordStrategy::Count => {
+					self.collect_range_count(ctx, opt, doc_ctx, &tb, v).await?
+				}
 				RecordStrategy::KeysOnly => {
 					self.collect_range_keys(ctx, opt, doc_ctx, &tb, v, sc).await?
 				}
@@ -653,7 +653,7 @@ pub(super) trait Collector {
 				let ctx = Self::check_query_planner_context(ctx, &table);
 				match rs {
 					RecordStrategy::Count => {
-						self.collect_table_count(&ctx, doc_ctx, &table).await?
+						self.collect_table_count(&ctx, opt, doc_ctx, &table).await?
 					}
 					RecordStrategy::KeysOnly => {
 						self.collect_table_keys(&ctx, opt, doc_ctx, &table, sc).await?
@@ -719,15 +719,18 @@ pub(super) trait Collector {
 		// Get the transaction
 		let txn = ctx.tx();
 		// We only need to iterate over keys.
-		let mut stream = txn.stream_keys(rng.clone(), opt.version, Some(skippable), sc);
+		let mut stream = txn.stream_keys(rng.clone(), opt.version, Some(skippable), 0, sc);
 		let mut skipped = 0;
 		let mut last_key = vec![];
-		while let Some(res) = stream.next().await {
-			if ctx.is_done(Some(skipped)).await? {
-				break;
+		'outer: while let Some(res) = stream.next().await {
+			let batch = res?;
+			for key in batch {
+				if ctx.is_done(Some(skipped)).await? {
+					break 'outer;
+				}
+				last_key = key;
+				skipped += 1;
 			}
-			last_key = res?;
-			skipped += 1;
 		}
 		// If we don't have a last key, we're done
 		if last_key.is_empty() {
@@ -771,19 +774,21 @@ pub(super) trait Collector {
 
 		// Create a new iterable range
 		let txn = ctx.tx();
-		let mut stream = txn.stream_keys_vals(rng, opt.version, None, sc);
+		let mut stream = txn.stream_keys_vals(rng, opt.version, None, 0, sc, false);
 
 		// Loop until no more entries
 		let mut count = 0;
-		while let Some(res) = stream.next().await {
-			// Check if the context is finished
-			if ctx.is_done(Some(count)).await? {
-				break;
+		'outer: while let Some(res) = stream.next().await {
+			let batch = res?;
+			for (k, v) in batch {
+				// Check if the context is finished
+				if ctx.is_done(Some(count)).await? {
+					break 'outer;
+				}
+				// Parse the data from the store
+				self.collect(Collectable::KeyVal(doc_ctx.clone(), k, v)).await?;
+				count += 1;
 			}
-			// Parse the data from the store
-			let (k, v) = res?;
-			self.collect(Collectable::KeyVal(doc_ctx.clone(), k, v)).await?;
-			count += 1;
 		}
 		// Everything ok
 		Ok(())
@@ -814,19 +819,20 @@ pub(super) trait Collector {
 		};
 		// Create a new iterable range
 		let txn = ctx.tx();
-		let mut stream = txn.stream_keys(rng, opt.version, None, sc);
+		let mut stream = txn.stream_keys(rng, opt.version, None, 0, sc);
 		// Loop until no more entries
 		let mut count = 0;
-		while let Some(res) = stream.next().await {
-			// Check if the context is finished
-			if ctx.is_done(Some(count)).await? {
-				break;
+		'outer: while let Some(res) = stream.next().await {
+			let batch = res?;
+			for k in batch {
+				// Check if the context is finished
+				if ctx.is_done(Some(count)).await? {
+					break 'outer;
+				}
+				// Collect the key
+				self.collect(Collectable::TableKey(doc_ctx.clone(), k)).await?;
+				count += 1;
 			}
-			// Parse the data from the store
-			let k = res?;
-			// Collect the key
-			self.collect(Collectable::TableKey(doc_ctx.clone(), k)).await?;
-			count += 1;
 		}
 		// Everything ok
 		Ok(())
@@ -836,6 +842,7 @@ pub(super) trait Collector {
 	async fn collect_table_count(
 		&mut self,
 		ctx: &FrozenContext,
+		opt: &Options,
 		doc_ctx: NsDbTbCtx,
 		v: &TableName,
 	) -> Result<()> {
@@ -844,7 +851,7 @@ pub(super) trait Collector {
 		let beg = record::prefix(ns, db, v)?;
 		let end = record::suffix(ns, db, v)?;
 		// Create a new iterable range
-		let count = ctx.tx().count(beg..end).await?;
+		let count = ctx.tx().count(beg..end, opt.version).await?;
 		// Collect the count
 		self.collect(Collectable::Count(doc_ctx, count)).await?;
 		// Everything ok
@@ -904,19 +911,20 @@ pub(super) trait Collector {
 		};
 		// Create a new iterable range
 		let txn = ctx.tx();
-		let mut stream = txn.stream_keys_vals(rng, None, None, sc);
+		let mut stream = txn.stream_keys_vals(rng, None, None, 0, sc, false);
 		// Loop until no more entries
 		let mut count = 0;
-		while let Some(res) = stream.next().await {
-			// Check if the context is finished
-			if ctx.is_done(Some(count)).await? {
-				break;
+		'outer: while let Some(res) = stream.next().await {
+			let batch = res?;
+			for (k, v) in batch {
+				// Check if the context is finished
+				if ctx.is_done(Some(count)).await? {
+					break 'outer;
+				}
+				// Collect
+				self.collect(Collectable::KeyVal(doc_ctx.clone(), k, v)).await?;
+				count += 1;
 			}
-			// Parse the data from the store
-			let (k, v) = res?;
-			// Collect
-			self.collect(Collectable::KeyVal(doc_ctx.clone(), k, v)).await?;
-			count += 1;
 		}
 		// Everything ok
 		Ok(())
@@ -948,18 +956,20 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream_keys(rng, opt.version, None, sc);
+		let mut stream = txn.stream_keys(rng, opt.version, None, 0, sc);
 		// Loop until no more entries
 		let mut count = 0;
-		while let Some(res) = stream.next().await {
-			// Check if the context is finished
-			if ctx.is_done(Some(count)).await? {
-				break;
+		'outer: while let Some(res) = stream.next().await {
+			let batch = res?;
+			for k in batch {
+				// Check if the context is finished
+				if ctx.is_done(Some(count)).await? {
+					break 'outer;
+				}
+				// Collect the key
+				self.collect(Collectable::RangeKey(doc_ctx.clone(), k)).await?;
+				count += 1;
 			}
-			// Parse the data from the store
-			let k = res?;
-			self.collect(Collectable::RangeKey(doc_ctx.clone(), k)).await?;
-			count += 1;
 		}
 		// Everything ok
 		Ok(())
@@ -969,6 +979,7 @@ pub(super) trait Collector {
 	async fn collect_range_count(
 		&mut self,
 		ctx: &FrozenContext,
+		opt: &Options,
 		doc_ctx: NsDbTbCtx,
 		tb: &TableName,
 		r: RecordIdKeyRange,
@@ -979,7 +990,7 @@ pub(super) trait Collector {
 		let (beg, end) =
 			Self::range_prepare(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, tb, r).await?;
 		// Create a new iterable range
-		let count = txn.count(beg..end).await?;
+		let count = txn.count(beg..end, opt.version).await?;
 		// Collect the count
 		self.collect(Collectable::Count(doc_ctx, count)).await?;
 		// Everything ok
@@ -1038,23 +1049,24 @@ pub(super) trait Collector {
 		};
 		// Get the transaction
 		let txn = ctx.tx();
-		// Check that the table exists
 		// Loop over the chosen edge types
-		for (beg, end) in keys {
+		'keys: for (beg, end) in keys {
 			// Create a new iterable range
-			let mut stream = txn.stream_keys(beg..end, opt.version, None, ScanDirection::Forward);
+			let mut stream =
+				txn.stream_keys(beg..end, opt.version, None, 0, ScanDirection::Forward);
 			// Loop until no more entries
 			let mut count = 0;
 			while let Some(res) = stream.next().await {
-				// Check if the context is finished
-				if ctx.is_done(Some(count)).await? {
-					break;
+				let batch = res?;
+				for key in batch {
+					// Check if the context is finished
+					if ctx.is_done(Some(count)).await? {
+						break 'keys;
+					}
+					// Collect the key
+					self.collect(Collectable::Lookup(doc_ctx.clone(), kind.clone(), key)).await?;
+					count += 1;
 				}
-				// Parse the key from the result
-				let key = res?;
-				// Collector the key
-				self.collect(Collectable::Lookup(doc_ctx.clone(), kind.clone(), key)).await?;
-				count += 1;
 			}
 		}
 		// Everything ok

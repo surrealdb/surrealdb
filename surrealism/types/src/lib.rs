@@ -7,10 +7,12 @@
 //! This crate provides the core types and traits for transferring data across WASM boundaries
 //! in a way that can be implemented by any language that compiles to WebAssembly. It defines:
 //!
-//! - A binary serialization protocol ([`Serializable`])
-//! - Memory transfer abstractions ([`Transfer`], [`AsyncTransfer`])
-//! - Memory management interfaces ([`MemoryController`], [`AsyncMemoryController`])
-//! - Function argument marshalling ([`Args`])
+//! - A binary serialization protocol ([`Serializable`](serialize::Serializable))
+//! - Memory transfer abstractions ([`Transfer`](transfer::Transfer),
+//!   [`AsyncTransfer`](transfer::AsyncTransfer))
+//! - Memory management interfaces ([`MemoryController`](controller::MemoryController),
+//!   [`AsyncMemoryController`](controller::AsyncMemoryController))
+//! - Function argument marshalling ([`Args`](args::Args))
 //!
 //! ## Feature Flags
 //!
@@ -42,14 +44,6 @@
 //!     String::receive(ptr.into(), controller).unwrap()
 //! }
 //! ```
-//!
-//! [`Serializable`]: serialize::Serializable
-//! [`Transfer`]: transfer::Transfer
-//! [`AsyncTransfer`]: transfer::AsyncTransfer
-//! [`MemoryController`]: controller::MemoryController
-//! [`AsyncMemoryController`]: controller::AsyncMemoryController
-//! [`Args`]: args::Args
-
 /// Wrapper type for function arguments that implement [`surrealdb_types::SurrealValue`].
 pub mod arg;
 

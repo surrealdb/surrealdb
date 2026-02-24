@@ -56,6 +56,14 @@ impl OrderList {
 	}
 }
 
+impl IntoIterator for OrderList {
+	type Item = Order;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
+	}
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Order {
 	/// The value to order by

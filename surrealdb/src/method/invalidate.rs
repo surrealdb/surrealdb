@@ -97,7 +97,8 @@ where
 				.execute_unit(
 					self.client.session_id,
 					Command::Revoke {
-						token: SurrealValue::from_value(self.token)?,
+						token: SurrealValue::from_value(self.token)
+							.map_err(|e| crate::Error::internal(e.to_string()))?,
 					},
 				)
 				.await

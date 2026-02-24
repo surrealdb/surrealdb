@@ -23,10 +23,12 @@ pub struct ApiRequest {
 }
 
 impl TryFrom<Value> for ApiRequest {
-	type Error = anyhow::Error;
+	type Error = surrealdb_types::Error;
 
 	fn try_from(value: Value) -> std::result::Result<Self, Self::Error> {
-		convert_value_to_public_value(value)?.into_t()
+		convert_value_to_public_value(value)
+			.map_err(|e| surrealdb_types::Error::internal(e.to_string()))?
+			.into_t()
 	}
 }
 

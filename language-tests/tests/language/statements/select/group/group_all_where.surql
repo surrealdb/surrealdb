@@ -9,7 +9,7 @@ value = "'OK'"
 value = "[{ avg_temp: 22.333333333333332f, count: 3 }]"
 
 [[test.results]]
-value = "[]"
+value = "[{ count: 0 }]"
 
 [[test.results]]
 value = "[{ count: 2, total: 47f }]"

@@ -55,8 +55,9 @@ impl TestConfig {
 	}
 
 	/// Whether this test can use one of the datastorage struct which are reused between tests.
+	/// Versioned tests always need a fresh datastore since they require different configuration.
 	pub fn can_use_reusable_ds(&self) -> bool {
-		self.env.as_ref().map(|x| !x.clean).unwrap_or(false)
+		self.env.as_ref().map(|x| !x.clean && !x.versioned).unwrap_or(false)
 	}
 
 	/// Returns a list of keys which are not in the schema but still define.
@@ -114,6 +115,22 @@ pub struct TestEnv {
 	/// Valid values: "mem", "rocksdb", "surrealkv", "tikv"
 	#[serde(default)]
 	pub backend: Vec<String>,
+
+	/// Whether the test requires MVCC versioning to be enabled on the datastore.
+	/// When true, the datastore is created with `?versioned=true` in the connection string.
+	#[serde(default)]
+	pub versioned: bool,
+	/// Strategy for the new streaming planner/executor.
+	/// - "best-effort-ro" (default): try new planner, fall back on Unimplemented
+	/// - "all-ro": require new planner for all read-only statements (hard fail)
+	/// - "compute-only": skip new planner entirely
+	pub new_planner_strategy: Option<NewPlannerStrategyConfig>,
+
+	/// Whether EXPLAIN ANALYZE output omits elapsed durations, making
+	/// output deterministic for test assertions. Defaults to true in the
+	/// language test framework. Set to `false` explicitly if you need
+	/// actual elapsed times.
+	pub redact_volatile_explain_attrs: Option<bool>,
 
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
@@ -192,6 +209,21 @@ impl TestEnv {
 
 		res
 	}
+}
+
+/// Strategy for the new streaming planner/executor in language tests.
+///
+/// Maps to `surrealdb_core::dbs::NewPlannerStrategy` but uses shorter
+/// kebab-case names for TOML configuration.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NewPlannerStrategyConfig {
+	/// Try new planner, fall back on Unimplemented.
+	BestEffortRo,
+	/// Require new planner for all read-only statements (hard fail on Unimplemented).
+	AllRo,
+	/// Skip new planner entirely; always use legacy compute.
+	ComputeOnly,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -487,7 +519,6 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
 		};
@@ -550,7 +581,6 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
 		};
@@ -593,7 +623,6 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
 		};

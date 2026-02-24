@@ -130,7 +130,7 @@ impl<T: Coerce> FromArg for Rest<T> {
 	fn from_arg(name: &str, iter: &mut Args) -> Result<Self> {
 		let mut res = Vec::new();
 		while let Some((idx, x)) = iter.next() {
-			let v = x.coerce_to::<T>().map_err(|e| Error::InvalidArguments {
+			let v = x.coerce_to::<T>().map_err(|e| Error::InvalidFunctionArguments {
 				name: name.to_owned(),
 				message: format!("Argument {idx} was the wrong type. {e}"),
 			})?;
@@ -151,12 +151,12 @@ impl<T: Coerce> FromArg for T {
 	fn from_arg(name: &str, iter: &mut Args) -> Result<Self> {
 		// The error should not happen when called with the FromArgs traits as the arity
 		// is already checked.
-		let (idx, x) = iter.next().ok_or_else(|| Error::InvalidArguments {
+		let (idx, x) = iter.next().ok_or_else(|| Error::InvalidFunctionArguments {
 			name: name.to_owned(),
 			message: "Missing an argument".to_string(),
 		})?;
 
-		let v = x.coerce_to::<T>().map_err(|e| Error::InvalidArguments {
+		let v = x.coerce_to::<T>().map_err(|e| Error::InvalidFunctionArguments {
 			name: name.to_owned(),
 			message: format!("Argument {idx} was the wrong type. {e}"),
 		})?;
@@ -179,12 +179,12 @@ impl<T: CastTrait> FromArg for Cast<T> {
 	fn from_arg(name: &str, iter: &mut Args) -> Result<Self> {
 		// The error should not happen when called with the FromArgs traits as the arity
 		// is already checked.
-		let (idx, x) = iter.next().ok_or_else(|| Error::InvalidArguments {
+		let (idx, x) = iter.next().ok_or_else(|| Error::InvalidFunctionArguments {
 			name: name.to_owned(),
 			message: "Missing an argument".to_string(),
 		})?;
 
-		let v = x.cast_to::<T>().map_err(|e| Error::InvalidArguments {
+		let v = x.cast_to::<T>().map_err(|e| Error::InvalidFunctionArguments {
 			name: name.to_owned(),
 			message: format!("Argument {idx} was the wrong type. {e}"),
 		})?;
@@ -215,7 +215,7 @@ impl<T: FromArg> FromArgs for T {
 				format!("Expected {} or more arguments", arity.lower)
 			};
 
-			bail!(Error::InvalidArguments {
+			bail!(Error::InvalidFunctionArguments {
 				name: name.to_owned(),
 				message,
 			});

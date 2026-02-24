@@ -2,9 +2,8 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 
 use crate::conn::Command;
-use crate::err::Error;
 use crate::method::{BoxFuture, OnceLockExt};
-use crate::{Connection, Result, Surreal};
+use crate::{Connection, Error, Result, Surreal};
 
 /// A version future
 #[derive(Debug)]
@@ -37,9 +36,11 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			let version = router.execute_value(self.client.session_id, Command::Version).await?;
-			let version = version.into_string()?;
+			let version = version.into_string().map_err(|e| Error::internal(e.to_string()))?;
 			let semantic = version.trim_start_matches("surrealdb-");
-			semantic.parse().map_err(|_| Error::InvalidSemanticVersion(format!("\"{version}\"")))
+			semantic
+				.parse()
+				.map_err(|_| Error::internal(format!("Invalid semantic version: \"{version}\"")))
 		})
 	}
 }

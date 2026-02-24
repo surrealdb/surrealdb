@@ -12,9 +12,8 @@ use surrealdb_core::dbs::capabilities::Capabilities;
 use surrealdb_core::dbs::{QueryResult, Session};
 use surrealdb_core::iam::{Auth, Level, Role};
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
-use surrealdb_types::{Number, ToSql, Value};
+use surrealdb_types::{Error as TypesError, Number, ToSql, Value};
 
 pub async fn new_ds(ns: &str, db: &str) -> Result<Datastore> {
 	let ds =
@@ -333,6 +332,11 @@ impl Test {
 		Self::new_ds_session(ds, Session::owner().with_ns("test").with_db("test"), sql).await
 	}
 
+	#[allow(dead_code)]
+	pub async fn new_sql(self, sql: &str) -> Result<Self> {
+		Self::new_ds(self.ds, sql).await
+	}
+
 	/// Creates a new instance of the `Self` struct with the given SQL query.
 	/// Arguments `sql` - A string slice representing the SQL query.
 	/// Panics if an error occurs.#[expect(dead_code)]
@@ -477,10 +481,7 @@ impl Test {
 	/// error or if the error message does not pass the check.
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_error_func<F: Fn(&DbResultError) -> bool>(
-		&mut self,
-		check: F,
-	) -> Result<&mut Self> {
+	pub fn expect_error_func<F: Fn(&TypesError) -> bool>(&mut self, check: F) -> Result<&mut Self> {
 		let tmp = self.next()?.result;
 		match &tmp {
 			Ok(val) => {

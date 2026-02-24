@@ -25,7 +25,7 @@ where
 			let result: crate::types::Value =
 				router.execute(client.session_id, Command::Begin).await?;
 			// Extract the UUID from the result
-			let uuid = result.into_uuid()?;
+			let uuid = result.into_uuid().map_err(|e| crate::Error::internal(e.to_string()))?;
 			Ok(Transaction {
 				id: uuid.into(),
 				client,

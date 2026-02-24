@@ -67,19 +67,18 @@ pub fn settings_from_capabilities(cap: &Capabilities) -> ParserSettings {
 	ParserSettings {
 		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
 		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-		define_api_enabled: cap.allows_experimental(&ExperimentalTarget::DefineApi),
 		files_enabled: cap.allows_experimental(&ExperimentalTarget::Files),
 		surrealism_enabled: cap.allows_experimental(&ExperimentalTarget::Surrealism),
 		..Default::default()
 	}
 }
 
-/// Parses a SurrealQL [`Query`]
+/// Parses a SurrealQL query.
 ///
 /// During query parsing, the total depth of calls to parse values (including
 /// arrays, expressions, functions, objects, sub-queries), Javascript values,
 /// and geometry collections count against a computation depth limit. If the
-/// limit is reached, parsing will return [`Error::ComputationDepthExceeded`],
+/// limit is reached, parsing will return an error,
 /// as opposed to spending more time and potentially overflowing the call stack.
 ///
 /// If you encounter this limit and believe that it should be increased,
@@ -90,12 +89,12 @@ pub fn parse(input: &str) -> Result<Ast> {
 	parse_with_capabilities(input, &capabilities)
 }
 
-/// Parses a SurrealQL [`Query`]
+/// Parses a SurrealQL query.
 ///
 /// During query parsing, the total depth of calls to parse values (including
 /// arrays, expressions, functions, objects, sub-queries), Javascript values,
 /// and geometry collections count against a computation depth limit. If the
-/// limit is reached, parsing will return [`Error::ComputationDepthExceeded`],
+/// limit is reached, parsing will return an error,
 /// as opposed to spending more time and potentially overflowing the call stack.
 ///
 /// If you encounter this limit and believe that it should be increased,
@@ -132,14 +131,14 @@ pub(crate) fn expr_with_capabilities(input: &str, capabilities: &Capabilities) -
 	)
 }
 
-/// Parses a SurrealQL [`Value`].
+/// Parses a SurrealQL function name.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn function(input: &str) -> Result<Function> {
 	let capabilities = Capabilities::all();
 	function_with_capabilities(input, &capabilities)
 }
 
-/// Parses a SurrealQL [`Value`].
+/// Parses a SurrealQL function name.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn function_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Function> {
 	trace!(target: TARGET, "Parsing SurrealQL function name");
@@ -151,7 +150,7 @@ pub fn function_with_capabilities(input: &str, capabilities: &Capabilities) -> R
 	)
 }
 
-/// Parses JSON into an inert SurrealQL [`Value`]
+/// Parses JSON into an inert SurrealQL [`PublicValue`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn json(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing inert JSON value");
@@ -227,7 +226,6 @@ pub fn block(input: &str) -> Result<Block> {
 		ParserSettings {
 			legacy_strands: true,
 			flexible_record_id: true,
-			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
 			..Default::default()
@@ -266,7 +264,7 @@ pub(crate) fn expr_legacy_strand(input: &str) -> Result<Expr> {
 	})
 }
 
-/// Parses a SurrealQL [`Value`] and parses values within strings.
+/// Parses a SurrealQL [`PublicValue`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn value(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
@@ -282,7 +280,7 @@ pub fn value(input: &str) -> Result<PublicValue> {
 	})
 }
 
-/// Parses a SurrealQL [`Value`] and parses values within strings.
+/// Parses a SurrealQL [`PublicValue`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn value_legacy_strand(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
@@ -299,7 +297,7 @@ pub fn value_legacy_strand(input: &str) -> Result<PublicValue> {
 	})
 }
 
-/// Parses JSON into an inert SurrealQL [`Value`] and parses values within
+/// Parses JSON into an inert SurrealQL [`PublicValue`] and parses values within
 /// strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn json_legacy_strand(input: &str) -> Result<PublicValue> {

@@ -9,10 +9,10 @@ value = "'OK'"
 value = "[{ count: 3, nonexistent: NONE }]"
 
 [[test.results]]
-error = "Incorrect arguments for function math::sum(). Argument 1 was the wrong type. Expected `number` but found `NONE`"
+value = "[{ a: 10, total: 0 }, { a: 15, total: 0 }]"
 
 [[test.results]]
-error = "Incorrect arguments for function math::mean(). Argument 1 was the wrong type. Expected `number` but found `NONE`"
+value = "[{ avg: NaN, missing_group: NONE }]"
 
 */
 
@@ -27,7 +27,7 @@ error = "Incorrect arguments for function math::mean(). Argument 1 was the wrong
 -- Test grouping by nonexistent field (should create NONE groups)
 SELECT nonexistent, COUNT() as count FROM data GROUP BY nonexistent;
 
--- Test aggregate over nonexistent field
+-- Test aggregate over nonexistent field (NONE)
 SELECT a, math::sum(nonexistent) as total FROM data GROUP BY a;
 
 -- Test grouping and aggregating both on nonexistent fields

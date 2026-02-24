@@ -29,9 +29,6 @@ value = "NONE"
 match = "$result.body.headers != NONE AND $result.status == 200"
 error = false
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 - Request headers access

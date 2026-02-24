@@ -229,7 +229,7 @@ impl Clump<Array> for Array {
 	fn clump(self, clump_size: usize) -> Result<Array> {
 		ensure!(
 			clump_size >= 1,
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: "array::clump".to_string(),
 				message: "The second argument must be an integer greater than 0".to_string(),
 			}
@@ -407,7 +407,7 @@ impl Windows<Array> for Array {
 	fn windows(self, window_size: usize) -> Result<Array> {
 		ensure!(
 			window_size >= 1,
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: "array::windows".to_string(),
 				message: "The second argument must be an integer greater than 0".to_string(),
 			}

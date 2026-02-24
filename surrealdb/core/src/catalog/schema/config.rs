@@ -76,11 +76,21 @@ impl InfoStructure for ConfigDefinition {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct GraphQLConfig {
 	pub tables: GraphQLTablesConfig,
 	pub functions: GraphQLFunctionsConfig,
+	/// Maximum query nesting depth. `None` means no limit.
+	#[revision(start = 2)]
+	pub depth_limit: Option<u32>,
+	/// Maximum query complexity (total number of fields). `None` means no limit.
+	#[revision(start = 2)]
+	pub complexity_limit: Option<u32>,
+	/// Controls whether GraphQL schema introspection is enabled.
+	/// Defaults to `Auto` (introspection enabled).
+	#[revision(start = 3)]
+	pub introspection: GraphQLIntrospectionConfig,
 }
 
 impl InfoStructure for GraphQLConfig {
@@ -88,6 +98,9 @@ impl InfoStructure for GraphQLConfig {
 		Value::from(map!(
 			"tables" => self.tables.structure(),
 			"functions" => self.functions.structure(),
+			"depth_limit", if let Some(d) = self.depth_limit => Value::from(d as i64),
+			"complexity_limit", if let Some(c) = self.complexity_limit => Value::from(c as i64),
+			"introspection", if let GraphQLIntrospectionConfig::None = self.introspection => Value::None,
 		))
 	}
 }
@@ -138,6 +151,23 @@ impl InfoStructure for GraphQLFunctionsConfig {
 			GraphQLFunctionsConfig::Exclude(fs) => Value::from(map!(
 				"exclude" => Value::Array(fs.into_iter().map(Value::from).collect()),
 			)),
+		}
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub enum GraphQLIntrospectionConfig {
+	#[default]
+	Auto,
+	None,
+}
+
+impl InfoStructure for GraphQLIntrospectionConfig {
+	fn structure(self) -> Value {
+		match self {
+			GraphQLIntrospectionConfig::Auto => Value::String("AUTO".into()),
+			GraphQLIntrospectionConfig::None => Value::None,
 		}
 	}
 }

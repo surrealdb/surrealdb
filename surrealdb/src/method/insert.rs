@@ -8,11 +8,10 @@ use super::insert_relation::InsertRelation;
 use super::transaction::WithTransaction;
 use super::validate_data;
 use crate::conn::Command;
-use crate::err::Error;
 use crate::method::{BoxFuture, Content, OnceLockExt};
 use crate::opt::Resource;
 use crate::types::{SurrealValue, Value, Variables};
-use crate::{Connection, Result, Surreal};
+use crate::{Connection, Error, Result, Surreal};
 
 /// An insert future
 #[derive(Debug)]
@@ -71,9 +70,21 @@ macro_rules! into_future {
 						Cow::Owned(format!("CREATE {what}"))
 					}
 					Resource::RecordId(_) => Cow::Owned(format!("CREATE {what}")),
-					Resource::Object(_) => return Err(Error::InsertOnObject.into()),
-					Resource::Array(_) => return Err(Error::InsertOnArray.into()),
-					Resource::Range(_) => return Err(Error::InsertOnRange.into()),
+					Resource::Object(_) => {
+						return Err(Error::internal(
+							"Insert queries on objects are not supported".to_string(),
+						));
+					}
+					Resource::Array(_) => {
+						return Err(Error::internal(
+							"Insert queries on arrays are not supported".to_string(),
+						));
+					}
+					Resource::Range(_) => {
+						return Err(Error::internal(
+							"Insert queries on ranges are not supported".to_string(),
+						));
+					}
 				};
 
 				router
@@ -156,8 +167,9 @@ where
 				}
 				Resource::RecordId(record_id) => {
 					if data.is_array() {
-						return Err(Error::InvalidParams(
+						return Err(Error::validation(
 							"Tried to insert multiple records on a record ID".to_owned(),
+							None,
 						));
 					}
 
@@ -167,9 +179,21 @@ where
 
 					Cow::Owned(format!("CREATE {what} CONTENT $_data"))
 				}
-				Resource::Object(_) => return Err(Error::InsertOnObject),
-				Resource::Array(_) => return Err(Error::InsertOnArray),
-				Resource::Range(_) => return Err(Error::InsertOnRange),
+				Resource::Object(_) => {
+					return Err(Error::internal(
+						"Insert queries on objects are not supported".to_string(),
+					));
+				}
+				Resource::Array(_) => {
+					return Err(Error::internal(
+						"Insert queries on arrays are not supported".to_string(),
+					));
+				}
+				Resource::Range(_) => {
+					return Err(Error::internal(
+						"Insert queries on ranges are not supported".to_string(),
+					));
+				}
 			};
 
 			variables.insert("_data".to_string(), data);
@@ -209,8 +233,9 @@ where
 				Resource::Table(_) => Cow::Owned(format!("INSERT RELATION INTO {what} $_data;")),
 				Resource::RecordId(record_id) => {
 					if data.is_array() {
-						return Err(Error::InvalidParams(
+						return Err(Error::validation(
 							"Tried to insert multiple records on a record ID".to_owned(),
+							None,
 						));
 					}
 
@@ -220,9 +245,21 @@ where
 
 					Cow::Owned(format!("INSERT RELATION INTO {what} $_data RETURN AFTER"))
 				}
-				Resource::Array(_) => return Err(Error::InsertOnArray),
-				Resource::Range(_) => return Err(Error::InsertOnRange),
-				Resource::Object(_) => return Err(Error::InsertOnObject),
+				Resource::Array(_) => {
+					return Err(Error::internal(
+						"Insert queries on arrays are not supported".to_string(),
+					));
+				}
+				Resource::Range(_) => {
+					return Err(Error::internal(
+						"Insert queries on ranges are not supported".to_string(),
+					));
+				}
+				Resource::Object(_) => {
+					return Err(Error::internal(
+						"Insert queries on objects are not supported".to_string(),
+					));
+				}
 			};
 
 			variables.insert("_data".to_string(), data);

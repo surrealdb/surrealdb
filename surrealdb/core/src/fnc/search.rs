@@ -67,37 +67,37 @@ pub async fn offsets(
 	Ok(Value::None)
 }
 
-/// Internal structure for storing documents during RRF (Reciprocal Rank Fusion)
-/// processing.
+/// Internal structure for storing scored documents during search result fusion
+/// (used by both `search::rrf` and `search::linear`).
 ///
 /// This tuple struct contains:
-/// - `f64`: The accumulated RRF score for the document
+/// - `f64`: The accumulated fusion score for the document (RRF score or linear combination score)
 /// - `Value`: The document ID used to identify the same document across different result lists
 /// - `Vec<Object>`: Collection of original objects from different search results that will be
 ///   merged
 ///
 /// The struct implements comparison traits (`Eq`, `Ord`, `PartialEq`,
-/// `PartialOrd`) based solely on the RRF score (first field) to enable
-/// efficient sorting and heap operations during the top-k selection process.
-struct RrfDoc(f64, Value, Vec<Object>);
+/// `PartialOrd`) based solely on the score (first field). The ordering is
+/// reversed so a `BinaryHeap` behaves as a min-heap during top-k selection.
+struct ScoredDoc(f64, Value, Vec<Object>);
 
-impl PartialEq for RrfDoc {
+impl PartialEq for ScoredDoc {
 	fn eq(&self, other: &Self) -> bool {
 		self.0 == other.0
 	}
 }
 
-impl Eq for RrfDoc {}
+impl Eq for ScoredDoc {}
 
-impl PartialOrd for RrfDoc {
+impl PartialOrd for ScoredDoc {
 	fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
 		Some(self.cmp(other))
 	}
 }
 
-impl Ord for RrfDoc {
+impl Ord for ScoredDoc {
 	fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-		self.0.partial_cmp(&other.0).unwrap_or(std::cmp::Ordering::Equal)
+		other.0.partial_cmp(&self.0).unwrap_or(std::cmp::Ordering::Equal)
 	}
 }
 
@@ -129,7 +129,7 @@ impl Ord for RrfDoc {
 ///
 /// # Errors
 ///
-/// * `Error::InvalidArguments` - If `limit` < 1 or `rrf_constant` < 0
+/// * `Error::InvalidFunctionArguments` - If `limit` < 1 or `rrf_constant` < 0
 /// * Context cancellation errors if the operation is cancelled during processing
 ///
 /// # Example
@@ -145,7 +145,7 @@ pub async fn rrf(
 	(results, limit, rrf_constant): (Array, i64, Optional<i64>),
 ) -> Result<Value> {
 	let limit = if limit < 1 {
-		anyhow::bail!(Error::InvalidArguments {
+		anyhow::bail!(Error::InvalidFunctionArguments {
 			name: "search::rrf".to_string(),
 			message: "limit must be at least 1".to_string(),
 		});
@@ -154,7 +154,7 @@ pub async fn rrf(
 	};
 	let rrf_constant = if let Some(rrf_constant) = rrf_constant.0 {
 		if rrf_constant < 0 {
-			anyhow::bail!(Error::InvalidArguments {
+			anyhow::bail!(Error::InvalidFunctionArguments {
 				name: "search::rrf".to_string(),
 				message: "RRF constant must be at least 0".to_string(),
 			});
@@ -168,7 +168,7 @@ pub async fn rrf(
 	}
 
 	// Map to store document IDs with their accumulated RRF scores and original
-	// objects Key: document ID, Value: (accumulated_rrf_score,
+	// objects. Key: document ID, Value: (accumulated_rrf_score,
 	// vector_of_original_objects)
 	#[expect(clippy::mutable_key_type)]
 	let mut documents: HashMap<Value, (f64, Vec<Object>)> = HashMap::new();
@@ -208,39 +208,40 @@ pub async fn rrf(
 					}
 				}
 				if ctx.is_done(Some(count)).await? {
-					break;
+					return Ok(Value::None);
 				}
 				count += 1;
 			}
 		}
 	}
 
-	// Use a min-heap (BinaryHeap) to efficiently maintain only the top `limit`
-	// documents This avoids sorting all documents when we only need the top-k
-	// results
+	// Use a min-heap (via reversed Ord) to efficiently maintain only the top
+	// `limit` documents. This avoids sorting all documents when we only need the
+	// top-k results.
 	let mut scored_docs = BinaryHeap::with_capacity(limit);
 	for (id, (score, objects)) in documents {
 		if scored_docs.len() < limit {
 			// Heap not full yet - add document directly
-			scored_docs.push(RrfDoc(score, id, objects));
-		} else if let Some(RrfDoc(min_score, _, _)) = scored_docs.peek() {
-			// Heap is full - only add if this document has a higher score than the minimum
-			if score > *min_score {
-				scored_docs.pop(); // Remove the lowest scoring document
-				scored_docs.push(RrfDoc(score, id, objects)); // Add the new higher scoring document
+			scored_docs.push(ScoredDoc(score, id, objects));
+		} else if let Some(ScoredDoc(heap_min_score, _, _)) = scored_docs.peek() {
+			// Heap is full - only add if this document has a higher score than the heap minimum
+			if score > *heap_min_score {
+				scored_docs.pop(); // Remove the lowest scoring document from top-k
+				scored_docs.push(ScoredDoc(score, id, objects)); // Add the new higher scoring document
 			}
 		}
 		if ctx.is_done(Some(count)).await? {
-			break;
+			return Ok(Value::None);
 		}
 		count += 1;
 	}
 
-	// Extract the top `limit` results from the heap and build the final result
-	// array Note: BinaryHeap.pop() returns documents in descending order by RRF
-	// score (highest first)
-	let mut result_array = Array::new();
-	while let Some(doc) = scored_docs.pop() {
+	// Build the final result array sorted by RRF score in descending order.
+	// `into_sorted_vec()` on our min-heap (reversed Ord) yields documents from
+	// highest to lowest score, so no reversal is needed.
+	let sorted_docs = scored_docs.into_sorted_vec();
+	let mut result_array = Array::with_capacity(sorted_docs.len());
+	for doc in sorted_docs {
 		// Merge all objects from the same document ID across different result lists
 		// This combines fields like 'distance' from vector search and 'ft_score' from
 		// full-text search
@@ -254,11 +255,10 @@ pub async fn rrf(
 		obj.insert("rrf_score".to_string(), Value::Number(Number::Float(doc.0)));
 		result_array.push(Value::Object(obj));
 		if ctx.is_done(Some(count)).await? {
-			break;
+			return Ok(Value::None);
 		}
 		count += 1;
 	}
-	// Return the fused results sorted by RRF score in descending order
 	Ok(Value::Array(result_array))
 }
 
@@ -297,7 +297,7 @@ enum LinearNorm {
 ///
 /// # Errors
 ///
-/// * `Error::InvalidArguments` - If:
+/// * `Error::InvalidFunctionArguments` - If:
 ///   - `limit` < 1
 ///   - `results` and `weights` arrays have different lengths
 ///   - Any weight is not a numeric value
@@ -336,7 +336,7 @@ pub async fn linear(
 	(results, weights, limit, norm): (Array, Array, i64, String),
 ) -> Result<Value> {
 	let limit = if limit < 1 {
-		anyhow::bail!(Error::InvalidArguments {
+		anyhow::bail!(Error::InvalidFunctionArguments {
 			name: "search::linear".to_string(),
 			message: "Limit must be at least 1".to_string(),
 		});
@@ -344,7 +344,7 @@ pub async fn linear(
 		limit as usize
 	};
 	if weights.len() != results.len() {
-		anyhow::bail!(Error::InvalidArguments {
+		anyhow::bail!(Error::InvalidFunctionArguments {
 			name: "search::linear".to_string(),
 			message: "The results and the weights array should have the same length".to_string(),
 		});
@@ -352,7 +352,7 @@ pub async fn linear(
 	// Validate that all weights are numeric
 	for (i, weight) in weights.iter().enumerate() {
 		if !matches!(weight, Value::Number(_)) {
-			anyhow::bail!(Error::InvalidArguments {
+			anyhow::bail!(Error::InvalidFunctionArguments {
 				name: "search::linear".to_string(),
 				message: format!("Weight at index {} must be a number", i),
 			});
@@ -361,7 +361,7 @@ pub async fn linear(
 	let norm = match norm.as_str() {
 		"minmax" => LinearNorm::MinMax,
 		"zscore" => LinearNorm::ZScore,
-		_ => anyhow::bail!(Error::InvalidArguments {
+		_ => anyhow::bail!(Error::InvalidFunctionArguments {
 			name: "search::linear".to_string(),
 			message: "Norm must be 'minmax' or 'zscore'".to_string()
 		}),
@@ -373,12 +373,12 @@ pub async fn linear(
 	let results_len = results.len();
 
 	// Map to store document IDs with their scores from each result list and
-	// original objects Key: document ID, Value: (scores_vector,
+	// original objects. Key: document ID, Value: (scores_per_list,
 	// vector_of_original_objects)
 	#[expect(clippy::mutable_key_type)]
 	let mut documents: HashMap<Value, (Vec<f64>, Vec<Object>)> = HashMap::new();
 
-	// First pass: collect all documents and their scores from each result list
+	// First pass: collect all documents and their raw scores from each result list
 	let mut count = 0;
 	for (list_idx, result_list) in results.into_iter().enumerate() {
 		if let Value::Array(array) = result_list {
@@ -416,14 +416,14 @@ pub async fn linear(
 					}
 				}
 				if ctx.is_done(Some(count)).await? {
-					break;
+					return Ok(Value::None);
 				}
 				count += 1;
 			}
 		}
 	}
 
-	// Second pass: normalize scores and compute weighted linear combination
+	// Second pass: gather raw scores per list for normalization
 	let mut all_scores_by_list: Vec<Vec<f64>> = vec![Vec::new(); results_len];
 
 	// Collect all scores for normalization
@@ -435,7 +435,9 @@ pub async fn linear(
 		}
 	}
 
-	// Normalize scores for each result list
+	// Compute normalization parameters for each result list.
+	// For MinMax: (min_score, range)  where range = max - min
+	// For ZScore: (mean, std_dev)
 	let mut normalized_params: Vec<(f64, f64)> = Vec::new();
 	for list_scores in &all_scores_by_list {
 		if list_scores.is_empty() {
@@ -468,7 +470,8 @@ pub async fn linear(
 		}
 	}
 
-	// Use a min-heap to efficiently maintain only the top `limit` documents
+	// Use a min-heap (via reversed Ord) to efficiently maintain only the top
+	// `limit` documents.
 	let mut scored_docs = BinaryHeap::with_capacity(limit);
 
 	for (id, (scores, objects)) in documents {
@@ -498,22 +501,25 @@ pub async fn linear(
 		}
 
 		if scored_docs.len() < limit {
-			scored_docs.push(RrfDoc(combined_score, id, objects));
-		} else if let Some(RrfDoc(min_score, _, _)) = scored_docs.peek()
-			&& combined_score > *min_score
+			scored_docs.push(ScoredDoc(combined_score, id, objects));
+		} else if let Some(ScoredDoc(heap_min_score, _, _)) = scored_docs.peek()
+			&& combined_score > *heap_min_score
 		{
 			scored_docs.pop();
-			scored_docs.push(RrfDoc(combined_score, id, objects));
+			scored_docs.push(ScoredDoc(combined_score, id, objects));
 		}
 		if ctx.is_done(Some(count)).await? {
-			break;
+			return Ok(Value::None);
 		}
 		count += 1;
 	}
 
-	// Build the final result array
-	let mut result_array = Array::new();
-	while let Some(doc) = scored_docs.pop() {
+	// Build the final result array sorted by linear score in descending order.
+	// `into_sorted_vec()` on our min-heap (reversed Ord) yields documents from
+	// highest to lowest score, so no reversal is needed.
+	let sorted_docs = scored_docs.into_sorted_vec();
+	let mut result_array = Array::with_capacity(sorted_docs.len());
+	for doc in sorted_docs {
 		// Merge all objects from the same document ID
 		let mut obj = Object::default();
 		for mut o in doc.2 {
@@ -524,10 +530,9 @@ pub async fn linear(
 		obj.insert("linear_score".to_string(), Value::Number(Number::Float(doc.0)));
 		result_array.push(Value::Object(obj));
 		if ctx.is_done(Some(count)).await? {
-			break;
+			return Ok(Value::None);
 		}
 		count += 1;
 	}
-
 	Ok(Value::Array(result_array))
 }

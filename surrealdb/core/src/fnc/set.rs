@@ -269,7 +269,7 @@ pub async fn reduce(
 			0 => Ok(Value::None),
 			1 => {
 				let Some(val) = set.into_iter().next() else {
-					return Err(Error::InvalidArguments {
+					return Err(Error::InvalidFunctionArguments {
 						name: String::from("set::reduce"),
 						message: String::from("Iterator should have an item at this point"),
 					}
@@ -303,25 +303,27 @@ pub fn slice(
 	};
 
 	let range = if let Some(end) = end {
-		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("set::slice"),
-			message: format!("Argument 1 was the wrong type. {e}"),
-		})?;
+		let start =
+			range_start.coerce_to::<i64>().map_err(|e| Error::InvalidFunctionArguments {
+				name: String::from("set::slice"),
+				message: format!("Argument 1 was the wrong type. {e}"),
+			})?;
 
 		TypedRange {
 			start: Bound::Included(start),
 			end: Bound::Excluded(end),
 		}
 	} else if let Value::Range(range) = range_start {
-		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
+		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidFunctionArguments {
 			name: String::from("set::slice"),
 			message: format!("Range was the wrong type. {e}"),
 		})?
 	} else {
-		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("set::slice"),
-			message: format!("Argument 1 was the wrong type. {e}"),
-		})?;
+		let start =
+			range_start.coerce_to::<i64>().map_err(|e| Error::InvalidFunctionArguments {
+				name: String::from("set::slice"),
+				message: format!("Argument 1 was the wrong type. {e}"),
+			})?;
 		TypedRange {
 			start: Bound::Included(start),
 			end: Bound::Unbounded,

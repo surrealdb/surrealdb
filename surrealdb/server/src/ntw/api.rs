@@ -8,7 +8,7 @@ use surrealdb_core::api::err::ApiError;
 use surrealdb_core::api::request::ApiRequest;
 use surrealdb_core::catalog::ApiMethod;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::{ExperimentalTarget, RouteTarget};
+use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_types::Value;
 use tower_http::limit::RequestBodyLimitLayer;
 use uuid::Uuid;
@@ -19,7 +19,7 @@ use crate::cnf::HTTP_MAX_API_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::ntw::params::Params;
 
-pub(super) fn router<S>() -> Router<S>
+pub fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
@@ -58,11 +58,6 @@ async fn handler(
 	let ds = &state.datastore;
 	// Update the session with the NS & DB
 	let session = session.with_ns(&ns).with_db(&db);
-	// Check if the experimental capability is enabled
-	if !state.datastore.get_capabilities().allows_experimental(&ExperimentalTarget::DefineApi) {
-		warn!(request_id = %request_id, "Experimental capability for API routes is not enabled");
-		return Err(ApiHandlerError(NetError::NotFound(url).into(), request_id));
-	}
 	// Check if capabilities allow querying the requested HTTP route
 	if !ds.allows_http_route(&RouteTarget::Api) {
 		warn!(

@@ -7,10 +7,9 @@ use crate::conn::Router;
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::engine;
 use crate::engine::any::Any;
-use crate::err::Error;
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, EndpointKind, WaitFor};
-use crate::{ExtraFeatures, Result, SessionClone, Surreal, conn};
+use crate::{Error, ExtraFeatures, Result, SessionClone, Surreal, conn};
 
 impl crate::Connection for Any {}
 impl conn::Sealed for Any {
@@ -48,12 +47,12 @@ impl conn::Sealed for Any {
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??;
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}
 
 					#[cfg(not(feature = "kv-indxdb"))]
 				return Err(
-					Error::InternalError("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+					Error::internal("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 				);
 				}
 
@@ -67,12 +66,12 @@ impl conn::Sealed for Any {
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??;
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
 				return Err(
-					Error::InternalError("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+					Error::internal("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 				);
 				}
 
@@ -86,14 +85,14 @@ impl conn::Sealed for Any {
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??;
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
-			return Err(Error::Ws("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			return Err(Error::internal("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 				}
 
-				EndpointKind::SurrealKv | EndpointKind::SurrealKvVersioned => {
+				EndpointKind::SurrealKv => {
 					#[cfg(feature = "kv-surrealkv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
@@ -103,11 +102,11 @@ impl conn::Sealed for Any {
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??;
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
-				return Err(Error::Ws(
+				return Err(Error::internal(
 				"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
 			));
 				}
@@ -122,12 +121,12 @@ impl conn::Sealed for Any {
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??;
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
 				return Err(
-					Error::Ws("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+					Error::internal("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 				);
 				}
 
@@ -143,7 +142,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "protocol-http"))]
-				return Err(Error::InternalError(
+				return Err(Error::internal(
 					"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
 				));
 				}
@@ -153,23 +152,28 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::LiveQueries);
 						let mut endpoint = address;
-						endpoint.url = endpoint.url.join(engine::remote::ws::PATH)?;
+						endpoint.url = endpoint
+							.url
+							.join(engine::remote::ws::PATH)
+							.map_err(crate::std_error_to_types_error)?;
 						spawn_local(engine::remote::ws::wasm::run_router(
 							endpoint,
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await??;
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 					}
 
 					#[cfg(not(feature = "protocol-ws"))]
-				return Err(Error::InternalError(
+				return Err(Error::internal(
 					"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
 				));
 				}
 
-				EndpointKind::Unsupported(v) => return Err(Error::Scheme(v).into()),
+				EndpointKind::Unsupported(v) => {
+					return Err(Error::configuration(format!("Unsupported scheme: {v}"), None));
+				}
 			}
 
 			let waiter = watch::channel(Some(WaitFor::Connection));

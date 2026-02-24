@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -72,6 +72,18 @@ impl FromIterator<(String, Value)> for Variables {
 impl From<BTreeMap<String, Value>> for Variables {
 	fn from(map: BTreeMap<String, Value>) -> Self {
 		Self(map)
+	}
+}
+
+impl From<BTreeMap<String, String>> for Variables {
+	fn from(map: BTreeMap<String, String>) -> Self {
+		Self(map.into_iter().map(|(k, v)| (k, Value::String(v))).collect())
+	}
+}
+
+impl From<HashMap<String, String>> for Variables {
+	fn from(map: HashMap<String, String>) -> Self {
+		Self(map.into_iter().map(|(k, v)| (k, Value::String(v))).collect())
 	}
 }
 

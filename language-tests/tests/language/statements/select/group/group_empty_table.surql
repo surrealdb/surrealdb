@@ -9,7 +9,7 @@ value = "'OK'"
 value = "[]"
 
 [[test.results]]
-value = "[]"
+value = "[{ count: 0, total: 0 }]"
 
 [[test.results]]
 value = "[]"

@@ -2,6 +2,8 @@ use std::env;
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use surrealdb_core::lazy_env_parse;
+
 /// The logo of the SurrealDB server
 pub const LOGO: &str = "
  .d8888b.                                             888 8888888b.  888888b.

@@ -14,7 +14,7 @@ use crate::sql::statements::{
 	ForeachStatement, InfoStatement, KillStatement, LiveStatement, OptionStatement,
 	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, UseStatement,
 };
-use crate::sql::{AssignOperator, Expr, Literal, Param, TopLevelExpr};
+use crate::sql::{AssignOperator, ExplainFormat, Expr, Literal, Param, TopLevelExpr};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{TokenKind, t};
@@ -297,6 +297,69 @@ impl Parser<'_> {
 		Ok(TopLevelExpr::Commit)
 	}
 
+	/// Parses an EXPLAIN expression.
+	///
+	/// # Parser State
+	/// Expects `EXPLAIN` to already be consumed.
+	pub(super) async fn parse_explain_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+		// Check for optional ANALYZE keyword
+		// ANALYZE is not a reserved keyword, so we need to check if it's an identifier
+		let analyze = {
+			let peek = self.peek();
+			if matches!(peek.kind, TokenKind::Identifier) {
+				let ident_str = self.lexer.span_str(peek.span);
+				if ident_str.eq_ignore_ascii_case("ANALYZE") {
+					self.pop_peek();
+					true
+				} else {
+					false
+				}
+			} else {
+				false
+			}
+		};
+
+		// Check for optional FORMAT keyword
+		let format = {
+			let peek = self.peek();
+			if matches!(peek.kind, TokenKind::Identifier) {
+				let ident_str = self.lexer.span_str(peek.span);
+				if ident_str.eq_ignore_ascii_case("FORMAT") {
+					self.pop_peek();
+					// Now expect TEXT or JSON
+					let format_peek = self.peek();
+					if matches!(format_peek.kind, TokenKind::Identifier) {
+						let format_str = self.lexer.span_str(format_peek.span);
+						if format_str.eq_ignore_ascii_case("TEXT") {
+							self.pop_peek();
+							ExplainFormat::Text
+						} else if format_str.eq_ignore_ascii_case("JSON") {
+							self.pop_peek();
+							ExplainFormat::Json
+						} else {
+							unexpected!(self, format_peek, "TEXT or JSON")
+						}
+					} else {
+						unexpected!(self, format_peek, "TEXT or JSON")
+					}
+				} else {
+					ExplainFormat::Text // Default to TEXT
+				}
+			} else {
+				ExplainFormat::Text // Default to TEXT
+			}
+		};
+
+		// Parse the inner statement as an expression
+		let statement = stk.run(|ctx| self.parse_expr_start(ctx)).await?;
+
+		Ok(Expr::Explain {
+			format,
+			analyze,
+			statement: Box::new(statement),
+		})
+	}
+
 	/// Parsers a USE statement.
 	///
 	/// # Parser State
@@ -373,7 +436,7 @@ impl Parser<'_> {
 				InfoStatement::Db(structure, version)
 			}
 			t!("TABLE") => {
-				let ident = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let ident = stk.run(|stk| self.parse_expr_table(stk)).await?;
 				let version = if self.eat(t!("VERSION")) {
 					Some(stk.run(|stk| self.parse_expr_inherit(stk)).await?)
 				} else {
@@ -383,7 +446,7 @@ impl Parser<'_> {
 				InfoStatement::Tb(ident, structure, version)
 			}
 			t!("USER") => {
-				let ident = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let ident = stk.run(|stk| self.parse_expr_inherit(stk)).await?;
 				let base = self.eat(t!("ON")).then(|| self.parse_base()).transpose()?;
 				let structure = self.eat(t!("STRUCTURE"));
 				InfoStatement::User(ident, base, structure)
@@ -392,7 +455,7 @@ impl Parser<'_> {
 				let index = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
-				let table = stk.run(|stk| self.parse_expr_field(stk)).await?;
+				let table = stk.run(|stk| self.parse_expr_table(stk)).await?;
 				let structure = self.eat(t!("STRUCTURE"));
 				InfoStatement::Index(index, table, structure)
 			}

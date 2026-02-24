@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-error = "Incorrect arguments for function extend(). Argument 2 was the wrong type. Expected `object` but found `'9'`"
+error = "Incorrect arguments for method extend(). Argument 2 was the wrong type. Expected `object` but found `'9'`"
 
 
 [[test.results]]

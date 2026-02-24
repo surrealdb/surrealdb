@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::*;
 use crate::catalog::auth::AuthLimit;
-use crate::catalog::record::{Data, Record};
+use crate::catalog::record::Record;
 use crate::catalog::schema::base::Base;
 use crate::expr::field::Selector;
 use crate::expr::{
@@ -154,7 +154,10 @@ use crate::val::{Datetime, TableName, Value};
 #[case::config(ConfigDefinition::GraphQL(GraphQLConfig {
 	tables: GraphQLTablesConfig::default(),
 	functions: GraphQLFunctionsConfig::default(),
-}), 7)]
+	depth_limit: None,
+	complexity_limit: None,
+	introspection: GraphQLIntrospectionConfig::default(),
+}), 11)]
 #[case::event(EventDefinition {
 	name: "test".to_string(),
 	target_table: TableName::from("test"),
@@ -183,7 +186,8 @@ use crate::val::{Datetime, TableName, Value};
 	comment: Some("comment".to_string()),
 	reference: None,
 	auth_limit: AuthLimit::default(),
-}, 43)]
+	computed_deps: None,
+}, 44)]
 #[case::function(FunctionDefinition {
 	name: "function".to_string(),
 	args: vec![],
@@ -234,7 +238,7 @@ use crate::val::{Datetime, TableName, Value};
 	comment: Some("comment".to_string()),
 	base: crate::catalog::schema::base::Base::Root,
 }, 40)]
-#[case::record(Record::new(Data::from(Value::Bool(true))), 5)]
+#[case::record(Record::new(Value::Bool(true)), 5)]
 fn test_serialize_deserialize<T>(#[case] original: T, #[case] expected_encoded_size: usize)
 where
 	T: KVValue + std::fmt::Debug + PartialEq,

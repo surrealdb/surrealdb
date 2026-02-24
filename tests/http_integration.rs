@@ -2180,7 +2180,7 @@ mod http_integration {
 		{
 			// Start server disallowing routes for queries, exporting and importing
 			let (addr, _server) = common::start_server(StartServerArguments {
-				args: "--deny-experimental * --allow-experimental define_api".to_string(),
+				args: "--deny-experimental * --allow-experimental files".to_string(),
 				// Auth disabled to ensure unauthorized errors are due to capabilities
 				auth: false,
 				..Default::default()
@@ -2206,7 +2206,7 @@ mod http_integration {
 			let res = client
 				.post(format!("{base_url}/sql"))
 				.basic_auth(USER, Some(PASS))
-				.body("DEFINE API \"/\" FOR any THEN {}")
+				.body("DEFINE BUCKET test BACKEND \"memory\"")
 				.send()
 				.await
 				.unwrap();
@@ -2219,7 +2219,7 @@ mod http_integration {
 		{
 			// Start server disallowing routes for queries, exporting and importing
 			let (addr, _server) = common::start_server(StartServerArguments {
-				args: "--deny-experimental define_api --allow-experimental *".to_string(),
+				args: "--deny-experimental files --allow-experimental *".to_string(),
 				// Auth disabled to ensure unauthorized errors are due to capabilities
 				auth: false,
 				..Default::default()
@@ -2245,13 +2245,13 @@ mod http_integration {
 			let res = client
 				.post(format!("{base_url}/sql"))
 				.basic_auth(USER, Some(PASS))
-				.body("DEFINE API \"/\" FOR any THEN {}")
+				.body("DEFINE BUCKET test BACKEND \"memory\"")
 				.send()
 				.await
 				.unwrap();
 			let res = res.text().await.unwrap();
 			assert!(
-				res.contains("the experimental define api capability is not enabled"),
+				res.contains("expected the experimental files feature to be enabled"),
 				"body: {}",
 				res
 			);

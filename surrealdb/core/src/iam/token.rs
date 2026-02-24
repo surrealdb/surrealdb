@@ -3,18 +3,27 @@ use std::fmt;
 use std::sync::LazyLock;
 
 use anyhow::{Result, bail};
-use jsonwebtoken::{Algorithm, Header, decode};
+use jsonwebtoken::{Algorithm, Header};
 use serde::{Deserialize, Serialize};
 use surrealdb_types::SurrealValue;
 
 use crate::dbs::Session;
 use crate::err::Error;
-use crate::iam::verify::{DUD, KEY};
 use crate::kvs::Datastore;
 use crate::sql::expression::convert_public_value_to_internal;
 use crate::val::{Object, Value, convert_object_to_public_map};
 use crate::{iam, syn};
 pub static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS512));
+
+/// Decodes JWT claims from an access token without cryptographic verification.
+///
+/// SAFETY: This is used exclusively during token refresh and revocation to extract
+/// routing information (namespace, database, access method) from an expired access
+/// token. The refresh token itself provides the real authentication and is fully
+/// validated during the subsequent signin process.
+fn decode_access_token_claims(token: &str) -> Result<jsonwebtoken::TokenData<Claims>> {
+	Ok(jsonwebtoken::dangerous::insecure_decode::<Claims>(token)?)
+}
 
 /// A token that can be either an access token alone or an access token with a refresh token.
 ///
@@ -138,7 +147,7 @@ impl Token {
 	/// ```
 	pub async fn refresh(self, kvs: &Datastore, session: &mut Session) -> Result<Self> {
 		match self {
-			Token::Access(_) => bail!(Error::InvalidArguments {
+			Token::Access(_) => bail!(Error::InvalidFunctionArguments {
 				name: "refresh".into(),
 				message: "Token is an access token, cannot refresh".into(),
 			}),
@@ -151,7 +160,7 @@ impl Token {
 				// extracting the authentication scope (NS, DB, AC, ID, etc.) to pass
 				// to the signin function. The refresh token itself will be validated
 				// during the signin process.
-				let token_data = decode::<Claims>(&access, &KEY, &DUD)?;
+				let token_data = decode_access_token_claims(&access)?;
 				let claims = token_data.claims.into_claims_object();
 				// Convert token claims to signin variables. These claims contain the
 				// original authentication scope (namespace, database, access method)
@@ -172,7 +181,7 @@ impl Token {
 
 	pub async fn revoke_refresh_token(self, kvs: &Datastore) -> Result<()> {
 		match self {
-			Token::Access(_) => bail!(Error::InvalidArguments {
+			Token::Access(_) => bail!(Error::InvalidFunctionArguments {
 				name: "refresh".into(),
 				message: "Token is an access token, cannot revoke refresh token".into(),
 			}),
@@ -181,16 +190,16 @@ impl Token {
 				refresh,
 			} => {
 				let grant_id = iam::signin::validate_grant_bearer(&refresh)?;
-				let token_data = decode::<Claims>(&access, &KEY, &DUD)?;
-				let ns = token_data.claims.ns.ok_or_else(|| Error::InvalidArguments {
+				let token_data = decode_access_token_claims(&access)?;
+				let ns = token_data.claims.ns.ok_or_else(|| Error::InvalidFunctionArguments {
 					name: "ns".into(),
 					message: "Token does not contain a namespace".into(),
 				})?;
-				let db = token_data.claims.db.ok_or_else(|| Error::InvalidArguments {
+				let db = token_data.claims.db.ok_or_else(|| Error::InvalidFunctionArguments {
 					name: "db".into(),
 					message: "Token does not contain a database".into(),
 				})?;
-				let ac = token_data.claims.ac.ok_or_else(|| Error::InvalidArguments {
+				let ac = token_data.claims.ac.ok_or_else(|| Error::InvalidFunctionArguments {
 					name: "ac".into(),
 					message: "Token does not contain an access name".into(),
 				})?;

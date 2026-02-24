@@ -18,19 +18,19 @@ pub struct AlterSystemStatement {
 }
 
 impl ToSql for AlterSystemStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, _fmt, "ALTER SYSTEM");
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "ALTER SYSTEM");
 		match &self.query_timeout {
 			AlterKind::None => {}
 			AlterKind::Set(duration) => {
-				write_sql!(f, _fmt, " QUERY_TIMEOUT {}", duration);
+				write_sql!(f, fmt, " QUERY_TIMEOUT {}", duration);
 			}
 			AlterKind::Drop => {
-				write_sql!(f, _fmt, " DROP QUERY_TIMEOUT");
+				write_sql!(f, fmt, " DROP QUERY_TIMEOUT");
 			}
 		}
 		if self.compact {
-			write_sql!(f, _fmt, " COMPACT");
+			write_sql!(f, fmt, " COMPACT");
 		}
 	}
 }

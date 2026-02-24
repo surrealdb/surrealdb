@@ -86,6 +86,10 @@ pub async fn expr_to_ident(
 	{
 		return Ok(x.clone());
 	}
+	// Handle table name expressions (when parsed with table_as_field = false)
+	if let Expr::Table(name) = expr {
+		return Ok(name.to_string());
+	}
 	match stk
 		.run(|stk| expr.compute(stk, ctx, opt, doc))
 		.await
@@ -116,6 +120,10 @@ pub async fn expr_to_optional_ident(
 		&& let [Part::Field(x)] = x.as_slice()
 	{
 		return Ok(Some(x.clone()));
+	}
+	// Handle table name expressions (when parsed with table_as_field = false)
+	if let Expr::Table(name) = expr {
+		return Ok(Some(name.to_string()));
 	}
 	match stk
 		.run(|stk| expr.compute(stk, ctx, opt, doc))

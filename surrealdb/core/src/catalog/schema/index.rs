@@ -60,9 +60,9 @@ pub struct IndexDefinition {
 	pub(crate) cols: Vec<Idiom>,
 	pub(crate) index: Index,
 	pub(crate) comment: Option<String>,
-	/// Whether this index has been marked for removal.
-	/// Decommissioned indexes are excluded from query planning and document indexing,
-	/// and any concurrent index builds are cancelled.
+	/// Whether this index has been marked for removal via `REMOVE INDEX`.
+	/// Indexes marked for removal are excluded from query planning and document
+	/// indexing, and any in-progress index builds are cancelled.
 	pub(crate) prepare_remove: bool,
 }
 
@@ -85,14 +85,15 @@ impl IndexDefinition {
 		}
 	}
 
-	/// Checks if this index is decommissioned and returns an error if it is.
+	/// Checks if this index has been marked for removal and returns an error if so.
 	///
-	/// This method is used during concurrent index building to detect when an index
-	/// has been decommissioned, allowing the build process to be cancelled gracefully.
+	/// This method is used during index building to detect when an index has been
+	/// marked for removal via `REMOVE INDEX`, allowing the build process to be
+	/// cancelled gracefully.
 	///
 	/// # Errors
 	///
-	/// Returns `Error::IndexingBuildingCancelled` if the index is decommissioned.
+	/// Returns `Error::IndexingBuildingCancelled` if `prepare_remove` is `true`.
 	pub(crate) fn expect_not_prepare_remove(&self) -> Result<()> {
 		if self.prepare_remove {
 			Err(anyhow::Error::new(Error::IndexingBuildingCancelled {

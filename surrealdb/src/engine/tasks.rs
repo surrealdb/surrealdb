@@ -13,8 +13,8 @@ use tokio_util::sync::CancellationToken;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
+use crate::Error;
 use crate::engine::IntervalStream;
-use crate::err::Error;
 
 #[cfg(not(target_family = "wasm"))]
 type Task = Pin<Box<dyn Future<Output = Result<(), tokio::task::JoinError>> + Send + 'static>>;
@@ -218,7 +218,7 @@ fn spawn_task_index_compaction(
 				_ = canceller.cancelled() => break,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
-					if let Err(e) = dbs.index_compaction(interval).await {
+					if let Err(e) = Datastore::index_compaction(dbs.clone(), interval).await {
 						error!("Error running index compaction: {e}");
 					}
 				}

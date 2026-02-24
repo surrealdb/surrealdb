@@ -70,9 +70,6 @@ value = "{ body: { parsed: { auto: 'json' } }, headers: {}, status: 200 }"
 skip-api-request-id = true
 value = "{ body: { parsed: b'736F6D652064617461' }, headers: {}, status: 200 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 - JSON strategy

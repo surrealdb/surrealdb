@@ -19,6 +19,11 @@ impl Enum {
 		}
 	}
 
+	fn strategy_for_variant(variant: &EnumVariant, attrs: &EnumAttributes) -> Strategy {
+		Strategy::for_enum(&variant.ident, attrs)
+			.with_variant_skip_content(variant.fields.skip_content().cloned())
+	}
+
 	#[allow(clippy::wrong_self_convention)]
 	pub fn into_value(&self, attrs: &EnumAttributes, crate_path: &CratePath) -> TokenStream2 {
 		let variants = self
@@ -27,9 +32,8 @@ impl Enum {
 			.map(|variant| {
 				let ident = &variant.ident;
 				let fields = variant.fields.match_fields();
-				let into_value = variant
-					.fields
-					.into_value(&Strategy::for_enum(&variant.ident, attrs), crate_path);
+				let strategy = Self::strategy_for_variant(variant, attrs);
+				let into_value = variant.fields.into_value(&strategy, crate_path);
 
 				quote! {
 					Self::#ident #fields => {
@@ -54,7 +58,8 @@ impl Enum {
 		crate_path: &CratePath,
 	) -> TokenStream2 {
 		let value_ty = crate_path.value();
-		let anyhow_macro = crate_path.anyhow_macro();
+		let error_no_variants_matched = crate_path
+			.error_internal(quote! { format!("Failed to decode {}, no variants matched", #name) });
 
 		let mut with_map = WithMap::new();
 
@@ -62,7 +67,7 @@ impl Enum {
 			let ident = &variant.ident;
 			let fields = variant.fields.match_fields();
 			let ok = quote!(return Ok(Self::#ident #fields));
-			let strategy = Strategy::for_enum(&variant.ident, attrs);
+			let strategy = Self::strategy_for_variant(variant, attrs);
 			with_map.push(variant.fields.from_value(&ident.to_string(), &strategy, ok, crate_path));
 		}
 
@@ -102,6 +107,17 @@ impl Enum {
 			},
 		};
 
+		// If a variant is marked with #[surreal(other)], use it as the fallback
+		// instead of returning an error when no variants match. This enables
+		// forward compatibility: unknown values on the wire fall back to the
+		// designated variant rather than failing deserialization.
+		let fallback = if let Some(other) = self.variants.iter().find(|v| v.is_other()) {
+			let ident = &other.ident;
+			quote! { Ok(Self::#ident) }
+		} else {
+			quote! { Err(#error_no_variants_matched) }
+		};
+
 		quote! {
 			match value {
 				#match_map
@@ -110,7 +126,7 @@ impl Enum {
 				#match_value
 			};
 
-			Err(#anyhow_macro!("Failed to decode {}, no variants matched", #name))
+			#fallback
 		}
 	}
 
@@ -120,7 +136,7 @@ impl Enum {
 		let mut with_map = WithMap::new();
 
 		for variant in &self.variants {
-			let strategy = Strategy::for_enum(&variant.ident, attrs);
+			let strategy = Self::strategy_for_variant(variant, attrs);
 			with_map.push(variant.fields.is_value(&strategy, crate_path));
 		}
 
@@ -179,7 +195,8 @@ impl Enum {
 			.variants
 			.iter()
 			.map(|variant| {
-				variant.fields.kind_of(&Strategy::for_enum(&variant.ident, attrs), crate_path)
+				let strategy = Self::strategy_for_variant(variant, attrs);
+				variant.fields.kind_of(&strategy, crate_path)
 			})
 			.collect::<Vec<_>>();
 

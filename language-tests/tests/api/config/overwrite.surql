@@ -33,9 +33,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: { version: 'second' }, headers: {}, status: 200 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 // Default behavior - first definition succeeds

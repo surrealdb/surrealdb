@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::rpc::{DbResult, RpcError, RpcProtocol};
-use surrealdb_types::{Array, HashMap, Value};
+use surrealdb_core::rpc::{DbResult, Method, RpcProtocol, method_not_found};
+use surrealdb_types::{Array, Error as TypesError, HashMap, Value};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -69,8 +69,8 @@ impl RpcProtocol for Http {
 		&self,
 		_txn: Option<Uuid>,
 		_session_id: Option<Uuid>,
-	) -> Result<DbResult, RpcError> {
-		Err(RpcError::MethodNotFound)
+	) -> Result<DbResult, TypesError> {
+		Err(method_not_found(Method::Begin.to_string()))
 	}
 
 	/// Transactions are not supported on HTTP RPC context
@@ -79,8 +79,8 @@ impl RpcProtocol for Http {
 		_txn: Option<Uuid>,
 		_session_id: Option<Uuid>,
 		_params: Array,
-	) -> Result<DbResult, RpcError> {
-		Err(RpcError::MethodNotFound)
+	) -> Result<DbResult, TypesError> {
+		Err(method_not_found(Method::Commit.to_string()))
 	}
 
 	/// Transactions are not supported on HTTP RPC context
@@ -89,7 +89,7 @@ impl RpcProtocol for Http {
 		_txn: Option<Uuid>,
 		_session_id: Option<Uuid>,
 		_params: Array,
-	) -> Result<DbResult, RpcError> {
-		Err(RpcError::MethodNotFound)
+	) -> Result<DbResult, TypesError> {
+		Err(method_not_found(Method::Cancel.to_string()))
 	}
 }

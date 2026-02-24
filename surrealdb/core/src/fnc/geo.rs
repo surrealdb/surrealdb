@@ -1,8 +1,7 @@
 use anyhow::Result;
 use geo::algorithm::centroid::Centroid;
 use geo::algorithm::chamberlain_duquette_area::ChamberlainDuquetteArea;
-use geo::algorithm::haversine_distance::HaversineDistance;
-use geo::{Bearing, Haversine};
+use geo::{Bearing, Distance, Haversine};
 
 use crate::val::{Geometry, Value};
 
@@ -53,7 +52,7 @@ pub fn centroid((arg,): (Geometry,)) -> Result<Value> {
 
 pub fn distance((v, w): (Geometry, Geometry)) -> Result<Value> {
 	Ok(match (v, w) {
-		(Geometry::Point(v), Geometry::Point(w)) => v.haversine_distance(&w).into(),
+		(Geometry::Point(v), Geometry::Point(w)) => Haversine.distance(v, w).into(),
 		_ => Value::None,
 	})
 }
@@ -71,7 +70,7 @@ pub mod hash {
 		let len = match len {
 			Some(len) if (1..=12).contains(&len) => len as usize,
 			None => 12usize,
-			_ => bail!(Error::InvalidArguments {
+			_ => bail!(Error::InvalidFunctionArguments {
 				name: String::from("geo::encode"),
 				message: String::from(
 					"The second argument must be an integer greater than 0 and less than or equal to 12."

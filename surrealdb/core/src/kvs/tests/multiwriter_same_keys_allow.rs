@@ -1,20 +1,15 @@
 #![cfg(feature = "kv-tikv")]
 
-use std::sync::Arc;
-
 use uuid::Uuid;
 
 use super::CreateDs;
-use crate::dbs::node::Timestamp;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::kvs::clock::{FakeClock, SizedClock};
 
 pub async fn multiwriter_same_keys_allow(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("a19cf00d-f95b-42c6-95e5-7b310162d570").unwrap();
-	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds.create_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Insert an initial key
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.set(&"test", &"some text".as_bytes().to_vec(), None).await.unwrap();

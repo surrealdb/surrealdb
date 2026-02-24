@@ -44,7 +44,7 @@ pub fn atan((arg,): (Number,)) -> Result<Value> {
 pub fn bottom((array, c): (Vec<Number>, i64)) -> Result<Value> {
 	ensure!(
 		c > 0,
-		Error::InvalidArguments {
+		Error::InvalidFunctionArguments {
 			name: String::from("math::bottom"),
 			message: String::from("The second argument must be an integer greater than 0."),
 		}
@@ -59,7 +59,7 @@ pub fn ceil((arg,): (Number,)) -> Result<Value> {
 pub fn clamp((arg, min, max): (Number, Number, Number)) -> Result<Value> {
 	ensure!(
 		min <= max,
-		Error::InvalidArguments {
+		Error::InvalidFunctionArguments {
 			name: "math::clamp".to_string(),
 			message: "Lowerbound for clamp must be smaller than the upperbound".to_string(),
 		}
@@ -81,7 +81,7 @@ pub fn deg2rad((arg,): (Number,)) -> Result<Value> {
 pub fn fixed((arg, p): (Number, i64)) -> Result<Value> {
 	ensure!(
 		p > 0,
-		Error::InvalidArguments {
+		Error::InvalidFunctionArguments {
 			name: String::from("math::fixed"),
 			message: String::from("The second argument must be an integer greater than 0."),
 		}
@@ -213,7 +213,7 @@ pub fn tan((arg,): (Number,)) -> Result<Value> {
 pub fn top((array, c): (Vec<Number>, i64)) -> Result<Value> {
 	ensure!(
 		c > 0,
-		Error::InvalidArguments {
+		Error::InvalidFunctionArguments {
 			name: String::from("math::top"),
 			message: String::from("The second argument must be an integer greater than 0."),
 		}

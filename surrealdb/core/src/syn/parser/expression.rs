@@ -46,7 +46,7 @@ impl Parser<'_> {
 	/// A generic loose ident like `foo` in for example `foo.bar` can be two
 	/// different values depending on context: a table or a field the current
 	/// document. This function parses loose idents as a field, see
-	/// [`parse_value`] for parsing loose idents as table
+	/// [`parse_expr_table`] for parsing loose idents as table
 	pub(crate) async fn parse_expr_field(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
@@ -76,7 +76,6 @@ impl Parser<'_> {
 	/// All operators in SurrealQL which are parsed by the functions in this
 	/// module are left associative or have no defined associativity.
 	fn infix_binding_power(&mut self, token: TokenKind) -> Option<BindingPower> {
-		// TODO: Look at ordering of operators.
 		match token {
 			// assigment operators have the lowest binding power.
 			//t!("+=") | t!("-=") | t!("+?=") => Some((2, 1)),
@@ -405,7 +404,6 @@ impl Parser<'_> {
 	) -> ParseResult<Expr> {
 		let token = self.next();
 		let operator = match token.kind {
-			// TODO: change operator name?
 			t!("||") | t!("OR") => BinaryOperator::Or,
 			t!("&&") | t!("AND") => BinaryOperator::And,
 			t!("?:") => BinaryOperator::TenaryCondition,

@@ -49,7 +49,7 @@ fn try_as_uri(fn_name: &str, value: Value) -> Result<String> {
 	match value {
 		// Pre-check URI.
 		Value::String(uri) if crate::fnc::util::http::uri_is_valid(&uri) => Ok(uri),
-		_ => Err(anyhow::Error::new(Error::InvalidArguments {
+		_ => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			// Assumption is that URI is first argument.
 			message: String::from("The first argument should be a string containing a valid URI."),
@@ -66,7 +66,7 @@ fn try_as_opts(
 	match value {
 		Some(Value::Object(opts)) => Ok(Some(opts)),
 		None => Ok(None),
-		Some(_) => Err(anyhow::Error::new(Error::InvalidArguments {
+		Some(_) => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			message: error_message.to_owned(),
 		})),
@@ -168,16 +168,41 @@ pub mod resolver {
 					.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?;
 				let name_is_allowed = cap.matches_any_allow_net(&name_target)
 					&& !cap.matches_any_deny_net(&name_target);
+				// If the domain name itself is not allowed, return an error
+				if !name_is_allowed {
+					return Err(Box::new(crate::err::Error::NetTargetNotAllowed(
+						name_target.to_string(),
+					)) as Box<dyn Error + Send + Sync>);
+				}
 				// Resolve the addresses
-				let addrs = lookup_host((name_str, 0_u16))
+				let addrs: Vec<std::net::SocketAddr> = lookup_host((name_str, 0_u16))
 					.await
-					.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?;
-				// Build an iterator checking the addresses
-				let iterator = Box::new(addrs.filter(move |addr| {
-					let target = IpNet::new_assert(addr.ip(), 0);
-					name_is_allowed && !cap.matches_any_deny_net(&NetTarget::IPNet(target))
-				}));
-				Ok(iterator as Addrs)
+					.map_err(|x| Box::new(x) as Box<dyn Error + Send + Sync>)?
+					.collect();
+				// Check each resolved address against the deny list, collecting allowed ones
+				// and tracking the first denied address for error reporting
+				let mut allowed = Vec::new();
+				let mut first_denied = None;
+				for addr in addrs {
+					let target = IpNet::from(addr.ip());
+					if cap.matches_any_deny_net(&NetTarget::IPNet(target)) {
+						if first_denied.is_none() {
+							first_denied = Some(target);
+						}
+					} else {
+						allowed.push(addr);
+					}
+				}
+				// If all addresses were denied, return a proper error
+				if allowed.is_empty()
+					&& let Some(denied) = first_denied
+				{
+					return Err(
+						Box::new(crate::err::Error::NetTargetNotAllowed(denied.to_string()))
+							as Box<dyn Error + Send + Sync>,
+					);
+				}
+				Ok(Box::new(allowed.into_iter()) as Addrs)
 			}) as Resolving
 		}
 	}

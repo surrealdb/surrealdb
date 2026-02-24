@@ -7,9 +7,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{
-	DatabaseDefinition, DatabaseId, Distance, Index, IndexDefinition, NamespaceId,
-};
+use crate::catalog::{DatabaseId, Distance, Index, IndexDefinition, NamespaceId};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, NsDbTbCtx};
@@ -20,7 +18,6 @@ use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::idx::ft::highlighter::HighlightParams;
-use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::{
 	IndexCountThingIterator, IndexEqualThingIterator, IndexJoinThingIterator,
 	IndexRangeReverseThingIterator, IndexRangeThingIterator, IndexUnionThingIterator,
@@ -197,7 +194,6 @@ impl InnerQueryExecutor {
 								if let PerIndexReferenceIndex::Hnsw(hi) = e.get() {
 									Some(
 										HnswEntry::new(
-											&doc_ctx.db,
 											stk,
 											ctx,
 											opt,
@@ -234,10 +230,9 @@ impl InnerQueryExecutor {
 									)
 									.await?;
 								// Ensure the local HNSW index is up to date with the KVS
-								hi.write().await.check_state(&ctx.tx()).await?;
+								hi.check_state(ctx).await?;
 								// Now we can execute the request
 								let entry = HnswEntry::new(
-									&doc_ctx.db,
 									stk,
 									ctx,
 									opt,
@@ -882,7 +877,6 @@ pub(super) struct HnswEntry {
 impl HnswEntry {
 	#[expect(clippy::too_many_arguments)]
 	async fn new(
-		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
@@ -892,16 +886,8 @@ impl HnswEntry {
 		ef: u32,
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self> {
-		let cond_checker = if let Some(cond) = cond {
-			HnswConditionChecker::new_cond(ctx, opt, cond)
-		} else {
-			HnswConditionChecker::new()
-		};
-		let res = h
-			.read()
-			.await
-			.knn_search(db, &ctx.tx(), stk, v, n as usize, ef as usize, cond_checker)
-			.await?;
+		let cond_filter = cond.map(|cond| (opt, cond));
+		let res = h.knn_search(ctx, stk, v, n as usize, ef as usize, cond_filter).await?;
 		Ok(Self {
 			res,
 		})

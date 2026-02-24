@@ -48,7 +48,9 @@ where
 				.execute(
 					client.session_id,
 					Command::Signin {
-						credentials: credentials.into_object()?,
+						credentials: credentials
+							.into_object()
+							.map_err(|e| crate::Error::internal(e.to_string()))?,
 					},
 				)
 				.await

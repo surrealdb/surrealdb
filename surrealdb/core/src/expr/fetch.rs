@@ -35,6 +35,10 @@ impl Fetchs {
 		Self(fetches)
 	}
 
+	pub(crate) fn len(&self) -> usize {
+		self.0.len()
+	}
+
 	pub(crate) fn iter(&self) -> impl Iterator<Item = &Fetch> {
 		self.0.iter()
 	}

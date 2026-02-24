@@ -160,8 +160,6 @@ impl Value {
 					Part::Where(w) => {
 						if path.len() == 1 {
 							let mut new_res = Vec::new();
-							// TODO: Look into why this is unused, don't just remove the unused
-							// var.
 							for v in v.0.iter() {
 								let cur = v.clone().into();
 								if !stk

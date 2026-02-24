@@ -17,6 +17,7 @@ use crate::idx::trees::vector::SharedVector;
 #[derive(Clone)]
 struct VectorWeighter;
 
+/// Cache key uniquely identifying a vector: (table, index, element).
 type VectorCacheKey = (TableId, IndexId, ElementId);
 impl Weighter<VectorCacheKey, SharedVector> for VectorWeighter {
 	fn weight(&self, key: &VectorCacheKey, val: &SharedVector) -> u64 {
@@ -88,6 +89,10 @@ impl Lifecycle<VectorCacheKey, SharedVector> for VectorCacheLifecycle {
 	}
 }
 
+/// Thread-safe, weighted LRU cache for HNSW element vectors.
+///
+/// Shared across all HNSW indexes via `Arc`. Tracks which elements are
+/// cached per index for efficient bulk eviction when an index is dropped.
 #[derive(Clone)]
 pub(crate) struct VectorCache(Arc<Inner>);
 
@@ -112,6 +117,7 @@ impl Default for VectorCache {
 	}
 }
 impl VectorCache {
+	/// Creates a new vector cache with the given weight capacity (in bytes).
 	fn new(cache_size: u64) -> Self {
 		// Create the shared indexes structure
 		let indexes = ElementsPerIndex::default();
@@ -133,6 +139,7 @@ impl VectorCache {
 		}))
 	}
 
+	/// Inserts a vector into the cache, tracking it in the per-index element set.
 	pub(super) async fn insert(
 		&self,
 		table_id: TableId,
@@ -147,6 +154,7 @@ impl VectorCache {
 		self.0.vectors.insert((table_id, index_id, element_id), vector);
 	}
 
+	/// Retrieves a cached vector, if present.
 	pub(super) async fn get(
 		&self,
 		table_id: TableId,
@@ -157,6 +165,7 @@ impl VectorCache {
 		self.0.vectors.get(&key)
 	}
 
+	/// Removes a single vector from the cache.
 	pub(super) async fn remove(&self, table_id: TableId, index_id: IndexId, element_id: ElementId) {
 		// Remove from the indexes tracking structure first
 		self.0.indexes.remove_element(table_id, index_id, element_id);
@@ -164,6 +173,7 @@ impl VectorCache {
 		self.0.vectors.remove(&(table_id, index_id, element_id));
 	}
 
+	/// Removes all cached vectors for a given index, yielding periodically during bulk removal.
 	pub(crate) async fn remove_index(&self, table_id: TableId, index_id: IndexId) {
 		let mut count = 0;
 		if let Some(elements_ids) = self.0.indexes.remove_index(table_id, index_id) {

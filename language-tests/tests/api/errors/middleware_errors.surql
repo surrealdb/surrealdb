@@ -11,9 +11,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: NONE, headers: {  }, status: 500 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 - Middleware function that doesn't exist (error during DEFINE)

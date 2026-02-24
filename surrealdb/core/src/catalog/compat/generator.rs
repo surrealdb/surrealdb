@@ -112,6 +112,21 @@ fn table_fixtures() -> TypeFixtures {
 				description: "schemafull table with changefeed",
 				value: Box::new(fix::table_schemafull()),
 			},
+			Fixture {
+				name: "TABLE_RELATION",
+				description: "relation table with drop and non-default permissions",
+				value: Box::new(fix::table_relation()),
+			},
+			Fixture {
+				name: "TABLE_WITH_MATERIALIZED_VIEW",
+				description: "table with materialized view",
+				value: Box::new(fix::table_with_materialized_view()),
+			},
+			Fixture {
+				name: "TABLE_ANY_TYPE",
+				description: "table with TableType::Any",
+				value: Box::new(fix::table_any_type()),
+			},
 		],
 	}
 }
@@ -130,6 +145,11 @@ fn subscription_fixtures() -> TypeFixtures {
 				name: "SUBSCRIPTION_WITH_FILTERS",
 				description: "subscription with condition and fetch",
 				value: Box::new(fix::subscription_with_filters()),
+			},
+			Fixture {
+				name: "SUBSCRIPTION_WITH_VARS",
+				description: "subscription with non-empty vars",
+				value: Box::new(fix::subscription_with_vars()),
 			},
 		],
 	}
@@ -150,6 +170,21 @@ fn access_definition_fixtures() -> TypeFixtures {
 				description: "access with custom authenticate expression",
 				value: Box::new(fix::access_with_authenticate()),
 			},
+			Fixture {
+				name: "ACCESS_RECORD",
+				description: "record-based access with signup/signin",
+				value: Box::new(fix::access_record()),
+			},
+			Fixture {
+				name: "ACCESS_JWT_JWKS",
+				description: "JWT access with JWKS verification",
+				value: Box::new(fix::access_jwt_jwks()),
+			},
+			Fixture {
+				name: "ACCESS_BEARER_REFRESH",
+				description: "bearer access with refresh type",
+				value: Box::new(fix::access_bearer_refresh()),
+			},
 		],
 	}
 }
@@ -168,6 +203,16 @@ fn access_grant_fixtures() -> TypeFixtures {
 				name: "GRANT_REVOKED",
 				description: "revoked access grant",
 				value: Box::new(fix::grant_revoked()),
+			},
+			Fixture {
+				name: "GRANT_RECORD",
+				description: "record-type access grant with record subject",
+				value: Box::new(fix::grant_record()),
+			},
+			Fixture {
+				name: "GRANT_BEARER",
+				description: "bearer-type access grant",
+				value: Box::new(fix::grant_bearer()),
 			},
 		],
 	}
@@ -207,6 +252,11 @@ fn api_fixtures() -> TypeFixtures {
 				description: "API with middleware and multiple methods",
 				value: Box::new(fix::api_with_middleware()),
 			},
+			Fixture {
+				name: "API_WITH_AUTH_LIMIT",
+				description: "API with specific permissions and database-level auth limit",
+				value: Box::new(fix::api_with_auth_limit()),
+			},
 		],
 	}
 }
@@ -234,11 +284,28 @@ fn bucket_fixtures() -> TypeFixtures {
 fn config_fixtures() -> TypeFixtures {
 	TypeFixtures {
 		type_name: "ConfigDefinition",
-		fixtures: vec![Fixture {
-			name: "CONFIG_GRAPHQL",
-			description: "GraphQL configuration",
-			value: Box::new(fix::config_graphql()),
-		}],
+		fixtures: vec![
+			Fixture {
+				name: "CONFIG_GRAPHQL",
+				description: "GraphQL configuration (default)",
+				value: Box::new(fix::config_graphql()),
+			},
+			Fixture {
+				name: "CONFIG_DEFAULT",
+				description: "default config with namespace and database",
+				value: Box::new(fix::config_default()),
+			},
+			Fixture {
+				name: "CONFIG_API",
+				description: "API config definition",
+				value: Box::new(fix::config_api()),
+			},
+			Fixture {
+				name: "CONFIG_GRAPHQL_FULL",
+				description: "GraphQL config with all non-default fields",
+				value: Box::new(fix::config_graphql_full()),
+			},
+		],
 	}
 }
 
@@ -246,11 +313,18 @@ fn config_fixtures() -> TypeFixtures {
 fn event_fixtures() -> TypeFixtures {
 	TypeFixtures {
 		type_name: "EventDefinition",
-		fixtures: vec![Fixture {
-			name: "EVENT_BASIC",
-			description: "table event trigger",
-			value: Box::new(fix::event_basic()),
-		}],
+		fixtures: vec![
+			Fixture {
+				name: "EVENT_BASIC",
+				description: "table event trigger",
+				value: Box::new(fix::event_basic()),
+			},
+			Fixture {
+				name: "EVENT_ASYNC",
+				description: "async event with retry and max_depth",
+				value: Box::new(fix::event_async()),
+			},
+		],
 	}
 }
 
@@ -273,6 +347,21 @@ fn field_fixtures() -> TypeFixtures {
 				name: "FIELD_READONLY",
 				description: "readonly computed field",
 				value: Box::new(fix::field_readonly()),
+			},
+			Fixture {
+				name: "FIELD_FLEXIBLE_WITH_REFERENCE",
+				description: "flexible field with reference and computed deps",
+				value: Box::new(fix::field_flexible_with_reference()),
+			},
+			Fixture {
+				name: "FIELD_WITH_DEFAULT_SET",
+				description: "field with DefineDefault::Set and incomplete computed deps",
+				value: Box::new(fix::field_with_default_set()),
+			},
+			Fixture {
+				name: "FIELD_RECORD_TYPE",
+				description: "field with record type kind and custom reference delete",
+				value: Box::new(fix::field_record_type()),
 			},
 		],
 	}
@@ -311,6 +400,21 @@ fn index_fixtures() -> TypeFixtures {
 				name: "INDEX_UNIQUE",
 				description: "unique index on multiple columns",
 				value: Box::new(fix::index_unique()),
+			},
+			Fixture {
+				name: "INDEX_HNSW",
+				description: "HNSW vector index",
+				value: Box::new(fix::index_hnsw()),
+			},
+			Fixture {
+				name: "INDEX_FULLTEXT",
+				description: "full-text search index with BM25 scoring",
+				value: Box::new(fix::index_fulltext()),
+			},
+			Fixture {
+				name: "INDEX_COUNT",
+				description: "count index with prepare_remove flag",
+				value: Box::new(fix::index_count()),
 			},
 		],
 	}
@@ -380,6 +484,11 @@ fn user_fixtures() -> TypeFixtures {
 				name: "USER_WITH_DURATIONS",
 				description: "user with custom token/session durations",
 				value: Box::new(fix::user_with_durations()),
+			},
+			Fixture {
+				name: "USER_DB_BASE",
+				description: "user with database-level base",
+				value: Box::new(fix::user_db_base()),
 			},
 		],
 	}
@@ -529,6 +638,11 @@ fn record_fixtures() -> TypeFixtures {
 				name: "RECORD_WITH_METADATA",
 				description: "record with metadata (Edge type)",
 				value: Box::new(fix::record_with_metadata()),
+			},
+			Fixture {
+				name: "RECORD_WITH_TABLE_METADATA",
+				description: "record with explicit Table metadata type",
+				value: Box::new(fix::record_with_table_metadata()),
 			},
 		],
 	}
@@ -692,6 +806,11 @@ fn module_definition_fixtures() -> TypeFixtures {
 				description: "module with Silo executable",
 				value: Box::new(fix::module_silo()),
 			},
+			Fixture {
+				name: "MODULE_NO_NAME",
+				description: "module with no name and Permission::None",
+				value: Box::new(fix::module_no_name()),
+			},
 		],
 	}
 }
@@ -722,6 +841,21 @@ fn table_mutations_fixtures() -> TypeFixtures {
 				name: "TABLE_MUTATIONS_DEL",
 				description: "table mutations with delete operation",
 				value: Box::new(fix::table_mutations_del()),
+			},
+			Fixture {
+				name: "TABLE_MUTATIONS_DEF",
+				description: "table mutations with Def operation",
+				value: Box::new(fix::table_mutations_def()),
+			},
+			Fixture {
+				name: "TABLE_MUTATIONS_SET_WITH_DIFF",
+				description: "table mutations with SetWithDiff operation",
+				value: Box::new(fix::table_mutations_set_with_diff()),
+			},
+			Fixture {
+				name: "TABLE_MUTATIONS_DEL_WITH_ORIGINAL",
+				description: "table mutations with DelWithOriginal operation",
+				value: Box::new(fix::table_mutations_del_with_original()),
 			},
 		],
 	}
@@ -823,6 +957,11 @@ fn recordid_key_fixtures() -> TypeFixtures {
 				name: "RECORDID_KEY_OBJECT",
 				description: "RecordIdKey with object",
 				value: Box::new(fix::recordid_key_object()),
+			},
+			Fixture {
+				name: "RECORDID_KEY_RANGE",
+				description: "RecordIdKey with range",
+				value: Box::new(fix::recordid_key_range()),
 			},
 		],
 	}
@@ -930,4 +1069,15 @@ fn test_v3_0_0_beta_3_remains_unchanged() {
 	let hash = Sha256::digest(v3_0_0_beta_3);
 	let hash_str = hex::encode(hash);
 	assert_eq!(hash_str, "696a85c143d53c01f3f842ee45cc64e45e4d9c1251c99e083467d07db8c29805");
+}
+
+#[test]
+fn test_v3_0_0_remains_unchanged() {
+	use sha2::{Digest, Sha256};
+
+	// Read the v3_0_0.rs file, hash it and assert on the hash.
+	let v3_0_0 = include_bytes!("v3_0_0.rs");
+	let hash = Sha256::digest(v3_0_0);
+	let hash_str = hex::encode(hash);
+	assert_eq!(hash_str, "042aa56204bff3007e371be6968e9c684430556f32654b5cee7107a5c1677f4d");
 }

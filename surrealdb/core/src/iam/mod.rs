@@ -54,6 +54,12 @@ fn algorithm_to_jwt_algorithm(alg: catalog::Algorithm) -> jsonwebtoken::Algorith
 	}
 }
 
+/// Returns true if the error is an expired-token auth error (e.g. from `verify::token`).
+pub fn is_expired_token_error(e: &anyhow::Error) -> bool {
+	e.downcast_ref::<crate::err::Error>()
+		.is_some_and(|err| matches!(err, crate::err::Error::ExpiredToken))
+}
+
 pub fn is_allowed_check(actor: &Actor, action: &Action, resource: &Resource) -> bool {
 	match action {
 		Action::View => resource.level().sublevel_of(actor.level()),

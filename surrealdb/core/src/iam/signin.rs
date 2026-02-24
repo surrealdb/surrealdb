@@ -1106,7 +1106,7 @@ pub(crate) fn verify_grant_bearer(
 #[cfg(test)]
 mod tests {
 	use chrono::Duration;
-	use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
+	use jsonwebtoken::{Algorithm, DecodingKey, Validation, dangerous, decode};
 	use regex::Regex;
 
 	use super::*;
@@ -1943,16 +1943,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							} => token,
 						};
 						// Decode token without validation
-						let token_data =
-							decode::<Claims>(token, &DecodingKey::from_secret(&[]), &{
-								let mut validation =
-									Validation::new(jsonwebtoken::Algorithm::HS256);
-								validation.insecure_disable_signature_validation();
-								validation.validate_nbf = false;
-								validation.validate_exp = false;
-								validation
-							})
-							.unwrap();
+						let token_data = dangerous::insecure_decode::<Claims>(token).unwrap();
 
 						// Check session expiration
 						if let Some(exp_duration) = case.token_expiration {

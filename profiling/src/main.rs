@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
 
 	db.query(
 		r#"
-			FOR $i IN 0..100 {
+			FOR $i IN 0..100000 {
 				CREATE person CONTENT { id: $i, name: 'Stu', age: $i }
 			}
     	"#,
@@ -73,7 +73,10 @@ async fn main() -> Result<()> {
 
 	println!("Perfetto tracing enabled, writing to: {}", perfetto_path.display());
 
-	let mut results = db.query("SELECT * FROM person").await.context("Failed to query database")?;
+	let mut results = db
+		.query("SELECT * FROM person WHERE age = 21")
+		.await
+		.context("Failed to query database")?;
 
 	let _: Vec<Person> = results.take(0).context("Failed to take result")?;
 

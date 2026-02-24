@@ -1,6 +1,4 @@
-use anyhow::Result;
-
-use crate::{Kind, SurrealValue, Value, union_conversion_error};
+use crate::{Error, Kind, SurrealValue, Value, union_conversion_error};
 
 // Either of 2, 3, 4, 5, 6 or 7
 macro_rules! impl_arg_either {
@@ -21,7 +19,7 @@ macro_rules! impl_arg_either {
                     $($name::is_value(value) ||)+ false
                 }
 
-                fn from_value(value: Value) -> Result<Self> {
+                fn from_value(value: Value) -> Result<Self, Error> {
                     $(if $name::is_value(&value) {
                         return Ok($enum::$name($name::from_value(value)?));
                     })+

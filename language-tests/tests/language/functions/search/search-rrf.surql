@@ -31,6 +31,9 @@ value = "NONE"
 [[test.results]]
 value = "[{ distance: 0.0034970067397347426f, ft_score: 0.5366538763046265f, id: test:1, rrf_score: 0.03278688524590164f }, { distance: 0.05639380312223785f, id: test:3, rrf_score: 0.016129032258064516f }]"
 
+[[test.results]]
+value = "[{ id: r:1, rrf_score: 1.5f }, { id: r:3, rrf_score: 1.3333333333333333f }, { id: r:2, rrf_score: 0.75f }]"
+
 */
 -- Sample data ---------------------------------------------------------------
 CREATE test:1 SET text = "Graph databases are great.", embedding = [0.10, 0.20, 0.30];
@@ -58,3 +61,13 @@ LET $ft = SELECT id, search::score(1) as ft_score FROM test
 
 -- Fuse with Reciprocal Rank Fusion (k defaults to 60 if omitted)
 RETURN search::rrf([$vs, $ft], 2, 60);
+
+-- RRF top-k selection regression
+RETURN search::rrf(
+	[
+		[{ id: r:1 }, { id: r:2 }, { id: r:3 }, { id: r:4 }],
+		[{ id: r:3 }, { id: r:1 }, { id: r:4 }, { id: r:2 }]
+	],
+	3,
+	0
+);

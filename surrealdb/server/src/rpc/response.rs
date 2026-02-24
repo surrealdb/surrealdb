@@ -29,8 +29,8 @@ pub async fn send(
 	// Record tracing details for errors
 	if let Err(err) = &response.result {
 		span.record("otel.status_code", "ERROR");
-		span.record("rpc.error_code", err.code());
-		span.record("rpc.error_message", err.to_string().as_str());
+		span.record("rpc.error_kind", format!("{:?}", err.kind_str()));
+		span.record("rpc.error_message", err.message());
 	}
 	// Process the response for the format
 	let (len, msg) = match fmt.res_ws(response) {

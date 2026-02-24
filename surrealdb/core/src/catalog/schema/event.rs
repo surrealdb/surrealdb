@@ -28,6 +28,7 @@ pub struct EventDefinition {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum EventKind {
 	Sync,
 	Async {

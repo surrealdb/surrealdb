@@ -6,10 +6,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use indxdb::{Database as Db, Transaction as Tx};
 use tokio::sync::RwLock;
 
+use super::api::ScanLimit;
 use super::err::{Error, Result};
+use super::util;
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
 use crate::kvs::{Key, Val};
+
+const ESTIMATED_BYTES_PER_KEY: u32 = 128;
+const ESTIMATED_BYTES_PER_VAL: u32 = 512;
 
 pub struct Datastore {
 	db: Db,
@@ -247,7 +252,13 @@ impl Transactable for Transaction {
 
 	/// Retrieve a range of keys
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keys(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
 		// IndxDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
@@ -258,15 +269,29 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let inner = self.inner.read().await;
+		// Extract the limit count, adding skip to fetch enough entries
+		let count = match limit {
+			ScanLimit::Count(c) => c.saturating_add(skip),
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_KEY).max(1).saturating_add(skip),
+			ScanLimit::BytesOrCount(_, c) => c.saturating_add(skip),
+		};
 		// Scan the keys
-		let res = inner.keys(rng, limit).await?;
+		let res = inner.keys(rng, count).await?;
+		// Consume the results
+		let res = consume_keys(&mut res.into_iter(), limit, skip);
 		// Return result
 		Ok(res)
 	}
 
 	/// Retrieve a range of keys, in reverse
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+	async fn keysr(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>> {
 		// IndxDB does not support versioned queries.
 		if version.is_some() {
 			return Err(Error::UnsupportedVersionedQueries);
@@ -277,8 +302,16 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let inner = self.inner.read().await;
+		// Extract the limit count, adding skip to fetch enough entries
+		let count = match limit {
+			ScanLimit::Count(c) => c.saturating_add(skip),
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_KEY).max(1).saturating_add(skip),
+			ScanLimit::BytesOrCount(_, c) => c.saturating_add(skip),
+		};
 		// Scan the keys
-		let res = inner.keysr(rng, limit).await?;
+		let res = inner.keysr(rng, count).await?;
+		// Consume the results
+		let res = consume_keys(&mut res.into_iter(), limit, skip);
 		// Return result
 		Ok(res)
 	}
@@ -288,7 +321,8 @@ impl Transactable for Transaction {
 	async fn scan(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// IndxDB does not support versioned queries.
@@ -301,8 +335,31 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let inner = self.inner.read().await;
+		// Skip entries using keys-only scan to avoid fetching values
+		let rng = if skip > 0 {
+			let skipped = inner.keys(rng.clone(), skip).await?;
+			match skipped.last() {
+				Some(last) => {
+					let mut start = last.clone();
+					util::advance_key(&mut start);
+					start..rng.end
+				}
+				// Fewer entries than skip -- nothing to return
+				None => return Ok(Vec::new()),
+			}
+		} else {
+			rng
+		};
+		// Extract the limit count
+		let count = match limit {
+			ScanLimit::Count(c) => c,
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_VAL).max(1),
+			ScanLimit::BytesOrCount(_, c) => c,
+		};
 		// Scan the keys
-		let res = inner.scan(rng, limit).await?;
+		let res = inner.scan(rng, count).await?;
+		// Consume the results
+		let res = consume_vals(&mut res.into_iter(), limit);
 		// Return result
 		Ok(res)
 	}
@@ -312,7 +369,8 @@ impl Transactable for Transaction {
 	async fn scanr(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// IndxDB does not support versioned queries.
@@ -325,8 +383,30 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let inner = self.inner.read().await;
-		// Scan the keys
-		let res = inner.scanr(rng, limit).await?;
+		// Skip entries using keys-only scan to avoid fetching values
+		let rng = if skip > 0 {
+			let skipped = inner.keysr(rng.clone(), skip).await?;
+			match skipped.last() {
+				Some(last) => {
+					let end = last.clone();
+					rng.start..end
+				}
+				// Fewer entries than skip -- nothing to return
+				None => return Ok(Vec::new()),
+			}
+		} else {
+			rng
+		};
+		// Extract the limit count
+		let count = match limit {
+			ScanLimit::Count(c) => c,
+			ScanLimit::Bytes(b) => (b / ESTIMATED_BYTES_PER_VAL).max(1),
+			ScanLimit::BytesOrCount(_, c) => c,
+		};
+		// Scan the keys in reverse
+		let res = inner.scanr(rng, count).await?;
+		// Consume the results
+		let res = consume_vals(&mut res.into_iter(), limit);
 		// Return result
 		Ok(res)
 	}
@@ -346,5 +426,125 @@ impl Transactable for Transaction {
 	/// Release the last save point.
 	async fn release_last_save_point(&self) -> Result<()> {
 		Ok(())
+	}
+}
+
+// Consume and iterate over keys
+fn consume_keys<I: Iterator<Item = Key>>(iter: &mut I, limit: ScanLimit, skip: u32) -> Vec<Key> {
+	// Skip entries from the pre-fetched iterator
+	for _ in 0..skip {
+		if iter.next().is_none() {
+			return Vec::new();
+		}
+	}
+	match limit {
+		ScanLimit::Count(c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Check that we don't exceed the count limit
+			while res.len() < c as usize {
+				// Check the key
+				if let Some(k) = iter.next() {
+					res.push(k);
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::Bytes(b) => {
+			// Create the result set
+			let mut res = Vec::with_capacity((b / ESTIMATED_BYTES_PER_KEY).min(4096) as usize);
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the byte limit
+			while bytes_fetched < b as usize {
+				// Check the key
+				if let Some(k) = iter.next() {
+					bytes_fetched += k.len();
+					res.push(k);
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::BytesOrCount(b, c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the count limit AND the byte limit
+			while res.len() < c as usize && bytes_fetched < b as usize {
+				// Check the key
+				if let Some(k) = iter.next() {
+					bytes_fetched += k.len();
+					res.push(k);
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+	}
+}
+
+// Consume and iterate over keys and values
+fn consume_vals<I: Iterator<Item = (Key, Val)>>(iter: &mut I, limit: ScanLimit) -> Vec<(Key, Val)> {
+	match limit {
+		ScanLimit::Count(c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Check that we don't exceed the count limit
+			while res.len() < c as usize {
+				// Check the key and value
+				if let Some((k, v)) = iter.next() {
+					res.push((k, v));
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::Bytes(b) => {
+			// Create the result set
+			let mut res = Vec::with_capacity((b / ESTIMATED_BYTES_PER_VAL).min(4096) as usize);
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the byte limit
+			while bytes_fetched < b as usize {
+				// Check the key and value
+				if let Some((k, v)) = iter.next() {
+					bytes_fetched += k.len() + v.len();
+					res.push((k, v));
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
+		ScanLimit::BytesOrCount(b, c) => {
+			// Create the result set
+			let mut res = Vec::with_capacity(c.min(4096) as usize);
+			// Count the bytes fetched
+			let mut bytes_fetched = 0usize;
+			// Check that we don't exceed the count limit AND the byte limit
+			while res.len() < c as usize && bytes_fetched < b as usize {
+				// Check the key and value
+				if let Some((k, v)) = iter.next() {
+					bytes_fetched += k.len() + v.len();
+					res.push((k, v));
+				} else {
+					break;
+				}
+			}
+			// Return the result
+			res
+		}
 	}
 }

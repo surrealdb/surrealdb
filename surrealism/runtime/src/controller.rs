@@ -2,7 +2,7 @@
 //!
 //! # Architecture
 //!
-//! - **`Runtime`**: Compiled WASM module. Thread-safe, shareable (Arc<Runtime>). Compile once,
+//! - **`Runtime`**: Compiled WASM module. Thread-safe, shareable (`Arc<Runtime>`). Compile once,
 //!   instantiate many times.
 //!
 //! - **`Controller`**: Per-execution instance. Single-threaded, created from Runtime. Cheap to
@@ -69,7 +69,7 @@ pub struct Runtime {
 
 impl Runtime {
 	/// Compile the WASM module and prepare the runtime.
-	/// This is expensive - do it once and share via Arc<Runtime>.
+	/// This is expensive - do it once and share via `Arc<Runtime>`.
 	/// The compiled artifacts (Engine, Module, Linker) are immutable and thread-safe.
 	pub fn new(
 		SurrealismPackage {

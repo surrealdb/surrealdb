@@ -8,9 +8,6 @@ auth = { namespace = "test", database = "test", access = "user", rid = "user:tes
 [test]
 reason = "Test API permission checks for record users at method-level, route-level, and global config levels"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 # Method-Level Permissions Tests
 # 0 - Method-level PERMISSIONS NONE should deny (returns ApiResponse with 403)
 [[test.results]]

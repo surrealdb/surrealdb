@@ -14,11 +14,13 @@ mod surrealkv;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
 
+#[cfg(any(feature = "kv-mem", feature = "kv-surrealkv", feature = "kv-rocksdb"))]
+mod local;
+
 use url::Url;
 
 use super::Config;
-use crate::err::Error;
-use crate::{Connection, Result};
+use crate::{Connection, Error, Result};
 
 /// A server address used to connect to the server
 #[derive(Debug, Clone)]
@@ -42,8 +44,24 @@ impl Endpoint {
 	#[doc(hidden)]
 	pub fn parse_kind(&self) -> Result<EndpointKind> {
 		match EndpointKind::from(self.url.scheme()) {
-			EndpointKind::Unsupported(s) => Err(Error::Scheme(s)),
+			EndpointKind::Unsupported(s) => {
+				Err(Error::configuration(format!("Unsupported scheme: {s}"), None))
+			}
 			kind => Ok(kind),
+		}
+	}
+
+	/// Append a query parameter to the endpoint path string.
+	/// Only used when a local engine (e.g. `kv-mem`, `kv-rocksdb`) is enabled.
+	#[cfg_attr(
+		not(any(feature = "kv-mem", feature = "kv-surrealkv", feature = "kv-rocksdb")),
+		allow(dead_code)
+	)]
+	pub(crate) fn append_query_param(&mut self, key: &str, value: &str) {
+		if self.path.contains('?') {
+			self.path = format!("{}&{key}={value}", self.path);
+		} else {
+			self.path = format!("{}?{key}={value}", self.path);
 		}
 	}
 }
@@ -78,9 +96,19 @@ pub(crate) fn path_to_string(protocol: &str, path: impl AsRef<std::path::Path>) 
 	use path_clean::PathClean;
 
 	let path = path.as_ref().display().to_string();
-	let expanded = replace_tilde(&path);
+	// Split query parameters from the path before cleaning to avoid
+	// path normalization corrupting query strings (e.g. `?` is valid
+	// in Unix filenames but has special meaning in URLs).
+	let (path_part, query_part) = match path.split_once('?') {
+		Some((p, q)) => (p.to_string(), Some(q.to_string())),
+		None => (path, None),
+	};
+	let expanded = replace_tilde(&path_part);
 	let cleaned = Path::new(&expanded).clean();
-	format!("{protocol}{}", cleaned.display())
+	match query_part {
+		Some(q) => format!("{protocol}{}?{q}", cleaned.display()),
+		None => format!("{protocol}{}", cleaned.display()),
+	}
 }
 
 #[cfg(test)]
@@ -126,7 +154,6 @@ pub enum EndpointKind {
 	TiKv,
 	Unsupported(String),
 	SurrealKv,
-	SurrealKvVersioned,
 }
 
 impl From<&str> for EndpointKind {
@@ -142,7 +169,6 @@ impl From<&str> for EndpointKind {
 			"rocksdb" => Self::RocksDb,
 			"tikv" => Self::TiKv,
 			"surrealkv" => Self::SurrealKv,
-			"surrealkv+versioned" => Self::SurrealKvVersioned,
 			_ => Self::Unsupported(s.to_owned()),
 		}
 	}

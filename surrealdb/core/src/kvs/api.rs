@@ -4,14 +4,31 @@
 use std::ops::Range;
 
 use anyhow::bail;
-use chrono::{DateTime, Utc};
 
 use super::err::{Error, Result};
 use super::util;
 use crate::cnf::{COUNT_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
-use crate::kvs::{Key, Timestamp, Val, Version};
+use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
+use crate::kvs::{DefaultTimestamp, Key, Val};
+
+/// Specifies the limit for scan operations
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanLimit {
+	/// Fetch up to the specified number of entries
+	Count(u32),
+	/// Fetch at least the specified number of bytes
+	Bytes(u32),
+	/// Fetch at least the specified number of bytes, limited by the specified number of entries
+	BytesOrCount(u32, u32),
+}
+
+impl From<u32> for ScanLimit {
+	fn from(count: u32) -> Self {
+		ScanLimit::Count(count)
+	}
+}
 
 pub mod requirements {
 	//! This module defines the trait requirements for a transaction.
@@ -63,7 +80,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// If the transaction has been cancelled or committed,
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
-	/// in a [`kvs::Error::TransactionFinished`] error.
+	/// in a [`crate::kvs::Error::TransactionFinished`] error.
 	fn closed(&self) -> bool;
 
 	/// Check if transaction is writeable.
@@ -72,7 +89,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// transaction, then this function will return [`true`].
 	/// This fuction can be used to check whether a transaction
 	/// allows data to be modified, and if not then the function
-	/// will return a [`kvs::Error::TransactionReadonly`] error.
+	/// will return a [`crate::kvs::Error::TransactionReadonly`] error.
 	fn writeable(&self) -> bool;
 
 	/// Cancel a transaction.
@@ -111,13 +128,25 @@ pub trait Transactable: requirements::TransactionRequirements {
 	///
 	/// This function fetches the full range of keys without values, in a single
 	/// request to the underlying datastore.
-	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>;
+	async fn keys(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>>;
 
 	/// Retrieve a specific range of keys from the datastore, in reverse order.
 	///
 	/// This function fetches the full range of keys without values, in a single
 	/// request to the underlying datastore.
-	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>;
+	async fn keysr(
+		&self,
+		rng: Range<Key>,
+		limit: ScanLimit,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Vec<Key>>;
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
@@ -126,7 +155,8 @@ pub trait Transactable: requirements::TransactionRequirements {
 	async fn scan(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>;
 
@@ -137,7 +167,8 @@ pub trait Transactable: requirements::TransactionRequirements {
 	async fn scanr(
 		&self,
 		rng: Range<Key>,
-		limit: u32,
+		limit: ScanLimit,
+		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>;
 
@@ -315,7 +346,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// This function fetches the total key count from the underlying datastore
 	/// in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn count(&self, rng: Range<Key>) -> Result<usize> {
+	async fn count(&self, rng: Range<Key>, version: Option<u64>) -> Result<usize> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -324,25 +355,11 @@ pub trait Transactable: requirements::TransactionRequirements {
 		let mut len = 0;
 		let mut next = Some(rng);
 		while let Some(rng) = next {
-			let res = self.batch_keys(rng, *COUNT_BATCH_SIZE, None).await?;
+			let res = self.batch_keys(rng, *COUNT_BATCH_SIZE, version).await?;
 			next = res.next;
 			len += res.result.len();
 		}
 		Ok(len)
-	}
-
-	/// Retrieve all the versions for a specific range of keys from the
-	/// datastore.
-	///
-	/// This function fetches all the versions for the full range of key-value
-	/// pairs, in a single request to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = _rng.sprint()))]
-	async fn scan_all_versions(
-		&self,
-		_rng: Range<Key>,
-		_limit: u32,
-	) -> Result<Vec<(Key, Val, Version, bool)>> {
-		Err(Error::UnsupportedVersionedQueries)
 	}
 
 	// --------------------------------------------------
@@ -367,7 +384,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		// Continue with function logic
 		let end = rng.end.clone();
 		// Scan for the next batch
-		let res = self.keys(rng, batch, version).await?;
+		let res = self.keys(rng, ScanLimit::Count(batch), 0, version).await?;
 		// Check if range is consumed
 		if res.len() < batch as usize && batch > 0 {
 			Ok(Batch::<Key>::new(None, res))
@@ -410,7 +427,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		// Continue with function logic
 		let end = rng.end.clone();
 		// Scan for the next batch
-		let res = self.scan(rng, batch, version).await?;
+		let res = self.scan(rng, ScanLimit::Count(batch), 0, version).await?;
 		// Check if range is consumed
 		if res.len() < batch as usize && batch > 0 {
 			Ok(Batch::<(Key, Val)>::new(None, res))
@@ -435,48 +452,6 @@ pub trait Transactable: requirements::TransactionRequirements {
 		}
 	}
 
-	/// Retrieve a batched scan over a specific range of keys in the datastore.
-	///
-	/// This function fetches key-value-version pairs, in batches, with multiple
-	/// requests to the underlying datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn batch_keys_vals_versions(
-		&self,
-		rng: Range<Key>,
-		batch: u32,
-	) -> Result<Batch<(Key, Val, Version, bool)>> {
-		// Check to see if transaction is closed
-		if self.closed() {
-			return Err(Error::TransactionFinished);
-		}
-		// Continue with function logic
-		let end = rng.end.clone();
-		// Scan for the next batch
-		let res = self.scan_all_versions(rng, batch).await?;
-		// Check if range is consumed
-		if res.len() < batch as usize && batch > 0 {
-			Ok(Batch::<(Key, Val, Version, bool)>::new(None, res))
-		} else {
-			match res.last() {
-				Some((k, _, _, _)) => {
-					let mut k = k.clone();
-					util::advance_key(&mut k);
-					Ok(Batch::<(Key, Val, Version, bool)>::new(
-						Some(Range {
-							start: k,
-							end,
-						}),
-						res,
-					))
-				}
-				// We have checked the length above, so
-				// there should be a last item in the
-				// vector, so we shouldn't arrive here
-				None => Ok(Batch::<(Key, Val, Version, bool)>::new(None, res)),
-			}
-		}
-	}
-
 	// --------------------------------------------------
 	// Savepoint functions
 	// --------------------------------------------------
@@ -495,25 +470,12 @@ pub trait Transactable: requirements::TransactionRequirements {
 	// --------------------------------------------------
 
 	/// Get the current monotonic timestamp
-	#[cfg(test)]
-	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
-		Ok(Box::new(super::timestamp::IncTimestamp::next()))
+	async fn timestamp(&self) -> Result<TimeStamp> {
+		Ok(TimeStamp::Default(DefaultTimestamp::next()))
 	}
 
-	/// Get the current monotonic timestamp
-	#[cfg(not(test))]
-	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
-		Ok(Box::new(super::timestamp::HlcTimestamp::next()))
-	}
-
-	/// Convert a versionstamp to timestamp bytes for this storage engine
-	async fn timestamp_bytes_from_versionstamp(&self, version: u128) -> Result<Vec<u8>> {
-		Ok(<u64 as Timestamp>::from_versionstamp(version)?.to_ts_bytes())
-	}
-
-	/// Convert a datetime to timestamp bytes for this storage engine
-	async fn timestamp_bytes_from_datetime(&self, datetime: DateTime<Utc>) -> Result<Vec<u8>> {
-		Ok(<u64 as Timestamp>::from_datetime(datetime)?.to_ts_bytes())
+	fn timestamp_impl(&self) -> TimeStampImpl {
+		TimeStampImpl::Default
 	}
 
 	async fn compact(&self, _range: Option<Range<Key>>) -> anyhow::Result<()> {
