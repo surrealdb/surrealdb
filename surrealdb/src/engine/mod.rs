@@ -22,6 +22,15 @@ use futures::Stream;
 use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Interval;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+	feature = "protocol-http",
+	feature = "protocol-ws",
+))]
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasmtimer::std::Instant;
@@ -50,12 +59,30 @@ impl Stream for IntervalStream {
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+	feature = "protocol-http",
+	feature = "protocol-ws",
+))]
 pub(crate) enum SessionError {
 	NotFound(Uuid),
 	Remote(String),
 }
 
 /// Convert a session error into the public error type.
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+	feature = "protocol-http",
+	feature = "protocol-ws",
+))]
 pub(crate) fn session_error_to_error(e: SessionError) -> surrealdb_types::Error {
 	match e {
 		SessionError::NotFound(id) => {
