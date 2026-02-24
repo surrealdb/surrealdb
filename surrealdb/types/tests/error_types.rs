@@ -597,7 +597,7 @@ fn test_error_snapshot_not_allowed_auth_token_expired() {
 	assert_eq!(obj.get("kind"), Some(&Value::String("NotAllowed".into())));
 	assert_eq!(obj.get("message"), Some(&Value::String("Token expired".into())));
 	// cause may be omitted or null when absent
-	assert!(obj.get("cause").map_or(true, |v| *v == Value::None));
+	assert!(obj.get("cause").is_none_or(|v| *v == Value::None));
 	let Some(Value::Object(details)) = obj.get("details") else {
 		panic!("Expected details object");
 	};
@@ -860,7 +860,7 @@ fn test_error_snapshot_internal_no_details() {
 	assert_eq!(obj.get("message"), Some(&Value::String("Unexpected".into())));
 	assert!(!obj.contains_key("details"), "No details should be present");
 	// cause may be omitted or null when absent
-	assert!(obj.get("cause").map_or(true, |v| *v == Value::None));
+	assert!(obj.get("cause").is_none_or(|v| *v == Value::None));
 
 	// Round-trip
 	let parsed = Error::from_value(val).unwrap();
@@ -887,7 +887,7 @@ fn test_error_snapshot_thrown_no_details() {
 	assert_eq!(obj.get("message"), Some(&Value::String("custom error".into())));
 	assert!(!obj.contains_key("details"));
 	// cause may be omitted or null when absent
-	assert!(obj.get("cause").map_or(true, |v| *v == Value::None));
+	assert!(obj.get("cause").is_none_or(|v| *v == Value::None));
 
 	// Round-trip
 	let parsed = Error::from_value(val).unwrap();
@@ -1839,7 +1839,7 @@ fn test_error_from_parts_no_kind() {
 #[test]
 fn test_error_cause_accessor() {
 	let root = Error::internal("root cause".into());
-	let top = Error::validation("validation failed".into(), None).with_cause(root.clone());
+	let top = Error::validation("validation failed".into(), None).with_cause(root);
 	assert!(top.cause().is_some());
 	let cause = top.cause().unwrap();
 	assert_eq!(cause.message(), "root cause");
@@ -1852,7 +1852,7 @@ fn test_error_cause_wire_roundtrip() {
 
 	let root = Error::internal("root cause".into());
 	let top = Error::validation("validation failed".into(), None).with_cause(root);
-	let value = top.clone().into_value();
+	let value = top.into_value();
 	let parsed = Error::from_value(value).unwrap();
 	assert_eq!(parsed.message(), "validation failed");
 	let cause = parsed.cause().expect("cause should be present");
@@ -1886,7 +1886,7 @@ fn test_error_without_cause_omitted_on_wire() {
 	use surrealdb_types::SurrealValue;
 
 	let err = Error::internal("no cause".into());
-	let value = err.clone().into_value();
+	let value = err.into_value();
 	// cause key may be omitted when None (depends on Option serialization)
 	let parsed = Error::from_value(value).unwrap();
 	assert_eq!(parsed.message(), "no cause");
