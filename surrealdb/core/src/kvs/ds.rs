@@ -1,3 +1,9 @@
+#[cfg(not(target_family = "wasm"))]
+use std::collections::HashMap;
+#[cfg(target_family = "wasm")]
+use std::collections::HashSet;
+#[cfg(not(target_family = "wasm"))]
+use std::collections::hash_map::Entry;
 use std::fmt::{self, Display};
 #[cfg(storage)]
 use std::path::PathBuf;
@@ -14,6 +20,8 @@ use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use reblessive::TreeStack;
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
+#[cfg(not(target_family = "wasm"))]
+use tokio::spawn;
 use tokio::sync::Notify;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
@@ -22,10 +30,10 @@ use tracing::{debug, instrument, trace, warn};
 use uuid::Uuid;
 
 use super::api::Transactable;
-use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
+use super::{Key, Val, export};
 use crate::api::err::ApiError;
 use crate::api::invocation::process_api_request;
 use crate::api::request::ApiRequest;
@@ -55,6 +63,7 @@ use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevel
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
+use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::ic::IndexCompactionKey;
@@ -1380,7 +1389,7 @@ impl Datastore {
 	// Indexing functions
 	// --------------------------------------------------
 
-	/// Processes the index compaction queue
+	/// Processes the index compaction queue.
 	///
 	/// This method is called periodically by the index compaction thread to
 	/// process indexes that have been marked for compaction. It acquires a
@@ -1389,23 +1398,30 @@ impl Datastore {
 	/// overlap is possible.
 	///
 	/// The method scans the index compaction queue (stored as `Ic` keys) and
-	/// processes each index that needs compaction. Currently, only full-text
-	/// indexes support compaction, which helps optimize their performance by
-	/// consolidating changes and removing unnecessary data.
+	/// delegates to [`Self::index_compaction_loop`], which compacts each
+	/// distinct index exactly once — duplicate queue entries for the same
+	/// index are skipped. On native targets compaction tasks run in parallel
+	/// (one spawned task per index), while on wasm they run sequentially.
+	/// Indexes that support compaction include full-text, count, and HNSW.
 	///
-	/// After processing an index, it is removed from the compaction queue.
+	/// Each compaction runs on its own write transaction, while a separate
+	/// outer transaction manages the queue. Once all compactions have
+	/// completed, the entire queue range is deleted and the outer transaction
+	/// is committed. Compaction failures are logged but do not prevent other
+	/// indexes from being processed.
 	///
 	/// # Arguments
-	/// * `interval` - The interval between compaction runs, to calculate the lease duration
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
+	/// * `dbs` - The shared datastore instance, cloned into each compaction task
+	/// * `interval` - The interval between compaction runs, used to calculate the lease duration
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs))]
+	pub async fn index_compaction(dbs: Arc<Datastore>, interval: Duration) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting index compaction process");
 		// Create a new lease handler
 		let lh = LeaseHandler::new(
-			self.sequences.clone(),
-			self.id,
-			self.transaction_factory.clone(),
+			dbs.sequences.clone(),
+			dbs.id,
+			dbs.transaction_factory.clone(),
 			TaskLeaseType::IndexCompaction,
 			interval * 2,
 		)?;
@@ -1418,79 +1434,135 @@ impl Datastore {
 			}
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running index compaction process");
-			// Create a new transaction
-			let txn = Arc::new(self.transaction(Write, Optimistic).await?);
 			// Collect every item in the queue
 			let (beg, end) = IndexCompactionKey::range();
 			let range = beg..end;
-			let mut previous: Option<IndexCompactionKey<'static>> = None;
-			let mut count = 0;
+			// Create a new transaction managing the batch
+			let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
 			// Returns an ordered list of indexes that require compaction
 			let items = catch!(txn, txn.getr(range.clone(), None).await);
-			for (k, _) in items {
-				count += 1;
-				lh.try_maintain_lease().await?;
-				let ic = IndexCompactionKey::decode_key(&k)?;
-				// If the index has already been compacted, we can ignore the task
-				if let Some(p) = &previous
-					&& p.index_matches(&ic)
-				{
-					continue;
-				}
-				match catch!(txn, txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await)
-				{
-					Some(ix) if !ix.prepare_remove => match &ix.index {
-						Index::FullText(p) => {
-							catch!(
-								txn,
-								IndexOperation::index_fulltext_compaction(
-									&self.index_stores,
-									&ic,
-									&txn,
-									p
-								)
-								.await
-							);
-						}
-						Index::Count(_) => {
-							catch!(txn, IndexOperation::index_count_compaction(&ic, &txn).await);
-						}
-						Index::Hnsw(p) => {
-							let mut ctx = self.setup_ctx()?;
-							ctx.set_transaction(txn.clone());
-							let ctx = ctx.freeze();
-							catch!(
-								txn,
-								IndexOperation::index_hnsw_compaction(
-									&ctx,
-									&self.index_stores,
-									&ic,
-									&ix,
-									p
-								)
-								.await
-							);
-						}
-						_ => {
-							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
-						}
-					},
-					_ => {
-						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
-					}
-				}
-				previous = Some(ic.into_owned());
-			}
-			if count > 0 {
-				catch!(txn, txn.delr(range).await);
-				catch!(txn, txn.commit().await);
-			} else {
-				txn.cancel().await?;
+			if items.is_empty() {
+				let _ = txn.cancel().await;
 				return Ok(());
 			}
+			catch!(txn, Self::index_compaction_loop(dbs.clone(), &lh, items).await);
+			// We can now delete the range
+			catch!(txn, txn.delr(range).await);
+			catch!(txn, txn.commit().await);
 		}
 	}
 
+	/// Compacts each distinct index found in the queue items.
+	///
+	/// On native targets, compaction tasks are spawned in parallel — one per
+	/// distinct index — and joined afterwards. Duplicate queue entries for
+	/// the same index are deduplicated via a [`HashMap`] so only one task is
+	/// spawned per index. Failures are logged but do not abort the loop.
+	#[cfg(not(target_family = "wasm"))]
+	async fn index_compaction_loop(
+		dbs: Arc<Datastore>,
+		lh: &LeaseHandler,
+		items: Vec<(Key, Val)>,
+	) -> Result<()> {
+		let mut concurrent_compactions = HashMap::new();
+		for (k, _) in items {
+			lh.try_maintain_lease().await?;
+			let ic = IndexCompactionKey::decode_key(&k)?;
+			let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
+			if let Entry::Vacant(e) = concurrent_compactions.entry(ikb.clone()) {
+				// Compaction is actually not running for this index,
+				// let's spawn it
+				let dbs = dbs.clone();
+				let jh = spawn(async move {
+					// Each compaction task runs on its own transaction
+					let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
+					catch!(txn, dbs.process_index_compaction(txn.clone(), &ikb).await);
+					catch!(txn, txn.commit().await);
+					Ok(())
+				});
+				e.insert(jh);
+			}
+		}
+		for (ikb, jh) in concurrent_compactions {
+			if let Err(e) = jh.await? {
+				error!("Index compaction {ikb} fails: {e}")
+			}
+		}
+		Ok(())
+	}
+
+	/// Compacts each distinct index found in the queue items.
+	///
+	/// On wasm, `tokio::spawn` is unavailable so compactions run
+	/// sequentially. A [`HashSet`] is used to skip duplicate queue entries
+	/// for the same index. Failures are logged but do not abort the loop.
+	#[cfg(target_family = "wasm")]
+	async fn index_compaction_loop(
+		dbs: Arc<Datastore>,
+		lh: &LeaseHandler,
+		items: Vec<(Key, Val)>,
+	) -> Result<()> {
+		let mut seen = HashSet::new();
+		for (k, _) in items {
+			lh.try_maintain_lease().await?;
+			let ic = IndexCompactionKey::decode_key(&k)?;
+			let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
+			if !seen.insert(ikb.clone()) {
+				continue;
+			}
+			// Each compaction task runs on its own transaction
+			let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
+			match dbs.process_index_compaction(txn.clone(), &ikb).await {
+				Err(e) => {
+					error!("Index compaction {ikb} fails: {e}");
+					let _ = txn.cancel().await;
+				}
+				Ok(_) => {
+					catch!(txn, txn.commit().await);
+				}
+			}
+		}
+		Ok(())
+	}
+
+	/// Performs the actual compaction of a single index.
+	///
+	/// Looks up the index definition identified by `ikb` and dispatches to
+	/// the appropriate compaction implementation based on the index type:
+	/// full-text, count, or HNSW. Indexes that are being removed
+	/// (`prepare_remove`), not found, or of an unsupported type are silently
+	/// skipped with a trace log.
+	async fn process_index_compaction(
+		&self,
+		txn: Arc<Transaction>,
+		ikb: &IndexKeyBase,
+	) -> Result<()> {
+		match txn.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index()).await? {
+			Some(ix) if !ix.prepare_remove => match &ix.index {
+				Index::FullText(p) => {
+					IndexOperation::index_fulltext_compaction(&self.index_stores, ikb, &txn, p)
+						.await?;
+				}
+				Index::Count(_) => {
+					IndexOperation::index_count_compaction(ikb, &txn).await?;
+				}
+				Index::Hnsw(p) => {
+					let mut ctx = self.setup_ctx()?;
+					ctx.set_transaction(txn.clone());
+					let ctx = ctx.freeze();
+					IndexOperation::index_hnsw_compaction(&ctx, &self.index_stores, ikb, &ix, p)
+						.await?;
+				}
+				_ => {
+					trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ikb);
+				}
+			},
+			_ => {
+				trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ikb);
+			}
+		}
+		Ok(())
+	}
 	/// Process queued async events using a distributed lease to coordinate batches.
 	/// Once a batch starts it runs to completion even if the lease expires, so
 	/// brief overlap is possible.

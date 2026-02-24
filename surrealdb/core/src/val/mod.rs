@@ -102,6 +102,8 @@ impl Ord for Value {
 }
 
 impl Value {
+	pub const NONE: Self = Self::None;
+
 	// -----------------------------------
 	// Initial record value
 	// -----------------------------------

@@ -138,6 +138,12 @@ pub struct RootContext {
 	/// explicit DAG input binding -- operators read it via `CurrentValueSource`,
 	/// and it is set by `LookupPart` before executing the lookup's operator chain.
 	pub(crate) current_value: Option<Arc<Value>>,
+	/// When true, RecordId dereferences bypass permission checks.
+	///
+	/// Propagated from `EvalContext` at subquery / lookup / recursion boundaries
+	/// so that permission predicate evaluation does not re-enter table permissions
+	/// and recurse infinitely on cyclic record links.
+	pub(crate) skip_fetch_perms: bool,
 }
 
 impl std::fmt::Debug for RootContext {
@@ -149,6 +155,7 @@ impl std::fmt::Debug for RootContext {
 			.field("auth_enabled", &self.auth_enabled)
 			.field("session", &self.session)
 			.field("current_value", &self.current_value.as_ref().map(|_| "<Value>"))
+			.field("skip_fetch_perms", &self.skip_fetch_perms)
 			.field("ctx", &"<FrozenContext>")
 			.finish()
 	}
@@ -484,6 +491,7 @@ impl ExecutionContext {
 				auth_enabled: r.auth_enabled,
 				session: r.session.clone(),
 				current_value: r.current_value.clone(),
+				skip_fetch_perms: r.skip_fetch_perms,
 			}),
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
 				root: RootContext {
@@ -495,6 +503,7 @@ impl ExecutionContext {
 					auth_enabled: n.root.auth_enabled,
 					session: n.root.session.clone(),
 					current_value: n.root.current_value.clone(),
+					skip_fetch_perms: n.root.skip_fetch_perms,
 				},
 				ns: n.ns.clone(),
 			}),
@@ -509,6 +518,7 @@ impl ExecutionContext {
 						auth_enabled: d.ns_ctx.root.auth_enabled,
 						session: d.ns_ctx.root.session.clone(),
 						current_value: d.ns_ctx.root.current_value.clone(),
+						skip_fetch_perms: d.ns_ctx.root.skip_fetch_perms,
 					},
 					ns: d.ns_ctx.ns.clone(),
 				},
@@ -542,6 +552,25 @@ impl ExecutionContext {
 	/// `CurrentValueSource` to yield its input into the operator stream.
 	pub fn current_value(&self) -> Option<&Value> {
 		self.root().current_value.as_deref()
+	}
+
+	/// Derive a context that skips permission checks on RecordId dereferences.
+	///
+	/// Used at subquery / lookup / recursion boundaries when the parent
+	/// `EvalContext` has `skip_fetch_perms` set (i.e., we are inside a
+	/// permission predicate evaluation).
+	pub fn with_skip_fetch_perms(self, skip: bool) -> Self {
+		if skip == self.root().skip_fetch_perms {
+			return self;
+		}
+		let mut new = self;
+		let root = match &mut new {
+			Self::Root(r) => r,
+			Self::Namespace(n) => &mut n.root,
+			Self::Database(d) => &mut d.ns_ctx.root,
+		};
+		root.skip_fetch_perms = skip;
+		new
 	}
 
 	/// Create a new context with an additional parameter.

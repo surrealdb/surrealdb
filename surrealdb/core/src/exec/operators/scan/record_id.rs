@@ -16,7 +16,6 @@ use super::pipeline::{
 	range_start_key,
 };
 use super::resolved::ResolvedTableContext;
-use crate::catalog::providers::TableProvider;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
 	validate_record_user_access,
@@ -355,17 +354,11 @@ pub(crate) async fn execute_record_lookup(
 		}
 		_ => {
 			// --- Point lookup ---
-			let record = txn
-				.get_record(ns.namespace_id, db.database_id, &rid.table, &rid.key, version)
-				.await
-				.context("Failed to get record")?;
-
-			if record.data.is_none() {
+			let Some(value) =
+				crate::exec::operators::fetch::fetch_raw_record(ctx, rid, version).await?
+			else {
 				return Ok(vec![]);
-			}
-
-			let mut value = record.data.clone();
-			value.def(rid.clone());
+			};
 
 			let mut batch = vec![value];
 			if needs_processing {

@@ -39,6 +39,15 @@ impl PhysicalExpr for ScalarSubquery {
 			ctx.exec_ctx.clone()
 		};
 
+		// Propagate the permission-skip flag so that inner plans executed
+		// during permission predicate evaluation do not re-enter table
+		// permission checks (which would recurse on cyclic record links).
+		let subquery_ctx = if ctx.skip_fetch_perms {
+			subquery_ctx.with_skip_fetch_perms(true)
+		} else {
+			subquery_ctx
+		};
+
 		// Execute the subquery plan with the derived context
 		let mut stream = self.plan.execute(&subquery_ctx)?;
 

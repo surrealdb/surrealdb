@@ -251,9 +251,7 @@ mod graphql_integration {
 				)
 				.send()
 				.await?;
-			// assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			eprintln!("\n\n\n\n\n{body}\n\n\n\n\n\n");
+			assert_eq!(res.status(), 200);
 		}
 
 		// check works with root
@@ -264,7 +262,7 @@ mod graphql_integration {
 				.body(json!({"query": r#"query{foo{id, val}}"#}).to_string())
 				.send()
 				.await?;
-			// assert_eq!(res.status(), 200);
+			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			let expected =
 				json!({"data":{"foo":[{"id":"foo:1","val":42},{"id":"foo:2","val":43}]}});
