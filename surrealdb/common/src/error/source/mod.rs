@@ -1,6 +1,7 @@
 mod render;
 
-use std::{borrow::Cow, fmt};
+use std::borrow::Cow;
+use std::fmt;
 
 use crate::span::Span;
 
@@ -61,6 +62,21 @@ impl<'a> Diagnostic<'a> {
 	pub fn to_owned(self) -> Diagnostic<'static> {
 		Diagnostic {
 			groups: self.groups.into_iter().map(|x| x.to_owned()).collect(),
+		}
+	}
+
+	pub fn map_source<Fs, Fp>(&mut self, mut map_source: Fs, mut map_span: Fp)
+	where
+		Fs: FnMut(&mut OptionCow<'a>),
+		Fp: FnMut(&mut Span),
+	{
+		for g in self.groups.iter_mut() {
+			for s in g.elements.iter_mut() {
+				map_source(&mut s.source);
+				for a in s.annotations.iter_mut() {
+					map_span(&mut a.span);
+				}
+			}
 		}
 	}
 }

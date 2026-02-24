@@ -41,7 +41,7 @@ pub trait Node: Any {}
 /// Trait for types which can be part of the ast in a hash-consed set.
 pub trait UniqueNode: Any + Eq + Hash {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Spanned<T> {
 	pub value: T,
 	pub span: Span,
@@ -162,9 +162,9 @@ macro_rules! library {
             }
 
 			fn get<T: ::std::any::Any>(&self, id: NodeId<T>) -> Option<&T>{
-                let type_id = std::any::TypeId::of::<T>();
+                let type_id = const { std::any::TypeId::of::<T>() };
                 $(
-                    if std::any::TypeId::of::<$ty>() == type_id{
+                    if const{ std::any::TypeId::of::<$ty>() } == type_id{
                         unsafe{
                             let cntr = std::mem::transmute::<&$container<$ty>,&$container<T>>(&self.$field);
                             return $crate::types::NodeCollection::<T>::get_node(cntr,id.into_u32());
@@ -178,9 +178,9 @@ macro_rules! library {
             }
 
             fn get_mut<T: ::std::any::Any>(&mut self, idx: NodeId<T>) -> Option<&mut T>{
-                let type_id = std::any::TypeId::of::<T>();
+                let type_id = const { std::any::TypeId::of::<T>() };
                 $(
-                    if std::any::TypeId::of::<$ty>() == type_id{
+                    if const{ std::any::TypeId::of::<$ty>() } == type_id{
                         unsafe{
                             let cntr = std::mem::transmute::<&mut $container<$ty>,&mut $container<T>>(&mut self.$field);
                             return $crate::types::NodeCollection::<T>::get_mut_node(cntr,idx.into_u32());
@@ -193,7 +193,7 @@ macro_rules! library {
             }
 
             fn insert<T: crate::types::Node>(&mut self, value: T) -> NodeId<T>{
-                let type_id = std::any::TypeId::of::<T>();
+                let type_id = const { std::any::TypeId::of::<T>() };
                 $(
 					library!{@push $($field_meta)?, $ty, $container,self.$field = type_id <= value}
                 )*
@@ -203,7 +203,7 @@ macro_rules! library {
             }
 
             fn insert_set<T: crate::types::UniqueNode>(&mut self, value: T) -> NodeId<T>{
-                let type_id = std::any::TypeId::of::<T>();
+                let type_id = const { std::any::TypeId::of::<T>() };
                 $(
 					library!{@push_set $($field_meta)?, $ty, $container,self.$field = type_id <= value}
                 )*
@@ -223,7 +223,7 @@ macro_rules! library {
     };
 
 	(@push , $ty:ty, $container:ident, $this:ident.$field:ident = $ty_id:ident <= $value:ident) => {
-		if std::any::TypeId::of::<$ty>() == $ty_id{
+		if const{ std::any::TypeId::of::<$ty>() } == $ty_id{
 			unsafe{
 				let cntr = std::mem::transmute::<&mut $container<$ty>,&mut $container<T>>(&mut $this.$field);
 				let idx = <$container<T> as $crate::types::NodeVec::<T>>::insert_node(cntr,$value);
@@ -233,19 +233,19 @@ macro_rules! library {
 	};
 
 	(@push set, $ty:ty, $container:ident, $this:ident.$field:ident = $ty_id:ident <= $value:ident) => {
-		if std::any::TypeId::of::<$ty>() == $ty_id{
+		if const{ std::any::TypeId::of::<$ty>() } == $ty_id{
 			panic!("tried to push type `{}` as part of a set which is not a unique node",std::any::type_name::<$ty>())
 		}
 	};
 
 	(@push_set, $ty:ty, $container:ident, $this:ident.$field:ident = $ty_id:ident <= $value:ident) => {
-		if std::any::TypeId::of::<$ty>() == $ty_id{
+		if const{ std::any::TypeId::of::<$ty>() } == $ty_id{
 			panic!("tried to push type `{}` as part of a vector which is a unique node",std::any::type_name::<$ty>())
 		}
 	};
 
 	(@push_set set, $ty:ty, $container:ident, $this:ident.$field:ident = $ty_id:ident <= $value:ident) => {
-		if std::any::TypeId::of::<$ty>() == $ty_id{
+		if const{ std::any::TypeId::of::<$ty>() } == $ty_id{
 			unsafe{
 				let cntr = std::mem::transmute::<&mut $container<$ty>,&mut $container<T>>(&mut $this.$field);
 				let idx = <$container<T> as $crate::types::NodeSet::<T>>::insert_node(cntr,$value);

@@ -18,6 +18,7 @@ mod error;
 mod expr;
 mod peek;
 pub mod prime;
+mod record_id;
 mod special;
 mod stmt;
 mod top_level_expr;
@@ -81,6 +82,7 @@ impl Default for Config {
 }
 
 bitflags! {
+	#[derive(Clone,Copy)]
 	struct ParserSettings: u8 {
 		/// Are legacy_strands strands enabled.
 		const LEGACY_STRAND      = 1 << 0;
@@ -261,6 +263,22 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				}
 			}
 		}
+	}
+
+	pub async fn sub_parse<P: Parse>(&mut self, sub_str: &str) -> ParseResult<P> {
+		let lex = BaseTokenKind::lexer(sub_str);
+		let lex = PeekableLexer::new(lex);
+
+		let mut parser = Parser {
+			lex,
+			last_span: Span::empty(),
+			ast: self.ast,
+			settings: self.settings,
+			state: self.state,
+			unescape_buffer: String::new(),
+		};
+
+		parser.parse().await
 	}
 
 	/// Returns a speculative error,
@@ -609,6 +627,10 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		let (lex, t) = f(lexer)?;
 		*self.lex.lexer() = lex;
 		Ok(t)
+	}
+
+	pub fn source(&self) -> &'source str {
+		self.lex.source()
 	}
 
 	/// Returns sub string of full source that corresponds to the given span.

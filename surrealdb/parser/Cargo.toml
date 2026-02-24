@@ -21,6 +21,7 @@ bitflags.workspace = true
 reblessive.workspace = true
 logos = { version = "0.16" }
 rust_decimal.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

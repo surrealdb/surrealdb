@@ -176,6 +176,13 @@ impl<E: ErrorTrait> RawTypedError<E> {
 			&ptr.as_ref().t
 		}
 	}
+
+	pub unsafe fn ref_mut_from_raw<'a>(ptr: NonNull<()>) -> &'a mut E {
+		unsafe {
+			let mut ptr: ErrorPtr<E> = ptr.cast();
+			&mut ptr.as_mut().t
+		}
+	}
 }
 
 impl<T> Deref for RawTypedError<T> {

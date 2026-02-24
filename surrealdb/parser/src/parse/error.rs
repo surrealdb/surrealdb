@@ -75,6 +75,13 @@ impl ParseError {
 		}
 		unsafe { Some(TypedError::<Diagnostic<'static>>::ref_from_raw(self.0)) }
 	}
+
+	pub fn as_mut_diagnostic<'a>(&'a mut self) -> Option<&'a mut Diagnostic<'static>> {
+		if !self.is_diagnostic() {
+			return None;
+		}
+		unsafe { Some(TypedError::<Diagnostic<'static>>::ref_mut_from_raw(self.0)) }
+	}
 }
 
 impl Drop for ParseError {

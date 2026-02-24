@@ -1,3 +1,5 @@
+use std::ops::Bound;
+
 use common::ids::IdSet;
 use common::span::Span;
 use rust_decimal::Decimal;
@@ -8,6 +10,7 @@ pub mod vis;
 mod visit;
 
 pub use types::{Node, NodeId, NodeList, NodeListId, Spanned, UniqueNode};
+use uuid::Uuid;
 
 use crate::mac::ast_type;
 use crate::types::AstSpan;
@@ -37,9 +40,16 @@ library! {
 		floats: Vec<Spanned<f64>>,
 		integer: Vec<Integer>,
 		decimal: Vec<Spanned<Decimal>>,
+		uuid: Vec<Spanned<Uuid>>,
+		str: Vec<StringLit>,
+
+		record_id: Vec<RecordId>,
+		record_id_key: Vec<RecordIdKey>,
+		record_id_key_range: Vec<RecordIdKeyRange>,
 
 		point: Vec<Point>,
 		array: Vec<Array>,
+		set: Vec<Set>,
 		object: Vec<Object>,
 		object_entry: Vec<ObjectEntry>,
 		object_entrys: Vec<NodeList<ObjectEntry>>,
@@ -68,6 +78,7 @@ pub type Ast = types::Ast<Library>;
 impl UniqueNode for String {}
 impl Node for f64 {}
 impl Node for Decimal {}
+impl Node for Uuid {}
 
 ast_type! {
 	pub struct Query {
@@ -77,6 +88,12 @@ ast_type! {
 
 ast_type! {
 	pub struct Ident {
+		pub text: NodeId<String>,
+	}
+}
+
+ast_type! {
+	pub struct StringLit {
 		pub text: NodeId<String>,
 	}
 }
@@ -360,6 +377,41 @@ ast_type! {
 
 ast_type! {
 	#[derive(Copy, Clone)]
+	pub struct RecordId{
+		pub name: NodeId<Ident>,
+		pub key: NodeId<RecordIdKey>,
+	}
+}
+
+ast_type! {
+	#[derive(Copy, Clone)]
+	pub enum RecordIdKey{
+		String(NodeId<StringLit>),
+		Number(NodeId<Integer>),
+		Uuid(NodeId<Spanned<Uuid>>),
+		Object(NodeId<Object>),
+		Array(NodeId<Array>),
+		Range(NodeId<RecordIdKeyRange>),
+		Generate(Spanned<RecordIdKeyGenerate>),
+	}
+}
+
+ast_type! {
+	pub struct RecordIdKeyRange{
+		pub start: Bound<NodeId<RecordIdKey>>,
+		pub end: Bound<NodeId<RecordIdKey>>,
+	}
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum RecordIdKeyGenerate {
+	Ulid,
+	Uuid,
+	Rand,
+}
+
+ast_type! {
+	#[derive(Copy, Clone)]
 	pub enum Expr {
 		Covered(NodeId<Expr>),
 
@@ -367,12 +419,17 @@ ast_type! {
 		Float(NodeId<Spanned<f64>>),
 		Integer(NodeId<Integer>),
 		Decimal(NodeId<Spanned<Decimal>>),
+		String(NodeId<StringLit>),
+
+		Uuid(NodeId<Spanned<Uuid>>),
 
 		Point(NodeId<Point>),
 
 		Array(NodeId<Array>),
 		Object(NodeId<Object>),
 		Set(NodeId<Set>),
+
+		RecordId(NodeId<RecordId>),
 
 		Block(NodeId<Block>),
 

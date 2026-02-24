@@ -108,6 +108,10 @@ impl<T: ErrorTrait> TypedError<T> {
 	pub unsafe fn ref_from_raw<'a>(ptr: NonNull<()>) -> &'a T {
 		unsafe { RawTypedError::<T>::ref_from_raw(ptr) }
 	}
+
+	pub unsafe fn ref_mut_from_raw<'a>(ptr: NonNull<()>) -> &'a mut T {
+		unsafe { RawTypedError::<T>::ref_mut_from_raw(ptr) }
+	}
 }
 
 impl<T: ErrorTrait> Deref for TypedError<T> {

@@ -1,8 +1,10 @@
 use core::fmt;
 use std::any::Any;
+use std::ops::Bound;
 
 use common::span::Span;
 use rust_decimal::Decimal;
+use uuid::Uuid;
 
 use super::AstFormatter;
 use crate::mac::impl_vis_debug;
@@ -10,7 +12,7 @@ use crate::types::{Ast, NodeLibrary};
 use crate::vis::AstVis;
 use crate::{
 	BinaryOperator, DestructureOperator, IdiomOperator, Integer, NodeId, NodeListId,
-	PostfixOperator, Sign, Spanned, UseStatementKind,
+	PostfixOperator, RecordIdKeyGenerate, Sign, Spanned, UseStatementKind,
 };
 
 impl_vis_debug!(BinaryOperator);
@@ -104,6 +106,20 @@ where
 	}
 }
 
+impl<L, W> AstVis<L, W> for RecordIdKeyGenerate
+where
+	L: NodeLibrary,
+	W: fmt::Write,
+{
+	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
+		fmt.fmt_enum(ast, "DestructureOperator", |_, fmt| match self {
+			RecordIdKeyGenerate::Ulid => fmt.unit_variant("Ulid"),
+			RecordIdKeyGenerate::Uuid => fmt.unit_variant("Uuid"),
+			RecordIdKeyGenerate::Rand => fmt.unit_variant("Rand"),
+		})
+	}
+}
+
 impl<N, L, W> AstVis<L, W> for NodeId<N>
 where
 	N: AstVis<L, W> + Any,
@@ -158,6 +174,25 @@ where
 	}
 }
 
+impl<N, L, W> AstVis<L, W> for Bound<N>
+where
+	N: AstVis<L, W>,
+	L: NodeLibrary,
+	W: fmt::Write,
+{
+	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
+		fmt.fmt_enum(ast, "Bound", |ast, fmt| match self {
+			Bound::Included(x) => {
+				fmt.variant(ast, "Included", |ast, fmt| fmt.tuple(ast, x)?.finish())
+			}
+			Bound::Excluded(x) => {
+				fmt.variant(ast, "Excluded", |ast, fmt| fmt.tuple(ast, x)?.finish())
+			}
+			Bound::Unbounded => fmt.unit_variant("Unbounded"),
+		})
+	}
+}
+
 impl<L, W> AstVis<L, W> for String
 where
 	L: NodeLibrary,
@@ -190,7 +225,9 @@ where
 		}
 	}
 }
+
 impl_vis_debug!(Decimal);
+impl_vis_debug!(Uuid);
 
 impl_vis_debug!(bool);
 impl_vis_debug!(usize);
