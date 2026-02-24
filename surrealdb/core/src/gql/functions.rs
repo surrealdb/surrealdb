@@ -13,7 +13,7 @@ use std::sync::Arc;
 use async_graphql::dynamic::{Field, FieldFuture, FieldValue, InputValue, Object, Type};
 
 use super::GqlError;
-use super::schema::{gql_to_sql_kind, sql_value_to_gql_value_with_kind};
+use super::schema::{gql_to_sql_kind_with_scope, sql_value_to_gql_value_with_kind};
 use super::utils::execute_plan;
 use crate::catalog::FunctionDefinition;
 use crate::dbs::Session;
@@ -67,7 +67,12 @@ pub async fn process_fns(
 					// Convert each GraphQL argument to its SurrealQL equivalent
 					for (arg_name, arg_kind) in fnd1.args.iter() {
 						if let Some(arg_val) = gql_args.get(arg_name.as_str()) {
-							let arg_val = gql_to_sql_kind(arg_val, arg_kind.clone())?;
+							let scope = format!("fn_{}_{}", fnd1.name, arg_name);
+							let arg_val = gql_to_sql_kind_with_scope(
+								arg_val,
+								arg_kind.clone(),
+								Some(&scope),
+							)?;
 							args.push(arg_val.into_literal());
 						} else {
 							// Missing arguments default to None

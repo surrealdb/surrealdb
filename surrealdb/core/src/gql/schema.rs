@@ -433,24 +433,16 @@ fn literal_enum_type_name(scope: Option<&str>, literals: &[String]) -> String {
 	}
 }
 
-fn token_matches_literal(token: &str, literal: &str) -> bool {
-	let literal_component = sanitize_gql_identifier_component(literal);
-	token == literal_component || token.ends_with(&format!("_{literal_component}"))
-}
-
-fn enum_token_to_literal(ks: &[Kind], token: &str) -> Option<String> {
-	let mut out = None;
+fn enum_token_to_literal(ks: &[Kind], token: &str, enum_scope: Option<&str>) -> Option<String> {
 	for kind in ks {
-		if let Kind::Literal(KindLiteral::String(lit)) = kind
-			&& token_matches_literal(token, lit)
-		{
-			if out.is_some() {
-				return None;
+		if let Kind::Literal(KindLiteral::String(lit)) = kind {
+			let expected = literal_enum_item_name(enum_scope, lit);
+			if expected == token {
+				return Some(lit.clone());
 			}
-			out = Some(lit.clone());
 		}
 	}
-	out
+	None
 }
 
 /// Map a SurrealDB [`Kind`] to a GraphQL [`TypeRef`].
@@ -822,6 +814,16 @@ fn convert_static_literal(lit: Literal) -> Result<SurValue, GqlError> {
 /// duration, uuid, then parsed as SurrealQL expressions.  For `Kind::Either`,
 /// each constituent kind is tried in turn until one succeeds.
 pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError> {
+	gql_to_sql_kind_with_scope(val, kind, None)
+}
+
+/// Like [`gql_to_sql_kind`], but with an optional `enum_scope` for precise
+/// reverse-mapping of scoped enum tokens back to their original string literals.
+pub(crate) fn gql_to_sql_kind_with_scope(
+	val: &GqlValue,
+	kind: Kind,
+	enum_scope: Option<&str>,
+) -> Result<SurValue, GqlError> {
 	use crate::syn;
 	match kind {
 		Kind::Any => match val {
@@ -1072,7 +1074,7 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 					Err(resolver_error("binary input for Either is not yet supported"))
 				}
 				GqlValue::Enum(n) => {
-					if let Some(literal) = enum_token_to_literal(ks, n.as_str()) {
+					if let Some(literal) = enum_token_to_literal(ks, n.as_str(), enum_scope) {
 						return Ok(SurValue::String(literal));
 					}
 					either_try_kind!(ks, &GqlValue::String(n.to_string()), Kind::String);

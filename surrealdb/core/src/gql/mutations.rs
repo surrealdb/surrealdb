@@ -19,7 +19,9 @@ use async_graphql::{Name, Value as GqlValue};
 use surrealdb_types::ToSql;
 
 use super::error::{GqlError, resolver_error};
-use super::schema::{SchemaContext, gql_to_sql_kind, kind_to_type_with_enum_prefix, unwrap_type};
+use super::schema::{
+	SchemaContext, gql_to_sql_kind_with_scope, kind_to_type_with_enum_prefix, unwrap_type,
+};
 use super::tables::{CachedRecord, cond_from_filter};
 use super::utils::{GqlValueUtils, execute_plan};
 use crate::catalog::providers::TableProvider;
@@ -69,6 +71,7 @@ fn gql_input_to_sql_object(
 	input: &IndexMap<Name, GqlValue>,
 	fds: &[FieldDefinition],
 	skip_fields: &[&str],
+	tb_name: &str,
 ) -> Result<SurObject, GqlError> {
 	let mut map = BTreeMap::new();
 	for (key, val) in input {
@@ -76,11 +79,9 @@ fn gql_input_to_sql_object(
 		if skip_fields.contains(&key_str) {
 			continue;
 		}
-		// Skip null values
 		if matches!(val, GqlValue::Null) {
 			continue;
 		}
-		// Find the field kind from definitions
 		let kind = fds
 			.iter()
 			.find(|fd| {
@@ -88,7 +89,8 @@ fn gql_input_to_sql_object(
 			})
 			.and_then(|fd| fd.field_kind.clone())
 			.unwrap_or(Kind::Any);
-		let sql_val = gql_to_sql_kind(val, kind)?;
+		let enum_scope = format!("{tb_name}_{key_str}");
+		let sql_val = gql_to_sql_kind_with_scope(val, kind, Some(&enum_scope))?;
 		map.insert(key_str.to_string(), sql_val);
 	}
 	Ok(SurObject(map))
@@ -327,7 +329,8 @@ fn add_update_field(mutation: Object, tc: &MutationTableContext, input_name: &st
 					let data_obj = get_data_object(args)?;
 
 					let rid = parse_record_id(&tb_name, &id_str)?;
-					let content = gql_input_to_sql_object(data_obj, &fds, &["id"])?;
+					let content =
+						gql_input_to_sql_object(data_obj, &fds, &["id"], tb_name.as_str())?;
 
 					let data = if content.0.is_empty() {
 						None
@@ -379,7 +382,8 @@ fn add_upsert_field(mutation: Object, tc: &MutationTableContext, input_name: &st
 					let data_obj = get_data_object(args)?;
 
 					let rid = parse_record_id(&tb_name, &id_str)?;
-					let content = gql_input_to_sql_object(data_obj, &fds, &["id"])?;
+					let content =
+						gql_input_to_sql_object(data_obj, &fds, &["id"], tb_name.as_str())?;
 
 					let data = if content.0.is_empty() {
 						None
@@ -530,15 +534,15 @@ fn add_update_many_field(mutation: Object, tc: &MutationTableContext, input_name
 					let args = ctx.args.as_index_map();
 
 					let data_obj = get_data_object(args)?;
-					let content = gql_input_to_sql_object(data_obj, &fds, &["id"])?;
+					let content =
+						gql_input_to_sql_object(data_obj, &fds, &["id"], tb_name.as_str())?;
 					let data = if content.0.is_empty() {
 						None
 					} else {
 						Some(Data::MergeExpression(Value::Object(content).into_literal()))
 					};
 
-					// Parse WHERE condition
-					let cond = parse_where_arg(args, &fds)?;
+					let cond = parse_where_arg(args, &fds, tb_name.as_str())?;
 
 					let stmt = UpdateStatement {
 						only: false,
@@ -582,15 +586,15 @@ fn add_upsert_many_field(mutation: Object, tc: &MutationTableContext, input_name
 					let args = ctx.args.as_index_map();
 
 					let data_obj = get_data_object(args)?;
-					let content = gql_input_to_sql_object(data_obj, &fds, &["id"])?;
+					let content =
+						gql_input_to_sql_object(data_obj, &fds, &["id"], tb_name.as_str())?;
 					let data = if content.0.is_empty() {
 						None
 					} else {
 						Some(Data::ContentExpression(Value::Object(content).into_literal()))
 					};
 
-					// Parse WHERE condition
-					let cond = parse_where_arg(args, &fds)?;
+					let cond = parse_where_arg(args, &fds, tb_name.as_str())?;
 
 					let stmt = UpsertStatement {
 						only: false,
@@ -633,8 +637,7 @@ fn add_delete_many_field(mutation: Object, tc: &MutationTableContext) -> Object 
 					let sess = ctx.data::<Arc<Session>>()?;
 					let args = ctx.args.as_index_map();
 
-					// Parse WHERE condition
-					let cond = parse_where_arg(args, &fds)?;
+					let cond = parse_where_arg(args, &fds, tb_name.as_str())?;
 
 					// Use RETURN BEFORE to count deleted records
 					let stmt = DeleteStatement {
@@ -689,9 +692,10 @@ fn get_required_id(args: &IndexMap<Name, GqlValue>) -> Result<String, GqlError> 
 fn parse_where_arg(
 	args: &IndexMap<Name, GqlValue>,
 	fds: &[FieldDefinition],
+	tb_name: &str,
 ) -> Result<Option<Cond>, GqlError> {
 	match args.get("where") {
-		Some(GqlValue::Object(o)) if !o.is_empty() => Ok(Some(cond_from_filter(o, fds)?)),
+		Some(GqlValue::Object(o)) if !o.is_empty() => Ok(Some(cond_from_filter(o, fds, tb_name)?)),
 		_ => Ok(None),
 	}
 }
@@ -705,7 +709,7 @@ async fn execute_normal_create(
 	fds: &[FieldDefinition],
 	id_opt: Option<String>,
 ) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
-	let content = gql_input_to_sql_object(data_obj, fds, &["id"])?;
+	let content = gql_input_to_sql_object(data_obj, fds, &["id"], tb_name.as_str())?;
 
 	let what = match id_opt {
 		Some(id_str) => {
@@ -758,8 +762,7 @@ async fn execute_relate_create(
 	let from_rid = parse_full_record_id(&in_str)?;
 	let to_rid = parse_full_record_id(&out_str)?;
 
-	// Build content data (excluding id, in, out)
-	let content = gql_input_to_sql_object(data_obj, fds, &["id", "in", "out"])?;
+	let content = gql_input_to_sql_object(data_obj, fds, &["id", "in", "out"], tb_name.as_str())?;
 
 	let through = match id_opt {
 		Some(id_str) => {

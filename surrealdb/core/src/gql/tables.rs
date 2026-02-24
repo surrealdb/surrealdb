@@ -53,7 +53,8 @@ use surrealdb_types::ToSql;
 use super::error::{GqlError, resolver_error};
 use super::relations::{RelationDirection, RelationInfo};
 use super::schema::{
-	SchemaContext, gql_to_sql_kind, sql_value_to_gql_value, sql_value_to_gql_value_with_kind,
+	SchemaContext, gql_to_sql_kind, gql_to_sql_kind_with_scope, sql_value_to_gql_value,
+	sql_value_to_gql_value_with_kind,
 };
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{FieldDefinition, TableDefinition};
@@ -209,10 +210,11 @@ fn parse_order_arg(args: &IndexMap<Name, GqlValue>) -> Result<Option<Ordering>, 
 fn parse_filter_arg(
 	args: &IndexMap<Name, GqlValue>,
 	fds: &[FieldDefinition],
+	tb_name: &str,
 ) -> Result<Option<Cond>, GqlError> {
 	let filter = args.get("filter").or_else(|| args.get("where"));
 	match filter {
-		Some(GqlValue::Object(o)) => Ok(Some(cond_from_filter(o, fds)?)),
+		Some(GqlValue::Object(o)) => Ok(Some(cond_from_filter(o, fds, tb_name)?)),
 		Some(f) => {
 			error!(
 				"Found filter {f}, which should be object and should have \
@@ -712,7 +714,8 @@ fn make_table_list_field(
 			let limit = parse_limit_arg(args);
 			let version = parse_version_arg(args)?;
 			let order = parse_order_arg(args)?;
-			let cond = parse_filter_arg(args, &fds)?;
+			let tb_name_str_ref = tb_name.as_str();
+			let cond = parse_filter_arg(args, &fds, tb_name_str_ref)?;
 
 			trace!("parsed order: {order:?}");
 			trace!("parsed filter: {cond:?}");
@@ -1380,7 +1383,7 @@ fn make_relation_field_resolver(
 
 			// Parse and combine user-supplied filter
 			if let Some(ref fds) = fds
-				&& let Some(user_cond) = parse_filter_arg(args, fds)?
+				&& let Some(user_cond) = parse_filter_arg(args, fds, relation_table.as_str())?
 			{
 				base_cond = Expr::Binary {
 					left: Box::new(base_cond),
@@ -1570,8 +1573,9 @@ fn filter_from_type(
 pub(super) fn cond_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
 	fds: &[FieldDefinition],
+	tb_name: &str,
 ) -> Result<Cond, GqlError> {
-	val_from_filter(filter, fds).map(Cond)
+	val_from_filter(filter, fds, tb_name).map(Cond)
 }
 
 /// Recursive filter-to-expression converter.
@@ -1582,6 +1586,7 @@ pub(super) fn cond_from_filter(
 fn val_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
 	fds: &[FieldDefinition],
+	tb_name: &str,
 ) -> Result<Expr, GqlError> {
 	if filter.is_empty() {
 		return Err(resolver_error("Table filter must have at least one item"));
@@ -1592,10 +1597,10 @@ fn val_from_filter(
 		let (k, v) = filter.iter().next().expect("filter has exactly one item");
 
 		return match k.as_str().to_lowercase().as_str() {
-			"or" => aggregate(v, AggregateOp::Or, fds),
-			"and" => aggregate(v, AggregateOp::And, fds),
-			"not" => negate(v, fds),
-			_ => binop(k.as_str(), v, fds),
+			"or" => aggregate(v, AggregateOp::Or, fds, tb_name),
+			"and" => aggregate(v, AggregateOp::And, fds, tb_name),
+			"not" => negate(v, fds, tb_name),
+			_ => binop(k.as_str(), v, fds, tb_name),
 		};
 	}
 
@@ -1605,10 +1610,10 @@ fn val_from_filter(
 
 	for (k, v) in filter.iter() {
 		let expr = match k.as_str().to_lowercase().as_str() {
-			"or" => aggregate(v, AggregateOp::Or, fds)?,
-			"and" => aggregate(v, AggregateOp::And, fds)?,
-			"not" => negate(v, fds)?,
-			_ => binop(k.as_str(), v, fds)?,
+			"or" => aggregate(v, AggregateOp::Or, fds, tb_name)?,
+			"and" => aggregate(v, AggregateOp::And, fds, tb_name)?,
+			"not" => negate(v, fds, tb_name)?,
+			_ => binop(k.as_str(), v, fds, tb_name)?,
 		};
 		exprs.push(expr);
 	}
@@ -1652,9 +1657,9 @@ fn parse_function_op(name: &str) -> Option<&'static str> {
 	}
 }
 
-fn negate(filter: &GqlValue, fds: &[FieldDefinition]) -> Result<Expr, GqlError> {
+fn negate(filter: &GqlValue, fds: &[FieldDefinition], tb_name: &str) -> Result<Expr, GqlError> {
 	let obj = filter.as_object().ok_or(resolver_error("Value of NOT must be object"))?;
-	let inner_cond = val_from_filter(obj, fds)?;
+	let inner_cond = val_from_filter(obj, fds, tb_name)?;
 
 	Ok(Expr::Prefix {
 		op: expr::PrefixOperator::Not,
@@ -1671,6 +1676,7 @@ fn aggregate(
 	filter: &GqlValue,
 	op: AggregateOp,
 	fds: &[FieldDefinition],
+	tb_name: &str,
 ) -> Result<Expr, GqlError> {
 	let op_str = match op {
 		AggregateOp::And => "AND",
@@ -1684,7 +1690,7 @@ fn aggregate(
 		filter.as_list().ok_or(resolver_error(format!("Value of {op_str} should be a list")))?;
 	let filter_arr = list
 		.iter()
-		.map(|v| v.as_object().map(|o| val_from_filter(o, fds)))
+		.map(|v| v.as_object().map(|o| val_from_filter(o, fds, tb_name)))
 		.collect::<Option<Result<Vec<Expr>, GqlError>>>()
 		.ok_or(resolver_error(format!("List of {op_str} should contain objects")))??;
 
@@ -1711,11 +1717,15 @@ fn aggregate(
 /// values.  Binary operators produce `field <op> value` expressions; function
 /// operators produce `fn(field, value)` calls.  Multiple operators on the
 /// same field are combined with AND.
-fn binop(field_name: &str, val: &GqlValue, fds: &[FieldDefinition]) -> Result<Expr, GqlError> {
+fn binop(
+	field_name: &str,
+	val: &GqlValue,
+	fds: &[FieldDefinition],
+	tb_name: &str,
+) -> Result<Expr, GqlError> {
 	let obj = val.as_object().ok_or(resolver_error("Field filter should be object"))?;
 
 	let Some(fd) = fds.iter().find(|fd| fd.name.to_sql() == field_name) else {
-		// Check if this is the `id` field (always present even if not in fds)
 		if field_name == "id" {
 			return binop_for_id(obj);
 		}
@@ -1726,8 +1736,8 @@ fn binop(field_name: &str, val: &GqlValue, fds: &[FieldDefinition]) -> Result<Ex
 		return Err(resolver_error("Field filter must have at least one operator"));
 	}
 
-	// Support multiple operators on the same field (implicit AND)
 	let field_kind = fd.field_kind.clone().unwrap_or_default();
+	let enum_scope = format!("{tb_name}_{field_name}");
 	let mut exprs = Vec::with_capacity(obj.len());
 
 	for (k, v) in obj.iter() {
@@ -1735,13 +1745,12 @@ fn binop(field_name: &str, val: &GqlValue, fds: &[FieldDefinition]) -> Result<Ex
 		let lhs = Expr::Idiom(Idiom::field(field_name.to_string()));
 
 		if let Some(binary_op) = parse_binary_op(op_name) {
-			// For `in` operator, the RHS is a list -- parse it as an array
 			let rhs_kind = if op_name == "in" {
 				Kind::Array(Box::new(field_kind.clone()), None)
 			} else {
 				field_kind.clone()
 			};
-			let rhs = gql_to_sql_kind(v, rhs_kind)?;
+			let rhs = gql_to_sql_kind_with_scope(v, rhs_kind, Some(&enum_scope))?;
 			exprs.push(Expr::Binary {
 				left: Box::new(lhs),
 				op: binary_op,
