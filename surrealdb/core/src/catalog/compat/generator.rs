@@ -1070,3 +1070,14 @@ fn test_v3_0_0_beta_3_remains_unchanged() {
 	let hash_str = hex::encode(hash);
 	assert_eq!(hash_str, "696a85c143d53c01f3f842ee45cc64e45e4d9c1251c99e083467d07db8c29805");
 }
+
+#[test]
+fn test_v3_0_0_remains_unchanged() {
+	use sha2::{Digest, Sha256};
+
+	// Read the v3_0_0.rs file, hash it and assert on the hash.
+	let v3_0_0 = include_bytes!("v3_0_0.rs");
+	let hash = Sha256::digest(v3_0_0);
+	let hash_str = hex::encode(hash);
+	assert_eq!(hash_str, "042aa56204bff3007e371be6968e9c684430556f32654b5cee7107a5c1677f4d");
+}
