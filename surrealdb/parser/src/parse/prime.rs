@@ -433,6 +433,10 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			let uuid = parser.parse_sync_push()?;
 			Ok(Expr::Uuid(uuid))
 		}
+		BaseTokenKind::DateTimeString => {
+			let uuid = parser.parse_sync_push()?;
+			Ok(Expr::DateTime(uuid))
+		}
 		T![IF] => {
 			let expr = parser.parse_push().await?;
 			Ok(Expr::If(expr))

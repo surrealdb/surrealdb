@@ -18,6 +18,7 @@ ast.workspace = true
 token.workspace = true
 
 bitflags.workspace = true
+chrono.workspace = true
 reblessive.workspace = true
 logos = { version = "0.16" }
 rust_decimal.workspace = true
