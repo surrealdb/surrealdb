@@ -27,6 +27,7 @@ defaults:
 
 permissions:
   contents: read
+  checks: write
 
 jobs:
   # ----------------------------------------
@@ -621,10 +622,22 @@ jobs:
         run: bun install
 
       - name: Run JavaScript tests (${{ matrix.protocol }})
-        run: bun test --timeout 10000
+        run: bun test --timeout 10000 --reporter=junit --reporter-outfile=junit.xml
         env:
           SURREAL_PROTOCOL: ${{ matrix.protocol }}
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
+
+      - name: Publish Test Report
+        uses: mikepenz/action-junit-report@v6
+        if: success() || failure()
+        with:
+          report_paths: junit.xml
+          check_name: JS SDK Test Report (${{ matrix.version }} / ${{ matrix.protocol }})
+          detailed_summary: true
+          include_passed: false
+          include_skipped: false
+          group_suite: true
+          skip_success_summary: true
 
   sdk-golang:
     name: SDK - Golang (${{ matrix.version }}, ${{ matrix.protocol }})
