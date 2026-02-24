@@ -30,6 +30,11 @@ fn walk_dir<F: FnMut(&Path)>(path: &Path, f: &mut F) {
 	}
 }
 
+/// Text tests, implements a small language-test like testing suite where we test the parser
+/// against a text representation of the AST if the query parsed successfully and otherwise against
+/// the text formatted error.
+///
+/// The actual tests can be found in the `files` directory.
 #[test]
 fn text_test() {
 	let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join("test").join("files");

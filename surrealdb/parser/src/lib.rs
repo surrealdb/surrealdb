@@ -1,6 +1,6 @@
 //! # Surrealdb parser
 //!
-//! This crate is the internal library of SurrealDB. It contains a implemention of a surrealql
+//! This crate is the internal library of SurrealDB. It contains a implemention of the surrealql
 //! parser
 //!
 //! <section class="warning">
