@@ -791,14 +791,14 @@ pub enum BaseTokenKind {
 	#[regex(r#""([^"\\]|\\.)*""#)]
 	#[regex(r#"'([^'\\]|\\.)*'"#)]
 	String,
-	#[regex(r#"r"([^"\\]|\\")*""#)]
-	#[regex(r#"r'([^'\\]|\\')*'"#)]
+	#[regex(r#"r"([^"\\]|\\.)*""#)]
+	#[regex(r#"r'([^'\\]|\\.)*'"#)]
 	RecordIdString,
-	#[regex(r#"u"([^"\\]|\\")*""#)]
-	#[regex(r#"u'([^'\\]|\\')*'"#)]
+	#[regex(r#"u"([^"\\]|\\.)*""#)]
+	#[regex(r#"u'([^'\\]|\\.)*'"#)]
 	UuidString,
-	#[regex(r#"d"([^"\\]|\\")*""#)]
-	#[regex(r#"d'([^'\\]|\\')*'"#)]
+	#[regex(r#"d"([^"\\]|\\.)*""#)]
+	#[regex(r#"d'([^'\\]|\\.)*'"#)]
 	DateTimeString,
 
 	#[regex(r"\$(?&backtick_ident)")]

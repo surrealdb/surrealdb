@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use ast::PathSegment;
+use common::source_error::{AnnotationKind, Level};
 use rust_decimal::Decimal;
 use token::{BaseTokenKind, T};
 
@@ -92,6 +93,38 @@ impl ParseSync for ast::Path {
 			start,
 			parts,
 			span: parser.span_since(span),
+		})
+	}
+}
+
+impl ParseSync for ast::Integer {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let token = parser.expect(BaseTokenKind::Int)?;
+		let slice = parser.slice(token.span);
+		let Ok(x) = slice.parse() else {
+			return Err(parser.with_error(|parser| {
+				Level::Error
+					.title("Integer too large to fit in target type")
+					.snippet(parser.snippet().annotate(AnnotationKind::Primary.span(token.span)))
+					.to_diagnostic()
+			}));
+		};
+
+		Ok(ast::Integer {
+			sign: ast::Sign::Plus,
+			value: x,
+			span: token.span,
+		})
+	}
+}
+
+impl ParseSync for ast::StringLit {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let token = parser.expect(BaseTokenKind::String)?;
+		let slice = parser.unescape_str_push(token)?;
+		Ok(ast::StringLit {
+			text: slice,
+			span: token.span,
 		})
 	}
 }

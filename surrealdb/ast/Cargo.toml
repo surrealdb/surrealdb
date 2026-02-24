@@ -15,6 +15,7 @@ categories.workspace = true
 [dependencies]
 common.workspace = true
 rust_decimal.workspace = true
+uuid.workspace = true
 
 [lints]
 workspace = true

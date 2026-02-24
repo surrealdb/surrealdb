@@ -9,8 +9,10 @@ use logos::Lexer;
 #[macro_use]
 mod mac;
 mod base;
+mod uuid;
+pub use uuid::UuidToken;
 mod version;
-pub use version::VersionTokenKind;
+pub use version::VersionToken;
 mod escaped;
 pub use escaped::EscapeTokenKind;
 

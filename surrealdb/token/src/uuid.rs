@@ -4,9 +4,9 @@ use crate::Joined;
 
 #[derive(Logos, Clone, Copy, PartialEq, Eq, Debug)]
 #[logos(extras = Joined)]
-pub enum VersionToken {
-	#[regex("[0-9]+")]
+pub enum UuidToken {
+	#[regex("[0-9a-fA-F]+")]
 	Digits,
-	#[token(".")]
-	Dot,
+	#[token("-")]
+	Dash,
 }

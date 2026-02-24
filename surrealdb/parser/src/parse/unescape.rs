@@ -1,4 +1,5 @@
-use common::source_error::{AnnotationKind, Level};
+use ast::NodeId;
+use common::source_error::{AnnotationKind, Level, Snippet};
 use common::span::Span;
 use logos::Logos;
 use token::{BaseTokenKind, EscapeTokenKind, Token};
@@ -36,12 +37,13 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		}
 	}
 
-	fn unescape_common<'a>(
-		&'a mut self,
+	pub fn unescape_common<'a>(
 		slice_span: Span,
 		unescape_source: &'a str,
+		full_source: &'a str,
+		buffer: &'a mut String,
 	) -> ParseResult<&'a str> {
-		self.unescape_buffer.clear();
+		buffer.clear();
 
 		let mut lexer = EscapeTokenKind::lexer(unescape_source);
 		let mut pending_span = 0..0;
@@ -51,7 +53,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				if pending_span.len() == unescape_source.len() {
 					return Ok(unescape_source);
 				}
-				self.unescape_buffer.push_str(&unescape_source[pending_span]);
+				buffer.push_str(&unescape_source[pending_span]);
 				break;
 			};
 
@@ -66,7 +68,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 						return Err(ParseError::diagnostic(
 							Level::Error
 								.title("Invalid escape sequence")
-								.snippet(self.snippet().annotate(
+								.snippet(Snippet::source(full_source).annotate(
 									AnnotationKind::Primary.span(slice_span.sub_span(span)),
 								))
 								.to_diagnostic()
@@ -80,19 +82,15 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 					pending_span.end = span.end;
 				}
 				x => {
-					self.unescape_buffer.push_str(&unescape_source[pending_span]);
+					buffer.push_str(&unescape_source[pending_span]);
 					pending_span = span.end..span.end;
-					if !Self::handle_escape(
-						&mut self.unescape_buffer,
-						&unescape_source[span.clone()],
-						x,
-					) {
+					if !Self::handle_escape(buffer, &unescape_source[span.clone()], x) {
 						let span = Span::from_usize_range(span)
 							.expect("Source to be shorter the u32::MAX");
 						return Err(ParseError::diagnostic(
 							Level::Error
 								.title("Invalid escape sequence")
-								.snippet(self.snippet().annotate(
+								.snippet(Snippet::source(full_source).annotate(
 									AnnotationKind::Primary.span(slice_span.sub_span(span)),
 								))
 								.to_diagnostic()
@@ -103,7 +101,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			}
 		}
 
-		Ok(&self.unescape_buffer)
+		Ok(buffer.as_str())
 	}
 
 	fn handle_escape(buffer: &mut String, slice: &str, token: EscapeTokenKind) -> bool {
@@ -162,10 +160,10 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 							char += (x - b'0') as u32;
 						}
 						x @ b'A'..=b'F' => {
-							char += (x - b'A') as u32;
+							char += (x - b'A' + 10) as u32;
 						}
 						x @ b'a'..=b'f' => {
-							char += (x - b'a') as u32;
+							char += (x - b'a' + 10) as u32;
 						}
 						_ => unreachable!(),
 					}
@@ -192,7 +190,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		slice_span.start += start_offset as u32;
 		slice_span.end -= end_offset as u32;
 
-		self.unescape_common(slice_span, slice)
+		Self::unescape_common(slice_span, slice, self.source(), &mut self.unescape_buffer)
 	}
 
 	fn unescape_backtick_ident<'a>(
@@ -206,7 +204,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		slice_span.start += start_offset as u32;
 		slice_span.end -= end_offset as u32;
 
-		self.unescape_common(slice_span, slice)
+		Self::unescape_common(slice_span, slice, self.source(), &mut self.unescape_buffer)
 	}
 
 	pub fn unescape_str<'a>(&'a mut self, token: Token) -> ParseResult<&'a str> {
@@ -224,6 +222,84 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		slice_span.start += start_offset as u32;
 		slice_span.end -= end_offset as u32;
 
-		self.unescape_common(slice_span, slice)
+		Self::unescape_common(slice_span, slice, self.source(), &mut self.unescape_buffer)
+	}
+
+	pub fn unescape_str_push<'a>(&'a mut self, token: Token) -> ParseResult<NodeId<String>> {
+		let str = self.unescape_str(token)?;
+		let s = str.to_string();
+		Ok(self.ast.push_set(s))
+	}
+
+	/// Returns the offset in the unescaped_str for an offset derived from the escaped version of
+	/// the unescaped string.
+	///
+	/// For example `escape_str_offset("\\u{21}a",1)` will return `6` because `\u{21}` results in a
+	/// single escaped character.
+	pub fn escape_str_offset(unescaped_str: &str, offset: u32) -> u32 {
+		let mut lexer = EscapeTokenKind::lexer(unescaped_str);
+
+		let mut offset_idx = 0;
+		loop {
+			if offset_idx >= offset {
+				return lexer.span().end as u32;
+			}
+
+			let Some(t) = lexer.next() else {
+				break;
+			};
+
+			let t = t.expect("string should have already been checked to be correct");
+			match t {
+				EscapeTokenKind::EscNewline
+				| EscapeTokenKind::EscCarriageReturn
+				| EscapeTokenKind::EscTab
+				| EscapeTokenKind::EscZeroByte
+				| EscapeTokenKind::EscBackSlash
+				| EscapeTokenKind::EscBackSpace
+				| EscapeTokenKind::EscFormFeed
+				| EscapeTokenKind::EscQuote
+				| EscapeTokenKind::EscDoubleQuote
+				| EscapeTokenKind::EscBackTick => {
+					offset_idx += 1;
+				}
+				EscapeTokenKind::EscBracketClose => {
+					offset_idx += const { '⟩'.len_utf8() } as u32;
+				}
+				EscapeTokenKind::EscUnicode => {
+					let mut char = 0u32;
+					let slice = lexer.slice();
+					let slice = &slice["\\u{".len()..(slice.len() - 1)];
+					for c in slice.as_bytes() {
+						match c {
+							b'0'..=b'9' => {
+								char *= 10;
+								char += (c - b'0') as u32
+							}
+							b'a'..=b'f' => {
+								char *= 10;
+								char += (c - b'a' + 10) as u32
+							}
+							b'A'..=b'F' => {
+								char *= 10;
+								char += (c - b'a' + 10) as u32
+							}
+							_ => unreachable!(),
+						}
+					}
+
+					offset_idx += char::from_u32(char).unwrap().len_utf8() as u32;
+				}
+				EscapeTokenKind::Chars => {
+					let slice = lexer.span();
+					if offset_idx + slice.len() as u32 >= offset {
+						return ((slice.start as u32) + (offset - offset_idx)) as u32;
+					}
+					offset_idx += slice.len() as u32;
+				}
+			}
+		}
+
+		lexer.span().end as u32
 	}
 }

@@ -4,7 +4,7 @@ use common::span::Span;
 use token::{BaseTokenKind, T};
 
 use crate::Parse;
-use crate::parse::{ParseResult, Parser};
+use crate::parse::{ParseError, ParseResult, Parser};
 
 impl Parse for ast::Array {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
@@ -32,6 +32,21 @@ impl Parse for ast::Array {
 	}
 }
 
+impl Parse for ast::Object {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Object> {
+		let start = parser.expect(BaseTokenKind::OpenBrace)?;
+		let peek = parser.peek_expect("an object key")?;
+		match peek.token {
+			BaseTokenKind::String | BaseTokenKind::Ident => {
+				let obj = parse_object_continue(parser, start.span).await?;
+				Ok(obj)
+			}
+			_ => return Err(parser.unexpected("an object key")),
+		}
+	}
+}
+
+/// Parse a prime expression that starts with `{`:
 pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 	let start = parser.expect(BaseTokenKind::OpenBrace)?;
 
@@ -55,14 +70,18 @@ pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 			return Ok(Expr::Object(obj));
 		}
 		T![;] => {
-			let _ = parser.next();
-			let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseBrace, start.span)?;
-			let span = parser.span_since(start.span);
-			let obj = parser.push(ast::Block {
-				exprs: None,
-				span,
-			});
-			return Ok(Expr::Block(obj));
+			while parser.eat(T![;])?.is_some() {}
+
+			if parser.eat(BaseTokenKind::CloseBrace)?.is_some() {
+				let span = parser.span_since(start.span);
+				let obj = parser.push(ast::Block {
+					exprs: None,
+					span,
+				});
+				return Ok(Expr::Block(obj));
+			} else {
+				parser.parse_enter::<Expr>().await?
+			}
 		}
 		T![,] => {
 			let _ = parser.next();
@@ -84,7 +103,6 @@ pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 	let token = parser.peek_expect("`}`")?;
 	match token.token {
 		T![;] => {
-			let _ = parser.next();
 			loop {
 				while parser.eat(T![;])?.is_some() {}
 
@@ -303,22 +321,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			Ok(Expr::Builtin(builtin))
 		}
 		BaseTokenKind::Int => {
-			let _ = parser.next();
-			let slice = parser.slice(peek.span);
-			let Ok(x) = slice.parse() else {
-				return Err(parser.with_error(|parser| {
-					Level::Error
-						.title("Integer too large to fit in target type")
-						.snippet(parser.snippet().annotate(AnnotationKind::Primary.span(peek.span)))
-						.to_diagnostic()
-				}));
-			};
-
-			let value = parser.push(Integer {
-				sign: Sign::Plus,
-				value: x,
-				span: peek.span,
-			});
+			let value = parser.parse_sync_push()?;
 			Ok(Expr::Integer(value))
 		}
 		BaseTokenKind::Float => {
@@ -394,6 +397,42 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, peek.span)?;
 			Ok(Expr::Covered(expr))
 		}
+		BaseTokenKind::String => Ok(Expr::String(parser.parse_sync_push()?)),
+		BaseTokenKind::RecordIdString => {
+			let _ = parser.next()?;
+			// TODO: Remove `to_owned` call.
+			let str = parser.unescape_str(peek)?.to_owned();
+			match parser.sub_parse::<ast::RecordId>(&str).await {
+				Ok(x) => {
+					let p = parser.push(x);
+					Ok(Expr::RecordId(p))
+				}
+				Err(mut e) => {
+					if let Some(e) = e.as_mut_diagnostic() {
+						// remove the first 2 `r"` characters to get the unescaped string that was
+						// used for parsing.
+						let slice = &parser.slice(peek.span)[2..];
+						e.map_source(
+							|s| *s = parser.source().to_owned().into(),
+							|s| {
+								let range = s.to_range();
+								// +2 for the `r"` characters
+								let start = Parser::escape_str_offset(slice, range.start)
+									+ peek.span.start + 2;
+								let end = Parser::escape_str_offset(slice, range.end)
+									+ peek.span.start + 2;
+								*s = Span::from_range(start..end)
+							},
+						);
+					}
+					return Err(e);
+				}
+			}
+		}
+		BaseTokenKind::UuidString => {
+			let uuid = parser.parse_sync_push()?;
+			Ok(Expr::Uuid(uuid))
+		}
 		T![IF] => {
 			let expr = parser.parse_push().await?;
 			Ok(Expr::If(expr))
@@ -403,8 +442,15 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			Ok(Expr::Let(expr))
 		}
 		BaseTokenKind::Ident => {
-			let path = parser.parse_sync_push()?;
-			Ok(Expr::Path(path))
+			let peek1 = parser.peek1()?;
+
+			if peek1.map(|x| x.token) == Some(T![:]) {
+				let expr = parser.parse_push().await?;
+				Ok(Expr::RecordId(expr))
+			} else {
+				let path = parser.parse_sync_push()?;
+				Ok(Expr::Path(path))
+			}
 		}
 		BaseTokenKind::Param => {
 			let path = parser.parse_sync_push()?;
