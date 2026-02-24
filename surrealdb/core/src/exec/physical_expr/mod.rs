@@ -97,6 +97,12 @@ pub struct EvalContext<'a> {
 	/// evaluate dynamic key expressions (`[field]`, `[$param]`) against the
 	/// document rather than the chain's current position.
 	pub document_root: Option<&'a Value>,
+
+	/// When true, RecordId dereferences use raw fetch (no permission checks).
+	/// Set during permission predicate evaluation to prevent reentrant
+	/// permission checks that would otherwise recurse infinitely on cyclic
+	/// links with conditional table permissions.
+	pub skip_fetch_perms: bool,
 }
 
 impl<'a> EvalContext<'a> {
@@ -110,6 +116,7 @@ impl<'a> EvalContext<'a> {
 			local_params: None,
 			recursion_ctx: None,
 			document_root: None,
+			skip_fetch_perms: exec_ctx.root().skip_fetch_perms,
 		}
 	}
 
@@ -121,6 +128,7 @@ impl<'a> EvalContext<'a> {
 			local_params: self.local_params,
 			recursion_ctx: self.recursion_ctx.clone(),
 			document_root: self.document_root,
+			skip_fetch_perms: self.skip_fetch_perms,
 		}
 	}
 
@@ -134,6 +142,7 @@ impl<'a> EvalContext<'a> {
 			local_params: self.local_params,
 			recursion_ctx: self.recursion_ctx.clone(),
 			document_root: Some(value),
+			skip_fetch_perms: self.skip_fetch_perms,
 		}
 	}
 
@@ -145,6 +154,7 @@ impl<'a> EvalContext<'a> {
 			local_params: self.local_params,
 			recursion_ctx: Some(ctx),
 			document_root: self.document_root,
+			skip_fetch_perms: self.skip_fetch_perms,
 		}
 	}
 

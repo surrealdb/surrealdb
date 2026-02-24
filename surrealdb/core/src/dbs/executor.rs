@@ -235,6 +235,7 @@ impl Executor {
 			auth_enabled: self.opt.auth_enabled,
 			session: self.get_session_info(),
 			current_value: None,
+			skip_fetch_perms: false,
 		};
 
 		// Check what level of context we need

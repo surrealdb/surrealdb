@@ -7,7 +7,7 @@
 //! Failing either check indicates a backwards compatibility regression.
 
 use super::super::*;
-use super::{fixtures, v3_0_0_beta_1, v3_0_0_beta_3};
+use super::{fixtures, v3_0_0, v3_0_0_beta_1, v3_0_0_beta_3};
 use crate::cf::TableMutations;
 use crate::dbs::node::Node;
 use crate::idx::ft::fulltext::{DocLengthAndCount, TermDocument};
@@ -102,14 +102,14 @@ compat_test!(
 	NamespaceDefinition,
 	NAMESPACE_BASIC,
 	fixtures::namespace_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	namespace_with_comment,
 	NamespaceDefinition,
 	NAMESPACE_WITH_COMMENT,
 	fixtures::namespace_with_comment(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // DatabaseDefinition
@@ -118,21 +118,21 @@ compat_test!(
 	DatabaseDefinition,
 	DATABASE_BASIC,
 	fixtures::database_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	database_with_changefeed,
 	DatabaseDefinition,
 	DATABASE_WITH_CHANGEFEED,
 	fixtures::database_with_changefeed(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	database_strict,
 	DatabaseDefinition,
 	DATABASE_STRICT,
 	fixtures::database_strict(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // TableDefinition
@@ -141,22 +141,31 @@ compat_test!(
 	TableDefinition,
 	TABLE_BASIC,
 	fixtures::table_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	table_with_view,
 	TableDefinition,
 	TABLE_WITH_VIEW,
 	fixtures::table_with_view(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	table_schemafull,
 	TableDefinition,
 	TABLE_SCHEMAFULL,
 	fixtures::table_schemafull(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
+compat_test!(table_relation, TableDefinition, TABLE_RELATION, fixtures::table_relation(), [v3_0_0]);
+compat_test!(
+	table_with_materialized_view,
+	TableDefinition,
+	TABLE_WITH_MATERIALIZED_VIEW,
+	fixtures::table_with_materialized_view(),
+	[v3_0_0]
+);
+compat_test!(table_any_type, TableDefinition, TABLE_ANY_TYPE, fixtures::table_any_type(), [v3_0_0]);
 
 // SubscriptionDefinition
 compat_test!(
@@ -164,14 +173,21 @@ compat_test!(
 	SubscriptionDefinition,
 	SUBSCRIPTION_BASIC,
 	fixtures::subscription_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	subscription_with_filters,
 	SubscriptionDefinition,
 	SUBSCRIPTION_WITH_FILTERS,
 	fixtures::subscription_with_filters(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
+);
+compat_test!(
+	subscription_with_vars,
+	SubscriptionDefinition,
+	SUBSCRIPTION_WITH_VARS,
+	fixtures::subscription_with_vars(),
+	[v3_0_0]
 );
 
 // AccessDefinition
@@ -180,14 +196,29 @@ compat_test!(
 	AccessDefinition,
 	ACCESS_BEARER,
 	fixtures::access_bearer(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	access_with_authenticate,
 	AccessDefinition,
 	ACCESS_WITH_AUTHENTICATE,
 	fixtures::access_with_authenticate(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
+);
+compat_test!(access_record, AccessDefinition, ACCESS_RECORD, fixtures::access_record(), [v3_0_0]);
+compat_test!(
+	access_jwt_jwks,
+	AccessDefinition,
+	ACCESS_JWT_JWKS,
+	fixtures::access_jwt_jwks(),
+	[v3_0_0]
+);
+compat_test!(
+	access_bearer_refresh,
+	AccessDefinition,
+	ACCESS_BEARER_REFRESH,
+	fixtures::access_bearer_refresh(),
+	[v3_0_0]
 );
 
 // AccessGrant
@@ -196,15 +227,17 @@ compat_test!(
 	AccessGrant,
 	GRANT_JWT,
 	fixtures::grant_jwt(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	grant_revoked,
 	AccessGrant,
 	GRANT_REVOKED,
 	fixtures::grant_revoked(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
+compat_test!(grant_record, AccessGrant, GRANT_RECORD, fixtures::grant_record(), [v3_0_0]);
+compat_test!(grant_bearer, AccessGrant, GRANT_BEARER, fixtures::grant_bearer(), [v3_0_0]);
 
 // AnalyzerDefinition
 compat_test!(
@@ -212,14 +245,14 @@ compat_test!(
 	AnalyzerDefinition,
 	ANALYZER_BASIC,
 	fixtures::analyzer_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	analyzer_with_tokenizers,
 	AnalyzerDefinition,
 	ANALYZER_WITH_TOKENIZERS,
 	fixtures::analyzer_with_tokenizers(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // ApiDefinition
@@ -228,14 +261,21 @@ compat_test!(
 	ApiDefinition,
 	API_BASIC,
 	fixtures::api_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	api_with_middleware,
 	ApiDefinition,
 	API_WITH_MIDDLEWARE,
 	fixtures::api_with_middleware(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
+);
+compat_test!(
+	api_with_auth_limit,
+	ApiDefinition,
+	API_WITH_AUTH_LIMIT,
+	fixtures::api_with_auth_limit(),
+	[v3_0_0]
 );
 
 // BucketDefinition
@@ -244,14 +284,14 @@ compat_test!(
 	BucketDefinition,
 	BUCKET_BASIC,
 	fixtures::bucket_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	bucket_readonly,
 	BucketDefinition,
 	BUCKET_READONLY,
 	fixtures::bucket_readonly(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // ConfigDefinition
@@ -260,7 +300,22 @@ compat_test!(
 	ConfigDefinition,
 	CONFIG_GRAPHQL,
 	fixtures::config_graphql(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
+);
+compat_test!(
+	config_default,
+	ConfigDefinition,
+	CONFIG_DEFAULT,
+	fixtures::config_default(),
+	[v3_0_0]
+);
+compat_test!(config_api, ConfigDefinition, CONFIG_API, fixtures::config_api(), [v3_0_0]);
+compat_test!(
+	config_graphql_full,
+	ConfigDefinition,
+	CONFIG_GRAPHQL_FULL,
+	fixtures::config_graphql_full(),
+	[v3_0_0]
 );
 
 // EventDefinition
@@ -269,8 +324,9 @@ compat_test!(
 	EventDefinition,
 	EVENT_BASIC,
 	fixtures::event_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
+compat_test!(event_async, EventDefinition, EVENT_ASYNC, fixtures::event_async(), [v3_0_0]);
 
 // FieldDefinition
 compat_test!(
@@ -278,21 +334,42 @@ compat_test!(
 	FieldDefinition,
 	FIELD_BASIC,
 	fixtures::field_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	field_with_type,
 	FieldDefinition,
 	FIELD_WITH_TYPE,
 	fixtures::field_with_type(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	field_readonly,
 	FieldDefinition,
 	FIELD_READONLY,
 	fixtures::field_readonly(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
+);
+compat_test!(
+	field_flexible_with_reference,
+	FieldDefinition,
+	FIELD_FLEXIBLE_WITH_REFERENCE,
+	fixtures::field_flexible_with_reference(),
+	[v3_0_0]
+);
+compat_test!(
+	field_with_default_set,
+	FieldDefinition,
+	FIELD_WITH_DEFAULT_SET,
+	fixtures::field_with_default_set(),
+	[v3_0_0]
+);
+compat_test!(
+	field_record_type,
+	FieldDefinition,
+	FIELD_RECORD_TYPE,
+	fixtures::field_record_type(),
+	[v3_0_0]
 );
 
 // FunctionDefinition
@@ -301,14 +378,14 @@ compat_test!(
 	FunctionDefinition,
 	FUNCTION_BASIC,
 	fixtures::function_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	function_with_args,
 	FunctionDefinition,
 	FUNCTION_WITH_ARGS,
 	fixtures::function_with_args(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // IndexDefinition
@@ -317,15 +394,18 @@ compat_test!(
 	IndexDefinition,
 	INDEX_BASIC,
 	fixtures::index_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	index_unique,
 	IndexDefinition,
 	INDEX_UNIQUE,
 	fixtures::index_unique(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
+compat_test!(index_hnsw, IndexDefinition, INDEX_HNSW, fixtures::index_hnsw(), [v3_0_0]);
+compat_test!(index_fulltext, IndexDefinition, INDEX_FULLTEXT, fixtures::index_fulltext(), [v3_0_0]);
+compat_test!(index_count, IndexDefinition, INDEX_COUNT, fixtures::index_count(), [v3_0_0]);
 
 // MlModelDefinition
 compat_test!(
@@ -333,7 +413,7 @@ compat_test!(
 	MlModelDefinition,
 	MODEL_BASIC,
 	fixtures::model_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // ParamDefinition
@@ -342,14 +422,14 @@ compat_test!(
 	ParamDefinition,
 	PARAM_BOOL,
 	fixtures::param_bool(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	param_string,
 	ParamDefinition,
 	PARAM_STRING,
 	fixtures::param_string(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // SequenceDefinition
@@ -358,14 +438,14 @@ compat_test!(
 	SequenceDefinition,
 	SEQUENCE_BASIC,
 	fixtures::sequence_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	sequence_with_options,
 	SequenceDefinition,
 	SEQUENCE_WITH_OPTIONS,
 	fixtures::sequence_with_options(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // UserDefinition
@@ -374,15 +454,16 @@ compat_test!(
 	UserDefinition,
 	USER_BASIC,
 	fixtures::user_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	user_with_durations,
 	UserDefinition,
 	USER_WITH_DURATIONS,
 	fixtures::user_with_durations(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
+compat_test!(user_db_base, UserDefinition, USER_DB_BASE, fixtures::user_db_base(), [v3_0_0]);
 
 // Record
 compat_test!(
@@ -390,196 +471,203 @@ compat_test!(
 	Record,
 	RECORD_NONE,
 	fixtures::record_none(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_null,
 	Record,
 	RECORD_NULL,
 	fixtures::record_null(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_bool,
 	Record,
 	RECORD_BOOL,
 	fixtures::record_bool(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_number_int,
 	Record,
 	RECORD_NUMBER_INT,
 	fixtures::record_number_int(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_number_float,
 	Record,
 	RECORD_NUMBER_FLOAT,
 	fixtures::record_number_float(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_number_decimal,
 	Record,
 	RECORD_NUMBER_DECIMAL,
 	fixtures::record_number_decimal(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_string,
 	Record,
 	RECORD_STRING,
 	fixtures::record_string(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_bytes,
 	Record,
 	RECORD_BYTES,
 	fixtures::record_bytes(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_duration,
 	Record,
 	RECORD_DURATION,
 	fixtures::record_duration(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_datetime,
 	Record,
 	RECORD_DATETIME,
 	fixtures::record_datetime(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_uuid,
 	Record,
 	RECORD_UUID,
 	fixtures::record_uuid(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_geometry_point,
 	Record,
 	RECORD_GEOMETRY_POINT,
 	fixtures::record_geometry_point(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_geometry_line,
 	Record,
 	RECORD_GEOMETRY_LINE,
 	fixtures::record_geometry_line(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_geometry_polygon,
 	Record,
 	RECORD_GEOMETRY_POLYGON,
 	fixtures::record_geometry_polygon(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_geometry_multi_point,
 	Record,
 	RECORD_GEOMETRY_MULTI_POINT,
 	fixtures::record_geometry_multi_point(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_geometry_multi_line,
 	Record,
 	RECORD_GEOMETRY_MULTI_LINE,
 	fixtures::record_geometry_multi_line(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_geometry_multi_polygon,
 	Record,
 	RECORD_GEOMETRY_MULTI_POLYGON,
 	fixtures::record_geometry_multi_polygon(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_geometry_collection,
 	Record,
 	RECORD_GEOMETRY_COLLECTION,
 	fixtures::record_geometry_collection(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_table,
 	Record,
 	RECORD_TABLE,
 	fixtures::record_table(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_recordid,
 	Record,
 	RECORD_RECORDID,
 	fixtures::record_recordid(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_file,
 	Record,
 	RECORD_FILE,
 	fixtures::record_file(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_range_unbounded,
 	Record,
 	RECORD_RANGE_UNBOUNDED,
 	fixtures::record_range_unbounded(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_range_bounded,
 	Record,
 	RECORD_RANGE_BOUNDED,
 	fixtures::record_range_bounded(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_regex,
 	Record,
 	RECORD_REGEX,
 	fixtures::record_regex(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_array,
 	Record,
 	RECORD_ARRAY,
 	fixtures::record_array(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_object,
 	Record,
 	RECORD_OBJECT,
 	fixtures::record_object(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_set,
 	Record,
 	RECORD_SET,
 	fixtures::record_set(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	record_with_metadata,
 	Record,
 	RECORD_WITH_METADATA,
 	fixtures::record_with_metadata(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
+);
+compat_test!(
+	record_with_table_metadata,
+	Record,
+	RECORD_WITH_TABLE_METADATA,
+	fixtures::record_with_table_metadata(),
+	[v3_0_0]
 );
 
 // MajorVersion
@@ -588,14 +676,14 @@ compat_test!(
 	MajorVersion,
 	VERSION_1,
 	fixtures::version_1(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	version_3,
 	MajorVersion,
 	VERSION_3,
 	fixtures::version_3(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // ApiActionDefinition
@@ -604,14 +692,14 @@ compat_test!(
 	ApiActionDefinition,
 	API_ACTION_BASIC,
 	fixtures::api_action_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	api_action_multi_method,
 	ApiActionDefinition,
 	API_ACTION_MULTI_METHOD,
 	fixtures::api_action_multi_method(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // Appending
@@ -620,28 +708,28 @@ compat_test!(
 	Appending,
 	APPENDING_NONE,
 	fixtures::appending_none(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	appending_old_values,
 	Appending,
 	APPENDING_OLD_VALUES,
 	fixtures::appending_old_values(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	appending_new_values,
 	Appending,
 	APPENDING_NEW_VALUES,
 	fixtures::appending_new_values(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	appending_both,
 	Appending,
 	APPENDING_BOTH,
 	fixtures::appending_both(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // DocLengthAndCount
@@ -650,7 +738,7 @@ compat_test!(
 	DocLengthAndCount,
 	DOC_LENGTH_AND_COUNT_BASIC,
 	fixtures::doc_length_and_count_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // PrimaryAppending
@@ -659,7 +747,7 @@ compat_test!(
 	PrimaryAppending,
 	PRIMARY_APPENDING_BASIC,
 	fixtures::primary_appending_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // BatchValue
@@ -668,7 +756,7 @@ compat_test!(
 	BatchValue,
 	BATCH_VALUE_BASIC,
 	fixtures::batch_value_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // SequenceState
@@ -677,7 +765,7 @@ compat_test!(
 	SequenceState,
 	SEQUENCE_STATE_BASIC,
 	fixtures::sequence_state_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // TaskLease
@@ -686,7 +774,7 @@ compat_test!(
 	TaskLease,
 	TASK_LEASE_BASIC,
 	fixtures::task_lease_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // IDs
@@ -695,28 +783,28 @@ compat_test!(
 	NamespaceId,
 	NAMESPACE_ID_BASIC,
 	fixtures::namespace_id_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	database_id_basic,
 	DatabaseId,
 	DATABASE_ID_BASIC,
 	fixtures::database_id_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	table_id_basic,
 	TableId,
 	TABLE_ID_BASIC,
 	fixtures::table_id_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	index_id_basic,
 	IndexId,
 	INDEX_ID_BASIC,
 	fixtures::index_id_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // ModuleDefinition
@@ -725,14 +813,21 @@ compat_test!(
 	ModuleDefinition,
 	MODULE_SURREALISM,
 	fixtures::module_surrealism(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	module_definition_silo,
 	ModuleDefinition,
 	MODULE_SILO,
 	fixtures::module_silo(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
+);
+compat_test!(
+	module_no_name,
+	ModuleDefinition,
+	MODULE_NO_NAME,
+	fixtures::module_no_name(),
+	[v3_0_0]
 );
 
 // NodeLiveQuery
@@ -741,7 +836,7 @@ compat_test!(
 	NodeLiveQuery,
 	NODE_LIVE_QUERY_BASIC,
 	fixtures::node_live_query_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // TableMutations
@@ -750,14 +845,35 @@ compat_test!(
 	TableMutations,
 	TABLE_MUTATIONS_SET,
 	fixtures::table_mutations_set(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	table_mutations_del,
 	TableMutations,
 	TABLE_MUTATIONS_DEL,
 	fixtures::table_mutations_del(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
+);
+compat_test!(
+	table_mutations_def,
+	TableMutations,
+	TABLE_MUTATIONS_DEF,
+	fixtures::table_mutations_def(),
+	[v3_0_0]
+);
+compat_test!(
+	table_mutations_set_with_diff,
+	TableMutations,
+	TABLE_MUTATIONS_SET_WITH_DIFF,
+	fixtures::table_mutations_set_with_diff(),
+	[v3_0_0]
+);
+compat_test!(
+	table_mutations_del_with_original,
+	TableMutations,
+	TABLE_MUTATIONS_DEL_WITH_ORIGINAL,
+	fixtures::table_mutations_del_with_original(),
+	[v3_0_0]
 );
 
 // Node
@@ -766,14 +882,14 @@ compat_test!(
 	Node,
 	NODE_ACTIVE,
 	fixtures::node_active(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	node_archived,
 	Node,
 	NODE_ARCHIVED,
 	fixtures::node_archived(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // RecordId
@@ -782,21 +898,21 @@ compat_test!(
 	RecordId,
 	RECORDID_NUMBER,
 	fixtures::recordid_number(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	recordid_string,
 	RecordId,
 	RECORDID_STRING,
 	fixtures::recordid_string(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	recordid_uuid,
 	RecordId,
 	RECORDID_UUID,
 	fixtures::recordid_uuid(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 
 // RecordIdKey
@@ -805,35 +921,42 @@ compat_test!(
 	RecordIdKey,
 	RECORDID_KEY_NUMBER,
 	fixtures::recordid_key_number(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	recordid_key_string,
 	RecordIdKey,
 	RECORDID_KEY_STRING,
 	fixtures::recordid_key_string(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	recordid_key_uuid,
 	RecordIdKey,
 	RECORDID_KEY_UUID,
 	fixtures::recordid_key_uuid(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	recordid_key_array,
 	RecordIdKey,
 	RECORDID_KEY_ARRAY,
 	fixtures::recordid_key_array(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );
 compat_test!(
 	recordid_key_object,
 	RecordIdKey,
 	RECORDID_KEY_OBJECT,
 	fixtures::recordid_key_object(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
+);
+compat_test!(
+	recordid_key_range,
+	RecordIdKey,
+	RECORDID_KEY_RANGE,
+	fixtures::recordid_key_range(),
+	[v3_0_0]
 );
 
 // TermDocument
@@ -842,5 +965,5 @@ compat_test!(
 	TermDocument,
 	TERM_DOCUMENT_BASIC,
 	fixtures::term_document_basic(),
-	[v3_0_0_beta_1, v3_0_0_beta_3]
+	[v3_0_0_beta_1, v3_0_0_beta_3, v3_0_0]
 );

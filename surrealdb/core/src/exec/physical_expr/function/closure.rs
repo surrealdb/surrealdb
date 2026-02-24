@@ -177,6 +177,7 @@ impl PhysicalExpr for ClosureCallExec {
 					local_params: Some(&local_params),
 					recursion_ctx: None,
 					document_root: None,
+					skip_fetch_perms: ctx.skip_fetch_perms,
 				};
 
 				let result = match block_expr.evaluate(eval_ctx).await {

@@ -58,11 +58,10 @@ mod tests {
 				},
 			}"
 		);
-		let none = Value::None;
-		match res.merge(none.clone()).unwrap_err().downcast() {
+		match res.merge(Value::NONE.clone()).unwrap_err().downcast() {
 			Ok(Error::InvalidMerge {
 				value,
-			}) => assert_eq!(value, none),
+			}) => assert_eq!(value, Value::NONE),
 			Ok(error) => panic!("unexpected error: {error:?}"),
 			Err(error) => panic!("unexpected error: {error:?}"),
 		}

@@ -57,6 +57,25 @@ pub(crate) fn get_legacy_context_with_param<'a>(
 }
 
 // ============================================================================
+// Legacy Compute
+// ============================================================================
+
+/// Execute an expression using the legacy `Expr::compute()` path.
+///
+/// This is the **single call site** for `Expr::compute()` in the streaming
+/// executor.  All operators that need legacy compute fallback should call this
+/// function rather than invoking `.compute()` directly.
+pub(crate) async fn legacy_compute(
+	expr: &Expr,
+	frozen: &FrozenContext,
+	opt: &crate::dbs::Options,
+	doc: Option<&crate::doc::CursorDoc>,
+) -> crate::expr::FlowResult<Value> {
+	let mut stack = TreeStack::new();
+	stack.enter(|stk| expr.compute(stk, frozen, opt, doc)).finish().await
+}
+
+// ============================================================================
 // Plan-or-Compute Evaluation
 // ============================================================================
 
@@ -80,8 +99,7 @@ pub(crate) async fn evaluate_expr(
 			}
 			let (opt, frozen) =
 				get_legacy_context(ctx).context("Legacy compute fallback context unavailable")?;
-			let mut stack = TreeStack::new();
-			stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await
+			legacy_compute(expr, &frozen, opt, None).await
 		}
 		Err(e) => Err(ControlFlow::Err(e.into())),
 	}
@@ -117,8 +135,31 @@ pub(crate) async fn evaluate_body_expr(
 			}
 			let (opt, frozen) = get_legacy_context_with_param(ctx, param_name, param_value)
 				.context("Legacy compute fallback context unavailable")?;
-			let mut stack = TreeStack::new();
-			stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await
+
+			if let Expr::Let(set_stmt) = expr {
+				if set_stmt.is_protected_set() {
+					return Err(Error::InvalidParam {
+						name: set_stmt.name.clone(),
+					}
+					.into());
+				}
+
+				let value = legacy_compute(&set_stmt.what, &frozen, opt, None).await?;
+
+				let value = if let Some(kind) = &set_stmt.kind {
+					value.coerce_to_kind(kind).map_err(|e| Error::SetCoerce {
+						name: set_stmt.name.clone(),
+						error: Box::new(e),
+					})?
+				} else {
+					value
+				};
+
+				*ctx = ctx.with_param(set_stmt.name.clone(), value);
+				Ok(Value::None)
+			} else {
+				legacy_compute(expr, &frozen, opt, None).await
+			}
 		}
 		Err(e) => Err(ControlFlow::Err(e.into())),
 	}

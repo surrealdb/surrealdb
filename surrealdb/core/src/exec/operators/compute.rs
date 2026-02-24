@@ -15,7 +15,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use crate::exec::parts::fetch_record_with_computed_fields;
 use crate::exec::{
 	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
 	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
@@ -163,8 +162,7 @@ async fn compute_batch(
 			Value::Object(o) => o.clone(),
 			Value::Geometry(geo) => geo.as_object(),
 			Value::RecordId(rid) => {
-				if let Value::Object(v) =
-					fetch_record_with_computed_fields(rid, eval_ctx.clone()).await?
+				if let Value::Object(v) = super::fetch::fetch_record(eval_ctx.exec_ctx, rid).await?
 				{
 					v
 				} else {

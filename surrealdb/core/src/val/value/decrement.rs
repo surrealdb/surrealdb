@@ -5,7 +5,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::expr::FlowResultExt as _;
 use crate::expr::part::Part;
-use crate::val::{Number, Value};
+use crate::val::{Duration, Error, Number, Value};
 
 impl Value {
 	/// Asynchronous method for decrementing a field in a `Value`
@@ -20,6 +20,15 @@ impl Value {
 		match self.get(stk, ctx, opt, None, path).await.catch_return()? {
 			Value::Number(v) => match val {
 				Value::Number(x) => self.set(stk, ctx, opt, path, Value::from(v - x)).await,
+				_ => Ok(()),
+			},
+			Value::Duration(v) => match val {
+				Value::Duration(x) => {
+					let Some(res) = v.0.checked_sub(x.0) else {
+						return Err(Error::ArithmeticNegativeOverflow(format!("{v} - {x}")).into());
+					};
+					self.set(stk, ctx, opt, path, Value::Duration(Duration(res))).await
+				}
 				_ => Ok(()),
 			},
 			Value::Array(v) => match val {
