@@ -16,7 +16,6 @@ use futures::StreamExt;
 use tracing::instrument;
 
 use crate::exec::field_path::{FieldPath, FieldPathPart};
-use crate::exec::parts::fetch_record_with_computed_fields;
 use crate::exec::{
 	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
 	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
@@ -240,9 +239,7 @@ impl ExecOperator for Project {
 							}
 							Value::RecordId(rid) => {
 								let fetched =
-									fetch_record_with_computed_fields(rid, eval_ctx.clone())
-										.await
-										.map_err(crate::expr::ControlFlow::Err)?;
+									super::fetch::fetch_record(eval_ctx.exec_ctx, rid).await?;
 								match fetched {
 									Value::Object(mut obj) => {
 										for field in fields.iter() {
@@ -663,11 +660,7 @@ async fn apply_projections(
 	let input_obj = match value {
 		Value::Object(obj) => obj.clone(),
 		Value::RecordId(rid) if has_all || has_includes => {
-			let eval_ctx = EvalContext::from_exec_ctx(ctx);
-			match fetch_record_with_computed_fields(rid, eval_ctx)
-				.await
-				.map_err(crate::expr::ControlFlow::Err)?
-			{
+			match super::fetch::fetch_record(ctx, rid).await? {
 				Value::Object(obj) => obj,
 				Value::None => return Ok(Value::None),
 				other => return Ok(other),

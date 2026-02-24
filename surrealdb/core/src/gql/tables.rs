@@ -52,7 +52,10 @@ use surrealdb_types::ToSql;
 
 use super::error::{GqlError, resolver_error};
 use super::relations::{RelationDirection, RelationInfo};
-use super::schema::{SchemaContext, gql_to_sql_kind, sql_value_to_gql_value};
+use super::schema::{
+	SchemaContext, gql_to_sql_kind, gql_to_sql_kind_with_scope, sql_value_to_gql_value,
+	sql_value_to_gql_value_with_kind,
+};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{FieldDefinition, TableDefinition};
 use crate::dbs::Session;
@@ -65,7 +68,7 @@ use crate::expr::{
 	LogicalPlan, Start, TopLevelExpr,
 };
 use crate::gql::error::internal_error;
-use crate::gql::schema::{geometry_gql_type_name, kind_to_type, unwrap_type};
+use crate::gql::schema::{geometry_gql_type_name, kind_to_type_with_enum_prefix, unwrap_type};
 use crate::gql::utils::{GqlValueUtils, execute_plan};
 use crate::kvs::Datastore;
 use crate::val::{Array as SurArray, Datetime, Object as SurObject, RecordId, TableName, Value};
@@ -207,10 +210,11 @@ fn parse_order_arg(args: &IndexMap<Name, GqlValue>) -> Result<Option<Ordering>, 
 fn parse_filter_arg(
 	args: &IndexMap<Name, GqlValue>,
 	fds: &[FieldDefinition],
+	tb_name: &str,
 ) -> Result<Option<Cond>, GqlError> {
 	let filter = args.get("filter").or_else(|| args.get("where"));
 	match filter {
-		Some(GqlValue::Object(o)) => Ok(Some(cond_from_filter(o, fds)?)),
+		Some(GqlValue::Object(o)) => Ok(Some(cond_from_filter(o, fds, tb_name)?)),
 		Some(f) => {
 			error!(
 				"Found filter {f}, which should be object and should have \
@@ -483,8 +487,9 @@ fn make_nested_object_type(
 		let Some(ref kind) = sf.kind else {
 			continue;
 		};
-		let fd_type = kind_to_type(kind.clone(), types, false)?;
-		let resolver = make_sub_field_resolver(sf.name.clone(), sf.kind.clone());
+		let enum_scope = format!("{type_name}_{}", sf.name);
+		let fd_type = kind_to_type_with_enum_prefix(kind.clone(), types, false, Some(&enum_scope))?;
+		let resolver = make_sub_field_resolver(sf.name.clone(), sf.kind.clone(), Some(enum_scope));
 		let mut field = Field::new(&sf.name, fd_type, resolver);
 		if let Some(ref comment) = sf.comment {
 			field = field.description(comment.clone());
@@ -502,10 +507,12 @@ fn make_nested_object_type(
 fn make_sub_field_resolver(
 	field_name: String,
 	kind: Option<Kind>,
+	enum_scope: Option<String>,
 ) -> impl for<'a> Fn(ResolverContext<'a>) -> FieldFuture<'a> + Send + Sync + 'static {
 	move |ctx: ResolverContext| {
 		let field_name = field_name.clone();
 		let field_kind = kind.clone();
+		let enum_scope = enum_scope.clone();
 		FieldFuture::new(async move {
 			let obj = ctx.parent_value.try_downcast_ref::<SurObject>()?;
 
@@ -538,8 +545,12 @@ fn make_sub_field_resolver(
 						Ok(Some(field_val))
 					}
 					v => {
-						let gql_val = sql_value_to_gql_value(v.clone())
-							.map_err(async_graphql::Error::from)?;
+						let gql_val = sql_value_to_gql_value_with_kind(
+							v.clone(),
+							field_kind.as_ref(),
+							enum_scope.as_deref(),
+						)
+						.map_err(async_graphql::Error::from)?;
 						Ok(Some(FieldValue::value(gql_val)))
 					}
 				},
@@ -703,7 +714,8 @@ fn make_table_list_field(
 			let limit = parse_limit_arg(args);
 			let version = parse_version_arg(args)?;
 			let order = parse_order_arg(args)?;
-			let cond = parse_filter_arg(args, &fds)?;
+			let tb_name_str_ref = tb_name.as_str();
+			let cond = parse_filter_arg(args, &fds, tb_name_str_ref)?;
 
 			trace!("parsed order: {order:?}");
 			trace!("parsed filter: {cond:?}");
@@ -914,7 +926,7 @@ fn build_table_type(
 		.field(Field::new(
 			"id",
 			TypeRef::named_nn(TypeRef::ID),
-			make_table_field_resolver("id", Some(Kind::Record(vec![tb_name.clone()]))),
+			make_table_field_resolver("id", Some(Kind::Record(vec![tb_name.clone()])), None),
 		))
 		.implement("record");
 
@@ -977,7 +989,8 @@ fn build_table_type(
 		}
 
 		// Handle regular fields
-		let fd_type = kind_to_type(kind.clone(), types, false)?;
+		let enum_scope = format!("{}_{}", tb_name_str, fd_name);
+		let fd_type = kind_to_type_with_enum_prefix(kind.clone(), types, false, Some(&enum_scope))?;
 		orderable = orderable.item(fd_name.to_string());
 
 		let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
@@ -986,8 +999,12 @@ fn build_table_type(
 			_ => false,
 		});
 		if !filter_already_exists {
-			let type_filter =
-				Type::InputObject(filter_from_type(kind.clone(), type_filter_name.clone(), types)?);
+			let type_filter = Type::InputObject(filter_from_type(
+				kind.clone(),
+				type_filter_name.clone(),
+				types,
+				Some(&enum_scope),
+			)?);
 			trace!("\n{type_filter:?}\n");
 			types.push(type_filter);
 		}
@@ -997,7 +1014,11 @@ fn build_table_type(
 			.field(Field::new(
 				fd.name.to_sql(),
 				fd_type,
-				make_table_field_resolver(fd_name.as_str(), fd.field_kind.clone()),
+				make_table_field_resolver(
+					fd_name.as_str(),
+					fd.field_kind.clone(),
+					Some(enum_scope),
+				),
 			))
 			.description(if let Some(ref c) = fd.comment {
 				c.clone()
@@ -1139,11 +1160,13 @@ pub async fn process_tbs(
 fn make_table_field_resolver(
 	fd_name: impl Into<String>,
 	kind: Option<Kind>,
+	enum_scope: Option<String>,
 ) -> impl for<'a> Fn(ResolverContext<'a>) -> FieldFuture<'a> + Send + Sync + 'static {
 	let fd_name = fd_name.into();
 	move |ctx: ResolverContext| {
 		let fd_name = fd_name.clone();
 		let field_kind = kind.clone();
+		let enum_scope = enum_scope.clone();
 		FieldFuture::new({
 			async move {
 				// ── Fast path: extract field from CachedRecord ──
@@ -1153,8 +1176,14 @@ fn make_table_field_resolver(
 				// memory. Extract the requested field directly instead of
 				// issuing a separate database query.
 				if let Ok(cached) = ctx.parent_value.try_downcast_ref::<CachedRecord>() {
-					return resolve_field_from_cached_record(&ctx, cached, &fd_name, &field_kind)
-						.await;
+					return resolve_field_from_cached_record(
+						&ctx,
+						cached,
+						&fd_name,
+						&field_kind,
+						enum_scope.as_deref(),
+					)
+					.await;
 				}
 
 				// ── Slow path: fetch field via database query ──
@@ -1175,7 +1204,15 @@ fn make_table_field_resolver(
 				// Build SELECT VALUE <field> FROM ONLY <record_id>
 				let stmt = select_field_from_record(&rid, &fd_name, &version);
 				let val = execute_select(ds, sess, stmt).await?;
-				resolve_field_value(&ctx, val, &fd_name, &field_kind, &version).await
+				resolve_field_value(
+					&ctx,
+					val,
+					&fd_name,
+					&field_kind,
+					&version,
+					enum_scope.as_deref(),
+				)
+				.await
 			}
 		})
 	}
@@ -1192,6 +1229,7 @@ async fn resolve_field_value(
 	fd_name: &str,
 	field_kind: &Option<Kind>,
 	version: &Option<Datetime>,
+	enum_scope: Option<&str>,
 ) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
 	match val {
 		Value::RecordId(target_rid) if fd_name != "id" => {
@@ -1236,7 +1274,8 @@ async fn resolve_field_value(
 		}
 		Value::None | Value::Null => Ok(None),
 		v => {
-			let out = sql_value_to_gql_value(v).map_err(async_graphql::Error::from)?;
+			let out = sql_value_to_gql_value_with_kind(v, field_kind.as_ref(), enum_scope)
+				.map_err(async_graphql::Error::from)?;
 			Ok(Some(FieldValue::value(out)))
 		}
 	}
@@ -1252,9 +1291,10 @@ async fn resolve_field_from_cached_record(
 	cached: &CachedRecord,
 	fd_name: &str,
 	field_kind: &Option<Kind>,
+	enum_scope: Option<&str>,
 ) -> Result<Option<FieldValue<'static>>, async_graphql::Error> {
 	let val = cached.data.get(fd_name).cloned().unwrap_or(Value::None);
-	resolve_field_value(ctx, val, fd_name, field_kind, &cached.version).await
+	resolve_field_value(ctx, val, fd_name, field_kind, &cached.version, enum_scope).await
 }
 
 /// Build a GraphQL field for a relation on a table type.
@@ -1343,7 +1383,7 @@ fn make_relation_field_resolver(
 
 			// Parse and combine user-supplied filter
 			if let Some(ref fds) = fds
-				&& let Some(user_cond) = parse_filter_arg(args, fds)?
+				&& let Some(user_cond) = parse_filter_arg(args, fds, relation_table.as_str())?
 			{
 				base_cond = Expr::Binary {
 					left: Box::new(base_cond),
@@ -1410,6 +1450,7 @@ fn filter_from_type(
 	kind: Kind,
 	filter_name: String,
 	types: &mut Vec<Type>,
+	enum_scope: Option<&str>,
 ) -> Result<InputObject, GqlError> {
 	// Normalise `option<record<T>>` (Kind::Either([None, Record([T])])) down to the
 	// inner record kind so filters are generated correctly with ID-based filtering.
@@ -1433,7 +1474,7 @@ fn filter_from_type(
 			)),
 			_ => TypeRef::named(TypeRef::ID),
 		},
-		k => unwrap_type(kind_to_type(k.clone(), types, true)?),
+		k => unwrap_type(kind_to_type_with_enum_prefix(k.clone(), types, true, enum_scope)?),
 	};
 
 	// All types get eq and ne
@@ -1532,8 +1573,9 @@ fn filter_from_type(
 pub(super) fn cond_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
 	fds: &[FieldDefinition],
+	tb_name: &str,
 ) -> Result<Cond, GqlError> {
-	val_from_filter(filter, fds).map(Cond)
+	val_from_filter(filter, fds, tb_name).map(Cond)
 }
 
 /// Recursive filter-to-expression converter.
@@ -1544,6 +1586,7 @@ pub(super) fn cond_from_filter(
 fn val_from_filter(
 	filter: &IndexMap<Name, GqlValue>,
 	fds: &[FieldDefinition],
+	tb_name: &str,
 ) -> Result<Expr, GqlError> {
 	if filter.is_empty() {
 		return Err(resolver_error("Table filter must have at least one item"));
@@ -1554,10 +1597,10 @@ fn val_from_filter(
 		let (k, v) = filter.iter().next().expect("filter has exactly one item");
 
 		return match k.as_str().to_lowercase().as_str() {
-			"or" => aggregate(v, AggregateOp::Or, fds),
-			"and" => aggregate(v, AggregateOp::And, fds),
-			"not" => negate(v, fds),
-			_ => binop(k.as_str(), v, fds),
+			"or" => aggregate(v, AggregateOp::Or, fds, tb_name),
+			"and" => aggregate(v, AggregateOp::And, fds, tb_name),
+			"not" => negate(v, fds, tb_name),
+			_ => binop(k.as_str(), v, fds, tb_name),
 		};
 	}
 
@@ -1567,10 +1610,10 @@ fn val_from_filter(
 
 	for (k, v) in filter.iter() {
 		let expr = match k.as_str().to_lowercase().as_str() {
-			"or" => aggregate(v, AggregateOp::Or, fds)?,
-			"and" => aggregate(v, AggregateOp::And, fds)?,
-			"not" => negate(v, fds)?,
-			_ => binop(k.as_str(), v, fds)?,
+			"or" => aggregate(v, AggregateOp::Or, fds, tb_name)?,
+			"and" => aggregate(v, AggregateOp::And, fds, tb_name)?,
+			"not" => negate(v, fds, tb_name)?,
+			_ => binop(k.as_str(), v, fds, tb_name)?,
 		};
 		exprs.push(expr);
 	}
@@ -1614,9 +1657,9 @@ fn parse_function_op(name: &str) -> Option<&'static str> {
 	}
 }
 
-fn negate(filter: &GqlValue, fds: &[FieldDefinition]) -> Result<Expr, GqlError> {
+fn negate(filter: &GqlValue, fds: &[FieldDefinition], tb_name: &str) -> Result<Expr, GqlError> {
 	let obj = filter.as_object().ok_or(resolver_error("Value of NOT must be object"))?;
-	let inner_cond = val_from_filter(obj, fds)?;
+	let inner_cond = val_from_filter(obj, fds, tb_name)?;
 
 	Ok(Expr::Prefix {
 		op: expr::PrefixOperator::Not,
@@ -1633,6 +1676,7 @@ fn aggregate(
 	filter: &GqlValue,
 	op: AggregateOp,
 	fds: &[FieldDefinition],
+	tb_name: &str,
 ) -> Result<Expr, GqlError> {
 	let op_str = match op {
 		AggregateOp::And => "AND",
@@ -1646,7 +1690,7 @@ fn aggregate(
 		filter.as_list().ok_or(resolver_error(format!("Value of {op_str} should be a list")))?;
 	let filter_arr = list
 		.iter()
-		.map(|v| v.as_object().map(|o| val_from_filter(o, fds)))
+		.map(|v| v.as_object().map(|o| val_from_filter(o, fds, tb_name)))
 		.collect::<Option<Result<Vec<Expr>, GqlError>>>()
 		.ok_or(resolver_error(format!("List of {op_str} should contain objects")))??;
 
@@ -1673,11 +1717,15 @@ fn aggregate(
 /// values.  Binary operators produce `field <op> value` expressions; function
 /// operators produce `fn(field, value)` calls.  Multiple operators on the
 /// same field are combined with AND.
-fn binop(field_name: &str, val: &GqlValue, fds: &[FieldDefinition]) -> Result<Expr, GqlError> {
+fn binop(
+	field_name: &str,
+	val: &GqlValue,
+	fds: &[FieldDefinition],
+	tb_name: &str,
+) -> Result<Expr, GqlError> {
 	let obj = val.as_object().ok_or(resolver_error("Field filter should be object"))?;
 
 	let Some(fd) = fds.iter().find(|fd| fd.name.to_sql() == field_name) else {
-		// Check if this is the `id` field (always present even if not in fds)
 		if field_name == "id" {
 			return binop_for_id(obj);
 		}
@@ -1688,8 +1736,8 @@ fn binop(field_name: &str, val: &GqlValue, fds: &[FieldDefinition]) -> Result<Ex
 		return Err(resolver_error("Field filter must have at least one operator"));
 	}
 
-	// Support multiple operators on the same field (implicit AND)
 	let field_kind = fd.field_kind.clone().unwrap_or_default();
+	let enum_scope = format!("{tb_name}_{field_name}");
 	let mut exprs = Vec::with_capacity(obj.len());
 
 	for (k, v) in obj.iter() {
@@ -1697,13 +1745,12 @@ fn binop(field_name: &str, val: &GqlValue, fds: &[FieldDefinition]) -> Result<Ex
 		let lhs = Expr::Idiom(Idiom::field(field_name.to_string()));
 
 		if let Some(binary_op) = parse_binary_op(op_name) {
-			// For `in` operator, the RHS is a list -- parse it as an array
 			let rhs_kind = if op_name == "in" {
 				Kind::Array(Box::new(field_kind.clone()), None)
 			} else {
 				field_kind.clone()
 			};
-			let rhs = gql_to_sql_kind(v, rhs_kind)?;
+			let rhs = gql_to_sql_kind_with_scope(v, rhs_kind, Some(&enum_scope))?;
 			exprs.push(Expr::Binary {
 				left: Box::new(lhs),
 				op: binary_op,

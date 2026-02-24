@@ -19,7 +19,7 @@ use rust_decimal::Decimal;
 use uuid::Uuid as UuidExt;
 
 use super::super::*;
-use crate::catalog::auth::AuthLimit;
+use crate::catalog::auth::{AuthLevel, AuthLimit};
 use crate::catalog::record::{Record, RecordType};
 use crate::catalog::schema::base::Base;
 use crate::catalog::{
@@ -29,9 +29,10 @@ use crate::catalog::{
 use crate::cf::mutations::{TableMutation, TableMutations};
 use crate::dbs::node::{Node, Timestamp};
 use crate::expr::field::Selector;
+use crate::expr::reference::{Reference, ReferenceDeleteStrategy};
 use crate::expr::{
-	Block, ChangeFeed, Expr, Fetch, Fetchs, Field, Fields, Filter, Groups, Idiom, Kind, Literal,
-	Tokenizer,
+	Block, ChangeFeed, Cond, Expr, Fetch, Fetchs, Field, Fields, Filter, Groups, Idiom, Kind,
+	Literal, Operation, Tokenizer,
 };
 use crate::iam::Auth;
 use crate::idx::ft::fulltext::{DocLengthAndCount, TermDocument};
@@ -42,7 +43,7 @@ use crate::kvs::tasklease::TaskLease;
 use crate::kvs::version::MajorVersion;
 use crate::val::{
 	Array, Bytes, Datetime, Duration as ValDuration, File, Geometry, Number, Object, Range,
-	RecordId, RecordIdKey, Regex, Set, TableName, Uuid, Value,
+	RecordId, RecordIdKey, RecordIdKeyRange, Regex, Set, TableName, Uuid, Value,
 };
 
 // ===========================================================================
@@ -191,6 +192,84 @@ pub fn table_schemafull() -> TableDefinition {
 	}
 }
 
+/// Relation table with drop and non-default permissions
+pub fn table_relation() -> TableDefinition {
+	TableDefinition {
+		namespace_id: NamespaceId(10),
+		database_id: DatabaseId(20),
+		table_id: TableId(30),
+		name: TableName::from("likes"),
+		drop: true,
+		schemafull: true,
+		view: None,
+		permissions: Permissions {
+			select: Permission::Full,
+			create: Permission::Specific(Expr::Literal(Literal::String(
+				"$auth.role = 'admin'".to_string(),
+			))),
+			update: Permission::None,
+			delete: Permission::None,
+		},
+		changefeed: None,
+		comment: Some("User likes relation".to_string()),
+		table_type: TableType::Relation(Relation {
+			from: vec!["users".to_string()],
+			to: vec!["posts".to_string(), "comments".to_string()],
+			enforced: true,
+		}),
+		cache_fields_ts: UuidExt::nil(),
+		cache_events_ts: UuidExt::nil(),
+		cache_tables_ts: UuidExt::nil(),
+		cache_indexes_ts: UuidExt::nil(),
+	}
+}
+
+/// Table with materialized view
+pub fn table_with_materialized_view() -> TableDefinition {
+	TableDefinition {
+		namespace_id: NamespaceId(1),
+		database_id: DatabaseId(1),
+		table_id: TableId(100),
+		name: TableName::from("active_users"),
+		drop: false,
+		schemafull: false,
+		view: Some(ViewDefinition::Materialized {
+			fields: Fields::Select(vec![Field::All]),
+			tables: vec![TableName::from("users")],
+			condition: Some(Expr::Literal(Literal::String("active = true".to_string()))),
+		}),
+		permissions: Permissions::default(),
+		changefeed: None,
+		comment: Some("Materialized view of active users".to_string()),
+		table_type: TableType::Normal,
+		cache_fields_ts: UuidExt::nil(),
+		cache_events_ts: UuidExt::nil(),
+		cache_tables_ts: UuidExt::nil(),
+		cache_indexes_ts: UuidExt::nil(),
+	}
+}
+
+/// Table with TableType::Any (default variant)
+pub fn table_any_type() -> TableDefinition {
+	TableDefinition {
+		namespace_id: NamespaceId(1),
+		database_id: DatabaseId(1),
+		table_id: TableId(50),
+		name: TableName::from("flexible"),
+		drop: false,
+		schemafull: false,
+		view: None,
+		permissions: Permissions::default(),
+		changefeed: None,
+		comment: None,
+		table_type: TableType::Any,
+		cache_fields_ts: UuidExt::nil(),
+		cache_events_ts: UuidExt::nil(),
+		cache_tables_ts: UuidExt::nil(),
+		cache_indexes_ts: UuidExt::nil(),
+	}
+}
+
 // ===========================================================================
 // SubscriptionDefinition fixtures
 // ===========================================================================
@@ -230,6 +309,24 @@ pub fn subscription_with_filters() -> SubscriptionDefinition {
 		auth: Some(Auth::default()),
 		session: Some(Value::default()),
 		vars: BTreeMap::new(),
+	}
+}
+
+/// Subscription with non-empty vars
+pub fn subscription_with_vars() -> SubscriptionDefinition {
+	let mut vars = BTreeMap::new();
+	vars.insert("user_id".to_string(), Value::String("user:123".to_string()));
+	vars.insert("threshold".to_string(), Value::Number(Number::Int(50)));
+	SubscriptionDefinition {
+		id: UuidExt::nil(),
+		node: UuidExt::nil(),
+		fields: SubscriptionFields::Diff,
+		what: Expr::Literal(Literal::String("orders".to_string())),
+		cond: Some(Expr::Literal(Literal::String("amount > $threshold".to_string()))),
+		fetch: None,
+		auth: Some(Auth::default()),
+		session: Some(Value::default()),
+		vars,
 	}
 }
 
@@ -290,6 +387,98 @@ pub fn access_with_authenticate() -> AccessDefinition {
 	}
 }
 
+/// Record-based access with signup/signin
+pub fn access_record() -> AccessDefinition {
+	AccessDefinition {
+		name: "user_access".to_string(),
+		access_type: AccessType::Record(RecordAccess {
+			signup: Some(Expr::Literal(Literal::String(
+				"CREATE user SET email = $email, pass = crypto::argon2::generate($pass)"
+					.to_string(),
+			))),
+			signin: Some(Expr::Literal(Literal::String(
+				"SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass)"
+					.to_string(),
+			))),
+			jwt: JwtAccess {
+				verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+					alg: Algorithm::Hs256,
+					key: "jwt_secret".to_string(),
+				}),
+				issue: Some(JwtAccessIssue {
+					alg: Algorithm::Hs256,
+					key: "jwt_secret".to_string(),
+				}),
+			},
+			bearer: Some(BearerAccess {
+				kind: BearerAccessType::Refresh,
+				subject: BearerAccessSubject::Record,
+				jwt: JwtAccess {
+					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+						alg: Algorithm::Hs256,
+						key: "refresh_secret".to_string(),
+					}),
+					issue: None,
+				},
+			}),
+		}),
+		base: Base::Db,
+		authenticate: Some(Expr::Literal(Literal::String(
+			"SELECT * FROM user WHERE id = $auth.id".to_string(),
+		))),
+		grant_duration: Some(Duration::from_secs(604800)),
+		token_duration: Some(Duration::from_secs(900)),
+		session_duration: Some(Duration::from_secs(86400)),
+		comment: Some("User record access".to_string()),
+	}
+}
+
+/// JWT access with JWKS verification
+pub fn access_jwt_jwks() -> AccessDefinition {
+	AccessDefinition {
+		name: "external_jwt".to_string(),
+		access_type: AccessType::Jwt(JwtAccess {
+			verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
+				url: "https://auth.example.com/.well-known/jwks.json".to_string(),
+			}),
+			issue: None,
+		}),
+		base: Base::Ns,
+		authenticate: None,
+		grant_duration: None,
+		token_duration: None,
+		session_duration: Some(Duration::from_secs(3600)),
+		comment: Some("External JWT verification via JWKS".to_string()),
+	}
+}
+
+/// Bearer access with refresh type
+pub fn access_bearer_refresh() -> AccessDefinition {
+	AccessDefinition {
+		name: "refresh_access".to_string(),
+		access_type: AccessType::Bearer(BearerAccess {
+			kind: BearerAccessType::Refresh,
+			subject: BearerAccessSubject::Record,
+			jwt: JwtAccess {
+				verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
+					alg: Algorithm::Rs256,
+					key: "rsa_public_key".to_string(),
+				}),
+				issue: Some(JwtAccessIssue {
+					alg: Algorithm::Rs256,
+					key: "rsa_private_key".to_string(),
+				}),
+			},
+		}),
+		base: Base::Root,
+		authenticate: None,
+		grant_duration: Some(Duration::from_secs(2592000)),
+		token_duration: Some(Duration::from_secs(300)),
+		session_duration: None,
+		comment: None,
+	}
+}
+
 // ===========================================================================
 // AccessGrant fixtures
 // ===========================================================================
@@ -322,6 +511,39 @@ pub fn grant_revoked() -> AccessGrant {
 		grant: Grant::Jwt(GrantJwt {
 			jti: UuidExt::nil(),
 			token: None,
+		}),
+	}
+}
+
+/// Record-type access grant with record subject
+pub fn grant_record() -> AccessGrant {
+	AccessGrant {
+		id: "grant_003".to_string(),
+		ac: "user_access".to_string(),
+		creation: Datetime::MIN_UTC,
+		expiration: Some(Datetime::MIN_UTC),
+		revocation: None,
+		subject: Subject::Record(RecordId::new(TableName::from("users"), 42)),
+		grant: Grant::Record(GrantRecord {
+			rid: UuidExt::nil(),
+			jti: UuidExt::nil(),
+			token: Some("eyJhbGciOiJIUzI1NiJ9.record_token".to_string()),
+		}),
+	}
+}
+
+/// Bearer-type access grant
+pub fn grant_bearer() -> AccessGrant {
+	AccessGrant {
+		id: "grant_004".to_string(),
+		ac: "refresh_access".to_string(),
+		creation: Datetime::MIN_UTC,
+		expiration: None,
+		revocation: None,
+		subject: Subject::User("service_account".to_string()),
+		grant: Grant::Bearer(GrantBearer {
+			id: "surreal-bearer-key-001".to_string(),
+			key: "surreal-bearer-xxxxxxxxxxxxxxxx".to_string(),
 		}),
 	}
 }
@@ -407,6 +629,37 @@ pub fn api_with_middleware() -> ApiDefinition {
 	}
 }
 
+/// API with specific permissions, database-level auth limit, and more HTTP methods
+pub fn api_with_auth_limit() -> ApiDefinition {
+	ApiDefinition {
+		path: "/api/v1/admin".parse().unwrap(),
+		actions: vec![
+			ApiActionDefinition {
+				methods: vec![ApiMethod::Get, ApiMethod::Put, ApiMethod::Patch],
+				action: Expr::Literal(Literal::String("SELECT * FROM admin_data".to_string())),
+				config: ApiConfigDefinition {
+					middleware: vec![],
+					permissions: Permission::Specific(Expr::Literal(Literal::String(
+						"$auth.role = 'admin'".to_string(),
+					))),
+				},
+			},
+			ApiActionDefinition {
+				methods: vec![ApiMethod::Delete, ApiMethod::Trace],
+				action: Expr::Literal(Literal::String("RETURN { status: 'ok' }".to_string())),
+				config: ApiConfigDefinition::default(),
+			},
+		],
+		fallback: None,
+		config: ApiConfigDefinition::default(),
+		comment: Some("Admin API with restricted access".to_string()),
+		auth_limit: AuthLimit::new(
+			AuthLevel::Database("prod_ns".to_string(), "prod_db".to_string()),
+			Some("Owner".to_string()),
+		),
+	}
+}
+
 // ===========================================================================
 // BucketDefinition fixtures
 // ===========================================================================
@@ -439,9 +692,44 @@ pub fn bucket_readonly() -> BucketDefinition {
 // ConfigDefinition fixtures
 // ===========================================================================
 
-/// GraphQL configuration
+/// GraphQL configuration (default)
 pub fn config_graphql() -> ConfigDefinition {
 	ConfigDefinition::GraphQL(GraphQLConfig::default())
+}
+
+/// Default config with namespace and database
+pub fn config_default() -> ConfigDefinition {
+	ConfigDefinition::Default(DefaultConfig {
+		namespace: Some("production".to_string()),
+		database: Some("main".to_string()),
+	})
+}
+
+/// API config definition
+pub fn config_api() -> ConfigDefinition {
+	ConfigDefinition::Api(ApiConfigDefinition {
+		middleware: vec![MiddlewareDefinition {
+			name: "cors".to_string(),
+			args: vec![Value::String("*".to_string())],
+		}],
+		permissions: Permission::Specific(Expr::Literal(Literal::String(
+			"$auth.role = 'admin'".to_string(),
+		))),
+	})
+}
+
+/// GraphQL config with all non-default fields populated
+pub fn config_graphql_full() -> ConfigDefinition {
+	ConfigDefinition::GraphQL(GraphQLConfig {
+		tables: GraphQLTablesConfig::Include(vec![
+			TableName::from("users"),
+			TableName::from("posts"),
+		]),
+		functions: GraphQLFunctionsConfig::Auto,
+		depth_limit: Some(10),
+		complexity_limit: Some(1000),
+		introspection: GraphQLIntrospectionConfig::None,
+	})
 }
 
 // ===========================================================================
@@ -460,6 +748,24 @@ pub fn event_basic() -> EventDefinition {
 		comment: Some("Audit log on create".to_string()),
 		auth_limit: AuthLimit::new_no_limit(),
 		kind: EventKind::Sync,
+	}
+}
+
+/// Async event with retry and max_depth
+pub fn event_async() -> EventDefinition {
+	EventDefinition {
+		name: "on_update_async".to_string(),
+		target_table: TableName::from("orders"),
+		when: Expr::Literal(Literal::String("$event = 'UPDATE'".to_string())),
+		then: vec![Expr::Literal(Literal::String(
+			"CREATE notification SET order = $after.id, type = 'updated'".to_string(),
+		))],
+		comment: Some("Async notification on order update".to_string()),
+		auth_limit: AuthLimit::new_no_limit(),
+		kind: EventKind::Async {
+			retry: 3,
+			max_depth: 5,
+		},
 	}
 }
 
@@ -533,6 +839,95 @@ pub fn field_readonly() -> FieldDefinition {
 	}
 }
 
+/// Flexible field with reference and computed deps
+pub fn field_flexible_with_reference() -> FieldDefinition {
+	FieldDefinition {
+		name: Idiom::from_str("total_price").unwrap(),
+		table: TableName::from("orders"),
+		field_kind: Some(Kind::Number),
+		readonly: false,
+		flexible: true,
+		value: Some(Expr::Literal(Literal::String("$price * $quantity".to_string()))),
+		assert: None,
+		computed: None,
+		default: DefineDefault::None,
+		select_permission: Permission::Full,
+		create_permission: Permission::Full,
+		update_permission: Permission::Specific(Expr::Literal(Literal::String(
+			"$auth.role = 'admin'".to_string(),
+		))),
+		comment: Some("Calculated total price".to_string()),
+		reference: Some(Reference {
+			on_delete: ReferenceDeleteStrategy::Cascade,
+		}),
+		auth_limit: AuthLimit::new_no_limit(),
+		computed_deps: Some(ComputedDeps {
+			fields: vec!["price".to_string(), "quantity".to_string()],
+			is_complete: true,
+		}),
+	}
+}
+
+/// Field with DefineDefault::Set, Permission::Specific, and incomplete computed deps
+pub fn field_with_default_set() -> FieldDefinition {
+	FieldDefinition {
+		name: Idiom::from_str("status").unwrap(),
+		table: TableName::from("orders"),
+		field_kind: Some(Kind::String),
+		readonly: false,
+		flexible: false,
+		value: None,
+		assert: Some(Expr::Literal(Literal::String(
+			"$value INSIDE ['pending', 'active', 'closed']".to_string(),
+		))),
+		computed: None,
+		default: DefineDefault::Set(Expr::Literal(Literal::String("'pending'".to_string()))),
+		select_permission: Permission::Full,
+		create_permission: Permission::Full,
+		update_permission: Permission::Specific(Expr::Literal(Literal::String(
+			"$auth.role = 'manager'".to_string(),
+		))),
+		comment: None,
+		reference: Some(Reference {
+			on_delete: ReferenceDeleteStrategy::Reject,
+		}),
+		auth_limit: AuthLimit::new_no_limit(),
+		computed_deps: Some(ComputedDeps {
+			fields: vec![],
+			is_complete: false,
+		}),
+	}
+}
+
+/// Field with record type kind and custom reference delete strategy
+pub fn field_record_type() -> FieldDefinition {
+	FieldDefinition {
+		name: Idiom::from_str("author").unwrap(),
+		table: TableName::from("posts"),
+		field_kind: Some(Kind::Record(vec![TableName::from("users")])),
+		readonly: true,
+		flexible: false,
+		value: None,
+		assert: None,
+		computed: None,
+		default: DefineDefault::None,
+		select_permission: Permission::Full,
+		create_permission: Permission::Full,
+		update_permission: Permission::None,
+		comment: Some("Author reference".to_string()),
+		reference: Some(Reference {
+			on_delete: ReferenceDeleteStrategy::Custom(Expr::Literal(Literal::String(
+				"DELETE $parent".to_string(),
+			))),
+		}),
+		auth_limit: AuthLimit::new(
+			AuthLevel::Database("test_ns".to_string(), "test_db".to_string()),
+			Some("Editor".to_string()),
+		),
+		computed_deps: None,
+	}
+}
+
 // ===========================================================================
 // FunctionDefinition fixtures
 // ===========================================================================
@@ -590,6 +985,65 @@ pub fn index_unique() -> IndexDefinition {
 		index: Index::Uniq,
 		comment: Some("Unique email constraint".to_string()),
 		prepare_remove: false,
+	}
+}
+
+/// HNSW vector index
+pub fn index_hnsw() -> IndexDefinition {
+	IndexDefinition {
+		index_id: IndexId(3),
+		name: "idx_embedding_hnsw".to_string(),
+		table_name: TableName::from("documents"),
+		cols: vec![Idiom::from_str("embedding").unwrap()],
+		index: Index::Hnsw(HnswParams {
+			dimension: 1536,
+			distance: Distance::Cosine,
+			vector_type: VectorType::F32,
+			m: 12,
+			m0: 24,
+			ml: Number::Float(1.0 / (12_f64).ln()),
+			ef_construction: 150,
+			extend_candidates: false,
+			keep_pruned_connections: true,
+			use_hashed_vector: false,
+		}),
+		comment: Some("Vector similarity search index".to_string()),
+		prepare_remove: false,
+	}
+}
+
+/// Full-text search index with BM25 scoring
+pub fn index_fulltext() -> IndexDefinition {
+	IndexDefinition {
+		index_id: IndexId(4),
+		name: "idx_content_search".to_string(),
+		table_name: TableName::from("articles"),
+		cols: vec![Idiom::from_str("title").unwrap(), Idiom::from_str("body").unwrap()],
+		index: Index::FullText(FullTextParams {
+			analyzer: "english".to_string(),
+			highlight: true,
+			scoring: Scoring::Bm {
+				k1: 1.2,
+				b: 0.75,
+			},
+		}),
+		comment: Some("Full-text search on articles".to_string()),
+		prepare_remove: false,
+	}
+}
+
+/// Count index with prepare_remove flag
+pub fn index_count() -> IndexDefinition {
+	IndexDefinition {
+		index_id: IndexId(5),
+		name: "idx_status_count".to_string(),
+		table_name: TableName::from("orders"),
+		cols: vec![Idiom::from_str("status").unwrap()],
+		index: Index::Count(Some(Cond(Expr::Literal(Literal::String(
+			"status = 'active'".to_string(),
+		))))),
+		comment: None,
+		prepare_remove: true,
 	}
 }
 
@@ -685,6 +1139,20 @@ pub fn user_with_durations() -> UserDefinition {
 		session_duration: Some(Duration::from_secs(86400)),
 		comment: Some("API service account".to_string()),
 		base: Base::Ns,
+	}
+}
+
+/// User with database-level base
+pub fn user_db_base() -> UserDefinition {
+	UserDefinition {
+		name: "db_user".to_string(),
+		hash: "$argon2id$v=19$m=65536,t=3,p=4$hash".to_string(),
+		code: "".to_string(),
+		roles: vec!["editor".to_string()],
+		token_duration: Some(Duration::from_secs(1800)),
+		session_duration: None,
+		comment: Some("Database-level user".to_string()),
+		base: Base::Db,
 	}
 }
 
@@ -899,6 +1367,15 @@ pub fn record_with_metadata() -> Record {
 	record
 }
 
+/// Record with explicit Table metadata type
+pub fn record_with_table_metadata() -> Record {
+	let mut obj = Object::default();
+	obj.insert("name".to_string(), Value::String("Test Record".to_string()));
+	let mut record = Record::new(Value::Object(obj));
+	record.set_record_type(RecordType::Table);
+	record
+}
+
 // ===========================================================================
 // MajorVersion fixtures
 // ===========================================================================
@@ -992,6 +1469,19 @@ pub fn module_silo() -> ModuleDefinition {
 	}
 }
 
+/// Module with no name and Permission::None
+pub fn module_no_name() -> ModuleDefinition {
+	ModuleDefinition {
+		name: None,
+		comment: None,
+		permissions: Permission::None,
+		executable: ModuleExecutable::Surrealism(SurrealismExecutable {
+			bucket: "default_bucket".to_string(),
+			key: "anonymous_module".to_string(),
+		}),
+	}
+}
+
 // ===========================================================================
 // NodeLiveQuery fixtures
 // ===========================================================================
@@ -1024,6 +1514,42 @@ pub fn table_mutations_set() -> TableMutations {
 pub fn table_mutations_del() -> TableMutations {
 	let mut mutations = TableMutations::new(TableName::from("users"));
 	mutations.1.push(TableMutation::Del(RecordId::new(TableName::from("users"), 1)));
+	mutations
+}
+
+/// Table mutations with Def operation
+pub fn table_mutations_def() -> TableMutations {
+	let mut mutations = TableMutations::new(TableName::from("users"));
+	mutations.1.push(TableMutation::Def(table_basic()));
+	mutations
+}
+
+/// Table mutations with SetWithDiff operation
+pub fn table_mutations_set_with_diff() -> TableMutations {
+	let mut mutations = TableMutations::new(TableName::from("users"));
+	let mut obj = Object::default();
+	obj.insert("name".to_string(), Value::String("Bob".to_string()));
+	obj.insert("age".to_string(), Value::Number(Number::Int(30)));
+	mutations.1.push(TableMutation::SetWithDiff(
+		RecordId::new(TableName::from("users"), 1),
+		Value::Object(obj),
+		vec![Operation::Replace {
+			path: vec!["name".to_string()],
+			value: Value::String("Alice".to_string()),
+		}],
+	));
+	mutations
+}
+
+/// Table mutations with DelWithOriginal operation
+pub fn table_mutations_del_with_original() -> TableMutations {
+	let mut mutations = TableMutations::new(TableName::from("users"));
+	let mut obj = Object::default();
+	obj.insert("name".to_string(), Value::String("Charlie".to_string()));
+	mutations.1.push(TableMutation::DelWithOriginal(
+		RecordId::new(TableName::from("users"), 2),
+		Value::Object(obj),
+	));
 	mutations
 }
 
@@ -1189,4 +1715,12 @@ pub fn recordid_key_object() -> RecordIdKey {
 	let mut obj = Object::default();
 	obj.insert("id".to_string(), Value::Number(Number::Int(123)));
 	RecordIdKey::Object(obj)
+}
+
+/// RecordIdKey with range
+pub fn recordid_key_range() -> RecordIdKey {
+	RecordIdKey::Range(Box::new(RecordIdKeyRange {
+		start: Bound::Included(RecordIdKey::Number(1)),
+		end: Bound::Excluded(RecordIdKey::Number(100)),
+	}))
 }

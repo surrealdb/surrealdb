@@ -216,19 +216,17 @@ impl PhysicalExpr for SimpleBinaryOp {
 		use crate::expr::operator::BinaryOperator;
 		use crate::fnc::operate;
 
-		let none = Value::None;
-		let current = ctx.current_value.unwrap_or(&none);
+		let current = ctx.current_value.unwrap_or(&Value::NONE);
 
 		// Fast path: direct object field lookup (covers table scan records).
 		// Slow path: fall back to evaluate_field for RecordId auto-fetch, arrays, etc.
 		let (field_ref, _owned);
 		let field_val: &Value = if let Value::Object(obj) = current {
-			field_ref = obj.get(&self.field_name).unwrap_or(&none);
+			field_ref = obj.get(&self.field_name).unwrap_or(&Value::NONE);
 			field_ref
 		} else {
-			_owned = crate::exec::parts::field::evaluate_field(current, &self.field_name, ctx)
-				.await
-				.map_err(crate::expr::ControlFlow::Err)?;
+			_owned =
+				crate::exec::parts::field::evaluate_field(current, &self.field_name, ctx).await?;
 			&_owned
 		};
 
@@ -295,7 +293,6 @@ impl PhysicalExpr for SimpleBinaryOp {
 			return Ok(results);
 		}
 
-		let none = Value::None;
 		let mut results = Vec::with_capacity(values.len());
 
 		// All values are Objects — use fast synchronous field lookup.
@@ -303,7 +300,7 @@ impl PhysicalExpr for SimpleBinaryOp {
 			($op_fn:expr) => {
 				for value in values {
 					let field_val = match value {
-						Value::Object(obj) => obj.get(&self.field_name).unwrap_or(&none),
+						Value::Object(obj) => obj.get(&self.field_name).unwrap_or(&Value::NONE),
 						_ => unreachable!("checked all_objects above"),
 					};
 					let (left, right) = if self.reversed {

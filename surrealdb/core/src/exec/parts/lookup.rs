@@ -79,8 +79,7 @@ impl PhysicalExpr for LookupPart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let none = Value::None;
-		let value = ctx.current_value.unwrap_or(&none);
+		let value = ctx.current_value.unwrap_or(&Value::NONE);
 		Ok(evaluate_lookup(value, self, ctx).await?)
 	}
 
@@ -176,6 +175,11 @@ async fn evaluate_lookup_for_value(
 	// Create a new execution context with the current value set.
 	// The CurrentValueSource operator reads this to seed the operator chain.
 	let bound_ctx = ctx.exec_ctx.with_current_value(value.clone());
+	let bound_ctx = if ctx.skip_fetch_perms {
+		bound_ctx.with_skip_fetch_perms(true)
+	} else {
+		bound_ctx
+	};
 
 	// Execute the lookup plan
 	let stream = lookup.plan.execute(&bound_ctx).map_err(|e| match e {
