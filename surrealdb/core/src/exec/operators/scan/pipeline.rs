@@ -260,11 +260,18 @@ macro_rules! check_perm {
 			PhysicalPermission::Allow => Ok::<bool, ControlFlow>(true),
 			PhysicalPermission::Deny => Ok(false),
 			PhysicalPermission::Conditional(expr) => {
-				let mut eval_ctx = EvalContext::from_exec_ctx($ctx).with_value($value);
-				eval_ctx.skip_fetch_perms = true;
-				expr.evaluate(eval_ctx).await.map(|v| v.is_truthy()).map_err(|e| {
-					ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}"))
-				})
+				// When already inside a permission predicate evaluation
+				// (propagated via skip_fetch_perms), allow unconditionally
+				// to prevent reentrant permission checks on cyclic links.
+				if $ctx.root().skip_fetch_perms {
+					Ok(true)
+				} else {
+					let mut eval_ctx = EvalContext::from_exec_ctx($ctx).with_value($value);
+					eval_ctx.skip_fetch_perms = true;
+					expr.evaluate(eval_ctx).await.map(|v| v.is_truthy()).map_err(|e| {
+						ControlFlow::Err(anyhow::anyhow!("Failed to check permission: {e}"))
+					})
+				}
 			}
 		}
 	};

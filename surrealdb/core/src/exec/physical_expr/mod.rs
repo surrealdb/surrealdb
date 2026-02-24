@@ -116,7 +116,7 @@ impl<'a> EvalContext<'a> {
 			local_params: None,
 			recursion_ctx: None,
 			document_root: None,
-			skip_fetch_perms: false,
+			skip_fetch_perms: exec_ctx.root().skip_fetch_perms,
 		}
 	}
 

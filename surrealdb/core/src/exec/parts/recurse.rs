@@ -69,6 +69,11 @@ impl PhysicalExpr for RecursePart {
 		// Create a new execution context with the current value set.
 		// The RecursionOp reads this to seed the recursion.
 		let bound_ctx = ctx.exec_ctx.with_current_value(value);
+		let bound_ctx = if ctx.skip_fetch_perms {
+			bound_ctx.with_skip_fetch_perms(true)
+		} else {
+			bound_ctx
+		};
 
 		// Execute the recursion operator
 		let stream = self.op.execute(&bound_ctx).map_err(|e| match e {

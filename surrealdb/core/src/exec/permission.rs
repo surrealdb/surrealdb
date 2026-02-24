@@ -205,6 +205,13 @@ pub async fn check_permission_for_value(
 		PhysicalPermission::Deny => Ok(false),
 		PhysicalPermission::Allow => Ok(true),
 		PhysicalPermission::Conditional(physical_expr) => {
+			// When already inside a permission predicate evaluation
+			// (propagated via skip_fetch_perms), allow unconditionally
+			// to prevent reentrant permission checks on cyclic links.
+			if ctx.root().skip_fetch_perms {
+				return Ok(true);
+			}
+
 			let mut eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(value);
 			eval_ctx.skip_fetch_perms = true;
 
