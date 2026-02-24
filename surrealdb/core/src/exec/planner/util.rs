@@ -722,8 +722,7 @@ impl Visitor for MatchesCollector<'_> {
 			left,
 			op: BinaryOperator::Matches(matches_op),
 			right,
-		} = expr
-			&& let Expr::Idiom(idiom) = left.as_ref()
+		} = expr && let Expr::Idiom(idiom) = left.as_ref()
 		{
 			// Extract the query string from the right-hand side.
 			// Supports both literal strings and bind parameters.

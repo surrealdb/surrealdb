@@ -285,19 +285,14 @@ impl<'ctx> Planner<'ctx> {
 					// Extract the query string: either from a literal or by
 					// resolving a bind parameter from the frozen context.
 					let resolved_query = match &*right {
-						Expr::Literal(crate::expr::literal::Literal::String(s)) => {
-							Some(s.clone())
-						}
-						Expr::Param(param) => self
-							.ctx
-							.value(param.as_str())
-							.and_then(|v| {
-								if let crate::val::Value::String(s) = v {
-									Some(s.clone())
-								} else {
-									None
-								}
-							}),
+						Expr::Literal(crate::expr::literal::Literal::String(s)) => Some(s.clone()),
+						Expr::Param(param) => self.ctx.value(param.as_str()).and_then(|v| {
+							if let crate::val::Value::String(s) = v {
+								Some(s.clone())
+							} else {
+								None
+							}
+						}),
 						_ => None,
 					};
 
