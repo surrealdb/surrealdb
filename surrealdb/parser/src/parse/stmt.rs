@@ -1,5 +1,5 @@
 use ast::{Base, Expr};
-use token::T;
+use token::{BaseTokenKind, T};
 
 use super::Parser;
 use crate::Parse;
@@ -69,9 +69,11 @@ impl Parse for ast::Let {
 
 		let param = parser.parse_sync_push()?;
 
-		if parser.eat(T![:])?.is_some() {
-			return parser.todo();
-		}
+		let ty = if parser.eat(T![:])?.is_some() {
+			Some(parser.parse_push().await?)
+		} else {
+			None
+		};
 
 		let _ = parser.expect(T![=])?;
 
@@ -80,6 +82,7 @@ impl Parse for ast::Let {
 
 		Ok(ast::Let {
 			param,
+			ty,
 			expr,
 			span,
 		})
@@ -168,6 +171,51 @@ impl Parse for ast::Info {
 
 			span: parser.span_since(start.span),
 			structure,
+		})
+	}
+}
+
+impl Parse for ast::Show {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start = parser.expect(T![SHOW])?;
+
+		let _ = parser.expect(T![CHANGES])?;
+		let _ = parser.expect(T![FOR])?;
+
+		let peek = parser.peek_expect("keyword `TABLE` or `DATABASE`")?;
+		let target = match peek.token {
+			T![TABLE] => {
+				let _ = parser.next();
+				ast::ShowTarget::Table(parser.parse_sync_push()?)
+			}
+			T![DATABASE] => {
+				let _ = parser.next();
+				ast::ShowTarget::Database(peek.span)
+			}
+			_ => return Err(parser.unexpected("keyword `TABLE` or `DATABASE`")),
+		};
+
+		let _ = parser.expect(T![SINCE])?;
+
+		let peek = parser.peek_expect("a datetime or integer")?;
+		let since = match peek.token {
+			BaseTokenKind::DateTimeString => ast::ShowSince::Timestamp(parser.parse_sync_push()?),
+			BaseTokenKind::Int => ast::ShowSince::VersionStamp(parser.parse_sync_push()?),
+			_ => return Err(parser.unexpected("a datetime or integer")),
+		};
+
+		let limit = if parser.eat(T![LIMIT])?.is_some() {
+			Some(parser.parse_enter_push().await?)
+		} else {
+			None
+		};
+
+		let span = parser.span_since(start.span);
+		Ok(ast::Show {
+			target,
+			since,
+			limit,
+			span,
 		})
 	}
 }

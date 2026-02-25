@@ -14,22 +14,21 @@
 use std::ops::Bound;
 use std::time::Duration;
 
-use chrono::{DateTime as BaseDataTime, Utc};
+use chrono::{DateTime as BaseDateTime, Utc};
 use common::ids::IdSet;
 use common::span::Span;
 pub use rust_decimal::Decimal;
 pub use uuid::Uuid;
-pub type DateTime = BaseDataTime<Utc>;
+pub type DateTime = BaseDateTime<Utc>;
 
 mod mac;
 mod types;
 pub mod vis;
 mod visit;
 
-pub use types::{Node, NodeId, NodeList, NodeListId, Spanned, UniqueNode};
+pub use types::{AstSpan, Node, NodeId, NodeList, NodeListId, Spanned, UniqueNode};
 
 use crate::mac::ast_type;
-use crate::types::AstSpan;
 
 type NodeSet<T> = IdSet<u32, T>;
 
@@ -51,6 +50,7 @@ library! {
 		if_stmt: Vec<If>,
 		let_stmt: Vec<Let>,
 		info_stmt: Vec<Info>,
+		show_stmt: Vec<Show>,
 
 		expr: Vec<Expr>,
 		exprs: Vec<NodeList<Expr>>,
@@ -131,6 +131,7 @@ ast_type! {
 		Use(NodeId<Use>),
 		Option(NodeId<OptionStmt>),
 		Kill(NodeId<Kill>),
+		Show(NodeId<Show>),
 		Expr(NodeId<Expr>),
 	}
 }
@@ -186,6 +187,7 @@ ast_type! {
 ast_type! {
 	pub struct Let{
 		pub param: NodeId<Param>,
+		pub ty: Option<NodeId<Type>>,
 		// TODO: Kind,
 		pub expr: NodeId<Expr>,
 	}
@@ -223,6 +225,28 @@ ast_type! {
 	pub struct Info{
 		pub kind: InfoKind,
 		pub structure: bool,
+	}
+}
+
+ast_type! {
+	pub enum ShowTarget{
+		Database(Span),
+		Table(NodeId<Ident>)
+	}
+}
+
+ast_type! {
+	pub enum ShowSince{
+		Timestamp(NodeId<Spanned<DateTime>>),
+		VersionStamp(NodeId<Integer>),
+	}
+}
+
+ast_type! {
+	pub struct Show{
+		pub target: ShowTarget,
+		pub since: ShowSince,
+		pub limit: Option<NodeId<Expr>>,
 	}
 }
 

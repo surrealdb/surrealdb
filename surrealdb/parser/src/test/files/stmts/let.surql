@@ -8,6 +8,7 @@ Query
                 Let
                     .param: Param
                         .text: "a"
+                    .ty: None
                     .expr: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -15,6 +16,7 @@ Query
                 Let
                     .param: Param
                         .text: "b"
+                    .ty: None
                     .expr: Expr::Binary
                         BinaryExpr
                             .left: Expr::Path
