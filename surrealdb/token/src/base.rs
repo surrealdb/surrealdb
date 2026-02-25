@@ -11,6 +11,7 @@ fn whitespace_callback(lexer: &mut Lexer<BaseTokenKind>) {
 #[derive(Logos, Clone, Copy, PartialEq, Eq, Debug)]
 #[logos(extras = Joined)]
 #[logos(error(LexError, LexError::from_lexer))]
+#[logos(subpattern duration_part = r"[0-9]+(y|w|d|h|m|s|ms|us|µs|ns)")]
 #[logos(subpattern backtick_ident = r"`([^`\\]|\\.)*`")]
 #[logos(subpattern bracket_ident = r"⟨([^⟩\\]|\\.)*⟩")]
 #[logos(subpattern whitespace = r"[\u{0009}\u{000b}\u{0000c}\u{FEFF}\p{Space_Separator}\n\r\u{2028}\u{2029}]+")]
@@ -42,6 +43,8 @@ pub enum BaseTokenKind {
 	#[token("%")]
 	Percent,
 
+	#[token("|")]
+	HLine,
 	#[token("||")]
 	HLineHLine,
 	#[token("|>")]
@@ -810,11 +813,12 @@ pub enum BaseTokenKind {
 	#[regex(r"\p{XID_Start}\p{XID_Continue}*")]
 	Ident,
 
-	#[regex(r"NaN")]
+	#[token("NaN")]
 	NaN,
-	#[regex(r"(?:\+)?Infinity")]
+	#[token(r"Infinity")]
+	#[token(r"+Infinity")]
 	PosInfinity,
-	#[regex(r"-Infinity")]
+	#[token(r"-Infinity")]
 	NegInfinity,
 	#[regex(r"[0-9]+f")]
 	#[regex(r"[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?(f)?")]
@@ -823,9 +827,13 @@ pub enum BaseTokenKind {
 	Decimal,
 	#[regex(r"[0-9]+", priority = 3)]
 	Int,
+	#[regex(r"(?&duration_part)+")]
+	Duration,
 }
 
 impl BaseTokenKind {
+	/// Returns a description of the token, used for generating an error when expecting a specific
+	/// token.
 	pub fn description(&self) -> &'static str {
 		match self {
 			BaseTokenKind::OpenParen => "`(`",
@@ -834,41 +842,42 @@ impl BaseTokenKind {
 			BaseTokenKind::CloseBrace => "`}`",
 			BaseTokenKind::OpenBracket => "`[`",
 			BaseTokenKind::CloseBracket => "`]`",
-			BaseTokenKind::SemiColon => todo!(),
-			BaseTokenKind::Comma => todo!(),
-			BaseTokenKind::At => todo!(),
-			BaseTokenKind::Slash => todo!(),
-			BaseTokenKind::Percent => todo!(),
-			BaseTokenKind::HLineHLine => todo!(),
-			BaseTokenKind::HLineRightShevron => todo!(),
-			BaseTokenKind::AndAnd => todo!(),
-			BaseTokenKind::Dot => todo!(),
-			BaseTokenKind::DotDot => todo!(),
-			BaseTokenKind::DotDotDot => todo!(),
-			BaseTokenKind::Exclaim => todo!(),
-			BaseTokenKind::ExclaimEq => todo!(),
-			BaseTokenKind::Question => todo!(),
-			BaseTokenKind::QuestionEqual => todo!(),
-			BaseTokenKind::QuestionColon => todo!(),
-			BaseTokenKind::LeftShevron => todo!(),
-			BaseTokenKind::LeftShevronEqual => todo!(),
-			BaseTokenKind::LeftShevronHLine => todo!(),
-			BaseTokenKind::RightShevron => todo!(),
-			BaseTokenKind::RightShevronEqual => todo!(),
-			BaseTokenKind::Dash => todo!(),
-			BaseTokenKind::DashEqual => todo!(),
-			BaseTokenKind::DashRightShevron => todo!(),
-			BaseTokenKind::Plus => todo!(),
-			BaseTokenKind::PlusEqual => todo!(),
-			BaseTokenKind::PlusQuestionEqual => todo!(),
-			BaseTokenKind::Star => todo!(),
-			BaseTokenKind::StarEqual => todo!(),
-			BaseTokenKind::StarStar => todo!(),
-			BaseTokenKind::Equal => todo!(),
-			BaseTokenKind::EqualEqual => todo!(),
+			BaseTokenKind::SemiColon => "`;`",
+			BaseTokenKind::Comma => "`,`",
+			BaseTokenKind::At => "`@`",
+			BaseTokenKind::Slash => "`/`",
+			BaseTokenKind::Percent => "`%`",
+			BaseTokenKind::HLine => "`|`",
+			BaseTokenKind::HLineHLine => "`||`",
+			BaseTokenKind::HLineRightShevron => "`|>`",
+			BaseTokenKind::AndAnd => "`&&`",
+			BaseTokenKind::Dot => "`.`",
+			BaseTokenKind::DotDot => "`..`",
+			BaseTokenKind::DotDotDot => "`...`",
+			BaseTokenKind::Exclaim => "`!`",
+			BaseTokenKind::ExclaimEq => "`!=`",
+			BaseTokenKind::Question => "`?`",
+			BaseTokenKind::QuestionEqual => "`?=`",
+			BaseTokenKind::QuestionColon => "`?:`",
+			BaseTokenKind::LeftShevron => "`<`",
+			BaseTokenKind::LeftShevronEqual => "`<=`",
+			BaseTokenKind::LeftShevronHLine => "`<|`",
+			BaseTokenKind::RightShevron => "`>`",
+			BaseTokenKind::RightShevronEqual => "`>=`",
+			BaseTokenKind::Dash => "`-`",
+			BaseTokenKind::DashEqual => "`-=`",
+			BaseTokenKind::DashRightShevron => "`->`",
+			BaseTokenKind::Plus => "`+`",
+			BaseTokenKind::PlusEqual => "`+=`",
+			BaseTokenKind::PlusQuestionEqual => "`+?=`",
+			BaseTokenKind::Star => "`*`",
+			BaseTokenKind::StarEqual => "`*=`",
+			BaseTokenKind::StarStar => "`**`",
+			BaseTokenKind::Equal => "`=`",
+			BaseTokenKind::EqualEqual => "`==`",
 			BaseTokenKind::Colon => "`:`",
-			BaseTokenKind::ColonColon => todo!(),
-			BaseTokenKind::Dollar => todo!(),
+			BaseTokenKind::ColonColon => "`::`",
+			BaseTokenKind::Dollar => "`$`",
 			BaseTokenKind::Times => todo!(),
 			BaseTokenKind::Divide => todo!(),
 			BaseTokenKind::Contains => todo!(),
@@ -1187,6 +1196,7 @@ impl BaseTokenKind {
 			BaseTokenKind::Float => "a float",
 			BaseTokenKind::Decimal => "a decimal",
 			BaseTokenKind::Int => "an integer",
+			BaseTokenKind::Duration => "a duration",
 		}
 	}
 

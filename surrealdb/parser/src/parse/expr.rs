@@ -68,7 +68,13 @@ async fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 		}
 		T![<] => match parser.peek_joined1()?.map(|x| x.token) {
 			Some(T![-] | T![->]) => return parser.todo(),
-			_ => return parse_prime(parser).await,
+			_ => {
+				let _ = parser.next();
+				let ty = parser.parse_push().await?;
+				let _ = parser.expect_closing_delimiter(T![>], token.span)?;
+
+				PrefixOperator::Cast(ty)
+			}
 		},
 		T![..] => {
 			let _ = parser.next();
@@ -902,13 +908,14 @@ async fn try_parse_infix_postfix_op(
 			}
 
 			let lhs = parser.push(lhs);
+			let span = parser.span_since(lhs_span);
 			let expr = parser.push(PostfixExpr {
 				left: lhs,
 				op: Spanned {
 					value: PostfixOperator::Range,
 					span: peek.span,
 				},
-				span: lhs_span,
+				span,
 			});
 			Ok(Some(Expr::Postfix(expr)))
 		}
@@ -920,6 +927,45 @@ async fn try_parse_infix_postfix_op(
 			parse_dot_postfix(parser, lhs, lhs_span).await
 		}
 		BaseTokenKind::OpenBracket => parse_bracket_postfix(parser, min_bp, lhs, lhs_span).await,
+		BaseTokenKind::OpenParen => {
+			if IDIOM_BP < min_bp {
+				return Ok(None);
+			}
+
+			let _ = parser.next();
+
+			let lhs = parser.push(lhs);
+
+			let mut head = None;
+			let mut tail = None;
+			loop {
+				if parser.eat(BaseTokenKind::CloseParen)?.is_some() {
+					break;
+				}
+
+				let arg = parser.parse_enter().await?;
+				parser.push_list(arg, &mut head, &mut tail);
+
+				if parser.eat(T![,])?.is_none() {
+					let _ =
+						parser.expect_closing_delimiter(BaseTokenKind::CloseParen, peek.span)?;
+					break;
+				}
+			}
+
+			let op_span = parser.span_since(peek.span);
+			let span = parser.span_since(lhs_span);
+			let idiom = parser.push(IdiomExpr {
+				left: lhs,
+				op: Spanned {
+					value: IdiomOperator::Call(head),
+					span: op_span,
+				},
+				span,
+			});
+
+			Ok(Some(Expr::Idiom(idiom)))
+		}
 		_ => Ok(None),
 	}
 }

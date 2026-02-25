@@ -2,6 +2,7 @@ use logos::Logos;
 
 use crate::Joined;
 
+/// Token type used to unescape all stringly formatted surrealql structures.
 #[derive(Logos, Clone, Copy, PartialEq, Eq, Debug)]
 #[logos(extras = Joined)]
 pub enum EscapeTokenKind {

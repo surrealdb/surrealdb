@@ -1,6 +1,7 @@
 use core::fmt;
 use std::any::Any;
 use std::ops::Bound;
+use std::time::Duration;
 
 use common::span::Span;
 use rust_decimal::Decimal;
@@ -11,28 +12,61 @@ use crate::mac::impl_vis_debug;
 use crate::types::{Ast, NodeLibrary};
 use crate::vis::AstVis;
 use crate::{
-	BinaryOperator, DestructureOperator, IdiomOperator, Integer, NodeId, NodeListId,
-	PostfixOperator, RecordIdKeyGenerate, Sign, Spanned, UseStatementKind,
+	Base, BinaryOperator, DateTime, DestructureOperator, IdiomOperator, InfoKind, Integer, NodeId,
+	NodeListId, PostfixOperator, RecordIdKeyGenerate, Sign, Spanned, UseKind,
 };
 
-impl_vis_debug!(BinaryOperator);
+impl<L, W> AstVis<L, W> for InfoKind
+where
+	L: NodeLibrary,
+	W: fmt::Write,
+{
+	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
+		fmt.fmt_enum(ast, "InfoKind", |ast, fmt| match self {
+			InfoKind::Root => fmt.unit_variant("Root"),
+			InfoKind::Namespace => fmt.unit_variant("Namespace"),
+			InfoKind::Database {
+				version,
+			} => fmt
+				.variant(ast, "Database", |ast, fmt| fmt.field(ast, "version", version)?.finish()),
+			InfoKind::Table {
+				name,
+				version,
+			} => fmt.variant(ast, "Table", |ast, fmt| {
+				fmt.field(ast, "name", name)?.field(ast, "version", version)?.finish()
+			}),
+			InfoKind::User {
+				name,
+				base,
+			} => fmt.variant(ast, "Table", |ast, fmt| {
+				fmt.field(ast, "name", name)?.field(ast, "base", base)?.finish()
+			}),
+			InfoKind::Index {
+				name,
+				table,
+			} => fmt.variant(ast, "Table", |ast, fmt| {
+				fmt.field(ast, "name", name)?.field(ast, "table", table)?.finish()
+			}),
+		})
+	}
+}
 
-impl<L, W> AstVis<L, W> for UseStatementKind
+impl<L, W> AstVis<L, W> for UseKind
 where
 	L: NodeLibrary,
 	W: fmt::Write,
 {
 	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
 		fmt.fmt_enum(ast, "UseStatementKind", |ast, fmt| match self {
-			UseStatementKind::Namespace(ns) => {
+			UseKind::Namespace(ns) => {
 				fmt.variant(ast, "Namespace", |ast, fmt| fmt.tuple(ast, ns)?.finish())
 			}
-			UseStatementKind::NamespaceDatabase(ns, db) => {
+			UseKind::NamespaceDatabase(ns, db) => {
 				fmt.variant(ast, "NamespaceDatabase", |ast, fmt| {
 					fmt.tuple(ast, ns)?.tuple(ast, db)?.finish()
 				})
 			}
-			UseStatementKind::Database(db) => {
+			UseKind::Database(db) => {
 				fmt.variant(ast, "Database", |ast, fmt| fmt.tuple(ast, db)?.finish())
 			}
 		})
@@ -83,6 +117,9 @@ where
 			}
 			IdiomOperator::Destructure(x) => {
 				fmt.variant(ast, "Destructure", |ast, fmt| fmt.field(ast, "op", x)?.finish())
+			}
+			IdiomOperator::Call(x) => {
+				fmt.variant(ast, "Call", |ast, fmt| fmt.field(ast, "args", x)?.finish())
 			}
 		})
 	}
@@ -226,8 +263,13 @@ where
 	}
 }
 
+impl_vis_debug!(BinaryOperator);
+impl_vis_debug!(Base);
+
 impl_vis_debug!(Decimal);
 impl_vis_debug!(Uuid);
+impl_vis_debug!(DateTime);
+impl_vis_debug!(Duration);
 
 impl_vis_debug!(bool);
 impl_vis_debug!(usize);

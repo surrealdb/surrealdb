@@ -1,6 +1,6 @@
-use ast::{Query, TopLevelExpr, Transaction, UseStatementKind};
+use ast::{KillKind, Query, TopLevelExpr, Transaction, UseKind};
 use common::source_error::{AnnotationKind, Level};
-use token::T;
+use token::{BaseTokenKind, T};
 
 use super::{Parse, ParseResult, ParseSync, Parser};
 use crate::parse::ParserState;
@@ -104,6 +104,7 @@ impl Parse for ast::TopLevelExpr {
 			}
 			T![USE] => Ok(TopLevelExpr::Use(parser.parse_sync_push()?)),
 			T![OPTION] => Ok(TopLevelExpr::Option(parser.parse_sync_push()?)),
+			T![KILL] => Ok(TopLevelExpr::Kill(parser.parse_sync_push()?)),
 			_ => Ok(TopLevelExpr::Expr(parser.parse_push().await?)),
 		}
 	}
@@ -197,7 +198,24 @@ impl Parse for ast::Transaction {
 	}
 }
 
-impl ParseSync for ast::UseStatement {
+impl ParseSync for ast::Kill {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let start = parser.expect(T![KILL])?.span;
+
+		let peek = parser.peek_expect("a UUID or a parameter")?;
+		let kind = match peek.token {
+			BaseTokenKind::UuidString => KillKind::Uuid(parser.parse_sync_push()?),
+			BaseTokenKind::Param => KillKind::Param(parser.parse_sync_push()?),
+			_ => return Err(parser.unexpected("a UUID or a parameter")),
+		};
+		Ok(ast::Kill {
+			kind,
+			span: parser.span_since(start),
+		})
+	}
+}
+
+impl ParseSync for ast::Use {
 	fn parse_sync(parser: &mut Parser) -> super::ParseResult<Self> {
 		let start = parser.expect(T![USE])?.span;
 
@@ -205,26 +223,26 @@ impl ParseSync for ast::UseStatement {
 			let ns = parser.parse_sync_push()?;
 			if parser.eat(T![DATABASE])?.is_some() {
 				let db = parser.parse_sync_push()?;
-				(UseStatementKind::NamespaceDatabase(ns, db), start.extend(parser[db].span))
+				(UseKind::NamespaceDatabase(ns, db), start.extend(parser[db].span))
 			} else {
-				(UseStatementKind::Namespace(ns), start.extend(parser[ns].span))
+				(UseKind::Namespace(ns), start.extend(parser[ns].span))
 			}
 		} else if parser.eat(T![DATABASE])?.is_some() {
 			let db = parser.parse_sync_push()?;
 
-			(UseStatementKind::Database(db), start.extend(parser[db].span))
+			(UseKind::Database(db), start.extend(parser[db].span))
 		} else {
 			return Err(parser.unexpected("either `NAMESPACE` or `DATABASE`"));
 		};
 
-		Ok(ast::UseStatement {
+		Ok(ast::Use {
 			kind,
 			span,
 		})
 	}
 }
 
-impl ParseSync for ast::OptionStatement {
+impl ParseSync for ast::OptionStmt {
 	fn parse_sync(parser: &mut Parser) -> super::ParseResult<Self> {
 		let start = parser.expect(T![OPTION])?.span;
 
@@ -239,7 +257,7 @@ impl ParseSync for ast::OptionStatement {
 
 		let span = start.extend(value_token.span);
 
-		Ok(ast::OptionStatement {
+		Ok(ast::OptionStmt {
 			name,
 			value,
 			span,
