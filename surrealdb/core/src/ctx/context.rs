@@ -135,8 +135,10 @@ impl Debug for Context {
 impl Context {
 	/// Creates a new empty background context.
 	pub(crate) fn background() -> Self {
+		let config = Arc::new(CoreConfig::default());
 		Self {
-			config: Arc::new(CoreConfig::default()),
+			index_stores: IndexStores::new(config.caches.hnsw_cache_size),
+			config,
 			values: HashMap::default(),
 			parent: None,
 			deadline: None,
@@ -147,7 +149,6 @@ impl Context {
 			query_executor: None,
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
-			index_stores: IndexStores::default(),
 			cache: None,
 			index_builder: None,
 			sequences: None,
@@ -790,6 +791,7 @@ impl Context {
 	}
 
 	/// Get the core engine configuration.
+	#[inline]
 	pub(crate) fn config(&self) -> &CoreConfig {
 		&self.config
 	}

@@ -26,17 +26,15 @@ struct Inner {
 	vector_cache: VectorCache,
 }
 
-impl Default for IndexStores {
-	fn default() -> Self {
+impl IndexStores {
+	pub fn new(hnsw_cache_size: u64) -> Self {
 		Self(Arc::new(Inner {
 			hnsw_indexes: HnswIndexes::default(),
 			mappers: Mappers::default(),
-			vector_cache: VectorCache::default(),
+			vector_cache: VectorCache::new(hnsw_cache_size),
 		}))
 	}
-}
 
-impl IndexStores {
 	pub(crate) async fn get_index_hnsw(
 		&self,
 		ns: NamespaceId,

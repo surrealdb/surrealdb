@@ -19,6 +19,7 @@ pub(crate) struct DynamicConfiguration(Arc<Inner>);
 struct Inner {
 	query_timeout: AtomicU64,
 }
+
 impl DynamicConfiguration {
 	/// Sets the global query timeout enforced by the Datastore.
 	///

@@ -4,6 +4,7 @@ use anyhow::{Result, ensure};
 use surrealdb_types::ToSql;
 
 use super::args::{Any, Cast, Optional};
+use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::val::range::TypedRange;
@@ -19,14 +20,6 @@ fn limit(name: &str, n: usize, max: usize) -> Result<()> {
 		}
 	);
 	Ok(())
-}
-
-fn default_gen_limit() -> usize {
-	crate::cnf::LimitsConfig::default().generation_allocation_limit
-}
-
-fn default_sim_limit() -> usize {
-	crate::cnf::LimitsConfig::default().string_similarity_limit
 }
 
 /// Checks that both input strings are within the configured length limit for
@@ -73,8 +66,8 @@ pub fn capitalize((string,): (String,)) -> Result<Value> {
 	Ok(new_str.into())
 }
 
-pub fn concat(Any(args): Any) -> Result<Value> {
-	let gen_limit = default_gen_limit();
+pub fn concat(ctx: &FrozenContext, Any(args): Any) -> Result<Value> {
+	let gen_limit = ctx.config().limits.generation_allocation_limit;
 	let strings = args.into_iter().map(Value::into_raw_string).collect::<Vec<_>>();
 	limit("string::concat", strings.iter().map(String::len).sum::<usize>(), gen_limit)?;
 	Ok(strings.concat().into())
@@ -88,8 +81,8 @@ pub fn ends_with((val, chr): (String, String)) -> Result<Value> {
 	Ok(val.ends_with(&chr).into())
 }
 
-pub fn join(Any(args): Any) -> Result<Value> {
-	let gen_limit = default_gen_limit();
+pub fn join(ctx: &FrozenContext, Any(args): Any) -> Result<Value> {
+	let gen_limit = ctx.config().limits.generation_allocation_limit;
 	let mut args = args.into_iter().map(Value::into_raw_string);
 	let chr = args.next().ok_or_else(|| Error::InvalidFunctionArguments {
 		name: String::from("string::join"),
@@ -116,8 +109,8 @@ pub fn lowercase((string,): (String,)) -> Result<Value> {
 	Ok(string.to_lowercase().into())
 }
 
-pub fn repeat((val, num): (String, i64)) -> Result<Value> {
-	let gen_limit = default_gen_limit();
+pub fn repeat(ctx: &FrozenContext, (val, num): (String, i64)) -> Result<Value> {
+	let gen_limit = ctx.config().limits.generation_allocation_limit;
 	//TODO: Deal with truncation of neg:
 	let num = num as usize;
 	limit("string::repeat", val.len().saturating_mul(num), gen_limit)?;
@@ -128,8 +121,11 @@ pub fn matches((val, Cast(regex)): (String, Cast<Regex>)) -> Result<Value> {
 	Ok(regex.0.is_match(&val).into())
 }
 
-pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value> {
-	let gen_limit = default_gen_limit();
+pub fn replace(
+	ctx: &FrozenContext,
+	(val, search, replace): (String, Value, String),
+) -> Result<Value> {
+	let gen_limit = ctx.config().limits.generation_allocation_limit;
 	match search {
 		Value::String(search) => {
 			if replace.len() > search.len() {
@@ -292,35 +288,39 @@ pub mod distance {
 	use anyhow::Result;
 	use strsim;
 
+	use crate::ctx::FrozenContext;
 	use crate::err::Error;
 	use crate::val::Value;
 
-	pub fn damerau_levenshtein((a, b): (String, String)) -> Result<Value> {
+	pub fn damerau_levenshtein(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
 		super::check_similarity_input_length(
 			"string::distance::damerau_levenshtein",
 			&a,
 			&b,
-			super::default_sim_limit(),
+			ctx.config().limits.string_similarity_limit,
 		)?;
 		Ok(strsim::damerau_levenshtein(&a, &b).into())
 	}
 
-	pub fn normalized_damerau_levenshtein((a, b): (String, String)) -> Result<Value> {
+	pub fn normalized_damerau_levenshtein(
+		ctx: &FrozenContext,
+		(a, b): (String, String),
+	) -> Result<Value> {
 		super::check_similarity_input_length(
 			"string::distance::normalized_damerau_levenshtein",
 			&a,
 			&b,
-			super::default_sim_limit(),
+			ctx.config().limits.string_similarity_limit,
 		)?;
 		Ok(strsim::normalized_damerau_levenshtein(&a, &b).into())
 	}
 
-	pub fn hamming((a, b): (String, String)) -> Result<Value> {
+	pub fn hamming(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
 		super::check_similarity_input_length(
 			"string::distance::hamming",
 			&a,
 			&b,
-			super::default_sim_limit(),
+			ctx.config().limits.string_similarity_limit,
 		)?;
 		match strsim::hamming(&a, &b) {
 			Ok(v) => Ok(v.into()),
@@ -331,32 +331,32 @@ pub mod distance {
 		}
 	}
 
-	pub fn levenshtein((a, b): (String, String)) -> Result<Value> {
+	pub fn levenshtein(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
 		super::check_similarity_input_length(
 			"string::distance::levenshtein",
 			&a,
 			&b,
-			super::default_sim_limit(),
+			ctx.config().limits.string_similarity_limit,
 		)?;
 		Ok(strsim::levenshtein(&a, &b).into())
 	}
 
-	pub fn normalized_levenshtein((a, b): (String, String)) -> Result<Value> {
+	pub fn normalized_levenshtein(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
 		super::check_similarity_input_length(
 			"string::distance::normalized_levenshtein",
 			&a,
 			&b,
-			super::default_sim_limit(),
+			ctx.config().limits.string_similarity_limit,
 		)?;
 		Ok(strsim::normalized_levenshtein(&a, &b).into())
 	}
 
-	pub fn osa_distance((a, b): (String, String)) -> Result<Value> {
+	pub fn osa_distance(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
 		super::check_similarity_input_length(
 			"string::distance::osa_distance",
 			&a,
 			&b,
-			super::default_sim_limit(),
+			ctx.config().limits.string_similarity_limit,
 		)?;
 		Ok(strsim::osa_distance(&a, &b).into())
 	}
@@ -523,51 +523,52 @@ pub mod similarity {
 	use fuzzy_matcher::skim::SkimMatcherV2;
 	use strsim;
 
+	use crate::ctx::FrozenContext;
 	use crate::val::Value;
 
 	static MATCHER: LazyLock<SkimMatcherV2> =
 		LazyLock::new(|| SkimMatcherV2::default().ignore_case());
 
-	pub fn fuzzy(arg: (String, String)) -> Result<Value> {
-		smithwaterman(arg)
+	pub fn fuzzy(ctx: &FrozenContext, arg: (String, String)) -> Result<Value> {
+		smithwaterman(ctx, arg)
 	}
 
-	pub fn jaro((a, b): (String, String)) -> Result<Value> {
+	pub fn jaro(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
 		super::check_similarity_input_length(
 			"string::similarity::jaro",
 			&a,
 			&b,
-			super::default_sim_limit(),
+			ctx.config().limits.string_similarity_limit,
 		)?;
 		Ok(strsim::jaro(&a, &b).into())
 	}
 
-	pub fn jaro_winkler((a, b): (String, String)) -> Result<Value> {
+	pub fn jaro_winkler(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
 		super::check_similarity_input_length(
 			"string::similarity::jaro_winkler",
 			&a,
 			&b,
-			super::default_sim_limit(),
+			ctx.config().limits.string_similarity_limit,
 		)?;
 		Ok(strsim::jaro_winkler(&a, &b).into())
 	}
 
-	pub fn smithwaterman((a, b): (String, String)) -> Result<Value> {
+	pub fn smithwaterman(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
 		super::check_similarity_input_length(
 			"string::similarity::smithwaterman",
 			&a,
 			&b,
-			super::default_sim_limit(),
+			ctx.config().limits.string_similarity_limit,
 		)?;
 		Ok(MATCHER.fuzzy_match(&a, &b).unwrap_or(0).into())
 	}
 
-	pub fn sorensen_dice((a, b): (String, String)) -> Result<Value> {
+	pub fn sorensen_dice(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
 		super::check_similarity_input_length(
 			"string::similarity::sorensen_dice",
 			&a,
 			&b,
-			super::default_sim_limit(),
+			ctx.config().limits.string_similarity_limit,
 		)?;
 		Ok(strsim::sorensen_dice(&a, &b).into())
 	}
@@ -736,10 +737,16 @@ mod tests {
 
 	#[test]
 	fn string_replace() {
+		use std::sync::Arc;
+
+		use crate::ctx::Context;
+
+		let ctx: Arc<Context> = Arc::new(Context::background());
+
 		#[track_caller]
-		fn test(base: &str, pattern: Value, replacement: &str, expected: &str) {
+		fn test(ctx: &Arc<Context>, base: &str, pattern: Value, replacement: &str, expected: &str) {
 			assert_eq!(
-				replace((base.to_string(), pattern.clone(), replacement.to_string())).unwrap(),
+				replace(ctx, (base.to_string(), pattern.clone(), replacement.to_string())).unwrap(),
 				Value::from(expected),
 				"replace({},{},{})",
 				base,
@@ -748,8 +755,8 @@ mod tests {
 			);
 		}
 
-		test("foo bar", Value::Regex("foo".parse().unwrap()), "bar", "bar bar");
-		test("foo bar", "bar".into(), "foo", "foo foo");
+		test(&ctx, "foo bar", Value::Regex("foo".parse().unwrap()), "bar", "bar bar");
+		test(&ctx, "foo bar", "bar".into(), "foo", "foo foo");
 	}
 
 	#[test]
@@ -839,31 +846,36 @@ mod tests {
 
 	#[test]
 	fn similarity_distance_length_limit() {
-		use crate::cnf::LimitsConfig;
+		use std::sync::Arc;
 
-		let limit = LimitsConfig::default().string_similarity_limit;
+		use crate::ctx::Context;
+
+		let ctx: Arc<Context> = Arc::new(Context::background());
+		let limit = ctx.config().limits.string_similarity_limit;
 
 		let a = "hello".to_string();
 		let b = "world".to_string();
-		assert!(super::distance::levenshtein((a.clone(), b.clone())).is_ok());
-		assert!(super::distance::hamming((a.clone(), a.clone())).is_ok());
-		assert!(super::similarity::jaro((a.clone(), b.clone())).is_ok());
-		assert!(super::similarity::fuzzy((a, b)).is_ok());
+		assert!(super::distance::levenshtein(&ctx, (a.clone(), b.clone())).is_ok());
+		assert!(super::distance::hamming(&ctx, (a.clone(), a.clone())).is_ok());
+		assert!(super::similarity::jaro(&ctx, (a.clone(), b.clone())).is_ok());
+		assert!(super::similarity::fuzzy(&ctx, (a, b)).is_ok());
 
 		let long_a = "a".repeat(limit + 1);
 		let long_b = "b".repeat(limit + 1);
 		let short = "x".to_string();
 
-		assert!(super::distance::levenshtein((long_a.clone(), short.clone())).is_err());
-		assert!(super::similarity::jaro((long_a.clone(), short.clone())).is_err());
-		assert!(super::distance::levenshtein((short.clone(), long_b.clone())).is_err());
-		assert!(super::similarity::jaro((short, long_b.clone())).is_err());
-		assert!(super::distance::levenshtein((long_a.clone(), long_b.clone())).is_err());
-		assert!(super::similarity::jaro((long_a, long_b)).is_err());
+		assert!(super::distance::levenshtein(&ctx, (long_a.clone(), short.clone())).is_err());
+		assert!(super::similarity::jaro(&ctx, (long_a.clone(), short.clone())).is_err());
+		assert!(super::distance::levenshtein(&ctx, (short.clone(), long_b.clone())).is_err());
+		assert!(super::similarity::jaro(&ctx, (short, long_b.clone())).is_err());
+		assert!(super::distance::levenshtein(&ctx, (long_a.clone(), long_b.clone())).is_err());
+		assert!(super::similarity::jaro(&ctx, (long_a, long_b)).is_err());
 
 		let at_limit_a = "a".repeat(limit);
 		let at_limit_b = "b".repeat(limit);
-		assert!(super::distance::levenshtein((at_limit_a.clone(), at_limit_b.clone())).is_ok());
-		assert!(super::similarity::jaro((at_limit_a, at_limit_b)).is_ok());
+		assert!(
+			super::distance::levenshtein(&ctx, (at_limit_a.clone(), at_limit_b.clone())).is_ok()
+		);
+		assert!(super::similarity::jaro(&ctx, (at_limit_a, at_limit_b)).is_ok());
 	}
 }

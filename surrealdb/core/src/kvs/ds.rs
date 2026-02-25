@@ -675,7 +675,7 @@ impl Datastore {
 			transaction_timeout: None,
 			notification_channel: None,
 			capabilities: Arc::new(Capabilities::default()),
-			index_stores: IndexStores::default(),
+			index_stores: IndexStores::new(CoreConfig::default().caches.hnsw_cache_size),
 			index_builder: IndexBuilder::new(tf.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
@@ -722,7 +722,7 @@ impl Datastore {
 			transaction_timeout: self.transaction_timeout,
 			capabilities: self.capabilities,
 			notification_channel: self.notification_channel,
-			index_stores: Default::default(),
+			index_stores: IndexStores::new(self.config.caches.hnsw_cache_size),
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(Default::default()),

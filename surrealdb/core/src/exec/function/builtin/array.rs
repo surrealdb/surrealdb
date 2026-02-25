@@ -11,7 +11,7 @@ use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
 use crate::fnc::args::FromArgs;
 use crate::val::Value;
-use crate::{define_pure_function, register_functions};
+use crate::{define_config_function, define_pure_function, register_functions};
 
 // Single array argument functions
 define_pure_function!(ArrayDistinct, "array::distinct", (array: Any) -> Any, crate::fnc::array::distinct);
@@ -43,7 +43,7 @@ define_pure_function!(ArrayBooleanXor, "array::boolean_xor", (a: Any, b: Any) ->
 define_pure_function!(ArrayClump, "array::clump", (array: Any, size: Int) -> Any, crate::fnc::array::clump);
 define_pure_function!(ArrayCombine, "array::combine", (a: Any, b: Any) -> Any, crate::fnc::array::combine);
 define_pure_function!(ArrayComplement, "array::complement", (a: Any, b: Any) -> Any, crate::fnc::array::complement);
-define_pure_function!(ArrayConcat, "array::concat", (a: Any, b: Any) -> Any, crate::fnc::array::concat);
+define_config_function!(ArrayConcat, "array::concat", (a: Any, b: Any) -> Any, crate::fnc::array::concat);
 define_pure_function!(ArrayDifference, "array::difference", (a: Any, b: Any) -> Any, crate::fnc::array::difference);
 define_pure_function!(ArrayIntersect, "array::intersect", (a: Any, b: Any) -> Any, crate::fnc::array::intersect);
 define_pure_function!(ArrayJoin, "array::join", (array: Any, separator: String) -> String, crate::fnc::array::join);
@@ -54,15 +54,15 @@ define_pure_function!(ArrayMatches, "array::matches", (array: Any, value: Any) -
 define_pure_function!(ArrayPrepend, "array::prepend", (array: Any, value: Any) -> Any, crate::fnc::array::prepend);
 define_pure_function!(ArrayPush, "array::push", (array: Any, value: Any) -> Any, crate::fnc::array::push);
 define_pure_function!(ArrayRemove, "array::remove", (array: Any, index: Int) -> Any, crate::fnc::array::remove);
-define_pure_function!(ArrayRepeat, "array::repeat", (value: Any, count: Int) -> Any, crate::fnc::array::repeat);
+define_config_function!(ArrayRepeat, "array::repeat", (value: Any, count: Int) -> Any, crate::fnc::array::repeat);
 define_pure_function!(ArrayUnion, "array::union", (a: Any, b: Any) -> Any, crate::fnc::array::union);
 define_pure_function!(ArrayWindows, "array::windows", (array: Any, size: Int) -> Any, crate::fnc::array::windows);
-define_pure_function!(ArraySequence, "array::sequence", (start: Int, end: Int) -> Any, crate::fnc::array::sequence);
+define_config_function!(ArraySequence, "array::sequence", (start: Int, end: Int) -> Any, crate::fnc::array::sequence);
 
 // Three argument array functions
 define_pure_function!(ArrayFill, "array::fill", (array: Any, value: Any, ?index: Int) -> Any, crate::fnc::array::fill);
 define_pure_function!(ArrayInsert, "array::insert", (array: Any, value: Any, index: Int) -> Any, crate::fnc::array::insert);
-define_pure_function!(ArrayRange, "array::range", (array: Any, start: Int, end: Int) -> Any, crate::fnc::array::range);
+define_config_function!(ArrayRange, "array::range", (array: Any, start: Int, ? end: Int) -> Any, crate::fnc::array::range);
 define_pure_function!(ArraySlice, "array::slice", (array: Any, start: Int, ?length: Int) -> Any, crate::fnc::array::slice);
 define_pure_function!(ArraySwap, "array::swap", (array: Any, i: Int, j: Int) -> Any, crate::fnc::array::swap);
 
