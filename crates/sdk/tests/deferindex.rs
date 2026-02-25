@@ -163,29 +163,19 @@ async fn deferred_index_survives_restart() -> Result<(), Error> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
 #[test_log::test]
-// Check this issue: https://github.com/surrealdb/surrealdb/issues/6837
-async fn multi_index_concurrent_test_create_only() -> Result<(), Error> {
-	multi_index_concurrent_test(1000, &[(0.8, SQL_CREATE_COMMIT), (1.0, SQL_CREATE_CANCEL)]).await
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
-#[test_log::test]
-async fn multi_index_concurrent_test_create_delete() -> Result<(), Error> {
-	multi_index_concurrent_test(1000, &[(0.5, SQL_CREATE_COMMIT), (1.0, SQL_DELETE_COMMIT)]).await
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
-#[test_log::test]
-async fn multi_index_concurrent_test_create_update() -> Result<(), Error> {
-	multi_index_concurrent_test(1000, &[(0.5, SQL_CREATE_COMMIT), (1.0, SQL_UPDATE_COMMIT)]).await
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
-#[test_log::test]
 async fn multi_index_concurrent_test_create_update_delete() -> Result<(), Error> {
+	#[cfg(not(debug_assertions))]
+	let count = 1000;
+	#[cfg(debug_assertions)]
+	let count = 250;
 	multi_index_concurrent_test(
-		1000,
-		&[(0.33, SQL_CREATE_COMMIT), (0.66, SQL_UPDATE_COMMIT), (1.0, SQL_DELETE_COMMIT)],
+		count,
+		&[
+			(0.33, SQL_CREATE_COMMIT),
+			(0.40, SQL_CREATE_CANCEL),
+			(0.70, SQL_UPDATE_COMMIT),
+			(1.0, SQL_DELETE_COMMIT),
+		],
 	)
 	.await
 }

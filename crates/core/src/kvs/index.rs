@@ -282,6 +282,7 @@ impl IndexBuilder {
 				if let Err(e) = building.index_appending_loop(None).await {
 					error!("Index appending loop error: {}", e);
 					building.set_status(BuildingStatus::Error(e.to_string())).await;
+					break;
 				}
 				sleep(Duration::from_millis(100)).await;
 			}
@@ -562,7 +563,7 @@ impl Building {
 	/// This is used when the server is restarted during an indexing process.
 	async fn recover_queue(&self) -> Result<(), Error> {
 		let (ns, db) = self.opt.ns_db()?;
-		let (beg, end) = crate::key::index::ib::range(ns, db, &self.ix.what, &self.ix.name)?;
+		let (beg, end) = ib::range(ns, db, &self.ix.what, &self.ix.name)?;
 		let mut next = Some(beg..end);
 		let mut max_appending_id: Option<u32> = None;
 		let mut max_batch_id: Option<u32> = None;
@@ -633,25 +634,32 @@ impl Building {
 		// Store the appending
 		let ib = self.new_ib_key(appending_id, batch_id)?;
 		tx.set(ib, revision::to_vec(&appending)?, None).await?;
-		// Do we already have a primary indexing?
-		let ip = self.new_ip_key(rid.id.clone())?;
-		let v = tx.get(ip.clone(), None).await?;
-		let pa: Option<PrimaryAppending> = if let Some(v) = v {
-			Some(revision::from_slice(&v)?)
-		} else {
-			None
-		};
-		// We ignore legacy primary indexing.
-		// The initial batch is responsible for removing them, if any,
-		// and reporting their presence in the logs.
-		let is_pa = if let Some(pa) = pa {
-			pa.1 != QueueSequences::LEGACY_BATCH_ID
-		} else {
-			false
-		};
-		if !is_pa {
-			// If not, we set it
-			tx.set(ip, revision::to_vec(&PrimaryAppending(appending_id, batch_id))?, None).await?;
+		// The ip (primary appending) key is only needed during the initial build phase,
+		// where `check_existing_primary_appending` uses it to find the latest appending
+		// for a record being initially indexed. Once the initial build is complete
+		// (appending phase), we skip setting ip to avoid write-write conflicts with the
+		// deferred daemon which deletes ip keys.
+		if !self.initial_build_complete.load(Ordering::Relaxed) {
+			let ip = self.new_ip_key(rid.id.clone())?;
+			let v = tx.get(ip.clone(), None).await?;
+			let pa: Option<PrimaryAppending> = if let Some(v) = v {
+				Some(revision::from_slice(&v)?)
+			} else {
+				None
+			};
+			// We ignore legacy primary indexing.
+			// The initial batch is responsible for removing them, if any,
+			// and reporting their presence in the logs.
+			let is_pa = if let Some(pa) = pa {
+				pa.1 != QueueSequences::LEGACY_BATCH_ID
+			} else {
+				false
+			};
+			if !is_pa {
+				// If not, we set it
+				tx.set(ip, revision::to_vec(&PrimaryAppending(appending_id, batch_id))?, None)
+					.await?;
+			}
 		}
 		// Free the queue
 		drop(queue);
@@ -698,7 +706,7 @@ impl Building {
 				// and that the initial build is not done
 				catch!(tx, tx.set(key, revision::to_vec(&false)?, None).await);
 			}
-			tx.commit().await?;
+			catch!(tx, tx.commit().await);
 		}
 
 		// First iteration, we index every keys
@@ -748,7 +756,7 @@ impl Building {
 					)
 					.await
 				);
-				tx.commit().await?;
+				catch!(tx, tx.commit().await);
 			}
 		}
 		self.set_status(BuildingStatus::Indexing {
@@ -776,7 +784,7 @@ impl Building {
 		let ctx = self.new_write_tx_ctx().await?;
 		let tx = ctx.tx();
 		catch!(tx, tx.set(key, revision::to_vec(&initial_build_done)?, None).await);
-		tx.commit().await?;
+		catch!(tx, tx.commit().await);
 		Ok(())
 	}
 
@@ -842,7 +850,7 @@ impl Building {
 						)
 						.await
 					);
-					tx.commit().await?;
+					catch!(tx, tx.commit().await);
 					if !indexed.is_empty() {
 						{
 							let mut clean_queue = self.clean_queue.lock().await;
@@ -978,7 +986,7 @@ impl Building {
 					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);
 				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
 
-				// We can delete the ip record if any
+				// Delete the ip (primary appending) key if any
 				let ip = self.new_ip_key(rid.id)?;
 				tx.del(ip).await?;
 			}
