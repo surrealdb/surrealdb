@@ -241,8 +241,9 @@ async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk>
 
 	// Retrieve JWKS cache
 	let cache = kvs.jwks_cache();
+	let user_agent = kvs.config().http_client.user_agent.as_str();
 	// Attempt to fetch JWKS object from remote location
-	match fetch_jwks_from_url(cache, url).await {
+	match fetch_jwks_from_url(cache, url, user_agent).await {
 		Ok(jwks) => {
 			trace!("Successfully fetched JWKS object from remote location");
 			// Attempt to find JWK in JWKS by the key identifier
@@ -301,15 +302,15 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<()> {
 
 // Attempts to fetch a JWKS object from a remote location and stores it in the
 // cache if successful
-async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Result<JwkSet> {
+async fn fetch_jwks_from_url(
+	cache: &Arc<RwLock<JwksCache>>,
+	url: &str,
+	user_agent: &str,
+) -> Result<JwkSet> {
 	let client = Client::new();
 	let req = client.get(url);
-	// Add a User-Agent header so that WAF rules don't reject the request
 	#[cfg(not(target_family = "wasm"))]
-	let req = req.header(
-		reqwest::header::USER_AGENT,
-		crate::cnf::HttpClientConfig::default().user_agent.as_str(),
-	);
+	let req = req.header(reqwest::header::USER_AGENT, user_agent);
 	#[cfg(not(target_family = "wasm"))]
 	let res = req.timeout((*REMOTE_TIMEOUT).to_std().expect("valid duration")).send().await?;
 	#[cfg(target_family = "wasm")]

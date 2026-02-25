@@ -206,7 +206,6 @@ async fn http_request(
 
 	use reqwest::header::CONTENT_TYPE;
 
-	use crate::cnf::HttpClientConfig;
 	use crate::err::Error;
 	use crate::sql::expression::convert_public_value_to_internal;
 	use crate::syn;
@@ -277,8 +276,10 @@ async fn http_request(
 
 	// Add User-Agent header
 	if cfg!(not(target_family = "wasm")) {
-		req = req
-			.header(reqwest::header::USER_AGENT, HttpClientConfig::default().user_agent.as_str());
+		req = req.header(
+			reqwest::header::USER_AGENT,
+			ctx.exec_ctx.ctx().config().http_client.user_agent.as_str(),
+		);
 	}
 
 	// Add custom headers from opts
