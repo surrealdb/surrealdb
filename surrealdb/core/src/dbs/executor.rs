@@ -601,6 +601,22 @@ impl Executor {
 		start: &Instant,
 		plan: TopLevelExpr,
 	) -> Result<Value> {
+		match kvs.transaction_timeout() {
+			Some(timeout) => {
+				tokio::time::timeout(timeout, self.execute_plan_impl_inner(kvs, start, plan))
+					.await
+					.map_err(|_| anyhow!(Error::TransactionTimedout(timeout.into())))?
+			}
+			None => self.execute_plan_impl_inner(kvs, start, plan).await,
+		}
+	}
+
+	async fn execute_plan_impl_inner(
+		&mut self,
+		kvs: &Datastore,
+		start: &Instant,
+		plan: TopLevelExpr,
+	) -> Result<Value> {
 		let transaction_type = if plan.read_only() {
 			TransactionType::Read
 		} else {
@@ -654,6 +670,42 @@ impl Executor {
 	/// Execute the begin statement and all statements after which are within a
 	/// transaction block.
 	async fn execute_begin_statement<S>(
+		&mut self,
+		kvs: &Datastore,
+		stream: Pin<&mut S>,
+	) -> Result<()>
+	where
+		S: Stream<Item = Result<TopLevelExpr>>,
+	{
+		match kvs.transaction_timeout() {
+			Some(timeout) => {
+				let start_results = self.results.len();
+				match tokio::time::timeout(timeout, self.execute_begin_statement_inner(kvs, stream))
+					.await
+				{
+					Ok(result) => result,
+					Err(_) => {
+						for res in &mut self.results[start_results..] {
+							res.query_type = QueryType::Other;
+							res.result = Err(TypesError::query(
+								format!(
+									"The transaction timed out: {}",
+									crate::val::Duration::from(timeout)
+								),
+								Some(QueryError::TimedOut {
+									duration: timeout,
+								}),
+							));
+						}
+						bail!(Error::TransactionTimedout(timeout.into()))
+					}
+				}
+			}
+			None => self.execute_begin_statement_inner(kvs, stream).await,
+		}
+	}
+
+	async fn execute_begin_statement_inner<S>(
 		&mut self,
 		kvs: &Datastore,
 		mut stream: Pin<&mut S>,
