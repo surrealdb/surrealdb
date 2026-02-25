@@ -9,6 +9,7 @@ use crate::types::{PublicObject, PublicValue};
 use crate::val::{Value, convert_value_to_public_value};
 
 #[derive(Debug, Default, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(default)]
 pub struct ApiResponse {
 	pub status: StatusCode,

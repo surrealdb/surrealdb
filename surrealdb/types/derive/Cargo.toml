@@ -14,6 +14,11 @@ categories.workspace = true
 [lib]
 proc-macro = true
 
+[features]
+default = []
+# Enabled by the SDK (surrealdb crate): default path is `::surrealdb::types`.
+sdk-path = []
+
 [dependencies]
 syn = { version = "2.0", features = ["full", "extra-traits"] }
 quote = "1.0"

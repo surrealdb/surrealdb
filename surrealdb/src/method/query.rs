@@ -630,11 +630,13 @@ mod tests {
 	use super::*;
 
 	#[derive(Debug, Clone, SurrealValue)]
+	#[surreal(crate = "crate::types")]
 	struct Summary {
 		title: String,
 	}
 
 	#[derive(Debug, Clone, SurrealValue)]
+	#[surreal(crate = "crate::types")]
 	struct Article {
 		title: String,
 		body: String,

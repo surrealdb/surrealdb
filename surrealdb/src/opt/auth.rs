@@ -19,6 +19,7 @@ pub trait Credentials<Action>: SurrealValue {}
 
 /// Credentials for the root user
 #[derive(Debug, Clone, SurrealValue)]
+#[surreal(crate = "crate::types")]
 pub struct Root {
 	/// The username of the root user
 	#[surreal(rename = "user")]
@@ -32,6 +33,7 @@ impl Credentials<Signin> for Root {}
 
 /// Credentials for the namespace user
 #[derive(Debug, Clone, SurrealValue)]
+#[surreal(crate = "crate::types")]
 pub struct Namespace {
 	/// The namespace the user has access to
 	#[surreal(rename = "ns")]
@@ -48,6 +50,7 @@ impl Credentials<Signin> for Namespace {}
 
 /// Credentials for the database user
 #[derive(Debug, Clone, SurrealValue)]
+#[surreal(crate = "crate::types")]
 pub struct Database {
 	/// The namespace the user has access to
 	#[surreal(rename = "ns")]
@@ -252,6 +255,7 @@ impl SurrealValue for Token {
 /// JWT. For example, it can be stored in a secure cookie or encrypted in conjunction with other
 /// encryption mechanisms.
 #[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+#[surreal(crate = "crate::types")]
 pub struct AccessToken(pub(crate) SecureToken);
 
 impl AccessToken {
@@ -307,6 +311,7 @@ impl AccessToken {
 /// // (implementation depends on your authentication flow)
 /// ```
 #[derive(Debug, Serialize, Deserialize, SurrealValue)]
+#[surreal(crate = "crate::types")]
 pub struct RefreshToken(pub(crate) SecureToken);
 
 impl RefreshToken {
@@ -337,6 +342,7 @@ impl RefreshToken {
 /// The struct is marked as `pub(crate)` to keep it internal to the crate
 /// while still allowing access from other modules within the same crate.
 #[derive(Clone, Serialize, Deserialize, SurrealValue)]
+#[surreal(crate = "crate::types")]
 pub(crate) struct SecureToken(pub(crate) String);
 
 impl fmt::Debug for SecureToken {

@@ -696,16 +696,25 @@ pub(super) fn all_value_sources(sources: &[Expr]) -> bool {
 // ============================================================================
 
 /// Extract MATCHES clause information from a WHERE condition for index functions.
-pub(super) fn extract_matches_context(cond: &Cond) -> crate::exec::function::MatchesContext {
-	let mut collector = MatchesCollector(crate::exec::function::MatchesContext::new());
+///
+/// Accepts an optional `FrozenContext` to resolve bind parameters (`$query`)
+/// that appear on the right-hand side of `@N@` operators.
+pub(super) fn extract_matches_context(
+	cond: &Cond,
+	ctx: Option<&crate::ctx::FrozenContext>,
+) -> crate::exec::function::MatchesContext {
+	let mut collector = MatchesCollector(crate::exec::function::MatchesContext::new(), ctx);
 	let _ = collector.visit_expr(&cond.0);
 	collector.0
 }
 
 /// Visitor that collects MATCHES clause entries from expression trees.
-struct MatchesCollector(crate::exec::function::MatchesContext);
+struct MatchesCollector<'a>(
+	crate::exec::function::MatchesContext,
+	Option<&'a crate::ctx::FrozenContext>,
+);
 
-impl Visitor for MatchesCollector {
+impl Visitor for MatchesCollector<'_> {
 	type Error = std::convert::Infallible;
 
 	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
@@ -714,16 +723,36 @@ impl Visitor for MatchesCollector {
 			op: BinaryOperator::Matches(matches_op),
 			right,
 		} = expr && let Expr::Idiom(idiom) = left.as_ref()
-			&& let Expr::Literal(Literal::String(s)) = right.as_ref()
 		{
-			let match_ref = matches_op.rf.unwrap_or(0);
-			self.0.insert(
-				match_ref,
-				crate::exec::function::MatchInfo {
-					idiom: idiom.clone(),
-					query: s.clone(),
-				},
-			);
+			// Extract the query string from the right-hand side.
+			// Supports both literal strings and bind parameters.
+			let query_str = match right.as_ref() {
+				Expr::Literal(Literal::String(s)) => Some(s.clone()),
+				Expr::Param(param) => {
+					// Resolve the bind parameter from the frozen context
+					self.1.and_then(|ctx| {
+						ctx.value(param.as_str()).and_then(|v| {
+							if let crate::val::Value::String(s) = v {
+								Some(s.clone())
+							} else {
+								None
+							}
+						})
+					})
+				}
+				_ => None,
+			};
+
+			if let Some(query) = query_str {
+				let match_ref = matches_op.rf.unwrap_or(0);
+				self.0.insert(
+					match_ref,
+					crate::exec::function::MatchInfo {
+						idiom: idiom.clone(),
+						query,
+					},
+				);
+			}
 		}
 		expr.visit(self)
 	}

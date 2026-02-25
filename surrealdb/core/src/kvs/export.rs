@@ -19,6 +19,7 @@ use crate::kvs::KVValue;
 use crate::sql::statements::OptionStatement;
 
 #[derive(Clone, Debug, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(default)]
 pub struct Config {
 	pub users: bool,
@@ -49,6 +50,7 @@ impl Default for Config {
 }
 
 #[derive(Clone, Debug, Default, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(untagged)]
 pub enum TableConfig {
 	#[default]
