@@ -201,8 +201,8 @@ tar = "0.4.44"
 toml = "0.9.11"
 walrus = "0.24.4"
 wasm-opt = "0.116.1"
-wasmtime = { version = "41.0.0", default-features = false, features = ["cranelift", "winch", "runtime", "std", "wat"] }
-wasmtime-wasi = { version = "41.0.0", features = ["p1"] }
+wasmtime = { version = "41.0.4", default-features = false, features = ["cranelift", "winch", "runtime", "std", "wat"] }
+wasmtime-wasi = { version = "41.0.4", features = ["p1"] }
 zstd = "0.13.3"
 
 [package]
