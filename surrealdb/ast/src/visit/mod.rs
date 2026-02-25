@@ -54,6 +54,7 @@ impl_visitor! {
 			TopLevelExpr::Option(node_id) => todo!(),
 			TopLevelExpr::Expr(node_id) => todo!(),
 			TopLevelExpr::Kill(node_id) => todo!(),
+			TopLevelExpr::Show(node_id) => todo!(),
 		}
 		Ok(())
 	}

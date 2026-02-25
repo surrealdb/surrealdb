@@ -1,31 +1,57 @@
-use ast::{KillKind, Query, TopLevelExpr, Transaction, UseKind};
+use ast::{AstSpan, KillKind, NodeId, NodeListId, Query, TopLevelExpr, Transaction, UseKind};
 use common::source_error::{AnnotationKind, Level};
 use token::{BaseTokenKind, T};
 
 use super::{Parse, ParseResult, ParseSync, Parser};
 use crate::parse::ParserState;
 
+fn name_previous_statement(prev: NodeId<TopLevelExpr>, parser: &Parser<'_, '_>) -> &'static str {
+	match parser[prev] {
+		TopLevelExpr::Transaction(_) => "a transaction",
+		TopLevelExpr::Expr(n) => match parser[n] {
+			ast::Expr::Path(n) => {
+				if parser[n].parts.is_none() {
+					"an identifier"
+				} else {
+					"a path"
+				}
+			}
+			_ => "an expression",
+		},
+		_ => "a statement",
+	}
+}
+
 impl Parse for ast::Query {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let span = parser.peek_span();
 
 		let mut exprs = None;
-		let mut cur = None;
+		let mut cur: Option<NodeListId<ast::TopLevelExpr>> = None;
 		while let Some(next) = parser.peek()? {
-			if exprs.is_some() {
+			if let Some(cur) = cur {
 				if parser.eat(T![;])?.is_none() {
 					return Err(parser.with_error(|parser| {
+						let last_stmt = parser[cur].cur;
+						let last_stmt_span = last_stmt.ast_span(parser);
+						let last_stmt_name = name_previous_statement(last_stmt, parser);
+
 						Level::Error
 							.title(format!(
 								"Unexpected token `{}`, expected `;`",
 								parser.slice(next.span)
 							))
 							.snippet(
-								parser.snippet().annotate(
-									AnnotationKind::Primary
-										.span(span)
-										.label("Maybe missing a semicolon on the last statement?"),
-								),
+								parser
+									.snippet()
+									.annotate(AnnotationKind::Primary.span(next.span).label(
+										"Maybe missing a semicolon after the last statement?",
+									))
+									.annotate(AnnotationKind::Context.span(last_stmt_span).label(
+										format!(
+											"The last statement here was parsed as {last_stmt_name}"
+										),
+									)),
 							)
 							.to_diagnostic()
 					}));
@@ -105,6 +131,7 @@ impl Parse for ast::TopLevelExpr {
 			T![USE] => Ok(TopLevelExpr::Use(parser.parse_sync_push()?)),
 			T![OPTION] => Ok(TopLevelExpr::Option(parser.parse_sync_push()?)),
 			T![KILL] => Ok(TopLevelExpr::Kill(parser.parse_sync_push()?)),
+			T![SHOW] => Ok(TopLevelExpr::Show(parser.parse_push().await?)),
 			_ => Ok(TopLevelExpr::Expr(parser.parse_push().await?)),
 		}
 	}
