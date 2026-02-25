@@ -25,7 +25,6 @@ url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 [imports.zcash]
 url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml"
 
-# All workspace crates: treat as trusted first-party (no per-version exemptions).
 [policy.demo]
 audit-as-crates-io = false
 
@@ -33,6 +32,9 @@ audit-as-crates-io = false
 audit-as-crates-io = false
 
 [policy.surrealdb]
+audit-as-crates-io = false
+
+[policy.surrealdb-cfg]
 audit-as-crates-io = false
 
 [policy.surrealdb-core]
@@ -1424,10 +1426,6 @@ criteria = "safe-to-deploy"
 [[exemptions.sdd]]
 version = "3.0.10"
 criteria = "safe-to-run"
-
-[[exemptions.seahash]]
-version = "4.1.0"
-criteria = "safe-to-deploy"
 
 [[exemptions.sec1]]
 version = "0.7.3"

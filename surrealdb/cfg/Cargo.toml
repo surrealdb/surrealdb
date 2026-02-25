@@ -1,11 +1,17 @@
 [package]
 name = "surrealdb-cfg"
-version.workspace = true
-publish = false
-authors.workspace = true
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-cfg/"
 edition.workspace = true
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 license-file.workspace = true
-description = "Configuration structs for SurrealDB core engine"
 
 [features]
 default = []
