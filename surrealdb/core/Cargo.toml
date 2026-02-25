@@ -90,6 +90,7 @@ lexicmp.workspace = true
 reblessive = { workspace = true, features = ["tree"] }
 revision.workspace = true
 storekey.workspace = true
+surrealdb-cfg = { workspace = true }
 surrealdb-types = { workspace = true }
 vart.workspace = true
 

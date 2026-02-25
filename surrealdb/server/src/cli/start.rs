@@ -125,6 +125,10 @@ pub struct StartCommandArguments {
 	#[command(flatten)]
 	#[command(next_help_heading = "Database")]
 	dbs: StartCommandDbsOptions,
+	//
+	// Core engine tuning
+	#[command(flatten)]
+	core_config: surrealdb_cfg::CoreConfig,
 }
 
 #[derive(Args, Debug)]
@@ -184,6 +188,7 @@ pub async fn init<
 		event_processing_interval,
 		no_banner,
 		no_identification_headers,
+		core_config,
 		..
 	}: StartCommandArguments,
 	server_config: ServerConfig,
@@ -240,7 +245,8 @@ pub async fn init<
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore
-	let datastore = Arc::new(dbs::init::<C>(composer, &config, canceller.clone(), dbs).await?);
+	let datastore =
+		Arc::new(dbs::init::<C>(composer, &config, canceller.clone(), dbs, core_config).await?);
 	// Register datastore metrics
 	register_datastore_metrics(datastore.clone());
 	// Start the node agent

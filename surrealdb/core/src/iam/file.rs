@@ -2,7 +2,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use path_clean::PathClean;
 
 use crate::err::Error;
 
@@ -54,12 +53,9 @@ fn check_is_path_allowed(path: &Path, allowed_paths: &[PathBuf]) -> Result<PathB
 	}
 }
 
-pub(crate) fn extract_allowed_paths(
-	input: &str,
-	canonicalize: bool,
-	subject: &str,
-) -> Vec<PathBuf> {
-	// or a semicolon on Windows.
+#[cfg(test)]
+fn extract_allowed_paths(input: &str, canonicalize: bool, subject: &str) -> Vec<PathBuf> {
+	use path_clean::PathClean;
 	let delimiter = if cfg!(target_os = "windows") {
 		";"
 	} else {

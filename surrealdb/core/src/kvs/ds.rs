@@ -622,7 +622,7 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Self> {
-		Self::new_with_config(path, CoreConfig::from_env()).await
+		Self::new_with_config(path, CoreConfig::default()).await
 	}
 
 	/// Creates a new datastore with explicit configuration.
@@ -736,6 +736,12 @@ impl Datastore {
 			surrealism_cache: Arc::new(SurrealismCache::new(surrealism_cache_size)),
 			async_event_trigger: self.async_event_trigger,
 		}
+	}
+
+	/// Set the core engine configuration for this datastore.
+	pub fn with_config(mut self, config: CoreConfig) -> Self {
+		self.config = Arc::new(config);
+		self
 	}
 
 	/// Set the node id for this datastore.

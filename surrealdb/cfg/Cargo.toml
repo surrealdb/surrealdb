@@ -1,0 +1,18 @@
+[package]
+name = "surrealdb-cfg"
+version.workspace = true
+publish = false
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description = "Configuration structs for SurrealDB core engine"
+
+[features]
+default = []
+cli = ["dep:clap"]
+
+[dependencies]
+clap = { workspace = true, features = ["derive", "env"], optional = true }
+
+[lints]
+workspace = true

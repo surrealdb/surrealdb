@@ -736,6 +736,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		default_database,
 		no_defaults,
 	}: StartCommandDbsOptions,
+	core_config: surrealdb_cfg::CoreConfig,
 ) -> Result<Datastore> {
 	// Warn about the strict mode flag being unused.
 	if let Some(true) = strict_mode {
@@ -779,6 +780,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	// Parse and setup the desired kv datastore
 	let dbs = Datastore::new_with_factory::<C>(composer, &opt.path, canceller)
 		.await?
+		.with_config(core_config)
 		.with_notifications()
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
