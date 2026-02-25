@@ -1,9 +1,11 @@
 use std::str::FromStr;
+use std::time::Duration;
 
 use ast::PathSegment;
 use common::source_error::{AnnotationKind, Level};
+use logos::Logos;
 use rust_decimal::Decimal;
-use token::{BaseTokenKind, T};
+use token::{BaseTokenKind, DurationToken, T};
 
 use super::{ParseResult, ParseSync, Parser};
 
@@ -126,5 +128,91 @@ impl ParseSync for ast::StringLit {
 			text: slice,
 			span: token.span,
 		})
+	}
+}
+
+impl ParseSync for Duration {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		const NANOSECOND_DURATION_MAX: u128 = (u64::MAX as u128) * 1_000_000_000 + 999_999_999;
+		const MICRO_SECOND: u128 = 1_000;
+		const MILI_SECOND: u128 = 1_000 * MICRO_SECOND;
+		const SECOND: u128 = 1_000 * MILI_SECOND;
+		const MINUTE: u128 = 60 * SECOND;
+		const HOUR: u128 = 60 * MINUTE;
+		const DAY: u128 = 24 * HOUR;
+		const WEEK: u128 = 7 * DAY;
+		const YEAR: u128 = 365 * DAY;
+
+		let token = parser.expect(BaseTokenKind::Duration)?;
+		let slice = parser.slice(token.span);
+
+		let mut lexer = DurationToken::lexer(slice);
+		let mut duration = 0u128;
+		loop {
+			let number = match lexer.next() {
+				None => break,
+				Some(Ok(DurationToken::Digits)) => {
+					let Some(x) = lexer.slice().parse::<u128>().ok().and_then(|x| {
+						if x > NANOSECOND_DURATION_MAX {
+							None
+						} else {
+							Some(x)
+						}
+					}) else {
+						return Err(parser.with_error(|parser| {
+							Level::Error
+								.title(
+									"Duration value overflowed, value larger then maximum supported value",
+								)
+								.snippet(
+									parser
+										.snippet()
+										.annotate(AnnotationKind::Primary.span(token.span)),
+								)
+								.to_diagnostic()
+						}));
+					};
+					x
+				}
+				// Previously already enforced by the base token lexer
+				_ => unreachable!(),
+			};
+
+			let sub_duration = match lexer.next() {
+				Some(Ok(DurationToken::Year)) => number.checked_mul(YEAR),
+				Some(Ok(DurationToken::Week)) => number.checked_mul(WEEK),
+				Some(Ok(DurationToken::Day)) => number.checked_mul(DAY),
+				Some(Ok(DurationToken::Hour)) => number.checked_mul(HOUR),
+				Some(Ok(DurationToken::Minute)) => number.checked_mul(MINUTE),
+				Some(Ok(DurationToken::Second)) => number.checked_mul(SECOND),
+				Some(Ok(DurationToken::MiliSecond)) => number.checked_mul(MILI_SECOND),
+				Some(Ok(DurationToken::MicroSecond)) => number.checked_mul(MICRO_SECOND),
+				Some(Ok(DurationToken::NanoSecond)) => Some(number),
+				// Previously already enforced by the base token lexer
+				_ => unreachable!(),
+			};
+
+			let Some(x) = sub_duration.and_then(|x| duration.checked_add(x)).and_then(|x| {
+				if x > NANOSECOND_DURATION_MAX {
+					None
+				} else {
+					Some(x)
+				}
+			}) else {
+				return Err(parser.with_error(|parser| {
+					Level::Error
+						.title(
+							"Duration value overflowed, value larger then maximum supported value",
+						)
+						.snippet(
+							parser.snippet().annotate(AnnotationKind::Primary.span(token.span)),
+						)
+						.to_diagnostic()
+				}));
+			};
+			duration = x;
+		}
+
+		Ok(Duration::from_nanos_u128(duration))
 	}
 }

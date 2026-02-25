@@ -16,6 +16,7 @@ use crate::peekable::PeekableLexer;
 mod basic;
 mod error;
 mod expr;
+mod kind;
 mod peek;
 pub mod prime;
 mod record_id;
@@ -201,6 +202,86 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 					e.to_diagnostic()
 						.expect("A parser internal error was returned outside of the context where such errors should be generated.")
 				});
+			}
+
+			if runner.depth() > config.depth_limit {
+				std::mem::drop(runner);
+				return Err(parser
+					.error("Parser hit maximum configured recursion depth")
+					.to_diagnostic()
+					.unwrap());
+			}
+		}
+	}
+
+	/// Parse a parsable type in partial mode.
+	///
+	/// In partial mode if the parser encounters an error which happend due to a sudden end of the
+	/// source it will return `Ok(None)` instead of an error assuming the error can fixed by adding
+	/// more data to the source.
+	pub fn enter_partial_parse<P: Parse + Node>(
+		source: &str,
+		stack: &mut Stack,
+		ast: &mut Ast,
+		config: Config,
+	) -> Result<Option<NodeId<P>>, TypedError<Diagnostic<'static>>> {
+		let lex = BaseTokenKind::lexer(source);
+		let lex = PeekableLexer::new(lex);
+
+		let mut features = ParserSettings::PARTIAL;
+
+		if config.legacy_strands {
+			features |= ParserSettings::LEGACY_STRAND;
+		}
+		if config.generate_warnings {
+			features |= ParserSettings::WARNINGS;
+		}
+		if config.feature_references {
+			features |= ParserSettings::FEAT_REFERENCES;
+		}
+		if config.feature_define_api {
+			features |= ParserSettings::FEAT_DEFINE_API;
+		}
+		if config.feature_files {
+			features |= ParserSettings::FEAT_FILES;
+		}
+		if config.legacy_strands {
+			features |= ParserSettings::LEGACY_STRAND;
+		}
+
+		let mut parser = Parser {
+			lex,
+			last_span: Span::empty(),
+			ast,
+			settings: features,
+			state: ParserState::empty(),
+			unescape_buffer: String::new(),
+		};
+
+		if source.len() > u32::MAX as usize {
+			return Err(parser
+				.error("Query length exceeds maximum length supported by the parser")
+				.to_diagnostic()
+				.unwrap());
+		}
+
+		// We ignore the stk which is mostly just to ensure the no accidental panics or infinite
+		// loops because we can maintain it's savety guarentees within the parser.
+		let mut runner = stack.enter(|_| parser.parse_push());
+
+		loop {
+			if let Some(x) = runner.step() {
+				match x {
+					Ok(x) => return Ok(Some(x)),
+					Err(e) => {
+						if e.is_missing_data() {
+							return Ok(None);
+						}
+
+						return Err(e.to_diagnostic()
+						.expect("A parser internal error was returned outside of the context where such errors should be generated."));
+					}
+				}
 			}
 
 			if runner.depth() > config.depth_limit {
@@ -528,7 +609,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 					return ParseError::speculate_error();
 				}
 				self.error(format!(
-					"Unexpected token `{}`, expected `{}`",
+					"Unexpected token `{}`, expected {}",
 					self.slice(token.span),
 					expected
 				))
@@ -537,7 +618,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				if self.state.contains(ParserState::SPECULATING) {
 					return ParseError::speculate_error();
 				}
-				self.error(format!("Unexpected end of query, expected `{}`", expected))
+				self.error(format!("Unexpected end of query, expected {}", expected))
 			}
 		}
 	}
@@ -558,9 +639,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
 		let message = match peek {
 			Some(token) => {
-				format!("Unexpected token `{}`, expected `{}`", self.slice(token.span), expected)
+				format!("Unexpected token `{}`, expected {}", self.slice(token.span), expected)
 			}
-			None => format!("Unexpected token end of query, expected `{}`", expected),
+			None => format!("Unexpected token end of query, expected {}", expected),
 		};
 
 		let span = self.peek_span();
@@ -643,9 +724,10 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		Snippet::source(self.lex.source())
 	}
 
-	/// A tiny function, handing the current span to a callback.
-	/// Mostly usefully because of it's cold annotation, meaning it's use will automatically flag a
-	/// branch as being unlikely to be taken, and can be optimized with that assumption.
+	/// A tiny function, for creating an error handing the current span to a callback.
+	///
+	/// This function will only call the callback if the parser is not in the speculating state,
+	/// otherwise this function will return `ParseError::speculate_error()`
 	#[cold]
 	pub fn with_error<F>(&mut self, cb: F) -> ParseError
 	where
@@ -676,12 +758,17 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	#[cold]
 	fn lex_error(&mut self, e: LexError) -> ParseError {
 		match e {
-			LexError::UnexpectedEof(span) => self.with_error(|this| {
-				Level::Error
-					.title("Unexpected end of query while lexing a token")
-					.snippet(this.snippet().annotate(AnnotationKind::Primary.span(span)))
-					.to_diagnostic()
-			}),
+			LexError::UnexpectedEof(span) => {
+				if self.settings.contains(ParserSettings::PARTIAL) {
+					return ParseError::missing_data_error();
+				}
+				self.with_error(|this| {
+					Level::Error
+						.title("Unexpected end of query while lexing a token")
+						.snippet(this.snippet().annotate(AnnotationKind::Primary.span(span)))
+						.to_diagnostic()
+				})
+			}
 			LexError::InvalidToken(span) => self.with_error(|this| {
 				Level::Error
 					.title("Invalid token")
@@ -704,9 +791,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				return Err(self.with_error(|this| {
 					Level::Error
 						.title(format!(
-							"Unexpected token `{}`, expected closing delimiter `{}`",
+							"Unexpected token `{}`, expected closing delimiter {}",
 							this.slice(span),
-							delimiter
+							delimiter.description()
 						))
 						.snippet(
 							this.snippet().annotate(AnnotationKind::Primary.span(span)).annotate(
@@ -723,8 +810,8 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			return Err(self.with_error(|this| {
 				Level::Error
 					.title(format!(
-						"Unexpected end of query, expected closing delimiter `{}`",
-						delimiter
+						"Unexpected end of query, expected closing delimiter {}",
+						delimiter.description()
 					))
 					.snippet(
 						this.snippet()

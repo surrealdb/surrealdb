@@ -1,33 +1,26 @@
-use ast::{Builtin, Expr, Integer, NodeList, ObjectEntry, Point, Sign, Spanned};
+use ast::{Builtin, Expr, ObjectEntry, Point, Spanned};
 use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
 use token::{BaseTokenKind, T};
 
 use crate::Parse;
-use crate::parse::{ParseError, ParseResult, Parser};
+use crate::parse::utils::parse_delimited_list;
+use crate::parse::{ParseResult, Parser};
 
 impl Parse for ast::Array {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
-		let start = parser.expect(BaseTokenKind::OpenBracket)?;
-		let mut head = None;
-		let mut tail = None;
-		loop {
-			if parser.eat(BaseTokenKind::CloseBracket)?.is_some() {
-				break;
-			}
-
-			let expr = parser.parse_enter::<ast::Expr>().await?;
-			parser.push_list(expr, &mut head, &mut tail);
-
-			if parser.eat(T![,])?.is_none() {
-				let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseBracket, start.span)?;
-				break;
-			}
-		}
+		let (span, entries) = parse_delimited_list(
+			parser,
+			BaseTokenKind::OpenBracket,
+			BaseTokenKind::CloseBracket,
+			T![,],
+			async |parser| parser.parse_enter().await,
+		)
+		.await?;
 
 		Ok(ast::Array {
-			entries: head,
-			span: parser.span_since(start.span),
+			entries,
+			span,
 		})
 	}
 }
@@ -392,7 +385,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				return Ok(Expr::Point(point));
 			};
 
-			// not a point, so it has to be a partial expression.
+			// not a point, so it has to be a covered expression.
 			let expr = parser.parse_enter_push().await?;
 			let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, peek.span)?;
 			Ok(Expr::Covered(expr))
@@ -437,6 +430,10 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			let uuid = parser.parse_sync_push()?;
 			Ok(Expr::DateTime(uuid))
 		}
+		BaseTokenKind::Duration => {
+			let uuid = parser.parse_sync_push()?;
+			Ok(Expr::Duration(uuid))
+		}
 		T![IF] => {
 			let expr = parser.parse_push().await?;
 			Ok(Expr::If(expr))
@@ -445,7 +442,20 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			let expr = parser.parse_push().await?;
 			Ok(Expr::Let(expr))
 		}
-		BaseTokenKind::Ident => {
+		T![INFO] => {
+			let expr = parser.parse_push().await?;
+			Ok(Expr::Info(expr))
+		}
+		T![THROW] => {
+			let _ = parser.next();
+			let expr = parser.parse_enter_push().await?;
+			Ok(Expr::Throw(expr))
+		}
+		BaseTokenKind::Param => {
+			let path = parser.parse_sync_push()?;
+			Ok(Expr::Param(path))
+		}
+		x if x.is_identifier() => {
 			let peek1 = parser.peek1()?;
 
 			if peek1.map(|x| x.token) == Some(T![:]) {
@@ -455,10 +465,6 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				let path = parser.parse_sync_push()?;
 				Ok(Expr::Path(path))
 			}
-		}
-		BaseTokenKind::Param => {
-			let path = parser.parse_sync_push()?;
-			Ok(Expr::Param(path))
 		}
 		_ => Err(parser.with_error(|parser| {
 			Level::Error

@@ -9,8 +9,12 @@ use logos::Lexer;
 #[macro_use]
 mod mac;
 mod base;
+mod duration;
+pub use duration::DurationToken;
 mod uuid;
 pub use uuid::UuidToken;
+mod datetime;
+pub use datetime::DateTimeToken;
 mod version;
 pub use version::VersionToken;
 mod escaped;

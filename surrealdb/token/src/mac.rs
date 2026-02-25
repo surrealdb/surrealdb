@@ -15,7 +15,9 @@ macro_rules! T {
 	(%) => {
 		$crate::BaseTokenKind::Percent
 	};
-
+	(|) => {
+		$crate::BaseTokenKind::HLine
+	};
 	(||) => {
 		$crate::BaseTokenKind::HLineHLine
 	};
