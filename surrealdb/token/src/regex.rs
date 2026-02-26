@@ -5,7 +5,7 @@ use crate::Joined;
 #[derive(Logos, Clone, Copy, PartialEq, Eq, Debug)]
 #[logos(extras = Joined)]
 pub enum RegexToken {
-	#[regex("(?m)[^/]+")]
+	#[regex("[^/]+")]
 	Source,
 	#[token("\\/")]
 	Escape,

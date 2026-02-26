@@ -4,7 +4,7 @@ use crate::Joined;
 
 #[derive(Logos, Clone, Copy, PartialEq, Eq, Debug)]
 #[logos(extras = Joined)]
-#[logos(subpattern source = r#"[^\]\[\{\}\(\)"'`]|"([^"]|\\")*"|'([^']|\\')*'|\\\{|\\\}|\\\(|\\\)|\\\[|\\\]"#)]
+#[logos(subpattern source = r#"[^\]\[\{\}\(\)"'`]|//[^\n]*\n|/\*([^*]|\*[^/])*\*/|"([^"]|\\")*"|'([^']|\\')*'|\\\{|\\\}|\\\(|\\\)|\\\[|\\\]"#)]
 pub enum JsFunctionToken {
 	#[regex(r"(?&source)*\{")]
 	BraceOpen,

@@ -1,3 +1,6 @@
+//! Module implementing special tokens which require additional parsing or require a separate lexer
+//! from the normal lexer because of token conflicts.
+
 use std::ops::{Range, RangeInclusive};
 
 use ast::DateTime;
@@ -14,6 +17,9 @@ use uuid::Uuid;
 use crate::parse::{ParseError, ParseResult};
 use crate::{ParseSync, Parser};
 
+/// Create an unexpected token error for productions parsed from an escaped string.
+///
+/// This function maps the span from the escaped string to the span in the orignal source.
 fn unexpected_error(
 	full_source: &str,
 	unescape_source: &str,
@@ -34,6 +40,7 @@ fn unexpected_error(
 	)
 }
 
+/// Parse a version `1.2.3`, token conflicts with a float so needs special consideration.
 impl ParseSync for ast::Version {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
 		fn eat_version(partial: bool, lexer: &mut Lexer<'_, VersionToken>) -> ParseResult<u64> {
@@ -142,6 +149,9 @@ impl ParseSync for ast::Version {
 	}
 }
 
+/// Parse a UUID string.
+///
+/// String first needs to be unescaped and then parsed for correct UUID format.
 impl ParseSync for Uuid {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
 		let token = parser.expect(BaseTokenKind::UuidString)?;
@@ -254,6 +264,9 @@ impl ParseSync for Uuid {
 	}
 }
 
+/// Parse a DateTime string.
+///
+/// String first needs to be unescaped and then parsed for correct DateTime format.
 impl ParseSync for DateTime {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
 		// Taken from chrono docs, who took it from the rfc docs.
@@ -618,6 +631,10 @@ impl ParseSync for DateTime {
 	}
 }
 
+/// Parse a regex.
+///
+/// A regex works almost like a string but its delimiter `/` conflicts with the division operator
+/// so it cannot be lexed by the normal lexer.
 impl ParseSync for ast::Regex {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
 		let start = parser.expect(T![/])?;
@@ -678,12 +695,13 @@ impl ParseSync for ast::JsFunctionBody {
 		// Unfortunatly delimiters in a js function body are not always balanced. Instances where
 		// we should not track delimiter tokens are:
 		// 1. Strings like "]" and '{';
-		// 2. Template strings like `[`
-		// 3. Regexes like /\[/
+		// 2. Coments like `// ]` and `/* ) */`
+		// 3. Template strings like `[`
+		// 4. Regexes like /\[/
 		//
-		// The first is handled by the lexer.
+		// The first and second are handled by the lexer.
 		//
-		// The second requires some work, because you can have `foo ${ `recursive template ${ string
+		// The third requires some work, because you can have `foo ${ `recursive template ${ string
 		// }` } bar` We cannot just snip out anything between two `` but need to restart counting
 		// delimiters when entering a template expression (the `${ }` part).
 		//
@@ -693,8 +711,6 @@ impl ParseSync for ast::JsFunctionBody {
 		// delimiters everywhere in a javascript body. Escaped delimiters are not valid syntax in
 		// normal javascript; `\(`, `\[` is never valid syntax outside of a regex so doing it this
 		// way should only ignore those delimiters that happened to be part of a regex.
-		//
-		//
 
 		#[derive(Clone, Copy, Eq, PartialEq)]
 		enum Delimiter {
