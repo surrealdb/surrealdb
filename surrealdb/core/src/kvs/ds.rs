@@ -661,7 +661,7 @@ impl Datastore {
 		// Initiate the desired datastore
 		let builder = composer.new_transaction_builder(path, &config, canceller).await?;
 		//
-		let buckets = BucketsManager::new(Arc::new(composer));
+		let buckets = BucketsManager::new(Arc::new(composer), config.files.clone());
 		// Set the properties on the datastore
 		Self::new_with_builder(builder, buckets, config)
 	}

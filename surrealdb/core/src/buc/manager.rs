@@ -1,9 +1,9 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
+use surrealdb_cfg::FileConfig;
 
 use crate::buc::BucketStoreProvider;
 use crate::buc::store::prefixed::PrefixedStore;
@@ -29,24 +29,20 @@ type BucketConnections = Arc<DashMap<BucketConnectionKey, Arc<dyn ObjectStore>>>
 pub(crate) struct BucketsManager {
 	buckets: BucketConnections,
 	provider: Arc<dyn BucketStoreProvider>,
-	global_bucket: Option<String>,
-	global_bucket_enforced: bool,
-	bucket_folder_allowlist: Vec<PathBuf>,
+	file_config: FileConfig,
 }
 
 impl BucketsManager {
-	/// Creates a new `BucketsManager` with the given storage provider.
+	/// Creates a new `BucketsManager` with the given storage provider and file configuration.
 	///
 	/// # Arguments
 	/// * `provider` - The bucket store provider used to create new connections
-	pub(crate) fn new(provider: Arc<dyn BucketStoreProvider>) -> Self {
-		let file_cfg = surrealdb_cfg::FileConfig::default();
+	/// * `file_config` - File configuration containing bucket settings
+	pub(crate) fn new(provider: Arc<dyn BucketStoreProvider>, file_config: FileConfig) -> Self {
 		Self {
 			buckets: Default::default(),
 			provider,
-			global_bucket: file_cfg.global_bucket,
-			global_bucket_enforced: file_cfg.global_bucket_enforced,
-			bucket_folder_allowlist: file_cfg.bucket_folder_allowlist,
+			file_config,
 		}
 	}
 
@@ -68,10 +64,12 @@ impl BucketsManager {
 		readonly: bool,
 	) -> Result<Arc<dyn ObjectStore>> {
 		// Check if the global bucket is enforced
-		if !global && self.global_bucket_enforced {
+		if !global && self.file_config.global_bucket_enforced {
 			bail!(Error::GlobalBucketEnforced);
 		}
-		self.provider.connect(url, global, readonly, &self.bucket_folder_allowlist).await
+		self.provider
+			.connect(url, global, readonly, &self.file_config.bucket_folder_allowlist)
+			.await
 	}
 
 	/// Connects to a global bucket with automatic namespacing.
@@ -86,12 +84,15 @@ impl BucketsManager {
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>> {
 		// Obtain the URL for the global bucket
-		let Some(ref url) = self.global_bucket else {
+		let Some(ref url) = self.file_config.global_bucket else {
 			bail!(Error::NoGlobalBucket);
 		};
 
 		// Connect to the global bucket
-		let global = self.provider.connect(url, true, false, &self.bucket_folder_allowlist).await?;
+		let global = self
+			.provider
+			.connect(url, true, false, &self.file_config.bucket_folder_allowlist)
+			.await?;
 
 		// Create a prefixstore for the specified bucket
 		let key = ObjectKey::new(format!("/{ns}/{db}/{bu}"));
