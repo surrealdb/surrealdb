@@ -504,6 +504,13 @@ pub fn synchronous(
 		"type::is_set" => r#type::is::set,
 		"type::is_string" => r#type::is::string,
 		"type::is_uuid" => r#type::is::uuid,
+		"time::set_year" => time::set_year,
+		"time::set_month" => time::set_month,
+		"time::set_day" => time::set_day,
+		"time::set_hour" => time::set_hour,
+		"time::set_minute" => time::set_minute,
+		"time::set_second" => time::set_second,
+		"time::set_nanosecond" => time::set_nanosecond,
 		//
 		"vector::add" => vector::add,
 		"vector::angle" => vector::angle,

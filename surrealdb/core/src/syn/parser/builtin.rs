@@ -130,6 +130,13 @@ pub(crate) static PATHS: phf::Map<
 		UniCase::ascii("duration::from_nanos") => (PathKind::Function, Some(UniCase::ascii("duration::from::nanos"))),
 		UniCase::ascii("duration::from_secs") => (PathKind::Function, Some(UniCase::ascii("duration::from::secs"))),
 		UniCase::ascii("duration::from_weeks") => (PathKind::Function, Some(UniCase::ascii("duration::from::weeks"))),
+		UniCase::ascii("duration::set_year") => (PathKind::Function, None),
+		UniCase::ascii("duration::set_month") => (PathKind::Function, None),
+		UniCase::ascii("duration::set_day") => (PathKind::Function, None),
+		UniCase::ascii("duration::set_hour") => (PathKind::Function, None),
+		UniCase::ascii("duration::set_minute") => (PathKind::Function, None),
+		UniCase::ascii("duration::set_second") => (PathKind::Function, None),
+		UniCase::ascii("duration::set_nanosecond") => (PathKind::Function, None),
 		//
 		UniCase::ascii("encoding::base64::decode") => (PathKind::Function, None),
 		UniCase::ascii("encoding::base64::encode") => (PathKind::Function, None),
