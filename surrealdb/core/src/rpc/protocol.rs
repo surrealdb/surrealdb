@@ -22,7 +22,8 @@ use crate::sql::{
 	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use crate::types::{
-	PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables, SurrealValue,
+	PublicArray, PublicRecordId, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables,
+	SurrealValue,
 };
 
 /// utility function converting a `Value::String` into a `Expr::Table`
@@ -1277,9 +1278,16 @@ pub trait RpcProtocol {
 			return Err(method_not_allowed(Method::Delete.to_string()));
 		}
 		// Process the method arguments
-		let (what,) = extract_args::<(PublicValue,)>(params.into_vec())
+		let (mut what,) = extract_args::<(PublicValue,)>(params.into_vec())
 			.ok_or(invalid_params("Expected (what:Value)".to_string()))?;
-		// Specify the SQL query string
+		// When the client sends a string like "table:id", treat it as a record id so we delete
+		// by record id rather than by table name.
+		if let PublicValue::String(ref s) = what
+			&& let Ok(rid) = PublicRecordId::parse_simple(s)
+		{
+			what = PublicValue::RecordId(rid);
+		}
+		// Single result for record IDs (backwards compatible: one record or null).
 		let sql = Expr::Delete(Box::new(DeleteStatement {
 			only: singular(&what),
 			what: vec![value_to_table(what)],
