@@ -1,6 +1,6 @@
 use std::ops::Bound;
 
-use ast::{NodeId, RecordIdKeyGenerate, Spanned};
+use ast::{RecordIdKeyGenerate, Spanned};
 use token::{BaseTokenKind, T};
 
 use crate::parse::ParseResult;
