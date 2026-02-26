@@ -5,7 +5,10 @@ use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset, TimeZone,
 use common::source_error::{AnnotationKind, Level, Snippet};
 use common::span::Span;
 use logos::{Lexer, Logos};
-use token::{BaseTokenKind, DateTimeToken, UuidToken, VersionToken};
+use token::{
+	BaseTokenKind, DateTimeToken, JsFunctionTemplateToken, JsFunctionToken, RegexToken, T,
+	UuidToken, VersionToken,
+};
 use uuid::Uuid;
 
 use crate::parse::{ParseError, ParseResult};
@@ -74,7 +77,7 @@ impl ParseSync for ast::Version {
 		}
 
 		let partial = parser.partial();
-		parser.lex(|lexer| {
+		parser.lex(|lexer, _| {
 			let mut lexer = lexer.morph::<VersionToken>();
 
 			let start = lexer.span().end;
@@ -612,5 +615,253 @@ impl ParseSync for DateTime {
 		};
 
 		Ok(datetime.with_timezone(&Utc))
+	}
+}
+
+impl ParseSync for ast::Regex {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let start = parser.expect(T![/])?;
+		let partial = parser.partial();
+		let snippet = parser.snippet();
+		let source = parser.lex(|lexer, buffer| {
+			buffer.clear();
+			let mut lexer = lexer.morph::<RegexToken>();
+			loop {
+				match lexer.next() {
+					Some(Ok(RegexToken::End)) => break,
+					Some(Ok(RegexToken::Escape)) => {
+						buffer.push('/');
+					}
+					Some(Ok(RegexToken::Source)) => {
+						buffer.push_str(lexer.slice());
+					}
+					// This lexer has no invalid characters, so this should never error.
+					Some(Err(_)) => unreachable!(),
+					None => {
+						if partial {
+							return Err(ParseError::missing_data_error());
+						}
+
+						let span = lexer.span();
+						let span = Span::from_usize_range(span).expect("span to be in range");
+						return Err(ParseError::diagnostic(
+							Level::Error
+								.title("Unexpected end of query, expected regex to end")
+								.snippet(snippet.annotate(AnnotationKind::Primary.span(span)))
+								.to_diagnostic()
+								.to_owned(),
+						));
+					}
+				}
+			}
+			Ok((lexer.morph(), buffer.clone()))
+		})?;
+
+		let source = parser.push_set(source);
+		let span = parser.span_since(start.span);
+
+		Ok(ast::Regex {
+			source,
+			span,
+		})
+	}
+}
+
+impl ParseSync for ast::JsFunctionBody {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let start = parser.expect(BaseTokenKind::OpenBrace)?;
+		// Lex a javascript function body by keeping track of delimiters: `()`, `{}`, and `[]`.
+		// Each of these delimiters should (mostly) be balanced, once all the delimiters have
+		// closed to function body has been successfully lexed. We use a stack to keep track of the
+		// next delimiter that should be closed, that way we don't have to recurse.
+		//
+		// Unfortunatly delimiters in a js function body are not always balanced. Instances where
+		// we should not track delimiter tokens are:
+		// 1. Strings like "]" and '{';
+		// 2. Template strings like `[`
+		// 3. Regexes like /\[/
+		//
+		// The first is handled by the lexer.
+		//
+		// The second requires some work, because you can have `foo ${ `recursive template ${ string
+		// }` } bar` We cannot just snip out anything between two `` but need to restart counting
+		// delimiters when entering a template expression (the `${ }` part).
+		//
+		// The last is the least robust and relies on the fact the `()` `{}` and `[]` are also part
+		// of regex syntax, and need to be balanced within the regex except when escaped. The lexer
+		// cannot know if a delimiter is inside a regex so instead we just ignore all escaped
+		// delimiters everywhere in a javascript body. Escaped delimiters are not valid syntax in
+		// normal javascript; `\(`, `\[` is never valid syntax outside of a regex so doing it this
+		// way should only ignore those delimiters that happened to be part of a regex.
+		//
+		//
+
+		#[derive(Clone, Copy, Eq, PartialEq)]
+		enum Delimiter {
+			Paren,
+			Brace,
+			Bracket,
+			Template,
+		}
+
+		impl Delimiter {
+			fn as_token(&self) -> &str {
+				match self {
+					Delimiter::Paren => ")",
+					Delimiter::Brace => "}",
+					Delimiter::Bracket => "]",
+					Delimiter::Template => "}",
+				}
+			}
+		}
+
+		fn expect_delimiter(
+			stack: &mut Vec<Delimiter>,
+			expected: Delimiter,
+			span: Span,
+			source: &str,
+		) -> ParseResult<()> {
+			let got = stack.pop().expect("delimiters to be present");
+			if got != expected {
+				return Err(ParseError::diagnostic(
+					Level::Error
+						.title(format!(
+							"Unexpected token `{}`, expected `{}",
+							got.as_token(),
+							expected.as_token()
+						))
+						.snippet(
+							Snippet::source(source).annotate(AnnotationKind::Primary.span(span)),
+						)
+						.to_diagnostic()
+						.to_owned(),
+				));
+			}
+			Ok(())
+		}
+
+		fn lex_template(
+			lexer: &mut Lexer<JsFunctionToken>,
+			delim_stack: &mut Vec<Delimiter>,
+			partial: bool,
+		) -> ParseResult<()> {
+			let mut templ_lexer = lexer.clone().morph::<JsFunctionTemplateToken>();
+			loop {
+				match templ_lexer.next() {
+					// lexer should have no invalid characters so it should never error.
+					Some(Err(_)) => unreachable!("invalid token {:?}", lexer.slice()),
+					Some(Ok(JsFunctionTemplateToken::End)) => break,
+					Some(Ok(JsFunctionTemplateToken::Dollar)) => {}
+					Some(Ok(JsFunctionTemplateToken::TemplateOpen)) => {
+						delim_stack.push(Delimiter::Template);
+						break;
+					}
+					None => {
+						if partial {
+							return Err(ParseError::missing_data_error());
+						}
+						let span = Span::from_usize_range(templ_lexer.span())
+							.expect("span to be in range");
+						return Err(ParseError::diagnostic(
+							Level::Error
+								.title(
+									"Unexpected end of query, expected javascript function to end",
+								)
+								.snippet(
+									Snippet::source(templ_lexer.source())
+										.annotate(AnnotationKind::Primary.span(span)),
+								)
+								.to_diagnostic()
+								.to_owned(),
+						));
+					}
+				}
+			}
+			*lexer = templ_lexer.morph();
+			Ok(())
+		}
+
+		let partial = parser.partial();
+		let body_span = parser.lex(|lexer, _| {
+			let start = lexer.span().end;
+			let mut lexer = lexer.morph::<JsFunctionToken>();
+			let mut delim_stack = vec![Delimiter::Brace];
+			while !delim_stack.is_empty() {
+				match lexer.next() {
+					Some(Ok(JsFunctionToken::BraceOpen)) => delim_stack.push(Delimiter::Brace),
+					Some(Ok(JsFunctionToken::BracketOpen)) => delim_stack.push(Delimiter::Bracket),
+					Some(Ok(JsFunctionToken::ParenOpen)) => delim_stack.push(Delimiter::Paren),
+					Some(Ok(JsFunctionToken::BraceClose)) => {
+						if *delim_stack.last().expect("stack should have entries")
+							== Delimiter::Template
+						{
+							delim_stack.pop();
+							lex_template(&mut lexer, &mut delim_stack, partial)?;
+						} else {
+							let span_end = lexer.span().end as u32;
+							let span = Span::from_range((span_end - 1)..span_end);
+							expect_delimiter(
+								&mut delim_stack,
+								Delimiter::Brace,
+								span,
+								lexer.source(),
+							)?;
+						}
+					}
+					Some(Ok(JsFunctionToken::BracketClose)) => {
+						let span_end = lexer.span().end as u32;
+						let span = Span::from_range((span_end - 1)..span_end);
+						expect_delimiter(
+							&mut delim_stack,
+							Delimiter::Bracket,
+							span,
+							lexer.source(),
+						)?;
+					}
+					Some(Ok(JsFunctionToken::ParenClose)) => {
+						let span_end = lexer.span().end as u32;
+						let span = Span::from_range((span_end - 1)..span_end);
+						expect_delimiter(&mut delim_stack, Delimiter::Paren, span, lexer.source())?;
+					}
+					Some(Ok(JsFunctionToken::TemplateOpen)) => {
+						lex_template(&mut lexer, &mut delim_stack, partial)?;
+					}
+					// lexer should have no invalid characters so it should never error.
+					Some(Err(_)) => unreachable!("{:?}", lexer.slice()),
+					None => {
+						if partial {
+							return Err(ParseError::missing_data_error());
+						}
+						let span =
+							Span::from_usize_range(lexer.span()).expect("span to be in range");
+						return Err(ParseError::diagnostic(
+							Level::Error
+								.title(
+									"Unexpected end of query, expected javascript function to end",
+								)
+								.snippet(
+									Snippet::source(lexer.source())
+										.annotate(AnnotationKind::Primary.span(span)),
+								)
+								.to_diagnostic()
+								.to_owned(),
+						));
+					}
+				}
+			}
+
+			// -1 to remove the last `}`
+			let span = Span::from_range((start as u32)..((lexer.span().end - 1) as u32));
+			Ok((lexer.morph(), span))
+		})?;
+
+		let body = parser.slice(body_span).to_owned();
+		let source = parser.push_set(body);
+
+		let span = parser.span_since(start.span);
+		Ok(ast::JsFunctionBody {
+			source,
+			span,
+		})
 	}
 }

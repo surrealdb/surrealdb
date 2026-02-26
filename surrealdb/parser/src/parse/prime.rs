@@ -29,6 +29,7 @@ impl ParseSync for ast::Mock {
 							if let Some(x) = peek2
 								&& let T![=] = x.token
 							{
+								// |a:1>..=2|
 								let _ = parser.next();
 								let _ = parser.next();
 								let _ = parser.next();
@@ -48,6 +49,7 @@ impl ParseSync for ast::Mock {
 							} else if let Some(peek2) = parser.peek2()?
 								&& let BaseTokenKind::Int = peek2.token
 							{
+								// |a:1>..2|
 								let _ = parser.next();
 								let _ = parser.next();
 								let end = parser.parse_sync_push()?;
@@ -63,6 +65,7 @@ impl ParseSync for ast::Mock {
 									span,
 								})
 							} else {
+								// |a:1>..|
 								let _ = parser.next();
 								let _ = parser.next();
 								let _ = parser.expect_closing_delimiter(T![|], start.span)?;
@@ -85,6 +88,7 @@ impl ParseSync for ast::Mock {
 						if let Some(x) = peek1
 							&& let T![=] = x.token
 						{
+							// |a:1..=2|
 							let _ = parser.next();
 							let _ = parser.next();
 							let end = parser.parse_sync_push()?;
@@ -103,6 +107,7 @@ impl ParseSync for ast::Mock {
 						} else if let Some(peek1) = parser.peek1()?
 							&& let BaseTokenKind::Int = peek1.token
 						{
+							// |a:..2|
 							let _ = parser.next();
 							let end = parser.parse_sync_push()?;
 							let _ = parser.expect_closing_delimiter(T![|], start.span)?;
@@ -117,6 +122,7 @@ impl ParseSync for ast::Mock {
 								span,
 							})
 						} else {
+							// |a:1..|
 							let _ = parser.next();
 							let _ = parser.expect_closing_delimiter(T![|], start.span)?;
 
@@ -132,6 +138,7 @@ impl ParseSync for ast::Mock {
 						}
 					}
 					_ => {
+						// |a:1|
 						let _ = parser.expect_closing_delimiter(T![|], start.span)?;
 						Ok(ast::Mock {
 							name,
@@ -145,6 +152,7 @@ impl ParseSync for ast::Mock {
 				if let Some(x) = parser.peek_joined1()?
 					&& let T![=] = x.token
 				{
+					// |a:..=2|
 					let _ = parser.next();
 					let _ = parser.next();
 					let end = parser.parse_sync_push()?;
@@ -163,6 +171,7 @@ impl ParseSync for ast::Mock {
 				} else if let Some(x) = parser.peek1()?
 					&& let BaseTokenKind::Int = x.token
 				{
+					// |a:..2|
 					let _ = parser.next();
 					let end = parser.parse_sync_push()?;
 					let _ = parser.expect_closing_delimiter(T![|], start.span)?;
@@ -177,6 +186,7 @@ impl ParseSync for ast::Mock {
 						span,
 					})
 				} else {
+					// |a:..|
 					let _ = parser.next();
 					let _ = parser.expect_closing_delimiter(T![|], start.span)?;
 					let span = parser.span_since(start.span);
@@ -235,6 +245,7 @@ pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 	let expr = match token.token {
 		BaseTokenKind::String | BaseTokenKind::Ident => {
 			if let Some(T![:]) = parser.peek1()?.map(|x| x.token) {
+				// Has to be object.
 				let obj = parse_object_continue(parser, start.span).await?;
 				let obj = parser.push(obj);
 				return Ok(Expr::Object(obj));
@@ -242,6 +253,7 @@ pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 			parser.parse_enter().await?
 		}
 		BaseTokenKind::CloseBrace => {
+			// empty object.
 			let _ = parser.next();
 			let span = parser.span_since(start.span);
 			let obj = parser.push(ast::Object {
@@ -251,6 +263,7 @@ pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 			return Ok(Expr::Object(obj));
 		}
 		T![;] => {
+			// block with a starting empty statement.
 			while parser.eat(T![;])?.is_some() {}
 
 			if parser.eat(BaseTokenKind::CloseBrace)?.is_some() {
@@ -265,6 +278,7 @@ pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 			}
 		}
 		T![,] => {
+			// empty set.
 			let _ = parser.next();
 			let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseBrace, start.span)?;
 			let span = parser.span_since(start.span);
@@ -284,6 +298,7 @@ pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 	let token = parser.peek_expect("`}`")?;
 	match token.token {
 		T![;] => {
+			// Block
 			loop {
 				while parser.eat(T![;])?.is_some() {}
 
@@ -308,6 +323,7 @@ pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 			Ok(Expr::Block(obj))
 		}
 		T![,] => {
+			// set
 			let _ = parser.next();
 
 			loop {
@@ -332,6 +348,7 @@ pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 			Ok(Expr::Set(obj))
 		}
 		_ => {
+			// block with a single expression
 			let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseBrace, start.span)?;
 
 			let span = parser.span_since(start.span);
@@ -344,6 +361,8 @@ pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 	}
 }
 
+/// Continues parsing an object after ensuring that the production starting with `{` has to be an
+/// object.
 async fn parse_object_continue(
 	parser: &mut Parser<'_, '_>,
 	start_span: Span,
@@ -466,6 +485,28 @@ impl Parse for ast::Block {
 		Ok(ast::Block {
 			exprs: head,
 			span: parser.span_since(start.span),
+		})
+	}
+}
+
+impl Parse for ast::JsFunction {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start = parser.expect(T![FUNCTION])?;
+		let (_, args) = parse_delimited_list(
+			parser,
+			BaseTokenKind::OpenParen,
+			BaseTokenKind::CloseParen,
+			T![,],
+			async |parser| parser.parse_enter().await,
+		)
+		.await?;
+		let body = parser.parse_sync()?;
+
+		let span = parser.span_since(start.span);
+		Ok(ast::JsFunction {
+			args,
+			body,
+			span,
 		})
 	}
 }
@@ -625,6 +666,14 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 		T![|] => {
 			let uuid = parser.parse_sync_push()?;
 			Ok(Expr::Mock(uuid))
+		}
+		T![/] => {
+			let regex = parser.parse_sync_push()?;
+			Ok(Expr::Regex(regex))
+		}
+		T![FUNCTION] => {
+			let js_function = parser.parse_push().await?;
+			Ok(Expr::JsFunction(js_function))
 		}
 		T![IF] => {
 			let expr = parser.parse_push().await?;

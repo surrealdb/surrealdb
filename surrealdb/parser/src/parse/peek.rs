@@ -21,7 +21,7 @@ pub fn peek_starts_prime(parser: &mut Parser<'_, '_>) -> ParseResult<bool> {
 					| BaseTokenKind::NaN
 					| BaseTokenKind::PosInfinity
 					| BaseTokenKind::NegInfinity
-					| T![|]
+					| T![|] | T![/]
 			))
 	} else {
 		Ok(false)

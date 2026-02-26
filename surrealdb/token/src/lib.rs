@@ -9,16 +9,21 @@ use logos::Lexer;
 #[macro_use]
 mod mac;
 mod base;
-mod duration;
-pub use duration::DurationToken;
-mod uuid;
-pub use uuid::UuidToken;
 mod datetime;
-pub use datetime::DateTimeToken;
-mod version;
-pub use version::VersionToken;
+mod duration;
 mod escaped;
+mod js_function;
+mod regex;
+mod uuid;
+mod version;
+
+pub use datetime::DateTimeToken;
+pub use duration::DurationToken;
 pub use escaped::EscapeTokenKind;
+pub use js_function::{JsFunctionTemplateToken, JsFunctionToken};
+pub use regex::RegexToken;
+pub use uuid::UuidToken;
+pub use version::VersionToken;
 
 pub use crate::base::BaseTokenKind;
 
