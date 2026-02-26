@@ -30,6 +30,6 @@ pub enum EscapeTokenKind {
 	EscBracketClose,
 	#[regex(r#"\\u\{[0-9a-fA-F]{1,6}}"#)]
 	EscUnicode,
-	#[regex(r#"(?m)[^\\]+"#, priority = 0)]
+	#[regex(r#"[^\\]+"#, priority = 0)]
 	Chars,
 }
