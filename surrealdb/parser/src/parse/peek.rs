@@ -1,4 +1,4 @@
-use token::BaseTokenKind;
+use token::{BaseTokenKind, T};
 
 use crate::parse::{ParseResult, Parser};
 
@@ -17,6 +17,11 @@ pub fn peek_starts_prime(parser: &mut Parser<'_, '_>) -> ParseResult<bool> {
 					| BaseTokenKind::UuidString
 					| BaseTokenKind::RecordIdString
 					| BaseTokenKind::DateTimeString
+					| BaseTokenKind::Duration
+					| BaseTokenKind::NaN
+					| BaseTokenKind::PosInfinity
+					| BaseTokenKind::NegInfinity
+					| T![|]
 			))
 	} else {
 		Ok(false)

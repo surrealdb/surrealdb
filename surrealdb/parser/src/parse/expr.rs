@@ -907,6 +907,8 @@ async fn try_parse_infix_postfix_op(
 				.await;
 			}
 
+			let _ = parser.next();
+
 			let lhs = parser.push(lhs);
 			let span = parser.span_since(lhs_span);
 			let expr = parser.push(PostfixExpr {
