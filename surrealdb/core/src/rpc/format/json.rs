@@ -1,4 +1,5 @@
-use crate::cnf::LimitsConfig;
+use surrealdb_cfg::LimitsConfig;
+
 use crate::syn;
 use crate::syn::parser::ParserSettings;
 use crate::types::PublicValue;

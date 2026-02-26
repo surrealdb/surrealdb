@@ -1,6 +1,5 @@
 #![cfg(feature = "kv-tikv")]
 
-mod cnf;
 mod savepoint;
 
 use std::collections::HashMap;
@@ -18,7 +17,7 @@ use tokio::sync::RwLock;
 use super::api::ScanLimit;
 use super::err::{Error, Result};
 use super::util;
-use crate::cnf::BatchConfig;
+use crate::cnf::{BatchConfig, TiKvEngineConfig};
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
 use crate::kvs::{Key, TimeStamp, TimeStampImpl, Val};
@@ -58,9 +57,7 @@ struct TransactionInner {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new(path: &str) -> Result<Datastore> {
-		// Load the storage tuning configuration from environment variables
-		let tuning = cnf::TiKvConfig::from_env();
+	pub(crate) async fn new(path: &str, tuning: &TiKvEngineConfig) -> Result<Datastore> {
 		// Configure the client and keyspace
 		let config = match tuning.api_version {
 			2 => match tuning.keyspace.as_ref() {

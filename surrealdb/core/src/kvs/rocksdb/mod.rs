@@ -1,7 +1,6 @@
 #![cfg(feature = "kv-rocksdb")]
 
 mod background_flusher;
-mod cnf;
 mod commit_coordinator;
 mod disk_space_manager;
 mod memory_manager;
@@ -25,6 +24,7 @@ use super::Direction;
 use super::api::ScanLimit;
 use super::config::{RocksDbConfig, SyncMode};
 use super::err::{Error, Result};
+use crate::cnf::RocksDbEngineConfig;
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
 use crate::kvs::ds::{Metric, Metrics};
@@ -69,7 +69,11 @@ pub struct Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new(path: &str, config: RocksDbConfig) -> Result<Datastore> {
+	pub(crate) async fn new(
+		path: &str,
+		config: RocksDbConfig,
+		tuning: &RocksDbEngineConfig,
+	) -> Result<Datastore> {
 		// Configure custom options
 		let mut opts = Options::default();
 		// Ensure we use fdatasync
@@ -82,8 +86,6 @@ impl Datastore {
 		opts.set_manual_wal_flush(false);
 		// Set incremental asynchronous bytes per sync to 2MiB
 		opts.set_wal_bytes_per_sync(2 * 1024 * 1024);
-		// Load the storage tuning configuration from environment variables
-		let tuning = cnf::RocksDbConfig::from_env();
 		// Increase the background thread count
 		let threads = tuning.thread_count.min(i32::MAX as usize) as i32;
 		info!(target: TARGET, "Background thread count: {threads}");
@@ -206,21 +208,21 @@ impl Datastore {
 			}
 		});
 		// Configure and create the memory manager
-		let memory_manager = Arc::new(MemoryManager::configure(&mut opts, &tuning)?);
+		let memory_manager = Arc::new(MemoryManager::configure(&mut opts, tuning)?);
 		// Pre-configure the disk space manager
-		let should_create_disk_space_manager = DiskSpaceManager::configure(&mut opts, &tuning)?;
+		let should_create_disk_space_manager = DiskSpaceManager::configure(&mut opts, tuning)?;
 		// Pre-configure WAL options based on the resolved sync mode
 		match config.sync_mode {
 			// Pre-configure the background flusher
 			SyncMode::Interval(_) => BackgroundFlusher::configure(&mut opts, &config),
 			// Pre-configure the commit coordinator
-			SyncMode::Every => CommitCoordinator::configure(&mut opts, &config, &tuning),
+			SyncMode::Every => CommitCoordinator::configure(&mut opts, &config, tuning),
 			// No configuration needed
 			SyncMode::Never => {}
 		};
 		// Create the disk space manager if enabled
 		let disk_space_manager = if should_create_disk_space_manager {
-			Some(Arc::new(DiskSpaceManager::new(&mut opts, &tuning)?))
+			Some(Arc::new(DiskSpaceManager::new(&mut opts, tuning)?))
 		} else {
 			None
 		};
@@ -228,7 +230,7 @@ impl Datastore {
 		let db = Arc::pin(OptimisticTransactionDB::open(&opts, path)?);
 		// Create the commit coordinator if enabled
 		let commit_coordinator = if let SyncMode::Every = config.sync_mode {
-			Some(Arc::new(CommitCoordinator::new(db.clone(), &tuning)?))
+			Some(Arc::new(CommitCoordinator::new(db.clone(), tuning)?))
 		} else {
 			None
 		};

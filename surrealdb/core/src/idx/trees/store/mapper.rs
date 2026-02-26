@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ahash::HashSet;
 use anyhow::{Result, bail};
@@ -10,10 +10,19 @@ use crate::expr::Filter;
 use crate::iam::file::is_path_allowed;
 use crate::idx::ft::analyzer::mapper::Mapper;
 
-#[derive(Default)]
-pub(crate) struct Mappers(DashMap<String, Mapper>);
+pub(crate) struct Mappers {
+	map: DashMap<String, Mapper>,
+	file_allowlist: Vec<PathBuf>,
+}
 
 impl Mappers {
+	pub(crate) fn new(file_allowlist: Vec<PathBuf>) -> Self {
+		Self {
+			map: DashMap::default(),
+			file_allowlist,
+		}
+	}
+
 	/// If any mapper is defined, it will be loaded in memory.
 	pub(crate) async fn load(&self, az: &catalog::AnalyzerDefinition) -> Result<()> {
 		if let Some(filters) = &az.filters {
@@ -32,7 +41,7 @@ impl Mappers {
 		if let Some(filters) = &az.filters {
 			for f in filters {
 				if let Filter::Mapper(path) = f
-					&& !self.0.contains_key(path)
+					&& !self.map.contains_key(path)
 				{
 					self.insert(path).await?;
 				}
@@ -43,18 +52,17 @@ impl Mappers {
 
 	async fn insert(&self, path: &str) -> Result<()> {
 		let p = Path::new(path);
-		// Check the path is allowed
-		is_path_allowed(p, &crate::cnf::FileConfig::default().file_allowlist)?;
+		is_path_allowed(p, &self.file_allowlist)?;
 		if !p.exists() || !p.is_file() {
 			bail!(Error::Internal(format!("Invalid mapper path: {p:?}")));
 		}
-		let mapper = Mapper::new(p).await?;
-		self.0.insert(path.to_string(), mapper);
+		let mapper = Mapper::new(p, &self.file_allowlist).await?;
+		self.map.insert(path.to_string(), mapper);
 		Ok(())
 	}
 
 	pub(in crate::idx) fn get(&self, path: &str) -> Result<Mapper> {
-		match self.0.get(path) {
+		match self.map.get(path) {
 			None => {
 				Err(anyhow::Error::new(Error::Internal(format!("Mapper not found for {path}"))))
 			}
@@ -63,9 +71,7 @@ impl Mappers {
 	}
 
 	pub(crate) fn cleanup(&self, azs: &[catalog::AnalyzerDefinition]) {
-		// Collect every existing mapper
-		let mut keys: HashSet<String> = self.0.iter().map(|e| e.key().clone()).collect();
-		// Remove keys that still exist in the definitions
+		let mut keys: HashSet<String> = self.map.iter().map(|e| e.key().clone()).collect();
 		for az in azs {
 			if let Some(filters) = &az.filters {
 				for f in filters {
@@ -75,9 +81,8 @@ impl Mappers {
 				}
 			}
 		}
-		// Any left key can be removed
 		for key in keys {
-			self.0.remove(&key);
+			self.map.remove(&key);
 		}
 	}
 }

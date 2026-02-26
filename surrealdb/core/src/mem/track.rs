@@ -101,7 +101,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 
 	/// Checks if the current usage exceeds a configured threshold.
 	pub fn is_beyond_threshold(&self) -> bool {
-		match *crate::cnf::MEMORY_THRESHOLD {
+		match crate::cnf::MEMORY_THRESHOLD.load(std::sync::atomic::Ordering::Relaxed) {
 			0 => false,
 			v => self.memory_allocated() > v,
 		}

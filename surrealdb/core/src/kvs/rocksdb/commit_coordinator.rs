@@ -8,7 +8,8 @@ use parking_lot::{Condvar, Mutex};
 use rocksdb::{OptimisticTransactionDB, Options};
 use tokio::sync::oneshot::{self, Sender};
 
-use super::{TARGET, cnf};
+use super::TARGET;
+use crate::cnf::RocksDbEngineConfig;
 use crate::kvs::config::{RocksDbConfig, SyncMode};
 use crate::kvs::err::{Error, Result};
 
@@ -112,7 +113,7 @@ impl CommitCoordinator {
 	pub(super) fn configure(
 		opts: &mut Options,
 		config: &RocksDbConfig,
-		tuning: &cnf::RocksDbConfig,
+		tuning: &RocksDbEngineConfig,
 	) {
 		// Don't configure if the sync mode is not every
 		if config.sync_mode != SyncMode::Every {
@@ -133,7 +134,10 @@ impl CommitCoordinator {
 	}
 
 	/// Create a new commit coordinator
-	pub fn new(db: Pin<Arc<OptimisticTransactionDB>>, tuning: &cnf::RocksDbConfig) -> Result<Self> {
+	pub fn new(
+		db: Pin<Arc<OptimisticTransactionDB>>,
+		tuning: &RocksDbEngineConfig,
+	) -> Result<Self> {
 		// Get the batched commit configuration options
 		let timeout = tuning.grouped_commit_timeout;
 		let wait_threshold = tuning.grouped_commit_wait_threshold;

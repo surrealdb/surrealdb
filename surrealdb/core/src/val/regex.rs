@@ -11,9 +11,10 @@ use revision::revisioned;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_cfg::LimitsConfig;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::cnf::{LimitsConfig, REGEX_CACHE_SIZE};
+use crate::cnf::REGEX_CACHE_SIZE;
 
 pub(crate) const REGEX_TOKEN: &str = "$surrealdb::private::Regex";
 
@@ -37,8 +38,9 @@ pub(crate) fn regex_new_with_limit(
 	str: &str,
 	regex_size_limit: usize,
 ) -> Result<regex::Regex, regex::Error> {
-	static REGEX_CACHE: LazyLock<Cache<String, regex::Regex>> =
-		LazyLock::new(|| Cache::new(REGEX_CACHE_SIZE.max(10)));
+	static REGEX_CACHE: LazyLock<Cache<String, regex::Regex>> = LazyLock::new(|| {
+		Cache::new(REGEX_CACHE_SIZE.load(std::sync::atomic::Ordering::Relaxed).max(10))
+	});
 	match REGEX_CACHE.get_value_or_guard(str, None) {
 		GuardResult::Value(v) => Ok(v),
 		GuardResult::Guard(g) => {

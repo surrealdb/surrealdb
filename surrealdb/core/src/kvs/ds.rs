@@ -19,6 +19,7 @@ use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use reblessive::TreeStack;
+use surrealdb_cfg::CoreConfig;
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
@@ -45,7 +46,6 @@ use crate::catalog::providers::{
 	UserProvider,
 };
 use crate::catalog::{ApiDefinition, Index, NodeLiveQuery, SubscriptionDefinition};
-use crate::cnf::CoreConfig;
 use crate::cnf::dynamic::DynamicConfiguration;
 use crate::ctx::Context;
 #[cfg(feature = "jwks")]
@@ -279,10 +279,12 @@ pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
 	///
 	/// # Parameters
 	/// - `path`: Database connection path string
+	/// - `config`: Core engine configuration for storage tuning
 	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 	async fn new_transaction_builder(
 		&self,
 		path: &str,
+		config: &CoreConfig,
 		canceller: CancellationToken,
 	) -> Result<Box<dyn TransactionBuilder>>;
 
@@ -328,6 +330,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 	async fn new_transaction_builder(
 		&self,
 		path: &str,
+		config: &CoreConfig,
 		_canceller: CancellationToken,
 	) -> Result<Box<dyn TransactionBuilder>> {
 		// Extract query parameters from the path before scheme extraction
@@ -389,12 +392,13 @@ impl TransactionBuilderFactory for CommunityComposer {
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Parse RocksDB-specific configuration from query parameters
-					let config =
+					let query_config =
 						super::config::RocksDbConfig::from_params(&params).map_err(Error::Kvs)?;
 					// Initialise the storage engine
-					let v = super::rocksdb::Datastore::new(&path, config)
-						.await
-						.map(DatastoreFlavor::RocksDB)?;
+					let v =
+						super::rocksdb::Datastore::new(&path, query_config, &config.rocksdb_engine)
+							.await
+							.map(DatastoreFlavor::RocksDB)?;
 					info!(target: TARGET, "Started {flavour} kvs store");
 					Ok(Box::<DatastoreFlavor>::new(v))
 				}
@@ -408,12 +412,16 @@ impl TransactionBuilderFactory for CommunityComposer {
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Parse SurrealKV-specific configuration from query parameters
-					let config =
+					let query_config =
 						super::config::SurrealKvConfig::from_params(&params).map_err(Error::Kvs)?;
 					// Initialise the storage engine
-					let v = super::surrealkv::Datastore::new(&path, config)
-						.await
-						.map(DatastoreFlavor::SurrealKV)?;
+					let v = super::surrealkv::Datastore::new(
+						&path,
+						query_config,
+						&config.surrealkv_engine,
+					)
+					.await
+					.map(DatastoreFlavor::SurrealKV)?;
 					info!(target: TARGET, "Started {flavour} kvs store");
 					Ok(Box::<DatastoreFlavor>::new(v))
 				}
@@ -436,7 +444,9 @@ impl TransactionBuilderFactory for CommunityComposer {
 			(flavour @ "tikv", path) => {
 				#[cfg(feature = "kv-tikv")]
 				{
-					let v = super::tikv::Datastore::new(&path).await.map(DatastoreFlavor::TiKV)?;
+					let v = super::tikv::Datastore::new(&path, &config.tikv_engine)
+						.await
+						.map(DatastoreFlavor::TiKV)?;
 					info!(target: TARGET, "Started {flavour} kvs store");
 					Ok(Box::<DatastoreFlavor>::new(v))
 				}
@@ -627,10 +637,7 @@ impl Datastore {
 
 	/// Creates a new datastore with explicit configuration.
 	pub async fn new_with_config(path: &str, config: CoreConfig) -> Result<Self> {
-		let mut ds =
-			Self::new_with_factory(CommunityComposer(), path, CancellationToken::new()).await?;
-		ds.config = Arc::new(config);
-		Ok(ds)
+		Self::new_with_factory(CommunityComposer(), path, config, CancellationToken::new()).await
 	}
 
 	/// Creates a new datastore instance with a custom transaction builder factory.
@@ -648,26 +655,35 @@ impl Datastore {
 	pub async fn new_with_factory<F: TransactionBuilderFactory + BucketStoreProvider + 'static>(
 		composer: F,
 		path: &str,
+		config: CoreConfig,
 		canceller: CancellationToken,
 	) -> Result<Self> {
 		// Initiate the desired datastore
-		let builder = composer.new_transaction_builder(path, canceller).await?;
+		let builder = composer.new_transaction_builder(path, &config, canceller).await?;
 		//
 		let buckets = BucketsManager::new(Arc::new(composer));
 		// Set the properties on the datastore
-		Self::new_with_builder(builder, buckets)
+		Self::new_with_builder(builder, buckets, config)
 	}
 
 	pub(crate) fn new_with_builder(
 		builder: Box<dyn TransactionBuilder>,
 		buckets: BucketsManager,
+		config: CoreConfig,
 	) -> Result<Self> {
+		// Propagate config values to global atomics
+		crate::cnf::apply_config(&config);
 		let async_event_trigger = Arc::new(Notify::new());
 		let tf = TransactionFactory::new(async_event_trigger.clone(), builder);
 		let id = Uuid::new_v4();
+		let hnsw_cache_size = config.caches.hnsw_cache_size;
+		let ds_cache_size = config.caches.datastore_cache_size;
+		let file_allowlist = config.files.file_allowlist.clone();
+		#[cfg(feature = "surrealism")]
+		let surrealism_cache_size = config.caches.surrealism_cache_size;
 		Ok(Self {
 			id,
-			config: Arc::new(CoreConfig::default()),
+			config: Arc::new(config),
 			transaction_factory: tf.clone(),
 			auth_enabled: false,
 			dynamic_configuration: DynamicConfiguration::default(),
@@ -675,19 +691,17 @@ impl Datastore {
 			transaction_timeout: None,
 			notification_channel: None,
 			capabilities: Arc::new(Capabilities::default()),
-			index_stores: IndexStores::new(CoreConfig::default().caches.hnsw_cache_size),
+			index_stores: IndexStores::new(hnsw_cache_size, file_allowlist),
 			index_builder: IndexBuilder::new(tf.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
 			#[cfg(storage)]
 			temporary_directory: None,
-			cache: Arc::new(DatastoreCache::new(CoreConfig::default().caches.datastore_cache_size)),
+			cache: Arc::new(DatastoreCache::new(ds_cache_size)),
 			buckets,
 			sequences: Sequences::new(tf, id),
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: Arc::new(SurrealismCache::new(
-				CoreConfig::default().caches.surrealism_cache_size,
-			)),
+			surrealism_cache: Arc::new(SurrealismCache::new(surrealism_cache_size)),
 			async_event_trigger,
 		})
 	}
@@ -710,7 +724,9 @@ impl Datastore {
 	/// flushed cache. Simulating a server restart
 	pub fn restart(self) -> Self {
 		self.buckets.clear();
+		let hnsw_cache_size = self.config.caches.hnsw_cache_size;
 		let ds_cache_size = self.config.caches.datastore_cache_size;
+		let file_allowlist = self.config.files.file_allowlist.clone();
 		#[cfg(feature = "surrealism")]
 		let surrealism_cache_size = self.config.caches.surrealism_cache_size;
 		Self {
@@ -722,7 +738,7 @@ impl Datastore {
 			transaction_timeout: self.transaction_timeout,
 			capabilities: self.capabilities,
 			notification_channel: self.notification_channel,
-			index_stores: IndexStores::new(self.config.caches.hnsw_cache_size),
+			index_stores: IndexStores::new(hnsw_cache_size, file_allowlist),
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(Default::default()),
@@ -1575,7 +1591,10 @@ impl Datastore {
 						.await?;
 				}
 				Index::Count(_) => {
-					IndexOperation::index_count_compaction(ikb, &txn).await?;
+					let mut ctx = self.setup_ctx()?;
+					ctx.set_transaction(txn.clone());
+					let ctx = ctx.freeze();
+					IndexOperation::index_count_compaction(&ctx, ikb, &txn).await?;
 				}
 				Index::Hnsw(p) => {
 					let mut ctx = self.setup_ctx()?;

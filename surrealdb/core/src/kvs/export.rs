@@ -2,6 +2,7 @@ use std::fmt;
 
 use anyhow::Result;
 use async_channel::Sender;
+use surrealdb_cfg::BatchConfig;
 use surrealdb_types::{SurrealValue, ToSql};
 
 use super::Transaction;
@@ -9,7 +10,6 @@ use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, TableProvider, UserProvider,
 };
 use crate::catalog::{DatabaseId, NamespaceId, Record, TableDefinition};
-use crate::cnf::BatchConfig;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement};

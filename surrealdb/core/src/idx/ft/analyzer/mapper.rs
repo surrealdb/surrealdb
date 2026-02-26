@@ -2,7 +2,7 @@
 use std::fs::File;
 #[cfg(target_family = "wasm")]
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -24,9 +24,9 @@ pub(in crate::idx) struct Mapper {
 }
 
 impl Mapper {
-	pub(in crate::idx) async fn new(path: &Path) -> Result<Self> {
+	pub(in crate::idx) async fn new(path: &Path, file_allowlist: &[PathBuf]) -> Result<Self> {
 		let mut terms = Tree::new();
-		let path = is_path_allowed(path, &crate::cnf::FileConfig::default().file_allowlist)?;
+		let path = is_path_allowed(path, file_allowlist)?;
 		Self::iterate_file(&mut terms, &path).await?;
 		Ok(Self {
 			terms: Arc::new(terms),

@@ -4,11 +4,11 @@ use std::task::{Context, Poll};
 
 use futures::stream::Stream;
 use futures::{Future, FutureExt};
+use surrealdb_cfg::BatchConfig;
 
 use super::api::ScanLimit;
 use super::tr::Transactor;
 use super::{Key, Result, Val};
-use crate::cnf::BatchConfig;
 
 #[cfg(not(target_family = "wasm"))]
 type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>>> + 'a + Send>>;

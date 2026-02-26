@@ -40,7 +40,7 @@ impl BucketsManager {
 	/// # Arguments
 	/// * `provider` - The bucket store provider used to create new connections
 	pub(crate) fn new(provider: Arc<dyn BucketStoreProvider>) -> Self {
-		let file_cfg = crate::cnf::FileConfig::default();
+		let file_cfg = surrealdb_cfg::FileConfig::default();
 		Self {
 			buckets: Default::default(),
 			provider,

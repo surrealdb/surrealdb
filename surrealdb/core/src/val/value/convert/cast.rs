@@ -4,9 +4,9 @@ use std::str::FromStr as _;
 
 use geo::Point;
 use rust_decimal::Decimal;
+use surrealdb_cfg::LimitsConfig;
 use surrealdb_types::ToSql;
 
-use crate::cnf::LimitsConfig;
 use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::syn;

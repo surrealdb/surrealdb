@@ -4,10 +4,10 @@
 use std::ops::Range;
 
 use anyhow::bail;
+use surrealdb_cfg::BatchConfig;
 
 use super::err::{Error, Result};
 use super::util;
-use crate::cnf::BatchConfig;
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};

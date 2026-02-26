@@ -1,6 +1,5 @@
 #![cfg(feature = "kv-surrealkv")]
 
-mod cnf;
 mod sync;
 
 use std::ops::Range;
@@ -17,6 +16,7 @@ use super::Direction;
 use super::api::ScanLimit;
 use super::config::{SurrealKvConfig, SyncMode};
 use super::err::{Error, Result};
+use crate::cnf::SurrealKvEngineConfig;
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
 use crate::kvs::{Key, Val};
@@ -47,12 +47,13 @@ pub struct Transaction {
 
 impl Datastore {
 	/// Open a new database
-	pub(crate) async fn new(path: &str, config: SurrealKvConfig) -> Result<Datastore> {
+	pub(crate) async fn new(
+		path: &str,
+		config: SurrealKvConfig,
+		tuning: &SurrealKvEngineConfig,
+	) -> Result<Datastore> {
 		// Configure custom options
 		let builder = TreeBuilder::new();
-
-		// Load the storage tuning configuration from environment variables
-		let tuning = cnf::SurrealKvConfig::from_env();
 		// Enable separated keys and values
 		// Determine if vlog should be enabled
 		// - Required when versioning is enabled

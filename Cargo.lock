@@ -6900,6 +6900,8 @@ name = "surrealdb-cfg"
 version = "3.1.0-alpha"
 dependencies = [
  "clap",
+ "num_cpus",
+ "sysinfo",
 ]
 
 [[package]]

@@ -535,7 +535,7 @@ impl Transactor {
 		// prefetching is active we double it to amortise the overlap cost.
 		if prefetch {
 			scanner = scanner.prefetch(true).initial_batch_size(ScanLimit::Count(
-				crate::cnf::BatchConfig::default().normal_fetch_size * 2,
+				surrealdb_cfg::BatchConfig::default().normal_fetch_size * 2,
 			));
 		}
 		// Return the stream

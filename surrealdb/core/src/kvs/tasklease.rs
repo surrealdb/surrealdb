@@ -401,7 +401,8 @@ mod tests {
 		// Create a new RocksDB configuration
 		let config = crate::kvs::config::RocksDbConfig::default();
 		// Create a new RocksDB datastore in the temporary directory
-		let flavor = crate::kvs::rocksdb::Datastore::new(&path, config)
+		let engine = crate::cnf::RocksDbEngineConfig::default();
+		let flavor = crate::kvs::rocksdb::Datastore::new(&path, config, &engine)
 			.await
 			.map(DatastoreFlavor::RocksDB)
 			.unwrap();
@@ -425,7 +426,8 @@ mod tests {
 		// Create a new SurrealKV configuration
 		let config = crate::kvs::config::SurrealKvConfig::default();
 		// Create a new SurrealKV datastore
-		let flavor = crate::kvs::surrealkv::Datastore::new(&path, config)
+		let engine = crate::cnf::SurrealKvEngineConfig::default();
+		let flavor = crate::kvs::surrealkv::Datastore::new(&path, config, &engine)
 			.await
 			.map(DatastoreFlavor::SurrealKV)
 			.unwrap();

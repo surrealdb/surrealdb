@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use rocksdb::{BlockBasedOptions, Cache, Options, WriteBufferManager};
 
-use super::{TARGET, cnf};
+use super::TARGET;
+use crate::cnf::RocksDbEngineConfig;
 use crate::kvs::Result;
 use crate::mem::{MemoryReporter, cleanup_memory_reporters, register_memory_reporter};
 
@@ -21,7 +22,7 @@ impl MemoryReporter for MemoryManager {
 
 impl MemoryManager {
 	/// Pre-configure the disk space manager
-	pub(super) fn configure(opts: &mut Options, tuning: &cnf::RocksDbConfig) -> Result<Self> {
+	pub(super) fn configure(opts: &mut Options, tuning: &RocksDbEngineConfig) -> Result<Self> {
 		// Get the configuration options
 		let block_cache_size = tuning.block_cache_size;
 		let write_buffer_size = tuning.write_buffer_size;

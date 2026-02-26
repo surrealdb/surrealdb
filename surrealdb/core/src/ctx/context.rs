@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use async_channel::Sender;
+use surrealdb_cfg::CoreConfig;
 #[cfg(feature = "surrealism")]
 use surrealism_runtime::controller::Runtime;
 #[cfg(feature = "surrealism")]
@@ -23,7 +24,7 @@ use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider};
 use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
-use crate::cnf::{CoreConfig, PROTECTED_PARAM_NAMES};
+use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 #[cfg(feature = "surrealism")]
@@ -137,7 +138,10 @@ impl Context {
 	pub(crate) fn background() -> Self {
 		let config = Arc::new(CoreConfig::default());
 		Self {
-			index_stores: IndexStores::new(config.caches.hnsw_cache_size),
+			index_stores: IndexStores::new(
+				config.caches.hnsw_cache_size,
+				config.files.file_allowlist.clone(),
+			),
 			config,
 			values: HashMap::default(),
 			parent: None,
@@ -1178,40 +1182,19 @@ mod tests {
 	/// 1. The "allocation-tracking" feature to be enabled
 	/// 2. The "allocator" feature to be enabled (for tracking to work)
 	/// 3. Running with #[serial] to avoid interference from other tests
-	///
-	/// The test sets SURREAL_MEMORY_THRESHOLD environment variable, allocates memory
-	/// to exceed the threshold, and verifies that context.done(true) detects the violation.
 	#[tokio::test]
 	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
 	#[serial_test::serial]
 	async fn test_context_memory_threshold_integration() {
+		use std::sync::atomic::Ordering;
+
 		use crate::err::Error;
-		use crate::str::ParseBytes;
 
-		// Set a low memory threshold (1MB) before MEMORY_THRESHOLD is accessed
-		// This must happen before any code accesses cnf::MEMORY_THRESHOLD
-		// Safety: This test runs with #[serial] ensuring no other tests run concurrently,
-		// so there's no risk of data races when modifying the environment variable.
-		unsafe {
-			std::env::set_var(
-				"SURREAL_MEMORY_THRESHOLD",
-				"1MB".parse_bytes::<u64>().unwrap().to_string(),
-			);
-		}
-		// Assert that SURREAL_MEMORY_THRESHOLD shows up as MEMORY_THRESHOLD with the expected value
-		assert_eq!(*MEMORY_THRESHOLD, 1048576);
+		// Set a low memory threshold (1 MiB) directly via the atomic
+		MEMORY_THRESHOLD.store(1024 * 1024, Ordering::Relaxed);
+		assert_eq!(MEMORY_THRESHOLD.load(Ordering::Relaxed), 1048576);
 
-		// Force reinitialization by dropping and recreating (this won't work with LazyLock)
-		// Instead, we rely on this test running in isolation with #[serial]
-		// and being run in a fresh process where MEMORY_THRESHOLD hasn't been accessed yet
-
-		// Note: This test may not work reliably if MEMORY_THRESHOLD was already accessed
-		// elsewhere in the test suite. The #[serial] attribute ensures tests run one at a time,
-		// but doesn't guarantee a fresh process. For reliable testing, this should be run
-		// as a separate integration test binary.
-
-		// Allocate a large vector (10MB) to exceed the threshold
-		// Using Vec::with_capacity to ensure the memory is actually allocated
+		// Allocate a large vector (20MB) to exceed the threshold
 		let _large_allocation: Vec<u8> = Vec::with_capacity(20 * 1024 * 1024);
 
 		// Give the allocator tracking time to register the allocation
@@ -1223,17 +1206,11 @@ mod tests {
 		// The memory threshold check should detect that we've exceeded the limit
 		let result = ctx.done(true);
 
-		// We expect either:
-		// 1. An error if memory tracking properly detected the threshold violation
-		// 2. Ok(None) if MEMORY_THRESHOLD was already initialized with default (0) before we set
-		//    the environment variable
 		match result {
 			Err(e) => {
-				// Verify it's the correct error type
 				match e.downcast_ref::<Error>() {
 					Some(Error::QueryBeyondMemoryThreshold) => {
-						// Success! Memory threshold was properly detected
-						println!("✓ Memory threshold violation detected as expected");
+						// Memory threshold was properly detected
 					}
 					other => {
 						panic!("Expected QueryBeyondMemoryThreshold error, got: {:?}", other);
@@ -1241,29 +1218,14 @@ mod tests {
 				}
 			}
 			Ok(None) => {
-				// This means MEMORY_THRESHOLD was already initialized before we set the env var
-				// This is expected behavior in the test suite - document it
-				println!(
-					"⚠ Memory threshold not enforced - MEMORY_THRESHOLD was already initialized"
-				);
-				println!("  This is expected when running as part of the full test suite.");
-				println!(
-					"  To properly test memory threshold enforcement, run this test in isolation:"
-				);
-				println!(
-					"  cargo test --package surrealdb-core --features allocation-tracking,allocator test_context_memory_threshold_integration"
-				);
-				panic!("MEMORY_THRESHOLD was already initialized")
+				panic!("Memory threshold not enforced - allocation tracking may not be active");
 			}
 			Ok(Some(reason)) => {
 				panic!("Unexpected reason returned: {:?}", reason);
 			}
 		}
 
-		// Clean up the environment variable
-		// Safety: Same as above - #[serial] ensures no concurrent access
-		unsafe {
-			std::env::remove_var("SURREAL_MEMORY_THRESHOLD");
-		}
+		// Restore default threshold
+		MEMORY_THRESHOLD.store(0, Ordering::Relaxed);
 	}
 }

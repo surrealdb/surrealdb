@@ -10,6 +10,7 @@ use reblessive::TreeStack;
 use revision::revisioned;
 use roaring::RoaringBitmap;
 use serde::{Deserialize, Serialize};
+use surrealdb_cfg::BatchConfig;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::{Mutex, RwLock};
@@ -22,7 +23,6 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId, Record, TableId,
 };
-use crate::cnf::BatchConfig;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};

@@ -1,6 +1,6 @@
 pub(crate) mod dynamic;
 
-use std::sync::LazyLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub use surrealdb_cfg::*;
 
@@ -21,24 +21,19 @@ pub const ID_CHARS: [char; 36] = [
 pub const PROTECTED_PARAM_NAMES: &[&str] = &["access", "auth", "token", "session"];
 
 // ---------------------------------------------------------------------------
-// Statics that stay global (genuinely no path to receive config)
+// Global atomics set from CoreConfig during Datastore initialization
 // ---------------------------------------------------------------------------
 
-/// The memory usage threshold before tasks are forced to exit (default: 0
-/// bytes). The default 0 bytes means that there is no memory threshold.
-/// Any other user-set memory threshold will default to at least 1 MiB.
-pub static MEMORY_THRESHOLD: LazyLock<usize> = LazyLock::new(|| {
-	let n = std::env::var("SURREAL_MEMORY_THRESHOLD")
-		.map(|s| s.parse::<usize>().unwrap_or(0))
-		.unwrap_or(0);
-	match n {
-		default @ 0 => default,
-		specified => std::cmp::max(specified, 1024 * 1024),
-	}
-});
+/// The memory usage threshold before tasks are forced to exit (default: 0 = disabled).
+/// Set from `CoreConfig.limits.memory_threshold` during datastore init.
+pub static MEMORY_THRESHOLD: AtomicUsize = AtomicUsize::new(0);
 
-/// Specifies the number of computed regexes which can be cached in the engine
-/// (default: 1000). Kept global because it governs a process-wide thread-local
-/// regex cache used from parsing, deserialization, and query execution.
-pub static REGEX_CACHE_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_REGEX_CACHE_SIZE", usize, 1_000);
+/// The number of computed regexes cached in the engine (default: 1000).
+/// Set from `CoreConfig.caches.regex_cache_size` during datastore init.
+pub static REGEX_CACHE_SIZE: AtomicUsize = AtomicUsize::new(1_000);
+
+/// Apply the relevant fields from a `CoreConfig` to the global atomics.
+pub fn apply_config(config: &CoreConfig) {
+	MEMORY_THRESHOLD.store(config.limits.memory_threshold, Ordering::Relaxed);
+	REGEX_CACHE_SIZE.store(config.caches.regex_cache_size, Ordering::Relaxed);
+}

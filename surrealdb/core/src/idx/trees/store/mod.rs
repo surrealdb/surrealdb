@@ -1,6 +1,7 @@
 pub(crate) mod hnsw;
 mod mapper;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -27,10 +28,10 @@ struct Inner {
 }
 
 impl IndexStores {
-	pub fn new(hnsw_cache_size: u64) -> Self {
+	pub fn new(hnsw_cache_size: u64, file_allowlist: Vec<PathBuf>) -> Self {
 		Self(Arc::new(Inner {
 			hnsw_indexes: HnswIndexes::default(),
-			mappers: Mappers::default(),
+			mappers: Mappers::new(file_allowlist),
 			vector_cache: VectorCache::new(hnsw_cache_size),
 		}))
 	}

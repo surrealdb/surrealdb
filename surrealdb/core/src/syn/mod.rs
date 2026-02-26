@@ -3,7 +3,8 @@
 
 use std::collections::HashSet;
 
-use crate::cnf::LimitsConfig;
+use surrealdb_cfg::LimitsConfig;
+
 use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
