@@ -33,11 +33,12 @@ async fn concurrent_tasks(
 		tasks.push(tokio::spawn(async move {
 			let mut res = dbs.execute(sql, &session, None).await?;
 			// Ignore errors from aborted/cancelled transactions.
-			if let Err(e) = res.remove(0).result {
-				if !sql.contains("aborting transaction test") && !sql.ends_with("CANCEL;") {
-					error!("Concurrent task error: {sql} - {e}");
-					panic!("Concurrent task error: {sql} - {e}")
-				}
+			if let Err(e) = res.remove(0).result
+				&& !sql.contains("aborting transaction test")
+				&& !sql.ends_with("CANCEL;")
+			{
+				error!("Concurrent task error: {sql} - {e}");
+				panic!("Concurrent task error: {sql} - {e}")
 			}
 			Ok::<(), anyhow::Error>(())
 		}));
@@ -194,15 +195,15 @@ async fn multi_index_concurrent_test(
             let Value::Object(o) = val else {
                 panic!("Invalid result format: {}", val.to_sql_pretty())
             };
-            let building = o.get("building").unwrap();
+            let building = o.get("building").expect("building field not found");
             let Value::Object(building) = building else {
                 panic!("Invalid result format: {}", building.to_sql_pretty())
             };
-            let status = building.get("status").unwrap();
+            let status = building.get("status").expect("status field not found");
             let Value::String(status) = status else {
                 panic!("Invalid result format: {}", status.to_sql_pretty())
             };
-            let pending = building.get("pending").unwrap();
+            let pending = building.get("pending").expect("pending field not found");
             let Value::Number(pending) = pending else {
                 panic!("Invalid pending format: {}", building.to_sql_pretty())
             };
@@ -226,7 +227,7 @@ async fn multi_index_concurrent_test(
                 let Value::Array(record) = item else {
                     panic!("Invalid result format: {}", item.to_sql_pretty())
                 };
-                let count = record.get(1).unwrap();
+                let count = record.get(1).expect("count field not found");
                 let Value::Number(count) = count else {
                     panic!("Invalid result format: {}", count.to_sql_pretty())
                 };
