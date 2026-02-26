@@ -616,7 +616,7 @@ pub async fn delete(cfg_server: Option<Format>, cfg_format: Format) {
 	assert_eq!(res[0]["id"], "tester:id", "result: {res:?}");
 	// Create a test record
 	socket.send_message_query("CREATE tester:id").await.unwrap();
-	// Send DELETE command (record-id string is interpreted as record id)
+	// Send DELETE command
 	let res = socket.send_request("delete", json!(["tester:id"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	assert!(res["result"].is_object(), "result: {res:?}");
