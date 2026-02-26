@@ -65,10 +65,14 @@ library! {
 		datetime: Vec<Spanned<DateTime>>,
 		duration: Vec<Spanned<Duration>>,
 		str: Vec<StringLit>,
+		regex: Vec<Regex>,
+		js_function: Vec<JsFunction>,
 
 		record_id: Vec<RecordId>,
 		record_id_key: Vec<RecordIdKey>,
 		record_id_key_range: Vec<RecordIdKeyRange>,
+
+		mock: Vec<Mock>,
 
 		point: Vec<Point>,
 		array: Vec<Array>,
@@ -261,6 +265,8 @@ ast_type! {
 		Decimal(NodeId<Spanned<Decimal>>),
 		String(NodeId<StringLit>),
 
+		Regex(NodeId<Regex>),
+
 		Uuid(NodeId<Spanned<Uuid>>),
 		DateTime(NodeId<Spanned<DateTime>>),
 		Duration(NodeId<Spanned<Duration>>),
@@ -270,6 +276,10 @@ ast_type! {
 		Array(NodeId<Array>),
 		Object(NodeId<Object>),
 		Set(NodeId<Set>),
+
+		Mock(NodeId<Mock>),
+
+		JsFunction(NodeId<JsFunction>),
 
 		RecordId(NodeId<RecordId>),
 
@@ -337,6 +347,25 @@ ast_type! {
 }
 
 ast_type! {
+	pub struct Regex {
+		pub source: NodeId<String>,
+	}
+}
+
+ast_type! {
+	pub struct JsFunctionBody{
+		pub source: NodeId<String>,
+	}
+}
+
+ast_type! {
+	pub struct JsFunction{
+		pub args: Option<NodeListId<Expr>>,
+		pub body: JsFunctionBody,
+	}
+}
+
+ast_type! {
 	#[derive(Copy, Clone)]
 	pub struct RecordId{
 		pub name: NodeId<Ident>,
@@ -369,6 +398,22 @@ pub enum RecordIdKeyGenerate {
 	Ulid,
 	Uuid,
 	Rand,
+}
+
+#[derive(Debug)]
+pub enum MockKind {
+	Integer(NodeId<Integer>),
+	Range {
+		start: Bound<NodeId<Integer>>,
+		end: Bound<NodeId<Integer>>,
+	},
+}
+
+ast_type! {
+	pub struct Mock{
+		pub name: NodeId<Ident>,
+		pub kind: MockKind
+	}
 }
 
 ast_type! {

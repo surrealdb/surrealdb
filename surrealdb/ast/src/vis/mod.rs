@@ -5,9 +5,8 @@ mod implement;
 
 use std::fmt::{self, Arguments};
 
-use crate::mac::impl_vis_debug;
 use crate::types::{Ast, NodeLibrary};
-use crate::{Node, NodeId, Spanned};
+use crate::{Node, NodeId};
 
 pub fn visualize_ast<N, L, W>(root: NodeId<N>, ast: &Ast<L>, writer: W) -> fmt::Result
 where

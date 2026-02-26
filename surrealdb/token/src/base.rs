@@ -20,16 +20,22 @@ fn whitespace_callback(lexer: &mut Lexer<BaseTokenKind>) {
 #[logos(skip(r"((?&whitespace)|(?&line_comment)|(?&multi_line_comment))+", whitespace_callback))]
 pub enum BaseTokenKind {
 	#[token("{")]
+	/// `{`
 	OpenBrace,
 	#[token("}")]
+	/// `}`
 	CloseBrace,
 	#[token("[")]
+	/// `[`
 	OpenBracket,
 	#[token("]")]
+	/// `]`
 	CloseBracket,
 	#[token("(")]
+	/// `(`
 	OpenParen,
 	#[token(")")]
+	/// `)`
 	CloseParen,
 
 	#[token(";")]

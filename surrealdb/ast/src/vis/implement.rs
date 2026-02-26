@@ -12,8 +12,8 @@ use crate::mac::impl_vis_debug;
 use crate::types::{Ast, NodeLibrary};
 use crate::vis::AstVis;
 use crate::{
-	Base, BinaryOperator, DateTime, DestructureOperator, IdiomOperator, InfoKind, Integer, NodeId,
-	NodeListId, PostfixOperator, RecordIdKeyGenerate, Sign, Spanned, UseKind,
+	Base, BinaryOperator, DateTime, DestructureOperator, IdiomOperator, InfoKind, Integer,
+	MockKind, NodeId, NodeListId, PostfixOperator, RecordIdKeyGenerate, Sign, Spanned, UseKind,
 };
 
 impl<L, W> AstVis<L, W> for InfoKind
@@ -153,6 +153,26 @@ where
 			RecordIdKeyGenerate::Ulid => fmt.unit_variant("Ulid"),
 			RecordIdKeyGenerate::Uuid => fmt.unit_variant("Uuid"),
 			RecordIdKeyGenerate::Rand => fmt.unit_variant("Rand"),
+		})
+	}
+}
+
+impl<L, W> AstVis<L, W> for MockKind
+where
+	L: NodeLibrary,
+	W: fmt::Write,
+{
+	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
+		fmt.fmt_enum(ast, "MockKind", |ast, fmt| match self {
+			MockKind::Integer(n) => {
+				fmt.variant(ast, "Integer", |ast, fmt| fmt.tuple(ast, n)?.finish())
+			}
+			MockKind::Range {
+				start,
+				end,
+			} => fmt.variant(ast, "Range", |ast, fmt| {
+				fmt.field(ast, "start", start)?.field(ast, "end", end)?.finish()
+			}),
 		})
 	}
 }

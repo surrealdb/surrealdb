@@ -700,12 +700,12 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
 	pub fn lex<T, F>(&mut self, f: F) -> ParseResult<T>
 	where
-		F: FnOnce(BaseLexer<'source>) -> ParseResult<(BaseLexer<'source>, T)>,
+		F: FnOnce(BaseLexer<'source>, &mut String) -> ParseResult<(BaseLexer<'source>, T)>,
 	{
 		assert!(self.lex.is_empty(), "Lexing special tokens requires the lexer to be empty");
 
 		let lexer = self.lex.lexer().clone();
-		let (lex, t) = f(lexer)?;
+		let (lex, t) = f(lexer, &mut self.unescape_buffer)?;
 		*self.lex.lexer() = lex;
 		Ok(t)
 	}
