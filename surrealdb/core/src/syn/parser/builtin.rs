@@ -398,6 +398,13 @@ pub(crate) static PATHS: phf::Map<
 		UniCase::ascii("time::from_unix") => (PathKind::Function, Some(UniCase::ascii("time::from::unix"))),
 		UniCase::ascii("time::from_uuid") => (PathKind::Function, Some(UniCase::ascii("time::from::uuid"))),
 		UniCase::ascii("time::is_leap_year") => (PathKind::Function, Some(UniCase::ascii("time::is::leap_year"))),
+		UniCase::ascii("time::set_year") => (PathKind::Function, None),
+		UniCase::ascii("time::set_month") => (PathKind::Function, None),
+		UniCase::ascii("time::set_day") => (PathKind::Function, None),
+		UniCase::ascii("time::set_hour") => (PathKind::Function, None),
+		UniCase::ascii("time::set_minute") => (PathKind::Function, None),
+		UniCase::ascii("time::set_second") => (PathKind::Function, None),
+		UniCase::ascii("time::set_nanosecond") => (PathKind::Function, None),
 		//
 		UniCase::ascii("type::array") => (PathKind::Function, None),
 		UniCase::ascii("type::bool") => (PathKind::Function, None),
