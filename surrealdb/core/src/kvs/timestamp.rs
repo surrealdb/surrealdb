@@ -171,11 +171,8 @@ impl HlcTimestamp {
 	/// it will spin-wait until the next millisecond.
 	pub fn next() -> Self {
 		use std::sync::atomic::{AtomicU64, Ordering};
-		#[cfg(not(target_family = "wasm"))]
-		use std::time::{SystemTime, UNIX_EPOCH};
 
-		#[cfg(target_family = "wasm")]
-		use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+		use web_time::{SystemTime, UNIX_EPOCH};
 
 		// Set the timestamps and masks
 		static LAST_TIMESTAMP: AtomicU64 = AtomicU64::new(0);

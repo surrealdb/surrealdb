@@ -2,7 +2,7 @@
 
 mod helpers;
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use anyhow::Result;
 use helpers::*;
@@ -10,6 +10,7 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::syn;
 use surrealdb_types::Value;
+use web_time::SystemTime;
 
 #[tokio::test]
 async fn define_statement_namespace() -> Result<()> {

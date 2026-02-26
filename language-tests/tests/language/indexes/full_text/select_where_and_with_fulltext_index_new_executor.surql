@@ -14,7 +14,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''"Project [ctx: Db] {rows: 1}
+value = '''"SelectProject [ctx: Db] [projections: name] {rows: 1}
     Filter [ctx: Db] [predicate: name @@ 'Jaime' AND genre = 'm'] {rows: 1}
         FullTextScan [ctx: Db] [index: ft_name, query: Jaime] {rows: 1}
 

@@ -223,6 +223,7 @@ impl PhysicalExpr for ClosureFieldCallPart {
 					local_params: Some(&local_params),
 					recursion_ctx: None,
 					document_root: ctx.document_root,
+					skip_fetch_perms: ctx.skip_fetch_perms,
 				};
 
 				let result = match block_expr.evaluate(eval_ctx).await {

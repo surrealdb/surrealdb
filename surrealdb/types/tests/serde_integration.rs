@@ -3,6 +3,7 @@ use surrealdb_types::{Object, SurrealValue, Value};
 
 // Test that SurrealValue and serde work together with matching attributes
 #[derive(SurrealValue, Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[surreal(crate = "surrealdb_types")]
 struct PersonWithSerde {
 	#[surreal(rename = "full_name")]
 	#[serde(rename = "full_name")]
@@ -11,6 +12,7 @@ struct PersonWithSerde {
 }
 
 #[derive(SurrealValue, Serialize, Deserialize, Debug, PartialEq, Clone)]
+#[surreal(crate = "surrealdb_types")]
 struct ComplexPerson {
 	#[surreal(rename = "full_name")]
 	#[serde(rename = "full_name")]

@@ -19,6 +19,11 @@ impl Enum {
 		}
 	}
 
+	fn strategy_for_variant(variant: &EnumVariant, attrs: &EnumAttributes) -> Strategy {
+		Strategy::for_enum(&variant.ident, attrs)
+			.with_variant_skip_content(variant.fields.skip_content().cloned())
+	}
+
 	#[allow(clippy::wrong_self_convention)]
 	pub fn into_value(&self, attrs: &EnumAttributes, crate_path: &CratePath) -> TokenStream2 {
 		let variants = self
@@ -27,9 +32,8 @@ impl Enum {
 			.map(|variant| {
 				let ident = &variant.ident;
 				let fields = variant.fields.match_fields();
-				let into_value = variant
-					.fields
-					.into_value(&Strategy::for_enum(&variant.ident, attrs), crate_path);
+				let strategy = Self::strategy_for_variant(variant, attrs);
+				let into_value = variant.fields.into_value(&strategy, crate_path);
 
 				quote! {
 					Self::#ident #fields => {
@@ -63,7 +67,7 @@ impl Enum {
 			let ident = &variant.ident;
 			let fields = variant.fields.match_fields();
 			let ok = quote!(return Ok(Self::#ident #fields));
-			let strategy = Strategy::for_enum(&variant.ident, attrs);
+			let strategy = Self::strategy_for_variant(variant, attrs);
 			with_map.push(variant.fields.from_value(&ident.to_string(), &strategy, ok, crate_path));
 		}
 
@@ -132,7 +136,7 @@ impl Enum {
 		let mut with_map = WithMap::new();
 
 		for variant in &self.variants {
-			let strategy = Strategy::for_enum(&variant.ident, attrs);
+			let strategy = Self::strategy_for_variant(variant, attrs);
 			with_map.push(variant.fields.is_value(&strategy, crate_path));
 		}
 
@@ -191,7 +195,8 @@ impl Enum {
 			.variants
 			.iter()
 			.map(|variant| {
-				variant.fields.kind_of(&Strategy::for_enum(&variant.ident, attrs), crate_path)
+				let strategy = Self::strategy_for_variant(variant, attrs);
+				variant.fields.kind_of(&strategy, crate_path)
 			})
 			.collect::<Vec<_>>();
 

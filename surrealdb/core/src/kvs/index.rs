@@ -13,9 +13,10 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::{Mutex, RwLock};
-use tokio::time::{Instant, sleep};
+use tokio::time::sleep;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
+use web_time::Instant;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{

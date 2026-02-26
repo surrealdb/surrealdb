@@ -20,7 +20,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::instrument;
 
-use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Permission};
 use crate::err::Error;
 use crate::exec::permission::{
@@ -64,6 +63,7 @@ impl CountScan {
 		version: Option<Arc<dyn PhysicalExpr>>,
 		field_names: Vec<String>,
 	) -> Self {
+		debug_assert!(!field_names.is_empty(), "CountScan requires at least one field name");
 		Self {
 			source,
 			version,
@@ -167,8 +167,8 @@ impl ExecOperator for CountScan {
 			};
 
 			// Verify that the table exists.
-			let table_def = txn
-				.get_tb_by_name(&ns.name, &db.name, &table_name)
+			let table_def = db_ctx
+				.get_table_def(&table_name)
 				.await
 				.context("Failed to get table")?;
 
@@ -357,17 +357,11 @@ async fn count_with_perm_fallback(
 			}
 			_ => {
 				// Single record – do a point check with permission evaluation
-				let record = txn
-					.get_record(ns_id, db_id, table_name, &rid.key, version)
-					.await
-					.context("Failed to get record")?;
-
-				if record.data.as_ref().is_none() {
+				let Some(value) =
+					crate::exec::operators::fetch::fetch_raw_record(ctx, rid, version).await?
+				else {
 					return Ok(0);
-				}
-
-				let mut value = record.data.as_ref().clone();
-				value.def(rid);
+				};
 				let allowed = check_perm_value(ctx, &value, permission).await?;
 				return Ok(usize::from(allowed));
 			}
@@ -404,8 +398,8 @@ async fn count_with_perm_fallback(
 			};
 			let mut record = crate::catalog::Record::kv_decode_value(val)
 				.context("Failed to deserialize record")?;
-			record.data.to_mut().def(&rid_val);
-			let value = record.data.into_value();
+			record.data.def(rid_val);
+			let value = record.data;
 
 			// Check per-record permission
 			let allowed = match permission {

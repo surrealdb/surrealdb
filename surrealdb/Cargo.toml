@@ -60,6 +60,7 @@ targets = []
 # workspace internal dependencies
 surrealdb-core = { workspace = true, default-features = false }
 surrealdb-types.workspace = true
+surrealdb-types-derive = { workspace = true, features = ["sdk-path"] }
 
 # Other crates (anyhow used for import stream compat with core's execute_import)
 anyhow.workspace = true
@@ -121,6 +122,7 @@ criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
 parking_lot.workspace = true
+web-time.workspace = true
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 radix_trie.workspace = true
 rand.workspace = true
@@ -135,6 +137,11 @@ tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 ulid = { workspace = true, features = ["serde"] }
 wiremock.workspace = true
+
+[package.metadata.cargo-machete]
+# Unused in our source; only needed so the derive is built with sdk-path
+# for macro output (::surrealdb::types). Not exposed on surrealdb-types.
+ignored = ["surrealdb-types-derive"]
 
 [lints]
 workspace = true

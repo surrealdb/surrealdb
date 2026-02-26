@@ -71,7 +71,7 @@
 //! using any stack recursion.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use surrealdb_types::ToSql;
 
@@ -161,10 +161,7 @@ pub(crate) fn evaluate_repeat_recurse<'a>(
 				}
 			};
 			if !values_to_write.is_empty() {
-				let mut guard = sink.lock().map_err(|_| {
-					ControlFlow::Err(anyhow::anyhow!("recursion discovery sink mutex poisoned"))
-				})?;
-				guard.extend(values_to_write);
+				sink.lock().extend(values_to_write);
 			}
 			// Return a placeholder -- the discovery phase discards results.
 			return Ok(value.clone());
@@ -295,7 +292,8 @@ pub(crate) async fn evaluate_recurse_iterative(
 		} else {
 			// ── Fallback: full-path evaluation with discovery sink ──
 			// Create a shared sink for this depth's discoveries.
-			let sink: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+			let sink: Arc<parking_lot::Mutex<Vec<Value>>> =
+				Arc::new(parking_lot::Mutex::new(Vec::new()));
 
 			// Build a RecursionCtx in discovery mode.
 			let discovery_ctx = RecursionCtx {
@@ -330,9 +328,7 @@ pub(crate) async fn evaluate_recurse_iterative(
 			// Extract discovered values from the sink.
 			// We use lock+take instead of Arc::try_unwrap because the cloned
 			// RecursionCtx instances may still hold Arc references to the sink.
-			std::mem::take(&mut *sink.lock().map_err(|_| {
-				ControlFlow::Err(anyhow::anyhow!("recursion discovery sink mutex poisoned"))
-			})?)
+			std::mem::take(&mut *sink.lock())
 		};
 
 		// Per-level deduplication.

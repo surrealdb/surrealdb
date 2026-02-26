@@ -26,7 +26,7 @@ value = "NONE"
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: t, direction: Forward, predicate: links CONTAINSANY [a:2]]
 ''''
 
@@ -34,7 +34,7 @@ value = ''''Project [ctx: Db]
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: t, direction: Forward, predicate: links CONTAINS a:2]
 ''''
 
@@ -42,7 +42,7 @@ value = ''''Project [ctx: Db]
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: t, direction: Forward, predicate: a:2 INSIDE links]
 ''''
 
@@ -50,7 +50,7 @@ value = ''''Project [ctx: Db]
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: t, direction: Forward, predicate: [a:2] ANYINSIDE links]
 ''''
 

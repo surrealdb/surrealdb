@@ -11,7 +11,7 @@ value = "[{ id: t:{ id: 3, r: o:1 } }]"
 value = "[{ id: t:{ id: 3, r: o:1 } }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: id]
     IndexScan [ctx: Db] [index: idx, access: [o:1, 2025], direction: Forward]
 ''''
 
@@ -22,7 +22,7 @@ value = "[{ id: t:{ id: 4, r: o:2 } }]"
 value = "[{ id: t:{ id: 4, r: o:2 } }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: id]
     IndexScan [ctx: Db] [index: idx, access: [o:2] MoreThan 2022, direction: Forward]
 ''''
 

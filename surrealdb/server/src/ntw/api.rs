@@ -19,7 +19,7 @@ use crate::cnf::HTTP_MAX_API_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::ntw::params::Params;
 
-pub(super) fn router<S>() -> Router<S>
+pub fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {

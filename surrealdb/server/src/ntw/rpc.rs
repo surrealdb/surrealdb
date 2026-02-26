@@ -32,7 +32,7 @@ use crate::rpc::RpcState;
 use crate::rpc::format::HttpFormat;
 use crate::rpc::websocket::Websocket;
 
-pub(super) fn router() -> Router<Arc<RpcState>> {
+pub fn router() -> Router<Arc<RpcState>> {
 	Router::new()
 		.route("/rpc", options(|| async {}).get(get_handler).post(post_handler))
 		.route_layer(DefaultBodyLimit::disable())

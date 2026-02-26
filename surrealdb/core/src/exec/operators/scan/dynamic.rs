@@ -8,7 +8,6 @@ use super::pipeline::{
 	build_field_state, determine_scan_direction, eval_limit_expr, kv_scan_stream,
 };
 use super::{FullTextScan, IndexScan, KnnScan};
-use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Permission};
 use crate::err::Error;
 use crate::exec::index::access_path::{AccessPath, select_access_path};
@@ -219,7 +218,6 @@ impl ExecOperator for DynamicScan {
 
 		let stream = async_stream::try_stream! {
 			let db_ctx = ctx.database().context("Scan requires database context")?;
-			let txn = ctx.txn();
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
 
@@ -274,7 +272,7 @@ impl ExecOperator for DynamicScan {
 
 				let results = super::record_id::execute_record_lookup(
 					&rid, version, check_perms, needed_fields.as_ref(), &ctx,
-					predicate.as_ref(), limit_val, start_val,
+					predicate.as_ref(), limit_val, start_val, None,
 				).await?;
 
 				if !results.is_empty() {
@@ -390,8 +388,8 @@ impl ExecOperator for DynamicScan {
 			}
 
 			// Check table existence and resolve SELECT permission
-			let table_def = txn
-				.get_tb_by_name(&ns.name, &db.name, &table_name)
+			let table_def = db_ctx
+				.get_table_def(&table_name)
 				.await
 				.context("Failed to get table")?;
 
@@ -423,10 +421,9 @@ impl ExecOperator for DynamicScan {
 			// Pre-compute whether any post-decode processing is needed.
 			// When false, the scan loop can skip filter/process calls entirely
 			// (zero async overhead beyond the KV stream poll).
-			let needs_processing = !matches!(select_permission, PhysicalPermission::Allow)
-				|| !field_state.computed_fields.is_empty()
-				|| (check_perms && !field_state.field_permissions.is_empty())
-				|| predicate.is_some();
+			let needs_processing = ScanPipeline::compute_needs_processing(
+				&select_permission, &field_state, check_perms, predicate.as_ref(),
+			);
 
 			// When no processing is needed, push start to the KV layer as pre_skip
 			// so rows are discarded before deserialization.
@@ -539,10 +536,10 @@ async fn resolve_table_scan_stream(
 	let access_path = if matches!(&cfg.with, Some(With::NoIndex)) {
 		None
 	} else {
-		let indexes = txn
-			.all_tb_indexes(cfg.ns_id, cfg.db_id, &cfg.table_name)
-			.await
-			.context("Failed to fetch indexes")?;
+		let db_ctx =
+			ctx.database().context("DynamicScan index analysis requires database context")?;
+		let indexes =
+			db_ctx.get_table_indexes(&cfg.table_name).await.context("Failed to fetch indexes")?;
 
 		let analyzer = IndexAnalyzer::new(indexes, cfg.with.as_ref());
 		let candidates = analyzer.analyze(cfg.cond.as_ref(), cfg.order.as_ref());

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use anyhow::Context;
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{DefaultBodyLimit, Query, WebSocketUpgrade};
@@ -20,7 +22,7 @@ use crate::cnf::HTTP_MAX_SQL_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::ntw::input::bytes_to_utf8;
 
-pub(super) fn router<S>() -> Router<S>
+pub fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
@@ -34,9 +36,10 @@ async fn post_handler(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	output: Option<TypedHeader<Accept>>,
-	Query(vars): Query<Variables>,
+	Query(params): Query<BTreeMap<String, String>>,
 	sql: Bytes,
 ) -> Result<Output, ResponseError> {
+	let vars = Variables::from(params);
 	// Get a database reference
 	let db = &state.datastore;
 	// Check if capabilities allow querying the requested HTTP route

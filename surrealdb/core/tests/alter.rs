@@ -1,11 +1,12 @@
 mod helpers;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use anyhow::Result;
 use helpers::*;
 use surrealdb_core::dbs::Session;
 use surrealdb_types::Value;
 use tokio::time::sleep;
+use web_time::SystemTime;
 
 async fn alter_statement_index_prepare_remove(def_index: &str, skip_def: usize) -> Result<()> {
 	let session = Session::owner().with_ns("test").with_db("test");

@@ -15,6 +15,7 @@ mod knn;
 pub(crate) mod pipeline;
 mod record_id;
 mod reference;
+pub(crate) mod resolved;
 mod table;
 mod union_index;
 

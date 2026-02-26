@@ -47,6 +47,8 @@ pub mod parse {
 #[doc(inline)]
 pub use method::Stats;
 #[doc(inline)]
+pub use method::Stream;
+#[doc(inline)]
 pub use method::query::IndexedResults;
 #[doc(inline)]
 pub use surrealdb_types as types;

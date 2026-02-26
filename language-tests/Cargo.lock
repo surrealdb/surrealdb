@@ -4229,7 +4229,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surrealdb-core"
-version = "3.0.0-beta"
+version = "3.1.0-alpha"
 dependencies = [
  "addr",
  "affinitypool",
@@ -4310,7 +4310,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "trice",
  "ulid",
  "unicase",
  "url",
@@ -4318,6 +4317,7 @@ dependencies = [
  "vart",
  "wasm-bindgen-futures",
  "wasmtimer",
+ "web-time",
 ]
 
 [[package]]
@@ -4400,7 +4400,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types"
-version = "3.0.0-beta"
+version = "3.1.0-alpha"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4424,7 +4424,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types-derive"
-version = "3.0.0-beta"
+version = "3.1.0-alpha"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4461,9 +4461,9 @@ dependencies = [
 
 [[package]]
 name = "surrealmx"
-version = "0.16.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "471704eb963b9b4545d0f32bd910466201b3eb2b259565332b5775684628a454"
+checksum = "6508449a7d1379a92a51ba49391b48ccab0b60dd11a4277c0dda965d8c99dbff"
 dependencies = [
  "arc-swap",
  "bincode",
@@ -4478,6 +4478,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.18",
  "tracing",
+ "web-time",
 ]
 
 [[package]]

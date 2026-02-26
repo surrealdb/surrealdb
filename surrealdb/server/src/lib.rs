@@ -35,6 +35,9 @@ use std::future::Future;
 use std::process::ExitCode;
 
 pub use cli::{Config, ConfigCheck, ConfigCheckRequirements};
+/// Re-export `RouterFactory` for convenience so embedders can `use surreal::RouterFactory`.
+#[doc(inline)]
+pub use ntw::RouterFactory;
 /// Re-export `RpcState` for convenience so embedders can `use surreal::RpcState`.
 #[doc(inline)]
 pub use rpc::RpcState;
@@ -48,7 +51,6 @@ use surrealdb_core::kvs::TransactionBuilderFactory;
 
 // Re-export the core crate in the same path used across internal modules
 // so that `crate::core::...` keeps working when used as a library target.
-use crate::ntw::RouterFactory;
 
 /// Initialize SurrealDB CLI/server with the same behavior as the `surreal` binary.
 /// This spins up a Tokio runtime with a larger stack size and then runs the CLI

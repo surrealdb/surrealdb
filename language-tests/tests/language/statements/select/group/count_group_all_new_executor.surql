@@ -12,8 +12,9 @@ value = ''''CountScan [ctx: Db] [source: `table`]
 value = "[{ count: 3 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
-    TableScan [ctx: Db] [table: table, direction: Forward]
+value = ''''SelectProject [ctx: Db] [projections: count]
+    Compute [ctx: Db] [fields: count = count(...)]
+        TableScan [ctx: Db] [table: table, direction: Forward]
 ''''
 
 [[test.results]]

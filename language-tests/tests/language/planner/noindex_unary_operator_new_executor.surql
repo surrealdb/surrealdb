@@ -6,13 +6,13 @@ reason = "Test NOINDEX hint and unsupported unary operator fallback (new executo
 value = "NONE"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 0}
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 0}
     TableScan [ctx: Db] [table: table, direction: Forward, predicate: ! param.subparam] {rows: 0}
 
 Total rows: 0''''
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 0}
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 0}
     TableScan [ctx: Db] [table: table, direction: Forward, predicate: ! param.subparam] {rows: 0}
 
 Total rows: 0''''

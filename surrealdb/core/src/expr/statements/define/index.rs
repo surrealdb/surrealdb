@@ -95,32 +95,49 @@ impl DefineIndexStatement {
 		// Compute columns
 		let cols = exprs_to_fields(stk, ctx, opt, doc, self.cols.as_slice()).await?;
 
-		// If the table is schemafull, ensure that every indexed field is defined.
-		// For sub-field paths (e.g. `document.visible`), we allow the index if
-		// either the full path is explicitly defined, or the top-level parent
-		// field has a type that permits sub-field access — this includes `object`,
-		// `any`, literal object types (e.g. `{ key: string }`), and union types
-		// where every non-none variant is object-like. A parent field with no
-		// explicit type is also accepted, since it is unconstrained.
-		if tb.schemafull {
-			for idiom in cols.iter() {
-				let fd = idiom.to_raw_string();
-				// Check if the exact field path (e.g. `document.visible`) is defined
-				if txn.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &fd).await?.is_some()
-				{
-					continue;
+		// Validate each indexed field:
+		// 1. Computed fields cannot be indexed (regardless of schemafull/schemaless). This applies
+		//    to both exact field matches and sub-field paths whose parent is a computed field.
+		// 2. If the table is schemafull, ensure that every indexed field is defined. For sub-field
+		//    paths (e.g. `document.visible`), we allow the index if either the full path is
+		//    explicitly defined, or the top-level parent field has a type that permits sub-field
+		//    access — this includes `object`, `any`, literal object types (e.g. `{ key: string }`),
+		//    and union types where every non-none variant is object-like. A parent field with no
+		//    explicit type is also accepted, since it is unconstrained.
+		for idiom in cols.iter() {
+			let fd = idiom.to_raw_string();
+			// Check if the exact field path (e.g. `document.visible`) is defined
+			if let Some(f) =
+				txn.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &fd).await?
+			{
+				// Computed fields cannot be indexed
+				if f.computed.is_some() {
+					bail!(Error::ComputedFieldCannotBeIndexed {
+						field: fd,
+						index: name
+					});
 				}
-				// For sub-field paths, extract the top-level parent field name
-				if let Some(Part::Field(first)) = idiom.0.first() &&
-					// Allow the index when the parent field exists and its type
-					// permits sub-field access. If no type is set (field_kind is
-					// None), the field is unconstrained and sub-fields are allowed.
-					 let Some(f) =
-						txn.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, first).await?
-				&& f.field_kind.as_ref().is_none_or(|k| k.allows_sub_fields())
-				{
-					continue;
+				continue;
+			}
+			// For sub-field paths, extract the top-level parent field name
+			if let Some(Part::Field(first)) = idiom.0.first() &&
+						// Allow the index when the parent field exists and its type
+						// permits sub-field access. If no type is set (field_kind is
+						// None), the field is unconstrained and sub-fields are allowed.
+						let Some(f) =
+							txn.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, first).await?
+						&& f.field_kind.as_ref().is_none_or(|k| k.allows_sub_fields())
+			{
+				// Sub-fields of computed fields cannot be indexed
+				if f.computed.is_some() {
+					bail!(Error::ComputedFieldCannotBeIndexed {
+						field: first.clone(),
+						index: name
+					});
 				}
+				continue;
+			}
+			if tb.schemafull {
 				bail!(Error::FdNotFound {
 					name: idiom.to_raw_string(),
 				});

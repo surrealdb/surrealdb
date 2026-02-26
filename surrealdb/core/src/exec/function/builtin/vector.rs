@@ -98,7 +98,7 @@ impl IndexFunction for VectorDistanceKnn {
 			let rid = extract_record_id(ctx)?;
 
 			// Look up the precomputed distance for this record
-			match knn_ctx.get(&rid) {
+			match knn_ctx.get(&rid).await {
 				Some(dist) => Ok(Value::Number(dist)),
 				None => Ok(Value::None),
 			}

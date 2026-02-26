@@ -252,14 +252,21 @@ impl Transactable for Transaction {
 		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
+		// Build an index from key bytes to original position so we can
+		// restore order without cloning values out of a HashMap.
+		let key_index: HashMap<&[u8], usize> =
+			keys.iter().enumerate().map(|(i, k)| (k.as_slice(), i)).collect();
 		// Batch get the keys
 		let pairs = inner.tx.batch_get(keys.iter().cloned()).await?;
-		// Collect into a map for key-order restoration
-		let map: HashMap<Key, Val> = pairs.map(|kv| (Key::from(kv.0), kv.1)).collect();
-		// Build result preserving original key order
-		let res = keys.into_iter().map(|k| map.get(&k).cloned()).collect();
+		// Place each result directly at the correct position
+		let mut out: Vec<Option<Val>> = vec![None; keys.len()];
+		for kv in pairs {
+			if let Some(&idx) = key_index.get(Key::from(kv.0).as_slice()) {
+				out[idx] = Some(kv.1);
+			}
+		}
 		// Return result
-		Ok(res)
+		Ok(out)
 	}
 
 	/// Insert or update a key in the database

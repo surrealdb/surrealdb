@@ -34,7 +34,7 @@ value = ''''Expr [ctx: Db] [expr: (person:tobie)<->knows<->person]
 
 [[test.results]]
 value = ''''Expr [ctx: Db] [expr: (person:tobie)->(SELECT * FROM knows WHERE age > 30)]
-  expr.lookup: Project [ctx: Db]
+  expr.lookup: SelectProject [ctx: Db] [projections: *]
       Filter [ctx: Db] [predicate: age > 30]
           GraphEdgeScan [ctx: Db] [direction: ->, tables: knows, output: FullEdge]
               CurrentValueSource [ctx: Rt]

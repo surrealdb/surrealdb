@@ -65,6 +65,7 @@ fn decode_access_token_claims(token: &str) -> Result<jsonwebtoken::TokenData<Cla
 /// };
 /// ```
 #[derive(Clone, Eq, PartialEq, PartialOrd, SurrealValue, Hash)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(untagged)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Token {

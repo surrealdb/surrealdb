@@ -3,7 +3,7 @@ mod compute;
 mod current_value_source;
 mod explain;
 mod expr;
-mod fetch;
+pub(crate) mod fetch;
 mod filter;
 mod foreach;
 mod ifelse;

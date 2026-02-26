@@ -9,16 +9,16 @@ reason = "Test that SELECT ... EXPLAIN rewrites to EXPLAIN SELECT (JSON format) 
 value = "'OK'"
 
 [[test.results]]
-value = "{ children: [{ attributes: { direction: 'Forward', table: 'item' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'Project' }"
+value = "{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', table: 'item' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'SelectProject' }"
 
 [[test.results]]
-value = "{ children: [{ attributes: { direction: 'Forward', predicate: 'score > 15', table: 'item' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'Project' }"
+value = "{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', predicate: 'score > 15', table: 'item' }, context: 'Db', operator: 'TableScan' }], context: 'Db', operator: 'SelectProject' }"
 
 [[test.results]]
-value = "{ children: [{ attributes: { direction: 'Forward', table: 'item' }, context: 'Db', metrics: { output_rows: 3 }, operator: 'TableScan' }], context: 'Db', metrics: { output_rows: 3 }, operator: 'Project', total_rows: 3 }"
+value = "{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', table: 'item' }, context: 'Db', metrics: { output_rows: 3 }, operator: 'TableScan' }], context: 'Db', metrics: { output_rows: 3 }, operator: 'SelectProject', total_rows: 3 }"
 
 [[test.results]]
-value = "{ children: [{ attributes: { direction: 'Forward', predicate: 'score > 15', table: 'item' }, context: 'Db', metrics: { output_rows: 2 }, operator: 'TableScan' }], context: 'Db', metrics: { output_rows: 2 }, operator: 'Project', total_rows: 2 }"
+value = "{ attributes: { projections: '*' }, children: [{ attributes: { direction: 'Forward', predicate: 'score > 15', table: 'item' }, context: 'Db', metrics: { output_rows: 2 }, operator: 'TableScan' }], context: 'Db', metrics: { output_rows: 2 }, operator: 'SelectProject', total_rows: 2 }"
 
 */
 

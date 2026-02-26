@@ -25,7 +25,7 @@
 //! let plan = planner.plan(expr)?;
 //! ```
 //!
-//! For backwards compatibility, [`try_plan_expr`] delegates to `Planner::plan()`.
+//! For backwards compatibility, [`try_plan_expr!`] delegates to `Planner::plan()`.
 //!
 //! # SELECT Pipeline
 //!
@@ -80,7 +80,13 @@ use crate::exec::operators::{
 	IndexInfoPlan, NamespaceInfoPlan, ReturnPlan, RootInfoPlan, SequencePlan, SleepPlan,
 	TableInfoPlan, UserInfoPlan,
 };
-use crate::exec::physical_expr::ControlFlowKind;
+use crate::exec::physical_expr::{
+	ArrayLiteral, BinaryOp, BlockPhysicalExpr, BuiltinFunctionExec, ClosureCallExec, ClosureExec,
+	ControlFlowExpr, ControlFlowKind, IfElseExpr, JsFunctionExec, Literal as PhysicalLiteral,
+	MockExpr, ModelFunctionExec, ObjectLiteral, Param, PostfixOp, ProjectionFunctionExec,
+	RecordIdExpr, ScalarSubquery, SetLiteral, SiloModuleExec, SurrealismModuleExec, UnaryOp,
+	UserDefinedFunctionExec,
+};
 use crate::expr::statements::IfelseStatement;
 use crate::expr::{Expr, Function, FunctionCall};
 
@@ -217,289 +223,48 @@ impl<'ctx> Planner<'ctx> {
 	/// Physical expressions are evaluated at runtime to produce values.
 	/// This is used for expressions within operators (e.g., WHERE predicates,
 	/// SELECT field expressions, ORDER BY expressions).
+	///
+	/// Each `Expr` variant is handled by a focused helper method; this function
+	/// is a thin dispatcher.
 	pub async fn physical_expr(
 		&self,
 		expr: Expr,
 	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-		use crate::exec::physical_expr::{
-			ArrayLiteral, BinaryOp, BlockPhysicalExpr, BuiltinFunctionExec, ClosureCallExec,
-			ClosureExec, ControlFlowExpr, IfElseExpr, JsFunctionExec, Literal as PhysicalLiteral,
-			MockExpr, ModelFunctionExec, ObjectLiteral, Param, PostfixOp, ProjectionFunctionExec,
-			RecordIdExpr, ScalarSubquery, SetLiteral, SiloModuleExec, SurrealismModuleExec,
-			UnaryOp, UserDefinedFunctionExec,
-		};
-
 		match expr {
-			Expr::Literal(crate::expr::literal::Literal::Array(elements)) => {
-				let mut phys_elements = Vec::with_capacity(elements.len());
-				for elem in elements {
-					phys_elements.push(Box::pin(self.physical_expr(elem)).await?);
-				}
-				Ok(Arc::new(ArrayLiteral {
-					elements: phys_elements,
-				}))
-			}
-			Expr::Literal(crate::expr::literal::Literal::Object(entries)) => {
-				let mut phys_entries = Vec::with_capacity(entries.len());
-				for entry in entries {
-					let value = Box::pin(self.physical_expr(entry.value)).await?;
-					phys_entries.push((entry.key, value));
-				}
-				Ok(Arc::new(ObjectLiteral {
-					entries: phys_entries,
-				}))
-			}
-			Expr::Literal(crate::expr::literal::Literal::Set(elements)) => {
-				let mut phys_elements = Vec::with_capacity(elements.len());
-				for elem in elements {
-					phys_elements.push(Box::pin(self.physical_expr(elem)).await?);
-				}
-				Ok(Arc::new(SetLiteral {
-					elements: phys_elements,
-				}))
-			}
-			Expr::Literal(crate::expr::literal::Literal::RecordId(rid_lit)) => {
-				let key = self.convert_record_key_to_physical(&rid_lit.key).await?;
-				Ok(Arc::new(RecordIdExpr {
-					table: rid_lit.table,
-					key,
-				}))
-			}
-			Expr::Literal(lit) => {
-				let value = literal_to_value(lit)?;
-				Ok(Arc::new(PhysicalLiteral(value)))
-			}
-			Expr::Param(param) => Ok(Arc::new(Param(param.as_str().to_string()))),
+			// Literals and constant values
+			Expr::Literal(lit) => Box::pin(self.physical_literal(lit)).await,
+			Expr::Constant(c) => Ok(Arc::new(PhysicalLiteral(c.compute()))),
+			Expr::Table(t) => Ok(Arc::new(PhysicalLiteral(crate::val::Value::Table(t)))),
+			Expr::Param(p) => Ok(Arc::new(Param(p.as_str().to_string()))),
 			Expr::Idiom(idiom) => Box::pin(self.convert_idiom(idiom)).await,
+
+			// Operators
 			Expr::Binary {
 				left,
 				op,
 				right,
-			} => {
-				// For MATCHES operators with idiom left and string-literal right,
-				// create a MatchesOp that evaluates via the full-text index.
-				if let crate::expr::operator::BinaryOperator::Matches(ref matches_op) = op
-					&& let Expr::Idiom(idiom) = *left
-				{
-					if let Expr::Literal(crate::expr::literal::Literal::String(query)) = *right {
-						// Multi-part idioms (e.g. `t.name`) may traverse record links
-						// to fields on other tables. MatchesOp can only evaluate
-						// MATCHES against a fulltext index on the source table — it
-						// cannot resolve cross-table record links.
-						if idiom.0.len() > 1 {
-							return Err(Error::PlannerUnimplemented(
-								"MATCHES with multi-part field path not yet supported \
-								 in streaming executor"
-									.to_string(),
-							));
-						}
-						let idiom_clone = idiom.clone();
-						let query_clone = query.clone();
-						let left_phys = Box::pin(self.physical_expr(Expr::Idiom(idiom))).await?;
-						let right_phys = Box::pin(self.physical_expr(Expr::Literal(
-							crate::expr::literal::Literal::String(query),
-						)))
-						.await?;
-						return Ok(Arc::new(crate::exec::physical_expr::MatchesOp::new(
-							left_phys,
-							right_phys,
-							matches_op.clone(),
-							idiom_clone,
-							query_clone,
-						)));
-					}
-					// Left was idiom but right wasn't a string literal — reassemble
-					let left_phys = Box::pin(self.physical_expr(Expr::Idiom(idiom))).await?;
-					let right_phys = Box::pin(self.physical_expr(*right)).await?;
-					return Ok(Arc::new(BinaryOp {
-						left: left_phys,
-						op,
-						right: right_phys,
-					}));
-				}
-				// All other binary operators (and non-standard MATCHES patterns)
-				let left_phys = Box::pin(self.physical_expr(*left)).await?;
-				let right_phys = Box::pin(self.physical_expr(*right)).await?;
-				Ok(Arc::new(BinaryOp {
-					left: left_phys,
-					op,
-					right: right_phys,
-				}))
-			}
-			Expr::Constant(constant) => {
-				let value = constant.compute();
-				Ok(Arc::new(PhysicalLiteral(value)))
-			}
+			} => Box::pin(self.physical_binary_expr(*left, op, *right)).await,
 			Expr::Prefix {
 				op,
 				expr,
-			} => {
-				// Check for excessively deep prefix/cast chains. The old
-				// compute path enforces a recursion depth limit via TreeStack;
-				// the new physical-expr evaluator does not track depth. Detect
-				// deep chains at planning time and reject with the same error.
-				{
-					let mut d = 0u32;
-					let mut cur = &*expr;
-					while let Expr::Prefix {
-						expr: inner,
-						..
-					} = cur
-					{
-						d += 1;
-						if d > *MAX_COMPUTATION_DEPTH {
-							return Err(Error::ComputationDepthExceeded);
-						}
-						cur = inner;
-					}
-				}
-				let inner = Box::pin(self.physical_expr(*expr)).await?;
-				Ok(Arc::new(UnaryOp {
-					op,
-					expr: inner,
-				}))
-			}
+			} => Box::pin(self.physical_prefix_expr(op, *expr)).await,
 			Expr::Postfix {
 				op,
 				expr,
-			} => {
-				use crate::expr::operator::PostfixOperator;
+			} => Box::pin(self.physical_postfix_expr(op, *expr)).await,
 
-				match op {
-					PostfixOperator::Call(args) => {
-						let target = Box::pin(self.physical_expr(*expr)).await?;
-						let mut phys_args = Vec::with_capacity(args.len());
-						for arg in args {
-							phys_args.push(Box::pin(self.physical_expr(arg)).await?);
-						}
-						Ok(Arc::new(ClosureCallExec {
-							target,
-							arguments: phys_args,
-						}))
-					}
-					_ => {
-						let inner = Box::pin(self.physical_expr(*expr)).await?;
-						Ok(Arc::new(PostfixOp {
-							op,
-							expr: inner,
-						}))
-					}
-				}
-			}
-			Expr::Table(table_name) => {
-				Ok(Arc::new(PhysicalLiteral(crate::val::Value::Table(table_name))))
-			}
-			Expr::FunctionCall(func_call) => {
-				let FunctionCall {
-					receiver,
-					arguments,
-				} = *func_call;
-
-				macro_rules! phys_args {
-					($($arg:expr),*) => {{
-						let mut phys_args = Vec::with_capacity(arguments.len());
-						for arg in arguments {
-							phys_args.push(Box::pin(self.physical_expr(arg)).await?);
-						}
-						phys_args
-					}};
-				}
-
-				match receiver {
-					Function::Normal(name) => {
-						let registry = self.function_registry();
-
-						if registry.is_index_function(&name) {
-							return Box::pin(self.plan_index_function(&name, arguments)).await;
-						}
-
-						if registry.is_projection(&name) {
-							let func_ctx = registry
-								.get_projection(&name)
-								.map(|f| f.required_context())
-								.unwrap_or(crate::exec::ContextLevel::Database);
-							Ok(Arc::new(ProjectionFunctionExec {
-								name,
-								arguments: phys_args!(arguments),
-								func_required_context: func_ctx,
-							}))
-						} else {
-							let func_ctx = registry
-								.get(&name)
-								.map(|f| f.required_context())
-								.unwrap_or(crate::exec::ContextLevel::Root);
-							Ok(Arc::new(BuiltinFunctionExec {
-								name,
-								arguments: phys_args!(arguments),
-								func_required_context: func_ctx,
-							}))
-						}
-					}
-					Function::Custom(name) => Ok(Arc::new(UserDefinedFunctionExec {
-						name,
-						arguments: phys_args!(arguments),
-					})),
-					Function::Script(script) => Ok(Arc::new(JsFunctionExec {
-						script,
-						arguments: phys_args!(arguments),
-					})),
-					Function::Model(model) => Ok(Arc::new(ModelFunctionExec {
-						model,
-						arguments: phys_args!(arguments),
-					})),
-					Function::Module(module, sub) => Ok(Arc::new(SurrealismModuleExec {
-						module,
-						sub,
-						arguments: phys_args!(arguments),
-					})),
-					Function::Silo {
-						org,
-						pkg,
-						major,
-						minor,
-						patch,
-						sub,
-					} => Ok(Arc::new(SiloModuleExec {
-						org,
-						pkg,
-						major,
-						minor,
-						patch,
-						sub,
-						arguments: phys_args!(arguments),
-					})),
-				}
-			}
-			Expr::Closure(closure) => Ok(Arc::new(ClosureExec {
-				closure: *closure,
+			// Functions and closures
+			Expr::FunctionCall(fc) => Box::pin(self.physical_function_call(*fc)).await,
+			Expr::Closure(c) => Ok(Arc::new(ClosureExec {
+				closure: *c,
 			})),
-			Expr::IfElse(ifelse) => {
-				let IfelseStatement {
-					exprs,
-					close,
-				} = *ifelse;
-				let mut branches = Vec::with_capacity(exprs.len());
-				for (condition, body) in exprs {
-					let cond_phys = Box::pin(self.physical_expr(condition)).await?;
-					let body_phys = Box::pin(self.physical_expr(body)).await?;
-					branches.push((cond_phys, body_phys));
-				}
-				let otherwise = if let Some(else_expr) = close {
-					Some(Box::pin(self.physical_expr(else_expr)).await?)
-				} else {
-					None
-				};
-				Ok(Arc::new(IfElseExpr {
-					branches,
-					otherwise,
-				}))
-			}
-			Expr::Select(select) => {
-				let plan = Box::pin(self.plan_select_statement(*select)).await?;
-				Ok(Arc::new(ScalarSubquery {
-					plan,
-				}))
-			}
+
+			// Compound expressions
+			Expr::IfElse(stmt) => Box::pin(self.physical_if_else(*stmt)).await,
+			Expr::Mock(m) => Ok(Arc::new(MockExpr(m))),
+			Expr::Block(b) => Ok(Arc::new(BlockPhysicalExpr {
+				block: *b,
+			})),
 
 			// Control flow
 			Expr::Break => Ok(Arc::new(ControlFlowExpr {
@@ -510,81 +275,406 @@ impl<'ctx> Planner<'ctx> {
 				kind: ControlFlowKind::Continue,
 				inner: None,
 			})),
-			Expr::Return(output_stmt) => {
-				let inner = Box::pin(self.physical_expr(output_stmt.what)).await?;
+			Expr::Return(s) => {
+				let inner = Box::pin(self.physical_expr(s.what)).await?;
 				Ok(Arc::new(ControlFlowExpr {
 					kind: ControlFlowKind::Return,
 					inner: Some(inner),
 				}))
 			}
-
-			// DDL — cannot be used in expression context
-			Expr::Define(_) => Err(Error::PlannerUnsupported(
-				"DEFINE statements cannot be used in expression context".to_string(),
-			)),
-			Expr::Remove(_) => Err(Error::PlannerUnsupported(
-				"REMOVE statements cannot be used in expression context".to_string(),
-			)),
-			Expr::Rebuild(_) => Err(Error::PlannerUnsupported(
-				"REBUILD statements cannot be used in expression context".to_string(),
-			)),
-			Expr::Alter(_) => Err(Error::PlannerUnsupported(
-				"ALTER statements cannot be used in expression context".to_string(),
-			)),
-
-			// INFO sub-expressions (e.g. `(INFO FOR DATABASE).analyzers`)
-			Expr::Info(info) => {
-				use crate::exec::operators::RootInfoPlan;
-				use crate::expr::statements::info::InfoStatement;
-
-				let plan: Arc<dyn ExecOperator> = match *info {
-					InfoStatement::Root(structured) => Arc::new(RootInfoPlan::new(structured)),
-					InfoStatement::Ns(structured) => Arc::new(NamespaceInfoPlan::new(structured)),
-					InfoStatement::Db(structured, version) => {
-						let version = match version {
-							Some(v) => Some(Box::pin(self.physical_expr(v)).await?),
-							None => None,
-						};
-						Arc::new(DatabaseInfoPlan::new(structured, version))
-					}
-					InfoStatement::Tb(table, structured, version) => {
-						let table = self.physical_expr_as_name(table).await?;
-						let version = match version {
-							Some(v) => Some(Box::pin(self.physical_expr(v)).await?),
-							None => None,
-						};
-						Arc::new(TableInfoPlan::new(table, structured, version))
-					}
-					InfoStatement::User(user, base, structured) => {
-						let user = self.physical_expr_as_name(user).await?;
-						Arc::new(UserInfoPlan::new(user, base, structured))
-					}
-					InfoStatement::Index(index, table, structured) => {
-						let index = self.physical_expr_as_name(index).await?;
-						let table = self.physical_expr_as_name(table).await?;
-						Arc::new(IndexInfoPlan::new(index, table, structured))
-					}
-				};
-				Ok(Arc::new(crate::exec::physical_expr::ScalarSubquery {
-					plan,
+			Expr::Throw(e) => {
+				let inner = Box::pin(self.physical_expr(*e)).await?;
+				Ok(Arc::new(ControlFlowExpr {
+					kind: ControlFlowKind::Throw,
+					inner: Some(inner),
 				}))
 			}
-			Expr::Foreach(_) => Err(Error::Query {
-				message: "FOR loops cannot be used in expression context".to_string(),
-			}),
-			Expr::Sleep(_) => Err(Error::Query {
-				message: "SLEEP statements cannot be used in expression context".to_string(),
-			}),
+
+			// Statement subqueries (wrapped in ScalarSubquery)
+			Expr::Select(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => Box::pin(self.physical_statement_subquery(expr)).await,
+
+			// LET is handled by block/sequence operators, not as an expression
 			Expr::Let(_) => Err(Error::Query {
-				message: "LET statements cannot be used in expression context".to_string(),
+				message: "LET statements are handled by block or sequence operators".to_string(),
 			}),
+
+			// DDL — cannot be used in expression context
+			Expr::Define(_) | Expr::Remove(_) | Expr::Rebuild(_) | Expr::Alter(_) => {
+				Err(Error::PlannerUnsupported(
+					"DDL statements cannot be used in expression context".to_string(),
+				))
+			}
+
+			// DML subqueries — not yet implemented
+			Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Upsert(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_) => Err(Error::PlannerUnsupported(
+				"DML subqueries not yet supported in execution plans".to_string(),
+			)),
+		}
+	}
+
+	/// Convert a literal expression to a physical expression.
+	async fn physical_literal(
+		&self,
+		lit: crate::expr::literal::Literal,
+	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+		use crate::expr::literal::Literal;
+
+		match lit {
+			Literal::Array(elements) => {
+				let elements = self.physical_args(elements).await?;
+				Ok(Arc::new(ArrayLiteral {
+					elements,
+				}))
+			}
+			Literal::Object(entries) => {
+				let mut phys_entries = Vec::with_capacity(entries.len());
+				for entry in entries {
+					let value = Box::pin(self.physical_expr(entry.value)).await?;
+					phys_entries.push((entry.key, value));
+				}
+				Ok(Arc::new(ObjectLiteral {
+					entries: phys_entries,
+				}))
+			}
+			Literal::Set(elements) => {
+				let elements = self.physical_args(elements).await?;
+				Ok(Arc::new(SetLiteral {
+					elements,
+				}))
+			}
+			Literal::RecordId(rid_lit) => {
+				let key = self.convert_record_key_to_physical(&rid_lit.key).await?;
+				Ok(Arc::new(RecordIdExpr {
+					table: rid_lit.table,
+					key,
+				}))
+			}
+			other => {
+				let value = literal_to_value(other)?;
+				Ok(Arc::new(PhysicalLiteral(value)))
+			}
+		}
+	}
+
+	/// Convert a binary expression to a physical expression.
+	///
+	/// Handles the MATCHES operator special-case (full-text index evaluation)
+	/// and the `SimpleBinaryOp` optimisation for `field op literal` patterns.
+	async fn physical_binary_expr(
+		&self,
+		left: Expr,
+		op: crate::expr::operator::BinaryOperator,
+		right: Expr,
+	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+		// For MATCHES operators with idiom left and string-literal or
+		// bind-parameter right, create a MatchesOp that evaluates via
+		// the full-text index.
+		if let crate::expr::operator::BinaryOperator::Matches(ref matches_op) = op
+			&& let Expr::Idiom(idiom) = left
+		{
+			let resolved_query = match &right {
+				Expr::Literal(crate::expr::literal::Literal::String(s)) => Some(s.clone()),
+				Expr::Param(param) => self.ctx.value(param.as_str()).and_then(|v| {
+					if let crate::val::Value::String(s) = v {
+						Some(s.clone())
+					} else {
+						None
+					}
+				}),
+				_ => None,
+			};
+			if let Some(query) = resolved_query {
+				// Multi-part idioms (e.g. `t.name`) may traverse record links
+				// to fields on other tables. MatchesOp can only evaluate
+				// MATCHES against a fulltext index on the source table — it
+				// cannot resolve cross-table record links.
+				if idiom.0.len() > 1 {
+					return Err(Error::PlannerUnimplemented(
+						"MATCHES with multi-part field path not yet supported \
+						 in streaming executor"
+							.to_string(),
+					));
+				}
+				let idiom_clone = idiom.clone();
+				let query_clone = query.clone();
+				let left_phys = Box::pin(self.physical_expr(Expr::Idiom(idiom))).await?;
+				let right_phys = Box::pin(
+					self.physical_expr(Expr::Literal(crate::expr::literal::Literal::String(query))),
+				)
+				.await?;
+				return Ok(Arc::new(crate::exec::physical_expr::MatchesOp::new(
+					left_phys,
+					right_phys,
+					matches_op.clone(),
+					idiom_clone,
+					query_clone,
+				)));
+			}
+			// Left was idiom but right wasn't resolvable — reassemble
+			let left_phys = Box::pin(self.physical_expr(Expr::Idiom(idiom))).await?;
+			let right_phys = Box::pin(self.physical_expr(right)).await?;
+			return Ok(Arc::new(BinaryOp {
+				left: left_phys,
+				op,
+				right: right_phys,
+			}));
+		}
+
+		// All other binary operators (and non-standard MATCHES patterns)
+		let left_phys = Box::pin(self.physical_expr(left)).await?;
+		let right_phys = Box::pin(self.physical_expr(right)).await?;
+
+		// Optimisation: detect `field op literal` or `literal op field`
+		// patterns and emit a SimpleBinaryOp that inlines field access
+		// and avoids per-record async dispatch + Value cloning.
+		if is_simple_binary_eligible(&op) {
+			if let Some(field) = left_phys.try_simple_field()
+				&& let Some(lit) = right_phys.try_literal()
+			{
+				return Ok(Arc::new(crate::exec::physical_expr::SimpleBinaryOp {
+					field_name: field.to_string(),
+					op,
+					literal: lit.clone(),
+					reversed: false,
+				}));
+			} else if let Some(field) = right_phys.try_simple_field()
+				&& let Some(lit) = left_phys.try_literal()
+			{
+				return Ok(Arc::new(crate::exec::physical_expr::SimpleBinaryOp {
+					field_name: field.to_string(),
+					op,
+					literal: lit.clone(),
+					reversed: true,
+				}));
+			}
+		}
+
+		Ok(Arc::new(BinaryOp {
+			left: left_phys,
+			op,
+			right: right_phys,
+		}))
+	}
+
+	/// Convert a prefix (unary) expression to a physical expression.
+	async fn physical_prefix_expr(
+		&self,
+		op: crate::expr::operator::PrefixOperator,
+		expr: Expr,
+	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+		// Check for excessively deep prefix/cast chains. The old compute path
+		// enforces a recursion depth limit via TreeStack; the new physical-expr
+		// evaluator does not track depth. Detect deep chains at planning time
+		// and reject with the same error.
+		{
+			let mut d = 0u32;
+			let mut cur = &expr;
+			while let Expr::Prefix {
+				expr: inner,
+				..
+			} = cur
+			{
+				d += 1;
+				if d > *MAX_COMPUTATION_DEPTH {
+					return Err(Error::ComputationDepthExceeded);
+				}
+				cur = inner;
+			}
+		}
+		let inner = Box::pin(self.physical_expr(expr)).await?;
+		Ok(Arc::new(UnaryOp {
+			op,
+			expr: inner,
+		}))
+	}
+
+	/// Convert a postfix expression to a physical expression.
+	async fn physical_postfix_expr(
+		&self,
+		op: crate::expr::operator::PostfixOperator,
+		expr: Expr,
+	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+		use crate::expr::operator::PostfixOperator;
+
+		match op {
+			PostfixOperator::Call(args) => {
+				let target = Box::pin(self.physical_expr(expr)).await?;
+				let arguments = self.physical_args(args).await?;
+				Ok(Arc::new(ClosureCallExec {
+					target,
+					arguments,
+				}))
+			}
+			_ => {
+				let inner = Box::pin(self.physical_expr(expr)).await?;
+				Ok(Arc::new(PostfixOp {
+					op,
+					expr: inner,
+				}))
+			}
+		}
+	}
+
+	/// Convert a function call to a physical expression.
+	async fn physical_function_call(
+		&self,
+		func_call: FunctionCall,
+	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+		let FunctionCall {
+			receiver,
+			arguments,
+		} = func_call;
+
+		match receiver {
+			Function::Normal(name) => {
+				let registry = self.function_registry();
+
+				if registry.is_index_function(&name) {
+					return Box::pin(self.plan_index_function(&name, arguments)).await;
+				}
+
+				let arguments = self.physical_args(arguments).await?;
+				if registry.is_projection(&name) {
+					let func_ctx = registry
+						.get_projection(&name)
+						.map(|f| f.required_context())
+						.unwrap_or(crate::exec::ContextLevel::Database);
+					Ok(Arc::new(ProjectionFunctionExec {
+						name,
+						arguments,
+						func_required_context: func_ctx,
+					}))
+				} else {
+					let func_ctx = registry
+						.get(&name)
+						.map(|f| f.required_context())
+						.unwrap_or(crate::exec::ContextLevel::Root);
+					Ok(Arc::new(BuiltinFunctionExec {
+						name,
+						arguments,
+						func_required_context: func_ctx,
+					}))
+				}
+			}
+			Function::Custom(name) => {
+				let arguments = self.physical_args(arguments).await?;
+				Ok(Arc::new(UserDefinedFunctionExec {
+					name,
+					arguments,
+				}))
+			}
+			Function::Script(script) => {
+				let arguments = self.physical_args(arguments).await?;
+				Ok(Arc::new(JsFunctionExec {
+					script,
+					arguments,
+				}))
+			}
+			Function::Model(model) => {
+				let arguments = self.physical_args(arguments).await?;
+				Ok(Arc::new(ModelFunctionExec {
+					model,
+					arguments,
+				}))
+			}
+			Function::Module(module, sub) => {
+				let arguments = self.physical_args(arguments).await?;
+				Ok(Arc::new(SurrealismModuleExec {
+					module,
+					sub,
+					arguments,
+				}))
+			}
+			Function::Silo {
+				org,
+				pkg,
+				major,
+				minor,
+				patch,
+				sub,
+			} => {
+				let arguments = self.physical_args(arguments).await?;
+				Ok(Arc::new(SiloModuleExec {
+					org,
+					pkg,
+					major,
+					minor,
+					patch,
+					sub,
+					arguments,
+				}))
+			}
+		}
+	}
+
+	/// Convert a list of argument expressions to physical expressions.
+	async fn physical_args(
+		&self,
+		args: Vec<Expr>,
+	) -> Result<Vec<Arc<dyn crate::exec::PhysicalExpr>>, Error> {
+		let mut phys = Vec::with_capacity(args.len());
+		for arg in args {
+			phys.push(Box::pin(self.physical_expr(arg)).await?);
+		}
+		Ok(phys)
+	}
+
+	/// Convert an if-else expression to a physical expression.
+	async fn physical_if_else(
+		&self,
+		stmt: IfelseStatement,
+	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+		let IfelseStatement {
+			exprs,
+			close,
+		} = stmt;
+		let mut branches = Vec::with_capacity(exprs.len());
+		for (condition, body) in exprs {
+			let cond_phys = Box::pin(self.physical_expr(condition)).await?;
+			let body_phys = Box::pin(self.physical_expr(body)).await?;
+			branches.push((cond_phys, body_phys));
+		}
+		let otherwise = if let Some(else_expr) = close {
+			Some(Box::pin(self.physical_expr(else_expr)).await?)
+		} else {
+			None
+		};
+		Ok(Arc::new(IfElseExpr {
+			branches,
+			otherwise,
+		}))
+	}
+
+	/// Convert a statement expression (SELECT, INFO, FOREACH, SLEEP, EXPLAIN)
+	/// into a physical expression by wrapping its operator plan in a
+	/// [`ScalarSubquery`].
+	async fn physical_statement_subquery(
+		&self,
+		expr: Expr,
+	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+		let plan: Arc<dyn ExecOperator> = match expr {
+			Expr::Select(select) => Box::pin(self.plan_select_statement(*select)).await?,
+			Expr::Info(info) => self.plan_info_statement(*info).await?,
+			Expr::Foreach(stmt) => self.plan_foreach_statement(*stmt)?,
+			Expr::Sleep(stmt) => self.plan_sleep_statement(*stmt)?,
 			Expr::Explain {
 				format,
 				analyze,
 				statement,
 			} => {
 				let inner_plan = self.plan_expr(*statement).await?;
-				let plan: Arc<dyn ExecOperator> = if analyze {
+				if analyze {
 					Arc::new(AnalyzePlan {
 						plan: inner_plan,
 						format,
@@ -595,44 +685,13 @@ impl<'ctx> Planner<'ctx> {
 						plan: inner_plan,
 						format,
 					})
-				};
-				Ok(Arc::new(ScalarSubquery {
-					plan,
-				}))
+				}
 			}
-
-			Expr::Mock(mock) => Ok(Arc::new(MockExpr(mock))),
-			Expr::Block(block) => Ok(Arc::new(BlockPhysicalExpr {
-				block: *block,
-			})),
-			Expr::Throw(expr) => {
-				let inner = Box::pin(self.physical_expr(*expr)).await?;
-				Ok(Arc::new(ControlFlowExpr {
-					kind: ControlFlowKind::Throw,
-					inner: Some(inner),
-				}))
-			}
-
-			// DML subqueries — not yet implemented
-			Expr::Create(_) => Err(Error::PlannerUnsupported(
-				"CREATE subqueries not yet supported in execution plans".to_string(),
-			)),
-			Expr::Update(_) => Err(Error::PlannerUnsupported(
-				"UPDATE subqueries not yet supported in execution plans".to_string(),
-			)),
-			Expr::Upsert(_) => Err(Error::PlannerUnsupported(
-				"UPSERT subqueries not yet supported in execution plans".to_string(),
-			)),
-			Expr::Delete(_) => Err(Error::PlannerUnsupported(
-				"DELETE subqueries not yet supported in execution plans".to_string(),
-			)),
-			Expr::Relate(_) => Err(Error::PlannerUnsupported(
-				"RELATE subqueries not yet supported in execution plans".to_string(),
-			)),
-			Expr::Insert(_) => Err(Error::PlannerUnsupported(
-				"INSERT subqueries not yet supported in execution plans".to_string(),
-			)),
-		}
+			_ => unreachable!("physical_statement_subquery called with non-statement expr"),
+		};
+		Ok(Arc::new(ScalarSubquery {
+			plan,
+		}))
 	}
 
 	/// Convert an expression to a physical expression, treating simple identifiers as strings.
@@ -1008,15 +1067,41 @@ impl<'ctx> Planner<'ctx> {
 // Public API Wrappers
 // ============================================================================
 
+macro_rules! try_plan_expr {
+	($expr:expr, $ctx:expr, $txn:expr) => {{
+		let __expr: &$crate::expr::Expr = $expr;
+		if matches!(
+			__expr,
+			$crate::expr::Expr::Create(_)
+				| $crate::expr::Expr::Update(_)
+				| $crate::expr::Expr::Upsert(_)
+				| $crate::expr::Expr::Delete(_)
+				| $crate::expr::Expr::Insert(_)
+				| $crate::expr::Expr::Relate(_)
+				| $crate::expr::Expr::Define(_)
+				| $crate::expr::Expr::Remove(_)
+				| $crate::expr::Expr::Rebuild(_)
+				| $crate::expr::Expr::Alter(_)
+		) {
+			Err($crate::err::Error::PlannerUnsupported(String::new()))
+		} else if *$ctx.new_planner_strategy() == $crate::dbs::NewPlannerStrategy::ComputeOnly {
+			Err($crate::err::Error::PlannerUnsupported(String::new()))
+		} else {
+			$crate::exec::planner::plan_expr_inner(__expr, $ctx, $txn).await
+		}
+	}};
+}
+
+pub(crate) use try_plan_expr;
+
 /// Plan an expression into an executable operator tree.
 ///
-/// This is the main entry point for the planner, delegating to `Planner::plan()`.
-/// Returns `Error::PlannerUnsupported` when `ComputeOnly` strategy is active.
-/// Plan an expression into an executable operator tree.
+/// This is the inner planning function called by the `try_plan_expr!` macro
+/// after DML/DDL rejection and ComputeOnly checks have been performed inline.
 ///
 /// When a transaction is provided, the planner resolves table definitions
 /// and indexes at plan time, enabling sort elimination and concrete scan operators.
-pub(crate) async fn try_plan_expr(
+pub(crate) async fn plan_expr_inner(
 	expr: &Expr,
 	ctx: &FrozenContext,
 	txn: Arc<crate::kvs::Transaction>,
@@ -1036,11 +1121,6 @@ pub(crate) async fn try_plan_expr(
 				_ => None,
 			}
 		});
-	if *ctx.new_planner_strategy() == NewPlannerStrategy::ComputeOnly {
-		return Err(Error::PlannerUnsupported(
-			"ComputeOnly strategy: skipping new planner".to_string(),
-		));
-	}
 	Planner::with_txn(ctx, txn, ns, db).plan(expr).await
 }
 
@@ -1058,6 +1138,40 @@ pub(crate) async fn expr_to_physical_expr(
 // ============================================================================
 // Tests
 // ============================================================================
+
+/// Returns `true` if the binary operator is eligible for `SimpleBinaryOp` optimisation.
+///
+/// Only comparison and containment operators are eligible — these take `(&Value, &Value)`
+/// and produce a boolean result. Operators that produce non-boolean results (arithmetic,
+/// ranges), require short-circuit logic (And, Or, NullCoalescing), or need special index
+/// context (Matches, NearestNeighbor) are excluded.
+fn is_simple_binary_eligible(op: &crate::expr::operator::BinaryOperator) -> bool {
+	use crate::expr::operator::BinaryOperator;
+	matches!(
+		op,
+		BinaryOperator::Equal
+			| BinaryOperator::ExactEqual
+			| BinaryOperator::NotEqual
+			| BinaryOperator::AllEqual
+			| BinaryOperator::AnyEqual
+			| BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual
+			| BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+			| BinaryOperator::Contain
+			| BinaryOperator::NotContain
+			| BinaryOperator::ContainAll
+			| BinaryOperator::ContainAny
+			| BinaryOperator::ContainNone
+			| BinaryOperator::Inside
+			| BinaryOperator::NotInside
+			| BinaryOperator::AllInside
+			| BinaryOperator::AnyInside
+			| BinaryOperator::NoneInside
+			| BinaryOperator::Outside
+			| BinaryOperator::Intersects
+	)
+}
 
 #[cfg(test)]
 mod planner_tests {

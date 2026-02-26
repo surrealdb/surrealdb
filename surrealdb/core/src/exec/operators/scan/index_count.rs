@@ -27,7 +27,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::instrument;
 
-use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, Index, NamespaceId, Permission};
 use crate::err::Error;
 use crate::exec::permission::{
@@ -67,6 +66,10 @@ pub struct IndexCountScan {
 	pub(crate) condition: Cond,
 	/// Optional VERSION timestamp for time-travel queries.
 	pub(crate) version: Option<u64>,
+	/// Output field names for the count result (one per SELECT field).
+	/// For `SELECT count() as c FROM t WHERE ... GROUP ALL` this would be `["c"]`.
+	/// For `SELECT count() FROM t WHERE ... GROUP ALL` this would be `["count"]`.
+	pub(crate) field_names: Vec<String>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -79,12 +82,15 @@ impl IndexCountScan {
 		predicate: Arc<dyn PhysicalExpr>,
 		condition: Cond,
 		version: Option<u64>,
+		field_names: Vec<String>,
 	) -> Self {
+		debug_assert!(!field_names.is_empty(), "IndexCountScan requires at least one field name");
 		Self {
 			source,
 			predicate,
 			condition,
 			version,
+			field_names,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -138,6 +144,7 @@ impl ExecOperator for IndexCountScan {
 		let predicate_expr = Arc::clone(&self.predicate);
 		let condition = self.condition.clone();
 		let version = self.version;
+		let field_names = self.field_names.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -161,8 +168,8 @@ impl ExecOperator for IndexCountScan {
 			};
 
 			// Verify table exists.
-			let table_def = txn
-				.get_tb_by_name(&ns.name, &db.name, &table_name)
+			let table_def = db_ctx
+				.get_table_def(&table_name)
 				.await
 				.context("Failed to get table")?;
 
@@ -191,27 +198,27 @@ impl ExecOperator for IndexCountScan {
 				}
 				PhysicalPermission::Conditional(_) => {
 					// Per-record permissions: fall back to full scan + filter + count.
-					let count = count_with_filter_fallback(
-						&ctx,
-						ns.namespace_id,
-						db.database_id,
-						&table_name,
-						version,
-						&select_permission,
-						&predicate_expr,
-					)
-					.await?;
-					yield make_count_batch(count);
-					return;
+				let count = count_with_filter_fallback(
+					&ctx,
+					ns.namespace_id,
+					db.database_id,
+					&table_name,
+					version,
+					&select_permission,
+					&predicate_expr,
+				)
+				.await?;
+				yield make_count_batch(count, &field_names);
+				return;
 				}
 				PhysicalPermission::Allow => {
 					// Proceed to look for a matching COUNT index.
 				}
 			}
 
-			// Look up all indexes for the table and find a matching COUNT index.
-			let indexes = txn
-				.all_tb_indexes(ns.namespace_id, db.database_id, &table_name)
+			// Look up all indexes for the table (using the execution-level cache).
+			let indexes = db_ctx
+				.get_table_indexes(&table_name)
 				.await
 				.context("Failed to fetch table indexes")?;
 
@@ -235,7 +242,7 @@ impl ExecOperator for IndexCountScan {
 					ix_def.index_id,
 				)
 				.await?;
-				yield make_count_batch(count);
+				yield make_count_batch(count, &field_names);
 			} else {
 				// No matching COUNT index found: fall back to full scan + filter + count.
 				let perm = PhysicalPermission::Allow;
@@ -249,7 +256,7 @@ impl ExecOperator for IndexCountScan {
 					&predicate_expr,
 				)
 				.await?;
-				yield make_count_batch(count);
+				yield make_count_batch(count, &field_names);
 			}
 		};
 
@@ -261,10 +268,20 @@ impl ExecOperator for IndexCountScan {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Build the single-row `{ "count": N }` batch.
-fn make_count_batch(count: usize) -> ValueBatch {
+/// Build the single-row batch that the Aggregate operator would normally
+/// produce for `SELECT count() … GROUP ALL`.
+///
+/// Each entry in `field_names` becomes a key in the output object, all
+/// mapping to the same count value. For example:
+/// - `SELECT count() FROM t WHERE … GROUP ALL`      -> `{ "count": N }`
+/// - `SELECT count() AS c FROM t WHERE … GROUP ALL`  -> `{ "c": N }`
+/// - `SELECT count() AS a, count() AS b …`           -> `{ "a": N, "b": N }`
+fn make_count_batch(count: usize, field_names: &[String]) -> ValueBatch {
 	let mut obj = Object::default();
-	obj.insert("count".to_string(), Value::Number(Number::Int(count as i64)));
+	let count_val = Value::Number(Number::Int(count as i64));
+	for name in field_names {
+		obj.insert(name.clone(), count_val.clone());
+	}
 	ValueBatch {
 		values: vec![Value::Object(obj)],
 	}
@@ -356,8 +373,8 @@ async fn count_with_filter_fallback(
 			};
 			let mut record = crate::catalog::Record::kv_decode_value(val)
 				.context("Failed to deserialize record")?;
-			record.data.to_mut().def(&rid_val);
-			let value = record.data.into_value();
+			record.data.def(rid_val);
+			let value = record.data;
 
 			// Check per-record permission first.
 			let perm_allowed = match permission {

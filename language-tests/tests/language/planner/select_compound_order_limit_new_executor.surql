@@ -5,7 +5,7 @@
 value = "'OK'"
 
 [[test.results]]
-value = '''"Project [ctx: Db]
+value = '''"SelectProject [ctx: Db] [projections: *]
     SortByKey [ctx: Db] [sort_keys: i DESC]
         IndexScan [ctx: Db] [index: idx_k1_k2, access: ['key1', 'key2'], direction: Forward]
 "'''
@@ -14,7 +14,7 @@ value = '''"Project [ctx: Db]
 value = "[5, 4, 3, 2, 1]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]
+value = '''"SelectProject [ctx: Db] [projections: *]
     SortByKey [ctx: Db] [sort_keys: i ASC]
         IndexScan [ctx: Db] [index: idx_k1_k2, access: ['key1', 'key2'], direction: Forward]
 "'''
@@ -23,7 +23,7 @@ value = '''"Project [ctx: Db]
 value = "[1, 2, 3, 4, 5]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]
+value = '''"SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 1]
         SortTopKByKey [ctx: Db] [sort_keys: i DESC, limit: 1]
             IndexScan [ctx: Db] [index: idx_k1_k2, access: ['key1', 'key2'], direction: Forward]
@@ -33,7 +33,7 @@ value = '''"Project [ctx: Db]
 value = "[5]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]
+value = '''"SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 1]
         SortTopKByKey [ctx: Db] [sort_keys: i ASC, limit: 1]
             IndexScan [ctx: Db] [index: idx_k1_k2, access: ['key1', 'key2'], direction: Forward]
@@ -43,7 +43,7 @@ value = '''"Project [ctx: Db]
 value = "[1]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]
+value = '''"SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 1, offset: 1]
         SortTopKByKey [ctx: Db] [sort_keys: i DESC, limit: 2]
             IndexScan [ctx: Db] [index: idx_k1_k2, access: ['key1', 'key2'], direction: Forward]
@@ -53,7 +53,7 @@ value = '''"Project [ctx: Db]
 value = "[4]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]
+value = '''"SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 1, offset: 1]
         SortTopKByKey [ctx: Db] [sort_keys: i ASC, limit: 2]
             IndexScan [ctx: Db] [index: idx_k1_k2, access: ['key1', 'key2'], direction: Forward]

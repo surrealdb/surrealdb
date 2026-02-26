@@ -388,6 +388,7 @@ impl Authenticate for RequestBuilder {
 }
 
 #[derive(Debug, Serialize, Deserialize, SurrealValue)]
+#[surreal(crate = "crate::types")]
 struct Credentials {
 	user: String,
 	pass: String,

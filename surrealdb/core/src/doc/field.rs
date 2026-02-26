@@ -318,6 +318,8 @@ impl Document {
 								val = field.process_type_clause(val).await?;
 								// Process any VALUE clause
 								val = field.process_value_clause(val).await?;
+								// Re-validate that VALUE output conforms to TYPE
+								val = field.process_type_clause(val).await?;
 							}
 						} else {
 							// Process any TYPE clause

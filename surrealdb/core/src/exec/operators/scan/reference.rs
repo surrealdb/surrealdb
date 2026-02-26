@@ -20,6 +20,7 @@ use crate::exec::{
 };
 use crate::expr::ControlFlow;
 use crate::idx::planner::ScanDirection;
+use crate::kvs::CachePolicy;
 use crate::val::{RecordId, TableName};
 
 /// What kind of output the ReferenceScan should produce.
@@ -200,6 +201,7 @@ impl ExecOperator for ReferenceScan {
 							if rid_batch.len() >= BATCH_SIZE {
 								let values = resolve_record_batch(
 									&txn, ns_id, db_id, &rid_batch, fetch_full, None,
+									CachePolicy::ReadWrite,
 								).await?;
 								yield ValueBatch { values };
 								rid_batch.clear();
@@ -213,6 +215,7 @@ impl ExecOperator for ReferenceScan {
 			if !rid_batch.is_empty() {
 				let values = resolve_record_batch(
 					&txn, ns_id, db_id, &rid_batch, fetch_full, None,
+					CachePolicy::ReadWrite,
 				).await?;
 				yield ValueBatch { values };
 			}

@@ -6,12 +6,12 @@ reason = "Test EXPLAIN with basic SELECT queries: table scan, predicates, specif
 value = "'OK'"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: item, direction: Forward]
 ''''
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15]
 ''''
 
@@ -26,8 +26,9 @@ value = ''''ProjectValue [ctx: Db] [expr: name]
 ''''
 
 [[test.results]]
-value = ''''Project [ctx: Db]
-    TableScan [ctx: Db] [table: item, direction: Forward]
+value = ''''SelectProject [ctx: Db] [projections: name, doubled]
+    Compute [ctx: Db] [fields: doubled = score * 2]
+        TableScan [ctx: Db] [table: item, direction: Forward]
 ''''
 */
 

@@ -243,7 +243,7 @@ impl ExecOperator for KnnTopK {
 					if let Value::Object(ref obj) = entry.value
 						&& let Some(Value::RecordId(rid)) = obj.get("id")
 					{
-						knn_ctx.insert(rid.clone(), entry.distance);
+						knn_ctx.insert(rid.clone(), entry.distance).await;
 					}
 				}
 			}

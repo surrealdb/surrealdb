@@ -9,7 +9,7 @@ value = "NONE"
 value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]
+value = '''"SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: test, direction: Forward, predicate: email CONTAINS 'domain.com']
 "'''
 
@@ -17,7 +17,7 @@ value = '''"Project [ctx: Db]
 value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]
+value = '''"SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: test, direction: Forward, predicate: 'domain.com' INSIDE email]
 "'''
 
@@ -25,7 +25,7 @@ value = '''"Project [ctx: Db]
 value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
-value = '''"Project [ctx: Db]
+value = '''"SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: test, direction: Forward, predicate: email CONTAINS 'domain.com']
 "'''
 

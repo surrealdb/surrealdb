@@ -6,29 +6,29 @@ reason = "Test EXPLAIN with ORDER BY, LIMIT, and START clauses"
 value = "'OK'"
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     SortByKey [ctx: Db] [sort_keys: val ASC]
         TableScan [ctx: Db] [table: record, direction: Forward]
 ''''
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     SortByKey [ctx: Db] [sort_keys: val DESC]
         TableScan [ctx: Db] [table: record, direction: Forward]
 ''''
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: record, direction: Forward, limit: 5]
 ''''
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: record, direction: Forward, limit: 3, offset: 2]
 ''''
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = ''''SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 2, offset: 1]
         SortTopKByKey [ctx: Db] [sort_keys: val DESC, limit: 3]
             TableScan [ctx: Db] [table: record, direction: Forward]

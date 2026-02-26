@@ -16,8 +16,16 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow.workspace = true
+# Not required for Surrealism itself — only needed in this workspace so
+# #[derive(SurrealValue)] expands to ::surrealdb::types. Omit when using
+# Surrealism outside this repo.
+surrealdb.workspace = true
 surrealdb-types.workspace = true
 surrealism.workspace = true
+
+[package.metadata.cargo-machete]
+# Only referenced in macro-expanded code; omit surrealdb when outside this repo.
+ignored = ["surrealdb"]
 
 [lints]
 workspace = true

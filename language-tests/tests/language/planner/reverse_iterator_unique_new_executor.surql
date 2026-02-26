@@ -6,7 +6,7 @@ reason = "Tests reverse iteration with a unique index using ORDER BY DESC (new e
 value = "'OK'"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3}
+value = ''''SelectProject [ctx: Db] [projections: v] {rows: 3}
     Limit [ctx: Db] [limit: 3] {rows: 3}
         SortTopKByKey [ctx: Db] [sort_keys: v DESC, limit: 3] {rows: 3}
             IndexScan [ctx: Db] [index: idx, access: >5, direction: Forward] {rows: 10}
@@ -17,7 +17,7 @@ Total rows: 3''''
 value = "[{ v: 15 }, { v: 14 }, { v: 13 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 3}
+value = ''''SelectProject [ctx: Db] [projections: v] {rows: 3}
     Limit [ctx: Db] [limit: 3] {rows: 3}
         SortTopKByKey [ctx: Db] [sort_keys: v DESC, limit: 3] {rows: 3}
             IndexScan [ctx: Db] [index: idx, access: , direction: Forward] {rows: 15}
@@ -28,7 +28,7 @@ Total rows: 3''''
 value = "[{ v: 15 }, { v: 14 }, { v: 13 }]"
 
 [[test.results]]
-value = ''''Project [ctx: Db] {rows: 15}
+value = ''''SelectProject [ctx: Db] [projections: v] {rows: 15}
     SortByKey [ctx: Db] [sort_keys: v DESC] {rows: 15}
         IndexScan [ctx: Db] [index: idx, access: , direction: Forward] {rows: 15}
 

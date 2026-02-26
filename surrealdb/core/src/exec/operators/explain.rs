@@ -143,6 +143,10 @@ impl ExecOperator for AnalyzePlan {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
+		// Enable metrics on all operators before execution so that
+		// monitor_stream wraps each stream with timing/counting.
+		self.plan.enable_metrics();
+
 		// Execute the inner plan to get its stream
 		let mut inner_stream = buffer_stream(
 			self.plan.execute(ctx)?,

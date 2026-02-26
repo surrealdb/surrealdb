@@ -1,12 +1,14 @@
 //! B-tree index iterators for Idx and Uniq indexes.
 //!
 //! These iterators provide efficient record retrieval using B-tree index structures.
-//! They support equality lookups, range scans, and union operations.
+//! They support equality lookups, range scans, compound prefix scans, and union
+//! operations.
 
 use anyhow::Result;
 
 use crate::catalog::{DatabaseId, IndexDefinition, NamespaceId};
 use crate::exec::index::access_path::RangeBound;
+use crate::expr::BinaryOperator;
 use crate::key::index::Index;
 use crate::kvs::{KVKey, Key, Transaction};
 use crate::val::{Array, RecordId, Value};
@@ -302,5 +304,247 @@ impl UniqueRangeIterator {
 		self.beg_inclusive = true;
 
 		Ok(records)
+	}
+}
+
+/// Iterator for compound (multi-column) index equality scans.
+///
+/// Scans all records matching a composite key prefix using
+/// `prefix_ids_composite_beg/end`, with cursor-based batching via `tx.scan()`.
+pub struct CompoundEqualIterator {
+	/// Current scan position (begin key)
+	beg: Vec<u8>,
+	/// End key (exclusive)
+	end: Vec<u8>,
+	/// Whether iteration is complete
+	done: bool,
+}
+
+impl CompoundEqualIterator {
+	/// Create a new compound equality iterator.
+	///
+	/// `prefix` contains the fixed equality values for leading columns.
+	/// When an additional equality range is present, it is appended to the
+	/// prefix so the scan covers the exact composite key.
+	pub fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &IndexDefinition,
+		prefix: &[Value],
+		range: Option<&(BinaryOperator, Value)>,
+	) -> Result<Self> {
+		let (beg, end) = compute_compound_key_range(ns, db, ix, prefix, range)?;
+		Ok(Self {
+			beg,
+			end,
+			done: false,
+		})
+	}
+
+	/// Fetch the next batch of record IDs, capped at `limit`.
+	///
+	/// The caller supplies a `limit` so that storage-level scans can be
+	/// bounded (e.g. when a pushed-down LIMIT is active).  Pass
+	/// `INDEX_BATCH_SIZE` when no external limit applies.
+	pub async fn next_batch(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<RecordId>> {
+		if self.done {
+			return Ok(Vec::new());
+		}
+
+		let scan_limit = limit.min(INDEX_BATCH_SIZE);
+		let res = tx.scan(self.beg.clone()..self.end.clone(), scan_limit, 0, None).await?;
+
+		if res.is_empty() {
+			self.done = true;
+			return Ok(Vec::new());
+		}
+
+		// Advance cursor past the last key for the next batch
+		if let Some((key, _)) = res.last() {
+			self.beg.clone_from(key);
+			self.beg.push(0x00);
+		}
+
+		// Decode record IDs from values
+		let mut records = Vec::with_capacity(res.len());
+		for (_, val) in res {
+			let rid: RecordId = revision::from_slice(&val)?;
+			records.push(rid);
+		}
+
+		Ok(records)
+	}
+}
+
+/// Iterator for compound (multi-column) index range scans.
+///
+/// Handles the case where leading columns are fixed by equality and the
+/// next column has a range condition (e.g. `a = 1 AND b > 5`).
+pub struct CompoundRangeIterator {
+	/// Current scan position (begin key)
+	beg: Vec<u8>,
+	/// End key (exclusive)
+	end: Vec<u8>,
+	/// Whether iteration is complete
+	done: bool,
+}
+
+impl CompoundRangeIterator {
+	/// Create a new compound range iterator.
+	pub fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &IndexDefinition,
+		prefix: &[Value],
+		range: &(BinaryOperator, Value),
+	) -> Result<Self> {
+		let (beg, end) = compute_compound_key_range(ns, db, ix, prefix, Some(range))?;
+		Ok(Self {
+			beg,
+			end,
+			done: false,
+		})
+	}
+
+	/// Fetch the next batch of record IDs, capped at `limit`.
+	pub async fn next_batch(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<RecordId>> {
+		if self.done {
+			return Ok(Vec::new());
+		}
+
+		let scan_limit = limit.min(INDEX_BATCH_SIZE);
+		let res = tx.scan(self.beg.clone()..self.end.clone(), scan_limit, 0, None).await?;
+
+		if res.is_empty() {
+			self.done = true;
+			return Ok(Vec::new());
+		}
+
+		// Advance cursor past the last key for the next batch
+		if let Some((key, _)) = res.last() {
+			self.beg.clone_from(key);
+			self.beg.push(0x00);
+		}
+
+		// Decode record IDs from values
+		let mut records = Vec::with_capacity(res.len());
+		for (_, val) in res {
+			let rid: RecordId = revision::from_slice(&val)?;
+			records.push(rid);
+		}
+
+		Ok(records)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
+/// Compute the KV key range `(beg, end)` for a compound index scan.
+///
+/// Builds the appropriate prefix-based key boundaries depending on whether
+/// the scan is a pure equality prefix or has a range condition on the
+/// next column.
+fn compute_compound_key_range(
+	ns: NamespaceId,
+	db: DatabaseId,
+	ix: &IndexDefinition,
+	prefix: &[Value],
+	range: Option<&(BinaryOperator, Value)>,
+) -> Result<(Vec<u8>, Vec<u8>)> {
+	let prefix_array = Array::from(prefix.to_vec());
+
+	if let Some((op, val)) = range {
+		let mut key_values: Vec<Value> = prefix.to_vec();
+		key_values.push(val.clone());
+		let key_array = Array::from(key_values);
+
+		match op {
+			BinaryOperator::Equal | BinaryOperator::ExactEqual => {
+				let beg = Index::prefix_ids_composite_beg(
+					ns,
+					db,
+					&ix.table_name,
+					ix.index_id,
+					&key_array,
+				)?;
+				let end = Index::prefix_ids_composite_end(
+					ns,
+					db,
+					&ix.table_name,
+					ix.index_id,
+					&key_array,
+				)?;
+				Ok((beg, end))
+			}
+			BinaryOperator::MoreThan => {
+				let beg = Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &key_array)?;
+				let end = Index::prefix_ids_composite_end(
+					ns,
+					db,
+					&ix.table_name,
+					ix.index_id,
+					&prefix_array,
+				)?;
+				Ok((beg, end))
+			}
+			BinaryOperator::MoreThanEqual => {
+				let beg = Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &key_array)?;
+				let end = Index::prefix_ids_composite_end(
+					ns,
+					db,
+					&ix.table_name,
+					ix.index_id,
+					&prefix_array,
+				)?;
+				Ok((beg, end))
+			}
+			BinaryOperator::LessThan => {
+				let beg = Index::prefix_ids_composite_beg(
+					ns,
+					db,
+					&ix.table_name,
+					ix.index_id,
+					&prefix_array,
+				)?;
+				let end = Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &key_array)?;
+				Ok((beg, end))
+			}
+			BinaryOperator::LessThanEqual => {
+				let beg = Index::prefix_ids_composite_beg(
+					ns,
+					db,
+					&ix.table_name,
+					ix.index_id,
+					&prefix_array,
+				)?;
+				let end = Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &key_array)?;
+				Ok((beg, end))
+			}
+			_ => {
+				let beg = Index::prefix_ids_composite_beg(
+					ns,
+					db,
+					&ix.table_name,
+					ix.index_id,
+					&prefix_array,
+				)?;
+				let end = Index::prefix_ids_composite_end(
+					ns,
+					db,
+					&ix.table_name,
+					ix.index_id,
+					&prefix_array,
+				)?;
+				Ok((beg, end))
+			}
+		}
+	} else {
+		let beg =
+			Index::prefix_ids_composite_beg(ns, db, &ix.table_name, ix.index_id, &prefix_array)?;
+		let end =
+			Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &prefix_array)?;
+		Ok((beg, end))
 	}
 }

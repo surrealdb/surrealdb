@@ -11,7 +11,7 @@ use futures::StreamExt;
 use tracing::instrument;
 
 use super::pipeline::{ScanPipeline, build_field_state, eval_limit_expr, kv_scan_stream};
-use crate::catalog::providers::TableProvider;
+use super::resolved::ResolvedTableContext;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
 	validate_record_user_access,
@@ -44,6 +44,9 @@ pub struct TableScan {
 	pub(crate) limit: Option<Arc<dyn PhysicalExpr>>,
 	pub(crate) start: Option<Arc<dyn PhysicalExpr>>,
 	pub(crate) needed_fields: Option<std::collections::HashSet<String>>,
+	/// Plan-time resolved table context. When present, `execute()` skips
+	/// all runtime metadata lookups (table def, permissions, field state).
+	pub(crate) resolved: Option<ResolvedTableContext>,
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
@@ -65,8 +68,15 @@ impl TableScan {
 			limit,
 			start,
 			needed_fields,
+			resolved: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// Set the plan-time resolved table context.
+	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
+		self.resolved = Some(resolved);
+		self
 	}
 }
 
@@ -133,14 +143,10 @@ impl ExecOperator for TableScan {
 	#[instrument(name = "TableScan::execute", level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let db_ctx = ctx.database()?.clone();
-
-		// Validate record user has access to this namespace/database
 		validate_record_user_access(&db_ctx)?;
-
-		// Check if we need to enforce permissions
 		let check_perms = should_check_perms(&db_ctx, Action::View)?;
 
-		// Clone for the async block
+		let resolved = self.resolved.clone();
 		let table_name = self.table_name.clone();
 		let direction = self.direction;
 		let version_expr = self.version.clone();
@@ -180,71 +186,73 @@ impl ExecOperator for TableScan {
 				None => None,
 			};
 
-			// Early exit if limit is 0
 			if limit_val == Some(0) {
 				return;
 			}
 
-			// Check table existence and resolve SELECT permission
-			let table_def = txn
-				.get_tb_by_name(&ns.name, &db.name, &table_name)
-				.await
-				.context("Failed to get table")?;
-
-			if table_def.is_none() {
-				Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {
-					name: table_name.clone(),
-				})))?;
-			}
-
-			let select_permission = if check_perms {
-				let catalog_perm = match &table_def {
-					Some(def) => def.permissions.select.clone(),
-					None => crate::catalog::Permission::None,
-				};
-				convert_permission_to_physical(&catalog_perm, ctx.ctx()).await
-					.context("Failed to convert permission")?
+			// Resolve table metadata: plan-time fast path or runtime fallback
+			let (select_permission, field_state) = if let Some(ref res) = resolved {
+				// Plan-time resolved: use pre-fetched table def + field state.
+				// Only the permission compilation (pure CPU) happens here.
+				let perm = res.select_permission(check_perms);
+				let fs = res.field_state_for_projection(needed_fields.as_ref());
+				(perm, fs)
 			} else {
-				PhysicalPermission::Allow
+				// Runtime fallback (DynamicScan path or no txn at plan time)
+				let table_def = db_ctx
+					.get_table_def(&table_name)
+					.await
+					.context("Failed to get table")?;
+
+				if table_def.is_none() {
+					Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {
+						name: table_name.clone(),
+					})))?;
+				}
+
+				let perm = if check_perms {
+					let catalog_perm = match &table_def {
+						Some(def) => def.permissions.select.clone(),
+						None => crate::catalog::Permission::None,
+					};
+					convert_permission_to_physical(&catalog_perm, ctx.ctx()).await
+						.context("Failed to convert permission")?
+				} else {
+					PhysicalPermission::Allow
+				};
+
+				let fs = build_field_state(
+					&ctx, &table_name, check_perms, needed_fields.as_ref(),
+				).await?;
+
+				(perm, fs)
 			};
 
-			// Early exit if denied
 			if matches!(select_permission, PhysicalPermission::Deny) {
 				return;
 			}
 
-			// Build field state (computed fields + field permissions)
-			let field_state = build_field_state(
-				&ctx, &table_name, check_perms, needed_fields.as_ref(),
-			).await?;
-
 			// Pre-compute whether any post-decode processing is needed
-			let needs_processing = !matches!(select_permission, PhysicalPermission::Allow)
-				|| !field_state.computed_fields.is_empty()
-				|| (check_perms && !field_state.field_permissions.is_empty())
-				|| predicate.is_some();
+			let needs_processing = ScanPipeline::compute_needs_processing(
+				&select_permission, &field_state, check_perms, predicate.as_ref(),
+			);
 
-			// When no processing is needed, push start/limit to the KV layer
 			let pre_skip = if !needs_processing { start_val } else { 0 };
 			let effective_storage_limit = if !needs_processing { limit_val } else { None };
 
-			// Create KV range scan stream
 			let beg = record::prefix(ns.namespace_id, db.database_id, &table_name)?;
 			let end = record::suffix(ns.namespace_id, db.database_id, &table_name)?;
-			// Enable prefetching and larger initial batch for full scans (no limit pushed)
 			let prefetch = effective_storage_limit.is_none();
 			let mut source = kv_scan_stream(
 				Arc::clone(&txn), beg, end, version,
 				effective_storage_limit, direction, pre_skip, prefetch,
 			);
 
-			// Build the pipeline
 			let mut pipeline = ScanPipeline::new(
 				select_permission, predicate, field_state,
 				check_perms, limit_val, start_val.saturating_sub(pre_skip),
 			);
 
-			// Consume the stream
 			while let Some(batch_result) = source.next().await {
 				if ctx.cancellation().is_cancelled() {
 					Err(ControlFlow::Err(
