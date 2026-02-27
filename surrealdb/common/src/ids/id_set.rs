@@ -1,12 +1,36 @@
-use std::{
-	fmt::{self, Debug},
-	hash::{BuildHasher, Hash, Hasher, RandomState},
-	ops::{Index, IndexMut},
-};
+use std::fmt::{self, Debug};
+use std::hash::{BuildHasher, Hash, Hasher, RandomState};
+use std::ops::{Index, IndexMut};
 
 use hashbrown::raw::RawTable;
 
 use super::Id;
+
+pub trait SetEntry<T>: Hash {
+	fn into_owned(self) -> T;
+
+	fn equal(&self, other: &T) -> bool;
+}
+
+impl<T: Hash + Eq> SetEntry<T> for T {
+	fn into_owned(self) -> T {
+		self
+	}
+
+	fn equal(&self, other: &T) -> bool {
+		self == other
+	}
+}
+
+impl SetEntry<String> for &str {
+	fn into_owned(self) -> String {
+		self.to_owned()
+	}
+
+	fn equal(&self, other: &String) -> bool {
+		self == other
+	}
+}
 
 /// A collection which will ensure that the storage only contains unique values.
 /// If two values are pushed which are equal to each-other this collection will instead return the
@@ -53,13 +77,16 @@ where
 	V: Eq + Hash,
 	S: BuildHasher,
 {
-	pub fn push(&mut self, v: V) -> Option<I> {
+	pub fn push<T>(&mut self, v: T) -> Option<I>
+	where
+		T: SetEntry<V>,
+	{
 		let mut hasher = self.hasher.build_hasher();
 		v.hash(&mut hasher);
 		let hash = hasher.finish();
 		match self.map.find_or_find_insert_slot(
 			hash,
-			|s| self.storage[s.idx()] == v,
+			|s| v.equal(&self.storage[s.idx()]),
 			|s| {
 				let mut hasher = self.hasher.build_hasher();
 				self.storage[s.idx()].hash(&mut hasher);
@@ -69,7 +96,7 @@ where
 			Ok(x) => unsafe { Some(*x.as_ref()) },
 			Err(slot) => {
 				let idx = I::from_idx(self.storage.len())?;
-				self.storage.push(v);
+				self.storage.push(v.into_owned());
 				unsafe { self.map.insert_in_slot(hash, slot, idx) };
 				Some(idx)
 			}

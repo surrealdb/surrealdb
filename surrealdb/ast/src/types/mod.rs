@@ -3,6 +3,7 @@ use std::hash::Hash;
 use std::ops::{Deref, DerefMut};
 
 use common::id;
+use common::ids::SetEntry;
 use common::span::Span;
 
 mod ast;
@@ -33,7 +34,10 @@ pub trait NodeVec<T: Node>: NodeCollection<T> {
 
 /// Trait for types which contain ast nodes as hash-consed set.
 pub trait NodeSet<T: UniqueNode>: NodeCollection<T> {
-	fn insert_node(&mut self, value: T) -> u32;
+	fn insert_node<V>(&mut self, value: V) -> u32
+	where
+		T: crate::types::UniqueNode,
+		V: SetEntry<T>;
 }
 
 /// Trait for types which can be part of the ast.
@@ -129,7 +133,17 @@ pub trait NodeLibrary {
 
 	fn insert<T: Node>(&mut self, value: T) -> NodeId<T>;
 
-	fn insert_set<T: UniqueNode>(&mut self, value: T) -> NodeId<T>;
+	fn insert_set<T>(&mut self, value: T) -> NodeId<T>
+	where
+		T: UniqueNode,
+	{
+		self.insert_set_entry::<T, T>(value)
+	}
+
+	fn insert_set_entry<T, V>(&mut self, value: V) -> NodeId<T>
+	where
+		T: UniqueNode,
+		V: SetEntry<T>;
 
 	fn clear(&mut self);
 }
@@ -202,7 +216,11 @@ macro_rules! library {
 				}
             }
 
-            fn insert_set<T: crate::types::UniqueNode>(&mut self, value: T) -> NodeId<T>{
+            fn insert_set_entry<T, V>(&mut self, value: V) -> NodeId<T>
+				where
+					T: crate::types::UniqueNode,
+					V: common::ids::SetEntry<T>,
+			{
                 let type_id = const { std::any::TypeId::of::<T>() };
                 $(
 					library!{@push_set $($field_meta)?, $ty, $container,self.$field = type_id <= value}

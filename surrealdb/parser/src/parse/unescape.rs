@@ -7,7 +7,7 @@ use token::{BaseTokenKind, EscapeTokenKind, Token};
 use crate::parse::{ParseError, ParseResult, Parser};
 
 impl<'source, 'ast> Parser<'source, 'ast> {
-	pub fn unescape_ident(&mut self, token: Token) -> ParseResult<&str> {
+	pub fn unescape_ident(&mut self, token: Token) -> ParseResult<NodeId<String>> {
 		assert!(token.token.is_identifier());
 		let slice = self.slice(token.span);
 		if slice.starts_with('`') {
@@ -16,11 +16,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			self.unescape_bracket_ident(token.span, slice)
 		} else {
 			// Already a valid identifier.
-			Ok(slice)
+			Ok(self.ast.push_set_entry(slice))
 		}
 	}
 
-	pub fn unescape_param(&mut self, token: Token) -> ParseResult<&str> {
+	pub fn unescape_param(&mut self, token: Token) -> ParseResult<NodeId<String>> {
 		assert_eq!(token.token, BaseTokenKind::Param);
 		let slice = self.slice(token.span);
 		if slice.starts_with("$`") {
@@ -33,7 +33,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			self.unescape_bracket_ident(span, &slice[1..])
 		} else {
 			// Already a valid identifier.
-			Ok(&slice[1..])
+			Ok(self.ast.push_set_entry(&slice[1..]))
 		}
 	}
 
@@ -183,28 +183,32 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		&'a mut self,
 		mut slice_span: Span,
 		slice: &'a str,
-	) -> ParseResult<&'a str> {
+	) -> ParseResult<NodeId<String>> {
 		let start_offset = const { '⟨'.len_utf8() };
 		let end_offset = const { '⟩'.len_utf8() };
 		let slice = &slice[start_offset..(slice.len() - end_offset)];
 		slice_span.start += start_offset as u32;
 		slice_span.end -= end_offset as u32;
 
-		Self::unescape_common(slice_span, slice, self.source(), &mut self.unescape_buffer)
+		let str =
+			Self::unescape_common(slice_span, slice, self.source(), &mut self.unescape_buffer)?;
+		Ok(self.ast.push_set_entry(str))
 	}
 
 	fn unescape_backtick_ident<'a>(
 		&'a mut self,
 		mut slice_span: Span,
 		slice: &'a str,
-	) -> ParseResult<&'a str> {
+	) -> ParseResult<NodeId<String>> {
 		let start_offset = const { '`'.len_utf8() };
 		let end_offset = const { '`'.len_utf8() };
 		let slice = &slice[start_offset..(slice.len() - end_offset)];
 		slice_span.start += start_offset as u32;
 		slice_span.end -= end_offset as u32;
 
-		Self::unescape_common(slice_span, slice, self.source(), &mut self.unescape_buffer)
+		let str =
+			Self::unescape_common(slice_span, slice, self.source(), &mut self.unescape_buffer)?;
+		Ok(self.ast.push_set_entry(str))
 	}
 
 	pub fn unescape_str<'a>(&'a mut self, token: Token) -> ParseResult<&'a str> {
@@ -226,9 +230,23 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	}
 
 	pub fn unescape_str_push<'a>(&'a mut self, token: Token) -> ParseResult<NodeId<String>> {
-		let str = self.unescape_str(token)?;
-		let s = str.to_string();
-		Ok(self.ast.push_set(s))
+		let start_offset = match token.token {
+			BaseTokenKind::String => 1,
+			BaseTokenKind::RecordIdString
+			| BaseTokenKind::UuidString
+			| BaseTokenKind::DateTimeString => 2,
+			_ => panic!("unescape_str should only be called with string like tokens"),
+		};
+		let slice = self.slice(token.span);
+		let mut slice_span = token.span;
+		let end_offset = 1;
+		let slice = &slice[start_offset..(slice.len() - end_offset)];
+		slice_span.start += start_offset as u32;
+		slice_span.end -= end_offset as u32;
+
+		let str =
+			Self::unescape_common(slice_span, slice, self.source(), &mut self.unescape_buffer)?;
+		Ok(self.ast.push_set_entry(str))
 	}
 
 	/// Returns the offset in the unescaped_str for an offset derived from the escaped version of

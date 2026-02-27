@@ -1,4 +1,7 @@
-use common::ids::IdSet;
+use std::borrow::Borrow;
+use std::hash::Hash;
+
+use common::ids::{IdSet, SetEntry};
 
 use super::{Node, NodeCollection, NodeSet, NodeVec, UniqueNode};
 
@@ -31,7 +34,11 @@ impl<T> NodeCollection<T> for IdSet<u32, T> {
 }
 
 impl<T: UniqueNode> NodeSet<T> for IdSet<u32, T> {
-	fn insert_node(&mut self, value: T) -> u32 {
+	fn insert_node<V>(&mut self, value: V) -> u32
+	where
+		T: crate::types::UniqueNode,
+		V: SetEntry<T>,
+	{
 		self.push(value).expect("Too many nodes")
 	}
 }
