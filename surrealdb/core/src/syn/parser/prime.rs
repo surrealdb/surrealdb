@@ -569,11 +569,10 @@ impl Parser<'_> {
 		}
 
 		let mut record_id_parser = Parser::new(str.as_bytes());
-
-		if let Ok(x) = record_id_parser.parse_record_id(stk).await {
-			if record_id_parser.peek().is_eof() {
-				return Ok(Literal::RecordId(x));
-			}
+		if let Ok(x) = record_id_parser.parse_record_id(stk).await
+			&& record_id_parser.peek().is_eof()
+		{
+			return Ok(Literal::RecordId(x));
 		}
 
 		Ok(Literal::String(str.to_owned()))
