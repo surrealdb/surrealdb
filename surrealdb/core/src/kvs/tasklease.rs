@@ -331,7 +331,12 @@ mod tests {
 		// Async event trigger
 		let async_event_trigger = Arc::new(Notify::new());
 		// Create a transaction factory with the specified datastore flavor
-		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(
+			async_event_trigger,
+			Box::new(flavor),
+			surrealdb_cfg::CacheConfig::default().transaction_cache_size,
+			surrealdb_cfg::BatchConfig::default(),
+		);
 		// Create a sequence generator for the transaction factory
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 		// Set test to run for 3 seconds
@@ -462,7 +467,12 @@ mod tests {
 		// Create an async event trigger
 		let async_event_trigger = Arc::new(Notify::new());
 		// Create the transaction factory
-		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(
+			async_event_trigger,
+			Box::new(flavor),
+			surrealdb_cfg::CacheConfig::default().transaction_cache_size,
+			surrealdb_cfg::BatchConfig::default(),
+		);
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Set lease duration to 10 minutes

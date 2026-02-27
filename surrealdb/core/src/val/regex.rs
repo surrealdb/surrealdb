@@ -11,7 +11,6 @@ use revision::revisioned;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_cfg::LimitsConfig;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::cnf::REGEX_CACHE_SIZE;
@@ -31,7 +30,7 @@ impl Regex {
 }
 
 pub(crate) fn regex_new(str: &str) -> Result<regex::Regex, regex::Error> {
-	regex_new_with_limit(str, LimitsConfig::default().regex_size_limit)
+	regex_new_with_limit(str, *crate::cnf::REGEX_SIZE_LIMIT)
 }
 
 pub(crate) fn regex_new_with_limit(

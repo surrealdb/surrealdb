@@ -164,16 +164,24 @@ pub(crate) struct TransactionFactory {
 	builder: Arc<Box<dyn TransactionBuilder>>,
 	// Async event processing trigger
 	async_event_trigger: Arc<Notify>,
+	// The number of items cached within a single transaction
+	transaction_cache_size: usize,
+	// Batch configuration for scan/iterate operations
+	batch_config: surrealdb_cfg::BatchConfig,
 }
 
 impl TransactionFactory {
 	pub(super) fn new(
 		async_event_trigger: Arc<Notify>,
 		builder: Box<dyn TransactionBuilder>,
+		transaction_cache_size: usize,
+		batch_config: surrealdb_cfg::BatchConfig,
 	) -> Self {
 		Self {
 			builder: Arc::new(builder),
 			async_event_trigger,
+			transaction_cache_size,
+			batch_config,
 		}
 	}
 
@@ -205,8 +213,10 @@ impl TransactionFactory {
 			local,
 			sequences,
 			self.async_event_trigger.clone(),
+			self.transaction_cache_size,
 			Transactor {
 				inner,
+				batch_config: self.batch_config.clone(),
 			},
 		))
 	}
@@ -674,7 +684,12 @@ impl Datastore {
 		// Propagate config values to global atomics
 		crate::cnf::apply_config(&config);
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(async_event_trigger.clone(), builder);
+		let tf = TransactionFactory::new(
+			async_event_trigger.clone(),
+			builder,
+			config.caches.transaction_cache_size,
+			config.batching.clone(),
+		);
 		let id = Uuid::new_v4();
 		let hnsw_cache_size = config.caches.hnsw_cache_size;
 		let ds_cache_size = config.caches.datastore_cache_size;

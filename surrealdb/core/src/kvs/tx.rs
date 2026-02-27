@@ -86,14 +86,13 @@ impl Transaction {
 		local: bool,
 		sequences: Sequences,
 		async_event_trigger: Arc<Notify>,
+		transaction_cache_size: usize,
 		tr: Transactor,
 	) -> Transaction {
 		Transaction {
 			local,
 			tr,
-			cache: TransactionCache::new(
-				surrealdb_cfg::CacheConfig::default().transaction_cache_size,
-			),
+			cache: TransactionCache::new(transaction_cache_size),
 			sequences,
 			cf: crate::cf::Writer::new(),
 			async_event_trigger,

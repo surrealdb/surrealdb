@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::LazyLock;
 
 #[cfg(feature = "cli")]
 use crate::parsers::{parse_generation_alloc_limit, parse_memory_threshold, parse_path_list};
@@ -19,6 +20,26 @@ const DEFAULT_MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE: u32 = 1000;
 const DEFAULT_OPERATOR_BUFFER_SIZE: usize = 2;
 const DEFAULT_EXTERNAL_SORTING_BUFFER_LIMIT: usize = 50_000;
 const DEFAULT_MEMORY_THRESHOLD: usize = 0;
+
+// ---------------------------------------------------------------------------
+// LazyLock constants for values that are hard to pass through configuration.
+// These read from the same env vars that clap uses, with a fallback to the
+// compiled-in defaults above.
+// ---------------------------------------------------------------------------
+
+pub static REGEX_SIZE_LIMIT: LazyLock<usize> = LazyLock::new(|| {
+	std::env::var("SURREAL_REGEX_SIZE_LIMIT")
+		.ok()
+		.and_then(|v| v.parse().ok())
+		.unwrap_or(DEFAULT_REGEX_SIZE_LIMIT)
+});
+
+pub static MAX_CONCURRENT_TASKS: LazyLock<usize> = LazyLock::new(|| {
+	std::env::var("SURREAL_MAX_CONCURRENT_TASKS")
+		.ok()
+		.and_then(|v| v.parse().ok())
+		.unwrap_or(DEFAULT_MAX_CONCURRENT_TASKS)
+});
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
@@ -133,8 +154,8 @@ impl Default for LimitsConfig {
 			max_object_parsing_depth: DEFAULT_MAX_OBJECT_PARSING_DEPTH,
 			max_query_parsing_depth: DEFAULT_MAX_QUERY_PARSING_DEPTH,
 			idiom_recursion_limit: DEFAULT_IDIOM_RECURSION_LIMIT,
-			regex_size_limit: DEFAULT_REGEX_SIZE_LIMIT,
-			max_concurrent_tasks: DEFAULT_MAX_CONCURRENT_TASKS,
+			regex_size_limit: *REGEX_SIZE_LIMIT,
+			max_concurrent_tasks: *MAX_CONCURRENT_TASKS,
 			generation_allocation_limit: DEFAULT_GENERATION_ALLOCATION_LIMIT,
 			string_similarity_limit: DEFAULT_STRING_SIMILARITY_LIMIT,
 			max_order_limit_priority_queue_size: DEFAULT_MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE,
