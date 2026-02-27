@@ -18,6 +18,7 @@ mod error;
 mod expr;
 mod kind;
 mod peek;
+mod place;
 pub mod prime;
 mod record_id;
 mod special;
@@ -600,6 +601,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	}
 
 	/// Returns the error marking the next token in the parser to be an unexpected token.
+	/// Expects a string specifying what was expected at this point.
 	#[cold]
 	pub fn unexpected(&mut self, expected: &str) -> ParseError {
 		match self.peek() {

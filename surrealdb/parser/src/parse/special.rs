@@ -731,6 +731,10 @@ impl ParseSync for ast::JsFunctionBody {
 			}
 		}
 
+		/// Pop a delimiter from the stack and return an error if the delimiter is not the expected
+		/// delimiter.
+		///
+		/// Delimiter::Template should be handled before this function.
 		fn expect_delimiter(
 			stack: &mut Vec<Delimiter>,
 			expected: Delimiter,
@@ -756,6 +760,8 @@ impl ParseSync for ast::JsFunctionBody {
 			Ok(())
 		}
 
+		/// Handle template strings, possibly pushing a `Delimiter::Template` on the stack when
+		/// encounter a template expression `${}`.
 		fn lex_template(
 			lexer: &mut Lexer<JsFunctionToken>,
 			delim_stack: &mut Vec<Delimiter>,
@@ -802,15 +808,15 @@ impl ParseSync for ast::JsFunctionBody {
 			let start = lexer.span().end;
 			let mut lexer = lexer.morph::<JsFunctionToken>();
 			let mut delim_stack = vec![Delimiter::Brace];
-			while !delim_stack.is_empty() {
+			while let Some(last) = delim_stack.last() {
 				match lexer.next() {
 					Some(Ok(JsFunctionToken::BraceOpen)) => delim_stack.push(Delimiter::Brace),
 					Some(Ok(JsFunctionToken::BracketOpen)) => delim_stack.push(Delimiter::Bracket),
 					Some(Ok(JsFunctionToken::ParenOpen)) => delim_stack.push(Delimiter::Paren),
 					Some(Ok(JsFunctionToken::BraceClose)) => {
-						if *delim_stack.last().expect("stack should have entries")
-							== Delimiter::Template
-						{
+						if *last == Delimiter::Template {
+							// We found that the next `}` re-enters into a template string so we
+							// need to lex the template source.
 							delim_stack.pop();
 							lex_template(&mut lexer, &mut delim_stack, partial)?;
 						} else {
@@ -871,8 +877,8 @@ impl ParseSync for ast::JsFunctionBody {
 			Ok((lexer.morph(), span))
 		})?;
 
-		let body = parser.slice(body_span).to_owned();
-		let source = parser.push_set(body);
+		let body = parser.slice(body_span);
+		let source = parser.push_set_entry::<String, _>(body);
 
 		let span = parser.span_since(start.span);
 		Ok(ast::JsFunctionBody {

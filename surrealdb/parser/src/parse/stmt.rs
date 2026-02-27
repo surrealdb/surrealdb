@@ -4,6 +4,7 @@ use token::{BaseTokenKind, T};
 use super::Parser;
 use crate::Parse;
 use crate::parse::ParseResult;
+use crate::parse::utils::{parse_seperated_list, parse_seperated_list_sync};
 
 impl Parse for ast::If {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
@@ -215,6 +216,158 @@ impl Parse for ast::Show {
 			target,
 			since,
 			limit,
+			span,
+		})
+	}
+}
+
+impl Parse for ast::Delete {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start = parser.expect(T![DELETE])?;
+		let only = parser.eat(T![ONLY])?.is_some();
+		let (_, targets) =
+			parse_seperated_list(parser, T![,], async |parser| parser.parse_enter().await).await?;
+		let with_index = if parser.eat(T![WITH])?.is_some() {
+			let peek = parser.peek_expect("`INDEX` or `NOINDEX`")?;
+			let idx = match peek.token {
+				T![NOINDEX] => {
+					let _ = parser.next();
+					ast::WithIndex::None(peek.span)
+				}
+				T![INDEX] => {
+					let _ = parser.next();
+					let (_, indecies) =
+						parse_seperated_list_sync(parser, T![,], |parser| parser.parse_sync())?;
+					ast::WithIndex::Some(indecies)
+				}
+				_ => return Err(parser.unexpected("`INDEX` or `NOINDEX`")),
+			};
+			Some(idx)
+		} else {
+			None
+		};
+		let condition = if parser.eat(T![WHERE])?.is_some() {
+			Some(parser.parse_enter_push().await?)
+		} else {
+			None
+		};
+		let timeout = if parser.eat(T![TIMEOUT])?.is_some() {
+			Some(parser.parse_enter_push().await?)
+		} else {
+			None
+		};
+
+		let explain = if let Some(explain) = parser.eat(T![EXPLAIN])? {
+			if let Some(full) = parser.eat(T![FULL])? {
+				Some(ast::Explain::Full(explain.span.extend(full.span)))
+			} else {
+				Some(ast::Explain::Base(explain.span))
+			}
+		} else {
+			None
+		};
+
+		let span = parser.span_since(start.span);
+		Ok(ast::Delete {
+			only,
+			targets,
+			with_index,
+			condition,
+			timeout,
+			explain,
+			span,
+		})
+	}
+}
+
+impl Parse for ast::Assignment {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start = parser.peek_span();
+		let place = parser.parse_push().await?;
+
+		let peek = parser.peek_expect("`=`, `+=`, `-=`, or `+?=`")?;
+		let op = match peek.token {
+			T![=] => ast::AssignmentOp::Assign(peek.span),
+			T![+=] => ast::AssignmentOp::Add(peek.span),
+			T![-=] => ast::AssignmentOp::Subtract(peek.span),
+			T![+?=] => ast::AssignmentOp::Extend(peek.span),
+			_ => return Err(parser.unexpected("`=`, `+=`, `-=`, or `+?=`")),
+		};
+		let _ = parser.next();
+
+		let value = parser.parse_enter_push().await?;
+		let span = parser.span_since(start);
+
+		Ok(ast::Assignment {
+			place,
+			op,
+			value,
+			span,
+		})
+	}
+}
+
+impl Parse for ast::Create {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start = parser.expect(T![CREATE])?;
+		let only = parser.eat(T![ONLY])?.is_some();
+		let (_, targets) =
+			parse_seperated_list(parser, T![,], async |parser| parser.parse_enter().await).await?;
+
+		let peek = parser.peek()?;
+		let data = match peek.map(|x| x.token) {
+			Some(T![SET]) => {
+				let _ = parser.next();
+				let (_, list) =
+					parse_seperated_list(parser, T![,], async |parser| parser.parse().await)
+						.await?;
+				Some(ast::RecordData::Set(list))
+			}
+			Some(T![UNSET]) => {
+				let _ = parser.next();
+				let (_, list) =
+					parse_seperated_list(parser, T![,], async |parser| parser.parse().await)
+						.await?;
+				Some(ast::RecordData::Unset(list))
+			}
+			Some(T![CONTENT]) => {
+				let _ = parser.next();
+				Some(ast::RecordData::Content(parser.parse_enter_push().await?))
+			}
+			Some(T![PATCH]) => {
+				let _ = parser.next();
+				Some(ast::RecordData::Patch(parser.parse_enter_push().await?))
+			}
+			Some(T![MERGE]) => {
+				let _ = parser.next();
+				Some(ast::RecordData::Merge(parser.parse_enter_push().await?))
+			}
+			Some(T![REPLACE]) => {
+				let _ = parser.next();
+				Some(ast::RecordData::Replace(parser.parse_enter_push().await?))
+			}
+			_ => None,
+		};
+
+		let version = if parser.eat(T![VERSION])?.is_some() {
+			Some(parser.parse_enter_push().await?)
+		} else {
+			None
+		};
+
+		let timeout = if parser.eat(T![TIMEOUT])?.is_some() {
+			Some(parser.parse_enter_push().await?)
+		} else {
+			None
+		};
+
+		let span = parser.span_since(start.span);
+		Ok(ast::Create {
+			only,
+			targets,
+			data,
+			version,
+			timeout,
 			span,
 		})
 	}

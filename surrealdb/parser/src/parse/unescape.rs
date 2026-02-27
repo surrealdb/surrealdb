@@ -165,6 +165,8 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 						x @ b'a'..=b'f' => {
 							char += (x - b'a' + 10) as u32;
 						}
+						// Lexer already verified that there are only hex digits in the escape
+						// code.
 						_ => unreachable!(),
 					}
 				}
@@ -175,6 +177,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 					false
 				}
 			}
+			// Caller should only call this on escape sequence tokens.
 			EscapeTokenKind::Chars => unreachable!(),
 		}
 	}
@@ -254,6 +257,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	///
 	/// For example `escape_str_offset("\\u{21}a",1)` will return `6` because `\u{21}` results in a
 	/// single escaped character.
+	///
+	/// # Panics
+	/// This function can panic if the escaped string has invalid escape sequences inside and
+	/// therefore should only be called on strings which are already verified to have correct
+	/// escape sequences.
 	pub fn escape_str_offset(unescaped_str: &str, offset: u32) -> u32 {
 		let mut lexer = EscapeTokenKind::lexer(unescaped_str);
 
@@ -302,6 +310,8 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 								char *= 10;
 								char += (c - b'a' + 10) as u32
 							}
+							// Lexer already verified that there are only hex digits in the escape
+							// code.
 							_ => unreachable!(),
 						}
 					}

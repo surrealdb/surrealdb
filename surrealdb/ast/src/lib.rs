@@ -51,6 +51,8 @@ library! {
 		let_stmt: Vec<Let>,
 		info_stmt: Vec<Info>,
 		show_stmt: Vec<Show>,
+		create_stmt: Vec<Create>,
+		delete_stmt: Vec<Delete>,
 
 		expr: Vec<Expr>,
 		exprs: Vec<NodeList<Expr>>,
@@ -89,6 +91,13 @@ library! {
 		destructure: Vec<Destructure>,
 		destructures: Vec<NodeList<Destructure>>,
 
+		place: Vec<Place>,
+		places: Vec<NodeList<Place>>,
+		present_place: Vec<PresentPlace>,
+
+		assignment: Vec<Assignment>,
+		assignments: Vec<NodeList<Assignment>>,
+
 		type_: Vec<Type>,
 		types: Vec<NodeList<Type>>,
 		prime_type: Vec<PrimeType>,
@@ -109,7 +118,7 @@ library! {
 
 		params: Vec<Param>,
 		ident: Vec<Ident>,
-		idents: Vec<NodeListId<Ident>>,
+		idents: Vec<NodeList<Ident>>,
 		#[set]
 		strings: NodeSet<String>,
 	}
@@ -247,10 +256,73 @@ ast_type! {
 }
 
 ast_type! {
+	pub enum Explain{
+		Base(Span),
+		Full(Span),
+	}
+}
+
+ast_type! {
 	pub struct Show{
 		pub target: ShowTarget,
 		pub since: ShowSince,
 		pub limit: Option<NodeId<Expr>>,
+	}
+}
+
+ast_type! {
+	pub enum WithIndex{
+		None(Span),
+		Some(NodeListId<Ident>)
+	}
+}
+
+ast_type! {
+	pub enum AssignmentOp{
+		Assign(Span),
+		Add(Span),
+		Subtract(Span),
+		Extend(Span),
+	}
+}
+
+ast_type! {
+	pub struct Assignment{
+		pub place: NodeId<Place>,
+		pub op: AssignmentOp,
+		pub value: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	pub enum RecordData{
+		Set(NodeListId<Assignment>),
+		Unset(NodeListId<Place>),
+		Content(NodeId<Expr>),
+		Patch(NodeId<Expr>),
+		Merge(NodeId<Expr>),
+		Replace(NodeId<Expr>),
+	}
+}
+
+ast_type! {
+	pub struct Create{
+		pub only: bool,
+		pub targets: NodeListId<Expr>,
+		pub data: Option<RecordData>,
+		pub version: Option<NodeId<Expr>>,
+		pub timeout: Option<NodeId<Expr>>,
+	}
+}
+
+ast_type! {
+	pub struct Delete{
+		pub only: bool,
+		pub targets: NodeListId<Expr>,
+		pub with_index: Option<WithIndex>,
+		pub condition: Option<NodeId<Expr>>,
+		pub timeout: Option<NodeId<Expr>>,
+		pub explain: Option<Explain>,
 	}
 }
 
@@ -297,6 +369,8 @@ ast_type! {
 		If(NodeId<If>),
 		Let(NodeId<Let>),
 		Info(NodeId<Info>),
+		Create(NodeId<Create>),
+		Delete(NodeId<Delete>),
 	}
 }
 
@@ -659,6 +733,64 @@ ast_type! {
 	pub struct IdiomExpr{
 		pub left: NodeId<Expr>,
 		pub op: Spanned<IdiomOperator>,
+	}
+}
+
+ast_type! {
+	pub struct MemberPlace{
+		pub lhs: NodeId<Place>,
+		pub name: NodeId<Ident>,
+	}
+}
+
+ast_type! {
+	pub struct IndexPlace{
+		pub lhs: NodeId<Place>,
+		pub index: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	pub enum Place{
+		Field(NodeId<Ident>),
+		Member(MemberPlace),
+		Index(IndexPlace),
+	}
+}
+
+ast_type! {
+	pub struct MemberPresentPlace{
+		pub lhs: NodeId<PresentPlace>,
+		pub name: NodeId<Ident>,
+	}
+}
+
+ast_type! {
+	pub struct IndexPresentPlace{
+		pub lhs: NodeId<PresentPlace>,
+		pub index: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	pub struct AllPresentPlace{
+		pub lhs: NodeId<PresentPlace>,
+	}
+}
+
+ast_type! {
+	pub struct LastPresentPlace{
+		pub lhs: NodeId<PresentPlace>,
+	}
+}
+
+ast_type! {
+	pub enum PresentPlace{
+		Field(NodeId<Ident>),
+		Member(MemberPresentPlace),
+		Index(IndexPresentPlace),
+		All(AllPresentPlace),
+		Last(LastPresentPlace),
 	}
 }
 
