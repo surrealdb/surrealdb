@@ -107,6 +107,11 @@ impl Transaction {
 		self.pending_index_batches.lock().await
 	}
 
+	/// Returns the batch configuration used by this transaction.
+	pub(crate) fn batch_config(&self) -> &surrealdb_cfg::BatchConfig {
+		self.tr.batch_config()
+	}
+
 	/// Check if the transaction is local or remote
 	pub fn is_local(&self) -> bool {
 		self.local

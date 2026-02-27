@@ -1,5 +1,3 @@
-use surrealdb_cfg::LimitsConfig;
-
 use crate::syn;
 use crate::syn::parser::ParserSettings;
 use crate::types::PublicValue;
@@ -16,8 +14,8 @@ pub fn encode_str(value: PublicValue) -> anyhow::Result<String> {
 pub fn decode(value: &[u8]) -> anyhow::Result<PublicValue> {
 	decode_with_limits(
 		value,
-		LimitsConfig::default().max_object_parsing_depth,
-		LimitsConfig::default().max_query_parsing_depth,
+		*surrealdb_cfg::MAX_OBJECT_PARSING_DEPTH,
+		*surrealdb_cfg::MAX_QUERY_PARSING_DEPTH,
 	)
 }
 

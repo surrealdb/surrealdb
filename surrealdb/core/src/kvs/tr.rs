@@ -68,6 +68,11 @@ impl Transactor {
 		self.inner.kind()
 	}
 
+	/// Returns the batch configuration used by this transactor.
+	pub(crate) fn batch_config(&self) -> &BatchConfig {
+		&self.batch_config
+	}
+
 	/// Check if transaction is finished.
 	///
 	/// If the transaction has been cancelled or committed,

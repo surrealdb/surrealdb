@@ -17,7 +17,7 @@ use tokio::sync::RwLock;
 use super::api::ScanLimit;
 use super::err::{Error, Result};
 use super::util;
-use crate::cnf::{BatchConfig, TiKvEngineConfig};
+use crate::cnf::TiKvEngineConfig;
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
 use crate::kvs::{Key, TimeStamp, TimeStampImpl, Val};
@@ -488,10 +488,8 @@ impl Transactable for Transaction {
 		// Loop until we have exhausted the range
 		loop {
 			// Scan keys in key-only mode (no values fetched)
-			let iter = inner
-				.tx
-				.scan_keys(start..end.clone(), BatchConfig::default().count_batch_size)
-				.await?;
+			let iter =
+				inner.tx.scan_keys(start..end.clone(), *crate::cnf::COUNT_BATCH_SIZE).await?;
 			// Count the items, tracking the last key seen
 			let mut key: Option<tikv::Key> = None;
 			// Count the items in this batch
@@ -504,7 +502,7 @@ impl Transactable for Transaction {
 			// Increment the total count
 			total += count as usize;
 			// If we got fewer than batch_size, we've exhausted the range
-			if count < BatchConfig::default().count_batch_size {
+			if count < *crate::cnf::COUNT_BATCH_SIZE {
 				break;
 			}
 			// Advance past the last key for the next batch

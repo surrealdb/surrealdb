@@ -4,7 +4,6 @@
 use std::ops::Range;
 
 use anyhow::bail;
-use surrealdb_cfg::BatchConfig;
 
 use super::err::{Error, Result};
 use super::util;
@@ -238,9 +237,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		let mut out = vec![];
 		let mut next = Some(rng);
 		while let Some(rng) = next {
-			let res = self
-				.batch_keys_vals(rng, BatchConfig::default().normal_fetch_size, version)
-				.await?;
+			let res = self.batch_keys_vals(rng, *surrealdb_cfg::NORMAL_FETCH_SIZE, version).await?;
 			next = res.next;
 			out.extend(res.result);
 		}
@@ -283,7 +280,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		// Continue with function logic
 		let mut next = Some(rng);
 		while let Some(rng) = next {
-			let res = self.batch_keys(rng, BatchConfig::default().normal_fetch_size, None).await?;
+			let res = self.batch_keys(rng, *surrealdb_cfg::NORMAL_FETCH_SIZE, None).await?;
 			next = res.next;
 			for k in res.result {
 				self.del(k).await?;
@@ -328,7 +325,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		// Continue with function logic
 		let mut next = Some(rng);
 		while let Some(rng) = next {
-			let res = self.batch_keys(rng, BatchConfig::default().normal_fetch_size, None).await?;
+			let res = self.batch_keys(rng, *surrealdb_cfg::NORMAL_FETCH_SIZE, None).await?;
 			next = res.next;
 			for k in res.result {
 				self.clr(k).await?;
@@ -351,8 +348,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		let mut len = 0;
 		let mut next = Some(rng);
 		while let Some(rng) = next {
-			let res =
-				self.batch_keys(rng, BatchConfig::default().count_batch_size, version).await?;
+			let res = self.batch_keys(rng, *surrealdb_cfg::COUNT_BATCH_SIZE, version).await?;
 			next = res.next;
 			len += res.result.len();
 		}

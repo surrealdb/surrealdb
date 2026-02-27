@@ -41,6 +41,27 @@ pub static MAX_CONCURRENT_TASKS: LazyLock<usize> = LazyLock::new(|| {
 		.unwrap_or(DEFAULT_MAX_CONCURRENT_TASKS)
 });
 
+pub static MAX_OBJECT_PARSING_DEPTH: LazyLock<u32> = LazyLock::new(|| {
+	std::env::var("SURREAL_MAX_OBJECT_PARSING_DEPTH")
+		.ok()
+		.and_then(|v| v.parse().ok())
+		.unwrap_or(DEFAULT_MAX_OBJECT_PARSING_DEPTH)
+});
+
+pub static MAX_QUERY_PARSING_DEPTH: LazyLock<u32> = LazyLock::new(|| {
+	std::env::var("SURREAL_MAX_QUERY_PARSING_DEPTH")
+		.ok()
+		.and_then(|v| v.parse().ok())
+		.unwrap_or(DEFAULT_MAX_QUERY_PARSING_DEPTH)
+});
+
+pub static GENERATION_ALLOCATION_LIMIT: LazyLock<usize> = LazyLock::new(|| {
+	std::env::var("SURREAL_GENERATION_ALLOCATION_LIMIT")
+		.ok()
+		.and_then(|v| v.parse().ok())
+		.unwrap_or(DEFAULT_GENERATION_ALLOCATION_LIMIT)
+});
+
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct LimitsConfig {
@@ -151,12 +172,12 @@ impl Default for LimitsConfig {
 		Self {
 			memory_threshold: DEFAULT_MEMORY_THRESHOLD,
 			max_computation_depth: DEFAULT_MAX_COMPUTATION_DEPTH,
-			max_object_parsing_depth: DEFAULT_MAX_OBJECT_PARSING_DEPTH,
-			max_query_parsing_depth: DEFAULT_MAX_QUERY_PARSING_DEPTH,
+			max_object_parsing_depth: *MAX_OBJECT_PARSING_DEPTH,
+			max_query_parsing_depth: *MAX_QUERY_PARSING_DEPTH,
 			idiom_recursion_limit: DEFAULT_IDIOM_RECURSION_LIMIT,
 			regex_size_limit: *REGEX_SIZE_LIMIT,
 			max_concurrent_tasks: *MAX_CONCURRENT_TASKS,
-			generation_allocation_limit: DEFAULT_GENERATION_ALLOCATION_LIMIT,
+			generation_allocation_limit: *GENERATION_ALLOCATION_LIMIT,
 			string_similarity_limit: DEFAULT_STRING_SIMILARITY_LIMIT,
 			max_order_limit_priority_queue_size: DEFAULT_MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE,
 			operator_buffer_size: DEFAULT_OPERATOR_BUFFER_SIZE,
@@ -367,6 +388,34 @@ const DEFAULT_EXPORT_BATCH_SIZE: u32 = 1000;
 const DEFAULT_COUNT_BATCH_SIZE: u32 = 50_000;
 const DEFAULT_INDEXING_BATCH_SIZE: u32 = 250;
 
+pub static NORMAL_FETCH_SIZE: LazyLock<u32> = LazyLock::new(|| {
+	std::env::var("SURREAL_NORMAL_FETCH_SIZE")
+		.ok()
+		.and_then(|v| v.parse().ok())
+		.unwrap_or(DEFAULT_NORMAL_FETCH_SIZE)
+});
+
+pub static EXPORT_BATCH_SIZE: LazyLock<u32> = LazyLock::new(|| {
+	std::env::var("SURREAL_EXPORT_BATCH_SIZE")
+		.ok()
+		.and_then(|v| v.parse().ok())
+		.unwrap_or(DEFAULT_EXPORT_BATCH_SIZE)
+});
+
+pub static COUNT_BATCH_SIZE: LazyLock<u32> = LazyLock::new(|| {
+	std::env::var("SURREAL_COUNT_BATCH_SIZE")
+		.ok()
+		.and_then(|v| v.parse().ok())
+		.unwrap_or(DEFAULT_COUNT_BATCH_SIZE)
+});
+
+pub static INDEXING_BATCH_SIZE: LazyLock<u32> = LazyLock::new(|| {
+	std::env::var("SURREAL_INDEXING_BATCH_SIZE")
+		.ok()
+		.and_then(|v| v.parse().ok())
+		.unwrap_or(DEFAULT_INDEXING_BATCH_SIZE)
+});
+
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "cli", derive(clap::Args))]
 pub struct BatchConfig {
@@ -407,10 +456,10 @@ pub struct BatchConfig {
 impl Default for BatchConfig {
 	fn default() -> Self {
 		Self {
-			normal_fetch_size: DEFAULT_NORMAL_FETCH_SIZE,
-			export_batch_size: DEFAULT_EXPORT_BATCH_SIZE,
-			count_batch_size: DEFAULT_COUNT_BATCH_SIZE,
-			indexing_batch_size: DEFAULT_INDEXING_BATCH_SIZE,
+			normal_fetch_size: *NORMAL_FETCH_SIZE,
+			export_batch_size: *EXPORT_BATCH_SIZE,
+			count_batch_size: *COUNT_BATCH_SIZE,
+			indexing_batch_size: *INDEXING_BATCH_SIZE,
 		}
 	}
 }

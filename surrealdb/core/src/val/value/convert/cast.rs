@@ -4,7 +4,6 @@ use std::str::FromStr as _;
 
 use geo::Point;
 use rust_decimal::Decimal;
-use surrealdb_cfg::LimitsConfig;
 use surrealdb_types::ToSql;
 
 use crate::expr::Kind;
@@ -505,7 +504,7 @@ impl Cast for Array {
 				}
 				// checked above
 				let range = range.coerce_to_typed::<i64>().expect("range type checked above");
-				if range.len() > LimitsConfig::default().generation_allocation_limit {
+				if range.len() > *crate::cnf::GENERATION_ALLOCATION_LIMIT {
 					return Err(CastError::RangeSizeLimit {
 						value: Box::new(Range::from(range)),
 					});

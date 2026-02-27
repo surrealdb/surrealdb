@@ -4,7 +4,6 @@ use std::task::{Context, Poll};
 
 use futures::stream::Stream;
 use futures::{Future, FutureExt};
-use surrealdb_cfg::BatchConfig;
 
 use super::api::ScanLimit;
 use super::tr::Transactor;
@@ -94,7 +93,7 @@ impl<'a, I> Scanner<'a, I> {
 			first_batch: true,
 			version: None,
 			enable_prefetch: false,
-			initial_batch_size: ScanLimit::Count(BatchConfig::default().normal_fetch_size),
+			initial_batch_size: ScanLimit::Count(*surrealdb_cfg::NORMAL_FETCH_SIZE),
 			subsequent_batch_size: ScanLimit::Bytes(4 * 1024 * 1024),
 		}
 	}

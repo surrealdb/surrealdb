@@ -10,7 +10,6 @@ use reblessive::TreeStack;
 use revision::revisioned;
 use roaring::RoaringBitmap;
 use serde::{Deserialize, Serialize};
-use surrealdb_cfg::BatchConfig;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::{Mutex, RwLock};
@@ -620,7 +619,7 @@ impl Building {
 				// Get the next batch of records.
 				let res = catch!(
 					tx,
-					tx.batch_keys_vals(rng, BatchConfig::default().indexing_batch_size, None).await
+					tx.batch_keys_vals(rng, self.tf.batch_config().indexing_batch_size, None).await
 				);
 				tx.cancel().await?;
 				res
@@ -681,7 +680,7 @@ impl Building {
 					let tx = self.new_read_tx().await?;
 					let keys = catch!(
 						tx,
-						tx.keys(rng.clone(), BatchConfig::default().indexing_batch_size, 0, None)
+						tx.keys(rng.clone(), self.tf.batch_config().indexing_batch_size, 0, None)
 							.await
 					);
 					tx.cancel().await?;

@@ -185,6 +185,11 @@ impl TransactionFactory {
 		}
 	}
 
+	/// Returns the batch configuration used by this factory.
+	pub(crate) fn batch_config(&self) -> &surrealdb_cfg::BatchConfig {
+		&self.batch_config
+	}
+
 	#[allow(
 		unreachable_code,
 		unreachable_patterns,

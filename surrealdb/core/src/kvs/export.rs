@@ -2,7 +2,6 @@ use std::fmt;
 
 use anyhow::Result;
 use async_channel::Sender;
-use surrealdb_cfg::BatchConfig;
 use surrealdb_types::{SurrealValue, ToSql};
 
 use super::Transaction;
@@ -328,7 +327,7 @@ impl Transaction {
 
 		while let Some(rng) = next {
 			let batch =
-				self.batch_keys_vals(rng, BatchConfig::default().export_batch_size, None).await?;
+				self.batch_keys_vals(rng, self.batch_config().export_batch_size, None).await?;
 			next = batch.next;
 			// If there are no values, return early.
 			if batch.result.is_empty() {

@@ -261,8 +261,8 @@ pub(crate) fn expr_legacy_strand(input: &str) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: LimitsConfig::default().max_object_parsing_depth as usize,
-		query_recursion_limit: LimitsConfig::default().max_query_parsing_depth as usize,
+		object_recursion_limit: *crate::cnf::MAX_OBJECT_PARSING_DEPTH as usize,
+		query_recursion_limit: *crate::cnf::MAX_QUERY_PARSING_DEPTH as usize,
 		legacy_strands: true,
 		..Default::default()
 	};
@@ -278,8 +278,8 @@ pub fn value(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: LimitsConfig::default().max_object_parsing_depth as usize,
-		query_recursion_limit: LimitsConfig::default().max_query_parsing_depth as usize,
+		object_recursion_limit: *crate::cnf::MAX_OBJECT_PARSING_DEPTH as usize,
+		query_recursion_limit: *crate::cnf::MAX_QUERY_PARSING_DEPTH as usize,
 		..Default::default()
 	};
 
@@ -294,8 +294,8 @@ pub fn value_legacy_strand(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: LimitsConfig::default().max_object_parsing_depth as usize,
-		query_recursion_limit: LimitsConfig::default().max_query_parsing_depth as usize,
+		object_recursion_limit: *crate::cnf::MAX_OBJECT_PARSING_DEPTH as usize,
+		query_recursion_limit: *crate::cnf::MAX_QUERY_PARSING_DEPTH as usize,
 		legacy_strands: true,
 		..Default::default()
 	};
@@ -312,8 +312,8 @@ pub fn json_legacy_strand(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: LimitsConfig::default().max_object_parsing_depth as usize,
-		query_recursion_limit: LimitsConfig::default().max_query_parsing_depth as usize,
+		object_recursion_limit: *crate::cnf::MAX_OBJECT_PARSING_DEPTH as usize,
+		query_recursion_limit: *crate::cnf::MAX_QUERY_PARSING_DEPTH as usize,
 		legacy_strands: true,
 		..Default::default()
 	};
