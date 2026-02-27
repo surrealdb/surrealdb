@@ -1,5 +1,9 @@
 use std::any::Any;
+use std::borrow::Borrow;
+use std::hash::Hash;
 use std::ops::{Index, IndexMut};
+
+use common::ids::SetEntry;
 
 use crate::types::{NodeLibrary, UniqueNode};
 use crate::{Node, NodeId, NodeList, NodeListId};
@@ -24,7 +28,15 @@ impl<L: NodeLibrary> Ast<L> {
 		self.library.insert_set(value)
 	}
 
-	pub fn push_list_item<T: Node>(&mut self, list: NodeList<T>) -> NodeListId<T>{
+	pub fn push_set_entry<T, V>(&mut self, value: V) -> NodeId<T>
+	where
+		T: UniqueNode,
+		V: SetEntry<T>,
+	{
+		self.library.insert_set_entry(value)
+	}
+
+	pub fn push_list_item<T: Node>(&mut self, list: NodeList<T>) -> NodeListId<T> {
 		NodeListId(self.push(list))
 	}
 

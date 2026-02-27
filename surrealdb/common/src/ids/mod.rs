@@ -1,5 +1,5 @@
 mod id_set;
-pub use id_set::IdSet;
+pub use id_set::{IdSet, SetEntry};
 
 pub trait Id: Sized + Copy {
 	fn idx(self) -> usize;

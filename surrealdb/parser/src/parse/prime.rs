@@ -370,16 +370,8 @@ async fn parse_object_continue(
 	let next = parser.next()?.expect("there should be an object key in this function");
 
 	let key = match next.token {
-		BaseTokenKind::Ident => {
-			let str = parser.unescape_ident(next)?;
-			let str = str.to_owned();
-			parser.push_set(str)
-		}
-		BaseTokenKind::String => {
-			let str = parser.unescape_str(next)?;
-			let str = str.to_owned();
-			parser.push_set(str)
-		}
+		BaseTokenKind::Ident => parser.unescape_ident(next)?,
+		BaseTokenKind::String => parser.unescape_str_push(next)?,
 		_ => unreachable!(),
 	};
 
@@ -411,15 +403,11 @@ async fn parse_object_continue(
 			let key = match peek.token {
 				BaseTokenKind::Ident => {
 					let _ = parser.next();
-					let str = parser.unescape_ident(peek)?;
-					let str = str.to_owned();
-					parser.push_set(str)
+					parser.unescape_ident(peek)?
 				}
 				BaseTokenKind::String => {
 					let _ = parser.next();
-					let str = parser.unescape_str(peek)?;
-					let str = str.to_owned();
-					parser.push_set(str)
+					parser.unescape_str_push(peek)?
 				}
 				_ => return Err(parser.unexpected("an object key")),
 			};

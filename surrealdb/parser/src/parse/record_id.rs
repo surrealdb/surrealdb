@@ -30,8 +30,7 @@ impl Parse for ast::RecordIdKey {
 			}
 			x if x.is_identifier() => {
 				let _ = parser.next();
-				let str = parser.unescape_ident(peek)?.to_owned();
-				let text = parser.push_set(str);
+				let text = parser.unescape_ident(peek)?;
 				let i = parser.push(ast::StringLit {
 					text,
 					span: peek.span,

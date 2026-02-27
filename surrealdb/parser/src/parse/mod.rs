@@ -796,11 +796,18 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 							delimiter.description()
 						))
 						.snippet(
-							this.snippet().annotate(AnnotationKind::Primary.span(span)).annotate(
-								AnnotationKind::Context
-									.span(open_span)
-									.label("expected this delimiter to close"),
-							),
+							this.snippet()
+								.annotate(
+									AnnotationKind::Primary.span(span).label(format!(
+										"Missing {} here.",
+										delimiter.description()
+									)),
+								)
+								.annotate(
+									AnnotationKind::Context
+										.span(open_span)
+										.label("Expected this delimiter to close"),
+								),
 						)
 						.to_diagnostic()
 				}));
@@ -815,11 +822,15 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 					))
 					.snippet(
 						this.snippet()
-							.annotate(AnnotationKind::Primary.span(this.eof_span()))
+							.annotate(
+								AnnotationKind::Primary
+									.span(this.eof_span())
+									.label(format!("Missing {} here.", delimiter.description())),
+							)
 							.annotate(
 								AnnotationKind::Context
 									.span(open_span)
-									.label("expected this delimiter to close"),
+									.label("Expected this delimiter to close"),
 							),
 					)
 					.to_diagnostic()

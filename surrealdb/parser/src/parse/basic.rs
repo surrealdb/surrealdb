@@ -16,8 +16,7 @@ impl ParseSync for ast::Ident {
 			return Err(parser.unexpected("an identifier"));
 		}
 		let _ = parser.next();
-		let str_value = parser.unescape_ident(token)?.to_owned();
-		let text = parser.push_set(str_value);
+		let text = parser.unescape_ident(token)?.to_owned();
 
 		Ok(ast::Ident {
 			text,
@@ -29,8 +28,7 @@ impl ParseSync for ast::Ident {
 impl ParseSync for ast::Param {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
 		let token = parser.expect(BaseTokenKind::Param)?;
-		let str_value = parser.unescape_param(token)?.to_owned();
-		let text = parser.push_set(str_value);
+		let text = parser.unescape_param(token)?.to_owned();
 
 		Ok(ast::Param {
 			text,
