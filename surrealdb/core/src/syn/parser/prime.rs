@@ -567,9 +567,15 @@ impl Parser<'_> {
 		if let Ok(x) = Lexer::lex_datetime(str) {
 			return Ok(Literal::Datetime(x));
 		}
-		if let Ok(x) = Parser::new(str.as_bytes()).parse_record_id(stk).await {
-			return Ok(Literal::RecordId(x));
+
+		let mut record_id_parser = Parser::new(str.as_bytes());
+
+		if let Ok(x) = record_id_parser.parse_record_id(stk).await {
+			if record_id_parser.peek().is_eof() {
+				return Ok(Literal::RecordId(x));
+			}
 		}
+
 		Ok(Literal::String(str.to_owned()))
 	}
 
@@ -720,5 +726,26 @@ mod tests {
 		let sql = "$__hello";
 		let out = syn::expr(sql).unwrap();
 		assert_eq!("$__hello", out.to_sql());
+	}
+
+	#[test]
+	fn legacy_strand_partial_record_id_stays_string() {
+		let sql = "'openai:gpt-5-mini'";
+		let out = syn::expr_legacy_strand(sql).unwrap();
+		assert!(
+			matches!(out, Expr::Literal(Literal::String(_))),
+			"expected Literal::String, got: {out:?}"
+		);
+		assert_eq!("'openai:gpt-5-mini'", out.to_sql());
+	}
+
+	#[test]
+	fn legacy_strand_full_record_id_is_converted() {
+		let sql = "'person:test'";
+		let out = syn::expr_legacy_strand(sql).unwrap();
+		assert!(
+			matches!(out, Expr::Literal(Literal::RecordId(_))),
+			"expected Literal::RecordId, got: {out:?}"
+		);
 	}
 }
