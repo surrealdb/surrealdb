@@ -5,9 +5,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use rust_decimal::Decimal;
+use serde::{Serialize, de::DeserializeOwned};
 
 use crate as surrealdb_types;
 use crate::error::{ConversionError, LengthMismatchError, OutOfRangeError};
+use crate::traits::ser::Serializer;
 use crate::{
 	Array, Bytes, Datetime, Duration, Error, File, Geometry, Kind, Number, Object, Range, RecordId,
 	Set, SurrealNone, SurrealNull, Table, Uuid, Value, kind,
@@ -1632,5 +1634,25 @@ impl<T: SurrealValue + Hash + Eq> SurrealValue for HashSet<T> {
 		a.into_iter().map(|v| T::from_value(v)).collect::<Result<HashSet<T>, Error>>().map_err(
 			|e| Error::internal(format!("Failed to convert to {}: {}", Self::kind_of(), e)),
 		)
+	}
+}
+
+/// A wrapper struct that allows bridging between SurrealValue and types that implement Serialize and Deserialize
+pub struct Wrapper<T: Serialize + DeserializeOwned>(T);
+
+impl<T: Serialize + DeserializeOwned> SurrealValue for Wrapper<T> {
+	fn kind_of() -> Kind {
+		Kind::Any
+	}
+
+	fn into_value(self) -> Value {
+		self.0.serialize(Serializer).expect("serialization to a value failed!")
+	}
+
+	fn from_value(value: Value) -> Result<Self, Error>
+	where
+		Self: Sized,
+	{
+		Ok(Self(T::deserialize(value)?))
 	}
 }
