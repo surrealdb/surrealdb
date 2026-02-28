@@ -81,6 +81,7 @@ pub enum Resource {
 
 impl Resource {
 	/// Add a range to the resource, this only works if the resource is a table.
+	#[allow(clippy::result_large_err)]
 	pub fn with_range(self, range: KeyRange) -> Result<Self> {
 		match self {
 			Resource::Table(table) => Ok(Resource::Range(Table(table).with_range(range))),
@@ -313,15 +314,18 @@ impl From<ops::RangeFull> for KeyRange {
 /// A trait for types which can be used as a resource selection for a query.
 pub trait IntoResource<Output> {
 	#[deprecated(since = "2.3.0")]
+	#[allow(clippy::result_large_err)]
 	fn into_resource(self) -> Result<Resource>;
 }
 
 /// A trait for types which can be used as a resource selection for a query that returns an `Option`.
 pub trait CreateResource<Output> {
 	#[deprecated(since = "2.3.0")]
+	#[allow(clippy::result_large_err)]
 	fn into_resource(self) -> Result<Resource>;
 }
 
+#[allow(clippy::result_large_err)]
 fn no_colon(a: &str) -> Result<()> {
 	if a.contains(':') {
 		return Err(Error::TableColonId {

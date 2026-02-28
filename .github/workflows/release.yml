@@ -10,7 +10,7 @@ on:
       git-ref:
         required: true
         type: string
-        default: releases/2.3
+        default: releases/2.x
         description: "The git ref of this release"
       latest:
         required: false

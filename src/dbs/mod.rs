@@ -83,6 +83,15 @@ pub struct DbsCapabilities {
 	#[arg(env = "SURREAL_CAPS_ALLOW_GUESTS", long, conflicts_with_all = ["allow_all", "deny_guests"])]
 	allow_guests: bool,
 
+	#[arg(help = "Insecurely allow closures to be stored on database records")]
+	#[arg(long_help = r#"Insecurely allow closures to be stored on database records. 
+This is insecure, because users of a lower authentication level could inject queries 
+into closures causing their own permissions to escalate to a higher level when executed 
+by users who are allowed to make such changes.
+"#)]
+	#[arg(env = "SURREAL_CAPS_ALLOW_INSECURE_STORABLE_CLOSURES", long, conflicts_with_all = ["deny_insecure_storable_closures"])]
+	allow_insecure_storable_closures: bool,
+
 	#[arg(
 		help = "Allow execution of all functions except for functions that are specifically denied. Alternatively, you can provide a comma-separated list of function names to allow",
 		long_help = r#"Allow execution of all functions except for functions that are specifically denied. Alternatively, you can provide a comma-separated list of function names to allow
@@ -170,6 +179,14 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(env = "SURREAL_CAPS_DENY_GUESTS", long, conflicts_with_all = ["deny_all", "allow_guests"])]
 	deny_guests: bool,
 
+	#[arg(help = "Deny insecurely allowing closures to be stored on database records")]
+	#[arg(long_help = r#"Deny insecurely allowing closures to be stored on database records. 
+This is insecure, because users of a lower authentication level could inject queries into 
+closures causing their own permissions to escalate to a higher level when executed by users who are allowed to make such changes.
+"#)]
+	#[arg(env = "SURREAL_CAPS_DENY_INSECURE_STORABLE_CLOSURES", long, conflicts_with_all = ["allow_insecure_storable_closures"])]
+	deny_insecure_storable_closures: bool,
+
 	#[arg(
 		help = "Deny execution of all functions except for functions that are specifically allowed. Alternatively, you can provide a comma-separated list of function names to deny",
 		long_help = r#"Deny execution of all functions except for functions that are specifically allowed. Alternatively, you can provide a comma-separated list of function names to deny.
@@ -251,6 +268,10 @@ impl DbsCapabilities {
 	#[cfg(not(feature = "scripting"))]
 	fn get_scripting(&self) -> bool {
 		false
+	}
+
+	fn get_allow_insecure_storable_closures(&self) -> bool {
+		self.allow_insecure_storable_closures && !self.deny_insecure_storable_closures
 	}
 
 	fn get_allow_guests(&self) -> bool {
@@ -490,6 +511,7 @@ fn merge_capabilities(initial: Capabilities, caps: DbsCapabilities) -> Capabilit
 	initial
 		.with_scripting(caps.get_scripting())
 		.with_guest_access(caps.get_allow_guests())
+		.with_insecure_storable_closures(caps.get_allow_insecure_storable_closures())
 		.with_functions(caps.get_allow_funcs())
 		.without_functions(caps.get_deny_funcs())
 		.with_network_targets(caps.get_allow_net())
@@ -1078,6 +1100,8 @@ mod tests {
 			allow_all: false,
 			allow_scripting: false,
 			allow_guests: false,
+			allow_insecure_storable_closures: false,
+			deny_insecure_storable_closures: false,
 			allow_funcs: None,
 			allow_experimental: Some(Targets::All),
 			allow_arbitrary_query: Some(Targets::All),

@@ -435,6 +435,7 @@ impl Response {
 	///
 	/// The indices are stable. Taking one index doesn't affect the numbering
 	/// of the other indices, so you can take them in any order you see fit.
+	#[allow(clippy::result_large_err)]
 	pub fn take<R>(&mut self, index: impl opt::QueryResult<R>) -> Result<R>
 	where
 		R: DeserializeOwned,
@@ -487,6 +488,7 @@ impl Response {
 	/// ```
 	///
 	/// Consume the stream the same way you would any other type that implements `futures::Stream`.
+	#[allow(clippy::result_large_err)]
 	pub fn stream<R>(&mut self, index: impl opt::QueryStream<R>) -> Result<QueryStream<R>> {
 		#[expect(deprecated)]
 		index.query_stream(self)
@@ -539,6 +541,7 @@ impl Response {
 	/// # Ok(())
 	/// # }
 	/// ```
+	#[allow(clippy::result_large_err)]
 	pub fn check(mut self) -> Result<Self> {
 		let mut first_error = None;
 		for (key, result) in &self.results {
@@ -697,6 +700,7 @@ impl WithStats<Response> {
 	/// # Ok(())
 	/// # }
 	/// ```
+	#[allow(clippy::result_large_err)]
 	pub fn check(self) -> Result<Self> {
 		let response = self.0.check()?;
 		Ok(Self(response))

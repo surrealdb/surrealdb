@@ -1,3 +1,4 @@
+pub mod ds;
 pub mod http;
 pub mod ws;
 

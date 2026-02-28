@@ -1130,7 +1130,11 @@ mod http_integration {
 				num_records - 10,
 				"body: {body}"
 			);
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:11", "body: {body}");
+			assert_eq!(
+				body[0]["result"].as_array().unwrap()[0]["id"],
+				"`table`:11",
+				"body: {body}"
+			);
 		}
 
 		// GET records with a start and limit
@@ -1144,7 +1148,11 @@ mod http_integration {
 
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 			assert_eq!(body[0]["result"].as_array().unwrap().len(), 10, "body: {body}");
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:11", "body: {body}");
+			assert_eq!(
+				body[0]["result"].as_array().unwrap()[0]["id"],
+				"`table`:11",
+				"body: {body}"
+			);
 		}
 
 		// GET without authentication returns no records
@@ -1484,7 +1492,7 @@ mod http_integration {
 			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["id"],
-				"table:new_id",
+				"`table`:new_id",
 				"body: {body}"
 			);
 		}
@@ -1510,7 +1518,7 @@ mod http_integration {
 			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
 			assert_eq!(
 				body[0]["result"].as_array().unwrap()[0]["id"],
-				"table:new_id_query",
+				"`table`:new_id_query",
 				"body: {body}"
 			);
 			assert_eq!(body[0]["result"].as_array().unwrap()[0]["age"], 45, "body: {body}");
@@ -1575,7 +1583,7 @@ mod http_integration {
 			// Verify the record was updated
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "`table`:1", "body: {body}");
 
 			// Verify the record has the new data
 			assert_eq!(
@@ -1597,7 +1605,7 @@ mod http_integration {
 			// Verify the record was not updated
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "`table`:1", "body: {body}");
 
 			// Verify the record doesn't have the new data
 			assert!(body[0]["result"].as_array().unwrap()[0]["noauth"].is_null(), "body: {body}");
@@ -1645,7 +1653,7 @@ mod http_integration {
 			// Verify the records were modified
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "`table`:1", "body: {body}");
 
 			// Verify the record has the new data
 			assert_eq!(
@@ -1671,7 +1679,7 @@ mod http_integration {
 			// Verify the record was not modified
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:1", "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "`table`:1", "body: {body}");
 
 			// Verify the record doesn't have the new data
 			assert!(body[0]["result"].as_array().unwrap()[0]["noauth"].is_null(), "body: {body}");
@@ -1721,7 +1729,7 @@ mod http_integration {
 			let res = client.get(base_url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
 			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
-			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "table:2", "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap()[0]["id"], "`table`:2", "body: {body}");
 		}
 
 		// Delete one record without authentication

@@ -17,7 +17,7 @@ use crate::{
 	err::Error,
 	kvs::{Datastore, Transaction},
 	sql::{
-		statements::{define::config::api::ApiConfig, define::ApiDefinition},
+		statements::define::{config::api::ApiConfig, ApiDefinition},
 		Object, Value,
 	},
 };
@@ -108,6 +108,7 @@ impl ApiInvocation {
 		let body = body.process(&inv_ctx, &self).await?;
 
 		// Edit the options
+		let opt = api.auth_limit.limit_opt(opt);
 		let opt = opt.new_with_perms(false);
 
 		// Edit the context

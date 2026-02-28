@@ -460,6 +460,9 @@ fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 	assert!(a.len() < LEVENSTHEIN_ARRAY_SIZE);
 	assert!(b.len() < LEVENSTHEIN_ARRAY_SIZE);
 
+	// Clippy is here just wrong,
+	// the iterator alternative is way more complex and less readable then a simple range loop.
+	#[allow(clippy::needless_range_loop)]
 	for i in 1..=a.len() {
 		distance_array[0][i] = i as u8;
 	}

@@ -57,7 +57,18 @@ yanked = "warn"
 # A list of security advisory identifiers to ignore.
 # TODOs:
 # - for RUSTSEC-2024-0436, track https://github.com/3Hren/msgpack-rust/issues/365
-ignore = ["RUSTSEC-2024-0436"]
+# - for RUSTSEC-2025-0141, bincode is unmaintained but still functional - consider alternatives
+# - for RUSTSEC-2025-0134, rustls-pemfile is unmaintained - transitive dependency from axum-server, reqwest, tonic
+# - for RUSTSEC-2026-0002, lru has a soundness issue violating stacked borrows, currently there is no good way to work around that.
+# - for RUSTSEC-2026-0009, time DoS via RFC 2822: we do not use time's RFC 2822 parsing (no Rfc2822/well_known in code).
+#   Our only use is doc examples (OffsetDateTime::now_utc()) and serde; time is pinned to 0.3.40 to avoid Windows build breakage from 0.3.47.
+ignore = [
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2025-0141",
+    "RUSTSEC-2025-0134",
+    "RUSTSEC-2026-0002",
+    "RUSTSEC-2026-0009",
+]
 
 # --------------------------------------------------
 # LICENSES
@@ -86,10 +97,6 @@ confidence-threshold = 0.95
 # Allow specific licenses on a per-crate basis, instead of globally.
 
 [[licenses.exceptions]]
-name = "ring"
-allow = ["OpenSSL"]
-
-[[licenses.exceptions]]
 name = "surreal"
 allow = ["BUSL-1.1"]
 
@@ -113,10 +120,6 @@ allow = ["Apache-2.0"]
 name = "surrealcs-kernel"
 allow = ["BUSL-1.1"]
 
-[[licenses.exceptions]]
-name = "unicode-ident"
-allow = ["Unicode-DFS-2016"]
-
 # Specify overrides for crates where licenses are hard to guess.
 
 [[licenses.clarify]]
@@ -138,8 +141,3 @@ license-files = []
 name = "surrealml-core"
 expression = "Apache-2.0"
 license-files = []
-
-[[licenses.clarify]]
-name = "ring"
-expression = "MIT AND ISC AND OpenSSL"
-license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]

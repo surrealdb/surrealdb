@@ -1,38 +1,41 @@
 use std::{
-	fmt::{self, Display, Write},
+	fmt::{self, Write},
 	ops::Bound,
 };
 
 use crate::{
 	sql::{
 		access_type::{BearerAccessSubject, JwtAccessVerify},
-		escape::{EscapeIdent, EscapeKey, QuoteStr},
+		escape::{EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapePath, QuoteStr},
 		graph::GraphSubject,
 		order::Ordering,
 		part::{DestructurePart, RecurseInstruction},
 		reference::{self, Reference, Refs},
 		statements::{
-			access::{AccessStatementRevoke, AccessStatementShow},
+			access::{
+				AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
+				AccessStatementShow, Subject,
+			},
 			define::{
 				config::{api::ApiConfig, graphql::GraphQLConfig},
 				ApiAction, DefineConfigStatement,
 			},
 			rebuild::RebuildStatement,
-			AccessStatement, AlterTableStatement, AnalyzeStatement, CreateStatement,
-			DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement,
-			DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement,
-			DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
-			DefineNamespaceStatement, DefineParamStatement, DefineTableStatement,
-			DefineUserStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
-			InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
-			RelateStatement, RemoveStatement, SelectStatement, SetStatement, ShowStatement,
-			SleepStatement, ThrowStatement, UpdateStatement, UpsertStatement, UseStatement,
+			AlterTableStatement, AnalyzeStatement, CreateStatement, DefineAccessStatement,
+			DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
+			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
+			DefineIndexStatement, DefineModelStatement, DefineNamespaceStatement,
+			DefineParamStatement, DefineTableStatement, DefineUserStatement, DeleteStatement,
+			ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement,
+			LiveStatement, OptionStatement, OutputStatement, RelateStatement, RemoveStatement,
+			SelectStatement, SetStatement, ShowStatement, SleepStatement, ThrowStatement,
+			UpdateStatement, UpsertStatement, UseStatement,
 		},
 		visit::{Visit, Visitor},
 		AccessType, Array, Block, Cast, Closure, Data, Edges, Entry, Expression, Field, Fields,
-		Function, Future, Geometry, Graph, IdRange, Idiom, Index, Kind, Mock, Model, Number,
-		Object, Operator, Output, Param, Part, Permission, Permissions, Range, Statements,
-		Subquery, TableType, Thing, Value, View, With,
+		Function, Future, Geometry, Graph, Id, IdRange, Idiom, Index, Kind, Literal, Mock, Model,
+		Number, Object, Operator, Output, Param, Part, Permission, Permissions, Range, Statements,
+		Subquery, Thing, Value, View, With,
 	},
 	syn::error::{Location, MessageKind, Snippet},
 };
@@ -101,12 +104,31 @@ impl fmt::Write for PassWriter<'_> {
 #[derive(Clone, Copy, Default)]
 pub struct PassState {
 	pub breaking_futures: bool,
+	pub breaking_closures: bool,
+	pub non_expression_idiom: bool,
+	pub mock_allowed: bool,
+	pub skip_relation_field: bool,
 	pub _tmp: (),
+}
+
+impl PassState {
+	pub fn with_breaking_futures(mut self) -> Self {
+		self.breaking_futures = true;
+		self
+	}
+	pub fn with_breaking_closures(mut self) -> Self {
+		self.breaking_closures = true;
+		self
+	}
+
+	pub fn with_breaking_storage(self) -> Self {
+		self.with_breaking_futures().with_breaking_closures()
+	}
 }
 
 pub struct MigratorPass<'a> {
 	issues: &'a mut Vec<MigrationIssue>,
-	pub path: &'a mut String,
+	pub path: &'a mut Vec<Value>,
 	w: PassWriter<'a>,
 	state: PassState,
 }
@@ -115,7 +137,7 @@ impl<'a> MigratorPass<'a> {
 	pub fn new(
 		issues: &'a mut Vec<MigrationIssue>,
 		export: &'a mut String,
-		path: &'a mut String,
+		path: &'a mut Vec<Value>,
 		state: PassState,
 	) -> Self {
 		export.clear();
@@ -125,18 +147,6 @@ impl<'a> MigratorPass<'a> {
 			w: PassWriter::new(export),
 			state,
 		}
-	}
-
-	fn with_path<T, F, R>(&mut self, segment: T, f: F) -> Result<R, fmt::Error>
-	where
-		T: Display,
-		F: FnOnce(&mut Self) -> Result<R, fmt::Error>,
-	{
-		let len = self.path.len();
-		write!(self.path, "{}", segment).unwrap();
-		let r = f(self);
-		self.path.truncate(len);
-		r
 	}
 
 	fn with_state<Fs, Fc, R>(&mut self, fs: Fs, fc: Fc) -> Result<R, fmt::Error>
@@ -149,6 +159,108 @@ impl<'a> MigratorPass<'a> {
 		let r = fc(self);
 		self.state = old_state;
 		r
+	}
+
+	fn check_function(&mut self, range: std::ops::Range<Location>, name: &str, _args: &[Value]) {
+		match name {
+			"array::logical_and" => {
+				self.issues.push(MigrationIssue {
+					severity: Severity::UnlikelyBreak,
+					error: "Found use of function array::logical_and, this function now has different behavior".to_string(),
+					details: String::new(),
+					kind: IssueKind::FunctionLogicalAnd,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						range,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
+			}
+			"array::logical_or" => {
+				self.issues.push(MigrationIssue {
+					severity: Severity::UnlikelyBreak,
+					error: "Found use of function array::logical_or, this function now has different behavior".to_string(),
+					details: String::new(),
+					kind: IssueKind::FunctionLogicalOr,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						range,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
+			}
+			"array::range" => {
+				self.issues.push(MigrationIssue {
+					severity: Severity::CanBreak,
+					error: "Found use of function array::range, this function now has different behavior".to_string(),
+					details: String::new(),
+					kind: IssueKind::FunctionLogicalOr,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						range,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
+			}
+			"math::sqrt" => {
+				self.issues.push(MigrationIssue {
+					severity: Severity::UnlikelyBreak,
+					error: "Found use of function math::sqrt, this function now returns `NaN` when called with a negative number".to_string(),
+					details: String::new(),
+					kind: IssueKind::FunctionLogicalOr,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						range,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
+			}
+			"math::min" => {
+				self.issues.push(MigrationIssue {
+					severity: Severity::UnlikelyBreak,
+					error: "Found use of function math::min, this function now return `Infinity` when called with an empty array".to_string(),
+					details: String::new(),
+					kind: IssueKind::FunctionLogicalOr,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						range,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
+			}
+			"math::max" => {
+				self.issues.push(MigrationIssue {
+					severity: Severity::UnlikelyBreak,
+					error: "Found use of function math::max, this function now returns `-Infinity` when called with an empty array".to_string(),
+					details: String::new(),
+					kind: IssueKind::FunctionLogicalOr,
+					origin: self.path.clone(),
+					error_location: Some(Snippet::from_source_location_range(
+						self.w.flush_source(),
+						range,
+						None,
+						MessageKind::Error,
+					)),
+					resolution: None,
+				})
+			}
+			_ => {}
+		}
 	}
 }
 
@@ -164,11 +276,39 @@ impl Visitor for MigratorPass<'_> {
 		Ok(())
 	}
 
-	fn visit_access(&mut self, a: &AccessStatement) -> Result<(), Self::Error> {
-		match a {
-			AccessStatement::Grant(_) | AccessStatement::Purge(_) => write!(self.w, "{a}"),
-			AccessStatement::Show(_) | AccessStatement::Revoke(_) => a.visit(self),
+	fn visit_access_grant(&mut self, a: &AccessStatementGrant) -> Result<(), Self::Error> {
+		write!(self.w, "ACCESS {}", a.ac)?;
+		if let Some(ref v) = a.base {
+			write!(self.w, " ON {v}")?;
 		}
+		write!(self.w, " GRANT")?;
+		match &a.subject {
+			Subject::User(x) => write!(self.w, " FOR USER {}", EscapeKwFreeIdent(&x.0))?,
+			Subject::Record(x) => {
+				write!(self.w, " FOR RECORD ")?;
+				self.visit_thing(x)?
+			}
+		}
+		Ok(())
+	}
+
+	fn visit_access_purge(&mut self, a: &AccessStatementPurge) -> Result<(), Self::Error> {
+		write!(self.w, "ACCESS {}", a.ac)?;
+		if let Some(ref v) = a.base {
+			write!(self.w, " ON {v}")?;
+		}
+		write!(self.w, " PURGE")?;
+		match (a.expired, a.revoked) {
+			(true, false) => write!(self.w, " EXPIRED")?,
+			(false, true) => write!(self.w, " REVOKED")?,
+			(true, true) => write!(self.w, " EXPIRED, REVOKED")?,
+			// This case should not parse.
+			(false, false) => write!(self.w, " NONE")?,
+		};
+		if !a.grace.is_zero() {
+			write!(self.w, " FOR {}", a.grace)?;
+		}
+		Ok(())
 	}
 
 	fn visit_access_show(&mut self, a: &AccessStatementShow) -> Result<(), Self::Error> {
@@ -181,7 +321,7 @@ impl Visitor for MigratorPass<'_> {
 			Some(v) => write!(self.w, " GRANT {v}")?,
 			None => match &a.cond {
 				Some(v) => {
-					write!(self.w, "WHERE ")?;
+					write!(self.w, " WHERE ")?;
 					self.visit_value(&v.0)?;
 				}
 				None => write!(self.w, " ALL")?,
@@ -200,7 +340,7 @@ impl Visitor for MigratorPass<'_> {
 			Some(v) => write!(self.w, " GRANT {v}")?,
 			None => match &a.cond {
 				Some(v) => {
-					write!(self.w, "WHERE ")?;
+					write!(self.w, " WHERE ")?;
 					self.visit_value(&v.0)?;
 				}
 				None => write!(self.w, " ALL")?,
@@ -217,36 +357,7 @@ impl Visitor for MigratorPass<'_> {
 
 		write!(self.w, " {}", a.name)?;
 		if let Some(kind) = &a.kind {
-			write!(self.w, " TYPE")?;
-			match &kind {
-				TableType::Normal => {
-					self.w.write_str(" NORMAL")?;
-				}
-				TableType::Relation(rel) => {
-					self.w.write_str(" RELATION")?;
-					if let Some(Kind::Record(kind)) = &rel.from {
-						write!(self.w, " IN ",)?;
-						for (idx, k) in kind.iter().enumerate() {
-							if idx != 0 {
-								self.w.write_str("|")?;
-							}
-							write!(self.w, "{k}")?;
-						}
-					}
-					if let Some(Kind::Record(kind)) = &rel.to {
-						write!(self.w, " OUT ",)?;
-						for (idx, k) in kind.iter().enumerate() {
-							if idx != 0 {
-								self.w.write_str("|")?;
-							}
-							write!(self.w, "{k}")?;
-						}
-					}
-				}
-				TableType::Any => {
-					self.w.write_str(" ANY")?;
-				}
-			}
+			write!(self.w, " TYPE {kind}")?;
 		}
 		if let Some(full) = a.full {
 			let s = if full {
@@ -260,10 +371,11 @@ impl Visitor for MigratorPass<'_> {
 			write!(self.w, " COMMENT {}", comment.clone().unwrap_or("NONE".into()))?
 		}
 		if let Some(changefeed) = &a.changefeed {
-			write!(self.w, " CHANGEFEED {}", changefeed.map_or("NONE".into(), |v| v.to_string()))?
+			write!(self.w, " {}", changefeed.map_or("DROP CHANGEFEED".into(), |v| v.to_string()))?
 		}
 
 		if let Some(permissions) = &a.permissions {
+			self.w.write_char(' ')?;
 			self.visit_permissions(permissions)?;
 		}
 		Ok(())
@@ -273,6 +385,7 @@ impl Visitor for MigratorPass<'_> {
 		self.with_state(
 			|s| PassState {
 				breaking_futures: true,
+				breaking_closures: true,
 				..s
 			},
 			|this| {
@@ -296,7 +409,7 @@ impl Visitor for MigratorPass<'_> {
 							if idx != 0 {
 								this.w.write_str(",")?;
 							}
-							this.w.write_str(x)?;
+							write!(this.w, "{}", EscapeKwFreeIdent(x))?;
 						}
 					}
 					None => {}
@@ -307,14 +420,21 @@ impl Visitor for MigratorPass<'_> {
 					this.visit_data(d)?;
 				}
 
+				if let Some(c) = u.cond.as_ref() {
+					this.w.write_str(" WHERE ")?;
+					this.with_state(
+						|s| PassState {
+							breaking_futures: false,
+							breaking_closures: false,
+							..s
+						},
+						|this| this.visit_value(&c.0),
+					)?;
+				}
+
 				if let Some(o) = u.output.as_ref() {
 					this.w.write_str(" ")?;
 					this.visit_output(o)?;
-				}
-
-				if let Some(c) = u.cond.as_ref() {
-					this.w.write_str(" WHERE ")?;
-					this.visit_value(&c.0)?;
 				}
 				Ok(())
 			},
@@ -362,7 +482,7 @@ impl Visitor for MigratorPass<'_> {
 							if idx != 0 {
 								this.w.write_str(",")?;
 							}
-							this.w.write_str(x)?;
+							write!(this.w, "{}", EscapeKwFreeIdent(x))?;
 						}
 					}
 					None => {}
@@ -373,15 +493,23 @@ impl Visitor for MigratorPass<'_> {
 					this.visit_data(d)?;
 				}
 
+				if let Some(c) = u.cond.as_ref() {
+					this.w.write_str(" WHERE ")?;
+					this.with_state(
+						|s| PassState {
+							breaking_futures: false,
+							breaking_closures: false,
+							..s
+						},
+						|this| this.visit_value(&c.0),
+					)?;
+				}
+
 				if let Some(o) = u.output.as_ref() {
 					this.w.write_str(" ")?;
 					this.visit_output(o)?;
 				}
 
-				if let Some(c) = u.cond.as_ref() {
-					this.w.write_str(" WHERE ")?;
-					this.visit_value(&c.0)?;
-				}
 				Ok(())
 			},
 		)
@@ -400,7 +528,7 @@ impl Visitor for MigratorPass<'_> {
 		if let Some(k) = &s.kind {
 			write!(self.w, ":{k}")?;
 		};
-		self.w.write_str("=")?;
+		self.w.write_str(" = ")?;
 		self.visit_value(&s.what)
 	}
 
@@ -437,7 +565,7 @@ impl Visitor for MigratorPass<'_> {
 					if idx != 0 {
 						self.w.write_str(",")?;
 					}
-					self.w.write_str(x)?;
+					write!(self.w, "{}", EscapeKwFreeIdent(x))?;
 				}
 			}
 			None => {}
@@ -448,13 +576,17 @@ impl Visitor for MigratorPass<'_> {
 			self.visit_value(&v.0)?;
 		}
 
-		if let Some(ref v) = s.split {
-			self.w.write_str(" SPLIT ON ")?;
-			for (idx, i) in v.0.iter().enumerate() {
-				if idx != 0 {
-					write!(self.w, ",")?;
+		// Just don't generate the split on when a group by is present
+		// Since it doesn't do anything and having both breaks in 3.0
+		if s.group.is_none() {
+			if let Some(ref v) = s.split {
+				self.w.write_str(" SPLIT ON ")?;
+				for (idx, i) in v.0.iter().enumerate() {
+					if idx != 0 {
+						write!(self.w, ",")?;
+					}
+					self.visit_idiom(i)?;
 				}
-				self.visit_idiom(i)?;
 			}
 		}
 
@@ -479,7 +611,11 @@ impl Visitor for MigratorPass<'_> {
 				}
 				Ordering::Order(order_list) => {
 					self.w.write_str(" ORDER BY ")?;
-					for o in order_list.iter() {
+					for (idx, o) in order_list.iter().enumerate() {
+						if idx != 0 {
+							self.w.write_str(", ")?;
+						}
+
 						self.visit_idiom(&o.value)?;
 						if o.collate {
 							self.w.write_str(" COLLATE")?;
@@ -520,9 +656,6 @@ impl Visitor for MigratorPass<'_> {
 		if let Some(ref v) = s.timeout {
 			write!(self.w, " {v}")?
 		}
-		if s.parallel {
-			self.w.write_str(" PARALLEL")?
-		}
 
 		if let Some(ref v) = s.explain {
 			write!(self.w, " {v}")?
@@ -531,13 +664,14 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_remove(&mut self, r: &RemoveStatement) -> Result<(), Self::Error> {
-		write!(self.w, " {r}")
+		write!(self.w, "{r}")
 	}
 
 	fn visit_relate(&mut self, o: &RelateStatement) -> Result<(), Self::Error> {
 		self.with_state(
 			|s| PassState {
 				breaking_futures: true,
+				breaking_closures: true,
 				..s
 			},
 			|this| {
@@ -545,11 +679,27 @@ impl Visitor for MigratorPass<'_> {
 				if o.only {
 					this.w.write_str(" ONLY ")?;
 				}
+				this.w.write_char('(')?;
 				this.visit_value(&o.from)?;
+				this.w.write_char(')')?;
+
 				this.w.write_str(" -> ")?;
+
+				let escape = !matches!(o.kind, Value::Table(_) | Value::Thing(_));
+				if escape {
+					this.w.write_char('(')?;
+				}
 				this.visit_value(&o.kind)?;
+				if escape {
+					this.w.write_char(')')?;
+				}
+
 				this.w.write_str(" -> ")?;
+
+				this.w.write_char('(')?;
 				this.visit_value(&o.with)?;
+				this.w.write_char(')')?;
+
 				if o.uniq {
 					this.w.write_str(" UNIQUE")?;
 				}
@@ -564,9 +714,6 @@ impl Visitor for MigratorPass<'_> {
 				if let Some(ref v) = o.timeout {
 					write!(this.w, " {v}")?
 				}
-				if o.parallel {
-					this.w.write_str(" PARALLEL")?;
-				}
 
 				Ok(())
 			},
@@ -580,7 +727,7 @@ impl Visitor for MigratorPass<'_> {
 				..s
 			},
 			|this| {
-				this.w.write_str("RELATE ")?;
+				this.w.write_str("RETURN ")?;
 				this.visit_value(&o.what)?;
 				if let Some(ref v) = o.fetch {
 					this.w.write_str(" FETCH ")?;
@@ -591,8 +738,7 @@ impl Visitor for MigratorPass<'_> {
 						this.visit_value(&v.0)?;
 					}
 				}
-
-				o.visit(this)
+				Ok(())
 			},
 		)
 	}
@@ -620,7 +766,7 @@ impl Visitor for MigratorPass<'_> {
 				self.visit_value(&v.0)?;
 			}
 		}
-		l.visit(self)
+		Ok(())
 	}
 
 	fn visit_kill(&mut self, i: &KillStatement) -> Result<(), Self::Error> {
@@ -667,9 +813,6 @@ impl Visitor for MigratorPass<'_> {
 
 				if let Some(ref v) = i.timeout {
 					write!(this.w, " {v}")?
-				}
-				if i.parallel {
-					this.w.write_str(" PARALLEL")?;
 				}
 				Ok(())
 			},
@@ -745,6 +888,7 @@ impl Visitor for MigratorPass<'_> {
 	fn visit_foreach(&mut self, f: &ForeachStatement) -> Result<(), Self::Error> {
 		write!(self.w, "FOR {} IN ", f.param)?;
 		self.visit_value(&f.range)?;
+		self.w.write_char(' ')?;
 		self.visit_block(&f.block)?;
 		Ok(())
 	}
@@ -761,7 +905,7 @@ impl Visitor for MigratorPass<'_> {
 					this.w.write_str("ONLY ")?;
 				}
 				for (idx, v) in d.what.0.iter().enumerate() {
-					if idx == 0 {
+					if idx != 0 {
 						this.w.write_str(",")?;
 					}
 					this.visit_value(v)?;
@@ -776,7 +920,7 @@ impl Visitor for MigratorPass<'_> {
 							if idx != 0 {
 								this.w.write_str(",")?;
 							}
-							this.w.write_str(x)?;
+							write!(this.w, "{}", EscapeKwFreeIdent(x))?;
 						}
 					}
 					None => {}
@@ -794,10 +938,6 @@ impl Visitor for MigratorPass<'_> {
 
 				if let Some(ref v) = d.timeout {
 					write!(this.w, " {v}")?
-				}
-
-				if d.parallel {
-					this.w.write_str(" PARALLEL")?;
 				}
 
 				if let Some(ref v) = d.explain {
@@ -1006,15 +1146,85 @@ impl Visitor for MigratorPass<'_> {
 		if d.overwrite {
 			self.w.write_str(" OVERWRITE")?;
 		}
-		write!(self.w, " {} ON {} FIELDS ", d.name, d.what)?;
-		for (idx, i) in d.cols.0.iter().enumerate() {
-			if idx != 0 {
-				self.w.write_str(", ")?;
+		write!(self.w, " {} ON {}", d.name, d.what)?;
+		if !d.cols.0.is_empty() {
+			self.w.write_str(" FIELDS ")?;
+			for (idx, i) in d.cols.0.iter().enumerate() {
+				if idx != 0 {
+					self.w.write_str(", ")?;
+				}
+				self.with_state(
+					|p| PassState {
+						non_expression_idiom: true,
+						..p
+					},
+					|this| this.visit_idiom(i),
+				)?;
 			}
-			self.visit_idiom(i)?;
 		}
 		if Index::Idx != d.index {
-			write!(self.w, " {}", d.index)?;
+			match &d.index {
+				Index::Search(x) => {
+					let before = self.w.location();
+
+					write!(
+						self.w,
+						" FULLTEXT ANALYZER {} {}",
+						EscapeKwFreeIdent(x.az.0.as_str()),
+						x.sc
+					)?;
+					if x.hl {
+						write!(self.w, " HIGHLIGHTS")?;
+					}
+
+					if x.doc_ids_order != 100
+						|| x.doc_lengths_order != 100
+						|| x.postings_order != 100
+						|| x.terms_order != 100
+						|| x.doc_ids_cache != 100
+						|| x.doc_lengths_cache != 100
+						|| x.terms_cache != 100
+					{
+						let range = before..(self.w.location());
+						self.issues.push(MigrationIssue {
+					    severity: Severity::UnlikelyBreak,
+					    error: "The `SEARCH` index has been renamed to `FULLTEXT` and some of it's parameters have been removed".to_string(),
+					    details: "".to_string(),
+					    kind: IssueKind::SearchIndex,
+					    origin: self.path.clone(),
+					    error_location: Some(Snippet::from_source_location_range(
+						    self.w.flush_source(),
+						    range,
+						    None,
+						    MessageKind::Error,
+					    )),
+					    resolution: None,
+				    });
+					}
+				}
+				Index::MTree(_) => {
+					let before = self.w.location();
+					write!(self.w, " {}", d.index)?;
+					let after = self.w.location();
+					self.issues.push(MigrationIssue {
+						severity: Severity::WillBreak,
+						error: "Found use of deprecated `MTREE` index".to_string(),
+						details: "".to_string(),
+						kind: IssueKind::MTreeIndex,
+						origin: self.path.clone(),
+						error_location: Some(Snippet::from_source_location_range(
+							self.w.flush_source(),
+							before..after,
+							None,
+							MessageKind::Error,
+						)),
+						resolution: None,
+					});
+				}
+				_ => {
+					write!(self.w, " {}", d.index)?;
+				}
+			}
 		}
 		if let Some(ref v) = d.comment {
 			write!(self.w, " COMMENT {v}")?
@@ -1026,97 +1236,136 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_define_field(&mut self, d: &DefineFieldStatement) -> Result<(), Self::Error> {
-		self.with_path(format_args!("tb/{}/field/{}", d.what, d.name), |this| {
-			this.w.write_str("DEFINE FIELD")?;
-			if d.if_not_exists {
-				this.w.write_str(" IF NOT EXISTS")?;
+		fn kind_contains_object(kind: &Kind) -> bool {
+			match kind {
+				Kind::Object => true,
+				Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
+				Kind::Array(inner, _) | Kind::Set(inner, _) => kind_contains_object(inner),
+				Kind::Literal(Literal::Object(_)) => true,
+				Kind::Literal(Literal::Array(x)) => x.iter().any(kind_contains_object),
+				_ => false,
 			}
-			if d.overwrite {
-				this.w.write_str(" OVERWRITE")?;
-			}
-			this.w.write_str(" ")?;
-			this.visit_idiom(&d.name)?;
-			write!(this.w, " ON {}", d.what)?;
-			if d.flex {
-				this.w.write_str(" FLEXIBLE")?
-			}
-			if let Some(ref v) = d.kind {
-				write!(this.w, " TYPE {v}")?
-			}
-			if let Some(ref v) = d.default {
-				this.w.write_str(" DEFAULT")?;
-				if d.default_always {
-					this.w.write_str(" ALWAYS")?
-				}
+		}
 
-				this.visit_value(v)?;
+		self.w.write_str("DEFINE FIELD")?;
+
+		if d.if_not_exists {
+			self.w.write_str(" IF NOT EXISTS")?;
+		}
+
+		if d.overwrite {
+			self.w.write_str(" OVERWRITE")?;
+		}
+
+		self.w.write_str(" ")?;
+		self.with_state(
+			|p| PassState {
+				non_expression_idiom: true,
+				..p
+			},
+			|this| this.visit_idiom(&d.name),
+		)?;
+
+		write!(self.w, " ON {}", d.what)?;
+
+		if let Some(ref v) = d.kind {
+			write!(self.w, " TYPE {v}")?
+		}
+
+		if d.flex {
+			if let Some(k) = &d.kind {
+				if kind_contains_object(k) {
+					self.w.write_str(" FLEXIBLE")?
+				}
 			}
-			if d.readonly {
-				this.w.write_str(" READONLY")?
+		}
+
+		if let Some(ref v) = d.default {
+			self.w.write_str(" DEFAULT ")?;
+			if d.default_always {
+				self.w.write_str(" ALWAYS ")?
 			}
-			if let Some(v) = &d.value {
-				this.with_path("/value", |this| {
-					// handle future -> computed conversion
-					let mut cur = v;
-					loop {
-						match cur {
-							// (<future> { .. }) is just the same as future
-							Value::Subquery(s) => match **s {
-								Subquery::Value(ref x) => cur = x,
-								_ => {
-									this.w.write_str(" VALUE ")?;
-									this.with_state(
-										|old| PassState {
-											breaking_futures: true,
-											..old
-										},
-										|this| this.visit_value(cur),
-									)?;
-									break;
-								}
-							},
-							Value::Future(x) => {
-								this.w.write_str(" COMPUTED ")?;
-								// TODO: Check if recursive futures actually didn't run futures inside
-								// futures.
-								this.with_state(
-									|old| PassState {
-										breaking_futures: true,
-										..old
-									},
-									|this| this.visit_block(&x.0),
-								)?;
-								break;
-							}
-							x => {
-								this.w.write_str(" VALUE ")?;
-								this.with_state(
-									|old| PassState {
-										breaking_futures: true,
-										..old
-									},
-									|this| this.visit_value(x),
-								)?;
-								break;
-							}
+
+			self.with_state(|p| p.with_breaking_storage(), |this| this.visit_value(v))?;
+		}
+
+		if d.readonly {
+			self.w.write_str(" READONLY")?
+		}
+
+		if let Some(v) = &d.value {
+			// handle future -> computed conversion
+			let mut cur = v;
+			loop {
+				match cur {
+					// (<future> { .. }) is just the same as future
+					Value::Subquery(s) => match **s {
+						Subquery::Value(ref x) => cur = x,
+						_ => {
+							self.w.write_str(" VALUE ")?;
+							self.with_state(
+								|old| PassState {
+									breaking_futures: true,
+									..old
+								},
+								|this| this.visit_value(cur),
+							)?;
+							break;
 						}
+					},
+					Value::Future(x) => {
+						self.w.write_str(" COMPUTED ")?;
+						self.with_state(
+							|old| PassState {
+								breaking_futures: false,
+								..old
+							},
+							|this| this.visit_block(&x.0),
+						)?;
+						break;
 					}
-					Ok(())
-				})?;
+					x => {
+						self.w.write_str(" VALUE ")?;
+						self.with_state(
+							|old| PassState {
+								breaking_futures: true,
+								..old
+							},
+							|this| this.visit_value(x),
+						)?;
+						break;
+					}
+				}
 			}
-			if let Some(ref v) = d.assert {
-				this.w.write_str(" ASSERT ")?;
-				this.visit_value(v)?;
-			}
-			if let Some(ref v) = d.reference {
-				this.w.write_str(" REFERENCE ")?;
-				this.visit_reference(v)?;
-			}
-			if let Some(ref v) = d.comment {
-				write!(this.w, " COMMENT {v}")?
-			}
-			this.visit_permissions(&d.permissions)
-		})
+		}
+
+		if let Some(ref v) = d.assert {
+			self.w.write_str(" ASSERT ")?;
+			self.visit_value(v)?;
+		}
+		if let Some(ref v) = d.reference {
+			self.w.write_str(" REFERENCE ")?;
+			self.visit_reference(v)?;
+		}
+		if let Some(ref v) = d.comment {
+			write!(self.w, " COMMENT {v}")?
+		}
+		self.w.write_char(' ')?;
+		self.w.write_str("PERMISSIONS")?;
+
+		if d.permissions.is_none() {
+			self.w.write_str(" NONE")?;
+		} else if d.permissions.is_full() {
+			self.w.write_str(" FULL")?;
+		} else {
+			self.w.write_str(" FOR create ")?;
+			self.visit_permission(&d.permissions.update)?;
+			self.w.write_str(" FOR select ")?;
+			self.visit_permission(&d.permissions.update)?;
+			self.w.write_str(" FOR update ")?;
+			self.visit_permission(&d.permissions.update)?;
+		}
+		Ok(())
 	}
 
 	fn visit_reference(&mut self, d: &Reference) -> Result<(), Self::Error> {
@@ -1141,147 +1390,116 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_define_event(&mut self, d: &DefineEventStatement) -> Result<(), Self::Error> {
-		self.with_path(format_args!("/event/{}", &d.name.0), |this| {
-			this.w.write_str("DEFINE EVENT")?;
-			if d.if_not_exists {
-				this.w.write_str(" IF NOT EXISTS")?;
+		self.w.write_str("DEFINE EVENT")?;
+		if d.if_not_exists {
+			self.w.write_str(" IF NOT EXISTS")?;
+		}
+		if d.overwrite {
+			self.w.write_str(" OVERWRITE")?;
+		}
+		write!(self.w, " {} ON {} WHEN ", d.name, d.what)?;
+		self.visit_value(&d.when)?;
+		self.w.write_str(" THEN ")?;
+		for (idx, v) in d.then.0.iter().enumerate() {
+			if idx != 0 {
+				self.w.write_str(", ")?;
 			}
-			if d.overwrite {
-				this.w.write_str(" OVERWRITE")?;
-			}
-			write!(this.w, " {} ON {} WHEN ", d.name, d.what)?;
-			this.visit_value(&d.when)?;
-			this.w.write_str(" THEN ")?;
-			for (idx, v) in d.then.0.iter().enumerate() {
-				if idx != 0 {
-					this.w.write_str(", ")?;
-				}
-				this.visit_value(v)?;
-			}
-			if let Some(ref v) = d.comment {
-				write!(this.w, " COMMENT {v}")?
-			}
-			Ok(())
-		})
+			self.visit_value(v)?;
+		}
+		if let Some(ref v) = d.comment {
+			write!(self.w, " COMMENT {v}")?
+		}
+		Ok(())
 	}
 
 	fn visit_define_table(&mut self, d: &DefineTableStatement) -> Result<(), Self::Error> {
-		self.with_path(format_args!("/table/{}", &d.name.0), |this| {
-			this.w.write_str("DEFINE TABLE")?;
-			if d.if_not_exists {
-				this.w.write_str(" IF NOT EXISTS")?;
-			}
-			if d.overwrite {
-				this.w.write_str(" OVERWRITE")?;
-			}
-			write!(this.w, " {}", d.name)?;
-			write!(this.w, " TYPE")?;
-			match &d.kind {
-				TableType::Any => {
-					this.w.write_str(" ANY")?;
-				}
-				TableType::Normal => {
-					this.w.write_str(" NORMAL")?;
-				}
-				TableType::Relation(rel) => {
-					this.w.write_str(" RELATION")?;
-					if let Some(Kind::Record(kind)) = &rel.from {
-						this.w.write_str(" IN ")?;
-						for (idx, k) in kind.iter().enumerate() {
-							if idx != 0 {
-								this.w.write_str("|")?;
-							}
-							write!(this.w, "{k}")?;
-						}
-					}
-					if let Some(Kind::Record(kind)) = &rel.to {
-						this.w.write_str(" OUT ")?;
-						for (idx, k) in kind.iter().enumerate() {
-							if idx != 0 {
-								this.w.write_str("|")?;
-							}
-							write!(this.w, "{k}")?;
-						}
-					}
-					if rel.enforced {
-						this.w.write_str(" ENFORCED")?;
-					}
-				}
-			}
+		self.w.write_str("DEFINE TABLE")?;
+		if d.if_not_exists {
+			self.w.write_str(" IF NOT EXISTS")?;
+		}
+		if d.overwrite {
+			self.w.write_str(" OVERWRITE")?;
+		}
+		write!(self.w, " {}", d.name)?;
+		write!(self.w, " TYPE {}", d.kind)?;
 
-			let s = if d.full {
-				" SCHEMAFULL"
-			} else {
-				" SCHEMALESS"
-			};
-			this.w.write_str(s)?;
+		let s = if d.full {
+			" SCHEMAFULL"
+		} else {
+			" SCHEMALESS"
+		};
+		self.w.write_str(s)?;
 
-			if let Some(ref v) = d.comment {
-				write!(this.w, " COMMENT {v}")?
-			}
-			if let Some(ref v) = d.view {
-				this.visit_view(v)?
-			}
-			if let Some(ref v) = d.changefeed {
-				write!(this.w, " {v}")?;
-			}
-			Ok(())
-		})
+		if let Some(ref v) = d.comment {
+			write!(self.w, " COMMENT {v}")?
+		}
+		if let Some(ref v) = d.view {
+			self.w.write_char(' ')?;
+			self.visit_view(v)?
+		}
+		if let Some(ref v) = d.changefeed {
+			write!(self.w, " {v}")?;
+		}
+		Ok(())
 	}
 
 	fn visit_permissions(&mut self, d: &Permissions) -> Result<(), Self::Error> {
-		self.with_path("/permissions", |this| {
-			this.w.write_str("PERMISSIONS")?;
+		self.w.write_str("PERMISSIONS")?;
 
-			if d.is_none() {
-				this.w.write_str(" NONE")?;
-			} else if d.is_full() {
-				this.w.write_str(" FULL")?;
-			} else {
-				this.w.write_str(" FOR create")?;
-				this.with_path("/create", |this| this.visit_permission(&d.create))?;
-				this.w.write_str(" FOR select ")?;
-				this.with_path("/select", |this| this.visit_permission(&d.select))?;
-				this.w.write_str(" FOR update ")?;
-				this.with_path("/update", |this| this.visit_permission(&d.update))?;
-				this.w.write_str(" FOR delete ")?;
-				this.with_path("/delete", |this| this.visit_permission(&d.delete))?;
+		if d.is_none() {
+			self.w.write_str(" NONE")?;
+		} else if d.is_full() {
+			self.w.write_str(" FULL")?;
+		} else {
+			if !matches!(d.create, Permission::Full) {
+				self.w.write_str(" FOR create ")?;
+				self.visit_permission(&d.update)?;
 			}
+			if !matches!(d.select, Permission::Full) {
+				self.w.write_str(" FOR select ")?;
+				self.visit_permission(&d.update)?;
+			}
+			if !matches!(d.update, Permission::Full) {
+				self.w.write_str(" FOR update ")?;
+				self.visit_permission(&d.update)?;
+			}
+			if !matches!(d.delete, Permission::Full) {
+				self.w.write_str(" FOR delete ")?;
+				self.visit_permission(&d.delete)?;
+			}
+		}
 
-			Ok(())
-		})
+		Ok(())
 	}
 
 	fn visit_view(&mut self, v: &View) -> Result<(), Self::Error> {
-		self.with_path("/view", |this| {
-			this.w.write_str("AS SELECT ")?;
-			this.visit_fields(&v.expr)?;
-			this.w.write_str(" FROM ")?;
-			for (idx, t) in v.what.iter().enumerate() {
-				if idx != 0 {
-					this.w.write_str(",")?;
-				}
-				write!(this.w, "{t}")?;
+		self.w.write_str("AS SELECT ")?;
+		self.visit_fields(&v.expr)?;
+		self.w.write_str(" FROM ")?;
+		for (idx, t) in v.what.iter().enumerate() {
+			if idx != 0 {
+				self.w.write_str(",")?;
 			}
-			if let Some(ref v) = v.cond {
-				this.w.write_str(" WHERE ")?;
-				this.visit_value(v)?;
-			}
-			if let Some(ref v) = v.group {
-				if v.0.is_empty() {
-					this.w.write_str(" GROUP ALL")?;
-				} else {
-					this.w.write_str(" GROUP BY ")?;
-					for (idx, i) in v.0.iter().enumerate() {
-						if idx != 0 {
-							write!(this.w, ",")?;
-						}
-						this.visit_idiom(i)?;
+			write!(self.w, "{t}")?;
+		}
+		if let Some(ref v) = v.cond {
+			self.w.write_str(" WHERE ")?;
+			self.visit_value(v)?;
+		}
+		if let Some(ref v) = v.group {
+			if v.0.is_empty() {
+				self.w.write_str(" GROUP ALL")?;
+			} else {
+				self.w.write_str(" GROUP BY ")?;
+				for (idx, i) in v.0.iter().enumerate() {
+					if idx != 0 {
+						write!(self.w, ",")?;
 					}
+					self.visit_idiom(i)?;
 				}
 			}
-			Ok(())
-		})
+		}
+		Ok(())
 	}
 
 	fn visit_define_param(&mut self, d: &DefineParamStatement) -> Result<(), Self::Error> {
@@ -1292,8 +1510,16 @@ impl Visitor for MigratorPass<'_> {
 		if d.overwrite {
 			self.w.write_str(" OVERWRITE")?;
 		}
-		write!(self.w, " ${} VALUE", d.name)?;
-		self.visit_value(&d.value)?;
+		write!(self.w, " ${} VALUE ", d.name)?;
+
+		self.with_state(
+			|s| PassState {
+				breaking_closures: false,
+				breaking_futures: false,
+				..s
+			},
+			|this| this.visit_value(&d.value),
+		)?;
 
 		if let Some(ref v) = d.comment {
 			write!(self.w, " COMMENT {v}")?
@@ -1307,32 +1533,30 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_define_function(&mut self, d: &DefineFunctionStatement) -> Result<(), Self::Error> {
-		self.with_path(format_args!("/fn/{}", d.name.0), |this| {
-			this.w.write_str("DEFINE FUNCTION")?;
-			if d.if_not_exists {
-				this.w.write_str(" IF NOT EXISTS")?;
+		self.w.write_str("DEFINE FUNCTION")?;
+		if d.if_not_exists {
+			self.w.write_str(" IF NOT EXISTS")?;
+		}
+		if d.overwrite {
+			self.w.write_str(" OVERWRITE")?;
+		}
+		write!(self.w, " fn::{}(", EscapePath(&d.name.0))?;
+		for (i, (name, kind)) in d.args.iter().enumerate() {
+			if i != 0 {
+				self.w.write_str(",")?;
 			}
-			if d.overwrite {
-				this.w.write_str(" OVERWRITE")?;
-			}
-			write!(this.w, " fn::{}(", d.name.0)?;
-			for (i, (name, kind)) in d.args.iter().enumerate() {
-				if i != 0 {
-					this.w.write_str(",")?;
-				}
-				write!(this.w, "${name}:{kind}")?;
-			}
-			this.w.write_str(")")?;
-			if let Some(ref v) = d.returns {
-				write!(this.w, "-> {v}")?;
-			}
-			this.visit_block(&d.block)?;
-			if let Some(ref v) = d.comment {
-				write!(this.w, " COMMENT {v}")?
-			}
-			this.w.write_str(" PERMISSIONS ")?;
-			this.visit_permission(&d.permissions)
-		})
+			write!(self.w, "${name}:{kind}")?;
+		}
+		self.w.write_str(")")?;
+		if let Some(ref v) = d.returns {
+			write!(self.w, "-> {v}")?;
+		}
+		self.visit_block(&d.block)?;
+		if let Some(ref v) = d.comment {
+			write!(self.w, " COMMENT {v}")?
+		}
+		self.w.write_str(" PERMISSIONS ")?;
+		self.visit_permission(&d.permissions)
 	}
 
 	fn visit_permission(&mut self, p: &Permission) -> Result<(), Self::Error> {
@@ -1369,12 +1593,24 @@ impl Visitor for MigratorPass<'_> {
 					if idx != 0 {
 						this.w.write_str(",")?;
 					}
-					this.visit_value(v)?;
+					this.with_state(
+						|s| PassState {
+							mock_allowed: true,
+							..s
+						},
+						|this| this.visit_value(v),
+					)?;
 				}
 
 				if let Some(d) = c.data.as_ref() {
 					this.w.write_str(" ")?;
-					this.visit_data(d)?;
+					this.with_state(
+						|s| PassState {
+							breaking_closures: true,
+							..s
+						},
+						|this| this.visit_data(d),
+					)?;
 				}
 				if let Some(o) = c.output.as_ref() {
 					this.w.write_str(" ")?;
@@ -1387,22 +1623,47 @@ impl Visitor for MigratorPass<'_> {
 				if let Some(ref v) = c.timeout {
 					write!(this.w, " {v}")?
 				}
-				if c.parallel {
-					this.w.write_str(" PARALLEL")?;
-				}
 				Ok(())
 			},
 		)
 	}
 
 	fn visit_output(&mut self, o: &Output) -> Result<(), Self::Error> {
+		self.w.write_str("RETURN ")?;
 		match o {
 			Output::None => self.w.write_str("NONE"),
 			Output::Null => self.w.write_str("NULL"),
 			Output::Diff => self.w.write_str("DIFF"),
 			Output::After => self.w.write_str("AFTER"),
 			Output::Before => self.w.write_str("BEFORE"),
-			Output::Fields(fields) => self.visit_fields(fields),
+			Output::Fields(v) => match v.single() {
+				Some(v) => write!(self.w, "VALUE {}", &v),
+				None => {
+					if let Some(Field::Single {
+						expr,
+						alias,
+					}) = v.0.first()
+					{
+						// Avoid conflict between the value NONE with the `Output::None`.
+						if expr.has_left_none_or_null() {
+							self.w.write_char('(')?;
+							self.visit_value(expr)?;
+							self.w.write_char(')')?;
+							if let Some(a) = alias {
+								self.w.write_str(" AS ")?;
+								self.visit_idiom(a)?;
+							}
+
+							for i in &v.0[1..] {
+								self.w.write_str(", ")?;
+								self.visit_field(i)?
+							}
+							return Ok(());
+						}
+					}
+					self.visit_fields(v)
+				}
+			},
 		}
 	}
 
@@ -1416,10 +1677,8 @@ impl Visitor for MigratorPass<'_> {
 						self.w.write_str(", ")?;
 					}
 					self.visit_idiom(&v.0)?;
-					self.w.write_str(" ")?;
-					write!(self.w, "{}", v.1)?;
-					self.w.write_str(" ")?;
-					self.visit_value(&v.2)?;
+					write!(self.w, " {} ", v.1)?;
+					self.with_state(|s| s.with_breaking_storage(), |this| this.visit_value(&v.2))?;
 				}
 			}
 			Data::UnsetExpression(idioms) => {
@@ -1433,25 +1692,27 @@ impl Visitor for MigratorPass<'_> {
 			}
 			Data::PatchExpression(value) => {
 				self.w.write_str("PATCH ")?;
-				self.visit_value(value)?;
+				self.with_state(|s| s.with_breaking_storage(), |this| this.visit_value(value))?;
 			}
 			Data::MergeExpression(value) => {
 				self.w.write_str("MERGE ")?;
-				self.visit_value(value)?;
+				self.with_state(|s| s.with_breaking_storage(), |this| this.visit_value(value))?;
 			}
 			Data::ReplaceExpression(value) => {
 				self.w.write_str("REPLACE ")?;
-				self.visit_value(value)?;
+				self.with_state(|s| s.with_breaking_storage(), |this| this.visit_value(value))?;
 			}
 			Data::ContentExpression(value) => {
 				self.w.write_str("CONTENT ")?;
-				self.visit_value(value)?;
+				self.with_state(|s| s.with_breaking_storage(), |this| this.visit_value(value))?;
 			}
 			Data::SingleExpression(value) => {
 				self.visit_value(value)?;
 			}
 			Data::ValuesExpression(items) => {
-				let first = items.first().unwrap();
+				let Some(first) = items.first() else {
+					return Ok(());
+				};
 				self.w.write_str("(")?;
 				for (idx, i) in first.iter().enumerate() {
 					if idx != 0 {
@@ -1469,7 +1730,10 @@ impl Visitor for MigratorPass<'_> {
 						if idx != 0 {
 							self.w.write_str(",")?;
 						}
-						self.visit_value(&i.1)?;
+						self.with_state(
+							|s| s.with_breaking_storage(),
+							|this| this.visit_value(&i.1),
+						)?;
 					}
 					self.w.write_str(")")?;
 				}
@@ -1481,8 +1745,10 @@ impl Visitor for MigratorPass<'_> {
 						self.w.write_str(",")?;
 					}
 					self.visit_idiom(&v.0)?;
+					self.w.write_char(' ')?;
 					self.visit_operator(&v.1)?;
-					self.visit_value(&v.2)?;
+					self.w.write_char(' ')?;
+					self.with_state(|s| s.with_breaking_storage(), |this| this.visit_value(&v.2))?;
 				}
 			}
 		}
@@ -1490,10 +1756,29 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_analyze_stmt(&mut self, v: &AnalyzeStatement) -> Result<(), Self::Error> {
-		write!(self.w, "{v}")
+		let before = self.w.location();
+		write!(self.w, "{v}")?;
+		let after = self.w.location();
+		self.issues.push(MigrationIssue {
+			severity: Severity::WillBreak,
+			error: "Found use of `ANALYZE` statement which has been removed".to_string(),
+			details: String::new(),
+			kind: IssueKind::AnalyzeStatement,
+			origin: self.path.clone(),
+			error_location: Some(Snippet::from_source_location_range(
+				self.w.flush_source(),
+				before..after,
+				None,
+				MessageKind::Error,
+			)),
+			resolution: None,
+		});
+		Ok(())
 	}
 
 	fn visit_value(&mut self, value: &Value) -> Result<(), Self::Error> {
+		static HEX_CHARS: &[u8; 16] = b"0123456789ABCDEF";
+
 		match value {
 			Value::None => self.w.write_str("NONE"),
 			Value::Null => self.w.write_str("NULL"),
@@ -1509,23 +1794,30 @@ impl Visitor for MigratorPass<'_> {
 			| Value::Duration(_)
 			| Value::Datetime(_)
 			| Value::Uuid(_)
-			| Value::Bytes(_)
 			| Value::Table(_)
 			| Value::Geometry(_)
-			| Value::Param(_)
 			| Value::Regex(_)
 			| Value::Constant(_) => {
 				write!(self.w, "{value}")
 			}
 
+			Value::Bytes(b) => {
+				self.w.write_str("b\"")?;
+				for b in b.0.iter() {
+					self.w.write_char(HEX_CHARS[(b >> 4) as usize] as char)?;
+					self.w.write_char(HEX_CHARS[(b & 0b1111) as usize] as char)?;
+				}
+				self.w.write_char('"')
+			}
+
+			Value::Mock(_) => value.visit(self),
+
 			Value::Array(_)
+			| Value::Param(_)
 			| Value::Object(_)
-			| Value::Thing(_)
 			| Value::Idiom(_)
-			| Value::Mock(_)
 			| Value::Cast(_)
 			| Value::Block(_)
-			| Value::Range(_)
 			| Value::Edges(_)
 			| Value::Future(_)
 			| Value::Function(_)
@@ -1534,40 +1826,117 @@ impl Visitor for MigratorPass<'_> {
 			| Value::Query(_)
 			| Value::Model(_)
 			| Value::Closure(_)
-			| Value::Refs(_) => value.visit(self),
+			| Value::Refs(_) => self.with_state(
+				|s| PassState {
+					mock_allowed: false,
+					..s
+				},
+				|this| value.visit(this),
+			),
+			Value::Thing(thing) => self.with_state(
+				|s| PassState {
+					mock_allowed: false,
+					..s
+				},
+				|this| {
+					if let Id::Range(_) = thing.id {
+						this.w.write_char('(')?;
+						this.visit_thing(thing)?;
+						this.w.write_char(')')
+					} else {
+						this.visit_thing(thing)
+					}
+				},
+			),
+			Value::Range(_) => {
+				self.w.write_char('(')?;
+				self.with_state(
+					|s| PassState {
+						mock_allowed: false,
+						..s
+					},
+					|this| value.visit(this),
+				)?;
+				self.w.write_char(')')
+			}
 		}
 	}
 
-	fn visit_refs(&mut self, r: &Refs) -> Result<(), Self::Error> {
-		for r in r.0.iter() {
-			if let Some(x) = &r.1 {
-				self.visit_idiom(x)?;
-			}
-		}
+	fn visit_refs(&mut self, _: &Refs) -> Result<(), Self::Error> {
+		let before = self.w.location();
+		write!(self.w, "[]")?;
+		let after = self.w.location();
+
+		self.issues.push(MigrationIssue {
+			severity: Severity::WillBreak,
+			error: "Found usage of experimental record references".to_owned(),
+			details: String::new(),
+			kind: IssueKind::RecordReferences,
+			origin: self.path.clone(),
+			error_location: Some(Snippet::from_source_location_range(
+				self.w.flush_source(),
+				before..after,
+				None,
+				MessageKind::Error,
+			)),
+			resolution: None,
+		});
 		Ok(())
 	}
 
 	fn visit_closure(&mut self, c: &Closure) -> Result<(), Self::Error> {
+		let before = self.w.location();
 		self.w.write_str("|")?;
 		for (i, (name, kind)) in c.args.iter().enumerate() {
 			if i > 0 {
 				self.w.write_str(",")?;
 			}
-			write!(self.w, "${name}:")?;
-			match kind {
-				k @ Kind::Either(_) => write!(self.w, "<{}>", k)?,
-				k => write!(self.w, "{}", k)?,
-			}
+			write!(self.w, "${name}: <{kind}>")?;
 		}
 		self.w.write_str("|")?;
 		if let Some(returns) = &c.returns {
 			write!(self.w, " -> {returns}")?;
 		}
-		self.visit_value(&c.body)
+		self.with_state(
+			|s| PassState {
+				breaking_closures: false,
+				breaking_futures: false,
+				..s
+			},
+			|this| {
+				if let Value::Block(_) = c.body {
+					this.visit_value(&c.body)
+				} else {
+					this.w.write_str("( ")?;
+					this.visit_value(&c.body)?;
+					this.w.write_str(" )")
+				}
+			},
+		)?;
+
+		if self.state.breaking_closures {
+			let after = self.w.location();
+			self.issues.push(MigrationIssue {
+				severity: Severity::WillBreak,
+				error: "Found future which can be stored in the datastore".to_owned(),
+				details: String::new(),
+				kind: IssueKind::StoredClosure,
+				origin: self.path.clone(),
+				error_location: Some(Snippet::from_source_location_range(
+					self.w.flush_source(),
+					before..after,
+					None,
+					MessageKind::Error,
+				)),
+				resolution: None,
+			});
+		}
+
+		Ok(())
 	}
 
 	fn visit_model(&mut self, m: &Model) -> Result<(), Self::Error> {
-		write!(self.w, "ml::{}<{}>(", m.name, m.version)?;
+		write!(self.w, "ml::{}<{}>(", EscapePath(m.name.as_str()), m.version)?;
 		for (idx, p) in m.args.iter().enumerate() {
 			if idx != 0 {
 				self.w.write_str(",")?;
@@ -1578,59 +1947,62 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_expression(&mut self, e: &Expression) -> Result<(), Self::Error> {
-		match e {
-			Expression::Unary {
-				o,
-				v,
-			} => {
-				write!(self.w, "{o}(")?;
-				self.visit_value(v)?;
-				self.w.write_str(")")
-			}
-			Expression::Binary {
-				l,
-				o,
-				r,
-			} => match o {
-				Operator::Like => {
-					self.visit_value(r)?;
-					self.w.write_str("(string::similarity::smithwaterman(")?;
-					self.visit_value(l)?;
-					self.w.write_str(",")?;
-					self.visit_value(r)?;
-					self.w.write_str(") > 0)")
+		self.with_state(
+			|s| PassState {
+				breaking_closures: false,
+				breaking_futures: false,
+				..s
+			},
+			|this| match e {
+				Expression::Unary {
+					o,
+					v,
+				} => {
+					write!(this.w, "{o}(")?;
+					this.visit_value(v)?;
+					this.w.write_str(")")
 				}
-				Operator::NotLike => {
-					self.visit_value(r)?;
-					self.w.write_str("(string::similarity::smithwaterman(")?;
-					self.visit_value(l)?;
-					self.w.write_str(",")?;
-					self.visit_value(r)?;
-					self.w.write_str(") == 0)")
-				}
-				Operator::AllLike => {
-					self.w.write_str("(array::all(array::transpose([")?;
-					self.visit_value(l)?;
-					self.w.write_str(",")?;
-					self.visit_value(r)?;
-					self.w.write_str("]),|a,b| string::similarity::smithwaterman(a,b) > 0 )")
-				}
-				Operator::AnyLike => {
-					self.w.write_str("(array::any(array::transpose([")?;
-					self.visit_value(l)?;
-					self.w.write_str(",")?;
-					self.visit_value(r)?;
-					self.w.write_str("]),|a,b| string::similarity::smithwaterman(a,b) > 0 )")
-				}
-				_ => {
-					write!(self.w, "(")?;
-					self.visit_value(l)?;
-					write!(self.w, "{o}")?;
-					self.visit_value(r)?;
-					self.w.write_str(")")
+				Expression::Binary {
+					l,
+					o,
+					r,
+				} => {
+					write!(this.w, "(")?;
+					this.visit_value(l)?;
+					let before = this.w.location();
+					write!(this.w, " {o} ")?;
+					let after = this.w.location();
+					this.visit_value(r)?;
+					this.w.write_str(")")?;
+
+					if let Operator::Like
+					| Operator::NotLike
+					| Operator::AllLike
+					| Operator::AnyLike = o
+					{
+						this.issues.push(MigrationIssue {
+							severity: Severity::WillBreak,
+							error: format!("Found usage of removed `{}` operator", o),
+							details: String::new(),
+							kind: IssueKind::LikeOperator,
+							origin: this.path.clone(),
+							error_location: Some(Snippet::from_source_location_range(
+								this.w.flush_source(),
+								before..after,
+								None,
+								MessageKind::Error,
+							)),
+							resolution: None,
+						})
+					}
+					Ok(())
 				}
 			},
-		}
+		)
+	}
+
+	fn visit_operator(&mut self, o: &Operator) -> Result<(), Self::Error> {
+		write!(self.w, "{o}")
 	}
 
 	fn visit_subquery(&mut self, s: &Subquery) -> Result<(), Self::Error> {
@@ -1642,22 +2014,40 @@ impl Visitor for MigratorPass<'_> {
 	fn visit_function(&mut self, f: &Function) -> Result<(), Self::Error> {
 		match f {
 			Function::Normal(s, e) => {
+				let before = self.w.location();
 				write!(self.w, "{}(", v3_function_name(s))?;
 				for (idx, e) in e.iter().enumerate() {
 					if idx != 0 {
 						self.w.write_str(", ")?;
 					}
-					self.visit_value(e)?;
+					self.with_state(
+						|s| PassState {
+							breaking_futures: false,
+							breaking_closures: false,
+							..s
+						},
+						|this| this.visit_value(e),
+					)?;
 				}
-				self.w.write_char(')')
+				self.w.write_char(')')?;
+				let after = self.w.location();
+				self.check_function(before..after, s, e);
+				Ok(())
 			}
 			Function::Custom(s, e) => {
-				write!(self.w, "fn::{s}(")?;
+				write!(self.w, "fn::{}(", EscapePath(s))?;
 				for (idx, e) in e.iter().enumerate() {
 					if idx != 0 {
 						self.w.write_str(", ")?;
 					}
-					self.visit_value(e)?;
+					self.with_state(
+						|s| PassState {
+							breaking_futures: false,
+							breaking_closures: false,
+							..s
+						},
+						|this| this.visit_value(e),
+					)?;
 				}
 				self.w.write_char(')')
 			}
@@ -1667,20 +2057,36 @@ impl Visitor for MigratorPass<'_> {
 					if idx != 0 {
 						self.w.write_str(", ")?;
 					}
-					self.visit_value(e)?;
+					self.with_state(
+						|s| PassState {
+							breaking_futures: false,
+							breaking_closures: false,
+							..s
+						},
+						|this| this.visit_value(e),
+					)?;
 				}
 				self.w.write_str("){")?;
 				self.w.write_str(s.0.as_str())?;
 				self.w.write_str("}")
 			}
 			Function::Anonymous(p, e, _) => {
+				self.w.write_char('(')?;
 				self.visit_value(p)?;
+				self.w.write_char(')')?;
 				self.w.write_char('(')?;
 				for (idx, e) in e.iter().enumerate() {
 					if idx != 0 {
 						self.w.write_str(",")?;
 					}
-					self.visit_value(e)?;
+					self.with_state(
+						|s| PassState {
+							breaking_futures: false,
+							breaking_closures: false,
+							..s
+						},
+						|this| this.visit_value(e),
+					)?;
 				}
 				self.w.write_char(')')
 			}
@@ -1689,10 +2095,26 @@ impl Visitor for MigratorPass<'_> {
 
 	fn visit_future(&mut self, f: &Future) -> Result<(), Self::Error> {
 		let before = self.w.location();
+
 		if self.state.breaking_futures {
 			self.w.write_str("<future> ")?;
 		}
-		self.visit_block(&f.0)?;
+
+		self.with_state(
+			|s| PassState {
+				breaking_futures: false,
+				..s
+			},
+			|this| {
+				if f.0 .0.len() == 1 {
+					this.w.write_str("( ")?;
+					this.visit_entry(&f.0 .0[0])?;
+					this.w.write_str(" )")
+				} else {
+					this.visit_block(&f.0)
+				}
+			},
+		)?;
 
 		if self.state.breaking_futures {
 			let after = self.w.location();
@@ -1716,28 +2138,54 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_edges(&mut self, e: &Edges) -> Result<(), Self::Error> {
-		e.visit(self)
+		match e.what.len() {
+			0 => {
+				self.visit_thing(&e.from)?;
+				write!(self.w, "{}?", e.dir)
+			}
+			1 => {
+				self.visit_thing(&e.from)?;
+				write!(self.w, "{}", e.dir)?;
+				self.visit_graph_subject(&e.what.0[0])
+			}
+			_ => {
+				self.visit_thing(&e.from)?;
+				write!(self.w, "{}(", e.dir)?;
+				for (idx, s) in e.what.0.iter().enumerate() {
+					if idx != 0 {
+						self.w.write_str(",")?;
+					}
+					self.visit_graph_subject(s)?;
+				}
+				self.w.write_char(')')
+			}
+		}
 	}
 
 	fn visit_range(&mut self, value: &Range) -> Result<(), Self::Error> {
 		match value.beg {
 			Bound::Included(ref x) => {
+				write!(self.w, "(")?;
 				self.visit_value(x)?;
-				write!(self.w, "..")?;
+				write!(self.w, ")..")?;
 			}
 			Bound::Excluded(ref x) => {
+				write!(self.w, "(")?;
 				self.visit_value(x)?;
-				write!(self.w, ">..")?
+				write!(self.w, ")>..")?
 			}
 			Bound::Unbounded => self.w.write_str("..")?,
 		}
 		match value.end {
 			Bound::Included(ref x) => {
-				write!(self.w, "=")?;
+				write!(self.w, "=(")?;
 				self.visit_value(x)?;
+				write!(self.w, ")")?;
 			}
 			Bound::Excluded(ref x) => {
+				write!(self.w, "(")?;
 				self.visit_value(x)?;
+				write!(self.w, ")")?;
 			}
 			Bound::Unbounded => {}
 		}
@@ -1746,13 +2194,46 @@ impl Visitor for MigratorPass<'_> {
 
 	fn visit_block(&mut self, value: &Block) -> Result<(), Self::Error> {
 		self.w.write_str("{")?;
-		value.visit(self)?;
+		for (idx, e) in value.0.iter().enumerate() {
+			let mut escape = false;
+			if idx == 0 {
+				if let Entry::Value(Value::Edges(_)) | Entry::Value(Value::Thing(_)) = e {
+					escape = true;
+				}
+			}
+			if escape {
+				self.w.write_char('(')?;
+			}
+
+			if idx != value.0.len() - 1 {
+				self.with_state(
+					|s| PassState {
+						breaking_futures: false,
+						breaking_closures: false,
+						..s
+					},
+					|this| this.visit_entry(e),
+				)?;
+			} else {
+				self.visit_entry(e)?;
+			}
+
+			if escape {
+				self.w.write_char(')')?;
+			}
+			if idx != value.0.len() - 1 {
+				self.w.write_str("; ")?;
+			}
+		}
 		self.w.write_str("}")
 	}
 
 	fn visit_entry(&mut self, entry: &Entry) -> Result<(), Self::Error> {
-		entry.visit(self)?;
-		self.w.write_str(";")
+		match entry {
+			Entry::Break(_) => self.w.write_str("BREAK"),
+			Entry::Continue(_) => self.w.write_str("CONTINUE"),
+			entry => entry.visit(self),
+		}
 	}
 
 	fn visit_cast(&mut self, value: &Cast) -> Result<(), Self::Error> {
@@ -1761,14 +2242,37 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_mock(&mut self, m: &Mock) -> Result<(), Self::Error> {
+		let before = self.w.location();
 		match m {
 			Mock::Count(t, c) => {
-				write!(self.w, "|{}:{}|", EscapeIdent(t), c)
+				write!(self.w, "|{}:{}|", EscapeIdent(t), c)?;
 			}
 			Mock::Range(t, from, to) => {
-				write!(self.w, "|{}:{}..={}|", EscapeIdent(t), from, to)
+				write!(self.w, "|{}:{}..={}|", EscapeIdent(t), from, to)?;
 			}
 		}
+
+		if !self.state.mock_allowed {
+			let after = self.w.location();
+
+			self.issues.push(MigrationIssue {
+				severity: Severity::UnlikelyBreak,
+				error: "Found usage of mock value outside of CREATE or SELECT statement"
+					.to_string(),
+				details: String::new(),
+				kind: IssueKind::MockValue,
+				origin: self.path.clone(),
+				error_location: Some(Snippet::from_source_location_range(
+					self.w.flush_source(),
+					before..after,
+					None,
+					MessageKind::Error,
+				)),
+				resolution: None,
+			})
+		}
+
+		Ok(())
 	}
 
 	fn visit_number(&mut self, n: &Number) -> Result<(), Self::Error> {
@@ -1787,24 +2291,49 @@ impl Visitor for MigratorPass<'_> {
 			}
 			self.visit_value(v)?;
 		}
+		self.w.write_str("]")?;
 		Ok(())
 	}
 
 	fn visit_object(&mut self, obj: &Object) -> Result<(), Self::Error> {
 		self.w.write_str("{")?;
-		for (idx, (k, v)) in obj.0.iter().enumerate() {
+		let skip = self.state.skip_relation_field;
+		for (idx, (k, v)) in obj.0.iter().filter(|(k, _)| !skip || *k != "__").enumerate() {
 			if idx != 0 {
 				self.w.write_str(",")?;
 			}
 			write!(self.w, "{}:", EscapeKey(k.as_str()))?;
-			self.visit_value(v)?;
+			self.with_state(
+				|p| PassState {
+					skip_relation_field: false,
+					..p
+				},
+				|this| this.visit_value(v),
+			)?;
 		}
+		self.w.write_str("}")?;
 		Ok(())
 	}
 
 	fn visit_thing(&mut self, t: &Thing) -> Result<(), Self::Error> {
+		if let Id::Range(_) = t.id {
+			self.w.write_char('(')?;
+		}
 		write!(self.w, "{}:", EscapeIdent(t.tb.as_str()))?;
-		t.visit(self)
+		t.visit(self)?;
+		if let Id::Range(_) = t.id {
+			self.w.write_char(')')?;
+		}
+		Ok(())
+	}
+
+	fn visit_id(&mut self, id: &crate::sql::Id) -> Result<(), Self::Error> {
+		match id {
+			Id::Array(array) => self.visit_array(array),
+			Id::Object(object) => self.visit_object(object),
+			Id::Range(id_range) => self.visit_id_range(id_range),
+			x => write!(self.w, "{x}"),
+		}
 	}
 
 	fn visit_id_range(&mut self, id_range: &IdRange) -> Result<(), Self::Error> {
@@ -1833,28 +2362,106 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_param(&mut self, p: &Param) -> Result<(), Self::Error> {
-		write!(self.w, "{p}")
+		write!(self.w, "{p}")?;
+		Ok(())
 	}
 
 	fn visit_idiom(&mut self, idiom: &Idiom) -> Result<(), Self::Error> {
-		match idiom.0.first().unwrap() {
-			Part::Start(value) => {
+		let mut last_field = None;
+		let parts = match idiom.0.first() {
+			Some(Part::Start(value)) => {
 				self.w.write_str("(")?;
-				self.visit_value(value)?;
+				self.with_state(
+					|s| PassState {
+						non_expression_idiom: false,
+						..s
+					},
+					|this| this.visit_value(value),
+				)?;
 				self.w.write_str(")")?;
-				for p in idiom.0[1..].iter() {
-					self.visit_part(p)?;
-				}
+				&idiom.0[1..]
 			}
-			Part::Field(value) => {
+			Some(Part::Field(value)) => {
+				let loc = self.w.location();
+				last_field = Some(loc);
 				write!(self.w, "{}", value)?;
-				for p in idiom.0[1..].iter() {
-					self.visit_part(p)?;
+
+				if value.as_str() == "id" && idiom.0.len() > 1 && !self.state.non_expression_idiom {
+					let after = self.w.location();
+					self.issues.push(MigrationIssue {
+						severity: Severity::CanBreak,
+						error:
+							"Found usage of an `.id` idiom, this field had special behavior for record-ids in 2.0 which has been removed in 3.0"
+							.to_string(),
+							details: String::new(),
+							kind: IssueKind::IdField,
+							origin: self.path.clone(),
+							error_location: Some(Snippet::from_source_location_range(
+									self.w.flush_source(),
+									loc..after,
+									None,
+									MessageKind::Error,
+							)),
+							resolution: None,
+					})
+				}
+
+				&idiom.0[1..]
+			}
+			_ => idiom.0.as_slice(),
+		};
+		for (idx, p) in parts.iter().enumerate() {
+			let prev_field = last_field;
+			let loc = self.w.location();
+			if matches!(p, Part::Field(_)) {
+				last_field = Some(loc);
+			} else {
+				last_field = None
+			}
+
+			self.visit_part(p)?;
+
+			if let Part::Field(x) = p {
+				if x.as_str() == "id" && parts.len() > idx + 1 && !self.state.non_expression_idiom {
+					let after = self.w.location();
+					self.issues.push(MigrationIssue {
+						severity: Severity::CanBreak,
+						error:
+							"Found usage of an `.id` idiom, this field had special behavior for record-ids in 2.0 which has been removed in 3.0"
+							.to_string(),
+							details: String::new(),
+							kind: IssueKind::IdField,
+							origin: self.path.clone(),
+							error_location: Some(Snippet::from_source_location_range(
+									self.w.flush_source(),
+									loc..after,
+									None,
+									MessageKind::Error,
+							)),
+							resolution: None,
+					})
 				}
 			}
-			_ => {
-				for p in idiom.0.iter() {
-					self.visit_part(p)?;
+
+			if let Some(field) = prev_field {
+				if last_field.is_none() && !self.state.non_expression_idiom {
+					let after = self.w.location();
+					self.issues.push(MigrationIssue {
+						severity: Severity::CanBreak,
+						error:
+							"Found usage of an idiom with a field followed by another idiom part"
+								.to_string(),
+						details: String::new(),
+						kind: IssueKind::FieldIdiomFollowed,
+						origin: self.path.clone(),
+						error_location: Some(Snippet::from_source_location_range(
+							self.w.flush_source(),
+							field..after,
+							None,
+							MessageKind::Error,
+						)),
+						resolution: None,
+					})
 				}
 			}
 		}
@@ -1864,32 +2471,80 @@ impl Visitor for MigratorPass<'_> {
 	fn visit_part(&mut self, part: &Part) -> Result<(), Self::Error> {
 		match part {
 			Part::All => {
-				// NOTE: Possibly use `[*]` for old behavior in 3.0 and export as that instead.
-				self.w.write_str(".*")?
+				let before = self.w.location();
+				self.w.write_str(".*")?;
+				if !self.state.non_expression_idiom {
+					let after = self.w.location();
+					self.issues.push(MigrationIssue {
+						severity: Severity::CanBreak,
+						error: "Found usage of all idiom `.*` behavior of which has changed when used on an array or object".to_string(),
+						details: String::new(),
+						kind: IssueKind::AllIdiom,
+						origin: self.path.clone(),
+						error_location: Some(Snippet::from_source_location_range(
+								self.w.flush_source(),
+								before..after,
+								None,
+								MessageKind::Error,
+						)),
+						resolution: None,
+					})
+				}
 			}
 			Part::Where(value) => {
 				self.w.write_str("[? ")?;
-				self.visit_value(value)?;
+				self.with_state(
+					|s| PassState {
+						non_expression_idiom: false,
+						breaking_futures: false,
+						breaking_closures: false,
+						..s
+					},
+					|this| this.visit_value(value),
+				)?;
 				self.w.write_str("]")?;
 			}
 			Part::Graph(graph) => self.visit_graph(graph)?,
 			Part::Value(value) => {
 				self.w.write_str("[")?;
-				self.visit_value(value)?;
+				self.with_state(
+					|s| PassState {
+						non_expression_idiom: false,
+						breaking_futures: false,
+						breaking_closures: false,
+						..s
+					},
+					|this| this.visit_value(value),
+				)?;
 				self.w.write_str("]")?;
 			}
 			Part::Start(value) => {
 				// Shouldn't happen.
-				self.visit_value(value)?
+				self.with_state(
+					|s| PassState {
+						non_expression_idiom: false,
+						..s
+					},
+					|this| this.visit_value(value),
+				)?;
 			}
 			Part::Method(name, values) => {
-				write!(self.w, ".{name}(")?;
+				write!(self.w, ".{}(", EscapeKwFreeIdent(name))?;
 				for (idx, v) in values.iter().enumerate() {
-					if idx == 0 {
+					if idx != 0 {
 						self.w.write_str(",")?;
 					}
-					self.visit_value(v)?;
+					self.with_state(
+						|s| PassState {
+							non_expression_idiom: false,
+							breaking_futures: false,
+							breaking_closures: false,
+							..s
+						},
+						|this| this.visit_value(v),
+					)?;
 				}
+				self.w.write_char(')')?;
 			}
 			Part::Last
 			| Part::First
@@ -1897,9 +2552,11 @@ impl Visitor for MigratorPass<'_> {
 			| Part::Field(_)
 			| Part::Index(_)
 			| Part::Doc
-			| Part::RepeatRecurse
-			| Part::Optional => {
+			| Part::RepeatRecurse => {
 				write!(self.w, "{part}")?;
+			}
+			Part::Optional => {
+				write!(self.w, ".?")?;
 			}
 			Part::Destructure(s) => {
 				self.w.write_str(".{")?;
@@ -1921,7 +2578,9 @@ impl Visitor for MigratorPass<'_> {
 
 				if let Some(i) = idiom {
 					self.w.write_str("(")?;
-					self.visit_idiom(i)?;
+					for p in i.0.iter() {
+						self.visit_part(p)?;
+					}
 					self.w.write_str(")")?;
 				}
 			}
@@ -1976,43 +2635,48 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_graph(&mut self, graph: &Graph) -> Result<(), Self::Error> {
-		if graph.what.0.len() <= 1 && graph.cond.is_none() && graph.alias.is_none() {
+		if graph.what.0.is_empty() {
+			write!(self.w, "{}?", graph.dir)?;
+		} else if graph.what.0.len() == 1
+			&& graph.cond.is_none()
+			&& graph.alias.is_none()
+			&& graph.split.is_none()
+			&& graph.order.is_none()
+			&& graph.limit.is_none()
+			&& graph.start.is_none()
+			&& graph.expr.is_none()
+			&& !matches!(graph.what.0[0], GraphSubject::Range(..))
+		{
 			write!(self.w, "{}", graph.dir)?;
-			match graph.what.len() {
-				0 => self.w.write_char('?')?,
-				_ => {
-					for (idx, s) in graph.what.0.iter().enumerate() {
-						if idx != 0 {
-							self.w.write_str(",")?;
-						}
-						self.visit_graph_subject(s)?;
-					}
-				}
-			}
+			self.visit_graph_subject(&graph.what.0[0])?;
 		} else {
 			write!(self.w, "{}(", graph.dir)?;
-			match graph.what.len() {
-				0 => self.w.write_char('?')?,
-				_ => {
-					for (idx, s) in graph.what.0.iter().enumerate() {
-						if idx != 0 {
-							self.w.write_str(",")?;
-						}
-						self.visit_graph_subject(s)?;
-					}
+			if let Some(expr) = &graph.expr {
+				self.w.write_str("SELECT ")?;
+				self.visit_fields(expr)?;
+				self.w.write_str(" FROM ")?;
+			}
+
+			for (idx, s) in graph.what.0.iter().enumerate() {
+				if idx != 0 {
+					self.w.write_str(",")?;
 				}
-			};
+				self.visit_graph_subject(s)?;
+			}
+
 			if let Some(ref v) = graph.cond {
-				self.w.write_str("WHERE ")?;
+				self.w.write_str(" WHERE ")?;
 				self.visit_value(&v.0)?;
 			}
-			if let Some(ref v) = graph.split {
-				self.w.write_str(" SPLIT ON ")?;
-				for (idx, i) in v.0.iter().enumerate() {
-					if idx != 0 {
-						write!(self.w, ",")?;
+			if graph.group.is_none() {
+				if let Some(ref v) = graph.split {
+					self.w.write_str(" SPLIT ON ")?;
+					for (idx, i) in v.0.iter().enumerate() {
+						if idx != 0 {
+							write!(self.w, ",")?;
+						}
+						self.visit_idiom(i)?;
 					}
-					self.visit_idiom(i)?;
 				}
 			}
 			if let Some(ref v) = graph.group {
@@ -2035,7 +2699,10 @@ impl Visitor for MigratorPass<'_> {
 					}
 					Ordering::Order(order_list) => {
 						self.w.write_str(" ORDER BY ")?;
-						for o in order_list.iter() {
+						for (idx, o) in order_list.iter().enumerate() {
+							if idx != 0 {
+								self.w.write_str(", ")?;
+							}
 							self.visit_idiom(&o.value)?;
 							if o.collate {
 								self.w.write_str(" COLLATE")?;
@@ -2068,18 +2735,28 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_fields(&mut self, fields: &Fields) -> Result<(), Self::Error> {
-		if let Some(v) = fields.single() {
-			write!(self.w, "VALUE ")?;
-			self.visit_field(v)?;
-		} else {
-			for (idx, f) in fields.0.iter().enumerate() {
-				if idx != 0 {
-					self.w.write_str(",")?;
+		self.with_state(
+			|s| PassState {
+				breaking_futures: false,
+				breaking_closures: false,
+				..s
+			},
+			|this| {
+				if let Some(v) = fields.single() {
+					write!(this.w, "VALUE ")?;
+					this.visit_field(v)?;
+				} else {
+					for (idx, f) in fields.0.iter().enumerate() {
+						if idx != 0 {
+							this.w.write_str(",")?;
+						}
+						this.visit_field(f)?;
+					}
 				}
-				self.visit_field(f)?;
-			}
-		}
-		Ok(())
+
+				Ok(())
+			},
+		)
 	}
 
 	fn visit_field(&mut self, field: &Field) -> Result<(), Self::Error> {
@@ -2091,10 +2768,33 @@ impl Visitor for MigratorPass<'_> {
 				expr,
 				alias,
 			} => {
-				self.visit_value(expr)?;
+				self.with_state(
+					|s| PassState {
+						mock_allowed: false,
+						..s
+					},
+					|this| this.visit_value(expr),
+				)?;
 				if let Some(alias) = alias {
 					self.w.write_str(" AS ")?;
-					self.visit_idiom(alias)?;
+					for (idx, p) in alias.0.iter().enumerate() {
+						match p {
+							Part::Field(ident) => {
+								if idx != 0 {
+									self.w.write_char('.')?;
+								}
+								write!(self.w, "{ident}")?;
+							}
+							Part::All | Part::Last | Part::Index(_) => self.visit_part(p)?,
+							x => {
+								if idx != 0 {
+									self.w.write_char('.')?;
+								}
+								let part = x.to_string();
+								write!(self.w, "{}", EscapeKwFreeIdent(&part))?;
+							}
+						}
+					}
 				}
 			}
 		}

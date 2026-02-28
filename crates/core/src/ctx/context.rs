@@ -308,7 +308,7 @@ impl MutableContext {
 		self.transaction = Some(txn);
 	}
 
-	pub(crate) fn tx(&self) -> Arc<Transaction> {
+	pub fn tx(&self) -> Arc<Transaction> {
 		self.transaction
 			.clone()
 			.unwrap_or_else(|| unreachable!("The context was not associated with a transaction"))

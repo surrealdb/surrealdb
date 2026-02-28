@@ -21,6 +21,10 @@ impl Document {
 		}
 		// Get the record id
 		let rid = self.id()?;
+		// Ensure that no illegal closures will be stored on the record
+		if self.current.doc.as_ref().contains_illegal_closures(ctx) {
+			return Err(Error::IllegalClosures(rid.to_string()));
+		}
 		// Get NS & DB
 		let (ns, db) = opt.ns_db()?;
 		// Store the record data

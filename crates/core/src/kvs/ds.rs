@@ -103,6 +103,22 @@ pub(super) struct TransactionFactory {
 	flavor: Arc<DatastoreFlavor>,
 }
 
+/// Represents a collection of metrics for a specific datastore flavor.
+pub struct Metrics {
+	/// The name of the metrics group (e.g., "surrealdb.rocksdb").
+	pub name: &'static str,
+	/// A list of u64-based metrics.
+	pub u64_metrics: Vec<Metric>,
+}
+
+/// Represents a single metric with a name and description.
+pub struct Metric {
+	/// The name of the metric.
+	pub name: &'static str,
+	/// A human-readable description of the metric.
+	pub description: &'static str,
+}
+
 impl TransactionFactory {
 	pub(super) fn new(clock: Arc<SizedClock>, flavor: DatastoreFlavor) -> Self {
 		Self {
@@ -172,6 +188,7 @@ impl TransactionFactory {
 		};
 		Ok(Transaction::new(
 			local,
+			write,
 			Transactor {
 				inner,
 				stash: super::stash::Stash::default(),
@@ -435,6 +452,26 @@ impl Datastore {
 		})
 	}
 
+	/// Registers metrics for the current datastore flavor if supported.
+	pub fn register_metrics(&self) -> Option<Metrics> {
+		match self.transaction_factory.flavor.as_ref() {
+			#[cfg(feature = "kv-rocksdb")]
+			DatastoreFlavor::RocksDB(v) => Some(v.register_metrics()),
+			#[allow(unreachable_patterns)]
+			_ => None,
+		}
+	}
+
+	/// Collects a specific u64 metric by name if supported by the datastore flavor.
+	pub fn collect_u64_metric(&self, _metric: &str) -> Option<u64> {
+		match self.transaction_factory.flavor.as_ref() {
+			#[cfg(feature = "kv-rocksdb")]
+			DatastoreFlavor::RocksDB(v) => v.collect_u64_metric(_metric),
+			#[allow(unreachable_patterns)]
+			_ => None,
+		}
+	}
+
 	/// Create a new datastore with the same persistent data (inner), with flushed cache.
 	/// Simulating a server restart
 	#[allow(dead_code)]
@@ -690,6 +727,35 @@ impl Datastore {
 		self.expire_nodes().await?;
 		// Remove archived nodes
 		self.remove_nodes().await?;
+		// Restart deferred indexes
+		self.restart_deferred_indexes().await?;
+		// Everything ok
+		Ok(())
+	}
+
+	/// Restart deferred indexes after database startup
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn restart_deferred_indexes(&self) -> Result<(), Error> {
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Restarting deferred indexes");
+		let tx = Arc::new(self.transaction(Read, Optimistic).await?);
+		let mut ctx = self.setup_ctx()?;
+		ctx.set_transaction(tx.clone());
+		let ctx = ctx.freeze();
+		let sess = Session::owner();
+		for ns in tx.all_ns().await?.iter() {
+			for db in tx.all_db(&ns.name).await?.iter() {
+				let opt = self
+					.setup_options(&sess)
+					.with_ns(Some(Arc::from(ns.name.as_str())))
+					.with_db(Some(Arc::from(db.name.as_str())));
+				for tb in tx.all_tb(&ns.name, &db.name, None).await?.iter() {
+					for ix in tx.all_tb_indexes(&ns.name, &db.name, &tb.name).await?.iter() {
+						self.index_builder.restart_deferred_index(&ctx, &opt, &tb.name, ix).await?;
+					}
+				}
+			}
+		}
 		// Everything ok
 		Ok(())
 	}
@@ -1322,12 +1388,35 @@ impl Datastore {
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
 		let txn = self.transaction(Read, Optimistic).await?;
+
 		// Return an async export job
 		Ok(async move {
 			// Process the export
-			txn.export(&ns, &db, cfg, chn).await?;
-			// Everything ok
-			Ok(())
+			if cfg.v3 {
+				let mut buffer = Vec::new();
+				crate::kvs::export::export_v3(&txn, &cfg, chn, &ns, &db, &mut buffer).await?;
+				for b in buffer {
+					if let Some(loc) = b.error_location {
+						warn!(
+							issue = b.kind.as_str(),
+							severity = b.severity.as_str(),
+							"Export for version 3 encountered issue: {}\n{}",
+							b.error,
+							loc
+						);
+					} else {
+						warn!(
+							issue = b.kind.as_str(),
+							severity = b.severity.as_str(),
+							"Export for version 3 encountered issue: {}",
+							b.error
+						);
+					}
+				}
+			} else {
+				txn.export(&ns, &db, cfg, chn).await?;
+			}
+			txn.cancel().await
 		})
 	}
 

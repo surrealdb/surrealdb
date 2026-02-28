@@ -11,6 +11,7 @@ use tracing::Subscriber;
 use tracing_subscriber::Layer;
 
 // Returns a tracer provider based on the SURREAL_TELEMETRY_PROVIDER environment variable
+#[allow(clippy::result_large_err)]
 pub fn new<S>(filter: CustomFilter) -> Result<Option<Box<dyn Layer<S> + Send + Sync>>, Error>
 where
 	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,

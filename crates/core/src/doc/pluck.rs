@@ -191,8 +191,9 @@ impl Document {
 							Permission::Full => (),
 							Permission::None => out.del(stk, ctx, opt, k).await?,
 							Permission::Specific(e) => {
-								// Disable permissions
-								let opt = &opt.new_with_perms(false);
+								// Disable permissions & Limit auth
+								let mut opt = opt.new_with_perms(false);
+								opt.auth = Arc::new(opt.auth.as_ref().new_limited(&fd.auth_limit));
 								// Get the current value
 								let val = Arc::new(self.current.doc.as_ref().pick(k));
 								// Configure the context
@@ -201,7 +202,7 @@ impl Document {
 								let ctx = ctx.freeze();
 								// Process the PERMISSION clause
 								if !e
-									.compute(stk, &ctx, opt, Some(&self.current))
+									.compute(stk, &ctx, &opt, Some(&self.current))
 									.await?
 									.is_truthy()
 								{

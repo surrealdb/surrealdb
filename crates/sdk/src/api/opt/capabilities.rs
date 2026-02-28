@@ -180,6 +180,13 @@ impl Capabilities {
 		}
 	}
 
+	/// Set whether to allow insecurely storing closures on database records.
+	pub fn with_insecure_storable_closures(self, enabled: bool) -> Self {
+		Self {
+			cap: self.cap.with_insecure_storable_closures(enabled),
+		}
+	}
+
 	/// Set the allow list to allow all functions
 	pub fn allow_all_functions(&mut self) -> &mut Self {
 		*self.cap.allowed_functions_mut() = Targets::All;

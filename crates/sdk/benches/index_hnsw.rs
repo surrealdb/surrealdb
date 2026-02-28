@@ -4,8 +4,10 @@ use flate2::read::GzDecoder;
 use reblessive::TreeStack;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::sync::Arc;
 use std::time::Duration;
 use surrealdb::sql::index::Distance;
+use surrealdb_core::ctx::MutableContext;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::idx::planner::checker::{HnswChecker, HnswConditionChecker};
 use surrealdb_core::idx::trees::hnsw::index::HnswIndex;
@@ -222,10 +224,11 @@ async fn insert_objects(samples: &[(Thing, Vec<Value>)]) -> (Datastore, HnswInde
 	let ds = Datastore::new("memory").await.unwrap();
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let mut h = hnsw(&tx).await;
+	let ctx = Arc::new(MutableContext::from(tx));
 	for (thg, content) in samples {
-		h.index_document(&tx, &thg.id, content).await.unwrap();
+		h.index_document(&ctx, &thg.id, content).await.unwrap();
 	}
-	tx.commit().await.unwrap();
+	ctx.tx().commit().await.unwrap();
 	(ds, h)
 }
 

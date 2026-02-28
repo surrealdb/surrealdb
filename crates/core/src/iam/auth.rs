@@ -1,4 +1,7 @@
-use crate::sql::statements::{DefineAccessStatement, DefineUserStatement};
+use crate::{
+	iam::AuthLimit,
+	sql::statements::{DefineAccessStatement, DefineUserStatement},
+};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -111,6 +114,14 @@ impl Auth {
 	/// Checks if the current actor has a Viewer role
 	pub fn has_viewer_role(&self) -> bool {
 		self.actor.has_viewer_role()
+	}
+
+	pub fn new_limited(&self, limit: &AuthLimit) -> Self {
+		Self::new(self.actor.new_limited(limit))
+	}
+
+	pub fn max_role(&self) -> Option<Role> {
+		self.actor.max_role()
 	}
 }
 

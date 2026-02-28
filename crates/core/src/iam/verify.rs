@@ -1096,10 +1096,10 @@ mod tests {
 			TestCase {
 				title: "with ids including special characters",
 				ids: vec![
-					"user:⟨user.name⟩",
-					"user:⟨user.name1⟩",
-					"user:⟨user.name10⟩",
-					"user:⟨user.name100⟩",
+					"user:`user.name`",
+					"user:`user.name1`",
+					"user:`user.name10`",
+					"user:`user.name100`",
 				],
 				roles: None,
 				key: "secret",
@@ -1107,7 +1107,7 @@ mod tests {
 			},
 			TestCase {
 				title: "with UUID ids",
-				ids: vec!["user:⟨83149446-95f5-4c0d-9f42-136e7b272456⟩"],
+				ids: vec!["user:`83149446-95f5-4c0d-9f42-136e7b272456`"],
 				roles: None,
 				key: "secret",
 				expect_error: false,

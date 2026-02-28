@@ -2,7 +2,7 @@ use crate::api::method::Method;
 use crate::api::path::Path;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::sql::fmt::{pretty_indent, Fmt};
 use crate::sql::{Base, Object, Value};
 use crate::{ctx::Context, sql::statements::info::InfoStructure};
@@ -63,6 +63,7 @@ impl DefineApiStatement {
 			actions: self.actions.clone(),
 			fallback: self.fallback.clone(),
 			config: self.config.clone(),
+			auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()),
 			..Default::default()
 		};
 		txn.set(key, revision::to_vec(&ap)?, None).await?;
@@ -120,7 +121,7 @@ impl InfoStructure for DefineApiStatement {
 	}
 }
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[non_exhaustive]
 pub struct ApiDefinition {
@@ -129,6 +130,14 @@ pub struct ApiDefinition {
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Value>,
 	pub config: Option<ApiConfig>,
+	#[revision(start = 2, default_fn = "existing_auth_limit")]
+	pub auth_limit: AuthLimit,
+}
+
+impl ApiDefinition {
+	fn existing_auth_limit(_revision: u16) -> Result<AuthLimit, revision::Error> {
+		Ok(AuthLimit::new_no_limit())
+	}
 }
 
 impl From<ApiDefinition> for DefineApiStatement {

@@ -28,7 +28,10 @@ impl fmt::Display for Ordering {
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct OrderList(pub Vec<Order>);
+pub struct OrderList(
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+	pub  Vec<Order>,
+);
 
 impl Deref for OrderList {
 	type Target = Vec<Order>;
@@ -69,6 +72,7 @@ impl OrderList {
 #[non_exhaustive]
 pub struct Order {
 	/// The value to order by
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::basic_idiom))]
 	pub value: Idiom,
 	pub collate: bool,
 	pub numeric: bool,

@@ -381,6 +381,7 @@ trait OnceLockExt {
 		}
 	}
 
+	#[allow(clippy::result_large_err)]
 	fn extract(&self) -> Result<&Router>;
 }
 

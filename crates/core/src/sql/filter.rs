@@ -1,3 +1,4 @@
+use crate::sql::escape::QuoteStr;
 use crate::sql::language::Language;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -27,7 +28,7 @@ impl Display for Filter {
 			Self::Ngram(min, max) => write!(f, "NGRAM({min},{max})"),
 			Self::Snowball(lang) => write!(f, "SNOWBALL({lang})"),
 			Self::Uppercase => f.write_str("UPPERCASE"),
-			Self::Mapper(path) => write!(f, "MAPPER({path})"),
+			Self::Mapper(path) => write!(f, "MAPPER({})", QuoteStr(path)),
 		}
 	}
 }

@@ -50,6 +50,7 @@ pub enum RemoveStatement {
 	Field(RemoveFieldStatement),
 	Index(RemoveIndexStatement),
 	User(RemoveUserStatement),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Model(RemoveModelStatement),
 }
 

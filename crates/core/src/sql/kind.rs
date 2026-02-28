@@ -34,14 +34,24 @@ pub enum Kind {
 	#[revision(start = 2)]
 	Regex,
 	Record(Vec<Table>),
-	Geometry(Vec<String>),
-	Option(Box<Kind>),
-	Either(Vec<Kind>),
+	Geometry(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::geometry_kind))]
+		Vec<String>,
+	),
+	Option(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::option_kind))]
+		Box<Kind>,
+	),
+	Either(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::either_kind))]
+		Vec<Kind>,
+	),
 	Set(Box<Kind>, Option<u64>),
 	Array(Box<Kind>, Option<u64>),
 	Function(Option<Vec<Kind>>, Option<Box<Kind>>),
 	Range,
 	Literal(Literal),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	References(Option<Table>, Option<Idiom>),
 }
 
@@ -257,7 +267,7 @@ impl Display for Kind {
 			Kind::Int => f.write_str("int"),
 			Kind::Number => f.write_str("number"),
 			Kind::Object => f.write_str("object"),
-			Kind::Point => f.write_str("point"),
+			Kind::Point => f.write_str("geometry<point>"),
 			Kind::String => f.write_str("string"),
 			Kind::Uuid => f.write_str("uuid"),
 			Kind::Regex => f.write_str("regex"),
@@ -309,7 +319,11 @@ pub enum Literal {
 	Duration(Duration),
 	Array(Vec<Kind>),
 	Object(BTreeMap<String, Kind>),
-	DiscriminatedObject(String, Vec<BTreeMap<String, Kind>>),
+	DiscriminatedObject(
+		String,
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+		Vec<BTreeMap<String, Kind>>,
+	),
 	Bool(bool),
 }
 

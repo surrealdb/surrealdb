@@ -14,7 +14,6 @@ use std::fmt::{self, Display};
 
 #[revisioned(revision = 3)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineAccessStatement {
 	pub name: Ident,

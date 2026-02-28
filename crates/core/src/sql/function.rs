@@ -4,6 +4,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::fnc;
 use crate::iam::Action;
+use crate::sql::escape::EscapePath;
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::script::Script;
@@ -23,7 +24,6 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Function";
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Function")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Function {
 	Normal(String, Vec<Value>),
@@ -282,6 +282,7 @@ impl Function {
 				// Get the function definition
 				let (ns, db) = opt.ns_db()?;
 				let val = ctx.tx().get_db_function(ns, db, s).await?;
+				let opt = val.auth_limit.limit_opt(opt);
 				// Check permissions
 				if opt.check_perms(Action::View)? {
 					match &val.permissions {
@@ -328,7 +329,7 @@ impl Function {
 				let a = stk
 					.scope(|scope| {
 						try_join_all(
-							x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, opt, doc))),
+							x.iter().map(|v| scope.run(|stk| v.compute(stk, ctx, &opt, doc))),
 						)
 					})
 					.await?;
@@ -340,7 +341,7 @@ impl Function {
 				}
 				let ctx = ctx.freeze();
 				// Run the custom function
-				let result = match stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await {
+				let result = match stk.run(|stk| val.block.compute(stk, &ctx, &opt, doc)).await {
 					Err(Error::Return {
 						value,
 					}) => Ok(value),
@@ -386,8 +387,8 @@ impl Function {
 impl fmt::Display for Function {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Normal(s, e) => write!(f, "{s}({})", Fmt::comma_separated(e)),
-			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
+			Self::Normal(s, e) => write!(f, "{}({})", EscapePath(s), Fmt::comma_separated(e)),
+			Self::Custom(s, e) => write!(f, "fn::{}({})", EscapePath(s), Fmt::comma_separated(e)),
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
 			Self::Anonymous(p, e, _) => write!(f, "{p}({})", Fmt::comma_separated(e)),
 		}

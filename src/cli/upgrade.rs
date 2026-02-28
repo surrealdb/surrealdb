@@ -61,6 +61,7 @@ impl UpgradeCommandArguments {
 	}
 }
 
+#[allow(clippy::result_large_err)]
 pub(crate) fn parse_version(input: &str) -> Result<Version, Error> {
 	// Remove the `v` prefix, if supplied
 	let version = input.strip_prefix('v').unwrap_or(input);

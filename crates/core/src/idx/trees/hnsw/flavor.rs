@@ -1,3 +1,4 @@
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::{AHashSet, ArraySet};
@@ -54,22 +55,22 @@ impl HnswFlavor {
 		Ok(res)
 	}
 
-	pub(super) async fn check_state(&mut self, tx: &Transaction) -> Result<(), Error> {
+	pub(super) async fn check_state(&mut self, ctx: &Context) -> Result<(), Error> {
 		match self {
-			HnswFlavor::H5_9(h) => h.check_state(tx).await,
-			HnswFlavor::H5_17(h) => h.check_state(tx).await,
-			HnswFlavor::H5_25(h) => h.check_state(tx).await,
-			HnswFlavor::H5set(h) => h.check_state(tx).await,
-			HnswFlavor::H9_17(h) => h.check_state(tx).await,
-			HnswFlavor::H9_25(h) => h.check_state(tx).await,
-			HnswFlavor::H9set(h) => h.check_state(tx).await,
-			HnswFlavor::H13_25(h) => h.check_state(tx).await,
-			HnswFlavor::H13set(h) => h.check_state(tx).await,
-			HnswFlavor::H17set(h) => h.check_state(tx).await,
-			HnswFlavor::H21set(h) => h.check_state(tx).await,
-			HnswFlavor::H25set(h) => h.check_state(tx).await,
-			HnswFlavor::H29set(h) => h.check_state(tx).await,
-			HnswFlavor::Hset(h) => h.check_state(tx).await,
+			HnswFlavor::H5_9(h) => h.check_state(ctx).await,
+			HnswFlavor::H5_17(h) => h.check_state(ctx).await,
+			HnswFlavor::H5_25(h) => h.check_state(ctx).await,
+			HnswFlavor::H5set(h) => h.check_state(ctx).await,
+			HnswFlavor::H9_17(h) => h.check_state(ctx).await,
+			HnswFlavor::H9_25(h) => h.check_state(ctx).await,
+			HnswFlavor::H9set(h) => h.check_state(ctx).await,
+			HnswFlavor::H13_25(h) => h.check_state(ctx).await,
+			HnswFlavor::H13set(h) => h.check_state(ctx).await,
+			HnswFlavor::H17set(h) => h.check_state(ctx).await,
+			HnswFlavor::H21set(h) => h.check_state(ctx).await,
+			HnswFlavor::H25set(h) => h.check_state(ctx).await,
+			HnswFlavor::H29set(h) => h.check_state(ctx).await,
+			HnswFlavor::Hset(h) => h.check_state(ctx).await,
 		}
 	}
 

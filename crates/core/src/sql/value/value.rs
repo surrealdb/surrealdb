@@ -10,6 +10,7 @@ use crate::sql::kind::Literal;
 use crate::sql::range::OldRange;
 use crate::sql::reference::Refs;
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::visit::{Visit, Visitor};
 use crate::sql::Closure;
 use crate::sql::{
 	array::Uniq,
@@ -40,7 +41,10 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Value";
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Values(pub Vec<Value>);
+pub struct Values(
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+	pub  Vec<Value>,
+);
 
 impl<V> From<V> for Values
 where
@@ -135,6 +139,7 @@ pub enum Value {
 	Function(Box<Function>),
 	Subquery(Box<Subquery>),
 	Expression(Box<Expression>),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Query(Query),
 	Model(Box<Model>),
 	Closure(Box<Closure>),
@@ -154,6 +159,33 @@ impl Value {
 				end: fields.0.end,
 			})),
 		}))
+	}
+
+	pub(crate) fn contains_illegal_closures(&self, ctx: &Context) -> bool {
+		if ctx.get_capabilities().allows_insecure_storable_closures() {
+			return false;
+		}
+
+		struct ClosureFinder {
+			found: bool,
+		}
+
+		impl Visitor for ClosureFinder {
+			type Error = ();
+
+			fn visit_value(&mut self, value: &Value) -> Result<(), Self::Error> {
+				if let Value::Closure(_) = value {
+					self.found = true;
+				}
+				value.visit(self)
+			}
+		}
+
+		let mut finder = ClosureFinder {
+			found: false,
+		};
+		self.visit(&mut finder).ok();
+		finder.found
 	}
 }
 
@@ -2929,6 +2961,40 @@ impl Value {
 				| Value::Table(_)
 				| Value::Uuid(_)
 		)
+	}
+
+	pub(crate) fn has_left_none_or_null(&self) -> bool {
+		match self {
+			Value::None => true,
+			Value::Null => true,
+			Value::Range(x) => {
+				if let Bound::Included(x) | Bound::Excluded(x) = &x.beg {
+					x.has_left_none_or_null()
+				} else {
+					false
+				}
+			}
+			Value::Expression(x) => {
+				if let Expression::Binary {
+					l,
+					..
+				} = &**x
+				{
+					l.has_left_none_or_null()
+				} else {
+					false
+				}
+			}
+			Value::Idiom(x) => {
+				if let Some(Part::Start(x)) = x.0.first() {
+					x.has_left_none_or_null()
+				} else {
+					false
+				}
+			}
+
+			_ => false,
+		}
 	}
 }
 

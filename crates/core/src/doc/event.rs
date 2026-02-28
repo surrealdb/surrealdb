@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::dbs::Statement;
@@ -31,6 +33,9 @@ impl Document {
 		let opt = &opt.new_with_perms(false);
 		// Loop through all event statements
 		for ev in self.ev(ctx, opt).await?.iter() {
+			// Limit auth
+			let mut opt = opt.clone();
+			opt.auth = Arc::new(opt.auth.as_ref().new_limited(&ev.auth_limit));
 			// Get the event action
 			let evt = if stm.is_delete() {
 				Value::from("DELETE")
@@ -55,11 +60,11 @@ impl Document {
 			// Freeze the context
 			let ctx = ctx.freeze();
 			// Process conditional clause
-			let val = ev.when.compute(stk, &ctx, opt, Some(doc)).await?;
+			let val = ev.when.compute(stk, &ctx, &opt, Some(doc)).await?;
 			// Execute event if value is truthy
 			if val.is_truthy() {
 				for v in ev.then.iter() {
-					v.compute(stk, &ctx, opt, Some(doc)).await?;
+					v.compute(stk, &ctx, &opt, Some(doc)).await?;
 				}
 			}
 		}

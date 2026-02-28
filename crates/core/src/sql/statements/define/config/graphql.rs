@@ -72,7 +72,15 @@ impl Display for TablesConfig {
 					drop(indent);
 				}
 			}
-			TablesConfig::Exclude(_) => todo!(),
+			TablesConfig::Exclude(cs) => {
+				let mut f = Pretty::from(f);
+				write!(f, " EXCLUDE ")?;
+				if !cs.is_empty() {
+					let indent = pretty_indent();
+					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
+					drop(indent);
+				}
+			}
 		}
 
 		Ok(())

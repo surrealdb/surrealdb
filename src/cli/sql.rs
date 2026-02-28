@@ -271,6 +271,7 @@ pub async fn init(
 	Ok(())
 }
 
+#[allow(clippy::result_large_err)]
 fn process(
 	pretty: bool,
 	json: bool,

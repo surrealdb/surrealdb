@@ -81,6 +81,9 @@ mod thing;
 mod token;
 mod token_buffer;
 
+#[cfg(feature = "arbitrary")]
+pub(crate) use builtin::{PathKind, PATHS};
+
 pub(crate) use mac::{enter_object_recursion, enter_query_recursion, unexpected};
 
 use super::error::{syntax_error, RenderedError};

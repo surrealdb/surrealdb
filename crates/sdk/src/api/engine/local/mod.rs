@@ -934,22 +934,26 @@ async fn router(
 
 			let kvs = kvs.clone();
 			let session = session.read().await.clone();
+			let bytes_clone = bytes.clone();
+
+			fn is_send<T: Send>(t: T) -> T {
+				t
+			}
+
+			let fut = is_send(async move {
+				if let Err(error) = export_file(&kvs, &session, tx, config).await {
+					let _ = bytes_clone.send(Err(error)).await;
+				}
+			});
+
+			tokio::spawn(fut);
+
 			tokio::spawn(async move {
-				let export = async {
-					if let Err(error) = export_file(&kvs, &session, tx, config).await {
-						let _ = bytes.send(Err(error)).await;
+				while let Ok(b) = rx.recv().await {
+					if bytes.send(Ok(b)).await.is_err() {
+						break;
 					}
-				};
-
-				let bridge = async {
-					while let Ok(b) = rx.recv().await {
-						if bytes.send(Ok(b)).await.is_err() {
-							break;
-						}
-					}
-				};
-
-				tokio::join!(export, bridge);
+				}
 			});
 
 			Ok(DbResponse::Other(CoreValue::None))

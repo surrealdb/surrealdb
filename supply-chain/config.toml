@@ -251,6 +251,10 @@ criteria = "safe-to-deploy"
 version = "0.6.12"
 criteria = "safe-to-deploy"
 
+[[exemptions.bytes]]
+version = "1.11.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.bzip2-sys]]
 version = "0.1.13+1.0.8"
 criteria = "safe-to-deploy"
@@ -324,7 +328,7 @@ version = "0.1.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.convert_case]]
-version = "0.6.0"
+version = "0.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.cpp_demangle]]
@@ -559,6 +563,10 @@ criteria = "safe-to-run"
 version = "0.3.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.hashbrown]]
+version = "0.16.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.heapless]]
 version = "0.8.0"
 criteria = "safe-to-deploy"
@@ -649,10 +657,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.lalrpop-util]]
 version = "0.20.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.lazycell]]
-version = "1.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.libloading]]
@@ -753,10 +757,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.multimap]]
 version = "0.10.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.nanoid]]
-version = "0.4.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.ndarray]]
@@ -915,10 +915,6 @@ criteria = "safe-to-deploy"
 version = "1.1.10"
 criteria = "safe-to-deploy"
 
-[[exemptions.pkg-config]]
-version = "0.3.31"
-criteria = "safe-to-deploy"
-
 [[exemptions.plotters]]
 version = "0.3.7"
 criteria = "safe-to-deploy"
@@ -981,10 +977,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.prost-derive]]
 version = "0.11.9"
-criteria = "safe-to-deploy"
-
-[[exemptions.prost-derive]]
-version = "0.13.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.prost-types]]
@@ -1075,6 +1067,10 @@ criteria = "safe-to-deploy"
 version = "0.4.6"
 criteria = "safe-to-deploy"
 
+[[exemptions.relative-path]]
+version = "2.0.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.rend]]
 version = "0.4.2"
 criteria = "safe-to-deploy"
@@ -1112,19 +1108,19 @@ version = "1.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs]]
-version = "0.9.0"
+version = "0.11.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-core]]
-version = "0.9.0"
+version = "0.11.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-macro]]
-version = "0.9.0"
+version = "0.11.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs-sys]]
-version = "0.9.0"
+version = "0.11.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rstar]]
@@ -1375,8 +1371,16 @@ criteria = "safe-to-deploy"
 version = "0.3.40"
 criteria = "safe-to-deploy"
 
+[[exemptions.time]]
+version = "0.3.47"
+criteria = "safe-to-deploy"
+
 [[exemptions.time-macros]]
 version = "0.2.21"
+criteria = "safe-to-deploy"
+
+[[exemptions.time-macros]]
+version = "0.2.27"
 criteria = "safe-to-deploy"
 
 [[exemptions.tiny-keccak]]
@@ -1491,10 +1495,6 @@ criteria = "safe-to-deploy"
 version = "2.1.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.utf-8]]
-version = "0.7.6"
-criteria = "safe-to-deploy"
-
 [[exemptions.uuid]]
 version = "1.16.0"
 criteria = "safe-to-deploy"
@@ -1565,10 +1565,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.web_atoms]]
 version = "0.1.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.which]]
-version = "4.4.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.winapi]]

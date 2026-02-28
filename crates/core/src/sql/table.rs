@@ -11,7 +11,10 @@ pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Table";
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct Tables(pub Vec<Table>);
+pub struct Tables(
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+	pub  Vec<Table>,
+);
 
 impl From<Table> for Tables {
 	fn from(v: Table) -> Self {

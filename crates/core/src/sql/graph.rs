@@ -25,7 +25,6 @@ use super::{Id, IdRange, Table, Thing};
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct Graph {
 	pub dir: Dir,
@@ -100,18 +99,28 @@ impl Graph {
 
 impl Display for Graph {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		if self.what.0.len() <= 1 && self.cond.is_none() && self.alias.is_none() {
-			Display::fmt(&self.dir, f)?;
-			match self.what.len() {
-				0 => f.write_char('?'),
-				_ => Display::fmt(&self.what, f),
-			}
+		if self.what.0.is_empty() {
+			write!(f, "{}?", self.dir)
+		} else if self.what.0.len() == 1
+			&& self.cond.is_none()
+			&& self.alias.is_none()
+			&& self.split.is_none()
+			&& self.order.is_none()
+			&& self.limit.is_none()
+			&& self.start.is_none()
+			&& self.expr.is_none()
+		{
+			write!(f, "{}{}", self.dir, self.what)
 		} else {
 			write!(f, "{}(", self.dir)?;
-			match self.what.len() {
-				0 => f.write_char('?'),
-				_ => Display::fmt(&self.what, f),
-			}?;
+			if let Some(x) = &self.expr {
+				f.write_str("SELECT ")?;
+				write!(f, "{x}")?;
+				f.write_str(" FROM ")?;
+			};
+
+			Display::fmt(&self.what, f)?;
+
 			if let Some(ref v) = self.cond {
 				write!(f, " {v}")?
 			}
@@ -141,7 +150,10 @@ impl Display for Graph {
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
-pub struct GraphSubjects(pub Vec<GraphSubject>);
+pub struct GraphSubjects(
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+	pub  Vec<GraphSubject>,
+);
 
 impl From<Tables> for GraphSubjects {
 	fn from(tbs: Tables) -> Self {

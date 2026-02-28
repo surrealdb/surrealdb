@@ -4,8 +4,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::{escape::EscapeRid, Array, Number, Object, Strand, Thing, Uuid, Value};
-use nanoid::nanoid;
+use crate::sql::{escape::EscapeRidKey, Array, Number, Object, Strand, Thing, Uuid, Value};
+use rand::seq::SliceRandom;
 use range::IdRange;
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -181,7 +181,9 @@ impl From<Thing> for Id {
 impl Id {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
-		Self::String(nanoid!(20, &ID_CHARS))
+		let mut rng = rand::thread_rng();
+		let id: String = (0..20).map(|_| *ID_CHARS.choose(&mut rng).unwrap_or(&'0')).collect();
+		Self::String(id)
 	}
 	/// Generate a new random ULID
 	pub fn ulid() -> Self {
@@ -225,7 +227,7 @@ impl Display for Id {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Number(v) => Display::fmt(v, f),
-			Self::String(v) => EscapeRid(v).fmt(f),
+			Self::String(v) => EscapeRidKey(v).fmt(f),
 			Self::Uuid(v) => Display::fmt(v, f),
 			Self::Array(v) => Display::fmt(v, f),
 			Self::Object(v) => Display::fmt(v, f),

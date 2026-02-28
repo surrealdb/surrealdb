@@ -1274,11 +1274,18 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.comment = Some(self.next_token_value()?);
 				}
+				t!("DEFER") => {
+					self.pop_peek();
+					res.defer = true;
+				}
 				_ => break,
 			}
 		}
 		if matches!(res.index, Index::Count) && !res.cols.is_empty() {
 			bail!("Cannot create a count index with fields");
+		}
+		if matches!(res.index, Index::Uniq) && res.defer {
+			bail!("Unique index does not support DEFER.");
 		}
 		Ok(res)
 	}
@@ -1518,7 +1525,7 @@ impl Parser<'_> {
 						}
 						t!("EXCLUDE") => {
 							tmp_tables =
-								Some(TablesConfig::Include(self.parse_graphql_table_configs()?))
+								Some(TablesConfig::Exclude(self.parse_graphql_table_configs()?))
 						}
 						t!("NONE") => {
 							tmp_tables = Some(TablesConfig::None);

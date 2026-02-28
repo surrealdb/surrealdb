@@ -13,9 +13,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 use uuid::Uuid;
 
-#[revisioned(revision = 4)]
+#[revisioned(revision = 5)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct DefineIndexStatement {
 	pub name: Ident,
@@ -29,6 +28,9 @@ pub struct DefineIndexStatement {
 	pub overwrite: bool,
 	#[revision(start = 4)]
 	pub concurrently: bool,
+	#[revision(start = 5)]
+	/// Whether to defer the index creation and keep it updated in the background
+	pub defer: bool,
 }
 
 impl DefineIndexStatement {
@@ -163,6 +165,9 @@ impl Display for DefineIndexStatement {
 		if self.concurrently {
 			write!(f, " CONCURRENTLY")?
 		}
+		if self.defer {
+			write!(f, " DEFER")?
+		}
 		Ok(())
 	}
 }
@@ -174,6 +179,7 @@ impl InfoStructure for DefineIndexStatement {
 			"what".to_string() => self.what.structure(),
 			"cols".to_string() => self.cols.structure(),
 			"index".to_string() => self.index.structure(),
+			"defer".to_string() => self.defer.into(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
 	}

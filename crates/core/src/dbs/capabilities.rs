@@ -576,6 +576,7 @@ pub struct Capabilities {
 	scripting: bool,
 	guest_access: bool,
 	live_query_notifications: bool,
+	insecure_storable_closures: bool,
 
 	allow_funcs: Targets<FuncTarget>,
 	deny_funcs: Targets<FuncTarget>,
@@ -595,8 +596,8 @@ impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
             f,
-            "scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}",
-            self.scripting, self.guest_access, self.live_query_notifications, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc, self.allow_http, self.deny_http, self.allow_experimental, self.deny_experimental, self.allow_arbitrary_query, self.deny_arbitrary_query,
+            "scripting={}, guest_access={}, live_query_notifications={}, insecure_storable_closures={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}",
+            self.scripting, self.guest_access, self.live_query_notifications, self.insecure_storable_closures, self.allow_funcs, self.deny_funcs, self.allow_net, self.deny_net, self.allow_rpc, self.deny_rpc, self.allow_http, self.deny_http, self.allow_experimental, self.deny_experimental, self.allow_arbitrary_query, self.deny_arbitrary_query,
         )
 	}
 }
@@ -607,6 +608,7 @@ impl Default for Capabilities {
 			scripting: false,
 			guest_access: false,
 			live_query_notifications: true,
+			insecure_storable_closures: false,
 
 			allow_funcs: Targets::All,
 			deny_funcs: Targets::None,
@@ -630,6 +632,7 @@ impl Capabilities {
 			scripting: true,
 			guest_access: true,
 			live_query_notifications: true,
+			insecure_storable_closures: false,
 
 			allow_funcs: Targets::All,
 			deny_funcs: Targets::None,
@@ -651,6 +654,7 @@ impl Capabilities {
 			scripting: false,
 			guest_access: false,
 			live_query_notifications: false,
+			insecure_storable_closures: false,
 
 			allow_funcs: Targets::None,
 			deny_funcs: Targets::None,
@@ -679,6 +683,11 @@ impl Capabilities {
 
 	pub fn with_live_query_notifications(mut self, live_query_notifications: bool) -> Self {
 		self.live_query_notifications = live_query_notifications;
+		self
+	}
+
+	pub fn with_insecure_storable_closures(mut self, insecure_storable_closures: bool) -> Self {
+		self.insecure_storable_closures = insecure_storable_closures;
 		self
 	}
 
@@ -782,6 +791,10 @@ impl Capabilities {
 
 	pub fn allows_live_query_notifications(&self) -> bool {
 		self.live_query_notifications
+	}
+
+	pub fn allows_insecure_storable_closures(&self) -> bool {
+		self.insecure_storable_closures
 	}
 
 	pub fn allows_function_name(&self, target: &str) -> bool {
@@ -1082,6 +1095,24 @@ mod tests {
 		{
 			let cap = Capabilities::default().with_live_query_notifications(false);
 			assert!(!cap.allows_live_query_notifications());
+		}
+
+		// When insecure storable closures are allowed
+		{
+			let cap = Capabilities::default().with_insecure_storable_closures(true);
+			assert!(cap.allows_insecure_storable_closures());
+		}
+
+		// Insecure storable closures need explicit opt-in
+		{
+			let cap = Capabilities::all();
+			assert!(!cap.allows_insecure_storable_closures());
+		}
+
+		// When insecure storable closures are disabled
+		{
+			let cap = Capabilities::default().with_insecure_storable_closures(false);
+			assert!(!cap.allows_insecure_storable_closures());
 		}
 
 		// When all nets are allowed

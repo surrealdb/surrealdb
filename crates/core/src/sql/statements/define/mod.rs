@@ -74,11 +74,14 @@ pub enum DefineStatement {
 	Field(DefineFieldStatement),
 	Index(DefineIndexStatement),
 	User(DefineUserStatement),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Model(DefineModelStatement),
 	#[revision(start = 2)]
 	Access(DefineAccessStatement),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Config(DefineConfigStatement),
 	#[revision(start = 3)]
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Api(DefineApiStatement),
 }
 

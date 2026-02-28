@@ -1,3 +1,4 @@
+use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
@@ -88,50 +89,52 @@ impl HnswIndex {
 
 	pub async fn index_document(
 		&mut self,
-		tx: &Transaction,
+		ctx: &Context,
 		id: &Id,
 		content: &[Value],
 	) -> Result<(), Error> {
+		let tx = ctx.tx();
 		// Ensure the layers are up-to-date
-		self.hnsw.check_state(tx).await?;
+		self.hnsw.check_state(ctx).await?;
 		// Resolve the doc_id
-		let doc_id = self.docs.resolve(tx, id).await?;
+		let doc_id = self.docs.resolve(&tx, id).await?;
 		// Index the values
 		for value in content.iter().filter(|v| v.is_some()) {
 			// Extract the vector
 			let vector = Vector::try_from_value(self.vector_type, self.dim, value)?;
 			vector.check_dimension(self.dim)?;
 			// Insert the vector
-			self.vec_docs.insert(tx, vector, doc_id, &mut self.hnsw).await?;
+			self.vec_docs.insert(&tx, vector, doc_id, &mut self.hnsw).await?;
 		}
-		self.docs.finish(tx).await?;
+		self.docs.finish(&tx).await?;
 		Ok(())
 	}
 
 	pub(crate) async fn remove_document(
 		&mut self,
-		tx: &Transaction,
+		ctx: &Context,
 		id: Id,
 		content: &[Value],
 	) -> Result<(), Error> {
-		if let Some(doc_id) = self.docs.remove(tx, id).await? {
+		let tx = ctx.tx();
+		if let Some(doc_id) = self.docs.remove(&tx, id).await? {
 			// Ensure the layers are up-to-date
-			self.hnsw.check_state(tx).await?;
+			self.hnsw.check_state(ctx).await?;
 			for v in content.iter().filter(|v| v.is_some()) {
 				// Extract the vector
 				let vector = Vector::try_from_value(self.vector_type, self.dim, v)?;
 				vector.check_dimension(self.dim)?;
 				// Remove the vector
-				self.vec_docs.remove(tx, &vector, doc_id, &mut self.hnsw).await?;
+				self.vec_docs.remove(&tx, &vector, doc_id, &mut self.hnsw).await?;
 			}
-			self.docs.finish(tx).await?;
+			self.docs.finish(&tx).await?;
 		}
 		Ok(())
 	}
 
 	// Ensure the layers are up-to-date
-	pub async fn check_state(&mut self, tx: &Transaction) -> Result<(), Error> {
-		self.hnsw.check_state(tx).await
+	pub async fn check_state(&mut self, ctx: &Context) -> Result<(), Error> {
+		self.hnsw.check_state(ctx).await
 	}
 
 	pub async fn knn_search(

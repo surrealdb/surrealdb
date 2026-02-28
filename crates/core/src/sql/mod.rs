@@ -1,17 +1,17 @@
 //! The full type definitions for the SurrealQL query language
 
+#[cfg(feature = "arbitrary")]
+pub(crate) mod arbitrary;
+
 pub(crate) mod access;
 pub(crate) mod access_type;
 pub(crate) mod algorithm;
-#[cfg(feature = "arbitrary")]
-pub(crate) mod arbitrary;
 pub(crate) mod array;
 pub(crate) mod base;
 pub(crate) mod block;
 pub(crate) mod bytes;
 pub(crate) mod bytesize;
 pub(crate) mod cast;
-pub(crate) mod change_feed_include;
 pub(crate) mod changefeed;
 pub(crate) mod closure;
 pub(crate) mod cond;

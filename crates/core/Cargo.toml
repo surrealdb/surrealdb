@@ -2,7 +2,7 @@
 name = "surrealdb-core"
 publish = true
 edition = "2021"
-version = "2.4.0"
+version = "2.6.2"
 rust-version = "1.82.0"
 readme = "README.md"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -61,6 +61,7 @@ arbitrary = [
     "rust_decimal/rust-fuzz",
     "geo-types/arbitrary",
     "uuid/arbitrary",
+    "chrono/arbitrary",
 ]
 allocation-tracking = []
 # Special features
@@ -140,13 +141,13 @@ futures.workspace = true
 fuzzy-matcher.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
 geo-types = { workspace = true }
+hashbrown.workspace = true
 http.workspace = true
 hex.workspace = true
 ipnet.workspace = true
 jsonwebtoken.workspace = true
 linfa-linalg.workspace = true
 md-5.workspace = true
-nanoid.workspace = true
 ndarray.workspace = true
 ndarray-stats.workspace = true
 num_cpus.workspace = true

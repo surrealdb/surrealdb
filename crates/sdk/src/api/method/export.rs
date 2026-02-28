@@ -149,6 +149,13 @@ where
 		}
 		self
 	}
+
+	pub fn v3(mut self, v3: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.v3 = v3;
+		}
+		self
+	}
 }
 
 impl<C, R, T> Export<'_, C, R, T>

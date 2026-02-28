@@ -13,7 +13,6 @@ use surrealdb::iam::Role;
 use surrealdb::kvs::{LockType, TransactionType};
 use surrealdb::sql::Idiom;
 use surrealdb::sql::{Part, Value};
-use test_log::test;
 use tracing::info;
 
 #[tokio::test]
@@ -226,6 +225,10 @@ async fn define_statement_index_concurrently_building_status(
 							info!("Started");
 							continue;
 						}
+						"cleaning" => {
+							info!("Cleaning");
+							continue;
+						}
 						"indexing" => {
 							{
 								if new_initial != initial_count {
@@ -294,7 +297,7 @@ async fn define_statement_index_concurrently_building_status_standard_overwrite(
 	.await
 }
 
-#[test(tokio::test)]
+#[tokio::test(flavor = "multi_thread")]
 async fn define_statement_index_concurrently_building_status_full_text() -> Result<(), Error> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
@@ -306,7 +309,7 @@ async fn define_statement_index_concurrently_building_status_full_text() -> Resu
 	.await
 }
 
-#[test(tokio::test)]
+#[tokio::test(flavor = "multi_thread")]
 async fn define_statement_index_concurrently_building_status_full_text_overwrite(
 ) -> Result<(), Error> {
 	define_statement_index_concurrently_building_status(
@@ -339,7 +342,7 @@ async fn define_statement_analyzer() -> Result<(), Error> {
 			analyzers: {
 				autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE,EDGENGRAM(2,10)',
 				english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
-				englishLemmatizer: 'DEFINE ANALYZER englishLemmatizer TOKENIZERS BLANK,CLASS FILTERS MAPPER(../../tests/data/lemmatization-en.txt)',
+				englishLemmatizer: "DEFINE ANALYZER englishLemmatizer TOKENIZERS BLANK,CLASS FILTERS MAPPER('../../tests/data/lemmatization-en.txt')",
 				htmlAnalyzer: 'DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS BLANK,CLASS'
 			},
 			apis: {},
@@ -1088,7 +1091,7 @@ async fn permissions_checks_define_table() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: { TB: 'DEFINE TABLE TB TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"],
+        vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: { TB: 'DEFINE TABLE `TB` TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"],
         vec!["{ accesses: {  }, analyzers: {  }, apis: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, tables: {  }, users: {  } }"]
     ];
 
@@ -1124,13 +1127,13 @@ async fn permissions_checks_define_table() {
 async fn permissions_checks_define_event() {
 	let scenario = HashMap::from([
 		("prepare", ""),
-		("test", "DEFINE EVENT event ON TABLE TB WHEN true THEN RETURN 'foo'"),
+		("test", "DEFINE EVENT event ON TABLE `TB` WHEN true THEN RETURN 'foo'"),
 		("check", "INFO FOR TABLE TB"),
 	]);
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: { event: \"DEFINE EVENT event ON TB WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
+        vec!["{ events: { event: \"DEFINE EVENT event ON `TB` WHEN true THEN (RETURN 'foo')\" }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"],
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
     ];
 
@@ -1172,7 +1175,7 @@ async fn permissions_checks_define_field() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON TB PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"],
+        vec!["{ events: {  }, fields: { field: 'DEFINE FIELD field ON `TB` PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"],
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
     ];
 
@@ -1214,7 +1217,7 @@ async fn permissions_checks_define_index() {
 
 	// Define the expected results for the check statement when the test statement succeeded and when it failed
 	let check_results = [
-        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON TB FIELDS field' }, lives: {  }, tables: {  } }"],
+        vec!["{ events: {  }, fields: {  }, indexes: { index: 'DEFINE INDEX index ON `TB` FIELDS field' }, lives: {  }, tables: {  } }"],
 		vec!["{ events: {  }, fields: {  }, indexes: {  }, lives: {  }, tables: {  } }"]
     ];
 

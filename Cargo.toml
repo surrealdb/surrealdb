@@ -2,17 +2,17 @@
 name = "surreal"
 publish = false
 edition = "2021"
-version = "2.4.0"
+version = "2.6.2"
 license-file = "LICENSE"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 
 [workspace]
-members = ["crates/core", "crates/sdk"]
+members = ["./", "crates/core", "crates/sdk"]
 
 [workspace.dependencies]
 # workspace internal dependencies
-surrealdb-core = { version = "=2.4.0", package = "surrealdb-core", path = "./crates/core", default-features = false }
-surrealdb = { version = "=2.4.0", package = "surrealdb", path = "./crates/sdk" }
+surrealdb-core = { version = "=2.6.2", package = "surrealdb-core", path = "./crates/core", default-features = false }
+surrealdb = { version = "=2.6.2", package = "surrealdb", path = "./crates/sdk" }
 
 # External surreal crates
 surrealcs = { version = "0.4.4" }
@@ -23,7 +23,7 @@ dmp = "0.2.0"
 indxdb = "0.6.0"
 ipnet = "2.9.0"
 ## Somewhat a surreal crate as it is maintained by @Delskayn.
-js = { version = "0.9.0", package = "rquickjs" }
+js = { version = "0.11.0", package = "rquickjs" }
 lexicmp = "0.1.0"
 ## Also maintained by @Delskayn
 reblessive = "0.4.2"
@@ -80,7 +80,6 @@ jemallocator = { version = "0.6.0", package = "tikv-jemallocator" }
 jsonwebtoken = "9.3.0"
 linfa-linalg = "=0.1.0"
 md-5 = "0.10.6"
-nanoid = "0.4.0"
 native-tls = "0.2.11"
 ndarray = "=0.15.6"
 ndarray-stats = "=0.5.1"
@@ -97,7 +96,7 @@ pin-project-lite = "0.2.13"
 quick_cache = "0.5.1"
 # TODO: Look at use of this dependency. Last update was 4 years ago and it is unmaintained
 radix_trie = "0.2.1"
-rand = "0.8.5"
+rand = { version = "0.8.5", features = ["small_rng"] }
 rayon = "1.10.0"
 regex = "1.10.6"
 regex-syntax = "0.8.4"

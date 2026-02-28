@@ -16,6 +16,7 @@ use std::fmt::{self, Display, Write};
 #[non_exhaustive]
 pub struct IfelseStatement {
 	/// The first if condition followed by a body, followed by any number of else if's
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub exprs: Vec<(Value, Value)>,
 	/// the final else body, if there is one
 	pub close: Option<Value>,

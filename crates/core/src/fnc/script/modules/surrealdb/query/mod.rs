@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use js::{
 	class::{JsClass, OwnedBorrow, Readable, Trace},
 	prelude::{Coerced, Opt},
-	Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value,
+	Ctx, Exception, FromJs, Promise, Result, Value,
 };
 use reblessive::tree::Stk;
 

@@ -32,7 +32,7 @@ error = "Expected a datetime but cannot convert 1dec into a datetime"
 error = "Expected a duration but cannot convert 1dec into a duration"
 
 [[test.results]]
-error = "Expected a point but cannot convert 1dec into a point"
+error = "Expected a geometry<point> but cannot convert 1dec into a geometry<point>"
 
 [[test.results]]
 error = "Expected a uuid but cannot convert 1dec into a uuid"

@@ -7,6 +7,7 @@ use crate::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Deserialize)]
+#[allow(dead_code)]
 pub(crate) struct Failure {
 	pub(crate) code: i64,
 	pub(crate) message: String,

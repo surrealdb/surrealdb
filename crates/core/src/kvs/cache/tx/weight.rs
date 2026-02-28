@@ -14,12 +14,11 @@ impl Weighter<Key, Entry> for Weight {
 			// the precise weight of a Value (when
 			// deserialising), and using this size to
 			// determine the actual cache weight.
-			Entry::Val(_) => 1,
-			// We don't want to evict other entries
-			// so we set the weight to 0 which will
-			// prevent entries being evicted, unless
-			// specifically removed from the cache.
-			_ => 0,
+			Entry::Val(_) => 2,
+			// We prefer to not evict other entries
+			// so we set the weight to 1 which will
+			// evict other entries before these.
+			_ => 1,
 		}
 	}
 }

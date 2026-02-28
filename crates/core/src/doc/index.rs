@@ -56,7 +56,7 @@ impl Document {
 		rid: &Thing,
 	) -> Result<(), Error> {
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
-			match ib.consume(ctx, opt.ns_db()?, ix, o, n, rid).await? {
+			match ib.consume(ctx, opt, ix, o, n, rid).await? {
 				// The index builder consumed the value, which means it is currently building the index asynchronously,
 				// we don't index the document and let the index builder do it later.
 				ConsumeResult::Enqueued => return Ok(()),

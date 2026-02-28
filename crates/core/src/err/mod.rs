@@ -1314,6 +1314,9 @@ pub enum Error {
 
 	#[error("File access denied: {0}")]
 	FileAccessDenied(String),
+
+	#[error("Failed to store record {0}: contains illegal closures")]
+	IllegalClosures(String),
 }
 
 impl From<Error> for String {

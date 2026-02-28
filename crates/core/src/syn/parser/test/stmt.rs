@@ -1,4 +1,5 @@
 use crate::{
+	iam::AuthLimit,
 	sql::{
 		access::AccessDuration,
 		access_type::{
@@ -224,6 +225,7 @@ fn parse_define_function() {
 			if_not_exists: false,
 			overwrite: false,
 			returns: None,
+			auth_limit: AuthLimit::default(),
 		}))
 	)
 }
@@ -1883,6 +1885,7 @@ fn parse_define_event() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
+			auth_limit: AuthLimit::default(),
 		}))
 	)
 }
@@ -1926,6 +1929,7 @@ fn parse_define_field() {
 				overwrite: false,
 				reference: None,
 				default_always: false,
+				auth_limit: AuthLimit::default(),
 			}))
 		)
 	}
@@ -1960,6 +1964,7 @@ fn parse_define_field() {
 				overwrite: false,
 				reference: None,
 				default_always: false,
+				auth_limit: AuthLimit::default(),
 			}))
 		)
 	}
@@ -1978,7 +1983,7 @@ fn parse_define_index() {
 			DOC_LENGTHS_CACHE 6
 			POSTINGS_CACHE 7
 			TERMS_CACHE 8
-			HIGHLIGHTS"#
+			HIGHLIGHTS DEFER"#
 	)
 	.unwrap();
 
@@ -2010,7 +2015,8 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			concurrently: false
+			concurrently: false,
+			defer: true,
 		}))
 	);
 
@@ -2027,7 +2033,8 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			concurrently: false
+			concurrently: false,
+			defer: false,
 		}))
 	);
 
@@ -2052,7 +2059,8 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			concurrently: false
+			concurrently: false,
+			defer: false,
 		}))
 	);
 
@@ -2079,7 +2087,8 @@ fn parse_define_index() {
 			comment: None,
 			if_not_exists: false,
 			overwrite: false,
-			concurrently: false
+			concurrently: false,
+			defer: false
 		}))
 	);
 }

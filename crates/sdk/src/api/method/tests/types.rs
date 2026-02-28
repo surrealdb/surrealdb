@@ -11,6 +11,7 @@ pub struct User {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+#[allow(dead_code)]
 pub struct Root {
 	user: String,
 	pass: String,
@@ -20,6 +21,7 @@ pub struct Root {
 pub struct AuthParams {}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct SigninData {
 	pub token: String,
 	pub refresh: Option<String>,

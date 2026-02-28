@@ -5,6 +5,7 @@ use crate::dbs::StartCommandDbsOptions;
 use crate::env;
 use crate::err::Error;
 use crate::net::{self, client_ip::ClientIp};
+use crate::telemetry::metrics::ds::register_datastore_metrics;
 use clap::Args;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -212,6 +213,8 @@ pub async fn init(
 	let canceller = CancellationToken::new();
 	// Start the datastore
 	let datastore = Arc::new(dbs::init(dbs).await?);
+	// Register datastore metrics
+	register_datastore_metrics(datastore.clone());
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &CF.get().unwrap().engine);
 	// Start the web server

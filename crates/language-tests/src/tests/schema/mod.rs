@@ -388,6 +388,7 @@ pub struct Capabilities {
 	pub scripting: Option<bool>,
 	pub quest_access: Option<bool>,
 	pub live_query_notifications: Option<bool>,
+	pub insecure_storable_closures: Option<bool>,
 
 	pub allow_functions: Option<BoolOr<Vec<SchemaTarget<FuncTarget>>>>,
 	pub deny_functions: Option<BoolOr<Vec<SchemaTarget<FuncTarget>>>>,
