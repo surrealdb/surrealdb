@@ -14,7 +14,11 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: name] {rows: 1}\n    Filter [ctx: Db] [predicate: genre = 'm'] {rows: 1}\n        FullTextScan [ctx: Db] [index: ft_name, query: Jaime] {rows: 1}\n\nTotal rows: 1"'''
+value = '''"SelectProject [ctx: Db] [projections: name] {rows: 1}
+    Filter [ctx: Db] [predicate: genre = 'm'] {rows: 1}
+        FullTextScan [ctx: Db] [index: ft_name, query: Jaime] {rows: 1}
+
+Total rows: 1"'''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }]"

@@ -11,10 +11,17 @@ value = "[{ id: student:1, marks: [{ mark: 40, subject: 'english' }] }]"
 value = "[{ id: student:2, marks: [{ mark: 40, subject: 'maths' }, { mark: 40, subject: 'english' }, { mark: 45, subject: 'hindi' }] }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 0}\n    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.mark = 40] {rows: 0}\n\nTotal rows: 0''''
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 0}
+    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.mark = 40] {rows: 0}
+
+Total rows: 0''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 2}\n    Filter [ctx: Db] [predicate: 40 INSIDE marks.*.mark] {rows: 2}\n        IndexScan [ctx: Db] [index: mark_idx, access: = 40, direction: Forward] {rows: 2}\n\nTotal rows: 2''''
+value = ''''SelectProject [ctx: Db] [projections: *] {rows: 2}
+    Filter [ctx: Db] [predicate: 40 INSIDE marks.*.mark] {rows: 2}
+        IndexScan [ctx: Db] [index: mark_idx, access: = 40, direction: Forward] {rows: 2}
+
+Total rows: 2''''
 
 [[test.results]]
 value = "[{ id: student:1, marks: [{ mark: 40, subject: 'english' }] }, { id: student:2, marks: [{ mark: 40, subject: 'maths' }, { mark: 40, subject: 'english' }, { mark: 45, subject: 'hindi' }] }]"
