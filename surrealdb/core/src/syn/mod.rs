@@ -224,7 +224,7 @@ pub fn block(input: &str) -> Result<Block> {
 	parse_with_settings(
 		input.as_bytes(),
 		ParserSettings {
-			legacy_strands: true,
+			legacy_strands: false,
 			flexible_record_id: true,
 			files_enabled: true,
 			surrealism_enabled: true,
