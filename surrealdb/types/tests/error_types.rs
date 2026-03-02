@@ -596,7 +596,8 @@ fn test_error_snapshot_not_allowed_auth_token_expired() {
 	};
 	assert_eq!(obj.get("kind"), Some(&Value::String("NotAllowed".into())));
 	assert_eq!(obj.get("message"), Some(&Value::String("Token expired".into())));
-	assert!(!obj.contains_key("cause"));
+	// cause may be omitted or null when absent
+	assert!(obj.get("cause").is_none_or(|v| *v == Value::None));
 	let Some(Value::Object(details)) = obj.get("details") else {
 		panic!("Expected details object");
 	};
@@ -858,7 +859,8 @@ fn test_error_snapshot_internal_no_details() {
 	assert_eq!(obj.get("kind"), Some(&Value::String("Internal".into())));
 	assert_eq!(obj.get("message"), Some(&Value::String("Unexpected".into())));
 	assert!(!obj.contains_key("details"), "No details should be present");
-	assert!(!obj.contains_key("cause"), "No cause field should exist");
+	// cause may be omitted or null when absent
+	assert!(obj.get("cause").is_none_or(|v| *v == Value::None));
 
 	// Round-trip
 	let parsed = Error::from_value(val).unwrap();
@@ -884,7 +886,8 @@ fn test_error_snapshot_thrown_no_details() {
 	assert_eq!(obj.get("kind"), Some(&Value::String("Thrown".into())));
 	assert_eq!(obj.get("message"), Some(&Value::String("custom error".into())));
 	assert!(!obj.contains_key("details"));
-	assert!(!obj.contains_key("cause"));
+	// cause may be omitted or null when absent
+	assert!(obj.get("cause").is_none_or(|v| *v == Value::None));
 
 	// Round-trip
 	let parsed = Error::from_value(val).unwrap();
@@ -1827,4 +1830,65 @@ fn test_error_from_parts_unknown_kind() {
 fn test_error_from_parts_no_kind() {
 	let err = Error::from_parts("No kind".into(), None, None);
 	assert!(err.is_internal()); // Missing kind defaults to Internal
+}
+
+// -----------------------------------------------------------------------------
+// Error chaining (cause)
+// -----------------------------------------------------------------------------
+
+#[test]
+fn test_error_cause_accessor() {
+	let root = Error::internal("root cause".into());
+	let top = Error::validation("validation failed".into(), None).with_cause(root);
+	assert!(top.cause().is_some());
+	let cause = top.cause().unwrap();
+	assert_eq!(cause.message(), "root cause");
+	assert!(cause.is_internal());
+}
+
+#[test]
+fn test_error_cause_wire_roundtrip() {
+	use surrealdb_types::SurrealValue;
+
+	let root = Error::internal("root cause".into());
+	let top = Error::validation("validation failed".into(), None).with_cause(root);
+	let value = top.into_value();
+	let parsed = Error::from_value(value).unwrap();
+	assert_eq!(parsed.message(), "validation failed");
+	let cause = parsed.cause().expect("cause should be present");
+	assert_eq!(cause.message(), "root cause");
+	assert!(cause.is_internal());
+}
+
+#[test]
+fn test_error_cause_chain_three_levels() {
+	use surrealdb_types::SurrealValue;
+
+	let innermost = Error::not_found("record missing".into(), None);
+	let middle = Error::query("query failed".into(), None).with_cause(innermost);
+	let top = Error::internal("operation failed".into()).with_cause(middle);
+	assert_eq!(top.message(), "operation failed");
+	let c1 = top.cause().unwrap();
+	assert_eq!(c1.message(), "query failed");
+	let c2 = c1.cause().unwrap();
+	assert_eq!(c2.message(), "record missing");
+	assert!(c2.is_not_found());
+
+	let value = top.clone().into_value();
+	let parsed = Error::from_value(value).unwrap();
+	assert_eq!(parsed.message(), "operation failed");
+	assert_eq!(parsed.cause().unwrap().message(), "query failed");
+	assert_eq!(parsed.cause().unwrap().cause().unwrap().message(), "record missing");
+}
+
+#[test]
+fn test_error_without_cause_omitted_on_wire() {
+	use surrealdb_types::SurrealValue;
+
+	let err = Error::internal("no cause".into());
+	let value = err.into_value();
+	// cause key may be omitted when None (depends on Option serialization)
+	let parsed = Error::from_value(value).unwrap();
+	assert_eq!(parsed.message(), "no cause");
+	assert!(parsed.cause().is_none());
 }

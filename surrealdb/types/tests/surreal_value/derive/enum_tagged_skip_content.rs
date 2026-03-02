@@ -5,6 +5,7 @@ use surrealdb_types::{Number, SurrealValue, Value, array, object};
 // -------------------------------------------------
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 enum TestSkipContent {
 	UnitA,
@@ -189,6 +190,7 @@ fn test_skip_content_rejects_unknown_kind() {
 // -------------------------------------------------
 
 #[derive(SurrealValue, Debug, PartialEq, Default)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 enum TestSkipContentWithDefault {
 	#[default]
@@ -261,6 +263,7 @@ fn test_skip_content_named_invalid_content_errors() {
 // -------------------------------------------------
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(tag = "kind", content = "details")]
 enum TestNoSkipContent {
 	UnitA,
@@ -306,6 +309,7 @@ fn test_no_skip_content_named_roundtrip() {
 // -------------------------------------------------
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 enum TestSkipContentOption {
 	WithInner(Option<String>),
@@ -362,6 +366,7 @@ fn test_skip_content_option_is_value() {
 // -------------------------------------------------
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(tag = "kind", content = "details")]
 enum TestPerVariantSkip {
 	#[surreal(skip_content)]
@@ -432,6 +437,7 @@ fn test_per_variant_skip_is_value() {
 // -------------------------------------------------
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 enum TestOverrideSkip {
 	#[surreal(skip_content)]

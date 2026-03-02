@@ -1,5 +1,6 @@
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet, LinkedList};
+use std::hash::Hash;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -1571,5 +1572,65 @@ impl SurrealValue for http::StatusCode {
 		};
 		http::StatusCode::from_u16(n as u16)
 			.map_err(|_| Error::internal("Failed to convert status code".to_string()))
+	}
+}
+
+impl<T: SurrealValue> SurrealValue for LinkedList<T> {
+	fn kind_of() -> Kind {
+		kind!(array<(T::kind_of())>)
+	}
+
+	fn is_value(value: &Value) -> bool {
+		{
+			if let Value::Array(Array(a)) = value {
+				a.iter().all(T::is_value)
+			} else {
+				false
+			}
+		}
+	}
+
+	fn into_value(self) -> Value {
+		Value::Array(Array(self.into_iter().map(SurrealValue::into_value).collect()))
+	}
+
+	fn from_value(value: Value) -> Result<Self, Error> {
+		let Value::Array(Array(a)) = value else {
+			return Err(ConversionError::from_value(Self::kind_of(), &value).into());
+		};
+
+		a.into_iter().map(|v| T::from_value(v)).collect::<Result<LinkedList<T>, Error>>().map_err(
+			|e| Error::internal(format!("Failed to convert to {}: {}", Self::kind_of(), e)),
+		)
+	}
+}
+
+impl<T: SurrealValue + Hash + Eq> SurrealValue for HashSet<T> {
+	fn kind_of() -> Kind {
+		kind!(array<(T::kind_of())>)
+	}
+
+	fn is_value(value: &Value) -> bool {
+		{
+			if let Value::Array(Array(a)) = value {
+				a.iter().all(T::is_value)
+			} else {
+				false
+			}
+		}
+	}
+
+	fn into_value(self) -> Value {
+		Value::Array(Array(self.into_iter().map(SurrealValue::into_value).collect()))
+	}
+
+	fn from_value(value: Value) -> Result<Self, Error> {
+		let Value::Array(Array(a)) = value else {
+			return Err(ConversionError::from_value(Self::kind_of(), &value).into());
+		};
+
+		a.into_iter().map(|v| T::from_value(v)).collect::<Result<HashSet<T>, Error>>().map_err(
+			|e| Error::internal(format!("Failed to convert to {}: {}", Self::kind_of(), e)),
+		)
 	}
 }

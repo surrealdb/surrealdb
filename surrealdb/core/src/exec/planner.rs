@@ -377,12 +377,24 @@ impl<'ctx> Planner<'ctx> {
 		op: crate::expr::operator::BinaryOperator,
 		right: Expr,
 	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-		// For MATCHES operators with idiom left and string-literal right,
-		// create a MatchesOp that evaluates via the full-text index.
+		// For MATCHES operators with idiom left and string-literal or
+		// bind-parameter right, create a MatchesOp that evaluates via
+		// the full-text index.
 		if let crate::expr::operator::BinaryOperator::Matches(ref matches_op) = op
 			&& let Expr::Idiom(idiom) = left
 		{
-			if let Expr::Literal(crate::expr::literal::Literal::String(query)) = right {
+			let resolved_query = match &right {
+				Expr::Literal(crate::expr::literal::Literal::String(s)) => Some(s.clone()),
+				Expr::Param(param) => self.ctx.value(param.as_str()).and_then(|v| {
+					if let crate::val::Value::String(s) = v {
+						Some(s.clone())
+					} else {
+						None
+					}
+				}),
+				_ => None,
+			};
+			if let Some(query) = resolved_query {
 				// Multi-part idioms (e.g. `t.name`) may traverse record links
 				// to fields on other tables. MatchesOp can only evaluate
 				// MATCHES against a fulltext index on the source table — it
@@ -409,7 +421,7 @@ impl<'ctx> Planner<'ctx> {
 					query_clone,
 				)));
 			}
-			// Left was idiom but right wasn't a string literal — reassemble
+			// Left was idiom but right wasn't resolvable — reassemble
 			let left_phys = Box::pin(self.physical_expr(Expr::Idiom(idiom))).await?;
 			let right_phys = Box::pin(self.physical_expr(right)).await?;
 			return Ok(Arc::new(BinaryOp {

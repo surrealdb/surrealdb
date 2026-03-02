@@ -1195,7 +1195,7 @@ impl<'ctx> Planner<'ctx> {
 
 		let planning_ctx: std::borrow::Cow<'_, crate::ctx::FrozenContext> =
 			if let Some(ref c) = cond {
-				let mc = extract_matches_context(c);
+				let mc = extract_matches_context(c, Some(self.ctx));
 				let hm = !mc.is_empty();
 				if hm || has_knn_early {
 					let mut child = crate::ctx::Context::new(self.ctx);

@@ -47,7 +47,8 @@ fn default_code() -> i64 {
 ///
 /// The `details` field is flattened into the serialized object, so the wire
 /// format contains `kind` (string) and optionally `details` (object) at the
-/// same level as `code` and `message`.
+/// same level as `code` and `message`. The optional `cause` field allows
+/// error chaining so that SDKs can receive and display full error chains.
 #[derive(Debug, Clone, PartialEq, Eq, SurrealValue)]
 #[surreal(crate = "crate")]
 pub struct Error {
@@ -60,6 +61,10 @@ pub struct Error {
 	/// Flattened into the parent object: contributes `kind` and optionally `details` fields.
 	#[surreal(flatten)]
 	details: ErrorDetails,
+	/// Optional underlying cause for error chaining. Serialized as a nested error object on the
+	/// wire.
+	#[surreal(default)]
+	cause: Option<Box<Error>>,
 }
 
 impl Error {
@@ -91,6 +96,7 @@ impl Error {
 			message,
 			code,
 			details: ErrorDetails::Validation(details),
+			cause: None,
 		}
 	}
 
@@ -134,6 +140,7 @@ impl Error {
 			message,
 			code,
 			details: ErrorDetails::NotAllowed(details),
+			cause: None,
 		}
 	}
 
@@ -153,6 +160,7 @@ impl Error {
 			message,
 			code,
 			details: ErrorDetails::Configuration(details),
+			cause: None,
 		}
 	}
 
@@ -162,6 +170,7 @@ impl Error {
 			message,
 			code: code::THROWN,
 			details: ErrorDetails::Thrown,
+			cause: None,
 		}
 	}
 
@@ -183,6 +192,7 @@ impl Error {
 			message,
 			code,
 			details: ErrorDetails::Query(details),
+			cause: None,
 		}
 	}
 
@@ -201,6 +211,7 @@ impl Error {
 			message,
 			code,
 			details: ErrorDetails::Serialization(details),
+			cause: None,
 		}
 	}
 
@@ -222,6 +233,7 @@ impl Error {
 			message,
 			code,
 			details: ErrorDetails::NotFound(details),
+			cause: None,
 		}
 	}
 
@@ -232,6 +244,7 @@ impl Error {
 			message,
 			code: code::INTERNAL_ERROR,
 			details: ErrorDetails::AlreadyExists(details),
+			cause: None,
 		}
 	}
 
@@ -243,6 +256,7 @@ impl Error {
 			message,
 			code: code::CLIENT_SIDE_ERROR,
 			details: ErrorDetails::Connection(details),
+			cause: None,
 		}
 	}
 
@@ -252,6 +266,7 @@ impl Error {
 			message,
 			code: code::INTERNAL_ERROR,
 			details: ErrorDetails::Internal,
+			cause: None,
 		}
 	}
 
@@ -264,6 +279,23 @@ impl Error {
 			code: default_code(),
 			message,
 			details,
+			cause: None,
+		}
+	}
+
+	/// Build an error from message, details, and optional cause. For deserialization when cause is
+	/// present.
+	#[doc(hidden)]
+	pub fn from_details_with_cause(
+		message: String,
+		details: ErrorDetails,
+		cause: Option<Box<Error>>,
+	) -> Self {
+		Self {
+			code: default_code(),
+			message,
+			details,
+			cause,
 		}
 	}
 
@@ -282,7 +314,19 @@ impl Error {
 			code: default_code(),
 			message,
 			details: typed_details,
+			cause: None,
 		}
+	}
+
+	/// Returns the optional underlying cause for error chaining.
+	pub fn cause(&self) -> Option<&Error> {
+		self.cause.as_deref()
+	}
+
+	/// Returns an error with the given cause attached. Consumes `self`.
+	pub fn with_cause(mut self, cause: Error) -> Self {
+		self.cause = Some(Box::new(cause));
+		self
 	}
 
 	/// Returns the kind string for this error (e.g. "NotAllowed", "Internal").
@@ -848,7 +892,11 @@ impl fmt::Display for Error {
 	}
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for Error {
+	fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+		self.cause.as_deref().map(|e| e as &(dyn std::error::Error + 'static))
+	}
+}
 
 // -----------------------------------------------------------------------------
 // Type conversion errors (internal to the types layer)

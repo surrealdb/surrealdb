@@ -23,6 +23,7 @@ use crate::expr::TopLevelExpr;
 	Deserialize,
 	SurrealValue,
 )]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(untagged, lowercase)]
 #[serde(rename_all = "lowercase")]
 pub enum QueryType {
@@ -254,6 +255,7 @@ impl QueryResultBuilder {
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
 #[serde(rename_all = "UPPERCASE")]
 #[surreal(untagged, uppercase)]
 pub enum Status {

@@ -472,9 +472,14 @@ impl ExecutionContext {
 				}
 			}
 		} else {
-			// Without database context, we can't do the full check
-			// Default to requiring permission checks
-			Ok(true)
+			// Without database context we cannot verify namespace/database-level
+			// users, but root users with the appropriate role should still bypass
+			// permission checks regardless of context level.
+			let has_role = match action {
+				Action::Edit => root.auth.has_editor_role(),
+				Action::View => root.auth.has_viewer_role(),
+			};
+			Ok(!has_role || !root.auth.is_root())
 		}
 	}
 

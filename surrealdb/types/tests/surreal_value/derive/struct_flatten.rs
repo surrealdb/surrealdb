@@ -5,12 +5,14 @@ use surrealdb_types::{SurrealValue, Value, object};
 // -------------------------------------------------
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 struct Inner {
 	x: i64,
 	y: i64,
 }
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 struct Outer {
 	name: String,
 	#[surreal(flatten)]
@@ -85,6 +87,7 @@ fn test_flatten_roundtrip() {
 // -------------------------------------------------
 
 #[derive(SurrealValue, Debug, PartialEq, Clone)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(tag = "kind", content = "details", skip_content_if = "Value::is_empty")]
 enum Status {
 	Active,
@@ -94,6 +97,7 @@ enum Status {
 }
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 struct Record {
 	id: i64,
 	#[surreal(flatten)]
@@ -197,6 +201,7 @@ fn test_flatten_is_value() {
 // -------------------------------------------------
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 struct NoFlatten {
 	name: String,
 	inner: Inner,
