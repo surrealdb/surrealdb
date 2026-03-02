@@ -379,6 +379,8 @@ pub enum BaseTokenKind {
 	KwMerge,
 	#[regex(r"(?i)MODEL")]
 	KwModel,
+	#[regex(r"(?i)MODULE")]
+	KwModule,
 	#[regex(r"(?i)MTREE")]
 	KwMTree,
 	#[regex(r"(?i)MTREE_CACHE")]
@@ -497,6 +499,8 @@ pub enum BaseTokenKind {
 	KwSplit,
 	#[regex(r"(?i)START")]
 	KwStart,
+	#[regex(r"(?i)STRICT")]
+	KwStrict,
 	#[regex(r"(?i)STRUCTURE")]
 	KwStructure,
 	#[regex(r"(?i)TABLE")]
@@ -809,6 +813,9 @@ pub enum BaseTokenKind {
 	#[regex(r#"d"([^"\\]|\\.)*""#)]
 	#[regex(r#"d'([^'\\]|\\.)*'"#)]
 	DateTimeString,
+	#[regex(r#"f"([^"\\]|\\.)*""#)]
+	#[regex(r#"f'([^'\\]|\\.)*'"#)]
+	FileString,
 
 	#[regex(r"\$(?&backtick_ident)")]
 	#[regex(r"\$(?&bracket_ident)")]
@@ -1007,6 +1014,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwML => "keyword `ML`",
 			BaseTokenKind::KwMerge => "keyword `MERGE`",
 			BaseTokenKind::KwModel => "keyword `MODEL`",
+			BaseTokenKind::KwModule => "keyword `MODULE`",
 			BaseTokenKind::KwMTree => "keyword `MTREE`",
 			BaseTokenKind::KwMTreeCache => "keyword `MTREECACHE`",
 			BaseTokenKind::KwNamespace => "keyword `NAMESPACE`",
@@ -1064,6 +1072,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwSnowball => "keyword `SNOWBALL`",
 			BaseTokenKind::KwSplit => "keyword `SPLIT`",
 			BaseTokenKind::KwStart => "keyword `START`",
+			BaseTokenKind::KwStrict => "keyword `STRICT`",
 			BaseTokenKind::KwStructure => "keyword `STRUCTURE`",
 			BaseTokenKind::KwTable => "keyword `TABLE`",
 			BaseTokenKind::KwTables => "keyword `TABLES`",
@@ -1194,6 +1203,7 @@ impl BaseTokenKind {
 			BaseTokenKind::RecordIdString => "a record-id string",
 			BaseTokenKind::UuidString => "a uuid",
 			BaseTokenKind::DateTimeString => "a datetime",
+			BaseTokenKind::FileString => "a file path",
 			BaseTokenKind::Param => "a parameter",
 			BaseTokenKind::Ident => "an identifier",
 			BaseTokenKind::NaN => "`NaN`",

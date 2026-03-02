@@ -1,3 +1,5 @@
+mod define;
+
 use ast::{AstSpan, Base, Expr, Fetch, NodeId, OrderBy, RecordData, WithIndex};
 use common::source_error::{Annotation, AnnotationKind, Level, Snippet};
 use token::{BaseTokenKind, T};

@@ -105,7 +105,7 @@ pub(crate) use ast_type;
 macro_rules! impl_vis_debug {
 	($t:ty) => {
 		#[cfg(feature = "visualize")]
-		impl<L, W> AstVis<L, W> for $t
+		impl<L, W> crate::vis::AstVis<L, W> for $t
 		where
 			L: $crate::types::NodeLibrary,
 			W: ::std::fmt::Write,

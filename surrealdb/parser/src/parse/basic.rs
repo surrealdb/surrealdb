@@ -129,6 +129,17 @@ impl ParseSync for ast::StringLit {
 	}
 }
 
+impl ParseSync for ast::FileLit {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let token = parser.expect(BaseTokenKind::String)?;
+		let slice = parser.unescape_str_push(token)?;
+		Ok(ast::FileLit {
+			path: slice,
+			span: token.span,
+		})
+	}
+}
+
 impl ParseSync for Duration {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
 		const NANOSECOND_DURATION_MAX: u128 = (u64::MAX as u128) * 1_000_000_000 + 999_999_999;

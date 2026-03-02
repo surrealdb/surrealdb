@@ -14,7 +14,7 @@ pub use ast::Ast;
 id!(NodeId<T>);
 
 impl<T: Any> NodeId<T> {
-	fn index<'a, L: NodeLibrary>(self, ast: &'a Ast<L>) -> &'a T {
+	pub fn index<'a, L: NodeLibrary>(self, ast: &'a Ast<L>) -> &'a T {
 		&ast[self]
 	}
 }
