@@ -1119,9 +1119,8 @@ impl<'ctx> Planner<'ctx> {
 			&& self.has_matching_count_index(&what, &cond).await
 		{
 			use crate::exec::operators::scan::index_count::IndexCountScan;
-			let table_expr = self
-				.physical_expr(what.iter().next().cloned().expect("what verified non-empty"))
-				.await?;
+			let table_expr =
+				self.physical_expr(what.first().cloned().expect("what verified non-empty")).await?;
 			let condition = cond.clone().expect("is_indexed_count_eligible requires cond");
 			let predicate = self.physical_expr(condition.0.clone()).await?;
 			let field_names = extract_count_field_names(&fields);
