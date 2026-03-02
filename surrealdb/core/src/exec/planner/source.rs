@@ -257,14 +257,21 @@ impl<'ctx> Planner<'ctx> {
 					GraphEdgeScan::new(input, LookupDirection::from(dir), edge_tables, output_mode);
 				// Push limit into the scan when no filter/sort/split would
 				// change the result count. This avoids scanning all edges
-				// when only a few are needed.
+				// when only a few are needed. When START is present, add
+				// the offset so the scan fetches enough rows for the skip.
 				let scan =
 					if cond.is_none() && split.is_none() && order.is_none() && group.is_none() {
 						if let Some(crate::expr::limit::Limit(crate::expr::Expr::Literal(
 							crate::expr::Literal::Integer(n),
 						))) = &limit
 						{
-							scan.with_limit(*n as usize)
+							let offset = match &start {
+								Some(crate::expr::start::Start(crate::expr::Expr::Literal(
+									crate::expr::Literal::Integer(s),
+								))) => *s as usize,
+								_ => 0,
+							};
+							scan.with_limit(*n as usize + offset)
 						} else {
 							scan
 						}
