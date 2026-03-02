@@ -1,9 +1,12 @@
-//! Pure utility functions for the planner.
+//! Utility functions for the planner.
 //!
-//! These functions have no dependency on `Planner` or `FrozenContext` and perform
-//! static conversions, validation, or predicate checks.
+//! Most functions are pure and perform static conversions, validation, or
+//! predicate checks. `resolve_condition_params` is the exception: it requires
+//! `FrozenContext` for parameter resolution and a transaction for `DEFINE PARAM`
+//! fallback.
 
 use crate::catalog::Distance;
+use crate::catalog::providers::DatabaseProvider;
 use crate::err::Error;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::expr::field::{Field, Fields};
@@ -624,6 +627,113 @@ impl MutVisitor for BoolSimplifier {
 	) -> Result<(), Self::Error> {
 		Ok(())
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Parameter pre-resolution
+// ---------------------------------------------------------------------------
+
+/// Collects all `Expr::Param` names referenced in a condition, skipping
+/// subqueries. Used as the first pass before async resolution.
+struct ParamCollector {
+	names: std::collections::HashSet<String>,
+}
+
+impl Visitor for ParamCollector {
+	type Error = std::convert::Infallible;
+
+	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
+		if let Expr::Param(param) = expr {
+			self.names.insert(param.as_str().to_string());
+		}
+		expr.visit(self)
+	}
+
+	fn visit_select(&mut self, _: &crate::expr::SelectStatement) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
+/// Replaces `Expr::Param` nodes with `Expr::Literal` using a pre-built value
+/// map. Applied after async resolution has populated the map.
+struct ParamResolver<'a> {
+	values: &'a std::collections::HashMap<String, crate::val::Value>,
+}
+
+impl MutVisitor for ParamResolver<'_> {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		if let Expr::Param(param) = expr {
+			if let Some(value) = self.values.get(param.as_str()) {
+				*expr = value.clone().into_literal();
+				return Ok(());
+			}
+		}
+		expr.visit_mut(self)
+	}
+
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
+/// Resolve bind-parameter references in a `WHERE` condition to their literal
+/// values. Returns a new `Cond` with `Expr::Param` nodes replaced by
+/// `Expr::Literal` wherever the value is available.
+///
+/// Resolution order for each parameter:
+/// 1. Context values (`LET` bindings, client bind parameters, session params)
+/// 2. Database-level defined parameters (`DEFINE PARAM`) via the transaction store, when `ns_db`
+///    IDs are provided.
+///
+/// Parameters that cannot be resolved are left as-is.
+pub(crate) async fn resolve_condition_params(
+	cond: &Cond,
+	ctx: &crate::ctx::FrozenContext,
+	ns_db: Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)>,
+) -> Cond {
+	// Pass 1: collect all param names referenced in the condition.
+	let mut collector = ParamCollector {
+		names: std::collections::HashSet::new(),
+	};
+	let _ = collector.visit_expr(&cond.0);
+	if collector.names.is_empty() {
+		return cond.clone();
+	}
+
+	// Pass 2: resolve each parameter.
+	let mut resolved = std::collections::HashMap::with_capacity(collector.names.len());
+	for name in &collector.names {
+		// Try context values first (LET, bind params, session).
+		if let Some(value) = ctx.value(name) {
+			resolved.insert(name.clone(), value.clone());
+			continue;
+		}
+		// Fall back to DEFINE PARAM in the transaction store.
+		if let Some((ns, db)) = ns_db
+			&& let Some(txn) = ctx.try_tx()
+		{
+			if let Ok(param_def) = txn.get_db_param(ns, db, name).await {
+				resolved.insert(name.clone(), param_def.value.clone());
+			}
+		}
+	}
+
+	if resolved.is_empty() {
+		return cond.clone();
+	}
+
+	// Pass 3: apply substitutions.
+	let mut expr = cond.0.clone();
+	let _ = ParamResolver {
+		values: &resolved,
+	}
+	.visit_mut_expr(&mut expr);
+	Cond(expr)
 }
 
 /// Extract a `Vec<Number>` from a literal array expression.

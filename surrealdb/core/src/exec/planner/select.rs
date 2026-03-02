@@ -24,7 +24,8 @@ use super::util::{
 	extract_version, get_effective_limit_literal, has_knn_k_operator, has_knn_operator,
 	has_top_level_or, idiom_to_field_name, idiom_to_field_path, index_covers_ordering,
 	is_count_all_eligible, is_indexed_count_eligible, order_is_scan_compatible,
-	strip_fts_condition, strip_index_conditions, strip_knn_from_condition,
+	resolve_condition_params, strip_fts_condition, strip_index_conditions,
+	strip_knn_from_condition,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
@@ -1271,6 +1272,25 @@ impl<'ctx> Planner<'ctx> {
 				&& matches!(&what[0], Expr::Param(p) if {
 					matches!(self.ctx.value(p.as_str()), Some(crate::val::Value::Table(_)))
 				}));
+
+		// Resolve bind-parameter references so that downstream index analysis
+		// and KNN extraction see Expr::Literal instead of Expr::Param.
+		// This covers LET bindings, client bind params, and DEFINE PARAM.
+		let ns_db = match (&self.txn, &self.ns, &self.db) {
+			(Some(txn), Some(ns), Some(db)) => {
+				match (txn.get_ns_by_name(ns).await, txn.get_db_by_name(ns, db).await) {
+					(Ok(Some(ns_def)), Ok(Some(db_def))) => {
+						Some((ns_def.namespace_id, db_def.database_id))
+					}
+					_ => None,
+				}
+			}
+			_ => None,
+		};
+		let cond = match cond.as_ref() {
+			Some(c) => Some(resolve_condition_params(c, self.ctx, ns_db).await),
+			None => None,
+		};
 
 		// KNN handling
 		let has_knn = cond.as_ref().is_some_and(|c| has_knn_operator(&c.0));
