@@ -120,6 +120,10 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_NO_IDENTIFICATION_HEADERS", long)]
 	#[arg(default_value_t = false)]
 	no_identification_headers: bool,
+	#[arg(help = "The allowed origins for CORS requests. Defaults to allow all origins")]
+	#[arg(env = "SURREAL_ALLOW_ORIGIN", long = "allow-origin")]
+	#[arg(value_delimiter = ',')]
+	allow_origin: Vec<String>,
 	//
 	// Database options
 	#[command(flatten)]
@@ -184,6 +188,7 @@ pub async fn init<
 		event_processing_interval,
 		no_banner,
 		no_identification_headers,
+		allow_origin,
 		..
 	}: StartCommandArguments,
 ) -> Result<()> {
@@ -227,6 +232,7 @@ pub async fn init<
 		user,
 		pass,
 		no_identification_headers,
+		allow_origin,
 		engine,
 		crt,
 		key,
