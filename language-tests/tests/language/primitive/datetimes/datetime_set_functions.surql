@@ -38,25 +38,25 @@ value = "d'+262142-02-26T07:29:23.346200Z'"
 value = "d'-262143-02-26T07:29:23.346200Z'"
 
 [[test.results]]
-value = "Unable to set datetime to year 262143"
+error = "Unable to set datetime to year 262143"
 
 [[test.results]]
-value = "out of range integral type conversion attempted"
+error = "out of range integral type conversion attempted"
 
 [[test.results]]
-value = "out of range integral type conversion attempted"
+error = "out of range integral type conversion attempted"
 
 [[test.results]]
-value = "out of range integral type conversion attempted"
+error = "out of range integral type conversion attempted"
 
 [[test.results]]
-value = "out of range integral type conversion attempted"
+error = "out of range integral type conversion attempted"
 
 [[test.results]]
-value = "out of range integral type conversion attempted"
+error = "out of range integral type conversion attempted"
 
 [[test.results]]
-value = "out of range integral type conversion attempted"
+error = "out of range integral type conversion attempted"
 
 */
 
