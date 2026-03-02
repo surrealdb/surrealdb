@@ -28,7 +28,7 @@ mod visit;
 
 pub use types::{AstSpan, Node, NodeId, NodeList, NodeListId, Spanned, UniqueNode};
 
-use crate::mac::ast_type;
+use crate::mac::{ast_type, impl_vis_debug};
 
 type NodeSet<T> = IdSet<u32, T>;
 
@@ -57,6 +57,9 @@ library! {
 		delete_stmt: Vec<Delete>,
 		relate_stmt: Vec<Relate>,
 		select_stmt: Vec<Select>,
+		define_ns_stmt: Vec<DefineNamespace>,
+		define_db_stmt: Vec<DefineDatabase>,
+		define_function_stmt: Vec<DefineFunction>,
 
 		expr: Vec<Expr>,
 		exprs: Vec<NodeList<Expr>>,
@@ -112,6 +115,9 @@ library! {
 		fetchs: Vec<NodeList<Fetch>>,
 
 		output: Vec<Output>,
+
+		parameter: Vec<Parameter>,
+		parameters: Vec<NodeList<Parameter>>,
 
 		type_: Vec<Type>,
 		types: Vec<NodeList<Type>>,
@@ -459,6 +465,129 @@ ast_type! {
 	}
 }
 
+#[derive(Debug)]
+pub enum DefineKind {
+	Create,
+	IfNotExists,
+	Overwrite,
+}
+impl_vis_debug!(DefineKind);
+
+ast_type! {
+	pub enum Permission{
+		None(Span),
+		Full(Span),
+		Where(NodeId<Expr>),
+	}
+}
+
+ast_type! {
+	pub struct DefineNamespace{
+		pub kind: DefineKind,
+		pub name: NodeId<Expr>,
+		pub comment: Option<NodeId<Expr>>,
+	}
+}
+
+ast_type! {
+	pub enum ChangeFeed{
+		Base(NodeId<Spanned<Duration>>),
+		WithOriginal(NodeId<Spanned<Duration>>),
+	}
+}
+
+ast_type! {
+	pub struct DefineDatabase{
+		pub kind: DefineKind,
+		pub name: NodeId<Expr>,
+		pub strict: bool,
+		pub changefeed: Option<ChangeFeed>,
+		pub comment: Option<NodeId<Expr>>,
+	}
+}
+
+ast_type! {
+	pub struct Parameter{
+		pub name: NodeId<Param>,
+		pub ty: NodeId<Type>,
+	}
+}
+
+ast_type! {
+	pub struct DefineFunction{
+		pub kind: DefineKind,
+		pub name: NodeId<Path>,
+		pub parameters: Option<NodeListId<Parameter>>,
+		pub return_ty: Option<NodeId<Type>>,
+		pub body: NodeId<Block>,
+		pub comment: Option<NodeId<Expr>>,
+		pub permission: Option<Permission>,
+	}
+}
+ast_type! {
+	pub enum ModuleName{
+		File(NodeId<FileLit>),
+		Path(NodeId<Path>),
+	}
+}
+
+ast_type! {
+	pub struct DefineModule{
+		pub kind: DefineKind,
+		pub subject: ModuleName,
+		pub alias: Option<NodeId<Path>>,
+		pub comment: Option<NodeId<Expr>>,
+		pub permission: Option<Permission>,
+	}
+}
+
+ast_type! {
+	pub struct DefineParam{
+		pub kind: DefineKind,
+		pub param: NodeId<Param>,
+		pub value: Option<NodeId<Expr>>,
+		pub comment: Option<NodeId<Expr>>,
+		pub permission: Option<Permission>,
+	}
+}
+
+ast_type! {
+	pub struct RelationTable{
+		pub from: Option<NodeListId<Ident>>,
+		pub to: Option<NodeListId<Ident>>,
+		pub enforced: bool,
+	}
+}
+
+ast_type! {
+	pub enum TableKind{
+		Normal(Span),
+		Relation(RelationTable),
+		Any(Span),
+	}
+}
+
+#[derive(Debug)]
+pub enum Schema {
+	Less,
+	Full,
+}
+impl_vis_debug!(Schema);
+
+ast_type! {
+	pub struct DefineTable{
+		pub kind: DefineKind,
+		pub name: NodeId<Expr>,
+		pub comment: Option<NodeId<Expr>>,
+		pub drop: bool,
+		pub schema: Option<Schema>,
+		pub table_kind: Option<TableKind>,
+		pub permission: Option<Permission>,
+		pub changefeed: Option<ChangeFeed>,
+		pub view: Option<NodeId<Select>>,
+	}
+}
+
 ast_type! {
 	#[derive(Copy, Clone)]
 	pub enum Expr {
@@ -554,6 +683,12 @@ impl AstSpan for Integer {
 ast_type! {
 	pub struct StringLit {
 		pub text: NodeId<String>,
+	}
+}
+
+ast_type! {
+	pub struct FileLit{
+		pub path: NodeId<String>,
 	}
 }
 

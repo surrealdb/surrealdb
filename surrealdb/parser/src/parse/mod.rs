@@ -17,6 +17,7 @@ mod basic;
 mod error;
 mod expr;
 mod kind;
+mod misc;
 mod peek;
 mod place;
 pub mod prime;

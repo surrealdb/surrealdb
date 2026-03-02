@@ -454,6 +454,9 @@ macro_rules! T {
 	(MODEL) => {
 		$crate::BaseTokenKind::KwModel
 	};
+	(MODULE) => {
+		$crate::BaseTokenKind::KwModule
+	};
 	(MTREE) => {
 		$crate::BaseTokenKind::KwMTree
 	};
@@ -624,6 +627,9 @@ macro_rules! T {
 	};
 	(START) => {
 		$crate::BaseTokenKind::KwStart
+	};
+	(STRICT) => {
+		$crate::BaseTokenKind::KwStrict
 	};
 	(STRUCTURE) => {
 		$crate::BaseTokenKind::KwStructure

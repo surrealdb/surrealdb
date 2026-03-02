@@ -50,6 +50,11 @@ surrealdb-core = { version = "3.1.0-alpha", path = "surrealdb/core", default-fea
 surrealdb-server = { version = "3.1.0-alpha", path = "surrealdb/server", default-features = false }
 surrealdb-types = { version = "3.1.0-alpha", path = "surrealdb/types" }
 surrealdb-types-derive = { version = "3.1.0-alpha", path = "surrealdb/types/derive" }
+ast = { package = "surrealdb-ast", path = "surrealdb/ast" }
+token = { package = "surrealdb-token", path = "surrealdb/token" }
+parser = { package = "surrealdb-parser", path = "surrealdb/parser" }
+common = { package = "surrealdb-common", path = "surrealdb/common" }
+
 # SurrealML crates
 surrealml-core = { version = "0.1", path = "surrealml/core" }
 # Surrealism crates
@@ -103,6 +108,7 @@ async-graphql-axum = "7.2.0"
 async-trait = "0.1.89"
 base64 = "0.22.1"
 bcrypt = "0.18.0"
+bitflags = "*" # TODO: pin version
 blake3 = "1.8.3"
 boxcar = "0.2.14"
 bytes = "1.11.1"
@@ -122,6 +128,7 @@ fuzzy-matcher = "0.3.7"
 geo = { version = "0.32.0", default-features = false }
 geo-types = "0.7.18"
 getrandom = "0.3.4"
+hashbrown = "*" # TODO: pin version
 hex = "0.4.3"
 http = "1.4.0"
 hyper = "1.8"
@@ -130,6 +137,7 @@ indexmap = "2.13.0"
 ipnet = "2.11.0"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
 jsonwebtoken = { version = "10.3.0", default-features = false, features = ["use_pem"] }
+logos = "*" # TODO: pin version
 md-5 = "0.10.6"
 mimalloc = "0.1.48"
 native-tls = "0.2.14"
