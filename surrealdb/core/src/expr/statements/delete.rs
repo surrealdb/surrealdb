@@ -105,7 +105,10 @@ impl DeleteStatement {
 				Value::Array(mut a) if self.only => match a.len() {
 					// There was exactly one result
 					1 => Ok(a.remove(0)),
-					// There were no results
+					// No results (e.g. record did not exist): return None for backwards
+					// compatibility with clients that expect a single value.
+					0 => Ok(Value::None),
+					// Multiple results when only one expected
 					_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
 				},
 				// This is standard query result
