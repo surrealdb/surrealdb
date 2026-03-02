@@ -32,7 +32,7 @@ use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
 	AccessStatement, CreateStatement, DeleteStatement, ForeachStatement, IfelseStatement,
-	InfoStatement, InsertStatement, KillStatement, OptionStatement, OutputStatement,
+	InfoStatement, InsertStatement, KillStatement, OptionStatement, OptionValue, OutputStatement,
 	RelateStatement, RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement,
 	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement,
 	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
@@ -2293,7 +2293,54 @@ fn parse_option() {
 		res,
 		TopLevelExpr::Option(OptionStatement {
 			name: "value".to_owned(),
-			what: true
+			what: OptionValue::Bool(true)
+		})
+	)
+}
+
+#[test]
+fn parse_option_string() {
+	let res =
+		syn::parse_with(r#"OPTION PLANNER = "compute-only""#.as_bytes(), async |parser, stk| {
+			parser.parse_top_level_expr(stk).await
+		})
+		.unwrap();
+	assert_eq!(
+		res,
+		TopLevelExpr::Option(OptionStatement {
+			name: "PLANNER".to_owned(),
+			what: OptionValue::String("compute-only".to_owned())
+		})
+	)
+}
+
+#[test]
+fn parse_option_string_single_quotes() {
+	let res =
+		syn::parse_with(r#"OPTION PLANNER = 'all-read-only'"#.as_bytes(), async |parser, stk| {
+			parser.parse_top_level_expr(stk).await
+		})
+		.unwrap();
+	assert_eq!(
+		res,
+		TopLevelExpr::Option(OptionStatement {
+			name: "PLANNER".to_owned(),
+			what: OptionValue::String("all-read-only".to_owned())
+		})
+	)
+}
+
+#[test]
+fn parse_option_implicit_true() {
+	let res = syn::parse_with(r#"OPTION IMPORT"#.as_bytes(), async |parser, stk| {
+		parser.parse_top_level_expr(stk).await
+	})
+	.unwrap();
+	assert_eq!(
+		res,
+		TopLevelExpr::Option(OptionStatement {
+			name: "IMPORT".to_owned(),
+			what: OptionValue::Bool(true)
 		})
 	)
 }

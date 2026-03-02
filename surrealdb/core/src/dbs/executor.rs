@@ -78,14 +78,54 @@ impl Executor {
 		self.opt.is_allowed(Action::Edit, ResourceKind::Option, &Base::Db)?;
 
 		if stmt.name.eq_ignore_ascii_case("IMPORT") {
-			self.opt.set_import(stmt.what);
+			let val = stmt.what.as_bool().map_err(|mut e| {
+				if let Error::InvalidOption {
+					name,
+					..
+				} = &mut e
+				{
+					*name = "IMPORT".into();
+				}
+				e
+			})?;
+			self.opt.set_import(val);
 		} else if stmt.name.eq_ignore_ascii_case("FORCE") {
-			let force = if stmt.what {
+			let val = stmt.what.as_bool().map_err(|mut e| {
+				if let Error::InvalidOption {
+					name,
+					..
+				} = &mut e
+				{
+					*name = "FORCE".into();
+				}
+				e
+			})?;
+			self.opt.force = if val {
 				Force::All
 			} else {
 				Force::None
 			};
-			self.opt.force = force;
+		} else if stmt.name.eq_ignore_ascii_case("PLANNER") {
+			let val = stmt.what.as_str().map_err(|mut e| {
+				if let Error::InvalidOption {
+					name,
+					..
+				} = &mut e
+				{
+					*name = "PLANNER".into();
+				}
+				e
+			})?;
+			let strategy = val.parse::<crate::dbs::NewPlannerStrategy>().map_err(|msg| {
+				Error::InvalidOption {
+					name: "PLANNER".into(),
+					message: msg,
+				}
+			})?;
+			let ctx = Arc::get_mut(&mut self.ctx).ok_or_else(|| {
+				Error::unreachable("Tried to unfreeze a Context with multiple references")
+			})?;
+			ctx.set_new_planner_strategy(strategy);
 		}
 
 		Ok(())

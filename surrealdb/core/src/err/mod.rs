@@ -368,6 +368,13 @@ pub(crate) enum Error {
 	#[error("Reached excessive computation depth due to functions, subqueries, or computed values")]
 	ComputationDepthExceeded,
 
+	/// Invalid value for an OPTION statement
+	#[error("Invalid value for OPTION {name}: {message}")]
+	InvalidOption {
+		name: String,
+		message: String,
+	},
+
 	/// Tried to execute a statement that can't be used here
 	#[error("Invalid statement: {0}")]
 	InvalidStatement(String),

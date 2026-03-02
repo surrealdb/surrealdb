@@ -822,6 +822,11 @@ impl Context {
 		&self.new_planner_strategy
 	}
 
+	/// Override the planner strategy for this context
+	pub(crate) fn set_new_planner_strategy(&mut self, strategy: NewPlannerStrategy) {
+		self.new_planner_strategy = strategy;
+	}
+
 	/// Whether EXPLAIN ANALYZE should redact elapsed durations.
 	pub(crate) fn redact_volatile_explain_attrs(&self) -> bool {
 		self.redact_volatile_explain_attrs
