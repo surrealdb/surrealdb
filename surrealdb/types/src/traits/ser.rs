@@ -1,10 +1,11 @@
 use crate::error::Error;
-use crate::value::Value;
-use crate::{Array, Bytes, Number, Object, SerializationError};
+use crate::value::{self, Value};
+use crate::{Array, Bytes, Number, Object, SerializationError, object};
 use core::fmt::Display;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use serde::ser::{Impossible, Serialize};
+use std::collections::BTreeMap;
 
 pub struct Serializer;
 
