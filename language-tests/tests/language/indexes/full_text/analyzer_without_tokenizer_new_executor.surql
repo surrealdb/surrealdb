@@ -1,6 +1,18 @@
 /**
 [test]
 reason = "Test fulltext search with analyzer that has filters but no tokenizer (new executor)"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: t:1, text: 'ab' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: t:1, text: 'ab' }]"
 */
 
 DEFINE ANALYZER az FILTERS lowercase,ngram(1,5);

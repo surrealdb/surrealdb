@@ -2,6 +2,18 @@
 [test]
 reason = "Ensure link.* works correctly with and without WHERE clause (new executor)"
 issue = 3510
+
+[[test.results]]
+value = "[{ id: a:1 }]"
+
+[[test.results]]
+value = "[{ id: b:1, link: a:1, num: 1 }]"
+
+[[test.results]]
+value = "[{ link: { id: a:1 } }]"
+
+[[test.results]]
+value = "[{ link: { id: a:1 } }]"
 */
 
 CREATE a:1;

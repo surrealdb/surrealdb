@@ -24,7 +24,7 @@ use super::util::{
 	extract_version, get_effective_limit_literal, has_knn_k_operator, has_knn_operator,
 	has_top_level_or, idiom_to_field_name, idiom_to_field_path, index_covers_ordering,
 	is_count_all_eligible, is_indexed_count_eligible, order_is_scan_compatible,
-	strip_index_conditions, strip_knn_from_condition,
+	strip_fts_condition, strip_index_conditions, strip_knn_from_condition,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
@@ -1662,9 +1662,17 @@ impl<'ctx> Planner<'ctx> {
 						if let Some(ref tc) = table_ctx {
 							scan = scan.with_resolved(tc.clone());
 						}
+						let filter_action = if let Some(c) = cond {
+							match strip_fts_condition(c) {
+								None => FilterAction::FullyConsumed,
+								Some(residual) => FilterAction::Residual(residual),
+							}
+						} else {
+							FilterAction::FullyConsumed
+						};
 						return Ok(PlannedSource {
 							operator: Arc::new(scan) as Arc<dyn ExecOperator>,
-							filter_action: FilterAction::UseOriginal,
+							filter_action,
 							limit_pushed: false,
 						});
 					}

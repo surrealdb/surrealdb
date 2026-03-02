@@ -1,6 +1,33 @@
 /**
 [test]
 reason = "Test search::score() when fulltext index is not directly used as the iterator (new executor)"
+
+[[test.results]]
+value = "[{ id: blog:1, label: 'test', title: 'the quick brown fox jumped over the lazy dog' }]"
+
+[[test.results]]
+value = "[{ id: blog:2, label: 'test', title: 'the fast fox jumped over the lazy dog' }]"
+
+[[test.results]]
+value = "[{ id: blog:3, label: 'test', title: 'the other animals sat there watching' }]"
+
+[[test.results]]
+value = "[{ id: blog:4, label: 'test', title: 'the dog sat there and did nothing' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: blog:3, score: 0.9227996468544006f }]"
+
+[[test.results]]
+value = "[]"
 */
 
 CREATE blog:1 SET title = 'the quick brown fox jumped over the lazy dog', label = 'test';

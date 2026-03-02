@@ -1,6 +1,30 @@
 /**
 [test]
 reason = "Test that boolean expressions in WHERE with index produce correct results (new executor)"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ flag: true, id: test:t }]"
+
+[[test.results]]
+value = "[{ flag: false, id: test:f }]"
+
+[[test.results]]
+value = "[{ flag: false, id: test:f }, { flag: true, id: test:t }]"
+
+[[test.results]]
+value = "[{ flag: false, id: test:f }, { flag: true, id: test:t }]"
+
+[[test.results]]
+value = "[{ flag: false, id: test:f }, { flag: true, id: test:t }]"
+
+[[test.results]]
+value = "[{ flag: false, id: test:f }, { flag: true, id: test:t }]"
+
+[[test.results]]
+value = "[{ flag: false, id: test:f }, { flag: true, id: test:t }]"
 */
 
 DEFINE INDEX flagIndex ON TABLE test COLUMNS flag;

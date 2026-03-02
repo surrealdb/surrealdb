@@ -1,6 +1,21 @@
 /**
 [test]
 reason = "Test search offsets with multiple fulltext indexes on different fields (new executor)"
+
+[[test.results]]
+value = "[{ content: ['Hello World!', 'Be Bop', 'Foo Bãr'], id: blog:1, title: 'Blog title!' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = '[{ content: { "0": [{ e: 5, s: 0 }], "2": [{ e: 7, s: 4 }] }, id: blog:1, title: { "0": [{ e: 10, s: 5 }] } }]'
 */
 
 CREATE blog:1 SET title = 'Blog title!', content = ['Hello World!', 'Be Bop', 'Foo Bãr'];

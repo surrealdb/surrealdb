@@ -1,6 +1,30 @@
 /**
 [test]
 reason = "Test dynamic array and object key access in SELECT and UPSERT (new executor)"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: documentation:test, languages: { de: 'das ist Englisch', en: 'this is english', es: 'esto es español' }, primarylang: 'en', tags: [{ type: 'library', value: 'client-side' }, { type: 'library', value: 'server-side' }, { type: 'environment', value: 'frontend' }] }]"
+
+[[test.results]]
+value = "[{ tags: { value: 'client-side' } }]"
+
+[[test.results]]
+value = "[{ content: 'this is english' }]"
+
+[[test.results]]
+value = "[{ id: documentation:test, languages: { de: 'das ist Englisch', en: 'my primary text', es: 'esto es español' }, primarylang: 'en', tags: [{ type: 'library', value: 'client-side' }, { type: 'library', value: 'server-side' }, { type: 'environment', value: 'frontend' }] }]"
+
+[[test.results]]
+value = "[{ content: 'my primary text' }]"
+
+[[test.results]]
+value = "[{ id: documentation:test, languages: { de: 'das ist Englisch', en: 'my secondary text', es: 'esto es español' }, primarylang: 'en', tags: [{ type: 'library', value: 'client-side' }, { type: 'library', value: 'server-side' }, { type: 'environment', value: 'frontend' }] }]"
+
+[[test.results]]
+value = "[{ content: 'my secondary text' }]"
 */
 
 LET $lang = 'en';

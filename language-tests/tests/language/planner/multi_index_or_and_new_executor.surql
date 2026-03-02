@@ -27,113 +27,61 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: name] {rows: 2}
-    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2}
-        Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm'] {rows: 2}
-            UnionIndexScan [ctx: Db] [table: person, branches: 2] {rows: 2}
-                IndexScan [ctx: Db] [index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1}
-                IndexScan [ctx: Db] [index: idx_genre, access: = 'm', direction: Forward] {rows: 2}
-
-Total rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: name] {rows: 2}\n    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2}\n        Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm'] {rows: 2}\n            UnionIndexScan [ctx: Db] [table: person, branches: 2] {rows: 2}\n                IndexScan [ctx: Db] [index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1}\n                IndexScan [ctx: Db] [index: idx_genre, access: = 'm', direction: Forward] {rows: 2}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }, { name: 'Tobie' }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: name] {rows: 1}
-    Filter [ctx: Db] [predicate: genre = 'm'] {rows: 1}
-        IndexScan [ctx: Db] [index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1}
-
-Total rows: 1"'''
+value = '''"SelectProject [ctx: Db] [projections: name] {rows: 1}\n    Filter [ctx: Db] [predicate: genre = 'm'] {rows: 1}\n        IndexScan [ctx: Db] [index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1}\n\nTotal rows: 1"'''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: name] {rows: 3}
-    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 3}
-        Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3}
-            UnionIndexScan [ctx: Db] [table: person, branches: 3] {rows: 3}
-                IndexScan [ctx: Db] [index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1}
-                IndexScan [ctx: Db] [index: idx_genre, access: = 'm', direction: Forward] {rows: 2}
-                FullTextScan [ctx: Db] [index: ft_company, query: surrealdb] {rows: 3}
-
-Total rows: 3"'''
+value = '''"SelectProject [ctx: Db] [projections: name] {rows: 3}\n    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 3}\n        Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3}\n            UnionIndexScan [ctx: Db] [table: person, branches: 3] {rows: 3}\n                IndexScan [ctx: Db] [index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1}\n                IndexScan [ctx: Db] [index: idx_genre, access: = 'm', direction: Forward] {rows: 2}\n                FullTextScan [ctx: Db] [index: ft_company, query: surrealdb] {rows: 3}\n\nTotal rows: 3"'''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: name] {rows: 1}
-    Filter [ctx: Db] [predicate: genre = 'm' AND company @@ 'surrealdb'] {rows: 1}
-        IndexScan [ctx: Db] [index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1}
-
-Total rows: 1"'''
+value = '''"SelectProject [ctx: Db] [projections: name] {rows: 1}\n    Filter [ctx: Db] [predicate: genre = 'm' AND company @@ 'surrealdb'] {rows: 1}\n        IndexScan [ctx: Db] [index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1}\n\nTotal rows: 1"'''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: name] {rows: 2}
-    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2}
-        TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm'] {rows: 2}
-
-Total rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: name] {rows: 2}\n    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2}\n        TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm'] {rows: 2}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }, { name: 'Tobie' }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: name] {rows: 3}
-    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 3}
-        Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3}
-            UnionIndexScan [ctx: Db] [table: person, branches: 3] {rows: 3}
-                IndexScan [ctx: Db] [index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1}
-                IndexScan [ctx: Db] [index: idx_genre, access: = 'm', direction: Forward] {rows: 2}
-                FullTextScan [ctx: Db] [index: ft_company, query: surrealdb] {rows: 3}
-
-Total rows: 3"'''
+value = '''"SelectProject [ctx: Db] [projections: name] {rows: 3}\n    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 3}\n        Filter [ctx: Db] [predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3}\n            UnionIndexScan [ctx: Db] [table: person, branches: 3] {rows: 3}\n                IndexScan [ctx: Db] [index: uniq_name, access: = 'Jaime', direction: Forward] {rows: 1}\n                IndexScan [ctx: Db] [index: idx_genre, access: = 'm', direction: Forward] {rows: 2}\n                FullTextScan [ctx: Db] [index: ft_company, query: surrealdb] {rows: 3}\n\nTotal rows: 3"'''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: name] {rows: 3}
-    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 3}
-        TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3}
-
-Total rows: 3"'''
+value = '''"SelectProject [ctx: Db] [projections: name] {rows: 3}\n    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 3}\n        TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm' OR company @@ 'surrealdb'] {rows: 3}\n\nTotal rows: 3"'''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: name] {rows: 1}
-    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 1}
-        Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb'] {rows: 1}
-            FullTextScan [ctx: Db] [index: ft_company, query: surrealdb] {rows: 3}
-
-Total rows: 1"'''
+value = '''"SelectProject [ctx: Db] [projections: name] {rows: 1}\n    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 1}\n        Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm'] {rows: 1}\n            FullTextScan [ctx: Db] [index: ft_company, query: surrealdb] {rows: 3}\n\nTotal rows: 1"'''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: name] {rows: 2}
-    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2}
-        TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm'] {rows: 2}
-
-Total rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: name] {rows: 2}\n    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 2}\n        TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' OR genre = 'm'] {rows: 2}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }, { name: 'Tobie' }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: name] {rows: 1}
-    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 1}
-        TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' AND genre = 'm'] {rows: 1}
-
-Total rows: 1"'''
+value = '''"SelectProject [ctx: Db] [projections: name] {rows: 1}\n    SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 1}\n        TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = 'Jaime' AND genre = 'm'] {rows: 1}\n\nTotal rows: 1"'''
 
 [[test.results]]
 value = "[{ name: 'Jaime' }]"

@@ -234,6 +234,21 @@ pub(super) fn extract_bruteforce_knn(cond: &Cond) -> Option<BruteForceKnnParams>
 	extractor.params
 }
 
+/// Strip the MATCHES (`@@`) predicate from a WHERE clause, returning the residual.
+///
+/// Returns `None` when the entire condition is consumed (just a single `@@`),
+/// or `Some(residual)` when additional predicates remain (e.g., `content @@ 'x' AND status = 'a'`).
+pub(crate) fn strip_fts_condition(cond: &Cond) -> Option<Cond> {
+	let mut expr = cond.0.clone();
+	let _ = FtsStripper.visit_mut_expr(&mut expr);
+	let _ = BoolSimplifier.visit_mut_expr(&mut expr);
+	if matches!(expr, Expr::Literal(Literal::Bool(true))) {
+		None
+	} else {
+		Some(Cond(expr))
+	}
+}
+
 /// Strip handled KNN operators from a WHERE clause, returning the residual condition.
 ///
 /// Both `NearestNeighbor::K` (consumed by `KnnTopK`) and `NearestNeighbor::Approximate`
@@ -476,6 +491,43 @@ impl MutVisitor for KnnStripper {
 	}
 
 	// Don't strip KNN inside subqueries -- only top-level WHERE.
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
+/// Replaces MATCHES (`@@`) expressions with `Literal::Bool(true)`.
+/// Run `BoolSimplifier` afterwards to collapse the resulting
+/// `true AND x` chains.
+struct FtsStripper;
+
+impl MutVisitor for FtsStripper {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		if let Expr::Binary {
+			op: BinaryOperator::Matches(_),
+			..
+		} = expr
+		{
+			*expr = Expr::Literal(Literal::Bool(true));
+			return Ok(());
+		}
+		if let Expr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} = expr
+		{
+			self.visit_mut_expr(left)?;
+			self.visit_mut_expr(right)?;
+		}
+		Ok(())
+	}
+
 	fn visit_mut_select(
 		&mut self,
 		_: &mut crate::expr::SelectStatement,

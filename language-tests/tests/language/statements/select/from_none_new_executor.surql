@@ -1,6 +1,42 @@
 /**
 [test]
 reason = "Test SELECT FROM NONE and NULL returns empty results (new executor)"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[]"
 */
 
 SELECT * FROM NONE;

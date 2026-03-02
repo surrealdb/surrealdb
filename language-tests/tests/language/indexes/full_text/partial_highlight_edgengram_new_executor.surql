@@ -1,6 +1,33 @@
 /**
 [test]
 reason = "Test partial highlights and offsets with edgengram analyzer (new executor)"
+
+[[test.results]]
+value = "[{ content: 'Hello World!', id: blog:1 }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ content: '<em>Hello</em> World!', id: blog:1 }]"
+
+[[test.results]]
+value = "[{ content: '<em>Hello</em> World!', id: blog:1 }]"
+
+[[test.results]]
+value = "[{ content: '<em>He</em>llo World!', id: blog:1 }]"
+
+[[test.results]]
+value = '[{ content: { "0": [{ e: 5, s: 0 }] }, id: blog:1 }]'
+
+[[test.results]]
+value = '[{ content: { "0": [{ e: 5, s: 0 }] }, id: blog:1 }]'
+
+[[test.results]]
+value = '[{ content: { "0": [{ e: 2, s: 0 }] }, id: blog:1 }]'
 */
 
 CREATE blog:1 SET content = 'Hello World!';

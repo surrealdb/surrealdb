@@ -1,6 +1,24 @@
 /**
 [test]
 reason = "Test writeable subqueries with UPSERT in LET and SELECT VALUE (new executor)"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: tester:test }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[tester:test]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "tester:test"
 */
 
 LET $id = (UPSERT tester:test);

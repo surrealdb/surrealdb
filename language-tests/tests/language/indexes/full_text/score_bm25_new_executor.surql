@@ -1,6 +1,27 @@
 /**
 [test]
 reason = "Test search::score() with BM25 scoring and fulltext index (new executor)"
+
+[[test.results]]
+value = "[{ id: blog:1, title: 'the quick brown fox jumped over the lazy dog' }]"
+
+[[test.results]]
+value = "[{ id: blog:2, title: 'the fast fox jumped over the lazy dog' }]"
+
+[[test.results]]
+value = "[{ id: blog:3, title: 'the other animals sat there watching' }]"
+
+[[test.results]]
+value = "[{ id: blog:4, title: 'the dog sat there and did nothing' }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: blog:3, score: 0.9227996468544006f }]"
 */
 
 CREATE blog:1 SET title = 'the quick brown fox jumped over the lazy dog';

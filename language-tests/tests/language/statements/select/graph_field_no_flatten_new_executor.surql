@@ -1,6 +1,18 @@
 /**
 [test]
 reason = "Test that SELECT VALUE ->edge.field does not flatten nested arrays (new executor)"
+
+[[test.results]]
+value = "[{ id: a:1 }, { id: a:2 }]"
+
+[[test.results]]
+value = "[{ id: b:1, in: a:1, list: [1, 2, 3], out: a:2 }]"
+
+[[test.results]]
+value = "[{ id: b:2, in: a:1, list: [4, 5, 6], out: a:2 }]"
+
+[[test.results]]
+value = "[[[1, 2, 3], [4, 5, 6]]]"
 */
 
 CREATE a:1, a:2;
