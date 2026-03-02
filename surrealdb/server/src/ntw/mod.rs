@@ -208,13 +208,11 @@ pub async fn init<F: RouterFactory>(
 	let allow_origin: AllowOrigin = if opt.allow_origin.is_empty() {
 		Any.into()
 	} else {
-		let mut origins = Vec::with_capacity(opt.allow_origin.len());
-		for origin in &opt.allow_origin {
-			let value = origin.parse::<http::HeaderValue>().map_err(|_| {
-				anyhow::anyhow!("Invalid CORS origin '{origin}': must be a valid HTTP header value")
-			})?;
-			origins.push(value);
-		}
+		let origins: Vec<http::HeaderValue> = opt
+			.allow_origin
+			.iter()
+			.map(|o| o.parse().expect("CORS origins are validated at startup"))
+			.collect();
 		AllowOrigin::list(origins)
 	};
 

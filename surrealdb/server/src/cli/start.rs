@@ -122,7 +122,7 @@ pub struct StartCommandArguments {
 	no_identification_headers: bool,
 	#[arg(help = "The allowed origins for CORS requests. Defaults to allow all origins")]
 	#[arg(env = "SURREAL_ALLOW_ORIGIN", long = "allow-origin")]
-	#[arg(value_delimiter = ',')]
+	#[arg(value_delimiter = ',', value_parser = super::validator::cors_origin)]
 	allow_origin: Vec<String>,
 	//
 	// Database options
