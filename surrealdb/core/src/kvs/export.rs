@@ -49,6 +49,14 @@ impl Default for Config {
 	}
 }
 
+/// Named-field wrapper so that the untagged `SurrealValue` serialization
+/// can differentiate `Exclude` from `Some` (include).
+#[derive(Clone, Debug, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
+pub struct ExcludedTables {
+	pub exclude: Vec<String>,
+}
+
 #[derive(Clone, Debug, Default, SurrealValue)]
 #[surreal(crate = "surrealdb_types")]
 #[surreal(untagged)]
@@ -59,6 +67,7 @@ pub enum TableConfig {
 	#[surreal(value = false)]
 	None,
 	Some(Vec<String>),
+	Exclude(ExcludedTables),
 }
 
 // TODO: This should probably be removed
@@ -88,7 +97,7 @@ impl From<Vec<&str>> for TableConfig {
 impl TableConfig {
 	/// Check if we should export tables
 	pub(crate) fn is_any(&self) -> bool {
-		matches!(self, Self::All | Self::Some(_))
+		matches!(self, Self::All | Self::Some(_) | Self::Exclude(_))
 	}
 	// Check if we should export a specific table
 	pub(crate) fn includes(&self, table: &str) -> bool {
@@ -96,6 +105,7 @@ impl TableConfig {
 			Self::All => true,
 			Self::None => false,
 			Self::Some(v) => v.iter().any(|v| v.eq(table)),
+			Self::Exclude(v) => !v.exclude.iter().any(|v| v.eq(table)),
 		}
 	}
 }
