@@ -578,13 +578,13 @@ impl Statement<'_> {
 		stmt: &'a SelectStatement,
 	) -> Result<Statement<'a>> {
 		use crate::expr::visit::MutVisitor;
-		use crate::idx::planner::count_exists_rewriter::CountExistsRewriter;
+		use crate::idx::planner::count_exists_rewriter::CountLimitRewriter;
 
 		let omit = exprs_to_fields(stk, ctx, opt, doc, stmt.omit.as_slice()).await?;
 
 		let rewritten_cond = if let Some(cond) = &stmt.cond {
 			let mut cond_expr = cond.0.clone();
-			if CountExistsRewriter.visit_mut_expr(&mut cond_expr).is_ok() && cond_expr != cond.0 {
+			if CountLimitRewriter.visit_mut_expr(&mut cond_expr).is_ok() && cond_expr != cond.0 {
 				Some(Cond(cond_expr))
 			} else {
 				None

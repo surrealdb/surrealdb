@@ -5,16 +5,16 @@ use crate::expr::part::Part;
 use crate::expr::visit::{MutVisitor, VisitMut};
 use crate::expr::{Expr, Literal};
 
-/// Rewrites `count(->edge) > 0` and `count(->edge) >= 1` patterns to inject
-/// `LIMIT 1` into the graph traversal lookup. This short-circuits edge
-/// iteration after the first match, turning an O(edges) scan into O(1).
+/// Rewrites `count(->edge) OP N` patterns to inject a minimal `LIMIT` into
+/// the graph traversal lookup, short-circuiting edge iteration once enough
+/// results have been collected to determine the comparison outcome.
 ///
-/// The rewrite is safe because `count(array) > 0` is equivalent to
-/// `count(array LIMIT 1) > 0` — we only need to know if at least one
-/// truthy element exists.
-pub(crate) struct CountExistsRewriter;
+/// For example, `count(->edge) > 5` only needs 6 results to decide truth,
+/// so `LIMIT 6` is injected. The special case `count(->edge) > 0` becomes
+/// `LIMIT 1` (the original "exists" optimisation).
+pub(crate) struct CountLimitRewriter;
 
-impl MutVisitor for CountExistsRewriter {
+impl MutVisitor for CountLimitRewriter {
 	type Error = ();
 
 	fn visit_mut_expr(&mut self, e: &mut Expr) -> Result<(), Self::Error> {
@@ -24,12 +24,15 @@ impl MutVisitor for CountExistsRewriter {
 			right,
 		} = e
 		{
-			if is_count_exists_pattern(left, op, right) {
-				inject_limit_one(left);
+			// count(->edge) OP N
+			if let Some(limit) = count_comparison_limit(left, op, right) {
+				inject_limit(left, limit);
 			}
-			// Also check the reversed form: 0 < count(->edge)
-			if is_reverse_count_exists_pattern(left, op, right) {
-				inject_limit_one(right);
+			// N OP count(->edge)  —  flip the operator to normalise
+			if let Some(flipped) = flip_comparison(op)
+				&& let Some(limit) = count_comparison_limit(right, &flipped, left)
+			{
+				inject_limit(right, limit);
 			}
 		}
 
@@ -68,28 +71,46 @@ impl MutVisitor for CountExistsRewriter {
 	}
 }
 
-/// Detect `count(idiom_with_lookup) > 0` or `count(idiom_with_lookup) >= 1`
-fn is_count_exists_pattern(left: &Expr, op: &BinaryOperator, right: &Expr) -> bool {
-	if !is_count_of_graph_traversal(left) {
-		return false;
+/// Given `count(->edge) OP N`, compute the minimum LIMIT needed to determine
+/// the comparison's truth value. Returns `None` when the pattern doesn't match
+/// or the optimisation doesn't apply.
+fn count_comparison_limit(count_expr: &Expr, op: &BinaryOperator, n_expr: &Expr) -> Option<i64> {
+	if !is_count_of_graph_traversal(count_expr) {
+		return None;
 	}
-	match (op, right) {
-		(BinaryOperator::MoreThan, Expr::Literal(Literal::Integer(0))) => true,
-		(BinaryOperator::MoreThanEqual, Expr::Literal(Literal::Integer(n))) if *n <= 1 => true,
-		_ => false,
-	}
+	let Expr::Literal(Literal::Integer(n)) = n_expr else {
+		return None;
+	};
+	compute_limit(op, *n)
 }
 
-/// Detect `0 < count(idiom_with_lookup)` or `1 <= count(idiom_with_lookup)`
-fn is_reverse_count_exists_pattern(left: &Expr, op: &BinaryOperator, right: &Expr) -> bool {
-	if !is_count_of_graph_traversal(right) {
-		return false;
-	}
-	match (op, left) {
-		(BinaryOperator::LessThan, Expr::Literal(Literal::Integer(0))) => true,
-		(BinaryOperator::LessThanEqual, Expr::Literal(Literal::Integer(n))) if *n <= 1 => true,
-		_ => false,
-	}
+/// Derive the smallest LIMIT that preserves the semantics of `count(...) OP n`.
+fn compute_limit(op: &BinaryOperator, n: i64) -> Option<i64> {
+	let limit = match op {
+		BinaryOperator::MoreThan => n.checked_add(1)?,
+		BinaryOperator::MoreThanEqual => n,
+		BinaryOperator::LessThan => n,
+		BinaryOperator::LessThanEqual => n.checked_add(1)?,
+		BinaryOperator::Equal | BinaryOperator::ExactEqual => n.checked_add(1)?,
+		BinaryOperator::NotEqual => n.checked_add(1)?,
+		_ => return None,
+	};
+	(limit >= 1).then_some(limit)
+}
+
+/// Flip a comparison operator so that `N OP count(...)` becomes
+/// `count(...) FLIPPED_OP N`. Symmetric operators return themselves.
+fn flip_comparison(op: &BinaryOperator) -> Option<BinaryOperator> {
+	Some(match op {
+		BinaryOperator::LessThan => BinaryOperator::MoreThan,
+		BinaryOperator::LessThanEqual => BinaryOperator::MoreThanEqual,
+		BinaryOperator::MoreThan => BinaryOperator::LessThan,
+		BinaryOperator::MoreThanEqual => BinaryOperator::LessThanEqual,
+		BinaryOperator::Equal => BinaryOperator::Equal,
+		BinaryOperator::ExactEqual => BinaryOperator::ExactEqual,
+		BinaryOperator::NotEqual => BinaryOperator::NotEqual,
+		_ => return None,
+	})
 }
 
 /// Check if an expression is `count(idiom)` where the idiom contains a graph lookup
@@ -109,8 +130,9 @@ fn is_count_of_graph_traversal(expr: &Expr) -> bool {
 	idiom.0.iter().any(|p| matches!(p, Part::Lookup(_)))
 }
 
-/// Inject `LIMIT 1` into the last `Part::Lookup` in the count's idiom argument
-fn inject_limit_one(count_expr: &mut Expr) {
+/// Inject a `LIMIT` into the last `Part::Lookup` in the count's idiom argument.
+/// Skips injection when the lookup already has a limit.
+fn inject_limit(count_expr: &mut Expr, limit_value: i64) {
 	let Expr::FunctionCall(fc) = count_expr else {
 		return;
 	};
@@ -123,7 +145,7 @@ fn inject_limit_one(count_expr: &mut Expr) {
 	for part in idiom.0.iter_mut().rev() {
 		if let Part::Lookup(lookup) = part {
 			if lookup.limit.is_none() {
-				lookup.limit = Some(Limit(Expr::Literal(Literal::Integer(1))));
+				lookup.limit = Some(Limit(Expr::Literal(Literal::Integer(limit_value))));
 			}
 			break;
 		}
