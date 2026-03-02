@@ -602,6 +602,105 @@ mod http_integration {
 		Ok(())
 	}
 
+	/// RPC delete with a record-id string (e.g. "table:id") must be interpreted as a record id,
+	/// not a table name. Deleting a non-existent record returns success with an empty array.
+	#[test(tokio::test)]
+	async fn rpc_delete_record_id() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let url = &format!("http://{addr}/rpc");
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::CONTENT_TYPE, "application/json".parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		// Ensure the article table exists (create and remove a dummy record so table is empty)
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.body("CREATE article:__ensure_table__ SET x = 1; DELETE article:__ensure_table__")
+			.send()
+			.await?;
+		assert!(res.status().is_success(), "body: {}", res.text().await?);
+
+		// Delete non-existent record by record-id string: must succeed with empty result (not
+		// error)
+		{
+			let body = json!({
+				"id": "1",
+				"method": "delete",
+				"params": ["article:nonexisted"]
+			});
+			let res =
+				client.post(url).basic_auth(USER, Some(PASS)).body(body.to_string()).send().await?;
+			assert!(res.status().is_success(), "body: {}", res.text().await?);
+			let body: serde_json::Value = res.json().await?;
+			assert!(
+				body.get("error").is_none(),
+				"RPC delete of non-existent record must not return error: {body}"
+			);
+			let result = body.get("result").expect("response must have result");
+			assert!(
+				result.is_null(),
+				"result must be null for non-existent record (single result): {result}"
+			);
+		}
+
+		// Delete existing record by record-id string: must return the deleted record
+		{
+			// Create a record
+			let res = client
+				.post(format!("http://{addr}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body("CREATE article:rpc_delete_test SET name = 'test'")
+				.send()
+				.await?;
+			assert!(res.status().is_success(), "body: {}", res.text().await?);
+
+			let body = json!({
+				"id": "2",
+				"method": "delete",
+				"params": ["article:rpc_delete_test"]
+			});
+			let res =
+				client.post(url).basic_auth(USER, Some(PASS)).body(body.to_string()).send().await?;
+			assert!(res.status().is_success(), "body: {}", res.text().await?);
+			let body: serde_json::Value = res.json().await?;
+			assert!(body.get("error").is_none(), "delete must succeed: {body}");
+			let result = body.get("result").expect("response must have result");
+			assert!(
+				result.is_object()
+					&& result.get("id").and_then(|v| v.as_str()) == Some("article:rpc_delete_test"),
+				"result must be the single deleted record: {result}"
+			);
+
+			// Delete same record again (non-existent now): must succeed with null
+			let body = json!({
+				"id": "3",
+				"method": "delete",
+				"params": ["article:rpc_delete_test"]
+			});
+			let res =
+				client.post(url).basic_auth(USER, Some(PASS)).body(body.to_string()).send().await?;
+			assert!(res.status().is_success(), "body: {}", res.text().await?);
+			let body: serde_json::Value = res.json().await?;
+			assert!(body.get("error").is_none(), "second delete must succeed: {body}");
+			let result = body.get("result").expect("response must have result");
+			assert!(result.is_null(), "result must be null for non-existent record: {result}");
+		}
+
+		Ok(())
+	}
+
 	#[test(tokio::test)]
 	async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
