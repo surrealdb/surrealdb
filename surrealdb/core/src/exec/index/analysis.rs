@@ -539,8 +539,11 @@ impl<'a> IndexAnalyzer<'a> {
 					BinaryOperator::NearestNeighbor(nn) => {
 						self.try_match_knn(left, right, nn, candidates);
 					}
+					BinaryOperator::Contain | BinaryOperator::Inside => {
+						self.try_match_containment(left, op, right, candidates);
+						self.try_match_comparison(left, op, right, candidates);
+					}
 					_ => {
-						// Check if this is an indexable comparison
 						self.try_match_comparison(left, op, right, candidates);
 					}
 				}
@@ -724,6 +727,65 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 
 			_ => None,
+		}
+	}
+
+	/// Try to match a containment expression to an array index.
+	///
+	/// Handles single-value containment:
+	/// - `field CONTAINS scalar` -> Equality lookup on `field[*]` index
+	/// - `scalar INSIDE field`   -> Equality lookup on `field[*]` index
+	fn try_match_containment(
+		&self,
+		left: &Expr,
+		op: &BinaryOperator,
+		right: &Expr,
+		candidates: &mut Vec<IndexCandidate>,
+	) {
+		let (idiom, value) = match op {
+			BinaryOperator::Contain => match (left, right) {
+				(Expr::Idiom(idiom), Expr::Literal(lit)) => {
+					if let Some(v) = try_literal_to_value(lit) {
+						(idiom, v)
+					} else {
+						return;
+					}
+				}
+				_ => return,
+			},
+			BinaryOperator::Inside => match (left, right) {
+				(Expr::Literal(lit), Expr::Idiom(idiom)) => {
+					if let Some(v) = try_literal_to_value(lit) {
+						(idiom, v)
+					} else {
+						return;
+					}
+				}
+				_ => return,
+			},
+			_ => return,
+		};
+
+		for (idx, ix_def) in self.indexes.iter().enumerate() {
+			if ix_def.prepare_remove {
+				continue;
+			}
+			if !matches!(ix_def.index, Index::Idx | Index::Uniq) {
+				continue;
+			}
+			if ix_def.cols.len() != 1 {
+				continue;
+			}
+			if let Some(first_col) = ix_def.cols.first()
+				&& idiom_matches_containment(idiom, first_col)
+			{
+				let index_ref = IndexRef::new(self.indexes.clone(), idx);
+				candidates.push(IndexCandidate {
+					index_ref,
+					access: BTreeAccess::Equality(value.clone()),
+					covers_order: false,
+				});
+			}
 		}
 	}
 
@@ -1049,6 +1111,28 @@ fn idiom_matches(expr_idiom: &Idiom, index_col: &Idiom) -> bool {
 	}
 
 	true
+}
+
+/// Check if an idiom matches an index column for containment operators.
+///
+/// Unlike `idiom_matches`, this allows `Part::All` in the index column.
+/// The query idiom `tags` matches index column `tags.*` (or `tags[*]`)
+/// because each array element is indexed individually, and the containment
+/// operator checks membership of a scalar in the indexed array.
+///
+/// Only matches when the index column actually contains `Part::All` --
+/// regular scalar indexes are not valid for containment lookups.
+fn idiom_matches_containment(expr_idiom: &Idiom, index_col: &Idiom) -> bool {
+	use crate::expr::Part;
+
+	if !index_col.0.iter().any(|p| matches!(p, Part::All)) {
+		return false;
+	}
+
+	let col_without_all: Vec<&Part> =
+		index_col.0.iter().filter(|p| !matches!(p, Part::All)).collect();
+	let expr_parts: Vec<&Part> = expr_idiom.0.iter().collect();
+	col_without_all == expr_parts
 }
 
 /// Normalize a range operator based on the position of the idiom in the
