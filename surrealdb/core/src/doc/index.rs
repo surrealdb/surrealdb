@@ -18,7 +18,7 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::{DatabaseDefinition, IndexDefinition, TableDefinition};
+use crate::catalog::{DatabaseDefinition, Index, IndexDefinition, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Force, Options};
 use crate::doc::{CursorDoc, Document};
@@ -62,9 +62,26 @@ impl Document {
 			// Calculate new values
 			let n = Self::build_opt_values(stk, ctx, opt, ix, &self.current).await?;
 
+			// For COUNT indexes with a condition, evaluate against the full document
+			let count_cond_match = if let Index::Count(Some(cond)) = &ix.index {
+				let old_matches = stk
+					.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.initial)))
+					.await
+					.catch_return()?
+					.is_truthy();
+				let new_matches = stk
+					.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.current)))
+					.await
+					.catch_return()?
+					.is_truthy();
+				Some((old_matches, new_matches))
+			} else {
+				None
+			};
+
 			// Update the index entries
 			if o != n {
-				Self::one_index(&db, tb, stk, ctx, opt, ix, o, n, &rid).await?;
+				Self::one_index(&db, tb, stk, ctx, opt, ix, o, n, &rid, count_cond_match).await?;
 			}
 		}
 		// Carry on
@@ -82,6 +99,7 @@ impl Document {
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
 		rid: &RecordId,
+		count_cond_match: Option<(bool, bool)>,
 	) -> Result<()> {
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
 			match ib.consume(db, ctx, ix, o, n, rid).await? {
@@ -108,6 +126,9 @@ impl Document {
 			n,
 			rid,
 		);
+		if let Some((old_matches, new_matches)) = count_cond_match {
+			ic = ic.with_count_cond_match(old_matches, new_matches);
+		}
 		// Keep track of compaction requests, we need to trigger them after the index operation
 		let mut require_compaction = false;
 		// Execute the index operation

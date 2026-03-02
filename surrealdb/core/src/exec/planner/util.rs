@@ -1070,7 +1070,6 @@ pub(super) fn idiom_to_field_path(idiom: &crate::expr::idiom::Idiom) -> FieldPat
 /// index with a matching condition exists, sum delta counts instead of
 /// scanning all records.
 #[allow(clippy::too_many_arguments)]
-#[allow(dead_code)] // Ready for use when plan-time index detection is added.
 pub(super) fn is_indexed_count_eligible(
 	fields: &Fields,
 	group: &Option<crate::expr::group::Groups>,

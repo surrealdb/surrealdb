@@ -23,8 +23,8 @@ use super::util::{
 	extract_count_field_names, extract_matches_context, extract_record_id_point_lookup,
 	extract_version, get_effective_limit_literal, has_knn_k_operator, has_knn_operator,
 	has_top_level_or, idiom_to_field_name, idiom_to_field_path, index_covers_ordering,
-	is_count_all_eligible, order_is_scan_compatible, strip_index_conditions,
-	strip_knn_from_condition,
+	is_count_all_eligible, is_indexed_count_eligible, order_is_scan_compatible,
+	strip_index_conditions, strip_knn_from_condition,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
@@ -1114,6 +1114,38 @@ impl<'ctx> Planner<'ctx> {
 			};
 		}
 
+		// Indexed COUNT fast-path (COUNT with WHERE + matching COUNT index)
+		if is_indexed_count_eligible(&fields, &group, &cond, &split, &order, &fetch, &omit, &what)
+			&& self.has_matching_count_index(&what, &cond).await
+		{
+			use crate::exec::operators::scan::index_count::IndexCountScan;
+			let table_expr = self
+				.physical_expr(what.iter().next().cloned().expect("what verified non-empty"))
+				.await?;
+			let condition = cond.clone().expect("is_indexed_count_eligible requires cond");
+			let predicate = self.physical_expr(condition.0.clone()).await?;
+			let field_names = extract_count_field_names(&fields);
+			let index_count_scan: Arc<dyn ExecOperator> = Arc::new(IndexCountScan::new(
+				table_expr,
+				predicate,
+				condition,
+				version,
+				field_names,
+			));
+			let timed = match timeout {
+				Expr::Literal(Literal::None) => index_count_scan,
+				te => {
+					let tp = self.physical_expr(te).await?;
+					Arc::new(Timeout::new(index_count_scan, Some(tp))) as Arc<dyn ExecOperator>
+				}
+			};
+			return if only {
+				Ok(Arc::new(UnwrapExactlyOne::new(timed, true)))
+			} else {
+				Ok(timed)
+			};
+		}
+
 		// Fast path: SELECT [*|fields] FROM <literal RecordId>
 		if what.len() == 1
 			&& matches!(&what[0], Expr::Literal(Literal::RecordId(_)))
@@ -1969,6 +2001,52 @@ impl<'ctx> Planner<'ctx> {
 		resolve_table_context(txn, ctx, ns, db, ns_def.namespace_id, db_def.database_id, table_name)
 			.await
 			.ok()?
+	}
+
+	/// Check at plan time whether a matching COUNT index exists for the query.
+	///
+	/// Returns `true` when:
+	/// - Plan-time catalog access is available (txn, ns, db)
+	/// - The source is a single table
+	/// - The table has a `DEFINE INDEX ... COUNT WHERE <cond>` whose condition matches the query's
+	///   WHERE clause
+	async fn has_matching_count_index(&self, what: &[Expr], cond: &Option<Cond>) -> bool {
+		let Some(ref txn) = self.txn else {
+			return false;
+		};
+		let Some(ref ns_name) = self.ns else {
+			return false;
+		};
+		let Some(ref db_name) = self.db else {
+			return false;
+		};
+		let table_name = match what.first() {
+			Some(Expr::Table(t)) => t,
+			_ => return false,
+		};
+		let cond = match cond {
+			Some(c) => c,
+			None => return false,
+		};
+
+		let Ok(Some(ns_def)) = txn.get_ns_by_name(ns_name).await else {
+			return false;
+		};
+		let Ok(Some(db_def)) = txn.get_db_by_name(ns_name, db_name).await else {
+			return false;
+		};
+		let Ok(indexes) =
+			txn.all_tb_indexes(ns_def.namespace_id, db_def.database_id, table_name).await
+		else {
+			return false;
+		};
+		indexes.iter().any(|ix| {
+			if let crate::catalog::Index::Count(ref idx_cond) = ix.index {
+				idx_cond.as_ref() == Some(cond)
+			} else {
+				false
+			}
+		})
 	}
 
 	/// Resolve the optimal access path for a table at plan time.
