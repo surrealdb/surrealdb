@@ -10,7 +10,7 @@ mod dynamic;
 mod fulltext;
 mod graph;
 mod index;
-mod index_count;
+pub(crate) mod index_count;
 mod knn;
 pub(crate) mod pipeline;
 mod record_id;

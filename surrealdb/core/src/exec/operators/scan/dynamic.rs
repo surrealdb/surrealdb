@@ -17,7 +17,7 @@ use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
 	validate_record_user_access,
 };
-use crate::exec::planner::util::strip_knn_from_condition;
+use crate::exec::planner::util::{resolve_condition_params, strip_knn_from_condition};
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
@@ -533,6 +533,17 @@ async fn resolve_table_scan_stream(
 		None => None,
 	};
 
+	// Resolve bind-parameter references so that index analysis sees
+	// Expr::Literal instead of Expr::Param. Covers LET bindings, client
+	// bind params, and DEFINE PARAM (via txn store).
+	let resolved_cond = match cfg.cond.as_ref() {
+		Some(c) => {
+			let ns_db = Some((cfg.ns_id, cfg.db_id));
+			Some(resolve_condition_params(c, &ctx.root().ctx, ns_db).await)
+		}
+		None => None,
+	};
+
 	let access_path = if matches!(&cfg.with, Some(With::NoIndex)) {
 		None
 	} else {
@@ -542,19 +553,23 @@ async fn resolve_table_scan_stream(
 			db_ctx.get_table_indexes(&cfg.table_name).await.context("Failed to fetch indexes")?;
 
 		let analyzer = IndexAnalyzer::new(indexes, cfg.with.as_ref());
-		let candidates = analyzer.analyze(cfg.cond.as_ref(), cfg.order.as_ref());
+		let candidates = analyzer.analyze(resolved_cond.as_ref(), cfg.order.as_ref());
 		if candidates.is_empty() {
 			// No single-index candidates -- try multi-index union for OR conditions
 			analyzer
-				.try_or_union(cfg.cond.as_ref(), cfg.direction)
+				.try_or_union(resolved_cond.as_ref(), cfg.direction)
 				// Try expanding IN operators into union of equality lookups
-				.or_else(|| analyzer.try_in_expansion(cfg.cond.as_ref(), cfg.direction))
+				.or_else(|| analyzer.try_in_expansion(resolved_cond.as_ref(), cfg.direction))
+				// Try expanding CONTAINSALL/CONTAINSANY into union of equality lookups
+				.or_else(|| {
+					analyzer.try_containment_expansion(resolved_cond.as_ref(), cfg.direction)
+				})
 		} else {
 			let path = select_access_path(candidates, cfg.with.as_ref(), cfg.direction);
 			// When the best single-index path is a full-range scan (ORDER BY
 			// only), prefer a multi-index union for OR conditions if available.
 			if path.is_full_range_scan() {
-				analyzer.try_or_union(cfg.cond.as_ref(), cfg.direction).or(Some(path))
+				analyzer.try_or_union(resolved_cond.as_ref(), cfg.direction).or(Some(path))
 			} else {
 				Some(path)
 			}
@@ -599,9 +614,9 @@ async fn resolve_table_scan_stream(
 			k,
 			ef,
 		}) => {
-			// Strip KNN operators from the condition to get the residual
-			// (non-KNN predicates) for HNSW pushdown.
-			let residual_cond = cfg.cond.as_ref().and_then(strip_knn_from_condition);
+			// Strip KNN operators from the resolved condition to get the
+			// residual (non-KNN predicates) for HNSW pushdown.
+			let residual_cond = resolved_cond.as_ref().and_then(strip_knn_from_condition);
 			let knn_op = KnnScan::new(
 				index_ref,
 				vector,
@@ -621,7 +636,7 @@ async fn resolve_table_scan_stream(
 		Some(AccessPath::Union(paths)) => {
 			let mut sub_operators: Vec<Arc<dyn ExecOperator>> = Vec::with_capacity(paths.len());
 			for path in paths {
-				sub_operators.push(create_index_operator(&path, &cfg));
+				sub_operators.push(create_index_operator(&path, &cfg, resolved_cond.as_ref()));
 			}
 			let union_op = super::UnionIndexScan::new(cfg.table_name.clone(), sub_operators, None);
 			let stream = union_op.execute(ctx)?;
@@ -655,7 +670,11 @@ async fn resolve_table_scan_stream(
 /// for each branch of an OR condition. The caller (typically
 /// [`UnionIndexScan`](super::UnionIndexScan)) is responsible for
 /// executing the operators and deduplicating results.
-fn create_index_operator(path: &AccessPath, cfg: &TableScanConfig) -> Arc<dyn ExecOperator> {
+fn create_index_operator(
+	path: &AccessPath,
+	cfg: &TableScanConfig,
+	resolved_cond: Option<&Cond>,
+) -> Arc<dyn ExecOperator> {
 	match path {
 		AccessPath::BTreeScan {
 			index_ref,
@@ -687,7 +706,7 @@ fn create_index_operator(path: &AccessPath, cfg: &TableScanConfig) -> Arc<dyn Ex
 			k,
 			ef,
 		} => {
-			let residual_cond = cfg.cond.as_ref().and_then(strip_knn_from_condition);
+			let residual_cond = resolved_cond.and_then(strip_knn_from_condition);
 			Arc::new(KnnScan::new(
 				index_ref.clone(),
 				vector.clone(),

@@ -18,7 +18,8 @@ Total rows: 0''''
 
 [[test.results]]
 value = ''''SelectProject [ctx: Db] [projections: *] {rows: 2}
-    TableScan [ctx: Db] [table: student, direction: Forward, predicate: 40 INSIDE marks.*.mark] {rows: 2}
+    Filter [ctx: Db] [predicate: 40 INSIDE marks.*.mark] {rows: 2}
+        IndexScan [ctx: Db] [index: mark_idx, access: = 40, direction: Forward] {rows: 2}
 
 Total rows: 2''''
 

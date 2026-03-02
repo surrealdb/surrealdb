@@ -110,7 +110,7 @@ value = "[{ name: 'Jaime' }, { name: 'Lizzie' }, { name: 'Tobie' }]"
 [[test.results]]
 value = '''"SelectProject [ctx: Db] [projections: name] {rows: 1}
     SortByKey [ctx: Db] [sort_keys: name ASC] {rows: 1}
-        Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm' AND company @@ 'surrealdb'] {rows: 1}
+        Filter [ctx: Db] [predicate: name = 'Jaime' AND genre = 'm'] {rows: 1}
             FullTextScan [ctx: Db] [index: ft_company, query: surrealdb] {rows: 3}
 
 Total rows: 1"'''

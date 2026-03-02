@@ -253,12 +253,32 @@ impl<'ctx> Planner<'ctx> {
 					edge_tables.push(spec);
 				}
 
-				Arc::new(GraphEdgeScan::new(
-					input,
-					LookupDirection::from(dir),
-					edge_tables,
-					output_mode,
-				))
+				let scan =
+					GraphEdgeScan::new(input, LookupDirection::from(dir), edge_tables, output_mode);
+				// Push limit into the scan when no filter/sort/split would
+				// change the result count. This avoids scanning all edges
+				// when only a few are needed. When START is present, add
+				// the offset so the scan fetches enough rows for the skip.
+				let scan =
+					if cond.is_none() && split.is_none() && order.is_none() && group.is_none() {
+						if let Some(crate::expr::limit::Limit(crate::expr::Expr::Literal(
+							crate::expr::Literal::Integer(n),
+						))) = &limit
+						{
+							let offset = match &start {
+								Some(crate::expr::start::Start(crate::expr::Expr::Literal(
+									crate::expr::Literal::Integer(s),
+								))) => *s as usize,
+								_ => 0,
+							};
+							scan.with_limit(*n as usize + offset)
+						} else {
+							scan
+						}
+					} else {
+						scan
+					};
+				Arc::new(scan)
 			}
 			crate::expr::lookup::LookupKind::Reference => {
 				let (referencing_table, referencing_field, range_start, range_end) =
