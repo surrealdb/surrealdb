@@ -52,7 +52,11 @@ library! {
 		info_stmt: Vec<Info>,
 		show_stmt: Vec<Show>,
 		create_stmt: Vec<Create>,
+		update_stmt: Vec<Update>,
+		upsert_stmt: Vec<Upsert>,
 		delete_stmt: Vec<Delete>,
+		relate_stmt: Vec<Relate>,
+		select_stmt: Vec<Select>,
 
 		expr: Vec<Expr>,
 		exprs: Vec<NodeList<Expr>>,
@@ -94,9 +98,20 @@ library! {
 		place: Vec<Place>,
 		places: Vec<NodeList<Place>>,
 		present_place: Vec<PresentPlace>,
+		present_places: Vec<NodeList<PresentPlace>>,
 
 		assignment: Vec<Assignment>,
 		assignments: Vec<NodeList<Assignment>>,
+
+		field: Vec<Fields>,
+		list_selector: Vec<ListSelector>,
+		list_selectors: Vec<NodeList<ListSelector>>,
+		selector: Vec<Selector>,
+
+		fetch: Vec<Fetch>,
+		fetchs: Vec<NodeList<Fetch>>,
+
+		output: Vec<Output>,
 
 		type_: Vec<Type>,
 		types: Vec<NodeList<Type>>,
@@ -306,6 +321,38 @@ ast_type! {
 }
 
 ast_type! {
+	pub struct Selector{
+		pub expr: NodeId<Expr>,
+		pub alias: Option<NodeId<Place>>,
+	}
+}
+
+ast_type! {
+	pub enum ListSelector{
+		All(Span),
+		Selector(Selector),
+	}
+}
+
+ast_type! {
+	pub enum Fields{
+		Value(NodeId<Selector>),
+		List(NodeListId<ListSelector>),
+	}
+}
+
+ast_type! {
+	pub enum Output{
+		None(Span),
+		Null(Span),
+		Diff(Span),
+		After(Span),
+		Before(Span),
+		Fields(NodeId<Fields>),
+	}
+}
+
+ast_type! {
 	pub struct Create{
 		pub only: bool,
 		pub targets: NodeListId<Expr>,
@@ -322,6 +369,92 @@ ast_type! {
 		pub with_index: Option<WithIndex>,
 		pub condition: Option<NodeId<Expr>>,
 		pub timeout: Option<NodeId<Expr>>,
+		pub explain: Option<Explain>,
+	}
+}
+
+ast_type! {
+	pub struct Update{
+		pub only: bool,
+		pub targets: NodeListId<Expr>,
+		pub with_index: Option<WithIndex>,
+		pub data: Option<RecordData>,
+		pub condition: Option<NodeId<Expr>>,
+		pub output: Option<NodeId<Output>>,
+		pub timeout: Option<NodeId<Expr>>,
+		pub explain: Option<Explain>,
+	}
+}
+
+ast_type! {
+	pub struct Upsert{
+		pub only: bool,
+		pub targets: NodeListId<Expr>,
+		pub with_index: Option<WithIndex>,
+		pub data: Option<RecordData>,
+		pub condition: Option<NodeId<Expr>>,
+		pub output: Option<NodeId<Output>>,
+		pub timeout: Option<NodeId<Expr>>,
+		pub explain: Option<Explain>,
+	}
+}
+
+ast_type! {
+	pub struct Relate{
+		pub only: bool,
+		pub from: NodeId<Expr>,
+		pub through: NodeId<Expr>,
+		pub to: NodeId<Expr>,
+		pub data: Option<RecordData>,
+		pub output: Option<NodeId<Output>>,
+		pub timeout: Option<NodeId<Expr>>,
+	}
+}
+
+ast_type! {
+	pub enum OrderBy{
+		Rand(Span),
+		Places(NodeListId<PresentPlace>),
+	}
+}
+
+ast_type! {
+	pub struct FetchTypeFields{
+		pub args: Option<NodeListId<Expr>>,
+	}
+}
+
+ast_type! {
+	pub struct FetchTypeField{
+		pub arg: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	pub enum Fetch{
+		Param(NodeId<Param>),
+		Place(NodeId<PresentPlace>),
+		TypeField(FetchTypeField),
+		TypeFields(FetchTypeFields),
+	}
+}
+
+ast_type! {
+	pub struct Select{
+		pub fields: NodeId<Fields>,
+		pub only: bool,
+		pub from: NodeListId<Expr>,
+		pub with_index: Option<WithIndex>,
+		pub condition: Option<NodeId<Expr>>,
+		pub split: Option<NodeListId<PresentPlace>>,
+		pub group: Option<NodeListId<PresentPlace>>,
+		pub order: Option<OrderBy>,
+		pub start: Option<NodeId<Expr>>,
+		pub limit: Option<NodeId<Expr>>,
+		pub version: Option<NodeId<Expr>>,
+		pub timeout: Option<NodeId<Expr>>,
+		pub fetch: Option<NodeListId<Fetch>>,
+		pub tempfiles: bool,
 		pub explain: Option<Explain>,
 	}
 }
@@ -370,7 +503,11 @@ ast_type! {
 		Let(NodeId<Let>),
 		Info(NodeId<Info>),
 		Create(NodeId<Create>),
+		Update(NodeId<Update>),
+		Upsert(NodeId<Upsert>),
 		Delete(NodeId<Delete>),
+		Relate(NodeId<Relate>),
+		Select(NodeId<Select>),
 	}
 }
 
