@@ -1,6 +1,6 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::EscapeKwFreeIdent;
+use crate::fmt::{EscapeKwFreeIdent, QuoteStr};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -59,7 +59,7 @@ impl ToSql for OptionStatement {
 				write_sql!(f, fmt, "OPTION {} = FALSE", EscapeKwFreeIdent(&self.name))
 			}
 			OptionValue::String(s) => {
-				write_sql!(f, fmt, "OPTION {} = \"{}\"", EscapeKwFreeIdent(&self.name), s)
+				write_sql!(f, fmt, "OPTION {} = {}", EscapeKwFreeIdent(&self.name), QuoteStr(s))
 			}
 		}
 	}

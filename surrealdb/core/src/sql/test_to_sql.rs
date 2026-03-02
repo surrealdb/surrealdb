@@ -327,7 +327,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::top_level_live_diff(TopLevelExpr::Live(Box::new(LiveStatement { fields: LiveFields::Diff, what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT DIFF FROM user", "LIVE SELECT DIFF FROM user")]
 #[case::top_level_option(TopLevelExpr::Option(OptionStatement { name: "IMPORT".to_string(), what: OptionValue::Bool(true) }), "OPTION IMPORT", "OPTION IMPORT")]
 #[case::top_level_option_false(TopLevelExpr::Option(OptionStatement { name: "IMPORT".to_string(), what: OptionValue::Bool(false) }), "OPTION IMPORT = FALSE", "OPTION IMPORT = FALSE")]
-#[case::top_level_option_string(TopLevelExpr::Option(OptionStatement { name: "PLANNER".to_string(), what: OptionValue::String("compute-only".to_string()) }), "OPTION PLANNER = \"compute-only\"", "OPTION PLANNER = \"compute-only\"")]
+#[case::top_level_option_string(TopLevelExpr::Option(OptionStatement { name: "PLANNER".to_string(), what: OptionValue::String("compute-only".to_string()) }), "OPTION PLANNER = 'compute-only'", "OPTION PLANNER = 'compute-only'")]
 #[case::top_level_use(TopLevelExpr::Use(UseStatement::NsDb(Expr::Idiom(Idiom::field("ns".to_string())), Expr::Idiom(Idiom::field("db".to_string())))), "USE NS ns DB db", "USE NS ns DB db")]
 #[case::top_level_show(TopLevelExpr::Show(ShowStatement { table: Some("user".to_string()), since: ShowSince::Versionstamp(123), limit: Some(10) }), "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10", "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10")]
 #[case::top_level_expr(TopLevelExpr::Expr(Expr::Literal(Literal::Integer(1))), "1", "1")]
