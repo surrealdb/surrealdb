@@ -295,7 +295,7 @@ pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	) -> FlowResult<Vec<Value>> {
 		let mut results = Vec::with_capacity(values.len());
 		for value in values {
-			results.push(self.evaluate(ctx.with_value(value)).await?);
+			results.push(self.evaluate(ctx.with_value_and_doc(value)).await?);
 		}
 		Ok(results)
 	}
