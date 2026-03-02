@@ -12,10 +12,7 @@ value = "[{ id: student:2, marks: [{ mark: 50, subject: 'maths' }, { mark: 35, s
 value = "[{ id: student:3, marks: [{ mark: 50, subject: 'maths' }, { mark: 30, subject: 'hindi' }, { mark: 45, subject: 'tamil' }] }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}
-    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINS 'english'] {rows: 2}
-
-Total rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINS 'english'] {rows: 2}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:1 }, { id: student:2 }]"
@@ -24,10 +21,7 @@ value = "[{ id: student:1 }, { id: student:2 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}
-    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.subject CONTAINS 'english'] {rows: 2}
-
-Total rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    Filter [ctx: Db] [predicate: marks.*.subject CONTAINS 'english'] {rows: 2}\n        IndexScan [ctx: Db] [index: subject_idx, access: = 'english', direction: Forward] {rows: 2}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:1 }, { id: student:2 }]"
@@ -36,10 +30,7 @@ value = "[{ id: student:1 }, { id: student:2 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}
-    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINSALL ['hindi', 'maths']] {rows: 2}
-
-Total rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINSALL ['hindi', 'maths']] {rows: 2}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:2 }, { id: student:3 }]"
@@ -48,10 +39,7 @@ value = "[{ id: student:2 }, { id: student:3 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}
-    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.subject CONTAINSALL ['hindi', 'maths']] {rows: 2}
-
-Total rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    Filter [ctx: Db] [predicate: marks.*.subject CONTAINSALL ['hindi', 'maths']] {rows: 2}\n        UnionIndexScan [ctx: Db] [table: student, branches: 2] {rows: 3}\n            IndexScan [ctx: Db] [index: subject_idx, access: = 'hindi', direction: Forward] {rows: 2}\n            IndexScan [ctx: Db] [index: subject_idx, access: = 'maths', direction: Forward] {rows: 3}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:2 }, { id: student:3 }]"
@@ -60,10 +48,7 @@ value = "[{ id: student:2 }, { id: student:3 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}
-    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINSANY ['tamil', 'french']] {rows: 2}
-
-Total rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINSANY ['tamil', 'french']] {rows: 2}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:1 }, { id: student:3 }]"
@@ -72,15 +57,13 @@ value = "[{ id: student:1 }, { id: student:3 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}
-    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.subject CONTAINSANY ['tamil', 'french']] {rows: 2}
-
-Total rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    Filter [ctx: Db] [predicate: marks.*.subject CONTAINSANY ['tamil', 'french']] {rows: 2}\n        UnionIndexScan [ctx: Db] [table: student, branches: 2] {rows: 2}\n            IndexScan [ctx: Db] [index: subject_idx, access: = 'tamil', direction: Forward] {rows: 2}\n            IndexScan [ctx: Db] [index: subject_idx, access: = 'french', direction: Forward] {rows: 0}\n\nTotal rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:1 }, { id: student:3 }]"
 */
 
+# 0, 1, 2: Setup test data
 CREATE student:1 CONTENT {
 	marks: [
 		{ subject: "maths", mark: 50 },
@@ -103,34 +86,28 @@ CREATE student:3 CONTENT {
 	]
 };
 
--- CONTAINS without index
+# 3, 4: CONTAINS without index
 EXPLAIN ANALYZE SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
 SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
--- CONTAINS with index
+# 5, 6, 7: CONTAINS with index
 DEFINE INDEX subject_idx ON student COLUMNS marks.*.subject;
-EXPLAIN ANALYZE SELECT id FROM student WHERE marks.
-subject CONTAINS "english";
-
+EXPLAIN ANALYZE SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
 SELECT id FROM student WHERE marks.*.subject CONTAINS "english";
 
--- CONTAINSALL without index
+# 8, 9, 10: CONTAINSALL without index
 REMOVE INDEX subject_idx ON student;
 EXPLAIN ANALYZE SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"];
 SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"];
--- CONTAINSALL with index
+# 11, 12, 13: CONTAINSALL with index
 DEFINE INDEX subject_idx ON student COLUMNS marks.*.subject;
-EXPLAIN ANALYZE SELECT id FROM student WHERE marks.
-subject CONTAINSALL ["hindi", "maths"];
-
+EXPLAIN ANALYZE SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"];
 SELECT id FROM student WHERE marks.*.subject CONTAINSALL ["hindi", "maths"];
 
--- CONTAINSANY without index
+# 14, 15, 16: CONTAINSANY without index
 REMOVE INDEX subject_idx ON student;
 EXPLAIN ANALYZE SELECT id FROM student WHERE marks.*.subject CONTAINSANY ["tamil", "french"];
 SELECT id FROM student WHERE marks.*.subject CONTAINSANY ["tamil", "french"];
--- CONTAINSANY with index
+# 17, 18, 19: CONTAINSANY with index
 DEFINE INDEX subject_idx ON student COLUMNS marks.*.subject;
-EXPLAIN ANALYZE SELECT id FROM student WHERE marks.
-subject CONTAINSANY ["tamil", "french"];
-
+EXPLAIN ANALYZE SELECT id FROM student WHERE marks.*.subject CONTAINSANY ["tamil", "french"];
 SELECT id FROM student WHERE marks.*.subject CONTAINSANY ["tamil", "french"];

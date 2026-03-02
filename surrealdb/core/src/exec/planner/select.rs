@@ -2107,6 +2107,10 @@ impl<'ctx> Planner<'ctx> {
 			if let Some(path) = analyzer.try_in_expansion(cond, direction) {
 				return Ok(Some((path, direction)));
 			}
+			// Try expanding CONTAINSALL/CONTAINSANY into union of equality lookups
+			if let Some(path) = analyzer.try_containment_expansion(cond, direction) {
+				return Ok(Some((path, direction)));
+			}
 			return Ok(Some((AccessPath::TableScan, direction)));
 		}
 

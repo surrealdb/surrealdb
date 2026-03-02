@@ -549,6 +549,8 @@ async fn resolve_table_scan_stream(
 				.try_or_union(cfg.cond.as_ref(), cfg.direction)
 				// Try expanding IN operators into union of equality lookups
 				.or_else(|| analyzer.try_in_expansion(cfg.cond.as_ref(), cfg.direction))
+				// Try expanding CONTAINSALL/CONTAINSANY into union of equality lookups
+				.or_else(|| analyzer.try_containment_expansion(cfg.cond.as_ref(), cfg.direction))
 		} else {
 			let path = select_access_path(candidates, cfg.with.as_ref(), cfg.direction);
 			// When the best single-index path is a full-range scan (ORDER BY
