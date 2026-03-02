@@ -664,7 +664,9 @@ impl MutVisitor for ParamResolver<'_> {
 	type Error = std::convert::Infallible;
 
 	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
-		if let Expr::Param(param) = expr && let Some(value) = self.values.get(param.as_str()) {
+		if let Expr::Param(param) = expr
+			&& let Some(value) = self.values.get(param.as_str())
+		{
 			*expr = value.clone().into_literal();
 			return Ok(());
 		}
@@ -714,8 +716,9 @@ pub(crate) async fn resolve_condition_params(
 		// Fall back to DEFINE PARAM in the transaction store.
 		if let Some((ns, db)) = ns_db
 			&& let Some(txn) = ctx.try_tx()
-			&& let Ok(param_def) = txn.get_db_param(ns, db, name).await {
-				resolved.insert(name.clone(), param_def.value.clone());
+			&& let Ok(param_def) = txn.get_db_param(ns, db, name).await
+		{
+			resolved.insert(name.clone(), param_def.value.clone());
 		}
 	}
 
