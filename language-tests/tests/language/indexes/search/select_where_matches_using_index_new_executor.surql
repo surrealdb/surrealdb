@@ -12,8 +12,7 @@ value = "NONE"
 
 [[test.results]]
 value = '''"SelectProject [ctx: Db] [projections: id] {rows: 1}
-    Filter [ctx: Db] [predicate: title @1@ 'Hello'] {rows: 1}
-        FullTextScan [ctx: Db] [index: blog_title, query: Hello] {rows: 1}
+    FullTextScan [ctx: Db] [index: blog_title, query: Hello] {rows: 1}
 
 Total rows: 1"'''
 

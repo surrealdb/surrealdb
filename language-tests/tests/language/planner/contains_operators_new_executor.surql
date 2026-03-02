@@ -2,17 +2,20 @@
 [test]
 reason = "Test CONTAINS, CONTAINSALL, and CONTAINSANY with array fields and index (new executor)"
 
+# 0, 1, 2: Setup test data
 [[test.results]]
 value = "[{ id: student:1, marks: [{ mark: 50, subject: 'maths' }, { mark: 40, subject: 'english' }, { mark: 45, subject: 'tamil' }] }]"
-
 [[test.results]]
 value = "[{ id: student:2, marks: [{ mark: 50, subject: 'maths' }, { mark: 35, subject: 'english' }, { mark: 45, subject: 'hindi' }] }]"
-
 [[test.results]]
 value = "[{ id: student:3, marks: [{ mark: 50, subject: 'maths' }, { mark: 30, subject: 'hindi' }, { mark: 45, subject: 'tamil' }] }]"
 
+
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINS 'english'] {rows: 2}\n\nTotal rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}
+    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINS 'english'] {rows: 2}
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:1 }, { id: student:2 }]"
@@ -21,7 +24,11 @@ value = "[{ id: student:1 }, { id: student:2 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    Filter [ctx: Db] [predicate: marks.*.subject CONTAINS 'english'] {rows: 2}\n        IndexScan [ctx: Db] [index: subject_idx, access: = 'english', direction: Forward] {rows: 2}\n\nTotal rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}
+    Filter [ctx: Db] [predicate: marks.*.subject CONTAINS 'english'] {rows: 2}
+        IndexScan [ctx: Db] [index: subject_idx, access: = 'english', direction: Forward] {rows: 2}
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:1 }, { id: student:2 }]"
@@ -30,7 +37,10 @@ value = "[{ id: student:1 }, { id: student:2 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINSALL ['hindi', 'maths']] {rows: 2}\n\nTotal rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}
+    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINSALL ['hindi', 'maths']] {rows: 2}
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:2 }, { id: student:3 }]"
@@ -39,7 +49,13 @@ value = "[{ id: student:2 }, { id: student:3 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    Filter [ctx: Db] [predicate: marks.*.subject CONTAINSALL ['hindi', 'maths']] {rows: 2}\n        UnionIndexScan [ctx: Db] [table: student, branches: 2] {rows: 3}\n            IndexScan [ctx: Db] [index: subject_idx, access: = 'hindi', direction: Forward] {rows: 2}\n            IndexScan [ctx: Db] [index: subject_idx, access: = 'maths', direction: Forward] {rows: 3}\n\nTotal rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}
+    Filter [ctx: Db] [predicate: marks.*.subject CONTAINSALL ['hindi', 'maths']] {rows: 2}
+        UnionIndexScan [ctx: Db] [table: student, branches: 2] {rows: 3}
+            IndexScan [ctx: Db] [index: subject_idx, access: = 'hindi', direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [index: subject_idx, access: = 'maths', direction: Forward] {rows: 3}
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:2 }, { id: student:3 }]"
@@ -48,7 +64,10 @@ value = "[{ id: student:2 }, { id: student:3 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINSANY ['tamil', 'french']] {rows: 2}\n\nTotal rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}
+    TableScan [ctx: Db] [table: student, direction: Forward, predicate: marks.*.subject CONTAINSANY ['tamil', 'french']] {rows: 2}
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:1 }, { id: student:3 }]"
@@ -57,7 +76,13 @@ value = "[{ id: student:1 }, { id: student:3 }]"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}\n    Filter [ctx: Db] [predicate: marks.*.subject CONTAINSANY ['tamil', 'french']] {rows: 2}\n        UnionIndexScan [ctx: Db] [table: student, branches: 2] {rows: 2}\n            IndexScan [ctx: Db] [index: subject_idx, access: = 'tamil', direction: Forward] {rows: 2}\n            IndexScan [ctx: Db] [index: subject_idx, access: = 'french', direction: Forward] {rows: 0}\n\nTotal rows: 2"'''
+value = '''"SelectProject [ctx: Db] [projections: id] {rows: 2}
+    Filter [ctx: Db] [predicate: marks.*.subject CONTAINSANY ['tamil', 'french']] {rows: 2}
+        UnionIndexScan [ctx: Db] [table: student, branches: 2] {rows: 2}
+            IndexScan [ctx: Db] [index: subject_idx, access: = 'tamil', direction: Forward] {rows: 2}
+            IndexScan [ctx: Db] [index: subject_idx, access: = 'french', direction: Forward] {rows: 0}
+
+Total rows: 2"'''
 
 [[test.results]]
 value = "[{ id: student:1 }, { id: student:3 }]"
