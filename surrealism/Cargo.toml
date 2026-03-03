@@ -1,6 +1,6 @@
 [package]
 name = "surrealism"
-version = "0.1.9"
+version = "0.1.10"
 edition.workspace = true
 authors.workspace = true
 description.workspace = true
