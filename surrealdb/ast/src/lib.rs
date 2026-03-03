@@ -589,6 +589,43 @@ ast_type! {
 }
 
 ast_type! {
+	pub struct ApiMiddleware{
+		pub path: NodeId<Path>,
+		pub args: Option<NodeListId<Expr>>,
+	}
+}
+
+ast_type! {
+	pub struct ApiAction{
+		pub middleware: Option<NodeListId<ApiMiddleware>>,
+		pub permission: Option<Permission>,
+		pub action: NodeId<Expr>,
+	}
+}
+
+#[derive(Debug)]
+pub struct DefineMethodApiActions {
+	pub get: Option<NodeId<ApiAction>>,
+	pub delete: Option<NodeId<ApiAction>>,
+	pub patch: Option<NodeId<ApiAction>>,
+	pub post: Option<NodeId<ApiAction>>,
+	pub put: Option<NodeId<ApiAction>>,
+	pub trace: Option<NodeId<ApiAction>>,
+}
+
+ast_type! {
+	pub struct DefineApi{
+		pub kind: DefineKind,
+		pub path: NodeId<Expr>,
+		pub base_middleware: Option<NodeListId<ApiMiddleware>>,
+		pub base_permission: Option<Permission>,
+		pub fallback: Option<NodeId<Expr>>,
+		pub methods: DefineMethodApiActions,
+		pub comment: Option<NodeId<Expr>>,
+	}
+}
+
+ast_type! {
 	#[derive(Copy, Clone)]
 	pub enum Expr {
 		Covered(NodeId<Expr>),
@@ -637,6 +674,7 @@ ast_type! {
 		Delete(NodeId<Delete>),
 		Relate(NodeId<Relate>),
 		Select(NodeId<Select>),
+		DefineTable(NodeId<DefineTable>),
 	}
 }
 

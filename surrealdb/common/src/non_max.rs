@@ -26,6 +26,10 @@ macro_rules! impl_non_max {
 				None
 			}
 
+			#[doc = "Create a new NonMax value."]
+			#[doc = ""]
+			#[doc = "# Safety"]
+			#[doc = "Caller must ensure that the value used is not equal to the maximum value."]
 			pub const unsafe fn new_unchecked(v: $zeroable) -> Self{
 				unsafe{ $name(NonZero::<$zeroable>::new_unchecked(v ^ impl_non_max!(@max $signed, $zeroable))) }
 			}

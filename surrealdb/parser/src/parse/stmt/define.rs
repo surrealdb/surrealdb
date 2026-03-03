@@ -1,9 +1,9 @@
-use ast::RelationTable;
+use ast::{ApiAction, RelationTable};
 use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
 use token::{BaseTokenKind, T};
 
-use crate::parse::utils::{parse_delimited_list, parse_seperated_list_sync};
+use crate::parse::utils::{parse_delimited_list, parse_seperated_list, parse_seperated_list_sync};
 use crate::parse::{ParseError, ParseResult};
 use crate::{Parse, ParseSync, Parser};
 
@@ -510,6 +510,257 @@ impl Parse for ast::DefineTable {
 			view: view.map(|x| x.0),
 			changefeed: changefeed.map(|x| x.0),
 			table_kind: table_kind.map(|x| x.0),
+			span,
+		})
+	}
+}
+
+impl Parse for ast::ApiMiddleware {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let span = parser.peek_span();
+		let path = parser.parse_sync_push()?;
+		let (_, args) = parse_delimited_list(
+			parser,
+			BaseTokenKind::OpenParen,
+			BaseTokenKind::CloseParen,
+			T![,],
+			async |parser| parser.parse_enter().await,
+		)
+		.await?;
+		let span = parser.span_since(span);
+		Ok(ast::ApiMiddleware {
+			path,
+			args,
+			span,
+		})
+	}
+}
+
+impl Parse for ast::ApiAction {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let span = parser.peek_span();
+		let mut permission = None;
+		let mut middleware = None;
+
+		let mut did_parse = false;
+		loop {
+			let Some(peek) = parser.peek()? else {
+				break;
+			};
+			match peek.token {
+				T![PERMISSIONS] => {
+					let _ = parser.next();
+
+					parse_unordered_clause(parser, &mut permission, peek.span, async |parser| {
+						parser.parse().await
+					})
+					.await?;
+					did_parse = true;
+				}
+				T![MIDDLEWARE] => {
+					let _ = parser.next();
+
+					parse_unordered_clause(parser, &mut middleware, peek.span, async |parser| {
+						parse_seperated_list(parser, T![,], async |parser| parser.parse().await)
+							.await
+							.map(|x| x.1)
+					})
+					.await?;
+					did_parse = true;
+				}
+				_ => break,
+			}
+		}
+		if !did_parse {
+			return Err(parser.unexpected("`PERMISSIONS`, or `MIDDLEWARE`"));
+		}
+
+		let _ = parser.expect(T![THEN])?;
+
+		let action = parser.parse_enter_push().await?;
+
+		Ok(ast::ApiAction {
+			middleware: middleware.map(|x| x.0),
+			permission: permission.map(|x| x.0),
+			action,
+			span,
+		})
+	}
+}
+
+macro_rules! impl_method_matching {
+    (($parser:expr) => {$($pat:pat => ($store:ident, $new_span:ident)),*}) => {
+		$(let mut $new_span = None;)*
+		let peek = $parser
+			.peek_expect("`DELETE`, `GET`, `PATCH`, `POST`, `PUT`, or `TRACE`")?;
+		loop{
+			match peek.token {
+				$($pat => {
+					let _ = $parser.next();
+					if let Some(span) = $store.map(|x: (_, Span)| x.1).or($new_span) {
+						return Err(reuse_error($parser, peek.span, span));
+					}
+					$new_span = Some(peek.span)
+				})*
+				_ => {
+					return Err($parser.unexpected(
+						"`DELETE`, `GET`, `PATCH`, `POST`, `PUT`, or `TRACE`",
+					));
+				}
+			}
+
+			if $parser.eat(T![,])?.is_none(){
+				break
+			}
+		}
+
+		let action = $parser.parse_push::<ast::ApiAction>().await?;
+
+		$(
+			if let Some($new_span) = $new_span{
+				$store = Some((action, $new_span));
+			}
+		)*
+    };
+}
+
+impl Parse for ast::DefineApi {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let define = parser.expect(T![DEFINE])?;
+		let _ = parser.expect(T![API])?;
+		let kind = parser.parse_sync()?;
+
+		let path = parser.parse_enter_push().await?;
+
+		let mut base_permission = None;
+		let mut base_middleware = None;
+		let mut fallback = None;
+		let mut get = None;
+		let mut patch = None;
+		let mut put = None;
+		let mut post = None;
+		let mut trace = None;
+		let mut delete = None;
+		loop {
+			if parser.eat(T![FOR])?.is_none() {
+				break;
+			}
+
+			let peek =
+				parser.peek_expect("`ANY`, `DELETE`, `GET`, `PATCH`, `POST`, `PUT`, or `TRACE`")?;
+			match peek.token {
+				T![ANY] => {
+					let _ = parser.next();
+
+					let mut did_parse = false;
+					loop {
+						let Some(peek) = parser.peek()? else {
+							break;
+						};
+						match peek.token {
+							T![PERMISSIONS] => {
+								let _ = parser.next();
+
+								parse_unordered_clause(
+									parser,
+									&mut base_permission,
+									peek.span,
+									async |parser| parser.parse().await,
+								)
+								.await?;
+								did_parse = true;
+							}
+							T![MIDDLEWARE] => {
+								let _ = parser.next();
+
+								parse_unordered_clause(
+									parser,
+									&mut base_middleware,
+									peek.span,
+									async |parser| {
+										parse_seperated_list(parser, T![,], async |parser| {
+											parser.parse().await
+										})
+										.await
+										.map(|x| x.1)
+									},
+								)
+								.await?;
+								did_parse = true;
+							}
+							_ => break,
+						}
+					}
+
+					if let Some(x) = parser.eat(T![THEN])? {
+						parse_unordered_clause(parser, &mut fallback, x.span, async |parser| {
+							parser.parse_enter_push().await
+						})
+						.await?;
+					}
+
+					if !did_parse {
+						return Err(parser.unexpected("`PERMISSIONS`, `MIDDLEWARE`, or `THEN`"));
+					}
+				}
+				T![DELETE] | T![GET] | T![PATCH] | T![POST] | T![PUT] | T![TRACE] => {
+					// macro for some very repetitive code
+					// Don't forget to update the expectation strings inside the macro if you ever
+					// add new methods.
+					//
+					// Matches any number of methods, checks if the method was already defined
+					// somewhere, if so, throw an error, otherwise parse a ApiAction and set the
+					// methods to the parsed action
+					impl_method_matching! {
+						(parser) => {
+							T![DELETE] => (delete,delete_span),
+							T![GET] => (get,get_span),
+							T![PATCH] => (patch,patch_span),
+							T![POST] => (post,post_span),
+							T![PUT] => (put,put_span),
+							T![TRACE] => (trace,trace_span)
+						}
+					}
+				}
+				_ => {
+					return Err(parser
+						.unexpected("`ANY`, `DELETE`, `GET`, `PATCH`, `POST`, `PUT`, or `TRACE`"));
+				}
+			}
+		}
+
+		let mut comment = None;
+		while let Some(x) = parser.peek()? {
+			match x.token {
+				T![COMMENT] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut comment, x.span, async |parser| {
+						parser.parse_enter_push::<ast::Expr>().await
+					})
+					.await?;
+				}
+				_ => break,
+			}
+		}
+
+		let methods = ast::DefineMethodApiActions {
+			get: get.map(|x| x.0),
+			post: post.map(|x| x.0),
+			patch: patch.map(|x| x.0),
+			put: put.map(|x| x.0),
+			trace: trace.map(|x| x.0),
+			delete: delete.map(|x| x.0),
+		};
+
+		let span = parser.span_since(define.span);
+		Ok(ast::DefineApi {
+			kind,
+			path,
+			base_middleware: base_middleware.map(|x| x.0),
+			base_permission: base_permission.map(|x| x.0),
+			fallback: fallback.map(|x| x.0),
+			methods,
+			comment: comment.map(|x| x.0),
 			span,
 		})
 	}

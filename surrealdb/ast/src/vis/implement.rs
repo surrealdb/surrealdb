@@ -12,8 +12,9 @@ use crate::mac::impl_vis_debug;
 use crate::types::{Ast, NodeLibrary};
 use crate::vis::AstVis;
 use crate::{
-	Base, BinaryOperator, DateTime, DestructureOperator, IdiomOperator, InfoKind, Integer,
-	MockKind, NodeId, NodeListId, PostfixOperator, RecordIdKeyGenerate, Sign, Spanned, UseKind,
+	Base, BinaryOperator, DateTime, DefineMethodApiActions, DestructureOperator, IdiomOperator,
+	InfoKind, Integer, MockKind, NodeId, NodeListId, PostfixOperator, RecordIdKeyGenerate, Sign,
+	Spanned, UseKind,
 };
 
 impl<L, W> AstVis<L, W> for InfoKind
@@ -173,6 +174,24 @@ where
 			} => fmt.variant(ast, "Range", |ast, fmt| {
 				fmt.field(ast, "start", start)?.field(ast, "end", end)?.finish()
 			}),
+		})
+	}
+}
+
+impl<L, W> AstVis<L, W> for DefineMethodApiActions
+where
+	L: NodeLibrary,
+	W: fmt::Write,
+{
+	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
+		fmt.fmt_struct(ast, "DefineMethodApiActions", |ast, fmt| {
+			fmt.field(ast, "delete", &self.delete)?
+				.field(ast, "get", &self.get)?
+				.field(ast, "patch", &self.patch)?
+				.field(ast, "post", &self.post)?
+				.field(ast, "put", &self.put)?
+				.field(ast, "trace", &self.trace)?
+				.finish()
 		})
 	}
 }
