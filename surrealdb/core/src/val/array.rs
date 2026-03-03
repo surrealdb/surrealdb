@@ -102,6 +102,10 @@ impl Array {
 		self.0.iter().all(|v| v.is_nullish())
 	}
 
+	pub(crate) fn is_any_none_or_null(&self) -> bool {
+		self.0.iter().any(|v| v.is_nullish())
+	}
+
 	/// Removes all values in the array which are equal to the given value.
 	pub fn remove_value(mut self, other: &Value) -> Self {
 		self.retain(|x| x != other);
