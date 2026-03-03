@@ -930,7 +930,7 @@ impl Executor {
 						});
 						continue;
 					}
-					Err(e) => Err(TypesError::internal(e.to_string())),
+					Err(e) => Err(types_error_from_anyhow(e)),
 				},
 				stmt => {
 					// reintroduce planner later.
@@ -1125,7 +1125,7 @@ impl Executor {
 				TopLevelExpr::Option(stmt) => {
 					let result = match this.execute_option_statement(stmt) {
 						Ok(_) => Ok(PublicValue::None),
-						Err(e) => Err(TypesError::internal(e.to_string())),
+						Err(e) => Err(types_error_from_anyhow(e)),
 					};
 					this.results.push(QueryResult {
 						time: Duration::ZERO,
