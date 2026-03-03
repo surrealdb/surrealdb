@@ -731,7 +731,9 @@ async fn router(
 			txn,
 		} => {
 			if let Some(ct) = state.transactions.get(&txn) {
-				let _ = ct.tx.cancel().await;
+				if !ct.tx.closed() {
+					ct.tx.cancel().await.map_err(crate::std_error_to_types_error)?;
+				}
 				state.transactions.remove(&txn);
 			}
 			Ok(vec![QueryResultBuilder::instant_none()])

@@ -499,13 +499,12 @@ impl RpcProtocol for Websocket {
 			);
 			surrealdb_core::rpc::invalid_params("Transaction not found")
 		})?;
-		if entry.is_poisoned() {
-			return Err(surrealdb_core::rpc::invalid_params(
-				"Transaction failed due to a previous error, only cancel is allowed",
-			));
-		}
 		debug!("Transaction {id} found in WebSocket transactions map");
 		Ok(entry.tx.clone())
+	}
+
+	async fn is_tx_poisoned(&self, id: Uuid) -> bool {
+		self.transactions.get(&id).is_some_and(|entry| entry.is_poisoned())
 	}
 
 	/// Stores a transaction
@@ -669,8 +668,10 @@ impl RpcProtocol for Websocket {
 			return Err(surrealdb_core::rpc::invalid_params("Transaction not found"));
 		};
 
-		// Cancel the transaction, ignoring errors if already cancelled by the executor
-		let _ = ct.tx.cancel().await;
+		// Skip if already cancelled by the executor, otherwise propagate errors
+		if !ct.tx.closed() {
+			ct.tx.cancel().await.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
+		}
 
 		// Return success
 		Ok(DbResult::Other(Value::None))

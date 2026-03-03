@@ -149,6 +149,11 @@ pub trait RpcProtocol {
 		Ok(())
 	}
 
+	/// Returns true if the transaction has been poisoned by a prior error.
+	async fn is_tx_poisoned(&self, _id: Uuid) -> bool {
+		false
+	}
+
 	// ------------------------------
 	// Realtime
 	// ------------------------------
@@ -1577,7 +1582,17 @@ where
 
 	// If a transaction UUID is provided, retrieve it and execute with it
 	let res = if let Some(txn_id) = txn {
-		// Retrieve the transaction - fail if not found (also rejects poisoned transactions)
+		if this.is_tx_poisoned(txn_id).await {
+			return Ok(vec![QueryResult {
+				time: std::time::Duration::ZERO,
+				result: Err(surrealdb_types::Error::internal(
+					"Transaction failed due to a previous error, only cancel is allowed"
+						.to_string(),
+				)),
+				query_type: QueryType::Other,
+			}]);
+		}
+		// Retrieve the transaction - fail if not found
 		let tx = this.get_tx(txn_id).await.map_err(anyhow::Error::from)?;
 		// Execute with the existing transaction by passing it through context
 		let res = match query {
