@@ -13,7 +13,8 @@ pub struct NamedField {
 	pub default: Option<FieldDefault>,
 	/// When true, this field's serialized object is merged into the parent.
 	pub flatten: bool,
-	/// When true, the type will be wrapped in the Wrapper type to provide interop with serde-only types
+	/// When true, the type will be wrapped in the Wrapper type to provide interop with serde-only
+	/// types
 	pub wrap: bool,
 }
 

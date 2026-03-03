@@ -8,7 +8,8 @@ use crate::CratePath;
 pub struct UnnamedFields {
 	pub fields: Vec<syn::Type>,
 	pub field_names: Vec<Ident>,
-	/// When true, the type will be wrapped in the Wrapper type to provide interop with serde-only types
+	/// When true, the type will be wrapped in the Wrapper type to provide interop with serde-only
+	/// types
 	pub wrap: Vec<bool>,
 	pub tuple: bool,
 	pub skip_content: Option<crate::SkipContent>,
