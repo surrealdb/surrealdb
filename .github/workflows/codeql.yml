@@ -52,7 +52,7 @@ jobs:
         uses: ./.github/actions/setup-environment
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3.32.5
         with:
           languages: rust
           # Use build-mode: none to avoid full Rust compilation
@@ -65,7 +65,7 @@ jobs:
           queries: security-extended
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@ae9ef3a1d2e3413523c3741725c30064970cc0d4 # v3.32.5
         with:
           category: "/language:rust"
           # Upload results even if previous steps had warnings
