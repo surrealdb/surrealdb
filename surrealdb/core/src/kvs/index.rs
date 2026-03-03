@@ -428,6 +428,11 @@ struct Building {
 	queue: Arc<RwLock<QueueSequences>>,
 	/// Batch IDs scheduled for deferred cleanup after rollback (cancel or failed commit).
 	clean_queue: BatchIdsCleanQueue,
+	/// Set to `true` once the initial build (first pass) is complete.
+	/// Used to skip writing `ip` (primary appending) keys during the appending
+	/// phase, avoiding write-write conflicts with `index_appending_range` which
+	/// deletes those same keys.
+	initial_build_complete: AtomicBool,
 	/// Abort flag for the build process.
 	aborted: AtomicBool,
 	finished: AtomicBool,
@@ -454,6 +459,7 @@ impl Building {
 			status: Arc::new(RwLock::new(BuildingStatus::Started)),
 			queue: Default::default(),
 			clean_queue: Default::default(),
+			initial_build_complete: AtomicBool::new(false),
 			aborted: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
 		})
@@ -504,21 +510,26 @@ impl Building {
 		// Store the appending
 		let ig = self.ikb.new_ig_key(appending_id, batch_id);
 		tx.set(&ig, &appending, None).await?;
-		// Do we already have a primary appending?
-		let ip = self.ikb.new_ip_key(rid.key.clone());
-		let pa = tx.get(&ip, None).await?;
-		// Do we have a primary indexing?
-		// We ignore legacy primary indexing.
-		// The initial batch is responsible for removing them, if any,
-		// and reporting their presence in the logs.
-		let is_pa = if let Some(pa) = pa {
-			pa.1 != QueueSequences::LEGACY_BATCH_ID
-		} else {
-			false
-		};
-		if !is_pa {
-			// If not, set it.
-			tx.set(&ip, &PrimaryAppending(appending_id, batch_id), None).await?;
+		// The ip (primary appending) key is only needed during the initial build phase,
+		// where `check_existing_primary_appending` uses it to find the latest appending
+		// for a record being initially indexed. Once the initial build is complete
+		// (appending phase), we skip setting ip to avoid write-write conflicts with the
+		// appending daemon which deletes ip keys.
+		if !self.initial_build_complete.load(Ordering::Relaxed) {
+			let ip = self.ikb.new_ip_key(rid.key.clone());
+			let pa = tx.get(&ip, None).await?;
+			// We ignore legacy primary indexing.
+			// The initial batch is responsible for removing them, if any,
+			// and reporting their presence in the logs.
+			let is_pa = if let Some(pa) = pa {
+				pa.1 != QueueSequences::LEGACY_BATCH_ID
+			} else {
+				false
+			};
+			if !is_pa {
+				// If not, set it.
+				tx.set(&ip, &PrimaryAppending(appending_id, batch_id), None).await?;
+			}
 		}
 		drop(queue);
 		Ok(ConsumeResult::Enqueued)
@@ -648,6 +659,8 @@ impl Building {
 				catch!(tx, tx.commit().await);
 			}
 		}
+		// Mark initial build as complete before entering the appending phase.
+		self.initial_build_complete.store(true, Ordering::Relaxed);
 		// Second pass: index/remove records that changed during the initial pass.
 		self.set_status(BuildingStatus::Indexing {
 			initial: Some(initial_count),
