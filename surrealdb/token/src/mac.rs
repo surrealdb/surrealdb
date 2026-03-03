@@ -169,6 +169,9 @@ macro_rules! T {
 	(AUTO) => {
 		$crate::BaseTokenKind::KwAuto
 	};
+	(ASYNC) => {
+		$crate::BaseTokenKind::KwAsync
+	};
 	(BACKEND) => {
 		$crate::BaseTokenKind::KwBackend
 	};
@@ -442,6 +445,9 @@ macro_rules! T {
 	(MAPPER) => {
 		$crate::BaseTokenKind::KwMapper
 	};
+	(MAXDEPTH) => {
+		$crate::BaseTokenKind::KwMaxdepth
+	};
 	(MIDDLEWARE) => {
 		$crate::BaseTokenKind::KwMiddleware
 	};
@@ -564,6 +570,9 @@ macro_rules! T {
 	};
 	(REPLACE) => {
 		$crate::BaseTokenKind::KwReplace
+	};
+	(RETRY) => {
+		$crate::BaseTokenKind::KwRetry
 	};
 	(RETURN) => {
 		$crate::BaseTokenKind::KwReturn

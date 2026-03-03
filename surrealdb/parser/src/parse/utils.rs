@@ -53,15 +53,15 @@ impl<T: Parse> Parse for Spanned<T> {
 ///
 /// Returns a list of items parsed as well as the span for the whole delimited list including
 /// delimiters.
-pub async fn parse_delimited_list<R, F>(
-	parser: &mut Parser<'_, '_>,
+pub async fn parse_delimited_list<'src, 'ast, R, F>(
+	parser: &mut Parser<'src, 'ast>,
 	open: BaseTokenKind,
 	close: BaseTokenKind,
 	seperator: BaseTokenKind,
 	value: F,
 ) -> ParseResult<(Span, Option<NodeListId<R>>)>
 where
-	F: AsyncFn(&mut Parser<'_, '_>) -> ParseResult<R>,
+	F: AsyncFn(&mut Parser<'src, 'ast>) -> ParseResult<R>,
 	R: Node,
 {
 	let start = parser.expect(open)?;
@@ -87,13 +87,13 @@ where
 	Ok((span, head))
 }
 
-pub async fn parse_seperated_list<R, F>(
-	parser: &mut Parser<'_, '_>,
+pub async fn parse_seperated_list<'src, 'ast, R, F>(
+	parser: &mut Parser<'src, 'ast>,
 	seperator: BaseTokenKind,
 	value: F,
 ) -> ParseResult<(Span, NodeListId<R>)>
 where
-	F: AsyncFn(&mut Parser<'_, '_>) -> ParseResult<R>,
+	F: AsyncFn(&mut Parser<'src, 'ast>) -> ParseResult<R>,
 	R: Node,
 {
 	let span = parser.peek_span();
@@ -125,13 +125,13 @@ where
 	Ok((span, start))
 }
 
-pub fn parse_seperated_list_sync<R, F>(
-	parser: &mut Parser<'_, '_>,
+pub fn parse_seperated_list_sync<'src, 'ast, R, F>(
+	parser: &mut Parser<'src, 'ast>,
 	seperator: BaseTokenKind,
 	value: F,
 ) -> ParseResult<(Span, NodeListId<R>)>
 where
-	F: Fn(&mut Parser<'_, '_>) -> ParseResult<R>,
+	F: Fn(&mut Parser<'src, 'ast>) -> ParseResult<R>,
 	R: Node,
 {
 	let span = parser.peek_span();

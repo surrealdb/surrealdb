@@ -183,6 +183,8 @@ pub enum BaseTokenKind {
 	KwAuthenticate,
 	#[regex(r"(?i)AUTO")]
 	KwAuto,
+	#[regex(r"(?i)ASYNC")]
+	KwAsync,
 	#[regex(r"(?i)BACKEND")]
 	KwBackend,
 	#[regex(r"(?i)BATCH")]
@@ -371,6 +373,8 @@ pub enum BaseTokenKind {
 	KwM0,
 	#[regex(r"(?i)MAPPER")]
 	KwMapper,
+	#[regex(r"(?i)MAXDEPTH")]
+	KwMaxdepth,
 	#[regex(r"(?i)MIDDLEWARE")]
 	KwMiddleware,
 	#[regex(r"(?i)ML")]
@@ -454,6 +458,8 @@ pub enum BaseTokenKind {
 	KwRemove,
 	#[regex(r"(?i)REPLACE")]
 	KwReplace,
+	#[regex(r"(?i)RETRY")]
+	KwRetry,
 	#[regex(r"(?i)RETURN")]
 	KwReturn,
 	#[regex(r"(?i)REVOKE")]
@@ -919,6 +925,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwAt => "keyword `AT`",
 			BaseTokenKind::KwAuthenticate => "keyword `AUTHENTICATE`",
 			BaseTokenKind::KwAuto => "keyword `AUTO`",
+			BaseTokenKind::KwAsync => "keyword `ASYNC`",
 			BaseTokenKind::KwBackend => "keyword `BACKEND`",
 			BaseTokenKind::KwBatch => "keyword `BATCH`",
 			BaseTokenKind::KwBearer => "keyword `BEARER`",
@@ -1010,6 +1017,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwM => "keyword `M`",
 			BaseTokenKind::KwM0 => "keyword `M0`",
 			BaseTokenKind::KwMapper => "keyword `MAPPER`",
+			BaseTokenKind::KwMaxdepth => "keyword `MAXDEPTH`",
 			BaseTokenKind::KwMiddleware => "keyword `MIDDLEWARE`",
 			BaseTokenKind::KwML => "keyword `ML`",
 			BaseTokenKind::KwMerge => "keyword `MERGE`",
@@ -1051,6 +1059,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwRefresh => "keyword `REFRESH`",
 			BaseTokenKind::KwRemove => "keyword `REMOVE`",
 			BaseTokenKind::KwReplace => "keyword `REPLACE`",
+			BaseTokenKind::KwRetry => "keyword `RETRY`",
 			BaseTokenKind::KwReturn => "keyword `RETURN`",
 			BaseTokenKind::KwRevoke => "keyword `REVOKE`",
 			BaseTokenKind::KwRevoked => "keyword `REVOKED`",

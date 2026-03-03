@@ -36,10 +36,24 @@ pub trait Parse: Sized {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self>;
 }
 
+impl<P: Parse + Node> Parse for NodeId<P> {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let p = P::parse(parser).await?;
+		Ok(parser.push(p))
+	}
+}
+
 /// A trait for types which can be individually parsed and require no recursion.
 /// Faster to call as it doesn't require a future.
 pub trait ParseSync: Sized {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self>;
+}
+
+impl<P: ParseSync + Node> ParseSync for NodeId<P> {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let p = P::parse_sync(parser)?;
+		Ok(parser.push(p))
+	}
 }
 
 /// Configuration struct for the parser.
