@@ -30,7 +30,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::rpc::types_error_from_anyhow;
-use crate::types::PublicNotification;
+use crate::types::{PublicNotification, PublicValue};
 use crate::val::{Array, Value, convert_value_to_public_value};
 use crate::{err, expr, sql};
 
@@ -872,7 +872,7 @@ impl Executor {
 					// CANCEL returns NONE
 					self.results.push(QueryResult {
 						time: before.elapsed(),
-						result: Ok(convert_value_to_public_value(Value::None)?),
+						result: Ok(PublicValue::None),
 						query_type: QueryType::Other,
 					});
 
@@ -903,7 +903,7 @@ impl Executor {
 						// COMMIT returns NONE
 						self.results.push(QueryResult {
 							time: before.elapsed(),
-							result: Ok(convert_value_to_public_value(Value::None)?),
+							result: Ok(PublicValue::None),
 							query_type: QueryType::Other,
 						});
 
@@ -925,7 +925,7 @@ impl Executor {
 						// OPTION returns NONE
 						self.results.push(QueryResult {
 							time: before.elapsed(),
-							result: Ok(convert_value_to_public_value(Value::None)?),
+							result: Ok(PublicValue::None),
 							query_type: QueryType::Other,
 						});
 						continue;
@@ -1123,11 +1123,13 @@ impl Executor {
 
 			match stmt {
 				TopLevelExpr::Option(stmt) => {
-					this.execute_option_statement(stmt)?;
-					// OPTION returns NONE
+					let result = match this.execute_option_statement(stmt) {
+						Ok(_) => Ok(PublicValue::None),
+						Err(e) => Err(TypesError::internal(e.to_string())),
+					};
 					this.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Ok(convert_value_to_public_value(Value::None)?),
+						result,
 						query_type: QueryType::Other,
 					});
 				}
@@ -1135,7 +1137,7 @@ impl Executor {
 					// BEGIN returns NONE
 					this.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Ok(convert_value_to_public_value(Value::None)?),
+						result: Ok(PublicValue::None),
 						query_type: QueryType::Other,
 					});
 
