@@ -6,6 +6,7 @@ pub struct FieldAttributes {
 	/// When set, missing field during from_value uses this default (either Default::default() or a
 	/// path).
 	pub default: Option<FieldDefault>,
+	pub wrap: bool,
 	/// When true, this field's serialized object is merged into the parent instead of
 	/// being inserted under a single key. Like serde's `#[serde(flatten)]`.
 	pub flatten: bool,
@@ -39,6 +40,8 @@ impl FieldAttributes {
 						field_attrs.rename = Some(lit_str.value());
 					} else if meta.path.is_ident("flatten") {
 						field_attrs.flatten = true;
+					} else if meta.path.is_ident("wrap") {
+						field_attrs.wrap = true;
 					} else if meta.path.is_ident("default") {
 						if meta.input.peek(syn::token::Eq) {
 							// #[surreal(default = "path")]
