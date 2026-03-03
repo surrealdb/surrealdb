@@ -9,7 +9,6 @@ use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, TableProvider, UserProvider,
 };
 use crate::catalog::{DatabaseId, NamespaceId, Record, TableDefinition};
-use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement};
@@ -327,7 +326,8 @@ impl Transaction {
 		let mut next = Some(beg..end);
 
 		while let Some(rng) = next {
-			let batch = self.batch_keys_vals(rng, *EXPORT_BATCH_SIZE, None).await?;
+			let batch =
+				self.batch_keys_vals(rng, self.batch_config().export_batch_size, None).await?;
 			next = batch.next;
 			// If there are no values, return early.
 			if batch.result.is_empty() {

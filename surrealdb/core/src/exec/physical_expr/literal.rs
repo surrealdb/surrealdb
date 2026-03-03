@@ -6,7 +6,6 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Permission};
-use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
@@ -249,12 +248,13 @@ impl PhysicalExpr for MockExpr {
 		crate::exec::ContextLevel::Root
 	}
 
-	async fn evaluate(&self, _ctx: EvalContext<'_>) -> FlowResult<Value> {
+	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
+		let limit = ctx.exec_ctx.ctx().config().limits.generation_allocation_limit;
 		let iter = self.0.clone().into_iter();
 		if iter
 			.size_hint()
 			.1
-			.map(|x| x.saturating_mul(std::mem::size_of::<Value>()) > *GENERATION_ALLOCATION_LIMIT)
+			.map(|x| x.saturating_mul(std::mem::size_of::<Value>()) > limit)
 			.unwrap_or(true)
 		{
 			return Err(anyhow::Error::msg("Mock range exceeds allocation limit").into());

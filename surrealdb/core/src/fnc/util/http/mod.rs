@@ -13,7 +13,6 @@ use reqwest::redirect::Policy;
 use reqwest::{Client, Method, RequestBuilder, Response};
 use url::Url;
 
-use crate::cnf::SURREALDB_USER_AGENT;
 use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::sql::expression::convert_public_value_to_internal;
@@ -45,6 +44,7 @@ impl HttpClientManager {
 	async fn get_or_create_client(
 		&self,
 		capabilities: Arc<crate::dbs::Capabilities>,
+		http_cfg: &crate::cnf::HttpClientConfig,
 		redirect_checker: Option<
 			impl Fn(&Url) -> Result<(), crate::err::Error> + Send + Sync + 'static,
 		>,
@@ -65,18 +65,17 @@ impl HttpClientManager {
 			dashmap::mapref::entry::Entry::Vacant(entry) => {
 				// We need to create the client
 				let mut builder = Client::builder()
-					.pool_idle_timeout(Duration::from_secs(*crate::cnf::HTTP_IDLE_TIMEOUT_SECS))
-					.pool_max_idle_per_host(*crate::cnf::MAX_HTTP_IDLE_CONNECTIONS_PER_HOST)
-					.connect_timeout(Duration::from_secs(*crate::cnf::HTTP_CONNECT_TIMEOUT_SECS))
+					.pool_idle_timeout(Duration::from_secs(http_cfg.idle_timeout_secs))
+					.pool_max_idle_per_host(http_cfg.max_idle_connections_per_host)
+					.connect_timeout(Duration::from_secs(http_cfg.connect_timeout_secs))
 					.tcp_keepalive(Some(Duration::from_secs(60)))
 					.http2_keep_alive_interval(Some(Duration::from_secs(30)))
 					.http2_keep_alive_timeout(Duration::from_secs(10));
 
 				if let Some(checker) = redirect_checker {
-					let count = *crate::cnf::MAX_HTTP_REDIRECTS;
-					let policy = Policy::custom(move |attempt: Attempt| {
-						// Use a more efficient approach instead of block_in_place
-						match checker(attempt.url()) {
+					let count = http_cfg.max_redirects;
+					let policy =
+						Policy::custom(move |attempt: Attempt| match checker(attempt.url()) {
 							Ok(()) => {
 								if attempt.previous().len() >= count {
 									attempt.stop()
@@ -85,8 +84,7 @@ impl HttpClientManager {
 								}
 							}
 							Err(e) => attempt.error(e),
-						}
-					});
+						});
 					builder = builder.redirect(policy);
 				}
 
@@ -115,13 +113,14 @@ impl HttpClientManager {
 #[cfg(not(target_family = "wasm"))]
 async fn get_http_client(
 	capabilities: Arc<crate::dbs::Capabilities>,
+	http_cfg: &crate::cnf::HttpClientConfig,
 	redirect_checker: Option<
 		impl Fn(&Url) -> Result<(), crate::err::Error> + Send + Sync + 'static,
 	>,
 ) -> Result<Arc<Client>> {
 	let manager = HTTP_CLIENT_MANAGER.get_or_init(|| async { HttpClientManager::new() }).await;
 
-	manager.get_or_create_client(capabilities, redirect_checker).await
+	manager.get_or_create_client(capabilities, http_cfg, redirect_checker).await
 }
 
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
@@ -195,15 +194,13 @@ async fn request(
 	#[cfg(not(target_family = "wasm"))]
 	let cli = {
 		let capabilities = ctx.get_capabilities();
+		let http_cfg = &ctx.config().http_client;
 		let capabilities_clone = Arc::clone(&capabilities);
 		let redirect_checker = move |url: &Url| -> Result<(), crate::err::Error> {
-			// This is a synchronous version for redirect checking
-			// We'll validate the URL against the same rules
 			use std::str::FromStr;
 
 			use crate::dbs::capabilities::NetTarget;
 
-			// Check domain name allowlist
 			let target = NetTarget::from_str(url.host_str().unwrap_or(""))
 				.map_err(|e| crate::err::Error::InvalidUrl(format!("Invalid host: {}", e)))?;
 
@@ -216,7 +213,7 @@ async fn request(
 			Ok(())
 		};
 
-		get_http_client(capabilities, Some(redirect_checker)).await?
+		get_http_client(capabilities, http_cfg, Some(redirect_checker)).await?
 	};
 
 	#[cfg(target_family = "wasm")]
@@ -230,7 +227,7 @@ async fn request(
 	let mut req = cli.request(method.clone(), url);
 	// Add the User-Agent header
 	if cfg!(not(target_family = "wasm")) {
-		req = req.header(reqwest::header::USER_AGENT, &*SURREALDB_USER_AGENT);
+		req = req.header(reqwest::header::USER_AGENT, ctx.config().http_client.user_agent.as_str());
 	}
 	// Add specified header values
 	for (k, v) in opts.into().iter() {

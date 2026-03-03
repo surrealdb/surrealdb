@@ -6,10 +6,8 @@ use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, post};
 use tower_http::limit::RequestBodyLimitLayer;
 
-use crate::cnf::HTTP_MAX_ML_BODY_SIZE;
-
 /// The router definition for the ML API endpoints.
-pub fn router<S>() -> Router<S>
+pub fn router<S>(max_body_size: usize) -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
@@ -17,7 +15,7 @@ where
 		.route("/ml/import", post(implementation::import))
 		.route("/ml/export/{name}/{version}", get(implementation::export))
 		.route_layer(DefaultBodyLimit::disable())
-		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_ML_BODY_SIZE))
+		.layer(RequestBodyLimitLayer::new(max_body_size))
 }
 
 #[cfg(feature = "ml")]

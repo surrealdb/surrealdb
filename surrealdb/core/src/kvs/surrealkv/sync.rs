@@ -198,11 +198,12 @@ pub(super) struct CommitCoordinator {
 
 impl CommitCoordinator {
 	/// Create a new commit coordinator.
-	pub fn new(db: Tree) -> Result<Self> {
-		// Get the batched commit configuration options
-		let timeout = *super::cnf::SURREALKV_GROUPED_COMMIT_TIMEOUT;
-		let wait_threshold = *super::cnf::SURREALKV_GROUPED_COMMIT_WAIT_THRESHOLD;
-		let max_batch_size = *super::cnf::SURREALKV_GROUPED_COMMIT_MAX_BATCH_SIZE;
+	pub fn new(
+		db: Tree,
+		timeout: u64,
+		wait_threshold: usize,
+		max_batch_size: usize,
+	) -> Result<Self> {
 		// Log the batched group commit configuration options
 		info!(target: TARGET, "Grouped commit: enabled (timeout={}ns, wait_threshold={}, max_batch_size={})",
 			timeout,

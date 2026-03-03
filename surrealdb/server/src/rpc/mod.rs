@@ -16,6 +16,7 @@ use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::cnf::WebSocketConfig;
 use crate::rpc::websocket::Websocket;
 use crate::telemetry::metrics::ws::NotificationContext;
 
@@ -34,17 +35,21 @@ pub struct RpcState {
 	pub live_queries: LiveQueries,
 	/// HTTP RPC handler with persistent sessions
 	pub http: Arc<crate::rpc::http::Http>,
+	/// WebSocket configuration for tuning connection parameters
+	pub websocket_config: WebSocketConfig,
 }
 
 impl RpcState {
 	pub fn new(
 		datastore: Arc<surrealdb_core::kvs::Datastore>,
 		session: surrealdb_core::dbs::Session,
+		websocket_config: WebSocketConfig,
 	) -> Self {
 		Self {
 			web_sockets: RwLock::new(HashMap::new()),
 			live_queries: RwLock::new(HashMap::new()),
 			http: Arc::new(crate::rpc::http::Http::new(datastore, session)),
+			websocket_config,
 		}
 	}
 }

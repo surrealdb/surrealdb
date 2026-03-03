@@ -47,7 +47,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream;
 
-use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::exec::parts::recurse::PhysicalRecurseInstruction;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
@@ -223,7 +222,7 @@ impl ExecOperator for RecursionOp {
 		let value = ctx.current_value().cloned().unwrap_or(Value::None);
 
 		// Resolve the effective max depth once.
-		let system_limit = *IDIOM_RECURSION_LIMIT as u32;
+		let system_limit = ctx.ctx().config().limits.idiom_recursion_limit as u32;
 		let max_depth = self.max_depth.unwrap_or(system_limit).min(system_limit);
 
 		let path = self.path.clone();

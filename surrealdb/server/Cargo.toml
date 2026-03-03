@@ -127,6 +127,7 @@ rustls = { workspace = true, features = ["aws_lc_rs"] }
 semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+surrealdb-cfg = { workspace = true, features = ["cli"] }
 tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "signal", "tracing"] }

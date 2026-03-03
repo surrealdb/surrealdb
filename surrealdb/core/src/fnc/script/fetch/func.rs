@@ -53,7 +53,7 @@ pub async fn fetch<'js>(
 	let mut headers = headers.inner.clone();
 
 	let redirect = js_req.init.request_redirect;
-	let redirect_limit = *crate::cnf::MAX_HTTP_REDIRECTS;
+	let redirect_limit = query_ctx.config().http_client.max_redirects;
 
 	// set the policy for redirecting requests.
 	let policy = redirect::Policy::custom(move |attempt| {

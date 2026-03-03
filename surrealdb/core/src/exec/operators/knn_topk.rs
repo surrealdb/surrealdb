@@ -168,6 +168,7 @@ impl ExecOperator for KnnTopK {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.ctx().config().limits.operator_buffer_size,
 		);
 		let field = self.field.clone();
 		let query_vector = self.query_vector.clone();

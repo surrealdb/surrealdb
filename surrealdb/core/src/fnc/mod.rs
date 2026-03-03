@@ -167,7 +167,7 @@ pub fn synchronous(
 		"array::clump" => array::clump,
 		"array::combine" => array::combine,
 		"array::complement" => array::complement,
-		"array::concat" => array::concat,
+		"array::concat" => array::concat(ctx),
 		"array::difference" => array::difference,
 		"array::distinct" => array::distinct,
 		"array::fill" => array::fill,
@@ -189,11 +189,11 @@ pub fn synchronous(
 		"array::pop" => array::pop,
 		"array::prepend" => array::prepend,
 		"array::push" => array::push,
-		"array::range" => array::range,
+		"array::range" => array::range(ctx),
 		"array::remove" => array::remove,
-		"array::repeat" => array::repeat,
+		"array::repeat" => array::repeat(ctx),
 		"array::reverse" => array::reverse,
-		"array::sequence" => array::sequence,
+		"array::sequence" => array::sequence(ctx),
 		"array::shuffle" => array::shuffle,
 		"array::slice" => array::slice,
 		"array::sort" => array::sort,
@@ -365,15 +365,15 @@ pub fn synchronous(
 		"set::union" => set::union,
 		//
 		"string::capitalize" => string::capitalize,
-		"string::concat" => string::concat,
+		"string::concat" => string::concat(ctx),
 		"string::contains" => string::contains,
 		"string::ends_with" => string::ends_with,
-		"string::join" => string::join,
+		"string::join" => string::join(ctx),
 		"string::len" => string::len,
 		"string::lowercase" => string::lowercase,
 		"string::matches" => string::matches,
-		"string::repeat" => string::repeat,
-		"string::replace" => string::replace,
+		"string::repeat" => string::repeat(ctx),
+		"string::replace" => string::replace(ctx),
 		"string::reverse" => string::reverse,
 		"string::slice" => string::slice,
 		"string::slug" => string::slug,
@@ -383,12 +383,12 @@ pub fn synchronous(
 		"string::uppercase" => string::uppercase,
 		"string::words" => string::words,
 		//
-		"string::distance::damerau_levenshtein" => string::distance::damerau_levenshtein,
-		"string::distance::hamming" => string::distance::hamming,
-		"string::distance::levenshtein" => string::distance::levenshtein,
-		"string::distance::normalized_damerau_levenshtein" => string::distance::normalized_damerau_levenshtein,
-		"string::distance::normalized_levenshtein" => string::distance::normalized_levenshtein,
-		"string::distance::osa" => string::distance::osa_distance,
+		"string::distance::damerau_levenshtein" => string::distance::damerau_levenshtein(ctx),
+		"string::distance::hamming" => string::distance::hamming(ctx),
+		"string::distance::levenshtein" => string::distance::levenshtein(ctx),
+		"string::distance::normalized_damerau_levenshtein" => string::distance::normalized_damerau_levenshtein(ctx),
+		"string::distance::normalized_levenshtein" => string::distance::normalized_levenshtein(ctx),
+		"string::distance::osa" => string::distance::osa_distance(ctx),
 		//
 		"string::html::encode" => string::html::encode,
 		"string::html::sanitize" => string::html::sanitize,
@@ -411,11 +411,11 @@ pub fn synchronous(
 		"string::is_uuid" => string::is::uuid,
 		"string::is_record" => string::is::record,
 		//
-		"string::similarity::fuzzy" => string::similarity::fuzzy,
-		"string::similarity::jaro" => string::similarity::jaro,
-		"string::similarity::jaro_winkler" => string::similarity::jaro_winkler,
-		"string::similarity::smithwaterman" => string::similarity::smithwaterman,
-		"string::similarity::sorensen_dice" => string::similarity::sorensen_dice,
+		"string::similarity::fuzzy" => string::similarity::fuzzy(ctx),
+		"string::similarity::jaro" => string::similarity::jaro(ctx),
+		"string::similarity::jaro_winkler" => string::similarity::jaro_winkler(ctx),
+		"string::similarity::smithwaterman" => string::similarity::smithwaterman(ctx),
+		"string::similarity::sorensen_dice" => string::similarity::sorensen_dice(ctx),
 		//
 		"string::semver::compare" => string::semver::compare,
 		"string::semver::major" => string::semver::major,
@@ -730,7 +730,7 @@ pub async fn idiom(
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
-				"repeat" => array::repeat,
+				"repeat" => array::repeat(ctx),
 			)
 		}
 		Value::Array(x) => {
@@ -753,7 +753,7 @@ pub async fn idiom(
 				"clump" => array::clump,
 				"combine" => array::combine,
 				"complement" => array::complement,
-				"concat" => array::concat,
+				"concat" => array::concat(ctx),
 				"difference" => array::difference,
 				"distinct" => array::distinct,
 				"every" => array::all((stk, ctx, Some(opt), doc)).await,
@@ -873,7 +873,7 @@ pub async fn idiom(
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
-				"repeat" => array::repeat,
+				"repeat" => array::repeat(ctx),
 			)
 		}
 		Value::Bytes(x) => {
@@ -935,7 +935,7 @@ pub async fn idiom(
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
-				"repeat" => array::repeat,
+				"repeat" => array::repeat(ctx),
 			)
 		}
 		Value::Duration(d) => {
@@ -1005,7 +1005,7 @@ pub async fn idiom(
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
-				"repeat" => array::repeat,
+				"repeat" => array::repeat(ctx),
 
 			)
 		}
@@ -1074,7 +1074,7 @@ pub async fn idiom(
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
-				"repeat" => array::repeat,
+				"repeat" => array::repeat(ctx),
 			)
 		}
 		Value::RecordId(t) => {
@@ -1140,7 +1140,7 @@ pub async fn idiom(
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
-				"repeat" => array::repeat,
+				"repeat" => array::repeat(ctx),
 			)
 		}
 		Value::Object(o) => {
@@ -1209,7 +1209,7 @@ pub async fn idiom(
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
-				"repeat" => array::repeat,
+				"repeat" => array::repeat(ctx),
 			)
 		}
 		Value::Number(n) => {
@@ -1289,7 +1289,7 @@ pub async fn idiom(
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
-				"repeat" => array::repeat,
+				"repeat" => array::repeat(ctx),
 			)
 		}
 		Value::String(s) => {
@@ -1301,15 +1301,15 @@ pub async fn idiom(
 				"no such method found for the string type",
 				//
 				"capitalize" => string::capitalize,
-				"concat" => string::concat,
+				"concat" => string::concat(ctx),
 				"contains" => string::contains,
 				"ends_with" => string::ends_with,
-				"join" => string::join,
+				"join" => string::join(ctx),
 				"len" => string::len,
 				"lowercase" => string::lowercase,
 				"matches" => string::matches,
-				"repeat" => string::repeat,
-				"replace" => string::replace,
+				"repeat" => string::repeat(ctx),
+				"replace" => string::replace(ctx),
 				"reverse" => string::reverse,
 				"slice" => string::slice,
 				"slug" => string::slug,
@@ -1318,11 +1318,11 @@ pub async fn idiom(
 				"trim" => string::trim,
 				"uppercase" => string::uppercase,
 				"words" => string::words,
-				"distance_damerau_levenshtein" => string::distance::damerau_levenshtein,
-				"distance_hamming" => string::distance::hamming,
-				"distance_levenshtein" => string::distance::levenshtein,
-				"distance_normalized_damerau_levenshtein" => string::distance::normalized_damerau_levenshtein,
-				"distance_normalized_levenshtein" => string::distance::normalized_levenshtein,
+				"distance_damerau_levenshtein" => string::distance::damerau_levenshtein(ctx),
+				"distance_hamming" => string::distance::hamming(ctx),
+				"distance_levenshtein" => string::distance::levenshtein(ctx),
+				"distance_normalized_damerau_levenshtein" => string::distance::normalized_damerau_levenshtein(ctx),
+				"distance_normalized_levenshtein" => string::distance::normalized_levenshtein(ctx),
 				"html_encode" => string::html::encode,
 				"html_sanitize" => string::html::sanitize,
 				"is_alphanum" => string::is::alphanum,
@@ -1343,11 +1343,11 @@ pub async fn idiom(
 				"is_ulid" => string::is::ulid,
 				"is_uuid" => string::is::uuid,
 				"is_record" => string::is::record,
-				"similarity_fuzzy" => string::similarity::fuzzy,
-				"similarity_jaro" => string::similarity::jaro,
-				"similarity_jaro_winkler" => string::similarity::jaro_winkler,
-				"similarity_smithwaterman" => string::similarity::smithwaterman,
-				"similarity_sorensen_dice" => string::similarity::sorensen_dice,
+				"similarity_fuzzy" => string::similarity::fuzzy(ctx),
+				"similarity_jaro" => string::similarity::jaro(ctx),
+				"similarity_jaro_winkler" => string::similarity::jaro_winkler(ctx),
+				"similarity_smithwaterman" => string::similarity::smithwaterman(ctx),
+				"similarity_sorensen_dice" => string::similarity::sorensen_dice(ctx),
 				"semver_compare" => string::semver::compare,
 				"semver_major" => string::semver::major,
 				"semver_minor" => string::semver::minor,
@@ -1482,7 +1482,7 @@ pub async fn idiom(
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
-				"repeat" => array::repeat,
+				"repeat" => array::repeat(ctx),
 			)
 		}
 		Value::File(f) => {
@@ -1556,7 +1556,7 @@ pub async fn idiom(
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
-				"repeat" => array::repeat,
+				"repeat" => array::repeat(ctx),
 			)
 		}
 		x => {
@@ -1617,7 +1617,7 @@ pub async fn idiom(
 				"diff" => value::diff.await,
 				"patch" => value::patch.await,
 				//
-				"repeat" => array::repeat,
+				"repeat" => array::repeat(ctx),
 			)
 		}
 	}

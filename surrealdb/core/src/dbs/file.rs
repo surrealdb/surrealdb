@@ -12,7 +12,6 @@ use tempfile::{Builder, TempDir};
 #[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
 
-use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 use crate::dbs::plan::Explanation;
 use crate::err::Error;
 use crate::expr::order::Ordering;
@@ -25,6 +24,7 @@ pub(super) struct FileCollector {
 	reader: Option<FileReader>,
 	orders: Option<Ordering>,
 	paging: FilePaging,
+	external_sorting_buffer_limit: usize,
 }
 
 impl FileCollector {
@@ -35,7 +35,11 @@ impl FileCollector {
 
 	const USIZE_SIZE: usize = mem::size_of::<usize>();
 
-	pub(super) fn new(temp_dir: &Path, orders: Option<Ordering>) -> Result<Self, Error> {
+	pub(super) fn new(
+		temp_dir: &Path,
+		orders: Option<Ordering>,
+		external_sorting_buffer_limit: usize,
+	) -> Result<Self, Error> {
 		let dir = Builder::new().prefix("SURREAL").tempdir_in(temp_dir)?;
 		Ok(Self {
 			len: 0,
@@ -43,6 +47,7 @@ impl FileCollector {
 			reader: None,
 			orders,
 			paging: Default::default(),
+			external_sorting_buffer_limit,
 			dir,
 		})
 	}
@@ -146,6 +151,7 @@ impl FileCollector {
 			}
 			Ordering::Order(orders) => {
 				let sort_dir = self.dir.path().join(Self::SORT_DIRECTORY_NAME);
+				let ext_sort_limit = self.external_sorting_buffer_limit;
 
 				let f = move || {
 					fs::create_dir(&sort_dir)?;
@@ -157,10 +163,7 @@ impl FileCollector {
 						ValueExternalChunk,
 					> = ExternalSorterBuilder::new()
 						.with_tmp_dir(&sort_dir)
-						.with_buffer(LimitedBufferBuilder::new(
-							*EXTERNAL_SORTING_BUFFER_LIMIT,
-							true,
-						))
+						.with_buffer(LimitedBufferBuilder::new(ext_sort_limit, true))
 						.build()?;
 
 					let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;

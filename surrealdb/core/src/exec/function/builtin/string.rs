@@ -1,7 +1,7 @@
 //! String functions
 
 use crate::exec::function::FunctionRegistry;
-use crate::{define_pure_function, register_functions};
+use crate::{define_config_function, define_pure_function, register_functions};
 
 // Single string argument functions
 define_pure_function!(StringCapitalize, "string::capitalize", (value: String) -> String, crate::fnc::string::capitalize);
@@ -17,25 +17,25 @@ define_pure_function!(StringWords, "string::words", (value: String) -> Any, crat
 define_pure_function!(StringContains, "string::contains", (value: String, search: String) -> Bool, crate::fnc::string::contains);
 define_pure_function!(StringEndsWith, "string::ends_with", (value: String, suffix: String) -> Bool, crate::fnc::string::ends_with);
 define_pure_function!(StringMatches, "string::matches", (value: String, pattern: String) -> Bool, crate::fnc::string::matches);
-define_pure_function!(StringRepeat, "string::repeat", (value: String, count: Int) -> String, crate::fnc::string::repeat);
+define_config_function!(StringRepeat, "string::repeat", (value: String, count: Int) -> String, crate::fnc::string::repeat);
 define_pure_function!(StringSplit, "string::split", (value: String, delimiter: String) -> Any, crate::fnc::string::split);
 define_pure_function!(StringStartsWith, "string::starts_with", (value: String, prefix: String) -> Bool, crate::fnc::string::starts_with);
 
 // Three argument string functions
-define_pure_function!(StringReplace, "string::replace", (value: String, search: String, replacement: String) -> String, crate::fnc::string::replace);
+define_config_function!(StringReplace, "string::replace", (value: String, search: String, replacement: String) -> String, crate::fnc::string::replace);
 define_pure_function!(StringSlice, "string::slice", (value: String, start: Int, ?length: Int) -> String, crate::fnc::string::slice);
 
 // Variadic string functions
-define_pure_function!(StringConcat, "string::concat", (...values: Any) -> String, crate::fnc::string::concat);
-define_pure_function!(StringJoin, "string::join", (separator: String, ...values: Any) -> String, crate::fnc::string::join);
+define_config_function!(StringConcat, "string::concat", (...values: Any) -> String, crate::fnc::string::concat);
+define_config_function!(StringJoin, "string::join", (separator: String, ...values: Any) -> String, crate::fnc::string::join);
 
 // String distance functions
-define_pure_function!(StringDistanceDamerauLevenshtein, "string::distance::damerau_levenshtein", (a: String, b: String) -> Int, crate::fnc::string::distance::damerau_levenshtein);
-define_pure_function!(StringDistanceHamming, "string::distance::hamming", (a: String, b: String) -> Int, crate::fnc::string::distance::hamming);
-define_pure_function!(StringDistanceLevenshtein, "string::distance::levenshtein", (a: String, b: String) -> Int, crate::fnc::string::distance::levenshtein);
-define_pure_function!(StringDistanceNormalizedDamerauLevenshtein, "string::distance::normalized_damerau_levenshtein", (a: String, b: String) -> Float, crate::fnc::string::distance::normalized_damerau_levenshtein);
-define_pure_function!(StringDistanceNormalizedLevenshtein, "string::distance::normalized_levenshtein", (a: String, b: String) -> Float, crate::fnc::string::distance::normalized_levenshtein);
-define_pure_function!(StringDistanceOsa, "string::distance::osa", (a: String, b: String) -> Int, crate::fnc::string::distance::osa_distance);
+define_config_function!(StringDistanceDamerauLevenshtein, "string::distance::damerau_levenshtein", (a: String, b: String) -> Int, crate::fnc::string::distance::damerau_levenshtein);
+define_config_function!(StringDistanceHamming, "string::distance::hamming", (a: String, b: String) -> Int, crate::fnc::string::distance::hamming);
+define_config_function!(StringDistanceLevenshtein, "string::distance::levenshtein", (a: String, b: String) -> Int, crate::fnc::string::distance::levenshtein);
+define_config_function!(StringDistanceNormalizedDamerauLevenshtein, "string::distance::normalized_damerau_levenshtein", (a: String, b: String) -> Float, crate::fnc::string::distance::normalized_damerau_levenshtein);
+define_config_function!(StringDistanceNormalizedLevenshtein, "string::distance::normalized_levenshtein", (a: String, b: String) -> Float, crate::fnc::string::distance::normalized_levenshtein);
+define_config_function!(StringDistanceOsa, "string::distance::osa", (a: String, b: String) -> Int, crate::fnc::string::distance::osa_distance);
 
 // String HTML functions
 define_pure_function!(StringHtmlEncode, "string::html::encode", (value: String) -> String, crate::fnc::string::html::encode);
@@ -62,11 +62,11 @@ define_pure_function!(StringIsUrl, "string::is_url", (value: String) -> Bool, cr
 define_pure_function!(StringIsUuid, "string::is_uuid", (value: String) -> Bool, crate::fnc::string::is::uuid);
 
 // String similarity functions
-define_pure_function!(StringSimilarityFuzzy, "string::similarity::fuzzy", (a: String, b: String) -> Int, crate::fnc::string::similarity::fuzzy);
-define_pure_function!(StringSimilarityJaro, "string::similarity::jaro", (a: String, b: String) -> Float, crate::fnc::string::similarity::jaro);
-define_pure_function!(StringSimilarityJaroWinkler, "string::similarity::jaro_winkler", (a: String, b: String) -> Float, crate::fnc::string::similarity::jaro_winkler);
-define_pure_function!(StringSimilaritySmithwaterman, "string::similarity::smithwaterman", (a: String, b: String) -> Float, crate::fnc::string::similarity::smithwaterman);
-define_pure_function!(StringSimilaritySorensenDice, "string::similarity::sorensen_dice", (a: String, b: String) -> Float, crate::fnc::string::similarity::sorensen_dice);
+define_config_function!(StringSimilarityFuzzy, "string::similarity::fuzzy", (a: String, b: String) -> Int, crate::fnc::string::similarity::fuzzy);
+define_config_function!(StringSimilarityJaro, "string::similarity::jaro", (a: String, b: String) -> Float, crate::fnc::string::similarity::jaro);
+define_config_function!(StringSimilarityJaroWinkler, "string::similarity::jaro_winkler", (a: String, b: String) -> Float, crate::fnc::string::similarity::jaro_winkler);
+define_config_function!(StringSimilaritySmithwaterman, "string::similarity::smithwaterman", (a: String, b: String) -> Float, crate::fnc::string::similarity::smithwaterman);
+define_config_function!(StringSimilaritySorensenDice, "string::similarity::sorensen_dice", (a: String, b: String) -> Float, crate::fnc::string::similarity::sorensen_dice);
 
 // String semver functions
 define_pure_function!(StringSemverCompare, "string::semver::compare", (a: String, b: String) -> Int, crate::fnc::string::semver::compare);

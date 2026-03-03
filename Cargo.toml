@@ -7,6 +7,7 @@ members = [
     "surrealdb",
     "surrealdb/core",
     "surrealdb/server",
+    "surrealdb/cfg",
     "surrealdb/types",
     "surrealdb/types/derive",
     # SurrealML crates
@@ -44,6 +45,7 @@ categories = ["database-implementations", "data-structures", "embedded"]
 surrealdb = { version = "3.1.0-alpha", path = "surrealdb" }
 surrealdb-core = { version = "3.1.0-alpha", path = "surrealdb/core", default-features = false }
 surrealdb-server = { version = "3.1.0-alpha", path = "surrealdb/server", default-features = false }
+surrealdb-cfg = { version = "3.1.0-alpha", path = "surrealdb/cfg" }
 surrealdb-types = { version = "3.1.0-alpha", path = "surrealdb/types" }
 surrealdb-types-derive = { version = "3.1.0-alpha", path = "surrealdb/types/derive" }
 # SurrealML crates

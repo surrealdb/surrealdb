@@ -7,16 +7,16 @@ use tracing::Subscriber;
 use tracing_subscriber::Layer;
 use tracing_subscriber::registry::LookupSpan;
 
-use crate::cnf::{TOKIO_CONSOLE_RETENTION, TOKIO_CONSOLE_SOCKET_ADDR};
+use crate::cnf::TelemetryConfig;
 
 const DEFAULT_TOKIO_CONSOLE_ADDR: SocketAddr =
 	SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 6669);
 
-pub fn new<S>() -> Result<Box<dyn Layer<S> + Send + Sync>>
+pub fn new<S>(telemetry: &TelemetryConfig) -> Result<Box<dyn Layer<S> + Send + Sync>>
 where
 	S: Subscriber + for<'a> LookupSpan<'a> + Send + Sync,
 {
-	let socket_addr = match &*TOKIO_CONSOLE_SOCKET_ADDR {
+	let socket_addr = match &telemetry.tokio_console_socket_addr {
 		Some(addr) => addr.parse().context("failed to parse Tokio Console socket address")?,
 		None => DEFAULT_TOKIO_CONSOLE_ADDR,
 	};
@@ -24,7 +24,7 @@ where
 	Ok(Box::new(
 		ConsoleLayer::builder()
 			.server_addr(socket_addr)
-			.retention(Duration::from_secs(*TOKIO_CONSOLE_RETENTION))
+			.retention(Duration::from_secs(telemetry.tokio_console_retention))
 			.spawn(),
 	))
 }

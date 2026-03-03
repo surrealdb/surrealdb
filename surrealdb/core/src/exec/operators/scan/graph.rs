@@ -158,6 +158,7 @@ impl ExecOperator for GraphEdgeScan {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.ctx().config().limits.operator_buffer_size,
 		);
 		let direction = self.direction;
 		let edge_tables = self.edge_tables.clone();

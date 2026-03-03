@@ -5,7 +5,6 @@ use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use surrealdb_types::{RecordId, SqlFormat, ToSql};
 
 use super::SleepStatement;
-use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -370,14 +369,12 @@ impl Expr {
 				// create we return the array here instead.
 				//
 
+				let gen_limit = ctx.config().limits.generation_allocation_limit;
 				let iter = mock.clone().into_iter();
 				if iter
 					.size_hint()
 					.1
-					.map(|x| {
-						x.saturating_mul(std::mem::size_of::<Value>())
-							> *GENERATION_ALLOCATION_LIMIT
-					})
+					.map(|x| x.saturating_mul(std::mem::size_of::<Value>()) > gen_limit)
 					.unwrap_or(true)
 				{
 					return Err(ControlFlow::Err(anyhow::Error::msg(

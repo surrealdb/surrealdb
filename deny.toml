@@ -101,11 +101,11 @@ name = "surrealdb"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
-name = "surrealdb-core"
+name = "surrealdb-cfg"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
-name = "surrealdb-server"
+name = "surrealdb-core"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
@@ -113,8 +113,8 @@ name = "surrealdb-protocol"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
-name = "surrealml-core"
-allow = ["Apache-2.0"]
+name = "surrealdb-server"
+allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
 name = "surrealdb-types"
@@ -132,6 +132,10 @@ allow = ["BUSL-1.1"]
 name = "surrealism-types"
 allow = ["BUSL-1.1"]
 
+[[licenses.exceptions]]
+name = "surrealml-core"
+allow = ["Apache-2.0"]
+
 [[licenses.clarify]]
 name = "surreal"
 expression = "BUSL-1.1"
@@ -139,6 +143,11 @@ license-files = []
 
 [[licenses.clarify]]
 name = "surrealdb"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-cfg"
 expression = "BUSL-1.1"
 license-files = []
 

@@ -15,12 +15,8 @@ pub struct TransactionCache {
 
 impl TransactionCache {
 	/// Creates a new transaction cache
-	pub(in crate::kvs) fn new() -> Self {
-		let cache = Cache::with_weighter(
-			*crate::cnf::TRANSACTION_CACHE_SIZE,
-			*crate::cnf::TRANSACTION_CACHE_SIZE as u64,
-			weight::Weight,
-		);
+	pub(in crate::kvs) fn new(capacity: usize) -> Self {
+		let cache = Cache::with_weighter(capacity, capacity as u64, weight::Weight);
 		Self {
 			cache,
 		}

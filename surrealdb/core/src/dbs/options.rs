@@ -7,7 +7,6 @@ use uuid::Uuid;
 
 use crate::catalog;
 use crate::catalog::SubscriptionDefinition;
-use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::cnf::dynamic::DynamicConfiguration;
 use crate::err::Error;
 use crate::expr::Base;
@@ -75,12 +74,16 @@ pub trait MessageBroker: Send + Sync + Debug {
 }
 
 impl Options {
-	pub(crate) fn new(id: Uuid, dynamic_configuration: DynamicConfiguration) -> Self {
+	pub(crate) fn new(
+		id: Uuid,
+		dynamic_configuration: DynamicConfiguration,
+		max_computation_depth: u32,
+	) -> Self {
 		Self {
 			id,
 			ns: None,
 			db: None,
-			dive: *MAX_COMPUTATION_DEPTH,
+			dive: max_computation_depth,
 			live: false,
 			perms: true,
 			force: Force::None,
@@ -457,7 +460,7 @@ mod tests {
 	fn is_allowed() {
 		// With auth disabled
 		{
-			let opts = Options::new(Uuid::new_v4(), DynamicConfiguration::default())
+			let opts = Options::new(Uuid::new_v4(), DynamicConfiguration::default(), 120)
 				.with_auth_enabled(false);
 
 			// When no NS is provided and it targets the NS base, it should return an error
@@ -485,7 +488,7 @@ mod tests {
 
 		// With auth enabled
 		{
-			let opts = Options::new(Uuid::new_v4(), DynamicConfiguration::default())
+			let opts = Options::new(Uuid::new_v4(), DynamicConfiguration::default(), 120)
 				.with_auth_enabled(true)
 				.with_auth(Auth::for_root(Role::Owner).into());
 

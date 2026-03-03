@@ -11,7 +11,7 @@ use opentelemetry::KeyValue;
 use pin_project_lite::pin_project;
 use tower::{Layer, Service};
 
-use crate::cnf::TELEMETRY_NAMESPACE;
+use crate::telemetry::metrics::telemetry_namespace;
 
 #[derive(Clone, Default)]
 pub struct HttpMetricsLayer;
@@ -176,9 +176,9 @@ impl HttpCallMetricTracker {
 			res.push(KeyValue::new("server.address", host.to_owned()));
 		}
 
-		if let Some(namespace) = TELEMETRY_NAMESPACE.clone() {
+		if let Some(namespace) = telemetry_namespace() {
 			res.push(KeyValue::new("namespace", namespace.trim().to_owned()));
-		};
+		}
 
 		res
 	}

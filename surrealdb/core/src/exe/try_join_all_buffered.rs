@@ -36,7 +36,7 @@ where
 	let limit: usize = 1;
 
 	#[cfg(not(target_family = "wasm"))]
-	let limit: usize = *crate::cnf::MAX_CONCURRENT_TASKS;
+	let limit: usize = *surrealdb_cfg::MAX_CONCURRENT_TASKS;
 
 	let mut input = iter.into_iter();
 	let (lo, hi) = input.size_hint();

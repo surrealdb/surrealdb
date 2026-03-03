@@ -86,12 +86,13 @@ impl Transaction {
 		local: bool,
 		sequences: Sequences,
 		async_event_trigger: Arc<Notify>,
+		transaction_cache_size: usize,
 		tr: Transactor,
 	) -> Transaction {
 		Transaction {
 			local,
 			tr,
-			cache: TransactionCache::new(),
+			cache: TransactionCache::new(transaction_cache_size),
 			sequences,
 			cf: crate::cf::Writer::new(),
 			async_event_trigger,
@@ -104,6 +105,11 @@ impl Transaction {
 		&'a self,
 	) -> MutexGuard<'a, HashMap<SharedIndexKey, (BatchId, BatchIdsCleanQueue)>> {
 		self.pending_index_batches.lock().await
+	}
+
+	/// Returns the batch configuration used by this transaction.
+	pub(crate) fn batch_config(&self) -> &surrealdb_cfg::BatchConfig {
+		self.tr.batch_config()
 	}
 
 	/// Check if the transaction is local or remote

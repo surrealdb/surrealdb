@@ -1,7 +1,6 @@
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
-use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -72,7 +71,7 @@ pub(crate) async fn compute_idiom_recursion(
 	rec: Recursion<'_>,
 ) -> Result<Value> {
 	// Find the recursion limit
-	let limit = *IDIOM_RECURSION_LIMIT as u32;
+	let limit = ctx.config().limits.idiom_recursion_limit as u32;
 	// Do we recursion instead of looping?
 	let marked_recursive = rec.plan.is_some();
 

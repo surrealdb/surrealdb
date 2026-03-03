@@ -76,7 +76,12 @@ impl ExecOperator for ReturnPlan {
 		Ok(Box::pin(futures::stream::once(async move {
 			// Execute inner plan and collect values
 			let mut stream = match inner.execute(&ctx) {
-				Ok(s) => buffer_stream(s, inner.access_mode(), inner.cardinality_hint()),
+				Ok(s) => buffer_stream(
+					s,
+					inner.access_mode(),
+					inner.cardinality_hint(),
+					ctx.ctx().config().limits.operator_buffer_size,
+				),
 				Err(ctrl) => return Err(ctrl),
 			};
 

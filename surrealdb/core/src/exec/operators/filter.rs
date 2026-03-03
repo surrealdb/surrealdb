@@ -86,6 +86,7 @@ impl ExecOperator for Filter {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.ctx().config().limits.operator_buffer_size,
 		);
 		let predicate = Arc::clone(&self.predicate);
 

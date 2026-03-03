@@ -15,18 +15,17 @@ use uuid::Uuid;
 
 use super::AppState;
 use super::error::{ApiHandlerError, ResponseError};
-use crate::cnf::HTTP_MAX_API_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::ntw::params::Params;
 
-pub fn router<S>() -> Router<S>
+pub fn router<S>(max_body_size: usize) -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
 		.route("/api/{ns}/{db}/{*path}", any(handler))
 		.route_layer(DefaultBodyLimit::disable())
-		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_API_BODY_SIZE))
+		.layer(RequestBodyLimitLayer::new(max_body_size))
 }
 
 async fn handler(

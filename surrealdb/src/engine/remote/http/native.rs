@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use async_channel::Receiver;
 use reqwest::ClientBuilder;
-use surrealdb_core::cnf::SURREALDB_USER_AGENT;
+use surrealdb_core::cnf::HttpClientConfig;
 use tokio::sync::watch;
 use url::Url;
 
@@ -74,7 +74,7 @@ pub(crate) async fn create_client(
 		// Try health check with this address
 		let req = client
 			.get(base_url.join("health").map_err(crate::std_error_to_types_error)?)
-			.header(reqwest::header::USER_AGENT, &*SURREALDB_USER_AGENT);
+			.header(reqwest::header::USER_AGENT, HttpClientConfig::default().user_agent.as_str());
 
 		match super::health(req).await {
 			Ok(()) => return Ok(client),

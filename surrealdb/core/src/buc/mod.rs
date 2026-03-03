@@ -9,6 +9,7 @@
 //! - `BucketsManager` - Manages bucket connections and caching
 //! - [`store`] - Object store trait and implementations
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 mod controller;
@@ -66,6 +67,7 @@ pub trait BucketStoreProvider: BucketStoreProviderRequirements {
 		url: &str,
 		global: bool,
 		readonly: bool,
+		bucket_folder_allowlist: &[PathBuf],
 	) -> Result<Arc<dyn ObjectStore>>;
 }
 
@@ -78,13 +80,14 @@ impl BucketStoreProvider for CommunityComposer {
 		url: &str,
 		_global: bool,
 		_readonly: bool,
+		bucket_folder_allowlist: &[PathBuf],
 	) -> Result<Arc<dyn ObjectStore>> {
 		if MemoryStore::parse_url(url) {
 			return Ok(Arc::new(MemoryStore::new()));
 		}
 
 		#[cfg(not(target_arch = "wasm32"))]
-		if let Some(opts) = FileStore::parse_url(url).await? {
+		if let Some(opts) = FileStore::parse_url(url, bucket_folder_allowlist.to_vec()).await? {
 			return Ok(Arc::new(FileStore::new(opts)));
 		}
 

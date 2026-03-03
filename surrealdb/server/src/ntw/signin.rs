@@ -17,7 +17,6 @@ use super::AppState;
 use super::error::ResponseError;
 use super::headers::Accept;
 use super::output::Output;
-use crate::cnf::HTTP_MAX_SIGNUP_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::ntw::input::bytes_to_utf8;
 
@@ -38,14 +37,14 @@ impl Success {
 	}
 }
 
-pub fn router<S>() -> Router<S>
+pub fn router<S>(max_body_size: usize) -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
 		.route("/signin", options(|| async {}).post(handler))
 		.route_layer(DefaultBodyLimit::disable())
-		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_SIGNUP_BODY_SIZE))
+		.layer(RequestBodyLimitLayer::new(max_body_size))
 }
 
 async fn handler(

@@ -9,7 +9,6 @@ use reblessive::tree::Stk;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId, Record};
-use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::{Iterable, Iterator, Operable, Options, Processable, Statement};
@@ -574,11 +573,11 @@ impl Collector for ConcurrentDistinctCollector<'_> {
 pub(super) trait Collector {
 	async fn collect(&mut self, collected: Collectable) -> Result<()>;
 
-	fn max_fetch_size(&mut self) -> u32 {
+	fn max_fetch_size(&mut self, normal_fetch_size: u32) -> u32 {
 		if let Some(l) = self.iterator().start_limit() {
 			*l
 		} else {
-			*NORMAL_FETCH_SIZE
+			normal_fetch_size
 		}
 	}
 
@@ -1119,7 +1118,7 @@ pub(super) trait Collector {
 		doc_ctx: NsDbTbCtx,
 		mut iterator: RecordIterator,
 	) -> Result<()> {
-		let fetch_size = self.max_fetch_size();
+		let fetch_size = self.max_fetch_size(ctx.config().batching.normal_fetch_size);
 		while !ctx.is_done(None).await? {
 			let records: Vec<IndexItemRecord> = iterator.next_batch(ctx, txn, fetch_size).await?;
 			if records.is_empty() {
@@ -1143,7 +1142,7 @@ pub(super) trait Collector {
 		doc_ctx: NsDbTbCtx,
 		mut iterator: RecordIterator,
 	) -> Result<()> {
-		let fetch_size = self.max_fetch_size();
+		let fetch_size = self.max_fetch_size(ctx.config().batching.normal_fetch_size);
 		while !ctx.is_done(None).await? {
 			let records: Vec<IndexItemRecord> = iterator.next_batch(ctx, txn, fetch_size).await?;
 			if records.is_empty() {
@@ -1168,7 +1167,7 @@ pub(super) trait Collector {
 		mut iterator: RecordIterator,
 	) -> Result<()> {
 		let mut total_count = 0;
-		let fetch_size = self.max_fetch_size();
+		let fetch_size = self.max_fetch_size(ctx.config().batching.normal_fetch_size);
 		while !ctx.is_done(None).await? {
 			let count = iterator.next_count(ctx, txn, fetch_size).await?;
 			if count == 0 {

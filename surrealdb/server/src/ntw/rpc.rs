@@ -25,18 +25,16 @@ use uuid::Uuid;
 use super::AppState;
 use super::error::ResponseError;
 use super::headers::{Accept, ContentType, SurrealId};
-use crate::cnf;
-use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::rpc::RpcState;
 use crate::rpc::format::HttpFormat;
 use crate::rpc::websocket::Websocket;
 
-pub fn router() -> Router<Arc<RpcState>> {
+pub fn router(max_body_size: usize) -> Router<Arc<RpcState>> {
 	Router::new()
 		.route("/rpc", options(|| async {}).get(get_handler).post(post_handler))
 		.route_layer(DefaultBodyLimit::disable())
-		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_RPC_BODY_SIZE))
+		.layer(RequestBodyLimitLayer::new(max_body_size))
 }
 
 async fn get_handler(
@@ -105,20 +103,21 @@ async fn get_handler(
 	if rpc_state.web_sockets.read().await.contains_key(&id) {
 		return Err(NetError::Request);
 	}
+	let ws_config = &rpc_state.websocket_config;
 	// Now let's upgrade the WebSocket connection with comprehensive buffer configuration
 	Ok(ws
 		// Set the potential WebSocket protocols (JSON, CBOR, etc.)
 		.protocols(PROTOCOLS)
 		// Set the maximum WebSocket frame size to prevent oversized frames
-		.max_frame_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
+		.max_frame_size(ws_config.max_message_size)
 		// Set the maximum WebSocket message size to prevent memory exhaustion
-		.max_message_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
+		.max_message_size(ws_config.max_message_size)
 		// Configure read buffer size for incoming data optimization
-		.read_buffer_size(*cnf::WEBSOCKET_READ_BUFFER_SIZE)
+		.read_buffer_size(ws_config.read_buffer_size)
 		// Configure write buffer size for outgoing data optimization
-		.write_buffer_size(*cnf::WEBSOCKET_WRITE_BUFFER_SIZE)
+		.write_buffer_size(ws_config.write_buffer_size)
 		// Set maximum write buffer size to apply backpressure when needed
-		.max_write_buffer_size(*cnf::WEBSOCKET_MAX_WRITE_BUFFER_SIZE)
+		.max_write_buffer_size(ws_config.max_write_buffer_size)
 		// Handle WebSocket upgrade failures with appropriate logging
 		.on_failed_upgrade(|err| {
 			warn!("Failed to upgrade WebSocket connection: {err}");

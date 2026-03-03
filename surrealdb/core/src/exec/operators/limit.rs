@@ -126,6 +126,7 @@ impl ExecOperator for Limit {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.ctx().config().limits.operator_buffer_size,
 		);
 
 		let limit_expr = self.limit.clone();

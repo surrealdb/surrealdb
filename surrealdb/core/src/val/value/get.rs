@@ -5,7 +5,6 @@ use futures::future::try_join_all;
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
-use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -44,7 +43,7 @@ impl Value {
 		path: &[Part],
 	) -> FlowResult<Self> {
 		// Limit recursion depth.
-		if path.len() > (*MAX_COMPUTATION_DEPTH).try_into().unwrap_or(usize::MAX) {
+		if path.len() > ctx.config().limits.max_computation_depth as usize {
 			return Err(ControlFlow::from(anyhow::Error::new(Error::ComputationDepthExceeded)));
 		}
 

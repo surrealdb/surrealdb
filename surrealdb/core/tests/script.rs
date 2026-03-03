@@ -764,7 +764,7 @@ async fn script_run_too_long() -> Result<()> {
 	"#;
 	let dbs = new_ds("test", "test").await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let mut timeout = *surrealdb_core::cnf::SCRIPTING_MAX_TIME_LIMIT;
+	let mut timeout = surrealdb_core::cnf::ScriptingConfig::default().max_time_limit;
 	timeout += timeout / 2;
 
 	let before = Instant::now();

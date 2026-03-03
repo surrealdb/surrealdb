@@ -30,14 +30,16 @@ kv-rocksdb = [
     "dep:tempfile",
     "dep:ext-sort",
     "dep:affinitypool",
+    "surrealdb-cfg/kv-rocksdb",
 ]
-kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
+kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort", "surrealdb-cfg/kv-tikv"]
 kv-surrealkv = [
     "dep:surrealkv",
     "tokio/time",
     "dep:tempfile",
     "dep:ext-sort",
     "dep:affinitypool",
+    "surrealdb-cfg/kv-surrealkv",
 ]
 scripting = ["dep:js"]
 http = ["dep:reqwest"]
@@ -90,6 +92,7 @@ lexicmp.workspace = true
 reblessive = { workspace = true, features = ["tree"] }
 revision.workspace = true
 storekey.workspace = true
+surrealdb-cfg = { workspace = true }
 surrealdb-types = { workspace = true }
 vart.workspace = true
 

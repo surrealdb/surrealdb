@@ -331,7 +331,12 @@ mod tests {
 		// Async event trigger
 		let async_event_trigger = Arc::new(Notify::new());
 		// Create a transaction factory with the specified datastore flavor
-		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(
+			async_event_trigger,
+			Box::new(flavor),
+			surrealdb_cfg::CacheConfig::default().transaction_cache_size,
+			surrealdb_cfg::BatchConfig::default(),
+		);
 		// Create a sequence generator for the transaction factory
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 		// Set test to run for 3 seconds
@@ -401,7 +406,8 @@ mod tests {
 		// Create a new RocksDB configuration
 		let config = crate::kvs::config::RocksDbConfig::default();
 		// Create a new RocksDB datastore in the temporary directory
-		let flavor = crate::kvs::rocksdb::Datastore::new(&path, config)
+		let engine = crate::cnf::RocksDbEngineConfig::default();
+		let flavor = crate::kvs::rocksdb::Datastore::new(&path, config, &engine)
 			.await
 			.map(DatastoreFlavor::RocksDB)
 			.unwrap();
@@ -425,7 +431,8 @@ mod tests {
 		// Create a new SurrealKV configuration
 		let config = crate::kvs::config::SurrealKvConfig::default();
 		// Create a new SurrealKV datastore
-		let flavor = crate::kvs::surrealkv::Datastore::new(&path, config)
+		let engine = crate::cnf::SurrealKvEngineConfig::default();
+		let flavor = crate::kvs::surrealkv::Datastore::new(&path, config, &engine)
 			.await
 			.map(DatastoreFlavor::SurrealKV)
 			.unwrap();
@@ -460,7 +467,12 @@ mod tests {
 		// Create an async event trigger
 		let async_event_trigger = Arc::new(Notify::new());
 		// Create the transaction factory
-		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(
+			async_event_trigger,
+			Box::new(flavor),
+			surrealdb_cfg::CacheConfig::default().transaction_cache_size,
+			surrealdb_cfg::BatchConfig::default(),
+		);
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Set lease duration to 10 minutes

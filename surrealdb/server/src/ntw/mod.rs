@@ -52,7 +52,7 @@ use tower_http::sensitive_headers::{
 use tower_http::trace::TraceLayer;
 
 use crate::cli::Config;
-use crate::cnf;
+use crate::cnf::{self, HttpServerConfig, ServerConfig};
 use crate::ntw::signals::graceful_shutdown;
 use crate::rpc::{RpcState, notifications};
 use crate::telemetry::metrics::HttpMetricsLayer;
@@ -112,7 +112,7 @@ const LOG: &str = "surrealdb::net";
 /// [`CommunityComposer`]: surrealdb_core::CommunityComposer
 pub trait RouterFactory {
 	/// Build and return the base Router. The server will attach shared state and layers.
-	fn configure_router() -> Router<Arc<RpcState>>;
+	fn configure_router(http: &HttpServerConfig) -> Router<Arc<RpcState>>;
 }
 
 /// Default router implementation for the community edition.
@@ -121,23 +121,23 @@ pub trait RouterFactory {
 /// Consumers embedding SurrealDB can implement `RouterFactory` on their own
 /// composer to customize routes.
 impl RouterFactory for CommunityComposer {
-	fn configure_router() -> Router<Arc<RpcState>> {
+	fn configure_router(http: &HttpServerConfig) -> Router<Arc<RpcState>> {
 		let router = Router::<Arc<RpcState>>::new()
 			// Redirect until we provide a UI
 			.route("/", get(|| async { Redirect::temporary(cnf::APP_ENDPOINT) }))
 			.route("/status", get(|| async {}))
 			.merge(health::router())
 			.merge(export::router())
-			.merge(import::router())
-			.merge(rpc::router())
+			.merge(import::router(http.max_import_body_size))
+			.merge(rpc::router(http.max_rpc_body_size))
 			.merge(version::router())
 			.merge(sync::router())
-			.merge(sql::router())
-			.merge(signin::router())
-			.merge(signup::router())
-			.merge(key::router())
-			.merge(ml::router())
-			.merge(api::router());
+			.merge(sql::router(http.max_sql_body_size))
+			.merge(signin::router(http.max_signin_body_size))
+			.merge(signup::router(http.max_signup_body_size))
+			.merge(key::router(http.max_key_body_size))
+			.merge(ml::router(http.max_ml_body_size))
+			.merge(api::router(http.max_api_body_size));
 
 		#[cfg(feature = "graphql")]
 		let router = router.merge(gql::router());
@@ -169,6 +169,7 @@ pub async fn init<F: RouterFactory>(
 	opt: &Config,
 	ds: Arc<Datastore>,
 	ct: CancellationToken,
+	server_config: &ServerConfig,
 ) -> Result<()> {
 	let app_state = AppState {
 		client_ip: opt.client_ip,
@@ -192,7 +193,7 @@ pub async fn init<F: RouterFactory>(
 		// Ensure the Request-Id is sent in the response
 		.propagate_x_request_id()
 		// Limit the number of requests handled at once
-		.concurrency_limit(*cnf::NET_MAX_CONCURRENT_REQUESTS);
+		.concurrency_limit(server_config.http.max_concurrent_requests);
 
 	let service = service.layer(
 		CompressionLayer::new().compress_when(
@@ -251,7 +252,7 @@ pub async fn init<F: RouterFactory>(
 				.max_age(Duration::from_secs(86400)),
 		);
 
-	let axum_app = F::configure_router();
+	let axum_app = F::configure_router(&server_config.http);
 
 	let axum_app = axum_app.layer(service);
 
@@ -259,7 +260,11 @@ pub async fn init<F: RouterFactory>(
 	let handle = Handle::new();
 
 	// Create RpcState with persistent HTTP handler
-	let rpc_state = Arc::new(RpcState::new(ds.clone(), surrealdb_core::dbs::Session::default()));
+	let rpc_state = Arc::new(RpcState::new(
+		ds.clone(),
+		surrealdb_core::dbs::Session::default(),
+		server_config.websocket.clone(),
+	));
 
 	// Setup the graceful shutdown handler
 	let shutdown_handler = graceful_shutdown(rpc_state.clone(), ct.clone(), handle.clone());

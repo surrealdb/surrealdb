@@ -205,6 +205,7 @@ impl ExecOperator for Project {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.ctx().config().limits.operator_buffer_size,
 		);
 		let fields = Arc::clone(&self.fields);
 		let omit = Arc::clone(&self.omit);
@@ -608,6 +609,7 @@ impl ExecOperator for SelectProject {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.ctx().config().limits.operator_buffer_size,
 		);
 		let projections = Arc::clone(&self.projections);
 		let ctx = ctx.clone();

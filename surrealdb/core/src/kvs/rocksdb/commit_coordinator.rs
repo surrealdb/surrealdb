@@ -8,7 +8,8 @@ use parking_lot::{Condvar, Mutex};
 use rocksdb::{OptimisticTransactionDB, Options};
 use tokio::sync::oneshot::{self, Sender};
 
-use super::{TARGET, cnf};
+use super::TARGET;
+use crate::cnf::RocksDbEngineConfig;
 use crate::kvs::config::{RocksDbConfig, SyncMode};
 use crate::kvs::err::{Error, Result};
 
@@ -109,7 +110,11 @@ pub struct CommitCoordinator {
 
 impl CommitCoordinator {
 	/// Pre-configure RocksDB options for grouped commit.
-	pub(super) fn configure(opts: &mut Options, config: &RocksDbConfig) {
+	pub(super) fn configure(
+		opts: &mut Options,
+		config: &RocksDbConfig,
+		tuning: &RocksDbEngineConfig,
+	) {
 		// Don't configure if the sync mode is not every
 		if config.sync_mode != SyncMode::Every {
 			return;
@@ -118,9 +123,9 @@ impl CommitCoordinator {
 		info!(target: TARGET, "Sync mode: every transaction commit");
 		// Log the batched group commit configuration options
 		info!(target: TARGET, "Grouped commit: enabled (timeout={}ns, wait_threshold={}, max_batch_size={})",
-			*cnf::ROCKSDB_GROUPED_COMMIT_TIMEOUT,
-			*cnf::ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD,
-			*cnf::ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE,
+			tuning.grouped_commit_timeout,
+			tuning.grouped_commit_wait_threshold,
+			tuning.grouped_commit_max_batch_size,
 		);
 		// Set incremental asynchronous bytes per sync to 512KiB
 		opts.set_wal_bytes_per_sync(512 * 1024);
@@ -129,11 +134,14 @@ impl CommitCoordinator {
 	}
 
 	/// Create a new commit coordinator
-	pub fn new(db: Pin<Arc<OptimisticTransactionDB>>) -> Result<Self> {
+	pub fn new(
+		db: Pin<Arc<OptimisticTransactionDB>>,
+		tuning: &RocksDbEngineConfig,
+	) -> Result<Self> {
 		// Get the batched commit configuration options
-		let timeout = *cnf::ROCKSDB_GROUPED_COMMIT_TIMEOUT;
-		let wait_threshold = *cnf::ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD;
-		let max_batch_size = *cnf::ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE;
+		let timeout = tuning.grouped_commit_timeout;
+		let wait_threshold = tuning.grouped_commit_wait_threshold;
+		let max_batch_size = tuning.grouped_commit_max_batch_size;
 		// Create shared state with pre-allocated buffer
 		let shared = Arc::new(SharedState {
 			shutdown: Arc::new(AtomicBool::new(false)),

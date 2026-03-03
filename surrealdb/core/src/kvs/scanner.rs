@@ -8,7 +8,6 @@ use futures::{Future, FutureExt};
 use super::api::ScanLimit;
 use super::tr::Transactor;
 use super::{Key, Result, Val};
-use crate::cnf::NORMAL_FETCH_SIZE;
 
 #[cfg(not(target_family = "wasm"))]
 type FutureResult<'a, I> = Pin<Box<dyn Future<Output = Result<Vec<I>>> + 'a + Send>>;
@@ -94,7 +93,7 @@ impl<'a, I> Scanner<'a, I> {
 			first_batch: true,
 			version: None,
 			enable_prefetch: false,
-			initial_batch_size: ScanLimit::Count(*NORMAL_FETCH_SIZE),
+			initial_batch_size: ScanLimit::Count(*surrealdb_cfg::NORMAL_FETCH_SIZE),
 			subsequent_batch_size: ScanLimit::Bytes(4 * 1024 * 1024),
 		}
 	}

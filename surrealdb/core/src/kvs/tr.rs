@@ -3,11 +3,13 @@ use std::fmt::Debug;
 use std::ops::Range;
 
 use futures::stream::Stream;
+use surrealdb_cfg::BatchConfig;
 
 use super::api::{ScanLimit, Transactable};
 use super::batch::Batch;
+use super::err::Error;
 use super::scanner::{Direction, Scanner};
-use super::{IntoBytes, Key, Result, Val};
+use super::{IntoBytes, Key, Result, Val, util};
 use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
 
 /// Specifies whether the transaction is read-only or writeable.
@@ -37,6 +39,8 @@ impl From<bool> for LockType {
 pub struct Transactor {
 	// The underlying transaction
 	pub(super) inner: Box<dyn Transactable>,
+	// Batch configuration for scan/iterate operations
+	pub(super) batch_config: BatchConfig,
 }
 
 impl fmt::Display for Transactor {
@@ -62,6 +66,11 @@ impl Transactor {
 	/// Get the underlying datastore kind.
 	pub(super) fn kind(&self) -> &'static str {
 		self.inner.kind()
+	}
+
+	/// Returns the batch configuration used by this transactor.
+	pub(crate) fn batch_config(&self) -> &BatchConfig {
+		&self.batch_config
 	}
 
 	/// Check if transaction is finished.
@@ -144,7 +153,8 @@ impl Transactor {
 		K: IntoBytes + Debug,
 	{
 		let key = key.into_vec();
-		self.inner.getp(key).await
+		let rng = util::to_prefix_range(key)?;
+		self.getr(rng, None).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -158,7 +168,20 @@ impl Transactor {
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
-		self.inner.getr(beg..end, version).await
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		let mut out = vec![];
+		let mut next = Some(beg..end);
+		while let Some(rng) = next {
+			let res = self
+				.inner
+				.batch_keys_vals(rng, self.batch_config.normal_fetch_size, version)
+				.await?;
+			next = res.next;
+			out.extend(res.result);
+		}
+		Ok(out)
 	}
 
 	/// Insert or update a key in the datastore.
@@ -243,7 +266,8 @@ impl Transactor {
 		K: IntoBytes + Debug,
 	{
 		let key = key.into_vec();
-		self.inner.delp(key).await
+		let rng = util::to_prefix_range(key)?;
+		self.delr(rng).await
 	}
 
 	/// Delete a range of keys from the datastore.
@@ -257,7 +281,21 @@ impl Transactor {
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
-		self.inner.delr(beg..end).await
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		let mut next = Some(beg..end);
+		while let Some(rng) = next {
+			let res = self.inner.batch_keys(rng, self.batch_config.normal_fetch_size, None).await?;
+			next = res.next;
+			for k in res.result {
+				self.inner.del(k).await?;
+			}
+		}
+		Ok(())
 	}
 
 	/// Delete all versions of a key from the datastore.
@@ -293,7 +331,8 @@ impl Transactor {
 		K: IntoBytes + Debug,
 	{
 		let key = key.into_vec();
-		self.inner.clrp(key).await
+		let rng = util::to_prefix_range(key)?;
+		self.clrr(rng).await
 	}
 
 	/// Delete all versions of a range of keys from the datastore.
@@ -307,7 +346,21 @@ impl Transactor {
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
-		self.inner.clrr(beg..end).await
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		let mut next = Some(beg..end);
+		while let Some(rng) = next {
+			let res = self.inner.batch_keys(rng, self.batch_config.normal_fetch_size, None).await?;
+			next = res.next;
+			for k in res.result {
+				self.inner.clr(k).await?;
+			}
+		}
+		Ok(())
 	}
 
 	// --------------------------------------------------
@@ -417,7 +470,18 @@ impl Transactor {
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
-		self.inner.count(beg..end, version).await
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		let mut len = 0;
+		let mut next = Some(beg..end);
+		while let Some(rng) = next {
+			let res =
+				self.inner.batch_keys(rng, self.batch_config.count_batch_size, version).await?;
+			next = res.next;
+			len += res.result.len();
+		}
+		Ok(len)
 	}
 
 	// --------------------------------------------------
@@ -536,7 +600,7 @@ impl Transactor {
 		if prefetch {
 			scanner = scanner
 				.prefetch(true)
-				.initial_batch_size(ScanLimit::Count(*crate::cnf::NORMAL_FETCH_SIZE * 2));
+				.initial_batch_size(ScanLimit::Count(self.batch_config.normal_fetch_size * 2));
 		}
 		// Return the stream
 		scanner

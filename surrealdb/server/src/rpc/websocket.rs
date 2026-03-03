@@ -24,10 +24,7 @@ use tracing::{Instrument, Span};
 use uuid::Uuid;
 
 use super::RpcState;
-use crate::cnf::{
-	PKG_NAME, PKG_VERSION, WEBSOCKET_PING_FREQUENCY, WEBSOCKET_RESPONSE_BUFFER_SIZE,
-	WEBSOCKET_RESPONSE_CHANNEL_SIZE, WEBSOCKET_RESPONSE_FLUSH_PERIOD,
-};
+use crate::cnf::{PKG_NAME, PKG_VERSION, WEBSOCKET_PING_FREQUENCY};
 use crate::rpc::CONN_CLOSED_ERR;
 use crate::rpc::format::WsFormat;
 use crate::telemetry;
@@ -74,7 +71,7 @@ impl Websocket {
 		// Log the succesful WebSocket connection
 		trace!("WebSocket {id} connected");
 		// Create a channel for sending messages
-		let (sender, receiver) = channel(*WEBSOCKET_RESPONSE_CHANNEL_SIZE);
+		let (sender, receiver) = channel(state.websocket_config.response_channel_size);
 		// Create and store the RPC connection
 		let rpc = Arc::new(Websocket {
 			id,
@@ -98,10 +95,10 @@ impl Websocket {
 		// Store all concurrent spawned tasks
 		let mut tasks = JoinSet::new();
 		// Buffer the WebSocket response stream
-		match *WEBSOCKET_RESPONSE_BUFFER_SIZE > 0 {
+		match state.websocket_config.response_buffer_size > 0 {
 			true => {
 				// Buffer the WebSocket response stream
-				let buffer = ws.buffer(*WEBSOCKET_RESPONSE_BUFFER_SIZE);
+				let buffer = ws.buffer(state.websocket_config.response_buffer_size);
 				// Split the socket into sending and receiving streams
 				let (ws_sender, ws_receiver) = buffer.split();
 				// Spawn async tasks for the WebSocket
@@ -180,9 +177,9 @@ impl Websocket {
 		// Clone the WebSocket cancellation token
 		let canceller = rpc.canceller.clone();
 		// Check if the responses are buffered
-		let buffer = *WEBSOCKET_RESPONSE_BUFFER_SIZE > 0;
+		let buffer = rpc.state.websocket_config.response_buffer_size > 0;
 		// How often should responses be flushed
-		let period = Duration::from_millis(*WEBSOCKET_RESPONSE_FLUSH_PERIOD);
+		let period = Duration::from_millis(rpc.state.websocket_config.response_flush_period);
 		// Loop, and listen for messages to write
 		loop {
 			tokio::select! {

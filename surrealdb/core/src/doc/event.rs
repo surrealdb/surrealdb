@@ -12,7 +12,6 @@ use tokio::spawn;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::catalog::{EventDefinition, EventKind, Record};
-use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Options, Session, Statement};
 use crate::doc::{Action, CursorDoc, Document, DocumentContext};
@@ -311,7 +310,10 @@ impl AsyncEventRecord {
 			let tx = ds.transaction(TransactionType::Read, LockType::Optimistic).await?;
 			let (beg, end) = EventQueue::range();
 			// Read a bounded batch without holding a write transaction.
-			let res = catch!(tx, tx.scan(beg..end, *NORMAL_FETCH_SIZE, 0, None).await);
+			let res = catch!(
+				tx,
+				tx.scan(beg..end, ds.config().batching.normal_fetch_size, 0, None).await
+			);
 			tx.cancel().await?;
 			res
 		};

@@ -117,6 +117,7 @@ impl ExecOperator for Compute {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.ctx().config().limits.operator_buffer_size,
 		);
 		let fields = self.fields.clone();
 		let ctx = ctx.clone();

@@ -206,7 +206,6 @@ async fn http_request(
 
 	use reqwest::header::CONTENT_TYPE;
 
-	use crate::cnf::SURREALDB_USER_AGENT;
 	use crate::err::Error;
 	use crate::sql::expression::convert_public_value_to_internal;
 	use crate::syn;
@@ -237,12 +236,13 @@ async fn http_request(
 			Ok(())
 		};
 
-		let count = *crate::cnf::MAX_HTTP_REDIRECTS;
+		let http_config = &ctx.exec_ctx.ctx().config().http_client;
+		let max_redirects = http_config.max_redirects;
 		let policy =
 			reqwest::redirect::Policy::custom(move |attempt: reqwest::redirect::Attempt| {
 				match redirect_checker(attempt.url()) {
 					Ok(()) => {
-						if attempt.previous().len() >= count {
+						if attempt.previous().len() >= max_redirects {
 							attempt.stop()
 						} else {
 							attempt.follow()
@@ -253,9 +253,9 @@ async fn http_request(
 			});
 
 		reqwest::Client::builder()
-			.pool_idle_timeout(Duration::from_secs(*crate::cnf::HTTP_IDLE_TIMEOUT_SECS))
-			.pool_max_idle_per_host(*crate::cnf::MAX_HTTP_IDLE_CONNECTIONS_PER_HOST)
-			.connect_timeout(Duration::from_secs(*crate::cnf::HTTP_CONNECT_TIMEOUT_SECS))
+			.pool_idle_timeout(Duration::from_secs(http_config.idle_timeout_secs))
+			.pool_max_idle_per_host(http_config.max_idle_connections_per_host)
+			.connect_timeout(Duration::from_secs(http_config.connect_timeout_secs))
 			.tcp_keepalive(Some(Duration::from_secs(60)))
 			.http2_keep_alive_interval(Some(Duration::from_secs(30)))
 			.http2_keep_alive_timeout(Duration::from_secs(10))
@@ -276,7 +276,10 @@ async fn http_request(
 
 	// Add User-Agent header
 	if cfg!(not(target_family = "wasm")) {
-		req = req.header(reqwest::header::USER_AGENT, &*SURREALDB_USER_AGENT);
+		req = req.header(
+			reqwest::header::USER_AGENT,
+			ctx.exec_ctx.ctx().config().http_client.user_agent.as_str(),
+		);
 	}
 
 	// Add custom headers from opts

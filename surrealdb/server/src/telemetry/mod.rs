@@ -17,7 +17,7 @@ use tracing_subscriber::prelude::*;
 
 use crate::cli::LogFormat;
 use crate::cli::validator::parser::tracing::CustomFilter;
-use crate::cnf::ENABLE_TOKIO_CONSOLE;
+use crate::cnf::TelemetryConfig;
 
 pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 	// Build resource from environment variables and default attributes
@@ -42,6 +42,8 @@ pub struct Builder {
 	file_path: Option<String>,
 	file_name: Option<String>,
 	file_rotation: Option<String>,
+	// Telemetry config
+	telemetry_config: Option<TelemetryConfig>,
 }
 
 pub fn builder() -> Builder {
@@ -69,6 +71,7 @@ impl Default for Builder {
 			file_path: Some("logs".to_string()),
 			file_name: Some("surrealdb.log".to_string()),
 			file_rotation: Some("daily".to_string()),
+			telemetry_config: None,
 		}
 	}
 }
@@ -82,6 +85,12 @@ impl Builder {
 		registry.init();
 		// Everything ok
 		Ok(guards)
+	}
+
+	/// Set the telemetry configuration
+	pub fn with_telemetry_config(mut self, config: TelemetryConfig) -> Self {
+		self.telemetry_config = Some(config);
+		self
 	}
 
 	/// Set the log filter on the builder
@@ -169,8 +178,9 @@ impl Builder {
 
 	/// Build a tracing dispatcher with the logs and tracer subscriber
 	pub fn build(&self) -> Result<(Box<dyn Subscriber + Send + Sync + 'static>, Vec<WorkerGuard>)> {
+		let telemetry = self.telemetry_config.clone().unwrap_or_else(TelemetryConfig::from_env);
 		// Setup the metrics layer
-		if let Some(provider) = metrics::init()? {
+		if let Some(provider) = metrics::init(&telemetry)? {
 			global::set_meter_provider(provider);
 		}
 		// Create a non-blocking stdout log destination
@@ -199,7 +209,7 @@ impl Builder {
 			// Get the otel filter or global filter
 			let filter = self.otel_filter.clone().unwrap_or_else(|| self.filter.clone());
 			// Create the otel destination layer
-			if let Some(layer) = traces::new(filter)? {
+			if let Some(layer) = traces::new(filter, &telemetry)? {
 				// Add the layer to the registry
 				layers.push(layer);
 			}
@@ -258,9 +268,9 @@ impl Builder {
 		}
 
 		// Setup logging to console if enabled
-		if *ENABLE_TOKIO_CONSOLE {
+		if telemetry.tokio_console_enabled {
 			// Create the console destination layer
-			let layer = console::new()?;
+			let layer = console::new(&telemetry)?;
 			// Add the layer to the registry
 			layers.push(layer);
 		}

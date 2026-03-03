@@ -7,7 +7,6 @@ use radix_trie::Trie;
 use surrealdb_types::ToSql;
 
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId, Record};
-use crate::cnf::COUNT_BATCH_SIZE;
 use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::expr::BinaryOperator;
@@ -1718,7 +1717,8 @@ impl IndexCountThingIterator {
 			let mut loops = 0;
 			let mut current_range = Some(range);
 			while let Some(range) = current_range {
-				let batch = txn.batch_keys(range, *COUNT_BATCH_SIZE, None).await?;
+				let batch =
+					txn.batch_keys(range, ctx.config().batching.count_batch_size, None).await?;
 				for key in batch.result.iter() {
 					loops += 1;
 					ctx.is_done(Some(loops)).await?;
@@ -1740,6 +1740,7 @@ impl IndexCountThingIterator {
 
 	pub(in crate::idx) async fn compaction(
 		&mut self,
+		ctx: &FrozenContext,
 		ikb: &IndexKeyBase,
 		txn: &Transaction,
 	) -> Result<()> {
@@ -1750,7 +1751,7 @@ impl IndexCountThingIterator {
 		let mut loops = 0;
 		let mut current_range = Some(range.clone());
 		while let Some(r) = current_range {
-			let batch = txn.batch_keys(r, *COUNT_BATCH_SIZE, None).await?;
+			let batch = txn.batch_keys(r, ctx.config().batching.count_batch_size, None).await?;
 			for key in batch.result.iter() {
 				loops += 1;
 				if loops % 1000 == 0 {

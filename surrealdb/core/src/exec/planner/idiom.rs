@@ -69,7 +69,7 @@ impl<'ctx> Planner<'ctx> {
 			while let Some(part) = iter.next() {
 				// Handle implicit recursion (Recurse with no inner path absorbs remaining parts)
 				if let Part::Recurse(recurse, None, instruction) = part {
-					let system_limit = *crate::cnf::IDIOM_RECURSION_LIMIT as u32;
+					let system_limit = self.ctx.config().limits.idiom_recursion_limit as u32;
 					let (min_depth, max_depth) = match recurse {
 						crate::expr::part::Recurse::Fixed(n) => (n, Some(n)),
 						crate::expr::part::Recurse::Range(min, max) => (min.unwrap_or(1), max),
@@ -287,7 +287,7 @@ impl<'ctx> Planner<'ctx> {
 			}
 
 			Part::Recurse(recurse, inner_path, instruction) => {
-				let system_limit = *crate::cnf::IDIOM_RECURSION_LIMIT as u32;
+				let system_limit = self.ctx.config().limits.idiom_recursion_limit as u32;
 				let (min_depth, max_depth) = match recurse {
 					crate::expr::part::Recurse::Fixed(n) => (n, Some(n)),
 					crate::expr::part::Recurse::Range(min, max) => (min.unwrap_or(1), max),

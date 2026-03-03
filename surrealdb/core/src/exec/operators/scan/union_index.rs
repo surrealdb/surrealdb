@@ -131,8 +131,12 @@ impl ExecOperator for UnionIndexScan {
 		// so that any setup errors surface immediately.
 		let mut sub_streams: Vec<ValueBatchStream> = Vec::with_capacity(self.inputs.len());
 		for input in &self.inputs {
-			let sub_stream =
-				buffer_stream(input.execute(ctx)?, input.access_mode(), input.cardinality_hint());
+			let sub_stream = buffer_stream(
+				input.execute(ctx)?,
+				input.access_mode(),
+				input.cardinality_hint(),
+				ctx.ctx().config().limits.operator_buffer_size,
+			);
 			sub_streams.push(sub_stream);
 		}
 

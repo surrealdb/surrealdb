@@ -60,7 +60,6 @@ use std::sync::Arc;
 use surrealdb_types::ToSql;
 
 use super::common::is_recursion_target;
-use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::exec::FlowResult;
 use crate::exec::parts::{clean_iteration, evaluate_physical_path, get_final, is_final};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
@@ -80,7 +79,7 @@ pub(crate) async fn evaluate_recurse_default(
 	user_specified_max: bool,
 	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
-	let system_limit = *IDIOM_RECURSION_LIMIT as u32;
+	let system_limit = ctx.exec_ctx.ctx().config().limits.idiom_recursion_limit as u32;
 	let mut current = start.clone();
 	let mut depth = 0u32;
 

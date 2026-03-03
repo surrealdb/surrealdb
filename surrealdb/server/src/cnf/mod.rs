@@ -1,8 +1,11 @@
-use std::env;
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use surrealdb_core::lazy_env_parse;
+use surrealdb_core::str::ParseBytes;
+
+// ---------------------------------------------------------------------------
+// True constants
+// ---------------------------------------------------------------------------
 
 /// The logo of the SurrealDB server
 pub const LOGO: &str = "
@@ -32,155 +35,18 @@ pub const PKG_NAME: &str = "surrealdb";
 /// The public endpoint for the administration interface
 pub const APP_ENDPOINT: &str = "https://surrealdb.com/surrealist";
 
-/// How many concurrent network requests can be handled at once (default:
-/// 1,048,576)
-pub static NET_MAX_CONCURRENT_REQUESTS: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_NET_MAX_CONCURRENT_REQUESTS", usize, 1 << 20);
-
-/// The maximum HTTP body size of the HTTP /ml endpoints (default: 4 GiB)
-pub static HTTP_MAX_ML_BODY_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_ML_BODY_SIZE", usize, 4 << 30);
-
-/// The maximum HTTP body size of the HTTP /sql endpoint (default: 1 MiB)
-pub static HTTP_MAX_SQL_BODY_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_SQL_BODY_SIZE", usize, 1 << 20);
-
-/// The maximum HTTP body size of the HTTP /api endpoint (default: 1 MiB)
-pub static HTTP_MAX_API_BODY_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_API_BODY_SIZE", usize, 4 << 20);
-
-/// The maximum HTTP body size of the HTTP /rpc endpoint (default: 4 MiB)
-pub static HTTP_MAX_RPC_BODY_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_RPC_BODY_SIZE", usize, 4 << 20);
-
-/// The maximum HTTP body size of the HTTP /key endpoints (default: 16 KiB)
-pub static HTTP_MAX_KEY_BODY_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_KEY_BODY_SIZE", usize, 16 << 10);
-
-/// The maximum HTTP body size of the HTTP /signup endpoint (default: 1 KiB)
-pub static HTTP_MAX_SIGNUP_BODY_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_SIGNUP_BODY_SIZE", usize, 1 << 10);
-
-/// The maximum HTTP body size of the HTTP /signin endpoint (default: 1 KiB)
-pub static HTTP_MAX_SIGNIN_BODY_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_SIGNIN_BODY_SIZE", usize, 1 << 10);
-
-/// The maximum HTTP body size of the HTTP /import endpoint (default: 4 GiB)
-pub static HTTP_MAX_IMPORT_BODY_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_IMPORT_BODY_SIZE", usize, 4 << 30);
-
 /// Specifies the frequency with which ping messages are sent to the client
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 
-/// What is the maximum WebSocket message size (default: 128 MiB)
-pub static WEBSOCKET_MAX_MESSAGE_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE", usize, 128 << 20);
-
-/// The size of the read buffer for WebSocket connections (default: 128 KiB)
-///
-/// This controls how much data can be buffered when reading from WebSocket connections.
-/// Larger values can improve performance for high-throughput connections but consume
-/// more memory per connection. The value can be configured via the
-/// `SURREAL_WEBSOCKET_READ_BUFFER_SIZE` environment variable.
-pub static WEBSOCKET_READ_BUFFER_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_WEBSOCKET_READ_BUFFER_SIZE", usize, 128 * 1024);
-
-/// The size of the write buffer for WebSocket connections (default: 128 KiB)
-///
-/// This controls how much data can be buffered when writing to WebSocket connections.
-/// Larger values can improve performance for high-throughput connections but consume
-/// more memory per connection. The value can be configured via the
-/// `SURREAL_WEBSOCKET_WRITE_BUFFER_SIZE` environment variable.
-pub static WEBSOCKET_WRITE_BUFFER_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_WEBSOCKET_WRITE_BUFFER_SIZE", usize, 128 * 1024);
-
-/// The maximum write buffer size before backpressure is applied (default: unlimited)
-///
-/// When the write buffer reaches this size, the WebSocket connection will apply
-/// backpressure to prevent memory exhaustion. By default, this is set to unlimited
-/// (`usize::MAX`), but it can be configured via the
-/// `SURREAL_WEBSOCKET_MAX_WRITE_BUFFER_SIZE` environment variable.
-///
-/// # Environment Variable
-///
-/// Set `SURREAL_WEBSOCKET_MAX_WRITE_BUFFER_SIZE` to configure this value. The value
-/// must be greater than `WEBSOCKET_WRITE_BUFFER_SIZE` to be effective. If not set
-/// or if the value is invalid, unlimited buffering is used.
-pub static WEBSOCKET_MAX_WRITE_BUFFER_SIZE: LazyLock<usize> = LazyLock::new(|| {
-	let buffer_size = || {
-		let var = env::var("SURREAL_WEBSOCKET_MAX_WRITE_BUFFER_SIZE").ok()?;
-		let size = var.parse().ok()?;
-		if size > *WEBSOCKET_WRITE_BUFFER_SIZE {
-			Some(size)
-		} else {
-			None
-		}
-	};
-	buffer_size().unwrap_or(usize::MAX)
-});
-
-/// How many messages can be queued for sending down the WebSocket (default:
-/// 100)
-pub static WEBSOCKET_RESPONSE_CHANNEL_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_CHANNEL_SIZE", usize, 100);
-
-/// How many responses can be buffered when delivering to the client (default:
-/// 0)
-pub static WEBSOCKET_RESPONSE_BUFFER_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_BUFFER_SIZE", usize, 0);
-
-/// How often are any buffered responses flushed to the WebSocket client
-/// (default: 3 ms)
-pub static WEBSOCKET_RESPONSE_FLUSH_PERIOD: LazyLock<u64> =
-	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_FLUSH_PERIOD", u64, 3);
-
-/// The number of runtime worker threads to start (default: the number of CPU
-/// cores, minimum 4)
-pub static RUNTIME_WORKER_THREADS: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_RUNTIME_WORKER_THREADS", usize, || {
-		std::cmp::max(4, num_cpus::get())
-	});
-
-/// What is the runtime thread memory stack size (default: 10 MiB)
-pub static RUNTIME_STACK_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_RUNTIME_STACK_SIZE", usize, || {
-		// Stack frames are generally larger in debug mode.
-		if cfg!(debug_assertions) {
-			20 * 1024 * 1024 // 20 MiB in debug mode
-		} else {
-			10 * 1024 * 1024 // 10 MiB in release mode
-		}
-	});
-
-/// How many threads which can be started for blocking operations (default: 512)
-pub static RUNTIME_MAX_BLOCKING_THREADS: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_RUNTIME_MAX_BLOCKING_THREADS", usize, 512);
-
-/// If set to "otlp" then telemetry is sent to the GRPC OpenTelemetry collector
-pub static TELEMETRY_PROVIDER: LazyLock<String> =
-	lazy_env_parse!("SURREAL_TELEMETRY_PROVIDER", String);
-
-/// If set then use this as value for the namespace label when sending telemetry
-pub static TELEMETRY_NAMESPACE: LazyLock<Option<String>> =
-	lazy_env_parse!("SURREAL_TELEMETRY_NAMESPACE", Option<String>);
-
-/// Whether to disable sending traces to the OpenTelemetry collector (default:
-/// false)
-pub static TELEMETRY_DISABLE_TRACING: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_TELEMETRY_DISABLE_TRACING", bool);
-
-/// Whether to disable sending metrics to the OpenTelemetry collector (default:
-/// false)
-pub static TELEMETRY_DISABLE_METRICS: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_TELEMETRY_DISABLE_METRICS", bool);
+// ---------------------------------------------------------------------------
+// Statics that stay global (compile-time / build metadata)
+// ---------------------------------------------------------------------------
 
 /// The version identifier of this build
 pub static PKG_VERSION: LazyLock<String> = LazyLock::new(|| {
-	// Use SURREAL_BUILD_VERSION if set, otherwise fall back to CARGO_PKG_VERSION
 	let version = option_env!("SURREAL_BUILD_VERSION")
 		.filter(|v| !v.trim().is_empty())
 		.unwrap_or(env!("CARGO_PKG_VERSION"));
-	// Append build metadata if set
 	match option_env!("SURREAL_BUILD_METADATA") {
 		Some(metadata) if !metadata.trim().is_empty() => {
 			format!("{version}+{metadata}")
@@ -189,14 +55,191 @@ pub static PKG_VERSION: LazyLock<String> = LazyLock::new(|| {
 	}
 });
 
-/// Whether to enable Tokio Console
-pub static ENABLE_TOKIO_CONSOLE: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_TOKIO_CONSOLE_ENABLED", bool, false);
+// ---------------------------------------------------------------------------
+// Env-var parsing helpers
+// ---------------------------------------------------------------------------
 
-/// The socket address that Tokio Console will bind on
-pub static TOKIO_CONSOLE_SOCKET_ADDR: LazyLock<Option<String>> =
-	lazy_env_parse!("SURREAL_TOKIO_CONSOLE_SOCKET_ADDR", Option<String>);
+fn env_parse<T: std::str::FromStr>(key: &str, default: T) -> T {
+	std::env::var(key).ok().and_then(|s| s.parse::<T>().ok()).unwrap_or(default)
+}
 
-/// How long, in seconds, to retain data for completed events (default: 60)
-pub static TOKIO_CONSOLE_RETENTION: LazyLock<u64> =
-	lazy_env_parse!("SURREAL_TOKIO_CONSOLE_RETENTION", u64, 60);
+fn env_parse_bytes<T: TryFrom<u128>>(key: &str, default: T) -> T {
+	std::env::var(key).ok().and_then(|s| s.as_str().parse_bytes::<T>().ok()).unwrap_or(default)
+}
+
+// ---------------------------------------------------------------------------
+// ServerConfig – the top-level server config struct
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct ServerConfig {
+	pub runtime: RuntimeConfig,
+	pub telemetry: TelemetryConfig,
+	pub http: HttpServerConfig,
+	pub websocket: WebSocketConfig,
+}
+
+impl ServerConfig {
+	pub fn from_env() -> Self {
+		Self {
+			runtime: RuntimeConfig::from_env(),
+			telemetry: TelemetryConfig::from_env(),
+			http: HttpServerConfig::from_env(),
+			websocket: WebSocketConfig::from_env(),
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// RuntimeConfig (pre-Datastore bootstrap)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct RuntimeConfig {
+	/// The number of runtime worker threads to start (default: max(4, num_cpus))
+	pub worker_threads: usize,
+	/// The runtime thread memory stack size (default: 10 MiB / 20 MiB debug)
+	pub stack_size: usize,
+	/// How many threads can be started for blocking operations (default: 512)
+	pub max_blocking_threads: usize,
+}
+
+impl RuntimeConfig {
+	pub fn from_env() -> Self {
+		Self {
+			worker_threads: env_parse(
+				"SURREAL_RUNTIME_WORKER_THREADS",
+				std::cmp::max(4, num_cpus::get()),
+			),
+			stack_size: env_parse(
+				"SURREAL_RUNTIME_STACK_SIZE",
+				if cfg!(debug_assertions) {
+					20 * 1024 * 1024
+				} else {
+					10 * 1024 * 1024
+				},
+			),
+			max_blocking_threads: env_parse("SURREAL_RUNTIME_MAX_BLOCKING_THREADS", 512),
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// TelemetryConfig
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct TelemetryConfig {
+	/// If set to "otlp" then telemetry is sent to the GRPC OpenTelemetry collector
+	pub provider: String,
+	/// Namespace label when sending telemetry
+	pub namespace: Option<String>,
+	/// Whether to disable sending traces to the OpenTelemetry collector (default: false)
+	pub disable_tracing: bool,
+	/// Whether to disable sending metrics to the OpenTelemetry collector (default: false)
+	pub disable_metrics: bool,
+	/// Whether to enable Tokio Console (default: false)
+	pub tokio_console_enabled: bool,
+	/// The socket address that Tokio Console will bind on
+	pub tokio_console_socket_addr: Option<String>,
+	/// How long, in seconds, to retain data for completed events (default: 60)
+	pub tokio_console_retention: u64,
+}
+
+impl TelemetryConfig {
+	pub fn from_env() -> Self {
+		Self {
+			provider: env_parse("SURREAL_TELEMETRY_PROVIDER", String::new()),
+			namespace: std::env::var("SURREAL_TELEMETRY_NAMESPACE").ok(),
+			disable_tracing: env_parse("SURREAL_TELEMETRY_DISABLE_TRACING", false),
+			disable_metrics: env_parse("SURREAL_TELEMETRY_DISABLE_METRICS", false),
+			tokio_console_enabled: env_parse("SURREAL_TOKIO_CONSOLE_ENABLED", false),
+			tokio_console_socket_addr: std::env::var("SURREAL_TOKIO_CONSOLE_SOCKET_ADDR").ok(),
+			tokio_console_retention: env_parse("SURREAL_TOKIO_CONSOLE_RETENTION", 60),
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HttpServerConfig (body size limits for inbound HTTP)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct HttpServerConfig {
+	/// How many concurrent network requests can be handled at once (default: 1_048_576)
+	pub max_concurrent_requests: usize,
+	/// The maximum HTTP body size of the /ml endpoints (default: 4 GiB)
+	pub max_ml_body_size: usize,
+	/// The maximum HTTP body size of the /sql endpoint (default: 1 MiB)
+	pub max_sql_body_size: usize,
+	/// The maximum HTTP body size of the /api endpoint (default: 4 MiB)
+	pub max_api_body_size: usize,
+	/// The maximum HTTP body size of the /rpc endpoint (default: 4 MiB)
+	pub max_rpc_body_size: usize,
+	/// The maximum HTTP body size of the /key endpoints (default: 16 KiB)
+	pub max_key_body_size: usize,
+	/// The maximum HTTP body size of the /signup endpoint (default: 1 KiB)
+	pub max_signup_body_size: usize,
+	/// The maximum HTTP body size of the /signin endpoint (default: 1 KiB)
+	pub max_signin_body_size: usize,
+	/// The maximum HTTP body size of the /import endpoint (default: 4 GiB)
+	pub max_import_body_size: usize,
+}
+
+impl HttpServerConfig {
+	pub fn from_env() -> Self {
+		Self {
+			max_concurrent_requests: env_parse("SURREAL_NET_MAX_CONCURRENT_REQUESTS", 1 << 20),
+			max_ml_body_size: env_parse_bytes("SURREAL_HTTP_MAX_ML_BODY_SIZE", 4 << 30),
+			max_sql_body_size: env_parse_bytes("SURREAL_HTTP_MAX_SQL_BODY_SIZE", 1 << 20),
+			max_api_body_size: env_parse_bytes("SURREAL_HTTP_MAX_API_BODY_SIZE", 4 << 20),
+			max_rpc_body_size: env_parse_bytes("SURREAL_HTTP_MAX_RPC_BODY_SIZE", 4 << 20),
+			max_key_body_size: env_parse_bytes("SURREAL_HTTP_MAX_KEY_BODY_SIZE", 16 << 10),
+			max_signup_body_size: env_parse_bytes("SURREAL_HTTP_MAX_SIGNUP_BODY_SIZE", 1 << 10),
+			max_signin_body_size: env_parse_bytes("SURREAL_HTTP_MAX_SIGNIN_BODY_SIZE", 1 << 10),
+			max_import_body_size: env_parse_bytes("SURREAL_HTTP_MAX_IMPORT_BODY_SIZE", 4 << 30),
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// WebSocketConfig
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct WebSocketConfig {
+	/// The maximum WebSocket message size (default: 128 MiB)
+	pub max_message_size: usize,
+	/// The size of the read buffer for WebSocket connections (default: 128 KiB)
+	pub read_buffer_size: usize,
+	/// The size of the write buffer for WebSocket connections (default: 128 KiB)
+	pub write_buffer_size: usize,
+	/// The maximum write buffer size before backpressure is applied (default: usize::MAX)
+	pub max_write_buffer_size: usize,
+	/// How many messages can be queued for sending down the WebSocket (default: 100)
+	pub response_channel_size: usize,
+	/// How many responses can be buffered when delivering to the client (default: 0)
+	pub response_buffer_size: usize,
+	/// How often buffered responses are flushed to the WebSocket client in ms (default: 3)
+	pub response_flush_period: u64,
+}
+
+impl WebSocketConfig {
+	pub fn from_env() -> Self {
+		let write_buffer_size = env_parse_bytes("SURREAL_WEBSOCKET_WRITE_BUFFER_SIZE", 128 * 1024);
+		let max_write_buffer_size = std::env::var("SURREAL_WEBSOCKET_MAX_WRITE_BUFFER_SIZE")
+			.ok()
+			.and_then(|s| s.parse::<usize>().ok())
+			.filter(|&size| size > write_buffer_size)
+			.unwrap_or(usize::MAX);
+		Self {
+			max_message_size: env_parse_bytes("SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE", 128 << 20),
+			read_buffer_size: env_parse_bytes("SURREAL_WEBSOCKET_READ_BUFFER_SIZE", 128 * 1024),
+			write_buffer_size,
+			max_write_buffer_size,
+			response_channel_size: env_parse("SURREAL_WEBSOCKET_RESPONSE_CHANNEL_SIZE", 100),
+			response_buffer_size: env_parse("SURREAL_WEBSOCKET_RESPONSE_BUFFER_SIZE", 0),
+			response_flush_period: env_parse("SURREAL_WEBSOCKET_RESPONSE_FLUSH_PERIOD", 3),
+		}
+	}
+}

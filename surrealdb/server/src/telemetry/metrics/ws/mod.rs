@@ -4,7 +4,7 @@ use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
 use opentelemetry::{Context as TelemetryContext, KeyValue, global};
 use web_time::Instant;
 
-use crate::cnf::TELEMETRY_NAMESPACE;
+use super::telemetry_namespace;
 
 static METER: LazyLock<Meter> = LazyLock::new(|| global::meter("surrealdb.rpc"));
 
@@ -48,7 +48,7 @@ pub static RPC_SERVER_RESPONSE_SIZE: LazyLock<Histogram<u64>> = LazyLock::new(||
 
 fn otel_common_attrs() -> Vec<KeyValue> {
 	let mut common = vec![KeyValue::new("rpc.service", "surrealdb")];
-	if let Some(namespace) = TELEMETRY_NAMESPACE.clone() {
+	if let Some(namespace) = telemetry_namespace() {
 		common.push(KeyValue::new("namespace", namespace.trim().to_owned()));
 	}
 	common

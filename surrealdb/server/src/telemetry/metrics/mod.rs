@@ -2,13 +2,22 @@ pub mod ds;
 pub mod http;
 pub mod ws;
 
+use std::sync::OnceLock;
+
 use opentelemetry_sdk::metrics::{
 	Aggregation, Instrument, PeriodicReader, SdkMeterProvider, Stream,
 };
 
 pub use self::http::tower_layer::HttpMetricsLayer;
 use super::OTEL_DEFAULT_RESOURCE;
-use crate::cnf::{TELEMETRY_DISABLE_METRICS, TELEMETRY_PROVIDER};
+use crate::cnf::TelemetryConfig;
+
+static TELEMETRY_NAMESPACE: OnceLock<Option<String>> = OnceLock::new();
+
+/// Returns the configured telemetry namespace, if any.
+pub fn telemetry_namespace() -> Option<&'static String> {
+	TELEMETRY_NAMESPACE.get().and_then(|o| o.as_ref())
+}
 
 // Histogram buckets in milliseconds
 static HISTOGRAM_BUCKETS_MS: &[f64] = &[
@@ -35,12 +44,12 @@ const HISTOGRAM_BUCKETS_BYTES: &[f64] = &[
 	100.0 * MB,
 ];
 
-// Returns a metrics configuration based on the SURREAL_TELEMETRY_PROVIDER
-// environment variable
-pub fn init() -> anyhow::Result<Option<SdkMeterProvider>> {
-	match TELEMETRY_PROVIDER.trim() {
+// Returns a metrics configuration based on the telemetry config
+pub fn init(telemetry: &TelemetryConfig) -> anyhow::Result<Option<SdkMeterProvider>> {
+	let _ = TELEMETRY_NAMESPACE.set(telemetry.namespace.clone());
+	match telemetry.provider.trim() {
 		// The OTLP telemetry provider has been specified
-		s if s.eq_ignore_ascii_case("otlp") && !*TELEMETRY_DISABLE_METRICS => {
+		s if s.eq_ignore_ascii_case("otlp") && !telemetry.disable_metrics => {
 			// Create a new metrics exporter using OTLP with tonic transport
 			let exporter = opentelemetry_otlp::MetricExporter::builder()
 				.with_tonic()

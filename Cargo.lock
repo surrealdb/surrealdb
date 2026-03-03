@@ -6896,6 +6896,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-cfg"
+version = "3.1.0-alpha"
+dependencies = [
+ "clap",
+ "num_cpus",
+ "sysinfo",
+]
+
+[[package]]
 name = "surrealdb-core"
 version = "3.1.0-alpha"
 dependencies = [
@@ -6978,6 +6987,7 @@ dependencies = [
  "storekey",
  "strsim",
  "subtle",
+ "surrealdb-cfg",
  "surrealdb-protocol",
  "surrealdb-rocksdb",
  "surrealdb-tikv-client",
@@ -7117,6 +7127,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "surrealdb",
+ "surrealdb-cfg",
  "surrealdb-core",
  "surrealdb-types",
  "surrealism-runtime",

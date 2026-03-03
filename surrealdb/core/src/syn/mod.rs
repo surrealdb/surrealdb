@@ -3,7 +3,8 @@
 
 use std::collections::HashSet;
 
-use crate::cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH};
+use surrealdb_cfg::LimitsConfig;
+
 use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
@@ -61,16 +62,23 @@ where
 		.map_err(anyhow::Error::new)
 }
 
-/// Creates the parser settings struct from the global configuration values as
-/// wel as the capabilities  struct.
-pub fn settings_from_capabilities(cap: &Capabilities) -> ParserSettings {
+/// Creates the parser settings struct from the given limits and capabilities.
+pub fn settings_from_config_and_capabilities(
+	limits: &LimitsConfig,
+	cap: &Capabilities,
+) -> ParserSettings {
 	ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		object_recursion_limit: limits.max_object_parsing_depth as usize,
+		query_recursion_limit: limits.max_query_parsing_depth as usize,
 		files_enabled: cap.allows_experimental(&ExperimentalTarget::Files),
 		surrealism_enabled: cap.allows_experimental(&ExperimentalTarget::Surrealism),
 		..Default::default()
 	}
+}
+
+/// Creates the parser settings struct from default limits and the given capabilities.
+pub fn settings_from_capabilities(cap: &Capabilities) -> ParserSettings {
+	settings_from_config_and_capabilities(&LimitsConfig::default(), cap)
 }
 
 /// Parses a SurrealQL query.
@@ -253,8 +261,8 @@ pub(crate) fn expr_legacy_strand(input: &str) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		object_recursion_limit: *crate::cnf::MAX_OBJECT_PARSING_DEPTH as usize,
+		query_recursion_limit: *crate::cnf::MAX_QUERY_PARSING_DEPTH as usize,
 		legacy_strands: true,
 		..Default::default()
 	};
@@ -270,8 +278,8 @@ pub fn value(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		object_recursion_limit: *crate::cnf::MAX_OBJECT_PARSING_DEPTH as usize,
+		query_recursion_limit: *crate::cnf::MAX_QUERY_PARSING_DEPTH as usize,
 		..Default::default()
 	};
 
@@ -286,8 +294,8 @@ pub fn value_legacy_strand(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		object_recursion_limit: *crate::cnf::MAX_OBJECT_PARSING_DEPTH as usize,
+		query_recursion_limit: *crate::cnf::MAX_QUERY_PARSING_DEPTH as usize,
 		legacy_strands: true,
 		..Default::default()
 	};
@@ -304,8 +312,8 @@ pub fn json_legacy_strand(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		object_recursion_limit: *crate::cnf::MAX_OBJECT_PARSING_DEPTH as usize,
+		query_recursion_limit: *crate::cnf::MAX_QUERY_PARSING_DEPTH as usize,
 		legacy_strands: true,
 		..Default::default()
 	};

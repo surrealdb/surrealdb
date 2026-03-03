@@ -77,6 +77,7 @@ impl ExecOperator for Union {
 				self.inputs[0].execute(ctx)?,
 				self.inputs[0].access_mode(),
 				self.inputs[0].cardinality_hint(),
+				ctx.ctx().config().limits.operator_buffer_size,
 			);
 			return Ok(monitor_stream(stream, "Union", &self.metrics));
 		}
@@ -118,6 +119,7 @@ impl ExecOperator for Union {
 								stream,
 								inputs[i].access_mode(),
 								inputs[i].cardinality_hint(),
+								ctx.ctx().config().limits.operator_buffer_size,
 							))
 						}
 						Err(e) => return Some((Err(e), (inputs, ctx, idx, None))),

@@ -35,6 +35,7 @@ use std::future::Future;
 use std::process::ExitCode;
 
 pub use cli::{Config, ConfigCheck, ConfigCheckRequirements};
+pub use cnf::ServerConfig;
 /// Re-export `RouterFactory` for convenience so embedders can `use surreal::RouterFactory`.
 #[doc(inline)]
 pub use ntw::RouterFactory;
@@ -67,19 +68,24 @@ use surrealdb_core::kvs::TransactionBuilderFactory;
 pub fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck + BucketStoreProvider>(
 	composer: C,
 ) -> ExitCode {
-	with_enough_stack(cli::init::<C>(composer))
+	let config = cnf::ServerConfig::from_env();
+	let rt = config.runtime.clone();
+	with_enough_stack(&rt, cli::init::<C>(composer, config))
 }
 
 /// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth
 /// for SurrealDB's query parser and execution engine. This function creates a Tokio
-/// runtime with a larger stack size configured via `cnf::RUNTIME_STACK_SIZE`.
-fn with_enough_stack(fut: impl Future<Output = ExitCode> + Send) -> ExitCode {
+/// runtime with a larger stack size configured via the [`cnf::RuntimeConfig`].
+fn with_enough_stack(
+	rt: &cnf::RuntimeConfig,
+	fut: impl Future<Output = ExitCode> + Send,
+) -> ExitCode {
 	// Start a Tokio runtime with custom configuration
 	let runtime = tokio::runtime::Builder::new_multi_thread()
 		.enable_all()
-		.max_blocking_threads(*cnf::RUNTIME_MAX_BLOCKING_THREADS)
-		.worker_threads(*cnf::RUNTIME_WORKER_THREADS)
-		.thread_stack_size(*cnf::RUNTIME_STACK_SIZE)
+		.max_blocking_threads(rt.max_blocking_threads)
+		.worker_threads(rt.worker_threads)
+		.thread_stack_size(rt.stack_size)
 		.thread_name("surrealdb-worker")
 		// When a thread is parked, ensure that local memory
 		// tracking is flushed to the global tracking counter.

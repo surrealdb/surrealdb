@@ -7,18 +7,21 @@ use tracing::Subscriber;
 use tracing_subscriber::Layer;
 
 use crate::cli::validator::parser::tracing::CustomFilter;
-use crate::cnf::{TELEMETRY_DISABLE_TRACING, TELEMETRY_PROVIDER};
+use crate::cnf::TelemetryConfig;
 use crate::telemetry::OTEL_DEFAULT_RESOURCE;
 
 // Returns a tracer provider based on the SURREAL_TELEMETRY_PROVIDER environment
 // variable
-pub fn new<S>(filter: CustomFilter) -> Result<Option<Box<dyn Layer<S> + Send + Sync>>>
+pub fn new<S>(
+	filter: CustomFilter,
+	telemetry: &TelemetryConfig,
+) -> Result<Option<Box<dyn Layer<S> + Send + Sync>>>
 where
 	S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a> + Send + Sync,
 {
-	match TELEMETRY_PROVIDER.trim() {
+	match telemetry.provider.trim() {
 		// The OTLP telemetry provider has been specified
-		s if s.eq_ignore_ascii_case("otlp") && !*TELEMETRY_DISABLE_TRACING => {
+		s if s.eq_ignore_ascii_case("otlp") && !telemetry.disable_tracing => {
 			// Build a new span exporter which uses gRPC via tonic
 			let span_exporter = opentelemetry_otlp::SpanExporter::builder().with_tonic().build()?;
 			// Create a batch span processor with the exporter (uses Tokio runtime automatically)

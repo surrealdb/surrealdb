@@ -13,13 +13,9 @@ pub struct SurrealismCache {
 }
 
 impl SurrealismCache {
-	pub fn new() -> Self {
+	pub fn new(capacity: usize) -> Self {
 		Self {
-			cache: quick_cache::sync::Cache::with_weighter(
-				*crate::cnf::SURREALISM_CACHE_SIZE,
-				*crate::cnf::SURREALISM_CACHE_SIZE as u64,
-				Weight,
-			),
+			cache: quick_cache::sync::Cache::with_weighter(capacity, capacity as u64, Weight),
 		}
 	}
 

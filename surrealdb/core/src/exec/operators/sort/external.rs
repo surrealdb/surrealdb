@@ -20,7 +20,6 @@ use tempfile::{Builder, TempDir};
 use tokio::task::spawn_blocking;
 
 use super::common::{OrderByField, SortDirection, compare_keys};
-use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 use crate::err::Error;
 use crate::exec::{
 	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
@@ -145,9 +144,11 @@ impl ExecOperator for ExternalSort {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.ctx().config().limits.operator_buffer_size,
 		);
 		let order_by = Arc::new(self.order_by.clone());
 		let temp_dir = self.temp_dir.clone();
+		let external_sorting_buffer_limit = ctx.ctx().config().limits.external_sorting_buffer_limit;
 		let ctx = ctx.clone();
 
 		let sorted_stream = futures::stream::once(async move {
@@ -243,7 +244,7 @@ impl ExecOperator for ExternalSort {
 					KeyedValueExternalChunk,
 				> = ExternalSorterBuilder::new()
 					.with_tmp_dir(&sort_dir)
-					.with_buffer(LimitedBufferBuilder::new(*EXTERNAL_SORTING_BUFFER_LIMIT, true))
+					.with_buffer(LimitedBufferBuilder::new(external_sorting_buffer_limit, true))
 					.build()?;
 
 				let sorted = sorter

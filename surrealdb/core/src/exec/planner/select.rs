@@ -28,7 +28,6 @@ use super::util::{
 	strip_knn_from_condition,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
-use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::err::Error;
 use crate::exec::expression_registry::{ComputePoint, ExpressionRegistry, resolve_order_by_alias};
 use crate::exec::field_path::FieldPath;
@@ -632,7 +631,8 @@ impl<'ctx> Planner<'ctx> {
 				}
 
 				if let Some(effective_limit) = get_effective_limit_literal(start, limit)
-					&& effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE as usize
+					&& effective_limit
+						<= self.ctx.config().limits.max_order_limit_priority_queue_size as usize
 				{
 					return Ok(Arc::new(SortTopK::new(input, order_by, effective_limit))
 						as Arc<dyn ExecOperator>);
@@ -759,7 +759,8 @@ impl<'ctx> Planner<'ctx> {
 
 				// Use heap-based TopK when the effective limit is small.
 				if let Some(effective_limit) = get_effective_limit_literal(start, limit)
-					&& effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE as usize
+					&& effective_limit
+						<= self.ctx.config().limits.max_order_limit_priority_queue_size as usize
 				{
 					return Ok((
 						Arc::new(SortTopKByKey::new(computed, sort_keys, effective_limit))

@@ -90,6 +90,7 @@ impl ExecOperator for RandomShuffle {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.ctx().config().limits.operator_buffer_size,
 		);
 		let limit = self.limit;
 		let cancellation = ctx.cancellation().clone();

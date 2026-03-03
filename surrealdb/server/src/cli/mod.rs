@@ -48,7 +48,7 @@ use version::VersionCommandArguments;
 use crate::cli::version_client::VersionClient;
 #[cfg(debug_assertions)]
 use crate::cnf::DEBUG_BUILD_WARNING;
-use crate::cnf::{LOGO, PKG_VERSION};
+use crate::cnf::{LOGO, PKG_VERSION, ServerConfig};
 use crate::env::RELEASE;
 use crate::ntw::RouterFactory;
 
@@ -230,6 +230,7 @@ pub async fn init<
 	C: TransactionBuilderFactory + RouterFactory + ConfigCheck + BucketStoreProvider,
 >(
 	composer: C,
+	server_config: ServerConfig,
 ) -> ExitCode {
 	// Enables ANSI code support on Windows
 	#[cfg(windows)]
@@ -267,6 +268,7 @@ pub async fn init<
 	let server = matches!(args.command, Commands::Start(_));
 	// Initialize opentelemetry and logging
 	let telemetry = crate::telemetry::builder()
+		.with_telemetry_config(server_config.telemetry.clone())
 		.with_log_level("info")
 		.with_log_format(args.log_format)
 		.with_filter(args.log.clone())
@@ -284,7 +286,7 @@ pub async fn init<
 	let guards = telemetry.init().expect("Unable to configure logs");
 	// After version warning we can run the respective command
 	let output = match args.command {
-		Commands::Start(args) => start::init::<C>(composer, args).await,
+		Commands::Start(args) => start::init::<C>(composer, args, server_config).await,
 		Commands::Import(args) => import::init(args).await,
 		Commands::Export(args) => export::init(args).await,
 		Commands::Version(args) => version::init(args).await,

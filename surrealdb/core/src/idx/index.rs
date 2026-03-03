@@ -265,9 +265,13 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	pub(crate) async fn index_count_compaction(ikb: &IndexKeyBase, tx: &Transaction) -> Result<()> {
+	pub(crate) async fn index_count_compaction(
+		ctx: &FrozenContext,
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+	) -> Result<()> {
 		IndexCountThingIterator::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index())?
-			.compaction(ikb, tx)
+			.compaction(ctx, ikb, tx)
 			.await
 	}
 

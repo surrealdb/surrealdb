@@ -21,7 +21,7 @@ use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, NamespaceProvider, UserProvider,
 };
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
-use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
+use crate::cnf::SERVER_NAME;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::expr::access_type;
@@ -425,7 +425,7 @@ pub async fn db_access(
 							// forwarded
 							_ => {
 								debug!("Record user signin query failed: {e}");
-								if *INSECURE_FORWARD_ACCESS_ERRORS {
+								if kvs.config().security.insecure_forward_access_errors {
 									Err(e)
 								} else {
 									Err(anyhow::Error::new(Error::AccessRecordSigninQueryFailed))

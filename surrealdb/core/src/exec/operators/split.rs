@@ -71,6 +71,7 @@ impl ExecOperator for Split {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.ctx().config().limits.operator_buffer_size,
 		);
 		let idioms = self.idioms.clone();
 

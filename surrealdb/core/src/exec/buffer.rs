@@ -58,8 +58,8 @@ pub(crate) fn buffer_stream(
 	stream: ValueBatchStream,
 	mode: AccessMode,
 	cardinality: CardinalityHint,
+	buffer_size: usize,
 ) -> ValueBatchStream {
-	let buffer_size = *crate::cnf::OPERATOR_BUFFER_SIZE;
 	if buffer_size == 0 {
 		return stream;
 	}
@@ -86,6 +86,7 @@ pub(crate) fn buffer_stream(
 	stream: ValueBatchStream,
 	_mode: AccessMode,
 	_cardinality: CardinalityHint,
+	_buffer_size: usize,
 ) -> ValueBatchStream {
 	stream
 }

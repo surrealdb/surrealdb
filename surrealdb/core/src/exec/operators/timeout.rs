@@ -98,6 +98,7 @@ impl ExecOperator for Timeout {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.ctx().config().limits.operator_buffer_size,
 		);
 
 		// If no timeout is specified, just pass through the input stream

@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::config::Config;
 use crate::cli::ConfigCheck;
-use crate::cnf::LOGO;
+use crate::cnf::{LOGO, ServerConfig};
 use crate::dbs::StartCommandDbsOptions;
 use crate::ntw::RouterFactory;
 use crate::ntw::client_ip::ClientIp;
@@ -125,6 +125,10 @@ pub struct StartCommandArguments {
 	#[command(flatten)]
 	#[command(next_help_heading = "Database")]
 	dbs: StartCommandDbsOptions,
+	//
+	// Core engine tuning
+	#[command(flatten)]
+	core_config: surrealdb_cfg::CoreConfig,
 }
 
 #[derive(Args, Debug)]
@@ -184,8 +188,10 @@ pub async fn init<
 		event_processing_interval,
 		no_banner,
 		no_identification_headers,
+		core_config,
 		..
 	}: StartCommandArguments,
+	server_config: ServerConfig,
 ) -> Result<()> {
 	// Install the crypto provider before any TLS operations occur
 	let _ = CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider());
@@ -239,13 +245,14 @@ pub async fn init<
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore
-	let datastore = Arc::new(dbs::init::<C>(composer, &config, canceller.clone(), dbs).await?);
+	let datastore =
+		Arc::new(dbs::init::<C>(composer, &config, canceller.clone(), dbs, core_config).await?);
 	// Register datastore metrics
 	register_datastore_metrics(datastore.clone());
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &config.engine);
 	// Build and run the HTTP server using the provided RouterFactory implementation
-	ntw::init::<C>(&config, datastore.clone(), canceller.clone()).await?;
+	ntw::init::<C>(&config, datastore.clone(), canceller.clone(), &server_config).await?;
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish

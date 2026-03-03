@@ -4,19 +4,19 @@ use anyhow::{Result, ensure};
 use surrealdb_types::ToSql;
 
 use super::args::{Any, Cast, Optional};
-use crate::cnf::{GENERATION_ALLOCATION_LIMIT, STRING_SIMILARITY_LIMIT};
+use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::fnc::util::string;
 use crate::val::range::TypedRange;
 use crate::val::{Regex, Value};
 
-/// Returns `true` if a string of this length is too much to allocate.
-fn limit(name: &str, n: usize) -> Result<()> {
+/// Returns an error if a string of this length is too much to allocate.
+fn limit(name: &str, n: usize, max: usize) -> Result<()> {
 	ensure!(
-		n <= *GENERATION_ALLOCATION_LIMIT,
+		n <= max,
 		Error::InvalidFunctionArguments {
 			name: name.to_owned(),
-			message: format!("Output must not exceed {} bytes.", *GENERATION_ALLOCATION_LIMIT),
+			message: format!("Output must not exceed {max} bytes."),
 		}
 	);
 	Ok(())
@@ -25,8 +25,7 @@ fn limit(name: &str, n: usize) -> Result<()> {
 /// Checks that both input strings are within the configured length limit for
 /// similarity/distance functions. These functions have O(n*m) complexity, so
 /// unbounded input could cause denial of service.
-fn check_similarity_input_length(name: &str, a: &str, b: &str) -> Result<()> {
-	let max = *STRING_SIMILARITY_LIMIT;
+fn check_similarity_input_length(name: &str, a: &str, b: &str, max: usize) -> Result<()> {
 	ensure!(
 		a.len() <= max && b.len() <= max,
 		Error::InvalidFunctionArguments {
@@ -67,9 +66,10 @@ pub fn capitalize((string,): (String,)) -> Result<Value> {
 	Ok(new_str.into())
 }
 
-pub fn concat(Any(args): Any) -> Result<Value> {
+pub fn concat(ctx: &FrozenContext, Any(args): Any) -> Result<Value> {
+	let gen_limit = ctx.config().limits.generation_allocation_limit;
 	let strings = args.into_iter().map(Value::into_raw_string).collect::<Vec<_>>();
-	limit("string::concat", strings.iter().map(String::len).sum::<usize>())?;
+	limit("string::concat", strings.iter().map(String::len).sum::<usize>(), gen_limit)?;
 	Ok(strings.concat().into())
 }
 
@@ -81,7 +81,8 @@ pub fn ends_with((val, chr): (String, String)) -> Result<Value> {
 	Ok(val.ends_with(&chr).into())
 }
 
-pub fn join(Any(args): Any) -> Result<Value> {
+pub fn join(ctx: &FrozenContext, Any(args): Any) -> Result<Value> {
+	let gen_limit = ctx.config().limits.generation_allocation_limit;
 	let mut args = args.into_iter().map(Value::into_raw_string);
 	let chr = args.next().ok_or_else(|| Error::InvalidFunctionArguments {
 		name: String::from("string::join"),
@@ -91,7 +92,7 @@ pub fn join(Any(args): Any) -> Result<Value> {
 	let mut res = args.next().unwrap_or_else(String::new);
 
 	for a in args {
-		limit("string::join", res.len() + a.len() + chr.len())?;
+		limit("string::join", res.len() + a.len() + chr.len(), gen_limit)?;
 		res.push_str(&chr);
 		res.push_str(&a);
 	}
@@ -108,10 +109,11 @@ pub fn lowercase((string,): (String,)) -> Result<Value> {
 	Ok(string.to_lowercase().into())
 }
 
-pub fn repeat((val, num): (String, i64)) -> Result<Value> {
+pub fn repeat(ctx: &FrozenContext, (val, num): (String, i64)) -> Result<Value> {
+	let gen_limit = ctx.config().limits.generation_allocation_limit;
 	//TODO: Deal with truncation of neg:
 	let num = num as usize;
-	limit("string::repeat", val.len().saturating_mul(num))?;
+	limit("string::repeat", val.len().saturating_mul(num), gen_limit)?;
 	Ok(val.repeat(num).into())
 }
 
@@ -119,7 +121,11 @@ pub fn matches((val, Cast(regex)): (String, Cast<Regex>)) -> Result<Value> {
 	Ok(regex.0.is_match(&val).into())
 }
 
-pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value> {
+pub fn replace(
+	ctx: &FrozenContext,
+	(val, search, replace): (String, Value, String),
+) -> Result<Value> {
+	let gen_limit = ctx.config().limits.generation_allocation_limit;
 	match search {
 		Value::String(search) => {
 			if replace.len() > search.len() {
@@ -129,6 +135,7 @@ pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value>
 					val.len().saturating_add(
 						val.matches(search.as_str()).count().saturating_mul(increase),
 					),
+					gen_limit,
 				)?;
 			}
 			Ok(val.replace(search.as_str(), &replace).into())
@@ -138,21 +145,14 @@ pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value>
 			let mut last = 0;
 
 			for m in search.0.find_iter(&val) {
-				// Push everything until the match
 				new_val.push_str(&val[last..m.start()]);
-
-				// Push replacement
 				new_val.push_str(&replace);
-
-				// Abort early if we'd exceed the allowed limit
-				limit("string::replace", new_val.len())?;
-
+				limit("string::replace", new_val.len(), gen_limit)?;
 				last = m.end();
 			}
 
-			// Finally, push anything after the last match
 			new_val.push_str(&val[last..]);
-			limit("string::replace", new_val.len())?;
+			limit("string::replace", new_val.len(), gen_limit)?;
 			Ok(new_val.into())
 		}
 		_ => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
@@ -285,51 +285,43 @@ pub fn words((string,): (String,)) -> Result<Value> {
 }
 
 pub mod distance {
-
 	use anyhow::Result;
 	use strsim;
 
+	use crate::ctx::FrozenContext;
 	use crate::err::Error;
 	use crate::val::Value;
 
-	/// Calculate the Damerau-Levenshtein distance between two strings.
-	///
-	/// Time complexity: O(n * m) where n and m are the string lengths.
-	/// Space complexity: O(n * m).
-	///
-	/// Uses [`strsim::damerau_levenshtein`].
-	pub fn damerau_levenshtein((a, b): (String, String)) -> Result<Value> {
-		super::check_similarity_input_length("string::distance::damerau_levenshtein", &a, &b)?;
+	pub fn damerau_levenshtein(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length(
+			"string::distance::damerau_levenshtein",
+			&a,
+			&b,
+			ctx.config().limits.string_similarity_limit,
+		)?;
 		Ok(strsim::damerau_levenshtein(&a, &b).into())
 	}
 
-	/// Calculate the normalized Damerau-Levenshtein distance between two strings.
-	/// Returns a value between 0.0 and 1.0, where 1.0 means the strings are identical.
-	///
-	/// Time complexity: O(n * m) where n and m are the string lengths.
-	/// Space complexity: O(n * m).
-	///
-	/// Uses [`strsim::normalized_damerau_levenshtein`].
-	pub fn normalized_damerau_levenshtein((a, b): (String, String)) -> Result<Value> {
+	pub fn normalized_damerau_levenshtein(
+		ctx: &FrozenContext,
+		(a, b): (String, String),
+	) -> Result<Value> {
 		super::check_similarity_input_length(
 			"string::distance::normalized_damerau_levenshtein",
 			&a,
 			&b,
+			ctx.config().limits.string_similarity_limit,
 		)?;
 		Ok(strsim::normalized_damerau_levenshtein(&a, &b).into())
 	}
 
-	/// Calculate the Hamming distance between two strings.
-	///
-	/// Time complexity: O(n) where n is the string length.
-	/// Space complexity: O(1).
-	///
-	/// Uses [`strsim::hamming`].
-	///
-	/// Will result in an [`Error::InvalidFunctionArguments`] if the given strings are
-	/// of different lengths.
-	pub fn hamming((a, b): (String, String)) -> Result<Value> {
-		super::check_similarity_input_length("string::distance::hamming", &a, &b)?;
+	pub fn hamming(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length(
+			"string::distance::hamming",
+			&a,
+			&b,
+			ctx.config().limits.string_similarity_limit,
+		)?;
 		match strsim::hamming(&a, &b) {
 			Ok(v) => Ok(v.into()),
 			Err(_) => Err(anyhow::Error::new(Error::InvalidFunctionArguments {
@@ -339,38 +331,33 @@ pub mod distance {
 		}
 	}
 
-	/// Calculate the Levenshtein distance between two strings.
-	///
-	/// Time complexity: O(n * m) where n and m are the string lengths.
-	/// Space complexity: O(min(n, m)).
-	///
-	/// Uses [`strsim::levenshtein`].
-	pub fn levenshtein((a, b): (String, String)) -> Result<Value> {
-		super::check_similarity_input_length("string::distance::levenshtein", &a, &b)?;
+	pub fn levenshtein(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length(
+			"string::distance::levenshtein",
+			&a,
+			&b,
+			ctx.config().limits.string_similarity_limit,
+		)?;
 		Ok(strsim::levenshtein(&a, &b).into())
 	}
 
-	/// Calculate the normalized Levenshtein distance between two strings.
-	/// Returns a value between 0.0 and 1.0, where 1.0 means the strings are identical.
-	///
-	/// Time complexity: O(n * m) where n and m are the string lengths.
-	/// Space complexity: O(min(n, m)).
-	///
-	/// Uses [`strsim::normalized_levenshtein`].
-	pub fn normalized_levenshtein((a, b): (String, String)) -> Result<Value> {
-		super::check_similarity_input_length("string::distance::normalized_levenshtein", &a, &b)?;
+	pub fn normalized_levenshtein(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length(
+			"string::distance::normalized_levenshtein",
+			&a,
+			&b,
+			ctx.config().limits.string_similarity_limit,
+		)?;
 		Ok(strsim::normalized_levenshtein(&a, &b).into())
 	}
 
-	/// Calculate the OSA distance between two strings. This is a variant of
-	/// Levenshtein distance that also allows transposition of adjacent characters.
-	///
-	/// Time complexity: O(n * m) where n and m are the string lengths.
-	/// Space complexity: O(min(n, m)).
-	///
-	/// Uses [`strsim::osa_distance`].
-	pub fn osa_distance((a, b): (String, String)) -> Result<Value> {
-		super::check_similarity_input_length("string::distance::osa_distance", &a, &b)?;
+	pub fn osa_distance(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length(
+			"string::distance::osa_distance",
+			&a,
+			&b,
+			ctx.config().limits.string_similarity_limit,
+		)?;
 		Ok(strsim::osa_distance(&a, &b).into())
 	}
 }
@@ -534,68 +521,55 @@ pub mod similarity {
 	use anyhow::Result;
 	use fuzzy_matcher::FuzzyMatcher;
 	use fuzzy_matcher::skim::SkimMatcherV2;
+	use strsim;
 
+	use crate::ctx::FrozenContext;
 	use crate::val::Value;
+
 	static MATCHER: LazyLock<SkimMatcherV2> =
 		LazyLock::new(|| SkimMatcherV2::default().ignore_case());
 
-	use strsim;
-
-	/// Calculate fuzzy similarity between two strings using the Smith-Waterman algorithm.
-	///
-	/// Time complexity: O(n * m) where n and m are the string lengths.
-	/// Space complexity: O(n * m).
-	///
-	/// Returns a score where higher values indicate greater similarity.
-	pub fn fuzzy(arg: (String, String)) -> Result<Value> {
-		smithwaterman(arg)
+	pub fn fuzzy(ctx: &FrozenContext, arg: (String, String)) -> Result<Value> {
+		smithwaterman(ctx, arg)
 	}
 
-	/// Calculate the Jaro similarity between two strings.
-	/// Returns a value between 0.0 and 1.0, where 1.0 means the strings are identical.
-	///
-	/// Time complexity: O(n * m) where n and m are the string lengths.
-	/// Space complexity: O(n + m).
-	///
-	/// Uses [`strsim::jaro`].
-	pub fn jaro((a, b): (String, String)) -> Result<Value> {
-		super::check_similarity_input_length("string::similarity::jaro", &a, &b)?;
+	pub fn jaro(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length(
+			"string::similarity::jaro",
+			&a,
+			&b,
+			ctx.config().limits.string_similarity_limit,
+		)?;
 		Ok(strsim::jaro(&a, &b).into())
 	}
 
-	/// Calculate the Jaro-Winkler similarity between two strings.
-	/// This is a variant of Jaro similarity that gives more weight to common prefixes.
-	/// Returns a value between 0.0 and 1.0, where 1.0 means the strings are identical.
-	///
-	/// Time complexity: O(n * m) where n and m are the string lengths.
-	/// Space complexity: O(n + m).
-	///
-	/// Uses [`strsim::jaro_winkler`].
-	pub fn jaro_winkler((a, b): (String, String)) -> Result<Value> {
-		super::check_similarity_input_length("string::similarity::jaro_winkler", &a, &b)?;
+	pub fn jaro_winkler(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length(
+			"string::similarity::jaro_winkler",
+			&a,
+			&b,
+			ctx.config().limits.string_similarity_limit,
+		)?;
 		Ok(strsim::jaro_winkler(&a, &b).into())
 	}
 
-	/// Calculate fuzzy similarity between two strings using the Smith-Waterman algorithm.
-	///
-	/// Time complexity: O(n * m) where n and m are the string lengths.
-	/// Space complexity: O(n * m).
-	///
-	/// Returns a score where higher values indicate greater similarity.
-	pub fn smithwaterman((a, b): (String, String)) -> Result<Value> {
-		super::check_similarity_input_length("string::similarity::smithwaterman", &a, &b)?;
+	pub fn smithwaterman(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length(
+			"string::similarity::smithwaterman",
+			&a,
+			&b,
+			ctx.config().limits.string_similarity_limit,
+		)?;
 		Ok(MATCHER.fuzzy_match(&a, &b).unwrap_or(0).into())
 	}
 
-	/// Calculate the Sørensen-Dice similarity coefficient between two strings.
-	/// Returns a value between 0.0 and 1.0, where 1.0 means the strings are identical.
-	///
-	/// Time complexity: O(n + m) where n and m are the string lengths.
-	/// Space complexity: O(n + m).
-	///
-	/// Uses [`strsim::sorensen_dice`].
-	pub fn sorensen_dice((a, b): (String, String)) -> Result<Value> {
-		super::check_similarity_input_length("string::similarity::sorensen_dice", &a, &b)?;
+	pub fn sorensen_dice(ctx: &FrozenContext, (a, b): (String, String)) -> Result<Value> {
+		super::check_similarity_input_length(
+			"string::similarity::sorensen_dice",
+			&a,
+			&b,
+			ctx.config().limits.string_similarity_limit,
+		)?;
 		Ok(strsim::sorensen_dice(&a, &b).into())
 	}
 }
@@ -763,10 +737,16 @@ mod tests {
 
 	#[test]
 	fn string_replace() {
+		use std::sync::Arc;
+
+		use crate::ctx::Context;
+
+		let ctx: Arc<Context> = Arc::new(Context::background());
+
 		#[track_caller]
-		fn test(base: &str, pattern: Value, replacement: &str, expected: &str) {
+		fn test(ctx: &Arc<Context>, base: &str, pattern: Value, replacement: &str, expected: &str) {
 			assert_eq!(
-				replace((base.to_string(), pattern.clone(), replacement.to_string())).unwrap(),
+				replace(ctx, (base.to_string(), pattern.clone(), replacement.to_string())).unwrap(),
 				Value::from(expected),
 				"replace({},{},{})",
 				base,
@@ -775,8 +755,8 @@ mod tests {
 			);
 		}
 
-		test("foo bar", Value::Regex("foo".parse().unwrap()), "bar", "bar bar");
-		test("foo bar", "bar".into(), "foo", "foo foo");
+		test(&ctx, "foo bar", Value::Regex("foo".parse().unwrap()), "bar", "bar bar");
+		test(&ctx, "foo bar", "bar".into(), "foo", "foo foo");
 	}
 
 	#[test]
@@ -866,38 +846,36 @@ mod tests {
 
 	#[test]
 	fn similarity_distance_length_limit() {
-		use crate::cnf::STRING_SIMILARITY_LIMIT;
+		use std::sync::Arc;
 
-		// Normal strings under limit should work
+		use crate::ctx::Context;
+
+		let ctx: Arc<Context> = Arc::new(Context::background());
+		let limit = ctx.config().limits.string_similarity_limit;
+
 		let a = "hello".to_string();
 		let b = "world".to_string();
-		assert!(super::distance::levenshtein((a.clone(), b.clone())).is_ok());
-		assert!(super::distance::hamming((a.clone(), a.clone())).is_ok());
-		assert!(super::similarity::jaro((a.clone(), b.clone())).is_ok());
-		assert!(super::similarity::fuzzy((a, b)).is_ok());
+		assert!(super::distance::levenshtein(&ctx, (a.clone(), b.clone())).is_ok());
+		assert!(super::distance::hamming(&ctx, (a.clone(), a.clone())).is_ok());
+		assert!(super::similarity::jaro(&ctx, (a.clone(), b.clone())).is_ok());
+		assert!(super::similarity::fuzzy(&ctx, (a, b)).is_ok());
 
-		// Strings exceeding limit should error
-		let limit = *STRING_SIMILARITY_LIMIT;
 		let long_a = "a".repeat(limit + 1);
 		let long_b = "b".repeat(limit + 1);
 		let short = "x".to_string();
 
-		// First argument too long
-		assert!(super::distance::levenshtein((long_a.clone(), short.clone())).is_err());
-		assert!(super::similarity::jaro((long_a.clone(), short.clone())).is_err());
+		assert!(super::distance::levenshtein(&ctx, (long_a.clone(), short.clone())).is_err());
+		assert!(super::similarity::jaro(&ctx, (long_a.clone(), short.clone())).is_err());
+		assert!(super::distance::levenshtein(&ctx, (short.clone(), long_b.clone())).is_err());
+		assert!(super::similarity::jaro(&ctx, (short, long_b.clone())).is_err());
+		assert!(super::distance::levenshtein(&ctx, (long_a.clone(), long_b.clone())).is_err());
+		assert!(super::similarity::jaro(&ctx, (long_a, long_b)).is_err());
 
-		// Second argument too long
-		assert!(super::distance::levenshtein((short.clone(), long_b.clone())).is_err());
-		assert!(super::similarity::jaro((short, long_b.clone())).is_err());
-
-		// Both arguments too long
-		assert!(super::distance::levenshtein((long_a.clone(), long_b.clone())).is_err());
-		assert!(super::similarity::jaro((long_a, long_b)).is_err());
-
-		// Strings at exactly the limit should work
 		let at_limit_a = "a".repeat(limit);
 		let at_limit_b = "b".repeat(limit);
-		assert!(super::distance::levenshtein((at_limit_a.clone(), at_limit_b.clone())).is_ok());
-		assert!(super::similarity::jaro((at_limit_a, at_limit_b)).is_ok());
+		assert!(
+			super::distance::levenshtein(&ctx, (at_limit_a.clone(), at_limit_b.clone())).is_ok()
+		);
+		assert!(super::similarity::jaro(&ctx, (at_limit_a, at_limit_b)).is_ok());
 	}
 }

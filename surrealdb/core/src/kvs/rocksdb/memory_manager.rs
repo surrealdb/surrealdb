@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use rocksdb::{BlockBasedOptions, Cache, Options, WriteBufferManager};
 
-use super::{TARGET, cnf};
+use super::TARGET;
+use crate::cnf::RocksDbEngineConfig;
 use crate::kvs::Result;
 use crate::mem::{MemoryReporter, cleanup_memory_reporters, register_memory_reporter};
 
@@ -21,16 +22,15 @@ impl MemoryReporter for MemoryManager {
 
 impl MemoryManager {
 	/// Pre-configure the disk space manager
-	pub(super) fn configure(opts: &mut Options) -> Result<Self> {
+	pub(super) fn configure(opts: &mut Options, tuning: &RocksDbEngineConfig) -> Result<Self> {
 		// Get the configuration options
-		let block_cache_size = *cnf::ROCKSDB_BLOCK_CACHE_SIZE;
-		let write_buffer_size = *cnf::ROCKSDB_WRITE_BUFFER_SIZE;
+		let block_cache_size = tuning.block_cache_size;
+		let write_buffer_size = tuning.write_buffer_size;
 		let total_write_buffer_size =
-			cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER.saturating_mul(write_buffer_size);
-		let max_write_buffer_number =
-			cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER.min(i32::MAX as usize) as i32;
+			tuning.max_write_buffer_number.saturating_mul(write_buffer_size);
+		let max_write_buffer_number = tuning.max_write_buffer_number.min(i32::MAX as usize) as i32;
 		let min_write_buffers_to_merge =
-			cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE.min(i32::MAX as usize) as i32;
+			tuning.min_write_buffer_number_to_merge.min(i32::MAX as usize) as i32;
 		let total_memory_limit = total_write_buffer_size + block_cache_size;
 		// Set the block cache size in bytes
 		info!(target: TARGET, "Memory manager: block cache size: {block_cache_size}B");
@@ -46,13 +46,13 @@ impl MemoryManager {
 		// Combine the cache and the write buffers to get the memory limit
 		info!(target: TARGET, "Memory manager: total memory limit: {total_memory_limit}");
 		// Configure the in-memory cache options
-		let cache = Cache::new_lru_cache(*cnf::ROCKSDB_BLOCK_CACHE_SIZE);
+		let cache = Cache::new_lru_cache(tuning.block_cache_size);
 		// Configure the block based file options
 		let mut block = BlockBasedOptions::default();
 		block.set_pin_l0_filter_and_index_blocks_in_cache(true);
 		block.set_pin_top_level_index_and_filter(true);
 		block.set_bloom_filter(10.0, false);
-		block.set_block_size(*cnf::ROCKSDB_BLOCK_SIZE);
+		block.set_block_size(tuning.block_size);
 		block.set_block_cache(&cache);
 		// Configure the database with the cache
 		opts.set_block_based_table_factory(&block);

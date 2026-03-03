@@ -994,7 +994,7 @@ mod tests {
 			};
 			let mut stack = reblessive::TreeStack::new();
 
-			let opts = Options::new(ds.id(), DynamicConfiguration::default());
+			let opts = Options::new(ds.id(), DynamicConfiguration::default(), 120);
 			let stk_ctx = ctx.clone();
 			let az = stack
 				.enter(|stk| async move {
@@ -1041,7 +1041,7 @@ mod tests {
 			});
 			let nid = Uuid::new_v4();
 			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t".into(), IndexId(3));
-			let opt = Options::new(nid, DynamicConfiguration::default())
+			let opt = Options::new(nid, DynamicConfiguration::default(), 120)
 				.with_ns(Some("testns".into()))
 				.with_db(Some("testdb".into()));
 			let fti = Arc::new(

@@ -2,7 +2,7 @@
 #![cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
 
 use surrealdb::opt::Config;
-use surrealdb_core::cnf::EXPORT_BATCH_SIZE;
+use surrealdb_core::cnf::BatchConfig;
 use surrealdb_types::SurrealValue;
 use tokio::fs::remove_file;
 use ulid::Ulid;
@@ -15,7 +15,7 @@ pub async fn export_import_versions_with_inserts_updates_deletes(new_db: impl Cr
 	let db_name = Ulid::new().to_string();
 	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 
-	let num_records = (*EXPORT_BATCH_SIZE * 2) as usize;
+	let num_records = (BatchConfig::default().export_batch_size * 2) as usize;
 	let num_deleted_records = num_records / 2;
 
 	// Insert a lot of users
@@ -235,7 +235,7 @@ pub async fn export_import_versioned_records(new_db: impl CreateDb) {
 	let db_name = Ulid::new().to_string();
 	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 
-	let num_versions = (*EXPORT_BATCH_SIZE * 2) as usize;
+	let num_versions = (BatchConfig::default().export_batch_size * 2) as usize;
 
 	// Insert a user
 	let _ = db

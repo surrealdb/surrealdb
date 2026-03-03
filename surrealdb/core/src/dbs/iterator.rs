@@ -8,7 +8,6 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::Record;
 use crate::catalog::providers::TableProvider;
-use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::ctx::{Canceller, Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
@@ -692,13 +691,7 @@ impl Iterator {
 		// Process the query START clause
 		self.setup_start(stk, &cancel_ctx, opt, stm).await?;
 		// Prepare the results with possible optimisations on groups
-		self.results = self.results.prepare(
-			#[cfg(storage)]
-			ctx,
-			stm,
-			self.start,
-			self.limit,
-		)?;
+		self.results = self.results.prepare(ctx, stm, self.start, self.limit)?;
 
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or
 		// without FULL
@@ -1049,7 +1042,9 @@ impl Iterator {
 						// Check if we should use the priority queue optimization
 						if let Some(limit) = self.limit {
 							let effective_limit = self.start.unwrap_or(0) + limit;
-							if effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE {
+							if effective_limit
+								<= ctx.config().limits.max_order_limit_priority_queue_size
+							{
 								let mut res = MemoryOrderedLimit::new(
 									effective_limit as usize,
 									orders.clone(),

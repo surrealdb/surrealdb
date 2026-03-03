@@ -2,7 +2,6 @@ use anyhow::Result;
 use reblessive;
 
 use crate::catalog;
-use crate::cnf::INSECURE_FORWARD_ACCESS_ERRORS;
 use crate::ctx::Context;
 use crate::dbs::Session;
 use crate::err::Error;
@@ -47,7 +46,7 @@ pub(crate) async fn authenticate_record(
 					debug!(
 						"Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}"
 					);
-					if *INSECURE_FORWARD_ACCESS_ERRORS {
+					if kvs.config().security.insecure_forward_access_errors {
 						Err(e)
 					} else {
 						Err(anyhow::Error::new(Error::InvalidAuth))
@@ -93,7 +92,7 @@ pub(crate) async fn authenticate_generic(
 					debug!(
 						"Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}"
 					);
-					if *INSECURE_FORWARD_ACCESS_ERRORS {
+					if kvs.config().security.insecure_forward_access_errors {
 						Err(e)
 					} else {
 						Err(anyhow::Error::new(Error::InvalidAuth))
