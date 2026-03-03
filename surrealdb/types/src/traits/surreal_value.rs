@@ -5,7 +5,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use rust_decimal::Decimal;
-use serde::{Serialize, de::DeserializeOwned};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate as surrealdb_types;
 use crate::error::{ConversionError, LengthMismatchError, OutOfRangeError};
@@ -1637,16 +1638,18 @@ impl<T: SurrealValue + Hash + Eq> SurrealValue for HashSet<T> {
 	}
 }
 
-/// A wrapper struct that allows bridging between SurrealValue and types that implement Serialize and Deserialize
+/// A wrapper struct that allows bridging between SurrealValue and types that implement Serialize
+/// and Deserialize
 ///
 /// # A note on parity with `SurrealValue`
-/// Serializing and Deserializing a type does *not* behave the same as `SurrealValue` in some cases. Notably:
+/// Serializing and Deserializing a type does *not* behave the same as `SurrealValue` in some cases.
+/// Notably:
 /// - Enum variants behave differently
-/// - The only primitives taken advantage of are String, Number, Object, Bool, and Array
+/// - The only primitives taken advantage of are String, Number, Bool, Bytes, Object, and Array
 ///
-/// As such, it's best to use SurrealValue directly where possible. This is intended for types where an implementation of SurrealValue
-/// isn't available or practical
-pub struct Wrapper<T: Serialize + DeserializeOwned>(T);
+/// As such, it's best to use SurrealValue directly where possible. This is intended for types where
+/// an implementation of SurrealValue isn't available or practical
+pub struct Wrapper<T: Serialize + DeserializeOwned>(pub T);
 
 impl<T: Serialize + DeserializeOwned> SurrealValue for Wrapper<T> {
 	fn kind_of() -> Kind {
@@ -1667,10 +1670,12 @@ impl<T: Serialize + DeserializeOwned> SurrealValue for Wrapper<T> {
 
 #[cfg(test)]
 mod test {
-	use super::*;
+	use std::fmt::Debug;
+
 	use rstest::rstest;
 	use serde::{Deserialize, Serialize};
-	use std::fmt::Debug;
+
+	use super::*;
 
 	#[derive(Serialize, Deserialize, PartialEq, Debug)]
 	enum Test {
@@ -1717,6 +1722,7 @@ mod test {
 		sneaky_and_evil: (),
 		also_sneaky_and_evil: Gerald
 	})]
+	#[allow(non_snake_case)]
 	fn wrapper_roundtrip<'a>(#[case] value: impl Serialize + Deserialize<'a> + PartialEq + Debug) {
 		let serialized_value = value.serialize(Serializer).expect("this should work!");
 		let deserialized_value =

@@ -1,17 +1,18 @@
-use crate::Array;
-use crate::Object;
-use crate::error::Error;
-use crate::number::Number;
-use crate::value::Value;
 use core::slice;
+use std::borrow::Cow;
+use std::fmt::Display;
+
 use rust_decimal::prelude::ToPrimitive;
 use serde::de::{
 	self, Deserialize, DeserializeSeed, Deserializer as _, EnumAccess, Expected, IntoDeserializer,
 	MapAccess, SeqAccess, Unexpected, VariantAccess, Visitor,
 };
 use serde::forward_to_deserialize_any;
-use std::borrow::Cow;
-use std::fmt::Display;
+
+use crate::error::Error;
+use crate::number::Number;
+use crate::value::Value;
+use crate::{Array, Object};
 
 impl serde::de::Error for Error {
 	fn custom<T>(msg: T) -> Self
@@ -735,6 +736,7 @@ impl<'de> serde::Deserializer<'de> for &'de Value {
 		V: Visitor<'de>,
 	{
 		match self {
+			Value::Bytes(v) => visitor.visit_bytes(v),
 			Value::String(v) => visitor.visit_borrowed_str(v),
 			Value::Array(v) => visit_array_ref(v, visitor),
 			_ => Err(self.invalid_type(&visitor)),
