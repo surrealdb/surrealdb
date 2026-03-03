@@ -1,6 +1,4 @@
 use std::any::Any;
-use std::borrow::Borrow;
-use std::hash::Hash;
 use std::ops::{Index, IndexMut};
 
 use common::ids::SetEntry;
