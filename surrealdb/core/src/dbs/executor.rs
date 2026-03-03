@@ -1018,7 +1018,11 @@ impl Executor {
 					});
 				}
 				Err(ControlFlow::Err(e)) => {
-					let _ = tx.cancel().await;
+					let cancel_err = if !tx.closed() {
+						tx.cancel().await.err().map(types_error_from_anyhow)
+					} else {
+						None
+					};
 
 					for res in &mut results {
 						res.query_type = QueryType::Other;
@@ -1033,6 +1037,14 @@ impl Executor {
 						result: Err(types_error_from_anyhow(e)),
 						query_type: QueryType::Other,
 					});
+
+					if let Some(err) = cancel_err {
+						results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Err(err),
+							query_type: QueryType::Other,
+						});
+					}
 
 					for _ in (i + 1)..total {
 						results.push(QueryResult {
@@ -1049,7 +1061,11 @@ impl Executor {
 					return Ok(results);
 				}
 				Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
-					let _ = tx.cancel().await;
+					let cancel_err = if !tx.closed() {
+						tx.cancel().await.err().map(types_error_from_anyhow)
+					} else {
+						None
+					};
 
 					for res in &mut results {
 						res.query_type = QueryType::Other;
@@ -1064,6 +1080,14 @@ impl Executor {
 						result: Err(TypesError::internal("Invalid control flow".to_string())),
 						query_type: QueryType::Other,
 					});
+
+					if let Some(err) = cancel_err {
+						results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Err(err),
+							query_type: QueryType::Other,
+						});
+					}
 
 					for _ in (i + 1)..total {
 						results.push(QueryResult {
