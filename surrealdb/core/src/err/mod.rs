@@ -210,6 +210,10 @@ pub(crate) enum Error {
 	#[error("The query was not executed because it exceeded the timeout: {0}")]
 	QueryTimedout(Duration),
 
+	/// The transaction timed out
+	#[error("The transaction was not completed because it exceeded the timeout: {0}")]
+	TransactionTimedout(Duration),
+
 	/// The query did not execute, because the transaction was cancelled
 	#[error("The query was not executed due to a cancelled transaction")]
 	QueryCancelled,

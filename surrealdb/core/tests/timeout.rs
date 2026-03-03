@@ -4,6 +4,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use helpers::{Test, new_ds};
 use surrealdb_core::dbs::Session;
+#[allow(unused_imports)]
+use surrealdb_core::kvs::Datastore;
 
 #[tokio::test]
 async fn statement_timeouts() -> Result<()> {
@@ -52,6 +54,54 @@ async fn query_timeout() -> Result<()> {
 		panic!("Query did not properly timeout");
 	}
 	res.pop().unwrap().result.unwrap_err();
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn transaction_timeout() -> Result<()> {
+	let ds =
+		new_ds("test", "test").await?.with_transaction_timeout(Some(Duration::from_millis(500)));
+	let session = Session::owner().with_ns("test").with_db("test");
+
+	let before = Instant::now();
+	let mut res = ds.execute("SLEEP 10s", &session, None).await.unwrap();
+	let elapsed = before.elapsed();
+	assert!(
+		elapsed < Duration::from_secs(5),
+		"Transaction timeout was not enforced, took {elapsed:?}"
+	);
+
+	let result = res.pop().unwrap().result;
+	let err = result.unwrap_err().to_string();
+	assert!(err.contains("exceeded the timeout"), "Expected transaction timeout error, got: {err}");
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn transaction_timeout_begin_commit() -> Result<()> {
+	let ds =
+		new_ds("test", "test").await?.with_transaction_timeout(Some(Duration::from_millis(500)));
+	let session = Session::owner().with_ns("test").with_db("test");
+
+	let before = Instant::now();
+	let res = ds
+		.execute("BEGIN; CREATE person:1 SET name = 'a'; SLEEP 10s; COMMIT;", &session, None)
+		.await
+		.unwrap();
+	let elapsed = before.elapsed();
+	assert!(
+		elapsed < Duration::from_secs(5),
+		"Transaction timeout was not enforced in BEGIN block, took {elapsed:?}"
+	);
+
+	let has_timeout_err = res.iter().any(|r| {
+		r.result.as_ref().is_err_and(|e| {
+			e.to_string().contains("exceeded the timeout") || e.to_string().contains("timed out")
+		})
+	});
+	assert!(has_timeout_err, "Expected transaction timeout error in BEGIN block results: {res:?}");
 
 	Ok(())
 }

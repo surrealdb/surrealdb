@@ -28,6 +28,13 @@ define_pure_function!(TimeFloor, "time::floor", (value: Datetime, duration: Dura
 define_pure_function!(TimeFormat, "time::format", (value: Datetime, format: String) -> String, crate::fnc::time::format);
 define_pure_function!(TimeGroup, "time::group", (value: Datetime, group: String) -> Datetime, crate::fnc::time::group);
 define_pure_function!(TimeRound, "time::round", (value: Datetime, duration: Duration) -> Datetime, crate::fnc::time::round);
+define_pure_function!(TimeSetYear, "time::set_year", (dt: Datetime, year: Number) -> Datetime, crate::fnc::time::set_year);
+define_pure_function!(TimeSetMonth, "time::set_month", (dt: Datetime, month: Number) -> Datetime, crate::fnc::time::set_month);
+define_pure_function!(TimeSetDay, "time::set_day", (dt: Datetime, day: Number) -> Datetime, crate::fnc::time::set_day);
+define_pure_function!(TimeSetHour, "time::set_hour", (dt: Datetime, hour: Number) -> Datetime, crate::fnc::time::set_hour);
+define_pure_function!(TimeSetMinute, "time::set_minute", (dt: Datetime, minute: Number) -> Datetime, crate::fnc::time::set_minute);
+define_pure_function!(TimeSetSecond, "time::set_second", (dt: Datetime, minute: Number) -> Datetime, crate::fnc::time::set_second);
+define_pure_function!(TimeSetNanosecond, "time::set_nanosecond", (dt: Datetime, nanos: Number) -> Datetime, crate::fnc::time::set_nanosecond);
 
 // Array argument functions
 define_pure_function!(TimeMax, "time::max", (array: Any) -> Datetime, crate::fnc::time::max);
@@ -78,5 +85,12 @@ pub fn register(registry: &mut FunctionRegistry) {
 		TimeWeek,
 		TimeYday,
 		TimeYear,
+		TimeSetYear,
+		TimeSetMonth,
+		TimeSetDay,
+		TimeSetHour,
+		TimeSetMinute,
+		TimeSetSecond,
+		TimeSetNanosecond
 	);
 }

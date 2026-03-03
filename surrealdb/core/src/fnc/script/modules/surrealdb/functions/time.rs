@@ -37,5 +37,12 @@ impl_module_def!(
 	"from_ulid" => run,
 	"from_unix" => run,
 	"from_uuid" => run,
-	"is_leap_year" => run
+	"is_leap_year" => run,
+	"set_year" => run,
+	"set_month" => run,
+	"set_day" => run,
+	"set_hour" => run,
+	"set_minute" => run,
+	"set_second" => run,
+	"set_nanosecond" => run,
 );
