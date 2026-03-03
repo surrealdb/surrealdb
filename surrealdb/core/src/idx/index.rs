@@ -151,7 +151,7 @@ impl<'a> IndexOperation<'a> {
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
-				if !n.is_all_none_or_null() {
+				if !n.is_any_none_or_null() {
 					let key = self.get_unique_index_key(&n)?;
 					if txn.putc(&key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;

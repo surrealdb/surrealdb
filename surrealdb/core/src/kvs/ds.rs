@@ -764,6 +764,11 @@ impl Datastore {
 		self
 	}
 
+	/// Get the configured transaction timeout, if any
+	pub(crate) fn transaction_timeout(&self) -> Option<Duration> {
+		self.transaction_timeout
+	}
+
 	/// Set whether authentication is enabled for this Datastore
 	pub fn with_auth_enabled(mut self, enabled: bool) -> Self {
 		self.auth_enabled = enabled;

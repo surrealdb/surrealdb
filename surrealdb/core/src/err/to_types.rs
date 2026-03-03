@@ -118,6 +118,12 @@ pub fn into_types_error(error: Error) -> TypesError {
 				duration: duration.0,
 			},
 		),
+		TransactionTimedout(duration) => TypesError::query(
+			message,
+			QueryError::TimedOut {
+				duration: duration.0,
+			},
+		),
 		QueryCancelled => TypesError::query(message, QueryError::Cancelled),
 		QueryNotExecuted {
 			message,
