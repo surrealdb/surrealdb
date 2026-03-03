@@ -49,6 +49,7 @@ impl Document {
 			Statement::Select {
 				stmt,
 				omit,
+				..
 			} => doc.select(stk, ctx, opt, stmt, omit).await?,
 			Statement::Create(_) => doc.create(stk, ctx, opt, stm).await?,
 			Statement::Upsert(_) => doc.upsert(stk, ctx, opt, stm).await?,

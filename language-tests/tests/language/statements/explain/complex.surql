@@ -30,8 +30,7 @@ value = '''"SelectProject [ctx: Db] [projections: name, price, rating]
 
 [[test.results]]
 value = '''"SelectProject [ctx: Db] [projections: id, name]
-    Filter [ctx: Db] [predicate: name @1@ 'Widget']
-        FullTextScan [ctx: Db] [index: idx_ft_name, query: Widget]
+    FullTextScan [ctx: Db] [index: idx_ft_name, query: Widget]
 "'''
 
 [[test.results]]

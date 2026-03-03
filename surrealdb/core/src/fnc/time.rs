@@ -4,7 +4,7 @@ use chrono::{DateTime, Datelike, DurationRound, Local, Timelike, Utc};
 
 use super::args::Optional;
 use crate::err::Error;
-use crate::val::{Datetime, Duration, Value};
+use crate::val::{Datetime, Duration, Number, Value};
 
 pub fn ceil((val, duration): (Datetime, Duration)) -> Result<Value> {
 	match chrono::Duration::from_std(*duration) {
@@ -256,6 +256,79 @@ pub fn year((Optional(val),): (Optional<Datetime>,)) -> Result<Value> {
 		Some(v) => v.year().into(),
 		None => Datetime::now().year().into(),
 	})
+}
+
+pub fn set_year((dt, year): (Datetime, Number)) -> Result<Value> {
+	let Number::Int(year) = year else {
+		return Err(anyhow::anyhow!("Unable to set datetime to year {year}"));
+	};
+
+	let dt =
+		dt.0.with_year(i32::try_from(year)?)
+			.ok_or_else(|| anyhow::anyhow!("Unable to set datetime to year {year}"))?;
+
+	Ok(Value::Datetime(Datetime(dt)))
+}
+
+pub fn set_month((dt, month): (Datetime, Number)) -> Result<Value> {
+	let Number::Int(month) = month else {
+		return Err(anyhow::anyhow!("Unable to set datetime to month {month}"));
+	};
+
+	match dt.0.with_month(u32::try_from(month)?) {
+		Some(dt) => Ok(Value::Datetime(Datetime(dt))),
+		None => Err(anyhow::anyhow!("Unable to set datetime to month {month}")),
+	}
+}
+
+pub fn set_day((dt, day): (Datetime, Number)) -> Result<Value> {
+	let Number::Int(day) = day else {
+		return Err(anyhow::anyhow!("Unable to set datetime to day {day}"));
+	};
+	match dt.0.with_day(u32::try_from(day)?) {
+		Some(dt) => Ok(Value::Datetime(Datetime(dt))),
+		None => Err(anyhow::anyhow!("Unable to set datetime to day {day}")),
+	}
+}
+
+pub fn set_hour((dt, hour): (Datetime, Number)) -> Result<Value> {
+	let Number::Int(hour) = hour else {
+		return Err(anyhow::anyhow!("Unable to set datetime to hour {hour}"));
+	};
+	match dt.0.with_hour(u32::try_from(hour)?) {
+		Some(dt) => Ok(Value::Datetime(Datetime(dt))),
+		None => Err(anyhow::anyhow!("Unable to set datetime to hour {hour}")),
+	}
+}
+
+pub fn set_minute((dt, minute): (Datetime, Number)) -> Result<Value> {
+	let Number::Int(minute) = minute else {
+		return Err(anyhow::anyhow!("Unable to set datetime to {minute} minutes"));
+	};
+	match dt.0.with_minute(u32::try_from(minute)?) {
+		Some(dt) => Ok(Value::Datetime(Datetime(dt))),
+		None => Err(anyhow::anyhow!("Unable to set datetime to {minute} minutes")),
+	}
+}
+
+pub fn set_second((dt, second): (Datetime, Number)) -> Result<Value> {
+	let Number::Int(second) = second else {
+		return Err(anyhow::anyhow!("Unable to set datetime to {second} seconds"));
+	};
+	match dt.0.with_second(u32::try_from(second)?) {
+		Some(dt) => Ok(Value::Datetime(Datetime(dt))),
+		None => Err(anyhow::anyhow!("Unable to set datetime to {second} seconds")),
+	}
+}
+
+pub fn set_nanosecond((dt, nanos): (Datetime, Number)) -> Result<Value> {
+	let Number::Int(nanos) = nanos else {
+		return Err(anyhow::anyhow!("Unable to set datetime to {nanos} nanoseconds"));
+	};
+	match dt.0.with_nanosecond(u32::try_from(nanos)?) {
+		Some(dt) => Ok(Value::Datetime(Datetime(dt))),
+		None => Err(anyhow::anyhow!("Unable to set datetime to {nanos} nanoseconds")),
+	}
 }
 
 pub mod is {

@@ -8,7 +8,7 @@
 //! entries stored in `IndexCountKey` for the matching COUNT index.  This is
 //! O(index entries) with no record I/O.
 //!
-//! The planner emits this operator when:
+//! The planner emits this operator (via `is_indexed_count_eligible`) when:
 //! - Fields are count-all-only
 //! - GROUP ALL is present
 //! - A WHERE clause is present
@@ -50,11 +50,6 @@ use crate::val::{Number, Object, TableName, Value};
 ///
 /// Falls back to full scan + filter + count if no matching COUNT index is found
 /// at execution time.
-///
-/// NOTE: This operator is fully implemented but not yet auto-detected by the
-/// planner because the planner cannot verify COUNT index existence at plan time.
-/// It will be wired in once plan-time catalog access is available.
-#[allow(dead_code)] // Ready for use when plan-time index detection is added.
 #[derive(Debug, Clone)]
 pub struct IndexCountScan {
 	/// Expression that evaluates to the table name.
@@ -64,8 +59,8 @@ pub struct IndexCountScan {
 	/// The AST-level WHERE condition for exact matching against COUNT index
 	/// conditions.
 	pub(crate) condition: Cond,
-	/// Optional VERSION timestamp for time-travel queries.
-	pub(crate) version: Option<u64>,
+	/// Optional VERSION expression for time-travel queries.
+	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	/// Output field names for the count result (one per SELECT field).
 	/// For `SELECT count() as c FROM t WHERE ... GROUP ALL` this would be `["c"]`.
 	/// For `SELECT count() FROM t WHERE ... GROUP ALL` this would be `["count"]`.
@@ -75,13 +70,11 @@ pub struct IndexCountScan {
 }
 
 impl IndexCountScan {
-	/// Create a new IndexCountScan operator.
-	#[allow(dead_code)]
 	pub(crate) fn new(
 		source: Arc<dyn PhysicalExpr>,
 		predicate: Arc<dyn PhysicalExpr>,
 		condition: Cond,
-		version: Option<u64>,
+		version: Option<Arc<dyn PhysicalExpr>>,
 		field_names: Vec<String>,
 	) -> Self {
 		debug_assert!(!field_names.is_empty(), "IndexCountScan requires at least one field name");
@@ -143,7 +136,7 @@ impl ExecOperator for IndexCountScan {
 		let source_expr = Arc::clone(&self.source);
 		let predicate_expr = Arc::clone(&self.predicate);
 		let condition = self.condition.clone();
-		let version = self.version;
+		let version = self.version.clone();
 		let field_names = self.field_names.clone();
 		let ctx = ctx.clone();
 
@@ -152,6 +145,20 @@ impl ExecOperator for IndexCountScan {
 			let txn = ctx.txn();
 			let ns = Arc::clone(&db_ctx.ns_ctx.ns);
 			let db = Arc::clone(&db_ctx.db);
+
+			// Evaluate VERSION expression to a timestamp
+			let version: Option<u64> = match &version {
+				Some(expr) => {
+					let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+					let v = expr.evaluate(eval_ctx).await?;
+					Some(
+						v.cast_to::<crate::val::Datetime>()
+							.map_err(|e| anyhow::anyhow!("{e}"))?
+							.to_version_stamp()?,
+					)
+				}
+				None => None,
+			};
 
 			// Evaluate source expression to get the table name.
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
