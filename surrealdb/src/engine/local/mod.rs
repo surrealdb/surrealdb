@@ -171,7 +171,8 @@ use surrealdb_core::dbs::{QueryResult, QueryResultBuilder, Session};
 use surrealdb_core::iam;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
+use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
+use surrealdb_core::rpc::ClientTransaction;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
 	iam::{Action, ResourceKind, check::check_ns_db},
@@ -454,7 +455,7 @@ type SessionResult = Result<Arc<SessionState>, SessionError>;
 struct SessionState {
 	session: RwLock<Session>,
 	vars: RwLock<Variables>,
-	transactions: HashMap<Uuid, Arc<Transaction>>,
+	transactions: HashMap<Uuid, Arc<ClientTransaction>>,
 	live_queries: HashMap<Uuid, Sender<crate::Result<Notification>>>,
 }
 
@@ -704,7 +705,7 @@ async fn router(
 			let result = match kvs.transaction(TransactionType::Write, LockType::Optimistic).await {
 				Ok(txn) => {
 					let id = Uuid::now_v7();
-					state.transactions.insert(id, Arc::new(txn));
+					state.transactions.insert(id, Arc::new(ClientTransaction::new(Arc::new(txn))));
 					query_result.finish_with_result(Ok(Value::Uuid(id.into())))
 				}
 				Err(error) => {
@@ -729,18 +730,25 @@ async fn router(
 		Command::Rollback {
 			txn,
 		} => {
-			if let Some(tx) = state.transactions.get(&txn) {
+			if let Some(ct) = state.transactions.get(&txn) {
+				let _ = ct.tx.cancel().await;
 				state.transactions.remove(&txn);
-				tx.cancel().await.map_err(crate::std_error_to_types_error)?;
 			}
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		Command::Commit {
 			txn,
 		} => {
-			if let Some(tx) = state.transactions.get(&txn) {
+			if let Some(ct) = state.transactions.get(&txn) {
 				state.transactions.remove(&txn);
-				tx.commit().await.map_err(crate::std_error_to_types_error)?;
+				if ct.is_poisoned() || ct.tx.closed() {
+					let _ = ct.tx.cancel().await;
+					return Err(crate::Error::internal(
+						"Transaction failed due to a previous error and cannot be committed"
+							.to_string(),
+					));
+				}
+				ct.tx.commit().await.map_err(crate::std_error_to_types_error)?;
 			}
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
@@ -756,16 +764,30 @@ async fn router(
 			// If a transaction UUID is provided, we need to retrieve it and use it
 			let response = if let Some(txn_id) = txn {
 				// Retrieve the transaction from storage
-				let tx_option = state.transactions.get(&txn_id);
-				if let Some(tx) = tx_option {
+				let ct_option = state.transactions.get(&txn_id);
+				if let Some(ct) = ct_option {
+					if ct.is_poisoned() {
+						return Ok(vec![QueryResultBuilder::started_now().finish_with_result(
+							Err(TypesError::internal(
+								"Transaction failed due to a previous error, only cancel is allowed".to_string(),
+							)),
+						)]);
+					}
 					// Execute with the existing transaction
-					kvs.execute_with_transaction(
-						query.as_ref(),
-						&*state.session.read().await,
-						Some(vars),
-						tx,
-					)
-					.await?
+					let response = kvs
+						.execute_with_transaction(
+							query.as_ref(),
+							&*state.session.read().await,
+							Some(vars),
+							ct.tx.clone(),
+						)
+						.await?;
+
+					if response.iter().any(|r| r.result.is_err()) {
+						ct.poison();
+					}
+
+					response
 				} else {
 					// Transaction not found - return error
 					return Ok(vec![QueryResultBuilder::started_now().finish_with_result(Err(

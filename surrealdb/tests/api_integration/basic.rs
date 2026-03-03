@@ -1846,6 +1846,52 @@ pub async fn client_side_transactions(_new_db: impl CreateDb) {
 	// Client-side transactions are not supported on HTTP
 }
 
+#[cfg(not(feature = "protocol-http"))]
+pub async fn client_side_transaction_errors(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	// Create a table so SELECTs don't fail with "table not found" in strict mode
+	db.query("DEFINE TABLE person SCHEMALESS").await.unwrap().check().unwrap();
+
+	// Test 1: THROW within a transaction should prevent commit
+	let txn = db.clone().begin().await.unwrap();
+	txn.query("CREATE person:one SET name = 'Alice'").await.unwrap();
+	let response = txn.query("THROW 'deliberate error'").await.unwrap();
+	assert!(response.check().is_err(), "THROW should produce an error in the response");
+
+	// Commit should fail because the transaction is poisoned
+	let result = txn.commit().await;
+	assert!(result.is_err(), "Commit should fail after a THROW error");
+
+	// Verify nothing was persisted from the failed transaction
+	let result: Vec<Value> = db.select("person").await.unwrap();
+	assert!(result.is_empty(), "No records should exist after a failed transaction");
+
+	// Test 2: Query after error should fail
+	let txn = db.clone().begin().await.unwrap();
+	txn.query("THROW 'fail early'").await.unwrap();
+
+	// Subsequent query should fail because the transaction is poisoned
+	let response = txn.query("CREATE person:two SET name = 'Bob'").await.unwrap();
+	assert!(response.check().is_err(), "Query after error should fail on a poisoned transaction");
+
+	// Cancel should still work
+	txn.cancel().await.unwrap();
+
+	// Verify nothing was persisted
+	let result: Vec<Value> = db.select("person").await.unwrap();
+	assert!(result.is_empty(), "No records should exist after a cancelled transaction");
+
+	drop(permit);
+}
+
+#[cfg(feature = "protocol-http")]
+pub async fn client_side_transaction_errors(_new_db: impl CreateDb) {
+	// Client-side transactions are not supported on HTTP
+}
+
 pub async fn refresh_tokens(new_db: impl CreateDb) {
 	let config = Config::new();
 	let (permit, db) = new_db.create_db(config).await;
@@ -2018,6 +2064,8 @@ define_include_tests!(basic => {
 	field_and_index_methods,
 	#[test_log::test(tokio::test)]
 	client_side_transactions,
+	#[test_log::test(tokio::test)]
+	client_side_transaction_errors,
 	#[test_log::test(tokio::test)]
 	refresh_tokens,
 });

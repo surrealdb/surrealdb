@@ -142,6 +142,13 @@ pub trait RpcProtocol {
 		Err(method_not_found(Method::Unknown.to_string()))
 	}
 
+	/// Marks a transaction as poisoned due to a query error.
+	/// Subsequent queries on this transaction will fail, and commit will
+	/// be rejected. Only cancel is allowed on a poisoned transaction.
+	async fn poison_tx(&self, _id: Uuid) -> Result<(), surrealdb_types::Error> {
+		Ok(())
+	}
+
 	// ------------------------------
 	// Realtime
 	// ------------------------------
@@ -1570,17 +1577,22 @@ where
 
 	// If a transaction UUID is provided, retrieve it and execute with it
 	let res = if let Some(txn_id) = txn {
-		// Retrieve the transaction - fail if not found
+		// Retrieve the transaction - fail if not found (also rejects poisoned transactions)
 		let tx = this.get_tx(txn_id).await.map_err(anyhow::Error::from)?;
 		// Execute with the existing transaction by passing it through context
-		match query {
+		let res = match query {
 			QueryForm::Text(query) => {
 				this.kvs().execute_with_transaction(query, &session, vars, tx).await?
 			}
 			QueryForm::Parsed(ast) => {
 				this.kvs().process_with_transaction(ast, &session, vars, tx).await?
 			}
+		};
+		// If any result has an error, poison the transaction
+		if res.iter().any(|r| r.result.is_err()) {
+			let _ = this.poison_tx(txn_id).await;
 		}
+		res
 	} else {
 		// No transaction - execute normally
 		match query {

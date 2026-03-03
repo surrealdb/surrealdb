@@ -11,10 +11,10 @@ use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::Context as TelemetryContext;
 use opentelemetry::trace::FutureExt;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
+use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
 use surrealdb_core::mem::ALLOC;
 use surrealdb_core::rpc::format::Format;
-use surrealdb_core::rpc::{DbResponse, DbResult, Method, RpcProtocol};
+use surrealdb_core::rpc::{ClientTransaction, DbResponse, DbResult, Method, RpcProtocol};
 use surrealdb_types::{Array, Error as TypesError, HashMap, Value};
 use tokio::sync::RwLock;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
@@ -52,7 +52,7 @@ pub struct Websocket {
 	/// The active sessions for this WebSocket connection
 	pub(crate) sessions: HashMap<Option<Uuid>, Arc<RwLock<Session>>>,
 	/// The active transactions for this WebSocket connection
-	pub(crate) transactions: DashMap<Uuid, Arc<Transaction>>,
+	pub(crate) transactions: DashMap<Uuid, ClientTransaction>,
 	/// A cancellation token called when shutting down the server
 	pub(crate) shutdown: CancellationToken,
 	/// A cancellation token for cancelling all spawned tasks
@@ -492,19 +492,20 @@ impl RpcProtocol for Websocket {
 		id: Uuid,
 	) -> Result<Arc<surrealdb_core::kvs::Transaction>, surrealdb_types::Error> {
 		debug!("WebSocket get_tx called for transaction {id}");
-		self.transactions
-			.get(&id)
-			.map(|tx| {
-				debug!("Transaction {id} found in WebSocket transactions map");
-				tx.clone()
-			})
-			.ok_or_else(|| {
-				warn!(
-					"Transaction {id} not found in WebSocket transactions map (have {} transactions)",
-					self.transactions.len()
-				);
-				surrealdb_core::rpc::invalid_params("Transaction not found")
-			})
+		let entry = self.transactions.get(&id).ok_or_else(|| {
+			warn!(
+				"Transaction {id} not found in WebSocket transactions map (have {} transactions)",
+				self.transactions.len()
+			);
+			surrealdb_core::rpc::invalid_params("Transaction not found")
+		})?;
+		if entry.is_poisoned() {
+			return Err(surrealdb_core::rpc::invalid_params(
+				"Transaction failed due to a previous error, only cancel is allowed",
+			));
+		}
+		debug!("Transaction {id} found in WebSocket transactions map");
+		Ok(entry.tx.clone())
 	}
 
 	/// Stores a transaction
@@ -513,7 +514,15 @@ impl RpcProtocol for Websocket {
 		id: Uuid,
 		tx: Arc<surrealdb_core::kvs::Transaction>,
 	) -> Result<(), surrealdb_types::Error> {
-		self.transactions.insert(id, tx);
+		self.transactions.insert(id, ClientTransaction::new(tx));
+		Ok(())
+	}
+
+	/// Marks a transaction as poisoned due to a query error
+	async fn poison_tx(&self, id: Uuid) -> Result<(), surrealdb_types::Error> {
+		if let Some(entry) = self.transactions.get(&id) {
+			entry.poison();
+		}
 		Ok(())
 	}
 
@@ -597,7 +606,7 @@ impl RpcProtocol for Websocket {
 		let id = Uuid::now_v7();
 		debug!("WebSocket begin: created transaction {id}");
 		// Store the transaction in the map
-		self.transactions.insert(id, Arc::new(tx));
+		self.transactions.insert(id, ClientTransaction::new(Arc::new(tx)));
 		debug!(
 			"WebSocket begin: stored transaction {id}, map now has {} transactions",
 			self.transactions.len()
@@ -622,12 +631,19 @@ impl RpcProtocol for Websocket {
 		let txn_id = txn_id.into_inner();
 
 		// Retrieve and remove the transaction from the map
-		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
+		let Some((_, ct)) = self.transactions.remove(&txn_id) else {
 			return Err(surrealdb_core::rpc::invalid_params("Transaction not found"));
 		};
 
+		if ct.is_poisoned() || ct.tx.closed() {
+			let _ = ct.tx.cancel().await;
+			return Err(surrealdb_core::rpc::invalid_params(
+				"Transaction failed due to a previous error and cannot be committed",
+			));
+		}
+
 		// Commit the transaction
-		tx.commit().await.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
+		ct.tx.commit().await.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
 
 		// Return success
 		Ok(DbResult::Other(Value::None))
@@ -649,12 +665,12 @@ impl RpcProtocol for Websocket {
 		let txn_id = txn_id.into_inner();
 
 		// Retrieve and remove the transaction from the map
-		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
+		let Some((_, ct)) = self.transactions.remove(&txn_id) else {
 			return Err(surrealdb_core::rpc::invalid_params("Transaction not found"));
 		};
 
-		// Cancel the transaction
-		tx.cancel().await.map_err(surrealdb_core::rpc::types_error_from_anyhow)?;
+		// Cancel the transaction, ignoring errors if already cancelled by the executor
+		let _ = ct.tx.cancel().await;
 
 		// Return success
 		Ok(DbResult::Other(Value::None))
