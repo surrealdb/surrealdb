@@ -349,7 +349,7 @@ mod tests {
 		let ts_impl = HlcTimeStampImpl;
 		// Test epoch
 		let epoch = Utc.timestamp_opt(0, 0).unwrap();
-		let ts = ts_impl.from_datetime(epoch).unwrap();
+		let ts = ts_impl.create_from_datetime(epoch).unwrap();
 		let recovered = ts.as_datetime();
 		assert_eq!(epoch.timestamp_nanos_opt(), recovered.timestamp_nanos_opt());
 
