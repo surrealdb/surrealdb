@@ -157,6 +157,13 @@ pub(crate) fn route_targets(value: &str) -> Result<Targets<RouteTarget>, String>
 	Ok(Targets::Some(result))
 }
 
+pub(crate) fn cors_origin(value: &str) -> Result<String, String> {
+	value
+		.parse::<http::HeaderValue>()
+		.map(|_| value.to_string())
+		.map_err(|_| format!("Invalid CORS origin '{value}': must be a valid HTTP header value"))
+}
+
 pub(crate) fn export_tables(value: &str) -> Result<TableConfig, String> {
 	if ["*", "", "true"].contains(&value) {
 		return Ok(TableConfig::All);
