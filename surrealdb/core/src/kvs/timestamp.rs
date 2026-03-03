@@ -190,8 +190,7 @@ impl TimeStampImpl for HlcTimeStampImpl {
 		let bytes = <[u8; 8]>::try_from(bytes).map_err(|_| {
 			Error::TimestampInvalid("encoded timestamp not a valid length".to_string())
 		})?;
-		dbg!(bytes);
-		Ok(BoxTimeStamp::new(HlcTimeStamp(dbg!(u64::from_be_bytes(bytes)))))
+		Ok(BoxTimeStamp::new(HlcTimeStamp(u64::from_be_bytes(bytes))))
 	}
 }
 
@@ -270,10 +269,9 @@ impl TimeStamp for HlcTimeStamp {
 	}
 
 	fn encode<'a>(&self, bytes: &'a mut [u8; MAX_TIMESTAMP_BYTES]) -> &'a [u8] {
-		dbg!(self.0);
 		let ts_bytes = dbg!(self.0.to_be_bytes());
 		bytes[..8].copy_from_slice(&ts_bytes);
-		dbg!(&bytes[..8])
+		&bytes[..8]
 	}
 }
 
