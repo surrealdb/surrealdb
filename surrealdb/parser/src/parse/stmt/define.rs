@@ -1,3 +1,5 @@
+use std::fs::Permissions;
+
 use ast::{ApiAction, RelationTable};
 use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
@@ -58,14 +60,14 @@ fn reuse_error(parser: &mut Parser<'_, '_>, start: Span, last_span: Span) -> Par
 	})
 }
 
-async fn parse_unordered_clause<T, F>(
-	parser: &mut Parser<'_, '_>,
+async fn parse_unordered_clause<'src, 'ast, T, F>(
+	parser: &mut Parser<'src, 'ast>,
 	store: &mut Option<(T, Span)>,
 	start: Span,
 	f: F,
 ) -> ParseResult<()>
 where
-	F: AsyncFnOnce(&mut Parser<'_, '_>) -> ParseResult<T>,
+	F: AsyncFnOnce(&mut Parser<'src, 'ast>) -> ParseResult<T>,
 {
 	if let Some((_, last_span)) = store {
 		return Err(reuse_error(parser, start, *last_span));
@@ -78,14 +80,14 @@ where
 	Ok(())
 }
 
-fn parse_unordered_clause_sync<T, F>(
-	parser: &mut Parser<'_, '_>,
+fn parse_unordered_clause_sync<'src, 'ast, T, F>(
+	parser: &mut Parser<'src, 'ast>,
 	store: &mut Option<(T, Span)>,
 	start: Span,
 	f: F,
 ) -> ParseResult<()>
 where
-	F: FnOnce(&mut Parser<'_, '_>) -> ParseResult<T>,
+	F: FnOnce(&mut Parser<'src, 'ast>) -> ParseResult<T>,
 {
 	if let Some((_, last_span)) = store {
 		return Err(reuse_error(parser, start, *last_span));
@@ -111,10 +113,8 @@ impl Parse for ast::DefineNamespace {
 			match x.token {
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, x.span, async |parser| {
-						parser.parse_enter_push::<ast::Expr>().await
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, x.span, Parser::parse_enter_push)
+						.await?;
 				}
 				_ => break,
 			}
@@ -145,10 +145,8 @@ impl Parse for ast::DefineDatabase {
 			match x.token {
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, x.span, async |parser| {
-						parser.parse_enter_push::<ast::Expr>().await
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, x.span, Parser::parse_enter_push)
+						.await?;
 				}
 				T![STRICT] => {
 					let _ = parser.next();
@@ -229,17 +227,12 @@ impl Parse for ast::DefineFunction {
 			match x.token {
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, x.span, async |parser| {
-						parser.parse_enter_push::<ast::Expr>().await
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, x.span, Parser::parse_enter_push)
+						.await?;
 				}
 				T![PERMISSIONS] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut permissions, x.span, async |parser| {
-						parser.parse().await
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut permissions, x.span, Parser::parse).await?;
 				}
 				_ => break,
 			}
@@ -283,17 +276,12 @@ impl Parse for ast::DefineModule {
 			match x.token {
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, x.span, async |parser| {
-						parser.parse_enter_push::<ast::Expr>().await
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut comment, x.span, Parser::parse_enter_push)
+						.await?;
 				}
 				T![PERMISSIONS] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut permissions, x.span, async |parser| {
-						parser.parse().await
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut permissions, x.span, Parser::parse).await?;
 				}
 				_ => break,
 			}
@@ -326,24 +314,27 @@ impl Parse for ast::DefineParam {
 			match x.token {
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, x.span, async |parser| {
-						parser.parse_enter_push::<ast::Expr>().await
-					})
+					parse_unordered_clause(
+						parser,
+						&mut comment,
+						x.span,
+						Parser::parse_enter_push::<ast::Expr>,
+					)
 					.await?;
 				}
 				T![VALUE] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut value, x.span, async |parser| {
-						parser.parse_enter_push::<ast::Expr>().await
-					})
+					parse_unordered_clause(
+						parser,
+						&mut value,
+						x.span,
+						Parser::parse_enter_push::<ast::Expr>,
+					)
 					.await?;
 				}
 				T![PERMISSIONS] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut permissions, x.span, async |parser| {
-						parser.parse().await
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut permissions, x.span, Parser::parse).await?;
 				}
 				_ => break,
 			}
@@ -380,9 +371,12 @@ impl Parse for ast::DefineTable {
 			match x.token {
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, x.span, async |parser| {
-						parser.parse_enter_push::<ast::Expr>().await
-					})
+					parse_unordered_clause(
+						parser,
+						&mut comment,
+						x.span,
+						Parser::parse_enter_push::<ast::Expr>,
+					)
 					.await?;
 				}
 				T![DROP] => {
@@ -403,16 +397,16 @@ impl Parse for ast::DefineTable {
 				}
 				T![PERMISSIONS] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut permissions, x.span, async |parser| {
-						parser.parse().await
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut permissions, x.span, Parser::parse).await?;
 				}
 				T![AS] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut view, x.span, async |parser| {
-						parser.parse_push::<ast::Select>().await
-					})
+					parse_unordered_clause(
+						parser,
+						&mut view,
+						x.span,
+						Parser::parse_push::<ast::Select>,
+					)
 					.await?;
 				}
 				T![CHANGEFEED] => {
@@ -455,7 +449,7 @@ impl Parse for ast::DefineTable {
 													parse_seperated_list_sync(
 														parser,
 														T![,],
-														|parser| parser.parse_sync(),
+														Parser::parse_sync,
 													)
 													.map(|x| x.1)
 												},
@@ -470,7 +464,7 @@ impl Parse for ast::DefineTable {
 													parse_seperated_list_sync(
 														parser,
 														T![,],
-														|parser| parser.parse_sync(),
+														Parser::parse_sync,
 													)
 													.map(|x| x.1)
 												},
@@ -551,19 +545,15 @@ impl Parse for ast::ApiAction {
 				T![PERMISSIONS] => {
 					let _ = parser.next();
 
-					parse_unordered_clause(parser, &mut permission, peek.span, async |parser| {
-						parser.parse().await
-					})
-					.await?;
+					parse_unordered_clause(parser, &mut permission, peek.span, Parser::parse)
+						.await?;
 					did_parse = true;
 				}
 				T![MIDDLEWARE] => {
 					let _ = parser.next();
 
 					parse_unordered_clause(parser, &mut middleware, peek.span, async |parser| {
-						parse_seperated_list(parser, T![,], async |parser| parser.parse().await)
-							.await
-							.map(|x| x.1)
+						parse_seperated_list(parser, T![,], Parser::parse).await.map(|x| x.1)
 					})
 					.await?;
 					did_parse = true;
@@ -665,7 +655,7 @@ impl Parse for ast::DefineApi {
 									parser,
 									&mut base_permission,
 									peek.span,
-									async |parser| parser.parse().await,
+									Parser::parse,
 								)
 								.await?;
 								did_parse = true;
@@ -678,11 +668,9 @@ impl Parse for ast::DefineApi {
 									&mut base_middleware,
 									peek.span,
 									async |parser| {
-										parse_seperated_list(parser, T![,], async |parser| {
-											parser.parse().await
-										})
-										.await
-										.map(|x| x.1)
+										parse_seperated_list(parser, T![,], Parser::parse)
+											.await
+											.map(|x| x.1)
 									},
 								)
 								.await?;
@@ -693,9 +681,12 @@ impl Parse for ast::DefineApi {
 					}
 
 					if let Some(x) = parser.eat(T![THEN])? {
-						parse_unordered_clause(parser, &mut fallback, x.span, async |parser| {
-							parser.parse_enter_push().await
-						})
+						parse_unordered_clause(
+							parser,
+							&mut fallback,
+							x.span,
+							Parser::parse_enter_push,
+						)
 						.await?;
 					}
 
@@ -734,9 +725,12 @@ impl Parse for ast::DefineApi {
 			match x.token {
 				T![COMMENT] => {
 					let _ = parser.next();
-					parse_unordered_clause(parser, &mut comment, x.span, async |parser| {
-						parser.parse_enter_push::<ast::Expr>().await
-					})
+					parse_unordered_clause(
+						parser,
+						&mut comment,
+						x.span,
+						Parser::parse_enter_push::<ast::Expr>,
+					)
 					.await?;
 				}
 				_ => break,
@@ -761,6 +755,227 @@ impl Parse for ast::DefineApi {
 			fallback: fallback.map(|x| x.0),
 			methods,
 			comment: comment.map(|x| x.0),
+			span,
+		})
+	}
+}
+
+impl Parse for ast::DefineEvent {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let define = parser.expect(T![DEFINE])?;
+		let _ = parser.expect(T![EVENT])?;
+		let kind = parser.parse_sync()?;
+
+		let name = parser.parse_enter_push().await?;
+		let _ = parser.expect(T![ON])?;
+		let _ = parser.eat(T![TABLE])?;
+		let table = parser.parse_enter_push().await?;
+
+		let mut comment = None;
+		let mut async_ = None;
+		let mut then = None;
+		let mut condition = None;
+
+		loop {
+			let Some(peek) = parser.peek()? else {
+				break;
+			};
+
+			match peek.token {
+				T![WHEN] => {
+					let _ = parser.next();
+
+					parse_unordered_clause(
+						parser,
+						&mut condition,
+						peek.span,
+						Parser::parse_enter_push,
+					)
+					.await?
+				}
+				T![THEN] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut then, peek.span, async |parser| {
+						parse_seperated_list(parser, T![,], Parser::parse_enter).await.map(|x| x.1)
+					})
+					.await?
+				}
+				T![COMMENT] => {
+					let _ = parser.next();
+
+					parse_unordered_clause(
+						parser,
+						&mut comment,
+						peek.span,
+						Parser::parse_enter_push,
+					)
+					.await?
+				}
+				T![ASYNC] => {
+					let _ = parser.next();
+
+					parse_unordered_clause_sync(parser, &mut async_, peek.span, |parser| {
+						let mut retry = None;
+						let mut max_depth = None;
+						loop {
+							let Some(peek) = parser.peek()? else {
+								break;
+							};
+
+							match peek.token {
+								T![RETRY] => {
+									let _ = parser.next();
+									parse_unordered_clause_sync(
+										parser,
+										&mut retry,
+										peek.span,
+										Parser::parse_sync_push,
+									)?;
+								}
+								T![MAXDEPTH] => {
+									let _ = parser.next();
+									parse_unordered_clause_sync(
+										parser,
+										&mut max_depth,
+										peek.span,
+										Parser::parse_sync_push,
+									)?;
+								}
+								_ => break,
+							}
+						}
+
+						let span = parser.span_since(peek.span);
+						Ok(ast::DefineEventAsync {
+							retry: retry.map(|x| x.0),
+							max_depth: max_depth.map(|x| x.0),
+							span,
+						})
+					})?
+				}
+				_ => break,
+			}
+		}
+
+		let Some((then, _)) = then else {
+			return Err(parser.with_error(|parser| {
+				Level::Error
+					.title(
+						"Event is missing an event expression, expected atleast one `THEN` clause",
+					)
+					.snippet(
+						parser.snippet().annotate(AnnotationKind::Primary.span(parser.last_span)),
+					)
+					.to_diagnostic()
+			}));
+		};
+
+		let span = parser.span_since(define.span);
+		Ok(ast::DefineEvent {
+			kind,
+			name,
+			table,
+			then,
+			comment: comment.map(|x| x.0),
+			async_: async_.map(|x| x.0),
+			condition: condition.map(|x| x.0),
+			span,
+		})
+	}
+}
+
+impl Parse for ast::DefineField {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let define = parser.expect(T![DEFINE])?;
+		let _ = parser.expect(T![FIELD])?;
+		let kind = parser.parse_sync()?;
+
+		let name = parser.parse_enter_push().await?;
+		let _ = parser.expect(T![ON])?;
+		let _ = parser.eat(T![TABLE])?;
+		let table = parser.parse_enter_push().await?;
+
+		let mut ty = None;
+		let mut flexible = None;
+		let mut readonly = None;
+		let mut value = None;
+		let mut assert = None;
+		let mut computed = None;
+		let mut default = None;
+		let mut permissions = None;
+		let mut comment = None;
+		let mut on_delete = None;
+		loop {
+			let Some(peek) = parser.peek()? else {
+				break;
+			};
+			match peek.token {
+				T![COMMENT] => {
+					let _ = parser.next();
+					parse_unordered_clause(
+						parser,
+						&mut comment,
+						peek.span,
+						Parser::parse_enter_push,
+					)
+					.await?
+				}
+				T![TYPE] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut ty, peek.span, Parser::parse_push).await?
+				}
+				T![FLEXIBLE] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut flexible, peek.span, |_| Ok(()))?
+				}
+				T![READONLY] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut readonly, peek.span, |_| Ok(()))?
+				}
+				T![VALUE] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut value, peek.span, Parser::parse_enter_push)
+						.await?
+				}
+				T![COMPUTED] => {
+					let _ = parser.next();
+					parse_unordered_clause(
+						parser,
+						&mut computed,
+						peek.span,
+						Parser::parse_enter_push,
+					)
+					.await?
+				}
+				T![ASSERT] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut assert, peek.span, Parser::parse_enter_push)
+						.await?
+				}
+				T![PERMISSIONS] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut assert, peek.span, Parser::parse_enter_push)
+						.await?
+				}
+				_ => break,
+			}
+		}
+
+		let span = parser.span_since(define.span);
+		Ok(ast::DefineField {
+			kind,
+			name,
+			table,
+			ty: ty.map(|x| x.0),
+			flexible: flexible.is_some(),
+			readonly: readonly.is_some(),
+			value: value.map(|x| x.0),
+			assert: assert.map(|x| x.0),
+			computed: computed.map(|x| x.0),
+			default: default.map(|x| x.0),
+			permissions: permissions.map(|x| x.0),
+			comment: comment.map(|x| x.0),
+			on_delete: on_delete.map(|x| x.0),
 			span,
 		})
 	}

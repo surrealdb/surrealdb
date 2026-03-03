@@ -626,6 +626,62 @@ ast_type! {
 }
 
 ast_type! {
+	pub struct DefineEventAsync{
+		pub retry: Option<NodeId<Integer>>,
+		pub max_depth: Option<NodeId<Integer>>,
+	}
+}
+
+ast_type! {
+	pub struct DefineEvent{
+		pub kind: DefineKind,
+		pub name: NodeId<Expr>,
+		pub table: NodeId<Expr>,
+		pub condition: Option<NodeId<Expr>>,
+		pub then: NodeListId<Expr>,
+		pub comment: Option<NodeId<Expr>>,
+		pub async_: Option<DefineEventAsync>,
+	}
+}
+
+ast_type! {
+	pub enum DefineFieldDefault{
+		Always(NodeId<Expr>),
+		Some(NodeId<Expr>),
+	}
+}
+
+ast_type! {
+	pub enum OnDelete{
+		Reject(Span),
+		Ignore(Span),
+		Cascade(Span),
+		Unset(Span),
+		Then(NodeId<Expr>),
+	}
+}
+
+ast_type! {
+	pub struct DefineField{
+		pub kind: DefineKind,
+		pub name: NodeId<Expr>,
+		pub table: NodeId<Expr>,
+		pub ty: Option<NodeId<Type>>,
+		pub flexible: bool,
+		pub readonly: bool,
+		pub value: Option<NodeId<Expr>>,
+		pub assert: Option<NodeId<Expr>>,
+		pub computed: Option<NodeId<Expr>>,
+		pub default: Option<DefineFieldDefault>,
+		pub permissions: Option<Permission>,
+		pub comment: Option<NodeId<Expr>>,
+		// NOTE: maybe move into own struct if `REFERENCE` gets more subclauses.
+		/// `REFERENCE ON DELETE` clause
+		pub on_delete: Option<OnDelete>
+	}
+}
+
+ast_type! {
 	#[derive(Copy, Clone)]
 	pub enum Expr {
 		Covered(NodeId<Expr>),
