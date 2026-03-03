@@ -258,6 +258,42 @@ args = [
     "wasm32-unknown-unknown",
 ]
 
+[tasks.ci-clippy-wasm]
+# Same LLVM note as ci-check-wasm above.
+# Allows certain lints that are structurally expected on WASM:
+#   arc_with_non_send_sync  - WASM is single-threaded, Arc<T: !Send> is fine
+#   useless_conversion      - some Into::into calls are needed for non-WASM targets
+#   unused_imports          - some imports are only used on non-WASM cfg paths
+category = "CI - CHECK"
+description = "Run clippy linting (WASM)"
+command = "cargo"
+env = { RUSTFLAGS = '--cfg getrandom_backend="wasm_js"' }
+args = [
+    "clippy",
+    "--locked",
+    "--package",
+    "surrealdb",
+    "--features",
+    "protocol-ws,protocol-http,kv-mem,kv-indxdb,http,jwks",
+    "--target",
+    "wasm32-unknown-unknown",
+    "--",
+    "-D",
+    "warnings",
+    "-A",
+    "clippy::arc_with_non_send_sync",
+    "-A",
+    "clippy::useless_conversion",
+    "-A",
+    "unused_imports",
+    "-A",
+    "clippy::useless_format",
+    "-A",
+    "clippy::explicit_counter_loop",
+    "-A",
+    "clippy::unit_arg",
+]
+
 # --------------------------------------------------
 # Integration Tests
 # --------------------------------------------------
