@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, CombineAccessModes, ContextLevel};
+use crate::exec::{AccessMode, CombineAccessModes, ContextLevel, ExecOperator};
 use crate::val::Value;
 
 // ============================================================================
@@ -50,13 +50,6 @@ impl IdiomExpr {
 			parts,
 		}
 	}
-
-	/// Check if this is a simple identifier (single Field part with no complex parts).
-	/// When used without a current value context, simple identifiers can be
-	/// treated as string literals (e.g., `INFO FOR USER test` where `test` is a name).
-	pub fn is_simple_identifier(&self) -> bool {
-		self.parts.len() == 1 && self.parts[0].name() == "Field"
-	}
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -75,6 +68,14 @@ impl PhysicalExpr for IdiomExpr {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> crate::expr::FlowResult<Value> {
+		// Fast path: single-part idiom without a start expression (e.g., simple
+		// field access like `age`). Delegates directly to the part's evaluate,
+		// which can work with a reference to current_value and avoids cloning
+		// the entire record into an owned Value for evaluate_parts_with_continuation.
+		if self.start_expr.is_none() && self.parts.len() == 1 {
+			return self.parts[0].evaluate(ctx).await;
+		}
+
 		// Determine the base value for the idiom evaluation.
 		// If we have a start expression (e.g. `(INFO FOR KV).namespaces`), evaluate
 		// it first to produce the base value. Otherwise use the current row value.
@@ -91,19 +92,6 @@ impl PhysicalExpr for IdiomExpr {
 		evaluate_parts_with_continuation(&self.parts, value, ctx).await
 	}
 
-	fn references_current_value(&self) -> bool {
-		// When we have a start expression, the idiom provides its own base value
-		// and doesn't need the current row value -- but the start expression itself
-		// might reference it.
-		if let Some(ref start) = self.start_expr {
-			return start.references_current_value();
-		}
-		// Simple identifiers (single Field part) can be evaluated without current_value
-		// - they return NONE (undefined variable)
-		// Complex idioms require current_value to provide the base object for field access
-		!self.is_simple_identifier()
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		let parts_mode = self.parts.iter().map(|p| p.access_mode()).combine_all();
 		if let Some(ref start) = self.start_expr {
@@ -111,6 +99,28 @@ impl PhysicalExpr for IdiomExpr {
 		} else {
 			parts_mode
 		}
+	}
+
+	fn try_simple_field(&self) -> Option<&str> {
+		// A simple field access is an IdiomExpr with no start expression and
+		// exactly one part that is a FieldPart. Delegate to the part's own
+		// try_simple_field to extract the raw field name.
+		if self.start_expr.is_none() && self.parts.len() == 1 {
+			self.parts[0].try_simple_field()
+		} else {
+			None
+		}
+	}
+
+	fn embedded_operators(&self) -> Vec<(&str, &Arc<dyn ExecOperator>)> {
+		let mut ops = Vec::new();
+		if let Some(ref start) = self.start_expr {
+			ops.extend(start.embedded_operators());
+		}
+		for part in &self.parts {
+			ops.extend(part.embedded_operators());
+		}
+		ops
 	}
 }
 
@@ -214,7 +224,7 @@ pub(crate) async fn evaluate_parts_with_continuation(
 		// results are NOT flattened, preserving per-element nesting.
 		if matches!(&value, Value::Array(_))
 			&& part.name() == "Lookup"
-			&& i + 1 < parts.len()
+			&& (i + 1 < parts.len() || part.is_fused_lookup())
 			&& !matches!(prev_part_name, "Lookup" | "Flatten")
 		{
 			let arr = match value {

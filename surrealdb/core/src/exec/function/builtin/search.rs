@@ -16,7 +16,7 @@ use reblessive::tree::TreeStack;
 use crate::catalog::providers::DatabaseProvider;
 use crate::err::Error;
 use crate::exec::ContextLevel;
-use crate::exec::function::index::{IndexFunction, MatchContext};
+use crate::exec::function::index::{IndexContext, IndexContextKind, IndexFunction};
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
@@ -167,8 +167,12 @@ impl IndexFunction for SearchHighlight {
 			.returns(Kind::Any)
 	}
 
-	fn match_ref_arg_index(&self) -> usize {
-		2
+	fn index_context_kind(&self) -> IndexContextKind {
+		IndexContextKind::FullText
+	}
+
+	fn index_ref_arg_index(&self) -> Option<usize> {
+		Some(2)
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -178,10 +182,19 @@ impl IndexFunction for SearchHighlight {
 	fn invoke_async<'a>(
 		&'a self,
 		ctx: &'a EvalContext<'_>,
-		match_ctx: &'a MatchContext,
+		index_ctx: &'a IndexContext,
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
+			let match_ctx = match index_ctx {
+				IndexContext::FullText(ctx) => ctx,
+				_ => {
+					return Err(anyhow::anyhow!(
+						"search::highlight requires a FullText index context"
+					));
+				}
+			};
+
 			let mut args = args.into_iter();
 
 			let prefix = args.next().unwrap_or(Value::None);
@@ -232,8 +245,12 @@ impl IndexFunction for SearchScore {
 		Signature::new().arg("match_ref", Kind::Number).returns(Kind::Number)
 	}
 
-	fn match_ref_arg_index(&self) -> usize {
-		0
+	fn index_context_kind(&self) -> IndexContextKind {
+		IndexContextKind::FullText
+	}
+
+	fn index_ref_arg_index(&self) -> Option<usize> {
+		Some(0)
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -243,10 +260,17 @@ impl IndexFunction for SearchScore {
 	fn invoke_async<'a>(
 		&'a self,
 		ctx: &'a EvalContext<'_>,
-		match_ctx: &'a MatchContext,
+		index_ctx: &'a IndexContext,
 		_args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
+			let match_ctx = match index_ctx {
+				IndexContext::FullText(ctx) => ctx,
+				_ => {
+					return Err(anyhow::anyhow!("search::score requires a FullText index context"));
+				}
+			};
+
 			// Extract RecordId from the current row
 			let rid = extract_record_id(ctx)?;
 
@@ -297,8 +321,12 @@ impl IndexFunction for SearchOffsets {
 			.returns(Kind::Any)
 	}
 
-	fn match_ref_arg_index(&self) -> usize {
-		0
+	fn index_context_kind(&self) -> IndexContextKind {
+		IndexContextKind::FullText
+	}
+
+	fn index_ref_arg_index(&self) -> Option<usize> {
+		Some(0)
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -308,10 +336,19 @@ impl IndexFunction for SearchOffsets {
 	fn invoke_async<'a>(
 		&'a self,
 		ctx: &'a EvalContext<'_>,
-		match_ctx: &'a MatchContext,
+		index_ctx: &'a IndexContext,
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
+			let match_ctx = match index_ctx {
+				IndexContext::FullText(ctx) => ctx,
+				_ => {
+					return Err(anyhow::anyhow!(
+						"search::offsets requires a FullText index context"
+					));
+				}
+			};
+
 			let mut args = args.into_iter();
 			let partial = args.next().map(|v| v.is_truthy()).unwrap_or(false);
 

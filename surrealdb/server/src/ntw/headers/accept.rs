@@ -46,6 +46,7 @@ impl Header for Accept {
 			value.to_str().map_err(|_| headers::Error::invalid())?.split(';').collect();
 
 		match parts[0] {
+			surrealdb_core::api::format::ANY => Ok(Accept::ApplicationJson),
 			surrealdb_core::api::format::PLAIN => Ok(Accept::TextPlain),
 			surrealdb_core::api::format::JSON => Ok(Accept::ApplicationJson),
 			surrealdb_core::api::format::CBOR => Ok(Accept::ApplicationCbor),

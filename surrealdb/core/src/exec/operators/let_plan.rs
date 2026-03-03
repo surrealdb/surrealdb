@@ -11,7 +11,10 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatchStream};
+use crate::exec::{
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatchStream,
+	buffer_stream,
+};
 use crate::val::{Array, Value};
 
 /// LET operator - binds a value to a parameter.
@@ -62,6 +65,10 @@ impl ExecOperator for LetPlan {
 		self.value.access_mode()
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
+	}
+
 	fn execute(&self, _ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// LET returns NONE as its result (the binding happens in output_context)
 		Ok(Box::pin(stream::once(async {
@@ -79,7 +86,7 @@ impl ExecOperator for LetPlan {
 		// Execute the value plan and collect results
 		// Handle control flow signals explicitly
 		let stream = match self.value.execute(input) {
-			Ok(s) => s,
+			Ok(s) => buffer_stream(s, self.value.access_mode(), self.value.cardinality_hint()),
 			Err(crate::expr::ControlFlow::Return(v)) => {
 				// If value expression returns early, use that value
 				return Ok(input.with_param(self.name.clone(), v));

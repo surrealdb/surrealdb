@@ -41,7 +41,7 @@ impl Value {
 				}
 				Part::First => compare_optional(a.first(), b.first(), path, collate, numeric),
 				Part::Last => compare_optional(a.last(), b.last(), path, collate, numeric),
-				//TODO: It is kind of weird that a[1] works but `a[+(1)]` or `let $b = 1;
+				//FIXME: It is kind of weird that a[1] works but `a[+(1)]` or `let $b = 1;
 				// a[$b]` for example doesn't as
 				x => {
 					if let Some(idx) = x.as_old_index() {

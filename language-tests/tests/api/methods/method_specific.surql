@@ -34,9 +34,6 @@ value = "{ body: { handler: 'get', middleware: 'get_mw' }, headers: {}, status: 
 skip-api-request-id = true
 value = "{ body: { handler: 'post', middleware: 'post_mw' }, headers: {}, status: 201 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 - Multiple methods on same route

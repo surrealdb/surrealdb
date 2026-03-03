@@ -3,12 +3,19 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::StreamExt;
 
-use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream, monitor_stream,
+use crate::catalog::providers::TableProvider;
+use crate::exec::permission::{
+	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
+	resolve_select_permission, should_check_perms,
 };
+use crate::exec::{
+	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+};
+use crate::expr::ControlFlowExt;
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
+use crate::iam::Action;
 use crate::val::{RecordId, Value};
 
 /// Fetches related records for specified fields.
@@ -60,6 +67,10 @@ impl ExecOperator for Fetch {
 		AccessMode::ReadOnly.combine(self.input.access_mode())
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.input.cardinality_hint()
+	}
+
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
@@ -69,14 +80,19 @@ impl ExecOperator for Fetch {
 	}
 
 	fn is_scalar(&self) -> bool {
-		// Fetch preserves the scalar nature of its input.
-		// If the input is a scalar expression (e.g., RETURN $var FETCH field),
-		// the result should also be treated as scalar.
 		self.input.is_scalar()
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		self.input.output_ordering()
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let fields = self.fields.clone();
 		let ctx = ctx.clone();
 
@@ -228,34 +244,127 @@ async fn fetch_value_if_record(
 	Ok(())
 }
 
-/// Fetch a single record by its ID.
+/// Fetch a single raw record value from the datastore.
+///
+/// Returns `Ok(Some(val))` with the record's ID injected, or `Ok(None)` if
+/// the record does not exist.  This is the single point of record retrieval
+/// that all higher-level helpers compose on top of.
+pub(crate) async fn fetch_raw_record(
+	ctx: &ExecutionContext,
+	rid: &RecordId,
+	version: Option<u64>,
+) -> crate::expr::FlowResult<Option<Value>> {
+	let db_ctx = ctx.database().context("fetch_raw_record requires database context")?;
+	let txn = db_ctx.txn();
+	let record = txn
+		.get_record(
+			db_ctx.ns_ctx.ns.namespace_id,
+			db_ctx.db.database_id,
+			&rid.table,
+			&rid.key,
+			version,
+		)
+		.await
+		.context("Failed to fetch record")?;
+	if record.data.is_none() {
+		return Ok(None);
+	}
+
+	Ok(Some(record.data.clone()))
+}
+
+/// Process a fetched record: check table-level permissions, evaluate computed
+/// fields, and apply field-level permissions.
+///
+/// Returns `Ok(true)` if the record passes all permission checks, or
+/// `Ok(false)` if the record should be hidden (Deny or failed Conditional).
+/// Computed fields are always evaluated (even without permissions) using the
+/// same `FieldState` + `compute_fields_for_value` path as the scan pipeline,
+/// ensuring a single code path for computed field evaluation throughout the
+/// executor.
+pub(crate) async fn process_fetched_record(
+	ctx: &ExecutionContext,
+	rid: &RecordId,
+	val: &mut Value,
+) -> crate::expr::FlowResult<bool> {
+	let db_ctx = ctx.database().context("process_fetched_record requires database context")?;
+	let check_perms =
+		should_check_perms(db_ctx, Action::View).context("Failed to check permissions")?;
+
+	// 1. Table-level permission check (on raw value, before computing fields)
+	if check_perms {
+		let table_def =
+			db_ctx.get_table_def(&rid.table).await.context("Failed to get table definition")?;
+		let catalog_perm = resolve_select_permission(table_def.as_deref());
+		let select_perm = convert_permission_to_physical(catalog_perm, ctx.ctx())
+			.await
+			.context("Failed to convert permission")?;
+
+		match &select_perm {
+			PhysicalPermission::Deny => return Ok(false),
+			PhysicalPermission::Allow => {}
+			PhysicalPermission::Conditional(_) => {
+				let allowed = check_permission_for_value(&select_perm, val, ctx)
+					.await
+					.context("Permission check failed")?;
+				if !allowed {
+					return Ok(false);
+				}
+			}
+		}
+	}
+
+	// 2. Build FieldState (computed fields + field permissions)
+	let field_state =
+		super::scan::pipeline::build_field_state(ctx, &rid.table, check_perms, None).await?;
+
+	// 3. Evaluate computed fields via the modern PhysicalExpr path
+	super::scan::pipeline::compute_fields_for_value(ctx, &field_state, val, false).await?;
+
+	// 4. Apply field-level permissions
+	if check_perms {
+		super::scan::pipeline::filter_fields_by_permission(ctx, &field_state, val).await?;
+	}
+
+	Ok(true)
+}
+
+/// Fetch a single record by its ID without permission checks, but with
+/// computed fields evaluated.
+///
+/// Used during permission predicate evaluation to prevent reentrant
+/// permission checks that would recurse infinitely on cyclic links.
+/// Computed fields are still evaluated so that permission expressions
+/// referencing computed fields on linked records work correctly.
+pub(crate) async fn fetch_record_no_perms(
+	ctx: &ExecutionContext,
+	rid: &RecordId,
+) -> crate::expr::FlowResult<Value> {
+	let Some(mut val) = fetch_raw_record(ctx, rid, None).await? else {
+		return Ok(Value::None);
+	};
+	let field_state =
+		super::scan::pipeline::build_field_state(ctx, &rid.table, false, None).await?;
+	super::scan::pipeline::compute_fields_for_value(ctx, &field_state, &mut val, true).await?;
+	Ok(val)
+}
+
+/// Fetch a single record by its ID, evaluating computed fields and applying
+/// table-level and field-level permission checks.
+///
+/// Uses the transaction record cache so repeated fetches of the same record
+/// within a transaction only hit the datastore once.
 pub(crate) async fn fetch_record(
 	ctx: &ExecutionContext,
 	rid: &RecordId,
 ) -> crate::expr::FlowResult<Value> {
-	// Get the database context
-	let db_ctx = ctx.database().map_err(|e| crate::expr::ControlFlow::Err(e.into()))?;
-
-	// Read the record from the datastore
-	let txn = db_ctx.txn();
-	let key = crate::key::record::new(
-		db_ctx.ns_ctx.ns.namespace_id,
-		db_ctx.db.database_id,
-		&rid.table,
-		&rid.key,
-	);
-
-	match txn.get(&key, None).await {
-		Ok(Some(record)) => {
-			// Extract the Value from the Record
-			let mut val = record.data.as_ref().clone();
-			// Inject the record ID
-			val.def(rid);
-			Ok(val)
-		}
-		Ok(None) => Ok(Value::None),
-		Err(e) => Err(crate::expr::ControlFlow::Err(e)),
+	let Some(mut val) = fetch_raw_record(ctx, rid, None).await? else {
+		return Ok(Value::None);
+	};
+	if !process_fetched_record(ctx, rid, &mut val).await? {
+		return Ok(Value::None);
 	}
+	Ok(val)
 }
 
 /// Batch fetch multiple records by their IDs concurrently.
@@ -357,13 +466,13 @@ mod tests {
 
 	#[test]
 	fn test_fetch_name() {
-		use crate::exec::operators::scan::Scan;
+		use crate::exec::operators::scan::DynamicScan;
 		use crate::expr::part::Part;
 
 		let fields = vec![Idiom(vec![Part::Field("author".into())])];
 
 		// Create a minimal scan for testing
-		let scan = Arc::new(Scan::new(
+		let scan = Arc::new(DynamicScan::new(
 			Arc::new(Literal(Value::from("test"))) as Arc<dyn crate::exec::PhysicalExpr>,
 			None,
 			None,

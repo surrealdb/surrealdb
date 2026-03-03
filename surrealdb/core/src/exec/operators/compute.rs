@@ -16,8 +16,9 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
+	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
+	buffer_stream, monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::val::{Object, Value};
@@ -69,15 +70,14 @@ impl ExecOperator for Compute {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Compute needs Database for expression evaluation, but also
-		// inherits child requirements (take the maximum)
+		// Combine field expression contexts with child operator context
 		let expr_ctx = self
 			.fields
 			.iter()
 			.map(|(_, expr)| expr.required_context())
 			.max()
 			.unwrap_or(ContextLevel::Root);
-		ContextLevel::Database.max(self.input.required_context()).max(expr_ctx)
+		self.input.required_context().max(expr_ctx)
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -85,6 +85,10 @@ impl ExecOperator for Compute {
 		// An expression could contain a mutation subquery!
 		let expr_mode = self.fields.iter().map(|(_, expr)| expr.access_mode()).combine_all();
 		self.input.access_mode().combine(expr_mode)
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.input.cardinality_hint()
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
@@ -99,13 +103,21 @@ impl ExecOperator for Compute {
 		self.fields.iter().map(|(name, expr)| (name.as_str(), expr)).collect()
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		self.input.output_ordering()
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		// If there are no fields to compute, just pass through
 		if self.fields.is_empty() {
 			return self.input.execute(ctx);
 		}
 
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let fields = self.fields.clone();
 		let ctx = ctx.clone();
 
@@ -139,14 +151,28 @@ async fn compute_batch(
 	fields: &[(String, Arc<dyn PhysicalExpr>)],
 	eval_ctx: EvalContext<'_>,
 ) -> Result<ValueBatch, ControlFlow> {
-	// Initialize output objects from input values
-	let mut objects: Vec<Object> = values
-		.iter()
-		.map(|v| match v {
+	// Initialize output objects from input values.
+	// Geometry values are converted to their GeoJSON object representation
+	// so that downstream operators (SelectProject) can access fields like
+	// `type` and `coordinates` directly.
+	let mut objects: Vec<Object> = Vec::with_capacity(values.len());
+
+	for v in values.iter() {
+		let o = match v {
 			Value::Object(o) => o.clone(),
+			Value::Geometry(geo) => geo.as_object(),
+			Value::RecordId(rid) => {
+				if let Value::Object(v) = super::fetch::fetch_record(eval_ctx.exec_ctx, rid).await?
+				{
+					v
+				} else {
+					Object::default()
+				}
+			}
 			_ => Object::default(),
-		})
-		.collect();
+		};
+		objects.push(o);
+	}
 
 	// Batch each field expression across all rows
 	for (name, expr) in fields {

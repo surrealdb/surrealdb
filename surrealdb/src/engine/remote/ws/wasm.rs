@@ -18,11 +18,10 @@ use super::{
 };
 use crate::conn::{self, Route, Router};
 use crate::engine::{IntervalStream, SessionError};
-use crate::err::Error;
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, WaitFor};
 use crate::types::HashMap;
-use crate::{ExtraFeatures, Result, SessionClone, SessionId, Surreal};
+use crate::{Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal};
 
 type MessageStream = SplitStream<WebSocketStream>;
 type MessageSink = SplitSink<WebSocketStream, Message>;
@@ -66,7 +65,7 @@ impl conn::Sealed for super::Client {
 		session_clone: Option<crate::SessionClone>,
 	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
-			address.url = address.url.join(PATH)?;
+			address.url = address.url.join(PATH).map_err(crate::std_error_to_types_error)?;
 
 			let (route_tx, route_rx) = match capacity {
 				0 => async_channel::unbounded(),
@@ -79,7 +78,7 @@ impl conn::Sealed for super::Client {
 
 			spawn_local(run_router(address, conn_tx, route_rx, session_clone.receiver.clone()));
 
-			conn_rx.recv().await??;
+			conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::LiveQueries);
@@ -168,7 +167,7 @@ pub(crate) async fn run_router(
 	let socket = match connect_with_protocols(ws_url, &["flatbuffers"]).await {
 		Ok(socket) => socket,
 		Err(error) => {
-			conn_tx.send(Err(Error::Ws(error.to_string()).into())).await.ok();
+			conn_tx.send(Err(Error::internal(format!("WebSocket error: {}", error)))).await.ok();
 			return;
 		}
 	};

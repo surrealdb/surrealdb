@@ -5,6 +5,7 @@ use surrealdb_types::{SurrealValue, Value, object};
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(tag = "tag")]
 enum EnumTaggedWithTag {
 	Foo,
@@ -79,6 +80,7 @@ fn test_enum_tagged_with_tag_variant_bar() {
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(tag = "tag", lowercase)]
 enum EnumTaggedWithTagLowercase {
 	Foo,
@@ -111,6 +113,7 @@ fn test_enum_tagged_with_tag_variant_lowercase() {
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(tag = "tag", uppercase)]
 enum EnumTaggedWithTagUppercase {
 	Foo,

@@ -6,6 +6,7 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::syn::error::bail;
+use crate::syn::lexer::Lexer;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::parser::mac::{expected, expected_whitespace};
 use crate::syn::parser::unexpected;
@@ -133,7 +134,6 @@ impl Parser<'_> {
 			t!("d\"") | t!("d'") => PublicValue::Datetime(self.next_token_value()?),
 			t!("u\"") | t!("u'") => PublicValue::Uuid(self.next_token_value()?),
 			t!("b\"") | t!("b'") => PublicValue::Bytes(self.next_token_value()?),
-			//TODO: Implement record id for value parsing
 			t!("f\"") | t!("f'") => {
 				if !self.settings.files_enabled {
 					unexpected!(self, token, "the experimental files feature to be enabled");
@@ -356,15 +356,15 @@ impl Parser<'_> {
 		if let Ok(x) = Parser::new(strand.as_bytes()).parse_value_record_id(stk).await {
 			return PublicValue::RecordId(x);
 		}
-		if let Ok(x) = Parser::new(strand.as_bytes()).next_token_value() {
+
+		if let Ok(x) = Lexer::lex_datetime(&strand) {
 			return PublicValue::Datetime(x);
 		}
-		// TODO: Fix this, uuid's don't actually work since it expects a 'u"'
-		if let Ok(x) = Parser::new(strand.as_bytes()).next_token_value() {
+
+		if let Ok(x) = Lexer::lex_uuid(&strand) {
 			return PublicValue::Uuid(x);
 		}
 
-		//TODO: Fix record id and others
 		PublicValue::String(strand)
 	}
 

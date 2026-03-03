@@ -13,16 +13,16 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use futures::stream;
-use reblessive::tree::TreeStack;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::{Context, FrozenContext};
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::plan_or_compute::collect_stream;
+use crate::exec::plan_or_compute::{block_required_context, collect_stream, legacy_compute};
 use crate::exec::planner::try_plan_expr;
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream,
 };
 use crate::expr::{Block, ControlFlow, ControlFlowExt, Expr};
 use crate::val::{Array, Value};
@@ -69,9 +69,8 @@ impl ExecOperator for SequencePlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Conservative: require database context since we don't know
-		// what the inner expressions need without analyzing them
-		ContextLevel::Database
+		// Derive the required context from the block's expressions
+		block_required_context(&self.block)
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -80,6 +79,10 @@ impl ExecOperator for SequencePlan {
 		} else {
 			AccessMode::ReadWrite
 		}
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -153,7 +156,7 @@ async fn execute_block_with_context(
 		let frozen_ctx = current_ctx.ctx().clone();
 
 		// Try to plan the expression with current context
-		match try_plan_expr(expr, &frozen_ctx) {
+		match try_plan_expr!(expr, &frozen_ctx, current_ctx.txn()) {
 			Ok(plan) => {
 				if plan.mutates_context() {
 					current_ctx = plan.output_context(&current_ctx).await?;
@@ -169,17 +172,16 @@ async fn execute_block_with_context(
 					};
 				}
 			}
-			Err(Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_)) => {
+			Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+				if let Error::PlannerUnimplemented(msg) = &e {
+					tracing::warn!("PlannerUnimplemented fallback in sequence: {msg}");
+				}
 				// Fallback to legacy compute path
 				let (opt, frozen) = get_legacy_context_cached(&current_ctx, &mut legacy_ctx)
 					.context("Legacy compute fallback context unavailable")?;
 
 				if let Expr::Let(set_stmt) = expr {
-					let mut stack = TreeStack::new();
-					let value = stack
-						.enter(|stk| set_stmt.what.compute(stk, &frozen, opt, None))
-						.finish()
-						.await?;
+					let value = legacy_compute(&set_stmt.what, &frozen, opt, None).await?;
 
 					// Update context with the new variable
 					current_ctx = current_ctx.with_param(set_stmt.name.clone(), value.clone());
@@ -191,9 +193,7 @@ async fn execute_block_with_context(
 					}
 					result = Value::None;
 				} else {
-					let mut stack = TreeStack::new();
-					result =
-						stack.enter(|stk| expr.compute(stk, &frozen, opt, None)).finish().await?;
+					result = legacy_compute(expr, &frozen, opt, None).await?;
 				}
 			}
 			Err(e) => return Err(ControlFlow::Err(e.into())),

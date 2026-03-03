@@ -1,27 +1,30 @@
 use std::ops::{self, Bound};
 
-use crate::Result;
-use crate::err::Error;
 use crate::types::{
 	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, Table, ToSql,
 	Value, Variables,
 };
+use crate::{Error, Result};
 
-/// A table range.
+/// A range of records within a table.
 #[derive(Debug, Clone, PartialEq)]
 pub struct QueryRange {
 	pub table: Table,
 	pub range: RecordIdKeyRange,
 }
 
+/// Direction for graph traversal or resource access.
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Direction {
+	/// Outgoing direction.
 	Out,
+	/// Incoming direction.
 	In,
+	/// Both directions.
 	Both,
 }
 
-/// A database resource
+/// A database resource.
 ///
 /// A resource is a location, or a range of locations, from which data can be
 /// fetched.
@@ -48,10 +51,18 @@ impl Resource {
 				table,
 				range,
 			})),
-			Resource::RecordId(_) => Err(Error::RangeOnRecordId),
-			Resource::Object(_) => Err(Error::RangeOnObject),
-			Resource::Array(_) => Err(Error::RangeOnArray),
-			Resource::Range(_) => Err(Error::RangeOnRange),
+			Resource::RecordId(_) => {
+				Err(Error::internal("Tried to add a range to an record-id resource".to_string()))
+			}
+			Resource::Object(_) => {
+				Err(Error::internal("Tried to add a range to an object resource".to_string()))
+			}
+			Resource::Array(_) => {
+				Err(Error::internal("Tried to add a range to an array resource".to_string()))
+			}
+			Resource::Range(_) => Err(Error::internal(
+				"Tried to add a range to a resource which was already a range".to_string(),
+			)),
 		}
 	}
 
@@ -130,8 +141,8 @@ impl SurrealValue for Resource {
 		}
 	}
 
-	fn from_value(value: Value) -> crate::types::anyhow::Result<Self> {
-		Err(crate::types::anyhow::anyhow!("Invalid resource: {}", value.to_sql()))
+	fn from_value(value: Value) -> Result<Self> {
+		Err(crate::Error::internal(format!("Invalid resource: {}", value.to_sql())))
 	}
 }
 
@@ -347,9 +358,9 @@ mod create_resource {
 
 fn no_colon(a: &str) -> Result<()> {
 	if a.contains(':') {
-		return Err(Error::TableColonId {
-			table: a.to_string(),
-		});
+		return Err(Error::internal(format!(
+			"Table name `{a}` contained a colon (:), this is dissallowed to avoid confusion with record-id's try `Table(\"{a}\")` instead."
+		)));
 	}
 	Ok(())
 }

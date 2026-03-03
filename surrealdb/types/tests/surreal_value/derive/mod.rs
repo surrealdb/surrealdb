@@ -1,9 +1,11 @@
 mod enum_mixed_with_value;
+mod enum_tagged_skip_content;
 mod enum_tagged_tag;
 mod enum_tagged_tag_content;
 mod enum_tagged_variant;
 mod enum_unit_value;
 mod enum_untagged;
+mod struct_flatten;
 
 use rstest::rstest;
 use surrealdb_types::{Array, Object, SurrealValue, Uuid, Value, object};
@@ -13,6 +15,7 @@ use surrealdb_types::{Array, Object, SurrealValue, Uuid, Value, object};
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 struct Person {
 	name: String,
 	age: i64,
@@ -56,6 +59,7 @@ fn test_simple_struct() {
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 struct PersonRenamed {
 	#[surreal(rename = "full_name")]
 	name: String,
@@ -105,6 +109,7 @@ fn test_simple_struct_with_renamed_fields() {
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 struct StringWrapper(String);
 
 #[test]
@@ -134,6 +139,7 @@ fn test_simple_single_field_struct() {
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(tuple)]
 struct StringWrapperTuple(String);
 
@@ -165,6 +171,7 @@ fn test_simple_single_field_tuple_struct() {
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 struct Point(i64, i64);
 
 #[test]
@@ -199,6 +206,7 @@ fn test_simple_multi_field_struct() {
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 struct UnitStruct;
 
 #[test]
@@ -227,6 +235,7 @@ fn test_unit_struct() {
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(value = true)]
 struct UnitStructWithValue;
 
@@ -256,6 +265,7 @@ fn test_unit_struct_with_value() {
 ////////////////////////////////////////////////////
 
 #[derive(Clone, Debug, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
 pub(crate) struct RouterRequest {
 	id: Option<i64>,
 	method: String,
@@ -289,6 +299,7 @@ fn test_router_request() {
 }
 
 #[derive(Clone, Debug, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
 struct TestOptional {
 	id: i64,
 	name: Option<String>,
@@ -297,6 +308,7 @@ struct TestOptional {
 #[test]
 fn test_test_optional() {
 	#[derive(Clone, Debug, SurrealValue)]
+	#[surreal(crate = "surrealdb_types")]
 	struct TestOptionalNoOption {
 		id: i64,
 	}
@@ -316,6 +328,7 @@ fn test_test_optional() {
 }
 
 #[derive(Clone, Debug, SurrealValue, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(default)]
 struct TestDefault {
 	str: String,
@@ -341,4 +354,66 @@ impl Default for TestDefault {
 fn test_test_default(#[case] value: Value, #[case] expected: TestDefault) {
 	let parsed = TestDefault::from_value(value).unwrap();
 	assert_eq!(parsed, expected);
+}
+
+////////////////////////////////////////////////////
+//////// Per-field #[surreal(default)] //////////////
+////////////////////////////////////////////////////
+
+/// Used by #[surreal(default = "default_code_for_test")] in tests.
+fn default_code_for_test() -> i64 {
+	-32000
+}
+
+#[derive(Clone, Debug, SurrealValue, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
+struct StructWithFieldDefaults {
+	#[surreal(default = "default_code_for_test")]
+	code: i64,
+	#[surreal(default)]
+	optional: Option<String>,
+	message: String,
+}
+
+#[test]
+fn test_per_field_default_missing_optional_fields() {
+	// Only message present: code and optional get their defaults
+	let value = Value::Object(object! { message: "Something went wrong".to_string() });
+	let parsed = StructWithFieldDefaults::from_value(value).unwrap();
+	assert_eq!(parsed.code, -32000, "code should use default_code_for_test()");
+	assert_eq!(parsed.optional, None, "optional should use Default::default()");
+	assert_eq!(parsed.message, "Something went wrong");
+}
+
+#[test]
+fn test_per_field_default_all_fields_present() {
+	let value = Value::Object(object! {
+		code: 123,
+		optional: Some("detail".to_string()),
+		message: "Bad input".to_string(),
+	});
+	let parsed = StructWithFieldDefaults::from_value(value).unwrap();
+	assert_eq!(parsed.code, 123);
+	assert_eq!(parsed.optional, Some("detail".to_string()));
+	assert_eq!(parsed.message, "Bad input");
+}
+
+#[test]
+fn test_per_field_default_required_field_missing_fails() {
+	// Missing required field "message" should fail
+	let value = Value::Object(object! { code: 1 });
+	let result = StructWithFieldDefaults::from_value(value);
+	assert!(result.is_err());
+}
+
+#[test]
+fn test_per_field_default_roundtrip() {
+	let s = StructWithFieldDefaults {
+		code: -32000,
+		optional: None,
+		message: "hello".to_string(),
+	};
+	let value = s.clone().into_value();
+	let parsed = StructWithFieldDefaults::from_value(value).unwrap();
+	assert_eq!(parsed, s);
 }

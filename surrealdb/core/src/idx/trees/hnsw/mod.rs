@@ -1,36 +1,45 @@
 pub(crate) mod cache;
 pub(crate) mod docs;
 mod elements;
+mod filter;
 mod flavor;
 mod heuristic;
 pub mod index;
 mod layer;
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use rand::prelude::SmallRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, SeedableRng, thread_rng};
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
+use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseDefinition, HnswParams, TableId};
-use crate::ctx::Context;
+use crate::catalog::{HnswParams, TableId};
+use crate::ctx::FrozenContext;
 use crate::idx::IndexKeyBase;
-use crate::idx::planner::checker::HnswConditionChecker;
+use crate::idx::seqdocids::DocId;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::cache::VectorCache;
-use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::elements::HnswElements;
+use crate::idx::trees::hnsw::filter::HnswTruthyDocumentFilter;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
-use crate::idx::trees::hnsw::index::HnswCheckedSearchContext;
+use crate::idx::trees::hnsw::index::HnswContext;
 use crate::idx::trees::hnsw::layer::{HnswLayer, LayerState};
 use crate::idx::trees::knn::DoublePriorityQueue;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
-use crate::kvs::{KVValue, Transaction};
+use crate::kvs::{KVValue, Transaction, impl_kv_value_revisioned};
+use crate::val::RecordIdKey;
 
+/// Parameters for a k-nearest neighbor search on the HNSW graph.
 struct HnswSearch {
+	/// The query vector to search for.
 	pt: SharedVector,
+	/// The number of nearest neighbors to return.
 	k: usize,
+	/// The size of the dynamic candidate list during search (exploration factor).
 	ef: usize,
 }
 
@@ -44,12 +53,21 @@ impl HnswSearch {
 	}
 }
 
+/// Persisted state of the HNSW graph, stored in the key-value store.
+///
+/// Tracks the current entry point, element ID counter, and per-layer state.
+/// This state is loaded at startup and saved after each mutation to ensure
+/// consistency across concurrent transactions.
 #[revisioned(revision = 1)]
 #[derive(Default, Serialize, Deserialize)]
 pub(crate) struct HnswState {
+	/// The entry point element for graph traversal, or `None` if the graph is empty.
 	enter_point: Option<ElementId>,
+	/// The next available element ID for new insertions.
 	next_element_id: ElementId,
+	/// State of layer 0 (the base layer containing all elements).
 	layer0: LayerState,
+	/// State of the upper layers (layers 1..N with progressively fewer elements).
 	layers: Vec<LayerState>,
 }
 
@@ -67,23 +85,71 @@ impl KVValue for HnswState {
 	}
 }
 
+/// A pending vector update queued for later application to the HNSW graph.
+///
+/// During concurrent writes, vector updates are not applied directly to the graph.
+/// Instead, they are serialized to the key-value store as pending updates and later
+/// applied in batch by a background task via [`HnswIndex::index_pendings`].
+#[revisioned(revision = 1)]
+pub(crate) struct VectorPendingUpdate {
+	/// Identifies the document being updated (by doc ID if known, or record key if new).
+	id: VectorId,
+	/// The previous vectors to remove from the index (empty for new documents).
+	old_vectors: Vec<SerializedVector>,
+	/// The new vectors to insert into the index (empty for deletions).
+	new_vectors: Vec<SerializedVector>,
+}
+
+/// Identifies a vector's owning document, either by its internal doc ID or its record key.
+///
+/// When a document is first indexed, its doc ID may not yet be assigned, so the
+/// record key is used. Once the pending update is applied, the doc ID is resolved.
+#[revisioned(revision = 1)]
+#[derive(Debug, PartialOrd, Ord, Hash, PartialEq, Eq, Clone)]
+pub(crate) enum VectorId {
+	/// A previously resolved internal document ID.
+	DocId(DocId),
+	/// A record key for a document whose doc ID has not yet been resolved.
+	RecordKey(Arc<RecordIdKey>),
+}
+
+impl_kv_value_revisioned!(VectorPendingUpdate);
+
+/// Core HNSW (Hierarchical Navigable Small World) graph implementation.
+///
+/// The graph is organized into multiple layers: a base layer (layer 0) that contains
+/// all elements, and upper layers with progressively fewer elements for fast
+/// long-range traversal. The type parameters `L0` and `L` control the neighbor
+/// set implementation for layer 0 and upper layers respectively, allowing
+/// compile-time optimization based on the `m` (max connections) parameter.
 struct Hnsw<L0, L>
 where
 	L0: DynamicSet,
 	L: DynamicSet,
 {
+	/// Key base for generating index-related storage keys.
 	ikb: IndexKeyBase,
+	/// Persisted graph state (entry point, element counter, layer states).
 	state: HnswState,
+	/// Maximum number of connections per element in upper layers.
 	m: usize,
+	/// Size of the dynamic candidate list during construction.
 	efc: usize,
+	/// Level multiplier used in the random level generation formula.
 	ml: f64,
+	/// The base layer (layer 0) containing all elements.
 	layer0: HnswLayer<L0>,
+	/// Upper layers (1..N), each containing a subset of elements.
 	layers: Vec<HnswLayer<L>>,
+	/// Storage and cache for element vectors.
 	elements: HnswElements,
+	/// Random number generator for level assignment.
 	rng: SmallRng,
+	/// Heuristic strategy for neighbor selection.
 	heuristic: Heuristic,
 }
 
+/// Unique identifier for an element (vector) in the HNSW graph.
 pub(crate) type ElementId = u64;
 
 impl<L0, L> Hnsw<L0, L>
@@ -91,6 +157,7 @@ where
 	L0: DynamicSet,
 	L: DynamicSet,
 {
+	/// Creates a new HNSW graph with the given parameters.
 	fn new(
 		table_id: TableId,
 		ikb: IndexKeyBase,
@@ -106,13 +173,18 @@ where
 			layer0: HnswLayer::new(ikb.clone(), 0, m0),
 			layers: Vec::default(),
 			elements: HnswElements::new(table_id, ikb.clone(), p.distance.clone(), vector_cache),
-			rng: SmallRng::from_entropy(),
+			rng: SmallRng::from_rng(thread_rng())?,
 			heuristic: p.into(),
 			ikb,
 		})
 	}
 
-	async fn check_state(&mut self, ctx: &Context) -> Result<()> {
+	/// Loads and synchronizes the in-memory graph state from the key-value store.
+	///
+	/// Compares the stored layer versions with the current in-memory versions,
+	/// reloading any layers that have changed. Also handles layer migration
+	/// from the legacy `Hl` format to the current `Hn` format.
+	async fn check_state(&mut self, ctx: &FrozenContext) -> Result<()> {
 		let tx = ctx.tx();
 		// Read the state
 		let mut st: HnswState = tx.get(&self.ikb.new_hs_key(), None).await?.unwrap_or_default();
@@ -151,9 +223,13 @@ where
 		Ok(())
 	}
 
+	/// Inserts a vector into the graph at the specified level.
+	///
+	/// Assigns a new element ID, creates any missing upper layers, stores
+	/// the vector, and connects it to its nearest neighbors at each layer.
 	async fn insert_level(
 		&mut self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		q_pt: Vector,
 		q_level: usize,
 	) -> Result<ElementId> {
@@ -169,25 +245,27 @@ where
 
 		// Store the vector
 		let pt_ser = SerializedVector::from(&q_pt);
-		let q_pt = self.elements.insert(tx, q_id, q_pt, &pt_ser).await?;
+		let q_pt = self.elements.insert(&ctx.tx, q_id, q_pt, &pt_ser).await?;
 
 		if let Some(ep_id) = self.state.enter_point {
 			// We already have an enter_point, let's insert the element in the layers
-			self.insert_element(tx, q_id, &q_pt, q_level, ep_id, top_up_layers).await?;
+			self.insert_element(ctx, q_id, &q_pt, q_level, ep_id, top_up_layers).await?;
 		} else {
 			// Otherwise is the first element
-			self.insert_first_element(tx, q_id, q_level).await?;
+			self.insert_first_element(&ctx.tx, q_id, q_level).await?;
 		}
 
 		self.state.next_element_id = self.elements.inc_next_element_id();
 		Ok(q_id)
 	}
 
+	/// Generates a random level for a new element using the level multiplier `ml`.
 	fn get_random_level(&mut self) -> usize {
 		let unif: f64 = self.rng.r#gen(); // generate a uniform random number between 0 and 1
 		(-unif.ln() * self.ml).floor() as usize // calculate the layer
 	}
 
+	/// Inserts the very first element into an empty graph, setting it as the entry point.
 	async fn insert_first_element(
 		&mut self,
 		tx: &Transaction,
@@ -210,20 +288,26 @@ where
 		Ok(())
 	}
 
+	/// Inserts an element into the graph when an entry point already exists.
+	///
+	/// Traverses the upper layers to find the closest entry point, then inserts
+	/// the element into each layer from `q_level` down to layer 0, connecting
+	/// it to its nearest neighbors. Updates the entry point if the new element
+	/// is assigned to a higher layer than the current entry point.
 	async fn insert_element(
 		&mut self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		q_id: ElementId,
 		q_pt: &SharedVector,
 		q_level: usize,
 		mut ep_id: ElementId,
 		top_up_layers: usize,
 	) -> Result<()> {
-		if let Some(mut ep_dist) = self.elements.get_distance(tx, q_pt, &ep_id).await? {
+		if let Some(mut ep_dist) = self.elements.get_distance(&ctx.tx, q_pt, &ep_id).await? {
 			if q_level < top_up_layers {
 				for layer in self.layers[q_level..top_up_layers].iter_mut().rev() {
 					if let Some(ep_dist_id) = layer
-						.search_single(tx, &self.elements, q_pt, ep_dist, ep_id, 1)
+						.search_single(ctx, &self.elements, q_pt, ep_dist, ep_id, 1, None)
 						.await?
 						.peek_first()
 					{
@@ -248,7 +332,8 @@ where
 				{
 					eps = layer
 						.insert(
-							(tx, st),
+							ctx,
+							st,
 							&self.elements,
 							&self.heuristic,
 							self.efc,
@@ -261,7 +346,8 @@ where
 
 			self.layer0
 				.insert(
-					(tx, &mut self.state.layer0),
+					ctx,
+					&mut self.state.layer0,
 					&self.elements,
 					&self.heuristic,
 					self.efc,
@@ -275,7 +361,7 @@ where
 					.iter_mut()
 					.zip(self.state.layers[top_up_layers..q_level].iter_mut())
 				{
-					if !layer.add_empty_node(tx, q_id, st).await? {
+					if !layer.add_empty_node(&ctx.tx, q_id, st).await? {
 						#[cfg(debug_assertions)]
 						unreachable!("Already there {}", q_id);
 					}
@@ -292,24 +378,28 @@ where
 		Ok(())
 	}
 
+	/// Persists the current graph state to the key-value store.
 	async fn save_state(&self, tx: &Transaction) -> Result<()> {
 		let state_key = self.ikb.new_hs_key();
 		tx.set(&state_key, &self.state, None).await?;
 		Ok(())
 	}
 
-	async fn insert(&mut self, tx: &Transaction, q_pt: Vector) -> Result<ElementId> {
+	/// Inserts a vector into the graph at a randomly chosen level and persists the state.
+	async fn insert(&mut self, ctx: &HnswContext<'_>, q_pt: Vector) -> Result<ElementId> {
 		let q_level = self.get_random_level();
-		let res = self.insert_level(tx, q_pt, q_level).await?;
-		self.save_state(tx).await?;
+		let res = self.insert_level(ctx, q_pt, q_level).await?;
+		self.save_state(&ctx.tx).await?;
 		Ok(res)
 	}
 
-	async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<bool> {
+	/// Removes an element from the graph, reconnecting its neighbors and updating
+	/// the entry point if necessary. Returns `true` if the element was found and removed.
+	async fn remove(&mut self, ctx: &HnswContext<'_>, e_id: ElementId) -> Result<bool> {
 		let mut removed = false;
 
 		// Do we have the vector?
-		if let Some(e_pt) = self.elements.get_vector(tx, &e_id).await? {
+		if let Some(e_pt) = self.elements.get_vector(&ctx.tx, &e_id).await? {
 			// Check if we are deleted the current enter_point
 			let mut new_enter_point = if Some(e_id) == self.state.enter_point {
 				None
@@ -321,10 +411,10 @@ where
 			for (layer, st) in self.layers.iter_mut().zip(self.state.layers.iter_mut()).rev() {
 				if new_enter_point.is_none() {
 					new_enter_point = layer
-						.search_single_with_ignore(tx, &self.elements, &e_pt, e_id, self.efc)
+						.search_single_with_ignore(ctx, &self.elements, &e_pt, e_id, self.efc)
 						.await?;
 				}
-				if layer.remove(tx, st, &self.elements, &self.heuristic, e_id, self.efc).await? {
+				if layer.remove(ctx, st, &self.elements, &self.heuristic, e_id, self.efc).await? {
 					removed = true;
 				}
 			}
@@ -333,37 +423,57 @@ where
 			if new_enter_point.is_none() {
 				new_enter_point = self
 					.layer0
-					.search_single_with_ignore(tx, &self.elements, &e_pt, e_id, self.efc)
+					.search_single_with_ignore(ctx, &self.elements, &e_pt, e_id, self.efc)
 					.await?;
 			}
 
 			// Remove from layer 0
 			if self
 				.layer0
-				.remove(tx, &mut self.state.layer0, &self.elements, &self.heuristic, e_id, self.efc)
+				.remove(
+					ctx,
+					&mut self.state.layer0,
+					&self.elements,
+					&self.heuristic,
+					e_id,
+					self.efc,
+				)
 				.await?
 			{
 				removed = true;
 			}
 
-			self.elements.remove(tx, e_id).await?;
+			self.elements.remove(&ctx.tx, e_id).await?;
 
 			self.state.enter_point = new_enter_point;
 		}
 
-		self.save_state(tx).await?;
+		self.save_state(&ctx.tx).await?;
 		Ok(removed)
 	}
 
+	/// Performs a k-nearest neighbor search on the graph without filtering.
+	///
+	/// Optionally excludes documents present in `pending_docs` (those with
+	/// pending updates that have already been searched separately).
 	async fn knn_search(
 		&self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		search: &HnswSearch,
+		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<Vec<(f64, ElementId)>> {
-		if let Some((ep_dist, ep_id)) = self.search_ep(tx, &search.pt).await? {
+		if let Some((ep_dist, ep_id)) = self.search_ep(ctx, &search.pt, pending_docs).await? {
 			let w = self
 				.layer0
-				.search_single(tx, &self.elements, &search.pt, ep_dist, ep_id, search.ef)
+				.search_single(
+					ctx,
+					&self.elements,
+					&search.pt,
+					ep_dist,
+					ep_id,
+					search.ef,
+					pending_docs,
+				)
 				.await?;
 			Ok(w.to_vec_limit(search.k))
 		} else {
@@ -371,46 +481,54 @@ where
 		}
 	}
 
-	#[expect(clippy::too_many_arguments)]
-	async fn knn_search_checked(
+	/// Performs a k-nearest neighbor search with a conditional document filter.
+	///
+	/// Similar to [`knn_search`](Self::knn_search), but additionally applies a
+	/// user-defined filter to exclude non-matching documents from the results.
+	async fn knn_search_with_filter(
 		&self,
-		db: &DatabaseDefinition,
-		tx: &Transaction,
-		stk: &mut Stk,
+		ctx: &HnswContext<'_>,
 		search: &HnswSearch,
-		hnsw_docs: &HnswDocs,
-		vec_docs: &VecDocs,
-		chk: &mut HnswConditionChecker<'_>,
+		stk: &mut Stk,
+		filter: &mut HnswTruthyDocumentFilter<'_>,
+		pending_docs: Option<&RoaringTreemap>,
 	) -> Result<Vec<(f64, ElementId)>> {
-		if let Some((ep_dist, ep_id)) = self.search_ep(tx, &search.pt).await?
-			&& let Some(ep_pt) = self.elements.get_vector(tx, &ep_id).await?
+		if let Some((ep_dist, ep_id)) = self.search_ep(ctx, &search.pt, pending_docs).await?
+			&& self.elements.get_vector(&ctx.tx, &ep_id).await?.is_some()
 		{
-			let search_ctx = HnswCheckedSearchContext::new(
-				&self.elements,
-				hnsw_docs,
-				vec_docs,
-				&search.pt,
-				search.ef,
-			);
 			let w = self
 				.layer0
-				.search_single_checked(db, tx, stk, &search_ctx, &ep_pt, ep_dist, ep_id, chk)
+				.search_single_with_filter(
+					ctx,
+					stk,
+					&self.elements,
+					search,
+					ep_dist,
+					ep_id,
+					filter,
+					pending_docs,
+				)
 				.await?;
 			return Ok(w.to_vec_limit(search.k));
 		}
 		Ok(vec![])
 	}
 
+	/// Finds the best entry point for a search by traversing the upper layers.
+	///
+	/// Starting from the graph's entry point, greedily descends through the upper
+	/// layers to find the closest element to the query vector `pt`.
 	async fn search_ep(
 		&self,
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		pt: &SharedVector,
+		pending_doc: Option<&RoaringTreemap>,
 	) -> Result<Option<(f64, ElementId)>> {
 		if let Some(mut ep_id) = self.state.enter_point {
-			if let Some(mut ep_dist) = self.elements.get_distance(tx, pt, &ep_id).await? {
+			if let Some(mut ep_dist) = self.elements.get_distance(&ctx.tx, pt, &ep_id).await? {
 				for layer in self.layers.iter().rev() {
 					if let Some(ep_dist_id) = layer
-						.search_single(tx, &self.elements, pt, ep_dist, ep_id, 1)
+						.search_single(ctx, &self.elements, pt, ep_dist, ep_id, 1, pending_doc)
 						.await?
 						.peek_first()
 					{
@@ -429,6 +547,7 @@ where
 		Ok(None)
 	}
 
+	/// Retrieves the vector associated with the given element ID.
 	async fn get_vector(&self, tx: &Transaction, e_id: &ElementId) -> Result<Option<SharedVector>> {
 		self.elements.get_vector(tx, e_id).await
 	}
@@ -456,57 +575,60 @@ mod tests {
 	use std::ops::Deref;
 	use std::sync::Arc;
 
-	use ahash::{HashMap, HashSet};
+	use ahash::{HashMap, HashSet, HashSetExt};
 	use anyhow::Result;
 	use ndarray::Array1;
 	use reblessive::tree::Stk;
-	use roaring::RoaringTreemap;
 	use test_log::test;
 
 	use crate::catalog::providers::CatalogProvider;
 	use crate::catalog::{
-		DatabaseDefinition, DatabaseId, Distance, HnswParams, IndexId, NamespaceId,
-		TableDefinition, TableId, VectorType,
+		DatabaseId, Distance, HnswParams, IndexId, NamespaceId, TableDefinition, TableId,
+		VectorType,
 	};
 	use crate::ctx::{Context, FrozenContext};
 	use crate::idx::IndexKeyBase;
-	use crate::idx::planner::checker::HnswConditionChecker;
 	use crate::idx::seqdocids::DocId;
+	use crate::idx::trees::hnsw::docs::VecDocs;
 	use crate::idx::trees::hnsw::flavor::HnswFlavor;
-	use crate::idx::trees::hnsw::index::HnswIndex;
-	use crate::idx::trees::hnsw::{ElementId, HnswSearch};
+	use crate::idx::trees::hnsw::index::{HnswContext, HnswIndex};
+	use crate::idx::trees::hnsw::{ElementId, HnswSearch, VectorId};
 	use crate::idx::trees::knn::tests::{TestCollection, new_vectors_from_file};
 	use crate::idx::trees::knn::{Ids64, KnnResult, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
 	use crate::kvs::LockType::Optimistic;
-	use crate::kvs::{Datastore, Transaction, TransactionType};
+	use crate::kvs::{Datastore, TransactionType};
 	use crate::val::{RecordIdKey, Value};
 
 	async fn insert_collection_hnsw(
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		h: &mut HnswFlavor,
 		collection: &TestCollection,
 	) -> HashMap<ElementId, SharedVector> {
 		let mut map = HashMap::default();
 		for (_, obj) in collection.to_vec_ref() {
 			let obj: SharedVector = obj.clone();
-			let e_id = h.insert(tx, obj.clone_vector()).await.unwrap();
+			let e_id = h.insert(ctx, obj.clone_vector()).await.unwrap();
 			map.insert(e_id, obj);
 			h.check_hnsw_properties(map.len()).await;
 		}
 		map
 	}
 
-	async fn find_collection_hnsw(tx: &Transaction, h: &HnswFlavor, collection: &TestCollection) {
+	async fn find_collection_hnsw(
+		ctx: &HnswContext<'_>,
+		h: &HnswFlavor,
+		collection: &TestCollection,
+	) {
 		let max_knn = 20.min(collection.len());
 		for (_, obj) in collection.to_vec_ref() {
 			for knn in 1..max_knn {
 				let search = HnswSearch::new(obj.clone(), knn, 80);
-				let res = h.knn_search(tx, &search).await.unwrap();
+				let res = h.knn_search(ctx, &search, None).await.unwrap();
 				if collection.is_unique() {
 					let mut found = false;
 					for (_, e_id) in &res {
-						if let Some(v) = h.get_vector(tx, e_id).await.unwrap()
+						if let Some(v) = h.get_vector(&ctx.tx, e_id).await.unwrap()
 							&& v.eq(obj)
 						{
 							found = true;
@@ -540,13 +662,13 @@ mod tests {
 	}
 
 	async fn delete_collection_hnsw(
-		tx: &Transaction,
+		ctx: &HnswContext<'_>,
 		h: &mut HnswFlavor,
 		mut map: HashMap<ElementId, SharedVector>,
 	) {
 		let element_ids: Vec<ElementId> = map.keys().copied().collect();
 		for e_id in element_ids {
-			assert!(h.remove(tx, e_id).await.unwrap());
+			assert!(h.remove(ctx, e_id).await.unwrap());
 			map.remove(&e_id);
 			h.check_hnsw_properties(map.len()).await;
 		}
@@ -558,6 +680,8 @@ mod tests {
 		let db = DatabaseId(2);
 		let tb = TableId(3);
 		let tb = TableDefinition::new(ns, db, tb, "tb".into());
+		let ikb = IndexKeyBase::new(ns, db, "tb".into(), IndexId(4));
+		let vec_docs = VecDocs::new(ikb.clone(), false);
 		let mut h = HnswFlavor::new(
 			tb.table_id,
 			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), tb.name.clone(), IndexId(4)),
@@ -566,20 +690,23 @@ mod tests {
 		)
 		.unwrap();
 		let map = {
-			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-			let map = insert_collection_hnsw(&tx, &mut h, collection).await;
-			tx.commit().await.unwrap();
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
+			let map = insert_collection_hnsw(&ctx, &mut h, collection).await;
+			ctx.tx.commit().await.unwrap();
 			map
 		};
 		{
-			let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
-			find_collection_hnsw(&tx, &h, collection).await;
-			tx.cancel().await.unwrap();
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
+			find_collection_hnsw(&ctx, &h, collection).await;
+			ctx.tx.cancel().await.unwrap();
 		}
 		{
-			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-			delete_collection_hnsw(&tx, &mut h, map).await;
-			tx.commit().await.unwrap();
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
+			delete_collection_hnsw(&ctx, &mut h, map).await;
+			ctx.tx.commit().await.unwrap();
 		}
 	}
 
@@ -664,14 +791,14 @@ mod tests {
 	}
 
 	async fn insert_collection_hnsw_index(
-		ctx: &Context,
+		ctx: &FrozenContext,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 	) -> Result<HashMap<SharedVector, HashSet<DocId>>> {
 		let mut map: HashMap<SharedVector, HashSet<DocId>> = HashMap::default();
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index_document(ctx, &RecordIdKey::Number(*doc_id as i64), &content).await.unwrap();
+			h.index(ctx, &RecordIdKey::Number(*doc_id as i64), None, Some(content)).await?;
 			match map.entry(obj.clone()) {
 				Entry::Occupied(mut e) => {
 					e.get_mut().insert(*doc_id);
@@ -680,45 +807,49 @@ mod tests {
 					e.insert(HashSet::from_iter([*doc_id]));
 				}
 			}
+			h.index_pendings(ctx).await?;
 			h.check_hnsw_properties(map.len()).await;
 		}
 		Ok(map)
 	}
 
 	async fn find_collection_hnsw_index(
-		tx: &Transaction,
-		db: &DatabaseDefinition,
+		ctx: &FrozenContext,
 		stk: &mut Stk,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 	) {
+		let ctx = h.new_hnsw_context(ctx);
 		let max_knn = 20.min(collection.len());
 		for (doc_id, obj) in collection.to_vec_ref() {
+			let doc_id = VectorId::DocId(*doc_id);
 			for knn in 1..max_knn {
-				let mut chk = HnswConditionChecker::new();
 				let search = HnswSearch::new(obj.clone(), knn, 500);
-				let res = h.search(db, tx, stk, &search, &mut chk).await.unwrap();
-				if knn == 1 && res.docs.len() == 1 && res.docs[0].1 > 0.0 {
-					let docs: Vec<DocId> = res.docs.iter().map(|(d, _)| *d).collect();
+				let mut builder = KnnResultBuilder::new(search.k);
+				h.search_graph(&ctx, stk, &search, None, &mut None, &mut builder).await.unwrap();
+				let res = builder.collect();
+				let first_dist: f64 = res.first().unwrap().0.into();
+				if knn == 1 && res.len() == 1 && first_dist > 0.0 {
+					let docs: Vec<VectorId> = res.iter().map(|(_, id)| id.clone()).collect();
 					if collection.is_unique() {
 						assert!(
-							docs.contains(doc_id),
-							"Search: {:?} - Knn: {} - Wrong Doc - Expected: {} - Got: {:?}",
+							docs.contains(&doc_id),
+							"Search: {:?} - Knn: {} - Wrong Doc - Expected: {:?} - Got: {:?}",
 							obj,
 							knn,
 							doc_id,
-							res.docs
+							res
 						);
 					}
 				}
 				let expected_len = collection.len().min(knn);
 				assert_eq!(
 					expected_len,
-					res.docs.len(),
+					res.len(),
 					"Wrong knn count - Expected: {} - Got: {} - - Docs: {:?} - Collection: {}",
 					expected_len,
-					res.docs.len(),
-					res.docs,
+					res.len(),
+					res,
 					collection.len(),
 				)
 			}
@@ -726,14 +857,15 @@ mod tests {
 	}
 
 	async fn delete_hnsw_index_collection(
-		ctx: &Context,
+		ctx: &FrozenContext,
 		h: &mut HnswIndex,
 		collection: &TestCollection,
 		mut map: HashMap<SharedVector, HashSet<DocId>>,
 	) -> Result<()> {
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.remove_document(ctx, RecordIdKey::Number(*doc_id as i64), &content).await?;
+			let id = RecordIdKey::Number(*doc_id as i64);
+			h.index(ctx, &id, Some(content), None).await?;
 			if let Entry::Occupied(mut e) = map.entry(obj.clone()) {
 				let set = e.get_mut();
 				set.remove(doc_id);
@@ -741,6 +873,7 @@ mod tests {
 					e.remove();
 				}
 			}
+			h.index_pendings(ctx).await?;
 			// Check properties
 			h.check_hnsw_properties(map.len()).await;
 		}
@@ -796,11 +929,9 @@ mod tests {
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
 
-			let db = tx.ensure_ns_db(None, "myns", "mydb").await.unwrap();
-
 			stack
 				.enter(|stk| async {
-					find_collection_hnsw_index(&tx, &db, stk, &mut h, &collection).await;
+					find_collection_hnsw_index(&ctx, stk, &mut h, &collection).await;
 				})
 				.finish()
 				.await;
@@ -827,7 +958,7 @@ mod tests {
 			// (Distance::Jaccard, 100),
 			(Distance::Manhattan, 5),
 			(Distance::Minkowski(2.into()), 5),
-			// (Distance::Pearson, 5),
+			(Distance::Pearson, 5),
 		] {
 			for vt in [
 				VectorType::F64,
@@ -885,18 +1016,22 @@ mod tests {
 		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb".into(), IndexId(4));
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true, true);
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let vec_docs = VecDocs::new(ikb.clone(), false);
 		let mut h =
-			HnswFlavor::new(TableId(3), ikb, &p, ds.index_store().vector_cache().clone()).unwrap();
+			HnswFlavor::new(TableId(3), ikb.clone(), &p, ds.index_store().vector_cache().clone())
+				.unwrap();
 		{
-			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-			insert_collection_hnsw(&tx, &mut h, &collection).await;
-			tx.commit().await.unwrap();
+			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
+			insert_collection_hnsw(&ctx, &mut h, &collection).await;
+			ctx.tx.commit().await.unwrap();
 		}
 		{
-			let tx = ds.transaction(TransactionType::Read, Optimistic).await.unwrap();
+			let ctx = new_ctx(&ds, TransactionType::Read).await;
+			let ctx = HnswContext::new(&ctx, ikb.clone(), &vec_docs);
 			let search = HnswSearch::new(new_i16_vec(-2, -3), 10, 501);
-			let res = h.knn_search(&tx, &search).await.unwrap();
-			tx.cancel().await.unwrap();
+			let res = h.knn_search(&ctx, &search, None).await.unwrap();
+			ctx.tx.cancel().await.unwrap();
 			assert_eq!(res.len(), 10);
 		}
 	}
@@ -912,8 +1047,8 @@ mod tests {
 		info!("Build data collection");
 
 		let ds = Arc::new(Datastore::new("memory").await?);
-		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-		let db = tx.ensure_ns_db(None, "myns", "mydb").await.unwrap();
+		let tx = ds.transaction(TransactionType::Write, Optimistic).await?;
+		let db = tx.ensure_ns_db(None, "myns", "mydb").await?;
 		tx.commit().await?;
 
 		let collection: Arc<TestCollection> =
@@ -927,7 +1062,7 @@ mod tests {
 		let tx = ctx.tx();
 		let tb = TableId(3);
 		let ix = IndexId(4);
-		let mut h = HnswIndex::new(
+		let h = HnswIndex::new(
 			ctx.get_index_stores().vector_cache().clone(),
 			&tx,
 			IndexKeyBase::new(db.namespace_id, db.database_id, "tb".into(), ix),
@@ -938,8 +1073,13 @@ mod tests {
 		info!("Insert collection");
 		for (doc_id, obj) in collection.to_vec_ref() {
 			let content = vec![Value::from(obj.deref())];
-			h.index_document(&ctx, &RecordIdKey::Number(*doc_id as i64), &content).await?;
+			h.index(&ctx, &RecordIdKey::Number(*doc_id as i64), None, Some(content)).await?;
 		}
+
+		info!("Index pendings");
+		assert_eq!(h.index_pendings(&ctx).await?, collection.len());
+		assert_eq!(h.index_pendings(&ctx).await?, 0);
+
 		tx.commit().await?;
 
 		let h = Arc::new(h);
@@ -958,7 +1098,6 @@ mod tests {
 			let collection = collection.clone();
 			let h = h.clone();
 			let ds = ds.clone();
-			let db = db.clone();
 			let f = tokio::spawn(async move {
 				let mut stack = reblessive::tree::TreeStack::new();
 				stack
@@ -966,19 +1105,21 @@ mod tests {
 						let mut total_recall = 0.0;
 						for (_, pt) in queries.to_vec_ref() {
 							let knn = 10;
-							let mut chk = HnswConditionChecker::new();
 							let search = HnswSearch::new(pt.clone(), knn, efs);
 
 							let ctx = new_ctx(&ds, TransactionType::Read).await;
-							let tx = ctx.tx();
-							let hnsw_res =
-								h.search(&db, &tx, stk, &search, &mut chk).await.unwrap();
-							tx.cancel().await.unwrap();
-							assert_eq!(hnsw_res.docs.len(), knn, "Different size - knn: {knn}",);
+							let ctx = h.new_hnsw_context(&ctx);
+							let mut builder = KnnResultBuilder::new(knn);
+							h.search_graph(&ctx, stk, &search, None, &mut None, &mut builder)
+								.await
+								.unwrap();
+							ctx.tx.cancel().await.unwrap();
+							let res = builder.collect();
+							assert_eq!(res.len(), knn, "Different size - knn: {knn}",);
 							let brute_force_res = collection.knn(pt, Distance::Euclidean, knn);
-							let rec = brute_force_res.recall(&hnsw_res);
+							let rec = compute_recall(&brute_force_res, &res);
 							if rec == 1.0 {
-								assert_eq!(brute_force_res.docs, hnsw_res.docs);
+								assert_eq!(brute_force_res, res);
 							}
 							total_recall += rec;
 						}
@@ -1048,27 +1189,25 @@ mod tests {
 			for (doc_id, doc_pt) in self.to_vec_ref() {
 				let d = dist.calculate(doc_pt, pt);
 				if b.check_add(d) {
-					b.add(d, Ids64::One(*doc_id));
+					b.add_graph_result(d, Ids64::One(*doc_id));
 				}
 			}
-			b.build()
+			b.collect()
 		}
 	}
 
-	impl KnnResult {
-		fn recall(&self, res: &KnnResult) -> f64 {
-			let mut bits = RoaringTreemap::new();
-			for &(doc_id, _) in &self.docs {
-				bits.insert(doc_id);
-			}
-			let mut found = 0;
-			for &(doc_id, _) in &res.docs {
-				if bits.contains(doc_id) {
-					found += 1;
-				}
-			}
-			found as f64 / bits.len() as f64
+	fn compute_recall(res1: &KnnResult, res2: &KnnResult) -> f64 {
+		let mut docs = HashSet::with_capacity(res1.len());
+		for (_, doc_id) in res1.iter() {
+			docs.insert(doc_id.clone());
 		}
+		let mut found = 0;
+		for (_, doc_id) in res2.iter() {
+			if docs.contains(doc_id) {
+				found += 1;
+			}
+		}
+		found as f64 / docs.len() as f64
 	}
 
 	fn new_i16_vec(x: isize, y: isize) -> SharedVector {

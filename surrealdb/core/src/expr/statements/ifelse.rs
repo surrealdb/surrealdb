@@ -4,7 +4,8 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Expr, FlowResult, Value};
+use crate::err::Error;
+use crate::expr::{ControlFlow, Expr, FlowResult, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct IfelseStatement {
@@ -32,6 +33,9 @@ impl IfelseStatement {
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
 		for (cond, then) in &self.exprs {
+			if let Some(d) = ctx.is_timedout().await? {
+				return Err(ControlFlow::from(anyhow::Error::new(Error::QueryTimedout(d.into()))));
+			}
 			let v = stk.run(|stk| cond.compute(stk, ctx, opt, doc)).await?;
 			if v.is_truthy() {
 				return stk.run(|stk| then.compute(stk, ctx, opt, doc)).await;

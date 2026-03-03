@@ -10,12 +10,14 @@ use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::plan_or_compute::evaluate_expr;
+use crate::exec::plan_or_compute::{evaluate_expr, expr_required_context};
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream,
 };
-use crate::expr::Expr;
+use crate::expr::{ControlFlow, Expr};
 use crate::val::Value;
 
 /// IfElse operator with deferred planning.
@@ -70,9 +72,16 @@ impl ExecOperator for IfElsePlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Conservative: require database context since we don't know
-		// what the inner expressions need without analyzing them
-		ContextLevel::Database
+		// Derive the required context from condition and body expressions
+		let branches_ctx = self
+			.branches
+			.iter()
+			.flat_map(|(cond, body)| [expr_required_context(cond), expr_required_context(body)])
+			.max()
+			.unwrap_or(ContextLevel::Root);
+		let else_ctx =
+			self.else_body.as_ref().map(expr_required_context).unwrap_or(ContextLevel::Root);
+		branches_ctx.max(else_ctx)
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -86,6 +95,10 @@ impl ExecOperator for IfElsePlan {
 		} else {
 			AccessMode::ReadWrite
 		}
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
@@ -119,12 +132,13 @@ async fn execute_ifelse(
 	else_body: &Option<Expr>,
 	ctx: &ExecutionContext,
 ) -> crate::expr::FlowResult<ValueBatch> {
-	// Evaluate each condition in order
 	for (cond, body) in branches {
+		if ctx.cancellation().is_cancelled() {
+			return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+		}
 		let cond_value = evaluate_expr(cond, ctx).await?;
 
 		if cond_value.is_truthy() {
-			// Execute the body of the first truthy branch
 			let result = evaluate_expr(body, ctx).await?;
 			return Ok(ValueBatch {
 				values: vec![result],

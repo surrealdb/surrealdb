@@ -15,7 +15,8 @@ use surrealdb_types::ToSql;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider, UserProvider};
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream,
 };
 use crate::expr::statements::info::InfoStructure;
 use crate::iam::{Action, ResourceKind};
@@ -57,6 +58,10 @@ impl ExecOperator for NamespaceInfoPlan {
 
 	fn access_mode(&self) -> AccessMode {
 		AccessMode::ReadOnly
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {

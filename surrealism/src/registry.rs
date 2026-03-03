@@ -146,7 +146,8 @@ where
 	/// - If invoking the function fails.
 	/// - If transferring the result fails.
 	pub fn invoke_raw(&self, controller: &mut dyn MemoryController, args: Ptr) -> Result<Ptr> {
-		let args = A::from_values(Vec::<surrealdb_types::Value>::receive(args, controller)?)?;
+		let args = A::from_values(Vec::<surrealdb_types::Value>::receive(args, controller)?)
+			.map_err(|e| anyhow::anyhow!("{}", e))?;
 		self.invoke(args)?.map(SerializableArg::from).transfer(controller)
 	}
 }

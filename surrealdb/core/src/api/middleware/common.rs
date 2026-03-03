@@ -6,6 +6,7 @@ use surrealdb_types::SurrealValue;
 use crate::api::format;
 
 #[derive(Clone, Copy, Debug, Default, SurrealValue, PartialOrd, Ord, PartialEq, Eq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(untagged, lowercase, default)]
 pub enum BodyStrategy {
 	#[default]

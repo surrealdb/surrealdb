@@ -6,13 +6,19 @@ reason = "Test EXPLAIN with GROUP BY and GROUP ALL aggregation"
 value = "'OK'"
 
 [[test.results]]
-value = ''''CountScan [ctx: Db] [source: sale]\n''''
+value = ''''CountScan [ctx: Db] [source: sale]
+''''
 
 [[test.results]]
-value = ''''Aggregate [ctx: Db] [by: region]\n└────> Scan [ctx: Db] [source: sale]\n''''
+value = ''''Aggregate [ctx: Db] [by: region]
+    TableScan [ctx: Db] [table: sale, direction: Forward]
+''''
 
 [[test.results]]
-value = ''''Sort [ctx: Db] [order_by: total DESC]\n└────> Aggregate [ctx: Db] [by: region]\n       └────> Scan [ctx: Db] [source: sale]\n''''
+value = ''''Sort [ctx: Db] [order_by: total DESC]
+    Aggregate [ctx: Db] [by: region]
+        TableScan [ctx: Db] [table: sale, direction: Forward]
+''''
 */
 
 -- Setup test data

@@ -45,6 +45,7 @@ mod backup;
 mod backup_version;
 mod basic;
 mod live;
+mod run;
 mod serialisation;
 mod session_isolation;
 mod version;
@@ -135,7 +136,7 @@ mod any {
 		(permit, db)
 	}
 
-	include_tests!(new_db => basic, serialisation, backup, session_isolation);
+	include_tests!(new_db => basic, serialisation, backup, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -174,7 +175,7 @@ mod http {
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, backup, session_isolation);
+	include_tests!(new_db => basic, serialisation, backup, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -346,11 +347,48 @@ mod ws {
 
 			let error_str = error.to_string();
 
-			assert!(error_str.starts_with("Internal error: Message too long: "), "{error_str}");
+			assert!(error_str.starts_with("Message too long: "), "{error_str}");
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live, session_isolation);
+	/// Test that repeated WebSocket queries don't leak pending request entries.
+	///
+	/// This is a regression test for #6822 where each WS query left an entry
+	/// in the pending_requests map, causing unbounded memory growth.
+	#[test_log::test(tokio::test)]
+	async fn repeated_queries_no_leak() {
+		use ulid::Ulid;
+
+		let permit = PERMITS.acquire().await.unwrap();
+		let config = Config::new();
+		let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await.unwrap();
+		db.signin(Root {
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
+		})
+		.await
+		.unwrap();
+		let ns = Ulid::new().to_string();
+		let dbn = Ulid::new().to_string();
+		db.use_ns(&ns).use_db(&dbn).await.unwrap();
+
+		// Define the table so that selecting a non-existent record returns
+		// None rather than erroring with "table does not exist".
+		db.query("DEFINE TABLE user SCHEMAFULL").await.unwrap();
+
+		// Run many queries in a tight loop. Before the fix, each query would
+		// leak a PendingRequest entry (~768 bytes). With 1000 iterations this
+		// would accumulate without bound.
+		for i in 0..1000u32 {
+			let result: Option<super::RecordName> = db.select(("user", "test")).await.unwrap();
+			// The record doesn't exist, so we expect None
+			assert!(result.is_none(), "iteration {i}: expected None for non-existent record");
+		}
+
+		drop(permit);
+	}
+
+	include_tests!(new_db => basic, serialisation, live, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -420,7 +458,7 @@ mod mem {
 			.await
 			.unwrap_err()
 			.to_string(),
-			"Thrown error: There was a problem with authentication",
+			"There was a problem with authentication",
 		);
 	}
 
@@ -460,20 +498,20 @@ mod mem {
 	async fn experimental_features() {
 		let surql = "
 		    USE NAMESPACE namespace DATABASE database;
-			DEFINE API \"/\" FOR any THEN {};
+			DEFINE BUCKET test BACKEND \"memory\";
 		";
 		// Experimental features are rejected by default
 		let db = Surreal::new::<Mem>(()).await.unwrap();
 		db.query(surql).await.unwrap_err();
 		// Experimental features can be allowed
 		let capabilities =
-			Capabilities::new().with_experimental_feature_allowed(ExperimentalFeature::DefineApi);
+			Capabilities::new().with_experimental_feature_allowed(ExperimentalFeature::Files);
 		let config = Config::new().capabilities(capabilities);
 		let db = Surreal::new::<Mem>(config).await.unwrap();
 		db.query(surql).await.unwrap().check().unwrap();
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -519,7 +557,7 @@ mod rocksdb {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -567,7 +605,7 @@ mod surrealkv {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -601,7 +639,7 @@ mod tikv {
 		drop(permit);
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 
 // --------------------------------------------------
@@ -637,7 +675,7 @@ mod mem_versioned {
 		surrealdb::engine::any::connect("memory?versioned=true").await.unwrap();
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, version, backup_version);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run, version, backup_version);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -687,5 +725,5 @@ mod surrealkv_versioned {
 		}
 	}
 
-	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, version, backup_version);
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run, version, backup_version);
 }

@@ -1,5 +1,3 @@
-// Temporary allow deprecated until the 3.0
-#![allow(deprecated)]
 // This triggers because we have regex's in our Value type which have a unsafecell inside.
 #![allow(clippy::mutable_key_type)]
 // Increased to support #[instrument] on complex async functions. Those are compiled out in release

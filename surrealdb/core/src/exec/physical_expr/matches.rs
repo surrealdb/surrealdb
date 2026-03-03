@@ -207,11 +207,6 @@ impl PhysicalExpr for MatchesOp {
 		Ok(Value::Bool(matches))
 	}
 
-	fn references_current_value(&self) -> bool {
-		// Always references the current document (needs RecordId)
-		true
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		// Read-only: we only read from the FT index
 		self.left.access_mode().combine(self.right.access_mode())

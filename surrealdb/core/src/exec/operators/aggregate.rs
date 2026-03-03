@@ -14,7 +14,7 @@ use futures::StreamExt;
 use crate::exec::function::{Accumulator, AggregateFunction};
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
-	FlowResultExt as _, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
+	FlowResultExt as _, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
 	monitor_stream,
 };
 use crate::expr::idiom::Idiom;
@@ -199,8 +199,48 @@ impl ExecOperator for Aggregate {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Aggregate needs database context for expression evaluation
-		ContextLevel::Database.max(self.input.required_context())
+		// Combine group-by and aggregate expression contexts with child operator context
+		let group_ctx = self
+			.group_by_exprs
+			.iter()
+			.map(|e| e.required_context())
+			.max()
+			.unwrap_or(ContextLevel::Root);
+		let agg_ctx = self
+			.aggregates
+			.iter()
+			.map(|agg| {
+				let info_ctx = agg
+					.aggregate_expr_info
+					.as_ref()
+					.map(|info| {
+						let agg_arg_ctx = info
+							.aggregates
+							.iter()
+							.flat_map(|ext| {
+								std::iter::once(ext.argument_expr.required_context())
+									.chain(ext.extra_args.iter().map(|e| e.required_context()))
+							})
+							.max()
+							.unwrap_or(ContextLevel::Root);
+						let post_ctx = info
+							.post_expr
+							.as_ref()
+							.map(|e| e.required_context())
+							.unwrap_or(ContextLevel::Root);
+						agg_arg_ctx.max(post_ctx)
+					})
+					.unwrap_or(ContextLevel::Root);
+				let fallback_ctx = agg
+					.fallback_expr
+					.as_ref()
+					.map(|e| e.required_context())
+					.unwrap_or(ContextLevel::Root);
+				info_ctx.max(fallback_ctx)
+			})
+			.max()
+			.unwrap_or(ContextLevel::Root);
+		group_ctx.max(agg_ctx).max(self.input.required_context())
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -264,7 +304,11 @@ impl ExecOperator for Aggregate {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let group_by_exprs = self.group_by_exprs.clone();
 		let aggregates = self.aggregates.clone();
 		let ctx = ctx.clone();

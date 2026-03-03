@@ -2,7 +2,7 @@
 [env]
 namespace = "test"
 database = "test"
-new-planner-strategy = "best-effort-ro"
+new-planner-strategy = "compute-only"
 
 [test]
 reason = "Test that OPTION IMPORT populates indexes correctly"

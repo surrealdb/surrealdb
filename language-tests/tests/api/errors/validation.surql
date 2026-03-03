@@ -96,9 +96,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: 'Request body must be binary data', headers: {  }, status: 400 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 - Invalid status code: too low

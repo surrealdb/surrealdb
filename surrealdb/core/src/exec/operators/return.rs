@@ -10,7 +10,10 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
-use crate::exec::{AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatchStream};
+use crate::exec::{
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatchStream,
+	buffer_stream,
+};
 use crate::expr::ControlFlow;
 use crate::val::Value;
 
@@ -56,6 +59,10 @@ impl ExecOperator for ReturnPlan {
 		self.inner.access_mode()
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.inner.cardinality_hint()
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let inner = self.inner.clone();
 		let ctx = ctx.clone();
@@ -69,7 +76,7 @@ impl ExecOperator for ReturnPlan {
 		Ok(Box::pin(futures::stream::once(async move {
 			// Execute inner plan and collect values
 			let mut stream = match inner.execute(&ctx) {
-				Ok(s) => s,
+				Ok(s) => buffer_stream(s, inner.access_mode(), inner.cardinality_hint()),
 				Err(ctrl) => return Err(ctrl),
 			};
 

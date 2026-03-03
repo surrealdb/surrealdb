@@ -83,10 +83,6 @@ impl PhysicalExpr for ControlFlowExpr {
 		}
 	}
 
-	fn references_current_value(&self) -> bool {
-		self.inner.as_ref().is_some_and(|e| e.references_current_value())
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		self.inner.as_ref().map_or(AccessMode::ReadOnly, |e| e.access_mode())
 	}

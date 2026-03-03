@@ -36,13 +36,13 @@ impl PhysicalExpr for Literal {
 		Ok(self.0.clone())
 	}
 
-	fn references_current_value(&self) -> bool {
-		false
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		// Literals are always read-only
 		AccessMode::ReadOnly
+	}
+
+	fn try_literal(&self) -> Option<&Value> {
+		Some(&self.0)
 	}
 }
 
@@ -81,7 +81,9 @@ impl Param {
 							match crate::exec::planner::expr_to_physical_expr(
 								perm_expr.clone(),
 								ctx.exec_ctx.ctx(),
-							) {
+							)
+							.await
+							{
 								Ok(phys_expr) => {
 									match phys_expr.evaluate(ctx.clone()).await {
 										Ok(result) if result.is_truthy() => {
@@ -216,10 +218,6 @@ impl PhysicalExpr for Param {
 		Err(anyhow::anyhow!("Parameter not found: ${}", self.0).into())
 	}
 
-	fn references_current_value(&self) -> bool {
-		false
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		// Parameter references are read-only
 		AccessMode::ReadOnly
@@ -263,10 +261,6 @@ impl PhysicalExpr for MockExpr {
 		}
 		let record_ids = iter.map(Value::RecordId).collect();
 		Ok(Value::Array(Array(record_ids)))
-	}
-
-	fn references_current_value(&self) -> bool {
-		false
 	}
 
 	fn access_mode(&self) -> AccessMode {

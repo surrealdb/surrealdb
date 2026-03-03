@@ -1,3 +1,5 @@
+use std::collections::{HashSet, LinkedList};
+use std::hash::Hash;
 use std::marker::PhantomData;
 use std::mem;
 
@@ -6,11 +8,10 @@ use futures::future::Either;
 use futures::stream::select_all;
 use surrealdb_core::rpc::DbResultStats;
 
-use crate::err::Error;
 use crate::method::live::Stream;
 use crate::notification::Notification;
 use crate::types::{SurrealValue, Value};
-use crate::{IndexedResults as QueryResponse, Result};
+use crate::{Error, IndexedResults as QueryResponse, Result};
 
 /// Represents a way to take a single query result from a list of responses
 pub trait QueryResult<Response>: query_result::Sealed<Response>
@@ -61,7 +62,10 @@ where
 				Ok(val) => val,
 				Err(_) => {
 					response.results.swap_remove(&self);
-					return Err(Error::ConnectionUninitialised);
+					return Err(Error::connection(
+						"Connection uninitialised".to_string(),
+						Some(crate::types::ConnectionError::Uninitialised),
+					));
 				}
 			},
 			None => {
@@ -75,19 +79,21 @@ where
 					let value = mem::take(value);
 					match value {
 						Value::None => Ok(None),
-						v => Ok(Some(T::from_value(v)?)),
+						v => {
+							Ok(Some(T::from_value(v).map_err(|e| Error::internal(e.to_string()))?))
+						}
 					}
 				}
-				_ => Err(Error::LossyTake(Box::new(QueryResponse {
-					results: mem::take(&mut response.results),
-					live_queries: mem::take(&mut response.live_queries),
-				}))),
+				_ => Err(Error::internal(
+					"Tried to take only a single result from a query that contains multiple"
+						.to_string(),
+				)),
 			},
 			value => {
 				let value = mem::take(value);
 				match value {
 					Value::None => Ok(None),
-					v => Ok(Some(T::from_value(v)?)),
+					v => Ok(Some(T::from_value(v).map_err(|e| Error::internal(e.to_string()))?)),
 				}
 			}
 		};
@@ -109,7 +115,10 @@ impl query_result::Sealed<Value> for (usize, &str) {
 				Ok(val) => val,
 				Err(_) => {
 					response.results.swap_remove(&index);
-					return Err(Error::ConnectionUninitialised);
+					return Err(Error::connection(
+						"Connection uninitialised".to_string(),
+						Some(crate::types::ConnectionError::Uninitialised),
+					));
 				}
 			},
 			None => {
@@ -142,7 +151,10 @@ where
 				Ok(val) => val,
 				Err(_) => {
 					response.results.swap_remove(&index);
-					return Err(Error::ConnectionUninitialised);
+					return Err(Error::connection(
+						"Connection uninitialised".to_string(),
+						Some(crate::types::ConnectionError::Uninitialised),
+					));
 				}
 			},
 			None => {
@@ -157,10 +169,10 @@ where
 				}
 				[value] => value,
 				_ => {
-					return Err(Error::LossyTake(Box::new(QueryResponse {
-						results: mem::take(&mut response.results),
-						live_queries: mem::take(&mut response.live_queries),
-					})));
+					return Err(Error::internal(
+						"Tried to take only a single result from a query that contains multiple"
+							.to_string(),
+					));
 				}
 			},
 			value => value,
@@ -178,7 +190,7 @@ where
 				let Some(value) = object.remove(key) else {
 					return Ok(None);
 				};
-				Ok(Some(T::from_value(value)?))
+				Ok(Some(T::from_value(value).map_err(|e| Error::internal(e.to_string()))?))
 			}
 			_ => Ok(None),
 		}
@@ -205,7 +217,9 @@ where
 			}
 		};
 
-		vec.into_iter().map(|v| T::from_value(v).map_err(Into::into)).collect::<Result<Vec<T>>>()
+		vec.into_iter()
+			.map(|v| T::from_value(v).map_err(|e| Error::internal(e.to_string())))
+			.collect::<Result<Vec<T>>>()
 	}
 
 	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
@@ -234,24 +248,185 @@ where
 						}
 						responses
 							.into_iter()
-							.map(|v| T::from_value(v).map_err(Into::into))
+							.map(|v| T::from_value(v).map_err(|e| Error::internal(e.to_string())))
 							.collect::<Result<Vec<T>>>()
 					}
 					val => {
 						if let Value::Object(object) = val
 							&& let Some(value) = object.remove(key)
 						{
-							return Ok(vec![T::from_value(value)?]);
+							return Ok(vec![
+								T::from_value(value).map_err(|e| Error::internal(e.to_string()))?,
+							]);
 						}
 						Ok(vec![])
 					}
 				},
 				Err(_) => {
 					response.results.swap_remove(&index);
-					Err(Error::ConnectionUninitialised)
+					Err(Error::connection(
+						"Connection uninitialised".to_string(),
+						Some(crate::types::ConnectionError::Uninitialised),
+					))
 				}
 			},
 			None => Ok(vec![]),
+		}
+	}
+
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
+		response.results.get(&self.0).map(|x| x.0)
+	}
+}
+
+impl<T> QueryResult<LinkedList<T>> for usize where T: SurrealValue {}
+impl<T> query_result::Sealed<LinkedList<T>> for usize
+where
+	T: SurrealValue,
+{
+	fn query_result(self, response: &mut QueryResponse) -> Result<LinkedList<T>> {
+		let vec = match response.results.swap_remove(&self) {
+			Some((_, result)) => match result? {
+				Value::Array(arr) => arr.into_vec(),
+				vec => vec![vec],
+			},
+			None => {
+				return Ok(LinkedList::new());
+			}
+		};
+
+		vec.into_iter()
+			.map(|v| T::from_value(v).map_err(|e| Error::internal(e.to_string())))
+			.collect::<Result<LinkedList<T>>>()
+	}
+
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
+		response.results.get(self).map(|x| x.0)
+	}
+}
+
+impl<T> QueryResult<LinkedList<T>> for (usize, &str) where T: SurrealValue {}
+impl<T> query_result::Sealed<LinkedList<T>> for (usize, &str)
+where
+	T: SurrealValue,
+{
+	fn query_result(self, response: &mut QueryResponse) -> Result<LinkedList<T>> {
+		let (index, key) = self;
+		match response.results.get_mut(&index) {
+			Some((_, result)) => match result {
+				Ok(val) => match val {
+					Value::Array(vec) => {
+						let mut responses = Vec::with_capacity(vec.len());
+						for value in vec.iter_mut() {
+							if let Value::Object(object) = value
+								&& let Some(value) = object.remove(key)
+							{
+								responses.push(value);
+							}
+						}
+						responses
+							.into_iter()
+							.map(|v| T::from_value(v).map_err(|e| Error::internal(e.to_string())))
+							.collect::<Result<LinkedList<T>>>()
+					}
+					val => {
+						if let Value::Object(object) = val
+							&& let Some(value) = object.remove(key)
+						{
+							return Ok(LinkedList::from([
+								T::from_value(value).map_err(|e| Error::internal(e.to_string()))?
+							]));
+						}
+						Ok(LinkedList::new())
+					}
+				},
+				Err(_) => {
+					response.results.swap_remove(&index);
+					Err(Error::connection(
+						"Connection uninitialised".to_string(),
+						Some(crate::types::ConnectionError::Uninitialised),
+					))
+				}
+			},
+			None => Ok(LinkedList::new()),
+		}
+	}
+
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
+		response.results.get(&self.0).map(|x| x.0)
+	}
+}
+
+impl<T> QueryResult<HashSet<T>> for usize where T: SurrealValue + Hash + Eq {}
+impl<T> query_result::Sealed<HashSet<T>> for usize
+where
+	T: SurrealValue + Hash + Eq,
+{
+	fn query_result(self, response: &mut QueryResponse) -> Result<HashSet<T>> {
+		let vec = match response.results.swap_remove(&self) {
+			Some((_, result)) => match result? {
+				Value::Array(arr) => arr.into_vec(),
+				vec => vec![vec],
+			},
+			None => {
+				return Ok(HashSet::new());
+			}
+		};
+
+		vec.into_iter()
+			.map(|v| T::from_value(v).map_err(|e| Error::internal(e.to_string())))
+			.collect::<Result<HashSet<T>>>()
+	}
+
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
+		response.results.get(self).map(|x| x.0)
+	}
+}
+
+impl<T> QueryResult<HashSet<T>> for (usize, &str) where T: SurrealValue + Hash + Eq {}
+impl<T> query_result::Sealed<HashSet<T>> for (usize, &str)
+where
+	T: SurrealValue + Hash + Eq,
+{
+	fn query_result(self, response: &mut QueryResponse) -> Result<HashSet<T>> {
+		let (index, key) = self;
+		match response.results.get_mut(&index) {
+			Some((_, result)) => match result {
+				Ok(val) => match val {
+					Value::Array(vec) => {
+						let mut responses = Vec::with_capacity(vec.len());
+						for value in vec.iter_mut() {
+							if let Value::Object(object) = value
+								&& let Some(value) = object.remove(key)
+							{
+								responses.push(value);
+							}
+						}
+						responses
+							.into_iter()
+							.map(|v| T::from_value(v).map_err(|e| Error::internal(e.to_string())))
+							.collect::<Result<HashSet<T>>>()
+					}
+					val => {
+						if let Value::Object(object) = val
+							&& let Some(value) = object.remove(key)
+						{
+							return Ok(HashSet::from([
+								T::from_value(value).map_err(|e| Error::internal(e.to_string()))?
+							]));
+						}
+						Ok(HashSet::new())
+					}
+				},
+				Err(_) => {
+					response.results.swap_remove(&index);
+					Err(Error::connection(
+						"Connection uninitialised".to_string(),
+						Some(crate::types::ConnectionError::Uninitialised),
+					))
+				}
+			},
+			None => Ok(HashSet::new()),
 		}
 	}
 
@@ -287,6 +462,26 @@ where
 	}
 }
 
+impl<T> QueryResult<LinkedList<T>> for &str where T: SurrealValue {}
+impl<T> query_result::Sealed<LinkedList<T>> for &str
+where
+	T: SurrealValue,
+{
+	fn query_result(self, response: &mut QueryResponse) -> Result<LinkedList<T>> {
+		(0, self).query_result(response)
+	}
+}
+
+impl<T> QueryResult<HashSet<T>> for &str where T: SurrealValue + Hash + Eq {}
+impl<T> query_result::Sealed<HashSet<T>> for &str
+where
+	T: SurrealValue + Hash + Eq,
+{
+	fn query_result(self, response: &mut QueryResponse) -> Result<HashSet<T>> {
+		(0, self).query_result(response)
+	}
+}
+
 /// A way to take a query stream future from a query response
 pub trait QueryStream<R>: query_stream::Sealed<R> {}
 
@@ -311,7 +506,7 @@ impl query_stream::Sealed<Value> for usize {
 			.swap_remove(&self)
 			.and_then(|result| match result {
 				Err(e) => {
-					if matches!(e, Error::NotLiveQuery(..)) {
+					if e.message().contains("is not a live query") {
 						response.results.swap_remove(&self);
 						None
 					} else {
@@ -321,8 +516,10 @@ impl query_stream::Sealed<Value> for usize {
 				result => Some(result),
 			})
 			.unwrap_or_else(|| match response.results.contains_key(&self) {
-				true => Err(Error::NotLiveQuery(self)),
-				false => Err(Error::QueryIndexOutOfBounds(self)),
+				true => {
+					Err(Error::internal(format!("Query statement {} is not a live query", self)))
+				}
+				false => Err(Error::internal(format!("Query statement {} is out of bounds", self))),
 			})?;
 		Ok(crate::method::QueryStream(Either::Left(stream)))
 	}
@@ -339,16 +536,22 @@ impl query_stream::Sealed<Value> for () {
 			match result {
 				Ok(stream) => streams.push(stream),
 				Err(e) => {
-					if matches!(e, Error::NotLiveQuery(..)) {
+					if e.message().contains("is not a live query") {
 						match response.results.swap_remove(&index) {
 							Some((_, Err(_))) => {
-								return Err(Error::ConnectionUninitialised);
+								return Err(Error::connection(
+									"Connection uninitialised".to_string(),
+									Some(crate::types::ConnectionError::Uninitialised),
+								));
 							}
 							Some((_, Ok(..))) => unreachable!(
 								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
 							),
 							None => {
-								return Err(Error::ResponseAlreadyTaken);
+								return Err(Error::internal(
+									"Tried to take a query response that has already been taken"
+										.to_string(),
+								));
 							}
 						}
 					} else {
@@ -375,7 +578,7 @@ where
 			.swap_remove(&self)
 			.and_then(|result| match result {
 				Err(e) => {
-					if matches!(e, Error::NotLiveQuery(..)) {
+					if e.message().contains("is not a live query") {
 						response.results.swap_remove(&self);
 						None
 					} else {
@@ -385,8 +588,10 @@ where
 				result => Some(result),
 			})
 			.unwrap_or_else(|| match response.results.contains_key(&self) {
-				true => Err(Error::NotLiveQuery(self)),
-				false => Err(Error::QueryIndexOutOfBounds(self)),
+				true => {
+					Err(Error::internal(format!("Query statement {} is not a live query", self)))
+				}
+				false => Err(Error::internal(format!("Query statement {} is out of bounds", self))),
 			})?;
 		Ok(crate::method::QueryStream(Either::Left(Stream {
 			client: stream.client.clone(),
@@ -411,16 +616,22 @@ where
 			let mut stream = match result {
 				Ok(stream) => stream,
 				Err(e) => {
-					if matches!(e, Error::NotLiveQuery(..)) {
+					if e.message().contains("is not a live query") {
 						match response.results.swap_remove(&index) {
 							Some((_, Err(_))) => {
-								return Err(Error::ConnectionUninitialised);
+								return Err(Error::connection(
+									"Connection uninitialised".to_string(),
+									Some(crate::types::ConnectionError::Uninitialised),
+								));
 							}
 							Some((_, Ok(..))) => unreachable!(
 								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
 							),
 							None => {
-								return Err(Error::ResponseAlreadyTaken);
+								return Err(Error::internal(
+									"Tried to take a query response that has already been taken"
+										.to_string(),
+								));
 							}
 						}
 					} else {

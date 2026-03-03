@@ -14,9 +14,6 @@ value = "NONE"
 [[test.results]]
 value = "NONE"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 // Path not starting with /

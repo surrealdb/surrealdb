@@ -8,6 +8,7 @@ alwaysApply: true
 - Prefer workspace-managed dependencies; don't add dependencies without getting confirmation first
 - Use `anyhow::Result` for fallible APIs and `thiserror` for domain error enums
 - Leverage `ensure!` and `bail!` macros for guard-style validation
+- Use `web_time::Instant` and `web_time::SystemTime` instead of `std::time::Instant` / `std::time::SystemTime` for WASM compatibility. `std::time::Duration` is fine to use directly. This is enforced by `cargo make ci-check-imports`
 
 ## 2. Async and concurrency
 - Keep long-running or blocking work off async tasks; push blocking work to tokios blocking threadpool or `affinitypool` when needed

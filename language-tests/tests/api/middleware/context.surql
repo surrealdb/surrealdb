@@ -65,9 +65,6 @@ value = "NONE"
 skip-api-request-id = true
 value = "{ body: { message: 'Chain', requestContext: { step1: 'value1', step2: 'value2', step3: 'value3' }, responseContext: {  } }, headers: { context: \"{ step2: 'value2', step3: 'value3' }\" }, status: 200 }"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 # 0 

@@ -1,5 +1,7 @@
 use syn::{Attribute, Ident, LitStr};
 
+use crate::SkipContent;
+
 #[derive(Debug, Default)]
 pub struct EnumAttributes {
 	/// Whether the enum is untagged
@@ -8,6 +10,9 @@ pub struct EnumAttributes {
 	pub tag: Option<String>,
 	/// Content field name for adjacently tagged enums
 	pub content: Option<String>,
+	/// Enum-level content skipping. `Always` for `#[surreal(skip_content)]`,
+	/// `If(path)` for `#[surreal(skip_content_if = "predicate")]`.
+	pub skip_content: Option<SkipContent>,
 	/// Whether to transform variant names to uppercase
 	pub casing: Option<Casing>,
 }
@@ -32,6 +37,27 @@ impl EnumAttributes {
 							&& let Ok(lit_str) = value.parse::<LitStr>()
 						{
 							enum_attrs.content = Some(lit_str.value());
+						}
+					} else if meta.path.is_ident("skip_content") {
+						if enum_attrs.skip_content.is_some() {
+							panic!(
+								"Cannot use both skip_content and skip_content_if on the same enum"
+							);
+						}
+						enum_attrs.skip_content = Some(SkipContent::Always);
+					} else if meta.path.is_ident("skip_content_if") {
+						if enum_attrs.skip_content.is_some() {
+							panic!(
+								"Cannot use both skip_content and skip_content_if on the same enum"
+							);
+						}
+						if let Ok(value) = meta.value()
+							&& let Ok(lit_str) = value.parse::<LitStr>()
+						{
+							enum_attrs.skip_content = Some(SkipContent::If(
+								syn::parse_str(&lit_str.value())
+									.expect("skip_content_if must be a valid path"),
+							));
 						}
 					} else if meta.path.is_ident("uppercase") {
 						enum_attrs.casing = Some(Casing::Uppercase);

@@ -106,6 +106,7 @@ impl InfoStructure for ApiDefinition {
 /// REST API method.
 #[revisioned(revision = 1)]
 #[derive(SurrealValue, Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[surreal(crate = "surrealdb_types")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[surreal(untagged, lowercase)]
 pub enum ApiMethod {

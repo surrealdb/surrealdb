@@ -3,7 +3,6 @@
 use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use super::fetch_record_with_computed_fields;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, ContextLevel};
 use crate::expr::FlowResult;
@@ -36,8 +35,8 @@ impl PhysicalExpr for AllPart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.cloned().unwrap_or(Value::None);
-		Ok(evaluate_all(&value, ctx).await?)
+		let value = ctx.current_value.unwrap_or(&Value::NONE);
+		evaluate_all(value, ctx).await
 	}
 
 	/// Parallel batch evaluation for `[*]` / `.*`.
@@ -61,10 +60,6 @@ impl PhysicalExpr for AllPart {
 		futures::future::try_join_all(futures).await
 	}
 
-	fn references_current_value(&self) -> bool {
-		true
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		AccessMode::ReadOnly
 	}
@@ -77,10 +72,9 @@ impl ToSql for AllPart {
 }
 
 /// All elements evaluation.
-pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> anyhow::Result<Value> {
+pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> FlowResult<Value> {
 	match value {
 		Value::Array(arr) => {
-			// Check if the array contains RecordIds that need fetching
 			let has_record_ids = arr.iter().any(|v| matches!(v, Value::RecordId(_)));
 			if has_record_ids {
 				let mut results = Vec::with_capacity(arr.len());
@@ -93,17 +87,14 @@ pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> anyhow:
 				Ok(Value::Array(arr.clone()))
 			}
 		}
-		Value::Object(_) => {
-			// All (*) on an Object is a no-op - returns the object itself.
-			// This matches the old executor's behavior where Part::All on Object
-			// simply continues with the remaining path.
-			Ok(value.clone())
-		}
+		Value::Object(_) => Ok(value.clone()),
 		Value::RecordId(rid) => {
-			// Fetch the record and return the full object with computed fields evaluated
-			fetch_record_with_computed_fields(rid, ctx).await
+			if ctx.skip_fetch_perms {
+				crate::exec::operators::fetch::fetch_record_no_perms(ctx.exec_ctx, rid).await
+			} else {
+				crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, rid).await
+			}
 		}
-		// For other types, return as single-element array
 		other => Ok(Value::Array(vec![other.clone()].into())),
 	}
 }
@@ -130,12 +121,8 @@ impl PhysicalExpr for FlattenPart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.cloned().unwrap_or(Value::None);
-		Ok(evaluate_flatten(&value)?)
-	}
-
-	fn references_current_value(&self) -> bool {
-		true
+		let value = ctx.current_value.unwrap_or(&Value::NONE);
+		Ok(evaluate_flatten(value)?)
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -193,10 +180,6 @@ impl PhysicalExpr for FirstPart {
 		}
 	}
 
-	fn references_current_value(&self) -> bool {
-		true
-	}
-
 	fn access_mode(&self) -> AccessMode {
 		AccessMode::ReadOnly
 	}
@@ -233,10 +216,6 @@ impl PhysicalExpr for LastPart {
 			Value::Array(arr) => Ok(arr.last().cloned().unwrap_or(Value::None)),
 			other => Ok(other),
 		}
-	}
-
-	fn references_current_value(&self) -> bool {
-		true
 	}
 
 	fn access_mode(&self) -> AccessMode {

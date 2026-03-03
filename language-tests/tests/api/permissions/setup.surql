@@ -116,7 +116,7 @@ DEFINE API "/route/where-false"
 // ============================================================================
 
 // Global config PERMISSIONS NONE
-DEFINE CONFIG API PERMISSIONS NONE;
+DEFINE CONFIG OVERWRITE API PERMISSIONS NONE;
 DEFINE API "/global/none"
     FOR get
         THEN {
@@ -127,10 +127,10 @@ DEFINE API "/global/none"
         };
 
 // Reset global config to FULL for other tests
-DEFINE CONFIG API PERMISSIONS FULL;
+DEFINE CONFIG OVERWRITE API PERMISSIONS FULL;
 
 // Global config PERMISSIONS WHERE true
-DEFINE CONFIG API PERMISSIONS WHERE true;
+DEFINE CONFIG OVERWRITE API PERMISSIONS WHERE true;
 DEFINE API "/global/where-true"
     FOR get
         THEN {
@@ -141,7 +141,7 @@ DEFINE API "/global/where-true"
         };
 
 // Global config PERMISSIONS WHERE false
-DEFINE CONFIG API PERMISSIONS WHERE false;
+DEFINE CONFIG OVERWRITE API PERMISSIONS WHERE false;
 DEFINE API "/global/where-false"
     FOR get
         THEN {
@@ -152,7 +152,7 @@ DEFINE API "/global/where-false"
         };
 
 // Reset global config to FULL for remaining tests
-DEFINE CONFIG API PERMISSIONS FULL;
+DEFINE CONFIG OVERWRITE API PERMISSIONS FULL;
 
 // ============================================================================
 // Permission Evaluation Order Tests
@@ -178,7 +178,7 @@ DEFINE API "/order/method-none-route-full"
         };
 
 // Route-level NONE blocks even if global config is FULL
-DEFINE CONFIG API PERMISSIONS FULL;
+DEFINE CONFIG OVERWRITE API PERMISSIONS FULL;
 DEFINE API "/order/route-none-global-full"
     FOR any
         PERMISSIONS NONE
@@ -209,7 +209,7 @@ DEFINE API "/order/method-false-route-full"
         };
 
 // Route-level WHERE false blocks even if global config is FULL
-DEFINE CONFIG API PERMISSIONS FULL;
+DEFINE CONFIG OVERWRITE API PERMISSIONS FULL;
 DEFINE API "/order/route-false-global-full"
     FOR any
         PERMISSIONS WHERE false
@@ -240,7 +240,7 @@ DEFINE API "/order/all-full"
         };
 
 // Method-level WHERE true, route-level WHERE true, global FULL should allow
-DEFINE CONFIG API PERMISSIONS FULL;
+DEFINE CONFIG OVERWRITE API PERMISSIONS FULL;
 DEFINE API "/order/method-true-route-true-global-full"
     FOR any
         PERMISSIONS WHERE true

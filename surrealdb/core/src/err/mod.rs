@@ -27,6 +27,9 @@ use crate::kvs::Error as KvsError;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::val::{CastError, CoerceError, Duration, RecordId, TableName, Value};
 
+mod to_types;
+pub(crate) use to_types::into_types_error;
+
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)]
@@ -206,6 +209,10 @@ pub(crate) enum Error {
 	/// The query timedout
 	#[error("The query was not executed because it exceeded the timeout: {0}")]
 	QueryTimedout(Duration),
+
+	/// The transaction timed out
+	#[error("The transaction was not completed because it exceeded the timeout: {0}")]
+	TransactionTimedout(Duration),
 
 	/// The query did not execute, because the transaction was cancelled
 	#[error("The query was not executed due to a cancelled transaction")]
@@ -1038,9 +1045,14 @@ pub(crate) enum Error {
 
 	/// There was an outdated storage version stored in the database
 	#[error(
-		"The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation"
+		"The data stored on disk is out-of-date with this version (Expected: {expected}, Actual: {actual}). \
+		 Please follow the upgrade guides in the documentation, \
+		 or use a clean storage directory if this is intended to be a new instance"
 	)]
-	OutdatedStorageVersion,
+	OutdatedStorageVersion {
+		expected: u16,
+		actual: u16,
+	},
 
 	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]
 	QueryTooLarge,
@@ -1080,6 +1092,12 @@ pub(crate) enum Error {
 	/// supported
 	#[error("Cannot construct a recursion plan when an instruction is provided")]
 	RecursionInstructionPlanConflict,
+
+	/// Encountered a non-record-id value during recursive graph traversal
+	#[error("Expected a record ID during recursive graph traversal, but found `{value}`")]
+	InvalidRecursionTarget {
+		value: String,
+	},
 
 	/// The record cannot be deleted as it's still referenced elsewhere
 	#[error("Cannot delete `{0}` as it is referenced by `{1}` with an ON DELETE REJECT clause")]
@@ -1185,6 +1203,12 @@ pub(crate) enum Error {
 
 	#[error("The event {0} reached the max async event nesting depth: {1}.")]
 	EvReachMaxDepth(String, u16),
+
+	#[error("Computed fields cannot be indexed. Index: '{index}' - Field: '{field}'")]
+	ComputedFieldCannotBeIndexed {
+		field: String,
+		index: String,
+	},
 }
 
 impl Error {

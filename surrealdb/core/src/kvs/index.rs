@@ -13,9 +13,10 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::{Mutex, RwLock};
-use tokio::time::{Instant, sleep};
+use tokio::time::sleep;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
+use web_time::Instant;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
@@ -27,7 +28,6 @@ use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
 use crate::key::index::ig::IndexAppending;
 use crate::key::record;
@@ -895,7 +895,7 @@ impl Building {
 		if !*rc {
 			return Ok(());
 		}
-		FullTextIndex::trigger_compaction(&self.ikb, tx, self.opt.id()).await?;
+		IndexOperation::compaction_trigger(&self.ikb, tx, self.opt.id()).await?;
 		*rc = false;
 		Ok(())
 	}

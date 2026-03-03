@@ -343,17 +343,17 @@ jobs:
           - arch: x86_64-apple-darwin
             platform: amd64
             os: macos
-            runner: macos-15
+            runner: macos-15-xlarge
           # macOS arm64
           - arch: aarch64-apple-darwin
             platform: arm64
             os: macos
-            runner: macos-15
+            runner: macos-15-xlarge
           # Windows amd64
           - arch: x86_64-pc-windows-msvc
             platform: amd64
             os: windows
-            runner: windows-2025
+            runner: windows-latest-32-cores
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

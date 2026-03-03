@@ -22,7 +22,7 @@ use super::error::ResponseError;
 use super::headers::ContentType;
 use crate::ntw::error::Error as NetError;
 
-pub(super) fn router<S>() -> Router<S>
+pub fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
@@ -60,7 +60,8 @@ async fn post_handler(
 		}
 	};
 
-	let cfg = export::Config::from_value(val).map_err(ResponseError)?;
+	let cfg =
+		export::Config::from_value(val).map_err(|e| ResponseError(anyhow::anyhow!("{}", e)))?;
 	handle_inner(state, session, cfg).await
 }
 

@@ -31,7 +31,7 @@ Temporary Items
 *.sw?
 *.skv
 *.profraw
-lcov.info
+*lcov.info
 
 # -----------------------------------
 # Folders

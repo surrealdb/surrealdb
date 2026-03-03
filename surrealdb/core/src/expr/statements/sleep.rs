@@ -46,7 +46,9 @@ impl SleepStatement {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-	use std::time::{self, SystemTime};
+	use std::time;
+
+	use web_time::SystemTime;
 
 	use super::*;
 	use crate::dbs::test::mock;

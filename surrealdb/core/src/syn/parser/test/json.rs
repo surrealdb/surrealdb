@@ -1,4 +1,4 @@
-use crate::syn;
+use crate::syn::{self, ParserSettings};
 use crate::types::PublicValue;
 
 #[test]
@@ -41,4 +41,38 @@ fn not_a_record_id_in_object() {
 	let object = res.into_object().unwrap();
 	let data = object.get("data").unwrap();
 	assert_eq!(*data, PublicValue::String("focus:outline-none".to_owned()))
+}
+
+#[test]
+fn legacy_uuid() {
+	let v = syn::parse_with_settings(
+		r#" "11111111-1111-1111-1111-111111111111" "#.as_bytes(),
+		ParserSettings {
+			legacy_strands: true,
+			..Default::default()
+		},
+		async |parser, stk| parser.parse_json(stk).await,
+	)
+	.unwrap();
+
+	let surrealdb_types::Value::Uuid(_) = v else {
+		panic!()
+	};
+}
+
+#[test]
+fn legacy_datetime() {
+	let v = syn::parse_with_settings(
+		r#" "2024-01-01T00:00:00Z" "#.as_bytes(),
+		ParserSettings {
+			legacy_strands: true,
+			..Default::default()
+		},
+		async |parser, stk| parser.parse_json(stk).await,
+	)
+	.unwrap();
+
+	let surrealdb_types::Value::Datetime(_) = v else {
+		panic!()
+	};
 }

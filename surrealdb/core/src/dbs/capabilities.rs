@@ -121,7 +121,6 @@ impl std::str::FromStr for FuncTarget {
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub enum ExperimentalTarget {
-	DefineApi,
 	Files,
 	Surrealism,
 }
@@ -129,7 +128,6 @@ pub enum ExperimentalTarget {
 impl fmt::Display for ExperimentalTarget {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
-			Self::DefineApi => write!(f, "define_api"),
 			Self::Files => write!(f, "files"),
 			Self::Surrealism => write!(f, "surrealism"),
 		}
@@ -145,7 +143,6 @@ impl Target for ExperimentalTarget {
 impl Target<str> for ExperimentalTarget {
 	fn matches(&self, elem: &str) -> bool {
 		match self {
-			Self::DefineApi => elem.eq_ignore_ascii_case("define_api"),
 			Self::Files => elem.eq_ignore_ascii_case("files"),
 			Self::Surrealism => elem.eq_ignore_ascii_case("surrealism"),
 		}
@@ -173,7 +170,6 @@ impl std::str::FromStr for ExperimentalTarget {
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match s.trim().to_ascii_lowercase().as_str() {
-			"define_api" => Ok(ExperimentalTarget::DefineApi),
 			"files" => Ok(ExperimentalTarget::Files),
 			"surrealism" => Ok(ExperimentalTarget::Surrealism),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
@@ -258,22 +254,22 @@ impl fmt::Display for NetTarget {
 }
 
 impl Target for NetTarget {
-	fn matches(&self, elem: &Self) -> bool {
+	fn matches(&self, tgt: &Self) -> bool {
 		match self {
 			// If self contains a host and port, the elem must match both the host and port
-			Self::Host(host, Some(port)) => match elem {
-				Self::Host(_host, Some(_port)) => host == _host && port == _port,
+			Self::Host(host, Some(port)) => match tgt {
+				Self::Host(tgt_host, Some(tgt_port)) => host == tgt_host && port == tgt_port,
 				_ => false,
 			},
 			// If self contains a host but no port, the elem must match the host only
-			Self::Host(host, None) => match elem {
-				Self::Host(_host, _) => host == _host,
+			Self::Host(host, None) => match tgt {
+				Self::Host(tgt_host, _) => host == tgt_host,
 				_ => false,
 			},
 			// If self is an IPNet, it can match both an IPNet or a Host elem that contains an
 			// IPAddr
-			Self::IPNet(ipnet) => match elem {
-				Self::IPNet(_ipnet) => ipnet.contains(_ipnet),
+			Self::IPNet(ipnet) => match tgt {
+				Self::IPNet(tgt_ipnet) => ipnet.contains(tgt_ipnet),
 				Self::Host(host, _) => match host {
 					url::Host::Ipv4(ip) => ipnet.contains(&IpAddr::from(ip.to_owned())),
 					url::Host::Ipv6(ip) => ipnet.contains(&IpAddr::from(ip.to_owned())),

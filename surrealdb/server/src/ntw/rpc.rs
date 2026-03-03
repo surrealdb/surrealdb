@@ -32,7 +32,7 @@ use crate::rpc::RpcState;
 use crate::rpc::format::HttpFormat;
 use crate::rpc::websocket::Websocket;
 
-pub(super) fn router() -> Router<Arc<RpcState>> {
+pub fn router() -> Router<Arc<RpcState>> {
 	Router::new()
 		.route("/rpc", options(|| async {}).get(get_handler).post(post_handler))
 		.route_layer(DefaultBodyLimit::disable())
@@ -200,7 +200,7 @@ async fn post_handler(
 			// Return the HTTP response
 			Ok(fmt.res_http(match res {
 				Ok(result) => DbResponse::success(None, None, result),
-				Err(err) => DbResponse::failure(None, None, err.into()),
+				Err(err) => DbResponse::failure(None, None, err),
 			})?)
 		}
 		Err(err) => Err(err.into()),

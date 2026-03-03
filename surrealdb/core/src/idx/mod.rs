@@ -5,6 +5,7 @@ pub(super) mod seqdocids;
 pub mod trees;
 
 use std::borrow::Cow;
+use std::fmt::{Debug, Display};
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -14,6 +15,7 @@ use uuid::Uuid;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::hnsw::ElementId;
+use crate::idx::trees::hnsw::index::AppendingId64;
 use crate::idx::trees::vector::SerializedVector;
 use crate::key::index::dc::Dc;
 use crate::key::index::dl::Dl;
@@ -23,6 +25,7 @@ use crate::key::index::hh::Hh;
 use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
 use crate::key::index::hn::HnswNode;
+use crate::key::index::hp::{HnswPending, HnswPendingPrefix};
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
 use crate::key::index::ib::Ib;
@@ -50,6 +53,12 @@ struct Inner {
 	ix: IndexId,
 }
 
+impl Display for IndexKeyBase {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "NS: {} - DB: {} - TB: {} - IX: {}", self.0.ns, self.0.db, self.0.tb, self.0.ix.0)
+	}
+}
+
 impl IndexKeyBase {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: TableName, ix: IndexId) -> Self {
 		Self(Arc::new(Inner {
@@ -72,8 +81,16 @@ impl IndexKeyBase {
 		He::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, element_id)
 	}
 
-	fn new_hi_key(&self, id: RecordIdKey) -> Hi<'_> {
+	fn new_hi_key<'a>(&'a self, id: &'a RecordIdKey) -> Hi<'a> {
 		Hi::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
+	}
+
+	fn new_hp_key(&self, appending_id: AppendingId64) -> HnswPending<'_> {
+		HnswPending::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, appending_id)
+	}
+
+	fn new_hp_range(&self) -> Result<Range<Key>> {
+		HnswPendingPrefix::range(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
 	fn new_hl_key(&self, layer: u16, chunk: u32) -> Hl<'_> {
@@ -195,6 +212,14 @@ impl IndexKeyBase {
 
 	fn new_dl(&self, doc_id: DocId) -> Dl<'_> {
 		Dl::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id)
+	}
+
+	pub(crate) fn ns(&self) -> NamespaceId {
+		self.0.ns
+	}
+
+	pub(crate) fn db(&self) -> DatabaseId {
+		self.0.db
 	}
 
 	pub(crate) fn table(&self) -> &TableName {

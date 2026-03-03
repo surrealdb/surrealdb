@@ -1,3 +1,4 @@
+use anyhow::Context;
 use http::{HeaderMap, HeaderValue, StatusCode};
 use surrealdb_types::SurrealValue;
 
@@ -8,6 +9,7 @@ use crate::types::{PublicObject, PublicValue};
 use crate::val::{Value, convert_value_to_public_value};
 
 #[derive(Debug, Default, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(default)]
 pub struct ApiResponse {
 	pub status: StatusCode,
@@ -73,7 +75,10 @@ impl TryFrom<Value> for ApiResponse {
 	type Error = anyhow::Error;
 
 	fn try_from(value: Value) -> std::result::Result<Self, Self::Error> {
-		convert_value_to_public_value(value)?.into_t()
+		convert_value_to_public_value(value)
+			.context("Failed to convert value to public value")?
+			.into_t()
+			.context("Failed to convert public value to ApiResponse")
 	}
 }
 

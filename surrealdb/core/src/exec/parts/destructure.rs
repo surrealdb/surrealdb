@@ -5,10 +5,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use super::{evaluate_physical_path, fetch_record_with_computed_fields};
+use super::evaluate_physical_path;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, CombineAccessModes, ContextLevel};
-use crate::expr::{ControlFlowExt, FlowResult};
+use crate::expr::FlowResult;
 use crate::val::Value;
 
 /// Destructure - extract fields into a new object `{ field1, field2: path }`.
@@ -70,12 +70,8 @@ impl PhysicalExpr for DestructurePart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.cloned().unwrap_or(Value::None);
-		evaluate_destructure(&value, &self.fields, ctx).await
-	}
-
-	fn references_current_value(&self) -> bool {
-		true
+		let value = ctx.current_value.unwrap_or(&Value::NONE);
+		evaluate_destructure(value, &self.fields, ctx).await
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -198,12 +194,11 @@ async fn evaluate_destructure(
 			Ok(Value::Object(crate::val::Object(result)))
 		}
 		Value::RecordId(rid) => {
-			// Fetch the record with computed fields evaluated, then destructure it.
-			// Using fetch_record_with_computed_fields ensures that DEFINE FIELD ... COMPUTED
-			// fields are properly evaluated before destructuring.
-			let fetched = fetch_record_with_computed_fields(rid, ctx.clone())
-				.await
-				.context("Failed to fetch record")?;
+			let fetched = if ctx.skip_fetch_perms {
+				crate::exec::operators::fetch::fetch_record_no_perms(ctx.exec_ctx, rid).await?
+			} else {
+				crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, rid).await?
+			};
 			if fetched.is_none() {
 				return Ok(Value::None);
 			}

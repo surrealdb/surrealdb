@@ -22,6 +22,10 @@ impl Value {
 				Value::Number(x) => self.set(stk, ctx, opt, path, Value::Number(v + x)).await,
 				_ => Ok(()),
 			},
+			Value::Duration(v) => match val {
+				Value::Duration(x) => self.set(stk, ctx, opt, path, Value::Duration(v + x)).await,
+				_ => Ok(()),
+			},
 			Value::Array(v) => match val {
 				Value::Array(x) => self.set(stk, ctx, opt, path, Value::Array(v.concat(x))).await,
 				x => self.set(stk, ctx, opt, path, Value::Array(v.with_push(x))).await,
@@ -30,6 +34,7 @@ impl Value {
 				Value::Number(x) => {
 					self.set(stk, ctx, opt, path, Value::Number(Number::Int(0) + x)).await
 				}
+				Value::Duration(x) => self.set(stk, ctx, opt, path, Value::Duration(x)).await,
 				Value::Array(x) => self.set(stk, ctx, opt, path, Value::Array(x)).await,
 				x => self.set(stk, ctx, opt, path, Value::from(vec![x])).await,
 			},

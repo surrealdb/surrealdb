@@ -11,7 +11,8 @@ use surrealdb_types::ToSql;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream,
 };
 use crate::expr::Base;
 use crate::iam::{Action, ResourceKind};
@@ -58,6 +59,10 @@ impl ExecOperator for SleepPlan {
 	fn access_mode(&self) -> AccessMode {
 		// Sleep has a side effect (pausing execution) and requires edit permissions
 		AccessMode::ReadWrite
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {

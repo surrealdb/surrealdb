@@ -7,16 +7,27 @@ use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::kvs::Transaction;
 
+/// Manages storage and retrieval of element vectors in the HNSW graph.
+///
+/// Vectors are stored in the key-value store and cached in-memory via
+/// [`VectorCache`] for fast distance computations during graph traversal.
 pub(super) struct HnswElements {
+	/// The table this index belongs to.
 	table_id: TableId,
+	/// The index identifier.
 	index_id: IndexId,
+	/// Key base for generating element storage keys.
 	ikb: IndexKeyBase,
+	/// In-memory LRU cache for element vectors.
 	vector_cache: VectorCache,
+	/// The next element ID to assign.
 	next_element_id: ElementId,
+	/// Distance metric for similarity computations.
 	dist: Distance,
 }
 
 impl HnswElements {
+	/// Creates a new `HnswElements` instance.
 	pub(super) fn new(
 		table_id: TableId,
 		ikb: IndexKeyBase,
@@ -33,14 +44,17 @@ impl HnswElements {
 		}
 	}
 
+	/// Sets the next element ID (used when loading state from the key-value store).
 	pub(super) fn set_next_element_id(&mut self, next: ElementId) {
 		self.next_element_id = next;
 	}
 
+	/// Returns the current next element ID without incrementing.
 	pub(super) fn next_element_id(&self) -> ElementId {
 		self.next_element_id
 	}
 
+	/// Increments and returns the next element ID.
 	pub(super) fn inc_next_element_id(&mut self) -> ElementId {
 		self.next_element_id += 1;
 		self.next_element_id
@@ -56,6 +70,7 @@ impl HnswElements {
 		self.vector_cache.contains(self.table_id, self.index_id, e_id).await
 	}
 
+	/// Stores a vector in the key-value store and caches it. Returns the shared vector.
 	pub(super) async fn insert(
 		&mut self,
 		tx: &Transaction,
@@ -70,6 +85,7 @@ impl HnswElements {
 		Ok(pt)
 	}
 
+	/// Retrieves a vector by element ID, checking the cache first then the key-value store.
 	pub(super) async fn get_vector(
 		&self,
 		tx: &Transaction,
@@ -90,10 +106,12 @@ impl HnswElements {
 		}
 	}
 
+	/// Computes the distance between two vectors using the configured distance metric.
 	pub(super) fn distance(&self, a: &SharedVector, b: &SharedVector) -> f64 {
 		self.dist.calculate(a, b)
 	}
 
+	/// Computes the distance between a query vector and an element's stored vector.
 	pub(super) async fn get_distance(
 		&self,
 		tx: &Transaction,
@@ -103,6 +121,7 @@ impl HnswElements {
 		Ok(self.get_vector(tx, e_id).await?.map(|r| self.dist.calculate(&r, q)))
 	}
 
+	/// Removes an element's vector from both the cache and the key-value store.
 	pub(super) async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<()> {
 		self.vector_cache.remove(self.table_id, self.index_id, e_id).await;
 		let key = self.ikb.new_he_key(e_id);

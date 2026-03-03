@@ -49,38 +49,22 @@ impl SurrealValue for RecordIdKeyRange {
 		}))
 	}
 
-	fn from_value(value: Value) -> anyhow::Result<Self> {
+	fn from_value(value: Value) -> Result<Self, crate::Error> {
 		if let Value::Range(r) = value {
 			Ok(RecordIdKeyRange {
 				start: match r.start {
 					Bound::Unbounded => Bound::Unbounded,
-					Bound::Included(x) => {
-						Bound::Included(RecordIdKey::from_value(x).map_err(|e| {
-							anyhow::anyhow!("Failed to convert Bound value to record id key: {e}")
-						})?)
-					}
-					Bound::Excluded(x) => {
-						Bound::Excluded(RecordIdKey::from_value(x).map_err(|e| {
-							anyhow::anyhow!("Failed to convert Bound value to record id key: {e}")
-						})?)
-					}
+					Bound::Included(x) => Bound::Included(RecordIdKey::from_value(x)?),
+					Bound::Excluded(x) => Bound::Excluded(RecordIdKey::from_value(x)?),
 				},
 				end: match r.end {
 					Bound::Unbounded => Bound::Unbounded,
-					Bound::Included(x) => {
-						Bound::Included(RecordIdKey::from_value(x).map_err(|e| {
-							anyhow::anyhow!("Failed to convert Bound value to record id key: {e}")
-						})?)
-					}
-					Bound::Excluded(x) => {
-						Bound::Excluded(RecordIdKey::from_value(x).map_err(|e| {
-							anyhow::anyhow!("Failed to convert Bound value to record id key: {e}")
-						})?)
-					}
+					Bound::Included(x) => Bound::Included(RecordIdKey::from_value(x)?),
+					Bound::Excluded(x) => Bound::Excluded(RecordIdKey::from_value(x)?),
 				},
 			})
 		} else {
-			Err(anyhow::anyhow!("Failed to convert to RecordIdKeyRange"))
+			Err(crate::Error::internal("Failed to convert to RecordIdKeyRange".to_string()))
 		}
 	}
 }
@@ -110,7 +94,7 @@ impl RecordIdKeyRange {
 	}
 
 	/// Converts a `Range` value into a `RecordIdKeyRange`.
-	pub fn from_value_range(range: Range) -> anyhow::Result<Self> {
+	pub fn from_value_range(range: Range) -> std::result::Result<Self, crate::Error> {
 		let start = match range.start {
 			Bound::Included(x) => Bound::Included(RecordIdKey::from_value(x)?),
 			Bound::Excluded(x) => Bound::Excluded(RecordIdKey::from_value(x)?),

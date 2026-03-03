@@ -3,6 +3,7 @@
 mod cnf;
 mod savepoint;
 
+use std::collections::HashMap;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -238,6 +239,36 @@ impl Transactable for Transaction {
 		let res = inner.tx.get(key).await?;
 		// Return result
 		Ok(res)
+	}
+
+	/// Fetch many keys from the database
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
+	async fn getm(&self, keys: Vec<Key>, version: Option<u64>) -> Result<Vec<Option<Val>>> {
+		// TiKV does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
+		// Build an index from key bytes to original position so we can
+		// restore order without cloning values out of a HashMap.
+		let key_index: HashMap<&[u8], usize> =
+			keys.iter().enumerate().map(|(i, k)| (k.as_slice(), i)).collect();
+		// Batch get the keys
+		let pairs = inner.tx.batch_get(keys.iter().cloned()).await?;
+		// Place each result directly at the correct position
+		let mut out: Vec<Option<Val>> = vec![None; keys.len()];
+		for kv in pairs {
+			if let Some(&idx) = key_index.get(Key::from(kv.0).as_slice()) {
+				out[idx] = Some(kv.1);
+			}
+		}
+		// Return result
+		Ok(out)
 	}
 
 	/// Insert or update a key in the database

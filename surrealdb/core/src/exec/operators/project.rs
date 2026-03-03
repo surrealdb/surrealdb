@@ -16,10 +16,10 @@ use futures::StreamExt;
 use tracing::instrument;
 
 use crate::exec::field_path::{FieldPath, FieldPathPart};
-use crate::exec::parts::fetch_record_with_computed_fields;
 use crate::exec::{
-	AccessMode, CombineAccessModes, ContextLevel, EvalContext, ExecOperator, ExecutionContext,
-	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
+	ExecutionContext, FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream,
+	buffer_stream, monitor_stream,
 };
 use crate::expr::idiom::Idiom;
 use crate::expr::part::{DestructurePart, Part};
@@ -154,12 +154,20 @@ impl ExecOperator for Project {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// When include_all is true, we may need to dereference RecordIds,
-		// which requires database access
+		// Combine field expression contexts with child operator context.
+		// When include_all is true, we additionally need database access
+		// to dereference RecordIds.
+		let fields_ctx = self
+			.fields
+			.iter()
+			.map(|f| f.expr.required_context())
+			.max()
+			.unwrap_or(ContextLevel::Root);
+		let base = self.input.required_context().max(fields_ctx);
 		if self.include_all {
-			ContextLevel::Database.max(self.input.required_context())
+			base.max(ContextLevel::Database)
 		} else {
-			self.input.required_context()
+			base
 		}
 	}
 
@@ -171,6 +179,10 @@ impl ExecOperator for Project {
 		self.input.access_mode().combine(expr_mode)
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.input.cardinality_hint()
+	}
+
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
@@ -179,9 +191,21 @@ impl ExecOperator for Project {
 		Some(&self.metrics)
 	}
 
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		self.fields.iter().map(|f| ("field", &f.expr)).collect()
+	}
+
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		self.input.output_ordering()
+	}
+
 	#[instrument(level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let fields = Arc::clone(&self.fields);
 		let omit = Arc::clone(&self.omit);
 		let include_all = self.include_all;
@@ -215,9 +239,7 @@ impl ExecOperator for Project {
 							}
 							Value::RecordId(rid) => {
 								let fetched =
-									fetch_record_with_computed_fields(rid, eval_ctx.clone())
-										.await
-										.map_err(crate::expr::ControlFlow::Err)?;
+									super::fetch::fetch_record(eval_ctx.exec_ctx, rid).await?;
 								match fetched {
 									Value::Object(mut obj) => {
 										for field in fields.iter() {
@@ -278,14 +300,12 @@ impl ExecOperator for Project {
 								.await?;
 							}
 						} else {
-							// Per-row evaluation with document_root set so
-							// dynamic index expressions (e.g. `[field]`)
-							// resolve against the full document.
-							let mut field_values = Vec::with_capacity(batch_len);
-							for value in &batch.values {
-								let row_ctx = eval_ctx.with_value_and_doc(value);
-								field_values.push(field.expr.evaluate(row_ctx).await?);
-							}
+							// Batch evaluation: use evaluate_batch which allows
+							// I/O-bound expressions (subqueries, lookups) to
+							// parallelize. For simple field accesses, the default
+							// sequential implementation is used.
+							let field_values =
+								field.expr.evaluate_batch(eval_ctx.clone(), &batch.values).await?;
 							for (i, field_value) in field_values.into_iter().enumerate() {
 								set_field_on_object(
 									&mut objects[i],
@@ -566,6 +586,10 @@ impl ExecOperator for SelectProject {
 		self.input.access_mode()
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.input.cardinality_hint()
+	}
+
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
@@ -574,9 +598,17 @@ impl ExecOperator for SelectProject {
 		Some(&self.metrics)
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		self.input.output_ordering()
+	}
+
 	#[instrument(level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let projections = Arc::clone(&self.projections);
 		let ctx = ctx.clone();
 
@@ -618,25 +650,24 @@ async fn apply_projections(
 	projections: &[Projection],
 	ctx: &ExecutionContext,
 ) -> Result<Value, crate::expr::ControlFlow> {
-	// Classify projections in a single pass (used by both the async dereference
-	// path and the sync object-shaping path).
 	let has_all = projections.iter().any(|p| matches!(p, Projection::All));
+	let has_includes =
+		projections.iter().any(|p| matches!(p, Projection::Include(_) | Projection::Rename { .. }));
 
-	// Get the input object, dereferencing RecordId if needed for SELECT *
+	// Get the input object, dereferencing RecordId when needed.
+	// RecordIds must be dereferenced for SELECT * (all fields) and for
+	// specific field selections (e.g. SELECT id FROM [person:1]).
 	let input_obj = match value {
 		Value::Object(obj) => obj.clone(),
-		Value::RecordId(rid) if has_all => {
-			// Dereference RecordId to full record with computed fields for SELECT *
-			let eval_ctx = EvalContext::from_exec_ctx(ctx);
-			match fetch_record_with_computed_fields(rid, eval_ctx)
-				.await
-				.map_err(crate::expr::ControlFlow::Err)?
-			{
+		Value::RecordId(rid) if has_all || has_includes => {
+			match super::fetch::fetch_record(ctx, rid).await? {
 				Value::Object(obj) => obj,
 				Value::None => return Ok(Value::None),
 				other => return Ok(other),
 			}
 		}
+		// Geometry values expose GeoJSON fields (type, coordinates, etc.)
+		Value::Geometry(geo) if has_all || has_includes => geo.as_object(),
 		_ => return Ok(value.clone()),
 	};
 
@@ -653,40 +684,37 @@ fn apply_projections_to_object(
 ) -> Value {
 	// Build output object
 	let mut output = if has_all {
-		// Start with all fields from input, removing any omitted ones
-		let mut obj = input_obj.clone();
-		for p in projections {
-			if let Projection::Omit(name) = p {
-				obj.remove(name.as_str());
-			}
-		}
-		obj
+		input_obj.clone()
 	} else {
 		Object::default()
 	};
 
-	// Apply includes and renames
+	// Apply includes and renames.
+	// Fields that don't exist on the input default to Value::None,
+	// matching SQL projection semantics (SELECT v FROM t always
+	// produces a `v` column, even when the record lacks it).
 	for projection in projections {
 		match projection {
 			Projection::Include(name) => {
-				if let Some(v) = input_obj.get(name) {
-					output.insert(name.clone(), v.clone());
-				}
+				let v = input_obj.get(name).cloned().unwrap_or(Value::None);
+				output.insert(name.clone(), v);
 			}
 			Projection::Rename {
 				from,
 				to,
 			} => {
-				if let Some(v) = input_obj.get(from) {
-					output.insert(to.clone(), v.clone());
-					// If we had All, we need to remove the original name
-					// to avoid having both `from` and `to` in output
-					if has_all {
-						output.remove(from);
-					}
+				let v = input_obj.get(from).cloned().unwrap_or(Value::None);
+				output.insert(to.clone(), v);
+				// If we had All, remove the original name to avoid
+				// having both `from` and `to` in output.
+				if has_all {
+					output.remove(from);
 				}
 			}
-			Projection::All | Projection::Omit(_) => {
+			Projection::Omit(name) => {
+				output.remove(name.as_str());
+			}
+			Projection::All => {
 				// Already handled above
 			}
 		}

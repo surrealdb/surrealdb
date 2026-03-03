@@ -16,7 +16,8 @@ use crate::catalog::providers::TableProvider;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{
-	AccessMode, ExecOperator, FlowResult, OperatorMetrics, ValueBatch, ValueBatchStream,
+	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatch,
+	ValueBatchStream,
 };
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Object, TableName, Value};
@@ -66,15 +67,26 @@ impl ExecOperator for IndexInfoPlan {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		ContextLevel::Database
+		// Index info needs database context, combined with expression contexts
+		self.index.required_context().max(self.table.required_context()).max(ContextLevel::Database)
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		AccessMode::ReadOnly
+		// Info is inherently read-only, but the index/table expressions
+		// could theoretically contain mutation subqueries.
+		self.index.access_mode().combine(self.table.access_mode())
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		CardinalityHint::AtMostOne
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(self.metrics.as_ref())
+	}
+
+	fn expressions(&self) -> Vec<(&str, &Arc<dyn PhysicalExpr>)> {
+		vec![("index", &self.index), ("table", &self.table)]
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {

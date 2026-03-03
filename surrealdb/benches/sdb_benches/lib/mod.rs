@@ -30,8 +30,8 @@ pub(super) async fn init(target: &str) {
 		"lib-rocksdb" => {
 			let path = format!(
 				"rocksdb://lib-rocksdb-{}.db",
-				std::time::SystemTime::now()
-					.duration_since(std::time::UNIX_EPOCH)
+				web_time::SystemTime::now()
+					.duration_since(web_time::UNIX_EPOCH)
 					.unwrap()
 					.as_millis()
 			);
@@ -50,8 +50,8 @@ pub(super) async fn init(target: &str) {
 		"lib-surrealkv" => {
 			let path = format!(
 				"surrealkv://lib-surrealkv-{}.db",
-				std::time::SystemTime::now()
-					.duration_since(std::time::UNIX_EPOCH)
+				web_time::SystemTime::now()
+					.duration_since(web_time::UNIX_EPOCH)
 					.unwrap()
 					.as_millis()
 			);

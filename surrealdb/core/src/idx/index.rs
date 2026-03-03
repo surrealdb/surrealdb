@@ -16,7 +16,9 @@
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
+use uuid::Uuid;
 
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{
 	DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition, NamespaceId, TableId,
 };
@@ -27,9 +29,9 @@ use crate::expr::{Cond, Part};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::planner::iterators::IndexCountThingIterator;
+use crate::idx::trees::store::IndexStores;
 use crate::key;
 use crate::key::index::iu::IndexCountKey;
-use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::Transaction;
 use crate::val::{Array, RecordId, Value};
 
@@ -46,6 +48,10 @@ pub(crate) struct IndexOperation<'a> {
 	/// The new values (if existing)
 	n: Option<Vec<Value>>,
 	rid: &'a RecordId,
+	/// For COUNT indexes with a WHERE condition: pre-evaluated condition results.
+	/// `(old_doc_matches, new_doc_matches)` — whether the old/new document
+	/// satisfies the COUNT index condition. `None` for non-COUNT indexes.
+	count_cond_match: Option<(bool, bool)>,
 }
 
 impl<'a> IndexOperation<'a> {
@@ -72,7 +78,13 @@ impl<'a> IndexOperation<'a> {
 			o,
 			n,
 			rid,
+			count_cond_match: None,
 		}
+	}
+
+	pub(crate) fn with_count_cond_match(mut self, old_matches: bool, new_matches: bool) -> Self {
+		self.count_cond_match = Some((old_matches, new_matches));
+		self
 	}
 
 	pub(crate) async fn compute(
@@ -85,7 +97,7 @@ impl<'a> IndexOperation<'a> {
 			Index::Uniq => self.index_unique().await,
 			Index::Idx => self.index_non_unique().await,
 			Index::FullText(p) => self.index_fulltext(stk, p, require_compaction).await,
-			Index::Hnsw(p) => self.index_hnsw(p).await,
+			Index::Hnsw(p) => self.index_hnsw(p, require_compaction).await,
 			Index::Count(c) => self.index_count(stk, c.as_ref(), require_compaction).await,
 		}
 	}
@@ -189,35 +201,27 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_count(
 		&mut self,
-		_stk: &mut Stk,       // Placeholder for phase 2 (Condition)
-		_cond: Option<&Cond>, // Placeholder for phase 2 (Condition)
+		_stk: &mut Stk,
+		cond: Option<&Cond>,
 		require_compaction: &mut bool,
 	) -> Result<()> {
-		// Phase 2 (Condition)
-		// let is_truthy = async |stk: &mut Stk, c: &Cond, d: &CursorDoc| -> Result<bool> {
-		// 	Ok(stk.run(|stk| c.0.compute(stk, ctx, opt, Some(d))).await.catch_return()?.is_truthy())
-		// };
 		let mut relative_count: i8 = 0;
-		// Phase 2 - with condition
-		// if let Some(c) = cond {
-		// 	if self.o.is_some() {
-		// 		if is_truthy(stk, c, &self.doc.initial).await? {
-		// 			relative_count -= 1;
-		// 		}
-		// 	}
-		// 	if self.n.is_some() {
-		// 		if is_truthy(stk, c, &self.doc.current).await? {
-		// 			relative_count += 1;
-		// 		}
-		// 	}
-		// } else {
-		if self.o.is_some() {
-			relative_count -= 1;
+		if let Some(_c) = cond {
+			let (old_matches, new_matches) = self.count_cond_match.unwrap_or((false, false));
+			if self.o.is_some() && old_matches {
+				relative_count -= 1;
+			}
+			if self.n.is_some() && new_matches {
+				relative_count += 1;
+			}
+		} else {
+			if self.o.is_some() {
+				relative_count -= 1;
+			}
+			if self.n.is_some() {
+				relative_count += 1;
+			}
 		}
-		if self.n.is_some() {
-			relative_count += 1;
-		}
-		// }
 		if relative_count == 0 {
 			return Ok(());
 		}
@@ -235,11 +239,36 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	pub(crate) async fn index_count_compaction(
-		ic: &IndexCompactionKey<'_>,
+	pub(crate) async fn index_fulltext_compaction(
+		ixs: &IndexStores,
+		ikb: &IndexKeyBase,
 		tx: &Transaction,
+		p: &FullTextParams,
 	) -> Result<()> {
-		IndexCountThingIterator::new(ic.ns, ic.db, ic.tb.as_ref(), ic.ix)?.compaction(ic, tx).await
+		let ft = FullTextIndex::new(ixs, tx, ikb.clone(), p).await?;
+		ft.compaction(tx).await?;
+		Ok(())
+	}
+
+	pub(crate) async fn index_hnsw_compaction(
+		ctx: &FrozenContext,
+		ixs: &IndexStores,
+		ikb: &IndexKeyBase,
+		ix: &IndexDefinition,
+		p: &HnswParams,
+	) -> Result<()> {
+		let tx = ctx.tx();
+		if let Some(tb) = tx.get_tb(ikb.ns(), ikb.db(), ikb.table()).await? {
+			let hnsw = ixs.get_index_hnsw(ikb.ns(), ikb.db(), ctx, tb.table_id, ix, p).await?;
+			hnsw.index_pendings(ctx).await?;
+		}
+		Ok(())
+	}
+
+	pub(crate) async fn index_count_compaction(ikb: &IndexKeyBase, tx: &Transaction) -> Result<()> {
+		IndexCountThingIterator::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index())?
+			.compaction(ikb, tx)
+			.await
 	}
 
 	/// Construct a consistent uniqueness violation error message.
@@ -290,23 +319,41 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	pub(crate) async fn trigger_compaction(&self) -> Result<()> {
-		FullTextIndex::trigger_compaction(&self.ikb, &self.ctx.tx(), self.opt.id()).await
+		IndexOperation::compaction_trigger(&self.ikb, &self.ctx.tx(), self.opt.id()).await
 	}
 
-	async fn index_hnsw(&mut self, p: &HnswParams) -> Result<()> {
+	/// Triggers index compaction.
+	///
+	/// This method adds an entry to the index compaction queue by creating an
+	/// `Ic` key for the specified index. The index compaction thread will
+	/// later process this entry and perform the actual compaction via
+	/// [`Datastore::index_compaction`].
+	///
+	/// Compaction helps optimize index performance after many mutations.
+	/// For full-text indexes it consolidates term frequency and document
+	/// length data; for HNSW indexes it processes pending vector operations;
+	/// for count indexes it reconciles count tracking entries.
+	pub(crate) async fn compaction_trigger(
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+		nid: Uuid,
+	) -> Result<()> {
+		let ic = ikb.new_ic_key(nid);
+		tx.put(&ic, &(), None).await?;
+		Ok(())
+	}
+
+	async fn index_hnsw(&mut self, p: &HnswParams, require_compaction: &mut bool) -> Result<()> {
 		let hnsw = self
 			.ctx
 			.get_index_stores()
 			.get_index_hnsw(self.ns, self.db, self.ctx, self.tb, self.ix, p)
 			.await?;
-		let mut hnsw = hnsw.write().await;
-		// Delete the old index data
-		if let Some(o) = self.o.take() {
-			hnsw.remove_document(self.ctx, self.rid.key.clone(), &o).await?;
-		}
-		// Create the new index data
-		if let Some(n) = self.n.take() {
-			hnsw.index_document(self.ctx, &self.rid.key, &n).await?;
+		let old_values = self.o.take();
+		let new_values = self.n.take();
+		if old_values.is_some() || new_values.is_some() {
+			hnsw.index(self.ctx, &self.rid.key, old_values, new_values).await?;
+			*require_compaction = true;
 		}
 		Ok(())
 	}

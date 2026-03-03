@@ -148,7 +148,7 @@ impl GroupCollector {
 		};
 
 		if let RecordStrategy::Count = rs {
-			let Value::Number(n) = doc.doc.data.as_ref() else {
+			let Value::Number(n) = doc.doc.as_ref() else {
 				fail!("Value for Count RecordStrategy was not a number");
 			};
 
@@ -186,7 +186,7 @@ impl GroupCollector {
 		let mut doc: CursorDoc = Value::empty_object().into();
 
 		for (group, result) in std::mem::take(&mut self.results) {
-			let Value::Object(doc_obj) = doc.doc.data.to_mut() else {
+			let Value::Object(doc_obj) = doc.doc.to_mut() else {
 				// We create the document above as a object so it must be an object.
 				unreachable!()
 			};

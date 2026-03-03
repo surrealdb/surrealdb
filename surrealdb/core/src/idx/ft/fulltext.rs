@@ -373,9 +373,9 @@ impl FullTextIndex {
 
 	/// Extracts query terms from a search string
 	///
-	/// This method tokenizes the query string and retrieves the document sets
-	/// for each term. It returns a QueryTerms object containing the tokens and
-	/// their associated document sets.
+	/// Tokenizes the query string, then retrieves the document bitmaps for each
+	/// unique term. The compacted bitmap fetches are batched via `tx.getm()` to
+	/// reduce KV round trips (one batch instead of N sequential gets).
 	pub(crate) async fn extract_querying_terms(
 		&self,
 		stk: &mut Stk,
@@ -383,28 +383,69 @@ impl FullTextIndex {
 		opt: &Options,
 		query_string: String,
 	) -> Result<QueryTerms> {
-		// We extract the tokens
 		let tokens = self
 			.analyzer
 			.generate_tokens(stk, ctx, opt, FilteringStage::Querying, query_string)
 			.await?;
-		// We collect the term docs
-		let mut docs = Vec::with_capacity(tokens.list().len());
+
+		let mut unique_terms: Vec<&str> = Vec::new();
 		let mut unique_tokens = HashSet::new();
-		let tx = ctx.tx();
-		let mut has_unknown_terms = false;
 		for token in tokens.list() {
-			// Tokens can contain duplicates, not need to evaluate them again
 			if unique_tokens.insert(token) {
-				// Is the term known in the index?
-				let term = tokens.get_token_string(token)?;
-				let d = self.get_docs(&tx, term).await?;
-				if !has_unknown_terms && d.is_none() {
-					has_unknown_terms = true;
-				}
-				docs.push(d);
+				unique_terms.push(tokens.get_token_string(token)?);
 			}
 		}
+
+		let tx = ctx.tx();
+
+		// Phase 1: Collect deltas for each term (sequential range scans)
+		let mut all_deltas: Vec<HashMap<DocId, i64>> = Vec::with_capacity(unique_terms.len());
+		for term in &unique_terms {
+			let (beg, end) = self.ikb.new_tt_term_range(term)?;
+			let mut deltas: HashMap<DocId, i64> = HashMap::new();
+			for k in tx.keys(beg..end, u32::MAX, 0, None).await? {
+				let tt = Tt::decode_key(&k)?;
+				let entry = deltas.entry(tt.doc_id).or_default();
+				if tt.add {
+					*entry += 1;
+				} else {
+					*entry -= 1;
+				}
+			}
+			all_deltas.push(deltas);
+		}
+
+		// Phase 2: Batch-fetch compacted bitmaps for all terms at once
+		let bitmap_keys: Vec<_> =
+			unique_terms.iter().map(|term| self.ikb.new_td_root(term)).collect();
+		let bitmaps: Vec<Option<RoaringTreemap>> = tx.getm(bitmap_keys, None).await?;
+
+		// Phase 3: Merge deltas into bitmaps
+		let mut docs = Vec::with_capacity(unique_terms.len());
+		let mut has_unknown_terms = false;
+		for (bitmap, deltas) in bitmaps.into_iter().zip(all_deltas.iter()) {
+			let mut doc_set = bitmap.unwrap_or_default();
+			for (doc_id, delta) in deltas {
+				match 0.cmp(delta) {
+					Ordering::Greater => {
+						doc_set.remove(*doc_id);
+					}
+					Ordering::Less => {
+						doc_set.insert(*doc_id);
+					}
+					Ordering::Equal => {}
+				}
+			}
+			if doc_set.is_empty() {
+				if !has_unknown_terms {
+					has_unknown_terms = true;
+				}
+				docs.push(None);
+			} else {
+				docs.push(Some(doc_set));
+			}
+		}
+
 		Ok(QueryTerms {
 			tokens,
 			docs,
@@ -426,39 +467,6 @@ impl FullTextIndex {
 		match bo {
 			BooleanOperator::And => qt.matches_and(&tks),
 			BooleanOperator::Or => qt.matches_or(&tks),
-		}
-	}
-
-	async fn get_docs(&self, tx: &Transaction, term: &str) -> Result<Option<RoaringTreemap>> {
-		// We compute the not yet compacted term/documents if any
-		let (beg, end) = self.ikb.new_tt_term_range(term)?;
-
-		// Track document ID deltas: positive values mean document contains the term,
-		// negative values mean document no longer contains the term
-		let mut deltas: HashMap<DocId, i64> = HashMap::new();
-
-		// Scan all term-document transaction logs for this term
-		for k in tx.keys(beg..end, u32::MAX, 0, None).await? {
-			let tt = Tt::decode_key(&k)?;
-			let entry = deltas.entry(tt.doc_id).or_default();
-			// Increment or decrement the counter based on whether we're adding or removing
-			// the term
-			if tt.add {
-				*entry += 1;
-			} else {
-				*entry -= 1;
-			}
-		}
-
-		// Merge the delta changes with the consolidated document set
-		let docs = self.append_term_docs_delta(tx, term, &deltas).await?;
-
-		// If the final `docs` is empty, we return `None` to indicate no documents
-		// contain this term
-		if docs.is_empty() {
-			Ok(None)
-		} else {
-			Ok(Some(docs))
 		}
 	}
 
@@ -718,26 +726,6 @@ impl FullTextIndex {
 		Ok(r1 || r2)
 	}
 
-	/// Triggers compaction for the full-text index
-	///
-	/// This method adds an entry to the index compaction queue by creating an
-	/// `Ic` key for the specified index. The index compaction thread will
-	/// later process this entry and perform the actual compaction of the
-	/// index.
-	///
-	/// Compaction helps optimize full-text index performance by consolidating
-	/// term frequency data and document length information, which can become
-	/// fragmented after many updates to the index.
-	pub(crate) async fn trigger_compaction(
-		ikb: &IndexKeyBase,
-		tx: &Transaction,
-		nid: Uuid,
-	) -> Result<()> {
-		let ic = ikb.new_ic_key(nid);
-		tx.put(&ic, &(), None).await?;
-		Ok(())
-	}
-
 	/// Highlights search terms in a document
 	///
 	/// This method highlights the occurrences of search terms in the document
@@ -973,6 +961,7 @@ mod tests {
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::offset::Offset;
+	use crate::idx::index::IndexOperation;
 	use crate::kvs::LockType::*;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use crate::sql::Expr;
@@ -1107,7 +1096,7 @@ mod tests {
 				.unwrap();
 
 			if require_compaction {
-				FullTextIndex::trigger_compaction(&self.ikb, &tx, self.nid).await.unwrap();
+				IndexOperation::compaction_trigger(&self.ikb, &tx, self.nid).await.unwrap();
 			}
 
 			tx.commit().await.unwrap();

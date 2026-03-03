@@ -48,7 +48,6 @@ pub(crate) mod tasklease;
 pub(crate) mod version;
 
 pub use api::{ScanLimit, Transactable};
-pub use clock::SizedClock;
 pub(crate) use ds::TransactionFactory;
 pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
 pub use ds::{
@@ -63,6 +62,7 @@ pub use timestamp::{
 	MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
 };
 pub use tr::{LockType, TransactionType, Transactor};
+pub(crate) use tx::CachePolicy;
 pub use tx::Transaction;
 
 /// The key part of a key-value pair. An alias for [`Vec<u8>`].

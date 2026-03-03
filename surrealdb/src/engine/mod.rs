@@ -22,6 +22,15 @@ use futures::Stream;
 use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Interval;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+	feature = "protocol-http",
+	feature = "protocol-ws",
+))]
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasmtimer::std::Instant;
@@ -50,18 +59,35 @@ impl Stream for IntervalStream {
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
-enum SessionError {
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+	feature = "protocol-http",
+	feature = "protocol-ws",
+))]
+pub(crate) enum SessionError {
 	NotFound(Uuid),
 	Remote(String),
 }
 
-impl From<SessionError> for crate::Error {
-	fn from(error: SessionError) -> Self {
-		match error {
-			SessionError::NotFound(id) => {
-				crate::Error::InternalError(format!("Session not found: {id}"))
-			}
-			SessionError::Remote(error) => crate::Error::InternalError(error),
+/// Convert a session error into the public error type.
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+	feature = "protocol-http",
+	feature = "protocol-ws",
+))]
+pub(crate) fn session_error_to_error(e: SessionError) -> surrealdb_types::Error {
+	match e {
+		SessionError::NotFound(id) => {
+			surrealdb_types::Error::internal(format!("Session not found: {id}"))
 		}
+		SessionError::Remote(msg) => surrealdb_types::Error::internal(msg),
 	}
 }

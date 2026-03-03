@@ -11,13 +11,13 @@ use crate::cnf::COUNT_BATCH_SIZE;
 use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::expr::BinaryOperator;
+use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextHitsIterator;
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::idx::seqdocids::DocId;
 use crate::key::index::Index;
 use crate::key::index::iu::IndexCountKey;
-use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::val::{Array, RecordId, TableName, Value};
 
@@ -1639,6 +1639,9 @@ where
 	}
 }
 
+/// For earch KNN result we have the RecordID, the distance (f64), and an optional record.
+/// Optimisation: The optional record is present if a filter has checked if the record is truthy has
+/// been used
 pub(crate) type KnnIteratorResult = (Arc<RecordId>, f64, Option<Arc<Record>>);
 
 pub(crate) struct KnnIterator {
@@ -1737,7 +1740,7 @@ impl IndexCountThingIterator {
 
 	pub(in crate::idx) async fn compaction(
 		&mut self,
-		ic: &IndexCompactionKey<'_>,
+		ikb: &IndexKeyBase,
 		txn: &Transaction,
 	) -> Result<()> {
 		let Some(range) = self.0.take() else {
@@ -1765,7 +1768,8 @@ impl IndexCountThingIterator {
 		txn.delr(range).await?;
 		let pos = count.is_positive();
 		let count = count.unsigned_abs();
-		let compact_key = IndexCountKey::new(ic.ns, ic.db, ic.tb.as_ref(), ic.ix, None, pos, count);
+		let compact_key =
+			IndexCountKey::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None, pos, count);
 		txn.put(&compact_key, &(), None).await?;
 		Ok(())
 	}

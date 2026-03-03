@@ -171,18 +171,6 @@ macro_rules! catch {
 	};
 }
 
-macro_rules! catch_into {
-	($txn:ident, $default:expr_2021) => {
-		match $default {
-			Err(e) => {
-				let _ = $txn.cancel().await;
-				return Err(e.into());
-			}
-			Ok(v) => v,
-		}
-	};
-}
-
 /// Runs a method on a transaction, ensuring that the transaction
 /// is cancelled and rolled back if the initial function fails, or
 /// committed successfully if the initial function succeeds. This

@@ -12,7 +12,7 @@ use futures::stream::{self, StreamExt};
 
 use crate::exec::{
 	AccessMode, CombineAccessModes, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, ValueBatchStream, monitor_stream,
+	OperatorMetrics, ValueBatchStream, buffer_stream, monitor_stream,
 };
 
 /// Union operator - combines results from multiple execution plans.
@@ -73,7 +73,11 @@ impl ExecOperator for Union {
 		}
 
 		if self.inputs.len() == 1 {
-			let stream = self.inputs[0].execute(ctx)?;
+			let stream = buffer_stream(
+				self.inputs[0].execute(ctx)?,
+				self.inputs[0].access_mode(),
+				self.inputs[0].cardinality_hint(),
+			);
 			return Ok(monitor_stream(stream, "Union", &self.metrics));
 		}
 
@@ -109,7 +113,13 @@ impl ExecOperator for Union {
 					idx += 1;
 
 					match inputs[i].execute(&ctx) {
-						Ok(stream) => current = Some(stream),
+						Ok(stream) => {
+							current = Some(buffer_stream(
+								stream,
+								inputs[i].access_mode(),
+								inputs[i].cardinality_hint(),
+							))
+						}
 						Err(e) => return Some((Err(e), (inputs, ctx, idx, None))),
 					}
 				}

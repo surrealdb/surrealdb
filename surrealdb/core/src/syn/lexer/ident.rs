@@ -21,7 +21,6 @@ impl Lexer<'_> {
 		span: Span,
 		buffer: &'a mut Vec<u8>,
 	) -> Result<&'a str, SyntaxError> {
-		buffer.clear();
 		let mut reader = BytesReader::new(str.as_bytes());
 		match reader.next() {
 			Some(b'`') => Self::unescape_backtick_span(reader, span, buffer),
@@ -37,6 +36,7 @@ impl Lexer<'_> {
 		span: Span,
 		buffer: &'a mut Vec<u8>,
 	) -> Result<&'a str, SyntaxError> {
+		buffer.clear();
 		loop {
 			// lexer ensures that backtick tokens end with `.
 			let before = reader.offset();
@@ -53,6 +53,9 @@ impl Lexer<'_> {
 			}
 		}
 
+		// Safety: We clear the buffer, and then we only push either ascii characters, bytes from
+		// an existing valid string or explicity utf-8 encoded bytes. Therefore it is safe to
+		// assume the buffer is valid utf-8
 		Ok(unsafe { std::str::from_utf8_unchecked(buffer) })
 	}
 
@@ -61,6 +64,7 @@ impl Lexer<'_> {
 		span: Span,
 		buffer: &'a mut Vec<u8>,
 	) -> Result<&'a str, SyntaxError> {
+		buffer.clear();
 		assert_eq!(reader.complete_char(BRACKET_START_CHARACTER).expect("valid character"), '⟨');
 		loop {
 			// lexer ensures that backtick tokens end with `
@@ -86,6 +90,9 @@ impl Lexer<'_> {
 			}
 		}
 
+		// Safety: We clear the buffer, and then we only push either ascii characters, bytes from
+		// an existing valid string or explicity utf-8 encoded bytes. Therefore it is safe to
+		// assume the buffer is valid utf-8
 		Ok(unsafe { std::str::from_utf8_unchecked(buffer) })
 	}
 

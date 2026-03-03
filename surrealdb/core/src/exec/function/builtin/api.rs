@@ -3,7 +3,6 @@
 use anyhow::Result;
 use reblessive::TreeStack;
 
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::exec::function::{FunctionRegistry, ScalarFunction, Signature};
 use crate::exec::physical_expr::EvalContext;
@@ -45,19 +44,6 @@ impl ScalarFunction for ApiInvoke {
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
-			// Check DefineApi experimental capability
-			let caps = ctx.capabilities();
-			if !caps.allows_experimental(&ExperimentalTarget::DefineApi) {
-				return Err(Error::InvalidFunction {
-					name: "api::invoke".to_string(),
-					message: format!(
-						"Experimental feature {} is not enabled",
-						ExperimentalTarget::DefineApi
-					),
-				}
-				.into());
-			}
-
 			let frozen = ctx.exec_ctx.ctx();
 			let opt = ctx.exec_ctx.options().ok_or_else(|| {
 				anyhow::anyhow!(Error::Internal("No options available for api::invoke".to_string()))

@@ -15,7 +15,8 @@ impl CratePath {
 	/// Parse the crate path from attributes.
 	///
 	/// Looks for `#[surreal(crate = "path::to::crate")]` attribute.
-	/// Defaults to `::surrealdb_types` if not specified.
+	/// If not specified, defaults to `::surrealdb::types` when the
+	/// `sdk-path` feature is enabled, otherwise `::surrealdb_types`.
 	pub fn parse(attrs: &[Attribute]) -> Self {
 		for attr in attrs {
 			if attr.path().is_ident("surreal") {
@@ -40,7 +41,6 @@ impl CratePath {
 			}
 		}
 
-		// Default to ::surrealdb_types
 		Self::default()
 	}
 
@@ -86,16 +86,17 @@ impl CratePath {
 		quote! { #base::TypeError }
 	}
 
-	/// Get the token stream for anyhow::Result
-	pub fn anyhow_result(&self) -> TokenStream {
+	/// Get the token stream for `Result<Self, Error>` (used as the return type of `from_value`).
+	pub fn error_result(&self) -> TokenStream {
 		let base = &self.path;
-		quote! { #base::anyhow::Result }
+		quote! { std::result::Result<Self, #base::Error> }
 	}
 
-	/// Get the token stream for anyhow::anyhow!
-	pub fn anyhow_macro(&self) -> TokenStream {
+	/// Get the token stream for `Error::internal(msg)`. The passed token stream must
+	/// produce a value that converts to String (e.g. `format!(...)` or `"msg".to_string()`).
+	pub fn error_internal(&self, msg: TokenStream) -> TokenStream {
 		let base = &self.path;
-		quote! { #base::anyhow::anyhow }
+		quote! { #base::Error::internal(#msg) }
 	}
 
 	/// Get the token stream for Value::from_t function
@@ -107,8 +108,13 @@ impl CratePath {
 
 impl Default for CratePath {
 	fn default() -> Self {
+		let path = if cfg!(feature = "sdk-path") {
+			quote! { ::surrealdb::types }
+		} else {
+			quote! { ::surrealdb_types }
+		};
 		Self {
-			path: quote! { ::surrealdb_types },
+			path,
 		}
 	}
 }

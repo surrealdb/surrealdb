@@ -27,9 +27,6 @@ value = "[{ id: t:0, v: NONE }, { id: t:1, v: NULL }, { id: t:2, v: true }, { id
 
 [[test.results]]
 value = "NONE"
-
-
-
 */
 array::max([]);
 array::max("some text");

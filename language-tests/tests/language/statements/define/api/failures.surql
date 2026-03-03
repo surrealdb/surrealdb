@@ -11,9 +11,6 @@ value = "{ body: 'deadline has elapsed', headers: {  }, status: 500 }"
 [[test.results]]
 error = "The string could not be parsed into a path: Segment should start with /"
 
-[env.capabilities]
-allow-experimental = ["define_api"]
-
 */
 
 DEFINE API "/exceeds_timeout"

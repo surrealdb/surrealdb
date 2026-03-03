@@ -19,11 +19,11 @@ pub enum FieldPathPart {
 	Field(String),
 	/// Literal integer index: `[0]`, `[1]`
 	Index(usize),
-	/// First element: `[0]` or `$first`
+	/// First element: `[0]`
 	First,
-	/// Last element: `[$]` or `$last`
+	/// Last element: `[$]`
 	Last,
-	/// Graph traversal key: `->table` or `<-table`
+	/// Graph traversal key: `->table`, `<-table`, `<->table`
 	Lookup(String),
 }
 
@@ -77,12 +77,14 @@ impl TryFrom<&Idiom> for FieldPath {
 				// Skip parts that don't affect output path structure
 				Part::Destructure(_) | Part::Start(_) => {}
 				_ => {
-					return Err(Error::PlannerUnimplemented(format!(
-						"FieldPath cannot contain complex parts like where clauses or method calls. \
+					return Err(Error::Query {
+						message: format!(
+							"FieldPath cannot contain complex parts like where clauses or method calls. \
 				 Only simple field access (a.b.c), literal indices ([0], [$]), and graph traversals are supported. \
 				 Got: {:?}",
-						idiom
-					)));
+							idiom
+						),
+					});
 				}
 			}
 		}

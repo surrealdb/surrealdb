@@ -31,8 +31,8 @@ static SURREAL_DATASTORE_RETENTION: LazyLock<Option<String>> =
 	lazy_env_parse!("SURREAL_DATASTORE_RETENTION", Option<String>);
 
 /// Filesystem path for persistence ('memory' engine only).
-/// This is an alternative to the `persist` query parameter.
-/// Only used by the 'memory' engine.
+/// Only used by the 'memory' engine when no path is given in the URL (e.g. `mem://`).
+/// When using `mem:///path` or `Surreal::new::<Mem>("/path")`, the path is taken from the URL.
 /// Accepts: a filesystem path.
 static SURREAL_DATASTORE_PERSIST: LazyLock<Option<String>> =
 	lazy_env_parse!("SURREAL_DATASTORE_PERSIST", Option<String>);
@@ -78,7 +78,8 @@ pub struct MemoryConfig {
 	pub versioned: bool,
 	/// Version retention period in nanoseconds (0 = unlimited).
 	pub retention_ns: u64,
-	/// Path for persistence files. If set, enables disk persistence.
+	/// Path for persistence files (from URL path, e.g. `mem:///tmp/data`). If set, enables disk
+	/// persistence.
 	pub persist_path: Option<String>,
 	/// Sync mode. Requires `persist_path`.
 	pub sync_mode: SyncMode,
@@ -102,11 +103,18 @@ impl Default for MemoryConfig {
 }
 
 impl MemoryConfig {
-	/// Build configuration from parsed query parameters, with environment
-	/// variable fallbacks. Query parameters take precedence over env vars,
-	/// which take precedence over engine defaults.
-	pub fn from_params(params: &HashMap<String, String>) -> Result<Self> {
+	/// Build configuration from the URL path and parsed query parameters.
+	/// The path is the component after `mem://` (e.g. empty for in-memory only,
+	/// or `/tmp/data` for persistence). Query parameters and env vars provide the rest.
+	pub fn from_path_and_params(path: &str, params: &HashMap<String, String>) -> Result<Self> {
 		let mut config = Self::default();
+		// Persist path: from URL path first, else env var when path is empty
+		let path = path.trim();
+		if !path.is_empty() {
+			config.persist_path = Some(path.to_string());
+		} else if let Some(v) = SURREAL_DATASTORE_PERSIST.as_deref() {
+			config.persist_path = Some(v.to_string());
+		}
 		// Check whether versioning is enabled (query param > env var > default)
 		if let Some(v) = params.get("versioned") {
 			config.versioned = v.eq_ignore_ascii_case("true") || v == "1";
@@ -120,12 +128,6 @@ impl MemoryConfig {
 		} else if let Some(v) = SURREAL_DATASTORE_RETENTION.as_deref() {
 			let dur = parse_duration(v)?;
 			config.retention_ns = dur.as_nanos() as u64;
-		}
-		// Determine whether persistence is enabled (query param > env var > default)
-		if let Some(v) = params.get("persist") {
-			config.persist_path = Some(v.clone());
-		} else if let Some(v) = SURREAL_DATASTORE_PERSIST.as_deref() {
-			config.persist_path = Some(v.to_string());
 		}
 		// Determine the append-only-log mode (query param > env var > default)
 		if let Some(v) = params.get("aol") {
@@ -145,21 +147,21 @@ impl MemoryConfig {
 		} else if let Some(v) = SURREAL_DATASTORE_SYNC_DATA.as_deref() {
 			config.sync_mode = parse_sync_mode(v)?;
 		}
-		// Validate: aol, snapshot, and sync require persist
+		// Validate: aol, snapshot, and sync require a persist path
 		if config.persist_path.is_none() {
 			if config.sync_mode != SyncMode::Never {
 				return Err(Error::Datastore(
-					"The 'sync' option requires 'persist' to be set".to_string(),
+					"The 'sync' option requires a persist path (e.g. mem:///path or Surreal::new::<Mem>(\"/path\"))".to_string(),
 				));
 			}
 			if config.aol_mode != AolMode::Never {
 				return Err(Error::Datastore(
-					"The 'aol' option requires 'persist' to be set".to_string(),
+					"The 'aol' option requires a persist path (e.g. mem:///path or Surreal::new::<Mem>(\"/path\"))".to_string(),
 				));
 			}
 			if config.snapshot_mode != SnapshotMode::Never {
 				return Err(Error::Datastore(
-					"The 'snapshot' option requires 'persist' to be set".to_string(),
+					"The 'snapshot' option requires a persist path (e.g. mem:///path or Surreal::new::<Mem>(\"/path\"))".to_string(),
 				));
 			}
 		}
@@ -562,7 +564,7 @@ mod tests {
 
 	#[test]
 	fn test_memory_config_defaults() {
-		let config = MemoryConfig::from_params(&HashMap::new()).unwrap();
+		let config = MemoryConfig::from_path_and_params("", &HashMap::new()).unwrap();
 		assert!(!config.versioned);
 		assert_eq!(config.retention_ns, 0);
 		assert!(config.persist_path.is_none());
@@ -573,9 +575,9 @@ mod tests {
 
 	#[test]
 	fn test_memory_config_with_persistence() {
-		let params =
-			parse_query_params("versioned=true&persist=/tmp/data&aol=sync&snapshot=60s&sync=5s");
-		let config = MemoryConfig::from_params(&params).unwrap();
+		// Persist path comes from URL path (e.g. mem:///tmp/data), not query params
+		let params = parse_query_params("versioned=true&aol=sync&snapshot=60s&sync=5s");
+		let config = MemoryConfig::from_path_and_params("/tmp/data", &params).unwrap();
 		assert!(config.versioned);
 		assert_eq!(config.persist_path.as_deref(), Some("/tmp/data"));
 		assert_eq!(config.aol_mode, AolMode::Sync);
@@ -586,13 +588,13 @@ mod tests {
 	#[test]
 	fn test_memory_config_aol_requires_persist() {
 		let params = parse_query_params("aol=sync");
-		assert!(MemoryConfig::from_params(&params).is_err());
+		assert!(MemoryConfig::from_path_and_params("", &params).is_err());
 	}
 
 	#[test]
 	fn test_memory_config_sync_requires_persist() {
 		let params = parse_query_params("sync=every");
-		assert!(MemoryConfig::from_params(&params).is_err());
+		assert!(MemoryConfig::from_path_and_params("", &params).is_err());
 	}
 
 	#[test]
@@ -676,10 +678,9 @@ mod tests {
 
 	#[test]
 	fn test_query_param_overrides_for_memory() {
-		let params = parse_query_params(
-			"versioned=true&retention=24h&persist=/tmp/test&aol=async&snapshot=5m&sync=every",
-		);
-		let config = MemoryConfig::from_params(&params).unwrap();
+		let params =
+			parse_query_params("versioned=true&retention=24h&aol=async&snapshot=5m&sync=every");
+		let config = MemoryConfig::from_path_and_params("/tmp/test", &params).unwrap();
 		assert!(config.versioned);
 		assert_eq!(config.retention_ns, 24 * 3600 * 1_000_000_000);
 		assert_eq!(config.persist_path.as_deref(), Some("/tmp/test"));

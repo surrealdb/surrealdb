@@ -11,7 +11,7 @@ value = "NONE"
 value = "[{ five: 5, four: 4, id: test:1, one: 1, three: 3, two: 2 }]"
 
 [[test.results]]
-value = "[{ five: 5, id: test:1 }]"
+value = "[{ five: 5, four: 4, id: test:1, three: 3, two: 2 }]"
 
 */
 

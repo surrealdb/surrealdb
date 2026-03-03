@@ -19,8 +19,7 @@
 //!
 //! [`SurrealValue`]: surrealdb_types::SurrealValue
 
-use anyhow::Result;
-use surrealdb_types::SurrealValue;
+use surrealdb_types::{Error, SurrealValue};
 
 /// Trait for marshalling function arguments to and from [`surrealdb_types::Value`] vectors.
 ///
@@ -83,7 +82,7 @@ pub trait Args: Sized {
 	/// let values = vec![/* ... */];
 	/// let (s, n): (String, i64) = Args::from_values(values)?;
 	/// ```
-	fn from_values(values: Vec<surrealdb_types::Value>) -> Result<Self>;
+	fn from_values(values: Vec<surrealdb_types::Value>) -> std::result::Result<Self, Error>;
 
 	/// Get the expected types for each argument position.
 	///
@@ -115,9 +114,12 @@ macro_rules! impl_args {
                     ]
                 }
 
-                fn from_values(values: Vec<surrealdb_types::Value>) -> Result<Self> {
+                fn from_values(values: Vec<surrealdb_types::Value>) -> std::result::Result<Self, Error> {
                     if values.len() != $len {
-                        return Err(anyhow::anyhow!("Expected ({}), found other arguments", Self::kinds().iter().map(|k| k.to_string()).collect::<Vec<String>>().join(", ")));
+                        return Err(Error::validation(
+                            format!("Expected ({}), found {} arguments", Self::kinds().iter().map(|k| k.to_string()).collect::<Vec<String>>().join(", "), values.len()),
+                            None,
+                        ));
                     }
 
                     let mut values = values;
@@ -158,11 +160,15 @@ impl Args for () {
 		Vec::new()
 	}
 
-	fn from_values(values: Vec<surrealdb_types::Value>) -> Result<Self> {
+	fn from_values(values: Vec<surrealdb_types::Value>) -> std::result::Result<Self, Error> {
 		if !values.is_empty() {
-			return Err(anyhow::anyhow!(
-				"Expected ({}), found other arguments",
-				Self::kinds().iter().map(|k| k.to_string()).collect::<Vec<String>>().join(", ")
+			return Err(Error::validation(
+				format!(
+					"Expected ({}), found {} arguments",
+					Self::kinds().iter().map(|k| k.to_string()).collect::<Vec<String>>().join(", "),
+					values.len()
+				),
+				None,
 			));
 		}
 
@@ -196,8 +202,8 @@ where
 		self.into_iter().map(|x| x.into_value()).collect()
 	}
 
-	fn from_values(values: Vec<surrealdb_types::Value>) -> Result<Self> {
-		values.into_iter().map(|x| T::from_value(x)).collect::<Result<Vec<T>>>()
+	fn from_values(values: Vec<surrealdb_types::Value>) -> std::result::Result<Self, Error> {
+		values.into_iter().map(|x| T::from_value(x)).collect()
 	}
 
 	/// Returns a single-element vector with the element type.

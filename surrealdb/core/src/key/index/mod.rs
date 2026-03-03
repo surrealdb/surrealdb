@@ -21,6 +21,7 @@ pub mod hh;
 pub mod hi;
 pub mod hl;
 pub mod hn;
+pub mod hp;
 pub mod hs;
 pub mod hv;
 pub mod ib;

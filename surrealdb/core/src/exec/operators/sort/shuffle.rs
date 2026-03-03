@@ -15,8 +15,8 @@ use rand::{Rng, thread_rng};
 use tokio::task::spawn_blocking;
 
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::val::Value;
 
@@ -70,6 +70,13 @@ impl ExecOperator for RandomShuffle {
 		self.input.access_mode()
 	}
 
+	fn cardinality_hint(&self) -> CardinalityHint {
+		match self.limit {
+			Some(n) => CardinalityHint::Bounded(n),
+			None => self.input.cardinality_hint(),
+		}
+	}
+
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
 		vec![&self.input]
 	}
@@ -79,7 +86,11 @@ impl ExecOperator for RandomShuffle {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let limit = self.limit;
 		let cancellation = ctx.cancellation().clone();
 
@@ -140,7 +151,7 @@ async fn full_shuffle(mut values: Vec<Value>) -> Vec<Value> {
 		values
 	})
 	.await
-	.unwrap_or_default()
+	.expect("shuffle blocking task should not panic")
 }
 
 /// Perform a full Fisher-Yates shuffle of all values (WASM version).
@@ -158,7 +169,9 @@ async fn full_shuffle(mut values: Vec<Value>) -> Vec<Value> {
 /// The result is also shuffled to ensure random ordering.
 #[cfg(not(target_family = "wasm"))]
 async fn reservoir_sample(values: Vec<Value>, limit: usize) -> Vec<Value> {
-	spawn_blocking(move || reservoir_sample_sync(values, limit)).await.unwrap_or_default()
+	spawn_blocking(move || reservoir_sample_sync(values, limit))
+		.await
+		.expect("reservoir sampling blocking task should not panic")
 }
 
 /// Select a random sample using reservoir sampling (WASM version).

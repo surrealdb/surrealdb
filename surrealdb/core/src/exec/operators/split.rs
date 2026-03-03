@@ -5,7 +5,7 @@ use futures::StreamExt;
 
 use crate::exec::{
 	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	ValueBatch, ValueBatchStream, monitor_stream,
+	ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::idiom::Idiom;
 use crate::val::Value;
@@ -67,7 +67,11 @@ impl ExecOperator for Split {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 		let idioms = self.idioms.clone();
 
 		let split_stream = input_stream.map(move |batch_result| {
@@ -114,30 +118,38 @@ fn split_value_on_idiom(value: Value, idiom: &Idiom, output: &mut Vec<Value>) {
 	match field_value {
 		Value::Array(arr) => {
 			if arr.is_empty() {
-				// Empty array - keep the original value with the field as-is
 				output.push(value);
 			} else {
-				// For each element in the array, create a copy of the value
-				// with that field replaced by the element
-				for element in arr.iter() {
+				let len = arr.len();
+				for (i, element) in arr.into_iter().enumerate() {
+					if i == len - 1 {
+						// Last element: move value instead of cloning
+						let mut val = value;
+						val.put(idiom, element);
+						output.push(val);
+						return;
+					}
 					let mut cloned = value.clone();
-					// Set the field to the individual element (synchronous)
-					cloned.put(idiom, element.clone());
+					cloned.put(idiom, element);
 					output.push(cloned);
 				}
 			}
 		}
 		Value::Set(set) => {
 			if set.is_empty() {
-				// Empty set - keep the original value with the field as-is
 				output.push(value);
 			} else {
-				// For each element in the set, create a copy of the value
-				// with that field replaced by the element
-				for element in set.iter() {
+				let len = set.len();
+				for (i, element) in set.into_iter().enumerate() {
+					if i == len - 1 {
+						// Last element: move value instead of cloning
+						let mut val = value;
+						val.put(idiom, element);
+						output.push(val);
+						return;
+					}
 					let mut cloned = value.clone();
-					// Set the field to the individual element (synchronous)
-					cloned.put(idiom, element.clone());
+					cloned.put(idiom, element);
 					output.push(cloned);
 				}
 			}

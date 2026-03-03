@@ -11,8 +11,8 @@ use futures::StreamExt;
 
 use crate::err::Error;
 use crate::exec::{
-	AccessMode, ContextLevel, ExecOperator, ExecutionContext, FlowResult, OperatorMetrics,
-	PhysicalExpr, ValueBatchStream, monitor_stream,
+	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
+	OperatorMetrics, PhysicalExpr, ValueBatchStream, buffer_stream, monitor_stream,
 };
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::val::Duration;
@@ -58,13 +58,19 @@ impl ExecOperator for Timeout {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Timeout inherits its input's context requirements
-		self.input.required_context()
+		// Combine timeout expression context with child operator context
+		let timeout_ctx =
+			self.timeout.as_ref().map(|e| e.required_context()).unwrap_or(ContextLevel::Root);
+		timeout_ctx.max(self.input.required_context())
 	}
 
 	fn access_mode(&self) -> AccessMode {
 		// Timeout is transparent to access mode
 		self.input.access_mode()
+	}
+
+	fn cardinality_hint(&self) -> CardinalityHint {
+		self.input.cardinality_hint()
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
@@ -83,8 +89,16 @@ impl ExecOperator for Timeout {
 		}
 	}
 
+	fn output_ordering(&self) -> crate::exec::OutputOrdering {
+		self.input.output_ordering()
+	}
+
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let input_stream = self.input.execute(ctx)?;
+		let input_stream = buffer_stream(
+			self.input.execute(ctx)?,
+			self.input.access_mode(),
+			self.input.cardinality_hint(),
+		);
 
 		// If no timeout is specified, just pass through the input stream
 		let Some(timeout_expr) = &self.timeout else {
