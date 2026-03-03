@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Values;
 use std::fmt::Write;
 use std::hash::Hash;
+#[cfg(not(target_family = "wasm"))]
 use std::io::{self, IsTerminal as _};
 use std::mem;
 use std::ops::Index;
@@ -10,6 +11,7 @@ use std::path::{self, Path};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
+#[cfg(not(target_family = "wasm"))]
 use tokio::fs;
 
 use super::{ResolvedImport, TestCase};
@@ -17,7 +19,7 @@ use crate::cli::ColorMode;
 use crate::format::{IndentFormatter, ansi};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-pub struct TestId(usize);
+pub struct TestId(pub(crate) usize);
 
 /// An error that happened during loading of a test case.
 #[derive(Debug)]
@@ -31,7 +33,10 @@ impl TestLoadError {
 		let use_color = match color {
 			ColorMode::Always => true,
 			ColorMode::Never => false,
+			#[cfg(not(target_family = "wasm"))]
 			ColorMode::Auto => io::stdout().is_terminal(),
+			#[cfg(target_family = "wasm")]
+			ColorMode::Auto => false,
 		};
 
 		type Fmt<'a> = IndentFormatter<&'a mut String>;
@@ -120,6 +125,7 @@ impl TestSet {
 		self.all_map.get(name.as_ref()).copied()
 	}
 
+	#[cfg(not(target_family = "wasm"))]
 	pub async fn collect_directory(path: &str) -> Result<(Self, Vec<TestLoadError>)> {
 		let mut all = Vec::new();
 		let mut map = HashMap::new();
@@ -138,12 +144,49 @@ impl TestSet {
 		))
 	}
 
+	#[cfg(target_family = "wasm")]
+	pub fn collect_embedded(
+		embedded: &[(&str, &[u8])],
+	) -> Result<(Self, Vec<TestLoadError>)> {
+		let mut all = Vec::new();
+		let mut map = HashMap::new();
+		let mut errors = Vec::new();
+
+		for &(path, source) in embedded {
+			let case = match TestCase::from_source_path(path.to_string(), source.to_vec()) {
+				Ok(x) => x,
+				Err(e) => {
+					errors.push(TestLoadError {
+						path: path.to_string(),
+						error: e,
+					});
+					continue;
+				}
+			};
+
+			let idx = all.len();
+			all.push(case);
+			map.insert(path.to_string(), TestId(idx));
+		}
+
+		Self::resolve_imports(&mut all, &map, &mut errors);
+		let map = Arc::new(map);
+		Ok((
+			Self {
+				root: String::new(),
+				all_map: map.clone(),
+				map,
+				all: Arc::new(all),
+			},
+			errors,
+		))
+	}
+
 	fn resolve_imports(
 		all: &mut [TestCase],
 		map: &HashMap<String, TestId>,
 		errors: &mut Vec<TestLoadError>,
 	) {
-		// resolve all import paths.
 		for t in all.iter_mut() {
 			for import_path in t.config.imports() {
 				let mut import_name = Cow::Borrowed(import_path);
@@ -170,7 +213,6 @@ impl TestSet {
 			}
 		}
 
-		// ensure that imports don't have imports themselves.
 		for test_index in 0..all.len() {
 			let mut contains_error = false;
 			for import in all[test_index].imports.iter() {
@@ -190,6 +232,7 @@ impl TestSet {
 		}
 	}
 
+	#[cfg(not(target_family = "wasm"))]
 	async fn collect_recursive(
 		dir: &str,
 		root: &str,

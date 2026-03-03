@@ -589,6 +589,35 @@ run_task = { name = [
     "stop-tikv",
 ], fork = true, parallel = false }
 
+[tasks.ci-lang-test-wasm]
+# Prerequisites:
+#   cargo install wasm-pack
+#   brew install --no-quarantine chromedriver   (--no-quarantine is required on macOS)
+# On Mac with Apple-shipped LLVM that can't cross-compile to WASM:
+#   brew install llvm
+#   echo 'export PATH="/opt/homebrew/opt/llvm/bin:$PATH"' >> ~/.zshrc
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language tests on the WASM/IndexedDB backend"
+env = { RUSTFLAGS = '--cfg getrandom_backend="wasm_js"' }
+script = """
+    #!/bin/bash -ex
+    cd language-tests
+
+    # Use a system-installed chromedriver. The copy that wasm-pack downloads
+    # is unsigned and gets killed by macOS Gatekeeper on modern versions.
+    # Install with: brew install --no-quarantine chromedriver
+    if command -v chromedriver &>/dev/null; then
+        export CHROMEDRIVER="$(command -v chromedriver)"
+        echo "Using system chromedriver: $CHROMEDRIVER"
+    else
+        echo "ERROR: chromedriver not found on PATH."
+        echo "Install it with: brew install --no-quarantine chromedriver"
+        exit 1
+    fi
+
+    wasm-pack test --headless --chrome --features backend-indxdb
+"""
+
 # --------------------------------------------------
 # Workspace tests
 # --------------------------------------------------

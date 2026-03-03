@@ -4,7 +4,9 @@ use std::ops::Range;
 
 use anyhow::Result;
 use surrealdb_types::{ToSql, Value as SurValue};
+#[cfg(not(target_family = "wasm"))]
 use tokio::fs;
+#[cfg(not(target_family = "wasm"))]
 use tokio::io::AsyncWriteExt;
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
 
@@ -13,6 +15,12 @@ use crate::tests::report::TestOutputs;
 use crate::tests::{ConfigKind, TestSet};
 
 impl TestReport {
+	#[cfg(target_family = "wasm")]
+	pub async fn update_config_results(&self, _set: &TestSet) -> Result<()> {
+		Ok(())
+	}
+
+	#[cfg(not(target_family = "wasm"))]
 	pub async fn update_config_results(&self, set: &TestSet) -> Result<()> {
 		let Some(values) = self.outputs.as_ref() else {
 			println!("tried to update test {} without results", set[self.id].path);

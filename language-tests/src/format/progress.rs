@@ -1,4 +1,5 @@
-use std::io::{self, BufWriter, IsTerminal as _, Stderr, Write};
+#[cfg(not(target_family = "wasm"))]
+use std::io::{self, BufWriter, IsTerminal as _, Stderr};
 
 use crate::cli::ColorMode;
 use crate::format::ansi;
@@ -26,6 +27,7 @@ impl<I, W> Progress<I, W> {
 	}
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl<I> Progress<I, BufWriter<Stderr>> {
 	pub fn from_stderr(expected: usize, color_mode: ColorMode) -> Self {
 		Self::from_writer(
@@ -37,7 +39,14 @@ impl<I> Progress<I, BufWriter<Stderr>> {
 	}
 }
 
-impl<I: Eq, W: Write> Progress<I, W> {
+#[cfg(target_family = "wasm")]
+impl<I> Progress<I, Vec<u8>> {
+	pub fn from_stderr(expected: usize, color_mode: ColorMode) -> Self {
+		Self::from_writer(Vec::new(), false, color_mode, expected)
+	}
+}
+
+impl<I: Eq, W: std::io::Write> Progress<I, W> {
 	fn use_color(&self) -> bool {
 		match self.color_mode {
 			ColorMode::Always => true,
@@ -46,7 +55,7 @@ impl<I: Eq, W: Write> Progress<I, W> {
 		}
 	}
 
-	fn write_bar(&mut self) -> Result<(), io::Error> {
+	fn write_bar(&mut self) -> Result<(), std::io::Error> {
 		const TOTAL_WIDTH: usize = 80;
 
 		let num_width = (self.expected.max(1).ilog10() + 1) as usize;
@@ -73,7 +82,7 @@ impl<I: Eq, W: Write> Progress<I, W> {
 		self.writer.write_all(b"]")
 	}
 
-	fn write_running(&mut self, name: &str) -> Result<(), io::Error> {
+	fn write_running(&mut self, name: &str) -> Result<(), std::io::Error> {
 		if self.use_color() {
 			self.writer.write_fmt(format_args!(
 				ansi!(blue, "  Running", reset_format, " {:<80}", reset_format, "\n"),
@@ -84,7 +93,7 @@ impl<I: Eq, W: Write> Progress<I, W> {
 		}
 	}
 
-	fn write_finished(&mut self, name: &str, result: TestGrade) -> Result<(), io::Error> {
+	fn write_finished(&mut self, name: &str, result: TestGrade) -> Result<(), std::io::Error> {
 		if self.use_color() {
 			let res = match result {
 				TestGrade::Success => {
@@ -113,7 +122,7 @@ impl<I: Eq, W: Write> Progress<I, W> {
 		}
 	}
 
-	pub fn start_item(&mut self, id: I, name: &str) -> Result<(), io::Error> {
+	pub fn start_item(&mut self, id: I, name: &str) -> Result<(), std::io::Error> {
 		if self.items.iter().any(|x| x.0 == id) {
 			return Ok(());
 		}
@@ -131,7 +140,7 @@ impl<I: Eq, W: Write> Progress<I, W> {
 		self.writer.flush()
 	}
 
-	pub fn finish_item(&mut self, id: I, result: TestGrade) -> Result<(), io::Error> {
+	pub fn finish_item(&mut self, id: I, result: TestGrade) -> Result<(), std::io::Error> {
 		let Some(idx) = self.items.iter().position(|x| x.0 == id) else {
 			return Ok(());
 		};

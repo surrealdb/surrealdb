@@ -1,8 +1,11 @@
+#[cfg(not(target_family = "wasm"))]
 use std::io::IsTerminal;
 use std::time::Duration;
-use std::{io, mem, str, thread};
+#[cfg(not(target_family = "wasm"))]
+use std::{io, mem, thread};
 
 use anyhow::{Context, Result, bail};
+#[cfg(not(target_family = "wasm"))]
 use clap::ArgMatches;
 use provisioner::{Permit, PermitError, Provisioner};
 use semver::Version;
@@ -11,7 +14,10 @@ use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::env::VERSION;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
+#[cfg(not(target_family = "wasm"))]
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
+#[cfg(target_family = "wasm")]
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::{select, time};
 
 use crate::cli::{Backend, ColorMode, ResultsMode};
@@ -21,7 +27,7 @@ use crate::tests::TestSet;
 use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
 use crate::tests::set::TestId;
 
-mod provisioner;
+pub(crate) mod provisioner;
 mod util;
 
 use util::core_capabilities_from_test_config;
@@ -34,6 +40,7 @@ pub struct TestTaskContext {
 	pub backend: Backend,
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn try_collect_reports<W: io::Write>(
 	reports: &mut Vec<TestReport>,
 	channel: &mut UnboundedReceiver<TestReport>,
@@ -46,6 +53,7 @@ fn try_collect_reports<W: io::Write>(
 	}
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> TestSet {
 	let subset = if let Some(x) = matches.get_one::<String>("filter") {
 		testset.filter_map(|name, _| name.contains(x))
@@ -59,11 +67,6 @@ fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> Test
 		subset
 	};
 
-	// Filter tests based on backend specification in their environment configuration.
-	// Tests are included if:
-	// - They have no env config (run on all backends)
-	// - They have an empty backend list (run on all backends)
-	// - Their backend list contains the current backend
 	let subset = if let Some(backend) = matches.get_one::<Backend>("backend") {
 		subset.filter_map(|_, test| {
 			if let Some(env) = &test.config.env {
@@ -89,14 +92,28 @@ fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> Test
 	}
 }
 
+#[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
+fn filter_testset_by_backend(testset: TestSet, backend: &Backend) -> TestSet {
+	testset.filter_map(|_, test| {
+		if let Some(env) = &test.config.env {
+			if !env.backend.is_empty() {
+				env.backend.contains(&backend.to_string())
+			} else {
+				true
+			}
+		} else {
+			true
+		}
+	})
+}
+
+#[cfg(not(target_family = "wasm"))]
 pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let path: &String = matches.get_one("path").unwrap();
 	let (testset, load_errors) = TestSet::collect_directory(path).await?;
 	let backend = *matches.get_one::<Backend>("backend").unwrap();
 
-	// Check if the backend is supported by the enabled features.
 	match backend {
-		// backend memory is always enabled as we needs it to run match expressions.
 		Backend::Memory => {}
 		#[cfg(feature = "backend-rocksdb")]
 		Backend::RocksDb => {}
@@ -110,11 +127,11 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		Backend::TikV => {}
 		#[cfg(not(feature = "backend-tikv"))]
 		Backend::TikV => bail!("TiKV backend feature is not enabled"),
+		Backend::IndxDb => bail!("IndxDB backend requires a WASM target"),
 	}
 
 	let subset = filter_testset_from_arguments(testset, matches);
 
-	// check for unused keys in tests
 	for t in subset.iter() {
 		for k in t.config.unused_keys() {
 			println!("Test `{}` contained unused key `{k}` in config", t.path);
@@ -130,7 +147,6 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	let core_version = Version::parse(VERSION).unwrap();
 
-	// filter tasks.
 	let tasks: Vec<_> = subset
 		.iter_ids()
 		.filter_map(|(id, test)| {
@@ -140,14 +156,12 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 			let config = test.config.clone();
 
-			// Ensure this test can run on this version.
 			if let Some(version_req) = config.test.as_ref().and_then(|x| x.version.as_ref()) {
 				if !version_req.matches(&core_version) {
 					return None;
 				}
 			}
 
-			// Ensure this test imports can run on this version as specified by the test itself.
 			if let Some(version_req) =
 				config.test.as_ref().and_then(|x| x.importing_version.as_ref())
 			{
@@ -156,7 +170,6 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 				}
 			}
 
-			// Ensure this test imports can run on this version as specified by the imports.
 			for import in test.imports.iter() {
 				if let Some(version_req) =
 					subset[import.id].config.test.as_ref().and_then(|x| x.version.as_ref())
@@ -178,10 +191,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	println!(" Running with {num_jobs} jobs");
 	let mut schedular = Schedular::new(num_jobs);
 
-	// give the result channel some slack to catch up to tasks.
 	let (res_send, res_recv) = mpsc::channel(num_jobs as usize * 4);
-	// all reports are collected into the channel before processing.
-	// So unbounded is required.
 	let (report_send, mut report_recv) = mpsc::unbounded_channel();
 
 	let mut provisioner = Provisioner::new(num_jobs as usize, backend).await?;
@@ -194,7 +204,6 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let num_tasks = tasks.len();
 	let mut progress = Progress::from_stderr(num_tasks, color);
 
-	// spawn all tests.
 	for id in tasks {
 		let config = subset[id].config.as_ref();
 		progress.start_item(id, subset[id].path.as_str()).unwrap();
@@ -228,35 +237,27 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			schedular.spawn(future).await;
 		}
 
-		// Try to collect reports to give quick feedback on test completion.
 		try_collect_reports(&mut reports, &mut report_recv, &mut progress);
 	}
 
-	// all test are running.
-	// drop the result sender so that tasks properly quit when the channel does.
 	mem::drop(res_send);
 
-	// when the report channel quits we can be sure we are done. since the report task has quit
-	// meaning the test tasks have all quit.
 	while let Some(x) = report_recv.recv().await {
 		let grade = x.grade();
 		progress.finish_item(x.test_id(), grade).unwrap();
 		reports.push(x);
 	}
 
-	// Wait for all the tasks to finish.
 	schedular.join_all().await;
 
 	println!();
 
-	// Shutdown all the stores.
 	if let Err(e) = provisioner.shutdown().await {
 		println!("Shutdown error: {e:?}");
 		println!();
 		println!();
 	}
 
-	// done, report the results.
 	for v in reports.iter() {
 		v.display(&subset, color)
 	}
@@ -265,7 +266,6 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		e.display(color);
 	}
 
-	// Print summary line.
 	let passed = reports.iter().filter(|r| r.grade() == TestGrade::Success).count();
 	let failed = reports.iter().filter(|r| r.grade() == TestGrade::Failed).count();
 	let warned = reports.iter().filter(|r| r.grade() == TestGrade::Warning).count();
@@ -307,7 +307,6 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	}
 	println!();
 
-	// possibly update test configs with acquired results.
 	match failure_mode {
 		ResultsMode::Default => {}
 		ResultsMode::Accept => {
@@ -335,6 +334,168 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	Ok(())
 }
 
+#[cfg(target_family = "wasm")]
+pub async fn run_wasm(backend: Backend) -> Result<()> {
+	let (testset, load_errors) =
+		TestSet::collect_embedded(crate::EMBEDDED_TESTS)?;
+
+	let subset = filter_testset_by_backend(testset, &backend);
+
+	let core_version = Version::parse(VERSION).unwrap();
+
+	let tasks: Vec<_> = subset
+		.iter_ids()
+		.filter_map(|(id, test)| {
+			if test.contains_error {
+				return None;
+			}
+
+			let config = test.config.clone();
+
+			if let Some(version_req) = config.test.as_ref().and_then(|x| x.version.as_ref()) {
+				if !version_req.matches(&core_version) {
+					return None;
+				}
+			}
+
+			if let Some(version_req) =
+				config.test.as_ref().and_then(|x| x.importing_version.as_ref())
+			{
+				if !version_req.matches(&core_version) {
+					return None;
+				}
+			}
+
+			for import in test.imports.iter() {
+				if let Some(version_req) =
+					subset[import.id].config.test.as_ref().and_then(|x| x.version.as_ref())
+				{
+					if !version_req.matches(&core_version) {
+						return None;
+					}
+				}
+			}
+
+			if !config.should_run() {
+				return None;
+			}
+
+			Some(id)
+		})
+		.collect();
+
+	let num_tasks = tasks.len();
+	web_sys::console::log_1(
+		&format!("Found {num_tasks} tests to run on {backend} backend").into(),
+	);
+
+	let mut provisioner = Provisioner::new(1, backend).await?;
+
+	let ds = Datastore::new("memory")
+		.await
+		.expect("failed to create datastore for running matching expressions");
+	let mut _session = surrealdb_core::dbs::Session::default();
+	ds.process_use(None, &mut _session, Some("match".to_string()), Some("match".to_string()))
+		.await
+		.unwrap();
+
+	let mut passed = 0usize;
+	let mut failed = 0usize;
+	let mut warned = 0usize;
+	let skipped = subset.len() - num_tasks;
+
+	for id in tasks {
+		let config = subset[id].config.as_ref();
+		let test_name = subset[id].path.as_str().to_owned();
+
+		let versioned = config.env.as_ref().map(|e| e.versioned).unwrap_or(false);
+		let permit = if config.can_use_reusable_ds() {
+			provisioner.obtain().await
+		} else {
+			provisioner.create(versioned)
+		};
+
+		let capabilities = core_capabilities_from_test_config(config);
+		let backend_str = backend.to_string();
+
+		let context_timeout_duration = config
+			.env
+			.as_ref()
+			.map(|x| {
+				x.context_timeout(Some(&backend_str))
+					.map(Duration::from_millis)
+					.unwrap_or(Duration::MAX)
+			})
+			.unwrap_or(Duration::from_secs(3));
+
+		let test_result = permit
+			.with(
+				move |ds| {
+					ds.with_capabilities(capabilities)
+						.with_query_timeout(Some(context_timeout_duration))
+				},
+				async |ds_ref| run_test_with_dbs(id, &subset, ds_ref, backend).await,
+			)
+			.await;
+
+		let task_result = match test_result {
+			Ok(r) => match r {
+				Ok(r) => r,
+				Err(e) => {
+					web_sys::console::error_1(
+						&format!("Error running test '{test_name}': {e:?}").into(),
+					);
+					continue;
+				}
+			},
+			Err(PermitError::Other(e)) => {
+				web_sys::console::error_1(
+					&format!("Error running test '{test_name}': {e:?}").into(),
+				);
+				continue;
+			}
+		};
+
+		let report =
+			TestReport::from_test_result(id, &subset, task_result, &ds, None).await;
+
+		match report.grade() {
+			TestGrade::Success => passed += 1,
+			TestGrade::Failed => {
+				failed += 1;
+				report.display(&subset, ColorMode::Never);
+			}
+			TestGrade::Warning => {
+				warned += 1;
+				report.display(&subset, ColorMode::Never);
+			}
+		}
+	}
+
+	if let Err(e) = provisioner.shutdown().await {
+		web_sys::console::warn_1(&format!("Shutdown error: {e:?}").into());
+	}
+
+	for e in load_errors.iter() {
+		e.display(ColorMode::Never);
+	}
+
+	web_sys::console::log_1(
+		&format!("{passed} passed, {failed} failed, {warned} warnings, {skipped} skipped").into(),
+	);
+
+	if failed > 0 {
+		bail!("{failed} tests failed")
+	}
+
+	if !load_errors.is_empty() {
+		bail!("Could not load all tests")
+	}
+
+	Ok(())
+}
+
+#[cfg(not(target_family = "wasm"))]
 pub async fn grade_task(
 	set: TestSet,
 	mut results: Receiver<(TestId, TestTaskResult)>,
@@ -389,6 +550,7 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 	let res = match res {
 		Ok(x) => x?,
 		Err(PermitError::Other(e)) => return Err(e),
+		#[cfg(not(target_family = "wasm"))]
 		Err(PermitError::Panic(e)) => TestTaskResult::Panicked(e),
 	};
 
@@ -435,7 +597,7 @@ async fn run_test_with_dbs(
 			));
 		};
 
-		let Ok(source) = str::from_utf8(&set[test].source) else {
+		let Ok(source) = std::str::from_utf8(&set[test].source) else {
 			return Ok(TestTaskResult::Import(
 				import.to_string(),
 				"Import file was not valid utf-8.".to_string(),
@@ -450,10 +612,6 @@ async fn run_test_with_dbs(
 				));
 			}
 			Ok(results) => {
-				// Check if any import result contains an error.
-				// Without this, errors within transaction blocks (e.g. constraint
-				// violations, write conflicts) are silently ignored, causing
-				// subsequent test queries to see empty data.
 				for result in &results {
 					if let Err(ref e) = result.result {
 						return Ok(TestTaskResult::Import(
@@ -514,19 +672,23 @@ async fn run_test_with_dbs(
 		_ = timeout_future => {
 			did_timeout = true;
 
-
-			// Ideally still need to finish the future cause it might panic otherwise.
-			select!{
-				_ = time::sleep(Duration::from_secs(10)) => {
-					// Test doesn't want to quit. Time to force it with a bit of hack to avoid a
-					// panic
-					std::thread::scope(|scope|{
-						scope.spawn(move ||{
-							std::mem::drop(process_future)
+			#[cfg(not(target_family = "wasm"))]
+			{
+				select!{
+					_ = time::sleep(Duration::from_secs(10)) => {
+						std::thread::scope(|scope|{
+							scope.spawn(move ||{
+								std::mem::drop(process_future)
+							});
 						});
-					});
+					}
+				   _ = process_future.as_mut() => {}
 				}
-			   _ = process_future.as_mut() => {}
+			}
+
+			#[cfg(target_family = "wasm")]
+			{
+				drop(process_future);
 			}
 
 			None

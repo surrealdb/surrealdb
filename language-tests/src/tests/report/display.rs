@@ -1,6 +1,10 @@
 use std::fmt::{self, Write};
+#[cfg(not(target_family = "wasm"))]
 use std::io::{self, IsTerminal as _};
+#[cfg(not(target_family = "wasm"))]
 use std::time::{Duration, Instant};
+#[cfg(target_family = "wasm")]
+use std::time::Duration;
 
 use similar::{Algorithm, TextDiff};
 use surrealdb_types::{ToSql, Value as SurValue};
@@ -24,7 +28,10 @@ impl TestReport {
 		let use_color = match color {
 			ColorMode::Always => true,
 			ColorMode::Never => false,
+			#[cfg(not(target_family = "wasm"))]
 			ColorMode::Auto => io::stdout().is_terminal(),
+			#[cfg(target_family = "wasm")]
+			ColorMode::Auto => false,
 		};
 		let mut buffer = String::new();
 		let mut f = Fmt::new(&mut buffer, 2);
@@ -473,10 +480,11 @@ impl TestReport {
 		let got = got.to_string();
 		let expected = expected.to_string();
 
-		let diff = TextDiff::configure()
-			.algorithm(Algorithm::Myers)
-			.deadline(Instant::now() + Duration::from_millis(500))
-			.diff_words(got.as_str(), expected.as_str());
+		let mut config = TextDiff::configure();
+		config.algorithm(Algorithm::Myers);
+		#[cfg(not(target_family = "wasm"))]
+		config.deadline(Instant::now() + Duration::from_millis(500));
+		let diff = config.diff_words(got.as_str(), expected.as_str());
 
 		write!(f, "- ")?;
 		for op in diff.ops() {

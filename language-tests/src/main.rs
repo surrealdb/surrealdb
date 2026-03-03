@@ -1,27 +1,22 @@
 #![recursion_limit = "256"]
+#![cfg_attr(target_family = "wasm", allow(unused))]
 
-mod cli;
-mod cmd;
-mod format;
-mod runner;
-mod temp_dir;
-mod tests;
-
+#[cfg(not(target_family = "wasm"))]
 use anyhow::{self, Result};
-use cli::ColorMode;
+#[cfg(not(target_family = "wasm"))]
+use surrealql_test::cli::ColorMode;
 
+#[cfg(not(target_family = "wasm"))]
 #[tokio::main]
 async fn main() -> Result<()> {
-	let matches = cli::parse();
+	let matches = surrealql_test::cli::parse();
 
 	let color: ColorMode = matches.get_one("color").copied().unwrap();
 
 	let (sub, args) = matches.subcommand().unwrap();
 
-	//log::init(Level::INFO);
-
 	match sub {
-		"test" => cmd::run::run(color, args).await,
+		"test" => surrealql_test::cmd::run::run(color, args).await,
 		#[cfg(not(feature = "upgrade"))]
 		"upgrade" => {
 			anyhow::bail!(
@@ -29,8 +24,11 @@ async fn main() -> Result<()> {
 			)
 		}
 		#[cfg(feature = "upgrade")]
-		"upgrade" => cmd::upgrade::run(color, args).await,
-		"list" => cmd::list::run(args).await,
+		"upgrade" => surrealql_test::cmd::upgrade::run(color, args).await,
+		"list" => surrealql_test::cmd::list::run(args).await,
 		_ => unreachable!(),
 	}
 }
+
+#[cfg(target_family = "wasm")]
+fn main() {}

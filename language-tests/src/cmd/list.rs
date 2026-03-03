@@ -1,8 +1,12 @@
+#[cfg(not(target_family = "wasm"))]
 use anyhow::Result;
+#[cfg(not(target_family = "wasm"))]
 use clap::ArgMatches;
 
+#[cfg(not(target_family = "wasm"))]
 use crate::tests::TestSet;
 
+#[cfg(not(target_family = "wasm"))]
 pub async fn run(matches: &ArgMatches) -> Result<()> {
 	let path: &String = matches.get_one("path").unwrap();
 	let (testset, errors) = TestSet::collect_directory(path).await?;

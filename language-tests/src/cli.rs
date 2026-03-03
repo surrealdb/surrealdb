@@ -1,8 +1,11 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
+#[cfg(not(target_family = "wasm"))]
 use clap::builder::{EnumValueParser, PossibleValue};
+#[cfg(not(target_family = "wasm"))]
 use clap::{ArgMatches, Command, ValueEnum, arg, command, value_parser};
+#[cfg(not(target_family = "wasm"))]
 use semver::Version;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -12,6 +15,7 @@ pub enum ResultsMode {
 	Overwrite,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl ValueEnum for ResultsMode {
 	fn value_variants<'a>() -> &'a [Self] {
 		&[ResultsMode::Default, ResultsMode::Accept, ResultsMode::Overwrite]
@@ -38,8 +42,10 @@ pub enum Backend {
 	RocksDb,
 	SurrealKv,
 	TikV,
+	IndxDb,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl ValueEnum for Backend {
 	fn value_variants<'a>() -> &'a [Self] {
 		&[Backend::Memory, Backend::RocksDb, Backend::SurrealKv, Backend::TikV]
@@ -51,6 +57,7 @@ impl ValueEnum for Backend {
 			Backend::RocksDb => Some(PossibleValue::new("rocksdb")),
 			Backend::SurrealKv => Some(PossibleValue::new("surrealkv")),
 			Backend::TikV => Some(PossibleValue::new("tikv")),
+			Backend::IndxDb => Some(PossibleValue::new("indxdb")),
 		}
 	}
 }
@@ -62,16 +69,19 @@ impl Display for Backend {
 			Self::RocksDb => f.write_str("rocksdb"),
 			Self::SurrealKv => f.write_str("surrealkv"),
 			Self::TikV => f.write_str("tikv"),
+			Self::IndxDb => f.write_str("indxdb"),
 		}
 	}
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum UpgradeBackend {
 	RocksDb,
 	SurrealKv,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl ValueEnum for UpgradeBackend {
 	fn value_variants<'a>() -> &'a [Self] {
 		&[UpgradeBackend::RocksDb, UpgradeBackend::SurrealKv]
@@ -85,12 +95,14 @@ impl ValueEnum for UpgradeBackend {
 	}
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Clone, Eq, PartialEq, Debug, PartialOrd, Ord, Hash)]
 pub enum DsVersion {
 	Version(Version),
 	Path(String),
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl fmt::Display for DsVersion {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
@@ -100,6 +112,7 @@ impl fmt::Display for DsVersion {
 	}
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl DsVersion {
 	fn from_str(s: &str) -> Result<Self, semver::Error> {
 		if let Ok(x) = Version::parse(s) {
@@ -109,32 +122,6 @@ impl DsVersion {
 	}
 }
 
-/*
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum LogLevel {
-	Trace,
-	Debug,
-	Info,
-	Warn,
-	Error,
-}
-
-impl ValueEnum for LogLevel {
-	fn value_variants<'a>() -> &'a [Self] {
-		&[LogLevel::Trace, LogLevel::Debug, LogLevel::Info, LogLevel::Warn, LogLevel::Error]
-	}
-
-	fn to_possible_value(&self) -> Option<PossibleValue> {
-		match self {
-			LogLevel::Trace => Some(PossibleValue::new("trace")),
-			LogLevel::Debug => Some(PossibleValue::new("debug")),
-			LogLevel::Info => Some(PossibleValue::new("info")),
-			LogLevel::Warn => Some(PossibleValue::new("warn")),
-			LogLevel::Error => Some(PossibleValue::new("error")),
-		}
-	}
-}*/
-
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ColorMode {
 	Always,
@@ -142,6 +129,7 @@ pub enum ColorMode {
 	Auto,
 }
 
+#[cfg(not(target_family = "wasm"))]
 impl ValueEnum for ColorMode {
 	fn value_variants<'a>() -> &'a [Self] {
 		&[ColorMode::Always, ColorMode::Never, ColorMode::Auto]
@@ -156,6 +144,7 @@ impl ValueEnum for ColorMode {
 	}
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn parse() -> ArgMatches {
 	let cmd = command!()
 		.arg(arg!(--color <COLOR> "Set if the output should be colored").value_parser(EnumValueParser::<ColorMode>::new()).default_value("auto"))
