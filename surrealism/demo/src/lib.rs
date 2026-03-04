@@ -190,3 +190,78 @@ fn test_io() -> Result<String> {
 fn test_none_value() -> Result<Vec<surrealdb_types::Value>> {
 	Ok(vec![surrealdb_types::Value::None])
 }
+
+#[cfg(feature = "p2")]
+mod p2_dispatch {
+	struct Plugin;
+
+	impl surrealism::p2_bindings::Guest for Plugin {
+		fn invoke(name: String, args: Vec<u8>) -> Result<Vec<u8>, String> {
+			match name.as_str() {
+				"" => super::__sr_p2_invoke_default(&args),
+				"can_drive" => super::__sr_p2_invoke_can_drive(&args),
+				"create_user" => super::__sr_p2_invoke_create_user(&args),
+				"other" => super::__sr_p2_invoke_other(&args),
+				"safe_divide" => super::__sr_p2_invoke_safe_divide(&args),
+				"parse_number" => super::__sr_p2_invoke_parse_number(&args),
+				"result" => super::__sr_p2_invoke_result(&args),
+				"test_kv" => super::__sr_p2_invoke_test_kv(&args),
+				"test_io" => super::__sr_p2_invoke_test_io(&args),
+				"test_none_value" => super::__sr_p2_invoke_test_none_value(&args),
+				_ => Err(format!("Unknown function: {name}")),
+			}
+		}
+
+		fn list_functions() -> Vec<String> {
+			vec![
+				"can_drive".into(),
+				"create_user".into(),
+				"other".into(),
+				"safe_divide".into(),
+				"parse_number".into(),
+				"result".into(),
+				"test_kv".into(),
+				"test_io".into(),
+				"test_none_value".into(),
+			]
+		}
+
+		fn function_args(name: String) -> Result<Vec<u8>, String> {
+			match name.as_str() {
+				"" => super::__sr_p2_args_default(),
+				"can_drive" => super::__sr_p2_args_can_drive(),
+				"create_user" => super::__sr_p2_args_create_user(),
+				"other" => super::__sr_p2_args_other(),
+				"safe_divide" => super::__sr_p2_args_safe_divide(),
+				"parse_number" => super::__sr_p2_args_parse_number(),
+				"result" => super::__sr_p2_args_result(),
+				"test_kv" => super::__sr_p2_args_test_kv(),
+				"test_io" => super::__sr_p2_args_test_io(),
+				"test_none_value" => super::__sr_p2_args_test_none_value(),
+				_ => Err(format!("Unknown function: {name}")),
+			}
+		}
+
+		fn function_returns(name: String) -> Result<Vec<u8>, String> {
+			match name.as_str() {
+				"" => super::__sr_p2_returns_default(),
+				"can_drive" => super::__sr_p2_returns_can_drive(),
+				"create_user" => super::__sr_p2_returns_create_user(),
+				"other" => super::__sr_p2_returns_other(),
+				"safe_divide" => super::__sr_p2_returns_safe_divide(),
+				"parse_number" => super::__sr_p2_returns_parse_number(),
+				"result" => super::__sr_p2_returns_result(),
+				"test_kv" => super::__sr_p2_returns_test_kv(),
+				"test_io" => super::__sr_p2_returns_test_io(),
+				"test_none_value" => super::__sr_p2_returns_test_none_value(),
+				_ => Err(format!("Unknown function: {name}")),
+			}
+		}
+
+		fn init() -> Result<(), String> {
+			Ok(())
+		}
+	}
+
+	surrealism::p2_bindings::export!(Plugin with_types_in surrealism::p2_bindings);
+}

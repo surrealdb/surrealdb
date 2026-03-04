@@ -23,35 +23,38 @@ mod surrealism_integration {
 		status: String,
 	}
 
-	/// Check whether the `wasm32-wasip1` target is installed via rustup.
-	fn has_wasm_target() -> bool {
+	fn has_wasm_target(target: &str) -> bool {
 		Command::new("rustup")
 			.args(["target", "list", "--installed"])
 			.output()
-			.map(|o| String::from_utf8_lossy(&o.stdout).contains("wasm32-wasip1"))
+			.map(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.trim() == target))
 			.unwrap_or(false)
 	}
 
-	/// Build the demo surrealism module as a P1 core module and pack it into
-	/// `output_dir/demo.surli`.
-	fn build_demo_module(output_dir: &Path) {
+	fn build_and_pack_demo(output_dir: &Path, abi: AbiVersion) {
 		let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+		let (target, features) = match abi {
+			AbiVersion::P1 => ("wasm32-wasip1", None),
+			AbiVersion::P2 => ("wasm32-wasip2", Some("demo/p2")),
+		};
 
-		let result = Command::new("cargo")
-			.args(["build", "-p", "demo", "--target", "wasm32-wasip1"])
-			.current_dir(workspace_root)
-			.output()
-			.expect("Failed to execute cargo build for demo module");
+		let mut cmd = Command::new("cargo");
+		cmd.args(["build", "-p", "demo", "--target", target]);
+		if let Some(feat) = features {
+			cmd.args(["--features", feat]);
+		}
+
+		let result =
+			cmd.current_dir(workspace_root).output().expect("Failed to execute cargo build");
 
 		assert!(
 			result.status.success(),
-			"cargo build -p demo failed.\nstdout: {}\nstderr: {}",
+			"cargo build -p demo (abi {abi:?}) failed.\nstdout: {}\nstderr: {}",
 			String::from_utf8_lossy(&result.stdout),
 			String::from_utf8_lossy(&result.stderr),
 		);
 
-		let wasm_path =
-			workspace_root.join("target/wasm32-wasip1/debug/demo.wasm");
+		let wasm_path = workspace_root.join(format!("target/{target}/debug/demo.wasm"));
 		assert!(wasm_path.exists(), "demo.wasm not found at {}", wasm_path.display());
 
 		let wasm = std::fs::read(&wasm_path).expect("Failed to read demo.wasm");
@@ -64,7 +67,7 @@ mod surrealism_integration {
 				version: semver::Version::new(1, 0, 0),
 			},
 			capabilities: Default::default(),
-			abi: AbiVersion::P1,
+			abi,
 		};
 
 		let package = SurrealismPackage {
@@ -86,23 +89,27 @@ mod surrealism_integration {
 		canonical: PathBuf,
 	}
 
-	/// Shared demo module build directory. The module is built once and reused
-	/// across all tests in this module.
-	static DEMO_DIR: LazyLock<DemoModuleDir> = LazyLock::new(|| {
-		if !has_wasm_target() {
-			panic!(
-				"wasm32-wasip1 target not installed — install with: rustup target add wasm32-wasip1"
-			);
+	fn build_demo_dir(abi: AbiVersion) -> DemoModuleDir {
+		let target = match abi {
+			AbiVersion::P1 => "wasm32-wasip1",
+			AbiVersion::P2 => "wasm32-wasip2",
+		};
+		if !has_wasm_target(target) {
+			panic!("{target} target not installed — install with: rustup target add {target}");
 		}
 		let tmp = tempfile::TempDir::new().expect("Failed to create temp dir for demo module");
 		let canonical =
 			std::fs::canonicalize(tmp.path()).expect("Failed to canonicalize temp dir path");
-		build_demo_module(&canonical);
+		build_and_pack_demo(&canonical, abi);
 		DemoModuleDir {
 			_tmp: tmp,
 			canonical,
 		}
-	});
+	}
+
+	static DEMO_DIR_P1: LazyLock<DemoModuleDir> = LazyLock::new(|| build_demo_dir(AbiVersion::P1));
+
+	static DEMO_DIR_P2: LazyLock<DemoModuleDir> = LazyLock::new(|| build_demo_dir(AbiVersion::P2));
 
 	/// Start a SurrealDB server with the `files` and `surrealism` experimental
 	/// capabilities enabled, and a bucket folder allowlist pointing at the given
@@ -166,12 +173,10 @@ mod surrealism_integration {
 	}
 
 	// -------------------------------------------------------------------
-	// Tests
+	// Test helpers (shared across P1 and P2)
 	// -------------------------------------------------------------------
 
-	#[test(tokio::test)]
-	async fn module_function_calls() -> Result<(), Box<dyn std::error::Error>> {
-		let bucket_dir = &DEMO_DIR.canonical;
+	async fn check_function_calls(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
@@ -210,21 +215,62 @@ mod surrealism_integration {
 		Ok(())
 	}
 
-	#[test(tokio::test)]
-	async fn module_kv_operations() -> Result<(), Box<dyn std::error::Error>> {
-		let bucket_dir = &DEMO_DIR.canonical;
+	async fn check_result_type_handling(
+		bucket_dir: &Path,
+	) -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
 		let ns = Ulid::new().to_string();
 		let db = Ulid::new().to_string();
 
 		setup_module(&addr, &ns, &db, bucket_dir).await;
 
-		// test_kv() exercises set/get/del/exists, range queries, batch ops, and
-		// range deletes internally via assertions. A successful return means the
-		// full KV integration works.
-		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::test_kv();").await;
-		assert_eq!(results[0].status, "OK", "test_kv failed: {:?}", results[0].result);
+		// result(false) -> Ok("Success")
+		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::result(false);").await;
+		assert_eq!(results[0].status, "OK", "result(false): {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!("Success"));
+
+		// result(true) -> Err("Failed") propagated as module error
+		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::result(true);").await;
+		assert_eq!(results[0].status, "ERR", "Expected error from result(true)");
+
+		// parse_number("42") -> Ok(42)
+		let results = sql_query(&addr, &ns, &db, "RETURN mod::demo::parse_number('42');").await;
+		assert_eq!(results[0].status, "OK", "parse_number('42'): {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!(42));
+
+		// parse_number("not_a_number") -> Err
+		let results =
+			sql_query(&addr, &ns, &db, "RETURN mod::demo::parse_number('not_a_number');").await;
+		assert_eq!(results[0].status, "ERR", "Expected error from parse_number('not_a_number')");
 
 		Ok(())
+	}
+
+	// -------------------------------------------------------------------
+	// P1 tests
+	// -------------------------------------------------------------------
+
+	#[test(tokio::test)]
+	async fn module_function_calls_p1() -> Result<(), Box<dyn std::error::Error>> {
+		check_function_calls(&DEMO_DIR_P1.canonical).await
+	}
+
+	#[test(tokio::test)]
+	async fn module_result_type_handling_p1() -> Result<(), Box<dyn std::error::Error>> {
+		check_result_type_handling(&DEMO_DIR_P1.canonical).await
+	}
+
+	// -------------------------------------------------------------------
+	// P2 tests
+	// -------------------------------------------------------------------
+
+	#[test(tokio::test)]
+	async fn module_function_calls_p2() -> Result<(), Box<dyn std::error::Error>> {
+		check_function_calls(&DEMO_DIR_P2.canonical).await
+	}
+
+	#[test(tokio::test)]
+	async fn module_result_type_handling_p2() -> Result<(), Box<dyn std::error::Error>> {
+		check_result_type_handling(&DEMO_DIR_P2.canonical).await
 	}
 }

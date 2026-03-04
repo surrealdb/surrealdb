@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use reblessive::TreeStack;
 use surrealism_runtime::config::SurrealismConfig;
 use surrealism_runtime::host::InvocationContext;
-use surrealism_runtime::kv::KVStore;
+use surrealism_runtime::kv::{BTreeMapStore, KVStore};
 
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
@@ -18,6 +18,7 @@ pub(crate) struct Host {
 	pub(crate) ctx: FrozenContext,
 	pub(crate) opt: Options,
 	pub(crate) doc: Option<CursorDoc>,
+	kv: BTreeMapStore,
 }
 
 impl Host {
@@ -27,6 +28,7 @@ impl Host {
 			ctx: ctx.clone(),
 			opt: opt.clone(),
 			doc: doc.cloned(),
+			kv: BTreeMapStore::new(),
 		}
 	}
 }
@@ -81,15 +83,17 @@ impl InvocationContext for Host {
 	}
 
 	fn kv(&mut self) -> Result<&dyn KVStore> {
-		todo!()
+		Ok(&self.kv)
 	}
 
-	fn stdout(&mut self, _output: &str) -> Result<()> {
-		todo!()
+	fn stdout(&mut self, output: &str) -> Result<()> {
+		tracing::info!(target: "surrealism::module", "{output}");
+		Ok(())
 	}
 
-	fn stderr(&mut self, _output: &str) -> Result<()> {
-		todo!()
+	fn stderr(&mut self, output: &str) -> Result<()> {
+		tracing::warn!(target: "surrealism::module", "{output}");
+		Ok(())
 	}
 }
 
@@ -127,10 +131,10 @@ impl InvocationContext for SignatureHost {
 	}
 
 	fn stdout(&mut self, _output: &str) -> Result<()> {
-		todo!()
+		bail!("I/O is not supported in signature host")
 	}
 
 	fn stderr(&mut self, _output: &str) -> Result<()> {
-		todo!()
+		bail!("I/O is not supported in signature host")
 	}
 }

@@ -22,7 +22,7 @@ threads-required = 4
 slow-timeout = "60s"
 
 [[profile.default.overrides]]
-filter = 'test(surrealism_integration::module_kv_operations) | test(surrealism_integration::module_function_calls)'
+filter = 'test(surrealism_integration::)'
 slow-timeout = "120s"
 
 [[profile.default.overrides]]

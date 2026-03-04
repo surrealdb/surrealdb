@@ -282,6 +282,7 @@ reqwest = { workspace = true, default-features = false, features = [
     "gzip",
     "http2",
 ] }
+semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 surrealism-runtime.workspace = true
