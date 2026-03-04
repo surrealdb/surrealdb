@@ -1,6 +1,6 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::{fs, mem};
 
 use anyhow::Result;
 use surrealism_runtime::PrefixErr;
@@ -8,8 +8,11 @@ use surrealism_runtime::config::{AbiVersion, SurrealismConfig};
 use surrealism_runtime::package::{SurrealismPackage, detect_module_kind};
 use tempfile::TempDir;
 use walrus::Module;
+use wasm_encoder::{ComponentSectionId, Encode, RawSection, Section};
 use wasm_opt::OptimizationOptions;
 
+/// Build a Surrealism WASM module from a Rust project, optimize the binary,
+/// and pack it into a `.surrealism` package file.
 pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>, debug: bool) -> Result<()> {
 	let path = path.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 	let config = load_config(&path)?;
@@ -38,6 +41,7 @@ pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>, debug: bool) -> R
 	Ok(())
 }
 
+/// Parse the `surrealism.toml` configuration from the project directory.
 fn load_config(path: &Path) -> Result<SurrealismConfig> {
 	let surrealism_toml = path.join("surrealism.toml");
 	if !surrealism_toml.exists() {
@@ -49,6 +53,7 @@ fn load_config(path: &Path) -> Result<SurrealismConfig> {
 	)?)
 }
 
+/// Map the configured ABI version to the corresponding `cargo build` target triple.
 fn wasm_target(config: &SurrealismConfig) -> &'static str {
 	match config.abi {
 		AbiVersion::P1 => "wasm32-wasip1",
@@ -56,6 +61,7 @@ fn wasm_target(config: &SurrealismConfig) -> &'static str {
 	}
 }
 
+/// Invoke `cargo build` targeting the appropriate WASM triple for the ABI version.
 fn build_wasm_module(path: &PathBuf, config: &SurrealismConfig, debug: bool) -> Result<()> {
 	let target = wasm_target(config);
 	let profile = if debug {
@@ -85,6 +91,10 @@ fn build_wasm_module(path: &PathBuf, config: &SurrealismConfig, debug: bool) -> 
 	Ok(())
 }
 
+/// Read the compiled WASM binary and apply ABI-specific optimizations.
+///
+/// P1 core modules are stripped with `walrus` and optimized with `wasm-opt`.
+/// P2 component binaries are handled by [`optimize_component`].
 fn optimize_wasm(source_wasm: &PathBuf, config: &SurrealismConfig) -> Result<Vec<u8>> {
 	if !source_wasm.exists() {
 		anyhow::bail!("Expected WASM file not found: {}", source_wasm.display());
@@ -99,31 +109,34 @@ fn optimize_wasm(source_wasm: &PathBuf, config: &SurrealismConfig) -> Result<Vec
 			let stripped_bytes = strip_wasm_sections(&wasm_bytes)?;
 			apply_wasm_opt(&stripped_bytes)
 		}
-		AbiVersion::P2 => {
-			// P2 components have a different binary structure — walrus and wasm-opt
-			// operate on core modules and don't support the component model format.
-			// For now, return the raw bytes. Future: use wasm-tools component
-			// optimisation passes.
-			Ok(wasm_bytes)
-		}
+		AbiVersion::P2 => optimize_component(&wasm_bytes),
 	}
 }
 
+/// Returns `true` if a custom section with the given name should be removed
+/// from a release build. Preserves `component-type:*` sections which are
+/// required by the component model.
+fn should_strip_section(name: &str) -> bool {
+	if name.starts_with("component-type") {
+		return false;
+	}
+	name.starts_with(".debug")
+		|| name == "name"
+		|| name == "sourceMappingURL"
+		|| name.starts_with("reloc.")
+		|| name.starts_with("linking")
+		|| name == "target_features"
+		|| name == "producers"
+}
+
+/// Strip debug and metadata custom sections from a P1 core module using `walrus`.
 fn strip_wasm_sections(wasm_bytes: &[u8]) -> Result<Vec<u8>> {
 	let mut module =
 		Module::from_buffer(wasm_bytes).prefix_err(|| "Failed to parse WASM module")?;
 
-	// Strip debug information and other unnecessary sections
 	let mut sections_to_remove = Vec::new();
 	for (id, custom) in module.customs.iter() {
-		let name = custom.name();
-		if name.starts_with(".debug")
-			|| name == "name"
-			|| name == "sourceMappingURL"
-			|| name.starts_with("reloc.")
-			|| name.starts_with("linking")
-			|| name == "target_features"
-		{
+		if should_strip_section(custom.name()) {
 			sections_to_remove.push(id);
 		}
 	}
@@ -131,12 +144,89 @@ fn strip_wasm_sections(wasm_bytes: &[u8]) -> Result<Vec<u8>> {
 		module.customs.delete(id);
 	}
 
-	// Clear producers section
+	// walrus manages the producers section separately from custom sections
 	module.producers.clear();
 
 	Ok(module.emit_wasm())
 }
 
+/// Optimize a P2 component binary by stripping unnecessary custom sections
+/// at all nesting levels and applying wasm-opt to embedded core modules.
+///
+/// `walrus` and `wasm-opt` only understand core WASM modules, not the
+/// component model binary format. This function uses `wasmparser` to walk
+/// the component's nested structure, strips metadata sections, and runs
+/// Binaryen on each core module before re-embedding it.
+///
+/// The parse-rewrite approach is taken from the Bytecode Alliance's
+/// [`wasm-tools strip`](https://github.com/bytecodealliance/wasm-tools/blob/main/src/bin/wasm-tools/strip.rs).
+fn optimize_component(wasm_bytes: &[u8]) -> Result<Vec<u8>> {
+	let mut output = Vec::new();
+	let mut stack = Vec::new();
+
+	for payload in wasmparser::Parser::new(0).parse_all(wasm_bytes) {
+		let payload = payload.prefix_err(|| "Failed to parse WASM component")?;
+
+		match &payload {
+			wasmparser::Payload::Version {
+				encoding,
+				..
+			} => {
+				output.extend_from_slice(match encoding {
+					wasmparser::Encoding::Component => &wasm_encoder::Component::HEADER,
+					wasmparser::Encoding::Module => &wasm_encoder::Module::HEADER,
+				});
+				continue;
+			}
+			wasmparser::Payload::ModuleSection {
+				..
+			}
+			| wasmparser::Payload::ComponentSection {
+				..
+			} => {
+				stack.push(mem::take(&mut output));
+				continue;
+			}
+			wasmparser::Payload::End(_) => {
+				let mut parent = match stack.pop() {
+					Some(p) => p,
+					None => break,
+				};
+				let is_component = output.starts_with(&wasm_encoder::Component::HEADER);
+				if !is_component {
+					output = apply_wasm_opt(&output)?;
+				}
+				if is_component {
+					parent.push(ComponentSectionId::Component as u8);
+				} else {
+					parent.push(ComponentSectionId::CoreModule as u8);
+				}
+				output.encode(&mut parent);
+				output = parent;
+				continue;
+			}
+			wasmparser::Payload::CustomSection(c) => {
+				if should_strip_section(c.name()) {
+					continue;
+				}
+			}
+			_ => {}
+		}
+
+		if let Some((id, range)) = payload.as_section() {
+			RawSection {
+				id,
+				data: &wasm_bytes[range],
+			}
+			.append_to(&mut output);
+		}
+	}
+
+	Ok(output)
+}
+
+/// Run Binaryen's `wasm-opt` on a core module with aggressive size optimization
+/// and common post-MVP features enabled.
 fn apply_wasm_opt(wasm_bytes: &[u8]) -> Result<Vec<u8>> {
 	let mut opts = OptimizationOptions::new_optimize_for_size_aggressively();
 	opts.enable_feature(wasm_opt::Feature::BulkMemory);
@@ -160,6 +250,8 @@ fn apply_wasm_opt(wasm_bytes: &[u8]) -> Result<Vec<u8>> {
 	Ok(fs::read(&temp_wasm_output).prefix_err(|| "Failed to read optimized WASM file")?)
 }
 
+/// Locate the `.wasm` artifact produced by `cargo build` using `cargo metadata`
+/// to resolve the target directory and package name.
 fn get_source_wasm(path: &PathBuf, config: &SurrealismConfig, debug: bool) -> Result<PathBuf> {
 	let metadata = metadata(path).prefix_err(|| "Failed to retrieve cargo metadata")?;
 
@@ -210,6 +302,7 @@ fn get_source_wasm(path: &PathBuf, config: &SurrealismConfig, debug: bool) -> Re
 	Ok(target_dir.join(&wasm_filename))
 }
 
+/// Run `cargo metadata --no-deps` and return the parsed JSON.
 fn metadata(path: &PathBuf) -> Result<serde_json::Value> {
 	let output = Command::new("cargo")
 		.args(["metadata", "--format-version", "1", "--no-deps"])
@@ -227,6 +320,8 @@ fn metadata(path: &PathBuf) -> Result<serde_json::Value> {
 	Ok(serde_json::from_str(&metadata_str).prefix_err(|| "Failed to parse cargo metadata JSON")?)
 }
 
+/// Resolve the output path for the `.surrealism` package, defaulting to
+/// `<package_name>.surrealism` in the current working directory.
 fn resolve_output_path(out: Option<PathBuf>, config: &SurrealismConfig) -> Result<PathBuf> {
 	match out {
 		None => {

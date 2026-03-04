@@ -7147,7 +7147,9 @@ dependencies = [
  "ulid",
  "uuid",
  "walrus",
+ "wasm-encoder 0.245.1",
  "wasm-opt",
+ "wasmparser 0.245.1",
  "web-time",
  "wiremock",
 ]
