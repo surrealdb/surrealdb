@@ -9,9 +9,9 @@ pub struct IfelseStatement {
 	/// The first if condition followed by a body, followed by any number of
 	/// else if's
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
-	pub exprs: Vec<(Expr, Expr)>,
+	pub(crate) exprs: Vec<(Expr, Expr)>,
 	/// the final else body, if there is one
-	pub close: Option<Expr>,
+	pub(crate) close: Option<Expr>,
 }
 
 impl IfelseStatement {

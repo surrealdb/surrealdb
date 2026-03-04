@@ -7,8 +7,8 @@ use crate::sql::fetch::Fetchs;
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct OutputStatement {
-	pub what: Expr,
-	pub fetch: Option<Fetchs>,
+	pub(crate) what: Expr,
+	pub(crate) fetch: Option<Fetchs>,
 }
 
 impl ToSql for OutputStatement {

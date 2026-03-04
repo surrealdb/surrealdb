@@ -18,7 +18,7 @@ pub struct DefineParamStatement {
 	pub name: String,
 	pub value: Expr,
 	pub comment: Expr,
-	pub permissions: Permission,
+	pub(crate) permissions: Permission,
 }
 
 impl DefineParamStatement {

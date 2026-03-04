@@ -20,7 +20,7 @@ pub struct DefineModelStatement {
 	pub name: String,
 	pub version: String,
 	pub comment: Expr,
-	pub permissions: Permission,
+	pub(crate) permissions: Permission,
 }
 
 impl DefineModelStatement {

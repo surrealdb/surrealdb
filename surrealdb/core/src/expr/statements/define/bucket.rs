@@ -17,7 +17,7 @@ pub struct DefineBucketStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub backend: Option<Expr>,
-	pub permissions: Permission,
+	pub(crate) permissions: Permission,
 	pub readonly: bool,
 	pub comment: Expr,
 }

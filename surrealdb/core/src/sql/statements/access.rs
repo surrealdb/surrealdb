@@ -40,7 +40,7 @@ impl From<crate::expr::statements::access::AccessStatement> for AccessStatement 
 pub struct AccessStatementGrant {
 	pub ac: String,
 	pub base: Option<Base>,
-	pub subject: Subject,
+	pub(crate) subject: Subject,
 }
 
 impl From<AccessStatementGrant> for crate::expr::statements::access::AccessStatementGrant {
@@ -69,7 +69,7 @@ pub struct AccessStatementShow {
 	pub ac: String,
 	pub base: Option<Base>,
 	pub gr: Option<String>,
-	pub cond: Option<Cond>,
+	pub(crate) cond: Option<Cond>,
 }
 
 impl From<AccessStatementShow> for crate::expr::statements::access::AccessStatementShow {
@@ -100,7 +100,7 @@ pub struct AccessStatementRevoke {
 	pub ac: String,
 	pub base: Option<Base>,
 	pub gr: Option<String>,
-	pub cond: Option<Cond>,
+	pub(crate) cond: Option<Cond>,
 }
 
 impl From<AccessStatementRevoke> for crate::expr::statements::access::AccessStatementRevoke {
@@ -186,7 +186,7 @@ impl From<crate::expr::statements::access::PurgeKind> for PurgeKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Subject {
+pub(crate) enum Subject {
 	Record(RecordIdLit),
 	User(String),
 }

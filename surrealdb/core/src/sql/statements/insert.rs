@@ -5,13 +5,13 @@ use crate::sql::{Data, Expr, Literal, Output};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InsertStatement {
-	pub into: Option<Expr>,
-	pub data: Data,
+	pub(crate) into: Option<Expr>,
+	pub(crate) data: Data,
 	/// Does the statement have the ignore clause.
 	pub ignore: bool,
-	pub update: Option<Data>,
-	pub output: Option<Output>,
-	pub timeout: Expr,
+	pub(crate) update: Option<Data>,
+	pub(crate) output: Option<Output>,
+	pub(crate) timeout: Expr,
 	pub relation: bool,
 }
 

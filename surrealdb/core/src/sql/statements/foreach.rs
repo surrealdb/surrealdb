@@ -7,7 +7,7 @@ use crate::sql::{Block, Expr, Param};
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ForeachStatement {
 	pub param: Param,
-	pub range: Expr,
+	pub(crate) range: Expr,
 	pub block: Block,
 }
 

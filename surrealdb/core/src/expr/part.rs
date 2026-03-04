@@ -239,7 +239,7 @@ pub enum RecursionPlan {
 
 impl<'a> RecursionPlan {
 	#[instrument(level = "trace", name = "RecursionPlan::compute", skip_all)]
-	pub async fn compute(
+	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
@@ -264,7 +264,7 @@ impl<'a> RecursionPlan {
 		}
 	}
 
-	pub async fn compute_inner(
+	pub(crate) async fn compute_inner(
 		&self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,

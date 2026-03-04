@@ -132,7 +132,7 @@ pub fn new_grant_bearer(ty: catalog::BearerAccessType) -> catalog::GrantBearer {
 }
 
 /// Returns the surrealql object representation of the access grant
-pub fn access_object_from_grant(grant: &catalog::AccessGrant) -> Object {
+pub(crate) fn access_object_from_grant(grant: &catalog::AccessGrant) -> Object {
 	let mut res = Object::default();
 	res.insert("id".to_owned(), Value::from(grant.id.clone()));
 	res.insert("ac".to_owned(), Value::from(grant.ac.clone()));
@@ -178,7 +178,7 @@ pub fn access_object_from_grant(grant: &catalog::AccessGrant) -> Object {
 	res
 }
 
-pub async fn create_grant(
+pub(crate) async fn create_grant(
 	access: String,
 	base: Option<Base>,
 	subject: catalog::Subject,

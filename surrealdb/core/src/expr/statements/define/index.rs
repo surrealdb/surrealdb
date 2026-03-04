@@ -23,7 +23,7 @@ pub struct DefineIndexStatement {
 	pub name: Expr,
 	pub what: Expr,
 	pub cols: Vec<Expr>,
-	pub index: Index,
+	pub(crate) index: Index,
 	pub comment: Expr,
 	pub concurrently: bool,
 }

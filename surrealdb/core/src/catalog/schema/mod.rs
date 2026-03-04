@@ -105,7 +105,7 @@ impl Permissions {
 		}
 	}
 
-	pub fn to_sql_definition(&self) -> crate::sql::Permissions {
+	pub(crate) fn to_sql_definition(&self) -> crate::sql::Permissions {
 		self.clone().into()
 	}
 }

@@ -23,7 +23,7 @@ impl DialectTranslator for PostgresTranslator {
 		let dialect = PostgreSqlDialect {};
 		let ast = Parser::parse_sql(&dialect, sql)?;
 		let expressions: Result<Vec<TopLevelExpr>, TranslateError> =
-			ast.into_iter().map(|stmt| translate_statement(stmt)).collect();
+			ast.into_iter().map(translate_statement).collect();
 		Ok(LogicalPlan {
 			expressions: expressions?,
 		})

@@ -20,7 +20,7 @@ pub struct DefineFunctionStatement {
 	pub args: Vec<(String, Kind)>,
 	pub block: Block,
 	pub comment: Expr,
-	pub permissions: Permission,
+	pub(crate) permissions: Permission,
 	pub returns: Option<Kind>,
 }
 

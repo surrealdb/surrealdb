@@ -10,13 +10,13 @@ pub struct CreateStatement {
 	pub only: bool,
 	// Where we are creating (i.e. table, or record ID)
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
-	pub what: Vec<Expr>,
+	pub(crate) what: Vec<Expr>,
 	// The data associated with the record being created
-	pub data: Option<Data>,
+	pub(crate) data: Option<Data>,
 	//  What the result of the statement should resemble (i.e. Diff or no result etc).
-	pub output: Option<Output>,
+	pub(crate) output: Option<Output>,
 	// The timeout for the statement
-	pub timeout: Expr,
+	pub(crate) timeout: Expr,
 }
 
 impl Default for CreateStatement {

@@ -7,9 +7,9 @@ use crate::sql::Expr;
 // does not expire
 pub struct UserDuration {
 	// Duration after which the token obtained after authenticating with user credentials expires
-	pub token: Expr,
+	pub(crate) token: Expr,
 	// Duration after which the session authenticated with user credentials or token expires
-	pub session: Expr,
+	pub(crate) session: Expr,
 }
 
 /*

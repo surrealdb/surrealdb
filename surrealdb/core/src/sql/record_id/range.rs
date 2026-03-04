@@ -6,8 +6,8 @@ use super::RecordIdKeyLit;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RecordIdKeyRangeLit {
-	pub start: Bound<RecordIdKeyLit>,
-	pub end: Bound<RecordIdKeyLit>,
+	pub(crate) start: Bound<RecordIdKeyLit>,
+	pub(crate) end: Bound<RecordIdKeyLit>,
 }
 
 impl From<RecordIdKeyRangeLit> for crate::expr::RecordIdKeyRangeLit {

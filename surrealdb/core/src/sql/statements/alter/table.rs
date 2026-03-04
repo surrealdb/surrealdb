@@ -22,7 +22,7 @@ pub struct AlterTableStatement {
 	pub name: String,
 	pub if_exists: bool,
 	pub schemafull: AlterKind<()>,
-	pub permissions: Option<Permissions>,
+	pub(crate) permissions: Option<Permissions>,
 	pub changefeed: AlterKind<ChangeFeed>,
 	pub comment: AlterKind<String>,
 	pub kind: Option<TableType>,

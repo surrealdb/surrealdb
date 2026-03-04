@@ -94,7 +94,8 @@ impl DocumentContext {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CursorDoc {
+#[doc(hidden)]
+pub struct CursorDoc {
 	pub(crate) rid: Option<Arc<RecordId>>,
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
 	pub(crate) doc: CursorRecord,
