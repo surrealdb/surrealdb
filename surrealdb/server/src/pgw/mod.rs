@@ -8,7 +8,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::Sink;
-use pgwire::api::auth::{DefaultServerParameterProvider, StartupHandler};
+use pgwire::api::auth::{
+	DefaultServerParameterProvider, StartupHandler, save_startup_parameters_to_metadata,
+};
 use pgwire::api::{ClientInfo, PgWireServerHandlers};
 use pgwire::error::{PgWireError, PgWireResult};
 use pgwire::messages::{PgWireBackendMessage, PgWireFrontendMessage};
@@ -26,13 +28,16 @@ impl StartupHandler for SurrealStartupHandler {
 	async fn on_startup<C>(
 		&self,
 		client: &mut C,
-		_message: PgWireFrontendMessage,
+		message: PgWireFrontendMessage,
 	) -> PgWireResult<()>
 	where
 		C: ClientInfo + Sink<PgWireBackendMessage> + Unpin + Send,
 		C::Error: Debug,
 		PgWireError: From<<C as Sink<PgWireBackendMessage>>::Error>,
 	{
+		if let PgWireFrontendMessage::Startup(ref startup) = message {
+			save_startup_parameters_to_metadata(client, startup);
+		}
 		client.set_state(pgwire::api::PgWireConnectionState::ReadyForQuery);
 		pgwire::api::auth::finish_authentication(client, &DefaultServerParameterProvider::default())
 			.await

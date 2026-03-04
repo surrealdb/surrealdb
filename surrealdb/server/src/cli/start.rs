@@ -198,6 +198,8 @@ pub async fn init<
 		no_banner,
 		no_identification_headers,
 		allow_origin,
+		#[cfg(feature = "pgwire")]
+		pgwire_listen,
 		..
 	}: StartCommandArguments,
 ) -> Result<()> {
@@ -245,6 +247,9 @@ pub async fn init<
 		engine,
 		crt,
 		key,
+		#[cfg(feature = "pgwire")]
+		pgwire_bind: pgwire_listen,
+		#[cfg(not(feature = "pgwire"))]
 		pgwire_bind: None,
 	};
 	composer.check_config(&config).await?;
