@@ -209,7 +209,7 @@ impl ExecOperator for IndexScan {
 		};
 
 		let ix_def = self.index_ref.definition();
-		let cols: Vec<SortProperty> = ix_def
+		let mut cols: Vec<SortProperty> = ix_def
 			.cols
 			.iter()
 			.skip(skip_cols)
@@ -222,6 +222,21 @@ impl ExecOperator for IndexScan {
 				})
 			})
 			.collect();
+
+		// For non-unique indexes (Idx), the record ID is stored in the BTree
+		// key after the field values.  This means entries are implicitly
+		// sorted by record ID after the declared index columns.  Expose
+		// this so that ORDER BY (col DESC, id DESC) is recognised as
+		// satisfied by a backward index scan.
+		if !self.index_ref.is_unique() && !cols.is_empty() {
+			cols.push(SortProperty {
+				path: crate::exec::field_path::FieldPath::field("id"),
+				direction: dir,
+				collate: false,
+				numeric: false,
+			});
+		}
+
 		if cols.is_empty() {
 			crate::exec::OutputOrdering::Unordered
 		} else {

@@ -928,7 +928,7 @@ pub(super) fn index_covers_ordering(
 		crate::idx::planner::ScanDirection::Backward => SortDirection::Desc,
 	};
 	let ix_def = index_ref.definition();
-	let cols: Vec<SortProperty> = ix_def
+	let mut cols: Vec<SortProperty> = ix_def
 		.cols
 		.iter()
 		.skip(skip_cols)
@@ -941,6 +941,20 @@ pub(super) fn index_covers_ordering(
 			})
 		})
 		.collect();
+
+	// For non-unique indexes (Idx), the record ID is stored in the BTree
+	// key after the field values.  Entries are implicitly sorted by record
+	// ID, so we append an `id` property to the effective ordering.  This
+	// allows `ORDER BY col DESC, id DESC` to be satisfied by a backward
+	// compound index scan.
+	if !index_ref.is_unique() && !cols.is_empty() {
+		cols.push(SortProperty {
+			path: crate::exec::field_path::FieldPath::field("id"),
+			direction: dir,
+			collate: false,
+			numeric: false,
+		});
+	}
 
 	if cols.is_empty() {
 		return false;

@@ -386,6 +386,16 @@ impl<'a> IndexAnalyzer<'a> {
 							// beyond the equality prefix.
 							if let Some(op) = normalize_range_op(&cond.op, cond.position) {
 								range_condition = Some((op, cond.value.clone()));
+							} else if matches!(cond.op, BinaryOperator::NotEqual)
+								&& matches!(cond.value, Value::Null | Value::None)
+							{
+								// `field IS NOT NULL` / `field != NULL` / `field != NONE`.
+								// NULL and NONE sort first in the BTree key ordering, so
+								// "not null/none" is equivalent to `field > NULL` for
+								// compound range purposes. This narrows the scan to
+								// exclude entries where this column is NULL/NONE.
+								range_condition =
+									Some((BinaryOperator::MoreThan, cond.value.clone()));
 							}
 							break;
 						}
