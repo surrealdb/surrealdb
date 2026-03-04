@@ -9,7 +9,7 @@ use surrealdb::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 	Targets,
 };
-use surrealdb::kvs::export::TableConfig;
+use surrealdb::kvs::export::{ExcludedTables, TableConfig};
 
 pub(crate) mod parser;
 
@@ -189,6 +189,16 @@ pub(crate) fn export_tables(value: &str) -> Result<TableConfig, String> {
 	}
 
 	Ok(TableConfig::Some(value.split(",").filter(|s| !s.is_empty()).map(str::to_string).collect()))
+}
+
+pub(crate) fn export_tables_exclude(value: &str) -> Result<TableConfig, String> {
+	if value.is_empty() {
+		return Err(String::from("Provide at least one table name to exclude"));
+	}
+
+	Ok(TableConfig::Exclude(ExcludedTables {
+		exclude: value.split(",").filter(|s| !s.is_empty()).map(str::to_string).collect(),
+	}))
 }
 
 #[cfg(test)]

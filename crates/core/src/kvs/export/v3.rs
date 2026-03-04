@@ -138,6 +138,16 @@ pub async fn export_v3(
 
 	let tables = tx.all_tb(ns, db, None).await?;
 
+	// Warn if any specified table names don't match existing tables
+	if let Some(names) = cfg.tables.names() {
+		let existing: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
+		for name in names {
+			if !existing.contains(&name.as_str()) {
+				warn!("Table '{name}' does not exist in the database");
+			}
+		}
+	}
+
 	for t in tables.iter() {
 		if writer.is_closed() {
 			break;
