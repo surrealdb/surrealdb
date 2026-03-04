@@ -27,17 +27,6 @@ function Get-VsDevCmdPath {
         }
     }
 
-    $fallbacks = @(
-        "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\Common7\Tools\VsDevCmd.bat",
-        "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat"
-    )
-
-    foreach ($fallback in $fallbacks) {
-        if (Test-Path -LiteralPath $fallback -PathType Leaf) {
-            return $fallback
-        }
-    }
-
     return $null
 }
 
@@ -112,6 +101,115 @@ function Ensure-ScoopPackage {
     }
 }
 
+function Ensure-ScoopPackageLatest {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PackageName
+    )
+
+    $scoop = Get-Command scoop -ErrorAction SilentlyContinue
+    if (-not $scoop) {
+        $shim = Join-Path $env:USERPROFILE "scoop\shims\scoop.cmd"
+        if (Test-Path -LiteralPath $shim -PathType Leaf) {
+            $scoop = Get-Item -LiteralPath $shim
+        }
+    }
+
+    if (-not $scoop) {
+        throw "Scoop was not found, cannot ensure latest '$PackageName'."
+    }
+
+    $scoopCmd = if ($scoop -is [System.IO.FileInfo]) { $scoop.FullName } else { $scoop.Source }
+
+    & $scoopCmd list $PackageName *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Installing '$PackageName' via Scoop..."
+        & $scoopCmd install $PackageName
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to install '$PackageName' via Scoop."
+        }
+        return
+    }
+
+    Write-Host "Updating '$PackageName' via Scoop..."
+    & $scoopCmd update $PackageName
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to update '$PackageName' via Scoop."
+    }
+}
+
+function Get-RustupCommand {
+    $rustup = Get-Command rustup -ErrorAction SilentlyContinue
+    if ($rustup) {
+        return $rustup
+    }
+
+    $fallbacks = @(
+        (Join-Path $env:USERPROFILE ".cargo\bin\rustup.exe"),
+        (Join-Path $env:USERPROFILE "scoop\shims\rustup.exe")
+    )
+
+    foreach ($fallback in $fallbacks) {
+        if (Test-Path -LiteralPath $fallback -PathType Leaf) {
+            return Get-Item -LiteralPath $fallback
+        }
+    }
+
+    return $null
+}
+
+function Get-RustcCommand {
+    $rustc = Get-Command rustc -ErrorAction SilentlyContinue
+    if ($rustc) {
+        return $rustc
+    }
+
+    $fallbacks = @(
+        (Join-Path $env:USERPROFILE ".cargo\bin\rustc.exe"),
+        (Join-Path $env:USERPROFILE "scoop\shims\rustc.exe")
+    )
+
+    foreach ($fallback in $fallbacks) {
+        if (Test-Path -LiteralPath $fallback -PathType Leaf) {
+            return Get-Item -LiteralPath $fallback
+        }
+    }
+
+    return $null
+}
+
+function Ensure-LatestRustToolchain {
+    Ensure-ScoopPackageLatest -PackageName "rustup"
+
+    $rustup = Get-RustupCommand
+    if (-not $rustup) {
+        throw "rustup not found after Scoop install/update."
+    }
+
+    $rustupPath = if ($rustup -is [System.IO.FileInfo]) { $rustup.FullName } else { $rustup.Source }
+
+    Write-Host "Ensuring latest stable Rust toolchain via rustup..."
+    & $rustupPath toolchain install stable
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to install stable toolchain via rustup."
+    }
+
+    & $rustupPath update stable
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to update stable toolchain via rustup."
+    }
+
+    & $rustupPath default stable
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to set stable as default toolchain via rustup."
+    }
+
+    $rustc = Get-RustcCommand
+    if (-not $rustc) {
+        throw "rustc not found after rustup update."
+    }
+}
+
 function Get-NasmCommand {
     $nasm = Get-Command nasm -ErrorAction SilentlyContinue
     if ($nasm) {
@@ -149,12 +247,13 @@ function Normalize-PathValue {
 
 $vsDevCmd = Get-VsDevCmdPath
 if (-not $vsDevCmd) {
-    throw "VsDevCmd.bat not found. Install Visual Studio Build Tools with C++ workload and Windows SDK."
+    throw "VsDevCmd.bat not found via vswhere. Install the latest Visual Studio Build Tools with C++ workload and Windows SDK."
 }
 $vsDevCmd = Normalize-PathValue -Value $vsDevCmd -ExpectedLeaf "VsDevCmd.bat"
 
+Ensure-LatestRustToolchain
+
 if ($InstallMissingTools) {
-    Ensure-ScoopPackage -PackageName "rustup"
     Ensure-ScoopPackage -PackageName "llvm"
     Ensure-ScoopPackage -PackageName "nasm"
 }
