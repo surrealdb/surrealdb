@@ -10,7 +10,7 @@ use crate::{Node, NodeId};
 
 pub fn visualize_ast<N, L, W>(root: NodeId<N>, ast: &Ast<L>, writer: W) -> fmt::Result
 where
-	N: Node + AstVis<L, W>,
+	N: Node + AstVis<L>,
 	L: NodeLibrary,
 	W: fmt::Write,
 {
@@ -18,12 +18,18 @@ where
 	ast[root].fmt(ast, &mut fmt)
 }
 
-pub trait AstVis<L, W>
+pub trait AstVis<L>
 where
 	L: NodeLibrary,
-	W: fmt::Write,
 {
-	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result;
+	fn fmt<W: fmt::Write>(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result;
+
+	fn to_ast_string(&self, ast: &Ast<L>) -> String {
+		let mut res = String::new();
+		let mut fmt = AstFormatter::new(&mut res);
+		self.fmt(ast, &mut fmt).expect("Formatting to not fail when writing to a string");
+		res
+	}
 }
 
 pub struct AstFormatter<W> {
@@ -131,7 +137,7 @@ where
 	pub fn tuple<L, N>(&mut self, ast: &Ast<L>, n: &N) -> Result<&mut Self, fmt::Error>
 	where
 		L: NodeLibrary,
-		N: AstVis<L, W>,
+		N: AstVis<L>,
 	{
 		let fmt = unsafe { std::mem::transmute::<&mut Self, &mut AstFormatter<W>>(self) };
 		n.fmt(ast, fmt)?;
@@ -141,7 +147,7 @@ where
 	pub fn field<L, N>(&mut self, ast: &Ast<L>, name: &str, n: &N) -> Result<&mut Self, fmt::Error>
 	where
 		L: NodeLibrary,
-		N: AstVis<L, W>,
+		N: AstVis<L>,
 	{
 		self.0.write_str(".")?;
 		self.0.write_str(name)?;

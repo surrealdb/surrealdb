@@ -28,7 +28,7 @@ mod visit;
 
 pub use types::{AstSpan, Node, NodeId, NodeList, NodeListId, Spanned, UniqueNode};
 
-use crate::mac::{ast_type, impl_vis_debug};
+use crate::mac::{ast_type, impl_vis_debug, impl_vis_type};
 
 type NodeSet<T> = IdSet<u32, T>;
 
@@ -190,11 +190,16 @@ ast_type! {
 	}
 }
 
-#[derive(Debug)]
-pub enum UseKind {
-	Namespace(NodeId<Ident>),
-	NamespaceDatabase(NodeId<Ident>, NodeId<Ident>),
-	Database(NodeId<Ident>),
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum UseKind {
+		Namespace(NodeId<Ident>),
+		NamespaceDatabase{
+			namespace: NodeId<Ident>,
+			database: NodeId<Ident>
+		},
+		Database(NodeId<Ident>),
+	}
 }
 
 ast_type! {
@@ -234,25 +239,27 @@ pub enum Base {
 	Root,
 }
 
-#[derive(Debug)]
-pub enum InfoKind {
-	Root,
-	Namespace,
-	Database {
-		version: Option<NodeId<Expr>>,
-	},
-	Table {
-		name: NodeId<Expr>,
-		version: Option<NodeId<Expr>>,
-	},
-	User {
-		name: NodeId<Expr>,
-		base: Option<Base>,
-	},
-	Index {
-		name: NodeId<Expr>,
-		table: NodeId<Expr>,
-	},
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum InfoKind {
+		Root,
+		Namespace,
+		Database {
+			version: Option<NodeId<Expr>>,
+		},
+		Table {
+			name: NodeId<Expr>,
+			version: Option<NodeId<Expr>>,
+		},
+		User {
+			name: NodeId<Expr>,
+			base: Option<Base>,
+		},
+		Index {
+			name: NodeId<Expr>,
+			table: NodeId<Expr>,
+		},
+	}
 }
 
 ast_type! {
@@ -603,14 +610,16 @@ ast_type! {
 	}
 }
 
-#[derive(Debug)]
-pub struct DefineMethodApiActions {
-	pub get: Option<NodeId<ApiAction>>,
-	pub delete: Option<NodeId<ApiAction>>,
-	pub patch: Option<NodeId<ApiAction>>,
-	pub post: Option<NodeId<ApiAction>>,
-	pub put: Option<NodeId<ApiAction>>,
-	pub trace: Option<NodeId<ApiAction>>,
+impl_vis_type! {
+	#[derive(Debug)]
+	pub struct DefineMethodApiActions {
+		pub get: Option<NodeId<ApiAction>>,
+		pub delete: Option<NodeId<ApiAction>>,
+		pub patch: Option<NodeId<ApiAction>>,
+		pub post: Option<NodeId<ApiAction>>,
+		pub put: Option<NodeId<ApiAction>>,
+		pub trace: Option<NodeId<ApiAction>>,
+	}
 }
 
 ast_type! {
@@ -651,12 +660,13 @@ ast_type! {
 	}
 }
 
-ast_type! {
+impl_vis_type! {
+	#[derive(Debug)]
 	pub enum OnDelete{
-		Reject(Span),
-		Ignore(Span),
-		Cascade(Span),
-		Unset(Span),
+		Reject,
+		Ignore,
+		Cascade,
+		Unset,
 		Then(NodeId<Expr>),
 	}
 }
@@ -678,6 +688,193 @@ ast_type! {
 		// NOTE: maybe move into own struct if `REFERENCE` gets more subclauses.
 		/// `REFERENCE ON DELETE` clause
 		pub on_delete: Option<OnDelete>
+	}
+}
+
+ast_type! {
+	pub struct CountIndex{
+		pub condition: Option<NodeId<Expr>>,
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum FullTextScoring {
+		VectorSearch,
+		Bm25 {
+			k1: NodeId<Spanned<f64>>,
+			b: NodeId<Spanned<f64>>,
+		},
+	}
+}
+
+ast_type! {
+	pub struct FullTextIndex{
+		pub analyzer: Option<NodeId<StringLit>>,
+		pub highlights: bool,
+		pub scoring: Option<FullTextScoring>,
+	}
+}
+
+#[derive(Debug)]
+pub enum VectorType {
+	F64,
+	F32,
+	I64,
+	I32,
+	I16,
+}
+impl_vis_debug!(VectorType);
+
+ast_type! {
+	pub struct HnswIndex{
+		pub distance: Option<Distance>,
+		pub ty: Option<VectorType>,
+		pub m: Option<NodeId<Integer>>,
+		pub m0: Option<NodeId<Integer>>,
+		pub ml: Option<NodeId<Integer>>,
+		pub ef_construction: Option<NodeId<Integer>>,
+		pub extend_candidates: bool,
+		pub keep_pruned_connections: bool,
+		pub use_hashed_vector: bool,
+	}
+}
+
+ast_type! {
+	pub enum Index{
+		Unique(Span),
+		Count(CountIndex),
+		FullText(FullTextIndex),
+		Hnsw(HnswIndex)
+	}
+}
+
+ast_type! {
+	pub struct DefineIndex{
+		pub kind: DefineKind,
+		pub name: NodeId<Expr>,
+		pub table: NodeId<Expr>,
+		pub fields: Option<NodeListId<Expr>>,
+		pub comment: Option<NodeId<Expr>>,
+		pub index: Option<Index>,
+		pub concurrently: bool,
+	}
+}
+
+ast_type! {
+	pub struct NgramMapper{
+		pub min: NodeId<Integer>,
+		pub max: NodeId<Integer>,
+	}
+}
+
+ast_type! {
+	pub enum Filter{
+		Ascii(Span),
+		Lowercase(Span),
+		Uppercase(Span),
+		EdgeNgram(NgramMapper),
+		Ngram(NgramMapper),
+		Snowball(NodeId<Ident>),
+		Mapper(NodeId<StringLit>),
+	}
+}
+
+ast_type! {
+	pub struct DefineAnalyzer{
+		pub kind: DefineKind,
+		pub name: NodeId<Expr>,
+		pub filters: Option<NodeListId<Filter>>,
+		pub tokenizer: Option<NodeListId<Ident>>,
+		pub function: Option<NodeId<Path>>,
+		pub comment: Option<NodeId<Expr>>,
+	}
+}
+
+ast_type! {
+	pub struct DefineBucket{
+		pub kind: DefineKind,
+		pub name: NodeId<Expr>,
+		pub backend: Option<NodeId<Expr>>,
+		pub permission: Option<Permission>,
+		pub comment: Option<NodeId<Expr>>,
+		pub readonly: bool,
+	}
+}
+
+ast_type! {
+	pub struct DefineSequence{
+		pub kind: DefineKind,
+		pub name: NodeId<Expr>,
+		pub batch: Option<NodeId<Expr>>,
+		pub start: Option<NodeId<Expr>>,
+		pub timeout: Option<NodeId<Expr>>,
+	}
+}
+
+ast_type! {
+	pub struct DefineConfigApi{
+		pub permission: Option<Permission>,
+		pub middleware: Option<NodeListId<ApiMiddleware>>,
+	}
+}
+
+#[derive(Debug)]
+pub enum GraphqlIntrospection {
+	None,
+	Auto,
+}
+impl_vis_debug!(GraphqlIntrospection);
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum TablesConfig{
+		None,
+		Auto,
+		Include(NodeListId<Ident>),
+		Exclude(NodeListId<Ident>),
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum FunctionConfig{
+		None,
+		Auto,
+		Include(NodeListId<Path>),
+		Exclude(NodeListId<Path>),
+	}
+}
+
+ast_type! {
+	pub struct DefineConfigGraphql{
+		pub introspection: GraphqlIntrospection,
+		pub table_config: TablesConfig,
+		pub function_config: FunctionConfig,
+		pub depth_limit: Option<NodeId<Integer>>,
+		pub complexity_limit: Option<NodeId<Integer>>,
+	}
+}
+
+ast_type! {
+	pub struct DefineConfigDefault{
+		pub namespace: Option<NodeId<Expr>>,
+		pub database: Option<NodeId<Expr>>,
+	}
+}
+
+ast_type! {
+	pub enum DefineConfigKind{
+		Api(DefineConfigApi),
+		Graphql(DefineConfigGraphql),
+		Default(DefineConfigDefault),
+	}
+}
+
+ast_type! {
+	pub struct DefineConfig{
+		pub kind: DefineKind,
+		pub inner: DefineConfigKind,
 	}
 }
 
@@ -839,14 +1036,17 @@ pub enum RecordIdKeyGenerate {
 	Uuid,
 	Rand,
 }
+impl_vis_debug!(RecordIdKeyGenerate);
 
-#[derive(Debug)]
-pub enum MockKind {
-	Integer(NodeId<Integer>),
-	Range {
-		start: Bound<NodeId<Integer>>,
-		end: Bound<NodeId<Integer>>,
-	},
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum MockKind {
+		Integer(NodeId<Integer>),
+		Range {
+			start: Bound<NodeId<Integer>>,
+			end: Bound<NodeId<Integer>>,
+		},
+	}
 }
 
 ast_type! {
@@ -898,16 +1098,18 @@ ast_type! {
 	}
 }
 
-#[derive(Debug)]
-pub enum Distance {
-	Chebyshev,
-	Cosine,
-	Euclidean,
-	Hamming,
-	Jaccard,
-	Manhattan,
-	Minkowski(f64),
-	Pearson,
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum Distance {
+		Chebyshev,
+		Cosine,
+		Euclidean,
+		Hamming,
+		Jaccard,
+		Manhattan,
+		Minkowski(f64),
+		Pearson,
+	}
 }
 
 #[derive(Debug)]
@@ -1020,15 +1222,20 @@ ast_type! {
 	}
 }
 
-#[derive(Debug)]
-pub enum PostfixOperator {
-	Range,
-	RangeSkip,
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum PostfixOperator {
+		Range,
+		RangeSkip,
 
-	/// .field(EXPR*)
-	MethodCall(NodeId<String>, Option<NodeListId<Expr>>),
-	/// (EXPR*)
-	Call(Option<NodeListId<Expr>>),
+		/// .field(EXPR*)
+		MethodCall{
+			name: NodeId<String>,
+			arguments: Option<NodeListId<Expr>>
+		},
+		/// (EXPR*)
+		Call(Option<NodeListId<Expr>>),
+	}
 }
 
 ast_type! {
@@ -1056,14 +1263,16 @@ ast_type! {
 	}
 }
 
-#[derive(Debug)]
-pub enum DestructureOperator {
-	/// { field.* }
-	All,
-	/// { field : EXPR }
-	Expr(NodeId<Expr>),
-	/// { field.{ .. } }
-	Destructure(Option<NodeListId<Destructure>>),
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum DestructureOperator {
+		/// { field.* }
+		All,
+		/// { field : EXPR }
+		Expr(NodeId<Expr>),
+		/// { field.{ .. } }
+		Destructure(Option<NodeListId<Destructure>>),
+	}
 }
 
 ast_type! {
@@ -1073,26 +1282,28 @@ ast_type! {
 	}
 }
 
-#[derive(Debug)]
-pub enum IdiomOperator {
-	/// [*] | .*
-	All,
-	/// [$]
-	Last,
-	/// .field
-	Field(NodeId<String>),
-	/// \[EXPR\]
-	Index(NodeId<Expr>),
-	/// \[? EXPR\] | \[WHERE EXPR\]
-	Where(NodeId<Expr>),
-	/// .?
-	Option,
-	/// .@
-	Repeat,
-	/// .{ .. }
-	Destructure(Option<NodeListId<Destructure>>),
-	/// (1, $bar)
-	Call(Option<NodeListId<Expr>>),
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum IdiomOperator {
+		/// [*] | .*
+		All,
+		/// [$]
+		Last,
+		/// .field
+		Field(NodeId<String>),
+		/// \[EXPR\]
+		Index(NodeId<Expr>),
+		/// \[? EXPR\] | \[WHERE EXPR\]
+		Where(NodeId<Expr>),
+		/// .?
+		Option,
+		/// .@
+		Repeat,
+		/// .{ .. }
+		Destructure(Option<NodeListId<Destructure>>),
+		/// (1, $bar)
+		Call(Option<NodeListId<Expr>>),
+	}
 }
 
 ast_type! {
