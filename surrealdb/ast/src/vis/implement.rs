@@ -11,209 +11,30 @@ use super::AstFormatter;
 use crate::mac::impl_vis_debug;
 use crate::types::{Ast, NodeLibrary};
 use crate::vis::AstVis;
-use crate::{
-	Base, BinaryOperator, DateTime, DefineMethodApiActions, DestructureOperator, IdiomOperator,
-	InfoKind, Integer, MockKind, NodeId, NodeListId, PostfixOperator, RecordIdKeyGenerate, Sign,
-	Spanned, UseKind,
-};
+use crate::{Base, BinaryOperator, DateTime, Integer, NodeId, NodeListId, Sign, Spanned};
 
-impl<L, W> AstVis<L, W> for InfoKind
+impl<N, L> AstVis<L> for NodeId<N>
 where
+	N: AstVis<L> + Any,
 	L: NodeLibrary,
-	W: fmt::Write,
 {
-	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
-		fmt.fmt_enum(ast, "InfoKind", |ast, fmt| match self {
-			InfoKind::Root => fmt.unit_variant("Root"),
-			InfoKind::Namespace => fmt.unit_variant("Namespace"),
-			InfoKind::Database {
-				version,
-			} => fmt
-				.variant(ast, "Database", |ast, fmt| fmt.field(ast, "version", version)?.finish()),
-			InfoKind::Table {
-				name,
-				version,
-			} => fmt.variant(ast, "Table", |ast, fmt| {
-				fmt.field(ast, "name", name)?.field(ast, "version", version)?.finish()
-			}),
-			InfoKind::User {
-				name,
-				base,
-			} => fmt.variant(ast, "Table", |ast, fmt| {
-				fmt.field(ast, "name", name)?.field(ast, "base", base)?.finish()
-			}),
-			InfoKind::Index {
-				name,
-				table,
-			} => fmt.variant(ast, "Table", |ast, fmt| {
-				fmt.field(ast, "name", name)?.field(ast, "table", table)?.finish()
-			}),
-		})
-	}
-}
-
-impl<L, W> AstVis<L, W> for UseKind
-where
-	L: NodeLibrary,
-	W: fmt::Write,
-{
-	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
-		fmt.fmt_enum(ast, "UseStatementKind", |ast, fmt| match self {
-			UseKind::Namespace(ns) => {
-				fmt.variant(ast, "Namespace", |ast, fmt| fmt.tuple(ast, ns)?.finish())
-			}
-			UseKind::NamespaceDatabase(ns, db) => {
-				fmt.variant(ast, "NamespaceDatabase", |ast, fmt| {
-					fmt.tuple(ast, ns)?.tuple(ast, db)?.finish()
-				})
-			}
-			UseKind::Database(db) => {
-				fmt.variant(ast, "Database", |ast, fmt| fmt.tuple(ast, db)?.finish())
-			}
-		})
-	}
-}
-
-impl<L, W> AstVis<L, W> for PostfixOperator
-where
-	L: NodeLibrary,
-	W: fmt::Write,
-{
-	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
-		fmt.fmt_enum(ast, "PostfixOperator", |ast, fmt| match self {
-			PostfixOperator::Range => fmt.unit_variant("Range"),
-			PostfixOperator::RangeSkip => fmt.unit_variant("RangeSkip"),
-			PostfixOperator::MethodCall(receiver, arguments) => {
-				fmt.variant(ast, "MethodCall", |ast, fmt| {
-					fmt.field(ast, "receiver", receiver)?
-						.field(ast, "arguments", arguments)?
-						.finish()
-				})
-			}
-			PostfixOperator::Call(arguments) => fmt
-				.variant(ast, "Call", |ast, fmt| fmt.field(ast, "arguments", arguments)?.finish()),
-		})
-	}
-}
-
-impl<L, W> AstVis<L, W> for IdiomOperator
-where
-	L: NodeLibrary,
-	W: fmt::Write,
-{
-	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
-		fmt.fmt_enum(ast, "PostfixOperator", |ast, fmt| match self {
-			IdiomOperator::All => fmt.unit_variant("All"),
-			IdiomOperator::Last => fmt.unit_variant("Last"),
-			IdiomOperator::Option => fmt.unit_variant("Option"),
-			IdiomOperator::Repeat => fmt.unit_variant("Repeat"),
-			IdiomOperator::Field(n) => {
-				fmt.variant(ast, "Field", |ast, fmt| fmt.field(ast, "name", n)?.finish())
-			}
-			IdiomOperator::Index(i) => {
-				fmt.variant(ast, "Index", |ast, fmt| fmt.field(ast, "expr", i)?.finish())
-			}
-			IdiomOperator::Where(i) => {
-				fmt.variant(ast, "Where", |ast, fmt| fmt.field(ast, "expr", i)?.finish())
-			}
-			IdiomOperator::Destructure(x) => {
-				fmt.variant(ast, "Destructure", |ast, fmt| fmt.field(ast, "op", x)?.finish())
-			}
-			IdiomOperator::Call(x) => {
-				fmt.variant(ast, "Call", |ast, fmt| fmt.field(ast, "args", x)?.finish())
-			}
-		})
-	}
-}
-
-impl<L, W> AstVis<L, W> for DestructureOperator
-where
-	L: NodeLibrary,
-	W: fmt::Write,
-{
-	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
-		fmt.fmt_enum(ast, "DestructureOperator", |ast, fmt| match self {
-			DestructureOperator::All => fmt.unit_variant("All"),
-			DestructureOperator::Expr(x) => {
-				fmt.variant(ast, "Expr", |ast, fmt| fmt.field(ast, "expr", x)?.finish())
-			}
-			DestructureOperator::Destructure(x) => {
-				fmt.variant(ast, "Destructure", |ast, fmt| fmt.field(ast, "op", x)?.finish())
-			}
-		})
-	}
-}
-
-impl<L, W> AstVis<L, W> for RecordIdKeyGenerate
-where
-	L: NodeLibrary,
-	W: fmt::Write,
-{
-	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
-		fmt.fmt_enum(ast, "DestructureOperator", |_, fmt| match self {
-			RecordIdKeyGenerate::Ulid => fmt.unit_variant("Ulid"),
-			RecordIdKeyGenerate::Uuid => fmt.unit_variant("Uuid"),
-			RecordIdKeyGenerate::Rand => fmt.unit_variant("Rand"),
-		})
-	}
-}
-
-impl<L, W> AstVis<L, W> for MockKind
-where
-	L: NodeLibrary,
-	W: fmt::Write,
-{
-	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
-		fmt.fmt_enum(ast, "MockKind", |ast, fmt| match self {
-			MockKind::Integer(n) => {
-				fmt.variant(ast, "Integer", |ast, fmt| fmt.tuple(ast, n)?.finish())
-			}
-			MockKind::Range {
-				start,
-				end,
-			} => fmt.variant(ast, "Range", |ast, fmt| {
-				fmt.field(ast, "start", start)?.field(ast, "end", end)?.finish()
-			}),
-		})
-	}
-}
-
-impl<L, W> AstVis<L, W> for DefineMethodApiActions
-where
-	L: NodeLibrary,
-	W: fmt::Write,
-{
-	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
-		fmt.fmt_struct(ast, "DefineMethodApiActions", |ast, fmt| {
-			fmt.field(ast, "delete", &self.delete)?
-				.field(ast, "get", &self.get)?
-				.field(ast, "patch", &self.patch)?
-				.field(ast, "post", &self.post)?
-				.field(ast, "put", &self.put)?
-				.field(ast, "trace", &self.trace)?
-				.finish()
-		})
-	}
-}
-
-impl<N, L, W> AstVis<L, W> for NodeId<N>
-where
-	N: AstVis<L, W> + Any,
-	L: NodeLibrary,
-	W: fmt::Write,
-{
-	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
+	fn fmt<W>(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result
+	where
+		W: fmt::Write,
+	{
 		ast[*self].fmt(ast, fmt)
 	}
 }
 
-impl<N, L, W> AstVis<L, W> for NodeListId<N>
+impl<N, L> AstVis<L> for NodeListId<N>
 where
-	N: AstVis<L, W> + Any,
+	N: AstVis<L> + Any,
 	L: NodeLibrary,
-	W: fmt::Write,
 {
-	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
+	fn fmt<W>(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result
+	where
+		W: fmt::Write,
+	{
 		for n in ast.iter_list(Some(*self)) {
 			fmt.write_str("-")?;
 			n.fmt(ast, fmt)?;
@@ -222,24 +43,28 @@ where
 	}
 }
 
-impl<N, L, W> AstVis<L, W> for Spanned<N>
+impl<N, L> AstVis<L> for Spanned<N>
 where
-	N: AstVis<L, W>,
+	N: AstVis<L>,
 	L: NodeLibrary,
-	W: fmt::Write,
 {
-	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
+	fn fmt<W>(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result
+	where
+		W: fmt::Write,
+	{
 		self.value.fmt(ast, fmt)
 	}
 }
 
-impl<N, L, W> AstVis<L, W> for Option<N>
+impl<N, L> AstVis<L> for Option<N>
 where
-	N: AstVis<L, W>,
+	N: AstVis<L>,
 	L: NodeLibrary,
-	W: fmt::Write,
 {
-	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
+	fn fmt<W>(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result
+	where
+		W: fmt::Write,
+	{
 		if let Some(x) = self.as_ref() {
 			fmt.write_str("Some")?;
 			fmt.new_line();
@@ -250,13 +75,15 @@ where
 	}
 }
 
-impl<N, L, W> AstVis<L, W> for Bound<N>
+impl<N, L> AstVis<L> for Bound<N>
 where
-	N: AstVis<L, W>,
+	N: AstVis<L>,
 	L: NodeLibrary,
-	W: fmt::Write,
 {
-	fn fmt(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
+	fn fmt<W>(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result
+	where
+		W: fmt::Write,
+	{
 		fmt.fmt_enum(ast, "Bound", |ast, fmt| match self {
 			Bound::Included(x) => {
 				fmt.variant(ast, "Included", |ast, fmt| fmt.tuple(ast, x)?.finish())
@@ -269,32 +96,38 @@ where
 	}
 }
 
-impl<L, W> AstVis<L, W> for String
+impl<L> AstVis<L> for String
 where
 	L: NodeLibrary,
-	W: fmt::Write,
 {
-	fn fmt(&self, _: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
+	fn fmt<W>(&self, _: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result
+	where
+		W: fmt::Write,
+	{
 		write!(fmt.writer, "{:?}", self)
 	}
 }
 
-impl<L, W> AstVis<L, W> for Span
+impl<L> AstVis<L> for Span
 where
 	L: NodeLibrary,
-	W: fmt::Write,
 {
-	fn fmt(&self, _: &Ast<L>, _fmt: &mut AstFormatter<W>) -> fmt::Result {
+	fn fmt<W>(&self, _: &Ast<L>, _: &mut AstFormatter<W>) -> fmt::Result
+	where
+		W: fmt::Write,
+	{
 		Ok(())
 	}
 }
 
-impl<L, W> AstVis<L, W> for Integer
+impl<L> AstVis<L> for Integer
 where
 	L: NodeLibrary,
-	W: fmt::Write,
 {
-	fn fmt(&self, _: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result {
+	fn fmt<W>(&self, _: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result
+	where
+		W: fmt::Write,
+	{
 		match self.sign {
 			Sign::Plus => fmt.fmt_args(format_args!("+{:?}", self.value)),
 			Sign::Minus => fmt.fmt_args(format_args!("-{:?}", self.value)),
