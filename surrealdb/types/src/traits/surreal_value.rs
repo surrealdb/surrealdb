@@ -1381,37 +1381,7 @@ impl SurrealValue for serde_json::Value {
 	}
 
 	fn from_value(value: Value) -> Result<Self, Error> {
-		match value {
-			Value::None | Value::Null => Ok(serde_json::Value::Null),
-			Value::Bool(b) => Ok(serde_json::Value::Bool(b)),
-			Value::Number(n) => match n {
-				Number::Int(i) => Ok(serde_json::Value::Number(serde_json::Number::from(i))),
-				Number::Float(f) => {
-					if let Some(num) = serde_json::Number::from_f64(f) {
-						Ok(serde_json::Value::Number(num))
-					} else {
-						Ok(serde_json::Value::Null)
-					}
-				}
-				Number::Decimal(d) => Ok(serde_json::Value::String(d.to_string())),
-			},
-			Value::String(s) => Ok(serde_json::Value::String(s)),
-			Value::Object(o) => {
-				let mut obj = serde_json::Map::new();
-				for (k, v) in o.0 {
-					obj.insert(k, serde_json::Value::from_value(v)?);
-				}
-				Ok(serde_json::Value::Object(obj))
-			}
-			Value::Array(a) => {
-				let mut arr = Vec::new();
-				for v in a.0 {
-					arr.push(serde_json::Value::from_value(v)?);
-				}
-				Ok(serde_json::Value::Array(arr))
-			}
-			_ => Err(ConversionError::from_value(Self::kind_of(), &value).into()),
-		}
+		Ok(value.into_json_value())
 	}
 }
 
