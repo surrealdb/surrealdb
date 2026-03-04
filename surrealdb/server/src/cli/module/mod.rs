@@ -47,6 +47,10 @@ pub enum ModuleCommand {
 
 	/// Build a WASM module
 	Build {
+		/// Build in debug mode (default is release)
+		#[arg(long)]
+		debug: bool,
+
 		/// Output file path or filename
 		#[arg(short = 'o', long)]
 		out: Option<PathBuf>,
@@ -78,8 +82,9 @@ pub async fn init(cmd: ModuleCommand) -> Result<()> {
 			file,
 		} => info::init(file).await,
 		ModuleCommand::Build {
+			debug,
 			out,
 			path,
-		} => build::init(path, out).await,
+		} => build::init(path, out, debug).await,
 	}
 }

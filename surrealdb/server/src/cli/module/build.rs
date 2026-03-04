@@ -10,13 +10,20 @@ use tempfile::TempDir;
 use walrus::Module;
 use wasm_opt::OptimizationOptions;
 
-pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>) -> Result<()> {
+pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>, debug: bool) -> Result<()> {
 	let path = path.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 	let config = load_config(&path)?;
-	let source_wasm = get_source_wasm(&path, &config)?;
+	let source_wasm = get_source_wasm(&path, &config, debug)?;
 
-	build_wasm_module(&path, &config)?;
-	let wasm = optimize_wasm(&source_wasm, &config)?;
+	build_wasm_module(&path, &config, debug)?;
+	let wasm = if debug {
+		if !source_wasm.exists() {
+			anyhow::bail!("Expected WASM file not found: {}", source_wasm.display());
+		}
+		fs::read(&source_wasm).prefix_err(|| "Failed to read WASM file")?
+	} else {
+		optimize_wasm(&source_wasm, &config)?
+	};
 
 	// Pack the optimized WASM into a Surrealism package
 	let kind = detect_module_kind(&wasm);
@@ -49,12 +56,20 @@ fn wasm_target(config: &SurrealismConfig) -> &'static str {
 	}
 }
 
-fn build_wasm_module(path: &PathBuf, config: &SurrealismConfig) -> Result<()> {
+fn build_wasm_module(path: &PathBuf, config: &SurrealismConfig, debug: bool) -> Result<()> {
 	let target = wasm_target(config);
-	println!("Building WASM module (target: {target})...");
+	let profile = if debug {
+		"debug"
+	} else {
+		"release"
+	};
+	println!("Building WASM module (target: {target}, profile: {profile})...");
 
 	let mut cmd = Command::new("cargo");
-	cmd.args(["build", "--target", target, "--release"]);
+	cmd.args(["build", "--target", target]);
+	if !debug {
+		cmd.arg("--release");
+	}
 
 	if config.abi == AbiVersion::P2 {
 		cmd.args(["--features", "p2"]);
@@ -145,7 +160,7 @@ fn apply_wasm_opt(wasm_bytes: &[u8]) -> Result<Vec<u8>> {
 	Ok(fs::read(&temp_wasm_output).prefix_err(|| "Failed to read optimized WASM file")?)
 }
 
-fn get_source_wasm(path: &PathBuf, config: &SurrealismConfig) -> Result<PathBuf> {
+fn get_source_wasm(path: &PathBuf, config: &SurrealismConfig, debug: bool) -> Result<PathBuf> {
 	let metadata = metadata(path).prefix_err(|| "Failed to retrieve cargo metadata")?;
 
 	let target_directory = metadata["target_directory"]
@@ -186,7 +201,12 @@ fn get_source_wasm(path: &PathBuf, config: &SurrealismConfig) -> Result<PathBuf>
 
 	let wasm_filename = format!("{}.wasm", package_name.replace("-", "_"));
 	let target = wasm_target(config);
-	let target_dir = PathBuf::from(target_directory).join(format!("{target}/release"));
+	let profile_dir = if debug {
+		"debug"
+	} else {
+		"release"
+	};
+	let target_dir = PathBuf::from(target_directory).join(format!("{target}/{profile_dir}"));
 	Ok(target_dir.join(&wasm_filename))
 }
 

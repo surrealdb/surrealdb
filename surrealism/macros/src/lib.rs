@@ -149,6 +149,7 @@ pub fn surrealism(attr: TokenStream, item: TokenStream) -> TokenStream {
 	TokenStream::from(expanded)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generate_p1_exports(
 	fn_name: &syn::Ident,
 	arg_patterns: &[Box<syn::Pat>],
@@ -284,6 +285,7 @@ fn generate_p1_exports(
 	}
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generate_p2_exports(
 	fn_name: &syn::Ident,
 	arg_patterns: &[Box<syn::Pat>],

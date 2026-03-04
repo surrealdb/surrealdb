@@ -481,7 +481,7 @@ impl P2Controller {
 		};
 		let typed = func.typed::<(), (Result<(), String>,)>(&self.store)?;
 		let (result,) = typed.call_async(&mut self.store, ()).await?;
-		result.map_err(|e| SurrealismError::FunctionCallError(e))
+		result.map_err(SurrealismError::FunctionCallError)
 	}
 
 	async fn invoke<A: Args>(
@@ -500,7 +500,7 @@ impl P2Controller {
 		let call_name = name.unwrap_or_default();
 		let (result,) = typed.call_async(&mut self.store, (&call_name, &args_bytes)).await?;
 
-		let result_bytes = result.map_err(|e| SurrealismError::FunctionCallError(e))?;
+		let result_bytes = result.map_err(SurrealismError::FunctionCallError)?;
 		let value = surrealdb_types::Value::deserialize(Serialized(result_bytes.into()))?;
 		Ok(value)
 	}
@@ -515,7 +515,7 @@ impl P2Controller {
 		let call_name = name.unwrap_or_default();
 		let (result,) = typed.call_async(&mut self.store, (&call_name,)).await?;
 
-		let result_bytes = result.map_err(|e| SurrealismError::FunctionCallError(e))?;
+		let result_bytes = result.map_err(SurrealismError::FunctionCallError)?;
 		Ok(Vec::<surrealdb_types::Kind>::deserialize(Serialized(result_bytes.into()))?)
 	}
 
@@ -529,7 +529,7 @@ impl P2Controller {
 		let call_name = name.unwrap_or_default();
 		let (result,) = typed.call_async(&mut self.store, (&call_name,)).await?;
 
-		let result_bytes = result.map_err(|e| SurrealismError::FunctionCallError(e))?;
+		let result_bytes = result.map_err(SurrealismError::FunctionCallError)?;
 		Ok(surrealdb_types::Kind::deserialize(Serialized(result_bytes.into()))?)
 	}
 
