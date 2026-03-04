@@ -863,6 +863,27 @@ impl<'a> IndexAnalyzer<'a> {
 		// The order value is already an Idiom
 		let idiom = &first_order.value;
 
+		// Check existing compound candidates: if a compound candidate has an
+		// equality prefix covering columns 0..N, and the ORDER BY field
+		// matches column N (the column right after the prefix), the compound
+		// scan naturally produces records in ORDER BY order. Mark it as
+		// covering ORDER BY so that the planner can push LIMIT down and
+		// eliminate the Sort operator.
+		for candidate in candidates.iter_mut() {
+			if let BTreeAccess::Compound {
+				prefix,
+				..
+			} = &candidate.access
+			{
+				let ix_def = candidate.index_ref.definition();
+				if let Some(next_col) = ix_def.cols.get(prefix.len())
+					&& idiom_matches(idiom, next_col)
+				{
+					candidate.covers_order = true;
+				}
+			}
+		}
+
 		// Find indexes that match this idiom as first column
 		for (idx, ix_def) in self.indexes.iter().enumerate() {
 			if ix_def.prepare_remove {
