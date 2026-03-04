@@ -189,7 +189,7 @@ impl SurrealismExecutable {
 			let args: Result<Vec<crate::types::PublicValue>, _> =
 				args.into_iter().map(|x| x.try_into()).collect();
 			let args = args?;
-			controller.invoke(sub.map(String::from), args).await.map(|x| x.into())
+			Ok(controller.invoke(sub.map(String::from), args).await.map(|x| x.into())?)
 		})
 	}
 }
@@ -336,7 +336,7 @@ impl SiloExecutable {
 			let args: Result<Vec<crate::types::PublicValue>, _> =
 				args.into_iter().map(|x| x.try_into()).collect();
 			let args = args?;
-			controller.invoke(sub.map(String::from), args).await.map(|x| x.into())
+			Ok(controller.invoke(sub.map(String::from), args).await.map(|x| x.into())?)
 		})
 	}
 }

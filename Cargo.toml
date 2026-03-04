@@ -182,16 +182,16 @@ wasm-bindgen-futures = "0.4.58"
 wasmtimer = { version = "0.4.3", default-features = false }
 
 # Dev dependencies
-criterion = "0.8.1"
-env_logger = "0.11.8"
-flate2 = "1.1.8"
-rstest = "0.26.1"
-serial_test = "3.3.1"
-temp-dir = "0.1.16"
-test-log = "0.2.19"
-time = "0.3.47"
-tracing-subscriber = "0.3.22"
-wiremock = "0.6.5"
+criterion = "0.8"
+env_logger = "0.11"
+flate2 = "1.1"
+rstest = "0.26"
+serial_test = "3.4"
+temp-dir = "0.2"
+test-log = "0.2"
+time = "0.3"
+tracing-subscriber = "0.3"
+wiremock = "0.6"
 
 # SurrealML specific dependencies
 ort = { version = "2.0.0-rc.11", features = ["cuda", "ndarray"] }
@@ -199,10 +199,10 @@ ort = { version = "2.0.0-rc.11", features = ["cuda", "ndarray"] }
 # Surrealism specific dependencies
 tar = "0.4.44"
 toml = "0.9.11"
-walrus = "0.24.4"
+walrus = "0.25"
 wasm-opt = "0.116.1"
-wasmtime = { version = "41.0.4", default-features = false, features = ["cranelift", "winch", "runtime", "std", "wat"] }
-wasmtime-wasi = { version = "41.0.4", features = ["p1"] }
+wasmtime = { version = "42", default-features = false, features = ["cranelift", "winch", "runtime", "std", "wat"] }
+wasmtime-wasi = { version = "42", features = ["p1", "p2"] }
 zstd = "0.13.3"
 
 [package]

@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
+use surrealism_runtime::PrefixErr;
 use surrealism_runtime::controller::Runtime;
 use surrealism_runtime::package::SurrealismPackage;
-use surrealism_types::err::PrefixError;
 
 use crate::cli::module::host::DemoHost;
 

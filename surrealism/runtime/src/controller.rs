@@ -24,16 +24,16 @@
 //!     let mut controller = runtime.new_controller(context).await?;
 //!     controller.invoke(None, args).await
 //! });
-//! # Ok::<(), anyhow::Error>(())
+//! # Ok::<(), surrealism_types::err::SurrealismError>(())
 //! ```
 
 use std::fmt;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::Context;
 use async_trait::async_trait;
 use surrealism_types::args::Args;
-use surrealism_types::err::PrefixError;
+use surrealism_types::err::{PrefixErr, SurrealismError, SurrealismResult};
 use surrealism_types::transfer::AsyncTransfer;
 use wasmtime::*;
 use wasmtime_wasi::p1::{self, WasiP1Ctx};
@@ -76,7 +76,7 @@ impl Runtime {
 			wasm,
 			config,
 		}: SurrealismPackage,
-	) -> Result<Self> {
+	) -> SurrealismResult<Self> {
 		// Configure engine for fast compilation in debug, optimized runtime in release
 		let mut engine_config = Config::new();
 		// Enable async support for async host functions
@@ -114,7 +114,10 @@ impl Runtime {
 	/// This is cheap (relative to compilation) - the expensive compilation is shared.
 	/// Each controller has its own mutable Store, ensuring no shared mutable state.
 	/// Safe for concurrent execution: no mutable state is shared between controllers.
-	pub async fn new_controller(&self, context: Box<dyn InvocationContext>) -> Result<Controller> {
+	pub async fn new_controller(
+		&self,
+		context: Box<dyn InvocationContext>,
+	) -> SurrealismResult<Controller> {
 		let wasi_ctx = super::wasi_context::build()?;
 
 		let store_data = StoreData {
@@ -127,10 +130,10 @@ impl Runtime {
 			.linker
 			.instantiate_async(&mut store, &self.module)
 			.await
-			.prefix_err(|| "failed to instantiate WASM module")?;
+			.map_err(SurrealismError::Compilation)?;
 		let memory = instance
 			.get_memory(&mut store, "memory")
-			.prefix_err(|| "WASM module must export 'memory'")?;
+			.context("WASM module must export 'memory'")?;
 
 		Ok(Controller {
 			store,
@@ -150,70 +153,81 @@ pub struct Controller {
 }
 
 impl Controller {
-	pub async fn alloc(&mut self, len: u32) -> Result<u32> {
+	pub async fn alloc(&mut self, len: u32) -> SurrealismResult<u32> {
 		let alloc = self.instance.get_typed_func::<(u32,), i32>(&mut self.store, "__sr_alloc")?;
 		let result = alloc.call_async(&mut self.store, (len,)).await?;
 		if result == -1 {
-			anyhow::bail!("Memory allocation failed");
+			return Err(SurrealismError::AllocFailed);
 		}
 		Ok(result as u32)
 	}
 
-	pub async fn free(&mut self, ptr: u32, len: u32) -> Result<()> {
+	pub async fn free(&mut self, ptr: u32, len: u32) -> SurrealismResult<()> {
 		let free = self.instance.get_typed_func::<(u32, u32), i32>(&mut self.store, "__sr_free")?;
 		let result = free.call_async(&mut self.store, (ptr, len)).await?;
 		if result == -1 {
-			anyhow::bail!("Memory deallocation failed");
+			return Err(SurrealismError::FreeFailed);
 		}
 		Ok(())
 	}
 
-	pub async fn init(&mut self) -> Result<()> {
+	pub async fn init(&mut self) -> SurrealismResult<()> {
 		let init: Option<Extern> = self.instance.get_export(&mut self.store, "__sr_init");
 		if init.is_none() {
 			return Ok(());
 		}
 
 		let init = self.instance.get_typed_func::<(), ()>(&mut self.store, "__sr_init")?;
-		init.call_async(&mut self.store, ()).await
+		init.call_async(&mut self.store, ()).await?;
+		Ok(())
 	}
 
 	pub async fn invoke<A: Args>(
 		&mut self,
 		name: Option<String>,
 		args: A,
-	) -> Result<surrealdb_types::Value> {
+	) -> SurrealismResult<surrealdb_types::Value> {
 		let name = format!("__sr_fnc__{}", name.unwrap_or_default());
 		let args = AsyncTransfer::transfer(args.to_values(), self).await?;
 		let invoke = self.instance.get_typed_func::<(u32,), (i32,)>(&mut self.store, &name)?;
 		let (ptr,) = invoke.call_async(&mut self.store, (*args,)).await?;
 		if ptr == -1 {
-			anyhow::bail!("WASM function returned error (-1)");
+			return Err(SurrealismError::FunctionCallError(
+				"WASM function returned error (-1)".to_string(),
+			));
 		}
 		let ptr_u32: u32 = ptr.try_into()?;
-		let result: Result<surrealdb_types::Value, String> =
+		let inner: anyhow::Result<surrealdb_types::Value> =
 			AsyncTransfer::receive(ptr_u32.into(), self).await?;
-		result.map_err(|e| anyhow::anyhow!("WASM function returned error: {}", e))
+		Ok(inner?)
 	}
 
-	pub async fn args(&mut self, name: Option<String>) -> Result<Vec<surrealdb_types::Kind>> {
+	pub async fn args(
+		&mut self,
+		name: Option<String>,
+	) -> SurrealismResult<Vec<surrealdb_types::Kind>> {
 		let name = format!("__sr_args__{}", name.unwrap_or_default());
 		let args = self.instance.get_typed_func::<(), (i32,)>(&mut self.store, &name)?;
 		let (ptr,) = args.call_async(&mut self.store, ()).await?;
-		AsyncTransfer::receive(ptr.try_into()?, self).await
+		Ok(AsyncTransfer::receive(ptr.try_into()?, self).await?)
 	}
 
-	pub async fn returns(&mut self, name: Option<String>) -> Result<surrealdb_types::Kind> {
+	pub async fn returns(
+		&mut self,
+		name: Option<String>,
+	) -> SurrealismResult<surrealdb_types::Kind> {
 		let name = format!("__sr_returns__{}", name.unwrap_or_default());
 		let returns = self.instance.get_typed_func::<(), (i32,)>(&mut self.store, &name)?;
 		let (ptr,) = returns.call_async(&mut self.store, ()).await?;
 		if ptr == -1 {
-			anyhow::bail!("WASM function returned error (-1)");
+			return Err(SurrealismError::FunctionCallError(
+				"WASM function returned error (-1)".into(),
+			));
 		}
-		AsyncTransfer::receive(ptr.try_into()?, self).await
+		Ok(AsyncTransfer::receive(ptr.try_into()?, self).await?)
 	}
 
-	pub fn list(&mut self) -> Result<Vec<String>> {
+	pub fn list(&mut self) -> SurrealismResult<Vec<String>> {
 		// scan the exported functions and return a list of available functions
 		let mut functions = Vec::new();
 
@@ -249,26 +263,26 @@ impl Controller {
 
 #[async_trait]
 impl surrealism_types::controller::AsyncMemoryController for Controller {
-	async fn alloc(&mut self, len: u32) -> Result<u32> {
+	async fn alloc(&mut self, len: u32) -> SurrealismResult<u32> {
 		Controller::alloc(self, len).await
 	}
 
-	async fn free(&mut self, ptr: u32, len: u32) -> Result<()> {
+	async fn free(&mut self, ptr: u32, len: u32) -> SurrealismResult<()> {
 		Controller::free(self, ptr, len).await
 	}
 
-	fn mut_mem(&mut self, ptr: u32, len: u32) -> Result<&mut [u8]> {
+	fn mut_mem(&mut self, ptr: u32, len: u32) -> SurrealismResult<&mut [u8]> {
 		let mem = self.memory.data_mut(&mut self.store);
 		let start = ptr as usize;
-		let end = start
-			.checked_add(len as usize)
-			.ok_or_else(|| anyhow::anyhow!("Memory access overflow: ptr={ptr}, len={len}"))?;
+		let end = start.checked_add(len as usize).ok_or_else(|| {
+			SurrealismError::OutOfBounds(format!("Memory access overflow: ptr={ptr}, len={len}"))
+		})?;
 
 		if end > mem.len() {
-			anyhow::bail!(
+			return Err(SurrealismError::OutOfBounds(format!(
 				"Memory access out of bounds: attempting to access [{start}..{end}), but memory size is {}",
 				mem.len()
-			);
+			)));
 		}
 
 		Ok(&mut mem[start..end])

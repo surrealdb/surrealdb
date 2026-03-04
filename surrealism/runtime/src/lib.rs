@@ -5,3 +5,5 @@ pub mod host;
 pub mod kv;
 pub mod package;
 mod wasi_context;
+
+pub use surrealism_types::err::PrefixErr;

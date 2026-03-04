@@ -3,9 +3,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::Result;
+use surrealism_runtime::PrefixErr;
 use surrealism_runtime::config::SurrealismConfig;
 use surrealism_runtime::package::SurrealismPackage;
-use surrealism_types::err::PrefixError;
 use tempfile::TempDir;
 use walrus::Module;
 use wasm_opt::OptimizationOptions;
@@ -37,9 +37,9 @@ fn load_config(path: &Path) -> Result<SurrealismConfig> {
 		anyhow::bail!("surrealism.toml not found in the current directory");
 	}
 
-	SurrealismConfig::parse(
+	Ok(SurrealismConfig::parse(
 		&fs::read_to_string(&surrealism_toml).prefix_err(|| "Failed to read surrealism.toml")?,
-	)
+	)?)
 }
 
 fn build_wasm_module(path: &PathBuf) -> Result<()> {
@@ -122,7 +122,7 @@ fn apply_wasm_opt(wasm_bytes: &[u8]) -> Result<Vec<u8>> {
 	opts.run(&temp_wasm_input, &temp_wasm_output)
 		.prefix_err(|| "Failed to optimize WASM with wasm-opt")?;
 
-	fs::read(&temp_wasm_output).prefix_err(|| "Failed to read optimized WASM file")
+	Ok(fs::read(&temp_wasm_output).prefix_err(|| "Failed to read optimized WASM file")?)
 }
 
 fn get_source_wasm(path: &PathBuf) -> Result<PathBuf> {
@@ -184,7 +184,7 @@ fn metadata(path: &PathBuf) -> Result<serde_json::Value> {
 	let metadata_str =
 		String::from_utf8(output.stdout).prefix_err(|| "Invalid UTF-8 in cargo metadata output")?;
 
-	serde_json::from_str(&metadata_str).prefix_err(|| "Failed to parse cargo metadata JSON")
+	Ok(serde_json::from_str(&metadata_str).prefix_err(|| "Failed to parse cargo metadata JSON")?)
 }
 
 fn resolve_output_path(out: Option<PathBuf>, config: &SurrealismConfig) -> Result<PathBuf> {

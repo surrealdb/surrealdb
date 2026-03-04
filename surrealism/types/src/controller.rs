@@ -26,6 +26,9 @@ use anyhow::Result;
 #[cfg(feature = "host")]
 use async_trait::async_trait;
 
+#[cfg(feature = "host")]
+use crate::err::SurrealismResult;
+
 /// Synchronous memory controller for WASM linear memory (guest side).
 ///
 /// This trait provides the interface for managing memory allocations within a WASM module.
@@ -180,7 +183,7 @@ pub trait AsyncMemoryController: Send {
 	/// - Allocation fails (out of memory)
 	/// - Alignment is invalid (not a power of 2)
 	/// - WASM function call fails
-	async fn alloc(&mut self, len: u32) -> Result<u32>;
+	async fn alloc(&mut self, len: u32) -> SurrealismResult<u32>;
 
 	/// Free a previously allocated region of memory (async).
 	///
@@ -195,7 +198,7 @@ pub trait AsyncMemoryController: Send {
 	/// - The pointer is invalid or wasn't allocated
 	/// - The length doesn't match the original allocation
 	/// - WASM function call fails
-	async fn free(&mut self, ptr: u32, len: u32) -> Result<()>;
+	async fn free(&mut self, ptr: u32, len: u32) -> SurrealismResult<()>;
 
 	/// Get mutable access to a region of WASM linear memory.
 	///
@@ -215,5 +218,5 @@ pub trait AsyncMemoryController: Send {
 	/// # Panics
 	///
 	/// May panic if the pointer or length are out of bounds.
-	fn mut_mem(&mut self, ptr: u32, len: u32) -> Result<&mut [u8]>;
+	fn mut_mem(&mut self, ptr: u32, len: u32) -> SurrealismResult<&mut [u8]>;
 }

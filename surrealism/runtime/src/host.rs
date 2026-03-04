@@ -3,7 +3,7 @@ use std::ops::{Deref, DerefMut};
 use anyhow::Result;
 use async_trait::async_trait;
 use surrealism_types::controller::AsyncMemoryController;
-use surrealism_types::err::PrefixError;
+use surrealism_types::err::{PrefixErr, SurrealismError, SurrealismResult};
 use surrealism_types::serialize::SerializableRange;
 use surrealism_types::transfer::AsyncTransfer;
 use wasmtime::{Caller, Linker};
@@ -151,7 +151,7 @@ pub trait InvocationContext: Send + Sync {
 // Legacy alias for backwards compatibility during transition
 pub trait Host: InvocationContext {}
 
-pub fn implement_host_functions(linker: &mut Linker<StoreData>) -> Result<()> {
+pub fn implement_host_functions(linker: &mut Linker<StoreData>) -> SurrealismResult<()> {
 	// SQL function
 	#[rustfmt::skip]
     register_host_function!(linker, "__sr_sql", |mut controller: HostController, sql: String, vars: Vec<(String, surrealdb_types::Value)>| -> Result<surrealdb_types::Value> {
@@ -265,7 +265,7 @@ impl<'a> DerefMut for HostController<'a> {
 
 #[async_trait]
 impl<'a> AsyncMemoryController for HostController<'a> {
-	async fn alloc(&mut self, len: u32) -> Result<u32> {
+	async fn alloc(&mut self, len: u32) -> SurrealismResult<u32> {
 		let alloc_func = self
 			.get_export("__sr_alloc")
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_alloc not found"))?
@@ -274,12 +274,12 @@ impl<'a> AsyncMemoryController for HostController<'a> {
 		let result =
 			alloc_func.typed::<(u32,), u32>(&mut self.0)?.call_async(&mut self.0, (len,)).await?;
 		if result == 0 {
-			anyhow::bail!("Memory allocation failed");
+			return Err(SurrealismError::AllocFailed);
 		}
 		Ok(result)
 	}
 
-	async fn free(&mut self, ptr: u32, len: u32) -> Result<()> {
+	async fn free(&mut self, ptr: u32, len: u32) -> SurrealismResult<()> {
 		let free_func = self
 			.get_export("__sr_free")
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_free not found"))?
@@ -290,12 +290,12 @@ impl<'a> AsyncMemoryController for HostController<'a> {
 			.call_async(&mut self.0, (ptr, len))
 			.await?;
 		if result == 0 {
-			anyhow::bail!("Memory deallocation failed");
+			return Err(SurrealismError::FreeFailed);
 		}
 		Ok(())
 	}
 
-	fn mut_mem(&mut self, ptr: u32, len: u32) -> Result<&mut [u8]> {
+	fn mut_mem(&mut self, ptr: u32, len: u32) -> SurrealismResult<&mut [u8]> {
 		let memory = self
 			.get_export("memory")
 			.ok_or_else(|| anyhow::anyhow!("Export memory not found"))?
@@ -303,11 +303,11 @@ impl<'a> AsyncMemoryController for HostController<'a> {
 			.ok_or_else(|| anyhow::anyhow!("Export memory is not a memory"))?;
 		let mem = memory.data_mut(&mut self.0);
 		if (ptr as usize) + (len as usize) > mem.len() {
-			anyhow::bail!(
-				"[ERROR] Out of bounds: ptr + len = {} > mem.len() = {}",
+			return Err(SurrealismError::OutOfBounds(format!(
+				"ptr + len = {} > mem.len() = {}",
 				(ptr as usize) + (len as usize),
 				mem.len()
-			);
+			)));
 		}
 		Ok(&mut mem[(ptr as usize)..(ptr as usize) + (len as usize)])
 	}
