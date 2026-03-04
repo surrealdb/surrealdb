@@ -21,7 +21,7 @@ pub mod recursion;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[allow(dead_code)]
-pub(crate) struct Idioms(pub(crate) Vec<Idiom>);
+pub struct Idioms(pub Vec<Idiom>);
 
 impl Deref for Idioms {
 	type Target = Vec<Idiom>;
@@ -58,7 +58,7 @@ impl Ord for Idioms {
 
 /// An idiom defines a way to reference a field, reference, or other part of the document graph.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct Idiom(pub(crate) Vec<Part>);
+pub struct Idiom(pub Vec<Part>);
 
 impl Idiom {
 	/// Returns an idiom for a field of the given name.
@@ -253,7 +253,7 @@ impl InfoStructure for Idiom {
 /// Note: This is a simplified version of a trie and does not implement all the
 /// features of a full trie.
 #[derive(Debug)]
-pub(crate) struct IdiomTrie<T> {
+pub struct IdiomTrie<T> {
 	/// The children of this node, indexed by their path part.
 	pub(crate) children: HashMap<Part, IdiomTrie<T>>,
 	/// The data associated with this node, if any.
@@ -312,7 +312,7 @@ impl<T: Clone + std::fmt::Debug> IdiomTrie<T> {
 }
 
 /// The result of a search in the [`IdiomTrie`].
-pub(crate) enum IdiomTrieContains<T> {
+pub enum IdiomTrieContains<T> {
 	/// The path was not found and none of it had no ancestors in the trie.
 	None,
 	/// The path was found and the data is associated with it.

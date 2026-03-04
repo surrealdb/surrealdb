@@ -16,7 +16,7 @@ use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct SelectStatement {
+pub struct SelectStatement {
 	/// The fields to extract from the records.
 	///
 	/// The foo,bar part in `SELECT foo,bar FROM baz`.

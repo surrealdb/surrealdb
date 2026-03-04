@@ -5,7 +5,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::expr::idiom::Idiom;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct Splits(pub(crate) Vec<Split>);
+pub struct Splits(pub Vec<Split>);
 
 impl Deref for Splits {
 	type Target = Vec<Split>;
@@ -30,7 +30,7 @@ impl ToSql for Splits {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct Split(pub(crate) Idiom);
+pub struct Split(pub Idiom);
 
 impl Deref for Split {
 	type Target = Idiom;

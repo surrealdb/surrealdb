@@ -34,7 +34,7 @@ pub(crate) use to_types::into_types_error;
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)]
 #[allow(dead_code, reason = "Some variants are only used by specific KV stores")]
-pub(crate) enum Error {
+pub enum Error {
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
 	Unreachable(String),

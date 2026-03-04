@@ -18,7 +18,7 @@ use crate::fmt::EscapeKwFreeIdent;
 use crate::val::{Array, RecordId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum Part {
+pub enum Part {
 	All,
 	Flatten,
 	Last,
@@ -416,7 +416,7 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 // ------------------------------
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum DestructurePart {
+pub enum DestructurePart {
 	All(String),
 	Field(String),
 	Aliased(String, Idiom),
@@ -502,7 +502,7 @@ impl ToSql for Recurse {
 // ------------------------------
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum RecurseInstruction {
+pub enum RecurseInstruction {
 	Path {
 		// Do we include the starting point in the paths?
 		inclusive: bool,

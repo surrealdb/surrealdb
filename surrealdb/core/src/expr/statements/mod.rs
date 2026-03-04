@@ -1,59 +1,57 @@
-pub(crate) mod access;
-pub(crate) mod alter;
-pub(crate) mod create;
-// needs to be public because the RPC layer is accessing the kv store for api
-// definitions.
+pub mod access;
+pub mod alter;
+pub mod create;
 pub mod define;
-pub(crate) mod delete;
-pub(crate) mod foreach;
-pub(crate) mod ifelse;
-pub(crate) mod info;
-pub(crate) mod insert;
-pub(crate) mod kill;
-pub(crate) mod live;
-pub(crate) mod option;
-pub(crate) mod output;
-pub(crate) mod rebuild;
-pub(crate) mod relate;
-pub(crate) mod remove;
-pub(crate) mod select;
-pub(crate) mod set;
-pub(crate) mod show;
-pub(crate) mod sleep;
-pub(crate) mod update;
-pub(crate) mod upsert;
-pub(crate) mod r#use;
+pub mod delete;
+pub mod foreach;
+pub mod ifelse;
+pub mod info;
+pub mod insert;
+pub mod kill;
+pub mod live;
+pub mod option;
+pub mod output;
+pub mod rebuild;
+pub mod relate;
+pub mod remove;
+pub mod select;
+pub mod set;
+pub mod show;
+pub mod sleep;
+pub mod update;
+pub mod upsert;
+pub mod r#use;
 
-pub(crate) use self::access::AccessStatement;
-pub(crate) use self::alter::AlterStatement;
-pub(crate) use self::create::CreateStatement;
-pub(crate) use self::define::{
+pub use self::access::AccessStatement;
+pub use self::alter::AlterStatement;
+pub use self::create::CreateStatement;
+pub use self::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
 	DefineModelStatement, DefineModuleStatement, DefineNamespaceStatement, DefineParamStatement,
 	DefineStatement, DefineTableStatement, DefineUserStatement,
 };
-pub(crate) use self::delete::DeleteStatement;
-pub(crate) use self::foreach::ForeachStatement;
-pub(crate) use self::ifelse::IfelseStatement;
-pub(crate) use self::info::InfoStatement;
-pub(crate) use self::insert::InsertStatement;
-pub(crate) use self::kill::KillStatement;
-pub(crate) use self::live::{LiveFields, LiveStatement};
-pub(crate) use self::option::OptionStatement;
-pub(crate) use self::output::OutputStatement;
-pub(crate) use self::rebuild::RebuildStatement;
-pub(crate) use self::relate::RelateStatement;
-pub(crate) use self::remove::{
+pub use self::delete::DeleteStatement;
+pub use self::foreach::ForeachStatement;
+pub use self::ifelse::IfelseStatement;
+pub use self::info::InfoStatement;
+pub use self::insert::InsertStatement;
+pub use self::kill::KillStatement;
+pub use self::live::{LiveFields, LiveStatement};
+pub use self::option::OptionStatement;
+pub use self::output::OutputStatement;
+pub use self::rebuild::RebuildStatement;
+pub use self::relate::RelateStatement;
+pub use self::remove::{
 	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
 	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement,
 	RemoveModuleStatement, RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement,
 	RemoveTableStatement, RemoveUserStatement,
 };
-pub(crate) use self::select::SelectStatement;
-pub(crate) use self::set::SetStatement;
-pub(crate) use self::show::ShowStatement;
-pub(crate) use self::sleep::SleepStatement;
-pub(crate) use self::update::UpdateStatement;
-pub(crate) use self::upsert::UpsertStatement;
-pub(crate) use self::r#use::UseStatement;
+pub use self::select::SelectStatement;
+pub use self::set::SetStatement;
+pub use self::show::ShowStatement;
+pub use self::sleep::SleepStatement;
+pub use self::update::UpdateStatement;
+pub use self::upsert::UpsertStatement;
+pub use self::r#use::UseStatement;

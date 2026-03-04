@@ -51,6 +51,8 @@ graphql = [
     "dep:async-graphql",
     "dep:async-graphql-axum",
 ]
+# PostgreSQL wire protocol support
+pgwire = ["dep:pgwire", "dep:surrealdb-sql-compat"]
 # Interactive CLI support (SQL shell)
 cli = ["dep:rustyline"]
 
@@ -62,6 +64,7 @@ surrealdb = { workspace = true, features = [
     "rustls",
 ] }
 surrealdb-core.workspace = true
+surrealdb-sql-compat = { workspace = true, optional = true }
 surrealdb-types.workspace = true
 
 # Crates only used by the root surrealdb crate
@@ -110,6 +113,7 @@ tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
 
 # Other crates
 async-graphql = { workspace = true, default-features = false, optional = true }
+pgwire = { workspace = true, optional = true }
 async-graphql-axum = { workspace = true, optional = true }
 bytes.workspace = true
 futures.workspace = true

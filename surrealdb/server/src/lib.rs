@@ -26,6 +26,8 @@ mod gql;
 /// Make `ntw` public so embedders can access RouterFactory and related networking definitions
 /// when running SurrealDB as a library.
 pub mod ntw;
+#[cfg(feature = "pgwire")]
+pub mod pgw;
 /// Make `rpc` public so embedders can access RpcState and related router definitions
 /// when running SurrealDB as a library.
 pub mod rpc;

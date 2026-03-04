@@ -16,7 +16,7 @@ use crate::expr::{Base, Expr, FlowResultExt, Idiom, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineAnalyzerStatement {
+pub struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub function: Option<String>,

@@ -6,7 +6,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::val::{Array, Object, Value};
 
 #[derive(Debug)]
-pub(crate) struct PatchError {
+pub struct PatchError {
 	pub message: String,
 }
 
@@ -20,7 +20,7 @@ impl fmt::Display for PatchError {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum Operation {
+pub enum Operation {
 	Add {
 		path: Vec<String>,
 		value: Value,

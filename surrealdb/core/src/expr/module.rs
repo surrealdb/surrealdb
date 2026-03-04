@@ -22,7 +22,7 @@ use crate::surrealism::host::SignatureHost;
 use crate::val::File;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum ModuleExecutable {
+pub enum ModuleExecutable {
 	Surrealism(SurrealismExecutable),
 	Silo(SiloExecutable),
 }
@@ -91,13 +91,13 @@ impl ToSql for ModuleExecutable {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct Signature {
+pub struct Signature {
 	pub(crate) args: Vec<Kind>,
 	pub(crate) returns: Option<Kind>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct SurrealismExecutable(pub File);
+pub struct SurrealismExecutable(pub File);
 
 impl From<catalog::SurrealismExecutable> for SurrealismExecutable {
 	fn from(executable: catalog::SurrealismExecutable) -> Self {
@@ -220,7 +220,7 @@ impl SurrealismExecutable {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct SiloExecutable {
+pub struct SiloExecutable {
 	pub organisation: String,
 	pub package: String,
 	pub major: u32,

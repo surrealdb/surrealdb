@@ -13,7 +13,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum RebuildStatement {
+pub enum RebuildStatement {
 	Index(RebuildIndexStatement),
 }
 
@@ -41,7 +41,7 @@ impl ToSql for RebuildStatement {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct RebuildIndexStatement {
+pub struct RebuildIndexStatement {
 	pub name: String,
 	pub table: TableName,
 	pub if_exists: bool,

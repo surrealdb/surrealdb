@@ -2,7 +2,7 @@ use std::ops::Deref;
 use std::str;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
-pub(crate) struct Script(pub String);
+pub struct Script(pub String);
 
 impl From<String> for Script {
 	fn from(s: String) -> Self {

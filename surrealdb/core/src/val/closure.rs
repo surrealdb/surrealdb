@@ -30,7 +30,7 @@ pub(crate) type BuiltinClosure = Arc<
 >;
 
 #[derive(Clone)]
-pub(crate) enum Closure {
+pub enum Closure {
 	Expr {
 		args: Vec<(Param, Kind)>,
 		returns: Option<Kind>,

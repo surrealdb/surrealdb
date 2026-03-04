@@ -14,7 +14,7 @@ use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::iam::{Action, AuthLimit, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineApiStatement {
+pub struct DefineApiStatement {
 	pub kind: DefineKind,
 	pub path: Expr,
 	pub actions: Vec<ApiAction>,
@@ -91,7 +91,7 @@ impl DefineApiStatement {
 	}
 }
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct ApiAction {
+pub struct ApiAction {
 	pub methods: Vec<ApiMethod>,
 	pub action: Expr,
 	pub config: ApiConfig,

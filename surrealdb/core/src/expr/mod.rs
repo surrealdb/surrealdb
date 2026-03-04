@@ -5,111 +5,109 @@ use anyhow::Result;
 use crate::err::Error;
 use crate::val::Value;
 
-pub(crate) mod access;
-pub(crate) mod access_type;
-pub(crate) mod algorithm;
-pub(crate) mod base;
-pub(crate) mod block;
-pub(crate) mod bytesize;
-pub(crate) mod changefeed;
+pub mod access;
+pub mod access_type;
+pub mod algorithm;
+pub mod base;
+pub mod block;
+pub mod bytesize;
+pub mod changefeed;
 pub mod computed_deps;
-pub(crate) mod cond;
-pub(crate) mod constant;
-pub(crate) mod data;
-pub(crate) mod dir;
-pub(crate) mod explain;
-pub(crate) mod expression;
-pub(crate) mod fetch;
-pub(crate) mod field;
-pub(crate) mod filter;
-pub(crate) mod function;
-pub(crate) mod group;
-pub(crate) mod idiom;
-pub(crate) mod kind;
-pub(crate) mod language;
-pub(crate) mod limit;
-pub(crate) mod literal;
-pub(crate) mod lookup;
-pub(crate) mod mock;
-pub(crate) mod model;
-pub(crate) mod operation;
-pub(crate) mod operator;
-pub(crate) mod order;
-pub(crate) mod output;
-pub(crate) mod param;
-pub(crate) mod parameterize;
-pub(crate) mod part;
-pub(crate) mod paths;
-pub(crate) mod plan;
-pub(crate) mod record_id;
-pub(crate) mod reference;
-pub(crate) mod script;
-pub(crate) mod split;
-pub(crate) mod start;
-pub(crate) mod tokenizer;
-pub(crate) mod user;
-pub(crate) mod view;
-pub(crate) mod with;
+pub mod cond;
+pub mod constant;
+pub mod data;
+pub mod dir;
+pub mod explain;
+pub mod expression;
+pub mod fetch;
+pub mod field;
+pub mod filter;
+pub mod function;
+pub mod group;
+pub mod idiom;
+pub mod kind;
+pub mod language;
+pub mod limit;
+pub mod literal;
+pub mod lookup;
+pub mod mock;
+pub mod model;
+pub mod operation;
+pub mod operator;
+pub mod order;
+pub mod output;
+pub mod param;
+pub mod parameterize;
+pub mod part;
+pub mod paths;
+pub mod plan;
+pub mod record_id;
+pub mod reference;
+pub mod script;
+pub mod split;
+pub mod start;
+pub mod tokenizer;
+pub mod user;
+pub mod view;
+pub mod with;
 
-pub(crate) mod decimal;
-pub(crate) mod module;
+pub mod decimal;
+pub mod module;
 
-mod closure;
-pub(crate) mod statements;
+pub mod closure;
+pub mod statements;
 pub mod visit;
 
-pub(crate) use self::access_type::{AccessType, JwtAccess, RecordAccess};
-pub(crate) use self::algorithm::Algorithm;
-pub(crate) use self::base::Base;
-pub(crate) use self::block::Block;
-pub(crate) use self::bytesize::Bytesize;
-pub(crate) use self::changefeed::ChangeFeed;
-pub(crate) use self::closure::ClosureExpr;
-pub(crate) use self::cond::Cond;
-pub(crate) use self::constant::Constant;
-pub(crate) use self::data::Data;
-pub(crate) use self::dir::Dir;
-pub(crate) use self::explain::Explain;
-pub(crate) use self::expression::{ExplainFormat, Expr};
-pub(crate) use self::fetch::{Fetch, Fetchs};
-pub(crate) use self::field::{Field, Fields};
-pub(crate) use self::filter::Filter;
-pub(crate) use self::function::{Function, FunctionCall};
-pub(crate) use self::group::{Group, Groups};
-pub(crate) use self::idiom::Idiom;
-pub(crate) use self::kind::{Kind, KindLiteral};
-pub(crate) use self::limit::Limit;
-pub(crate) use self::literal::{Literal, ObjectEntry};
-pub(crate) use self::lookup::Lookup;
-pub(crate) use self::mock::Mock;
-pub(crate) use self::model::Model;
-pub(crate) use self::module::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
-pub(crate) use self::operation::Operation;
-pub(crate) use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
-pub(crate) use self::order::Order;
-pub(crate) use self::output::Output;
-pub(crate) use self::param::Param;
-pub(crate) use self::part::Part;
-pub(crate) use self::plan::{LogicalPlan, TopLevelExpr};
-pub(crate) use self::record_id::{
-	RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit,
-};
-pub(crate) use self::script::Script;
-pub(crate) use self::split::{Split, Splits};
-pub(crate) use self::start::Start;
-pub(crate) use self::statements::{DefineAnalyzerStatement, SelectStatement, SleepStatement};
-pub(crate) use self::tokenizer::Tokenizer;
-pub(crate) use self::view::View;
-pub(crate) use self::with::With;
+pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
+pub use self::algorithm::Algorithm;
+pub use self::base::Base;
+pub use self::block::Block;
+pub use self::bytesize::Bytesize;
+pub use self::changefeed::ChangeFeed;
+pub use self::closure::ClosureExpr;
+pub use self::cond::Cond;
+pub use self::constant::Constant;
+pub use self::data::Data;
+pub use self::dir::Dir;
+pub use self::explain::Explain;
+pub use self::expression::{ExplainFormat, Expr};
+pub use self::fetch::{Fetch, Fetchs};
+pub use self::field::{Field, Fields};
+pub use self::filter::Filter;
+pub use self::function::{Function, FunctionCall};
+pub use self::group::{Group, Groups};
+pub use self::idiom::Idiom;
+pub use self::kind::{Kind, KindLiteral};
+pub use self::limit::Limit;
+pub use self::literal::{Literal, ObjectEntry};
+pub use self::lookup::Lookup;
+pub use self::mock::Mock;
+pub use self::model::Model;
+pub use self::module::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
+pub use self::operation::Operation;
+pub use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
+pub use self::order::Order;
+pub use self::output::Output;
+pub use self::param::Param;
+pub use self::part::Part;
+pub use self::plan::{LogicalPlan, TopLevelExpr};
+pub use self::record_id::{RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
+pub use self::script::Script;
+pub use self::split::{Split, Splits};
+pub use self::start::Start;
+pub use self::statements::{DefineAnalyzerStatement, SelectStatement, SleepStatement};
+pub use self::tokenizer::Tokenizer;
+pub use self::view::View;
+pub use self::with::With;
 
 /// Result of functions which can impact the controlflow of query execution.
-pub(crate) type FlowResult<T> = Result<T, ControlFlow>;
+pub type FlowResult<T> = Result<T, ControlFlow>;
 
 /// An enum carrying control flow information.
 ///
 /// Returned by compute functions which can impact control flow.
 #[derive(Debug)]
-pub(crate) enum ControlFlow {
+pub enum ControlFlow {
 	Break,
 	Continue,
 	Return(Value),
@@ -162,7 +160,7 @@ impl ControlFlow {
 }
 
 /// Helper trait to catch controlflow return unwinding.
-pub(crate) trait FlowResultExt {
+pub trait FlowResultExt {
 	/// Function which catches `ControlFlow::Return(x)` and turns it into
 	/// `Ok(x)`.
 	///
@@ -221,7 +219,7 @@ impl FlowResultExt for FlowResult<Value> {
 /// // Unwrap an Option<T> into FlowResult<T> with context:
 /// let table = opt_table.context("Referencing table is required")?;
 /// ```
-pub(crate) trait ControlFlowExt<T> {
+pub trait ControlFlowExt<T> {
 	/// Wrap the error value with additional context, converting it into a
 	/// `ControlFlow::Err`.
 	fn context<C: std::fmt::Display + Send + Sync + 'static>(

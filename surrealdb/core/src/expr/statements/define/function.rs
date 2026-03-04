@@ -14,7 +14,7 @@ use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineFunctionStatement {
+pub struct DefineFunctionStatement {
 	pub kind: DefineKind,
 	pub name: String,
 	pub args: Vec<(String, Kind)>,

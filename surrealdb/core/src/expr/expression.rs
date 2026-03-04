@@ -27,14 +27,14 @@ use crate::types::PublicValue;
 use crate::val::{Array, Range, TableName, Value};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
-pub(crate) enum ExplainFormat {
+pub enum ExplainFormat {
 	#[default]
 	Text,
 	Json,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum Expr {
+pub enum Expr {
 	Literal(Literal),
 	Param(Param),
 	Idiom(Idiom),

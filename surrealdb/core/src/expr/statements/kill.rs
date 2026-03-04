@@ -11,7 +11,7 @@ use crate::types::{PublicAction, PublicNotification, PublicValue};
 use crate::val::{Uuid, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct KillStatement {
+pub struct KillStatement {
 	// Uuid of Live Query
 	// or Param resolving to Uuid of Live Query
 	pub id: Expr,

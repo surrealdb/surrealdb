@@ -14,7 +14,7 @@ use crate::val::{IndexFormat, Value};
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub(crate) struct Array(pub(crate) Vec<Value>);
+pub struct Array(pub(crate) Vec<Value>);
 
 impl<T> From<Vec<T>> for Array
 where

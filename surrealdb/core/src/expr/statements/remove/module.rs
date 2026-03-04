@@ -12,7 +12,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::surrealism::cache::SurrealismCacheLookup;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct RemoveModuleStatement {
+pub struct RemoveModuleStatement {
 	pub name: ModuleName,
 	pub if_exists: bool,
 }

@@ -4,12 +4,12 @@ use crate::expr::statements::{
 };
 
 #[derive(Clone, Debug)]
-pub(crate) struct LogicalPlan {
-	pub(crate) expressions: Vec<TopLevelExpr>,
+pub struct LogicalPlan {
+	pub expressions: Vec<TopLevelExpr>,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub(crate) enum TopLevelExpr {
+pub enum TopLevelExpr {
 	Begin,
 	Cancel,
 	Commit,

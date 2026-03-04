@@ -16,7 +16,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) enum AlterDefault {
+pub enum AlterDefault {
 	#[default]
 	None,
 	Drop,
@@ -25,7 +25,7 @@ pub(crate) enum AlterDefault {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct AlterFieldStatement {
+pub struct AlterFieldStatement {
 	pub name: Idiom,
 	pub what: TableName,
 	pub if_exists: bool,

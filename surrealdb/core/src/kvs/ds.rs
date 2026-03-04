@@ -1873,7 +1873,7 @@ impl Datastore {
 		self.process_plan(ast.into(), sess, vars).await
 	}
 
-	pub(crate) async fn process_plan(
+	pub async fn process_plan(
 		&self,
 		plan: LogicalPlan,
 		sess: &Session,

@@ -125,6 +125,15 @@ pub struct StartCommandArguments {
 	#[arg(value_delimiter = ',', value_parser = super::validator::cors_origin)]
 	allow_origin: Vec<String>,
 	//
+	// PostgreSQL wire protocol
+	#[cfg(feature = "pgwire")]
+	#[arg(
+		help = "The hostname or IP address to listen for PostgreSQL wire protocol connections on",
+		help_heading = "PostgreSQL compatibility"
+	)]
+	#[arg(env = "SURREAL_PGWIRE_LISTEN", long = "pgwire-listen")]
+	pgwire_listen: Option<SocketAddr>,
+	//
 	// Database options
 	#[command(flatten)]
 	#[command(next_help_heading = "Database")]
@@ -236,6 +245,7 @@ pub async fn init<
 		engine,
 		crt,
 		key,
+		pgwire_bind: None,
 	};
 	composer.check_config(&config).await?;
 	// Setup the command-line options
@@ -250,6 +260,17 @@ pub async fn init<
 	register_datastore_metrics(datastore.clone());
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &config.engine);
+	// Start the PostgreSQL wire protocol server if configured
+	#[cfg(feature = "pgwire")]
+	if let Some(pgwire_bind) = config.pgwire_bind {
+		let ds = datastore.clone();
+		let ct = canceller.clone();
+		tokio::spawn(async move {
+			if let Err(e) = crate::pgw::init(pgwire_bind, ds, ct).await {
+				error!("pgwire server error: {e}");
+			}
+		});
+	}
 	// Build and run the HTTP server using the provided RouterFactory implementation
 	ntw::init::<C>(&config, datastore.clone(), canceller.clone()).await?;
 	// Shutdown and stop closed tasks

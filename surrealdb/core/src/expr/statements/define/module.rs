@@ -15,7 +15,7 @@ use crate::surrealism::cache::SurrealismCacheLookup;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineModuleStatement {
+pub struct DefineModuleStatement {
 	pub kind: DefineKind,
 	pub name: Option<String>,
 	pub executable: ModuleExecutable,
