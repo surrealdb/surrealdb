@@ -4,26 +4,26 @@ use std::process::Command;
 
 use anyhow::Result;
 use surrealism_runtime::PrefixErr;
-use surrealism_runtime::config::SurrealismConfig;
-use surrealism_runtime::package::SurrealismPackage;
+use surrealism_runtime::config::{AbiVersion, SurrealismConfig};
+use surrealism_runtime::package::{SurrealismPackage, detect_module_kind};
 use tempfile::TempDir;
 use walrus::Module;
 use wasm_opt::OptimizationOptions;
 
 pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>) -> Result<()> {
-	// Ensure all requirements are met
 	let path = path.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 	let config = load_config(&path)?;
-	let source_wasm = get_source_wasm(&path)?;
+	let source_wasm = get_source_wasm(&path, &config)?;
 
-	// Compile the WASM module and optimize it
-	build_wasm_module(&path)?;
-	let wasm = optimize_wasm(&source_wasm)?;
+	build_wasm_module(&path, &config)?;
+	let wasm = optimize_wasm(&source_wasm, &config)?;
 
 	// Pack the optimized WASM into a Surrealism package
+	let kind = detect_module_kind(&wasm);
 	let package = SurrealismPackage {
 		config,
 		wasm,
+		kind,
 	};
 	let out = resolve_output_path(out, &package.config)?;
 	package.pack(out).prefix_err(|| "Failed to pack Surrealism package")?;
@@ -42,13 +42,26 @@ fn load_config(path: &Path) -> Result<SurrealismConfig> {
 	)?)
 }
 
-fn build_wasm_module(path: &PathBuf) -> Result<()> {
-	println!("Building WASM module...");
-	let cargo_status = Command::new("cargo")
-		.args(["build", "--target", "wasm32-wasip1", "--release"])
-		.current_dir(path)
-		.status()
-		.prefix_err(|| "Failed to execute cargo build")?;
+fn wasm_target(config: &SurrealismConfig) -> &'static str {
+	match config.abi {
+		AbiVersion::P1 => "wasm32-wasip1",
+		AbiVersion::P2 => "wasm32-wasip2",
+	}
+}
+
+fn build_wasm_module(path: &PathBuf, config: &SurrealismConfig) -> Result<()> {
+	let target = wasm_target(config);
+	println!("Building WASM module (target: {target})...");
+
+	let mut cmd = Command::new("cargo");
+	cmd.args(["build", "--target", target, "--release"]);
+
+	if config.abi == AbiVersion::P2 {
+		cmd.args(["--features", "p2"]);
+	}
+
+	let cargo_status =
+		cmd.current_dir(path).status().prefix_err(|| "Failed to execute cargo build")?;
 
 	if !cargo_status.success() {
 		anyhow::bail!("Cargo build failed");
@@ -57,21 +70,28 @@ fn build_wasm_module(path: &PathBuf) -> Result<()> {
 	Ok(())
 }
 
-fn optimize_wasm(source_wasm: &PathBuf) -> Result<Vec<u8>> {
+fn optimize_wasm(source_wasm: &PathBuf, config: &SurrealismConfig) -> Result<Vec<u8>> {
 	if !source_wasm.exists() {
 		anyhow::bail!("Expected WASM file not found: {}", source_wasm.display());
 	}
 
 	println!("Optimizing bundle...");
 
-	// Read and strip WASM
 	let wasm_bytes = fs::read(source_wasm).prefix_err(|| "Failed to read WASM file")?;
-	let stripped_bytes = strip_wasm_sections(&wasm_bytes)?;
 
-	// Apply wasm-opt optimization
-	let optimized_bytes = apply_wasm_opt(&stripped_bytes)?;
-
-	Ok(optimized_bytes)
+	match config.abi {
+		AbiVersion::P1 => {
+			let stripped_bytes = strip_wasm_sections(&wasm_bytes)?;
+			apply_wasm_opt(&stripped_bytes)
+		}
+		AbiVersion::P2 => {
+			// P2 components have a different binary structure — walrus and wasm-opt
+			// operate on core modules and don't support the component model format.
+			// For now, return the raw bytes. Future: use wasm-tools component
+			// optimisation passes.
+			Ok(wasm_bytes)
+		}
+	}
 }
 
 fn strip_wasm_sections(wasm_bytes: &[u8]) -> Result<Vec<u8>> {
@@ -125,7 +145,7 @@ fn apply_wasm_opt(wasm_bytes: &[u8]) -> Result<Vec<u8>> {
 	Ok(fs::read(&temp_wasm_output).prefix_err(|| "Failed to read optimized WASM file")?)
 }
 
-fn get_source_wasm(path: &PathBuf) -> Result<PathBuf> {
+fn get_source_wasm(path: &PathBuf, config: &SurrealismConfig) -> Result<PathBuf> {
 	let metadata = metadata(path).prefix_err(|| "Failed to retrieve cargo metadata")?;
 
 	let target_directory = metadata["target_directory"]
@@ -164,9 +184,9 @@ fn get_source_wasm(path: &PathBuf) -> Result<PathBuf> {
 		.as_str()
 		.ok_or_else(|| anyhow::anyhow!("No package name found in metadata"))?;
 
-	// Construct the expected WASM file path
 	let wasm_filename = format!("{}.wasm", package_name.replace("-", "_"));
-	let target_dir = PathBuf::from(target_directory).join("wasm32-wasip1/release");
+	let target = wasm_target(config);
+	let target_dir = PathBuf::from(target_directory).join(format!("{target}/release"));
 	Ok(target_dir.join(&wasm_filename))
 }
 

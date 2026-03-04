@@ -1,0 +1,68 @@
+package surrealism:plugin;
+
+interface types {
+    /// Opaque serialized SurrealDB value (FlatBuffers).
+    type serialized-value = list<u8>;
+    /// Opaque serialized query variables.
+    type serialized-vars = list<u8>;
+    /// Opaque serialized function arguments.
+    type serialized-args = list<u8>;
+    /// Opaque serialized SurrealDB kind (type descriptor).
+    type serialized-kind = list<u8>;
+    /// Opaque serialized list of SurrealDB kinds.
+    type serialized-kinds = list<u8>;
+}
+
+interface host {
+    use types.{serialized-value, serialized-vars, serialized-args};
+
+    /// Execute a SurrealQL query with optional variables.
+    sql: func(query: string, vars: serialized-vars) -> result<serialized-value, string>;
+
+    /// Call another surrealism function by name.
+    run: func(fnc: string, version: option<string>, args: serialized-args) -> result<serialized-value, string>;
+
+    /// Get a value from the key-value store.
+    kv-get: func(key: string) -> result<option<serialized-value>, string>;
+    /// Set a value in the key-value store.
+    kv-set: func(key: string, value: serialized-value) -> result<_, string>;
+    /// Delete a key from the key-value store.
+    kv-del: func(key: string) -> result<_, string>;
+    /// Check if a key exists in the key-value store.
+    kv-exists: func(key: string) -> result<bool, string>;
+
+    /// Delete all keys in a serialized range.
+    kv-del-rng: func(range: serialized-value) -> result<_, string>;
+
+    /// Batch get multiple keys.
+    kv-get-batch: func(keys: list<string>) -> result<serialized-value, string>;
+    /// Batch set multiple key-value pairs.
+    kv-set-batch: func(entries: serialized-value) -> result<_, string>;
+    /// Batch delete multiple keys.
+    kv-del-batch: func(keys: list<string>) -> result<_, string>;
+
+    /// List keys in a serialized range.
+    kv-keys: func(range: serialized-value) -> result<list<string>, string>;
+    /// List values in a serialized range.
+    kv-values: func(range: serialized-value) -> result<serialized-value, string>;
+    /// List key-value entries in a serialized range.
+    kv-entries: func(range: serialized-value) -> result<serialized-value, string>;
+    /// Count entries in a serialized range.
+    kv-count: func(range: serialized-value) -> result<u64, string>;
+}
+
+world plugin {
+    import host;
+    use types.{serialized-value, serialized-args, serialized-kind, serialized-kinds};
+
+    /// Invoke a named function with serialized arguments.
+    export invoke: func(name: string, args: serialized-args) -> result<serialized-value, string>;
+    /// List all available function names.
+    export list-functions: func() -> list<string>;
+    /// Get the argument type descriptors for a function.
+    export function-args: func(name: string) -> result<serialized-kinds, string>;
+    /// Get the return type descriptor for a function.
+    export function-returns: func(name: string) -> result<serialized-kind, string>;
+    /// Optional initialization hook.
+    export init: func() -> result<_, string>;
+}

@@ -6,11 +6,33 @@ use surrealism_types::err::{PrefixErr, SurrealismError, SurrealismResult};
 use tar::Archive;
 use zstd::stream::read::Decoder;
 
-use crate::config::SurrealismConfig;
+use crate::config::{AbiVersion, SurrealismConfig};
+
+/// Whether the WASM bytes represent a core module (P1) or a component (P2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleKind {
+	/// Core WASM module (WASI P1).
+	CoreModule,
+	/// WASM component (WASI P2 / Component Model).
+	Component,
+}
+
+/// The 8-byte preamble of a WASM component (layer 1, version 0x0d).
+const COMPONENT_PREAMBLE: [u8; 8] = [0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
+
+/// Detect whether raw WASM bytes represent a component or a core module.
+pub fn detect_module_kind(wasm: &[u8]) -> ModuleKind {
+	if wasm.len() >= 8 && wasm[..8] == COMPONENT_PREAMBLE {
+		ModuleKind::Component
+	} else {
+		ModuleKind::CoreModule
+	}
+}
 
 pub struct SurrealismPackage {
 	pub config: SurrealismConfig,
 	pub wasm: Vec<u8>,
+	pub kind: ModuleKind,
 }
 
 impl SurrealismPackage {
@@ -74,9 +96,25 @@ impl SurrealismPackage {
 		let config =
 			config.ok_or_else(|| anyhow::anyhow!("surrealism.toml not found in archive"))?;
 
+		let detected = detect_module_kind(&wasm);
+		let kind = match config.abi {
+			AbiVersion::P1 => ModuleKind::CoreModule,
+			AbiVersion::P2 => {
+				if detected == ModuleKind::CoreModule {
+					// Config says P2 but bytes are a core module. The config default
+					// is P2, so older packages that predate the `abi` field will land
+					// here. Fall back to what the bytes actually contain.
+					ModuleKind::CoreModule
+				} else {
+					ModuleKind::Component
+				}
+			}
+		};
+
 		Ok(SurrealismPackage {
 			config,
 			wasm,
+			kind,
 		})
 	}
 

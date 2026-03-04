@@ -14,11 +14,12 @@ license-file.workspace = true
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+default = []
+p2 = ["surrealism/p2"]
+
 [dependencies]
 anyhow.workspace = true
-# Not required for Surrealism itself — only needed in this workspace so
-# #[derive(SurrealValue)] expands to ::surrealdb::types. Omit when using
-# Surrealism outside this repo.
 surrealdb.workspace = true
 surrealdb-types.workspace = true
 surrealism.workspace = true

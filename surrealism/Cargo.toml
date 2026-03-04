@@ -10,12 +10,18 @@ keywords.workspace = true
 categories.workspace = true
 license-file.workspace = true
 
+[features]
+default = []
+p1 = []
+p2 = ["wit-bindgen"]
+
 [dependencies]
 anyhow.workspace = true
 thiserror.workspace = true
 surrealdb-types.workspace = true
 surrealism-macros = { workspace = true, default-features = false }
 surrealism-types = { workspace = true, default-features = false }
+wit-bindgen = { workspace = true, optional = true }
 
 [lints]
 workspace = true

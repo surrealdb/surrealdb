@@ -201,8 +201,9 @@ tar = "0.4.44"
 toml = "0.9.11"
 walrus = "0.25"
 wasm-opt = "0.116.1"
-wasmtime = { version = "42", default-features = false, features = ["cranelift", "winch", "runtime", "std", "wat"] }
+wasmtime = { version = "42", default-features = false, features = ["cranelift", "winch", "runtime", "std", "wat", "component-model"] }
 wasmtime-wasi = { version = "42", features = ["p1", "p2"] }
+wit-bindgen = { version = "0.51", default-features = false, features = ["macros", "realloc"] }
 zstd = "0.13.3"
 
 [package]
