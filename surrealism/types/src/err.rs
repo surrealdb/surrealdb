@@ -5,6 +5,7 @@ use std::num::TryFromIntError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum SurrealismError {
+	#[cfg(feature = "host")]
 	#[error("WASM compilation failed: {0}")]
 	Compilation(wasmtime::Error),
 	#[error("Memory allocation failed")]
@@ -17,6 +18,7 @@ pub enum SurrealismError {
 	FunctionCallError(String),
 	#[error("Integer conversion error: {0}")]
 	IntConversion(#[from] TryFromIntError),
+	#[cfg(feature = "host")]
 	#[error("Wasmtime error: {0}")]
 	Wasmtime(#[from] wasmtime::Error),
 	#[error("Other error: {0}")]

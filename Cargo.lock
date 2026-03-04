@@ -6837,6 +6837,7 @@ dependencies = [
  "surrealdb-core",
  "surrealdb-server",
  "surrealdb-types",
+ "surrealism-runtime",
  "tempfile",
  "test-log",
  "thiserror 2.0.18",

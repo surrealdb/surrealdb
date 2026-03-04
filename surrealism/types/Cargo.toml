@@ -12,7 +12,7 @@ license-file.workspace = true
 
 [features]
 # Enable this feature for the host side (runtime) to make traits async
-host = []
+host = ["dep:wasmtime"]
 
 [dependencies]
 anyhow.workspace = true
@@ -20,7 +20,7 @@ async-trait.workspace = true
 bytes.workspace = true
 surrealdb-types.workspace = true
 thiserror.workspace = true
-wasmtime.workspace = true
+wasmtime = { workspace = true, optional = true }
 
 [lints]
 workspace = true

@@ -284,6 +284,7 @@ reqwest = { workspace = true, default-features = false, features = [
 ] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+surrealism-runtime.workspace = true
 surrealdb-types.workspace = true
 test-log = { workspace = true, features = ["trace"] }
 thiserror.workspace = true

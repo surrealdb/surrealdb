@@ -16,9 +16,9 @@ use wasm_opt::OptimizationOptions;
 pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>, debug: bool) -> Result<()> {
 	let path = path.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 	let config = load_config(&path)?;
-	let source_wasm = get_source_wasm(&path, &config, debug)?;
+	let (package_name, source_wasm) = get_source_wasm(&path, &config, debug)?;
 
-	build_wasm_module(&path, &config, debug)?;
+	build_wasm_module(&path, &package_name, &config, debug)?;
 	let wasm = if debug {
 		if !source_wasm.exists() {
 			anyhow::bail!("Expected WASM file not found: {}", source_wasm.display());
@@ -62,7 +62,12 @@ fn wasm_target(config: &SurrealismConfig) -> &'static str {
 }
 
 /// Invoke `cargo build` targeting the appropriate WASM triple for the ABI version.
-fn build_wasm_module(path: &PathBuf, config: &SurrealismConfig, debug: bool) -> Result<()> {
+fn build_wasm_module(
+	path: &PathBuf,
+	package_name: &str,
+	config: &SurrealismConfig,
+	debug: bool,
+) -> Result<()> {
 	let target = wasm_target(config);
 	let profile = if debug {
 		"debug"
@@ -72,13 +77,14 @@ fn build_wasm_module(path: &PathBuf, config: &SurrealismConfig, debug: bool) -> 
 	println!("Building WASM module (target: {target}, profile: {profile})...");
 
 	let mut cmd = Command::new("cargo");
-	cmd.args(["build", "--target", target]);
+	cmd.args(["build", "-p", package_name, "--target", target]);
 	if !debug {
 		cmd.arg("--release");
 	}
 
 	if config.abi == AbiVersion::P2 {
-		cmd.args(["--features", "p2"]);
+		let feature_flag = format!("{package_name}/p2");
+		cmd.args(["--features", &feature_flag]);
 	}
 
 	let cargo_status =
@@ -252,7 +258,11 @@ fn apply_wasm_opt(wasm_bytes: &[u8]) -> Result<Vec<u8>> {
 
 /// Locate the `.wasm` artifact produced by `cargo build` using `cargo metadata`
 /// to resolve the target directory and package name.
-fn get_source_wasm(path: &PathBuf, config: &SurrealismConfig, debug: bool) -> Result<PathBuf> {
+fn get_source_wasm(
+	path: &PathBuf,
+	config: &SurrealismConfig,
+	debug: bool,
+) -> Result<(String, PathBuf)> {
 	let metadata = metadata(path).prefix_err(|| "Failed to retrieve cargo metadata")?;
 
 	let target_directory = metadata["target_directory"]
@@ -299,7 +309,7 @@ fn get_source_wasm(path: &PathBuf, config: &SurrealismConfig, debug: bool) -> Re
 		"release"
 	};
 	let target_dir = PathBuf::from(target_directory).join(format!("{target}/{profile_dir}"));
-	Ok(target_dir.join(&wasm_filename))
+	Ok((package_name.to_string(), target_dir.join(&wasm_filename)))
 }
 
 /// Run `cargo metadata --no-deps` and return the parsed JSON.
