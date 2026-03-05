@@ -861,6 +861,12 @@ user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-06-10"
 end = "2025-08-06"
 
+[[trusted.objc2-system-configuration]]
+criteria = "safe-to-deploy"
+user-id = 36629 # Mads Marquart (madsmtm)
+start = "2025-01-11"
+end = "2027-03-05"
+
 [[trusted.onnx-embedding]]
 criteria = "safe-to-deploy"
 user-id = 262632
@@ -1016,6 +1022,12 @@ criteria = "safe-to-deploy"
 user-id = 539 # Josh Stone (cuviper)
 start = "2019-02-22"
 end = "2026-10-30"
+
+[[trusted.recursive]]
+criteria = "safe-to-deploy"
+user-id = 24326 # Orson Peters (orlp)
+start = "2024-03-28"
+end = "2027-03-05"
 
 [[trusted.ref-cast]]
 criteria = "safe-to-deploy"
@@ -1437,6 +1449,12 @@ user-id = 6741 # Alice Ryhl (Darksonn)
 start = "2020-10-26"
 end = "2025-09-03"
 
+[[trusted.tokio-postgres]]
+criteria = "safe-to-deploy"
+user-id = 55015 # Paolo Barbolini (paolobarbolini)
+start = "2025-09-25"
+end = "2027-03-05"
+
 [[trusted.tokio-util]]
 criteria = "safe-to-deploy"
 user-id = 10
@@ -1613,7 +1631,7 @@ end = "2026-10-30"
 
 [[trusted.wasmtime-versioned-export-macros]]
 criteria = "safe-to-deploy"
-user-id = 73222
+user-id = 73222 # wasmtime-publish
 start = "2023-08-21"
 end = "2026-10-30"
 
@@ -1754,6 +1772,12 @@ criteria = "safe-to-deploy"
 user-id = 1 # Alex Crichton (alexcrichton)
 start = "2022-06-06"
 end = "2026-05-06"
+
+[[trusted.zeroize_derive]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2019-03-23"
+end = "2027-03-05"
 
 [[trusted.zip]]
 criteria = "safe-to-deploy"

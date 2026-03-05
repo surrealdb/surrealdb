@@ -237,11 +237,7 @@ fn try_build_semi_anti(
 
 /// Wrap the current FROM list in a Semi/Anti join node.
 fn wrap_what_in_join(what: Vec<Expr>, join: SemiAntiJoin) -> Expr {
-	let left = if what.len() == 1 {
-		what.into_iter().next().unwrap()
-	} else {
-		what.into_iter().next().unwrap_or(Expr::Literal(Literal::None))
-	};
+	let left = what.into_iter().next().unwrap_or(Expr::Literal(Literal::None));
 
 	// Determine left alias: if the left side is already a Join, it has no
 	// single alias; otherwise extract from the join or table.
@@ -251,7 +247,7 @@ fn wrap_what_in_join(what: Vec<Expr>, join: SemiAntiJoin) -> Expr {
 	};
 
 	let alias_suffix = "_semi";
-	let right_alias = join.right_alias.or_else(|| Some(format!("{alias_suffix}")));
+	let right_alias = join.right_alias.or_else(|| Some(alias_suffix.to_string()));
 
 	Expr::Join(Box::new(JoinExpr {
 		kind: join.kind,
