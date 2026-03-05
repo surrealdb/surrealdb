@@ -18,7 +18,7 @@
 //! - **Custom scalars** -- registers scalars like `uuid`, `decimal`, `datetime`, `duration`,
 //!   `bytes`, `object`, `any`, `JSON`, and `null`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use async_graphql::dynamic::indexmap::IndexMap;
@@ -168,11 +168,20 @@ pub async fn generate_schema(
 
 	match tbs {
 		Some(ref tbs) if !tbs.is_empty() => {
-			query = process_tbs(tbs.clone(), query, &mut types, &schema_ctx, &relations).await?;
+			let mut table_fields = HashMap::new();
+			query = process_tbs(
+				tbs.clone(),
+				query,
+				&mut types,
+				&schema_ctx,
+				&relations,
+				&mut table_fields,
+			)
+			.await?;
 
 			// Generate mutations for all tables
 			mutation_obj = Some(process_mutations(tbs.clone(), &mut types, &schema_ctx).await?);
-			subscription_obj = process_subscriptions(&tbs[..]);
+			subscription_obj = process_subscriptions(&tbs[..], &table_fields);
 		}
 		_ => {}
 	}
