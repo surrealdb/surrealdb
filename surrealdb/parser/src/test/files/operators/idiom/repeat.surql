@@ -10,5 +10,5 @@ Query
                             .start: Ident
                                 .text: "a"
                             .parts: None
-                    .op: PostfixOperator::Repeat
+                    .op: IdiomOperator::Repeat
 */

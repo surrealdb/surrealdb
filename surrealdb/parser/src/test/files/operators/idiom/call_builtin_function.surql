@@ -13,8 +13,8 @@ Query
                                 -PathSegment::Ident
                                     Ident
                                         .text: "join"
-                    .op: PostfixOperator::Call
-                        .args: Some
+                    .op: IdiomOperator::Call
+                        Some
                             -Expr::Array
                                 Array
                                     .entries: Some

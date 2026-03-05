@@ -155,13 +155,19 @@ fn render_element(buf: &mut CharBuffer, elem: &Snippet, line_color: Color) {
 			Color::Blue
 		};
 
+		let underline_char = if AnnotationKind::Primary == ann.kind {
+			"^"
+		} else {
+			"-"
+		};
+
 		if end.line == start.line {
 			for _ in 0..end.column.saturating_sub(start.column).max(1) {
-				buf.writer().color(underline_color).push_str("^");
+				buf.writer().color(underline_color).push_str(underline_char);
 			}
 			buf.writer().color(underline_color).push_str(" ");
 		} else {
-			buf.writer().color(underline_color).push_str("^... ");
+			buf.writer().color(underline_color).push_str(underline_char).push_str("... ");
 		}
 		if let Some(x) = ann.label.as_ref() {
 			buf.writer().push_str(x);

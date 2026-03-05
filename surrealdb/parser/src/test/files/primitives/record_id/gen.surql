@@ -10,19 +10,19 @@ Query
                     .name: Ident
                         .text: "a"
                     .key: RecordIdKey::Generate
-                        DestructureOperator::Rand
+                        Rand
         -TopLevelExpr::Expr
             Expr::RecordId
                 RecordId
                     .name: Ident
                         .text: "a"
                     .key: RecordIdKey::Generate
-                        DestructureOperator::Uuid
+                        Uuid
         -TopLevelExpr::Expr
             Expr::RecordId
                 RecordId
                     .name: Ident
                         .text: "a"
                     .key: RecordIdKey::Generate
-                        DestructureOperator::Ulid
+                        Ulid
 */

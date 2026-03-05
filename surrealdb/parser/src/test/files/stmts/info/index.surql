@@ -8,7 +8,7 @@ Query
         -TopLevelExpr::Expr
             Expr::Info
                 Info
-                    .kind: InfoKind::Table
+                    .kind: InfoKind::Index
                         .name: Expr::Path
                             Path
                                 .start: Ident
@@ -23,7 +23,7 @@ Query
         -TopLevelExpr::Expr
             Expr::Info
                 Info
-                    .kind: InfoKind::Table
+                    .kind: InfoKind::Index
                         .name: Expr::Path
                             Path
                                 .start: Ident
@@ -38,7 +38,7 @@ Query
         -TopLevelExpr::Expr
             Expr::Info
                 Info
-                    .kind: InfoKind::Table
+                    .kind: InfoKind::Index
                         .name: Expr::Binary
                             BinaryExpr
                                 .left: Expr::Integer
@@ -63,7 +63,7 @@ Query
         -TopLevelExpr::Expr
             Expr::Info
                 Info
-                    .kind: InfoKind::Table
+                    .kind: InfoKind::Index
                         .name: Expr::Binary
                             BinaryExpr
                                 .left: Expr::Integer

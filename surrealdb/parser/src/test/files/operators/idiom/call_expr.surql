@@ -13,8 +13,8 @@ Query
                                     .key: "a"
                                     .value: Expr::Integer
                                         +1
-                    .op: PostfixOperator::Call
-                        .args: None
+                    .op: IdiomOperator::Call
+                        None
         -TopLevelExpr::Expr
             Expr::Idiom
                 IdiomExpr
@@ -27,8 +27,7 @@ Query
                                             .key: "a"
                                             .value: Expr::Integer
                                                 +1
-                            .op: PostfixOperator::Field
-                                .name: "a"
-                    .op: PostfixOperator::Call
-                        .args: None
+                            .op: IdiomOperator::Field"a"
+                    .op: IdiomOperator::Call
+                        None
 */

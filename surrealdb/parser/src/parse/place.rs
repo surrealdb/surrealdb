@@ -6,7 +6,7 @@ use crate::Parse;
 impl Parse for ast::Place {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.peek_span();
-		let field = parser.parse_sync_push()?;
+		let field = parser.parse_sync()?;
 		let mut lhs = ast::Place::Field(field);
 
 		loop {
@@ -16,7 +16,7 @@ impl Parse for ast::Place {
 			match peek.token {
 				T![.] => {
 					let _ = parser.next();
-					let name = parser.parse_sync_push()?;
+					let name = parser.parse_sync()?;
 					let new_lhs = parser.push(lhs);
 					let span = parser.span_since(start);
 					lhs = ast::Place::Member(ast::MemberPlace {
@@ -27,7 +27,7 @@ impl Parse for ast::Place {
 				}
 				BaseTokenKind::OpenBracket => {
 					let _ = parser.next();
-					let index = parser.parse_enter_push().await?;
+					let index = parser.parse_enter().await?;
 					let _ =
 						parser.expect_closing_delimiter(BaseTokenKind::CloseBracket, peek.span)?;
 					let new_lhs = parser.push(lhs);
@@ -48,7 +48,7 @@ impl Parse for ast::Place {
 impl Parse for ast::PresentPlace {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.peek_span();
-		let field = parser.parse_sync_push()?;
+		let field = parser.parse_sync()?;
 		let mut lhs = ast::PresentPlace::Field(field);
 
 		loop {
@@ -70,7 +70,7 @@ impl Parse for ast::PresentPlace {
 							});
 						}
 						x if x.is_identifier() => {
-							let name = parser.parse_sync_push()?;
+							let name = parser.parse_sync()?;
 							let span = parser.span_since(start);
 							lhs = ast::PresentPlace::Member(ast::MemberPresentPlace {
 								lhs: new_lhs,
@@ -107,7 +107,7 @@ impl Parse for ast::PresentPlace {
 							});
 						}
 						_ => {
-							let index = parser.parse_enter_push().await?;
+							let index = parser.parse_enter().await?;
 							let _ = parser
 								.expect_closing_delimiter(BaseTokenKind::CloseBracket, peek.span)?;
 							let span = parser.span_since(start);

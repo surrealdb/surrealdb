@@ -6,19 +6,19 @@ Query
     .exprs: Some
         -TopLevelExpr::Use
             Use
-                .kind: UseStatementKind::Namespace
+                .kind: UseKind::Namespace
                     Ident
                         .text: "ns"
         -TopLevelExpr::Use
             Use
-                .kind: UseStatementKind::Database
+                .kind: UseKind::Database
                     Ident
                         .text: "db"
         -TopLevelExpr::Use
             Use
-                .kind: UseStatementKind::NamespaceDatabase
-                    Ident
+                .kind: UseKind::NamespaceDatabase
+                    .namespace: Ident
                         .text: "ns"
-                    Ident
+                    .database: Ident
                         .text: "db"
 */

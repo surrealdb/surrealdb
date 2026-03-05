@@ -2,6 +2,14 @@
 //!
 //! This crate is split out because of the large amount of code logos tends to generate, slowing
 //! down compilation as well as tooling for every crate it the generated code is included in.
+//!
+//! <section class="warning">
+//! <h3>Unstable!</h3>
+//! This crate is <b>SurrealDB internal API</b>. It does not adhere to SemVer and its API is
+//! free to change and break code even between patch versions. If you are looking for a stable
+//! interface to the SurrealDB library please have a look at
+//! <a href="https://crates.io/crates/surrealdb">the Rust SDK</a>.
+//! </section>
 
 use common::span::Span;
 use logos::Lexer;

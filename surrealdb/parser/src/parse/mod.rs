@@ -59,25 +59,23 @@ impl<P: ParseSync + Node> ParseSync for NodeId<P> {
 /// Configuration struct for the parser.
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
+	/// Recursion depth limit of the parser.
+	///
+	/// If the parser ever recursers more times then the limit the parser will throw an error.
 	pub depth_limit: usize,
 
-	pub flexible_record_ids: bool,
+	/// If the parser should generate warning diagnostics,
+	/// Unused at the moment.
 	pub generate_warnings: bool,
 
-	pub feature_references: bool,
 	pub feature_bearer_access: bool,
-	pub feature_define_api: bool,
-	pub feature_files: bool,
-	pub legacy_strands: bool,
+	pub feature_surrealism: bool,
 }
 
 impl Config {
 	pub fn all_features() -> Self {
 		Config {
-			feature_references: true,
 			feature_bearer_access: true,
-			feature_define_api: true,
-			feature_files: true,
 			..Default::default()
 		}
 	}
@@ -87,13 +85,9 @@ impl Default for Config {
 	fn default() -> Self {
 		Self {
 			depth_limit: 1024,
-			flexible_record_ids: true,
 			generate_warnings: false,
-			feature_references: false,
 			feature_bearer_access: false,
-			feature_define_api: false,
-			feature_files: false,
-			legacy_strands: false,
+			feature_surrealism: false,
 		}
 	}
 }
@@ -101,38 +95,36 @@ impl Default for Config {
 bitflags! {
 	#[derive(Clone,Copy)]
 	struct ParserSettings: u8 {
-		/// Are legacy_strands strands enabled.
-		const LEGACY_STRAND      = 1 << 0;
 		/// Is the emmiting of warnings enabled.
 		const WARNINGS           = 1 << 1;
 		/// Is the parser parsing a partially available query.
 		const PARTIAL            = 1 << 2;
-		/// Is the record-references feature enabled
-		const FEAT_REFERENCES    = 1 << 3;
 		/// Is Bearer access feature enabled
-		const FEAT_BEARER_ACCESS = 1 << 4;
-		/// Is the define API feature enabled
-		const FEAT_DEFINE_API    = 1 << 5;
-		/// Is the files feature enabled
-		const FEAT_FILES         = 1 << 6;
+		const FEAT_BEARER_ACCESS = 1 << 3;
+		/// Is surrealism enabled
+		const FEAT_SURREALISM = 1 << 4;
 	}
 }
 
 bitflags! {
 	#[derive(Clone,Copy)]
-	pub struct ParserState: u8 {
+	pub(crate) struct ParserState: u8 {
 		/// Is the parser in a cancelable transaction.
 		const TRANSACTION = 1 << 0;
 		/// Is the parser in a control flow loop.
+		/// Used to reject `break` and `continue` statements which are outside of a loop.
 		const LOOP = 1 << 1;
 		/// Is the parser speculativily parsing.
 		const SPECULATING = 1 << 2;
 	}
 }
 
-pub type BaseLexer<'src> = Lexer<'src, BaseTokenKind>;
+type BaseLexer<'src> = Lexer<'src, BaseTokenKind>;
 
 /// The parser, holds the lexer, parsing state and configurations as well as some reusable buffers.
+///
+/// It is passed between functions and trait implementation which implement the actual parsing of
+/// types.
 pub struct Parser<'source, 'ast> {
 	lex: PeekableLexer<'source, 4>,
 	last_span: Span,
@@ -171,32 +163,23 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		let lex = BaseTokenKind::lexer(source);
 		let lex = PeekableLexer::new(lex);
 
-		let mut features = ParserSettings::empty();
+		let mut settings = ParserSettings::empty();
 
-		if config.legacy_strands {
-			features |= ParserSettings::LEGACY_STRAND;
-		}
 		if config.generate_warnings {
-			features |= ParserSettings::WARNINGS;
+			settings |= ParserSettings::WARNINGS;
 		}
-		if config.feature_references {
-			features |= ParserSettings::FEAT_REFERENCES;
+		if config.feature_surrealism {
+			settings |= ParserSettings::FEAT_SURREALISM;
 		}
-		if config.feature_define_api {
-			features |= ParserSettings::FEAT_DEFINE_API;
-		}
-		if config.feature_files {
-			features |= ParserSettings::FEAT_FILES;
-		}
-		if config.legacy_strands {
-			features |= ParserSettings::LEGACY_STRAND;
+		if config.feature_bearer_access {
+			settings |= ParserSettings::FEAT_BEARER_ACCESS;
 		}
 
 		let mut parser = Parser {
 			lex,
 			last_span: Span::empty(),
 			ast,
-			settings: features,
+			settings,
 			state: ParserState::empty(),
 			unescape_buffer: String::new(),
 		};
@@ -210,7 +193,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
 		// We ignore the stk which is mostly just to ensure the no accidental panics or infinite
 		// loops because we can maintain it's savety guarentees within the parser.
-		let mut runner = stack.enter(|_| parser.parse_push());
+		let mut runner = stack.enter(|_| parser.parse());
 
 		loop {
 			if let Some(x) = runner.step() {
@@ -244,32 +227,23 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		let lex = BaseTokenKind::lexer(source);
 		let lex = PeekableLexer::new(lex);
 
-		let mut features = ParserSettings::PARTIAL;
+		let mut settings = ParserSettings::PARTIAL;
 
-		if config.legacy_strands {
-			features |= ParserSettings::LEGACY_STRAND;
-		}
 		if config.generate_warnings {
-			features |= ParserSettings::WARNINGS;
+			settings |= ParserSettings::WARNINGS;
 		}
-		if config.feature_references {
-			features |= ParserSettings::FEAT_REFERENCES;
+		if config.feature_surrealism {
+			settings |= ParserSettings::FEAT_SURREALISM;
 		}
-		if config.feature_define_api {
-			features |= ParserSettings::FEAT_DEFINE_API;
-		}
-		if config.feature_files {
-			features |= ParserSettings::FEAT_FILES;
-		}
-		if config.legacy_strands {
-			features |= ParserSettings::LEGACY_STRAND;
+		if config.feature_bearer_access {
+			settings |= ParserSettings::FEAT_BEARER_ACCESS;
 		}
 
 		let mut parser = Parser {
 			lex,
 			last_span: Span::empty(),
 			ast,
-			settings: features,
+			settings,
 			state: ParserState::empty(),
 			unescape_buffer: String::new(),
 		};
@@ -283,7 +257,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
 		// We ignore the stk which is mostly just to ensure the no accidental panics or infinite
 		// loops because we can maintain it's savety guarentees within the parser.
-		let mut runner = stack.enter(|_| parser.parse_push());
+		let mut runner = stack.enter(|_| parser.parse());
 
 		loop {
 			if let Some(x) = runner.step() {
@@ -426,7 +400,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
 	/// Modifies the parser state within the given closure, reseting the parser state to the old
 	/// result after the closure returns.
-	pub async fn with_state<F1, F2, R>(&mut self, state_cb: F1, cb: F2) -> ParseResult<R>
+	pub(crate) async fn with_state<F1, F2, R>(&mut self, state_cb: F1, cb: F2) -> ParseResult<R>
 	where
 		F1: FnOnce(ParserState) -> ParserState,
 		F2: AsyncFnOnce(&mut Parser) -> ParseResult<R>,
@@ -686,25 +660,6 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// Parse an ast node that can be parsed without recursion
 	pub fn parse_sync<P: ParseSync>(&mut self) -> ParseResult<P> {
 		P::parse_sync(self)
-	}
-
-	/// Parse
-	pub async fn parse_push<P: Parse + Node>(&mut self) -> ParseResult<NodeId<P>> {
-		let p = self.parse().await?;
-		Ok(self.push(p))
-	}
-
-	/// Parses and then pushes a ast node into the ast returning an id entering into a new stack
-	/// frame.
-	pub async fn parse_enter_push<P: Parse + Node>(&mut self) -> ParseResult<NodeId<P>> {
-		let p = self.parse_enter().await?;
-		Ok(self.push(p))
-	}
-
-	/// Parses and then pushes a ast node into the ast returning an id.
-	pub fn parse_sync_push<P: ParseSync + Node>(&mut self) -> ParseResult<NodeId<P>> {
-		let p = self.parse_sync()?;
-		Ok(self.push(p))
 	}
 
 	/// Enter into a new stack context, use when running a recursive function.

@@ -12,20 +12,20 @@ impl Parse for ast::RecordIdKey {
 		let peek = parser.peek_expect("a record id key")?;
 		let key = match peek.token {
 			BaseTokenKind::OpenBrace => {
-				let array = parser.parse_push().await?;
+				let array = parser.parse().await?;
 				ast::RecordIdKey::Object(array)
 			}
 			BaseTokenKind::OpenBracket => {
-				let array = parser.parse_push().await?;
+				let array = parser.parse().await?;
 				ast::RecordIdKey::Array(array)
 			}
 			BaseTokenKind::String => {
-				let i = parser.parse_sync_push()?;
+				let i = parser.parse_sync()?;
 				ast::RecordIdKey::String(i)
 			}
-			BaseTokenKind::Int => ast::RecordIdKey::Number(parser.parse_sync_push()?),
+			BaseTokenKind::Int => ast::RecordIdKey::Number(parser.parse_sync()?),
 			BaseTokenKind::UuidString => {
-				let uuid = parser.parse_sync_push()?;
+				let uuid = parser.parse_sync()?;
 				ast::RecordIdKey::Uuid(uuid)
 			}
 			x if x.is_identifier() => {
@@ -57,7 +57,7 @@ impl Parse for ast::RecordId {
 					let _ = parser.next()?;
 					let _ = parser.next()?;
 
-					let key = parser.parse_push().await?;
+					let key = parser.parse().await?;
 					let span = parser.span_since(peek.span);
 					let range = ast::RecordIdKeyRange {
 						start: Bound::Unbounded,
@@ -69,7 +69,7 @@ impl Parse for ast::RecordId {
 					let _ = parser.next()?;
 
 					if peek_starts_record_id_key(parser)? {
-						let key = parser.parse_push().await?;
+						let key = parser.parse().await?;
 						let span = parser.span_since(peek.span);
 						let range = ast::RecordIdKeyRange {
 							start: Bound::Unbounded,
@@ -125,7 +125,7 @@ impl Parse for ast::RecordId {
 
 							let start = parser.push(start);
 
-							let end = parser.parse_push().await?;
+							let end = parser.parse().await?;
 
 							let span = parser.span_since(peek.span);
 							let range = ast::RecordIdKeyRange {
@@ -140,7 +140,7 @@ impl Parse for ast::RecordId {
 							let start = parser.push(start);
 
 							if peek_starts_record_id_key(parser)? {
-								let end = parser.parse_push().await?;
+								let end = parser.parse().await?;
 								let span = parser.span_since(peek.span);
 								let range = ast::RecordIdKeyRange {
 									start: Bound::Included(start),
@@ -170,7 +170,7 @@ impl Parse for ast::RecordId {
 							let _ = parser.next();
 
 							let start = parser.push(start);
-							let end = parser.parse_push().await?;
+							let end = parser.parse().await?;
 
 							let span = parser.span_since(peek.span);
 							let range = ast::RecordIdKeyRange {
@@ -185,7 +185,7 @@ impl Parse for ast::RecordId {
 
 							let start = parser.push(start);
 							if peek_starts_record_id_key(parser)? {
-								let end = parser.parse_push().await?;
+								let end = parser.parse().await?;
 
 								let span = parser.span_since(peek.span);
 								let range = ast::RecordIdKeyRange {
