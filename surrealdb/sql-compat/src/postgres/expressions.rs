@@ -291,11 +291,16 @@ pub fn translate_select_items(items: Vec<pg::SelectItem>) -> Result<Fields, Tran
 	let mut fields = Vec::new();
 	for item in items {
 		match item {
-			pg::SelectItem::UnnamedExpr(e) => {
-				let expr = translate_expr(e)?;
+			pg::SelectItem::UnnamedExpr(ref e) => {
+				let alias = if let pg::Expr::CompoundIdentifier(parts) = e {
+					parts.last().map(|i| Idiom(vec![Part::Field(i.value.clone())]))
+				} else {
+					None
+				};
+				let expr = translate_expr(e.clone())?;
 				fields.push(Field::Single(Selector {
 					expr,
-					alias: None,
+					alias,
 				}));
 			}
 			pg::SelectItem::ExprWithAlias {

@@ -1,8 +1,10 @@
 use sqlparser::ast::{self as pg, SetExpr, TableFactor};
+use surrealdb_core::expr::cond::Cond;
 use surrealdb_core::expr::data::{Assignment, Data};
 use surrealdb_core::expr::expression::Expr;
 use surrealdb_core::expr::group::{Group, Groups};
 use surrealdb_core::expr::idiom::Idiom;
+use surrealdb_core::expr::join::{JoinExpr, JoinKind};
 use surrealdb_core::expr::limit::Limit;
 use surrealdb_core::expr::literal::Literal;
 use surrealdb_core::expr::operator::AssignOperator;
@@ -138,24 +140,83 @@ fn translate_group_by(group_by: &pg::GroupByExpr) -> Result<Option<Groups>, Tran
 }
 
 fn translate_from(from: Vec<pg::TableWithJoins>) -> Result<Vec<Expr>, TranslateError> {
-	let mut tables = Vec::new();
+	let mut results = Vec::new();
 	for table_with_joins in from {
-		let table_expr = translate_table_factor(table_with_joins.relation)?;
-		tables.push(table_expr);
+		let (left_expr, left_alias) = translate_table_factor(table_with_joins.relation)?;
+
+		if table_with_joins.joins.is_empty() {
+			results.push(left_expr);
+		} else {
+			let mut current = left_expr;
+			let mut current_alias = left_alias;
+
+			for join in table_with_joins.joins {
+				let (right_expr, right_alias) = translate_table_factor(join.relation)?;
+				let (kind, cond) = translate_join_operator(join.join_operator)?;
+
+				current = Expr::Join(Box::new(JoinExpr {
+					kind,
+					left: current,
+					right: right_expr,
+					cond,
+					left_alias: current_alias,
+					right_alias: right_alias.clone(),
+				}));
+				current_alias = None;
+			}
+
+			results.push(current);
+		}
 	}
-	Ok(tables)
+	Ok(results)
 }
 
-fn translate_table_factor(factor: TableFactor) -> Result<Expr, TranslateError> {
+fn translate_table_factor(factor: TableFactor) -> Result<(Expr, Option<String>), TranslateError> {
 	match factor {
 		TableFactor::Table {
 			name,
+			alias,
 			..
 		} => {
 			let table_name = name.to_string();
-			Ok(Expr::Table(TableName(table_name)))
+			let alias_str = alias.map(|a| a.name.value);
+			Ok((Expr::Table(TableName(table_name)), alias_str))
 		}
 		other => Err(TranslateError::unsupported(format!("table factor: {other}"))),
+	}
+}
+
+fn translate_join_operator(
+	op: pg::JoinOperator,
+) -> Result<(JoinKind, Option<Cond>), TranslateError> {
+	match op {
+		pg::JoinOperator::Inner(constraint) | pg::JoinOperator::Join(constraint) => {
+			let cond = translate_join_constraint(constraint)?;
+			Ok((JoinKind::Inner, cond))
+		}
+		pg::JoinOperator::Left(constraint) | pg::JoinOperator::LeftOuter(constraint) => {
+			let cond = translate_join_constraint(constraint)?;
+			Ok((JoinKind::Left, cond))
+		}
+		pg::JoinOperator::Right(constraint) | pg::JoinOperator::RightOuter(constraint) => {
+			let cond = translate_join_constraint(constraint)?;
+			Ok((JoinKind::Right, cond))
+		}
+		pg::JoinOperator::CrossJoin(_) => Ok((JoinKind::Cross, None)),
+		other => Err(TranslateError::unsupported(format!("join type: {other:?}"))),
+	}
+}
+
+fn translate_join_constraint(
+	constraint: pg::JoinConstraint,
+) -> Result<Option<Cond>, TranslateError> {
+	match constraint {
+		pg::JoinConstraint::On(expr) => {
+			let translated = expressions::translate_expr(expr)?;
+			Ok(Some(Cond(translated)))
+		}
+		pg::JoinConstraint::None => Ok(None),
+		other => Err(TranslateError::unsupported(format!("join constraint: {other:?}"))),
 	}
 }
 

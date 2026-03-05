@@ -701,6 +701,7 @@ impl From<crate::expr::Expr> for Expr {
 				analyze,
 				statement: Box::new((*statement).into()),
 			},
+			crate::expr::Expr::Join(_) => unreachable!("JOIN expressions are not supported in SurrealQL"),
 		}
 	}
 }

@@ -8,6 +8,7 @@ mod filter;
 mod foreach;
 mod ifelse;
 mod info;
+pub(crate) mod join;
 mod knn_topk;
 mod let_plan;
 mod limit;
@@ -39,6 +40,7 @@ pub use ifelse::IfElsePlan;
 pub use info::{
 	DatabaseInfoPlan, IndexInfoPlan, NamespaceInfoPlan, RootInfoPlan, TableInfoPlan, UserInfoPlan,
 };
+pub use join::{HashJoin, NestedLoopJoin};
 pub use knn_topk::KnnTopK;
 pub use let_plan::LetPlan;
 pub use limit::Limit;

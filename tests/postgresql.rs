@@ -291,11 +291,193 @@ mod postgresql {
 	#[rstest]
 	#[case::create_table("CREATE TABLE foo (id INT PRIMARY KEY, name TEXT)")]
 	#[case::create_index("CREATE INDEX idx ON foo (name)")]
-	#[case::join("SELECT * FROM a JOIN b ON a.id = b.id")]
 	#[tokio::test]
 	async fn test_unsupported(#[case] query: &str) {
 		let ctx = setup_pg().await.unwrap();
 		let result = ctx.client.simple_query(query).await;
 		assert!(result.is_err(), "expected error for unsupported query: {query}");
+	}
+
+	// ---------------------------------------------------------------
+	// JOIN tests
+	// ---------------------------------------------------------------
+
+	async fn seed_join_tables(client: &tokio_postgres::Client) {
+		client
+			.simple_query(
+				"INSERT INTO users (name, age, status) VALUES \
+				 ('Alice', 30, 'active'), \
+				 ('Bob', 25, 'inactive'), \
+				 ('Charlie', 35, 'active')",
+			)
+			.await
+			.expect("failed to seed users");
+		client
+			.simple_query(
+				"INSERT INTO orders (user_name, amount) VALUES \
+				 ('Alice', 100), \
+				 ('Alice', 200), \
+				 ('Bob', 50)",
+			)
+			.await
+			.expect("failed to seed orders");
+	}
+
+	#[tokio::test]
+	async fn test_inner_join() {
+		let ctx = setup_pg().await.unwrap();
+		seed_join_tables(&ctx.client).await;
+
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT u.name, o.amount \
+				 FROM users AS u \
+				 INNER JOIN orders AS o ON u.name = o.user_name \
+				 ORDER BY u.name, o.amount",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		// Columns are alphabetically ordered (amount before name)
+		assert_eq!(
+			rows,
+			vec![
+				vec![Some("100".into()), Some("Alice".into())],
+				vec![Some("200".into()), Some("Alice".into())],
+				vec![Some("50".into()), Some("Bob".into())],
+			],
+			"INNER JOIN"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_left_join() {
+		let ctx = setup_pg().await.unwrap();
+		seed_join_tables(&ctx.client).await;
+
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT u.name, o.amount \
+				 FROM users AS u \
+				 LEFT JOIN orders AS o ON u.name = o.user_name \
+				 ORDER BY u.name, o.amount",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		// Columns are alphabetically ordered (amount before name)
+		// Charlie has no orders so amount (col 0) should be NULL
+		assert!(
+			rows.iter().any(|r| r[1] == Some("Charlie".into()) && r[0].is_none()),
+			"LEFT JOIN should include Charlie with NULL amount, got: {rows:?}"
+		);
+		// Alice and Bob should have their orders
+		assert!(
+			rows.iter().any(|r| r[1] == Some("Alice".into()) && r[0] == Some("100".into())),
+			"LEFT JOIN should include Alice's orders, got: {rows:?}"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_cross_join() {
+		let ctx = setup_pg().await.unwrap();
+		ctx.client
+			.simple_query("INSERT INTO colors (name) VALUES ('red'), ('blue')")
+			.await
+			.expect("seed colors");
+		ctx.client
+			.simple_query("INSERT INTO sizes (name) VALUES ('S'), ('L')")
+			.await
+			.expect("seed sizes");
+
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT c.name, s.name \
+				 FROM colors AS c \
+				 CROSS JOIN sizes AS s \
+				 ORDER BY c.name, s.name",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		assert_eq!(rows.len(), 4, "CROSS JOIN should produce 2x2=4 rows, got: {rows:?}");
+	}
+
+	#[tokio::test]
+	async fn test_join_with_where() {
+		let ctx = setup_pg().await.unwrap();
+		seed_join_tables(&ctx.client).await;
+
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT u.name, o.amount \
+				 FROM users AS u \
+				 INNER JOIN orders AS o ON u.name = o.user_name \
+				 WHERE o.amount > 50 \
+				 ORDER BY o.amount",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		// Columns are alphabetically ordered (amount before name)
+		assert_eq!(
+			rows,
+			vec![
+				vec![Some("100".into()), Some("Alice".into())],
+				vec![Some("200".into()), Some("Alice".into())],
+			],
+			"JOIN with WHERE"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_multi_table_join() {
+		let ctx = setup_pg().await.unwrap();
+		ctx.client
+			.simple_query("INSERT INTO departments (name) VALUES ('Engineering'), ('Sales')")
+			.await
+			.expect("seed departments");
+		ctx.client
+			.simple_query(
+				"INSERT INTO employees (name, dept) VALUES \
+				 ('Alice', 'Engineering'), \
+				 ('Bob', 'Sales')",
+			)
+			.await
+			.expect("seed employees");
+		ctx.client
+			.simple_query(
+				"INSERT INTO projects (name, dept) VALUES \
+				 ('SurrealDB', 'Engineering'), \
+				 ('Marketing', 'Sales')",
+			)
+			.await
+			.expect("seed projects");
+
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT e.name AS employee, p.name AS project \
+				 FROM employees AS e \
+				 INNER JOIN departments AS d ON e.dept = d.name \
+				 INNER JOIN projects AS p ON d.name = p.dept \
+				 ORDER BY e.name",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		// Columns are alphabetically ordered (employee before project)
+		assert_eq!(
+			rows,
+			vec![
+				vec![Some("Alice".into()), Some("SurrealDB".into())],
+				vec![Some("Bob".into()), Some("Marketing".into())],
+			],
+			"multi-table JOIN"
+		);
 	}
 }

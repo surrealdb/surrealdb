@@ -46,7 +46,7 @@ use crate::exec::operators::{
 };
 use crate::exec::{ExecOperator, OperatorMetrics};
 use crate::expr::field::{Field, Fields};
-use crate::expr::{Cond, Expr, Idiom, Literal};
+use crate::expr::{BinaryOperator, Cond, Expr, Idiom, Literal};
 
 /// Configuration for the SELECT pipeline.
 ///
@@ -2000,6 +2000,68 @@ impl<'ctx> Planner<'ctx> {
 					limit_pushed,
 				})
 			}
+			Expr::Join(join_expr) => {
+				let both_simple_tables = matches!(&join_expr.left, Expr::Table(_))
+					&& matches!(&join_expr.right, Expr::Table(_));
+
+				let left_op =
+					Box::pin(self.plan_join_input(join_expr.left, version.clone())).await?;
+				let right_op =
+					Box::pin(self.plan_join_input(join_expr.right, version.clone())).await?;
+
+				let join_op: Arc<dyn ExecOperator> = if let Some(ref cond_expr) = join_expr.cond {
+					if both_simple_tables {
+						if let Some((lk, rk)) = extract_equi_join_keys(&cond_expr.0) {
+							let left_key = self.physical_expr(lk).await?;
+							let right_key = self.physical_expr(rk).await?;
+							Arc::new(crate::exec::operators::HashJoin::new(
+								left_op,
+								right_op,
+								join_expr.kind.clone(),
+								left_key,
+								right_key,
+								join_expr.left_alias.clone().unwrap_or_default(),
+								join_expr.right_alias.clone().unwrap_or_default(),
+							))
+						} else {
+							let phys_cond = self.physical_expr(cond_expr.0.clone()).await?;
+							Arc::new(crate::exec::operators::NestedLoopJoin::new(
+								left_op,
+								right_op,
+								join_expr.kind.clone(),
+								Some(phys_cond),
+								join_expr.left_alias.clone().unwrap_or_default(),
+								join_expr.right_alias.clone().unwrap_or_default(),
+							))
+						}
+					} else {
+						let phys_cond = self.physical_expr(cond_expr.0.clone()).await?;
+						Arc::new(crate::exec::operators::NestedLoopJoin::new(
+							left_op,
+							right_op,
+							join_expr.kind.clone(),
+							Some(phys_cond),
+							join_expr.left_alias.clone().unwrap_or_default(),
+							join_expr.right_alias.clone().unwrap_or_default(),
+						))
+					}
+				} else {
+					Arc::new(crate::exec::operators::NestedLoopJoin::new(
+						left_op,
+						right_op,
+						join_expr.kind.clone(),
+						None,
+						join_expr.left_alias.clone().unwrap_or_default(),
+						join_expr.right_alias.clone().unwrap_or_default(),
+					))
+				};
+
+				Ok(PlannedSource {
+					operator: join_op,
+					filter_action: FilterAction::UseOriginal,
+					limit_pushed: false,
+				})
+			}
 			other => {
 				let phys_expr = self.physical_expr(other).await?;
 				Ok(PlannedSource {
@@ -2007,6 +2069,36 @@ impl<'ctx> Planner<'ctx> {
 					filter_action: FilterAction::UseOriginal,
 					limit_pushed: false,
 				})
+			}
+		}
+	}
+
+	/// Plan a join input (left or right side) as a simple source operator.
+	///
+	/// For tables, creates a DynamicScan without WHERE/ORDER push-down.
+	/// For nested joins, recursively calls plan_source.
+	async fn plan_join_input(
+		&self,
+		expr: Expr,
+		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+	) -> Result<Arc<dyn ExecOperator>, Error> {
+		match &expr {
+			Expr::Table(_) => {
+				let table_expr = self.physical_expr(expr).await?;
+				Ok(Arc::new(DynamicScan::new(
+					table_expr, version, None, None, None, None, None, None, None,
+				)) as Arc<dyn ExecOperator>)
+			}
+			Expr::Join(_) => {
+				let planned = Box::pin(
+					self.plan_source(expr, version, None, None, None, None, None, None, None),
+				)
+				.await?;
+				Ok(planned.operator)
+			}
+			_ => {
+				let phys_expr = self.physical_expr(expr).await?;
+				Ok(Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>)
 			}
 		}
 	}
@@ -2164,6 +2256,33 @@ impl<'ctx> Planner<'ctx> {
 /// These names are passed to `ExpressionRegistry::with_reserved_names` so that
 /// synthetic internal names (`_e0`, `_e1`, ...) do not collide with fields the
 /// user explicitly selected.
+/// Extract equi-join keys from a binary equality expression.
+///
+/// Returns `Some((left_key, right_key))` if the expression is `left = right`
+/// where both sides are multi-part idioms (alias-qualified field references
+/// like `u.name`). The returned keys have the leading alias part stripped
+/// so they can be evaluated against individual (un-merged) table records.
+///
+/// Returns `None` for non-equi-join conditions, single-part idioms,
+/// or complex expressions.
+fn extract_equi_join_keys(expr: &Expr) -> Option<(Expr, Expr)> {
+	if let Expr::Binary {
+		left,
+		op: BinaryOperator::Equal,
+		right,
+	} = expr
+	{
+		if let (Expr::Idiom(l_idiom), Expr::Idiom(r_idiom)) = (left.as_ref(), right.as_ref()) {
+			if l_idiom.0.len() >= 2 && r_idiom.0.len() >= 2 {
+				let l_stripped = Idiom(l_idiom.0[1..].to_vec());
+				let r_stripped = Idiom(r_idiom.0[1..].to_vec());
+				return Some((Expr::Idiom(l_stripped), Expr::Idiom(r_stripped)));
+			}
+		}
+	}
+	None
+}
+
 fn collect_field_names(fields: &Fields) -> Vec<String> {
 	match fields {
 		Fields::Value(_) => vec![], // SELECT VALUE has no object fields
