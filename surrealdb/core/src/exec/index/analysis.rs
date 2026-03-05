@@ -204,6 +204,117 @@ impl<'a> IndexAnalyzer<'a> {
 		None
 	}
 
+	/// Try to expand CONTAINSALL/CONTAINSANY/ALLINSIDE/ANYINSIDE expressions
+	/// into `AccessPath::Union` of equality scans on array indexes.
+	///
+	/// For `field CONTAINSALL [a, b]` with an index on `field[*]`, creates a
+	/// union of equality scans: one for `a` and one for `b`. This parallels
+	/// `try_in_expansion` but matches against array indexes (columns with
+	/// `Part::All`) using `idiom_matches_containment`.
+	pub fn try_containment_expansion(
+		&self,
+		cond: Option<&Cond>,
+		direction: ScanDirection,
+	) -> Option<AccessPath> {
+		let cond = cond?;
+
+		if matches!(self.with_hints, Some(With::NoIndex)) {
+			return None;
+		}
+
+		let mut exprs = Vec::new();
+		Self::collect_containment_expressions(&cond.0, &mut exprs);
+
+		for (idiom, values) in &exprs {
+			if values.is_empty() || values.len() > Self::MAX_IN_EXPANSION_SIZE {
+				continue;
+			}
+
+			for (idx, ix_def) in self.indexes.iter().enumerate() {
+				if ix_def.prepare_remove {
+					continue;
+				}
+				if !matches!(ix_def.index, crate::catalog::Index::Idx | crate::catalog::Index::Uniq)
+				{
+					continue;
+				}
+				if ix_def.cols.len() != 1 {
+					continue;
+				}
+
+				if let Some(With::Index(names)) = self.with_hints
+					&& !names.contains(&ix_def.name)
+				{
+					continue;
+				}
+
+				if let Some(first_col) = ix_def.cols.first()
+					&& idiom_matches_containment(idiom, first_col)
+				{
+					let index_ref = IndexRef::new(self.indexes.clone(), idx);
+					let paths: Vec<AccessPath> = values
+						.iter()
+						.map(|v| AccessPath::BTreeScan {
+							index_ref: index_ref.clone(),
+							access: BTreeAccess::Equality(v.clone()),
+							direction,
+						})
+						.collect();
+					return Some(AccessPath::Union(paths));
+				}
+			}
+		}
+
+		None
+	}
+
+	/// Collect CONTAINSALL/CONTAINSANY (idiom on left, array literal on right)
+	/// and ALLINSIDE/ANYINSIDE (array literal on left, idiom on right) from an
+	/// AND tree.
+	fn collect_containment_expressions(expr: &Expr, results: &mut Vec<(Idiom, Vec<Value>)>) {
+		match expr {
+			Expr::Binary {
+				left,
+				op: BinaryOperator::And,
+				right,
+			} => {
+				Self::collect_containment_expressions(left, results);
+				Self::collect_containment_expressions(right, results);
+			}
+			Expr::Binary {
+				left,
+				op: BinaryOperator::ContainAll | BinaryOperator::ContainAny,
+				right,
+			} => {
+				if let (Expr::Idiom(idiom), Expr::Literal(lit)) = (left.as_ref(), right.as_ref())
+					&& let Some(Value::Array(arr)) = try_literal_to_value(lit)
+				{
+					results.push((idiom.clone(), arr.0));
+				}
+			}
+			Expr::Binary {
+				left,
+				op: BinaryOperator::AllInside | BinaryOperator::AnyInside,
+				right,
+			} => {
+				if let (Expr::Literal(lit), Expr::Idiom(idiom)) = (left.as_ref(), right.as_ref())
+					&& let Some(Value::Array(arr)) = try_literal_to_value(lit)
+				{
+					results.push((idiom.clone(), arr.0));
+				}
+			}
+			Expr::Prefix {
+				op,
+				expr: inner,
+			} => {
+				if !matches!(op, PrefixOperator::Not) {
+					Self::collect_containment_expressions(inner, results);
+				}
+			}
+			_ => {}
+		}
+	}
+
 	/// Collect `field INSIDE [values]` expressions from an AND tree.
 	fn collect_in_expressions(expr: &Expr, results: &mut Vec<(Idiom, Vec<Value>)>) {
 		match expr {
@@ -549,8 +660,11 @@ impl<'a> IndexAnalyzer<'a> {
 					BinaryOperator::NearestNeighbor(nn) => {
 						self.try_match_knn(left, right, nn, candidates);
 					}
+					BinaryOperator::Contain | BinaryOperator::Inside => {
+						self.try_match_containment(left, op, right, candidates);
+						self.try_match_comparison(left, op, right, candidates);
+					}
 					_ => {
-						// Check if this is an indexable comparison
 						self.try_match_comparison(left, op, right, candidates);
 					}
 				}
@@ -734,6 +848,65 @@ impl<'a> IndexAnalyzer<'a> {
 			}
 
 			_ => None,
+		}
+	}
+
+	/// Try to match a containment expression to an array index.
+	///
+	/// Handles single-value containment:
+	/// - `field CONTAINS scalar` -> Equality lookup on `field[*]` index
+	/// - `scalar INSIDE field`   -> Equality lookup on `field[*]` index
+	fn try_match_containment(
+		&self,
+		left: &Expr,
+		op: &BinaryOperator,
+		right: &Expr,
+		candidates: &mut Vec<IndexCandidate>,
+	) {
+		let (idiom, value) = match op {
+			BinaryOperator::Contain => match (left, right) {
+				(Expr::Idiom(idiom), Expr::Literal(lit)) => {
+					if let Some(v) = try_literal_to_value(lit) {
+						(idiom, v)
+					} else {
+						return;
+					}
+				}
+				_ => return,
+			},
+			BinaryOperator::Inside => match (left, right) {
+				(Expr::Literal(lit), Expr::Idiom(idiom)) => {
+					if let Some(v) = try_literal_to_value(lit) {
+						(idiom, v)
+					} else {
+						return;
+					}
+				}
+				_ => return,
+			},
+			_ => return,
+		};
+
+		for (idx, ix_def) in self.indexes.iter().enumerate() {
+			if ix_def.prepare_remove {
+				continue;
+			}
+			if !matches!(ix_def.index, Index::Idx | Index::Uniq) {
+				continue;
+			}
+			if ix_def.cols.len() != 1 {
+				continue;
+			}
+			if let Some(first_col) = ix_def.cols.first()
+				&& idiom_matches_containment(idiom, first_col)
+			{
+				let index_ref = IndexRef::new(self.indexes.clone(), idx);
+				candidates.push(IndexCandidate {
+					index_ref,
+					access: BTreeAccess::Equality(value.clone()),
+					covers_order: false,
+				});
+			}
 		}
 	}
 
@@ -1080,6 +1253,33 @@ fn idiom_matches(expr_idiom: &Idiom, index_col: &Idiom) -> bool {
 	}
 
 	true
+}
+
+/// Check if an idiom matches an index column for containment operators.
+///
+/// Unlike `idiom_matches`, this allows `Part::All` in the index column.
+/// The query idiom `tags` matches index column `tags.*` (or `tags[*]`)
+/// because each array element is indexed individually, and the containment
+/// operator checks membership of a scalar in the indexed array.
+///
+/// Also handles nested array paths like `marks.*.subject` where both the
+/// expression idiom and the index column contain `Part::All`. The comparison
+/// strips `Part::All` from both sides before checking equality.
+///
+/// Only matches when the index column actually contains `Part::All` --
+/// regular scalar indexes are not valid for containment lookups.
+fn idiom_matches_containment(expr_idiom: &Idiom, index_col: &Idiom) -> bool {
+	use crate::expr::Part;
+
+	if !index_col.0.iter().any(|p| matches!(p, Part::All)) {
+		return false;
+	}
+
+	let col_without_all: Vec<&Part> =
+		index_col.0.iter().filter(|p| !matches!(p, Part::All)).collect();
+	let expr_without_all: Vec<&Part> =
+		expr_idiom.0.iter().filter(|p| !matches!(p, Part::All)).collect();
+	col_without_all == expr_without_all
 }
 
 /// Normalize a range operator based on the position of the idiom in the

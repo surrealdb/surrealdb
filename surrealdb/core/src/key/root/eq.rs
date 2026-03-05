@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::doc::AsyncEventRecord;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{HlcTimestamp, impl_kv_key_storekey};
+use crate::kvs::{HlcTimeStamp, impl_kv_key_storekey};
 use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -41,7 +41,7 @@ impl<'a> EventQueue<'a> {
 		db: DatabaseId,
 		tb: &'a TableName,
 		ev: &'a str,
-		ts: HlcTimestamp,
+		ts: HlcTimeStamp,
 		node_id: Uuid,
 	) -> Self {
 		Self {
@@ -70,14 +70,14 @@ impl<'a> EventQueue<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::{HlcTimestamp, KVKey};
+	use crate::kvs::{HlcTimeStamp, KVKey};
 
 	#[test]
 	fn key() {
 		let id = Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 		let tb = TableName::from("testtb");
 		let ev = "testev";
-		let val = EventQueue::new(NamespaceId(1), DatabaseId(2), &tb, ev, HlcTimestamp(1), id);
+		let val = EventQueue::new(NamespaceId(1), DatabaseId(2), &tb, ev, HlcTimeStamp(1), id);
 		let enc = EventQueue::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

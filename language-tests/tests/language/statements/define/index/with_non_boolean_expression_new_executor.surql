@@ -53,7 +53,7 @@ value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
 value = ''''SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: v > $p3 - math::max(...) + $p1]
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: v > 3 - math::max(...) + 1]
 ''''
 
 */

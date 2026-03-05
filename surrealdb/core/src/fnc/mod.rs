@@ -458,6 +458,13 @@ pub fn synchronous(
 		"time::from_unix" => time::from::unix,
 		"time::from_uuid" => time::from::uuid,
 		"time::is_leap_year" => time::is::leap_year,
+		"time::set_year" => time::set_year,
+		"time::set_month" => time::set_month,
+		"time::set_day" => time::set_day,
+		"time::set_hour" => time::set_hour,
+		"time::set_minute" => time::set_minute,
+		"time::set_second" => time::set_second,
+		"time::set_nanosecond" => time::set_nanosecond,
 		//
 		"type::array" => r#type::array,
 		"type::bool" => r#type::bool,

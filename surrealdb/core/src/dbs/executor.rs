@@ -609,7 +609,25 @@ impl Executor {
 		let txn = Arc::new(kvs.transaction(transaction_type, LockType::Optimistic).await?);
 		let receiver = self.prepare_broker();
 
-		match self.execute_plan_in_transaction(txn.clone(), start, plan).await {
+		let exec_result = match kvs.transaction_timeout() {
+			Some(timeout) => {
+				match tokio::time::timeout(
+					timeout,
+					self.execute_plan_in_transaction(txn.clone(), start, plan),
+				)
+				.await
+				{
+					Ok(res) => res,
+					Err(_) => {
+						let _ = txn.cancel().await;
+						bail!(Error::TransactionTimedout(timeout.into()))
+					}
+				}
+			}
+			None => self.execute_plan_in_transaction(txn.clone(), start, plan).await,
+		};
+
+		match exec_result {
 			Ok(value) | Err(ControlFlow::Return(value)) => {
 				// non-writable transactions might return an error on commit.
 				// So cancel them instead. This is fine since a non-writable transaction
@@ -642,6 +660,7 @@ impl Executor {
 				Ok(value)
 			}
 			Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
+				let _ = txn.cancel().await;
 				bail!(Error::InvalidControlFlow)
 			}
 			Err(ControlFlow::Err(e)) => {
@@ -687,12 +706,51 @@ impl Executor {
 			// effectively canceled.
 			return Ok(());
 		};
+		let txn = Arc::new(txn);
 
+		match kvs.transaction_timeout() {
+			Some(timeout) => {
+				let start_results = self.results.len();
+				match tokio::time::timeout(
+					timeout,
+					self.execute_begin_statement_inner(txn.clone(), stream),
+				)
+				.await
+				{
+					Ok(result) => result,
+					Err(_) => {
+						let _ = txn.cancel().await;
+						for res in &mut self.results[start_results..] {
+							res.query_type = QueryType::Other;
+							res.result = Err(TypesError::query(
+								format!(
+									"The transaction timed out: {}",
+									crate::val::Duration::from(timeout)
+								),
+								Some(QueryError::TimedOut {
+									duration: timeout,
+								}),
+							));
+						}
+						bail!(Error::TransactionTimedout(timeout.into()))
+					}
+				}
+			}
+			None => self.execute_begin_statement_inner(txn, stream).await,
+		}
+	}
+
+	async fn execute_begin_statement_inner<S>(
+		&mut self,
+		txn: Arc<Transaction>,
+		mut stream: Pin<&mut S>,
+	) -> Result<()>
+	where
+		S: Stream<Item = Result<TopLevelExpr>>,
+	{
 		// Create a sender for this transaction only if the context allows for
 		// notifications.
 		let receiver = self.prepare_broker();
-
-		let txn = Arc::new(txn);
 		let start_results = self.results.len();
 		let mut skip_remaining = false;
 
@@ -1102,7 +1160,7 @@ impl Executor {
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
 						this.results.push(QueryResult {
 							time: Duration::ZERO,
-							result: Err(TypesError::internal(e.to_string())),
+							result: Err(types_error_from_anyhow(e)),
 							query_type: QueryType::Other,
 						});
 

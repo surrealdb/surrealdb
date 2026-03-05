@@ -651,6 +651,13 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	m.register_typed("week", ValueKind::Datetime, get(funcs, "time::week"));
 	m.register_typed("yday", ValueKind::Datetime, get(funcs, "time::yday"));
 	m.register_typed("year", ValueKind::Datetime, get(funcs, "time::year"));
+	m.register_typed("set_year", ValueKind::Datetime, get(funcs, "time::set_year"));
+	m.register_typed("set_month", ValueKind::Datetime, get(funcs, "time::set_month"));
+	m.register_typed("set_day", ValueKind::Datetime, get(funcs, "time::set_day"));
+	m.register_typed("set_hour", ValueKind::Datetime, get(funcs, "time::set_hour"));
+	m.register_typed("set_minute", ValueKind::Datetime, get(funcs, "time::set_minute"));
+	m.register_typed("set_second", ValueKind::Datetime, get(funcs, "time::set_second"));
+	m.register_typed("set_nanosecond", ValueKind::Datetime, get(funcs, "time::set_nanosecond"));
 
 	// =====================================================================
 	// File methods

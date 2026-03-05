@@ -150,14 +150,11 @@ impl PhysicalExpr for BinaryOp {
 				Value::Bool(true)
 			}
 
-			// Nearest neighbor requires vector index context
-			// TODO(stu): IMPLEMENT
-			BinaryOperator::NearestNeighbor(_) => {
-				return Err(anyhow::anyhow!(
-					"KNN operator not yet supported in physical expressions"
-				)
-				.into());
-			}
+			// Records reaching this point have already been selected by
+			// KnnScan (HNSW) or KnnTopK (brute-force). KNN operators are
+			// stripped via strip_knn_from_condition before physical expression
+			// compilation, so this is a defensive fallback only.
+			BinaryOperator::NearestNeighbor(_) => Value::Bool(true),
 		})
 	}
 

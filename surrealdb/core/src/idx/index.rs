@@ -48,6 +48,10 @@ pub(crate) struct IndexOperation<'a> {
 	/// The new values (if existing)
 	n: Option<Vec<Value>>,
 	rid: &'a RecordId,
+	/// For COUNT indexes with a WHERE condition: pre-evaluated condition results.
+	/// `(old_doc_matches, new_doc_matches)` — whether the old/new document
+	/// satisfies the COUNT index condition. `None` for non-COUNT indexes.
+	count_cond_match: Option<(bool, bool)>,
 }
 
 impl<'a> IndexOperation<'a> {
@@ -74,7 +78,13 @@ impl<'a> IndexOperation<'a> {
 			o,
 			n,
 			rid,
+			count_cond_match: None,
 		}
+	}
+
+	pub(crate) fn with_count_cond_match(mut self, old_matches: bool, new_matches: bool) -> Self {
+		self.count_cond_match = Some((old_matches, new_matches));
+		self
 	}
 
 	pub(crate) async fn compute(
@@ -141,7 +151,7 @@ impl<'a> IndexOperation<'a> {
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
-				if !n.is_all_none_or_null() {
+				if !n.is_any_none_or_null() {
 					let key = self.get_unique_index_key(&n)?;
 					if txn.putc(&key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
@@ -191,35 +201,27 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_count(
 		&mut self,
-		_stk: &mut Stk,       // Placeholder for phase 2 (Condition)
-		_cond: Option<&Cond>, // Placeholder for phase 2 (Condition)
+		_stk: &mut Stk,
+		cond: Option<&Cond>,
 		require_compaction: &mut bool,
 	) -> Result<()> {
-		// Phase 2 (Condition)
-		// let is_truthy = async |stk: &mut Stk, c: &Cond, d: &CursorDoc| -> Result<bool> {
-		// 	Ok(stk.run(|stk| c.0.compute(stk, ctx, opt, Some(d))).await.catch_return()?.is_truthy())
-		// };
 		let mut relative_count: i8 = 0;
-		// Phase 2 - with condition
-		// if let Some(c) = cond {
-		// 	if self.o.is_some() {
-		// 		if is_truthy(stk, c, &self.doc.initial).await? {
-		// 			relative_count -= 1;
-		// 		}
-		// 	}
-		// 	if self.n.is_some() {
-		// 		if is_truthy(stk, c, &self.doc.current).await? {
-		// 			relative_count += 1;
-		// 		}
-		// 	}
-		// } else {
-		if self.o.is_some() {
-			relative_count -= 1;
+		if let Some(_c) = cond {
+			let (old_matches, new_matches) = self.count_cond_match.unwrap_or((false, false));
+			if self.o.is_some() && old_matches {
+				relative_count -= 1;
+			}
+			if self.n.is_some() && new_matches {
+				relative_count += 1;
+			}
+		} else {
+			if self.o.is_some() {
+				relative_count -= 1;
+			}
+			if self.n.is_some() {
+				relative_count += 1;
+			}
 		}
-		if self.n.is_some() {
-			relative_count += 1;
-		}
-		// }
 		if relative_count == 0 {
 			return Ok(());
 		}

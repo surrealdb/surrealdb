@@ -44,7 +44,7 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::auth::AsyncRequireAuthorizationLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::request_id::MakeRequestUuid;
 use tower_http::sensitive_headers::{
 	SetSensitiveRequestHeadersLayer, SetSensitiveResponseHeadersLayer,
@@ -205,6 +205,17 @@ pub async fn init<F: RouterFactory>(
 		),
 	);
 
+	let allow_origin: AllowOrigin = if opt.allow_origin.is_empty() {
+		Any.into()
+	} else {
+		let origins: Vec<http::HeaderValue> = opt
+			.allow_origin
+			.iter()
+			.map(|o| o.parse().expect("CORS origins are validated at startup"))
+			.collect();
+		AllowOrigin::list(origins)
+	};
+
 	let allow_header = [
 		http::header::ACCEPT,
 		http::header::ACCEPT_ENCODING,
@@ -246,8 +257,7 @@ pub async fn init<F: RouterFactory>(
 					http::Method::OPTIONS,
 				])
 				.allow_headers(allow_header)
-				// allow requests from any origin
-				.allow_origin(Any)
+				.allow_origin(allow_origin)
 				.max_age(Duration::from_secs(86400)),
 		);
 

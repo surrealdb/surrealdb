@@ -74,6 +74,10 @@ pub struct GraphEdgeScan {
 	/// What to output: EdgeId, TargetId, or FullEdge
 	pub(crate) output_mode: GraphScanOutput,
 
+	/// Optional limit on the total number of edges yielded per source record.
+	/// When set, edge scanning stops early after this many results.
+	pub(crate) limit: Option<usize>,
+
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -90,8 +94,14 @@ impl GraphEdgeScan {
 			direction,
 			edge_tables,
 			output_mode,
+			limit: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	pub(crate) fn with_limit(mut self, limit: usize) -> Self {
+		self.limit = Some(limit);
+		self
 	}
 }
 
@@ -114,11 +124,15 @@ impl ExecOperator for GraphEdgeScan {
 		} else {
 			self.edge_tables.iter().map(|t| t.table.as_str()).collect::<Vec<_>>().join(", ")
 		};
-		vec![
+		let mut attrs = vec![
 			("direction".to_string(), dir.to_string()),
 			("tables".to_string(), tables),
 			("output".to_string(), format!("{:?}", self.output_mode)),
-		]
+		];
+		if let Some(limit) = self.limit {
+			attrs.push(("limit".to_string(), limit.to_string()));
+		}
+		attrs
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -148,6 +162,7 @@ impl ExecOperator for GraphEdgeScan {
 		let direction = self.direction;
 		let edge_tables = self.edge_tables.clone();
 		let output_mode = self.output_mode;
+		let edge_limit = self.limit;
 		let ctx = ctx.clone();
 		let fetch_full = output_mode == GraphScanOutput::FullEdge;
 
@@ -186,15 +201,16 @@ impl ExecOperator for GraphEdgeScan {
 
 				// Scan edges for each source record
 				for rid in &source_rids {
-					for dir in &directions {
-						// Compute all key ranges to scan for this rid + direction
+					let mut edges_yielded: usize = 0;
+					'dir_loop: for dir in &directions {
 						let ranges = compute_graph_ranges(
 							ns_id, db_id, rid, dir, &edge_tables, &ctx,
 						).await?;
 
 						for (beg, end) in ranges {
+							let remaining = edge_limit.map(|l| l.saturating_sub(edges_yielded));
 							let kv_stream = txn.stream_keys(
-								beg..end, None, None, 0, ScanDirection::Forward,
+								beg..end, None, remaining, 0, ScanDirection::Forward,
 							);
 							futures::pin_mut!(kv_stream);
 
@@ -204,6 +220,7 @@ impl ExecOperator for GraphEdgeScan {
 								for key in keys {
 									let target_rid = decode_graph_edge(&key)?;
 									rid_batch.push(target_rid);
+									edges_yielded += 1;
 
 									if rid_batch.len() >= BATCH_SIZE {
 										let values = resolve_record_batch(
@@ -212,6 +229,10 @@ impl ExecOperator for GraphEdgeScan {
 										).await?;
 										yield ValueBatch { values };
 										rid_batch.clear();
+									}
+
+									if edge_limit.is_some_and(|l| edges_yielded >= l) {
+										break 'dir_loop;
 									}
 								}
 							}
