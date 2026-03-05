@@ -44,6 +44,7 @@ mod functions;
 mod mutations;
 mod relations;
 pub mod schema;
+mod subscriptions;
 mod tables;
 mod utils;
 
