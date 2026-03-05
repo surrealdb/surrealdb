@@ -9,6 +9,7 @@ use surrealdb_core::expr::operator::{BinaryOperator, PrefixOperator};
 use surrealdb_core::expr::order::{Order, OrderList, Ordering};
 use surrealdb_core::expr::param::Param;
 use surrealdb_core::expr::part::Part;
+use surrealdb_core::val::Regex;
 
 use crate::error::TranslateError;
 
@@ -148,53 +149,14 @@ pub fn translate_expr(expr: pg::Expr) -> Result<Expr, TranslateError> {
 			expr,
 			pattern,
 			..
-		} => {
-			let left = translate_expr(*expr)?;
-			let right = translate_expr(*pattern)?;
-			let call = Expr::FunctionCall(Box::new(FunctionCall {
-				receiver: Function::Normal("string::contains".to_string()),
-				arguments: vec![left, right],
-			}));
-			if negated {
-				Ok(Expr::Prefix {
-					op: PrefixOperator::Not,
-					expr: Box::new(call),
-				})
-			} else {
-				Ok(call)
-			}
-		}
+		} => translate_like(*expr, *pattern, negated, false),
 
 		pg::Expr::ILike {
 			negated,
 			expr,
 			pattern,
 			..
-		} => {
-			let left = translate_expr(*expr)?;
-			let right = translate_expr(*pattern)?;
-			let func = Expr::FunctionCall(Box::new(FunctionCall {
-				receiver: Function::Normal("string::contains".to_string()),
-				arguments: vec![
-					Expr::FunctionCall(Box::new(FunctionCall {
-						receiver: Function::Normal("string::lowercase".to_string()),
-						arguments: vec![left],
-					})),
-					Expr::FunctionCall(Box::new(FunctionCall {
-						receiver: Function::Normal("string::lowercase".to_string()),
-						arguments: vec![right],
-					})),
-				],
-			}));
-			if negated {
-				Ok(Expr::Prefix {
-					op: PrefixOperator::Not,
-					expr: Box::new(func),
-				})
-			} else {
-				Ok(func)
-			}
-		}
+		} => translate_like(*expr, *pattern, negated, true),
 
 		pg::Expr::Wildcard(_) => Ok(Expr::Literal(Literal::None)),
 
@@ -370,5 +332,317 @@ fn expr_to_idiom(expr: Expr) -> Result<Idiom, TranslateError> {
 		Expr::Literal(Literal::String(s)) => Ok(Idiom(vec![Part::Field(s)])),
 		Expr::Table(t) => Ok(Idiom(vec![Part::Field(t.0)])),
 		_ => Err(TranslateError::mapping("expected a field reference in ORDER BY")),
+	}
+}
+
+fn translate_like(
+	expr: pg::Expr,
+	pattern: pg::Expr,
+	negated: bool,
+	case_insensitive: bool,
+) -> Result<Expr, TranslateError> {
+	let left = translate_expr(expr)?;
+	let pattern_expr = translate_expr(pattern)?;
+
+	let pattern_str = match &pattern_expr {
+		Expr::Literal(Literal::String(s)) => s.clone(),
+		_ => return Err(TranslateError::unsupported("LIKE with non-literal pattern")),
+	};
+
+	let regex_str = like_pattern_to_regex(&pattern_str, case_insensitive)?;
+	let regex: Regex = regex_str
+		.parse()
+		.map_err(|e| TranslateError::mapping(format!("invalid regex from LIKE pattern: {e}")))?;
+
+	let call = Expr::FunctionCall(Box::new(FunctionCall {
+		receiver: Function::Normal("string::matches".to_string()),
+		arguments: vec![left, Expr::Literal(Literal::Regex(regex))],
+	}));
+	if negated {
+		Ok(Expr::Prefix {
+			op: PrefixOperator::Not,
+			expr: Box::new(call),
+		})
+	} else {
+		Ok(call)
+	}
+}
+
+fn like_pattern_to_regex(pattern: &str, case_insensitive: bool) -> Result<String, TranslateError> {
+	let mut regex = String::with_capacity(pattern.len() + 8);
+	if case_insensitive {
+		regex.push_str("(?i)");
+	}
+	regex.push('^');
+
+	let mut chars = pattern.chars().peekable();
+	while let Some(ch) = chars.next() {
+		match ch {
+			'%' => regex.push_str(".*"),
+			'_' => regex.push('.'),
+			'\\' => {
+				if let Some(&next) = chars.peek() {
+					regex_escape_char(next, &mut regex);
+					chars.next();
+				}
+			}
+			other => regex_escape_char(other, &mut regex),
+		}
+	}
+
+	regex.push('$');
+	Ok(regex)
+}
+
+fn regex_escape_char(ch: char, out: &mut String) {
+	match ch {
+		'.' | '+' | '*' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '\\' => {
+			out.push('\\');
+			out.push(ch);
+		}
+		_ => out.push(ch),
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	fn pat(pattern: &str) -> String {
+		like_pattern_to_regex(pattern, false).unwrap()
+	}
+
+	fn ipat(pattern: &str) -> String {
+		like_pattern_to_regex(pattern, true).unwrap()
+	}
+
+	fn matches(pattern: &str, input: &str) -> bool {
+		let re_str = pat(pattern);
+		regex::Regex::new(&re_str).unwrap().is_match(input)
+	}
+
+	fn imatches(pattern: &str, input: &str) -> bool {
+		let re_str = ipat(pattern);
+		regex::Regex::new(&re_str).unwrap().is_match(input)
+	}
+
+	// -- like_pattern_to_regex: anchoring and structure ----------------
+
+	#[test]
+	fn anchored_exact_match() {
+		assert_eq!(pat("hello"), "^hello$");
+	}
+
+	#[test]
+	fn case_insensitive_flag() {
+		assert_eq!(ipat("hello"), "(?i)^hello$");
+	}
+
+	#[test]
+	fn empty_pattern() {
+		assert_eq!(pat(""), "^$");
+	}
+
+	// -- wildcard translation -----------------------------------------
+
+	#[test]
+	fn percent_becomes_dotstar() {
+		assert_eq!(pat("%"), "^.*$");
+		assert_eq!(pat("a%"), "^a.*$");
+		assert_eq!(pat("%b"), "^.*b$");
+		assert_eq!(pat("%a%"), "^.*a.*$");
+	}
+
+	#[test]
+	fn underscore_becomes_dot() {
+		assert_eq!(pat("_"), "^.$");
+		assert_eq!(pat("a_b"), "^a.b$");
+		assert_eq!(pat("__"), "^..$");
+	}
+
+	#[test]
+	fn mixed_wildcards() {
+		assert_eq!(pat("_%"), "^..*$");
+		assert_eq!(pat("%_"), "^.*.$");
+		assert_eq!(pat("a%b_c"), "^a.*b.c$");
+	}
+
+	// -- regex metacharacter escaping ---------------------------------
+
+	#[test]
+	fn escapes_dot() {
+		assert_eq!(pat("a.b"), r"^a\.b$");
+	}
+
+	#[test]
+	fn escapes_plus() {
+		assert_eq!(pat("a+b"), r"^a\+b$");
+	}
+
+	#[test]
+	fn escapes_star() {
+		assert_eq!(pat("a*b"), r"^a\*b$");
+	}
+
+	#[test]
+	fn escapes_question_mark() {
+		assert_eq!(pat("a?b"), r"^a\?b$");
+	}
+
+	#[test]
+	fn escapes_parens() {
+		assert_eq!(pat("(a)"), r"^\(a\)$");
+	}
+
+	#[test]
+	fn escapes_brackets() {
+		assert_eq!(pat("[a]"), r"^\[a\]$");
+	}
+
+	#[test]
+	fn escapes_braces() {
+		assert_eq!(pat("{a}"), r"^\{a\}$");
+	}
+
+	#[test]
+	fn escapes_caret_dollar_pipe() {
+		assert_eq!(pat("^$|"), r"^\^\$\|$");
+	}
+
+	#[test]
+	fn escapes_backslash_literal() {
+		assert_eq!(pat(r"a\\b"), r"^a\\b$");
+	}
+
+	// -- SQL LIKE escape sequences (backslash escapes) ----------------
+
+	#[test]
+	fn escaped_percent_is_literal() {
+		assert_eq!(pat(r"100\%"), r"^100%$");
+		assert!(matches(r"100\%", "100%"));
+		assert!(!matches(r"100\%", "100abc"));
+	}
+
+	#[test]
+	fn escaped_underscore_is_literal() {
+		assert_eq!(pat(r"a\_b"), "^a_b$");
+		assert!(matches(r"a\_b", "a_b"));
+		assert!(!matches(r"a\_b", "aXb"));
+	}
+
+	#[test]
+	fn escaped_backslash_is_literal() {
+		assert_eq!(pat(r"a\\b"), r"^a\\b$");
+		assert!(matches(r"a\\b", r"a\b"));
+	}
+
+	#[test]
+	fn trailing_backslash_ignored() {
+		assert_eq!(like_pattern_to_regex("abc\\", false).unwrap(), "^abc$");
+	}
+
+	// -- end-to-end match correctness ---------------------------------
+
+	#[test]
+	fn prefix_match() {
+		assert!(matches("Ali%", "Alice"));
+		assert!(!matches("Ali%", "Bob"));
+	}
+
+	#[test]
+	fn suffix_match() {
+		assert!(matches("%ice", "Alice"));
+		assert!(!matches("%ice", "Bob"));
+	}
+
+	#[test]
+	fn contains_match() {
+		assert!(matches("%li%", "Alice"));
+		assert!(matches("%li%", "Charlie"));
+		assert!(!matches("%li%", "Bob"));
+	}
+
+	#[test]
+	fn single_char_wildcard() {
+		assert!(matches("_ob", "Bob"));
+		assert!(!matches("_ob", "ob"));
+		assert!(!matches("_ob", "XXob"));
+	}
+
+	#[test]
+	fn exact_match_no_wildcards() {
+		assert!(matches("Bob", "Bob"));
+		assert!(!matches("Bob", "bob"));
+		assert!(!matches("Bob", "Bobby"));
+	}
+
+	#[test]
+	fn case_insensitive_match() {
+		assert!(imatches("ali%", "Alice"));
+		assert!(imatches("ALI%", "Alice"));
+		assert!(!imatches("ali%", "Bob"));
+	}
+
+	#[test]
+	fn match_all() {
+		assert!(matches("%", "anything"));
+		assert!(matches("%", ""));
+	}
+
+	#[test]
+	fn match_single_any() {
+		assert!(matches("_", "a"));
+		assert!(!matches("_", ""));
+		assert!(!matches("_", "ab"));
+	}
+
+	// -- translate_like integration -----------------------------------
+
+	fn pg_string(s: &str) -> pg::Expr {
+		pg::Expr::Value(pg::Value::SingleQuotedString(s.into()).with_empty_span())
+	}
+
+	#[test]
+	fn translate_like_produces_string_matches_call() {
+		let expr = pg::Expr::Identifier(pg::Ident::new("name"));
+		let pattern = pg_string("Ali%");
+		let result = translate_like(expr, pattern, false, false).unwrap();
+		match result {
+			Expr::FunctionCall(fc) => {
+				assert_eq!(fc.receiver, Function::Normal("string::matches".to_string()));
+				assert_eq!(fc.arguments.len(), 2);
+				match &fc.arguments[1] {
+					Expr::Literal(Literal::Regex(r)) => {
+						assert_eq!(r.inner().as_str(), "^Ali.*$");
+					}
+					other => panic!("expected Regex literal, got: {other:?}"),
+				}
+			}
+			other => panic!("expected FunctionCall, got: {other:?}"),
+		}
+	}
+
+	#[test]
+	fn translate_like_negated_wraps_with_not() {
+		let expr = pg::Expr::Identifier(pg::Ident::new("name"));
+		let pattern = pg_string("Ali%");
+		let result = translate_like(expr, pattern, true, false).unwrap();
+		match result {
+			Expr::Prefix {
+				op: PrefixOperator::Not,
+				expr: inner,
+			} => {
+				assert!(matches!(*inner, Expr::FunctionCall(_)));
+			}
+			other => panic!("expected Prefix(Not, ...), got: {other:?}"),
+		}
+	}
+
+	#[test]
+	fn translate_like_rejects_non_literal_pattern() {
+		let expr = pg::Expr::Identifier(pg::Ident::new("name"));
+		let pattern = pg::Expr::Identifier(pg::Ident::new("other_col"));
+		let result = translate_like(expr, pattern, false, false);
+		assert!(result.is_err());
 	}
 }

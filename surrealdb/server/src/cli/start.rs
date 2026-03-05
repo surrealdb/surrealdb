@@ -270,8 +270,12 @@ pub async fn init<
 	if let Some(pgwire_bind) = config.pgwire_bind {
 		let ds = datastore.clone();
 		let ct = canceller.clone();
+		let tls = match (&config.crt, &config.key) {
+			(Some(crt), Some(key)) => Some((crt.clone(), key.clone())),
+			_ => None,
+		};
 		tokio::spawn(async move {
-			if let Err(e) = crate::pgw::init(pgwire_bind, ds, ct).await {
+			if let Err(e) = crate::pgw::init(pgwire_bind, ds, ct, tls).await {
 				error!("pgwire server error: {e}");
 			}
 		});

@@ -7440,6 +7440,7 @@ dependencies = [
 name = "surrealdb-sql-compat"
 version = "3.1.0-alpha"
 dependencies = [
+ "regex",
  "sqlparser",
  "surrealdb-core",
  "thiserror 2.0.18",

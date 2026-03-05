@@ -7,23 +7,25 @@ use pgwire::api::query::{ExtendedQueryHandler, SimpleQueryHandler};
 use pgwire::api::results::{DescribePortalResponse, DescribeStatementResponse, Response};
 use pgwire::api::stmt::{NoopQueryParser, StoredStatement};
 use pgwire::error::{ErrorInfo, PgWireError, PgWireResult};
-use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_sql_compat::DialectTranslator;
 use surrealdb_sql_compat::postgres::PostgresTranslator;
 
+use super::SessionMap;
 use super::results::query_results_to_response;
 
 pub struct SurrealQueryHandler {
 	datastore: Arc<Datastore>,
+	sessions: Arc<SessionMap>,
 	translator: PostgresTranslator,
 	query_parser: Arc<NoopQueryParser>,
 }
 
 impl SurrealQueryHandler {
-	pub fn new(datastore: Arc<Datastore>) -> Self {
+	pub fn new(datastore: Arc<Datastore>, sessions: Arc<SessionMap>) -> Self {
 		Self {
 			datastore,
+			sessions,
 			translator: PostgresTranslator,
 			query_parser: Arc::new(NoopQueryParser::new()),
 		}
@@ -45,7 +47,13 @@ impl SimpleQueryHandler for SurrealQueryHandler {
 		C: ClientInfo + Unpin + Send + Sync,
 	{
 		let plan = self.translator.translate(query).map_err(|e| pg_error("42601", e))?;
-		let session = build_session(client);
+
+		let session = self
+			.sessions
+			.get(&client.socket_addr())
+			.map(|entry| entry.value().clone())
+			.ok_or_else(|| pg_error("28000", "no authenticated session"))?;
+
 		let results = self
 			.datastore
 			.process_plan(plan, &session, None)
@@ -98,18 +106,4 @@ impl ExtendedQueryHandler for SurrealQueryHandler {
 	{
 		Err(pg_error("0A000", "Extended query protocol not yet implemented"))
 	}
-}
-
-fn build_session<C: ClientInfo>(client: &C) -> Session {
-	let mut session = Session::owner();
-	if let Some(db) = client.metadata().get(pgwire::api::METADATA_DATABASE) {
-		if let Some((ns, db_name)) = db.split_once('.') {
-			session.ns = Some(ns.to_string());
-			session.db = Some(db_name.to_string());
-		} else {
-			session.ns = Some("default".to_string());
-			session.db = Some(db.to_string());
-		}
-	}
-	session
 }

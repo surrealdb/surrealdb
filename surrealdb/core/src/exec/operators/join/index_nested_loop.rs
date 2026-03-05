@@ -190,8 +190,16 @@ impl ExecOperator for IndexNestedLoopJoin {
 					} else {
 						let mut iter = IndexEqualIterator::new(ns_id, db_id, &ix_def, &key_val)
 							.context("Failed to create index iterator")?;
-						iter.next_batch(&txn).await
-							.context("Failed to iterate index")?
+						let mut all_rids = Vec::new();
+						loop {
+							let batch = iter.next_batch(&txn).await
+								.context("Failed to iterate index")?;
+							if batch.is_empty() {
+								break;
+							}
+							all_rids.extend(batch);
+						}
+						all_rids
 					};
 
 					if rids.is_empty() {

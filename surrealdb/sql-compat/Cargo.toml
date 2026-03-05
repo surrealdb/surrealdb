@@ -17,6 +17,7 @@ sqlparser.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+regex.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]
