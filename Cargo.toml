@@ -41,7 +41,7 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # SurrealDB crates
-surrealdb = { version = "3.1.0-alpha", path = "surrealdb" }
+surrealdb = { version = "3.1.0-alpha", path = "surrealdb", default-features = false }
 surrealdb-core = { version = "3.1.0-alpha", path = "surrealdb/core", default-features = false }
 surrealdb-server = { version = "3.1.0-alpha", path = "surrealdb/server", default-features = false }
 surrealdb-types = { version = "3.1.0-alpha", path = "surrealdb/types" }
@@ -164,7 +164,7 @@ sha2 = "0.10.9"
 snap = "1.1.1"
 strsim = "0.11.1"
 subtle = "2.6"
-surrealdb-protocol = { path = "/Users/stu/dev/surrealdb/surrealdb-protocol", default-features = false }
+surrealdb-protocol = { version = "0.9.0", default-features = false }
 sysinfo = "0.37.2"
 tempfile = "3.24.0"
 thiserror = "2.0.17"

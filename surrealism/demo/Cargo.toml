@@ -20,7 +20,7 @@ p2 = ["surrealism/p2"]
 
 [dependencies]
 anyhow.workspace = true
-surrealdb.workspace = true
+surrealdb = { workspace = true, default-features = false }
 surrealdb-types.workspace = true
 surrealism.workspace = true
 
