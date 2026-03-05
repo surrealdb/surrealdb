@@ -125,6 +125,11 @@ pub struct IndexRangeIterator {
 	reverse: bool,
 	/// Whether iteration is complete
 	done: bool,
+	/// For reverse scans with exclusive lower bound: the begin key to filter
+	/// on every batch. In reverse iteration `beg` stays fixed while `end`
+	/// moves downward, so the exclusive lower boundary must be checked on
+	/// every batch — not just the first.
+	exclusive_beg: Option<Key>,
 }
 
 impl IndexRangeIterator {
@@ -170,12 +175,21 @@ impl IndexRangeIterator {
 			beg_inclusive
 		};
 
+		// For reverse scans with exclusive lower bound, persist the begin key
+		// so we can filter it on every batch (beg stays fixed in reverse).
+		let exclusive_beg = if reverse && !beg_inclusive {
+			Some(beg.clone())
+		} else {
+			None
+		};
+
 		Ok(Self {
 			beg,
 			end,
 			boundary_checked,
 			reverse,
 			done: false,
+			exclusive_beg,
 		})
 	}
 
@@ -270,6 +284,15 @@ impl IndexRangeIterator {
 			// Skip end key if exclusive and this is the first batch
 			if let Some(ref exclusive_end) = check_exclusive_end
 				&& key == *exclusive_end
+			{
+				continue;
+			}
+
+			// Skip begin key if exclusive. In reverse scans beg stays fixed
+			// while end moves downward, so the excluded lower boundary must
+			// be checked on every batch — not just the first.
+			if let Some(ref exclusive_beg) = self.exclusive_beg
+				&& key == *exclusive_beg
 			{
 				continue;
 			}
@@ -436,7 +459,19 @@ impl UniqueRangeIterator {
 		// Decode record IDs
 		let mut records = head_records;
 		records.reserve(res.len());
-		for (_, val) in res {
+		for (key, val) in res {
+			// Skip begin boundary key if exclusive. In reverse scans beg is
+			// fixed while end moves downward, so the excluded lower boundary
+			// must be checked on every batch.
+			if !self.beg_inclusive && key == self.beg {
+				continue;
+			}
+			// If this is the inclusive begin boundary, mark it as consumed
+			// so the tx.get(beg) fallback on the final (empty) batch does
+			// not return the same record a second time.
+			if self.beg_inclusive && key == self.beg {
+				self.beg_inclusive = false;
+			}
 			let rid: RecordId = revision::from_slice(&val)?;
 			records.push(rid);
 		}
