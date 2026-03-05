@@ -14,7 +14,31 @@ mod postgresql {
 
 	struct PgTestContext {
 		client: tokio_postgres::Client,
+		http_addr: String,
 		_server: common::Child,
+	}
+
+	impl PgTestContext {
+		async fn surrealql(&self, query: &str) {
+			let url = format!("http://{}/sql", self.http_addr);
+			let client = reqwest::Client::new();
+			let resp = client
+				.post(&url)
+				.basic_auth(USER, Some(PASS))
+				.header("NS", "main")
+				.header("DB", "main")
+				.header("Accept", "application/json")
+				.body(query.to_string())
+				.send()
+				.await
+				.unwrap_or_else(|e| panic!("SurrealQL request failed: {e}"));
+			assert!(
+				resp.status().is_success(),
+				"SurrealQL query failed ({}): {}",
+				resp.status(),
+				resp.text().await.unwrap_or_default()
+			);
+		}
 	}
 
 	async fn setup_pg() -> Result<PgTestContext, Box<dyn Error>> {
@@ -22,7 +46,7 @@ mod postgresql {
 		let pg_port: u16 = rng.gen_range(24001..35000);
 		let pg_addr = format!("127.0.0.1:{pg_port}");
 
-		let (_http_addr, server) = common::start_server(StartServerArguments {
+		let (http_addr, server) = common::start_server(StartServerArguments {
 			auth: false,
 			args: format!("--pgwire-listen {pg_addr}"),
 			..Default::default()
@@ -43,6 +67,7 @@ mod postgresql {
 					});
 					return Ok(PgTestContext {
 						client: c,
+						http_addr,
 						_server: server,
 					});
 				}
@@ -478,6 +503,244 @@ mod postgresql {
 				vec![Some("Bob".into()), Some("Marketing".into())],
 			],
 			"multi-table JOIN"
+		);
+	}
+
+	// ---------------------------------------------------------------
+	// INLJ: Index Nested Loop Join (index on right table's join column)
+	// ---------------------------------------------------------------
+
+	#[tokio::test]
+	async fn test_inlj_inner_join() {
+		let ctx = setup_pg().await.unwrap();
+
+		// Create index on orders.user_name via SurrealQL
+		ctx.surrealql("DEFINE INDEX idx_orders_user_name ON orders FIELDS user_name").await;
+
+		seed_join_tables(&ctx.client).await;
+
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT u.name, o.amount \
+				 FROM users AS u \
+				 INNER JOIN orders AS o ON u.name = o.user_name \
+				 ORDER BY u.name, o.amount",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		assert_eq!(
+			rows,
+			vec![
+				vec![Some("100".into()), Some("Alice".into())],
+				vec![Some("200".into()), Some("Alice".into())],
+				vec![Some("50".into()), Some("Bob".into())],
+			],
+			"INLJ INNER JOIN"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_inlj_left_join() {
+		let ctx = setup_pg().await.unwrap();
+
+		ctx.surrealql("DEFINE INDEX idx_orders_user_name ON orders FIELDS user_name").await;
+
+		seed_join_tables(&ctx.client).await;
+
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT u.name, o.amount \
+				 FROM users AS u \
+				 LEFT JOIN orders AS o ON u.name = o.user_name \
+				 ORDER BY u.name, o.amount",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		// Charlie has no orders, should appear with NULL amount
+		assert!(
+			rows.iter().any(|r| r[1] == Some("Charlie".into()) && r[0].is_none()),
+			"INLJ LEFT JOIN should include Charlie with NULL amount, got: {rows:?}"
+		);
+		assert!(
+			rows.iter().any(|r| r[1] == Some("Alice".into()) && r[0] == Some("100".into())),
+			"INLJ LEFT JOIN should include Alice's orders, got: {rows:?}"
+		);
+	}
+
+	// ---------------------------------------------------------------
+	// Semi/Anti JOIN (IN subquery, NOT IN subquery)
+	// ---------------------------------------------------------------
+
+	#[tokio::test]
+	async fn test_semi_join_in_subquery() {
+		let ctx = setup_pg().await.unwrap();
+		seed_join_tables(&ctx.client).await;
+
+		// Users who have orders (Semi join via IN subquery)
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT name FROM users \
+				 WHERE name IN (SELECT user_name FROM orders) \
+				 ORDER BY name",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		assert_eq!(
+			rows,
+			vec![vec![Some("Alice".into())], vec![Some("Bob".into())],],
+			"Semi join (IN subquery)"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_anti_join_not_in_subquery() {
+		let ctx = setup_pg().await.unwrap();
+		seed_join_tables(&ctx.client).await;
+
+		// Users who have NO orders (Anti join via NOT IN subquery)
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT name FROM users \
+				 WHERE name NOT IN (SELECT user_name FROM orders) \
+				 ORDER BY name",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		assert_eq!(rows, vec![vec![Some("Charlie".into())]], "Anti join (NOT IN subquery)");
+	}
+
+	// ---------------------------------------------------------------
+	// INLJ: Index Nested Loop Join (index on right table's join column)
+	// ---------------------------------------------------------------
+
+	#[tokio::test]
+	async fn test_inlj_unique_index() {
+		let ctx = setup_pg().await.unwrap();
+
+		// Unique index on departments.name
+		ctx.surrealql("DEFINE INDEX idx_dept_name ON departments FIELDS name UNIQUE").await;
+
+		ctx.client
+			.simple_query("INSERT INTO departments (name) VALUES ('Engineering'), ('Sales')")
+			.await
+			.expect("seed departments");
+		ctx.client
+			.simple_query(
+				"INSERT INTO employees (name, dept) VALUES \
+				 ('Alice', 'Engineering'), \
+				 ('Bob', 'Sales')",
+			)
+			.await
+			.expect("seed employees");
+
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT e.name, d.name AS dept_name \
+				 FROM employees AS e \
+				 INNER JOIN departments AS d ON e.dept = d.name \
+				 ORDER BY e.name",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		assert_eq!(
+			rows,
+			vec![
+				vec![Some("Engineering".into()), Some("Alice".into())],
+				vec![Some("Sales".into()), Some("Bob".into())],
+			],
+			"INLJ with unique index"
+		);
+	}
+
+	// ---------------------------------------------------------------
+	// Sort-Merge Join correctness (operator is available; planner
+	// selects it when both inputs provide sorted output ordering)
+	// ---------------------------------------------------------------
+
+	#[tokio::test]
+	async fn test_smj_correctness_inner() {
+		let ctx = setup_pg().await.unwrap();
+
+		// Create indexes on join columns so the planner can use SMJ
+		// when both sides are resolved to IndexScan with sorted output.
+		ctx.surrealql("DEFINE INDEX idx_emp_dept ON employees FIELDS dept").await;
+		ctx.surrealql("DEFINE INDEX idx_dept_name ON departments FIELDS name UNIQUE").await;
+
+		ctx.client
+			.simple_query(
+				"INSERT INTO departments (name) VALUES ('Engineering'), ('Sales'), ('HR')",
+			)
+			.await
+			.expect("seed departments");
+		ctx.client
+			.simple_query(
+				"INSERT INTO employees (name, dept) VALUES \
+				 ('Alice', 'Engineering'), \
+				 ('Bob', 'Sales'), \
+				 ('Charlie', 'Engineering')",
+			)
+			.await
+			.expect("seed employees");
+
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT e.name, d.name AS dept \
+				 FROM employees AS e \
+				 INNER JOIN departments AS d ON e.dept = d.name \
+				 ORDER BY e.name",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		assert_eq!(
+			rows,
+			vec![
+				vec![Some("Engineering".into()), Some("Alice".into())],
+				vec![Some("Engineering".into()), Some("Bob".into())],
+				vec![Some("Engineering".into()), Some("Charlie".into())],
+			],
+			"SMJ correctness INNER JOIN"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_smj_correctness_left() {
+		let ctx = setup_pg().await.unwrap();
+
+		ctx.surrealql("DEFINE INDEX idx_orders_user ON orders FIELDS user_name").await;
+
+		seed_join_tables(&ctx.client).await;
+
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT u.name, o.amount \
+				 FROM users AS u \
+				 LEFT JOIN orders AS o ON u.name = o.user_name \
+				 ORDER BY u.name, o.amount",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		// Charlie has no orders
+		assert!(
+			rows.iter().any(|r| r[1] == Some("Charlie".into()) && r[0].is_none()),
+			"SMJ LEFT JOIN should include Charlie with NULL amount, got: {rows:?}"
+		);
+		assert!(
+			rows.iter().any(|r| r[1] == Some("Alice".into()) && r[0] == Some("100".into())),
+			"SMJ LEFT JOIN should include Alice's orders, got: {rows:?}"
 		);
 	}
 }

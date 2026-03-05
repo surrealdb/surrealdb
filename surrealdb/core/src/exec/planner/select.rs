@@ -2001,58 +2001,93 @@ impl<'ctx> Planner<'ctx> {
 				})
 			}
 			Expr::Join(join_expr) => {
-				let both_simple_tables = matches!(&join_expr.left, Expr::Table(_))
-					&& matches!(&join_expr.right, Expr::Table(_));
-
-				let left_op =
-					Box::pin(self.plan_join_input(join_expr.left, version.clone())).await?;
-				let right_op =
-					Box::pin(self.plan_join_input(join_expr.right, version.clone())).await?;
+				let right_is_table = matches!(&join_expr.right, Expr::Table(_));
+				let la = join_expr.left_alias.clone().unwrap_or_default();
+				let ra = join_expr.right_alias.clone().unwrap_or_default();
 
 				let join_op: Arc<dyn ExecOperator> = if let Some(ref cond_expr) = join_expr.cond {
-					if both_simple_tables {
-						if let Some((lk, rk)) = extract_equi_join_keys(&cond_expr.0) {
+					if let Some((lk, rk)) = extract_equi_join_keys(&cond_expr.0) {
+						// Try INLJ: if the right table has a B-tree index on
+						// the join key, we can avoid buffering the entire right
+						// side. Only for INNER/LEFT (RIGHT needs full right scan).
+						let inlj = if right_is_table
+							&& matches!(
+								join_expr.kind,
+								crate::expr::join::JoinKind::Inner
+									| crate::expr::join::JoinKind::Left
+									| crate::expr::join::JoinKind::Semi
+									| crate::expr::join::JoinKind::Anti
+							) {
+							Box::pin(self.try_plan_inlj(&join_expr, &rk, version.clone())).await?
+						} else {
+							None
+						};
+
+						if let Some(inlj_op) = inlj {
+							inlj_op
+						} else {
+							let left_op =
+								Box::pin(self.plan_join_input(join_expr.left, version.clone()))
+									.await?;
+							let right_op =
+								Box::pin(self.plan_join_input(join_expr.right, version.clone()))
+									.await?;
 							let left_key = self.physical_expr(lk).await?;
 							let right_key = self.physical_expr(rk).await?;
-							Arc::new(crate::exec::operators::HashJoin::new(
-								left_op,
-								right_op,
-								join_expr.kind.clone(),
-								left_key,
-								right_key,
-								join_expr.left_alias.clone().unwrap_or_default(),
-								join_expr.right_alias.clone().unwrap_or_default(),
-							))
-						} else {
-							let phys_cond = self.physical_expr(cond_expr.0.clone()).await?;
-							Arc::new(crate::exec::operators::NestedLoopJoin::new(
-								left_op,
-								right_op,
-								join_expr.kind.clone(),
-								Some(phys_cond),
-								join_expr.left_alias.clone().unwrap_or_default(),
-								join_expr.right_alias.clone().unwrap_or_default(),
-							))
+
+							// Try SMJ if both sides are sorted on the join key
+							if both_sides_sorted_on_join_key(
+								&left_op, &right_op, &left_key, &right_key,
+							) {
+								Arc::new(crate::exec::operators::SortMergeJoin::new(
+									left_op,
+									right_op,
+									join_expr.kind.clone(),
+									left_key,
+									right_key,
+									la.clone(),
+									ra.clone(),
+								))
+							} else {
+								Arc::new(crate::exec::operators::HashJoin::new(
+									left_op,
+									right_op,
+									join_expr.kind.clone(),
+									left_key,
+									right_key,
+									la.clone(),
+									ra.clone(),
+								))
+							}
 						}
 					} else {
+						let left_op =
+							Box::pin(self.plan_join_input(join_expr.left, version.clone())).await?;
+						let right_op =
+							Box::pin(self.plan_join_input(join_expr.right, version.clone()))
+								.await?;
 						let phys_cond = self.physical_expr(cond_expr.0.clone()).await?;
 						Arc::new(crate::exec::operators::NestedLoopJoin::new(
 							left_op,
 							right_op,
 							join_expr.kind.clone(),
 							Some(phys_cond),
-							join_expr.left_alias.clone().unwrap_or_default(),
-							join_expr.right_alias.clone().unwrap_or_default(),
+							la.clone(),
+							ra.clone(),
 						))
 					}
 				} else {
+					let left_op =
+						Box::pin(self.plan_join_input(join_expr.left, version.clone())).await?;
+					let right_op =
+						Box::pin(self.plan_join_input(join_expr.right, version.clone())).await?;
 					Arc::new(crate::exec::operators::NestedLoopJoin::new(
 						left_op,
 						right_op,
 						join_expr.kind.clone(),
 						None,
-						join_expr.left_alias.clone().unwrap_or_default(),
-						join_expr.right_alias.clone().unwrap_or_default(),
+						la.clone(),
+						ra.clone(),
 					))
 				};
 
@@ -2101,6 +2136,113 @@ impl<'ctx> Planner<'ctx> {
 				Ok(Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>)
 			}
 		}
+	}
+
+	/// Try to plan an IndexNestedLoopJoin for an equi-join.
+	///
+	/// Returns `Some(operator)` if the right table has a B-tree index (Idx or
+	/// Uniq) covering the join key column. Returns `None` if no suitable index
+	/// is found or plan-time catalog access is unavailable.
+	async fn try_plan_inlj(
+		&self,
+		join_expr: &crate::expr::join::JoinExpr,
+		right_key_expr: &Expr,
+		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+	) -> Result<Option<Arc<dyn ExecOperator>>, Error> {
+		let (txn, ns_name, db_name) = match (&self.txn, &self.ns, &self.db) {
+			(Some(t), Some(n), Some(d)) => (t, n.as_str(), d.as_str()),
+			_ => return Ok(None),
+		};
+
+		let right_table_name = match &join_expr.right {
+			Expr::Table(t) => t,
+			_ => return Ok(None),
+		};
+
+		// Extract the single-field idiom from the right key (e.g. `user_name`)
+		let right_col_idiom = match right_key_expr {
+			Expr::Idiom(idiom) if idiom.0.len() == 1 => idiom,
+			_ => return Ok(None),
+		};
+
+		let ns_def = match txn.get_ns_by_name(ns_name).await {
+			Ok(Some(ns)) => ns,
+			_ => return Ok(None),
+		};
+		let db_def = match txn.get_db_by_name(ns_name, db_name).await {
+			Ok(Some(db)) => db,
+			_ => return Ok(None),
+		};
+
+		let indexes = match txn
+			.all_tb_indexes(ns_def.namespace_id, db_def.database_id, right_table_name)
+			.await
+		{
+			Ok(idx) => idx,
+			Err(_) => return Ok(None),
+		};
+
+		// Find a B-tree index whose first column matches the join key
+		let mut best: Option<(usize, bool)> = None; // (idx_pos, is_unique)
+		for (i, ix) in indexes.iter().enumerate() {
+			if ix.prepare_remove {
+				continue;
+			}
+			let is_btree =
+				matches!(ix.index, crate::catalog::Index::Idx | crate::catalog::Index::Uniq);
+			if !is_btree {
+				continue;
+			}
+			if let Some(first_col) = ix.cols.first()
+				&& first_col == right_col_idiom
+			{
+				let is_unique = matches!(ix.index, crate::catalog::Index::Uniq);
+				match best {
+					None => best = Some((i, is_unique)),
+					Some((_, prev_unique)) if is_unique && !prev_unique => {
+						best = Some((i, true));
+					}
+					_ => {}
+				}
+			}
+		}
+
+		let Some((idx_pos, _)) = best else {
+			return Ok(None);
+		};
+
+		let index_ref = crate::exec::index::access_path::IndexRef::new(indexes, idx_pos);
+
+		// Resolve the right table context for permission checks
+		let resolved =
+			Self::try_resolve_table_ctx(txn, self.ctx, ns_name, db_name, right_table_name).await;
+
+		// Plan the left side as a normal source
+		let left_op =
+			Box::pin(self.plan_join_input(join_expr.left.clone(), version.clone())).await?;
+
+		// Extract the left key (already alias-stripped by extract_equi_join_keys)
+		let left_key_expr = match &join_expr.cond {
+			Some(cond) => {
+				let (lk, _) = extract_equi_join_keys(&cond.0)
+					.expect("try_plan_inlj called without equi-join");
+				lk
+			}
+			None => return Ok(None),
+		};
+		let left_key = self.physical_expr(left_key_expr).await?;
+
+		Ok(Some(Arc::new(crate::exec::operators::IndexNestedLoopJoin::new(
+			left_op,
+			join_expr.kind.clone(),
+			left_key,
+			index_ref,
+			right_table_name.clone(),
+			resolved,
+			join_expr.left_alias.clone().unwrap_or_default(),
+			join_expr.right_alias.clone().unwrap_or_default(),
+			version,
+		))))
 	}
 
 	/// Try to resolve a `ResolvedTableContext` for the given table.
@@ -2271,16 +2413,52 @@ fn extract_equi_join_keys(expr: &Expr) -> Option<(Expr, Expr)> {
 		op: BinaryOperator::Equal,
 		right,
 	} = expr
+		&& let (Expr::Idiom(l_idiom), Expr::Idiom(r_idiom)) = (left.as_ref(), right.as_ref())
+		&& l_idiom.0.len() >= 2
+		&& r_idiom.0.len() >= 2
 	{
-		if let (Expr::Idiom(l_idiom), Expr::Idiom(r_idiom)) = (left.as_ref(), right.as_ref()) {
-			if l_idiom.0.len() >= 2 && r_idiom.0.len() >= 2 {
-				let l_stripped = Idiom(l_idiom.0[1..].to_vec());
-				let r_stripped = Idiom(r_idiom.0[1..].to_vec());
-				return Some((Expr::Idiom(l_stripped), Expr::Idiom(r_stripped)));
-			}
-		}
+		let l_stripped = Idiom(l_idiom.0[1..].to_vec());
+		let r_stripped = Idiom(r_idiom.0[1..].to_vec());
+		return Some((Expr::Idiom(l_stripped), Expr::Idiom(r_stripped)));
 	}
 	None
+}
+
+/// Check whether both join sides declare an output ordering whose leading
+/// column matches the corresponding join key expression.
+///
+/// The key expressions are `PhysicalExpr` values that were derived from
+/// single-field idioms (e.g., `Idiom(["name"])`). We convert them to
+/// `FieldPath` and compare against the leading `SortProperty` of each
+/// side's `OutputOrdering`.
+fn both_sides_sorted_on_join_key(
+	left_op: &Arc<dyn ExecOperator>,
+	right_op: &Arc<dyn ExecOperator>,
+	left_key: &Arc<dyn crate::exec::PhysicalExpr>,
+	right_key: &Arc<dyn crate::exec::PhysicalExpr>,
+) -> bool {
+	use crate::exec::OutputOrdering;
+
+	let left_ordering = left_op.output_ordering();
+	let right_ordering = right_op.output_ordering();
+
+	let (left_props, right_props) = match (&left_ordering, &right_ordering) {
+		(OutputOrdering::Sorted(lp), OutputOrdering::Sorted(rp))
+			if !lp.is_empty() && !rp.is_empty() =>
+		{
+			(lp, rp)
+		}
+		_ => return false,
+	};
+
+	// Compare the leading sort property field name with the join key's SQL form.
+	// The key's to_sql() for a simple idiom like `name` returns "name".
+	let lk_sql = left_key.to_sql();
+	let rk_sql = right_key.to_sql();
+	let left_field = left_props[0].path.to_string();
+	let right_field = right_props[0].path.to_string();
+
+	lk_sql == left_field && rk_sql == right_field
 }
 
 fn collect_field_names(fields: &Fields) -> Vec<String> {

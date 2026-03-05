@@ -40,7 +40,7 @@ pub use ifelse::IfElsePlan;
 pub use info::{
 	DatabaseInfoPlan, IndexInfoPlan, NamespaceInfoPlan, RootInfoPlan, TableInfoPlan, UserInfoPlan,
 };
-pub use join::{HashJoin, NestedLoopJoin};
+pub use join::{HashJoin, IndexNestedLoopJoin, NestedLoopJoin, SortMergeJoin};
 pub use knn_topk::KnnTopK;
 pub use let_plan::LetPlan;
 pub use limit::Limit;

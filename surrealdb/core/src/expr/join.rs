@@ -7,6 +7,10 @@ pub enum JoinKind {
 	Left,
 	Right,
 	Cross,
+	/// Returns left rows that have at least one match on the right (EXISTS / IN subquery).
+	Semi,
+	/// Returns left rows that have no matches on the right (NOT EXISTS / NOT IN subquery).
+	Anti,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

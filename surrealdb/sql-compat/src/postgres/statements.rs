@@ -82,8 +82,15 @@ fn translate_select(
 	offset: Option<pg::Offset>,
 ) -> Result<SelectStatement, TranslateError> {
 	let fields = expressions::translate_select_items(select.projection)?;
-	let what = translate_from(select.from)?;
-	let cond = expressions::translate_where(select.selection)?;
+	let mut what = translate_from(select.from)?;
+
+	// Extract IN/NOT IN subquery patterns from WHERE and rewrite as Semi/Anti joins.
+	let (remaining_where, semi_anti_joins) = extract_semi_anti_joins(select.selection)?;
+	for join in semi_anti_joins {
+		what = vec![wrap_what_in_join(what, join)];
+	}
+
+	let cond = expressions::translate_where(remaining_where)?;
 
 	let order = if order_by.is_empty() {
 		None
@@ -114,6 +121,146 @@ fn translate_select(
 		explain: None,
 		tempfiles: false,
 	})
+}
+
+/// A Semi or Anti join extracted from a WHERE clause IN/NOT IN subquery.
+struct SemiAntiJoin {
+	kind: JoinKind,
+	right_table: Expr,
+	right_alias: Option<String>,
+	cond: Cond,
+}
+
+/// Extract `col IN (SELECT col FROM table)` / `col NOT IN (...)` patterns
+/// from a WHERE expression. Returns the remaining WHERE clause (with the
+/// extracted predicates removed) and a list of Semi/Anti joins.
+fn extract_semi_anti_joins(
+	selection: Option<pg::Expr>,
+) -> Result<(Option<pg::Expr>, Vec<SemiAntiJoin>), TranslateError> {
+	let Some(expr) = selection else {
+		return Ok((None, Vec::new()));
+	};
+
+	let mut joins = Vec::new();
+	let remaining = extract_semi_anti_recursive(expr, &mut joins)?;
+	Ok((remaining, joins))
+}
+
+fn extract_semi_anti_recursive(
+	expr: pg::Expr,
+	joins: &mut Vec<SemiAntiJoin>,
+) -> Result<Option<pg::Expr>, TranslateError> {
+	match expr {
+		pg::Expr::InSubquery {
+			expr: left_expr,
+			subquery,
+			negated,
+		} => {
+			if let Some(join) = try_build_semi_anti(*left_expr, *subquery, negated)? {
+				joins.push(join);
+				return Ok(None);
+			}
+			Err(TranslateError::unsupported("complex IN (SELECT ...) subquery"))
+		}
+		pg::Expr::BinaryOp {
+			left,
+			op: pg::BinaryOperator::And,
+			right,
+		} => {
+			let left_remaining = extract_semi_anti_recursive(*left, joins)?;
+			let right_remaining = extract_semi_anti_recursive(*right, joins)?;
+			match (left_remaining, right_remaining) {
+				(Some(l), Some(r)) => Ok(Some(pg::Expr::BinaryOp {
+					left: Box::new(l),
+					op: pg::BinaryOperator::And,
+					right: Box::new(r),
+				})),
+				(Some(e), None) | (None, Some(e)) => Ok(Some(e)),
+				(None, None) => Ok(None),
+			}
+		}
+		other => Ok(Some(other)),
+	}
+}
+
+fn try_build_semi_anti(
+	left_expr: pg::Expr,
+	subquery: pg::Query,
+	negated: bool,
+) -> Result<Option<SemiAntiJoin>, TranslateError> {
+	let body = *subquery.body;
+	let pg::SetExpr::Select(select) = body else {
+		return Ok(None);
+	};
+
+	// Must have exactly one FROM table and one projected column
+	if select.from.len() != 1 {
+		return Ok(None);
+	}
+	let twj = &select.from[0];
+	if !twj.joins.is_empty() {
+		return Ok(None);
+	}
+	let (right_expr, right_alias) = translate_table_factor(twj.relation.clone())?;
+
+	// Extract the single selected column from the subquery
+	if select.projection.len() != 1 {
+		return Ok(None);
+	}
+	let sub_col = match &select.projection[0] {
+		pg::SelectItem::UnnamedExpr(e) => expressions::translate_expr(e.clone())?,
+		_ => return Ok(None),
+	};
+
+	let left_translated = expressions::translate_expr(left_expr)?;
+
+	// Build equi-join condition: left_col = right_subquery_col
+	let cond_expr = Expr::Binary {
+		left: Box::new(left_translated),
+		op: surrealdb_core::expr::operator::BinaryOperator::Equal,
+		right: Box::new(sub_col),
+	};
+
+	let kind = if negated {
+		JoinKind::Anti
+	} else {
+		JoinKind::Semi
+	};
+
+	Ok(Some(SemiAntiJoin {
+		kind,
+		right_table: right_expr,
+		right_alias,
+		cond: Cond(cond_expr),
+	}))
+}
+
+/// Wrap the current FROM list in a Semi/Anti join node.
+fn wrap_what_in_join(what: Vec<Expr>, join: SemiAntiJoin) -> Expr {
+	let left = if what.len() == 1 {
+		what.into_iter().next().unwrap()
+	} else {
+		what.into_iter().next().unwrap_or(Expr::Literal(Literal::None))
+	};
+
+	// Determine left alias: if the left side is already a Join, it has no
+	// single alias; otherwise extract from the join or table.
+	let left_alias = match &left {
+		Expr::Join(j) => j.left_alias.clone(),
+		_ => None,
+	};
+
+	let alias_suffix = "_semi";
+	let right_alias = join.right_alias.or_else(|| Some(format!("{alias_suffix}")));
+
+	Expr::Join(Box::new(JoinExpr {
+		kind: join.kind,
+		left,
+		right: join.right_table,
+		cond: Some(join.cond),
+		left_alias,
+		right_alias,
+	}))
 }
 
 fn translate_group_by(group_by: &pg::GroupByExpr) -> Result<Option<Groups>, TranslateError> {
