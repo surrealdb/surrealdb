@@ -19,6 +19,7 @@ use uuid::Uuid;
 
 use crate::rpc::websocket::Websocket;
 use crate::telemetry::metrics::ws::NotificationContext;
+use crate::cnf::GQL_NOTIFICATION_CHANNEL_SIZE;
 
 static CONN_CLOSED_ERR: &str = "Connection closed normally";
 /// A type alias for an RPC Connection
@@ -45,7 +46,7 @@ impl RpcState {
 		datastore: Arc<surrealdb_core::kvs::Datastore>,
 		session: surrealdb_core::dbs::Session,
 	) -> Self {
-		let (notification_broadcaster, _) = broadcast::channel(4096);
+		let (notification_broadcaster, _) = broadcast::channel(*GQL_NOTIFICATION_CHANNEL_SIZE);
 		Self {
 			web_sockets: RwLock::new(HashMap::new()),
 			live_queries: RwLock::new(HashMap::new()),
