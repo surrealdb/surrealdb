@@ -48,6 +48,7 @@ use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::functions::process_fns;
 use crate::gql::mutations::process_mutations;
 use crate::gql::relations::collect_relations;
+use crate::gql::subscriptions::process_subscriptions;
 use crate::gql::tables::process_tbs;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::val::{
@@ -163,6 +164,7 @@ pub async fn generate_schema(
 	};
 
 	let mut mutation_obj: Option<Object> = None;
+	let mut subscription_obj = None;
 
 	match tbs {
 		Some(ref tbs) if !tbs.is_empty() => {
@@ -170,6 +172,7 @@ pub async fn generate_schema(
 
 			// Generate mutations for all tables
 			mutation_obj = Some(process_mutations(tbs.clone(), &mut types, &schema_ctx).await?);
+			subscription_obj = process_subscriptions(&tbs[..]);
 		}
 		_ => {}
 	}
@@ -199,8 +202,13 @@ pub async fn generate_schema(
 	} else {
 		None
 	};
+	let subscription_name = if subscription_obj.is_some() {
+		Some("Subscription")
+	} else {
+		None
+	};
 
-	let mut schema = Schema::build("Query", mutation_name, None).register(query);
+	let mut schema = Schema::build("Query", mutation_name, subscription_name).register(query);
 
 	// Apply depth and complexity limits from the GraphQL config
 	if let Some(depth) = gql_config.depth_limit {
@@ -216,6 +224,9 @@ pub async fn generate_schema(
 
 	if let Some(mutation) = mutation_obj {
 		schema = schema.register(mutation);
+	}
+	if let Some(subscription) = subscription_obj {
+		schema = schema.register(subscription);
 	}
 	for ty in types {
 		trace!("adding type: {ty:?}");
