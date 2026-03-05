@@ -5529,4 +5529,233 @@ mod graphql_integration {
 		assert_eq!(received["payload"]["data"]["foo"]["val"], 99);
 		Ok(())
 	}
+
+	#[test(tokio::test)]
+	async fn subscriptions_live_query_shape_filter_and_id() -> Result<(), Box<dyn std::error::Error>>
+	{
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_ws_url = &format!("ws://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE foo SCHEMAFUL;
+					DEFINE FIELD val ON foo TYPE int;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		let mut req = gql_ws_url.into_client_request()?;
+		req.headers_mut().insert("surreal-ns", ns.parse()?);
+		req.headers_mut().insert("surreal-db", db.parse()?);
+		req.headers_mut().insert("Sec-WebSocket-Protocol", "graphql-transport-ws".parse()?);
+		let (mut ws, _) = connect_async(req).await?;
+
+		ws.send(Message::Text(json!({"type":"connection_init"}).to_string().into())).await?;
+		let Some(Ok(Message::Text(ack_msg))) = ws.next().await else {
+			return Err(std::io::Error::other("expected websocket connection ack").into());
+		};
+		let ack_json: serde_json::Value = serde_json::from_str(&ack_msg)?;
+		assert_eq!(ack_json["type"], "connection_ack");
+
+		ws.send(Message::Text(
+			json!({
+				"id": "sub-filter",
+				"type": "subscribe",
+				"payload": {
+					"query": "subscription { foo(where: { val: { eq: 99 } }, fetch: [\"val\"]) { id val } }"
+				}
+			})
+			.to_string()
+			.into(),
+		))
+		.await?;
+
+		ws.send(Message::Text(
+			json!({
+				"id": "sub-id",
+				"type": "subscribe",
+				"payload": {
+					"query": "subscription { foo(id: \"foo:target\") { val } }"
+				}
+			})
+			.to_string()
+			.into(),
+		))
+		.await?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					CREATE foo:other SET val = 1;
+					CREATE foo:filter_match SET val = 99;
+					CREATE foo:target SET val = 42;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		let mut got_filter = false;
+		let mut got_id = false;
+		tokio::time::timeout(Duration::from_secs(10), async {
+			while let Some(frame) = ws.next().await {
+				let Ok(frame) = frame else {
+					continue;
+				};
+				let Message::Text(text) = frame else {
+					continue;
+				};
+				let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+					continue;
+				};
+				if value["type"] != "next" {
+					continue;
+				}
+				match value["id"].as_str() {
+					Some("sub-filter") => {
+						assert_eq!(value["payload"]["data"]["foo"]["id"], "foo:filter_match");
+						assert_eq!(value["payload"]["data"]["foo"]["val"], 99);
+						got_filter = true;
+					}
+					Some("sub-id") => {
+						assert_eq!(value["payload"]["data"]["foo"]["val"], 42);
+						got_id = true;
+					}
+					_ => {}
+				}
+				if got_filter && got_id {
+					return;
+				}
+			}
+		})
+		.await?;
+
+		assert!(got_filter, "did not receive filtered subscription event");
+		assert!(got_id, "did not receive id-targeted subscription event");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn subscriptions_live_query_shape_with_variables()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_ws_url = &format!("ws://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE foo SCHEMAFUL;
+					DEFINE FIELD val ON foo TYPE int;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		let mut req = gql_ws_url.into_client_request()?;
+		req.headers_mut().insert("surreal-ns", ns.parse()?);
+		req.headers_mut().insert("surreal-db", db.parse()?);
+		req.headers_mut().insert("Sec-WebSocket-Protocol", "graphql-transport-ws".parse()?);
+		let (mut ws, _) = connect_async(req).await?;
+
+		ws.send(Message::Text(json!({"type":"connection_init"}).to_string().into())).await?;
+		let Some(Ok(Message::Text(ack_msg))) = ws.next().await else {
+			return Err(std::io::Error::other("expected websocket connection ack").into());
+		};
+		let ack_json: serde_json::Value = serde_json::from_str(&ack_msg)?;
+		assert_eq!(ack_json["type"], "connection_ack");
+
+		ws.send(Message::Text(
+			json!({
+				"id": "sub-vars",
+				"type": "subscribe",
+				"payload": {
+					"query": "subscription($id: ID, $where: _filter_foo, $fetch: [String!]) { foo(id: $id, where: $where, fetch: $fetch) { val } }",
+					"variables": {
+						"id": "foo:target",
+						"where": { "val": { "eq": 42 } },
+						"fetch": ["val"]
+					}
+				}
+			})
+			.to_string()
+			.into(),
+		))
+		.await?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					CREATE foo:other SET val = 1;
+					CREATE foo:target SET val = 42;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		let received = tokio::time::timeout(Duration::from_secs(10), async {
+			while let Some(frame) = ws.next().await {
+				let Ok(frame) = frame else {
+					continue;
+				};
+				let Message::Text(text) = frame else {
+					continue;
+				};
+				let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+					continue;
+				};
+				if value["type"] == "next" && value["id"] == "sub-vars" {
+					return Some(value);
+				}
+			}
+			None
+		})
+		.await?
+		.ok_or_else(|| std::io::Error::other("subscription stream ended before event"))?;
+
+		assert_eq!(received["payload"]["data"]["foo"]["val"], 42);
+		Ok(())
+	}
 }
