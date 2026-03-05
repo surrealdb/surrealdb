@@ -86,9 +86,10 @@ glob = "0.3.3"
 http-body = "1.0.1"
 hyper.workspace = true
 opentelemetry = { version = "0.31.0" }
-opentelemetry-otlp = { version = "0.31.0", features = ["metrics", "grpc-tonic"] }
-opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "spec_unstable_metrics_views", "experimental_metrics_custom_reader"] }
+opentelemetry-otlp = { version = "0.31.0", features = ["metrics", "grpc-tonic", "tls", "tls-roots"] }
+opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "spec_unstable_metrics_views", "experimental_metrics_custom_reader", "experimental_metrics_periodicreader_with_async_runtime"] }
 rustyline = { version = "17.0.2", features = ["derive"], optional = true }
+tonic = "0.14.1"
 tower = { version = "0.5.3", features = ["limit", "load-shed"] }
 tower-http = { version = "0.6.8", features = [
     "trace",
