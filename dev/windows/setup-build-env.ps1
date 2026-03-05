@@ -1,8 +1,25 @@
-param(
-    [string[]]$CargoArgs = @("check", "-p", "surreal"),
-    [switch]$InstallMissingTools,
-    [switch]$ShowGeneratedCmd
-)
+<#
+.SYNOPSIS
+Sets up a Windows MSVC build environment for SurrealDB dependencies.
+
+.DESCRIPTION
+This script verifies and installs missing tools required to build
+SurrealDB on Windows:
+- Visual Studio Build Tools (detected, not auto-installed),
+- Rust toolchain (rustup/rustc/cargo),
+- LLVM + libclang,
+- NASM,
+- CMake.
+
+If Scoop is missing, this script can bootstrap Scoop and then install missing
+user-space dependencies (rustup, llvm, nasm, cmake).
+
+This script only prepares and validates the environment. It does not run cargo.
+
+.EXAMPLE
+pwsh -File .\dev\windows\windows-setup-build-env.ps1
+#>
+
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
@@ -33,13 +50,14 @@ function Get-VsDevCmdPath {
 function Get-LlvmBinPath {
     $candidates = @(
         (Join-Path $env:USERPROFILE "scoop\apps\llvm\current\bin"),
-        "C:\Program Files\LLVM\bin"
+        (Join-Path $env:ProgramFiles "LLVM\bin")
     )
 
     foreach ($candidate in $candidates) {
         if (-not (Test-Path -LiteralPath $candidate -PathType Container)) {
             continue
         }
+
         if ((Test-Path -LiteralPath (Join-Path $candidate "clang.exe") -PathType Leaf) -and
             (Test-Path -LiteralPath (Join-Path $candidate "libclang.dll") -PathType Leaf)) {
             return $candidate
@@ -70,23 +88,60 @@ function Get-CargoCommand {
     return $null
 }
 
+function Get-ScoopCommand {
+    $scoop = Get-Command scoop -ErrorAction SilentlyContinue
+    if ($scoop) {
+        return $scoop
+    }
+
+    $fallbacks = @(
+        (Join-Path $env:USERPROFILE "scoop\shims\scoop.cmd"),
+        (Join-Path $env:USERPROFILE "scoop\shims\scoop.ps1")
+    )
+
+    foreach ($fallback in $fallbacks) {
+        if (Test-Path -LiteralPath $fallback -PathType Leaf) {
+            return Get-Item -LiteralPath $fallback
+        }
+    }
+
+    return $null
+}
+
+function Ensure-ScoopInstalled {
+    $scoop = Get-ScoopCommand
+    if ($scoop) {
+        return $scoop
+    }
+
+    Write-Host "Scoop not found. Installing Scoop for current user..."
+    try {
+        $script = Invoke-RestMethod -Uri "https://get.scoop.sh"
+        Invoke-Expression "& { $script } -RunAsAdmin:`$false"
+    }
+    catch {
+        throw "Failed to install Scoop automatically. Install Scoop manually from https://scoop.sh and retry. Error: $($_.Exception.Message)"
+    }
+
+    $scoopShims = Join-Path $env:USERPROFILE "scoop\shims"
+    if ((Test-Path -LiteralPath $scoopShims -PathType Container) -and -not ($env:PATH -split ';' | Where-Object { $_ -eq $scoopShims })) {
+        $env:PATH = "$scoopShims;$env:PATH"
+    }
+
+    $scoop = Get-ScoopCommand
+    if (-not $scoop) {
+        throw "Scoop installation completed but command is still unavailable. Open a new shell and retry."
+    }
+
+    return $scoop
+}
+
 function Ensure-ScoopPackage {
     param(
         [string]$PackageName
     )
 
-    $scoop = Get-Command scoop -ErrorAction SilentlyContinue
-    if (-not $scoop) {
-        $shim = Join-Path $env:USERPROFILE "scoop\shims\scoop.cmd"
-        if (Test-Path -LiteralPath $shim -PathType Leaf) {
-            $scoop = Get-Item -LiteralPath $shim
-        }
-    }
-
-    if (-not $scoop) {
-        throw "Scoop was not found, cannot auto-install '$PackageName'."
-    }
-
+    $scoop = Ensure-ScoopInstalled
     $scoopCmd = if ($scoop -is [System.IO.FileInfo]) { $scoop.FullName } else { $scoop.Source }
 
     & $scoopCmd list $PackageName *> $null
@@ -98,43 +153,6 @@ function Ensure-ScoopPackage {
     & $scoopCmd install $PackageName
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to install '$PackageName' via Scoop."
-    }
-}
-
-function Ensure-ScoopPackageLatest {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$PackageName
-    )
-
-    $scoop = Get-Command scoop -ErrorAction SilentlyContinue
-    if (-not $scoop) {
-        $shim = Join-Path $env:USERPROFILE "scoop\shims\scoop.cmd"
-        if (Test-Path -LiteralPath $shim -PathType Leaf) {
-            $scoop = Get-Item -LiteralPath $shim
-        }
-    }
-
-    if (-not $scoop) {
-        throw "Scoop was not found, cannot ensure latest '$PackageName'."
-    }
-
-    $scoopCmd = if ($scoop -is [System.IO.FileInfo]) { $scoop.FullName } else { $scoop.Source }
-
-    & $scoopCmd list $PackageName *> $null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Installing '$PackageName' via Scoop..."
-        & $scoopCmd install $PackageName
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to install '$PackageName' via Scoop."
-        }
-        return
-    }
-
-    Write-Host "Updating '$PackageName' via Scoop..."
-    & $scoopCmd update $PackageName
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to update '$PackageName' via Scoop."
     }
 }
 
@@ -178,25 +196,29 @@ function Get-RustcCommand {
     return $null
 }
 
-function Ensure-LatestRustToolchain {
-    Ensure-ScoopPackageLatest -PackageName "rustup"
-
+function Ensure-RustToolchainAvailable {
     $rustup = Get-RustupCommand
     if (-not $rustup) {
-        throw "rustup not found after Scoop install/update."
+        Ensure-ScoopPackage -PackageName "rustup"
+        $rustup = Get-RustupCommand
+    }
+
+    if (-not $rustup) {
+        throw "rustup not found after installation attempt."
     }
 
     $rustupPath = if ($rustup -is [System.IO.FileInfo]) { $rustup.FullName } else { $rustup.Source }
 
-    Write-Host "Ensuring latest stable Rust toolchain via rustup..."
+    $rustc = Get-RustcCommand
+    $cargo = Get-CargoCommand
+    if ($rustc -and $cargo) {
+        return
+    }
+
+    Write-Host "Installing stable Rust toolchain via rustup..."
     & $rustupPath toolchain install stable
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to install stable toolchain via rustup."
-    }
-
-    & $rustupPath update stable
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to update stable toolchain via rustup."
     }
 
     & $rustupPath default stable
@@ -216,9 +238,35 @@ function Get-NasmCommand {
         return $nasm
     }
 
-    $nasmShim = Join-Path $env:USERPROFILE "scoop\shims\nasm.exe"
-    if (Test-Path -LiteralPath $nasmShim -PathType Leaf) {
-        return Get-Item -LiteralPath $nasmShim
+    $fallbacks = @(
+        (Join-Path $env:USERPROFILE "scoop\shims\nasm.exe"),
+        (Join-Path $env:ProgramFiles "NASM\nasm.exe")
+    )
+
+    foreach ($fallback in $fallbacks) {
+        if (Test-Path -LiteralPath $fallback -PathType Leaf) {
+            return Get-Item -LiteralPath $fallback
+        }
+    }
+
+    return $null
+}
+
+function Get-CmakeCommand {
+    $cmake = Get-Command cmake -ErrorAction SilentlyContinue
+    if ($cmake) {
+        return $cmake
+    }
+
+    $fallbacks = @(
+        (Join-Path $env:USERPROFILE "scoop\shims\cmake.exe"),
+        (Join-Path $env:ProgramFiles "CMake\bin\cmake.exe")
+    )
+
+    foreach ($fallback in $fallbacks) {
+        if (Test-Path -LiteralPath $fallback -PathType Leaf) {
+            return Get-Item -LiteralPath $fallback
+        }
     }
 
     return $null
@@ -247,19 +295,14 @@ function Normalize-PathValue {
 
 $vsDevCmd = Get-VsDevCmdPath
 if (-not $vsDevCmd) {
-    throw "VsDevCmd.bat not found via vswhere. Install the latest Visual Studio Build Tools with C++ workload and Windows SDK."
+    throw "VsDevCmd.bat not found via vswhere. Install Visual Studio Build Tools (C++ workload + Windows SDK)."
 }
 $vsDevCmd = Normalize-PathValue -Value $vsDevCmd -ExpectedLeaf "VsDevCmd.bat"
 
-Ensure-LatestRustToolchain
-
-if ($InstallMissingTools) {
-    Ensure-ScoopPackage -PackageName "llvm"
-    Ensure-ScoopPackage -PackageName "nasm"
-}
+Ensure-RustToolchainAvailable
 
 $llvmBin = Get-LlvmBinPath
-if (-not $llvmBin -and $InstallMissingTools) {
+if (-not $llvmBin) {
     Ensure-ScoopPackage -PackageName "llvm"
     $llvmBin = Get-LlvmBinPath
 }
@@ -270,7 +313,7 @@ if (-not $llvmBin) {
 $llvmBin = Normalize-PathValue -Value $llvmBin -ExpectedLeaf "bin"
 
 $nasm = Get-NasmCommand
-if (-not $nasm -and $InstallMissingTools) {
+if (-not $nasm) {
     Ensure-ScoopPackage -PackageName "nasm"
     $nasm = Get-NasmCommand
 }
@@ -279,53 +322,35 @@ if (-not $nasm) {
     throw "NASM not found. Install NASM (e.g. 'scoop install nasm') and retry."
 }
 
+$cmake = Get-CmakeCommand
+if (-not $cmake) {
+    Ensure-ScoopPackage -PackageName "cmake"
+    $cmake = Get-CmakeCommand
+}
+
+if (-not $cmake) {
+    throw "CMake not found. Install CMake (e.g. 'scoop install cmake') and retry."
+}
+
 $cargo = Get-CargoCommand
-if (-not $cargo -and $InstallMissingTools) {
+if (-not $cargo) {
     Ensure-ScoopPackage -PackageName "rustup"
     $cargo = Get-CargoCommand
 }
 
 if (-not $cargo) {
-    throw "cargo not found in PATH."
+    throw "cargo not found in PATH. Install Rust with rustup and retry."
 }
 
 $cargoPath = if ($cargo -is [System.IO.FileInfo]) { $cargo.FullName } else { $cargo.Source }
 $cargoPath = Normalize-PathValue -Value $cargoPath -ExpectedLeaf "cargo.exe"
-$cargoArgsEscaped = ($CargoArgs | ForEach-Object {
-        if ($_ -match '[\s"]') {
-            '"' + $_.Replace('"', '\"') + '"'
-        }
-        else {
-            $_
-        }
-    }) -join ' '
 
 Write-Host "Using VsDevCmd: $vsDevCmd"
 Write-Host "Using LLVM: $llvmBin"
 Write-Host "Using NASM: $(if ($nasm -is [System.IO.FileInfo]) { $nasm.FullName } else { $nasm.Source })"
-Write-Host "Running: cargo $($CargoArgs -join ' ')"
-
-$cmdFile = Join-Path ([IO.Path]::GetTempPath()) ("surreal-cargo-check-" + [Guid]::NewGuid().ToString("N") + ".cmd")
-$cmdContent = "@echo off`r`n"
-$cmdContent += 'call "' + $vsDevCmd + '" -arch=amd64 -host_arch=amd64 >nul' + "`r`n"
-$cmdContent += 'if errorlevel 1 exit /b %errorlevel%' + "`r`n"
-$cmdContent += 'set "LIBCLANG_PATH=' + $llvmBin + '"' + "`r`n"
-$cmdContent += 'set "CLANG_PATH=' + (Join-Path $llvmBin "clang.exe") + '"' + "`r`n"
-$cmdContent += 'set "PATH=' + $llvmBin + ';%PATH%"' + "`r`n"
-$cmdContent += '"' + $cargoPath + '" ' + $cargoArgsEscaped + "`r`n"
-$cmdContent += 'exit /b %errorlevel%' + "`r`n"
-
-Set-Content -LiteralPath $cmdFile -Value $cmdContent -Encoding Ascii -NoNewline
-if ($ShowGeneratedCmd) {
-    Write-Host "Generated cmd file: $cmdFile"
-    Get-Content -LiteralPath $cmdFile | ForEach-Object { Write-Host $_ }
-}
-try {
-    & cmd.exe /d /c $cmdFile
-    exit $LASTEXITCODE
-}
-finally {
-    if (-not $ShowGeneratedCmd) {
-        Remove-Item -LiteralPath $cmdFile -Force -ErrorAction SilentlyContinue
-    }
-}
+Write-Host "Using CMake: $(if ($cmake -is [System.IO.FileInfo]) { $cmake.FullName } else { $cmake.Source })"
+Write-Host "Using Cargo: $cargoPath"
+Write-Host ""
+Write-Host "Build environment prerequisites are installed and verified."
+Write-Host "Next step: run 'cargo build' in your terminal."
+Write-Host "If a plain shell cannot find MSVC tools, use a Developer PowerShell for VS or run VsDevCmd first."

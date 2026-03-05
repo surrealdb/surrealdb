@@ -27,6 +27,7 @@ cargo build --release --locked --target aarch64-apple-darwin
 ```
 
 ### ✅ Compile for `aarch64-unknown-linux-gnu` (Linux)
+
 ```bash
 # Run Docker
 docker run -it --platform linux/arm64 -v $PWD:/code ubuntu
@@ -54,6 +55,7 @@ cargo build --release --locked --target aarch64-unknown-linux-gnu
 ```
 
 ### ✅ Compile for `x86_64-unknown-linux-gnu` (Linux)
+
 ```bash
 # Run Docker
 docker run -it --platform linux/amd64 -v $PWD:/code ubuntu
@@ -81,7 +83,9 @@ cargo build --release --locked --target x86_64-unknown-linux-gnu
 ```
 
 ### ❌ Cross-compile for `x86_64-pc-windows-gnu` (Windows)
+
 <sub>This does not yet build successfully</sub>
+
 ```bash
 # Setup
 brew install cmake mingw-w64 protobuf
@@ -93,12 +97,14 @@ cargo build --release --locked --target x86_64-pc-windows-gnu
 ```
 
 ### ❌ Cross-compile for `x86_64-unknown-linux-musl` (Linux Musl)
+
 <sub>This does not yet build successfully</sub>
+
 ```bash
 docker pull clux/muslrust:stable
 docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --release --target x86_64-unknown-linux-musl
 ```
-	
+
 </details>
 
 <!-- -------------------------------------------------- -->
@@ -112,6 +118,7 @@ docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --rel
 <details><summary>Click to show details</summary>
 
 ### ✅ Compile for `aarch64-unknown-linux-gnu` (Linux)
+
 ```bash
 # Setup
 apt-get -y update
@@ -137,6 +144,7 @@ cargo build --release --locked --target aarch64-unknown-linux-gnu
 ```
 
 ### ✅ Compile for `x86_64-unknown-linux-gnu` (Linux)
+
 ```bash
 # Setup
 apt-get -y update
@@ -164,7 +172,9 @@ cargo build --release --locked --target x86_64-unknown-linux-gnu
 ```
 
 ### ❌ Cross-compile for `x86_64-pc-windows-gnu` (Windows)
+
 <sub>This does not yet build successfully</sub>
+
 ```bash
 # Setup
 sudo apt-get -y update
@@ -177,7 +187,9 @@ cargo build --release --locked --target x86_64-pc-windows-gnu
 ```
 
 ### ❌ Cross-compile for `armv7-unknown-linux-musleabihf` (Raspberry Pi)
+
 <sub>This does not yet build successfully</sub>
+
 ```bash
 # Setup
 apt-get -y update
@@ -204,7 +216,9 @@ cargo build --release --locked --target armv7-unknown-linux-musleabihf
 ```
 
 ### ❌ Cross-compile for `x86_64-unknown-linux-musl` (Linux Musl)
+
 <sub>This does not yet build successfully</sub>
+
 ```bash
 docker pull clux/muslrust:stable
 docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --release --target x86_64-unknown-linux-musl
@@ -223,6 +237,7 @@ docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --rel
 <details><summary>Click to show details</summary>
 
 ### ✅ Compile for `x86_64-unknown-linux-gnu` (Linux)
+
 ```bash
 # Setup
 apt-get -y update
@@ -248,6 +263,7 @@ cargo build --release --locked --target x86_64-unknown-linux-gnu
 ```
 
 ### ✅ Compile for `aarch64-unknown-linux-gnu` (Linux)
+
 ```bash
 # Setup
 apt-get -y update
@@ -275,7 +291,9 @@ cargo build --release --locked --target aarch64-unknown-linux-gnu
 ```
 
 ### ❌ Cross-compile for `x86_64-pc-windows-gnu` (Windows)
+
 <sub>This does not yet build successfully</sub>
+
 ```bash
 # Setup
 sudo apt-get -y update
@@ -288,7 +306,9 @@ cargo build --release --locked --target x86_64-pc-windows-gnu
 ```
 
 ### ❌ Cross-compile for `armv7-unknown-linux-musleabihf` (Raspberry Pi)
+
 <sub>This does not yet build successfully</sub>
+
 ```bash
 # Setup
 apt-get -y update
@@ -316,7 +336,9 @@ cargo build --release --locked --target armv7-unknown-linux-musleabihf
 ```
 
 ### ❌ Cross-compile for `x86_64-unknown-linux-musl` (Linux Musl)
+
 <sub>This does not yet build successfully</sub>
+
 ```bash
 docker pull clux/muslrust:stable
 docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --release --target x86_64-unknown-linux-musl
@@ -335,6 +357,7 @@ docker run --pull --rm -v $PWD:/volume -t clux/muslrust:stable cargo build --rel
 <details><summary>Click to show details</summary>
 
 ### ✅ Compile for `x86_64-unknown-linux-gnu` (Linux)
+
 ```bash
 # Setup
 sudo apt-get -y update
@@ -358,60 +381,76 @@ rustup target add x86_64-unknown-linux-gnu
 # Compile for x86_64-unknown-linux-gnu
 cargo build --release --locked --target x86_64-unknown-linux-gnu
 ```
+
 </details>
 
 ## Building on Windows-amd64 (Windows OS)
 
 <details><summary>Click to show details</summary>
 
-###  ✅ Compile for `windows-amd64`
+### ✅ Compile for `windows-amd64`
 
-> Compiling SurrealDB with windows OS requires **Administrator** privilege!
+This repository builds on Windows using the **MSVC** toolchain (`x86_64-pc-windows-msvc`).
 
-⚠**Tested on Windows 11 build 22H2(22621.963)**
+`rustup` installs and manages the Rust toolchain, including both `rustc` and `cargo`.
 
-1. Install LLVM 👉 [Download Here](https://github.com/llvm/llvm-project/releases) *look for something like `LLVM-X.Y.Z-win64.exe`*
+Install prerequisites:
 
-2. Install `MYSYS2` 👉 Follow instructions on [their website](https://www.msys2.org/)
+1. **Visual Studio Build Tools 2022**
 
-3. When `MYSYS2` is installed it opens a shell. Install GCC via that shell
+    Install the **Desktop development with C++** workload (includes MSVC and Windows SDK).
+    This provides `cl.exe`, linker tools, headers, and libraries required by Rust crates
+    that compile native code on Windows.
 
-	```bash
-	pacman -S mingw-w64-i686-gcc
-	pacman -S mingw-w64-x86_64-gcc
-	```
+    > Note: this is **not** installed by the helper script (or Scoop here). Install it separately from Microsoft.
 
-4. Install `patch` GNU Util
+2. **Rust toolchain**
 
-	Go to GNUWin32 page for [*patch*](http://gnuwin32.sourceforge.net/packages/patch.htm) and
-	extract the [*patch*](http://gnuwin32.sourceforge.net/downlinks/patch-bin-zip.php)
-	binaries onto your drive. 
-	
-	e.g. "C:\patch"
+    Install Rust via `rustup` (stable channel).
 
-	> For some bizzarre reasons, **patch.exe needs elevated privileges** to be invoked during compilation
+3. **LLVM (with libclang)**
 
-5. Add `gcc` and `patch` binary path to environment
+    Needed by `bindgen` (used by RocksDB sys crates such as `surrealdb-librocksdb-sys`).
 
-	> Setting the environment variables for the entire system requires an **elevated ⚠** shell.
+4. **NASM**
 
-	```powershell
-	[System.Environment]::SetEnvironmentVariable(
-		"PATH", 
-		[System.Environment]::GetEnvironmentVariable("PATH", "Machine") + 
-		";" +
-		"C:\msys64\mingw64\bin;" +
-		"C:\msys64\mingw32\bin;" +
-		"C:\patch\bin;",
-		"Machine"
-	)
-	```
+    Needed by `aws-lc-sys` on Windows (used via Rust TLS dependencies).
 
-	Or do it manually via `sysdm.cpl`.
+5. **CMake**
 
-6. Run cargo in an **elevated ⚠** shell
+    Needed by native dependencies (for example `aws-lc-sys` C/C++ build steps).
 
-    Running `cargo build` in an **elevated shell** will now build the `SurrealDB` in Windows OS.
+Optional (Scoop):
+
+```powershell
+scoop install rustup llvm nasm cmake
+```
+
+Recommended Windows workflows:
+
+1. **Manual install path**
+    - Install prerequisites yourself (including Visual Studio Build Tools)
+
+2. **Bootstrap path**
+    - Install Visual Studio Build Tools
+    - Let the script install Scoop + missing user-space tools (`rustup`, `llvm`, `nasm`, `cmake`):
+
+    ```powershell
+    pwsh -File .\dev\windows\windows-setup-build-env.ps1 -InstallMissingTools
+    ```
+
+After setup, build from your terminal:
+
+```powershell
+cargo build --release
+```
+
+The helper script:
+
+- ensures Rust stable toolchain is available via `rustup`,
+- ensures `LLVM/libclang`, `NASM`, and `CMake` are available,
+- installs missing user-space tools automatically
+
 </details>
 
 ## Building using the Nix package manager
