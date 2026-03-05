@@ -49,6 +49,14 @@ impl Default for Config {
 	}
 }
 
+/// Named-field wrapper so that the untagged `SurrealValue` serialization
+/// can differentiate `Exclude` from `Some` (include).
+#[derive(Clone, Debug, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
+pub struct ExcludedTables {
+	pub exclude: Vec<String>,
+}
+
 #[derive(Clone, Debug, Default, SurrealValue)]
 #[surreal(crate = "surrealdb_types")]
 #[surreal(untagged)]
@@ -59,6 +67,7 @@ pub enum TableConfig {
 	#[surreal(value = false)]
 	None,
 	Some(Vec<String>),
+	Exclude(ExcludedTables),
 }
 
 // TODO: This should probably be removed
@@ -88,7 +97,7 @@ impl From<Vec<&str>> for TableConfig {
 impl TableConfig {
 	/// Check if we should export tables
 	pub(crate) fn is_any(&self) -> bool {
-		matches!(self, Self::All | Self::Some(_))
+		matches!(self, Self::All | Self::Some(_) | Self::Exclude(_))
 	}
 	// Check if we should export a specific table
 	pub(crate) fn includes(&self, table: &str) -> bool {
@@ -96,6 +105,15 @@ impl TableConfig {
 			Self::All => true,
 			Self::None => false,
 			Self::Some(v) => v.iter().any(|v| v.eq(table)),
+			Self::Exclude(v) => !v.exclude.iter().any(|v| v.eq(table)),
+		}
+	}
+	/// Returns the explicitly listed table names, if any.
+	pub(crate) fn names(&self) -> Option<&[String]> {
+		match self {
+			Self::Some(v) => Some(v.as_slice()),
+			Self::Exclude(v) => Some(v.exclude.as_slice()),
+			_ => None,
 		}
 	}
 }
@@ -258,6 +276,15 @@ impl Transaction {
 		}
 		// Fetch all of the tables for this NS / DB
 		let tables = self.all_tb(ns, db, None).await?;
+		// Warn if any specified table names don't match existing tables
+		if let Some(names) = cfg.tables.names() {
+			let existing: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
+			for name in names {
+				if !existing.contains(&name.as_str()) {
+					warn!("Table '{name}' does not exist in the database");
+				}
+			}
+		}
 		// Loop over all of the tables in order
 		for table in tables.iter() {
 			// Check if this table is included in the export config

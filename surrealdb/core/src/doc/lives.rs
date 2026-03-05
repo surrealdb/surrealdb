@@ -204,7 +204,7 @@ impl Document {
 		// clause for this table allows this document to
 		// be viewed by the user who created this LIVE
 		// query. If it does, then we can continue.
-		match self.lq_allow(stk, &ctx, &opt).await {
+		match self.lq_allow(stk, &ctx, &opt, is_delete).await {
 			Err(IgnoreError::Ignore) => return Ok(()),
 			Err(IgnoreError::Error(e)) => return Err(e),
 			Ok(_) => (),
@@ -354,6 +354,7 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
+		is_delete: bool,
 	) -> Result<(), IgnoreError> {
 		// Should we run permissions checks?
 		// Live queries are always
@@ -365,8 +366,13 @@ impl Document {
 				Permission::None => return Err(IgnoreError::Ignore),
 				Permission::Full => return Ok(()),
 				Permission::Specific(e) => {
-					// Retrieve the document to check permissions against
-					let doc = &self.current;
+					// Retrieve the document to check permissions against.
+					// For DELETE events, we need self.initial as self.current has been cleared.
+					let doc = if is_delete {
+						&self.initial
+					} else {
+						&self.current
+					};
 
 					// Disable permissions
 					let opt = &opt.new_with_perms(false);

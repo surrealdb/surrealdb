@@ -24,7 +24,7 @@ use crate::kvs::TransactionType::Write;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::tasklease::LeaseHandler;
 use crate::kvs::{
-	Datastore, HlcTimestamp, KVValue, Key, LockType, Transaction, TransactionFactory,
+	Datastore, HlcTimeStamp, KVValue, Key, LockType, Transaction, TransactionFactory,
 	TransactionType, Val, impl_kv_value_revisioned,
 };
 use crate::val::{RecordId, Value};
@@ -144,7 +144,7 @@ impl Document {
 		cursor_doc: &mut CursorDoc,
 	) -> Result<()> {
 		let node_id = opt.id();
-		let ts = HlcTimestamp::next();
+		let ts = HlcTimeStamp::next();
 		let db = doc_ctx.db();
 		let tx = ctx.tx();
 		// Persist the event payload so it can be processed out-of-band.

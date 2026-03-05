@@ -42,6 +42,10 @@ struct ExportConfigArguments {
 	/// Whether tables should be exported, optionally providing a list of tables
 	#[arg(long, num_args = 0..=1, default_missing_value = "true", value_parser = super::validator::export_tables)]
 	tables: Option<TableConfig>,
+	/// Comma-separated list of tables to exclude from the export
+	#[arg(long, value_parser = super::validator::export_tables_exclude)]
+	#[arg(conflicts_with = "tables")]
+	tables_exclude: Option<TableConfig>,
 	/// Whether versions should be exported
 	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
 	versions: Option<bool>,
@@ -180,8 +184,11 @@ fn apply_config<C: Connection, R>(
 		export = export.analyzers(value);
 	}
 
-	if let Some(tables) = config.tables {
-		export = export.tables(tables);
+	match (config.tables, config.tables_exclude) {
+		(Some(_), Some(_)) => unreachable!("Cannot specify both --tables and --tables-exclude"),
+		(Some(tables), None) => export = export.tables(tables),
+		(None, Some(tables_exclude)) => export = export.tables(tables_exclude),
+		(None, None) => {}
 	}
 
 	if let Some(value) = config.versions {

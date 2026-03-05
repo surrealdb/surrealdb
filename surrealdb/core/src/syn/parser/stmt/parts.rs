@@ -170,6 +170,8 @@ impl Parser<'_> {
 		idiom: &Idiom,
 		idiom_span: Span,
 	) -> ParseResult<()> {
+		let is_group = matches!(kind, MissingKind::Group);
+
 		match fields {
 			Fields::Value(field) => {
 				if let Some(alias) = &field.alias
@@ -180,12 +182,13 @@ impl Parser<'_> {
 
 				match &field.expr {
 					Expr::Idiom(x) => {
-						if idiom == x {
+						if idiom == x || (is_group && idiom_is_prefix(idiom, x)) {
 							return Ok(());
 						}
 					}
 					v => {
-						if *idiom == v.to_idiom() {
+						let vi = v.to_idiom();
+						if *idiom == vi || (is_group && idiom_is_prefix(idiom, &vi)) {
 							return Ok(());
 						}
 					}
@@ -206,12 +209,13 @@ impl Parser<'_> {
 
 					match &field.expr {
 						Expr::Idiom(x) => {
-							if idiom == x {
+							if idiom == x || (is_group && idiom_is_prefix(idiom, x)) {
 								return Ok(());
 							}
 						}
 						v => {
-							if *idiom == v.to_idiom() {
+							let vi = v.to_idiom();
+							if *idiom == vi || (is_group && idiom_is_prefix(idiom, &vi)) {
 								return Ok(());
 							}
 						}
@@ -596,4 +600,13 @@ impl Parser<'_> {
 		};
 		Ok(Some(with))
 	}
+}
+
+/// Check whether `prefix` is a strict prefix of `full`. For GROUP BY
+/// validation this allows `GROUP BY in` when the SELECT contains `in.name`,
+/// since the selected sub-path is functionally dependent on the group key.
+fn idiom_is_prefix(prefix: &Idiom, full: &Idiom) -> bool {
+	let pp = &prefix.0;
+	let fp = &full.0;
+	pp.len() < fp.len() && fp.starts_with(pp)
 }

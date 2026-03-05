@@ -516,6 +516,11 @@ impl Context {
 			.unwrap_or_else(|| unreachable!("The context was not associated with a transaction"))
 	}
 
+	/// Returns the transaction if one is associated with this context.
+	pub(crate) fn try_tx(&self) -> Option<&Arc<Transaction>> {
+		self.transaction.as_ref()
+	}
+
 	/// Get the timeout for this operation, if any. This is useful for
 	/// checking if a long job should be started or not.
 	pub(crate) fn timeout(&self) -> Option<Duration> {
