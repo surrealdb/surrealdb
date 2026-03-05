@@ -11,7 +11,8 @@ use futures::stream::FuturesUnordered;
 use opentelemetry::Context as TelemetryContext;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::{DbResponse, DbResult};
-use tokio::sync::RwLock;
+use surrealdb_types::Notification;
+use tokio::sync::{RwLock, broadcast};
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -27,6 +28,8 @@ type WebSockets = RwLock<HashMap<Uuid, WebSocket>>;
 /// Mapping of LIVE Query ID to WebSocket ID + Session ID
 type LiveQueries = RwLock<HashMap<Uuid, (Uuid, Option<Uuid>)>>;
 
+type NotificationBroadcaster = Arc<broadcast::Sender<Notification>>;
+
 pub struct RpcState {
 	/// Stores the currently connected WebSockets
 	pub web_sockets: WebSockets,
@@ -34,6 +37,7 @@ pub struct RpcState {
 	pub live_queries: LiveQueries,
 	/// HTTP RPC handler with persistent sessions
 	pub http: Arc<crate::rpc::http::Http>,
+	pub notification_broadcaster: NotificationBroadcaster,
 }
 
 impl RpcState {
@@ -41,10 +45,12 @@ impl RpcState {
 		datastore: Arc<surrealdb_core::kvs::Datastore>,
 		session: surrealdb_core::dbs::Session,
 	) -> Self {
+		let (notification_broadcaster, _) = broadcast::channel(4096);
 		Self {
 			web_sockets: RwLock::new(HashMap::new()),
 			live_queries: RwLock::new(HashMap::new()),
 			http: Arc::new(crate::rpc::http::Http::new(datastore, session)),
+			notification_broadcaster: Arc::new(notification_broadcaster),
 		}
 	}
 }
@@ -70,6 +76,7 @@ pub(crate) async fn notifications(
 				Some(_) = futures.next() => continue,
 				// Receive a notification on the channel
 				Ok(notification) = channel.recv() => {
+					let _ = state.notification_broadcaster.send(notification.clone());
 					// Get the id for this notification
 					let id = notification.id.as_ref();
 					// Get the WebSocket for this notification
