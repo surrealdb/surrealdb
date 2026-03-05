@@ -99,7 +99,7 @@ impl Parse for ast::TopLevelExpr {
 				let tx = parser
 					.with_state(
 						|state| state | ParserState::TRANSACTION,
-						async |parser| parser.parse_push().await,
+						async |parser| parser.parse().await,
 					)
 					.await?;
 				Ok(TopLevelExpr::Transaction(tx))
@@ -128,11 +128,11 @@ impl Parse for ast::TopLevelExpr {
 						.to_diagnostic()
 				}));
 			}
-			T![USE] => Ok(TopLevelExpr::Use(parser.parse_sync_push()?)),
-			T![OPTION] => Ok(TopLevelExpr::Option(parser.parse_sync_push()?)),
-			T![KILL] => Ok(TopLevelExpr::Kill(parser.parse_sync_push()?)),
-			T![SHOW] => Ok(TopLevelExpr::Show(parser.parse_push().await?)),
-			_ => Ok(TopLevelExpr::Expr(parser.parse_push().await?)),
+			T![USE] => Ok(TopLevelExpr::Use(parser.parse_sync()?)),
+			T![OPTION] => Ok(TopLevelExpr::Option(parser.parse_sync()?)),
+			T![KILL] => Ok(TopLevelExpr::Kill(parser.parse_sync()?)),
+			T![SHOW] => Ok(TopLevelExpr::Show(parser.parse().await?)),
+			_ => Ok(TopLevelExpr::Expr(parser.parse().await?)),
 		}
 	}
 }
@@ -231,8 +231,8 @@ impl ParseSync for ast::Kill {
 
 		let peek = parser.peek_expect("a UUID or a parameter")?;
 		let kind = match peek.token {
-			BaseTokenKind::UuidString => KillKind::Uuid(parser.parse_sync_push()?),
-			BaseTokenKind::Param => KillKind::Param(parser.parse_sync_push()?),
+			BaseTokenKind::UuidString => KillKind::Uuid(parser.parse_sync()?),
+			BaseTokenKind::Param => KillKind::Param(parser.parse_sync()?),
 			_ => return Err(parser.unexpected("a UUID or a parameter")),
 		};
 		Ok(ast::Kill {
@@ -247,15 +247,21 @@ impl ParseSync for ast::Use {
 		let start = parser.expect(T![USE])?.span;
 
 		let (kind, span) = if parser.eat(T![NAMESPACE])?.is_some() {
-			let ns = parser.parse_sync_push()?;
+			let ns = parser.parse_sync()?;
 			if parser.eat(T![DATABASE])?.is_some() {
-				let db = parser.parse_sync_push()?;
-				(UseKind::NamespaceDatabase(ns, db), start.extend(parser[db].span))
+				let db = parser.parse_sync()?;
+				(
+					UseKind::NamespaceDatabase {
+						namespace: ns,
+						database: db,
+					},
+					start.extend(parser[db].span),
+				)
 			} else {
 				(UseKind::Namespace(ns), start.extend(parser[ns].span))
 			}
 		} else if parser.eat(T![DATABASE])?.is_some() {
-			let db = parser.parse_sync_push()?;
+			let db = parser.parse_sync()?;
 
 			(UseKind::Database(db), start.extend(parser[db].span))
 		} else {
@@ -273,7 +279,7 @@ impl ParseSync for ast::OptionStmt {
 	fn parse_sync(parser: &mut Parser) -> super::ParseResult<Self> {
 		let start = parser.expect(T![OPTION])?.span;
 
-		let name = parser.parse_sync_push()?;
+		let name = parser.parse_sync()?;
 		let _ = parser.expect(T![=])?;
 		let value_token = parser.peek_expect("either `true` or `false`")?;
 		let value = match value_token.token {
@@ -303,7 +309,7 @@ impl Parse for ast::Show {
 		let target = match peek.token {
 			T![TABLE] => {
 				let _ = parser.next();
-				ast::ShowTarget::Table(parser.parse_sync_push()?)
+				ast::ShowTarget::Table(parser.parse_sync()?)
 			}
 			T![DATABASE] => {
 				let _ = parser.next();
@@ -316,13 +322,13 @@ impl Parse for ast::Show {
 
 		let peek = parser.peek_expect("a datetime or integer")?;
 		let since = match peek.token {
-			BaseTokenKind::DateTimeString => ast::ShowSince::Timestamp(parser.parse_sync_push()?),
-			BaseTokenKind::Int => ast::ShowSince::VersionStamp(parser.parse_sync_push()?),
+			BaseTokenKind::DateTimeString => ast::ShowSince::Timestamp(parser.parse_sync()?),
+			BaseTokenKind::Int => ast::ShowSince::VersionStamp(parser.parse_sync()?),
 			_ => return Err(parser.unexpected("a datetime or integer")),
 		};
 
 		let limit = if parser.eat(T![LIMIT])?.is_some() {
-			Some(parser.parse_enter_push().await?)
+			Some(parser.parse_enter().await?)
 		} else {
 			None
 		};

@@ -12,12 +12,12 @@ use crate::{Parse, ParseSync};
 impl ParseSync for ast::Mock {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
 		let start = parser.expect(T![|])?;
-		let name = parser.parse_sync_push()?;
+		let name = parser.parse_sync()?;
 		let _ = parser.expect(T![:])?;
 		let peek = parser.peek_expect("an integer or a range")?;
 		match peek.token {
 			BaseTokenKind::Int => {
-				let start_int = parser.parse_sync_push()?;
+				let start_int = parser.parse_sync()?;
 				let peek = parser.peek_expect("`|`")?;
 				match peek.token {
 					T![>] => {
@@ -33,7 +33,7 @@ impl ParseSync for ast::Mock {
 								let _ = parser.next();
 								let _ = parser.next();
 								let _ = parser.next();
-								let end = parser.parse_sync_push()?;
+								let end = parser.parse_sync()?;
 								let _ = parser.expect_closing_delimiter(T![|], start.span)?;
 
 								let span = parser.span_since(start.span);
@@ -52,7 +52,7 @@ impl ParseSync for ast::Mock {
 								// |a:1>..2|
 								let _ = parser.next();
 								let _ = parser.next();
-								let end = parser.parse_sync_push()?;
+								let end = parser.parse_sync()?;
 								let _ = parser.expect_closing_delimiter(T![|], start.span)?;
 
 								let span = parser.span_since(start.span);
@@ -91,7 +91,7 @@ impl ParseSync for ast::Mock {
 							// |a:1..=2|
 							let _ = parser.next();
 							let _ = parser.next();
-							let end = parser.parse_sync_push()?;
+							let end = parser.parse_sync()?;
 							let _ = parser.expect_closing_delimiter(T![|], start.span)?;
 
 							let span = parser.span_since(start.span);
@@ -109,7 +109,7 @@ impl ParseSync for ast::Mock {
 						{
 							// |a:..2|
 							let _ = parser.next();
-							let end = parser.parse_sync_push()?;
+							let end = parser.parse_sync()?;
 							let _ = parser.expect_closing_delimiter(T![|], start.span)?;
 
 							let span = parser.span_since(start.span);
@@ -155,7 +155,7 @@ impl ParseSync for ast::Mock {
 					// |a:..=2|
 					let _ = parser.next();
 					let _ = parser.next();
-					let end = parser.parse_sync_push()?;
+					let end = parser.parse_sync()?;
 					let _ = parser.expect_closing_delimiter(T![|], start.span)?;
 
 					let span = parser.span_since(start.span);
@@ -173,7 +173,7 @@ impl ParseSync for ast::Mock {
 				{
 					// |a:..2|
 					let _ = parser.next();
-					let end = parser.parse_sync_push()?;
+					let end = parser.parse_sync()?;
 					let _ = parser.expect_closing_delimiter(T![|], start.span)?;
 
 					let span = parser.span_since(start.span);
@@ -377,7 +377,7 @@ async fn parse_object_continue(
 
 	let _ = parser.expect(T![:])?;
 
-	let expr = parser.parse_enter_push::<Expr>().await?;
+	let expr = parser.parse_enter().await?;
 
 	let entry_span = parser.span_since(next.span);
 
@@ -414,7 +414,7 @@ async fn parse_object_continue(
 
 			let _ = parser.expect(T![:])?;
 
-			let expr = parser.parse_enter_push::<Expr>().await?;
+			let expr = parser.parse_enter().await?;
 
 			let entry_span = parser.span_since(peek.span);
 
@@ -531,11 +531,11 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			Ok(Expr::Builtin(builtin))
 		}
 		BaseTokenKind::Int => {
-			let value = parser.parse_sync_push()?;
+			let value = parser.parse_sync()?;
 			Ok(Expr::Integer(value))
 		}
 		BaseTokenKind::Float => {
-			let float = parser.parse_sync_push()?;
+			let float = parser.parse_sync()?;
 			Ok(Expr::Float(float))
 		}
 		BaseTokenKind::NaN => {
@@ -563,11 +563,11 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			Ok(Expr::Float(float))
 		}
 		BaseTokenKind::Decimal => {
-			let dec = parser.parse_sync_push()?;
+			let dec = parser.parse_sync()?;
 			Ok(Expr::Decimal(dec))
 		}
 		BaseTokenKind::OpenBracket => {
-			let p = parser.parse_push().await?;
+			let p = parser.parse().await?;
 			Ok(Expr::Array(p))
 		}
 		BaseTokenKind::OpenBrace => parse_object_like(parser).await,
@@ -603,11 +603,11 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			};
 
 			// not a point, so it has to be a covered expression.
-			let expr = parser.parse_enter_push().await?;
+			let expr = parser.parse_enter().await?;
 			let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, peek.span)?;
 			Ok(Expr::Covered(expr))
 		}
-		BaseTokenKind::String => Ok(Expr::String(parser.parse_sync_push()?)),
+		BaseTokenKind::String => Ok(Expr::String(parser.parse_sync()?)),
 		BaseTokenKind::RecordIdString => {
 			let _ = parser.next();
 			// TODO: Remove `to_owned` call.
@@ -640,82 +640,113 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			}
 		}
 		BaseTokenKind::UuidString => {
-			let uuid = parser.parse_sync_push()?;
+			let uuid = parser.parse_sync()?;
 			Ok(Expr::Uuid(uuid))
 		}
 		BaseTokenKind::DateTimeString => {
-			let uuid = parser.parse_sync_push()?;
+			let uuid = parser.parse_sync()?;
 			Ok(Expr::DateTime(uuid))
 		}
+		BaseTokenKind::FileString => {
+			let file = parser.parse_sync()?;
+			Ok(Expr::File(file))
+		}
 		BaseTokenKind::Duration => {
-			let uuid = parser.parse_sync_push()?;
+			let uuid = parser.parse_sync()?;
 			Ok(Expr::Duration(uuid))
 		}
 		T![|] => {
-			let uuid = parser.parse_sync_push()?;
+			let uuid = parser.parse_sync()?;
 			Ok(Expr::Mock(uuid))
 		}
 		T![/] => {
-			let regex = parser.parse_sync_push()?;
+			let regex = parser.parse_sync()?;
 			Ok(Expr::Regex(regex))
 		}
 		T![FUNCTION] => {
-			let js_function = parser.parse_push().await?;
+			let js_function = parser.parse().await?;
 			Ok(Expr::JsFunction(js_function))
 		}
 		T![IF] => {
-			let expr = parser.parse_push().await?;
+			let expr = parser.parse().await?;
 			Ok(Expr::If(expr))
 		}
 		T![LET] => {
-			let expr = parser.parse_push().await?;
+			let expr = parser.parse().await?;
 			Ok(Expr::Let(expr))
 		}
 		T![INFO] => {
-			let expr = parser.parse_push().await?;
+			let expr = parser.parse().await?;
 			Ok(Expr::Info(expr))
 		}
 		T![THROW] => {
 			let _ = parser.next();
-			let expr = parser.parse_enter_push().await?;
+			let expr = parser.parse_enter().await?;
 			Ok(Expr::Throw(expr))
 		}
 		T![DELETE] => {
-			let expr = parser.parse_push().await?;
+			let expr = parser.parse().await?;
 			Ok(Expr::Delete(expr))
 		}
 		T![CREATE] => {
-			let expr = parser.parse_push().await?;
+			let expr = parser.parse().await?;
 			Ok(Expr::Create(expr))
 		}
 		T![UPDATE] => {
-			let expr = parser.parse_push().await?;
+			let expr = parser.parse().await?;
 			Ok(Expr::Update(expr))
 		}
 		T![UPSERT] => {
-			let expr = parser.parse_push().await?;
+			let expr = parser.parse().await?;
 			Ok(Expr::Upsert(expr))
 		}
 		T![RELATE] => {
-			let expr = parser.parse_push().await?;
+			let expr = parser.parse().await?;
 			Ok(Expr::Relate(expr))
 		}
 		T![SELECT] => {
-			let expr = parser.parse_push().await?;
+			let expr = parser.parse().await?;
 			Ok(Expr::Select(expr))
 		}
+		T![DEFINE] => {
+			let expected = "a resource type to define";
+			let Some(peek) = parser.peek1()? else {
+				let _ = parser.next();
+				return Err(parser.unexpected(expected));
+			};
+			match peek.token {
+				T![NAMESPACE] => parser.parse().await.map(Expr::DefineNamespace),
+				T![DATABASE] => parser.parse().await.map(Expr::DefineDatabase),
+				T![TABLE] => parser.parse().await.map(Expr::DefineTable),
+				T![FUNCTION] => parser.parse().await.map(Expr::DefineFunction),
+				T![MODULE] => parser.parse().await.map(Expr::DefineModule),
+				T![PARAM] => parser.parse().await.map(Expr::DefineParam),
+				T![API] => parser.parse().await.map(Expr::DefineApi),
+				T![EVENT] => parser.parse().await.map(Expr::DefineEvent),
+				T![FIELD] => parser.parse().await.map(Expr::DefineField),
+				T![INDEX] => parser.parse().await.map(Expr::DefineIndex),
+				T![ANALYZER] => parser.parse().await.map(Expr::DefineAnalyzer),
+				T![BUCKET] => parser.parse().await.map(Expr::DefineBucket),
+				T![SEQUENCE] => parser.parse().await.map(Expr::DefineSequence),
+				T![CONFIG] => parser.parse().await.map(Expr::DefineConfig),
+				_ => {
+					let _ = parser.next();
+					return Err(parser.unexpected(expected));
+				}
+			}
+		}
 		BaseTokenKind::Param => {
-			let path = parser.parse_sync_push()?;
+			let path = parser.parse_sync()?;
 			Ok(Expr::Param(path))
 		}
 		x if x.is_identifier() => {
 			let peek1 = parser.peek1()?;
 
 			if peek1.map(|x| x.token) == Some(T![:]) {
-				let expr = parser.parse_push().await?;
+				let expr = parser.parse().await?;
 				Ok(Expr::RecordId(expr))
 			} else {
-				let path = parser.parse_sync_push()?;
+				let path = parser.parse_sync()?;
 				Ok(Expr::Path(path))
 			}
 		}

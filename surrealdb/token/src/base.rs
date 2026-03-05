@@ -223,6 +223,10 @@ pub enum BaseTokenKind {
 	KwComment,
 	#[regex(r"(?i)COMMIT")]
 	KwCommit,
+	#[regex(r"(?i)COMPLEXITY")]
+	KwComplexity,
+	#[regex(r"(?i)COMPUTED")]
+	KwComputed,
 	#[regex(r"(?i)CONCURRENTLY")]
 	KwConcurrently,
 	#[regex(r"(?i)CONFIG")]
@@ -231,8 +235,8 @@ pub enum BaseTokenKind {
 	KwContent,
 	#[regex(r"(?i)CONTINUE")]
 	KwContinue,
-	#[regex(r"(?i)COMPUTED")]
-	KwComputed,
+	#[regex(r"(?i)COUNT")]
+	KwCount,
 	#[regex(r"(?i)CREATE")]
 	KwCreate,
 	#[regex(r"(?i)DATABASE")]
@@ -244,6 +248,8 @@ pub enum BaseTokenKind {
 	KwDefine,
 	#[regex(r"(?i)DELETE")]
 	KwDelete,
+	#[regex(r"(?i)DEPTH")]
+	KwDepth,
 	#[regex(r"(?i)DESCENDING")]
 	#[regex(r"(?i)DESC")]
 	KwDescending,
@@ -323,6 +329,8 @@ pub enum BaseTokenKind {
 	KwGraphql,
 	#[regex(r"(?i)GROUP")]
 	KwGroup,
+	#[regex(r"(?i)HASHED_VECTOR")]
+	KwHashedVector,
 	#[regex(r"(?i)HEADERS")]
 	KwHeaders,
 	#[regex(r"(?i)HIGHLIGHTS")]
@@ -341,6 +349,8 @@ pub enum BaseTokenKind {
 	KwInsert,
 	#[regex(r"(?i)INTO")]
 	KwInto,
+	#[regex(r"(?i)INTROSPECTION")]
+	KwIntrospection,
 	#[regex(r"(?i)IF")]
 	KwIf,
 	#[regex(r"(?i)IS")]
@@ -667,79 +677,6 @@ pub enum BaseTokenKind {
 	#[regex(r"(?i)FILE")]
 	KwFile,
 
-	// Languages
-	#[regex(r"(?i)ARABIC")]
-	#[regex(r"(?i)ARA")]
-	#[regex(r"(?i)AR")]
-	KwArabic,
-	#[regex(r"(?i)DANISH")]
-	#[regex(r"(?i)DAN")]
-	#[regex(r"(?i)DA")]
-	KwDanish,
-	#[regex(r"(?i)DUTCH")]
-	#[regex(r"(?i)NLD")]
-	#[regex(r"(?i)NL")]
-	KwDutch,
-	#[regex(r"(?i)ENGLISH")]
-	#[regex(r"(?i)ENG")]
-	#[regex(r"(?i)EN")]
-	KwEnglish,
-	#[regex(r"(?i)FINNISH")]
-	#[regex(r"(?i)FIN")]
-	#[regex(r"(?i)FI")]
-	KwFinnish,
-	#[regex(r"(?i)FRENCH")]
-	#[regex(r"(?i)FRA")]
-	#[regex(r"(?i)FR")]
-	KwFrench,
-	#[regex(r"(?i)GERMAN")]
-	#[regex(r"(?i)DEU")]
-	#[regex(r"(?i)DE")]
-	KwGerman,
-	#[regex(r"(?i)GREEK")]
-	#[regex(r"(?i)ELL")]
-	#[regex(r"(?i)EL")]
-	KwGreek,
-	#[regex(r"(?i)HUNGARIAN")]
-	#[regex(r"(?i)HUN")]
-	#[regex(r"(?i)HU")]
-	KwHungarian,
-	#[regex(r"(?i)ITALIAN")]
-	#[regex(r"(?i)ITA")]
-	#[regex(r"(?i)IT")]
-	KwItalian,
-	#[regex(r"(?i)NORWEGIAN")]
-	#[regex(r"(?i)NOR")]
-	KwNorwegian,
-	#[regex(r"(?i)PORTUGUESE")]
-	#[regex(r"(?i)POR")]
-	#[regex(r"(?i)PT")]
-	KwPortuguese,
-	#[regex(r"(?i)ROMANIAN")]
-	#[regex(r"(?i)RON")]
-	#[regex(r"(?i)RO")]
-	KwRomanian,
-	#[regex(r"(?i)RUSSIAN")]
-	#[regex(r"(?i)RUS")]
-	#[regex(r"(?i)RU")]
-	KwRussian,
-	#[regex(r"(?i)SPANISH")]
-	#[regex(r"(?i)SPA")]
-	#[regex(r"(?i)ES")]
-	KwSpanish,
-	#[regex(r"(?i)SWEDISH")]
-	#[regex(r"(?i)SWE")]
-	#[regex(r"(?i)SV")]
-	KwSwedish,
-	#[regex(r"(?i)TAMIL")]
-	#[regex(r"(?i)TAM")]
-	#[regex(r"(?i)TA")]
-	KwTamil,
-	#[regex(r"(?i)TURKISH")]
-	#[regex(r"(?i)TUR")]
-	#[regex(r"(?i)TR")]
-	KwTurkish,
-
 	#[regex(r"(?i)EDDSA")]
 	KwEdDSA,
 	#[regex(r"(?i)ES256")]
@@ -945,16 +882,19 @@ impl BaseTokenKind {
 			BaseTokenKind::KwClass => "keyword `CLASS`",
 			BaseTokenKind::KwComment => "keyword `COMMENT`",
 			BaseTokenKind::KwCommit => "keyword `COMMIT`",
+			BaseTokenKind::KwComplexity => "keyword `COMPLEXITY`",
+			BaseTokenKind::KwComputed => "keyword `COMPUTED`",
 			BaseTokenKind::KwConcurrently => "keyword `CONCURRENTLY`",
 			BaseTokenKind::KwConfig => "keyword `CONFIG`",
 			BaseTokenKind::KwContent => "keyword `CONTENT`",
 			BaseTokenKind::KwContinue => "keyword `CONTINUE`",
-			BaseTokenKind::KwComputed => "keyword `COMPUTED`",
+			BaseTokenKind::KwCount => "keyword `COUNT`",
 			BaseTokenKind::KwCreate => "keyword `CREATE`",
 			BaseTokenKind::KwDatabase => "keyword `DATABASE`",
 			BaseTokenKind::KwDefault => "keyword `DEFAULT`",
 			BaseTokenKind::KwDefine => "keyword `DEFINE`",
 			BaseTokenKind::KwDelete => "keyword `DELETE`",
+			BaseTokenKind::KwDepth => "keyword `DEPTH`",
 			BaseTokenKind::KwDescending => "keyword `DESCENDING`",
 			BaseTokenKind::KwDiff => "keyword `DIFF`",
 			BaseTokenKind::KwDimension => "keyword `DIMENSION`",
@@ -992,6 +932,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwGrant => "keyword `GRANT`",
 			BaseTokenKind::KwGraphql => "keyword `GRAPHQL`",
 			BaseTokenKind::KwGroup => "keyword `GROUP`",
+			BaseTokenKind::KwHashedVector => "keyword `HASHED_VECTOR`",
 			BaseTokenKind::KwHeaders => "keyword `HEADERS`",
 			BaseTokenKind::KwHighlights => "keyword `HIGHLIGHTS`",
 			BaseTokenKind::KwHnsw => "keyword `HNSW`",
@@ -1001,6 +942,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwInfo => "keyword `INFO`",
 			BaseTokenKind::KwInsert => "keyword `INSERT`",
 			BaseTokenKind::KwInto => "keyword `INTO`",
+			BaseTokenKind::KwIntrospection => "keyword `INTROSPECTION`",
 			BaseTokenKind::KwIf => "keyword `IF`",
 			BaseTokenKind::KwIs => "keyword `IS`",
 			BaseTokenKind::KwIssuer => "keyword `ISSUER`",
@@ -1160,24 +1102,6 @@ impl BaseTokenKind {
 			BaseTokenKind::KwMultiPolygon => "keyword `MULTIPOLYGON`",
 			BaseTokenKind::KwCollection => "keyword `COLLECTION`",
 			BaseTokenKind::KwFile => "keyword `FILE`",
-			BaseTokenKind::KwArabic => "keyword `ARABIC`",
-			BaseTokenKind::KwDanish => "keyword `DANISH`",
-			BaseTokenKind::KwDutch => "keyword `DUTCH`",
-			BaseTokenKind::KwEnglish => "keyword `ENGLISH`",
-			BaseTokenKind::KwFinnish => "keyword `FINNISH`",
-			BaseTokenKind::KwFrench => "keyword `FRENCH`",
-			BaseTokenKind::KwGerman => "keyword `GERMAN`",
-			BaseTokenKind::KwGreek => "keyword `GREEK`",
-			BaseTokenKind::KwHungarian => "keyword `HUNGARIAN`",
-			BaseTokenKind::KwItalian => "keyword `ITALIAN`",
-			BaseTokenKind::KwNorwegian => "keyword `NORWEGIAN`",
-			BaseTokenKind::KwPortuguese => "keyword `PORTUGUESE`",
-			BaseTokenKind::KwRomanian => "keyword `ROMANIAN`",
-			BaseTokenKind::KwRussian => "keyword `RUSSIAN`",
-			BaseTokenKind::KwSpanish => "keyword `SPANISH`",
-			BaseTokenKind::KwSwedish => "keyword `SWEDISH`",
-			BaseTokenKind::KwTamil => "keyword `TAMIL`",
-			BaseTokenKind::KwTurkish => "keyword `TURKISH`",
 			BaseTokenKind::KwEdDSA => "keyword `EDDSA`",
 			BaseTokenKind::KwEs256 => "keyword `ES256`",
 			BaseTokenKind::KwEs384 => "keyword `ES384`",
@@ -1464,24 +1388,6 @@ impl BaseTokenKind {
 				| Self::KwMultiPolygon
 				| Self::KwCollection
 				| Self::KwFile
-				| Self::KwArabic
-				| Self::KwDanish
-				| Self::KwDutch
-				| Self::KwEnglish
-				| Self::KwFinnish
-				| Self::KwFrench
-				| Self::KwGerman
-				| Self::KwGreek
-				| Self::KwHungarian
-				| Self::KwItalian
-				| Self::KwNorwegian
-				| Self::KwPortuguese
-				| Self::KwRomanian
-				| Self::KwRussian
-				| Self::KwSpanish
-				| Self::KwSwedish
-				| Self::KwTamil
-				| Self::KwTurkish
 				| Self::KwEdDSA
 				| Self::KwEs256
 				| Self::KwEs384

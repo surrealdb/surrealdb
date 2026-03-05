@@ -223,14 +223,20 @@ macro_rules! T {
 	(CLASS) => {
 		$crate::BaseTokenKind::KwClass
 	};
+	(CONCURRENTLY) => {
+		$crate::BaseTokenKind::KwConcurrently
+	};
 	(COMMENT) => {
 		$crate::BaseTokenKind::KwComment
 	};
 	(COMMIT) => {
 		$crate::BaseTokenKind::KwCommit
 	};
-	(CONCURRENTLY) => {
-		$crate::BaseTokenKind::KwConcurrently
+	(COMPLEXITY) => {
+		$crate::BaseTokenKind::KwComplexity
+	};
+	(COMPUTED) => {
+		$crate::BaseTokenKind::KwComputed
 	};
 	(CONFIG) => {
 		$crate::BaseTokenKind::KwConfig
@@ -241,8 +247,8 @@ macro_rules! T {
 	(CONTINUE) => {
 		$crate::BaseTokenKind::KwContinue
 	};
-	(COMPUTED) => {
-		$crate::BaseTokenKind::KwComputed
+	(COUNT) => {
+		$crate::BaseTokenKind::KwCount
 	};
 	(CREATE) => {
 		$crate::BaseTokenKind::KwCreate
@@ -258,6 +264,9 @@ macro_rules! T {
 	};
 	(DELETE) => {
 		$crate::BaseTokenKind::KwDelete
+	};
+	(DEPTH) => {
+		$crate::BaseTokenKind::KwDepth
 	};
 	(DESCENDING) => {
 		$crate::BaseTokenKind::KwDescending
@@ -370,6 +379,9 @@ macro_rules! T {
 	(GROUP) => {
 		$crate::BaseTokenKind::KwGroup
 	};
+	(HASHED_VECTOR) => {
+		$crate::BaseTokenKind::KwHashedVector
+	};
 	(HEADERS) => {
 		$crate::BaseTokenKind::KwHeaders
 	};
@@ -396,6 +408,9 @@ macro_rules! T {
 	};
 	(INTO) => {
 		$crate::BaseTokenKind::KwInto
+	};
+	(INTROSPECTION) => {
+		$crate::BaseTokenKind::KwIntrospection
 	};
 	(IF) => {
 		$crate::BaseTokenKind::KwIf

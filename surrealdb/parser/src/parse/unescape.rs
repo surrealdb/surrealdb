@@ -237,7 +237,8 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			BaseTokenKind::String => 1,
 			BaseTokenKind::RecordIdString
 			| BaseTokenKind::UuidString
-			| BaseTokenKind::DateTimeString => 2,
+			| BaseTokenKind::DateTimeString
+			| BaseTokenKind::FileString => 2,
 			_ => panic!("unescape_str should only be called with string like tokens"),
 		};
 		let slice = self.slice(token.span);

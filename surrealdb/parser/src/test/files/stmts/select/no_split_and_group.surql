@@ -6,7 +6,7 @@ ERROR:Error: Unexpected token `GrOUP`, selects cannot both have a `GROUP BY` cla
 1 | SELECT a FROM b SPLIT ON a GrOUP BY b;
   |                            ^^^^^ 
 1 | SELECT a FROM b SPLIT ON a GrOUP BY b;
-  |                 ^^^^^^^^^^ Previous `SPLIT ON` clause
+  |                 ---------- Previous `SPLIT ON` clause
 
 
 */

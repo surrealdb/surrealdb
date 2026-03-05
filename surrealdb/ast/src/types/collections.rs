@@ -1,6 +1,3 @@
-use std::borrow::Borrow;
-use std::hash::Hash;
-
 use common::ids::{IdSet, SetEntry};
 
 use super::{Node, NodeCollection, NodeSet, NodeVec, UniqueNode};

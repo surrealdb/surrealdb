@@ -63,7 +63,7 @@ impl ParseSync for Decimal {
 impl ParseSync for ast::Path {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
 		let span = parser.peek_span();
-		let start = parser.parse_sync_push()?;
+		let start = parser.parse_sync()?;
 
 		let mut cur = None;
 		let mut parts = None;
@@ -81,7 +81,7 @@ impl ParseSync for ast::Path {
 					PathSegment::Version(v)
 				}
 				x if x.is_identifier() => {
-					let ident = parser.parse_sync_push()?;
+					let ident = parser.parse_sync()?;
 					PathSegment::Ident(ident)
 				}
 				_ => return Err(parser.unexpected("a version or a identifier")),
@@ -131,7 +131,7 @@ impl ParseSync for ast::StringLit {
 
 impl ParseSync for ast::FileLit {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
-		let token = parser.expect(BaseTokenKind::String)?;
+		let token = parser.expect(BaseTokenKind::FileString)?;
 		let slice = parser.unescape_str_push(token)?;
 		Ok(ast::FileLit {
 			path: slice,

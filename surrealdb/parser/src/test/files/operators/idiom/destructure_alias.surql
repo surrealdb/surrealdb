@@ -10,21 +10,21 @@ Query
                             .start: Ident
                                 .text: "a"
                             .parts: None
-                    .op: PostfixOperator::Destructure
-                        .op: Some
+                    .op: IdiomOperator::Destructure
+                        Some
                             -Destructure
                                 .field: Ident
                                     .text: "field1"
                                 .op: Some
                                     DestructureOperator::Expr
-                                        .expr: Expr::Builtin
+                                        Expr::Builtin
                                             Builtin::True
                             -Destructure
                                 .field: Ident
                                     .text: "field2"
                                 .op: Some
                                     DestructureOperator::Expr
-                                        .expr: Expr::Binary
+                                        Expr::Binary
                                             BinaryExpr
                                                 .left: Expr::Integer
                                                     +1

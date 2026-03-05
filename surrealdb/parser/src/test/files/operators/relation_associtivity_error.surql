@@ -6,7 +6,7 @@ ERROR:Error: Operator `==` has no defined associativity
 1 | a == b == c
   |   ^^ Cover either this expression.
 1 | a == b == c
-  |        ^^ Or this expression with `()` to define an order of operations
+  |        -- Or this expression with `()` to define an order of operations
 
 
 */

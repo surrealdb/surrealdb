@@ -102,15 +102,15 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<PrimeType>
 			Ok(ast::PrimeType::LitFloat(builtin))
 		}
 		BaseTokenKind::Int => {
-			let int = parser.parse_sync_push()?;
+			let int = parser.parse_sync()?;
 			Ok(ast::PrimeType::LitInteger(int))
 		}
 		BaseTokenKind::Float => {
-			let int = parser.parse_sync_push()?;
+			let int = parser.parse_sync()?;
 			Ok(ast::PrimeType::LitFloat(int))
 		}
 		BaseTokenKind::Decimal => {
-			let int = parser.parse_sync_push()?;
+			let int = parser.parse_sync()?;
 			Ok(ast::PrimeType::LitDecimal(int))
 		}
 		BaseTokenKind::OpenBrace => {
@@ -130,11 +130,11 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<PrimeType>
 								span: key_peek.span,
 							})
 						}
-						x if x.is_identifier() => parser.parse_sync_push()?,
+						x if x.is_identifier() => parser.parse_sync()?,
 						_ => return Err(parser.unexpected("an object key")),
 					};
 					let _ = parser.expect(T![:])?;
-					let ty = parser.parse_enter_push().await?;
+					let ty = parser.parse_enter().await?;
 
 					let span = parser.span_since(key_peek.span);
 
@@ -251,9 +251,9 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<PrimeType>
 			let _ = parser.next();
 
 			let (ty, size) = if let Some(x) = parser.eat(T![<])? {
-				let ty = parser.parse_enter_push().await?;
+				let ty = parser.parse_enter().await?;
 				let size = if parser.eat(T![,])?.is_some() {
-					Some(parser.parse_sync_push()?)
+					Some(parser.parse_sync()?)
 				} else {
 					None
 				};
@@ -276,9 +276,9 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<PrimeType>
 			let _ = parser.next();
 
 			let (ty, size) = if let Some(x) = parser.eat(T![<])? {
-				let ty = parser.parse_enter_push().await?;
+				let ty = parser.parse_enter().await?;
 				let size = if parser.eat(T![,])?.is_some() {
-					Some(parser.parse_sync_push()?)
+					Some(parser.parse_sync()?)
 				} else {
 					None
 				};

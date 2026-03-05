@@ -60,6 +60,24 @@ library! {
 		define_ns_stmt: Vec<DefineNamespace>,
 		define_db_stmt: Vec<DefineDatabase>,
 		define_function_stmt: Vec<DefineFunction>,
+		define_table_stmt: Vec<DefineTable>,
+		define_module: Vec<DefineModule>,
+		define_param: Vec<DefineParam>,
+		define_event: Vec<DefineEvent>,
+		define_field: Vec<DefineField>,
+		define_index: Vec<DefineIndex>,
+		define_bucket: Vec<DefineBucket>,
+		define_sequence: Vec<DefineSequence>,
+		define_config: Vec<DefineConfig>,
+
+		filter: Vec<Filter>,
+		filters: Vec<NodeList<Filter>>,
+		define_analyzer: Vec<DefineAnalyzer>,
+
+		api_action: Vec<ApiAction>,
+		api_middleware: Vec<ApiMiddleware>,
+		api_middlewares: Vec<NodeList<ApiMiddleware>>,
+		define_api: Vec<DefineApi>,
 
 		expr: Vec<Expr>,
 		exprs: Vec<NodeList<Expr>>,
@@ -74,6 +92,7 @@ library! {
 		datetime: Vec<Spanned<DateTime>>,
 		duration: Vec<Spanned<Duration>>,
 		str: Vec<StringLit>,
+		files: Vec<FileLit>,
 		regex: Vec<Regex>,
 		js_function: Vec<JsFunction>,
 
@@ -134,6 +153,7 @@ library! {
 		record_table_type: Vec<IdentListType>,
 
 		path: Vec<Path>,
+		paths: Vec<NodeList<Path>>,
 		path_segment: Vec<PathSegment>,
 		path_segments: Vec<NodeList<PathSegment>>,
 
@@ -481,6 +501,7 @@ pub enum DefineKind {
 impl_vis_debug!(DefineKind);
 
 ast_type! {
+	#[derive(Clone)]
 	pub enum Permission{
 		None(Span),
 		Full(Span),
@@ -581,6 +602,16 @@ pub enum Schema {
 }
 impl_vis_debug!(Schema);
 
+impl_vis_type! {
+	#[derive(Debug)]
+	pub struct TablePermissions{
+		pub create: Option<Permission>,
+		pub delete: Option<Permission>,
+		pub update: Option<Permission>,
+		pub select: Option<Permission>,
+	}
+}
+
 ast_type! {
 	pub struct DefineTable{
 		pub kind: DefineKind,
@@ -589,7 +620,7 @@ ast_type! {
 		pub drop: bool,
 		pub schema: Option<Schema>,
 		pub table_kind: Option<TableKind>,
-		pub permission: Option<Permission>,
+		pub permission: Option<TablePermissions>,
 		pub changefeed: Option<ChangeFeed>,
 		pub view: Option<NodeId<Select>>,
 	}
@@ -671,6 +702,15 @@ impl_vis_type! {
 	}
 }
 
+impl_vis_type! {
+	#[derive(Debug)]
+	pub struct FieldPermissions{
+		pub create: Option<Permission>,
+		pub update: Option<Permission>,
+		pub select: Option<Permission>,
+	}
+}
+
 ast_type! {
 	pub struct DefineField{
 		pub kind: DefineKind,
@@ -683,7 +723,7 @@ ast_type! {
 		pub assert: Option<NodeId<Expr>>,
 		pub computed: Option<NodeId<Expr>>,
 		pub default: Option<DefineFieldDefault>,
-		pub permissions: Option<Permission>,
+		pub permissions: Option<FieldPermissions>,
 		pub comment: Option<NodeId<Expr>>,
 		// NOTE: maybe move into own struct if `REFERENCE` gets more subclauses.
 		/// `REFERENCE ON DELETE` clause
@@ -710,7 +750,7 @@ impl_vis_type! {
 
 ast_type! {
 	pub struct FullTextIndex{
-		pub analyzer: Option<NodeId<StringLit>>,
+		pub analyzer: Option<NodeId<Ident>>,
 		pub highlights: bool,
 		pub scoring: Option<FullTextScoring>,
 	}
@@ -848,9 +888,9 @@ impl_vis_type! {
 
 ast_type! {
 	pub struct DefineConfigGraphql{
-		pub introspection: GraphqlIntrospection,
-		pub table_config: TablesConfig,
-		pub function_config: FunctionConfig,
+		pub introspection: Option<GraphqlIntrospection>,
+		pub table_config: Option<TablesConfig>,
+		pub function_config: Option<FunctionConfig>,
 		pub depth_limit: Option<NodeId<Integer>>,
 		pub complexity_limit: Option<NodeId<Integer>>,
 	}
@@ -894,6 +934,7 @@ ast_type! {
 		Uuid(NodeId<Spanned<Uuid>>),
 		DateTime(NodeId<Spanned<DateTime>>),
 		Duration(NodeId<Spanned<Duration>>),
+		File(NodeId<FileLit>),
 
 		Point(NodeId<Point>),
 
@@ -927,7 +968,20 @@ ast_type! {
 		Delete(NodeId<Delete>),
 		Relate(NodeId<Relate>),
 		Select(NodeId<Select>),
+		DefineNamespace(NodeId<DefineNamespace>),
+		DefineDatabase(NodeId<DefineDatabase>),
 		DefineTable(NodeId<DefineTable>),
+		DefineFunction(NodeId<DefineFunction>),
+		DefineModule(NodeId<DefineModule>),
+		DefineParam(NodeId<DefineParam>),
+		DefineApi(NodeId<DefineApi>),
+		DefineEvent(NodeId<DefineEvent>),
+		DefineField(NodeId<DefineField>),
+		DefineIndex(NodeId<DefineIndex>),
+		DefineAnalyzer(NodeId<DefineAnalyzer>),
+		DefineBucket(NodeId<DefineBucket>),
+		DefineSequence(NodeId<DefineSequence>),
+		DefineConfig(NodeId<DefineConfig>),
 	}
 }
 

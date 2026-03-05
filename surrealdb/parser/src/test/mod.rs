@@ -62,13 +62,9 @@ fn text_test() {
 			&source,
 			Config {
 				depth_limit: 1000,
-				flexible_record_ids: true,
 				generate_warnings: true,
-				feature_references: true,
 				feature_bearer_access: true,
-				feature_define_api: true,
-				feature_files: true,
-				legacy_strands: false,
+				feature_surrealism: true,
 			},
 		);
 

@@ -10,14 +10,14 @@ Query
                             .start: Ident
                                 .text: "a"
                             .parts: None
-                    .op: PostfixOperator::Destructure
-                        .op: Some
+                    .op: IdiomOperator::Destructure
+                        Some
                             -Destructure
                                 .field: Ident
                                     .text: "b"
                                 .op: Some
                                     DestructureOperator::Destructure
-                                        .op: Some
+                                        Some
                                             -Destructure
                                                 .field: Ident
                                                     .text: "c"

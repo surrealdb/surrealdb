@@ -12,8 +12,8 @@ Query
                             .start: Ident
                                 .text: "a"
                             .parts: None
-                    .op: PostfixOperator::Where
-                        .expr: Expr::Builtin
+                    .op: IdiomOperator::Where
+                        Expr::Builtin
                             Builtin::True
         -TopLevelExpr::Expr
             Expr::Idiom
@@ -23,8 +23,8 @@ Query
                             .start: Ident
                                 .text: "a"
                             .parts: None
-                    .op: PostfixOperator::Where
-                        .expr: Expr::Builtin
+                    .op: IdiomOperator::Where
+                        Expr::Builtin
                             Builtin::False
         -TopLevelExpr::Expr
             Expr::Idiom
@@ -34,8 +34,8 @@ Query
                             .start: Ident
                                 .text: "a"
                             .parts: None
-                    .op: PostfixOperator::Where
-                        .expr: Expr::Binary
+                    .op: IdiomOperator::Where
+                        Expr::Binary
                             BinaryExpr
                                 .left: Expr::Integer
                                     +1

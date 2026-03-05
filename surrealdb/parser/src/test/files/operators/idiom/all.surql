@@ -11,7 +11,7 @@ Query
                             .start: Ident
                                 .text: "a"
                             .parts: None
-                    .op: PostfixOperator::All
+                    .op: IdiomOperator::All
         -TopLevelExpr::Expr
             Expr::Idiom
                 IdiomExpr
@@ -20,5 +20,5 @@ Query
                             .start: Ident
                                 .text: "a"
                             .parts: None
-                    .op: PostfixOperator::All
+                    .op: IdiomOperator::All
 */

@@ -70,7 +70,7 @@ async fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 			Some(T![-] | T![->]) => return parser.todo(),
 			_ => {
 				let _ = parser.next();
-				let ty = parser.parse_push().await?;
+				let ty = parser.parse().await?;
 				let _ = parser.expect_closing_delimiter(T![>], token.span)?;
 
 				PrefixOperator::Cast(ty)
@@ -348,7 +348,7 @@ async fn parse_bracket_postfix(
 			let _ = parser.next();
 
 			let left = parser.push(lhs);
-			let cond = parser.parse_enter_push().await?;
+			let cond = parser.parse_enter().await?;
 			let close =
 				parser.expect_closing_delimiter(BaseTokenKind::CloseBracket, open_token.span)?;
 			let op = IdiomOperator::Where(cond);
@@ -398,7 +398,7 @@ async fn parse_bracket_postfix(
 			let _ = parser.next();
 
 			let left = parser.push(lhs);
-			let index = parser.parse_enter_push().await?;
+			let index = parser.parse_enter().await?;
 			let close =
 				parser.expect_closing_delimiter(BaseTokenKind::CloseBracket, open_token.span)?;
 			let op = IdiomOperator::Index(index);
@@ -418,13 +418,13 @@ async fn parse_bracket_postfix(
 impl Parse for ast::Destructure {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.peek_span();
-		let field = parser.parse_sync_push()?;
+		let field = parser.parse_sync()?;
 
 		let peek = parser.peek_expect("`}`")?;
 		match peek.token {
 			T![:] => {
 				let _ = parser.next();
-				let expr = parser.parse_enter_push().await?;
+				let expr = parser.parse_enter().await?;
 
 				Ok(ast::Destructure {
 					field,
