@@ -4,11 +4,13 @@ mod kind;
 mod misc;
 mod primitives;
 mod record;
+mod surrealism;
 mod table;
 mod value;
 
 use anyhow::Context;
 
+pub use self::surrealism::*;
 use crate::{Kind, SurrealValue, Value};
 
 /// Trait for converting a type to a flatbuffers builder type.

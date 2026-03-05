@@ -35,7 +35,6 @@ use anyhow::Context;
 use async_trait::async_trait;
 use surrealism_types::args::Args;
 use surrealism_types::err::{PrefixErr, SurrealismError, SurrealismResult};
-use surrealism_types::serialize::{Serializable, Serialized};
 use surrealism_types::transfer::AsyncTransfer;
 use wasmtime::component::ResourceTable;
 use wasmtime::*;
@@ -122,6 +121,7 @@ impl fmt::Debug for RuntimeKind {
 pub struct Runtime {
 	inner: RuntimeKind,
 	config: Arc<SurrealismConfig>,
+	wasm_size: usize,
 }
 
 fn build_engine_config() -> Config {
@@ -148,6 +148,7 @@ impl Runtime {
 		}: SurrealismPackage,
 	) -> SurrealismResult<Self> {
 		let config = Arc::new(config);
+		let wasm_size = wasm.len();
 
 		let inner = match kind {
 			ModuleKind::CoreModule => Self::build_p1(&wasm)?,
@@ -157,7 +158,13 @@ impl Runtime {
 		Ok(Self {
 			inner,
 			config,
+			wasm_size,
 		})
+	}
+
+	/// Returns the size of the original WASM binary in bytes.
+	pub fn wasm_size(&self) -> usize {
+		self.wasm_size
 	}
 
 	fn build_p1(wasm: &[u8]) -> SurrealismResult<RuntimeKind> {
@@ -223,12 +230,21 @@ impl Runtime {
 				let memory = instance
 					.get_memory(&mut store, "memory")
 					.context("WASM module must export 'memory'")?;
+				let alloc_fn = instance
+					.get_typed_func::<(u32,), i32>(&mut store, "__sr_alloc")
+					.map_err(|e| anyhow::anyhow!("WASM module must export '__sr_alloc': {e}"))?;
+				let free_fn =
+					instance
+						.get_typed_func::<(u32, u32), i32>(&mut store, "__sr_free")
+						.map_err(|e| anyhow::anyhow!("WASM module must export '__sr_free': {e}"))?;
 
 				Ok(Controller {
 					inner: ControllerKind::P1(P1Controller {
 						store,
 						instance,
 						memory,
+						alloc_fn,
+						free_fn,
 					}),
 				})
 			}
@@ -341,27 +357,11 @@ pub(crate) struct P1Controller {
 	pub(super) store: Store<P1StoreData>,
 	pub(super) instance: Instance,
 	pub(super) memory: Memory,
+	alloc_fn: TypedFunc<(u32,), i32>,
+	free_fn: TypedFunc<(u32, u32), i32>,
 }
 
 impl P1Controller {
-	async fn alloc(&mut self, len: u32) -> SurrealismResult<u32> {
-		let alloc = self.instance.get_typed_func::<(u32,), i32>(&mut self.store, "__sr_alloc")?;
-		let result = alloc.call_async(&mut self.store, (len,)).await?;
-		if result == -1 {
-			return Err(SurrealismError::AllocFailed);
-		}
-		Ok(result as u32)
-	}
-
-	async fn free(&mut self, ptr: u32, len: u32) -> SurrealismResult<()> {
-		let free = self.instance.get_typed_func::<(u32, u32), i32>(&mut self.store, "__sr_free")?;
-		let result = free.call_async(&mut self.store, (ptr, len)).await?;
-		if result == -1 {
-			return Err(SurrealismError::FreeFailed);
-		}
-		Ok(())
-	}
-
 	async fn init(&mut self) -> SurrealismResult<()> {
 		let init: Option<Extern> = self.instance.get_export(&mut self.store, "__sr_init");
 		if init.is_none() {
@@ -441,11 +441,19 @@ impl P1Controller {
 #[async_trait]
 impl surrealism_types::controller::AsyncMemoryController for P1Controller {
 	async fn alloc(&mut self, len: u32) -> SurrealismResult<u32> {
-		P1Controller::alloc(self, len).await
+		let result = self.alloc_fn.call_async(&mut self.store, (len,)).await?;
+		if result == -1 {
+			return Err(SurrealismError::AllocFailed);
+		}
+		Ok(result as u32)
 	}
 
 	async fn free(&mut self, ptr: u32, len: u32) -> SurrealismResult<()> {
-		P1Controller::free(self, ptr, len).await
+		let result = self.free_fn.call_async(&mut self.store, (ptr, len)).await?;
+		if result == -1 {
+			return Err(SurrealismError::FreeFailed);
+		}
+		Ok(())
 	}
 
 	fn mut_mem(&mut self, ptr: u32, len: u32) -> SurrealismResult<&mut [u8]> {
@@ -489,7 +497,7 @@ impl P2Controller {
 		name: Option<String>,
 		args: A,
 	) -> SurrealismResult<surrealdb_types::Value> {
-		let args_bytes = Vec::<surrealdb_types::Value>::serialize(args.to_values())?.0.to_vec();
+		let args_bytes = surrealdb_types::encode_value_list(&args.to_values())?;
 
 		let func = self
 			.instance
@@ -501,7 +509,7 @@ impl P2Controller {
 		let (result,) = typed.call_async(&mut self.store, (&call_name, &args_bytes)).await?;
 
 		let result_bytes = result.map_err(SurrealismError::FunctionCallError)?;
-		let value = surrealdb_types::Value::deserialize(Serialized(result_bytes.into()))?;
+		let value = surrealdb_types::decode::<surrealdb_types::Value>(&result_bytes)?;
 		Ok(value)
 	}
 
@@ -516,7 +524,7 @@ impl P2Controller {
 		let (result,) = typed.call_async(&mut self.store, (&call_name,)).await?;
 
 		let result_bytes = result.map_err(SurrealismError::FunctionCallError)?;
-		Ok(Vec::<surrealdb_types::Kind>::deserialize(Serialized(result_bytes.into()))?)
+		Ok(surrealdb_types::decode_kind_list(&result_bytes)?)
 	}
 
 	async fn returns(&mut self, name: Option<String>) -> SurrealismResult<surrealdb_types::Kind> {
@@ -530,7 +538,7 @@ impl P2Controller {
 		let (result,) = typed.call_async(&mut self.store, (&call_name,)).await?;
 
 		let result_bytes = result.map_err(SurrealismError::FunctionCallError)?;
-		Ok(surrealdb_types::Kind::deserialize(Serialized(result_bytes.into()))?)
+		Ok(surrealdb_types::decode_kind(&result_bytes)?)
 	}
 
 	async fn list(&mut self) -> SurrealismResult<Vec<String>> {

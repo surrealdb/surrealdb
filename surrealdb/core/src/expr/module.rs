@@ -1,5 +1,5 @@
 #[cfg(feature = "surrealism")]
-use std::thread;
+use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -130,34 +130,10 @@ impl SurrealismExecutable {
 		db: &DatabaseId,
 		sub: Option<&str>,
 	) -> Result<Signature> {
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
-			bail!(
-				"Failed to get surrealism function signature: Experimental capability `surrealism` is not enabled"
-			);
-		}
-
+		check_surrealism_enabled(ctx)?;
 		let lookup = SurrealismCacheLookup::File(ns, db, &self.0.bucket, &self.0.key);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-
-		spawn_thread(move || async move {
-			let host = Box::new(SignatureHost::new());
-			let mut controller = runtime.new_controller(host).await?;
-
-			let args = controller
-				.args(sub.map(String::from))
-				.await?
-				.into_iter()
-				.map(|x| x.into())
-				.collect();
-
-			let returns =
-				controller.returns(sub.map(String::from)).await.map(|x| Some(x.into()))?;
-
-			Ok(Signature {
-				args,
-				returns,
-			})
-		})
+		signature_from_runtime(runtime, sub).await
 	}
 
 	pub(crate) async fn run(
@@ -169,28 +145,11 @@ impl SurrealismExecutable {
 		args: Vec<Value>,
 		sub: Option<&str>,
 	) -> Result<Value> {
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
-			bail!(
-				"Failed to run surrealism function: Experimental capability `surrealism` is not enabled"
-			);
-		}
-
+		check_surrealism_enabled(ctx)?;
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let lookup = SurrealismCacheLookup::File(&ns, &db, &self.0.bucket, &self.0.key);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-
-		let ctx = ctx.clone();
-		let opt = opt.clone();
-		let doc = doc.cloned();
-		spawn_thread(move || async move {
-			let host = Box::new(Host::new(&ctx, &opt, doc.as_ref()));
-			let mut controller = runtime.new_controller(host).await?;
-
-			let args: Result<Vec<crate::types::PublicValue>, _> =
-				args.into_iter().map(|x| x.try_into()).collect();
-			let args = args?;
-			Ok(controller.invoke(sub.map(String::from), args).await.map(|x| x.into())?)
-		})
+		run_on_runtime(runtime, ctx, opt, doc, args, sub).await
 	}
 }
 
@@ -266,12 +225,7 @@ impl SiloExecutable {
 		ctx: &FrozenContext,
 		sub: Option<&str>,
 	) -> Result<Signature> {
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
-			bail!(
-				"Failed to get silo function signature: Experimental capability `surrealism` is not enabled"
-			);
-		}
-
+		check_surrealism_enabled(ctx)?;
 		let lookup = SurrealismCacheLookup::Silo(
 			&self.organisation,
 			&self.package,
@@ -280,26 +234,7 @@ impl SiloExecutable {
 			self.patch,
 		);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-
-		spawn_thread(move || async move {
-			let host = Box::new(SignatureHost::new());
-			let mut controller = runtime.new_controller(host).await?;
-
-			let args = controller
-				.args(sub.map(String::from))
-				.await?
-				.into_iter()
-				.map(|x| x.into())
-				.collect();
-
-			let returns =
-				controller.returns(sub.map(String::from)).await.map(|x| Some(x.into()))?;
-
-			Ok(Signature {
-				args,
-				returns,
-			})
-		})
+		signature_from_runtime(runtime, sub).await
 	}
 
 	pub(crate) async fn run(
@@ -311,12 +246,7 @@ impl SiloExecutable {
 		args: Vec<Value>,
 		sub: Option<&str>,
 	) -> Result<Value> {
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
-			bail!(
-				"Failed to run silo function: Experimental capability `surrealism` is not enabled"
-			);
-		}
-
+		check_surrealism_enabled(ctx)?;
 		let lookup = SurrealismCacheLookup::Silo(
 			&self.organisation,
 			&self.package,
@@ -325,19 +255,7 @@ impl SiloExecutable {
 			self.patch,
 		);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-
-		let ctx = ctx.clone();
-		let opt = opt.clone();
-		let doc = doc.cloned();
-		spawn_thread(move || async move {
-			let host = Box::new(Host::new(&ctx, &opt, doc.as_ref()));
-			let mut controller = runtime.new_controller(host).await?;
-
-			let args: Result<Vec<crate::types::PublicValue>, _> =
-				args.into_iter().map(|x| x.try_into()).collect();
-			let args = args?;
-			Ok(controller.invoke(sub.map(String::from), args).await.map(|x| x.into())?)
-		})
+		run_on_runtime(runtime, ctx, opt, doc, args, sub).await
 	}
 }
 
@@ -364,27 +282,47 @@ impl SiloExecutable {
 	}
 }
 
-/// Spawn a dedicated thread to run async operations.
-///
-/// Uses scoped threads to allow safe borrowing from the current scope without requiring
-/// 'static lifetime bounds. Creates a single-threaded tokio runtime in the thread to
-/// handle async operations. The function blocks until the spawned thread completes.
 #[cfg(feature = "surrealism")]
-fn spawn_thread<F, Fut, R>(f: F) -> Result<R>
-where
-	F: FnOnce() -> Fut + Send,
-	Fut: std::future::Future<Output = Result<R>> + Send,
-	R: Send,
-{
-	thread::scope(|s| {
-		let handle = s.spawn(|| {
-			// Create a single-threaded tokio runtime for async operations
-			let rt = tokio::runtime::Builder::new_current_thread()
-				.enable_all()
-				.build()
-				.map_err(|e| anyhow::anyhow!("Failed to create runtime: {e}"))?;
-			rt.block_on(f())
-		});
-		handle.join().map_err(|_| anyhow::anyhow!("Thread panicked"))?
+fn check_surrealism_enabled(ctx: &FrozenContext) -> Result<()> {
+	if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
+		bail!("Experimental capability `surrealism` is not enabled");
+	}
+	Ok(())
+}
+
+#[cfg(feature = "surrealism")]
+async fn signature_from_runtime(
+	runtime: Arc<surrealism_runtime::controller::Runtime>,
+	sub: Option<&str>,
+) -> Result<Signature> {
+	let host = Box::new(SignatureHost::new());
+	let mut controller = runtime.new_controller(host).await?;
+
+	let args =
+		controller.args(sub.map(String::from)).await?.into_iter().map(|x| x.into()).collect();
+
+	let returns = controller.returns(sub.map(String::from)).await.map(|x| Some(x.into()))?;
+
+	Ok(Signature {
+		args,
+		returns,
 	})
+}
+
+#[cfg(feature = "surrealism")]
+async fn run_on_runtime(
+	runtime: Arc<surrealism_runtime::controller::Runtime>,
+	ctx: &FrozenContext,
+	opt: &Options,
+	doc: Option<&CursorDoc>,
+	args: Vec<Value>,
+	sub: Option<&str>,
+) -> Result<Value> {
+	let host = Box::new(Host::new(ctx, opt, doc));
+	let mut controller = runtime.new_controller(host).await?;
+
+	let args: Result<Vec<crate::types::PublicValue>, _> =
+		args.into_iter().map(|x| x.try_into()).collect();
+	let args = args?;
+	Ok(controller.invoke(sub.map(String::from), args).await.map(|x| x.into())?)
 }

@@ -326,34 +326,30 @@ fn generate_p2_exports(
 
 		quote! {
 			pub fn #p2_handler_ident(args_bytes: &[u8]) -> Result<Vec<u8>, String> {
-				use surrealism::types::serialize::{Serializable, Serialized};
 				use surrealism::types::args::Args;
 				use surrealdb_types::SurrealValue;
 
-				let values = Vec::<surrealdb_types::Value>::deserialize(
-					Serialized(args_bytes.to_vec().into())
-				).map_err(|e| e.to_string())?;
+				let values = surrealdb_types::decode_value_list(args_bytes)
+					.map_err(|e| e.to_string())?;
 				let #tuple_pattern: #tuple_type = <#tuple_type as Args>::from_values(values)
 					.map_err(|e| e.to_string())?;
 
 				let result: Result<#result_type, String> = #function_call;
 				let val = result?;
 				let public_val = val.into_value();
-				public_val.serialize().map(|s| s.0.to_vec()).map_err(|e| e.to_string())
+				surrealdb_types::encode(&public_val).map_err(|e| e.to_string())
 			}
 
 			pub fn #p2_args_ident() -> Result<Vec<u8>, String> {
-				use surrealism::types::serialize::Serializable;
 				use surrealism::types::args::Args;
 				let kinds = <#tuple_type as Args>::kinds();
-				kinds.serialize().map(|s| s.0.to_vec()).map_err(|e| e.to_string())
+				surrealdb_types::encode_kind_list(&kinds).map_err(|e| e.to_string())
 			}
 
 			pub fn #p2_returns_ident() -> Result<Vec<u8>, String> {
-				use surrealism::types::serialize::Serializable;
 				use surrealdb_types::SurrealValue;
 				let kind = <#result_type as SurrealValue>::kind_of();
-				kind.serialize().map(|s| s.0.to_vec()).map_err(|e| e.to_string())
+				surrealdb_types::encode_kind(&kind).map_err(|e| e.to_string())
 			}
 		}
 	}

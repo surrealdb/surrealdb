@@ -62,7 +62,7 @@ pub enum ModuleCommand {
 }
 
 /// Custom parser for `surrealdb_types::Value`
-fn parse_value(s: &str) -> Result<surrealdb_types::Value, String> {
+pub(super) fn parse_value(s: &str) -> Result<surrealdb_types::Value, String> {
 	crate::core::syn::value(s).map_err(|e| format!("Invalid value: {e}"))
 }
 

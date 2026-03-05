@@ -114,12 +114,9 @@ pub struct SurrealismCacheValue {
 pub(crate) struct Weight;
 
 impl Weighter<SurrealismCacheKey, SurrealismCacheValue> for Weight {
-	fn weight(&self, _key: &SurrealismCacheKey, _val: &SurrealismCacheValue) -> u64 {
-		// For the moment all entries have the
-		// same weight, and can be evicted when
-		// necessary. In the future we will
-		// compute the actual size of the value
-		// in memory and use that for the weight.
-		1
+	fn weight(&self, _key: &SurrealismCacheKey, val: &SurrealismCacheValue) -> u64 {
+		// Weight by WASM binary size in KB (minimum 1) so the cache
+		// preferentially evicts large modules when under pressure.
+		(val.runtime.wasm_size() as u64 / 1024).max(1)
 	}
 }

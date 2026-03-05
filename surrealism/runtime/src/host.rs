@@ -4,8 +4,14 @@ use anyhow::Result;
 use async_trait::async_trait;
 use surrealism_types::controller::AsyncMemoryController;
 use surrealism_types::err::{PrefixErr, SurrealismError, SurrealismResult};
-use surrealism_types::serialize::{Serializable, SerializableRange, Serialized};
+use surrealism_types::serialize::SerializableRange;
 use surrealism_types::transfer::AsyncTransfer;
+
+fn p2_decode_string_range(
+	bytes: &[u8],
+) -> Result<(std::ops::Bound<String>, std::ops::Bound<String>), String> {
+	surrealdb_types::decode_string_range(bytes).map_err(|e| e.to_string())
+}
 use wasmtime::{Caller, Linker, StoreContextMut};
 
 use crate::config::SurrealismConfig;
@@ -46,8 +52,6 @@ pub trait InvocationContext: Send + Sync {
 		Ok(())
 	}
 }
-
-pub trait Host: InvocationContext {}
 
 // ============================================================================
 // P1 host functions (core module path — unchanged)
@@ -295,18 +299,8 @@ impl<'a> AsyncMemoryController for P1HostController<'a> {
 }
 
 // ============================================================================
-// P2 host functions (component model path — typed, no pointer juggling)
+// P2 host functions (component model path — FlatBuffers serialization)
 // ============================================================================
-
-/// Deserialize bytes from the component boundary using our `Serializable` wire format.
-fn deser<T: Serializable>(bytes: &[u8]) -> Result<T, String> {
-	T::deserialize(Serialized(bytes.to_vec().into())).map_err(|e| e.to_string())
-}
-
-/// Serialize a value into bytes for the component boundary.
-fn ser<T: Serializable>(val: T) -> Result<Vec<u8>, String> {
-	val.serialize().map(|s| s.0.to_vec()).map_err(|e| e.to_string())
-}
 
 pub fn implement_p2_host_functions(
 	linker: &mut wasmtime::component::Linker<P2StoreData>,
@@ -323,7 +317,8 @@ pub fn implement_p2_host_functions(
 			 (query, vars_bytes): (String, Vec<u8>)| {
 				Box::new(async move {
 					let inner: Result<Vec<u8>, String> = async {
-						let vars_vec: Vec<(String, surrealdb_types::Value)> = deser(&vars_bytes)?;
+						let vars_vec = surrealdb_types::decode_string_key_values(&vars_bytes)
+							.map_err(|e| e.to_string())?;
 						let vars = surrealdb_types::Object::from_iter(vars_vec.into_iter());
 						let config = store.data().config.clone();
 						let val = store
@@ -332,7 +327,7 @@ pub fn implement_p2_host_functions(
 							.sql(&config, query, vars)
 							.await
 							.map_err(|e| e.to_string())?;
-						ser(val)
+						surrealdb_types::encode(&val).map_err(|e| e.to_string())
 					}
 					.await;
 					Ok((inner,))
@@ -349,7 +344,8 @@ pub fn implement_p2_host_functions(
 			 (fnc, version, args_bytes): (String, Option<String>, Vec<u8>)| {
 				Box::new(async move {
 					let inner: Result<Vec<u8>, String> = async {
-						let args: Vec<surrealdb_types::Value> = deser(&args_bytes)?;
+						let args = surrealdb_types::decode_value_list(&args_bytes)
+							.map_err(|e| e.to_string())?;
 						let config = store.data().config.clone();
 						let val = store
 							.data_mut()
@@ -357,7 +353,7 @@ pub fn implement_p2_host_functions(
 							.run(&config, fnc, version, args)
 							.await
 							.map_err(|e| e.to_string())?;
-						ser(val)
+						surrealdb_types::encode(&val).map_err(|e| e.to_string())
 					}
 					.await;
 					Ok((inner,))
@@ -375,7 +371,9 @@ pub fn implement_p2_host_functions(
 					let inner: Result<Option<Vec<u8>>, String> = match store.data_mut().context.kv()
 					{
 						Ok(kv) => match kv.get(key).await {
-							Ok(Some(v)) => ser(v).map(Some),
+							Ok(Some(v)) => {
+								surrealdb_types::encode(&v).map(Some).map_err(|e| e.to_string())
+							}
 							Ok(None) => Ok(None),
 							Err(e) => Err(e.to_string()),
 						},
@@ -394,7 +392,8 @@ pub fn implement_p2_host_functions(
 			|mut store: StoreContextMut<'_, P2StoreData>, (key, value_bytes): (String, Vec<u8>)| {
 				Box::new(async move {
 					let inner: Result<(), String> = async {
-						let value: surrealdb_types::Value = deser(&value_bytes)?;
+						let value: surrealdb_types::Value =
+							surrealdb_types::decode(&value_bytes).map_err(|e| e.to_string())?;
 						match store.data_mut().context.kv() {
 							Ok(kv) => kv.set(key, value).await.map_err(|e| e.to_string()),
 							Err(e) => Err(e.to_string()),
@@ -445,17 +444,13 @@ pub fn implement_p2_host_functions(
 			"kv-del-rng",
 			|mut store: StoreContextMut<'_, P2StoreData>, (range_bytes,): (Vec<u8>,)| {
 				Box::new(async move {
-					let result: Result<(), String> =
-						match deser::<SerializableRange<String>>(&range_bytes) {
-							Ok(range) => match store.data_mut().context.kv() {
-								Ok(kv) => kv
-									.del_rng(range.beg, range.end)
-									.await
-									.map_err(|e| e.to_string()),
-								Err(e) => Err(e.to_string()),
-							},
-							Err(e) => Err(e),
-						};
+					let result: Result<(), String> = match p2_decode_string_range(&range_bytes) {
+						Ok((start, end)) => match store.data_mut().context.kv() {
+							Ok(kv) => kv.del_rng(start, end).await.map_err(|e| e.to_string()),
+							Err(e) => Err(e.to_string()),
+						},
+						Err(e) => Err(e),
+					};
 					Ok((result,))
 				})
 			},
@@ -470,7 +465,8 @@ pub fn implement_p2_host_functions(
 				Box::new(async move {
 					let result: Result<Vec<u8>, String> = match store.data_mut().context.kv() {
 						Ok(kv) => match kv.get_batch(keys).await {
-							Ok(vals) => ser(vals),
+							Ok(vals) => surrealdb_types::encode_optional_values(&vals)
+								.map_err(|e| e.to_string()),
 							Err(e) => Err(e.to_string()),
 						},
 						Err(e) => Err(e.to_string()),
@@ -488,12 +484,12 @@ pub fn implement_p2_host_functions(
 			|mut store: StoreContextMut<'_, P2StoreData>, (entries_bytes,): (Vec<u8>,)| {
 				Box::new(async move {
 					let result: Result<(), String> =
-						match deser::<Vec<(String, surrealdb_types::Value)>>(&entries_bytes) {
+						match surrealdb_types::decode_string_key_values(&entries_bytes) {
 							Ok(entries) => match store.data_mut().context.kv() {
 								Ok(kv) => kv.set_batch(entries).await.map_err(|e| e.to_string()),
 								Err(e) => Err(e.to_string()),
 							},
-							Err(e) => Err(e),
+							Err(e) => Err(e.to_string()),
 						};
 					Ok((result,))
 				})
@@ -524,11 +520,9 @@ pub fn implement_p2_host_functions(
 			|mut store: StoreContextMut<'_, P2StoreData>, (range_bytes,): (Vec<u8>,)| {
 				Box::new(async move {
 					let result: Result<Vec<String>, String> =
-						match deser::<SerializableRange<String>>(&range_bytes) {
-							Ok(range) => match store.data_mut().context.kv() {
-								Ok(kv) => {
-									kv.keys(range.beg, range.end).await.map_err(|e| e.to_string())
-								}
+						match p2_decode_string_range(&range_bytes) {
+							Ok((start, end)) => match store.data_mut().context.kv() {
+								Ok(kv) => kv.keys(start, end).await.map_err(|e| e.to_string()),
 								Err(e) => Err(e.to_string()),
 							},
 							Err(e) => Err(e),
@@ -545,17 +539,18 @@ pub fn implement_p2_host_functions(
 			"kv-values",
 			|mut store: StoreContextMut<'_, P2StoreData>, (range_bytes,): (Vec<u8>,)| {
 				Box::new(async move {
-					let result: Result<Vec<u8>, String> =
-						match deser::<SerializableRange<String>>(&range_bytes) {
-							Ok(range) => match store.data_mut().context.kv() {
-								Ok(kv) => match kv.values(range.beg, range.end).await {
-									Ok(vals) => ser(vals),
-									Err(e) => Err(e.to_string()),
-								},
+					let result: Result<Vec<u8>, String> = match p2_decode_string_range(&range_bytes)
+					{
+						Ok((start, end)) => match store.data_mut().context.kv() {
+							Ok(kv) => match kv.values(start, end).await {
+								Ok(vals) => surrealdb_types::encode_value_list(&vals)
+									.map_err(|e| e.to_string()),
 								Err(e) => Err(e.to_string()),
 							},
-							Err(e) => Err(e),
-						};
+							Err(e) => Err(e.to_string()),
+						},
+						Err(e) => Err(e),
+					};
 					Ok((result,))
 				})
 			},
@@ -568,17 +563,18 @@ pub fn implement_p2_host_functions(
 			"kv-entries",
 			|mut store: StoreContextMut<'_, P2StoreData>, (range_bytes,): (Vec<u8>,)| {
 				Box::new(async move {
-					let result: Result<Vec<u8>, String> =
-						match deser::<SerializableRange<String>>(&range_bytes) {
-							Ok(range) => match store.data_mut().context.kv() {
-								Ok(kv) => match kv.entries(range.beg, range.end).await {
-									Ok(entries) => ser(entries),
-									Err(e) => Err(e.to_string()),
-								},
+					let result: Result<Vec<u8>, String> = match p2_decode_string_range(&range_bytes)
+					{
+						Ok((start, end)) => match store.data_mut().context.kv() {
+							Ok(kv) => match kv.entries(start, end).await {
+								Ok(entries) => surrealdb_types::encode_string_key_values(&entries)
+									.map_err(|e| e.to_string()),
 								Err(e) => Err(e.to_string()),
 							},
-							Err(e) => Err(e),
-						};
+							Err(e) => Err(e.to_string()),
+						},
+						Err(e) => Err(e),
+					};
 					Ok((result,))
 				})
 			},
@@ -591,16 +587,13 @@ pub fn implement_p2_host_functions(
 			"kv-count",
 			|mut store: StoreContextMut<'_, P2StoreData>, (range_bytes,): (Vec<u8>,)| {
 				Box::new(async move {
-					let result: Result<u64, String> =
-						match deser::<SerializableRange<String>>(&range_bytes) {
-							Ok(range) => match store.data_mut().context.kv() {
-								Ok(kv) => {
-									kv.count(range.beg, range.end).await.map_err(|e| e.to_string())
-								}
-								Err(e) => Err(e.to_string()),
-							},
-							Err(e) => Err(e),
-						};
+					let result: Result<u64, String> = match p2_decode_string_range(&range_bytes) {
+						Ok((start, end)) => match store.data_mut().context.kv() {
+							Ok(kv) => kv.count(start, end).await.map_err(|e| e.to_string()),
+							Err(e) => Err(e.to_string()),
+						},
+						Err(e) => Err(e),
+					};
 					Ok((result,))
 				})
 			},

@@ -197,7 +197,7 @@ impl<T: SurrealValue> Serializable for SerializableArg<T> {
 /// ```
 impl Serializable for String {
 	fn serialize(self) -> Result<Serialized> {
-		Ok(Serialized(self.as_bytes().to_vec().into()))
+		Ok(Serialized(self.into_bytes().into()))
 	}
 
 	fn deserialize(serialized: Serialized) -> Result<Self> {
@@ -274,7 +274,13 @@ impl Serializable for i64 {
 /// ```
 impl Serializable for bool {
 	fn serialize(self) -> Result<Serialized> {
-		Ok(Serialized(vec![self as u8].into()))
+		static FALSE: &[u8] = &[0];
+		static TRUE: &[u8] = &[1];
+		Ok(Serialized(bytes::Bytes::from_static(if self {
+			TRUE
+		} else {
+			FALSE
+		})))
 	}
 
 	fn deserialize(serialized: Serialized) -> Result<Self> {
@@ -367,9 +373,7 @@ impl<T: Serializable, E: Serializable> Serializable for Result<T, E> {
 				Ok(Ok(value))
 			}
 			1 => {
-				// Err variant - extract error string from remaining bytes
-				let error_bytes = &serialized.0[1..];
-				let error = E::deserialize(Serialized(error_bytes.to_vec().into()))?;
+				let error = E::deserialize(Serialized(serialized.0.slice(1..)))?;
 				Ok(Err(error))
 			}
 			_ => Err(anyhow::anyhow!("Invalid Result variant byte")),
@@ -411,7 +415,7 @@ impl<T: Serializable> Serializable for Option<T> {
 				result.extend_from_slice(&serialized.0);
 				Ok(Serialized(result.into()))
 			}
-			None => Ok(Serialized(vec![1].into())),
+			None => Ok(Serialized(bytes::Bytes::from_static(&[1]))),
 		}
 	}
 
@@ -487,7 +491,7 @@ impl<T: Serializable> Serializable for Bound<T> {
 	fn serialize(self) -> Result<Serialized> {
 		let bytes = match self {
 			Bound::Unbounded => {
-				vec![0]
+				return Ok(Serialized(bytes::Bytes::from_static(&[0])));
 			}
 			Bound::Included(value) => {
 				let serialized = value.serialize()?;
@@ -613,7 +617,7 @@ macro_rules! impl_tuple {
                 #[allow(non_snake_case)]
                 let ($($name,)+) = self;
                 $(#[allow(non_snake_case)] let $name = $name.serialize()?;)+
-                let mut result = Vec::with_capacity(0 $(+ $name.0.len())+);
+                let mut result = Vec::with_capacity(0 $(+ 4 + $name.0.len())+);
                 $(result.extend_from_slice(&($name.0.len() as u32).to_le_bytes());
                 result.extend_from_slice(&$name.0);)+
                 Ok(Serialized(result.into()))
@@ -655,7 +659,7 @@ impl_tuple! {
 /// ```
 impl Serializable for () {
 	fn serialize(self) -> Result<Serialized> {
-		Ok(Serialized(vec![].into()))
+		Ok(Serialized(bytes::Bytes::new()))
 	}
 
 	fn deserialize(_: Serialized) -> Result<Self> {
