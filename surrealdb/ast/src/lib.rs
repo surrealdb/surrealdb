@@ -57,6 +57,7 @@ library! {
 		delete_stmt: Vec<Delete>,
 		relate_stmt: Vec<Relate>,
 		select_stmt: Vec<Select>,
+
 		define_ns_stmt: Vec<DefineNamespace>,
 		define_db_stmt: Vec<DefineDatabase>,
 		define_function_stmt: Vec<DefineFunction>,
@@ -70,6 +71,20 @@ library! {
 		define_sequence: Vec<DefineSequence>,
 		define_config: Vec<DefineConfig>,
 		define_access: Vec<DefineAccess>,
+
+		remove_ns_stmt: Vec<RemoveNamespace>,
+		remove_db_stmt: Vec<RemoveDatabase>,
+		remove_function_stmt: Vec<RemoveFunction>,
+		remove_table_stmt: Vec<RemoveTable>,
+		remove_module: Vec<RemoveModule>,
+		remove_param: Vec<RemoveParam>,
+		remove_event: Vec<RemoveEvent>,
+		remove_field: Vec<RemoveField>,
+		remove_index: Vec<RemoveIndex>,
+		remove_bucket: Vec<RemoveBucket>,
+		remove_sequence: Vec<RemoveSequence>,
+		remove_access: Vec<RemoveAccess>,
+
 
 		filter: Vec<Filter>,
 		filters: Vec<NodeList<Filter>>,
@@ -1017,6 +1032,119 @@ ast_type! {
 }
 
 ast_type! {
+	pub struct RemoveNamespace{
+		pub if_exists: bool,
+		pub expunge: bool,
+		pub name: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	pub struct RemoveDatabase{
+		pub if_exists: bool,
+		pub expunge: bool,
+		pub name: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	pub struct RemoveFunction{
+		pub if_exists: bool,
+		pub name: NodeId<Path>,
+	}
+}
+
+ast_type! {
+	pub struct RemoveModule{
+		pub if_exists: bool,
+		pub name: NodeId<Path>,
+	}
+}
+
+ast_type! {
+	pub struct RemoveAccess{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub base: Base,
+	}
+}
+
+ast_type! {
+	pub struct RemoveParam{
+		pub if_exists: bool,
+		pub name: NodeId<Param>,
+	}
+}
+
+ast_type! {
+	pub struct RemoveTable{
+		pub expunge: bool,
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	pub struct RemoveEvent{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub table: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	pub struct RemoveField{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub table: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	pub struct RemoveIndex{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub table: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	pub struct RemoveAnalyzer{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	pub struct RemoveSequence{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	pub struct RemoveUser{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub base: Base,
+	}
+}
+
+ast_type! {
+	pub struct RemoveApi{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	pub struct RemoveBucket{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+	}
+}
+
+ast_type! {
 	#[derive(Copy, Clone)]
 	pub enum Expr {
 		Covered(NodeId<Expr>),
@@ -1066,6 +1194,7 @@ ast_type! {
 		Delete(NodeId<Delete>),
 		Relate(NodeId<Relate>),
 		Select(NodeId<Select>),
+
 		DefineNamespace(NodeId<DefineNamespace>),
 		DefineDatabase(NodeId<DefineDatabase>),
 		DefineTable(NodeId<DefineTable>),
@@ -1081,6 +1210,21 @@ ast_type! {
 		DefineSequence(NodeId<DefineSequence>),
 		DefineConfig(NodeId<DefineConfig>),
 		DefineAccess(NodeId<DefineAccess>),
+
+		RemoveNamespace(NodeId<RemoveNamespace>),
+		RemoveDatabase(NodeId<RemoveDatabase>),
+		RemoveTable(NodeId<RemoveTable>),
+		RemoveFunction(NodeId<RemoveFunction>),
+		RemoveModule(NodeId<RemoveModule>),
+		RemoveParam(NodeId<RemoveParam>),
+		RemoveApi(NodeId<RemoveApi>),
+		RemoveEvent(NodeId<RemoveEvent>),
+		RemoveField(NodeId<RemoveField>),
+		RemoveIndex(NodeId<RemoveIndex>),
+		RemoveAnalyzer(NodeId<RemoveAnalyzer>),
+		RemoveBucket(NodeId<RemoveBucket>),
+		RemoveSequence(NodeId<RemoveSequence>),
+		RemoveAccess(NodeId<RemoveAccess>),
 	}
 }
 
