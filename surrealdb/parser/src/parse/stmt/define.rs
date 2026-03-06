@@ -1,4 +1,7 @@
-use ast::{CountIndex, DefineConfigKind, FullTextScoring, NodeId, RelationTable};
+use ast::{
+	AccessType, Algorithm, Base, CountIndex, DefineConfigKind, FullTextScoring, JwtVerify, NodeId,
+	RelationTable,
+};
 use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
 use token::{BaseTokenKind, T};
@@ -1984,6 +1987,344 @@ impl Parse for ast::DefineConfig {
 		Ok(ast::DefineConfig {
 			kind,
 			inner,
+			span,
+		})
+	}
+}
+
+impl ParseSync for ast::Algorithm {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let expect = "an jwt encoding algorithm";
+		let peek = parser.peek_expect(expect)?;
+		let res = match peek.token {
+			T![EDDSA] => ast::Algorithm::EdDSA,
+			T![ES256] => ast::Algorithm::Es256,
+			T![ES384] => ast::Algorithm::Es384,
+			T![ES512] => ast::Algorithm::Es512,
+			T![HS256] => ast::Algorithm::Hs256,
+			T![HS384] => ast::Algorithm::Hs384,
+			T![PS256] => ast::Algorithm::Ps256,
+			T![PS384] => ast::Algorithm::Ps384,
+			T![PS512] => ast::Algorithm::Ps512,
+			T![RS256] => ast::Algorithm::Rs256,
+			T![RS384] => ast::Algorithm::Rs384,
+			T![RS512] => ast::Algorithm::Rs512,
+			_ => return Err(parser.unexpected(expect)),
+		};
+		let _ = parser.next();
+		Ok(res)
+	}
+}
+
+impl Parse for ast::Jwt {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let expect = "`ALGORITHM` or `URL`";
+		let peek = parser.peek_expect(expect)?;
+		let verify = match peek.token {
+			T![ALGORITHM] => {
+				let _ = parser.next();
+				let algorithm = parser.parse_sync()?;
+				let _ = parser.expect(T![KEY])?;
+				let key = parser.parse_enter().await?;
+				ast::JwtVerify::Key {
+					algorithm,
+					key,
+				}
+			}
+			T![URL] => {
+				let _ = parser.next();
+				let url = parser.parse_enter().await?;
+				ast::JwtVerify::Jwks {
+					url,
+				}
+			}
+			_ => return Err(parser.unexpected(expect)),
+		};
+
+		let issue = if parser.eat(T![WITH])?.is_some() {
+			let _ = parser.expect(T![ISSUER])?;
+			let mut algorithm = None;
+			let mut key = None;
+			loop {
+				let Some(peek) = parser.peek()? else {
+					break;
+				};
+				match peek.token {
+					T![ALGORITHM] => {
+						let _ = parser.next();
+						parse_unordered_clause_sync(
+							parser,
+							&mut algorithm,
+							peek.span,
+							Parser::parse_sync,
+						)?;
+					}
+					T![KEY] => {
+						let _ = parser.next();
+						parse_unordered_clause(parser, &mut key, peek.span, Parser::parse_enter)
+							.await?;
+					}
+					_ => break,
+				}
+			}
+			Some(ast::JwtIssue {
+				algorithm: algorithm.map(|x| x.0),
+				key: key.map(|x| x.0),
+			})
+		} else {
+			None
+		};
+
+		Ok(ast::Jwt {
+			verify,
+			issue,
+		})
+	}
+}
+
+impl Parse for ast::RecordAccess {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let mut signup = None;
+		let mut signin = None;
+		let mut jwt = None;
+		let mut refresh = None;
+		loop {
+			let Some(peek) = parser.peek()? else {
+				break;
+			};
+			match peek.token {
+				T![SIGNIN] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut signin, peek.span, Parser::parse_enter)
+						.await?;
+				}
+				T![SIGNUP] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut signup, peek.span, Parser::parse_enter)
+						.await?;
+				}
+				T![WITH] => {
+					let _ = parser.next();
+					let expect = "`JWT` or `REFRESH`";
+					let peek_with = parser.peek_expect(expect)?;
+					match peek_with.token {
+						T![JWT] => {
+							let _ = parser.next();
+							parse_unordered_clause(
+								parser,
+								&mut jwt,
+								peek.span.extend(peek_with.span),
+								Parser::parse,
+							)
+							.await?;
+						}
+						T![REFRESH] => {
+							let _ = parser.next();
+							parse_unordered_clause_sync(
+								parser,
+								&mut refresh,
+								peek.span.extend(peek_with.span),
+								|_| Ok(()),
+							)?;
+						}
+						_ => return Err(parser.unexpected(expect)),
+					}
+				}
+				_ => break,
+			}
+
+			parser.eat(T![,])?;
+		}
+
+		Ok(ast::RecordAccess {
+			signup: signup.map(|x| x.0),
+			signin: signin.map(|x| x.0),
+			jwt: jwt.map(|x| x.0),
+			refresh: refresh.is_some(),
+		})
+	}
+}
+
+impl Parse for ast::DefineAccess {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let define = parser.expect(T![DEFINE])?;
+		let _ = parser.expect(T![ACCESS])?;
+		let kind = parser.parse_sync()?;
+
+		let name = parser.parse_enter().await?;
+		let _ = parser.expect(T![ON])?;
+		let base = parser.parse_sync()?;
+
+		let span = parser.span_since(define.span);
+
+		let mut comment = None;
+		let mut duration_session = None;
+		let mut duration_token = None;
+		let mut duration_grant = None;
+		let mut authenticate = None;
+		let mut ty = None;
+		loop {
+			let Some(peek) = parser.peek()? else {
+				break;
+			};
+			match peek.token {
+				T![COMMENT] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut comment, peek.span, Parser::parse_enter)
+						.await?;
+				}
+				T![AUTHENTICATE] => {
+					let _ = parser.next();
+					parse_unordered_clause(
+						parser,
+						&mut authenticate,
+						peek.span,
+						Parser::parse_enter,
+					)
+					.await?;
+				}
+				T![DURATION] => {
+					let _ = parser.next();
+					parser.expect(T![FOR])?;
+					loop {
+						let expect = "`GRANT`, `TOKEN`, or `SESSION`";
+						let peek = parser.peek_expect(expect)?;
+						match peek.token {
+							T![SESSION] => {
+								let _ = parser.next();
+								parse_unordered_clause(
+									parser,
+									&mut duration_session,
+									peek.span,
+									Parser::parse_enter,
+								)
+								.await?
+							}
+							T![TOKEN] => {
+								let _ = parser.next();
+								parse_unordered_clause(
+									parser,
+									&mut duration_token,
+									peek.span,
+									Parser::parse_enter,
+								)
+								.await?
+							}
+							T![GRANT] => {
+								let _ = parser.next();
+								parse_unordered_clause(
+									parser,
+									&mut duration_grant,
+									peek.span,
+									Parser::parse_enter,
+								)
+								.await?
+							}
+							_ => return Err(parser.unexpected(expect)),
+						}
+						if parser.eat(T![FOR])?.is_none() {
+							break;
+						}
+					}
+				}
+				T![TYPE] => {
+					let _ = parser.next();
+					let expect = "`JWT`, `RECORD`, or `BEARER`";
+					let peek_type = parser.peek_expect(expect)?;
+					match peek_type.token {
+						T![JWT] => {
+							let _ = parser.next();
+							parse_unordered_clause(
+								parser,
+								&mut ty,
+								peek.span.extend(peek_type.span),
+								async |parser| parser.parse().await.map(AccessType::Jwt),
+							)
+							.await?;
+						}
+						T![RECORD] => {
+							let _ = parser.next();
+							parse_unordered_clause(
+								parser,
+								&mut ty,
+								peek.span.extend(peek_type.span),
+								async |parser| {
+									let ast::Base::Database = base else {
+										return Err(parser.with_error(|parser| {
+											Level::Error
+												.title(format!(
+													"Unexpected token `{}`, record access can only be defined on a database",
+													parser.slice(peek.span)
+												))
+												.snippet(parser.snippet().annotate(
+													AnnotationKind::Primary.span(peek.span),
+												))
+												.to_diagnostic()
+										}));
+									};
+
+									parser.parse().await.map(AccessType::Record)
+								},
+							)
+							.await?;
+						}
+						T![BEARER] => {
+							let _ = parser.next();
+							parse_unordered_clause(
+								parser,
+								&mut ty,
+								peek.span.extend(peek_type.span),
+								async |parser| {
+									let _ = parser.expect(T![FOR])?;
+									let expect = if matches!(base, Base::Database) {
+										"`USER` or `RECORD`"
+									} else {
+										"`USER`"
+									};
+									let peek = parser.peek_expect(expect)?;
+									let subject = match peek.token {
+										T![USER] => {
+											let _ = parser.next();
+											ast::BearerAccessSubject::User
+										}
+										T![RECORD] if matches!(base, Base::Database) => {
+											let _ = parser.next();
+											ast::BearerAccessSubject::Record
+										}
+										_ => return Err(parser.unexpected(expect)),
+									};
+
+									let jwt = if parser.eat(T![WITH])?.is_some() {
+										Some(parser.parse().await?)
+									} else {
+										None
+									};
+
+									Ok(AccessType::Bearer(ast::BearerAccess {
+										subject,
+										jwt,
+									}))
+								},
+							)
+							.await?
+						}
+						_ => return Err(parser.unexpected(expect)),
+					}
+				}
+				_ => break,
+			}
+		}
+
+		Ok(ast::DefineAccess {
+			kind,
+			name,
+			base,
+			comment: comment.map(|x| x.0),
+			duration_grant: duration_grant.map(|x| x.0),
+			duration_session: duration_session.map(|x| x.0),
+			duration_token: duration_token.map(|x| x.0),
+			authenticate: authenticate.map(|x| x.0),
+			ty: ty.map(|x| x.0),
 			span,
 		})
 	}

@@ -137,15 +137,7 @@ impl Parse for ast::Info {
 				let name = parser.parse_enter().await?;
 
 				let base = if parser.eat(T![ON])?.is_some() {
-					let peek = parser.peek_expect("`NAMESPACE`, `DATABASE`, or `ROOT`")?;
-					let base = match peek.token {
-						T![NAMESPACE] => Base::Namespace,
-						T![DATABASE] => Base::Database,
-						T![ROOT] => Base::Root,
-						_ => return Err(parser.unexpected("`NAMESPACE`, `DATABASE`, or `ROOT`")),
-					};
-					let _ = parser.next();
-					Some(base)
+					Some(parser.parse_sync()?)
 				} else {
 					None
 				};

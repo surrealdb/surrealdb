@@ -1,7 +1,7 @@
 use token::T;
 
 use crate::parse::ParseResult;
-use crate::{Parse, Parser};
+use crate::{Parse, ParseSync, Parser};
 
 impl Parse for ast::Parameter {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
@@ -15,5 +15,19 @@ impl Parse for ast::Parameter {
 			ty,
 			span,
 		})
+	}
+}
+
+impl ParseSync for ast::Base {
+	fn parse_sync(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let peek = parser.peek_expect("`NAMESPACE`, `DATABASE`, or `ROOT`")?;
+		let base = match peek.token {
+			T![NAMESPACE] => ast::Base::Namespace,
+			T![DATABASE] => ast::Base::Database,
+			T![ROOT] => ast::Base::Root,
+			_ => return Err(parser.unexpected("`NAMESPACE`, `DATABASE`, or `ROOT`")),
+		};
+		let _ = parser.next();
+		Ok(base)
 	}
 }
