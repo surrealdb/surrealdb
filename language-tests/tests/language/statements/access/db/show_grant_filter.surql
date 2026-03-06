@@ -1,4 +1,7 @@
 /**
+[env]
+timeout = 10000
+
 [env.capabilities]
 
 [test]
