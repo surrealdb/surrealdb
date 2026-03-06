@@ -669,7 +669,7 @@ mod serde_json_from_value {
 			Value::Null,
 			Value::Bool(true),
 			Value::Number(Number::Int(42)),
-			Value::Number(Number::Float(3.14)),
+			Value::Number(Number::Float(2.5)),
 			Value::String("hello".into()),
 			Value::Duration(Duration::from_secs(60)),
 			Value::Datetime(Datetime::default()),
