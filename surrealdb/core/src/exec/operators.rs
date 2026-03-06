@@ -1,6 +1,7 @@
 mod aggregate;
 mod compute;
 mod current_value_source;
+pub(crate) mod ddl;
 mod explain;
 mod expr;
 pub(crate) mod fetch;

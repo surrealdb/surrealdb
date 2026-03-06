@@ -60,6 +60,7 @@
 //! ```
 
 mod aggregate;
+mod ddl;
 mod idiom;
 mod select;
 mod source;
@@ -175,7 +176,7 @@ impl<'ctx> Planner<'ctx> {
 	/// available, performs plan-time index resolution and sort elimination.
 	pub async fn plan(&self, expr: &Expr) -> Result<Arc<dyn ExecOperator>, Error> {
 		match expr {
-			// DML/DDL — same as sync plan, always fall back to old executor
+			// DML — always fall back to old executor
 			Expr::Create(_) => Err(Error::PlannerUnsupported(
 				"CREATE statements not yet supported in execution plans".to_string(),
 			)),
@@ -194,17 +195,8 @@ impl<'ctx> Planner<'ctx> {
 			Expr::Relate(_) => Err(Error::PlannerUnsupported(
 				"RELATE statements not yet supported in execution plans".to_string(),
 			)),
-			Expr::Define(_) => Err(Error::PlannerUnsupported(
-				"DEFINE statements not yet supported in execution plans".to_string(),
-			)),
-			Expr::Remove(_) => Err(Error::PlannerUnsupported(
-				"REMOVE statements not yet supported in execution plans".to_string(),
-			)),
 			Expr::Rebuild(_) => Err(Error::PlannerUnsupported(
 				"REBUILD statements not yet supported in execution plans".to_string(),
-			)),
-			Expr::Alter(_) => Err(Error::PlannerUnsupported(
-				"ALTER statements not yet supported in execution plans".to_string(),
 			)),
 
 			other => {
@@ -299,17 +291,19 @@ impl<'ctx> Planner<'ctx> {
 				..
 			} => Box::pin(self.physical_statement_subquery(expr)).await,
 
+			// DDL subqueries (wrapped in ScalarSubquery)
+			Expr::Define(_) | Expr::Remove(_) | Expr::Alter(_) => {
+				Box::pin(self.physical_ddl_subquery(expr)).await
+			}
+
 			// LET is handled by block/sequence operators, not as an expression
 			Expr::Let(_) => Err(Error::Query {
 				message: "LET statements are handled by block or sequence operators".to_string(),
 			}),
 
-			// DDL — cannot be used in expression context
-			Expr::Define(_) | Expr::Remove(_) | Expr::Rebuild(_) | Expr::Alter(_) => {
-				Err(Error::PlannerUnsupported(
-					"DDL statements cannot be used in expression context".to_string(),
-				))
-			}
+			Expr::Rebuild(_) => Err(Error::PlannerUnsupported(
+				"REBUILD statements not yet supported in execution plans".to_string(),
+			)),
 
 			// DML subqueries — not yet implemented
 			Expr::Create(_)
@@ -694,9 +688,28 @@ impl<'ctx> Planner<'ctx> {
 		}))
 	}
 
-	/// Convert an expression to a physical expression, treating simple identifiers as strings.
+	/// Convert a DDL statement expression (DEFINE, REMOVE, ALTER) into a
+	/// physical expression by wrapping its operator plan in a [`ScalarSubquery`].
+	async fn physical_ddl_subquery(
+		&self,
+		expr: Expr,
+	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+		let plan: Arc<dyn ExecOperator> = match expr {
+			Expr::Define(stmt) => self.plan_define_statement(*stmt).await?,
+			Expr::Remove(stmt) => self.plan_remove_statement(*stmt).await?,
+			Expr::Alter(stmt) => self.plan_alter_statement(*stmt).await?,
+			_ => unreachable!("physical_ddl_subquery called with non-DDL expr"),
+		};
+		Ok(Arc::new(ScalarSubquery {
+			plan,
+		}))
+	}
+
+	/// Convert an expression to a physical expression, treating identifiers as strings.
 	///
-	/// Used for `INFO FOR USER test` where `test` is a name, not a variable.
+	/// Used for `INFO FOR USER test` where `test` is a name, not a variable,
+	/// and for DDL names like `REMOVE FIELD document.visible ON test` where
+	/// `document.visible` is a dotted name, not a nested field access.
 	pub async fn physical_expr_as_name(
 		&self,
 		expr: Expr,
@@ -704,11 +717,10 @@ impl<'ctx> Planner<'ctx> {
 		use crate::exec::physical_expr::Literal as PhysicalLiteral;
 		use crate::expr::part::Part;
 
-		if let Expr::Idiom(ref idiom) = expr
-			&& idiom.0.len() == 1
-			&& let Part::Field(name) = &idiom.0[0]
-		{
-			return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(name.clone()))));
+		if let Expr::Idiom(ref idiom) = expr && idiom.0.iter().all(|p| matches!(p, Part::Field(_))) {
+			return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(
+				idiom.to_raw_string(),
+			))));
 		}
 
 		if let Expr::Table(name) = expr {
@@ -865,11 +877,14 @@ impl<'ctx> Planner<'ctx> {
 				| Expr::Relate(_) => Err(Error::PlannerUnsupported(
 					"DML statements not yet supported in execution plans".to_string(),
 				)),
-				Expr::Define(_) | Expr::Remove(_) | Expr::Rebuild(_) | Expr::Alter(_) => {
-					Err(Error::PlannerUnsupported(
-						"DDL statements not yet supported in execution plans".to_string(),
-					))
-				}
+				Expr::Rebuild(_) => Err(Error::PlannerUnsupported(
+					"REBUILD statements not yet supported in execution plans".to_string(),
+				)),
+
+				// DDL — route to new DDL planner
+				Expr::Define(stmt) => self.plan_define_statement(*stmt).await,
+				Expr::Remove(stmt) => self.plan_remove_statement(*stmt).await,
+				Expr::Alter(stmt) => self.plan_alter_statement(*stmt).await,
 			}
 		})
 	}
@@ -1078,10 +1093,7 @@ macro_rules! try_plan_expr {
 				| $crate::expr::Expr::Delete(_)
 				| $crate::expr::Expr::Insert(_)
 				| $crate::expr::Expr::Relate(_)
-				| $crate::expr::Expr::Define(_)
-				| $crate::expr::Expr::Remove(_)
 				| $crate::expr::Expr::Rebuild(_)
-				| $crate::expr::Expr::Alter(_)
 		) {
 			Err($crate::err::Error::PlannerUnsupported(String::new()))
 		} else if *$ctx.new_planner_strategy() == $crate::dbs::NewPlannerStrategy::ComputeOnly {

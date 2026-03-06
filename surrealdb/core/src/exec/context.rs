@@ -71,6 +71,16 @@ impl ContextLevel {
 	}
 }
 
+impl From<Base> for ContextLevel {
+	fn from(base: Base) -> Self {
+		match base {
+			Base::Root => Self::Root,
+			Base::Ns => Self::Namespace,
+			Base::Db => Self::Database,
+		}
+	}
+}
+
 /// Session information for context-aware functions.
 ///
 /// This contains session data that can be accessed by functions like
