@@ -616,6 +616,10 @@ pub(crate) enum Error {
 	#[error("Cannot negate the value '{0}'")]
 	TryNeg(String),
 
+	/// Cannot extend a non-array value
+	#[error("Cannot extend '{0}' as it is not an array")]
+	TryExtend(String),
+
 	/// It's is not possible to convert between the two types
 	#[error("Cannot convert from '{0}' to '{1}'")]
 	TryFrom(String, &'static str),
@@ -1249,6 +1253,7 @@ impl Error {
 				| Error::TryDiv(..)
 				| Error::TryPow(..)
 				| Error::TryNeg(..)
+				| Error::TryExtend(..)
 		)
 	}
 }

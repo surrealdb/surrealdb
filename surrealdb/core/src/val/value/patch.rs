@@ -62,7 +62,7 @@ impl Value {
 
 					let path = path.into_iter().map(Part::Field).collect::<Vec<_>>();
 					match this.pick(&path) {
-						Value::Array(_) => this.inc(&path, value),
+						Value::Array(_) => this.inc(&path, value)?,
 						_ => this.put(&path, value),
 					}
 				}
