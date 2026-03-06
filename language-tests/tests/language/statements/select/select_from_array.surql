@@ -15,7 +15,7 @@ value = "[{ id: person:3, name: 'Charlie' }]"
 value = "[{ id: person:1, name: 'Alice' }, { id: person:3, name: 'Charlie' }]"
 
 [[test.results]]
-value = "[{ name: 'Bob' }, { name: 'Alice' }]"
+value = "[{ name: 'Alice' }, { name: 'Bob' }]"
 
 */
 
