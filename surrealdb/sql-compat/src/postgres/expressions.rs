@@ -8,7 +8,7 @@ use surrealdb_core::expr::literal::Literal;
 use surrealdb_core::expr::operator::{BinaryOperator, PrefixOperator};
 use surrealdb_core::expr::order::{Order, OrderList, Ordering};
 use surrealdb_core::expr::param::Param;
-use surrealdb_core::expr::part::Part;
+use surrealdb_core::expr::part::{DestructurePart, Part};
 use surrealdb_core::val::Regex;
 
 use crate::error::TranslateError;
@@ -278,8 +278,23 @@ pub fn translate_select_items(items: Vec<pg::SelectItem>) -> Result<Fields, Tran
 			pg::SelectItem::Wildcard(_) => {
 				fields.push(Field::All);
 			}
-			pg::SelectItem::QualifiedWildcard(_, _) => {
-				fields.push(Field::All);
+			pg::SelectItem::QualifiedWildcard(ref kind, _) => {
+				let qualifier = match kind {
+					pg::SelectItemQualifiedWildcardKind::ObjectName(name) => {
+						name.0.first().and_then(|p| p.as_ident()).map(|id| id.value.clone())
+					}
+					_ => None,
+				};
+				match qualifier {
+					Some(q) => {
+						let destructure = Part::Destructure(vec![DestructurePart::All(q)]);
+						fields.push(Field::Single(Selector {
+							expr: Expr::Idiom(Idiom(vec![destructure])),
+							alias: None,
+						}));
+					}
+					None => fields.push(Field::All),
+				}
 			}
 		}
 	}

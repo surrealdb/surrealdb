@@ -1019,4 +1019,125 @@ mod postgresql {
 		let rows = extract_rows(&results);
 		assert_eq!(rows, vec![vec![Some("2".into())]], "original session query should work");
 	}
+
+	// ---------------------------------------------------------------
+	// Semi/Anti JOIN with subquery WHERE predicates
+	// ---------------------------------------------------------------
+
+	#[tokio::test]
+	async fn test_semi_join_with_where_predicate() {
+		let ctx = setup_pg().await.unwrap();
+		seed_join_tables(&ctx.client).await;
+
+		// Only users who have orders with amount > 50 (Alice has 100 and 200, Bob has 50)
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT name FROM users \
+				 WHERE name IN (SELECT user_name FROM orders WHERE amount > 50) \
+				 ORDER BY name",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		assert_eq!(
+			rows,
+			vec![vec![Some("Alice".into())]],
+			"Semi join with WHERE predicate should only return Alice"
+		);
+	}
+
+	#[tokio::test]
+	async fn test_anti_join_with_where_predicate() {
+		let ctx = setup_pg().await.unwrap();
+		seed_join_tables(&ctx.client).await;
+
+		// Users who do NOT have orders with amount > 50 (Bob has 50, Charlie has none)
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT name FROM users \
+				 WHERE name NOT IN (SELECT user_name FROM orders WHERE amount > 50) \
+				 ORDER BY name",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		assert_eq!(
+			rows,
+			vec![vec![Some("Bob".into())], vec![Some("Charlie".into())]],
+			"Anti join with WHERE predicate should return Bob and Charlie"
+		);
+	}
+
+	// ---------------------------------------------------------------
+	// Single-table alias support
+	// ---------------------------------------------------------------
+
+	#[tokio::test]
+	async fn test_single_table_alias_select() {
+		let ctx = setup_pg().await.unwrap();
+		seed_users(&ctx.client).await;
+
+		let results =
+			ctx.client.simple_query("SELECT u.name FROM users AS u ORDER BY u.name").await.unwrap();
+		assert_query(
+			&results,
+			&["name"],
+			&[vec!["Alice"], vec!["Bob"], vec!["Charlie"]],
+			"single-table alias in SELECT and ORDER BY",
+		);
+	}
+
+	#[tokio::test]
+	async fn test_single_table_alias_where() {
+		let ctx = setup_pg().await.unwrap();
+		seed_users(&ctx.client).await;
+
+		let results = ctx
+			.client
+			.simple_query("SELECT name FROM users AS u WHERE u.age > 25 ORDER BY name")
+			.await
+			.unwrap();
+		assert_query(
+			&results,
+			&["name"],
+			&[vec!["Alice"], vec!["Charlie"]],
+			"single-table alias in WHERE",
+		);
+	}
+
+	// ---------------------------------------------------------------
+	// Qualified wildcard projections in JOINs
+	// ---------------------------------------------------------------
+
+	#[tokio::test]
+	async fn test_qualified_wildcard_join() {
+		let ctx = setup_pg().await.unwrap();
+		seed_join_tables(&ctx.client).await;
+
+		let results = ctx
+			.client
+			.simple_query(
+				"SELECT u.* \
+				 FROM users AS u \
+				 INNER JOIN orders AS o ON u.name = o.user_name \
+				 WHERE o.amount = 100",
+			)
+			.await
+			.unwrap();
+		let rows = extract_rows(&results);
+		let columns = extract_column_names(&results);
+
+		// Should only include users columns (age, name, status), NOT orders columns
+		assert!(
+			!columns.contains(&"amount".to_string()),
+			"u.* should not include orders columns, got columns: {columns:?}"
+		);
+		assert!(
+			!columns.contains(&"user_name".to_string()),
+			"u.* should not include orders columns, got columns: {columns:?}"
+		);
+		assert_eq!(rows.len(), 1, "should return one row for Alice's $100 order");
+	}
 }

@@ -75,12 +75,237 @@ fn translate_query(query: pg::Query) -> Result<TopLevelExpr, TranslateError> {
 	}
 }
 
+/// If the FROM clause is a single unjoined table with an alias, return that alias.
+fn detect_single_table_alias(from: &[pg::TableWithJoins]) -> Option<String> {
+	if from.len() != 1 || !from[0].joins.is_empty() {
+		return None;
+	}
+	match &from[0].relation {
+		TableFactor::Table {
+			alias: Some(a),
+			..
+		} => Some(a.name.value.clone()),
+		_ => None,
+	}
+}
+
+/// Rewrite a `pg::Select` and its companion `ORDER BY` list in-place,
+/// stripping every leading `alias.` qualifier from compound identifiers.
+fn strip_alias_from_select(
+	select: &mut pg::Select,
+	order_by: &mut Vec<pg::OrderByExpr>,
+	alias: &str,
+) {
+	select.projection =
+		select.projection.drain(..).map(|item| strip_qualifier_select_item(item, alias)).collect();
+
+	select.selection = select.selection.take().map(|e| strip_qualifier_expr(e, alias));
+
+	if let pg::GroupByExpr::Expressions(exprs, modifiers) = &mut select.group_by {
+		*exprs = exprs.drain(..).map(|e| strip_qualifier_expr(e, alias)).collect();
+		let _ = modifiers;
+	}
+
+	for o in order_by.iter_mut() {
+		o.expr = strip_qualifier_expr(o.expr.clone(), alias);
+	}
+}
+
+fn strip_qualifier_select_item(item: pg::SelectItem, alias: &str) -> pg::SelectItem {
+	match item {
+		pg::SelectItem::UnnamedExpr(e) => {
+			pg::SelectItem::UnnamedExpr(strip_qualifier_expr(e, alias))
+		}
+		pg::SelectItem::ExprWithAlias {
+			expr,
+			alias: a,
+		} => pg::SelectItem::ExprWithAlias {
+			expr: strip_qualifier_expr(expr, alias),
+			alias: a,
+		},
+		pg::SelectItem::QualifiedWildcard(ref kind, _) => {
+			let matches = match kind {
+				pg::SelectItemQualifiedWildcardKind::ObjectName(name) => {
+					name.0.len() == 1
+						&& name.0[0]
+							.as_ident()
+							.map(|id| id.value.eq_ignore_ascii_case(alias))
+							.unwrap_or(false)
+				}
+				_ => false,
+			};
+			if matches {
+				pg::SelectItem::Wildcard(pg::WildcardAdditionalOptions::default())
+			} else {
+				item
+			}
+		}
+		other => other,
+	}
+}
+
+/// Recursively strip a leading table qualifier from compound identifiers.
+/// Does NOT descend into subquery bodies (they have independent scoping).
+fn strip_qualifier_expr(expr: pg::Expr, alias: &str) -> pg::Expr {
+	match expr {
+		pg::Expr::CompoundIdentifier(ref parts)
+			if parts.len() >= 2 && parts[0].value.eq_ignore_ascii_case(alias) =>
+		{
+			if parts.len() == 2 {
+				pg::Expr::Identifier(parts[1].clone())
+			} else {
+				pg::Expr::CompoundIdentifier(parts[1..].to_vec())
+			}
+		}
+
+		pg::Expr::BinaryOp {
+			left,
+			op,
+			right,
+		} => pg::Expr::BinaryOp {
+			left: Box::new(strip_qualifier_expr(*left, alias)),
+			op,
+			right: Box::new(strip_qualifier_expr(*right, alias)),
+		},
+
+		pg::Expr::UnaryOp {
+			op,
+			expr: inner,
+		} => pg::Expr::UnaryOp {
+			op,
+			expr: Box::new(strip_qualifier_expr(*inner, alias)),
+		},
+
+		pg::Expr::Nested(inner) => pg::Expr::Nested(Box::new(strip_qualifier_expr(*inner, alias))),
+
+		pg::Expr::IsNull(inner) => pg::Expr::IsNull(Box::new(strip_qualifier_expr(*inner, alias))),
+		pg::Expr::IsNotNull(inner) => {
+			pg::Expr::IsNotNull(Box::new(strip_qualifier_expr(*inner, alias)))
+		}
+
+		pg::Expr::Between {
+			expr: e,
+			negated,
+			low,
+			high,
+		} => pg::Expr::Between {
+			expr: Box::new(strip_qualifier_expr(*e, alias)),
+			negated,
+			low: Box::new(strip_qualifier_expr(*low, alias)),
+			high: Box::new(strip_qualifier_expr(*high, alias)),
+		},
+
+		pg::Expr::InList {
+			expr: e,
+			list,
+			negated,
+		} => pg::Expr::InList {
+			expr: Box::new(strip_qualifier_expr(*e, alias)),
+			list: list.into_iter().map(|l| strip_qualifier_expr(l, alias)).collect(),
+			negated,
+		},
+
+		// Do NOT descend into subquery bodies -- they have their own scope.
+		pg::Expr::InSubquery {
+			expr: e,
+			subquery,
+			negated,
+		} => pg::Expr::InSubquery {
+			expr: Box::new(strip_qualifier_expr(*e, alias)),
+			subquery,
+			negated,
+		},
+
+		pg::Expr::Function(mut func) => {
+			func.args = match func.args {
+				pg::FunctionArguments::List(mut list) => {
+					list.args = list
+						.args
+						.into_iter()
+						.map(|arg| match arg {
+							pg::FunctionArg::Unnamed(pg::FunctionArgExpr::Expr(e)) => {
+								pg::FunctionArg::Unnamed(pg::FunctionArgExpr::Expr(
+									strip_qualifier_expr(e, alias),
+								))
+							}
+							pg::FunctionArg::Named {
+								name,
+								arg: pg::FunctionArgExpr::Expr(e),
+								operator,
+							} => pg::FunctionArg::Named {
+								name,
+								arg: pg::FunctionArgExpr::Expr(strip_qualifier_expr(e, alias)),
+								operator,
+							},
+							other => other,
+						})
+						.collect();
+					pg::FunctionArguments::List(list)
+				}
+				other => other,
+			};
+			pg::Expr::Function(func)
+		}
+
+		pg::Expr::Cast {
+			expr: e,
+			data_type,
+			format,
+			kind,
+			array,
+		} => pg::Expr::Cast {
+			expr: Box::new(strip_qualifier_expr(*e, alias)),
+			data_type,
+			format,
+			kind,
+			array,
+		},
+
+		pg::Expr::Like {
+			negated,
+			expr: e,
+			pattern,
+			escape_char,
+			any,
+		} => pg::Expr::Like {
+			negated,
+			expr: Box::new(strip_qualifier_expr(*e, alias)),
+			pattern: Box::new(strip_qualifier_expr(*pattern, alias)),
+			escape_char,
+			any,
+		},
+
+		pg::Expr::ILike {
+			negated,
+			expr: e,
+			pattern,
+			escape_char,
+			any,
+		} => pg::Expr::ILike {
+			negated,
+			expr: Box::new(strip_qualifier_expr(*e, alias)),
+			pattern: Box::new(strip_qualifier_expr(*pattern, alias)),
+			escape_char,
+			any,
+		},
+
+		other => other,
+	}
+}
+
 fn translate_select(
-	select: pg::Select,
-	order_by: Vec<pg::OrderByExpr>,
+	mut select: pg::Select,
+	mut order_by: Vec<pg::OrderByExpr>,
 	limit: Option<pg::Expr>,
 	offset: Option<pg::Offset>,
 ) -> Result<SelectStatement, TranslateError> {
+	// When a single table has an alias (e.g. `FROM users AS u`), strip the
+	// qualifier from compound identifiers so `u.name` becomes just `name`.
+	// SurrealDB scans produce flat records without alias wrappers.
+	if let Some(alias) = detect_single_table_alias(&select.from) {
+		strip_alias_from_select(&mut select, &mut order_by, &alias);
+	}
+
 	let fields = expressions::translate_select_items(select.projection)?;
 	let mut what = translate_from(select.from)?;
 
@@ -215,11 +440,22 @@ fn try_build_semi_anti(
 	let left_translated = expressions::translate_expr(left_expr)?;
 
 	// Build equi-join condition: left_col = right_subquery_col
-	let cond_expr = Expr::Binary {
+	let mut cond_expr = Expr::Binary {
 		left: Box::new(left_translated),
 		op: surrealdb_core::expr::operator::BinaryOperator::Equal,
 		right: Box::new(sub_col),
 	};
+
+	// Incorporate the subquery's WHERE filter so that predicates like
+	// `x IN (SELECT y FROM t WHERE active)` filter the right side.
+	if let Some(where_expr) = select.selection {
+		let filter = expressions::translate_expr(where_expr)?;
+		cond_expr = Expr::Binary {
+			left: Box::new(cond_expr),
+			op: surrealdb_core::expr::operator::BinaryOperator::And,
+			right: Box::new(filter),
+		};
+	}
 
 	let kind = if negated {
 		JoinKind::Anti
