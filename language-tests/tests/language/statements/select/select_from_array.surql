@@ -15,7 +15,7 @@ value = "[{ id: person:3, name: 'Charlie' }]"
 value = "[{ id: person:1, name: 'Alice' }, { id: person:3, name: 'Charlie' }]"
 
 [[test.results]]
-error = "Specify a database to use"
+value = "[{ name: 'Bob' }, { name: 'Alice' }]"
 
 */
 

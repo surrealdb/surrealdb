@@ -571,10 +571,15 @@ impl ExecOperator for SelectProject {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// When projections include All, we may need to dereference RecordIds,
-		// which requires database access
+		// When projections include All, Include, or Rename, we may need to
+		// dereference RecordIds, which requires database access.
+		// This must stay consistent with apply_projections().
 		let has_all = self.projections.iter().any(|p| matches!(p, Projection::All));
-		if has_all {
+		let has_includes = self
+			.projections
+			.iter()
+			.any(|p| matches!(p, Projection::Include(_) | Projection::Rename { .. }));
+		if has_all || has_includes {
 			ContextLevel::Database.max(self.input.required_context())
 		} else {
 			self.input.required_context()
