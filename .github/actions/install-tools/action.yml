@@ -9,6 +9,10 @@ inputs:
     description: 'Tools to install (comma-separated). Used if preset is not specified.'
     required: false
     default: 'cargo-make'
+  use-cargo-install:
+    description: 'If true, install tools via cargo install instead of taiki-e/install-action. Use on self-hosted runners where sudo may not be available (avoids unzip/system deps).'
+    required: false
+    default: 'false'
 
 runs:
   using: 'composite'
@@ -36,7 +40,18 @@ runs:
           echo "tools=${{ inputs.tools }}" >> $GITHUB_OUTPUT
         fi
 
+    - name: Install tools (cargo install)
+      if: inputs.use-cargo-install == 'true'
+      shell: bash
+      run: |
+        for tool in ${TOOLS//,/ }; do
+          cargo install "$tool" --locked
+        done
+      env:
+        TOOLS: ${{ steps.resolve-tools.outputs.tools }}
+
     - name: Install tools
+      if: inputs.use-cargo-install != 'true'
       uses: taiki-e/install-action@3216b6964cbfe053bb8b9a2ef245bd9300e2061d # (Actions must be pinned by commit hash) v2.62.14
       with:
         tool: ${{ steps.resolve-tools.outputs.tools }}

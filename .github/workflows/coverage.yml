@@ -36,6 +36,8 @@ jobs:
         uses: ./.github/actions/install-tools
         with:
           tools: cargo-llvm-cov,cargo-nextest,cargo-make
+          # Use cargo install to avoid taiki-e/install-action needing sudo (unzip) on self-hosted runner
+          use-cargo-install: true
 
       - name: Generate coverage report
         run: cargo make ci-workspace-coverage-with-server
