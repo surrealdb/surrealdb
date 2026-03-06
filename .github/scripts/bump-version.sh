@@ -42,7 +42,11 @@ cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
 
 # Commit changes
 git add -A
-git commit -m "Prepare v${VERSION} release"
+if ! git diff --staged --quiet; then
+	git commit -m "Prepare v${VERSION} release"
+else
+	echo "No version changes (branch already at v${VERSION}), skipping commit"
+fi
 
 # Push branch (tag will be created later after successful release)
 git push origin "${RELEASE_BRANCH}"
