@@ -736,6 +736,33 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				}
 			}
 		}
+		T![REMOVE] => {
+			let expected = "a resource type to define";
+			let Some(peek) = parser.peek1()? else {
+				let _ = parser.next();
+				return Err(parser.unexpected(expected));
+			};
+			match peek.token {
+				T![NAMESPACE] => parser.parse().await.map(Expr::RemoveNamespace),
+				T![DATABASE] => parser.parse().await.map(Expr::RemoveDatabase),
+				T![TABLE] => parser.parse().await.map(Expr::RemoveTable),
+				T![FUNCTION] => parser.parse().await.map(Expr::RemoveFunction),
+				T![MODULE] => parser.parse().await.map(Expr::RemoveModule),
+				T![PARAM] => parser.parse().await.map(Expr::RemoveParam),
+				T![API] => parser.parse().await.map(Expr::RemoveApi),
+				T![EVENT] => parser.parse().await.map(Expr::RemoveEvent),
+				T![FIELD] => parser.parse().await.map(Expr::RemoveField),
+				T![INDEX] => parser.parse().await.map(Expr::RemoveIndex),
+				T![ANALYZER] => parser.parse().await.map(Expr::RemoveAnalyzer),
+				T![BUCKET] => parser.parse().await.map(Expr::RemoveBucket),
+				T![SEQUENCE] => parser.parse().await.map(Expr::RemoveSequence),
+				T![ACCESS] => parser.parse().await.map(Expr::RemoveAccess),
+				_ => {
+					let _ = parser.next();
+					return Err(parser.unexpected(expected));
+				}
+			}
+		}
 		BaseTokenKind::Param => {
 			let path = parser.parse_sync()?;
 			Ok(Expr::Param(path))
