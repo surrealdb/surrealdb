@@ -36,7 +36,6 @@ scripting = ["surrealdb-core/scripting"]
 surrealism = [
     "surrealdb-core/surrealism",
     "dep:surrealism-runtime",
-    "dep:surrealism-types",
     "dep:walrus",
     "dep:wasm-encoder",
     "dep:wasm-opt",
@@ -144,7 +143,6 @@ pprof = { workspace = true, features = [
     "prost-codec",
 ], optional = true }
 surrealism-runtime = { workspace = true, optional = true }
-surrealism-types = { workspace = true, features = ["host"], optional = true }
 walrus = { workspace = true, optional = true }
 wasm-encoder = { workspace = true, optional = true }
 wasm-opt = { workspace = true, optional = true }
