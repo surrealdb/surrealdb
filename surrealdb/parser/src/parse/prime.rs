@@ -729,6 +729,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				T![BUCKET] => parser.parse().await.map(Expr::DefineBucket),
 				T![SEQUENCE] => parser.parse().await.map(Expr::DefineSequence),
 				T![CONFIG] => parser.parse().await.map(Expr::DefineConfig),
+				T![ACCESS] => parser.parse().await.map(Expr::DefineAccess),
 				_ => {
 					let _ = parser.next();
 					return Err(parser.unexpected(expected));

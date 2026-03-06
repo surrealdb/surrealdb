@@ -69,6 +69,7 @@ library! {
 		define_bucket: Vec<DefineBucket>,
 		define_sequence: Vec<DefineSequence>,
 		define_config: Vec<DefineConfig>,
+		define_access: Vec<DefineAccess>,
 
 		filter: Vec<Filter>,
 		filters: Vec<NodeList<Filter>>,
@@ -918,6 +919,103 @@ ast_type! {
 	}
 }
 
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum Algorithm{
+		EdDSA,
+		Es256,
+		Es384,
+		Es512,
+		Hs256,
+		Hs384,
+		Hs512,
+		Ps256,
+		Ps384,
+		Ps512,
+		Rs256,
+		Rs384,
+		Rs512,
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum JwtVerify{
+		Key{
+			algorithm: Algorithm,
+			key: NodeId<Expr>,
+		},
+		Jwks{
+			url: NodeId<Expr>,
+		},
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub struct JwtIssue{
+		pub algorithm: Option<Algorithm>,
+		pub key: Option<NodeId<Expr>>,
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub struct Jwt{
+		pub verify: JwtVerify,
+		pub issue: Option<JwtIssue>,
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum BearerAccessSubject{
+		User,
+		Record,
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub struct BearerAccess{
+		pub subject: BearerAccessSubject,
+		pub jwt: Option<Jwt>
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub struct RecordAccess{
+		pub signup: Option<NodeId<Expr>>,
+		pub signin: Option<NodeId<Expr>>,
+		pub jwt: Option<Jwt>,
+		pub refresh: bool,
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum AccessType{
+		Jwt(Jwt),
+		Record(RecordAccess),
+		Bearer(BearerAccess),
+	}
+}
+
+ast_type! {
+	pub struct DefineAccess{
+		pub kind: DefineKind,
+		pub name: NodeId<Expr>,
+		pub base: Base,
+		pub comment: Option<NodeId<Expr>>,
+		pub duration_session: Option<NodeId<Expr>>,
+		pub duration_token: Option<NodeId<Expr>>,
+		pub duration_grant: Option<NodeId<Expr>>,
+		pub authenticate: Option<NodeId<Expr>>,
+		pub ty: Option<AccessType>,
+	}
+}
+
 ast_type! {
 	#[derive(Copy, Clone)]
 	pub enum Expr {
@@ -982,6 +1080,7 @@ ast_type! {
 		DefineBucket(NodeId<DefineBucket>),
 		DefineSequence(NodeId<DefineSequence>),
 		DefineConfig(NodeId<DefineConfig>),
+		DefineAccess(NodeId<DefineAccess>),
 	}
 }
 
