@@ -1,9 +1,10 @@
 /**
 [test]
-reason = "Test time::timezone() returns a string"
+reason = "Test time::timezone() returns a valid UTC-offset string"
 
 [[test.results]]
-value = "'+00:00'"
+match = "$result = /^[+-]\\d{2}:\\d{2}$/"
+error = false
 
 */
 time::timezone();
