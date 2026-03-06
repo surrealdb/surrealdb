@@ -13,10 +13,10 @@
 
 use std::convert::Infallible;
 use std::task::{Context, Poll};
-use std::time::Duration;
 
-use async_graphql::http::{create_multipart_mixed_stream, is_accept_multipart_mixed};
-use async_graphql::{Executor, ParseRequestError};
+use async_graphql::http::is_accept_multipart_mixed;
+use async_graphql::parser::types::OperationType;
+use async_graphql::{Executor, ParseRequestError, Request as GraphQLInnerRequest, ServerError};
 use async_graphql_axum::rejection::GraphQLRejection;
 use async_graphql_axum::{GraphQLBatchRequest, GraphQLRequest, GraphQLResponse};
 use axum::BoxError;
@@ -25,9 +25,8 @@ use axum::extract::FromRequest;
 use axum::http::{Request as HttpRequest, Response as HttpResponse};
 use axum::response::IntoResponse;
 use bytes::Bytes;
-use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
-use http::StatusCode;
+use http::header::{CONTENT_TYPE, HeaderValue};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::gql::cache::GraphQLSchemaCache;
@@ -52,6 +51,11 @@ impl GraphQLService {
 		GraphQLService {
 			cache: GraphQLSchemaCache::default(),
 		}
+	}
+
+	/// Return a clone of the underlying schema cache (cheap -- backed by `Arc`).
+	pub(crate) fn cache(&self) -> GraphQLSchemaCache {
+		self.cache.clone()
 	}
 }
 
@@ -127,23 +131,17 @@ where
 					Ok(r) => r,
 					Err(err) => return Ok(err.into_response()),
 				};
-				// Add Datastore and Session to the GraphQL context
-				let req_with_data = gql_req.into_inner().data(datastore_ctx).data(session_ctx);
-				let stream = Executor::execute_stream(&schema, req_with_data, None);
-				let body = Body::from_stream(
-					create_multipart_mixed_stream(stream, Duration::from_secs(30))
-						.map(Ok::<_, std::io::Error>),
-				);
-				match HttpResponse::builder()
-					.header("content-type", "multipart/mixed; boundary=graphql")
-					.body(body)
-				{
-					Ok(r) => Ok(r),
-					Err(err) => {
-						let mut resp = HttpResponse::new(Body::new(err.to_string()));
-						*resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-						Ok(resp)
-					}
+				let mut req_with_data = gql_req.into_inner().data(datastore_ctx).data(session_ctx);
+				if request_is_subscription(&mut req_with_data) {
+					let response = async_graphql::Response::from_errors(vec![ServerError::new(
+						"Subscriptions require WebSocket transport on GET /graphql",
+						None,
+					)]);
+					Ok(as_application_json(GraphQLResponse::from(response).into_response()))
+				} else {
+					Ok(as_application_json(
+						GraphQLResponse::from(schema.execute(req_with_data).await).into_response(),
+					))
 				}
 			} else {
 				let gql_req =
@@ -151,12 +149,41 @@ where
 						Ok(r) => r,
 						Err(err) => return Ok(err.into_response()),
 					};
-				// Add Datastore and Session to the GraphQL context
 				let req_with_data = gql_req.into_inner().data(datastore_ctx).data(session_ctx);
-				Ok(GraphQLResponse(schema.execute_batch(req_with_data).await).into_response())
+				Ok(as_application_json(
+					GraphQLResponse(schema.execute_batch(req_with_data).await).into_response(),
+				))
 			}
 		})
 	}
+}
+
+/// Check whether `req` represents a GraphQL subscription operation.
+///
+/// Takes `&mut` because `parsed_query()` lazily parses and caches the AST
+/// inside the request. The request is not otherwise modified.
+fn request_is_subscription(req: &mut GraphQLInnerRequest) -> bool {
+	let operation_name = req.operation_name.clone();
+	let Ok(doc) = req.parsed_query() else {
+		return false;
+	};
+
+	match operation_name.as_deref() {
+		Some(selected) => doc.operations.iter().any(|(name, op)| {
+			name.is_some_and(|n| n.as_str() == selected)
+				&& matches!(op.node.ty, OperationType::Subscription)
+		}),
+		None => doc
+			.operations
+			.iter()
+			.next()
+			.is_some_and(|(_, op)| matches!(op.node.ty, OperationType::Subscription)),
+	}
+}
+
+fn as_application_json(mut response: HttpResponse<Body>) -> HttpResponse<Body> {
+	response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+	response
 }
 
 /// Wrap an error as a GraphQL rejection (HTTP 400-level response).
