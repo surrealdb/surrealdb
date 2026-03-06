@@ -23,6 +23,9 @@ coverage:
         flags:
           - language-tests
 
+ignore:
+  - "surrealism/**"
+
 comment:
   behavior: default
 

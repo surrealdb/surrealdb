@@ -739,58 +739,6 @@ impl Expr {
 			_ => self.to_sql(),
 		}
 	}
-
-	// NOTE: Changes to this function also likely require changes to
-	// crate::sql::Expr::needs_parentheses
-	/// Returns if this expression needs to be parenthesized when inside another expression.
-	#[allow(dead_code)]
-	fn needs_parentheses(&self) -> bool {
-		match self {
-			Expr::Literal(Literal::UnboundedRange | Literal::RecordId(_))
-			| Expr::Closure(_)
-			| Expr::Break
-			| Expr::Continue
-			| Expr::Throw(_)
-			| Expr::Return(_)
-			| Expr::IfElse(_)
-			| Expr::Select(_)
-			| Expr::Create(_)
-			| Expr::Update(_)
-			| Expr::Delete(_)
-			| Expr::Relate(_)
-			| Expr::Insert(_)
-			| Expr::Define(_)
-			| Expr::Remove(_)
-			| Expr::Rebuild(_)
-			| Expr::Upsert(_)
-			| Expr::Alter(_)
-			| Expr::Info(_)
-			| Expr::Foreach(_)
-			| Expr::Let(_)
-			| Expr::Sleep(_)
-			| Expr::Explain {
-				..
-			} => true,
-
-			Expr::Literal(_)
-			| Expr::Param(_)
-			| Expr::Idiom(_)
-			| Expr::Table(_)
-			| Expr::Mock(_)
-			| Expr::Block(_)
-			| Expr::Constant(_)
-			| Expr::Prefix {
-				..
-			}
-			| Expr::Postfix {
-				..
-			}
-			| Expr::Binary {
-				..
-			}
-			| Expr::FunctionCall(_) => false,
-		}
-	}
 }
 
 impl ToSql for Expr {
