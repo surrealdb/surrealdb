@@ -541,13 +541,16 @@ jobs:
           aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
 
   # ----------------------------------------
-  # Cleanup release branch
+  # Cleanup release branch (only on success)
   # ----------------------------------------
+  # Delete the temporary release branch only when the full release succeeded.
+  # On failure (e.g. crate publish network error), the branch is kept so the
+  # release can be retried from the same branch without starting from scratch.
 
   cleanup-release-branch:
     name: Delete release branch
     needs: [ bump-version, propagate ]
-    if: ${{ always() && needs.bump-version.outputs.release-branch != '' && (needs.propagate.result == 'success' || needs.propagate.result == 'skipped') }}
+    if: ${{ always() && needs.bump-version.outputs.release-branch != '' && needs.propagate.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
