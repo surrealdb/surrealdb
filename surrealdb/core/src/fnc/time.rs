@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use chrono::offset::TimeZone;
 use chrono::{DateTime, Datelike, DurationRound, Local, Timelike, Utc};
 
@@ -75,7 +75,15 @@ pub fn floor((val, duration): (Datetime, Duration)) -> Result<Value> {
 }
 
 pub fn format((val, format): (Datetime, String)) -> Result<Value> {
-	Ok(val.format(&format).to_string().into())
+	use std::fmt::Write;
+	let mut res = String::new();
+	let Ok(()) = write!(&mut res, "{}", val.format(&format)) else {
+		bail!(Error::InvalidMethodArguments {
+			name: "time::format".to_owned(),
+			message: format!("`{}` is not a valid time formatting string", format)
+		});
+	};
+	Ok(res.into())
 }
 
 pub fn group((val, group): (Datetime, String)) -> Result<Value> {
