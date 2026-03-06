@@ -418,20 +418,14 @@ impl ExecOperator for DynamicScan {
 			// Eagerly initialize field state (computed fields + field permissions)
 			let field_state = build_field_state(&ctx, &table_name, check_perms, needed_fields.as_ref()).await?;
 
-			// Pre-compute whether any post-decode processing is needed.
-			// When false, the scan loop can skip filter/process calls entirely
-			// (zero async overhead beyond the KV stream poll).
-			let needs_processing = ScanPipeline::compute_needs_processing(
-				&select_permission, &field_state, check_perms, predicate.as_ref(),
+			// Row-filtering (permissions, WHERE) prevents positional pushdown;
+			// row-modifying ops (computed fields, field perms) do not.
+			let needs_row_filtering = ScanPipeline::compute_needs_row_filtering(
+				&select_permission, predicate.as_ref(),
 			);
 
-			// When no processing is needed, push start to the KV layer as pre_skip
-			// so rows are discarded before deserialization.
-			let pre_skip = if !needs_processing { start_val } else { 0 };
-
-			// Push limit to the storage layer for the pure fast path.
-			// The KV scanner's skip is applied before the limit, so no adjustment needed.
-			let effective_storage_limit = if !needs_processing { limit_val } else { None };
+			let pre_skip = if !needs_row_filtering { start_val } else { 0 };
+			let effective_storage_limit = if !needs_row_filtering { limit_val } else { None };
 
 			let direction = determine_scan_direction(&order);
 
