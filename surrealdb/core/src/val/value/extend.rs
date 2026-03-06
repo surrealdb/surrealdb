@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use crate::ctx::FrozenContext;
@@ -28,7 +28,7 @@ impl Value {
 				Value::Array(x) => self.set(stk, ctx, opt, path, Value::from(x)).await,
 				x => self.set(stk, ctx, opt, path, Value::from(vec![x])).await,
 			},
-			_ => Ok(()),
+			v => bail!(crate::val::Error::TryExtend(v.to_raw_string())),
 		}
 	}
 }
@@ -75,5 +75,29 @@ mod tests {
 			.await
 			.unwrap();
 		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn extend_number_errors() {
+		let (ctx, opt) = mock().await;
+		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let mut val = parse_val!("{ test: 100 }");
+		let mut stack = reblessive::TreeStack::new();
+		let result =
+			stack.enter(|stk| val.extend(stk, &ctx, &opt, &idi, Value::from(200))).finish().await;
+		assert!(result.is_err());
+	}
+
+	#[tokio::test]
+	async fn extend_object_errors() {
+		let (ctx, opt) = mock().await;
+		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let mut val = parse_val!("{ test: { a: 1 } }");
+		let mut stack = reblessive::TreeStack::new();
+		let result = stack
+			.enter(|stk| val.extend(stk, &ctx, &opt, &idi, parse_val!("[1, 2, 3]")))
+			.finish()
+			.await;
+		assert!(result.is_err());
 	}
 }
