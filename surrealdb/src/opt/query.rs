@@ -61,11 +61,8 @@ where
 			Some((_, result)) => match result {
 				Ok(val) => val,
 				Err(_) => {
-					response.results.swap_remove(&self);
-					return Err(Error::connection(
-						"Connection uninitialised".to_string(),
-						Some(crate::types::ConnectionError::Uninitialised),
-					));
+					let (_, err) = response.results.swap_remove(&self).unwrap();
+					return Err(err.unwrap_err());
 				}
 			},
 			None => {
@@ -114,11 +111,8 @@ impl query_result::Sealed<Value> for (usize, &str) {
 			Some((_, result)) => match result {
 				Ok(val) => val,
 				Err(_) => {
-					response.results.swap_remove(&index);
-					return Err(Error::connection(
-						"Connection uninitialised".to_string(),
-						Some(crate::types::ConnectionError::Uninitialised),
-					));
+					let (_, err) = response.results.swap_remove(&index).unwrap();
+					return Err(err.unwrap_err());
 				}
 			},
 			None => {
@@ -150,11 +144,8 @@ where
 			Some((_, result)) => match result {
 				Ok(val) => val,
 				Err(_) => {
-					response.results.swap_remove(&index);
-					return Err(Error::connection(
-						"Connection uninitialised".to_string(),
-						Some(crate::types::ConnectionError::Uninitialised),
-					));
+					let (_, err) = response.results.swap_remove(&index).unwrap();
+					return Err(err.unwrap_err());
 				}
 			},
 			None => {
@@ -263,11 +254,8 @@ where
 					}
 				},
 				Err(_) => {
-					response.results.swap_remove(&index);
-					Err(Error::connection(
-						"Connection uninitialised".to_string(),
-						Some(crate::types::ConnectionError::Uninitialised),
-					))
+					let (_, err) = response.results.swap_remove(&index).unwrap();
+					Err(err.unwrap_err())
 				}
 			},
 			None => Ok(vec![]),
@@ -341,11 +329,8 @@ where
 					}
 				},
 				Err(_) => {
-					response.results.swap_remove(&index);
-					Err(Error::connection(
-						"Connection uninitialised".to_string(),
-						Some(crate::types::ConnectionError::Uninitialised),
-					))
+					let (_, err) = response.results.swap_remove(&index).unwrap();
+					Err(err.unwrap_err())
 				}
 			},
 			None => Ok(LinkedList::new()),
@@ -419,11 +404,8 @@ where
 					}
 				},
 				Err(_) => {
-					response.results.swap_remove(&index);
-					Err(Error::connection(
-						"Connection uninitialised".to_string(),
-						Some(crate::types::ConnectionError::Uninitialised),
-					))
+					let (_, err) = response.results.swap_remove(&index).unwrap();
+					Err(err.unwrap_err())
 				}
 			},
 			None => Ok(HashSet::new()),
@@ -538,11 +520,8 @@ impl query_stream::Sealed<Value> for () {
 				Err(e) => {
 					if e.message().contains("is not a live query") {
 						match response.results.swap_remove(&index) {
-							Some((_, Err(_))) => {
-								return Err(Error::connection(
-									"Connection uninitialised".to_string(),
-									Some(crate::types::ConnectionError::Uninitialised),
-								));
+							Some((_, Err(err))) => {
+								return Err(err);
 							}
 							Some((_, Ok(..))) => unreachable!(
 								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
@@ -618,11 +597,8 @@ where
 				Err(e) => {
 					if e.message().contains("is not a live query") {
 						match response.results.swap_remove(&index) {
-							Some((_, Err(_))) => {
-								return Err(Error::connection(
-									"Connection uninitialised".to_string(),
-									Some(crate::types::ConnectionError::Uninitialised),
-								));
+							Some((_, Err(err))) => {
+								return Err(err);
 							}
 							Some((_, Ok(..))) => unreachable!(
 								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
