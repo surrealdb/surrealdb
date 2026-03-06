@@ -158,7 +158,6 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Namespace(
 			DefineNamespaceStatement {
 				kind: DefineKind::Default,
-				id: None,
 				name: Expr::Idiom(Idiom::field("a".to_owned())),
 				comment: Expr::Literal(Literal::String("test".to_owned())),
 			},
@@ -166,7 +165,6 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Namespace(
 			DefineNamespaceStatement {
 				kind: DefineKind::Default,
-				id: None,
 				name: Expr::Idiom(Idiom::field("a".to_owned())),
 				comment: Expr::Literal(Literal::None),
 			},

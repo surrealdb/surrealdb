@@ -164,7 +164,6 @@ fn parse_define_namespace() {
 		res,
 		Expr::Define(Box::new(DefineStatement::Namespace(DefineNamespaceStatement {
 			kind: DefineKind::Default,
-			id: None,
 			name: Expr::Idiom(Idiom::field("a".to_string())),
 			comment: Expr::Literal(Literal::String("test".to_string())),
 		})))
@@ -178,7 +177,6 @@ fn parse_define_namespace() {
 		res,
 		Expr::Define(Box::new(DefineStatement::Namespace(DefineNamespaceStatement {
 			kind: DefineKind::Default,
-			id: None,
 			name: Expr::Idiom(Idiom::field("a".to_string())),
 			comment: Expr::Literal(Literal::None),
 		})))

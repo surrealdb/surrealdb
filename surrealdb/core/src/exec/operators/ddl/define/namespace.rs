@@ -18,7 +18,6 @@ use crate::val::Value;
 #[derive(Debug)]
 pub struct DefineNamespacePlan {
 	pub kind: DefineKind,
-	pub _id: Option<u32>,
 	pub name: Arc<dyn PhysicalExpr>,
 	pub comment: Arc<dyn PhysicalExpr>,
 	pub(crate) metrics: Arc<OperatorMetrics>,
@@ -27,13 +26,11 @@ pub struct DefineNamespacePlan {
 impl DefineNamespacePlan {
 	pub(crate) fn new(
 		kind: DefineKind,
-		id: Option<u32>,
 		name: Arc<dyn PhysicalExpr>,
 		comment: Arc<dyn PhysicalExpr>,
 	) -> Self {
 		Self {
 			kind,
-			_id: id,
 			name,
 			comment,
 			metrics: Arc::new(OperatorMetrics::new()),

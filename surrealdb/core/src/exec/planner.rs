@@ -292,8 +292,23 @@ impl<'ctx> Planner<'ctx> {
 			} => Box::pin(self.physical_statement_subquery(expr)).await,
 
 			// DDL subqueries (wrapped in ScalarSubquery)
-			Expr::Define(_) | Expr::Remove(_) | Expr::Alter(_) => {
-				Box::pin(self.physical_ddl_subquery(expr)).await
+			Expr::Define(stmt) => {
+				let plan = self.plan_define_statement(*stmt).await?;
+				Ok(Arc::new(ScalarSubquery {
+					plan,
+				}))
+			}
+			Expr::Remove(stmt) => {
+				let plan = self.plan_remove_statement(*stmt).await?;
+				Ok(Arc::new(ScalarSubquery {
+					plan,
+				}))
+			}
+			Expr::Alter(stmt) => {
+				let plan = self.plan_alter_statement(*stmt).await?;
+				Ok(Arc::new(ScalarSubquery {
+					plan,
+				}))
 			}
 
 			// LET is handled by block/sequence operators, not as an expression
@@ -688,23 +703,6 @@ impl<'ctx> Planner<'ctx> {
 		}))
 	}
 
-	/// Convert a DDL statement expression (DEFINE, REMOVE, ALTER) into a
-	/// physical expression by wrapping its operator plan in a [`ScalarSubquery`].
-	async fn physical_ddl_subquery(
-		&self,
-		expr: Expr,
-	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
-		let plan: Arc<dyn ExecOperator> = match expr {
-			Expr::Define(stmt) => self.plan_define_statement(*stmt).await?,
-			Expr::Remove(stmt) => self.plan_remove_statement(*stmt).await?,
-			Expr::Alter(stmt) => self.plan_alter_statement(*stmt).await?,
-			_ => unreachable!("physical_ddl_subquery called with non-DDL expr"),
-		};
-		Ok(Arc::new(ScalarSubquery {
-			plan,
-		}))
-	}
-
 	/// Convert an expression to a physical expression, treating identifiers as strings.
 	///
 	/// Used for `INFO FOR USER test` where `test` is a name, not a variable,
@@ -717,10 +715,10 @@ impl<'ctx> Planner<'ctx> {
 		use crate::exec::physical_expr::Literal as PhysicalLiteral;
 		use crate::expr::part::Part;
 
-		if let Expr::Idiom(ref idiom) = expr && idiom.0.iter().all(|p| matches!(p, Part::Field(_))) {
-			return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(
-				idiom.to_raw_string(),
-			))));
+		if let Expr::Idiom(ref idiom) = expr
+			&& idiom.0.iter().all(|p| matches!(p, Part::Field(_)))
+		{
+			return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(idiom.to_raw_string()))));
 		}
 
 		if let Expr::Table(name) = expr {

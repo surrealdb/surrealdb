@@ -21,7 +21,7 @@ impl<'ctx> Planner<'ctx> {
 			DefineStatement::Namespace(s) => {
 				let name = self.physical_expr_as_name(s.name).await?;
 				let comment = Box::pin(self.physical_expr(s.comment)).await?;
-				Ok(Arc::new(define::DefineNamespacePlan::new(s.kind, s.id, name, comment)))
+				Ok(Arc::new(define::DefineNamespacePlan::new(s.kind, name, comment)))
 			}
 			DefineStatement::Database(s) => {
 				let name = self.physical_expr_as_name(s.name).await?;
