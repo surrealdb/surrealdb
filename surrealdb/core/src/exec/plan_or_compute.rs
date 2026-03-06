@@ -17,7 +17,7 @@ use crate::exec::planner::try_plan_expr;
 use crate::exec::{FlowResult, ValueBatchStream};
 use crate::expr::part::{Part, RecurseInstruction};
 use crate::expr::statements::InfoStatement;
-use crate::expr::{Base, Block, ControlFlow, ControlFlowExt, Expr, Literal};
+use crate::expr::{Block, ControlFlow, ControlFlowExt, Expr, Literal};
 use crate::val::Value;
 
 // ============================================================================
@@ -299,10 +299,12 @@ pub(crate) fn expr_required_context(expr: &Expr) -> ContextLevel {
 		| Expr::Relate(_)
 		| Expr::Insert(_) => ContextLevel::Database,
 
-		// DDL statements need a database
-		Expr::Define(_) | Expr::Remove(_) | Expr::Alter(_) | Expr::Rebuild(_) => {
-			ContextLevel::Database
-		}
+		Expr::Rebuild(_) => ContextLevel::Database,
+
+		// DDL: context level depends on the specific variant
+		Expr::Define(stmt) => define_stmt_required_context(stmt),
+		Expr::Remove(stmt) => remove_stmt_required_context(stmt),
+		Expr::Alter(stmt) => alter_stmt_required_context(stmt),
 
 		// Info: depends on the level
 		Expr::Info(info) => info_stmt_required_context(info),
@@ -337,11 +339,7 @@ fn info_stmt_required_context(info: &InfoStatement) -> ContextLevel {
 			ContextLevel::Database
 		}
 		InfoStatement::User(user_expr, base, _) => {
-			let base_ctx = match base {
-				Some(Base::Root) | None => ContextLevel::Root,
-				Some(Base::Ns) => ContextLevel::Namespace,
-				Some(Base::Db) => ContextLevel::Database,
-			};
+			let base_ctx = base.map(ContextLevel::from).unwrap_or(ContextLevel::Root);
 			base_ctx.max(expr_required_context(user_expr))
 		}
 	}
@@ -433,5 +431,42 @@ fn part_required_context(part: &Part) -> ContextLevel {
 		| Part::Optional
 		| Part::Doc
 		| Part::RepeatRecurse => ContextLevel::Root,
+	}
+}
+
+fn define_stmt_required_context(
+	stmt: &crate::expr::statements::define::DefineStatement,
+) -> ContextLevel {
+	use crate::expr::statements::define::DefineStatement;
+	match stmt {
+		DefineStatement::Namespace(_) => ContextLevel::Root,
+		DefineStatement::Database(_) => ContextLevel::Namespace,
+		DefineStatement::Access(s) => s.base.into(),
+		DefineStatement::User(s) => s.base.into(),
+		_ => ContextLevel::Database,
+	}
+}
+
+fn remove_stmt_required_context(
+	stmt: &crate::expr::statements::remove::RemoveStatement,
+) -> ContextLevel {
+	use crate::expr::statements::remove::RemoveStatement;
+	match stmt {
+		RemoveStatement::Namespace(_) => ContextLevel::Root,
+		RemoveStatement::Database(_) => ContextLevel::Namespace,
+		RemoveStatement::Access(s) => s.base.into(),
+		RemoveStatement::User(s) => s.base.into(),
+		_ => ContextLevel::Database,
+	}
+}
+
+fn alter_stmt_required_context(
+	stmt: &crate::expr::statements::alter::AlterStatement,
+) -> ContextLevel {
+	use crate::expr::statements::alter::AlterStatement;
+	match stmt {
+		AlterStatement::System(_) => ContextLevel::Root,
+		AlterStatement::Namespace(_) => ContextLevel::Namespace,
+		_ => ContextLevel::Database,
 	}
 }

@@ -16,7 +16,6 @@ use crate::val::Value;
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineNamespaceStatement {
 	pub kind: DefineKind,
-	pub id: Option<u32>,
 	pub name: Expr,
 	pub comment: Expr,
 }
@@ -25,7 +24,6 @@ impl Default for DefineNamespaceStatement {
 	fn default() -> Self {
 		Self {
 			kind: DefineKind::Default,
-			id: None,
 			name: Expr::Literal(Literal::String(String::new())),
 			comment: Expr::Literal(Literal::None),
 		}

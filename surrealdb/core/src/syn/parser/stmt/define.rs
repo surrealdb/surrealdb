@@ -84,7 +84,6 @@ impl Parser<'_> {
 		};
 		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		let mut res = DefineNamespaceStatement {
-			id: None,
 			name,
 			kind,
 			..Default::default()
