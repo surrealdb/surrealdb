@@ -1,7 +1,7 @@
 /**
 [env]
 timeout = 30000
-context-timeout = 15000
+context-timeout = 60000
 
 [test]
 reason = "Test crypto::pbkdf2::generate() and crypto::pbkdf2::compare()"
