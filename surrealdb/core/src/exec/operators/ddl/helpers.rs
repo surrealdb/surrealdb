@@ -38,6 +38,31 @@ pub(crate) async fn eval_comment(
 ///
 /// Returns a single-element stream that either yields `Value::None`
 /// or propagates the error as `ControlFlow::Err`.
+#[cfg(target_family = "wasm")]
+pub(crate) fn ddl_stream<F>(
+	ctx: &ExecutionContext,
+	f: F,
+) -> crate::exec::FlowResult<crate::exec::ValueBatchStream>
+where
+	F: FnOnce(ExecutionContext) -> crate::exec::BoxFut<'static, Result<Value>> + 'static,
+{
+	let ctx = ctx.clone();
+	Ok(Box::pin(futures::stream::once(async move {
+		match f(ctx).await {
+			Ok(value) => Ok(crate::exec::ValueBatch {
+				values: vec![value],
+			}),
+			Err(e) => Err(crate::expr::ControlFlow::Err(e)),
+		}
+	})))
+}
+
+/// Wrap an async `Result<Value>` DDL execution function into the
+/// `execute` method pattern used by DDL [`ExecOperator`] impls.
+///
+/// Returns a single-element stream that either yields `Value::None`
+/// or propagates the error as `ControlFlow::Err`.
+#[cfg(not(target_family = "wasm"))]
 pub(crate) fn ddl_stream<F>(
 	ctx: &ExecutionContext,
 	f: F,

@@ -205,7 +205,7 @@ impl<'ctx> Planner<'ctx> {
 				Ok(Arc::new(remove::RemoveEventPlan::new(name, table_name, s.if_exists)))
 			}
 			RemoveStatement::Field(s) => {
-				let name = self.physical_expr_as_name(s.name).await?;
+				let name = self.physical_expr_as_field_name(s.name).await?;
 				let table_name = self.physical_expr_as_name(s.table_name).await?;
 				Ok(Arc::new(remove::RemoveFieldPlan::new(name, table_name, s.if_exists)))
 			}

@@ -703,12 +703,42 @@ impl<'ctx> Planner<'ctx> {
 		}))
 	}
 
-	/// Convert an expression to a physical expression, treating identifiers as strings.
+	/// Convert an expression to a physical expression, treating a single
+	/// identifier as a literal string name.
 	///
-	/// Used for `INFO FOR USER test` where `test` is a name, not a variable,
-	/// and for DDL names like `REMOVE FIELD document.visible ON test` where
-	/// `document.visible` is a dotted name, not a nested field access.
+	/// Used for DDL resource names like `INFO FOR USER test` or
+	/// `REMOVE DATABASE mydb` where a bare identifier is a name, not a
+	/// variable.  Multi-part dotted idioms are evaluated normally; use
+	/// [`physical_expr_as_field_name`] for contexts where dotted paths
+	/// should be coerced to a literal string (e.g. `REMOVE FIELD a.b`).
 	pub async fn physical_expr_as_name(
+		&self,
+		expr: Expr,
+	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
+		use crate::exec::physical_expr::Literal as PhysicalLiteral;
+		use crate::expr::part::Part;
+
+		if let Expr::Idiom(ref idiom) = expr
+			&& idiom.0.len() == 1
+			&& matches!(idiom.0[0], Part::Field(_))
+		{
+			return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(idiom.to_raw_string()))));
+		}
+
+		if let Expr::Table(name) = expr {
+			return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(name.to_string()))));
+		}
+
+		Box::pin(self.physical_expr(expr)).await
+	}
+
+	/// Convert an expression to a physical expression, treating any
+	/// idiom composed entirely of field parts as a literal dotted string.
+	///
+	/// Used for field-name positions in DDL statements such as
+	/// `REMOVE FIELD document.visible ON test` where `document.visible`
+	/// is a dotted name, not a nested field access.
+	pub async fn physical_expr_as_field_name(
 		&self,
 		expr: Expr,
 	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
