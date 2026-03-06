@@ -1,12 +1,12 @@
 use std::str::FromStr;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use async_graphql::Data;
 use async_graphql::http::{ALL_WEBSOCKET_PROTOCOLS, WebSocketProtocols, WsMessage};
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use axum::extract::{State, WebSocketUpgrade};
-use axum::http::header::SEC_WEBSOCKET_PROTOCOL;
 use axum::http::HeaderMap;
+use axum::http::header::SEC_WEBSOCKET_PROTOCOL;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use axum::{Extension, Router};
@@ -14,24 +14,26 @@ use futures_util::{SinkExt, StreamExt, future};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::gql::cache::GraphQLSchemaCache;
+use tracing::instrument;
 
 use crate::gql::GraphQLService;
 use crate::ntw::AppState;
 use crate::ntw::error::Error as NetError;
 use crate::rpc::RpcState;
 
-static WS_SCHEMA_CACHE: LazyLock<GraphQLSchemaCache> = LazyLock::new(GraphQLSchemaCache::default);
-
 pub fn router() -> Router<Arc<RpcState>> {
 	let service = GraphQLService::new();
-	Router::new().route("/graphql", get(ws_handler).post_service(service))
+	let cache = service.cache();
+	Router::new().route("/graphql", get(ws_handler).post_service(service)).layer(Extension(cache))
 }
 
+#[instrument(skip_all)]
 async fn ws_handler(
 	ws: WebSocketUpgrade,
 	headers: HeaderMap,
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
+	Extension(cache): Extension<GraphQLSchemaCache>,
 	State(rpc_state): State<Arc<RpcState>>,
 ) -> impl IntoResponse {
 	let datastore = &state.datastore;
@@ -44,7 +46,16 @@ async fn ws_handler(
 		return NetError::ForbiddenRoute(RouteTarget::GraphQL.to_string()).into_response();
 	}
 
-	let schema = match WS_SCHEMA_CACHE.get_schema(datastore, &session).await {
+	if session.ns.is_none() {
+		info!("GraphQL WebSocket rejected: no namespace specified");
+		return NetError::Request.into_response();
+	}
+	if session.db.is_none() {
+		info!("GraphQL WebSocket rejected: no database specified");
+		return NetError::Request.into_response();
+	}
+
+	let schema = match cache.get_schema(datastore, &session).await {
 		Ok(schema) => schema,
 		Err(err) => {
 			info!(?err, "error generating GraphQL schema for websocket");
@@ -55,7 +66,7 @@ async fn ws_handler(
 	let mut data = Data::default();
 	data.insert(datastore.clone());
 	data.insert(Arc::new(session));
-	data.insert(rpc_state.notification_broadcaster.clone());
+	data.insert(rpc_state.notification_router.clone());
 
 	let protocol = select_ws_protocol(&headers);
 
@@ -77,6 +88,7 @@ fn select_ws_protocol(headers: &HeaderMap) -> WebSocketProtocols {
 		.unwrap_or(WebSocketProtocols::GraphQLWS)
 }
 
+#[instrument(skip_all)]
 async fn serve_graphql_ws(
 	socket: WebSocket,
 	schema: async_graphql::dynamic::Schema,

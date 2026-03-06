@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use async_graphql::dynamic::indexmap::IndexMap;
 use async_graphql::dynamic::{
@@ -7,15 +7,13 @@ use async_graphql::dynamic::{
 };
 use async_graphql::{Name, Value as GqlValue};
 use async_stream::try_stream;
-use surrealdb_types::ToSql;
-use surrealdb_types::{Action as PublicAction, Notification as PublicNotification};
-use tokio::sync::broadcast::{Receiver, Sender};
+use surrealdb_types::{Action as PublicAction, Notification as PublicNotification, ToSql};
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use super::error::{resolver_error, GqlError};
-use super::tables::{filter_name_from_table, parse_filter_arg, CachedRecord};
-use super::utils::execute_plan;
-use super::utils::GqlValueUtils;
+use super::error::{GqlError, resolver_error};
+use super::tables::{CachedRecord, filter_name_from_table, parse_filter_arg};
+use super::utils::{GqlValueUtils, execute_plan};
 use crate::catalog::{FieldDefinition, TableDefinition};
 use crate::dbs::Session;
 use crate::expr::field::Selector;
@@ -27,8 +25,65 @@ use crate::expr::{
 use crate::kvs::Datastore;
 use crate::val::{RecordId, TableName, Value};
 
-/// Context for GraphQL Subscription resolvers
-pub(crate) type NotificationBroadcaster = Arc<Sender<PublicNotification>>;
+/// Routes LIVE query notifications to their specific GraphQL subscribers.
+///
+/// Each GraphQL subscription registers its live query UUID and receives a
+/// dedicated bounded mpsc channel. Notifications are dispatched in O(1) via
+/// HashMap lookup. When a subscriber's channel is full the notification is
+/// dropped (analogous to the "lagged" behaviour of broadcast channels).
+pub struct NotificationRouter {
+	routes: RwLock<HashMap<Uuid, mpsc::Sender<PublicNotification>>>,
+	channel_capacity: usize,
+}
+
+impl NotificationRouter {
+	pub fn new(channel_capacity: usize) -> Self {
+		Self {
+			routes: RwLock::new(HashMap::new()),
+			channel_capacity: channel_capacity.max(1),
+		}
+	}
+
+	fn subscribe(&self, live_id: Uuid) -> mpsc::Receiver<PublicNotification> {
+		let (tx, rx) = mpsc::channel(self.channel_capacity);
+		self.routes.write().unwrap_or_else(|e| e.into_inner()).insert(live_id, tx);
+		rx
+	}
+
+	fn unsubscribe(&self, live_id: &Uuid) {
+		self.routes.write().unwrap_or_else(|e| e.into_inner()).remove(live_id);
+	}
+
+	/// Route a notification to the matching subscriber, if any.
+	///
+	/// Clones the notification only when a matching subscriber exists.
+	/// If the subscriber's channel is full the notification is dropped
+	/// rather than blocking the dispatch loop.
+	pub fn dispatch(&self, notification: &PublicNotification) {
+		let routes = self.routes.read().unwrap_or_else(|e| e.into_inner());
+		if let Some(sender) = routes.get(&notification.id) {
+			match sender.try_send(notification.clone()) {
+				Ok(()) => {}
+				Err(mpsc::error::TrySendError::Full(_)) => {
+					warn!(
+						live_id = %notification.id,
+						"GraphQL subscription channel full, notification dropped"
+					);
+				}
+				Err(mpsc::error::TrySendError::Closed(_)) => {
+					trace!(
+						live_id = %notification.id,
+						"GraphQL subscription channel closed, stale route"
+					);
+				}
+			}
+		}
+	}
+
+	pub fn has_subscribers(&self) -> bool {
+		!self.routes.read().unwrap_or_else(|e| e.into_inner()).is_empty()
+	}
+}
 
 pub(crate) fn process_subscriptions(
 	tbs: &[TableDefinition],
@@ -66,7 +121,7 @@ fn make_table_subscription_field(
 		SubscriptionFieldFuture::new(async move {
 			let ds = ctx.data::<Arc<Datastore>>()?;
 			let sess = ctx.data::<Arc<Session>>()?;
-			let broadcaster = ctx.data::<NotificationBroadcaster>().map_err(|_| {
+			let router = ctx.data::<Arc<NotificationRouter>>().map_err(|_| {
 				async_graphql::Error::new(
 					"GraphQL subscriptions are not enabled on this server node",
 				)
@@ -78,17 +133,16 @@ fn make_table_subscription_field(
 			let cond = parse_subscription_cond(args, &fds, &tb_name)?;
 			let fetch = parse_fetch_arg(args)?;
 			let live_id =
-				start_table_live_query(&ds, &live_sess, &tb_name, fields, cond, fetch).await?;
-			let mut receiver = broadcaster.subscribe();
-			let cleanup = LiveQueryCleanup::new(ds.clone(), live_sess, live_id);
+				start_table_live_query(ds, &live_sess, &tb_name, fields, cond, fetch).await?;
+			let mut receiver = router.subscribe(live_id);
+			let cleanup = LiveQueryCleanup::new(ds.clone(), live_sess, live_id, router.clone());
 
 			Ok(try_stream! {
 				let _cleanup = cleanup;
 				loop {
-					let notification = recv_notification(&mut receiver).await?;
-					if notification.id.into_inner() != live_id {
-						continue;
-					}
+					let Some(notification) = receiver.recv().await else {
+						break;
+					};
 					if matches!(notification.action, PublicAction::Killed) {
 						break;
 					}
@@ -149,22 +203,6 @@ fn projected_live_fields(
 		})
 		.collect();
 	LiveFields::Select(Fields::Select(projected))
-}
-
-async fn recv_notification(
-	receiver: &mut Receiver<PublicNotification>,
-) -> Result<PublicNotification, async_graphql::Error> {
-	loop {
-		match receiver.recv().await {
-			Ok(n) => return Ok(n),
-			Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
-			Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-				return Err(async_graphql::Error::new(
-					"Live notification channel closed unexpectedly",
-				));
-			}
-		}
-	}
 }
 
 fn parse_subscription_cond(
@@ -240,7 +278,6 @@ fn parse_fetch_arg(
 			}
 			out
 		}
-		GqlValue::String(path) => vec![path.clone()],
 		_ => {
 			return Err(async_graphql::Error::new("fetch must be a list of strings"));
 		}
@@ -331,24 +368,35 @@ struct LiveQueryCleanup {
 	ds: Arc<Datastore>,
 	sess: Session,
 	live_id: Uuid,
+	router: Arc<NotificationRouter>,
 }
 
 impl LiveQueryCleanup {
-	fn new(ds: Arc<Datastore>, sess: Session, live_id: Uuid) -> Self {
+	fn new(
+		ds: Arc<Datastore>,
+		sess: Session,
+		live_id: Uuid,
+		router: Arc<NotificationRouter>,
+	) -> Self {
 		Self {
 			ds,
 			sess,
 			live_id,
+			router,
 		}
 	}
 }
 
 impl Drop for LiveQueryCleanup {
 	fn drop(&mut self) {
+		self.router.unsubscribe(&self.live_id);
+		let Ok(handle) = tokio::runtime::Handle::try_current() else {
+			return;
+		};
 		let ds = self.ds.clone();
 		let sess = self.sess.clone();
 		let live_id = self.live_id;
-		tokio::spawn(async move {
+		handle.spawn(async move {
 			if let Err(err) = kill_live_query(&ds, &sess, live_id).await {
 				trace!(?err, ?live_id, "failed to cleanup GraphQL live query");
 			}

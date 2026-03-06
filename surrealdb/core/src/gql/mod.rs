@@ -50,3 +50,4 @@ mod utils;
 
 pub use cache::*;
 pub use error::GqlError;
+pub use subscriptions::NotificationRouter;

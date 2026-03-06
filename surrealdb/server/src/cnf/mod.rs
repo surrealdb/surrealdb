@@ -134,13 +134,10 @@ pub static WEBSOCKET_RESPONSE_BUFFER_SIZE: LazyLock<usize> =
 pub static WEBSOCKET_RESPONSE_FLUSH_PERIOD: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_FLUSH_PERIOD", u64, 3);
 
-pub static GQL_NOTIFICATION_CHANNEL_SIZE: LazyLock<usize> = LazyLock::new(|| {
-	env::var("SURREAL_GQL_NOTIFICATION_CHANNEL_SIZE")
-		.ok()
-		.and_then(|v| v.parse::<usize>().ok())
-		.map(|v| v.max(1))
-		.unwrap_or(7500)
-});
+/// How many notifications can be buffered per GraphQL subscription before
+/// backpressure drops new notifications (default: 1024)
+pub static GQL_SUBSCRIPTION_CHANNEL_CAPACITY: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_GQL_SUBSCRIPTION_CHANNEL_CAPACITY", usize, 1024);
 
 /// The number of runtime worker threads to start (default: the number of CPU
 /// cores, minimum 4)

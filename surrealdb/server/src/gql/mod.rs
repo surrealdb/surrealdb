@@ -52,6 +52,11 @@ impl GraphQLService {
 			cache: GraphQLSchemaCache::default(),
 		}
 	}
+
+	/// Return a clone of the underlying schema cache (cheap -- backed by `Arc`).
+	pub(crate) fn cache(&self) -> GraphQLSchemaCache {
+		self.cache.clone()
+	}
 }
 
 impl<B> Service<HttpRequest<B>> for GraphQLService
@@ -112,10 +117,6 @@ where
 			// Clone Arc's before moving req (needed for GraphQL context)
 			let datastore_ctx = datastore.clone();
 			let session_ctx = std::sync::Arc::new(session.clone());
-			let notification_ctx = req
-				.extensions()
-				.get::<std::sync::Arc<crate::rpc::RpcState>>()
-				.map(|rpc_state| rpc_state.notification_broadcaster.clone());
 
 			let is_accept_multipart_mixed = req
 				.headers()
@@ -130,11 +131,7 @@ where
 					Ok(r) => r,
 					Err(err) => return Ok(err.into_response()),
 				};
-				// Add Datastore and Session to the GraphQL context
 				let mut req_with_data = gql_req.into_inner().data(datastore_ctx).data(session_ctx);
-				if let Some(notification_ctx) = notification_ctx {
-					req_with_data = req_with_data.data(notification_ctx);
-				}
 				if request_is_subscription(&mut req_with_data) {
 					let response = async_graphql::Response::from_errors(vec![ServerError::new(
 						"Subscriptions require WebSocket transport on GET /graphql",
@@ -152,11 +149,7 @@ where
 						Ok(r) => r,
 						Err(err) => return Ok(err.into_response()),
 					};
-				// Add Datastore and Session to the GraphQL context
-				let mut req_with_data = gql_req.into_inner().data(datastore_ctx).data(session_ctx);
-				if let Some(notification_ctx) = notification_ctx {
-					req_with_data = req_with_data.data(notification_ctx);
-				}
+				let req_with_data = gql_req.into_inner().data(datastore_ctx).data(session_ctx);
 				Ok(as_application_json(
 					GraphQLResponse(schema.execute_batch(req_with_data).await).into_response(),
 				))
@@ -165,6 +158,10 @@ where
 	}
 }
 
+/// Check whether `req` represents a GraphQL subscription operation.
+///
+/// Takes `&mut` because `parsed_query()` lazily parses and caches the AST
+/// inside the request. The request is not otherwise modified.
 fn request_is_subscription(req: &mut GraphQLInnerRequest) -> bool {
 	let operation_name = req.operation_name.clone();
 	let Ok(doc) = req.parsed_query() else {

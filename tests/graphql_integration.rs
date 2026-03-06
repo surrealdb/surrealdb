@@ -3,8 +3,7 @@ mod common;
 mod graphql_integration {
 	use std::time::Duration;
 
-	use futures_util::SinkExt;
-	use futures_util::StreamExt;
+	use futures_util::{SinkExt, StreamExt};
 	macro_rules! assert_equal_arrs {
 		($lhs: expr_2021, $rhs: expr_2021) => {
 			let lhs = $lhs.as_array().unwrap().iter().collect::<std::collections::HashSet<_>>();
