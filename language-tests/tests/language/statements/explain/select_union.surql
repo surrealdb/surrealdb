@@ -13,12 +13,12 @@ value = ''''SelectProject [ctx: Db] [projections: *]
 ''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
+value = ''''SelectProject [ctx: Rt] [projections: *]
     SourceExpr [ctx: Rt] [expr: [1, 2, 3]]
 ''''
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
+value = ''''SelectProject [ctx: Rt] [projections: *]
     SourceExpr [ctx: Rt] [expr: <array>  0 .. 5]
 ''''
 */

@@ -41,6 +41,10 @@ impl PhysicalExpr for ArrayLiteral {
 	fn access_mode(&self) -> AccessMode {
 		self.elements.iter().map(|e| e.access_mode()).combine_all()
 	}
+
+	fn may_produce_record_ids(&self) -> bool {
+		self.elements.iter().any(|e| e.may_produce_record_ids())
+	}
 }
 
 impl ToSql for ArrayLiteral {
@@ -88,6 +92,10 @@ impl PhysicalExpr for ObjectLiteral {
 
 	fn access_mode(&self) -> AccessMode {
 		self.entries.iter().map(|(_, e)| e.access_mode()).combine_all()
+	}
+
+	fn may_produce_record_ids(&self) -> bool {
+		false
 	}
 }
 

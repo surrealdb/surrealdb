@@ -154,21 +154,13 @@ impl ExecOperator for Project {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// Combine field expression contexts with child operator context.
-		// When include_all is true, we additionally need database access
-		// to dereference RecordIds.
 		let fields_ctx = self
 			.fields
 			.iter()
 			.map(|f| f.expr.required_context())
 			.max()
 			.unwrap_or(ContextLevel::Root);
-		let base = self.input.required_context().max(fields_ctx);
-		if self.include_all {
-			base.max(ContextLevel::Database)
-		} else {
-			base
-		}
+		self.input.required_context().max(fields_ctx)
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -571,14 +563,10 @@ impl ExecOperator for SelectProject {
 	}
 
 	fn required_context(&self) -> ContextLevel {
-		// When projections include All, we may need to dereference RecordIds,
-		// which requires database access
-		let has_all = self.projections.iter().any(|p| matches!(p, Projection::All));
-		if has_all {
-			ContextLevel::Database.max(self.input.required_context())
-		} else {
-			self.input.required_context()
-		}
+		// RecordId dereference in apply_projections only triggers when the
+		// input VALUE is a RecordId, so the need for Database context is
+		// determined by the source operator, not by projection shape.
+		self.input.required_context()
 	}
 
 	fn access_mode(&self) -> AccessMode {

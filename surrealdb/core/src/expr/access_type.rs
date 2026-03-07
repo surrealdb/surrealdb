@@ -24,32 +24,6 @@ impl Default for AccessType {
 	}
 }
 
-impl AccessType {
-	/// Returns whether or not the access method can issue non-token grants
-	/// In this context, token refers exclusively to JWT
-	#[allow(dead_code)]
-	pub fn can_issue_grants(&self) -> bool {
-		match self {
-			// The JWT access method cannot issue stateful grants.
-			AccessType::Jwt(_) => false,
-			// The record access method can be used to issue grants if defined with bearer AKA
-			// refresh.
-			AccessType::Record(ac) => ac.bearer.is_some(),
-			AccessType::Bearer(_) => true,
-		}
-	}
-	/// Returns whether or not the access method can issue tokens
-	/// In this context, tokens refers exclusively to JWT
-	#[allow(dead_code)]
-	pub fn can_issue_tokens(&self) -> bool {
-		match self {
-			// The JWT access method can only issue tokens if an issuer is set
-			AccessType::Jwt(jwt) => jwt.issue.is_some(),
-			_ => true,
-		}
-	}
-}
-
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 pub(crate) struct JwtAccess {
 	// Verify is required

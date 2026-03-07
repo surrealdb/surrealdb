@@ -44,6 +44,10 @@ impl PhysicalExpr for Literal {
 	fn try_literal(&self) -> Option<&Value> {
 		Some(&self.0)
 	}
+
+	fn may_produce_record_ids(&self) -> bool {
+		false
+	}
 }
 
 impl ToSql for Literal {
@@ -266,6 +270,10 @@ impl PhysicalExpr for MockExpr {
 	fn access_mode(&self) -> AccessMode {
 		// Mock expressions are read-only constant generators
 		AccessMode::ReadOnly
+	}
+
+	fn may_produce_record_ids(&self) -> bool {
+		true
 	}
 }
 

@@ -1961,10 +1961,28 @@ impl<'ctx> Planner<'ctx> {
 						limit_pushed: false,
 					})
 				}
-				Some(_) | None => {
+				Some(ref val) => {
+					let needs_fetch = match val {
+						crate::val::Value::Array(arr) => {
+							arr.iter().any(|v| matches!(v, crate::val::Value::RecordId(_)))
+						}
+						_ => false,
+					};
 					let phys_expr = self.physical_expr(expr).await?;
 					Ok(PlannedSource {
-						operator: Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>,
+						operator: Arc::new(SourceExpr::new(phys_expr, needs_fetch))
+							as Arc<dyn ExecOperator>,
+						filter_action: FilterAction::UseOriginal,
+						limit_pushed: false,
+					})
+				}
+				None => {
+					// Unresolvable param -- could evaluate to anything at
+					// runtime, so conservatively assume record fetches.
+					let phys_expr = self.physical_expr(expr).await?;
+					Ok(PlannedSource {
+						operator: Arc::new(SourceExpr::new(phys_expr, true))
+							as Arc<dyn ExecOperator>,
 						filter_action: FilterAction::UseOriginal,
 						limit_pushed: false,
 					})
@@ -2002,8 +2020,10 @@ impl<'ctx> Planner<'ctx> {
 			}
 			other => {
 				let phys_expr = self.physical_expr(other).await?;
+				let needs_fetch = phys_expr.may_produce_record_ids();
 				Ok(PlannedSource {
-					operator: Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>,
+					operator: Arc::new(SourceExpr::new(phys_expr, needs_fetch))
+						as Arc<dyn ExecOperator>,
 					filter_action: FilterAction::UseOriginal,
 					limit_pushed: false,
 				})

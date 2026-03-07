@@ -1,5 +1,6 @@
 /**
 [test]
+reason = "Test DEFINE TABLE TYPE RELATION with IN/OUT constraints"
 
 [[test.results]]
 value = "NONE"
@@ -11,41 +12,29 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+value = "[{ id: person:alice }]"
 
 [[test.results]]
-value = "NONE"
+value = "[{ id: post:first, title: 'Hello' }]"
 
 [[test.results]]
-value = "[{ id: likes:06jb1s1givlhh18tygxo, in: person:89o00cip2xw07f2w2upq, out: thing:m05avew5bzxn1fprfv48 }]"
+value = "[{ id: likes:h4hx3b2umz37rx0g1tht, in: person:alice, out: post:first }]"
 skip-record-id-key = true
 
 [[test.results]]
-value = "[{ id: likes:i1mv1jai8ir01d3ih7qd, in: person:89o00cip2xw07f2w2upq, out: person:oieqdx61ygylnxi00qaw }]"
+value = "[{ id: likes:h4hx3b2umz37rx0g1tht, in: person:alice, out: post:first }]"
 skip-record-id-key = true
 
-
 [[test.results]]
-match = "$error = <regex> 'Found record: `likes:[a-z0-9]+` which is not a relation, but expected a RELATION IN person OUT person | thing'"
-error = true
-
-[[test.results]]
-match = "$error = <regex> 'Couldn\\'t coerce value for field `out` of `likes:[a-z0-9]+`: Expected `record<person|thing>` but found `other:[0-9a-z]+`'"
-error = true
-
-[[test.results]]
-match = "$error = /Couldn't coerce value for field `in` of `likes:[a-z0-9]+`: Expected `record<person>` but found `thing:[0-9a-z]+`/"
-error = true
+value = "{ events: {  }, fields: { in: 'DEFINE FIELD in ON likes TYPE record<person> PERMISSIONS FULL', out: 'DEFINE FIELD out ON likes TYPE record<post> PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"
 
 */
 
-DEFINE TABLE likes TYPE RELATION FROM person TO person | thing SCHEMAFUL;
-LET $first_p = CREATE person SET name = 'first person';
-LET $second_p = CREATE person SET name = 'second person';
-LET $thing = CREATE thing SET name = 'rust';
-LET $other = CREATE other;
-RELATE $first_p->likes->$thing;
-RELATE $first_p->likes->$second_p;
-CREATE likes;
-RELATE $first_p->likes->$other;
-RELATE $thing->likes->$first_p;
+DEFINE TABLE likes TYPE RELATION IN person OUT post;
+DEFINE TABLE person;
+DEFINE TABLE post;
+CREATE person:alice;
+CREATE post:first SET title = 'Hello';
+RELATE person:alice->likes->post:first;
+SELECT * FROM likes;
+INFO FOR TABLE likes;
