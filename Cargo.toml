@@ -41,7 +41,7 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # SurrealDB crates
-surrealdb = { version = "3.1.0-alpha", path = "surrealdb" }
+surrealdb = { version = "3.1.0-alpha", path = "surrealdb", default-features = false }
 surrealdb-core = { version = "3.1.0-alpha", path = "surrealdb/core", default-features = false }
 surrealdb-server = { version = "3.1.0-alpha", path = "surrealdb/server", default-features = false }
 surrealdb-types = { version = "3.1.0-alpha", path = "surrealdb/types" }
@@ -164,7 +164,7 @@ sha2 = "0.10.9"
 snap = "1.1.1"
 strsim = "0.11.1"
 subtle = "2.6"
-surrealdb-protocol = { version = "0.8.3", default-features = false }
+surrealdb-protocol = { version = "0.9.0", default-features = false }
 sysinfo = "0.37.2"
 tempfile = "3.24.0"
 thiserror = "2.0.17"
@@ -182,16 +182,16 @@ wasm-bindgen-futures = "0.4.58"
 wasmtimer = { version = "0.4.3", default-features = false }
 
 # Dev dependencies
-criterion = "0.8.1"
-env_logger = "0.11.8"
-flate2 = "1.1.8"
-rstest = "0.26.1"
-serial_test = "3.3.1"
-temp-dir = "0.1.16"
-test-log = "0.2.19"
-time = "0.3.47"
-tracing-subscriber = "0.3.22"
-wiremock = "0.6.5"
+criterion = "0.8"
+env_logger = "0.11"
+flate2 = "1.1"
+rstest = "0.26"
+serial_test = "3.4"
+temp-dir = "0.2"
+test-log = "0.2"
+time = "0.3"
+tracing-subscriber = "0.3"
+wiremock = "0.6"
 
 # SurrealML specific dependencies
 ort = { version = "2.0.0-rc.11", features = ["cuda", "ndarray"] }
@@ -199,10 +199,13 @@ ort = { version = "2.0.0-rc.11", features = ["cuda", "ndarray"] }
 # Surrealism specific dependencies
 tar = "0.4.44"
 toml = "0.9.11"
-walrus = "0.24.4"
+walrus = "0.25"
+wasm-encoder = "0.245"
 wasm-opt = "0.116.1"
-wasmtime = { version = "41.0.4", default-features = false, features = ["cranelift", "winch", "runtime", "std", "wat"] }
-wasmtime-wasi = { version = "41.0.4", features = ["p1"] }
+wasmparser = "0.245"
+wasmtime = { version = "42", default-features = false, features = ["cranelift", "winch", "runtime", "std", "wat", "component-model"] }
+wasmtime-wasi = { version = "42", features = ["p1", "p2"] }
+wit-bindgen = { version = "0.51", default-features = false, features = ["macros", "realloc"] }
 zstd = "0.13.3"
 
 [package]
@@ -279,8 +282,10 @@ reqwest = { workspace = true, default-features = false, features = [
     "gzip",
     "http2",
 ] }
+semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+surrealism-runtime.workspace = true
 surrealdb-types.workspace = true
 test-log = { workspace = true, features = ["trace"] }
 thiserror.workspace = true

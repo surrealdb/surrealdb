@@ -604,7 +604,7 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks",
+    "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks,surrealism",
     "--workspace",
     "--",
     "--skip", "api_integration",

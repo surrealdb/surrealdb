@@ -1,15 +1,15 @@
 use anyhow::Result;
-use wasmtime_wasi::WasiCtxBuilder;
+use wasmtime::component::ResourceTable;
 use wasmtime_wasi::p1::WasiP1Ctx;
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder};
 
-pub fn build() -> Result<WasiP1Ctx> {
-	// Note: stdout/stderr would need to access context from StoreData
-	// For now, inherit from parent process
-	let ctx = WasiCtxBuilder::new().inherit_stdout().inherit_stderr().inherit_env().build_p1();
-
+pub fn build_p1() -> Result<WasiP1Ctx> {
+	let ctx = WasiCtxBuilder::new().inherit_stdout().inherit_stderr().build_p1();
 	Ok(ctx)
 }
 
-// TODO: Custom stdout/stderr that access context from StoreData
-// This requires passing Store through the OutputStream trait somehow
-// For now, just inherit from parent process
+pub fn build_p2() -> Result<(WasiCtx, ResourceTable)> {
+	let ctx = WasiCtxBuilder::new().inherit_stdout().inherit_stderr().build();
+	let table = ResourceTable::new();
+	Ok((ctx, table))
+}

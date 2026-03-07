@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use surrealdb_types::ToSql;
+use surrealism_runtime::PrefixErr;
 use surrealism_runtime::controller::Runtime;
 use surrealism_runtime::package::SurrealismPackage;
-use surrealism_types::err::PrefixError;
 
 use crate::cli::module::host::DemoHost;
 
@@ -33,7 +33,7 @@ pub async fn init(
 		}
 		Err(e) => {
 			eprintln!("❌ {}", e);
-			Err(e)
+			Err(e.into())
 		}
 	}
 }

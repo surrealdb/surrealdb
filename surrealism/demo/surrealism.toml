@@ -3,6 +3,10 @@ organisation = "surrealdb"
 name = "demo"
 version = "1.0.0"
 
+# abi = "p1" for WASI Preview 1, "p2" for WASI Preview 2 (component model)
+# Default is "p2" but bytes-based detection overrides when the binary is a core module.
+# abi = "p1"
+
 [attach]
 fs = "fs"
 

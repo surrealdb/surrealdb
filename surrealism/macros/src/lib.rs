@@ -54,7 +54,6 @@ pub fn surrealism(attr: TokenStream, item: TokenStream) -> TokenStream {
 	let fn_sig = &input_fn.sig;
 	let fn_block = &input_fn.block;
 
-	// Collect argument patterns and types
 	let mut arg_patterns = Vec::new();
 	let mut arg_types = Vec::new();
 
@@ -72,18 +71,15 @@ pub fn surrealism(attr: TokenStream, item: TokenStream) -> TokenStream {
 		}
 	}
 
-	// Compose tuple type and pattern (single args are passed directly)
 	let (tuple_type, tuple_pattern) = if arg_types.is_empty() {
 		(quote! { () }, quote! { () })
 	} else {
 		(quote! { ( #(#arg_types),*, ) }, quote! { ( #(#arg_patterns),*, ) })
 	};
 
-	// Return type analysis
 	let (result_type, is_result) = match &fn_sig.output {
 		ReturnType::Default => (quote! { () }, false),
 		ReturnType::Type(_, ty) => {
-			// Check if the return type is Result<T, E>
 			if let Type::Path(TypePath {
 				path,
 				..
@@ -112,18 +108,62 @@ pub fn surrealism(attr: TokenStream, item: TokenStream) -> TokenStream {
 		}
 	};
 
-	// Export function names
 	let export_suffix = if is_default {
 		String::new()
 	} else {
 		export_name_override.unwrap_or_else(|| fn_name.to_string())
 	};
 
+	let p1_exports = generate_p1_exports(
+		fn_name,
+		&arg_patterns,
+		&tuple_type,
+		&tuple_pattern,
+		&result_type,
+		is_result,
+		is_init,
+		&export_suffix,
+	);
+
+	let p2_exports = generate_p2_exports(
+		fn_name,
+		&arg_patterns,
+		&tuple_type,
+		&tuple_pattern,
+		&result_type,
+		is_result,
+		is_init,
+		&export_suffix,
+	);
+
+	let expanded = quote! {
+		#fn_vis #fn_sig #fn_block
+
+		#[cfg(not(feature = "p2"))]
+		const _: () = { #p1_exports };
+
+		#[cfg(feature = "p2")]
+		#p2_exports
+	};
+
+	TokenStream::from(expanded)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn generate_p1_exports(
+	fn_name: &syn::Ident,
+	arg_patterns: &[Box<syn::Pat>],
+	tuple_type: &proc_macro2::TokenStream,
+	tuple_pattern: &proc_macro2::TokenStream,
+	result_type: &proc_macro2::TokenStream,
+	is_result: bool,
+	is_init: bool,
+	export_suffix: &str,
+) -> proc_macro2::TokenStream {
 	let export_ident = format_ident!("__sr_fnc__{}", export_suffix);
 	let args_ident = format_ident!("__sr_args__{}", export_suffix);
 	let returns_ident = format_ident!("__sr_returns__{}", export_suffix);
 
-	// DRY error handling pattern
 	let try_or_fail = |expr: proc_macro2::TokenStream, context: &str| {
 		let context = syn::LitStr::new(context, proc_macro2::Span::call_site());
 		quote! {
@@ -137,7 +177,7 @@ pub fn surrealism(attr: TokenStream, item: TokenStream) -> TokenStream {
 		}
 	};
 
-	let expanded = if is_init {
+	if is_init {
 		let init_call = if is_result {
 			let expr = quote! { #fn_name() };
 			quote! {
@@ -157,8 +197,6 @@ pub fn surrealism(attr: TokenStream, item: TokenStream) -> TokenStream {
 		};
 
 		quote! {
-			#fn_vis #fn_sig #fn_block
-
 			#[unsafe(no_mangle)]
 			pub extern "C" fn __sr_init() -> i32 {
 				#init_call
@@ -166,96 +204,47 @@ pub fn surrealism(attr: TokenStream, item: TokenStream) -> TokenStream {
 		}
 	} else {
 		let function_call = if is_result {
-			quote! {
-				#fn_name(#(#arg_patterns),*).map_err(|e| e.to_string())
-			}
+			quote! { #fn_name(#(#arg_patterns),*).map_err(|e| e.to_string()) }
 		} else {
-			quote! {
-				Ok(#fn_name(#(#arg_patterns),*))
-			}
+			quote! { Ok(#fn_name(#(#arg_patterns),*)) }
 		};
 
-		let transfer_call = if is_result {
+		let transfer_call = {
 			let expr = quote! { f.invoke_raw(&mut controller, ptr.into()) };
 			let try_or_fail_result = try_or_fail(expr, "Function invocation");
 			quote! {
-				(*#try_or_fail_result)
-				.try_into()
-				.unwrap_or_else(|_| {
-					eprintln!("Transfer error: pointer overflow");
-					-1
-				})
-			}
-		} else {
-			quote! {
-				match f.invoke_raw(&mut controller, ptr.into()) {
-					Ok(result) => match (*result).try_into() {
-						Ok(ptr) => ptr,
-						Err(_) => {
-							eprintln!("Transfer error: pointer overflow");
-							-1
-						}
-					},
-					Err(e) => {
-						eprintln!("Function invocation error: {}", e);
+				match (*#try_or_fail_result).try_into() {
+					Ok(ptr) => ptr,
+					Err(_) => {
+						eprintln!("Transfer error: pointer overflow");
 						-1
 					}
 				}
 			}
 		};
 
-		let args_call = if is_result {
+		let args_call = {
 			let expr = quote! { f.args_raw(&mut controller) };
 			let try_or_fail_result = try_or_fail(expr, "Args");
 			quote! {
-				(*#try_or_fail_result)
-				.try_into()
-				.unwrap_or_else(|_| {
-					eprintln!("Transfer error: pointer overflow");
-					-1
-				})
-			}
-		} else {
-			quote! {
-				match f.args_raw(&mut controller) {
-					Ok(result) => match (*result).try_into() {
-						Ok(ptr) => ptr,
-						Err(_) => {
-							eprintln!("Transfer error: pointer overflow");
-							-1
-						}
-					},
-					Err(e) => {
-						eprintln!("Args error: {}", e);
+				match (*#try_or_fail_result).try_into() {
+					Ok(ptr) => ptr,
+					Err(_) => {
+						eprintln!("Transfer error: pointer overflow");
 						-1
 					}
 				}
 			}
 		};
 
-		let returns_call = if is_result {
+		let returns_call = {
 			let expr = quote! { f.returns_raw(&mut controller) };
 			let try_or_fail_result = try_or_fail(expr, "Returns");
 			quote! {
-				(*#try_or_fail_result)
-				.try_into()
-				.unwrap_or_else(|_| {
-					eprintln!("Transfer error: pointer overflow");
-					-1
-				})
-			}
-		} else {
-			quote! {
-				match f.returns_raw(&mut controller) {
-					Ok(result) => match (*result).try_into() {
-						Ok(ptr) => ptr,
-						Err(_) => {
-							eprintln!("Transfer error: pointer overflow");
-							-1
-						}
-					},
-					Err(e) => {
-						eprintln!("Returns error: {}", e);
+				match (*#try_or_fail_result).try_into() {
+					Ok(ptr) => ptr,
+					Err(_) => {
+						eprintln!("Transfer error: pointer overflow");
 						-1
 					}
 				}
@@ -263,8 +252,6 @@ pub fn surrealism(attr: TokenStream, item: TokenStream) -> TokenStream {
 		};
 
 		quote! {
-			#fn_vis #fn_sig #fn_block
-
 			#[unsafe(no_mangle)]
 			pub extern "C" fn #export_ident(ptr: u32) -> i32 {
 				use surrealism::types::transfer::Transfer;
@@ -295,7 +282,75 @@ pub fn surrealism(attr: TokenStream, item: TokenStream) -> TokenStream {
 				#returns_call
 			}
 		}
-	};
+	}
+}
 
-	TokenStream::from(expanded)
+#[allow(clippy::too_many_arguments)]
+fn generate_p2_exports(
+	fn_name: &syn::Ident,
+	arg_patterns: &[Box<syn::Pat>],
+	tuple_type: &proc_macro2::TokenStream,
+	tuple_pattern: &proc_macro2::TokenStream,
+	result_type: &proc_macro2::TokenStream,
+	is_result: bool,
+	is_init: bool,
+	export_suffix: &str,
+) -> proc_macro2::TokenStream {
+	let safe_suffix = if export_suffix.is_empty() {
+		"default"
+	} else {
+		export_suffix
+	};
+	let p2_handler_ident = format_ident!("__sr_p2_invoke_{}", safe_suffix);
+	let p2_args_ident = format_ident!("__sr_p2_args_{}", safe_suffix);
+	let p2_returns_ident = format_ident!("__sr_p2_returns_{}", safe_suffix);
+
+	if is_init {
+		let init_call = if is_result {
+			quote! { #fn_name().map_err(|e| e.to_string()) }
+		} else {
+			quote! { #fn_name(); Ok(()) }
+		};
+
+		quote! {
+			pub fn __sr_p2_init() -> Result<(), String> {
+				#init_call
+			}
+		}
+	} else {
+		let function_call = if is_result {
+			quote! { #fn_name(#(#arg_patterns),*).map_err(|e| e.to_string()) }
+		} else {
+			quote! { Ok(#fn_name(#(#arg_patterns),*)) }
+		};
+
+		quote! {
+			pub fn #p2_handler_ident(args_bytes: &[u8]) -> Result<Vec<u8>, String> {
+				use surrealism::types::args::Args;
+				use surrealdb_types::SurrealValue;
+
+				let values = surrealdb_types::decode_value_list(args_bytes)
+					.map_err(|e| e.to_string())?;
+				let #tuple_pattern: #tuple_type = <#tuple_type as Args>::from_values(values)
+					.map_err(|e| e.to_string())?;
+
+				let result: Result<#result_type, String> = #function_call;
+				let val = result?;
+				let public_val = val.into_value();
+				surrealdb_types::encode(&public_val).map_err(|e| e.to_string())
+			}
+
+			pub fn #p2_args_ident() -> Result<Vec<u8>, String> {
+				use surrealism::types::args::Args;
+				let kinds = <#tuple_type as Args>::kinds();
+				surrealdb_types::encode_kind_list(&kinds).map_err(|e| e.to_string())
+			}
+
+			pub fn #p2_returns_ident() -> Result<Vec<u8>, String> {
+				use surrealdb_types::SurrealValue;
+				let kind = <#result_type as SurrealValue>::kind_of();
+				surrealdb_types::encode_kind(&kind).map_err(|e| e.to_string())
+			}
+		}
+	}
 }

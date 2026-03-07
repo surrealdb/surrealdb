@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
+use surrealism_runtime::PrefixErr;
 use surrealism_runtime::controller::Runtime;
 use surrealism_runtime::package::SurrealismPackage;
-use surrealism_types::err::PrefixError;
 
 use crate::cli::module::host::DemoHost;
 
@@ -18,7 +18,8 @@ pub async fn init(file: PathBuf) -> Result<()> {
 	let mut controller =
 		runtime.new_controller(host).await.prefix_err(|| "Failed to load WASM module")?;
 
-	let exports = controller.list().prefix_err(|| "Failed to list functions in the WASM module")?;
+	let exports =
+		controller.list().await.prefix_err(|| "Failed to list functions in the WASM module")?;
 
 	let mut results = Vec::new();
 	for name in exports {
