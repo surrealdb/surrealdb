@@ -19,6 +19,9 @@ value = "[{ a: 1, b: 2 }, { a: 3, b: 4 }]"
 [[test.results]]
 value = "[{ b: 2 }, { b: 4 }]"
 
+[[test.results]]
+value = "[2]"
+
 */
 
 -- Pure value arrays should not need a database
@@ -26,3 +29,6 @@ SELECT * FROM [1, 2, 3];
 SELECT field FROM [{ field: 1 }, { field: 2 }];
 SELECT * FROM [{ a: 1, b: 2 }, { a: 3, b: 4 }];
 SELECT b FROM [{ a: 1, b: 2 }, { a: 3, b: 4 }];
+
+-- Generic value expressions should not need a database
+SELECT * FROM 1 + 1;

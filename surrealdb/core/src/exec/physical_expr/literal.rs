@@ -271,6 +271,10 @@ impl PhysicalExpr for MockExpr {
 		// Mock expressions are read-only constant generators
 		AccessMode::ReadOnly
 	}
+
+	fn may_produce_record_ids(&self) -> bool {
+		true
+	}
 }
 
 impl ToSql for MockExpr {

@@ -1977,10 +1977,11 @@ impl<'ctx> Planner<'ctx> {
 					})
 				}
 				None => {
+					// Unresolvable param -- could evaluate to anything at
+					// runtime, so conservatively assume record fetches.
 					let phys_expr = self.physical_expr(expr).await?;
-					let needs_fetch = phys_expr.may_produce_record_ids();
 					Ok(PlannedSource {
-						operator: Arc::new(SourceExpr::new(phys_expr, needs_fetch))
+						operator: Arc::new(SourceExpr::new(phys_expr, true))
 							as Arc<dyn ExecOperator>,
 						filter_action: FilterAction::UseOriginal,
 						limit_pushed: false,

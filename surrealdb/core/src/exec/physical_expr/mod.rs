@@ -364,10 +364,11 @@ pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	/// (either directly or within an array).
 	///
 	/// Used by `SourceExpr` to decide whether `ContextLevel::Database` is needed
-	/// for RecordId resolution. Conservative default is `true`; override to
-	/// `false` for expressions that provably never produce RecordIds.
+	/// for RecordId resolution. Default is `false`; only expressions that
+	/// structurally produce RecordIds (`RecordIdExpr`, `MockExpr`,
+	/// `ArrayLiteral` containing them) should override to `true`.
 	fn may_produce_record_ids(&self) -> bool {
-		true
+		false
 	}
 }
 
