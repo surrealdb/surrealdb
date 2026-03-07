@@ -193,11 +193,26 @@ impl ExecOperator for IndexScan {
 			ScanDirection::Forward => SortDirection::Asc,
 			ScanDirection::Backward => SortDirection::Desc,
 		};
-		let cols: Vec<SortProperty> = self
-			.index_ref
-			.definition()
+
+		// For compound access with an equality prefix, the prefix columns all
+		// have the same value within the scan and do not define ordering.
+		// Skip them so that the effective ordering starts from the first
+		// non-equality column. This allows `satisfies()` to match ORDER BY
+		// on the column after the prefix (e.g. `ORDER BY modified DESC`
+		// with `idx(IsVisible, modified)` and `WHERE IsVisible = true`).
+		let skip_cols = match &self.access {
+			BTreeAccess::Compound {
+				prefix,
+				..
+			} => prefix.len(),
+			_ => 0,
+		};
+
+		let ix_def = self.index_ref.definition();
+		let mut cols: Vec<SortProperty> = ix_def
 			.cols
 			.iter()
+			.skip(skip_cols)
 			.filter_map(|idiom| {
 				crate::exec::field_path::FieldPath::try_from(idiom).ok().map(|path| SortProperty {
 					path,
@@ -207,6 +222,21 @@ impl ExecOperator for IndexScan {
 				})
 			})
 			.collect();
+
+		// For non-unique indexes (Idx), the record ID is stored in the BTree
+		// key after the field values.  This means entries are implicitly
+		// sorted by record ID after the declared index columns.  Expose
+		// this so that ORDER BY (col DESC, id DESC) is recognised as
+		// satisfied by a backward index scan.
+		if !self.index_ref.is_unique() && !cols.is_empty() {
+			cols.push(SortProperty {
+				path: crate::exec::field_path::FieldPath::field("id"),
+				direction: dir,
+				collate: false,
+				numeric: false,
+			});
+		}
+
 		if cols.is_empty() {
 			crate::exec::OutputOrdering::Unordered
 		} else {
@@ -226,6 +256,7 @@ impl ExecOperator for IndexScan {
 		// Clone for the async block
 		let index_ref = self.index_ref.clone();
 		let access = self.access.clone();
+		let direction = self.direction;
 		let table_name = self.table_name.clone();
 		let limit_expr = self.limit.clone();
 		let start_expr = self.start.clone();
@@ -381,7 +412,8 @@ impl ExecOperator for IndexScan {
 				// iterator type because `async_stream` closures cannot
 				// easily hold trait objects or generics.
 				(BTreeAccess::Range { from, to }, true) => {
-					let mut iter = UniqueRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref())
+					let reverse = matches!(direction, ScanDirection::Backward);
+					let mut iter = UniqueRangeIterator::with_direction(ns_id, db_id, ix, from.as_ref(), to.as_ref(), reverse)
 						.context("Failed to create iterator")?;
 					loop {
 						if ctx.cancellation().is_cancelled() {
@@ -410,7 +442,8 @@ impl ExecOperator for IndexScan {
 				}
 
 				(BTreeAccess::Range { from, to }, false) => {
-					let mut iter = IndexRangeIterator::new(ns_id, db_id, ix, from.as_ref(), to.as_ref())
+					let reverse = matches!(direction, ScanDirection::Backward);
+					let mut iter = IndexRangeIterator::with_direction(ns_id, db_id, ix, from.as_ref(), to.as_ref(), reverse)
 						.context("Failed to create iterator")?;
 					loop {
 						if ctx.cancellation().is_cancelled() {
@@ -440,7 +473,8 @@ impl ExecOperator for IndexScan {
 
 				// Compound index access — equality prefix only (no range)
 				(BTreeAccess::Compound { prefix, range: None }, _) => {
-					let mut iter = CompoundEqualIterator::new(ns_id, db_id, ix, prefix, None)
+					let reverse = matches!(direction, ScanDirection::Backward);
+					let mut iter = CompoundEqualIterator::with_direction(ns_id, db_id, ix, prefix, None, reverse)
 						.context("Failed to create compound iterator")?;
 
 					// Compute the maximum number of index entries we need.
@@ -507,7 +541,8 @@ impl ExecOperator for IndexScan {
 
 				// Compound index access — equality prefix with range on next column
 				(BTreeAccess::Compound { prefix, range: Some(range) }, _) => {
-					let mut iter = CompoundRangeIterator::new(ns_id, db_id, ix, prefix, range)
+					let reverse = matches!(direction, ScanDirection::Backward);
+					let mut iter = CompoundRangeIterator::with_direction(ns_id, db_id, ix, prefix, range, reverse)
 						.context("Failed to create compound range iterator")?;
 
 					// Same cap logic as the equality-only compound branch:

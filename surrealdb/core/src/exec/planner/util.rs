@@ -1031,11 +1031,17 @@ pub(super) fn order_is_scan_compatible(order: &Option<crate::expr::order::Orderi
 /// would produce and checks whether it satisfies the ORDER BY requirements.
 /// This allows the planner to decide on limit pushdown before the IndexScan
 /// operator is created.
+///
+/// For compound access with an equality prefix, the prefix columns all have
+/// the same value and do not define ordering. They are skipped so that the
+/// effective ordering starts from the first non-equality column.
 pub(super) fn index_covers_ordering(
 	index_ref: &crate::exec::index::access_path::IndexRef,
+	access: &crate::exec::index::access_path::BTreeAccess,
 	direction: crate::idx::planner::ScanDirection,
 	order: &crate::expr::order::Ordering,
 ) -> bool {
+	use crate::exec::index::access_path::BTreeAccess;
 	use crate::exec::operators::SortDirection;
 	use crate::exec::ordering::{OutputOrdering, SortProperty};
 	use crate::expr::order::Ordering;
@@ -1068,15 +1074,25 @@ pub(super) fn index_covers_ordering(
 		return false;
 	}
 
+	// For compound access with equality prefix, skip the prefix columns
+	let skip_cols = match access {
+		BTreeAccess::Compound {
+			prefix,
+			..
+		} => prefix.len(),
+		_ => 0,
+	};
+
 	// Build the index ordering (same as IndexScan::output_ordering())
 	let dir = match direction {
 		crate::idx::planner::ScanDirection::Forward => SortDirection::Asc,
 		crate::idx::planner::ScanDirection::Backward => SortDirection::Desc,
 	};
 	let ix_def = index_ref.definition();
-	let cols: Vec<SortProperty> = ix_def
+	let mut cols: Vec<SortProperty> = ix_def
 		.cols
 		.iter()
+		.skip(skip_cols)
 		.filter_map(|idiom| {
 			crate::exec::field_path::FieldPath::try_from(idiom).ok().map(|path| SortProperty {
 				path,
@@ -1086,6 +1102,20 @@ pub(super) fn index_covers_ordering(
 			})
 		})
 		.collect();
+
+	// For non-unique indexes (Idx), the record ID is stored in the BTree
+	// key after the field values.  Entries are implicitly sorted by record
+	// ID, so we append an `id` property to the effective ordering.  This
+	// allows `ORDER BY col DESC, id DESC` to be satisfied by a backward
+	// compound index scan.
+	if !index_ref.is_unique() && !cols.is_empty() {
+		cols.push(SortProperty {
+			path: crate::exec::field_path::FieldPath::field("id"),
+			direction: dir,
+			collate: false,
+			numeric: false,
+		});
+	}
 
 	if cols.is_empty() {
 		return false;

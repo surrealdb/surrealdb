@@ -497,6 +497,16 @@ impl<'a> IndexAnalyzer<'a> {
 							// beyond the equality prefix.
 							if let Some(op) = normalize_range_op(&cond.op, cond.position) {
 								range_condition = Some((op, cond.value.clone()));
+							} else if matches!(cond.op, BinaryOperator::NotEqual)
+								&& matches!(cond.value, Value::Null | Value::None)
+							{
+								// `field IS NOT NULL` / `field != NULL` / `field != NONE`.
+								// NULL and NONE sort first in the BTree key ordering, so
+								// "not null/none" is equivalent to `field > NULL` for
+								// compound range purposes. This narrows the scan to
+								// exclude entries where this column is NULL/NONE.
+								range_condition =
+									Some((BinaryOperator::MoreThan, cond.value.clone()));
 							}
 							break;
 						}
@@ -1035,6 +1045,27 @@ impl<'a> IndexAnalyzer<'a> {
 
 		// The order value is already an Idiom
 		let idiom = &first_order.value;
+
+		// Check existing compound candidates: if a compound candidate has an
+		// equality prefix covering columns 0..N, and the ORDER BY field
+		// matches column N (the column right after the prefix), the compound
+		// scan naturally produces records in ORDER BY order. Mark it as
+		// covering ORDER BY so that the planner can push LIMIT down and
+		// eliminate the Sort operator.
+		for candidate in candidates.iter_mut() {
+			if let BTreeAccess::Compound {
+				prefix,
+				..
+			} = &candidate.access
+			{
+				let ix_def = candidate.index_ref.definition();
+				if let Some(next_col) = ix_def.cols.get(prefix.len())
+					&& idiom_matches(idiom, next_col)
+				{
+					candidate.covers_order = true;
+				}
+			}
+		}
 
 		// Find indexes that match this idiom as first column
 		for (idx, ix_def) in self.indexes.iter().enumerate() {
