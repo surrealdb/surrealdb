@@ -621,7 +621,7 @@ version = "0.3.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.gimli]]
-version = "0.26.2"
+version = "0.33.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.globset]]
@@ -825,7 +825,7 @@ version = "0.8.9"
 criteria = "safe-to-deploy"
 
 [[exemptions.libm]]
-version = "0.2.15"
+version = "0.2.16"
 criteria = "safe-to-deploy"
 
 [[exemptions.libmimalloc-sys]]
@@ -1457,11 +1457,11 @@ version = "0.7.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.serial_test]]
-version = "3.3.1"
+version = "3.4.0"
 criteria = "safe-to-run"
 
 [[exemptions.serial_test_derive]]
-version = "3.3.1"
+version = "3.4.0"
 criteria = "safe-to-run"
 
 [[exemptions.sif-itree]]
@@ -1561,7 +1561,7 @@ version = "0.37.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.temp-dir]]
-version = "0.1.16"
+version = "0.2.0"
 criteria = "safe-to-run"
 
 [[exemptions.tempfile]]
@@ -1737,11 +1737,11 @@ version = "0.0.18"
 criteria = "safe-to-deploy"
 
 [[exemptions.walrus]]
-version = "0.24.4"
+version = "0.25.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.walrus-macro]]
-version = "0.24.0"
+version = "0.25.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.wasm-bindgen]]
