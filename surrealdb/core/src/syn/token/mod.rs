@@ -403,9 +403,9 @@ impl fmt::Display for TokenKind {
 	}
 }
 
-/// An assertion statically checking that the size of Tokenkind remains two
+/// An assertion statically checking that the size of TokenKind remains four
 /// bytes
-const _TOKEN_KIND_SIZE_ASSERT: [(); 2] = [(); std::mem::size_of::<TokenKind>()];
+const _TOKEN_KIND_SIZE_ASSERT: [(); 4] = [(); std::mem::size_of::<TokenKind>()];
 
 impl TokenKind {
 	pub fn has_data(&self) -> bool {

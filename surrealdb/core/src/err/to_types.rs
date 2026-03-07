@@ -104,6 +104,14 @@ pub fn into_types_error(error: Error) -> TypesError {
 				name,
 			},
 		),
+		AgentPermissions {
+			name,
+		} => TypesError::not_allowed(
+			message,
+			NotAllowedError::Agent {
+				name,
+			},
+		),
 
 		// Configuration
 		RealtimeDisabled => {
@@ -168,6 +176,14 @@ pub fn into_types_error(error: Error) -> TypesError {
 				id: rid,
 			},
 		),
+		AgNotFound {
+			name,
+		} => TypesError::not_found(
+			message,
+			NotFoundError::Agent {
+				name,
+			},
+		),
 
 		// Already exists
 		DbAlreadyExists {
@@ -200,6 +216,14 @@ pub fn into_types_error(error: Error) -> TypesError {
 			message,
 			AlreadyExistsError::Record {
 				id: record.to_sql(),
+			},
+		),
+		AgAlreadyExists {
+			name,
+		} => TypesError::already_exists(
+			message,
+			AlreadyExistsError::Agent {
+				name,
 			},
 		),
 		ClAlreadyExists {
@@ -269,6 +293,29 @@ pub fn into_types_error(error: Error) -> TypesError {
 			..
 		}
 		| IndexingBuildingCancelled {
+			..
+		} => TypesError::internal(message),
+
+		// Agent runtime errors
+		AgentTimeout {
+			..
+		}
+		| AgentMaxRounds {
+			..
+		}
+		| AgentToolNotFound {
+			..
+		}
+		| AgentToolTimeout {
+			..
+		}
+		| AgentToolDenied {
+			..
+		}
+		| AgentToolInvalidArgs {
+			..
+		} => TypesError::query(message, None),
+		AiProviderError {
 			..
 		} => TypesError::internal(message),
 

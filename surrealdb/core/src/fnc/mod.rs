@@ -10,10 +10,13 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::val::{RecordId, Value};
+pub mod agent;
+pub mod ai;
 pub mod api;
 pub mod args;
 pub mod array;
 pub mod bytes;
+pub mod chunk;
 pub mod count;
 pub mod crypto;
 pub mod duration;
@@ -52,6 +55,7 @@ pub async fn run(
 	args: Vec<Value>,
 ) -> Result<Value> {
 	if name.eq("sleep")
+		|| name.starts_with("ai")
 		|| name.eq("array::all")
 		|| name.eq("array::any")
 		|| name.eq("array::every")
@@ -575,6 +579,18 @@ pub async fn asynchronous(
 		"api::res::status" => api::res::status((stk, ctx, opt, doc)).await,
 		"api::res::header" => api::res::header((stk, ctx, opt, doc)).await,
 		"api::res::headers" => api::res::headers((stk, ctx, opt, doc)).await,
+		//
+		exp(Ai) "ai::agent::run" => agent::run((stk, ctx, opt)).await,
+		//
+		exp(Ai) "ai::chat" => ai::chat((ctx, opt)).await,
+		exp(Ai) "ai::chunk::fixed" => chunk::fixed::run,
+		exp(Ai) "ai::chunk::paragraph" => chunk::paragraph::run,
+		exp(Ai) "ai::chunk::recursive" => chunk::recursive::run,
+		exp(Ai) "ai::chunk::semantic" => chunk::semantic::run((ctx, opt)).await,
+		exp(Ai) "ai::chunk::sentence" => chunk::sentence::run,
+		exp(Ai) "ai::embed" => ai::embed((ctx, opt)).await,
+		exp(Ai) "ai::generate" => ai::generate((ctx, opt)).await,
+		exp(Ai) "ai::sentiment" => ai::sentiment((ctx, opt)).await,
 		//
 		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
 		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,

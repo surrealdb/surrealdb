@@ -42,6 +42,8 @@ pub(crate) enum Entry {
 	Dag(Arc<[catalog::AccessGrant]>),
 	/// A slice of DefineUserStatement specified on a database.
 	Dus(Arc<[catalog::UserDefinition]>),
+	/// A slice of AgentDefinition specified on a database.
+	Ags(Arc<[catalog::AgentDefinition]>),
 	/// A slice of DefineFunctionStatement specified on a database.
 	Fcs(Arc<[catalog::FunctionDefinition]>),
 	/// A slice of DefineModuleStatement specified on a database.
@@ -208,6 +210,15 @@ impl Entry {
 		match self {
 			Entry::Sqs(v) => Ok(v),
 			_ => fail!("Unable to convert type into Entry::Sqs"),
+		}
+	}
+
+	/// Converts this cache entry into a slice of [`catalog::AgentDefinition`].
+	/// This panics if called on a cache entry that is not an [`Entry::Ags`].
+	pub(crate) fn try_into_ags(self) -> Result<Arc<[catalog::AgentDefinition]>> {
+		match self {
+			Entry::Ags(v) => Ok(v),
+			_ => fail!("Unable to convert type into Entry::Ags"),
 		}
 	}
 

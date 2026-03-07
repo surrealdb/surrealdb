@@ -3,10 +3,13 @@
 //! This module registers all built-in functions with the registry.
 //! Functions are organized by category (math, string, array, etc.).
 
+mod agent;
 pub mod aggregates;
+mod ai;
 mod api;
 mod array;
 mod bytes;
+mod chunk;
 mod count;
 mod crypto;
 mod crypto_async;
@@ -39,7 +42,10 @@ use super::FunctionRegistry;
 /// Register all built-in functions with the registry.
 pub fn register_all(registry: &mut FunctionRegistry) {
 	// Scalar functions
+	agent::register(registry);
+	ai::register(registry);
 	api::register(registry);
+	chunk::register(registry);
 	array::register(registry);
 	bytes::register(registry);
 	count::register(registry);

@@ -94,6 +94,11 @@ pub(crate) enum Error {
 	#[allow(dead_code)]
 	HttpDisabled,
 
+	/// AI functions are not enabled
+	#[error("AI functions are not enabled")]
+	#[allow(dead_code)]
+	AiDisabled,
+
 	/// it is not possible to set a variable with the specified name
 	#[error("'{name}' is a protected variable and cannot be set")]
 	InvalidParam {
@@ -255,6 +260,12 @@ pub(crate) enum Error {
 	/// The requested event does not exist
 	#[error("The event '{name}' does not exist")]
 	EvNotFound {
+		name: String,
+	},
+
+	/// The requested agent does not exist
+	#[error("The agent '{name}' does not exist")]
+	AgNotFound {
 		name: String,
 	},
 
@@ -474,6 +485,71 @@ pub(crate) enum Error {
 	#[error("You don't have permission to run the fn::{name} function")]
 	FunctionPermissions {
 		name: String,
+	},
+
+	/// The permissions do not allow this agent to be run
+	#[error("You don't have permission to run the {name} agent")]
+	AgentPermissions {
+		name: String,
+	},
+
+	/// The AI provider is not allowed by capabilities
+	#[error("AI provider '{0}' is not allowed by server capabilities")]
+	AiProviderNotAllowed(String),
+
+	/// The AI agent is not allowed by capabilities
+	#[error("AI agent '{0}' is not allowed by server capabilities")]
+	AiAgentNotAllowed(String),
+
+	/// The agent timed out during execution
+	#[error("The agent '{name}' timed out after {timeout}")]
+	AgentTimeout {
+		name: String,
+		timeout: Duration,
+	},
+
+	/// The agent exceeded the maximum number of LLM rounds
+	#[error("The agent '{name}' exceeded the maximum of {max_rounds} LLM round-trips")]
+	AgentMaxRounds {
+		name: String,
+		max_rounds: u32,
+	},
+
+	/// The LLM requested a tool that doesn't exist on the agent
+	#[error("The agent '{agent}' received a call for unknown tool '{tool}'")]
+	AgentToolNotFound {
+		agent: String,
+		tool: String,
+	},
+
+	/// A tool execution timed out
+	#[error("The tool '{tool}' on agent '{agent}' timed out after {timeout}")]
+	AgentToolTimeout {
+		agent: String,
+		tool: String,
+		timeout: Duration,
+	},
+
+	/// A tool call was denied by guardrails
+	#[error("The tool '{tool}' is denied by guardrails on agent '{agent}'")]
+	AgentToolDenied {
+		agent: String,
+		tool: String,
+	},
+
+	/// Invalid arguments passed to an agent tool by the LLM
+	#[error("Invalid arguments for tool '{tool}' on agent '{agent}': {message}")]
+	AgentToolInvalidArgs {
+		agent: String,
+		tool: String,
+		message: String,
+	},
+
+	/// An AI provider returned an error
+	#[error("The AI provider '{provider}' returned an error: {message}")]
+	AiProviderError {
+		provider: String,
+		message: String,
 	},
 
 	/// The permissions do not allow this query to be run on this table
@@ -805,6 +881,12 @@ pub(crate) enum Error {
 	/// The requested field already exists
 	#[error("The field '{name}' already exists")]
 	FdAlreadyExists {
+		name: String,
+	},
+
+	/// The requested agent already exists
+	#[error("The agent '{name}' already exists")]
+	AgAlreadyExists {
 		name: String,
 	},
 

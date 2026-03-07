@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use surrealdb_core::dbs::capabilities::{
-	ArbitraryQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
-	Targets,
+	AiTarget, ArbitraryQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
+	RouteTarget, Targets,
 };
 use surrealdb_core::kvs::export::{ExcludedTables, TableConfig};
 use surrealdb_types::Duration;
@@ -108,6 +108,20 @@ pub(crate) fn experimental_targets(value: &str) -> Result<Targets<ExperimentalTa
 
 	for target in value.split(',').filter(|s| !s.is_empty()) {
 		result.insert(ExperimentalTarget::from_str(target).map_err(|e| e.to_string())?);
+	}
+
+	Ok(Targets::Some(result))
+}
+
+pub(crate) fn ai_targets(value: &str) -> Result<Targets<AiTarget>, String> {
+	if ["*", ""].contains(&value) {
+		return Ok(Targets::All);
+	}
+
+	let mut result = HashSet::new();
+
+	for target in value.split(',').filter(|s| !s.is_empty()) {
+		result.insert(AiTarget::from_str(target).map_err(|e| e.to_string())?);
 	}
 
 	Ok(Targets::Some(result))

@@ -1,4 +1,5 @@
 mod access;
+mod agent;
 mod analyzer;
 mod api;
 mod bucket;
@@ -16,6 +17,7 @@ mod table;
 mod user;
 
 pub(crate) use access::RemoveAccessStatement;
+pub(crate) use agent::RemoveAgentStatement;
 pub(crate) use analyzer::RemoveAnalyzerStatement;
 use anyhow::Result;
 pub(crate) use api::RemoveApiStatement;
@@ -57,6 +59,7 @@ pub(crate) enum RemoveStatement {
 	Bucket(RemoveBucketStatement),
 	Sequence(RemoveSequenceStatement),
 	Module(RemoveModuleStatement),
+	Agent(RemoveAgentStatement),
 }
 
 impl RemoveStatement {
@@ -85,6 +88,7 @@ impl RemoveStatement {
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Module(v) => v.compute(ctx, opt).await,
+			Self::Agent(v) => v.compute(ctx, opt).await,
 		}
 	}
 }

@@ -25,6 +25,7 @@ kv-rocksdb = ["surrealdb-core/kv-rocksdb", "tokio/time"]
 kv-tikv = ["surrealdb-core/kv-tikv", "tokio/time"]
 kv-surrealkv = ["surrealdb-core/kv-surrealkv", "tokio/time"]
 scripting = ["surrealdb-core/scripting"]
+ai = ["surrealdb-core/ai"]
 http = ["surrealdb-core/http"]
 native-tls = [
     "dep:native-tls",

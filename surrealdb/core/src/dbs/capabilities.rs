@@ -123,6 +123,7 @@ impl std::str::FromStr for FuncTarget {
 pub enum ExperimentalTarget {
 	Files,
 	Surrealism,
+	Ai,
 }
 
 impl fmt::Display for ExperimentalTarget {
@@ -130,6 +131,7 @@ impl fmt::Display for ExperimentalTarget {
 		match self {
 			Self::Files => write!(f, "files"),
 			Self::Surrealism => write!(f, "surrealism"),
+			Self::Ai => write!(f, "ai"),
 		}
 	}
 }
@@ -145,6 +147,7 @@ impl Target<str> for ExperimentalTarget {
 		match self {
 			Self::Files => elem.eq_ignore_ascii_case("files"),
 			Self::Surrealism => elem.eq_ignore_ascii_case("surrealism"),
+			Self::Ai => elem.eq_ignore_ascii_case("ai"),
 		}
 	}
 }
@@ -172,7 +175,104 @@ impl std::str::FromStr for ExperimentalTarget {
 		match s.trim().to_ascii_lowercase().as_str() {
 			"files" => Ok(ExperimentalTarget::Files),
 			"surrealism" => Ok(ExperimentalTarget::Surrealism),
+			"ai" => Ok(ExperimentalTarget::Ai),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
+		}
+	}
+}
+
+/// Target for AI capability allow/deny lists.
+///
+/// Supports two categories:
+/// - `provider:<name>` — matches a specific AI provider (e.g. `provider:openai`)
+/// - `agent:<name>` — matches a specific defined agent (e.g. `agent:support`)
+///
+/// A wildcard `*` in the name position matches all targets within a category.
+#[derive(Debug, Clone, Hash, Eq, PartialEq, PartialOrd, Ord)]
+pub struct AiTarget(pub String, pub Option<String>);
+
+impl fmt::Display for AiTarget {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match &self.1 {
+			Some(name) => write!(f, "{}:{name}", self.0),
+			None => write!(f, "{}:*", self.0),
+		}
+	}
+}
+
+impl Target for AiTarget {
+	fn matches(&self, elem: &AiTarget) -> bool {
+		match self {
+			Self(category, Some(name)) => {
+				category == &elem.0 && elem.1.as_ref().is_some_and(|n| n == name)
+			}
+			Self(category, None) => category == &elem.0,
+		}
+	}
+}
+
+impl Target<str> for AiTarget {
+	fn matches(&self, elem: &str) -> bool {
+		if let Some(name) = self.1.as_ref() {
+			let Some((cat, rest)) = elem.split_once(':') else {
+				return false;
+			};
+			cat == self.0 && rest == name
+		} else {
+			let cat = elem.split_once(':').map(|(c, _)| c).unwrap_or(elem);
+			cat == self.0
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+pub enum ParseAiTargetError {
+	InvalidCategory,
+	InvalidName,
+}
+
+impl std::error::Error for ParseAiTargetError {}
+impl fmt::Display for ParseAiTargetError {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match *self {
+			ParseAiTargetError::InvalidCategory => {
+				write!(f, "invalid AI target category, expected 'provider' or 'agent'")
+			}
+			ParseAiTargetError::InvalidName => {
+				write!(f, "invalid AI target name")
+			}
+		}
+	}
+}
+
+impl std::str::FromStr for AiTarget {
+	type Err = ParseAiTargetError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		let s = s.trim();
+
+		if s.is_empty() {
+			return Err(ParseAiTargetError::InvalidName);
+		}
+
+		if let Some((category, name)) = s.split_once(':') {
+			match category {
+				"provider" | "agent" => {
+					if name == "*" || name.is_empty() {
+						Ok(AiTarget(category.to_string(), None))
+					} else if name
+						.bytes()
+						.all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+					{
+						Ok(AiTarget(category.to_string(), Some(name.to_string())))
+					} else {
+						Err(ParseAiTargetError::InvalidName)
+					}
+				}
+				_ => Err(ParseAiTargetError::InvalidCategory),
+			}
+		} else {
+			Err(ParseAiTargetError::InvalidCategory)
 		}
 	}
 }
@@ -593,6 +693,8 @@ pub struct Capabilities {
 	deny_http: Targets<RouteTarget>,
 	allow_experimental: Targets<ExperimentalTarget>,
 	deny_experimental: Targets<ExperimentalTarget>,
+	allow_ai: Targets<AiTarget>,
+	deny_ai: Targets<AiTarget>,
 	allow_arbitrary_query: Targets<ArbitraryQueryTarget>,
 	deny_arbitrary_query: Targets<ArbitraryQueryTarget>,
 	planner_strategy: NewPlannerStrategy,
@@ -602,7 +704,7 @@ impl fmt::Display for Capabilities {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(
 			f,
-			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_arbitrary_query={}, deny_arbitrary_query={}, planner_strategy={}",
+			"scripting={}, guest_access={}, live_query_notifications={}, allow_funcs={}, deny_funcs={}, allow_net={}, deny_net={}, allow_rpc={}, deny_rpc={}, allow_http={}, deny_http={}, allow_experimental={}, deny_experimental={}, allow_ai={}, deny_ai={}, allow_arbitrary_query={}, deny_arbitrary_query={}, planner_strategy={}",
 			self.scripting,
 			self.guest_access,
 			self.live_query_notifications,
@@ -616,6 +718,8 @@ impl fmt::Display for Capabilities {
 			self.deny_http,
 			self.allow_experimental,
 			self.deny_experimental,
+			self.allow_ai,
+			self.deny_ai,
 			self.allow_arbitrary_query,
 			self.deny_arbitrary_query,
 			self.planner_strategy,
@@ -640,6 +744,8 @@ impl Default for Capabilities {
 			deny_http: Targets::None,
 			allow_experimental: Targets::None,
 			deny_experimental: Targets::None,
+			allow_ai: Targets::All,
+			deny_ai: Targets::None,
 			allow_arbitrary_query: Targets::All,
 			deny_arbitrary_query: Targets::None,
 			planner_strategy: NewPlannerStrategy::default(),
@@ -664,6 +770,8 @@ impl Capabilities {
 			deny_http: Targets::None,
 			allow_experimental: Targets::None,
 			deny_experimental: Targets::None,
+			allow_ai: Targets::All,
+			deny_ai: Targets::None,
 			allow_arbitrary_query: Targets::All,
 			deny_arbitrary_query: Targets::None,
 			planner_strategy: NewPlannerStrategy::default(),
@@ -686,6 +794,8 @@ impl Capabilities {
 			deny_http: Targets::None,
 			allow_experimental: Targets::None,
 			deny_experimental: Targets::None,
+			allow_ai: Targets::None,
+			deny_ai: Targets::None,
 			allow_arbitrary_query: Targets::None,
 			deny_arbitrary_query: Targets::None,
 			planner_strategy: NewPlannerStrategy::default(),
@@ -741,6 +851,24 @@ impl Capabilities {
 
 	pub fn denied_experimental_features_mut(&mut self) -> &mut Targets<ExperimentalTarget> {
 		&mut self.deny_experimental
+	}
+
+	pub fn with_ai_targets(mut self, allow_ai: Targets<AiTarget>) -> Self {
+		self.allow_ai = allow_ai;
+		self
+	}
+
+	pub fn allowed_ai_targets_mut(&mut self) -> &mut Targets<AiTarget> {
+		&mut self.allow_ai
+	}
+
+	pub fn without_ai_targets(mut self, deny_ai: Targets<AiTarget>) -> Self {
+		self.deny_ai = deny_ai;
+		self
+	}
+
+	pub fn denied_ai_targets_mut(&mut self) -> &mut Targets<AiTarget> {
+		&mut self.deny_ai
 	}
 
 	pub fn with_arbitrary_query(
@@ -828,6 +956,10 @@ impl Capabilities {
 
 	pub fn allows_experimental_name(&self, target: &str) -> bool {
 		self.allow_experimental.matches(target) && !self.deny_experimental.matches(target)
+	}
+
+	pub fn allows_ai_target(&self, target: &str) -> bool {
+		self.allow_ai.matches(target) && !self.deny_ai.matches(target)
 	}
 
 	pub fn allows_query(&self, target: &ArbitraryQueryTarget) -> bool {
@@ -1452,6 +1584,107 @@ mod tests {
 			assert!(caps.allows_query(&ArbitraryQueryTarget::from_str("guest").unwrap()));
 			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("record").unwrap()));
 			assert!(!caps.allows_query(&ArbitraryQueryTarget::from_str("system").unwrap()));
+		}
+	}
+
+	#[test]
+	fn test_invalid_ai_target() {
+		AiTarget::from_str("").unwrap_err();
+		AiTarget::from_str("openai").unwrap_err();
+		AiTarget::from_str("unknown:foo").unwrap_err();
+		AiTarget::from_str("provider:foo bar").unwrap_err();
+	}
+
+	#[test]
+	fn test_ai_target() {
+		// Specific provider matches
+		assert!(AiTarget::from_str("provider:openai").unwrap().matches("provider:openai"));
+		assert!(!AiTarget::from_str("provider:openai").unwrap().matches("provider:anthropic"));
+		assert!(!AiTarget::from_str("provider:openai").unwrap().matches("agent:openai"));
+
+		// Wildcard provider matches all providers
+		assert!(AiTarget::from_str("provider:*").unwrap().matches("provider:openai"));
+		assert!(AiTarget::from_str("provider:*").unwrap().matches("provider:anthropic"));
+		assert!(!AiTarget::from_str("provider:*").unwrap().matches("agent:support"));
+
+		// Specific agent matches
+		assert!(AiTarget::from_str("agent:support").unwrap().matches("agent:support"));
+		assert!(!AiTarget::from_str("agent:support").unwrap().matches("agent:other"));
+		assert!(!AiTarget::from_str("agent:support").unwrap().matches("provider:support"));
+
+		// Wildcard agent matches all agents
+		assert!(AiTarget::from_str("agent:*").unwrap().matches("agent:support"));
+		assert!(AiTarget::from_str("agent:*").unwrap().matches("agent:other"));
+		assert!(!AiTarget::from_str("agent:*").unwrap().matches("provider:openai"));
+	}
+
+	#[test]
+	fn test_ai_capabilities() {
+		// When all AI targets are allowed
+		{
+			let caps = Capabilities::default()
+				.with_ai_targets(Targets::<AiTarget>::All)
+				.without_ai_targets(Targets::<AiTarget>::None);
+			assert!(caps.allows_ai_target("provider:openai"));
+			assert!(caps.allows_ai_target("agent:support"));
+		}
+
+		// When all AI targets are allowed and denied at the same time
+		{
+			let caps = Capabilities::default()
+				.with_ai_targets(Targets::<AiTarget>::All)
+				.without_ai_targets(Targets::<AiTarget>::All);
+			assert!(!caps.allows_ai_target("provider:openai"));
+			assert!(!caps.allows_ai_target("agent:support"));
+		}
+
+		// When specific providers are allowed and specific ones are denied
+		{
+			let caps = Capabilities::default()
+				.with_ai_targets(Targets::<AiTarget>::Some(
+					[AiTarget::from_str("provider:*").unwrap()].into(),
+				))
+				.without_ai_targets(Targets::<AiTarget>::Some(
+					[AiTarget::from_str("provider:huggingface").unwrap()].into(),
+				));
+			assert!(caps.allows_ai_target("provider:openai"));
+			assert!(caps.allows_ai_target("provider:anthropic"));
+			assert!(!caps.allows_ai_target("provider:huggingface"));
+			assert!(!caps.allows_ai_target("agent:support"));
+		}
+
+		// When only specific targets are allowed
+		{
+			let caps = Capabilities::default()
+				.with_ai_targets(Targets::<AiTarget>::Some(
+					[
+						AiTarget::from_str("provider:openai").unwrap(),
+						AiTarget::from_str("agent:support").unwrap(),
+					]
+					.into(),
+				))
+				.without_ai_targets(Targets::<AiTarget>::None);
+			assert!(caps.allows_ai_target("provider:openai"));
+			assert!(!caps.allows_ai_target("provider:anthropic"));
+			assert!(caps.allows_ai_target("agent:support"));
+			assert!(!caps.allows_ai_target("agent:other"));
+		}
+	}
+
+	#[test]
+	fn test_experimental_ai() {
+		// AI experimental feature is disabled by default
+		{
+			let caps = Capabilities::default();
+			assert!(!caps.allows_experimental(&ExperimentalTarget::Ai));
+		}
+
+		// AI experimental feature can be enabled
+		{
+			let mut set = std::collections::HashSet::new();
+			set.insert(ExperimentalTarget::Ai);
+			let caps = Capabilities::default().with_experimental(Targets::Some(set));
+			assert!(caps.allows_experimental(&ExperimentalTarget::Ai));
 		}
 	}
 }

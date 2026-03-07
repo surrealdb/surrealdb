@@ -170,6 +170,7 @@ impl InfoStatement {
 				let res = if *structured {
 					let object = map! {
 						"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?),
+						"agents".to_string() => process(txn.all_db_agents(ns, db).await?),
 						"apis".to_string() => process(txn.all_db_apis(ns, db).await?),
 						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
 						"buckets".to_string() => process(txn.all_db_buckets(ns, db).await?),
@@ -188,6 +189,13 @@ impl InfoStatement {
 						"accesses".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_accesses(ns, db).await?.iter() {
+								out.insert(v.name.clone(), v.to_sql().into());
+							}
+							out.into()
+						},
+						"agents".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_agents(ns, db).await?.iter() {
 								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()

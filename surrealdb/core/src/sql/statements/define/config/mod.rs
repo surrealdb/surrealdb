@@ -1,8 +1,10 @@
+pub mod ai;
 pub mod api;
 pub mod defaults;
 use surrealdb_types::{SqlFormat, ToSql};
 pub mod graphql;
 
+use ai::AiConfig;
 use api::ApiConfig;
 use defaults::DefaultConfig;
 pub(crate) use graphql::GraphQLConfig;
@@ -40,6 +42,7 @@ pub(crate) enum ConfigInner {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfig),
 	Default(DefaultConfig),
+	Ai(AiConfig),
 }
 
 impl ToSql for DefineConfigStatement {
@@ -65,6 +68,7 @@ impl ToSql for ConfigInner {
 				v.fmt_sql(f, fmt);
 			}
 			ConfigInner::Default(v) => v.fmt_sql(f, fmt),
+			ConfigInner::Ai(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -81,6 +85,9 @@ impl From<ConfigInner> for crate::expr::statements::define::config::ConfigInner 
 			ConfigInner::Api(v) => {
 				crate::expr::statements::define::config::ConfigInner::Api(v.into())
 			}
+			ConfigInner::Ai(v) => {
+				crate::expr::statements::define::config::ConfigInner::Ai(v.into())
+			}
 		}
 	}
 }
@@ -96,6 +103,9 @@ impl From<crate::expr::statements::define::config::ConfigInner> for ConfigInner 
 			}
 			crate::expr::statements::define::config::ConfigInner::Api(v) => {
 				ConfigInner::Api(v.into())
+			}
+			crate::expr::statements::define::config::ConfigInner::Ai(v) => {
+				ConfigInner::Ai(v.into())
 			}
 		}
 	}

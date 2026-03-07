@@ -3935,3 +3935,43 @@ async fn function_custom_typed_returns() -> Result<()> {
 		.expect_error(error)?;
 	Ok(())
 }
+
+// ===========================================================================
+// AI functions: feature-disabled tests
+// ===========================================================================
+
+/// When the `ai` feature is not enabled, ai::embed should return AiDisabled.
+#[cfg(not(feature = "ai"))]
+#[tokio::test]
+async fn function_ai_embed_disabled() -> Result<()> {
+	let sql = "RETURN ai::embed('openai:text-embedding-3-small', 'hello world');";
+	Test::new(sql).await?.expect_error("AI functions are not enabled")?;
+	Ok(())
+}
+
+/// When the `ai` feature is not enabled, ai::generate should return AiDisabled.
+#[cfg(not(feature = "ai"))]
+#[tokio::test]
+async fn function_ai_generate_disabled() -> Result<()> {
+	let sql = "RETURN ai::generate('openai:gpt-4-turbo', 'Hello');";
+	Test::new(sql).await?.expect_error("AI functions are not enabled")?;
+	Ok(())
+}
+
+/// When the `ai` feature is not enabled, ai::chat should return AiDisabled.
+#[cfg(not(feature = "ai"))]
+#[tokio::test]
+async fn function_ai_chat_disabled() -> Result<()> {
+	let sql = "RETURN ai::chat('openai:gpt-4-turbo', [{ role: 'user', content: 'Hello' }]);";
+	Test::new(sql).await?.expect_error("AI functions are not enabled")?;
+	Ok(())
+}
+
+/// When the `ai` feature is not enabled, ai::sentiment should return AiDisabled.
+#[cfg(not(feature = "ai"))]
+#[tokio::test]
+async fn function_ai_sentiment_disabled() -> Result<()> {
+	let sql = "RETURN ai::sentiment('openai:gpt-4-turbo', 'I love this product!');";
+	Test::new(sql).await?.expect_error("AI functions are not enabled")?;
+	Ok(())
+}
