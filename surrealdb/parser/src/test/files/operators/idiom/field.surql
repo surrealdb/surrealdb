@@ -1,0 +1,27 @@
+a.b;
+a.b.c;
+/* ===== result =====
+Query
+    .exprs: Some
+        -TopLevelExpr::Expr
+            Expr::Idiom
+                IdiomExpr
+                    .left: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "a"
+                            .parts: None
+                    .op: IdiomOperator::Field"b"
+        -TopLevelExpr::Expr
+            Expr::Idiom
+                IdiomExpr
+                    .left: Expr::Idiom
+                        IdiomExpr
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "a"
+                                    .parts: None
+                            .op: IdiomOperator::Field"b"
+                    .op: IdiomOperator::Field"c"
+*/

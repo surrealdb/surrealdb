@@ -1,0 +1,93 @@
+d"0000-01-01T00:00:00Z";
+d"0000-01-01 00:00:00Z";
+d"0000-01-01t00:00:00Z";
+d"0000-01-01t00:00:00z";
+d"000000-01-01t00:00:00z";
+d"+000000-01-01t00:00:00z";
+d"-000000-01-01t00:00:00z";
+d"-000000-01-01t00:00:00+00:00";
+d"-000000-01-01t00:00:00-00:00";
+d"-000000-01-01t00:00:00.0+00:00";
+d"-000000-01-01t00:00:00.00+00:00";
+d"-000000-01-01t00:00:00.000+00:00";
+d"-000000-01-01t00:00:00.0000+00:00";
+d"-000000-01-01t00:00:00.00000+00:00";
+d"-000000-01-01t00:00:00.000000+00:00";
+d"-000000-01-01t00:00:00.0000000+00:00";
+d"-000000-01-01t00:00:00.00000000+00:00";
+d"-000000-01-01t00:00:00.000000000+00:00";
+d"-\u{30}00000-01-01t00:00:00.000000000+00:00";
+d"-\u{30}00000-01-01t00:00:00.0000000001+00:00";
+d"-\u{30}00000-01-01t00:00:00.0000000001000000000+00:00";
+d"-\u{30}00000-01-01t00:00:00.0000000005+00:00";
+
+/* ===== result =====
+Query
+    .exprs: Some
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+        -TopLevelExpr::Expr
+            Expr::DateTime
+                0000-01-01T00:00:00Z
+*/
