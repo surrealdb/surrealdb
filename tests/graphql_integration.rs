@@ -3499,6 +3499,80 @@ mod graphql_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn schema_uses_surreal_comments_for_descriptions()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE person SCHEMAFUL COMMENT "Person records";
+					DEFINE FIELD name ON person TYPE string COMMENT "Person display name";
+					DEFINE FIELD age ON person TYPE int COMMENT "Person age";
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		}
+
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"{
+					queryType: __type(name: "Query") {
+						fields {
+							name
+							description
+						}
+					}
+					personType: __type(name: "person") {
+						fields {
+							name
+							description
+						}
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+
+		let query_fields = body["data"]["queryType"]["fields"].as_array().unwrap();
+		let person_query_field = query_fields.iter().find(|f| f["name"] == "person").unwrap();
+		assert_eq!(person_query_field["description"], "Person records");
+
+		let person_fields = body["data"]["personType"]["fields"].as_array().unwrap();
+		let name_field = person_fields.iter().find(|f| f["name"] == "name").unwrap();
+		let age_field = person_fields.iter().find(|f| f["name"] == "age").unwrap();
+
+		assert_eq!(name_field["description"], "Person display name");
+		assert_eq!(age_field["description"], "Person age");
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
 	async fn auth_mutations() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
