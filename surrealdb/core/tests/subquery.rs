@@ -377,3 +377,60 @@ async fn subquery_ifelse_array() -> Result<()> {
 	//
 	Ok(())
 }
+
+/// Regression test for issue #7038: subqueries with dotted aliases
+/// should produce nested objects, not flat keys.
+#[tokio::test]
+async fn subquery_nested_alias() -> Result<()> {
+	let sql = "
+		CREATE devices:1 SET name = 'test-device', status = { phase: 'Running' };
+		CREATE events:1 SET kind = 'Warning', message = 'High CPU';
+		-- Subquery aliased to a dotted path should merge into existing nested object
+		SELECT
+			*,
+			(SELECT kind, message FROM events LIMIT 5) AS status.events
+		FROM devices;
+	";
+	let dbs = new_ds("test", "test").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 3);
+	// CREATE devices:1
+	let tmp = res.remove(0).result?;
+	let val = syn::value(
+		"[{
+			id: devices:1,
+			name: 'test-device',
+			status: { phase: 'Running' }
+		}]",
+	)
+	.unwrap();
+	assert_eq!(tmp, val);
+	// CREATE events:1
+	let tmp = res.remove(0).result?;
+	let val = syn::value(
+		"[{
+			id: events:1,
+			kind: 'Warning',
+			message: 'High CPU'
+		}]",
+	)
+	.unwrap();
+	assert_eq!(tmp, val);
+	// SELECT *, (subquery) AS status.events - should produce nested object
+	let tmp = res.remove(0).result?;
+	let val = syn::value(
+		"[{
+			id: devices:1,
+			name: 'test-device',
+			status: {
+				events: [{ kind: 'Warning', message: 'High CPU' }],
+				phase: 'Running'
+			}
+		}]",
+	)
+	.unwrap();
+	assert_eq!(tmp, val);
+	//
+	Ok(())
+}
