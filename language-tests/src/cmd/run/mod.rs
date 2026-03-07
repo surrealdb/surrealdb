@@ -91,7 +91,31 @@ fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> Test
 
 pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let path: &String = matches.get_one("path").unwrap();
-	let (testset, load_errors) = TestSet::collect_directory(path).await?;
+
+	// Resolve the test path to an absolute path before potentially changing CWD.
+	let canonical_path = std::path::Path::new(path)
+		.canonicalize()
+		.with_context(|| format!("Failed to resolve test path: {path}"))?;
+
+	// Set CWD to the language-tests project root for consistent relative path
+	// resolution (e.g., MAPPER filter paths in analyzer tests reference files via
+	// paths like '../tests/data/...' relative to the project root). Walk up from the
+	// test directory to find the Cargo.toml that marks the project root.
+	{
+		let mut dir = canonical_path.as_path();
+		while let Some(parent) = dir.parent() {
+			if parent.join("Cargo.toml").exists() {
+				std::env::set_current_dir(parent).with_context(|| {
+					format!("Failed to set working directory to {}", parent.display())
+				})?;
+				break;
+			}
+			dir = parent;
+		}
+	}
+
+	let path = canonical_path.to_string_lossy().to_string();
+	let (testset, load_errors) = TestSet::collect_directory(&path).await?;
 	let backend = *matches.get_one::<Backend>("backend").unwrap();
 
 	// Check if the backend is supported by the enabled features.
