@@ -1,6 +1,6 @@
 /**
 [env]
-ns = "test"
+namespace = "test"
 
 [test]
 

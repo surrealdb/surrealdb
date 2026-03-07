@@ -10,7 +10,7 @@ pub mod request;
 pub use error::{
 	bad_gql_config, bad_lq_config, deserialize, internal_error, invalid_params, invalid_request,
 	lq_not_supported, method_not_allowed, method_not_found, parse_error, serialize, session_exists,
-	session_expired, session_not_found, thrown, types_error_from_anyhow,
+	session_expired, session_not_found, thrown, too_many_transactions, types_error_from_anyhow,
 };
 pub use format::Format;
 pub use method::Method;

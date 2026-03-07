@@ -104,9 +104,22 @@ pub trait RpcProtocol {
 
 	/// Deletes a session
 	async fn del_session(&self, id: &Uuid) {
+		// Get the session lock without removing it from the map yet.
+		let Some(session_lock) = self.session_map().get(&Some(*id)) else {
+			return;
+		};
+		// Acquire the write lock first. This blocks until any concurrent
+		// operation (e.g. begin) that already holds a read lock completes,
+		// and prevents new read locks from being acquired.
+		let _guard = session_lock.write_owned().await;
+		// Now remove the session from the map while holding the write lock.
+		// Any concurrent begin that re-checks session existence after
+		// acquiring its read lock will see the session is gone and abort.
 		self.session_map().remove(&Some(*id));
 		// Cleanup live queries
 		self.cleanup_lqs(Some(id)).await;
+		// Cleanup transactions
+		self.cleanup_txns(Some(id)).await;
 	}
 
 	/// Lists all non-default sessions
@@ -170,6 +183,19 @@ pub trait RpcProtocol {
 
 	/// Handles the cleanup of all live queries
 	fn cleanup_all_lqs(&self) -> impl std::future::Future<Output = ()> + Send;
+
+	/// Handles the cleanup of transactions for a session
+	fn cleanup_txns(
+		&self,
+		_session_id: Option<&Uuid>,
+	) -> impl std::future::Future<Output = ()> + Send {
+		async {}
+	}
+
+	/// Handles the cleanup of all transactions
+	fn cleanup_all_txns(&self) -> impl std::future::Future<Output = ()> + Send {
+		async {}
+	}
 
 	// ------------------------------
 	// Method execution
@@ -572,6 +598,8 @@ pub trait RpcProtocol {
 		crate::iam::reset::reset(&mut session);
 		// Cleanup live queries
 		self.cleanup_lqs(session_id.as_ref()).await;
+		// Cleanup transactions
+		self.cleanup_txns(session_id.as_ref()).await;
 		// Return nothing on success
 		Ok(DbResult::Other(PublicValue::None))
 	}

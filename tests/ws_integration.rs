@@ -2756,6 +2756,213 @@ pub async fn multi_session_management(cfg_server: Option<Format>, cfg_format: Fo
 	server.finish().unwrap();
 }
 
+// ------------------------------
+// Transaction tests
+// ------------------------------
+
+pub async fn transaction_begin_commit(cfg_server: Option<Format>, cfg_format: Format) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Begin a transaction
+	let res = socket.send_request("begin", json!([])).await.unwrap();
+	assert!(res["result"].is_string(), "Expected transaction UUID, got: {res:?}");
+	let txn_id = res["result"].as_str().unwrap().to_string();
+	// Commit the transaction
+	let res = socket.send_request("commit", json!([txn_id])).await.unwrap();
+	assert!(res.get("error").is_none(), "Commit should succeed: {res:?}");
+	// A second commit of the same UUID should fail
+	let res = socket.send_request("commit", json!([txn_id])).await.unwrap();
+	assert!(res["error"].is_object(), "Second commit should fail: {res:?}");
+	// Test passed
+	server.finish().unwrap();
+}
+
+pub async fn transaction_begin_cancel(cfg_server: Option<Format>, cfg_format: Format) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Begin a transaction
+	let res = socket.send_request("begin", json!([])).await.unwrap();
+	assert!(res["result"].is_string(), "Expected transaction UUID, got: {res:?}");
+	let txn_id = res["result"].as_str().unwrap().to_string();
+	// Cancel the transaction
+	let res = socket.send_request("cancel", json!([txn_id])).await.unwrap();
+	assert!(res.get("error").is_none(), "Cancel should succeed: {res:?}");
+	// The transaction should no longer be accessible
+	let res = socket.send_request("commit", json!([txn_id])).await.unwrap();
+	assert!(res["error"].is_object(), "Commit after cancel should fail: {res:?}");
+	// Test passed
+	server.finish().unwrap();
+}
+
+pub async fn transaction_limit_per_connection(cfg_server: Option<Format>, cfg_format: Format) {
+	// Start server with a low per-connection transaction limit
+	let mut vars = std::collections::HashMap::new();
+	vars.insert("SURREAL_MAX_TRANSACTIONS_PER_CONNECTION".to_string(), "2".to_string());
+	let (addr, mut server) = common::start_server(StartServerArguments {
+		vars: Some(vars),
+		..Default::default()
+	})
+	.await
+	.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Begin two transactions -- both should succeed
+	let res1 = socket.send_request("begin", json!([])).await.unwrap();
+	assert!(res1["result"].is_string(), "First begin should succeed: {res1:?}");
+	let txn1 = res1["result"].as_str().unwrap().to_string();
+	let res2 = socket.send_request("begin", json!([])).await.unwrap();
+	assert!(res2["result"].is_string(), "Second begin should succeed: {res2:?}");
+	// A third begin should fail with TooManyTransactions
+	let res3 = socket.send_request("begin", json!([])).await.unwrap();
+	assert!(res3["error"].is_object(), "Third begin should fail: {res3:?}");
+	let err_msg = res3["error"]["message"].as_str().unwrap_or("");
+	assert!(
+		err_msg.contains("Too many open transactions"),
+		"Expected 'Too many open transactions' error, got: {err_msg}"
+	);
+	// Cancel one transaction, then begin again -- should succeed
+	let res = socket.send_request("cancel", json!([txn1])).await.unwrap();
+	assert!(res.get("error").is_none(), "Cancel should succeed: {res:?}");
+	let res4 = socket.send_request("begin", json!([])).await.unwrap();
+	assert!(res4["result"].is_string(), "Begin after cancel should succeed: {res4:?}");
+	// Test passed
+	server.finish().unwrap();
+}
+
+pub async fn transaction_limit_per_session(cfg_server: Option<Format>, cfg_format: Format) {
+	// Start server with a low per-session transaction limit
+	let mut vars = std::collections::HashMap::new();
+	vars.insert("SURREAL_MAX_TRANSACTIONS_PER_SESSION".to_string(), "2".to_string());
+	let (addr, mut server) = common::start_server(StartServerArguments {
+		vars: Some(vars),
+		..Default::default()
+	})
+	.await
+	.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Attach a named session
+	let session1 = "11111111-1111-1111-1111-111111111111";
+	socket.send_request_with_session("attach", json!([]), session1).await.unwrap();
+	socket
+		.send_request_with_session("signin", json!([{"user": USER, "pass": PASS}]), session1)
+		.await
+		.unwrap();
+	socket.send_request_with_session("use", json!([NS, DB]), session1).await.unwrap();
+	// Begin two transactions on the session -- both should succeed
+	let res1 = socket.send_request_with_session("begin", json!([]), session1).await.unwrap();
+	assert!(res1["result"].is_string(), "First session begin should succeed: {res1:?}");
+	let res2 = socket.send_request_with_session("begin", json!([]), session1).await.unwrap();
+	assert!(res2["result"].is_string(), "Second session begin should succeed: {res2:?}");
+	// A third begin on the same session should fail
+	let res3 = socket.send_request_with_session("begin", json!([]), session1).await.unwrap();
+	assert!(res3["error"].is_object(), "Third session begin should fail: {res3:?}");
+	let err_msg = res3["error"]["message"].as_str().unwrap_or("");
+	assert!(
+		err_msg.contains("Too many open transactions"),
+		"Expected 'Too many open transactions' error, got: {err_msg}"
+	);
+	// Begin on the default session (no session ID) should still succeed
+	// because session limits are independent
+	let res4 = socket.send_request("begin", json!([])).await.unwrap();
+	assert!(
+		res4["result"].is_string(),
+		"Begin on default session should succeed despite session limit: {res4:?}"
+	);
+	// Test passed
+	server.finish().unwrap();
+}
+
+pub async fn transaction_cleanup_on_disconnect(cfg_server: Option<Format>, cfg_format: Format) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create a record
+	let res = socket.send_request("query", json!(["CREATE test:1 SET value = 1"])).await.unwrap();
+	assert!(res.get("error").is_none(), "CREATE should succeed: {res:?}");
+	// Begin a transaction
+	let res = socket.send_request("begin", json!([])).await.unwrap();
+	assert!(res["result"].is_string(), "Begin should succeed: {res:?}");
+	let txn_id = res["result"].as_str().unwrap().to_string();
+	// Update the record within the transaction (txn in request envelope, not params)
+	let res = socket
+		.send_request_with_txn("query", json!(["UPDATE test:1 SET value = 2"]), Some(&txn_id))
+		.await
+		.unwrap();
+	assert!(res.get("error").is_none(), "UPDATE in transaction should succeed: {res:?}");
+	// Disconnect WITHOUT committing
+	socket.close().await.unwrap();
+	// Give the server a moment to process the disconnect
+	tokio::time::sleep(Duration::from_millis(500)).await;
+	// Reconnect with a new socket
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Verify the uncommitted transaction was rolled back
+	let res = socket.send_request("query", json!(["SELECT * FROM test:1"])).await.unwrap();
+	assert!(res.get("error").is_none(), "SELECT should succeed: {res:?}");
+	let results = res["result"].as_array().unwrap();
+	let value = &results[0]["result"][0]["value"];
+	assert_eq!(*value, json!(1), "Value should still be 1 after rollback, got: {value}");
+	// Test passed
+	server.finish().unwrap();
+}
+
+pub async fn transaction_cleanup_on_session_detach(cfg_server: Option<Format>, cfg_format: Format) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Attach a named session
+	let session1 = "11111111-1111-1111-1111-111111111111";
+	socket.send_request_with_session("attach", json!([]), session1).await.unwrap();
+	socket
+		.send_request_with_session("signin", json!([{"user": USER, "pass": PASS}]), session1)
+		.await
+		.unwrap();
+	socket.send_request_with_session("use", json!([NS, DB]), session1).await.unwrap();
+	// Begin a transaction on the named session
+	let res = socket.send_request_with_session("begin", json!([]), session1).await.unwrap();
+	assert!(res["result"].is_string(), "Begin on session should succeed: {res:?}");
+	let txn_id = res["result"].as_str().unwrap().to_string();
+	// Detach the session
+	socket.send_request_with_session("detach", json!([]), session1).await.unwrap();
+	// The transaction should no longer be usable (it was cancelled during cleanup)
+	let res = socket.send_request("commit", json!([txn_id])).await.unwrap();
+	assert!(res["error"].is_object(), "Commit after session detach should fail: {res:?}");
+	// Test passed
+	server.finish().unwrap();
+}
+
 define_include_tests! {
 	#[test_log::test(tokio::test)]
 	ping,
@@ -2845,4 +3052,16 @@ define_include_tests! {
 	multi_session_authentication,
 	#[test_log::test(tokio::test)]
 	multi_session_management,
+	#[test_log::test(tokio::test)]
+	transaction_begin_commit,
+	#[test_log::test(tokio::test)]
+	transaction_begin_cancel,
+	#[test_log::test(tokio::test)]
+	transaction_limit_per_connection,
+	#[test_log::test(tokio::test)]
+	transaction_limit_per_session,
+	#[test_log::test(tokio::test)]
+	transaction_cleanup_on_disconnect,
+	#[test_log::test(tokio::test)]
+	transaction_cleanup_on_session_detach,
 }
