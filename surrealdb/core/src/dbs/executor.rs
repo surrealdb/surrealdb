@@ -1055,36 +1055,113 @@ impl Executor {
 		opt: Options,
 		plan: LogicalPlan,
 	) -> Result<Vec<QueryResult>> {
-		// The transaction is already set in the context
-		// Execute each expression with the transaction
 		let tx = ctx.tx();
 		let mut executor = Self::new(ctx, opt);
 		let mut results = Vec::new();
+		let expressions: Vec<_> = plan.expressions.into_iter().collect();
+		let total = expressions.len();
 
-		for expr in plan.expressions {
+		for (i, expr) in expressions.into_iter().enumerate() {
 			let start = Instant::now();
 			let result = executor.execute_plan_in_transaction(tx.clone(), &start, expr).await;
 
 			let time = start.elapsed();
-			let query_result = match result {
-				Ok(value) | Err(ControlFlow::Return(value)) => QueryResult {
-					time,
-					result: crate::val::convert_value_to_public_value(value)
-						.map_err(|e| TypesError::internal(e.to_string())),
-					query_type: QueryType::Other,
-				},
-				Err(ControlFlow::Err(e)) => QueryResult {
-					time,
-					result: Err(types_error_from_anyhow(e)),
-					query_type: QueryType::Other,
-				},
-				Err(ControlFlow::Continue) | Err(ControlFlow::Break) => QueryResult {
-					time,
-					result: Err(TypesError::internal("Invalid control flow".to_string())),
-					query_type: QueryType::Other,
-				},
-			};
-			results.push(query_result);
+			match result {
+				Ok(value) | Err(ControlFlow::Return(value)) => {
+					results.push(QueryResult {
+						time,
+						result: crate::val::convert_value_to_public_value(value)
+							.map_err(|e| TypesError::internal(e.to_string())),
+						query_type: QueryType::Other,
+					});
+				}
+				Err(ControlFlow::Err(e)) => {
+					let cancel_err = if !tx.closed() {
+						tx.cancel().await.err().map(types_error_from_anyhow)
+					} else {
+						None
+					};
+
+					for res in &mut results {
+						res.query_type = QueryType::Other;
+						res.result = Err(TypesError::query(
+							"The query was not executed due to a failed transaction".to_string(),
+							Some(QueryError::NotExecuted),
+						));
+					}
+
+					results.push(QueryResult {
+						time,
+						result: Err(types_error_from_anyhow(e)),
+						query_type: QueryType::Other,
+					});
+
+					if let Some(err) = cancel_err {
+						results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Err(err),
+							query_type: QueryType::Other,
+						});
+					}
+
+					for _ in (i + 1)..total {
+						results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Err(TypesError::query(
+								"The query was not executed due to a failed transaction"
+									.to_string(),
+								Some(QueryError::NotExecuted),
+							)),
+							query_type: QueryType::Other,
+						});
+					}
+
+					return Ok(results);
+				}
+				Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
+					let cancel_err = if !tx.closed() {
+						tx.cancel().await.err().map(types_error_from_anyhow)
+					} else {
+						None
+					};
+
+					for res in &mut results {
+						res.query_type = QueryType::Other;
+						res.result = Err(TypesError::query(
+							"The query was not executed due to a failed transaction".to_string(),
+							Some(QueryError::NotExecuted),
+						));
+					}
+
+					results.push(QueryResult {
+						time,
+						result: Err(TypesError::internal("Invalid control flow".to_string())),
+						query_type: QueryType::Other,
+					});
+
+					if let Some(err) = cancel_err {
+						results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Err(err),
+							query_type: QueryType::Other,
+						});
+					}
+
+					for _ in (i + 1)..total {
+						results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Err(TypesError::query(
+								"The query was not executed due to a failed transaction"
+									.to_string(),
+								Some(QueryError::NotExecuted),
+							)),
+							query_type: QueryType::Other,
+						});
+					}
+
+					return Ok(results);
+				}
+			}
 		}
 
 		Ok(results)
