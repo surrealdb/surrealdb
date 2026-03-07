@@ -1,15 +1,12 @@
+use anyhow::Result;
+
 use crate::expr::part::Part;
-use crate::val::{Number, Value};
+use crate::val::{Number, TryAdd, Value};
 
 impl Value {
 	/// Synchronous method for incrementing a field in a `Value`
-	pub(crate) fn inc(&mut self, path: &[Part], val: Value) {
+	pub(crate) fn inc(&mut self, path: &[Part], val: Value) -> Result<()> {
 		match self.pick(path) {
-			Value::Number(v) => {
-				if let Value::Number(x) = val {
-					self.put(path, Value::from(v + x))
-				}
-			}
 			Value::Array(v) => match val {
 				Value::Array(x) => self.put(path, Value::from(v.concat(x))),
 				x => self.put(path, Value::from(v.with_push(x))),
@@ -19,8 +16,12 @@ impl Value {
 				Value::Array(x) => self.put(path, Value::from(x)),
 				x => self.put(path, Value::from(vec![x])),
 			},
-			_ => (),
+			v => {
+				let result = v.try_add(val)?;
+				self.put(path, result);
+			}
 		}
+		Ok(())
 	}
 }
 
@@ -42,7 +43,7 @@ mod tests {
 		let idi: Idiom = syn::idiom("other").unwrap().into();
 		let mut val = parse_val!("{ test: 100 }");
 		let res = parse_val!("{ test: 100, other: +10 }");
-		val.inc(&idi, Value::from(10));
+		val.inc(&idi, Value::from(10)).unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -51,8 +52,15 @@ mod tests {
 		let idi: Idiom = syn::idiom("test").unwrap().into();
 		let mut val = parse_val!("{ test: 100 }");
 		let res = parse_val!("{ test: 110 }");
-		val.inc(&idi, Value::from(10));
+		val.inc(&idi, Value::from(10)).unwrap();
 		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn increment_object_number_errors() {
+		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let mut val = parse_val!("{ test: { a: 1 } }");
+		assert!(val.inc(&idi, Value::from(10)).is_err());
 	}
 
 	#[tokio::test]
@@ -60,7 +68,7 @@ mod tests {
 		let idi: Idiom = syn::idiom("test[1]").unwrap().into();
 		let mut val = parse_val!("{ test: [100, 200, 300] }");
 		let res = parse_val!("{ test: [100, 210, 300] }");
-		val.inc(&idi, Value::from(10));
+		val.inc(&idi, Value::from(10)).unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -69,7 +77,7 @@ mod tests {
 		let idi: Idiom = syn::idiom("test").unwrap().into();
 		let mut val = parse_val!("{ test: [100, 200, 300] }");
 		let res = parse_val!("{ test: [100, 200, 300, 200] }");
-		val.inc(&idi, Value::from(200));
+		val.inc(&idi, Value::from(200)).unwrap();
 		assert_eq!(res, val);
 	}
 
@@ -78,7 +86,7 @@ mod tests {
 		let idi: Idiom = syn::idiom("test").unwrap().into();
 		let mut val = parse_val!("{ test: [100, 200, 300] }");
 		let res = parse_val!("{ test: [100, 200, 300, 100, 300, 400, 500] }");
-		val.inc(&idi, parse_val!("[100, 300, 400, 500]"));
+		val.inc(&idi, parse_val!("[100, 300, 400, 500]")).unwrap();
 		assert_eq!(res, val);
 	}
 }
