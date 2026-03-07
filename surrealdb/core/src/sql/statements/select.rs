@@ -9,21 +9,21 @@ use crate::sql::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
-	pub fields: Fields,
-	pub omit: Vec<Expr>,
+	pub(crate) fields: Fields,
+	pub(crate) omit: Vec<Expr>,
 	pub only: bool,
 	/// The baz part in SELECT foo,bar FROM baz.
-	pub what: Vec<Expr>,
+	pub(crate) what: Vec<Expr>,
 	pub with: Option<With>,
-	pub cond: Option<Cond>,
+	pub(crate) cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
 	pub order: Option<Ordering>,
-	pub limit: Option<Limit>,
+	pub(crate) limit: Option<Limit>,
 	pub start: Option<Start>,
-	pub fetch: Option<Fetchs>,
-	pub version: Expr,
-	pub timeout: Expr,
+	pub(crate) fetch: Option<Fetchs>,
+	pub(crate) version: Expr,
+	pub(crate) timeout: Expr,
 	pub explain: Option<Explain>,
 	pub tempfiles: bool,
 }

@@ -7,7 +7,7 @@ use crate::sql::{Expr, Kind, Param};
 pub struct Closure {
 	pub args: Vec<(Param, Kind)>,
 	pub returns: Option<Kind>,
-	pub body: Expr,
+	pub(crate) body: Expr,
 }
 
 impl ToSql for Closure {

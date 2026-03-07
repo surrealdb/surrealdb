@@ -8,7 +8,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResultExt, Function, Idiom, Part};
 
-pub async fn exprs_to_fields(
+pub(crate) async fn exprs_to_fields(
 	stk: &mut Stk,
 	ctx: &FrozenContext,
 	opt: &Options,
@@ -73,7 +73,7 @@ pub async fn exprs_to_fields(
 	Ok(fields)
 }
 
-pub async fn expr_to_ident(
+pub(crate) async fn expr_to_ident(
 	stk: &mut Stk,
 	ctx: &FrozenContext,
 	opt: &Options,
@@ -108,7 +108,7 @@ pub async fn expr_to_ident(
 	.map_err(anyhow::Error::from)
 }
 
-pub async fn expr_to_optional_ident(
+pub(crate) async fn expr_to_optional_ident(
 	stk: &mut Stk,
 	ctx: &FrozenContext,
 	opt: &Options,
@@ -143,7 +143,7 @@ pub async fn expr_to_optional_ident(
 	.map_err(anyhow::Error::from)
 }
 
-pub async fn expr_to_idiom(
+pub(crate) async fn expr_to_idiom(
 	stk: &mut Stk,
 	ctx: &FrozenContext,
 	opt: &Options,

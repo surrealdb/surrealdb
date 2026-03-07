@@ -362,6 +362,27 @@ args = [
     "--nocapture",
 ]
 
+[tasks.ci-pgwire-integration]
+category = "CI - INTEGRATION TESTS"
+description = "Run PostgreSQL wire protocol integration tests"
+command = "cargo"
+env = { RUST_BACKTRACE = 1, RUST_LOG = { value = "postgresql=debug", condition = { env_not_set = [
+    "RUST_LOG",
+] } } }
+args = [
+    "test",
+    "--locked",
+    "--no-default-features",
+    "--features",
+    "storage-mem,pgwire",
+    "--workspace",
+    "--test",
+    "postgresql",
+    "--",
+    "postgresql",
+    "--nocapture",
+]
+
 # --------------------------------------------------
 # API tests
 # --------------------------------------------------
@@ -613,6 +634,7 @@ args = [
     "--skip", "ws_integration",
     "--skip", "ml_integration",
     "--skip", "graphql_integration",
+    "--skip", "postgresql",
     "--skip", "database_upgrade",
 ]
 

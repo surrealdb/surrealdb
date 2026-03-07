@@ -40,7 +40,7 @@ use crate::fnc::util::math::ToFloat;
 use crate::val::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 
 #[derive(Encode, BorrowDecode)]
-pub(crate) enum NumberKind {
+pub enum NumberKind {
 	Int,
 	Float,
 	Decimal,
@@ -49,7 +49,7 @@ pub(crate) enum NumberKind {
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub(crate) enum Number {
+pub enum Number {
 	Int(i64),
 	Float(f64),
 	Decimal(Decimal),

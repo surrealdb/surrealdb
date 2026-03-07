@@ -13,12 +13,12 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineParamStatement {
+pub struct DefineParamStatement {
 	pub kind: DefineKind,
 	pub name: String,
 	pub value: Expr,
 	pub comment: Expr,
-	pub permissions: Permission,
+	pub(crate) permissions: Permission,
 }
 
 impl DefineParamStatement {

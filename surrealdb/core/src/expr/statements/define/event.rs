@@ -15,7 +15,7 @@ use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineEventStatement {
+pub struct DefineEventStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub target_table: Expr,

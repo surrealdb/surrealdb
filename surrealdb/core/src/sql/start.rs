@@ -5,7 +5,7 @@ use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Start(pub Expr);
+pub struct Start(pub(crate) Expr);
 
 impl ToSql for Start {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {

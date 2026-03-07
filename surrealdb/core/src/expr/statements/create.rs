@@ -14,7 +14,7 @@ use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct CreateStatement {
+pub struct CreateStatement {
 	// A keyword modifier indicating if we are expecting a single result or several
 	pub only: bool,
 	// Where we are creating (i.e. table, or record ID)

@@ -15,7 +15,7 @@ use crate::key::database::sq::Sq;
 use crate::val::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
-pub(crate) struct AlterSequenceStatement {
+pub struct AlterSequenceStatement {
 	pub name: String,
 	pub if_exists: bool,
 	pub timeout: Option<Expr>,

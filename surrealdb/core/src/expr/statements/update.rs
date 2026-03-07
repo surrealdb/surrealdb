@@ -14,7 +14,7 @@ use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct UpdateStatement {
+pub struct UpdateStatement {
 	pub only: bool,
 	pub what: Vec<Expr>,
 	pub with: Option<With>,

@@ -25,7 +25,7 @@ use crate::val::TableName;
 ///
 /// This allows administrators to verify query performance before permanently removing an index.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct AlterIndexStatement {
+pub struct AlterIndexStatement {
 	pub name: String,
 	pub table: TableName,
 	pub if_exists: bool,

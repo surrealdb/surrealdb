@@ -29,7 +29,7 @@ impl RecordIdKeyGen {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum RecordIdKeyLit {
+pub enum RecordIdKeyLit {
 	Number(i64),
 	String(String),
 	Uuid(Uuid),

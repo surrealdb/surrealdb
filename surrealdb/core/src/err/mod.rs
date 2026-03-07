@@ -32,9 +32,10 @@ pub(crate) use to_types::into_types_error;
 
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 #[allow(clippy::enum_variant_names)]
 #[allow(dead_code, reason = "Some variants are only used by specific KV stores")]
-pub(crate) enum Error {
+pub enum Error {
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
 	Unreachable(String),
@@ -1038,10 +1039,6 @@ pub(crate) enum Error {
 	UnsupportedDestructure {
 		variant: String,
 	},
-
-	#[doc(hidden)]
-	#[error("The underlying datastore does not support versioned queries")]
-	UnsupportedVersionedQueries,
 
 	/// There was an invalid storage version stored in the database
 	#[error("There was an invalid storage version stored in the database")]

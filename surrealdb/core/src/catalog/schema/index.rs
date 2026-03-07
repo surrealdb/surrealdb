@@ -247,7 +247,7 @@ impl Default for Scoring {
 /// Distance metric for calculating distances between vectors.
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum Distance {
+pub enum Distance {
 	/// Chebyshev distance.
 	///
 	/// <https://en.wikipedia.org/wiki/Chebyshev_distance>

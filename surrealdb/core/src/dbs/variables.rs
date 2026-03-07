@@ -47,11 +47,10 @@ impl Visitor for ParameterCapturePass<'_, '_> {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[repr(transparent)]
-pub(crate) struct Variables(pub(crate) BTreeMap<String, Value>);
+pub struct Variables(pub(crate) BTreeMap<String, Value>);
 
 impl Variables {
 	/// Create a new empty variables map.
-	#[allow(dead_code)]
 	pub fn new() -> Self {
 		Self(BTreeMap::new())
 	}

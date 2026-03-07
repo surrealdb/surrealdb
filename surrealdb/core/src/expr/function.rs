@@ -14,7 +14,7 @@ use crate::fnc;
 use crate::iam::AuthLimit;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum Function {
+pub enum Function {
 	Normal(String),
 	Custom(String),
 	Script(Script),
@@ -214,7 +214,7 @@ impl Function {
 ///TODO(3.0): Remove after proper first class function support?
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct FunctionCall {
+pub struct FunctionCall {
 	pub receiver: Function,
 	pub arguments: Vec<Expr>,
 }

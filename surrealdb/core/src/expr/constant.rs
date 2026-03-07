@@ -34,7 +34,7 @@ pub enum Constant {
 }
 
 /// A type of constant that may be converted to a value or JSON.
-pub(crate) enum ConstantValue {
+pub enum ConstantValue {
 	Float(f64),
 	Datetime(Datetime),
 	Duration(Duration),

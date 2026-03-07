@@ -11,8 +11,8 @@ pub struct DefineModelStatement {
 	pub hash: String,
 	pub name: String,
 	pub version: String,
-	pub comment: Expr,
-	pub permissions: Permission,
+	pub(crate) comment: Expr,
+	pub(crate) permissions: Permission,
 }
 
 impl Default for DefineModelStatement {

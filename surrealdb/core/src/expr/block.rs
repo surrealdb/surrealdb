@@ -12,7 +12,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct Block(pub(crate) Vec<Expr>);
+pub struct Block(pub(crate) Vec<Expr>);
 
 impl Revisioned for Block {
 	fn revision() -> u16 {

@@ -6,7 +6,7 @@ use crate::sql::{Cond, Expr, Fetchs, Fields};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum LiveFields {
+pub(crate) enum LiveFields {
 	Diff,
 	Select(Fields),
 }
@@ -35,10 +35,10 @@ impl From<crate::expr::statements::LiveFields> for LiveFields {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct LiveStatement {
-	pub fields: LiveFields,
-	pub what: Expr,
-	pub cond: Option<Cond>,
-	pub fetch: Option<Fetchs>,
+	pub(crate) fields: LiveFields,
+	pub(crate) what: Expr,
+	pub(crate) cond: Option<Cond>,
+	pub(crate) fetch: Option<Fetchs>,
 }
 
 impl ToSql for LiveStatement {

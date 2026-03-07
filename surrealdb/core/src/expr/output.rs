@@ -4,7 +4,7 @@ use crate::expr::field::{Fields, Selector};
 use crate::expr::{Expr, Field, Literal};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) enum Output {
+pub enum Output {
 	#[default]
 	None,
 	Null,

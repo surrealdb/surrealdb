@@ -17,7 +17,7 @@ use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName};
 /// A lookup is a unified way of looking up graph edges and record references.
 /// Since they both work very similarly, they also both support the same operations
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct Lookup {
+pub struct Lookup {
 	pub(crate) kind: LookupKind,
 	pub(crate) expr: Option<Fields>,
 	pub(crate) what: Vec<LookupSubject>,
@@ -61,7 +61,7 @@ impl ToSql for LookupKind {
 
 /// This enum instructs whether we scan all edges on a table or just a specific range
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum LookupSubject {
+pub enum LookupSubject {
 	Table {
 		table: TableName,
 		referencing_field: Option<String>,

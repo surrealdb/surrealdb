@@ -12,7 +12,7 @@ use crate::sql::statements::alter::AlterKind;
 /// - `COMPACT`: requests datastore‑wide compaction
 pub struct AlterSystemStatement {
 	/// Tri‑state alteration for the `QUERY_TIMEOUT` parameter.
-	pub query_timeout: AlterKind<Expr>,
+	pub(crate) query_timeout: AlterKind<Expr>,
 	/// When true, emits `COMPACT`.
 	pub compact: bool,
 }

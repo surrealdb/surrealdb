@@ -9,7 +9,7 @@ use crate::err::Error;
 use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct SetStatement {
+pub struct SetStatement {
 	pub name: String,
 	pub what: Expr,
 	pub kind: Option<Kind>,

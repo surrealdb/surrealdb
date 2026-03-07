@@ -9,7 +9,7 @@ use crate::sql::Expr;
 pub struct AlterSequenceStatement {
 	pub name: String,
 	pub if_exists: bool,
-	pub timeout: Option<Expr>,
+	pub(crate) timeout: Option<Expr>,
 }
 
 impl ToSql for AlterSequenceStatement {

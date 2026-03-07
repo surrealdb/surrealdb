@@ -11,6 +11,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::closure::ClosureExpr;
+use crate::expr::join::JoinExpr;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::statements::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
@@ -27,14 +28,14 @@ use crate::types::PublicValue;
 use crate::val::{Array, Range, TableName, Value};
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug, Default)]
-pub(crate) enum ExplainFormat {
+pub enum ExplainFormat {
 	#[default]
 	Text,
 	Json,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum Expr {
+pub enum Expr {
 	Literal(Literal),
 	Param(Param),
 	Idiom(Idiom),
@@ -88,6 +89,7 @@ pub(crate) enum Expr {
 		analyze: bool,
 		statement: Box<Expr>,
 	},
+	Join(Box<JoinExpr>),
 }
 
 impl Expr {
@@ -130,7 +132,7 @@ impl Expr {
 				statement,
 				..
 			} => statement.read_only(),
-			Expr::Closure(_) => true,
+			Expr::Closure(_) | Expr::Join(_) => true,
 			Expr::Create(_)
 			| Expr::Update(_)
 			| Expr::Delete(_)
@@ -322,7 +324,8 @@ impl Expr {
 			| Expr::Sleep(_)
 			| Expr::Explain {
 				..
-			} => false,
+			}
+			| Expr::Join(_) => false,
 		}
 	}
 
@@ -463,6 +466,9 @@ impl Expr {
 				..
 			} => Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
 				"EXPLAIN is only supported with the new execution model".to_string(),
+			)))),
+			Expr::Join(_) => Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+				"JOIN expressions require the streaming executor".to_string(),
 			)))),
 		}
 	}
@@ -770,7 +776,8 @@ impl Expr {
 			| Expr::Sleep(_)
 			| Expr::Explain {
 				..
-			} => true,
+			}
+			| Expr::Join(_) => true,
 
 			Expr::Literal(_)
 			| Expr::Param(_)

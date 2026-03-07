@@ -7,7 +7,7 @@ use crate::sql::{Expr, Idiom, Kind, Permissions};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum AlterDefault {
+pub(crate) enum AlterDefault {
 	#[default]
 	None,
 	Drop,
@@ -49,18 +49,18 @@ impl From<AlterDefault> for crate::expr::statements::alter::AlterDefault {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterFieldStatement {
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::local_idiom))]
-	pub name: Idiom,
+	pub(crate) name: Idiom,
 	pub what: String,
 	pub if_exists: bool,
 	pub kind: AlterKind<Kind>,
 	pub flexible: AlterKind<()>,
 	pub readonly: AlterKind<()>,
-	pub value: AlterKind<Expr>,
-	pub assert: AlterKind<Expr>,
-	pub default: AlterDefault,
-	pub permissions: Option<Permissions>,
+	pub(crate) value: AlterKind<Expr>,
+	pub(crate) assert: AlterKind<Expr>,
+	pub(crate) default: AlterDefault,
+	pub(crate) permissions: Option<Permissions>,
 	pub comment: AlterKind<String>,
-	pub reference: AlterKind<Reference>,
+	pub(crate) reference: AlterKind<Reference>,
 }
 
 impl ToSql for AlterFieldStatement {

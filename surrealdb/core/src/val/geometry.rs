@@ -19,7 +19,7 @@ use crate::val::{Array, Value};
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub(crate) enum Geometry {
+pub enum Geometry {
 	Point(Point<f64>),
 	Line(LineString<f64>),
 	Polygon(Polygon<f64>),
