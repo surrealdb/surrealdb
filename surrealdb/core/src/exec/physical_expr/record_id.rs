@@ -194,6 +194,10 @@ impl PhysicalExpr for RecordIdExpr {
 	fn access_mode(&self) -> AccessMode {
 		self.key.access_mode()
 	}
+
+	fn may_produce_record_ids(&self) -> bool {
+		true
+	}
 }
 
 impl ToSql for RecordIdExpr {

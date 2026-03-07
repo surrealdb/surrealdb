@@ -220,7 +220,7 @@ mod tests {
 		// but we can test the operator's metadata methods
 		use crate::exec::operators::SourceExpr;
 
-		let source = Arc::new(SourceExpr::new(literal_expr(1)));
+		let source = Arc::new(SourceExpr::new(literal_expr(1), false));
 
 		let compute = Compute::new(
 			source,
@@ -241,7 +241,7 @@ mod tests {
 	fn test_compute_empty() {
 		use crate::exec::operators::SourceExpr;
 
-		let source = Arc::new(SourceExpr::new(literal_expr(1)));
+		let source = Arc::new(SourceExpr::new(literal_expr(1), false));
 
 		let compute = Compute::new(source, vec![]);
 

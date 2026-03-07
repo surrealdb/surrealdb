@@ -44,6 +44,10 @@ impl PhysicalExpr for Literal {
 	fn try_literal(&self) -> Option<&Value> {
 		Some(&self.0)
 	}
+
+	fn may_produce_record_ids(&self) -> bool {
+		false
+	}
 }
 
 impl ToSql for Literal {
