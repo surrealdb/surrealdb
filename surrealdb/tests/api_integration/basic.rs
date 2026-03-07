@@ -43,14 +43,12 @@ pub async fn yuse(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db(config).await;
 	let item = Ulid::new().to_string();
 	let err = db.create(Resource::from(item.as_str())).await.unwrap_err();
-	if !err.to_string().contains("Specify a namespace to use") {
-		panic!("{:?}", err)
-	}
+	assert!(err.is_validation(), "expected validation error (namespace): {:?}", err);
+	assert!(err.message().contains("namespace"), "expected namespace message: {}", err.message());
 	db.use_ns(Ulid::new().to_string()).await.unwrap();
 	let err = db.create(Resource::from(item.as_str())).await.unwrap_err();
-	if !err.to_string().contains("Specify a database to use") {
-		panic!("{:?}", err)
-	}
+	assert!(err.is_validation(), "expected validation error (database): {:?}", err);
+	assert!(err.message().contains("database"), "expected database message: {}", err.message());
 	db.use_db(item.as_str()).await.unwrap();
 	db.create(Resource::from(item)).await.unwrap();
 	drop(permit);
@@ -63,11 +61,7 @@ pub async fn invalidate(new_db: impl CreateDb) {
 	drop(permit);
 	db.invalidate().await.unwrap();
 	let error = db.create::<Option<ApiRecordId>>(("user", "john")).await.unwrap_err();
-	assert!(
-		error.to_string().contains("Not enough permissions to perform this action"),
-		"Unexpected error: {:?}",
-		error
-	);
+	assert!(error.is_not_allowed(), "Unexpected error (expected NotAllowed): {:?}", error);
 }
 
 pub async fn signup_record(new_db: impl CreateDb) {
@@ -221,9 +215,8 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 		.await
 		.unwrap_err();
 
-	// Check if the error message contains our expected thrown error
-	let err_str = err.to_string();
-	if err_str.contains("signup_thrown_error") {
+	// Check if the error is our expected thrown error or another known case
+	if err.is_thrown() && err.message().contains("signup_thrown_error") {
 		// Expected thrown error
 	} else if err.is_query() {
 		assert!(err.message().contains("signup"));
@@ -249,9 +242,8 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 		.await
 		.unwrap_err();
 
-	// Check if the error message contains our expected thrown error
-	let err_str = err.to_string();
-	if err_str.contains("signin_thrown_error") {
+	// Check if the error is our expected thrown error or another known case
+	if err.is_thrown() && err.message().contains("signin_thrown_error") {
 		// Expected thrown error
 	} else if err.is_query() {
 		assert!(err.message().contains("signin"));
@@ -299,9 +291,10 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 		.await
 		.unwrap_err();
 
-	// Check if the error message indicates a signup query failure
-	let err_str = err.to_string();
-	if err_str.contains("signup query failed") || err_str.contains("signup") {
+	// Check if the error indicates a signup query failure
+	if err.is_query()
+		&& (err.message().contains("signup query failed") || err.message().contains("signup"))
+	{
 		// Expected error
 	} else if err.is_query() {
 		assert_eq!(err.message(), "The record access signup query failed");

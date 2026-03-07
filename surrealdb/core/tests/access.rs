@@ -771,13 +771,8 @@ the database name matches", 			),
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
 					assert_ne!(res.unwrap(), Value::Array(Array::new()), "{}", msg);
 				} else {
-					let err = res.unwrap_err().to_string();
-					assert!(
-						err.contains("Not enough permissions to perform this action"),
-						"{}: {}",
-						msg,
-						err
-					)
+					let err = res.unwrap_err();
+					assert!(err.is_not_allowed(), "{}: expected NotAllowed, got {}", msg, err)
 				}
 			}
 		}

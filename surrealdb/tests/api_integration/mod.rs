@@ -450,16 +450,14 @@ mod mem {
 	async fn cant_sign_into_default_root_account() {
 		let db = Surreal::new::<Mem>(()).await.unwrap();
 
-		assert_eq!(
-			db.signin(Root {
+		let err = db
+			.signin(Root {
 				username: ROOT_USER.to_string(),
 				password: ROOT_PASS.to_string(),
 			})
 			.await
-			.unwrap_err()
-			.to_string(),
-			"There was a problem with authentication",
-		);
+			.unwrap_err();
+		assert!(err.is_not_allowed(), "expected auth (NotAllowed) error: {}", err);
 	}
 
 	#[test_log::test(tokio::test)]
@@ -472,13 +470,7 @@ mod mem {
 		db.use_ns("namespace").use_db("database").await.unwrap();
 		let res = db.create(Resource::from("item:foo")).await;
 		let err = res.unwrap_err();
-		let err_str = err.to_string();
-		if !err_str.contains("NotAllowed")
-			&& !err_str.contains("not allowed")
-			&& !err_str.contains("permission")
-		{
-			panic!("expected permissions error, got: {}", err_str);
-		}
+		assert!(err.is_not_allowed(), "expected permissions (NotAllowed) error, got: {}", err);
 	}
 
 	#[test_log::test(tokio::test)]

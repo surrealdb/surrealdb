@@ -105,10 +105,10 @@ pub async fn iam_run_case(
 			res
 		);
 
-		let err = res.unwrap_err().to_string();
+		let err = res.unwrap_err();
 		ensure!(
-			err.contains("Not enough permissions to perform this action"),
-			"Test statement failed with unexpected error: {}",
+			err.is_not_allowed(),
+			"Test statement failed with unexpected error (expected NotAllowed): {}",
 			err
 		);
 	}
@@ -499,6 +499,13 @@ impl Test {
 	/// Expects the next result to be an error with the specified error message.
 	pub fn expect_error(&mut self, error: &str) -> Result<&mut Self> {
 		self.expect_error_func(|e| e.to_string() == error)
+	}
+
+	#[track_caller]
+	#[allow(dead_code)]
+	/// Expects the next result to be a NotAllowed (e.g. permission) error.
+	pub fn expect_not_allowed(&mut self) -> Result<&mut Self> {
+		self.expect_error_func(|e| e.is_not_allowed())
 	}
 
 	#[track_caller]

@@ -1337,13 +1337,8 @@ mod tests {
 				if *should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
 				} else {
-					let err = res.unwrap_err().to_string();
-					assert!(
-						err.contains("Not enough permissions to perform this action"),
-						"{}: {}",
-						msg,
-						err
-					)
+					let err = res.unwrap_err();
+					assert!(err.is_not_allowed(), "{}: expected NotAllowed error, got {}", msg, err)
 				}
 			}
 		}
@@ -1355,9 +1350,9 @@ mod tests {
 			let res =
 				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;
 
-			let err = res.unwrap_err().to_string();
+			let err = res.unwrap_err();
 			assert!(
-				err.contains("Not enough permissions to perform this action"),
+				err.is_not_allowed(),
 				"anonymous user should not be able to set options: {}",
 				err
 			)
@@ -1400,9 +1395,11 @@ mod tests {
 			let stmt = "UPDATE test TIMEOUT 9460800000000000000s"; // 300 billion years
 			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
 			assert!(res.is_ok(), "Failed to execute statement with very large timeout: {:?}", res);
-			let err = res.unwrap()[0].result.as_ref().unwrap_err().to_string();
+			let results = res.unwrap();
+			let err = results[0].result.as_ref().unwrap_err();
 			assert!(
-				err.contains("Invalid timeout"),
+				err.is_validation()
+					|| (err.is_internal() && err.message().contains("Invalid timeout")),
 				"Expected to find invalid timeout error: {:?}",
 				err
 			);

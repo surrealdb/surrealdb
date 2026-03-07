@@ -6,6 +6,7 @@ use http::{HeaderName, HeaderValue, StatusCode};
 use serde::{Serialize, Serializer};
 use surrealdb_core::api::X_SURREAL_REQUEST_ID;
 use surrealdb_core::api::err::ApiError;
+use surrealdb_types::{AuthError, NotAllowedError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -156,43 +157,70 @@ impl IntoResponse for ResponseError {
 			}
 		}
 
-		// Handle errors based on their string representation
-		let error_str = self.0.to_string();
-
-		let error_str_lower = error_str.to_lowercase();
-
-		// Check for authentication errors
-		if error_str_lower.contains("authentication") || error_str_lower.contains("invalidauth") {
-			return ErrorMessage{
-				code: StatusCode::UNAUTHORIZED,
-				details: Some("Authentication failed".to_string()),
-				description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
-				information: Some("There was a problem with authentication".to_string())
-			}.into_response();
-		}
-
-		// Check for forbidden/not allowed errors
-		if error_str_lower.contains("notallowed")
-			|| error_str_lower.contains("not allowed")
-			|| error_str_lower.contains("forbidden")
-			|| error_str_lower.contains("not enough permissions")
-		{
+		// Handle structured SurrealDB types errors (from query execution, auth, etc.)
+		if let Some(e) = self.0.downcast_ref::<surrealdb_types::Error>() {
+			if e.is_not_allowed() {
+				// Auth-related NotAllowed -> 401; permission NotAllowed -> 403
+				let (code, details, description, information) =
+					match e.not_allowed_details() {
+						Some(NotAllowedError::Auth(AuthError::InvalidAuth))
+						| Some(NotAllowedError::Auth(AuthError::TokenExpired))
+						| Some(NotAllowedError::Auth(AuthError::SessionExpired))
+						| Some(NotAllowedError::Auth(AuthError::UnexpectedAuth))
+						| Some(NotAllowedError::Auth(AuthError::MissingUserOrPass))
+						| Some(NotAllowedError::Auth(AuthError::NoSigninTarget))
+						| Some(NotAllowedError::Auth(AuthError::InvalidPass))
+						| Some(NotAllowedError::Auth(AuthError::TokenMakingFailed))
+						| Some(NotAllowedError::Auth(AuthError::InvalidSignup)) => (
+							StatusCode::UNAUTHORIZED,
+							Some("Authentication failed".to_string()),
+							Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
+							Some("There was a problem with authentication".to_string()),
+						),
+						_ => (
+							StatusCode::FORBIDDEN,
+							Some("Forbidden".to_string()),
+							Some("Not allowed to do this.".to_string()),
+							Some(e.message().to_string()),
+						),
+					};
+				return ErrorMessage {
+					code,
+					details,
+					description,
+					information,
+				}
+				.into_response();
+			}
+			if e.is_not_found() {
+				return ErrorMessage {
+					code: StatusCode::NOT_FOUND,
+					details: Some("Not found".to_string()),
+					description: Some("The requested resource was not found.".to_string()),
+					information: Some(e.message().to_string()),
+				}
+				.into_response();
+			}
+			// Other structured errors (validation, query, etc.) fall through to default with
+			// message
 			return ErrorMessage {
-				code: StatusCode::FORBIDDEN,
-				details: Some("Forbidden".to_string()),
-				description: Some("Not allowed to do this.".to_string()),
-				information: Some(error_str),
+				code: StatusCode::BAD_REQUEST,
+				details: Some("Request problems dectected".to_string()),
+				description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
+				information: Some(e.message().to_string()),
 			}
 			.into_response();
 		}
 
-		// Default error response
+		// Fallback: handle opaque errors by string (e.g. from other crates)
+		let error_str = self.0.to_string();
 		ErrorMessage {
 			code: StatusCode::BAD_REQUEST,
 			details: Some("Request problems dectected".to_string()),
 			description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
 			information: Some(error_str),
-		}.into_response()
+		}
+		.into_response()
 	}
 }
 
