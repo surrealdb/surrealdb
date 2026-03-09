@@ -14,10 +14,11 @@ use std::time::Duration;
 
 #[allow(unused_imports)]
 use anyhow::bail;
-use anyhow::{Context as _, Result, ensure};
+use anyhow::{Context as _, Result, anyhow, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
+use rand::{Rng, thread_rng};
 use reblessive::TreeStack;
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
 #[cfg(not(target_family = "wasm"))]
@@ -25,6 +26,7 @@ use tokio::spawn;
 use tokio::sync::Notify;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
+use tokio::time::{Instant, sleep};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, trace, warn};
 use uuid::Uuid;
@@ -847,7 +849,7 @@ impl Datastore {
 	// Returns the current version and a flag indicating if this is a new datastore
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn check_version(&self) -> Result<(MajorVersion, bool)> {
-		let (version, is_new) = self.get_version().await?;
+		let (version, is_new) = Self::retry(Duration::from_mins(1), || self.get_version()).await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
 			bail!(Error::OutdatedStorageVersion {
@@ -916,6 +918,11 @@ impl Datastore {
 	/// Setup the initial cluster access credentials
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn initialise_credentials(&self, user: &str, pass: &str) -> Result<()> {
+		Self::retry(Duration::from_mins(1), || self.initialise_credentials_attempt(user, pass))
+			.await
+	}
+
+	async fn initialise_credentials_attempt(&self, user: &str, pass: &str) -> Result<()> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.enclose();
 		// Fetch the root users from the storage
@@ -1004,14 +1011,37 @@ impl Datastore {
 	/// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn bootstrap(&self) -> Result<()> {
+		let time_out = Duration::from_mins(1);
 		// Insert this node in the cluster
-		self.insert_node().await?;
+		Self::retry(time_out, || self.insert_node()).await?;
 		// Mark inactive nodes as archived
-		self.expire_nodes().await?;
+		Self::retry(time_out, || self.expire_nodes()).await?;
 		// Remove archived nodes
-		self.remove_nodes().await?;
+		Self::retry(time_out, || self.remove_nodes()).await?;
 		// Everything ok
 		Ok(())
+	}
+
+	async fn retry<F, Fut, R>(timeout: Duration, func: F) -> Result<R>
+	where
+		F: Fn() -> Fut,
+		Fut: Future<Output = Result<R>>,
+	{
+		let time = Instant::now();
+		let mut last_err = anyhow!(Error::TransactionTimedout(timeout.into()));
+		loop {
+			match func().await {
+				Ok(result) => return Ok(result),
+				Err(e) => {
+					if time.elapsed() > timeout {
+						bail!(last_err);
+					}
+					last_err = e;
+					let tempo = Duration::from_secs(thread_rng().gen_range(0..10));
+					sleep(tempo).await;
+				}
+			}
+		}
 	}
 
 	/// Inserts a node for the first time into the cluster.

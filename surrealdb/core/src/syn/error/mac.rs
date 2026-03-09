@@ -65,4 +65,5 @@ macro_rules! bail {
 	}};
 }
 
-pub(crate) use {bail, syntax_error};
+pub(crate) use bail;
+pub(crate) use syntax_error;
