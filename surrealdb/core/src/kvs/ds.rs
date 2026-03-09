@@ -1030,15 +1030,19 @@ impl Datastore {
 
 	/// Retries an async operation until it succeeds or `timeout` elapses.
 	///
-	/// On each failure a randomised delay (0–10 s) is applied before the next
-	/// attempt, adding jitter to reduce repeated collisions when multiple
-	/// instances start concurrently against the same storage backend.
+	/// Only [`TransactionConflict`](crate::kvs::Error::TransactionConflict)
+	/// errors are retried; any other error is returned immediately to the
+	/// caller. On each retryable failure a randomised delay (0–10 s) is
+	/// applied before the next attempt, adding jitter to reduce repeated
+	/// collisions when multiple instances start concurrently against the
+	/// same storage backend.
 	///
 	/// The timeout is checked only after a *failed* attempt; a successful
 	/// result is always returned immediately, even if the elapsed time
 	/// exceeds the budget. This means the total wall-clock time can exceed
 	/// `timeout` by up to one attempt duration plus the preceding back-off.
-	/// If no attempt succeeds within the budget, the last error is returned.
+	/// If no attempt succeeds within the budget, the conflict error from
+	/// the last failed attempt is surfaced.
 	async fn retry<F, Fut, R>(timeout: Duration, func: F) -> Result<R>
 	where
 		F: Fn() -> Fut,
@@ -1050,14 +1054,15 @@ impl Datastore {
 				Ok(result) => return Ok(result),
 				Err(e) => {
 					if let Some(crate::kvs::Error::TransactionConflict(_)) = e.downcast_ref() {
+						if time.elapsed() > timeout {
+							bail!(e);
+						}
+						// Randomised back-off to stagger retries across competing instances
+						let tempo = Duration::from_secs(thread_rng().gen_range(0..10));
+						sleep(tempo).await;
+					} else {
 						return Err(e);
 					}
-					if time.elapsed() > timeout {
-						bail!(e);
-					}
-					// Randomised back-off to stagger retries across competing instances
-					let tempo = Duration::from_secs(thread_rng().gen_range(0..10));
-					sleep(tempo).await;
 				}
 			}
 		}
