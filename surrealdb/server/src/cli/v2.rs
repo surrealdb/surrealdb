@@ -1,9 +1,7 @@
-use std::{
-	io::Write,
-	path::{Path, PathBuf},
-	process::Stdio,
-	time::Duration,
-};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 use bytes::Bytes;
@@ -11,10 +9,8 @@ use clap::Args;
 use futures::{Stream, TryStreamExt};
 use rand::distributions::DistString;
 use semver::Version;
-use tokio::{
-	fs::File,
-	io::{AsyncBufReadExt, BufReader},
-};
+use tokio::fs::File;
+use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::cli::upgrade::file_platform_suffix;
 
