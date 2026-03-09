@@ -107,6 +107,7 @@ tower-service = "0.3.3"
 tracing-appender = "0.2.4"
 tracing-opentelemetry = "0.32.1"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
+dirs = "6.0.0"
 
 # Other crates
 async-graphql = { workspace = true, default-features = false, optional = true }
@@ -129,7 +130,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "signal", "tracing"] }
+tokio = { workspace = true, features = ["macros", "signal", "tracing","process"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["io"] }
 tracing.workspace = true

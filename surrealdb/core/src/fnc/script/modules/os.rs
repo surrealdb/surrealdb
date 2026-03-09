@@ -4,12 +4,12 @@ use js::module::{Declarations, Exports, ModuleDef};
 /// Get the target system architecture
 #[js::function]
 pub fn arch() -> &'static str {
-	crate::env::arch()
+	std::env::consts::ARCH
 }
 /// Get the target operating system
 #[js::function]
 pub fn platform() -> &'static str {
-	crate::env::os()
+	std::env::consts::OS
 }
 
 pub struct Package;
