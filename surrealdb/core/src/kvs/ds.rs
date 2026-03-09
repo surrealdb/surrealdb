@@ -849,6 +849,7 @@ impl Datastore {
 	// Returns the current version and a flag indicating if this is a new datastore
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn check_version(&self) -> Result<(MajorVersion, bool)> {
+		// Retry because concurrent instances may conflict when writing the version key
 		let (version, is_new) = Self::retry(Duration::from_mins(1), || self.get_version()).await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
@@ -918,10 +919,13 @@ impl Datastore {
 	/// Setup the initial cluster access credentials
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn initialise_credentials(&self, user: &str, pass: &str) -> Result<()> {
+		// Retry because concurrent instances may conflict when creating the root user
 		Self::retry(Duration::from_mins(1), || self.initialise_credentials_attempt(user, pass))
 			.await
 	}
 
+	/// Single attempt to create the root user if none exists.
+	/// Separated from `initialise_credentials` so it can be wrapped in the retry loop.
 	async fn initialise_credentials_attempt(&self, user: &str, pass: &str) -> Result<()> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.enclose();
@@ -1011,6 +1015,8 @@ impl Datastore {
 	/// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn bootstrap(&self) -> Result<()> {
+		// Each bootstrap step is retried independently, because concurrent instances
+		// writing to the same cluster metadata keys may cause transaction conflicts.
 		let time_out = Duration::from_mins(1);
 		// Insert this node in the cluster
 		Self::retry(time_out, || self.insert_node()).await?;
@@ -1022,12 +1028,19 @@ impl Datastore {
 		Ok(())
 	}
 
+	/// Retries an async operation until it succeeds or `timeout` elapses.
+	///
+	/// On each failure a randomised delay (0–10 s) is applied before the next
+	/// attempt, adding jitter to reduce repeated collisions when multiple
+	/// instances start concurrently against the same storage backend.
+	/// If the timeout expires, the last error encountered is returned.
 	async fn retry<F, Fut, R>(timeout: Duration, func: F) -> Result<R>
 	where
 		F: Fn() -> Fut,
 		Fut: Future<Output = Result<R>>,
 	{
 		let time = Instant::now();
+		// Default error in case the very first attempt exceeds the timeout
 		let mut last_err = anyhow!(Error::TransactionTimedout(timeout.into()));
 		loop {
 			match func().await {
@@ -1037,6 +1050,7 @@ impl Datastore {
 						bail!(last_err);
 					}
 					last_err = e;
+					// Randomised back-off to stagger retries across competing instances
 					let tempo = Duration::from_secs(thread_rng().gen_range(0..10));
 					sleep(tempo).await;
 				}
