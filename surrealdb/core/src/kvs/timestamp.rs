@@ -269,7 +269,7 @@ impl TimeStamp for HlcTimeStamp {
 	}
 
 	fn encode<'a>(&self, bytes: &'a mut [u8; MAX_TIMESTAMP_BYTES]) -> &'a [u8] {
-		let ts_bytes = dbg!(self.0.to_be_bytes());
+		let ts_bytes = self.0.to_be_bytes();
 		bytes[..8].copy_from_slice(&ts_bytes);
 		&bytes[..8]
 	}
