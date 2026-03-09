@@ -1033,7 +1033,12 @@ impl Datastore {
 	/// On each failure a randomised delay (0–10 s) is applied before the next
 	/// attempt, adding jitter to reduce repeated collisions when multiple
 	/// instances start concurrently against the same storage backend.
-	/// If the timeout expires, the last error encountered is returned.
+	///
+	/// The timeout is checked only after a *failed* attempt; a successful
+	/// result is always returned immediately, even if the elapsed time
+	/// exceeds the budget. This means the total wall-clock time can exceed
+	/// `timeout` by up to one attempt duration plus the preceding back-off.
+	/// If no attempt succeeds within the budget, the last error is returned.
 	async fn retry<F, Fut, R>(timeout: Duration, func: F) -> Result<R>
 	where
 		F: Fn() -> Fut,
