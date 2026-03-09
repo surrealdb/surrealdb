@@ -920,7 +920,7 @@ impl Datastore {
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn initialise_credentials(&self, user: &str, pass: &str) -> Result<()> {
 		// Retry because concurrent instances may conflict when creating the root user
-		Self::retry(Duration::from_mins(1), || self.initialise_credentials_attempt(user, pass))
+		Self::retry(Duration::from_secs(60), || self.initialise_credentials_attempt(user, pass))
 			.await
 	}
 
