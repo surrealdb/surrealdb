@@ -672,37 +672,46 @@ impl FullTextIndex {
 
 	/// Computes document length and count statistics for the index
 	///
-	/// This method calculates the total document length and count by reading
-	/// the compacted (root) key and then aggregating any uncompacted deltas.
-	/// If compact_log is provided, it will also remove the delta logs and set
-	/// the flag to true if any logs were removed.
+	/// This method calculates the total document length and count by scanning
+	/// both the compacted root key and any uncompacted delta entries in a
+	/// single range query (via `new_dc_range_with_root`). If `compact_log` is
+	/// provided, it will also remove the delta logs (but not the root key)
+	/// and set the flag to true if any delta logs were removed.
 	async fn compute_doc_length_and_count(
 		&self,
 		tx: &Transaction,
 		compact_log: Option<&mut bool>,
 	) -> Result<DocLengthAndCount> {
 		let mut dlc = DocLengthAndCount::default();
-		// Read the compacted (root) key -- this holds the aggregated stats
-		// from previous compaction cycles. The key sits lexicographically
-		// before the delta range, so getr() on the range alone never sees it.
-		let compacted_key = self.ikb.new_dc_compacted()?;
-		if let Some(v) = tx.get(&compacted_key, None).await? {
-			dlc = revision::from_slice(&v)?;
-		}
-		// Aggregate any uncompacted deltas written since the last compaction.
-		let (beg, end) = self.ikb.new_dc_range()?;
+		let (beg, end) = self.ikb.new_dc_range_with_root()?;
 		let range = beg..end;
+		// Compute the total number of documents (DocCount) and the total number of
+		// terms (DocLength) This key list is supposed to be small, subject to
+		// compaction. The root key is the compacted values, and the others are deltas
+		// from transaction not yet compacted.
+		let root_key = if compact_log.is_some() {
+			Some(self.ikb.new_dc_compacted()?)
+		} else {
+			None
+		};
 		let mut has_log = false;
-		for (_, v) in tx.getr(range.clone(), None).await? {
+		for (k, v) in tx.getr(range.clone(), None).await? {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
 			dlc.doc_count += st.doc_count;
 			dlc.total_docs_length += st.total_docs_length;
-			has_log = true;
+
+			if !has_log
+				&& let Some(r) = &root_key
+				&& k.ne(r)
+			{
+				has_log = true;
+			}
 		}
 		if let Some(compact_log) = compact_log
 			&& has_log
 		{
-			tx.delr(range).await?;
+			let (beg, end) = self.ikb.new_dc_range()?;
+			tx.delr(beg..end).await?;
 			*compact_log = true;
 		}
 		Ok(dlc)
@@ -1201,15 +1210,19 @@ mod tests {
 		assert_eq!(tx.count(beg..end, None).await.unwrap(), 0);
 		let (beg, end) = test.ikb.new_dc_range().unwrap();
 		assert_eq!(tx.count(beg..end, None).await.unwrap(), 0);
+		let (beg, end) = test.ikb.new_dc_range_with_root().unwrap();
+		assert_eq!(tx.count(beg..end, None).await.unwrap(), 1);
 	}
 
 	/// Regression test: BM25 scores must remain non-zero after compaction.
 	///
-	/// Before the fix, `compute_doc_length_and_count()` only read from the
-	/// dc delta range. Compaction deletes those deltas and writes the
-	/// aggregated stats to a compacted (root) key that sits outside the range,
-	/// so the scorer would get doc_count=0 / total_docs_length=0, producing
-	/// NaN → 0.0 scores.
+	/// Before the fix, `compute_doc_length_and_count()` only scanned the dc
+	/// delta range (via `new_dc_range`), which excludes the root/compacted
+	/// key. Compaction deletes those deltas and writes the aggregated stats
+	/// to the root key. Since the root key was not included in the scan, the
+	/// scorer would get doc_count=0 / total_docs_length=0, producing
+	/// NaN → 0.0 scores. The fix uses `new_dc_range_with_root` to include
+	/// the root key in the scan.
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn bm25_score_survives_compaction() {
 		let test = TestContext::new().await;
