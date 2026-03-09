@@ -1045,16 +1045,13 @@ impl Datastore {
 		Fut: Future<Output = Result<R>>,
 	{
 		let time = Instant::now();
-		// Default error in case the very first attempt exceeds the timeout
-		let mut last_err = anyhow!(Error::TransactionTimedout(timeout.into()));
 		loop {
 			match func().await {
 				Ok(result) => return Ok(result),
 				Err(e) => {
 					if time.elapsed() > timeout {
-						bail!(last_err);
+						bail!(e);
 					}
-					last_err = e;
 					// Randomised back-off to stagger retries across competing instances
 					let tempo = Duration::from_secs(thread_rng().gen_range(0..10));
 					sleep(tempo).await;
