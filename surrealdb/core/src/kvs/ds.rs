@@ -850,7 +850,7 @@ impl Datastore {
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn check_version(&self) -> Result<(MajorVersion, bool)> {
 		// Retry because concurrent instances may conflict when writing the version key
-		let (version, is_new) = Self::retry(Duration::from_mins(1), || self.get_version()).await?;
+		let (version, is_new) = Self::retry(Duration::from_secs(60), || self.get_version()).await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
 			bail!(Error::OutdatedStorageVersion {
