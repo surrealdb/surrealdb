@@ -14,7 +14,7 @@ use std::time::Duration;
 
 #[allow(unused_imports)]
 use anyhow::bail;
-use anyhow::{Context as _, Result, anyhow, ensure};
+use anyhow::{Context as _, Result, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
@@ -1049,6 +1049,9 @@ impl Datastore {
 			match func().await {
 				Ok(result) => return Ok(result),
 				Err(e) => {
+					if let Some(crate::kvs::Error::TransactionConflict(_)) = e.downcast_ref() {
+						return Err(e);
+					}
 					if time.elapsed() > timeout {
 						bail!(e);
 					}
