@@ -190,7 +190,7 @@ enum Commands {
 	Validate(ValidateCommandArguments),
 	#[command(about = "Fix database storage issues")]
 	Fix(FixCommandArguments),
-	#[command(about = "Run commands in version 2 of the database")]
+	#[command(about = "Run commands in version 2 of the database for backwards compatibility")]
 	V2(V2Commands),
 }
 
