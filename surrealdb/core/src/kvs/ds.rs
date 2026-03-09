@@ -1017,7 +1017,7 @@ impl Datastore {
 	pub async fn bootstrap(&self) -> Result<()> {
 		// Each bootstrap step is retried independently, because concurrent instances
 		// writing to the same cluster metadata keys may cause transaction conflicts.
-		let time_out = Duration::from_mins(1);
+		let time_out = Duration::from_secs(60);
 		// Insert this node in the cluster
 		Self::retry(time_out, || self.insert_node()).await?;
 		// Mark inactive nodes as archived
