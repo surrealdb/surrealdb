@@ -124,12 +124,16 @@ impl<'a> Dc<'a> {
 		DcPrefix::new(ns, db, tb, ix).encode_key()
 	}
 
-	/// Creates a key range for querying document count and length statistics
+	/// Creates a key range for querying only the delta (non-root) document
+	/// count and length entries.
 	///
-	/// This method generates a key range that can be used to query all document
-	/// count and length statistics for a specific index. It's used for
-	/// operations like compaction, scoring calculations, and index
-	/// maintenance.
+	/// The range starts at `prefix + [0; 40]`, which sits lexicographically
+	/// after the root/compacted key (the bare prefix). This means the root
+	/// key is **excluded**. Use [`range_with_root`] when you need to include
+	/// the compacted root key as well.
+	///
+	/// This range is used during compaction to delete consumed delta logs
+	/// without affecting the root key.
 	///
 	/// # Arguments
 	/// * `ns` - Namespace identifier
@@ -138,7 +142,7 @@ impl<'a> Dc<'a> {
 	/// * `ix` - Index identifier
 	///
 	/// # Returns
-	/// A tuple of (start, end) keys that define the range for database queries
+	/// A tuple of (start, end) keys that define the delta-only range
 	pub(crate) fn range(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -148,6 +152,35 @@ impl<'a> Dc<'a> {
 		let prefix = DcPrefix::new(ns, db, tb, ix);
 		let mut beg = prefix.encode_key()?;
 		beg.extend([0; 40]);
+		let mut end = prefix.encode_key()?;
+		end.extend([255; 40]);
+		Ok((beg, end))
+	}
+
+	/// Creates a key range that includes the root/compacted key **and** all
+	/// delta entries.
+	///
+	/// Unlike [`range`], the range starts at the bare prefix (no zero-byte
+	/// padding), so the compacted root key is included in the scan. This is
+	/// used by [`FullTextIndex::compute_doc_length_and_count`] to aggregate
+	/// both compacted and uncompacted statistics in a single pass.
+	///
+	/// # Arguments
+	/// * `ns` - Namespace identifier
+	/// * `db` - Database identifier
+	/// * `tb` - Table identifier
+	/// * `ix` - Index identifier
+	///
+	/// # Returns
+	/// A tuple of (start, end) keys covering the root key and all deltas
+	pub(crate) fn range_with_root(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a TableName,
+		ix: IndexId,
+	) -> Result<(Vec<u8>, Vec<u8>)> {
+		let prefix = DcPrefix::new(ns, db, tb, ix);
+		let beg = prefix.encode_key()?;
 		let mut end = prefix.encode_key()?;
 		end.extend([255; 40]);
 		Ok((beg, end))
@@ -225,6 +258,18 @@ mod tests {
 		let tb = TableName::from("testtb");
 		let (beg, end) = Dc::range(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
 		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
+		assert_eq!(
+			end,
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+		);
+	}
+
+	#[test]
+	fn range_with_root() {
+		let tb = TableName::from("testtb");
+		let (beg, end) =
+			Dc::range_with_root(NamespaceId(1), DatabaseId(2), &tb, IndexId(3)).unwrap();
+		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc");
 		assert_eq!(
 			end,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
