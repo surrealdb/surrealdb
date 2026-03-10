@@ -34,7 +34,7 @@ pub async fn update_modified_time(file: &Path) -> Result<()> {
 
 pub async fn get_existing_version(file: &Path) -> Option<Version> {
 	let res = tokio::time::timeout(Duration::from_secs(1), async {
-		tokio::process::Command::new(file).arg("version").output().await
+		tokio::process::Command::new(file).arg("version").kill_on_drop(true).output().await
 	})
 	.await;
 
@@ -97,7 +97,7 @@ where
 }
 
 #[cfg(not(target_family = "unix"))]
-async fn make_exectuble(f: &mut File) -> Result<()> {
+async fn make_executable(f: &mut File) -> Result<()> {
 	Ok(())
 }
 
@@ -165,6 +165,7 @@ pub async fn download_v2(
 			.arg("-zxf")
 			.arg(&temp_path)
 			.arg("-O")
+			.arg("surreal")
 			.stdout(Stdio::piped())
 			.spawn()
 			.context("Could not run `tar` to extract downloaded file")?;
@@ -191,6 +192,18 @@ pub async fn download_v2(
 	}
 }
 
+pub async fn move_binary(from: &Path, to: &Path) -> std::io::Result<()> {
+	match tokio::fs::rename(from, to).await {
+		Ok(_) => return Ok(()),
+		Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
+			tokio::fs::copy(from, to).await?;
+			let _ = tokio::fs::remove_file(from).await;
+			Ok(())
+		}
+		Err(e) => Err(e),
+	}
+}
+
 pub async fn ensure_binary_present(has_permission: bool) -> Result<PathBuf> {
 	let dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("surrealdb");
 	let file = dir.join("surreal_v2");
@@ -211,9 +224,9 @@ pub async fn ensure_binary_present(has_permission: bool) -> Result<PathBuf> {
 					tokio::fs::remove_file(&file)
 						.await
 						.context("Cannot access cached surrealdb v2 binary")?;
-					tokio::fs::rename(tmp_path, &file)
+					move_binary(&tmp_path, &file)
 						.await
-						.context("Could not rename downloaded binary")?;
+						.context("Could not move downloaded file to cache directory")?;
 				}
 				return Ok(file);
 			} else {
@@ -261,6 +274,8 @@ pub async fn init(args: V2Commands) -> Result<()> {
 		.spawn()
 		.context("Could not run 2.0 surrealdb binary file")?;
 
-	child.wait().await?;
+	let res = child.wait().await?;
+	let err = res.code().unwrap_or(-1);
+	ensure!(res.success(), "Surrealdb v2 process failed with statuscode: {err}");
 	Ok(())
 }

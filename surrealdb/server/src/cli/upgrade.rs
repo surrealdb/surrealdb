@@ -136,8 +136,8 @@ pub async fn init(args: UpgradeCommandArguments) -> Result<()> {
 
 	println!(
 		"current version is {old_version} for {} on {}",
+		std::env::consts::OS,
 		std::env::consts::ARCH,
-		std::env::consts::OS
 	);
 
 	let suffix = file_platform_suffix()?;
@@ -145,7 +145,7 @@ pub async fn init(args: UpgradeCommandArguments) -> Result<()> {
 	println!(
 		"downloading {new_version} for {} on {}",
 		std::env::consts::OS,
-		std::env::consts::ARCH
+		std::env::consts::ARCH,
 	);
 
 	let download_filename = format!("surreal-{new_version}.{suffix}");
