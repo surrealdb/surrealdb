@@ -49,6 +49,7 @@ enum SocketMsg {
 		method: String,
 		args: serde_json::Value,
 		session_id: Option<String>,
+		txn_id: Option<String>,
 		channel: oneshot::Sender<serde_json::Value>,
 	},
 	Send {
@@ -201,38 +202,20 @@ impl Socket {
 		format: Format,
 		method: &str,
 		args: serde_json::Value,
+		session_id: Option<&str>,
+		txn_id: Option<&str>,
 	) -> Result<()> {
-		let msg = json!({
-			"id": id,
-			"method": method,
-			"params": args,
-		});
-
-		let msg = Self::to_msg(format, &msg)?;
-
-		match tokio::time::timeout(Duration::from_millis(500), stream.send(msg)).await {
-			Ok(Ok(_)) => Ok(()),
-			Ok(Err(e)) => Err(format!("error sending message: {e}").into()),
-			Err(_) => Err("sending message timed-out".to_string().into()),
+		let mut msg = serde_json::Map::new();
+		msg.insert("id".to_string(), json!(id));
+		msg.insert("method".to_string(), json!(method));
+		msg.insert("params".to_string(), args);
+		if let Some(sid) = session_id {
+			msg.insert("session".to_string(), json!(sid));
 		}
-	}
-
-	async fn send_msg_with_session(
-		stream: &mut WsStream,
-		id: u64,
-		format: Format,
-		method: &str,
-		args: serde_json::Value,
-		session_id: &str,
-	) -> Result<()> {
-		let msg = json!({
-			"id": id,
-			"method": method,
-			"params": args,
-			"session": session_id,
-		});
-
-		let msg = Self::to_msg(format, &msg)?;
+		if let Some(tid) = txn_id {
+			msg.insert("txn".to_string(), json!(tid));
+		}
+		let msg = Self::to_msg(format, &serde_json::Value::Object(msg))?;
 
 		match tokio::time::timeout(Duration::from_millis(500), stream.send(msg)).await {
 			Ok(Ok(_)) => Ok(()),
@@ -258,24 +241,34 @@ impl Socket {
 						return Ok(());
 					};
 					match msg{
-						SocketMsg::SendAwait { method, args, session_id, channel } => {
+						SocketMsg::SendAwait { method, args, session_id, txn_id, channel } => {
 							let id = next_id;
 							next_id += 1;
 							awaiting.insert(id,channel);
-							if let Some(session_id) = session_id {
-								Self::send_msg_with_session(&mut stream,id,format,&method, args, &session_id).await?;
-							} else {
-								Self::send_msg(&mut stream,id,format,&method, args).await?;
-							}
+							Self::send_msg(
+								&mut stream,
+								id,
+								format,
+								&method,
+								args,
+								session_id.as_deref(),
+								txn_id.as_deref(),
+							)
+							.await?;
 						},
 						SocketMsg::Send { method, args, session_id } => {
 							let id = next_id;
 							next_id += 1;
-							if let Some(session_id) = session_id {
-								Self::send_msg_with_session(&mut stream,id,format,&method, args, &session_id).await?;
-							} else {
-								Self::send_msg(&mut stream,id,format,&method, args).await?;
-							}
+							Self::send_msg(
+								&mut stream,
+								id,
+								format,
+								&method,
+								args,
+								session_id.as_deref(),
+								None,
+							)
+							.await?;
 						},
 						SocketMsg::Close{ channel } => {
 							stream.close(None).await?;
@@ -311,7 +304,17 @@ impl Socket {
 		method: &str,
 		params: serde_json::Value,
 	) -> Result<serde_json::Value> {
-		tracing::info!("Sending request: {method} {params:?}");
+		self.send_request_with_txn(method, params, None).await
+	}
+
+	/// Send a request with an optional transaction ID (for use with the `query` method).
+	pub async fn send_request_with_txn(
+		&self,
+		method: &str,
+		params: serde_json::Value,
+		txn_id: Option<&str>,
+	) -> Result<serde_json::Value> {
+		tracing::info!("Sending request: {method} {params:?} txn={txn_id:?}");
 		let (send, recv) = oneshot::channel();
 		if (self
 			.sender
@@ -319,6 +322,7 @@ impl Socket {
 				method: method.to_string(),
 				args: params,
 				session_id: None,
+				txn_id: txn_id.map(String::from),
 				channel: send,
 			})
 			.await)
@@ -349,6 +353,7 @@ impl Socket {
 				method: method.to_string(),
 				args: params,
 				session_id: Some(session_id.to_string()),
+				txn_id: None,
 				channel: send,
 			})
 			.await)

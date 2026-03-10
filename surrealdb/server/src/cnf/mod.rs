@@ -134,6 +134,16 @@ pub static WEBSOCKET_RESPONSE_BUFFER_SIZE: LazyLock<usize> =
 pub static WEBSOCKET_RESPONSE_FLUSH_PERIOD: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_FLUSH_PERIOD", u64, 3);
 
+/// Maximum number of open transactions per WebSocket connection on the default
+/// session (default: 32)
+pub static MAX_TRANSACTIONS_PER_CONNECTION: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_TRANSACTIONS_PER_CONNECTION", usize, 32);
+
+/// Maximum number of open transactions per session within a WebSocket
+/// connection (default: 32)
+pub static MAX_TRANSACTIONS_PER_SESSION: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_TRANSACTIONS_PER_SESSION", usize, 32);
+
 /// The number of runtime worker threads to start (default: the number of CPU
 /// cores, minimum 4)
 pub static RUNTIME_WORKER_THREADS: LazyLock<usize> =
