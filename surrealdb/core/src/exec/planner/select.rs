@@ -438,6 +438,18 @@ impl<'ctx> Planner<'ctx> {
 							if let Some(alias) = &selector.alias {
 								let output_name = idiom_to_field_name(alias);
 
+								// Dotted aliases (e.g. `AS status.events`) require
+								// nested object construction, which SelectProject
+								// doesn't support. Fall back to the full Project
+								// operator which handles this via
+								// parse_output_path + set_field_on_object.
+								if output_name.contains('.')
+									&& !output_name.contains(['[', '(', ' '])
+								{
+									needs_fallback = true;
+									break;
+								}
+
 								if let Some(field_name) = physical.try_simple_field() {
 									// Simple aliased field: rename
 									if field_name == output_name {
