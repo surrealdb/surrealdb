@@ -7,7 +7,6 @@ use std::process::Command;
 use anyhow::{Context as _, Result, bail, ensure};
 use clap::Args;
 use semver::{Comparator, Op, Version};
-use surrealdb_core::env::{arch, os};
 
 use crate::cli::version_client;
 use crate::cli::version_client::VersionClient;
@@ -85,6 +84,26 @@ pub(crate) fn parse_version(input: &str) -> Result<Version> {
 	}
 }
 
+pub fn file_platform_suffix() -> Result<String> {
+	let download_arch = match std::env::consts::ARCH {
+		"aarch64" => "arm64",
+		"x86_64" => "amd64",
+		arch => {
+			bail!("Unsupported architecture '{arch}'")
+		}
+	};
+
+	let (download_os, download_ext) = match std::env::consts::OS {
+		"linux" => ("linux", "tgz"),
+		"macos" => ("darwin", "tgz"),
+		"windows" => ("windows", "exe"),
+		os => {
+			bail!("Unsupported operating system '{os}'")
+		}
+	};
+	Ok(format!("{download_os}-{download_arch}.{download_ext}"))
+}
+
 pub async fn init(args: UpgradeCommandArguments) -> Result<()> {
 	// Upgrading overwrites the existing executable
 	let exe = std::env::current_exe()?;
@@ -115,32 +134,21 @@ pub async fn init(args: UpgradeCommandArguments) -> Result<()> {
 		}
 	}
 
-	let arch = arch();
-	let os = os();
+	println!(
+		"current version is {old_version} for {} on {}",
+		std::env::consts::OS,
+		std::env::consts::ARCH,
+	);
 
-	println!("current version is {old_version} for {os} on {arch}",);
+	let suffix = file_platform_suffix()?;
 
-	let download_arch = match arch {
-		"aarch64" => "arm64",
-		"x86_64" => "amd64",
-		_ => {
-			bail!("Unsupported architecture '{arch}'")
-		}
-	};
+	println!(
+		"downloading {new_version} for {} on {}",
+		std::env::consts::OS,
+		std::env::consts::ARCH,
+	);
 
-	let (download_os, download_ext) = match os {
-		"linux" => ("linux", "tgz"),
-		"macos" => ("darwin", "tgz"),
-		"windows" => ("windows", "exe"),
-		_ => {
-			bail!("Unsupported operating system '{os}'")
-		}
-	};
-
-	println!("downloading {new_version} for {download_os} on {download_arch}");
-
-	let download_filename =
-		format!("surreal-{new_version}.{download_os}-{download_arch}.{download_ext}");
+	let download_filename = format!("surreal-{new_version}.{suffix}");
 	let url = format!("{ROOT}/{new_version}/{download_filename}");
 
 	let response = reqwest::get(&url).await?;
@@ -164,7 +172,7 @@ pub async fn init(args: UpgradeCommandArguments) -> Result<()> {
 	fs::set_permissions(&tmp_path, permissions)?;
 
 	// Unarchive
-	if download_ext == "tgz" {
+	if suffix.ends_with("tgz") {
 		let output = Command::new("tar")
 			.arg("-zxf")
 			.arg(&tmp_path)

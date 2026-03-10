@@ -1643,7 +1643,13 @@ impl<'ctx> Planner<'ctx> {
 						};
 						// Push limit to IndexScan when the index ordering
 						// covers the ORDER BY (or there is no ORDER BY).
+						// IMPORTANT: Only push limit when the filter is fully
+						// consumed by the index. When there's a residual
+						// filter above the scan, pushing LIMIT causes the
+						// scan to return fewer rows than needed because the
+						// post-filter may remove some of them.
 						let push = scan_limit.is_some()
+							&& matches!(filter_action, FilterAction::FullyConsumed)
 							&& match order {
 								None => true,
 								Some(ord) => {
