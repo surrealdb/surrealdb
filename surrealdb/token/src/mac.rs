@@ -235,6 +235,9 @@ macro_rules! T {
 	(COMPLEXITY) => {
 		$crate::BaseTokenKind::KwComplexity
 	};
+	(COMPACT) => {
+		$crate::BaseTokenKind::KwCompact
+	};
 	(COMPUTED) => {
 		$crate::BaseTokenKind::KwComputed
 	};
@@ -550,6 +553,9 @@ macro_rules! T {
 	(POSTINGS_ORDER) => {
 		$crate::BaseTokenKind::KwPostingsOrder
 	};
+	(PREPARE) => {
+		$crate::BaseTokenKind::KwPrepare
+	};
 	(PUNCT) => {
 		$crate::BaseTokenKind::KwPunct
 	};
@@ -658,6 +664,9 @@ macro_rules! T {
 	(STRUCTURE) => {
 		$crate::BaseTokenKind::KwStructure
 	};
+	(SYSTEM) => {
+		$crate::BaseTokenKind::KwSystem
+	};
 	(TABLE) => {
 		$crate::BaseTokenKind::KwTable
 	};
@@ -693,6 +702,9 @@ macro_rules! T {
 	};
 	(TRANSACTION) => {
 		$crate::BaseTokenKind::KwTransaction
+	};
+	(QUERY_TIMEOUT) => {
+		$crate::BaseTokenKind::KwQueryTimeout
 	};
 	(true) => {
 		$crate::BaseTokenKind::KwTrue

@@ -170,7 +170,7 @@ fn render_element(buf: &mut CharBuffer, elem: &Snippet, line_color: Color) {
 			buf.writer().color(underline_color).push_str(underline_char).push_str("... ");
 		}
 		if let Some(x) = ann.label.as_ref() {
-			buf.writer().push_str(x);
+			buf.writer().style(Styling::Italic).push_str(x);
 		}
 		buf.writer().push_str("\n");
 

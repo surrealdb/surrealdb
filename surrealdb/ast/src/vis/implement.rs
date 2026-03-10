@@ -11,7 +11,25 @@ use super::AstFormatter;
 use crate::mac::impl_vis_debug;
 use crate::types::{Ast, NodeLibrary};
 use crate::vis::AstVis;
-use crate::{Base, BinaryOperator, DateTime, Integer, NodeId, NodeListId, Sign, Spanned};
+use crate::{
+	AlterKind, Base, BinaryOperator, DateTime, Integer, NodeId, NodeListId, Sign, Spanned,
+};
+
+impl<N, L> AstVis<L> for AlterKind<N>
+where
+	N: AstVis<L>,
+	L: NodeLibrary,
+{
+	fn fmt<W>(&self, ast: &Ast<L>, fmt: &mut AstFormatter<W>) -> fmt::Result
+	where
+		W: fmt::Write,
+	{
+		fmt.fmt_enum(ast, "AlterKind", |ast, fmt| match self {
+			AlterKind::Drop(_) => fmt.unit_variant("Drop"),
+			AlterKind::Set(s) => fmt.variant(ast, "Set", |ast, fmt| fmt.tuple(ast, s)?.finish()),
+		})
+	}
+}
 
 impl<N, L> AstVis<L> for NodeId<N>
 where

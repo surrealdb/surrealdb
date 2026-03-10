@@ -15,7 +15,7 @@ categories.workspace = true
 [dependencies]
 common.workspace = true
 
-chrono = { workspace = true, default-features = false }
+chrono.workspace = true
 rust_decimal.workspace = true
 uuid.workspace = true
 

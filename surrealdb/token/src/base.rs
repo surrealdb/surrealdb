@@ -223,6 +223,8 @@ pub enum BaseTokenKind {
 	KwComment,
 	#[regex(r"(?i)COMMIT")]
 	KwCommit,
+	#[regex(r"(?i)COMPACT")]
+	KwCompact,
 	#[regex(r"(?i)COMPLEXITY")]
 	KwComplexity,
 	#[regex(r"(?i)COMPUTED")]
@@ -444,6 +446,8 @@ pub enum BaseTokenKind {
 	KwPostingsCache,
 	#[regex(r"(?i)POSTINGS_ORDER")]
 	KwPostingsOrder,
+	#[regex(r"(?i)PREPARE")]
+	KwPrepare,
 	#[regex(r"(?i)PUNCT")]
 	KwPunct,
 	#[regex(r"(?i)PURGE")]
@@ -519,6 +523,8 @@ pub enum BaseTokenKind {
 	KwStrict,
 	#[regex(r"(?i)STRUCTURE")]
 	KwStructure,
+	#[regex(r"(?i)SYSTEM")]
+	KwSystem,
 	#[regex(r"(?i)TABLE")]
 	#[regex(r"(?i)TB")]
 	KwTable,
@@ -544,6 +550,10 @@ pub enum BaseTokenKind {
 	KwToken,
 	#[regex(r"(?i)TRANSACTION")]
 	KwTransaction,
+
+	#[regex(r"(?i)QUERY_TIMEOUT")]
+	KwQueryTimeout,
+
 	#[regex(r"(?i)true")]
 	KwTrue,
 	#[regex(r"(?i)TYPE")]
@@ -882,6 +892,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwClass => "keyword `CLASS`",
 			BaseTokenKind::KwComment => "keyword `COMMENT`",
 			BaseTokenKind::KwCommit => "keyword `COMMIT`",
+			BaseTokenKind::KwCompact => "keyword `COMPACT`",
 			BaseTokenKind::KwComplexity => "keyword `COMPLEXITY`",
 			BaseTokenKind::KwComputed => "keyword `COMPUTED`",
 			BaseTokenKind::KwConcurrently => "keyword `CONCURRENTLY`",
@@ -989,6 +1000,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwPermissions => "keyword `PERMISSIONS`",
 			BaseTokenKind::KwPostingsCache => "keyword `POSTINGSCACHE`",
 			BaseTokenKind::KwPostingsOrder => "keyword `POSTINGSORDER`",
+			BaseTokenKind::KwPrepare => "keyword `PREPARE`",
 			BaseTokenKind::KwPunct => "keyword `PUNCT`",
 			BaseTokenKind::KwPurge => "keyword `PURGE`",
 			BaseTokenKind::KwRange => "keyword `RANGE`",
@@ -1025,6 +1037,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwStart => "keyword `START`",
 			BaseTokenKind::KwStrict => "keyword `STRICT`",
 			BaseTokenKind::KwStructure => "keyword `STRUCTURE`",
+			BaseTokenKind::KwSystem => "keyword `SYSTEM`",
 			BaseTokenKind::KwTable => "keyword `TABLE`",
 			BaseTokenKind::KwTables => "keyword `TABLES`",
 			BaseTokenKind::KwTempFiles => "keyword `TEMPFILES`",
@@ -1037,6 +1050,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwTokenizers => "keyword `TOKENIZERS`",
 			BaseTokenKind::KwToken => "keyword `TOKEN`",
 			BaseTokenKind::KwTransaction => "keyword `TRANSACTION`",
+			BaseTokenKind::KwQueryTimeout => "keyword `QUERY_TIMEOUT`",
 			BaseTokenKind::KwTrue => "keyword `TRUE`",
 			BaseTokenKind::KwType => "keyword `TYPE`",
 			BaseTokenKind::KwUnique => "keyword `UNIQUE`",
@@ -1190,6 +1204,7 @@ impl BaseTokenKind {
 				| Self::KwConfig
 				| Self::KwContent
 				| Self::KwContinue
+				| Self::KwCompact
 				| Self::KwComputed
 				| Self::KwCreate
 				| Self::KwDatabase
@@ -1280,6 +1295,7 @@ impl BaseTokenKind {
 				| Self::KwPermissions
 				| Self::KwPostingsCache
 				| Self::KwPostingsOrder
+				| Self::KwPrepare
 				| Self::KwPunct
 				| Self::KwPurge
 				| Self::KwRange
@@ -1314,6 +1330,7 @@ impl BaseTokenKind {
 				| Self::KwSplit
 				| Self::KwStart
 				| Self::KwStructure
+				| Self::KwSystem
 				| Self::KwTable
 				| Self::KwTables
 				| Self::KwTempFiles

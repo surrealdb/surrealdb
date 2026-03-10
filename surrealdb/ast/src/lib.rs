@@ -85,6 +85,11 @@ library! {
 		remove_sequence: Vec<RemoveSequence>,
 		remove_access: Vec<RemoveAccess>,
 
+		alter_system: Vec<AlterSystem>,
+		alter_ns_stmt: Vec<AlterNamespace>,
+		alter_db_stmt: Vec<AlterDatabase>,
+		alter_table_stmt: Vec<AlterTable>,
+		alter_index_stmt: Vec<AlterIndex>,
 
 		filter: Vec<Filter>,
 		filters: Vec<NodeList<Filter>>,
@@ -1144,6 +1149,57 @@ ast_type! {
 	}
 }
 
+#[derive(Debug)]
+pub enum AlterKind<T> {
+	Drop(Span),
+	Set(T),
+}
+
+ast_type! {
+	pub struct AlterSystem{
+		pub query_timeout: Option<AlterKind<NodeId<Expr>>>,
+		pub compact: bool,
+	}
+}
+
+ast_type! {
+	pub struct AlterNamespace{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub compact: bool,
+	}
+}
+
+ast_type! {
+	pub struct AlterDatabase{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub compact: bool,
+	}
+}
+
+ast_type! {
+	pub struct AlterTable{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub comment: Option<AlterKind<NodeId<Expr>>>,
+		pub changefeed: Option<AlterKind<ChangeFeed>>,
+		pub schema: Option<Schema>,
+		pub compact: bool,
+		pub permissions: Option<TablePermissions>,
+	}
+}
+
+ast_type! {
+	pub struct AlterIndex{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub table: NodeId<Expr>,
+		pub comment: Option<AlterKind<NodeId<Expr>>>,
+		pub prepare_remove: bool,
+	}
+}
+
 ast_type! {
 	#[derive(Copy, Clone)]
 	pub enum Expr {
@@ -1225,6 +1281,12 @@ ast_type! {
 		RemoveBucket(NodeId<RemoveBucket>),
 		RemoveSequence(NodeId<RemoveSequence>),
 		RemoveAccess(NodeId<RemoveAccess>),
+
+		AlterSystem(NodeId<AlterSystem>),
+		AlterNamespace(NodeId<AlterNamespace>),
+		AlterDatabase(NodeId<AlterDatabase>),
+		AlterTable(NodeId<AlterTable>),
+		AlterIndex(NodeId<AlterIndex>),
 	}
 }
 

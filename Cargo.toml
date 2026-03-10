@@ -113,7 +113,7 @@ blake3 = "1.8.3"
 boxcar = "0.2.14"
 bytes = "1.11.1"
 castaway = "0.2.4"
-chrono = "0.4.43"
+chrono = { version = "0.4.43", default-features = false }
 ciborium = "0.2.2"
 clap = "4.5.54"
 dashmap = "6.1.0"
