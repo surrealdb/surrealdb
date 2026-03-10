@@ -1123,6 +1123,9 @@ impl Executor {
 		S: Stream<Item = Result<TopLevelExpr>>,
 	{
 		let mut this = Executor::new(ctx, opt);
+		if skip_success_results {
+			this.opt.set_suppress_output(true);
+		}
 		let mut stream = pin!(stream);
 
 		while let Some(stmt) = stream.next().await {
@@ -1142,20 +1145,22 @@ impl Executor {
 			match stmt {
 				TopLevelExpr::Option(stmt) => {
 					this.execute_option_statement(stmt)?;
-					// OPTION returns NONE
-					this.results.push(QueryResult {
-						time: Duration::ZERO,
-						result: Ok(convert_value_to_public_value(Value::None)?),
-						query_type: QueryType::Other,
-					});
+					if !skip_success_results {
+						this.results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+					}
 				}
 				TopLevelExpr::Begin => {
-					// BEGIN returns NONE
-					this.results.push(QueryResult {
-						time: Duration::ZERO,
-						result: Ok(convert_value_to_public_value(Value::None)?),
-						query_type: QueryType::Other,
-					});
+					if !skip_success_results {
+						this.results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+					}
 
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
 						this.results.push(QueryResult {
@@ -1172,11 +1177,19 @@ impl Executor {
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, &now, stmt).await;
-					let result = match result {
-						Ok(value) => Ok(convert_value_to_public_value(value)?),
-						Err(err) => Err(types_error_from_anyhow(err)),
-					};
-					if !skip_success_results || result.is_err() {
+					if skip_success_results {
+						if let Err(err) = result {
+							this.results.push(QueryResult {
+								time: now.elapsed(),
+								result: Err(types_error_from_anyhow(err)),
+								query_type,
+							});
+						}
+					} else {
+						let result = match result {
+							Ok(value) => Ok(convert_value_to_public_value(value)?),
+							Err(err) => Err(types_error_from_anyhow(err)),
+						};
 						this.results.push(QueryResult {
 							time: now.elapsed(),
 							result,
@@ -1407,5 +1420,62 @@ mod tests {
 				err
 			);
 		}
+	}
+
+	#[tokio::test]
+	async fn import_stream_suppresses_results_but_persists_data() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		// Ensure namespace and database exist
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "INSERT INTO person [{ name: 'a' }, { name: 'b' }, { name: 'c' }];";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let results = ds.import_stream(&sess, body).await.unwrap();
+
+		assert!(
+			results.is_empty(),
+			"import_stream should suppress successful results, got {} results",
+			results.len()
+		);
+
+		let verify = ds.execute("SELECT * FROM person ORDER BY name", &sess, None).await.unwrap();
+		let rows = verify[0].result.as_ref().unwrap();
+		assert!(rows.is_array(), "Expected an array of results");
+		let arr = rows.as_array().unwrap();
+		assert_eq!(arr.len(), 3, "Expected 3 inserted records, got {}", arr.len());
+	}
+
+	#[tokio::test]
+	async fn import_stream_still_reports_errors() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		// Ensure namespace and database exist
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "INSERT INTO person { name: 'ok' }; BREAK;";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let results = ds.import_stream(&sess, body).await.unwrap();
+
+		assert!(!results.is_empty(), "import_stream should report errors");
+		assert!(
+			results.iter().any(|r| r.result.is_err()),
+			"Expected at least one error result from invalid BREAK statement"
+		);
+
+		let verify = ds.execute("SELECT * FROM person", &sess, None).await.unwrap();
+		let rows = verify[0].result.as_ref().unwrap();
+		let arr = rows.as_array().unwrap();
+		assert_eq!(arr.len(), 1, "The successful INSERT before the error should have persisted");
 	}
 }
