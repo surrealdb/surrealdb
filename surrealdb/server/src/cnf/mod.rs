@@ -136,6 +136,7 @@ pub static WEBSOCKET_RESPONSE_FLUSH_PERIOD: LazyLock<u64> =
 
 /// How many notifications can be buffered per GraphQL subscription before
 /// backpressure drops new notifications (default: 1024)
+#[cfg(feature = "graphql")]
 pub static GQL_SUBSCRIPTION_CHANNEL_CAPACITY: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_GQL_SUBSCRIPTION_CHANNEL_CAPACITY", usize, 1024);
 
