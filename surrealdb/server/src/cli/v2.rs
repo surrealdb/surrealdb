@@ -194,7 +194,7 @@ pub async fn download_v2(
 
 pub async fn move_binary(from: &Path, to: &Path) -> std::io::Result<()> {
 	match tokio::fs::rename(from, to).await {
-		Ok(_) => return Ok(()),
+		Ok(_) => Ok(()),
 		Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
 			tokio::fs::copy(from, to).await?;
 			let _ = tokio::fs::remove_file(from).await;
