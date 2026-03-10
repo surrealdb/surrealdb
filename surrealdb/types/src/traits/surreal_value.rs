@@ -593,6 +593,18 @@ impl_surreal_value!(
 );
 
 impl_surreal_value!(
+	chrono::NaiveDate as kind!(datetime),
+	(value) => matches!(value, Value::Datetime(_)),
+	(self) => Value::Datetime(Datetime(chrono::DateTime::from_naive_utc_and_offset(self.and_time(chrono::NaiveTime::MIN), chrono::Utc))),
+	(value) => {
+		let Value::Datetime(Datetime(d)) = value else {
+			return Err(ConversionError::from_value(Self::kind_of(), &value).into());
+		};
+		Ok(d.date_naive())
+	}
+);
+
+impl_surreal_value!(
 	Uuid as kind!(uuid),
 	is_uuid(value) => matches!(value, Value::Uuid(_)),
 	from_uuid(self) => Value::Uuid(self),
