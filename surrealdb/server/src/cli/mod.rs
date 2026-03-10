@@ -15,6 +15,7 @@ mod start;
 #[cfg(test)]
 mod test;
 mod upgrade;
+mod v2;
 mod validate;
 pub(crate) mod validator;
 mod version;
@@ -45,6 +46,7 @@ use validate::ValidateCommandArguments;
 use validator::parser::tracing::{CustomFilter, CustomFilterParser};
 use version::VersionCommandArguments;
 
+use crate::cli::v2::V2Commands;
 use crate::cli::version_client::VersionClient;
 #[cfg(debug_assertions)]
 use crate::cnf::DEBUG_BUILD_WARNING;
@@ -188,6 +190,8 @@ enum Commands {
 	Validate(ValidateCommandArguments),
 	#[command(about = "Fix database storage issues")]
 	Fix(FixCommandArguments),
+	#[command(about = "Run commands in version 2 of the database for backwards compatibility")]
+	V2(V2Commands),
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -297,6 +301,7 @@ pub async fn init<
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
 		Commands::Fix(args) => fix::init::<C>(args).await,
+		Commands::V2(args) => v2::init(args).await,
 	};
 	// Save the flamegraph and profile
 	#[cfg(feature = "performance-profiler")]
@@ -318,7 +323,7 @@ pub async fn init<
 	// Error and exit the program
 	if let Err(e) = output {
 		// Output any error
-		error!("{}", e);
+		error!("{:?}", e);
 		// Drop the log guards
 		for guard in guards {
 			drop(guard);

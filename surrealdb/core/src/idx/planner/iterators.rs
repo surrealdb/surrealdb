@@ -1770,7 +1770,106 @@ impl IndexCountThingIterator {
 		let count = count.unsigned_abs();
 		let compact_key =
 			IndexCountKey::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None, pos, count);
-		txn.put(&compact_key, &(), None).await?;
+		txn.set(&compact_key, &(), None).await?;
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use uuid::Uuid;
+
+	use super::*;
+	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+	use crate::idx::IndexKeyBase;
+	use crate::key::index::iu::IndexCountKey;
+	use crate::kvs::Datastore;
+	use crate::kvs::LockType::Optimistic;
+	use crate::kvs::TransactionType::Write;
+
+	/// Non-regression test: consecutive compactions using new iterator instances
+	/// must not fail.
+	///
+	/// In production, `index_count_compaction` creates a fresh
+	/// `IndexCountThingIterator` for every compaction run. The compacted key
+	/// (uid = None) written by the first compaction already exists when the
+	/// second run executes `delr` + write. If the write used `put` (which
+	/// errors on existing keys) instead of `set`, the second compaction would
+	/// fail. This test ensures that does not happen.
+	#[tokio::test]
+	async fn test_consecutive_compactions_do_not_fail() {
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		let tb: TableName = "test_tb".into();
+		let ix = IndexId(3);
+		let ikb = IndexKeyBase::new(ns, db, tb.clone(), ix);
+
+		let ds = Datastore::new("memory").await.unwrap();
+
+		// Write some positive delta entries
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let uid1 = (Uuid::new_v4(), Uuid::new_v4());
+			let uid2 = (Uuid::new_v4(), Uuid::new_v4());
+			let k1 = IndexCountKey::new(ns, db, &tb, ix, Some(uid1), true, 10);
+			let k2 = IndexCountKey::new(ns, db, &tb, ix, Some(uid2), true, 5);
+			tx.set(&k1, &(), None).await.unwrap();
+			tx.set(&k2, &(), None).await.unwrap();
+			tx.commit().await.unwrap();
+		}
+
+		// First compaction (new iterator) — compacts (+10, +5) into a single +15 entry
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			IndexCountThingIterator::new(ns, db, &tb, ix)
+				.unwrap()
+				.compaction(&ikb, &tx)
+				.await
+				.unwrap();
+			tx.commit().await.unwrap();
+		}
+
+		// Verify the compacted count is 15
+		{
+			let mut count_iter = IndexCountThingIterator::new(ns, db, &tb, ix).unwrap();
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let mut ctx = ds.setup_ctx().unwrap();
+			ctx.set_transaction(tx.into());
+			let ctx = ctx.freeze();
+			let count = count_iter.next_count(&ctx, &ctx.tx(), u32::MAX).await.unwrap();
+			assert_eq!(count, 15, "first compaction should yield count 15");
+		}
+
+		// Write additional delta entries on top of the compacted state
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let uid3 = (Uuid::new_v4(), Uuid::new_v4());
+			let k3 = IndexCountKey::new(ns, db, &tb, ix, Some(uid3), true, 7);
+			tx.set(&k3, &(), None).await.unwrap();
+			tx.commit().await.unwrap();
+		}
+
+		// Second compaction (new iterator) — must not fail even though the
+		// compacted key already exists from the first compaction.
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			IndexCountThingIterator::new(ns, db, &tb, ix)
+				.unwrap()
+				.compaction(&ikb, &tx)
+				.await
+				.unwrap();
+			tx.commit().await.unwrap();
+		}
+
+		// Verify the compacted count is now 22 (15 + 7)
+		{
+			let mut count_iter = IndexCountThingIterator::new(ns, db, &tb, ix).unwrap();
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let mut ctx = ds.setup_ctx().unwrap();
+			ctx.set_transaction(tx.into());
+			let ctx = ctx.freeze();
+			let count = count_iter.next_count(&ctx, &ctx.tx(), u32::MAX).await.unwrap();
+			assert_eq!(count, 22, "second compaction should yield count 22 (15 + 7)");
+		}
 	}
 }

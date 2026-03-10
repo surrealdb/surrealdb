@@ -1546,7 +1546,7 @@ version = "0.3.0-surreal.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.surrealkv]]
-version = "0.20.2"
+version = "0.21.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.symbolic-common]]
@@ -1920,3 +1920,17 @@ criteria = "safe-to-deploy"
 [[exemptions.zstd-sys]]
 version = "2.0.16+zstd.1.5.7"
 criteria = "safe-to-deploy"
+
+
+[[exemptions.dirs]]
+version = "6.0.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.dirs-sys]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.redox_users]]
+version = "0.5.2"
+criteria = "safe-to-deploy"
+

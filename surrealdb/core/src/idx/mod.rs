@@ -210,6 +210,10 @@ impl IndexKeyBase {
 		Dc::range(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
+	fn new_dc_range_with_root(&self) -> Result<(Key, Key)> {
+		Dc::range_with_root(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
+	}
+
 	fn new_dl(&self, doc_id: DocId) -> Dl<'_> {
 		Dl::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id)
 	}

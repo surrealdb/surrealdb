@@ -232,13 +232,14 @@ impl ExecOperator for TableScan {
 				return;
 			}
 
-			// Pre-compute whether any post-decode processing is needed
-			let needs_processing = ScanPipeline::compute_needs_processing(
-				&select_permission, &field_state, check_perms, predicate.as_ref(),
+			// Row-filtering (permissions, WHERE) prevents positional pushdown;
+			// row-modifying ops (computed fields, field perms) do not.
+			let needs_row_filtering = ScanPipeline::compute_needs_row_filtering(
+				&select_permission, predicate.as_ref(),
 			);
 
-			let pre_skip = if !needs_processing { start_val } else { 0 };
-			let effective_storage_limit = if !needs_processing { limit_val } else { None };
+			let pre_skip = if !needs_row_filtering { start_val } else { 0 };
+			let effective_storage_limit = if !needs_row_filtering { limit_val } else { None };
 
 			let beg = record::prefix(ns.namespace_id, db.database_id, &table_name)?;
 			let end = record::suffix(ns.namespace_id, db.database_id, &table_name)?;
