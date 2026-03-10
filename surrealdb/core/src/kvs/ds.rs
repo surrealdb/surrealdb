@@ -1509,23 +1509,18 @@ impl Datastore {
 			}
 			// Collect the keys so we can delete them after processing
 			let keys: Vec<Key> = items.iter().map(|(k, _)| k.clone()).collect();
-			// Process compaction for each index, collecting any that failed
-			let failed = Self::index_compaction_loop(dbs.clone(), &lh, items).await?;
+			// Process compaction for each index
+			Self::index_compaction_loop(dbs.clone(), &lh, items).await?;
 			// Delete the processed queue entries in a separate write
 			// transaction. This avoids conflicts with concurrent user
 			// transactions that may enqueue new compaction requests.
-			// Failed indexes are re-enqueued so they are retried on the
-			// next compaction cycle.
+			// Failed indexes are not re-enqueued here; the next user
+			// write to the affected index will naturally trigger a new
+			// compaction request.
 			let txn = dbs.transaction(Write, Optimistic).await?;
 			for k in &keys {
 				if let Err(e) = txn.del(k).await {
 					warn!(target: TARGET, "Failed to delete compaction queue entry: {e}");
-				}
-			}
-			for ikb in &failed {
-				let ic = ikb.new_ic_key(dbs.id);
-				if let Err(e) = txn.put(&ic, &(), None).await {
-					warn!(target: TARGET, "Failed to re-enqueue compaction for {ikb}: {e}");
 				}
 			}
 			if let Err(e) = txn.commit().await {
@@ -1541,14 +1536,13 @@ impl Datastore {
 	/// On native targets, compaction tasks are spawned in parallel — one per
 	/// distinct index — and joined afterwards. Duplicate queue entries for
 	/// the same index are deduplicated via a [`HashMap`] so only one task is
-	/// spawned per index. Failures are logged but do not abort the loop;
-	/// failed indexes are returned so the caller can re-enqueue them.
+	/// spawned per index. Failures are logged but do not abort the loop.
 	#[cfg(not(target_family = "wasm"))]
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
 		items: Vec<(Key, Val)>,
-	) -> Result<Vec<IndexKeyBase>> {
+	) -> Result<()> {
 		let mut concurrent_compactions = HashMap::new();
 		for (k, _) in items {
 			lh.try_maintain_lease().await?;
@@ -1565,30 +1559,26 @@ impl Datastore {
 				e.insert(jh);
 			}
 		}
-		let mut failed = Vec::new();
 		for (ikb, jh) in concurrent_compactions {
 			if let Err(e) = jh.await? {
 				warn!("Index compaction {ikb} fails: {e}");
-				failed.push(ikb);
 			}
 		}
-		Ok(failed)
+		Ok(())
 	}
 
 	/// Compacts each distinct index found in the queue items.
 	///
 	/// On wasm, `tokio::spawn` is unavailable so compactions run
 	/// sequentially. A [`HashSet`] is used to skip duplicate queue entries
-	/// for the same index. Failures are logged but do not abort the loop;
-	/// failed indexes are returned so the caller can re-enqueue them.
+	/// for the same index. Failures are logged but do not abort the loop.
 	#[cfg(target_family = "wasm")]
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
 		items: Vec<(Key, Val)>,
-	) -> Result<Vec<IndexKeyBase>> {
+	) -> Result<()> {
 		let mut seen = HashSet::new();
-		let mut failed = Vec::new();
 		for (k, _) in items {
 			lh.try_maintain_lease().await?;
 			let ic = IndexCompactionKey::decode_key(&k)?;
@@ -1601,17 +1591,15 @@ impl Datastore {
 				Ok(()) => {
 					if let Err(e) = txn.commit().await {
 						warn!("Index compaction {ikb} fails: {e}");
-						failed.push(ikb);
 					}
 				}
 				Err(e) => {
 					let _ = txn.cancel().await;
 					warn!("Index compaction {ikb} fails: {e}");
-					failed.push(ikb);
 				}
 			}
 		}
-		Ok(failed)
+		Ok(())
 	}
 
 	/// Performs the actual compaction of a single index.
