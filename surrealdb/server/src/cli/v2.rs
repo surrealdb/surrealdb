@@ -201,7 +201,7 @@ pub async fn ensure_binary_present(has_permission: bool) -> Result<PathBuf> {
 			.context("Cannot read metadata of cached v2 surrealdb executable")?;
 		let modified =
 			meta.modified().context("Cannot read modified time of surrealdb executable")?;
-		if modified.elapsed().map(|x| x > Duration::from_hours(24)).unwrap_or(true) {
+		if modified.elapsed().map(|x| x > Duration::from_secs(24 * 60 * 60)).unwrap_or(true) {
 			if let Some(exiting_version) = get_existing_version(&file).await {
 				if let Some(latest_version) = get_latest_version().await
 					&& exiting_version < latest_version
