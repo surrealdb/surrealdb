@@ -237,7 +237,7 @@ jobs:
 
   format:
     name: Check format
-    needs: [ prepare-vars ]
+    needs: [prepare-vars]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -250,7 +250,7 @@ jobs:
 
   clippy:
     name: Check clippy
-    needs: [ prepare-vars ]
+    needs: [prepare-vars]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -263,7 +263,7 @@ jobs:
 
   check:
     name: Check workspace
-    needs: [ prepare-vars ]
+    needs: [prepare-vars]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -276,7 +276,7 @@ jobs:
 
   check-wasm:
     name: Check Wasm
-    needs: [ prepare-vars ]
+    needs: [prepare-vars]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -289,7 +289,7 @@ jobs:
 
   check-docs:
     name: Check docs
-    needs: [ prepare-vars ]
+    needs: [prepare-vars]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -306,8 +306,8 @@ jobs:
 
   test:
     name: Test workspace
-    needs: [ prepare-vars ]
-    runs-on: [ runner-amd64-2xlarge ]
+    needs: [prepare-vars]
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -323,7 +323,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.arch }} binary
-    needs: [ prepare-vars ]
+    needs: [prepare-vars]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -333,12 +333,12 @@ jobs:
           - arch: x86_64-unknown-linux-gnu
             platform: amd64
             os: linux
-            runner: [ runner-amd64-2xlarge ]
+            runner: [runner-amd64-2xlarge]
           # Linux arm64
           - arch: aarch64-unknown-linux-gnu
             platform: arm64
             os: linux
-            runner: [ runner-arm64-2xlarge ]
+            runner: [runner-arm64-2xlarge]
           # macOS amd64
           - arch: x86_64-apple-darwin
             platform: amd64
@@ -405,7 +405,8 @@ jobs:
 
   publish-crates:
     name: Publish crates
-    needs: [ test, format, clippy, check, check-wasm, check-docs, build, prepare-vars ]
+    needs:
+      [test, format, clippy, check, check-wasm, check-docs, build, prepare-vars]
     runs-on: ubuntu-latest
     continue-on-error: ${{ needs.prepare-vars.outputs.publish != 'true' || needs.prepare-vars.outputs.nightly-release == 'true' }}
     steps:
@@ -429,7 +430,7 @@ jobs:
     name: Publish binaries
     permissions:
       contents: write
-    needs: [ prepare-vars, publish-crates ]
+    needs: [prepare-vars, publish-crates]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -457,7 +458,7 @@ jobs:
 
   docker:
     name: Build ${{ matrix.name }} (${{ matrix.build-target }})
-    needs: [ prepare-vars, publish ]
+    needs: [prepare-vars, publish]
     if: ${{ needs.prepare-vars.outputs.publish == 'true' }}
     environment: ${{ needs.prepare-vars.outputs.release-name }}
     runs-on: ubuntu-latest
@@ -467,7 +468,7 @@ jobs:
         include:
           - name: Prod image
             build-target: prod-ci
-            tag-suffix: ''
+            tag-suffix: ""
           - name: Dev image
             build-target: dev-ci
             tag-suffix: -dev
@@ -501,7 +502,7 @@ jobs:
 
   package-macos:
     name: Package and publish macOS universal binary
-    needs: [ prepare-vars, publish ]
+    needs: [prepare-vars, publish]
     if: ${{ needs.prepare-vars.outputs.publish == 'true' }}
     runs-on: macos-latest
     steps:
@@ -526,7 +527,7 @@ jobs:
     name: Propagate binaries to all regions
     if: ${{ needs.prepare-vars.outputs.publish == 'true' }}
     environment: ${{ needs.prepare-vars.outputs.release-name }}
-    needs: [ publish, package-macos, prepare-vars ]
+    needs: [publish, package-macos, prepare-vars]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
@@ -541,6 +542,80 @@ jobs:
           aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
 
   # ----------------------------------------
+  # Comment on PRs included in this release
+  # ----------------------------------------
+
+  comment-prs:
+    name: Comment on released PRs
+    needs: [prepare-vars, propagate]
+    if: ${{ needs.propagate.result == 'success' && needs.prepare-vars.outputs.publish == 'true' && needs.prepare-vars.outputs.nightly-release != 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8 (Actions must be pinned by commit hash)
+        with:
+          script: |
+            const tag = `v${{ needs.prepare-vars.outputs.version }}`;
+            const releaseUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/releases/tag/${tag}`;
+
+            // Get previous tag
+            const tags = await github.rest.repos.listTags({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 10
+            });
+            const prevTag = tags.data[1]?.name;  // index 0 is current tag
+
+            if (!prevTag) {
+              console.log('No previous tag found, skipping PR comments');
+              return;
+            }
+
+            // Compare commits between tags
+            const comparison = await github.rest.repos.compareCommitsWithBasehead({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              basehead: `${prevTag}...${tag}`
+            });
+
+            const prNumbers = new Set();
+            for (const commit of comparison.data.commits) {
+              // GitHub merge commits include "(#123)" in the message
+              const matches = commit.commit.message.matchAll(/#(\d+)/g);
+              for (const match of matches) {
+                prNumbers.add(parseInt(match[1]));
+              }
+            }
+
+            // Also search for PRs via API (catches squash merges)
+            for (const commit of comparison.data.commits) {
+              const prs = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: commit.sha
+              });
+              for (const pr of prs.data) {
+                prNumbers.add(pr.number);
+              }
+            }
+
+            // Comment on each PR
+            for (const prNumber of prNumbers) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: `🚀 This PR is included in [${tag}](${releaseUrl})`
+              });
+            }
+
+  # ----------------------------------------
   # Cleanup release branch (only on success)
   # ----------------------------------------
   # Delete the temporary release branch only when the full release succeeded.
@@ -549,7 +624,7 @@ jobs:
 
   cleanup-release-branch:
     name: Delete release branch
-    needs: [ bump-version, propagate ]
+    needs: [bump-version, propagate]
     if: ${{ always() && needs.bump-version.outputs.release-branch != '' && needs.propagate.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
