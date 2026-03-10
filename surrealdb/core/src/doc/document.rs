@@ -357,6 +357,8 @@ impl Document {
 
 		self.current = CursorDoc::new(Some(retry), None, record);
 		self.initial = self.current.clone();
+		// Recalculating ComputedData, depending on the existing record.
+		self.input_data = None;
 	}
 
 	/// Checks if permissions are required to be run

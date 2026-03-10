@@ -8,7 +8,9 @@ use surrealmx::{Database, DatabaseOptions, KeyIterator, ScanIterator, Transactio
 use tokio::sync::RwLock;
 
 use super::api::ScanLimit;
-use super::config::{AolMode, MemoryConfig, SnapshotMode, SyncMode};
+use super::config::MemoryConfig;
+#[cfg(not(target_family = "wasm"))]
+use super::config::{AolMode, SnapshotMode, SyncMode};
 use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;

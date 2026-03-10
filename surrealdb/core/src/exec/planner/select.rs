@@ -438,6 +438,18 @@ impl<'ctx> Planner<'ctx> {
 							if let Some(alias) = &selector.alias {
 								let output_name = idiom_to_field_name(alias);
 
+								// Dotted aliases (e.g. `AS status.events`) require
+								// nested object construction, which SelectProject
+								// doesn't support. Fall back to the full Project
+								// operator which handles this via
+								// parse_output_path + set_field_on_object.
+								if output_name.contains('.')
+									&& !output_name.contains(['[', '(', ' '])
+								{
+									needs_fallback = true;
+									break;
+								}
+
 								if let Some(field_name) = physical.try_simple_field() {
 									// Simple aliased field: rename
 									if field_name == output_name {
@@ -1643,10 +1655,18 @@ impl<'ctx> Planner<'ctx> {
 						};
 						// Push limit to IndexScan when the index ordering
 						// covers the ORDER BY (or there is no ORDER BY).
+						// IMPORTANT: Only push limit when the filter is fully
+						// consumed by the index. When there's a residual
+						// filter above the scan, pushing LIMIT causes the
+						// scan to return fewer rows than needed because the
+						// post-filter may remove some of them.
 						let push = scan_limit.is_some()
+							&& matches!(filter_action, FilterAction::FullyConsumed)
 							&& match order {
 								None => true,
-								Some(ord) => index_covers_ordering(&index_ref, direction, ord),
+								Some(ord) => {
+									index_covers_ordering(&index_ref, &access, direction, ord)
+								}
 							};
 						let (idx_limit, idx_start, limit_pushed) = if push {
 							(scan_limit.clone(), scan_start.clone(), true)
@@ -2143,6 +2163,13 @@ impl<'ctx> Planner<'ctx> {
 
 		let path = select_access_path(candidates, with, direction);
 
+		// When the chosen index covers ORDER BY, derive the correct scan
+		// direction from the ORDER BY clause rather than the default
+		// `determine_scan_direction` (which only handles ORDER BY id).
+		// This enables LIMIT pushdown and sort elimination for queries like
+		// `ORDER BY metadata.payload_metadata.modified DESC LIMIT 25`.
+		let (path, direction) = adjust_direction_for_order(path, order, direction);
+
 		// When the best single-index path is a full-range scan (ORDER BY
 		// only, no WHERE selectivity), also try a multi-index union for
 		// OR conditions. The union reads only matching rows from each
@@ -2156,6 +2183,96 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		Ok(Some((path, direction)))
+	}
+}
+
+/// Adjust the scan direction and access path when the chosen index covers
+/// the ORDER BY clause.
+///
+/// `determine_scan_direction` only flips to `Backward` for `ORDER BY id DESC`.
+/// When an index covers a non-`id` ORDER BY (e.g. a nested field like
+/// `metadata.payload_metadata.modified DESC`), we must derive the correct
+/// direction from the ORDER BY clause so that:
+///
+/// 1. `index_covers_ordering()` succeeds → LIMIT is pushed to the IndexScan
+/// 2. `can_eliminate_sort()` succeeds → the Sort operator is eliminated
+///
+/// Without this fix, the index is scanned forward, LIMIT cannot be pushed
+/// (direction mismatch), and all rows are read + sorted in memory.
+fn adjust_direction_for_order(
+	path: AccessPath,
+	order: Option<&crate::expr::order::Ordering>,
+	default_direction: crate::idx::planner::ScanDirection,
+) -> (AccessPath, crate::idx::planner::ScanDirection) {
+	use crate::exec::field_path::FieldPath;
+	use crate::exec::index::access_path::BTreeAccess;
+	use crate::expr::order::Ordering;
+	use crate::idx::planner::ScanDirection;
+
+	// Only adjust for BTreeScan paths that cover ORDER BY
+	let AccessPath::BTreeScan {
+		ref index_ref,
+		ref access,
+		..
+	} = path
+	else {
+		return (path, default_direction);
+	};
+
+	// Need an ORDER BY clause to determine direction
+	let Some(Ordering::Order(order_list)) = order else {
+		return (path, default_direction);
+	};
+
+	// Check the first ORDER BY field against the index's first column
+	let Some(first_order) = order_list.0.first() else {
+		return (path, default_direction);
+	};
+
+	let ix_def = index_ref.definition();
+
+	// Determine which index column to match against.
+	// For compound access with an equality prefix, the ORDER BY field should
+	// match the column immediately after the prefix (since the prefix columns
+	// all have equal values and don't define ordering).
+	let target_col_index = match access {
+		BTreeAccess::Compound {
+			prefix,
+			..
+		} => prefix.len(),
+		_ => 0,
+	};
+
+	let Some(target_col) = ix_def.cols.get(target_col_index) else {
+		return (path, default_direction);
+	};
+
+	// Convert both to FieldPath for comparison
+	let Ok(order_path) = FieldPath::try_from(&first_order.value) else {
+		return (path, default_direction);
+	};
+	let Ok(col_path) = FieldPath::try_from(target_col) else {
+		return (path, default_direction);
+	};
+
+	// If the target column matches the ORDER BY field,
+	// set the direction based on the ORDER BY direction
+	if order_path == col_path {
+		let new_direction = if first_order.direction {
+			ScanDirection::Forward // ASC
+		} else {
+			ScanDirection::Backward // DESC
+		};
+
+		let new_path = AccessPath::BTreeScan {
+			index_ref: index_ref.clone(),
+			access: access.clone(),
+			direction: new_direction,
+		};
+
+		(new_path, new_direction)
+	} else {
+		(path, default_direction)
 	}
 }
 
