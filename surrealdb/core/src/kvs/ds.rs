@@ -1571,9 +1571,9 @@ impl Datastore {
 	///
 	/// On wasm, `tokio::spawn` is unavailable so compactions run
 	/// sequentially. A [`HashSet`] is used to skip duplicate queue entries
-	/// for the same index. Failures propagate immediately so that the
-	/// caller does not delete queue entries for indexes that failed to
-	/// compact, preserving the retry signal for the next compaction cycle.
+	/// for the same index. Failures are logged but do not abort the loop,
+	/// matching the non-wasm behavior so that a single transient failure
+	/// does not prevent other indexes from being compacted.
 	#[cfg(target_family = "wasm")]
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
@@ -1588,9 +1588,16 @@ impl Datastore {
 			if !seen.insert(ikb.clone()) {
 				continue;
 			}
-			let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
-			catch!(txn, dbs.process_index_compaction(txn.clone(), &ikb).await);
-			catch!(txn, txn.commit().await);
+			let res: Result<()> = async {
+				let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
+				catch!(txn, dbs.process_index_compaction(txn.clone(), &ikb).await);
+				catch!(txn, txn.commit().await);
+				Ok(())
+			}
+			.await;
+			if let Err(e) = res {
+				warn!("Index compaction {ikb} fails: {e}");
+			}
 		}
 		Ok(())
 	}
