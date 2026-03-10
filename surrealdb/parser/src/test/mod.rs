@@ -110,6 +110,8 @@ fn text_test() {
 	});
 
 	if !successfull {
-		panic!("Not all tests successfull")
+		panic!(
+			"Not all tests successfull.\nSet environment variable `RESULT` to:\n - `OVERWRITE` to overwrite the result of all tests.\n - `ACCEPT` to accept results for tests which do not have a result currently"
+		);
 	}
 }

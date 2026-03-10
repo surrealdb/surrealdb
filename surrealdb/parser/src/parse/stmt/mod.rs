@@ -1,7 +1,8 @@
+mod alter;
 mod define;
 mod remove;
 
-use ast::{AstSpan, Base, Expr, Fetch, NodeId, OrderBy, RecordData, WithIndex};
+use ast::{AstSpan, Expr, Fetch, NodeId, OrderBy, RecordData, WithIndex};
 use common::source_error::{AnnotationKind, Level};
 use token::{BaseTokenKind, T};
 

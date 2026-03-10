@@ -763,6 +763,24 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				}
 			}
 		}
+		T![ALTER] => {
+			let expected = "a resource type to alter";
+			let Some(peek) = parser.peek1()? else {
+				let _ = parser.next();
+				return Err(parser.unexpected(expected));
+			};
+			match peek.token {
+				T![SYSTEM] => parser.parse().await.map(Expr::AlterSystem),
+				T![NAMESPACE] => parser.parse().await.map(Expr::AlterNamespace),
+				T![DATABASE] => parser.parse().await.map(Expr::AlterDatabase),
+				T![TABLE] => parser.parse().await.map(Expr::AlterTable),
+				T![INDEX] => parser.parse().await.map(Expr::AlterIndex),
+				_ => {
+					let _ = parser.next();
+					return Err(parser.unexpected(expected));
+				}
+			}
+		}
 		BaseTokenKind::Param => {
 			let path = parser.parse_sync()?;
 			Ok(Expr::Param(path))

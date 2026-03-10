@@ -1,5 +1,6 @@
 use ast::{AstSpan, KillKind, NodeId, NodeListId, Query, TopLevelExpr, Transaction, UseKind};
 use common::source_error::{AnnotationKind, Level};
+use common::span::Span;
 use token::{BaseTokenKind, T};
 
 use super::{Parse, ParseResult, ParseSync, Parser};
@@ -16,6 +17,45 @@ fn name_previous_statement(prev: NodeId<TopLevelExpr>, parser: &Parser<'_, '_>) 
 					"a path"
 				}
 			}
+			ast::Expr::Create(_)
+			| ast::Expr::Update(_)
+			| ast::Expr::Upsert(_)
+			| ast::Expr::Delete(_)
+			| ast::Expr::Relate(_)
+			| ast::Expr::Select(_)
+			| ast::Expr::DefineNamespace(_)
+			| ast::Expr::DefineDatabase(_)
+			| ast::Expr::DefineTable(_)
+			| ast::Expr::DefineFunction(_)
+			| ast::Expr::DefineModule(_)
+			| ast::Expr::DefineParam(_)
+			| ast::Expr::DefineApi(_)
+			| ast::Expr::DefineEvent(_)
+			| ast::Expr::DefineField(_)
+			| ast::Expr::DefineIndex(_)
+			| ast::Expr::DefineAnalyzer(_)
+			| ast::Expr::DefineBucket(_)
+			| ast::Expr::DefineSequence(_)
+			| ast::Expr::DefineConfig(_)
+			| ast::Expr::DefineAccess(_)
+			| ast::Expr::RemoveNamespace(_)
+			| ast::Expr::RemoveDatabase(_)
+			| ast::Expr::RemoveTable(_)
+			| ast::Expr::RemoveFunction(_)
+			| ast::Expr::RemoveModule(_)
+			| ast::Expr::RemoveParam(_)
+			| ast::Expr::RemoveApi(_)
+			| ast::Expr::RemoveEvent(_)
+			| ast::Expr::RemoveField(_)
+			| ast::Expr::RemoveIndex(_)
+			| ast::Expr::RemoveAnalyzer(_)
+			| ast::Expr::RemoveBucket(_)
+			| ast::Expr::RemoveSequence(_)
+			| ast::Expr::RemoveAccess(_)
+			| ast::Expr::AlterSystem(_)
+			| ast::Expr::AlterNamespace(_)
+			| ast::Expr::AlterDatabase(_)
+			| ast::Expr::AlterTable(_) => "a statement expression",
 			_ => "an expression",
 		},
 		_ => "a statement",
@@ -34,6 +74,10 @@ impl Parse for ast::Query {
 					return Err(parser.with_error(|parser| {
 						let last_stmt = parser[cur].cur;
 						let last_stmt_span = last_stmt.ast_span(parser);
+						let last_stmt_end = Span {
+							start: last_stmt_span.end,
+							end: last_stmt_span.end,
+						};
 						let last_stmt_name = name_previous_statement(last_stmt, parser);
 
 						Level::Error
@@ -44,14 +88,21 @@ impl Parse for ast::Query {
 							.snippet(
 								parser
 									.snippet()
-									.annotate(AnnotationKind::Primary.span(next.span).label(
-										"Maybe missing a semicolon after the last statement?",
-									))
+									.annotate(
+										AnnotationKind::Primary
+											.span(next.span)
+											.label("Maybe missing a semicolon before this token?"),
+									)
 									.annotate(AnnotationKind::Context.span(last_stmt_span).label(
 										format!(
-											"The last statement here was parsed as {last_stmt_name}"
+											"This last statement here was parsed as {last_stmt_name}"
 										),
-									)),
+									))
+									.annotate(
+										AnnotationKind::Context
+											.span(last_stmt_end)
+											.label(format!("Expected a `;` here")),
+									),
 							)
 							.to_diagnostic()
 					}));

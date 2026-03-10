@@ -1,12 +1,12 @@
-use ast::{
-	AccessType, Algorithm, Base, CountIndex, DefineConfigKind, FullTextScoring, JwtVerify, NodeId,
-	RelationTable,
-};
+use ast::{AccessType, Base, CountIndex, DefineConfigKind, FullTextScoring, NodeId, RelationTable};
 use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
 use token::{BaseTokenKind, T};
 
-use crate::parse::utils::{parse_delimited_list, parse_seperated_list, parse_seperated_list_sync};
+use crate::parse::utils::{
+	parse_delimited_list, parse_seperated_list, parse_seperated_list_sync, parse_unordered_clause,
+	parse_unordered_clause_sync, redefined_error,
+};
 use crate::parse::{ParseError, ParseResult};
 use crate::{Parse, ParseSync, Parser};
 
@@ -53,70 +53,6 @@ impl Parse for ast::Permission {
 	}
 }
 
-/// Generates an error for clauses used more then once.
-#[cold]
-fn redefined_error(parser: &mut Parser<'_, '_>, start: Span, last_span: Span) -> ParseError {
-	parser.with_error(|parser| {
-		Level::Error
-			.title(format!("`{}` clause defined more then once", parser.slice(start)))
-			.snippet(
-				parser
-					.snippet()
-					.annotate(AnnotationKind::Primary.span(start))
-					.annotate(AnnotationKind::Context.span(last_span).label("First used here")),
-			)
-			.to_diagnostic()
-	})
-}
-
-/// Utility function implementing some re-used code,
-///
-/// Will parse with the given callback and store the result in the given mutable reference to an
-/// option. If the option was already set it will instead throw an error.
-async fn parse_unordered_clause<'src, 'ast, T, F>(
-	parser: &mut Parser<'src, 'ast>,
-	store: &mut Option<(T, Span)>,
-	start: Span,
-	f: F,
-) -> ParseResult<()>
-where
-	F: AsyncFnOnce(&mut Parser<'src, 'ast>) -> ParseResult<T>,
-{
-	if let Some((_, last_span)) = store {
-		return Err(redefined_error(parser, start, *last_span));
-	}
-
-	let res = f(parser).await?;
-	let span = parser.span_since(start);
-	*store = Some((res, span));
-
-	Ok(())
-}
-
-/// Utility function implementing some re-used code,
-///
-/// Will parse with the given callback and store the result in the given mutable reference to an
-/// option. If the option was already set it will instead throw an error.
-fn parse_unordered_clause_sync<'src, 'ast, T, F>(
-	parser: &mut Parser<'src, 'ast>,
-	store: &mut Option<(T, Span)>,
-	start: Span,
-	f: F,
-) -> ParseResult<()>
-where
-	F: FnOnce(&mut Parser<'src, 'ast>) -> ParseResult<T>,
-{
-	if let Some((_, last_span)) = store {
-		return Err(redefined_error(parser, start, *last_span));
-	}
-
-	let res = f(parser)?;
-	let span = parser.span_since(start);
-	*store = Some((res, span));
-
-	Ok(())
-}
-
 impl Parse for ast::DefineNamespace {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let define = parser.expect(T![DEFINE])?;
@@ -147,6 +83,18 @@ impl Parse for ast::DefineNamespace {
 	}
 }
 
+impl ParseSync for ast::ChangeFeed {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let duration = parser.parse_sync()?;
+		if parser.eat(T![INCLUDE])?.is_some() {
+			let _ = parser.expect(T![ORIGINAL])?;
+			Ok(ast::ChangeFeed::WithOriginal(duration))
+		} else {
+			Ok(ast::ChangeFeed::Base(duration))
+		}
+	}
+}
+
 impl Parse for ast::DefineDatabase {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let define = parser.expect(T![DEFINE])?;
@@ -171,15 +119,12 @@ impl Parse for ast::DefineDatabase {
 				}
 				T![CHANGEFEED] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut changefeed, x.span, |parser| {
-						let duration = parser.parse_sync()?;
-						if parser.eat(T![INCLUDE])?.is_some() {
-							let _ = parser.expect(T![ORIGINAL])?;
-							Ok(ast::ChangeFeed::WithOriginal(duration))
-						} else {
-							Ok(ast::ChangeFeed::Base(duration))
-						}
-					})?;
+					parse_unordered_clause_sync(
+						parser,
+						&mut changefeed,
+						x.span,
+						Parser::parse_sync,
+					)?;
 				}
 				_ => break,
 			}
