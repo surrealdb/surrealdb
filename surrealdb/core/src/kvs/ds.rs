@@ -1529,10 +1529,11 @@ impl Datastore {
 				}
 			}
 			if let Err(e) = txn.commit().await {
-				// Best-effort: entries will be re-processed next cycle
 				warn!(target: TARGET, "Failed to commit compaction queue cleanup: {e}");
+				break;
 			}
 		}
+		Ok(())
 	}
 
 	/// Compacts each distinct index found in the queue items.
