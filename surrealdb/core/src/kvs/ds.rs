@@ -99,9 +99,6 @@ const LQ_CHANNEL_SIZE: usize = 15_000;
 /// credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
 
-/// The maximum number of attempts to retry a compaction operation.
-const MAX_COMPACTION_ATTEMPTS: u8 = 3;
-
 /// The underlying datastore instance which stores the dataset.
 pub struct Datastore {
 	transaction_factory: TransactionFactory,
@@ -1512,15 +1509,23 @@ impl Datastore {
 			}
 			// Collect the keys so we can delete them after processing
 			let keys: Vec<Key> = items.iter().map(|(k, _)| k.clone()).collect();
-			// Process compaction for each index
-			Self::index_compaction_loop(dbs.clone(), &lh, items).await?;
+			// Process compaction for each index, collecting any that failed
+			let failed = Self::index_compaction_loop(dbs.clone(), &lh, items).await?;
 			// Delete the processed queue entries in a separate write
 			// transaction. This avoids conflicts with concurrent user
 			// transactions that may enqueue new compaction requests.
+			// Failed indexes are re-enqueued so they are retried on the
+			// next compaction cycle.
 			let txn = dbs.transaction(Write, Optimistic).await?;
 			for k in &keys {
 				if let Err(e) = txn.del(k).await {
 					warn!(target: TARGET, "Failed to delete compaction queue entry: {e}");
+				}
+			}
+			for ikb in &failed {
+				let ic = ikb.new_ic_key(dbs.id);
+				if let Err(e) = txn.put(&ic, &(), None).await {
+					warn!(target: TARGET, "Failed to re-enqueue compaction for {ikb}: {e}");
 				}
 			}
 			if let Err(e) = txn.commit().await {
@@ -1535,14 +1540,14 @@ impl Datastore {
 	/// On native targets, compaction tasks are spawned in parallel — one per
 	/// distinct index — and joined afterwards. Duplicate queue entries for
 	/// the same index are deduplicated via a [`HashMap`] so only one task is
-	/// spawned per index. Transaction conflicts are retried up to three
-	/// times. Failures are logged at warn level but do not abort the loop.
+	/// spawned per index. Failures are logged but do not abort the loop;
+	/// failed indexes are returned so the caller can re-enqueue them.
 	#[cfg(not(target_family = "wasm"))]
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
 		items: Vec<(Key, Val)>,
-	) -> Result<()> {
+	) -> Result<Vec<IndexKeyBase>> {
 		let mut concurrent_compactions = HashMap::new();
 		for (k, _) in items {
 			lh.try_maintain_lease().await?;
@@ -1551,62 +1556,38 @@ impl Datastore {
 			if let Entry::Vacant(e) = concurrent_compactions.entry(ikb.clone()) {
 				let dbs = dbs.clone();
 				let jh = spawn(async move {
-					let mut attempts = 0u8;
-					loop {
-						let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
-						match dbs.process_index_compaction(txn.clone(), &ikb).await {
-							Ok(()) => match txn.commit().await {
-								Ok(()) => return Ok(()),
-								Err(e) => {
-									attempts += 1;
-									if attempts < MAX_COMPACTION_ATTEMPTS
-										&& e.downcast_ref::<crate::kvs::Error>()
-											.is_some_and(|e| e.is_retryable())
-									{
-										continue;
-									}
-									return Err(e);
-								}
-							},
-							Err(e) => {
-								let _ = txn.cancel().await;
-								attempts += 1;
-								if attempts < MAX_COMPACTION_ATTEMPTS
-									&& e.downcast_ref::<crate::kvs::Error>()
-										.is_some_and(|e| e.is_retryable())
-								{
-									continue;
-								}
-								return Err(e);
-							}
-						}
-					}
+					let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
+					catch!(txn, dbs.process_index_compaction(txn.clone(), &ikb).await);
+					catch!(txn, txn.commit().await);
+					Ok(())
 				});
 				e.insert(jh);
 			}
 		}
+		let mut failed = Vec::new();
 		for (ikb, jh) in concurrent_compactions {
 			if let Err(e) = jh.await? {
-				warn!("Index compaction {ikb} fails: {e}")
+				warn!("Index compaction {ikb} fails: {e}");
+				failed.push(ikb);
 			}
 		}
-		Ok(())
+		Ok(failed)
 	}
 
 	/// Compacts each distinct index found in the queue items.
 	///
 	/// On wasm, `tokio::spawn` is unavailable so compactions run
 	/// sequentially. A [`HashSet`] is used to skip duplicate queue entries
-	/// for the same index. Transaction conflicts are retried up to three
-	/// times. Failures are logged at warn level but do not abort the loop.
+	/// for the same index. Failures are logged but do not abort the loop;
+	/// failed indexes are returned so the caller can re-enqueue them.
 	#[cfg(target_family = "wasm")]
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
 		items: Vec<(Key, Val)>,
-	) -> Result<()> {
-		const MAX_COMPACTION_ATTEMPTS: u8 = 3;
+	) -> Result<Vec<IndexKeyBase>> {
 		let mut seen = HashSet::new();
+		let mut failed = Vec::new();
 		for (k, _) in items {
 			lh.try_maintain_lease().await?;
 			let ic = IndexCompactionKey::decode_key(&k)?;
@@ -1614,40 +1595,22 @@ impl Datastore {
 			if !seen.insert(ikb.clone()) {
 				continue;
 			}
-			let mut attempts = 0u8;
-			loop {
-				let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
-				match dbs.process_index_compaction(txn.clone(), &ikb).await {
-					Ok(()) => match txn.commit().await {
-						Ok(()) => break,
-						Err(e) => {
-							attempts += 1;
-							if attempts < MAX_COMPACTION_ATTEMPTS
-								&& e.downcast_ref::<crate::kvs::Error>()
-									.is_some_and(|e| e.is_retryable())
-							{
-								continue;
-							}
-							warn!("Index compaction {ikb} fails: {e}");
-							break;
-						}
-					},
-					Err(e) => {
-						let _ = txn.cancel().await;
-						attempts += 1;
-						if attempts < MAX_COMPACTION_ATTEMPTS
-							&& e.downcast_ref::<crate::kvs::Error>()
-								.is_some_and(|e| e.is_retryable())
-						{
-							continue;
-						}
+			let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
+			match dbs.process_index_compaction(txn.clone(), &ikb).await {
+				Ok(()) => {
+					if let Err(e) = txn.commit().await {
 						warn!("Index compaction {ikb} fails: {e}");
-						break;
+						failed.push(ikb);
 					}
+				}
+				Err(e) => {
+					let _ = txn.cancel().await;
+					warn!("Index compaction {ikb} fails: {e}");
+					failed.push(ikb);
 				}
 			}
 		}
-		Ok(())
+		Ok(failed)
 	}
 
 	/// Performs the actual compaction of a single index.
