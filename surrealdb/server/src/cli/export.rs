@@ -52,6 +52,18 @@ struct ExportConfigArguments {
 	/// Whether records should be exported
 	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
 	records: Option<bool>,
+	/// Whether apis should be exported
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
+	apis: Option<bool>,
+	/// Whether buckets should be exported
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
+	buckets: Option<bool>,
+	/// Whether modules should be exported
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
+	modules: Option<bool>,
+	/// Whether configs should be exported
+	#[arg(long, num_args = 0..=1, default_missing_value = "true")]
+	configs: Option<bool>,
 }
 
 #[derive(Args, Debug)]
@@ -197,6 +209,22 @@ fn apply_config<C: Connection, R>(
 
 	if let Some(value) = config.records {
 		export = export.records(value);
+	}
+
+	if let Some(value) = config.apis {
+		export = export.apis(value);
+	}
+
+	if let Some(value) = config.buckets {
+		export = export.buckets(value);
+	}
+
+	if let Some(value) = config.modules {
+		export = export.modules(value);
+	}
+
+	if let Some(value) = config.configs {
+		export = export.configs(value);
 	}
 
 	export

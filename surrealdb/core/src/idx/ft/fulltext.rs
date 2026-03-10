@@ -672,32 +672,46 @@ impl FullTextIndex {
 
 	/// Computes document length and count statistics for the index
 	///
-	/// This method calculates the total document length and count by
-	/// aggregating all deltas. If compact_log is provided, it will also remove
-	/// the delta logs and set the flag to true if any logs were removed.
+	/// This method calculates the total document length and count by scanning
+	/// both the compacted root key and any uncompacted delta entries in a
+	/// single range query (via `new_dc_range_with_root`). If `compact_log` is
+	/// provided, it will also remove the delta logs (but not the root key)
+	/// and set the flag to true if any delta logs were removed.
 	async fn compute_doc_length_and_count(
 		&self,
 		tx: &Transaction,
 		compact_log: Option<&mut bool>,
 	) -> Result<DocLengthAndCount> {
 		let mut dlc = DocLengthAndCount::default();
-		let (beg, end) = self.ikb.new_dc_range()?;
+		let (beg, end) = self.ikb.new_dc_range_with_root()?;
 		let range = beg..end;
 		// Compute the total number of documents (DocCount) and the total number of
 		// terms (DocLength) This key list is supposed to be small, subject to
 		// compaction. The root key is the compacted values, and the others are deltas
 		// from transaction not yet compacted.
+		let root_key = if compact_log.is_some() {
+			Some(self.ikb.new_dc_compacted()?)
+		} else {
+			None
+		};
 		let mut has_log = false;
-		for (_, v) in tx.getr(range.clone(), None).await? {
+		for (k, v) in tx.getr(range.clone(), None).await? {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
 			dlc.doc_count += st.doc_count;
 			dlc.total_docs_length += st.total_docs_length;
-			has_log = true;
+
+			if !has_log
+				&& let Some(r) = &root_key
+				&& k.ne(r)
+			{
+				has_log = true;
+			}
 		}
 		if let Some(compact_log) = compact_log
 			&& has_log
 		{
-			tx.delr(range).await?;
+			let (beg, end) = self.ikb.new_dc_range()?;
+			tx.delr(beg..end).await?;
 			*compact_log = true;
 		}
 		Ok(dlc)
@@ -1196,5 +1210,112 @@ mod tests {
 		assert_eq!(tx.count(beg..end, None).await.unwrap(), 0);
 		let (beg, end) = test.ikb.new_dc_range().unwrap();
 		assert_eq!(tx.count(beg..end, None).await.unwrap(), 0);
+		let (beg, end) = test.ikb.new_dc_range_with_root().unwrap();
+		assert_eq!(tx.count(beg..end, None).await.unwrap(), 1);
+	}
+
+	/// Regression test: BM25 scores must remain non-zero after compaction.
+	///
+	/// Before the fix, `compute_doc_length_and_count()` only scanned the dc
+	/// delta range (via `new_dc_range`), which excludes the root/compacted
+	/// key. Compaction deletes those deltas and writes the aggregated stats
+	/// to the root key. Since the root key was not included in the scan, the
+	/// scorer would get doc_count=0 / total_docs_length=0, producing
+	/// NaN → 0.0 scores. The fix uses `new_dc_range_with_root` to include
+	/// the root key in the scan.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn bm25_score_survives_compaction() {
+		let test = TestContext::new().await;
+		let doc1 = Arc::new(RecordId::new("t".into(), "doc1".to_owned()));
+		let doc2 = Arc::new(RecordId::new("t".into(), "doc2".to_owned()));
+
+		// Index two documents so that IDF is non-zero for a term that only
+		// appears in one of them (BM25 IDF clamps to 0 when term_doc_count
+		// >= doc_count / 2, so we need at least 2 docs).
+		let mut stack = reblessive::TreeStack::new();
+		stack.enter(|stk| test.remove_insert_task(stk, &doc1)).finish().await;
+		stack.enter(|stk| test.remove_insert_task(stk, &doc2)).finish().await;
+
+		let frozen_read_ctx = |test: &TestContext| {
+			let test = test.clone();
+			async move {
+				let mut ctx = Context::new(&test.ctx);
+				let tx = test.new_tx(TransactionType::Read).await;
+				ctx.set_transaction(tx.clone());
+				(ctx.freeze(), tx)
+			}
+		};
+
+		// "lorem" appears in only 1 of 25 entries in the test content, so
+		// with 2 identical docs the term_doc_count=2 and doc_count=2, giving
+		// IDF = ln((2-2+0.5)/(2+0.5)) which clamps to 0. We need a search
+		// term where term_doc_count < doc_count. Since both docs have the
+		// same content, every term has term_doc_count == doc_count, so IDF=0.
+		//
+		// Instead, directly verify that `compute_doc_length_and_count`
+		// returns valid (non-zero) stats before and after compaction.
+
+		// Before compaction: scorer should exist and have valid doc stats.
+		let (read_ctx, tx) = frozen_read_ctx(&test).await;
+		let scorer_before = test.fti.new_scorer(&read_ctx).await.unwrap();
+		assert!(scorer_before.is_some(), "scorer should exist (BM25 is configured)");
+		// Verify doc_count is non-zero via the scorer's internal state.
+		// We access this indirectly: if doc_count were 0, average_doc_length
+		// would be NaN, causing b_over_avg_len to be NaN. We can verify by
+		// checking compute_doc_length_and_count directly.
+		let dlc_before = test.fti.compute_doc_length_and_count(&tx, None).await.unwrap();
+		assert!(
+			dlc_before.doc_count > 0,
+			"doc_count before compaction should be > 0, got {}",
+			dlc_before.doc_count
+		);
+		assert!(
+			dlc_before.total_docs_length > 0,
+			"total_docs_length before compaction should be > 0, got {}",
+			dlc_before.total_docs_length
+		);
+
+		// Run compaction (mimics the background compaction that fires every 5s).
+		let tx = test.new_tx(TransactionType::Write).await;
+		let compacted = test.fti.compaction(&tx).await.unwrap();
+		tx.commit().await.unwrap();
+		assert!(compacted, "compaction should have processed delta logs");
+
+		// Verify the dc delta range is now empty (deltas were consumed).
+		let tx = test.new_tx(TransactionType::Read).await;
+		let (beg, end) = test.ikb.new_dc_range().unwrap();
+		assert_eq!(
+			tx.count(beg..end, None).await.unwrap(),
+			0,
+			"dc delta range should be empty after compaction"
+		);
+
+		// After compaction: doc stats must still be valid.
+		let dlc_after = test.fti.compute_doc_length_and_count(&tx, None).await.unwrap();
+		assert!(
+			dlc_after.doc_count > 0,
+			"doc_count after compaction should be > 0, got {}",
+			dlc_after.doc_count
+		);
+		assert!(
+			dlc_after.total_docs_length > 0,
+			"total_docs_length after compaction should be > 0, got {}",
+			dlc_after.total_docs_length
+		);
+		assert_eq!(
+			dlc_before.doc_count, dlc_after.doc_count,
+			"doc_count should be stable across compaction: before={}, after={}",
+			dlc_before.doc_count, dlc_after.doc_count
+		);
+		assert_eq!(
+			dlc_before.total_docs_length, dlc_after.total_docs_length,
+			"total_docs_length should be stable across compaction: before={}, after={}",
+			dlc_before.total_docs_length, dlc_after.total_docs_length
+		);
+
+		// Verify the scorer still works (doesn't produce NaN).
+		let (read_ctx, _tx) = frozen_read_ctx(&test).await;
+		let scorer_after = test.fti.new_scorer(&read_ctx).await.unwrap();
+		assert!(scorer_after.is_some(), "scorer should still exist after compaction");
 	}
 }

@@ -65,10 +65,8 @@ impl ScanPipeline {
 	/// computed fields, field-level permissions, or WHERE predicate) is
 	/// needed.
 	///
-	/// Callers use this *before* constructing a `ScanPipeline` to decide
-	/// whether `pre_skip` / `effective_storage_limit` can be pushed to
-	/// the KV layer. The same check is cached internally so that
-	/// [`process_batch`] can skip work when nothing is needed.
+	/// This is cached internally so that [`process_batch`] can skip work
+	/// when nothing is needed.
 	pub(crate) fn compute_needs_processing(
 		permission: &PhysicalPermission,
 		field_state: &FieldState,
@@ -79,6 +77,21 @@ impl ScanPipeline {
 			|| !field_state.computed_fields.is_empty()
 			|| (check_perms && !field_state.field_permissions.is_empty())
 			|| predicate.is_some()
+	}
+
+	/// Check whether any operation that **removes rows** is active.
+	///
+	/// Row-modifying operations (computed fields, field-level permissions)
+	/// preserve row count and positional ordering, so `pre_skip` and
+	/// `effective_storage_limit` can safely be pushed to the KV layer
+	/// even when they are present. Only table-level permission filtering
+	/// and WHERE predicates can change which rows survive, preventing
+	/// positional pushdown.
+	pub(crate) fn compute_needs_row_filtering(
+		permission: &PhysicalPermission,
+		predicate: Option<&Arc<dyn PhysicalExpr>>,
+	) -> bool {
+		!matches!(permission, PhysicalPermission::Allow) || predicate.is_some()
 	}
 
 	pub(crate) fn new(

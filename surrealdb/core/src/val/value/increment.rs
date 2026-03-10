@@ -5,7 +5,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::expr::FlowResultExt as _;
 use crate::expr::part::Part;
-use crate::val::{Number, Value};
+use crate::val::{Number, TryAdd, Value};
 
 impl Value {
 	/// Asynchronous method for incrementing a field in a `Value`
@@ -18,14 +18,6 @@ impl Value {
 		val: Value,
 	) -> Result<()> {
 		match self.get(stk, ctx, opt, None, path).await.catch_return()? {
-			Value::Number(v) => match val {
-				Value::Number(x) => self.set(stk, ctx, opt, path, Value::Number(v + x)).await,
-				_ => Ok(()),
-			},
-			Value::Duration(v) => match val {
-				Value::Duration(x) => self.set(stk, ctx, opt, path, Value::Duration(v + x)).await,
-				_ => Ok(()),
-			},
 			Value::Array(v) => match val {
 				Value::Array(x) => self.set(stk, ctx, opt, path, Value::Array(v.concat(x))).await,
 				x => self.set(stk, ctx, opt, path, Value::Array(v.with_push(x))).await,
@@ -38,7 +30,10 @@ impl Value {
 				Value::Array(x) => self.set(stk, ctx, opt, path, Value::Array(x)).await,
 				x => self.set(stk, ctx, opt, path, Value::from(vec![x])).await,
 			},
-			_ => Ok(()),
+			v => {
+				let result = v.try_add(val)?;
+				self.set(stk, ctx, opt, path, result).await
+			}
 		}
 	}
 }
@@ -85,6 +80,60 @@ mod tests {
 			.await
 			.unwrap();
 		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn increment_string() {
+		let (ctx, opt) = mock().await;
+		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let mut val = parse_val!("{ test: 'hello' }");
+		let res = parse_val!("{ test: 'hello world' }");
+		let mut stack = reblessive::TreeStack::new();
+		stack
+			.enter(|stk| val.increment(stk, &ctx, &opt, &idi, Value::from(" world")))
+			.finish()
+			.await
+			.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn increment_object() {
+		let (ctx, opt) = mock().await;
+		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let mut val = parse_val!("{ test: { a: 1 } }");
+		let res = parse_val!("{ test: { a: 1, b: 2 } }");
+		let mut stack = reblessive::TreeStack::new();
+		stack
+			.enter(|stk| val.increment(stk, &ctx, &opt, &idi, parse_val!("{ b: 2 }")))
+			.finish()
+			.await
+			.unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn increment_object_number_errors() {
+		let (ctx, opt) = mock().await;
+		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let mut val = parse_val!("{ test: { a: 1 } }");
+		let mut stack = reblessive::TreeStack::new();
+		let result =
+			stack.enter(|stk| val.increment(stk, &ctx, &opt, &idi, Value::from(10))).finish().await;
+		assert!(result.is_err());
+	}
+
+	#[tokio::test]
+	async fn increment_number_string_errors() {
+		let (ctx, opt) = mock().await;
+		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let mut val = parse_val!("{ test: 100 }");
+		let mut stack = reblessive::TreeStack::new();
+		let result = stack
+			.enter(|stk| val.increment(stk, &ctx, &opt, &idi, Value::from("hello")))
+			.finish()
+			.await;
+		assert!(result.is_err());
 	}
 
 	#[tokio::test]
