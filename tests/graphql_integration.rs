@@ -5500,6 +5500,9 @@ mod graphql_integration {
 		))
 		.await?;
 
+		// Allow the server to fully register the live query before mutating data
+		tokio::time::sleep(Duration::from_secs(1)).await;
+
 		{
 			let res = client.post(sql_url).body(r#"CREATE foo:3 SET val = 99;"#).send().await?;
 			assert_eq!(res.status(), 200);
@@ -5600,6 +5603,9 @@ mod graphql_integration {
 			.into(),
 		))
 		.await?;
+
+		// Allow the server to fully register the live queries before mutating data
+		tokio::time::sleep(Duration::from_secs(1)).await;
 
 		{
 			let res = client
@@ -5719,6 +5725,9 @@ mod graphql_integration {
 			.into(),
 		))
 		.await?;
+
+		// Allow the server to fully register the live query before mutating data
+		tokio::time::sleep(Duration::from_secs(1)).await;
 
 		{
 			let res = client
