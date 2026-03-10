@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result, bail, ensure};
 use bytes::Bytes;
@@ -26,6 +26,12 @@ pub struct V2Commands {
 	args: Vec<String>,
 }
 
+pub async fn update_modified_time(file: &Path) -> Result<()> {
+	let f = tokio::fs::File::open(file).await?;
+	f.into_std().await.set_modified(SystemTime::now())?;
+	Ok(())
+}
+
 pub async fn get_existing_version(file: &Path) -> Option<Version> {
 	let res = tokio::time::timeout(Duration::from_secs(1), async {
 		tokio::process::Command::new(file).arg("version").output().await
@@ -39,6 +45,10 @@ pub async fn get_existing_version(file: &Path) -> Option<Version> {
 		.ok()?;
 	let version = str::from_utf8(&res.stdout).ok()?;
 	let version = version.split_whitespace().next()?.trim();
+
+	let _ = update_modified_time(file)
+		.await
+		.inspect_err(|e| warn!("Could not update the modification of the file: {e}"));
 	semver::Version::parse(version).ok()
 }
 
@@ -46,6 +56,9 @@ pub async fn get_latest_version() -> Option<Version> {
 	let body = reqwest::get("https://download.surrealdb.com/v2.txt")
 		.await
 		.inspect_err(|e| warn!("Could not fetch latest v2 version: {e}"))
+		.ok()?
+		.error_for_status()
+		.inspect_err(|e| warn!("Could not fetch latest version from download page: {e}"))
 		.ok()?;
 
 	let body =
@@ -117,6 +130,8 @@ pub async fn download_v2(
 	let res =
 		reqwest::get(url).await.context("Could not access surrealdb v2 binary download page")?;
 
+	let res = res.error_for_status().context("Download page returned an error status code")?;
+
 	let mut file = tokio::fs::OpenOptions::new()
 		.create(true)
 		.write(true)
@@ -131,7 +146,8 @@ pub async fn download_v2(
 	flush(&mut reader, &mut file).await.context("Failed to download v2 binary")?;
 
 	if suffix.ends_with("tgz") {
-		let extraction_path = temp_path.with_added_extension("bin");
+		let mut extraction_path = temp_path.clone();
+		extraction_path.set_extension("bin");
 		let mut file = tokio::fs::OpenOptions::new()
 			.create(true)
 			.write(true)
