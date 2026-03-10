@@ -76,6 +76,15 @@ runs:
         echo v${{ inputs.version }} > latest.txt
         aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
 
+    - name: Set stable major-version pointer (e.g. v3.txt)
+      if: ${{ inputs.publish == 'true' && inputs.pre-release != 'true' }}
+      shell: bash
+      run: |
+        version="${{ inputs.version }}"
+        major="${version%%.*}"
+        echo "v${version}" > "v${major}.txt"
+        aws s3 cp --cache-control 'no-store' "v${major}.txt" "s3://download.surrealdb.com/v${major}.txt"
+
     - name: Set latest alpha or beta version
       if: ${{ inputs.publish == 'true' && inputs.pre-release == 'true' }}
       shell: bash
