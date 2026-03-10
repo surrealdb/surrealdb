@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
+
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Utc};
 use rand::{Rng, thread_rng};
@@ -116,6 +119,10 @@ pub struct LeaseHandler {
 	task_type: TaskLeaseType,
 	/// How long each acquired lease should remain valid
 	lease_duration: Duration,
+	/// Unix timestamp (seconds) of the last lease maintenance check
+	last_maintain_check: Arc<AtomicI64>,
+	/// Maintenance period in seconds used to throttle lease checks
+	maintain_period: i64,
 }
 
 impl LeaseHandler {
@@ -124,11 +131,16 @@ impl LeaseHandler {
 	/// This constructor initializes a lease handler that will manage leases for a specific
 	/// task type using the provided transaction factory and lease duration.
 	///
+	/// The effective lease duration is clamped to a minimum of 8 seconds to prevent
+	/// excessive contention from very short lease durations.
+	///
 	/// # Arguments
+	/// * `sequences` - Sequence generator for transaction operations
 	/// * `node` - UUID of the current node that will attempt to acquire leases
 	/// * `tf` - Transaction factory for performing database operations
 	/// * `task_type` - The type of task this handler will manage leases for
 	/// * `lease_duration` - How long each acquired lease should remain valid before expiring
+	///   (minimum effective duration: 8 seconds)
 	///
 	/// # Returns
 	/// * `Ok(Self)` - A new LeaseHandler instance ready to manage leases
@@ -146,7 +158,9 @@ impl LeaseHandler {
 			node,
 			tf,
 			task_type,
-			lease_duration: Duration::from_std(lease_duration)?,
+			lease_duration: Duration::from_std(lease_duration)?.max(Duration::seconds(8)),
+			last_maintain_check: Arc::new(AtomicI64::new(0)),
+			maintain_period: ((lease_duration.as_secs() / 8) as i64).max(1),
 		})
 	}
 
@@ -190,17 +204,13 @@ impl LeaseHandler {
 
 	/// Attempts to maintain the current lease by checking and potentially renewing it.
 	///
-	/// This method provides lease ownership status to allow callers to decide whether to
-	/// continue processing or stop. It performs these operations:
-	/// 1. Checks if the current node owns a valid lease
-	/// 2. Renews the lease if needed and possible
-	/// 3. Returns whether the node currently owns the lease
+	/// This method is throttled: it performs an actual lease check at most once per maintenance
+	/// period (`lease_duration / 8`). When throttled (i.e., called again before the maintenance
+	/// period has elapsed), it returns `Ok(true)` immediately without contacting the datastore,
+	/// assuming the lease is still held.
 	///
-	/// # Design Rationale
-	///
-	/// When called periodically during long-running task processing (e.g., in loops processing
-	/// multiple items), this method ensures the node makes a best effort to maintain its lease.
-	/// It returns the current lease ownership status, allowing callers to decide their behavior:
+	/// When a check is performed, it provides lease ownership status to allow callers to decide
+	/// whether to continue processing or stop:
 	/// - **Continue processing**: Callers may choose to complete work already started even if the
 	///   lease is lost, preventing inconsistent state
 	/// - **Stop processing**: Callers may choose to abort immediately when losing the lease to
@@ -211,7 +221,8 @@ impl LeaseHandler {
 	/// execution.
 	///
 	/// # Returns
-	/// * `Ok(true)` - The node successfully maintained or renewed the lease and still owns it
+	/// * `Ok(true)` - The lease check was throttled (assumed still held), or the node successfully
+	///   maintained/renewed the lease
 	/// * `Ok(false)` - The node lost the lease to another node (or another node acquired it during
 	///   a race condition)
 	/// * `Err` - If database operations fail
@@ -238,9 +249,20 @@ impl LeaseHandler {
 	/// }
 	/// ```
 	pub(crate) async fn try_maintain_lease(&self) -> Result<bool> {
-		// Check and potentially renew the lease, returning ownership status.
-		// Callers can use this information to decide whether to continue or stop processing.
-		self.check_lease().await
+		let now = Utc::now();
+		let now_ts = now.timestamp();
+		let last = self.last_maintain_check.load(Ordering::Relaxed);
+		if (now_ts < last || now_ts - last > self.maintain_period)
+			&& self
+				.last_maintain_check
+				.compare_exchange(last, now_ts, Ordering::Relaxed, Ordering::Relaxed)
+				.is_ok()
+		{
+			// Check and potentially renew the lease, returning ownership status.
+			// Callers can use this information to decide whether to continue or stop processing.
+			return self.check_lease().await;
+		}
+		Ok(true)
 	}
 
 	/// Checks if a lease exists and attempts to acquire or renew it.
@@ -363,8 +385,9 @@ impl LeaseHandler {
 			.transaction(TransactionType::Write, LockType::Optimistic, self.sequences.clone())
 			.await?;
 
-		// Optimization: If a valid (non-expired) lease already exists and we don't own it,
-		// return early without attempting to write. This avoids unnecessary transaction overhead.
+		// Re-check within the write transaction: if another node owns a non-expired lease,
+		// return early without attempting to write. This avoids unnecessary write attempts
+		// when the lease state changed between the initial read and this write transaction.
 		let previous_lease = if let Some((current_lease, current_status)) =
 			self.get_lease(&tx, current).await?
 		{
@@ -391,7 +414,8 @@ impl LeaseHandler {
 		// This ensures mutual exclusion: only one node can successfully acquire the lease when
 		// multiple nodes attempt acquisition simultaneously (e.g., when replacing an expired
 		// lease).
-		match tx.putc(&Tl::new(&self.task_type), &new_lease, previous_lease.as_ref()).await {
+		let res = tx.putc(&Tl::new(&self.task_type), &new_lease, previous_lease.as_ref()).await;
+		match res {
 			Ok(()) => {
 				tx.commit().await?;
 				Ok(true)
@@ -403,6 +427,7 @@ impl LeaseHandler {
 			// and allow ongoing tasks to complete even when another node takes over the lease.
 			// This prevents tasks from aborting mid-process when lease ownership changes.
 			Err(e) => {
+				tx.cancel().await?;
 				if matches!(
 					e.downcast_ref::<Error>(),
 					Some(Error::Kvs(KvsError::TransactionConditionNotMet))
@@ -420,6 +445,8 @@ impl LeaseHandler {
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-mem"))]
 mod tests {
 	use std::sync::Arc;
+	#[cfg(feature = "kv-mem")]
+	use std::sync::atomic::Ordering;
 	use std::time::{Duration, Instant};
 
 	#[cfg(feature = "kv-mem")]
@@ -595,18 +622,18 @@ mod tests {
 		task_lease_concurrency(flavor).await;
 	}
 
-	/// Tests the task lease concurrency mechanism using a RocksDB datastore.
+	/// Tests the task lease concurrency mechanism using a SurrealKV datastore.
 	///
-	/// This test creates a temporary RocksDB datastore and runs the task lease
+	/// This test creates a temporary SurrealKV datastore and runs the task lease
 	/// concurrency test to verify that the lease mechanism works correctly in
 	/// a multi-threaded environment with a persistent storage backend.
 	///
-	/// The test is only compiled and run when the "kv-rocksdb" feature is
+	/// The test is only compiled and run when the "kv-surrealkv" feature is
 	/// enabled.
 	#[cfg(feature = "kv-surrealkv")]
 	#[tokio::test(flavor = "multi_thread")]
 	async fn task_lease_concurrency_surrealkv() {
-		// Create a temporary directory for the RocksDB datastore
+		// Create a temporary directory for the SurrealKV datastore
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		// Create a new SurrealKV configuration
 		let config = crate::kvs::config::SurrealKvConfig::default();
@@ -623,18 +650,10 @@ mod tests {
 	///
 	/// This test verifies that:
 	/// 1. A node that owns a lease doesn't try to re-acquire it if more than half the lease
-	///    duration remains
-	/// 2. A node that owns a lease does try to re-acquire it if less than half the lease duration
-	///    remains
-	///
-	/// Note: `check_lease()` now takes an explicit `now`, but lease expiration is
-	/// still based on `Utc::now()` inside `acquire_new_lease()`. We therefore
-	/// validate relative behavior instead of exact timestamps by:
-	/// - Checking that multiple calls to `check_lease()` in quick succession don't change the lease
-	///   expiration
-	/// - Manually verifying the condition that would trigger renewal (less than half duration
-	///   remaining)
-	/// - Forcing a renewal by calling `check_lease()` and verifying the expiration changes
+	///    duration remains (status: Valid)
+	/// 2. After waiting for more than half the lease duration, the lease enters the Renewable state
+	///    and `check_lease()` triggers a renewal
+	/// 3. After renewal, the lease is Valid again with a later expiration time
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_lease_renewal_behavior() {
@@ -649,8 +668,8 @@ mod tests {
 		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
-		// Set lease duration to 5 seconds
-		let lease_duration = Duration::from_secs(5);
+		// Set lease duration to 10 seconds
+		let lease_duration = Duration::from_secs(10);
 		let node_id = Uuid::new_v4();
 
 		// Create a lease handler
@@ -691,7 +710,7 @@ mod tests {
 
 		// PART 3: Verify the condition for renewal
 		// Wait half the lease duration
-		sleep(Duration::from_secs(3)).await;
+		sleep(Duration::from_secs(7)).await;
 
 		// Get the current lease status
 		let (_, status) = lh.read_lease(Utc::now()).await.unwrap().unwrap();
@@ -705,5 +724,399 @@ mod tests {
 		let (new_lease, status) = lh.read_lease(Utc::now()).await.unwrap().unwrap();
 		assert!(matches!(status, LeaseStatus::Valid), "Lease should be valid - {status:?}");
 		assert!(new_lease.expiration > initial_lease.expiration, "Lease should have been renewed");
+	}
+
+	/// Tests that another node cannot acquire a lease while a valid lease is held.
+	///
+	/// This test verifies the mutual exclusion property of the lease system:
+	/// 1. Node A acquires a lease successfully
+	/// 2. Node B attempts to acquire the same lease type and is rejected
+	/// 3. Node A can still confirm it holds the lease
+	#[cfg(feature = "kv-mem")]
+	#[tokio::test]
+	async fn test_another_node_rejected_while_lease_valid() {
+		let config = crate::kvs::config::MemoryConfig::default();
+		let flavor =
+			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let async_event_trigger = Arc::new(Notify::new());
+		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
+
+		let lease_duration = Duration::from_secs(60);
+		let node_a = Uuid::from_u128(1);
+		let node_b = Uuid::from_u128(2);
+
+		// Node A acquires the lease
+		let lh_a = LeaseHandler::new(
+			sequences.clone(),
+			node_a,
+			tf.clone(),
+			TaskLeaseType::IndexCompaction,
+			lease_duration,
+		)
+		.unwrap();
+		let acquired = lh_a.check_lease().await.unwrap();
+		assert!(acquired, "Node A should acquire the lease");
+
+		// Node B tries to acquire the same lease type
+		let lh_b = LeaseHandler::new(
+			sequences.clone(),
+			node_b,
+			tf.clone(),
+			TaskLeaseType::IndexCompaction,
+			lease_duration,
+		)
+		.unwrap();
+		let acquired = lh_b.check_lease().await.unwrap();
+		assert!(!acquired, "Node B should be rejected while Node A holds a valid lease");
+
+		// Node A still holds the lease
+		let acquired = lh_a.check_lease().await.unwrap();
+		assert!(acquired, "Node A should still hold the lease");
+
+		// Verify the lease is owned by Node A
+		let (lease, status) = lh_a.read_lease(Utc::now()).await.unwrap().unwrap();
+		assert_eq!(lease.owner, node_a);
+		assert!(matches!(status, LeaseStatus::Valid), "Lease should be valid - {status:?}");
+	}
+
+	/// Tests that the minimum lease duration floor of 8 seconds is enforced.
+	///
+	/// When a very short lease duration (e.g., 1 second) is provided, the effective
+	/// duration should be clamped to 8 seconds. This prevents excessive contention
+	/// from misconfigured short leases.
+	#[cfg(feature = "kv-mem")]
+	#[tokio::test]
+	async fn test_min_lease_duration_floor() {
+		let config = crate::kvs::config::MemoryConfig::default();
+		let flavor =
+			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let async_event_trigger = Arc::new(Notify::new());
+		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
+
+		// Create a handler with a 1-second lease duration (below the 8-second floor)
+		let lh = LeaseHandler::new(
+			sequences,
+			Uuid::new_v4(),
+			tf,
+			TaskLeaseType::IndexCompaction,
+			Duration::from_secs(1),
+		)
+		.unwrap();
+
+		// The effective lease duration should be clamped to 8 seconds
+		assert_eq!(
+			lh.lease_duration,
+			chrono::Duration::seconds(8),
+			"Lease duration should be clamped to the 8-second minimum"
+		);
+
+		// Acquire a lease and verify the expiration reflects the 8-second floor
+		lh.check_lease().await.unwrap();
+		let now = Utc::now();
+		let (lease, _) = lh.read_lease(now).await.unwrap().unwrap();
+		// The expiration should be approximately 8 seconds from when it was acquired
+		let remaining = lease.expiration - now;
+		assert!(
+			remaining > chrono::Duration::seconds(6),
+			"Lease expiration should reflect the 8-second floor, but remaining is {remaining}"
+		);
+	}
+
+	/// Tests that different task types maintain independent leases.
+	///
+	/// Two handlers managing different task types should not interfere with each other.
+	/// Both should be able to acquire leases simultaneously, even for the same node.
+	#[cfg(feature = "kv-mem")]
+	#[tokio::test]
+	async fn test_different_task_types_are_independent() {
+		let config = crate::kvs::config::MemoryConfig::default();
+		let flavor =
+			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let async_event_trigger = Arc::new(Notify::new());
+		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
+
+		let lease_duration = Duration::from_secs(60);
+		let node_a = Uuid::from_u128(1);
+		let node_b = Uuid::from_u128(2);
+
+		// Node A acquires a lease for IndexCompaction
+		let lh_a = LeaseHandler::new(
+			sequences.clone(),
+			node_a,
+			tf.clone(),
+			TaskLeaseType::IndexCompaction,
+			lease_duration,
+		)
+		.unwrap();
+		let acquired = lh_a.check_lease().await.unwrap();
+		assert!(acquired, "Node A should acquire IndexCompaction lease");
+
+		// Node B acquires a lease for ChangeFeedCleanup (different task type)
+		let lh_b = LeaseHandler::new(
+			sequences.clone(),
+			node_b,
+			tf.clone(),
+			TaskLeaseType::ChangeFeedCleanup,
+			lease_duration,
+		)
+		.unwrap();
+		let acquired = lh_b.check_lease().await.unwrap();
+		assert!(acquired, "Node B should acquire ChangeFeedCleanup lease independently");
+
+		// Both leases should still be valid
+		let (lease_a, _) = lh_a.read_lease(Utc::now()).await.unwrap().unwrap();
+		let (lease_b, _) = lh_b.read_lease(Utc::now()).await.unwrap().unwrap();
+		assert_eq!(lease_a.owner, node_a);
+		assert_eq!(lease_b.owner, node_b);
+	}
+
+	/// Tests the throttling behavior of `try_maintain_lease`.
+	///
+	/// This test verifies that:
+	/// 1. The first call to `try_maintain_lease` performs an actual lease check
+	/// 2. Subsequent calls within the maintenance period are throttled and return `Ok(true)`
+	///    without contacting the datastore
+	/// 3. The `last_maintain_check` timestamp is updated on the first call but not on throttled
+	///    calls
+	#[cfg(feature = "kv-mem")]
+	#[tokio::test]
+	async fn test_try_maintain_lease_throttling() {
+		let config = crate::kvs::config::MemoryConfig::default();
+		let flavor =
+			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let async_event_trigger = Arc::new(Notify::new());
+		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
+
+		// Use a 60-second lease so maintain_period = 60/8 = 7 seconds
+		let lease_duration = Duration::from_secs(60);
+		let node_id = Uuid::new_v4();
+
+		let lh = LeaseHandler::new(
+			sequences,
+			node_id,
+			tf,
+			TaskLeaseType::IndexCompaction,
+			lease_duration,
+		)
+		.unwrap();
+
+		// First, acquire the lease
+		let acquired = lh.check_lease().await.unwrap();
+		assert!(acquired, "Should acquire the lease");
+
+		// The last_maintain_check starts at 0 (never checked)
+		// First call to try_maintain_lease should perform an actual check
+		let result = lh.try_maintain_lease().await.unwrap();
+		assert!(result, "First try_maintain_lease should succeed");
+
+		// Record the timestamp after the first maintain call
+		let first_check_ts = lh.last_maintain_check.load(Ordering::Relaxed);
+		assert!(first_check_ts > 0, "last_maintain_check should be updated after first call");
+
+		// Subsequent calls within the maintenance period should be throttled
+		// (maintain_period = 7 seconds, and we're calling immediately)
+		let result = lh.try_maintain_lease().await.unwrap();
+		assert!(result, "Throttled try_maintain_lease should return Ok(true)");
+
+		// The timestamp should not change on throttled calls
+		let second_check_ts = lh.last_maintain_check.load(Ordering::Relaxed);
+		assert_eq!(
+			first_check_ts, second_check_ts,
+			"last_maintain_check should not change on throttled calls"
+		);
+
+		// Call many times rapidly - all should be throttled and return Ok(true)
+		for _ in 0..100 {
+			let result = lh.try_maintain_lease().await.unwrap();
+			assert!(result, "All throttled calls should return Ok(true)");
+		}
+	}
+
+	/// Tests the full lease lifecycle including expiration and takeover by another node.
+	///
+	/// This test verifies that:
+	/// 1. Node A acquires a lease
+	/// 2. Node B is rejected while the lease is valid
+	/// 3. After the lease expires, the status transitions to Expired
+	/// 4. Node B can then successfully acquire the expired lease
+	/// 5. Node A is now rejected when trying to re-acquire
+	#[cfg(feature = "kv-mem")]
+	#[tokio::test]
+	async fn test_lease_expiration_and_takeover() {
+		let config = crate::kvs::config::MemoryConfig::default();
+		let flavor =
+			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let async_event_trigger = Arc::new(Notify::new());
+		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
+
+		// Use the minimum lease duration (8 seconds due to the floor)
+		let lease_duration = Duration::from_secs(1); // Will be clamped to 8 seconds
+		let node_a = Uuid::from_u128(1);
+		let node_b = Uuid::from_u128(2);
+
+		let lh_a = LeaseHandler::new(
+			sequences.clone(),
+			node_a,
+			tf.clone(),
+			TaskLeaseType::IndexCompaction,
+			lease_duration,
+		)
+		.unwrap();
+		let lh_b = LeaseHandler::new(
+			sequences.clone(),
+			node_b,
+			tf.clone(),
+			TaskLeaseType::IndexCompaction,
+			lease_duration,
+		)
+		.unwrap();
+
+		// Node A acquires the lease
+		let acquired = lh_a.check_lease().await.unwrap();
+		assert!(acquired, "Node A should acquire the lease");
+
+		// Node B is rejected
+		let acquired = lh_b.check_lease().await.unwrap();
+		assert!(!acquired, "Node B should be rejected while Node A holds the lease");
+
+		// Wait for the lease to expire (8 seconds + small margin)
+		sleep(Duration::from_secs(9)).await;
+
+		// Verify the lease is now expired
+		let (_, status) = lh_a.read_lease(Utc::now()).await.unwrap().unwrap();
+		assert!(
+			matches!(status, LeaseStatus::Expired),
+			"Lease should be expired after waiting - {status:?}"
+		);
+
+		// Node B can now acquire the expired lease
+		let acquired = lh_b.check_lease().await.unwrap();
+		assert!(acquired, "Node B should acquire the expired lease");
+
+		// Verify Node B now owns the lease
+		let (lease, status) = lh_b.read_lease(Utc::now()).await.unwrap().unwrap();
+		assert_eq!(lease.owner, node_b, "Node B should now own the lease");
+		assert!(matches!(status, LeaseStatus::Valid), "New lease should be valid - {status:?}");
+
+		// Node A should now be rejected
+		let acquired = lh_a.check_lease().await.unwrap();
+		assert!(!acquired, "Node A should be rejected now that Node B owns the lease");
+	}
+
+	/// Tests that `try_maintain_lease` returns `Ok(false)` when another node has taken the lease.
+	///
+	/// This verifies that the lease ownership status is correctly propagated through
+	/// `try_maintain_lease` when an actual check is performed and the lease is no longer
+	/// owned by the current node.
+	#[cfg(feature = "kv-mem")]
+	#[tokio::test]
+	async fn test_try_maintain_lease_reports_lost_lease() {
+		let config = crate::kvs::config::MemoryConfig::default();
+		let flavor =
+			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let async_event_trigger = Arc::new(Notify::new());
+		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
+
+		// Use minimum lease duration (clamped to 8 seconds)
+		let lease_duration = Duration::from_secs(1);
+		let node_a = Uuid::from_u128(1);
+		let node_b = Uuid::from_u128(2);
+
+		let lh_a = LeaseHandler::new(
+			sequences.clone(),
+			node_a,
+			tf.clone(),
+			TaskLeaseType::IndexCompaction,
+			lease_duration,
+		)
+		.unwrap();
+		let lh_b = LeaseHandler::new(
+			sequences.clone(),
+			node_b,
+			tf.clone(),
+			TaskLeaseType::IndexCompaction,
+			lease_duration,
+		)
+		.unwrap();
+
+		// Node A acquires the lease
+		let acquired = lh_a.check_lease().await.unwrap();
+		assert!(acquired, "Node A should acquire the lease");
+
+		// Node A's try_maintain_lease should succeed
+		let result = lh_a.try_maintain_lease().await.unwrap();
+		assert!(result, "Node A should maintain the lease");
+
+		// Wait for the lease to expire
+		sleep(Duration::from_secs(9)).await;
+
+		// Node B acquires the expired lease
+		let acquired = lh_b.check_lease().await.unwrap();
+		assert!(acquired, "Node B should acquire the expired lease");
+
+		// Force Node A's throttle to allow a real check by advancing last_maintain_check
+		// far into the past
+		lh_a.last_maintain_check.store(0, Ordering::Relaxed);
+
+		// Node A's try_maintain_lease should now report the lease is lost
+		let result = lh_a.try_maintain_lease().await.unwrap();
+		assert!(!result, "Node A should detect that it lost the lease");
+	}
+
+	/// Tests that a lease created with no prior state works correctly.
+	///
+	/// This verifies the `acquire_new_lease` path when no lease exists in the datastore
+	/// (previous_lease is None), ensuring the `putc` conditional write handles the
+	/// "key doesn't exist" case correctly.
+	#[cfg(feature = "kv-mem")]
+	#[tokio::test]
+	async fn test_initial_lease_acquisition_from_empty_state() {
+		let config = crate::kvs::config::MemoryConfig::default();
+		let flavor =
+			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
+		let async_event_trigger = Arc::new(Notify::new());
+		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
+
+		let node_id = Uuid::new_v4();
+		let lh = LeaseHandler::new(
+			sequences.clone(),
+			node_id,
+			tf.clone(),
+			TaskLeaseType::IndexCompaction,
+			Duration::from_secs(60),
+		)
+		.unwrap();
+
+		// Verify no lease exists initially
+		let result = lh.read_lease(Utc::now()).await.unwrap();
+		assert!(result.is_none(), "No lease should exist initially");
+
+		// Acquire the lease from empty state
+		let acquired = lh.check_lease().await.unwrap();
+		assert!(acquired, "Should acquire lease from empty state");
+
+		// Verify the lease now exists with correct owner
+		let (lease, status) = lh.read_lease(Utc::now()).await.unwrap().unwrap();
+		assert_eq!(lease.owner, node_id, "Lease owner should match the node");
+		assert!(matches!(status, LeaseStatus::Valid), "New lease should be valid - {status:?}");
+
+		// Verify has_lease also works from empty state (using a different task type)
+		let lh2 = LeaseHandler::new(
+			sequences,
+			node_id,
+			tf,
+			TaskLeaseType::EventProcessing,
+			Duration::from_secs(60),
+		)
+		.unwrap();
+		let acquired = lh2.has_lease().await.unwrap();
+		assert!(acquired, "has_lease should acquire from empty state");
 	}
 }
