@@ -1770,7 +1770,7 @@ impl IndexCountThingIterator {
 		let count = count.unsigned_abs();
 		let compact_key =
 			IndexCountKey::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None, pos, count);
-		txn.put(&compact_key, &(), None).await?;
+		txn.set(&compact_key, &(), None).await?;
 		Ok(())
 	}
 }
