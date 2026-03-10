@@ -5,9 +5,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use rust_decimal::Decimal;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate as surrealdb_types;
 use crate::error::{ConversionError, LengthMismatchError, OutOfRangeError};
+use crate::traits::ser::Serializer;
 use crate::{
 	Array, Bytes, Datetime, Duration, Error, File, Geometry, Kind, Number, Object, Range, RecordId,
 	Set, SurrealNone, SurrealNull, Table, Uuid, Value, kind,
@@ -586,6 +589,18 @@ impl_surreal_value!(
 			return Err(ConversionError::from_value(Self::kind_of(), &value).into());
 		};
 		Ok(d)
+	}
+);
+
+impl_surreal_value!(
+	chrono::NaiveDate as kind!(datetime),
+	(value) => matches!(value, Value::Datetime(_)),
+	(self) => Value::Datetime(Datetime(chrono::DateTime::from_naive_utc_and_offset(self.and_time(chrono::NaiveTime::MIN), chrono::Utc))),
+	(value) => {
+		let Value::Datetime(Datetime(d)) = value else {
+			return Err(ConversionError::from_value(Self::kind_of(), &value).into());
+		};
+		Ok(d.date_naive())
 	}
 );
 
@@ -1381,37 +1396,7 @@ impl SurrealValue for serde_json::Value {
 	}
 
 	fn from_value(value: Value) -> Result<Self, Error> {
-		match value {
-			Value::None | Value::Null => Ok(serde_json::Value::Null),
-			Value::Bool(b) => Ok(serde_json::Value::Bool(b)),
-			Value::Number(n) => match n {
-				Number::Int(i) => Ok(serde_json::Value::Number(serde_json::Number::from(i))),
-				Number::Float(f) => {
-					if let Some(num) = serde_json::Number::from_f64(f) {
-						Ok(serde_json::Value::Number(num))
-					} else {
-						Ok(serde_json::Value::Null)
-					}
-				}
-				Number::Decimal(d) => Ok(serde_json::Value::String(d.to_string())),
-			},
-			Value::String(s) => Ok(serde_json::Value::String(s)),
-			Value::Object(o) => {
-				let mut obj = serde_json::Map::new();
-				for (k, v) in o.0 {
-					obj.insert(k, serde_json::Value::from_value(v)?);
-				}
-				Ok(serde_json::Value::Object(obj))
-			}
-			Value::Array(a) => {
-				let mut arr = Vec::new();
-				for v in a.0 {
-					arr.push(serde_json::Value::from_value(v)?);
-				}
-				Ok(serde_json::Value::Array(arr))
-			}
-			_ => Err(ConversionError::from_value(Self::kind_of(), &value).into()),
-		}
+		Ok(value.into_json_value())
 	}
 }
 
@@ -1632,5 +1617,98 @@ impl<T: SurrealValue + Hash + Eq> SurrealValue for HashSet<T> {
 		a.into_iter().map(|v| T::from_value(v)).collect::<Result<HashSet<T>, Error>>().map_err(
 			|e| Error::internal(format!("Failed to convert to {}: {}", Self::kind_of(), e)),
 		)
+	}
+}
+
+/// A wrapper struct that allows bridging between SurrealValue and types that implement Serialize
+/// and Deserialize
+///
+/// # A note on parity with `SurrealValue`
+/// Serializing and Deserializing a type does *not* behave the same as `SurrealValue` in some cases.
+/// Notably:
+/// - Enum variants behave differently
+/// - The only primitives taken advantage of are String, Number, Bool, Bytes, Object, and Array
+///
+/// As such, it's best to use SurrealValue directly where possible. This is intended for types where
+/// an implementation of SurrealValue isn't available or practical
+pub struct Wrapper<T: Serialize + DeserializeOwned>(pub T);
+
+impl<T: Serialize + DeserializeOwned> SurrealValue for Wrapper<T> {
+	fn kind_of() -> Kind {
+		Kind::Any
+	}
+
+	fn into_value(self) -> Value {
+		self.0.serialize(Serializer).expect("serialization to a value failed!")
+	}
+
+	fn from_value(value: Value) -> Result<Self, Error>
+	where
+		Self: Sized,
+	{
+		Ok(Self(T::deserialize(value)?))
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use std::fmt::Debug;
+
+	use rstest::rstest;
+	use serde::{Deserialize, Serialize};
+
+	use super::*;
+
+	#[derive(Serialize, Deserialize, PartialEq, Debug)]
+	enum Test {
+		A,
+		B(u8),
+		C {
+			hi: String,
+		},
+	}
+
+	#[derive(Serialize, Deserialize, PartialEq, Debug)]
+	struct Test2 {
+		is_goober: bool,
+		sneaky_and_evil: (),
+		also_sneaky_and_evil: Gerald,
+	}
+
+	#[derive(Serialize, Deserialize, PartialEq, Debug)]
+	struct Gerald;
+
+	#[rstest]
+	#[case::u8(64_u8)]
+	#[case::u16(64_u16)]
+	#[case::u32(64_u32)]
+	#[case::u64(64_u64)]
+	#[case::i8(64_i8)]
+	#[case::i16(64_i16)]
+	#[case::i32(64_i32)]
+	#[case::i64(64_i64)]
+	#[case::f32(64.0_f32)]
+	#[case::f64(64.0_f64)]
+	#[case::bool(true)]
+	#[case::zst_unit(())]
+	#[case::zst_arr([(); 0])]
+	#[case::zst_struct(Gerald)]
+	// static strings don't work because Value isn't zero-copy
+	//#[case::static_str("woag!")]
+	#[case::string("woag!".to_string())]
+	#[case::unit_enum(Test::A)]
+	#[case::newtype_enum(Test::B(64))]
+	#[case::struct_enum(Test::C{hi: "woag!".to_string()})]
+	#[case::_struct(Test2 {
+		is_goober: true,
+		sneaky_and_evil: (),
+		also_sneaky_and_evil: Gerald
+	})]
+	#[allow(non_snake_case)]
+	fn wrapper_roundtrip<'a>(#[case] value: impl Serialize + Deserialize<'a> + PartialEq + Debug) {
+		let serialized_value = value.serialize(Serializer).expect("this should work!");
+		let deserialized_value =
+			<_ as Deserialize>::deserialize(serialized_value).expect("this should work!");
+		assert_eq!(value, deserialized_value);
 	}
 }
