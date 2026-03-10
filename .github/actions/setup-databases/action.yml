@@ -1,19 +1,11 @@
 name: 'Setup databases'
-description: 'Install TiKV and/or FoundationDB based on requirements'
+description: 'Install TiKV for testing'
 
 inputs:
   tikv:
     description: 'Install TiKV'
     required: false
     default: 'false'
-  foundationdb:
-    description: 'Install FoundationDB'
-    required: false
-    default: 'false'
-  fdb-version:
-    description: 'FoundationDB version'
-    required: false
-    default: '7.3.47'
 
 runs:
   using: 'composite'
@@ -32,9 +24,3 @@ runs:
           sleep 5
         done
         $HOME/.tiup/bin/tiup -v
-
-    - name: Install FoundationDB
-      if: ${{ inputs.foundationdb == 'true' }}
-      uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # v2.2.0
-      with:
-        version: ${{ inputs.fdb-version }}

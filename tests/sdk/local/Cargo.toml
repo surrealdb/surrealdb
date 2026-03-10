@@ -4,7 +4,7 @@ version = "1.0.0"
 edition = "2024"
 
 [dependencies]
-surrealdb = { path = "../../../crates/sdk", features = ["kv-mem"] }
+surrealdb = { path = "../../../surrealdb", features = ["kv-mem"] }
 tokio = { version = "1", features = ["full"] }
 
 [workspace]

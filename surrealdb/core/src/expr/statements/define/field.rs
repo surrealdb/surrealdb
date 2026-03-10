@@ -1,0 +1,655 @@
+use std::sync::Arc;
+
+use anyhow::{Result, bail, ensure};
+use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
+use uuid::Uuid;
+
+use super::DefineKind;
+use crate::catalog::providers::TableProvider;
+use crate::catalog::{
+	self, DatabaseId, FieldDefinition, NamespaceId, Permission, Permissions, Relation,
+	TableDefinition, TableType,
+};
+use crate::ctx::FrozenContext;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
+use crate::expr::reference::Reference;
+use crate::expr::{
+	Base, Expr, FlowResultExt, Idiom, Kind, KindLiteral, Literal, Part, RecordIdKeyLit,
+};
+use crate::iam::{Action, AuthLimit, ResourceKind};
+use crate::kvs::Transaction;
+use crate::val::{TableName, Value};
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub(crate) enum DefineDefault {
+	#[default]
+	None,
+	Always(Expr),
+	Set(Expr),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct DefineFieldStatement {
+	pub kind: DefineKind,
+	pub name: Expr,
+	pub what: Expr,
+	pub field_kind: Option<Kind>,
+	pub flexible: bool,
+	pub readonly: bool,
+	pub value: Option<Expr>,
+	pub assert: Option<Expr>,
+	pub computed: Option<Expr>,
+	pub default: DefineDefault,
+	pub permissions: Permissions,
+	pub comment: Expr,
+	pub reference: Option<Reference>,
+}
+
+impl Default for DefineFieldStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			what: Expr::Literal(Literal::None),
+			field_kind: None,
+			flexible: false,
+			readonly: false,
+			value: None,
+			assert: None,
+			computed: None,
+			default: DefineDefault::None,
+			permissions: Permissions::default(),
+			comment: Expr::Literal(Literal::None),
+			reference: None,
+		}
+	}
+}
+
+impl DefineFieldStatement {
+	pub(crate) async fn to_definition(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<catalog::FieldDefinition> {
+		fn convert_permission(permission: &Permission) -> Permission {
+			match permission {
+				Permission::None => Permission::None,
+				Permission::Full => Permission::Full,
+				Permission::Specific(expr) => Permission::Specific(expr.clone()),
+			}
+		}
+
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
+		// Extract computed field dependencies if this is a computed field.
+		let computed_deps = self.computed.as_ref().map(|expr| {
+			let deps = crate::expr::computed_deps::extract_computed_deps(expr);
+			catalog::ComputedDeps {
+				fields: deps.fields,
+				is_complete: deps.is_complete,
+			}
+		});
+
+		let name: Idiom = expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?;
+		let table: TableName =
+			expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?.into();
+		// Computed fields cannot be indexed. Check if any existing index references
+		// this field (or has it as a prefix for sub-field paths).
+		if self.computed.is_some() {
+			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+			for ix in ctx.tx().all_tb_indexes(ns, db, &table).await?.iter() {
+				if ix.cols.iter().any(|col| col.starts_with(&name)) {
+					bail!(Error::ComputedFieldCannotBeIndexed {
+						index: ix.name.clone(),
+						field: name.to_raw_string(),
+					})
+				}
+			}
+		}
+
+		Ok(FieldDefinition {
+			name,
+			table,
+			field_kind: self.field_kind.clone(),
+			flexible: self.flexible,
+			readonly: self.readonly,
+			value: self.value.clone(),
+			assert: self.assert.clone(),
+			computed: self.computed.clone(),
+			default: match &self.default {
+				DefineDefault::None => catalog::DefineDefault::None,
+				DefineDefault::Set(x) => catalog::DefineDefault::Set(x.clone()),
+				DefineDefault::Always(x) => catalog::DefineDefault::Always(x.clone()),
+			},
+			select_permission: convert_permission(&self.permissions.select),
+			create_permission: convert_permission(&self.permissions.create),
+			update_permission: convert_permission(&self.permissions.update),
+			comment,
+			reference: self.reference.clone(),
+			auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()).into(),
+			computed_deps,
+		})
+	}
+
+	/// Process this type returning a computed simple Value
+	#[instrument(level = "trace", name = "DefineFieldStatement::compute", skip_all)]
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
+		let definition = self.to_definition(stk, ctx, opt, doc).await?;
+
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
+
+		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+
+		// Validate computed options
+		self.validate_computed_options(ns, db, ctx.tx(), &definition).await?;
+
+		// Validate computed field dependencies for cycles
+		self.validate_computed_cycles(ns, db, ctx.tx(), &definition).await?;
+
+		// Validate reference options
+		self.validate_reference_options(&definition)?;
+
+		// Disallow mismatched types
+		self.disallow_mismatched_types(ctx, ns, db, &definition).await?;
+
+		// Validate id field restrictions
+		self.validate_id_restrictions(&definition)?;
+
+		// Validate FLEXIBLE restrictions
+		self.validate_flexible_restrictions(ctx, ns, db, &definition).await?;
+
+		// Fetch the transaction
+		let txn = ctx.tx();
+
+		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &definition.table).await?;
+
+		// Get the name of the field
+		let fd = self.name.to_raw_string();
+		// Check if the definition exists
+		if let Some(fd) = txn.get_tb_field(ns, db, &tb.name, &fd).await? {
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::FdAlreadyExists {
+							name: fd.name.to_sql(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => {
+					return Ok(Value::None);
+				}
+			}
+		}
+
+		// Process the statement
+		txn.put_tb_field(ns, db, &tb.name, &definition).await?;
+
+		// Refresh the table cache
+		let mut tb = TableDefinition {
+			cache_fields_ts: Uuid::now_v7(),
+			..tb.as_ref().clone()
+		};
+
+		// If this is an `in` field then check relation definitions
+		if fd.as_str() == "in" {
+			// The table is marked as TYPE RELATION
+			if let TableType::Relation(ref relation) = tb.table_type {
+				// Check if a field TYPE has been specified
+				if let Some(kind) = self.field_kind.as_ref() {
+					let Kind::Record(field_kind) = kind else {
+						bail!(Error::Thrown("in field on a relation must be a record".into(),))
+					};
+
+					// Add the TYPE to the DEFINE TABLE statement
+					if *field_kind != relation.from {
+						tb.table_type = TableType::Relation(Relation {
+							from: field_kind.iter().map(|x| x.clone().into_string()).collect(),
+							..relation.clone()
+						});
+
+						txn.put_tb(ns_name, db_name, &tb).await?;
+						// Clear the cache
+						if let Some(cache) = ctx.get_cache() {
+							cache.clear_tb(ns, db, &definition.table);
+						}
+
+						txn.clear_cache();
+						return Ok(Value::None);
+					}
+				}
+			}
+		}
+
+		// If this is an `out` field then check relation definitions
+		if fd.as_str() == "out" {
+			// The table is marked as TYPE RELATION
+			if let TableType::Relation(ref relation) = tb.table_type {
+				// Check if a field TYPE has been specified
+				if let Some(kind) = self.field_kind.as_ref() {
+					// The `out` field must be a record type
+					let Kind::Record(field_kind) = kind else {
+						bail!(Error::Thrown("out field on a relation must be a record".into(),))
+					};
+					// Add the TYPE to the DEFINE TABLE statement
+					if *field_kind != relation.to {
+						tb.table_type = TableType::Relation(Relation {
+							to: field_kind.iter().map(|x| x.clone().into_string()).collect(),
+							..relation.clone()
+						});
+
+						txn.put_tb(ns_name, db_name, &tb).await?;
+						// Clear the cache
+						if let Some(cache) = ctx.get_cache() {
+							cache.clear_tb(ns, db, &definition.table);
+						}
+
+						txn.clear_cache();
+						return Ok(Value::None);
+					}
+				}
+			}
+		}
+
+		txn.put_tb(ns_name, db_name, &tb).await?;
+
+		// Process possible recursive defitions
+		self.process_recursive_definitions(ns, db, txn.clone(), &definition).await?;
+
+		// Clear the cache
+		if let Some(cache) = ctx.get_cache() {
+			cache.clear_tb(ns, db, &definition.table);
+		}
+
+		// Clear the cache
+		txn.clear_cache();
+		// Ok all good
+		Ok(Value::None)
+	}
+
+	pub(crate) async fn process_recursive_definitions(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		txn: Arc<Transaction>,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		// Find all existing field definitions
+		let fields = txn.all_tb_fields(ns, db, &definition.table, None).await.ok();
+		// Process possible recursive_definitions
+		if let Some(mut cur_kind) = self.field_kind.as_ref().and_then(|x| x.inner_kind()) {
+			let mut name = definition.name.clone();
+			loop {
+				// Check if the subtype is an `any` type
+				if let Kind::Any = cur_kind {
+					// There is no need to add a subtype
+					// field definition if the type is
+					// just specified as an `array`. This
+					// is because the following query:
+					//  DEFINE FIELD foo ON bar TYPE array;
+					// already implies that the immediate
+					// subtype is an any:
+					//  DEFINE FIELD foo[*] ON bar TYPE any;
+					// so we skip the subtype field.
+					break;
+				}
+				// Get the kind of this sub field
+				let new_kind = cur_kind.inner_kind();
+				// Add a new subtype
+				name.0.push(Part::All);
+				// Get the field name
+				let fd = name.to_sql();
+				// Set the subtype `DEFINE FIELD` definition
+				let key = crate::key::table::fd::new(ns, db, &definition.table, &fd);
+				let val = if let Some(existing) =
+					fields.as_ref().and_then(|x| x.iter().find(|x| x.name == name))
+				{
+					FieldDefinition {
+						field_kind: Some(cur_kind),
+						..existing.clone()
+					}
+				} else {
+					FieldDefinition {
+						name: name.clone(),
+						table: definition.table.clone(),
+						field_kind: Some(cur_kind),
+						..Default::default()
+					}
+				};
+				txn.set(&key, &val, None).await?;
+				// Process to any sub field
+				if let Some(new_kind) = new_kind {
+					cur_kind = new_kind;
+				} else {
+					break;
+				}
+			}
+		}
+
+		Ok(())
+	}
+
+	pub(crate) async fn validate_computed_options(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		txn: Arc<Transaction>,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		// Find all existing field definitions
+		let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
+		if self.computed.is_some() {
+			// Ensure the field is not the `id` field
+			ensure!(!definition.name.is_id(), Error::IdFieldKeywordConflict("COMPUTED".into()));
+
+			// Ensure the field is top-level
+			ensure!(
+				definition.name.len() == 1,
+				Error::ComputedNestedField(definition.name.to_sql())
+			);
+
+			// Ensure there are no conflicting clauses
+			ensure!(self.value.is_none(), Error::ComputedKeywordConflict("VALUE".into()));
+			ensure!(self.assert.is_none(), Error::ComputedKeywordConflict("ASSERT".into()));
+			ensure!(self.reference.is_none(), Error::ComputedKeywordConflict("REFERENCE".into()));
+			ensure!(
+				matches!(self.default, DefineDefault::None),
+				Error::ComputedKeywordConflict("DEFAULT".into())
+			);
+			ensure!(!self.readonly, Error::ComputedKeywordConflict("READONLY".into()));
+
+			// Ensure no nested fields exist
+			for field in fields.iter() {
+				if field.name.starts_with(&definition.name) && field.name != definition.name {
+					bail!(Error::ComputedNestedFieldConflict(
+						definition.name.to_sql(),
+						field.name.to_sql()
+					));
+				}
+			}
+		} else {
+			// Ensure no parent fields are computed
+			for field in fields.iter() {
+				if field.computed.is_some()
+					&& definition.name.starts_with(&field.name)
+					&& field.name != definition.name
+				{
+					bail!(Error::ComputedParentFieldConflict(
+						definition.name.to_sql(),
+						field.name.to_sql()
+					));
+				}
+			}
+		}
+
+		Ok(())
+	}
+
+	/// Validate that defining this computed field does not create a dependency cycle.
+	///
+	/// Builds a dependency graph from all existing computed fields on the table plus
+	/// the field being defined, then runs iterative DFS to detect cycles.
+	/// Only checks same-table dependencies (cross-table cycles are future work).
+	pub(crate) async fn validate_computed_cycles(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		txn: Arc<Transaction>,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		// Only relevant for computed fields
+		if definition.computed.is_none() {
+			return Ok(());
+		}
+
+		let fields = txn.all_tb_fields(ns, db, &definition.table, None).await?;
+		let field_name = definition.name.to_raw_string();
+
+		// Build adjacency list: field_name -> list of computed field dependencies.
+		// We use the stored computed_deps when available, falling back to on-the-fly
+		// extraction for legacy fields (computed_deps = None).
+		// BTreeMap ensures deterministic iteration order for consistent cycle error messages.
+		let mut graph: std::collections::BTreeMap<String, Vec<String>> =
+			std::collections::BTreeMap::new();
+
+		for fd in fields.iter() {
+			if fd.computed.is_none() {
+				continue;
+			}
+			let name = fd.name.to_raw_string();
+			// Skip the field being (re)defined -- we'll use the new definition below
+			if name == field_name {
+				continue;
+			}
+			let deps = if let Some(ref cd) = fd.computed_deps {
+				cd.fields.clone()
+			} else if let Some(ref expr) = fd.computed {
+				// Legacy field without stored deps: extract on the fly
+				crate::expr::computed_deps::extract_computed_deps(expr).fields
+			} else {
+				Vec::new()
+			};
+			graph.insert(name, deps);
+		}
+
+		// Insert/replace the field being defined with its freshly-extracted deps
+		let new_deps =
+			definition.computed_deps.as_ref().map(|cd| cd.fields.clone()).unwrap_or_default();
+		graph.insert(field_name, new_deps);
+
+		// Iterative DFS cycle detection.
+		// States: 0 = unvisited, 1 = in current path, 2 = fully visited
+		let mut state: std::collections::BTreeMap<&str, u8> = std::collections::BTreeMap::new();
+		for key in graph.keys() {
+			state.insert(key.as_str(), 0);
+		}
+
+		// For each unvisited node, run DFS
+		for start in graph.keys() {
+			if state.get(start.as_str()) == Some(&2) {
+				continue;
+			}
+
+			// Stack holds (node, index_into_neighbors)
+			let mut stack: Vec<(&str, usize)> = vec![(start.as_str(), 0)];
+			// Track the path for error reporting
+			let mut path: Vec<&str> = vec![start.as_str()];
+			state.insert(start.as_str(), 1);
+
+			while let Some((node, idx)) = stack.last_mut() {
+				let neighbors = graph.get(*node).map(|v| v.as_slice()).unwrap_or(&[]);
+				if *idx < neighbors.len() {
+					let neighbor = neighbors[*idx].as_str();
+					*idx += 1;
+
+					// Only check neighbors that are computed fields (in the graph)
+					if !graph.contains_key(neighbor) {
+						continue;
+					}
+
+					match state.get(neighbor) {
+						Some(1) => {
+							// Found a cycle! Build the cycle path for the error message.
+							let cycle_start = path.iter().position(|&n| n == neighbor).unwrap_or(0);
+							let cycle: Vec<String> =
+								path[cycle_start..].iter().map(|s| (*s).to_string()).collect();
+							let cycle_str = format!("{} -> {}", cycle.join(" -> "), neighbor);
+							bail!(Error::ComputedFieldCycle(cycle_str));
+						}
+						Some(0) | None => {
+							// Unvisited: push onto stack
+							state.insert(neighbor, 1);
+							path.push(neighbor);
+							stack.push((neighbor, 0));
+						}
+						_ => {
+							// Already fully visited (state 2), skip
+						}
+					}
+				} else {
+					// Done with this node's neighbors
+					state.insert(node, 2);
+					path.pop();
+					stack.pop();
+				}
+			}
+		}
+
+		Ok(())
+	}
+
+	pub(crate) fn validate_reference_options(
+		&self,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		// If a reference is defined, the field must be a record
+		if self.reference.is_some() {
+			ensure!(
+				definition.name.len() == 1,
+				Error::ReferenceNestedField(definition.name.to_sql())
+			);
+
+			fn valid(kind: &Kind, outer: bool) -> bool {
+				match kind {
+					Kind::None | Kind::Record(_) => true,
+					Kind::Array(kind, _) | Kind::Set(kind, _) => outer && valid(kind, false),
+					Kind::Literal(KindLiteral::Array(kinds)) => {
+						outer && kinds.iter().all(|k| valid(k, false))
+					}
+					_ => false,
+				}
+			}
+
+			let is_record_id = match self.field_kind.as_ref() {
+				Some(Kind::Either(kinds)) => kinds.iter().all(|k| valid(k, true)),
+				Some(Kind::Array(kind, _)) | Some(Kind::Set(kind, _)) => match kind.as_ref() {
+					Kind::Either(kinds) => kinds.iter().all(|k| valid(k, true)),
+					Kind::Record(_) => true,
+					_ => false,
+				},
+				Some(Kind::Literal(KindLiteral::Array(kinds))) => {
+					kinds.iter().all(|k| valid(k, true))
+				}
+				Some(Kind::Record(_)) => true,
+				_ => false,
+			};
+
+			ensure!(
+				is_record_id,
+				Error::ReferenceTypeConflict(
+					self.field_kind.as_ref().unwrap_or(&Kind::Any).to_sql()
+				)
+			);
+		}
+
+		Ok(())
+	}
+
+	pub(crate) async fn disallow_mismatched_types(
+		&self,
+		ctx: &FrozenContext,
+		ns: NamespaceId,
+		db: DatabaseId,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		let fds = ctx.tx().all_tb_fields(ns, db, &definition.table, None).await?;
+
+		if let Some(self_kind) = &self.field_kind {
+			for fd in fds.iter() {
+				if definition.name.starts_with(&fd.name)
+					&& definition.name != fd.name
+					&& let Some(fd_kind) = &fd.field_kind
+				{
+					let path = definition.name[fd.name.len()..].to_vec();
+					if !fd_kind.allows_nested_kind(&path, self_kind) {
+						bail!(Error::MismatchedFieldTypes {
+							name: definition.name.to_sql(),
+							kind: self_kind.to_sql(),
+							existing_name: fd.name.to_sql(),
+							existing_kind: fd_kind.to_sql(),
+						});
+					}
+				}
+			}
+		}
+
+		Ok(())
+	}
+
+	pub(crate) fn validate_id_restrictions(
+		&self,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		if definition.name.is_id() {
+			// Ensure no `VALUE` clause is specified
+			ensure!(self.value.is_none(), Error::IdFieldKeywordConflict("VALUE".into()));
+
+			// Ensure no `REFERENCE` clause is specified
+			ensure!(self.reference.is_none(), Error::IdFieldKeywordConflict("REFERENCE".into()));
+
+			// Ensure no `COMPUTED` clause is specified
+			ensure!(self.computed.is_none(), Error::IdFieldKeywordConflict("COMPUTED".into()));
+
+			// Ensure no `DEFAULT` clause is specified
+			ensure!(
+				matches!(self.default, DefineDefault::None),
+				Error::IdFieldKeywordConflict("DEFAULT".into())
+			);
+
+			// Ensure the field is not a record type
+			if let Some(ref kind) = self.field_kind {
+				ensure!(
+					RecordIdKeyLit::kind_supported(kind),
+					Error::IdFieldUnsupportedKind(kind.to_sql())
+				);
+			}
+		}
+
+		Ok(())
+	}
+
+	pub(crate) async fn validate_flexible_restrictions(
+		&self,
+		ctx: &FrozenContext,
+		ns: NamespaceId,
+		db: DatabaseId,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		if self.flexible {
+			// Get the table definition
+			let txn = ctx.tx();
+			let Some(tb) = txn.get_tb(ns, db, &definition.table).await? else {
+				bail!(Error::TbNotFound {
+					name: definition.table.clone(),
+				});
+			};
+
+			// FLEXIBLE can only be used in SCHEMAFULL tables
+			ensure!(
+				tb.schemafull,
+				Error::Thrown("FLEXIBLE can only be used in SCHEMAFULL tables".into())
+			);
+		}
+
+		Ok(())
+	}
+}

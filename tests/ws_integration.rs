@@ -34,6 +34,27 @@ use serde_json::json;
 const HDR_SURREAL: &str = "surreal-id";
 const HDR_REQUEST: &str = "x-request-id";
 
+/// Helper function to ensure namespace and database exist before use
+async fn ensure_namespace_and_database(
+	socket: &mut Socket,
+	ns: &str,
+	db: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+	// Create namespace at ROOT level (before USE)
+	socket.send_message_query(&format!("DEFINE NAMESPACE `{ns}`")).await?;
+
+	// USE the namespace to create the database within it
+	socket.send_message_use(Some(ns), None).await?;
+
+	// Create database within the namespace
+	socket.send_message_query(&format!("DEFINE DATABASE `{db}`")).await?;
+
+	// Reset to ROOT level so the test can USE the namespace/database itself
+	socket.send_message_use(None, None).await?;
+
+	Ok(())
+}
+
 pub async fn ping(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
@@ -695,8 +716,12 @@ pub async fn live_query(cfg_server: Option<Format>, cfg_format: Format) {
 	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create the table before using it
+	socket.send_message_query("DEFINE TABLE tester").await.unwrap();
 	// Send LIVE command
 	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
@@ -772,8 +797,12 @@ pub async fn live_rpc(cfg_server: Option<Format>, cfg_format: Format) {
 	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create the table before using it
+	socket.send_message_query("DEFINE TABLE tester").await.unwrap();
 	// Send LIVE command
 	let res = socket.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
@@ -842,8 +871,12 @@ pub async fn live_query_diff(cfg_server: Option<Format>, cfg_format: Format) {
 	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create the table before using it
+	socket.send_message_query("DEFINE TABLE tester").await.unwrap();
 	// Send LIVE DIFF command
 	let res = socket.send_request("query", json!(["LIVE SELECT DIFF FROM tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
@@ -961,8 +994,12 @@ pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create the table before using it
+	socket.send_message_query("DEFINE TABLE tester").await.unwrap();
 	// Send LIVE command
 	let res = socket.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
@@ -1096,8 +1133,12 @@ pub async fn live_table_removal(cfg_server: Option<Format>, cfg_format: Format) 
 	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create the table before using it
+	socket.send_message_query("DEFINE TABLE tester").await.unwrap();
 	// Send LIVE command
 	let res = socket.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
@@ -1133,8 +1174,12 @@ pub async fn live_second_connection(cfg_server: Option<Format>, cfg_format: Form
 	let mut socket1 = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket1.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket1, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket1.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create the table before using it
+	socket1.send_message_query("DEFINE TABLE tester").await.unwrap();
 	// Send LIVE command
 	let res = socket1.send_request("live", json!(["tester"])).await.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
@@ -1144,6 +1189,8 @@ pub async fn live_second_connection(cfg_server: Option<Format>, cfg_format: Form
 	let mut socket2 = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket2.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database (already exists, but ensure it's set up)
+	ensure_namespace_and_database(&mut socket2, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket2.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// Create a new test record
@@ -1181,8 +1228,12 @@ pub async fn variable_auth_live_query(cfg_server: Option<Format>, cfg_format: Fo
 	let mut socket_permanent = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket_permanent.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket_permanent, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket_permanent.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Create the table before using it
+	socket_permanent.send_message_query("DEFINE TABLE tester").await.unwrap();
 	// Define a user record access method
 	socket_permanent
 		.send_message_query(
@@ -1319,7 +1370,8 @@ pub async fn session_expiration(cfg_server: Option<Format>, cfg_format: Format) 
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 	// Sign in again using the same session
 	let res = socket
 		.send_request(
@@ -1426,7 +1478,8 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 	// Test operations that SHOULD NOT work with an expired session
 	let operations_ko = vec![
 		socket.send_request("let", json!(["let_var", "let_value",])),
@@ -1552,7 +1605,8 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 	let res = socket
 		.send_request(
 			"signin",
@@ -1581,7 +1635,8 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 
 	// This needs to be last operation as the session will no longer expire
 	// afterwards
@@ -1760,7 +1815,8 @@ pub async fn session_reauthentication_expired(cfg_server: Option<Format>, cfg_fo
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 	// Authenticate using the root token, which has not expired yet
 	socket.send_request("authenticate", json!([root_token,])).await.unwrap();
 	// Check that we have root access and the session is not expired
@@ -2070,22 +2126,28 @@ pub async fn temporary_directory(cfg_server: Option<Format>, cfg_format: Format)
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// create records
 	socket.send_message_query("CREATE test:a, test:b").await.unwrap();
-	// These selects use the memory collector
+	// ORDER BY id DESC is satisfied by a backward TableScan (no explicit sort needed)
 	let mut res =
 		socket.send_message_query("SELECT * FROM test ORDER BY id DESC EXPLAIN").await.unwrap();
-	let expected = json!([{"detail": { "direction": "forward", "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "MemoryOrdered" }, "operation": "Collector" }]);
-	assert_eq!(res.remove(0)["result"], expected);
+	let result = &res.remove(0)["result"];
+	// New executor EXPLAIN produces a JSON plan tree
+	assert_eq!(result["operator"], "SelectProject");
+	assert_eq!(result["children"][0]["operator"], "TableScan");
+	assert_eq!(result["children"][0]["attributes"]["direction"], "Backward");
 	// And return the correct result
 	let mut res = socket.send_message_query("SELECT * FROM test ORDER BY id DESC").await.unwrap();
 	let expected = json!([{"id": "test:b" }, { "id": "test:a" }]);
 	assert_eq!(res.remove(0)["result"], expected);
-	// This one should the file collector
+	// TEMPFILES requests file-backed sort, but the planner eliminates the sort
+	// entirely since a backward TableScan already satisfies ORDER BY id DESC.
 	let mut res = socket
 		.send_message_query("SELECT * FROM test ORDER BY id DESC TEMPFILES EXPLAIN")
 		.await
 		.unwrap();
-	let expected = json!([{"detail": { "direction": "forward", "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "TempFiles" }, "operation": "Collector" }]);
-	assert_eq!(res.remove(0)["result"], expected);
+	let result = &res.remove(0)["result"];
+	assert_eq!(result["operator"], "SelectProject");
+	assert_eq!(result["children"][0]["operator"], "TableScan");
+	assert_eq!(result["children"][0]["attributes"]["direction"], "Backward");
 	// And return the correct result
 	let mut res =
 		socket.send_message_query("SELECT * FROM test ORDER BY id DESC TEMPFILES").await.unwrap();
@@ -2205,7 +2267,7 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 		// Start server disallowing some RPC methods
 		let (addr, mut server) = common::start_server(StartServerArguments {
 			// Deny all routes except for RPC
-			args: "--deny-rpc info,query".to_string(),
+			args: "--deny-rpc info".to_string(),
 			// Auth disabled to ensure unauthorized errors are due to capabilities
 			auth: false,
 			..Default::default()
@@ -2218,17 +2280,15 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 		socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 
 		// Test operations that SHOULD NOT with the provided capabilities
-		let operations_ko = vec![
-			socket.send_request("info", json!([])),
-			socket.send_request("query", json!(["SELECT * FROM 1"])),
-		];
+		let operations_ko = vec![socket.send_request("info", json!([]))];
 		for operation in operations_ko {
 			let res = operation.await;
 			assert!(res.is_ok(), "result: {res:?}");
 			let res = res.unwrap();
 			assert!(res.is_object(), "result: {res:?}");
 			let res = res.as_object().unwrap();
-			assert_eq!(res["error"], json!({"code": -32602, "message": "Method not allowed"}));
+			assert_eq!(res["error"]["code"], -32602);
+			assert_eq!(res["error"]["message"], "Method not allowed");
 		}
 
 		// Test operations that SHOULD work with the provided capabilities
@@ -2238,6 +2298,7 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 			socket.send_request("version", json!([])),
 			socket.send_request("let", json!(["let_var", "let_value",])),
 			socket.send_request("set", json!(["set_var", "set_value",])),
+			socket.send_request("query", json!(["DEFINE TABLE tester"])),
 			socket.send_request("select", json!(["tester",])),
 			socket.send_request(
 				"insert",
@@ -2297,10 +2358,11 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 	}
 	// Deny all
 	{
-		// Start server disallowing all RPC methods except for version and use
+		// Start server disallowing all RPC methods except for version, use, and attach
+		// attach is required for the SDK to establish a session
 		let (addr, mut server) = common::start_server(StartServerArguments {
 			// Deny all routes except for RPC
-			args: "--deny-rpc --allow-rpc version,use".to_string(),
+			args: "--deny-rpc --allow-rpc version,use,attach".to_string(),
 			// Auth disabled to ensure unauthorized errors are due to capabilities
 			auth: false,
 			..Default::default()
@@ -2383,7 +2445,8 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 			let res = res.unwrap();
 			assert!(res.is_object(), "result: {res:?}");
 			let res = res.as_object().unwrap();
-			assert_eq!(res["error"], json!({"code": -32602, "message": "Method not allowed"}));
+			assert_eq!(res["error"]["code"], -32602);
+			assert_eq!(res["error"]["message"], "Method not allowed");
 		}
 
 		// Test operations that SHOULD work with the provided capabilities
@@ -2432,12 +2495,17 @@ pub async fn multi_session_isolation(cfg_server: Option<Format>, cfg_format: For
 	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
 	// Authenticate the connection
 	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Create namespace and database
+	ensure_namespace_and_database(&mut socket, NS, DB).await.unwrap();
 	// Specify a namespace and database
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 
 	// Define session IDs
 	let session1 = "11111111-1111-1111-1111-111111111111";
 	let session2 = "22222222-2222-2222-2222-222222222222";
+
+	socket.send_request_with_session("attach", json!([]), session1).await.unwrap();
+	socket.send_request_with_session("attach", json!([]), session2).await.unwrap();
 
 	// Test 1: Variable isolation between named sessions
 	// Setup session1 with auth and namespace/database
@@ -2490,8 +2558,26 @@ pub async fn multi_session_isolation(cfg_server: Option<Format>, cfg_format: For
 	assert_eq!(res["result"][0]["result"], "value_from_session1", "result: {res:?}");
 
 	// Test 3: Namespace/database isolation
+	// Create namespace and database for session1
+	socket
+		.send_request_with_session("query", json!(["DEFINE NAMESPACE `test_ns1`"]), session1)
+		.await
+		.unwrap();
+	socket
+		.send_request_with_session("use", json!(["test_ns1", None::<String>]), session1)
+		.await
+		.unwrap();
+	socket
+		.send_request_with_session("query", json!(["DEFINE DATABASE `test_db1`"]), session1)
+		.await
+		.unwrap();
 	socket
 		.send_request_with_session("use", json!(["test_ns1", "test_db1"]), session1)
+		.await
+		.unwrap();
+	// Create the table before using it
+	socket
+		.send_request_with_session("query", json!(["DEFINE TABLE test"]), session1)
 		.await
 		.unwrap();
 
@@ -2505,8 +2591,19 @@ pub async fn multi_session_isolation(cfg_server: Option<Format>, cfg_format: For
 		.unwrap();
 
 	// Default session should not see the record (different ns/db)
+	// The default session is still using NS/DB, so querying test:one will fail because
+	// the table doesn't exist in that namespace/database
 	let res = socket.send_request("query", json!(["SELECT * FROM test:one"])).await.unwrap();
-	assert_eq!(res["result"][0]["result"], json!([]), "result: {res:?}");
+	// When table doesn't exist in the namespace/database, we get an error
+	// Check for either empty result or error about table not existing
+	if res["result"][0]["status"] == "ERR" {
+		assert!(
+			res["result"][0]["result"].as_str().unwrap().contains("does not exist"),
+			"result: {res:?}"
+		);
+	} else {
+		assert_eq!(res["result"][0]["result"], json!([]), "result: {res:?}");
+	}
 
 	// Session 1 can see its own record
 	let res = socket
@@ -2528,6 +2625,9 @@ pub async fn multi_session_authentication(cfg_server: Option<Format>, cfg_format
 	// Define session IDs
 	let session1 = "11111111-1111-1111-1111-111111111111";
 	let session2 = "22222222-2222-2222-2222-222222222222";
+
+	socket.send_request_with_session("attach", json!([]), session1).await.unwrap();
+	socket.send_request_with_session("attach", json!([]), session2).await.unwrap();
 
 	// Authenticate session 1 as root user
 	let res = socket
@@ -2586,6 +2686,19 @@ pub async fn multi_session_management(cfg_server: Option<Format>, cfg_format: Fo
 	assert_eq!(res["result"].as_array().unwrap().len(), 0, "Expected no sessions initially");
 
 	// Test 2: Create sessions with proper authentication and namespace/database setup
+	socket.send_request_with_session("attach", json!([]), session1).await.unwrap();
+	socket.send_request_with_session("attach", json!([]), session2).await.unwrap();
+	socket.send_request_with_session("attach", json!([]), session3).await.unwrap();
+	let res = socket.send_request("sessions", json!([])).await.unwrap();
+	let sessions = res["result"].as_array().unwrap();
+	assert_eq!(sessions.len(), 3, "Expected 3 sessions");
+
+	let session_ids: Vec<String> =
+		sessions.iter().filter_map(|v| v.as_str()).map(|s| s.to_string()).collect();
+	assert!(session_ids.contains(&session1.to_string()), "Session 1 not found");
+	assert!(session_ids.contains(&session2.to_string()), "Session 2 not found");
+	assert!(session_ids.contains(&session3.to_string()), "Session 3 not found");
+
 	socket
 		.send_request_with_session("signin", json!([{"user": USER, "pass": PASS}]), session1)
 		.await
@@ -2607,23 +2720,13 @@ pub async fn multi_session_management(cfg_server: Option<Format>, cfg_format: Fo
 	socket.send_request_with_session("use", json!([NS, DB]), session3).await.unwrap();
 	socket.send_request_with_session("set", json!(["var3", "value3"]), session3).await.unwrap();
 
-	let res = socket.send_request("sessions", json!([])).await.unwrap();
-	let sessions = res["result"].as_array().unwrap();
-	assert_eq!(sessions.len(), 3, "Expected 3 sessions");
-
-	let session_ids: Vec<String> =
-		sessions.iter().filter_map(|v| v.as_str()).map(|s| s.to_string()).collect();
-	assert!(session_ids.contains(&session1.to_string()), "Session 1 not found");
-	assert!(session_ids.contains(&session2.to_string()), "Session 2 not found");
-	assert!(session_ids.contains(&session3.to_string()), "Session 3 not found");
-
 	// Test 3: Verify session variables work
 	let res =
 		socket.send_request_with_session("query", json!(["RETURN $var1"]), session1).await.unwrap();
 	assert_eq!(res["result"][0]["result"], "value1");
 
-	// Test 4: Reset with session ID removes the session completely
-	socket.send_request_with_session("reset", json!([]), session1).await.unwrap();
+	// Test 4: Detach with session ID removes the session completely
+	socket.send_request_with_session("detach", json!([]), session1).await.unwrap();
 
 	let res = socket.send_request("sessions", json!([])).await.unwrap();
 	let sessions = res["result"].as_array().unwrap();
@@ -2633,8 +2736,8 @@ pub async fn multi_session_management(cfg_server: Option<Format>, cfg_format: Fo
 		sessions.iter().filter_map(|v| v.as_str()).map(|s| s.to_string()).collect();
 	assert!(!session_ids.contains(&session1.to_string()), "Session 1 should be removed");
 
-	// Reset another session
-	socket.send_request_with_session("reset", json!([]), session2).await.unwrap();
+	// Detach another session
+	socket.send_request_with_session("detach", json!([]), session2).await.unwrap();
 
 	let res = socket.send_request("sessions", json!([])).await.unwrap();
 	let sessions = res["result"].as_array().unwrap();

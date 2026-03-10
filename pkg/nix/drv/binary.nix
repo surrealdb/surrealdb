@@ -26,12 +26,16 @@ let
     doCheck = false;
     cargoExtraArgs = let flags = [ "--no-default-features" ] ++ featureFlags;
     in builtins.concatStringsSep " " flags;
+    
+    # Add autoPatchelfHook to fix dynamic library linking for non-static builds
+    nativeBuildInputs = (spec.buildSpec.nativeBuildInputs or []) 
+      ++ lib.lists.optional (pkgs.stdenv.isLinux && !pkgs.stdenv.hostPlatform.isStatic) pkgs.autoPatchelfHook;
   };
 
   cargoArtifacts = craneLib.buildDepsOnly buildSpec;
 
 in craneLib.buildPackage (buildSpec // {
   inherit cargoArtifacts;
-  inherit (util) version SURREAL_BUILD_METADATA;
+  inherit (util) version SURREAL_BUILD_VERSION SURREAL_BUILD_METADATA;
 
 })

@@ -1,0 +1,25 @@
+name: 'Check docs'
+description: 'Run cargo doc check'
+
+inputs:
+  save-cache:
+    description: 'Whether to save the cargo cache'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup environment
+      uses: ./.github/actions/setup-environment
+      with:
+        save-cache: ${{ inputs.save-cache }}
+
+    - name: Install tools
+      uses: ./.github/actions/install-tools
+
+    - name: Check docs
+      shell: bash
+      run: cargo make ci-docs
+
+

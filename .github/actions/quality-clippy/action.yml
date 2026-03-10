@@ -1,0 +1,26 @@
+name: 'Check clippy'
+description: 'Run cargo clippy lints'
+
+inputs:
+  save-cache:
+    description: 'Whether to save the cargo cache'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup environment
+      uses: ./.github/actions/setup-environment
+      with:
+        components: clippy
+        save-cache: ${{ inputs.save-cache }}
+
+    - name: Install tools
+      uses: ./.github/actions/install-tools
+
+    - name: Run clippy
+      shell: bash
+      run: cargo make ci-clippy
+
+

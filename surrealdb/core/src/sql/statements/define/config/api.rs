@@ -1,0 +1,79 @@
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
+use crate::sql::{Expr, Permission};
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub(crate) struct ApiConfig {
+	pub middleware: Vec<Middleware>,
+	pub permissions: Permission,
+}
+
+impl ToSql for ApiConfig {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		if !self.middleware.is_empty() {
+			write_sql!(f, fmt, " MIDDLEWARE ");
+
+			for (idx, m) in self.middleware.iter().enumerate() {
+				if idx != 0 {
+					f.push_str(", ");
+				}
+				for (idx, s) in m.name.split("::").enumerate() {
+					if idx != 0 {
+						f.push_str("::");
+					}
+					EscapeKwFreeIdent(s).fmt_sql(f, fmt);
+				}
+				write_sql!(
+					f,
+					fmt,
+					"({})",
+					Fmt::pretty_comma_separated(m.args.iter().map(CoverStmts))
+				);
+			}
+		}
+
+		write_sql!(f, fmt, " PERMISSIONS {}", self.permissions);
+	}
+}
+
+impl From<ApiConfig> for crate::expr::statements::define::config::api::ApiConfig {
+	fn from(v: ApiConfig) -> Self {
+		crate::expr::statements::define::config::api::ApiConfig {
+			middleware: v.middleware.into_iter().map(From::from).collect(),
+			permissions: v.permissions.into(),
+		}
+	}
+}
+impl From<crate::expr::statements::define::config::api::ApiConfig> for ApiConfig {
+	fn from(v: crate::expr::statements::define::config::api::ApiConfig) -> Self {
+		ApiConfig {
+			middleware: v.middleware.into_iter().map(From::from).collect(),
+			permissions: v.permissions.into(),
+		}
+	}
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct Middleware {
+	pub name: String,
+	pub args: Vec<Expr>,
+}
+
+impl From<Middleware> for crate::expr::statements::define::config::api::Middleware {
+	fn from(v: Middleware) -> Self {
+		crate::expr::statements::define::config::api::Middleware {
+			name: v.name,
+			args: v.args.into_iter().map(From::from).collect(),
+		}
+	}
+}
+impl From<crate::expr::statements::define::config::api::Middleware> for Middleware {
+	fn from(v: crate::expr::statements::define::config::api::Middleware) -> Self {
+		Middleware {
+			name: v.name,
+			args: v.args.into_iter().map(From::from).collect(),
+		}
+	}
+}

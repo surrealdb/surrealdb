@@ -1,0 +1,60 @@
+name: 'Package macOS universal binary'
+description: 'Create and optionally publish macOS universal binary from amd64 and arm64 binaries'
+
+inputs:
+  name:
+    description: 'Release name (e.g., nightly or v2.0.0)'
+    required: true
+  publish:
+    description: 'Whether to publish'
+    required: false
+    default: 'false'
+  aws-access-key-id:
+    description: 'AWS access key ID'
+    required: false
+  aws-secret-access-key:
+    description: 'AWS secret access key'
+    required: false
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Download amd64 binary
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      with:
+        name: surreal-${{ inputs.name }}.darwin-amd64
+        path: amd64
+
+    - name: Download arm64 binary
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      with:
+        name: surreal-${{ inputs.name }}.darwin-arm64
+        path: arm64
+
+    - name: Configure AWS
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v5.0.0
+      with:
+        aws-region: us-east-2
+        aws-access-key-id: ${{ inputs.aws-access-key-id }}
+        aws-secret-access-key: ${{ inputs.aws-secret-access-key }}
+
+    - name: Package universal MacOS binary
+      shell: bash
+      env:
+        FILE: surreal-${{ inputs.name }}.darwin-universal
+      run: |
+        lipo -create -output surreal amd64/surreal arm64/surreal
+        chmod +x surreal
+        tar -zcvf $FILE.tgz surreal
+        echo $(shasum -a 256 $FILE.tgz | cut -f1 -d' ') > $FILE.txt
+
+    - name: Publish universal MacOS binary
+      if: ${{ inputs.publish == 'true' }}
+      shell: bash
+      env:
+        FILE: surreal-${{ inputs.name }}.darwin-universal
+      run: |
+        aws s3 cp --cache-control 'no-store' $FILE.tgz s3://download.surrealdb.com/${{ inputs.name }}/
+        aws s3 cp --cache-control 'no-store' $FILE.txt s3://download.surrealdb.com/${{ inputs.name }}/
+
+

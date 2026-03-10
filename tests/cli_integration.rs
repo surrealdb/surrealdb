@@ -6,7 +6,6 @@ mod cli_integration {
 	use std::io::Write;
 	#[cfg(unix)]
 	use std::time;
-	use std::time::Duration;
 
 	use assert_fs::prelude::{FileTouch, FileWriteStr, PathChild};
 	use chrono::{Duration as ChronoDuration, Utc};
@@ -19,7 +18,6 @@ mod cli_integration {
 	#[cfg(unix)]
 	use serde_json::json;
 	use test_log::test;
-	use tokio::time::sleep;
 	use tracing::info;
 	use ulid::Ulid;
 
@@ -84,7 +82,7 @@ mod cli_integration {
 		{
 			info!("* Development builds contain debug message");
 			let args = format!(
-				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
+				"sql --endpoint http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
 			let output = common::run(&args).input("CREATE any:any;\n").output().unwrap();
 			assert!(
@@ -96,7 +94,7 @@ mod cli_integration {
 		info!("* Create a record");
 		{
 			let args = format!(
-				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
+				"sql --endpoint http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
 			let output = common::run(&args).input("CREATE thing:one;\n").output().unwrap();
 			assert!(
@@ -108,7 +106,7 @@ mod cli_integration {
 		info!("* Export to stdout");
 		{
 			let args = format!(
-				"export --conn http://{addr} {creds} --ns {ns} --db {db} - --only --tables thing --records"
+				"export --endpoint http://{addr} {creds} --ns {ns} --db {db} - --only --tables thing --records"
 			);
 			let output = common::run(&args)
 				.output()
@@ -117,14 +115,14 @@ mod cli_integration {
 				output.contains("DEFINE TABLE thing TYPE ANY SCHEMALESS PERMISSIONS NONE;"),
 				"{output}"
 			);
-			assert!(output.contains("INSERT [ { id: thing:one } ];"), "{output}");
+			assert!(output.contains("INSERT [ { id: thing:one } ]"), "{output}");
 		}
 
 		info!("* Export to file");
 		let exported = {
 			let exported = common::tmp_file("exported.surql");
 			let args =
-				format!("export --conn http://{addr} {creds} --ns {ns} --db {db} {exported}");
+				format!("export --endpoint http://{addr} {creds} --ns {ns} --db {db} {exported}");
 			common::run(&args)
 				.output()
 				.unwrap_or_else(|_| panic!("failed to run file export: {args}"));
@@ -136,27 +134,27 @@ mod cli_integration {
 		info!("* Import the exported file");
 		{
 			let args =
-				format!("import --conn http://{addr} {creds} --ns {ns} --db {db2} {exported}");
+				format!("import --endpoint http://{addr} {creds} --ns {ns} --db {db2} {exported}");
 			common::run(&args).output().unwrap_or_else(|_| panic!("failed to run import: {args}"));
 		}
 
 		info!("* Query from the import (pretty-printed this time)");
 		{
 			let args = format!(
-				"sql --conn http://{addr} {creds} --ns {ns} --db {db2} --pretty --hide-welcome"
+				"sql --endpoint http://{addr} {creds} --ns {ns} --db {db2} --pretty --hide-welcome"
 			);
 			let output = common::run(&args).input("SELECT * FROM thing;\n").output().unwrap();
 			let output = remove_debug_info(output);
 			let (line1, rest) = output.split_once('\n').expect("response to have multiple lines");
 			assert!(line1.starts_with("-- Query 1"), "Expected on {line1}, and rest was {rest}");
 			assert!(line1.contains("execution time"));
-			assert_eq!(rest, "[{ id: thing:one }]\n\n", "failed to send sql: {args}");
+			assert_eq!(rest, "[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n", "failed to send sql: {args}");
 		}
 
 		info!("* Advanced uncomputed variable to be computed before saving");
 		{
 			let args = format!(
-				"sql --conn ws://{addr} {creds} --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} {creds} --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 			let output = common::run(&args)
@@ -168,13 +166,13 @@ mod cli_integration {
 				.output()
 				.unwrap();
 
-			assert!(output.contains("[1, 2, 3]"), "missing success in {output}");
+			assert!(output.contains("{1, 2, 3}"), "missing success in {output}");
 		}
 
 		info!("* Multi-statement (and multi-line) query including error(s) over WS");
 		{
 			let args = format!(
-				"sql --conn ws://{addr} {creds} --ns {throwaway} --db {throwaway} --multi --pretty",
+				"sql --endpoint ws://{addr} {creds} --ns {throwaway} --db {throwaway} --multi --pretty",
 				throwaway = Ulid::new()
 			);
 			let output = common::run(&args)
@@ -200,7 +198,7 @@ mod cli_integration {
 		info!("* Multi-statement (and multi-line) transaction including error(s) over WS");
 		{
 			let args = format!(
-				"sql --conn ws://{addr} {creds} --ns {throwaway} --db {throwaway} --multi --pretty",
+				"sql --endpoint ws://{addr} {creds} --ns {throwaway} --db {throwaway} --multi --pretty",
 				throwaway = Ulid::new()
 			);
 			let output = common::run(&args)
@@ -226,7 +224,7 @@ mod cli_integration {
 
 		info!("* Pass neither ns nor db");
 		{
-			let args = format!("sql --conn http://{addr} {creds}");
+			let args = format!("sql --endpoint http://{addr} {creds}");
 			let output = common::run(&args)
 				.input(&format!(
 					"USE NS `{throwaway}` DB `{throwaway}`; CREATE thing:one;\n",
@@ -239,7 +237,7 @@ mod cli_integration {
 
 		info!("* Pass only ns");
 		{
-			let args = format!("sql --conn http://{addr} {creds} --ns {ns}");
+			let args = format!("sql --endpoint http://{addr} {creds} --ns {ns}");
 			let output = common::run(&args)
 				.input(&format!("USE DB `{db}`; SELECT * FROM thing:one;\n"))
 				.output()
@@ -250,7 +248,7 @@ mod cli_integration {
 		info!("* Pass only db and expect an error");
 		{
 			let args = format!(
-				"sql --conn http://{addr} {creds} --db {throwaway}",
+				"sql --endpoint http://{addr} {creds} --db {throwaway}",
 				throwaway = Ulid::new()
 			);
 			common::run(&args).output().expect_err("only db");
@@ -279,7 +277,7 @@ mod cli_integration {
 		// Commands with credentials when auth is enabled, should succeed
 		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 		let creds = format!("--user {USER} --pass {PASS}");
-		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
+		let sql_args = format!("sql --endpoint http://{addr} --multi --pretty");
 
 		info!("* Query over HTTP");
 		{
@@ -291,7 +289,7 @@ mod cli_integration {
 
 		info!("* Query over WS");
 		{
-			let args = format!("sql --conn ws://{addr} --multi --pretty {creds}");
+			let args = format!("sql --endpoint ws://{addr} --multi --pretty {creds}");
 			let input = "INFO FOR ROOT;";
 			let output = common::run(&args).input(input).output();
 			assert!(output.is_ok(), "failed to query over WS: {}", output.err().unwrap());
@@ -301,7 +299,7 @@ mod cli_integration {
 		let exported = {
 			let exported = common::tmp_file("exported.surql");
 			let args = format!(
-				"export --conn http://{addr} {creds} --ns {throwaway} --db {throwaway} {exported}",
+				"export --endpoint http://{addr} {creds} --ns {throwaway} --db {throwaway} {exported}",
 				throwaway = Ulid::new()
 			);
 
@@ -312,7 +310,7 @@ mod cli_integration {
 		info!("* Root user can do imports");
 		{
 			let args = format!(
-				"import --conn http://{addr} {creds} --ns {throwaway} --db {throwaway} {exported}",
+				"import --endpoint http://{addr} {creds} --ns {throwaway} --db {throwaway} {exported}",
 				throwaway = Ulid::new()
 			);
 			common::run(&args).output().unwrap_or_else(|_| panic!("failed to run import: {args}"));
@@ -331,7 +329,7 @@ mod cli_integration {
 
 		info!("* Create users with identical credentials at ROOT, NS and DB levels");
 		{
-			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} {creds}");
+			let args = format!("sql --endpoint http://{addr} --db {db} --ns {ns} {creds}");
 			let _ = common::run(&args)
 				.input(format!("DEFINE USER {USER} ON ROOT PASSWORD '{PASS}' ROLES OWNER;
                                                 DEFINE USER {USER} ON NAMESPACE PASSWORD '{PASS}' ROLES OWNER;
@@ -342,8 +340,9 @@ mod cli_integration {
 
 		info!("* Pass root auth level and access root info");
 		{
-			let args =
-				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
+			let args = format!(
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level root {creds}"
+			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
 				.output()
@@ -356,8 +355,9 @@ mod cli_integration {
 
 		info!("* Pass root auth level and access namespace info");
 		{
-			let args =
-				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
+			let args = format!(
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level root {creds}"
+			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
@@ -370,8 +370,9 @@ mod cli_integration {
 
 		info!("* Pass root auth level and access database info");
 		{
-			let args =
-				format!("sql --conn http://{addr} --db {db} --ns {ns} --auth-level root {creds}");
+			let args = format!(
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level root {creds}"
+			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
@@ -385,7 +386,7 @@ mod cli_integration {
 		info!("* Pass namespace auth level and access root info");
 		{
 			let args = format!(
-				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
 			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
@@ -400,7 +401,7 @@ mod cli_integration {
 		info!("* Pass namespace auth level and access namespace info");
 		{
 			let args = format!(
-				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
 			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
@@ -415,7 +416,7 @@ mod cli_integration {
 		info!("* Pass namespace auth level and access database info");
 		{
 			let args = format!(
-				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level namespace {creds}"
 			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
@@ -430,7 +431,7 @@ mod cli_integration {
 		info!("* Pass database auth level and access root info");
 		{
 			let args = format!(
-				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
 			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
@@ -445,7 +446,7 @@ mod cli_integration {
 		info!("* Pass database auth level and access namespace info");
 		{
 			let args = format!(
-				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
 			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
@@ -460,7 +461,7 @@ mod cli_integration {
 		info!("* Pass database auth level and access database info");
 		{
 			let args = format!(
-				"sql --conn http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --auth-level database {creds}"
 			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
@@ -474,7 +475,7 @@ mod cli_integration {
 
 		info!("* Pass namespace auth level without specifying namespace");
 		{
-			let args = format!("sql --conn http://{addr} --auth-level database {creds}");
+			let args = format!("sql --endpoint http://{addr} --auth-level database {creds}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output();
@@ -489,7 +490,8 @@ mod cli_integration {
 
 		info!("* Pass database auth level without specifying database");
 		{
-			let args = format!("sql --conn http://{addr} --ns {ns} --auth-level database {creds}");
+			let args =
+				format!("sql --endpoint http://{addr} --ns {ns} --auth-level database {creds}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output();
@@ -504,7 +506,7 @@ mod cli_integration {
 
 		info!("* Pass auth level without providing credentials");
 		{
-			let args = format!("sql --conn http://{addr} --ns {ns} --auth-level database");
+			let args = format!("sql --endpoint http://{addr} --ns {ns} --auth-level database");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output();
@@ -622,8 +624,9 @@ mod cli_integration {
 
 		info!("* Create access methods with identical names at ROOT, NS and DB levels");
 		{
-			let args =
-				format!("sql --conn http://{addr} --db {db} --ns {ns} --user {USER} --pass {PASS}");
+			let args = format!(
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --user {USER} --pass {PASS}"
+			);
 			let _ = common::run(&args)
 				.input(format!("DEFINE ACCESS {ac} ON ROOT TYPE JWT ALGORITHM HS512 KEY '{key}';
                                                 DEFINE ACCESS {ac} ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '{key}';
@@ -634,8 +637,9 @@ mod cli_integration {
 
 		info!("* Create record that will be used as record user for authentication");
 		{
-			let args =
-				format!("sql --conn http://{addr} --db {db} --ns {ns} --user {USER} --pass {PASS}");
+			let args = format!(
+				"sql --endpoint http://{addr} --db {db} --ns {ns} --user {USER} --pass {PASS}"
+			);
 			let _ = common::run(&args)
 				.input(format!("CREATE {record_user};").as_str())
 				.output()
@@ -644,7 +648,8 @@ mod cli_integration {
 
 		info!("* Pass root token and access root info");
 		{
-			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_root}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_root}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
 				.output()
@@ -657,7 +662,8 @@ mod cli_integration {
 
 		info!("* Pass root token and access namespace info");
 		{
-			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_root}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_root}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
@@ -670,7 +676,8 @@ mod cli_integration {
 
 		info!("* Pass root auth level and access database info");
 		{
-			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_root}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_root}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
@@ -683,7 +690,8 @@ mod cli_integration {
 
 		info!("* Pass namespace token and access root info");
 		{
-			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_ns}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_ns}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
 				.output()
@@ -696,7 +704,8 @@ mod cli_integration {
 
 		info!("* Pass namespace token and access namespace info");
 		{
-			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_ns}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_ns}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
@@ -709,7 +718,8 @@ mod cli_integration {
 
 		info!("* Pass namespace token and access database info");
 		{
-			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_ns}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_ns}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
@@ -722,7 +732,8 @@ mod cli_integration {
 
 		info!("* Pass database token and access root info");
 		{
-			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_db}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_db}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR ROOT;\n").as_str())
 				.output()
@@ -735,7 +746,8 @@ mod cli_integration {
 
 		info!("* Pass database token and access namespace info");
 		{
-			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_db}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_db}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
@@ -748,7 +760,8 @@ mod cli_integration {
 
 		info!("* Pass database token and access database info");
 		{
-			let args = format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_db}");
+			let args =
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_db}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
@@ -761,7 +774,7 @@ mod cli_integration {
 
 		info!("* Pass database token without specifying namespace or database");
 		{
-			let args = format!("sql --conn http://{addr} --token {token_db}");
+			let args = format!("sql --endpoint http://{addr} --token {token_db}");
 			let output = common::run(&args).input("INFO FOR DB;\n").output().expect("success");
 			assert!(
 				output.contains("tables: {"),
@@ -772,7 +785,7 @@ mod cli_integration {
 		info!("* Pass record user token and access database info");
 		{
 			let args =
-				format!("sql --conn http://{addr} --db {db} --ns {ns} --token {token_record}");
+				format!("sql --endpoint http://{addr} --db {db} --ns {ns} --token {token_record}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
@@ -785,7 +798,7 @@ mod cli_integration {
 
 		info!("* Pass namespace token without specifying namespace");
 		{
-			let args = format!("sql --conn http://{addr} --token {token_ns}");
+			let args = format!("sql --endpoint http://{addr} --token {token_ns}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR NS;\n").as_str())
 				.output()
@@ -798,7 +811,7 @@ mod cli_integration {
 
 		info!("* Pass database token without specifying database");
 		{
-			let args = format!("sql --conn http://{addr} --ns {ns} --token {token_db}");
+			let args = format!("sql --endpoint http://{addr} --ns {ns} --token {token_db}");
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
 				.output()
@@ -812,7 +825,7 @@ mod cli_integration {
 		info!("* Pass token at the same time as credentials");
 		{
 			let args = format!(
-				"sql --conn http://{addr} --ns {ns} --token {token_db} -u {USER} -p {PASS}"
+				"sql --endpoint http://{addr} --ns {ns} --token {token_db} -u {USER} -p {PASS}"
 			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
@@ -830,7 +843,7 @@ mod cli_integration {
 		info!("* Pass token at the same time as different auth level");
 		{
 			let args = format!(
-				"sql --conn http://{addr} --ns {ns} --token {token_db} --auth-level namespace"
+				"sql --endpoint http://{addr} --ns {ns} --token {token_db} --auth-level namespace"
 			);
 			let output = common::run(&args)
 				.input(format!("USE NS `{ns}` DB `{db}`; INFO FOR DB;\n").as_str())
@@ -853,7 +866,7 @@ mod cli_integration {
 		// Commands without credentials when auth is enabled, should fail
 		let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
 		let creds = ""; // Anonymous user
-		let sql_args = format!("sql --conn http://{addr} --multi --pretty");
+		let sql_args = format!("sql --endpoint http://{addr} --multi --pretty");
 
 		info!("* Query over HTTP");
 		{
@@ -865,7 +878,7 @@ mod cli_integration {
 
 		info!("* Query over WS");
 		{
-			let args = format!("sql --conn ws://{addr} --multi --pretty {creds}");
+			let args = format!("sql --endpoint ws://{addr} --multi --pretty {creds}");
 			let input = "";
 			let output = common::run(&args).input(input).output();
 			assert!(output.is_ok(), "anonymous user should be able to query: {output:?}");
@@ -874,7 +887,7 @@ mod cli_integration {
 		info!("* Can't do exports");
 		{
 			let args = format!(
-				"export --conn http://{addr} {creds} --ns {throwaway} --db {throwaway} -",
+				"export --endpoint http://{addr} {creds} --ns {throwaway} --db {throwaway} -",
 				throwaway = Ulid::new()
 			);
 			let output = common::run(&args).output();
@@ -889,7 +902,7 @@ mod cli_integration {
 			let tmp_file = common::tmp_file("exported.surql");
 			File::create(&tmp_file).expect("failed to create tmp file");
 			let args = format!(
-				"import --conn http://{addr} {creds} --ns {throwaway} --db {throwaway} {tmp_file}",
+				"import --endpoint http://{addr} {creds} --ns {throwaway} --db {throwaway} {tmp_file}",
 				throwaway = Ulid::new()
 			);
 			let output = common::run(&args).output();
@@ -916,7 +929,7 @@ mod cli_integration {
 			let (addr, mut server) =
 				common::start_server_with_import_file(&import_file).await.unwrap();
 			// Define connection arguments.
-			let args = format!("sql --conn http://{addr} --user {USER} --pass {PASS}");
+			let args = format!("sql --endpoint http://{addr} --user {USER} --pass {PASS}");
 			// Verify that the file has been imported correctly.
 			let output = common::run(&args).input("INFO FOR ROOT").output().expect("success");
 			assert!(output.contains(
@@ -939,7 +952,7 @@ mod cli_integration {
 			let (addr, mut server) =
 				common::start_server_with_import_file(&import_file).await.unwrap();
 			// Verify that the resource has been recreated correctly.
-			let args = format!("sql --conn http://{addr} --user {USER} --pass {PASS}");
+			let args = format!("sql --endpoint http://{addr} --user {USER} --pass {PASS}");
 			let output = common::run(&args).input("INFO FOR ROOT").output().expect("success");
 			assert!(output.contains(
 				r#"DEFINE ACCESS admin ON ROOT TYPE JWT URL 'https://www.surrealdb.com/jwks.json'"#
@@ -964,12 +977,13 @@ mod cli_integration {
 			let (addr, mut server) =
 				common::start_server_with_import_file(&import_file).await.unwrap();
 			// Verify that the file has been imported correctly.
-			let args =
-				format!("sql --conn http://{addr} --user {USER} --pass {PASS} --namespace {ns}");
+			let args = format!(
+				"sql --endpoint http://{addr} --user {USER} --pass {PASS} --namespace {ns}"
+			);
 			let output = common::run(&args).input("INFO FOR NAMESPACE").output().expect("success");
 			assert!(output.contains(r#"DEFINE USER test ON NAMESPACE PASSHASH"#));
 			let args = format!(
-				"sql --conn http://{addr} --user {USER} --pass {PASS} --namespace {ns} --database {db}"
+				"sql --endpoint http://{addr} --user {USER} --pass {PASS} --namespace {ns} --database {db}"
 			);
 			let output = common::run(&args).input("SELECT * FROM user").output().expect("success");
 			assert!(output.contains(r#"{ id: user:1 }"#));
@@ -995,8 +1009,9 @@ mod cli_integration {
 			}
 			// Verify that no data has been created on the datastore.
 			let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
-			let args =
-				format!("sql --conn http://{addr} --user {USER} --pass {PASS} --namespace {ns}");
+			let args = format!(
+				"sql --endpoint http://{addr} --user {USER} --pass {PASS} --namespace {ns}"
+			);
 			let output = common::run(&args).input("INFO FOR ROOT").output().expect("success");
 			assert!(!output.contains(r#"DEFINE USER test ON ROOT PASSHASH"#));
 			server.finish().unwrap();
@@ -1035,12 +1050,10 @@ mod cli_integration {
 		info!("* Define a table");
 		{
 			let args = format!(
-				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
+				"sql --endpoint http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			let output = common::run(&args)
-				.input("DEFINE TABLE thing TYPE ANY CHANGEFEED 1s;\n")
-				.output()
-				.unwrap();
+			let output =
+				common::run(&args).input("DEFINE TABLE thing TYPE ANY;\n").output().unwrap();
 			let output = remove_debug_info(output);
 			assert_eq!(output, "[NONE]\n\n".to_owned(), "failed to send sql: {args}");
 		}
@@ -1048,67 +1061,41 @@ mod cli_integration {
 		info!("* Create a record");
 		{
 			let args = format!(
-				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
+				"sql --endpoint http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			let output = common::run(&args)
-				.input("BEGIN TRANSACTION; CREATE thing:one; COMMIT;\n")
-				.output()
-				.unwrap();
+			let output = common::run(&args).input("CREATE thing:one;\n").output().unwrap();
 			let output = remove_debug_info(output);
 			assert_eq!(
 				output,
-				"[NONE, [{ id: thing:one }], NONE]\n\n".to_owned(),
+				"[[{ id: thing:one }]]\n\n".to_owned(),
 				"failed to send sql: {args}"
 			);
 		}
 
-		info!("* Show changes");
+		info!("* Query the record");
 		{
 			let args = format!(
-				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
+				"sql --endpoint http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			let output = common::run(&args)
-				.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
-				.output()
-				.unwrap();
-			let output = remove_debug_info(output).replace('\n', "");
-			let allowed = [
-				// Delete these
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 4 }]]",
-				// Keep these
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 262144 }]]",
-			];
-			allowed
-				.into_iter()
-				.find(|case| {
-					let a = *case == output;
-					println!("Comparing\n{case}\n{output}\n{a}");
-					a
-				})
-				.ok_or(format!("Output didnt match an example output: {output}"))
-				.unwrap();
-		};
+			let output = common::run(&args).input("SELECT * FROM thing:one;\n").output().unwrap();
+			let output = remove_debug_info(output);
+			assert_eq!(
+				output,
+				"[[{ id: thing:one }]]\n\n".to_owned(),
+				"failed to send sql: {args}"
+			);
+		}
 
-		sleep(Duration::from_secs(20)).await;
-
-		info!("* Show changes after GC");
+		info!("* Delete the record");
 		{
 			let args = format!(
-				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
+				"sql --endpoint http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
-			let output = common::run(&args)
-				.input("SHOW CHANGES FOR TABLE thing SINCE 0 LIMIT 10;\n")
-				.output()
-				.unwrap();
+			let output = common::run(&args).input("DELETE thing:one;\n").output().unwrap();
 			let output = remove_debug_info(output);
 			assert_eq!(output, "[[]]\n\n".to_owned(), "failed to send sql: {args}");
 		}
+
 		server.finish().unwrap();
 	}
 
@@ -1263,7 +1250,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1297,7 +1284,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1330,7 +1317,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1355,7 +1342,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1379,7 +1366,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1402,7 +1389,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1423,7 +1410,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1449,7 +1436,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1477,7 +1464,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1505,7 +1492,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1535,7 +1522,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1565,7 +1552,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1596,7 +1583,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1616,7 +1603,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1636,7 +1623,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1660,7 +1647,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1684,7 +1671,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1704,7 +1691,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1729,7 +1716,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1750,7 +1737,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1774,7 +1761,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} -u root -p root --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1799,7 +1786,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1820,7 +1807,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1844,7 +1831,7 @@ mod cli_integration {
 			.unwrap();
 
 			let cmd = format!(
-				"sql --conn ws://{addr} --ns {throwaway} --db {throwaway} --multi",
+				"sql --endpoint ws://{addr} --ns {throwaway} --db {throwaway} --multi",
 				throwaway = Ulid::new()
 			);
 
@@ -1923,7 +1910,8 @@ mod cli_integration {
 	async fn double_create() {
 		info!("* check only one output created");
 		{
-			let args = "sql --conn memory --ns test --db test --pretty --hide-welcome".to_string();
+			let args =
+				"sql --endpoint memory --ns test --db test --pretty --hide-welcome".to_string();
 			let output = common::run(&args)
 				.input("let $a = create foo;\n")
 				.input("select * from foo;\n")
@@ -1947,7 +1935,7 @@ mod cli_integration {
 
 		// Connect the client
 		let cmd = format!(
-			"sql --conn ws://{addr} --ns {throwaway} --db {throwaway} --multi",
+			"sql --endpoint ws://{addr} --ns {throwaway} --db {throwaway} --multi",
 			throwaway = Ulid::new()
 		);
 
@@ -1964,7 +1952,7 @@ mod cli_integration {
 		// Check the log is present
 		assert!(stderr.contains("Slow query detected - time: "));
 		assert!(stderr.contains(
-			"s - query: RETURN string::concat(sleep(1s200ms), '/', $public, '/', $secret) - params: [ $public='foo' ]"
+			"s - query: RETURN string::concat(`sleep`(1s200ms), '/', $public, '/', $secret) - params: [ $public='foo' ]"
 		));
 		println!("{stderr}");
 	}

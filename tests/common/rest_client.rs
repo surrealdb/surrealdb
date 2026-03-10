@@ -1,10 +1,11 @@
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use http::{HeaderMap, StatusCode, header};
 use reqwest::Client;
 use serde_json::Value as JsonValue;
 use tokio::time::sleep;
 use tracing::{debug, error, warn};
+use web_time::SystemTime;
 
 use crate::common::expected::Expected;
 
@@ -42,10 +43,10 @@ impl RestClient {
 		let start = SystemTime::now();
 		while start.elapsed().unwrap().le(time_out) {
 			sleep(Duration::from_secs(2)).await;
-			if let Some(r) = self.query("INFO FOR ROOT").await {
-				if r.status() == StatusCode::OK {
-					return Some(self);
-				}
+			if let Some(r) = self.query("INFO FOR ROOT").await
+				&& r.status() == StatusCode::OK
+			{
+				return Some(self);
 			}
 			warn!("DB not yet responding");
 			sleep(Duration::from_secs(2)).await;

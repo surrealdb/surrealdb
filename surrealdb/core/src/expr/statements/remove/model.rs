@@ -1,0 +1,47 @@
+use anyhow::Result;
+
+use crate::catalog::providers::DatabaseProvider;
+use crate::ctx::FrozenContext;
+use crate::dbs::Options;
+use crate::err::Error;
+use crate::expr::{Base, Value};
+use crate::iam::{Action, ResourceKind};
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub(crate) struct RemoveModelStatement {
+	pub name: String,
+	pub version: String,
+	pub if_exists: bool,
+}
+
+impl RemoveModelStatement {
+	/// Process this type returning a computed simple Value
+	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
+		// Get the transaction
+		let txn = ctx.tx();
+		// Get the defined model
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let ml = match txn.get_db_model(ns, db, &self.name, &self.version).await? {
+			Some(x) => x,
+			None => {
+				if self.if_exists {
+					return Ok(Value::None);
+				}
+				return Err(Error::MlNotFound {
+					name: format!("{}<{}>", self.name, self.version),
+				}
+				.into());
+			}
+		};
+		// Delete the definition
+		let key = crate::key::database::ml::new(ns, db, &ml.name, &ml.version);
+		txn.del(&key).await?;
+		// Clear the cache
+		txn.clear_cache();
+		// TODO Remove the model file from storage
+		// Ok all good
+		Ok(Value::None)
+	}
+}

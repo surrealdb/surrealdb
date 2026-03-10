@@ -1,0 +1,30 @@
+name: 'Propagate binaries'
+description: 'Propagate binaries to all AWS regions'
+
+inputs:
+  aws-access-key-id:
+    description: 'AWS access key ID'
+    required: true
+  aws-secret-access-key:
+    description: 'AWS secret access key'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Configure AWS
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v5.0.0
+      with:
+        aws-region: us-east-2
+        aws-access-key-id: ${{ inputs.aws-access-key-id }}
+        aws-secret-access-key: ${{ inputs.aws-secret-access-key }}
+
+    - name: Distribute binaries
+      shell: bash
+      run: |
+        regions=("af-south-1" "ap-east-1" "ap-south-1" "ap-southeast-1" "ap-southeast-2" "ca-central-1" "eu-central-1" "eu-west-2" "me-south-1" "sa-east-1" "us-west-2")
+        for region in ${regions[@]}; do
+            aws s3 sync --delete --storage-class INTELLIGENT_TIERING --source-region eu-west-2 --region ${region} s3://download.surrealdb.com s3://download.${region}.surrealdb.com
+        done
+
+

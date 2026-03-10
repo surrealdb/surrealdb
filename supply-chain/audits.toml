@@ -122,11 +122,6 @@ who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
 version = "0.21.1"
 
-[[audits.rust-s3]]
-who = "Micha de Vries <micha@devrie.sh>"
-criteria = "safe-to-deploy"
-version = "0.35.1"
-
 [[audits.rxml]]
 who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
@@ -316,7 +311,7 @@ end = "2025-08-31"
 
 [[trusted.bytes]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-03-06"
 end = "2025-09-03"
 
@@ -388,7 +383,7 @@ end = "2026-10-30"
 
 [[trusted.cc]]
 criteria = "safe-to-deploy"
-user-id = 55123 # rust-lang-owner
+user-id = 55123
 start = "2022-10-29"
 end = "2026-10-30"
 
@@ -436,13 +431,13 @@ end = "2026-05-06"
 
 [[trusted.crc]]
 criteria = "safe-to-deploy"
-user-id = 64482 # Akhil Velagapudi (akhilles)
+user-id = 64482
 start = "2021-10-28"
 end = "2026-05-06"
 
 [[trusted.crc-catalog]]
 criteria = "safe-to-deploy"
-user-id = 64482 # Akhil Velagapudi (akhilles)
+user-id = 64482
 start = "2019-12-14"
 end = "2026-05-06"
 
@@ -466,7 +461,7 @@ end = "2026-10-30"
 
 [[trusted.deflate64]]
 criteria = "safe-to-deploy"
-user-id = 131098 # anatawa12 (anatawa12)
+user-id = 131098
 start = "2023-07-29"
 end = "2026-05-06"
 
@@ -484,7 +479,7 @@ end = "2026-04-09"
 
 [[trusted.double-ended-peekable]]
 criteria = "safe-to-deploy"
-user-id = 176367 # Edoardo Morandi (dodomorandi)
+user-id = 176367
 start = "2023-03-12"
 end = "2026-02-26"
 
@@ -556,7 +551,7 @@ end = "2026-10-30"
 
 [[trusted.fslock]]
 criteria = "safe-to-deploy"
-user-id = 23043 # brunoczim
+user-id = 23043
 start = "2020-01-01"
 end = "2026-05-06"
 
@@ -578,12 +573,6 @@ user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-03-13"
 end = "2025-08-06"
 
-[[trusted.hashbrown]]
-criteria = "safe-to-deploy"
-user-id = 2915 # Amanieu d'Antras (Amanieu)
-start = "2019-04-02"
-end = "2025-05-02"
-
 [[trusted.headers]]
 criteria = "safe-to-deploy"
 user-id = 359 # Sean McArthur (seanmonstar)
@@ -604,7 +593,7 @@ end = "2025-08-06"
 
 [[trusted.http-body]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-04-04"
 end = "2025-09-03"
 
@@ -754,7 +743,7 @@ end = "2026-10-30"
 
 [[trusted.loom]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-08-08"
 end = "2025-09-03"
 
@@ -766,7 +755,7 @@ end = "2025-09-03"
 
 [[trusted.lzma-rs]]
 criteria = "safe-to-deploy"
-user-id = 14564 # Guillaume E (gendx)
+user-id = 14564
 start = "2019-02-24"
 end = "2026-05-06"
 
@@ -814,7 +803,7 @@ end = "2025-08-06"
 
 [[trusted.mio]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-05-15"
 end = "2025-09-03"
 
@@ -832,7 +821,7 @@ end = "2026-10-30"
 
 [[trusted.nanoservices-utils]]
 criteria = "safe-to-deploy"
-user-id = 262632 # Maxwell Flitton (maxwellflitton)
+user-id = 262632
 start = "2024-03-30"
 end = "2025-09-03"
 
@@ -874,7 +863,7 @@ end = "2025-08-06"
 
 [[trusted.onnx-embedding]]
 criteria = "safe-to-deploy"
-user-id = 262632 # Maxwell Flitton (maxwellflitton)
+user-id = 262632
 start = "2025-04-17"
 end = "2026-05-06"
 
@@ -1044,13 +1033,13 @@ end = "2025-08-06"
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2019-02-27"
-end = "2025-08-31"
+end = "2026-11-06"
 
 [[trusted.regex-automata]]
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2019-02-25"
-end = "2025-08-31"
+end = "2026-11-06"
 
 [[trusted.regex-syntax]]
 criteria = "safe-to-deploy"
@@ -1236,7 +1225,7 @@ end = "2026-09-10"
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-07-19"
-end = "2026-02-13"
+end = "2027-02-18"
 
 [[trusted.surrealdb-async-graphql-axum]]
 criteria = "safe-to-deploy"
@@ -1248,7 +1237,7 @@ end = "2025-08-07"
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2024-01-30"
-end = "2026-02-13"
+end = "2027-02-18"
 
 [[trusted.surrealdb-derive]]
 criteria = "safe-to-deploy"
@@ -1262,15 +1251,33 @@ user-id = 3987 # Rushmore Mushambi (rushmorem)
 start = "2023-08-29"
 end = "2025-01-24"
 
+[[trusted.surrealdb-librocksdb-sys]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-10-31"
+end = "2026-11-20"
+
 [[trusted.surrealdb-protocol]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2025-07-04"
 end = "2026-07-18"
 
+[[trusted.surrealdb-rocksdb]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-10-31"
+end = "2026-11-20"
+
+[[trusted.surrealdb-server]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2024-01-30"
+end = "2026-02-13"
+
 [[trusted.surrealdb-tikv-client]]
 criteria = "safe-to-deploy"
-user-id = 217605 # Yusuke Kuoka (mumoshu)
+user-id = 217605
 start = "2023-06-19"
 end = "2025-07-08"
 
@@ -1286,6 +1293,30 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2025-09-16"
 end = "2026-09-23"
 
+[[trusted.surrealism]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-02-13"
+end = "2026-11-20"
+
+[[trusted.surrealism-macros]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-11-05"
+end = "2026-11-20"
+
+[[trusted.surrealism-runtime]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-11-05"
+end = "2026-11-20"
+
+[[trusted.surrealism-types]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-11-05"
+end = "2026-11-20"
+
 [[trusted.surrealkv]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
@@ -1298,6 +1329,12 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2023-10-31"
 end = "2026-05-06"
 
+[[trusted.surrealmx]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-10-06"
+end = "2027-02-17"
+
 [[trusted.syn]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
@@ -1306,13 +1343,13 @@ end = "2025-08-06"
 
 [[trusted.system-configuration]]
 criteria = "safe-to-deploy"
-user-id = 1459 # Linus Färnstrand (faern)
+user-id = 1459
 start = "2019-10-16"
 end = "2026-05-06"
 
 [[trusted.system-configuration-sys]]
 criteria = "safe-to-deploy"
-user-id = 1459 # Linus Färnstrand (faern)
+user-id = 1459
 start = "2019-10-16"
 end = "2026-05-06"
 
@@ -1358,9 +1395,21 @@ user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-10-09"
 end = "2026-10-12"
 
+[[trusted.thread-id]]
+criteria = "safe-to-deploy"
+user-id = 498 # Ruud van Asseldonk (ruuda)
+start = "2021-03-24"
+end = "2026-12-15"
+
+[[trusted.thread-id]]
+criteria = "safe-to-run"
+user-id = 498 # Ruud van Asseldonk (ruuda)
+start = "2021-03-24"
+end = "2026-12-15"
+
 [[trusted.tokio]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-03-02"
 end = "2025-09-03"
 
@@ -1378,7 +1427,7 @@ end = "2026-05-06"
 
 [[trusted.tokio-macros]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-04-24"
 end = "2025-09-03"
 
@@ -1390,7 +1439,7 @@ end = "2025-09-03"
 
 [[trusted.tokio-util]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-11-26"
 end = "2025-09-03"
 
@@ -1420,15 +1469,45 @@ end = "2026-10-30"
 
 [[trusted.tower]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-04-27"
 end = "2025-09-03"
 
 [[trusted.tower-layer]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-04-27"
 end = "2025-09-03"
+
+[[trusted.tracing]]
+criteria = "safe-to-deploy"
+user-id = 172786 # Hayden Stainsby (hds)
+start = "2024-11-27"
+end = "2026-12-10"
+
+[[trusted.tracing-attributes]]
+criteria = "safe-to-deploy"
+user-id = 172786 # Hayden Stainsby (hds)
+start = "2024-11-26"
+end = "2026-12-10"
+
+[[trusted.tracing-core]]
+criteria = "safe-to-deploy"
+user-id = 172786 # Hayden Stainsby (hds)
+start = "2024-11-25"
+end = "2026-12-10"
+
+[[trusted.tracing-perfetto]]
+criteria = "safe-to-deploy"
+user-id = 17316 # csmoe (csmoe)
+start = "2024-07-01"
+end = "2026-12-15"
+
+[[trusted.tracing-subscriber]]
+criteria = "safe-to-deploy"
+user-id = 172786 # Hayden Stainsby (hds)
+start = "2024-11-29"
+end = "2026-12-15"
 
 [[trusted.trice]]
 criteria = "safe-to-deploy"
@@ -1534,7 +1613,7 @@ end = "2026-10-30"
 
 [[trusted.wasmtime-versioned-export-macros]]
 criteria = "safe-to-deploy"
-user-id = 73222 # wasmtime-publish
+user-id = 73222
 start = "2023-08-21"
 end = "2026-10-30"
 
@@ -1678,12 +1757,12 @@ end = "2026-05-06"
 
 [[trusted.zip]]
 criteria = "safe-to-deploy"
-user-id = 209322 # Chris Hennick (Pr0methean)
+user-id = 209322
 start = "2024-04-20"
 end = "2026-05-06"
 
 [[trusted.zopfli]]
 criteria = "safe-to-deploy"
-user-id = 111932 # Alejandro González (AlexTMjugador)
+user-id = 111932
 start = "2022-08-19"
 end = "2026-05-06"

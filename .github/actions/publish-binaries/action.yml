@@ -1,0 +1,94 @@
+name: 'Publish binaries'
+description: 'Download artifacts and publish binaries to S3 and optionally create GitHub release'
+
+inputs:
+  name:
+    description: 'Release name (e.g., nightly or v2.0.0)'
+    required: true
+  version:
+    description: 'Version number'
+    required: true
+  pre-release:
+    description: 'Whether this is a pre-release'
+    required: true
+  release-name:
+    description: 'Release environment name'
+    required: true
+  publish:
+    description: 'Whether to publish'
+    required: false
+    default: 'false'
+  create-release:
+    description: 'Whether to create a GitHub release'
+    required: false
+    default: 'false'
+  latest:
+    description: 'Whether this is the latest release'
+    required: false
+    default: 'false'
+  git-ref:
+    description: 'Git ref for the release'
+    required: true
+  aws-access-key-id:
+    description: 'AWS access key ID'
+    required: false
+  aws-secret-access-key:
+    description: 'AWS secret access key'
+    required: false
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Download artifacts
+      if: ${{ inputs.publish == 'true' }}
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      with:
+        path: artifacts
+
+    - name: Publish release
+      uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+      if: ${{ inputs.publish == 'true' && inputs.create-release == 'true' }}
+      with:
+        tag_name: v${{ inputs.version }}
+        name: "Release ${{ inputs.version }}"
+        body: "Release ${{ inputs.version }}"
+        target_commitish: ${{ inputs.git-ref }}
+        prerelease: ${{ inputs.pre-release }}
+        make_latest: ${{ inputs.latest }}
+        fail_on_unmatched_files: true
+        files: |
+          LICENSE
+          artifacts/surreal-${{ inputs.name }}.*/*.tgz
+          artifacts/surreal-${{ inputs.name }}.*/*.exe
+
+    - name: Configure AWS
+      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v5.0.0
+      if: ${{ inputs.publish == 'true' }}
+      with:
+        aws-region: us-east-2
+        aws-access-key-id: ${{ inputs.aws-access-key-id }}
+        aws-secret-access-key: ${{ inputs.aws-secret-access-key }}
+
+    - name: Set latest release version
+      if: ${{ inputs.publish == 'true' && inputs.create-release == 'true' && inputs.latest == 'true' }}
+      shell: bash
+      run: |
+        echo v${{ inputs.version }} > latest.txt
+        aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
+
+    - name: Set latest alpha or beta version
+      if: ${{ inputs.publish == 'true' && inputs.pre-release == 'true' }}
+      shell: bash
+      run: |
+        echo v${{ inputs.version }} > ${{ inputs.release-name }}.txt
+        aws s3 cp --cache-control 'no-store' ${{ inputs.release-name }}.txt s3://download.surrealdb.com/${{ inputs.release-name }}.txt
+
+    - name: Publish binaries
+      if: ${{ inputs.publish == 'true' }}
+      shell: bash
+      run: |
+        for file in artifacts/**/*.{tgz,txt,exe}; do
+          aws s3 cp --cache-control 'no-store' $file s3://download.surrealdb.com/${{ inputs.name }}/
+        done
+
+

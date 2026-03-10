@@ -1,0 +1,120 @@
+use proc_macro2::TokenStream;
+use quote::quote;
+use syn::{Attribute, LitStr, Path};
+
+/// Configuration for the crate path used in generated code.
+///
+/// This allows users to customize which crate path the derive macro uses,
+/// which is useful when re-exporting the types from another crate.
+#[derive(Debug, Clone)]
+pub struct CratePath {
+	path: TokenStream,
+}
+
+impl CratePath {
+	/// Parse the crate path from attributes.
+	///
+	/// Looks for `#[surreal(crate = "path::to::crate")]` attribute.
+	/// If not specified, defaults to `::surrealdb::types` when the
+	/// `sdk-path` feature is enabled, otherwise `::surrealdb_types`.
+	pub fn parse(attrs: &[Attribute]) -> Self {
+		for attr in attrs {
+			if attr.path().is_ident("surreal") {
+				let mut crate_path = None;
+
+				let _ = attr.parse_nested_meta(|meta| {
+					if meta.path.is_ident("crate")
+						&& let Ok(value) = meta.value()
+						&& let Ok(lit_str) = value.parse::<LitStr>()
+						&& let Ok(path) = syn::parse_str::<Path>(&lit_str.value())
+					{
+						crate_path = Some(quote! { #path });
+					}
+					Ok(())
+				});
+
+				if let Some(path) = crate_path {
+					return Self {
+						path,
+					};
+				}
+			}
+		}
+
+		Self::default()
+	}
+
+	/// Get the token stream for Value type
+	pub fn value(&self) -> TokenStream {
+		let base = &self.path;
+		quote! { #base::Value }
+	}
+
+	/// Get the token stream for Kind type
+	pub fn kind(&self) -> TokenStream {
+		let base = &self.path;
+		quote! { #base::Kind }
+	}
+
+	/// Get the token stream for KindLiteral type
+	pub fn kind_literal(&self) -> TokenStream {
+		let base = &self.path;
+		quote! { #base::KindLiteral }
+	}
+
+	/// Get the token stream for Object type
+	pub fn object(&self) -> TokenStream {
+		let base = &self.path;
+		quote! { #base::Object }
+	}
+
+	/// Get the token stream for Array type
+	pub fn array(&self) -> TokenStream {
+		let base = &self.path;
+		quote! { #base::Array }
+	}
+
+	/// Get the token stream for ConversionError type
+	pub fn conversion_error(&self) -> TokenStream {
+		let base = &self.path;
+		quote! { #base::ConversionError }
+	}
+
+	/// Get the token stream for TypeError type
+	pub fn type_error(&self) -> TokenStream {
+		let base = &self.path;
+		quote! { #base::TypeError }
+	}
+
+	/// Get the token stream for `Result<Self, Error>` (used as the return type of `from_value`).
+	pub fn error_result(&self) -> TokenStream {
+		let base = &self.path;
+		quote! { std::result::Result<Self, #base::Error> }
+	}
+
+	/// Get the token stream for `Error::internal(msg)`. The passed token stream must
+	/// produce a value that converts to String (e.g. `format!(...)` or `"msg".to_string()`).
+	pub fn error_internal(&self, msg: TokenStream) -> TokenStream {
+		let base = &self.path;
+		quote! { #base::Error::internal(#msg) }
+	}
+
+	/// Get the token stream for Value::from_t function
+	pub fn value_from_t(&self) -> TokenStream {
+		let base = &self.path;
+		quote! { #base::Value::from_t }
+	}
+}
+
+impl Default for CratePath {
+	fn default() -> Self {
+		let path = if cfg!(feature = "sdk-path") {
+			quote! { ::surrealdb::types }
+		} else {
+			quote! { ::surrealdb_types }
+		};
+		Self {
+			path,
+		}
+	}
+}

@@ -68,11 +68,15 @@ rec {
       dot = optionalString hasDateRev ".";
     in "${date}${dot}${shortRev}";
 
+  # The base version from Cargo.toml, used as default for SURREAL_BUILD_VERSION
+  baseVersion = cargoToml.workspace.package.version;
+
   version = with lib.strings;
     let
       hasBuildMetadata = buildMetadata != "";
       plus = optionalString hasBuildMetadata "+";
-    in "${cargoToml.workspace.package.version}${plus}${buildMetadata}";
+    in "${baseVersion}${plus}${buildMetadata}";
 
+  SURREAL_BUILD_VERSION = baseVersion;
   SURREAL_BUILD_METADATA = buildMetadata;
 }
