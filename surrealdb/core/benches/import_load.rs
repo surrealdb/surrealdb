@@ -89,7 +89,7 @@ fn generate_insert_statement(statement_index: usize) -> String {
 			               zip: '62701' }}, \
 			   bio: '",
 			age = 18 + (global_id % 62),
-			active = if global_id % 2 == 0 {
+			active = if global_id.is_multiple_of(2) {
 				"true"
 			} else {
 				"false"
@@ -118,7 +118,7 @@ fn generate_insert_statement(statement_index: usize) -> String {
 fn statements_needed(target_bytes: u64) -> usize {
 	let sample = generate_insert_statement(0);
 	let stmt_bytes = sample.len() as u64;
-	((target_bytes + stmt_bytes - 1) / stmt_bytes) as usize
+	target_bytes.div_ceil(stmt_bytes) as usize
 }
 
 // ---------------------------------------------------------------------------
