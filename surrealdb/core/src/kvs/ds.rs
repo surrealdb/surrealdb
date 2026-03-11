@@ -1474,7 +1474,7 @@ impl Datastore {
 	/// * `dbs` - The shared datastore instance, cloned into each compaction task
 	/// * `interval` - The interval between compaction runs, used to calculate the lease duration
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs))]
-	pub async fn index_compaction(dbs: Arc<Datastore>, interval: Duration) -> Result<()> {
+	pub async fn index_compaction(dbs: Arc<Datastore>, interval: Duration) -> Result<usize> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting index compaction process");
 		// Create a new lease handler
@@ -1485,12 +1485,13 @@ impl Datastore {
 			TaskLeaseType::IndexCompaction,
 			interval * 2,
 		)?;
+		let mut count_iteration = 0;
 		// We continue without interruptions while there are keys and the lease
 		loop {
 			// Attempt to acquire a lease for the IndexCompaction task
 			// If we don't get the lease, another node is handling this task
 			if !lh.has_lease().await? {
-				return Ok(());
+				return Ok(count_iteration);
 			}
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running index compaction process");
@@ -1505,11 +1506,12 @@ impl Datastore {
 				res?
 			};
 			if items.is_empty() {
-				return Ok(());
+				return Ok(count_iteration);
 			}
 			// Collect the keys so we can delete them after processing
 			let keys: Vec<Key> = items.iter().map(|(k, _)| k.clone()).collect();
 			// Process compaction for each index
+			count_iteration += 1;
 			Self::index_compaction_loop(dbs.clone(), &lh, items).await?;
 			// Delete the processed queue entries in a separate write
 			// transaction. This avoids conflicts with concurrent user
@@ -1528,7 +1530,7 @@ impl Datastore {
 				break;
 			}
 		}
-		Ok(())
+		Ok(count_iteration)
 	}
 
 	/// Compacts each distinct index found in the queue items.

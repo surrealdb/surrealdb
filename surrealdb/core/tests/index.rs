@@ -13,7 +13,10 @@ use rand::{Rng, SeedableRng, random};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_types::{Array, RecordId, RecordIdKey, ToSql, Value};
-use tokio::time::timeout;
+use tokio::task;
+use tokio::task::JoinHandle;
+use tokio::time::{sleep, timeout};
+use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
 use crate::helpers::new_ds;
@@ -136,6 +139,21 @@ async fn batch_ingestion(
 	concurrent_tasks(dbs.clone(), ses, batch.len(), |i| batch[i]).await
 }
 
+async fn start_compaction_loop(
+	dbs: Arc<Datastore>,
+	abort_compaction: CancellationToken,
+) -> JoinHandle<Result<usize>> {
+	task::spawn(async move {
+		let mut compaction_count = 0;
+		while !abort_compaction.is_cancelled() {
+			compaction_count +=
+				Datastore::index_compaction(dbs.clone(), Duration::from_secs(1)).await?;
+		}
+		info!("Ran {compaction_count} compaction iterations");
+		Ok(compaction_count)
+	})
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 10)]
 #[test_log::test]
 // Regression test for https://github.com/surrealdb/surrealdb/issues/6837
@@ -143,7 +161,7 @@ async fn multi_index_concurrent_test_create_update_delete() -> Result<()> {
 	#[cfg(not(debug_assertions))]
 	let count = 1000;
 	#[cfg(debug_assertions)]
-	let count = 200;
+	let count = 1000;
 	multi_index_concurrent_test(
 		count,
 		&[
@@ -170,6 +188,11 @@ async fn multi_index_concurrent_test(
 	DEFINE INDEX field5 ON aaa FIELDS field5 FULLTEXT ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;
 ";
 	let dbs = Arc::new(new_ds("test", "test").await?);
+
+	// Start the index compaction
+	let abort_compaction = CancellationToken::new();
+	let compaction_loop = start_compaction_loop(dbs.clone(), abort_compaction.clone()).await;
+
 	let ses = Session::owner().with_ns("test").with_db("test");
 	// Define analyzer and indexes.
 	dbs.execute(sql, &ses, None).await?;
@@ -250,6 +273,11 @@ async fn multi_index_concurrent_test(
         Ok::<(), anyhow::Error>(())
     })
         .await??;
+
+	// Stop the compaction loop
+	abort_compaction.cancel();
+	assert!(compaction_loop.await?? > 0);
+
 	Ok(())
 }
 
@@ -350,6 +378,76 @@ async fn hnsw_concurrent_writes() -> Result<()> {
 
 	// The results should match
 	assert_eq!(results1, results2);
+
+	Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 10)]
+#[test_log::test]
+// Regression test for https://github.com/surrealdb/surrealdb/issues/7072
+async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
+	let dbs = Arc::new(new_ds("test", "test").await?);
+	let session = Session::owner().with_ns("test").with_db("test");
+
+	// Start the index compaction
+	let cancellation = CancellationToken::new();
+	let compaction_loop = start_compaction_loop(dbs.clone(), cancellation.clone()).await;
+
+	// Define the table and the index.
+	dbs.execute(
+		"
+		DEFINE INDEX idx_user_email ON user FIELDS email UNIQUE;
+		DEFINE INDEX idx_scope_name ON scope FIELDS name UNIQUE;
+		DEFINE INDEX idx_scope_kind ON scope FIELDS kind, name UNIQUE;
+		DEFINE INDEX idx_schema_key ON schema FIELDS key UNIQUE;",
+		&session,
+		None,
+	)
+	.await?;
+
+	let mut tasks = Vec::with_capacity(8);
+
+	let db = dbs.clone();
+	let sess = session.clone();
+	let cancel = cancellation.clone();
+
+	tasks.push(tokio::spawn(async move {
+		let mut count = 0;
+		while !cancel.is_cancelled() {
+			count += 1;
+			db.execute(&format!("CREATE user SET email = 'user{count}@test.com'"), &sess, None)
+				.await?;
+		}
+		Ok::<(), anyhow::Error>(())
+	}));
+
+	let db = dbs.clone();
+	let sess = session.clone();
+	let cancel = cancellation.clone();
+
+	tasks.push(tokio::spawn(async move {
+		let mut count = 0;
+		while !cancel.is_cancelled() {
+			count += 1;
+			db.execute(
+				&format!("CREATE scope SET name = 'tenant-{count}', kind = 'tenant'"),
+				&sess,
+				None,
+			)
+			.await?;
+		}
+		Ok::<(), anyhow::Error>(())
+	}));
+
+	// Stop the compaction loop
+	sleep(Duration::from_secs(5)).await;
+	cancellation.cancel();
+
+	for task in tasks {
+		task.await??;
+	}
+
+	assert_eq!(compaction_loop.await??, 0);
 
 	Ok(())
 }
