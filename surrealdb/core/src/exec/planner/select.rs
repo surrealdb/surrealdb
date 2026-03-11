@@ -172,7 +172,7 @@ impl<'ctx> Planner<'ctx> {
 	/// rewritten to `Expr::Table` so that downstream planning (index
 	/// resolution, limit pushdown, sort elimination) works identically to
 	/// literal table names.
-	async fn resolve_source_exprs(&self, what: &mut Vec<Expr>) {
+	async fn resolve_source_exprs(&self, what: &mut [Expr]) {
 		for expr in what.iter_mut() {
 			match expr {
 				Expr::Table(_) | Expr::Literal(_) | Expr::Select(_) => continue,
