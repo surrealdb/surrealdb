@@ -1123,10 +1123,32 @@ impl Executor {
 		S: Stream<Item = Result<TopLevelExpr>>,
 	{
 		let mut this = Executor::new(ctx, opt);
-		if skip_success_results {
-			this.opt.set_suppress_output(true);
-		}
 		let mut stream = pin!(stream);
+
+		if skip_success_results {
+			// The import path requires OPTION IMPORT as the first statement.
+			// This sets opt.import which skips events, live queries, field
+			// processing, table views, and result output for performance.
+			match stream.as_mut().next().await {
+				Some(Ok(TopLevelExpr::Option(ref stmt)))
+					if stmt.name.eq_ignore_ascii_case("IMPORT") && stmt.what =>
+				{
+					this.execute_option_statement(stmt.clone())?;
+				}
+				Some(Err(e)) => {
+					bail!(Error::InvalidStatement(e.to_string()));
+				}
+				_ => {
+					bail!(Error::InvalidStatement(
+						"Import requires `OPTION IMPORT;` as the first statement. \
+						 This disables events, live queries, field processing, and result \
+						 output for optimal import performance. To execute queries with \
+						 full side effects, use the /sql endpoint instead."
+							.to_string()
+					));
+				}
+			}
+		}
 
 		while let Some(stmt) = stream.next().await {
 			let stmt = match stmt {
@@ -1429,12 +1451,12 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::default().with_ns("NS").with_db("DB");
 
-		// Ensure namespace and database exist
 		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
 			.await
 			.unwrap();
 
-		let sql = "INSERT INTO person [{ name: 'a' }, { name: 'b' }, { name: 'c' }];";
+		let sql =
+			"OPTION IMPORT; INSERT INTO person [{ name: 'a' }, { name: 'b' }, { name: 'c' }];";
 		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
 		let results = ds.import_stream(&sess, body).await.unwrap();
 
@@ -1458,12 +1480,11 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::default().with_ns("NS").with_db("DB");
 
-		// Ensure namespace and database exist
 		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
 			.await
 			.unwrap();
 
-		let sql = "INSERT INTO person { name: 'ok' }; BREAK;";
+		let sql = "OPTION IMPORT; INSERT INTO person { name: 'ok' }; BREAK;";
 		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
 		let results = ds.import_stream(&sess, body).await.unwrap();
 
@@ -1477,5 +1498,25 @@ mod tests {
 		let rows = verify[0].result.as_ref().unwrap();
 		let arr = rows.as_array().unwrap();
 		assert_eq!(arr.len(), 1, "The successful INSERT before the error should have persisted");
+	}
+
+	#[tokio::test]
+	async fn import_stream_rejects_without_option_import() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "INSERT INTO person { name: 'a' };";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let result = ds.import_stream(&sess, body).await;
+
+		assert!(result.is_err(), "import_stream should reject input without OPTION IMPORT");
+		let err = result.unwrap_err().to_string();
+		assert!(err.contains("OPTION IMPORT"), "Error should mention OPTION IMPORT, got: {err}");
 	}
 }

@@ -31,7 +31,7 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
-		if opt.suppress_output {
+		if opt.import {
 			return Err(IgnoreError::Ignore);
 		}
 		// Check if we can view the output

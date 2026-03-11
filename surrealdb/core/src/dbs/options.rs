@@ -44,8 +44,6 @@ pub struct Options {
 	pub(crate) perms: bool,
 	/// Should we process field queries?
 	pub(crate) import: bool,
-	/// When true, document pluck skips output computation (used during import)
-	pub(crate) suppress_output: bool,
 	/// The data version as nanosecond timestamp
 	pub(crate) version: Option<u64>,
 	/// Optional message broker for live notifications
@@ -87,7 +85,6 @@ impl Options {
 			perms: true,
 			force: Force::None,
 			import: false,
-			suppress_output: false,
 			auth_enabled: true,
 			broker: None,
 			auth: Arc::new(Auth::default()),
@@ -167,11 +164,6 @@ impl Options {
 	/// Specify if we are currently importing data
 	pub fn set_import(&mut self, import: bool) {
 		self.import = import;
-	}
-
-	/// Skip document output computation in pluck (used during import)
-	pub fn set_suppress_output(&mut self, suppress_output: bool) {
-		self.suppress_output = suppress_output;
 	}
 
 	/// Create a new Options object with auth enabled
