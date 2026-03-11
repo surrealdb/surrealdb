@@ -766,7 +766,7 @@ version = "0.4.25"
 criteria = "safe-to-run"
 
 [[exemptions.indxdb]]
-version = "0.11.0"
+version = "0.12.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.inferno]]
