@@ -17,6 +17,7 @@ use crate::exec::index::iterator::btree::{CompoundEqualIterator, CompoundRangeIt
 use crate::exec::index::iterator::{
 	IndexEqualIterator, IndexRangeIterator, UniqueEqualIterator, UniqueRangeIterator,
 };
+use crate::exec::operators::scan::pipeline::build_field_state;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
 	validate_record_user_access,
@@ -52,6 +53,7 @@ pub struct IndexScan {
 	pub(crate) limit: Option<Arc<dyn PhysicalExpr>>,
 	/// Pushed-down START expression (evaluated at execution time).
 	pub(crate) start: Option<Arc<dyn PhysicalExpr>>,
+	pub(crate) needed_fields: Option<std::collections::HashSet<String>>,
 	/// Optional VERSION timestamp for time-travel queries.
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
 	/// Plan-time resolved table context. When present, `execute()` skips
@@ -69,6 +71,7 @@ impl IndexScan {
 		table_name: crate::val::TableName,
 		limit: Option<Arc<dyn PhysicalExpr>>,
 		start: Option<Arc<dyn PhysicalExpr>>,
+		needed_fields: Option<std::collections::HashSet<String>>,
 		version: Option<Arc<dyn PhysicalExpr>>,
 	) -> Self {
 		Self {
@@ -78,6 +81,7 @@ impl IndexScan {
 			table_name,
 			limit,
 			start,
+			needed_fields,
 			version,
 			resolved: None,
 			metrics: Arc::new(OperatorMetrics::new()),
@@ -262,6 +266,7 @@ impl ExecOperator for IndexScan {
 		let start_expr = self.start.clone();
 		let version_expr = self.version.clone();
 		let resolved = self.resolved.clone();
+		let needed_fields = self.needed_fields.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -302,24 +307,37 @@ impl ExecOperator for IndexScan {
 			}
 
 			// Resolve table permissions: plan-time fast path or runtime fallback
-			let select_permission = if let Some(ref res) = resolved {
-				res.select_permission(check_perms)
-			} else if check_perms {
+			let (select_permission, field_state) = if let Some(ref res) = resolved {
+				let perm = res.select_permission(check_perms);
+				let fs = res.field_state_for_projection(needed_fields.as_ref());
+				(perm, fs)
+			} else {
 				let table_def = db_ctx
 					.get_table_def(&table_name)
 					.await
 					.context("Failed to get table")?;
 
-				if let Some(def) = &table_def {
-					convert_permission_to_physical(&def.permissions.select, ctx.ctx()).await
+				if table_def.is_none() {
+					Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {
+						name: table_name.clone(),
+					})))?;
+				}
+
+				let perm = if check_perms {
+					let catalog_perm = match &table_def {
+						Some(def) => def.permissions.select.clone(),
+						None => crate::catalog::Permission::None,
+					};
+					convert_permission_to_physical(&catalog_perm, ctx.ctx()).await
 						.context("Failed to convert permission")?
 				} else {
-					Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
-						name: table_name.clone(),
-					})))?
-				}
-			} else {
-				PhysicalPermission::Allow
+					PhysicalPermission::Allow
+				};
+				let fs = build_field_state(
+					&ctx, &table_name, check_perms, needed_fields.as_ref(),
+				).await?;
+
+				(perm, fs)
 			};
 
 			// Early exit if denied
@@ -334,7 +352,7 @@ impl ExecOperator for IndexScan {
 			let mut pipeline = super::pipeline::ScanPipeline::new(
 				PhysicalPermission::Allow,
 				None, // no predicate
-				super::pipeline::FieldState::empty(),
+				field_state,
 				false, // permissions handled by fetch_and_filter_records_batch
 				limit_val,
 				start_val,

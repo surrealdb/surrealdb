@@ -1680,6 +1680,7 @@ impl<'ctx> Planner<'ctx> {
 							table,
 							idx_limit,
 							idx_start,
+							needed_fields,
 							version.clone(),
 						);
 						if let Some(ref tc) = table_ctx {
@@ -1799,6 +1800,7 @@ impl<'ctx> Planner<'ctx> {
 										access,
 										direction,
 										table.clone(),
+										None,
 										None,
 										None,
 										version.clone(),

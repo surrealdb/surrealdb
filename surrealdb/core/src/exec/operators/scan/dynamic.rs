@@ -584,6 +584,7 @@ async fn resolve_table_scan_stream(
 				cfg.table_name,
 				None,
 				None,
+				None,
 				cfg.version,
 			);
 			let stream = operator.execute(ctx)?;
@@ -679,6 +680,7 @@ fn create_index_operator(
 			access.clone(),
 			*direction,
 			cfg.table_name.clone(),
+			None,
 			None,
 			None,
 			cfg.version.clone(),
