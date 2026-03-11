@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use common::create_runtime;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use futures::StreamExt;
 use surrealdb_core::dbs::{Capabilities, Session};
 use surrealdb_core::kvs::Datastore;
 
@@ -178,10 +179,14 @@ fn bench_import_throughput(c: &mut Criterion) {
 				let ses = Session::owner().with_ns("test").with_db("test");
 				dbs.execute("USE NAMESPACE test DATABASE test", &ses, None).await.unwrap();
 
-				// Lazy stream — generates one statement at a time.
-				let stream = futures::stream::iter((0..num_stmts).map(|i| {
+				// Lazy stream — OPTION IMPORT header followed by one statement at a time.
+				let header = futures::stream::once(async {
+					Ok::<Bytes, anyhow::Error>(Bytes::from_static(b"OPTION IMPORT;\n"))
+				});
+				let inserts = futures::stream::iter((0..num_stmts).map(|i| {
 					Ok::<Bytes, anyhow::Error>(Bytes::from(generate_insert_statement(i)))
 				}));
+				let stream = header.chain(inserts);
 
 				let start = Instant::now();
 				let results = dbs.import_stream(&ses, stream).await.unwrap();

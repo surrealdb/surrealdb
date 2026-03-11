@@ -1134,6 +1134,11 @@ impl Executor {
 					if stmt.name.eq_ignore_ascii_case("IMPORT") && stmt.what =>
 				{
 					this.execute_option_statement(stmt.clone())?;
+					// OPTION IMPORT already requires editor-level DB access
+					// (Action::Edit on ResourceKind::Option at Base::Db), so
+					// per-document permission checks are redundant and can be
+					// skipped for the entire import session.
+					this.opt.perms = false;
 				}
 				Some(Err(e)) => {
 					bail!(Error::InvalidStatement(e.to_string()));
@@ -1166,6 +1171,13 @@ impl Executor {
 
 			match stmt {
 				TopLevelExpr::Option(stmt) => {
+					if skip_success_results && stmt.name.eq_ignore_ascii_case("IMPORT") {
+						bail!(Error::InvalidStatement(
+							"Cannot change OPTION IMPORT during an import stream. \
+						 Import mode is locked for the duration of the /import request."
+								.to_string()
+						));
+					}
 					this.execute_option_statement(stmt)?;
 					if !skip_success_results {
 						this.results.push(QueryResult {
@@ -1518,5 +1530,28 @@ mod tests {
 		assert!(result.is_err(), "import_stream should reject input without OPTION IMPORT");
 		let err = result.unwrap_err().to_string();
 		assert!(err.contains("OPTION IMPORT"), "Error should mention OPTION IMPORT, got: {err}");
+	}
+
+	#[tokio::test]
+	async fn import_stream_rejects_option_import_change_midstream() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "OPTION IMPORT; OPTION IMPORT = false; INSERT INTO person { name: 'a' };";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let result = ds.import_stream(&sess, body).await;
+
+		assert!(result.is_err(), "import_stream should reject OPTION IMPORT changes mid-stream");
+		let err = result.unwrap_err().to_string();
+		assert!(
+			err.contains("Cannot change OPTION IMPORT"),
+			"Error should explain that import mode is locked, got: {err}"
+		);
 	}
 }
