@@ -427,7 +427,7 @@ impl ExecOperator for DynamicScan {
 			let pre_skip = if !needs_row_filtering { start_val } else { 0 };
 			let effective_storage_limit = if !needs_row_filtering { limit_val } else { None };
 
-			let direction = determine_scan_direction(&order);
+			let direction = determine_scan_direction(order.as_ref());
 
 			// Create the source stream based on scan type.
 			// `applied_pre_skip` tracks how many rows the source will skip
@@ -794,7 +794,7 @@ mod tests {
 	#[test]
 	fn test_determine_scan_direction_no_order() {
 		// No order -> Forward
-		let direction = determine_scan_direction(&None);
+		let direction = determine_scan_direction(None);
 		assert!(matches!(direction, ScanDirection::Forward));
 	}
 
@@ -804,7 +804,7 @@ mod tests {
 
 		// Random order -> Forward
 		let order = Ordering::Random;
-		let direction = determine_scan_direction(&Some(order));
+		let direction = determine_scan_direction(Some(&order));
 		assert!(matches!(direction, ScanDirection::Forward));
 	}
 }

@@ -681,6 +681,40 @@ impl MutVisitor for ParamResolver<'_> {
 	}
 }
 
+/// Parameter names that are scoped to the current document/row and cannot
+/// be resolved at plan time. These are set during per-row execution
+/// (e.g. `$this` is the current document, `$parent` is the outer document
+/// in subqueries, `$before`/`$after`/`$value`/`$input` are event variables).
+pub(super) const DOC_SCOPED_PARAMS: &[&str] =
+	&["this", "self", "parent", "before", "after", "value", "input"];
+
+/// Resolve a single parameter to its value at plan time.
+///
+/// Resolution order:
+/// 1. Context values (LET bindings, client bind parameters, session params)
+/// 2. DEFINE PARAM values from the transaction store (when `ns_db` IDs are provided)
+///
+/// Returns `None` for document-scoped variables and unresolvable params.
+pub(super) async fn resolve_param_value(
+	name: &str,
+	ctx: &crate::ctx::FrozenContext,
+	ns_db: Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)>,
+) -> Option<crate::val::Value> {
+	if DOC_SCOPED_PARAMS.contains(&name) {
+		return None;
+	}
+	if let Some(value) = ctx.value(name) {
+		return Some(value.clone());
+	}
+	if let Some((ns, db)) = ns_db
+		&& let Some(txn) = ctx.try_tx()
+		&& let Ok(param_def) = txn.get_db_param(ns, db, name).await
+	{
+		return Some(param_def.value.clone());
+	}
+	None
+}
+
 /// Resolve bind-parameter references in a `WHERE` condition to their literal
 /// values. Returns a new `Cond` with `Expr::Param` nodes replaced by
 /// `Expr::Literal` wherever the value is available.
@@ -705,20 +739,11 @@ pub(crate) async fn resolve_condition_params(
 		return cond.clone();
 	}
 
-	// Pass 2: resolve each parameter.
+	// Pass 2: resolve each parameter via the shared resolution path.
 	let mut resolved = std::collections::HashMap::with_capacity(collector.names.len());
 	for name in &collector.names {
-		// Try context values first (LET, bind params, session).
-		if let Some(value) = ctx.value(name) {
-			resolved.insert(name.clone(), value.clone());
-			continue;
-		}
-		// Fall back to DEFINE PARAM in the transaction store.
-		if let Some((ns, db)) = ns_db
-			&& let Some(txn) = ctx.try_tx()
-			&& let Ok(param_def) = txn.get_db_param(ns, db, name).await
-		{
-			resolved.insert(name.clone(), param_def.value.clone());
+		if let Some(value) = resolve_param_value(name, ctx, ns_db).await {
+			resolved.insert(name.clone(), value);
 		}
 	}
 
@@ -1014,7 +1039,7 @@ impl Visitor for ForbiddenParamChecker {
 /// Returns `true` when ORDER BY is absent, or is exactly `id ASC` or `id DESC`
 /// with no COLLATE/NUMERIC modifiers. In these cases the scan already produces
 /// rows in the requested order and no separate Sort operator is needed.
-pub(super) fn order_is_scan_compatible(order: &Option<crate::expr::order::Ordering>) -> bool {
+pub(super) fn order_is_scan_compatible(order: Option<&crate::expr::order::Ordering>) -> bool {
 	use crate::expr::order::Ordering;
 	match order {
 		None => true,

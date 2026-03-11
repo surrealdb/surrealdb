@@ -24,7 +24,7 @@ use super::util::{
 	extract_version, get_effective_limit_literal, has_knn_k_operator, has_knn_operator,
 	has_top_level_or, idiom_to_field_name, idiom_to_field_path, index_covers_ordering,
 	is_count_all_eligible, is_indexed_count_eligible, order_is_scan_compatible,
-	resolve_condition_params, strip_fts_condition, strip_index_conditions,
+	resolve_condition_params, resolve_param_value, strip_fts_condition, strip_index_conditions,
 	strip_knn_from_condition,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
@@ -98,7 +98,98 @@ pub(crate) struct PlannedSource {
 	limit_pushed: bool,
 }
 
+/// Determine `FilterAction` when a scan predicate has been compiled.
+///
+/// When the planner compiled a `scan_predicate` (physical WHERE expression),
+/// the source operator is expected to apply it internally, so the outer
+/// pipeline needs no additional Filter. Otherwise the original condition
+/// must be used.
+fn filter_action_for_predicate(
+	scan_predicate: &Option<Arc<dyn crate::exec::PhysicalExpr>>,
+) -> FilterAction {
+	if scan_predicate.is_some() {
+		FilterAction::FullyConsumed
+	} else {
+		FilterAction::UseOriginal
+	}
+}
+
 impl<'ctx> Planner<'ctx> {
+	/// Resolve a parameter to its value at plan time.
+	///
+	/// Delegates to [`resolve_param_value`] with the planner's context and
+	/// namespace/database IDs (looked up from the transaction when available).
+	async fn resolve_param(&self, name: &str) -> Option<crate::val::Value> {
+		let ns_db = self.ns_db_ids().await;
+		resolve_param_value(name, self.ctx, ns_db).await
+	}
+
+	/// Look up (NamespaceId, DatabaseId) from the planner's transaction.
+	/// Returns None when the transaction or namespace/database is unavailable.
+	async fn ns_db_ids(&self) -> Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)> {
+		let (txn, ns, db) = match (&self.txn, &self.ns, &self.db) {
+			(Some(txn), Some(ns), Some(db)) => (txn, ns, db),
+			_ => return None,
+		};
+		match (txn.get_ns_by_name(ns).await, txn.get_db_by_name(ns, db).await) {
+			(Ok(Some(ns_def)), Ok(Some(db_def))) => Some((ns_def.namespace_id, db_def.database_id)),
+			_ => None,
+		}
+	}
+
+	/// Try to evaluate a source expression to a concrete `Value` at plan time.
+	///
+	/// Recursively resolves parameters and evaluates synchronous built-in
+	/// function calls when all arguments are known. Returns `None` when any
+	/// part of the expression cannot be resolved (e.g. row-scoped variables,
+	/// async functions, or unknown parameters).
+	async fn try_resolve_expr_value(&self, expr: &Expr) -> Option<crate::val::Value> {
+		use crate::expr::function::Function;
+		use crate::val::Value;
+
+		match expr {
+			Expr::Param(param) => self.resolve_param(param.as_str()).await,
+			Expr::Literal(lit) => super::util::try_literal_to_value(lit),
+			Expr::Table(name) => Some(Value::Table(name.clone())),
+			Expr::FunctionCall(fc) => {
+				let Function::Normal(ref name) = fc.receiver else {
+					return None;
+				};
+				let mut args = Vec::with_capacity(fc.arguments.len());
+				for arg in &fc.arguments {
+					args.push(Box::pin(self.try_resolve_expr_value(arg)).await?);
+				}
+				crate::fnc::synchronous(self.ctx, None, name, args).ok()
+			}
+			_ => None,
+		}
+	}
+
+	/// Try to resolve FROM source expressions at plan time.
+	///
+	/// Walks each source in the `what` vector and attempts to evaluate it
+	/// to a concrete value. When a source resolves to `Value::Table`, it is
+	/// rewritten to `Expr::Table` so that downstream planning (index
+	/// resolution, limit pushdown, sort elimination) works identically to
+	/// literal table names.
+	async fn resolve_source_exprs(&self, what: &mut Vec<Expr>) {
+		for expr in what.iter_mut() {
+			match expr {
+				Expr::Table(_) | Expr::Literal(_) | Expr::Select(_) => continue,
+				_ => {}
+			}
+			if let Some(value) = self.try_resolve_expr_value(expr).await {
+				match value {
+					crate::val::Value::Table(t) => *expr = Expr::Table(t),
+					crate::val::Value::RecordId(rid) => {
+						*expr = crate::val::Value::RecordId(rid).into_literal();
+					}
+					_ => *expr = value.into_literal(),
+				}
+			}
+		}
+	}
+
 	/// Plan the SELECT pipeline after the source is determined.
 	pub(crate) async fn plan_pipeline(
 		&self,
@@ -803,7 +894,7 @@ impl<'ctx> Planner<'ctx> {
 			Expr::Idiom(idiom) => Ok(vec![idiom]),
 			Expr::Param(ref param) => {
 				let value =
-					self.ctx.value(param.as_str()).cloned().unwrap_or(crate::val::Value::None);
+					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
 				let s = value.clone().coerce_to::<String>().map_err(|_| Error::InvalidFetch {
 					value: value.into_literal(),
 				})?;
@@ -821,7 +912,7 @@ impl<'ctx> Planner<'ctx> {
 					// and parse each as an idiom.
 					let mut idioms = Vec::new();
 					for arg in &call.arguments {
-						match self.resolve_expr_to_string(arg) {
+						match self.resolve_expr_to_string(arg).await {
 							Ok(s) => {
 								let idiom: Idiom = crate::syn::idiom(&s)
 									.map_err(|e| Error::Query {
@@ -835,15 +926,15 @@ impl<'ctx> Planner<'ctx> {
 							}
 							Err(_) => {
 								// Try resolving as an array of strings
-								let strings =
-									self.resolve_expr_to_string_array(arg).map_err(|_| {
-										Error::Query {
-											message: format!(
-												"Projection function '{}' argument could not \
+								let strings = self
+									.resolve_expr_to_string_array(arg)
+									.await
+									.map_err(|_| Error::Query {
+										message: format!(
+											"Projection function '{}' argument could not \
 												 be resolved to a field path",
-												name
-											),
-										}
+											name
+										),
 									})?;
 								for s in strings {
 									let idiom: Idiom = crate::syn::idiom(&s)
@@ -879,12 +970,12 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
-	fn resolve_expr_to_string(&self, expr: &Expr) -> Result<String, Error> {
+	async fn resolve_expr_to_string(&self, expr: &Expr) -> Result<String, Error> {
 		match expr {
 			Expr::Literal(Literal::String(s)) => Ok(s.clone()),
 			Expr::Param(param) => {
 				let value =
-					self.ctx.value(param.as_str()).cloned().unwrap_or(crate::val::Value::None);
+					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
 				value.coerce_to::<String>().map_err(|_| Error::Query {
 					message: "OMIT/FETCH parameter did not resolve to a string".to_string(),
 				})
@@ -895,14 +986,18 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
-	fn resolve_expr_to_string_array(&self, expr: &Expr) -> Result<Vec<String>, Error> {
+	async fn resolve_expr_to_string_array(&self, expr: &Expr) -> Result<Vec<String>, Error> {
 		match expr {
 			Expr::Literal(Literal::Array(items)) => {
-				items.iter().map(|item| self.resolve_expr_to_string(item)).collect()
+				let mut result = Vec::with_capacity(items.len());
+				for item in items {
+					result.push(self.resolve_expr_to_string(item).await?);
+				}
+				Ok(result)
 			}
 			Expr::Param(param) => {
 				let value =
-					self.ctx.value(param.as_str()).cloned().unwrap_or(crate::val::Value::None);
+					self.resolve_param(param.as_str()).await.unwrap_or(crate::val::Value::None);
 				value.coerce_to::<Vec<String>>().map_err(|_| Error::Query {
 					message: "OMIT/FETCH parameter did not resolve to an array of strings"
 						.to_string(),
@@ -1087,7 +1182,7 @@ impl<'ctx> Planner<'ctx> {
 			fields,
 			omit,
 			only,
-			what,
+			mut what,
 			with,
 			cond,
 			split,
@@ -1214,27 +1309,16 @@ impl<'ctx> Planner<'ctx> {
 			};
 		}
 
+		// Pre-resolve FROM sources so that params and function calls like
+		// type::table($name) are rewritten to concrete Expr::Table nodes
+		// before any downstream checks.
+		self.resolve_source_exprs(&mut what).await;
+
 		let is_value_source = all_value_sources(&what);
-		// Prefer literal tables over parameter-resolved tables so that
-		// `FROM $t, article` binds MATCHES context to `article`, not `$t`.
-		let primary_table = what
-			.iter()
-			.find_map(|e| match e {
-				Expr::Table(t) => Some(t.clone()),
-				_ => None,
-			})
-			.or_else(|| {
-				what.iter().find_map(|e| match e {
-					Expr::Param(p) => {
-						if let Some(crate::val::Value::Table(t)) = self.ctx.value(p.as_str()) {
-							Some(t.clone())
-						} else {
-							None
-						}
-					}
-					_ => None,
-				})
-			});
+		let primary_table = what.iter().find_map(|e| match e {
+			Expr::Table(t) => Some(t.clone()),
+			_ => None,
+		});
 		let has_knn_early = cond.as_ref().is_some_and(|c| has_knn_operator(&c.0));
 
 		let planning_ctx: std::borrow::Cow<'_, crate::ctx::FrozenContext> =
@@ -1278,27 +1362,15 @@ impl<'ctx> Planner<'ctx> {
 			group.as_ref(),
 			split.as_ref(),
 		);
+		// After source resolution, params that resolved to tables are now
+		// Expr::Table, so we only need to check concrete types here.
 		let source_is_single_scan = what.len() == 1
-			&& matches!(what[0], Expr::Table(_) | Expr::FunctionCall(_) | Expr::Postfix { .. })
-			|| (what.len() == 1
-				&& matches!(&what[0], Expr::Param(p) if {
-					matches!(self.ctx.value(p.as_str()), Some(crate::val::Value::Table(_)))
-				}));
+			&& matches!(what[0], Expr::Table(_) | Expr::FunctionCall(_) | Expr::Postfix { .. });
 
 		// Resolve bind-parameter references so that downstream index analysis
 		// and KNN extraction see Expr::Literal instead of Expr::Param.
 		// This covers LET bindings, client bind params, and DEFINE PARAM.
-		let ns_db = match (&self.txn, &self.ns, &self.db) {
-			(Some(txn), Some(ns), Some(db)) => {
-				match (txn.get_ns_by_name(ns).await, txn.get_db_by_name(ns, db).await) {
-					(Ok(Some(ns_def)), Ok(Some(db_def))) => {
-						Some((ns_def.namespace_id, db_def.database_id))
-					}
-					_ => None,
-				}
-			}
-			_ => None,
-		};
+		let ns_db = self.ns_db_ids().await;
 		let cond = match cond.as_ref() {
 			Some(c) => Some(resolve_condition_params(c, self.ctx, ns_db).await),
 			None => None,
@@ -1599,11 +1671,7 @@ impl<'ctx> Planner<'ctx> {
 			&& !cond.is_some_and(|c| has_knn_operator(&c.0))
 			&& let Some(rid_expr) = cond.and_then(|c| extract_record_id_point_lookup(c, table_name))
 		{
-			let filter_action = if scan_predicate.is_some() {
-				FilterAction::FullyConsumed
-			} else {
-				FilterAction::UseOriginal
-			};
+			let filter_action = filter_action_for_predicate(&scan_predicate);
 			let record_id_expr = self.physical_expr(rid_expr).await?;
 			// Resolve table context at plan time for the point lookup
 			let mut scan =
@@ -1745,16 +1813,11 @@ impl<'ctx> Planner<'ctx> {
 						});
 					}
 					AccessPath::TableScan => {
-						let filter_action = if scan_predicate.is_some() {
-							FilterAction::FullyConsumed
-						} else {
-							FilterAction::UseOriginal
-						};
+						let filter_action = filter_action_for_predicate(&scan_predicate);
 						// TableScan can only provide ordering for `id ASC/DESC`.
 						// Push limit only when ORDER BY is compatible with the
 						// natural KV scan direction.
-						let push =
-							scan_limit.is_some() && order_is_scan_compatible(&order.cloned());
+						let push = scan_limit.is_some() && order_is_scan_compatible(order);
 						let (tbl_limit, tbl_start, limit_pushed) = if push {
 							(scan_limit.clone(), scan_start.clone(), true)
 						} else {
@@ -1880,42 +1943,10 @@ impl<'ctx> Planner<'ctx> {
 			}
 		}
 
-		// Fallback: create a generic Scan operator (index resolved at runtime)
+		// Fallback: create the appropriate operator (index resolved at runtime)
 		let knn_ctx = self.ctx.get_knn_context().cloned();
 
 		match expr {
-			Expr::Table(_) => {
-				let filter_action = if scan_predicate.is_some() {
-					FilterAction::FullyConsumed
-				} else {
-					FilterAction::UseOriginal
-				};
-				let push = scan_limit.is_some() && order_is_scan_compatible(&order.cloned());
-				let (dyn_limit, dyn_start, limit_pushed) = if push {
-					(scan_limit, scan_start, true)
-				} else {
-					(None, None, false)
-				};
-				let table_expr = self.physical_expr(expr).await?;
-				Ok(PlannedSource {
-					operator: Arc::new(
-						DynamicScan::new(
-							table_expr,
-							version,
-							cond.cloned(),
-							order.cloned(),
-							with.cloned(),
-							needed_fields,
-							scan_predicate,
-							dyn_limit,
-							dyn_start,
-						)
-						.with_knn_context(knn_ctx),
-					) as Arc<dyn ExecOperator>,
-					filter_action,
-					limit_pushed,
-				})
-			}
 			Expr::Literal(crate::expr::literal::Literal::RecordId(rid)) => {
 				let record_id_expr = self
 					.physical_expr(Expr::Literal(crate::expr::literal::Literal::RecordId(rid)))
@@ -1945,95 +1976,35 @@ impl<'ctx> Planner<'ctx> {
 					limit_pushed: false,
 				})
 			}
-			Expr::Param(ref param) => match self.ctx.value(param.as_str()) {
-				Some(crate::val::Value::Table(_)) => {
-					let filter_action = if scan_predicate.is_some() {
-						FilterAction::FullyConsumed
-					} else {
-						FilterAction::UseOriginal
-					};
-					let push = scan_limit.is_some() && order_is_scan_compatible(&order.cloned());
-					let (dyn_limit, dyn_start, limit_pushed) = if push {
-						(scan_limit, scan_start, true)
-					} else {
-						(None, None, false)
-					};
-					let table_expr = self.physical_expr(expr).await?;
-					Ok(PlannedSource {
-						operator: Arc::new(
-							DynamicScan::new(
-								table_expr,
-								version,
-								cond.cloned(),
-								order.cloned(),
-								with.cloned(),
-								needed_fields,
-								scan_predicate,
-								dyn_limit,
-								dyn_start,
-							)
-							.with_knn_context(knn_ctx),
-						) as Arc<dyn ExecOperator>,
-						filter_action,
-						limit_pushed,
-					})
-				}
-				Some(crate::val::Value::RecordId(_)) => {
-					let record_id_expr = self.physical_expr(expr).await?;
-					Ok(PlannedSource {
-						operator: Arc::new(RecordIdScan::new(
-							record_id_expr,
-							version,
-							needed_fields,
-							None,
-						)) as Arc<dyn ExecOperator>,
-						filter_action: FilterAction::UseOriginal,
-						limit_pushed: false,
-					})
-				}
-				Some(_) | None => {
-					let phys_expr = self.physical_expr(expr).await?;
-					Ok(PlannedSource {
-						operator: Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>,
-						filter_action: FilterAction::UseOriginal,
-						limit_pushed: false,
-					})
-				}
-			},
-			Expr::FunctionCall(_)
+			// Params that could be resolved were already rewritten to
+			// Expr::Table / Expr::Literal by resolve_source_exprs().
+			// Any remaining Expr::Param is unresolvable at plan time.
+			Expr::Param(_) => {
+				let phys_expr = self.physical_expr(expr).await?;
+				Ok(PlannedSource {
+					operator: Arc::new(SourceExpr::new(phys_expr)) as Arc<dyn ExecOperator>,
+					filter_action: FilterAction::UseOriginal,
+					limit_pushed: false,
+				})
+			}
+			Expr::Table(_)
+			| Expr::FunctionCall(_)
 			| Expr::Postfix {
 				..
 			} => {
-				let filter_action = if scan_predicate.is_some() {
-					FilterAction::FullyConsumed
-				} else {
-					FilterAction::UseOriginal
-				};
-				let push = scan_limit.is_some() && order_is_scan_compatible(&order.cloned());
-				let (dyn_limit, dyn_start, limit_pushed) = if push {
-					(scan_limit, scan_start, true)
-				} else {
-					(None, None, false)
-				};
-				let source_expr = self.physical_expr(expr).await?;
-				Ok(PlannedSource {
-					operator: Arc::new(
-						DynamicScan::new(
-							source_expr,
-							version,
-							cond.cloned(),
-							order.cloned(),
-							with.cloned(),
-							needed_fields,
-							scan_predicate,
-							dyn_limit,
-							dyn_start,
-						)
-						.with_knn_context(knn_ctx),
-					) as Arc<dyn ExecOperator>,
-					filter_action,
-					limit_pushed,
-				})
+				self.plan_dynamic_scan(
+					expr,
+					version,
+					cond,
+					order,
+					with,
+					needed_fields,
+					scan_predicate,
+					scan_limit,
+					scan_start,
+					knn_ctx,
+				)
+				.await
 			}
 			other => {
 				let phys_expr = self.physical_expr(other).await?;
@@ -2044,6 +2015,54 @@ impl<'ctx> Planner<'ctx> {
 				})
 			}
 		}
+	}
+
+	/// Plan a `DynamicScan` source that resolves its access path at runtime.
+	///
+	/// Used for `FROM type::table(...)`, `FROM $param` (when the param holds a
+	/// table), and the `FROM tablename` fallback when plan-time catalog context
+	/// is unavailable. Handles filter-action, limit pushdown with ORDER BY
+	/// compatibility, and KNN context in a single place.
+	#[allow(clippy::too_many_arguments)]
+	async fn plan_dynamic_scan(
+		&self,
+		expr: Expr,
+		version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		cond: Option<&Cond>,
+		order: Option<&crate::expr::order::Ordering>,
+		with: Option<&crate::expr::with::With>,
+		needed_fields: Option<std::collections::HashSet<String>>,
+		scan_predicate: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		scan_limit: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		scan_start: Option<Arc<dyn crate::exec::PhysicalExpr>>,
+		knn_ctx: Option<Arc<crate::exec::function::KnnContext>>,
+	) -> Result<PlannedSource, Error> {
+		let filter_action = filter_action_for_predicate(&scan_predicate);
+		let push = scan_limit.is_some() && order_is_scan_compatible(order);
+		let (dyn_limit, dyn_start, limit_pushed) = if push {
+			(scan_limit, scan_start, true)
+		} else {
+			(None, None, false)
+		};
+		let source_expr = self.physical_expr(expr).await?;
+		Ok(PlannedSource {
+			operator: Arc::new(
+				DynamicScan::new(
+					source_expr,
+					version,
+					cond.cloned(),
+					order.cloned(),
+					with.cloned(),
+					needed_fields,
+					scan_predicate,
+					dyn_limit,
+					dyn_start,
+				)
+				.with_knn_context(knn_ctx),
+			) as Arc<dyn ExecOperator>,
+			filter_action,
+			limit_pushed,
+		})
 	}
 
 	/// Try to resolve a `ResolvedTableContext` for the given table.
@@ -2131,7 +2150,7 @@ impl<'ctx> Planner<'ctx> {
 		order: Option<&crate::expr::order::Ordering>,
 		with: Option<&crate::expr::with::With>,
 	) -> Result<Option<(AccessPath, crate::idx::planner::ScanDirection)>, Error> {
-		let direction = determine_scan_direction(&order.cloned());
+		let direction = determine_scan_direction(order);
 
 		if matches!(with, Some(crate::expr::with::With::NoIndex)) {
 			return Ok(Some((AccessPath::TableScan, direction)));

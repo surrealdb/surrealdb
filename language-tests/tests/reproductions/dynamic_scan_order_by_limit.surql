@@ -37,7 +37,7 @@ LET $table = type::table("scan");
 -- DynamicScan via type::table(): must return first 5 rows in createdOn order
 (SELECT createdOn FROM type::table("scan") ORDER BY createdOn LIMIT 5).createdOn;
 
--- DynamicScan via $param (Value::Table): must return first 5 rows in createdOn order
+-- $param (Value::Table, resolved to Expr::Table at plan time): must return first 5 rows in createdOn order
 (SELECT createdOn FROM $table ORDER BY createdOn LIMIT 5).createdOn;
 
 -- Literal table (control): must return first 5 rows in createdOn order
