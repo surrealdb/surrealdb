@@ -692,23 +692,30 @@ pub(super) const DOC_SCOPED_PARAMS: &[&str] =
 ///
 /// Resolution order:
 /// 1. Context values (LET bindings, client bind parameters, session params)
-/// 2. DEFINE PARAM values from the transaction store (when `ns_db` IDs are provided)
+/// 2. Document-scoped guard (skip `$this`, `$value`, etc.)
+/// 3. DEFINE PARAM values with `Permission::Full` from the transaction store
 ///
-/// Returns `None` for document-scoped variables and unresolvable params.
+/// Context values are checked first so that `LET $value = ...` bindings
+/// shadow the doc-scoped guard. At plan time doc-scoped variables are never
+/// present in `FrozenContext` (they are injected during per-row execution).
+///
+/// DEFINE PARAMs with `Permission::None` or `Permission::Specific` are left
+/// for runtime resolution where the full permission machinery is available.
 pub(super) async fn resolve_param_value(
 	name: &str,
 	ctx: &crate::ctx::FrozenContext,
 	ns_db: Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)>,
 ) -> Option<crate::val::Value> {
-	if DOC_SCOPED_PARAMS.contains(&name) {
-		return None;
-	}
 	if let Some(value) = ctx.value(name) {
 		return Some(value.clone());
+	}
+	if DOC_SCOPED_PARAMS.contains(&name) {
+		return None;
 	}
 	if let Some((ns, db)) = ns_db
 		&& let Some(txn) = ctx.try_tx()
 		&& let Ok(param_def) = txn.get_db_param(ns, db, name).await
+		&& matches!(param_def.permissions, crate::catalog::Permission::Full)
 	{
 		return Some(param_def.value.clone());
 	}

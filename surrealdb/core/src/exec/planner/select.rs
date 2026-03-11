@@ -125,16 +125,17 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// Look up (NamespaceId, DatabaseId) from the planner's transaction.
+	///
+	/// Mirrors `Context::try_ns_db_ids` but uses the planner's stored ns/db
+	/// strings instead of `Options` (which the planner doesn't have).
 	/// Returns None when the transaction or namespace/database is unavailable.
 	async fn ns_db_ids(&self) -> Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)> {
 		let (txn, ns, db) = match (&self.txn, &self.ns, &self.db) {
 			(Some(txn), Some(ns), Some(db)) => (txn, ns, db),
 			_ => return None,
 		};
-		match (txn.get_ns_by_name(ns).await, txn.get_db_by_name(ns, db).await) {
-			(Ok(Some(ns_def)), Ok(Some(db_def))) => Some((ns_def.namespace_id, db_def.database_id)),
-			_ => None,
-		}
+		let db_def = txn.get_db_by_name(ns, db).await.ok()??;
+		Some((db_def.namespace_id, db_def.database_id))
 	}
 
 	/// Try to evaluate a source expression to a concrete `Value` at plan time.
@@ -155,6 +156,7 @@ impl<'ctx> Planner<'ctx> {
 				let Function::Normal(ref name) = fc.receiver else {
 					return None;
 				};
+				self.ctx.check_allowed_function(name).ok()?;
 				let mut args = Vec::with_capacity(fc.arguments.len());
 				for arg in &fc.arguments {
 					args.push(Box::pin(self.try_resolve_expr_value(arg)).await?);
@@ -1309,15 +1311,25 @@ impl<'ctx> Planner<'ctx> {
 			};
 		}
 
+		// Capture literal Expr::Table nodes BEFORE resolve_source_exprs so
+		// that MATCHES context preferentially binds to tables written in the
+		// query rather than param-resolved ones (e.g. FROM $t, article).
+		let literal_primary_table = what.iter().find_map(|e| match e {
+			Expr::Table(t) => Some(t.clone()),
+			_ => None,
+		});
+
 		// Pre-resolve FROM sources so that params and function calls like
 		// type::table($name) are rewritten to concrete Expr::Table nodes
 		// before any downstream checks.
 		self.resolve_source_exprs(&mut what).await;
 
 		let is_value_source = all_value_sources(&what);
-		let primary_table = what.iter().find_map(|e| match e {
-			Expr::Table(t) => Some(t.clone()),
-			_ => None,
+		let primary_table = literal_primary_table.or_else(|| {
+			what.iter().find_map(|e| match e {
+				Expr::Table(t) => Some(t.clone()),
+				_ => None,
+			})
 		});
 		let has_knn_early = cond.as_ref().is_some_and(|c| has_knn_operator(&c.0));
 
