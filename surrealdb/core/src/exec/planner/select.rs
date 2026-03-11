@@ -1890,7 +1890,12 @@ impl<'ctx> Planner<'ctx> {
 				} else {
 					FilterAction::UseOriginal
 				};
-				let limit_pushed = scan_limit.is_some();
+				let push = scan_limit.is_some() && order_is_scan_compatible(&order.cloned());
+				let (dyn_limit, dyn_start, limit_pushed) = if push {
+					(scan_limit, scan_start, true)
+				} else {
+					(None, None, false)
+				};
 				let table_expr = self.physical_expr(expr).await?;
 				Ok(PlannedSource {
 					operator: Arc::new(
@@ -1902,8 +1907,8 @@ impl<'ctx> Planner<'ctx> {
 							with.cloned(),
 							needed_fields,
 							scan_predicate,
-							scan_limit,
-							scan_start,
+							dyn_limit,
+							dyn_start,
 						)
 						.with_knn_context(knn_ctx),
 					) as Arc<dyn ExecOperator>,
@@ -1947,7 +1952,12 @@ impl<'ctx> Planner<'ctx> {
 					} else {
 						FilterAction::UseOriginal
 					};
-					let limit_pushed = scan_limit.is_some();
+					let push = scan_limit.is_some() && order_is_scan_compatible(&order.cloned());
+					let (dyn_limit, dyn_start, limit_pushed) = if push {
+						(scan_limit, scan_start, true)
+					} else {
+						(None, None, false)
+					};
 					let table_expr = self.physical_expr(expr).await?;
 					Ok(PlannedSource {
 						operator: Arc::new(
@@ -1959,8 +1969,8 @@ impl<'ctx> Planner<'ctx> {
 								with.cloned(),
 								needed_fields,
 								scan_predicate,
-								scan_limit,
-								scan_start,
+								dyn_limit,
+								dyn_start,
 							)
 							.with_knn_context(knn_ctx),
 						) as Arc<dyn ExecOperator>,
@@ -1999,7 +2009,12 @@ impl<'ctx> Planner<'ctx> {
 				} else {
 					FilterAction::UseOriginal
 				};
-				let limit_pushed = scan_limit.is_some();
+				let push = scan_limit.is_some() && order_is_scan_compatible(&order.cloned());
+				let (dyn_limit, dyn_start, limit_pushed) = if push {
+					(scan_limit, scan_start, true)
+				} else {
+					(None, None, false)
+				};
 				let source_expr = self.physical_expr(expr).await?;
 				Ok(PlannedSource {
 					operator: Arc::new(
@@ -2011,8 +2026,8 @@ impl<'ctx> Planner<'ctx> {
 							with.cloned(),
 							needed_fields,
 							scan_predicate,
-							scan_limit,
-							scan_start,
+							dyn_limit,
+							dyn_start,
 						)
 						.with_knn_context(knn_ctx),
 					) as Arc<dyn ExecOperator>,
