@@ -19,9 +19,9 @@ Query
                                 .text: "b"
                             .parts: None
                     .comment: Some
-                        AlterKind::Set
-                            Expr::Integer
-                                +1
+                    AlterKind::Set
+                        Expr::Integer
+                            +1
                     .prepare_remove: false
         -TopLevelExpr::Expr
             Expr::AlterIndex
@@ -54,6 +54,6 @@ Query
                                 .text: "b"
                             .parts: None
                     .comment: Some
-                        AlterKind::Drop
+                    AlterKind::Drop
                     .prepare_remove: false
 */

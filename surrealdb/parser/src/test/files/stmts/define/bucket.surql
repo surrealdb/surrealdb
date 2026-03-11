@@ -31,9 +31,9 @@ Query
                     .backend: None
                     .permission: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "comment"
+                    Expr::String
+                        StringLit
+                            .text: "comment"
                     .readonly: false
         -TopLevelExpr::Expr
             Expr::DefineBucket
@@ -46,11 +46,11 @@ Query
                             .parts: None
                     .backend: None
                     .permission: Some
-                        Permission::Full
+                    Permission::Full
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "comment"
+                    Expr::String
+                        StringLit
+                            .text: "comment"
                     .readonly: false
         -TopLevelExpr::Expr
             Expr::DefineBucket
@@ -63,7 +63,7 @@ Query
                             .parts: None
                     .backend: None
                     .permission: Some
-                        Permission::Full
+                    Permission::Full
                     .comment: None
                     .readonly: true
         -TopLevelExpr::Expr
@@ -76,13 +76,13 @@ Query
                                 .text: "name"
                             .parts: None
                     .backend: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: Add
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: Add
+                            .right: Expr::Integer
+                                +2
                     .permission: None
                     .comment: None
                     .readonly: true

@@ -14,11 +14,11 @@ Query
                                 -Expr::Integer
                                     +1
                     .otherwise: Some
-                        Expr::Block
-                            Block
-                                .exprs: Some
-                                    -Expr::Integer
-                                        +2
+                    Expr::Block
+                        Block
+                            .exprs: Some
+                                -Expr::Integer
+                                    +2
         -TopLevelExpr::Expr
             Expr::If
                 If
@@ -27,6 +27,6 @@ Query
                     .then: Expr::Integer
                         +1
                     .otherwise: Some
-                        Expr::Integer
-                            +2
+                    Expr::Integer
+                        +2
 */

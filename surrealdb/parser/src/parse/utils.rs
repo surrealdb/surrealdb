@@ -60,10 +60,10 @@ pub async fn parse_delimited_list<'src, 'ast, R, F>(
 	open: BaseTokenKind,
 	close: BaseTokenKind,
 	seperator: BaseTokenKind,
-	value: F,
+	mut value: F,
 ) -> ParseResult<(Span, Option<NodeListId<R>>)>
 where
-	F: AsyncFn(&mut Parser<'src, 'ast>) -> ParseResult<R>,
+	F: AsyncFnMut(&mut Parser<'src, 'ast>) -> ParseResult<R>,
 	R: Node,
 {
 	let start = parser.expect(open)?;

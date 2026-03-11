@@ -42,9 +42,9 @@ Query
                         .text: "p"
                     .value: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "a"
+                    Expr::String
+                        StringLit
+                            .text: "a"
                     .permission: None
         -TopLevelExpr::Expr
             Expr::DefineParam
@@ -53,13 +53,13 @@ Query
                     .param: Param
                         .text: "p"
                     .value: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: Add
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: Add
+                            .right: Expr::Integer
+                                +2
                     .comment: None
                     .permission: None
         -TopLevelExpr::Expr
@@ -69,14 +69,14 @@ Query
                     .param: Param
                         .text: "p"
                     .value: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: Add
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: Add
+                            .right: Expr::Integer
+                                +2
                     .comment: None
                     .permission: Some
-                        Permission::Full
+                    Permission::Full
 */

@@ -48,12 +48,12 @@ Query
                                     .text: "test"
                                 .parts: None
                         .version: Some
-                            Expr::Binary
-                                BinaryExpr
-                                    .left: Expr::Integer
-                                        +1
-                                    .op: Add
-                                    .right: Expr::Integer
-                                        +1
+                        Expr::Binary
+                            BinaryExpr
+                                .left: Expr::Integer
+                                    +1
+                                .op: Add
+                                .right: Expr::Integer
+                                    +1
                     .structure: true
 */

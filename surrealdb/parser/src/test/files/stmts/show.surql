@@ -21,37 +21,37 @@ Query
                 .since: ShowSince::VersionStamp
                     +1
                 .limit: Some
-                    Expr::Binary
-                        BinaryExpr
-                            .left: Expr::Integer
-                                +1
-                            .op: Add
-                            .right: Expr::Integer
-                                +1
+                Expr::Binary
+                    BinaryExpr
+                        .left: Expr::Integer
+                            +1
+                        .op: Add
+                        .right: Expr::Integer
+                            +1
         -TopLevelExpr::Show
             Show
                 .target: ShowTarget::Database
                 .since: ShowSince::VersionStamp
                     +1
                 .limit: Some
-                    Expr::Binary
-                        BinaryExpr
-                            .left: Expr::Integer
-                                +1
-                            .op: Add
-                            .right: Expr::Integer
-                                +1
+                Expr::Binary
+                    BinaryExpr
+                        .left: Expr::Integer
+                            +1
+                        .op: Add
+                        .right: Expr::Integer
+                            +1
         -TopLevelExpr::Show
             Show
                 .target: ShowTarget::Database
                 .since: ShowSince::Timestamp
                     0000-01-01T00:00:00Z
                 .limit: Some
-                    Expr::Binary
-                        BinaryExpr
-                            .left: Expr::Integer
-                                +1
-                            .op: Add
-                            .right: Expr::Integer
-                                +1
+                Expr::Binary
+                    BinaryExpr
+                        .left: Expr::Integer
+                            +1
+                        .op: Add
+                        .right: Expr::Integer
+                            +1
 */

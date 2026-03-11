@@ -14,16 +14,16 @@ Query
                                 -Expr::Integer
                                     +2
                     .otherwise: Some
-                        Expr::If
-                            If
-                                .condition: Expr::Integer
-                                    +3
-                                .then: Expr::Block
-                                    Block
-                                        .exprs: Some
-                                            -Expr::Integer
-                                                +4
-                                .otherwise: None
+                    Expr::If
+                        If
+                            .condition: Expr::Integer
+                                +3
+                            .then: Expr::Block
+                                Block
+                                    .exprs: Some
+                                        -Expr::Integer
+                                            +4
+                            .otherwise: None
         -TopLevelExpr::Expr
             Expr::If
                 If
@@ -32,11 +32,11 @@ Query
                     .then: Expr::Integer
                         +2
                     .otherwise: Some
-                        Expr::If
-                            If
-                                .condition: Expr::Integer
-                                    +3
-                                .then: Expr::Integer
-                                    +4
-                                .otherwise: None
+                    Expr::If
+                        If
+                            .condition: Expr::Integer
+                                +3
+                            .then: Expr::Integer
+                                +4
+                            .otherwise: None
 */

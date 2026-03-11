@@ -16,10 +16,10 @@ Query
                                 .field: Ident
                                     .text: "b"
                                 .op: Some
-                                    DestructureOperator::Destructure
-                                        Some
-                                            -Destructure
-                                                .field: Ident
-                                                    .text: "c"
-                                                .op: None
+                                DestructureOperator::Destructure
+                                    Some
+                                        -Destructure
+                                            .field: Ident
+                                                .text: "c"
+                                            .op: None
 */

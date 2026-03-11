@@ -13,15 +13,15 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitArray
-                                LitArrayType
-                                    .entries: Some
-                                        -Type::Prime
-                                            -PrimeType::LitInteger
-                                                +1
-                                        -Type::Prime
-                                            -PrimeType::LitInteger
-                                                +2
+                                -PrimeType::LitArray
+                                    LitArrayType
+                                        .entries: Some
+                                            -Type::Prime
+                                                    -PrimeType::LitInteger
+                                                        +1
+                                            -Type::Prime
+                                                    -PrimeType::LitInteger
+                                                        +2
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -29,12 +29,12 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitArray
-                                LitArrayType
-                                    .entries: Some
-                                        -Type::Prime
-                                            -PrimeType::LitInteger
-                                                +1
+                                -PrimeType::LitArray
+                                    LitArrayType
+                                        .entries: Some
+                                            -Type::Prime
+                                                    -PrimeType::LitInteger
+                                                        +1
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -42,14 +42,14 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitArray
-                                LitArrayType
-                                    .entries: Some
-                                        -Type::Prime
-                                            -PrimeType::LitInteger
-                                                +1
-                                        -Type::Prime
-                                            -PrimeType::Integer
+                                -PrimeType::LitArray
+                                    LitArrayType
+                                        .entries: Some
+                                            -Type::Prime
+                                                    -PrimeType::LitInteger
+                                                        +1
+                                            -Type::Prime
+                                                    -PrimeType::Integer
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -57,22 +57,22 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitArray
-                                LitArrayType
-                                    .entries: Some
-                                        -Type::Prime
-                                            -PrimeType::LitInteger
-                                                +1
-                                        -Type::Prime
-                                            -PrimeType::LitArray
-                                                LitArrayType
-                                                    .entries: Some
-                                                        -Type::Prime
-                                                            -PrimeType::Float
-                                                        -Type::Prime
-                                                            -PrimeType::Geometry
-                                                                GeometryType
-                                                                    .types: None
+                                -PrimeType::LitArray
+                                    LitArrayType
+                                        .entries: Some
+                                            -Type::Prime
+                                                    -PrimeType::LitInteger
+                                                        +1
+                                            -Type::Prime
+                                                    -PrimeType::LitArray
+                                                        LitArrayType
+                                                            .entries: Some
+                                                                -Type::Prime
+                                                                        -PrimeType::Float
+                                                                -Type::Prime
+                                                                        -PrimeType::Geometry
+                                                                            GeometryType
+                                                                                .types: None
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -80,10 +80,10 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Array
-                                ArrayLikeType
-                                    .ty: None
-                                    .size: None
+                                -PrimeType::Array
+                                    ArrayLikeType
+                                        .ty: None
+                                        .size: None
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -91,12 +91,12 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Array
-                                ArrayLikeType
-                                    .ty: Some
+                                -PrimeType::Array
+                                    ArrayLikeType
+                                        .ty: Some
                                         Type::Prime
-                                            -PrimeType::Integer
-                                    .size: None
+                                                -PrimeType::Integer
+                                        .size: None
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -104,12 +104,12 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Array
-                                ArrayLikeType
-                                    .ty: Some
+                                -PrimeType::Array
+                                    ArrayLikeType
+                                        .ty: Some
                                         Type::Prime
-                                            -PrimeType::Integer
-                                    .size: Some
+                                                -PrimeType::Integer
+                                        .size: Some
                                         +10
                     .right: Expr::Integer
                         +1

@@ -25,7 +25,7 @@ Query
                     .inner: DefineConfigKind::Api
                         DefineConfigApi
                             .permission: Some
-                                Permission::Full
+                            Permission::Full
                             .middleware: Some
                                 -ApiMiddleware
                                     .path: Path
@@ -53,9 +53,9 @@ Query
                         DefineConfigGraphql
                             .introspection: None
                             .table_config: Some
-                                TablesConfig::None
+                            TablesConfig::None
                             .function_config: Some
-                                FunctionConfig::None
+                            FunctionConfig::None
                             .depth_limit: None
                             .complexity_limit: None
         -TopLevelExpr::Expr
@@ -66,9 +66,9 @@ Query
                         DefineConfigGraphql
                             .introspection: None
                             .table_config: Some
-                                TablesConfig::Auto
+                            TablesConfig::Auto
                             .function_config: Some
-                                FunctionConfig::Auto
+                            FunctionConfig::Auto
                             .depth_limit: None
                             .complexity_limit: None
         -TopLevelExpr::Expr
@@ -79,7 +79,7 @@ Query
                         DefineConfigGraphql
                             .introspection: None
                             .table_config: Some
-                                TablesConfig::Include
+                            TablesConfig::Include
                                     -Ident
                                         .text: "a"
                                     -Ident
@@ -95,7 +95,7 @@ Query
                         DefineConfigGraphql
                             .introspection: None
                             .table_config: Some
-                                TablesConfig::Exclude
+                            TablesConfig::Exclude
                                     -Ident
                                         .text: "a"
                                     -Ident
@@ -111,7 +111,7 @@ Query
                         DefineConfigGraphql
                             .introspection: None
                             .table_config: Some
-                                TablesConfig::None
+                            TablesConfig::None
                             .function_config: None
                             .depth_limit: None
                             .complexity_limit: None
@@ -123,7 +123,7 @@ Query
                         DefineConfigGraphql
                             .introspection: None
                             .table_config: Some
-                                TablesConfig::Auto
+                            TablesConfig::Auto
                             .function_config: None
                             .depth_limit: None
                             .complexity_limit: None
@@ -136,7 +136,7 @@ Query
                             .introspection: None
                             .table_config: None
                             .function_config: Some
-                                FunctionConfig::Include
+                            FunctionConfig::Include
                                     -Path
                                         .start: Ident
                                             .text: "a"
@@ -162,7 +162,7 @@ Query
                             .introspection: None
                             .table_config: None
                             .function_config: Some
-                                FunctionConfig::Exclude
+                            FunctionConfig::Exclude
                                     -Path
                                         .start: Ident
                                             .text: "a"
@@ -182,7 +182,7 @@ Query
                             .introspection: None
                             .table_config: None
                             .function_config: Some
-                                FunctionConfig::None
+                            FunctionConfig::None
                             .depth_limit: None
                             .complexity_limit: None
         -TopLevelExpr::Expr
@@ -194,7 +194,7 @@ Query
                             .introspection: None
                             .table_config: None
                             .function_config: Some
-                                FunctionConfig::Auto
+                            FunctionConfig::Auto
                             .depth_limit: None
                             .complexity_limit: None
         -TopLevelExpr::Expr
@@ -207,7 +207,7 @@ Query
                             .table_config: None
                             .function_config: None
                             .depth_limit: Some
-                                +1
+                            +1
                             .complexity_limit: None
         -TopLevelExpr::Expr
             Expr::DefineConfig
@@ -220,7 +220,7 @@ Query
                             .function_config: None
                             .depth_limit: None
                             .complexity_limit: Some
-                                +1
+                            +1
         -TopLevelExpr::Expr
             Expr::DefineConfig
                 DefineConfig
@@ -228,7 +228,7 @@ Query
                     .inner: DefineConfigKind::Graphql
                         DefineConfigGraphql
                             .introspection: Some
-                                Auto
+                            Auto
                             .table_config: None
                             .function_config: None
                             .depth_limit: None
@@ -240,7 +240,7 @@ Query
                     .inner: DefineConfigKind::Graphql
                         DefineConfigGraphql
                             .introspection: Some
-                                None
+                            None
                             .table_config: None
                             .function_config: None
                             .depth_limit: None
@@ -252,9 +252,9 @@ Query
                     .inner: DefineConfigKind::Default
                         DefineConfigDefault
                             .namespace: Some
-                                Expr::String
-                                    StringLit
-                                        .text: "a"
+                            Expr::String
+                                StringLit
+                                    .text: "a"
                             .database: None
         -TopLevelExpr::Expr
             Expr::DefineConfig
@@ -263,11 +263,11 @@ Query
                     .inner: DefineConfigKind::Default
                         DefineConfigDefault
                             .namespace: Some
-                                Expr::String
-                                    StringLit
-                                        .text: "a"
+                            Expr::String
+                                StringLit
+                                    .text: "a"
                             .database: Some
-                                Expr::String
-                                    StringLit
-                                        .text: "b"
+                            Expr::String
+                                StringLit
+                                    .text: "b"
 */

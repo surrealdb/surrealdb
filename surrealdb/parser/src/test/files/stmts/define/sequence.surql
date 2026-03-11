@@ -43,8 +43,8 @@ Query
                                         .text: "me"
                                     .parts: None
                     .batch: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .start: None
                     .timeout: None
         -TopLevelExpr::Expr
@@ -65,11 +65,11 @@ Query
                                         .text: "me"
                                     .parts: None
                     .batch: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .start: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .timeout: None
         -TopLevelExpr::Expr
             Expr::DefineSequence
@@ -90,9 +90,9 @@ Query
                                     .parts: None
                     .batch: None
                     .start: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .timeout: Some
-                        Expr::Duration
-                            1s
+                    Expr::Duration
+                        1s
 */

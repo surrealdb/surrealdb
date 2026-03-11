@@ -114,17 +114,17 @@ Query
                                 .text: "c"
                             .parts: None
                     .data: Some
-                        RecordData::Merge
-                            Expr::Object
-                                Object
-                                    .entries: Some
-                                        -ObjectEntry
-                                            .key: "a"
-                                            .value: Expr::Path
-                                                Path
-                                                    .start: Ident
-                                                        .text: "b"
-                                                    .parts: None
+                    RecordData::Merge
+                        Expr::Object
+                            Object
+                                .entries: Some
+                                    -ObjectEntry
+                                        .key: "a"
+                                        .value: Expr::Path
+                                            Path
+                                                .start: Ident
+                                                    .text: "b"
+                                                .parts: None
                     .output: None
                     .timeout: None
         -TopLevelExpr::Expr
@@ -145,19 +145,19 @@ Query
                                 .text: "c"
                             .parts: None
                     .data: Some
-                        RecordData::Merge
-                            Expr::Object
-                                Object
-                                    .entries: Some
-                                        -ObjectEntry
-                                            .key: "a"
-                                            .value: Expr::Path
-                                                Path
-                                                    .start: Ident
-                                                        .text: "b"
-                                                    .parts: None
+                    RecordData::Merge
+                        Expr::Object
+                            Object
+                                .entries: Some
+                                    -ObjectEntry
+                                        .key: "a"
+                                        .value: Expr::Path
+                                            Path
+                                                .start: Ident
+                                                    .text: "b"
+                                                .parts: None
                     .output: Some
-                        Output::Before
+                    Output::Before
                     .timeout: None
         -TopLevelExpr::Expr
             Expr::Relate
@@ -177,20 +177,20 @@ Query
                                 .text: "c"
                             .parts: None
                     .data: Some
-                        RecordData::Merge
-                            Expr::Object
-                                Object
-                                    .entries: Some
-                                        -ObjectEntry
-                                            .key: "a"
-                                            .value: Expr::Path
-                                                Path
-                                                    .start: Ident
-                                                        .text: "b"
-                                                    .parts: None
+                    RecordData::Merge
+                        Expr::Object
+                            Object
+                                .entries: Some
+                                    -ObjectEntry
+                                        .key: "a"
+                                        .value: Expr::Path
+                                            Path
+                                                .start: Ident
+                                                    .text: "b"
+                                                .parts: None
                     .output: Some
-                        Output::Before
+                    Output::Before
                     .timeout: Some
-                        Expr::Duration
-                            1s
+                    Expr::Duration
+                        1s
 */

@@ -12,13 +12,13 @@ Query
                         FileLit
                             .path: "abc"
                     .alias: Some
-                        Path
-                            .start: Ident
-                                .text: "mod"
-                            .parts: Some
-                                -PathSegment::Ident
-                                    Ident
-                                        .text: "bla"
+                    Path
+                        .start: Ident
+                            .text: "mod"
+                        .parts: Some
+                            -PathSegment::Ident
+                                Ident
+                                    .text: "bla"
                     .comment: None
                     .permission: None
         -TopLevelExpr::Expr
@@ -29,17 +29,17 @@ Query
                         FileLit
                             .path: "abc"
                     .alias: Some
-                        Path
-                            .start: Ident
-                                .text: "mod"
-                            .parts: Some
-                                -PathSegment::Ident
-                                    Ident
-                                        .text: "bla"
+                    Path
+                        .start: Ident
+                            .text: "mod"
+                        .parts: Some
+                            -PathSegment::Ident
+                                Ident
+                                    .text: "bla"
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "comment"
+                    Expr::String
+                        StringLit
+                            .text: "comment"
                     .permission: None
         -TopLevelExpr::Expr
             Expr::DefineModule
@@ -49,14 +49,14 @@ Query
                         FileLit
                             .path: "abc"
                     .alias: Some
-                        Path
-                            .start: Ident
-                                .text: "mod"
-                            .parts: Some
-                                -PathSegment::Ident
-                                    Ident
-                                        .text: "bla"
+                    Path
+                        .start: Ident
+                            .text: "mod"
+                        .parts: Some
+                            -PathSegment::Ident
+                                Ident
+                                    .text: "bla"
                     .comment: None
                     .permission: Some
-                        Permission::Full
+                    Permission::Full
 */

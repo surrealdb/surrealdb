@@ -94,9 +94,9 @@ Query
                             .parts: None
                     .fields: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "comment"
+                    Expr::String
+                        StringLit
+                            .text: "comment"
                     .index: None
                     .concurrently: false
         -TopLevelExpr::Expr
@@ -125,9 +125,9 @@ Query
                                     .text: "b"
                                 .parts: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "comment"
+                    Expr::String
+                        StringLit
+                            .text: "comment"
                     .index: None
                     .concurrently: false
         -TopLevelExpr::Expr
@@ -147,9 +147,9 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::Count
-                            CountIndex
-                                .condition: None
+                    Index::Count
+                        CountIndex
+                            .condition: None
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -168,16 +168,16 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::Count
-                            CountIndex
-                                .condition: Some
-                                    Expr::Binary
-                                        BinaryExpr
-                                            .left: Expr::Integer
-                                                +1
-                                            .op: Add
-                                            .right: Expr::Integer
-                                                +1
+                    Index::Count
+                        CountIndex
+                            .condition: Some
+                            Expr::Binary
+                                BinaryExpr
+                                    .left: Expr::Integer
+                                        +1
+                                    .op: Add
+                                    .right: Expr::Integer
+                                        +1
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -196,17 +196,17 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::Hnsw
-                            HnswIndex
-                                .distance: None
-                                .ty: None
-                                .m: None
-                                .m0: None
-                                .ml: None
-                                .ef_construction: None
-                                .extend_candidates: false
-                                .keep_pruned_connections: false
-                                .use_hashed_vector: false
+                    Index::Hnsw
+                        HnswIndex
+                            .distance: None
+                            .ty: None
+                            .m: None
+                            .m0: None
+                            .ml: None
+                            .ef_construction: None
+                            .extend_candidates: false
+                            .keep_pruned_connections: false
+                            .use_hashed_vector: false
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -225,18 +225,18 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::Hnsw
-                            HnswIndex
-                                .distance: Some
-                                    Distance::Euclidean
-                                .ty: None
-                                .m: None
-                                .m0: None
-                                .ml: None
-                                .ef_construction: None
-                                .extend_candidates: false
-                                .keep_pruned_connections: false
-                                .use_hashed_vector: false
+                    Index::Hnsw
+                        HnswIndex
+                            .distance: Some
+                            Distance::Euclidean
+                            .ty: None
+                            .m: None
+                            .m0: None
+                            .ml: None
+                            .ef_construction: None
+                            .extend_candidates: false
+                            .keep_pruned_connections: false
+                            .use_hashed_vector: false
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -255,19 +255,19 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::Hnsw
-                            HnswIndex
-                                .distance: Some
-                                    Distance::Minkowski
-                                        1.0
-                                .ty: None
-                                .m: None
-                                .m0: None
-                                .ml: None
-                                .ef_construction: None
-                                .extend_candidates: false
-                                .keep_pruned_connections: false
-                                .use_hashed_vector: false
+                    Index::Hnsw
+                        HnswIndex
+                            .distance: Some
+                            Distance::Minkowski
+                                1.0
+                            .ty: None
+                            .m: None
+                            .m0: None
+                            .ml: None
+                            .ef_construction: None
+                            .extend_candidates: false
+                            .keep_pruned_connections: false
+                            .use_hashed_vector: false
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -286,18 +286,18 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::Hnsw
-                            HnswIndex
-                                .distance: None
-                                .ty: Some
-                                    F64
-                                .m: None
-                                .m0: None
-                                .ml: None
-                                .ef_construction: None
-                                .extend_candidates: false
-                                .keep_pruned_connections: false
-                                .use_hashed_vector: false
+                    Index::Hnsw
+                        HnswIndex
+                            .distance: None
+                            .ty: Some
+                            F64
+                            .m: None
+                            .m0: None
+                            .ml: None
+                            .ef_construction: None
+                            .extend_candidates: false
+                            .keep_pruned_connections: false
+                            .use_hashed_vector: false
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -316,18 +316,18 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::Hnsw
-                            HnswIndex
-                                .distance: None
-                                .ty: Some
-                                    I16
-                                .m: None
-                                .m0: None
-                                .ml: None
-                                .ef_construction: None
-                                .extend_candidates: false
-                                .keep_pruned_connections: false
-                                .use_hashed_vector: false
+                    Index::Hnsw
+                        HnswIndex
+                            .distance: None
+                            .ty: Some
+                            I16
+                            .m: None
+                            .m0: None
+                            .ml: None
+                            .ef_construction: None
+                            .extend_candidates: false
+                            .keep_pruned_connections: false
+                            .use_hashed_vector: false
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -346,18 +346,18 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::Hnsw
-                            HnswIndex
-                                .distance: None
-                                .ty: None
-                                .m: None
-                                .m0: None
-                                .ml: Some
-                                    +1
-                                .ef_construction: None
-                                .extend_candidates: false
-                                .keep_pruned_connections: false
-                                .use_hashed_vector: false
+                    Index::Hnsw
+                        HnswIndex
+                            .distance: None
+                            .ty: None
+                            .m: None
+                            .m0: None
+                            .ml: Some
+                            +1
+                            .ef_construction: None
+                            .extend_candidates: false
+                            .keep_pruned_connections: false
+                            .use_hashed_vector: false
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -376,18 +376,18 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::Hnsw
-                            HnswIndex
-                                .distance: None
-                                .ty: None
-                                .m: None
-                                .m0: Some
-                                    +1
-                                .ml: None
-                                .ef_construction: None
-                                .extend_candidates: false
-                                .keep_pruned_connections: false
-                                .use_hashed_vector: false
+                    Index::Hnsw
+                        HnswIndex
+                            .distance: None
+                            .ty: None
+                            .m: None
+                            .m0: Some
+                            +1
+                            .ml: None
+                            .ef_construction: None
+                            .extend_candidates: false
+                            .keep_pruned_connections: false
+                            .use_hashed_vector: false
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -406,18 +406,18 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::Hnsw
-                            HnswIndex
-                                .distance: None
-                                .ty: None
-                                .m: Some
-                                    +1
-                                .m0: None
-                                .ml: None
-                                .ef_construction: None
-                                .extend_candidates: false
-                                .keep_pruned_connections: false
-                                .use_hashed_vector: false
+                    Index::Hnsw
+                        HnswIndex
+                            .distance: None
+                            .ty: None
+                            .m: Some
+                            +1
+                            .m0: None
+                            .ml: None
+                            .ef_construction: None
+                            .extend_candidates: false
+                            .keep_pruned_connections: false
+                            .use_hashed_vector: false
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -436,18 +436,18 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::Hnsw
-                            HnswIndex
-                                .distance: None
-                                .ty: None
-                                .m: None
-                                .m0: None
-                                .ml: None
-                                .ef_construction: Some
-                                    +1
-                                .extend_candidates: false
-                                .keep_pruned_connections: false
-                                .use_hashed_vector: false
+                    Index::Hnsw
+                        HnswIndex
+                            .distance: None
+                            .ty: None
+                            .m: None
+                            .m0: None
+                            .ml: None
+                            .ef_construction: Some
+                            +1
+                            .extend_candidates: false
+                            .keep_pruned_connections: false
+                            .use_hashed_vector: false
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -466,17 +466,17 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::Hnsw
-                            HnswIndex
-                                .distance: None
-                                .ty: None
-                                .m: None
-                                .m0: None
-                                .ml: None
-                                .ef_construction: None
-                                .extend_candidates: true
-                                .keep_pruned_connections: false
-                                .use_hashed_vector: false
+                    Index::Hnsw
+                        HnswIndex
+                            .distance: None
+                            .ty: None
+                            .m: None
+                            .m0: None
+                            .ml: None
+                            .ef_construction: None
+                            .extend_candidates: true
+                            .keep_pruned_connections: false
+                            .use_hashed_vector: false
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -495,17 +495,17 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::Hnsw
-                            HnswIndex
-                                .distance: None
-                                .ty: None
-                                .m: None
-                                .m0: None
-                                .ml: None
-                                .ef_construction: None
-                                .extend_candidates: false
-                                .keep_pruned_connections: true
-                                .use_hashed_vector: false
+                    Index::Hnsw
+                        HnswIndex
+                            .distance: None
+                            .ty: None
+                            .m: None
+                            .m0: None
+                            .ml: None
+                            .ef_construction: None
+                            .extend_candidates: false
+                            .keep_pruned_connections: true
+                            .use_hashed_vector: false
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -524,17 +524,17 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::Hnsw
-                            HnswIndex
-                                .distance: None
-                                .ty: None
-                                .m: None
-                                .m0: None
-                                .ml: None
-                                .ef_construction: None
-                                .extend_candidates: false
-                                .keep_pruned_connections: false
-                                .use_hashed_vector: true
+                    Index::Hnsw
+                        HnswIndex
+                            .distance: None
+                            .ty: None
+                            .m: None
+                            .m0: None
+                            .ml: None
+                            .ef_construction: None
+                            .extend_candidates: false
+                            .keep_pruned_connections: false
+                            .use_hashed_vector: true
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -553,13 +553,13 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::FullText
-                            FullTextIndex
-                                .analyzer: Some
-                                    Ident
-                                        .text: "nlyzr"
-                                .highlights: false
-                                .scoring: None
+                    Index::FullText
+                        FullTextIndex
+                            .analyzer: Some
+                            Ident
+                                .text: "nlyzr"
+                            .highlights: false
+                            .scoring: None
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -578,11 +578,11 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::FullText
-                            FullTextIndex
-                                .analyzer: None
-                                .highlights: true
-                                .scoring: None
+                    Index::FullText
+                        FullTextIndex
+                            .analyzer: None
+                            .highlights: true
+                            .scoring: None
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -601,12 +601,12 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::FullText
-                            FullTextIndex
-                                .analyzer: None
-                                .highlights: false
-                                .scoring: Some
-                                    FullTextScoring::VectorSearch
+                    Index::FullText
+                        FullTextIndex
+                            .analyzer: None
+                            .highlights: false
+                            .scoring: Some
+                            FullTextScoring::VectorSearch
                     .concurrently: false
         -TopLevelExpr::Expr
             Expr::DefineIndex
@@ -625,13 +625,13 @@ Query
                     .fields: None
                     .comment: None
                     .index: Some
-                        Index::FullText
-                            FullTextIndex
-                                .analyzer: None
-                                .highlights: false
-                                .scoring: Some
-                                    FullTextScoring::Bm25
-                                        .k1: 1.0
-                                        .b: 2.0
+                    Index::FullText
+                        FullTextIndex
+                            .analyzer: None
+                            .highlights: false
+                            .scoring: Some
+                            FullTextScoring::Bm25
+                                .k1: 1.0
+                                .b: 2.0
                     .concurrently: false
 */

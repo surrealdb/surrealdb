@@ -29,20 +29,20 @@ Query
                 Info
                     .kind: InfoKind::Database
                         .version: Some
-                            Expr::Integer
-                                +1
+                        Expr::Integer
+                            +1
                     .structure: true
         -TopLevelExpr::Expr
             Expr::Info
                 Info
                     .kind: InfoKind::Database
                         .version: Some
-                            Expr::Binary
-                                BinaryExpr
-                                    .left: Expr::Integer
-                                        +1
-                                    .op: Add
-                                    .right: Expr::Integer
-                                        +1
+                        Expr::Binary
+                            BinaryExpr
+                                .left: Expr::Integer
+                                    +1
+                                .op: Add
+                                .right: Expr::Integer
+                                    +1
                     .structure: true
 */

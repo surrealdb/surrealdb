@@ -16,5 +16,5 @@ Query
                                 .field: Ident
                                     .text: "b"
                                 .op: Some
-                                    DestructureOperator::All
+                                DestructureOperator::All
 */

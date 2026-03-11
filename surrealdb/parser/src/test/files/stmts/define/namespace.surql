@@ -14,9 +14,9 @@ Query
                                 .text: "ns"
                             .parts: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "comment"
+                    Expr::String
+                        StringLit
+                            .text: "comment"
         -TopLevelExpr::Expr
             Expr::DefineNamespace
                 DefineNamespace

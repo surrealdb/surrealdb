@@ -69,9 +69,9 @@ Query
                             .parts: None
                     .base: Database
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "foo"
+                    Expr::String
+                        StringLit
+                            .text: "foo"
                     .duration_session: None
                     .duration_token: None
                     .duration_grant: None
@@ -92,13 +92,13 @@ Query
                     .duration_token: None
                     .duration_grant: None
                     .authenticate: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: Add
-                                .right: Expr::Integer
-                                    +1
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: Add
+                            .right: Expr::Integer
+                                +1
                     .ty: None
         -TopLevelExpr::Expr
             Expr::DefineAccess
@@ -112,14 +112,14 @@ Query
                     .base: Database
                     .comment: None
                     .duration_session: Some
-                        Expr::Duration
-                            1s
+                    Expr::Duration
+                        1s
                     .duration_token: Some
-                        Expr::Duration
-                            1s
+                    Expr::Duration
+                        1s
                     .duration_grant: Some
-                        Expr::Duration
-                            1s
+                    Expr::Duration
+                        1s
                     .authenticate: None
                     .ty: None
         -TopLevelExpr::Expr
@@ -138,29 +138,29 @@ Query
                     .duration_grant: None
                     .authenticate: None
                     .ty: Some
-                        AccessType::Jwt
-                            Jwt
-                                .verify: JwtVerify::Key
-                                    .algorithm: Algorithm::EdDSA
-                                    .key: Expr::Binary
-                                        BinaryExpr
-                                            .left: Expr::Integer
-                                                +1
-                                            .op: Add
-                                            .right: Expr::Integer
-                                                +1
-                                .issue: Some
-                                    JwtIssue
-                                        .algorithm: Some
-                                            Algorithm::EdDSA
-                                        .key: Some
-                                            Expr::Binary
-                                                BinaryExpr
-                                                    .left: Expr::Integer
-                                                        +1
-                                                    .op: Add
-                                                    .right: Expr::Integer
-                                                        +2
+                    AccessType::Jwt
+                        Jwt
+                            .verify: JwtVerify::Key
+                                .algorithm: Algorithm::EdDSA
+                                .key: Expr::Binary
+                                    BinaryExpr
+                                        .left: Expr::Integer
+                                            +1
+                                        .op: Add
+                                        .right: Expr::Integer
+                                            +1
+                            .issue: Some
+                            JwtIssue
+                                .algorithm: Some
+                                Algorithm::EdDSA
+                                .key: Some
+                                Expr::Binary
+                                    BinaryExpr
+                                        .left: Expr::Integer
+                                            +1
+                                        .op: Add
+                                        .right: Expr::Integer
+                                            +2
         -TopLevelExpr::Expr
             Expr::DefineAccess
                 DefineAccess
@@ -177,7 +177,52 @@ Query
                     .duration_grant: None
                     .authenticate: None
                     .ty: Some
-                        AccessType::Jwt
+                    AccessType::Jwt
+                        Jwt
+                            .verify: JwtVerify::Jwks
+                                .url: Expr::Binary
+                                    BinaryExpr
+                                        .left: Expr::Integer
+                                            +1
+                                        .op: Add
+                                        .right: Expr::Integer
+                                            +1
+                            .issue: None
+        -TopLevelExpr::Expr
+            Expr::DefineAccess
+                DefineAccess
+                    .kind: Create
+                    .name: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "acss"
+                            .parts: None
+                    .base: Database
+                    .comment: None
+                    .duration_session: None
+                    .duration_token: None
+                    .duration_grant: None
+                    .authenticate: None
+                    .ty: Some
+                    AccessType::Record
+                        RecordAccess
+                            .signup: Some
+                            Expr::Binary
+                                BinaryExpr
+                                    .left: Expr::Integer
+                                        +1
+                                    .op: Add
+                                    .right: Expr::Integer
+                                        +2
+                            .signin: Some
+                            Expr::Binary
+                                BinaryExpr
+                                    .left: Expr::Integer
+                                        +1
+                                    .op: Add
+                                    .right: Expr::Integer
+                                        +1
+                            .jwt: Some
                             Jwt
                                 .verify: JwtVerify::Jwks
                                     .url: Expr::Binary
@@ -186,52 +231,7 @@ Query
                                                 +1
                                             .op: Add
                                             .right: Expr::Integer
-                                                +1
+                                                +3
                                 .issue: None
-        -TopLevelExpr::Expr
-            Expr::DefineAccess
-                DefineAccess
-                    .kind: Create
-                    .name: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "acss"
-                            .parts: None
-                    .base: Database
-                    .comment: None
-                    .duration_session: None
-                    .duration_token: None
-                    .duration_grant: None
-                    .authenticate: None
-                    .ty: Some
-                        AccessType::Record
-                            RecordAccess
-                                .signup: Some
-                                    Expr::Binary
-                                        BinaryExpr
-                                            .left: Expr::Integer
-                                                +1
-                                            .op: Add
-                                            .right: Expr::Integer
-                                                +2
-                                .signin: Some
-                                    Expr::Binary
-                                        BinaryExpr
-                                            .left: Expr::Integer
-                                                +1
-                                            .op: Add
-                                            .right: Expr::Integer
-                                                +1
-                                .jwt: Some
-                                    Jwt
-                                        .verify: JwtVerify::Jwks
-                                            .url: Expr::Binary
-                                                BinaryExpr
-                                                    .left: Expr::Integer
-                                                        +1
-                                                    .op: Add
-                                                    .right: Expr::Integer
-                                                        +3
-                                        .issue: None
-                                .refresh: true
+                            .refresh: true
 */

@@ -2130,7 +2130,7 @@ impl Parse for ast::DefineAccess {
 				}
 				T![DURATION] => {
 					let _ = parser.next();
-					parser.expect(T![FOR])?;
+					let _ = parser.expect(T![FOR])?;
 					loop {
 						let expect = "`GRANT`, `TOKEN`, or `SESSION`";
 						let peek = parser.peek_expect(expect)?;

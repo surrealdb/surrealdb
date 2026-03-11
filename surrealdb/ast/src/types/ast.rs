@@ -69,6 +69,14 @@ impl<L: NodeLibrary> Ast<L> {
 	pub fn clear(&mut self) {
 		self.library.clear();
 	}
+
+	pub fn library(&self) -> &L {
+		&self.library
+	}
+
+	pub fn library_mut(&mut self) -> &mut L {
+		&mut self.library
+	}
 }
 
 impl<T: Any, L: NodeLibrary> Index<NodeId<T>> for Ast<L> {

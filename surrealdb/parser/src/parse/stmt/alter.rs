@@ -1,4 +1,4 @@
-use ast::{AlterKind, ChangeFeed, Permission, Schema};
+use ast::{AlterKind, Schema};
 use token::T;
 
 use crate::parse::ParseResult;

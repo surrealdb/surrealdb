@@ -53,11 +53,14 @@ where
 	where
 		W: fmt::Write,
 	{
-		for n in ast.iter_list(Some(*self)) {
-			fmt.write_str("-")?;
-			n.fmt(ast, fmt)?;
-		}
-		Ok(())
+		fmt.new_line();
+		fmt.indent(ast, |ast, fmt| {
+			for n in ast.iter_list(Some(*self)) {
+				fmt.write_str("-")?;
+				n.fmt(ast, fmt)?;
+			}
+			Ok(())
+		})
 	}
 }
 
@@ -86,7 +89,7 @@ where
 		if let Some(x) = self.as_ref() {
 			fmt.write_str("Some")?;
 			fmt.new_line();
-			fmt.indent(ast, |ast, fmt| x.fmt(ast, fmt))
+			x.fmt(ast, fmt)
 		} else {
 			fmt.write_str("None")
 		}

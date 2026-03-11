@@ -32,9 +32,9 @@ Query
                     .tokenizer: None
                     .function: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "comment"
+                    Expr::String
+                        StringLit
+                            .text: "comment"
         -TopLevelExpr::Expr
             Expr::DefineAnalyzer
                 DefineAnalyzer
@@ -47,13 +47,13 @@ Query
                     .filters: None
                     .tokenizer: None
                     .function: Some
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: Some
-                                -PathSegment::Ident
-                                    Ident
-                                        .text: "b"
+                    Path
+                        .start: Ident
+                            .text: "a"
+                        .parts: Some
+                            -PathSegment::Ident
+                                Ident
+                                    .text: "b"
                     .comment: None
         -TopLevelExpr::Expr
             Expr::DefineAnalyzer

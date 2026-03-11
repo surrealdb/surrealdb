@@ -52,11 +52,11 @@ Query
                             .text: "test"
                     .base_middleware: None
                     .base_permission: Some
-                        Permission::Full
+                    Permission::Full
                     .fallback: Some
-                        Expr::Object
-                            Object
-                                .entries: None
+                    Expr::Object
+                        Object
+                            .entries: None
                     .methods: DefineMethodApiActions
                         .get: None
                         .delete: None
@@ -86,60 +86,60 @@ Query
                     .fallback: None
                     .methods: DefineMethodApiActions
                         .get: Some
-                            ApiAction
-                                .middleware: Some
-                                    -ApiMiddleware
-                                        .path: Path
-                                            .start: Ident
-                                                .text: "c"
-                                            .parts: Some
-                                                -PathSegment::Ident
-                                                    Ident
-                                                        .text: "d"
-                                        .args: None
-                                .permission: None
-                                .action: Expr::Block
-                                    Block
-                                        .exprs: Some
-                                            -Expr::Binary
-                                                BinaryExpr
-                                                    .left: Expr::Integer
-                                                        +1
-                                                    .op: Add
-                                                    .right: Expr::Integer
-                                                        +1
-                                            -Expr::String
-                                                StringLit
-                                                    .text: "bla"
+                        ApiAction
+                            .middleware: Some
+                                -ApiMiddleware
+                                    .path: Path
+                                        .start: Ident
+                                            .text: "c"
+                                        .parts: Some
+                                            -PathSegment::Ident
+                                                Ident
+                                                    .text: "d"
+                                    .args: None
+                            .permission: None
+                            .action: Expr::Block
+                                Block
+                                    .exprs: Some
+                                        -Expr::Binary
+                                            BinaryExpr
+                                                .left: Expr::Integer
+                                                    +1
+                                                .op: Add
+                                                .right: Expr::Integer
+                                                    +1
+                                        -Expr::String
+                                            StringLit
+                                                .text: "bla"
                         .delete: None
                         .patch: None
                         .post: None
                         .put: Some
-                            ApiAction
-                                .middleware: Some
-                                    -ApiMiddleware
-                                        .path: Path
-                                            .start: Ident
-                                                .text: "c"
-                                            .parts: Some
-                                                -PathSegment::Ident
-                                                    Ident
-                                                        .text: "d"
-                                        .args: None
-                                .permission: None
-                                .action: Expr::Block
-                                    Block
-                                        .exprs: Some
-                                            -Expr::Binary
-                                                BinaryExpr
-                                                    .left: Expr::Integer
-                                                        +1
-                                                    .op: Add
-                                                    .right: Expr::Integer
-                                                        +1
-                                            -Expr::String
-                                                StringLit
-                                                    .text: "bla"
+                        ApiAction
+                            .middleware: Some
+                                -ApiMiddleware
+                                    .path: Path
+                                        .start: Ident
+                                            .text: "c"
+                                        .parts: Some
+                                            -PathSegment::Ident
+                                                Ident
+                                                    .text: "d"
+                                    .args: None
+                            .permission: None
+                            .action: Expr::Block
+                                Block
+                                    .exprs: Some
+                                        -Expr::Binary
+                                            BinaryExpr
+                                                .left: Expr::Integer
+                                                    +1
+                                                .op: Add
+                                                .right: Expr::Integer
+                                                    +1
+                                        -Expr::String
+                                            StringLit
+                                                .text: "bla"
                         .trace: None
                     .comment: None
         -TopLevelExpr::Expr
@@ -163,62 +163,62 @@ Query
                     .fallback: None
                     .methods: DefineMethodApiActions
                         .get: Some
-                            ApiAction
-                                .middleware: Some
-                                    -ApiMiddleware
-                                        .path: Path
-                                            .start: Ident
-                                                .text: "c"
-                                            .parts: Some
-                                                -PathSegment::Ident
-                                                    Ident
-                                                        .text: "d"
-                                        .args: None
-                                .permission: Some
-                                    Permission::Full
-                                .action: Expr::Block
-                                    Block
-                                        .exprs: Some
-                                            -Expr::Binary
-                                                BinaryExpr
-                                                    .left: Expr::Integer
-                                                        +1
-                                                    .op: Add
-                                                    .right: Expr::Integer
-                                                        +1
-                                            -Expr::String
-                                                StringLit
-                                                    .text: "bla"
+                        ApiAction
+                            .middleware: Some
+                                -ApiMiddleware
+                                    .path: Path
+                                        .start: Ident
+                                            .text: "c"
+                                        .parts: Some
+                                            -PathSegment::Ident
+                                                Ident
+                                                    .text: "d"
+                                    .args: None
+                            .permission: Some
+                            Permission::Full
+                            .action: Expr::Block
+                                Block
+                                    .exprs: Some
+                                        -Expr::Binary
+                                            BinaryExpr
+                                                .left: Expr::Integer
+                                                    +1
+                                                .op: Add
+                                                .right: Expr::Integer
+                                                    +1
+                                        -Expr::String
+                                            StringLit
+                                                .text: "bla"
                         .delete: None
                         .patch: None
                         .post: None
                         .put: Some
-                            ApiAction
-                                .middleware: Some
-                                    -ApiMiddleware
-                                        .path: Path
-                                            .start: Ident
-                                                .text: "c"
-                                            .parts: Some
-                                                -PathSegment::Ident
-                                                    Ident
-                                                        .text: "d"
-                                        .args: None
-                                .permission: Some
-                                    Permission::Full
-                                .action: Expr::Block
-                                    Block
-                                        .exprs: Some
-                                            -Expr::Binary
-                                                BinaryExpr
-                                                    .left: Expr::Integer
-                                                        +1
-                                                    .op: Add
-                                                    .right: Expr::Integer
-                                                        +1
-                                            -Expr::String
-                                                StringLit
-                                                    .text: "bla"
+                        ApiAction
+                            .middleware: Some
+                                -ApiMiddleware
+                                    .path: Path
+                                        .start: Ident
+                                            .text: "c"
+                                        .parts: Some
+                                            -PathSegment::Ident
+                                                Ident
+                                                    .text: "d"
+                                    .args: None
+                            .permission: Some
+                            Permission::Full
+                            .action: Expr::Block
+                                Block
+                                    .exprs: Some
+                                        -Expr::Binary
+                                            BinaryExpr
+                                                .left: Expr::Integer
+                                                    +1
+                                                .op: Add
+                                                .right: Expr::Integer
+                                                    +1
+                                        -Expr::String
+                                            StringLit
+                                                .text: "bla"
                         .trace: None
                     .comment: None
         -TopLevelExpr::Expr
@@ -239,7 +239,7 @@ Query
                         .put: None
                         .trace: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "comment"
+                    Expr::String
+                        StringLit
+                            .text: "comment"
 */

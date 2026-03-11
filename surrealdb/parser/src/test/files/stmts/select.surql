@@ -26,13 +26,14 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: false
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: None
                     .condition: None
                     .split: None
@@ -49,36 +50,37 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::Selector
-                            Selector
-                                .expr: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "a"
-                                        .parts: None
-                                .alias: Some
+                            -ListSelector::Selector
+                                Selector
+                                    .expr: Expr::Path
+                                        Path
+                                            .start: Ident
+                                                .text: "a"
+                                            .parts: None
+                                    .alias: Some
                                     Place::Field
                                         Ident
                                             .text: "b"
-                        -ListSelector::Selector
-                            Selector
-                                .expr: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "c"
-                                        .parts: None
-                                .alias: None
+                            -ListSelector::Selector
+                                Selector
+                                    .expr: Expr::Path
+                                        Path
+                                            .start: Ident
+                                                .text: "c"
+                                            .parts: None
+                                    .alias: None
                     .only: false
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "bar"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "bar"
+                                .parts: None
                     .with_index: None
                     .condition: None
                     .split: None
@@ -95,13 +97,14 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: None
                     .condition: None
                     .split: None
@@ -118,15 +121,16 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
@@ -146,27 +150,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: None
                     .order: None
@@ -181,27 +186,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: Some
                         -PresentPlace::Field
                             Ident
@@ -222,27 +228,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -263,27 +270,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -293,7 +301,7 @@ Query
                             Ident
                                 .text: "b"
                     .order: Some
-                        OrderBy::Places
+                    OrderBy::Places
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
@@ -308,27 +316,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -338,13 +347,13 @@ Query
                             Ident
                                 .text: "b"
                     .order: Some
-                        OrderBy::Places
+                    OrderBy::Places
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
                     .start: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .limit: None
                     .version: None
                     .timeout: None
@@ -355,27 +364,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -385,14 +395,14 @@ Query
                             Ident
                                 .text: "b"
                     .order: Some
-                        OrderBy::Places
+                    OrderBy::Places
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
                     .start: None
                     .limit: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .version: None
                     .timeout: None
                     .fetch: None
@@ -402,27 +412,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -432,16 +443,16 @@ Query
                             Ident
                                 .text: "b"
                     .order: Some
-                        OrderBy::Places
+                    OrderBy::Places
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
                     .start: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .limit: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .version: None
                     .timeout: None
                     .fetch: None
@@ -451,27 +462,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -481,16 +493,16 @@ Query
                             Ident
                                 .text: "b"
                     .order: Some
-                        OrderBy::Places
+                    OrderBy::Places
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
                     .start: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .limit: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .version: None
                     .timeout: None
                     .fetch: None
@@ -500,27 +512,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -530,19 +543,19 @@ Query
                             Ident
                                 .text: "b"
                     .order: Some
-                        OrderBy::Places
+                    OrderBy::Places
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
                     .start: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .limit: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .version: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .timeout: None
                     .fetch: None
                     .tempfiles: false
@@ -551,27 +564,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -581,22 +595,22 @@ Query
                             Ident
                                 .text: "b"
                     .order: Some
-                        OrderBy::Places
+                    OrderBy::Places
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
                     .start: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .limit: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .version: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .timeout: Some
-                        Expr::Duration
-                            1s
+                    Expr::Duration
+                        1s
                     .fetch: None
                     .tempfiles: false
                     .explain: None
@@ -604,27 +618,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -634,22 +649,22 @@ Query
                             Ident
                                 .text: "b"
                     .order: Some
-                        OrderBy::Places
+                    OrderBy::Places
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
                     .start: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .limit: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .version: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .timeout: Some
-                        Expr::Duration
-                            1s
+                    Expr::Duration
+                        1s
                     .fetch: None
                     .tempfiles: true
                     .explain: None
@@ -657,27 +672,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -687,51 +703,52 @@ Query
                             Ident
                                 .text: "b"
                     .order: Some
-                        OrderBy::Places
+                    OrderBy::Places
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
                     .start: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .limit: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .version: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .timeout: Some
-                        Expr::Duration
-                            1s
+                    Expr::Duration
+                        1s
                     .fetch: None
                     .tempfiles: false
                     .explain: Some
-                        Explain::Base
+                    Explain::Base
         -TopLevelExpr::Expr
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -741,51 +758,52 @@ Query
                             Ident
                                 .text: "b"
                     .order: Some
-                        OrderBy::Places
+                    OrderBy::Places
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
                     .start: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .limit: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .version: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .timeout: Some
-                        Expr::Duration
-                            1s
+                    Expr::Duration
+                        1s
                     .fetch: None
                     .tempfiles: false
                     .explain: Some
-                        Explain::Base
+                    Explain::Base
         -TopLevelExpr::Expr
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -795,16 +813,16 @@ Query
                             Ident
                                 .text: "b"
                     .order: Some
-                        OrderBy::Places
+                    OrderBy::Places
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
                     .start: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .limit: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .version: None
                     .timeout: None
                     .fetch: Some
@@ -830,27 +848,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -860,16 +879,16 @@ Query
                             Ident
                                 .text: "b"
                     .order: Some
-                        OrderBy::Places
+                    OrderBy::Places
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
                     .start: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .limit: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .version: None
                     .timeout: None
                     .fetch: Some
@@ -886,27 +905,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -916,16 +936,16 @@ Query
                             Ident
                                 .text: "b"
                     .order: Some
-                        OrderBy::Places
+                    OrderBy::Places
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
                     .start: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .limit: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .version: None
                     .timeout: None
                     .fetch: Some
@@ -939,27 +959,28 @@ Query
             Expr::Select
                 Select
                     .fields: Fields::List
-                        -ListSelector::All
+                            -ListSelector::All
                     .only: true
-                    .from: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +2
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
                     .split: None
                     .group: Some
                         -PresentPlace::Field
@@ -969,16 +990,16 @@ Query
                             Ident
                                 .text: "b"
                     .order: Some
-                        OrderBy::Places
+                    OrderBy::Places
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
                     .start: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .limit: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .version: None
                     .timeout: None
                     .fetch: Some

@@ -9,7 +9,7 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Integer
+                                -PrimeType::Integer
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -17,8 +17,8 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitInteger
-                                +1
+                                -PrimeType::LitInteger
+                                    +1
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -26,9 +26,9 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitInteger
-                                +1
-                            -PrimeType::Integer
+                                -PrimeType::LitInteger
+                                    +1
+                                -PrimeType::Integer
                     .right: Expr::Integer
                         +1
 */

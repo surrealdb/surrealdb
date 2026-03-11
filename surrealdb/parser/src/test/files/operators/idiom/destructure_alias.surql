@@ -16,19 +16,19 @@ Query
                                 .field: Ident
                                     .text: "field1"
                                 .op: Some
-                                    DestructureOperator::Expr
-                                        Expr::Builtin
-                                            Builtin::True
+                                DestructureOperator::Expr
+                                    Expr::Builtin
+                                        Builtin::True
                             -Destructure
                                 .field: Ident
                                     .text: "field2"
                                 .op: Some
-                                    DestructureOperator::Expr
-                                        Expr::Binary
-                                            BinaryExpr
-                                                .left: Expr::Integer
-                                                    +1
-                                                .op: Add
-                                                .right: Expr::Integer
-                                                    +1
+                                DestructureOperator::Expr
+                                    Expr::Binary
+                                        BinaryExpr
+                                            .left: Expr::Integer
+                                                +1
+                                            .op: Add
+                                            .right: Expr::Integer
+                                                +1
 */

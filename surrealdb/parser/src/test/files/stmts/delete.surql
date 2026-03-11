@@ -13,11 +13,12 @@ Query
             Expr::Delete
                 Delete
                     .only: false
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
                     .with_index: None
                     .condition: None
                     .timeout: None
@@ -26,16 +27,17 @@ Query
             Expr::Delete
                 Delete
                     .only: false
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .with_index: None
                     .condition: None
                     .timeout: None
@@ -44,16 +46,17 @@ Query
             Expr::Delete
                 Delete
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .with_index: None
                     .condition: None
                     .timeout: None
@@ -62,18 +65,19 @@ Query
             Expr::Delete
                 Delete
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::None
+                    WithIndex::None
                     .condition: None
                     .timeout: None
                     .explain: None
@@ -81,18 +85,19 @@ Query
             Expr::Delete
                 Delete
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
@@ -104,105 +109,108 @@ Query
             Expr::Delete
                 Delete
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "foo"
-                                        .parts: None
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +1
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "foo"
+                                    .parts: None
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +1
                     .timeout: None
                     .explain: None
         -TopLevelExpr::Expr
             Expr::Delete
                 Delete
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "foo"
-                                        .parts: None
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +1
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "foo"
+                                    .parts: None
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +1
                     .timeout: Some
-                        Expr::Duration
-                            1s
+                    Expr::Duration
+                        1s
                     .explain: Some
-                        Explain::Base
+                    Explain::Base
         -TopLevelExpr::Expr
             Expr::Delete
                 Delete
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "a"
                             -Ident
                                 .text: "b"
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "foo"
-                                        .parts: None
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +1
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "foo"
+                                    .parts: None
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +1
                     .timeout: Some
-                        Expr::Duration
-                            1s
+                    Expr::Duration
+                        1s
                     .explain: Some
-                        Explain::Full
+                    Explain::Full
 */

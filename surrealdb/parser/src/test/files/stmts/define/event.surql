@@ -20,36 +20,38 @@ Query
                                 .text: "b"
                             .parts: None
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "a"
-                                        .parts: None
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +1
-                    .then: -Expr::Covered
-                        Expr::Create
-                            Create
-                                .only: false
-                                .targets: -Expr::RecordId
-                                    RecordId
-                                        .name: Ident
-                                            .text: "a"
-                                        .key: RecordIdKey::Number
-                                            +1
-                                .data: None
-                                .version: None
-                                .timeout: None
-                    -Expr::Binary
+                    Expr::Binary
                         BinaryExpr
-                            .left: Expr::Integer
-                                +2
-                            .op: Add
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "a"
+                                    .parts: None
+                            .op: ExactEqual
                             .right: Expr::Integer
-                                +3
+                                +1
+                    .then: 
+                        -Expr::Covered
+                            Expr::Create
+                                Create
+                                    .only: false
+                                    .targets: 
+                                        -Expr::RecordId
+                                            RecordId
+                                                .name: Ident
+                                                    .text: "a"
+                                                .key: RecordIdKey::Number
+                                                    +1
+                                    .data: None
+                                    .version: None
+                                    .timeout: None
+                        -Expr::Binary
+                            BinaryExpr
+                                .left: Expr::Integer
+                                    +2
+                                .op: Add
+                                .right: Expr::Integer
+                                    +3
                     .comment: None
                     .async_: None
         -TopLevelExpr::Expr
@@ -67,40 +69,42 @@ Query
                                 .text: "b"
                             .parts: None
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "a"
-                                        .parts: None
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +1
-                    .then: -Expr::Covered
-                        Expr::Create
-                            Create
-                                .only: false
-                                .targets: -Expr::RecordId
-                                    RecordId
-                                        .name: Ident
-                                            .text: "a"
-                                        .key: RecordIdKey::Number
-                                            +1
-                                .data: None
-                                .version: None
-                                .timeout: None
-                    -Expr::Binary
+                    Expr::Binary
                         BinaryExpr
-                            .left: Expr::Integer
-                                +2
-                            .op: Add
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "a"
+                                    .parts: None
+                            .op: ExactEqual
                             .right: Expr::Integer
-                                +3
+                                +1
+                    .then: 
+                        -Expr::Covered
+                            Expr::Create
+                                Create
+                                    .only: false
+                                    .targets: 
+                                        -Expr::RecordId
+                                            RecordId
+                                                .name: Ident
+                                                    .text: "a"
+                                                .key: RecordIdKey::Number
+                                                    +1
+                                    .data: None
+                                    .version: None
+                                    .timeout: None
+                        -Expr::Binary
+                            BinaryExpr
+                                .left: Expr::Integer
+                                    +2
+                                .op: Add
+                                .right: Expr::Integer
+                                    +3
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "foo"
+                    Expr::String
+                        StringLit
+                            .text: "foo"
                     .async_: None
         -TopLevelExpr::Expr
             Expr::DefineEvent
@@ -117,41 +121,43 @@ Query
                                 .text: "b"
                             .parts: None
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "a"
-                                        .parts: None
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +1
-                    .then: -Expr::Covered
-                        Expr::Create
-                            Create
-                                .only: false
-                                .targets: -Expr::RecordId
-                                    RecordId
-                                        .name: Ident
-                                            .text: "a"
-                                        .key: RecordIdKey::Number
-                                            +1
-                                .data: None
-                                .version: None
-                                .timeout: None
-                    -Expr::Binary
+                    Expr::Binary
                         BinaryExpr
-                            .left: Expr::Integer
-                                +2
-                            .op: Add
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "a"
+                                    .parts: None
+                            .op: ExactEqual
                             .right: Expr::Integer
-                                +3
+                                +1
+                    .then: 
+                        -Expr::Covered
+                            Expr::Create
+                                Create
+                                    .only: false
+                                    .targets: 
+                                        -Expr::RecordId
+                                            RecordId
+                                                .name: Ident
+                                                    .text: "a"
+                                                .key: RecordIdKey::Number
+                                                    +1
+                                    .data: None
+                                    .version: None
+                                    .timeout: None
+                        -Expr::Binary
+                            BinaryExpr
+                                .left: Expr::Integer
+                                    +2
+                                .op: Add
+                                .right: Expr::Integer
+                                    +3
                     .comment: None
                     .async_: Some
-                        DefineEventAsync
-                            .retry: None
-                            .max_depth: None
+                    DefineEventAsync
+                        .retry: None
+                        .max_depth: None
         -TopLevelExpr::Expr
             Expr::DefineEvent
                 DefineEvent
@@ -167,41 +173,43 @@ Query
                                 .text: "b"
                             .parts: None
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "a"
-                                        .parts: None
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +1
-                    .then: -Expr::Covered
-                        Expr::Create
-                            Create
-                                .only: false
-                                .targets: -Expr::RecordId
-                                    RecordId
-                                        .name: Ident
-                                            .text: "a"
-                                        .key: RecordIdKey::Number
-                                            +1
-                                .data: None
-                                .version: None
-                                .timeout: None
-                    -Expr::Binary
+                    Expr::Binary
                         BinaryExpr
-                            .left: Expr::Integer
-                                +2
-                            .op: Add
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "a"
+                                    .parts: None
+                            .op: ExactEqual
                             .right: Expr::Integer
-                                +3
+                                +1
+                    .then: 
+                        -Expr::Covered
+                            Expr::Create
+                                Create
+                                    .only: false
+                                    .targets: 
+                                        -Expr::RecordId
+                                            RecordId
+                                                .name: Ident
+                                                    .text: "a"
+                                                .key: RecordIdKey::Number
+                                                    +1
+                                    .data: None
+                                    .version: None
+                                    .timeout: None
+                        -Expr::Binary
+                            BinaryExpr
+                                .left: Expr::Integer
+                                    +2
+                                .op: Add
+                                .right: Expr::Integer
+                                    +3
                     .comment: None
                     .async_: Some
-                        DefineEventAsync
-                            .retry: Some
-                                +10
-                            .max_depth: Some
-                                +10
+                    DefineEventAsync
+                        .retry: Some
+                        +10
+                        .max_depth: Some
+                        +10
 */

@@ -20,11 +20,12 @@ Query
             Expr::Upsert
                 Upsert
                     .only: false
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: None
                     .data: None
                     .condition: None
@@ -35,11 +36,12 @@ Query
             Expr::Upsert
                 Upsert
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: None
                     .data: None
                     .condition: None
@@ -50,13 +52,14 @@ Query
             Expr::Upsert
                 Upsert
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::Some
+                    WithIndex::Some
                             -Ident
                                 .text: "foo"
                     .data: None
@@ -68,13 +71,14 @@ Query
             Expr::Upsert
                 Upsert
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::None
+                    WithIndex::None
                     .data: None
                     .condition: None
                     .output: None
@@ -84,15 +88,16 @@ Query
             Expr::Upsert
                 Upsert
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::None
+                    WithIndex::None
                     .data: Some
-                        RecordData::Set
+                    RecordData::Set
                             -Assignment
                                 .place: Place::Field
                                     Ident
@@ -108,15 +113,16 @@ Query
             Expr::Upsert
                 Upsert
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::None
+                    WithIndex::None
                     .data: Some
-                        RecordData::Set
+                    RecordData::Set
                             -Assignment
                                 .place: Place::Field
                                     Ident
@@ -143,15 +149,16 @@ Query
             Expr::Upsert
                 Upsert
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::None
+                    WithIndex::None
                     .data: Some
-                        RecordData::Set
+                    RecordData::Set
                             -Assignment
                                 .place: Place::Field
                                     Ident
@@ -171,19 +178,19 @@ Query
                                 .value: Expr::Integer
                                     +1
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "foo"
-                                        .parts: None
-                                .op: Equal
-                                .right: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "bar"
-                                        .parts: None
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "foo"
+                                    .parts: None
+                            .op: Equal
+                            .right: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "bar"
+                                    .parts: None
                     .output: None
                     .timeout: None
                     .explain: None
@@ -191,15 +198,16 @@ Query
             Expr::Upsert
                 Upsert
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::None
+                    WithIndex::None
                     .data: Some
-                        RecordData::Set
+                    RecordData::Set
                             -Assignment
                                 .place: Place::Field
                                     Ident
@@ -219,36 +227,37 @@ Query
                                 .value: Expr::Integer
                                     +1
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "foo"
-                                        .parts: None
-                                .op: Equal
-                                .right: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "bar"
-                                        .parts: None
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "foo"
+                                    .parts: None
+                            .op: Equal
+                            .right: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "bar"
+                                    .parts: None
                     .output: Some
-                        Output::None
+                    Output::None
                     .timeout: None
                     .explain: None
         -TopLevelExpr::Expr
             Expr::Upsert
                 Upsert
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::None
+                    WithIndex::None
                     .data: Some
-                        RecordData::Set
+                    RecordData::Set
                             -Assignment
                                 .place: Place::Field
                                     Ident
@@ -268,36 +277,37 @@ Query
                                 .value: Expr::Integer
                                     +1
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "foo"
-                                        .parts: None
-                                .op: Equal
-                                .right: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "bar"
-                                        .parts: None
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "foo"
+                                    .parts: None
+                            .op: Equal
+                            .right: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "bar"
+                                    .parts: None
                     .output: Some
-                        Output::Null
+                    Output::Null
                     .timeout: None
                     .explain: None
         -TopLevelExpr::Expr
             Expr::Upsert
                 Upsert
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::None
+                    WithIndex::None
                     .data: Some
-                        RecordData::Set
+                    RecordData::Set
                             -Assignment
                                 .place: Place::Field
                                     Ident
@@ -317,36 +327,37 @@ Query
                                 .value: Expr::Integer
                                     +1
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "foo"
-                                        .parts: None
-                                .op: Equal
-                                .right: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "bar"
-                                        .parts: None
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "foo"
+                                    .parts: None
+                            .op: Equal
+                            .right: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "bar"
+                                    .parts: None
                     .output: Some
-                        Output::Diff
+                    Output::Diff
                     .timeout: None
                     .explain: None
         -TopLevelExpr::Expr
             Expr::Upsert
                 Upsert
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::None
+                    WithIndex::None
                     .data: Some
-                        RecordData::Set
+                    RecordData::Set
                             -Assignment
                                 .place: Place::Field
                                     Ident
@@ -366,36 +377,37 @@ Query
                                 .value: Expr::Integer
                                     +1
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "foo"
-                                        .parts: None
-                                .op: Equal
-                                .right: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "bar"
-                                        .parts: None
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "foo"
+                                    .parts: None
+                            .op: Equal
+                            .right: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "bar"
+                                    .parts: None
                     .output: Some
-                        Output::Before
+                    Output::Before
                     .timeout: None
                     .explain: None
         -TopLevelExpr::Expr
             Expr::Upsert
                 Upsert
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::None
+                    WithIndex::None
                     .data: Some
-                        RecordData::Set
+                    RecordData::Set
                             -Assignment
                                 .place: Place::Field
                                     Ident
@@ -415,36 +427,37 @@ Query
                                 .value: Expr::Integer
                                     +1
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "foo"
-                                        .parts: None
-                                .op: Equal
-                                .right: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "bar"
-                                        .parts: None
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "foo"
+                                    .parts: None
+                            .op: Equal
+                            .right: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "bar"
+                                    .parts: None
                     .output: Some
-                        Output::After
+                    Output::After
                     .timeout: None
                     .explain: None
         -TopLevelExpr::Expr
             Expr::Upsert
                 Upsert
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::None
+                    WithIndex::None
                     .data: Some
-                        RecordData::Set
+                    RecordData::Set
                             -Assignment
                                 .place: Place::Field
                                     Ident
@@ -464,22 +477,22 @@ Query
                                 .value: Expr::Integer
                                     +1
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "foo"
-                                        .parts: None
-                                .op: Equal
-                                .right: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "bar"
-                                        .parts: None
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "foo"
+                                    .parts: None
+                            .op: Equal
+                            .right: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "bar"
+                                    .parts: None
                     .output: Some
-                        Output::Fields
-                            Fields::List
+                    Output::Fields
+                        Fields::List
                                 -ListSelector::Selector
                                     Selector
                                         .expr: Expr::Path
@@ -488,28 +501,29 @@ Query
                                                     .text: "a"
                                                 .parts: None
                                         .alias: Some
-                                            Place::Member
-                                                MemberPlace
-                                                    .lhs: Place::Field
-                                                        Ident
-                                                            .text: "b"
-                                                    .name: Ident
-                                                        .text: "c"
+                                        Place::Member
+                                            MemberPlace
+                                                .lhs: Place::Field
+                                                    Ident
+                                                        .text: "b"
+                                                .name: Ident
+                                                    .text: "c"
                     .timeout: None
                     .explain: None
         -TopLevelExpr::Expr
             Expr::Upsert
                 Upsert
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::None
+                    WithIndex::None
                     .data: Some
-                        RecordData::Set
+                    RecordData::Set
                             -Assignment
                                 .place: Place::Field
                                     Ident
@@ -529,22 +543,22 @@ Query
                                 .value: Expr::Integer
                                     +1
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "foo"
-                                        .parts: None
-                                .op: Equal
-                                .right: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "bar"
-                                        .parts: None
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "foo"
+                                    .parts: None
+                            .op: Equal
+                            .right: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "bar"
+                                    .parts: None
                     .output: Some
-                        Output::Fields
-                            Fields::List
+                    Output::Fields
+                        Fields::List
                                 -ListSelector::Selector
                                     Selector
                                         .expr: Expr::Path
@@ -553,30 +567,31 @@ Query
                                                     .text: "a"
                                                 .parts: None
                                         .alias: Some
-                                            Place::Member
-                                                MemberPlace
-                                                    .lhs: Place::Field
-                                                        Ident
-                                                            .text: "b"
-                                                    .name: Ident
-                                                        .text: "c"
+                                        Place::Member
+                                            MemberPlace
+                                                .lhs: Place::Field
+                                                    Ident
+                                                        .text: "b"
+                                                .name: Ident
+                                                    .text: "c"
                     .timeout: Some
-                        Expr::Duration
-                            1s
+                    Expr::Duration
+                        1s
                     .explain: None
         -TopLevelExpr::Expr
             Expr::Upsert
                 Upsert
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "foo"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
                     .with_index: Some
-                        WithIndex::None
+                    WithIndex::None
                     .data: Some
-                        RecordData::Set
+                    RecordData::Set
                             -Assignment
                                 .place: Place::Field
                                     Ident
@@ -596,22 +611,22 @@ Query
                                 .value: Expr::Integer
                                     +1
                     .condition: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "foo"
-                                        .parts: None
-                                .op: Equal
-                                .right: Expr::Path
-                                    Path
-                                        .start: Ident
-                                            .text: "bar"
-                                        .parts: None
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "foo"
+                                    .parts: None
+                            .op: Equal
+                            .right: Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "bar"
+                                    .parts: None
                     .output: Some
-                        Output::Fields
-                            Fields::List
+                    Output::Fields
+                        Fields::List
                                 -ListSelector::Selector
                                     Selector
                                         .expr: Expr::Path
@@ -620,16 +635,16 @@ Query
                                                     .text: "a"
                                                 .parts: None
                                         .alias: Some
-                                            Place::Member
-                                                MemberPlace
-                                                    .lhs: Place::Field
-                                                        Ident
-                                                            .text: "b"
-                                                    .name: Ident
-                                                        .text: "c"
+                                        Place::Member
+                                            MemberPlace
+                                                .lhs: Place::Field
+                                                    Ident
+                                                        .text: "b"
+                                                .name: Ident
+                                                    .text: "c"
                     .timeout: Some
-                        Expr::Duration
-                            1s
+                    Expr::Duration
+                        1s
                     .explain: Some
-                        Explain::Full
+                    Explain::Full
 */

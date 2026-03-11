@@ -39,8 +39,8 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitBuiltin
-                                Builtin::None
+                                -PrimeType::LitBuiltin
+                                    Builtin::None
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -48,8 +48,8 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitBuiltin
-                                Builtin::Null
+                                -PrimeType::LitBuiltin
+                                    Builtin::Null
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -57,8 +57,8 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitBuiltin
-                                Builtin::True
+                                -PrimeType::LitBuiltin
+                                    Builtin::True
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -66,8 +66,8 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitBuiltin
-                                Builtin::False
+                                -PrimeType::LitBuiltin
+                                    Builtin::False
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -75,7 +75,7 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Bool
+                                -PrimeType::Bool
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -83,8 +83,8 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitFloat
-                                NaN
+                                -PrimeType::LitFloat
+                                    NaN
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -92,8 +92,8 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitFloat
-                                inf
+                                -PrimeType::LitFloat
+                                    inf
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -101,8 +101,8 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitFloat
-                                -inf
+                                -PrimeType::LitFloat
+                                    -inf
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -110,7 +110,7 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Integer
+                                -PrimeType::Integer
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -118,7 +118,7 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Float
+                                -PrimeType::Float
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -126,7 +126,7 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Decimal
+                                -PrimeType::Decimal
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -134,7 +134,7 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Number
+                                -PrimeType::Number
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -142,7 +142,7 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Object
+                                -PrimeType::Object
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -150,7 +150,7 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Duration
+                                -PrimeType::Duration
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -158,7 +158,7 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::DateTime
+                                -PrimeType::DateTime
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -166,7 +166,7 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Bytes
+                                -PrimeType::Bytes
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -174,7 +174,7 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Regex
+                                -PrimeType::Regex
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -182,7 +182,7 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Uuid
+                                -PrimeType::Uuid
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -190,7 +190,7 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::String
+                                -PrimeType::String
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -198,7 +198,7 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Function
+                                -PrimeType::Function
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -206,9 +206,9 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Record
-                                IdentListType
-                                    .idents: None
+                                -PrimeType::Record
+                                    IdentListType
+                                        .idents: None
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -216,9 +216,9 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Table
-                                IdentListType
-                                    .idents: None
+                                -PrimeType::Table
+                                    IdentListType
+                                        .idents: None
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -226,10 +226,10 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Array
-                                ArrayLikeType
-                                    .ty: None
-                                    .size: None
+                                -PrimeType::Array
+                                    ArrayLikeType
+                                        .ty: None
+                                        .size: None
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -237,10 +237,10 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Set
-                                ArrayLikeType
-                                    .ty: None
-                                    .size: None
+                                -PrimeType::Set
+                                    ArrayLikeType
+                                        .ty: None
+                                        .size: None
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -248,9 +248,9 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Geometry
-                                GeometryType
-                                    .types: None
+                                -PrimeType::Geometry
+                                    GeometryType
+                                        .types: None
                     .right: Expr::Integer
                         +1
 */

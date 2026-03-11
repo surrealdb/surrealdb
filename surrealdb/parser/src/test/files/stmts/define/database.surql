@@ -32,9 +32,9 @@ Query
                     .strict: false
                     .changefeed: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "db"
+                    Expr::String
+                        StringLit
+                            .text: "db"
         -TopLevelExpr::Expr
             Expr::DefineDatabase
                 DefineDatabase
@@ -82,8 +82,8 @@ Query
                             .parts: None
                     .strict: true
                     .changefeed: Some
-                        ChangeFeed::WithOriginal
-                            1s
+                    ChangeFeed::WithOriginal
+                        1s
                     .comment: None
         -TopLevelExpr::Expr
             Expr::DefineDatabase

@@ -57,6 +57,7 @@ library! {
 		delete_stmt: Vec<Delete>,
 		relate_stmt: Vec<Relate>,
 		select_stmt: Vec<Select>,
+		insert_stmt: Vec<Insert>,
 
 		define_ns_stmt: Vec<DefineNamespace>,
 		define_db_stmt: Vec<DefineDatabase>,
@@ -102,6 +103,8 @@ library! {
 
 		expr: Vec<Expr>,
 		exprs: Vec<NodeList<Expr>>,
+		exprs_id: Vec<NodeListId<Expr>>,
+		exprs_ids: Vec<NodeList<NodeListId<Expr>>>,
 
 		block: Vec<Block>,
 
@@ -510,6 +513,42 @@ ast_type! {
 		pub fetch: Option<NodeListId<Fetch>>,
 		pub tempfiles: bool,
 		pub explain: Option<Explain>,
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum InsertInto{
+		Param(NodeId<Param>),
+		Table(NodeId<Ident>),
+	}
+}
+
+ast_type! {
+	pub struct InsertTuples {
+		pub places: NodeListId<Place>,
+		pub values: NodeListId<NodeListId<Expr>>,
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum InsertData{
+		Expr(NodeId<Expr>),
+		Tuples(InsertTuples),
+	}
+}
+
+ast_type! {
+	pub struct Insert{
+		pub relation: bool,
+		pub ignore: bool,
+		pub into: Option<InsertInto>,
+		pub data: InsertData,
+		pub on_duplicate: Option<NodeListId<Assignment>>,
+		pub output: Option<NodeId<Output>>,
+		pub version: Option<NodeId<Expr>>,
+		pub timeout: Option<NodeId<Expr>>,
 	}
 }
 
@@ -1250,6 +1289,7 @@ ast_type! {
 		Delete(NodeId<Delete>),
 		Relate(NodeId<Relate>),
 		Select(NodeId<Select>),
+		Insert(NodeId<Insert>),
 
 		DefineNamespace(NodeId<DefineNamespace>),
 		DefineDatabase(NodeId<DefineDatabase>),

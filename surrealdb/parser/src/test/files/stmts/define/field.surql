@@ -55,7 +55,7 @@ Query
                                 .text: "t"
                             .parts: None
                     .ty: Some
-                        Type::Prime
+                    Type::Prime
                             -PrimeType::LitObject
                                 LitObjectType
                                     .entries: Some
@@ -63,7 +63,7 @@ Query
                                             .name: Ident
                                                 .text: "a"
                                             .ty: Type::Prime
-                                                -PrimeType::Integer
+                                                    -PrimeType::Integer
                     .flexible: false
                     .readonly: false
                     .value: None
@@ -88,7 +88,7 @@ Query
                                 .text: "t"
                             .parts: None
                     .ty: Some
-                        Type::Prime
+                    Type::Prime
                             -PrimeType::LitObject
                                 LitObjectType
                                     .entries: Some
@@ -96,7 +96,7 @@ Query
                                             .name: Ident
                                                 .text: "a"
                                             .ty: Type::Prime
-                                                -PrimeType::Integer
+                                                    -PrimeType::Integer
                     .flexible: true
                     .readonly: false
                     .value: None
@@ -148,8 +148,8 @@ Query
                     .flexible: false
                     .readonly: true
                     .value: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .assert: None
                     .computed: None
                     .default: None
@@ -174,284 +174,284 @@ Query
                     .flexible: false
                     .readonly: false
                     .value: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .assert: Some
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +1
+                    .computed: None
+                    .default: None
+                    .permissions: None
+                    .comment: None
+                    .on_delete: None
+        -TopLevelExpr::Expr
+            Expr::DefineField
+                DefineField
+                    .kind: Create
+                    .name: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "f"
+                            .parts: None
+                    .table: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "t"
+                            .parts: None
+                    .ty: None
+                    .flexible: false
+                    .readonly: false
+                    .value: None
+                    .assert: Some
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +1
+                    .computed: Some
+                    Expr::Integer
+                        +2
+                    .default: None
+                    .permissions: None
+                    .comment: None
+                    .on_delete: None
+        -TopLevelExpr::Expr
+            Expr::DefineField
+                DefineField
+                    .kind: Create
+                    .name: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "f"
+                            .parts: None
+                    .table: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "t"
+                            .parts: None
+                    .ty: None
+                    .flexible: false
+                    .readonly: false
+                    .value: None
+                    .assert: None
+                    .computed: Some
+                    Expr::Integer
+                        +2
+                    .default: Some
+                    DefineFieldDefault::Some
+                        Expr::Integer
+                            +3
+                    .permissions: None
+                    .comment: None
+                    .on_delete: None
+        -TopLevelExpr::Expr
+            Expr::DefineField
+                DefineField
+                    .kind: Create
+                    .name: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "f"
+                            .parts: None
+                    .table: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "t"
+                            .parts: None
+                    .ty: None
+                    .flexible: false
+                    .readonly: false
+                    .value: None
+                    .assert: None
+                    .computed: None
+                    .default: Some
+                    DefineFieldDefault::Some
+                        Expr::Integer
+                            +3
+                    .permissions: Some
+                    FieldPermissions
+                        .create: Some
+                        Permission::Full
+                        .update: Some
+                        Permission::Full
+                        .select: Some
+                        Permission::Full
+                    .comment: None
+                    .on_delete: None
+        -TopLevelExpr::Expr
+            Expr::DefineField
+                DefineField
+                    .kind: Create
+                    .name: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "f"
+                            .parts: None
+                    .table: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "t"
+                            .parts: None
+                    .ty: None
+                    .flexible: false
+                    .readonly: false
+                    .value: None
+                    .assert: None
+                    .computed: None
+                    .default: None
+                    .permissions: Some
+                    FieldPermissions
+                        .create: Some
+                        Permission::Full
+                        .update: Some
+                        Permission::Full
+                        .select: Some
+                        Permission::Full
+                    .comment: Some
+                    Expr::String
+                        StringLit
+                            .text: "comment"
+                    .on_delete: None
+        -TopLevelExpr::Expr
+            Expr::DefineField
+                DefineField
+                    .kind: Create
+                    .name: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "f"
+                            .parts: None
+                    .table: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "t"
+                            .parts: None
+                    .ty: None
+                    .flexible: false
+                    .readonly: false
+                    .value: None
+                    .assert: None
+                    .computed: None
+                    .default: None
+                    .permissions: None
+                    .comment: Some
+                    Expr::String
+                        StringLit
+                            .text: "comment"
+                    .on_delete: Some
+                    OnDelete::Ignore
+        -TopLevelExpr::Expr
+            Expr::DefineField
+                DefineField
+                    .kind: Create
+                    .name: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "f"
+                            .parts: None
+                    .table: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "t"
+                            .parts: None
+                    .ty: None
+                    .flexible: false
+                    .readonly: false
+                    .value: None
+                    .assert: None
+                    .computed: None
+                    .default: None
+                    .permissions: None
+                    .comment: None
+                    .on_delete: Some
+                    OnDelete::Reject
+        -TopLevelExpr::Expr
+            Expr::DefineField
+                DefineField
+                    .kind: Create
+                    .name: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "f"
+                            .parts: None
+                    .table: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "t"
+                            .parts: None
+                    .ty: None
+                    .flexible: false
+                    .readonly: false
+                    .value: None
+                    .assert: None
+                    .computed: None
+                    .default: None
+                    .permissions: None
+                    .comment: None
+                    .on_delete: Some
+                    OnDelete::Cascade
+        -TopLevelExpr::Expr
+            Expr::DefineField
+                DefineField
+                    .kind: Create
+                    .name: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "f"
+                            .parts: None
+                    .table: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "t"
+                            .parts: None
+                    .ty: None
+                    .flexible: false
+                    .readonly: false
+                    .value: None
+                    .assert: None
+                    .computed: None
+                    .default: None
+                    .permissions: None
+                    .comment: None
+                    .on_delete: Some
+                    OnDelete::Unset
+        -TopLevelExpr::Expr
+            Expr::DefineField
+                DefineField
+                    .kind: Create
+                    .name: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "f"
+                            .parts: None
+                    .table: Expr::Path
+                        Path
+                            .start: Ident
+                                .text: "t"
+                            .parts: None
+                    .ty: None
+                    .flexible: false
+                    .readonly: false
+                    .value: None
+                    .assert: None
+                    .computed: None
+                    .default: None
+                    .permissions: None
+                    .comment: None
+                    .on_delete: Some
+                    OnDelete::Then
                         Expr::Binary
                             BinaryExpr
                                 .left: Expr::Integer
                                     +1
-                                .op: ExactEqual
+                                .op: Subtract
                                 .right: Expr::Integer
-                                    +1
-                    .computed: None
-                    .default: None
-                    .permissions: None
-                    .comment: None
-                    .on_delete: None
-        -TopLevelExpr::Expr
-            Expr::DefineField
-                DefineField
-                    .kind: Create
-                    .name: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "f"
-                            .parts: None
-                    .table: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "t"
-                            .parts: None
-                    .ty: None
-                    .flexible: false
-                    .readonly: false
-                    .value: None
-                    .assert: Some
-                        Expr::Binary
-                            BinaryExpr
-                                .left: Expr::Integer
-                                    +1
-                                .op: ExactEqual
-                                .right: Expr::Integer
-                                    +1
-                    .computed: Some
-                        Expr::Integer
-                            +2
-                    .default: None
-                    .permissions: None
-                    .comment: None
-                    .on_delete: None
-        -TopLevelExpr::Expr
-            Expr::DefineField
-                DefineField
-                    .kind: Create
-                    .name: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "f"
-                            .parts: None
-                    .table: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "t"
-                            .parts: None
-                    .ty: None
-                    .flexible: false
-                    .readonly: false
-                    .value: None
-                    .assert: None
-                    .computed: Some
-                        Expr::Integer
-                            +2
-                    .default: Some
-                        DefineFieldDefault::Some
-                            Expr::Integer
-                                +3
-                    .permissions: None
-                    .comment: None
-                    .on_delete: None
-        -TopLevelExpr::Expr
-            Expr::DefineField
-                DefineField
-                    .kind: Create
-                    .name: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "f"
-                            .parts: None
-                    .table: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "t"
-                            .parts: None
-                    .ty: None
-                    .flexible: false
-                    .readonly: false
-                    .value: None
-                    .assert: None
-                    .computed: None
-                    .default: Some
-                        DefineFieldDefault::Some
-                            Expr::Integer
-                                +3
-                    .permissions: Some
-                        FieldPermissions
-                            .create: Some
-                                Permission::Full
-                            .update: Some
-                                Permission::Full
-                            .select: Some
-                                Permission::Full
-                    .comment: None
-                    .on_delete: None
-        -TopLevelExpr::Expr
-            Expr::DefineField
-                DefineField
-                    .kind: Create
-                    .name: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "f"
-                            .parts: None
-                    .table: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "t"
-                            .parts: None
-                    .ty: None
-                    .flexible: false
-                    .readonly: false
-                    .value: None
-                    .assert: None
-                    .computed: None
-                    .default: None
-                    .permissions: Some
-                        FieldPermissions
-                            .create: Some
-                                Permission::Full
-                            .update: Some
-                                Permission::Full
-                            .select: Some
-                                Permission::Full
-                    .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "comment"
-                    .on_delete: None
-        -TopLevelExpr::Expr
-            Expr::DefineField
-                DefineField
-                    .kind: Create
-                    .name: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "f"
-                            .parts: None
-                    .table: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "t"
-                            .parts: None
-                    .ty: None
-                    .flexible: false
-                    .readonly: false
-                    .value: None
-                    .assert: None
-                    .computed: None
-                    .default: None
-                    .permissions: None
-                    .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "comment"
-                    .on_delete: Some
-                        OnDelete::Ignore
-        -TopLevelExpr::Expr
-            Expr::DefineField
-                DefineField
-                    .kind: Create
-                    .name: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "f"
-                            .parts: None
-                    .table: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "t"
-                            .parts: None
-                    .ty: None
-                    .flexible: false
-                    .readonly: false
-                    .value: None
-                    .assert: None
-                    .computed: None
-                    .default: None
-                    .permissions: None
-                    .comment: None
-                    .on_delete: Some
-                        OnDelete::Reject
-        -TopLevelExpr::Expr
-            Expr::DefineField
-                DefineField
-                    .kind: Create
-                    .name: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "f"
-                            .parts: None
-                    .table: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "t"
-                            .parts: None
-                    .ty: None
-                    .flexible: false
-                    .readonly: false
-                    .value: None
-                    .assert: None
-                    .computed: None
-                    .default: None
-                    .permissions: None
-                    .comment: None
-                    .on_delete: Some
-                        OnDelete::Cascade
-        -TopLevelExpr::Expr
-            Expr::DefineField
-                DefineField
-                    .kind: Create
-                    .name: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "f"
-                            .parts: None
-                    .table: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "t"
-                            .parts: None
-                    .ty: None
-                    .flexible: false
-                    .readonly: false
-                    .value: None
-                    .assert: None
-                    .computed: None
-                    .default: None
-                    .permissions: None
-                    .comment: None
-                    .on_delete: Some
-                        OnDelete::Unset
-        -TopLevelExpr::Expr
-            Expr::DefineField
-                DefineField
-                    .kind: Create
-                    .name: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "f"
-                            .parts: None
-                    .table: Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "t"
-                            .parts: None
-                    .ty: None
-                    .flexible: false
-                    .readonly: false
-                    .value: None
-                    .assert: None
-                    .computed: None
-                    .default: None
-                    .permissions: None
-                    .comment: None
-                    .on_delete: Some
-                        OnDelete::Then
-                            Expr::Binary
-                                BinaryExpr
-                                    .left: Expr::Integer
-                                        +1
-                                    .op: Subtract
-                                    .right: Expr::Integer
-                                        +2
+                                    +2
 */

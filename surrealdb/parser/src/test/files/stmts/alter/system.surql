@@ -13,14 +13,14 @@ Query
             Expr::AlterSystem
                 AlterSystem
                     .query_timeout: Some
-                        AlterKind::Set
-                            Expr::Duration
-                                1s
+                    AlterKind::Set
+                        Expr::Duration
+                            1s
                     .compact: false
         -TopLevelExpr::Expr
             Expr::AlterSystem
                 AlterSystem
                     .query_timeout: Some
-                        AlterKind::Drop
+                    AlterKind::Drop
                     .compact: false
 */

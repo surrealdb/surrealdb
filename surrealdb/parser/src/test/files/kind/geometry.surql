@@ -13,10 +13,10 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Geometry
-                                GeometryType
-                                    .types: Some
-                                        -GeometrySubType::Point
+                                -PrimeType::Geometry
+                                    GeometryType
+                                        .types: Some
+                                            -GeometrySubType::Point
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -24,10 +24,10 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Geometry
-                                GeometryType
-                                    .types: Some
-                                        -GeometrySubType::Line
+                                -PrimeType::Geometry
+                                    GeometryType
+                                        .types: Some
+                                            -GeometrySubType::Line
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -35,10 +35,10 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Geometry
-                                GeometryType
-                                    .types: Some
-                                        -GeometrySubType::Polygon
+                                -PrimeType::Geometry
+                                    GeometryType
+                                        .types: Some
+                                            -GeometrySubType::Polygon
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -46,10 +46,10 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Geometry
-                                GeometryType
-                                    .types: Some
-                                        -GeometrySubType::MultiLine
+                                -PrimeType::Geometry
+                                    GeometryType
+                                        .types: Some
+                                            -GeometrySubType::MultiLine
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -57,10 +57,10 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Geometry
-                                GeometryType
-                                    .types: Some
-                                        -GeometrySubType::MultiPolygon
+                                -PrimeType::Geometry
+                                    GeometryType
+                                        .types: Some
+                                            -GeometrySubType::MultiPolygon
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -68,10 +68,10 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Geometry
-                                GeometryType
-                                    .types: Some
-                                        -GeometrySubType::Collection
+                                -PrimeType::Geometry
+                                    GeometryType
+                                        .types: Some
+                                            -GeometrySubType::Collection
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -79,15 +79,15 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::Geometry
-                                GeometryType
-                                    .types: Some
-                                        -GeometrySubType::Point
-                                        -GeometrySubType::Line
-                                        -GeometrySubType::Polygon
-                                        -GeometrySubType::MultiLine
-                                        -GeometrySubType::MultiPolygon
-                                        -GeometrySubType::Collection
+                                -PrimeType::Geometry
+                                    GeometryType
+                                        .types: Some
+                                            -GeometrySubType::Point
+                                            -GeometrySubType::Line
+                                            -GeometrySubType::Polygon
+                                            -GeometrySubType::MultiLine
+                                            -GeometrySubType::MultiPolygon
+                                            -GeometrySubType::Collection
                     .right: Expr::Integer
                         +1
 */

@@ -76,9 +76,9 @@ Query
                                 .text: "foo"
                             .parts: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "table"
+                    Expr::String
+                        StringLit
+                            .text: "table"
                     .drop: false
                     .schema: None
                     .table_kind: None
@@ -95,9 +95,9 @@ Query
                                 .text: "foo"
                             .parts: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "table"
+                    Expr::String
+                        StringLit
+                            .text: "table"
                     .drop: true
                     .schema: None
                     .table_kind: None
@@ -116,7 +116,7 @@ Query
                     .comment: None
                     .drop: true
                     .schema: Some
-                        Full
+                    Full
                     .table_kind: None
                     .permission: None
                     .changefeed: None
@@ -133,7 +133,7 @@ Query
                     .comment: None
                     .drop: true
                     .schema: Some
-                        Less
+                    Less
                     .table_kind: None
                     .permission: None
                     .changefeed: None
@@ -154,27 +154,28 @@ Query
                     .permission: None
                     .changefeed: None
                     .view: Some
-                        Select
-                            .fields: Fields::List
+                    Select
+                        .fields: Fields::List
                                 -ListSelector::All
-                            .only: false
-                            .from: -Expr::Path
+                        .only: false
+                        .from: 
+                            -Expr::Path
                                 Path
                                     .start: Ident
                                         .text: "bar"
                                     .parts: None
-                            .with_index: None
-                            .condition: None
-                            .split: None
-                            .group: None
-                            .order: None
-                            .start: None
-                            .limit: None
-                            .version: None
-                            .timeout: None
-                            .fetch: None
-                            .tempfiles: false
-                            .explain: None
+                        .with_index: None
+                        .condition: None
+                        .split: None
+                        .group: None
+                        .order: None
+                        .start: None
+                        .limit: None
+                        .version: None
+                        .timeout: None
+                        .fetch: None
+                        .tempfiles: false
+                        .explain: None
         -TopLevelExpr::Expr
             Expr::DefineTable
                 DefineTable
@@ -190,8 +191,8 @@ Query
                     .table_kind: None
                     .permission: None
                     .changefeed: Some
-                        ChangeFeed::Base
-                            1s
+                    ChangeFeed::Base
+                        1s
                     .view: None
         -TopLevelExpr::Expr
             Expr::DefineTable
@@ -206,7 +207,7 @@ Query
                     .drop: false
                     .schema: None
                     .table_kind: Some
-                        TableKind::Normal
+                    TableKind::Normal
                     .permission: None
                     .changefeed: None
                     .view: None
@@ -223,7 +224,7 @@ Query
                     .drop: false
                     .schema: None
                     .table_kind: Some
-                        TableKind::Any
+                    TableKind::Any
                     .permission: None
                     .changefeed: None
                     .view: None
@@ -240,19 +241,19 @@ Query
                     .drop: false
                     .schema: None
                     .table_kind: Some
-                        TableKind::Relation
-                            RelationTable
-                                .from: Some
-                                    -Ident
-                                        .text: "a"
-                                    -Ident
-                                        .text: "b"
-                                .to: Some
-                                    -Ident
-                                        .text: "c"
-                                    -Ident
-                                        .text: "d"
-                                .enforced: true
+                    TableKind::Relation
+                        RelationTable
+                            .from: Some
+                                -Ident
+                                    .text: "a"
+                                -Ident
+                                    .text: "b"
+                            .to: Some
+                                -Ident
+                                    .text: "c"
+                                -Ident
+                                    .text: "d"
+                            .enforced: true
                     .permission: None
                     .changefeed: None
                     .view: None
@@ -270,15 +271,15 @@ Query
                     .schema: None
                     .table_kind: None
                     .permission: Some
-                        TablePermissions
-                            .create: Some
-                                Permission::Full
-                            .delete: Some
-                                Permission::Full
-                            .update: Some
-                                Permission::Full
-                            .select: Some
-                                Permission::Full
+                    TablePermissions
+                        .create: Some
+                        Permission::Full
+                        .delete: Some
+                        Permission::Full
+                        .update: Some
+                        Permission::Full
+                        .select: Some
+                        Permission::Full
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -295,15 +296,15 @@ Query
                     .schema: None
                     .table_kind: None
                     .permission: Some
-                        TablePermissions
-                            .create: Some
-                                Permission::None
-                            .delete: Some
-                                Permission::None
-                            .update: Some
-                                Permission::None
-                            .select: Some
-                                Permission::None
+                    TablePermissions
+                        .create: Some
+                        Permission::None
+                        .delete: Some
+                        Permission::None
+                        .update: Some
+                        Permission::None
+                        .select: Some
+                        Permission::None
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -320,13 +321,13 @@ Query
                     .schema: None
                     .table_kind: None
                     .permission: Some
-                        TablePermissions
-                            .create: None
-                            .delete: Some
-                                Permission::Full
-                            .update: None
-                            .select: Some
-                                Permission::Full
+                    TablePermissions
+                        .create: None
+                        .delete: Some
+                        Permission::Full
+                        .update: None
+                        .select: Some
+                        Permission::Full
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -343,14 +344,14 @@ Query
                     .schema: None
                     .table_kind: None
                     .permission: Some
-                        TablePermissions
-                            .create: Some
-                                Permission::None
-                            .delete: Some
-                                Permission::Full
-                            .update: None
-                            .select: Some
-                                Permission::Full
+                    TablePermissions
+                        .create: Some
+                        Permission::None
+                        .delete: Some
+                        Permission::Full
+                        .update: None
+                        .select: Some
+                        Permission::Full
                     .changefeed: None
                     .view: None
         -TopLevelExpr::Expr
@@ -367,22 +368,22 @@ Query
                     .schema: None
                     .table_kind: None
                     .permission: Some
-                        TablePermissions
-                            .create: Some
-                                Permission::None
-                            .delete: Some
-                                Permission::Full
-                            .update: Some
-                                Permission::Where
-                                    Expr::Binary
-                                        BinaryExpr
-                                            .left: Expr::Integer
-                                                +1
-                                            .op: ExactEqual
-                                            .right: Expr::Integer
-                                                +1
-                            .select: Some
-                                Permission::Full
+                    TablePermissions
+                        .create: Some
+                        Permission::None
+                        .delete: Some
+                        Permission::Full
+                        .update: Some
+                        Permission::Where
+                            Expr::Binary
+                                BinaryExpr
+                                    .left: Expr::Integer
+                                        +1
+                                    .op: ExactEqual
+                                    .right: Expr::Integer
+                                        +1
+                        .select: Some
+                        Permission::Full
                     .changefeed: None
                     .view: None
 */

@@ -2,14 +2,17 @@ mod alter;
 mod define;
 mod remove;
 
-use ast::{AstSpan, Expr, Fetch, NodeId, OrderBy, RecordData, WithIndex};
+use ast::{
+	AstSpan, Expr, Fetch, InsertData, InsertInto, InsertTuples, NodeId, OrderBy, RecordData,
+	WithIndex,
+};
 use common::source_error::{AnnotationKind, Level};
 use token::{BaseTokenKind, T};
 
 use super::Parser;
 use crate::Parse;
-use crate::parse::ParseResult;
 use crate::parse::utils::{parse_delimited_list, parse_seperated_list, parse_seperated_list_sync};
+use crate::parse::{ParseError, ParseResult};
 
 impl Parse for ast::If {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
@@ -777,6 +780,160 @@ impl Parse for ast::Select {
 			explain,
 
 			span,
+		})
+	}
+}
+
+async fn parse_insert_data(parser: &mut Parser<'_, '_>) -> ParseResult<InsertData> {
+	// Did not start with a `(` so it cannot be the tuples
+	if let Some(peek) = parser.peek()?
+		&& !matches!(peek.token, BaseTokenKind::OpenParen)
+	{
+		return Ok(InsertData::Expr(parser.parse_enter().await?));
+	}
+
+	// We need to do something a bit hacky here.
+	// Because we are speculating we might push a bunch of values which will then not be used.
+	// To ensure that we cannot overflow the u32::MAX integer of nodes we need to remove these
+	// values when recovering from speculation.
+	// TODO: Implement a more proper checkpointing system for the library.
+	let place_len = parser.ast.library().place.len();
+	let places_len = parser.ast.library().places.len();
+	let ident_len = parser.ast.library().ident.len();
+
+	let speculate = parser
+		.speculate(async |parser| {
+			let mut places_len = 0;
+			let (places_span, places) = parse_delimited_list(
+				parser,
+				BaseTokenKind::OpenParen,
+				BaseTokenKind::CloseParen,
+				T![,],
+				async |parser| {
+					let res = parser.parse().await;
+					places_len += 1;
+					res
+				},
+			)
+			.await?;
+
+			let Some(places) = places else {
+				return Err(ParseError::speculate_error());
+			};
+
+			let _ = parser.expect(T![VALUES])?;
+
+			// After parsing the VALUES token we can be sure this has to be tuples
+			parser
+				.commit(async |parser| {
+					let (_, values) = parse_seperated_list(parser, T![,], async |parser| {
+						let mut expr_len = 0;
+						let (exprs_span, exprs) = parse_delimited_list(
+							parser,
+							BaseTokenKind::OpenParen,
+							BaseTokenKind::CloseParen,
+							T![,],
+							async |parser| {
+								let res = parser.parse_enter::<Expr>().await?;
+								expr_len += 1;
+								Ok(res)
+							},
+						)
+						.await?;
+
+
+						if let Some(values) = exprs && places_len == expr_len {
+							Ok(values)
+						}else{
+							Err(parser.with_error(|parser|{
+								Level::Error.title(format!("Invalid number of inser values, found {expr_len} value(s) but field tuple has {places_len} value(s)"))
+									.snippet(parser.snippet()
+										.annotate(AnnotationKind::Primary.span(exprs_span))
+										.annotate(AnnotationKind::Context.span(places_span)
+											.label(format!("This fields tuple has {places_len} entries")))
+									)
+									.to_diagnostic()
+							}))
+						}
+					})
+					.await?;
+
+					let span = parser.span_since(places_span);
+					Ok(InsertTuples{
+						places,
+						values,
+						span,
+					})
+				})
+				.await
+		})
+		.await?;
+
+	if let Some(res) = speculate {
+		return Ok(InsertData::Tuples(res));
+	}
+
+	parser.ast.library_mut().place.truncate(place_len);
+	parser.ast.library_mut().places.truncate(places_len);
+	parser.ast.library_mut().ident.truncate(ident_len);
+
+	Ok(InsertData::Expr(parser.parse_enter().await?))
+}
+
+impl Parse for ast::Insert {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start = parser.expect(T![INSERT])?;
+
+		let relation = parser.eat(T![RELATION])?.is_some();
+		let ignore = parser.eat(T![IGNORE])?.is_some();
+
+		let into = if parser.eat(T![INTO])?.is_some() {
+			let expect = "a parameter or an identifier";
+			let peek = parser.peek_expect(expect)?;
+			let into = match peek.token {
+				BaseTokenKind::Param => InsertInto::Param(parser.parse_sync()?),
+				x if x.is_identifier() => InsertInto::Table(parser.parse_sync()?),
+				_ => return Err(parser.unexpected(expect)),
+			};
+			Some(into)
+		} else {
+			None
+		};
+
+		let data = parse_insert_data(parser).await?;
+
+		let on_duplicate = if parser.eat(T![ON])?.is_some() {
+			let _ = parser.expect(T![DUPLICATE])?;
+			let _ = parser.expect(T![KEY])?;
+			let _ = parser.expect(T![UPDATE])?;
+			let (_, assignments) = parse_seperated_list(parser, T![,], Parser::parse).await?;
+			Some(assignments)
+		} else {
+			None
+		};
+
+		let output = if let Some(x) = parser.peek()?
+			&& let T![RETURN] = x.token
+		{
+			Some(parser.parse().await?)
+		} else {
+			None
+		};
+
+		let version = try_parse_clause_expr(parser, T![VERSION]).await?;
+		let timeout = try_parse_clause_expr(parser, T![TIMEOUT]).await?;
+
+		let span = parser.span_since(start.span);
+		Ok(ast::Insert {
+			relation,
+			ignore,
+			into,
+			span,
+			on_duplicate,
+			output,
+			version,
+			timeout,
+			data,
 		})
 	}
 }

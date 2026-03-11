@@ -90,12 +90,12 @@ Query
                             .name: Param
                                 .text: "c"
                             .ty: Type::Prime
-                                -PrimeType::Integer
+                                    -PrimeType::Integer
                         -Parameter
                             .name: Param
                                 .text: "d"
                             .ty: Type::Prime
-                                -PrimeType::Integer
+                                    -PrimeType::Integer
                     .return_ty: None
                     .body: Block
                         .exprs: None
@@ -120,14 +120,14 @@ Query
                             .name: Param
                                 .text: "c"
                             .ty: Type::Prime
-                                -PrimeType::Integer
+                                    -PrimeType::Integer
                         -Parameter
                             .name: Param
                                 .text: "d"
                             .ty: Type::Prime
-                                -PrimeType::Integer
+                                    -PrimeType::Integer
                     .return_ty: Some
-                        Type::Prime
+                    Type::Prime
                             -PrimeType::Integer
                     .body: Block
                         .exprs: None
@@ -152,21 +152,21 @@ Query
                             .name: Param
                                 .text: "c"
                             .ty: Type::Prime
-                                -PrimeType::Integer
+                                    -PrimeType::Integer
                         -Parameter
                             .name: Param
                                 .text: "d"
                             .ty: Type::Prime
-                                -PrimeType::Integer
+                                    -PrimeType::Integer
                     .return_ty: Some
-                        Type::Prime
+                    Type::Prime
                             -PrimeType::Integer
                     .body: Block
                         .exprs: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "com"
+                    Expr::String
+                        StringLit
+                            .text: "com"
                     .permission: None
         -TopLevelExpr::Expr
             Expr::DefineFunction
@@ -187,21 +187,21 @@ Query
                             .name: Param
                                 .text: "c"
                             .ty: Type::Prime
-                                -PrimeType::Integer
+                                    -PrimeType::Integer
                         -Parameter
                             .name: Param
                                 .text: "d"
                             .ty: Type::Prime
-                                -PrimeType::Integer
+                                    -PrimeType::Integer
                     .return_ty: Some
-                        Type::Prime
+                    Type::Prime
                             -PrimeType::Integer
                     .body: Block
                         .exprs: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "com"
+                    Expr::String
+                        StringLit
+                            .text: "com"
                     .permission: None
         -TopLevelExpr::Expr
             Expr::DefineFunction
@@ -222,23 +222,23 @@ Query
                             .name: Param
                                 .text: "c"
                             .ty: Type::Prime
-                                -PrimeType::Integer
+                                    -PrimeType::Integer
                         -Parameter
                             .name: Param
                                 .text: "d"
                             .ty: Type::Prime
-                                -PrimeType::Integer
+                                    -PrimeType::Integer
                     .return_ty: Some
-                        Type::Prime
+                    Type::Prime
                             -PrimeType::Integer
                     .body: Block
                         .exprs: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "com"
+                    Expr::String
+                        StringLit
+                            .text: "com"
                     .permission: Some
-                        Permission::Full
+                    Permission::Full
         -TopLevelExpr::Expr
             Expr::DefineFunction
                 DefineFunction
@@ -258,23 +258,23 @@ Query
                             .name: Param
                                 .text: "c"
                             .ty: Type::Prime
-                                -PrimeType::Integer
+                                    -PrimeType::Integer
                         -Parameter
                             .name: Param
                                 .text: "d"
                             .ty: Type::Prime
-                                -PrimeType::Integer
+                                    -PrimeType::Integer
                     .return_ty: Some
-                        Type::Prime
+                    Type::Prime
                             -PrimeType::Integer
                     .body: Block
                         .exprs: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "com"
+                    Expr::String
+                        StringLit
+                            .text: "com"
                     .permission: Some
-                        Permission::None
+                    Permission::None
         -TopLevelExpr::Expr
             Expr::DefineFunction
                 DefineFunction
@@ -294,30 +294,30 @@ Query
                             .name: Param
                                 .text: "c"
                             .ty: Type::Prime
-                                -PrimeType::Integer
+                                    -PrimeType::Integer
                         -Parameter
                             .name: Param
                                 .text: "d"
                             .ty: Type::Prime
-                                -PrimeType::Integer
+                                    -PrimeType::Integer
                     .return_ty: Some
-                        Type::Prime
+                    Type::Prime
                             -PrimeType::Integer
                     .body: Block
                         .exprs: None
                     .comment: Some
-                        Expr::String
-                            StringLit
-                                .text: "com"
+                    Expr::String
+                        StringLit
+                            .text: "com"
                     .permission: Some
-                        Permission::Where
-                            Expr::Binary
-                                BinaryExpr
-                                    .left: Expr::Param
-                                        Param
-                                            .text: "session"
-                                    .op: Equal
-                                    .right: Expr::String
-                                        StringLit
-                                            .text: "bla"
+                    Permission::Where
+                        Expr::Binary
+                            BinaryExpr
+                                .left: Expr::Param
+                                    Param
+                                        .text: "session"
+                                .op: Equal
+                                .right: Expr::String
+                                    StringLit
+                                        .text: "bla"
 */

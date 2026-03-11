@@ -30,7 +30,7 @@ Query
                                     .text: "user"
                                 .parts: None
                         .base: Some
-                            Namespace
+                        Namespace
                     .structure: false
         -TopLevelExpr::Expr
             Expr::Info
@@ -42,7 +42,7 @@ Query
                                     .text: "foo"
                                 .parts: None
                         .base: Some
-                            Namespace
+                        Namespace
                     .structure: false
         -TopLevelExpr::Expr
             Expr::Info
@@ -54,7 +54,7 @@ Query
                                     .text: "foo"
                                 .parts: None
                         .base: Some
-                            Database
+                        Database
                     .structure: false
         -TopLevelExpr::Expr
             Expr::Info
@@ -66,7 +66,7 @@ Query
                                     .text: "foo"
                                 .parts: None
                         .base: Some
-                            Database
+                        Database
                     .structure: false
         -TopLevelExpr::Expr
             Expr::Info
@@ -78,7 +78,7 @@ Query
                                     .text: "foo"
                                 .parts: None
                         .base: Some
-                            Root
+                        Root
                     .structure: false
         -TopLevelExpr::Expr
             Expr::Info
@@ -90,7 +90,7 @@ Query
                                     .text: "foo"
                                 .parts: None
                         .base: Some
-                            Root
+                        Root
                     .structure: false
         -TopLevelExpr::Expr
             Expr::Info
@@ -102,6 +102,6 @@ Query
                                     .text: "foo"
                                 .parts: None
                         .base: Some
-                            Root
+                        Root
                     .structure: true
 */

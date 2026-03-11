@@ -708,6 +708,10 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			let expr = parser.parse().await?;
 			Ok(Expr::Select(expr))
 		}
+		T![INSERT] => {
+			let expr = parser.parse().await?;
+			Ok(Expr::Insert(expr))
+		}
 		T![DEFINE] => {
 			let expected = "a resource type to define";
 			let Some(peek) = parser.peek1()? else {

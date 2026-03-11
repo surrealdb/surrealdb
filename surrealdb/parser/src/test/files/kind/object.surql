@@ -11,15 +11,15 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitObject
-                                LitObjectType
-                                    .entries: Some
-                                        -LitObjectTypeEntry
-                                            .name: Ident
-                                                .text: "a"
-                                            .ty: Type::Prime
-                                                -PrimeType::LitInteger
-                                                    +1
+                                -PrimeType::LitObject
+                                    LitObjectType
+                                        .entries: Some
+                                            -LitObjectTypeEntry
+                                                .name: Ident
+                                                    .text: "a"
+                                                .ty: Type::Prime
+                                                        -PrimeType::LitInteger
+                                                            +1
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -27,15 +27,15 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitObject
-                                LitObjectType
-                                    .entries: Some
-                                        -LitObjectTypeEntry
-                                            .name: Ident
-                                                .text: "a"
-                                            .ty: Type::Prime
-                                                -PrimeType::LitInteger
-                                                    +1
+                                -PrimeType::LitObject
+                                    LitObjectType
+                                        .entries: Some
+                                            -LitObjectTypeEntry
+                                                .name: Ident
+                                                    .text: "a"
+                                                .ty: Type::Prime
+                                                        -PrimeType::LitInteger
+                                                            +1
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -43,15 +43,15 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitObject
-                                LitObjectType
-                                    .entries: Some
-                                        -LitObjectTypeEntry
-                                            .name: Ident
-                                                .text: "a"
-                                            .ty: Type::Prime
-                                                -PrimeType::LitInteger
-                                                    +1
+                                -PrimeType::LitObject
+                                    LitObjectType
+                                        .entries: Some
+                                            -LitObjectTypeEntry
+                                                .name: Ident
+                                                    .text: "a"
+                                                .ty: Type::Prime
+                                                        -PrimeType::LitInteger
+                                                            +1
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -59,15 +59,15 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitObject
-                                LitObjectType
-                                    .entries: Some
-                                        -LitObjectTypeEntry
-                                            .name: Ident
-                                                .text: "SELECT"
-                                            .ty: Type::Prime
-                                                -PrimeType::LitInteger
-                                                    +1
+                                -PrimeType::LitObject
+                                    LitObjectType
+                                        .entries: Some
+                                            -LitObjectTypeEntry
+                                                .name: Ident
+                                                    .text: "SELECT"
+                                                .ty: Type::Prime
+                                                        -PrimeType::LitInteger
+                                                            +1
                     .right: Expr::Integer
                         +1
         -TopLevelExpr::Expr
@@ -75,28 +75,28 @@ Query
                 PrefixExpr
                     .op: PrefixOperator::Cast
                         Type::Prime
-                            -PrimeType::LitObject
-                                LitObjectType
-                                    .entries: Some
-                                        -LitObjectTypeEntry
-                                            .name: Ident
-                                                .text: "a"
-                                            .ty: Type::Prime
-                                                -PrimeType::LitObject
-                                                    LitObjectType
-                                                        .entries: Some
-                                                            -LitObjectTypeEntry
-                                                                .name: Ident
-                                                                    .text: "b"
-                                                                .ty: Type::Prime
-                                                                    -PrimeType::LitInteger
-                                                                        +1
-                                                -PrimeType::Integer
-                                        -LitObjectTypeEntry
-                                            .name: Ident
-                                                .text: "c"
-                                            .ty: Type::Prime
-                                                -PrimeType::Float
+                                -PrimeType::LitObject
+                                    LitObjectType
+                                        .entries: Some
+                                            -LitObjectTypeEntry
+                                                .name: Ident
+                                                    .text: "a"
+                                                .ty: Type::Prime
+                                                        -PrimeType::LitObject
+                                                            LitObjectType
+                                                                .entries: Some
+                                                                    -LitObjectTypeEntry
+                                                                        .name: Ident
+                                                                            .text: "b"
+                                                                        .ty: Type::Prime
+                                                                                -PrimeType::LitInteger
+                                                                                    +1
+                                                        -PrimeType::Integer
+                                            -LitObjectTypeEntry
+                                                .name: Ident
+                                                    .text: "c"
+                                                .ty: Type::Prime
+                                                        -PrimeType::Float
                     .right: Expr::Integer
                         +1
 */

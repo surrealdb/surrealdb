@@ -17,11 +17,12 @@ Query
             Expr::Create
                 Create
                     .only: false
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
                     .data: None
                     .version: None
                     .timeout: None
@@ -29,16 +30,17 @@ Query
             Expr::Create
                 Create
                     .only: false
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .data: None
                     .version: None
                     .timeout: None
@@ -46,16 +48,17 @@ Query
             Expr::Create
                 Create
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .data: None
                     .version: None
                     .timeout: None
@@ -63,18 +66,19 @@ Query
             Expr::Create
                 Create
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .data: Some
-                        RecordData::Set
+                    RecordData::Set
                             -Assignment
                                 .place: Place::Field
                                     Ident
@@ -117,18 +121,19 @@ Query
             Expr::Create
                 Create
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .data: Some
-                        RecordData::Unset
+                    RecordData::Unset
                             -Place::Field
                                 Ident
                                     .text: "a"
@@ -152,156 +157,162 @@ Query
             Expr::Create
                 Create
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .data: Some
-                        RecordData::Content
-                            Expr::Object
-                                Object
-                                    .entries: Some
-                                        -ObjectEntry
-                                            .key: "a"
-                                            .value: Expr::Integer
-                                                +1
+                    RecordData::Content
+                        Expr::Object
+                            Object
+                                .entries: Some
+                                    -ObjectEntry
+                                        .key: "a"
+                                        .value: Expr::Integer
+                                            +1
                     .version: None
                     .timeout: None
         -TopLevelExpr::Expr
             Expr::Create
                 Create
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .data: Some
-                        RecordData::Patch
-                            Expr::Object
-                                Object
-                                    .entries: Some
-                                        -ObjectEntry
-                                            .key: "a"
-                                            .value: Expr::Integer
-                                                +1
+                    RecordData::Patch
+                        Expr::Object
+                            Object
+                                .entries: Some
+                                    -ObjectEntry
+                                        .key: "a"
+                                        .value: Expr::Integer
+                                            +1
                     .version: None
                     .timeout: None
         -TopLevelExpr::Expr
             Expr::Create
                 Create
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .data: Some
-                        RecordData::Merge
-                            Expr::Object
-                                Object
-                                    .entries: Some
-                                        -ObjectEntry
-                                            .key: "a"
-                                            .value: Expr::Integer
-                                                +1
+                    RecordData::Merge
+                        Expr::Object
+                            Object
+                                .entries: Some
+                                    -ObjectEntry
+                                        .key: "a"
+                                        .value: Expr::Integer
+                                            +1
                     .version: None
                     .timeout: None
         -TopLevelExpr::Expr
             Expr::Create
                 Create
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .data: Some
-                        RecordData::Replace
-                            Expr::Object
-                                Object
-                                    .entries: Some
-                                        -ObjectEntry
-                                            .key: "a"
-                                            .value: Expr::Integer
-                                                +1
+                    RecordData::Replace
+                        Expr::Object
+                            Object
+                                .entries: Some
+                                    -ObjectEntry
+                                        .key: "a"
+                                        .value: Expr::Integer
+                                            +1
                     .version: None
                     .timeout: None
         -TopLevelExpr::Expr
             Expr::Create
                 Create
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .data: Some
-                        RecordData::Replace
-                            Expr::Object
-                                Object
-                                    .entries: Some
-                                        -ObjectEntry
-                                            .key: "a"
-                                            .value: Expr::Integer
-                                                +1
+                    RecordData::Replace
+                        Expr::Object
+                            Object
+                                .entries: Some
+                                    -ObjectEntry
+                                        .key: "a"
+                                        .value: Expr::Integer
+                                            +1
                     .version: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .timeout: None
         -TopLevelExpr::Expr
             Expr::Create
                 Create
                     .only: true
-                    .targets: -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "a"
-                            .parts: None
-                    -Expr::Path
-                        Path
-                            .start: Ident
-                                .text: "b"
-                            .parts: None
+                    .targets: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .data: Some
-                        RecordData::Replace
-                            Expr::Object
-                                Object
-                                    .entries: Some
-                                        -ObjectEntry
-                                            .key: "a"
-                                            .value: Expr::Integer
-                                                +1
+                    RecordData::Replace
+                        Expr::Object
+                            Object
+                                .entries: Some
+                                    -ObjectEntry
+                                        .key: "a"
+                                        .value: Expr::Integer
+                                            +1
                     .version: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
                     .timeout: Some
-                        Expr::Integer
-                            +1
+                    Expr::Integer
+                        +1
 */
