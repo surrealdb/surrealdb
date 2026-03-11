@@ -1,9 +1,11 @@
 #![cfg(test)]
 
+use std::io::Write;
 use std::path::Path;
 use std::{env, fmt};
 
 use ast::Query;
+use common::source_error;
 
 use crate::Config;
 
@@ -113,5 +115,52 @@ fn text_test() {
 		panic!(
 			"Not all tests successfull.\nSet environment variable `RESULT` to:\n - `OVERWRITE` to overwrite the result of all tests.\n - `ACCEPT` to accept results for tests which do not have a result currently"
 		);
+	}
+}
+
+#[test]
+fn all_language_tests() {
+	let mut failed = 0;
+	let tests_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+		.join("..")
+		.join("..")
+		.join("language-tests")
+		.join("tests");
+	walk_dir(&tests_path, &mut |path| {
+		let source = std::fs::read_to_string(path).unwrap();
+		if source.contains("parsing-error") {
+			return;
+		}
+
+		let res = crate::Parser::enter_parse::<Query>(
+			&source,
+			Config {
+				depth_limit: 1000,
+				generate_warnings: true,
+				feature_bearer_access: true,
+				feature_surrealism: true,
+			},
+		);
+
+		match res {
+			Ok(_) => {}
+			Err(e) => {
+				eprintln!(
+					"Language test `{}` failed to parse",
+					path.strip_prefix(&tests_path).unwrap().display()
+				);
+				let mut buf = Vec::new();
+				e.render_char_buffer().write_styled(&mut buf).unwrap();
+				let s = String::from_utf8(buf).unwrap();
+				eprintln!("{s}");
+
+				failed += 1;
+			}
+		}
+	});
+
+	if failed != 0 {
+		eprintln!("\nFailed {failed} tests.");
+		panic!("Did not parse all the tests correctly");
 	}
 }

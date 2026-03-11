@@ -358,6 +358,9 @@ macro_rules! T {
 	(FOR) => {
 		$crate::BaseTokenKind::KwFor
 	};
+	(FORMAT) => {
+		$crate::BaseTokenKind::KwFormat
+	};
 	(FROM) => {
 		$crate::BaseTokenKind::KwFrom
 	};
@@ -682,6 +685,9 @@ macro_rules! T {
 	(TERMS_ORDER) => {
 		$crate::BaseTokenKind::KwTermsOrder
 	};
+	(TEXT) => {
+		$crate::BaseTokenKind::KwText
+	};
 	(THEN) => {
 		$crate::BaseTokenKind::KwThen
 	};
@@ -771,6 +777,9 @@ macro_rules! T {
 	};
 	(INTERSECTS) => {
 		$crate::BaseTokenKind::KwIntersects
+	};
+	(JSON) => {
+		$crate::BaseTokenKind::KwJson
 	};
 	(NONEINSIDE) => {
 		$crate::BaseTokenKind::KwNoneInside

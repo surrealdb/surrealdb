@@ -639,79 +639,29 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				}
 			}
 		}
-		BaseTokenKind::UuidString => {
-			let uuid = parser.parse_sync()?;
-			Ok(Expr::Uuid(uuid))
-		}
-		BaseTokenKind::DateTimeString => {
-			let uuid = parser.parse_sync()?;
-			Ok(Expr::DateTime(uuid))
-		}
-		BaseTokenKind::FileString => {
-			let file = parser.parse_sync()?;
-			Ok(Expr::File(file))
-		}
-		BaseTokenKind::Duration => {
-			let uuid = parser.parse_sync()?;
-			Ok(Expr::Duration(uuid))
-		}
-		T![|] => {
-			let uuid = parser.parse_sync()?;
-			Ok(Expr::Mock(uuid))
-		}
-		T![/] => {
-			let regex = parser.parse_sync()?;
-			Ok(Expr::Regex(regex))
-		}
-		T![FUNCTION] => {
-			let js_function = parser.parse().await?;
-			Ok(Expr::JsFunction(js_function))
-		}
-		T![IF] => {
-			let expr = parser.parse().await?;
-			Ok(Expr::If(expr))
-		}
-		T![LET] => {
-			let expr = parser.parse().await?;
-			Ok(Expr::Let(expr))
-		}
-		T![INFO] => {
-			let expr = parser.parse().await?;
-			Ok(Expr::Info(expr))
-		}
+		BaseTokenKind::UuidString => Ok(Expr::Uuid(parser.parse_sync()?)),
+		BaseTokenKind::DateTimeString => Ok(Expr::DateTime(parser.parse_sync()?)),
+		BaseTokenKind::FileString => Ok(Expr::File(parser.parse_sync()?)),
+		BaseTokenKind::Duration => Ok(Expr::Duration(parser.parse_sync()?)),
+		T![|] => Ok(Expr::Mock(parser.parse_sync()?)),
+		T![/] => Ok(Expr::Regex(parser.parse_sync()?)),
+		T![FUNCTION] => Ok(Expr::JsFunction(parser.parse().await?)),
+		T![IF] => Ok(Expr::If(parser.parse().await?)),
+		T![LET] => Ok(Expr::Let(parser.parse().await?)),
+		T![RETURN] => Ok(Expr::Return(parser.parse().await?)),
+		T![INFO] => Ok(Expr::Info(parser.parse().await?)),
 		T![THROW] => {
 			let _ = parser.next();
 			let expr = parser.parse_enter().await?;
 			Ok(Expr::Throw(expr))
 		}
-		T![DELETE] => {
-			let expr = parser.parse().await?;
-			Ok(Expr::Delete(expr))
-		}
-		T![CREATE] => {
-			let expr = parser.parse().await?;
-			Ok(Expr::Create(expr))
-		}
-		T![UPDATE] => {
-			let expr = parser.parse().await?;
-			Ok(Expr::Update(expr))
-		}
-		T![UPSERT] => {
-			let expr = parser.parse().await?;
-			Ok(Expr::Upsert(expr))
-		}
-		T![RELATE] => {
-			let expr = parser.parse().await?;
-			Ok(Expr::Relate(expr))
-		}
-		T![SELECT] => {
-			let expr = parser.parse().await?;
-			Ok(Expr::Select(expr))
-		}
-		T![INSERT] => {
-			let expr = parser.parse().await?;
-			Ok(Expr::Insert(expr))
-		}
+		T![DELETE] => Ok(Expr::Delete(parser.parse().await?)),
+		T![CREATE] => Ok(Expr::Create(parser.parse().await?)),
+		T![UPDATE] => Ok(Expr::Update(parser.parse().await?)),
+		T![UPSERT] => Ok(Expr::Upsert(parser.parse().await?)),
+		T![RELATE] => Ok(Expr::Relate(parser.parse().await?)),
+		T![SELECT] => Ok(Expr::Select(parser.parse().await?)),
+		T![INSERT] => Ok(Expr::Insert(parser.parse().await?)),
 		T![DEFINE] => {
 			let expected = "a resource type to define";
 			let Some(peek) = parser.peek1()? else {
@@ -785,6 +735,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				}
 			}
 		}
+		T![EXPLAIN] => Ok(Expr::Explain(parser.parse().await?)),
 		BaseTokenKind::Param => {
 			let path = parser.parse_sync()?;
 			Ok(Expr::Param(path))

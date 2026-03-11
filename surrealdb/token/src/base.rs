@@ -315,6 +315,8 @@ pub enum BaseTokenKind {
 	KwFlexible,
 	#[regex(r"(?i)FOR")]
 	KwFor,
+	#[regex(r"(?i)FORMAT")]
+	KwFormat,
 	#[regex(r"(?i)FROM")]
 	KwFrom,
 	#[regex(r"(?i)FULL")]
@@ -536,6 +538,8 @@ pub enum BaseTokenKind {
 	KwTermsCache,
 	#[regex(r"(?i)TERMS_ORDER")]
 	KwTermsOrder,
+	#[regex(r"(?i)TEXT")]
+	KwText,
 	#[regex(r"(?i)THEN")]
 	KwThen,
 	#[regex(r"(?i)THROW")]
@@ -598,6 +602,8 @@ pub enum BaseTokenKind {
 	KwInside,
 	#[regex(r"(?i)INTERSECTS")]
 	KwIntersects,
+	#[regex(r"(?i)JSON")]
+	KwJson,
 	#[regex(r"(?i)NONEINSIDE")]
 	KwNoneInside,
 	#[regex(r"(?i)NOTINSIDE")]
@@ -935,6 +941,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwFilters => "keyword `FILTERS`",
 			BaseTokenKind::KwFlexible => "keyword `FLEXIBLE`",
 			BaseTokenKind::KwFor => "keyword `FOR`",
+			BaseTokenKind::KwFormat => "keyword `FORMAT`",
 			BaseTokenKind::KwFrom => "keyword `FROM`",
 			BaseTokenKind::KwFull => "keyword `FULL`",
 			BaseTokenKind::KwFulltext => "keyword `FULLTEXT`",
@@ -1043,6 +1050,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwTempFiles => "keyword `TEMPFILES`",
 			BaseTokenKind::KwTermsCache => "keyword `TERMSCACHE`",
 			BaseTokenKind::KwTermsOrder => "keyword `TERMSORDER`",
+			BaseTokenKind::KwText => "keyword `TEXT`",
 			BaseTokenKind::KwThen => "keyword `THEN`",
 			BaseTokenKind::KwThrow => "keyword `THROW`",
 			BaseTokenKind::KwTimeout => "keyword `TIMEOUT`",
@@ -1073,6 +1081,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwAnyInside => "keyword `ANYINSIDE`",
 			BaseTokenKind::KwInside => "keyword `INSIDE`",
 			BaseTokenKind::KwIntersects => "keyword `INTERSECTS`",
+			BaseTokenKind::KwJson => "keyword `JSON`",
 			BaseTokenKind::KwNoneInside => "keyword `NONEINSIDE`",
 			BaseTokenKind::KwNotInside => "keyword `NOTINSIDE`",
 			BaseTokenKind::KwOrKw => "keyword `ORKW`",
@@ -1168,273 +1177,298 @@ impl BaseTokenKind {
 		matches!(
 			self,
 			Self::Ident
-				| Self::KwAccess
-				| Self::KwAfter
-				| Self::KwAlgorithm
-				| Self::KwAll
-				| Self::KwAlter
-				| Self::KwAlways
-				| Self::KwAnalyze
-				| Self::KwAnalyzer
-				| Self::KwApi
-				| Self::KwAs | Self::KwAscending
-				| Self::KwAscii
-				| Self::KwAssert
-				| Self::KwAt | Self::KwAuthenticate
-				| Self::KwAuto
-				| Self::KwBackend
-				| Self::KwBatch
-				| Self::KwBearer
-				| Self::KwBefore
-				| Self::KwBegin
-				| Self::KwBlank
-				| Self::KwBm25
-				| Self::KwBreak
-				| Self::KwBucket
-				| Self::KwBy | Self::KwCamel
-				| Self::KwCancel
-				| Self::KwCascade
-				| Self::KwChangeFeed
-				| Self::KwChanges
-				| Self::KwCapacity
-				| Self::KwClass
-				| Self::KwComment
-				| Self::KwCommit
-				| Self::KwConcurrently
-				| Self::KwConfig
-				| Self::KwContent
-				| Self::KwContinue
-				| Self::KwCompact
-				| Self::KwComputed
-				| Self::KwCreate
-				| Self::KwDatabase
-				| Self::KwDefault
-				| Self::KwDefine
-				| Self::KwDelete
-				| Self::KwDescending
-				| Self::KwDiff
-				| Self::KwDimension
-				| Self::KwDistance
-				| Self::KwDocIdsCache
-				| Self::KwDocIdsOrder
-				| Self::KwDocLengthsCache
-				| Self::KwDocLengthsOrder
-				| Self::KwDrop
-				| Self::KwDuplicate
-				| Self::KwEdgengram
-				| Self::KwEfc
-				| Self::KwEvent
-				| Self::KwElse
-				| Self::KwEnd
-				| Self::KwEnforced
-				| Self::KwExclude
-				| Self::KwExists
-				| Self::KwExpired
-				| Self::KwExplain
-				| Self::KwExpunge
-				| Self::KwExtendCandidates
-				| Self::KwFalse
-				| Self::KwFetch
-				| Self::KwField
-				| Self::KwFields
-				| Self::KwFilters
-				| Self::KwFlexible
-				| Self::KwFor
-				| Self::KwFrom
-				| Self::KwFull
-				| Self::KwFulltext
-				| Self::KwFunction
-				| Self::KwFunctions
-				| Self::KwGrant
-				| Self::KwGraphql
-				| Self::KwGroup
-				| Self::KwHeaders
-				| Self::KwHighlights
-				| Self::KwHnsw
-				| Self::KwIgnore
-				| Self::KwInclude
-				| Self::KwIndex
-				| Self::KwInfo
-				| Self::KwInsert
-				| Self::KwInto
-				| Self::KwIf | Self::KwIs
-				| Self::KwIssuer
-				| Self::KwJwt
-				| Self::KwJwks
-				| Self::KwKey
-				| Self::KwKeepPrunedConnections
-				| Self::KwKill
-				| Self::KwLet
-				| Self::KwLimit
-				| Self::KwLive
-				| Self::KwLowercase
-				| Self::KwLm | Self::KwM
-				| Self::KwM0 | Self::KwMapper
-				| Self::KwMiddleware
-				| Self::KwML | Self::KwMerge
-				| Self::KwModel
-				| Self::KwMTree
-				| Self::KwMTreeCache
-				| Self::KwNamespace
-				| Self::KwNgram
-				| Self::KwNo | Self::KwNoIndex
-				| Self::KwNone
-				| Self::KwNull
-				| Self::KwNumeric
-				| Self::KwOmit
-				| Self::KwOn | Self::KwOnly
-				| Self::KwOption
-				| Self::KwOrder
-				| Self::KwOriginal
-				| Self::KwOverwrite
-				| Self::KwParallel
-				| Self::KwKwParam
-				| Self::KwPasshash
-				| Self::KwPassword
-				| Self::KwPatch
-				| Self::KwPermissions
-				| Self::KwPostingsCache
-				| Self::KwPostingsOrder
-				| Self::KwPrepare
-				| Self::KwPunct
-				| Self::KwPurge
-				| Self::KwRange
-				| Self::KwReadonly
-				| Self::KwReject
-				| Self::KwRelate
-				| Self::KwRelation
-				| Self::KwRebuild
-				| Self::KwReference
-				| Self::KwRefresh
-				| Self::KwRemove
-				| Self::KwReplace
-				| Self::KwReturn
-				| Self::KwRevoke
-				| Self::KwRevoked
-				| Self::KwRoles
-				| Self::KwRoot
-				| Self::KwSchemafull
-				| Self::KwSchemaless
-				| Self::KwScope
-				| Self::KwSearch
-				| Self::KwSelect
-				| Self::KwSequence
-				| Self::KwSession
-				| Self::KwSet
-				| Self::KwShow
-				| Self::KwSignin
-				| Self::KwSignup
-				| Self::KwSince
-				| Self::KwSleep
-				| Self::KwSnowball
-				| Self::KwSplit
-				| Self::KwStart
-				| Self::KwStructure
-				| Self::KwSystem
-				| Self::KwTable
-				| Self::KwTables
-				| Self::KwTempFiles
-				| Self::KwTermsCache
-				| Self::KwTermsOrder
-				| Self::KwThen
-				| Self::KwThrow
-				| Self::KwTimeout
-				| Self::KwTo | Self::KwTokenizers
-				| Self::KwToken
-				| Self::KwTransaction
-				| Self::KwTrue
-				| Self::KwType
-				| Self::KwUnique
-				| Self::KwUnset
-				| Self::KwUpdate
-				| Self::KwUpsert
-				| Self::KwUppercase
-				| Self::KwUrl
-				| Self::KwUse
-				| Self::KwUser
-				| Self::KwValue
-				| Self::KwValues
-				| Self::KwVersion
-				| Self::KwVs | Self::KwWhen
-				| Self::KwWhere
-				| Self::KwWith
-				| Self::KwAllInside
-				| Self::KwAndKw
-				| Self::KwAnyInside
-				| Self::KwInside
-				| Self::KwIntersects
-				| Self::KwNoneInside
-				| Self::KwNotInside
-				| Self::KwOrKw
-				| Self::KwOutside
-				| Self::KwNot
-				| Self::KwAnd
-				| Self::KwCollate
-				| Self::KwContainsAll
-				| Self::KwContainsAny
-				| Self::KwContainsNone
-				| Self::KwContainsNot
-				| Self::KwContains
-				| Self::KwIn | Self::KwOut
-				| Self::KwNormal
-				| Self::KwAny
-				| Self::KwArray
-				| Self::KwGeometry
-				| Self::KwRecord
-				| Self::KwBool
-				| Self::KwBytes
-				| Self::KwDatetime
-				| Self::KwDecimal
-				| Self::KwDuration
-				| Self::KwFloat
-				| Self::KwInt
-				| Self::KwNumber
-				| Self::KwObject
-				| Self::KwRegex
-				| Self::KwString
-				| Self::KwUuid
-				| Self::KwUlid
-				| Self::KwRand
-				| Self::KwReferences
-				| Self::KwFeature
-				| Self::KwLine
-				| Self::KwPoint
-				| Self::KwPolygon
-				| Self::KwMultiPoint
-				| Self::KwMultiLine
-				| Self::KwMultiPolygon
-				| Self::KwCollection
-				| Self::KwFile
-				| Self::KwEdDSA
-				| Self::KwEs256
-				| Self::KwEs384
-				| Self::KwEs512
-				| Self::KwHs256
-				| Self::KwHs384
-				| Self::KwHs512
-				| Self::KwPs256
-				| Self::KwPs384
-				| Self::KwPs512
-				| Self::KwRs256
-				| Self::KwRs384
-				| Self::KwRs512
-				| Self::KwChebyshev
-				| Self::KwCosine
-				| Self::KwEuclidean
-				| Self::KwJaccard
-				| Self::KwHamming
-				| Self::KwManhattan
-				| Self::KwMinkowski
-				| Self::KwPearson
-				| Self::KwF64
-				| Self::KwF32
-				| Self::KwI64
-				| Self::KwI32
-				| Self::KwI16
-				| Self::KwGet
-				| Self::KwPost
-				| Self::KwPut
-				| Self::KwTrace
+				| BaseTokenKind::KwAfter
+				| BaseTokenKind::KwAlgorithm
+				| BaseTokenKind::KwAll
+				| BaseTokenKind::KwAlter
+				| BaseTokenKind::KwAlways
+				| BaseTokenKind::KwAnalyze
+				| BaseTokenKind::KwAnalyzer
+				| BaseTokenKind::KwApi
+				| BaseTokenKind::KwAs
+				| BaseTokenKind::KwAscending
+				| BaseTokenKind::KwAscii
+				| BaseTokenKind::KwAssert
+				| BaseTokenKind::KwAt
+				| BaseTokenKind::KwAuthenticate
+				| BaseTokenKind::KwAuto
+				| BaseTokenKind::KwAsync
+				| BaseTokenKind::KwBackend
+				| BaseTokenKind::KwBatch
+				| BaseTokenKind::KwBearer
+				| BaseTokenKind::KwBefore
+				| BaseTokenKind::KwBegin
+				| BaseTokenKind::KwBlank
+				| BaseTokenKind::KwBm25
+				| BaseTokenKind::KwBreak
+				| BaseTokenKind::KwBucket
+				| BaseTokenKind::KwBy
+				| BaseTokenKind::KwCamel
+				| BaseTokenKind::KwCancel
+				| BaseTokenKind::KwCascade
+				| BaseTokenKind::KwChangeFeed
+				| BaseTokenKind::KwChanges
+				| BaseTokenKind::KwCapacity
+				| BaseTokenKind::KwClass
+				| BaseTokenKind::KwComment
+				| BaseTokenKind::KwCommit
+				| BaseTokenKind::KwCompact
+				| BaseTokenKind::KwComplexity
+				| BaseTokenKind::KwComputed
+				| BaseTokenKind::KwConcurrently
+				| BaseTokenKind::KwConfig
+				| BaseTokenKind::KwContent
+				| BaseTokenKind::KwContinue
+				| BaseTokenKind::KwCount
+				| BaseTokenKind::KwCreate
+				| BaseTokenKind::KwDatabase
+				| BaseTokenKind::KwDefault
+				| BaseTokenKind::KwDefine
+				| BaseTokenKind::KwDelete
+				| BaseTokenKind::KwDepth
+				| BaseTokenKind::KwDescending
+				| BaseTokenKind::KwDiff
+				| BaseTokenKind::KwDimension
+				| BaseTokenKind::KwDistance
+				| BaseTokenKind::KwDocIdsCache
+				| BaseTokenKind::KwDocIdsOrder
+				| BaseTokenKind::KwDocLengthsCache
+				| BaseTokenKind::KwDocLengthsOrder
+				| BaseTokenKind::KwDrop
+				| BaseTokenKind::KwDuplicate
+				| BaseTokenKind::KwEdgengram
+				| BaseTokenKind::KwEfc
+				| BaseTokenKind::KwEvent
+				| BaseTokenKind::KwElse
+				| BaseTokenKind::KwEnd
+				| BaseTokenKind::KwEnforced
+				| BaseTokenKind::KwExclude
+				| BaseTokenKind::KwExists
+				| BaseTokenKind::KwExpired
+				| BaseTokenKind::KwExplain
+				| BaseTokenKind::KwExpunge
+				| BaseTokenKind::KwExtendCandidates
+				| BaseTokenKind::KwFalse
+				| BaseTokenKind::KwFetch
+				| BaseTokenKind::KwField
+				| BaseTokenKind::KwFields
+				| BaseTokenKind::KwFilters
+				| BaseTokenKind::KwFlexible
+				| BaseTokenKind::KwFor
+				| BaseTokenKind::KwFormat
+				| BaseTokenKind::KwFrom
+				| BaseTokenKind::KwFull
+				| BaseTokenKind::KwFulltext
+				| BaseTokenKind::KwFunction
+				| BaseTokenKind::KwFunctions
+				| BaseTokenKind::KwGrant
+				| BaseTokenKind::KwGraphql
+				| BaseTokenKind::KwGroup
+				| BaseTokenKind::KwHashedVector
+				| BaseTokenKind::KwHeaders
+				| BaseTokenKind::KwHighlights
+				| BaseTokenKind::KwHnsw
+				| BaseTokenKind::KwIgnore
+				| BaseTokenKind::KwInclude
+				| BaseTokenKind::KwIndex
+				| BaseTokenKind::KwInfo
+				| BaseTokenKind::KwInsert
+				| BaseTokenKind::KwInto
+				| BaseTokenKind::KwIntrospection
+				| BaseTokenKind::KwIf
+				| BaseTokenKind::KwIs
+				| BaseTokenKind::KwIssuer
+				| BaseTokenKind::KwJwt
+				| BaseTokenKind::KwJwks
+				| BaseTokenKind::KwKey
+				| BaseTokenKind::KwKeepPrunedConnections
+				| BaseTokenKind::KwKill
+				| BaseTokenKind::KwLet
+				| BaseTokenKind::KwLimit
+				| BaseTokenKind::KwLive
+				| BaseTokenKind::KwLowercase
+				| BaseTokenKind::KwLm
+				| BaseTokenKind::KwM
+				| BaseTokenKind::KwM0
+				| BaseTokenKind::KwMapper
+				| BaseTokenKind::KwMaxdepth
+				| BaseTokenKind::KwMiddleware
+				| BaseTokenKind::KwML
+				| BaseTokenKind::KwMerge
+				| BaseTokenKind::KwModel
+				| BaseTokenKind::KwModule
+				| BaseTokenKind::KwMTree
+				| BaseTokenKind::KwMTreeCache
+				| BaseTokenKind::KwNamespace
+				| BaseTokenKind::KwNgram
+				| BaseTokenKind::KwNo
+				| BaseTokenKind::KwNoIndex
+				| BaseTokenKind::KwNone
+				| BaseTokenKind::KwNull
+				| BaseTokenKind::KwNumeric
+				| BaseTokenKind::KwOmit
+				| BaseTokenKind::KwOn
+				| BaseTokenKind::KwOnly
+				| BaseTokenKind::KwOption
+				| BaseTokenKind::KwOrder
+				| BaseTokenKind::KwOriginal
+				| BaseTokenKind::KwOverwrite
+				| BaseTokenKind::KwParallel
+				| BaseTokenKind::KwKwParam
+				| BaseTokenKind::KwPasshash
+				| BaseTokenKind::KwPassword
+				| BaseTokenKind::KwPatch
+				| BaseTokenKind::KwPermissions
+				| BaseTokenKind::KwPostingsCache
+				| BaseTokenKind::KwPostingsOrder
+				| BaseTokenKind::KwPrepare
+				| BaseTokenKind::KwPunct
+				| BaseTokenKind::KwPurge
+				| BaseTokenKind::KwRange
+				| BaseTokenKind::KwReadonly
+				| BaseTokenKind::KwReject
+				| BaseTokenKind::KwRelate
+				| BaseTokenKind::KwRelation
+				| BaseTokenKind::KwRebuild
+				| BaseTokenKind::KwReference
+				| BaseTokenKind::KwRefresh
+				| BaseTokenKind::KwRemove
+				| BaseTokenKind::KwReplace
+				| BaseTokenKind::KwRetry
+				| BaseTokenKind::KwReturn
+				| BaseTokenKind::KwRevoke
+				| BaseTokenKind::KwRevoked
+				| BaseTokenKind::KwRoles
+				| BaseTokenKind::KwRoot
+				| BaseTokenKind::KwSchemafull
+				| BaseTokenKind::KwSchemaless
+				| BaseTokenKind::KwScope
+				| BaseTokenKind::KwSearch
+				| BaseTokenKind::KwSelect
+				| BaseTokenKind::KwSequence
+				| BaseTokenKind::KwSession
+				| BaseTokenKind::KwSet
+				| BaseTokenKind::KwShow
+				| BaseTokenKind::KwSignin
+				| BaseTokenKind::KwSignup
+				| BaseTokenKind::KwSince
+				| BaseTokenKind::KwSleep
+				| BaseTokenKind::KwSnowball
+				| BaseTokenKind::KwSplit
+				| BaseTokenKind::KwStart
+				| BaseTokenKind::KwStrict
+				| BaseTokenKind::KwStructure
+				| BaseTokenKind::KwSystem
+				| BaseTokenKind::KwTable
+				| BaseTokenKind::KwTables
+				| BaseTokenKind::KwTempFiles
+				| BaseTokenKind::KwTermsCache
+				| BaseTokenKind::KwTermsOrder
+				| BaseTokenKind::KwText
+				| BaseTokenKind::KwThen
+				| BaseTokenKind::KwThrow
+				| BaseTokenKind::KwTimeout
+				| BaseTokenKind::KwTo
+				| BaseTokenKind::KwTokenizers
+				| BaseTokenKind::KwToken
+				| BaseTokenKind::KwTransaction
+				| BaseTokenKind::KwQueryTimeout
+				| BaseTokenKind::KwTrue
+				| BaseTokenKind::KwType
+				| BaseTokenKind::KwUnique
+				| BaseTokenKind::KwUnset
+				| BaseTokenKind::KwUpdate
+				| BaseTokenKind::KwUpsert
+				| BaseTokenKind::KwUppercase
+				| BaseTokenKind::KwUrl
+				| BaseTokenKind::KwUse
+				| BaseTokenKind::KwUser
+				| BaseTokenKind::KwValue
+				| BaseTokenKind::KwValues
+				| BaseTokenKind::KwVersion
+				| BaseTokenKind::KwVs
+				| BaseTokenKind::KwWhen
+				| BaseTokenKind::KwWhere
+				| BaseTokenKind::KwWith
+				| BaseTokenKind::KwAllInside
+				| BaseTokenKind::KwAndKw
+				| BaseTokenKind::KwAnyInside
+				| BaseTokenKind::KwInside
+				| BaseTokenKind::KwIntersects
+				| BaseTokenKind::KwJson
+				| BaseTokenKind::KwNoneInside
+				| BaseTokenKind::KwNotInside
+				| BaseTokenKind::KwOrKw
+				| BaseTokenKind::KwOutside
+				| BaseTokenKind::KwNot
+				| BaseTokenKind::KwAnd
+				| BaseTokenKind::KwCollate
+				| BaseTokenKind::KwContainsAll
+				| BaseTokenKind::KwContainsAny
+				| BaseTokenKind::KwContainsNone
+				| BaseTokenKind::KwContainsNot
+				| BaseTokenKind::KwContains
+				| BaseTokenKind::KwIn
+				| BaseTokenKind::KwOut
+				| BaseTokenKind::KwNormal
+				| BaseTokenKind::KwAny
+				| BaseTokenKind::KwArray
+				| BaseTokenKind::KwGeometry
+				| BaseTokenKind::KwRecord
+				| BaseTokenKind::KwBool
+				| BaseTokenKind::KwBytes
+				| BaseTokenKind::KwDatetime
+				| BaseTokenKind::KwDecimal
+				| BaseTokenKind::KwDuration
+				| BaseTokenKind::KwFloat
+				| BaseTokenKind::KwInt
+				| BaseTokenKind::KwNumber
+				| BaseTokenKind::KwObject
+				| BaseTokenKind::KwRegex
+				| BaseTokenKind::KwString
+				| BaseTokenKind::KwUuid
+				| BaseTokenKind::KwUlid
+				| BaseTokenKind::KwRand
+				| BaseTokenKind::KwReferences
+				| BaseTokenKind::KwFeature
+				| BaseTokenKind::KwLine
+				| BaseTokenKind::KwPoint
+				| BaseTokenKind::KwPolygon
+				| BaseTokenKind::KwMultiPoint
+				| BaseTokenKind::KwMultiLine
+				| BaseTokenKind::KwMultiPolygon
+				| BaseTokenKind::KwCollection
+				| BaseTokenKind::KwFile
+				| BaseTokenKind::KwEdDSA
+				| BaseTokenKind::KwEs256
+				| BaseTokenKind::KwEs384
+				| BaseTokenKind::KwEs512
+				| BaseTokenKind::KwHs256
+				| BaseTokenKind::KwHs384
+				| BaseTokenKind::KwHs512
+				| BaseTokenKind::KwPs256
+				| BaseTokenKind::KwPs384
+				| BaseTokenKind::KwPs512
+				| BaseTokenKind::KwRs256
+				| BaseTokenKind::KwRs384
+				| BaseTokenKind::KwRs512
+				| BaseTokenKind::KwChebyshev
+				| BaseTokenKind::KwCosine
+				| BaseTokenKind::KwEuclidean
+				| BaseTokenKind::KwJaccard
+				| BaseTokenKind::KwHamming
+				| BaseTokenKind::KwManhattan
+				| BaseTokenKind::KwMinkowski
+				| BaseTokenKind::KwPearson
+				| BaseTokenKind::KwF64
+				| BaseTokenKind::KwF32
+				| BaseTokenKind::KwI64
+				| BaseTokenKind::KwI32
+				| BaseTokenKind::KwI16
+				| BaseTokenKind::KwGet
+				| BaseTokenKind::KwPost
+				| BaseTokenKind::KwPut
+				| BaseTokenKind::KwTrace
 		)
 	}
 }

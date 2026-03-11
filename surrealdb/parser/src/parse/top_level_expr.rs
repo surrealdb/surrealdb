@@ -338,6 +338,7 @@ impl ParseSync for ast::OptionStmt {
 			T![false] => false,
 			_ => return Err(parser.unexpected("either `true` or `false`")),
 		};
+		let _ = parser.next();
 
 		let span = start.extend(value_token.span);
 

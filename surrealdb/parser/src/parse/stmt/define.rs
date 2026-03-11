@@ -2167,6 +2167,8 @@ impl Parse for ast::DefineAccess {
 							}
 							_ => return Err(parser.unexpected(expect)),
 						}
+
+						let _ = parser.eat(T![,])?;
 						if parser.eat(T![FOR])?.is_none() {
 							break;
 						}

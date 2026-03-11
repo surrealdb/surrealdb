@@ -49,6 +49,7 @@ library! {
 
 		if_stmt: Vec<If>,
 		let_stmt: Vec<Let>,
+		return_stmt: Vec<Return>,
 		info_stmt: Vec<Info>,
 		show_stmt: Vec<Show>,
 		create_stmt: Vec<Create>,
@@ -71,6 +72,7 @@ library! {
 		define_bucket: Vec<DefineBucket>,
 		define_sequence: Vec<DefineSequence>,
 		define_config: Vec<DefineConfig>,
+		define_user: Vec<DefineUser>,
 		define_access: Vec<DefineAccess>,
 
 		remove_ns_stmt: Vec<RemoveNamespace>,
@@ -85,12 +87,16 @@ library! {
 		remove_bucket: Vec<RemoveBucket>,
 		remove_sequence: Vec<RemoveSequence>,
 		remove_access: Vec<RemoveAccess>,
+		remove_analyzer: Vec<RemoveAnalyzer>,
+		remove_api: Vec<RemoveApi>,
 
 		alter_system: Vec<AlterSystem>,
 		alter_ns_stmt: Vec<AlterNamespace>,
 		alter_db_stmt: Vec<AlterDatabase>,
 		alter_table_stmt: Vec<AlterTable>,
 		alter_index_stmt: Vec<AlterIndex>,
+
+		explain_stmt: Vec<Explain>,
 
 		filter: Vec<Filter>,
 		filters: Vec<NodeList<Filter>>,
@@ -271,8 +277,14 @@ ast_type! {
 	pub struct Let{
 		pub param: NodeId<Param>,
 		pub ty: Option<NodeId<Type>>,
-		// TODO: Kind,
 		pub expr: NodeId<Expr>,
+	}
+}
+
+ast_type! {
+	pub struct Return{
+		pub expr: NodeId<Expr>,
+		pub fetch: Option<NodeListId<Fetch>>,
 	}
 }
 
@@ -328,7 +340,7 @@ ast_type! {
 }
 
 ast_type! {
-	pub enum Explain{
+	pub enum ExplainClause{
 		Base(Span),
 		Full(Span),
 	}
@@ -426,7 +438,7 @@ ast_type! {
 		pub with_index: Option<WithIndex>,
 		pub condition: Option<NodeId<Expr>>,
 		pub timeout: Option<NodeId<Expr>>,
-		pub explain: Option<Explain>,
+		pub explain: Option<ExplainClause>,
 	}
 }
 
@@ -439,7 +451,7 @@ ast_type! {
 		pub condition: Option<NodeId<Expr>>,
 		pub output: Option<NodeId<Output>>,
 		pub timeout: Option<NodeId<Expr>>,
-		pub explain: Option<Explain>,
+		pub explain: Option<ExplainClause>,
 	}
 }
 
@@ -452,7 +464,7 @@ ast_type! {
 		pub condition: Option<NodeId<Expr>>,
 		pub output: Option<NodeId<Output>>,
 		pub timeout: Option<NodeId<Expr>>,
-		pub explain: Option<Explain>,
+		pub explain: Option<ExplainClause>,
 	}
 }
 
@@ -512,7 +524,7 @@ ast_type! {
 		pub timeout: Option<NodeId<Expr>>,
 		pub fetch: Option<NodeListId<Fetch>>,
 		pub tempfiles: bool,
-		pub explain: Option<Explain>,
+		pub explain: Option<ExplainClause>,
 	}
 }
 
@@ -978,6 +990,26 @@ ast_type! {
 	}
 }
 
+ast_type! {
+	pub enum UserSecret{
+		PassHash(NodeId<StringLit>),
+		PassWord(NodeId<StringLit>),
+	}
+}
+
+ast_type! {
+	pub struct DefineUser {
+		pub kind: DefineKind,
+		pub name: NodeId<Expr>,
+		pub base: Base,
+		pub secrect: Option<UserSecret>,
+		pub roles: Option<NodeListId<Ident>>,
+		pub session_duration: Option<NodeId<Expr>>,
+		pub token_duration: Option<NodeId<Expr>>,
+		pub comment: Option<NodeId<Expr>>,
+	}
+}
+
 impl_vis_type! {
 	#[derive(Debug)]
 	pub enum Algorithm{
@@ -1239,6 +1271,22 @@ ast_type! {
 	}
 }
 
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum ExplainFormat{
+		Json,
+		Text,
+	}
+}
+
+ast_type! {
+	pub struct Explain{
+		pub analyze: bool,
+		pub format: Option<ExplainFormat>,
+		pub expr: NodeId<Expr>,
+	}
+}
+
 ast_type! {
 	#[derive(Copy, Clone)]
 	pub enum Expr {
@@ -1282,6 +1330,7 @@ ast_type! {
 		Throw(NodeId<Expr>),
 		If(NodeId<If>),
 		Let(NodeId<Let>),
+		Return(NodeId<Return>),
 		Info(NodeId<Info>),
 		Create(NodeId<Create>),
 		Update(NodeId<Update>),
@@ -1305,6 +1354,7 @@ ast_type! {
 		DefineBucket(NodeId<DefineBucket>),
 		DefineSequence(NodeId<DefineSequence>),
 		DefineConfig(NodeId<DefineConfig>),
+		DefineUser(NodeId<DefineUser>),
 		DefineAccess(NodeId<DefineAccess>),
 
 		RemoveNamespace(NodeId<RemoveNamespace>),
@@ -1327,6 +1377,8 @@ ast_type! {
 		AlterDatabase(NodeId<AlterDatabase>),
 		AlterTable(NodeId<AlterTable>),
 		AlterIndex(NodeId<AlterIndex>),
+
+		Explain(NodeId<Explain>)
 	}
 }
 

@@ -98,6 +98,27 @@ impl Parse for ast::Let {
 	}
 }
 
+impl Parse for ast::Return {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start = parser.expect(T![RETURN])?;
+
+		let expr = parser.parse_enter().await?;
+
+		let fetch = if parser.eat(T![FETCH])?.is_some() {
+			Some(parse_seperated_list(parser, T![,], async |parser| parser.parse().await).await?.1)
+		} else {
+			None
+		};
+
+		let span = parser.span_since(start.span);
+		Ok(ast::Return {
+			expr,
+			fetch,
+			span,
+		})
+	}
+}
+
 impl Parse for ast::Info {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![INFO])?;
@@ -209,12 +230,12 @@ async fn try_parse_with(parser: &mut Parser<'_, '_>) -> ParseResult<Option<WithI
 	}
 }
 
-async fn try_parse_explain(parser: &mut Parser<'_, '_>) -> ParseResult<Option<ast::Explain>> {
+async fn try_parse_explain(parser: &mut Parser<'_, '_>) -> ParseResult<Option<ast::ExplainClause>> {
 	let res = if let Some(explain) = parser.eat(T![EXPLAIN])? {
 		if let Some(full) = parser.eat(T![FULL])? {
-			Some(ast::Explain::Full(explain.span.extend(full.span)))
+			Some(ast::ExplainClause::Full(explain.span.extend(full.span)))
 		} else {
-			Some(ast::Explain::Base(explain.span))
+			Some(ast::ExplainClause::Base(explain.span))
 		}
 	} else {
 		None
@@ -934,6 +955,37 @@ impl Parse for ast::Insert {
 			version,
 			timeout,
 			data,
+		})
+	}
+}
+
+impl Parse for ast::Explain {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start = parser.expect(T![EXPLAIN])?;
+
+		let analyze = parser.eat(T![ANALYZE])?.is_some();
+
+		let format = if parser.eat(T![FORMAT])?.is_some() {
+			let expect = "`JSON` or `TEXT`";
+			let peek = parser.peek_expect(expect)?;
+			let res = match peek.token {
+				T![JSON] => ast::ExplainFormat::Json,
+				T![TEXT] => ast::ExplainFormat::Text,
+				_ => return Err(parser.unexpected(expect)),
+			};
+			Some(res)
+		} else {
+			None
+		};
+
+		let expr = parser.parse_enter().await?;
+
+		let span = parser.span_since(start.span);
+		Ok(ast::Explain {
+			analyze,
+			format,
+			expr,
+			span,
 		})
 	}
 }
