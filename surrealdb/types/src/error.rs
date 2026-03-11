@@ -24,6 +24,7 @@ mod code {
 	pub const QUERY_NOT_EXECUTED: i64 = -32003;
 	pub const QUERY_TIMEDOUT: i64 = -32004;
 	pub const QUERY_CANCELLED: i64 = -32005;
+	pub const QUERY_TRANSACTION_CONFLICT: i64 = -32009;
 	pub const THROWN: i64 = -32006;
 	pub const SERIALIZATION_ERROR: i64 = -32007;
 	pub const DESERIALIZATION_ERROR: i64 = -32008;
@@ -186,6 +187,7 @@ impl Error {
 					..
 				} => code::QUERY_TIMEDOUT,
 				QueryError::Cancelled => code::QUERY_CANCELLED,
+				QueryError::TransactionConflict => code::QUERY_TRANSACTION_CONFLICT,
 			})
 			.unwrap_or(code::INTERNAL_ERROR);
 		Self {
@@ -838,6 +840,9 @@ pub enum QueryError {
 	/// Query was cancelled.
 	#[surreal(skip_content)]
 	Cancelled,
+	/// Transaction conflict; the operation can be retried.
+	#[surreal(skip_content)]
+	TransactionConflict,
 }
 
 /// Already-exists reason for [`ErrorKind::AlreadyExists`] errors.
@@ -884,6 +889,8 @@ pub enum ConnectionError {
 	Uninitialised,
 	/// Connect was called on an instance that is already connected.
 	AlreadyConnected,
+	/// Connection or transport failed (e.g. network error, DNS failure, WebSocket error).
+	ConnectionFailed,
 }
 
 impl fmt::Display for Error {

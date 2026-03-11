@@ -4,12 +4,13 @@
 //! public types-layer error used over RPC and in the SDK.
 
 use surrealdb_types::{
-	AlreadyExistsError, AuthError, ConfigurationError, Error as TypesError, NotAllowedError,
-	NotFoundError, QueryError, SerializationError, ToSql, ValidationError,
+	AlreadyExistsError, AuthError, ConfigurationError, ConnectionError, Error as TypesError,
+	NotAllowedError, NotFoundError, QueryError, SerializationError, ToSql, ValidationError,
 };
 
 use crate::err::Error;
 use crate::iam::Error as IamErrorKind;
+use crate::kvs::Error as KvsError;
 
 /// Converts a core database error into the public wire-friendly error type.
 ///
@@ -275,8 +276,31 @@ pub fn into_types_error(error: Error) -> TypesError {
 		// Thrown
 		Thrown(..) => TypesError::thrown(message),
 
+		// KVS: preserve type information for wire and client retry/UX
+		Kvs(kvs_err) => match kvs_err {
+			KvsError::TransactionConflict(_) => {
+				TypesError::query(message, QueryError::TransactionConflict)
+			}
+			KvsError::ConnectionFailed(_) => {
+				TypesError::connection(message, ConnectionError::ConnectionFailed)
+			}
+			KvsError::TransactionKeyAlreadyExists => TypesError::already_exists(message, None),
+			KvsError::ReadAndDeleteOnly => TypesError::not_allowed(message, None),
+			KvsError::TransactionTooLarge | KvsError::TransactionKeyTooLarge => {
+				TypesError::validation(message, ValidationError::InvalidParams)
+			}
+			KvsError::TransactionFinished
+			| KvsError::TransactionReadonly
+			| KvsError::TransactionConditionNotMet => TypesError::query(message, None),
+			KvsError::UnsupportedVersionedQueries => TypesError::configuration(message, None),
+			KvsError::Datastore(_)
+			| KvsError::Transaction(_)
+			| KvsError::TimestampInvalid(_)
+			| KvsError::Internal(_)
+			| KvsError::CompactionNotSupported => TypesError::internal(message),
+		},
+
 		// Internal and everything else
-		Kvs(..) => TypesError::internal(message),
 		Internal(..) => TypesError::internal(message),
 		Unimplemented(..) => TypesError::internal(message),
 		Io(..) => TypesError::internal(message),
