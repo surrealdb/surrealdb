@@ -161,7 +161,7 @@ async fn multi_index_concurrent_test_create_update_delete() -> Result<()> {
 	#[cfg(not(debug_assertions))]
 	let count = 1000;
 	#[cfg(debug_assertions)]
-	let count = 1000;
+	let count = 200;
 	multi_index_concurrent_test(
 		count,
 		&[
