@@ -1587,8 +1587,9 @@ impl Datastore {
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
 		items: Vec<(Key, Val)>,
-	) -> Result<()> {
+	) -> Result<usize> {
 		let mut seen = HashSet::new();
+		let mut error_count = 0;
 		for (k, _) in items {
 			lh.try_maintain_lease().await?;
 			let ic = IndexCompactionKey::decode_key(&k)?;
@@ -1604,10 +1605,11 @@ impl Datastore {
 			}
 			.await;
 			if let Err(e) = res {
+				error_count += 1;
 				warn!("Index compaction {ikb} fails: {e}");
 			}
 		}
-		Ok(())
+		Ok(error_count)
 	}
 
 	/// Performs the actual compaction of a single index.
