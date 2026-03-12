@@ -1473,6 +1473,11 @@ impl Datastore {
 	/// # Arguments
 	/// * `dbs` - The shared datastore instance, cloned into each compaction task
 	/// * `interval` - The interval between compaction runs, used to calculate the lease duration
+	///
+	/// # Returns
+	/// A tuple `(iterations, errors)` where `iterations` is the number of
+	/// compaction batches processed and `errors` is the total number of
+	/// individual index compaction failures across all batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs))]
 	pub async fn index_compaction(
 		dbs: Arc<Datastore>,
@@ -1543,6 +1548,8 @@ impl Datastore {
 	/// distinct index — and joined afterwards. Duplicate queue entries for
 	/// the same index are deduplicated via a [`HashMap`] so only one task is
 	/// spawned per index. Failures are logged but do not abort the loop.
+	///
+	/// Returns the number of indexes that failed to compact.
 	#[cfg(not(target_family = "wasm"))]
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
@@ -1582,6 +1589,8 @@ impl Datastore {
 	/// for the same index. Failures are logged but do not abort the loop,
 	/// matching the non-wasm behavior so that a single transient failure
 	/// does not prevent other indexes from being compacted.
+	///
+	/// Returns the number of indexes that failed to compact.
 	#[cfg(target_family = "wasm")]
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,

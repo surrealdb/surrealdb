@@ -23,8 +23,10 @@ pub(super) type FilterCache = HashMap<VectorId, Option<(Arc<RecordId>, Arc<Recor
 
 /// Filter that evaluates a `WHERE` condition against documents during KNN search.
 ///
-/// Holds a read lock on [`HnswDocs`] and caches evaluation results to avoid
-/// redundant record lookups and condition evaluations across candidates.
+/// Uses [`HnswDocs`] static methods to look up records directly from the
+/// key-value store (without holding a lock on `HnswDocs`), and caches
+/// evaluation results to avoid redundant record lookups and condition
+/// evaluations across candidates.
 pub(super) struct HnswTruthyDocumentFilter<'a> {
 	/// Query options for condition evaluation.
 	opt: &'a Options,
@@ -144,7 +146,7 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 		}
 	}
 
-	/// Returns the locked HnswDocs and the cache
+	/// Consumes the filter and returns the accumulated result cache.
 	pub(super) fn release(self) -> FilterCache {
 		self.cache
 	}

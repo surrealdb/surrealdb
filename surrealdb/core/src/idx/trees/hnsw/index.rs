@@ -132,8 +132,9 @@ impl HnswIndex {
 	///
 	/// Converts old/new document values into serialized vectors, resolves the
 	/// document identity, and writes a [`VectorPendingUpdate`] to the key-value
-	/// store. This method is lock-free on the HNSW graph itself, only requiring
-	/// a brief read lock on `docs` to check for an existing doc ID.
+	/// store. This method is entirely lock-free: it uses [`HnswDocs::get_doc_id`]
+	/// (a static method) to look up existing doc IDs directly from the
+	/// key-value store without acquiring any lock.
 	pub(crate) async fn index(
 		&self,
 		ctx: &Context,
@@ -178,9 +179,12 @@ impl HnswIndex {
 
 	/// Drains and applies all pending vector updates to the HNSW graph.
 	///
-	/// Streams pending updates from the key-value store, applies each one
-	/// (inserting/removing vectors and updating document mappings), then
-	/// deletes the consumed pending entries. Returns the number of updates applied.
+	/// Creates a local [`HnswDocs`] instance for the duration of the batch,
+	/// streams pending updates from the key-value store, and applies each one
+	/// (inserting/removing vectors and updating document mappings). The
+	/// `HnswDocs` state is persisted once at the end via [`HnswDocs::finish`],
+	/// and the consumed pending entries are deleted. Returns the number of
+	/// updates applied.
 	pub(in crate::idx) async fn index_pendings(&self, ctx: &FrozenContext) -> Result<usize> {
 		let tx = ctx.tx();
 		let rng = self.ikb.new_hp_range()?;
@@ -208,8 +212,9 @@ impl HnswIndex {
 
 	/// Applies a single pending vector update to the HNSW graph.
 	///
-	/// Acquires write locks on both the graph and document mappings to
-	/// remove old vectors, insert new vectors, and update document state.
+	/// Acquires a write lock on the graph to remove old vectors and insert
+	/// new vectors, and updates the provided [`HnswDocs`] instance (passed
+	/// by the caller) to manage document ID allocation and removal.
 	async fn index_pending(
 		&self,
 		ctx: &FrozenContext,
@@ -296,8 +301,7 @@ impl HnswIndex {
 		let result = builder.collect();
 
 		let cache = if let Some(filter) = filter {
-			// If there is a filter, we returns the read-locked HnswDoc
-			// and the record cache
+			// If there is a filter, retrieve the record cache
 			let cache = filter.release();
 			Some(cache)
 		} else {

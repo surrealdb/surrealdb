@@ -49,6 +49,9 @@ impl HnswDocs {
 	}
 
 	/// Looks up the internal doc ID for a given record key, if it exists.
+	///
+	/// This is a static method that reads directly from the key-value store,
+	/// avoiding the need to hold a lock on `HnswDocs`.
 	pub(super) async fn get_doc_id(
 		ikb: &IndexKeyBase,
 		tx: &Transaction,
@@ -85,6 +88,10 @@ impl HnswDocs {
 	}
 
 	/// Retrieves the full record ID for a given internal doc ID.
+	///
+	/// This is a static method that reads directly from the key-value store,
+	/// reconstructing the table name from the [`IndexKeyBase`]. This avoids
+	/// the need to hold a lock on `HnswDocs`.
 	pub(super) async fn get_thing(
 		ikb: &IndexKeyBase,
 		tx: &Transaction,
@@ -123,7 +130,9 @@ impl HnswDocs {
 		}
 	}
 
-	/// Persists the document allocation state if it has been modified.
+	/// Persists the document allocation state if it has been modified,
+	/// then resets the dirty flag so subsequent calls are no-ops until
+	/// the state is modified again.
 	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
 		if self.state_updated {
 			let state_key = self.ikb.new_hd_root_key();

@@ -16,13 +16,13 @@ use crate::idx::trees::hnsw::index::HnswIndex;
 /// so the outer `Arc` provides shared ownership without additional locking.
 pub(crate) type SharedHnswIndex = Arc<HnswIndex>;
 
+pub(crate) type SharedHnswKey = (NamespaceId, DatabaseId, TableId, IndexId);
+
 /// Registry of all active HNSW indexes, keyed by `(NamespaceId, DatabaseId, TableId, IndexId)`.
 ///
 /// Provides shared, concurrent access to HNSW indexes across the system.
 /// Indexes are lazily initialized on first access and cached for subsequent use.
-pub(crate) struct HnswIndexes(
-	Arc<RwLock<HashMap<(NamespaceId, DatabaseId, TableId, IndexId), SharedHnswIndex>>>,
-);
+pub(crate) struct HnswIndexes(Arc<RwLock<HashMap<SharedHnswKey, SharedHnswIndex>>>);
 
 impl Default for HnswIndexes {
 	fn default() -> Self {
