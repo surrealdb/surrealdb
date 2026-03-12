@@ -93,8 +93,8 @@ impl From<surrealmx::Error> for Error {
 			surrealmx::Error::ValNotExpectedValue => Error::TransactionConditionNotMet,
 			surrealmx::Error::TxClosed => Error::TransactionFinished,
 			surrealmx::Error::KeyAlreadyExists => Error::TransactionKeyAlreadyExists,
-			surrealmx::Error::KeyReadConflict => Error::TransactionConflict(e.to_string()),
-			surrealmx::Error::KeyWriteConflict => Error::TransactionConflict(e.to_string()),
+			surrealmx::Error::KeyReadConflict(_) => Error::TransactionConflict(e.to_string()),
+			surrealmx::Error::KeyWriteConflict(_) => Error::TransactionConflict(e.to_string()),
 			_ => Error::Transaction(e.to_string()),
 		}
 	}

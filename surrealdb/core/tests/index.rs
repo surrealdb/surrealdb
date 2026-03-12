@@ -397,7 +397,8 @@ async fn hnsw_concurrent_writes() -> Result<()> {
 /// to be an empty array (`[]`, i.e. `RETURN NONE`).
 ///
 /// Two categories of errors are tolerated and silently retried:
-/// - **Transaction write conflicts** – expected under high concurrency.
+/// - **Transaction write conflicts** – with `user` and `scope` table expected under high
+///   concurrency.
 /// - **Unique-index violations** – expected when multiple tasks race to insert the same key.
 ///
 /// Any other error causes an immediate panic, failing the test.
@@ -420,9 +421,11 @@ where
 			}
 			Err(e) => {
 				let e = e.to_string();
-				if !(e.starts_with("Database index")
-					&& e.contains("already contains")
-					&& e.contains("with record"))
+				if !((e.starts_with("Transaction conflict: Write conflict on key")
+					&& (e.contains("*scope\\0") || e.contains("*user\\0")))
+					|| (e.starts_with("Database index")
+						&& e.contains("already contains")
+						&& e.contains("with record")))
 				{
 					panic!("Failed [{count}] - SQL: {sql} - Error: {e}")
 				}
@@ -454,7 +457,8 @@ async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
 
 	// Step 3: For each session (namespace/database pair), define multiple indexes of different
 	// types on two tables (`user` and `scope`):
-	// - UNIQUE indexes (idx_user_email, idx_scope_name, and a composite idx_scope_kind on kind+name)
+	// - UNIQUE indexes (idx_user_email, idx_scope_name, and a composite idx_scope_kind on
+	//   kind+name)
 	// - A normal (non-unique) index (idx_scope_kind on `kind`)
 	// - COUNT indexes (idx_user_count, idx_scope_count)
 	// - FULLTEXT index with a custom analyzer using BM25 scoring (idx_scope_name_ft)
@@ -472,7 +476,7 @@ async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
 		DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase, ascii, edgengram(1, 10);
 		DEFINE INDEX idx_scope_name_ft ON scope FIELDS name FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
 		DEFINE INDEX idx_scope_kind ON scope FIELDS kind, name UNIQUE;",
-			&session,
+			session,
 			None,
 		)
 		.await?;
@@ -485,7 +489,8 @@ async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
 	let mut tasks = Vec::new();
 
 	for session in &sessions {
-		// Spawn 3 tasks writing `user` records with unique emails (exercises UNIQUE + COUNT indexes).
+		// Spawn 3 tasks writing `user` records with unique emails (exercises UNIQUE + COUNT
+		// indexes).
 		for _ in 0..3 {
 			tasks.push(tokio::spawn(write_loop_until_cancellation(
 				dbs.clone(),

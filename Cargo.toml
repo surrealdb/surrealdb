@@ -71,7 +71,7 @@ revision = { version = "0.17.0", features = [
 ] }
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
 surrealkv = "0.21.0"
-surrealmx = "0.18.0"
+surrealmx = { git = "https://github.com/surrealdb/surrealmx", branch = "emmanuel/report_conflicting_key" }
 web-time = "1.1.0"
 vart = "0.9.3"
 ## Maintained by @Delskayn
