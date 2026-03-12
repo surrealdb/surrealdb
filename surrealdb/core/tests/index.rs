@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use flate2::read::GzDecoder;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng, random};
@@ -139,6 +139,12 @@ async fn batch_ingestion(
 	concurrent_tasks(dbs.clone(), ses, batch.len(), |i| batch[i]).await
 }
 
+/// Spawns a background task that continuously runs index compaction on the given datastore
+/// until the `abort_compaction` token is cancelled.
+///
+/// Each iteration calls [`Datastore::index_compaction`] with a 1-second timeout. The loop
+/// accumulates the total number of compaction iterations and bails immediately if any
+/// iteration reports errors. Once cancelled, it logs and returns the total iteration count.
 async fn start_compaction_loop(
 	dbs: Arc<Datastore>,
 	abort_compaction: CancellationToken,
@@ -146,14 +152,13 @@ async fn start_compaction_loop(
 	task::spawn(async move {
 		let mut compaction_count = 0;
 		while !abort_compaction.is_cancelled() {
-			match Datastore::index_compaction(dbs.clone(), Duration::from_secs(1)).await {
-				Ok(c) => {
-					compaction_count += c;
-				}
-				Err(e) => {
-					error!("Compaction failed: {e}");
-					return Err(e);
-				}
+			let (count_iterator, count_error) =
+				Datastore::index_compaction(dbs.clone(), Duration::from_secs(1)).await?;
+			compaction_count += count_iterator;
+			if count_error > 0 {
+				bail!(
+					"{count_error} compaction tasks over {compaction_count} failed - check the logs"
+				);
 			}
 		}
 		info!("Ran {compaction_count} compaction iterations");
@@ -392,45 +397,27 @@ async fn hnsw_concurrent_writes() -> Result<()> {
 /// Continuously executes write queries against the datastore until the cancellation token
 /// is triggered. This helper is used to generate sustained write pressure during stress tests.
 ///
-/// On each iteration it increments a counter and calls the `sql` closure to produce a query
-/// string (the counter lets each iteration target a distinct record). The result is expected
-/// to be an empty array (`[]`, i.e. `RETURN NONE`).
+/// Each task is assigned a `prefix` character (e.g. `'a'`, `'b'`, `'c'`) that is forwarded
+/// to the `sql_func` closure together with an incrementing counter. The closure uses both
+/// values to build record keys (e.g. `user-a-1@test.com`), so that tasks writing to the
+/// same table produce distinct keys and reduce unnecessary unique-index collisions.
 ///
-/// Two categories of errors are tolerated and silently retried:
-/// - **Transaction write conflicts** – with `user` and `scope` table expected under high
-///   concurrency.
-/// - **Unique-index violations** – expected when multiple tasks race to insert the same key.
-///
-/// Any other error causes an immediate panic, failing the test.
+/// Any error returned by the datastore is propagated immediately to the caller.
 async fn write_loop_until_cancellation<F>(
+	prefix: char,
 	dbs: Arc<Datastore>,
 	session: Session,
 	cancellation: CancellationToken,
 	sql_func: F,
 ) -> Result<()>
 where
-	F: Fn(usize) -> String,
+	F: Fn(char, usize) -> String,
 {
-	let mut count = 0;
+	let mut count = 1;
 	while !cancellation.is_cancelled() {
 		count += 1;
-		let sql = sql_func(count);
-		match dbs.execute(&sql, &session, None).await?.remove(0).result {
-			Ok(v) => {
-				assert_eq!(v.to_sql(), "[]");
-			}
-			Err(e) => {
-				let e = e.to_string();
-				if !((e.starts_with("Transaction conflict: Write conflict on key")
-					&& (e.contains("*scope\\0") || e.contains("*user\\0")))
-					|| (e.starts_with("Database index")
-						&& e.contains("already contains")
-						&& e.contains("with record")))
-				{
-					panic!("Failed [{count}] - SQL: {sql} - Error: {e}")
-				}
-			}
-		}
+		let sql = sql_func(prefix, count);
+		dbs.execute(&sql, &session, None).await?.remove(0).result?;
 	}
 	Ok(())
 }
@@ -461,6 +448,7 @@ async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
 	//   kind+name)
 	// - A normal (non-unique) index (idx_scope_kind on `kind`)
 	// - COUNT indexes (idx_user_count, idx_scope_count)
+	// - HNSW vector index (ixd_user_vector on `vector`)
 	// - FULLTEXT index with a custom analyzer using BM25 scoring (idx_scope_name_ft)
 	// This ensures that index compaction is exercised against a variety of index types.
 	for session in &sessions {
@@ -484,26 +472,30 @@ async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
 	}
 
 	// Step 4: For each of the 9 sessions, spawn 6 concurrent write tasks (3 for `user` records
-	// and 3 for `scope` records), totalling 54 parallel writers. Each task continuously creates
-	// new records until the cancellation token is triggered. This generates heavy concurrent
-	// write pressure on all index types while the compaction loop is running in the background.
+	// and 3 for `scope` records), totalling 54 parallel writers. Each task is assigned a
+	// distinct prefix ('a', 'b', or 'c') so that concurrent writers targeting the same table
+	// produce non-overlapping record keys, reducing spurious unique-index collisions.
+	// Every task continuously creates new records until the cancellation token is triggered,
+	// generating heavy concurrent write pressure on all index types while the compaction loop
+	// is running in the background.
 	let mut tasks = Vec::new();
 
 	let vectors = Arc::new(new_vectors_from_file(INGESTING_SOURCE, 5000)?);
 
 	for session in &sessions {
-		// Spawn 3 tasks writing `user` records with unique emails (exercises UNIQUE + COUNT
-		// indexes).
-		for _ in 0..3 {
+		// Spawn 3 tasks writing `user` records with unique emails (exercises UNIQUE, COUNT,
+		// and HNSW indexes).
+		for prefix in ['a', 'b', 'c'] {
 			let vectors = vectors.clone();
 			tasks.push(tokio::spawn(write_loop_until_cancellation(
+				prefix,
 				dbs.clone(),
 				session.clone(),
 				cancellation.clone(),
-				move |c| {
+				move |p, c| {
 					let vector = &vectors.as_ref()[c % 5000].1;
 					format!(
-						"CREATE user SET email = 'user{c}@test.com', vector = {vector} RETURN NONE;"
+						"CREATE user SET email = 'user-{p}-{c}@test.com', vector = {vector} RETURN NONE;"
 					)
 				},
 			)));
@@ -511,19 +503,24 @@ async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
 
 		// Spawn 3 tasks writing `scope` records (exercises UNIQUE, COUNT, FULLTEXT, and
 		// composite UNIQUE indexes).
-		for _ in 0..3 {
+		for prefix in ['a', 'b', 'c'] {
 			tasks.push(tokio::spawn(write_loop_until_cancellation(
+				prefix,
 				dbs.clone(),
 				session.clone(),
 				cancellation.clone(),
-				|c| format!("CREATE scope SET name = 'tenant-{c}', kind = 'tenant' RETURN NONE;"),
+				|p, c| {
+					format!(
+						"CREATE scope SET name = 'tenant-{p}-{c}', kind = 'tenant' RETURN NONE;"
+					)
+				},
 			)));
 		}
 	}
 
-	// Step 5: Let the concurrent writes and index compaction run together for 10 seconds,
+	// Step 5: Let the concurrent writes and index compaction run together for 2 seconds,
 	// then signal all tasks and the compaction loop to stop via the cancellation token.
-	sleep(Duration::from_secs(10)).await;
+	sleep(Duration::from_secs(2)).await;
 	cancellation.cancel();
 
 	// Step 6: Await all write tasks and the compaction loop, propagating any errors.

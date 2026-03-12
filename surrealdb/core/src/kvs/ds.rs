@@ -1474,7 +1474,10 @@ impl Datastore {
 	/// * `dbs` - The shared datastore instance, cloned into each compaction task
 	/// * `interval` - The interval between compaction runs, used to calculate the lease duration
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs))]
-	pub async fn index_compaction(dbs: Arc<Datastore>, interval: Duration) -> Result<usize> {
+	pub async fn index_compaction(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+	) -> Result<(usize, usize)> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting index compaction process");
 		// Create a new lease handler
@@ -1486,12 +1489,13 @@ impl Datastore {
 			interval * 2,
 		)?;
 		let mut count_iteration = 0;
+		let mut count_error = 0;
 		// We continue without interruptions while there are keys and the lease
 		loop {
 			// Attempt to acquire a lease for the IndexCompaction task
 			// If we don't get the lease, another node is handling this task
 			if !lh.has_lease().await? {
-				return Ok(count_iteration);
+				return Ok((count_iteration, count_error));
 			}
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running index compaction process");
@@ -1506,13 +1510,13 @@ impl Datastore {
 				res?
 			};
 			if items.is_empty() {
-				return Ok(count_iteration);
+				return Ok((count_iteration, count_error));
 			}
 			// Collect the keys so we can delete them after processing
 			let keys: Vec<Key> = items.iter().map(|(k, _)| k.clone()).collect();
 			// Process compaction for each index
 			count_iteration += 1;
-			Self::index_compaction_loop(dbs.clone(), &lh, items).await?;
+			count_error += Self::index_compaction_loop(dbs.clone(), &lh, items).await?;
 			// Delete the processed queue entries in a separate write
 			// transaction. This avoids conflicts with concurrent user
 			// transactions that may enqueue new compaction requests.
@@ -1530,7 +1534,7 @@ impl Datastore {
 				break;
 			}
 		}
-		Ok(count_iteration)
+		Ok((count_iteration, count_error))
 	}
 
 	/// Compacts each distinct index found in the queue items.
@@ -1544,7 +1548,7 @@ impl Datastore {
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
 		items: Vec<(Key, Val)>,
-	) -> Result<()> {
+	) -> Result<usize> {
 		let mut concurrent_compactions = HashMap::new();
 		for (k, _) in items {
 			lh.try_maintain_lease().await?;
@@ -1561,12 +1565,14 @@ impl Datastore {
 				e.insert(jh);
 			}
 		}
+		let mut error_count = 0;
 		for (ikb, jh) in concurrent_compactions {
 			if let Err(e) = jh.await? {
+				error_count += 1;
 				warn!("Index compaction {ikb} fails: {e}");
 			}
 		}
-		Ok(())
+		Ok(error_count)
 	}
 
 	/// Compacts each distinct index found in the queue items.
