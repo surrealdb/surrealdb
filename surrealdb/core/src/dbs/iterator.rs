@@ -741,7 +741,7 @@ impl Iterator {
 				return Err(e);
 			}
 			// If no results, then create a record
-			if self.results.is_empty() {
+			if self.results.is_empty() && !opt.import {
 				// Check if a guaranteed record response is expected
 				if let Some(guaranteed) = self.guaranteed.take() {
 					// Ingest the pre-defined guaranteed record yield

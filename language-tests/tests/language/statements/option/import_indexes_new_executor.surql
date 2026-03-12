@@ -9,7 +9,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ id: test:1, num: 123 }"
+value = "NONE"
 
 [[test.results]]
 value = "[{ id: test:1, num: 123 }]"

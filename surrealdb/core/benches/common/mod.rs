@@ -12,6 +12,7 @@ pub fn create_runtime() -> Runtime {
 }
 
 /// Helper to run async code synchronously (for setup only)
+#[allow(dead_code)]
 pub fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
 	create_runtime().block_on(future)
 }

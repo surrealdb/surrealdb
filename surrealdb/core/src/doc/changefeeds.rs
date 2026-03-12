@@ -11,6 +11,10 @@ impl Document {
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<()> {
+		// Check import
+		if opt.import {
+			return Ok(());
+		}
 		// Check if changed
 		if !self.changed() {
 			return Ok(());
