@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -22,7 +24,29 @@ impl Value {
 				Value::Array(x) => {
 					self.set(stk, ctx, opt, path, Value::from(v.remove_all(&x.0))).await
 				}
+				Value::Set(x) => {
+					self.set(stk, ctx, opt, path, Value::from(v.remove_all_set(&x.0))).await
+				}
 				x => self.set(stk, ctx, opt, path, Value::from(v.remove_value(&x))).await,
+			},
+			Value::Set(mut v) => match val {
+				Value::Array(x) => {
+					let remove: BTreeSet<_> = x.0.into_iter().collect();
+					for item in remove {
+						v.0.remove(&item);
+					}
+					self.set(stk, ctx, opt, path, Value::from(v)).await
+				}
+				Value::Set(x) => {
+					for item in x.0 {
+						v.remove(&item);
+					}
+					self.set(stk, ctx, opt, path, Value::from(v)).await
+				}
+				x => {
+					v.remove(&x);
+					self.set(stk, ctx, opt, path, Value::from(v)).await
+				}
 			},
 			Value::None => match val {
 				Value::Number(x) => {
