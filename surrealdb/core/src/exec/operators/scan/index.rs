@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use surrealdb_types::ToSql;
 
 use super::common::fetch_and_filter_records_batch;
-use super::pipeline::eval_limit_expr;
+use super::pipeline::{ScanPipeline, build_field_state, eval_limit_expr};
 use super::resolved::ResolvedTableContext;
 use crate::err::Error;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
@@ -17,7 +17,6 @@ use crate::exec::index::iterator::btree::{CompoundEqualIterator, CompoundRangeIt
 use crate::exec::index::iterator::{
 	IndexEqualIterator, IndexRangeIterator, UniqueEqualIterator, UniqueRangeIterator,
 };
-use crate::exec::operators::scan::pipeline::build_field_state;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
 	validate_record_user_access,
@@ -53,6 +52,7 @@ pub struct IndexScan {
 	pub(crate) limit: Option<Arc<dyn PhysicalExpr>>,
 	/// Pushed-down START expression (evaluated at execution time).
 	pub(crate) start: Option<Arc<dyn PhysicalExpr>>,
+	/// The set of field names needed by a SELECT statement.
 	pub(crate) needed_fields: Option<std::collections::HashSet<String>>,
 	/// Optional VERSION timestamp for time-travel queries.
 	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
@@ -347,9 +347,9 @@ impl ExecOperator for IndexScan {
 
 			// Create a ScanPipeline for limit/start tracking.
 			// Permissions are already handled by fetch_and_filter_records_batch,
-			// so we use Allow and an empty FieldState here — the pipeline is
-			// only used for limit/start counting.
-			let mut pipeline = super::pipeline::ScanPipeline::new(
+			// so we use Allow here — the pipeline is
+			// only used for limit/start counting and computed field populating.
+			let mut pipeline = ScanPipeline::new(
 				PhysicalPermission::Allow,
 				None, // no predicate
 				field_state,
