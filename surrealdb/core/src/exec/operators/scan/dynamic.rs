@@ -17,7 +17,9 @@ use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
 	validate_record_user_access,
 };
-use crate::exec::planner::util::{resolve_condition_params, strip_knn_from_condition};
+use crate::exec::planner::util::{
+	index_covers_ordering, resolve_condition_params, strip_knn_from_condition,
+};
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
@@ -444,9 +446,10 @@ impl ExecOperator for DynamicScan {
 						with,
 						direction,
 						version,
-						storage_limit: effective_storage_limit,
-						pre_skip,
-						knn_context: knn_context.clone(),
+					storage_limit: effective_storage_limit,
+					pre_skip,
+					has_pushed_limit: limit_val.is_some(),
+					knn_context: knn_context.clone(),
 					},
 				).await?
 			};
@@ -499,6 +502,10 @@ struct TableScanConfig {
 	storage_limit: Option<usize>,
 	/// Number of KV pairs to skip before decoding (fast-path only).
 	pre_skip: usize,
+	/// Whether the caller has a pushed LIMIT that assumes id-ordered output.
+	/// When true and a BTree index is selected that does not cover the
+	/// requested ordering, we fall back to a KV scan for correctness.
+	has_pushed_limit: bool,
 	/// KNN distance context for vector::distance::knn() support.
 	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 }
@@ -570,13 +577,29 @@ async fn resolve_table_scan_stream(
 		}
 	};
 
+	// When limit is pushed, the planner assumed id-ordered output (via
+	// order_is_scan_compatible). If the runtime-selected BTree index does
+	// not cover the requested ordering, we must fall back to KV scan to
+	// avoid truncating rows in the wrong order.
+	let use_index = match &access_path {
+		Some(AccessPath::BTreeScan {
+			index_ref,
+			access,
+			direction,
+		}) if cfg.has_pushed_limit => match &cfg.order {
+			Some(order) => index_covers_ordering(index_ref, access, *direction, order),
+			None => true,
+		},
+		_ => true,
+	};
+
 	match access_path {
 		// B-tree index scan (single-column and compound)
 		Some(AccessPath::BTreeScan {
 			index_ref,
 			access,
 			direction,
-		}) => {
+		}) if use_index => {
 			let operator = IndexScan::new(
 				index_ref,
 				access,
@@ -637,7 +660,8 @@ async fn resolve_table_scan_stream(
 			Ok((stream, 0))
 		}
 
-		// Fall back to table KV scan (NOINDEX, etc.)
+		// Fall back to table KV scan (NOINDEX, BTree rejected by ordering
+		// check, etc.)
 		_ => {
 			let beg = record::prefix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;
 			let end = record::suffix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;

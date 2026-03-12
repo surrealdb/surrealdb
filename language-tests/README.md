@@ -556,7 +556,7 @@ to all capabilities enabled.
 
 This field is not supported for upgrade tests.
 
-#### `planner-strategy`
+#### `[env.planner-strategy]`
 
 Controls which planner strategies the test is executed under. The test runs
 once per listed strategy, each with its own clean datastore.

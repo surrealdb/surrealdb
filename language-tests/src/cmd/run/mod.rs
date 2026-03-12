@@ -285,6 +285,8 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	}
 
 	// Print summary line.
+	// passed/failed/warned are per-run counts (one report per test-strategy pair),
+	// while skipped is a per-test count (tests excluded before strategy expansion).
 	let passed = reports.iter().filter(|r| r.grade() == TestGrade::Success).count();
 	let failed = reports.iter().filter(|r| r.grade() == TestGrade::Failed).count();
 	let warned = reports.iter().filter(|r| r.grade() == TestGrade::Warning).count();
@@ -300,7 +302,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		let yellow = "\x1b[33m";
 		let dim = "\x1b[2m";
 		let reset = "\x1b[0m";
-		print!(" {green}{passed} passed{reset}");
+		print!(" {green}{passed} runs passed{reset}");
 		if failed > 0 {
 			print!(", {red}{failed} failed{reset}");
 		}
@@ -308,11 +310,11 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			print!(", {yellow}{warned} warnings{reset}");
 		}
 		if skipped > 0 {
-			print!(", {dim}{skipped} skipped{reset}");
+			print!(" | {dim}{skipped} tests skipped{reset}");
 		}
 		println!();
 	} else {
-		print!(" {passed} passed");
+		print!(" {passed} runs passed");
 		if failed > 0 {
 			print!(", {failed} failed");
 		}
@@ -320,7 +322,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			print!(", {warned} warnings");
 		}
 		if skipped > 0 {
-			print!(", {skipped} skipped");
+			print!(" | {skipped} tests skipped");
 		}
 		println!();
 	}

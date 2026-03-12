@@ -1067,7 +1067,7 @@ pub(super) fn order_is_scan_compatible(order: Option<&crate::expr::order::Orderi
 /// For compound access with an equality prefix, the prefix columns all have
 /// the same value and do not define ordering. They are skipped so that the
 /// effective ordering starts from the first non-equality column.
-pub(super) fn index_covers_ordering(
+pub(crate) fn index_covers_ordering(
 	index_ref: &crate::exec::index::access_path::IndexRef,
 	access: &crate::exec::index::access_path::BTreeAccess,
 	direction: crate::idx::planner::ScanDirection,
