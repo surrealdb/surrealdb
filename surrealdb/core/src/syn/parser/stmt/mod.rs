@@ -11,7 +11,7 @@ use crate::sql::statements::live::LiveFields;
 use crate::sql::statements::rebuild::RebuildIndexStatement;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::{
-	ForeachStatement, InfoStatement, KillStatement, LiveStatement, OptionStatement,
+	ForeachStatement, InfoStatement, KillStatement, LiveStatement, OptionStatement, OptionValue,
 	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, UseStatement,
 };
 use crate::sql::{AssignOperator, ExplainFormat, Expr, Literal, Param, TopLevelExpr};
@@ -517,14 +517,23 @@ impl Parser<'_> {
 	pub(super) fn parse_option_stmt(&mut self) -> ParseResult<OptionStatement> {
 		let name = self.parse_ident()?;
 		let what = if self.eat(t!("=")) {
-			let next = self.next();
-			match next.kind {
-				t!("true") => true,
-				t!("false") => false,
-				_ => unexpected!(self, next, "either 'true' or 'false'"),
+			match self.peek_kind() {
+				t!("true") => {
+					self.pop_peek();
+					OptionValue::Bool(true)
+				}
+				t!("false") => {
+					self.pop_peek();
+					OptionValue::Bool(false)
+				}
+				t!("\"") | t!("'") => OptionValue::String(self.parse_string_lit()?),
+				_ => {
+					let next = self.next();
+					unexpected!(self, next, "'true', 'false', or a string value")
+				}
 			}
 		} else {
-			true
+			OptionValue::Bool(true)
 		};
 		Ok(OptionStatement {
 			name,

@@ -40,7 +40,7 @@ pub(crate) use self::info::InfoStatement;
 pub(crate) use self::insert::InsertStatement;
 pub(crate) use self::kill::KillStatement;
 pub(crate) use self::live::{LiveFields, LiveStatement};
-pub(crate) use self::option::OptionStatement;
+pub(crate) use self::option::{OptionStatement, OptionValue};
 pub(crate) use self::output::OutputStatement;
 pub(crate) use self::rebuild::RebuildStatement;
 pub(crate) use self::relate::RelateStatement;

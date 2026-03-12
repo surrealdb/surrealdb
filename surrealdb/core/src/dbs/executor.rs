@@ -30,7 +30,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::rpc::types_error_from_anyhow;
-use crate::types::PublicNotification;
+use crate::types::{PublicNotification, PublicValue};
 use crate::val::{Array, Value, convert_value_to_public_value};
 use crate::{err, expr, sql};
 
@@ -78,14 +78,54 @@ impl Executor {
 		self.opt.is_allowed(Action::Edit, ResourceKind::Option, &Base::Db)?;
 
 		if stmt.name.eq_ignore_ascii_case("IMPORT") {
-			self.opt.set_import(stmt.what);
+			let val = stmt.what.as_bool().map_err(|mut e| {
+				if let Error::InvalidOption {
+					name,
+					..
+				} = &mut e
+				{
+					*name = "IMPORT".into();
+				}
+				e
+			})?;
+			self.opt.set_import(val);
 		} else if stmt.name.eq_ignore_ascii_case("FORCE") {
-			let force = if stmt.what {
+			let val = stmt.what.as_bool().map_err(|mut e| {
+				if let Error::InvalidOption {
+					name,
+					..
+				} = &mut e
+				{
+					*name = "FORCE".into();
+				}
+				e
+			})?;
+			self.opt.force = if val {
 				Force::All
 			} else {
 				Force::None
 			};
-			self.opt.force = force;
+		} else if stmt.name.eq_ignore_ascii_case("PLANNER") {
+			let val = stmt.what.as_str().map_err(|mut e| {
+				if let Error::InvalidOption {
+					name,
+					..
+				} = &mut e
+				{
+					*name = "PLANNER".into();
+				}
+				e
+			})?;
+			let strategy = val.parse::<crate::dbs::NewPlannerStrategy>().map_err(|msg| {
+				Error::InvalidOption {
+					name: "PLANNER".into(),
+					message: msg,
+				}
+			})?;
+			let ctx = Arc::get_mut(&mut self.ctx).ok_or_else(|| {
+				Error::unreachable("Tried to unfreeze a Context with multiple references")
+			})?;
+			ctx.set_new_planner_strategy(strategy);
 		}
 
 		Ok(())
@@ -890,7 +930,7 @@ impl Executor {
 					// CANCEL returns NONE
 					self.results.push(QueryResult {
 						time: before.elapsed(),
-						result: Ok(convert_value_to_public_value(Value::None)?),
+						result: Ok(PublicValue::None),
 						query_type: QueryType::Other,
 					});
 
@@ -921,7 +961,7 @@ impl Executor {
 						// COMMIT returns NONE
 						self.results.push(QueryResult {
 							time: before.elapsed(),
-							result: Ok(convert_value_to_public_value(Value::None)?),
+							result: Ok(PublicValue::None),
 							query_type: QueryType::Other,
 						});
 
@@ -943,12 +983,12 @@ impl Executor {
 						// OPTION returns NONE
 						self.results.push(QueryResult {
 							time: before.elapsed(),
-							result: Ok(convert_value_to_public_value(Value::None)?),
+							result: Ok(PublicValue::None),
 							query_type: QueryType::Other,
 						});
 						continue;
 					}
-					Err(e) => Err(TypesError::internal(e.to_string())),
+					Err(e) => Err(types_error_from_anyhow(e)),
 				},
 				stmt => {
 					// reintroduce planner later.
@@ -1141,11 +1181,13 @@ impl Executor {
 
 			match stmt {
 				TopLevelExpr::Option(stmt) => {
-					this.execute_option_statement(stmt)?;
-					// OPTION returns NONE
+					let result = match this.execute_option_statement(stmt) {
+						Ok(_) => Ok(PublicValue::None),
+						Err(e) => Err(types_error_from_anyhow(e)),
+					};
 					this.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Ok(convert_value_to_public_value(Value::None)?),
+						result,
 						query_type: QueryType::Other,
 					});
 				}
@@ -1153,7 +1195,7 @@ impl Executor {
 					// BEGIN returns NONE
 					this.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Ok(convert_value_to_public_value(Value::None)?),
+						result: Ok(PublicValue::None),
 						query_type: QueryType::Other,
 					});
 

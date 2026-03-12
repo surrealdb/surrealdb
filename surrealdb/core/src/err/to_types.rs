@@ -56,6 +56,9 @@ pub fn into_types_error(error: Error) -> TypesError {
 		NsEmpty => TypesError::validation(message, ValidationError::NamespaceEmpty),
 		DbEmpty => TypesError::validation(message, ValidationError::DatabaseEmpty),
 		InvalidQuery(_) => TypesError::validation(message, None),
+		InvalidOption {
+			..
+		} => TypesError::validation(message, None),
 		InvalidParam {
 			name,
 		} => TypesError::validation(
