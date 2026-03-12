@@ -434,65 +434,6 @@ impl Options {
 		}
 	}
 
-	/// Validates that the authenticated user's scope (namespace/database)
-	/// matches the currently selected ns/db on this Options. This check
-	/// is independent of the `perms` flag and prevents cross-scope access
-	/// even when table permission checks are disabled (e.g. during import).
-	pub fn check_scope(&self) -> Result<()> {
-		if !self.auth_enabled && self.auth.is_anon() {
-			return Ok(());
-		}
-		if self.auth.is_root() {
-			return Ok(());
-		}
-		if let Ok(ns) = self.ns()
-			&& let Some(auth_ns) = self.auth.level().ns()
-			&& auth_ns != ns
-		{
-			bail!(Error::NsNotAllowed {
-				ns: ns.into(),
-			});
-		}
-		if let Ok(db) = self.db()
-			&& let Some(auth_db) = self.auth.level().db()
-			&& auth_db != db
-		{
-			bail!(Error::DbNotAllowed {
-				db: db.into(),
-			});
-		}
-		Ok(())
-	}
-
-	/// Validates that the authenticated user's scope allows switching to
-	/// the given prospective namespace and database. Used by the USE
-	/// statement handler to block unauthorized scope changes before they
-	/// take effect.
-	pub fn check_ns_db_scope(&self, ns: &str, db: Option<&str>) -> Result<()> {
-		if !self.auth_enabled && self.auth.is_anon() {
-			return Ok(());
-		}
-		if self.auth.is_root() {
-			return Ok(());
-		}
-		if let Some(auth_ns) = self.auth.level().ns()
-			&& auth_ns != ns
-		{
-			bail!(Error::NsNotAllowed {
-				ns: ns.into(),
-			});
-		}
-		if let Some(db) = db
-			&& let Some(auth_db) = self.auth.level().db()
-			&& auth_db != db
-		{
-			bail!(Error::DbNotAllowed {
-				db: db.into(),
-			});
-		}
-		Ok(())
-	}
-
 	/// Returns the handle to runtime‑adjustable configuration toggles.
 	///
 	/// Currently this includes the global query timeout, which can be modified

@@ -402,13 +402,6 @@ impl Executor {
 					}
 				};
 
-				// Validate that the user is authorized to switch to the target scope
-				{
-					let target_ns = use_ns.as_deref().or(self.opt.ns.as_deref()).unwrap_or("");
-					let target_db = use_db.as_deref();
-					self.opt.check_ns_db_scope(target_ns, target_db)?;
-				}
-
 				let ctx = ctx_mut!();
 
 				// Apply new namespace
