@@ -80,6 +80,7 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 					VectorId::DocId(doc_id) => {
 						let Some(rid) = HnswDocs::get_thing(&self.ikb, &ctx.tx, *doc_id).await?
 						else {
+							e.insert(None);
 							// No record ID ? It is not truthy
 							return Ok(false);
 						};
