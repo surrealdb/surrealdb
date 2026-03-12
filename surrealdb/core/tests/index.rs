@@ -342,7 +342,7 @@ async fn hnsw_concurrent_writes() -> Result<()> {
 
 	// Define the table and the index.
 	dbs.execute(
-        "DEFINE TABLE t; DEFINE INDEX ix ON t FIELDS v HNSW DIMENSION 20 DIST EUCLIDEAN TYPE F32 EFC 150 M 8; ",
+        "DEFINE TABLE t; DEFINE INDEX ix ON t FIELDS v HNSW DIMENSION 20 DIST EUCLIDEAN TYPE F32 EFC 150 M 8;",
         &session,
         None,
     )
@@ -473,6 +473,7 @@ async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
 		DEFINE INDEX idx_scope_name ON scope FIELDS name UNIQUE;
 		DEFINE INDEX idx_scope_kind ON scope FIELDS kind;
 		DEFINE INDEX idx_scope_count ON scope COUNT;
+		DEFINE INDEX ixd_user_vector ON user FIELDS vector HNSW DIMENSION 20 DIST EUCLIDEAN TYPE F32 EFC 150 M 8;
 		DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase, ascii, edgengram(1, 10);
 		DEFINE INDEX idx_scope_name_ft ON scope FIELDS name FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
 		DEFINE INDEX idx_scope_kind ON scope FIELDS kind, name UNIQUE;",
@@ -488,15 +489,23 @@ async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
 	// write pressure on all index types while the compaction loop is running in the background.
 	let mut tasks = Vec::new();
 
+	let vectors = Arc::new(new_vectors_from_file(INGESTING_SOURCE, 5000)?);
+
 	for session in &sessions {
 		// Spawn 3 tasks writing `user` records with unique emails (exercises UNIQUE + COUNT
 		// indexes).
 		for _ in 0..3 {
+			let vectors = vectors.clone();
 			tasks.push(tokio::spawn(write_loop_until_cancellation(
 				dbs.clone(),
 				session.clone(),
 				cancellation.clone(),
-				|c| format!("CREATE user SET email = 'user{c}@test.com' RETURN NONE;"),
+				move |c| {
+					let vector = &vectors.as_ref()[c % 5000].1;
+					format!(
+						"CREATE user SET email = 'user{c}@test.com', vector = {vector} RETURN NONE;"
+					)
+				},
 			)));
 		}
 
