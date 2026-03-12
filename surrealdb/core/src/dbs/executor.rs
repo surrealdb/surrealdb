@@ -1125,6 +1125,31 @@ impl Executor {
 		let mut this = Executor::new(ctx, opt);
 		let mut stream = pin!(stream);
 
+		if skip_success_results {
+			// The import path requires OPTION IMPORT as the first statement.
+			// This sets opt.import which skips events, live queries, field
+			// processing, table views, and result output for performance.
+			match stream.as_mut().next().await {
+				Some(Ok(TopLevelExpr::Option(ref stmt)))
+					if stmt.name.eq_ignore_ascii_case("IMPORT") && stmt.what =>
+				{
+					this.execute_option_statement(stmt.clone())?;
+				}
+				Some(Err(e)) => {
+					bail!(Error::InvalidStatement(e.to_string()));
+				}
+				_ => {
+					bail!(Error::InvalidStatement(
+						"Import requires `OPTION IMPORT;` as the first statement. \
+						 This disables events, live queries, field processing, and result \
+						 output for optimal import performance. To execute queries with \
+						 full side effects, use the /sql endpoint instead."
+							.to_string()
+					));
+				}
+			}
+		}
+
 		while let Some(stmt) = stream.next().await {
 			let stmt = match stmt {
 				Ok(x) => x,
@@ -1141,21 +1166,30 @@ impl Executor {
 
 			match stmt {
 				TopLevelExpr::Option(stmt) => {
+					if skip_success_results && stmt.name.eq_ignore_ascii_case("IMPORT") {
+						bail!(Error::InvalidStatement(
+							"Cannot change OPTION IMPORT during an import stream. \
+						 Import mode is locked for the duration of the /import request."
+								.to_string()
+						));
+					}
 					this.execute_option_statement(stmt)?;
-					// OPTION returns NONE
-					this.results.push(QueryResult {
-						time: Duration::ZERO,
-						result: Ok(convert_value_to_public_value(Value::None)?),
-						query_type: QueryType::Other,
-					});
+					if !skip_success_results {
+						this.results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+					}
 				}
 				TopLevelExpr::Begin => {
-					// BEGIN returns NONE
-					this.results.push(QueryResult {
-						time: Duration::ZERO,
-						result: Ok(convert_value_to_public_value(Value::None)?),
-						query_type: QueryType::Other,
-					});
+					if !skip_success_results {
+						this.results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+					}
 
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
 						this.results.push(QueryResult {
@@ -1172,11 +1206,19 @@ impl Executor {
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, &now, stmt).await;
-					let result = match result {
-						Ok(value) => Ok(convert_value_to_public_value(value)?),
-						Err(err) => Err(types_error_from_anyhow(err)),
-					};
-					if !skip_success_results || result.is_err() {
+					if skip_success_results {
+						if let Err(err) = result {
+							this.results.push(QueryResult {
+								time: now.elapsed(),
+								result: Err(types_error_from_anyhow(err)),
+								query_type,
+							});
+						}
+					} else {
+						let result = match result {
+							Ok(value) => Ok(convert_value_to_public_value(value)?),
+							Err(err) => Err(types_error_from_anyhow(err)),
+						};
 						this.results.push(QueryResult {
 							time: now.elapsed(),
 							result,
@@ -1407,5 +1449,104 @@ mod tests {
 				err
 			);
 		}
+	}
+
+	#[tokio::test]
+	async fn import_stream_suppresses_results_but_persists_data() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql =
+			"OPTION IMPORT; INSERT INTO person [{ name: 'a' }, { name: 'b' }, { name: 'c' }];";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let results = ds.import_stream(&sess, body).await.unwrap();
+
+		assert!(
+			results.is_empty(),
+			"import_stream should suppress successful results, got {} results",
+			results.len()
+		);
+
+		let verify = ds.execute("SELECT * FROM person ORDER BY name", &sess, None).await.unwrap();
+		let rows = verify[0].result.as_ref().unwrap();
+		assert!(rows.is_array(), "Expected an array of results");
+		let arr = rows.as_array().unwrap();
+		assert_eq!(arr.len(), 3, "Expected 3 inserted records, got {}", arr.len());
+	}
+
+	#[tokio::test]
+	async fn import_stream_still_reports_errors() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "OPTION IMPORT; INSERT INTO person { name: 'ok' }; BREAK;";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let results = ds.import_stream(&sess, body).await.unwrap();
+
+		assert!(!results.is_empty(), "import_stream should report errors");
+		assert!(
+			results.iter().any(|r| r.result.is_err()),
+			"Expected at least one error result from invalid BREAK statement"
+		);
+
+		let verify = ds.execute("SELECT * FROM person", &sess, None).await.unwrap();
+		let rows = verify[0].result.as_ref().unwrap();
+		let arr = rows.as_array().unwrap();
+		assert_eq!(arr.len(), 1, "The successful INSERT before the error should have persisted");
+	}
+
+	#[tokio::test]
+	async fn import_stream_rejects_without_option_import() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "INSERT INTO person { name: 'a' };";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let result = ds.import_stream(&sess, body).await;
+
+		assert!(result.is_err(), "import_stream should reject input without OPTION IMPORT");
+		let err = result.unwrap_err().to_string();
+		assert!(err.contains("OPTION IMPORT"), "Error should mention OPTION IMPORT, got: {err}");
+	}
+
+	#[tokio::test]
+	async fn import_stream_rejects_option_import_change_midstream() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "OPTION IMPORT; OPTION IMPORT = false; INSERT INTO person { name: 'a' };";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let result = ds.import_stream(&sess, body).await;
+
+		assert!(result.is_err(), "import_stream should reject OPTION IMPORT changes mid-stream");
+		let err = result.unwrap_err().to_string();
+		assert!(
+			err.contains("Cannot change OPTION IMPORT"),
+			"Error should explain that import mode is locked, got: {err}"
+		);
 	}
 }
