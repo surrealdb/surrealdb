@@ -365,6 +365,9 @@ impl Document {
 			return Ok(());
 		}
 
+		// Always enforce auth scope boundaries (not gated by perms)
+		opt.check_scope()?;
+
 		// Should we run permissions checks?
 		if opt.check_perms(stm.into())? {
 			// Get the table for this document

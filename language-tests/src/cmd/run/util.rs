@@ -1,5 +1,6 @@
 use surrealdb_core::dbs::{NewPlannerStrategy, Session};
 use surrealdb_core::dbs::capabilities::{Capabilities, Targets};
+use surrealdb_core::iam::{Level, Role};
 use surrealdb_types::Value as SurValue;
 
 use crate::tests::schema::{
@@ -86,29 +87,32 @@ pub fn session_from_test_config(config: &TestConfig) -> Session {
 				AuthLevel::Editor => Session::editor(),
 				AuthLevel::Viewer => Session::viewer(),
 			},
-			TestAuth::Namespace {
-				namespace,
-				level,
-			} => {
-				let session = match level {
-					AuthLevel::Owner => Session::owner(),
-					AuthLevel::Editor => Session::editor(),
-					AuthLevel::Viewer => Session::viewer(),
-				};
-				session.with_ns(&namespace)
-			}
-			TestAuth::Database {
-				namespace,
-				database,
-				level,
-			} => {
-				let session = match level {
-					AuthLevel::Owner => Session::owner(),
-					AuthLevel::Editor => Session::editor(),
-					AuthLevel::Viewer => Session::viewer(),
-				};
-				session.with_ns(&namespace).with_db(&database)
-			}
+		TestAuth::Namespace {
+			namespace,
+			level,
+		} => {
+			let role = match level {
+				AuthLevel::Owner => Role::Owner,
+				AuthLevel::Editor => Role::Editor,
+				AuthLevel::Viewer => Role::Viewer,
+			};
+			Session::for_level(Level::Namespace(namespace.clone()), role)
+		}
+		TestAuth::Database {
+			namespace,
+			database,
+			level,
+		} => {
+			let role = match level {
+				AuthLevel::Owner => Role::Owner,
+				AuthLevel::Editor => Role::Editor,
+				AuthLevel::Viewer => Role::Viewer,
+			};
+			Session::for_level(
+				Level::Database(namespace.clone(), database.clone()),
+				role,
+			)
+		}
 			TestAuth::Record {
 				namespace,
 				database,

@@ -42,6 +42,9 @@ fn check_select_permissions_quick(
 	opt: &Options,
 	table: Option<&Arc<TableDefinition>>,
 ) -> Result<(), IgnoreError> {
+	// Always enforce auth scope boundaries (not gated by perms)
+	opt.check_scope()?;
+
 	// Should we run permissions checks?
 	if !opt.check_perms(Action::View)? {
 		return Ok(());
