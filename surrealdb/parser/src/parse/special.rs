@@ -631,6 +631,81 @@ impl ParseSync for DateTime {
 	}
 }
 
+impl ParseSync for ast::BytesLit {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let token = parser.expect(BaseTokenKind::ByteString)?;
+		let mut span = token.span;
+		span.start += 2;
+		span.end -= 1;
+		let full_source = parser.source();
+		let unescape_source = parser.slice(span);
+		let str = Parser::unescape_common(
+			span,
+			unescape_source,
+			parser.source(),
+			&mut parser.unescape_buffer,
+		)?;
+
+		let mut res = Vec::new();
+		let mut chars = str.chars();
+
+		let mut offset = 0;
+		while let Some(a) = chars.next() {
+			let first = match a {
+				'a'..='f' => (a as u8) - b'a',
+				'A'..='F' => (a as u8) - b'A',
+				'0'..='9' => (a as u8) - b'0',
+				_ => {
+					return Err(unexpected_error(
+						full_source,
+						str,
+						offset as u32,
+						offset..(offset + 1),
+						format!("Invalid bytes string token `{a}`, expected a hexidecimal digit"),
+					));
+				}
+			};
+
+			offset += 1;
+
+			let Some(b) = chars.next() else {
+				return Err(unexpected_error(
+					full_source,
+					str,
+					offset as u32,
+					offset..(offset + 1),
+					"Unexpected bytes string end, expected second hexidecimal digit of a pair"
+						.to_owned(),
+				));
+			};
+
+			let second = match b {
+				'a'..='f' => (b as u8) - b'a',
+				'A'..='F' => (b as u8) - b'A',
+				'0'..='9' => (b as u8) - b'0',
+				_ => {
+					return Err(unexpected_error(
+						full_source,
+						str,
+						offset as u32,
+						offset..(offset + 1),
+						format!("Invalid bytes string token `{b}`, expected a hexidecimal digit"),
+					));
+				}
+			};
+
+			offset += 1;
+
+			res.push(first << 4 | second);
+		}
+
+		Ok(ast::BytesLit {
+			text: res,
+			span: token.span,
+		})
+	}
+}
+
 /// Parse a regex.
 ///
 /// A regex works almost like a string but its delimiter `/` conflicts with the division operator

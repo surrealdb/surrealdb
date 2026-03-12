@@ -33,10 +33,12 @@ const PRODUCT_BP: (u8, u8) = (9, 10);
 // So the binding power is reversed from the left associative operators.
 const POWER_BP: (u8, u8) = (12, 11);
 
+const NULLISH_BP: (u8, u8) = (13, 14);
+
 const RANGE_BP: u8 = 7;
 
-const PREFIX_BP: u8 = 14;
-const IDIOM_BP: u8 = 15;
+const PREFIX_BP: u8 = 15;
+const IDIOM_BP: u8 = 16;
 
 impl Parse for ast::Expr {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
@@ -395,8 +397,6 @@ async fn parse_bracket_postfix(
 			Ok(Some(Expr::Idiom(postfix)))
 		}
 		_ => {
-			let _ = parser.next();
-
 			let left = parser.push(lhs);
 			let index = parser.parse_enter().await?;
 			let close =
@@ -653,6 +653,55 @@ async fn parse_dot_postfix(
 	}
 }
 
+async fn parse_graph_op(
+	parser: &mut Parser<'_, '_>,
+	lhs: Expr,
+	lhs_span: Span,
+	direction: ast::Direction,
+	direction_span: Span,
+) -> ParseResult<Expr> {
+	let expect = "`?`";
+
+	let peek = parser.peek_expect(expect)?;
+	match peek.token {
+		T![?] => {
+			let _ = parser.next();
+			//TODO: Reject seperated
+			let lhs = parser.push(lhs);
+			let op = ast::IdiomOperator::GraphAny(direction);
+			let op_span = direction_span.extend(peek.span);
+			let expr = IdiomExpr {
+				left: lhs,
+				op: Spanned {
+					span: op_span,
+					value: op,
+				},
+				span: lhs_span.extend(op_span),
+			};
+			return Ok(Expr::Idiom(parser.push(expr)));
+		}
+		x if x.is_identifier() => {
+			let lhs = parser.push(lhs);
+			let ident = parser.parse_sync()?;
+			let op = ast::IdiomOperator::GraphTable {
+				direction,
+				table: ident,
+			};
+			let op_span = direction_span.extend(peek.span);
+			let expr = IdiomExpr {
+				left: lhs,
+				op: Spanned {
+					span: op_span,
+					value: op,
+				},
+				span: lhs_span.extend(op_span),
+			};
+			return Ok(Expr::Idiom(parser.push(expr)));
+		}
+		_ => return Err(parser.unexpected(expect)),
+	}
+}
+
 async fn try_parse_infix_postfix_op(
 	parser: &mut Parser<'_, '_>,
 	min_bp: u8,
@@ -714,12 +763,58 @@ async fn try_parse_infix_postfix_op(
 		T![!=] => parse_equality_op(parser, min_bp, BinaryOperator::NotEqual, peek.span, lhs).await,
 		T![*=] => parse_equality_op(parser, min_bp, BinaryOperator::AllEqual, peek.span, lhs).await,
 		T![?=] => parse_equality_op(parser, min_bp, BinaryOperator::AnyEqual, peek.span, lhs).await,
+		T![?:] => {
+			parse_basic_infix_op(
+				parser,
+				min_bp,
+				NULLISH_BP,
+				BinaryOperator::TenaryCondition,
+				peek.span,
+				lhs,
+			)
+			.await
+		}
+		T![??] => {
+			parse_basic_infix_op(
+				parser,
+				min_bp,
+				NULLISH_BP,
+				BinaryOperator::NullCoalescing,
+				peek.span,
+				lhs,
+			)
+			.await
+		}
 		T![<] => {
-			if let Some(T![-] | T![->]) = parser.peek_joined1()?.map(|x| x.token) {
-				return Ok(None);
+			if let Some(peek1) = parser.peek_joined1()?
+				&& let T![-] | T![->] = peek1.token
+			{
+				if IDIOM_BP < min_bp {
+					return Ok(None);
+				}
+
+				let dir = match peek1.token {
+					T![-] => ast::Direction::In,
+					T![->] => ast::Direction::Both,
+					_ => unreachable!(),
+				};
+
+				let _ = parser.next();
+				let _ = parser.next();
+
+				let span = peek.span.extend(peek1.span);
+
+				return parse_graph_op(parser, lhs, lhs_span, dir, span).await.map(Some);
 			}
 
 			parse_relation_op(parser, min_bp, BinaryOperator::LessThan, peek.span, lhs).await
+		}
+		T![->] => {
+			if IDIOM_BP < min_bp {
+				return Ok(None);
+			}
+			let _ = parser.next();
+			parse_graph_op(parser, lhs, lhs_span, ast::Direction::Out, peek.span).await.map(Some)
 		}
 		T![<=] => {
 			parse_relation_op(parser, min_bp, BinaryOperator::LessThanEqual, peek.span, lhs).await
@@ -789,6 +884,93 @@ async fn try_parse_infix_postfix_op(
 		T![>=] => {
 			parse_relation_op(parser, min_bp, BinaryOperator::GreaterThanEqual, peek.span, lhs)
 				.await
+		}
+		T![@] => {
+			if EQUALITY_BP < min_bp {
+				return Ok(None);
+			}
+			let _ = parser.next();
+			let expect = "`AND`, `OR` an integer or `@`";
+			let peek = parser.peek_expect(expect)?;
+			let (span, op) = match peek.token {
+				BaseTokenKind::Int => {
+					let int = parser.parse_sync()?;
+					let operator = if parser.eat(T![,])?.is_some() {
+						let expect = "`AND` or`OR`";
+						let peek = parser.peek_expect(expect)?;
+						match peek.token {
+							T![AND] => {
+								let _ = parser.next();
+								Some(ast::MatchesOperator::And)
+							}
+							T![OR] => {
+								let _ = parser.next();
+								Some(ast::MatchesOperator::Or)
+							}
+							_ => return Err(parser.unexpected(expect)),
+						}
+					} else {
+						None
+					};
+					let _ = parser.expect(T![@])?;
+					let span = parser.span_since(peek.span);
+					(
+						span,
+						ast::BinaryOperator::Matches {
+							reference: Some(int),
+							operator,
+						},
+					)
+				}
+				T![OR] => {
+					let _ = parser.next();
+					let _ = parser.expect(T![@])?;
+					let span = parser.span_since(peek.span);
+					(
+						span,
+						ast::BinaryOperator::Matches {
+							reference: None,
+							operator: Some(ast::MatchesOperator::Or),
+						},
+					)
+				}
+				T![AND] => {
+					let _ = parser.next();
+					let _ = parser.expect(T![@])?;
+					let span = parser.span_since(peek.span);
+					(
+						span,
+						ast::BinaryOperator::Matches {
+							reference: None,
+							operator: Some(ast::MatchesOperator::And),
+						},
+					)
+				}
+				T![@] => {
+					let _ = parser.next();
+					let span = parser.span_since(peek.span);
+					(
+						span,
+						ast::BinaryOperator::Matches {
+							reference: None,
+							operator: None,
+						},
+					)
+				}
+				_ => return Err(parser.unexpected(expect)),
+			};
+
+			parse_non_associative_infix_op(
+				parser,
+				min_bp,
+				RELATION_BP,
+				op,
+				is_relation_op,
+				span,
+				lhs,
+				0,
+			)
+			.await
 		}
 		BaseTokenKind::Contains | T![CONTAINS] => {
 			parse_relation_op(parser, min_bp, BinaryOperator::Contain, peek.span, lhs).await
@@ -895,6 +1077,8 @@ async fn try_parse_infix_postfix_op(
 				)
 				.await;
 			}
+
+			let _ = parser.next();
 
 			if peek_starts_prime(parser)? {
 				return parse_range_infix_op(

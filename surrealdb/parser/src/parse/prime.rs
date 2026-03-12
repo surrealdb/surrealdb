@@ -205,6 +205,32 @@ impl ParseSync for ast::Mock {
 	}
 }
 
+impl Parse for ast::Closure {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let (args_span, parameters) = if let Some(peek) = parser.eat(T![||])? {
+			(peek.span, None)
+		} else {
+			parse_delimited_list(parser, T![|], T![|], T![,], Parser::parse).await?
+		};
+
+		let output_ty = if parser.eat(T![->])?.is_some() {
+			Some(parser.parse().await?)
+		} else {
+			None
+		};
+
+		let body = parser.parse_enter().await?;
+
+		let span = parser.span_since(args_span);
+		Ok(ast::Closure {
+			parameters,
+			output_ty,
+			body,
+			span,
+		})
+	}
+}
+
 impl Parse for ast::Array {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let (span, entries) = parse_delimited_list(
@@ -228,7 +254,11 @@ impl Parse for ast::Object {
 		let start = parser.expect(BaseTokenKind::OpenBrace)?;
 		let peek = parser.peek_expect("an object key")?;
 		match peek.token {
-			BaseTokenKind::String | BaseTokenKind::Ident => {
+			BaseTokenKind::String => {
+				let obj = parse_object_continue(parser, start.span).await?;
+				Ok(obj)
+			}
+			x if x.is_identifier() => {
 				let obj = parse_object_continue(parser, start.span).await?;
 				Ok(obj)
 			}
@@ -243,7 +273,16 @@ pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 
 	let token = parser.peek_expect("`}`")?;
 	let expr = match token.token {
-		BaseTokenKind::String | BaseTokenKind::Ident => {
+		BaseTokenKind::String | BaseTokenKind::Int => {
+			if let Some(T![:]) = parser.peek1()?.map(|x| x.token) {
+				// Has to be object.
+				let obj = parse_object_continue(parser, start.span).await?;
+				let obj = parser.push(obj);
+				return Ok(Expr::Object(obj));
+			}
+			parser.parse_enter().await?
+		}
+		x if x.is_identifier() => {
 			if let Some(T![:]) = parser.peek1()?.map(|x| x.token) {
 				// Has to be object.
 				let obj = parse_object_continue(parser, start.span).await?;
@@ -367,11 +406,22 @@ async fn parse_object_continue(
 	parser: &mut Parser<'_, '_>,
 	start_span: Span,
 ) -> ParseResult<ast::Object> {
-	let next = parser.next()?.expect("there should be an object key in this function");
+	let next = parser.peek()?.expect("there should be an object key in this function");
 
 	let key = match next.token {
-		BaseTokenKind::Ident => parser.unescape_ident(next)?,
-		BaseTokenKind::String => parser.unescape_str_push(next)?,
+		BaseTokenKind::String => {
+			let _ = parser.next();
+			parser.unescape_str_push(next)?
+		}
+		BaseTokenKind::Int => {
+			let _ = parser.next();
+			let p = parser.slice(next.span).to_owned();
+			parser.push_set(p)
+		}
+		x if x.is_identifier() => {
+			let _ = parser.next();
+			parser.unescape_ident(next)?
+		}
 		_ => unreachable!(),
 	};
 
@@ -401,13 +451,13 @@ async fn parse_object_continue(
 
 			let peek = parser.peek_expect("an object key")?;
 			let key = match peek.token {
-				BaseTokenKind::Ident => {
-					let _ = parser.next();
-					parser.unescape_ident(peek)?
-				}
 				BaseTokenKind::String => {
 					let _ = parser.next();
 					parser.unescape_str_push(peek)?
+				}
+				x if x.is_identifier() => {
+					let _ = parser.next();
+					parser.unescape_ident(peek)?
 				}
 				_ => return Err(parser.unexpected("an object key")),
 			};
@@ -643,10 +693,21 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 		BaseTokenKind::DateTimeString => Ok(Expr::DateTime(parser.parse_sync()?)),
 		BaseTokenKind::FileString => Ok(Expr::File(parser.parse_sync()?)),
 		BaseTokenKind::Duration => Ok(Expr::Duration(parser.parse_sync()?)),
-		T![|] => Ok(Expr::Mock(parser.parse_sync()?)),
+		BaseTokenKind::ByteString => Ok(Expr::Bytes(parser.parse_sync()?)),
+		T![||] => Ok(Expr::Closure(parser.parse().await?)),
+		T![|] => {
+			if let Some(peek1) = parser.peek1()?
+				&& let BaseTokenKind::Param = peek1.token
+			{
+				Ok(Expr::Closure(parser.parse().await?))
+			} else {
+				Ok(Expr::Mock(parser.parse_sync()?))
+			}
+		}
 		T![/] => Ok(Expr::Regex(parser.parse_sync()?)),
 		T![FUNCTION] => Ok(Expr::JsFunction(parser.parse().await?)),
 		T![IF] => Ok(Expr::If(parser.parse().await?)),
+		T![FOR] => Ok(Expr::For(parser.parse().await?)),
 		T![LET] => Ok(Expr::Let(parser.parse().await?)),
 		T![RETURN] => Ok(Expr::Return(parser.parse().await?)),
 		T![INFO] => Ok(Expr::Info(parser.parse().await?)),
@@ -654,6 +715,18 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			let _ = parser.next();
 			let expr = parser.parse_enter().await?;
 			Ok(Expr::Throw(expr))
+		}
+		T![CONTINUE] => {
+			let _ = parser.next();
+			Ok(Expr::Continue(parser.push(peek.span)))
+		}
+		T![BREAK] => {
+			let _ = parser.next();
+			Ok(Expr::Break(parser.push(peek.span)))
+		}
+		T![SLEEP] => {
+			let _ = parser.next();
+			Ok(Expr::Sleep(parser.parse_sync()?))
 		}
 		T![DELETE] => Ok(Expr::Delete(parser.parse().await?)),
 		T![CREATE] => Ok(Expr::Create(parser.parse().await?)),
@@ -683,6 +756,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				T![BUCKET] => parser.parse().await.map(Expr::DefineBucket),
 				T![SEQUENCE] => parser.parse().await.map(Expr::DefineSequence),
 				T![CONFIG] => parser.parse().await.map(Expr::DefineConfig),
+				T![USER] => parser.parse().await.map(Expr::DefineUser),
 				T![ACCESS] => parser.parse().await.map(Expr::DefineAccess),
 				_ => {
 					let _ = parser.next();
@@ -736,6 +810,28 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			}
 		}
 		T![EXPLAIN] => Ok(Expr::Explain(parser.parse().await?)),
+		T![@] => {
+			let _ = parser.next();
+			Ok(Expr::Document(parser.push(peek.span)))
+		}
+		T![<] => {
+			if let Some(peek1) = parser.peek_joined1()?
+				&& let T![->] | T![-] = peek1.token
+			{
+				Ok(Expr::Document(parser.push(peek.span.extend(peek1.span))))
+			} else {
+				Err(parser.with_error(|parser| {
+					Level::Error
+						.title(format!(
+							"Unexpected token `{}` expected an expression",
+							parser.slice(peek.span)
+						))
+						.snippet(parser.snippet().annotate(AnnotationKind::Primary.span(peek.span)))
+						.to_diagnostic()
+				}))
+			}
+		}
+		T![->] => Ok(Expr::Document(parser.push(peek.span))),
 		BaseTokenKind::Param => {
 			let path = parser.parse_sync()?;
 			Ok(Expr::Param(path))

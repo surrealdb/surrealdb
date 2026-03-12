@@ -28,8 +28,10 @@ pub enum EscapeTokenKind {
 	EscBackTick,
 	#[token("\\⟩")]
 	EscBracketClose,
+	#[regex(r#"\\u[0-9a-fA-F]{4}"#)]
+	EscUnicodeFixed,
 	#[regex(r#"\\u\{[0-9a-fA-F]{1,6}}"#)]
-	EscUnicode,
+	EscUnicodeBracket,
 	#[regex(r#"[^\\]+"#, priority = 0)]
 	Chars,
 }

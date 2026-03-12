@@ -49,6 +49,9 @@ macro_rules! T {
 	(?) => {
 		$crate::BaseTokenKind::Question
 	};
+	(??) => {
+		$crate::BaseTokenKind::QuestionQuestion
+	};
 	(?=) => {
 		$crate::BaseTokenKind::QuestionEqual
 	};

@@ -43,6 +43,7 @@ Query
                                                 .key: RecordIdKey::Number
                                                     +1
                                     .data: None
+                                    .output: None
                                     .version: None
                                     .timeout: None
                         -Expr::Binary
@@ -92,6 +93,7 @@ Query
                                                 .key: RecordIdKey::Number
                                                     +1
                                     .data: None
+                                    .output: None
                                     .version: None
                                     .timeout: None
                         -Expr::Binary
@@ -144,6 +146,7 @@ Query
                                                 .key: RecordIdKey::Number
                                                     +1
                                     .data: None
+                                    .output: None
                                     .version: None
                                     .timeout: None
                         -Expr::Binary
@@ -196,6 +199,7 @@ Query
                                                 .key: RecordIdKey::Number
                                                     +1
                                     .data: None
+                                    .output: None
                                     .version: None
                                     .timeout: None
                         -Expr::Binary

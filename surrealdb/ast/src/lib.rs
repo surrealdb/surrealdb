@@ -48,6 +48,7 @@ library! {
 		option_stmt: Vec<OptionStmt>,
 
 		if_stmt: Vec<If>,
+		for_stmt: Vec<For>,
 		let_stmt: Vec<Let>,
 		return_stmt: Vec<Return>,
 		info_stmt: Vec<Info>,
@@ -122,6 +123,7 @@ library! {
 		datetime: Vec<Spanned<DateTime>>,
 		duration: Vec<Spanned<Duration>>,
 		str: Vec<StringLit>,
+		bytes: Vec<BytesLit>,
 		files: Vec<FileLit>,
 		regex: Vec<Regex>,
 		js_function: Vec<JsFunction>,
@@ -131,6 +133,7 @@ library! {
 		record_id_key_range: Vec<RecordIdKeyRange>,
 
 		mock: Vec<Mock>,
+		closure: Vec<Closure>,
 
 		point: Vec<Point>,
 		array: Vec<Array>,
@@ -190,6 +193,9 @@ library! {
 		params: Vec<Param>,
 		ident: Vec<Ident>,
 		idents: Vec<NodeList<Ident>>,
+
+		span: Vec<Span>,
+
 		#[set]
 		strings: NodeSet<String>,
 	}
@@ -270,6 +276,14 @@ ast_type! {
 		pub condition: NodeId<Expr>,
 		pub then: NodeId<Expr>,
 		pub otherwise: Option<NodeId<Expr>>,
+	}
+}
+
+ast_type! {
+	pub struct For{
+		pub param: NodeId<Param>,
+		pub range: NodeId<Expr>,
+		pub body: NodeId<Block>,
 	}
 }
 
@@ -426,6 +440,7 @@ ast_type! {
 		pub only: bool,
 		pub targets: NodeListId<Expr>,
 		pub data: Option<RecordData>,
+		pub output: Option<NodeId<Output>>,
 		pub version: Option<NodeId<Expr>>,
 		pub timeout: Option<NodeId<Expr>>,
 	}
@@ -481,9 +496,26 @@ ast_type! {
 }
 
 ast_type! {
-	pub enum OrderBy{
+	pub enum OrderByKind{
 		Rand(Span),
 		Places(NodeListId<PresentPlace>),
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum OrderDirection{
+		Ascending,
+		Descending,
+	}
+}
+
+ast_type! {
+	pub struct OrderBy{
+		pub kind: OrderByKind,
+		pub collate: bool,
+		pub numeric: bool,
+		pub direction: Option<OrderDirection>,
 	}
 }
 
@@ -508,6 +540,14 @@ ast_type! {
 	}
 }
 
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum Group{
+		All,
+		Fields(NodeListId<PresentPlace>),
+	}
+}
+
 ast_type! {
 	pub struct Select{
 		pub fields: NodeId<Fields>,
@@ -516,7 +556,7 @@ ast_type! {
 		pub with_index: Option<WithIndex>,
 		pub condition: Option<NodeId<Expr>>,
 		pub split: Option<NodeListId<PresentPlace>>,
-		pub group: Option<NodeListId<PresentPlace>>,
+		pub group: Option<Group>,
 		pub order: Option<OrderBy>,
 		pub start: Option<NodeId<Expr>>,
 		pub limit: Option<NodeId<Expr>>,
@@ -609,7 +649,7 @@ ast_type! {
 ast_type! {
 	pub struct Parameter{
 		pub name: NodeId<Param>,
-		pub ty: NodeId<Type>,
+		pub ty: Option<NodeId<Type>>,
 	}
 }
 
@@ -840,6 +880,7 @@ impl_vis_debug!(VectorType);
 
 ast_type! {
 	pub struct HnswIndex{
+		pub dimension: NodeId<Integer>,
 		pub distance: Option<Distance>,
 		pub ty: Option<VectorType>,
 		pub m: Option<NodeId<Integer>>,
@@ -1002,7 +1043,7 @@ ast_type! {
 		pub kind: DefineKind,
 		pub name: NodeId<Expr>,
 		pub base: Base,
-		pub secrect: Option<UserSecret>,
+		pub secret: Option<UserSecret>,
 		pub roles: Option<NodeListId<Ident>>,
 		pub session_duration: Option<NodeId<Expr>>,
 		pub token_duration: Option<NodeId<Expr>>,
@@ -1298,12 +1339,16 @@ ast_type! {
 		Decimal(NodeId<Spanned<Decimal>>),
 		String(NodeId<StringLit>),
 
+		// `@` or ommited when parsing `<-`,`<~` or similar.
+		Document(NodeId<Span>),
+
 		Regex(NodeId<Regex>),
 
 		Uuid(NodeId<Spanned<Uuid>>),
 		DateTime(NodeId<Spanned<DateTime>>),
 		Duration(NodeId<Spanned<Duration>>),
 		File(NodeId<FileLit>),
+		Bytes(NodeId<BytesLit>),
 
 		Point(NodeId<Point>),
 
@@ -1312,6 +1357,7 @@ ast_type! {
 		Set(NodeId<Set>),
 
 		Mock(NodeId<Mock>),
+		Closure(NodeId<Closure>),
 
 		JsFunction(NodeId<JsFunction>),
 
@@ -1329,6 +1375,7 @@ ast_type! {
 
 		Throw(NodeId<Expr>),
 		If(NodeId<If>),
+		For(NodeId<For>),
 		Let(NodeId<Let>),
 		Return(NodeId<Return>),
 		Info(NodeId<Info>),
@@ -1339,6 +1386,11 @@ ast_type! {
 		Relate(NodeId<Relate>),
 		Select(NodeId<Select>),
 		Insert(NodeId<Insert>),
+
+		Sleep(NodeId<Spanned<Duration>>),
+
+		Continue(NodeId<Span>),
+		Break(NodeId<Span>),
 
 		DefineNamespace(NodeId<DefineNamespace>),
 		DefineDatabase(NodeId<DefineDatabase>),
@@ -1429,6 +1481,12 @@ ast_type! {
 }
 
 ast_type! {
+	pub struct BytesLit{
+		pub text: Vec<u8>,
+	}
+}
+
+ast_type! {
 	pub struct FileLit{
 		pub path: NodeId<String>,
 	}
@@ -1504,6 +1562,14 @@ ast_type! {
 	pub struct Mock{
 		pub name: NodeId<Ident>,
 		pub kind: MockKind
+	}
+}
+
+ast_type! {
+	pub struct Closure{
+		pub parameters: Option<NodeListId<Parameter>>,
+		pub output_ty: Option<NodeId<Type>>,
+		pub body: NodeId<Expr>,
 	}
 }
 
@@ -1649,8 +1715,8 @@ pub enum BinaryOperator {
 
 	// `@@`
 	Matches {
-		reference: u8,
-		operator: MatchesOperator,
+		reference: Option<NodeId<Integer>>,
+		operator: Option<MatchesOperator>,
 	},
 	KNearestNeighbour {
 		k: u32,
@@ -1733,6 +1799,17 @@ ast_type! {
 	}
 }
 
+#[derive(Debug)]
+pub enum Direction {
+	// `<-` or `<~`
+	In,
+	// `->` or `~>`
+	Out,
+	// `<->` or `<~>`
+	Both,
+}
+impl_vis_debug!(Direction);
+
 impl_vis_type! {
 	#[derive(Debug)]
 	pub enum IdiomOperator {
@@ -1754,6 +1831,13 @@ impl_vis_type! {
 		Destructure(Option<NodeListId<Destructure>>),
 		/// (1, $bar)
 		Call(Option<NodeListId<Expr>>),
+		/// `<-?`, `->?` or `<->?`
+		GraphAny(Direction),
+		/// `<-ident`, `->ident` or `<->ident`
+		GraphTable{
+			direction: Direction,
+			table: NodeId<Ident>
+		},
 	}
 }
 
@@ -1899,9 +1983,11 @@ ast_type! {
 		LitBuiltin(NodeId<Builtin>),
 		LitFloat(NodeId<Spanned<f64>>),
 		LitInteger(NodeId<Integer>),
+		LitString(NodeId<StringLit>),
 		LitDecimal(NodeId<Spanned<Decimal>>),
 		LitObject(NodeId<LitObjectType>),
 		LitArray(NodeId<LitArrayType>),
+		LitDuration(NodeId<Spanned<Duration>>),
 	}
 }
 

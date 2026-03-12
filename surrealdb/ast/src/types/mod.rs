@@ -51,6 +51,7 @@ pub struct Spanned<T> {
 	pub span: Span,
 }
 
+impl Node for Span {}
 impl<T: Node> Node for Spanned<T> {}
 
 impl<T> Deref for Spanned<T> {

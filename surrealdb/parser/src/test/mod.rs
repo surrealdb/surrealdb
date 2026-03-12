@@ -127,6 +127,10 @@ fn all_language_tests() {
 		.join("language-tests")
 		.join("tests");
 	walk_dir(&tests_path, &mut |path| {
+		if path.extension().and_then(|x| x.to_str()) != Some("surql") {
+			return;
+		}
+
 		let source = std::fs::read_to_string(path).unwrap();
 		if source.contains("parsing-error") {
 			return;

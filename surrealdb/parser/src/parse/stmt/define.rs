@@ -1,4 +1,7 @@
-use ast::{AccessType, Base, CountIndex, DefineConfigKind, FullTextScoring, NodeId, RelationTable};
+use ast::{
+	AccessType, Base, CountIndex, DefineConfigKind, FullTextScoring, NodeId, RelationTable,
+	UserSecret,
+};
 use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
 use token::{BaseTokenKind, T};
@@ -607,7 +610,6 @@ impl Parse for ast::ApiAction {
 		let mut permission = None;
 		let mut middleware = None;
 
-		let mut did_parse = false;
 		loop {
 			let Some(peek) = parser.peek()? else {
 				break;
@@ -618,7 +620,6 @@ impl Parse for ast::ApiAction {
 
 					parse_unordered_clause(parser, &mut permission, peek.span, Parser::parse)
 						.await?;
-					did_parse = true;
 				}
 				T![MIDDLEWARE] => {
 					let _ = parser.next();
@@ -627,13 +628,9 @@ impl Parse for ast::ApiAction {
 						parse_seperated_list(parser, T![,], Parser::parse).await.map(|x| x.1)
 					})
 					.await?;
-					did_parse = true;
 				}
 				_ => break,
 			}
-		}
-		if !did_parse {
-			return Err(parser.unexpected("`PERMISSIONS`, or `MIDDLEWARE`"));
 		}
 
 		let _ = parser.expect(T![THEN])?;
@@ -752,6 +749,7 @@ impl Parse for ast::DefineApi {
 					}
 
 					if let Some(x) = parser.eat(T![THEN])? {
+						did_parse = true;
 						parse_unordered_clause(parser, &mut fallback, x.span, Parser::parse_enter)
 							.await?;
 					}
@@ -1109,42 +1107,47 @@ impl Parse for ast::DefineField {
 				T![REFERENCE] => {
 					let _ = parser.next();
 
-					parse_unordered_clause(parser, &mut on_delete, peek.span, async |parser| {
-						let _ = parser.expect(T![ON])?;
-						let _ = parser.expect(T![DELETE])?;
+					if parser.eat(T![ON])?.is_some() {
+						parse_unordered_clause(parser, &mut on_delete, peek.span, async |parser| {
+							let _ = parser.expect(T![DELETE])?;
 
-						let peek = parser
-							.peek_expect("`REJECT`, `CASCADE`, `IGNORE`, `UNSET`, or `THEN`")?;
-						match peek.token {
-							T![REJECT] => {
-								let _ = parser.next();
-								Ok(ast::OnDelete::Reject)
+							let peek = parser
+								.peek_expect("`REJECT`, `CASCADE`, `IGNORE`, `UNSET`, or `THEN`")?;
+							match peek.token {
+								T![REJECT] => {
+									let _ = parser.next();
+									Ok(ast::OnDelete::Reject)
+								}
+								T![CASCADE] => {
+									let _ = parser.next();
+									Ok(ast::OnDelete::Cascade)
+								}
+								T![IGNORE] => {
+									let _ = parser.next();
+									Ok(ast::OnDelete::Ignore)
+								}
+								T![UNSET] => {
+									let _ = parser.next();
+									Ok(ast::OnDelete::Unset)
+								}
+								T![THEN] => {
+									let _ = parser.next();
+									let expr = parser.parse_enter().await?;
+									Ok(ast::OnDelete::Then(expr))
+								}
+								_ => {
+									return Err(parser.unexpected(
+										"`REJECT`, `CASCADE`, `IGNORE`, `UNSET`, or `THEN`",
+									));
+								}
 							}
-							T![CASCADE] => {
-								let _ = parser.next();
-								Ok(ast::OnDelete::Cascade)
-							}
-							T![IGNORE] => {
-								let _ = parser.next();
-								Ok(ast::OnDelete::Ignore)
-							}
-							T![UNSET] => {
-								let _ = parser.next();
-								Ok(ast::OnDelete::Unset)
-							}
-							T![THEN] => {
-								let _ = parser.next();
-								let expr = parser.parse_enter().await?;
-								Ok(ast::OnDelete::Then(expr))
-							}
-							_ => {
-								return Err(parser.unexpected(
-									"`REJECT`, `CASCADE`, `IGNORE`, `UNSET`, or `THEN`",
-								));
-							}
-						}
-					})
-					.await?;
+						})
+						.await?;
+					} else {
+						parse_unordered_clause_sync(parser, &mut on_delete, peek.span, |_| {
+							Ok(ast::OnDelete::Ignore)
+						})?;
+					}
 				}
 				_ => break,
 			}
@@ -1244,6 +1247,9 @@ impl ParseSync for ast::HnswIndex {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
 		let start = parser.expect(T![HNSW])?;
 
+		let _ = parser.expect(T![DIMENSION])?;
+		let dimension = parser.parse_sync()?;
+
 		let mut distance = None;
 		let mut ty = None;
 		let mut m = None;
@@ -1319,6 +1325,7 @@ impl ParseSync for ast::HnswIndex {
 
 		let span = parser.span_since(start.span);
 		Ok(ast::HnswIndex {
+			dimension,
 			distance: distance.map(|x| x.0),
 			ty: ty.map(|x| x.0),
 			m: m.map(|x| x.0),
@@ -1488,6 +1495,15 @@ impl Parse for ast::DefineIndex {
 					let span = parser.span_since(peek.span);
 					index = Some((ast::Index::FullText(idx), span));
 				}
+				T![UNIQUE] => {
+					let _ = parser.next();
+
+					if let Some((_, old_span)) = index {
+						return Err(index_type_redefined(parser, peek.span, old_span));
+					}
+
+					index = Some((ast::Index::Unique(peek.span), peek.span));
+				}
 				_ => break,
 			}
 		}
@@ -1524,8 +1540,11 @@ impl ParseSync for ast::Filter {
 			}
 			T![EDGENGRAM] => {
 				let _ = parser.next();
+				let open = parser.expect(BaseTokenKind::OpenParen)?;
 				let min = parser.parse_sync()?;
+				let _ = parser.expect(T![,])?;
 				let max = parser.parse_sync()?;
+				let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, open.span)?;
 				let span = parser.span_since(peek.span);
 				Ok(ast::Filter::EdgeNgram(ast::NgramMapper {
 					min,
@@ -1535,8 +1554,11 @@ impl ParseSync for ast::Filter {
 			}
 			T![NGRAM] => {
 				let _ = parser.next();
+				let open = parser.expect(BaseTokenKind::OpenParen)?;
 				let min = parser.parse_sync()?;
+				let _ = parser.expect(T![,])?;
 				let max = parser.parse_sync()?;
+				let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, open.span)?;
 				let span = parser.span_since(peek.span);
 				Ok(ast::Filter::Ngram(ast::NgramMapper {
 					min,
@@ -1932,6 +1954,103 @@ impl Parse for ast::DefineConfig {
 		Ok(ast::DefineConfig {
 			kind,
 			inner,
+			span,
+		})
+	}
+}
+
+impl Parse for ast::DefineUser {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let define = parser.expect(T![DEFINE])?;
+		let _ = parser.expect(T![USER])?;
+		let kind = parser.parse_sync()?;
+
+		let name = parser.parse_enter().await?;
+		let _ = parser.expect(T![ON])?;
+		let base = parser.parse_sync()?;
+
+		let mut comment = None;
+		let mut secret = None;
+		let mut roles = None;
+		let mut token_duration = None;
+		let mut session_duration = None;
+		loop {
+			let Some(peek) = parser.peek()? else {
+				break;
+			};
+			match peek.token {
+				T![COMMENT] => {
+					let _ = parser.next();
+					parse_unordered_clause(parser, &mut comment, peek.span, Parser::parse_enter)
+						.await?;
+				}
+				T![PASSWORD] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut secret, peek.span, |parser| {
+						parser.parse_sync().map(UserSecret::PassWord)
+					})?;
+				}
+				T![PASSHASH] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut secret, peek.span, |parser| {
+						parser.parse_sync().map(UserSecret::PassHash)
+					})?;
+				}
+				T![ROLES] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut roles, peek.span, |parser| {
+						parse_seperated_list_sync(parser, T![,], Parser::parse_sync).map(|x| x.1)
+					})?;
+				}
+				T![DURATION] => {
+					let _ = parser.next();
+					let _ = parser.expect(T![FOR])?;
+					loop {
+						let expect = "`TOKEN` or `SESSION`";
+						let token = parser.peek_expect(expect)?;
+						match token.token {
+							T![TOKEN] => {
+								let _ = parser.next();
+								parse_unordered_clause(
+									parser,
+									&mut token_duration,
+									peek.span,
+									Parser::parse_enter,
+								)
+								.await?
+							}
+							T![SESSION] => {
+								let _ = parser.next();
+								parse_unordered_clause(
+									parser,
+									&mut session_duration,
+									peek.span,
+									Parser::parse_enter,
+								)
+								.await?
+							}
+							_ => return Err(parser.unexpected(expect)),
+						}
+						let _ = parser.eat(T![,])?;
+						if parser.eat(T![FOR])?.is_none() {
+							break;
+						}
+					}
+				}
+				_ => break,
+			}
+		}
+
+		let span = parser.span_since(define.span);
+		Ok(ast::DefineUser {
+			kind,
+			name,
+			base,
+			comment: comment.map(|x| x.0),
+			secret: secret.map(|x| x.0),
+			roles: roles.map(|x| x.0),
+			session_duration: session_duration.map(|x| x.0),
+			token_duration: token_duration.map(|x| x.0),
 			span,
 		})
 	}

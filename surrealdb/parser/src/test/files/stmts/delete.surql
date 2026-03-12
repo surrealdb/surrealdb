@@ -175,7 +175,7 @@ Query
                     Expr::Duration
                         1s
                     .explain: Some
-                    Explain::Base
+                    ExplainClause::Base
         -TopLevelExpr::Expr
             Expr::Delete
                 Delete
@@ -212,5 +212,5 @@ Query
                     Expr::Duration
                         1s
                     .explain: Some
-                    Explain::Full
+                    ExplainClause::Full
 */

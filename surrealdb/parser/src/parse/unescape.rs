@@ -150,7 +150,38 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				buffer.push('⟩');
 				true
 			}
-			EscapeTokenKind::EscUnicode => {
+
+			EscapeTokenKind::EscUnicodeFixed => {
+				let mut char = 0u32;
+				let slice = &slice.as_bytes()["\\u".len()..];
+				for i in 0..4 {
+					match slice[i] {
+						c @ b'0'..=b'9' => {
+							char *= 10;
+							char += (c - b'0') as u32
+						}
+						c @ b'a'..=b'f' => {
+							char *= 10;
+							char += (c - b'a' + 10) as u32
+						}
+						c @ b'A'..=b'F' => {
+							char *= 10;
+							char += (c - b'a' + 10) as u32
+						}
+						// Lexer already verified that there are only hex digits in the escape
+						// code.
+						_ => unreachable!(),
+					}
+				}
+
+				if let Some(x) = char::from_u32(char) {
+					buffer.push(x);
+					true
+				} else {
+					false
+				}
+			}
+			EscapeTokenKind::EscUnicodeBracket => {
 				let bytes = &slice.as_bytes()[b"\\u{".len()..slice.len() - 1];
 				let mut char = 0u32;
 				for b in bytes {
@@ -293,11 +324,37 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				EscapeTokenKind::EscBracketClose => {
 					offset_idx += const { '⟩'.len_utf8() } as u32;
 				}
-				EscapeTokenKind::EscUnicode => {
+				EscapeTokenKind::EscUnicodeFixed => {
 					let mut char = 0u32;
 					let slice = lexer.slice();
+					let slice = &slice["\\u".len()..].as_bytes();
+					for i in 0..4 {
+						match slice[i] {
+							c @ b'0'..=b'9' => {
+								char *= 10;
+								char += (c - b'0') as u32
+							}
+							c @ b'a'..=b'f' => {
+								char *= 10;
+								char += (c - b'a' + 10) as u32
+							}
+							c @ b'A'..=b'F' => {
+								char *= 10;
+								char += (c - b'a' + 10) as u32
+							}
+							// Lexer already verified that there are only hex digits in the escape
+							// code.
+							_ => unreachable!(),
+						}
+					}
+
+					offset_idx += char::from_u32(char).unwrap().len_utf8() as u32;
+				}
+				EscapeTokenKind::EscUnicodeBracket => {
+					let mut char = 0u32;
+					let slice = lexer.slice().as_bytes();
 					let slice = &slice["\\u{".len()..(slice.len() - 1)];
-					for c in slice.as_bytes() {
+					for c in slice {
 						match c {
 							b'0'..=b'9' => {
 								char *= 10;

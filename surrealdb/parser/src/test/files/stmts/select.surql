@@ -252,12 +252,13 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
+                    Group::Fields
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
                     .order: None
                     .start: None
                     .limit: None
@@ -294,17 +295,22 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
-                    .order: Some
-                    OrderBy::Places
+                    Group::Fields
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
+                    .order: Some
+                    OrderBy
+                        .kind: OrderByKind::Places
+                                -PresentPlace::Field
+                                    Ident
+                                        .text: "a"
+                        .collate: false
+                        .numeric: false
+                        .direction: None
                     .start: None
                     .limit: None
                     .version: None
@@ -340,17 +346,22 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
-                    .order: Some
-                    OrderBy::Places
+                    Group::Fields
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
+                    .order: Some
+                    OrderBy
+                        .kind: OrderByKind::Places
+                                -PresentPlace::Field
+                                    Ident
+                                        .text: "a"
+                        .collate: false
+                        .numeric: false
+                        .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -388,17 +399,22 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
-                    .order: Some
-                    OrderBy::Places
+                    Group::Fields
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
+                    .order: Some
+                    OrderBy
+                        .kind: OrderByKind::Places
+                                -PresentPlace::Field
+                                    Ident
+                                        .text: "a"
+                        .collate: false
+                        .numeric: false
+                        .direction: None
                     .start: None
                     .limit: Some
                     Expr::Integer
@@ -436,17 +452,22 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
-                    .order: Some
-                    OrderBy::Places
+                    Group::Fields
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
+                    .order: Some
+                    OrderBy
+                        .kind: OrderByKind::Places
+                                -PresentPlace::Field
+                                    Ident
+                                        .text: "a"
+                        .collate: false
+                        .numeric: false
+                        .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -486,17 +507,22 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
-                    .order: Some
-                    OrderBy::Places
+                    Group::Fields
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
+                    .order: Some
+                    OrderBy
+                        .kind: OrderByKind::Places
+                                -PresentPlace::Field
+                                    Ident
+                                        .text: "a"
+                        .collate: false
+                        .numeric: false
+                        .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -536,17 +562,22 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
-                    .order: Some
-                    OrderBy::Places
+                    Group::Fields
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
+                    .order: Some
+                    OrderBy
+                        .kind: OrderByKind::Places
+                                -PresentPlace::Field
+                                    Ident
+                                        .text: "a"
+                        .collate: false
+                        .numeric: false
+                        .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -588,17 +619,22 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
-                    .order: Some
-                    OrderBy::Places
+                    Group::Fields
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
+                    .order: Some
+                    OrderBy
+                        .kind: OrderByKind::Places
+                                -PresentPlace::Field
+                                    Ident
+                                        .text: "a"
+                        .collate: false
+                        .numeric: false
+                        .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -642,17 +678,22 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
-                    .order: Some
-                    OrderBy::Places
+                    Group::Fields
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
+                    .order: Some
+                    OrderBy
+                        .kind: OrderByKind::Places
+                                -PresentPlace::Field
+                                    Ident
+                                        .text: "a"
+                        .collate: false
+                        .numeric: false
+                        .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -696,17 +737,22 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
-                    .order: Some
-                    OrderBy::Places
+                    Group::Fields
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
+                    .order: Some
+                    OrderBy
+                        .kind: OrderByKind::Places
+                                -PresentPlace::Field
+                                    Ident
+                                        .text: "a"
+                        .collate: false
+                        .numeric: false
+                        .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -722,7 +768,7 @@ Query
                     .fetch: None
                     .tempfiles: false
                     .explain: Some
-                    Explain::Base
+                    ExplainClause::Base
         -TopLevelExpr::Expr
             Expr::Select
                 Select
@@ -751,17 +797,22 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
-                    .order: Some
-                    OrderBy::Places
+                    Group::Fields
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
+                    .order: Some
+                    OrderBy
+                        .kind: OrderByKind::Places
+                                -PresentPlace::Field
+                                    Ident
+                                        .text: "a"
+                        .collate: false
+                        .numeric: false
+                        .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -777,7 +828,7 @@ Query
                     .fetch: None
                     .tempfiles: false
                     .explain: Some
-                    Explain::Base
+                    ExplainClause::Base
         -TopLevelExpr::Expr
             Expr::Select
                 Select
@@ -806,17 +857,22 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
-                    .order: Some
-                    OrderBy::Places
+                    Group::Fields
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
+                    .order: Some
+                    OrderBy
+                        .kind: OrderByKind::Places
+                                -PresentPlace::Field
+                                    Ident
+                                        .text: "a"
+                        .collate: false
+                        .numeric: false
+                        .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -872,17 +928,22 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
-                    .order: Some
-                    OrderBy::Places
+                    Group::Fields
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
+                    .order: Some
+                    OrderBy
+                        .kind: OrderByKind::Places
+                                -PresentPlace::Field
+                                    Ident
+                                        .text: "a"
+                        .collate: false
+                        .numeric: false
+                        .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -929,17 +990,22 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
-                    .order: Some
-                    OrderBy::Places
+                    Group::Fields
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
+                    .order: Some
+                    OrderBy
+                        .kind: OrderByKind::Places
+                                -PresentPlace::Field
+                                    Ident
+                                        .text: "a"
+                        .collate: false
+                        .numeric: false
+                        .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -983,17 +1049,22 @@ Query
                                 +2
                     .split: None
                     .group: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
-                    .order: Some
-                    OrderBy::Places
+                    Group::Fields
                             -PresentPlace::Field
                                 Ident
                                     .text: "a"
+                            -PresentPlace::Field
+                                Ident
+                                    .text: "b"
+                    .order: Some
+                    OrderBy
+                        .kind: OrderByKind::Places
+                                -PresentPlace::Field
+                                    Ident
+                                        .text: "a"
+                        .collate: false
+                        .numeric: false
+                        .direction: None
                     .start: Some
                     Expr::Integer
                         +1

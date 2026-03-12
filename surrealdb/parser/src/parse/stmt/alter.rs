@@ -5,9 +5,8 @@ use crate::parse::ParseResult;
 use crate::parse::utils::{parse_unordered_clause, parse_unordered_clause_sync};
 use crate::{Parse, Parser};
 
-fn parse_if_not_exists(parser: &mut Parser<'_, '_>) -> ParseResult<bool> {
+fn parse_if_exists(parser: &mut Parser<'_, '_>) -> ParseResult<bool> {
 	if parser.eat(T![IF])?.is_some() {
-		let _ = parser.expect(T![NOT])?;
 		let _ = parser.expect(T![EXISTS])?;
 		Ok(true)
 	} else {
@@ -66,7 +65,7 @@ impl Parse for ast::AlterNamespace {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![NAMESPACE])?;
 
-		let if_exists = parse_if_not_exists(parser)?;
+		let if_exists = parse_if_exists(parser)?;
 
 		let name = parser.parse_enter().await?;
 
@@ -87,7 +86,7 @@ impl Parse for ast::AlterDatabase {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![DATABASE])?;
 
-		let if_exists = parse_if_not_exists(parser)?;
+		let if_exists = parse_if_exists(parser)?;
 
 		let name = parser.parse_enter().await?;
 
@@ -108,7 +107,7 @@ impl Parse for ast::AlterTable {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![TABLE])?;
 
-		let if_exists = parse_if_not_exists(parser)?;
+		let if_exists = parse_if_exists(parser)?;
 
 		let name = parser.parse_enter().await?;
 
@@ -123,7 +122,6 @@ impl Parse for ast::AlterTable {
 			};
 
 			match peek.token {
-				_ => break,
 				T![DROP] => {
 					let expect = "`CHANGEFEED` or `COMMENT`";
 					let drop = parser.peek_expect(expect)?;
@@ -182,6 +180,7 @@ impl Parse for ast::AlterTable {
 						Ok(Schema::Less)
 					})?;
 				}
+				_ => break,
 			}
 		}
 
@@ -204,7 +203,7 @@ impl Parse for ast::AlterIndex {
 		let alter = parser.expect(T![ALTER])?;
 		let _ = parser.expect(T![INDEX])?;
 
-		let if_exists = parse_if_not_exists(parser)?;
+		let if_exists = parse_if_exists(parser)?;
 
 		let name = parser.parse_enter().await?;
 		let _ = parser.expect(T![ON])?;

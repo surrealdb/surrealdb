@@ -171,6 +171,8 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<PrimeType>
 
 			Ok(ast::PrimeType::LitArray(ty))
 		}
+		BaseTokenKind::String => Ok(ast::PrimeType::LitString(parser.parse_sync()?)),
+		BaseTokenKind::Duration => Ok(ast::PrimeType::LitDuration(parser.parse_sync()?)),
 		T![INT] => {
 			let _ = parser.next();
 			Ok(ast::PrimeType::Integer(peek.span))
@@ -376,4 +378,50 @@ impl Parse for ast::Type {
 		let (_, head) = parse_seperated_list(parser, T![|], parse_prime_type).await?;
 		Ok(ast::Type::Prime(head))
 	}
+}
+
+/// Parse a type which is not surrounded by `<>`.
+pub async fn parse_bare_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::Type> {
+	let peek = parser.peek_expect("a kind")?;
+	match peek.token {
+		T![<] => {
+			let _ = parser.next()?;
+			let res = parser.parse().await?;
+			let _ = parser.expect_closing_delimiter(T![>], peek.span)?;
+			return Ok(res);
+		}
+		T![ANY] => {
+			let _ = parser.next()?;
+			let ty = ast::Type::Any(peek.span);
+
+			no_either_type(parser, peek.span)?;
+
+			return Ok(ty);
+		}
+		T![OPTION] => {
+			let _ = parser.next()?;
+			let start = parser.expect(T![<])?;
+			let (_, head) = parse_seperated_list(parser, T![|], parse_prime_type).await?;
+			let _ = parser.expect_closing_delimiter(T![>], start.span)?;
+
+			let none = parser.push(ast::PrimeType::None(peek.span));
+			let head = parser.push_list_item(NodeList {
+				cur: none,
+				next: Some(head),
+			});
+
+			no_either_type(parser, peek.span)?;
+
+			return Ok(ast::Type::Prime(head));
+		}
+		_ => {}
+	}
+
+	let cur = parse_prime_type(parser).await?;
+	let cur = parser.push(cur);
+	let item = parser.push_list_item(NodeList {
+		cur,
+		next: None,
+	});
+	Ok(ast::Type::Prime(item))
 }

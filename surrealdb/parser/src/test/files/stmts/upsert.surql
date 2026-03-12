@@ -646,5 +646,5 @@ Query
                     Expr::Duration
                         1s
                     .explain: Some
-                    Explain::Full
+                    ExplainClause::Full
 */

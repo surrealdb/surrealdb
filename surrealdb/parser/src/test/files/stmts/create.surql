@@ -24,6 +24,7 @@ Query
                                     .text: "a"
                                 .parts: None
                     .data: None
+                    .output: None
                     .version: None
                     .timeout: None
         -TopLevelExpr::Expr
@@ -42,6 +43,7 @@ Query
                                     .text: "b"
                                 .parts: None
                     .data: None
+                    .output: None
                     .version: None
                     .timeout: None
         -TopLevelExpr::Expr
@@ -60,6 +62,7 @@ Query
                                     .text: "b"
                                 .parts: None
                     .data: None
+                    .output: None
                     .version: None
                     .timeout: None
         -TopLevelExpr::Expr
@@ -115,6 +118,7 @@ Query
                                 .op: AssignmentOp::Extend
                                 .value: Expr::Integer
                                     +4
+                    .output: None
                     .version: None
                     .timeout: None
         -TopLevelExpr::Expr
@@ -151,6 +155,7 @@ Query
                                             .text: "d"
                                     .index: Expr::Integer
                                         +1
+                    .output: None
                     .version: None
                     .timeout: None
         -TopLevelExpr::Expr
@@ -177,6 +182,7 @@ Query
                                         .key: "a"
                                         .value: Expr::Integer
                                             +1
+                    .output: None
                     .version: None
                     .timeout: None
         -TopLevelExpr::Expr
@@ -203,6 +209,7 @@ Query
                                         .key: "a"
                                         .value: Expr::Integer
                                             +1
+                    .output: None
                     .version: None
                     .timeout: None
         -TopLevelExpr::Expr
@@ -229,6 +236,7 @@ Query
                                         .key: "a"
                                         .value: Expr::Integer
                                             +1
+                    .output: None
                     .version: None
                     .timeout: None
         -TopLevelExpr::Expr
@@ -255,6 +263,7 @@ Query
                                         .key: "a"
                                         .value: Expr::Integer
                                             +1
+                    .output: None
                     .version: None
                     .timeout: None
         -TopLevelExpr::Expr
@@ -281,6 +290,7 @@ Query
                                         .key: "a"
                                         .value: Expr::Integer
                                             +1
+                    .output: None
                     .version: Some
                     Expr::Integer
                         +1
@@ -309,6 +319,7 @@ Query
                                         .key: "a"
                                         .value: Expr::Integer
                                             +1
+                    .output: None
                     .version: Some
                     Expr::Integer
                         +1

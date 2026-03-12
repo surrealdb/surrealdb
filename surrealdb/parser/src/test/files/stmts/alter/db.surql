@@ -1,6 +1,6 @@
 ALTER DATABASE a COMPACT;
 ALTER DATABASE 1 + 1;
-ALTER DATABASE IF NOT EXISTS 1 + 1;
+ALTER DATABASE IF EXISTS 1 + 1;
 /* ===== result =====
 Query
     .exprs: Some

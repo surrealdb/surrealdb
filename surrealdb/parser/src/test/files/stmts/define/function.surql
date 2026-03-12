@@ -89,12 +89,14 @@ Query
                         -Parameter
                             .name: Param
                                 .text: "c"
-                            .ty: Type::Prime
+                            .ty: Some
+                            Type::Prime
                                     -PrimeType::Integer
                         -Parameter
                             .name: Param
                                 .text: "d"
-                            .ty: Type::Prime
+                            .ty: Some
+                            Type::Prime
                                     -PrimeType::Integer
                     .return_ty: None
                     .body: Block
@@ -119,12 +121,14 @@ Query
                         -Parameter
                             .name: Param
                                 .text: "c"
-                            .ty: Type::Prime
+                            .ty: Some
+                            Type::Prime
                                     -PrimeType::Integer
                         -Parameter
                             .name: Param
                                 .text: "d"
-                            .ty: Type::Prime
+                            .ty: Some
+                            Type::Prime
                                     -PrimeType::Integer
                     .return_ty: Some
                     Type::Prime
@@ -151,12 +155,14 @@ Query
                         -Parameter
                             .name: Param
                                 .text: "c"
-                            .ty: Type::Prime
+                            .ty: Some
+                            Type::Prime
                                     -PrimeType::Integer
                         -Parameter
                             .name: Param
                                 .text: "d"
-                            .ty: Type::Prime
+                            .ty: Some
+                            Type::Prime
                                     -PrimeType::Integer
                     .return_ty: Some
                     Type::Prime
@@ -186,12 +192,14 @@ Query
                         -Parameter
                             .name: Param
                                 .text: "c"
-                            .ty: Type::Prime
+                            .ty: Some
+                            Type::Prime
                                     -PrimeType::Integer
                         -Parameter
                             .name: Param
                                 .text: "d"
-                            .ty: Type::Prime
+                            .ty: Some
+                            Type::Prime
                                     -PrimeType::Integer
                     .return_ty: Some
                     Type::Prime
@@ -221,12 +229,14 @@ Query
                         -Parameter
                             .name: Param
                                 .text: "c"
-                            .ty: Type::Prime
+                            .ty: Some
+                            Type::Prime
                                     -PrimeType::Integer
                         -Parameter
                             .name: Param
                                 .text: "d"
-                            .ty: Type::Prime
+                            .ty: Some
+                            Type::Prime
                                     -PrimeType::Integer
                     .return_ty: Some
                     Type::Prime
@@ -257,12 +267,14 @@ Query
                         -Parameter
                             .name: Param
                                 .text: "c"
-                            .ty: Type::Prime
+                            .ty: Some
+                            Type::Prime
                                     -PrimeType::Integer
                         -Parameter
                             .name: Param
                                 .text: "d"
-                            .ty: Type::Prime
+                            .ty: Some
+                            Type::Prime
                                     -PrimeType::Integer
                     .return_ty: Some
                     Type::Prime
@@ -293,12 +305,14 @@ Query
                         -Parameter
                             .name: Param
                                 .text: "c"
-                            .ty: Type::Prime
+                            .ty: Some
+                            Type::Prime
                                     -PrimeType::Integer
                         -Parameter
                             .name: Param
                                 .text: "d"
-                            .ty: Type::Prime
+                            .ty: Some
+                            Type::Prime
                                     -PrimeType::Integer
                     .return_ty: Some
                     Type::Prime

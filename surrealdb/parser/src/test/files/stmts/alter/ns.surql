@@ -1,6 +1,6 @@
 ALTER NAMESPACE a COMPACT;
 ALTER NAMESPACE 1 + 1;
-ALTER NAMESPACE IF NOT EXISTS 1 + 1;
+ALTER NAMESPACE IF EXISTS 1 + 1;
 /* ===== result =====
 Query
     .exprs: Some

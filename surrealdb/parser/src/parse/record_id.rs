@@ -87,7 +87,12 @@ impl Parse for ast::RecordId {
 					}
 				}
 			}
-			T![RAND] => {
+			T![RAND]
+				if parser
+					.peek1()?
+					.map(|x| matches!(x.token, BaseTokenKind::OpenParen))
+					.unwrap_or(false) =>
+			{
 				let _ = parser.next();
 				let _ = parser.expect(BaseTokenKind::OpenParen)?;
 				let _ = parser.expect(BaseTokenKind::CloseParen)?;
@@ -96,7 +101,12 @@ impl Parse for ast::RecordId {
 					span: parser.span_since(peek.span),
 				})
 			}
-			T![UUID] => {
+			T![UUID]
+				if parser
+					.peek1()?
+					.map(|x| matches!(x.token, BaseTokenKind::OpenParen))
+					.unwrap_or(false) =>
+			{
 				let _ = parser.next();
 				let _ = parser.expect(BaseTokenKind::OpenParen)?;
 				let _ = parser.expect(BaseTokenKind::CloseParen)?;
@@ -105,7 +115,12 @@ impl Parse for ast::RecordId {
 					span: parser.span_since(peek.span),
 				})
 			}
-			T![ULID] => {
+			T![ULID]
+				if parser
+					.peek1()?
+					.map(|x| matches!(x.token, BaseTokenKind::OpenParen))
+					.unwrap_or(false) =>
+			{
 				let _ = parser.next();
 				let _ = parser.expect(BaseTokenKind::OpenParen)?;
 				let _ = parser.expect(BaseTokenKind::CloseParen)?;

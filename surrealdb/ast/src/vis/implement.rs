@@ -164,6 +164,8 @@ impl_vis_debug!(Uuid);
 impl_vis_debug!(DateTime);
 impl_vis_debug!(Duration);
 
+impl_vis_debug!(Vec<u8>);
+
 impl_vis_debug!(bool);
 impl_vis_debug!(usize);
 impl_vis_debug!(isize);
