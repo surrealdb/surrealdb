@@ -1134,14 +1134,11 @@ impl Executor {
 					if stmt.name.eq_ignore_ascii_case("IMPORT") && stmt.what =>
 				{
 					this.execute_option_statement(stmt.clone())?;
-					// Root and namespace-level users have access to all databases
-					// in their scope, so per-document permission checks are
-					// redundant. DB-level editors keep perms enabled so that
-					// check_perms detects cross-database USE and enforces table
-					// permissions.
-					if this.opt.auth.is_root() || this.opt.auth.is_ns() {
-						this.opt.perms = false;
-					}
+					// OPTION IMPORT already requires editor-level DB access
+					// (Action::Edit on ResourceKind::Option at Base::Db), so
+					// per-document permission checks are redundant and can be
+					// skipped for the entire import session.
+					this.opt.perms = false;
 				}
 				Some(Err(e)) => {
 					bail!(Error::InvalidStatement(e.to_string()));
@@ -1177,12 +1174,9 @@ impl Executor {
 
 			match stmt {
 				TopLevelExpr::Option(stmt) => {
-					if skip_success_results
-						&& stmt.name.eq_ignore_ascii_case("IMPORT")
-						&& !stmt.what
-					{
+					if skip_success_results && stmt.name.eq_ignore_ascii_case("IMPORT") {
 						bail!(Error::InvalidStatement(
-							"Cannot disable OPTION IMPORT during an import stream. \
+							"Cannot change OPTION IMPORT during an import stream. \
 						 Import mode is locked for the duration of the /import request."
 								.to_string()
 						));
@@ -1556,39 +1550,11 @@ mod tests {
 		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
 		let result = ds.import_stream(&sess, body).await;
 
-		assert!(result.is_err(), "import_stream should reject OPTION IMPORT = false mid-stream");
+		assert!(result.is_err(), "import_stream should reject OPTION IMPORT changes mid-stream");
 		let err = result.unwrap_err().to_string();
 		assert!(
-			err.contains("Cannot disable OPTION IMPORT"),
+			err.contains("Cannot change OPTION IMPORT"),
 			"Error should explain that import mode is locked, got: {err}"
 		);
-	}
-
-	#[tokio::test]
-	async fn import_stream_allows_option_import_reaffirmation() {
-		use bytes::Bytes;
-
-		let ds = Datastore::new("memory").await.unwrap();
-		let sess = Session::default().with_ns("NS").with_db("DB");
-
-		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
-			.await
-			.unwrap();
-
-		// Simulates concatenated export files: each starts with OPTION IMPORT
-		let sql = "OPTION IMPORT; INSERT INTO person { name: 'a' }; OPTION IMPORT; INSERT INTO person { name: 'b' };";
-		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
-		let results = ds.import_stream(&sess, body).await.unwrap();
-
-		assert!(
-			results.iter().all(|r| r.result.is_ok()),
-			"Re-affirming OPTION IMPORT mid-stream should succeed, got errors: {:?}",
-			results.iter().filter(|r| r.result.is_err()).collect::<Vec<_>>()
-		);
-
-		let verify = ds.execute("SELECT * FROM person ORDER BY name", &sess, None).await.unwrap();
-		let rows = verify[0].result.as_ref().unwrap();
-		let arr = rows.as_array().unwrap();
-		assert_eq!(arr.len(), 2, "Both INSERTs should have persisted, got {}", arr.len());
 	}
 }
