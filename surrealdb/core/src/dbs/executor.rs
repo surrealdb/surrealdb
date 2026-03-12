@@ -1143,15 +1143,12 @@ impl Executor {
 				Some(Err(e)) => {
 					bail!(Error::InvalidStatement(e.to_string()));
 				}
-				None => {
-					return Ok(this.results);
-				}
 				_ => {
 					bail!(Error::InvalidStatement(
 						"Import requires `OPTION IMPORT;` as the first statement. \
-					 This disables events, live queries, field processing, and result \
-					 output for optimal import performance. To execute queries with \
-					 full side effects, use the /sql endpoint instead."
+						 This disables events, live queries, field processing, and result \
+						 output for optimal import performance. To execute queries with \
+						 full side effects, use the /sql endpoint instead."
 							.to_string()
 					));
 				}
