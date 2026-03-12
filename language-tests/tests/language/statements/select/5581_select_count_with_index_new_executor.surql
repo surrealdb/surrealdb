@@ -1,4 +1,6 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
 
 [test]
 issue = 5581

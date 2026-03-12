@@ -1,6 +1,6 @@
 /**
 [env]
-new-planner-strategy = "all-ro"
+planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test that SELECT ... EXPLAIN rewrites to EXPLAIN SELECT (JSON format) and SELECT ... EXPLAIN FULL rewrites to EXPLAIN ANALYZE SELECT (JSON format) when using the new planner"

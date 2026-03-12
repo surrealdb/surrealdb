@@ -469,11 +469,11 @@ impl<'ctx> Planner<'ctx> {
 					field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
 
 				if is_select_all {
-					if Self::has_nested_omit(&omit) {
-						return self.plan_projections(fields, omit, input, is_value_source).await;
-					}
+				if Self::has_complex_omit(&omit) {
+					return self.plan_projections(fields, omit, input, is_value_source).await;
+				}
 
-					let mut projections = vec![Projection::All];
+				let mut projections = vec![Projection::All];
 					for expr in &omit {
 						if let Expr::Idiom(idiom) = expr {
 							projections.push(Projection::Omit(idiom_to_field_name(idiom)));
@@ -499,10 +499,11 @@ impl<'ctx> Planner<'ctx> {
 					return Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>);
 				}
 
-				// Bail out early if OMIT contains nested paths — the fast
-				// SelectProject path can't handle them, and checking now
-				// avoids compiling physical expressions we'd throw away.
-				if Self::has_nested_omit(&omit) {
+				// Bail out early if OMIT contains complex expressions (nested
+				// paths, function calls, params) — the fast SelectProject path
+				// can't handle them, and checking now avoids compiling physical
+				// expressions we'd throw away.
+				if Self::has_complex_omit(&omit) {
 					return self.plan_projections(fields, omit, input, is_value_source).await;
 				}
 
@@ -659,16 +660,17 @@ impl<'ctx> Planner<'ctx> {
 		}
 	}
 
-	/// Check whether any OMIT expression contains a nested (multi-part) idiom.
+	/// Check whether any OMIT expression requires the full `Project` operator.
 	///
-	/// `SelectProject` only handles flat `Projection::Omit`; nested paths like
-	/// `opts.age` require the full `Project` operator with `omit_nested_field`.
-	fn has_nested_omit(omit: &[Expr]) -> bool {
+	/// `SelectProject` only handles flat `Projection::Omit` with simple idioms.
+	/// Nested paths like `opts.age`, function calls like `type::field(...)`, and
+	/// parameters all require the full `Project` operator via `plan_omit`.
+	fn has_complex_omit(omit: &[Expr]) -> bool {
 		omit.iter().any(|e| {
 			if let Expr::Idiom(idiom) = e {
 				idiom.len() > 1
 			} else {
-				false
+				true
 			}
 		})
 	}

@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "EXPLAIN plans show plan-time source resolution: type::table($name) resolves to concrete operators"
 

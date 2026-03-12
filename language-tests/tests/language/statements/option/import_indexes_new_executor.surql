@@ -1,4 +1,9 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+namespace = "test"
+database = "test"
+
 [test]
 reason = "Test that OPTION IMPORT populates indexes correctly"
 
@@ -19,10 +24,6 @@ value = ''''SelectProject [ctx: Db] [projections: *] {rows: 1}
     IndexScan [ctx: Db] [index: field_num, access: = 123, direction: Forward] {rows: 1}
 
 Total rows: 1''''
-
-[env]
-namespace = "test"
-database = "test"
 
 */
 

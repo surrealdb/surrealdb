@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test IN and INSIDE operators with standard, unique, and compound indexes (new executor)"
 

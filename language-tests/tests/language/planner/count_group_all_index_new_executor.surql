@@ -1,5 +1,7 @@
 /**
 [env]
+planner-strategy = ["all-ro"]
+
 timeout = 30000
 context-timeout = 30000
 

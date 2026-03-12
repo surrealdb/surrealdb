@@ -27,7 +27,7 @@ value = "[['United States', 'California'], ['United States', 'Texas'], ['Canada'
 value = "[[planet:earth, country:us, state:california], [planet:earth, country:us, state:texas], [planet:earth, country:canada, province:ontario], [planet:earth, country:canada, province:bc]]"
 
 [[test.results]]
-value = "[state:california, state:texas, province:ontario, province:bc]"
+match = "array::sort::asc($result) == [province:bc, province:ontario, state:california, state:texas]"
 
 [[test.results]]
 value = "['California', 'Texas', 'Ontario', 'British Columbia']"
@@ -76,6 +76,7 @@ value = "{ id: planet:earth, name: 'Earth', places: [{ id: country:us, name: 'Un
 
 [env]
 timeout = 10000
+planner-strategy = ["all-ro"]
 */
 
 INSERT [

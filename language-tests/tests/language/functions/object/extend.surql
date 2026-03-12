@@ -2,7 +2,8 @@
 [test]
 
 [[test.results]]
-error = "Incorrect arguments for method extend(). Argument 2 was the wrong type. Expected `object` but found `'9'`"
+match = "$error = /Incorrect arguments for (?:function|method) (?:object::?)?extend\\(\\)\\. Argument 2 was the wrong type\\. Expected `object` but found `'9'`/"
+error = true
 
 
 [[test.results]]

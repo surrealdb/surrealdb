@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Param holding a Table value gets full plan-time index resolution, matching literal table behavior"
 
