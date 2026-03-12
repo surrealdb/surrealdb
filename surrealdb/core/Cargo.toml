@@ -160,6 +160,7 @@ tracing.workspace = true
 web-time.workspace = true
 ulid = { workspace = true, features = ["serde"] }
 unicase.workspace = true
+percent-encoding.workspace = true
 url.workspace = true
 
 # Other optional crates

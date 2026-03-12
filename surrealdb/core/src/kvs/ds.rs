@@ -351,6 +351,10 @@ impl TransactionBuilderFactory for CommunityComposer {
 			_ => bail!(Error::Unreachable("Provide a valid database path parameter".to_owned())),
 		};
 
+		// Percent-decode the path so that URL-encoded characters (e.g. %20 for spaces)
+		// are converted to their literal equivalents before being used as filesystem paths.
+		let path = percent_encoding::percent_decode_str(path).decode_utf8_lossy();
+
 		let path = if path.starts_with("/") {
 			// if absolute, remove all slashes except one
 			let normalised = format!("/{}", path.trim_start_matches("/"));
