@@ -651,21 +651,23 @@ impl RecurseInstruction {
 				// Clean the iteration
 				let res = clean_iteration(res);
 
-				// Persist any new values from the result
-				match &res {
-					Value::Array(v) => {
-						for v in v.iter() {
+				// Persist any new values from the result, only at or beyond min depth
+				if rec.iterated >= rec.min {
+					match &res {
+						Value::Array(v) => {
+							for v in v.iter() {
+								if !finished.contains(v) {
+									finished.push(v.to_owned());
+								}
+							}
+						}
+						v => {
 							if !finished.contains(v) {
 								finished.push(v.to_owned());
 							}
 						}
-					}
-					v => {
-						if !finished.contains(v) {
-							finished.push(v.to_owned());
-						}
-					}
-				};
+					};
+				}
 
 				// Continue
 				Ok(res)

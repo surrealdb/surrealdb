@@ -333,7 +333,6 @@ impl<'ctx> Planner<'ctx> {
 				limit,
 				start,
 				omit: vec![],
-				is_value_source: false,
 				tempfiles: false,
 				filter_pushed: false,
 				precompiled_predicate: None,

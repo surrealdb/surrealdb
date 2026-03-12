@@ -60,9 +60,6 @@ pub(crate) struct SelectPipelineConfig {
 	pub limit: Option<crate::expr::limit::Limit>,
 	pub start: Option<crate::expr::start::Start>,
 	pub omit: Vec<Expr>,
-	/// Is the `FROM` clause equivalent only values, i.e. for SELECT * FROM [1,2,3,4],"a"
-	/// this field is true.
-	pub is_value_source: bool,
 	pub tempfiles: bool,
 	/// True when the WHERE predicate has been pushed into the Scan operator.
 	/// Currently informational; the actual guard is `cond: None` in the config.
@@ -207,7 +204,6 @@ impl<'ctx> Planner<'ctx> {
 			limit,
 			start,
 			omit,
-			is_value_source,
 			tempfiles,
 			filter_pushed: _,
 			precompiled_predicate,
@@ -311,8 +307,7 @@ impl<'ctx> Planner<'ctx> {
 				limited
 			}
 		} else {
-			self.plan_projections_fast(fields, all_omit, limited, is_value_source, &mut registry)
-				.await?
+			self.plan_projections_fast(fields, all_omit, limited, &mut registry).await?
 		};
 
 		Ok(projected)
@@ -371,7 +366,6 @@ impl<'ctx> Planner<'ctx> {
 		fields: Fields,
 		omit: Vec<Expr>,
 		input: Arc<dyn ExecOperator>,
-		is_value_source: bool,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		match fields {
 			Fields::Value(selector) => {
@@ -394,17 +388,6 @@ impl<'ctx> Planner<'ctx> {
 				}
 
 				let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
-
-				if is_value_source
-					&& !has_wildcard
-					&& field_list.len() == 1
-					&& let Some(Field::Single(selector)) = field_list.first()
-					&& selector.alias.is_none()
-					&& let Expr::Param(_) = &selector.expr
-				{
-					let expr = self.physical_expr(selector.expr.clone()).await?;
-					return Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>);
-				}
 
 				let mut field_selections = Vec::with_capacity(field_list.len());
 
@@ -455,7 +438,6 @@ impl<'ctx> Planner<'ctx> {
 		fields: Fields,
 		omit: Vec<Expr>,
 		input: Arc<dyn ExecOperator>,
-		is_value_source: bool,
 		registry: &mut ExpressionRegistry,
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		match fields {
@@ -469,11 +451,11 @@ impl<'ctx> Planner<'ctx> {
 					field_list.len() == 1 && matches!(field_list.first(), Some(Field::All));
 
 				if is_select_all {
-				if Self::has_complex_omit(&omit) {
-					return self.plan_projections(fields, omit, input, is_value_source).await;
-				}
+					if Self::has_complex_omit(&omit) {
+						return self.plan_projections(fields, omit, input).await;
+					}
 
-				let mut projections = vec![Projection::All];
+					let mut projections = vec![Projection::All];
 					for expr in &omit {
 						if let Expr::Idiom(idiom) = expr {
 							projections.push(Projection::Omit(idiom_to_field_name(idiom)));
@@ -486,25 +468,14 @@ impl<'ctx> Planner<'ctx> {
 					)) as Arc<dyn ExecOperator>);
 				}
 
-				// SELECT VALUE $param fast path
 				let has_wildcard = field_list.iter().any(|f| matches!(f, Field::All));
-				if is_value_source
-					&& !has_wildcard
-					&& field_list.len() == 1
-					&& let Some(Field::Single(selector)) = field_list.first()
-					&& selector.alias.is_none()
-					&& let Expr::Param(_) = &selector.expr
-				{
-					let expr = self.physical_expr(selector.expr.clone()).await?;
-					return Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>);
-				}
 
 				// Bail out early if OMIT contains complex expressions (nested
 				// paths, function calls, params) — the fast SelectProject path
 				// can't handle them, and checking now avoids compiling physical
 				// expressions we'd throw away.
 				if Self::has_complex_omit(&omit) {
-					return self.plan_projections(fields, omit, input, is_value_source).await;
+					return self.plan_projections(fields, omit, input).await;
 				}
 
 				// Classify each field. If any field requires the full Project
@@ -604,7 +575,7 @@ impl<'ctx> Planner<'ctx> {
 				}
 
 				if needs_fallback {
-					return self.plan_projections(fields, omit, input, is_value_source).await;
+					return self.plan_projections(fields, omit, input).await;
 				}
 
 				// Add OMIT projections (all simple / top-level)
@@ -1298,7 +1269,7 @@ impl<'ctx> Planner<'ctx> {
 			} else {
 				scan
 			};
-			let projected = self.plan_projections(fields, omit, limited, false).await?;
+			let projected = self.plan_projections(fields, omit, limited).await?;
 			let timed = match timeout {
 				Expr::Literal(Literal::None) => projected,
 				te => {
@@ -1571,7 +1542,6 @@ impl<'ctx> Planner<'ctx> {
 				start
 			},
 			omit,
-			is_value_source,
 			tempfiles,
 			filter_pushed: false,
 			precompiled_predicate: if had_bruteforce_knn {
