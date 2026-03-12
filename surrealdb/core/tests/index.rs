@@ -520,7 +520,7 @@ async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
 
 	// Step 5: Let the concurrent writes and index compaction run together for 2 seconds,
 	// then signal all tasks and the compaction loop to stop via the cancellation token.
-	sleep(Duration::from_secs(2)).await;
+	sleep(Duration::from_secs(5)).await;
 	cancellation.cancel();
 
 	// Step 6: Await all write tasks and the compaction loop, propagating any errors.

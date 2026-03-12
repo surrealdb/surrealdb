@@ -53,8 +53,6 @@ pub(crate) struct HnswIndex {
 	vector_type: VectorType,
 	/// The HNSW graph, protected by a read-write lock for concurrent access.
 	hnsw: RwLock<HnswFlavor>,
-	/// Document-to-ID mappings, protected by a read-write lock.
-	docs: RwLock<HnswDocs>,
 	/// Vector-to-document mappings.
 	vec_docs: VecDocs,
 	/// Monotonically increasing counter for assigning pending update keys.
@@ -110,9 +108,6 @@ impl HnswIndex {
 			vector_type: p.vector_type,
 			distance: p.distance.clone(),
 			hnsw: RwLock::new(HnswFlavor::new(tb, ikb.clone(), p, vector_cache)?),
-			docs: RwLock::new(
-				HnswDocs::new(tx, ikb.table().to_string().into(), ikb.clone()).await?,
-			),
 			vec_docs: VecDocs::new(ikb.clone(), p.use_hashed_vector),
 			ikb,
 			next_appending_id: AtomicU64::new(next_appending_id),
@@ -160,7 +155,7 @@ impl HnswIndex {
 			vec![]
 		};
 		let tx = ctx.tx();
-		let id = if let Some(doc_id) = self.docs.read().await.get_doc_id(&tx, id).await? {
+		let id = if let Some(doc_id) = HnswDocs::get_doc_id(&self.ikb, &tx, id).await? {
 			VectorId::DocId(doc_id)
 		} else {
 			VectorId::RecordKey(Arc::new(id.clone()))
@@ -192,6 +187,7 @@ impl HnswIndex {
 		let mut stream = tx.stream_keys_vals(rng, None, None, 0, ScanDirection::Forward, false);
 		// Loop until no more entries
 		let mut count = 0;
+		let mut docs = HnswDocs::new(&tx, self.ikb.clone()).await?;
 		while let Some(res) = stream.next().await {
 			let batch = res?;
 			for (_, v) in batch {
@@ -200,12 +196,13 @@ impl HnswIndex {
 					bail!(Error::QueryCancelled)
 				}
 				let pending = VectorPendingUpdate::kv_decode_value(v)?;
-				self.index_pending(ctx, pending).await?;
+				self.index_pending(ctx, &mut docs, pending).await?;
 				// Parse the data from the store
 				count += 1;
 			}
 		}
 		tx.delr(self.ikb.new_hp_range()?).await?;
+		docs.finish(&tx).await?;
 		Ok(count)
 	}
 
@@ -213,8 +210,12 @@ impl HnswIndex {
 	///
 	/// Acquires write locks on both the graph and document mappings to
 	/// remove old vectors, insert new vectors, and update document state.
-	async fn index_pending(&self, ctx: &FrozenContext, pending: VectorPendingUpdate) -> Result<()> {
-		let mut docs = self.docs.write().await;
+	async fn index_pending(
+		&self,
+		ctx: &FrozenContext,
+		docs: &mut HnswDocs,
+		pending: VectorPendingUpdate,
+	) -> Result<()> {
 		let mut hnsw = self.hnsw.write().await;
 		// Ensure the layers are up-to-date
 		hnsw.check_state(ctx).await?;
@@ -247,8 +248,6 @@ impl HnswIndex {
 				self.vec_docs.insert(&mut ctx, vector, doc_id, &mut hnsw).await?;
 			}
 		}
-		// update the state
-		docs.finish(&ctx.tx).await?;
 		Ok(())
 	}
 
@@ -274,7 +273,7 @@ impl HnswIndex {
 	) -> Result<VecDeque<KnnIteratorResult>> {
 		// Build a filter if required
 		let mut filter = if let Some((opt, cond)) = cond_filter {
-			Some(HnswTruthyDocumentFilter::new(opt, self.ikb.clone(), self.docs.read().await, cond))
+			Some(HnswTruthyDocumentFilter::new(opt, self.ikb.clone(), cond))
 		} else {
 			None
 		};
@@ -296,13 +295,13 @@ impl HnswIndex {
 		// We build the final result: replacing DocId with RecordIds
 		let result = builder.collect();
 
-		let (docs, cache) = if let Some(filter) = filter {
+		let cache = if let Some(filter) = filter {
 			// If there is a filter, we returns the read-locked HnswDoc
 			// and the record cache
-			let (docs, cache) = filter.release();
-			(docs, Some(cache))
+			let cache = filter.release();
+			Some(cache)
 		} else {
-			(self.docs.read().await, None)
+			None
 		};
 		// We can now build the final result
 		let mut res = VecDeque::with_capacity(result.len());
@@ -318,7 +317,7 @@ impl HnswIndex {
 			// Otherwise we get it from the state
 			match id {
 				VectorId::DocId(doc_id) => {
-					if let Some(rid) = docs.get_thing(&ctx.tx, doc_id).await? {
+					if let Some(rid) = HnswDocs::get_thing(&ctx.ikb, &ctx.tx, doc_id).await? {
 						res.push_back((Arc::new(rid), dist, None));
 					}
 				}

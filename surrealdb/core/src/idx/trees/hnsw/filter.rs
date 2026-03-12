@@ -4,7 +4,6 @@ use std::sync::Arc;
 use ahash::HashMap;
 use anyhow::Result;
 use reblessive::tree::Stk;
-use tokio::sync::RwLockReadGuard;
 
 use crate::catalog::Record;
 use crate::catalog::providers::TableProvider;
@@ -31,8 +30,6 @@ pub(super) struct HnswTruthyDocumentFilter<'a> {
 	opt: &'a Options,
 	/// Key base for record lookups.
 	ikb: IndexKeyBase,
-	/// Read-locked document mappings.
-	docs: RwLockReadGuard<'a, HnswDocs>,
 	/// The filter condition to evaluate.
 	cond: Arc<Cond>,
 	/// Cache of previously evaluated filter results.
@@ -40,16 +37,10 @@ pub(super) struct HnswTruthyDocumentFilter<'a> {
 }
 
 impl<'a> HnswTruthyDocumentFilter<'a> {
-	pub(super) fn new(
-		opt: &'a Options,
-		ikb: IndexKeyBase,
-		docs: RwLockReadGuard<'a, HnswDocs>,
-		cond: Arc<Cond>,
-	) -> Self {
+	pub(super) fn new(opt: &'a Options, ikb: IndexKeyBase, cond: Arc<Cond>) -> Self {
 		Self {
 			opt,
 			ikb,
-			docs,
 			cond,
 			cache: Default::default(),
 		}
@@ -85,7 +76,8 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 				// Collect the RecordId
 				let rid = match e.key() {
 					VectorId::DocId(doc_id) => {
-						let Some(rid) = self.docs.get_thing(&ctx.tx, *doc_id).await? else {
+						let Some(rid) = HnswDocs::get_thing(&self.ikb, &ctx.tx, *doc_id).await?
+						else {
 							// No record ID ? It is not truthy
 							return Ok(false);
 						};
@@ -153,7 +145,7 @@ impl<'a> HnswTruthyDocumentFilter<'a> {
 	}
 
 	/// Returns the locked HnswDocs and the cache
-	pub(super) fn release(self) -> (RwLockReadGuard<'a, HnswDocs>, FilterCache) {
-		(self.docs, self.cache)
+	pub(super) fn release(self) -> FilterCache {
+		self.cache
 	}
 }
