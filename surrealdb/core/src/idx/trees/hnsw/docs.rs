@@ -119,6 +119,7 @@ impl HnswDocs {
 		let Some(id) = tx.get(&doc_key, None).await? else {
 			return Ok(None);
 		};
+		self.state_updated = true;
 		tx.del(&doc_key).await?;
 		let id_key = self.ikb.new_hi_key(&id);
 		if let Some(doc_id) = tx.get(&id_key, None).await? {

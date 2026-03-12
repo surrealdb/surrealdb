@@ -452,7 +452,7 @@ async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
 	// - FULLTEXT index with a custom analyzer using BM25 scoring (idx_scope_name_ft)
 	// This ensures that index compaction is exercised against a variety of index types.
 	for session in &sessions {
-		dbs.execute(
+		let results = dbs.execute(
 			"
 		DEFINE TABLE user SCHEMALESS;
         DEFINE TABLE scope SCHEMALESS;
@@ -464,11 +464,14 @@ async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
 		DEFINE INDEX ixd_user_vector ON user FIELDS vector HNSW DIMENSION 20 DIST EUCLIDEAN TYPE F32 EFC 150 M 8;
 		DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase, ascii, edgengram(1, 10);
 		DEFINE INDEX idx_scope_name_ft ON scope FIELDS name FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
-		DEFINE INDEX idx_scope_kind ON scope FIELDS kind, name UNIQUE;",
+		DEFINE INDEX idx_scope_kind_name ON scope FIELDS kind, name UNIQUE;",
 			session,
 			None,
 		)
 		.await?;
+		for result in results {
+			result.result?;
+		}
 	}
 
 	// Step 4: For each of the 9 sessions, spawn 6 concurrent write tasks (3 for `user` records
@@ -520,7 +523,7 @@ async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
 
 	// Step 5: Let the concurrent writes and index compaction run together for 2 seconds,
 	// then signal all tasks and the compaction loop to stop via the cancellation token.
-	sleep(Duration::from_secs(5)).await;
+	sleep(Duration::from_secs(10)).await;
 	cancellation.cancel();
 
 	// Step 6: Await all write tasks and the compaction loop, propagating any errors.
