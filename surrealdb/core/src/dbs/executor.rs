@@ -1134,11 +1134,6 @@ impl Executor {
 					if stmt.name.eq_ignore_ascii_case("IMPORT") && stmt.what =>
 				{
 					this.execute_option_statement(stmt.clone())?;
-					// OPTION IMPORT already requires editor-level DB access
-					// (Action::Edit on ResourceKind::Option at Base::Db), so
-					// per-document permission checks are redundant and can be
-					// skipped for the entire import session.
-					this.opt.perms = false;
 				}
 				Some(Err(e)) => {
 					bail!(Error::InvalidStatement(e.to_string()));
