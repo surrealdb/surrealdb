@@ -234,6 +234,9 @@ impl TestSet {
 					.await
 					.with_context(|| format!("Failed to read test case file `{p}`"))?;
 
+				// Normalize \r\n to \n so tests pass on Windows.
+				let text = text.into_iter().filter(|&b| b != b'\r').collect::<Vec<_>>();
+
 				let case = match TestCase::from_source_path(p.clone(), text) {
 					Ok(x) => x,
 					Err(e) => {

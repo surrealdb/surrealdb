@@ -71,24 +71,40 @@ fn decode_record_ids(res: Vec<(Key, Val)>) -> Result<Vec<RecordId>> {
 ///
 /// Non-unique indexes store one KV entry per (value, record-id) pair, so an
 /// equality lookup may match many entries.  This iterator scans the
-/// half-open range `[prefix_ids_beg, prefix_ids_end)` in forward order,
-/// advancing the `beg` cursor after each batch.
+/// half-open range `[prefix_ids_beg, prefix_ids_end)` in forward or
+/// backward order, advancing/retreating the cursor after each batch.
 pub(crate) struct IndexEqualIterator {
 	/// Lower bound of the remaining scan range (inclusive).
 	beg: Vec<u8>,
 	/// Upper bound of the scan range (exclusive, fixed).
 	end: Vec<u8>,
+	/// Whether to scan in reverse (highest to lowest key order).
+	reverse: bool,
 	/// `true` once the scan range is exhausted.
 	done: bool,
 }
 
 impl IndexEqualIterator {
-	/// Create a new equality iterator for the given index value.
+	/// Create a new equality iterator for the given index value (always forward).
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
 		value: &Value,
+	) -> Result<Self> {
+		Self::with_direction(ns, db, ix, value, false)
+	}
+
+	/// Create a new equality iterator with explicit direction.
+	///
+	/// When `reverse` is true, the iterator uses `tx.scanr()` to return
+	/// records in descending key order (highest to lowest record ID).
+	pub(crate) fn with_direction(
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &IndexDefinition,
+		value: &Value,
+		reverse: bool,
 	) -> Result<Self> {
 		let array = Array::from(vec![value.clone()]);
 		let beg = Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &array)?;
@@ -96,6 +112,7 @@ impl IndexEqualIterator {
 		Ok(Self {
 			beg,
 			end,
+			reverse,
 			done: false,
 		})
 	}
@@ -103,11 +120,20 @@ impl IndexEqualIterator {
 	/// Fetch the next batch of matching record IDs.
 	///
 	/// Returns an empty `Vec` when iteration is complete.
-	pub async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
+	pub(crate) async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
 		if self.done {
 			return Ok(Vec::new());
 		}
 
+		if self.reverse {
+			self.next_batch_reverse(tx).await
+		} else {
+			self.next_batch_forward(tx).await
+		}
+	}
+
+	/// Forward scan: iterate from beg to end in ascending key order.
+	async fn next_batch_forward(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
 		let res = tx.scan(self.beg.clone()..self.end.clone(), INDEX_BATCH_SIZE, 0, None).await?;
 
 		if res.is_empty() {
@@ -124,6 +150,31 @@ impl IndexEqualIterator {
 		}
 
 		decode_record_ids(res)
+	}
+
+	/// Reverse scan: iterate from end to beg in descending key order.
+	async fn next_batch_reverse(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
+		let res = tx.scanr(self.beg.clone()..self.end.clone(), INDEX_BATCH_SIZE, 0, None).await?;
+
+		if res.is_empty() {
+			self.done = true;
+			return Ok(Vec::new());
+		}
+
+		// scanr returns [highest_key, ..., lowest_key].
+		// Update end key for next batch to the lowest key (last in result).
+		if let Some((key, _)) = res.last() {
+			self.end.clone_from(key);
+		}
+
+		// Decode record IDs from values
+		let mut records = Vec::with_capacity(res.len());
+		for (_, val) in res {
+			let rid: RecordId = revision::from_slice(&val)?;
+			records.push(rid);
+		}
+
+		Ok(records)
 	}
 }
 

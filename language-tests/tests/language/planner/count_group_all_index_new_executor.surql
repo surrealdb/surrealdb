@@ -22,8 +22,7 @@ Total rows: 1''''
 value = "[{ count: 5000 }]"
 
 [[test.results]]
-value = ''''Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1}
-    IndexScan [ctx: Db] [index: somethingIndex, access: >=5000, direction: Forward] {rows: 5000}
+value = ''''IndexCountScan [ctx: Db] [source: indexPerformance3, condition: something >= 5000] {rows: 1}
 
 Total rows: 1''''
 
