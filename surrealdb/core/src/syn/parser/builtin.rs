@@ -501,7 +501,7 @@ pub(crate) static PATHS: phf::Map<
 		UniCase::ascii("math::LOG2_E") => (PathKind::Constant(Constant::MathLog2E), None),
 		// Previous path retained for backwards compatibility
 		UniCase::ascii("math::NEG_INF") => (PathKind::Constant(Constant::MathNegInfinity), None),
-		UniCase::ascii("math::NEG_INFINITY") => (PathKind::Constant(Constant::MathInfinity), None),
+		UniCase::ascii("math::NEG_INFINITY") => (PathKind::Constant(Constant::MathNegInfinity), None),
 		UniCase::ascii("math::PI") => (PathKind::Constant(Constant::MathPi), None),
 		UniCase::ascii("math::SQRT_2") => (PathKind::Constant(Constant::MathSqrt2), None),
 		UniCase::ascii("math::TAU") => (PathKind::Constant(Constant::MathTau), None),
