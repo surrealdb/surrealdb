@@ -31,8 +31,7 @@ impl Value {
 			},
 			Value::Set(mut v) => match val {
 				Value::Array(x) => {
-					let remove: BTreeSet<_> = x.0.into_iter().collect();
-					for item in remove {
+					for item in x {
 						v.0.remove(&item);
 					}
 					self.set(stk, ctx, opt, path, Value::from(v)).await
