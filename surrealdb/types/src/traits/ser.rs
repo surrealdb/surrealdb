@@ -155,18 +155,22 @@ impl serde::Serializer for Serializer {
 		let serialized = value.serialize(self)?;
 		match name {
 			"Datetime" => {
-				let datetime = chrono::DateTime::<chrono::Utc>::deserialize(serialized)
-					.map_err(|err| Error::serialization(err.to_string(), None))?;
+				let datetime =
+					chrono::DateTime::<chrono::Utc>::deserialize(serialized).map_err(|err| {
+						Error::serialization(err.to_string(), SerializationError::Deserialization)
+					})?;
 				Ok(Value::Datetime(Datetime::from(datetime)))
 			}
 			"Uuid" => {
-				let uuid = uuid::Uuid::deserialize(serialized)
-					.map_err(|err| Error::serialization(err.to_string(), None))?;
+				let uuid = uuid::Uuid::deserialize(serialized).map_err(|err| {
+					Error::serialization(err.to_string(), SerializationError::Deserialization)
+				})?;
 				Ok(Value::Uuid(Uuid::from(uuid)))
 			}
 			"Duration" => {
-				let duration = std::time::Duration::deserialize(serialized)
-					.map_err(|err| Error::serialization(err.to_string(), None))?;
+				let duration = std::time::Duration::deserialize(serialized).map_err(|err| {
+					Error::serialization(err.to_string(), SerializationError::Deserialization)
+				})?;
 				Ok(Value::Duration(Duration::from(duration)))
 			}
 			_ => Ok(serialized),
@@ -385,8 +389,9 @@ impl serde::ser::SerializeMap for SerializeMap {
 
 	fn end(self) -> Result<Value> {
 		if self.record_id_struct {
-			let record_id = RecordId::deserialize(Value::Object(self.map))
-				.map_err(|err| Error::serialization(err.to_string(), None))?;
+			let record_id = RecordId::deserialize(Value::Object(self.map)).map_err(|err| {
+				Error::serialization(err.to_string(), SerializationError::Deserialization)
+			})?;
 			return Ok(Value::RecordId(record_id));
 		}
 		Ok(Value::Object(self.map))
