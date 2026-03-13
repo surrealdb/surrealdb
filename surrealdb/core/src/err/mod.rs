@@ -471,7 +471,7 @@ pub(crate) enum Error {
 	},
 
 	/// The permissions do not allow this query to be run on this table
-	#[error("You don't have permission to run the fn::{name} function")]
+	#[error("You don't have permission to run the {name} function")]
 	FunctionPermissions {
 		name: String,
 	},
