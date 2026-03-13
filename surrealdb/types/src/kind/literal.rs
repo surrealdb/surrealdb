@@ -196,8 +196,13 @@ impl ToSql for KindLiteral {
 					v.fmt_sql(f, fmt);
 					f.push('f');
 				} else {
-					// Don't add suffix for NaN, inf, -inf
-					v.fmt_sql(f, fmt);
+					if v.is_nan() {
+						f.push_str("NaN");
+					} else if v.is_sign_positive() {
+						f.push_str("Infinity");
+					} else {
+						f.push_str("-Infinity");
+					}
 				}
 			}
 			KindLiteral::Decimal(v) => {
