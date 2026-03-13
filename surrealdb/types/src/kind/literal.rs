@@ -4,7 +4,7 @@ use std::hash;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::sql::fmt_sql_comma_separated;
+use crate::sql::{fmt_non_finite_f64, fmt_sql_comma_separated};
 use crate::utils::escape::QuoteStr;
 use crate::{Duration, Kind, SqlFormat, ToSql, Value};
 
@@ -195,12 +195,8 @@ impl ToSql for KindLiteral {
 					// Add suffix to distinguish between int and float
 					v.fmt_sql(f, fmt);
 					f.push('f');
-				} else if v.is_nan() {
-					f.push_str("NaN");
-				} else if v.is_sign_positive() {
-					f.push_str("Infinity");
 				} else {
-					f.push_str("-Infinity");
+					f.push_str(fmt_non_finite_f64(*v));
 				}
 			}
 			KindLiteral::Decimal(v) => {

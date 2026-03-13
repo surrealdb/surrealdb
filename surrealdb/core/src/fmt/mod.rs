@@ -14,6 +14,16 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::sql;
 
+pub(crate) fn fmt_non_finite_f64(v: f64) -> &'static str {
+    if v.is_nan() {
+        "NaN"
+    } else if v.is_sign_positive() {
+        "Infinity"
+    } else {
+        "-Infinity"
+    }
+}
+
 /// Implements ToSql by calling formatter on contents.
 pub(crate) struct Fmt<T, F> {
 	contents: Cell<Option<T>>,
@@ -200,13 +210,7 @@ pub struct Float(pub f64);
 impl ToSql for Float {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		if !self.0.is_finite() {
-			if self.0.is_nan() {
-				f.push_str("NaN");
-			} else if self.0.is_sign_positive() {
-				f.push_str("Infinity");
-			} else {
-				f.push_str("-Infinity");
-			}
+			f.push_str(fmt_non_finite_f64(self.0));
 		} else {
 			self.0.fmt_sql(f, fmt);
 			f.push('f');

@@ -7,7 +7,7 @@ use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
 use crate::Kind;
-use crate::sql::{SqlFormat, ToSql};
+use crate::sql::{SqlFormat, ToSql, fmt_non_finite_f64};
 
 /// Represents a numeric value in SurrealDB
 ///
@@ -65,12 +65,8 @@ impl Display for Number {
 				if v.is_finite() {
 					// Add suffix to distinguish between int and float
 					write!(f, "{v}f")
-				} else if v.is_nan() {
-					write!(f, "NaN")
-				} else if v.is_sign_positive() {
-					write!(f, "Infinity")
 				} else {
-					write!(f, "-Infinity")
+					write!(f, "{}", fmt_non_finite_f64(*v))
 				}
 			}
 			Number::Decimal(v) => write!(f, "{v}dec"),
