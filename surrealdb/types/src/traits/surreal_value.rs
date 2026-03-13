@@ -1,9 +1,11 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet, LinkedList};
 use std::hash::Hash;
+use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use castaway::{cast, match_type};
 use rust_decimal::Decimal;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -13,7 +15,7 @@ use crate::error::{ConversionError, LengthMismatchError, OutOfRangeError};
 use crate::traits::ser::Serializer;
 use crate::{
 	Array, Bytes, Datetime, Duration, Error, File, Geometry, Kind, Number, Object, Range, RecordId,
-	Set, SurrealNone, SurrealNull, Table, Uuid, Value, kind,
+	SerializationError, Set, SurrealNone, SurrealNull, Table, Uuid, Value, kind,
 };
 
 /// Trait for converting between SurrealDB values and Rust types
@@ -1631,22 +1633,180 @@ impl<T: SurrealValue + Hash + Eq> SurrealValue for HashSet<T> {
 ///
 /// As such, it's best to use SurrealValue directly where possible. This is intended for types where
 /// an implementation of SurrealValue isn't available or practical
-pub struct SerdeWrapper<T: Serialize + DeserializeOwned>(pub T);
+pub struct Wrapper<T: Serialize + DeserializeOwned + 'static>(pub T);
 
-impl<T: Serialize + DeserializeOwned> SurrealValue for SerdeWrapper<T> {
+impl<T: Serialize + DeserializeOwned + 'static> SurrealValue for Wrapper<T> {
 	fn kind_of() -> Kind {
 		Kind::Any
 	}
 
 	fn into_value(self) -> Value {
-		self.0.serialize(Serializer).expect("serialization to a value failed!")
+		match_type!(self.0, {
+			uuid::Uuid as uuid => Value::Uuid(Uuid::from(uuid)),
+			chrono::DateTime<chrono::Utc> as datetime => Value::Datetime(Datetime::from(datetime)),
+			std::time::Duration as duration => Value::Duration(Duration::from(duration)),
+			Vec<uuid::Uuid> as uuids => Value::Array(Array(
+				uuids.into_iter().map(|uuid| Value::Uuid(Uuid::from(uuid))).collect(),
+			)),
+			Vec<chrono::DateTime<chrono::Utc>> as datetimes => Value::Array(Array(
+				datetimes
+					.into_iter()
+					.map(|datetime| Value::Datetime(Datetime::from(datetime)))
+					.collect(),
+			)),
+			Vec<std::time::Duration> as durations => Value::Array(Array(
+				durations
+					.into_iter()
+					.map(|duration| Value::Duration(Duration::from(duration)))
+					.collect(),
+			)),
+			Option<uuid::Uuid> as uuid => uuid.map(|uuid| Value::Uuid(Uuid::from(uuid))).unwrap_or(Value::None),
+			Option<chrono::DateTime<chrono::Utc>> as datetime => datetime
+				.map(|datetime| Value::Datetime(Datetime::from(datetime)))
+				.unwrap_or(Value::None),
+			Option<std::time::Duration> as duration => duration
+				.map(|duration| Value::Duration(Duration::from(duration)))
+				.unwrap_or(Value::None),
+			BTreeMap<String, uuid::Uuid> as map => Value::Object(Object(
+				map
+					.into_iter()
+					.map(|(key, uuid)| (key, Value::Uuid(Uuid::from(uuid))))
+					.collect(),
+			)),
+			BTreeMap<String, chrono::DateTime<chrono::Utc>> as map => Value::Object(Object(
+				map
+					.into_iter()
+					.map(|(key, datetime)| (key, Value::Datetime(Datetime::from(datetime))))
+					.collect(),
+			)),
+			BTreeMap<String, std::time::Duration> as map => Value::Object(Object(
+				map
+					.into_iter()
+					.map(|(key, duration)| (key, Value::Duration(Duration::from(duration))))
+					.collect(),
+			)),
+			value => match value.serialize(Serializer) {
+				Ok(value) => value,
+				Err(err) => {
+					Error::serialization(
+						"serialization to value failed".to_string(),
+						SerializationError::Serialization,
+					)
+					.with_cause(err)
+					.into_value()
+				}
+			},
+		})
 	}
 
 	fn from_value(value: Value) -> Result<Self, Error>
 	where
 		Self: Sized,
 	{
-		Ok(Self(T::deserialize(value)?))
+		match_type!(PhantomData::<T>, {
+			PhantomData<uuid::Uuid> as _ => {
+				let uuid = uuid::Uuid::from_value(value)?;
+				let typed = cast!(uuid, T)
+					.map_err(|_| Error::internal("failed to cast uuid wrapper type".to_string()))?;
+				Ok(Self(typed))
+			},
+			PhantomData<chrono::DateTime<chrono::Utc>> as _ => {
+				let datetime = chrono::DateTime::<chrono::Utc>::from_value(value)?;
+				let typed = cast!(datetime, T).map_err(|_| {
+					Error::internal("failed to cast datetime wrapper type".to_string())
+				})?;
+				Ok(Self(typed))
+			},
+			PhantomData<std::time::Duration> as _ => {
+				let duration = std::time::Duration::from_value(value)?;
+				let typed = cast!(duration, T).map_err(|_| {
+					Error::internal("failed to cast duration wrapper type".to_string())
+				})?;
+				Ok(Self(typed))
+			},
+			PhantomData<Vec<uuid::Uuid>> as _ => {
+				let uuids = Vec::<Uuid>::from_value(value)?
+					.into_iter()
+					.map(Uuid::into_inner)
+					.collect::<Vec<_>>();
+				let typed = cast!(uuids, T).map_err(|_| {
+					Error::internal("failed to cast uuid vec wrapper type".to_string())
+				})?;
+				Ok(Self(typed))
+			},
+			PhantomData<Vec<chrono::DateTime<chrono::Utc>>> as _ => {
+				let datetimes = Vec::<Datetime>::from_value(value)?
+					.into_iter()
+					.map(Datetime::into_inner)
+					.collect::<Vec<_>>();
+				let typed = cast!(datetimes, T).map_err(|_| {
+					Error::internal("failed to cast datetime vec wrapper type".to_string())
+				})?;
+				Ok(Self(typed))
+			},
+			PhantomData<Vec<std::time::Duration>> as _ => {
+				let durations = Vec::<Duration>::from_value(value)?
+					.into_iter()
+					.map(Duration::into_inner)
+					.collect::<Vec<_>>();
+				let typed = cast!(durations, T).map_err(|_| {
+					Error::internal("failed to cast duration vec wrapper type".to_string())
+				})?;
+				Ok(Self(typed))
+			},
+			PhantomData<Option<uuid::Uuid>> as _ => {
+				let uuid = Option::<Uuid>::from_value(value)?.map(Uuid::into_inner);
+				let typed = cast!(uuid, T).map_err(|_| {
+					Error::internal("failed to cast uuid option wrapper type".to_string())
+				})?;
+				Ok(Self(typed))
+			},
+			PhantomData<Option<chrono::DateTime<chrono::Utc>>> as _ => {
+				let datetime = Option::<Datetime>::from_value(value)?.map(Datetime::into_inner);
+				let typed = cast!(datetime, T).map_err(|_| {
+					Error::internal("failed to cast datetime option wrapper type".to_string())
+				})?;
+				Ok(Self(typed))
+			},
+			PhantomData<Option<std::time::Duration>> as _ => {
+				let duration = Option::<Duration>::from_value(value)?.map(Duration::into_inner);
+				let typed = cast!(duration, T).map_err(|_| {
+					Error::internal("failed to cast duration option wrapper type".to_string())
+				})?;
+				Ok(Self(typed))
+			},
+			PhantomData<BTreeMap<String, uuid::Uuid>> as _ => {
+				let map = BTreeMap::<String, Uuid>::from_value(value)?
+					.into_iter()
+					.map(|(key, uuid)| (key, uuid.into_inner()))
+					.collect::<BTreeMap<_, _>>();
+				let typed = cast!(map, T).map_err(|_| {
+					Error::internal("failed to cast uuid map wrapper type".to_string())
+				})?;
+				Ok(Self(typed))
+			},
+			PhantomData<BTreeMap<String, chrono::DateTime<chrono::Utc>>> as _ => {
+				let map = BTreeMap::<String, Datetime>::from_value(value)?
+					.into_iter()
+					.map(|(key, datetime)| (key, datetime.into_inner()))
+					.collect::<BTreeMap<_, _>>();
+				let typed = cast!(map, T).map_err(|_| {
+					Error::internal("failed to cast datetime map wrapper type".to_string())
+				})?;
+				Ok(Self(typed))
+			},
+			PhantomData<BTreeMap<String, std::time::Duration>> as _ => {
+				let map = BTreeMap::<String, Duration>::from_value(value)?
+					.into_iter()
+					.map(|(key, duration)| (key, duration.into_inner()))
+					.collect::<BTreeMap<_, _>>();
+				let typed = cast!(map, T).map_err(|_| {
+					Error::internal("failed to cast duration map wrapper type".to_string())
+				})?;
+				Ok(Self(typed))
+			},
+			_ => Ok(Self(T::deserialize(value)?)),
+		})
 	}
 }
 
