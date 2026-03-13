@@ -96,3 +96,8 @@ runs:
         shared-key: ${{ inputs.cache-key }}
         workspaces: ${{ inputs.workspaces }}
         cache-directories: ${{ inputs.cache-directories }}
+        # Only key cache by job type and runner; do not hash Cargo.toml/Cargo.lock.
+        # This keeps cache valid when a single crate (e.g. core) changes: we restore
+        # the previous target/ and Cargo incrementally recompiles only that crate and
+        # its dependents. Lang tests, surrealism, types, and third-party crates stay cached.
+        add-rust-environment-hash-key: false
