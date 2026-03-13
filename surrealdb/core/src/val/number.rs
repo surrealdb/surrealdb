@@ -198,7 +198,7 @@ impl ToSql for Number {
 		match self {
 			Number::Int(v) => v.fmt_sql(f, sql_fmt),
 			Number::Float(v) => {
-				if v.is_infinite() {
+				if !v.is_finite() {
 					write_sql!(f, sql_fmt, "{}", fmt_non_finite_f64(*v))
 				} else {
 					write_sql!(f, sql_fmt, "{v}f")
