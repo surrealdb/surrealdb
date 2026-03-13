@@ -36,6 +36,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use super::IndexFormat;
 use crate::err::Error;
 use crate::expr::decimal::DecimalLexEncoder;
+use crate::fmt::fmt_non_finite_f64;
 use crate::fnc::util::math::ToFloat;
 use crate::val::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 
@@ -198,13 +199,7 @@ impl ToSql for Number {
 			Number::Int(v) => v.fmt_sql(f, sql_fmt),
 			Number::Float(v) => {
 				if v.is_infinite() {
-					if v.is_sign_negative() {
-						write_sql!(f, sql_fmt, "-Infinity")
-					} else {
-						write_sql!(f, sql_fmt, "Infinity")
-					}
-				} else if v.is_nan() {
-					write_sql!(f, sql_fmt, "NaN")
+					write_sql!(f, sql_fmt, "{}", fmt_non_finite_f64(*v))
 				} else {
 					write_sql!(f, sql_fmt, "{v}f")
 				}

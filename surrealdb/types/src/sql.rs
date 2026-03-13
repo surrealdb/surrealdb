@@ -244,11 +244,11 @@ impl ToSql for rust_decimal::Decimal {
 }
 
 pub(crate) fn fmt_non_finite_f64(v: f64) -> &'static str {
-    if v.is_nan() {
-        "NaN"
-    } else if v.is_sign_positive() {
-        "Infinity"
-    } else {
-        "-Infinity"
-    }
+	if v.is_nan() {
+		"NaN"
+	} else if v.is_sign_positive() {
+		"Infinity"
+	} else {
+		"-Infinity"
+	}
 }

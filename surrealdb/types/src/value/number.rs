@@ -82,12 +82,8 @@ impl ToSql for Number {
 				if v.is_finite() {
 					f.push_str(&v.to_string());
 					f.push('f');
-				} else if v.is_nan() {
-					f.push_str("NaN");
-				} else if v.is_sign_positive() {
-					f.push_str("Infinity");
 				} else {
-					f.push_str("-Infinity");
+					f.push_str(fmt_non_finite_f64(*v));
 				}
 			}
 			Number::Decimal(v) => v.fmt_sql(f, fmt),

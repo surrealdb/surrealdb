@@ -15,13 +15,13 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::sql;
 
 pub(crate) fn fmt_non_finite_f64(v: f64) -> &'static str {
-    if v.is_nan() {
-        "NaN"
-    } else if v.is_sign_positive() {
-        "Infinity"
-    } else {
-        "-Infinity"
-    }
+	if v.is_nan() {
+		"NaN"
+	} else if v.is_sign_positive() {
+		"Infinity"
+	} else {
+		"-Infinity"
+	}
 }
 
 /// Implements ToSql by calling formatter on contents.
