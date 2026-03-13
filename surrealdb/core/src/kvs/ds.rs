@@ -1473,8 +1473,16 @@ impl Datastore {
 	/// # Arguments
 	/// * `dbs` - The shared datastore instance, cloned into each compaction task
 	/// * `interval` - The interval between compaction runs, used to calculate the lease duration
+	///
+	/// # Returns
+	/// A tuple `(iterations, errors)` where `iterations` is the number of
+	/// compaction batches processed and `errors` is the total number of
+	/// individual index compaction failures across all batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs))]
-	pub async fn index_compaction(dbs: Arc<Datastore>, interval: Duration) -> Result<()> {
+	pub async fn index_compaction(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+	) -> Result<(usize, usize)> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting index compaction process");
 		// Create a new lease handler
@@ -1485,12 +1493,14 @@ impl Datastore {
 			TaskLeaseType::IndexCompaction,
 			interval * 2,
 		)?;
+		let mut count_iteration = 0;
+		let mut count_error = 0;
 		// We continue without interruptions while there are keys and the lease
 		loop {
 			// Attempt to acquire a lease for the IndexCompaction task
 			// If we don't get the lease, another node is handling this task
 			if !lh.has_lease().await? {
-				return Ok(());
+				return Ok((count_iteration, count_error));
 			}
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running index compaction process");
@@ -1505,12 +1515,13 @@ impl Datastore {
 				res?
 			};
 			if items.is_empty() {
-				return Ok(());
+				return Ok((count_iteration, count_error));
 			}
 			// Collect the keys so we can delete them after processing
 			let keys: Vec<Key> = items.iter().map(|(k, _)| k.clone()).collect();
 			// Process compaction for each index
-			Self::index_compaction_loop(dbs.clone(), &lh, items).await?;
+			count_iteration += 1;
+			count_error += Self::index_compaction_loop(dbs.clone(), &lh, items).await?;
 			// Delete the processed queue entries in a separate write
 			// transaction. This avoids conflicts with concurrent user
 			// transactions that may enqueue new compaction requests.
@@ -1528,7 +1539,7 @@ impl Datastore {
 				break;
 			}
 		}
-		Ok(())
+		Ok((count_iteration, count_error))
 	}
 
 	/// Compacts each distinct index found in the queue items.
@@ -1537,12 +1548,14 @@ impl Datastore {
 	/// distinct index — and joined afterwards. Duplicate queue entries for
 	/// the same index are deduplicated via a [`HashMap`] so only one task is
 	/// spawned per index. Failures are logged but do not abort the loop.
+	///
+	/// Returns the number of indexes that failed to compact.
 	#[cfg(not(target_family = "wasm"))]
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
 		items: Vec<(Key, Val)>,
-	) -> Result<()> {
+	) -> Result<usize> {
 		let mut concurrent_compactions = HashMap::new();
 		for (k, _) in items {
 			lh.try_maintain_lease().await?;
@@ -1559,12 +1572,14 @@ impl Datastore {
 				e.insert(jh);
 			}
 		}
+		let mut error_count = 0;
 		for (ikb, jh) in concurrent_compactions {
 			if let Err(e) = jh.await? {
+				error_count += 1;
 				warn!("Index compaction {ikb} fails: {e}");
 			}
 		}
-		Ok(())
+		Ok(error_count)
 	}
 
 	/// Compacts each distinct index found in the queue items.
@@ -1574,13 +1589,16 @@ impl Datastore {
 	/// for the same index. Failures are logged but do not abort the loop,
 	/// matching the non-wasm behavior so that a single transient failure
 	/// does not prevent other indexes from being compacted.
+	///
+	/// Returns the number of indexes that failed to compact.
 	#[cfg(target_family = "wasm")]
 	async fn index_compaction_loop(
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
 		items: Vec<(Key, Val)>,
-	) -> Result<()> {
+	) -> Result<usize> {
 		let mut seen = HashSet::new();
+		let mut error_count = 0;
 		for (k, _) in items {
 			lh.try_maintain_lease().await?;
 			let ic = IndexCompactionKey::decode_key(&k)?;
@@ -1596,10 +1614,11 @@ impl Datastore {
 			}
 			.await;
 			if let Err(e) = res {
+				error_count += 1;
 				warn!("Index compaction {ikb} fails: {e}");
 			}
 		}
-		Ok(())
+		Ok(error_count)
 	}
 
 	/// Performs the actual compaction of a single index.
