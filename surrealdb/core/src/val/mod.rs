@@ -611,6 +611,16 @@ impl TryAdd for Value {
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
 			(Self::Array(v), Self::Array(w)) => Self::Array(v.concat(w)),
+			(Self::Array(v), Self::Set(w)) => Self::Array(v.concat_set(w)),
+
+			(Self::Set(mut v), Self::Set(w)) => {
+				v.0.extend(w.0);
+				Self::Set(v)
+			}
+			(Self::Set(mut v), Self::Array(w)) => {
+				v.0.extend(w.0);
+				Self::Set(v)
+			}
 			(Self::Object(v), Self::Object(w)) => Self::Object(v.add(w)),
 			(v, w) => bail!(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
 		})
@@ -633,6 +643,20 @@ impl TrySub for Value {
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_sub(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_sub(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_sub(w)?),
+			(Self::Array(v), Self::Array(x)) => Self::from(v.remove_all(&x.0)),
+			(Self::Array(v), Self::Set(x)) => Self::from(v.remove_all_set(&x.0)),
+			(Self::Set(mut v), Self::Array(x)) => {
+				for item in x.0 {
+					v.remove(&item);
+				}
+				Self::from(v)
+			}
+			(Self::Set(mut v), Self::Set(x)) => {
+				for item in x.0 {
+					v.remove(&item);
+				}
+				Self::from(v)
+			}
 			(v, w) => bail!(Error::TrySub(v.to_raw_string(), w.to_raw_string())),
 		})
 	}
