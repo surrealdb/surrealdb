@@ -65,14 +65,12 @@ impl Display for Number {
 				if v.is_finite() {
 					// Add suffix to distinguish between int and float
 					write!(f, "{v}f")
+				} else if v.is_nan() {
+					write!(f, "NaN")
+				} else if v.is_sign_positive() {
+					write!(f, "Infinity")
 				} else {
-					if v.is_nan() {
-						write!(f, "{}", "NaN")
-					} else if v.is_sign_positive() {
-						write!(f, "{}", "Infinity")
-					} else {
-						write!(f, "{}", "-Infinity")
-					}
+					write!(f, "-Infinity")
 				}
 			}
 			Number::Decimal(v) => write!(f, "{v}dec"),
@@ -88,14 +86,12 @@ impl ToSql for Number {
 				if v.is_finite() {
 					f.push_str(&v.to_string());
 					f.push('f');
+				} else if v.is_nan() {
+					f.push_str("NaN");
+				} else if v.is_sign_positive() {
+					f.push_str("Infinity");
 				} else {
-					if v.is_nan() {
-						f.push_str("NaN");
-					} else if v.is_sign_positive() {
-						f.push_str("Infinity");
-					} else {
-						f.push_str("-Infinity");
-					}
+					f.push_str("-Infinity");
 				}
 			}
 			Number::Decimal(v) => v.fmt_sql(f, fmt),
