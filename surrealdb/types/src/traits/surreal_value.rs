@@ -1658,6 +1658,7 @@ mod test {
 	use serde::{Deserialize, Serialize};
 
 	use super::*;
+	use crate::RecordIdKey;
 
 	#[derive(Serialize, Deserialize, PartialEq, Debug)]
 	enum Test {
@@ -1677,6 +1678,14 @@ mod test {
 
 	#[derive(Serialize, Deserialize, PartialEq, Debug)]
 	struct Gerald;
+
+	#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+	struct SpecialPayload {
+		uuid: Uuid,
+		datetime: Datetime,
+		duration: Duration,
+		record_id: RecordId,
+	}
 
 	#[rstest]
 	#[case::u8(64_u8)]
@@ -1710,5 +1719,66 @@ mod test {
 		let deserialized_value =
 			<_ as Deserialize>::deserialize(serialized_value).expect("this should work!");
 		assert_eq!(value, deserialized_value);
+	}
+
+	#[test]
+	fn wrapper_roundtrip_special_surreal_types_uses_native_variants() {
+		let datetime =
+			Datetime::from_timestamp(1_706_660_400, 123_000_000).expect("valid datetime");
+		let uuid = Uuid::new_v4();
+		let duration = Duration::new(42, 7);
+		let record_id = RecordId::new("person", RecordIdKey::Uuid(Uuid::new_v4()));
+
+		assert_eq!(Wrapper(datetime).into_value(), datetime.into_value());
+		assert_eq!(Wrapper(uuid).into_value(), uuid.into_value());
+		assert_eq!(Wrapper(duration).into_value(), duration.into_value());
+		assert_eq!(Wrapper(record_id.clone()).into_value(), record_id.clone().into_value());
+
+		assert_eq!(
+			Wrapper::<Datetime>::from_value(datetime.into_value()).expect("roundtrip Datetime").0,
+			datetime
+		);
+		assert_eq!(Wrapper::<Uuid>::from_value(uuid.into_value()).expect("roundtrip Uuid").0, uuid);
+		assert_eq!(
+			Wrapper::<Duration>::from_value(duration.into_value()).expect("roundtrip Duration").0,
+			duration
+		);
+		assert_eq!(
+			Wrapper::<RecordId>::from_value(record_id.clone().into_value())
+				.expect("roundtrip RecordId")
+				.0,
+			record_id
+		);
+	}
+
+	#[test]
+	fn wrapper_roundtrip_nested_payload_keeps_surreal_types() {
+		let payload = SpecialPayload {
+			uuid: Uuid::new_v4(),
+			datetime: Datetime::from_timestamp(1_706_660_400, 0).expect("valid datetime"),
+			duration: Duration::new(3600, 500),
+			record_id: RecordId::new("person", "alice"),
+		};
+
+		let value = Wrapper(payload.clone()).into_value();
+		let Value::Object(object) = &value else {
+			panic!("payload should serialize to object");
+		};
+		assert!(matches!(object.get("uuid"), Some(Value::Uuid(_))));
+		assert!(matches!(object.get("datetime"), Some(Value::Datetime(_))));
+		assert!(matches!(object.get("duration"), Some(Value::Duration(_))));
+		assert!(matches!(object.get("record_id"), Some(Value::RecordId(_))));
+
+		let roundtrip = Wrapper::<SpecialPayload>::from_value(value)
+			.expect("payload should deserialize from value")
+			.0;
+		assert_eq!(roundtrip, payload);
+	}
+
+	#[test]
+	fn deserializing_none_into_non_option_is_an_error_not_a_panic() {
+		let result = std::panic::catch_unwind(|| i64::deserialize(Value::None));
+		assert!(result.is_ok(), "deserializing Value::None should not panic");
+		assert!(result.expect("no panic").is_err());
 	}
 }
