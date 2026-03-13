@@ -1,5 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
+use serde::{Deserialize, Serialize};
 use surrealdb_types::{Datetime, Duration, SerdeWrapper, SurrealValue, Uuid, Value};
 
 fn utc_ts(secs: i64, nanos: u32) -> chrono::DateTime<chrono::Utc> {
@@ -164,4 +165,119 @@ fn wrapper_upstream_option_none_uses_value_none() {
 	assert_eq!(SerdeWrapper(none_uuid).into_value(), Value::None);
 	assert_eq!(SerdeWrapper(none_datetime).into_value(), Value::None);
 	assert_eq!(SerdeWrapper(none_duration).into_value(), Value::None);
+}
+
+#[test]
+fn wrapper_hashmap_types_use_native_variants_and_roundtrip() {
+	let id_map = HashMap::from([
+		("a".to_string(), uuid::Uuid::new_v4()),
+		("b".to_string(), uuid::Uuid::new_v4()),
+	]);
+	let event_map = HashMap::from([
+		("start".to_string(), utc_ts(1_706_770_200, 4)),
+		("end".to_string(), utc_ts(1_706_770_201, 5)),
+	]);
+	let retry_map = HashMap::from([
+		("short".to_string(), std::time::Duration::from_secs(2)),
+		("long".to_string(), std::time::Duration::from_secs(20)),
+	]);
+
+	let id_map_value = SerdeWrapper(id_map.clone()).into_value();
+	let event_map_value = SerdeWrapper(event_map.clone()).into_value();
+	let retry_map_value = SerdeWrapper(retry_map.clone()).into_value();
+	assert!(matches!(
+		id_map_value,
+		Value::Object(ref values) if values.values().all(|v| matches!(v, Value::Uuid(_)))
+	));
+	assert!(matches!(
+		event_map_value,
+		Value::Object(ref values) if values.values().all(|v| matches!(v, Value::Datetime(_)))
+	));
+	assert!(matches!(
+		retry_map_value,
+		Value::Object(ref values) if values.values().all(|v| matches!(v, Value::Duration(_)))
+	));
+	assert_eq!(
+		SerdeWrapper::<HashMap<String, uuid::Uuid>>::from_value(id_map_value)
+			.expect("uuid hashmap roundtrip")
+			.0,
+		id_map
+	);
+	assert_eq!(
+		SerdeWrapper::<HashMap<String, chrono::DateTime<chrono::Utc>>>::from_value(event_map_value)
+			.expect("datetime hashmap roundtrip")
+			.0,
+		event_map
+	);
+	assert_eq!(
+		SerdeWrapper::<HashMap<String, std::time::Duration>>::from_value(retry_map_value)
+			.expect("duration hashmap roundtrip")
+			.0,
+		retry_map
+	);
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(untagged)]
+enum UntaggedEvent {
+	Timed {
+		ts: chrono::DateTime<chrono::Utc>,
+	},
+	Named {
+		name: String,
+	},
+}
+
+#[test]
+fn deserialize_any_handles_native_datetime_in_untagged_enum() {
+	let ts = utc_ts(1_706_660_400, 0);
+	let value = Value::Object(surrealdb_types::Object::from(BTreeMap::from([(
+		"ts".to_string(),
+		Value::Datetime(Datetime::from(ts)),
+	)])));
+
+	let result = UntaggedEvent::deserialize(value).expect("untagged datetime should deserialize");
+	assert_eq!(
+		result,
+		UntaggedEvent::Timed {
+			ts
+		}
+	);
+}
+
+#[test]
+fn deserialize_any_handles_native_uuid() {
+	let uuid = uuid::Uuid::new_v4();
+	let value = Value::Uuid(Uuid::from(uuid));
+
+	let result = String::deserialize(value);
+	assert!(result.is_err(), "uuid is not a plain string, type mismatch expected");
+
+	let value = Value::Uuid(Uuid::from(uuid));
+	let result =
+		serde_json::Value::deserialize(value).expect("serde_json::Value uses deserialize_any");
+	assert_eq!(result, serde_json::Value::String(uuid.to_string()));
+}
+
+#[test]
+fn deserialize_any_handles_native_duration() {
+	let dur = std::time::Duration::new(42, 7);
+	let value = Value::Duration(Duration::from(dur));
+
+	let result =
+		serde_json::Value::deserialize(value).expect("serde_json::Value uses deserialize_any");
+	let obj = result.as_object().expect("duration should deserialize to object");
+	assert_eq!(obj.get("secs"), Some(&serde_json::Value::from(42u64)));
+	assert_eq!(obj.get("nanos"), Some(&serde_json::Value::from(7u32)));
+}
+
+#[test]
+fn deserialize_any_handles_native_record_id() {
+	let rid = surrealdb_types::RecordId::new("person", "alice");
+	let value = Value::RecordId(rid);
+
+	let result =
+		serde_json::Value::deserialize(value).expect("serde_json::Value uses deserialize_any");
+	let obj = result.as_object().expect("record_id should deserialize to object");
+	assert_eq!(obj.get("table"), Some(&serde_json::Value::String("person".to_string())));
 }

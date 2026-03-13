@@ -149,6 +149,39 @@ impl<'de> serde::Deserializer<'de> for Value {
 			Value::Object(v) => v.deserialize_any(visitor),
 			Value::None => visitor.visit_none(),
 			Value::Bytes(bytes) => visitor.visit_bytes(&bytes),
+			Value::Datetime(datetime) => {
+				let value = datetime
+					.into_inner()
+					.serialize(Serializer)
+					.map_err(|err| <Error as serde::de::Error>::custom(err.to_string()))?;
+				value.deserialize_any(visitor)
+			}
+			Value::Uuid(uuid) => {
+				let value = uuid
+					.into_inner()
+					.serialize(Serializer)
+					.map_err(|err| <Error as serde::de::Error>::custom(err.to_string()))?;
+				value.deserialize_any(visitor)
+			}
+			Value::Duration(duration) => {
+				let value = duration
+					.into_inner()
+					.serialize(Serializer)
+					.map_err(|err| <Error as serde::de::Error>::custom(err.to_string()))?;
+				value.deserialize_any(visitor)
+			}
+			Value::RecordId(record_id) => {
+				let mut object = Object::new();
+				object.insert("table".to_owned(), Value::String(record_id.table.to_string()));
+				object.insert(
+					"key".to_owned(),
+					record_id
+						.key
+						.serialize(Serializer)
+						.map_err(|err| <Error as serde::de::Error>::custom(err.to_string()))?,
+				);
+				Value::Object(object).deserialize_any(visitor)
+			}
 			_ => Err(self.invalid_type(&visitor)),
 		}
 	}

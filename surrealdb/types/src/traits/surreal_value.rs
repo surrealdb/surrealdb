@@ -1679,23 +1679,42 @@ impl<T: Serialize + DeserializeOwned + 'static> SurrealValue for SerdeWrapper<T>
 					.map(|(key, datetime)| (key, Value::Datetime(Datetime::from(datetime))))
 					.collect(),
 			)),
-			BTreeMap<String, std::time::Duration> as map => Value::Object(Object(
-				map
-					.into_iter()
-					.map(|(key, duration)| (key, Value::Duration(Duration::from(duration))))
-					.collect(),
-			)),
-			value => match value.serialize(Serializer) {
-				Ok(value) => value,
-				Err(err) => {
-					Error::serialization(
-						"serialization to value failed".to_string(),
-						SerializationError::Serialization,
-					)
-					.with_cause(err)
-					.into_value()
-				}
-			},
+		BTreeMap<String, std::time::Duration> as map => Value::Object(Object(
+			map
+				.into_iter()
+				.map(|(key, duration)| (key, Value::Duration(Duration::from(duration))))
+				.collect(),
+		)),
+		HashMap<String, uuid::Uuid> as map => Value::Object(Object(
+			map
+				.into_iter()
+				.map(|(key, uuid)| (key, Value::Uuid(Uuid::from(uuid))))
+				.collect(),
+		)),
+		HashMap<String, chrono::DateTime<chrono::Utc>> as map => Value::Object(Object(
+			map
+				.into_iter()
+				.map(|(key, datetime)| (key, Value::Datetime(Datetime::from(datetime))))
+				.collect(),
+		)),
+		HashMap<String, std::time::Duration> as map => Value::Object(Object(
+			map
+				.into_iter()
+				.map(|(key, duration)| (key, Value::Duration(Duration::from(duration))))
+				.collect(),
+		)),
+		value => match value.serialize(Serializer) {
+			Ok(value) => value,
+			Err(err) => {
+				debug_assert!(false, "SerdeWrapper serialization to value failed: {err}");
+				Error::serialization(
+					"serialization to value failed".to_string(),
+					SerializationError::Serialization,
+				)
+				.with_cause(err)
+				.into_value()
+			}
+		},
 		})
 	}
 
@@ -1781,15 +1800,39 @@ impl<T: Serialize + DeserializeOwned + 'static> SurrealValue for SerdeWrapper<T>
 				let typed = cast!(map, T).map_err(|_| cast_error("datetime map"))?;
 				Ok(Self(typed))
 			},
-			PhantomData<BTreeMap<String, std::time::Duration>> as _ => {
-				let map = BTreeMap::<String, Duration>::from_value(value)?
-					.into_iter()
-					.map(|(key, duration)| (key, duration.into_inner()))
-					.collect::<BTreeMap<_, _>>();
-				let typed = cast!(map, T).map_err(|_| cast_error("duration map"))?;
-				Ok(Self(typed))
-			},
-			_ => Ok(Self(T::deserialize(value)?)),
+		PhantomData<BTreeMap<String, std::time::Duration>> as _ => {
+			let map = BTreeMap::<String, Duration>::from_value(value)?
+				.into_iter()
+				.map(|(key, duration)| (key, duration.into_inner()))
+				.collect::<BTreeMap<_, _>>();
+			let typed = cast!(map, T).map_err(|_| cast_error("duration map"))?;
+			Ok(Self(typed))
+		},
+		PhantomData<HashMap<String, uuid::Uuid>> as _ => {
+			let map = HashMap::<String, Uuid>::from_value(value)?
+				.into_iter()
+				.map(|(key, uuid)| (key, uuid.into_inner()))
+				.collect::<HashMap<_, _>>();
+			let typed = cast!(map, T).map_err(|_| cast_error("uuid hashmap"))?;
+			Ok(Self(typed))
+		},
+		PhantomData<HashMap<String, chrono::DateTime<chrono::Utc>>> as _ => {
+			let map = HashMap::<String, Datetime>::from_value(value)?
+				.into_iter()
+				.map(|(key, datetime)| (key, datetime.into_inner()))
+				.collect::<HashMap<_, _>>();
+			let typed = cast!(map, T).map_err(|_| cast_error("datetime hashmap"))?;
+			Ok(Self(typed))
+		},
+		PhantomData<HashMap<String, std::time::Duration>> as _ => {
+			let map = HashMap::<String, Duration>::from_value(value)?
+				.into_iter()
+				.map(|(key, duration)| (key, duration.into_inner()))
+				.collect::<HashMap<_, _>>();
+			let typed = cast!(map, T).map_err(|_| cast_error("duration hashmap"))?;
+			Ok(Self(typed))
+		},
+		_ => Ok(Self(T::deserialize(value)?)),
 		})
 	}
 }
