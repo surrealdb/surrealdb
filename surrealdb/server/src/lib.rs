@@ -38,6 +38,12 @@ pub use cli::{Config, ConfigCheck, ConfigCheckRequirements};
 /// Re-export `RouterFactory` for convenience so embedders can `use surreal::RouterFactory`.
 #[doc(inline)]
 pub use ntw::RouterFactory;
+/// Re-export `RouterOptions` for convenience so embedders can `use surreal::RouterOptions`.
+#[doc(inline)]
+pub use ntw::RouterOptions;
+/// Re-export `SurrealRouter` for convenience so embedders can `use surreal::SurrealRouter`.
+#[doc(inline)]
+pub use ntw::SurrealRouter;
 /// Re-export `RpcState` for convenience so embedders can `use surreal::RpcState`.
 #[doc(inline)]
 pub use rpc::RpcState;
