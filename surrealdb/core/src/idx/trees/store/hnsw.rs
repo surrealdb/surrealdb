@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::RwLock;
 
-use crate::catalog::{HnswParams, IndexId, TableId};
+use crate::catalog::{DatabaseId, HnswParams, IndexId, NamespaceId, TableId};
 use crate::ctx::FrozenContext;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::index::HnswIndex;
@@ -16,11 +16,13 @@ use crate::idx::trees::hnsw::index::HnswIndex;
 /// so the outer `Arc` provides shared ownership without additional locking.
 pub(crate) type SharedHnswIndex = Arc<HnswIndex>;
 
-/// Registry of all active HNSW indexes, keyed by `(TableId, IndexId)`.
+pub(crate) type SharedHnswKey = (NamespaceId, DatabaseId, TableId, IndexId);
+
+/// Registry of all active HNSW indexes, keyed by `(NamespaceId, DatabaseId, TableId, IndexId)`.
 ///
 /// Provides shared, concurrent access to HNSW indexes across the system.
 /// Indexes are lazily initialized on first access and cached for subsequent use.
-pub(crate) struct HnswIndexes(Arc<RwLock<HashMap<(TableId, IndexId), SharedHnswIndex>>>);
+pub(crate) struct HnswIndexes(Arc<RwLock<HashMap<SharedHnswKey, SharedHnswIndex>>>);
 
 impl Default for HnswIndexes {
 	fn default() -> Self {
@@ -40,7 +42,7 @@ impl HnswIndexes {
 		ikb: &IndexKeyBase,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
-		let key = (tb, ikb.index());
+		let key = (ikb.ns(), ikb.db(), tb, ikb.index());
 		let h = self.0.read().await.get(&key).cloned();
 		if let Some(h) = h {
 			return Ok(h);
@@ -68,7 +70,7 @@ impl HnswIndexes {
 
 	/// Removes an HNSW index from the registry.
 	pub(super) async fn remove(&self, tb: TableId, ikb: &IndexKeyBase) -> Result<()> {
-		let key = (tb, ikb.index());
+		let key = (ikb.ns(), ikb.db(), tb, ikb.index());
 		self.0.write().await.remove(&key);
 		Ok(())
 	}

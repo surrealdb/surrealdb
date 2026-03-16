@@ -18,6 +18,9 @@ use tracing::instrument;
 
 use super::pipeline::{ScanPipeline, build_field_state};
 use super::resolved::ResolvedTableContext;
+use crate::exec::field_path::FieldPath;
+use crate::exec::operators::SortDirection;
+use crate::exec::ordering::{OutputOrdering, SortProperty};
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
 	validate_record_user_access,
@@ -50,6 +53,12 @@ pub struct UnionIndexScan {
 	/// Plan-time resolved table context. When present, `execute()` skips
 	/// runtime table def + permission lookup and uses pre-built field state.
 	pub(crate) resolved: Option<ResolvedTableContext>,
+	/// When set, use a k-way merge by record ID instead of sequential
+	/// iteration.  Each sub-stream must already produce results in record-ID
+	/// order (which single-column equality index scans naturally do).
+	/// The merge produces globally record-ID-sorted output, enabling sort
+	/// elimination and early termination for ORDER BY id queries.
+	pub(crate) merge_by_id: Option<SortDirection>,
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
 
@@ -64,6 +73,7 @@ impl UnionIndexScan {
 			inputs,
 			needed_fields,
 			resolved: None,
+			merge_by_id: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -71,6 +81,17 @@ impl UnionIndexScan {
 	/// Set the plan-time resolved table context.
 	pub(crate) fn with_resolved(mut self, resolved: ResolvedTableContext) -> Self {
 		self.resolved = Some(resolved);
+		self
+	}
+
+	/// Enable k-way merge by record ID in the given direction.
+	///
+	/// When set, the union iterates all sub-streams simultaneously using
+	/// a merge-sort on record IDs instead of draining them sequentially.
+	/// This produces globally record-ID-sorted output, allowing the
+	/// planner to eliminate the Sort operator for ORDER BY id queries.
+	pub(crate) fn with_merge_by_id(mut self, direction: SortDirection) -> Self {
+		self.merge_by_id = Some(direction);
 		self
 	}
 }
@@ -83,10 +104,14 @@ impl ExecOperator for UnionIndexScan {
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
-		vec![
+		let mut attrs = vec![
 			("table".to_string(), self.table_name.to_string()),
 			("branches".to_string(), self.inputs.len().to_string()),
-		]
+		];
+		if let Some(dir) = &self.merge_by_id {
+			attrs.push(("merge_by_id".to_string(), format!("{dir:?}")));
+		}
+		attrs
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -107,6 +132,19 @@ impl ExecOperator for UnionIndexScan {
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
 		Some(&self.metrics)
+	}
+
+	fn output_ordering(&self) -> OutputOrdering {
+		if let Some(direction) = self.merge_by_id {
+			OutputOrdering::Sorted(vec![SortProperty {
+				path: FieldPath::field("id"),
+				direction,
+				collate: false,
+				numeric: false,
+			}])
+		} else {
+			OutputOrdering::Unordered
+		}
 	}
 
 	#[instrument(name = "UnionIndexScan::execute", level = "trace", skip_all)]
@@ -131,8 +169,16 @@ impl ExecOperator for UnionIndexScan {
 		// so that any setup errors surface immediately.
 		let mut sub_streams: Vec<ValueBatchStream> = Vec::with_capacity(self.inputs.len());
 		for input in &self.inputs {
-			let sub_stream =
-				buffer_stream(input.execute(ctx)?, input.access_mode(), input.cardinality_hint());
+			let stream = input.execute(ctx)?;
+			// In merge mode, consume sub-streams on-demand — no buffering.
+			// This prevents background tasks from eagerly fetching entire
+			// equality ranges when only a small number of records are
+			// needed (e.g. ORDER BY id LIMIT 25).
+			let sub_stream = if self.merge_by_id.is_some() {
+				stream
+			} else {
+				buffer_stream(stream, input.access_mode(), input.cardinality_hint())
+			};
 			sub_streams.push(sub_stream);
 		}
 
@@ -140,6 +186,7 @@ impl ExecOperator for UnionIndexScan {
 		let table_name = self.table_name.clone();
 		let needed_fields = self.needed_fields.clone();
 		let resolved = self.resolved.clone();
+		let merge_by_id = self.merge_by_id;
 		let ctx = ctx.clone();
 
 		let stream: ValueBatchStream = Box::pin(async_stream::try_stream! {
@@ -191,37 +238,143 @@ impl ExecOperator for UnionIndexScan {
 				check_perms, None, 0,
 			);
 
-			// Deduplicate and stream results through the permission pipeline
-			let mut seen: HashSet<RecordId> = HashSet::new();
-			for mut sub_stream in sub_streams {
-				while let Some(batch_result) = sub_stream.next().await {
-					// Check for cancellation between batches
+			if let Some(merge_dir) = merge_by_id {
+				// ─── K-way merge by record ID ──────────────────────────
+				//
+				// Each sub-stream produces records sorted by record ID
+				// (guaranteed by single-column equality index scans).
+				// We merge them into a single globally-sorted stream,
+				// picking the min (ASC) or max (DESC) record ID at each
+				// step.  Because the downstream Limit operator stops
+				// consuming after N records, the merge terminates early
+				// for LIMIT queries — typically reading only ~N records
+				// total across all sub-streams.
+
+				// Per-stream buffers and positions
+				let k = sub_streams.len();
+				let mut buffers: Vec<Vec<Value>> = Vec::with_capacity(k);
+				let mut positions: Vec<usize> = Vec::with_capacity(k);
+
+				// Initialize: get first batch from each sub-stream
+				for stream in &mut sub_streams {
+					if let Some(batch_result) = stream.next().await {
+						let batch: ValueBatch = batch_result?;
+						buffers.push(batch.values);
+						positions.push(0);
+					} else {
+						buffers.push(Vec::new());
+						positions.push(0);
+					}
+				}
+
+				// Track the last yielded record ID for deduplication
+				let mut last_rid: Option<RecordId> = None;
+
+				loop {
+					// Check for cancellation
 					if ctx.cancellation().is_cancelled() {
 						Err(ControlFlow::Err(
 							anyhow::anyhow!(crate::err::Error::QueryCancelled),
 						))?;
 					}
 
-					let batch: ValueBatch = batch_result?;
-					let mut deduped: Vec<Value> = batch.values.into_iter()
-						.filter(|v| {
-							if let Value::Object(obj) = v
-								&& let Some(Value::RecordId(rid)) = obj.get("id")
-							{
-								return seen.insert(rid.clone());
-							}
-							true // non-object values pass through
-						})
-						.collect();
+					// Find the cursor with the best (min for ASC, max for DESC) record ID
+					let mut best_idx: Option<usize> = None;
+					let mut best_rid: Option<RecordId> = None;
 
-					if !deduped.is_empty() {
-						// Apply permission pipeline (computed fields, field permissions)
-						let cont = pipeline.process_batch(&mut deduped, &ctx).await?;
-						if !deduped.is_empty() {
-							yield ValueBatch { values: deduped };
+					for i in 0..k {
+						if positions[i] >= buffers[i].len() {
+							continue; // stream exhausted or buffer drained
 						}
-						if !cont {
-							return;
+						let rid = match &buffers[i][positions[i]] {
+							Value::Object(obj) => match obj.get("id") {
+								Some(Value::RecordId(r)) => r.clone(),
+								_ => continue,
+							},
+							_ => continue,
+						};
+						let is_better = match &best_rid {
+							None => true,
+							Some(prev) => match merge_dir {
+								SortDirection::Asc => rid < *prev,
+								SortDirection::Desc => rid > *prev,
+							},
+						};
+						if is_better {
+							best_idx = Some(i);
+							best_rid = Some(rid);
+						}
+					}
+
+					let Some(idx) = best_idx else {
+						break; // All streams exhausted
+					};
+
+					// Take the value and advance the cursor
+					let value = buffers[idx][positions[idx]].clone();
+					positions[idx] += 1;
+
+					// Refill the buffer if it's drained
+					if positions[idx] >= buffers[idx].len() {
+						buffers[idx].clear();
+						positions[idx] = 0;
+						if let Some(batch_result) = sub_streams[idx].next().await {
+							let batch: ValueBatch = batch_result?;
+							buffers[idx] = batch.values;
+						}
+					}
+
+					// Deduplicate: skip if same record ID as last yielded
+					if let Some(ref rid) = best_rid {
+						if last_rid.as_ref() == Some(rid) {
+							continue;
+						}
+						last_rid = Some(rid.clone());
+					}
+
+					// Apply permission pipeline
+					let mut batch = vec![value];
+					let cont = pipeline.process_batch(&mut batch, &ctx).await?;
+					if !batch.is_empty() {
+						yield ValueBatch { values: batch };
+					}
+					if !cont {
+						return;
+					}
+				}
+			} else {
+				// ─── Sequential iteration (original path) ──────────────
+				let mut seen: HashSet<RecordId> = HashSet::new();
+				for mut sub_stream in sub_streams {
+					while let Some(batch_result) = sub_stream.next().await {
+						// Check for cancellation between batches
+						if ctx.cancellation().is_cancelled() {
+							Err(ControlFlow::Err(
+								anyhow::anyhow!(crate::err::Error::QueryCancelled),
+							))?;
+						}
+
+						let batch: ValueBatch = batch_result?;
+						let mut deduped: Vec<Value> = batch.values.into_iter()
+							.filter(|v| {
+								if let Value::Object(obj) = v
+									&& let Some(Value::RecordId(rid)) = obj.get("id")
+								{
+									return seen.insert(rid.clone());
+								}
+								true // non-object values pass through
+							})
+							.collect();
+
+						if !deduped.is_empty() {
+							// Apply permission pipeline (computed fields, field permissions)
+							let cont = pipeline.process_batch(&mut deduped, &ctx).await?;
+							if !deduped.is_empty() {
+								yield ValueBatch { values: deduped };
+							}
+							if !cont {
+								return;
+							}
 						}
 					}
 				}

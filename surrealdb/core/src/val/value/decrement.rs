@@ -22,7 +22,28 @@ impl Value {
 				Value::Array(x) => {
 					self.set(stk, ctx, opt, path, Value::from(v.remove_all(&x.0))).await
 				}
+				Value::Set(x) => {
+					self.set(stk, ctx, opt, path, Value::from(v.remove_all_set(&x.0))).await
+				}
 				x => self.set(stk, ctx, opt, path, Value::from(v.remove_value(&x))).await,
+			},
+			Value::Set(mut v) => match val {
+				Value::Array(x) => {
+					for item in x {
+						v.0.remove(&item);
+					}
+					self.set(stk, ctx, opt, path, Value::from(v)).await
+				}
+				Value::Set(x) => {
+					for item in x.0 {
+						v.remove(&item);
+					}
+					self.set(stk, ctx, opt, path, Value::from(v)).await
+				}
+				x => {
+					v.remove(&x);
+					self.set(stk, ctx, opt, path, Value::from(v)).await
+				}
 			},
 			Value::None => match val {
 				Value::Number(x) => {

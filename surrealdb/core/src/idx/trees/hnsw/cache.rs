@@ -6,7 +6,7 @@ use quick_cache::sync::Cache;
 use quick_cache::{DefaultHashBuilder, Lifecycle, Weighter};
 use roaring::RoaringTreemap;
 
-use crate::catalog::{IndexId, TableId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
 use crate::cnf;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::SharedVector;
@@ -18,7 +18,7 @@ use crate::idx::trees::vector::SharedVector;
 struct VectorWeighter;
 
 /// Cache key uniquely identifying a vector: (table, index, element).
-type VectorCacheKey = (TableId, IndexId, ElementId);
+type VectorCacheKey = (NamespaceId, DatabaseId, TableId, IndexId, ElementId);
 impl Weighter<VectorCacheKey, SharedVector> for VectorWeighter {
 	fn weight(&self, key: &VectorCacheKey, val: &SharedVector) -> u64 {
 		// Calculate total memory: vector (including Arc + hash) + TableId + IndexId
@@ -26,7 +26,7 @@ impl Weighter<VectorCacheKey, SharedVector> for VectorWeighter {
 	}
 }
 
-type ElementsPerIndexKey = (TableId, IndexId);
+type ElementsPerIndexKey = (NamespaceId, DatabaseId, TableId, IndexId);
 
 /// Tracks which element IDs are cached for each index.
 /// Wrapped in Arc to share ownership between VectorCache and VectorCacheLifecycle.
@@ -34,23 +34,55 @@ type ElementsPerIndexKey = (TableId, IndexId);
 struct ElementsPerIndex(Arc<DashMap<ElementsPerIndexKey, RwLock<RoaringTreemap>>>);
 
 impl ElementsPerIndex {
-	fn insert(&self, table_id: TableId, index_id: IndexId, element_id: ElementId) {
-		self.0.entry((table_id, index_id)).or_default().write().insert(element_id);
+	fn insert(
+		&self,
+		namespace_id: NamespaceId,
+		database_id: DatabaseId,
+		table_id: TableId,
+		index_id: IndexId,
+		element_id: ElementId,
+	) {
+		self.0
+			.entry((namespace_id, database_id, table_id, index_id))
+			.or_default()
+			.write()
+			.insert(element_id);
 	}
 
 	#[cfg(test)]
-	fn len(&self, table_id: TableId, index_id: IndexId) -> u64 {
-		if let Some(elements_ids) = self.0.get(&(table_id, index_id)) {
+	fn len(
+		&self,
+		namespace_id: NamespaceId,
+		database_id: DatabaseId,
+		table_id: TableId,
+		index_id: IndexId,
+	) -> u64 {
+		if let Some(elements_ids) = self.0.get(&(namespace_id, database_id, table_id, index_id)) {
 			elements_ids.read().len()
 		} else {
 			0
 		}
 	}
-	fn remove_index(&self, table_id: TableId, index_id: IndexId) -> Option<RwLock<RoaringTreemap>> {
-		self.0.remove(&(table_id, index_id)).map(|entry| entry.1)
+	fn remove_index(
+		&self,
+		namespace_id: NamespaceId,
+		database_id: DatabaseId,
+		table_id: TableId,
+		index_id: IndexId,
+	) -> Option<RwLock<RoaringTreemap>> {
+		self.0.remove(&(namespace_id, database_id, table_id, index_id)).map(|entry| entry.1)
 	}
-	fn remove_element(&self, table_id: TableId, index_id: IndexId, element_id: ElementId) {
-		if let Entry::Occupied(mut entry) = self.0.entry((table_id, index_id)) {
+	fn remove_element(
+		&self,
+		namespace_id: NamespaceId,
+		database_id: DatabaseId,
+		table_id: TableId,
+		index_id: IndexId,
+		element_id: ElementId,
+	) {
+		if let Entry::Occupied(mut entry) =
+			self.0.entry((namespace_id, database_id, table_id, index_id))
+		{
 			let is_empty = {
 				let mut elements_ids = entry.get_mut().write();
 				elements_ids.remove(element_id);
@@ -64,8 +96,8 @@ impl ElementsPerIndex {
 	}
 
 	fn evict_element(&self, key: VectorCacheKey) {
-		if let Entry::Occupied(mut entry) = self.0.entry((key.0, key.1)) {
-			entry.get_mut().write().remove(key.2);
+		if let Entry::Occupied(mut entry) = self.0.entry((key.0, key.1, key.2, key.3)) {
+			entry.get_mut().write().remove(key.4);
 			// Note: We intentionally don't clean up empty index entries here to avoid potential
 			// race conditions. Empty entries are cleaned up during remove_element() calls.
 		}
@@ -142,6 +174,8 @@ impl VectorCache {
 	/// Inserts a vector into the cache, tracking it in the per-index element set.
 	pub(super) async fn insert(
 		&self,
+		namespace_id: NamespaceId,
+		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
 		element_id: ElementId,
@@ -150,36 +184,53 @@ impl VectorCache {
 		// Update indexes tracking first, before inserting into cache.
 		// This prevents a race condition where eviction could occur immediately after
 		// cache insertion but before index tracking is updated, leaving an inconsistent state.
-		self.0.indexes.insert(table_id, index_id, element_id);
-		self.0.vectors.insert((table_id, index_id, element_id), vector);
+		self.0.indexes.insert(namespace_id, database_id, table_id, index_id, element_id);
+		self.0.vectors.insert((namespace_id, database_id, table_id, index_id, element_id), vector);
 	}
 
 	/// Retrieves a cached vector, if present.
 	pub(super) async fn get(
 		&self,
+		namespace_id: NamespaceId,
+		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
 		element_id: ElementId,
 	) -> Option<SharedVector> {
-		let key = (table_id, index_id, element_id);
+		let key = (namespace_id, database_id, table_id, index_id, element_id);
 		self.0.vectors.get(&key)
 	}
 
 	/// Removes a single vector from the cache.
-	pub(super) async fn remove(&self, table_id: TableId, index_id: IndexId, element_id: ElementId) {
+	pub(super) async fn remove(
+		&self,
+		namespace_id: NamespaceId,
+		database_id: DatabaseId,
+		table_id: TableId,
+		index_id: IndexId,
+		element_id: ElementId,
+	) {
 		// Remove from the indexes tracking structure first
-		self.0.indexes.remove_element(table_id, index_id, element_id);
+		self.0.indexes.remove_element(namespace_id, database_id, table_id, index_id, element_id);
 		// Remove from the vector cache
-		self.0.vectors.remove(&(table_id, index_id, element_id));
+		self.0.vectors.remove(&(namespace_id, database_id, table_id, index_id, element_id));
 	}
 
 	/// Removes all cached vectors for a given index, yielding periodically during bulk removal.
-	pub(crate) async fn remove_index(&self, table_id: TableId, index_id: IndexId) {
+	pub(crate) async fn remove_index(
+		&self,
+		namespace_id: NamespaceId,
+		database_id: DatabaseId,
+		table_id: TableId,
+		index_id: IndexId,
+	) {
 		let mut count = 0;
-		if let Some(elements_ids) = self.0.indexes.remove_index(table_id, index_id) {
+		if let Some(elements_ids) =
+			self.0.indexes.remove_index(namespace_id, database_id, table_id, index_id)
+		{
 			let ids: Vec<ElementId> = elements_ids.read().iter().collect();
 			for element_id in ids {
-				self.0.vectors.remove(&(table_id, index_id, element_id));
+				self.0.vectors.remove(&(namespace_id, database_id, table_id, index_id, element_id));
 				// Yield control every 1000 removals to prevent blocking other async tasks
 				// during bulk operations
 				if count % 1000 == 0 {
@@ -190,18 +241,26 @@ impl VectorCache {
 		}
 	}
 	#[cfg(test)]
-	pub(super) async fn len(&self, table_id: TableId, index_id: IndexId) -> u64 {
-		self.0.indexes.len(table_id, index_id)
+	pub(super) async fn len(
+		&self,
+		namespace_id: NamespaceId,
+		database_id: DatabaseId,
+		table_id: TableId,
+		index_id: IndexId,
+	) -> u64 {
+		self.0.indexes.len(namespace_id, database_id, table_id, index_id)
 	}
 
 	#[cfg(test)]
 	pub(super) async fn contains(
 		&self,
+		namespace_id: NamespaceId,
+		database_id: DatabaseId,
 		table_id: TableId,
 		index_id: IndexId,
 		element_id: ElementId,
 	) -> bool {
-		self.0.vectors.contains_key(&(table_id, index_id, element_id))
+		self.0.vectors.contains_key(&(namespace_id, database_id, table_id, index_id, element_id))
 	}
 }
 
@@ -226,8 +285,10 @@ mod tests {
 		// Create a very small cache (1KB) to force evictions quickly
 		let cache = VectorCache::new(1024);
 
-		let table_id = TableId(1);
-		let index_id = IndexId(1);
+		let namespace_id = NamespaceId(1);
+		let database_id = DatabaseId(2);
+		let table_id = TableId(3);
+		let index_id = IndexId(4);
 
 		let dimensions = 128;
 
@@ -236,18 +297,20 @@ mod tests {
 			let vector = Vector::F32(Array1::from_vec(data));
 			let shared = SharedVector::from(vector);
 
-			cache.insert(table_id, index_id, i, shared).await;
+			cache.insert(namespace_id, database_id, table_id, index_id, i, shared).await;
 		}
 
-		assert!(cache.len(table_id, index_id).await < 100);
+		assert!(cache.len(namespace_id, database_id, table_id, index_id).await < 100);
 	}
 
 	#[tokio::test]
 	async fn test_cache_insert_get_remove() {
 		let cache = VectorCache::new(1024 * 1024); // 1MB cache
 
-		let table_id = TableId(1);
-		let index_id = IndexId(1);
+		let namespace_id = NamespaceId(1);
+		let database_id = DatabaseId(2);
+		let table_id = TableId(3);
+		let index_id = IndexId(4);
 		let element_id = 42u64;
 
 		let data: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
@@ -255,44 +318,48 @@ mod tests {
 		let shared = SharedVector::from(vector);
 
 		// Insert
-		cache.insert(table_id, index_id, element_id, shared.clone()).await;
-		assert!(cache.contains(table_id, index_id, element_id).await);
-		assert_eq!(cache.len(table_id, index_id).await, 1);
+		cache
+			.insert(namespace_id, database_id, table_id, index_id, element_id, shared.clone())
+			.await;
+		assert!(cache.contains(namespace_id, database_id, table_id, index_id, element_id).await);
+		assert_eq!(cache.len(namespace_id, database_id, table_id, index_id).await, 1);
 
 		// Get
-		let retrieved = cache.get(table_id, index_id, element_id).await;
+		let retrieved = cache.get(namespace_id, database_id, table_id, index_id, element_id).await;
 		assert!(retrieved.is_some());
 		assert_eq!(retrieved.unwrap(), shared);
 
 		// Remove
-		cache.remove(table_id, index_id, element_id).await;
-		assert!(!cache.contains(table_id, index_id, element_id).await);
-		assert_eq!(cache.len(table_id, index_id).await, 0);
+		cache.remove(namespace_id, database_id, table_id, index_id, element_id).await;
+		assert!(!cache.contains(namespace_id, database_id, table_id, index_id, element_id).await);
+		assert_eq!(cache.len(namespace_id, database_id, table_id, index_id).await, 0);
 	}
 
 	#[tokio::test]
 	async fn test_remove_index() {
 		let cache = VectorCache::new(1024 * 1024);
 
-		let table_id = TableId(1);
-		let index_id = IndexId(1);
+		let namespace_id = NamespaceId(1);
+		let database_id = DatabaseId(2);
+		let table_id = TableId(3);
+		let index_id = IndexId(4);
 
 		// Insert multiple vectors
 		for i in 0..10u64 {
 			let data: Vec<f32> = vec![i as f32; 4];
 			let vector = Vector::F32(Array1::from_vec(data));
 			let shared = SharedVector::from(vector);
-			cache.insert(table_id, index_id, i, shared).await;
+			cache.insert(namespace_id, database_id, table_id, index_id, i, shared).await;
 		}
 
-		assert_eq!(cache.len(table_id, index_id).await, 10);
+		assert_eq!(cache.len(namespace_id, database_id, table_id, index_id).await, 10);
 
 		// Remove entire index
-		cache.remove_index(table_id, index_id).await;
+		cache.remove_index(namespace_id, database_id, table_id, index_id).await;
 
 		// All vectors should be gone
 		for i in 0..10u64 {
-			assert!(!cache.contains(table_id, index_id, i).await);
+			assert!(!cache.contains(namespace_id, database_id, table_id, index_id, i).await);
 		}
 	}
 }
