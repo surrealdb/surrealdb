@@ -1440,6 +1440,7 @@ impl Visitor for MigratorPass<'_> {
 		if let Some(ref v) = d.changefeed {
 			write!(self.w, " {v}")?;
 		}
+		self.visit_permissions(&d.permissions)?;
 		Ok(())
 	}
 
