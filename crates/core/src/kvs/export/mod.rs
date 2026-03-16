@@ -36,6 +36,11 @@ impl Default for Config {
 	}
 }
 
+#[derive(Clone, Debug)]
+pub struct ExcludedTables {
+	pub exclude: Vec<String>,
+}
+
 impl From<Config> for Value {
 	fn from(config: Config) -> Value {
 		let obj = map!(
@@ -50,7 +55,8 @@ impl From<Config> for Value {
 			"tables" => match config.tables {
 				TableConfig::All => true.into(),
 				TableConfig::None => false.into(),
-				TableConfig::Some(v) => v.into()
+				TableConfig::Some(v) => v.into(),
+				TableConfig::Exclude(v) => v.exclude.into(),
 			}
 		);
 
@@ -108,6 +114,7 @@ pub enum TableConfig {
 	All,
 	None,
 	Some(Vec<String>),
+	Exclude(ExcludedTables),
 }
 
 impl From<bool> for TableConfig {
@@ -160,7 +167,7 @@ impl TryFrom<&Value> for TableConfig {
 impl TableConfig {
 	/// Check if we should export tables
 	pub(crate) fn is_any(&self) -> bool {
-		matches!(self, Self::All | Self::Some(_))
+		matches!(self, Self::All | Self::Some(_) | Self::Exclude(_))
 	}
 	// Check if we should export a specific table
 	pub(crate) fn includes(&self, table: &str) -> bool {
@@ -168,6 +175,15 @@ impl TableConfig {
 			Self::All => true,
 			Self::None => false,
 			Self::Some(v) => v.iter().any(|v| v.eq(table)),
+			Self::Exclude(v) => !v.exclude.iter().any(|v| v.eq(table)),
+		}
+	}
+	/// Returns the explicitly listed table names, if any.
+	pub(crate) fn names(&self) -> Option<&[String]> {
+		match self {
+			Self::Some(v) => Some(v.as_slice()),
+			Self::Exclude(v) => Some(v.exclude.as_slice()),
+			_ => None,
 		}
 	}
 }
