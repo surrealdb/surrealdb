@@ -18,7 +18,8 @@ use crate::exec::permission::{
 	validate_record_user_access,
 };
 use crate::exec::planner::util::{
-	index_covers_ordering, resolve_condition_params, strip_knn_from_condition,
+	SELECT_ITERATION_PARAMS, index_covers_ordering, resolve_condition_params,
+	strip_knn_from_condition,
 };
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
@@ -448,7 +449,7 @@ impl ExecOperator for DynamicScan {
 						version,
 					storage_limit: effective_storage_limit,
 					pre_skip,
-					has_pushed_limit: limit_val.is_some(),
+					has_pushed_limit: effective_storage_limit.is_some(),
 					knn_context: knn_context.clone(),
 					},
 				).await?
@@ -502,9 +503,10 @@ struct TableScanConfig {
 	storage_limit: Option<usize>,
 	/// Number of KV pairs to skip before decoding (fast-path only).
 	pre_skip: usize,
-	/// Whether the caller has a pushed LIMIT that assumes id-ordered output.
-	/// When true and a BTree index is selected that does not cover the
-	/// requested ordering, we fall back to a KV scan for correctness.
+	/// Whether the LIMIT was actually pushed into the storage-level scan.
+	/// When true the scan truncates rows, so we must verify that the
+	/// runtime-selected BTree index covers the requested ordering.
+	/// If it doesn't, we fall back to a KV scan for correctness.
 	has_pushed_limit: bool,
 	/// KNN distance context for vector::distance::knn() support.
 	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
@@ -540,7 +542,7 @@ async fn resolve_table_scan_stream(
 	let resolved_cond = match cfg.cond.as_ref() {
 		Some(c) => {
 			let ns_db = Some((cfg.ns_id, cfg.db_id));
-			Some(resolve_condition_params(c, &ctx.root().ctx, ns_db).await)
+			Some(resolve_condition_params(c, &ctx.root().ctx, ns_db, SELECT_ITERATION_PARAMS).await)
 		}
 		None => None,
 	};
@@ -577,29 +579,22 @@ async fn resolve_table_scan_stream(
 		}
 	};
 
-	// When limit is pushed, the planner assumed id-ordered output (via
-	// order_is_scan_compatible). If the runtime-selected BTree index does
-	// not cover the requested ordering, we must fall back to KV scan to
-	// avoid truncating rows in the wrong order.
-	let use_index = match &access_path {
-		Some(AccessPath::BTreeScan {
-			index_ref,
-			access,
-			direction,
-		}) if cfg.has_pushed_limit => match &cfg.order {
-			Some(order) => index_covers_ordering(index_ref, access, *direction, order),
-			None => true,
-		},
-		_ => true,
-	};
-
 	match access_path {
-		// B-tree index scan (single-column and compound)
+		// B-tree index scan (single-column and compound).
+		// When the LIMIT was pushed into storage, the scan truncates rows
+		// and assumes id-ordered output (via order_is_scan_compatible).
+		// Reject the index if it doesn't cover the requested ordering so
+		// we fall through to the KV scan fallback for correctness.
 		Some(AccessPath::BTreeScan {
 			index_ref,
 			access,
 			direction,
-		}) if use_index => {
+		}) if !cfg.has_pushed_limit
+			|| cfg
+				.order
+				.as_ref()
+				.map_or(true, |o| index_covers_ordering(&index_ref, &access, direction, o)) =>
+		{
 			let operator = IndexScan::new(
 				index_ref,
 				access,

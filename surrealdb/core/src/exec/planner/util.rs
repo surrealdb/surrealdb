@@ -814,23 +814,33 @@ impl MutVisitor for ParamResolver<'_> {
 	}
 }
 
-/// Parameter names that are scoped to the current document/row and cannot
-/// be resolved at plan time. These are set during per-row execution
-/// (e.g. `$this` is the current document, `$parent` is the outer document
-/// in subqueries, `$before`/`$after`/`$value`/`$input` are event variables).
-pub(super) const DOC_SCOPED_PARAMS: &[&str] =
-	&["this", "self", "parent", "before", "after", "value", "input"];
+/// Parameters injected per-row during SELECT document iteration.
+/// These change value for every row and cannot be resolved at plan time.
+///
+/// - `this`/`self`: the current document being iterated
+/// - `parent`: the outer document in correlated subqueries
+///
+/// Event/live/field params (`$before`, `$after`, `$value`, `$input`, `$event`)
+/// are intentionally excluded because the exec planner only handles
+/// top-level statements.  SELECTs inside event handlers, live query
+/// notifications, and field evaluators run through the legacy `compute()`
+/// path, where those params are resolved at runtime via `ctx.value()`.
+/// If the exec planner is ever extended to those contexts, this guard
+/// set would need to be expanded accordingly.
+pub(crate) const SELECT_ITERATION_PARAMS: &[&str] = &["this", "self", "parent"];
 
 /// Resolve a single parameter to its value at plan time.
 ///
 /// Resolution order:
 /// 1. Context values (LET bindings, client bind parameters, session params)
-/// 2. Document-scoped guard (skip `$this`, `$value`, etc.)
+/// 2. Row-scoped guard (skip params whose values change per-row)
 /// 3. DEFINE PARAM values with `Permission::Full` from the transaction store
 ///
-/// Context values are checked first so that `LET $value = ...` bindings
-/// shadow the doc-scoped guard. At plan time doc-scoped variables are never
-/// present in `FrozenContext` (they are injected during per-row execution).
+/// Context values are checked first so that `LET` bindings shadow the
+/// row-scoped guard. The `row_scoped` set is caller-provided so that
+/// different planning contexts can guard the appropriate params (e.g.
+/// SELECT iteration guards `$this`/`$self`/`$parent`; a future LIVE query
+/// planner would additionally guard `$event`/`$before`/`$after`/`$value`).
 ///
 /// DEFINE PARAMs with `Permission::None` or `Permission::Specific` are left
 /// for runtime resolution where the full permission machinery is available.
@@ -838,11 +848,12 @@ pub(super) async fn resolve_param_value(
 	name: &str,
 	ctx: &crate::ctx::FrozenContext,
 	ns_db: Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)>,
+	row_scoped: &[&str],
 ) -> Option<crate::val::Value> {
 	if let Some(value) = ctx.value(name) {
 		return Some(value.clone());
 	}
-	if DOC_SCOPED_PARAMS.contains(&name) {
+	if row_scoped.contains(&name) {
 		return None;
 	}
 	if let Some((ns, db)) = ns_db
@@ -864,11 +875,16 @@ pub(super) async fn resolve_param_value(
 /// 2. Database-level defined parameters (`DEFINE PARAM`) via the transaction store, when `ns_db`
 ///    IDs are provided.
 ///
+/// `row_scoped` names are skipped during DEFINE PARAM fallback (step 2) since
+/// their values change per-row at runtime. Callers provide the appropriate
+/// set for their planning context (e.g. [`SELECT_ITERATION_PARAMS`]).
+///
 /// Parameters that cannot be resolved are left as-is.
 pub(crate) async fn resolve_condition_params(
 	cond: &Cond,
 	ctx: &crate::ctx::FrozenContext,
 	ns_db: Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)>,
+	row_scoped: &[&str],
 ) -> Cond {
 	// Pass 1: collect all param names referenced in the condition.
 	let mut collector = ParamCollector {
@@ -882,7 +898,7 @@ pub(crate) async fn resolve_condition_params(
 	// Pass 2: resolve each parameter via the shared resolution path.
 	let mut resolved = std::collections::HashMap::with_capacity(collector.names.len());
 	for name in &collector.names {
-		if let Some(value) = resolve_param_value(name, ctx, ns_db).await {
+		if let Some(value) = resolve_param_value(name, ctx, ns_db, row_scoped).await {
 			resolved.insert(name.clone(), value);
 		}
 	}

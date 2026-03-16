@@ -19,13 +19,13 @@ use surrealdb_types::ToSql;
 
 use super::Planner;
 use super::util::{
-	all_value_sources, check_forbidden_group_by_params, derive_field_name, extract_bruteforce_knn,
-	extract_count_field_names, extract_matches_context, extract_record_id_point_lookup,
-	extract_version, fold_condition_expressions, get_effective_limit_literal, has_knn_k_operator,
-	has_knn_operator, has_top_level_or, idiom_to_field_name, idiom_to_field_path,
-	index_covers_ordering, is_count_all_eligible, is_indexed_count_eligible,
-	order_is_scan_compatible, resolve_condition_params, resolve_param_value, strip_fts_condition,
-	strip_index_conditions, strip_knn_from_condition,
+	SELECT_ITERATION_PARAMS, all_value_sources, check_forbidden_group_by_params, derive_field_name,
+	extract_bruteforce_knn, extract_count_field_names, extract_matches_context,
+	extract_record_id_point_lookup, extract_version, fold_condition_expressions,
+	get_effective_limit_literal, has_knn_k_operator, has_knn_operator, has_top_level_or,
+	idiom_to_field_name, idiom_to_field_path, index_covers_ordering, is_count_all_eligible,
+	is_indexed_count_eligible, order_is_scan_compatible, resolve_condition_params,
+	resolve_param_value, strip_fts_condition, strip_index_conditions, strip_knn_from_condition,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
@@ -118,7 +118,7 @@ impl<'ctx> Planner<'ctx> {
 	/// namespace/database IDs (looked up from the transaction when available).
 	async fn resolve_param(&self, name: &str) -> Option<crate::val::Value> {
 		let ns_db = self.ns_db_ids().await;
-		resolve_param_value(name, self.ctx, ns_db).await
+		resolve_param_value(name, self.ctx, ns_db, SELECT_ITERATION_PARAMS).await
 	}
 
 	/// Look up (NamespaceId, DatabaseId) from the planner's transaction.
@@ -1218,7 +1218,7 @@ impl<'ctx> Planner<'ctx> {
 			// Try COUNT index first, then B-tree index for key-only counting.
 			let has_count_idx = self.has_matching_count_index(&what, &cond).await;
 			let btree_access = if !has_count_idx {
-				self.resolve_count_btree_access(&what, &cond).await
+				self.resolve_count_btree_access(&what, &cond, with.as_ref()).await
 			} else {
 				None
 			};
@@ -1379,7 +1379,9 @@ impl<'ctx> Planner<'ctx> {
 		// This covers LET bindings, client bind params, and DEFINE PARAM.
 		let ns_db = self.ns_db_ids().await;
 		let cond = match cond.as_ref() {
-			Some(c) => Some(resolve_condition_params(c, self.ctx, ns_db).await),
+			Some(c) => {
+				Some(resolve_condition_params(c, self.ctx, ns_db, SELECT_ITERATION_PARAMS).await)
+			}
 			None => None,
 		};
 
@@ -1908,9 +1910,10 @@ impl<'ctx> Planner<'ctx> {
 						});
 
 						// When merge mode is active and a downstream LIMIT
-						// exists, pass it as a batch ceiling to each
-						// sub-scan.  This keeps each index batch small
-						// (4× the LIMIT) so the merge terminates quickly
+						// exists, pass it as a batch ceiling hint to each
+						// sub-scan.  IndexScan applies a 4× multiplier
+						// internally to account for filtered rows, keeping
+						// batches small so the merge terminates quickly
 						// instead of fetching a full 1000-entry batch.
 						let merge_batch_ceiling = if merge_dir.is_some() {
 							scan_limit.clone()
@@ -2215,6 +2218,7 @@ impl<'ctx> Planner<'ctx> {
 		&self,
 		what: &[Expr],
 		cond: &Option<Cond>,
+		with: Option<&crate::expr::with::With>,
 	) -> Option<(
 		crate::exec::index::access_path::IndexRef,
 		crate::exec::index::access_path::BTreeAccess,
@@ -2237,9 +2241,7 @@ impl<'ctx> Planner<'ctx> {
 			return None;
 		}
 
-		// Run the index analyzer to find candidate access paths.
-		// We pass None for order since we don't care about ordering for counting.
-		let analyzer = IndexAnalyzer::new(indexes, None);
+		let analyzer = IndexAnalyzer::new(indexes, with);
 		let candidates = analyzer.analyze(Some(cond), None);
 
 		// Look for a candidate that fully covers the WHERE condition
