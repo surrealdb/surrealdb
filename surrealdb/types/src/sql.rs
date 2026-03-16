@@ -243,12 +243,12 @@ impl ToSql for rust_decimal::Decimal {
 	}
 }
 
-pub(crate) fn fmt_non_finite_f64(v: f64) -> &'static str {
-	if v.is_nan() {
-		"NaN"
-	} else if v.is_sign_positive() {
-		"Infinity"
-	} else {
-		"-Infinity"
-	}
+#[doc(hidden)]
+pub const fn fmt_non_finite_f64(v: f64) -> Option<&'static str> {
+    match v {
+        f64::INFINITY => Some("Infinity"),
+        f64::NEG_INFINITY => Some("-Infinity"),
+        float if float.is_nan() => Some("NaN"),
+        _ => None,
+    }
 }
