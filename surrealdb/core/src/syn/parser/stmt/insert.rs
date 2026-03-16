@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use crate::sql::statements::InsertStatement;
-use crate::sql::{Data, Expr, Literal};
+use crate::sql::{Data, Expr};
 use crate::syn::error::bail;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
@@ -39,13 +39,13 @@ impl Parser<'_> {
 		};
 		let output = self.try_parse_output(stk).await?;
 
-		let version = if self.eat(t!("VERSION")) {
-			stk.run(|ctx| self.parse_expr_field(ctx)).await?
-		} else {
-			Expr::Literal(Literal::None)
+		// VERSION is no longer supported in INSERT statements, it is left here for backwards
+		// compatibility.
+		if self.eat(t!("VERSION")) {
+			stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		};
+
 		let timeout = self.try_parse_timeout(stk).await?;
-		let parallel = self.eat(t!("PARALLEL"));
 		Ok(InsertStatement {
 			into,
 			data,
@@ -53,9 +53,7 @@ impl Parser<'_> {
 			update,
 			output,
 			timeout,
-			parallel,
 			relation,
-			version,
 		})
 	}
 
@@ -72,6 +70,13 @@ impl Parser<'_> {
 		let speculate_result = self
 			.speculate(stk, async |stk, this| {
 				this.pop_peek();
+
+				// Some keywords can actually also align with plain idioms, for example `DELETE[1]`
+				// This should not be parsed as an idiom.
+				if Self::kind_starts_statement(this.peek().kind){
+					return Ok(None);
+				}
+
 
 				// If the first value fails to match a idiom, it could still be a valid normal
 				// expression so retry in this case.

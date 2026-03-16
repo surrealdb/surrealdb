@@ -13,22 +13,21 @@ impl Parser<'_> {
 	) -> ParseResult<RelateStatement> {
 		let only = self.eat(t!("ONLY"));
 		let (from, through, to) = stk.run(|stk| self.parse_relation(stk)).await?;
-		let uniq = self.eat(t!("UNIQUE"));
+
+		// UNIQUE is unused, parse it for backwards compatibility
+		self.eat(t!("UNIQUE"));
 
 		let data = self.try_parse_data(stk).await?;
 		let output = self.try_parse_output(stk).await?;
 		let timeout = self.try_parse_timeout(stk).await?;
-		let parallel = self.eat(t!("PARALLEL"));
 		Ok(RelateStatement {
 			only,
 			through,
 			from,
 			to,
-			uniq,
 			data,
 			output,
 			timeout,
-			parallel,
 		})
 	}
 
@@ -105,7 +104,7 @@ impl Parser<'_> {
 	}
 
 	pub(crate) async fn parse_thing_or_table(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
-		if self.peek_whitespace1().kind == t!(":") {
+		if let Some(t!(":")) = self.peek_whitespace1().map(|x| x.kind) {
 			self.parse_record_id(stk).await.map(|x| Expr::Literal(Literal::RecordId(x)))
 		} else {
 			self.parse_ident().map(Expr::Table)

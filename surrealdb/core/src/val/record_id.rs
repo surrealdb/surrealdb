@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::ops::Bound;
 
-use nanoid::nanoid;
+use rand::seq::SliceRandom;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
@@ -196,7 +196,9 @@ impl_kv_value_revisioned!(RecordIdKey);
 impl RecordIdKey {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
-		Self::String(nanoid!(20, &ID_CHARS))
+		let mut rng = rand::thread_rng();
+		let id: String = (0..20).map(|_| *ID_CHARS.choose(&mut rng).unwrap_or(&'0')).collect();
+		Self::String(id)
 	}
 	/// Generate a new random ULID
 	pub fn ulid() -> Self {
@@ -434,9 +436,22 @@ impl RecordId {
 	) -> anyhow::Result<Option<Object>> {
 		// Fetch the record id's contents
 		let stm = SelectStatement {
-			expr: Fields::Select(vec![Field::All]),
+			fields: Fields::Select(vec![Field::All]),
 			what: vec![Expr::Literal(Literal::RecordId(self.into_literal()))],
-			..SelectStatement::default()
+			omit: vec![],
+			only: false,
+			with: None,
+			cond: None,
+			split: None,
+			group: None,
+			order: None,
+			limit: None,
+			start: None,
+			fetch: None,
+			version: Expr::Literal(Literal::None),
+			timeout: Expr::Literal(Literal::None),
+			explain: None,
+			tempfiles: false,
 		};
 		if let Value::Object(x) = stk.run(|stk| stm.compute(stk, ctx, opt, doc)).await?.first() {
 			Ok(Some(x))

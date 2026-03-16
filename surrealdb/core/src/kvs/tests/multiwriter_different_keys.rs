@@ -1,18 +1,13 @@
-use std::sync::Arc;
-
 use uuid::Uuid;
 
 use super::CreateDs;
-use crate::dbs::node::Timestamp;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::kvs::clock::{FakeClock, SizedClock};
 
 pub async fn multiwriter_different_keys(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("7f0153b0-79cf-4922-85ef-61e390970514").unwrap();
-	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds.create_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Insert an initial key
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.set(&"test", &"some text".as_bytes().to_vec(), None).await.unwrap();

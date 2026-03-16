@@ -9,7 +9,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
 use crate::expr::literal::ObjectEntry;
-use crate::fmt::EscapeKey;
+use crate::fmt::EscapeObjectKey;
 use crate::val::{IndexFormat, RecordId, Value};
 
 /// Invariant: Keys never contain NUL bytes.
@@ -40,6 +40,12 @@ impl FromIterator<(String, Value)> for Object {
 impl From<BTreeMap<String, String>> for Object {
 	fn from(v: BTreeMap<String, String>) -> Self {
 		Self(v.into_iter().map(|(k, v)| (k, Value::from(v))).collect())
+	}
+}
+
+impl From<Vec<(String, Value)>> for Object {
+	fn from(v: Vec<(String, Value)>) -> Self {
+		Self(v.into_iter().collect())
 	}
 }
 
@@ -171,7 +177,7 @@ impl ToSql for Object {
 				if i > 0 {
 					inner_fmt.write_separator(f);
 				}
-				write_sql!(f, sql_fmt, "{}: ", EscapeKey(key));
+				write_sql!(f, sql_fmt, "{}: ", EscapeObjectKey(key));
 				value.fmt_sql(f, inner_fmt);
 			}
 			if sql_fmt.is_pretty() {

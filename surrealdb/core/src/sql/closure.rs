@@ -27,9 +27,12 @@ impl ToSql for Closure {
 		if let Some(returns) = &self.returns {
 			write_sql!(f, fmt, " -> {returns}");
 		}
-		match &self.body {
-			Expr::Idiom(_) => write_sql!(f, fmt, " ({})", &self.body),
-			x => write_sql!(f, fmt, " {}", CoverStmts(x)),
+		//  To avoid for example || ->? where ->? is a graph from failing to parse because the
+		//  parser expects a kind after ->
+		if self.body.has_left_idiom() {
+			write_sql!(f, fmt, " ({})", &self.body)
+		} else {
+			write_sql!(f, fmt, " {}", CoverStmts(&self.body))
 		}
 	}
 }

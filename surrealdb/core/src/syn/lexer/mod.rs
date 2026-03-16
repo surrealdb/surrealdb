@@ -161,16 +161,6 @@ impl<'a> Lexer<'a> {
 		}
 	}
 
-	/// Moves the lexer state back to before the give span.
-	///
-	/// # Warning
-	/// Moving the lexer into a state where the next byte is within a multibyte
-	/// character will result in spurious errors.
-	pub(crate) fn backup_before(&mut self, span: Span) {
-		self.reader.backup(span.offset);
-		self.last_offset = span.offset;
-	}
-
 	/// Moves the lexer state to after the give span.
 	///
 	/// # Warning

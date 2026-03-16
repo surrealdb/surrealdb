@@ -31,8 +31,9 @@ use crate_path::CratePath;
 ///
 /// The `#[surreal]` attribute can be used to customize the behavior:
 ///
-/// - `#[surreal(crate = "path")]` - Specify a custom path to the surrealdb-types crate (e.g.,
-///   `crate`, `::my_crate`)
+/// - `#[surreal(crate = "path")]` - Specify a custom path to the types crate (e.g.,
+///   `surrealdb::types`, `::surrealdb_types`, `crate`). If omitted, the default is chosen by
+///   feature: `sdk-path` → `::surrealdb::types`, else `::surrealdb_types`.
 /// - `#[surreal(tag = "type")]` - Specify a custom tag field for enum variants
 /// - `#[surreal(content = "data")]` - Specify a custom content field for enum variants
 /// - `#[surreal(rename = "name")]` - Rename a field or variant

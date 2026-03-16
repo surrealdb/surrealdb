@@ -113,6 +113,7 @@ use crate::types::{Array, SurrealValue, Value};
 ///
 /// This struct serializes as if it is a crate::types::Value::Object.
 #[derive(Clone, Debug, SurrealValue)]
+#[surreal(crate = "crate::types")]
 pub(crate) struct RouterRequest {
 	pub(crate) id: Option<i64>,
 	pub(crate) method: &'static str,

@@ -18,13 +18,13 @@ use crate::utils::escape::QuoteStr;
 /// need to be SQL compatible but it may happen to be.
 /// `ToSql` should be used for SQL compatible output.
 ///
-/// A good example is Datetime:
+/// Example usage:
 /// ```rust
 /// use surrealdb_types::ToSql;
 /// use surrealdb_types::Datetime;
 /// use chrono::{TimeZone, Utc};
-///
-/// let datetime = Datetime::new(Utc.with_ymd_and_hms(2025, 10, 3, 10, 2, 32).unwrap() + chrono::Duration::microseconds(873077));
+/// let dt = Utc.with_ymd_and_hms(2025, 10, 3, 10, 2, 32).unwrap() + chrono::Duration::microseconds(873077);
+/// let datetime = Datetime::from(dt);
 /// assert_eq!(datetime.to_string(), "2025-10-03T10:02:32.873077Z");
 /// assert_eq!(datetime.to_sql(), "d'2025-10-03T10:02:32.873077Z'");
 /// ```
@@ -123,7 +123,7 @@ pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
 	f: &mut String,
 	fmt: SqlFormat,
 ) {
-	use crate::utils::escape::EscapeKey;
+	use crate::utils::escape::EscapeObjectKey;
 
 	let pairs: Vec<_> = pairs.into_iter().collect();
 
@@ -135,7 +135,7 @@ pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
 		if i > 0 {
 			fmt.write_separator(f);
 		}
-		write_sql!(f, fmt, "{}: {}", EscapeKey(key.as_ref()), value);
+		write_sql!(f, fmt, "{}: {}", EscapeObjectKey(key.as_ref()), value);
 	}
 	if fmt.is_pretty() && !pairs.is_empty() {
 		f.push('\n');

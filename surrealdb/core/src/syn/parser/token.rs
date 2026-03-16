@@ -77,6 +77,7 @@ impl Parser<'_> {
 			t!("RETURN")
 				| t!("SELECT")
 				| t!("CREATE")
+				| t!("EXPLAIN")
 				| t!("UPSERT")
 				| t!("UPDATE")
 				| t!("DELETE")
@@ -96,8 +97,8 @@ impl Parser<'_> {
 				| t!("u\"") | t!("d'")
 				| t!("d\"") | t!("r'")
 				| t!("b\"") | t!("r\"")
-				| t!("'") | t!("\"")
-				| TokenKind::Digits
+				| t!("f\"") | t!("'")
+				| t!("\"") | TokenKind::Digits
 				| TokenKind::NaN
 				| t!("true") | t!("false")
 				| t!("fn") | t!("ml")
@@ -105,8 +106,9 @@ impl Parser<'_> {
 				| t!("(") | t!("{")
 				| t!("[") | t!("/")
 				| t!("|") | t!("||")
-				| t!("<") | t!("$param")
-				| t!("..") | TokenKind::Glued(_)
+				| t!("<") | t!("->")
+				| t!("$param")
+				| t!("..")
 		) || Self::kind_starts_subquery(kind)
 			|| Self::kind_is_identifier(kind)
 	}

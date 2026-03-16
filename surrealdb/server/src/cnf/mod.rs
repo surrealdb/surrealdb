@@ -2,6 +2,8 @@ use std::env;
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use surrealdb_core::lazy_env_parse;
+
 /// The logo of the SurrealDB server
 pub const LOGO: &str = "
  .d8888b.                                             888 8888888b.  888888b.
@@ -131,6 +133,12 @@ pub static WEBSOCKET_RESPONSE_BUFFER_SIZE: LazyLock<usize> =
 /// (default: 3 ms)
 pub static WEBSOCKET_RESPONSE_FLUSH_PERIOD: LazyLock<u64> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_RESPONSE_FLUSH_PERIOD", u64, 3);
+
+/// How many notifications can be buffered per GraphQL subscription before
+/// backpressure drops new notifications (default: 1024)
+#[cfg(feature = "graphql")]
+pub static GQL_SUBSCRIPTION_CHANNEL_CAPACITY: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_GQL_SUBSCRIPTION_CHANNEL_CAPACITY", usize, 1024);
 
 /// The number of runtime worker threads to start (default: the number of CPU
 /// cores, minimum 4)

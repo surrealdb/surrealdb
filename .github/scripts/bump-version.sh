@@ -10,7 +10,7 @@ if [[ -z "$VERSION" ]]; then
 	exit 1
 fi
 
-RELEASE_BRANCH="release/v${VERSION}"
+RELEASE_BRANCH="releases/v${VERSION}"
 
 # Configure git
 git config user.name "github-actions[bot]"
@@ -28,14 +28,25 @@ fi
 # Create release branch
 git checkout -b "${RELEASE_BRANCH}"
 
-# Bump version in workspace
-cargo set-version --workspace "${VERSION}"
+# Dynamically build list of surrealdb-* packages (excludes surrealism-*)
+PACKAGES=$(cargo metadata --format-version 1 --no-deps | \
+	jq -r '.packages[].name' | \
+	grep '^surrealdb' | \
+	sed 's/^/--package /' | \
+	tr '\n' ' ')
+
+# Bump version for surrealdb packages only
+cargo set-version $PACKAGES "${VERSION}"
 # Update lock file (only touch workspace crates, not dependencies)
 cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
 
 # Commit changes
 git add -A
-git commit -m "Prepare v${VERSION} release"
+if ! git diff --staged --quiet; then
+	git commit -m "Prepare v${VERSION} release"
+else
+	echo "No version changes (branch already at v${VERSION}), skipping commit"
+fi
 
 # Push branch (tag will be created later after successful release)
 git push origin "${RELEASE_BRANCH}"

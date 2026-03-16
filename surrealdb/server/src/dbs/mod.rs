@@ -12,11 +12,11 @@ use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 
 use crate::cli::Config;
-use crate::core::dbs::Session;
 use crate::core::dbs::capabilities::{
 	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget, Targets,
 };
+use crate::core::dbs::{NewPlannerStrategy, Session};
 
 const TARGET: &str = "surreal::dbs";
 
@@ -262,6 +262,13 @@ Targets must be in the form of <host>[:<port>], <ipv4|ipv6>[/<mask>]. For exampl
 	#[arg(default_missing_value_os = "", num_args = 0..)]
 	#[arg(value_parser = super::cli::validator::route_targets)]
 	deny_http: Option<Targets<RouteTarget>>,
+
+	#[arg(
+		help = "Strategy for the streaming query planner: 'best-effort' (default), 'compute-only', or 'all-read-only'"
+	)]
+	#[arg(env = "SURREAL_PLANNER_STRATEGY", long = "planner-strategy")]
+	#[arg(default_value = "best-effort")]
+	planner_strategy: NewPlannerStrategy,
 }
 
 impl DbsCapabilities {
@@ -581,6 +588,7 @@ fn merge_capabilities(initial: Capabilities, caps: DbsCapabilities) -> Capabilit
 		.without_experimental(caps.get_deny_experimental())
 		.with_arbitrary_query(caps.get_allow_arbitrary_query())
 		.without_arbitrary_query(caps.get_deny_arbitrary_query())
+		.with_planner_strategy(caps.planner_strategy)
 }
 
 impl From<DbsCapabilities> for Capabilities {
@@ -605,6 +613,31 @@ where
 	Fut: Future<Output = Result<T, E>>,
 	E: std::fmt::Display + std::fmt::Debug,
 {
+	retry_with_timeout_check(operation_name, f, |_| false).await
+}
+
+/// Retry an async operation until it succeeds, a timeout is reached, or a
+/// permanent (non-transient) error is detected.
+///
+/// # Parameters
+/// - `operation_name`: Name of the operation for logging purposes
+/// - `f`: The async function to retry
+/// - `is_permanent`: Predicate that returns `true` if an error is permanent and should not be
+///   retried (e.g. storage version mismatch)
+///
+/// # Returns
+/// The result of the operation if successful within the timeout
+async fn retry_with_timeout_check<F, Fut, T, E, P>(
+	operation_name: &str,
+	f: F,
+	is_permanent: P,
+) -> Result<T, anyhow::Error>
+where
+	F: Fn() -> Fut,
+	Fut: Future<Output = Result<T, E>>,
+	E: std::fmt::Display + std::fmt::Debug,
+	P: Fn(&E) -> bool,
+{
 	let timeout_duration = Duration::from_secs(60);
 	let start = Instant::now();
 	let mut attempt = 0;
@@ -622,6 +655,17 @@ where
 				return Ok(result);
 			}
 			Ok(Err(e)) => {
+				// If this is a permanent error, fail immediately without retrying
+				if is_permanent(&e) {
+					error!(
+						target: TARGET,
+						operation = operation_name,
+						error = %e,
+						"Operation failed with a permanent error, not retrying"
+					);
+					return Err(anyhow::anyhow!("{e}"));
+				}
+
 				let elapsed = start.elapsed();
 				if elapsed >= timeout_duration {
 					return Err(anyhow::anyhow!(
@@ -743,9 +787,16 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny);
 	#[cfg(storage)]
 	let dbs = dbs.with_temporary_directory(temporary_directory);
-	// Ensure the storage version is up to date to prevent corruption
-	let (_, is_new) =
-		retry_with_timeout("check_version", || async { dbs.check_version().await }).await?;
+	// Ensure the storage version is up to date to prevent corruption.
+	// OutdatedStorageVersion is a permanent condition (the data on disk is from
+	// an older version), so retrying it would waste time and delay pod restarts
+	// in Kubernetes environments where operators need fast failure feedback.
+	let (_, is_new) = retry_with_timeout_check(
+		"check_version",
+		|| async { dbs.check_version().await },
+		|e| e.to_string().contains("out-of-date"),
+	)
+	.await?;
 	// Create default namespace and database if not disabled
 	if is_new && !no_defaults {
 		let default_namespace = default_namespace.unwrap_or_else(|| "main".to_string());
@@ -937,23 +988,22 @@ mod tests {
 			// 7 - Specific experimental feature enabled
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default().with_experimental(ExperimentalTarget::DefineApi.into()),
+					Capabilities::default().with_experimental(ExperimentalTarget::Files.into()),
 				),
 				Session::owner().with_ns("test").with_db("test"),
-				"DEFINE API \"/\" FOR any THEN {};".to_string(),
+				"DEFINE BUCKET test BACKEND \"memory\";".to_string(),
 				true,
 				"NONE".to_string(),
 			),
 			// 8 - Specific experimental feature disabled
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.without_experimental(ExperimentalTarget::DefineApi.into()),
+					Capabilities::default().without_experimental(ExperimentalTarget::Files.into()),
 				),
 				Session::owner().with_ns("test").with_db("test"),
-				"DEFINE API \"/\" FOR any THEN {};".to_string(),
+				"DEFINE BUCKET test BACKEND \"memory\";".to_string(),
 				false,
-				"the experimental define api capability is not enabled".to_string(),
+				"expected the experimental files feature to be enabled".to_string(),
 			),
 			//
 			// 9 - Some functions are not allowed
@@ -1102,19 +1152,23 @@ mod tests {
 			),
 			// - 17
 			(
-				// Ensure redirect fails
+				// Ensure connecting via localhost is denied when all IPs are blocked
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::All)
 						.without_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str("127.0.0.1/0").unwrap()].into(),
+							[
+								NetTarget::from_str("127.0.0.1/0").unwrap(),
+								NetTarget::from_str("::/0").unwrap(),
+							]
+							.into(),
 						)),
 				),
 				Session::owner(),
 				format!("RETURN http::get('http://localhost:{}')", server1.address().port()),
 				false,
-				"Access to network target '127.0.0.1/32' is not allowed".to_string(),
+				"is not allowed".to_string(),
 			),
 			// 18 - Ensure redirect succeed
 			(
@@ -1211,6 +1265,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
+			planner_strategy: NewPlannerStrategy::default(),
 		};
 		assert_eq!(caps.get_allow_experimental(), Targets::All);
 		assert_eq!(caps.get_allow_arbitrary_query(), Targets::All);
@@ -1241,6 +1296,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
+			planner_strategy: NewPlannerStrategy::default(),
 		};
 		assert_eq!(
 			caps.get_allow_funcs(),
@@ -1271,6 +1327,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: Some(Targets::All),
+			planner_strategy: NewPlannerStrategy::default(),
 		};
 		assert_eq!(
 			caps.get_allow_http(),
@@ -1301,6 +1358,7 @@ mod tests {
 			deny_net: None,
 			deny_rpc: None,
 			deny_http: None,
+			planner_strategy: NewPlannerStrategy::default(),
 		};
 		assert_eq!(
 			caps.get_allow_funcs(),

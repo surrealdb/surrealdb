@@ -31,7 +31,7 @@ the tests. By default, tests run using the in-memory storage engine (`mem` or `m
 Other supported backends include:
 - `memory` or `mem` (default): In-memory storage engine, fastest for testing
 - `rocksdb`: RocksDB embedded storage engine (requires `backend-rocksdb` feature)
-- `surrealkv` or `file`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
+- `surrealkv`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
 - `tikv`: TiKV distributed storage engine (requires `backend-tikv` feature and a running TiKV cluster)
 
 Note that some backends require the corresponding Cargo feature to be enabled when building:
@@ -423,13 +423,54 @@ backends: it succeeds on RocksDB but returns an error on the memory backend.
 
 Defaults to `[]` (runs on all backends)
 
+#### `[env.versioned]`
+
+Specifies whether the test requires MVCC versioning to be enabled on the datastore.
+When set to `true`, the datastore is created with versioning support, enabling
+temporal queries using the `VERSION` clause.
+
+Tests with `versioned = true` always get a fresh datastore (they cannot reuse the
+shared datastore pool) since they require different datastore configuration.
+
+**Examples:**
+
+```toml
+# Test that requires versioning on memory and SurrealKV backends
+[env]
+backend = ["mem", "surrealkv"]
+versioned = true
+```
+
+```toml
+# Test with versioning on all backends that support it
+[env]
+versioned = true
+```
+
+Defaults to `false`
+
 #### `[env.timeout]`
 
 Specifies a duration in milliseconds within which the entire test should finish. 
 This controls the overall test execution time from start to finish. If the test 
 takes longer than the given duration it will be considered an error and it will 
 cause a test run to fail. This key can also be set to `false` to disable the 
-timeout altogether or `true` to default to 1 second. Defaults to `2000` (2 seconds).
+timeout altogether or `true` to default to 1 second. Defaults to `1000` (1 second).
+
+#### `[env.timeout-tikv]`, `[env.timeout-rocksdb]`, `[env.timeout-surrealkv]`
+
+Backend-specific timeout overrides in milliseconds. When running tests against a 
+specific backend, these values take precedence over the base `timeout`. This is 
+useful for tests that are known to be slower on certain backends (e.g., TiKV due 
+to network latency).
+
+**Example:**
+```toml
+[env]
+timeout = 2000           # Default timeout for memory backend
+timeout-tikv = 10000     # TiKV needs 5x more time due to network latency
+timeout-rocksdb = 3000   # RocksDB may need slightly more time for disk I/O
+```
 
 #### `[env.context_timeout]`
 
@@ -437,7 +478,19 @@ Specifies a duration in milliseconds for individual query execution within the
 datastore context. This controls how long each query is allowed to run. If a 
 query takes longer than the given duration, it will be terminated. This key can 
 also be set to `false` to disable the context timeout altogether or `true` to 
-default to 1 second. Defaults to `3000` (3 seconds).
+default to 1 second. Defaults to `1000` (1 second).
+
+#### `[env.context-timeout-tikv]`, `[env.context-timeout-rocksdb]`, `[env.context-timeout-surrealkv]`
+
+Backend-specific context timeout overrides in milliseconds. Similar to the timeout 
+overrides, these allow setting different query execution limits per backend.
+
+**Example:**
+```toml
+[env]
+context-timeout = 1000           # Default context timeout
+context-timeout-tikv = 5000      # TiKV queries may take longer
+```
 
 Note: `[env.timeout]` and `[env.context_timeout]` serve different purposes:
 - `timeout`: Controls the entire test execution time (end-to-end)
@@ -502,3 +555,35 @@ http routs and scripting just like with the SurrealDB binary/rust SDK. Defaults
 to all capabilities enabled.
 
 This field is not supported for upgrade tests.
+
+#### `[env.new-planner-strategy]`
+
+Controls the strategy for the new streaming planner/executor. This determines
+how read-only statements (SELECT, INFO, etc.) are executed and whether the new
+planner is required or optional.
+
+Valid values:
+- `"best-effort-ro"` (default): Try the new planner for read-only statements. If
+  the planner returns `Unimplemented`, silently fall back to the legacy compute
+  executor. This is the production default.
+- `"all-ro"`: Require the new planner for all read-only statements. If the new
+  planner cannot handle a non-DDL/DML statement, the test fails with an error
+  instead of silently falling back. DDL/DML statements (CREATE, UPDATE, DELETE,
+  DEFINE, etc.) always fall back regardless of this setting.
+- `"compute-only"`: Skip the new planner entirely and always use the legacy
+  compute executor for all statements.
+
+**Examples:**
+```toml
+# Require that all SELECTs use the new executor (test will fail if fallback occurs)
+[env]
+new-planner-strategy = "all-ro"
+```
+
+```toml
+# Force legacy compute path for all statements
+[env]
+new-planner-strategy = "compute-only"
+```
+
+Defaults to `"best-effort-ro"` (current production behavior).

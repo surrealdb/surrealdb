@@ -3,6 +3,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use super::{Action, Actor, Level, Resource, Role, is_allowed};
+use crate::iam::AuthLimit;
 
 /// Specifies the current authentication for the datastore execution context.
 #[revisioned(revision = 1)]
@@ -90,6 +91,14 @@ impl Auth {
 			vec![],
 			Level::Record(ns.to_owned(), db.to_owned(), ac.to_owned()),
 		))
+	}
+
+	pub fn new_limited(&self, limit: &AuthLimit) -> Self {
+		Self::new(self.actor.new_limited(limit))
+	}
+
+	pub fn max_role(&self) -> Option<Role> {
+		self.actor.max_role()
 	}
 
 	//

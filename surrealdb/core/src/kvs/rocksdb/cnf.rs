@@ -8,23 +8,20 @@ use sysinfo::System;
 // Basic options
 // --------------------------------------------------
 
-/// Should we sync writes to disk before acknowledgement
-pub(super) static SYNC_DATA: LazyLock<bool> = lazy_env_parse!("SURREAL_SYNC_DATA", bool, true);
-
 /// The number of threads to start for flushing and compaction (default: number
 /// of CPUs)
-pub(super) static ROCKSDB_THREAD_COUNT: LazyLock<i32> =
-	lazy_env_parse!("SURREAL_ROCKSDB_THREAD_COUNT", i32, || num_cpus::get() as i32);
+pub(super) static ROCKSDB_THREAD_COUNT: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_ROCKSDB_THREAD_COUNT", usize, || num_cpus::get());
 
 /// The maximum number of threads to use for flushing and compaction (default:
 /// number of CPUs * 2)
-pub(super) static ROCKSDB_JOBS_COUNT: LazyLock<i32> =
-	lazy_env_parse!("SURREAL_ROCKSDB_JOBS_COUNT", i32, || num_cpus::get() as i32 * 2);
+pub(super) static ROCKSDB_JOBS_COUNT: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_ROCKSDB_JOBS_COUNT", usize, || num_cpus::get() * 2);
 
 /// The maximum number of open files which can be opened by RocksDB (default:
 /// 1024)
-pub(super) static ROCKSDB_MAX_OPEN_FILES: LazyLock<i32> =
-	lazy_env_parse!("SURREAL_ROCKSDB_MAX_OPEN_FILES", i32, 1024);
+pub(super) static ROCKSDB_MAX_OPEN_FILES: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_ROCKSDB_MAX_OPEN_FILES", usize, 1024);
 
 /// The size of each uncompressed data block in bytes (default: 64 KiB)
 pub(super) static ROCKSDB_BLOCK_SIZE: LazyLock<usize> =
@@ -39,15 +36,15 @@ pub(super) static ROCKSDB_TARGET_FILE_SIZE_BASE: LazyLock<u64> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_TARGET_FILE_SIZE_BASE", u64, 64 * 1024 * 1024);
 
 /// The target file size multiplier for each compaction level (default: 2)
-pub(super) static ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER: LazyLock<i32> =
-	lazy_env_parse!("SURREAL_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER", i32, 2);
+pub(super) static ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER", usize, 2);
 
 /// The number of files needed to trigger level 0 compaction (default: 4)
-pub(super) static ROCKSDB_FILE_COMPACTION_TRIGGER: LazyLock<i32> =
-	lazy_env_parse!("SURREAL_ROCKSDB_FILE_COMPACTION_TRIGGER", i32, 4);
+pub(super) static ROCKSDB_FILE_COMPACTION_TRIGGER: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_ROCKSDB_FILE_COMPACTION_TRIGGER", usize, 4);
 
-/// The readahead buffer size used during compaction (default: dynamic from 4
-/// MiB to 16 MiB)
+/// The readahead buffer size used during compaction
+/// (default: dynamic from 4 MiB to 16 MiB)
 pub(super) static ROCKSDB_COMPACTION_READAHEAD_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_COMPACTION_READAHEAD_SIZE", usize, || {
 		// Load the system attributes
@@ -123,7 +120,7 @@ pub(super) static ROCKSDB_BLOB_FILE_SIZE: LazyLock<u64> =
 pub(super) static ROCKSDB_BLOB_COMPRESSION_TYPE: LazyLock<Option<String>> =
 	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_COMPRESSION_TYPE", Option<String>);
 
-/// Whether to enable blob garbage collection (default: false)
+/// Whether to enable blob garbage collection (default: true)
 pub(super) static ROCKSDB_ENABLE_BLOB_GC: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_ROCKSDB_ENABLE_BLOB_GC", bool, true);
 
@@ -143,7 +140,8 @@ pub(super) static ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE: LazyLock<u64> =
 // Memory manager options
 // --------------------------------------------------
 
-/// The size of the least-recently-used block cache (default: 16 MiB)
+/// The size of the least-recently-used block cache
+/// (default: dynamic depending on system memory)
 pub(super) static ROCKSDB_BLOCK_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_BLOCK_CACHE_SIZE", usize, || {
 		// Load the system attributes
@@ -163,8 +161,8 @@ pub(super) static ROCKSDB_BLOCK_CACHE_SIZE: LazyLock<usize> =
 		max(memory as usize, 16 * 1024 * 1024)
 	});
 
-/// The amount of data each write buffer can build up in memory (default:
-/// dynamic from 32 MiB to 128 MiB)
+/// The amount of data each write buffer can build up in memory
+/// (default: dynamic from 32 MiB to 128 MiB)
 pub(super) static ROCKSDB_WRITE_BUFFER_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_WRITE_BUFFER_SIZE", usize, || {
 		// Load the system attributes
@@ -186,10 +184,10 @@ pub(super) static ROCKSDB_WRITE_BUFFER_SIZE: LazyLock<usize> =
 		}
 	});
 
-/// The maximum number of write buffers which can be used (default: dynamic from
-/// 2 to 32)
-pub(super) static ROCKSDB_MAX_WRITE_BUFFER_NUMBER: LazyLock<i32> =
-	lazy_env_parse!("SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER", i32, || {
+/// The maximum number of write buffers which can be used
+/// (default: dynamic from 2 to 32)
+pub(super) static ROCKSDB_MAX_WRITE_BUFFER_NUMBER: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER", usize, || {
 		// Load the system attributes
 		let mut system = System::new_all();
 		// Refresh the system memory
@@ -213,8 +211,8 @@ pub(super) static ROCKSDB_MAX_WRITE_BUFFER_NUMBER: LazyLock<i32> =
 
 /// The minimum number of write buffers to merge before writing to disk
 /// (default: 2)
-pub(super) static ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE: LazyLock<i32> =
-	lazy_env_parse!("SURREAL_ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE", i32, 2);
+pub(super) static ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE", usize, 2);
 
 // --------------------------------------------------
 // Disk space manager options
@@ -228,30 +226,8 @@ pub(super) static ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE: LazyLock<u64> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE", u64, 0);
 
 // --------------------------------------------------
-// Background flusher options
-// --------------------------------------------------
-
-/// Whether to enable background WAL file flushing (default: true)
-pub(super) static ROCKSDB_BACKGROUND_FLUSH: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_ROCKSDB_BACKGROUND_FLUSH", bool, true);
-
-/// The interval in nanoseconds between background flushes (default: 200ms)
-pub(super) static ROCKSDB_BACKGROUND_FLUSH_INTERVAL: LazyLock<u64> =
-	lazy_env_parse!(duration, "SURREAL_ROCKSDB_BACKGROUND_FLUSH_INTERVAL", u64, || {
-		Duration::from_millis(200).as_nanos() as u64
-	});
-
-// --------------------------------------------------
 // Commit coordinator options
 // --------------------------------------------------
-
-/// Whether to enable grouped commit when sync is enabled (default: true)
-/// When enabled, multiple transaction commits are batched together and flushed to disk with a
-/// single fsync operation, improving throughput. When disabled, each transaction is committed
-/// and synced individually, which may provide lower latency for single transactions at the cost
-/// of reduced throughput under high load.
-pub(super) static ROCKSDB_GROUPED_COMMIT: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_ROCKSDB_GROUPED_COMMIT", bool, true);
 
 /// The maximum wait time in nanoseconds before forcing a grouped commit (default: 5ms).
 /// This timeout ensures that transactions don't wait indefinitely under low concurrency and

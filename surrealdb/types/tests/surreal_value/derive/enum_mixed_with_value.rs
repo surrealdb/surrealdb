@@ -5,6 +5,7 @@ use surrealdb_types::{Array, SurrealValue, Value};
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(untagged)]
 enum EnumMixedWithValue {
 	#[surreal(value = false)]

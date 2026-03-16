@@ -1,6 +1,8 @@
 use std::str::FromStr;
 
-use crate::rpc::{Method, RpcError};
+use surrealdb_types::Error as TypesError;
+
+use crate::rpc::{Method, invalid_request};
 use crate::types::{PublicArray, PublicNumber, PublicObject, PublicUuid, PublicValue};
 
 pub static ID: &str = "id";
@@ -23,7 +25,7 @@ pub struct Request {
 impl Request {
 	/// Create a request by extracting the request fields from an surealql
 	/// object.
-	pub fn from_object(mut obj: PublicObject) -> Result<Self, RpcError> {
+	pub fn from_object(mut obj: PublicObject) -> Result<Self, TypesError> {
 		// Fetch the 'id' argument
 
 		let id = obj.remove("id");
@@ -36,7 +38,7 @@ impl Request {
 				| PublicValue::String(_)
 				| PublicValue::Datetime(_),
 			) => id,
-			_ => return Err(RpcError::InvalidRequest),
+			_ => return Err(invalid_request()),
 		};
 
 		// Fetch the 'version' argument
@@ -45,9 +47,9 @@ impl Request {
 			Some(PublicValue::Number(v)) => match v {
 				PublicNumber::Int(1) => Some(1),
 				PublicNumber::Int(2) => Some(2),
-				_ => return Err(RpcError::InvalidRequest),
+				_ => return Err(invalid_request()),
 			},
-			_ => return Err(RpcError::InvalidRequest),
+			_ => return Err(invalid_request()),
 		};
 
 		// Fetch the 'txn' argument
@@ -55,9 +57,9 @@ impl Request {
 			None | Some(PublicValue::None | PublicValue::Null) => None,
 			Some(PublicValue::Uuid(x)) => Some(x),
 			Some(PublicValue::String(x)) => {
-				Some(PublicUuid::from_str(x.as_str()).map_err(|_| RpcError::InvalidRequest)?)
+				Some(PublicUuid::from_str(x.as_str()).map_err(|_| invalid_request())?)
 			}
-			_ => return Err(RpcError::InvalidRequest),
+			_ => return Err(invalid_request()),
 		};
 
 		// Fetch the 'txn' argument
@@ -65,15 +67,15 @@ impl Request {
 			None | Some(PublicValue::None | PublicValue::Null) => None,
 			Some(PublicValue::Uuid(x)) => Some(x),
 			Some(PublicValue::String(x)) => {
-				Some(PublicUuid::from_str(x.as_str()).map_err(|_| RpcError::InvalidRequest)?)
+				Some(PublicUuid::from_str(x.as_str()).map_err(|_| invalid_request())?)
 			}
-			_ => return Err(RpcError::InvalidRequest),
+			_ => return Err(invalid_request()),
 		};
 
 		// Fetch the 'method' argument
 		let method = match obj.remove(METHOD) {
 			Some(PublicValue::String(v)) => v,
-			_ => return Err(RpcError::InvalidRequest),
+			_ => return Err(invalid_request()),
 		};
 		// Fetch the 'params' argument
 		let params = match obj.remove(PARAMS) {

@@ -4,7 +4,6 @@ mod common;
 
 use common::{block_on, setup_datastore, setup_datastore_with_query};
 use criterion::{Criterion, criterion_group, criterion_main};
-use pprof::criterion::{Output, PProfProfiler};
 
 // ============================================================================
 // Benchmark: CREATE Statement
@@ -250,7 +249,7 @@ fn bench_relate(c: &mut Criterion) {
 
 criterion_group!(
 	name = benches;
-	config = Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
+	config = Criterion::default();
 	targets = bench_create,
 		bench_upsert,
 		bench_update,

@@ -10,7 +10,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Block, Expr, FlowResultExt, Kind};
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -76,6 +76,7 @@ impl DefineFunctionStatement {
 				permissions: self.permissions.clone(),
 				returns: self.returns.clone(),
 				comment,
+				auth_limit: AuthLimit::new_from_auth(&opt.auth).into(),
 			},
 		)
 		.await?;

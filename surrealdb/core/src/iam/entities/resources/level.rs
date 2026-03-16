@@ -72,6 +72,14 @@ impl Level {
 		}
 	}
 
+	pub(crate) fn is_record(&self) -> bool {
+		matches!(self, Level::Record(_, _, _))
+	}
+
+	pub(crate) fn is_anonymous(&self) -> bool {
+		matches!(self, Level::No)
+	}
+
 	#[cfg(test)]
 	pub(crate) fn id(&self) -> Option<&str> {
 		match self {

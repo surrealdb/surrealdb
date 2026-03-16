@@ -303,7 +303,7 @@ pub async fn create_grant(
 			);
 
 			// Return the original version of the grant.
-			// This is the only time the the plaintext key is returned.
+			// This is the only time the plaintext key is returned.
 			Ok(gr)
 		}
 		catalog::AccessType::Bearer(at) => {
@@ -438,7 +438,7 @@ pub async fn create_grant(
 			);
 
 			// Return the original version of the grant.
-			// This is the only time the the plaintext key is returned.
+			// This is the only time the plaintext key is returned.
 			Ok(gr)
 		}
 	}

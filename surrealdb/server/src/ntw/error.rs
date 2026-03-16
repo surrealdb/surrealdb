@@ -2,9 +2,9 @@ use std::error::Error as StdError;
 
 use axum::Json;
 use axum::response::{IntoResponse, Response};
-use http::{HeaderName, StatusCode};
-use opentelemetry::global::Error as OpentelemetryError;
+use http::{HeaderName, HeaderValue, StatusCode};
 use serde::{Serialize, Serializer};
+use surrealdb_core::api::X_SURREAL_REQUEST_ID;
 use surrealdb_core::api::err::ApiError;
 use thiserror::Error;
 
@@ -27,9 +27,6 @@ pub enum Error {
 
 	#[error("There was an error with the remote request: {0}")]
 	Remote(#[from] reqwest::Error),
-
-	#[error("There was an error with opentelemetry: {0}")]
-	Otel(#[from] OpentelemetryError),
 
 	#[error("The HTTP route '{0}' is forbidden")]
 	ForbiddenRoute(String),
@@ -196,5 +193,21 @@ impl IntoResponse for ResponseError {
 			description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
 			information: Some(error_str),
 		}.into_response()
+	}
+}
+
+/// Error wrapper for the API HTTP handler that attaches a request ID to the response
+/// so all errors (including those before invocation) can be traced.
+pub(super) struct ApiHandlerError(pub ResponseError, pub String);
+
+impl IntoResponse for ApiHandlerError {
+	fn into_response(self) -> Response {
+		let mut response = self.0.into_response();
+		if !self.1.is_empty()
+			&& let Ok(value) = HeaderValue::from_str(&self.1)
+		{
+			response.headers_mut().insert(X_SURREAL_REQUEST_ID, value);
+		}
+		response
 	}
 }

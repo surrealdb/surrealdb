@@ -8,13 +8,8 @@
 //! - Automatically recovers to normal mode when space drops below the limit after deletions and
 //!   compaction
 
-use std::sync::Arc;
-
-use crate::dbs::node::Timestamp;
 use crate::kvs::LockType::Optimistic;
-use crate::kvs::SizedClock;
 use crate::kvs::TransactionType::*;
-use crate::kvs::clock::FakeClock;
 use crate::kvs::tests::CreateDs;
 use crate::val::Uuid;
 
@@ -40,8 +35,7 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	// - SURREAL_ROCKSDB_WAL_SIZE_LIMIT = 1 (forces frequent WAL flushes)
 
 	// Create datastore (read-and-deletion-only mode is triggered by environment variables)
-	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds.create_ds(Uuid::new_v7().into(), clock).await;
+	let (ds, _) = new_ds.create_ds(Uuid::new_v7().into()).await;
 
 	// Phase 1: Initial writes in normal mode (before reaching space limit)
 	{

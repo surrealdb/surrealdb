@@ -11,7 +11,7 @@ use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::doc::CursorDoc;
-use crate::expr::FlowResultExt as _;
+use crate::expr::{FlowResultExt as _, Idiom};
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Number, TryFloatDiv, Value};
 
@@ -27,6 +27,7 @@ use crate::val::{Number, TryFloatDiv, Value};
 #[derive(Debug)]
 pub struct GroupCollector {
 	analysis: AggregationAnalysis,
+	omit: Vec<Idiom>,
 
 	/// buffers reused during pushing
 	exprs_buffer: Vec<Value>,
@@ -46,9 +47,11 @@ impl GroupCollector {
 		};
 
 		let analysis = AggregationAnalysis::analyze_fields_groups(fields, groups, false)?;
+		let omit = stm.omit().to_vec();
 
 		Ok(GroupCollector {
 			analysis,
+			omit,
 
 			exprs_buffer: Vec::new(),
 			group_buffer: Vec::new(),
@@ -145,7 +148,7 @@ impl GroupCollector {
 		};
 
 		if let RecordStrategy::Count = rs {
-			let Value::Number(n) = doc.doc.data.as_ref() else {
+			let Value::Number(n) = doc.doc.as_ref() else {
 				fail!("Value for Count RecordStrategy was not a number");
 			};
 
@@ -183,7 +186,7 @@ impl GroupCollector {
 		let mut doc: CursorDoc = Value::empty_object().into();
 
 		for (group, result) in std::mem::take(&mut self.results) {
-			let Value::Object(doc_obj) = doc.doc.data.to_mut() else {
+			let Value::Object(doc_obj) = doc.doc.to_mut() else {
 				// We create the document above as a object so it must be an object.
 				unreachable!()
 			};
@@ -288,10 +291,16 @@ impl GroupCollector {
 			// Calculate the final value for the fields.
 			match &self.analysis.fields {
 				AggregateFields::Value(expr) => {
-					let res = stk
+					let mut res = stk
 						.run(|stk| expr.compute(stk, ctx, opt, Some(&doc)))
 						.await
 						.catch_return()?;
+
+					// Apply OMIT to the aggregated result
+					for field in &self.omit {
+						res.del(stk, ctx, opt, field).await?;
+					}
+
 					collector.push(res);
 				}
 				AggregateFields::Fields(items) => {
@@ -303,6 +312,12 @@ impl GroupCollector {
 							.catch_return()?;
 						obj.set(stk, ctx, opt, name.as_ref(), res).await?;
 					}
+
+					// Apply OMIT to the aggregated result
+					for field in &self.omit {
+						obj.del(stk, ctx, opt, field).await?;
+					}
+
 					collector.push(obj);
 				}
 			}

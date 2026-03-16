@@ -23,6 +23,7 @@ pub use websocket::*;
 use crate::types::{SurrealValue, Value};
 
 #[derive(Debug, SurrealValue)]
+#[surreal(crate = "crate::types")]
 #[surreal(untagged, lowercase)]
 pub enum PatchOp {
 	Add {

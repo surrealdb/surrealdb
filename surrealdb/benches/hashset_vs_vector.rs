@@ -1,11 +1,12 @@
 #![allow(clippy::unwrap_used)]
 
 use std::collections::HashSet;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use surrealdb_core::idx::trees::dynamicset::{AHashSet, ArraySet, DynamicSet};
+use web_time::SystemTime;
 
 fn bench_hashset(samples_vec: &Vec<Vec<u64>>) {
 	for samples in samples_vec {
@@ -20,7 +21,7 @@ fn bench_hashset(samples_vec: &Vec<Vec<u64>>) {
 	}
 }
 
-fn bench_hashbrown(samples_vec: &Vec<Vec<u64>>) {
+fn bench_ahashset(samples_vec: &Vec<Vec<u64>>) {
 	for samples in samples_vec {
 		let mut h = AHashSet::with_capacity(samples.len());
 		for &s in samples {
@@ -77,7 +78,7 @@ fn create_samples(capacity: usize, num_samples: usize) -> Vec<Vec<u64>> {
 }
 
 /// This bench compares the performance of insert and search for small size
-/// HashSet collections. It compares HashSet, HashBrown, Vector and SmallVec.
+/// HashSet collections. It compares HashSet, AHashSet, Vector and SmallVec.
 /// It is used to help choosing the best options for the UndirectedGraph used
 /// for the HNSW index. The ultimate goal is to be sure that the DynamicSet use
 /// the best option based on the expected capacity.
@@ -107,8 +108,8 @@ fn group_test<const N: usize>(group: &mut BenchmarkGroup<WallTime>, iterations: 
 		b.iter(|| bench_hashset(&samples));
 	});
 
-	group.bench_function(format!("hashbrown_{N}"), |b| {
-		b.iter(|| bench_hashbrown(&samples));
+	group.bench_function(format!("ahashset_{N}"), |b| {
+		b.iter(|| bench_ahashset(&samples));
 	});
 
 	group.bench_function(format!("vector_{N}"), |b| {

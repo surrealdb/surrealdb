@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use ahash::{AHasher, HashSet};
 use anyhow::{Result, ensure};
-use linfa_linalg::norm::Norm;
+use blake3::Hasher as Blake3Hasher;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;
 use num_traits::Zero;
@@ -74,8 +74,9 @@ impl<F> Encode<F> for SerializedVector {
 impl<'de, F> BorrowDecode<'de, F> for SerializedVector {
 	fn borrow_decode(r: &mut BorrowReader<'de>) -> std::result::Result<Self, DecodeError> {
 		let slice = r.read_cow()?;
-		DeserializeRevisioned::deserialize_revisioned(&mut slice.as_ref())
-			.map_err(DecodeError::custom)
+		let bytes: &[u8] = slice.as_ref();
+		let mut reader = bytes;
+		DeserializeRevisioned::deserialize_revisioned(&mut reader).map_err(DecodeError::custom)
 	}
 }
 
@@ -100,6 +101,105 @@ impl From<SerializedVector> for Vector {
 			SerializedVector::I32(v) => Self::I32(Array1::from_vec(v)),
 			SerializedVector::I16(v) => Self::I16(Array1::from_vec(v)),
 		}
+	}
+}
+
+impl SerializedVector {
+	pub(super) fn try_from_value(t: VectorType, d: usize, v: Value) -> Result<Self> {
+		let res = match t {
+			VectorType::F64 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Self::F64(vec)
+			}
+			VectorType::F32 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Self::F32(vec)
+			}
+			VectorType::I64 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Self::I64(vec)
+			}
+			VectorType::I32 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Self::I32(vec)
+			}
+			VectorType::I16 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Self::I16(vec)
+			}
+		};
+		Ok(res)
+	}
+
+	fn check_vector_value<T>(value: Value, vec: &mut Vec<T>) -> Result<()>
+	where
+		T: TryFrom<Number, Error = Error>,
+	{
+		match value {
+			Value::Array(a) => {
+				for v in a.0 {
+					Self::check_vector_value(v, vec)?;
+				}
+				Ok(())
+			}
+			Value::Number(n) => {
+				vec.push(n.try_into()?);
+				Ok(())
+			}
+			_ => Err(anyhow::Error::new(Error::InvalidVectorValue(value.to_raw_string()))),
+		}
+	}
+
+	pub(super) fn dimension(&self) -> usize {
+		match self {
+			Self::F64(v) => v.len(),
+			Self::F32(v) => v.len(),
+			Self::I64(v) => v.len(),
+			Self::I32(v) => v.len(),
+			Self::I16(v) => v.len(),
+		}
+	}
+
+	/// Computes a BLAKE3 hash of the vector's bytes.
+	///
+	/// This is used for deduplicating vectors in the HNSW index when `HASHED_VECTOR` is enabled.
+	/// The hash is calculated by iterating over the vector elements and updating the hasher
+	/// with their little-endian byte representation.
+	pub(crate) fn compute_hash(&self) -> [u8; 32] {
+		let mut hasher = Blake3Hasher::new();
+		match self {
+			Self::F64(v) => {
+				for &val in v {
+					hasher.update(&val.to_le_bytes());
+				}
+			}
+			Self::F32(v) => {
+				for &val in v {
+					hasher.update(&val.to_le_bytes());
+				}
+			}
+			Self::I64(v) => {
+				for &val in v {
+					hasher.update(&val.to_le_bytes());
+				}
+			}
+			Self::I32(v) => {
+				for &val in v {
+					hasher.update(&val.to_le_bytes());
+				}
+			}
+			Self::I16(v) => {
+				for &val in v {
+					hasher.update(&val.to_le_bytes());
+				}
+			}
+		}
+		*hasher.finalize().as_bytes()
 	}
 }
 
@@ -135,16 +235,16 @@ impl Vector {
 	#[inline]
 	fn cosine_distance_f64(a: &Array1<f64>, b: &Array1<f64>) -> f64 {
 		let dot_product = a.dot(b);
-		let norm_a = a.norm_l2();
-		let norm_b = b.norm_l2();
+		let norm_a = (a * a).sum().sqrt();
+		let norm_b = (b * b).sum().sqrt();
 		1.0 - dot_product / (norm_a * norm_b)
 	}
 
 	#[inline]
 	fn cosine_distance_f32(a: &Array1<f32>, b: &Array1<f32>) -> f64 {
 		let dot_product = a.dot(b) as f64;
-		let norm_a = a.norm_l2() as f64;
-		let norm_b = b.norm_l2() as f64;
+		let norm_a = ((a * a).sum() as f64).sqrt();
+		let norm_b = ((b * b).sum() as f64).sqrt();
 		1.0 - dot_product / (norm_a * norm_b)
 	}
 
@@ -457,54 +557,36 @@ impl From<&Vector> for Value {
 }
 
 impl Vector {
-	pub(super) fn try_from_value(t: VectorType, d: usize, v: &Value) -> Result<Self> {
+	#[cfg(test)]
+	pub(super) fn try_from_value(t: VectorType, d: usize, v: Value) -> Result<Self> {
 		let res = match t {
 			VectorType::F64 => {
 				let mut vec = Vec::with_capacity(d);
-				Self::check_vector_value(v, &mut vec)?;
+				SerializedVector::check_vector_value(v, &mut vec)?;
 				Vector::F64(Array1::from_vec(vec))
 			}
 			VectorType::F32 => {
 				let mut vec = Vec::with_capacity(d);
-				Self::check_vector_value(v, &mut vec)?;
+				SerializedVector::check_vector_value(v, &mut vec)?;
 				Vector::F32(Array1::from_vec(vec))
 			}
 			VectorType::I64 => {
 				let mut vec = Vec::with_capacity(d);
-				Self::check_vector_value(v, &mut vec)?;
+				SerializedVector::check_vector_value(v, &mut vec)?;
 				Vector::I64(Array1::from_vec(vec))
 			}
 			VectorType::I32 => {
 				let mut vec = Vec::with_capacity(d);
-				Self::check_vector_value(v, &mut vec)?;
+				SerializedVector::check_vector_value(v, &mut vec)?;
 				Vector::I32(Array1::from_vec(vec))
 			}
 			VectorType::I16 => {
 				let mut vec = Vec::with_capacity(d);
-				Self::check_vector_value(v, &mut vec)?;
+				SerializedVector::check_vector_value(v, &mut vec)?;
 				Vector::I16(Array1::from_vec(vec))
 			}
 		};
 		Ok(res)
-	}
-
-	fn check_vector_value<T>(value: &Value, vec: &mut Vec<T>) -> Result<()>
-	where
-		T: TryFrom<Number, Error = Error>,
-	{
-		match value {
-			Value::Array(a) => {
-				for v in a.0.iter() {
-					Self::check_vector_value(v, vec)?;
-				}
-				Ok(())
-			}
-			Value::Number(n) => {
-				vec.push((*n).try_into()?);
-				Ok(())
-			}
-			_ => Err(anyhow::Error::new(Error::InvalidVectorValue(value.clone().to_raw_string()))),
-		}
 	}
 
 	pub(super) fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self> {

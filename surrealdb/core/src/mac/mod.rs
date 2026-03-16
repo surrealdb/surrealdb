@@ -147,13 +147,6 @@ macro_rules! yield_now {
 	};
 }
 
-/// Matches on a specific config environment
-macro_rules! get_cfg {
-	($i:ident : $($s:expr_2021),+) => (
-		let $i = || { $( if cfg!($i=$s) { return $s; } );+ "unknown"};
-	)
-}
-
 /// Runs a method on a transaction, ensuring that the transaction
 /// is cancelled and rolled back if the initial function fails.
 /// This can be used to ensure that the use of the `?` operator to

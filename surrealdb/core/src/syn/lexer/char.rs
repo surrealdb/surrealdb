@@ -1,6 +1,6 @@
 use crate::syn::error::syntax_error;
 use crate::syn::lexer::Lexer;
-use crate::syn::token::{Token, TokenKind, t};
+use crate::syn::token::{Token, t};
 
 impl Lexer<'_> {
 	/// lex non-ascii characters.
@@ -31,7 +31,8 @@ impl Lexer<'_> {
 			| '\u{2004}' | '\u{2005}' | '\u{2006}' | '\u{2007}' | '\u{2008}' | '\u{2009}'
 			| '\u{200A}' | '\u{202F}' | '\u{205F}' | '\u{3000}' => {
 				self.eat_whitespace();
-				TokenKind::WhiteSpace
+				self.advance_span();
+				return self.next_token();
 			}
 			x => {
 				let err = syntax_error!("Invalid token `{x}`", @self.current_span());

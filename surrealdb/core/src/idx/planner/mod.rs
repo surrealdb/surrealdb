@@ -1,4 +1,4 @@
-pub mod checker;
+pub(crate) mod count_exists_rewriter;
 pub(crate) mod executor;
 pub(crate) mod iterators;
 pub(in crate::idx) mod knn;

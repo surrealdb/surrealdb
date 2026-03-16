@@ -6,7 +6,8 @@ use rstest::rstest;
 use uuid::Uuid;
 
 use super::*;
-use crate::catalog::record::{Data, Record};
+use crate::catalog::auth::AuthLimit;
+use crate::catalog::record::Record;
 use crate::catalog::schema::base::Base;
 use crate::expr::field::Selector;
 use crate::expr::{
@@ -73,7 +74,7 @@ use crate::val::{Datetime, TableName, Value};
 	})])),
 	what: Expr::Literal(Literal::String("what".to_string())),
 	cond: Some(Expr::Literal(Literal::String("cond".to_string()))),
-	fetch: Some(Fetchs(vec![Fetch(Expr::Literal(Literal::String("fetch".to_string())))])),
+	fetch: Some(Fetchs::new(vec![Fetch(Expr::Literal(Literal::String("fetch".to_string())))])),
 	auth: Some(Auth::default()),
 	session: Some(Value::default()),
 	vars: BTreeMap::new(),
@@ -140,7 +141,8 @@ use crate::val::{Datetime, TableName, Value};
 		permissions: Permission::Full,
 	},
 	comment: None,
-}, 44)]
+	auth_limit: AuthLimit::default(),
+}, 48)]
 #[case::bucket(BucketDefinition {
 	id: Some(BucketId(123)),
 	readonly: false,
@@ -152,14 +154,22 @@ use crate::val::{Datetime, TableName, Value};
 #[case::config(ConfigDefinition::GraphQL(GraphQLConfig {
 	tables: GraphQLTablesConfig::default(),
 	functions: GraphQLFunctionsConfig::default(),
-}), 7)]
+	depth_limit: None,
+	complexity_limit: None,
+	introspection: GraphQLIntrospectionConfig::default(),
+}), 11)]
 #[case::event(EventDefinition {
 	name: "test".to_string(),
 	target_table: TableName::from("test"),
 	when: Expr::Literal(Literal::String("when".to_string())),
 	then: vec![Expr::Literal(Literal::String("then".to_string()))],
 	comment: Some("comment".to_string()),
-}, 35)]
+	auth_limit: AuthLimit::default(),
+    kind: EventKind::Async {
+        retry: 1,
+        max_depth: 5,
+    },
+}, 43)]
 #[case::field(FieldDefinition {
 	name: Idiom::from_str("field[0]").unwrap(),
 	table: TableName::from("what"),
@@ -175,7 +185,9 @@ use crate::val::{Datetime, TableName, Value};
 	update_permission: Permission::Full,
 	comment: Some("comment".to_string()),
 	reference: None,
-}, 39)]
+	auth_limit: AuthLimit::default(),
+	computed_deps: None,
+}, 44)]
 #[case::function(FunctionDefinition {
 	name: "function".to_string(),
 	args: vec![],
@@ -185,7 +197,8 @@ use crate::val::{Datetime, TableName, Value};
 	comment: Some("comment".to_string()),
 	permissions: Permission::Full,
 	returns: Some(Kind::Any),
-}, 36)]
+	auth_limit: AuthLimit::default(),
+}, 40)]
 #[case::index(IndexDefinition {
 	index_id: IndexId(123),
 	name: "test".to_string(),
@@ -225,7 +238,7 @@ use crate::val::{Datetime, TableName, Value};
 	comment: Some("comment".to_string()),
 	base: crate::catalog::schema::base::Base::Root,
 }, 40)]
-#[case::record(Record::new(Data::from(Value::Bool(true))), 5)]
+#[case::record(Record::new(Value::Bool(true)), 5)]
 fn test_serialize_deserialize<T>(#[case] original: T, #[case] expected_encoded_size: usize)
 where
 	T: KVValue + std::fmt::Debug + PartialEq,

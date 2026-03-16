@@ -14,7 +14,7 @@ use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, Token};
-use crate::iam::{Actor, Auth, Level, algorithm_to_jwt_algorithm};
+use crate::iam::{Actor, Auth, Level, Role, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
@@ -174,24 +174,24 @@ pub async fn db_access(
 ) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
-	let db_def = match tx.get_db_by_name(&ns, &db).await? {
+	let db_def = match catch!(tx, tx.get_db_by_name(&ns, &db).await) {
 		Some(db) => db,
 		None => {
+			let _ = tx.cancel().await;
 			return Err(Error::DbNotFound {
-				name: db.clone(),
+				name: db,
 			}
 			.into());
 		}
 	};
 	// Fetch the specified access method from storage
-	let access = tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await;
+	let Some(av) = catch!(tx, tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await)
+	else {
+		let _ = tx.cancel().await;
+		bail!(Error::AccessNotFound);
+	};
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
-
-	// Check the provided access method exists
-	let Ok(Some(av)) = access else {
-		bail!(Error::AccessNotFound)
-	};
 
 	// Check the access method type
 	// Currently, only the record access method supports signup
@@ -209,7 +209,7 @@ pub async fn db_access(
 	};
 	// Setup the query params
 	// Setup the system session for finding the signup record
-	let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+	let mut sess = Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Editor);
 	sess.ip.clone_from(&session.ip);
 	sess.or.clone_from(&session.or);
 	// Compute the value with the params
@@ -238,7 +238,8 @@ pub async fn db_access(
 			// AUTHENTICATE clause
 			if let Some(au) = &av.authenticate {
 				// Setup the system session for finding the signin record
-				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
+				let mut sess =
+					Session::for_level(Level::Database(ns.clone(), db.clone()), Role::Editor);
 				sess.rd = Some(
 					crate::val::convert_value_to_public_value(Value::RecordId(rid.clone().into()))
 						.expect("record id conversion should succeed"),

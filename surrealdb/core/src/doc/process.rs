@@ -38,7 +38,7 @@ impl Document {
 			Operable::Insert(v, o) => (v, Workable::Insert(o)),
 			Operable::Relate(f, v, w, o) => (v, Workable::Relate(f, w, o)),
 			Operable::Count(count) => {
-				(Record::new(Value::from(count).into()).into_read_only(), Workable::Normal)
+				(Record::new(Value::from(count)).into_read_only(), Workable::Normal)
 			}
 		};
 		// Setup a new document
@@ -49,6 +49,7 @@ impl Document {
 			Statement::Select {
 				stmt,
 				omit,
+				..
 			} => doc.select(stk, ctx, opt, stmt, omit).await?,
 			Statement::Create(_) => doc.create(stk, ctx, opt, stm).await?,
 			Statement::Upsert(_) => doc.upsert(stk, ctx, opt, stm).await?,

@@ -1,13 +1,12 @@
 use std::fmt;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{Kind, SurrealValue, Value, kind, object};
+use surrealdb_types::{Error as TypesError, ErrorDetails, Kind, SurrealValue, Value, kind, object};
+use web_time::Instant;
 
 use crate::expr::TopLevelExpr;
-use crate::rpc::DbResultError;
 
 #[revisioned(revision = 1)]
 #[derive(
@@ -24,6 +23,7 @@ use crate::rpc::DbResultError;
 	Deserialize,
 	SurrealValue,
 )]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(untagged, lowercase)]
 #[serde(rename_all = "lowercase")]
 pub enum QueryType {
@@ -62,7 +62,7 @@ impl QueryType {
 #[derive(Debug, Clone)]
 pub struct QueryResult {
 	pub time: Duration,
-	pub result: Result<Value, DbResultError>,
+	pub result: Result<Value, TypesError>,
 	// Record the query type in case processing the response is necessary (such as tracking live
 	// queries).
 	pub query_type: QueryType,
@@ -70,9 +70,44 @@ pub struct QueryResult {
 
 impl QueryResult {
 	/// Retrieve the response as a normal result
-	pub fn output(self) -> Result<Value> {
-		self.result.map_err(|err| anyhow::anyhow!(err.to_string()))
+	pub fn output(self) -> Result<Value, TypesError> {
+		self.result
 	}
+}
+
+/// Serialise this error into the query-result wire shape: `result` (message string), optional
+/// `kind` and `details`. Does not include `code`. Used for query result responses
+/// for backwards compatibility (old clients expect `result` to be the message string).
+fn into_query_result_value(error: &TypesError) -> Value {
+	let mut details = error.details().clone().into_value();
+
+	if let Value::Object(ref mut obj) = details {
+		obj.insert("result", error.message().to_string());
+		details
+	} else {
+		warn!("ErrorDetails::into_value() did not produce an Object; this is a bug");
+		Value::Object(object! {
+			result: "Failed to serialise error",
+			kind: "Internal",
+		})
+	}
+}
+
+/// Deserialise an error from the query-result wire shape. Requires `result` (message string).
+/// The remaining fields (`kind`, optional `details`) are the flattened `ErrorDetails`.
+fn from_query_result_value(value: Value) -> Result<TypesError, TypesError> {
+	let Value::Object(mut map) = value else {
+		return Err(TypesError::internal("Expected object for query result error".to_string()));
+	};
+	let message = map
+		.remove("result")
+		.ok_or_else(|| {
+			TypesError::internal("Missing result (message) for query result error".to_string())
+		})?
+		.into_string()
+		.map_err(|e| TypesError::internal(e.to_string()))?;
+	let details = ErrorDetails::from_value(Value::Object(map)).unwrap_or(ErrorDetails::Internal);
+	Ok(TypesError::from_details(message, details))
 }
 
 impl SurrealValue for QueryResult {
@@ -87,6 +122,8 @@ impl SurrealValue for QueryResult {
 				status: "ERR",
 				time: string,
 				result: string,
+				kind: string,
+				details: any,
 				query_type: (QueryType::kind_of()),
 			}
 		)
@@ -102,30 +139,40 @@ impl SurrealValue for QueryResult {
 	}
 
 	fn into_value(self) -> Value {
-		Value::Object(object! {
+		let mut map = object! {
 			status: Status::from(&self.result).into_value(),
 			time: format!("{:?}", self.time).into_value(),
-			result: match self.result {
-				Ok(v) => v.into_value(),
-				Err(e) => Value::from_string(e.to_string()),
-			},
 			type: self.query_type.into_value(),
-		})
+		};
+		match self.result {
+			Ok(v) => {
+				map.insert("result", v);
+			}
+			Err(e) => {
+				let err_val = into_query_result_value(&e);
+				if let Value::Object(err_obj) = err_val {
+					for (k, v) in err_obj.into_inner() {
+						map.insert(k, v);
+					}
+				}
+			}
+		}
+		Value::Object(map)
 	}
 
-	fn from_value(value: Value) -> anyhow::Result<Self> {
+	fn from_value(value: Value) -> Result<Self, TypesError> {
 		// Assert required fields
 		let Value::Object(mut map) = value else {
-			anyhow::bail!("Expected object for QueryResult");
+			return Err(TypesError::internal("Expected object for QueryResult".to_string()));
 		};
 		let Some(status) = map.remove("status") else {
-			anyhow::bail!("Expected status for QueryResult");
+			return Err(TypesError::internal("Expected status for QueryResult".to_string()));
 		};
 		let Some(time) = map.remove("time") else {
-			anyhow::bail!("Expected time for QueryResult");
+			return Err(TypesError::internal("Expected time for QueryResult".to_string()));
 		};
 		let Some(result) = map.remove("result") else {
-			anyhow::bail!("Expected result for QueryResult");
+			return Err(TypesError::internal("Expected result for QueryResult".to_string()));
 		};
 
 		// Grab status, query type and time
@@ -133,13 +180,19 @@ impl SurrealValue for QueryResult {
 		let query_type =
 			map.remove("type").map(QueryType::from_value).transpose()?.unwrap_or_default();
 
-		let time = humantime::parse_duration(&time.into_string()?)?;
+		let time = humantime::parse_duration(
+			&time.into_string().map_err(|e| TypesError::internal(e.to_string()))?,
+		)
+		.map_err(|e| TypesError::internal(e.to_string()))?;
 
 		// Grab result based on status
 
 		let result = match status {
 			Status::Ok => Ok(Value::from_value(result)?),
-			Status::Err => Err(DbResultError::from_value(result)?),
+			Status::Err => {
+				map.insert("result".to_string(), result);
+				Err(from_query_result_value(Value::Object(map))?)
+			}
 		};
 
 		Ok(QueryResult {
@@ -152,7 +205,7 @@ impl SurrealValue for QueryResult {
 
 pub struct QueryResultBuilder {
 	start_time: Instant,
-	result: Result<Value, DbResultError>,
+	result: Result<Value, TypesError>,
 	query_type: QueryType,
 }
 
@@ -173,7 +226,7 @@ impl QueryResultBuilder {
 		}
 	}
 
-	pub fn with_result(mut self, result: Result<Value, DbResultError>) -> Self {
+	pub fn with_result(mut self, result: Result<Value, TypesError>) -> Self {
 		self.result = result;
 		self
 	}
@@ -191,7 +244,7 @@ impl QueryResultBuilder {
 		}
 	}
 
-	pub fn finish_with_result(self, result: Result<Value, DbResultError>) -> QueryResult {
+	pub fn finish_with_result(self, result: Result<Value, TypesError>) -> QueryResult {
 		QueryResult {
 			time: self.start_time.elapsed(),
 			result,
@@ -202,6 +255,7 @@ impl QueryResultBuilder {
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
 #[serde(rename_all = "UPPERCASE")]
 #[surreal(untagged, uppercase)]
 pub enum Status {
@@ -245,5 +299,128 @@ impl<'de> Deserialize<'de> for QueryResult {
 		// Deserialize as a Value first, then convert
 		let value = Value::deserialize(deserializer)?;
 		QueryResult::from_value(value).map_err(serde::de::Error::custom)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use surrealdb_types::{AuthError, NotAllowedError, NotFoundError, ValidationError};
+
+	use super::*;
+
+	fn error_query_result(error: TypesError) -> QueryResult {
+		QueryResult {
+			time: Duration::from_millis(42),
+			result: Err(error),
+			query_type: QueryType::Other,
+		}
+	}
+
+	/// Verify that the `kind` field in a serialized error QueryResult is NOT
+	/// duplicated inside `details`. This was a bug where `into_query_result_value`
+	/// manually added `kind` and then also included it inside `details` via
+	/// `ErrorDetails::into_value()`.
+	#[test]
+	fn query_result_error_no_kind_duplication() {
+		let err = TypesError::not_allowed("Token expired".into(), AuthError::TokenExpired);
+		let qr = error_query_result(err);
+		let val = qr.into_value();
+		let Value::Object(ref obj) = val else {
+			panic!("Expected object");
+		};
+
+		assert_eq!(obj.get("status"), Some(&Value::String("ERR".into())));
+		assert_eq!(obj.get("result"), Some(&Value::String("Token expired".into())));
+		assert_eq!(obj.get("kind"), Some(&Value::String("NotAllowed".into())));
+
+		// `details` must contain the inner NotAllowedError, NOT a duplicate of ErrorDetails
+		let Some(Value::Object(details)) = obj.get("details") else {
+			panic!("Expected details object");
+		};
+		assert_eq!(
+			details.get("kind"),
+			Some(&Value::String("Auth".into())),
+			"details.kind should be the inner variant, not a duplicate of the top-level kind"
+		);
+	}
+
+	#[test]
+	fn query_result_error_round_trip_with_details() {
+		let err = TypesError::not_allowed("Token expired".into(), AuthError::TokenExpired);
+		let qr = error_query_result(err);
+		let val = qr.into_value();
+		let parsed = QueryResult::from_value(val).expect("round-trip should succeed");
+
+		let err = parsed.result.unwrap_err();
+		assert!(err.is_not_allowed());
+		assert_eq!(err.message(), "Token expired");
+		assert!(matches!(
+			err.not_allowed_details(),
+			Some(NotAllowedError::Auth(AuthError::TokenExpired))
+		));
+	}
+
+	#[test]
+	fn query_result_error_round_trip_nested_struct_details() {
+		let err = TypesError::not_found(
+			"Table not found".into(),
+			NotFoundError::Table {
+				name: "users".into(),
+			},
+		);
+		let qr = error_query_result(err);
+		let val = qr.into_value();
+		let parsed = QueryResult::from_value(val).expect("round-trip should succeed");
+
+		let err = parsed.result.unwrap_err();
+		assert!(err.is_not_found());
+		assert!(matches!(
+			err.not_found_details(),
+			Some(NotFoundError::Table { name }) if name == "users"
+		));
+	}
+
+	#[test]
+	fn query_result_error_round_trip_no_inner_details() {
+		let err = TypesError::internal("Something went wrong".into());
+		let qr = error_query_result(err);
+		let val = qr.into_value();
+
+		let Value::Object(ref obj) = val else {
+			panic!("Expected object");
+		};
+		assert_eq!(obj.get("kind"), Some(&Value::String("Internal".into())));
+		assert!(!obj.contains_key("details"), "Internal errors should have no details");
+
+		let parsed = QueryResult::from_value(val).expect("round-trip should succeed");
+		let err = parsed.result.unwrap_err();
+		assert!(err.is_internal());
+		assert_eq!(err.message(), "Something went wrong");
+	}
+
+	#[test]
+	fn query_result_error_round_trip_validation_parse() {
+		let err = TypesError::validation("Parse error".into(), ValidationError::Parse);
+		let qr = error_query_result(err);
+		let val = qr.into_value();
+		let parsed = QueryResult::from_value(val).expect("round-trip should succeed");
+
+		let err = parsed.result.unwrap_err();
+		assert!(err.is_validation());
+		assert_eq!(err.validation_details(), Some(&ValidationError::Parse));
+	}
+
+	#[test]
+	fn query_result_ok_round_trip() {
+		let qr = QueryResult {
+			time: Duration::from_millis(10),
+			result: Ok(Value::String("hello".into())),
+			query_type: QueryType::Other,
+		};
+		let val = qr.into_value();
+		let parsed = QueryResult::from_value(val).expect("round-trip should succeed");
+
+		let v = parsed.result.unwrap();
+		assert_eq!(v, Value::String("hello".into()));
 	}
 }

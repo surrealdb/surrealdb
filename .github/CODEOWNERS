@@ -29,5 +29,12 @@ deny.toml @surrealdb/security
 /fuzz/ @surrealdb/security
 SECURITY.md @surrealdb/security
 
+# AI instruction files (attack surface for prompt injection via PRs)
+CLAUDE.md @surrealdb/security
+AGENTS.md @surrealdb/security
+COPILOT.md @surrealdb/security
+.cursorrules @surrealdb/security
+/.cursor/ @surrealdb/security
+
 # KV Storage Interface
 /surrealdb/core/src/kvs/ @surrealdb/kv

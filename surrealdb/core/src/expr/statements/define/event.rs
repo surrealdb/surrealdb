@@ -4,14 +4,14 @@ use uuid::Uuid;
 
 use super::DefineKind;
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{EventDefinition, TableDefinition};
+use crate::catalog::{EventDefinition, EventKind, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt};
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -22,6 +22,7 @@ pub(crate) struct DefineEventStatement {
 	pub when: Expr,
 	pub then: Vec<Expr>,
 	pub comment: Expr,
+	pub event_kind: EventKind,
 }
 
 impl DefineEventStatement {
@@ -32,11 +33,11 @@ impl DefineEventStatement {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
-		let name = expr_to_ident(stk, ctx, opt, _doc, &self.name, "event name").await?;
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "event name").await?;
 		let target_table = TableName::new(
-			expr_to_ident(stk, ctx, opt, _doc, &self.target_table, "target table").await?,
+			expr_to_ident(stk, ctx, opt, doc, &self.target_table, "target table").await?,
 		);
 
 		// Allowed to run?
@@ -65,7 +66,7 @@ impl DefineEventStatement {
 		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &target_table).await?;
 
 		let comment = stk
-			.run(|stk| self.comment.compute(stk, ctx, opt, _doc))
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
 			.await
 			.catch_return()?
 			.cast_to()?;
@@ -79,7 +80,9 @@ impl DefineEventStatement {
 				target_table: target_table.clone(),
 				when: self.when.clone(),
 				then: self.then.clone(),
+				auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()).into(),
 				comment,
+				kind: self.event_kind.clone(),
 			},
 			None,
 		)

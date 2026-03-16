@@ -8,7 +8,8 @@ use crate::syn::token::{TokenKind, t};
 
 impl Parser<'_> {
 	pub(crate) async fn parse_function_name(&mut self) -> ParseResult<Function> {
-		let fnc = match self.peek_kind() {
+		let peek = self.peek();
+		let fnc = match peek.kind {
 			t!("fn") => {
 				self.pop_peek();
 				expected!(self, t!("::"));
@@ -98,6 +99,17 @@ impl Parser<'_> {
 					name.push_str("::");
 					name.push_str(self.parse_ident_str()?)
 				}
+				Function::Normal(name)
+			}
+			x if Self::kind_is_keyword_like(x) => {
+				self.pop_peek();
+				let mut name = self.lexer.span_str(peek.span).to_string();
+
+				while self.eat(t!("::")) {
+					name.push_str("::");
+					name.push_str(self.parse_ident_str()?)
+				}
+
 				Function::Normal(name)
 			}
 			_ => unexpected!(self, self.peek(), "a function name"),
@@ -228,7 +240,6 @@ impl Parser<'_> {
 		let token = self.next();
 		match token.kind {
 			TokenKind::Digits => self
-				.lexer
 				.span_str(token.span)
 				.parse::<u32>()
 				.map_err(|e| syntax_error!("Failed to parse model version: {e}", @token.span)),
@@ -331,7 +342,7 @@ mod test {
 	fn function_module() {
 		let sql = "rand::uuid()";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("rand::uuid()", out.to_sql());
+		assert_eq!("`rand`::uuid()", out.to_sql());
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};

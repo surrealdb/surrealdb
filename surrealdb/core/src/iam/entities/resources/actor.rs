@@ -6,7 +6,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use super::{Level, Resource, ResourceKind};
-use crate::iam::Role;
+use crate::iam::{AuthLimit, Role};
 
 //
 // User
@@ -76,6 +76,47 @@ impl Actor {
 	/// Checks if the actor has the Viewer role.
 	pub(crate) fn has_viewer_role(&self) -> bool {
 		self.roles.iter().any(|r| r.eq(&Role::Owner) || r.eq(&Role::Editor) || r.eq(&Role::Viewer))
+	}
+
+	pub(crate) fn new_limited(&self, limit: &AuthLimit) -> Self {
+		if self.res.level().is_record() || self.res.level().is_anonymous() {
+			return self.clone();
+		}
+
+		// TODO check sublevel_of
+		let level = if limit.level.sublevel_of(self.res.level()) {
+			limit.level.clone()
+		} else {
+			self.res.level().clone()
+		};
+
+		let mut roles = self.roles.clone();
+		if let Some(role) = limit.role.as_ref() {
+			roles.retain(|r| r <= role);
+			if roles.is_empty() {
+				roles.push(*role);
+			}
+		}
+
+		if roles.is_empty() {
+			roles.push(Role::Viewer);
+		}
+
+		Self::new(self.res.id().to_string(), roles, level)
+	}
+
+	pub(crate) fn max_role(&self) -> Option<Role> {
+		if self.roles.is_empty() {
+			return None;
+		}
+
+		Some(self.roles.iter().fold(Role::Viewer, |max_role, &role| {
+			if role > max_role {
+				role
+			} else {
+				max_role
+			}
+		}))
 	}
 }
 

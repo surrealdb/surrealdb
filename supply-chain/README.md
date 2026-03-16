@@ -51,3 +51,7 @@ The following process can be followed whenever the dependency checking action fa
   - Afterwards, prune the list of audits to remove outdated entries.
   	- `cargo vet prune`
   - The changes will be approved by **@surrealdb/security**.
+
+### Workspace crates published to crates.io
+
+All workspace crates (e.g. `surrealdb`, `surrealdb-core`, `surrealdb-server`, `surrealism`, `surrealml-core`, etc.) are part of this repo; some are also published to crates.io. We set `audit-as-crates-io = false` for every workspace crate so they are treated as trusted first-party code regardless of version. That avoids maintaining per-version exemptions or audits when bumping. Downstream consumers of published crates use their own `cargo-vet` configuration.

@@ -1,9 +1,9 @@
 use anyhow::{Result, bail, ensure};
 use chrono::{TimeZone, Utc};
-use nanoid::nanoid;
 use rand::Rng;
 use rand::distributions::{Alphanumeric, DistString};
 use rand::prelude::IteratorRandom;
+use rand::seq::SliceRandom;
 use ulid::Ulid;
 
 use super::args::{Any, Args, Arity, FromArg, Optional};
@@ -49,7 +49,7 @@ impl<T: FromArg> FromArg for NoneOrRange<T> {
 
 		ensure!(
 			args.has_next(),
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: name.to_owned(),
 				message: "Expected 0 or 2 arguments".to_string(),
 			}
@@ -91,7 +91,7 @@ pub fn id((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) -> R
 	let len = if let Some(upper) = arg2 {
 		ensure!(
 			lower <= upper,
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: String::from("rand::id"),
 				message: "Lowerbound of number of characters must be less then the upperbound."
 					.to_string(),
@@ -99,7 +99,7 @@ pub fn id((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) -> R
 		);
 		ensure!(
 			upper <= LIMIT,
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: String::from("rand::id"),
 				message: format!(
 					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
@@ -111,7 +111,7 @@ pub fn id((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) -> R
 	} else {
 		ensure!(
 			lower <= LIMIT,
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: String::from("rand::id"),
 				message: format!(
 					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
@@ -122,7 +122,9 @@ pub fn id((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) -> R
 	};
 
 	// Generate the random id
-	Ok(nanoid!(len, &ID_CHARS).into())
+	let mut rng = rand::thread_rng();
+	let id: String = (0..len).map(|_| *ID_CHARS.choose(&mut rng).unwrap_or(&'0')).collect();
+	Ok(Value::from(id))
 }
 
 pub fn int((NoneOrRange(range),): (NoneOrRange<i64>,)) -> Result<Value> {
@@ -146,7 +148,7 @@ pub fn string((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) 
 	let len = if let Some(upper) = arg2 {
 		ensure!(
 			lower <= upper,
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: String::from("rand::string"),
 				message: "Lowerbound of number of characters must be less then the upperbound."
 					.to_string(),
@@ -154,7 +156,7 @@ pub fn string((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) 
 		);
 		ensure!(
 			upper <= LIMIT,
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: String::from("rand::string"),
 				message: format!(
 					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
@@ -166,7 +168,7 @@ pub fn string((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) 
 	} else {
 		ensure!(
 			lower <= LIMIT,
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: String::from("rand::string"),
 				message: format!(
 					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
@@ -210,7 +212,7 @@ pub fn time((NoneOrRange(range),): (NoneOrRange<Value>,)) -> Result<Value> {
 		Some((Value::Number(Number::Int(min)), Value::Datetime(max))) => Some((min, max.to_secs())),
 		Some((Value::Datetime(min), Value::Number(Number::Int(max)))) => Some((min.to_secs(), max)),
 		_ => {
-			bail!(Error::InvalidArguments {
+			bail!(Error::InvalidFunctionArguments {
 				name: String::from("rand::time"),
 				message: String::from("Expected two arguments of type datetime or int"),
 			})
@@ -228,14 +230,14 @@ pub fn time((NoneOrRange(range),): (NoneOrRange<Value>,)) -> Result<Value> {
 			min if (MINIMUM..=LIMIT).contains(&min) => match max {
 				max if min <= max && max <= LIMIT => (min, max),
 				max if max >= MINIMUM && max <= min => (max, min),
-				_ => bail!(Error::InvalidArguments {
+				_ => bail!(Error::InvalidFunctionArguments {
 					name: String::from("rand::time"),
 					message: format!(
 						"To generate a random time, the 2 arguments must be numbers between {MINIMUM} and {LIMIT} seconds from the UNIX epoch or a 'datetime' within the range d'-262143-01-01T00:00:00Z' and +262142-12-31T23:59:59Z'."
 					),
 				}),
 			},
-			_ => bail!(Error::InvalidArguments {
+			_ => bail!(Error::InvalidFunctionArguments {
 				name: String::from("rand::time"),
 				message: format!(
 					"To generate a random time, the 2 arguments must be numbers between {MINIMUM} and {LIMIT} seconds from the UNIX epoch or a 'datetime' within the range d'-262143-01-01T00:00:00Z' and +262142-12-31T23:59:59Z'."
@@ -263,7 +265,7 @@ pub fn ulid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 			#[cfg(target_family = "wasm")]
 			ensure!(
 				timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
-				Error::InvalidArguments {
+				Error::InvalidFunctionArguments {
 					name: String::from("rand::ulid"),
 					message: format!(
 						"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
@@ -285,7 +287,7 @@ pub fn uuid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 			#[cfg(target_family = "wasm")]
 			ensure!(
 				timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
-				Error::InvalidArguments {
+				Error::InvalidFunctionArguments {
 					name: String::from("rand::ulid"),
 					message: format!(
 						"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."
@@ -298,6 +300,34 @@ pub fn uuid((Optional(timestamp),): (Optional<Datetime>,)) -> Result<Value> {
 		None => Uuid::new(),
 	};
 	Ok(uuid.into())
+}
+
+#[cfg(test)]
+mod tests {
+	use std::thread;
+
+	use super::*;
+
+	#[test]
+	fn test_rand_id_concurrency() {
+		let mut handles = vec![];
+		for _ in 0..100 {
+			handles.push(thread::spawn(|| {
+				for _ in 0..1000 {
+					let _ = id((Optional(Some(0)), Optional(Some(10)))).unwrap();
+				}
+			}));
+		}
+		for handle in handles {
+			handle.join().unwrap();
+		}
+	}
+
+	#[test]
+	fn test_rand_id_len_0() {
+		let res = id((Optional(Some(0)), Optional(Some(0)))).unwrap();
+		assert_eq!(res, Value::from(""));
+	}
 }
 
 pub mod uuid {
@@ -317,7 +347,7 @@ pub mod uuid {
 				#[cfg(target_family = "wasm")]
 				anyhow::ensure!(
 					timestamp.0 >= chrono::DateTime::UNIX_EPOCH,
-					crate::err::Error::InvalidArguments {
+					crate::err::Error::InvalidFunctionArguments {
 						name: String::from("rand::ulid"),
 						message: format!(
 							"To generate a ULID from a datetime, it must be a time beyond UNIX epoch."

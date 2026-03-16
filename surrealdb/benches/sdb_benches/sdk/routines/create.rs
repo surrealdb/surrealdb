@@ -40,7 +40,7 @@ impl super::Routine for Create {
 				let data = data.clone();
 
 				tasks.spawn(async move {
-					let res: Option<Record> = criterion::black_box(
+					let res: Option<Record> = std::hint::black_box(
 						client
 							.create(table_name)
 							.content(data)

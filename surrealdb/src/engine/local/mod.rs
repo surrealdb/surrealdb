@@ -172,12 +172,12 @@ use surrealdb_core::iam;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
-use surrealdb_core::rpc::DbResultError;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
 	iam::{Action, ResourceKind, check::check_ns_db},
 	ml::storage::surml_file::SurMlFile,
 };
+use surrealdb_types::Error as TypesError;
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
@@ -479,8 +479,13 @@ async fn export_file(
 	config: Option<DbExportConfig>,
 ) -> Result<(), crate::Error> {
 	let res = match config {
-		Some(config) => kvs.export_with_config(sess, chn, config).await?.await,
-		None => kvs.export(sess, chn).await?.await,
+		Some(config) => {
+			kvs.export_with_config(sess, chn, config)
+				.await
+				.map_err(crate::std_error_to_types_error)?
+				.await
+		}
+		None => kvs.export(sess, chn).await.map_err(crate::std_error_to_types_error)?.await,
 	};
 
 	if let Err(error) = res {
@@ -492,7 +497,7 @@ async fn export_file(
 			return Ok(());
 		}
 
-		return Err(crate::Error::InternalError(error.to_string()));
+		return Err(crate::Error::internal(error.to_string()));
 	}
 	Ok(())
 }
@@ -507,24 +512,24 @@ async fn export_ml(
 		version,
 	}: MlExportConfig,
 ) -> Result<(), crate::Error> {
-	let (nsv, dbv) = check_ns_db(sess).map_err(|e| crate::Error::InternalError(e.to_string()))?;
+	let (nsv, dbv) = check_ns_db(sess).map_err(|e| crate::Error::internal(e.to_string()))?;
 	// Check the permissions level
 	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))
-		.map_err(|e| crate::Error::InternalError(e.to_string()))?;
+		.map_err(|e| crate::Error::internal(e.to_string()))?;
 
 	// Attempt to get the model definition
 	let Some(model) = kvs
 		.get_db_model(&nsv, &dbv, &name, &version)
 		.await
-		.map_err(|e| crate::Error::InternalError(e.to_string()))?
+		.map_err(|e| crate::Error::internal(e.to_string()))?
 	else {
 		// Attempt to get the model definition
-		return Err(crate::Error::InternalError("Model not found".to_string()));
+		return Err(crate::Error::internal("Model not found".to_string()));
 	};
 	// Export the file data in to the store
 	let mut data = surrealdb_core::obs::stream(model.hash.clone())
 		.await
-		.map_err(|e| crate::Error::InternalError(e.to_string()))?;
+		.map_err(|e| crate::Error::internal(e.to_string()))?;
 	// Process all stream values
 	while let Some(Ok(bytes)) = data.next().await {
 		if chn.send(bytes.to_vec()).await.is_err() {
@@ -544,9 +549,8 @@ where
 	R: tokio::io::AsyncRead + Unpin + ?Sized,
 	W: tokio::io::AsyncWrite + Unpin + ?Sized,
 {
-	io::copy(reader, writer).await.map(|_| ()).map_err(|error| crate::Error::FileRead {
-		path,
-		error,
+	io::copy(reader, writer).await.map(|_| ()).map_err(|error| {
+		crate::Error::internal(format!("Failed to read `{}`: {}", path.display(), error))
 	})
 }
 
@@ -555,7 +559,7 @@ async fn kill_live_query(
 	id: Uuid,
 	session: &Session,
 	vars: Variables,
-) -> Result<Vec<QueryResult>, DbResultError> {
+) -> Result<Vec<QueryResult>, TypesError> {
 	let sql = format!("KILL {id}");
 
 	let results = kvs.execute(&sql, session, Some(vars)).await?;
@@ -585,7 +589,7 @@ async fn router(
 			let signup_data = {
 				iam::signup::signup(kvs, &mut *state.session.write().await, credentials.into())
 					.await
-					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?
+					.map_err(|e| TypesError::not_allowed(e.to_string(), None))?
 			};
 			let token = match signup_data {
 				iam::Token::Access(token) => Token {
@@ -610,7 +614,7 @@ async fn router(
 			let signin_data = {
 				iam::signin::signin(kvs, &mut *state.session.write().await, credentials.into())
 					.await
-					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?
+					.map_err(|e| TypesError::not_allowed(e.to_string(), None))?
 			};
 			let token = match signin_data {
 				iam::Token::Access(token) => Token {
@@ -649,23 +653,22 @@ async fn router(
 						// Automatic refresh token handling:
 						// If the access token is expired and we have a refresh token,
 						// automatically attempt to refresh and return new tokens.
-						if with_refresh && error.to_string().contains("token has expired") {
+						if with_refresh && surrealdb_core::iam::is_expired_token_error(&error) {
 							let result =
 								match token.refresh(kvs, &mut *state.session.write().await).await {
 									Ok(token) => {
 										query_result.finish_with_result(Ok(token.into_value()))
 									}
 									Err(error) => query_result.finish_with_result(Err(
-										DbResultError::InternalError(error.to_string()),
+										TypesError::internal(error.to_string()),
 									)),
 								};
 							return Ok(vec![result]);
 						}
 						// If authentication failed and automatic refresh isn't applicable,
 						// return the authentication error
-						query_result.finish_with_result(Err(DbResultError::InternalError(
-							error.to_string(),
-						)))
+						query_result
+							.finish_with_result(Err(TypesError::internal(error.to_string())))
 					}
 				}
 			};
@@ -680,7 +683,7 @@ async fn router(
 				match token.refresh(kvs, &mut *state.session.write().await).await {
 					Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
 					Err(error) => query_result
-						.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+						.finish_with_result(Err(TypesError::internal(error.to_string()))),
 				}
 			};
 			Ok(vec![result])
@@ -691,7 +694,7 @@ async fn router(
 				match iam::clear::clear(&mut *state.session.write().await) {
 					Ok(_) => query_result.finish_with_result(Ok(Value::None)),
 					Err(error) => query_result
-						.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+						.finish_with_result(Err(TypesError::internal(error.to_string()))),
 				}
 			};
 			Ok(vec![result])
@@ -704,8 +707,9 @@ async fn router(
 					state.transactions.insert(id, Arc::new(txn));
 					query_result.finish_with_result(Ok(Value::Uuid(id.into())))
 				}
-				Err(error) => query_result
-					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+				Err(error) => {
+					query_result.finish_with_result(Err(TypesError::internal(error.to_string())))
+				}
 			};
 			Ok(vec![result])
 		}
@@ -716,8 +720,9 @@ async fn router(
 			let query_result = QueryResultBuilder::started_now();
 			let result = match token.revoke_refresh_token(kvs).await {
 				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
-				Err(error) => query_result
-					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+				Err(error) => {
+					query_result.finish_with_result(Err(TypesError::internal(error.to_string())))
+				}
 			};
 			Ok(vec![result])
 		}
@@ -726,7 +731,7 @@ async fn router(
 		} => {
 			if let Some(tx) = state.transactions.get(&txn) {
 				state.transactions.remove(&txn);
-				tx.cancel().await?;
+				tx.cancel().await.map_err(crate::std_error_to_types_error)?;
 			}
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
@@ -735,7 +740,7 @@ async fn router(
 		} => {
 			if let Some(tx) = state.transactions.get(&txn) {
 				state.transactions.remove(&txn);
-				tx.commit().await?;
+				tx.commit().await.map_err(crate::std_error_to_types_error)?;
 			}
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
@@ -764,7 +769,10 @@ async fn router(
 				} else {
 					// Transaction not found - return error
 					return Ok(vec![QueryResultBuilder::started_now().finish_with_result(Err(
-						DbResultError::InternalError("Transaction not found".to_string()),
+						TypesError::not_found(
+							"Transaction not found".to_string(),
+							Some(surrealdb_types::NotFoundError::Transaction),
+						),
 					))]);
 				}
 			} else {
@@ -784,7 +792,10 @@ async fn router(
 		}
 		| Command::ImportFile {
 			..
-		} => Err(crate::Error::BackupsNotSupported.into()),
+		} => Err(crate::Error::internal(
+			"The protocol or storage engine does not support backups on this architecture"
+				.to_string(),
+		)),
 
 		#[cfg(any(target_family = "wasm", not(feature = "ml")))]
 		Command::ExportMl {
@@ -795,7 +806,10 @@ async fn router(
 		}
 		| Command::ImportMl {
 			..
-		} => Err(crate::Error::BackupsNotSupported),
+		} => Err(crate::Error::internal(
+			"The protocol or storage engine does not support backups on this architecture"
+				.to_string(),
+		)),
 
 		#[cfg(not(target_family = "wasm"))]
 		Command::ExportFile {
@@ -832,10 +846,11 @@ async fn router(
 			{
 				Ok(path) => path,
 				Err(error) => {
-					return Err(crate::Error::FileOpen {
-						path: file,
-						error,
-					});
+					return Err(crate::Error::internal(format!(
+						"Failed to open `{}`: {}",
+						file.display(),
+						error
+					)));
 				}
 			};
 
@@ -880,10 +895,11 @@ async fn router(
 			{
 				Ok(path) => path,
 				Err(error) => {
-					return Err(crate::Error::FileOpen {
-						path,
-						error,
-					});
+					return Err(crate::Error::internal(format!(
+						"Failed to open `{}`: {}",
+						path.display(),
+						error
+					)));
 				}
 			};
 
@@ -961,10 +977,11 @@ async fn router(
 			let file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
 				Err(error) => {
-					return Err(crate::Error::FileOpen {
-						path,
-						error,
-					});
+					return Err(crate::Error::internal(format!(
+						"Failed to open `{}`: {}",
+						path.display(),
+						error
+					)));
 				}
 			};
 
@@ -985,10 +1002,7 @@ async fn router(
 				match ready!(future.poll(ctx)) {
 					Ok(0) => Poll::Ready(None),
 					Ok(_) => Poll::Ready(Some(Ok(buffer.split().freeze()))),
-					Err(e) => {
-						let error = crate::types::anyhow::Error::new(e);
-						Poll::Ready(Some(Err(error)))
-					}
+					Err(e) => Poll::Ready(Some(Err(anyhow::anyhow!("{}", e)))),
 				}
 			});
 
@@ -999,7 +1013,7 @@ async fn router(
 					stream,
 				)
 				.await
-				.map_err(|e| crate::Error::InternalError(e.to_string()))?;
+				.map_err(crate::std_error_to_types_error)?;
 
 			for response in responses {
 				response.result?;
@@ -1015,38 +1029,42 @@ async fn router(
 			let mut file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
 				Err(error) => {
-					return Err(crate::Error::FileOpen {
-						path,
-						error,
-					});
+					return Err(crate::Error::internal(format!(
+						"Failed to open `{}`: {}",
+						path.display(),
+						error
+					)));
 				}
 			};
 
 			// Ensure a NS and DB are set
-			let (nsv, dbv) = check_ns_db(&*state.session.read().await)?;
+			let (nsv, dbv) = check_ns_db(&*state.session.read().await)
+				.map_err(crate::std_error_to_types_error)?;
 			// Check the permissions level
 			kvs.check(
 				&*state.session.read().await,
 				Action::Edit,
 				ResourceKind::Model.on_db(&nsv, &dbv),
-			)?;
+			)
+			.map_err(crate::std_error_to_types_error)?;
 			// Create a new buffer
 			let mut buffer = Vec::new();
 			// Load all the uploaded file chunks
 			if let Err(error) = file.read_to_end(&mut buffer).await {
-				return Err(crate::Error::FileRead {
-					path,
-					error,
-				});
+				return Err(crate::Error::internal(format!(
+					"Failed to read `{}`: {}",
+					path.display(),
+					error
+				)));
 			}
 			// Check that the SurrealML file is valid
 			let file = match SurMlFile::from_bytes(buffer) {
 				Ok(file) => file,
 				Err(error) => {
-					return Err(crate::Error::FileRead {
-						path,
-						error: io::Error::new(io::ErrorKind::InvalidData, error.message),
-					});
+					return Err(crate::Error::internal(format!(
+						"Invalid SurrealML file: {}",
+						error.message
+					)));
 				}
 			};
 			// Convert the file back in to raw bytes
@@ -1059,7 +1077,8 @@ async fn router(
 				&file.header.description.to_string(),
 				data,
 			)
-			.await?;
+			.await
+			.map_err(crate::std_error_to_types_error)?;
 
 			Ok(vec![query_result.finish()])
 		}
@@ -1078,7 +1097,7 @@ async fn router(
 		} => {
 			let query_result = QueryResultBuilder::started_now();
 			surrealdb_core::rpc::check_protected_param(&key)
-				.map_err(|e| crate::Error::InternalError(e.to_string()))?;
+				.map_err(|e| crate::Error::internal(e.to_string()))?;
 			// Need to compute because certain keys might not be allowed to be set and those
 			// should be rejected by an error.
 			match value {

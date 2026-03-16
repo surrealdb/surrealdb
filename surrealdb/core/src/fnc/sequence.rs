@@ -15,7 +15,7 @@ pub async fn nextval((ctx, opt): (&FrozenContext, &Options), (seq,): (Value,)) -
 			.await?;
 		Ok(next.into())
 	} else {
-		Err(anyhow::Error::new(Error::InvalidArguments {
+		Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 			name: "sequence::nextval()".to_string(),
 			message: "Expect a sequence name".to_string(),
 		}))

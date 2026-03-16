@@ -25,9 +25,12 @@ impl MemoryManager {
 		// Get the configuration options
 		let block_cache_size = *cnf::ROCKSDB_BLOCK_CACHE_SIZE;
 		let write_buffer_size = *cnf::ROCKSDB_WRITE_BUFFER_SIZE;
-		let max_write_buffer_number = *cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER;
-		let min_write_buffers_to_merge = *cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE;
-		let total_write_buffer_size = write_buffer_size * max_write_buffer_number as usize;
+		let total_write_buffer_size =
+			cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER.saturating_mul(write_buffer_size);
+		let max_write_buffer_number =
+			cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER.min(i32::MAX as usize) as i32;
+		let min_write_buffers_to_merge =
+			cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE.min(i32::MAX as usize) as i32;
 		let total_memory_limit = total_write_buffer_size + block_cache_size;
 		// Set the block cache size in bytes
 		info!(target: TARGET, "Memory manager: block cache size: {block_cache_size}B");

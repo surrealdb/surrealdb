@@ -47,13 +47,20 @@ impl OrderList {
 			};
 			//
 			match o {
+				None | Some(cmp::Ordering::Equal) => continue,
 				Some(cmp::Ordering::Greater) => return cmp::Ordering::Greater,
-				Some(cmp::Ordering::Equal) => continue,
 				Some(cmp::Ordering::Less) => return cmp::Ordering::Less,
-				None => continue,
 			}
 		}
 		cmp::Ordering::Equal
+	}
+}
+
+impl IntoIterator for OrderList {
+	type Item = Order;
+	type IntoIter = std::vec::IntoIter<Self::Item>;
+	fn into_iter(self) -> Self::IntoIter {
+		self.0.into_iter()
 	}
 }
 

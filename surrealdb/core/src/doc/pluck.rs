@@ -11,7 +11,7 @@ use crate::doc::Permitted::*;
 use crate::doc::compute::DocKind;
 use crate::expr::output::Output;
 use crate::expr::{FlowResultExt as _, Idiom, Operation, SelectStatement};
-use crate::iam::Action;
+use crate::iam::{Action, AuthLimit};
 use crate::idx::planner::RecordStrategy;
 use crate::val::Value;
 
@@ -31,6 +31,9 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
+		if opt.import {
+			return Err(IgnoreError::Ignore);
+		}
 		// Check if we can view the output
 		self.check_output_permissions(stk, ctx, opt, stm).await?;
 		// Process the desired output
@@ -106,7 +109,7 @@ impl Document {
 					// FAST PATH: For COUNT operations, skip all field computation and permissions
 					// COUNT operations create synthetic documents with only the count value
 					if matches!(self.record_strategy, RecordStrategy::Count) {
-						Ok(self.current.doc.data.as_ref().clone())
+						Ok(self.current.doc.as_ref().clone())
 					} else {
 						// Process the permitted documents
 						let current = if self.reduced(stk, ctx, opt, Current).await? {
@@ -119,10 +122,10 @@ impl Document {
 
 						if stmt.group.is_some() {
 							// Field computation with groups is defered to collection.
-							Ok(current.doc.data.as_ref().clone())
+							Ok(current.doc.as_ref().clone())
 						} else {
 							// Process the SELECT statement fields
-							stmt.expr
+							stmt.fields
 								.compute(stk, ctx, opt, Some(current))
 								.await
 								.map_err(IgnoreError::from)
@@ -155,12 +158,14 @@ impl Document {
 
 				// Loop through all field statements
 				for fd in table_fields.iter() {
+					// Limit auth
+					let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
 					// Loop over each field in document
 					for k in out.each(&fd.name).iter() {
 						// Process the field permissions
 						match &fd.select_permission {
 							catalog::Permission::Full => (),
-							catalog::Permission::None => out.del(stk, ctx, opt, k).await?,
+							catalog::Permission::None => out.del(stk, ctx, &opt, k).await?,
 							catalog::Permission::Specific(e) => {
 								// Disable permissions
 								let opt = &opt.new_with_perms(false);
@@ -207,7 +212,7 @@ impl Document {
 			// FAST PATH: For COUNT operations, skip all field computation and permissions
 			// COUNT operations create synthetic documents with only the count value
 			if matches!(self.record_strategy, RecordStrategy::Count) {
-				Ok(self.current.doc.data.as_ref().clone())
+				Ok(self.current.doc.as_ref().clone())
 			} else {
 				// Process the permitted documents
 				let current = if self.reduced(stk, ctx, opt, Current).await? {
@@ -220,10 +225,13 @@ impl Document {
 
 				if stmt.group.is_some() {
 					// Field computation with groups is deferred to collection.
-					Ok(current.doc.data.as_ref().clone())
+					Ok(current.doc.as_ref().clone())
 				} else {
 					// Process the SELECT statement fields
-					stmt.expr.compute(stk, ctx, opt, Some(current)).await.map_err(IgnoreError::from)
+					stmt.fields
+						.compute(stk, ctx, opt, Some(current))
+						.await
+						.map_err(IgnoreError::from)
 				}
 			}
 		}?;
@@ -268,8 +276,11 @@ impl Document {
 		}
 
 		// Remove any omitted fields from output
-		for field in omit {
-			out.del(stk, ctx, opt, field).await?;
+		// But skip this if we have a GROUP BY clause, as OMIT will be applied after aggregation
+		if stmt.group.is_none() {
+			for field in omit {
+				out.del(stk, ctx, opt, field).await?;
+			}
 		}
 		// Output result
 		Ok(out)

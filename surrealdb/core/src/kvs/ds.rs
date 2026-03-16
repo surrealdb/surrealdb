@@ -1,4 +1,9 @@
-use std::collections::BTreeMap;
+#[cfg(not(target_family = "wasm"))]
+use std::collections::HashMap;
+#[cfg(target_family = "wasm")]
+use std::collections::HashSet;
+#[cfg(not(target_family = "wasm"))]
+use std::collections::hash_map::Entry;
 use std::fmt::{self, Display};
 #[cfg(storage)]
 use std::path::PathBuf;
@@ -13,30 +18,35 @@ use anyhow::{Context as _, Result, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
-use http::HeaderMap;
+use rand::{Rng, thread_rng};
 use reblessive::TreeStack;
-use surrealdb_types::SurrealValue;
+use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
+#[cfg(not(target_family = "wasm"))]
+use tokio::spawn;
+use tokio::sync::Notify;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
+use tokio::time::{Instant, sleep};
 use tokio_util::sync::CancellationToken;
-use tracing::{instrument, trace};
+use tracing::{debug, instrument, trace, warn};
 use uuid::Uuid;
 
 use super::api::Transactable;
-use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
-use crate::api::body::ApiBody;
-use crate::api::invocation::ApiInvocation;
-use crate::api::response::{ApiResponse, ResponseInstruction};
+use super::{Key, Val, export};
+use crate::api::err::ApiError;
+use crate::api::invocation::process_api_request;
+use crate::api::request::ApiRequest;
+use crate::api::response::ApiResponse;
 use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
 use crate::catalog::providers::{
 	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider,
 	UserProvider,
 };
-use crate::catalog::{ApiDefinition, ApiMethod, Index, NodeLiveQuery, SubscriptionDefinition};
+use crate::catalog::{ApiDefinition, Index, NodeLiveQuery, SubscriptionDefinition};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::cnf::dynamic::DynamicConfiguration;
 use crate::ctx::Context;
@@ -47,6 +57,7 @@ use crate::dbs::capabilities::{
 };
 use crate::dbs::node::{Node, Timestamp};
 use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
+use crate::doc::AsyncEventRecord;
 use crate::err::Error;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
@@ -55,15 +66,12 @@ use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevel
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::kvs::cache::ds::DatastoreCache;
-use crate::kvs::clock::SizedClock;
-#[expect(unused_imports)]
 use crate::kvs::clock::SystemClock;
 use crate::kvs::ds::requirements::{
 	TransactionBuilderFactoryRequirements, TransactionBuilderRequirements,
@@ -73,7 +81,6 @@ use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{KVValue, LockType, TransactionType};
-use crate::rpc::DbResultError;
 use crate::sql::Ast;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
@@ -84,12 +91,12 @@ use crate::{CommunityComposer, syn};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
-// If there are an infinite number of heartbeats, then we want to go
-// batch-by-batch spread over several checks
+/// If there are an infinite number of heartbeats, then we want to go
+/// batch-by-batch spread over several checks
 const LQ_CHANNEL_SIZE: usize = 15_000;
 
-// The role assigned to the initial user created when starting the server with
-// credentials for the first time
+/// The role assigned to the initial user created when starting the server with
+/// credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
 
 /// The underlying datastore instance which stores the dataset.
@@ -129,6 +136,8 @@ pub struct Datastore {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Arc<SurrealismCache>,
+	// Async event processing trigger
+	async_event_trigger: Arc<Notify>,
 }
 
 /// Represents a collection of metrics for a specific datastore flavor.
@@ -150,18 +159,21 @@ pub struct Metric {
 }
 
 #[derive(Clone)]
-pub(super) struct TransactionFactory {
-	// Clock for tracking time. It is read-only and accessible to all transactions.
-	clock: Arc<SizedClock>,
+pub(crate) struct TransactionFactory {
 	// The inner datastore type
 	builder: Arc<Box<dyn TransactionBuilder>>,
+	// Async event processing trigger
+	async_event_trigger: Arc<Notify>,
 }
 
 impl TransactionFactory {
-	pub(super) fn new(clock: Arc<SizedClock>, builder: Box<dyn TransactionBuilder>) -> Self {
+	pub(super) fn new(
+		async_event_trigger: Arc<Notify>,
+		builder: Box<dyn TransactionBuilder>,
+	) -> Self {
 		Self {
-			clock,
 			builder: Arc::new(builder),
+			async_event_trigger,
 		}
 	}
 
@@ -192,6 +204,7 @@ impl TransactionFactory {
 		Ok(Transaction::new(
 			local,
 			sequences,
+			self.async_event_trigger.clone(),
 			Transactor {
 				inner,
 			},
@@ -262,18 +275,16 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 /// The `path_valid` helper is used by the CLI to validate the path early and
 /// provide better error messages before starting the runtime.
 pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
-	/// Create a new transaction builder and the clock to use throughout the datastore.
+	/// Create a new transaction builder for the datastore.
 	///
 	/// # Parameters
 	/// - `path`: Database connection path string
-	/// - `clock`: Optional clock for timestamp generation (uses system clock if None)
 	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 	async fn new_transaction_builder(
 		&self,
 		path: &str,
-		clock: Option<Arc<SizedClock>>,
 		canceller: CancellationToken,
-	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)>;
+	) -> Result<Box<dyn TransactionBuilder>>;
 
 	/// Validate a datastore path string.
 	fn path_valid(v: &str) -> Result<String>;
@@ -317,11 +328,24 @@ impl TransactionBuilderFactory for CommunityComposer {
 	async fn new_transaction_builder(
 		&self,
 		path: &str,
-		clock: Option<Arc<SizedClock>>,
 		_canceller: CancellationToken,
-	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)> {
-		let (flavour, path) = match path.split_once("://").or_else(|| path.split_once(':')) {
-			None if path == "memory" => ("memory", ""),
+	) -> Result<Box<dyn TransactionBuilder>> {
+		// Extract query parameters from the path before scheme extraction
+		let (raw_path, query_string) = match path.split_once('?') {
+			Some((p, q)) => (p, Some(q)),
+			None => (path, None),
+		};
+
+		// Parse any query parameters into a map
+		let params = query_string.map(super::config::parse_query_params).unwrap_or_default();
+
+		// Extract the scheme and path components
+		let (flavour, path) = match raw_path.split_once("://").or_else(|| raw_path.split_once(':'))
+		{
+			None if raw_path == "memory" => ("memory", ""),
+			// Treat "mem" as an alias for "memory"
+			None if raw_path == "mem" => ("memory", ""),
+			Some(("mem", path)) => ("memory", path),
 			Some((flavour, path)) => (flavour, path),
 			// Validated already in the CLI, should never happen
 			_ => bail!(Error::Unreachable("Provide a valid database path parameter".to_owned())),
@@ -342,40 +366,21 @@ impl TransactionBuilderFactory for CommunityComposer {
 		// Initiate the desired datastore
 		match (flavour, path) {
 			// Initiate an in-memory datastore
-			(flavour @ "memory", _) => {
+			(flavour @ "memory", path) => {
 				#[cfg(feature = "kv-mem")]
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
+					// Parse SurrealMX configuration from URL path and query parameters
+					let config = super::config::MemoryConfig::from_path_and_params(&path, &params)
+						.map_err(Error::Kvs)?;
 					// Initialise the storage engine
-					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					let v = super::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem)?;
 					info!(target: TARGET, "Started kvs store in {flavour}");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-mem"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
-			// Initiate a File (RocksDB) datastore
-			(flavour @ "file", path) => {
-				#[cfg(feature = "kv-rocksdb")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-					// Initialise the storage engine
-					warn!(
-						"file:// is deprecated, please use surrealkv:// or surrealkv+versioned:// or rocksdb://"
-					);
-
-					let v = super::rocksdb::Datastore::new(&path)
-						.await
-						.map(DatastoreFlavor::RocksDB)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
-				}
-				#[cfg(not(feature = "kv-rocksdb"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// Initiate a RocksDB datastore
 			(flavour @ "rocksdb", path) => {
@@ -383,47 +388,34 @@ impl TransactionBuilderFactory for CommunityComposer {
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
+					// Parse RocksDB-specific configuration from query parameters
+					let config =
+						super::config::RocksDbConfig::from_params(&params).map_err(Error::Kvs)?;
 					// Initialise the storage engine
-					let v = super::rocksdb::Datastore::new(&path)
+					let v = super::rocksdb::Datastore::new(&path, config)
 						.await
 						.map(DatastoreFlavor::RocksDB)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
-			// Initiate a SurrealKV versioned database
-			(flavour @ "surrealkv+versioned", path) => {
-				#[cfg(feature = "kv-surrealkv")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-					// Initialise the storage engine
-					let v = super::surrealkv::Datastore::new(&path, true)
-						.await
-						.map(DatastoreFlavor::SurrealKV)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store with versions enabled");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
-				}
-				#[cfg(not(feature = "kv-surrealkv"))]
-				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
-			}
-			// Initiate a SurrealKV non-versioned database
+			// Initiate a SurrealKV database
 			(flavour @ "surrealkv", path) => {
 				#[cfg(feature = "kv-surrealkv")]
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
+					// Parse SurrealKV-specific configuration from query parameters
+					let config =
+						super::config::SurrealKvConfig::from_params(&params).map_err(Error::Kvs)?;
 					// Initialise the storage engine
-					let v = super::surrealkv::Datastore::new(&path, false)
+					let v = super::surrealkv::Datastore::new(&path, config)
 						.await
 						.map(DatastoreFlavor::SurrealKV)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store with versions not enabled");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					info!(target: TARGET, "Started {flavour} kvs store");
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -434,9 +426,8 @@ impl TransactionBuilderFactory for CommunityComposer {
 				{
 					let v =
 						super::indxdb::Datastore::new(&path).await.map(DatastoreFlavor::IndxDB)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -446,9 +437,8 @@ impl TransactionBuilderFactory for CommunityComposer {
 				#[cfg(feature = "kv-tikv")]
 				{
 					let v = super::tikv::Datastore::new(&path).await.map(DatastoreFlavor::TiKV)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
+					Ok(Box::<DatastoreFlavor>::new(v))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -464,13 +454,16 @@ impl TransactionBuilderFactory for CommunityComposer {
 	}
 
 	fn path_valid(v: &str) -> Result<String> {
-		match v {
+		// Strip query parameters before validating the scheme
+		let scheme_part = v.split_once('?').map(|(s, _)| s).unwrap_or(v);
+		match scheme_part {
 			"memory" => Ok(v.to_string()),
-			v if v.starts_with("file:") => Ok(v.to_string()),
-			v if v.starts_with("rocksdb:") => Ok(v.to_string()),
-			v if v.starts_with("surrealkv:") => Ok(v.to_string()),
-			v if v.starts_with("surrealkv+versioned:") => Ok(v.to_string()),
-			v if v.starts_with("tikv:") => Ok(v.to_string()),
+			"mem" => Ok(v.to_string()),
+			v_s if v_s.starts_with("file:") => Ok(v.to_string()),
+			v_s if v_s.starts_with("rocksdb:") => Ok(v.to_string()),
+			v_s if v_s.starts_with("surrealkv:") => Ok(v.to_string()),
+			v_s if v_s.starts_with("mem:") => Ok(v.to_string()),
+			v_s if v_s.starts_with("tikv:") => Ok(v.to_string()),
 			_ => bail!("Provide a valid database path parameter"),
 		}
 	}
@@ -535,6 +528,8 @@ impl TransactionBuilder for DatastoreFlavor {
 	}
 
 	/// Collects a specific u64 metric by name if supported by the datastore flavor.
+	// Allow unused variable when kv-rocksdb feature is not enabled
+	#[allow(unused_variables)]
 	fn collect_u64_metric(&self, metric: &str) -> Option<u64> {
 		match self {
 			#[cfg(feature = "kv-rocksdb")]
@@ -647,44 +642,20 @@ impl Datastore {
 		path: &str,
 		canceller: CancellationToken,
 	) -> Result<Self> {
-		Self::new_with_clock::<F>(composer, path, None, canceller).await
-	}
-
-	/// Creates a new datastore instance with a custom factory and clock.
-	///
-	/// This is the most flexible constructor, allowing full control over both
-	/// the backend and the clock used for timestamps.
-	///
-	/// # Parameters
-	/// - `factory`: Transaction builder factory for backend selection
-	/// - `path`: Database path (e.g., "memory", "surrealkv://path", "tikv://host:port")
-	/// - `clock`: Optional custom clock for timestamp generation (uses system clock if None)
-	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
-	///
-	/// # Generic parameters
-	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-	pub(crate) async fn new_with_clock<
-		C: TransactionBuilderFactory + BucketStoreProvider + 'static,
-	>(
-		composer: C,
-		path: &str,
-		clock: Option<Arc<SizedClock>>,
-		canceller: CancellationToken,
-	) -> Result<Datastore> {
 		// Initiate the desired datastore
-		let (builder, clock) = composer.new_transaction_builder(path, clock, canceller).await?;
+		let builder = composer.new_transaction_builder(path, canceller).await?;
 		//
 		let buckets = BucketsManager::new(Arc::new(composer));
 		// Set the properties on the datastore
-		Self::new_with_builder(builder, buckets, clock)
+		Self::new_with_builder(builder, buckets)
 	}
 
 	pub(crate) fn new_with_builder(
 		builder: Box<dyn TransactionBuilder>,
 		buckets: BucketsManager,
-		clock: Arc<SizedClock>,
 	) -> Result<Self> {
-		let tf = TransactionFactory::new(clock, builder);
+		let async_event_trigger = Arc::new(Notify::new());
+		let tf = TransactionFactory::new(async_event_trigger.clone(), builder);
 		let id = Uuid::new_v4();
 		Ok(Self {
 			id,
@@ -706,6 +677,7 @@ impl Datastore {
 			sequences: Sequences::new(tf, id),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			async_event_trigger,
 		})
 	}
 
@@ -747,6 +719,7 @@ impl Datastore {
 			transaction_factory: self.transaction_factory,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			async_event_trigger: self.async_event_trigger,
 		}
 	}
 
@@ -791,6 +764,11 @@ impl Datastore {
 	pub fn with_transaction_timeout(mut self, duration: Option<Duration>) -> Self {
 		self.transaction_timeout = duration;
 		self
+	}
+
+	/// Get the configured transaction timeout, if any
+	pub(crate) fn transaction_timeout(&self) -> Option<Duration> {
+		self.transaction_timeout
 	}
 
 	/// Set whether authentication is enabled for this Datastore
@@ -857,8 +835,8 @@ impl Datastore {
 		&self.jwks_cache
 	}
 
-	pub(super) async fn clock_now(&self) -> Timestamp {
-		self.transaction_factory.clock.now().await
+	pub(super) fn clock_now(&self) -> Timestamp {
+		SystemClock::new().now()
 	}
 
 	// Used for testing live queries
@@ -871,10 +849,14 @@ impl Datastore {
 	// Returns the current version and a flag indicating if this is a new datastore
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn check_version(&self) -> Result<(MajorVersion, bool)> {
-		let (version, is_new) = self.get_version().await?;
+		// Retry because concurrent instances may conflict when writing the version key
+		let (version, is_new) = Self::retry(Duration::from_secs(60), || self.get_version()).await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
-			bail!(Error::OutdatedStorageVersion);
+			bail!(Error::OutdatedStorageVersion {
+				expected: MajorVersion::latest().into(),
+				actual: version.into(),
+			});
 		}
 		// Everything ok
 		Ok((version, is_new))
@@ -901,13 +883,21 @@ impl Datastore {
 			None => {
 				// Fetch any keys immediately following the version key
 				let rng = crate::key::version::proceeding();
-				let keys = catch!(txn, txn.keys(rng, 1, None).await);
+				let keys = catch!(txn, txn.keys(rng, 1, 0, None).await);
 				// Check the storage if there are any other keys set
 				let version = if keys.is_empty() {
 					// There are no keys set in storage, so this is a new database
 					MajorVersion::latest()
 				} else {
-					// There were keys in storage, so this is an upgrade
+					// There were keys in storage, so this is an upgrade.
+					// Log the first key found for diagnostic purposes.
+					warn!(
+						target: TARGET,
+						first_key = ?keys.first().map(|k| format!("{:?}", k)),
+						"No version key found but existing data detected in storage. \
+						 This storage contains data from a previous SurrealDB version. \
+						 The server will not start until the data is migrated or removed."
+					);
 					MajorVersion::v1()
 				};
 				// Attempt to set the current version in storage
@@ -929,6 +919,14 @@ impl Datastore {
 	/// Setup the initial cluster access credentials
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn initialise_credentials(&self, user: &str, pass: &str) -> Result<()> {
+		// Retry because concurrent instances may conflict when creating the root user
+		Self::retry(Duration::from_secs(60), || self.initialise_credentials_attempt(user, pass))
+			.await
+	}
+
+	/// Single attempt to create the root user if none exists.
+	/// Separated from `initialise_credentials` so it can be wrapped in the retry loop.
+	async fn initialise_credentials_attempt(&self, user: &str, pass: &str) -> Result<()> {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.enclose();
 		// Fetch the root users from the storage
@@ -969,9 +967,9 @@ impl Datastore {
 		info!(target: TARGET, "This is a new SurrealDB instance. Initialising default namespace '{namespace}' and database '{database}'");
 		// Create the SQL statement
 		let sql = r"
-			DEFINE NAMESPACE $namespace COMMENT 'Default namespace generated by SurrealDB'; 
+			DEFINE NAMESPACE $namespace COMMENT 'Default namespace generated by SurrealDB';
 			USE NS $namespace;
-			DEFINE DATABASE $database COMMENT 'Default database generated by SurrealDB'; 
+			DEFINE DATABASE $database COMMENT 'Default database generated by SurrealDB';
 			DEFINE CONFIG DEFAULT NAMESPACE $namespace DATABASE $database;
 		"
 		.to_string();
@@ -1006,7 +1004,7 @@ impl Datastore {
 		trace!(target: TARGET, "Running datastore shutdown operations");
 		// Delete this datastore from the cluster
 		self.delete_node().await?;
-		// Run any storag engine shutdown tasks
+		// Run any storage engine shutdown tasks
 		self.transaction_factory.builder.shutdown().await
 	}
 
@@ -1017,14 +1015,57 @@ impl Datastore {
 	/// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn bootstrap(&self) -> Result<()> {
+		// Each bootstrap step is retried independently, because concurrent instances
+		// writing to the same cluster metadata keys may cause transaction conflicts.
+		let time_out = Duration::from_secs(60);
 		// Insert this node in the cluster
-		self.insert_node().await?;
+		Self::retry(time_out, || self.insert_node()).await?;
 		// Mark inactive nodes as archived
-		self.expire_nodes().await?;
+		Self::retry(time_out, || self.expire_nodes()).await?;
 		// Remove archived nodes
-		self.remove_nodes().await?;
+		Self::retry(time_out, || self.remove_nodes()).await?;
 		// Everything ok
 		Ok(())
+	}
+
+	/// Retries an async operation until it succeeds or `timeout` elapses.
+	///
+	/// Only [`TransactionConflict`](crate::kvs::Error::TransactionConflict)
+	/// errors are retried; any other error is returned immediately to the
+	/// caller. On each retryable failure a randomised delay (0–10 s) is
+	/// applied before the next attempt, adding jitter to reduce repeated
+	/// collisions when multiple instances start concurrently against the
+	/// same storage backend.
+	///
+	/// The timeout is checked only after a *failed* attempt; a successful
+	/// result is always returned immediately, even if the elapsed time
+	/// exceeds the budget. This means the total wall-clock time can exceed
+	/// `timeout` by up to one attempt duration plus the preceding back-off.
+	/// If no attempt succeeds within the budget, the conflict error from
+	/// the last failed attempt is surfaced.
+	async fn retry<F, Fut, R>(timeout: Duration, func: F) -> Result<R>
+	where
+		F: Fn() -> Fut,
+		Fut: Future<Output = Result<R>>,
+	{
+		let time = Instant::now();
+		loop {
+			match func().await {
+				Ok(result) => return Ok(result),
+				Err(e) => {
+					if let Some(crate::kvs::Error::TransactionConflict(_)) = e.downcast_ref() {
+						if time.elapsed() > timeout {
+							bail!(e);
+						}
+						// Randomised back-off to stagger retries across competing instances
+						let tempo = Duration::from_secs(thread_rng().gen_range(0..10));
+						sleep(tempo).await;
+					} else {
+						return Err(e);
+					}
+				}
+			}
+		}
 	}
 
 	/// Inserts a node for the first time into the cluster.
@@ -1043,13 +1084,13 @@ impl Datastore {
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::Nd::new(self.id);
-		let now = self.clock_now().await;
+		let now = self.clock_now();
 		let node = Node::new(self.id, now, false);
 		let res = run!(txn, txn.put(&key, &node, None).await);
 		match res {
 			Err(e) => {
 				if matches!(
-					e.downcast_ref(),
+					e.downcast_ref::<Error>(),
 					Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
 				) {
 					Err(anyhow::Error::new(Error::ClAlreadyExists {
@@ -1079,7 +1120,7 @@ impl Datastore {
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::new(self.id);
-		let now = self.clock_now().await;
+		let now = self.clock_now();
 		let node = Node::new(self.id, now, false);
 		run!(txn, txn.replace(&key, &node).await)
 	}
@@ -1118,7 +1159,7 @@ impl Datastore {
 		let inactive = {
 			let txn = self.transaction(Read, Optimistic).await?;
 			let nds = catch!(txn, txn.all_nodes().await);
-			let now = self.clock_now().await;
+			let now = self.clock_now();
 			catch!(txn, txn.cancel().await);
 			// Filter the inactive nodes
 			nds.iter()
@@ -1239,13 +1280,16 @@ impl Datastore {
 		let archived = {
 			let txn = self.transaction(Read, Optimistic).await?;
 			let nds = catch!(txn, txn.all_nodes().await);
+			txn.cancel().await?;
 			// Filter the archived nodes
 			nds.iter().filter_map(Node::archived).collect::<Vec<_>>()
 		};
 		// Fetch all namespaces
 		let nss = {
 			let txn = self.transaction(Read, Optimistic).await?;
-			catch!(txn, txn.all_ns().await)
+			let res = catch!(txn, txn.all_ns().await);
+			txn.cancel().await?;
+			res
 		};
 		// Loop over all namespaces
 		for ns in nss.iter() {
@@ -1254,7 +1298,9 @@ impl Datastore {
 			// Fetch all databases
 			let dbs = {
 				let txn = self.transaction(Read, Optimistic).await?;
-				catch!(txn, txn.all_db(ns.namespace_id).await)
+				let res = catch!(txn, txn.all_db(ns.namespace_id).await);
+				txn.cancel().await?;
+				res
 			};
 			// Loop over all databases
 			for db in dbs.iter() {
@@ -1263,7 +1309,9 @@ impl Datastore {
 				// Fetch all tables
 				let tbs = {
 					let txn = self.transaction(Read, Optimistic).await?;
-					catch!(txn, txn.all_tb(ns.namespace_id, db.database_id, None).await)
+					let res = catch!(txn, txn.all_tb(ns.namespace_id, db.database_id, None).await);
+					txn.cancel().await?;
+					res
 				};
 				// Loop over all tables
 				for tb in tbs.iter() {
@@ -1302,7 +1350,7 @@ impl Datastore {
 						yield_now!();
 					}
 					// Commit the changes
-					txn.commit().await?;
+					catch!(txn, txn.commit().await);
 				}
 			}
 		}
@@ -1345,7 +1393,7 @@ impl Datastore {
 			}
 		}
 		// Commit the changes
-		txn.commit().await?;
+		catch!(txn, txn.commit().await);
 		// All ok
 		Ok(())
 	}
@@ -1357,14 +1405,14 @@ impl Datastore {
 	/// Performs changefeed garbage collection as a background task.
 	///
 	/// This method is responsible for cleaning up old changefeed data across
-	/// all databases. It uses a distributed task lease mechanism to ensure
-	/// that only one node in a cluster performs this maintenance operation at
-	/// a time, preventing duplicate work and potential conflicts.
+	/// all databases. It uses a distributed task lease mechanism to coordinate
+	/// which node performs this maintenance operation. Once a batch starts it
+	/// runs to completion even if the lease expires, so brief overlap is
+	/// possible.
 	///
 	/// The process involves:
 	/// 1. Acquiring a lease for the ChangeFeedCleanup task
-	/// 2. Calculating the current system time
-	/// 4. Cleaning up old changefeed data from all databases
+	/// 2. Cleaning up old changefeed data from all databases
 	///
 	/// # Arguments
 	/// * `interval` - The interval between compaction runs, to calculate the lease duration
@@ -1400,91 +1448,244 @@ impl Datastore {
 	// Indexing functions
 	// --------------------------------------------------
 
-	/// Processes the index compaction queue
+	/// Processes the index compaction queue.
 	///
 	/// This method is called periodically by the index compaction thread to
 	/// process indexes that have been marked for compaction. It acquires a
-	/// distributed lease to ensure only one node in a cluster performs the
-	/// compaction at a time.
+	/// distributed lease to coordinate compaction across the cluster. Once a
+	/// batch starts it runs to completion even if the lease expires, so brief
+	/// overlap is possible.
 	///
 	/// The method scans the index compaction queue (stored as `Ic` keys) and
-	/// processes each index that needs compaction. Currently, only full-text
-	/// indexes support compaction, which helps optimize their performance by
-	/// consolidating changes and removing unnecessary data.
+	/// delegates to [`Self::index_compaction_loop`], which compacts each
+	/// distinct index exactly once — duplicate queue entries for the same
+	/// index are skipped. On native targets compaction tasks run in parallel
+	/// (one spawned task per index), while on wasm they run sequentially.
+	/// Indexes that support compaction include full-text, count, and HNSW.
 	///
-	/// After processing an index, it is removed from the compaction queue.
+	/// The queue is read in a short-lived read transaction so that user
+	/// transactions enqueueing new compaction requests do not conflict with
+	/// the compaction cycle. Each index compaction runs on its own write
+	/// transaction. Once all compactions have completed, a separate write
+	/// transaction removes the processed queue entries. Compaction failures
+	/// are logged but do not prevent other indexes from being processed.
 	///
 	/// # Arguments
-	/// * `interval` - The interval between compaction runs, to calculate the lease duration
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
+	/// * `dbs` - The shared datastore instance, cloned into each compaction task
+	/// * `interval` - The interval between compaction runs, used to calculate the lease duration
+	///
+	/// # Returns
+	/// A tuple `(iterations, errors)` where `iterations` is the number of
+	/// compaction batches processed and `errors` is the total number of
+	/// individual index compaction failures across all batches.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs))]
+	pub async fn index_compaction(
+		dbs: Arc<Datastore>,
+		interval: Duration,
+	) -> Result<(usize, usize)> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting index compaction process");
+		// Create a new lease handler
+		let lh = LeaseHandler::new(
+			dbs.sequences.clone(),
+			dbs.id,
+			dbs.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			interval * 2,
+		)?;
+		let mut count_iteration = 0;
+		let mut count_error = 0;
+		// We continue without interruptions while there are keys and the lease
+		loop {
+			// Attempt to acquire a lease for the IndexCompaction task
+			// If we don't get the lease, another node is handling this task
+			if !lh.has_lease().await? {
+				return Ok((count_iteration, count_error));
+			}
+			// Output function invocation details to logs
+			trace!(target: TARGET, "Running index compaction process");
+			// Read the compaction queue in a short-lived read transaction
+			// to avoid holding a write lock across the entire compaction cycle
+			let (beg, end) = IndexCompactionKey::range();
+			let range = beg..end;
+			let items = {
+				let txn = dbs.transaction(Read, Optimistic).await?;
+				let res = txn.getr(range, None).await;
+				let _ = txn.cancel().await;
+				res?
+			};
+			if items.is_empty() {
+				return Ok((count_iteration, count_error));
+			}
+			// Collect the keys so we can delete them after processing
+			let keys: Vec<Key> = items.iter().map(|(k, _)| k.clone()).collect();
+			// Process compaction for each index
+			count_iteration += 1;
+			count_error += Self::index_compaction_loop(dbs.clone(), &lh, items).await?;
+			// Delete the processed queue entries in a separate write
+			// transaction. This avoids conflicts with concurrent user
+			// transactions that may enqueue new compaction requests.
+			// Failed indexes are not re-enqueued here; the next user
+			// write to the affected index will naturally trigger a new
+			// compaction request.
+			let txn = dbs.transaction(Write, Optimistic).await?;
+			for k in &keys {
+				if let Err(e) = txn.del(k).await {
+					warn!(target: TARGET, "Failed to delete compaction queue entry: {e}");
+				}
+			}
+			if let Err(e) = txn.commit().await {
+				warn!(target: TARGET, "Failed to commit compaction queue cleanup: {e}");
+				break;
+			}
+		}
+		Ok((count_iteration, count_error))
+	}
+
+	/// Compacts each distinct index found in the queue items.
+	///
+	/// On native targets, compaction tasks are spawned in parallel — one per
+	/// distinct index — and joined afterwards. Duplicate queue entries for
+	/// the same index are deduplicated via a [`HashMap`] so only one task is
+	/// spawned per index. Failures are logged but do not abort the loop.
+	///
+	/// Returns the number of indexes that failed to compact.
+	#[cfg(not(target_family = "wasm"))]
+	async fn index_compaction_loop(
+		dbs: Arc<Datastore>,
+		lh: &LeaseHandler,
+		items: Vec<(Key, Val)>,
+	) -> Result<usize> {
+		let mut concurrent_compactions = HashMap::new();
+		for (k, _) in items {
+			lh.try_maintain_lease().await?;
+			let ic = IndexCompactionKey::decode_key(&k)?;
+			let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
+			if let Entry::Vacant(e) = concurrent_compactions.entry(ikb.clone()) {
+				let dbs = dbs.clone();
+				let jh = spawn(async move {
+					let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
+					catch!(txn, dbs.process_index_compaction(txn.clone(), &ikb).await);
+					catch!(txn, txn.commit().await);
+					Ok(())
+				});
+				e.insert(jh);
+			}
+		}
+		let mut error_count = 0;
+		for (ikb, jh) in concurrent_compactions {
+			if let Err(e) = jh.await? {
+				error_count += 1;
+				warn!("Index compaction {ikb} fails: {e}");
+			}
+		}
+		Ok(error_count)
+	}
+
+	/// Compacts each distinct index found in the queue items.
+	///
+	/// On wasm, `tokio::spawn` is unavailable so compactions run
+	/// sequentially. A [`HashSet`] is used to skip duplicate queue entries
+	/// for the same index. Failures are logged but do not abort the loop,
+	/// matching the non-wasm behavior so that a single transient failure
+	/// does not prevent other indexes from being compacted.
+	///
+	/// Returns the number of indexes that failed to compact.
+	#[cfg(target_family = "wasm")]
+	async fn index_compaction_loop(
+		dbs: Arc<Datastore>,
+		lh: &LeaseHandler,
+		items: Vec<(Key, Val)>,
+	) -> Result<usize> {
+		let mut seen = HashSet::new();
+		let mut error_count = 0;
+		for (k, _) in items {
+			lh.try_maintain_lease().await?;
+			let ic = IndexCompactionKey::decode_key(&k)?;
+			let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
+			if !seen.insert(ikb.clone()) {
+				continue;
+			}
+			let res: Result<()> = async {
+				let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
+				catch!(txn, dbs.process_index_compaction(txn.clone(), &ikb).await);
+				catch!(txn, txn.commit().await);
+				Ok(())
+			}
+			.await;
+			if let Err(e) = res {
+				error_count += 1;
+				warn!("Index compaction {ikb} fails: {e}");
+			}
+		}
+		Ok(error_count)
+	}
+
+	/// Performs the actual compaction of a single index.
+	///
+	/// Looks up the index definition identified by `ikb` and dispatches to
+	/// the appropriate compaction implementation based on the index type:
+	/// full-text, count, or HNSW. Indexes that are being removed
+	/// (`prepare_remove`), not found, or of an unsupported type are silently
+	/// skipped with a trace log.
+	async fn process_index_compaction(
+		&self,
+		txn: Arc<Transaction>,
+		ikb: &IndexKeyBase,
+	) -> Result<()> {
+		match txn.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index()).await? {
+			Some(ix) if !ix.prepare_remove => match &ix.index {
+				Index::FullText(p) => {
+					IndexOperation::index_fulltext_compaction(&self.index_stores, ikb, &txn, p)
+						.await?;
+				}
+				Index::Count(_) => {
+					IndexOperation::index_count_compaction(ikb, &txn).await?;
+				}
+				Index::Hnsw(p) => {
+					let mut ctx = self.setup_ctx()?;
+					ctx.set_transaction(txn.clone());
+					let ctx = ctx.freeze();
+					IndexOperation::index_hnsw_compaction(&ctx, &self.index_stores, ikb, &ix, p)
+						.await?;
+				}
+				_ => {
+					trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ikb);
+				}
+			},
+			_ => {
+				trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ikb);
+			}
+		}
+		Ok(())
+	}
+	/// Process queued async events using a distributed lease to coordinate batches.
+	/// Once a batch starts it runs to completion even if the lease expires, so
+	/// brief overlap is possible.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn event_processing(&self, interval: Duration) -> Result<()> {
+		// Output function invocation details to logs
+		trace!(target: TARGET, "Attempting event processing process");
 		// Create a new lease handler
 		let lh = LeaseHandler::new(
 			self.sequences.clone(),
 			self.id,
 			self.transaction_factory.clone(),
-			TaskLeaseType::IndexCompaction,
+			TaskLeaseType::EventProcessing,
 			interval * 2,
 		)?;
 		// We continue without interruptions while there are keys and the lease
 		loop {
-			// Attempt to acquire a lease for the ChangeFeedCleanup task
+			// Attempt to acquire a lease for the EventProcessing task
 			// If we don't get the lease, another node is handling this task
 			if !lh.has_lease().await? {
 				return Ok(());
 			}
 			// Output function invocation details to logs
-			trace!(target: TARGET, "Running index compaction process");
-			// Create a new transaction
-			let txn = self.transaction(Write, Optimistic).await?;
-			// Collect every item in the queue
-			let (beg, end) = IndexCompactionKey::range();
-			let range = beg..end;
-			let mut previous: Option<IndexCompactionKey<'static>> = None;
-			let mut count = 0;
-			// Returns an ordered list of indexes that require compaction
-			for (k, _) in txn.getr(range.clone(), None).await? {
-				count += 1;
-				lh.try_maintain_lease().await?;
-				let ic = IndexCompactionKey::decode_key(&k)?;
-				// If the index has already been compacted, we can ignore the task
-				if let Some(p) = &previous
-					&& p.index_matches(&ic)
-				{
-					continue;
-				}
-				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
-					Some(ix) if !ix.prepare_remove => match &ix.index {
-						Index::FullText(p) => {
-							let ft = FullTextIndex::new(
-								&self.index_stores,
-								&txn,
-								IndexKeyBase::new(ic.ns, ic.db, ix.table_name.clone(), ix.index_id),
-								p,
-							)
-							.await?;
-							ft.compaction(&txn).await?;
-						}
-						Index::Count(_) => {
-							IndexOperation::index_count_compaction(&ic, &txn).await?;
-						}
-						_ => {
-							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
-						}
-					},
-					_ => {
-						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
-					}
-				}
-				previous = Some(ic.into_owned());
-			}
-			if count > 0 {
-				txn.delr(range).await?;
-				txn.commit().await?;
-			} else {
-				txn.cancel().await?;
+			trace!(target: TARGET, "Running event processing process");
+			if AsyncEventRecord::process_next_events_batch(self, Some(&lh)).await? == 0 {
+				// The last batch didn't have any events to process,
+				// we can sleep until the next wake-up call
 				return Ok(());
 			}
 		}
@@ -1502,7 +1703,7 @@ impl Datastore {
 	///
 	/// #[tokio::main]
 	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("file://database.db").await?;
+	///     let ds = Datastore::new("rocksdb://database.db").await?;
 	///     let mut tx = ds.transaction(Write, Optimistic).await?;
 	///     tx.cancel().await?;
 	///     Ok(())
@@ -1510,6 +1711,17 @@ impl Datastore {
 	/// ```
 	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
 		self.transaction_factory.transaction(write, lock, self.sequences.clone()).await
+	}
+
+	pub(crate) fn sequences(&self) -> &Sequences {
+		&self.sequences
+	}
+
+	pub(crate) fn transaction_factory(&self) -> &TransactionFactory {
+		&self.transaction_factory
+	}
+	pub fn async_event_trigger(&self) -> &Arc<Notify> {
+		&self.async_event_trigger
 	}
 
 	pub async fn health_check(&self) -> Result<()> {
@@ -1556,10 +1768,10 @@ impl Datastore {
 		txt: &str,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)
-			.map_err(|e| DbResultError::ParseError(e.to_string()))?;
+			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}
@@ -1572,10 +1784,10 @@ impl Datastore {
 		sess: &Session,
 		vars: Option<PublicVariables>,
 		tx: Arc<Transaction>,
-	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)
-			.map_err(|e| DbResultError::ParseError(e.to_string()))?;
+			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST with the transaction
 		self.process_with_transaction(ast, sess, vars, tx).await
 	}
@@ -1588,36 +1800,40 @@ impl Datastore {
 		sess: &Session,
 		vars: Option<PublicVariables>,
 		tx: Arc<Transaction>,
-	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Check if the session has expired
 		if sess.expired() {
-			return Err(DbResultError::InvalidAuth("The session has expired".to_string()));
+			return Err(TypesError::not_allowed(
+				"The session has expired".to_string(),
+				AuthError::SessionExpired,
+			));
 		}
 
 		// Check if anonymous actors can execute queries when auth is enabled
 		if let Err(e) = self.check_anon(sess) {
-			return Err(DbResultError::InvalidAuth(format!("Anonymous access not allowed: {}", e)));
+			return Err(TypesError::not_allowed(
+				format!("Anonymous access not allowed: {e}"),
+				AuthError::NotAllowed {
+					actor: "anonymous".to_owned(),
+					action: "process".to_owned(),
+					resource: "query".to_owned(),
+				},
+			));
 		}
 
 		// Create a new query options
 		let opt = self.setup_options(sess);
 
 		// Create a default context
-		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
-			Some(Error::ExpiredSession) => {
-				DbResultError::InvalidAuth("The session has expired".to_string())
-			}
-			_ => DbResultError::InternalError(e.to_string()),
+		let mut ctx = self.setup_ctx().map_err(|e| {
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})?;
 
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into()).map_err(|e| match e {
-				Error::InvalidParam {
-					..
-				} => DbResultError::InvalidParams("Invalid query variables".to_string()),
-				_ => DbResultError::InternalError(e.to_string()),
-			})?;
+			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
 		}
 
 		// Set the transaction in the context
@@ -1625,12 +1841,9 @@ impl Datastore {
 
 		// Process all statements with the transaction
 		Executor::execute_plan_with_transaction(ctx.freeze(), opt, ast.into()).await.map_err(|e| {
-			match e.downcast_ref::<Error>() {
-				Some(Error::ExpiredSession) => {
-					DbResultError::InvalidAuth("The session has expired".to_string())
-				}
-				_ => DbResultError::InternalError(e.to_string()),
-			}
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})
 	}
 
@@ -1671,9 +1884,6 @@ impl Datastore {
 		// Process all statements
 
 		let parser_settings = ParserSettings {
-			define_api_enabled: ctx
-				.get_capabilities()
-				.allows_experimental(&ExperimentalTarget::DefineApi),
 			files_enabled: ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
 			surrealism_enabled: ctx
 				.get_capabilities()
@@ -1749,7 +1959,7 @@ impl Datastore {
 		ast: Ast,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		//TODO: Insert planner here.
 		self.process_plan(ast.into(), sess, vars).await
 	}
@@ -1759,259 +1969,51 @@ impl Datastore {
 		plan: LogicalPlan,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-	) -> Result<Vec<QueryResult>, DbResultError> {
+	) -> Result<Vec<QueryResult>, TypesError> {
 		// Check if the session has expired
 		if sess.expired() {
-			return Err(DbResultError::InvalidAuth("The session has expired".to_string()));
+			return Err(TypesError::not_allowed(
+				"The session has expired".to_string(),
+				AuthError::SessionExpired,
+			));
 		}
 
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
 		if let Err(e) = self.check_anon(sess) {
-			return Err(DbResultError::InvalidAuth(format!("Anonymous access not allowed: {}", e)));
+			return Err(TypesError::not_allowed(
+				format!("Anonymous access not allowed: {e}"),
+				AuthError::NotAllowed {
+					actor: "anonymous".to_owned(),
+					action: "process".to_owned(),
+					resource: "query".to_owned(),
+				},
+			));
 		}
 
 		// Create a new query options
 		let opt = self.setup_options(sess);
 
 		// Create a default context
-		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
-			Some(Error::ExpiredSession) => {
-				DbResultError::InvalidAuth("The session has expired".to_string())
-			}
-			Some(Error::InvalidAuth) => {
-				DbResultError::InvalidAuth("Authentication failed".to_string())
-			}
-			Some(Error::UnexpectedAuth) => {
-				DbResultError::InvalidAuth("Unexpected authentication error".to_string())
-			}
-			Some(Error::MissingUserOrPass) => {
-				DbResultError::InvalidAuth("Missing username or password".to_string())
-			}
-			Some(Error::InvalidPass) => DbResultError::InvalidAuth("Invalid password".to_string()),
-			Some(Error::NoSigninTarget) => {
-				DbResultError::InvalidAuth("No signin target specified".to_string())
-			}
-			Some(Error::TokenMakingFailed) => {
-				DbResultError::InvalidAuth("Failed to create authentication token".to_string())
-			}
-			Some(Error::IamError(iam_err)) => {
-				DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
-			}
-			Some(Error::Kvs(kvs_err)) => {
-				DbResultError::InternalError(format!("Key-value store error: {}", kvs_err))
-			}
-			Some(Error::InvalidQuery(_)) => {
-				DbResultError::ParseError("Invalid query syntax".to_string())
-			}
-			Some(Error::Internal(msg)) => DbResultError::InternalError(msg.clone()),
-			Some(Error::Unimplemented(msg)) => {
-				DbResultError::InternalError(format!("Unimplemented: {}", msg))
-			}
-			Some(Error::Io(e)) => DbResultError::InternalError(format!("I/O error: {}", e)),
-			Some(Error::Http(msg)) => DbResultError::InternalError(format!("HTTP error: {}", msg)),
-			Some(Error::Channel(msg)) => {
-				DbResultError::InternalError(format!("Channel error: {}", msg))
-			}
-			Some(Error::QueryTimedout(msg)) => DbResultError::QueryTimedout(format!("{}", msg)),
-			Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
-			Some(Error::QueryNotExecuted {
-				message,
-			}) => DbResultError::QueryNotExecuted(format!("{message} - plan: {plan:?}")),
-			Some(Error::ScriptingNotAllowed) => {
-				DbResultError::MethodNotAllowed("Scripting functions are not allowed".to_string())
-			}
-			Some(Error::FunctionNotAllowed(func)) => {
-				DbResultError::MethodNotAllowed(format!("Function '{}' is not allowed", func))
-			}
-			Some(Error::NetTargetNotAllowed(target)) => DbResultError::MethodNotAllowed(format!(
-				"Network target '{}' is not allowed",
-				target
-			)),
-			Some(Error::Thrown(msg)) => DbResultError::Thrown(msg.clone()),
-			_ => DbResultError::InternalError(e.to_string()),
+		let mut ctx = self.setup_ctx().map_err(|e| {
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})?;
 
 		// Start an execution context
-		ctx.attach_session(sess).map_err(|e| match e {
-			Error::ExpiredSession => {
-				DbResultError::InvalidAuth("The session has expired".to_string())
-			}
-			Error::InvalidAuth => DbResultError::InvalidAuth("Authentication failed".to_string()),
-			Error::UnexpectedAuth => {
-				DbResultError::InvalidAuth("Unexpected authentication error".to_string())
-			}
-			Error::IamError(iam_err) => {
-				DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
-			}
-			_ => DbResultError::InternalError(e.to_string()),
-		})?;
+		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
 
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into()).map_err(|e| match e {
-				Error::InvalidParam {
-					..
-				} => DbResultError::InvalidParams("Invalid query variables".to_string()),
-				Error::Internal(msg) => DbResultError::InternalError(msg),
-				_ => DbResultError::InternalError(e.to_string()),
-			})?;
+			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
 		}
 
 		// Process all statements
 		Executor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
-			match e.downcast_ref::<Error>() {
-				Some(Error::ExpiredSession) => {
-					DbResultError::InvalidAuth("The session has expired".to_string())
-				}
-				Some(Error::InvalidAuth) => {
-					DbResultError::InvalidAuth("Authentication failed".to_string())
-				}
-				Some(Error::UnexpectedAuth) => {
-					DbResultError::InvalidAuth("Unexpected authentication error".to_string())
-				}
-				Some(Error::MissingUserOrPass) => {
-					DbResultError::InvalidAuth("Missing username or password".to_string())
-				}
-				Some(Error::InvalidPass) => {
-					DbResultError::InvalidAuth("Invalid password".to_string())
-				}
-				Some(Error::NoSigninTarget) => {
-					DbResultError::InvalidAuth("No signin target specified".to_string())
-				}
-				Some(Error::TokenMakingFailed) => {
-					DbResultError::InvalidAuth("Failed to create authentication token".to_string())
-				}
-				Some(Error::IamError(iam_err)) => {
-					DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
-				}
-				Some(Error::Kvs(kvs_err)) => {
-					DbResultError::InternalError(format!("Key-value store error: {}", kvs_err))
-				}
-				Some(Error::NsEmpty) => {
-					DbResultError::InvalidParams("No namespace specified".to_string())
-				}
-				Some(Error::DbEmpty) => {
-					DbResultError::InvalidParams("No database specified".to_string())
-				}
-				Some(Error::InvalidQuery(_)) => {
-					DbResultError::ParseError("Invalid query syntax".to_string())
-				}
-				Some(Error::InvalidContent {
-					..
-				}) => DbResultError::InvalidParams("Invalid content clause".to_string()),
-				Some(Error::InvalidMerge {
-					..
-				}) => DbResultError::InvalidParams("Invalid merge clause".to_string()),
-				Some(Error::InvalidPatch(_)) => {
-					DbResultError::InvalidParams("Invalid patch operation".to_string())
-				}
-				Some(Error::Internal(msg)) => DbResultError::InternalError(msg.clone()),
-				Some(Error::Unimplemented(msg)) => {
-					DbResultError::InternalError(format!("Unimplemented: {}", msg))
-				}
-				Some(Error::Io(e)) => DbResultError::InternalError(format!("I/O error: {}", e)),
-				Some(Error::Http(msg)) => {
-					DbResultError::InternalError(format!("HTTP error: {}", msg))
-				}
-				Some(Error::Channel(msg)) => {
-					DbResultError::InternalError(format!("Channel error: {}", msg))
-				}
-				Some(Error::QueryTimedout(timeout)) => {
-					DbResultError::QueryTimedout(format!("Timed out: {}", timeout))
-				}
-				Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
-				Some(Error::QueryNotExecuted {
-					message,
-				}) => DbResultError::QueryNotExecuted(message.clone()),
-				Some(Error::ScriptingNotAllowed) => DbResultError::MethodNotAllowed(
-					"Scripting functions are not allowed".to_string(),
-				),
-				Some(Error::FunctionNotAllowed(func)) => {
-					DbResultError::MethodNotAllowed(format!("Function '{}' is not allowed", func))
-				}
-				Some(Error::NetTargetNotAllowed(target)) => DbResultError::MethodNotAllowed(
-					format!("Network target '{}' is not allowed", target),
-				),
-				Some(Error::Thrown(msg)) => DbResultError::Thrown(msg.clone()),
-				Some(Error::Coerce(_)) => {
-					DbResultError::InvalidParams("Type coercion error".to_string())
-				}
-				Some(Error::Cast(_)) => {
-					DbResultError::InvalidParams("Type casting error".to_string())
-				}
-				Some(Error::TryAdd(_, _))
-				| Some(Error::TrySub(_, _))
-				| Some(Error::TryMul(_, _))
-				| Some(Error::TryDiv(_, _))
-				| Some(Error::TryRem(_, _))
-				| Some(Error::TryPow(_, _))
-				| Some(Error::TryNeg(_)) => {
-					DbResultError::InvalidParams("Arithmetic operation error".to_string())
-				}
-				Some(Error::TryFrom(_, _)) => {
-					DbResultError::InvalidParams("Type conversion error".to_string())
-				}
-				Some(Error::Unencodable) => {
-					DbResultError::SerializationError("Value cannot be serialized".to_string())
-				}
-				Some(Error::Decode(_)) => {
-					DbResultError::DeserializationError("Key decoding error".to_string())
-				}
-				Some(Error::Revision(_)) => {
-					DbResultError::DeserializationError("Versioned data error".to_string())
-				}
-				Some(Error::CorruptedIndex(_)) => {
-					DbResultError::InternalError("Index corruption detected".to_string())
-				}
-				Some(Error::NoIndexFoundForMatch {
-					..
-				}) => DbResultError::InternalError("No suitable index found".to_string()),
-				Some(Error::AnalyzerError(msg)) => {
-					DbResultError::InternalError(format!("Analyzer error: {}", msg))
-				}
-				Some(Error::HighlightError(msg)) => {
-					DbResultError::InternalError(format!("Highlight error: {}", msg))
-				}
-				Some(Error::Bincode(_)) => {
-					DbResultError::SerializationError("Bincode serialization error".to_string())
-				}
-				Some(Error::FstError(_)) => DbResultError::InternalError("FST error".to_string()),
-				Some(Error::Utf8Error(_)) => {
-					DbResultError::DeserializationError("UTF-8 decoding error".to_string())
-				}
-				Some(Error::ObsError(_)) => {
-					DbResultError::InternalError("Object store error".to_string())
-				}
-				Some(Error::DuplicatedMatchRef {
-					..
-				}) => DbResultError::InvalidParams("Duplicated match reference".to_string()),
-				Some(Error::TimestampOverflow(msg)) => {
-					DbResultError::InternalError(format!("Timestamp overflow: {}", msg))
-				}
-				Some(Error::NoRecordFound) => {
-					DbResultError::InternalError("No record found".to_string())
-				}
-				Some(Error::InvalidSignup) => {
-					DbResultError::InvalidAuth("Signup failed".to_string())
-				}
-				Some(Error::ClAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Cluster node already exists".to_string()),
-				Some(Error::ApAlreadyExists {
-					..
-				}) => DbResultError::InternalError("API already exists".to_string()),
-				Some(Error::AzAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Analyzer already exists".to_string()),
-				Some(Error::BuAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Bucket already exists".to_string()),
-				Some(Error::DbAlreadyExists {
-					..
-				}) => DbResultError::InternalError("Database already exists".to_string()),
-				_ => DbResultError::InternalError(e.to_string()),
-			}
+			e.downcast::<Error>()
+				.map(crate::err::into_types_error)
+				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})
 	}
 
@@ -2154,9 +2156,9 @@ impl Datastore {
 		// Return an async export job
 		Ok(async move {
 			// Process the export
-			txn.export(&ns, &db, cfg, chn).await?;
-			// Everything ok
-			Ok(())
+			let res = txn.export(&ns, &db, cfg, chn).await;
+			txn.cancel().await?;
+			res
 		})
 	}
 
@@ -2224,14 +2226,14 @@ impl Datastore {
 		session: &mut Session,
 		namespace: Option<String>,
 		database: Option<String>,
-	) -> std::result::Result<QueryResult, DbResultError> {
+	) -> std::result::Result<QueryResult, TypesError> {
 		let new_tx = || async {
 			self.transaction(Write, Optimistic)
 				.await
-				.map_err(|err| DbResultError::InternalError(err.to_string()))
+				.map_err(|err| TypesError::internal(err.to_string()))
 		};
 		let commit_tx = |txn: Transaction| async move {
-			txn.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))
+			txn.commit().await.map_err(|err| TypesError::internal(err.to_string()))
 		};
 
 		let query_result = QueryResultBuilder::started_now();
@@ -2240,7 +2242,7 @@ impl Datastore {
 				let tx = new_tx().await?;
 				tx.ensure_ns_db(ctx, &ns, &db)
 					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+					.map_err(|err| TypesError::internal(err.to_string()))?;
 				commit_tx(tx).await?;
 				session.ns = Some(ns);
 				session.db = Some(db);
@@ -2249,20 +2251,21 @@ impl Datastore {
 				let tx = new_tx().await?;
 				tx.get_or_add_ns(ctx, &ns)
 					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+					.map_err(|err| TypesError::internal(err.to_string()))?;
 				commit_tx(tx).await?;
 				session.ns = Some(ns);
 			}
 			(None, Some(db)) => {
 				let Some(ns) = session.ns.clone() else {
-					return Err(DbResultError::InvalidRequest(
+					return Err(TypesError::validation(
 						"Cannot use database without namespace".to_string(),
+						None,
 					));
 				};
 				let tx = new_tx().await?;
 				tx.ensure_ns_db(ctx, &ns, &db)
 					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+					.map_err(|err| TypesError::internal(err.to_string()))?;
 				commit_tx(tx).await?;
 				session.db = Some(db);
 			}
@@ -2272,7 +2275,12 @@ impl Datastore {
 			}
 		}
 
-		Ok(query_result.finish())
+		let value = PublicValue::from_t(object! {
+			namespace: session.ns.clone(),
+			database: session.db.clone(),
+		});
+
+		Ok(query_result.finish_with_result(Ok(value)))
 	}
 
 	/// Get a db model by name.
@@ -2296,24 +2304,14 @@ impl Datastore {
 	/// Invoke an API handler.
 	///
 	/// TODO: This should not need to be public, but it is used in `src/net/api.rs`.
-	#[expect(clippy::too_many_arguments)]
-	pub async fn invoke_api_handler<S>(
+	pub async fn invoke_api_handler(
 		&self,
 		ns: &str,
 		db: &str,
 		path: &str,
 		session: &Session,
-		method: ApiMethod,
-		headers: HeaderMap,
-		query: BTreeMap<String, String>,
-		body: S,
-	) -> Result<Option<(ApiResponse, ResponseInstruction)>>
-	where
-		S: Stream<Item = std::result::Result<Bytes, Box<dyn Display + Send + Sync>>>
-			+ Send
-			+ Unpin
-			+ 'static,
-	{
+		mut req: ApiRequest,
+	) -> Result<ApiResponse> {
 		let tx = Arc::new(self.transaction(TransactionType::Write, LockType::Optimistic).await?);
 
 		let db = tx.ensure_ns_db(None, ns, db).await?;
@@ -2321,14 +2319,14 @@ impl Datastore {
 		let apis = tx.all_db_apis(db.namespace_id, db.database_id).await?;
 		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
-		let res = match ApiDefinition::find_definition(apis.as_ref(), segments, method) {
+		let res = match ApiDefinition::find_definition(apis.as_ref(), segments, req.method) {
 			Some((api, params)) => {
-				let invocation = ApiInvocation {
-					params: params.try_into()?,
-					method,
-					headers,
-					query,
-				};
+				debug!(
+					request_id = %req.request_id,
+					path = %path,
+					"API definition found, dispatching to process_api_request"
+				);
+				req.params = params.try_into()?;
 
 				let opt = self.setup_options(session);
 
@@ -2337,12 +2335,19 @@ impl Datastore {
 				ctx.attach_session(session)?;
 				let ctx = &ctx.freeze();
 
-				invocation.invoke_with_transaction(ctx, &opt, api, ApiBody::from_stream(body)).await
+				process_api_request(ctx, &opt, api, req).await
 			}
-			_ => {
-				return Err(anyhow::anyhow!(Error::ApNotFound {
-					value: path.to_owned(),
-				}));
+			None => {
+				trace!(
+					request_id = %req.request_id,
+					path = %path,
+					"No API definition found for path"
+				);
+				tx.cancel().await?;
+				return Ok(ApiResponse::from_error(
+					ApiError::NotFound.into(),
+					req.request_id.clone(),
+				));
 			}
 		};
 
@@ -2411,15 +2416,17 @@ mod test {
 		let password = "root";
 
 		// Setup the initial user if there are no root users
-		assert_eq!(
-			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
-			0
-		);
+		{
+			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			assert_eq!(txn.all_root_users().await.unwrap().len(), 0);
+			txn.cancel().await.unwrap();
+		}
 		ds.initialise_credentials(username, password).await.unwrap();
-		assert_eq!(
-			ds.transaction(Read, Optimistic).await.unwrap().all_root_users().await.unwrap().len(),
-			1
-		);
+		{
+			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			assert_eq!(txn.all_root_users().await.unwrap().len(), 1);
+			txn.cancel().await.unwrap();
+		}
 		verify_root_creds(&ds, username, password).await.unwrap();
 
 		// Do not setup the initial root user if there are root users:
@@ -2427,28 +2434,19 @@ mod test {
 		let sql = "DEFINE USER root ON ROOT PASSWORD 'test' ROLES OWNER";
 		let sess = Session::owner();
 		ds.execute(sql, &sess, None).await.unwrap();
-		let pass_hash = ds
-			.transaction(Read, Optimistic)
-			.await
-			.unwrap()
-			.expect_root_user(username)
-			.await
-			.unwrap()
-			.hash
-			.clone();
+		let pass_hash = {
+			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			let res = txn.expect_root_user(username).await.unwrap().hash.clone();
+			txn.cancel().await.unwrap();
+			res
+		};
 
 		ds.initialise_credentials(username, password).await.unwrap();
-		assert_eq!(
-			pass_hash,
-			ds.transaction(Read, Optimistic)
-				.await
-				.unwrap()
-				.expect_root_user(username)
-				.await
-				.unwrap()
-				.hash
-				.clone()
-		)
+		{
+			let txn = ds.transaction(Read, Optimistic).await.unwrap();
+			assert_eq!(pass_hash, txn.expect_root_user(username).await.unwrap().hash.clone());
+			txn.cancel().await.unwrap();
+		}
 	}
 
 	#[tokio::test]
@@ -2493,9 +2491,9 @@ mod test {
 		// Set context capabilities
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction
-		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?;
+		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?.enclose();
 		// Store the transaction
-		ctx.set_transaction(txn.enclose());
+		ctx.set_transaction(txn.clone());
 		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value
@@ -2507,6 +2505,7 @@ mod test {
 			.catch_return()
 			.unwrap();
 		assert_eq!(res, Value::Number(Number::Int(1002)));
+		txn.cancel().await?;
 		Ok(())
 	}
 
@@ -2606,7 +2605,7 @@ mod test {
 			let after_remove = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
 			let after_remove_live_query_version =
 				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
-			drop(txn);
+			txn.cancel().await?;
 			// Compare uuids after definitions
 			assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);
 			assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);

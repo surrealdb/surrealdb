@@ -13,7 +13,6 @@ pub struct DeleteStatement {
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
 	pub timeout: Expr,
-	pub parallel: bool,
 	pub explain: Option<Explain>,
 }
 
@@ -26,7 +25,6 @@ impl Default for DeleteStatement {
 			cond: Default::default(),
 			output: Default::default(),
 			timeout: Expr::Literal(Literal::None),
-			parallel: Default::default(),
 			explain: Default::default(),
 		}
 	}
@@ -52,9 +50,6 @@ impl ToSql for DeleteStatement {
 			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
 
-		if self.parallel {
-			f.push_str(" PARALLEL");
-		}
 		if let Some(ref v) = self.explain {
 			write_sql!(f, fmt, " {v}");
 		}
@@ -70,7 +65,6 @@ impl From<DeleteStatement> for crate::expr::statements::DeleteStatement {
 			cond: v.cond.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
-			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 		}
 	}
@@ -85,7 +79,6 @@ impl From<crate::expr::statements::DeleteStatement> for DeleteStatement {
 			cond: v.cond.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
-			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 		}
 	}

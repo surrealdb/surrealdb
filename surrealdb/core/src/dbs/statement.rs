@@ -41,6 +41,9 @@ pub(crate) enum Statement<'a> {
 	Select {
 		stmt: &'a SelectStatement,
 		omit: Vec<Idiom>,
+		/// Rewritten condition with optimizations (e.g., count(->edge) > 0 -> LIMIT 1).
+		/// When present, this replaces `stmt.cond` for evaluation.
+		rewritten_cond: Option<Cond>,
 	},
 	Create(&'a CreateStatement),
 	Upsert(&'a UpsertStatement),
@@ -313,7 +316,7 @@ impl Statement<'_> {
 			Statement::Select {
 				stmt,
 				..
-			} => Some(&stmt.expr),
+			} => Some(&stmt.fields),
 			Statement::Live(v) => match &v.fields {
 				LiveFields::Diff => None,
 				LiveFields::Select(x) => Some(x),
@@ -340,8 +343,9 @@ impl Statement<'_> {
 			Statement::Live(v) => v.cond.as_ref(),
 			Statement::Select {
 				stmt,
+				rewritten_cond,
 				..
-			} => stmt.cond.as_ref(),
+			} => rewritten_cond.as_ref().or(stmt.cond.as_ref()),
 			Statement::Upsert(v) => v.cond.as_ref(),
 			Statement::Update(v) => v.cond.as_ref(),
 			Statement::Delete(v) => v.cond.as_ref(),
@@ -426,6 +430,17 @@ impl Statement<'_> {
 				..
 			} => stmt.limit.as_ref(),
 			_ => None,
+		}
+	}
+
+	/// Returns any OMIT fields if specified
+	pub(crate) fn omit(&self) -> &[Idiom] {
+		match self {
+			Statement::Select {
+				omit,
+				..
+			} => omit.as_slice(),
+			_ => &[],
 		}
 	}
 
@@ -562,11 +577,26 @@ impl Statement<'_> {
 		doc: Option<&CursorDoc>,
 		stmt: &'a SelectStatement,
 	) -> Result<Statement<'a>> {
+		use crate::expr::visit::MutVisitor;
+		use crate::idx::planner::count_exists_rewriter::CountLimitRewriter;
+
 		let omit = exprs_to_fields(stk, ctx, opt, doc, stmt.omit.as_slice()).await?;
+
+		let rewritten_cond = if let Some(cond) = &stmt.cond {
+			let mut cond_expr = cond.0.clone();
+			if CountLimitRewriter.visit_mut_expr(&mut cond_expr).is_ok() && cond_expr != cond.0 {
+				Some(Cond(cond_expr))
+			} else {
+				None
+			}
+		} else {
+			None
+		};
 
 		Ok(Statement::Select {
 			stmt,
 			omit,
+			rewritten_cond,
 		})
 	}
 }

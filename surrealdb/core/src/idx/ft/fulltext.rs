@@ -51,8 +51,18 @@ pub(crate) struct TermDocument {
 
 impl_kv_value_revisioned!(TermDocument);
 
+impl TermDocument {
+	#[cfg(test)]
+	pub(crate) fn new(f: TermFrequency, o: Vec<Offset>) -> Self {
+		Self {
+			f,
+			o,
+		}
+	}
+}
+
 #[revisioned(revision = 1)]
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 /// Tracks document length and count statistics for the index
 pub(crate) struct DocLengthAndCount {
 	/// The total length of all documents in the index
@@ -62,8 +72,18 @@ pub(crate) struct DocLengthAndCount {
 }
 impl_kv_value_revisioned!(DocLengthAndCount);
 
+impl DocLengthAndCount {
+	#[cfg(test)]
+	pub(crate) fn new(total_docs_length: i128, doc_count: i64) -> Self {
+		Self {
+			total_docs_length,
+			doc_count,
+		}
+	}
+}
+
 /// Represents the terms in a search query and their associated document sets
-pub(in crate::idx) struct QueryTerms {
+pub(crate) struct QueryTerms {
 	/// The tokenized query terms
 	#[allow(dead_code)]
 	tokens: Tokens,
@@ -76,11 +96,11 @@ pub(in crate::idx) struct QueryTerms {
 }
 
 impl QueryTerms {
-	pub(in crate::idx) fn is_empty(&self) -> bool {
+	pub(crate) fn is_empty(&self) -> bool {
 		self.tokens.list().is_empty()
 	}
 
-	pub(in crate::idx) fn contains_doc(&self, doc_id: DocId) -> bool {
+	pub(crate) fn contains_doc(&self, doc_id: DocId) -> bool {
 		for d in self.docs.iter().flatten() {
 			if d.contains(doc_id) {
 				return true;
@@ -353,38 +373,79 @@ impl FullTextIndex {
 
 	/// Extracts query terms from a search string
 	///
-	/// This method tokenizes the query string and retrieves the document sets
-	/// for each term. It returns a QueryTerms object containing the tokens and
-	/// their associated document sets.
-	pub(in crate::idx) async fn extract_querying_terms(
+	/// Tokenizes the query string, then retrieves the document bitmaps for each
+	/// unique term. The compacted bitmap fetches are batched via `tx.getm()` to
+	/// reduce KV round trips (one batch instead of N sequential gets).
+	pub(crate) async fn extract_querying_terms(
 		&self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
 		query_string: String,
 	) -> Result<QueryTerms> {
-		// We extract the tokens
 		let tokens = self
 			.analyzer
 			.generate_tokens(stk, ctx, opt, FilteringStage::Querying, query_string)
 			.await?;
-		// We collect the term docs
-		let mut docs = Vec::with_capacity(tokens.list().len());
+
+		let mut unique_terms: Vec<&str> = Vec::new();
 		let mut unique_tokens = HashSet::new();
-		let tx = ctx.tx();
-		let mut has_unknown_terms = false;
 		for token in tokens.list() {
-			// Tokens can contain duplicates, not need to evaluate them again
 			if unique_tokens.insert(token) {
-				// Is the term known in the index?
-				let term = tokens.get_token_string(token)?;
-				let d = self.get_docs(&tx, term).await?;
-				if !has_unknown_terms && d.is_none() {
-					has_unknown_terms = true;
-				}
-				docs.push(d);
+				unique_terms.push(tokens.get_token_string(token)?);
 			}
 		}
+
+		let tx = ctx.tx();
+
+		// Phase 1: Collect deltas for each term (sequential range scans)
+		let mut all_deltas: Vec<HashMap<DocId, i64>> = Vec::with_capacity(unique_terms.len());
+		for term in &unique_terms {
+			let (beg, end) = self.ikb.new_tt_term_range(term)?;
+			let mut deltas: HashMap<DocId, i64> = HashMap::new();
+			for k in tx.keys(beg..end, u32::MAX, 0, None).await? {
+				let tt = Tt::decode_key(&k)?;
+				let entry = deltas.entry(tt.doc_id).or_default();
+				if tt.add {
+					*entry += 1;
+				} else {
+					*entry -= 1;
+				}
+			}
+			all_deltas.push(deltas);
+		}
+
+		// Phase 2: Batch-fetch compacted bitmaps for all terms at once
+		let bitmap_keys: Vec<_> =
+			unique_terms.iter().map(|term| self.ikb.new_td_root(term)).collect();
+		let bitmaps: Vec<Option<RoaringTreemap>> = tx.getm(bitmap_keys, None).await?;
+
+		// Phase 3: Merge deltas into bitmaps
+		let mut docs = Vec::with_capacity(unique_terms.len());
+		let mut has_unknown_terms = false;
+		for (bitmap, deltas) in bitmaps.into_iter().zip(all_deltas.iter()) {
+			let mut doc_set = bitmap.unwrap_or_default();
+			for (doc_id, delta) in deltas {
+				match 0.cmp(delta) {
+					Ordering::Greater => {
+						doc_set.remove(*doc_id);
+					}
+					Ordering::Less => {
+						doc_set.insert(*doc_id);
+					}
+					Ordering::Equal => {}
+				}
+			}
+			if doc_set.is_empty() {
+				if !has_unknown_terms {
+					has_unknown_terms = true;
+				}
+				docs.push(None);
+			} else {
+				docs.push(Some(doc_set));
+			}
+		}
+
 		Ok(QueryTerms {
 			tokens,
 			docs,
@@ -406,39 +467,6 @@ impl FullTextIndex {
 		match bo {
 			BooleanOperator::And => qt.matches_and(&tks),
 			BooleanOperator::Or => qt.matches_or(&tks),
-		}
-	}
-
-	async fn get_docs(&self, tx: &Transaction, term: &str) -> Result<Option<RoaringTreemap>> {
-		// We compute the not yet compacted term/documents if any
-		let (beg, end) = self.ikb.new_tt_term_range(term)?;
-
-		// Track document ID deltas: positive values mean document contains the term,
-		// negative values mean document no longer contains the term
-		let mut deltas: HashMap<DocId, i64> = HashMap::new();
-
-		// Scan all term-document transaction logs for this term
-		for k in tx.keys(beg..end, u32::MAX, None).await? {
-			let tt = Tt::decode_key(&k)?;
-			let entry = deltas.entry(tt.doc_id).or_default();
-			// Increment or decrement the counter based on whether we're adding or removing
-			// the term
-			if tt.add {
-				*entry += 1;
-			} else {
-				*entry -= 1;
-			}
-		}
-
-		// Merge the delta changes with the consolidated document set
-		let docs = self.append_term_docs_delta(tx, term, &deltas).await?;
-
-		// If the final `docs` is empty, we return `None` to indicate no documents
-		// contain this term
-		if docs.is_empty() {
-			Ok(None)
-		} else {
-			Ok(Some(docs))
 		}
 	}
 
@@ -501,7 +529,7 @@ impl FullTextIndex {
 		let mut has_log = false;
 
 		// Process all term transaction logs, grouped by term
-		for k in tx.keys(range.clone(), u32::MAX, None).await? {
+		for k in tx.keys(range.clone(), u32::MAX, 0, None).await? {
 			let tt = Tt::decode_key(&k)?;
 			has_log = true;
 
@@ -543,7 +571,7 @@ impl FullTextIndex {
 	///
 	/// This method creates an iterator over the documents that match all query
 	/// terms. It returns None if any term has no matching documents.
-	pub(in crate::idx) fn new_hits_iterator(
+	pub(crate) fn new_hits_iterator(
 		&self,
 		qt: &QueryTerms,
 		bo: BooleanOperator,
@@ -623,7 +651,7 @@ impl FullTextIndex {
 		}
 	}
 
-	pub(in crate::idx) async fn get_doc_id(
+	pub(crate) async fn get_doc_id(
 		&self,
 		tx: &Transaction,
 		rid: &RecordId,
@@ -633,7 +661,7 @@ impl FullTextIndex {
 		}
 		self.doc_ids.get_doc_id(tx, &rid.key).await
 	}
-	pub(in crate::idx) async fn new_scorer(&self, ctx: &FrozenContext) -> Result<Option<Scorer>> {
+	pub(crate) async fn new_scorer(&self, ctx: &FrozenContext) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
 			let dlc = self.compute_doc_length_and_count(&ctx.tx(), None).await?;
 			let sc = Scorer::new(dlc, bm25.clone());
@@ -644,32 +672,46 @@ impl FullTextIndex {
 
 	/// Computes document length and count statistics for the index
 	///
-	/// This method calculates the total document length and count by
-	/// aggregating all deltas. If compact_log is provided, it will also remove
-	/// the delta logs and set the flag to true if any logs were removed.
+	/// This method calculates the total document length and count by scanning
+	/// both the compacted root key and any uncompacted delta entries in a
+	/// single range query (via `new_dc_range_with_root`). If `compact_log` is
+	/// provided, it will also remove the delta logs (but not the root key)
+	/// and set the flag to true if any delta logs were removed.
 	async fn compute_doc_length_and_count(
 		&self,
 		tx: &Transaction,
 		compact_log: Option<&mut bool>,
 	) -> Result<DocLengthAndCount> {
 		let mut dlc = DocLengthAndCount::default();
-		let (beg, end) = self.ikb.new_dc_range()?;
+		let (beg, end) = self.ikb.new_dc_range_with_root()?;
 		let range = beg..end;
 		// Compute the total number of documents (DocCount) and the total number of
 		// terms (DocLength) This key list is supposed to be small, subject to
 		// compaction. The root key is the compacted values, and the others are deltas
 		// from transaction not yet compacted.
+		let root_key = if compact_log.is_some() {
+			Some(self.ikb.new_dc_compacted()?)
+		} else {
+			None
+		};
 		let mut has_log = false;
-		for (_, v) in tx.getr(range.clone(), None).await? {
+		for (k, v) in tx.getr(range.clone(), None).await? {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
 			dlc.doc_count += st.doc_count;
 			dlc.total_docs_length += st.total_docs_length;
-			has_log = true;
+
+			if !has_log
+				&& let Some(r) = &root_key
+				&& k.ne(r)
+			{
+				has_log = true;
+			}
 		}
 		if let Some(compact_log) = compact_log
 			&& has_log
 		{
-			tx.delr(range).await?;
+			let (beg, end) = self.ikb.new_dc_range()?;
+			tx.delr(beg..end).await?;
 			*compact_log = true;
 		}
 		Ok(dlc)
@@ -698,32 +740,12 @@ impl FullTextIndex {
 		Ok(r1 || r2)
 	}
 
-	/// Triggers compaction for the full-text index
-	///
-	/// This method adds an entry to the index compaction queue by creating an
-	/// `Ic` key for the specified index. The index compaction thread will
-	/// later process this entry and perform the actual compaction of the
-	/// index.
-	///
-	/// Compaction helps optimize full-text index performance by consolidating
-	/// term frequency data and document length information, which can become
-	/// fragmented after many updates to the index.
-	pub(crate) async fn trigger_compaction(
-		ikb: &IndexKeyBase,
-		tx: &Transaction,
-		nid: Uuid,
-	) -> Result<()> {
-		let ic = ikb.new_ic_key(nid);
-		tx.put(&ic, &(), None).await?;
-		Ok(())
-	}
-
 	/// Highlights search terms in a document
 	///
 	/// This method highlights the occurrences of search terms in the document
 	/// value. It uses the provided highlighting parameters to format the
 	/// highlighted text.
-	pub(in crate::idx) async fn highlight(
+	pub(crate) async fn highlight(
 		&self,
 		tx: &Transaction,
 		thg: &RecordId,
@@ -757,7 +779,7 @@ impl FullTextIndex {
 		tx.get(&key, None).await
 	}
 
-	pub(in crate::idx) async fn read_offsets(
+	pub(crate) async fn read_offsets(
 		&self,
 		tx: &Transaction,
 		thg: &RecordId,
@@ -831,7 +853,7 @@ impl MatchesHitsIterator for FullTextHitsIterator {
 }
 
 /// Implements BM25 scoring for relevance ranking of search results
-pub(in crate::idx) struct Scorer {
+pub(crate) struct Scorer {
 	/// precomputed BM25 scoring parameters
 	k1: f64,
 	k1_plus_1: f64,
@@ -953,6 +975,7 @@ mod tests {
 	use crate::expr::statements::DefineAnalyzerStatement;
 	use crate::idx::IndexKeyBase;
 	use crate::idx::ft::offset::Offset;
+	use crate::idx::index::IndexOperation;
 	use crate::kvs::LockType::*;
 	use crate::kvs::{Datastore, Transaction, TransactionType};
 	use crate::sql::Expr;
@@ -1087,7 +1110,7 @@ mod tests {
 				.unwrap();
 
 			if require_compaction {
-				FullTextIndex::trigger_compaction(&self.ikb, &tx, self.nid).await.unwrap();
+				IndexOperation::compaction_trigger(&self.ikb, &tx, self.nid).await.unwrap();
 			}
 
 			tx.commit().await.unwrap();
@@ -1184,8 +1207,115 @@ mod tests {
 		// Check that logs have been compacted:
 		let tx = test.new_tx(TransactionType::Read).await;
 		let (beg, end) = test.ikb.new_tt_terms_range().unwrap();
-		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
+		assert_eq!(tx.count(beg..end, None).await.unwrap(), 0);
 		let (beg, end) = test.ikb.new_dc_range().unwrap();
-		assert_eq!(tx.count(beg..end).await.unwrap(), 0);
+		assert_eq!(tx.count(beg..end, None).await.unwrap(), 0);
+		let (beg, end) = test.ikb.new_dc_range_with_root().unwrap();
+		assert_eq!(tx.count(beg..end, None).await.unwrap(), 1);
+	}
+
+	/// Regression test: BM25 scores must remain non-zero after compaction.
+	///
+	/// Before the fix, `compute_doc_length_and_count()` only scanned the dc
+	/// delta range (via `new_dc_range`), which excludes the root/compacted
+	/// key. Compaction deletes those deltas and writes the aggregated stats
+	/// to the root key. Since the root key was not included in the scan, the
+	/// scorer would get doc_count=0 / total_docs_length=0, producing
+	/// NaN → 0.0 scores. The fix uses `new_dc_range_with_root` to include
+	/// the root key in the scan.
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn bm25_score_survives_compaction() {
+		let test = TestContext::new().await;
+		let doc1 = Arc::new(RecordId::new("t".into(), "doc1".to_owned()));
+		let doc2 = Arc::new(RecordId::new("t".into(), "doc2".to_owned()));
+
+		// Index two documents so that IDF is non-zero for a term that only
+		// appears in one of them (BM25 IDF clamps to 0 when term_doc_count
+		// >= doc_count / 2, so we need at least 2 docs).
+		let mut stack = reblessive::TreeStack::new();
+		stack.enter(|stk| test.remove_insert_task(stk, &doc1)).finish().await;
+		stack.enter(|stk| test.remove_insert_task(stk, &doc2)).finish().await;
+
+		let frozen_read_ctx = |test: &TestContext| {
+			let test = test.clone();
+			async move {
+				let mut ctx = Context::new(&test.ctx);
+				let tx = test.new_tx(TransactionType::Read).await;
+				ctx.set_transaction(tx.clone());
+				(ctx.freeze(), tx)
+			}
+		};
+
+		// "lorem" appears in only 1 of 25 entries in the test content, so
+		// with 2 identical docs the term_doc_count=2 and doc_count=2, giving
+		// IDF = ln((2-2+0.5)/(2+0.5)) which clamps to 0. We need a search
+		// term where term_doc_count < doc_count. Since both docs have the
+		// same content, every term has term_doc_count == doc_count, so IDF=0.
+		//
+		// Instead, directly verify that `compute_doc_length_and_count`
+		// returns valid (non-zero) stats before and after compaction.
+
+		// Before compaction: scorer should exist and have valid doc stats.
+		let (read_ctx, tx) = frozen_read_ctx(&test).await;
+		let scorer_before = test.fti.new_scorer(&read_ctx).await.unwrap();
+		assert!(scorer_before.is_some(), "scorer should exist (BM25 is configured)");
+		// Verify doc_count is non-zero via the scorer's internal state.
+		// We access this indirectly: if doc_count were 0, average_doc_length
+		// would be NaN, causing b_over_avg_len to be NaN. We can verify by
+		// checking compute_doc_length_and_count directly.
+		let dlc_before = test.fti.compute_doc_length_and_count(&tx, None).await.unwrap();
+		assert!(
+			dlc_before.doc_count > 0,
+			"doc_count before compaction should be > 0, got {}",
+			dlc_before.doc_count
+		);
+		assert!(
+			dlc_before.total_docs_length > 0,
+			"total_docs_length before compaction should be > 0, got {}",
+			dlc_before.total_docs_length
+		);
+
+		// Run compaction (mimics the background compaction that fires every 5s).
+		let tx = test.new_tx(TransactionType::Write).await;
+		let compacted = test.fti.compaction(&tx).await.unwrap();
+		tx.commit().await.unwrap();
+		assert!(compacted, "compaction should have processed delta logs");
+
+		// Verify the dc delta range is now empty (deltas were consumed).
+		let tx = test.new_tx(TransactionType::Read).await;
+		let (beg, end) = test.ikb.new_dc_range().unwrap();
+		assert_eq!(
+			tx.count(beg..end, None).await.unwrap(),
+			0,
+			"dc delta range should be empty after compaction"
+		);
+
+		// After compaction: doc stats must still be valid.
+		let dlc_after = test.fti.compute_doc_length_and_count(&tx, None).await.unwrap();
+		assert!(
+			dlc_after.doc_count > 0,
+			"doc_count after compaction should be > 0, got {}",
+			dlc_after.doc_count
+		);
+		assert!(
+			dlc_after.total_docs_length > 0,
+			"total_docs_length after compaction should be > 0, got {}",
+			dlc_after.total_docs_length
+		);
+		assert_eq!(
+			dlc_before.doc_count, dlc_after.doc_count,
+			"doc_count should be stable across compaction: before={}, after={}",
+			dlc_before.doc_count, dlc_after.doc_count
+		);
+		assert_eq!(
+			dlc_before.total_docs_length, dlc_after.total_docs_length,
+			"total_docs_length should be stable across compaction: before={}, after={}",
+			dlc_before.total_docs_length, dlc_after.total_docs_length
+		);
+
+		// Verify the scorer still works (doesn't produce NaN).
+		let (read_ctx, _tx) = frozen_read_ctx(&test).await;
+		let scorer_after = test.fti.new_scorer(&read_ctx).await.unwrap();
+		assert!(scorer_after.is_some(), "scorer should still exist after compaction");
 	}
 }

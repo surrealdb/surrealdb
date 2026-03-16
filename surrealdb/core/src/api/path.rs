@@ -21,11 +21,16 @@ impl<'a> Path {
 	/// the url Considering path the parsed path of an API, and url the current
 	/// subject, this method:
 	///  - iterates over each path segment (divided by `/`)
-	///  - attempts to to match against url segment
+	///  - attempts to match against url segment
 	///  - extracting variables where instructed by the path segment
 	///  - when we no longer match, or when the url is to short, we return None
 	///  - when the url is too long and there is no rest segment, we return None
 	pub fn fit(&'a self, segments: &'a [&'a str]) -> Option<Object> {
+		// Early exit if path has more segments than URL (unless rest segment exists)
+		if segments.len() < self.len() && !matches!(self.last(), Some(Segment::Rest(_))) {
+			return None;
+		}
+
 		let mut obj = Object::default();
 		for (i, segment) in self.iter().enumerate() {
 			if let Some(res) = segment.fit(&segments[i..]) {

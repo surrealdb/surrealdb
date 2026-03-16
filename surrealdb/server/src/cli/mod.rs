@@ -7,12 +7,15 @@ mod fix;
 mod import;
 mod isready;
 mod ml;
+#[cfg(feature = "surrealism")]
+mod module;
 #[cfg(feature = "cli")]
 mod sql;
 mod start;
 #[cfg(test)]
 mod test;
 mod upgrade;
+mod v2;
 mod validate;
 pub(crate) mod validator;
 mod version;
@@ -30,6 +33,8 @@ use fix::FixCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
 use ml::MlCommand;
+#[cfg(feature = "surrealism")]
+use module::ModuleCommand;
 use semver::Version;
 #[cfg(feature = "cli")]
 use sql::SqlCommandArguments;
@@ -41,6 +46,7 @@ use validate::ValidateCommandArguments;
 use validator::parser::tracing::{CustomFilter, CustomFilterParser};
 use version::VersionCommandArguments;
 
+use crate::cli::v2::V2Commands;
 use crate::cli::version_client::VersionClient;
 #[cfg(debug_assertions)]
 use crate::cnf::DEBUG_BUILD_WARNING;
@@ -172,6 +178,9 @@ enum Commands {
 	Sql(SqlCommandArguments),
 	#[command(subcommand, about = "Manage SurrealML models within an existing database")]
 	Ml(MlCommand),
+	#[cfg(feature = "surrealism")]
+	#[command(subcommand, about = "Manage and execute WASM modules", name = "module")]
+	Module(ModuleCommand),
 	#[command(
 		about = "Check if the SurrealDB server is ready to accept connections",
 		visible_alias = "isready"
@@ -181,6 +190,8 @@ enum Commands {
 	Validate(ValidateCommandArguments),
 	#[command(about = "Fix database storage issues")]
 	Fix(FixCommandArguments),
+	#[command(about = "Run commands in version 2 of the database for backwards compatibility")]
+	V2(V2Commands),
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -285,9 +296,12 @@ pub async fn init<
 		#[cfg(feature = "cli")]
 		Commands::Sql(args) => sql::init(args).await,
 		Commands::Ml(args) => ml::init(args).await,
+		#[cfg(feature = "surrealism")]
+		Commands::Module(args) => module::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
 		Commands::Fix(args) => fix::init::<C>(args).await,
+		Commands::V2(args) => v2::init(args).await,
 	};
 	// Save the flamegraph and profile
 	#[cfg(feature = "performance-profiler")]
@@ -309,7 +323,7 @@ pub async fn init<
 	// Error and exit the program
 	if let Err(e) = output {
 		// Output any error
-		error!("{}", e);
+		error!("{:?}", e);
 		// Drop the log guards
 		for guard in guards {
 			drop(guard);

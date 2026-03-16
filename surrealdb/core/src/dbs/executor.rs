@@ -5,21 +5,22 @@ use std::time::Duration;
 use anyhow::{Result, anyhow, bail};
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
-use surrealdb_types::ToSql;
+use surrealdb_types::{Error as TypesError, QueryError, ToSql};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tracing::instrument;
-use trice::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
+use web_time::Instant;
 
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, RootProvider};
-use crate::ctx::FrozenContext;
 use crate::ctx::reason::Reason;
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::response::QueryResult;
 use crate::dbs::{Force, Options, QueryType};
 use crate::doc::DefaultBroker;
 use crate::err::Error;
+use crate::exec::planner::try_plan_expr;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
@@ -28,18 +29,22 @@ use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
-use crate::rpc::DbResultError;
+use crate::rpc::types_error_from_anyhow;
 use crate::types::PublicNotification;
-use crate::val::{Value, convert_value_to_public_value};
+use crate::val::{Array, Value, convert_value_to_public_value};
 use crate::{err, expr, sql};
 
 const TARGET: &str = "surrealdb::core::dbs";
 
+/// An executor which relies on the `compute` methods of the logical expressions.
 pub struct Executor {
 	stack: TreeStack,
 	results: Vec<QueryResult>,
 	opt: Options,
 	ctx: FrozenContext,
+	/// Cached session info to avoid re-extracting from context on every query.
+	/// Session values don't change between statements in the same executor batch.
+	cached_session: Option<Arc<crate::exec::context::SessionInfo>>,
 }
 
 impl Executor {
@@ -64,6 +69,7 @@ impl Executor {
 			results: Vec::new(),
 			opt,
 			ctx,
+			cached_session: None,
 		}
 	}
 
@@ -93,6 +99,232 @@ impl Executor {
 	fn check_slow_log<S: SlowLogVisit + ToSql>(&self, start: &Instant, stm: &S) {
 		if let Some(slow_log) = self.ctx.slow_log() {
 			slow_log.check_log(&self.ctx, start, stm);
+		}
+	}
+
+	/// Get the cached session info, extracting it on first call.
+	///
+	/// Session values don't change between statements in the same
+	/// executor batch, so we extract once and reuse.
+	fn get_session_info(&mut self) -> Option<Arc<crate::exec::context::SessionInfo>> {
+		if let Some(ref cached) = self.cached_session {
+			return Some(cached.clone());
+		}
+		let session = self.extract_session_info();
+		self.cached_session.clone_from(&session);
+		session
+	}
+
+	/// Extract session information from the FrozenContext.
+	///
+	/// The session is stored as a Value object in the context with keys like
+	/// "ns", "db", "id", "ip", "or", "ac", "rd", "tk".
+	fn extract_session_info(&self) -> Option<std::sync::Arc<crate::exec::context::SessionInfo>> {
+		use crate::exec::context::SessionInfo;
+		use crate::expr::paths::{AC, DB, ID, IP, NS, OR, RD, TK};
+
+		let session_value = self.ctx.value("session")?;
+
+		// Extract fields from the session Value
+		let ns = match session_value.pick(NS.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let db = match session_value.pick(DB.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let id = match session_value.pick(ID.as_ref()) {
+			Value::Uuid(u) => Some(*u.as_ref()),
+			_ => None,
+		};
+
+		let ip = match session_value.pick(IP.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let origin = match session_value.pick(OR.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let ac = match session_value.pick(AC.as_ref()) {
+			Value::String(s) => Some(s),
+			_ => None,
+		};
+
+		let rd = match session_value.pick(RD.as_ref()) {
+			Value::None => None,
+			v => Some(v),
+		};
+
+		let token = match session_value.pick(TK.as_ref()) {
+			Value::None => None,
+			v => Some(v),
+		};
+
+		// Note: exp is not in the session object, it's in the Session struct
+		// For now, we leave it as None
+		let exp = None;
+
+		Some(std::sync::Arc::new(SessionInfo {
+			ns,
+			db,
+			id,
+			ip,
+			origin,
+			ac,
+			rd,
+			token,
+			exp,
+		}))
+	}
+
+	/// Execute an OperatorPlan and collect results into a Value.
+	///
+	/// This builds an ExecutionContext from the current session state and executes
+	/// the streaming operator plan, collecting all results into an array.
+	async fn execute_operator_plan(
+		&mut self,
+		plan: Arc<dyn crate::exec::ExecOperator>,
+		txn: Arc<Transaction>,
+	) -> FlowResult<Value> {
+		use tokio_util::sync::CancellationToken;
+
+		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
+		use crate::exec::context::{
+			DatabaseContext, ExecutionContext, NamespaceContext, RootContext,
+		};
+
+		/// Guard that aborts a spawned task when dropped, ensuring the
+		/// timeout task is cleaned up when execution finishes or errors.
+		struct AbortOnDrop(tokio::task::JoinHandle<()>);
+		impl Drop for AbortOnDrop {
+			fn drop(&mut self) {
+				self.0.abort();
+			}
+		}
+
+		let cancellation = CancellationToken::new();
+
+		// If a query timeout is configured, spawn a task that cancels the
+		// token when the timeout expires. This lets operators that check
+		// the cancellation token (e.g. SleepPlan, long-running scans)
+		// stop promptly instead of running to completion.
+		// AbortOnDrop ensures the task is cleaned up when execution finishes.
+		let _timeout_guard = self.ctx.timeout().map(|timeout| {
+			let token = cancellation.clone();
+			AbortOnDrop(tokio::spawn(async move {
+				tokio::time::sleep(timeout).await;
+				token.cancel();
+			}))
+		});
+
+		// Build the root context using cached session info. The context
+		// snapshot must be fresh per-query because it contains the
+		// transaction reference which changes between statements.
+		let root_ctx = RootContext {
+			ctx: Context::snapshot(&self.ctx).freeze(),
+			options: Some(self.opt.clone()),
+			datastore: None,
+			cancellation,
+			auth: self.opt.auth.clone(),
+			auth_enabled: self.opt.auth_enabled,
+			session: self.get_session_info(),
+			current_value: None,
+			skip_fetch_perms: false,
+		};
+
+		// Check what level of context we need
+		let required_level = plan.required_context();
+
+		let exec_ctx = match required_level {
+			crate::exec::context::ContextLevel::Root => ExecutionContext::Root(root_ctx),
+			crate::exec::context::ContextLevel::Namespace => {
+				// Get namespace definition
+				let ns_name = self.opt.ns()?;
+				let ns_def = txn.get_or_add_ns(None, ns_name).await?;
+				ExecutionContext::Namespace(NamespaceContext {
+					root: root_ctx,
+					ns: ns_def,
+				})
+			}
+			crate::exec::context::ContextLevel::Database => {
+				// Get namespace and database definitions
+				let ns_name = self.opt.ns()?;
+				let db_name = self.opt.db()?;
+				let ns_def = txn.get_or_add_ns(None, ns_name).await?;
+				let db_def = txn.get_or_add_db_upwards(None, ns_name, db_name, true).await?;
+				ExecutionContext::Database(DatabaseContext {
+					ns_ctx: NamespaceContext {
+						root: root_ctx,
+						ns: ns_def,
+					},
+					db: db_def,
+					field_state_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+						std::collections::HashMap::new(),
+					)),
+					table_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+						std::collections::HashMap::new(),
+					)),
+					index_def_cache: std::sync::Arc::new(tokio::sync::RwLock::new(
+						std::collections::HashMap::new(),
+					)),
+				})
+			}
+		};
+
+		// Execute the plan
+		// Handle control flow signals from execute()
+		let stream = match plan.execute(&exec_ctx) {
+			Ok(s) => s,
+			Err(crate::expr::ControlFlow::Return(v)) => {
+				// RETURN - propagate as control flow signal
+				return Err(ControlFlow::Return(v));
+			}
+			Err(crate::expr::ControlFlow::Break) => {
+				return Err(ControlFlow::Break);
+			}
+			Err(crate::expr::ControlFlow::Continue) => {
+				return Err(ControlFlow::Continue);
+			}
+			Err(crate::expr::ControlFlow::Err(e)) => {
+				return Err(ControlFlow::Err(e));
+			}
+		};
+
+		// Collect all results
+		let mut results = Vec::new();
+		futures::pin_mut!(stream);
+		while let Some(batch_result) = stream.next().await {
+			match batch_result {
+				Ok(batch) => {
+					results.extend(batch.values);
+				}
+				Err(crate::expr::ControlFlow::Err(e)) => {
+					return Err(ControlFlow::Err(e));
+				}
+				Err(crate::expr::ControlFlow::Return(v)) => {
+					// RETURN - propagate as control flow signal
+					return Err(ControlFlow::Return(v));
+				}
+				Err(crate::expr::ControlFlow::Break) => {
+					return Err(ControlFlow::Break);
+				}
+				Err(crate::expr::ControlFlow::Continue) => {
+					return Err(ControlFlow::Continue);
+				}
+			}
+		}
+
+		// Return results as an array if it's a query, or the scalar value if it's a scalar plan
+		if plan.is_scalar() && results.len() == 1 {
+			Ok(results.pop().expect("results verified non-empty"))
+		} else {
+			Ok(Value::Array(Array::from(results)))
 		}
 	}
 
@@ -198,6 +430,9 @@ impl Executor {
 					ctx.add_value("session", session.into());
 				}
 
+				// Invalidate cached session info since USE changes ns/db
+				self.cached_session = None;
+
 				// Return the current namespace and database
 				Ok(Value::from(map! {
 					"namespace".to_string() => self.opt.ns.clone().map(|x| Value::String(x.to_string())).unwrap_or(Value::None),
@@ -294,16 +529,36 @@ impl Executor {
 			}
 			// Process all other normal statements
 			TopLevelExpr::Expr(e) => {
-				// The transaction began successfully
-				ctx_mut!().set_transaction(txn);
-				// Process the statement
-				let res = self
-					.stack
-					.enter(|stk| e.compute(stk, &self.ctx, &self.opt, None))
-					.finish()
-					.await;
-				self.check_slow_log(start, &e);
-				res
+				// Try the new streaming execution path first
+				match try_plan_expr!(&e, &self.ctx, txn.clone()) {
+					Ok(plan) => {
+						// Set the transaction on the context
+						ctx_mut!().set_transaction(txn.clone());
+
+						// Build execution context and execute the plan
+						let exec_result = self.execute_operator_plan(plan, txn.clone()).await;
+
+						self.check_slow_log(start, &e);
+
+						// exec_result is now FlowResult<Value>, propagate directly
+						exec_result
+					}
+					Err(err @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
+						if let Error::PlannerUnimplemented(msg) = &err {
+							tracing::warn!("PlannerUnimplemented fallback in executor: {msg}");
+						}
+						// Fallback to existing compute path
+						ctx_mut!().set_transaction(txn);
+						let res = self
+							.stack
+							.enter(|stk| e.compute(stk, &self.ctx, &self.opt, None))
+							.finish()
+							.await;
+						self.check_slow_log(start, &e);
+						res
+					}
+					Err(e) => Err(ControlFlow::Err(anyhow::Error::new(e))),
+				}
 			}
 		};
 
@@ -354,7 +609,25 @@ impl Executor {
 		let txn = Arc::new(kvs.transaction(transaction_type, LockType::Optimistic).await?);
 		let receiver = self.prepare_broker();
 
-		match self.execute_plan_in_transaction(txn.clone(), start, plan).await {
+		let exec_result = match kvs.transaction_timeout() {
+			Some(timeout) => {
+				match tokio::time::timeout(
+					timeout,
+					self.execute_plan_in_transaction(txn.clone(), start, plan),
+				)
+				.await
+				{
+					Ok(res) => res,
+					Err(_) => {
+						let _ = txn.cancel().await;
+						bail!(Error::TransactionTimedout(timeout.into()))
+					}
+				}
+			}
+			None => self.execute_plan_in_transaction(txn.clone(), start, plan).await,
+		};
+
+		match exec_result {
 			Ok(value) | Err(ControlFlow::Return(value)) => {
 				// non-writable transactions might return an error on commit.
 				// So cancel them instead. This is fine since a non-writable transaction
@@ -387,6 +660,7 @@ impl Executor {
 				Ok(value)
 			}
 			Err(ControlFlow::Continue) | Err(ControlFlow::Break) => {
+				let _ = txn.cancel().await;
 				bail!(Error::InvalidControlFlow)
 			}
 			Err(ControlFlow::Err(e)) => {
@@ -418,9 +692,10 @@ impl Executor {
 
 				self.results.push(QueryResult {
 					time: Duration::ZERO,
-					result: Err(DbResultError::QueryNotExecuted(
+					result: Err(TypesError::query(
 						"Tried to start a transaction while another transaction was open"
 							.to_string(),
+						Some(QueryError::NotExecuted),
 					)),
 					query_type: QueryType::Other,
 				});
@@ -431,12 +706,51 @@ impl Executor {
 			// effectively canceled.
 			return Ok(());
 		};
+		let txn = Arc::new(txn);
 
+		match kvs.transaction_timeout() {
+			Some(timeout) => {
+				let start_results = self.results.len();
+				match tokio::time::timeout(
+					timeout,
+					self.execute_begin_statement_inner(txn.clone(), stream),
+				)
+				.await
+				{
+					Ok(result) => result,
+					Err(_) => {
+						let _ = txn.cancel().await;
+						for res in &mut self.results[start_results..] {
+							res.query_type = QueryType::Other;
+							res.result = Err(TypesError::query(
+								format!(
+									"The transaction timed out: {}",
+									crate::val::Duration::from(timeout)
+								),
+								Some(QueryError::TimedOut {
+									duration: timeout,
+								}),
+							));
+						}
+						bail!(Error::TransactionTimedout(timeout.into()))
+					}
+				}
+			}
+			None => self.execute_begin_statement_inner(txn, stream).await,
+		}
+	}
+
+	async fn execute_begin_statement_inner<S>(
+		&mut self,
+		txn: Arc<Transaction>,
+		mut stream: Pin<&mut S>,
+	) -> Result<()>
+	where
+		S: Stream<Item = Result<TopLevelExpr>>,
+	{
 		// Create a sender for this transaction only if the context allows for
 		// notifications.
 		let receiver = self.prepare_broker();
-
-		let txn = Arc::new(txn);
 		let start_results = self.results.len();
 		let mut skip_remaining = false;
 
@@ -460,7 +774,10 @@ impl Executor {
 
 				for res in &mut self.results[start_results..] {
 					res.query_type = QueryType::Other;
-					res.result = Err(DbResultError::QueryCancelled);
+					res.result = Err(TypesError::query(
+						"The query was not executed due to a cancelled transaction".to_string(),
+						Some(QueryError::Cancelled),
+					));
 				}
 
 				while let Some(stmt) = stream.next().await {
@@ -473,10 +790,17 @@ impl Executor {
 					self.results.push(QueryResult {
 						time: Duration::ZERO,
 						result: Err(match done {
-							Reason::Timedout(d) => {
-								DbResultError::QueryTimedout(format!("Timed out: {d}"))
-							}
-							Reason::Canceled => DbResultError::QueryCancelled,
+							Reason::Timedout(d) => TypesError::query(
+								format!("Timed out: {d}"),
+								Some(QueryError::TimedOut {
+									duration: d.0,
+								}),
+							),
+							Reason::Canceled => TypesError::query(
+								"The query was not executed due to a cancelled transaction"
+									.to_string(),
+								Some(QueryError::Cancelled),
+							),
 						}),
 						query_type: QueryType::Other,
 					});
@@ -506,15 +830,18 @@ impl Executor {
 
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(DbResultError::QueryNotExecuted(format!(
-							"The query was not executed due to a failed transaction: {}",
-							stmt.to_sql()
-						)));
+						res.result = Err(TypesError::query(
+							format!(
+								"The query was not executed due to a failed transaction: {}",
+								stmt.to_sql()
+							),
+							Some(QueryError::NotExecuted),
+						));
 					}
 
 					self.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Err(DbResultError::InternalError(
+						result: Err(TypesError::internal(
 							"Tried to start a transaction while another transaction was open"
 								.to_string(),
 						)),
@@ -532,10 +859,13 @@ impl Executor {
 
 						self.results.push(QueryResult {
 							time: Duration::ZERO,
-							result: Err(DbResultError::QueryNotExecuted(format!(
-								"The query was not executed due to a failed transaction: {}",
-								stmt.to_sql()
-							))),
+							result: Err(TypesError::query(
+								format!(
+									"The query was not executed due to a failed transaction: {}",
+									stmt.to_sql()
+								),
+								Some(QueryError::NotExecuted),
+							)),
 							query_type: QueryType::Other,
 						});
 					}
@@ -549,7 +879,10 @@ impl Executor {
 					// update the results indicating cancelation.
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(DbResultError::QueryCancelled);
+						res.result = Err(TypesError::query(
+							"The query was not executed due to a cancelled transaction".to_string(),
+							Some(QueryError::Cancelled),
+						));
 					}
 
 					self.opt.broker = None;
@@ -598,8 +931,7 @@ impl Executor {
 					// failed to commit
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result =
-							Err(DbResultError::InternalError(format!("Query not executed: {}", e)));
+						res.result = Err(TypesError::internal(format!("Query not executed: {e}")));
 					}
 
 					self.opt.broker = None;
@@ -616,7 +948,7 @@ impl Executor {
 						});
 						continue;
 					}
-					Err(e) => Err(DbResultError::InternalError(e.to_string())),
+					Err(e) => Err(TypesError::internal(e.to_string())),
 				},
 				stmt => {
 					// reintroduce planner later.
@@ -635,9 +967,10 @@ impl Executor {
 							Err(ControlFlow::Err(e)) => {
 								for res in &mut self.results[start_results..] {
 									res.query_type = QueryType::Other;
-									res.result = Err(DbResultError::QueryNotExecuted(
+									res.result = Err(TypesError::query(
 										"The query was not executed due to a failed transaction"
 											.to_string(),
+										Some(QueryError::NotExecuted),
 									));
 								}
 
@@ -645,7 +978,7 @@ impl Executor {
 								// we hit a cancel or commit.
 								self.results.push(QueryResult {
 									time: before.elapsed(),
-									result: Err(DbResultError::InternalError(e.to_string())),
+									result: Err(types_error_from_anyhow(e)),
 									query_type,
 								});
 
@@ -662,8 +995,9 @@ impl Executor {
 
 									self.results.push(QueryResult {
 										time: Duration::ZERO,
-										result: Err(DbResultError::QueryNotExecuted(
-												"The query was not executed due to a cancelled transaction".to_string(),
+										result: Err(TypesError::query(
+											"The query was not executed due to a cancelled transaction".to_string(),
+											Some(QueryError::Cancelled),
 										)),
 										query_type: QueryType::Other,
 									});
@@ -677,7 +1011,7 @@ impl Executor {
 
 					match r {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
-						Err(err) => Err(DbResultError::InternalError(err.to_string())),
+						Err(err) => Err(TypesError::internal(err.to_string())),
 					}
 				}
 			};
@@ -695,7 +1029,7 @@ impl Executor {
 
 		for res in &mut self.results[start_results..] {
 			res.query_type = QueryType::Other;
-			res.result = Err(DbResultError::InternalError("Missing COMMIT statement".to_string()));
+			res.result = Err(TypesError::internal("Missing COMMIT statement".to_string()));
 		}
 
 		self.opt.broker = None;
@@ -708,9 +1042,9 @@ impl Executor {
 		kvs: &Datastore,
 		ctx: FrozenContext,
 		opt: Options,
-		qry: LogicalPlan,
+		plan: LogicalPlan,
 	) -> Result<Vec<QueryResult>> {
-		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
+		let stream = futures::stream::iter(plan.expressions.into_iter().map(Ok));
 		Self::execute_expr_stream(kvs, ctx, opt, false, stream).await
 	}
 
@@ -719,15 +1053,15 @@ impl Executor {
 	pub(crate) async fn execute_plan_with_transaction(
 		ctx: FrozenContext,
 		opt: Options,
-		qry: LogicalPlan,
+		plan: LogicalPlan,
 	) -> Result<Vec<QueryResult>> {
 		// The transaction is already set in the context
 		// Execute each expression with the transaction
 		let tx = ctx.tx();
-		let mut executor = Executor::new(ctx, opt);
+		let mut executor = Self::new(ctx, opt);
 		let mut results = Vec::new();
 
-		for expr in qry.expressions {
+		for expr in plan.expressions {
 			let start = Instant::now();
 			let result = executor.execute_plan_in_transaction(tx.clone(), &start, expr).await;
 
@@ -736,17 +1070,17 @@ impl Executor {
 				Ok(value) | Err(ControlFlow::Return(value)) => QueryResult {
 					time,
 					result: crate::val::convert_value_to_public_value(value)
-						.map_err(|e| crate::rpc::DbResultError::InternalError(e.to_string())),
+						.map_err(|e| TypesError::internal(e.to_string())),
 					query_type: QueryType::Other,
 				},
 				Err(ControlFlow::Err(e)) => QueryResult {
 					time,
-					result: Err(DbResultError::InternalError(e.to_string())),
+					result: Err(types_error_from_anyhow(e)),
 					query_type: QueryType::Other,
 				},
 				Err(ControlFlow::Continue) | Err(ControlFlow::Break) => QueryResult {
 					time,
-					result: Err(DbResultError::InternalError("Invalid control flow".to_string())),
+					result: Err(TypesError::internal("Invalid control flow".to_string())),
 					query_type: QueryType::Other,
 				},
 			};
@@ -791,13 +1125,38 @@ impl Executor {
 		let mut this = Executor::new(ctx, opt);
 		let mut stream = pin!(stream);
 
+		if skip_success_results {
+			// The import path requires OPTION IMPORT as the first statement.
+			// This sets opt.import which skips events, live queries, field
+			// processing, table views, and result output for performance.
+			match stream.as_mut().next().await {
+				Some(Ok(TopLevelExpr::Option(ref stmt)))
+					if stmt.name.eq_ignore_ascii_case("IMPORT") && stmt.what =>
+				{
+					this.execute_option_statement(stmt.clone())?;
+				}
+				Some(Err(e)) => {
+					bail!(Error::InvalidStatement(e.to_string()));
+				}
+				_ => {
+					bail!(Error::InvalidStatement(
+						"Import requires `OPTION IMPORT;` as the first statement. \
+						 This disables events, live queries, field processing, and result \
+						 output for optimal import performance. To execute queries with \
+						 full side effects, use the /sql endpoint instead."
+							.to_string()
+					));
+				}
+			}
+		}
+
 		while let Some(stmt) = stream.next().await {
 			let stmt = match stmt {
 				Ok(x) => x,
 				Err(e) => {
 					this.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Err(DbResultError::InternalError(e.to_string())),
+						result: Err(TypesError::internal(e.to_string())),
 						query_type: QueryType::Other,
 					});
 
@@ -807,26 +1166,35 @@ impl Executor {
 
 			match stmt {
 				TopLevelExpr::Option(stmt) => {
+					if skip_success_results && stmt.name.eq_ignore_ascii_case("IMPORT") {
+						bail!(Error::InvalidStatement(
+							"Cannot change OPTION IMPORT during an import stream. \
+						 Import mode is locked for the duration of the /import request."
+								.to_string()
+						));
+					}
 					this.execute_option_statement(stmt)?;
-					// OPTION returns NONE
-					this.results.push(QueryResult {
-						time: Duration::ZERO,
-						result: Ok(convert_value_to_public_value(Value::None)?),
-						query_type: QueryType::Other,
-					});
+					if !skip_success_results {
+						this.results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+					}
 				}
 				TopLevelExpr::Begin => {
-					// BEGIN returns NONE
-					this.results.push(QueryResult {
-						time: Duration::ZERO,
-						result: Ok(convert_value_to_public_value(Value::None)?),
-						query_type: QueryType::Other,
-					});
+					if !skip_success_results {
+						this.results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+					}
 
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
 						this.results.push(QueryResult {
 							time: Duration::ZERO,
-							result: Err(DbResultError::InternalError(e.to_string())),
+							result: Err(types_error_from_anyhow(e)),
 							query_type: QueryType::Other,
 						});
 
@@ -838,11 +1206,19 @@ impl Executor {
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, &now, stmt).await;
-					let result = match result {
-						Ok(value) => Ok(convert_value_to_public_value(value)?),
-						Err(err) => Err(DbResultError::InternalError(err.to_string())),
-					};
-					if !skip_success_results || result.is_err() {
+					if skip_success_results {
+						if let Err(err) = result {
+							this.results.push(QueryResult {
+								time: now.elapsed(),
+								result: Err(types_error_from_anyhow(err)),
+								query_type,
+							});
+						}
+					} else {
+						let result = match result {
+							Ok(value) => Ok(convert_value_to_public_value(value)?),
+							Err(err) => Err(types_error_from_anyhow(err)),
+						};
 						this.results.push(QueryResult {
 							time: now.elapsed(),
 							result,
@@ -1073,5 +1449,104 @@ mod tests {
 				err
 			);
 		}
+	}
+
+	#[tokio::test]
+	async fn import_stream_suppresses_results_but_persists_data() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql =
+			"OPTION IMPORT; INSERT INTO person [{ name: 'a' }, { name: 'b' }, { name: 'c' }];";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let results = ds.import_stream(&sess, body).await.unwrap();
+
+		assert!(
+			results.is_empty(),
+			"import_stream should suppress successful results, got {} results",
+			results.len()
+		);
+
+		let verify = ds.execute("SELECT * FROM person ORDER BY name", &sess, None).await.unwrap();
+		let rows = verify[0].result.as_ref().unwrap();
+		assert!(rows.is_array(), "Expected an array of results");
+		let arr = rows.as_array().unwrap();
+		assert_eq!(arr.len(), 3, "Expected 3 inserted records, got {}", arr.len());
+	}
+
+	#[tokio::test]
+	async fn import_stream_still_reports_errors() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "OPTION IMPORT; INSERT INTO person { name: 'ok' }; BREAK;";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let results = ds.import_stream(&sess, body).await.unwrap();
+
+		assert!(!results.is_empty(), "import_stream should report errors");
+		assert!(
+			results.iter().any(|r| r.result.is_err()),
+			"Expected at least one error result from invalid BREAK statement"
+		);
+
+		let verify = ds.execute("SELECT * FROM person", &sess, None).await.unwrap();
+		let rows = verify[0].result.as_ref().unwrap();
+		let arr = rows.as_array().unwrap();
+		assert_eq!(arr.len(), 1, "The successful INSERT before the error should have persisted");
+	}
+
+	#[tokio::test]
+	async fn import_stream_rejects_without_option_import() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "INSERT INTO person { name: 'a' };";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let result = ds.import_stream(&sess, body).await;
+
+		assert!(result.is_err(), "import_stream should reject input without OPTION IMPORT");
+		let err = result.unwrap_err().to_string();
+		assert!(err.contains("OPTION IMPORT"), "Error should mention OPTION IMPORT, got: {err}");
+	}
+
+	#[tokio::test]
+	async fn import_stream_rejects_option_import_change_midstream() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "OPTION IMPORT; OPTION IMPORT = false; INSERT INTO person { name: 'a' };";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let result = ds.import_stream(&sess, body).await;
+
+		assert!(result.is_err(), "import_stream should reject OPTION IMPORT changes mid-stream");
+		let err = result.unwrap_err().to_string();
+		assert!(
+			err.contains("Cannot change OPTION IMPORT"),
+			"Error should explain that import mode is locked, got: {err}"
+		);
 	}
 }

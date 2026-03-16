@@ -50,7 +50,6 @@ impl Value {
 				}
 
 				for (k, v) in v.0.iter() {
-					// TODO: null byte validity.
 					accum.push(Part::Field(k.clone()));
 					v._every(steps, behavior, accum, build);
 					accum.pop();

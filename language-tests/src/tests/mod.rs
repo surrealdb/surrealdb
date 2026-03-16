@@ -89,10 +89,7 @@ impl TestCase {
 			config_source.parse().context("Failed to parse test case config")?;
 
 		let config = TestConfig::deserialize(toml.clone().into_deserializer())
-			.context("Failed to parse test case config")
-			.inspect_err(|_| {
-				println!("{config_source}");
-			})?;
+			.context("Failed to parse test case config")?;
 
 		let config = Arc::new(config);
 

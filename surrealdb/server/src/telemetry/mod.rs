@@ -5,14 +5,10 @@ pub mod traces;
 
 use std::net::ToSocketAddrs;
 use std::sync::LazyLock;
-use std::time::Duration;
 
 use anyhow::{Result, anyhow};
-use opentelemetry::{KeyValue, global};
+use opentelemetry::global;
 use opentelemetry_sdk::Resource;
-use opentelemetry_sdk::resource::{
-	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
-};
 use tracing::{Level, Subscriber};
 use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::EnvFilter;
@@ -24,26 +20,9 @@ use crate::cli::validator::parser::tracing::CustomFilter;
 use crate::cnf::ENABLE_TOKIO_CONSOLE;
 
 pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
-	// Set the default otel metadata if available
-	let res = Resource::from_detectors(
-		Duration::from_secs(5),
-		vec![
-			// set service.name from env OTEL_SERVICE_NAME > env OTEL_RESOURCE_ATTRIBUTES >
-			// option_env! CARGO_BIN_NAME > unknown_service
-			Box::new(SdkProvidedResourceDetector),
-			// detect res from env OTEL_RESOURCE_ATTRIBUTES (resources string like
-			// key1=value1,key2=value2,...)
-			Box::new(EnvResourceDetector::new()),
-			// set telemetry.sdk.{name, language, version}
-			Box::new(TelemetryResourceDetector),
-		],
-	);
-	// If no external service.name is set, set it to surrealdb
-	if res.get("service.name".into()).unwrap_or("".into()).as_str() == "unknown_service" {
-		res.merge(&Resource::new([KeyValue::new("service.name", "surrealdb")]))
-	} else {
-		res
-	}
+	// Build resource from environment variables and default attributes
+	// The Resource will automatically merge SDK, environment, and telemetry metadata
+	Resource::builder().with_service_name("surrealdb").build()
 });
 
 #[derive(Debug, Clone)]
@@ -304,8 +283,7 @@ impl Builder {
 pub fn shutdown() {
 	// Output information to logs
 	trace!("Shutting down telemetry service");
-	// Flush all telemetry data and block until done
-	opentelemetry::global::shutdown_tracer_provider();
+	// Explicit shutdown is handled by Drop implementations
 }
 
 /// Create an EnvFilter from the given value. If the value is not a valid log

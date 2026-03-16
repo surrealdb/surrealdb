@@ -94,7 +94,7 @@ args = [
     "--",
     "sql",
     "--pretty",
-    "--conn",
+	"--endpoint",
     "memory",
     "--ns",
     "main",

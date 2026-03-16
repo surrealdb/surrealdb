@@ -6,7 +6,7 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::aggregation::{self, AggregateFields, AggregationAnalysis, AggregationStat};
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{Data, Metadata, Record, RecordType, ViewDefinition};
+use crate::catalog::{Metadata, Record, RecordType, ViewDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::{Action, CursorDoc, Document, DocumentContext, NsDbTbCtx};
@@ -122,7 +122,7 @@ impl Document {
 
 				if set {
 					let data = fields.compute(stk, ctx, opt, Some(&self.current)).await?;
-					let record = Arc::new(Record::new(data.into()));
+					let record = Arc::new(Record::new(data));
 
 					ctx.tx()
 						.set_record(db.namespace_id, db.database_id, table_name, id, record, None)
@@ -328,7 +328,7 @@ impl Document {
 		} else {
 			action = Action::Create;
 			Record {
-				data: Data::Mutable(Value::None),
+				data: Value::None,
 				metadata: Some(Metadata {
 					record_type: RecordType::Table,
 					aggregation_stats: aggr.aggregations.iter().map(|x| x.to_stat()).collect(),
@@ -370,7 +370,7 @@ impl Document {
 			}
 		};
 
-		record.data = data.into();
+		record.data = data;
 		let record = Arc::new(record);
 
 		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None)
@@ -652,7 +652,7 @@ impl Document {
 
 			let recalc_stmt = SelectStatement {
 				// SELECT VALUE [recalc1, recalc2,..]
-				expr: Fields::Value(Box::new(Selector {
+				fields: Fields::Value(Box::new(Selector {
 					expr: Expr::Literal(Literal::Array(exprs)),
 					alias: None,
 				})),
@@ -663,7 +663,17 @@ impl Document {
 				cond: condition.map(Cond),
 				// GROUP ALL
 				group: Some(Groups(Vec::new())),
-				..Default::default()
+				omit: vec![],
+				with: None,
+				split: None,
+				order: None,
+				limit: None,
+				start: None,
+				fetch: None,
+				version: Expr::Literal(Literal::None),
+				timeout: Expr::Literal(Literal::None),
+				explain: None,
+				tempfiles: false,
 			};
 
 			let value = recalc_stmt.compute(stk, ctx, opt, None).await?;
@@ -731,7 +741,7 @@ impl Document {
 			}
 		};
 
-		record.data = data.into();
+		record.data = data;
 		let record = Arc::new(record);
 
 		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None)
@@ -831,7 +841,7 @@ impl Document {
 					max,
 				} => {
 					let Value::Number(ref after) = after_args[*arg] else {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "math::max".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -861,7 +871,7 @@ impl Document {
 					min,
 				} => {
 					let Value::Number(ref after) = after_args[*arg] else {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "math::min".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -888,7 +898,7 @@ impl Document {
 					sum,
 				} => {
 					let Value::Number(ref after) = after_args[*arg] else {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "math::sum".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -911,7 +921,7 @@ impl Document {
 					..
 				} => {
 					let Value::Number(ref after) = after_args[*arg] else {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "math::mean".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -932,7 +942,7 @@ impl Document {
 					max,
 				} => {
 					let Value::Datetime(after) = &after_args[*arg] else {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "time::max".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
@@ -960,7 +970,7 @@ impl Document {
 					min,
 				} => {
 					let Value::Datetime(after) = &after_args[*arg] else {
-						bail!(Error::InvalidArguments {
+						bail!(Error::InvalidFunctionArguments {
 							name: "time::min".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
@@ -1049,7 +1059,7 @@ impl Document {
 
 			let recalc_stmt = SelectStatement {
 				// SELECT VALUE [recalc1, recalc2,..]
-				expr: Fields::Value(Box::new(Selector {
+				fields: Fields::Value(Box::new(Selector {
 					expr: Expr::Literal(Literal::Array(exprs)),
 					alias: None,
 				})),
@@ -1060,7 +1070,17 @@ impl Document {
 				cond: condition.map(Cond),
 				// GROUP ALL
 				group: Some(Groups(Vec::new())),
-				..Default::default()
+				omit: vec![],
+				with: None,
+				split: None,
+				order: None,
+				limit: None,
+				start: None,
+				fetch: None,
+				version: Expr::Literal(Literal::None),
+				timeout: Expr::Literal(Literal::None),
+				explain: None,
+				tempfiles: false,
 			};
 
 			let value = recalc_stmt.compute(stk, ctx, opt, None).await?;
@@ -1128,7 +1148,7 @@ impl Document {
 			}
 		};
 
-		record.data = data.into();
+		record.data = data;
 		let record = Arc::new(record);
 
 		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None)
@@ -1184,7 +1204,7 @@ impl Document {
 		// do via statements. So instead we create a document and pretend to run be the right
 		// statement query and just run events immediatly.
 		// Updating views prevents premissions from being run anyway so there shouldn't be a
-		// probelm.
+		// problem.
 		//
 		// Generate a document so that we can run the events.
 

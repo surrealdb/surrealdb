@@ -23,6 +23,23 @@ where
 	Ok(res)
 }
 
+/// Generates an arbitrary vector with atleast one element generated from the given closure.
+pub fn arb_vec2<'a, R, F>(
+	u: &mut arbitrary::Unstructured<'a>,
+	mut f: F,
+) -> arbitrary::Result<Vec<R>>
+where
+	R: Arbitrary<'a>,
+	F: FnMut(&mut Unstructured<'a>) -> arbitrary::Result<R>,
+{
+	let mut res = vec![f(u)?, f(u)?];
+	res.reserve_exact(u.arbitrary_len::<R>()?);
+	for _ in 2..res.capacity() {
+		res.push(f(u)?);
+	}
+	Ok(res)
+}
+
 pub fn arb_opt<'a, R, F>(u: &mut arbitrary::Unstructured<'a>, f: F) -> arbitrary::Result<Option<R>>
 where
 	R: Arbitrary<'a>,

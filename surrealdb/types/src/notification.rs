@@ -38,15 +38,15 @@ impl Display for Action {
 }
 
 impl FromStr for Action {
-	type Err = anyhow::Error;
+	type Err = crate::Error;
 
-	fn from_str(s: &str) -> anyhow::Result<Self> {
+	fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
 		match s {
 			"CREATE" => Ok(Action::Create),
 			"UPDATE" => Ok(Action::Update),
 			"DELETE" => Ok(Action::Delete),
 			"KILLED" => Ok(Action::Killed),
-			_ => Err(anyhow::anyhow!("Invalid action: {s}")),
+			_ => Err(crate::Error::validation(format!("Invalid action: {s}"), None)),
 		}
 	}
 }

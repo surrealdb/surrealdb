@@ -1,6 +1,7 @@
 use surrealdb_types::{Number, SurrealValue, Value};
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(untagged)]
 enum EnumUnitValue {
 	#[surreal(value = true)]

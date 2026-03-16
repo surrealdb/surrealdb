@@ -26,7 +26,6 @@ impl SleepStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Root)?;
 		// Is there a timeout?
 		if let Some(t) = ctx.timeout() {
-			println!("{t:?} - {:?}", self.duration.0);
 			timeout(t, self.sleep()).await?;
 		} else {
 			self.sleep().await;
@@ -47,7 +46,9 @@ impl SleepStatement {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-	use std::time::{self, SystemTime};
+	use std::time;
+
+	use web_time::SystemTime;
 
 	use super::*;
 	use crate::dbs::test::mock;

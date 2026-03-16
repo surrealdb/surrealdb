@@ -2,6 +2,9 @@
 
 [test]
 
+[env.capabilities]
+allow-experimental = ["files"]
+
 [[test.results]]
 value = "NONE"
 
@@ -25,9 +28,6 @@ value = '[{ file: f"test:/folder1/a.txt", size: 3 }, { file: f"test:/folder1/b.t
 
 [[test.results]]
 error = "File access denied: /some_directory"
-
-[env.capabilities]
-allow-experimental = ["files"]
 
 */
 

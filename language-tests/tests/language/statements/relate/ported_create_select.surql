@@ -2,25 +2,7 @@
 [test]
 
 [[test.results]]
-value = "[{ id: user:tobie, name: 'Tobie' }]"
-
-[[test.results]]
-value = "[{ id: user:jaime, name: 'Jaime' }]"
-
-[[test.results]]
-value = "[{ id: product:phone, price: 1000 }]"
-
-[[test.results]]
-value = "[{ id: product:laptop, price: 3000 }]"
-
-[[test.results]]
-value = "[{ id: bought:1, in: user:tobie, out: product:phone, payment_method: 'VISA' }]"
-
-[[test.results]]
-value = "[{ id: bought:2, in: user:tobie, out: product:laptop, payment_method: 'VISA' }]"
-
-[[test.results]]
-value = "[{ id: bought:3, in: user:jaime, out: product:laptop, payment_method: 'VISA' }]"
+value = "'OK'"
 
 [[test.results]]
 value = "[{ id: user:jaime, name: 'Jaime', purchases: [bought:3] }, { id: user:tobie, name: 'Tobie', purchases: [bought:1, bought:2] }]"
@@ -56,13 +38,16 @@ value = "NONE"
 error = "Found 1f on FETCH CLAUSE, but FETCH expects an idiom, a string or fields"
 
 */
-CREATE user:tobie SET name = 'Tobie';
-CREATE user:jaime SET name = 'Jaime';
-CREATE product:phone SET price = 1000;
-CREATE product:laptop SET price = 3000;
-RELATE user:tobie->bought->product:phone SET id = bought:1, payment_method = 'VISA';
-RELATE user:tobie->bought->product:laptop SET id = bought:2, payment_method = 'VISA';
-RELATE user:jaime->bought->product:laptop SET id = bought:3, payment_method = 'VISA';
+{
+    CREATE user:tobie SET name = 'Tobie';
+    CREATE user:jaime SET name = 'Jaime';
+    CREATE product:phone SET price = 1000;
+    CREATE product:laptop SET price = 3000;
+    RELATE user:tobie->bought->product:phone SET id = bought:1, payment_method = 'VISA';
+    RELATE user:tobie->bought->product:laptop SET id = bought:2, payment_method = 'VISA';
+    RELATE user:jaime->bought->product:laptop SET id = bought:3, payment_method = 'VISA';
+    RETURN "OK";
+};
 SELECT *, ->bought AS purchases FROM user;
 SELECT *, ->bought.out.* AS products FROM user;
 SELECT *, ->bought->product.* AS products FROM user;

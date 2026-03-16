@@ -17,10 +17,6 @@ pub struct CreateStatement {
 	pub output: Option<Output>,
 	// The timeout for the statement
 	pub timeout: Expr,
-	// If the statement should be run in parallel
-	pub parallel: bool,
-	// Version as nanosecond timestamp passed down to Datastore
-	pub version: Expr,
 }
 
 impl Default for CreateStatement {
@@ -31,8 +27,6 @@ impl Default for CreateStatement {
 			data: Default::default(),
 			output: Default::default(),
 			timeout: Expr::Literal(Literal::None),
-			parallel: Default::default(),
-			version: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -50,14 +44,8 @@ impl ToSql for CreateStatement {
 		if let Some(ref v) = self.output {
 			write_sql!(f, fmt, " {v}");
 		}
-		if !matches!(self.version, Expr::Literal(Literal::None)) {
-			write_sql!(f, fmt, " VERSION {}", CoverStmts(&self.version));
-		}
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
-		}
-		if self.parallel {
-			write_sql!(f, fmt, " PARALLEL");
 		}
 	}
 }
@@ -70,8 +58,6 @@ impl From<CreateStatement> for crate::expr::statements::CreateStatement {
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
-			parallel: v.parallel,
-			version: v.version.into(),
 		}
 	}
 }
@@ -84,8 +70,6 @@ impl From<crate::expr::statements::CreateStatement> for CreateStatement {
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
-			parallel: v.parallel,
-			version: v.version.into(),
 		}
 	}
 }

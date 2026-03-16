@@ -40,7 +40,7 @@ impl conn::Sealed for Db {
 
 			tokio::spawn(run_router(address, conn_tx, route_rx, session_clone.receiver.clone()));
 
-			conn_rx.recv().await??;
+			conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);
@@ -80,25 +80,25 @@ pub(crate) async fn run_router(
 	let kvs = match Datastore::new(endpoint).await {
 		Ok(kvs) => {
 			if let Err(error) = kvs.check_version().await {
-				conn_tx.send(Err(crate::Error::InternalError(error.to_string()))).await.ok();
+				conn_tx.send(Err(crate::Error::internal(error.to_string()))).await.ok();
 				return;
 			};
 			if let Err(error) = kvs.bootstrap().await {
-				conn_tx.send(Err(crate::Error::InternalError(error.to_string()))).await.ok();
+				conn_tx.send(Err(crate::Error::internal(error.to_string()))).await.ok();
 				return;
 			}
 			// If a root user is specified, setup the initial datastore credentials
 			if let Some(root) = &configured_root
 				&& let Err(error) = kvs.initialise_credentials(&root.username, &root.password).await
 			{
-				conn_tx.send(Err(crate::Error::InternalError(error.to_string()))).await.ok();
+				conn_tx.send(Err(crate::Error::internal(error.to_string()))).await.ok();
 				return;
 			}
 			conn_tx.send(Ok(())).await.ok();
 			kvs.with_auth_enabled(configured_root.is_some())
 		}
 		Err(error) => {
-			conn_tx.send(Err(crate::Error::InternalError(error.to_string()))).await.ok();
+			conn_tx.send(Err(crate::Error::internal(error.to_string()))).await.ok();
 			return;
 		}
 	};
@@ -181,17 +181,17 @@ pub(crate) async fn run_router(
 									route.response.send(Ok(value)).await.ok();
 								}
 								Err(error) => {
-									route.response.send(Err(error.into())).await.ok();
+									route.response.send(Err(error)).await.ok();
 								}
 							}
 						});
 					}
 					Some(Err(error)) => {
-						route.response.send(Err(crate::Error::from(error).into())).await.ok();
+						route.response.send(Err(crate::engine::session_error_to_error(error))).await.ok();
 					}
 					None => {
-						let error = crate::Error::from(SessionError::NotFound(route.request.session_id));
-						route.response.send(Err(error.into())).await.ok();
+						let error = crate::engine::session_error_to_error(SessionError::NotFound(route.request.session_id));
+						route.response.send(Err(error)).await.ok();
 					}
 				}
 			}
@@ -229,11 +229,10 @@ pub(crate) async fn run_router(
 						}
 					}
 					Some(Err(error)) => {
-						let error = crate::Error::from(error);
-						warn!("Failed to find session '{session_id:?}' for live query '{live_query_id}'; {error}");
+						warn!("Failed to find session '{session_id:?}' for live query '{live_query_id}'; {error:?}");
 					}
 					None => {
-						let error = crate::Error::from(SessionError::NotFound(session_id));
+						let error = crate::engine::session_error_to_error(SessionError::NotFound(session_id));
 						warn!("Failed to find session '{session_id:?}' for live query '{live_query_id}'; {error}");
 					}
 				}

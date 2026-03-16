@@ -26,7 +26,7 @@ skip-record-id-key = true
 
 
 [[test.results]]
-match = "$error = <regex> 'Found record: `likes:[a-z0-9]+` which is not a relation, but expected a  RELATION IN record<person> OUT record<person | thing>'"
+match = "$error = <regex> 'Found record: `likes:[a-z0-9]+` which is not a relation, but expected a RELATION IN person OUT person | thing'"
 error = true
 
 [[test.results]]

@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-value = "-71.63409590760736f"
+value = "-71.63409590760739f"
 
 */
 geo::bearing(

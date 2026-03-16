@@ -570,8 +570,8 @@ impl Value {
 
 	/// Converts this value to the specified type
 	///
-	/// Returns `Ok(T)` if the conversion is successful, `Err(anyhow::Error)` otherwise.
-	pub fn into_t<T: SurrealValue>(self) -> anyhow::Result<T> {
+	/// Returns `Ok(T)` if the conversion is successful, `Err(Error)` otherwise.
+	pub fn into_t<T: SurrealValue>(self) -> Result<T, crate::Error> {
 		T::from_value(self)
 	}
 
@@ -728,6 +728,12 @@ impl Indexable<&str> for Value {
 impl FromIterator<Value> for Value {
 	fn from_iter<I: IntoIterator<Item = Value>>(iter: I) -> Self {
 		Value::Array(Array::from_iter(iter))
+	}
+}
+
+impl From<Object> for Value {
+	fn from(o: Object) -> Self {
+		Value::Object(o)
 	}
 }
 
@@ -1108,8 +1114,8 @@ mod tests {
 	#[case::string(Value::String("escap'd".to_string()), "\"escap'd\"")]
 	#[case::string(Value::String("\"escaped\"".to_string()), "'\"escaped\"'")]
 	#[case::string(Value::String("mix'd \"quotes\"".to_string()), "\"mix'd \\\"quotes\\\"\"")]
-	#[case::string(Value::String("tab\there".to_string()), "'tab\there'")]
-	#[case::string(Value::String("new\nline".to_string()), "'new\nline'")]
+	#[case::string(Value::String("tab\there".to_string()), "'tab\\there'")]
+	#[case::string(Value::String("new\nline".to_string()), "'new\\nline'")]
 	// Strings - unicode
 	#[case::string(Value::String("你好".to_string()), "'你好'")]
 	#[case::string(Value::String("emoji 🎉".to_string()), "'emoji 🎉'")]

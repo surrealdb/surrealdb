@@ -141,6 +141,38 @@ where
 		}
 		self
 	}
+
+	/// Whether to export apis from the database
+	pub fn apis(mut self, apis: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.apis = apis;
+		}
+		self
+	}
+
+	/// Whether to export buckets from the database
+	pub fn buckets(mut self, buckets: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.buckets = buckets;
+		}
+		self
+	}
+
+	/// Whether to export modules from the database
+	pub fn modules(mut self, modules: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.modules = modules;
+		}
+		self
+	}
+
+	/// Whether to export configs from the database
+	pub fn configs(mut self, configs: bool) -> Self {
+		if let Some(cfg) = self.db_config.as_mut() {
+			cfg.configs = configs;
+		}
+		self
+	}
 }
 
 impl<C, R, T> Export<'_, C, R, T>
@@ -168,7 +200,10 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			if !router.features.contains(&ExtraFeatures::Backup) {
-				return Err(Error::BackupsNotSupported);
+				return Err(Error::internal(
+					"The protocol or storage engine does not support backups on this architecture"
+						.to_string(),
+				));
 			}
 
 			if let Some(config) = self.ml_config {
@@ -208,7 +243,10 @@ where
 			let router = self.client.inner.router.extract()?;
 			if !router.features.contains(&ExtraFeatures::Backup) {
 				tracing::warn!("Backups are not supported");
-				return Err(Error::BackupsNotSupported);
+				return Err(Error::internal(
+					"The protocol or storage engine does not support backups on this architecture"
+						.to_string(),
+				));
 			}
 			let (tx, rx) = crate::channel::bounded(1);
 			let rx = Box::pin(rx);

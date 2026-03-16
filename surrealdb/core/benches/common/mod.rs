@@ -12,6 +12,7 @@ pub fn create_runtime() -> Runtime {
 }
 
 /// Helper to run async code synchronously (for setup only)
+#[allow(dead_code)]
 pub fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
 	create_runtime().block_on(future)
 }
@@ -25,7 +26,7 @@ pub fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
 #[macro_export]
 macro_rules! query {
 	($dbs: expr, $ses: expr, $($fmt:tt)*) => {
-		criterion::black_box($dbs.execute(&format!($($fmt)*), $ses, None).await).unwrap()
+		std::hint::black_box($dbs.execute(&format!($($fmt)*), $ses, None).await).unwrap()
 	};
 }
 
@@ -39,7 +40,7 @@ macro_rules! query {
 macro_rules! execute {
 	($dbs: expr, $ses: expr, $($fmt:tt)*) => {
 		$crate::common::block_on(async {
-			criterion::black_box($dbs.execute(&format!($($fmt)*), $ses, None).await).unwrap()
+			std::hint::black_box($dbs.execute(&format!($($fmt)*), $ses, None).await).unwrap()
 		})
 	};
 }
@@ -72,7 +73,7 @@ macro_rules! bench {
 			assert!(check(&result), "Result did not match expected value: {result:?}");
 			// Iterate over the benchmark
 			b.to_async(&runtime).iter(|| async {
-				criterion::black_box($dbs.execute(&query, $ses, None).await).unwrap()
+				std::hint::black_box($dbs.execute(&query, $ses, None).await).unwrap()
 			})
 		});
 	};
@@ -88,7 +89,7 @@ macro_rules! bench {
 			let runtime = $crate::common::create_runtime();
 			// Iterate over the benchmark
 			b.to_async(&runtime).iter(|| async {
-				criterion::black_box($dbs.execute(&query, $ses, None).await).unwrap()
+				std::hint::black_box($dbs.execute(&query, $ses, None).await).unwrap()
 			})
 		});
 	};

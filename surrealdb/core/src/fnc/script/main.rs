@@ -1,9 +1,10 @@
 use std::cell::RefCell;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Result;
 use js::prelude::*;
 use js::{CatchResultExt, Ctx, Function, Module, Promise, async_with};
+use web_time::Instant;
 
 use super::modules::surrealdb::query::QueryContext;
 use super::modules::{loader, resolver};

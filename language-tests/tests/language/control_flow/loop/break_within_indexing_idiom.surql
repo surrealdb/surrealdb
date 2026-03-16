@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: foo:0 }, { id: foo:1 }, { id: foo:2 }]"
+value = "[{ id: foo:0 }]"
 
 */
 

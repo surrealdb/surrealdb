@@ -3,11 +3,10 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 
 use crate::conn::Command;
-use crate::err::Error;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::auth::{RefreshToken, Token};
 use crate::types::SurrealValue;
-use crate::{Connection, Result, Surreal};
+use crate::{Connection, Error, Result, Surreal};
 
 /// An authentication future
 #[derive(Debug)]
@@ -32,11 +31,12 @@ where
 				.execute_value(
 					self.client.session_id,
 					Command::Authenticate {
-						token: SurrealValue::from_value(self.token.into_value())?,
+						token: SurrealValue::from_value(self.token.into_value())
+							.map_err(|e| Error::internal(e.to_string()))?,
 					},
 				)
 				.await?;
-			Ok(Token::from_value(value)?)
+			Token::from_value(value).map_err(|e| Error::internal(e.to_string()))
 		})
 	}
 }
@@ -101,7 +101,7 @@ where
 			let token = match self.token.refresh.is_some() {
 				true => self.token.into_value(),
 				false => {
-					return Err(Error::MissingRefreshToken);
+					return Err(Error::internal("Missing refresh token".to_string()));
 				}
 			};
 			// Execute the refresh command to obtain new tokens.
@@ -109,11 +109,12 @@ where
 				.execute_value(
 					self.client.session_id,
 					Command::Refresh {
-						token: SurrealValue::from_value(token)?,
+						token: SurrealValue::from_value(token)
+							.map_err(|e| Error::internal(e.to_string()))?,
 					},
 				)
 				.await?;
-			Ok(Token::from_value(value)?)
+			Token::from_value(value).map_err(|e| Error::internal(e.to_string()))
 		})
 	}
 }

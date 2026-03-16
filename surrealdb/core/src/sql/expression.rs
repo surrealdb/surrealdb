@@ -3,7 +3,9 @@ use std::ops::Bound;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{CoverStmts, EscapeIdent};
+use crate::sql::ast::ExplainFormat;
 use crate::sql::literal::ObjectEntry;
+use crate::sql::lookup::LookupKind;
 use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
@@ -12,7 +14,7 @@ use crate::sql::statements::{
 	UpdateStatement, UpsertStatement,
 };
 use crate::sql::{
-	BinaryOperator, Block, Closure, Constant, FunctionCall, Idiom, Literal, Mock, Param,
+	BinaryOperator, Block, Closure, Constant, Dir, FunctionCall, Idiom, Literal, Mock, Param, Part,
 	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
 use crate::types::{PublicFile, PublicNumber, PublicRecordId, PublicValue};
@@ -67,6 +69,11 @@ pub(crate) enum Expr {
 	Foreach(Box<ForeachStatement>),
 	Let(Box<SetStatement>),
 	Sleep(Box<SleepStatement>),
+	Explain {
+		format: ExplainFormat,
+		analyze: bool,
+		statement: Box<Expr>,
+	},
 }
 
 impl Expr {
@@ -154,12 +161,21 @@ impl Expr {
 			| Expr::Info(_)
 			| Expr::Foreach(_)
 			| Expr::Let(_)
-			| Expr::Sleep(_) => true,
+			| Expr::Sleep(_)
+			| Expr::Explain {
+				..
+			} => true,
 
 			Expr::Postfix {
 				op,
 				..
-			} => matches!(op, PostfixOperator::Range | PostfixOperator::RangeSkip),
+			} => matches!(
+				op,
+				PostfixOperator::Range
+					| PostfixOperator::RangeSkip
+					| PostfixOperator::MethodCall(_, _)
+					| PostfixOperator::Call(_)
+			),
 
 			Expr::Literal(_)
 			| Expr::Param(_)
@@ -175,6 +191,78 @@ impl Expr {
 				..
 			}
 			| Expr::FunctionCall(_) => false,
+		}
+	}
+
+	/// Returns true if there is a `NONE` or `NULL` value in the left most spot when formatting.
+	/// returns true for `NONE + 1`, `NULL()`, `NONE`, `NULL..` etc.
+	///
+	/// Required for proper formatting when `NONE` can conflict with a clause.
+	pub fn has_left_none_null(&self) -> bool {
+		match self {
+			Expr::Literal(Literal::None) | Expr::Literal(Literal::Null) => true,
+			Expr::Binary {
+				left: expr,
+				..
+			}
+			| Expr::Postfix {
+				expr,
+				..
+			} => expr.has_left_none_null(),
+			Expr::Idiom(x) => {
+				if let Some(Part::Start(x)) = x.0.first() {
+					x.has_left_none_null()
+				} else {
+					false
+				}
+			}
+			_ => false,
+		}
+	}
+
+	pub fn has_left_minus(&self) -> bool {
+		match self {
+			Expr::Prefix {
+				op: PrefixOperator::Negate,
+				..
+			} => true,
+			Expr::Postfix {
+				expr,
+				..
+			}
+			| Expr::Binary {
+				left: expr,
+				..
+			} => expr.has_left_minus(),
+			Expr::Literal(Literal::Integer(x)) => x.is_negative(),
+			Expr::Literal(Literal::Float(x)) => x.is_sign_negative(),
+			Expr::Literal(Literal::Decimal(x)) => x.is_sign_negative(),
+			Expr::Idiom(x) => {
+				if let Some(x) = x.0.first()
+					&& let Part::Graph(lookup) = x
+					&& let LookupKind::Graph(Dir::Out) = lookup.kind
+				{
+					return true;
+				}
+				false
+			}
+			_ => false,
+		}
+	}
+
+	pub fn has_left_idiom(&self) -> bool {
+		match self {
+			Expr::Idiom(_) => true,
+
+			Expr::Postfix {
+				expr,
+				..
+			}
+			| Expr::Binary {
+				left: expr,
+				..
+			} => expr.has_left_idiom(),
+			_ => false,
 		}
 	}
 }
@@ -362,28 +450,13 @@ impl ToSql for Expr {
 			} => {
 				let expr_bp = BindingPower::for_expr(expr);
 				let op_bp = BindingPower::for_prefix_operator(op);
-				if let Expr::Literal(Literal::Integer(x)) = expr.as_ref()
-					&& x.is_negative()
-				{
-					write_sql!(f, fmt, "{op}({expr})");
-				} else if let Expr::Literal(Literal::Decimal(x)) = expr.as_ref()
-					&& x.is_sign_negative()
-				{
-					write_sql!(f, fmt, "{op}({expr})");
-				} else if let Expr::Literal(Literal::Float(x)) = expr.as_ref()
-					&& x.is_sign_negative()
-				{
-					write_sql!(f, fmt, "{op}({expr})");
-				} else if expr.needs_parentheses()
+				if expr.needs_parentheses()
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
-					|| matches!(
-						expr.as_ref(),
-						Expr::Prefix {
-							op: PrefixOperator::Negate,
-							..
-						}
-					) {
+					// We need to avoid `--` from showing up so we need to cover if the expression
+					// has a left minus
+					|| *op == PrefixOperator::Negate && expr.has_left_minus()
+				{
 					write_sql!(f, fmt, "{op}({expr})");
 				} else {
 					write_sql!(f, fmt, "{op}{expr}");
@@ -474,6 +547,22 @@ impl ToSql for Expr {
 			Expr::Foreach(s) => s.fmt_sql(f, fmt),
 			Expr::Let(s) => s.fmt_sql(f, fmt),
 			Expr::Sleep(s) => s.fmt_sql(f, fmt),
+			Expr::Explain {
+				format: explain_format,
+				analyze,
+				statement,
+			} => {
+				f.push_str("EXPLAIN");
+				if *analyze {
+					f.push_str(" ANALYZE");
+				}
+				match explain_format {
+					ExplainFormat::Text => f.push_str(" FORMAT TEXT"),
+					ExplainFormat::Json => f.push_str(" FORMAT JSON"),
+				}
+				f.push(' ');
+				statement.fmt_sql(f, fmt);
+			}
 		}
 	}
 }
@@ -534,6 +623,15 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Foreach(s) => crate::expr::Expr::Foreach(Box::new((*s).into())),
 			Expr::Let(s) => crate::expr::Expr::Let(Box::new((*s).into())),
 			Expr::Sleep(s) => crate::expr::Expr::Sleep(Box::new((*s).into())),
+			Expr::Explain {
+				format,
+				analyze,
+				statement,
+			} => crate::expr::Expr::Explain {
+				format: format.into(),
+				analyze,
+				statement: Box::new((*statement).into()),
+			},
 		}
 	}
 }
@@ -594,6 +692,15 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Foreach(s) => Expr::Foreach(Box::new((*s).into())),
 			crate::expr::Expr::Let(s) => Expr::Let(Box::new((*s).into())),
 			crate::expr::Expr::Sleep(s) => Expr::Sleep(Box::new((*s).into())),
+			crate::expr::Expr::Explain {
+				format,
+				analyze,
+				statement,
+			} => Expr::Explain {
+				format: format.into(),
+				analyze,
+				statement: Box::new((*statement).into()),
+			},
 		}
 	}
 }

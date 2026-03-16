@@ -8,7 +8,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::expr::Expr;
-use crate::val::{IndexFormat, Value};
+use crate::val::{IndexFormat, Set, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
@@ -102,6 +102,10 @@ impl Array {
 		self.0.iter().all(|v| v.is_nullish())
 	}
 
+	pub(crate) fn is_any_none_or_null(&self) -> bool {
+		self.0.iter().any(|v| v.is_nullish())
+	}
+
 	/// Removes all values in the array which are equal to the given value.
 	pub fn remove_value(mut self, other: &Value) -> Self {
 		self.retain(|x| x != other);
@@ -114,9 +118,21 @@ impl Array {
 		self
 	}
 
+	// Removes all values in the array from those in a BTreeSet which are equal to a value.
+	pub fn remove_all_set(mut self, other: &BTreeSet<Value>) -> Self {
+		self.retain(|x| !other.contains(x));
+		self
+	}
+
 	/// Concatenates the two arrays returning an array with the values of both arrays.
 	pub fn concat(mut self, mut other: Array) -> Self {
 		self.0.append(&mut other.0);
+		self
+	}
+
+	/// Concatenates the items of a set into an array, returning an array with the values of both.
+	pub fn concat_set(mut self, other: Set) -> Self {
+		self.0.append(&mut other.0.into_iter().collect());
 		self
 	}
 
@@ -229,7 +245,7 @@ impl Clump<Array> for Array {
 	fn clump(self, clump_size: usize) -> Result<Array> {
 		ensure!(
 			clump_size >= 1,
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: "array::clump".to_string(),
 				message: "The second argument must be an integer greater than 0".to_string(),
 			}
@@ -407,7 +423,7 @@ impl Windows<Array> for Array {
 	fn windows(self, window_size: usize) -> Result<Array> {
 		ensure!(
 			window_size >= 1,
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: "array::windows".to_string(),
 				message: "The second argument must be an integer greater than 0".to_string(),
 			}

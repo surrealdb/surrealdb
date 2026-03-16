@@ -2,7 +2,7 @@ use std::ops::Bound;
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeKey, EscapeRidKey, Fmt};
+use crate::fmt::{CoverStmts, EscapeObjectKey, EscapeRidKey, Fmt};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, RecordIdKeyRangeLit};
 use crate::types::{PublicRecordIdKey, PublicUuid};
@@ -133,7 +133,7 @@ impl ToSql for RecordIdKeyLit {
 				f.push('[');
 				if !v.is_empty() {
 					let fmt = fmt.increment();
-					write_sql!(f, fmt, "{}", Fmt::pretty_comma_separated(v.iter()));
+					write_sql!(f, fmt, "{}", Fmt::pretty_comma_separated(v.iter().map(CoverStmts)));
 				}
 				f.push(']');
 			}
@@ -155,8 +155,8 @@ impl ToSql for RecordIdKeyLit {
 								f,
 								fmt,
 								"{}: {}",
-								EscapeKey(&entry.key),
-								&entry.value
+								EscapeObjectKey(&entry.key),
+								CoverStmts(&entry.value)
 							)
 						)),)
 					);

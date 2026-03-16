@@ -11,13 +11,13 @@ use crate::cnf::COUNT_BATCH_SIZE;
 use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::expr::BinaryOperator;
+use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextHitsIterator;
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::idx::seqdocids::DocId;
 use crate::key::index::Index;
 use crate::key::index::iu::IndexCountKey;
-use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::val::{Array, RecordId, TableName, Value};
 
@@ -299,7 +299,7 @@ impl IndexEqualThingIterator {
 	) -> Result<Vec<(Key, Val)>> {
 		let min = beg.clone();
 		let max = end.to_owned();
-		let res = tx.scan(min..max, limit, None).await?;
+		let res = tx.scan(min..max, limit, 0, None).await?;
 		// Update the begin key for the next scan to avoid duplicates and enable
 		// pagination
 		if let Some((key, _)) = res.last() {
@@ -702,7 +702,7 @@ impl IndexRangeThingIterator {
 	/// (by appending 0x00), which works with lexicographic ordering to ensure
 	/// the next call starts strictly after the last result.
 	async fn next_scan(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<(Key, Val)>> {
-		let res = tx.scan(self.r.range(), limit, None).await?;
+		let res = tx.scan(self.r.range(), limit, 0, None).await?;
 		if let Some((key, _)) = res.last() {
 			self.r.beg.clone_from(key);
 			// Advance begin key one byte past the last returned key to avoid
@@ -718,7 +718,7 @@ impl IndexRangeThingIterator {
 	/// mirrors `next_scan` but avoids fetching values for count-only
 	/// operations.
 	async fn next_keys(&mut self, tx: &Transaction, limit: u32) -> Result<Vec<Key>> {
-		let res = tx.keys(self.r.range(), limit, None).await?;
+		let res = tx.keys(self.r.range(), limit, 0, None).await?;
 		if let Some(key) = res.last() {
 			self.r.beg.clone_from(key);
 			// Same pagination technique as in next_scan: move begin strictly past
@@ -819,7 +819,7 @@ impl IndexRangeReverseThingIterator {
 
 		// Do we have enough limit left to collect additional records?
 		let res = if limit > 0 {
-			tx.scanr(self.r.r.range(), limit, None).await?
+			tx.scanr(self.r.r.range(), limit, 0, None).await?
 		} else {
 			vec![]
 		};
@@ -862,7 +862,7 @@ impl IndexRangeReverseThingIterator {
 
 		// Do we have enough limit left to collect additional records?
 		let res = if limit > 0 {
-			tx.keysr(self.r.r.range(), limit, None).await?
+			tx.keysr(self.r.r.range(), limit, 0, None).await?
 		} else {
 			vec![]
 		};
@@ -1267,7 +1267,7 @@ impl UniqueRangeThingIterator {
 			return Ok(B::empty());
 		}
 		limit += 1;
-		let res = tx.scan(self.r.range(), limit, None).await?;
+		let res = tx.scan(self.r.range(), limit, 0, None).await?;
 		let mut records = B::with_capacity(res.len());
 		for (k, v) in res {
 			limit -= 1;
@@ -1296,7 +1296,7 @@ impl UniqueRangeThingIterator {
 			return Ok(0);
 		}
 		limit += 1;
-		let res = tx.keys(self.r.range(), limit, None).await?;
+		let res = tx.keys(self.r.range(), limit, 0, None).await?;
 		let mut count = 0;
 		for k in res {
 			limit -= 1;
@@ -1376,7 +1376,7 @@ impl UniqueRangeReverseThingIterator {
 		} else {
 			None
 		};
-		let mut res = tx.scanr(self.r.r.range(), limit, None).await?;
+		let mut res = tx.scanr(self.r.r.range(), limit, 0, None).await?;
 		if let Some((k, _)) = res.last() {
 			// We set the ending for the next batch
 			self.r.r.end.clone_from(k);
@@ -1419,7 +1419,7 @@ impl UniqueRangeReverseThingIterator {
 				}
 			}
 		}
-		let mut res = tx.keysr(self.r.r.range(), limit, None).await?;
+		let mut res = tx.keysr(self.r.r.range(), limit, 0, None).await?;
 		if let Some(k) = res.last() {
 			// We set the ending for the next batch
 			self.r.r.end.clone_from(k);
@@ -1639,6 +1639,9 @@ where
 	}
 }
 
+/// For earch KNN result we have the RecordID, the distance (f64), and an optional record.
+/// Optimisation: The optional record is present if a filter has checked if the record is truthy has
+/// been used
 pub(crate) type KnnIteratorResult = (Arc<RecordId>, f64, Option<Arc<Record>>);
 
 pub(crate) struct KnnIterator {
@@ -1737,7 +1740,7 @@ impl IndexCountThingIterator {
 
 	pub(in crate::idx) async fn compaction(
 		&mut self,
-		ic: &IndexCompactionKey<'_>,
+		ikb: &IndexKeyBase,
 		txn: &Transaction,
 	) -> Result<()> {
 		let Some(range) = self.0.take() else {
@@ -1765,8 +1768,108 @@ impl IndexCountThingIterator {
 		txn.delr(range).await?;
 		let pos = count.is_positive();
 		let count = count.unsigned_abs();
-		let compact_key = IndexCountKey::new(ic.ns, ic.db, ic.tb.as_ref(), ic.ix, None, pos, count);
-		txn.put(&compact_key, &(), None).await?;
+		let compact_key =
+			IndexCountKey::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None, pos, count);
+		txn.set(&compact_key, &(), None).await?;
 		Ok(())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use uuid::Uuid;
+
+	use super::*;
+	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+	use crate::idx::IndexKeyBase;
+	use crate::key::index::iu::IndexCountKey;
+	use crate::kvs::Datastore;
+	use crate::kvs::LockType::Optimistic;
+	use crate::kvs::TransactionType::Write;
+
+	/// Non-regression test: consecutive compactions using new iterator instances
+	/// must not fail.
+	///
+	/// In production, `index_count_compaction` creates a fresh
+	/// `IndexCountThingIterator` for every compaction run. The compacted key
+	/// (uid = None) written by the first compaction already exists when the
+	/// second run executes `delr` + write. If the write used `put` (which
+	/// errors on existing keys) instead of `set`, the second compaction would
+	/// fail. This test ensures that does not happen.
+	#[tokio::test]
+	async fn test_consecutive_compactions_do_not_fail() {
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		let tb: TableName = "test_tb".into();
+		let ix = IndexId(3);
+		let ikb = IndexKeyBase::new(ns, db, tb.clone(), ix);
+
+		let ds = Datastore::new("memory").await.unwrap();
+
+		// Write some positive delta entries
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let uid1 = (Uuid::new_v4(), Uuid::new_v4());
+			let uid2 = (Uuid::new_v4(), Uuid::new_v4());
+			let k1 = IndexCountKey::new(ns, db, &tb, ix, Some(uid1), true, 10);
+			let k2 = IndexCountKey::new(ns, db, &tb, ix, Some(uid2), true, 5);
+			tx.set(&k1, &(), None).await.unwrap();
+			tx.set(&k2, &(), None).await.unwrap();
+			tx.commit().await.unwrap();
+		}
+
+		// First compaction (new iterator) — compacts (+10, +5) into a single +15 entry
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			IndexCountThingIterator::new(ns, db, &tb, ix)
+				.unwrap()
+				.compaction(&ikb, &tx)
+				.await
+				.unwrap();
+			tx.commit().await.unwrap();
+		}
+
+		// Verify the compacted count is 15
+		{
+			let mut count_iter = IndexCountThingIterator::new(ns, db, &tb, ix).unwrap();
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let mut ctx = ds.setup_ctx().unwrap();
+			ctx.set_transaction(tx.into());
+			let ctx = ctx.freeze();
+			let count = count_iter.next_count(&ctx, &ctx.tx(), u32::MAX).await.unwrap();
+			assert_eq!(count, 15, "first compaction should yield count 15");
+		}
+
+		// Write additional delta entries on top of the compacted state
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let uid3 = (Uuid::new_v4(), Uuid::new_v4());
+			let k3 = IndexCountKey::new(ns, db, &tb, ix, Some(uid3), true, 7);
+			tx.set(&k3, &(), None).await.unwrap();
+			tx.commit().await.unwrap();
+		}
+
+		// Second compaction (new iterator) — must not fail even though the
+		// compacted key already exists from the first compaction.
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			IndexCountThingIterator::new(ns, db, &tb, ix)
+				.unwrap()
+				.compaction(&ikb, &tx)
+				.await
+				.unwrap();
+			tx.commit().await.unwrap();
+		}
+
+		// Verify the compacted count is now 22 (15 + 7)
+		{
+			let mut count_iter = IndexCountThingIterator::new(ns, db, &tb, ix).unwrap();
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let mut ctx = ds.setup_ctx().unwrap();
+			ctx.set_transaction(tx.into());
+			let ctx = ctx.freeze();
+			let count = count_iter.next_count(&ctx, &ctx.tx(), u32::MAX).await.unwrap();
+			assert_eq!(count, 22, "second compaction should yield count 22 (15 + 7)");
+		}
 	}
 }

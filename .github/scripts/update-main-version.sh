@@ -44,8 +44,15 @@ git fetch origin main
 git checkout main
 git pull origin main
 
-# Bump version to the main-appropriate version
-cargo set-version --workspace "${MAIN_VERSION}"
+# Dynamically build list of surrealdb-* packages (excludes surrealism-*)
+PACKAGES=$(cargo metadata --format-version 1 --no-deps | \
+	jq -r '.packages[].name' | \
+	grep '^surrealdb' | \
+	sed 's/^/--package /' | \
+	tr '\n' ' ')
+
+# Bump version for surrealdb packages only
+cargo set-version $PACKAGES "${MAIN_VERSION}"
 cargo update -p surrealdb -p surrealdb-core -p surrealdb-server
 
 # Commit changes only if there are any (idempotency)

@@ -1,0 +1,37 @@
+# # Use a Windows base image
+# FROM mcr.microsoft.com/dotnet/core/sdk:2.1
+
+# # Install Rust
+# RUN powershell -Command \
+#     $ErrorActionPreference = 'Stop'; \
+#     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; \
+#     Invoke-WebRequest https://win.rustup.rs -OutFile rustup-init.exe; \
+#     Start-Process ./rustup-init.exe -ArgumentList '-y' -Wait; \
+#     Remove-Item rustup-init.exe
+
+# # Add Cargo to PATH
+# ENV PATH="C:\\Users\\ContainerAdministrator\\.cargo\\bin;${PATH}"
+
+# WORKDIR /app
+# COPY . .
+
+# # Command to run on container start
+# CMD ["cargo", "run"]
+
+# Use the latest Windows Server Core image
+FROM mcr.microsoft.com/windows:ltsc2019
+
+# Set the working directory to C:\app
+WORKDIR C:\app
+
+# Install Rust
+RUN powershell.exe -Command "Invoke-WebRequest https://win.rustup.rs -OutFile rustup-init.exe; .\rustup-init.exe -y"
+
+# Add Rust to the PATH environment variable
+RUN setx /M PATH $('C:\Users\ContainerAdministrator\.cargo\bin;' + $Env:PATH)
+
+# Copy the source code into the container
+COPY . .
+
+# Run the application
+CMD ["cargo", "run"]

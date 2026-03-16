@@ -75,8 +75,6 @@ pub fn surrealism(attr: TokenStream, item: TokenStream) -> TokenStream {
 	// Compose tuple type and pattern (single args are passed directly)
 	let (tuple_type, tuple_pattern) = if arg_types.is_empty() {
 		(quote! { () }, quote! { () })
-	} else if arg_types.len() == 1 {
-		(quote! { (#(#arg_types),*,) }, quote! { (#(#arg_patterns),*,) })
 	} else {
 		(quote! { ( #(#arg_types),*, ) }, quote! { ( #(#arg_patterns),*, ) })
 	};

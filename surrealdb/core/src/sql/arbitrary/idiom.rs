@@ -15,6 +15,10 @@ impl<'a> Arbitrary<'a> for Idiom {
 			_ => unreachable!(),
 		};
 		let mut res = vec![res];
+		if matches!(res[0], Part::Start(_)) {
+			res.push(u.arbitrary()?);
+		}
+
 		let len = u.arbitrary_len::<Part>()?;
 		res.reserve(len);
 		for _ in 0..len {
@@ -87,7 +91,7 @@ pub fn local_idiom<'a>(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result
 
 						let n = if !n.is_finite() {
 							0.0
-						} else if n < 0.0 {
+						} else if n.is_sign_negative() {
 							-n
 						} else {
 							n
@@ -136,7 +140,7 @@ pub fn basic_idiom<'a>(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result
 						let n = u.arbitrary::<f64>()?;
 						let n = if !n.is_finite() {
 							0.0
-						} else if n < 0.0 {
+						} else if n.is_sign_negative() {
 							-n
 						} else {
 							n

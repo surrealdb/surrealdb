@@ -5,6 +5,7 @@ use surrealdb_types::{SurrealValue, Value};
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(untagged)]
 enum EnumUntagged {
 	Foo,
@@ -62,6 +63,7 @@ fn test_enum_untagged_bar() {
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(untagged, lowercase)]
 enum EnumUntaggedLowercase {
 	Foo,
@@ -119,6 +121,7 @@ fn test_enum_untagged_lowercase_bar() {
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
 #[surreal(untagged, uppercase)]
 enum EnumUntaggedUppercase {
 	Foo,

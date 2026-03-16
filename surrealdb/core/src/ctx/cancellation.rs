@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use trice::Instant;
+use web_time::Instant;
 
 /// A 'static view into the cancellation status of a Context.
 #[derive(Clone, Debug, Default)]

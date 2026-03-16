@@ -1,20 +1,15 @@
 #![cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv",))]
 
-use std::sync::Arc;
-
 use uuid::Uuid;
 
 use super::CreateDs;
-use crate::dbs::node::Timestamp;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::kvs::clock::{FakeClock, SizedClock};
 
 pub async fn multiwriter_same_keys_conflict(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("96ebbb5c-8040-497a-9459-838e4931aca7").unwrap();
-	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds.create_ds(node_id, clock).await;
+	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Insert an initial key
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.set(&"test", &"some text".as_bytes().to_vec(), None).await.unwrap();

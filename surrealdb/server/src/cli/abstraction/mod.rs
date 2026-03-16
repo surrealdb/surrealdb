@@ -65,7 +65,7 @@ pub struct LevelSelectionArguments {
 #[derive(Args, Debug)]
 pub struct DatabaseConnectionArguments {
 	#[arg(help = "Remote database server url to connect to")]
-	#[arg(short = 'e', long = "endpoint", visible_aliases = ["conn"])]
+	#[arg(short = 'e', long = "endpoint")]
 	#[arg(default_value = "ws://localhost:8000")]
 	#[arg(value_parser = super::validator::endpoint_valid)]
 	pub(crate) endpoint: String,
@@ -75,7 +75,7 @@ pub struct DatabaseConnectionArguments {
 pub struct OptionalDatabaseConnectionArguments {
 	// Endpoint w/o default value
 	#[arg(help = "Remote database server url to connect to")]
-	#[arg(short = 'e', long = "endpoint", visible_aliases = ["conn"])]
+	#[arg(short = 'e', long = "endpoint")]
 	#[arg(value_parser = super::validator::endpoint_valid)]
 	pub(crate) endpoint: Option<String>,
 }

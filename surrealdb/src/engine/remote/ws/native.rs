@@ -24,13 +24,12 @@ use super::{
 };
 use crate::conn::{self, Route, Router};
 use crate::engine::{IntervalStream, SessionError};
-use crate::err::Error;
 use crate::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::opt::Tls;
 use crate::opt::{Endpoint, WaitFor};
 use crate::types::HashMap;
-use crate::{ExtraFeatures, SessionClone, SessionId, Surreal};
+use crate::{Error, ExtraFeatures, SessionClone, SessionId, Surreal};
 
 pub(crate) const NAGLE_ALG: bool = false;
 
@@ -88,8 +87,9 @@ pub(crate) async fn connect(
 	#[cfg_attr(not(any(feature = "native-tls", feature = "rustls")), expect(unused_variables))]
 	maybe_connector: Option<Connector>,
 ) -> crate::Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-	let mut request =
-		(&endpoint.url).into_client_request().map_err(|err| Error::InvalidUrl(err.to_string()))?;
+	let mut request = (&endpoint.url)
+		.into_client_request()
+		.map_err(|err| Error::internal(format!("Invalid URL: {}", err)))?;
 
 	request.headers_mut().insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("flatbuffers"));
 
@@ -101,12 +101,12 @@ pub(crate) async fn connect(
 		maybe_connector,
 	)
 	.await
-	.map_err(|err| Error::Ws(err.to_string()))?;
+	.map_err(|err| Error::internal(format!("WebSocket error: {}", err)))?;
 
 	#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 	let (socket, _) = tokio_tungstenite::connect_async_with_config(request, config, NAGLE_ALG)
 		.await
-		.map_err(|err| Error::Ws(err.to_string()))?;
+		.map_err(|err| Error::internal(format!("WebSocket error: {}", err)))?;
 
 	Ok(socket)
 }
@@ -120,7 +120,7 @@ impl conn::Sealed for super::Client {
 		session_clone: Option<crate::SessionClone>,
 	) -> BoxFuture<'static, crate::Result<Surreal<Self>>> {
 		Box::pin(async move {
-			address.url = address.url.join(PATH)?;
+			address.url = address.url.join(PATH).map_err(|e| Error::internal(e.to_string()))?;
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			let maybe_connector = address.config.tls_config.clone().map(Connector::from);
 			#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
@@ -345,13 +345,12 @@ pub(crate) async fn run_router(
 #[cfg(test)]
 mod tests {
 	use std::io::Write;
-	use std::time::SystemTime;
 
-	use bincode::Options;
 	use flate2::Compression;
 	use flate2::write::GzEncoder;
 	use rand::{Rng, thread_rng};
 	use surrealdb_core::rpc;
+	use web_time::SystemTime;
 
 	use crate::types::{Array, Value};
 
@@ -381,73 +380,24 @@ mod tests {
 		let ref_payload;
 		let ref_compressed;
 
-		const BINCODE_REF: &str = "Bincode Vec<i32>";
-		const COMPRESSED_BINCODE_REF: &str = "Compressed Bincode Vec<i32>";
-		{
-			let (duration, payload) = timed(&|| {
-				let mut payload = Vec::new();
-				bincode::options()
-					.with_fixint_encoding()
-					.serialize_into(&mut payload, &vector)
-					.unwrap();
-				payload
-			});
-			ref_payload = payload.len() as f32;
-			results.push((payload.len(), BINCODE_REF, duration, 1.0));
-
-			let (compression_duration, payload) = timed(&|| compress(&payload));
-			let duration = duration + compression_duration;
-			ref_compressed = payload.len() as f32;
-			results.push((payload.len(), COMPRESSED_BINCODE_REF, duration, 1.0));
-		}
 		let vector = Value::Array(Array::from(vector));
 
-		const BINCODE: &str = "Bincode Vec<Value>";
-		const COMPRESSED_BINCODE: &str = "Compressed Bincode Vec<Value>";
-		{
-			let (duration, payload) = timed(&|| {
-				let mut payload = Vec::new();
-				bincode::options()
-					.with_varint_encoding()
-					.serialize_into(&mut payload, &vector)
-					.unwrap();
-				payload
-			});
-			results.push((payload.len(), BINCODE, duration, payload.len() as f32 / ref_payload));
-
-			let (compression_duration, payload) = timed(&|| compress(&payload));
-			let duration = duration + compression_duration;
-			results.push((
-				payload.len(),
-				COMPRESSED_BINCODE,
-				duration,
-				payload.len() as f32 / ref_compressed,
-			));
-		}
 		const FLATBUFFERS: &str = "Flatbuffers Vec<Value>";
 		const FLATBUFFERS_COMPRESSED: &str = "Flatbuffers Compressed Vec<Value>";
 		{
 			let (duration, payload) =
 				timed(&|| surrealdb_core::rpc::format::flatbuffers::encode(&vector).unwrap());
-			results.push((
-				payload.len(),
-				FLATBUFFERS,
-				duration,
-				payload.len() as f32 / ref_payload,
-			));
+			ref_payload = payload.len() as f32;
+			results.push((payload.len(), FLATBUFFERS, duration, 1.0));
 
 			let (compression_duration, payload) = timed(&|| compress(&payload));
 			let duration = duration + compression_duration;
-			results.push((
-				payload.len(),
-				FLATBUFFERS_COMPRESSED,
-				duration,
-				payload.len() as f32 / ref_compressed,
-			));
+			ref_compressed = payload.len() as f32;
+			results.push((payload.len(), FLATBUFFERS_COMPRESSED, duration, 1.0));
 		}
 
 		const CBOR: &str = "CBor Vec<Value>";
-		const COMPRESSED_CBOR: &str = "Compressed CBor Vec<Value>";
+		const CBOR_COMPRESSED: &str = "Compressed CBor Vec<Value>";
 		{
 			let (duration, payload) = timed(&|| {
 				let cbor = rpc::format::cbor::encode(vector.clone()).unwrap();
@@ -461,7 +411,7 @@ mod tests {
 			let duration = duration + compression_duration;
 			results.push((
 				payload.len(),
-				COMPRESSED_CBOR,
+				CBOR_COMPRESSED,
 				duration,
 				payload.len() as f32 / ref_compressed,
 			));
@@ -472,18 +422,6 @@ mod tests {
 		}
 
 		let results: Vec<&str> = results.into_iter().map(|(_, name, _, _)| name).collect();
-		assert_eq!(
-			results,
-			vec![
-				BINCODE_REF,
-				COMPRESSED_BINCODE_REF,
-				COMPRESSED_BINCODE,
-				COMPRESSED_CBOR,
-				BINCODE,
-				CBOR,
-				FLATBUFFERS_COMPRESSED,
-				FLATBUFFERS,
-			]
-		)
+		assert_eq!(results, vec![CBOR_COMPRESSED, CBOR, FLATBUFFERS_COMPRESSED, FLATBUFFERS])
 	}
 }

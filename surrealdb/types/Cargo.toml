@@ -39,7 +39,6 @@ geo-types = { workspace = true, optional = true }
 hex.workspace = true
 http.workspace = true
 js = { workspace = true, optional = true }
-nanoid.workspace = true
 regex.workspace = true
 # Used for generating random regexes for fuzzing with arbitrary
 regex-syntax = { workspace = true, optional = true }
@@ -50,6 +49,7 @@ serde_json.workspace = true
 surrealdb-protocol = { workspace = true, features = ["flatbuffers"] }
 surrealdb-types-derive.workspace = true
 ulid.workspace = true
+rand.workspace = true
 
 # WASM DEPENDENCY CONFIGURATION
 [target.'cfg(target_family = "wasm")'.dependencies]

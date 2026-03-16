@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::ops::{Deref, DerefMut};
 
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
@@ -31,6 +30,21 @@ impl Set {
 	/// Check if the set is empty
 	pub fn is_empty(&self) -> bool {
 		self.0.is_empty()
+	}
+
+	/// Get the first value in the set
+	pub fn first(&self) -> Option<&Value> {
+		self.0.first()
+	}
+
+	/// Get the last value in the set
+	pub fn last(&self) -> Option<&Value> {
+		self.0.last()
+	}
+
+	/// Get the nth value in the set
+	pub fn nth(&self, index: usize) -> Option<&Value> {
+		self.0.iter().nth(index)
 	}
 
 	/// Get an iterator over the values in the set
@@ -144,19 +158,6 @@ impl From<surrealdb_types::Set> for Set {
 impl FromIterator<Value> for Set {
 	fn from_iter<I: IntoIterator<Item = Value>>(iter: I) -> Self {
 		Set(iter.into_iter().collect())
-	}
-}
-
-impl Deref for Set {
-	type Target = BTreeSet<Value>;
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-impl DerefMut for Set {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.0
 	}
 }
 

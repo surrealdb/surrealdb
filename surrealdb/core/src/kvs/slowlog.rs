@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use surrealdb_types::ToSql;
-use trice::Instant;
+use web_time::Instant;
 
 use crate::catalog::{Permission, Permissions};
 use crate::ctx::FrozenContext;

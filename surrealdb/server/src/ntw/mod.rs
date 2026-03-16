@@ -1,26 +1,26 @@
-mod api;
+pub mod api;
 mod auth;
 pub mod client_ip;
 pub mod error;
-mod export;
+pub mod export;
 #[cfg(feature = "graphql")]
-mod gql;
+pub mod gql;
 pub(crate) mod headers;
-mod health;
-mod import;
+pub mod health;
+pub mod import;
 mod input;
-mod key;
-mod ml;
+pub mod key;
+pub mod ml;
 pub(crate) mod output;
 mod params;
-mod rpc;
+pub mod rpc;
 mod signals;
-mod signin;
-mod signup;
-mod sql;
-mod sync;
+pub mod signin;
+pub mod signup;
+pub mod sql;
+pub mod sync;
 mod tracer;
-mod version;
+pub mod version;
 
 use std::io;
 use std::net::SocketAddr;
@@ -36,7 +36,6 @@ use axum_server::tls_rustls::RustlsConfig;
 use http::header;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use surrealdb_core::CommunityComposer;
-use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::kvs::Datastore;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
@@ -45,7 +44,7 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::auth::AsyncRequireAuthorizationLayer;
 use tower_http::compression::CompressionLayer;
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use tower_http::request_id::MakeRequestUuid;
 use tower_http::sensitive_headers::{
 	SetSensitiveRequestHeadersLayer, SetSensitiveResponseHeadersLayer,
@@ -63,7 +62,54 @@ const LOG: &str = "surrealdb::net";
 /// Factory for constructing the top-level Axum Router used by the HTTP server.
 ///
 /// Embedders can provide their own implementation to add or remove routes, or wrap
-/// additional middleware. The default binary uses `DefaultRouterFactory`.
+/// additional middleware. The default binary uses [`CommunityComposer`].
+///
+/// # Examples
+///
+/// Extend the default community router with additional custom routes:
+///
+/// ```rust,ignore
+/// use std::sync::Arc;
+/// use axum::{Router, routing::get};
+/// use surreal::RouterFactory;
+/// use surreal::rpc::RpcState;
+/// use surreal::core::CommunityComposer;
+///
+/// struct MyComposer;
+///
+/// impl RouterFactory for MyComposer {
+///     fn configure_router() -> Router<Arc<RpcState>> {
+///         let router = CommunityComposer::configure_router();
+///         router.merge(
+///             Router::new()
+///                 .route("/custom", get(|| async { "Hello from custom route" }))
+///         )
+///     }
+/// }
+/// ```
+///
+/// Build a minimal router from individual endpoint routers:
+///
+/// ```rust,ignore
+/// use std::sync::Arc;
+/// use axum::Router;
+/// use surreal::RouterFactory;
+/// use surreal::rpc::RpcState;
+/// use surreal::ntw::{health, sql, rpc};
+///
+/// struct MinimalComposer;
+///
+/// impl RouterFactory for MinimalComposer {
+///     fn configure_router() -> Router<Arc<RpcState>> {
+///         Router::new()
+///             .merge(health::router())
+///             .merge(sql::router())
+///             .merge(rpc::router())
+///     }
+/// }
+/// ```
+///
+/// [`CommunityComposer`]: surrealdb_core::CommunityComposer
 pub trait RouterFactory {
 	/// Build and return the base Router. The server will attach shared state and layers.
 	fn configure_router() -> Router<Arc<RpcState>>;
@@ -159,6 +205,17 @@ pub async fn init<F: RouterFactory>(
 		),
 	);
 
+	let allow_origin: AllowOrigin = if opt.allow_origin.is_empty() {
+		Any.into()
+	} else {
+		let origins: Vec<http::HeaderValue> = opt
+			.allow_origin
+			.iter()
+			.map(|o| o.parse().expect("CORS origins are validated at startup"))
+			.collect();
+		AllowOrigin::list(origins)
+	};
+
 	let allow_header = [
 		http::header::ACCEPT,
 		http::header::ACCEPT_ENCODING,
@@ -200,18 +257,11 @@ pub async fn init<F: RouterFactory>(
 					http::Method::OPTIONS,
 				])
 				.allow_headers(allow_header)
-				// allow requests from any origin
-				.allow_origin(Any)
+				.allow_origin(allow_origin)
 				.max_age(Duration::from_secs(86400)),
 		);
 
 	let axum_app = F::configure_router();
-
-	if ds.get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
-		warn!(
-			"❌🔒IMPORTANT: GraphQL is a pre-release feature with known security flaws. This is not recommended for production use.🔒❌"
-		);
-	}
 
 	let axum_app = axum_app.layer(service);
 

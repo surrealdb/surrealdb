@@ -27,8 +27,8 @@ pub(super) async fn init(target: &str) {
 		"sdk-rocksdb" => {
 			let path = format!(
 				"rocksdb://sdk-rocksdb-{}.db",
-				std::time::SystemTime::now()
-					.duration_since(std::time::UNIX_EPOCH)
+				web_time::SystemTime::now()
+					.duration_since(web_time::UNIX_EPOCH)
 					.unwrap()
 					.as_millis()
 			);
@@ -39,8 +39,8 @@ pub(super) async fn init(target: &str) {
 		"sdk-surrealkv" => {
 			let path = format!(
 				"surrealkv://sdk-surrealkv-{}.db",
-				std::time::SystemTime::now()
-					.duration_since(std::time::UNIX_EPOCH)
+				web_time::SystemTime::now()
+					.duration_since(web_time::UNIX_EPOCH)
 					.unwrap()
 					.as_millis()
 			);

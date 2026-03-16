@@ -1,10 +1,11 @@
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use http::{HeaderMap, StatusCode, header};
 use reqwest::Client;
 use serde_json::Value as JsonValue;
 use tokio::time::sleep;
 use tracing::{debug, error, warn};
+use web_time::SystemTime;
 
 use crate::common::expected::Expected;
 

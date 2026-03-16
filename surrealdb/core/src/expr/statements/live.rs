@@ -59,7 +59,7 @@ impl LiveStatement {
 			let _ = cond.0.visit(&mut pass);
 		}
 		if let Some(fetch) = &self.fetch {
-			for i in fetch.0.iter() {
+			for i in fetch.iter() {
 				let _ = i.0.visit(&mut pass);
 			}
 		}

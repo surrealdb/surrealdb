@@ -583,3 +583,105 @@ test_tuples! {
 	tuple_9 => (i64, i64, i64, i64, i64, i64, i64, i64, i64),
 	tuple_10 => (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)
 }
+
+// Tests for serde_json::Value::from_value — ensures all Value variants convert correctly.
+// Regression tests for https://github.com/surrealdb/surrealdb/issues/7020
+mod serde_json_from_value {
+	use surrealdb_types::*;
+
+	#[test]
+	fn datetime() {
+		let val = Value::Datetime(Datetime::default());
+		let json = serde_json::Value::from_value(val).unwrap();
+		assert!(json.is_string(), "Datetime should convert to JSON string");
+	}
+
+	#[test]
+	fn record_id() {
+		let val = Value::RecordId(RecordId::new("user", 42));
+		let json = serde_json::Value::from_value(val).unwrap();
+		assert!(json.is_string(), "RecordId should convert to JSON string");
+		assert!(json.as_str().unwrap().contains("user"));
+	}
+
+	#[test]
+	fn uuid() {
+		let val = Value::Uuid(Uuid::new_v4());
+		let json = serde_json::Value::from_value(val).unwrap();
+		assert!(json.is_string(), "Uuid should convert to JSON string");
+		assert_eq!(json.as_str().unwrap().len(), 36);
+	}
+
+	#[test]
+	fn duration() {
+		let val = Value::Duration(Duration::from_secs(3600));
+		let json = serde_json::Value::from_value(val).unwrap();
+		assert!(json.is_string(), "Duration should convert to JSON string");
+	}
+
+	#[test]
+	fn bytes() {
+		let val = Value::Bytes(Bytes::from(vec![1u8, 2, 3]));
+		let json = serde_json::Value::from_value(val).unwrap();
+		assert!(json.is_array(), "Bytes should convert to JSON array");
+	}
+
+	#[test]
+	fn table() {
+		let val = Value::Table(Table::from("users"));
+		let json = serde_json::Value::from_value(val).unwrap();
+		assert!(json.is_string(), "Table should convert to JSON string");
+	}
+
+	#[test]
+	fn geometry_point() {
+		let val = Value::Geometry(Geometry::Point(geo::Point::new(10.0, 20.0)));
+		let json = serde_json::Value::from_value(val).unwrap();
+		assert!(json.is_object(), "Geometry should convert to GeoJSON object");
+		assert_eq!(json["type"], "Point");
+	}
+
+	#[test]
+	fn set() {
+		let set = Set::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))]);
+		let val = Value::Set(set);
+		let json = serde_json::Value::from_value(val).unwrap();
+		assert!(json.is_array(), "Set should convert to JSON array");
+	}
+
+	#[test]
+	fn nested_object_with_datetime_and_record() {
+		let mut obj = Object::default();
+		obj.insert("name", Value::String("test".into()));
+		obj.insert("created_at", Value::Datetime(Datetime::default()));
+		obj.insert("ref", Value::RecordId(RecordId::new("other", "abc")));
+		let val = Value::Object(obj);
+		let json = serde_json::Value::from_value(val).unwrap();
+		assert!(json.is_object());
+		assert!(json["created_at"].is_string(), "Nested datetime should convert");
+		assert!(json["ref"].is_string(), "Nested record should convert");
+	}
+
+	#[test]
+	fn from_value_matches_into_json_value() {
+		let values = vec![
+			Value::None,
+			Value::Null,
+			Value::Bool(true),
+			Value::Number(Number::Int(42)),
+			Value::Number(Number::Float(2.5)),
+			Value::String("hello".into()),
+			Value::Duration(Duration::from_secs(60)),
+			Value::Datetime(Datetime::default()),
+			Value::Bytes(Bytes::from(vec![1, 2, 3])),
+			Value::RecordId(RecordId::new("test", 123)),
+			Value::Table(Table::from("users")),
+			Value::Geometry(Geometry::Point(geo::Point::new(10.0, 20.0))),
+		];
+		for val in values {
+			let via_into_json = val.clone().into_json_value();
+			let via_from_value = serde_json::Value::from_value(val).unwrap();
+			assert_eq!(via_into_json, via_from_value);
+		}
+	}
+}

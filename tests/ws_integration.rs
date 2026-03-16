@@ -1370,7 +1370,8 @@ pub async fn session_expiration(cfg_server: Option<Format>, cfg_format: Format) 
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 	// Sign in again using the same session
 	let res = socket
 		.send_request(
@@ -1477,7 +1478,8 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 	// Test operations that SHOULD NOT work with an expired session
 	let operations_ko = vec![
 		socket.send_request("let", json!(["let_var", "let_value",])),
@@ -1603,7 +1605,8 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 	let res = socket
 		.send_request(
 			"signin",
@@ -1632,7 +1635,8 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 
 	// This needs to be last operation as the session will no longer expire
 	// afterwards
@@ -1811,7 +1815,8 @@ pub async fn session_reauthentication_expired(cfg_server: Option<Format>, cfg_fo
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+	assert_eq!(res["error"]["code"], -32000);
+	assert_eq!(res["error"]["message"], "The session has expired");
 	// Authenticate using the root token, which has not expired yet
 	socket.send_request("authenticate", json!([root_token,])).await.unwrap();
 	// Check that we have root access and the session is not expired
@@ -2121,22 +2126,28 @@ pub async fn temporary_directory(cfg_server: Option<Format>, cfg_format: Format)
 	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 	// create records
 	socket.send_message_query("CREATE test:a, test:b").await.unwrap();
-	// These selects use the memory collector
+	// ORDER BY id DESC is satisfied by a backward TableScan (no explicit sort needed)
 	let mut res =
 		socket.send_message_query("SELECT * FROM test ORDER BY id DESC EXPLAIN").await.unwrap();
-	let expected = json!([{"detail": { "direction": "backward", "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "MemoryOrdered" }, "operation": "Collector" }]);
-	assert_eq!(res.remove(0)["result"], expected);
+	let result = &res.remove(0)["result"];
+	// New executor EXPLAIN produces a JSON plan tree
+	assert_eq!(result["operator"], "SelectProject");
+	assert_eq!(result["children"][0]["operator"], "TableScan");
+	assert_eq!(result["children"][0]["attributes"]["direction"], "Backward");
 	// And return the correct result
 	let mut res = socket.send_message_query("SELECT * FROM test ORDER BY id DESC").await.unwrap();
 	let expected = json!([{"id": "test:b" }, { "id": "test:a" }]);
 	assert_eq!(res.remove(0)["result"], expected);
-	// This one should the file collector
+	// TEMPFILES requests file-backed sort, but the planner eliminates the sort
+	// entirely since a backward TableScan already satisfies ORDER BY id DESC.
 	let mut res = socket
 		.send_message_query("SELECT * FROM test ORDER BY id DESC TEMPFILES EXPLAIN")
 		.await
 		.unwrap();
-	let expected = json!([{"detail": { "direction": "backward", "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "TempFiles" }, "operation": "Collector" }]);
-	assert_eq!(res.remove(0)["result"], expected);
+	let result = &res.remove(0)["result"];
+	assert_eq!(result["operator"], "SelectProject");
+	assert_eq!(result["children"][0]["operator"], "TableScan");
+	assert_eq!(result["children"][0]["attributes"]["direction"], "Backward");
 	// And return the correct result
 	let mut res =
 		socket.send_message_query("SELECT * FROM test ORDER BY id DESC TEMPFILES").await.unwrap();
@@ -2276,7 +2287,8 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 			let res = res.unwrap();
 			assert!(res.is_object(), "result: {res:?}");
 			let res = res.as_object().unwrap();
-			assert_eq!(res["error"], json!({"code": -32602, "message": "Method not allowed"}));
+			assert_eq!(res["error"]["code"], -32602);
+			assert_eq!(res["error"]["message"], "Method not allowed");
 		}
 
 		// Test operations that SHOULD work with the provided capabilities
@@ -2433,7 +2445,8 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 			let res = res.unwrap();
 			assert!(res.is_object(), "result: {res:?}");
 			let res = res.as_object().unwrap();
-			assert_eq!(res["error"], json!({"code": -32602, "message": "Method not allowed"}));
+			assert_eq!(res["error"]["code"], -32602);
+			assert_eq!(res["error"]["message"], "Method not allowed");
 		}
 
 		// Test operations that SHOULD work with the provided capabilities
@@ -2712,8 +2725,8 @@ pub async fn multi_session_management(cfg_server: Option<Format>, cfg_format: Fo
 		socket.send_request_with_session("query", json!(["RETURN $var1"]), session1).await.unwrap();
 	assert_eq!(res["result"][0]["result"], "value1");
 
-	// Test 4: Reset with session ID removes the session completely
-	socket.send_request_with_session("reset", json!([]), session1).await.unwrap();
+	// Test 4: Detach with session ID removes the session completely
+	socket.send_request_with_session("detach", json!([]), session1).await.unwrap();
 
 	let res = socket.send_request("sessions", json!([])).await.unwrap();
 	let sessions = res["result"].as_array().unwrap();
@@ -2723,8 +2736,8 @@ pub async fn multi_session_management(cfg_server: Option<Format>, cfg_format: Fo
 		sessions.iter().filter_map(|v| v.as_str()).map(|s| s.to_string()).collect();
 	assert!(!session_ids.contains(&session1.to_string()), "Session 1 should be removed");
 
-	// Reset another session
-	socket.send_request_with_session("reset", json!([]), session2).await.unwrap();
+	// Detach another session
+	socket.send_request_with_session("detach", json!([]), session2).await.unwrap();
 
 	let res = socket.send_request("sessions", json!([])).await.unwrap();
 	let sessions = res["result"].as_array().unwrap();

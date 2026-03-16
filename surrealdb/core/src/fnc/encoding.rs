@@ -33,7 +33,7 @@ pub mod base64 {
 	/// non-padded base64 strings.
 	pub fn decode((arg,): (String,)) -> Result<Value> {
 		Ok(Value::from(Bytes::from(STANDARD_GENERIC_DECODER.decode(arg).map_err(|_| {
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: "encoding::base64::decode".to_owned(),
 				message: "invalid base64".to_owned(),
 			}
@@ -51,7 +51,7 @@ pub mod cbor {
 	pub fn encode((arg,): (Value,)) -> Result<Value> {
 		// Convert internal value to public, encode, then convert back
 		let public_val = crate::val::convert_value_to_public_value(arg)?;
-		let val = cbor::encode(public_val).map_err(|_| Error::InvalidArguments {
+		let val = cbor::encode(public_val).map_err(|_| Error::InvalidFunctionArguments {
 			name: "encoding::cbor::encode".to_owned(),
 			message: "Value could not be encoded into CBOR".to_owned(),
 		})?;
@@ -60,10 +60,11 @@ pub mod cbor {
 	}
 
 	pub fn decode((arg,): (Bytes,)) -> Result<Value> {
-		let public_val = cbor::decode(arg.as_ref()).map_err(|_| Error::InvalidArguments {
-			name: "encoding::cbor::decode".to_owned(),
-			message: "invalid cbor".to_owned(),
-		})?;
+		let public_val =
+			cbor::decode(arg.as_ref()).map_err(|_| Error::InvalidFunctionArguments {
+				name: "encoding::cbor::decode".to_owned(),
+				message: "invalid cbor".to_owned(),
+			})?;
 		// Convert public value back to internal
 		Ok(crate::sql::expression::convert_public_value_to_internal(public_val))
 	}

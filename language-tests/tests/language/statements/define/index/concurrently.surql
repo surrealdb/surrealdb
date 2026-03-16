@@ -4,6 +4,8 @@
 timeout = 5000
 context-timeout = 5000
 
+new-planner-strategy = "compute-only"
+
 [test]
 
 [[test.results]]

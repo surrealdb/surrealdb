@@ -31,7 +31,6 @@ impl Value {
 							let mut path = path.clone();
 							path.push(key.clone());
 							ops.push(Operation::Add {
-								// TODO: null byte validity.
 								path,
 								value: val.clone(),
 							});
@@ -47,7 +46,6 @@ impl Value {
 			(Value::Array(a), Value::Array(b)) if a != b => {
 				let min_len = a.len().min(b.len());
 				for n in 0..min_len {
-					// TODO: null byte validity.
 					path.push(n.to_string());
 					a[n].diff_rec(&b[n], path, ops);
 					path.pop();

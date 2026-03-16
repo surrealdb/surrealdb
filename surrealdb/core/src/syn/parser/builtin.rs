@@ -4,7 +4,7 @@ use unicase::UniCase;
 
 use super::{ParseResult, Parser};
 use crate::sql::{Constant, Expr, Function, FunctionCall};
-use crate::syn::error::{MessageKind, bail};
+use crate::syn::error::MessageKind;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{SyntaxError, unexpected};
 use crate::syn::token::{Span, t};
@@ -24,6 +24,12 @@ pub(crate) static PATHS: phf::Map<
 	(PathKind, Option<UniCase<&'static str>>),
 > = phf_map! {
 		UniCase::ascii("api::invoke") => (PathKind::Function, None),
+		UniCase::ascii("api::timeout") => (PathKind::Function, None),
+		UniCase::ascii("api::req::body") => (PathKind::Function, None),
+		UniCase::ascii("api::res::body") => (PathKind::Function, None),
+		UniCase::ascii("api::res::status") => (PathKind::Function, None),
+		UniCase::ascii("api::res::header") => (PathKind::Function, None),
+		UniCase::ascii("api::res::headers") => (PathKind::Function, None),
 		//
 		UniCase::ascii("array::add") => (PathKind::Function, None),
 		UniCase::ascii("array::all") => (PathKind::Function, None),
@@ -124,6 +130,13 @@ pub(crate) static PATHS: phf::Map<
 		UniCase::ascii("duration::from_nanos") => (PathKind::Function, Some(UniCase::ascii("duration::from::nanos"))),
 		UniCase::ascii("duration::from_secs") => (PathKind::Function, Some(UniCase::ascii("duration::from::secs"))),
 		UniCase::ascii("duration::from_weeks") => (PathKind::Function, Some(UniCase::ascii("duration::from::weeks"))),
+		UniCase::ascii("duration::set_year") => (PathKind::Function, None),
+		UniCase::ascii("duration::set_month") => (PathKind::Function, None),
+		UniCase::ascii("duration::set_day") => (PathKind::Function, None),
+		UniCase::ascii("duration::set_hour") => (PathKind::Function, None),
+		UniCase::ascii("duration::set_minute") => (PathKind::Function, None),
+		UniCase::ascii("duration::set_second") => (PathKind::Function, None),
+		UniCase::ascii("duration::set_nanosecond") => (PathKind::Function, None),
 		//
 		UniCase::ascii("encoding::base64::decode") => (PathKind::Function, None),
 		UniCase::ascii("encoding::base64::encode") => (PathKind::Function, None),
@@ -385,6 +398,13 @@ pub(crate) static PATHS: phf::Map<
 		UniCase::ascii("time::from_unix") => (PathKind::Function, Some(UniCase::ascii("time::from::unix"))),
 		UniCase::ascii("time::from_uuid") => (PathKind::Function, Some(UniCase::ascii("time::from::uuid"))),
 		UniCase::ascii("time::is_leap_year") => (PathKind::Function, Some(UniCase::ascii("time::is::leap_year"))),
+		UniCase::ascii("time::set_year") => (PathKind::Function, None),
+		UniCase::ascii("time::set_month") => (PathKind::Function, None),
+		UniCase::ascii("time::set_day") => (PathKind::Function, None),
+		UniCase::ascii("time::set_hour") => (PathKind::Function, None),
+		UniCase::ascii("time::set_minute") => (PathKind::Function, None),
+		UniCase::ascii("time::set_second") => (PathKind::Function, None),
+		UniCase::ascii("time::set_nanosecond") => (PathKind::Function, None),
 		//
 		UniCase::ascii("type::array") => (PathKind::Function, None),
 		UniCase::ascii("type::bool") => (PathKind::Function, None),
@@ -583,6 +603,9 @@ fn find_suggestion(got: &str) -> Option<&'static str> {
 impl Parser<'_> {
 	/// Parse a builtin path.
 	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Expr> {
+		let s = self.unescape_ident_span(start)?;
+		let mut buffer = s.to_lowercase();
+
 		let mut last_span = start;
 		while self.eat(t!("::")) {
 			let peek = self.peek();
@@ -590,33 +613,33 @@ impl Parser<'_> {
 				unexpected!(self, peek, "an identifier")
 			}
 			self.pop_peek();
-			last_span = self.last_span();
+
+			buffer.push_str("::");
+			let s = self.unescape_ident_span(peek.span)?;
+			buffer.reserve(s.len());
+			for c in s.chars() {
+				for l in c.to_lowercase() {
+					buffer.push(l);
+				}
+			}
+			last_span = peek.span;
 		}
 
-		let span = start.covers(last_span);
-		let str = self.lexer.span_str(span);
-
-		match PATHS.get_entry(&UniCase::ascii(str)) {
+		match PATHS.get_entry(&UniCase::ascii(&buffer)) {
 			Some((_, (PathKind::Constant(x), _))) => Ok(Expr::Constant(x.clone())),
-			Some((k, (PathKind::Function, _))) => {
-				// TODO: Move this out of the parser.
-				if k == &UniCase::ascii("api::invoke") && !self.settings.define_api_enabled {
-					bail!("Cannot use the `api::invoke` method, as the experimental define api capability is not enabled", @span);
-				}
-
-				stk.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))
-					.await
-					.map(|x| Expr::FunctionCall(Box::new(x)))
-			}
+			Some((_, (PathKind::Function, _))) => stk
+				.run(|ctx| self.parse_builtin_function(ctx, buffer))
+				.await
+				.map(|x| Expr::FunctionCall(Box::new(x))),
 			None => {
-				if let Some(suggest) = find_suggestion(str) {
+				if let Some(suggest) = find_suggestion(&buffer) {
 					Err(SyntaxError::new(format_args!(
 						"Invalid function/constant path, did you maybe mean `{suggest}`"
 					))
-					.with_span(span, MessageKind::Error))
+					.with_span(start.covers(last_span), MessageKind::Error))
 				} else {
 					Err(SyntaxError::new("Invalid function/constant path")
-						.with_span(span, MessageKind::Error))
+						.with_span(start.covers(last_span), MessageKind::Error))
 				}
 			}
 		}

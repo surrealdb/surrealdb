@@ -1,12 +1,14 @@
+use std::time::Duration;
+
 use anyhow::Result;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::change;
 use crate::key::debug::Sprintable;
 use crate::kvs::tasklease::LeaseHandler;
-use crate::kvs::{KVKey, Transaction};
+use crate::kvs::{BoxTimeStamp, BoxTimeStampImpl, KVKey, Transaction};
 
 // gc_all_at deletes all change feed entries that become stale at the given
 // current time.
@@ -14,6 +16,8 @@ use crate::kvs::{KVKey, Transaction};
 pub async fn gc_all_at(lh: &LeaseHandler, tx: &Transaction) -> Result<()> {
 	// Fetch all namespaces
 	let nss = tx.all_ns().await?;
+
+	let ts_impl = tx.timestamp_impl();
 	// Loop over each namespace
 	for ns in nss.as_ref() {
 		// Trace for debugging
@@ -27,30 +31,28 @@ pub async fn gc_all_at(lh: &LeaseHandler, tx: &Transaction) -> Result<()> {
 			// Fetch all tables
 			let tbs = tx.all_tb(db.namespace_id, db.database_id, None).await?;
 			// Get the database changefeed expiration
-			let db_cf_expiry = db.changefeed.map(|v| v.expiry.as_secs()).unwrap_or_default();
+			let db_cf_expiry = db.changefeed.map(|v| v.expiry).unwrap_or_default();
 			// Get the maximum table changefeed expiration
 			let tb_cf_expiry = tbs
 				.as_ref()
 				.iter()
 				.filter_map(|tb| tb.changefeed.as_ref())
-				.map(|cf| cf.expiry.as_secs())
-				.filter(|&secs| secs > 0)
+				.map(|cf| cf.expiry)
+				.filter(|&dur| !dur.is_zero())
 				.max()
-				.unwrap_or(0);
-			// Calculate the maximum changefeed expiration (in seconds)
-			let cf_expiry_secs = db_cf_expiry.max(tb_cf_expiry);
+				.unwrap_or(Duration::ZERO);
+			// Calculate the maximum changefeed expiration
+			let cf_expiry = db_cf_expiry.max(tb_cf_expiry);
 			// Skip if no retention policy configured
-			if cf_expiry_secs == 0 {
+			if cf_expiry.is_zero() {
 				continue;
 			}
-			// Get current datetime from storage engine
-			let current_time = tx.timestamp().await?.to_datetime();
-			// Age the datetime by the maximum changefeed expiration
-			let changefeed_age = Duration::seconds(cf_expiry_secs as i64);
+
+			let ts = tx.timestamp().await?;
 			// Calculate the changefeed watermark cutoff time
-			let watermark_time = current_time - changefeed_age;
+			let watermark_ts = ts.sub_checked(cf_expiry).unwrap_or_else(|| ts_impl.earliest());
 			// Garbage collect all entries older than the watermark
-			gc_range(tx, db.namespace_id, db.database_id, watermark_time).await?;
+			gc_range(tx, db.namespace_id, db.database_id, &watermark_ts, &ts_impl).await?;
 			// Possibly renew the lease
 			lh.try_maintain_lease().await?;
 			// Yield execution
@@ -67,23 +69,27 @@ pub async fn gc_all_at(lh: &LeaseHandler, tx: &Transaction) -> Result<()> {
 // gc_range deletes all change feed entries in the given database that are older
 // than the given watermark time.
 // The time is converted to bytes using the storage engine's specific encoding.
-#[instrument(level = "trace", target = "surrealdb::core::cfs", skip_all, fields(ns = %ns, db = %db, dt = %dt))]
+#[instrument(level = "trace", target = "surrealdb::core::cfs", skip_all, fields(ns = %ns, db = %db))]
 pub async fn gc_range(
 	tx: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
-	dt: DateTime<Utc>,
+	ts: &BoxTimeStamp,
+	ts_impl: &BoxTimeStampImpl,
 ) -> Result<()> {
 	// Fetch the earliest timestamp from the storage engine
-	let beg_ts = tx.timestamp_bytes_from_versionstamp(0).await?;
+	let mut buf = [0u8; _];
+	let beg_ts = ts_impl.earliest().encode(&mut buf);
 	// Fetch the watermark timestamp from the storage engine
-	let end_ts = tx.timestamp_bytes_from_datetime(dt).await?;
+	let mut buf = [0u8; _];
+	let end_ts = ts.encode(&mut buf);
 	// Create the changefeed range key prefix
-	let beg = change::prefix_ts(ns, db, &beg_ts).encode_key()?;
-	let end = change::prefix_ts(ns, db, &end_ts).encode_key()?;
+	let beg = change::prefix_ts(ns, db, beg_ts).encode_key()?;
+	let end = change::prefix_ts(ns, db, end_ts).encode_key()?;
 	// Trace for debugging
 	trace!(
-		"Performing garbage collection on {ns}:{db} for watermark time {dt}, between {} and {}",
+		"Performing garbage collection on {ns}:{db} for watermark time {}, between {} and {}",
+		ts.as_datetime().unwrap_or(DateTime::<Utc>::MIN_UTC),
 		beg.sprint(),
 		end.sprint()
 	);

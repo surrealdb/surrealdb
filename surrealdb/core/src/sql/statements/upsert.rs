@@ -14,7 +14,6 @@ pub(crate) struct UpsertStatement {
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
 	pub timeout: Expr,
-	pub parallel: bool,
 	pub explain: Option<Explain>,
 }
 
@@ -28,7 +27,6 @@ impl Default for UpsertStatement {
 			cond: Default::default(),
 			output: Default::default(),
 			timeout: Expr::Literal(Literal::None),
-			parallel: Default::default(),
 			explain: Default::default(),
 		}
 	}
@@ -56,9 +54,6 @@ impl ToSql for UpsertStatement {
 		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " TIMEOUT {}", CoverStmts(&self.timeout));
 		}
-		if self.parallel {
-			write_sql!(f, fmt, " PARALLEL");
-		}
 		if let Some(ref v) = self.explain {
 			write_sql!(f, fmt, " {v}");
 		}
@@ -75,7 +70,6 @@ impl From<UpsertStatement> for crate::expr::statements::UpsertStatement {
 			cond: v.cond.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
-			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 		}
 	}
@@ -91,7 +85,6 @@ impl From<crate::expr::statements::UpsertStatement> for UpsertStatement {
 			cond: v.cond.map(Into::into),
 			output: v.output.map(Into::into),
 			timeout: v.timeout.into(),
-			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 		}
 	}

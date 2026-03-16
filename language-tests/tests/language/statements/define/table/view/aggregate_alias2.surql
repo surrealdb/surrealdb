@@ -25,8 +25,6 @@ DEFINE TABLE temperatures_by_month AS
 	FROM reading
 	GROUP BY city, month;
 
-
-
 CREATE reading SET
 	temperature = 27.4,
 	recorded_at = d'2025-10-03T14:15:23.12Z',

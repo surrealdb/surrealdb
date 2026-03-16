@@ -28,7 +28,7 @@ pub(crate) use self::executor::Executor;
 pub(crate) use self::iterator::{Iterable, Iterator, Operable, Processable, Workable};
 pub(crate) use self::options::{Force, MessageBroker, Options};
 pub use self::response::{QueryResult, QueryResultBuilder, QueryType, Status};
-pub use self::session::Session;
+pub use self::session::{NewPlannerStrategy, Session};
 pub(crate) use self::statement::Statement;
 
 #[cfg(storage)]

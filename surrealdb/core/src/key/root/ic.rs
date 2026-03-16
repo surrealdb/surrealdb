@@ -73,26 +73,11 @@ impl<'key> IndexCompactionKey<'key> {
 		}
 	}
 
-	pub(crate) fn into_owned(self) -> IndexCompactionKey<'static> {
-		IndexCompactionKey::new(
-			self.ns,
-			self.db,
-			Cow::Owned(self.tb.into_owned()),
-			self.ix,
-			self.nid,
-			self.uid,
-		)
-	}
-
-	pub(crate) fn index_matches(&self, other: &IndexCompactionKey<'_>) -> bool {
-		self.ns == other.ns && self.db == other.db && self.tb == other.tb && self.ix == other.ix
-	}
-
 	pub(crate) fn range() -> (Vec<u8>, Vec<u8>) {
 		(b"/!ic\0".to_vec(), b"/!ic\0xff".to_vec())
 	}
 
-	pub fn decode_key(k: &[u8]) -> anyhow::Result<IndexCompactionKey<'_>> {
+	pub(crate) fn decode_key(k: &[u8]) -> anyhow::Result<IndexCompactionKey<'_>> {
 		Ok(storekey::decode_borrow(k)?)
 	}
 }

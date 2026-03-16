@@ -1,10 +1,10 @@
 use std::str::{self, FromStr};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
-use jsonwebtoken::{DecodingKey, Validation, decode};
+use jsonwebtoken::{DecodingKey, TokenData, Validation, decode};
 use surrealdb_types::ToSql;
 
 use crate::catalog::providers::{
@@ -76,16 +76,16 @@ fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Valid
 	Ok((dec, val))
 }
 
-pub(crate) static KEY: LazyLock<DecodingKey> = LazyLock::new(|| DecodingKey::from_secret(&[]));
-
-pub(crate) static DUD: LazyLock<Validation> = LazyLock::new(|| {
-	let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
-	validation.insecure_disable_signature_validation();
-	validation.validate_nbf = false;
-	validation.validate_exp = false;
-	validation.validate_aud = false;
-	validation
-});
+/// Decodes JWT claims without cryptographic verification.
+///
+/// SAFETY: This is used exclusively to extract routing information (namespace,
+/// database, access method) needed to look up the correct verification key.
+/// The token MUST be fully verified via [`verify_token`] before any claims
+/// are trusted for authorization decisions.
+fn decode_claims_unverified(token: &str) -> Result<TokenData<Claims>> {
+	let data = jsonwebtoken::dangerous::insecure_decode::<Claims>(token)?;
+	Ok(data)
+}
 
 pub async fn basic(
 	kvs: &Datastore,
@@ -155,8 +155,8 @@ pub async fn basic(
 pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Result<()> {
 	// Log the authentication type
 	trace!("Attempting token authentication");
-	// Decode the token without verifying
-	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
+	// Decode the token without verifying to extract routing claims
+	let token_data = decode_claims_unverified(token)?;
 	// Convert the token to a SurrealQL object value
 	let value = crate::val::Value::from(token_data.claims.clone().into_claims_object());
 	// Check if the auth token can be used
@@ -187,9 +187,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating with record access method `{}`", ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let db_def = match tx.get_db_by_name(ns, db).await? {
+			let db_def = match catch!(tx, tx.get_db_by_name(ns, db).await) {
 				Some(db) => db,
 				None => {
+					let _ = tx.cancel().await;
 					return Err(Error::DbNotFound {
 						name: db.clone(),
 					}
@@ -197,10 +198,18 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				}
 			};
 			// Parse the record id
-			let mut rid = syn::record_id(id)?;
+			let mut rid = match syn::record_id(id) {
+				Ok(rid) => rid,
+				Err(e) => {
+					let _ = tx.cancel().await;
+					return Err(e);
+				}
+			};
 			// Get the database access method
-			let Some(de) = tx.get_db_access(db_def.namespace_id, db_def.database_id, ac).await?
+			let Some(de) =
+				catch!(tx, tx.get_db_access(db_def.namespace_id, db_def.database_id, ac).await)
 			else {
+				let _ = tx.cancel().await;
 				return Err(Error::AccessDbNotFound {
 					ac: ac.clone(),
 					ns: ns.clone(),
@@ -221,7 +230,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							Err(anyhow::Error::new(Error::InvalidArguments {
+							Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 								name: "token".to_string(),
 								message: "Missing token header 'kid'".to_string(),
 							}))
@@ -290,9 +299,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to database `{}` with access method `{}`", db, ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let db_def = match tx.get_db_by_name(ns, db).await? {
+			let db_def = match catch!(tx, tx.get_db_by_name(ns, db).await) {
 				Some(db) => db,
 				None => {
+					let _ = tx.cancel().await;
 					return Err(Error::DbNotFound {
 						name: db.clone(),
 					}
@@ -301,7 +311,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 
 			// Get the database access method
-			let de = tx.get_db_access(db_def.namespace_id, db_def.database_id, ac).await?;
+			let de =
+				catch!(tx, tx.get_db_access(db_def.namespace_id, db_def.database_id, ac).await);
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 
@@ -331,7 +342,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							if let Some(kid) = token_data.header.kid {
 								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 							} else {
-								Err(anyhow::Error::new(Error::InvalidArguments {
+								Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 									name: "token".to_string(),
 									message: "Missing token header 'kid'".to_string(),
 								}))
@@ -403,7 +414,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 								if let Some(kid) = token_data.header.kid {
 									jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 								} else {
-									Err(anyhow::Error::new(Error::InvalidArguments {
+									Err(anyhow::Error::new(Error::InvalidFunctionArguments {
 										name: "token".to_string(),
 										message: "Missing token header 'kid'".to_string(),
 									}))
@@ -466,9 +477,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to database `{}` with user `{}`", db, id);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let db_def = match tx.get_db_by_name(ns, db).await? {
+			let db_def = match catch!(tx, tx.get_db_by_name(ns, db).await) {
 				Some(db) => db,
 				None => {
+					let _ = tx.cancel().await;
 					return Err(Error::DbNotFound {
 						name: db.clone(),
 					}
@@ -477,15 +489,18 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 
 			// Get the database user
-			let de = match tx
-				.get_db_user(db_def.namespace_id, db_def.database_id, id)
-				.await
-				.map_err(|e| {
+			let de = match catch!(
+				tx,
+				tx.get_db_user(db_def.namespace_id, db_def.database_id, id).await.map_err(|e| {
 					debug!("Error while authenticating to database `{db}`: {e}");
-					Error::InvalidAuth
-				})? {
+					anyhow::Error::new(Error::InvalidAuth)
+				})
+			) {
 				Some(de) => de,
-				None => return Err(Error::InvalidAuth.into()),
+				None => {
+					let _ = tx.cancel().await;
+					return Err(Error::InvalidAuth.into());
+				}
 			};
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
@@ -523,9 +538,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to namespace `{}` with access method `{}`", ns, ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let ns_def = match tx.get_ns_by_name(ns).await? {
+			let ns_def = match catch!(tx, tx.get_ns_by_name(ns).await) {
 				Some(ns) => ns,
 				None => {
+					let _ = tx.cancel().await;
 					return Err(Error::NsNotFound {
 						name: ns.clone(),
 					}
@@ -534,7 +550,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 
 			// Get the namespace access method
-			let de = tx.get_ns_access(ns_def.namespace_id, ac).await?;
+			let de = catch!(tx, tx.get_ns_access(ns_def.namespace_id, ac).await);
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 
@@ -559,7 +575,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							bail!(Error::InvalidArguments {
+							bail!(Error::InvalidFunctionArguments {
 								name: "token".to_string(),
 								message: "Missing token header 'kid'".to_string()
 							})
@@ -627,9 +643,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to namespace `{}` with user `{}`", ns, id);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let ns_def = match tx.get_ns_by_name(ns).await? {
+			let ns_def = match catch!(tx, tx.get_ns_by_name(ns).await) {
 				Some(ns) => ns,
 				None => {
+					let _ = tx.cancel().await;
 					return Err(Error::NsNotFound {
 						name: ns.clone(),
 					}
@@ -637,14 +654,19 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				}
 			};
 			// Get the namespace user
-			let de = tx
-				.get_ns_user(ns_def.namespace_id, id)
-				.await
-				.map_err(|e| {
+			let de = match catch!(
+				tx,
+				tx.get_ns_user(ns_def.namespace_id, id).await.map_err(|e| {
 					debug!("Error while authenticating to namespace `{ns}`: {e}");
-					Error::InvalidAuth
-				})?
-				.ok_or(Error::InvalidAuth)?;
+					anyhow::Error::new(Error::InvalidAuth)
+				})
+			) {
+				Some(de) => de,
+				None => {
+					let _ = tx.cancel().await;
+					return Err(Error::InvalidAuth.into());
+				}
+			};
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Check the algorithm
@@ -679,8 +701,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to root with access method `{}`", ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			// Get the namespace access method
-			let de = tx.get_root_access(ac).await?;
+			// Get the root access method
+			let de = catch!(tx, tx.get_root_access(ac).await);
 
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
@@ -705,7 +727,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							bail!(Error::InvalidArguments {
+							bail!(Error::InvalidFunctionArguments {
 								name: "token".to_string(),
 								message: "Missing token header 'kid'".to_string()
 							})
@@ -768,10 +790,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the namespace user
-			let de = tx.expect_root_user(id).await.map_err(|e| {
-				debug!("Error while authenticating to root: {e}");
-				Error::InvalidAuth
-			})?;
+			let de = catch!(
+				tx,
+				tx.expect_root_user(id).await.map_err(|e| {
+					debug!("Error while authenticating to root: {e}");
+					anyhow::Error::new(Error::InvalidAuth)
+				})
+			);
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 			// Check the algorithm
@@ -809,11 +834,13 @@ pub async fn verify_root_creds(
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
 	// Fetch the specified user from storage
-	let user = tx.expect_root_user(user).await.map_err(|e| {
-		debug!("Error retrieving user for authentication to root: {e}");
-
-		Error::InvalidAuth
-	})?;
+	let user = catch!(
+		tx,
+		tx.expect_root_user(user).await.map_err(|e| {
+			debug!("Error retrieving user for authentication to root: {e}");
+			anyhow::Error::new(Error::InvalidAuth)
+		})
+	);
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 	// Verify the specified password for the user
@@ -832,9 +859,10 @@ pub async fn verify_ns_creds(
 ) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
-	let ns_def = match tx.get_ns_by_name(ns).await? {
+	let ns_def = match catch!(tx, tx.get_ns_by_name(ns).await) {
 		Some(ns) => ns,
 		None => {
+			let _ = tx.cancel().await;
 			return Err(Error::NsNotFound {
 				name: ns.to_string(),
 			}
@@ -843,14 +871,20 @@ pub async fn verify_ns_creds(
 	};
 
 	// Fetch the specified user from storage
-	let user = tx
-		.get_ns_user(ns_def.namespace_id, user)
-		.await
-		.map_err(|e| {
+	let user = catch!(
+		tx,
+		tx.get_ns_user(ns_def.namespace_id, user).await.map_err(|e| {
 			debug!("Error retrieving user for authentication to namespace `{ns}`: {e}");
-			Error::InvalidAuth
-		})?
-		.ok_or(Error::InvalidAuth)?;
+			anyhow::Error::new(Error::InvalidAuth)
+		})
+	);
+	let user = match user {
+		Some(user) => user,
+		None => {
+			let _ = tx.cancel().await;
+			return Err(Error::InvalidAuth.into());
+		}
+	};
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 
@@ -871,9 +905,10 @@ pub async fn verify_db_creds(
 ) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
-	let db_def = match tx.get_db_by_name(ns, db).await? {
+	let db_def = match catch!(tx, tx.get_db_by_name(ns, db).await) {
 		Some(db) => db,
 		None => {
+			let _ = tx.cancel().await;
 			return Err(Error::DbNotFound {
 				name: db.to_string(),
 			}
@@ -882,14 +917,20 @@ pub async fn verify_db_creds(
 	};
 
 	// Fetch the specified user from storage
-	let user = tx
-		.get_db_user(db_def.namespace_id, db_def.database_id, user)
-		.await
-		.map_err(|e| {
+	let user = catch!(
+		tx,
+		tx.get_db_user(db_def.namespace_id, db_def.database_id, user).await.map_err(|e| {
 			debug!("Error retrieving user for authentication to database `{ns}/{db}`: {e}");
-			Error::InvalidAuth
-		})?
-		.ok_or(Error::InvalidAuth)?;
+			anyhow::Error::new(Error::InvalidAuth)
+		})
+	);
+	let user = match user {
+		Some(user) => user,
+		None => {
+			let _ = tx.cancel().await;
+			return Err(Error::InvalidAuth.into());
+		}
+	};
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
 

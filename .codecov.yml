@@ -2,24 +2,57 @@ coverage:
   status:
     project:
       default:
-        informational: true # don't fail PRs on project coverage
+        informational: true
+      workspace-tests:
+        informational: true
+        flags:
+          - workspace-tests
+      language-tests:
+        informational: true
+        flags:
+          - language-tests
     patch:
       default:
-        informational: true # don't fail PRs on patch coverage
+        informational: true
+      workspace-tests:
+        informational: true
+        flags:
+          - workspace-tests
+      language-tests:
+        informational: true
+        flags:
+          - language-tests
 
 comment:
   behavior: default
 
+flags:
+  workspace-tests:
+    paths:
+      - surrealdb/
+      - src/
+      - surrealism/
+      - surrealml/
+      - tests/
+    carryforward: true
+  language-tests:
+    paths:
+      - surrealdb/
+      - surrealism/
+      - surrealml/
+      - tests/
+    carryforward: true
+
 component_management:
-  default_rules:  # default rules inherited by all components
+  default_rules:
     statuses:
       - type: project
         target: auto
-        informational: true  # don't fail PRs based on component coverage
+        informational: true
       - type: patch
         target: auto
         informational: true
-  
+
   individual_components:
     - component_id: surrealdb_core
       name: surrealdb-core

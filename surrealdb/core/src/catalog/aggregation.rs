@@ -39,6 +39,7 @@
 //! ```
 
 use std::fmt::Write;
+use std::hash::Hash;
 use std::mem;
 
 use ahash::HashMap;
@@ -260,7 +261,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				max,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "math::max".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -277,7 +278,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				min,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "math::min".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -294,7 +295,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				sum,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "math::sum".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -310,7 +311,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				count,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "math::mean".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -329,7 +330,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				count,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "math::stddev".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -349,7 +350,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				count,
 			} => {
 				let Value::Number(ref n) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "math::variance".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
@@ -367,7 +368,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				max,
 			} => {
 				let Value::Datetime(ref d) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "time::max".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
@@ -385,7 +386,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				min,
 			} => {
 				let Value::Datetime(ref d) = arguments[*arg] else {
-					bail!(Error::InvalidArguments {
+					bail!(Error::InvalidFunctionArguments {
 						name: "time::min".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
@@ -513,7 +514,7 @@ impl AggregateExprCollector<'_> {
 	) -> Result<()> {
 		ensure!(
 			args.len() == 1,
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: name.to_string(),
 				message: "Expected 1 argument".to_string()
 			}
@@ -687,7 +688,6 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		if let Some(d) = &mut s.data {
 			ParentRewritor.visit_mut_data(d)?;
 		}
-		self.visit_mut_expr(&mut s.version)?;
 		Ok(())
 	}
 
@@ -700,7 +700,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 		}
 		self.visit_mut_expr(&mut s.version)?;
 
-		ParentRewritor.visit_mut_fields(&mut s.expr)?;
+		ParentRewritor.visit_mut_fields(&mut s.fields)?;
 		for o in s.omit.iter_mut() {
 			ParentRewritor.visit_mut_expr(o)?;
 		}
@@ -721,7 +721,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 			ParentRewritor.visit_mut_ordering(o)?;
 		}
 		if let Some(f) = s.fetch.as_mut() {
-			for f in f.0.iter_mut() {
+			for f in f.iter_mut() {
 				ParentRewritor.visit_mut_expr(&mut f.0)?;
 			}
 		}
@@ -777,7 +777,6 @@ impl MutVisitor for AggregateExprCollector<'_> {
 			self.visit_mut_expr(into)?;
 		}
 		self.visit_mut_expr(&mut i.timeout)?;
-		self.visit_mut_expr(&mut i.version)?;
 
 		ParentRewritor.visit_mut_data(&mut i.data)?;
 		if let Some(update) = i.update.as_mut() {
@@ -855,12 +854,11 @@ impl MutVisitor for ParentRewritor {
 			self.visit_mut_expr(e)?;
 		}
 		self.visit_mut_expr(&mut s.timeout)?;
-		self.visit_mut_expr(&mut s.version)?;
 		Ok(())
 	}
 
 	fn visit_mut_select(&mut self, s: &mut SelectStatement) -> Result<(), Self::Error> {
-		self.visit_mut_fields(&mut s.expr)?;
+		self.visit_mut_fields(&mut s.fields)?;
 		for v in s.what.iter_mut() {
 			self.visit_mut_expr(v)?;
 		}
@@ -902,7 +900,6 @@ impl MutVisitor for ParentRewritor {
 			self.visit_mut_expr(into)?;
 		}
 		self.visit_mut_expr(&mut i.timeout)?;
-		self.visit_mut_expr(&mut i.version)?;
 		Ok(())
 	}
 

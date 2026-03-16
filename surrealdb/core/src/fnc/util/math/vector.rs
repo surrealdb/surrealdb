@@ -23,7 +23,7 @@ where
 pub(crate) fn check_same_dimension<T>(fnc: &str, a: &[T], b: &[T]) -> Result<()> {
 	ensure!(
 		a.len() == b.len(),
-		Error::InvalidArguments {
+		Error::InvalidFunctionArguments {
 			name: String::from(fnc),
 			message: String::from("The two vectors must be of the same dimension."),
 		}
@@ -248,7 +248,7 @@ impl CrossProduct for Vec<Number> {
 	fn cross(&self, other: &Self) -> Result<Vec<Number>> {
 		ensure!(
 			self.len() == 3 && other.len() == 3,
-			Error::InvalidArguments {
+			Error::InvalidFunctionArguments {
 				name: "vector::cross".to_string(),
 				message: String::from("Both vectors must have a dimension of 3."),
 			}
@@ -321,7 +321,6 @@ pub trait Normalize {
 impl Normalize for Vec<Number> {
 	fn normalize(&self) -> Vec<Number> {
 		let m = self.magnitude();
-		// TODO: What about zero magnitude vectors?
 		self.iter().map(|a| vector_div(a, &m)).collect()
 	}
 }

@@ -147,7 +147,7 @@ impl ObjectStore for MemoryStore {
 			// properly handled.
 			let entry = {
 				let Some(entry) = self.store.get(key) else {
-					return Ok(());
+					return Err(format!("Source key does not exist: {}", key.as_str()));
 				};
 				entry.clone()
 			};
@@ -187,9 +187,11 @@ impl ObjectStore for MemoryStore {
 		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
-			if let Some((_, data)) = self.store.remove(key) {
-				self.store.insert(target.clone(), data);
-			}
+			let Some((_, data)) = self.store.remove(key) else {
+				return Err(format!("Source key does not exist: {}", key.as_str()));
+			};
+
+			self.store.insert(target.clone(), data);
 
 			Ok(())
 		})
@@ -201,11 +203,17 @@ impl ObjectStore for MemoryStore {
 		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
-			if !self.store.contains_key(target)
-				&& let Some((_, data)) = self.store.remove(key)
-			{
-				self.store.insert(target.clone(), data);
+			// Check if target already exists
+			if self.store.contains_key(target) {
+				return Ok(());
 			}
+
+			// Check if source exists and remove it
+			let Some((_, data)) = self.store.remove(key) else {
+				return Err(format!("Source key does not exist: {}", key.as_str()));
+			};
+
+			self.store.insert(target.clone(), data);
 
 			Ok(())
 		})

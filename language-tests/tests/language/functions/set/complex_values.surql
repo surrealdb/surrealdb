@@ -8,13 +8,13 @@ value = "{{ foo: 1 }, { foo: 2 }}"
 value = "{ person: NONE }"
 
 [[test.results]]
-value = "{{,}, {1,}, {1, 2, 3}, {2,}, {{5,}, {{3, 4}}}}"
+value = "{{,}, {1,}, {1, 2, 3}, {2,}, {{5,}, {{3, 4},}}}"
 
 [[test.results]]
 value = "{{ foo: 1 }, { foo: 2 }, { foo: 3 }}"
 
 [[test.results]]
-value = "{{ foo: 2 }}"
+value = "{{ foo: 2 },}"
 
 [[test.results]]
 error = "Incorrect arguments for function set::contains(). Argument 1 was the wrong type. Expected `set` but found `{ person: NONE }`"
@@ -48,7 +48,7 @@ value = "{[1, 2], [3, 4]}"
 -- Sets with objects
 RETURN {{ foo: 1 }, { foo: 2 }, { foo: 1 }};
 
--- Sets with record IDs
+-- Sets with record IDs (they're interpreted as objects as there's no way to tell them apart from objects)
 RETURN {person:john, person:jane, person:john};
 
 -- Sets with sets

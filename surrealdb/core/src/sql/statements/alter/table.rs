@@ -2,7 +2,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
 use crate::fmt::{EscapeKwFreeIdent, EscapeKwIdent, QuoteStr};
-use crate::sql::{ChangeFeed, Kind, Permissions, TableType};
+use crate::sql::{ChangeFeed, Permissions, TableType};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -45,20 +45,20 @@ impl ToSql for AlterTableStatement {
 				}
 				TableType::Relation(rel) => {
 					write_sql!(f, fmt, " RELATION");
-					if let Some(Kind::Record(kind)) = &rel.from {
-						write_sql!(f, fmt, " IN ");
-						for (idx, k) in kind.iter().enumerate() {
+					if !rel.from.is_empty() {
+						f.push_str(" IN ");
+						for (idx, k) in rel.from.iter().enumerate() {
 							if idx != 0 {
-								write_sql!(f, fmt, " | ");
+								f.push_str(" | ");
 							}
 							write_sql!(f, fmt, "{}", EscapeKwFreeIdent(k));
 						}
 					}
-					if let Some(Kind::Record(kind)) = &rel.to {
-						write_sql!(f, fmt, " OUT ");
-						for (idx, k) in kind.iter().enumerate() {
+					if !rel.to.is_empty() {
+						f.push_str(" OUT ");
+						for (idx, k) in rel.to.iter().enumerate() {
 							if idx != 0 {
-								write_sql!(f, fmt, " | ");
+								f.push_str(" | ");
 							}
 							write_sql!(f, fmt, "{}", EscapeKwFreeIdent(k));
 						}

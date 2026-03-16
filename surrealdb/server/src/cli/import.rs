@@ -10,7 +10,7 @@ use crate::cli::abstraction::{AuthArguments, DatabaseSelectionArguments};
 #[derive(Args, Debug)]
 pub struct DatabaseConnectionArguments {
 	#[arg(help = "Database endpoint to import to")]
-	#[arg(short = 'e', long = "endpoint", visible_aliases = ["conn"])]
+	#[arg(short = 'e', long = "endpoint")]
 	#[arg(default_value = "http://localhost:8000")]
 	#[arg(value_parser = super::validator::endpoint_valid)]
 	pub(crate) endpoint: String,

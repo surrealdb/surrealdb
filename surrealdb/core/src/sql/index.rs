@@ -83,6 +83,7 @@ pub(crate) struct HnswParams {
 	pub extend_candidates: bool,
 	pub keep_pruned_connections: bool,
 	pub ml: PublicNumber,
+	pub use_hashed_vector: bool,
 }
 
 impl From<HnswParams> for crate::catalog::HnswParams {
@@ -97,6 +98,7 @@ impl From<HnswParams> for crate::catalog::HnswParams {
 			ml: v.ml.into(),
 			extend_candidates: v.extend_candidates,
 			keep_pruned_connections: v.keep_pruned_connections,
+			use_hashed_vector: v.use_hashed_vector,
 		}
 	}
 }
@@ -113,6 +115,7 @@ impl From<crate::catalog::HnswParams> for HnswParams {
 			ml: v.ml.into(),
 			extend_candidates: v.extend_candidates,
 			keep_pruned_connections: v.keep_pruned_connections,
+			use_hashed_vector: v.use_hashed_vector,
 		}
 	}
 }
@@ -234,6 +237,9 @@ impl ToSql for Index {
 				}
 				if p.keep_pruned_connections {
 					f.push_str(" KEEP_PRUNED_CONNECTIONS")
+				}
+				if p.use_hashed_vector {
+					f.push_str(" HASHED_VECTOR")
 				}
 			}
 		}

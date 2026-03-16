@@ -440,6 +440,7 @@ impl_direct! {
 	String => String,
 	Geometry => Geometry,
 	Regex => Regex,
+	Table => TableName,
 }
 
 // Coerce to runtime value implementations

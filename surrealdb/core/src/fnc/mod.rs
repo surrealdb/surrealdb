@@ -52,7 +52,6 @@ pub async fn run(
 	args: Vec<Value>,
 ) -> Result<Value> {
 	if name.eq("sleep")
-		|| name.eq("api::invoke")
 		|| name.eq("array::all")
 		|| name.eq("array::any")
 		|| name.eq("array::every")
@@ -91,6 +90,7 @@ pub async fn run(
 		|| name.eq("value::diff")
 		|| name.eq("value::patch")
 		|| name.eq("sequence::nextval")
+		|| name.starts_with("api")
 		|| name.starts_with("http")
 		|| name.starts_with("search")
 		|| name.starts_with("crypto::argon2")
@@ -458,6 +458,13 @@ pub fn synchronous(
 		"time::from_unix" => time::from::unix,
 		"time::from_uuid" => time::from::uuid,
 		"time::is_leap_year" => time::is::leap_year,
+		"time::set_year" => time::set_year,
+		"time::set_month" => time::set_month,
+		"time::set_day" => time::set_day,
+		"time::set_hour" => time::set_hour,
+		"time::set_minute" => time::set_minute,
+		"time::set_second" => time::set_second,
+		"time::set_nanosecond" => time::set_nanosecond,
 		//
 		"type::array" => r#type::array,
 		"type::bool" => r#type::bool,
@@ -561,7 +568,13 @@ pub async fn asynchronous(
 		args,
 		"no such builtin function found",
 		//
-		exp(DefineApi) "api::invoke" => api::invoke((stk, ctx, opt)).await,
+		"api::invoke" => api::invoke((stk, ctx, opt)).await,
+		"api::req::body" => api::req::body((stk, ctx, opt, doc)).await,
+		"api::res::body" => api::res::body((stk, ctx, opt, doc)).await,
+		"api::timeout" => api::timeout((stk, ctx, opt, doc)).await,
+		"api::res::status" => api::res::status((stk, ctx, opt, doc)).await,
+		"api::res::header" => api::res::header((stk, ctx, opt, doc)).await,
+		"api::res::headers" => api::res::headers((stk, ctx, opt, doc)).await,
 		//
 		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
 		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,
@@ -1722,7 +1735,6 @@ mod tests {
 	use regex::Regex;
 
 	use crate::dbs::Capabilities;
-	use crate::dbs::capabilities::ExperimentalTarget;
 	use crate::sql::{Expr, Function};
 
 	#[tokio::test]
@@ -1756,10 +1768,8 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			let res = crate::syn::expr_with_capabilities(
-				&format!("{}()", name),
-				&Capabilities::all().with_experimental(ExperimentalTarget::DefineApi.into()),
-			);
+			let res =
+				crate::syn::expr_with_capabilities(&format!("{}()", name), &Capabilities::all());
 
 			if let Ok(Expr::FunctionCall(call)) = res {
 				match call.receiver {

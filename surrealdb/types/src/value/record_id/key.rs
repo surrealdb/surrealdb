@@ -1,3 +1,4 @@
+use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
 use crate as surrealdb_types;
@@ -34,7 +35,9 @@ pub enum RecordIdKey {
 impl RecordIdKey {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
-		Self::String(nanoid::nanoid!(20, &ID_CHARS))
+		let mut rng = rand::thread_rng();
+		let id: String = (0..20).map(|_| *ID_CHARS.choose(&mut rng).unwrap_or(&'0')).collect();
+		Self::String(id)
 	}
 	/// Generate a new random ULID
 	pub fn ulid() -> Self {
@@ -144,11 +147,11 @@ impl PartialEq<Value> for RecordIdKey {
 
 impl ToSql for RecordIdKey {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		use crate::utils::escape::EscapeRid;
+		use crate::utils::escape::EscapeRecordKey;
 
 		match self {
 			RecordIdKey::Number(n) => n.fmt_sql(f, fmt),
-			RecordIdKey::String(v) => EscapeRid(v).fmt_sql(f, fmt),
+			RecordIdKey::String(v) => EscapeRecordKey(v).fmt_sql(f, fmt),
 			RecordIdKey::Uuid(uuid) => uuid.fmt_sql(f, fmt),
 			RecordIdKey::Object(object) => object.fmt_sql(f, fmt),
 			RecordIdKey::Array(array) => array.fmt_sql(f, fmt),
@@ -186,7 +189,7 @@ impl SurrealValue for RecordIdKey {
 		}
 	}
 
-	fn from_value(value: Value) -> anyhow::Result<Self> {
+	fn from_value(value: Value) -> Result<Self, crate::Error> {
 		match value {
 			Value::Number(Number::Int(n)) => Ok(RecordIdKey::Number(n)),
 			Value::String(s) => Ok(RecordIdKey::String(s)),
@@ -197,7 +200,7 @@ impl SurrealValue for RecordIdKey {
 				let range = RecordIdKeyRange::from_value(value)?;
 				Ok(RecordIdKey::Range(Box::new(range)))
 			}
-			_ => Err(anyhow::anyhow!("Cannot convert {:?} to RecordIdKey", value)),
+			_ => Err(crate::Error::internal(format!("Cannot convert {:?} to RecordIdKey", value))),
 		}
 	}
 }

@@ -21,7 +21,7 @@ pub(crate) struct Hi<'a> {
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	pub id: RecordIdKey,
+	pub id: Cow<'a, RecordIdKey>,
 }
 
 impl crate::kvs::KVKey for Hi<'_> {
@@ -38,7 +38,7 @@ impl<'a> Hi<'a> {
 		db: DatabaseId,
 		tb: &'a TableName,
 		ix: IndexId,
-		id: RecordIdKey,
+		id: &'a RecordIdKey,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -53,7 +53,7 @@ impl<'a> Hi<'a> {
 			_e: b'!',
 			_f: b'h',
 			_g: b'i',
-			id,
+			id: Cow::Borrowed(id),
 		}
 	}
 }
@@ -66,13 +66,8 @@ mod tests {
 	#[test]
 	fn key() {
 		let tb = TableName::from("testtb");
-		let val = Hi::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			&tb,
-			IndexId(3),
-			RecordIdKey::String("testid".into()),
-		);
+		let id = RecordIdKey::String("testid".into());
+		let val = Hi::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), &id);
 		let enc = Hi::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,

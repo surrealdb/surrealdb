@@ -8,6 +8,7 @@
 
 mod access;
 pub(crate) mod aggregation;
+mod auth;
 mod database;
 mod module;
 mod namespace;
@@ -18,6 +19,8 @@ mod subscription;
 mod table;
 mod view;
 
+#[cfg(test)]
+mod compat;
 #[cfg(test)]
 mod test;
 

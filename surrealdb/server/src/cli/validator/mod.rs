@@ -6,7 +6,7 @@ use surrealdb_core::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 	Targets,
 };
-use surrealdb_core::kvs::export::TableConfig;
+use surrealdb_core::kvs::export::{ExcludedTables, TableConfig};
 use surrealdb_types::Duration;
 
 pub(crate) mod parser;
@@ -36,28 +36,24 @@ pub(crate) fn dir_exists(path: &str) -> Result<PathBuf, String> {
 }
 
 pub(crate) fn endpoint_valid(v: &str) -> Result<String, String> {
+	// Split the endpoint into scheme and path
 	fn split_endpoint(v: &str) -> (&str, &str) {
-		match v {
-			"memory" => ("mem", ""),
+		// Strip query parameters before extracting the scheme
+		let without_query = v.split_once('?').map(|(s, _)| s).unwrap_or(v);
+		// Split the endpoint into scheme and path
+		match without_query {
+			"memory" | "mem" => ("mem", ""),
 			v => match v.split_once("://") {
 				Some(parts) => parts,
 				None => v.split_once(':').unwrap_or_default(),
 			},
 		}
 	}
-
-	let scheme = split_endpoint(v).0;
-	match scheme {
-		"http"
-		| "https"
-		| "ws"
-		| "wss"
-		| "mem"
-		| "rocksdb"
-		| "surrealkv"
-		| "surrealkv+versioned"
-		| "file"
-		| "tikv" => Ok(v.to_string()),
+	// Validate the scheme
+	match split_endpoint(v).0 {
+		"http" | "https" | "ws" | "wss" | "mem" | "rocksdb" | "surrealkv" | "tikv" => {
+			Ok(v.to_string())
+		}
 		_ => Err(String::from("Provide a valid database connection string")),
 	}
 }
@@ -161,6 +157,13 @@ pub(crate) fn route_targets(value: &str) -> Result<Targets<RouteTarget>, String>
 	Ok(Targets::Some(result))
 }
 
+pub(crate) fn cors_origin(value: &str) -> Result<String, String> {
+	value
+		.parse::<http::HeaderValue>()
+		.map(|_| value.to_string())
+		.map_err(|_| format!("Invalid CORS origin '{value}': must be a valid HTTP header value"))
+}
+
 pub(crate) fn export_tables(value: &str) -> Result<TableConfig, String> {
 	if ["*", "", "true"].contains(&value) {
 		return Ok(TableConfig::All);
@@ -171,6 +174,16 @@ pub(crate) fn export_tables(value: &str) -> Result<TableConfig, String> {
 	}
 
 	Ok(TableConfig::Some(value.split(",").filter(|s| !s.is_empty()).map(str::to_string).collect()))
+}
+
+pub(crate) fn export_tables_exclude(value: &str) -> Result<TableConfig, String> {
+	if value.is_empty() {
+		return Err(String::from("Provide at least one table name to exclude"));
+	}
+
+	Ok(TableConfig::Exclude(ExcludedTables {
+		exclude: value.split(",").filter(|s| !s.is_empty()).map(str::to_string).collect(),
+	}))
 }
 
 #[cfg(test)]

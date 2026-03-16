@@ -326,7 +326,7 @@ where
 	}
 }
 
-/// Iterator over TypedRange<i64>.
+/// Iterator over `TypedRange<i64>`.
 pub struct IntegerRangeIter {
 	cur: i64,
 	// Signifies the end of the iterator.

@@ -30,7 +30,7 @@ impl Array {
 		self.0
 	}
 
-	/// Convert into the inner Vec<Value>
+	/// Convert into the inner `Vec<Value>`
 	pub fn into_inner(self) -> Vec<Value> {
 		self.0
 	}

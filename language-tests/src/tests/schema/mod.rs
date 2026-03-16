@@ -55,8 +55,9 @@ impl TestConfig {
 	}
 
 	/// Whether this test can use one of the datastorage struct which are reused between tests.
+	/// Versioned tests always need a fresh datastore since they require different configuration.
 	pub fn can_use_reusable_ds(&self) -> bool {
-		self.env.as_ref().map(|x| !x.clean).unwrap_or(false)
+		self.env.as_ref().map(|x| !x.clean && !x.versioned).unwrap_or(false)
 	}
 
 	/// Returns a list of keys which are not in the schema but still define.
@@ -96,12 +97,40 @@ pub struct TestEnv {
 	pub context_timeout: Option<BoolOr<u64>>,
 	pub capabilities: Option<BoolOr<Capabilities>>,
 
+	/// Backend-specific timeout overrides (in milliseconds).
+	/// These take precedence over the base `timeout` when running on the corresponding backend.
+	pub timeout_tikv: Option<BoolOr<u64>>,
+	pub timeout_rocksdb: Option<BoolOr<u64>>,
+	pub timeout_surrealkv: Option<BoolOr<u64>>,
+
+	/// Backend-specific context timeout overrides (in milliseconds).
+	/// These take precedence over the base `context_timeout` when running on the corresponding backend.
+	pub context_timeout_tikv: Option<BoolOr<u64>>,
+	pub context_timeout_rocksdb: Option<BoolOr<u64>>,
+	pub context_timeout_surrealkv: Option<BoolOr<u64>>,
+
 	/// Specifies which backends this test should run on.
 	/// If empty, the test runs on all backends.
 	/// If specified, the test only runs when the selected backend is in this list.
 	/// Valid values: "mem", "rocksdb", "surrealkv", "tikv"
 	#[serde(default)]
 	pub backend: Vec<String>,
+
+	/// Whether the test requires MVCC versioning to be enabled on the datastore.
+	/// When true, the datastore is created with `?versioned=true` in the connection string.
+	#[serde(default)]
+	pub versioned: bool,
+	/// Strategy for the new streaming planner/executor.
+	/// - "best-effort-ro" (default): try new planner, fall back on Unimplemented
+	/// - "all-ro": require new planner for all read-only statements (hard fail)
+	/// - "compute-only": skip new planner entirely
+	pub new_planner_strategy: Option<NewPlannerStrategyConfig>,
+
+	/// Whether EXPLAIN ANALYZE output omits elapsed durations, making
+	/// output deterministic for test assertions. Defaults to true in the
+	/// language test framework. Set to `false` explicitly if you need
+	/// actual elapsed times.
+	pub redact_volatile_explain_attrs: Option<bool>,
 
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
@@ -131,11 +160,43 @@ impl TestEnv {
 		}
 	}
 
-	pub fn timeout(&self) -> Option<u64> {
+	/// Returns the timeout for this test in milliseconds.
+	/// If a backend-specific timeout is set and matches the current backend, it takes precedence.
+	/// Falls back to the base timeout, defaulting to 1000ms.
+	pub fn timeout(&self, backend: Option<&str>) -> Option<u64> {
+		// Check for backend-specific override first
+		let override_timeout = match backend {
+			Some("tikv") => self.timeout_tikv,
+			Some("rocksdb") => self.timeout_rocksdb,
+			Some("surrealkv") => self.timeout_surrealkv,
+			_ => None,
+		};
+
+		if let Some(t) = override_timeout {
+			return t.into_value(1000);
+		}
+
+		// Fall back to base timeout
 		self.timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
 	}
 
-	pub fn context_timeout(&self) -> Option<u64> {
+	/// Returns the context timeout for this test in milliseconds.
+	/// If a backend-specific context timeout is set and matches the current backend, it takes precedence.
+	/// Falls back to the base context_timeout, defaulting to 1000ms.
+	pub fn context_timeout(&self, backend: Option<&str>) -> Option<u64> {
+		// Check for backend-specific override first
+		let override_timeout = match backend {
+			Some("tikv") => self.context_timeout_tikv,
+			Some("rocksdb") => self.context_timeout_rocksdb,
+			Some("surrealkv") => self.context_timeout_surrealkv,
+			_ => None,
+		};
+
+		if let Some(t) = override_timeout {
+			return t.into_value(1000);
+		}
+
+		// Fall back to base context_timeout
 		self.context_timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
 	}
 
@@ -148,6 +209,21 @@ impl TestEnv {
 
 		res
 	}
+}
+
+/// Strategy for the new streaming planner/executor in language tests.
+///
+/// Maps to `surrealdb_core::dbs::NewPlannerStrategy` but uses shorter
+/// kebab-case names for TOML configuration.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum NewPlannerStrategyConfig {
+	/// Try new planner, fall back on Unimplemented.
+	BestEffortRo,
+	/// Require new planner for all read-only statements (hard fail on Unimplemented).
+	AllRo,
+	/// Skip new planner entirely; always use legacy compute.
+	ComputeOnly,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -213,6 +289,8 @@ pub struct ValueTestResult {
 	pub skip_record_id_key: Option<bool>,
 	#[serde(default)]
 	pub skip_uuid: Option<bool>,
+	#[serde(default)]
+	pub skip_api_request_id: Option<bool>,
 	#[serde(default)]
 	pub float_roughly_eq: Option<bool>,
 	#[serde(default)]
@@ -441,7 +519,6 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
 		};
@@ -504,7 +581,6 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
 		};
@@ -547,7 +623,6 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
 		};

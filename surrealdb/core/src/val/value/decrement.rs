@@ -5,7 +5,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::expr::FlowResultExt as _;
 use crate::expr::part::Part;
-use crate::val::{Number, Value};
+use crate::val::{Number, TrySub, Value};
 
 impl Value {
 	/// Asynchronous method for decrementing a field in a `Value`
@@ -18,15 +18,32 @@ impl Value {
 		val: Value,
 	) -> Result<()> {
 		match self.get(stk, ctx, opt, None, path).await.catch_return()? {
-			Value::Number(v) => match val {
-				Value::Number(x) => self.set(stk, ctx, opt, path, Value::from(v - x)).await,
-				_ => Ok(()),
-			},
 			Value::Array(v) => match val {
 				Value::Array(x) => {
 					self.set(stk, ctx, opt, path, Value::from(v.remove_all(&x.0))).await
 				}
+				Value::Set(x) => {
+					self.set(stk, ctx, opt, path, Value::from(v.remove_all_set(&x.0))).await
+				}
 				x => self.set(stk, ctx, opt, path, Value::from(v.remove_value(&x))).await,
+			},
+			Value::Set(mut v) => match val {
+				Value::Array(x) => {
+					for item in x {
+						v.0.remove(&item);
+					}
+					self.set(stk, ctx, opt, path, Value::from(v)).await
+				}
+				Value::Set(x) => {
+					for item in x.0 {
+						v.remove(&item);
+					}
+					self.set(stk, ctx, opt, path, Value::from(v)).await
+				}
+				x => {
+					v.remove(&x);
+					self.set(stk, ctx, opt, path, Value::from(v)).await
+				}
 			},
 			Value::None => match val {
 				Value::Number(x) => {
@@ -34,7 +51,10 @@ impl Value {
 				}
 				_ => Ok(()),
 			},
-			_ => Ok(()),
+			v => {
+				let result = v.try_sub(val)?;
+				self.set(stk, ctx, opt, path, result).await
+			}
 		}
 	}
 }
@@ -81,6 +101,30 @@ mod tests {
 			.await
 			.unwrap();
 		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn decrement_object_number_errors() {
+		let (ctx, opt) = mock().await;
+		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let mut val = parse_val!("{ test: { a: 1 } }");
+		let mut stack = reblessive::TreeStack::new();
+		let result =
+			stack.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::from(10))).finish().await;
+		assert!(result.is_err());
+	}
+
+	#[tokio::test]
+	async fn decrement_number_string_errors() {
+		let (ctx, opt) = mock().await;
+		let idi: Idiom = syn::idiom("test").unwrap().into();
+		let mut val = parse_val!("{ test: 100 }");
+		let mut stack = reblessive::TreeStack::new();
+		let result = stack
+			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::from("hello")))
+			.finish()
+			.await;
+		assert!(result.is_err());
 	}
 
 	#[tokio::test]

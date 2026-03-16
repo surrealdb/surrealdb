@@ -103,7 +103,7 @@ impl Config {
 	/// Set the WebSocket config
 	pub fn websocket(mut self, websocket: WebsocketConfig) -> crate::Result<Self> {
 		if websocket.max_write_buffer_size <= websocket.write_buffer_size {
-			return Err(crate::err::Error::MaxWriteBufferSizeTooSmall);
+			return Err(crate::Error::internal("The write buffer size is too small".to_string()));
 		}
 		self.websocket = websocket;
 		Ok(self)

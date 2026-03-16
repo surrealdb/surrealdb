@@ -284,10 +284,22 @@ impl DefineTableStatement {
 		condition: Option<&Expr>,
 	) -> Result<()> {
 		let select = SelectStatement {
-			expr: fields.clone(),
+			fields: fields.clone(),
 			what: tables.iter().map(|x| Expr::Table(x.clone())).collect(),
 			cond: condition.cloned().map(Cond),
-			..Default::default()
+			omit: vec![],
+			only: false,
+			with: None,
+			split: None,
+			group: None,
+			order: None,
+			limit: None,
+			start: None,
+			fetch: None,
+			version: Expr::Literal(Literal::None),
+			timeout: Expr::Literal(Literal::None),
+			explain: None,
+			tempfiles: false,
 		};
 
 		let Value::Array(Array(v)) = select.compute(stk, ctx, opt, None).await? else {
@@ -307,7 +319,7 @@ impl DefineTableStatement {
 			};
 
 			let key = key::record::new(ns, db, view_table_name, &id.key);
-			let record = Arc::new(Record::new(Value::Object(o).into()));
+			let record = Arc::new(Record::new(Value::Object(o)));
 			tx.put(&key, &record, None).await?;
 
 			let ns = doc_ctx.ns();
@@ -517,13 +529,24 @@ impl DefineTableStatement {
 
 		let stmt = SelectStatement {
 			// SELECT [aggregate1, aggregate2, ..] as a, group_expr1 as g0, group_expr2 as g1, ..
-			expr: Fields::Select(fields),
+			fields: Fields::Select(fields),
 			// WHERE cond
 			cond: condition.cloned().map(Cond),
 			// GROUP BY g0,g1,..
 			group: Some(Groups(groups)),
 			what: tables.iter().map(|x| Expr::Table(x.clone())).collect(),
-			..Default::default()
+			omit: vec![],
+			only: false,
+			with: None,
+			split: None,
+			order: None,
+			limit: None,
+			start: None,
+			fetch: None,
+			version: Expr::Literal(Literal::None),
+			timeout: Expr::Literal(Literal::None),
+			explain: None,
+			tempfiles: false,
 		};
 		let res = stmt.compute(stk, ctx, opt, None).await?;
 		let Value::Array(res) = res else {
@@ -716,7 +739,7 @@ impl DefineTableStatement {
 					record_type: RecordType::Table,
 					aggregation_stats: stats,
 				}),
-				data: data.into(),
+				data,
 			});
 
 			let key = RecordIdKey::Array(Array(group));
@@ -758,13 +781,14 @@ impl DefineTableStatement {
 			// Set the `in` field as a DEFINE FIELD definition
 			{
 				let key = crate::key::table::fd::new(ns, db, &tb.name, "in");
-				let val = rel.from.clone().unwrap_or(Kind::Record(vec![]));
+				let val =
+					Some(Kind::Record(rel.from.iter().cloned().map(TableName::new).collect()));
 				txn.set(
 					&key,
 					&FieldDefinition {
 						name: Idiom::from(IN.to_vec()),
 						table: tb.name.clone(),
-						field_kind: Some(val),
+						field_kind: val,
 						..Default::default()
 					},
 					None,
@@ -774,13 +798,13 @@ impl DefineTableStatement {
 			// Set the `out` field as a DEFINE FIELD definition
 			{
 				let key = crate::key::table::fd::new(ns, db, &tb.name, "out");
-				let val = rel.to.clone().unwrap_or(Kind::Record(vec![]));
+				let val = Some(Kind::Record(rel.to.iter().cloned().map(TableName::new).collect()));
 				txn.set(
 					&key,
 					&FieldDefinition {
 						name: Idiom::from(OUT.to_vec()),
 						table: tb.name.clone(),
-						field_kind: Some(val),
+						field_kind: val,
 						..Default::default()
 					},
 					None,

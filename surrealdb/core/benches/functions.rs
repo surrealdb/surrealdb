@@ -4,7 +4,6 @@ mod common;
 
 use common::{block_on, setup_datastore};
 use criterion::{Criterion, criterion_group, criterion_main};
-use pprof::criterion::{Output, PProfProfiler};
 
 // ============================================================================
 // Benchmark: Array functions
@@ -438,7 +437,7 @@ fn bench_vector_functions(c: &mut Criterion) {
 
 criterion_group!(
 	name = benches;
-	config = Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
+	config = Criterion::default();
 	targets = bench_array_functions,
 		bench_crypto_functions,
 		bench_duration_functions,

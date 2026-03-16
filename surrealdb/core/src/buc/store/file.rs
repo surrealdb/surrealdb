@@ -1,13 +1,13 @@
 use std::future::Future;
 use std::path::{Path as OsPath, PathBuf};
 use std::pin::Pin;
-use std::time::SystemTime;
 
 use bytes::Bytes;
 use path_clean::PathClean;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 use url::Url;
+use web_time::SystemTime;
 
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 use crate::cnf::BUCKET_FOLDER_ALLOWLIST;
@@ -34,7 +34,7 @@ impl FileStore {
 		}
 	}
 
-	/// Parse a URL into FileStoreOptions
+	/// Parse a URL into FileStoreOption
 	pub async fn parse_url(url_str: &str) -> Result<Option<FileStoreOptions>, Error> {
 		let Ok(url) = Url::parse(url_str) else {
 			return Ok(None);
@@ -369,8 +369,7 @@ impl ObjectStore for FileStore {
 
 			// Check if the source file exists
 			if !Self::path_exists(&source_key).await? {
-				// Silently ignore operations on non-existent source files
-				return Ok(());
+				return Err(format!("Source key does not exist: {}", source_key.display()));
 			}
 
 			Self::ensure_parent_dirs(&target_key).await?;

@@ -170,24 +170,26 @@ impl Parser<'_> {
 		idiom: &Idiom,
 		idiom_span: Span,
 	) -> ParseResult<()> {
-		let mut found = false;
+		let is_group = matches!(kind, MissingKind::Group);
+
 		match fields {
 			Fields::Value(field) => {
 				if let Some(alias) = &field.alias
 					&& idiom == alias
 				{
-					found = true;
+					return Ok(());
 				}
 
 				match &field.expr {
 					Expr::Idiom(x) => {
-						if idiom == x {
-							found = true;
+						if idiom == x || (is_group && idiom_is_prefix(idiom, x)) {
+							return Ok(());
 						}
 					}
 					v => {
-						if *idiom == v.to_idiom() {
-							found = true;
+						let vi = v.to_idiom();
+						if *idiom == vi || (is_group && idiom_is_prefix(idiom, &vi)) {
+							return Ok(());
 						}
 					}
 				}
@@ -202,21 +204,19 @@ impl Parser<'_> {
 					if let Some(alias) = &field.alias
 						&& idiom == alias
 					{
-						found = true;
-						break;
+						return Ok(());
 					}
 
 					match &field.expr {
 						Expr::Idiom(x) => {
-							if idiom == x {
-								found = true;
-								break;
+							if idiom == x || (is_group && idiom_is_prefix(idiom, x)) {
+								return Ok(());
 							}
 						}
 						v => {
-							if *idiom == v.to_idiom() {
-								found = true;
-								break;
+							let vi = v.to_idiom();
+							if *idiom == vi || (is_group && idiom_is_prefix(idiom, &vi)) {
+								return Ok(());
 							}
 						}
 					}
@@ -224,47 +224,55 @@ impl Parser<'_> {
 			}
 		}
 
-		if !found {
-			match kind {
-				MissingKind::Split => {
-					bail!(
-						"Missing split idiom `{:?}` in statement selection",
-						idiom.to_sql(),
-						@idiom_span,
-						@field_span => "Idiom missing here",
-					)
-				}
-				MissingKind::Order => {
-					bail!(
-						"Missing order idiom `{}` in statement selection",
-						idiom.to_sql(),
-						@idiom_span,
-						@field_span => "Idiom missing here",
-					)
-				}
-				MissingKind::Group => {
-					bail!(
-						"Missing group idiom `{}` in statement selection",
-						idiom.to_sql(),
-						@idiom_span,
-						@field_span => "Idiom missing here",
-					)
-				}
-			};
+		match kind {
+			MissingKind::Split => {
+				bail!(
+					"Missing split idiom `{:?}` in statement selection",
+					idiom.to_sql(),
+					@idiom_span,
+					@field_span => "Idiom missing here",
+				)
+			}
+			MissingKind::Order => {
+				bail!(
+					"Missing order idiom `{}` in statement selection",
+					idiom.to_sql(),
+					@idiom_span,
+					@field_span => "Idiom missing here",
+				)
+			}
+			MissingKind::Group => {
+				bail!(
+					"Missing group idiom `{}` in statement selection",
+					idiom.to_sql(),
+					@idiom_span,
+					@field_span => "Idiom missing here",
+				)
+			}
 		};
-		Ok(())
 	}
 
 	pub(crate) fn try_parse_group(
 		&mut self,
 		fields: &Fields,
 		fields_span: Span,
+		split_span: Option<Span>,
 	) -> ParseResult<Option<Groups>> {
 		if !self.eat(t!("GROUP")) {
 			return Ok(None);
 		}
+		let group_start_span = self.last_span();
 
 		if self.eat(t!("ALL")) {
+			if let Some(split_span) = split_span {
+				let group_span = group_start_span.covers(self.last_span());
+				bail!(
+					"SPLIT and GROUP are mutually exclusive",
+					@split_span => "SPLIT cannot be used with GROUP",
+					@group_span => "GROUP cannot be used with SPLIT",
+				)
+			}
+
 			return Ok(Some(Groups(Vec::new())));
 		}
 
@@ -288,6 +296,15 @@ impl Parser<'_> {
 				Self::check_idiom(MissingKind::Group, fields, fields_span, &group, group_span)?;
 			}
 			groups.0.push(Group(group));
+		}
+
+		if let Some(split_span) = split_span {
+			let group_span = group_start_span.covers(self.last_span());
+			bail!(
+				"SPLIT and GROUP are mutually exclusive",
+				@split_span => "SPLIT cannot be used with GROUP",
+				@group_span => "GROUP cannot be used with SPLIT",
+			)
 		}
 
 		Ok(Some(groups))
@@ -497,7 +514,7 @@ impl Parser<'_> {
 		}
 
 		let cond = self.try_parse_condition(stk).await?;
-		let group = self.try_parse_group(&fields, fields_span)?;
+		let group = self.try_parse_group(&fields, fields_span, None)?;
 
 		Ok(View {
 			expr: fields,
@@ -583,4 +600,13 @@ impl Parser<'_> {
 		};
 		Ok(Some(with))
 	}
+}
+
+/// Check whether `prefix` is a strict prefix of `full`. For GROUP BY
+/// validation this allows `GROUP BY in` when the SELECT contains `in.name`,
+/// since the selected sub-path is functionally dependent on the group key.
+fn idiom_is_prefix(prefix: &Idiom, full: &Idiom) -> bool {
+	let pp = &prefix.0;
+	let fp = &full.0;
+	pp.len() < fp.len() && fp.starts_with(pp)
 }
