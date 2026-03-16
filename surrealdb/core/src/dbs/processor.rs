@@ -191,6 +191,24 @@ impl Collectable {
 			}
 		};
 
+		// Load correaponding table definition.
+		let tb = txn.expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, ft.as_ref()).await?;
+		// Load correaponding field definitions.
+		let fields = txn
+			.all_tb_fields(
+				doc_ctx.ns.namespace_id,
+				doc_ctx.db.database_id,
+				&ft,
+				None,
+			)
+			.await?;
+		let doc_ctx = NsDbTbCtx {
+			ns: Arc::clone(&doc_ctx.ns),
+			db: Arc::clone(&doc_ctx.db),
+			tb,
+			fields,
+		};
+
 		// Fetch the data from the store
 		let record = if rid_only {
 			Arc::new(Default::default())
