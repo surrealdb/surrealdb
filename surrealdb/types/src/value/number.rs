@@ -62,11 +62,11 @@ impl Display for Number {
 		match self {
 			Number::Int(v) => Display::fmt(v, f),
 			Number::Float(v) => {
-				if v.is_finite() {
-					// Add suffix to distinguish between int and float
-					write!(f, "{v}f")
-				} else {
-					write!(f, "{}", fmt_non_finite_f64(*v))
+				match fmt_non_finite_f64(*v) {
+					// Special case: Infinity, -Infinity or NaN
+					Some(special) => write!(f, "{}", special),
+					// Regular float: add f to distinguish between int and float
+					None => write!(f, "{v}f"),
 				}
 			}
 			Number::Decimal(v) => write!(f, "{v}dec"),
@@ -79,11 +79,14 @@ impl ToSql for Number {
 		match self {
 			Number::Int(v) => f.push_str(&v.to_string()),
 			Number::Float(v) => {
-				if v.is_finite() {
-					f.push_str(&v.to_string());
-					f.push('f');
-				} else {
-					f.push_str(fmt_non_finite_f64(*v));
+				match fmt_non_finite_f64(*v) {
+					// Special case: Infinity, -Infinity or NaN
+					Some(special) => f.push_str(special),
+					// Regular float: add f to distinguish between int and float
+					None => {
+						f.push_str(&v.to_string());
+						f.push('f');
+					}
 				}
 			}
 			Number::Decimal(v) => v.fmt_sql(f, fmt),

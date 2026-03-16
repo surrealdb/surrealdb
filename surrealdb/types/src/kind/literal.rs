@@ -191,12 +191,14 @@ impl ToSql for KindLiteral {
 			KindLiteral::String(string) => QuoteStr(string).fmt_sql(f, fmt),
 			KindLiteral::Integer(x) => x.fmt_sql(f, fmt),
 			KindLiteral::Float(v) => {
-				if v.is_finite() {
-					// Add suffix to distinguish between int and float
-					v.fmt_sql(f, fmt);
-					f.push('f');
-				} else {
-					f.push_str(fmt_non_finite_f64(*v));
+				match fmt_non_finite_f64(*v) {
+					// Special case: Infinity, -Infinity or NaN
+					Some(special) => f.push_str(special),
+					// Regular float: add f to distinguish between int and float
+					None => {
+						v.fmt_sql(f, fmt);
+						f.push('f');
+					}
 				}
 			}
 			KindLiteral::Decimal(v) => {

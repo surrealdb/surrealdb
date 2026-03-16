@@ -31,12 +31,11 @@ use revision::revisioned;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, fmt_non_finite_f64, write_sql};
 
 use super::IndexFormat;
 use crate::err::Error;
 use crate::expr::decimal::DecimalLexEncoder;
-use crate::fmt::fmt_non_finite_f64;
 use crate::fnc::util::math::ToFloat;
 use crate::val::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 
@@ -198,10 +197,11 @@ impl ToSql for Number {
 		match self {
 			Number::Int(v) => v.fmt_sql(f, sql_fmt),
 			Number::Float(v) => {
-				if !v.is_finite() {
-					write_sql!(f, sql_fmt, "{}", fmt_non_finite_f64(*v))
-				} else {
-					write_sql!(f, sql_fmt, "{v}f")
+				match fmt_non_finite_f64(*v) {
+					// Special case: Infinity, -Infinity or NaN
+					Some(special) => write_sql!(f, sql_fmt, "{}", special),
+					// Regular float: add f to distinguish between int and float
+					None => write_sql!(f, sql_fmt, "{v}f"),
 				}
 			}
 			Number::Decimal(v) => v.fmt_sql(f, sql_fmt),

@@ -10,19 +10,9 @@ use std::fmt::Display;
 pub use escape::{
 	EscapeIdent, EscapeKwFreeIdent, EscapeKwIdent, EscapeObjectKey, EscapeRidKey, QuoteStr,
 };
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, fmt_non_finite_f64};
 
 use crate::sql;
-
-pub(crate) fn fmt_non_finite_f64(v: f64) -> &'static str {
-	if v.is_nan() {
-		"NaN"
-	} else if v.is_sign_positive() {
-		"Infinity"
-	} else {
-		"-Infinity"
-	}
-}
 
 /// Implements ToSql by calling formatter on contents.
 pub(crate) struct Fmt<T, F> {
@@ -209,11 +199,14 @@ pub struct Float(pub f64);
 
 impl ToSql for Float {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		if !self.0.is_finite() {
-			f.push_str(fmt_non_finite_f64(self.0));
-		} else {
-			self.0.fmt_sql(f, fmt);
-			f.push('f');
+		match fmt_non_finite_f64(self.0) {
+			// Special case: Infinity, -Infinity or NaN
+			Some(special) => f.push_str(special),
+			// Regular float: add f to distinguish between int and float
+			None => {
+				self.0.fmt_sql(f, fmt);
+				f.push('f');
+			}
 		}
 	}
 }
