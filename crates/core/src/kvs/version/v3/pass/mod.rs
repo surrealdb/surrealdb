@@ -1359,9 +1359,9 @@ impl Visitor for MigratorPass<'_> {
 			self.w.write_str(" FULL")?;
 		} else {
 			self.w.write_str(" FOR create ")?;
-			self.visit_permission(&d.permissions.update)?;
+			self.visit_permission(&d.permissions.create)?;
 			self.w.write_str(" FOR select ")?;
-			self.visit_permission(&d.permissions.update)?;
+			self.visit_permission(&d.permissions.select)?;
 			self.w.write_str(" FOR update ")?;
 			self.visit_permission(&d.permissions.update)?;
 		}
@@ -1440,6 +1440,7 @@ impl Visitor for MigratorPass<'_> {
 		if let Some(ref v) = d.changefeed {
 			write!(self.w, " {v}")?;
 		}
+		write!(self.w, " ")?;
 		self.visit_permissions(&d.permissions)?;
 		Ok(())
 	}
@@ -1454,11 +1455,11 @@ impl Visitor for MigratorPass<'_> {
 		} else {
 			if !matches!(d.create, Permission::Full) {
 				self.w.write_str(" FOR create ")?;
-				self.visit_permission(&d.update)?;
+				self.visit_permission(&d.create)?;
 			}
 			if !matches!(d.select, Permission::Full) {
 				self.w.write_str(" FOR select ")?;
-				self.visit_permission(&d.update)?;
+				self.visit_permission(&d.select)?;
 			}
 			if !matches!(d.update, Permission::Full) {
 				self.w.write_str(" FOR update ")?;
