@@ -1631,9 +1631,9 @@ impl<T: SurrealValue + Hash + Eq> SurrealValue for HashSet<T> {
 ///
 /// As such, it's best to use SurrealValue directly where possible. This is intended for types where
 /// an implementation of SurrealValue isn't available or practical
-pub struct Wrapper<T: Serialize + DeserializeOwned>(pub T);
+pub struct SerdeWrapper<T: Serialize + DeserializeOwned>(pub T);
 
-impl<T: Serialize + DeserializeOwned> SurrealValue for Wrapper<T> {
+impl<T: Serialize + DeserializeOwned> SurrealValue for SerdeWrapper<T> {
 	fn kind_of() -> Kind {
 		Kind::Any
 	}
