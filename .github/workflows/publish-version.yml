@@ -400,6 +400,15 @@ jobs:
           echo v${{ needs.prepare-vars.outputs.version }} > latest.txt
           aws s3 cp --cache-control 'no-store' latest.txt s3://download.surrealdb.com/latest.txt
 
+      - name: Set stable major-version pointer (e.g. v2.txt)
+        if: ${{ inputs.publish == 'true' && needs.prepare-vars.outputs.environment == 'stable' }}
+        shell: bash
+        run: |
+          version="${{ needs.prepare-vars.outputs.version }}"
+          major="${version%%.*}"
+          echo "v${version}" > "v${major}.txt"
+          aws s3 cp --cache-control 'no-store' "v${major}.txt" "s3://download.surrealdb.com/v${major}.txt"
+
       - name: Set latest alpha or beta version
         if: ${{ inputs.publish && (needs.prepare-vars.outputs.environment == 'alpha' || needs.prepare-vars.outputs.environment == 'beta') }}
         run: |
