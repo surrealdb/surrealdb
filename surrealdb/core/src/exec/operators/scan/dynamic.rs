@@ -593,7 +593,7 @@ async fn resolve_table_scan_stream(
 			|| cfg
 				.order
 				.as_ref()
-				.map_or(true, |o| index_covers_ordering(&index_ref, &access, direction, o)) =>
+				.is_none_or(|o| index_covers_ordering(&index_ref, &access, direction, o)) =>
 		{
 			let operator = IndexScan::new(
 				index_ref,
