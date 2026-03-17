@@ -33,11 +33,11 @@ use crate::expr::statements::{
 	DefineTableStatement, DefineUserStatement, DeleteStatement, ForeachStatement, IfelseStatement,
 	InfoStatement, InsertStatement, KillStatement, LiveFields, LiveStatement, OptionStatement,
 	OutputStatement, RelateStatement, RemoveAccessStatement, RemoveAnalyzerStatement,
-	RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
-	RemoveIndexStatement, RemoveModelStatement, RemoveModuleStatement, RemoveNamespaceStatement,
-	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
-	SelectStatement, SetStatement, ShowStatement, SleepStatement, UpdateStatement, UpsertStatement,
-	UseStatement,
+	RemoveConfigStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
+	RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement, RemoveModuleStatement,
+	RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
+	RemoveUserStatement, SelectStatement, SetStatement, ShowStatement, SleepStatement,
+	UpdateStatement, UpsertStatement, UseStatement,
 };
 use crate::expr::{
 	AccessType, Block, ClosureExpr, Data, Expr, Field, Fields, Function, FunctionCall, Idiom,
@@ -560,6 +560,9 @@ implement_visitor! {
 			RemoveStatement::Module(r) => {
 				this.visit_remove_module(r)?;
 			},
+			RemoveStatement::Config(r) => {
+				this.visit_remove_config(r)?;
+			},
 		}
 		Ok(())
 	}
@@ -579,6 +582,10 @@ implement_visitor! {
 	}
 
 	fn visit_remove_module(this, r: &RemoveModuleStatement){
+		Ok(())
+	}
+
+	fn visit_remove_config(this, r: &RemoveConfigStatement){
 		Ok(())
 	}
 
@@ -1965,6 +1972,9 @@ implement_visitor_mut! {
 			RemoveStatement::Module(r) => {
 				this.visit_mut_remove_module(r)?;
 			},
+			RemoveStatement::Config(r) => {
+				this.visit_mut_remove_config(r)?;
+			},
 		}
 		Ok(())
 	}
@@ -1984,6 +1994,10 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_remove_module(this, r: &mut RemoveModuleStatement){
+		Ok(())
+	}
+
+	fn visit_mut_remove_config(this, r: &mut RemoveConfigStatement){
 		Ok(())
 	}
 
