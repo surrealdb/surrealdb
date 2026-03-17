@@ -37,6 +37,7 @@ impl Fields {
 							rename: field_attrs.rename,
 							default: field_attrs.default,
 							flatten: field_attrs.flatten,
+							wrap: field_attrs.wrap,
 						}
 					})
 					.collect();
@@ -50,9 +51,29 @@ impl Fields {
 			syn::Fields::Unnamed(unnamed_fields) => {
 				let unnamed_field_attrs = UnnamedFieldsAttributes::parse(attrs);
 				let fields = unnamed_fields.unnamed.iter().map(|field| field.ty.clone()).collect();
+				let wrap = unnamed_fields
+					.unnamed
+					.iter()
+					.map(|field| {
+						field.attrs.iter().any(|attr| {
+							let mut wrap = false;
+							if attr.path().is_ident("surreal") {
+								attr.parse_nested_meta(|meta| {
+									if meta.path.is_ident("wrap") {
+										wrap = true;
+									}
+									Ok(())
+								})
+								.ok();
+							};
+							wrap
+						})
+					})
+					.collect();
 
 				Fields::Unnamed(UnnamedFields::new(
 					fields,
+					wrap,
 					unnamed_field_attrs.tuple,
 					unnamed_field_attrs.skip_content,
 				))
@@ -108,7 +129,7 @@ impl Fields {
 		let value_from_t = crate_path.value_from_t();
 		match self {
 			Fields::Named(fields) => {
-				let map_assignments = fields.map_assignments();
+				let map_assignments = fields.map_assignments(crate_path);
 
 				match strategy {
 					Strategy::VariantKey {
@@ -193,9 +214,14 @@ impl Fields {
 			}
 			Fields::Unnamed(x) => {
 				let value = if !x.tuple && x.fields.len() == 1 {
-					quote!(#value_from_t(field_0))
+					if x.wrap[0] {
+						let wrapper = crate_path.wrapper();
+						quote!(#value_from_t(#wrapper(field_0)))
+					} else {
+						quote!(#value_from_t(field_0))
+					}
 				} else {
-					let arr_assignments = x.arr_assignments();
+					let arr_assignments = x.arr_assignments(crate_path);
 					quote! {{
 						let mut arr = #array_ty::new();
 						#(#arr_assignments)*
@@ -428,7 +454,7 @@ impl Fields {
 					Strategy::Value {
 						variant: Some(_),
 					} => {
-						let field_checks = fields.field_checks();
+						let field_checks = fields.field_checks(crate_path);
 
 						With::Map(quote! {{
 							let mut valid = true;
@@ -453,10 +479,18 @@ impl Fields {
 				// Single field
 				if !fields.tuple && fields.fields.len() == 1 {
 					let ty = &fields.fields[0];
-					let retrieve = quote! {{
-						let field_0 = <#ty as SurrealValue>::from_value(value)?;
-						#ok
-					}};
+					let retrieve = if fields.wrap[0] {
+						let wrapper = crate_path.wrapper();
+						quote! {{
+							let field_0 = <#wrapper::<#ty> as SurrealValue>::from_value(value)?.0;
+							#ok
+						}}
+					} else {
+						quote! {{
+							let field_0 = <#ty as SurrealValue>::from_value(value)?;
+							#ok
+						}}
+					};
 
 					match strategy {
 						Strategy::VariantKey {
@@ -517,7 +551,7 @@ impl Fields {
 						} => With::Value(retrieve),
 					}
 				} else {
-					let arr_retrievals = fields.arr_retrievals();
+					let arr_retrievals = fields.arr_retrievals(crate_path);
 					let retrieve_arr = quote! {{
 						#(#arr_retrievals)*
 						#ok
@@ -582,7 +616,7 @@ impl Fields {
 						Strategy::Value {
 							variant: Some(_),
 						} => {
-							let field_checks = fields.field_checks();
+							let field_checks = fields.field_checks(crate_path);
 							With::Arr(quote! {{
 								let mut valid = true;
 								#(#field_checks)*
@@ -715,7 +749,7 @@ impl Fields {
 		let value_ty = crate_path.value();
 		match self {
 			Fields::Named(fields) => {
-				let field_checks = fields.field_checks();
+				let field_checks = fields.field_checks(crate_path);
 
 				match strategy {
 					Strategy::VariantKey {
@@ -775,7 +809,12 @@ impl Fields {
 				// Single field
 				if !fields.tuple && fields.fields.len() == 1 {
 					let ty = &fields.fields[0];
-					let check = quote!( <#ty as SurrealValue>::is_value(value) );
+					let check = if fields.wrap[0] {
+						let wrapper = crate_path.wrapper();
+						quote!( <#wrapper::<#ty> as SurrealValue>::is_value(value) )
+					} else {
+						quote!( <#ty as SurrealValue>::is_value(value) )
+					};
 
 					match strategy {
 						Strategy::VariantKey {
@@ -824,7 +863,7 @@ impl Fields {
 						}}),
 					}
 				} else {
-					let field_checks = fields.field_checks();
+					let field_checks = fields.field_checks(crate_path);
 					let check_arr = quote!( #(#field_checks)* );
 					let check_value = quote! {{
 						if let #value_ty::Array(arr) = value {
@@ -960,7 +999,7 @@ impl Fields {
 		let kind_literal_ty = crate_path.kind_literal();
 		match self {
 			Fields::Named(fields) => {
-				let map_types = fields.map_types();
+				let map_types = fields.map_types(crate_path);
 
 				match strategy {
 					Strategy::VariantKey {
@@ -1018,9 +1057,14 @@ impl Fields {
 			Fields::Unnamed(fields) => {
 				let kind_of = if !fields.tuple && fields.fields.len() == 1 {
 					let ty = &fields.fields[0];
-					quote!( <#ty as SurrealValue>::kind_of() )
+					if fields.wrap[0] {
+						let wrapper = crate_path.wrapper();
+						quote!( <#wrapper::<#ty> as SurrealValue>::kind_of() )
+					} else {
+						quote!( <#ty as SurrealValue>::kind_of() )
+					}
 				} else {
-					let arr_types = fields.arr_types();
+					let arr_types = fields.arr_types(crate_path);
 
 					quote! {{
 						let mut arr = Vec::new();

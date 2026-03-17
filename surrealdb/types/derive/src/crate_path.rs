@@ -104,6 +104,12 @@ impl CratePath {
 		let base = &self.path;
 		quote! { #base::Value::from_t }
 	}
+
+	/// Get the path to the SerdeWrapper type
+	pub fn wrapper(&self) -> TokenStream {
+		let base = &self.path;
+		quote! { #base::SerdeWrapper }
+	}
 }
 
 impl Default for CratePath {
