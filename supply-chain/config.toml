@@ -1291,6 +1291,14 @@ criteria = "safe-to-deploy"
 version = "0.5.4"
 criteria = "safe-to-deploy"
 
+[[exemptions.surrealdb]]
+version = "2.6.4"
+criteria = "safe-to-deploy"
+
+[[exemptions.surrealdb-core]]
+version = "2.6.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.surrealdb-librocksdb-sys]]
 version = "0.17.3+10.6.2"
 criteria = "safe-to-deploy"
