@@ -21,6 +21,7 @@ mod misc;
 mod peek;
 mod place;
 pub mod prime;
+mod range;
 mod record_id;
 mod special;
 mod stmt;
@@ -185,8 +186,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		};
 
 		if source.len() > u32::MAX as usize {
+			let span = parser.peek_span();
 			return Err(parser
-				.error("Query length exceeds maximum length supported by the parser")
+				.error("Query length exceeds maximum length supported by the parser", span)
 				.to_diagnostic()
 				.unwrap());
 		}
@@ -205,8 +207,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
 			if runner.depth() > config.depth_limit {
 				std::mem::drop(runner);
+				let span = parser.peek_span();
 				return Err(parser
-					.error("Parser hit maximum configured recursion depth")
+					.error("Parser hit maximum configured recursion depth", span)
 					.to_diagnostic()
 					.unwrap());
 			}
@@ -249,8 +252,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		};
 
 		if source.len() > u32::MAX as usize {
+			let span = parser.peek_span();
 			return Err(parser
-				.error("Query length exceeds maximum length supported by the parser")
+				.error("Query length exceeds maximum length supported by the parser", span)
 				.to_diagnostic()
 				.unwrap());
 		}
@@ -276,8 +280,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
 			if runner.depth() > config.depth_limit {
 				std::mem::drop(runner);
+				let span = parser.peek_span();
 				return Err(parser
-					.error("Parser hit maximum configured recursion depth")
+					.error("Parser hit maximum configured recursion depth", span)
 					.to_diagnostic()
 					.unwrap());
 			}
@@ -336,6 +341,29 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		}
 	}
 
+	/// Same as [`speculate`] but not returning a future.
+	pub fn speculate_sync<T, F>(&mut self, cb: F) -> ParseResult<Option<T>>
+	where
+		F: FnOnce(&mut Parser) -> ParseResult<T>,
+	{
+		let backup = self.lex.clone();
+		let old_state = self.state;
+		self.state |= ParserState::SPECULATING;
+		let res = cb(self);
+		self.state = old_state;
+		match res {
+			Ok(x) => Ok(Some(x)),
+			Err(e) => {
+				if e.is_speculative() && !self.state.contains(ParserState::SPECULATING) {
+					self.lex = backup;
+					Ok(None)
+				} else {
+					Err(e)
+				}
+			}
+		}
+	}
+
 	pub async fn sub_parse<P: Parse>(&mut self, sub_str: &str) -> ParseResult<P> {
 		let lex = BaseTokenKind::lexer(sub_str);
 		let lex = PeekableLexer::new(lex);
@@ -373,6 +401,21 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		let old_state = self.state;
 		self.state &= !ParserState::SPECULATING;
 		let res = cb(self).await;
+		self.state = old_state;
+		res
+	}
+
+	/// Undoes the speculative state within it's closure.
+	///
+	/// Use to commit to some branching paths in a speculative context while still able to
+	/// speulcate in other branches.
+	pub fn commit_sync<T, F>(&mut self, cb: F) -> ParseResult<T>
+	where
+		F: FnOnce(&mut Parser) -> ParseResult<T>,
+	{
+		let old_state = self.state;
+		self.state &= !ParserState::SPECULATING;
+		let res = cb(self);
 		self.state = old_state;
 		res
 	}
@@ -436,7 +479,8 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				if self.settings.contains(ParserSettings::PARTIAL) {
 					Err(ParseError::missing_data_error())
 				} else {
-					Err(self.error(format!("Unexpected end of query, expected {expected}")))
+					let span = self.peek_span();
+					Err(self.error(format!("Unexpected end of query, expected {expected}"), span))
 				}
 			}
 			Some(Err(e)) => Err(self.lex_error(e)),
@@ -500,7 +544,8 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			if self.settings.contains(ParserSettings::PARTIAL) {
 				Err(ParseError::missing_data_error())
 			} else {
-				Err(self.error(format!("Unexpected end of query, expected {expected}")))
+				let span = self.eof_span();
+				Err(self.error(format!("Unexpected end of query, expected {expected}"), span))
 			}
 		}
 	}
@@ -530,6 +575,22 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			}
 		}
 		Ok(None)
+	}
+
+	/// Returns the next token after the first in the lexer without consuming it.
+	///
+	/// Also returns None if the token was not joined to the previous token.
+	pub fn peek_joined(&mut self) -> ParseResult<Option<Token>> {
+		match self.peek()? {
+			Some(x) => {
+				if let Joined::Joined = x.joined {
+					Ok(Some(x))
+				} else {
+					Ok(None)
+				}
+			}
+			None => Ok(None),
+		}
 	}
 
 	/// Returns the next token after the first in the lexer without consuming it.
@@ -584,34 +645,34 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		Ok(token)
 	}
 
-	/// Returns if we reached the end of file of the source
-	pub fn eof(&self) -> bool {
-		self.lex.is_empty()
-	}
-
 	/// Returns the error marking the next token in the parser to be an unexpected token.
 	/// Expects a string specifying what was expected at this point.
 	#[cold]
 	pub fn unexpected(&mut self, expected: &str) -> ParseError {
 		match self.peek() {
 			Err(e) => e,
-			Ok(Some(token)) => {
-				if self.state.contains(ParserState::SPECULATING) {
-					return ParseError::speculate_error();
-				}
-				self.error(format!(
-					"Unexpected token `{}`, expected {}",
-					self.slice(token.span),
-					expected
-				))
-			}
+			Ok(Some(token)) => self.unexpected_token(expected, token),
 			Ok(None) => {
 				if self.state.contains(ParserState::SPECULATING) {
 					return ParseError::speculate_error();
 				}
-				self.error(format!("Unexpected end of query, expected {}", expected))
+				let span = self.peek_span();
+				self.error(format!("Unexpected end of query, expected {}", expected), span)
 			}
 		}
+	}
+
+	/// Returns the error marking the next token in the parser to be an unexpected token.
+	/// Expects a string specifying what was expected at this point.
+	#[cold]
+	pub fn unexpected_token(&mut self, expected: &str, token: Token) -> ParseError {
+		if self.state.contains(ParserState::SPECULATING) {
+			return ParseError::speculate_error();
+		}
+		self.error(
+			format!("Unexpected token `{}`, expected {}", self.slice(token.span), expected),
+			token.span,
+		)
 	}
 
 	#[cold]
@@ -674,7 +735,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	where
 		F: FnOnce(BaseLexer<'source>, &mut String) -> ParseResult<(BaseLexer<'source>, T)>,
 	{
-		assert!(self.lex.is_empty(), "Lexing special tokens requires the lexer to be empty");
+		assert!(!self.lex.has_peek(), "Lexing special tokens requires the lexer to be empty");
 
 		let lexer = self.lex.lexer().clone();
 		let (lex, t) = f(lexer, &mut self.unescape_buffer)?;
@@ -714,11 +775,10 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
 	/// Returns an error with the given message with a snippet pointing to the next token.
 	#[cold]
-	pub fn error<T>(&mut self, msg: T) -> ParseError
+	pub fn error<T>(&mut self, msg: T, span: Span) -> ParseError
 	where
 		Cow<'source, str>: From<T>,
 	{
-		let span = self.peek_span();
 		self.with_error(|this| {
 			Level::Error
 				.title(msg)
@@ -757,20 +817,19 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		delimiter: BaseTokenKind,
 		open_span: Span,
 	) -> ParseResult<Token> {
-		if let Some(next) = self.next()? {
-			if next.token != delimiter {
-				let span = self.peek_span();
+		if let Some(peek) = self.peek()? {
+			if peek.token != delimiter {
 				return Err(self.with_error(|this| {
 					Level::Error
 						.title(format!(
 							"Unexpected token `{}`, expected closing delimiter {}",
-							this.slice(span),
+							this.slice(peek.span),
 							delimiter.description()
 						))
 						.snippet(
 							this.snippet()
 								.annotate(
-									AnnotationKind::Primary.span(span).label(format!(
+									AnnotationKind::Primary.span(peek.span).label(format!(
 										"Missing {} here.",
 										delimiter.description()
 									)),
@@ -784,7 +843,8 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 						.to_diagnostic()
 				}));
 			}
-			Ok(next)
+			let _ = self.next();
+			Ok(peek)
 		} else {
 			return Err(self.with_error(|this| {
 				Level::Error
@@ -821,18 +881,23 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	}
 
 	/// Returns the span of that points to the end of the source.
-	pub fn eof_span(&mut self) -> Span {
+	pub fn eof_span(&self) -> Span {
 		self.lex.eof_span()
+	}
+
+	/// Returns the span of that points to the end of the source.
+	pub fn eof(&mut self) -> bool {
+		self.lex.peek::<0>().is_none()
 	}
 
 	#[track_caller]
 	pub fn todo<T>(&mut self) -> ParseResult<T> {
 		let loc = std::panic::Location::caller();
-		Err(self.error(format!(
-			"hit an unimplemented path in the parser: {}:{}",
-			loc.file(),
-			loc.line()
-		)))
+		let span = self.peek_span();
+		Err(self.error(
+			format!("hit an unimplemented path in the parser: {}:{}", loc.file(), loc.line()),
+			span,
+		))
 	}
 }
 

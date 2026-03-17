@@ -24,7 +24,7 @@ pub type DateTime = BaseDateTime<Utc>;
 mod mac;
 mod types;
 pub mod vis;
-mod visit;
+//mod visit;
 
 pub use types::{AstSpan, Node, NodeId, NodeList, NodeListId, Spanned, UniqueNode};
 
@@ -60,6 +60,8 @@ library! {
 		relate_stmt: Vec<Relate>,
 		select_stmt: Vec<Select>,
 		insert_stmt: Vec<Insert>,
+		rebuild_stmt: Vec<Rebuild>,
+		access_stmt: Vec<Access>,
 
 		define_ns_stmt: Vec<DefineNamespace>,
 		define_db_stmt: Vec<DefineDatabase>,
@@ -87,6 +89,7 @@ library! {
 		remove_index: Vec<RemoveIndex>,
 		remove_bucket: Vec<RemoveBucket>,
 		remove_sequence: Vec<RemoveSequence>,
+		remove_user: Vec<RemoveUser>,
 		remove_access: Vec<RemoveAccess>,
 		remove_analyzer: Vec<RemoveAnalyzer>,
 		remove_api: Vec<RemoveApi>,
@@ -95,9 +98,14 @@ library! {
 		alter_ns_stmt: Vec<AlterNamespace>,
 		alter_db_stmt: Vec<AlterDatabase>,
 		alter_table_stmt: Vec<AlterTable>,
+		alter_field_stmt: Vec<AlterField>,
 		alter_index_stmt: Vec<AlterIndex>,
+		alter_sequence_stmt: Vec<AlterSequence>,
 
 		explain_stmt: Vec<Explain>,
+
+		order: Vec<Order>,
+		orders: Vec<NodeList<Order>>,
 
 		filter: Vec<Filter>,
 		filters: Vec<NodeList<Filter>>,
@@ -145,6 +153,11 @@ library! {
 		binary: Vec<BinaryExpr>,
 		postfix: Vec<PostfixExpr>,
 		prefix: Vec<PrefixExpr>,
+
+		lookup_subject: Vec<LookupSubject>,
+		lookup_subjects: Vec<NodeList<LookupSubject>>,
+		lookup: Vec<Lookup>,
+		recurse: Vec<Recurse>,
 		idiom: Vec<IdiomExpr>,
 
 		destructure: Vec<Destructure>,
@@ -162,9 +175,6 @@ library! {
 		list_selector: Vec<ListSelector>,
 		list_selectors: Vec<NodeList<ListSelector>>,
 		selector: Vec<Selector>,
-
-		fetch: Vec<Fetch>,
-		fetchs: Vec<NodeList<Fetch>>,
 
 		output: Vec<Output>,
 
@@ -298,7 +308,7 @@ ast_type! {
 ast_type! {
 	pub struct Return{
 		pub expr: NodeId<Expr>,
-		pub fetch: Option<NodeListId<Fetch>>,
+		pub fetch: Option<NodeListId<Expr>>,
 	}
 }
 
@@ -452,6 +462,7 @@ ast_type! {
 		pub targets: NodeListId<Expr>,
 		pub with_index: Option<WithIndex>,
 		pub condition: Option<NodeId<Expr>>,
+		pub output: Option<NodeId<Output>>,
 		pub timeout: Option<NodeId<Expr>>,
 		pub explain: Option<ExplainClause>,
 	}
@@ -495,13 +506,6 @@ ast_type! {
 	}
 }
 
-ast_type! {
-	pub enum OrderByKind{
-		Rand(Span),
-		Places(NodeListId<PresentPlace>),
-	}
-}
-
 impl_vis_type! {
 	#[derive(Debug)]
 	pub enum OrderDirection{
@@ -511,8 +515,8 @@ impl_vis_type! {
 }
 
 ast_type! {
-	pub struct OrderBy{
-		pub kind: OrderByKind,
+	pub struct Order{
+		pub expr: NodeId<Expr>,
 		pub collate: bool,
 		pub numeric: bool,
 		pub direction: Option<OrderDirection>,
@@ -520,23 +524,9 @@ ast_type! {
 }
 
 ast_type! {
-	pub struct FetchTypeFields{
-		pub args: Option<NodeListId<Expr>>,
-	}
-}
-
-ast_type! {
-	pub struct FetchTypeField{
-		pub arg: NodeId<Expr>,
-	}
-}
-
-ast_type! {
-	pub enum Fetch{
-		Param(NodeId<Param>),
-		Place(NodeId<PresentPlace>),
-		TypeField(FetchTypeField),
-		TypeFields(FetchTypeFields),
+	pub enum OrderBy{
+		Rand(Span),
+		List(NodeListId<Order>),
 	}
 }
 
@@ -544,25 +534,26 @@ impl_vis_type! {
 	#[derive(Debug)]
 	pub enum Group{
 		All,
-		Fields(NodeListId<PresentPlace>),
+		Fields(NodeListId<Expr>),
 	}
 }
 
 ast_type! {
 	pub struct Select{
 		pub fields: NodeId<Fields>,
+		pub omit: Option<NodeListId<Expr>>,
 		pub only: bool,
 		pub from: NodeListId<Expr>,
 		pub with_index: Option<WithIndex>,
 		pub condition: Option<NodeId<Expr>>,
-		pub split: Option<NodeListId<PresentPlace>>,
+		pub split: Option<NodeListId<Expr>>,
 		pub group: Option<Group>,
 		pub order: Option<OrderBy>,
 		pub start: Option<NodeId<Expr>>,
 		pub limit: Option<NodeId<Expr>>,
 		pub version: Option<NodeId<Expr>>,
 		pub timeout: Option<NodeId<Expr>>,
-		pub fetch: Option<NodeListId<Fetch>>,
+		pub fetch: Option<NodeListId<Expr>>,
 		pub tempfiles: bool,
 		pub explain: Option<ExplainClause>,
 	}
@@ -601,6 +592,91 @@ ast_type! {
 		pub output: Option<NodeId<Output>>,
 		pub version: Option<NodeId<Expr>>,
 		pub timeout: Option<NodeId<Expr>>,
+	}
+}
+
+ast_type! {
+	pub struct Rebuild{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub table: NodeId<Expr>,
+		pub concurrently: bool,
+	}
+}
+
+ast_type! {
+	pub enum AccessSubject{
+		User(NodeId<Ident>),
+		Subject(NodeId<RecordId>),
+	}
+}
+
+ast_type! {
+	pub struct AccessGrant{
+		pub subject: AccessSubject,
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum AccessShowKind{
+		All,
+		Condition(NodeId<Expr>),
+		Grant(NodeId<Ident>),
+	}
+}
+
+ast_type! {
+	pub struct AccessShow{
+		pub kind: AccessShowKind,
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum AccessRevokeKind{
+		All,
+		Condition(NodeId<Expr>),
+		Grant(NodeId<Ident>),
+	}
+}
+
+ast_type! {
+	pub struct AccessRevoke{
+		pub kind: AccessRevokeKind,
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum PurgeKind{
+		Expired,
+		Revoked,
+		Both,
+	}
+}
+
+ast_type! {
+	pub struct AccessPurge{
+		pub kind: PurgeKind,
+		pub grace: NodeId<Spanned<Duration>>,
+	}
+}
+
+ast_type! {
+	pub enum AccessKind{
+		Grant(AccessGrant),
+		Show(AccessShow),
+		Revoke(AccessRevoke),
+		Purge(AccessPurge),
+	}
+}
+
+ast_type! {
+	pub struct Access{
+		pub access: NodeId<Ident>,
+		pub base : Option<Base>,
+		pub kind: AccessKind,
 	}
 }
 
@@ -797,7 +873,7 @@ ast_type! {
 }
 
 ast_type! {
-	pub enum DefineFieldDefault{
+	pub enum FieldDefault{
 		Always(NodeId<Expr>),
 		Some(NodeId<Expr>),
 	}
@@ -834,7 +910,7 @@ ast_type! {
 		pub value: Option<NodeId<Expr>>,
 		pub assert: Option<NodeId<Expr>>,
 		pub computed: Option<NodeId<Expr>>,
-		pub default: Option<DefineFieldDefault>,
+		pub default: Option<FieldDefault>,
 		pub permissions: Option<FieldPermissions>,
 		pub comment: Option<NodeId<Expr>>,
 		// NOTE: maybe move into own struct if `REFERENCE` gets more subclauses.
@@ -1297,8 +1373,28 @@ ast_type! {
 		pub comment: Option<AlterKind<NodeId<Expr>>>,
 		pub changefeed: Option<AlterKind<ChangeFeed>>,
 		pub schema: Option<Schema>,
+		pub table_kind: Option<TableKind>,
 		pub compact: bool,
 		pub permissions: Option<TablePermissions>,
+	}
+}
+
+ast_type! {
+	pub struct AlterField{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub table: NodeId<Expr>,
+		pub ty: Option<AlterKind<NodeId<Type>>>,
+		pub flexible: Option<AlterKind<()>>,
+		pub readonly: Option<AlterKind<()>>,
+		pub value: Option<AlterKind<NodeId<Expr>>>,
+		pub assert: Option<AlterKind<NodeId<Expr>>>,
+		pub default: Option<AlterKind<FieldDefault>>,
+		// NOTE: maybe move into own struct if `REFERENCE` gets more subclauses.
+		/// `REFERENCE ON DELETE` clause
+		pub on_delete: Option<AlterKind<OnDelete>>,
+		pub comment: Option<AlterKind<NodeId<Expr>>>,
+		pub permissions: Option<FieldPermissions>,
 	}
 }
 
@@ -1309,6 +1405,14 @@ ast_type! {
 		pub table: NodeId<Expr>,
 		pub comment: Option<AlterKind<NodeId<Expr>>>,
 		pub prepare_remove: bool,
+	}
+}
+
+ast_type! {
+	pub struct AlterSequence{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub timeout: Option<AlterKind<Expr>>,
 	}
 }
 
@@ -1358,6 +1462,7 @@ ast_type! {
 
 		Mock(NodeId<Mock>),
 		Closure(NodeId<Closure>),
+		UnboundedRange(NodeId<Span>),
 
 		JsFunction(NodeId<JsFunction>),
 
@@ -1386,6 +1491,8 @@ ast_type! {
 		Relate(NodeId<Relate>),
 		Select(NodeId<Select>),
 		Insert(NodeId<Insert>),
+		Rebuild(NodeId<Rebuild>),
+		Access(NodeId<Access>),
 
 		Sleep(NodeId<Spanned<Duration>>),
 
@@ -1422,13 +1529,16 @@ ast_type! {
 		RemoveAnalyzer(NodeId<RemoveAnalyzer>),
 		RemoveBucket(NodeId<RemoveBucket>),
 		RemoveSequence(NodeId<RemoveSequence>),
+		RemoveUser(NodeId<RemoveUser>),
 		RemoveAccess(NodeId<RemoveAccess>),
 
 		AlterSystem(NodeId<AlterSystem>),
 		AlterNamespace(NodeId<AlterNamespace>),
 		AlterDatabase(NodeId<AlterDatabase>),
 		AlterTable(NodeId<AlterTable>),
+		AlterField(NodeId<AlterField>),
 		AlterIndex(NodeId<AlterIndex>),
+		AlterSequence(NodeId<AlterSequence>),
 
 		Explain(NodeId<Explain>)
 	}
@@ -1455,7 +1565,7 @@ ast_type! {
 	}
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Sign {
 	Plus,
 	Minus,
@@ -1471,6 +1581,34 @@ impl Node for Integer {}
 impl AstSpan for Integer {
 	fn ast_span<L: types::NodeLibrary>(&self, _: &types::Ast<L>) -> Span {
 		self.span
+	}
+}
+
+impl Integer {
+	pub fn with_sign(mut self, sign: Sign) -> Self {
+		self.sign = sign;
+		self
+	}
+
+	pub fn into_f64(&self) -> f64 {
+		let v = self.value as f64;
+		if let Sign::Minus = self.sign {
+			-v
+		} else {
+			v
+		}
+	}
+
+	pub fn into_i64(&self) -> Option<i64> {
+		const I64_MAX: u64 = i64::MAX as u64;
+		const I64_NEG_MIN: u64 = (i64::MAX as u64) + 1;
+
+		match (self.sign, self.value) {
+			(Sign::Plus, 0..=I64_MAX) => Some(self.value as i64),
+			(Sign::Minus, 0..=I64_MAX) => Some(-(self.value as i64)),
+			(Sign::Minus, I64_NEG_MIN) => Some(i64::MIN),
+			_ => None,
+		}
 	}
 }
 
@@ -1523,7 +1661,7 @@ ast_type! {
 	#[derive(Copy, Clone)]
 	pub enum RecordIdKey{
 		String(NodeId<StringLit>),
-		Number(NodeId<Integer>),
+		Number(Spanned<i64>),
 		Uuid(NodeId<Spanned<Uuid>>),
 		Object(NodeId<Object>),
 		Array(NodeId<Array>),
@@ -1719,15 +1857,15 @@ pub enum BinaryOperator {
 		operator: Option<MatchesOperator>,
 	},
 	KNearestNeighbour {
-		k: u32,
+		k: NodeId<Integer>,
 		distance: Distance,
 	},
 	KTree {
-		k: u32,
+		k: NodeId<Integer>,
 	},
 	KApproximate {
-		k: u32,
-		ef: u32,
+		k: NodeId<Integer>,
+		ef: NodeId<Integer>,
 	},
 }
 
@@ -1810,6 +1948,86 @@ pub enum Direction {
 }
 impl_vis_debug!(Direction);
 
+ast_type! {
+	pub struct LookupSubjectRange{
+		pub table: NodeId<Ident>,
+		pub range: NodeId<RecordIdKeyRange>,
+		pub field: Option<NodeId<Ident>>,
+	}
+}
+
+ast_type! {
+	pub struct LookupSubjectTable{
+		pub table: NodeId<Ident>,
+		pub field: Option<NodeId<Ident>>,
+	}
+}
+
+ast_type! {
+	pub enum LookupSubject{
+		Range(LookupSubjectRange),
+		Table(LookupSubjectTable),
+	}
+}
+
+ast_type! {
+	pub struct BasicLookup{
+		pub from: Option<NodeListId<LookupSubject>>,
+		pub condition:  Option<NodeId<Expr>>,
+		pub limit: Option<NodeId<Expr>>,
+		pub start: Option<NodeId<Expr>>,
+		pub alias: Option<NodeId<PresentPlace>>,
+	}
+}
+
+ast_type! {
+	pub struct SelectLookup{
+		pub fields: NodeId<Fields>,
+		pub from: Option<NodeListId<LookupSubject>>,
+		pub condition:  Option<NodeId<Expr>>,
+		pub split: Option<NodeListId<Expr>>,
+		pub group: Option<Group>,
+		pub order: Option<OrderBy>,
+		pub limit: Option<NodeId<Expr>>,
+		pub start: Option<NodeId<Expr>>,
+		pub alias: Option<NodeId<PresentPlace>>,
+	}
+}
+
+ast_type! {
+	pub enum Lookup{
+		Any(Span),
+		Subject(NodeId<LookupSubject>),
+		Basic(BasicLookup),
+		Select(SelectLookup),
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum RecurseKind{
+		Path{
+			inclusive: bool,
+		},
+		Collect{
+			inclusive: bool,
+		},
+		Shortest{
+			expects: NodeId<Expr>,
+			inclusive: bool,
+		},
+	}
+}
+
+ast_type! {
+	pub struct Recurse{
+		pub start: Bound<NodeId<Integer>>,
+		pub end: Bound<NodeId<Integer>>,
+		pub kind: Option<RecurseKind>,
+		pub expr: NodeId<Expr>,
+	}
+}
+
 impl_vis_type! {
 	#[derive(Debug)]
 	pub enum IdiomOperator {
@@ -1817,6 +2035,8 @@ impl_vis_type! {
 		All,
 		/// [$]
 		Last,
+		/// `...`
+		Flatten,
 		/// .field
 		Field(NodeId<String>),
 		/// \[EXPR\]
@@ -1831,13 +2051,14 @@ impl_vis_type! {
 		Destructure(Option<NodeListId<Destructure>>),
 		/// (1, $bar)
 		Call(Option<NodeListId<Expr>>),
-		/// `<-?`, `->?` or `<->?`
-		GraphAny(Direction),
-		/// `<-ident`, `->ident` or `<->ident`
-		GraphTable{
+		/// `<-`, `->` or `<->`
+		Graph{
 			direction: Direction,
-			table: NodeId<Ident>
+			lookup: NodeId<Lookup>,
 		},
+		/// `<~`
+		Reference(NodeId<Lookup>),
+		Recurse(NodeId<Recurse>),
 	}
 }
 

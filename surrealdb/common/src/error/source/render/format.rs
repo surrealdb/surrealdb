@@ -21,8 +21,13 @@ impl Loc {
 		}
 
 		let mut col = 0;
-		for (i, _) in s[start_line..].char_indices() {
-			col += 1;
+		for (i, c) in s[start_line..].char_indices() {
+			// Handle tab length.
+			col += if c == '\t' {
+				4
+			} else {
+				1
+			};
 			if offset - start_line <= i {
 				col -= 1;
 				break;
@@ -135,15 +140,26 @@ fn render_element(buf: &mut CharBuffer, elem: &Snippet, line_color: Color) {
 
 		let line = source.lines().nth(start.line).unwrap_or("INVALID LINE");
 
-		buf.writer()
+		let mut writer = buf.writer();
+		writer
 			.push_fmt(format_args!("{line_n} "))
 			.color(line_color)
 			.push_str("| ")
-			.color(Color::Default)
-			.push_str(line)
-			.indent(line_n_indent)
-			.color(line_color)
-			.push_str("\n| ");
+			.color(Color::Default);
+
+		for c in line.chars() {
+			if c == '\t' {
+				// Tabs are replaced with 4 spaces to ensure consistent formatting.
+				writer.push_char(' ');
+				writer.push_char(' ');
+				writer.push_char(' ');
+				writer.push_char(' ');
+			} else {
+				writer.push_char(c);
+			}
+		}
+
+		buf.writer().indent(line_n_indent).color(line_color).push_str("\n| ");
 
 		for _ in 0..start.column {
 			buf.writer().push_str(" ");

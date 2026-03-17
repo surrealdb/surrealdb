@@ -245,7 +245,7 @@ Query
                     Expr::Integer
                         +2
                     .default: Some
-                    DefineFieldDefault::Some
+                    FieldDefault::Some
                         Expr::Integer
                             +3
                     .permissions: None
@@ -272,7 +272,7 @@ Query
                     .assert: None
                     .computed: None
                     .default: Some
-                    DefineFieldDefault::Some
+                    FieldDefault::Some
                         Expr::Integer
                             +3
                     .permissions: Some

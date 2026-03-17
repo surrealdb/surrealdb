@@ -13,7 +13,7 @@ Query
                     .name: Ident
                         .text: "a"
                     .key: RecordIdKey::Number
-                        +1
+                        1
         -TopLevelExpr::Expr
             Expr::RecordId
                 RecordId

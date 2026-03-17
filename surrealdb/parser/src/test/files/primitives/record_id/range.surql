@@ -19,10 +19,10 @@ Query
                         RecordIdKeyRange
                             .start: Bound::Included
                                 RecordIdKey::Number
-                                    +1
+                                    1
                             .end: Bound::Excluded
                                 RecordIdKey::Number
-                                    +2
+                                    2
         -TopLevelExpr::Expr
             Expr::RecordId
                 RecordId
@@ -32,10 +32,10 @@ Query
                         RecordIdKeyRange
                             .start: Bound::Excluded
                                 RecordIdKey::Number
-                                    +1
+                                    1
                             .end: Bound::Excluded
                                 RecordIdKey::Number
-                                    +2
+                                    2
         -TopLevelExpr::Expr
             Expr::RecordId
                 RecordId
@@ -45,10 +45,10 @@ Query
                         RecordIdKeyRange
                             .start: Bound::Excluded
                                 RecordIdKey::Number
-                                    +1
+                                    1
                             .end: Bound::Included
                                 RecordIdKey::Number
-                                    +2
+                                    2
         -TopLevelExpr::Expr
             Expr::RecordId
                 RecordId
@@ -58,10 +58,10 @@ Query
                         RecordIdKeyRange
                             .start: Bound::Included
                                 RecordIdKey::Number
-                                    +1
+                                    1
                             .end: Bound::Included
                                 RecordIdKey::Number
-                                    +2
+                                    2
         -TopLevelExpr::Expr
             Expr::RecordId
                 RecordId
@@ -72,7 +72,7 @@ Query
                             .start: Bound::Unbounded
                             .end: Bound::Included
                                 RecordIdKey::Number
-                                    +2
+                                    2
         -TopLevelExpr::Expr
             Expr::RecordId
                 RecordId
@@ -83,7 +83,7 @@ Query
                             .start: Bound::Unbounded
                             .end: Bound::Excluded
                                 RecordIdKey::Number
-                                    +2
+                                    2
         -TopLevelExpr::Expr
             Expr::RecordId
                 RecordId
@@ -93,7 +93,7 @@ Query
                         RecordIdKeyRange
                             .start: Bound::Included
                                 RecordIdKey::Number
-                                    +1
+                                    1
                             .end: Bound::Unbounded
         -TopLevelExpr::Expr
             Expr::RecordId
@@ -104,7 +104,7 @@ Query
                         RecordIdKeyRange
                             .start: Bound::Excluded
                                 RecordIdKey::Number
-                                    +1
+                                    1
                             .end: Bound::Unbounded
         -TopLevelExpr::Expr
             Expr::RecordId

@@ -9,7 +9,7 @@ DEFINE TABLE foo AS select * from bar;
 DEFINE TABLE foo CHANGEFEED 1s;
 DEFINE TABLE foo TYPE NORMAL;
 DEFINE TABLE foo TYPE ANY;
-DEFINE TABLE foo TYPE RELATION from a,b to c,d ENFORCED;
+DEFINE TABLE foo TYPE RELATION from a|b to c|d ENFORCED;
 DEFINE TABLE foo PERMISSIONS FULL;
 DEFINE TABLE foo PERMISSIONS NONE;
 DEFINE TABLE foo PERMISSIONS FOR select, delete FULL;
@@ -157,6 +157,7 @@ Query
                     Select
                         .fields: Fields::List
                                 -ListSelector::All
+                        .omit: None
                         .only: false
                         .from: 
                             -Expr::Path

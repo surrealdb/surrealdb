@@ -41,7 +41,7 @@ Query
                                                 .name: Ident
                                                     .text: "a"
                                                 .key: RecordIdKey::Number
-                                                    +1
+                                                    1
                                     .data: None
                                     .output: None
                                     .version: None
@@ -91,7 +91,7 @@ Query
                                                 .name: Ident
                                                     .text: "a"
                                                 .key: RecordIdKey::Number
-                                                    +1
+                                                    1
                                     .data: None
                                     .output: None
                                     .version: None
@@ -144,7 +144,7 @@ Query
                                                 .name: Ident
                                                     .text: "a"
                                                 .key: RecordIdKey::Number
-                                                    +1
+                                                    1
                                     .data: None
                                     .output: None
                                     .version: None
@@ -197,7 +197,7 @@ Query
                                                 .name: Ident
                                                     .text: "a"
                                                 .key: RecordIdKey::Number
-                                                    +1
+                                                    1
                                     .data: None
                                     .output: None
                                     .version: None

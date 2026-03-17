@@ -5,8 +5,9 @@ use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
 use token::{BaseTokenKind, T};
 
+use crate::parse::range::{TryRange, parse_prefix_range_sync, try_parse_infix_range_sync};
 use crate::parse::utils::parse_delimited_list;
-use crate::parse::{ParseResult, Parser};
+use crate::parse::{ParseError, ParseResult, Parser};
 use crate::{Parse, ParseSync};
 
 impl ParseSync for ast::Mock {
@@ -15,190 +16,49 @@ impl ParseSync for ast::Mock {
 		let name = parser.parse_sync()?;
 		let _ = parser.expect(T![:])?;
 		let peek = parser.peek_expect("an integer or a range")?;
+
+		fn peek_has_int(parser: &mut Parser) -> ParseResult<bool> {
+			parser.peek().map(|x| {
+				x.map(|x| matches!(x.token, BaseTokenKind::Int | T![+] | T![-])).unwrap_or(false)
+			})
+		}
+
 		match peek.token {
 			BaseTokenKind::Int => {
 				let start_int = parser.parse_sync()?;
-				let peek = parser.peek_expect("`|`")?;
-				match peek.token {
-					T![>] => {
-						let peek1 = parser.peek_joined1()?;
-						if let Some(x) = peek1
-							&& let T![..] = x.token
-						{
-							let peek2 = parser.peek_joined2()?;
-							if let Some(x) = peek2
-								&& let T![=] = x.token
-							{
-								// |a:1>..=2|
-								let _ = parser.next();
-								let _ = parser.next();
-								let _ = parser.next();
-								let end = parser.parse_sync()?;
-								let _ = parser.expect_closing_delimiter(T![|], start.span)?;
+				let try_range = try_parse_infix_range_sync(parser, start_int, peek_has_int)?;
+				let kind = match try_range {
+					TryRange::None(x) => ast::MockKind::Integer(x),
+					TryRange::Some {
+						start,
+						end,
+					} => ast::MockKind::Range {
+						start,
+						end,
+					},
+				};
 
-								let span = parser.span_since(start.span);
+				let _ = parser.expect_closing_delimiter(T![|], start.span)?;
 
-								Ok(ast::Mock {
-									name,
-									kind: ast::MockKind::Range {
-										start: Bound::Excluded(start_int),
-										end: Bound::Included(end),
-									},
-									span,
-								})
-							} else if let Some(peek2) = parser.peek2()?
-								&& let BaseTokenKind::Int = peek2.token
-							{
-								// |a:1>..2|
-								let _ = parser.next();
-								let _ = parser.next();
-								let end = parser.parse_sync()?;
-								let _ = parser.expect_closing_delimiter(T![|], start.span)?;
-
-								let span = parser.span_since(start.span);
-								Ok(ast::Mock {
-									name,
-									kind: ast::MockKind::Range {
-										start: Bound::Excluded(start_int),
-										end: Bound::Excluded(end),
-									},
-									span,
-								})
-							} else {
-								// |a:1>..|
-								let _ = parser.next();
-								let _ = parser.next();
-								let _ = parser.expect_closing_delimiter(T![|], start.span)?;
-								let span = parser.span_since(start.span);
-								Ok(ast::Mock {
-									name,
-									kind: ast::MockKind::Range {
-										start: Bound::Excluded(start_int),
-										end: Bound::Unbounded,
-									},
-									span,
-								})
-							}
-						} else {
-							Err(parser.unexpected("`>..`"))
-						}
-					}
-					T![..] => {
-						let peek1 = parser.peek_joined1()?;
-						if let Some(x) = peek1
-							&& let T![=] = x.token
-						{
-							// |a:1..=2|
-							let _ = parser.next();
-							let _ = parser.next();
-							let end = parser.parse_sync()?;
-							let _ = parser.expect_closing_delimiter(T![|], start.span)?;
-
-							let span = parser.span_since(start.span);
-
-							Ok(ast::Mock {
-								name,
-								kind: ast::MockKind::Range {
-									start: Bound::Included(start_int),
-									end: Bound::Included(end),
-								},
-								span,
-							})
-						} else if let Some(peek1) = parser.peek1()?
-							&& let BaseTokenKind::Int = peek1.token
-						{
-							// |a:..2|
-							let _ = parser.next();
-							let end = parser.parse_sync()?;
-							let _ = parser.expect_closing_delimiter(T![|], start.span)?;
-
-							let span = parser.span_since(start.span);
-							Ok(ast::Mock {
-								name,
-								kind: ast::MockKind::Range {
-									start: Bound::Included(start_int),
-									end: Bound::Excluded(end),
-								},
-								span,
-							})
-						} else {
-							// |a:1..|
-							let _ = parser.next();
-							let _ = parser.expect_closing_delimiter(T![|], start.span)?;
-
-							let span = parser.span_since(start.span);
-							Ok(ast::Mock {
-								name,
-								kind: ast::MockKind::Range {
-									start: Bound::Included(start_int),
-									end: Bound::Unbounded,
-								},
-								span,
-							})
-						}
-					}
-					_ => {
-						// |a:1|
-						let _ = parser.expect_closing_delimiter(T![|], start.span)?;
-						Ok(ast::Mock {
-							name,
-							kind: ast::MockKind::Integer(start_int),
-							span: start.span.extend(peek.span),
-						})
-					}
-				}
+				let span = parser.span_since(start.span);
+				Ok(ast::Mock {
+					name,
+					kind,
+					span,
+				})
 			}
 			T![..] => {
-				if let Some(x) = parser.peek_joined1()?
-					&& let T![=] = x.token
-				{
-					// |a:..=2|
-					let _ = parser.next();
-					let _ = parser.next();
-					let end = parser.parse_sync()?;
-					let _ = parser.expect_closing_delimiter(T![|], start.span)?;
-
-					let span = parser.span_since(start.span);
-
-					Ok(ast::Mock {
-						name,
-						kind: ast::MockKind::Range {
-							start: Bound::Unbounded,
-							end: Bound::Included(end),
-						},
-						span,
-					})
-				} else if let Some(x) = parser.peek1()?
-					&& let BaseTokenKind::Int = x.token
-				{
-					// |a:..2|
-					let _ = parser.next();
-					let end = parser.parse_sync()?;
-					let _ = parser.expect_closing_delimiter(T![|], start.span)?;
-
-					let span = parser.span_since(start.span);
-					Ok(ast::Mock {
-						name,
-						kind: ast::MockKind::Range {
-							start: Bound::Unbounded,
-							end: Bound::Excluded(end),
-						},
-						span,
-					})
-				} else {
-					// |a:..|
-					let _ = parser.next();
-					let _ = parser.expect_closing_delimiter(T![|], start.span)?;
-					let span = parser.span_since(start.span);
-					Ok(ast::Mock {
-						name,
-						kind: ast::MockKind::Range {
-							start: Bound::Unbounded,
-							end: Bound::Unbounded,
-						},
-						span,
-					})
-				}
+				let bound = parse_prefix_range_sync(parser, peek_has_int)?;
+				let _ = parser.expect_closing_delimiter(T![|], start.span)?;
+				let span = parser.span_since(start.span);
+				Ok(ast::Mock {
+					name,
+					kind: ast::MockKind::Range {
+						start: Bound::Unbounded,
+						end: bound,
+					},
+					span,
+				})
 			}
 			_ => Err(parser.unexpected("an integer or a range")),
 		}
@@ -596,7 +456,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			});
 			Ok(Expr::Float(float))
 		}
-		BaseTokenKind::PosInfinity => {
+		BaseTokenKind::PosInfinity | BaseTokenKind::Infinity => {
 			let _ = parser.next();
 			let float = parser.push(Spanned {
 				span: peek.span,
@@ -624,19 +484,47 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 		BaseTokenKind::OpenParen => {
 			let _ = parser.next();
 
-			// Try parsing a point: (float, float)
+			// Try parsing a point: (float|int, float|int)
 			if let Some((x, y, span)) = parser
 				.speculate(async |parser| {
-					let x: f64 = parser.parse_sync()?;
+					let expect = "an integer or a float";
+					let peek = parser.peek_expect(expect)?;
+					let x = match peek.token {
+						T![+] | T![-] => match parser.peek1()?.map(|x| x.token) {
+							Some(BaseTokenKind::Int) => {
+								parser.parse_sync::<ast::Integer>()?.into_f64()
+							}
+							Some(BaseTokenKind::Float) => parser.parse_sync::<f64>()?,
+							_ => return Err(ParseError::speculate_error()),
+						},
+						BaseTokenKind::Float => parser.parse_sync::<f64>()?,
+						BaseTokenKind::Int => parser.parse_sync::<ast::Integer>()?.into_f64(),
+						_ => return Err(ParseError::speculate_error()),
+					};
+
 					let _ = parser.expect(T![,])?;
 					// The `,` was accepted so this has to be a point.
 					// So commit to parsing `FLOAT )`
 					let y: f64 = parser
 						.commit(async |parser| {
-							let res = parser.parse_sync()?;
+							let peek_float = parser.peek_expect(expect)?;
+							let y = match peek_float.token {
+								T![+] | T![-] => match parser.peek1()?.map(|x| x.token) {
+									Some(BaseTokenKind::Int) => {
+										parser.parse_sync::<ast::Integer>()?.into_f64()
+									}
+									Some(BaseTokenKind::Float) => parser.parse_sync::<f64>()?,
+									_ => return Err(parser.unexpected(expect)),
+								},
+								BaseTokenKind::Float => parser.parse_sync::<f64>()?,
+								BaseTokenKind::Int => {
+									parser.parse_sync::<ast::Integer>()?.into_f64()
+								}
+								_ => return Err(parser.unexpected(expect)),
+							};
 							let _ = parser
 								.expect_closing_delimiter(BaseTokenKind::CloseParen, peek.span)?;
-							Ok(res)
+							Ok(y)
 						})
 						.await?;
 					Ok((x, y, parser.span_since(peek.span)))
@@ -735,6 +623,8 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 		T![RELATE] => Ok(Expr::Relate(parser.parse().await?)),
 		T![SELECT] => Ok(Expr::Select(parser.parse().await?)),
 		T![INSERT] => Ok(Expr::Insert(parser.parse().await?)),
+		T![REBUILD] => Ok(Expr::Rebuild(parser.parse().await?)),
+		T![ACCESS] => Ok(Expr::Access(parser.parse().await?)),
 		T![DEFINE] => {
 			let expected = "a resource type to define";
 			let Some(peek) = parser.peek1()? else {
@@ -784,6 +674,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				T![ANALYZER] => parser.parse().await.map(Expr::RemoveAnalyzer),
 				T![BUCKET] => parser.parse().await.map(Expr::RemoveBucket),
 				T![SEQUENCE] => parser.parse().await.map(Expr::RemoveSequence),
+				T![USER] => parser.parse().await.map(Expr::RemoveUser),
 				T![ACCESS] => parser.parse().await.map(Expr::RemoveAccess),
 				_ => {
 					let _ = parser.next();
@@ -802,7 +693,9 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				T![NAMESPACE] => parser.parse().await.map(Expr::AlterNamespace),
 				T![DATABASE] => parser.parse().await.map(Expr::AlterDatabase),
 				T![TABLE] => parser.parse().await.map(Expr::AlterTable),
+				T![FIELD] => parser.parse().await.map(Expr::AlterField),
 				T![INDEX] => parser.parse().await.map(Expr::AlterIndex),
+				T![SEQUENCE] => parser.parse().await.map(Expr::AlterSequence),
 				_ => {
 					let _ = parser.next();
 					return Err(parser.unexpected(expected));
@@ -812,6 +705,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 		T![EXPLAIN] => Ok(Expr::Explain(parser.parse().await?)),
 		T![@] => {
 			let _ = parser.next();
+
 			Ok(Expr::Document(parser.push(peek.span)))
 		}
 		T![<] => {
@@ -832,6 +726,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 			}
 		}
 		T![->] => Ok(Expr::Document(parser.push(peek.span))),
+		T![<~] => Ok(Expr::Document(parser.push(peek.span))),
 		BaseTokenKind::Param => {
 			let path = parser.parse_sync()?;
 			Ok(Expr::Param(path))

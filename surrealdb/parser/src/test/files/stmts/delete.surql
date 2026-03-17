@@ -21,6 +21,7 @@ Query
                                 .parts: None
                     .with_index: None
                     .condition: None
+                    .output: None
                     .timeout: None
                     .explain: None
         -TopLevelExpr::Expr
@@ -40,6 +41,7 @@ Query
                                 .parts: None
                     .with_index: None
                     .condition: None
+                    .output: None
                     .timeout: None
                     .explain: None
         -TopLevelExpr::Expr
@@ -59,6 +61,7 @@ Query
                                 .parts: None
                     .with_index: None
                     .condition: None
+                    .output: None
                     .timeout: None
                     .explain: None
         -TopLevelExpr::Expr
@@ -79,6 +82,7 @@ Query
                     .with_index: Some
                     WithIndex::None
                     .condition: None
+                    .output: None
                     .timeout: None
                     .explain: None
         -TopLevelExpr::Expr
@@ -103,6 +107,7 @@ Query
                             -Ident
                                 .text: "b"
                     .condition: None
+                    .output: None
                     .timeout: None
                     .explain: None
         -TopLevelExpr::Expr
@@ -137,6 +142,7 @@ Query
                             .op: ExactEqual
                             .right: Expr::Integer
                                 +1
+                    .output: None
                     .timeout: None
                     .explain: None
         -TopLevelExpr::Expr
@@ -171,6 +177,7 @@ Query
                             .op: ExactEqual
                             .right: Expr::Integer
                                 +1
+                    .output: None
                     .timeout: Some
                     Expr::Duration
                         1s
@@ -208,6 +215,7 @@ Query
                             .op: ExactEqual
                             .right: Expr::Integer
                                 +1
+                    .output: None
                     .timeout: Some
                     Expr::Duration
                         1s

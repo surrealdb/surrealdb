@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use ast::PathSegment;
+use ast::{NodeId, PathSegment};
 use common::source_error::{AnnotationKind, Level};
 use logos::Logos;
 use rust_decimal::Decimal;
@@ -37,12 +37,39 @@ impl ParseSync for ast::Param {
 	}
 }
 
+pub fn ununderscore_slice<'a>(slice: &'a str, buffer: &'a mut String) -> &'a str {
+	let Some((a, mut rest)) = slice.split_once('_') else {
+		return slice;
+	};
+	buffer.clear();
+	buffer.push_str(a);
+	while let Some((head, tail)) = rest.split_once('_') {
+		buffer.push_str(head);
+		rest = tail
+	}
+	buffer
+}
+
 impl ParseSync for f64 {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let sign = if parser.eat(T![+])?.is_some() {
+			ast::Sign::Plus
+		} else if parser.eat(T![-])?.is_some() {
+			ast::Sign::Minus
+		} else {
+			ast::Sign::Plus
+		};
+
 		let token = parser.expect(BaseTokenKind::Float)?;
 		let slice = parser.slice(token.span);
-		let float = slice.trim_end_matches("f").parse().expect("lexer should ensure valid floats");
-		Ok(float)
+		let slice = ununderscore_slice(slice, &mut parser.unescape_buffer);
+		let float: f64 =
+			slice.trim_end_matches("f").parse().expect("lexer should ensure valid floats");
+		if let ast::Sign::Minus = sign {
+			Ok(-float)
+		} else {
+			Ok(float)
+		}
 	}
 }
 
@@ -51,6 +78,7 @@ impl ParseSync for Decimal {
 		let token = parser.expect(BaseTokenKind::Decimal)?;
 		let slice =
 			parser.slice(token.span).strip_suffix("dec").expect("decimal tokens should end in dec");
+		let slice = ununderscore_slice(slice, &mut parser.unescape_buffer);
 		let decimal = if slice.contains(['e', 'E']) {
 			Decimal::from_scientific(slice).expect("lexer should ensure valid decimals").normalize()
 		} else {
@@ -63,7 +91,35 @@ impl ParseSync for Decimal {
 impl ParseSync for ast::Path {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
 		let span = parser.peek_span();
-		let start = parser.parse_sync()?;
+		let start = parser.parse_sync::<NodeId<ast::Ident>>()?;
+
+		// Special path for ml::*<version> paths which don't have the ::< and are therefore
+		// generally ambiguous,
+		if start.index(parser).text.index(parser) == "ml" {
+			let ml = parser.speculate_sync(|parser| {
+				let _ = parser.expect(T![::])?;
+				let name = parser.parse_sync()?;
+				let open = parser.expect(T![<])?;
+				parser.commit_sync(|parser| {
+					let version = parser.parse_sync()?;
+					let _ = parser.expect_closing_delimiter(T![>], open.span)?;
+					Ok((name, version))
+				})
+			})?;
+			if let Some((name, version)) = ml {
+				let mut cur = None;
+				let mut parts = None;
+				let name = parser.push(name);
+				parser.push_list(ast::PathSegment::Ident(name), &mut parts, &mut cur);
+				parser.push_list(ast::PathSegment::Version(version), &mut parts, &mut cur);
+
+				return Ok(ast::Path {
+					start,
+					parts,
+					span: parser.span_since(span),
+				});
+			}
+		}
 
 		let mut cur = None;
 		let mut parts = None;
@@ -99,9 +155,31 @@ impl ParseSync for ast::Path {
 
 impl ParseSync for ast::Integer {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		fn parse_int_value(slice: &[u8]) -> Option<u64> {
+			let mut res: u64 = 0;
+			for b in slice.iter().copied() {
+				if b == b'_' {
+					continue;
+				}
+				// Lexer guarentees that no other characters then `[0-9_]` are present in the
+				// slice.
+				let v = (b - b'0') as u64;
+				res = res.checked_mul(10u64)?.checked_add(v)?;
+			}
+			Some(res)
+		}
+
+		let sign = if parser.eat(T![+])?.is_some() {
+			ast::Sign::Plus
+		} else if parser.eat(T![-])?.is_some() {
+			ast::Sign::Minus
+		} else {
+			ast::Sign::Plus
+		};
+
 		let token = parser.expect(BaseTokenKind::Int)?;
 		let slice = parser.slice(token.span);
-		let Ok(x) = slice.parse() else {
+		let Some(x) = parse_int_value(slice.as_bytes()) else {
 			return Err(parser.with_error(|parser| {
 				Level::Error
 					.title("Integer too large to fit in target type")
@@ -111,7 +189,7 @@ impl ParseSync for ast::Integer {
 		};
 
 		Ok(ast::Integer {
-			sign: ast::Sign::Plus,
+			sign,
 			value: x,
 			span: token.span,
 		})

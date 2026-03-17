@@ -56,6 +56,7 @@ impl Parse for ast::PresentPlace {
 				break;
 			};
 			match peek.token {
+				T![...] => {}
 				T![.] => {
 					let _ = parser.next();
 					let new_lhs = parser.push(lhs);

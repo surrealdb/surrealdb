@@ -1,7 +1,5 @@
-use std::{
-	fmt::{Arguments, Write},
-	io,
-};
+use std::fmt::{Arguments, Write};
+use std::io;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Default, Debug)]
 pub enum Color {
@@ -235,6 +233,21 @@ impl<'a> CharBufferWriter<'a> {
 				}
 			}
 			self.buffer.push_str(s, self.color, self.style);
+		}
+		self
+	}
+
+	/// Push a string into the writer, unlike `write_str` this doesn't return an `Result`.
+	pub fn push_char(&mut self, c: char) -> &mut Self {
+		if c == '\n' {
+			self.buffer.push_char(c, self.color, self.style);
+		} else {
+			if self.buffer.lines.last().unwrap().is_empty() {
+				for _ in 0..self.indent {
+					self.buffer.push_char(' ', self.color, self.style);
+				}
+			}
+			self.buffer.push_char(c, self.color, self.style);
 		}
 		self
 	}

@@ -64,6 +64,7 @@ pub enum BaseTokenKind {
 	#[token("..")]
 	DotDot,
 	#[token("...")]
+	#[token("…")]
 	DotDotDot,
 
 	#[token("!")]
@@ -82,6 +83,8 @@ pub enum BaseTokenKind {
 
 	#[token("<")]
 	LeftShevron,
+	#[token("<~")]
+	LeftShevronTilde,
 	#[token("<=")]
 	LeftShevronEqual,
 	#[token("<|")]
@@ -182,16 +185,17 @@ pub enum BaseTokenKind {
 	#[token("NaN")]
 	NaN,
 	#[token(r"Infinity")]
+	Infinity,
 	#[token(r"+Infinity")]
 	PosInfinity,
 	#[token(r"-Infinity")]
 	NegInfinity,
-	#[regex(r"[0-9]+f")]
-	#[regex(r"[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?(f)?")]
+	#[regex(r"[0-9][0-9_]*f")]
+	#[regex(r"[0-9][0-9_]*(\.[0-9][0-9_]*)?([eE][-+]?[0-9][0-9_]*)?(f)?")]
 	Float,
-	#[regex(r"[0-9]+(\.[0-9]+)?([eE][-+]?[0-9]+)?dec")]
+	#[regex(r"[0-9][0-9_]*(\.[0-9][0-9_]*)?([eE][-+]?[0-9][0-9_]*)?dec")]
 	Decimal,
-	#[regex(r"[0-9]+", priority = 3)]
+	#[regex(r"[0-9][0-9_]*", priority = 3)]
 	Int,
 	#[regex(r"(?&duration_part)+")]
 	Duration,
@@ -392,6 +396,8 @@ pub enum BaseTokenKind {
 	KwIgnore,
 	#[regex(r"(?i)INCLUDE")]
 	KwInclude,
+	#[regex(r"(?i)INCLUSIVE")]
+	KwInclusive,
 	#[regex(r"(?i)INDEX")]
 	KwIndex,
 	#[regex(r"(?i)INFO")]
@@ -482,13 +488,15 @@ pub enum BaseTokenKind {
 	#[regex(r"(?i)PARALLEL")]
 	KwParallel,
 	#[regex(r"(?i)PARAM")]
-	KwKwParam,
+	KwParam,
 	#[regex(r"(?i)PASSHASH")]
 	KwPasshash,
 	#[regex(r"(?i)PASSWORD")]
 	KwPassword,
 	#[regex(r"(?i)PATCH")]
 	KwPatch,
+	#[regex(r"(?i)PATH")]
+	KwPath,
 	#[regex(r"(?i)PERMISSIONS")]
 	KwPermissions,
 	#[regex(r"(?i)POSTINGS_CACHE")]
@@ -554,6 +562,8 @@ pub enum BaseTokenKind {
 	KwSet,
 	#[regex(r"(?i)SHOW")]
 	KwShow,
+	#[regex(r"(?i)SHORTEST")]
+	KwShortest,
 	#[regex(r"(?i)SIGNIN")]
 	KwSignin,
 	#[regex(r"(?i)SIGNUP")]
@@ -735,6 +745,8 @@ pub enum BaseTokenKind {
 	KwMultiLine,
 	#[regex(r"(?i)MULTIPOLYGON")]
 	KwMultiPolygon,
+	#[regex(r"(?i)COLLECT")]
+	KwCollect,
 	#[regex(r"(?i)COLLECTION")]
 	KwCollection,
 	#[regex(r"(?i)FILE")]
@@ -838,6 +850,7 @@ impl BaseTokenKind {
 			BaseTokenKind::QuestionEqual => "`?=`",
 			BaseTokenKind::QuestionColon => "`?:`",
 			BaseTokenKind::LeftShevron => "`<`",
+			BaseTokenKind::LeftShevronTilde => "`<~`",
 			BaseTokenKind::LeftShevronEqual => "`<=`",
 			BaseTokenKind::LeftShevronHLine => "`<|`",
 			BaseTokenKind::RightShevron => "`>`",
@@ -962,6 +975,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwHnsw => "keyword `HNSW`",
 			BaseTokenKind::KwIgnore => "keyword `IGNORE`",
 			BaseTokenKind::KwInclude => "keyword `INCLUDE`",
+			BaseTokenKind::KwInclusive => "keyword `INCLUSIVE`",
 			BaseTokenKind::KwIndex => "keyword `INDEX`",
 			BaseTokenKind::KwInfo => "keyword `INFO`",
 			BaseTokenKind::KwInsert => "keyword `INSERT`",
@@ -1006,10 +1020,11 @@ impl BaseTokenKind {
 			BaseTokenKind::KwOriginal => "keyword `ORIGINAL`",
 			BaseTokenKind::KwOverwrite => "keyword `OVERWRITE`",
 			BaseTokenKind::KwParallel => "keyword `PARALLEL`",
-			BaseTokenKind::KwKwParam => "keyword `KWPARAM`",
+			BaseTokenKind::KwParam => "keyword `PARAM`",
 			BaseTokenKind::KwPasshash => "keyword `PASSHASH`",
 			BaseTokenKind::KwPassword => "keyword `PASSWORD`",
 			BaseTokenKind::KwPatch => "keyword `PATCH`",
+			BaseTokenKind::KwPath => "keyword `PATH`",
 			BaseTokenKind::KwPermissions => "keyword `PERMISSIONS`",
 			BaseTokenKind::KwPostingsCache => "keyword `POSTINGSCACHE`",
 			BaseTokenKind::KwPostingsOrder => "keyword `POSTINGSORDER`",
@@ -1041,6 +1056,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwSession => "keyword `SESSION`",
 			BaseTokenKind::KwSet => "keyword `SET`",
 			BaseTokenKind::KwShow => "keyword `SHOW`",
+			BaseTokenKind::KwShortest => "keyword `SHORTEST`",
 			BaseTokenKind::KwSignin => "keyword `SIGNIN`",
 			BaseTokenKind::KwSignup => "keyword `SIGNUP`",
 			BaseTokenKind::KwSince => "keyword `SINCE`",
@@ -1129,6 +1145,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwMultiPoint => "keyword `MULTIPOINT`",
 			BaseTokenKind::KwMultiLine => "keyword `MULTILINE`",
 			BaseTokenKind::KwMultiPolygon => "keyword `MULTIPOLYGON`",
+			BaseTokenKind::KwCollect => "keyword `COLLECT`",
 			BaseTokenKind::KwCollection => "keyword `COLLECTION`",
 			BaseTokenKind::KwFile => "keyword `FILE`",
 			BaseTokenKind::KwEdDSA => "keyword `EDDSA`",
@@ -1170,6 +1187,7 @@ impl BaseTokenKind {
 			BaseTokenKind::Param => "a parameter",
 			BaseTokenKind::Ident => "an identifier",
 			BaseTokenKind::NaN => "`NaN`",
+			BaseTokenKind::Infinity => "infinity",
 			BaseTokenKind::PosInfinity => "infinity",
 			BaseTokenKind::NegInfinity => "negative infinity",
 			BaseTokenKind::Float => "a float",
@@ -1312,10 +1330,11 @@ impl BaseTokenKind {
 				| Self::KwOriginal
 				| Self::KwOverwrite
 				| Self::KwParallel
-				| Self::KwKwParam
+				| Self::KwParam
 				| Self::KwPasshash
 				| Self::KwPassword
 				| Self::KwPatch
+				| Self::KwPath
 				| Self::KwPermissions
 				| Self::KwPostingsCache
 				| Self::KwPostingsOrder

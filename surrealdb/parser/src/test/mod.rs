@@ -1,11 +1,9 @@
 #![cfg(test)]
 
-use std::io::Write;
 use std::path::Path;
 use std::{env, fmt};
 
 use ast::Query;
-use common::source_error;
 
 use crate::Config;
 
@@ -121,6 +119,7 @@ fn text_test() {
 #[test]
 fn all_language_tests() {
 	let mut failed = 0;
+	let mut successfull = 0;
 	let tests_path = Path::new(env!("CARGO_MANIFEST_DIR"))
 		.join("..")
 		.join("..")
@@ -147,7 +146,9 @@ fn all_language_tests() {
 		);
 
 		match res {
-			Ok(_) => {}
+			Ok(_) => {
+				successfull += 1;
+			}
 			Err(e) => {
 				eprintln!(
 					"Language test `{}` failed to parse",
@@ -164,7 +165,7 @@ fn all_language_tests() {
 	});
 
 	if failed != 0 {
-		eprintln!("\nFailed {failed} tests.");
+		eprintln!("\nFailed {failed} tests, parsed {successfull} tests successfully.");
 		panic!("Did not parse all the tests correctly");
 	}
 }

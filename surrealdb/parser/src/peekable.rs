@@ -55,6 +55,12 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 		})
 	}
 
+	pub fn push_token(&mut self, token: Token) {
+		assert_ne!(self.write.wrapping_add(1) & Self::MASK, self.read);
+		self.peek[(self.write & Self::MASK) as usize] = MaybeUninit::new(Ok(token));
+		self.write = self.write.wrapping_add(1);
+	}
+
 	#[inline]
 	pub fn peek<const OFFSET: u8>(&mut self) -> Option<Result<Token, LexError>> {
 		const {
@@ -129,8 +135,8 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 	}
 
 	#[inline]
-	pub fn is_empty(&self) -> bool {
-		self.read == self.write
+	pub fn has_peek(&self) -> bool {
+		self.read != self.write
 	}
 
 	#[inline]

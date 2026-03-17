@@ -27,6 +27,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: false
                     .from: 
                         -Expr::Path
@@ -69,6 +70,7 @@ Query
                                                 .text: "c"
                                             .parts: None
                                     .alias: None
+                    .omit: None
                     .only: false
                     .from: 
                         -Expr::Path
@@ -98,6 +100,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -122,6 +125,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -151,6 +155,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -187,6 +192,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -209,12 +215,16 @@ Query
                             .right: Expr::Integer
                                 +2
                     .split: Some
-                        -PresentPlace::Field
-                            Ident
-                                .text: "a"
-                        -PresentPlace::Field
-                            Ident
-                                .text: "b"
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "a"
+                                .parts: None
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "b"
+                                .parts: None
                     .group: None
                     .order: None
                     .start: None
@@ -229,6 +239,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -253,12 +264,16 @@ Query
                     .split: None
                     .group: Some
                     Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "a"
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "b"
+                                    .parts: None
                     .order: None
                     .start: None
                     .limit: None
@@ -272,6 +287,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -296,21 +312,27 @@ Query
                     .split: None
                     .group: Some
                     Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
-                    .order: Some
-                    OrderBy
-                        .kind: OrderByKind::Places
-                                -PresentPlace::Field
-                                    Ident
+                            -Expr::Path
+                                Path
+                                    .start: Ident
                                         .text: "a"
-                        .collate: false
-                        .numeric: false
-                        .direction: None
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "b"
+                                    .parts: None
+                    .order: Some
+                    OrderBy::List
+                            -Order
+                                .expr: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .collate: false
+                                .numeric: false
+                                .direction: None
                     .start: None
                     .limit: None
                     .version: None
@@ -323,6 +345,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -347,21 +370,27 @@ Query
                     .split: None
                     .group: Some
                     Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
-                    .order: Some
-                    OrderBy
-                        .kind: OrderByKind::Places
-                                -PresentPlace::Field
-                                    Ident
+                            -Expr::Path
+                                Path
+                                    .start: Ident
                                         .text: "a"
-                        .collate: false
-                        .numeric: false
-                        .direction: None
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "b"
+                                    .parts: None
+                    .order: Some
+                    OrderBy::List
+                            -Order
+                                .expr: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .collate: false
+                                .numeric: false
+                                .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -376,6 +405,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -400,21 +430,27 @@ Query
                     .split: None
                     .group: Some
                     Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
-                    .order: Some
-                    OrderBy
-                        .kind: OrderByKind::Places
-                                -PresentPlace::Field
-                                    Ident
+                            -Expr::Path
+                                Path
+                                    .start: Ident
                                         .text: "a"
-                        .collate: false
-                        .numeric: false
-                        .direction: None
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "b"
+                                    .parts: None
+                    .order: Some
+                    OrderBy::List
+                            -Order
+                                .expr: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .collate: false
+                                .numeric: false
+                                .direction: None
                     .start: None
                     .limit: Some
                     Expr::Integer
@@ -429,6 +465,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -453,21 +490,27 @@ Query
                     .split: None
                     .group: Some
                     Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
-                    .order: Some
-                    OrderBy
-                        .kind: OrderByKind::Places
-                                -PresentPlace::Field
-                                    Ident
+                            -Expr::Path
+                                Path
+                                    .start: Ident
                                         .text: "a"
-                        .collate: false
-                        .numeric: false
-                        .direction: None
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "b"
+                                    .parts: None
+                    .order: Some
+                    OrderBy::List
+                            -Order
+                                .expr: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .collate: false
+                                .numeric: false
+                                .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -484,6 +527,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -508,21 +552,27 @@ Query
                     .split: None
                     .group: Some
                     Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
-                    .order: Some
-                    OrderBy
-                        .kind: OrderByKind::Places
-                                -PresentPlace::Field
-                                    Ident
+                            -Expr::Path
+                                Path
+                                    .start: Ident
                                         .text: "a"
-                        .collate: false
-                        .numeric: false
-                        .direction: None
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "b"
+                                    .parts: None
+                    .order: Some
+                    OrderBy::List
+                            -Order
+                                .expr: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .collate: false
+                                .numeric: false
+                                .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -539,6 +589,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -563,21 +614,27 @@ Query
                     .split: None
                     .group: Some
                     Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
-                    .order: Some
-                    OrderBy
-                        .kind: OrderByKind::Places
-                                -PresentPlace::Field
-                                    Ident
+                            -Expr::Path
+                                Path
+                                    .start: Ident
                                         .text: "a"
-                        .collate: false
-                        .numeric: false
-                        .direction: None
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "b"
+                                    .parts: None
+                    .order: Some
+                    OrderBy::List
+                            -Order
+                                .expr: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .collate: false
+                                .numeric: false
+                                .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -596,6 +653,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -620,21 +678,27 @@ Query
                     .split: None
                     .group: Some
                     Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
-                    .order: Some
-                    OrderBy
-                        .kind: OrderByKind::Places
-                                -PresentPlace::Field
-                                    Ident
+                            -Expr::Path
+                                Path
+                                    .start: Ident
                                         .text: "a"
-                        .collate: false
-                        .numeric: false
-                        .direction: None
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "b"
+                                    .parts: None
+                    .order: Some
+                    OrderBy::List
+                            -Order
+                                .expr: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .collate: false
+                                .numeric: false
+                                .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -655,6 +719,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -679,21 +744,27 @@ Query
                     .split: None
                     .group: Some
                     Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
-                    .order: Some
-                    OrderBy
-                        .kind: OrderByKind::Places
-                                -PresentPlace::Field
-                                    Ident
+                            -Expr::Path
+                                Path
+                                    .start: Ident
                                         .text: "a"
-                        .collate: false
-                        .numeric: false
-                        .direction: None
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "b"
+                                    .parts: None
+                    .order: Some
+                    OrderBy::List
+                            -Order
+                                .expr: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .collate: false
+                                .numeric: false
+                                .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -714,6 +785,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -738,166 +810,186 @@ Query
                     .split: None
                     .group: Some
                     Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
-                    .order: Some
-                    OrderBy
-                        .kind: OrderByKind::Places
-                                -PresentPlace::Field
-                                    Ident
+                            -Expr::Path
+                                Path
+                                    .start: Ident
                                         .text: "a"
-                        .collate: false
-                        .numeric: false
-                        .direction: None
-                    .start: Some
-                    Expr::Integer
-                        +1
-                    .limit: Some
-                    Expr::Integer
-                        +1
-                    .version: Some
-                    Expr::Integer
-                        +1
-                    .timeout: Some
-                    Expr::Duration
-                        1s
-                    .fetch: None
-                    .tempfiles: false
-                    .explain: Some
-                    ExplainClause::Base
-        -TopLevelExpr::Expr
-            Expr::Select
-                Select
-                    .fields: Fields::List
-                            -ListSelector::All
-                    .only: true
-                    .from: 
-                        -Expr::Path
-                            Path
-                                .start: Ident
-                                    .text: "foo"
-                                .parts: None
-                    .with_index: Some
-                    WithIndex::Some
-                            -Ident
-                                .text: "a"
-                            -Ident
-                                .text: "b"
-                    .condition: Some
-                    Expr::Binary
-                        BinaryExpr
-                            .left: Expr::Integer
-                                +1
-                            .op: ExactEqual
-                            .right: Expr::Integer
-                                +2
-                    .split: None
-                    .group: Some
-                    Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
-                    .order: Some
-                    OrderBy
-                        .kind: OrderByKind::Places
-                                -PresentPlace::Field
-                                    Ident
-                                        .text: "a"
-                        .collate: false
-                        .numeric: false
-                        .direction: None
-                    .start: Some
-                    Expr::Integer
-                        +1
-                    .limit: Some
-                    Expr::Integer
-                        +1
-                    .version: Some
-                    Expr::Integer
-                        +1
-                    .timeout: Some
-                    Expr::Duration
-                        1s
-                    .fetch: None
-                    .tempfiles: false
-                    .explain: Some
-                    ExplainClause::Base
-        -TopLevelExpr::Expr
-            Expr::Select
-                Select
-                    .fields: Fields::List
-                            -ListSelector::All
-                    .only: true
-                    .from: 
-                        -Expr::Path
-                            Path
-                                .start: Ident
-                                    .text: "foo"
-                                .parts: None
-                    .with_index: Some
-                    WithIndex::Some
-                            -Ident
-                                .text: "a"
-                            -Ident
-                                .text: "b"
-                    .condition: Some
-                    Expr::Binary
-                        BinaryExpr
-                            .left: Expr::Integer
-                                +1
-                            .op: ExactEqual
-                            .right: Expr::Integer
-                                +2
-                    .split: None
-                    .group: Some
-                    Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
-                    .order: Some
-                    OrderBy
-                        .kind: OrderByKind::Places
-                                -PresentPlace::Field
-                                    Ident
-                                        .text: "a"
-                        .collate: false
-                        .numeric: false
-                        .direction: None
-                    .start: Some
-                    Expr::Integer
-                        +1
-                    .limit: Some
-                    Expr::Integer
-                        +1
-                    .version: None
-                    .timeout: None
-                    .fetch: Some
-                        -Fetch::Place
-                            PresentPlace::Member
-                                MemberPresentPlace
-                                    .lhs: PresentPlace::Field
-                                        Ident
-                                            .text: "a"
-                                    .name: Ident
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
                                         .text: "b"
-                        -Fetch::Place
-                            PresentPlace::Member
-                                MemberPresentPlace
-                                    .lhs: PresentPlace::Field
-                                        Ident
+                                    .parts: None
+                    .order: Some
+                    OrderBy::List
+                            -Order
+                                .expr: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .collate: false
+                                .numeric: false
+                                .direction: None
+                    .start: Some
+                    Expr::Integer
+                        +1
+                    .limit: Some
+                    Expr::Integer
+                        +1
+                    .version: Some
+                    Expr::Integer
+                        +1
+                    .timeout: Some
+                    Expr::Duration
+                        1s
+                    .fetch: None
+                    .tempfiles: false
+                    .explain: Some
+                    ExplainClause::Base
+        -TopLevelExpr::Expr
+            Expr::Select
+                Select
+                    .fields: Fields::List
+                            -ListSelector::All
+                    .omit: None
+                    .only: true
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
+                    .with_index: Some
+                    WithIndex::Some
+                            -Ident
+                                .text: "a"
+                            -Ident
+                                .text: "b"
+                    .condition: Some
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
+                    .split: None
+                    .group: Some
+                    Group::Fields
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "a"
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "b"
+                                    .parts: None
+                    .order: Some
+                    OrderBy::List
+                            -Order
+                                .expr: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .collate: false
+                                .numeric: false
+                                .direction: None
+                    .start: Some
+                    Expr::Integer
+                        +1
+                    .limit: Some
+                    Expr::Integer
+                        +1
+                    .version: Some
+                    Expr::Integer
+                        +1
+                    .timeout: Some
+                    Expr::Duration
+                        1s
+                    .fetch: None
+                    .tempfiles: false
+                    .explain: Some
+                    ExplainClause::Base
+        -TopLevelExpr::Expr
+            Expr::Select
+                Select
+                    .fields: Fields::List
+                            -ListSelector::All
+                    .omit: None
+                    .only: true
+                    .from: 
+                        -Expr::Path
+                            Path
+                                .start: Ident
+                                    .text: "foo"
+                                .parts: None
+                    .with_index: Some
+                    WithIndex::Some
+                            -Ident
+                                .text: "a"
+                            -Ident
+                                .text: "b"
+                    .condition: Some
+                    Expr::Binary
+                        BinaryExpr
+                            .left: Expr::Integer
+                                +1
+                            .op: ExactEqual
+                            .right: Expr::Integer
+                                +2
+                    .split: None
+                    .group: Some
+                    Group::Fields
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "a"
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "b"
+                                    .parts: None
+                    .order: Some
+                    OrderBy::List
+                            -Order
+                                .expr: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .collate: false
+                                .numeric: false
+                                .direction: None
+                    .start: Some
+                    Expr::Integer
+                        +1
+                    .limit: Some
+                    Expr::Integer
+                        +1
+                    .version: None
+                    .timeout: None
+                    .fetch: Some
+                        -Expr::Idiom
+                            IdiomExpr
+                                .left: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .op: IdiomOperator::Field"b"
+                        -Expr::Idiom
+                            IdiomExpr
+                                .left: Expr::Path
+                                    Path
+                                        .start: Ident
                                             .text: "c"
-                                    .name: Ident
-                                        .text: "d"
+                                        .parts: None
+                                .op: IdiomOperator::Field"d"
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -905,6 +997,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -929,21 +1022,27 @@ Query
                     .split: None
                     .group: Some
                     Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
-                    .order: Some
-                    OrderBy
-                        .kind: OrderByKind::Places
-                                -PresentPlace::Field
-                                    Ident
+                            -Expr::Path
+                                Path
+                                    .start: Ident
                                         .text: "a"
-                        .collate: false
-                        .numeric: false
-                        .direction: None
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "b"
+                                    .parts: None
+                    .order: Some
+                    OrderBy::List
+                            -Order
+                                .expr: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .collate: false
+                                .numeric: false
+                                .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -953,13 +1052,22 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: Some
-                        -Fetch::TypeFields
-                            FetchTypeFields
-                                .args: Some
-                                    -Expr::Integer
-                                        +1
-                                    -Expr::Integer
-                                        +2
+                        -Expr::Idiom
+                            IdiomExpr
+                                .left: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "type"
+                                        .parts: Some
+                                            -PathSegment::Ident
+                                                Ident
+                                                    .text: "fields"
+                                .op: IdiomOperator::Call
+                                    Some
+                                        -Expr::Integer
+                                            +1
+                                        -Expr::Integer
+                                            +2
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -967,6 +1075,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -991,21 +1100,27 @@ Query
                     .split: None
                     .group: Some
                     Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
-                    .order: Some
-                    OrderBy
-                        .kind: OrderByKind::Places
-                                -PresentPlace::Field
-                                    Ident
+                            -Expr::Path
+                                Path
+                                    .start: Ident
                                         .text: "a"
-                        .collate: false
-                        .numeric: false
-                        .direction: None
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "b"
+                                    .parts: None
+                    .order: Some
+                    OrderBy::List
+                            -Order
+                                .expr: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .collate: false
+                                .numeric: false
+                                .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -1015,10 +1130,20 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: Some
-                        -Fetch::TypeField
-                            FetchTypeField
-                                .arg: Expr::Integer
-                                    +1
+                        -Expr::Idiom
+                            IdiomExpr
+                                .left: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "type"
+                                        .parts: Some
+                                            -PathSegment::Ident
+                                                Ident
+                                                    .text: "field"
+                                .op: IdiomOperator::Call
+                                    Some
+                                        -Expr::Integer
+                                            +1
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr
@@ -1026,6 +1151,7 @@ Query
                 Select
                     .fields: Fields::List
                             -ListSelector::All
+                    .omit: None
                     .only: true
                     .from: 
                         -Expr::Path
@@ -1050,21 +1176,27 @@ Query
                     .split: None
                     .group: Some
                     Group::Fields
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "a"
-                            -PresentPlace::Field
-                                Ident
-                                    .text: "b"
-                    .order: Some
-                    OrderBy
-                        .kind: OrderByKind::Places
-                                -PresentPlace::Field
-                                    Ident
+                            -Expr::Path
+                                Path
+                                    .start: Ident
                                         .text: "a"
-                        .collate: false
-                        .numeric: false
-                        .direction: None
+                                    .parts: None
+                            -Expr::Path
+                                Path
+                                    .start: Ident
+                                        .text: "b"
+                                    .parts: None
+                    .order: Some
+                    OrderBy::List
+                            -Order
+                                .expr: Expr::Path
+                                    Path
+                                        .start: Ident
+                                            .text: "a"
+                                        .parts: None
+                                .collate: false
+                                .numeric: false
+                                .direction: None
                     .start: Some
                     Expr::Integer
                         +1
@@ -1074,7 +1206,7 @@ Query
                     .version: None
                     .timeout: None
                     .fetch: Some
-                        -Fetch::Param
+                        -Expr::Param
                             Param
                                 .text: "p"
                     .tempfiles: false

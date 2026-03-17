@@ -3,8 +3,7 @@ mod define;
 mod remove;
 
 use ast::{
-	AstSpan, Expr, Fetch, InsertData, InsertInto, InsertTuples, NodeId, OrderBy, RecordData,
-	WithIndex,
+	AstSpan, Expr, InsertData, InsertInto, InsertTuples, NodeId, OrderBy, RecordData, WithIndex,
 };
 use common::source_error::{AnnotationKind, Level};
 use token::{BaseTokenKind, T};
@@ -21,6 +20,7 @@ impl Parse for ast::If {
 
 		if parser.eat(T![THEN])?.is_some() {
 			let then = parser.parse_enter().await?;
+			parser.eat(T![;])?;
 
 			let otherwise = if parser.eat(T![ELSE])?.is_some() {
 				let peek = parser.peek_expect("a `else` body")?;
@@ -29,6 +29,7 @@ impl Parse for ast::If {
 					Some(parser.push(Expr::If(otherwise)))
 				} else {
 					let res = parser.parse_enter().await?;
+					parser.eat(T![;])?;
 					let _ = parser.expect(T![END])?;
 					Some(res)
 				}
@@ -125,7 +126,23 @@ impl Parse for ast::Return {
 		let expr = parser.parse_enter().await?;
 
 		let fetch = if parser.eat(T![FETCH])?.is_some() {
-			Some(parse_seperated_list(parser, T![,], async |parser| parser.parse().await).await?.1)
+			Some(
+				parse_seperated_list(parser, T![,], async |parser| {
+					// Check for param or identifier,
+					// This check could be removed but keeping it in place can allow us to
+					// constrain the allowed syntax in the future without cause backwards
+					// incompatible changes
+					if let Some(t) = parser.peek()?
+						&& (t.token.is_identifier() || t.token == BaseTokenKind::Param)
+					{
+						parser.parse_enter().await
+					} else {
+						Err(parser.unexpected("a fetch expression"))
+					}
+				})
+				.await?
+				.1,
+			)
 		} else {
 			None
 		};
@@ -230,8 +247,13 @@ async fn try_parse_clause_expr(
 
 async fn try_parse_with(parser: &mut Parser<'_, '_>) -> ParseResult<Option<WithIndex>> {
 	if parser.eat(T![WITH])?.is_some() {
-		let peek = parser.peek_expect("`INDEX` or `NOINDEX`")?;
+		let peek = parser.peek_expect("`INDEX` `NO`, or `NOINDEX`")?;
 		let idx = match peek.token {
+			T![NO] => {
+				let _ = parser.next();
+				let _ = parser.expect(T![INDEX])?;
+				ast::WithIndex::None(peek.span)
+			}
 			T![NOINDEX] => {
 				let _ = parser.next();
 				ast::WithIndex::None(peek.span)
@@ -378,12 +400,22 @@ impl Parse for ast::Output {
 impl Parse for ast::Delete {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let start = parser.expect(T![DELETE])?;
+		let _ = parser.eat(T![FROM])?;
 		let only = parser.eat(T![ONLY])?.is_some();
 		let (_, targets) =
 			parse_seperated_list(parser, T![,], async |parser| parser.parse_enter().await).await?;
+
 		let with_index = try_parse_with(parser).await?;
 
 		let condition = try_parse_clause_expr(parser, T![WHERE]).await?;
+		let output = if let Some(x) = parser.peek()?
+			&& let T![RETURN] = x.token
+		{
+			Some(parser.parse().await?)
+		} else {
+			None
+		};
+
 		let timeout = try_parse_clause_expr(parser, T![TIMEOUT]).await?;
 
 		let explain = try_parse_explain(parser).await?;
@@ -394,6 +426,7 @@ impl Parse for ast::Delete {
 			targets,
 			with_index,
 			condition,
+			output,
 			timeout,
 			explain,
 			span,
@@ -673,50 +706,57 @@ impl Parse for ast::Relate {
 	}
 }
 
-impl Parse for ast::Fetch {
+impl Parse for ast::Order {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
-		let peek = parser.peek_expect("a parameter, place, or type::field(s) call")?;
-		let res = match peek.token {
-			BaseTokenKind::Param => Fetch::Param(parser.parse_sync()?),
-			T![TYPE] => {
+		let span = parser.peek_span();
+		let expr = parser.parse_enter().await?;
+
+		let collate = parser.eat(T![COLLATE])?.is_some();
+		let numeric = parser.eat(T![NUMERIC])?.is_some();
+
+		let peek = parser.peek()?;
+		let direction = match peek.map(|x| x.token) {
+			Some(T![ASCENDING]) => {
 				let _ = parser.next();
-				let _ = parser.expect(T![::])?;
-				let peek = parser.peek_expect("`FIELD` or `FIELDS`")?;
-				match peek.token {
-					T![FIELD] => {
-						let _ = parser.next();
-						let paren = parser.expect(BaseTokenKind::OpenParen)?;
-						let arg = parser.parse_enter().await?;
-						let _ = parser
-							.expect_closing_delimiter(BaseTokenKind::CloseParen, paren.span)?;
-						let span = parser.span_since(peek.span);
-						Fetch::TypeField(ast::FetchTypeField {
-							arg,
-							span,
-						})
-					}
-					T![FIELDS] => {
-						let _ = parser.next();
-						let (_, args) = parse_delimited_list(
-							parser,
-							BaseTokenKind::OpenParen,
-							BaseTokenKind::CloseParen,
-							T![,],
-							async |parser| parser.parse_enter().await,
-						)
-						.await?;
-						let span = parser.span_since(peek.span);
-						Fetch::TypeFields(ast::FetchTypeFields {
-							args,
-							span,
-						})
-					}
-					_ => return Err(parser.unexpected("`FIELD` or `FIELDS`")),
-				}
+				Some(ast::OrderDirection::Ascending)
 			}
-			_ => Fetch::Place(parser.parse().await?),
+			Some(T![DESCENDING]) => {
+				let _ = parser.next();
+				Some(ast::OrderDirection::Descending)
+			}
+			_ => None,
 		};
-		Ok(res)
+
+		let span = parser.span_since(span);
+		Ok(ast::Order {
+			expr,
+			collate,
+			numeric,
+			direction,
+			span,
+		})
+	}
+}
+
+impl Parse for ast::OrderBy {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let _ = parser.expect(T![ORDER])?;
+		let _ = parser.expect(T![BY])?;
+
+		let peek = parser.peek_expect("an expression")?;
+		if let T![RAND] = peek.token
+			&& let Some(peek1) = parser.peek1()?
+			&& let BaseTokenKind::OpenParen = peek1.token
+		{
+			let _ = parser.next();
+			let _ = parser.next();
+			let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, peek1.span);
+			let span = parser.span_since(peek.span);
+			return Ok(OrderBy::Rand(span));
+		}
+
+		let (_, v) = parse_seperated_list(parser, T![,], Parser::parse).await?;
+		Ok(OrderBy::List(v))
 	}
 }
 
@@ -724,6 +764,12 @@ impl Parse for ast::Select {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let select = parser.expect(T![SELECT])?;
 		let fields = parser.parse().await?;
+
+		let omit = if parser.eat(T![OMIT])?.is_some() {
+			Some(parse_seperated_list(parser, T![,], Parser::parse_enter).await?.1)
+		} else {
+			None
+		};
 
 		let _ = parser.expect(T![FROM])?;
 
@@ -739,7 +785,8 @@ impl Parse for ast::Select {
 		let split = if parser.eat(T![SPLIT])?.is_some() {
 			let _ = parser.eat(T![ON])?;
 			let (_, splits) =
-				parse_seperated_list(parser, T![,], async |parser| parser.parse().await).await?;
+				parse_seperated_list(parser, T![,], async |parser| parser.parse_enter().await)
+					.await?;
 			Some(splits)
 		} else {
 			None
@@ -756,9 +803,9 @@ impl Parse for ast::Select {
 				}));
 				}
 
-				let _ = parser.expect(T![BY])?;
+				let _ = parser.eat(T![BY])?;
 				let (_, groups) =
-					parse_seperated_list(parser, T![,], async |parser| parser.parse().await)
+					parse_seperated_list(parser, T![,], async |parser| parser.parse_enter().await)
 						.await?;
 				Some(ast::Group::Fields(groups))
 			}
@@ -766,44 +813,10 @@ impl Parse for ast::Select {
 			None
 		};
 
-		let order = if let Some(x) = parser.eat(T![ORDER])? {
-			let _ = parser.expect(T![BY])?;
-
-			let kind = if let Some(start) = parser.eat(T![RAND])? {
-				let paren = parser.expect(BaseTokenKind::OpenParen)?;
-				let end = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, paren.span)?;
-				ast::OrderByKind::Rand(start.span.extend(end.span))
-			} else {
-				let (_, orders) =
-					parse_seperated_list(parser, T![,], async |parser| parser.parse().await)
-						.await?;
-				ast::OrderByKind::Places(orders)
-			};
-
-			let collate = parser.eat(T![COLLATE])?.is_some();
-			let numeric = parser.eat(T![NUMERIC])?.is_some();
-
-			let peek = parser.peek()?;
-			let direction = match peek.map(|x| x.token) {
-				Some(T![ASCENDING]) => {
-					let _ = parser.next();
-					Some(ast::OrderDirection::Ascending)
-				}
-				Some(T![DESCENDING]) => {
-					let _ = parser.next();
-					Some(ast::OrderDirection::Descending)
-				}
-				_ => None,
-			};
-
-			let span = parser.span_since(x.span);
-			Some(ast::OrderBy {
-				kind,
-				collate,
-				numeric,
-				direction,
-				span,
-			})
+		let order = if let Some(x) = parser.peek()?
+			&& let T![ORDER] = x.token
+		{
+			Some(parser.parse().await?)
 		} else {
 			None
 		};
@@ -840,7 +853,23 @@ impl Parse for ast::Select {
 		};
 
 		let fetch = if parser.eat(T![FETCH])?.is_some() {
-			Some(parse_seperated_list(parser, T![,], async |parser| parser.parse().await).await?.1)
+			Some(
+				parse_seperated_list(parser, T![,], async |parser| {
+					// Check for param or identifier,
+					// This check could be removed but keeping it in place can allow us to
+					// constrain the allowed syntax in the future without cause backwards
+					// incompatible changes
+					if let Some(t) = parser.peek()?
+						&& (t.token.is_identifier() || t.token == BaseTokenKind::Param)
+					{
+						parser.parse_enter().await
+					} else {
+						Err(parser.unexpected("a fetch expression"))
+					}
+				})
+				.await?
+				.1,
+			)
 		} else {
 			None
 		};
@@ -855,6 +884,7 @@ impl Parse for ast::Select {
 		let span = parser.span_since(select.span);
 		Ok(ast::Select {
 			fields,
+			omit,
 			only,
 			from,
 			with_index,
@@ -1032,6 +1062,116 @@ impl Parse for ast::Insert {
 			version,
 			timeout,
 			data,
+		})
+	}
+}
+
+impl Parse for ast::Rebuild {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start = parser.expect(T![REBUILD])?;
+		let _ = parser.expect(T![INDEX])?;
+
+		let if_exists = if parser.eat(T![IF])?.is_some() {
+			let _ = parser.expect(T![EXISTS])?;
+			true
+		} else {
+			false
+		};
+
+		let name = parser.parse_enter().await?;
+		let _ = parser.expect(T![ON])?;
+		let _ = parser.eat(T![TABLE])?;
+		let table = parser.parse_enter().await?;
+
+		let concurrently = parser.eat(T![CONCURRENTLY])?.is_some();
+
+		let span = parser.span_since(start.span);
+		Ok(ast::Rebuild {
+			if_exists,
+			name,
+			table,
+			concurrently,
+			span,
+		})
+	}
+}
+
+impl Parse for ast::Access {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start = parser.expect(T![ACCESS])?;
+
+		let access = parser.parse_sync()?;
+		let base = if parser.eat(T![ON])?.is_some() {
+			Some(parser.parse_sync()?)
+		} else {
+			None
+		};
+
+		let expect = "`GRANT`, `SHOW`, `REVOKE`, and `PURGE`";
+		let peek = parser.peek_expect(expect)?;
+		let kind = match peek.token {
+			T![GRANT] => {
+				let _ = parser.next();
+				let _ = parser.expect(T![FOR])?;
+				let expect = "`USER` or `RECORD`";
+				let subject = parser.peek_expect(expect)?;
+				match subject.token {
+					T![USER] => {
+						let _ = parser.next();
+						let subject = ast::AccessSubject::User(parser.parse_sync()?);
+						let span = parser.span_since(peek.span);
+						ast::AccessKind::Grant(ast::AccessGrant {
+							subject,
+							span,
+						})
+					}
+					T![RECORD] => {
+						let _ = parser.next();
+						let subject = ast::AccessSubject::Subject(parser.parse().await?);
+						let span = parser.span_since(peek.span);
+						ast::AccessKind::Grant(ast::AccessGrant {
+							subject,
+							span,
+						})
+					}
+					_ => return Err(parser.unexpected(expect)),
+				}
+			}
+			T![SHOW] => {
+				let _ = parser.next();
+				let expect = "`ALL`, `GRANT`, or `WHERE`";
+				let which = parser.peek_expect(expect)?;
+				let kind = match which.token {
+					T![ALL] => {
+						let _ = parser.next();
+						ast::AccessShowKind::All
+					}
+					T![GRANT] => {
+						let _ = parser.next();
+						ast::AccessShowKind::Grant(parser.parse_sync()?)
+					}
+					T![WHERE] => {
+						let _ = parser.next();
+						ast::AccessShowKind::Condition(parser.parse_enter().await?)
+					}
+					_ => return Err(parser.unexpected(expect)),
+				};
+
+				let span = parser.span_since(peek.span);
+				ast::AccessKind::Show(ast::AccessShow {
+					kind,
+					span,
+				})
+			}
+			_ => return Err(parser.unexpected(expect)),
+		};
+
+		let span = parser.span_since(start.span);
+		Ok(ast::Access {
+			access,
+			base,
+			span,
+			kind,
 		})
 	}
 }

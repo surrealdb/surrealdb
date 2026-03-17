@@ -341,10 +341,9 @@ impl Parse for ast::TablePermissions {
 					update: None,
 					select: None,
 				};
+				let _ = parser.expect(T![FOR])?;
 
 				loop {
-					let _ = parser.expect(T![FOR])?;
-
 					loop {
 						let peek =
 							parser.peek_expect("`SELECT`, `UPDATE`, `CREATE`, or `DELETE`")?;
@@ -423,7 +422,10 @@ impl Parse for ast::TablePermissions {
 							res.delete = Some(permission.clone())
 						}
 					}
-					if parser.eat(T![,])?.is_none() {
+
+					let _ = parser.eat(T![,])?;
+
+					if parser.eat(T![FOR])?.is_none() {
 						break;
 					}
 				}
@@ -431,6 +433,58 @@ impl Parse for ast::TablePermissions {
 				Ok(res)
 			}
 			_ => Err(parser.unexpected("`NONE`, `FULL`, or `FOR`")),
+		}
+	}
+}
+
+impl ParseSync for ast::TableKind {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let peek = parser.peek_expect("`NORMAL`, `RELATION`, `ANY`")?;
+		match peek.token {
+			T![NORMAL] => {
+				let _ = parser.next();
+				Ok(ast::TableKind::Normal(peek.span))
+			}
+			T![ANY] => {
+				let _ = parser.next();
+				Ok(ast::TableKind::Any(peek.span))
+			}
+			T![RELATION] => {
+				let _ = parser.next();
+				let mut from = None;
+				let mut to = None;
+
+				while let Some(x) = parser.peek()? {
+					match x.token {
+						T![FROM] | T![IN] => {
+							let _ = parser.next();
+							parse_unordered_clause_sync(parser, &mut from, x.span, |parser| {
+								parse_seperated_list_sync(parser, T![|], Parser::parse_sync)
+									.map(|x| x.1)
+							})?;
+						}
+						T![TO] | T![OUT] => {
+							let _ = parser.next();
+							parse_unordered_clause_sync(parser, &mut to, x.span, |parser| {
+								parse_seperated_list_sync(parser, T![|], Parser::parse_sync)
+									.map(|x| x.1)
+							})?;
+						}
+						_ => break,
+					}
+				}
+
+				let enforced = parser.eat(T![ENFORCED])?.is_some();
+
+				let span = parser.span_since(peek.span);
+				Ok(ast::TableKind::Relation(RelationTable {
+					from: from.map(|x| x.0),
+					to: to.map(|x| x.0),
+					enforced,
+					span,
+				}))
+			}
+			_ => Err(parser.unexpected("`NORMAL`, `RELATION`, `ANY`")),
 		}
 	}
 }
@@ -494,74 +548,12 @@ impl Parse for ast::DefineTable {
 				}
 				T![TYPE] => {
 					let _ = parser.next();
-					parse_unordered_clause_sync(parser, &mut table_kind, x.span, |parser| {
-						let peek = parser.peek_expect("`NORMAL`, `RELATION`, `ANY`")?;
-						let res = match peek.token {
-							T![NORMAL] => {
-								let _ = parser.next();
-								ast::TableKind::Normal(peek.span)
-							}
-							T![ANY] => {
-								let _ = parser.next();
-								ast::TableKind::Any(peek.span)
-							}
-							T![RELATION] => {
-								let _ = parser.next();
-								let mut from = None;
-								let mut to = None;
-
-								while let Some(x) = parser.peek()? {
-									match x.token {
-										T![FROM] | T![IN] => {
-											let _ = parser.next();
-											parse_unordered_clause_sync(
-												parser,
-												&mut from,
-												x.span,
-												|parser| {
-													parse_seperated_list_sync(
-														parser,
-														T![,],
-														Parser::parse_sync,
-													)
-													.map(|x| x.1)
-												},
-											)?;
-										}
-										T![TO] | T![OUT] => {
-											let _ = parser.next();
-											parse_unordered_clause_sync(
-												parser,
-												&mut to,
-												x.span,
-												|parser| {
-													parse_seperated_list_sync(
-														parser,
-														T![,],
-														Parser::parse_sync,
-													)
-													.map(|x| x.1)
-												},
-											)?;
-										}
-										_ => break,
-									}
-								}
-
-								let enforced = parser.eat(T![ENFORCED])?.is_some();
-
-								let span = parser.span_since(peek.span);
-								ast::TableKind::Relation(RelationTable {
-									from: from.map(|x| x.0),
-									to: to.map(|x| x.0),
-									enforced,
-									span,
-								})
-							}
-							_ => return Err(parser.unexpected("`NORMAL`, `RELATION`, `ANY`")),
-						};
-						Ok(res)
-					})?;
+					parse_unordered_clause_sync(
+						parser,
+						&mut table_kind,
+						x.span,
+						Parser::parse_sync,
+					)?;
 				}
 				_ => break,
 			}
@@ -647,40 +639,40 @@ impl Parse for ast::ApiAction {
 }
 
 macro_rules! impl_method_matching {
-    (($parser:expr) => {$($pat:pat => ($store:ident, $new_span:ident)),*}) => {
-		$(let mut $new_span = None;)*
-		loop{
-			let peek = $parser
-				.peek_expect("`DELETE`, `GET`, `PATCH`, `POST`, `PUT`, or `TRACE`")?;
-			match peek.token {
-				$($pat => {
-					let _ = $parser.next();
-					if let Some(span) = $store.map(|x: (_, Span)| x.1).or($new_span) {
-						return Err(redefined_error($parser, peek.span, span));
+		(($parser:expr) => {$($pat:pat => ($store:ident, $new_span:ident)),*}) => {
+			$(let mut $new_span = None;)*
+				loop{
+					let peek = $parser
+						.peek_expect("`DELETE`, `GET`, `PATCH`, `POST`, `PUT`, or `TRACE`")?;
+					match peek.token {
+						$($pat => {
+							let _ = $parser.next();
+							if let Some(span) = $store.map(|x: (_, Span)| x.1).or($new_span) {
+								return Err(redefined_error($parser, peek.span, span));
+							}
+							$new_span = Some(peek.span)
+						})*
+						_ => {
+							return Err($parser.unexpected(
+									"`DELETE`, `GET`, `PATCH`, `POST`, `PUT`, or `TRACE`",
+							));
+						}
 					}
-					$new_span = Some(peek.span)
-				})*
-				_ => {
-					return Err($parser.unexpected(
-						"`DELETE`, `GET`, `PATCH`, `POST`, `PUT`, or `TRACE`",
-					));
+
+					if $parser.eat(T![,])?.is_none(){
+						break
+					}
 				}
-			}
 
-			if $parser.eat(T![,])?.is_none(){
-				break
-			}
-		}
+			let action = $parser.parse::<ast::NodeId<ast::ApiAction>>().await?;
 
-		let action = $parser.parse::<ast::NodeId<ast::ApiAction>>().await?;
-
-		$(
-			if let Some($new_span) = $new_span{
-				$store = Some((action, $new_span));
-			}
-		)*
-    };
-}
+			$(
+				if let Some($new_span) = $new_span{
+					$store = Some((action, $new_span));
+				}
+			)*
+		};
+	}
 
 impl Parse for ast::DefineApi {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
@@ -968,35 +960,47 @@ impl Parse for ast::FieldPermissions {
 				loop {
 					let _ = parser.expect(T![FOR])?;
 
-					let peek = parser.peek_expect("`SELECT`, `UPDATE`, `CREATE`, or `DELETE`")?;
-					match peek.token {
-						T![SELECT] => {
-							let _ = parser.next();
-							parse_unordered_clause_sync(parser, &mut select, peek.span, |_| {
-								Ok(true)
-							})?;
+					loop {
+						let peek =
+							parser.peek_expect("`SELECT`, `UPDATE`, `CREATE`, or `DELETE`")?;
+						match peek.token {
+							T![SELECT] => {
+								let _ = parser.next();
+								parse_unordered_clause_sync(
+									parser,
+									&mut select,
+									peek.span,
+									|_| Ok(true),
+								)?;
+							}
+							T![UPDATE] => {
+								let _ = parser.next();
+								parse_unordered_clause_sync(
+									parser,
+									&mut update,
+									peek.span,
+									|_| Ok(true),
+								)?;
+							}
+							T![CREATE] => {
+								let _ = parser.next();
+								parse_unordered_clause_sync(
+									parser,
+									&mut create,
+									peek.span,
+									|_| Ok(true),
+								)?;
+							}
+							_ => {
+								return Err(
+									parser.unexpected("`SELECT`, `UPDATE`, `CREATE`, or `DELETE`")
+								);
+							}
 						}
-						T![UPDATE] => {
-							let _ = parser.next();
-							parse_unordered_clause_sync(parser, &mut update, peek.span, |_| {
-								Ok(true)
-							})?;
-						}
-						T![CREATE] => {
-							let _ = parser.next();
-							parse_unordered_clause_sync(parser, &mut create, peek.span, |_| {
-								Ok(true)
-							})?;
-						}
-						_ => {
-							return Err(
-								parser.unexpected("`SELECT`, `UPDATE`, `CREATE`, or `DELETE`")
-							);
-						}
-					}
 
-					if parser.eat(T![,])?.is_some() {
-						continue;
+						if parser.eat(T![,])?.is_none() {
+							break;
+						}
 					}
 
 					let permission = parser.parse::<ast::Permission>().await?;
@@ -1027,6 +1031,48 @@ impl Parse for ast::FieldPermissions {
 				Ok(res)
 			}
 			_ => Err(parser.unexpected("`NONE`, `FULL`, or `FOR`")),
+		}
+	}
+}
+
+impl Parse for ast::OnDelete {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let _ = parser.expect(T![REFERENCE])?;
+
+		if parser.eat(T![ON])?.is_some() {
+			let _ = parser.expect(T![DELETE])?;
+
+			let peek = parser.peek_expect("`REJECT`, `CASCADE`, `IGNORE`, `UNSET`, or `THEN`")?;
+			match peek.token {
+				T![REJECT] => {
+					let _ = parser.next();
+					Ok(ast::OnDelete::Reject)
+				}
+				T![CASCADE] => {
+					let _ = parser.next();
+					Ok(ast::OnDelete::Cascade)
+				}
+				T![IGNORE] => {
+					let _ = parser.next();
+					Ok(ast::OnDelete::Ignore)
+				}
+				T![UNSET] => {
+					let _ = parser.next();
+					Ok(ast::OnDelete::Unset)
+				}
+				T![THEN] => {
+					let _ = parser.next();
+					let expr = parser.parse_enter().await?;
+					Ok(ast::OnDelete::Then(expr))
+				}
+				_ => {
+					return Err(
+						parser.unexpected("`REJECT`, `CASCADE`, `IGNORE`, `UNSET`, or `THEN`")
+					);
+				}
+			}
+		} else {
+			Ok(ast::OnDelete::Ignore)
 		}
 	}
 }
@@ -1097,57 +1143,15 @@ impl Parse for ast::DefineField {
 					let _ = parser.next();
 					parse_unordered_clause(parser, &mut default, peek.span, async |parser| {
 						if parser.eat(T![ALWAYS])?.is_some() {
-							Ok(ast::DefineFieldDefault::Always(parser.parse_enter().await?))
+							Ok(ast::FieldDefault::Always(parser.parse_enter().await?))
 						} else {
-							Ok(ast::DefineFieldDefault::Some(parser.parse_enter().await?))
+							Ok(ast::FieldDefault::Some(parser.parse_enter().await?))
 						}
 					})
 					.await?
 				}
 				T![REFERENCE] => {
-					let _ = parser.next();
-
-					if parser.eat(T![ON])?.is_some() {
-						parse_unordered_clause(parser, &mut on_delete, peek.span, async |parser| {
-							let _ = parser.expect(T![DELETE])?;
-
-							let peek = parser
-								.peek_expect("`REJECT`, `CASCADE`, `IGNORE`, `UNSET`, or `THEN`")?;
-							match peek.token {
-								T![REJECT] => {
-									let _ = parser.next();
-									Ok(ast::OnDelete::Reject)
-								}
-								T![CASCADE] => {
-									let _ = parser.next();
-									Ok(ast::OnDelete::Cascade)
-								}
-								T![IGNORE] => {
-									let _ = parser.next();
-									Ok(ast::OnDelete::Ignore)
-								}
-								T![UNSET] => {
-									let _ = parser.next();
-									Ok(ast::OnDelete::Unset)
-								}
-								T![THEN] => {
-									let _ = parser.next();
-									let expr = parser.parse_enter().await?;
-									Ok(ast::OnDelete::Then(expr))
-								}
-								_ => {
-									return Err(parser.unexpected(
-										"`REJECT`, `CASCADE`, `IGNORE`, `UNSET`, or `THEN`",
-									));
-								}
-							}
-						})
-						.await?;
-					} else {
-						parse_unordered_clause_sync(parser, &mut on_delete, peek.span, |_| {
-							Ok(ast::OnDelete::Ignore)
-						})?;
-					}
+					parse_unordered_clause(parser, &mut on_delete, peek.span, Parser::parse).await?
 				}
 				_ => break,
 			}
@@ -1568,12 +1572,16 @@ impl ParseSync for ast::Filter {
 			}
 			T![SNOWBALL] => {
 				let _ = parser.next();
+				let open = parser.expect(BaseTokenKind::OpenParen)?;
 				let language = parser.parse_sync()?;
+				let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, open.span)?;
 				Ok(ast::Filter::Snowball(language))
 			}
 			T![MAPPER] => {
 				let _ = parser.next();
+				let open = parser.expect(BaseTokenKind::OpenParen)?;
 				let mapper = parser.parse_sync()?;
+				let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, open.span)?;
 				Ok(ast::Filter::Mapper(mapper))
 			}
 			_ => Err(parser.unexpected("a analyzer filter")),
@@ -2067,6 +2075,7 @@ impl ParseSync for ast::Algorithm {
 			T![ES512] => ast::Algorithm::Es512,
 			T![HS256] => ast::Algorithm::Hs256,
 			T![HS384] => ast::Algorithm::Hs384,
+			T![HS512] => ast::Algorithm::Hs512,
 			T![PS256] => ast::Algorithm::Ps256,
 			T![PS384] => ast::Algorithm::Ps384,
 			T![PS512] => ast::Algorithm::Ps512,

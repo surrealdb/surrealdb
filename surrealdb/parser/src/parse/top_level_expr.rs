@@ -331,16 +331,20 @@ impl ParseSync for ast::OptionStmt {
 		let start = parser.expect(T![OPTION])?.span;
 
 		let name = parser.parse_sync()?;
-		let _ = parser.expect(T![=])?;
-		let value_token = parser.peek_expect("either `true` or `false`")?;
-		let value = match value_token.token {
-			T![true] => true,
-			T![false] => false,
-			_ => return Err(parser.unexpected("either `true` or `false`")),
+		let value = if parser.eat(T![=])?.is_some() {
+			let value_token = parser.peek_expect("either `true` or `false`")?;
+			let value = match value_token.token {
+				T![true] => true,
+				T![false] => false,
+				_ => return Err(parser.unexpected("either `true` or `false`")),
+			};
+			let _ = parser.next();
+			value
+		} else {
+			true
 		};
-		let _ = parser.next();
 
-		let span = start.extend(value_token.span);
+		let span = parser.span_since(start);
 
 		Ok(ast::OptionStmt {
 			name,

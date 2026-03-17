@@ -62,6 +62,9 @@ macro_rules! T {
 	(<) => {
 		$crate::BaseTokenKind::LeftShevron
 	};
+	(<~) => {
+		$crate::BaseTokenKind::LeftShevronTilde
+	};
 	(<=) => {
 		$crate::BaseTokenKind::LeftShevronEqual
 	};
@@ -406,6 +409,9 @@ macro_rules! T {
 	(INCLUDE) => {
 		$crate::BaseTokenKind::KwInclude
 	};
+	(INCLUSIVE) => {
+		$crate::BaseTokenKind::KwInclusive
+	};
 	(INDEX) => {
 		$crate::BaseTokenKind::KwIndex
 	};
@@ -539,7 +545,7 @@ macro_rules! T {
 		$crate::BaseTokenKind::KwParallel
 	};
 	(PARAM) => {
-		$crate::BaseTokenKind::KwKwParam
+		$crate::BaseTokenKind::KwParam
 	};
 	(PASSHASH) => {
 		$crate::BaseTokenKind::KwPasshash
@@ -549,6 +555,9 @@ macro_rules! T {
 	};
 	(PATCH) => {
 		$crate::BaseTokenKind::KwPatch
+	};
+	(PATH) => {
+		$crate::BaseTokenKind::KwPath
 	};
 	(PERMISSIONS) => {
 		$crate::BaseTokenKind::KwPermissions
@@ -642,6 +651,9 @@ macro_rules! T {
 	};
 	(SHOW) => {
 		$crate::BaseTokenKind::KwShow
+	};
+	(SHORTEST) => {
+		$crate::BaseTokenKind::KwShortest
 	};
 	(SIGNIN) => {
 		$crate::BaseTokenKind::KwSignin
@@ -908,6 +920,9 @@ macro_rules! T {
 	};
 	(MULTIPOLYGON) => {
 		$crate::BaseTokenKind::KwMultiPolygon
+	};
+	(COLLECT) => {
+		$crate::BaseTokenKind::KwCollect
 	};
 	(COLLECTION) => {
 		$crate::BaseTokenKind::KwCollection

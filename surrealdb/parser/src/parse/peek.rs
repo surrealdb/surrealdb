@@ -22,14 +22,16 @@ pub fn peek_starts_prime(parser: &mut Parser<'_, '_>) -> ParseResult<bool> {
 					| BaseTokenKind::PosInfinity
 					| BaseTokenKind::NegInfinity
 					| T![|] | T![/]
+					// +123 and -123 are valid prime integers
+					| T![+] | T![-]
 			))
 	} else {
 		Ok(false)
 	}
 }
 
-pub fn peek_starts_record_id_key(parser: &mut Parser<'_, '_>) -> ParseResult<bool> {
-	if let Some(x) = parser.peek()? {
+pub fn peek_joined_starts_record_id_key(parser: &mut Parser<'_, '_>) -> ParseResult<bool> {
+	if let Some(x) = parser.peek_joined()? {
 		Ok(x.token.is_identifier()
 			|| matches!(
 				x.token,
@@ -38,6 +40,8 @@ pub fn peek_starts_record_id_key(parser: &mut Parser<'_, '_>) -> ParseResult<boo
 					| BaseTokenKind::UuidString
 					| BaseTokenKind::Int
 					| BaseTokenKind::String
+					// +123 and -123 are valid prime integers
+					| T![+] | T![-]
 			))
 	} else {
 		Ok(false)

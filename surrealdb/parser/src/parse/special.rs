@@ -642,7 +642,7 @@ impl ParseSync for ast::BytesLit {
 		let str = Parser::unescape_common(
 			span,
 			unescape_source,
-			parser.source(),
+			full_source,
 			&mut parser.unescape_buffer,
 		)?;
 
@@ -652,14 +652,14 @@ impl ParseSync for ast::BytesLit {
 		let mut offset = 0;
 		while let Some(a) = chars.next() {
 			let first = match a {
-				'a'..='f' => (a as u8) - b'a',
-				'A'..='F' => (a as u8) - b'A',
+				'a'..='f' => (a as u8) - b'a' + 10,
+				'A'..='F' => (a as u8) - b'A' + 10,
 				'0'..='9' => (a as u8) - b'0',
 				_ => {
 					return Err(unexpected_error(
 						full_source,
-						str,
-						offset as u32,
+						unescape_source,
+						span.start,
 						offset..(offset + 1),
 						format!("Invalid bytes string token `{a}`, expected a hexidecimal digit"),
 					));
@@ -671,8 +671,8 @@ impl ParseSync for ast::BytesLit {
 			let Some(b) = chars.next() else {
 				return Err(unexpected_error(
 					full_source,
-					str,
-					offset as u32,
+					unescape_source,
+					span.start,
 					offset..(offset + 1),
 					"Unexpected bytes string end, expected second hexidecimal digit of a pair"
 						.to_owned(),
@@ -680,14 +680,14 @@ impl ParseSync for ast::BytesLit {
 			};
 
 			let second = match b {
-				'a'..='f' => (b as u8) - b'a',
-				'A'..='F' => (b as u8) - b'A',
+				'a'..='f' => (b as u8) - b'a' + 10,
+				'A'..='F' => (b as u8) - b'A' + 10,
 				'0'..='9' => (b as u8) - b'0',
 				_ => {
 					return Err(unexpected_error(
 						full_source,
-						str,
-						offset as u32,
+						unescape_source,
+						span.start,
 						offset..(offset + 1),
 						format!("Invalid bytes string token `{b}`, expected a hexidecimal digit"),
 					));

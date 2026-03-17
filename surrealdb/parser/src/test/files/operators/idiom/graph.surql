@@ -11,16 +11,25 @@ Query
                             .left: Expr::Idiom
                                 IdiomExpr
                                     .left: Expr::Document
-                                    .op: IdiomOperator::GraphAny
-                                        Out
-                            .op: IdiomOperator::GraphTable
+                                    .op: IdiomOperator::Graph
+                                        .direction: Out
+                                        .lookup: Lookup::Any
+                            .op: IdiomOperator::Graph
                                 .direction: Out
-                                .table: Ident
-                                    .text: "foo"
-                    .op: IdiomOperator::GraphTable
+                                .lookup: Lookup::Subject
+                                    LookupSubject::Table
+                                        LookupSubjectTable
+                                            .table: Ident
+                                                .text: "foo"
+                                            .field: None
+                    .op: IdiomOperator::Graph
                         .direction: Out
-                        .table: Ident
-                            .text: "bar"
+                        .lookup: Lookup::Subject
+                            LookupSubject::Table
+                                LookupSubjectTable
+                                    .table: Ident
+                                        .text: "bar"
+                                    .field: None
         -TopLevelExpr::Expr
             Expr::Idiom
                 IdiomExpr
@@ -33,14 +42,23 @@ Query
                                             .start: Ident
                                                 .text: "foo"
                                             .parts: None
-                                    .op: IdiomOperator::GraphAny
-                                        Both
-                            .op: IdiomOperator::GraphTable
+                                    .op: IdiomOperator::Graph
+                                        .direction: Both
+                                        .lookup: Lookup::Any
+                            .op: IdiomOperator::Graph
                                 .direction: In
-                                .table: Ident
-                                    .text: "foo"
-                    .op: IdiomOperator::GraphTable
+                                .lookup: Lookup::Subject
+                                    LookupSubject::Table
+                                        LookupSubjectTable
+                                            .table: Ident
+                                                .text: "foo"
+                                            .field: None
+                    .op: IdiomOperator::Graph
                         .direction: Out
-                        .table: Ident
-                            .text: "bar"
+                        .lookup: Lookup::Subject
+                            LookupSubject::Table
+                                LookupSubjectTable
+                                    .table: Ident
+                                        .text: "bar"
+                                    .field: None
 */

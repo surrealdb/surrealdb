@@ -155,19 +155,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				let mut char = 0u32;
 				let slice = &slice.as_bytes()["\\u".len()..];
 				for i in 0..4 {
+					char <<= 4;
 					match slice[i] {
-						c @ b'0'..=b'9' => {
-							char *= 10;
-							char += (c - b'0') as u32
-						}
-						c @ b'a'..=b'f' => {
-							char *= 10;
-							char += (c - b'a' + 10) as u32
-						}
-						c @ b'A'..=b'F' => {
-							char *= 10;
-							char += (c - b'a' + 10) as u32
-						}
+						c @ b'0'..=b'9' => char += (c - b'0') as u32,
+						c @ b'a'..=b'f' => char += (c - b'a' + 10) as u32,
+						c @ b'A'..=b'F' => char += (c - b'a' + 10) as u32,
 						// Lexer already verified that there are only hex digits in the escape
 						// code.
 						_ => unreachable!(),

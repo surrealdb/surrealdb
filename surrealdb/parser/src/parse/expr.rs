@@ -1,14 +1,22 @@
+use std::ops::Bound;
+
 use ast::{
-	BinaryExpr, BinaryOperator, Expr, IdiomExpr, IdiomOperator, NodeId, PostfixExpr,
-	PostfixOperator, PrefixExpr, PrefixOperator, Spanned,
+	BinaryExpr, BinaryOperator, Expr, IdiomExpr, IdiomOperator, LookupSubject, NodeId, NodeListId,
+	PostfixExpr, PostfixOperator, PrefixExpr, PrefixOperator, RecordIdKeyRange, Spanned,
 };
 use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
 use token::{BaseTokenKind, Joined, T};
 
-use super::Parser;
+use crate::Parser;
 use crate::parse::peek::peek_starts_prime;
 use crate::parse::prime::parse_prime;
+use crate::parse::range::{TryRange, parse_prefix_range_sync, try_parse_infix_range_sync};
+use crate::parse::record_id::{
+	parse_peeked_record_id_key, parse_record_id_headless_range, peek_record_id_token,
+	try_parse_record_id_range,
+};
+use crate::parse::utils::parse_seperated_list;
 use crate::parse::{Parse, ParseResult};
 
 // Constants defining precedences and associativity of operators.
@@ -69,7 +77,7 @@ async fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 			PrefixOperator::Positive(token.span)
 		}
 		T![<] => match parser.peek_joined1()?.map(|x| x.token) {
-			Some(T![-] | T![->]) => return parser.todo(),
+			Some(T![-] | T![->]) => return parse_prime(parser).await,
 			_ => {
 				let _ = parser.next();
 				let ty = parser.parse().await?;
@@ -78,12 +86,45 @@ async fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 				PrefixOperator::Cast(ty)
 			}
 		},
+		// Special case, because apparently you can omit the dot when recursing from the
+		// document.
+		T![@] => {
+			if let Some(x) = parser.peek1()?
+				&& let BaseTokenKind::OpenBrace = x.token
+			{
+				let _ = parser.next();
+				let _ = parser.next();
+				let recurse = parse_recurse(parser, x.span, x.span).await?;
+				let op_span = parser.span_since(x.span);
+				let op = ast::IdiomOperator::Recurse(parser.push(recurse));
+				let doc_span = parser.push(token.span);
+				let left = parser.push(Expr::Document(doc_span));
+				let span = parser.span_since(token.span);
+				let expr = parser.push(ast::IdiomExpr {
+					left,
+					op: Spanned {
+						value: op,
+						span: op_span,
+					},
+
+					span,
+				});
+				return Ok(Expr::Idiom(expr));
+			} else {
+				return parse_prime(parser).await;
+			}
+		}
 		T![..] => {
 			let _ = parser.next();
 			if parser.eat_joined(T![=])?.is_some() {
 				PrefixOperator::RangeInclusive(parser.span_since(token.span))
 			} else {
-				PrefixOperator::Range(token.span)
+				if peek_starts_prime(parser)? {
+					PrefixOperator::Range(token.span)
+				} else {
+					let span = parser.push(token.span);
+					return Ok(Expr::UnboundedRange(span));
+				}
 			}
 		}
 		_ => {
@@ -500,6 +541,127 @@ impl Parse for ast::Destructure {
 	}
 }
 
+async fn parse_recurse(
+	parser: &mut Parser<'_, '_>,
+	dot_span: Span,
+	brace_span: Span,
+) -> ParseResult<ast::Recurse> {
+	fn has_int(p: &mut Parser<'_, '_>) -> ParseResult<bool> {
+		Ok(p.peek_joined()?.map(|x| x.token == BaseTokenKind::Int).unwrap_or(false))
+	}
+
+	let expected = "`*`, `..` or an integer";
+	let peek = parser.peek_expect(expected)?;
+	let range = match peek.token {
+		T![*] => (Bound::Unbounded, Bound::Unbounded),
+		T![..] => {
+			let bound = parse_prefix_range_sync(parser, has_int)?;
+			(Bound::Unbounded, bound)
+		}
+		BaseTokenKind::Int => {
+			let start = parser.parse_sync()?;
+			match try_parse_infix_range_sync(parser, start, has_int)? {
+				TryRange::None(start) => (Bound::Included(start), Bound::Included(start)),
+				TryRange::Some {
+					start,
+					end,
+				} => (start, end),
+			}
+		}
+		_ => return Err(parser.unexpected(expected)),
+	};
+
+	let kind = if parser.eat(T![+])?.is_some() {
+		let expect = "`PATH`, `SHORTEST`, or `COLLECT`";
+		let peek = parser.peek_expect(expect)?;
+		match peek.token {
+			T![PATH] => {
+				let _ = parser.next();
+				let inclusive = if parser.eat(T![+])?.is_some() {
+					let _ = parser.expect(T![INCLUSIVE])?;
+					true
+				} else {
+					false
+				};
+				Some(ast::RecurseKind::Path {
+					inclusive,
+				})
+			}
+			T![SHORTEST] => {
+				let _ = parser.next();
+				let _ = parser.expect(T![=]);
+				let expected = "a parameter or a record id";
+				let expects = parser.peek_expect(expected)?;
+				let expects = match expects.token {
+					BaseTokenKind::Param => Expr::Param(parser.parse_sync()?),
+					x if x.is_identifier() => Expr::RecordId(parser.parse().await?),
+					_ => return Err(parser.unexpected(expected)),
+				};
+				let expects = parser.push(expects);
+
+				let inclusive = if parser.eat(T![+])?.is_some() {
+					let _ = parser.expect(T![INCLUSIVE])?;
+					true
+				} else {
+					false
+				};
+				Some(ast::RecurseKind::Shortest {
+					expects,
+					inclusive,
+				})
+			}
+			T![COLLECT] => {
+				let _ = parser.next();
+				let inclusive = if parser.eat(T![+])?.is_some() {
+					let _ = parser.expect(T![INCLUSIVE])?;
+					true
+				} else {
+					false
+				};
+				Some(ast::RecurseKind::Collect {
+					inclusive,
+				})
+			}
+			_ => return Err(parser.unexpected(expect)),
+		}
+	} else {
+		None
+	};
+
+	let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseBrace, brace_span)?;
+
+	let span = parser.span_since(dot_span);
+	let push_span = parser.push(span);
+
+	let paren = parser.eat(BaseTokenKind::OpenParen)?;
+
+	let mut expr = Expr::Document(push_span);
+	while let Some(new_expr) = parser
+		.enter(async |parser| {
+			try_parse_infix_postfix_op(parser, IDIOM_BP, Expr::Document(push_span), span).await
+		})
+		.await?
+	{
+		expr = new_expr
+	}
+
+	if let Some(paren) = paren {
+		let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseParen, paren.span)?;
+	}
+
+	let expr = parser.push(expr);
+
+	let span = parser.span_since(dot_span);
+	Ok(ast::Recurse {
+		start: range.0,
+		end: range.1,
+		kind,
+		expr,
+		span,
+	})
+}
+
+/// Parses all operators which start with `.{` .
 async fn parse_dot_brace_postfix(
 	parser: &mut Parser<'_, '_>,
 	lhs: Expr,
@@ -508,12 +670,40 @@ async fn parse_dot_brace_postfix(
 ) -> ParseResult<Expr> {
 	let brace_token = parser.expect(BaseTokenKind::OpenBrace)?;
 
-	let peek = parser.peek_expect("`*`, `..` or an identifier")?;
+	let peek = parser.peek_expect("`*`, `..`, an integer, or an identifier")?;
 	match peek.token {
-		T![*] => parser.todo(),
-		T![..] => parser.todo(),
-		BaseTokenKind::Int => parser.todo(),
-		x @ BaseTokenKind::CloseBrace | x if x.is_identifier() => {
+		T![*] | T![..] | BaseTokenKind::Int => {
+			let left = parser.push(lhs);
+			let recurse = parse_recurse(parser, dot_span, brace_token.span).await?;
+			let recurse = parser.push(recurse);
+			let op = IdiomOperator::Recurse(recurse);
+			let expr = IdiomExpr {
+				left,
+				op: Spanned {
+					value: op,
+					span: parser.span_since(dot_span),
+				},
+				span: parser.span_since(lhs_span),
+			};
+			let expr = parser.push(expr);
+			Ok(Expr::Idiom(expr))
+		}
+		BaseTokenKind::CloseBrace => {
+			let _ = parser.next();
+			let left = parser.push(lhs);
+			let op = IdiomOperator::Destructure(None);
+			let expr = IdiomExpr {
+				left,
+				op: Spanned {
+					value: op,
+					span: parser.span_since(dot_span),
+				},
+				span: parser.span_since(lhs_span),
+			};
+			let expr = parser.push(expr);
+			Ok(Expr::Idiom(expr))
+		}
+		x if x.is_identifier() => {
 			let left = parser.push(lhs);
 
 			let mut head = None;
@@ -549,11 +739,14 @@ async fn parse_dot_brace_postfix(
 	}
 }
 
+/// Parses all operators which start with `.`
+/// This function must be called after checking if this is correct for precedence order (which it
+/// practically always is).
 async fn parse_dot_postfix(
 	parser: &mut Parser<'_, '_>,
 	lhs: Expr,
 	lhs_span: Span,
-) -> ParseResult<Option<Expr>> {
+) -> ParseResult<Expr> {
 	let dot_token = parser.expect(T![.])?;
 	let peek = parser.peek_expect("*, ?, .@, {, or an identifier")?;
 
@@ -589,7 +782,7 @@ async fn parse_dot_postfix(
 				},
 				span: lhs_span.extend(peek.span),
 			});
-			Ok(Some(Expr::Idiom(idiom)))
+			Ok(Expr::Idiom(idiom))
 		}
 		T![?] => {
 			reject_seperated(parser, dot_token.span, peek.joined)?;
@@ -604,7 +797,7 @@ async fn parse_dot_postfix(
 				},
 				span: lhs_span.extend(peek.span),
 			});
-			Ok(Some(Expr::Idiom(idiom)))
+			Ok(Expr::Idiom(idiom))
 		}
 		T![@] => {
 			reject_seperated(parser, dot_token.span, peek.joined)?;
@@ -619,12 +812,12 @@ async fn parse_dot_postfix(
 				},
 				span: lhs_span.extend(peek.span),
 			});
-			Ok(Some(Expr::Idiom(idiom)))
+			Ok(Expr::Idiom(idiom))
 		}
 		BaseTokenKind::OpenBrace => {
 			reject_seperated(parser, dot_token.span, peek.joined)?;
 
-			parse_dot_brace_postfix(parser, lhs, lhs_span, dot_token.span).await.map(Some)
+			parse_dot_brace_postfix(parser, lhs, lhs_span, dot_token.span).await
 		}
 		x if x.is_identifier() => {
 			let _ = parser.next();
@@ -639,7 +832,7 @@ async fn parse_dot_postfix(
 				},
 				span: lhs_span.extend(peek.span),
 			});
-			Ok(Some(Expr::Idiom(idiom)))
+			Ok(Expr::Idiom(idiom))
 		}
 		_ => Err(parser.with_error(|parser| {
 			Level::Error
@@ -653,55 +846,314 @@ async fn parse_dot_postfix(
 	}
 }
 
-async fn parse_graph_op(
-	parser: &mut Parser<'_, '_>,
-	lhs: Expr,
-	lhs_span: Span,
-	direction: ast::Direction,
-	direction_span: Span,
-) -> ParseResult<Expr> {
-	let expect = "`?`";
+/// # Panic
+///
+/// This function might panic if there is a peeked token. Called must ensure that no token is
+/// peeked when calling this function.
+async fn parse_lookup_range(parser: &mut Parser<'_, '_>) -> ParseResult<RecordIdKeyRange> {
+	assert!(
+		!parser.lex.has_peek(),
+		"lexing record-id-keys requires that parser has no peeked tokens"
+	);
 
+	let Some(peek) = peek_record_id_token(parser)? else {
+		return Err(parser.unexpected("a record-id key"));
+	};
+	match peek.token {
+		T![..] => {
+			let _ = parser.next();
+			let bound = parse_record_id_headless_range(parser).await?;
+			let range_span = parser.span_since(peek.span);
+
+			Ok(ast::RecordIdKeyRange {
+				start: Bound::Unbounded,
+				end: bound.map(|x| parser.push(x)),
+
+				span: range_span,
+			})
+		}
+		_ => {
+			let key = parse_peeked_record_id_key(parser).await?;
+			match try_parse_record_id_range(parser, key).await? {
+				TryRange::None(_) => return Err(parser.unexpected("a record id key range")),
+				TryRange::Some {
+					start,
+					end,
+				} => {
+					let range_span = parser.span_since(peek.span);
+					Ok(ast::RecordIdKeyRange {
+						start: start.map(|x| parser.push(x)),
+						end: end.map(|x| parser.push(x)),
+						span: range_span,
+					})
+				}
+			}
+		}
+	}
+}
+
+impl Parse for ast::LookupSubject {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let start_span = parser.peek_span();
+		let table = parser.parse_sync()?;
+		if let Some(peek) = parser.peek()?
+			&& let T![:] = peek.token
+		{
+			let _ = parser.next();
+
+			let range = parse_lookup_range(parser).await?;
+			let range = parser.push(range);
+
+			let field = if let Some(peek) = parser.peek()?
+				&& let T![FIELD] = peek.token
+			{
+				let _ = parser.next();
+				Some(parser.parse_sync()?)
+			} else {
+				None
+			};
+
+			let span = parser.span_since(start_span);
+			Ok(ast::LookupSubject::Range(ast::LookupSubjectRange {
+				range,
+				table,
+				field,
+				span,
+			}))
+		} else {
+			let span = parser.span_since(start_span);
+
+			let field = if let Some(peek) = parser.peek()?
+				&& let T![FIELD] = peek.token
+			{
+				let _ = parser.next();
+				Some(parser.parse_sync()?)
+			} else {
+				None
+			};
+
+			Ok(ast::LookupSubject::Table(ast::LookupSubjectTable {
+				table,
+				field,
+				span,
+			}))
+		}
+	}
+}
+
+async fn parse_lookup_from(
+	parser: &mut Parser<'_, '_>,
+) -> ParseResult<Option<NodeListId<LookupSubject>>> {
+	let expect = "`?` or an identifier";
 	let peek = parser.peek_expect(expect)?;
 	match peek.token {
 		T![?] => {
 			let _ = parser.next();
-			//TODO: Reject seperated
-			let lhs = parser.push(lhs);
-			let op = ast::IdiomOperator::GraphAny(direction);
-			let op_span = direction_span.extend(peek.span);
-			let expr = IdiomExpr {
-				left: lhs,
-				op: Spanned {
-					span: op_span,
-					value: op,
-				},
-				span: lhs_span.extend(op_span),
-			};
-			return Ok(Expr::Idiom(parser.push(expr)));
+			Ok(None)
 		}
 		x if x.is_identifier() => {
-			let lhs = parser.push(lhs);
-			let ident = parser.parse_sync()?;
-			let op = ast::IdiomOperator::GraphTable {
-				direction,
-				table: ident,
-			};
-			let op_span = direction_span.extend(peek.span);
-			let expr = IdiomExpr {
-				left: lhs,
-				op: Spanned {
-					span: op_span,
-					value: op,
-				},
-				span: lhs_span.extend(op_span),
-			};
-			return Ok(Expr::Idiom(parser.push(expr)));
+			Ok(Some(parse_seperated_list(parser, T![,], Parser::parse).await?.1))
 		}
-		_ => return Err(parser.unexpected(expect)),
+		_ => Err(parser.unexpected(expect)),
 	}
 }
 
+async fn parse_lookup_limit_start(
+	parser: &mut Parser<'_, '_>,
+) -> ParseResult<(Option<NodeId<Expr>>, Option<NodeId<Expr>>)> {
+	if parser.eat(T![START])?.is_some() {
+		let start = parser.parse_enter().await?;
+		let limit = if parser.eat(T![LIMIT])?.is_some() {
+			Some(parser.parse_enter().await?)
+		} else {
+			None
+		};
+		Ok((limit, Some(start)))
+	} else {
+		let limit = if parser.eat(T![LIMIT])?.is_some() {
+			Some(parser.parse_enter().await?)
+		} else {
+			None
+		};
+		let start = if parser.eat(T![START])?.is_some() {
+			Some(parser.parse_enter().await?)
+		} else {
+			None
+		};
+		Ok((limit, start))
+	}
+}
+
+impl Parse for ast::Lookup {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let expect = "`?`, `(` or an identifier";
+		let peek = parser.peek_expect(expect)?;
+		match peek.token {
+			T![?] => {
+				let _ = parser.next();
+				Ok(ast::Lookup::Any(peek.span))
+			}
+			BaseTokenKind::OpenParen => {
+				let _ = parser.next();
+				if parser.eat(T![SELECT])?.is_some() {
+					let fields = parser.parse().await?;
+
+					let _ = parser.expect(T![FROM])?;
+
+					let from = parse_lookup_from(parser).await?;
+					let condition = if parser.eat(T![WHERE])?.is_some() {
+						Some(parser.parse_enter().await?)
+					} else {
+						None
+					};
+
+					let split_span = parser.peek_span();
+					let split = if parser.eat(T![SPLIT])?.is_some() {
+						let _ = parser.eat(T![ON])?;
+						let (_, splits) = parse_seperated_list(parser, T![,], async |parser| {
+							parser.parse_enter().await
+						})
+						.await?;
+						Some(splits)
+					} else {
+						None
+					};
+					let split_span = parser.span_since(split_span);
+
+					let group = if let Some(x) = parser.eat(T![GROUP])? {
+						if parser.eat(T![ALL])?.is_some() {
+							Some(ast::Group::All)
+						} else {
+							if split.is_some() {
+								return Err(parser.with_error(|parser|{
+									let title =format!("Unexpected token `{}`, selects cannot both have a `GROUP BY` clause and a `SPLIT ON` clause",parser.slice(x.span));
+									Level::Error.
+										title(title)
+											.snippet(parser.snippet()
+												.annotate(AnnotationKind::Primary.span(x.span))
+												.annotate(AnnotationKind::Context.span(split_span).label("Previous `SPLIT ON` clause"))
+											).to_diagnostic()
+								}));
+							}
+
+							let _ = parser.expect(T![BY])?;
+							let (_, groups) = parse_seperated_list(parser, T![,], async |parser| {
+								parser.parse_enter().await
+							})
+							.await?;
+							Some(ast::Group::Fields(groups))
+						}
+					} else {
+						None
+					};
+
+					let order = if let Some(x) = parser.peek()?
+						&& let T![ORDER] = x.token
+					{
+						Some(parser.parse().await?)
+					} else {
+						None
+					};
+
+					let (limit, start) = parse_lookup_limit_start(parser).await?;
+
+					let alias = if parser.eat(T![AS])?.is_some() {
+						Some(parser.parse().await?)
+					} else {
+						None
+					};
+
+					let _ =
+						parser.expect_closing_delimiter(BaseTokenKind::CloseParen, peek.span)?;
+
+					let span = parser.span_since(peek.span);
+					Ok(ast::Lookup::Select(ast::SelectLookup {
+						fields,
+						from,
+						condition,
+						split,
+						group,
+						order,
+						limit,
+						start,
+						span,
+						alias,
+					}))
+				} else {
+					let from = parse_lookup_from(parser).await?;
+					let condition = if parser.eat(T![WHERE])?.is_some() {
+						Some(parser.parse_enter().await?)
+					} else {
+						None
+					};
+
+					let (limit, start) = parse_lookup_limit_start(parser).await?;
+
+					let alias = if parser.eat(T![AS])?.is_some() {
+						Some(parser.parse().await?)
+					} else {
+						None
+					};
+
+					let _ =
+						parser.expect_closing_delimiter(BaseTokenKind::CloseParen, peek.span)?;
+
+					let span = parser.span_since(peek.span);
+					Ok(ast::Lookup::Basic(ast::BasicLookup {
+						from,
+						condition,
+						limit,
+						start,
+						span,
+						alias,
+					}))
+				}
+			}
+			x if x.is_identifier() => {
+				let ident = parser.parse_sync()?;
+
+				if let Some(peek) = parser.peek()?
+					&& let T![:] = peek.token
+				{
+					let _ = parser.next();
+
+					// parse_lookup_range requires an empty peek buffer, otherwise it cannot parse
+					// the record id correctly.
+					assert!(
+						!parser.lex.has_peek(),
+						"cannot peek past a `:` signifying a record id"
+					);
+
+					let range = parse_lookup_range(parser).await?;
+					let range = parser.push(range);
+					let span = parser.span_since(peek.span);
+					let subject = parser.push(ast::LookupSubject::Range(ast::LookupSubjectRange {
+						table: ident,
+						range,
+						field: None,
+						span,
+					}));
+					Ok(ast::Lookup::Subject(subject))
+				} else {
+					let span = parser.span_since(peek.span);
+					let subject = parser.push(ast::LookupSubject::Table(ast::LookupSubjectTable {
+						table: ident,
+						field: None,
+						span,
+					}));
+					Ok(ast::Lookup::Subject(subject))
+				}
+			}
+			_ => Err(parser.unexpected(expect)),
+		}
+	}
+}
+
+/// Function which implements the parsing for infix operators, postfix operates and idiom operators
+/// (which are just postfix operators).
+///
+/// Returns None if parsing the next operator would violate precedence, or if the next token does
+/// not start an operator.
 async fn try_parse_infix_postfix_op(
 	parser: &mut Parser<'_, '_>,
 	min_bp: u8,
@@ -802,9 +1254,25 @@ async fn try_parse_infix_postfix_op(
 				let _ = parser.next();
 				let _ = parser.next();
 
-				let span = peek.span.extend(peek1.span);
+				let lhs = parser.push(lhs);
 
-				return parse_graph_op(parser, lhs, lhs_span, dir, span).await.map(Some);
+				let lookup = parser.parse().await?;
+				let op_span = parser.span_since(peek.span);
+
+				let op = IdiomOperator::Graph {
+					direction: dir,
+					lookup,
+				};
+				let expr = IdiomExpr {
+					left: lhs,
+					op: Spanned {
+						value: op,
+						span: op_span,
+					},
+					span: parser.span_since(lhs_span),
+				};
+				let expr = Expr::Idiom(parser.push(expr));
+				return Ok(Some(expr));
 			}
 
 			parse_relation_op(parser, min_bp, BinaryOperator::LessThan, peek.span, lhs).await
@@ -814,7 +1282,25 @@ async fn try_parse_infix_postfix_op(
 				return Ok(None);
 			}
 			let _ = parser.next();
-			parse_graph_op(parser, lhs, lhs_span, ast::Direction::Out, peek.span).await.map(Some)
+			let lhs = parser.push(lhs);
+
+			let lookup = parser.parse().await?;
+			let op_span = parser.span_since(peek.span);
+
+			let op = IdiomOperator::Graph {
+				direction: ast::Direction::Out,
+				lookup,
+			};
+			let expr = IdiomExpr {
+				left: lhs,
+				op: Spanned {
+					value: op,
+					span: op_span,
+				},
+				span: parser.span_since(lhs_span),
+			};
+			let expr = Expr::Idiom(parser.push(expr));
+			return Ok(Some(expr));
 		}
 		T![<=] => {
 			parse_relation_op(parser, min_bp, BinaryOperator::LessThanEqual, peek.span, lhs).await
@@ -880,6 +1366,126 @@ async fn try_parse_infix_postfix_op(
 			}
 
 			parse_relation_op(parser, min_bp, BinaryOperator::GreaterThan, peek.span, lhs).await
+		}
+		T![<~] => {
+			if IDIOM_BP < min_bp {
+				return Ok(None);
+			}
+			let _ = parser.next();
+			let lhs = parser.push(lhs);
+
+			let lookup = parser.parse().await?;
+			let op_span = parser.span_since(peek.span);
+
+			let op = IdiomOperator::Reference(lookup);
+			let expr = IdiomExpr {
+				left: lhs,
+				op: Spanned {
+					value: op,
+					span: op_span,
+				},
+				span: parser.span_since(lhs_span),
+			};
+			let expr = Expr::Idiom(parser.push(expr));
+			return Ok(Some(expr));
+		}
+		T![<|] => {
+			if RELATION_BP < min_bp {
+				return Ok(None);
+			}
+
+			let _ = parser.next();
+			let k = parser.parse_sync()?;
+			let op = if parser.eat(T![,])?.is_some() {
+				let expect = "a distance or an integer";
+				let peek = parser.peek_expect(expect)?;
+				match peek.token {
+					T![CHEBYSHEV] => {
+						let _ = parser.next();
+						BinaryOperator::KNearestNeighbour {
+							k,
+							distance: ast::Distance::Chebyshev,
+						}
+					}
+					T![COSINE] => {
+						let _ = parser.next();
+						BinaryOperator::KNearestNeighbour {
+							k,
+							distance: ast::Distance::Cosine,
+						}
+					}
+					T![EUCLIDEAN] => {
+						let _ = parser.next();
+						BinaryOperator::KNearestNeighbour {
+							k,
+							distance: ast::Distance::Euclidean,
+						}
+					}
+					T![HAMMING] => {
+						let _ = parser.next();
+						BinaryOperator::KNearestNeighbour {
+							k,
+							distance: ast::Distance::Hamming,
+						}
+					}
+					T![JACCARD] => {
+						let _ = parser.next();
+						BinaryOperator::KNearestNeighbour {
+							k,
+							distance: ast::Distance::Jaccard,
+						}
+					}
+					T![MANHATTAN] => {
+						let _ = parser.next();
+						BinaryOperator::KNearestNeighbour {
+							k,
+							distance: ast::Distance::Manhattan,
+						}
+					}
+					T![MINKOWSKI] => {
+						let _ = parser.next();
+						let v = parser.parse_sync()?;
+						BinaryOperator::KNearestNeighbour {
+							k,
+							distance: ast::Distance::Minkowski(v),
+						}
+					}
+					T![PEARSON] => {
+						let _ = parser.next();
+						BinaryOperator::KNearestNeighbour {
+							k,
+							distance: ast::Distance::Pearson,
+						}
+					}
+					BaseTokenKind::Int => {
+						let ef = parser.parse_sync()?;
+						BinaryOperator::KApproximate {
+							k,
+							ef,
+						}
+					}
+					_ => return Err(parser.unexpected(expect)),
+				}
+			} else {
+				BinaryOperator::KTree {
+					k,
+				}
+			};
+
+			let _ = parser.expect_closing_delimiter(T![|>], peek.span)?;
+			let span = parser.span_since(peek.span);
+
+			parse_non_associative_infix_op(
+				parser,
+				min_bp,
+				RELATION_BP,
+				op,
+				is_relation_op,
+				span,
+				lhs,
+				0,
+			)
+			.await
 		}
 		T![>=] => {
 			parse_relation_op(parser, min_bp, BinaryOperator::GreaterThanEqual, peek.span, lhs)
@@ -1056,6 +1662,25 @@ async fn try_parse_infix_postfix_op(
 				parse_equality_op(parser, min_bp, BinaryOperator::Equal, peek.span, lhs).await
 			}
 		}
+		T![...] => {
+			if IDIOM_BP < min_bp {
+				return Ok(None);
+			}
+
+			let _ = parser.next();
+
+			let lhs = parser.push(lhs);
+			let span = parser.span_since(lhs_span);
+			let expr = parser.push(IdiomExpr {
+				left: lhs,
+				op: Spanned {
+					value: IdiomOperator::Flatten,
+					span: peek.span,
+				},
+				span,
+			});
+			Ok(Some(Expr::Idiom(expr)))
+		}
 		T![..] => {
 			if RANGE_BP < min_bp {
 				return Ok(None);
@@ -1110,7 +1735,7 @@ async fn try_parse_infix_postfix_op(
 				return Ok(None);
 			}
 
-			parse_dot_postfix(parser, lhs, lhs_span).await
+			parse_dot_postfix(parser, lhs, lhs_span).await.map(Some)
 		}
 		BaseTokenKind::OpenBracket => parse_bracket_postfix(parser, min_bp, lhs, lhs_span).await,
 		BaseTokenKind::OpenParen => {
@@ -1156,6 +1781,8 @@ async fn try_parse_infix_postfix_op(
 	}
 }
 
+/// Main fuction dispatching the parsing of operators, uses pratt parsing based on binding power to
+/// ensure operators are parsed immediatly with correct precedence.
 async fn parse_pratt(parser: &mut Parser<'_, '_>, bp: u8) -> ParseResult<Expr> {
 	let span = parser.peek_span();
 	let mut lhs = parse_prefix_or_prime(parser).await?;

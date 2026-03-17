@@ -1,12 +1,11 @@
-use ast::{GeometrySubType, IdentListType, NodeList, PrimeType, Spanned};
+use ast::{IdentListType, NodeList, Spanned};
 use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
 use token::{BaseTokenKind, T};
 
-use super::Parser;
-use crate::Parse;
 use crate::parse::ParseResult;
 use crate::parse::utils::{parse_delimited_list, parse_seperated_list, parse_seperated_list_sync};
+use crate::{Parse, Parser};
 
 fn parse_ident_list_type(span: Span, parser: &mut Parser) -> ParseResult<IdentListType> {
 	let tables = if let Some(x) = parser.eat(T![<])? {
@@ -25,16 +24,16 @@ fn parse_ident_list_type(span: Span, parser: &mut Parser) -> ParseResult<IdentLi
 	})
 }
 
-fn parse_geometry_sub_type(parser: &mut Parser<'_, '_>) -> ParseResult<GeometrySubType> {
+fn parse_geometry_sub_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::GeometrySubType> {
 	let peek = parser.peek_expect("a geometry sub type")?;
 	let res = match peek.token {
-		T![POINT] => GeometrySubType::Point(peek.span),
-		T![LINE] => GeometrySubType::Line(peek.span),
-		T![POLYGON] => GeometrySubType::Polygon(peek.span),
-		T![MULTIPOINT] => GeometrySubType::MultiPoint(peek.span),
-		T![MULTILINE] => GeometrySubType::MultiLine(peek.span),
-		T![MULTIPOLYGON] => GeometrySubType::MultiPolygon(peek.span),
-		T![COLLECTION] => GeometrySubType::Collection(peek.span),
+		T![POINT] => ast::GeometrySubType::Point(peek.span),
+		T![LINE] => ast::GeometrySubType::Line(peek.span),
+		T![POLYGON] => ast::GeometrySubType::Polygon(peek.span),
+		T![MULTIPOINT] => ast::GeometrySubType::MultiPoint(peek.span),
+		T![MULTILINE] => ast::GeometrySubType::MultiLine(peek.span),
+		T![MULTIPOLYGON] => ast::GeometrySubType::MultiPolygon(peek.span),
+		T![COLLECTION] => ast::GeometrySubType::Collection(peek.span),
 		_ => return Err(parser.unexpected("a geometry sub type")),
 	};
 
@@ -42,7 +41,7 @@ fn parse_geometry_sub_type(parser: &mut Parser<'_, '_>) -> ParseResult<GeometryS
 	Ok(res)
 }
 
-async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<PrimeType> {
+async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<ast::PrimeType> {
 	let peek = parser.peek_expect("a kind")?;
 	match peek.token {
 		T![ANY] => Err(parser.with_error(|parser| {
@@ -85,7 +84,7 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<PrimeType>
 			});
 			Ok(ast::PrimeType::LitFloat(builtin))
 		}
-		BaseTokenKind::PosInfinity => {
+		BaseTokenKind::PosInfinity | BaseTokenKind::Infinity => {
 			let _ = parser.next();
 			let builtin = parser.push(Spanned {
 				value: f64::INFINITY,
@@ -209,6 +208,10 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<PrimeType>
 			let _ = parser.next();
 			Ok(ast::PrimeType::Bool(peek.span))
 		}
+		T![RANGE] => {
+			let _ = parser.next();
+			Ok(ast::PrimeType::Range(peek.span))
+		}
 		T![REGEX] => {
 			let _ = parser.next();
 			Ok(ast::PrimeType::Regex(peek.span))
@@ -298,6 +301,20 @@ async fn parse_prime_type(parser: &mut Parser<'_, '_>) -> ParseResult<PrimeType>
 			});
 
 			Ok(ast::PrimeType::Set(ty))
+		}
+
+		T![POINT] => {
+			let _ = parser.next();
+			let types = parser.push(ast::GeometrySubType::Point(peek.span));
+			let types = parser.push_list_item(NodeList {
+				cur: types,
+				next: None,
+			});
+			let n = parser.push(ast::GeometryType {
+				types: Some(types),
+				span: peek.span,
+			});
+			Ok(ast::PrimeType::Geometry(n))
 		}
 		T![GEOMETRY] => {
 			let _ = parser.next();
