@@ -8,7 +8,7 @@ This module implements SurrealDB's streaming query execution engine. It replaces
 SurrealQL (Expr) ──► Planner ──► ExecOperator tree ──► ValueBatchStream ──► Results
 ```
 
-1. **Planner** converts parsed AST (`Expr`) into a tree of `Arc<dyn ExecOperator>`
+1. **Planner** converts parsed LogicalPlan (`expr::Expr`) into a tree of `Arc<dyn ExecOperator>`
 2. **Executor** (`dbs::Executor::execute_operator_plan()`) builds an `ExecutionContext` and calls `plan.execute()`
 3. Each operator returns a `ValueBatchStream` — an async stream of `ValueBatch` (Vec\<Value\>)
 4. If the planner returns `PlannerUnsupported`/`PlannerUnimplemented`, execution falls back to `Expr::compute()` via `plan_or_compute`.
@@ -59,7 +59,7 @@ SurrealQL (Expr) ──► Planner ──► ExecOperator tree ──► ValueBa
 
 ### `planner/` — Query Planning
 
-Converts AST into operator trees. Key submodules:
+Converts Logical Plan into operator trees. Key submodules:
 
 - `select.rs` — SELECT pipeline planning (FROM → WHERE → SPLIT → GROUP → ORDER → LIMIT → FETCH → PROJECT → TIMEOUT)
 - `aggregate.rs` — GROUP BY and aggregate function extraction
@@ -152,4 +152,4 @@ Sort elimination: if the scan already produces ordered output (e.g., index scan)
 - **`Planner::with_txn(ctx, txn, ns, db)`** — Planner with transaction for index resolution at plan time
 - **`plan.execute(&exec_ctx)`** — Execute operator tree, returns `ValueBatchStream`
 - **`Executor::execute_operator_plan(plan, txn)`** — Full execution: build context, run plan, collect results
-- **`expr_to_physical_expr(expr, ctx)`** — Convert an expression AST node to a `PhysicalExpr`
+- **`expr_to_physical_expr(expr, ctx)`** — Convert an expression Logical Plan node to a `PhysicalExpr`
