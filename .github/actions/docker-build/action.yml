@@ -71,6 +71,29 @@ runs:
       shell: bash
       run: docker run --platform linux/amd64 --rm surrealdb-local:amd64 version
 
+    - name: Test Docker image volume permissions
+      shell: bash
+      run: |
+        # Verify /data and /logs are owned by the default user, not root.
+        # Uses docker export since prod images have no shell.
+        expected_uid=$(docker inspect --format '{{.Config.User}}' surrealdb-local:amd64)
+        cid=$(docker create --platform linux/amd64 surrealdb-local:amd64)
+        listing=$(docker export "$cid" | tar -tvf - data logs 2>/dev/null)
+        docker rm "$cid" > /dev/null
+        echo "$listing"
+        for dir in data logs; do
+          line=$(echo "$listing" | grep " ${dir}/$")
+          if echo "$line" | grep -qE "(^d\S+\s+0/0|^d\S+\s+0\s+0\s)"; then
+            echo "ERROR: /$dir is owned by root"
+            exit 1
+          fi
+          if ! echo "$line" | grep -q "$expected_uid"; then
+            echo "ERROR: /$dir is not owned by container user ($expected_uid)"
+            exit 1
+          fi
+          echo "OK: /$dir owned by $expected_uid"
+        done
+
     - name: Configure DockerHub
       uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
       if: ${{ inputs.push == 'true' }}

@@ -85,9 +85,9 @@ COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
 
 COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
-COPY --from=dev-ci /data /data
+COPY --chown=nonroot:nonroot --from=dev-ci /data /data
 
-COPY --from=dev-ci /logs /logs
+COPY --chown=nonroot:nonroot --from=dev-ci /logs /logs
 
 VOLUME /data /logs
 
@@ -136,9 +136,9 @@ COPY --from=tzdata /usr/share/zoneinfo /usr/share/zoneinfo
 
 COPY --from=tzdata /usr/share/zoneinfo/UTC /etc/localtime
 
-COPY --from=dev /data /data
+COPY --chown=nonroot:nonroot --from=dev /data /data
 
-COPY --from=dev /logs /logs
+COPY --chown=nonroot:nonroot --from=dev /logs /logs
 
 VOLUME /data /logs
 
