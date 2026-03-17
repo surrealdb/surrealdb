@@ -8,11 +8,11 @@ use crate::sql::{Cond, Explain, Expr, Literal, Output, With};
 pub struct DeleteStatement {
 	pub only: bool,
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
-	pub what: Vec<Expr>,
+	pub(crate) what: Vec<Expr>,
 	pub with: Option<With>,
-	pub cond: Option<Cond>,
-	pub output: Option<Output>,
-	pub timeout: Expr,
+	pub(crate) cond: Option<Cond>,
+	pub(crate) output: Option<Output>,
+	pub(crate) timeout: Expr,
 	pub explain: Option<Explain>,
 }
 

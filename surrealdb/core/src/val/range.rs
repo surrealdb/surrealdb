@@ -18,7 +18,7 @@ use crate::val::{Array, IndexFormat, Number, Value};
 #[derive(Debug, Eq, PartialEq, Clone, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub(crate) struct Range {
+pub struct Range {
 	pub start: Bound<Value>,
 	pub end: Bound<Value>,
 }

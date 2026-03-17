@@ -24,7 +24,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Duration, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineAccessStatement {
+pub struct DefineAccessStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub base: Base,

@@ -10,15 +10,15 @@ use crate::expr::{Expr, FlowResultExt};
 /// The api configuration as it is received from ast.
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct ApiConfig {
+pub struct ApiConfig {
 	pub middleware: Vec<Middleware>,
-	pub permissions: Permission,
+	pub(crate) permissions: Permission,
 }
 
 /// The api middleware as it is received from ast.
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct Middleware {
+pub struct Middleware {
 	pub name: String,
 	pub args: Vec<Expr>,
 }

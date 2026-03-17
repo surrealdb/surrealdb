@@ -7,6 +7,7 @@ members = [
     "surrealdb",
     "surrealdb/core",
     "surrealdb/server",
+    "surrealdb/sql-compat",
     "surrealdb/types",
     "surrealdb/types/derive",
     # SurrealML crates
@@ -44,6 +45,7 @@ categories = ["database-implementations", "data-structures", "embedded"]
 surrealdb = { version = "3.1.0-alpha", path = "surrealdb" }
 surrealdb-core = { version = "3.1.0-alpha", path = "surrealdb/core", default-features = false }
 surrealdb-server = { version = "3.1.0-alpha", path = "surrealdb/server", default-features = false }
+surrealdb-sql-compat = { version = "3.1.0-alpha", path = "surrealdb/sql-compat" }
 surrealdb-types = { version = "3.1.0-alpha", path = "surrealdb/types" }
 surrealdb-types-derive = { version = "3.1.0-alpha", path = "surrealdb/types/derive" }
 # SurrealML crates
@@ -140,6 +142,7 @@ parking_lot = "0.12.5"
 paste = "1.0.15"
 path-clean = "1.0.1"
 pbkdf2 = "0.12.2"
+pgwire = "0.38"
 phf = "0.13.1"
 pin-project-lite = "0.2.16"
 pprof = "0.15.0"
@@ -159,6 +162,7 @@ scrypt = "0.11.0"
 semver = "1.0.27"
 serde = "1.0.228"
 serde_json = "1.0.149"
+sqlparser = "0.61"
 sha1 = "0.10.6"
 sha2 = "0.10.9"
 snap = "1.1.1"
@@ -170,6 +174,7 @@ tempfile = "3.24.0"
 thiserror = "2.0.17"
 tokio = { version = "1.49.0", default-features = false }
 tokio-stream = "0.1"
+tokio-postgres = "0.7.16"
 tokio-tungstenite = "0.28.0"
 tokio-tungstenite-wasm = "0.8.1"
 tokio-util = "0.7.18"
@@ -247,6 +252,8 @@ storage-tikv = ["surrealdb-server/storage-tikv"]
 storage-indxdb = ["surrealdb-server/storage-indxdb"]
 # GraphQL API support
 graphql = ["surrealdb-server/graphql"]
+# PostgreSQL wire protocol support
+pgwire = ["surrealdb-server/pgwire"]
 # Interactive SQL CLI support
 cli = ["surrealdb-server/cli"]
 
@@ -279,6 +286,7 @@ reqwest = { workspace = true, default-features = false, features = [
     "gzip",
     "http2",
 ] }
+rstest.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 surrealdb-types.workspace = true
@@ -286,6 +294,7 @@ test-log = { workspace = true, features = ["trace"] }
 thiserror.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "signal", "tracing"] }
+tokio-postgres.workspace = true
 tokio-stream.workspace = true
 tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
 tracing.workspace = true

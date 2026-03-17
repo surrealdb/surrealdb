@@ -18,7 +18,7 @@ use crate::val::{Array, Value};
 /// The `foo,bar,*` part of statements like `SELECT foo,bar.* FROM faz`.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum Fields {
+pub enum Fields {
 	/// Fields had the `VALUE` clause and should only return the given selector
 	///
 	/// This variant should not contain Field::All
@@ -300,7 +300,7 @@ impl Fields {
 	}
 }
 
-pub(crate) enum FieldsIter<'a> {
+pub enum FieldsIter<'a> {
 	Single(Option<&'a Selector>),
 	Multiple(Iter<'a, Field>),
 }
@@ -336,7 +336,7 @@ impl ExactSizeIterator for FieldsIter<'_> {}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) enum Field {
+pub enum Field {
 	/// The `*` in `SELECT * FROM ...`
 	#[default]
 	All,
@@ -365,7 +365,7 @@ impl ToSql for Field {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct Selector {
+pub struct Selector {
 	pub expr: Expr,
 	/// The `quality` in `SELECT rating AS quality FROM ...`
 	pub alias: Option<Idiom>,

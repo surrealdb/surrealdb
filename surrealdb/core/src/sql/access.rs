@@ -9,12 +9,12 @@ use crate::types::PublicDuration;
 pub struct AccessDuration {
 	// Duration after which the grants generated with the access method expire
 	// For access methods whose grants are tokens, this value is irrelevant
-	pub grant: Expr,
+	pub(crate) grant: Expr,
 	// Duration after which the tokens obtained with the access method expire
 	// For access methods that cannot issue tokens, this value is irrelevant
-	pub token: Expr,
+	pub(crate) token: Expr,
 	// Duration after which the session authenticated with the access method expires
-	pub session: Expr,
+	pub(crate) session: Expr,
 }
 
 impl Default for AccessDuration {

@@ -144,7 +144,7 @@ impl ToSql for Part {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum DestructurePart {
+pub(crate) enum DestructurePart {
 	All(String),
 	Field(String),
 	Aliased(String, Idiom),
@@ -243,7 +243,7 @@ impl From<crate::expr::part::Recurse> for Recurse {
 // ------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RecurseInstruction {
+pub(crate) enum RecurseInstruction {
 	Path {
 		// Do we include the starting point in the paths?
 		inclusive: bool,

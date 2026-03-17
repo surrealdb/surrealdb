@@ -29,7 +29,7 @@ use crate::val::{TableName, Value};
 /// - When switching to a `RELATION` table type, in/out fields are created as needed via
 ///   `DefineTableStatement::add_in_out_fields`.
 /// - When `compact` is true, underlying storage for this table is compacted.
-pub(crate) struct AlterTableStatement {
+pub struct AlterTableStatement {
 	/// Table name.
 	pub name: TableName,
 	/// If true, do nothing (and succeed) when the table does not exist.

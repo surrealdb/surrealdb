@@ -6,7 +6,7 @@ use crate::sql::{Expr, Literal};
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveTableStatement {
-	pub name: Expr,
+	pub(crate) name: Expr,
 	pub if_exists: bool,
 	pub expunge: bool,
 }

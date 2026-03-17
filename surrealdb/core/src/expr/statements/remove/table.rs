@@ -15,7 +15,7 @@ use crate::types::{PublicAction, PublicNotification, PublicValue};
 use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct RemoveTableStatement {
+pub struct RemoveTableStatement {
 	pub name: Expr,
 	pub if_exists: bool,
 	pub expunge: bool,

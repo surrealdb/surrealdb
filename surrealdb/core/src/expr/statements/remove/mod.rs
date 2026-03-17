@@ -1,38 +1,38 @@
-mod access;
-mod analyzer;
-mod api;
-mod bucket;
-mod database;
-mod event;
-mod field;
-mod function;
-mod index;
-mod model;
-mod module;
-mod namespace;
-mod param;
-mod sequence;
-mod table;
-mod user;
+pub mod access;
+pub mod analyzer;
+pub mod api;
+pub mod bucket;
+pub mod database;
+pub mod event;
+pub mod field;
+pub mod function;
+pub mod index;
+pub mod model;
+pub mod module;
+pub mod namespace;
+pub mod param;
+pub mod sequence;
+pub mod table;
+pub mod user;
 
-pub(crate) use access::RemoveAccessStatement;
-pub(crate) use analyzer::RemoveAnalyzerStatement;
+pub use access::RemoveAccessStatement;
+pub use analyzer::RemoveAnalyzerStatement;
 use anyhow::Result;
-pub(crate) use api::RemoveApiStatement;
-pub(crate) use bucket::RemoveBucketStatement;
-pub(crate) use database::RemoveDatabaseStatement;
-pub(crate) use event::RemoveEventStatement;
-pub(crate) use field::RemoveFieldStatement;
-pub(crate) use function::RemoveFunctionStatement;
-pub(crate) use index::RemoveIndexStatement;
-pub(crate) use model::RemoveModelStatement;
-pub(crate) use module::RemoveModuleStatement;
-pub(crate) use namespace::RemoveNamespaceStatement;
-pub(crate) use param::RemoveParamStatement;
+pub use api::RemoveApiStatement;
+pub use bucket::RemoveBucketStatement;
+pub use database::RemoveDatabaseStatement;
+pub use event::RemoveEventStatement;
+pub use field::RemoveFieldStatement;
+pub use function::RemoveFunctionStatement;
+pub use index::RemoveIndexStatement;
+pub use model::RemoveModelStatement;
+pub use module::RemoveModuleStatement;
+pub use namespace::RemoveNamespaceStatement;
+pub use param::RemoveParamStatement;
 use reblessive::tree::Stk;
-pub(crate) use sequence::RemoveSequenceStatement;
-pub(crate) use table::RemoveTableStatement;
-pub(crate) use user::RemoveUserStatement;
+pub use sequence::RemoveSequenceStatement;
+pub use table::RemoveTableStatement;
+pub use user::RemoveUserStatement;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -40,7 +40,7 @@ use crate::doc::CursorDoc;
 use crate::expr::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum RemoveStatement {
+pub enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),
 	Database(RemoveDatabaseStatement),
 	Function(RemoveFunctionStatement),

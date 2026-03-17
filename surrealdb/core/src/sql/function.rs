@@ -114,7 +114,7 @@ impl From<crate::expr::Function> for Function {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct FunctionCall {
 	pub receiver: Function,
-	pub arguments: Vec<Expr>,
+	pub(crate) arguments: Vec<Expr>,
 }
 
 impl From<FunctionCall> for crate::expr::FunctionCall {

@@ -5,7 +5,7 @@ use crate::sql::Expr;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum UseStatement {
+pub(crate) enum UseStatement {
 	Ns(Expr),
 	Db(Expr),
 	NsDb(Expr, Expr),

@@ -13,7 +13,7 @@ use crate::val::Geometry;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Literal {
+pub(crate) enum Literal {
 	None,
 	Null,
 	// and unbounded range: `..`

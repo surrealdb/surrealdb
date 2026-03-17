@@ -9,8 +9,8 @@ use crate::sql::{Expr, Literal};
 pub struct DefineNamespaceStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Expr,
-	pub comment: Expr,
+	pub(crate) name: Expr,
+	pub(crate) comment: Expr,
 }
 
 impl Default for DefineNamespaceStatement {

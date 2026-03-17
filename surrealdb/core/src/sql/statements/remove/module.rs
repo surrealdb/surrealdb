@@ -5,7 +5,7 @@ use crate::sql::ModuleName;
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveModuleStatement {
-	pub name: ModuleName,
+	pub(crate) name: ModuleName,
 	pub if_exists: bool,
 }
 

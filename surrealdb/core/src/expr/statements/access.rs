@@ -28,7 +28,7 @@ pub static GRANT_BEARER_ID_LENGTH: usize = 12;
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum AccessStatement {
+pub enum AccessStatement {
 	Grant(AccessStatementGrant),   // Create access grant.
 	Show(AccessStatementShow),     // Show access grants.
 	Revoke(AccessStatementRevoke), // Revoke access grant.
@@ -36,14 +36,14 @@ pub(crate) enum AccessStatement {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct AccessStatementGrant {
+pub struct AccessStatementGrant {
 	pub ac: String,
 	pub base: Option<Base>,
 	pub subject: Subject,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct AccessStatementShow {
+pub struct AccessStatementShow {
 	pub ac: String,
 	pub base: Option<Base>,
 	pub gr: Option<String>,
@@ -51,7 +51,7 @@ pub(crate) struct AccessStatementShow {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct AccessStatementRevoke {
+pub struct AccessStatementRevoke {
 	pub ac: String,
 	pub base: Option<Base>,
 	pub gr: Option<String>,
@@ -59,7 +59,7 @@ pub(crate) struct AccessStatementRevoke {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct AccessStatementPurge {
+pub struct AccessStatementPurge {
 	pub ac: String,
 	pub base: Option<Base>,
 	pub kind: PurgeKind,
@@ -76,7 +76,7 @@ pub enum PurgeKind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum Subject {
+pub enum Subject {
 	Record(RecordIdLit),
 	User(String),
 }
@@ -132,7 +132,7 @@ pub fn new_grant_bearer(ty: catalog::BearerAccessType) -> catalog::GrantBearer {
 }
 
 /// Returns the surrealql object representation of the access grant
-pub fn access_object_from_grant(grant: &catalog::AccessGrant) -> Object {
+pub(crate) fn access_object_from_grant(grant: &catalog::AccessGrant) -> Object {
 	let mut res = Object::default();
 	res.insert("id".to_owned(), Value::from(grant.id.clone()));
 	res.insert("ac".to_owned(), Value::from(grant.ac.clone()));
@@ -178,7 +178,7 @@ pub fn access_object_from_grant(grant: &catalog::AccessGrant) -> Object {
 	res
 }
 
-pub async fn create_grant(
+pub(crate) async fn create_grant(
 	access: String,
 	base: Option<Base>,
 	subject: catalog::Subject,

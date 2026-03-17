@@ -14,7 +14,7 @@ use crate::val::{IndexFormat, Value};
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub(crate) struct Set(pub(crate) BTreeSet<Value>);
+pub struct Set(pub(crate) BTreeSet<Value>);
 
 impl Set {
 	/// Create a new empty set

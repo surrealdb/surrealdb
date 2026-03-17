@@ -78,7 +78,7 @@ impl From<crate::expr::order::OrderList> for OrderList {
 pub struct Order {
 	/// The value to order by
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::basic_idiom))]
-	pub value: Idiom,
+	pub(crate) value: Idiom,
 	pub collate: bool,
 	pub numeric: bool,
 	/// true if the direction is ascending

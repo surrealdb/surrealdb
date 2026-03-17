@@ -11,7 +11,7 @@ use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct RemoveUserStatement {
+pub struct RemoveUserStatement {
 	pub name: Expr,
 	pub base: Base,
 	pub if_exists: bool,

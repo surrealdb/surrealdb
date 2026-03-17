@@ -7,7 +7,7 @@ use crate::expr::Value;
 use crate::expr::idiom::Idiom;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum Ordering {
+pub enum Ordering {
 	Random,
 	Order(OrderList),
 }
@@ -20,7 +20,7 @@ impl ToSql for Ordering {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct OrderList(pub(crate) Vec<Order>);
+pub struct OrderList(pub Vec<Order>);
 
 impl Deref for OrderList {
 	type Target = Vec<Order>;
@@ -65,13 +65,13 @@ impl IntoIterator for OrderList {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct Order {
+pub struct Order {
 	/// The value to order by
-	pub(crate) value: Idiom,
-	pub(crate) collate: bool,
-	pub(crate) numeric: bool,
+	pub value: Idiom,
+	pub collate: bool,
+	pub numeric: bool,
 	/// true if the direction is ascending
-	pub(crate) direction: bool,
+	pub direction: bool,
 }
 
 impl ToSql for Order {

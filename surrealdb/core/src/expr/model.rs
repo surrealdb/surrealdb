@@ -31,7 +31,7 @@ pub fn get_model_path(ns: &str, db: &str, name: &str, version: &str, hash: &str)
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct Model {
+pub struct Model {
 	pub name: String,
 	pub version: String,
 }

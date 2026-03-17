@@ -32,7 +32,7 @@ use crate::kvs::Transaction;
 use crate::val::{Array, Number, RecordId, RecordIdKey, TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineTableStatement {
+pub struct DefineTableStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Expr,

@@ -14,7 +14,7 @@ use crate::val::Value;
 /// The type of access methods available
 #[revisioned(revision = 1)]
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub enum AccessType {
+pub(crate) enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
 	Bearer(BearerAccess),

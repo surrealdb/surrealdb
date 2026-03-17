@@ -27,7 +27,7 @@ impl ToSql for PrefixOperator {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum PostfixOperator {
+pub enum PostfixOperator {
 	Range,
 	RangeSkip,
 	/// Not used as of yet but will be once the idiom is properly restructured.
@@ -43,7 +43,7 @@ impl ToSql for PostfixOperator {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum BinaryOperator {
+pub enum BinaryOperator {
 	/// `-`
 	Subtract,
 	/// `+`
@@ -127,7 +127,7 @@ pub(crate) enum BinaryOperator {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct MatchesOperator {
+pub struct MatchesOperator {
 	pub rf: Option<MatchRef>,
 	pub operator: BooleanOperator,
 }
@@ -157,7 +157,7 @@ impl ToSql for BooleanOperator {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum NearestNeighbor {
+pub enum NearestNeighbor {
 	/// `<|k, dist|>`
 	K(u32, Distance),
 	/// `<|k|>`

@@ -1,41 +1,41 @@
-mod access;
-mod analyzer;
-mod api;
-mod bucket;
+pub mod access;
+pub mod analyzer;
+pub mod api;
+pub mod bucket;
 pub mod config;
-mod database;
-mod event;
-mod field;
-mod function;
-mod index;
-mod model;
-mod module;
-mod namespace;
-mod param;
-mod sequence;
-mod table;
-mod user;
+pub mod database;
+pub mod event;
+pub mod field;
+pub mod function;
+pub mod index;
+pub mod model;
+pub mod module;
+pub mod namespace;
+pub mod param;
+pub mod sequence;
+pub mod table;
+pub mod user;
 
-pub(crate) use access::DefineAccessStatement;
-pub(crate) use analyzer::DefineAnalyzerStatement;
+pub use access::DefineAccessStatement;
+pub use analyzer::DefineAnalyzerStatement;
 use anyhow::Result;
-pub(crate) use api::{ApiAction, DefineApiStatement};
-pub(crate) use bucket::DefineBucketStatement;
-pub(crate) use config::DefineConfigStatement;
-pub(crate) use database::DefineDatabaseStatement;
-pub(crate) use event::DefineEventStatement;
-pub(crate) use field::{DefineDefault, DefineFieldStatement};
-pub(crate) use function::DefineFunctionStatement;
-pub(crate) use index::DefineIndexStatement;
+pub use api::{ApiAction, DefineApiStatement};
+pub use bucket::DefineBucketStatement;
+pub use config::DefineConfigStatement;
+pub use database::DefineDatabaseStatement;
+pub use event::DefineEventStatement;
+pub use field::{DefineDefault, DefineFieldStatement};
+pub use function::DefineFunctionStatement;
+pub use index::DefineIndexStatement;
 pub(in crate::expr::statements) use index::run_indexing;
-pub(crate) use model::DefineModelStatement;
-pub(crate) use module::DefineModuleStatement;
-pub(crate) use namespace::DefineNamespaceStatement;
-pub(crate) use param::DefineParamStatement;
+pub use model::DefineModelStatement;
+pub use module::DefineModuleStatement;
+pub use namespace::DefineNamespaceStatement;
+pub use param::DefineParamStatement;
 use reblessive::tree::Stk;
-pub(crate) use sequence::DefineSequenceStatement;
-pub(crate) use table::DefineTableStatement;
-pub(crate) use user::DefineUserStatement;
+pub use sequence::DefineSequenceStatement;
+pub use table::DefineTableStatement;
+pub use user::DefineUserStatement;
 
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -51,7 +51,7 @@ pub enum DefineKind {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum DefineStatement {
+pub enum DefineStatement {
 	Namespace(DefineNamespaceStatement),
 	Database(DefineDatabaseStatement),
 	Function(DefineFunctionStatement),

@@ -9,7 +9,7 @@ use crate::expr::{Block, ControlFlow, Expr, FlowResult, Param, Value};
 use crate::val::range::IntegerRangeIter;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct ForeachStatement {
+pub struct ForeachStatement {
 	pub param: Param,
 	pub range: Expr,
 	pub block: Block,

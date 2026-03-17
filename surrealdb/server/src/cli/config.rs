@@ -54,4 +54,5 @@ pub struct Config {
 	pub engine: EngineOptions,
 	pub no_identification_headers: bool,
 	pub allow_origin: Vec<String>,
+	pub pgwire_bind: Option<SocketAddr>,
 }

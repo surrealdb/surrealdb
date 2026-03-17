@@ -8,7 +8,7 @@ use crate::err::Error;
 use crate::expr::{ControlFlow, Expr, FlowResult, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct IfelseStatement {
+pub struct IfelseStatement {
 	/// The first if condition followed by a body, followed by any number of
 	/// else if's
 	pub exprs: Vec<(Expr, Expr)>,

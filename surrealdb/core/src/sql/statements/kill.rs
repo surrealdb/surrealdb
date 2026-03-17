@@ -7,7 +7,7 @@ use crate::sql::Expr;
 pub struct KillStatement {
 	// Uuid of Live Query
 	// or Param resolving to Uuid of Live Query
-	pub id: Expr,
+	pub(crate) id: Expr,
 }
 
 impl ToSql for KillStatement {

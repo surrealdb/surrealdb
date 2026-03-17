@@ -78,7 +78,7 @@ use crate::err::Error;
 /// - Variable length encoding (3+ bytes typical: 1 sign + 2 scale + packed digits)
 /// - Handles full D128 range including extreme values
 /// - Uses packed digit encoding for efficient storage (2 digits per byte)
-pub(crate) struct DecimalLexEncoder;
+pub struct DecimalLexEncoder;
 
 impl DecimalLexEncoder {
 	/// We use a 16-bit biased "scale" (not the raw exponent).

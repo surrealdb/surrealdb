@@ -7,7 +7,7 @@ use crate::expr::parameterize::expr_to_optional_ident;
 use crate::expr::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefaultConfig {
+pub struct DefaultConfig {
 	pub namespace: Expr,
 	pub database: Expr,
 }

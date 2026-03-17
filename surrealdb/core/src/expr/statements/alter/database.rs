@@ -11,7 +11,7 @@ use crate::val::Value;
 ///
 /// Supported options:
 /// - `compact`: triggers a compaction of the current database keyspace.
-pub(crate) struct AlterDatabaseStatement {
+pub struct AlterDatabaseStatement {
 	pub compact: bool,
 }
 

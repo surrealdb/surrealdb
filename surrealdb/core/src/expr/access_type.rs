@@ -9,7 +9,7 @@ use crate::expr::{Algorithm, Expr, Literal};
 /// The type of access methods available
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub(crate) enum AccessType {
+pub enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
 	Bearer(BearerAccess),
@@ -51,7 +51,7 @@ impl AccessType {
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub(crate) struct JwtAccess {
+pub struct JwtAccess {
 	// Verify is required
 	pub verify: JwtAccessVerify,
 	// Issue is optional
@@ -79,7 +79,7 @@ impl Default for JwtAccess {
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub(crate) struct JwtAccessIssue {
+pub struct JwtAccessIssue {
 	pub(crate) alg: Algorithm,
 	pub(crate) key: Expr,
 }
@@ -96,7 +96,7 @@ impl Default for JwtAccessIssue {
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub(crate) enum JwtAccessVerify {
+pub enum JwtAccessVerify {
 	Key(JwtAccessVerifyKey),
 	Jwks(JwtAccessVerifyJwks),
 }
@@ -109,7 +109,7 @@ impl Default for JwtAccessVerify {
 	}
 }
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub(crate) struct JwtAccessVerifyKey {
+pub struct JwtAccessVerifyKey {
 	pub(crate) alg: Algorithm,
 	pub(crate) key: Expr,
 }
@@ -126,12 +126,12 @@ impl Default for JwtAccessVerifyKey {
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub(crate) struct JwtAccessVerifyJwks {
+pub struct JwtAccessVerifyJwks {
 	pub(crate) url: Expr,
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub(crate) struct RecordAccess {
+pub struct RecordAccess {
 	pub signup: Option<Expr>,
 	pub signin: Option<Expr>,
 	pub jwt: JwtAccess,
@@ -152,7 +152,7 @@ impl Default for RecordAccess {
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub(crate) struct BearerAccess {
+pub struct BearerAccess {
 	pub kind: BearerAccessType,
 	pub subject: BearerAccessSubject,
 	pub jwt: JwtAccess,
@@ -171,7 +171,7 @@ impl Default for BearerAccess {
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub(crate) enum BearerAccessType {
+pub enum BearerAccessType {
 	Bearer,
 	Refresh,
 }

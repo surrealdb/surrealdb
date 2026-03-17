@@ -16,7 +16,7 @@ use crate::key::sequence::Prefix;
 use crate::val::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineSequenceStatement {
+pub struct DefineSequenceStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub batch: Expr,

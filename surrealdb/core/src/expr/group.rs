@@ -7,7 +7,7 @@ use crate::expr::idiom::Idiom;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct Groups(pub(crate) Vec<Group>);
+pub struct Groups(pub Vec<Group>);
 
 impl Groups {
 	pub(crate) fn is_group_all_only(&self) -> bool {
@@ -21,7 +21,7 @@ impl Groups {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct Group(pub(crate) Idiom);
+pub struct Group(pub Idiom);
 
 impl Deref for Group {
 	type Target = Idiom;

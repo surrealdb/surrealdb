@@ -28,7 +28,7 @@ use crate::val::Value;
 /// clobbered by `a`.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct Fetchs(Vec<Fetch>);
+pub struct Fetchs(pub Vec<Fetch>);
 
 impl Fetchs {
 	pub(crate) fn new(fetches: Vec<Fetch>) -> Self {
@@ -71,7 +71,7 @@ impl InfoStructure for Fetchs {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct Fetch(pub(crate) Expr);
+pub struct Fetch(pub Expr);
 
 impl Fetch {
 	#[instrument(level = "trace", name = "Fetch::compute", skip_all)]

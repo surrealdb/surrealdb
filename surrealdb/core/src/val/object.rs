@@ -17,7 +17,7 @@ use crate::val::{IndexFormat, RecordId, Value};
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub(crate) struct Object(pub(crate) BTreeMap<String, Value>);
+pub struct Object(pub(crate) BTreeMap<String, Value>);
 
 impl From<BTreeMap<&str, Value>> for Object {
 	fn from(v: BTreeMap<&str, Value>) -> Self {

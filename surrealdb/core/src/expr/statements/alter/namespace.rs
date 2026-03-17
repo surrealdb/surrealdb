@@ -11,7 +11,7 @@ use crate::val::Value;
 ///
 /// Supported options:
 /// - `compact`: triggers a compaction of the current namespace keyspace.
-pub(crate) struct AlterNamespaceStatement {
+pub struct AlterNamespaceStatement {
 	/// When true, compacts the underlying storage for the namespace.
 	pub compact: bool,
 }

@@ -8,27 +8,27 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::Value;
 
-mod database;
-mod field;
-mod index;
-mod namespace;
-mod sequence;
-mod system;
-mod table;
+pub mod database;
+pub mod field;
+pub mod index;
+pub mod namespace;
+pub mod sequence;
+pub mod system;
+pub mod table;
 
-pub(crate) use database::AlterDatabaseStatement;
-pub(crate) use field::{AlterDefault, AlterFieldStatement};
-pub(crate) use index::AlterIndexStatement;
-pub(crate) use namespace::AlterNamespaceStatement;
-pub(crate) use sequence::AlterSequenceStatement;
-pub(crate) use system::AlterSystemStatement;
-pub(crate) use table::AlterTableStatement;
+pub use database::AlterDatabaseStatement;
+pub use field::{AlterDefault, AlterFieldStatement};
+pub use index::AlterIndexStatement;
+pub use namespace::AlterNamespaceStatement;
+pub use sequence::AlterSequenceStatement;
+pub use system::AlterSystemStatement;
+pub use table::AlterTableStatement;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 /// Helper to express a tri‑state alteration:
 /// - `None`: leave the current value unchanged
 /// - `Set(T)`: set/replace the current value to `T`
 /// - `Drop`: remove/clear the current value
-pub(crate) enum AlterKind<T> {
+pub enum AlterKind<T> {
 	#[default]
 	None,
 	Set(T),
@@ -90,7 +90,7 @@ impl<T: Revisioned + DeserializeRevisioned> DeserializeRevisioned for AlterKind<
 ///
 /// Variants map to specific resources and delegate execution to their
 /// corresponding implementations.
-pub(crate) enum AlterStatement {
+pub enum AlterStatement {
 	System(AlterSystemStatement),
 	Namespace(AlterNamespaceStatement),
 	Database(AlterDatabaseStatement),

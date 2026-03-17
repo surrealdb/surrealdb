@@ -21,7 +21,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Duration, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineUserStatement {
+pub struct DefineUserStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub base: Base,

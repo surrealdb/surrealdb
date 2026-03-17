@@ -20,7 +20,7 @@ pub enum LiveFields {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct LiveStatement {
+pub struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
 	pub fields: LiveFields,

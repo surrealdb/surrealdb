@@ -15,12 +15,12 @@ use crate::surrealism::cache::SurrealismCacheLookup;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineModuleStatement {
+pub struct DefineModuleStatement {
 	pub kind: DefineKind,
 	pub name: Option<String>,
 	pub executable: ModuleExecutable,
 	pub comment: Expr,
-	pub permissions: Permission,
+	pub(crate) permissions: Permission,
 }
 
 impl DefineModuleStatement {

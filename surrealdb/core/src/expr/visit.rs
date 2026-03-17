@@ -237,7 +237,14 @@ implement_visitor! {
 			Expr::Mock(_) |
 			Expr::Constant(_) |
 			Expr::Break |
-			Expr::Continue => {},
+			Expr::Continue => {}
+			Expr::Join(j) => {
+				this.visit_expr(&j.left)?;
+				this.visit_expr(&j.right)?;
+				if let Some(cond) = &j.cond {
+					this.visit_expr(&cond.0)?;
+				}
+			},
 			Expr::Idiom(idiom) => {
 				this.visit_idiom(idiom)?;
 			}
@@ -1642,7 +1649,14 @@ implement_visitor_mut! {
 			Expr::Mock(_) |
 			Expr::Constant(_) |
 			Expr::Break |
-			Expr::Continue => {},
+			Expr::Continue => {}
+			Expr::Join(j) => {
+				this.visit_mut_expr(&mut j.left)?;
+				this.visit_mut_expr(&mut j.right)?;
+				if let Some(cond) = &mut j.cond {
+					this.visit_mut_expr(&mut cond.0)?;
+				}
+			},
 			Expr::Idiom(idiom) => {
 				this.visit_mut_idiom(idiom)?;
 			}

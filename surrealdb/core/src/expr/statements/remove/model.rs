@@ -8,7 +8,7 @@ use crate::expr::{Base, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct RemoveModelStatement {
+pub struct RemoveModelStatement {
 	pub name: String,
 	pub version: String,
 	pub if_exists: bool,

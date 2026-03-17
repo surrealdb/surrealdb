@@ -21,7 +21,7 @@ use crate::val::{Array, IndexFormat, Number, Object, Range, TableName, Uuid, Val
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub(crate) struct RecordIdKeyRange {
+pub struct RecordIdKeyRange {
 	pub start: Bound<RecordIdKey>,
 	pub end: Bound<RecordIdKey>,
 }
@@ -182,7 +182,7 @@ impl PartialEq<Range> for RecordIdKeyRange {
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub(crate) enum RecordIdKey {
+pub enum RecordIdKey {
 	Number(i64),
 	String(String),
 	Uuid(Uuid),
@@ -389,7 +389,7 @@ impl ToSql for RecordIdKey {
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub(crate) struct RecordId {
+pub struct RecordId {
 	pub table: TableName,
 	pub key: RecordIdKey,
 }

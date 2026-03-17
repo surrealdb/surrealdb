@@ -13,11 +13,11 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineBucketStatement {
+pub struct DefineBucketStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub backend: Option<Expr>,
-	pub permissions: Permission,
+	pub(crate) permissions: Permission,
 	pub readonly: bool,
 	pub comment: Expr,
 }

@@ -1,0 +1,24 @@
+[package]
+name = "surrealdb-sql-compat"
+version.workspace = true
+publish = false
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description = "SQL dialect translation layer for SurrealDB"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+surrealdb-core = { workspace = true, default-features = false }
+sqlparser.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+regex.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

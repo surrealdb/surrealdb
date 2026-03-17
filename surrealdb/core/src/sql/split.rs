@@ -6,7 +6,7 @@ use crate::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Splits(pub Vec<Split>);
+pub struct Splits(pub(crate) Vec<Split>);
 
 impl surrealdb_types::ToSql for Splits {
 	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {

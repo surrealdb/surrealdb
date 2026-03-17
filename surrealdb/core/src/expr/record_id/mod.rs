@@ -8,13 +8,13 @@ use crate::expr::FlowResult;
 use crate::fmt::EscapeIdent;
 use crate::val::{RecordId, TableName};
 
-pub(crate) mod key;
-pub(crate) use key::{RecordIdKeyGen, RecordIdKeyLit};
-pub(crate) mod range;
-pub(crate) use range::RecordIdKeyRangeLit;
+pub mod key;
+pub use key::{RecordIdKeyGen, RecordIdKeyLit};
+pub mod range;
+pub use range::RecordIdKeyRangeLit;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct RecordIdLit {
+pub struct RecordIdLit {
 	/// Table name
 	pub table: TableName,
 	pub(crate) key: RecordIdKeyLit,

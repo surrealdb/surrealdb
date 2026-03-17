@@ -320,6 +320,9 @@ pub(crate) fn expr_required_context(expr: &Expr) -> ContextLevel {
 			statement,
 			..
 		} => expr_required_context(statement),
+
+		// Join: requires database context for both sides
+		Expr::Join(_) => ContextLevel::Database,
 	}
 }
 

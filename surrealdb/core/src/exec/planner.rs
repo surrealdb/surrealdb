@@ -320,6 +320,12 @@ impl<'ctx> Planner<'ctx> {
 			| Expr::Insert(_) => Err(Error::PlannerUnsupported(
 				"DML subqueries not yet supported in execution plans".to_string(),
 			)),
+
+			// Join is a relational operator, not a scalar expression
+			Expr::Join(_) => Err(Error::PlannerUnsupported(
+				"JOIN expressions are relational operators and cannot be used as scalar expressions"
+					.to_string(),
+			)),
 		}
 	}
 
@@ -870,6 +876,9 @@ impl<'ctx> Planner<'ctx> {
 						"DDL statements not yet supported in execution plans".to_string(),
 					))
 				}
+				Expr::Join(_) => Err(Error::PlannerUnsupported(
+					"JOIN expressions must be used as source in a SELECT statement".to_string(),
+				)),
 			}
 		})
 	}

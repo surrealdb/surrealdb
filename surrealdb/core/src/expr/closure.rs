@@ -9,7 +9,7 @@ use crate::expr::{Expr, Kind, Param};
 use crate::val::{Closure, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct ClosureExpr {
+pub struct ClosureExpr {
 	pub args: Vec<(Param, Kind)>,
 	pub returns: Option<Kind>,
 	pub body: Expr,

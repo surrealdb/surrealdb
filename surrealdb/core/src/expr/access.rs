@@ -4,7 +4,7 @@ use crate::val::Duration;
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
 // Durations representing the expiration of different elements of the access method
 // In this context, the None variant represents that the element does not expire
-pub(crate) struct AccessDuration {
+pub struct AccessDuration {
 	// Duration after which the grants generated with the access method expire
 	// For access methods whose grants are tokens, this value is irrelevant
 	pub(crate) grant: Expr,

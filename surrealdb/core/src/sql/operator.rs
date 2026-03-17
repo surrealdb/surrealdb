@@ -61,7 +61,7 @@ impl ToSql for PrefixOperator {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum PostfixOperator {
+pub(crate) enum PostfixOperator {
 	Range,
 	RangeSkip,
 	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]

@@ -18,7 +18,7 @@ use crate::expr::statements::define::DefineKind;
 use crate::iam::{Action, ConfigKind, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineConfigStatement {
+pub struct DefineConfigStatement {
 	pub kind: DefineKind,
 	pub inner: ConfigInner,
 }
@@ -26,7 +26,7 @@ pub(crate) struct DefineConfigStatement {
 /// The config struct as a computation target.
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum ConfigInner {
+pub enum ConfigInner {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfig),
 	Default(DefaultConfig),

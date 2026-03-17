@@ -6,7 +6,7 @@ mod def;
 mod del;
 mod diff;
 mod each;
-pub(crate) mod every;
+pub mod every;
 mod extend;
 mod fetch;
 mod first;
@@ -24,6 +24,6 @@ mod rid;
 mod set;
 mod walk;
 
-mod convert;
-pub(crate) use convert::cast::{Cast, CastError};
-pub(crate) use convert::coerce::{Coerce, CoerceError, CoerceErrorExt};
+pub mod convert;
+pub use convert::cast::{Cast, CastError};
+pub use convert::coerce::{Coerce, CoerceError, CoerceErrorExt};

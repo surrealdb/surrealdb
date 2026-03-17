@@ -1,7 +1,7 @@
 use crate::sql::idiom::Idiom;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Groups(pub Vec<Group>);
+pub struct Groups(pub(crate) Vec<Group>);
 
 impl surrealdb_types::ToSql for Groups {
 	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {

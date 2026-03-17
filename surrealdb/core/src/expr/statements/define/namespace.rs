@@ -14,7 +14,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineNamespaceStatement {
+pub struct DefineNamespaceStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Expr,
