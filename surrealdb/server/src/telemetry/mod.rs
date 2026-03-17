@@ -139,7 +139,7 @@ impl Builder {
 
 	/// Set the terminal log output format
 	pub fn with_socket_format(mut self, format: LogFormat) -> Self {
-		self.format = format;
+		self.socket_format = format;
 		self
 	}
 
