@@ -94,7 +94,7 @@ async fn evaluate_idiom_on_value(
 				Value::Array(arr) => arr.last().cloned().unwrap_or(Value::None),
 				_ => Value::None,
 			},
-			_ => current.pick(&[part.clone()]),
+			_ => current.pick(std::slice::from_ref(part)),
 		};
 	}
 	Ok(current)

@@ -52,7 +52,9 @@ impl ScalarFunction for RecordExists {
 			let args = FromArgs::from_args("record::exists", args)?;
 			let frozen = ctx.exec_ctx.ctx();
 			let opt = ctx.exec_ctx.options();
-			let doc = ctx.document_root.or(ctx.current_value)
+			let doc = ctx
+				.document_root
+				.or(ctx.current_value)
 				.map(|v| CursorDoc::new(None, None, v.clone()));
 			let mut stack = TreeStack::new();
 			stack
@@ -103,7 +105,9 @@ impl ScalarFunction for RecordIsEdge {
 			let args = FromArgs::from_args("record::is_edge", args)?;
 			let frozen = ctx.exec_ctx.ctx();
 			let opt = ctx.exec_ctx.options();
-			let doc = ctx.document_root.or(ctx.current_value)
+			let doc = ctx
+				.document_root
+				.or(ctx.current_value)
 				.map(|v| CursorDoc::new(None, None, v.clone()));
 			let mut stack = TreeStack::new();
 			stack
