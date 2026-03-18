@@ -2,7 +2,7 @@
 
 name: Release
 
-run-name: "Release '${{ inputs.git-ref }}' (publish: ${{ inputs.publish }}, latest: ${{ inputs.latest }})"
+run-name: "Release '${{ inputs.git-ref }}' (publish: ${{ inputs.publish }})"
 
 on:
   workflow_dispatch:
@@ -12,11 +12,6 @@ on:
         type: string
         default: releases/2.x
         description: "The git ref of this release"
-      latest:
-        required: false
-        type: boolean
-        default: false
-        description: "Make this the latest release"
       extra-features:
         required: false
         type: string
@@ -44,7 +39,7 @@ jobs:
     uses: ./.github/workflows/publish-version.yml
     with:
       git-ref: ${{ inputs.git-ref }}
-      latest: ${{ inputs.latest }}
+      latest: false
       release-type: release
       publish: ${{ inputs.publish }}
       extra-features: ${{ inputs.extra-features }}
