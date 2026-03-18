@@ -18,8 +18,8 @@ use crate::exec::permission::{
 	validate_record_user_access,
 };
 use crate::exec::planner::util::{
-	SELECT_ITERATION_PARAMS, index_covers_ordering, resolve_condition_params,
-	strip_knn_from_condition,
+	SELECT_ITERATION_PARAMS, fold_condition_expressions, index_covers_ordering,
+	resolve_condition_params, resolve_projection_field_idioms, strip_knn_from_condition,
 };
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
@@ -539,10 +539,18 @@ async fn resolve_table_scan_stream(
 	// Resolve bind-parameter references so that index analysis sees
 	// Expr::Literal instead of Expr::Param. Covers LET bindings, client
 	// bind params, and DEFINE PARAM (via txn store).
+	//
+	// After param resolution, re-fold constant expressions (pure functions
+	// whose arguments are now all literals) and rewrite type::field("name")
+	// to Expr::Idiom so the index analyzer can match them.
 	let resolved_cond = match cfg.cond.as_ref() {
 		Some(c) => {
 			let ns_db = Some((cfg.ns_id, cfg.db_id));
-			Some(resolve_condition_params(c, &ctx.root().ctx, ns_db, SELECT_ITERATION_PARAMS).await)
+			let mut cond =
+				resolve_condition_params(c, &ctx.root().ctx, ns_db, SELECT_ITERATION_PARAMS).await;
+			fold_condition_expressions(&mut cond, ctx.function_registry());
+			resolve_projection_field_idioms(&mut cond, ctx.function_registry());
+			Some(cond)
 		}
 		None => None,
 	};

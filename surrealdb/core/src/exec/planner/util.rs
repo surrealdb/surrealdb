@@ -916,6 +916,56 @@ pub(crate) async fn resolve_condition_params(
 	Cond(expr)
 }
 
+/// Rewrite projection function calls with a single string literal argument
+/// (e.g. `type::field("name")`) to `Expr::Idiom` so the index analyzer can
+/// match them against indexed columns.
+///
+/// Projection functions like `type::field(s)` and a bare `Idiom(s)` both
+/// reference the same document field, but the index analyzer only recognises
+/// `Expr::Idiom`. This pass bridges the gap after param resolution and
+/// constant folding have reduced the argument to a string literal.
+///
+/// Uses `FunctionRegistry::is_projection` so any current or future
+/// projection function is handled without hardcoding names.
+pub(crate) fn resolve_projection_field_idioms(cond: &mut Cond, registry: &FunctionRegistry) {
+	let mut resolver = ProjectionFieldResolver {
+		registry,
+	};
+	let _ = resolver.visit_mut_expr(&mut cond.0);
+}
+
+struct ProjectionFieldResolver<'a> {
+	registry: &'a FunctionRegistry,
+}
+
+impl MutVisitor for ProjectionFieldResolver<'_> {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		use crate::expr::function::Function;
+
+		expr.visit_mut(self)?;
+
+		if let Expr::FunctionCall(fc) = expr
+			&& let Function::Normal(name) = &fc.receiver
+			&& self.registry.is_projection(name)
+			&& fc.arguments.len() == 1
+			&& let Expr::Literal(Literal::String(s)) = &fc.arguments[0]
+			&& let Ok(idiom) = crate::syn::idiom(s)
+		{
+			*expr = Expr::Idiom(idiom.into());
+		}
+		Ok(())
+	}
+
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
 /// Extract a `Vec<Number>` from a literal array expression.
 fn extract_literal_vector(expr: &Expr) -> Option<Vec<Number>> {
 	match expr {

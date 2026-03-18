@@ -25,7 +25,8 @@ use super::util::{
 	get_effective_limit_literal, has_knn_k_operator, has_knn_operator, has_top_level_or,
 	idiom_to_field_name, idiom_to_field_path, index_covers_ordering, is_count_all_eligible,
 	is_indexed_count_eligible, order_is_scan_compatible, resolve_condition_params,
-	resolve_param_value, strip_fts_condition, strip_index_conditions, strip_knn_from_condition,
+	resolve_param_value, resolve_projection_field_idioms, strip_fts_condition,
+	strip_index_conditions, strip_knn_from_condition,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
@@ -2306,19 +2307,29 @@ impl<'ctx> Planner<'ctx> {
 			return Ok(Some((AccessPath::TableScan, direction)));
 		}
 
+		// Rewrite projection function calls (e.g. type::field("name")) →
+		// Idiom in a cloned condition so the index analyzer can match
+		// against indexed columns.
+		let rewritten_cond = cond.map(|c| {
+			let mut c = c.clone();
+			resolve_projection_field_idioms(&mut c, self.function_registry());
+			c
+		});
+		let analysis_cond = rewritten_cond.as_ref();
+
 		let analyzer = IndexAnalyzer::new(indexes, with);
-		let candidates = analyzer.analyze(cond, order);
+		let candidates = analyzer.analyze(analysis_cond, order);
 
 		if candidates.is_empty() {
-			if let Some(path) = analyzer.try_or_union(cond, direction) {
+			if let Some(path) = analyzer.try_or_union(analysis_cond, direction) {
 				return Ok(Some((path, direction)));
 			}
 			// Try expanding IN operators into union of equality lookups
-			if let Some(path) = analyzer.try_in_expansion(cond, direction) {
+			if let Some(path) = analyzer.try_in_expansion(analysis_cond, direction) {
 				return Ok(Some((path, direction)));
 			}
 			// Try expanding CONTAINSALL/CONTAINSANY into union of equality lookups
-			if let Some(path) = analyzer.try_containment_expansion(cond, direction) {
+			if let Some(path) = analyzer.try_containment_expansion(analysis_cond, direction) {
 				return Ok(Some((path, direction)));
 			}
 			return Ok(Some((AccessPath::TableScan, direction)));
@@ -2340,7 +2351,7 @@ impl<'ctx> Planner<'ctx> {
 		// in the index. The outer pipeline adds a Sort when the union
 		// does not satisfy ORDER BY.
 		if path.is_full_range_scan()
-			&& let Some(union_path) = analyzer.try_or_union(cond, direction)
+			&& let Some(union_path) = analyzer.try_or_union(analysis_cond, direction)
 		{
 			return Ok(Some((union_path, direction)));
 		}
