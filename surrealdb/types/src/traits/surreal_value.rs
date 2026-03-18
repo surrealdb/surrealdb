@@ -475,24 +475,24 @@ impl_surreal_value!(
 	}
 );
 
-impl SurrealValue for Cow<'static, str> {
+impl<T: ToOwned + ?Sized> SurrealValue for Cow<'_, T>
+where
+	T::Owned: SurrealValue,
+{
 	fn kind_of() -> Kind {
-		kind!(string)
+		<T::Owned>::kind_of()
 	}
 
 	fn is_value(value: &Value) -> bool {
-		matches!(value, Value::String(_))
+		<T::Owned>::is_value(value)
 	}
 
 	fn into_value(self) -> Value {
-		Value::String(self.to_string())
+		<T::Owned>::into_value(self.into_owned())
 	}
 
 	fn from_value(value: Value) -> Result<Self, Error> {
-		let Value::String(s) = value else {
-			return Err(ConversionError::from_value(Self::kind_of(), &value).into());
-		};
-		Ok(Cow::Owned(s))
+		<T::Owned>::from_value(value).map(Cow::Owned)
 	}
 }
 
@@ -1710,5 +1710,56 @@ mod test {
 		let deserialized_value =
 			<_ as Deserialize>::deserialize(serialized_value).expect("this should work!");
 		assert_eq!(value, deserialized_value);
+	}
+
+	#[test]
+	fn cow_str_roundtrip() {
+		let original: Cow<'_, str> = Cow::Borrowed("hello");
+		let value = original.clone().into_value();
+		assert!(matches!(value, Value::String(ref s) if s == "hello"));
+		let recovered = Cow::<'_, str>::from_value(value).unwrap();
+		assert_eq!(recovered, "hello");
+
+		let owned: Cow<'_, str> = Cow::Owned("world".to_string());
+		let value = owned.into_value();
+		let recovered = Cow::<'_, str>::from_value(value).unwrap();
+		assert_eq!(recovered, "world");
+	}
+
+	#[test]
+	fn cow_str_kind_of() {
+		assert_eq!(Cow::<'_, str>::kind_of(), kind!(string));
+	}
+
+	#[test]
+	fn cow_str_is_value() {
+		assert!(Cow::<'_, str>::is_value(&Value::String("test".to_string())));
+		assert!(!Cow::<'_, str>::is_value(&Value::Number(Number::Int(42))));
+	}
+
+	#[test]
+	fn cow_clone_type_roundtrip() {
+		let original: Cow<'_, str> = Cow::Owned("hello".to_string());
+		let value = original.into_value();
+		assert!(matches!(value, Value::String(ref s) if s == "hello"));
+		let recovered = Cow::<'_, str>::from_value(value).unwrap();
+		assert_eq!(recovered.into_owned(), "hello");
+
+		let original: Cow<'_, i64> = Cow::Owned(42);
+		let value = original.into_value();
+		let recovered = Cow::<'_, i64>::from_value(value).unwrap();
+		assert_eq!(recovered.into_owned(), 42);
+
+		let original: Cow<'_, bool> = Cow::Owned(true);
+		let value = original.into_value();
+		let recovered = Cow::<'_, bool>::from_value(value).unwrap();
+		assert!(recovered.into_owned());
+	}
+
+	#[test]
+	fn cow_from_value_type_mismatch() {
+		let value = Value::Number(Number::Int(42));
+		let result = Cow::<'_, str>::from_value(value);
+		assert!(result.is_err());
 	}
 }
