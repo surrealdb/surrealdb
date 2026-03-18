@@ -40,10 +40,10 @@ BEGIN;
     fn::assert("bar" = /foo|bar/);
     fn::assert("foo" = /foo|bar/);
 
-    fn::assert(set::all({/foo|bar/},/foo|bar/));
+    fn::assert(set::all({/foo|bar/,},/foo|bar/));
 
     fn::assert(!set::all({1,2},{1,2}));
-    fn::assert(set::all([[1,2]],{1,2}));
+    fn::assert(set::all({{1,2},},{1,2}));
 
 
     RETURN "OK";
