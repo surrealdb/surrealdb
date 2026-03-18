@@ -6,16 +6,15 @@ mod implement;
 use std::fmt::{self, Arguments};
 
 use crate::types::{Ast, NodeLibrary};
-use crate::{Node, NodeId};
 
-pub fn visualize_ast<N, L, W>(root: NodeId<N>, ast: &Ast<L>, writer: W) -> fmt::Result
+pub fn visualize_ast<N, L, W>(root: &N, ast: &Ast<L>, writer: W) -> fmt::Result
 where
-	N: Node + AstVis<L>,
+	N: AstVis<L>,
 	L: NodeLibrary,
 	W: fmt::Write,
 {
 	let mut fmt = AstFormatter::new(writer);
-	ast[root].fmt(ast, &mut fmt)
+	root.fmt(ast, &mut fmt)
 }
 
 pub trait AstVis<L>

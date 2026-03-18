@@ -142,12 +142,6 @@ async fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 	Ok(Expr::Prefix(expr))
 }
 
-enum ParseFlow {
-	Continue,
-	Break,
-	Next,
-}
-
 async fn parse_basic_infix_op(
 	parser: &mut Parser<'_, '_>,
 	min_bp: u8,
@@ -440,6 +434,7 @@ async fn parse_bracket_postfix(
 		_ => {
 			let left = parser.push(lhs);
 			let index = parser.parse_enter().await?;
+			let _ = parser.peek();
 			let close =
 				parser.expect_closing_delimiter(BaseTokenKind::CloseBracket, open_token.span)?;
 			let op = IdiomOperator::Index(index);
@@ -822,8 +817,7 @@ async fn parse_dot_postfix(
 		x if x.is_identifier() => {
 			let _ = parser.next();
 			let left = parser.push(lhs);
-			let slice = parser.slice(peek.span).to_owned();
-			let field = parser.push_set(slice);
+			let field = parser.parse_sync()?;
 			let idiom = parser.push(IdiomExpr {
 				left,
 				op: Spanned {
@@ -1715,8 +1709,6 @@ async fn try_parse_infix_postfix_op(
 				)
 				.await;
 			}
-
-			let _ = parser.next();
 
 			let lhs = parser.push(lhs);
 			let span = parser.span_since(lhs_span);

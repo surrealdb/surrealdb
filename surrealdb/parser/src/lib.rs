@@ -10,8 +10,8 @@
 //! interface to the SurrealDB library please have a look at
 //! <a href="https://crates.io/crates/surrealdb">the Rust SDK</a>.
 //! </section>
-
-#![allow(dead_code)]
+//!
+//!
 
 pub mod parse;
 mod test;

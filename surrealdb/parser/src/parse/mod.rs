@@ -77,6 +77,7 @@ impl Config {
 	pub fn all_features() -> Self {
 		Config {
 			feature_bearer_access: true,
+			feature_surrealism: true,
 			..Default::default()
 		}
 	}
@@ -140,9 +141,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	pub fn enter_parse<P>(
 		source: &str,
 		config: Config,
-	) -> Result<(NodeId<P>, Ast), TypedError<Diagnostic<'static>>>
+	) -> Result<(P, Ast), TypedError<Diagnostic<'static>>>
 	where
-		P: Parse + Node,
+		P: Parse,
 	{
 		let mut ast = Ast::empty();
 		let mut stack = Stack::new();
@@ -156,9 +157,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		stack: &mut Stack,
 		ast: &mut Ast,
 		config: Config,
-	) -> Result<NodeId<P>, TypedError<Diagnostic<'static>>>
+	) -> Result<P, TypedError<Diagnostic<'static>>>
 	where
-		P: Parse + Node,
+		P: Parse,
 	{
 		ast.clear();
 		let lex = BaseTokenKind::lexer(source);

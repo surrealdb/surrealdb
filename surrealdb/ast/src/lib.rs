@@ -32,12 +32,11 @@ use crate::mac::{ast_type, impl_vis_debug, impl_vis_type};
 
 type NodeSet<T> = IdSet<u32, T>;
 
+// Macro implementing the syntax sugar for working with the ast.
 library! {
 	/// Type containing all the possible node types.
 	#[derive(Debug)]
 	Library{
-		query: Vec<Query>,
-
 		top_level_expr: Vec<TopLevelExpr>,
 		top_level_exprs: Vec<NodeList<TopLevelExpr>>,
 
@@ -2038,7 +2037,7 @@ impl_vis_type! {
 		/// `...`
 		Flatten,
 		/// .field
-		Field(NodeId<String>),
+		Field(NodeId<Ident>),
 		/// \[EXPR\]
 		Index(NodeId<Expr>),
 		/// \[? EXPR\] | \[WHERE EXPR\]
@@ -2235,6 +2234,7 @@ ast_type! {
 }
 
 ast_type! {
+	// `field`, `math::max`, `silo::module::pkg::<1.2.3>`
 	pub struct Path{
 		pub start: NodeId<Ident>,
 		pub parts: Option<NodeListId<PathSegment>>,

@@ -4,6 +4,7 @@ use std::path::Path;
 use std::{env, fmt};
 
 use ast::Query;
+use common::fmt_from_fn;
 
 use crate::Config;
 
@@ -70,7 +71,7 @@ fn text_test() {
 
 		let found = match res {
 			Ok((node, ast)) => {
-				fmt::from_fn(|fmt| ast::vis::visualize_ast(node, &ast, fmt)).to_string()
+				fmt_from_fn(|fmt| ast::vis::visualize_ast(&node, &ast, fmt)).to_string()
 			}
 			Err(e) => {
 				format!("ERROR:{}", e.render_char_buffer().to_string())

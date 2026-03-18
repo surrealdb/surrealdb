@@ -1,6 +1,7 @@
 use std::io::stdout;
 
 use ast::Query;
+use common::fmt_from_fn;
 
 fn read_input() -> String {
 	if let Some(arg) = std::env::args().nth(1) {
@@ -15,7 +16,7 @@ fn main() {
 
 	match surrealdb_parser::parse::Parser::enter_parse::<Query>(&input, Default::default()) {
 		Ok((node, ast)) => {
-			println!("{}", std::fmt::from_fn(|fmt| { ast::vis::visualize_ast(node, &ast, fmt) }))
+			println!("{}", fmt_from_fn(|fmt| { ast::vis::visualize_ast(&node, &ast, fmt) }))
 		}
 		Err(e) => e.render_char_buffer().write_styled(&mut stdout().lock()).unwrap(),
 	}

@@ -81,7 +81,7 @@ impl<T: Node> Node for NodeList<T> {}
 pub struct NodeListId<T>(pub NodeId<NodeList<T>>);
 
 impl<T: Any> NodeListId<T> {
-	fn index<'a, L: NodeLibrary>(self, ast: &'a Ast<L>) -> &'a NodeList<T> {
+	pub fn index<'a, L: NodeLibrary>(self, ast: &'a Ast<L>) -> &'a NodeList<T> {
 		&ast[self]
 	}
 }
