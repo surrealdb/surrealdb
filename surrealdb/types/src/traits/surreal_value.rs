@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate as surrealdb_types;
-use crate::error::{ConversionError, LengthMismatchError, OutOfRangeError};
+use crate::error::{ConversionError, LengthMismatchError, OutOfRangeError, SerializationError};
 use crate::traits::ser::Serializer;
 use crate::{
 	Array, Bytes, Datetime, Duration, Error, File, Geometry, Kind, Number, Object, Range, RecordId,
@@ -496,7 +496,7 @@ where
 	}
 }
 
-impl SurrealValue for &'static str {
+impl SurrealValue for &str {
 	fn kind_of() -> Kind {
 		kind!(string)
 	}
@@ -509,9 +509,10 @@ impl SurrealValue for &'static str {
 		Value::String(self.to_string())
 	}
 
-	fn from_value(_value: Value) -> Result<Self, Error> {
-		Err(Error::internal(
-			"Cannot deserialize &'static str from value: static string references cannot be created from runtime values".to_string(),
+	fn from_value(_: Value) -> Result<Self, Error> {
+		Err(Error::serialization(
+			"Cannot convert to &str because the value would be dropped and the reference would dangle. Use String or Cow<'_, str> instead".to_owned(),
+			SerializationError::Deserialization,
 		))
 	}
 }
