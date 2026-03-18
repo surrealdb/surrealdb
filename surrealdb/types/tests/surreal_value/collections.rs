@@ -151,7 +151,7 @@ mod vecdeque {
 	#[test]
 	fn preserves_order() {
 		let deque: VecDeque<i64> = [10, 20, 30, 40, 50].into_iter().collect();
-		let value = deque.clone().into_value();
+		let value = deque.into_value();
 		let recovered = VecDeque::<i64>::from_value(value).unwrap();
 		let items: Vec<i64> = recovered.into_iter().collect();
 		assert_eq!(items, vec![10, 20, 30, 40, 50]);
