@@ -163,35 +163,7 @@ macro_rules! impl_vis_type{
 			}
 		}
 	};
-	/*
-	(@expand_enum $vis:vis, $($m:meta)*, $name:ident {} -> ($($fields:tt)*)) => {
-		$(#[$m])*
-		$vis enum $name {
-			$($fields)*
-		}
-	};
-	(@expand_enum $vis:vis, $($m:meta)*, $name:ident { $(#[$fm:meta])* $variant:ident($t:ty), $($rest:tt)* } -> ($($fields:tt)*)) => {
-		impl_vis_type!{@expand_enum $vis, $($m)*, $name { $($rest)* } -> (
-			$($fields)*
 
-			$(#[$fm])*	$variant($t),
-		)}
-	};
-	(@expand_enum $vis:vis, $($m:meta)*, $name:ident { $(#[$fm:meta])* $variant:ident{$($field:ident: $t:ty),*$(,)?}, $($rest:tt)* } -> ($($fields:tt)*)) => {
-		impl_vis_type!{@expand_enum $vis, $($m)*, $name { $($rest)* } -> (
-			$($fields)*
-
-			$(#[$fm])*	$variant{$($field: $t),*},
-		)}
-	};
-	(@expand_enum $vis:vis, $($m:meta)*, $name:ident { $(#[$fm:meta])* $variant:ident, $($rest:tt)* } -> ($($fields:tt)*)) => {
-		impl_vis_type!{@expand_enum $vis, $($m)*, $name { $($rest)* } -> (
-			$($fields)*
-
-			$(#[$fm])* $variant,
-		)}
-	};
-	*/
 	(@variant $this:expr, $fmt:expr, $ast:expr => { }) => {  Ok(())  };
 	(@variant $this:expr, $fmt:expr, $ast:expr => { $(#[$fm:meta])* $variant:ident($ty:ty), $($rest:tt)* }) => {
 		if let Self::$variant(x) = $this{

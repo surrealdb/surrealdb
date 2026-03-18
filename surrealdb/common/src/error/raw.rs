@@ -58,7 +58,7 @@ impl ErrorVTable {
 	}
 }
 
-#[repr(C)]
+#[repr(C, align(4))]
 struct ErrorImpl<T> {
 	vtable: &'static ErrorVTable,
 	t: T,
