@@ -90,6 +90,12 @@ macro_rules! define_set_closure_function {
 	};
 }
 
+// array::all - Check if all elements match a condition
+define_set_closure_function!(SetAll, "set::all", crate::fnc::set::all, set: Any, check: Any => Any);
+
+// set::any - Check if any element matches a condition
+define_set_closure_function!(SetAny, "set::any", crate::fnc::set::any, set: Any, check: Any => Any);
+
 // set::filter - Filter elements by closure/value
 define_set_closure_function!(SetFilter, "set::filter", crate::fnc::set::filter, set: Any, check: Any => Any);
 
@@ -128,6 +134,8 @@ pub fn register(registry: &mut FunctionRegistry) {
 	);
 
 	// Register closure-based functions
+	registry.register(SetAll);
+	registry.register(SetAny);
 	registry.register(SetFilter);
 	registry.register(SetFind);
 	registry.register(SetFold);
