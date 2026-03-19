@@ -3,7 +3,7 @@ use surrealdb_core::dbs::capabilities::{Capabilities, Targets};
 use surrealdb_types::Value as SurValue;
 
 use crate::tests::schema::{
-	AuthLevel, BoolOr, NewPlannerStrategyConfig, SchemaTarget, TestAuth, TestConfig,
+	AuthLevel, BoolOr, SchemaTarget, TestAuth, TestConfig,
 };
 
 /// Creates the right core capabilities from a test config.
@@ -63,24 +63,16 @@ pub fn core_capabilities_from_test_config(config: &TestConfig) -> Capabilities {
 		.unwrap_or_else(Capabilities::all)
 }
 
-fn strategy_to_core(strategy: &NewPlannerStrategyConfig) -> NewPlannerStrategy {
-	match strategy {
-		NewPlannerStrategyConfig::BestEffortRo => NewPlannerStrategy::BestEffortReadOnlyStatements,
-		NewPlannerStrategyConfig::ComputeOnly => NewPlannerStrategy::ComputeOnly,
-		NewPlannerStrategyConfig::AllRo => NewPlannerStrategy::AllReadOnlyStatements,
-	}
-}
-
 /// Builds a `Session` from a test config and a specific planner strategy.
 pub fn session_from_test_config(
 	config: &TestConfig,
-	strategy: &NewPlannerStrategyConfig,
+	strategy: NewPlannerStrategy,
 ) -> Session {
 	let Some(env) = config.env.as_ref() else {
 		let mut session = Session::owner()
 			.with_ns("test")
 			.with_db("test")
-			.new_planner_strategy(strategy_to_core(strategy));
+			.new_planner_strategy(strategy.clone());
 		session.redact_volatile_explain_attrs = true;
 		return session;
 	};
@@ -139,7 +131,7 @@ pub fn session_from_test_config(
 	session.ns = ns.map(|x| x.to_owned());
 	session.db = db.map(|x| x.to_owned());
 
-	session.new_planner_strategy = strategy_to_core(strategy);
+	session.new_planner_strategy = strategy;
 
 	session.redact_volatile_explain_attrs = env.redact_volatile_explain_attrs.unwrap_or(true);
 

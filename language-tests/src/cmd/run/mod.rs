@@ -405,7 +405,7 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 					.with_query_timeout(Some(context_timeout_duration))
 			},
 			async |ds| {
-				run_test_with_dbs(context.id, &context.testset, ds, backend, &strategy).await
+				run_test_with_dbs(context.id, &context.testset, ds, backend, strategy.clone()).await
 			},
 		)
 		.await;
@@ -431,12 +431,12 @@ async fn run_test_with_dbs(
 	set: &TestSet,
 	dbs: &mut Datastore,
 	backend: Backend,
-	strategy: &NewPlannerStrategyConfig,
+	strategy: NewPlannerStrategyConfig,
 ) -> Result<TestTaskResult> {
 	let config = &set[id].config;
 	let backend_str = backend.to_string();
 
-	let mut session = util::session_from_test_config(config, strategy);
+	let mut session = util::session_from_test_config(config, strategy.into());
 
 	if let Some(ref x) = session.ns {
 		let db = session.db.take();

@@ -8,6 +8,7 @@ use std::str::FromStr;
 
 use semver::VersionReq;
 use serde::{Deserialize, Serialize, de};
+use surrealdb_core::dbs::NewPlannerStrategy;
 use surrealdb_core::dbs::capabilities::{
 	ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 };
@@ -248,6 +249,26 @@ impl fmt::Display for NewPlannerStrategyConfig {
 			Self::BestEffortRo => f.write_str("best-effort-ro"),
 			Self::AllRo => f.write_str("all-ro"),
 			Self::ComputeOnly => f.write_str("compute-only"),
+		}
+	}
+}
+
+impl From<NewPlannerStrategy> for NewPlannerStrategyConfig {
+	fn from(strategy: NewPlannerStrategy) -> Self {
+		match strategy {
+			NewPlannerStrategy::BestEffortReadOnlyStatements => Self::BestEffortRo,
+			NewPlannerStrategy::ComputeOnly => Self::ComputeOnly,
+			NewPlannerStrategy::AllReadOnlyStatements => Self::AllRo,
+		}
+	}
+}
+
+impl From<NewPlannerStrategyConfig> for NewPlannerStrategy {
+	fn from(strategy: NewPlannerStrategyConfig) -> Self {
+		match strategy {
+			NewPlannerStrategyConfig::BestEffortRo => NewPlannerStrategy::BestEffortReadOnlyStatements,
+			NewPlannerStrategyConfig::ComputeOnly => NewPlannerStrategy::ComputeOnly,
+			NewPlannerStrategyConfig::AllRo => NewPlannerStrategy::AllReadOnlyStatements,
 		}
 	}
 }
