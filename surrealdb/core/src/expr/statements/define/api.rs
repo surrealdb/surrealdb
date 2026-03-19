@@ -43,7 +43,7 @@ impl DefineApiStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::ApAlreadyExists {
-							value: self.path.to_sql(),
+							value: self.path.to_raw_string(),
 						});
 					}
 				}
