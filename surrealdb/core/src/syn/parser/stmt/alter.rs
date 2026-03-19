@@ -7,13 +7,14 @@ use crate::sql::statements::alter::field::AlterDefault;
 use crate::sql::statements::alter::{
 	AlterAccessStatement, AlterAnalyzerStatement, AlterApiStatement, AlterBucketStatement,
 	AlterConfigStatement, AlterDatabaseStatement, AlterEventStatement, AlterFieldStatement,
-	AlterFunctionStatement, AlterIndexStatement, AlterKind, AlterNamespaceStatement,
-	AlterParamStatement, AlterSequenceStatement, AlterSystemStatement, AlterUserStatement,
+	AlterFunctionStatement, AlterIndexStatement, AlterKind, AlterModuleStatement,
+	AlterNamespaceStatement, AlterParamStatement, AlterSequenceStatement, AlterSystemStatement,
+	AlterUserStatement,
 };
 use crate::sql::statements::{AlterStatement, AlterTableStatement};
 use crate::sql::tokenizer::Tokenizer;
 use crate::syn::error::bail;
-use crate::syn::parser::mac::{expected, unexpected};
+use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
 
@@ -37,6 +38,7 @@ impl Parser<'_> {
 			t!("ACCESS") => self.parse_alter_access(stk).await.map(AlterStatement::Access),
 			t!("CONFIG") => self.parse_alter_config(stk).await.map(AlterStatement::Config),
 			t!("API") => self.parse_alter_api(stk).await.map(AlterStatement::Api),
+			t!("MODULE") => self.parse_alter_module(stk).await.map(AlterStatement::Module),
 			_ => unexpected!(self, next, "a alter statement keyword"),
 		}
 	}
@@ -1055,6 +1057,85 @@ impl Parser<'_> {
 				t!("COMMENT") => {
 					self.pop_peek();
 					res.comment = AlterKind::Set(self.parse_string_lit()?);
+				}
+				_ => break,
+			}
+		}
+
+		Ok(res)
+	}
+
+	pub(crate) async fn parse_alter_module(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<AlterModuleStatement> {
+		if !self.settings.surrealism_enabled {
+			bail!(
+				"Experimental capability `surrealism` is not enabled",
+				@self.last_span() => "Use of `ALTER MODULE` is still experimental"
+			)
+		}
+
+		let if_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
+
+		let peek = self.peek();
+		let name = match peek.kind {
+			t!("mod") => {
+				self.pop_peek();
+				expected_whitespace!(self, t!("::"));
+				let name = self.parse_ident()?;
+				crate::sql::ModuleName::Module(name)
+			}
+			t!("silo") => {
+				self.pop_peek();
+				expected_whitespace!(self, t!("::"));
+				let organisation = self.parse_ident()?;
+				expected_whitespace!(self, t!("::"));
+				let package = self.parse_ident()?;
+				expected_whitespace!(self, t!("<"));
+				let major = self.parse_version_digits()?;
+				expected_whitespace!(self, t!("."));
+				let minor = self.parse_version_digits()?;
+				expected_whitespace!(self, t!("."));
+				let patch = self.parse_version_digits()?;
+				expected_whitespace!(self, t!(">"));
+				crate::sql::ModuleName::Silo(organisation, package, major, minor, patch)
+			}
+			_ => unexpected!(self, peek, "a module name"),
+		};
+
+		let mut res = AlterModuleStatement {
+			name,
+			if_exists,
+			comment: AlterKind::None,
+			permissions: None,
+		};
+
+		loop {
+			match self.peek_kind() {
+				t!("DROP") => {
+					self.pop_peek();
+					let peek = self.peek();
+					match peek.kind {
+						t!("COMMENT") => {
+							self.pop_peek();
+							res.comment = AlterKind::Drop;
+						}
+						_ => unexpected!(self, peek, "`COMMENT`"),
+					}
+				}
+				t!("COMMENT") => {
+					self.pop_peek();
+					res.comment = AlterKind::Set(self.parse_string_lit()?);
+				}
+				t!("PERMISSIONS") => {
+					self.pop_peek();
+					res.permissions = Some(stk.run(|stk| self.parse_permission_value(stk)).await?);
 				}
 				_ => break,
 			}

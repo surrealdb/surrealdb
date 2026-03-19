@@ -18,6 +18,7 @@ mod event;
 mod field;
 mod function;
 mod index;
+mod module;
 mod namespace;
 mod param;
 mod sequence;
@@ -35,6 +36,7 @@ pub(crate) use event::AlterEventStatement;
 pub(crate) use field::{AlterDefault, AlterFieldStatement};
 pub(crate) use function::AlterFunctionStatement;
 pub(crate) use index::AlterIndexStatement;
+pub(crate) use module::AlterModuleStatement;
 pub(crate) use namespace::AlterNamespaceStatement;
 pub(crate) use param::AlterParamStatement;
 pub(crate) use sequence::AlterSequenceStatement;
@@ -125,6 +127,7 @@ pub(crate) enum AlterStatement {
 	Function(AlterFunctionStatement),
 	User(AlterUserStatement),
 	Access(AlterAccessStatement),
+	Module(AlterModuleStatement),
 }
 
 impl AlterStatement {
@@ -157,6 +160,7 @@ impl AlterStatement {
 			Self::Function(v) => v.compute(ctx, opt).await,
 			Self::User(v) => v.compute(ctx, opt).await,
 			Self::Access(v) => v.compute(ctx, opt).await,
+			Self::Module(v) => v.compute(ctx, opt).await,
 		}
 	}
 }
@@ -180,6 +184,7 @@ impl ToSql for AlterStatement {
 			Self::Function(v) => v.fmt_sql(f, fmt),
 			Self::User(v) => v.fmt_sql(f, fmt),
 			Self::Access(v) => v.fmt_sql(f, fmt),
+			Self::Module(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

@@ -15,8 +15,8 @@ use crate::expr::statements::alter::{
 	AlterAccessStatement, AlterAnalyzerStatement, AlterApiStatement, AlterBucketStatement,
 	AlterConfigStatement, AlterDatabaseStatement, AlterDefault, AlterEventStatement,
 	AlterFieldStatement, AlterFunctionStatement, AlterIndexStatement, AlterKind,
-	AlterNamespaceStatement, AlterParamStatement, AlterSequenceStatement, AlterSystemStatement,
-	AlterTableStatement, AlterUserStatement,
+	AlterModuleStatement, AlterNamespaceStatement, AlterParamStatement, AlterSequenceStatement,
+	AlterSystemStatement, AlterTableStatement, AlterUserStatement,
 };
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::statements::define::config::api::ApiConfig;
@@ -365,6 +365,14 @@ implement_visitor! {
 			AlterStatement::Access(a) => { this.visit_alter_access(a)?; },
 			AlterStatement::User(a) => { this.visit_alter_user(a)?; },
 			AlterStatement::Api(a) => { this.visit_alter_api(a)?; },
+			AlterStatement::Module(a) => { this.visit_alter_module(a)?; },
+		}
+		Ok(())
+	}
+
+	fn visit_alter_module(this, a: &AlterModuleStatement){
+		if let Some(ref p) = a.permissions {
+			this.visit_permission(p)?;
 		}
 		Ok(())
 	}
@@ -1859,6 +1867,14 @@ implement_visitor_mut! {
 			AlterStatement::Access(a) => { this.visit_mut_alter_access(a)?; },
 			AlterStatement::User(a) => { this.visit_mut_alter_user(a)?; },
 			AlterStatement::Api(a) => { this.visit_mut_alter_api(a)?; },
+			AlterStatement::Module(a) => { this.visit_mut_alter_module(a)?; },
+		}
+		Ok(())
+	}
+
+	fn visit_mut_alter_module(this, a: &mut AlterModuleStatement){
+		if let Some(ref mut p) = a.permissions {
+			this.visit_mut_permission(p)?;
 		}
 		Ok(())
 	}

@@ -11,6 +11,7 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::define::ApiAction;
 use crate::expr::statements::define::config::api::ApiConfig;
 use crate::expr::{Base, Expr, Literal};
@@ -54,15 +55,15 @@ impl AlterApiStatement {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let txn = ctx.tx();
 
-		let path_str = self.path.to_raw_string();
-		let mut ap = match txn.get_db_api(ns, db, &path_str).await? {
+		let path_name = expr_to_ident(stk, ctx, opt, doc, &self.path, "api path").await?;
+		let mut ap = match txn.get_db_api(ns, db, &path_name).await? {
 			Some(v) => v.deref().clone(),
 			None => {
 				if self.if_exists {
 					return Ok(Value::None);
 				}
 				return Err(Error::ApNotFound {
-					value: path_str,
+					value: path_name,
 				}
 				.into());
 			}
@@ -96,7 +97,7 @@ impl AlterApiStatement {
 			AlterKind::None => {}
 		}
 
-		let key = crate::key::database::ap::new(ns, db, &path_str);
+		let key = crate::key::database::ap::new(ns, db, &path_name);
 		txn.set(&key, &ap, None).await?;
 		txn.clear_cache();
 		Ok(Value::None)

@@ -9,13 +9,13 @@ value = "NONE"
 value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'original' }" }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
-error = "The api '/mytest' does not exist"
+value = "NONE"
 
 [[test.results]]
-value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'original' }" }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
+value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'original' } COMMENT 'updated api'" }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
 
 [[test.results]]
-error = "The api '/mytest' does not exist"
+value = "NONE"
 
 [[test.results]]
 value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/mytest' FOR any PERMISSIONS FULL THEN { RETURN 'original' }" }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"""
@@ -24,7 +24,7 @@ value = """{ accesses: {  }, analyzers: {  }, apis: { "/mytest": "DEFINE API '/m
 value = "NONE"
 
 [[test.results]]
-error = "The api '/nonexistent' does not exist"
+error = "The api '//nonexistent' does not exist"
 
 */
 

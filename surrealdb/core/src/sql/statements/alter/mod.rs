@@ -6,6 +6,7 @@ mod config;
 mod event;
 pub mod field;
 mod function;
+mod module;
 use surrealdb_types::{SqlFormat, ToSql};
 mod database;
 mod index;
@@ -27,6 +28,7 @@ pub use event::AlterEventStatement;
 pub use field::AlterFieldStatement;
 pub use function::AlterFunctionStatement;
 pub use index::AlterIndexStatement;
+pub use module::AlterModuleStatement;
 pub use namespace::AlterNamespaceStatement;
 pub use param::AlterParamStatement;
 pub use sequence::AlterSequenceStatement;
@@ -94,6 +96,7 @@ pub enum AlterStatement {
 	Function(AlterFunctionStatement),
 	User(AlterUserStatement),
 	Access(AlterAccessStatement),
+	Module(AlterModuleStatement),
 }
 
 impl ToSql for AlterStatement {
@@ -115,6 +118,7 @@ impl ToSql for AlterStatement {
 			Self::Function(v) => v.fmt_sql(f, fmt),
 			Self::User(v) => v.fmt_sql(f, fmt),
 			Self::Access(v) => v.fmt_sql(f, fmt),
+			Self::Module(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -138,6 +142,7 @@ impl From<AlterStatement> for crate::expr::statements::AlterStatement {
 			AlterStatement::Function(v) => Self::Function(v.into()),
 			AlterStatement::User(v) => Self::User(v.into()),
 			AlterStatement::Access(v) => Self::Access(v.into()),
+			AlterStatement::Module(v) => Self::Module(v.into()),
 		}
 	}
 }
@@ -161,6 +166,7 @@ impl From<crate::expr::statements::AlterStatement> for AlterStatement {
 			crate::expr::statements::AlterStatement::Function(v) => Self::Function(v.into()),
 			crate::expr::statements::AlterStatement::User(v) => Self::User(v.into()),
 			crate::expr::statements::AlterStatement::Access(v) => Self::Access(v.into()),
+			crate::expr::statements::AlterStatement::Module(v) => Self::Module(v.into()),
 		}
 	}
 }
