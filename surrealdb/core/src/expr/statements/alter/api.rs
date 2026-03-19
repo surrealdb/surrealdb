@@ -54,15 +54,15 @@ impl AlterApiStatement {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let txn = ctx.tx();
 
-		let path_str = self.path.to_raw_string();
-		let mut ap = match txn.get_db_api(ns, db, &path_str).await? {
+		let path_sql = self.path.to_sql();
+		let mut ap = match txn.get_db_api(ns, db, &path_sql).await? {
 			Some(v) => v.deref().clone(),
 			None => {
 				if self.if_exists {
 					return Ok(Value::None);
 				}
 				return Err(Error::ApNotFound {
-					value: path_str,
+					value: path_sql,
 				}
 				.into());
 			}
@@ -96,7 +96,7 @@ impl AlterApiStatement {
 			AlterKind::None => {}
 		}
 
-		let key = crate::key::database::ap::new(ns, db, &path_str);
+		let key = crate::key::database::ap::new(ns, db, &path_sql);
 		txn.set(&key, &ap, None).await?;
 		txn.clear_cache();
 		Ok(Value::None)

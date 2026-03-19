@@ -10,7 +10,7 @@ use crate::sql::{Expr, Permission};
 pub struct AlterParamStatement {
 	pub name: String,
 	pub if_exists: bool,
-	pub value: AlterKind<Expr>,
+	pub value: Option<Expr>,
 	pub comment: AlterKind<String>,
 	pub permissions: Option<Permission>,
 }
@@ -23,10 +23,8 @@ impl ToSql for AlterParamStatement {
 		}
 		write_sql!(f, fmt, " ${}", EscapeKwFreeIdent(&self.name));
 
-		match self.value {
-			AlterKind::Set(ref v) => write_sql!(f, fmt, " VALUE {}", CoverStmts(v)),
-			AlterKind::Drop => f.push_str(" DROP VALUE"),
-			AlterKind::None => {}
+		if let Some(ref v) = self.value {
+			write_sql!(f, fmt, " VALUE {}", CoverStmts(v));
 		}
 
 		match self.comment {
@@ -47,7 +45,7 @@ impl From<AlterParamStatement> for crate::expr::statements::alter::AlterParamSta
 		crate::expr::statements::alter::AlterParamStatement {
 			name: v.name,
 			if_exists: v.if_exists,
-			value: v.value.into(),
+			value: v.value.map(Into::into),
 			comment: v.comment.into(),
 			permissions: v.permissions.map(Into::into),
 		}
@@ -59,7 +57,7 @@ impl From<crate::expr::statements::alter::AlterParamStatement> for AlterParamSta
 		AlterParamStatement {
 			name: v.name,
 			if_exists: v.if_exists,
-			value: v.value.into(),
+			value: v.value.map(Into::into),
 			comment: v.comment.into(),
 			permissions: v.permissions.map(Into::into),
 		}

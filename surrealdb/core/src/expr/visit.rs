@@ -437,10 +437,8 @@ implement_visitor! {
 	}
 
 	fn visit_alter_param(this, a: &AlterParamStatement){
-		match a.value {
-			AlterKind::None |
-			AlterKind::Drop => {},
-			AlterKind::Set(ref x) => this.visit_expr(x)?,
+		if let Some(ref x) = a.value {
+			this.visit_expr(x)?;
 		}
 		if let Some(ref p) = a.permissions {
 			this.visit_permission(p)?;
@@ -1929,10 +1927,8 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_alter_param(this, a: &mut AlterParamStatement){
-		match a.value {
-			AlterKind::None |
-			AlterKind::Drop => {},
-			AlterKind::Set(ref mut x) => this.visit_mut_expr(x)?,
+		if let Some(ref mut x) = a.value {
+			this.visit_mut_expr(x)?;
 		}
 		if let Some(ref mut p) = a.permissions {
 			this.visit_mut_permission(p)?;

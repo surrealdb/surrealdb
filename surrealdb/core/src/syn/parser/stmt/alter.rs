@@ -491,20 +491,16 @@ impl Parser<'_> {
 					self.pop_peek();
 					let peek = self.peek();
 					match peek.kind {
-						t!("VALUE") => {
-							self.pop_peek();
-							res.value = AlterKind::Drop;
-						}
 						t!("COMMENT") => {
 							self.pop_peek();
 							res.comment = AlterKind::Drop;
 						}
-						_ => unexpected!(self, peek, "`VALUE` or `COMMENT`"),
+						_ => unexpected!(self, peek, "`COMMENT`"),
 					}
 				}
 				t!("VALUE") => {
 					self.pop_peek();
-					res.value = AlterKind::Set(stk.run(|stk| self.parse_expr_field(stk)).await?);
+					res.value = Some(stk.run(|stk| self.parse_expr_field(stk)).await?);
 				}
 				t!("COMMENT") => {
 					self.pop_peek();

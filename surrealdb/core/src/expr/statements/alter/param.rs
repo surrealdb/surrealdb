@@ -18,7 +18,7 @@ use crate::val::Value;
 pub(crate) struct AlterParamStatement {
 	pub name: String,
 	pub if_exists: bool,
-	pub value: AlterKind<Expr>,
+	pub value: Option<Expr>,
 	pub comment: AlterKind<String>,
 	pub permissions: Option<Permission>,
 }
@@ -47,12 +47,8 @@ impl AlterParamStatement {
 			}
 		};
 
-		match self.value {
-			AlterKind::Set(ref v) => {
-				pa.value = stk.run(|stk| v.compute(stk, ctx, opt, doc)).await.catch_return()?;
-			}
-			AlterKind::Drop => pa.value = Value::None,
-			AlterKind::None => {}
+		if let Some(ref v) = self.value {
+			pa.value = stk.run(|stk| v.compute(stk, ctx, opt, doc)).await.catch_return()?;
 		}
 
 		match self.comment {
