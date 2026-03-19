@@ -815,7 +815,6 @@ async fn parse_dot_postfix(
 			parse_dot_brace_postfix(parser, lhs, lhs_span, dot_token.span).await
 		}
 		x if x.is_identifier() => {
-			let _ = parser.next();
 			let left = parser.push(lhs);
 			let field = parser.parse_sync()?;
 			let idiom = parser.push(IdiomExpr {

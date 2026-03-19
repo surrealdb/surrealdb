@@ -495,11 +495,11 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 								parser.parse_sync::<ast::Integer>()?.into_f64()
 							}
 							Some(BaseTokenKind::Float) => parser.parse_sync::<f64>()?,
-							_ => return Err(ParseError::speculate_error()),
+							_ => return Err(ParseError::speculate()),
 						},
 						BaseTokenKind::Float => parser.parse_sync::<f64>()?,
 						BaseTokenKind::Int => parser.parse_sync::<ast::Integer>()?.into_f64(),
-						_ => return Err(ParseError::speculate_error()),
+						_ => return Err(ParseError::speculate()),
 					};
 
 					let _ = parser.expect(T![,])?;

@@ -27,7 +27,9 @@ Query
                                             .key: "a"
                                             .value: Expr::Integer
                                                 +1
-                            .op: IdiomOperator::Field"a"
+                            .op: IdiomOperator::Field
+                                Ident
+                                    .text: "a"
                     .op: IdiomOperator::Call
                         None
 */

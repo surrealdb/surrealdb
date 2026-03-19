@@ -48,7 +48,7 @@ impl ParseSync for ast::Version {
 				Some(Ok(VersionToken::Digits)) => {}
 				None => {
 					if partial {
-						return Err(ParseError::missing_data_error());
+						return Err(ParseError::missing_data());
 					}
 				}
 				_ => {
@@ -94,7 +94,7 @@ impl ParseSync for ast::Version {
 				Some(Ok(VersionToken::Dot)) => {}
 				x => {
 					if x.is_none() && partial {
-						return Err(ParseError::missing_data_error());
+						return Err(ParseError::missing_data());
 					}
 					let span = Span::from_usize_range(lexer.span())
 						.expect("source should not be larger the u32::MAX");
@@ -115,7 +115,7 @@ impl ParseSync for ast::Version {
 				Some(Ok(VersionToken::Dot)) => {}
 				x => {
 					if x.is_none() && partial {
-						return Err(ParseError::missing_data_error());
+						return Err(ParseError::missing_data());
 					}
 					let span = Span::from_usize_range(lexer.span())
 						.expect("source should not be larger the u32::MAX");
@@ -731,7 +731,7 @@ impl ParseSync for ast::Regex {
 					Some(Err(_)) => unreachable!(),
 					None => {
 						if partial {
-							return Err(ParseError::missing_data_error());
+							return Err(ParseError::missing_data());
 						}
 
 						let span = lexer.span();
@@ -855,7 +855,7 @@ impl ParseSync for ast::JsFunctionBody {
 					}
 					None => {
 						if partial {
-							return Err(ParseError::missing_data_error());
+							return Err(ParseError::missing_data());
 						}
 						let span = Span::from_usize_range(templ_lexer.span())
 							.expect("span to be in range");
@@ -927,7 +927,7 @@ impl ParseSync for ast::JsFunctionBody {
 					Some(Err(_)) => unreachable!("{:?}", lexer.slice()),
 					None => {
 						if partial {
-							return Err(ParseError::missing_data_error());
+							return Err(ParseError::missing_data());
 						}
 						let span =
 							Span::from_usize_range(lexer.span()).expect("span to be in range");

@@ -7,7 +7,8 @@ use token::{BaseTokenKind, EscapeTokenKind, Token};
 use crate::parse::{ParseError, ParseResult, Parser};
 
 impl<'source, 'ast> Parser<'source, 'ast> {
-	pub fn unescape_ident(&mut self, token: Token) -> ParseResult<NodeId<String>> {
+	// Unescape an ident token and push the string value of that token into the ast.
+	pub(crate) fn unescape_ident(&mut self, token: Token) -> ParseResult<NodeId<String>> {
 		assert!(token.token.is_identifier());
 		let slice = self.slice(token.span);
 		if slice.starts_with('`') {
@@ -20,7 +21,8 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		}
 	}
 
-	pub fn unescape_param(&mut self, token: Token) -> ParseResult<NodeId<String>> {
+	// Unescape an param token and push the string value of that token into the ast.
+	pub(crate) fn unescape_param(&mut self, token: Token) -> ParseResult<NodeId<String>> {
 		assert_eq!(token.token, BaseTokenKind::Param);
 		let slice = self.slice(token.span);
 		if slice.starts_with("$`") {
@@ -37,7 +39,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		}
 	}
 
-	pub fn unescape_common<'a>(
+	pub(crate) fn unescape_common<'a>(
 		slice_span: Span,
 		unescape_source: &'a str,
 		full_source: &'a str,
@@ -237,7 +239,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		Ok(self.ast.push_set_entry(str))
 	}
 
-	pub fn unescape_str<'a>(&'a mut self, token: Token) -> ParseResult<&'a str> {
+	pub(crate) fn unescape_str<'a>(&'a mut self, token: Token) -> ParseResult<&'a str> {
 		let start_offset = match token.token {
 			BaseTokenKind::String => 1,
 			BaseTokenKind::RecordIdString
@@ -255,7 +257,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		Self::unescape_common(slice_span, slice, self.source(), &mut self.unescape_buffer)
 	}
 
-	pub fn unescape_str_push<'a>(&'a mut self, token: Token) -> ParseResult<NodeId<String>> {
+	pub(crate) fn unescape_str_push<'a>(&'a mut self, token: Token) -> ParseResult<NodeId<String>> {
 		let start_offset = match token.token {
 			BaseTokenKind::String => 1,
 			BaseTokenKind::RecordIdString
@@ -286,7 +288,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// This function can panic if the escaped string has invalid escape sequences inside and
 	/// therefore should only be called on strings which are already verified to have correct
 	/// escape sequences.
-	pub fn escape_str_offset(unescaped_str: &str, offset: u32) -> u32 {
+	pub(crate) fn escape_str_offset(unescaped_str: &str, offset: u32) -> u32 {
 		let mut lexer = EscapeTokenKind::lexer(unescaped_str);
 
 		let mut offset_idx = 0;

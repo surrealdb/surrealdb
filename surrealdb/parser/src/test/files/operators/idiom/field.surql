@@ -11,7 +11,9 @@ Query
                             .start: Ident
                                 .text: "a"
                             .parts: None
-                    .op: IdiomOperator::Field"b"
+                    .op: IdiomOperator::Field
+                        Ident
+                            .text: "b"
         -TopLevelExpr::Expr
             Expr::Idiom
                 IdiomExpr
@@ -22,6 +24,10 @@ Query
                                     .start: Ident
                                         .text: "a"
                                     .parts: None
-                            .op: IdiomOperator::Field"b"
-                    .op: IdiomOperator::Field"c"
+                            .op: IdiomOperator::Field
+                                Ident
+                                    .text: "b"
+                    .op: IdiomOperator::Field
+                        Ident
+                            .text: "c"
 */

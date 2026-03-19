@@ -981,7 +981,9 @@ Query
                                         .start: Ident
                                             .text: "a"
                                         .parts: None
-                                .op: IdiomOperator::Field"b"
+                                .op: IdiomOperator::Field
+                                    Ident
+                                        .text: "b"
                         -Expr::Idiom
                             IdiomExpr
                                 .left: Expr::Path
@@ -989,7 +991,9 @@ Query
                                         .start: Ident
                                             .text: "c"
                                         .parts: None
-                                .op: IdiomOperator::Field"d"
+                                .op: IdiomOperator::Field
+                                    Ident
+                                        .text: "d"
                     .tempfiles: false
                     .explain: None
         -TopLevelExpr::Expr

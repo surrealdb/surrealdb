@@ -5,6 +5,7 @@ use std::ptr::NonNull;
 use common::TypedError;
 use common::source_error::Diagnostic;
 
+/// Shorthand for `Result<T, ParseError>`
 pub type ParseResult<T> = Result<T, ParseError>;
 
 /// Parser internal error type that is optimized for use within the parser, providing special error
@@ -35,8 +36,8 @@ impl ParseError {
 	/// Create an error for in a speculative context, indicating that this speculating failed and
 	/// we should recover to another branch.
 	///
-	/// This function should not be manually called, but only created inside parser methods.
-	pub fn speculate_error() -> Self {
+	/// Be carefull to not return this error outside of a speculating context in the parser.
+	pub fn speculate() -> Self {
 		// Safety: 1 is not a valid pointer for typederror, See documentation of `ParseError`.
 		unsafe { ParseError(NonNull::without_provenance(NonZeroUsize::new_unchecked(1))) }
 	}
@@ -46,7 +47,7 @@ impl ParseError {
 	///
 	/// This function should not be manually called, but only created inside parser methods.
 	#[cold]
-	pub fn missing_data_error() -> Self {
+	pub fn missing_data() -> Self {
 		// Safety: 2 is not a valid pointer for typederror, See documentation of `ParseError`.
 		unsafe { ParseError(NonNull::without_provenance(NonZeroUsize::new_unchecked(2))) }
 	}
@@ -82,6 +83,8 @@ impl ParseError {
 		Some(diag)
 	}
 
+	/// Returns a reference to the underlying diagnostic if the error is not missing data
+	/// or speculative.
 	pub fn as_diagnostic<'a>(&'a self) -> Option<&'a Diagnostic<'static>> {
 		if !self.is_diagnostic() {
 			return None;
@@ -89,6 +92,8 @@ impl ParseError {
 		unsafe { Some(TypedError::<Diagnostic<'static>>::ref_from_raw(self.0)) }
 	}
 
+	/// Returns a mutable reference to the underlying diagnostic if the error is not missing data
+	/// or speculative.
 	pub fn as_mut_diagnostic<'a>(&'a mut self) -> Option<&'a mut Diagnostic<'static>> {
 		if !self.is_diagnostic() {
 			return None;

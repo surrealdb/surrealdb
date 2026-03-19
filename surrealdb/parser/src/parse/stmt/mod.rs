@@ -946,7 +946,7 @@ async fn parse_insert_data(parser: &mut Parser<'_, '_>) -> ParseResult<InsertDat
 			.await?;
 
 			let Some(places) = places else {
-				return Err(ParseError::speculate_error());
+				return Err(ParseError::speculate());
 			};
 
 			let _ = parser.expect(T![VALUES])?;
