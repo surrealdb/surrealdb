@@ -861,7 +861,6 @@ impl Transaction {
 	// will be returned or cached.
 	#[inline]
 	fn purge_doc_id(&self, record: &Record) -> Record {
-
 		let mut record = record.clone();
 		if let Value::Object(obj) = &mut record.data {
 			obj.0.remove("id");
@@ -2095,7 +2094,6 @@ impl TableProvider for Transaction {
 		id: &RecordIdKey,
 		version: Option<u64>,
 	) -> Result<Arc<Record>> {
-		dbg!(version);
 		// Cache is not versioned
 		if version.is_some() {
 			// Fetch the record from the datastore
