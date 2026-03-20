@@ -658,16 +658,14 @@ impl Parse for ast::Relate {
 
 		if rightward {
 			let _ = parser.expect(T![->])?;
+		} else if let T![<] = parser.peek_expect("`<-`")?.token
+			&& let Some(peek1) = parser.peek_joined1()?
+			&& let T![-] = peek1.token
+		{
+			let _ = parser.next();
+			let _ = parser.next();
 		} else {
-			if let T![<] = parser.peek_expect("`<-`")?.token
-				&& let Some(peek1) = parser.peek_joined1()?
-				&& let T![-] = peek1.token
-			{
-				let _ = parser.next();
-				let _ = parser.next();
-			} else {
-				return Err(parser.unexpected("`<-`"));
-			}
+			return Err(parser.unexpected("`<-`"));
 		}
 
 		let last = parser.parse_enter().await?;

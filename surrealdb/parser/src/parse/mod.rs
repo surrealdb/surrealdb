@@ -554,13 +554,11 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	pub fn next_expect(&mut self, expected: &str) -> ParseResult<Token> {
 		if let Some(x) = self.next()? {
 			Ok(x)
+		} else if self.settings.contains(ParserSettings::PARTIAL) {
+			Err(ParseError::missing_data())
 		} else {
-			if self.settings.contains(ParserSettings::PARTIAL) {
-				Err(ParseError::missing_data())
-			} else {
-				let span = self.eof_span();
-				Err(self.error(format!("Unexpected end of query, expected {expected}"), span))
-			}
+			let span = self.eof_span();
+			Err(self.error(format!("Unexpected end of query, expected {expected}"), span))
 		}
 	}
 
