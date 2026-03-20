@@ -72,9 +72,9 @@ const LOG: &str = "surrealdb::net";
 /// ```rust,ignore
 /// use std::sync::Arc;
 /// use axum::{Router, routing::get};
-/// use surreal::RouterFactory;
-/// use surreal::rpc::RpcState;
-/// use surreal::core::CommunityComposer;
+/// use surrealdb_server::RouterFactory;
+/// use surrealdb_server::rpc::RpcState;
+/// use surrealdb_server::core::CommunityComposer;
 ///
 /// struct MyComposer;
 ///
@@ -94,9 +94,9 @@ const LOG: &str = "surrealdb::net";
 /// ```rust,ignore
 /// use std::sync::Arc;
 /// use axum::Router;
-/// use surreal::RouterFactory;
-/// use surreal::rpc::RpcState;
-/// use surreal::ntw::{health, sql, rpc};
+/// use surrealdb_server::RouterFactory;
+/// use surrealdb_server::rpc::RpcState;
+/// use surrealdb_server::ntw::{health, sql, rpc};
 ///
 /// struct MinimalComposer;
 ///
@@ -167,7 +167,7 @@ pub struct AppState {
 /// # Example
 ///
 /// ```rust,ignore
-/// use surreal::ntw::{RouterOptions, client_ip::ClientIp};
+/// use surrealdb_server::ntw::{RouterOptions, client_ip::ClientIp};
 ///
 /// let opts = RouterOptions::default();
 ///
@@ -222,19 +222,28 @@ impl From<&Config> for RouterOptions {
 /// [`spawn_notifications`](SurrealRouter::spawn_notifications) to start LIVE query notification
 /// delivery whenever you are ready.
 ///
+/// # Shutdown
+///
+/// When the server is stopping, the embedder is responsible for:
+/// 1. Cancelling the [`CancellationToken`] passed to [`build`](SurrealRouter::build) to stop
+///    background tasks and notification delivery.
+/// 2. Calling [`Datastore::shutdown`] on the shared datastore to deregister the node from the
+///    cluster and release resources. You can use the convenience method
+///    [`shutdown`](SurrealRouter::shutdown) which does this for you.
+///
 /// # Example
 ///
 /// ```rust,ignore
 /// use std::sync::Arc;
-/// use surreal::ntw::SurrealRouter;
-/// use surreal::core::{CommunityComposer, kvs::Datastore};
+/// use surrealdb_server::ntw::{SurrealRouter, RouterOptions};
+/// use surrealdb_server::core::{CommunityComposer, kvs::Datastore};
 /// use tokio_util::sync::CancellationToken;
 ///
 /// let ds = Arc::new(Datastore::new("memory").await?.with_notifications());
 /// let ct = CancellationToken::new();
 ///
 /// let opts = RouterOptions::default();
-/// let surreal = SurrealRouter::build::<CommunityComposer>(opts, ds, ct).await?;
+/// let surreal = SurrealRouter::build::<CommunityComposer>(opts, ds.clone(), ct.clone()).await?;
 ///
 /// // Start notification delivery (returns a JoinHandle you can await or abort)
 /// let notifications = surreal.spawn_notifications();
@@ -245,6 +254,10 @@ impl From<&Config> for RouterOptions {
 ///     .merge(surreal.into_router());
 ///
 /// // Serve `app` with your own server setup...
+///
+/// // When shutting down, cancel the token and deregister the node from the cluster:
+/// // ct.cancel();
+/// // ds.shutdown().await.ok();
 /// ```
 pub struct SurrealRouter {
 	router: Router,
@@ -420,6 +433,19 @@ impl SurrealRouter {
 	/// Return a reference to the [`CancellationToken`] for this router.
 	pub fn canceller(&self) -> &CancellationToken {
 		&self.canceller
+	}
+
+	/// Shut down the datastore, deregistering this node from the cluster.
+	///
+	/// This calls [`Datastore::shutdown`] on the underlying datastore. You should
+	/// call this when your server is stopping, **after** cancelling the
+	/// [`CancellationToken`] and waiting for background tasks to finish.
+	///
+	/// For the CLI server path (`surreal start`) this is handled automatically.
+	/// Embedders using [`SurrealRouter::build`] directly must call this (or
+	/// call `datastore.shutdown()` themselves).
+	pub async fn shutdown(&self) {
+		self.datastore.shutdown().await.ok();
 	}
 
 	/// Spawn the LIVE query notification delivery task.

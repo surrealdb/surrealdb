@@ -86,18 +86,24 @@ impl Surreal<Db> {
 	/// use surrealdb::Surreal;
 	/// use surrealdb_core::kvs::Datastore;
 	/// use surrealdb_core::options::EngineOptions;
+	/// use tokio_util::sync::CancellationToken;
 	///
 	/// let ds = Arc::new(
 	///     Datastore::new("surrealkv://my.surkv")
 	///         .await?
 	///         .with_notifications(),
 	/// );
+	/// let ct = CancellationToken::new();
 	///
 	/// // Create an SDK client that shares `ds`
-	/// let db = Surreal::<Db>::from_datastore(ds.clone(), EngineOptions::default()).await?;
+	/// let db = Surreal::<Db>::from_datastore(ct, ds.clone(), EngineOptions::default()).await?;
 	/// db.use_ns("test").use_db("test").await?;
 	///
 	/// // `ds` can now also be handed to SurrealRouter::build(...)
+	///
+	/// // When shutting down, cancel the token and shut down the datastore:
+	/// // ct.cancel();
+	/// // ds.shutdown().await.ok();
 	/// ```
 	pub async fn from_datastore(
 		canceller: CancellationToken,
