@@ -5,8 +5,8 @@ use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::AlterKind;
-use crate::catalog::ApiActionDefinition;
 use crate::catalog::providers::ApiProvider;
+use crate::catalog::{ApiActionDefinition, ApiMethod};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -18,13 +18,27 @@ use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
+/// A single `FOR` clause within an `ALTER API` statement.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) enum AlterApiClause {
+	/// `FOR any [config] [THEN expr | DROP THEN]`
+	ForAny {
+		config: Option<ApiConfig>,
+		fallback: AlterKind<Expr>,
+	},
+	/// `FOR method1, method2 [config] THEN expr`
+	SetAction(ApiAction),
+	/// `FOR method1, method2 DROP THEN`
+	DropAction {
+		methods: Vec<ApiMethod>,
+	},
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct AlterApiStatement {
 	pub path: Expr,
 	pub if_exists: bool,
-	pub actions: Option<Vec<ApiAction>>,
-	pub fallback: AlterKind<Expr>,
-	pub config: Option<ApiConfig>,
+	pub clauses: Vec<AlterApiClause>,
 	pub comment: AlterKind<String>,
 }
 
@@ -33,10 +47,22 @@ impl Default for AlterApiStatement {
 		Self {
 			path: Expr::Literal(Literal::None),
 			if_exists: false,
-			actions: None,
-			fallback: AlterKind::None,
-			config: None,
+			clauses: Vec::new(),
 			comment: AlterKind::None,
+		}
+	}
+}
+
+/// Remove the given methods from existing action entries, splitting entries
+/// that partially overlap and removing entries that are fully consumed.
+fn remove_methods_from_actions(actions: &mut Vec<ApiActionDefinition>, drop_methods: &[ApiMethod]) {
+	let mut i = 0;
+	while i < actions.len() {
+		actions[i].methods.retain(|m| !drop_methods.contains(m));
+		if actions[i].methods.is_empty() {
+			actions.swap_remove(i);
+		} else {
+			i += 1;
 		}
 	}
 }
@@ -69,26 +95,35 @@ impl AlterApiStatement {
 			}
 		};
 
-		if let Some(ref actions) = self.actions {
-			let mut new_actions = Vec::new();
-			for action in actions {
-				new_actions.push(ApiActionDefinition {
-					methods: action.methods.clone(),
-					action: action.action.clone(),
-					config: action.config.compute(stk, ctx, opt, doc).await?,
-				});
+		for clause in &self.clauses {
+			match clause {
+				AlterApiClause::ForAny {
+					config,
+					fallback,
+				} => {
+					if let Some(c) = config {
+						ap.config = c.compute(stk, ctx, opt, doc).await?;
+					}
+					match fallback {
+						AlterKind::Set(v) => ap.fallback = Some(v.clone()),
+						AlterKind::Drop => ap.fallback = None,
+						AlterKind::None => {}
+					}
+				}
+				AlterApiClause::SetAction(action) => {
+					remove_methods_from_actions(&mut ap.actions, &action.methods);
+					ap.actions.push(ApiActionDefinition {
+						methods: action.methods.clone(),
+						action: action.action.clone(),
+						config: action.config.compute(stk, ctx, opt, doc).await?,
+					});
+				}
+				AlterApiClause::DropAction {
+					methods,
+				} => {
+					remove_methods_from_actions(&mut ap.actions, methods);
+				}
 			}
-			ap.actions = new_actions;
-		}
-
-		match self.fallback {
-			AlterKind::Set(ref v) => ap.fallback = Some(v.clone()),
-			AlterKind::Drop => ap.fallback = None,
-			AlterKind::None => {}
-		}
-
-		if let Some(ref config) = self.config {
-			ap.config = config.compute(stk, ctx, opt, doc).await?;
 		}
 
 		match self.comment {

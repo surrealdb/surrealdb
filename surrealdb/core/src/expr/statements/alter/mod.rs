@@ -28,7 +28,7 @@ mod user;
 
 pub(crate) use access::AlterAccessStatement;
 pub(crate) use analyzer::AlterAnalyzerStatement;
-pub(crate) use api::AlterApiStatement;
+pub(crate) use api::{AlterApiClause, AlterApiStatement};
 pub(crate) use bucket::AlterBucketStatement;
 pub(crate) use config::AlterConfigStatement;
 pub(crate) use database::AlterDatabaseStatement;

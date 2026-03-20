@@ -1,16 +1,17 @@
 use reblessive::Stk;
 
-use crate::catalog::{EventDefinition, EventKind};
+use crate::catalog::{ApiMethod, EventDefinition, EventKind};
 use crate::sql::TableType;
 use crate::sql::filter::Filter;
 use crate::sql::statements::alter::field::AlterDefault;
 use crate::sql::statements::alter::{
-	AlterAccessStatement, AlterAnalyzerStatement, AlterApiStatement, AlterBucketStatement,
-	AlterConfigStatement, AlterDatabaseStatement, AlterEventStatement, AlterFieldStatement,
-	AlterFunctionStatement, AlterIndexStatement, AlterKind, AlterModuleStatement,
-	AlterNamespaceStatement, AlterParamStatement, AlterSequenceStatement, AlterSystemStatement,
-	AlterUserStatement,
+	AlterAccessStatement, AlterAnalyzerStatement, AlterApiClause, AlterApiStatement,
+	AlterBucketStatement, AlterConfigStatement, AlterDatabaseStatement, AlterEventStatement,
+	AlterFieldStatement, AlterFunctionStatement, AlterIndexStatement, AlterKind,
+	AlterModuleStatement, AlterNamespaceStatement, AlterParamStatement, AlterSequenceStatement,
+	AlterSystemStatement, AlterUserStatement,
 };
+use crate::sql::statements::define::ApiAction;
 use crate::sql::statements::{AlterStatement, AlterTableStatement};
 use crate::sql::tokenizer::Tokenizer;
 use crate::syn::error::bail;
@@ -1039,20 +1040,92 @@ impl Parser<'_> {
 
 		loop {
 			match self.peek_kind() {
-				t!("DROP") => {
+				t!("FOR") => {
 					self.pop_peek();
 					let peek = self.peek();
 					match peek.kind {
-						t!("THEN") => {
+						t!("ANY") => {
 							self.pop_peek();
-							res.fallback = AlterKind::Drop;
+							let config = self.parse_api_config(stk).await?;
+							let config_is_default = config == Default::default();
+
+							let fallback = if self.eat(t!("THEN")) {
+								AlterKind::Set(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+							} else if self.eat(t!("DROP")) {
+								expected!(self, t!("THEN"));
+								AlterKind::Drop
+							} else {
+								AlterKind::None
+							};
+
+							res.clauses.push(AlterApiClause::ForAny {
+								config: if config_is_default {
+									None
+								} else {
+									Some(config)
+								},
+								fallback,
+							});
 						}
-						t!("COMMENT") => {
-							self.pop_peek();
-							res.comment = AlterKind::Drop;
+						t!("DELETE")
+						| t!("GET")
+						| t!("PATCH")
+						| t!("POST")
+						| t!("PUT")
+						| t!("TRACE") => {
+							let mut methods: Vec<ApiMethod> = vec![];
+							loop {
+								let method = match self.peek().kind {
+									t!("DELETE") => ApiMethod::Delete,
+									t!("GET") => ApiMethod::Get,
+									t!("PATCH") => ApiMethod::Patch,
+									t!("POST") => ApiMethod::Post,
+									t!("PUT") => ApiMethod::Put,
+									t!("TRACE") => ApiMethod::Trace,
+									_ => {
+										unexpected!(
+											self,
+											peek,
+											"one of `DELETE`, `GET`, `PATCH`, `POST`, `PUT` or `TRACE`"
+										)
+									}
+								};
+								self.pop_peek();
+								methods.push(method);
+								if !self.eat(t!(",")) {
+									break;
+								}
+							}
+
+							if self.eat(t!("DROP")) {
+								expected!(self, t!("THEN"));
+								res.clauses.push(AlterApiClause::DropAction {
+									methods,
+								});
+							} else {
+								let config = self.parse_api_config(stk).await?;
+								expected!(self, t!("THEN"));
+								let action = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+								res.clauses.push(AlterApiClause::SetAction(ApiAction {
+									methods,
+									action,
+									config,
+								}));
+							}
 						}
-						_ => unexpected!(self, peek, "`THEN` or `COMMENT`"),
+						_ => {
+							unexpected!(
+								self,
+								peek,
+								"`any`, `DELETE`, `GET`, `PATCH`, `POST`, `PUT` or `TRACE`"
+							)
+						}
 					}
+				}
+				t!("DROP") => {
+					self.pop_peek();
+					expected!(self, t!("COMMENT"));
+					res.comment = AlterKind::Drop;
 				}
 				t!("COMMENT") => {
 					self.pop_peek();

@@ -313,7 +313,7 @@ pub(crate) enum Error {
 	},
 
 	/// The requested api does not exist
-	#[error("The api '/{value}' does not exist")]
+	#[error("The api '{value}' does not exist")]
 	ApNotFound {
 		value: String,
 	},

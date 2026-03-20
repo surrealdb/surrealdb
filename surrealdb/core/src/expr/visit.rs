@@ -12,11 +12,11 @@ use crate::expr::statements::access::{
 	AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow, Subject,
 };
 use crate::expr::statements::alter::{
-	AlterAccessStatement, AlterAnalyzerStatement, AlterApiStatement, AlterBucketStatement,
-	AlterConfigStatement, AlterDatabaseStatement, AlterDefault, AlterEventStatement,
-	AlterFieldStatement, AlterFunctionStatement, AlterIndexStatement, AlterKind,
-	AlterModuleStatement, AlterNamespaceStatement, AlterParamStatement, AlterSequenceStatement,
-	AlterSystemStatement, AlterTableStatement, AlterUserStatement,
+	AlterAccessStatement, AlterAnalyzerStatement, AlterApiClause, AlterApiStatement,
+	AlterBucketStatement, AlterConfigStatement, AlterDatabaseStatement, AlterDefault,
+	AlterEventStatement, AlterFieldStatement, AlterFunctionStatement, AlterIndexStatement,
+	AlterKind, AlterModuleStatement, AlterNamespaceStatement, AlterParamStatement,
+	AlterSequenceStatement, AlterSystemStatement, AlterTableStatement, AlterUserStatement,
 };
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::statements::define::config::api::ApiConfig;
@@ -382,10 +382,18 @@ implement_visitor! {
 	}
 
 	fn visit_alter_api(this, a: &AlterApiStatement){
-		match a.fallback {
-			AlterKind::None |
-			AlterKind::Drop => {},
-			AlterKind::Set(ref x) => this.visit_expr(x)?,
+		for clause in &a.clauses {
+			match clause {
+				AlterApiClause::ForAny { fallback, .. } => {
+					if let AlterKind::Set(x) = fallback {
+						this.visit_expr(x)?;
+					}
+				}
+				AlterApiClause::SetAction(action) => {
+					this.visit_expr(&action.action)?;
+				}
+				AlterApiClause::DropAction { .. } => {}
+			}
 		}
 		Ok(())
 	}
@@ -1884,10 +1892,18 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_alter_api(this, a: &mut AlterApiStatement){
-		match a.fallback {
-			AlterKind::None |
-			AlterKind::Drop => {},
-			AlterKind::Set(ref mut x) => this.visit_mut_expr(x)?,
+		for clause in &mut a.clauses {
+			match clause {
+				AlterApiClause::ForAny { fallback, .. } => {
+					if let AlterKind::Set(x) = fallback {
+						this.visit_mut_expr(x)?;
+					}
+				}
+				AlterApiClause::SetAction(action) => {
+					this.visit_mut_expr(&mut action.action)?;
+				}
+				AlterApiClause::DropAction { .. } => {}
+			}
 		}
 		Ok(())
 	}

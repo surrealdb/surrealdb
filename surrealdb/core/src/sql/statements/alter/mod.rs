@@ -20,7 +20,7 @@ mod table;
 
 pub use access::AlterAccessStatement;
 pub use analyzer::AlterAnalyzerStatement;
-pub use api::AlterApiStatement;
+pub use api::{AlterApiClause, AlterApiStatement};
 pub use bucket::AlterBucketStatement;
 pub use config::AlterConfigStatement;
 pub use database::AlterDatabaseStatement;
