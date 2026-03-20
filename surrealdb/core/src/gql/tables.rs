@@ -207,7 +207,7 @@ fn parse_order_arg(args: &IndexMap<Name, GqlValue>) -> Result<Option<Ordering>, 
 /// Accepts either `filter` or `where` (aliases of each other). The value must
 /// be a GraphQL input object whose shape matches the generated filter type for
 /// the table.
-fn parse_filter_arg(
+pub(crate) fn parse_filter_arg(
 	args: &IndexMap<Name, GqlValue>,
 	fds: &[FieldDefinition],
 	tb_name: &str,
@@ -635,7 +635,7 @@ fn resolve_nested_object_value(
 }
 
 /// Derive the GraphQL filter input type name for a table (e.g. `_filter_person`).
-fn filter_name_from_table(tb_name: impl Display) -> String {
+pub(crate) fn filter_name_from_table(tb_name: impl Display) -> String {
 	format!("_filter_{tb_name}")
 }
 
@@ -971,20 +971,17 @@ fn build_table_type(
 			};
 
 			orderable = orderable.item(fd_name.to_string());
-			ty_obj = ty_obj
-				.field(Field::new(
-					fd_name.as_str(),
-					fd_type,
-					make_nested_object_field_resolver(
-						fd_name.as_str().to_string(),
-						nested.is_array,
-					),
-				))
-				.description(if let Some(ref c) = fd.comment {
-					c.clone()
-				} else {
-					format!("Nested object field `{}`", fd_name.as_str())
-				});
+			let mut field = Field::new(
+				fd_name.as_str(),
+				fd_type,
+				make_nested_object_field_resolver(fd_name.as_str().to_string(), nested.is_array),
+			);
+			field = field.description(if let Some(ref c) = fd.comment {
+				c.clone()
+			} else {
+				format!("Nested object field `{}`", fd_name.as_str())
+			});
+			ty_obj = ty_obj.field(field);
 			continue;
 		}
 
@@ -1010,21 +1007,15 @@ fn build_table_type(
 		}
 
 		filter = filter.field(InputValue::new(fd.name.to_sql(), TypeRef::named(type_filter_name)));
-		ty_obj = ty_obj
-			.field(Field::new(
-				fd.name.to_sql(),
-				fd_type,
-				make_table_field_resolver(
-					fd_name.as_str(),
-					fd.field_kind.clone(),
-					Some(enum_scope),
-				),
-			))
-			.description(if let Some(ref c) = fd.comment {
-				c.clone()
-			} else {
-				"".to_string()
-			});
+		let mut field = Field::new(
+			fd.name.to_sql(),
+			fd_type,
+			make_table_field_resolver(fd_name.as_str(), fd.field_kind.clone(), Some(enum_scope)),
+		);
+		if let Some(ref c) = fd.comment {
+			field = field.description(c.clone());
+		}
+		ty_obj = ty_obj.field(field);
 	}
 
 	// --- Add relation fields ---
@@ -1098,6 +1089,7 @@ pub async fn process_tbs(
 	types: &mut Vec<Type>,
 	ctx: &SchemaContext<'_>,
 	relations: &[RelationInfo],
+	table_fields: &mut HashMap<String, Arc<[FieldDefinition]>>,
 ) -> Result<Object, GqlError> {
 	// Pre-fetch field definitions for relation tables (needed for filter support
 	// in relation field resolvers). These are captured by the resolver closures.
@@ -1117,6 +1109,7 @@ pub async fn process_tbs(
 	for tb in tbs.iter() {
 		trace!("Adding table: {}", tb.name);
 		let fds = ctx.tx.all_tb_fields(ctx.ns, ctx.db, &tb.name, None).await?;
+		table_fields.insert(tb.name.clone().into_string(), fds.clone());
 
 		// Add query root fields for this table
 		query = query.field(make_table_list_field(tb, fds.clone(), ctx.datastore.clone()));

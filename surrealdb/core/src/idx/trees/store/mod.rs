@@ -122,7 +122,7 @@ impl IndexStores {
 
 	async fn remove_hnsw_index(&self, tb: TableId, ikb: IndexKeyBase) -> Result<()> {
 		self.0.hnsw_indexes.remove(tb, &ikb).await?;
-		self.0.vector_cache.remove_index(tb, ikb.index()).await;
+		self.0.vector_cache.remove_index(ikb.ns(), ikb.db(), tb, ikb.index()).await;
 		Ok(())
 	}
 

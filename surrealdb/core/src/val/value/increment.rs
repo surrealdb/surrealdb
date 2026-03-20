@@ -17,24 +17,42 @@ impl Value {
 		path: &[Part],
 		val: Value,
 	) -> Result<()> {
-		match self.get(stk, ctx, opt, None, path).await.catch_return()? {
-			Value::Array(v) => match val {
-				Value::Array(x) => self.set(stk, ctx, opt, path, Value::Array(v.concat(x))).await,
-				x => self.set(stk, ctx, opt, path, Value::Array(v.with_push(x))).await,
-			},
+		let current = self.get(stk, ctx, opt, None, path).await.catch_return()?;
+
+		let next = match current {
 			Value::None => match val {
-				Value::Number(x) => {
-					self.set(stk, ctx, opt, path, Value::Number(Number::Int(0) + x)).await
-				}
-				Value::Duration(x) => self.set(stk, ctx, opt, path, Value::Duration(x)).await,
-				Value::Array(x) => self.set(stk, ctx, opt, path, Value::Array(x)).await,
-				x => self.set(stk, ctx, opt, path, Value::from(vec![x])).await,
+				Value::Number(x) => Value::Number(Number::Int(0) + x),
+				Value::Duration(x) => Value::Duration(x),
+				Value::Array(x) => Value::Array(x),
+				Value::Set(x) => Value::Set(x),
+				x => Value::from(vec![x]),
 			},
-			v => {
-				let result = v.try_add(val)?;
-				self.set(stk, ctx, opt, path, result).await
-			}
-		}
+
+			Value::Array(v) => match val {
+				Value::Array(x) => Value::Array(v.concat(x)),
+				Value::Set(x) => Value::Array(v.concat_set(x)),
+				x => Value::Array(v.with_push(x)),
+			},
+
+			Value::Set(mut s) => match val {
+				Value::Set(x) => {
+					s.0.extend(x.0);
+					Value::Set(s)
+				}
+				Value::Array(x) => {
+					s.0.extend(x.0);
+					Value::Set(s)
+				}
+				x => {
+					s.insert(x);
+					Value::Set(s)
+				}
+			},
+
+			v => v.try_add(val)?,
+		};
+
+		self.set(stk, ctx, opt, path, next).await
 	}
 }
 

@@ -11,8 +11,7 @@ value = "NONE"
 value = "[]"
 
 [[test.results]]
-value = '''"Aggregate [ctx: Db] [mode: GROUP ALL] {rows: 1}
-    IndexScan [ctx: Db] [index: idx_indexedField, access: = 'cake', direction: Forward] {rows: 10}
+value = '''"IndexCountScan [ctx: Db] [source: test, condition: indexedField = 'cake'] {rows: 1}
 
 Total rows: 1"'''
 

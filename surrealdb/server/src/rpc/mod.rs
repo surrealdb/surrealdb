@@ -9,6 +9,8 @@ use std::time::Duration;
 
 use futures::stream::FuturesUnordered;
 use opentelemetry::Context as TelemetryContext;
+#[cfg(feature = "graphql")]
+use surrealdb_core::gql::NotificationRouter;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::{DbResponse, DbResult};
 use tokio::sync::RwLock;
@@ -16,6 +18,8 @@ use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+#[cfg(feature = "graphql")]
+use crate::cnf::GQL_SUBSCRIPTION_CHANNEL_CAPACITY;
 use crate::rpc::websocket::Websocket;
 use crate::telemetry::metrics::ws::NotificationContext;
 
@@ -34,6 +38,8 @@ pub struct RpcState {
 	pub live_queries: LiveQueries,
 	/// HTTP RPC handler with persistent sessions
 	pub http: Arc<crate::rpc::http::Http>,
+	#[cfg(feature = "graphql")]
+	pub(crate) notification_router: Arc<NotificationRouter>,
 }
 
 impl RpcState {
@@ -45,6 +51,10 @@ impl RpcState {
 			web_sockets: RwLock::new(HashMap::new()),
 			live_queries: RwLock::new(HashMap::new()),
 			http: Arc::new(crate::rpc::http::Http::new(datastore, session)),
+			#[cfg(feature = "graphql")]
+			notification_router: Arc::new(NotificationRouter::new(
+				*GQL_SUBSCRIPTION_CHANNEL_CAPACITY,
+			)),
 		}
 	}
 }
@@ -70,6 +80,10 @@ pub(crate) async fn notifications(
 				Some(_) = futures.next() => continue,
 				// Receive a notification on the channel
 				Ok(notification) = channel.recv() => {
+					#[cfg(feature = "graphql")]
+					if state.notification_router.has_subscribers() {
+						state.notification_router.dispatch(&notification);
+					}
 					// Get the id for this notification
 					let id = notification.id.as_ref();
 					// Get the WebSocket for this notification

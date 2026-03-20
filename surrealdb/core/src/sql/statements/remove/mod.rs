@@ -3,6 +3,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 mod analyzer;
 mod api;
 mod bucket;
+mod config;
 mod database;
 mod event;
 mod field;
@@ -20,6 +21,7 @@ pub(crate) use access::RemoveAccessStatement;
 pub(crate) use analyzer::RemoveAnalyzerStatement;
 pub(crate) use api::RemoveApiStatement;
 pub(crate) use bucket::RemoveBucketStatement;
+pub(crate) use config::{RemoveConfigKind, RemoveConfigStatement};
 pub(crate) use database::RemoveDatabaseStatement;
 pub(crate) use event::RemoveEventStatement;
 pub(crate) use field::RemoveFieldStatement;
@@ -53,6 +55,7 @@ pub(crate) enum RemoveStatement {
 	Bucket(RemoveBucketStatement),
 	Sequence(RemoveSequenceStatement),
 	Module(RemoveModuleStatement),
+	Config(RemoveConfigStatement),
 }
 
 impl ToSql for RemoveStatement {
@@ -74,6 +77,7 @@ impl ToSql for RemoveStatement {
 			Self::Bucket(v) => v.fmt_sql(f, fmt),
 			Self::Sequence(v) => v.fmt_sql(f, fmt),
 			Self::Module(v) => v.fmt_sql(f, fmt),
+			Self::Config(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -97,6 +101,7 @@ impl From<RemoveStatement> for crate::expr::statements::RemoveStatement {
 			RemoveStatement::Bucket(v) => Self::Bucket(v.into()),
 			RemoveStatement::Sequence(v) => Self::Sequence(v.into()),
 			RemoveStatement::Module(v) => Self::Module(v.into()),
+			RemoveStatement::Config(v) => Self::Config(v.into()),
 		}
 	}
 }
@@ -120,6 +125,7 @@ impl From<crate::expr::statements::RemoveStatement> for RemoveStatement {
 			crate::expr::statements::RemoveStatement::Bucket(v) => Self::Bucket(v.into()),
 			crate::expr::statements::RemoveStatement::Sequence(v) => Self::Sequence(v.into()),
 			crate::expr::statements::RemoveStatement::Module(v) => Self::Module(v.into()),
+			crate::expr::statements::RemoveStatement::Config(v) => Self::Config(v.into()),
 		}
 	}
 }

@@ -29,6 +29,7 @@ use tracing::instrument;
 
 use crate::catalog::{DatabaseId, Index, NamespaceId, Permission};
 use crate::err::Error;
+use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
 	validate_record_user_access,
@@ -48,8 +49,8 @@ use crate::val::{Number, Object, TableName, Value};
 /// Optimized operator for `SELECT count() FROM <table> WHERE <cond> GROUP ALL`
 /// when a matching COUNT index exists.
 ///
-/// Falls back to full scan + filter + count if no matching COUNT index is found
-/// at execution time.
+/// Falls back to B-tree index key counting (when a covering B-tree index is
+/// available) or full scan + filter + count if no index can service the query.
 #[derive(Debug, Clone)]
 pub struct IndexCountScan {
 	/// Expression that evaluates to the table name.
@@ -65,6 +66,10 @@ pub struct IndexCountScan {
 	/// For `SELECT count() as c FROM t WHERE ... GROUP ALL` this would be `["c"]`.
 	/// For `SELECT count() FROM t WHERE ... GROUP ALL` this would be `["count"]`.
 	pub(crate) field_names: Vec<String>,
+	/// Optional B-tree index access path for key-only counting when no
+	/// matching COUNT index exists.  The planner resolves this from the
+	/// same index analysis it performs for regular queries.
+	pub(crate) btree_access: Option<(IndexRef, BTreeAccess)>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -84,8 +89,15 @@ impl IndexCountScan {
 			condition,
 			version,
 			field_names,
+			btree_access: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
+	}
+
+	/// Set the B-tree index access path for key-only counting.
+	pub(crate) fn with_btree_access(mut self, access: Option<(IndexRef, BTreeAccess)>) -> Self {
+		self.btree_access = access;
+		self
 	}
 }
 
@@ -138,6 +150,7 @@ impl ExecOperator for IndexCountScan {
 		let condition = self.condition.clone();
 		let version = self.version.clone();
 		let field_names = self.field_names.clone();
+		let btree_access = self.btree_access.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -250,6 +263,19 @@ impl ExecOperator for IndexCountScan {
 				)
 				.await?;
 				yield make_count_batch(count, &field_names);
+			} else if let Some((ref ix_ref, ref access)) = btree_access {
+				// Medium path: count entries by iterating B-tree index
+				// keys only — no record value deserialization.
+				let count = count_btree_index_keys(
+					&ctx,
+					&txn,
+					ns.namespace_id,
+					db.database_id,
+					ix_ref,
+					access,
+				)
+				.await?;
+				yield make_count_batch(count, &field_names);
 			} else {
 				// No matching COUNT index found: fall back to full scan + filter + count.
 				let perm = PhysicalPermission::Allow;
@@ -295,7 +321,7 @@ fn make_count_batch(count: usize, field_names: &[String]) -> ValueBatch {
 }
 
 /// Sum the delta entries in `IndexCountKey` for a given COUNT index.
-async fn sum_index_count_deltas(
+pub(crate) async fn sum_index_count_deltas(
 	ctx: &ExecutionContext,
 	txn: &crate::kvs::Transaction,
 	ns: NamespaceId,
@@ -407,6 +433,160 @@ async fn count_with_filter_fallback(
 			if matches {
 				count += 1;
 			}
+		}
+	}
+
+	Ok(count)
+}
+
+/// Count matching records by iterating B-tree index keys only.
+///
+/// This is much faster than the full-scan fallback because it avoids
+/// reading and deserializing record values.  Each index entry corresponds
+/// to exactly one matching record, so we simply count entries in the
+/// appropriate key range.
+async fn count_btree_index_keys(
+	ctx: &ExecutionContext,
+	txn: &crate::kvs::Transaction,
+	ns_id: NamespaceId,
+	db_id: DatabaseId,
+	index_ref: &IndexRef,
+	access: &BTreeAccess,
+) -> Result<usize, ControlFlow> {
+	use crate::exec::index::iterator::btree::{
+		CompoundEqualIterator, CompoundRangeIterator, IndexEqualIterator, IndexRangeIterator,
+		UniqueEqualIterator, UniqueRangeIterator,
+	};
+	use crate::idx::planner::ScanDirection;
+
+	let ix = index_ref.definition();
+	let is_unique = index_ref.is_unique();
+	let mut count = 0usize;
+
+	match (access, is_unique) {
+		(BTreeAccess::Equality(value), true) => {
+			// Unique equality: at most one record.
+			let mut iter = UniqueEqualIterator::new(ns_id, db_id, ix, value)
+				.context("Failed to create unique equal iterator")?;
+			let rids = iter.next_batch(txn).await.context("Failed to iterate index")?;
+			count = rids.len();
+		}
+		(BTreeAccess::Equality(value), false) => {
+			// Non-unique equality: iterate all matching entries.
+			let mut iter = IndexEqualIterator::new(ns_id, db_id, ix, value)
+				.context("Failed to create index equal iterator")?;
+			loop {
+				if ctx.cancellation().is_cancelled() {
+					return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+				}
+				let rids = iter.next_batch(txn).await.context("Failed to iterate index")?;
+				if rids.is_empty() {
+					break;
+				}
+				count += rids.len();
+			}
+		}
+		(
+			BTreeAccess::Range {
+				from,
+				to,
+			},
+			true,
+		) => {
+			let mut iter = UniqueRangeIterator::new(
+				ns_id,
+				db_id,
+				ix,
+				from.as_ref(),
+				to.as_ref(),
+				ScanDirection::Forward,
+			)
+			.context("Failed to create unique range iterator")?;
+			loop {
+				if ctx.cancellation().is_cancelled() {
+					return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+				}
+				let rids = iter.next_batch(txn).await.context("Failed to iterate index")?;
+				if rids.is_empty() {
+					break;
+				}
+				count += rids.len();
+			}
+		}
+		(
+			BTreeAccess::Range {
+				from,
+				to,
+			},
+			false,
+		) => {
+			let mut iter = IndexRangeIterator::new(
+				ns_id,
+				db_id,
+				ix,
+				from.as_ref(),
+				to.as_ref(),
+				ScanDirection::Forward,
+			)
+			.context("Failed to create index range iterator")?;
+			loop {
+				if ctx.cancellation().is_cancelled() {
+					return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+				}
+				let rids = iter.next_batch(txn).await.context("Failed to iterate index")?;
+				if rids.is_empty() {
+					break;
+				}
+				count += rids.len();
+			}
+		}
+		(
+			BTreeAccess::Compound {
+				prefix,
+				range: Some(range),
+			},
+			_,
+		) => {
+			let mut iter =
+				CompoundRangeIterator::new(ns_id, db_id, ix, prefix, range, ScanDirection::Forward)
+					.context("Failed to create compound range iterator")?;
+			loop {
+				if ctx.cancellation().is_cancelled() {
+					return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+				}
+				let rids = iter.next_batch(txn, 1000).await.context("Failed to iterate index")?;
+				if rids.is_empty() {
+					break;
+				}
+				count += rids.len();
+			}
+		}
+		(
+			BTreeAccess::Compound {
+				prefix,
+				range: None,
+			},
+			_,
+		) => {
+			let mut iter =
+				CompoundEqualIterator::new(ns_id, db_id, ix, prefix, None, ScanDirection::Forward)
+					.context("Failed to create compound equal iterator")?;
+			loop {
+				if ctx.cancellation().is_cancelled() {
+					return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+				}
+				let rids = iter.next_batch(txn, 1000).await.context("Failed to iterate index")?;
+				if rids.is_empty() {
+					break;
+				}
+				count += rids.len();
+			}
+		}
+		// FullText and Knn are not supported for counting.
+		_ => {
+			return Err(ControlFlow::Err(anyhow::anyhow!(
+				"Unsupported BTreeAccess type for index key counting"
+			)));
 		}
 	}
 

@@ -368,7 +368,7 @@ impl AsyncEventRecord {
 				}
 			};
 			if let Some(lh) = lh {
-				lh.try_maintain_lease().await?
+				lh.try_maintain_lease().await?;
 			}
 		}
 		sender.close();
@@ -391,7 +391,7 @@ impl AsyncEventRecord {
 		let mut stack = TreeStack::new();
 		for (k, v) in res {
 			if let Some(lh) = lh {
-				lh.try_maintain_lease().await?
+				lh.try_maintain_lease().await?;
 			}
 			let event_context = AsyncEventContext::new(ds, lh.cloned(), k, v)?;
 			stack.enter(|stk| stk.run(|stk| event_context.run_event_checked(stk))).finish().await;
