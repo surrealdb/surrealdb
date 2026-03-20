@@ -72,7 +72,8 @@ impl RpcState {
 ///
 /// # Usage
 ///
-/// This is called automatically by [`SurrealRouter::spawn_notifications`](crate::ntw::SurrealRouter::spawn_notifications).
+/// This is called automatically by
+/// [`SurrealRouter::spawn_notifications`](crate::ntw::SurrealRouter::spawn_notifications).
 /// If you need lower-level control you can call it directly inside your own `tokio::spawn`.
 pub async fn notifications(ds: Arc<Datastore>, state: Arc<RpcState>, canceller: CancellationToken) {
 	// Store messages being delivered

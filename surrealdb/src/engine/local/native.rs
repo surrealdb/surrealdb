@@ -64,11 +64,19 @@ impl Surreal<Db> {
 	/// This allows the SDK client and other components (such as the SurrealDB
 	/// HTTP router) to share the **same** datastore instance.
 	///
+	/// # Shutdown
+	///
+	/// Because the datastore is shared, this method does **not** call
+	/// [`Datastore::shutdown`] when the client is dropped. The caller is
+	/// responsible for calling `datastore.shutdown().await` once all
+	/// consumers (SDK clients, HTTP routers, etc.) are finished.
+	///
 	/// # Parameters
 	///
+	/// - `canceller`: A [`CancellationToken`] for cooperative shutdown of background tasks
 	/// - `datastore`: A shared reference to an already-configured [`Datastore`]
-	/// - `engine`:    [`EngineOptions`] controlling background task intervals
-	///                Use [`EngineOptions::default()`] for the standard intervals.
+	/// - `engine`:    [`EngineOptions`] controlling background task intervals Use
+	///   [`EngineOptions::default()`] for the standard intervals.
 	///
 	/// # Example
 	///
@@ -91,12 +99,17 @@ impl Surreal<Db> {
 	///
 	/// // `ds` can now also be handed to SurrealRouter::build(...)
 	/// ```
-	pub async fn from_datastore(datastore: Arc<Datastore>, engine: EngineOptions) -> Result<Self> {
+	pub async fn from_datastore(
+		canceller: CancellationToken,
+		datastore: Arc<Datastore>,
+		engine: EngineOptions,
+	) -> Result<Self> {
 		let (route_tx, route_rx) = async_channel::unbounded();
 		let (conn_tx, conn_rx) = async_channel::bounded::<Result<()>>(1);
 		let session_clone = SessionClone::new();
 
 		tokio::spawn(run_router_with_datastore(
+			canceller,
 			datastore,
 			engine,
 			conn_tx,
@@ -216,6 +229,7 @@ pub(crate) async fn run_router(
 /// (notifications, capabilities, timeouts, etc.) before passing it here.
 /// Background engine tasks are started using the provided [`EngineOptions`].
 pub(crate) async fn run_router_with_datastore(
+	canceller: CancellationToken,
 	datastore: Arc<Datastore>,
 	engine: EngineOptions,
 	conn_tx: Sender<Result<()>>,
@@ -229,7 +243,6 @@ pub(crate) async fn run_router_with_datastore(
 		sessions: HashMap::new(),
 	};
 
-	let canceller = CancellationToken::new();
 	let tasks = tasks::init(router_state.kvs.clone(), canceller.clone(), &engine);
 
 	router_loop(&router_state, canceller, tasks, route_rx, session_rx).await;

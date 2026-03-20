@@ -167,7 +167,7 @@ pub struct AppState {
 /// # Example
 ///
 /// ```rust,ignore
-/// use surrealdb_server::ntw::{RouterOptions, client_ip::ClientIp};
+/// use surreal::ntw::{RouterOptions, client_ip::ClientIp};
 ///
 /// let opts = RouterOptions::default();
 ///
@@ -218,15 +218,16 @@ impl From<&Config> for RouterOptions {
 /// # For embedders
 ///
 /// Use [`into_router`](SurrealRouter::into_router) to extract the `Router` and merge it
-/// into your own Axum application. Then call [`spawn_notifications`](SurrealRouter::spawn_notifications)
-/// to start LIVE query notification delivery whenever you are ready.
+/// into your own Axum application. Then call
+/// [`spawn_notifications`](SurrealRouter::spawn_notifications) to start LIVE query notification
+/// delivery whenever you are ready.
 ///
 /// # Example
 ///
 /// ```rust,ignore
 /// use std::sync::Arc;
-/// use surrealdb_server::ntw::SurrealRouter;
-/// use surrealdb_server::core::{CommunityComposer, kvs::Datastore};
+/// use surreal::ntw::SurrealRouter;
+/// use surreal::core::{CommunityComposer, kvs::Datastore};
 /// use tokio_util::sync::CancellationToken;
 ///
 /// let ds = Arc::new(Datastore::new("memory").await?.with_notifications());
@@ -235,13 +236,13 @@ impl From<&Config> for RouterOptions {
 /// let opts = RouterOptions::default();
 /// let surreal = SurrealRouter::build::<CommunityComposer>(opts, ds, ct).await?;
 ///
+/// // Start notification delivery (returns a JoinHandle you can await or abort)
+/// let notifications = surreal.spawn_notifications();
+///
 /// // Extract the router and merge with your own routes
 /// let app = axum::Router::new()
 ///     .route("/custom", axum::routing::get(|| async { "hello" }))
 ///     .merge(surreal.into_router());
-///
-/// // Start notification delivery (returns a JoinHandle you can await or abort)
-/// let notifications = surreal.spawn_notifications();
 ///
 /// // Serve `app` with your own server setup...
 /// ```
@@ -314,17 +315,17 @@ impl SurrealRouter {
 			let origins: Vec<http::HeaderValue> = opt
 				.allow_origin
 				.iter()
-				.map(|o| o.parse().expect("CORS origins are validated at startup"))
-				.collect();
+				.map(|o| o.parse().map_err(|_| anyhow::anyhow!("invalid CORS origin: {o}")))
+				.collect::<Result<Vec<_>, _>>()?;
 			AllowOrigin::list(origins)
 		};
 
 		let allow_header = [
-			http::header::ACCEPT,
-			http::header::ACCEPT_ENCODING,
-			http::header::AUTHORIZATION,
-			http::header::CONTENT_TYPE,
-			http::header::ORIGIN,
+			header::ACCEPT,
+			header::ACCEPT_ENCODING,
+			header::AUTHORIZATION,
+			header::CONTENT_TYPE,
+			header::ORIGIN,
 			NS.clone(),
 			DB.clone(),
 			ID.clone(),
