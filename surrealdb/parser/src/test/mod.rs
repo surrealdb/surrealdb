@@ -74,7 +74,7 @@ fn text_test() {
 				fmt_from_fn(|fmt| ast::vis::visualize_ast(&node, &ast, fmt)).to_string()
 			}
 			Err(e) => {
-				format!("ERROR:{}", e.render_char_buffer().to_string())
+				format!("ERROR:{}", e.render_char_buffer().write_to_string())
 			}
 		};
 

@@ -249,7 +249,8 @@ macro_rules! library {
     };
 
 	(@push , $ty:ty, $container:ident, $this:ident.$field:ident = $ty_id:ident <= $value:ident) => {
-		if const{ std::any::TypeId::of::<$ty>() } == $ty_id{
+		//if const{ std::any::TypeId::of::<$ty>() } == $ty_id{
+		if std::any::TypeId::of::<$ty>() == $ty_id{
 			unsafe{
 				let cntr = std::mem::transmute::<&mut $container<$ty>,&mut $container<T>>(&mut $this.$field);
 				let idx = <$container<T> as $crate::types::NodeVec::<T>>::insert_node(cntr,$value);
@@ -259,19 +260,22 @@ macro_rules! library {
 	};
 
 	(@push set, $ty:ty, $container:ident, $this:ident.$field:ident = $ty_id:ident <= $value:ident) => {
-		if const{ std::any::TypeId::of::<$ty>() } == $ty_id{
+		//if const{ std::any::TypeId::of::<$ty>() } == $ty_id{
+		if std::any::TypeId::of::<$ty>() == $ty_id{
 			panic!("tried to push type `{}` as part of a set which is not a unique node",std::any::type_name::<$ty>())
 		}
 	};
 
 	(@push_set, $ty:ty, $container:ident, $this:ident.$field:ident = $ty_id:ident <= $value:ident) => {
-		if const{ std::any::TypeId::of::<$ty>() } == $ty_id{
+		//if const{ std::any::TypeId::of::<$ty>() } == $ty_id{
+		if std::any::TypeId::of::<$ty>() == $ty_id{
 			panic!("tried to push type `{}` as part of a vector which is a unique node",std::any::type_name::<$ty>())
 		}
 	};
 
 	(@push_set set, $ty:ty, $container:ident, $this:ident.$field:ident = $ty_id:ident <= $value:ident) => {
-		if const{ std::any::TypeId::of::<$ty>() } == $ty_id{
+		//if const{ std::any::TypeId::of::<$ty>() } == $ty_id{
+		if std::any::TypeId::of::<$ty>() == $ty_id{
 			unsafe{
 				let cntr = std::mem::transmute::<&mut $container<$ty>,&mut $container<T>>(&mut $this.$field);
 				let idx = <$container<T> as $crate::types::NodeSet::<T>>::insert_node(cntr,$value);

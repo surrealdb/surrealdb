@@ -42,7 +42,7 @@ impl Loc {
 }
 
 pub fn render_string(g: &Diagnostic<'_>) -> String {
-	render_char_buffer(g).to_string()
+	render_char_buffer(g).write_to_string()
 }
 
 pub fn render_char_buffer(g: &Diagnostic<'_>) -> CharBuffer {

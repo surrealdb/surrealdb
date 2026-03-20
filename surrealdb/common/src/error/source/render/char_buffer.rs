@@ -90,7 +90,7 @@ impl CharBuffer {
 	}
 
 	/// Convert the char buffer to a plain string.
-	pub fn to_string(&self) -> String {
+	pub fn write_to_string(&self) -> String {
 		let mut res = String::new();
 		for l in self.lines.iter() {
 			for c in l.iter() {
@@ -220,7 +220,7 @@ impl<'a> CharBufferWriter<'a> {
 
 	/// Push a formatting args into the writer, unlike `write_fmt` this doesn't return an `Result`.
 	pub fn push_fmt(&mut self, args: Arguments) -> &mut Self {
-		self.write_fmt(args).unwrap();
+		self.write_fmt(args).expect("writing into a char buffer cannot fail");
 		self
 	}
 
