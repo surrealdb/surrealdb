@@ -7,7 +7,7 @@ use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
 use crate::Kind;
-use crate::sql::{SqlFormat, ToSql};
+use crate::sql::{SqlFormat, ToSql, fmt_non_finite_f64};
 
 /// Represents a numeric value in SurrealDB
 ///
@@ -62,12 +62,11 @@ impl Display for Number {
 		match self {
 			Number::Int(v) => Display::fmt(v, f),
 			Number::Float(v) => {
-				if v.is_finite() {
-					// Add suffix to distinguish between int and float
-					write!(f, "{v}f")
-				} else {
-					// Don't add suffix for NaN, inf, -inf
-					Display::fmt(v, f)
+				match fmt_non_finite_f64(*v) {
+					// Special case: Infinity, -Infinity or NaN
+					Some(special) => write!(f, "{}", special),
+					// Regular float: add f to distinguish between int and float
+					None => write!(f, "{v}f"),
 				}
 			}
 			Number::Decimal(v) => write!(f, "{v}dec"),
@@ -80,12 +79,14 @@ impl ToSql for Number {
 		match self {
 			Number::Int(v) => f.push_str(&v.to_string()),
 			Number::Float(v) => {
-				if v.is_finite() {
-					f.push_str(&v.to_string());
-					f.push('f');
-				} else {
-					// NaN, inf, -inf
-					f.push_str(&v.to_string());
+				match fmt_non_finite_f64(*v) {
+					// Special case: Infinity, -Infinity or NaN
+					Some(special) => f.push_str(special),
+					// Regular float: add f to distinguish between int and float
+					None => {
+						f.push_str(&v.to_string());
+						f.push('f');
+					}
 				}
 			}
 			Number::Decimal(v) => v.fmt_sql(f, fmt),

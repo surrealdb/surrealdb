@@ -1520,7 +1520,7 @@ impl Parser<'_> {
 		Ok(config)
 	}
 
-	fn parse_graphql_config(&mut self) -> ParseResult<GraphQLConfig> {
+	pub(crate) fn parse_graphql_config(&mut self) -> ParseResult<GraphQLConfig> {
 		use graphql::{FunctionsConfig, IntrospectionConfig, TablesConfig};
 		let mut tmp_tables = Option::<TablesConfig>::None;
 		let mut tmp_fncs = Option::<FunctionsConfig>::None;
