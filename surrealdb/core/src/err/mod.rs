@@ -773,7 +773,7 @@ pub(crate) enum Error {
 	},
 
 	/// The requested api already exists
-	#[error("The api '/{value}' already exists")]
+	#[error("The api '{value}' already exists")]
 	ApAlreadyExists {
 		value: String,
 	},
