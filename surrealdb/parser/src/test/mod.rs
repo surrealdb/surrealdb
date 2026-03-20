@@ -1,7 +1,7 @@
 #![cfg(test)]
 
+use std::env;
 use std::path::Path;
-use std::{env, fmt};
 
 use ast::Query;
 use common::fmt_from_fn;

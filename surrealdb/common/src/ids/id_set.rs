@@ -1,5 +1,5 @@
 use std::fmt::{self, Debug};
-use std::hash::{BuildHasher, Hash, Hasher, RandomState};
+use std::hash::{BuildHasher, Hash, RandomState};
 use std::ops::{Index, IndexMut};
 
 use hashbrown::raw::RawTable;
@@ -81,17 +81,11 @@ where
 	where
 		T: SetEntry<V>,
 	{
-		let mut hasher = self.hasher.build_hasher();
-		v.hash(&mut hasher);
-		let hash = hasher.finish();
+		let hash = self.hasher.hash_one(&v);
 		match self.map.find_or_find_insert_slot(
 			hash,
 			|s| v.equal(&self.storage[s.idx()]),
-			|s| {
-				let mut hasher = self.hasher.build_hasher();
-				self.storage[s.idx()].hash(&mut hasher);
-				hasher.finish()
-			},
+			|s| self.hasher.hash_one(&self.storage[s.idx()]),
 		) {
 			Ok(x) => unsafe { Some(*x.as_ref()) },
 			Err(slot) => {
@@ -136,7 +130,10 @@ where
 	type Output = V;
 
 	fn index(&self, index: I) -> &Self::Output {
-		self.get(index).unwrap()
+		let Some(x) = self.get(index) else {
+			panic!("Tired to index into id set with out of range index {}", index.idx())
+		};
+		x
 	}
 }
 
@@ -146,7 +143,11 @@ where
 	V: Eq + Hash,
 	S: BuildHasher,
 {
+	#[track_caller]
 	fn index_mut(&mut self, index: I) -> &mut Self::Output {
-		self.get_mut(index).unwrap()
+		let Some(x) = self.get_mut(index) else {
+			panic!("Tired to index into id set with out of range index {}", index.idx())
+		};
+		x
 	}
 }

@@ -34,6 +34,12 @@ pub struct CharBuffer {
 	lines: Vec<Vec<DisplayChar>>,
 }
 
+impl Default for CharBuffer {
+	fn default() -> Self {
+		CharBuffer::new()
+	}
+}
+
 impl CharBuffer {
 	/// Create a new char buffer.
 	pub fn new() -> Self {
@@ -63,7 +69,9 @@ impl CharBuffer {
 			return;
 		}
 
-		let last = self.lines.last_mut().unwrap();
+		let Some(last) = self.lines.last_mut() else {
+			unreachable!()
+		};
 		last.push(DisplayChar {
 			color,
 			style,
@@ -111,20 +119,20 @@ impl CharBuffer {
 				if c.color != color {
 					match c.color {
 						Color::Default => {
-							out.write_all(&[b'\x1b', b'[', b'm'])?;
+							out.write_all(b"\x1b[m")?;
 							style = Styling::Plain;
 						}
 						Color::Red => {
-							out.write_all(&[b'\x1b', b'[', b'3', b'1', b'm'])?;
+							out.write_all(b"\x1b[31m")?;
 						}
 						Color::Green => {
-							out.write_all(&[b'\x1b', b'[', b'3', b'2', b'm'])?;
+							out.write_all(b"\x1b[32m")?;
 						}
 						Color::Yellow => {
-							out.write_all(&[b'\x1b', b'[', b'3', b'3', b'm'])?;
+							out.write_all(b"\x1b[33m")?;
 						}
 						Color::Blue => {
-							out.write_all(&[b'\x1b', b'[', b'3', b'4', b'm'])?;
+							out.write_all(b"\x1b[34m")?;
 						}
 					}
 					color = c.color;
@@ -132,44 +140,44 @@ impl CharBuffer {
 
 				match (style, c.style) {
 					(Styling::Plain, Styling::Bold) => {
-						out.write_all(&[b'\x1b', b'[', b'1', b'm'])?;
+						out.write_all(b"\x1b[1m")?;
 					}
 					(Styling::Plain, Styling::BoldItalic) => {
-						out.write_all(&[b'\x1b', b'[', b'1', b'm'])?;
-						out.write_all(&[b'\x1b', b'[', b'3', b'm'])?;
+						out.write_all(b"\x1b[1m")?;
+						out.write_all(b"\x1b[3m")?;
 					}
 					(Styling::Plain, Styling::Italic) => {
-						out.write_all(&[b'\x1b', b'[', b'3', b'm'])?;
+						out.write_all(b"\x1b[3m")?;
 					}
 					(Styling::Italic, Styling::Plain) => {
-						out.write_all(&[b'\x1b', b'[', b'2', b'3', b'm'])?;
+						out.write_all(b"\x1b[23m")?;
 					}
 					(Styling::Italic, Styling::Bold) => {
-						out.write_all(&[b'\x1b', b'[', b'2', b'3', b'm'])?;
-						out.write_all(&[b'\x1b', b'[', b'1', b'm'])?;
+						out.write_all(b"\x1b[23m")?;
+						out.write_all(b"\x1b[1m")?;
 					}
 					(Styling::Italic, Styling::BoldItalic) => {
-						out.write_all(&[b'\x1b', b'[', b'1', b'm'])?;
+						out.write_all(b"\x1b[1m")?;
 					}
 					(Styling::Bold, Styling::Plain) => {
-						out.write_all(&[b'\x1b', b'[', b'2', b'2', b'm'])?;
+						out.write_all(b"\x1b[22m")?;
 					}
 					(Styling::Bold, Styling::Italic) => {
-						out.write_all(&[b'\x1b', b'[', b'2', b'2', b'm'])?;
-						out.write_all(&[b'\x1b', b'[', b'3', b'm'])?;
+						out.write_all(b"\x1b[22m")?;
+						out.write_all(b"\x1b[3m")?;
 					}
 					(Styling::Bold, Styling::BoldItalic) => {
-						out.write_all(&[b'\x1b', b'[', b'3', b'm'])?;
+						out.write_all(b"\x1b[3m")?;
 					}
 					(Styling::BoldItalic, Styling::Plain) => {
-						out.write_all(&[b'\x1b', b'[', b'2', b'2', b'm'])?;
-						out.write_all(&[b'\x1b', b'[', b'2', b'3', b'm'])?;
+						out.write_all(b"\x1b[22m")?;
+						out.write_all(b"\x1b[23m")?;
 					}
 					(Styling::BoldItalic, Styling::Italic) => {
-						out.write_all(&[b'\x1b', b'[', b'2', b'2', b'm'])?;
+						out.write_all(b"\x1b[22m")?;
 					}
 					(Styling::BoldItalic, Styling::Bold) => {
-						out.write_all(&[b'\x1b', b'[', b'2', b'3', b'm'])?;
+						out.write_all(b"\x1b[23m")?;
 					}
 					_ => {}
 				}
@@ -177,11 +185,9 @@ impl CharBuffer {
 
 				out.write_all(c.char.encode_utf8(&mut encode_buffer).as_bytes())?;
 			}
-			out.write_all(&[b'\n'])?;
+			out.write_all(b"\n")?;
 		}
-		out.write_all(&[
-			b'\x1b', b'[', b'm', b'\x1b', b'[', b'2', b'2', b'm', b'\x1b', b'[', b'2', b'3', b'm',
-		])?;
+		out.write_all(b"\x1b[m\x1b[22m\x1b[23m")?;
 		Ok(())
 	}
 }
@@ -227,7 +233,12 @@ impl<'a> CharBufferWriter<'a> {
 			if s.is_empty() {
 				continue;
 			}
-			if self.buffer.lines.last().unwrap().is_empty() {
+
+			let Some(last) = self.buffer.lines.last() else {
+				unreachable!()
+			};
+
+			if last.is_empty() {
 				for _ in 0..self.indent {
 					self.buffer.push_char(' ', self.color, self.style);
 				}
@@ -242,7 +253,11 @@ impl<'a> CharBufferWriter<'a> {
 		if c == '\n' {
 			self.buffer.push_char(c, self.color, self.style);
 		} else {
-			if self.buffer.lines.last().unwrap().is_empty() {
+			let Some(last) = self.buffer.lines.last() else {
+				unreachable!()
+			};
+
+			if last.is_empty() {
 				for _ in 0..self.indent {
 					self.buffer.push_char(' ', self.color, self.style);
 				}

@@ -1,3 +1,5 @@
+//! Module implementing utlities related to new-type indexes
+
 mod id_set;
 pub use id_set::{IdSet, SetEntry};
 

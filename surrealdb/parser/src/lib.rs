@@ -11,7 +11,6 @@
 //! <a href="https://crates.io/crates/surrealdb">the Rust SDK</a>.
 //! </section>
 //!
-//!
 
 pub mod parse;
 mod test;

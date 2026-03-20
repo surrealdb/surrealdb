@@ -300,9 +300,9 @@ impl ParseSync for Duration {
 			duration = x;
 		}
 
-		let nanos = (duration % 1_000_000_000) as u32 ;
+		let nanos = (duration % 1_000_000_000) as u32;
 		let secs = (duration / 1_000_000_000) as u64;
 
-		Ok(Duration::new(secs,nanos))
+		Ok(Duration::new(secs, nanos))
 	}
 }

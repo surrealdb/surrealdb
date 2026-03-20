@@ -121,15 +121,16 @@ fn render_element(buf: &mut CharBuffer, elem: &Snippet, line_color: Color) {
 
 	let mut last_line = None;
 	for (ann, start, end) in anns {
-		if let Some(last_line) = last_line {
-			if last_line != start.line && last_line + 1 != start.line {
-				buf.writer()
-					.indent(line_n_indent)
-					.color(line_color)
-					.push_str("| ")
-					.color(Color::Default)
-					.push_str("...\n");
-			}
+		if let Some(last_line) = last_line
+			&& last_line != start.line
+			&& last_line + 1 != start.line
+		{
+			buf.writer()
+				.indent(line_n_indent)
+				.color(line_color)
+				.push_str("| ")
+				.color(Color::Default)
+				.push_str("...\n");
 		}
 
 		let line_n = start.line + 1;

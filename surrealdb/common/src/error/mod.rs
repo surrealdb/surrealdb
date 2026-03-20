@@ -27,6 +27,7 @@ pub type Result<T, E = Error> = StdResult<T, E>;
 pub struct Error(RawError);
 
 impl Error {
+	/// Create a new error.
 	#[cold]
 	pub fn new<E>(e: E) -> Self
 	where
@@ -35,18 +36,22 @@ impl Error {
 		Error(RawError::new(e))
 	}
 
+	/// Returns the error code for the error.
 	pub fn error_code(&self) -> ErrorCode {
 		self.0.error_code()
 	}
 
+	/// Obtain a reference to the internal error if the error is of the right type.
 	pub fn downcast_ref<T: ErrorTrait>(&self) -> Option<&T> {
 		self.0.is::<T>().then(|| unsafe { self.0.unchecked_ref() })
 	}
 
+	/// Obtain a mutable reference to the internal error if the error is of the right type.
 	pub fn downcast_mut<T: ErrorTrait>(&mut self) -> Option<&mut T> {
 		self.0.is::<T>().then(|| unsafe { self.0.unchecked_mut() })
 	}
 
+	/// Convert value to the internal error if the error is of the right type.
 	pub fn into_inner<T: ErrorTrait>(self) -> Result<T, Self> {
 		if self.0.is::<T>() {
 			Ok(unsafe { self.0.unchecked_into_inner() })
@@ -55,6 +60,7 @@ impl Error {
 		}
 	}
 
+	/// Returns a typed version of the error if the error is of the right type.
 	pub fn downcast<T: ErrorTrait>(self) -> Result<TypedError<T>, Self> {
 		if self.0.is::<T>() {
 			Ok(TypedError(unsafe { self.0.unchecked_cast() }))
@@ -78,12 +84,13 @@ impl fmt::Display for Error {
 
 /// Error type, optimized to have little overhead on the happy path.
 ///
-/// This error can be efficiently cast into	[`Error`] without any allocation.
+/// This error can be efficiently cast into [`Error`] without any allocation.
 ///
 /// This error will always be the size of a pointer, regardless of the errors it might contain.
 pub struct TypedError<T: ErrorTrait>(RawTypedError<T>);
 
 impl<T: ErrorTrait> TypedError<T> {
+	/// Creates a new typed error. Boxing the given error.
 	pub fn new(e: T) -> Self {
 		TypedError(RawTypedError::new(e))
 	}
@@ -93,22 +100,39 @@ impl<T: ErrorTrait> TypedError<T> {
 		Error(self.0.erase())
 	}
 
+	/// Returns the underlying error
 	pub fn into_inner(self) -> T {
 		self.0.into_inner()
 	}
 
+	/// Returns a raw pointer to the error.
 	pub fn into_raw(self) -> NonNull<()> {
 		self.0.into_raw()
 	}
 
+	/// Create a type error from a pointer.
+	///
+	/// # Safety
+	/// Pointer must have previously been returned from [`TypedError::into_raw`] and after calling
+	/// from_raw the pointer must no longer be used.
 	pub unsafe fn from_raw(ptr: NonNull<()>) -> Self {
 		unsafe { TypedError(RawTypedError::from_raw(ptr)) }
 	}
 
+	/// Create a type error from a pointer.
+	///
+	/// # Safety
+	/// Pointer must have previously been returned from [`TypedError::into_raw`] and the pointer
+	/// must not be mutably accessed with for example [`TypedError::ref_mut_from_raw`].
 	pub unsafe fn ref_from_raw<'a>(ptr: NonNull<()>) -> &'a T {
 		unsafe { RawTypedError::<T>::ref_from_raw(ptr) }
 	}
 
+	/// Create a type error from a pointer.
+	///
+	/// # Safety
+	/// Pointer must have previously been returned from [`TypedError::into_raw`] and the pointer
+	/// must not be borrowed with for example [`TypedError::ref_from_raw`].
 	pub unsafe fn ref_mut_from_raw<'a>(ptr: NonNull<()>) -> &'a mut T {
 		unsafe { RawTypedError::<T>::ref_mut_from_raw(ptr) }
 	}

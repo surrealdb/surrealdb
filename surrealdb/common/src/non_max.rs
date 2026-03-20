@@ -1,10 +1,11 @@
+//! NonMax implementation, integers which are not their maximum value.
+
 use std::num::NonZero;
 
 /// A wrapper around a primitive indicating it cannot be it's max value.
 ///
 /// This type works similar to NonZero and is infact a small wrapper around it enabling niche
 /// optimizations for types containing this type.
-
 macro_rules! impl_non_max {
     ($signed:tt, $name:ident, $zeroable:ty) => {
 

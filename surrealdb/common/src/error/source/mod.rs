@@ -1,3 +1,5 @@
+//! Implementation for generating diagnostic associated with some source code.
+
 mod render;
 
 use std::borrow::Cow;
@@ -47,8 +49,8 @@ impl<'a> OptionCow<'a> {
 	pub fn as_ref(&self) -> Option<&str> {
 		match self {
 			OptionCow::None => None,
-			OptionCow::Owned(x) => Some(x.as_ref()),
-			OptionCow::Borrow(x) => Some(x.as_ref()),
+			OptionCow::Owned(x) => Some(x),
+			OptionCow::Borrow(x) => Some(x),
 		}
 	}
 }

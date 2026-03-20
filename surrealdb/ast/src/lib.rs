@@ -2030,23 +2030,23 @@ ast_type! {
 impl_vis_type! {
 	#[derive(Debug)]
 	pub enum IdiomOperator {
-		/// [*] | .*
+		/// `[*]` | `.*`
 		All,
-		/// [$]
+		/// `[$]`
 		Last,
 		/// `...`
 		Flatten,
-		/// .field
+		/// `.field`
 		Field(NodeId<Ident>),
-		/// \[EXPR\]
+		/// `[EXPR]`
 		Index(NodeId<Expr>),
-		/// \[? EXPR\] | \[WHERE EXPR\]
+		/// `[? EXPR]` | `[WHERE EXPR\]`
 		Where(NodeId<Expr>),
-		/// .?
+		/// `.?`
 		Option,
-		/// .@
+		/// `.@`
 		Repeat,
-		/// .{ .. }
+		/// `.{ .. }`
 		Destructure(Option<NodeListId<Destructure>>),
 		/// (1, $bar)
 		Call(Option<NodeListId<Expr>>),

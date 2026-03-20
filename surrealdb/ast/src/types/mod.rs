@@ -149,6 +149,7 @@ pub trait NodeLibrary {
 	fn clear(&mut self);
 }
 
+//TODO(MSRV): Add `const` blocks if we upgrade the MSRV to a version which has const TypeId::of
 #[macro_export]
 macro_rules! library {
     (
@@ -177,9 +178,11 @@ macro_rules! library {
             }
 
 			fn get<T: ::std::any::Any>(&self, id: NodeId<T>) -> Option<&T>{
-                let type_id = const { std::any::TypeId::of::<T>() };
+                //let type_id = const { std::any::TypeId::of::<T>() };
+                let type_id = std::any::TypeId::of::<T>();
                 $(
-                    if const{ std::any::TypeId::of::<$ty>() } == type_id{
+                    //if const{ std::any::TypeId::of::<$ty>() } == type_id{
+                    if  std::any::TypeId::of::<$ty>() == type_id{
                         unsafe{
                             let cntr = std::mem::transmute::<&$container<$ty>,&$container<T>>(&self.$field);
                             return $crate::types::NodeCollection::<T>::get_node(cntr,id.into_u32());
@@ -193,9 +196,11 @@ macro_rules! library {
             }
 
             fn get_mut<T: ::std::any::Any>(&mut self, idx: NodeId<T>) -> Option<&mut T>{
-                let type_id = const { std::any::TypeId::of::<T>() };
+                //let type_id = const { std::any::TypeId::of::<T>() };
+                let type_id = std::any::TypeId::of::<T>();
                 $(
-                    if const{ std::any::TypeId::of::<$ty>() } == type_id{
+                    //if const{ std::any::TypeId::of::<$ty>() } == type_id{
+                    if  std::any::TypeId::of::<$ty>() == type_id{
                         unsafe{
                             let cntr = std::mem::transmute::<&mut $container<$ty>,&mut $container<T>>(&mut self.$field);
                             return $crate::types::NodeCollection::<T>::get_mut_node(cntr,idx.into_u32());
@@ -208,7 +213,8 @@ macro_rules! library {
             }
 
             fn insert<T: crate::types::Node>(&mut self, value: T) -> NodeId<T>{
-                let type_id = const { std::any::TypeId::of::<T>() };
+                //llet type_id = const { std::any::TypeId::of::<T>() };
+                let type_id = std::any::TypeId::of::<T>();
                 $(
 					library!{@push $($field_meta)?, $ty, $container,self.$field = type_id <= value}
                 )*
@@ -222,7 +228,8 @@ macro_rules! library {
 					T: crate::types::UniqueNode,
 					V: common::ids::SetEntry<T>,
 			{
-                let type_id = const { std::any::TypeId::of::<T>() };
+                //let type_id = const { std::any::TypeId::of::<T>() };
+                let type_id = std::any::TypeId::of::<T>();
                 $(
 					library!{@push_set $($field_meta)?, $ty, $container,self.$field = type_id <= value}
                 )*
