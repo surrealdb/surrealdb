@@ -118,13 +118,11 @@ async fn parse_prefix_or_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 			let _ = parser.next();
 			if parser.eat_joined(T![=])?.is_some() {
 				PrefixOperator::RangeInclusive(parser.span_since(token.span))
+			} else if peek_starts_prime(parser)? {
+				PrefixOperator::Range(token.span)
 			} else {
-				if peek_starts_prime(parser)? {
-					PrefixOperator::Range(token.span)
-				} else {
-					let span = parser.push(token.span);
-					return Ok(Expr::UnboundedRange(span));
-				}
+				let span = parser.push(token.span);
+				return Ok(Expr::UnboundedRange(span));
 			}
 		}
 		_ => {
@@ -285,6 +283,7 @@ async fn parse_range_infix_op(
 /// Will first check if the operator has the right binding power to be parsed at this point, if it
 /// does it will eat up to `EAT` tokens, expecting the code to have already checked if the operator
 /// to be parsed is correct.
+#[allow(clippy::too_many_arguments)]
 async fn parse_non_associative_infix_op(
 	parser: &mut Parser<'_, '_>,
 	min_bp: u8,
@@ -481,14 +480,14 @@ impl Parse for ast::Destructure {
 						let _ = parser.next();
 						let _ = parser.next();
 
-						return Ok(ast::Destructure {
+						Ok(ast::Destructure {
 							field,
 							op: Some(Spanned {
 								value: ast::DestructureOperator::All,
 								span: parser.span_since(peek.span),
 							}),
 							span: parser.span_since(start),
-						});
+						})
 					}
 					BaseTokenKind::OpenBrace => {
 						let _ = parser.next();
@@ -513,18 +512,16 @@ impl Parse for ast::Destructure {
 							}
 						}
 
-						return Ok(ast::Destructure {
+						Ok(ast::Destructure {
 							field,
 							op: Some(Spanned {
 								value: ast::DestructureOperator::Destructure(head),
 								span: parser.span_since(peek.span),
 							}),
 							span: parser.span_since(start),
-						});
+						})
 					}
-					_ => {
-						return Err(parser.unexpected("`.*` or `.{`"));
-					}
+					_ => Err(parser.unexpected("`.*` or `.{`")),
 				}
 			}
 			_ => Ok(ast::Destructure {
@@ -868,7 +865,7 @@ async fn parse_lookup_range(parser: &mut Parser<'_, '_>) -> ParseResult<RecordId
 		_ => {
 			let key = parse_peeked_record_id_key(parser).await?;
 			match try_parse_record_id_range(parser, key).await? {
-				TryRange::None(_) => return Err(parser.unexpected("a record id key range")),
+				TryRange::None(_) => Err(parser.unexpected("a record id key range")),
 				TryRange::Some {
 					start,
 					end,
@@ -1293,7 +1290,7 @@ async fn try_parse_infix_postfix_op(
 				span: parser.span_since(lhs_span),
 			};
 			let expr = Expr::Idiom(parser.push(expr));
-			return Ok(Some(expr));
+			Ok(Some(expr))
 		}
 		T![<=] => {
 			parse_relation_op(parser, min_bp, BinaryOperator::LessThanEqual, peek.span, lhs).await
@@ -1380,7 +1377,7 @@ async fn try_parse_infix_postfix_op(
 				span: parser.span_since(lhs_span),
 			};
 			let expr = Expr::Idiom(parser.push(expr));
-			return Ok(Some(expr));
+			Ok(Some(expr))
 		}
 		T![<|] => {
 			if RELATION_BP < min_bp {
@@ -1624,7 +1621,7 @@ async fn try_parse_infix_postfix_op(
 				)
 				.await
 			} else {
-				return Err(parser.with_error(|parser| {
+				Err(parser.with_error(|parser| {
 					Level::Error
 						.title(format!(
 							"Unexpected token `{}` expected `NOT` to be followed by `IN`",
@@ -1632,7 +1629,7 @@ async fn try_parse_infix_postfix_op(
 						))
 						.snippet(parser.snippet().annotate(AnnotationKind::Primary.span(peek.span)))
 						.to_diagnostic()
-				}));
+				}))
 			}
 		}
 		T![IS] => {

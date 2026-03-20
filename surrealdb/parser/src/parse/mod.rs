@@ -222,7 +222,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			return Err(parser
 				.error("Query length exceeds maximum length supported by the parser", span)
 				.to_diagnostic()
-				.unwrap());
+				.expect("returned non diagnostic outside of the approriate context"));
 		}
 
 		// We ignore the stk which is mostly just to ensure the no accidental panics or infinite
@@ -243,7 +243,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				return Err(parser
 					.error("Parser hit maximum configured recursion depth", span)
 					.to_diagnostic()
-					.unwrap());
+					.expect("returned non diagnostic outside of the approriate context"));
 			}
 		}
 	}
@@ -288,7 +288,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			return Err(parser
 				.error("Query length exceeds maximum length supported by the parser", span)
 				.to_diagnostic()
-				.unwrap());
+				.expect("returned non-diagnostic error outside of allowed context"));
 		}
 
 		// We ignore the stk which is mostly just to ensure the no accidental panics or infinite
@@ -316,7 +316,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				return Err(parser
 					.error("Parser hit maximum configured recursion depth", span)
 					.to_diagnostic()
-					.unwrap());
+					.expect("returned non-diagnostic error outside of allowed context"));
 			}
 		}
 	}
@@ -474,7 +474,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			Some(Ok(x)) => Ok(Some(x)),
 			None => {
 				if self.settings.contains(ParserSettings::PARTIAL) {
-					return Err(ParseError::missing_data());
+					Err(ParseError::missing_data())
 				} else {
 					Ok(None)
 				}
@@ -506,7 +506,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			Some(Ok(x)) => Ok(Some(x)),
 			None => {
 				if self.settings.contains(ParserSettings::PARTIAL) {
-					return Err(ParseError::missing_data());
+					Err(ParseError::missing_data())
 				} else {
 					Ok(None)
 				}
@@ -521,7 +521,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			Some(Ok(x)) => Ok(Some(x)),
 			None => {
 				if self.settings.contains(ParserSettings::PARTIAL) {
-					return Err(ParseError::missing_data());
+					Err(ParseError::missing_data())
 				} else {
 					Ok(None)
 				}
@@ -531,6 +531,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	}
 
 	/// Consumes the next token in the lexer and returns it.
+	#[allow(clippy::should_implement_trait)]
 	pub fn next(&mut self) -> ParseResult<Option<Token>> {
 		match self.lex.next() {
 			Some(Ok(x)) => {
@@ -539,7 +540,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			}
 			None => {
 				if self.settings.contains(ParserSettings::PARTIAL) {
-					return Err(ParseError::missing_data());
+					Err(ParseError::missing_data())
 				} else {
 					Ok(None)
 				}
@@ -566,12 +567,12 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// Consumes the next token and returns it, if the token has the same kind as the argument.
 	pub fn eat(&mut self, kind: BaseTokenKind) -> ParseResult<Option<Token>> {
 		let peek = self.peek()?;
-		if let Some(token) = peek {
-			if token.token == kind {
-				self.lex.pop_peek();
-				self.last_span = token.span;
-				return Ok(Some(token));
-			}
+		if let Some(token) = peek
+			&& token.token == kind
+		{
+			self.lex.pop_peek();
+			self.last_span = token.span;
+			return Ok(Some(token));
 		}
 		Ok(None)
 	}
@@ -580,12 +581,13 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 	/// it was joined to previous token.
 	pub fn eat_joined(&mut self, kind: BaseTokenKind) -> ParseResult<Option<Token>> {
 		let peek = self.peek()?;
-		if let Some(token) = peek {
-			if token.token == kind && token.joined == Joined::Joined {
-				self.lex.pop_peek();
-				self.last_span = token.span;
-				return Ok(Some(token));
-			}
+		if let Some(token) = peek
+			&& token.token == kind
+			&& token.joined == Joined::Joined
+		{
+			self.lex.pop_peek();
+			self.last_span = token.span;
+			return Ok(Some(token));
 		}
 		Ok(None)
 	}
@@ -869,7 +871,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			let _ = self.next();
 			Ok(peek)
 		} else {
-			return Err(self.with_error(|this| {
+			Err(self.with_error(|this| {
 				Level::Error
 					.title(format!(
 						"Unexpected end of query, expected closing delimiter {}",
@@ -889,7 +891,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 							),
 					)
 					.to_diagnostic()
-			}));
+			}))
 		}
 	}
 

@@ -329,10 +329,10 @@ impl ParseSync for DateTime {
 			expected: DateTimeToken,
 			expected_description: &str,
 		) -> ParseResult<()> {
-			if let Some(Ok(x)) = lexer.next() {
-				if x == expected {
-					return Ok(());
-				}
+			if let Some(Ok(x)) = lexer.next()
+				&& x == expected
+			{
+				return Ok(());
 			}
 
 			let span = lexer.span();

@@ -398,29 +398,29 @@ impl Parse for ast::TablePermissions {
 
 					let permission = parser.parse::<ast::Permission>().await?;
 
-					if let Some((x, _)) = &mut create {
-						if *x {
-							*x = false;
-							res.create = Some(permission.clone())
-						}
+					if let Some((x, _)) = &mut create
+						&& *x
+					{
+						*x = false;
+						res.create = Some(permission.clone())
 					}
-					if let Some((x, _)) = &mut update {
-						if *x {
-							*x = false;
-							res.update = Some(permission.clone())
-						}
+					if let Some((x, _)) = &mut update
+						&& *x
+					{
+						*x = false;
+						res.update = Some(permission.clone())
 					}
-					if let Some((x, _)) = &mut select {
-						if *x {
-							*x = false;
-							res.select = Some(permission.clone())
-						}
+					if let Some((x, _)) = &mut select
+						&& *x
+					{
+						*x = false;
+						res.select = Some(permission.clone())
 					}
-					if let Some((x, _)) = &mut delete {
-						if *x {
-							*x = false;
-							res.delete = Some(permission.clone())
-						}
+					if let Some((x, _)) = &mut delete
+						&& *x
+					{
+						*x = false;
+						res.delete = Some(permission.clone())
 					}
 
 					let _ = parser.eat(T![,])?;
@@ -1005,23 +1005,23 @@ impl Parse for ast::FieldPermissions {
 
 					let permission = parser.parse::<ast::Permission>().await?;
 
-					if let Some((x, _)) = &mut create {
-						if *x {
-							*x = false;
-							res.create = Some(permission.clone())
-						}
+					if let Some((x, _)) = &mut create
+						&& *x
+					{
+						*x = false;
+						res.create = Some(permission.clone())
 					}
-					if let Some((x, _)) = &mut update {
-						if *x {
-							*x = false;
-							res.update = Some(permission.clone())
-						}
+					if let Some((x, _)) = &mut update
+						&& *x
+					{
+						*x = false;
+						res.update = Some(permission.clone())
 					}
-					if let Some((x, _)) = &mut select {
-						if *x {
-							*x = false;
-							res.select = Some(permission.clone())
-						}
+					if let Some((x, _)) = &mut select
+						&& *x
+					{
+						*x = false;
+						res.select = Some(permission.clone())
 					}
 					if parser.eat(T![,])?.is_none() {
 						break;
@@ -1065,11 +1065,7 @@ impl Parse for ast::OnDelete {
 					let expr = parser.parse_enter().await?;
 					Ok(ast::OnDelete::Then(expr))
 				}
-				_ => {
-					return Err(
-						parser.unexpected("`REJECT`, `CASCADE`, `IGNORE`, `UNSET`, or `THEN`")
-					);
-				}
+				_ => Err(parser.unexpected("`REJECT`, `CASCADE`, `IGNORE`, `UNSET`, or `THEN`")),
 			}
 		} else {
 			Ok(ast::OnDelete::Ignore)

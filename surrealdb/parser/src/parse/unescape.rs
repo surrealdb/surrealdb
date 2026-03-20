@@ -156,9 +156,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 			EscapeTokenKind::EscUnicodeFixed => {
 				let mut char = 0u32;
 				let slice = &slice.as_bytes()["\\u".len()..];
-				for i in 0..4 {
+				for c in slice.iter().copied() {
 					char <<= 4;
-					match slice[i] {
+					match c {
 						c @ b'0'..=b'9' => char += (c - b'0') as u32,
 						c @ b'a'..=b'f' => char += (c - b'a' + 10) as u32,
 						c @ b'A'..=b'F' => char += (c - b'a' + 10) as u32,
@@ -239,7 +239,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		Ok(self.ast.push_set_entry(str))
 	}
 
-	pub(crate) fn unescape_str<'a>(&'a mut self, token: Token) -> ParseResult<&'a str> {
+	pub(crate) fn unescape_str(&mut self, token: Token) -> ParseResult<&str> {
 		let start_offset = match token.token {
 			BaseTokenKind::String => 1,
 			BaseTokenKind::RecordIdString
@@ -257,7 +257,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		Self::unescape_common(slice_span, slice, self.source(), &mut self.unescape_buffer)
 	}
 
-	pub(crate) fn unescape_str_push<'a>(&'a mut self, token: Token) -> ParseResult<NodeId<String>> {
+	pub(crate) fn unescape_str_push(&mut self, token: Token) -> ParseResult<NodeId<String>> {
 		let start_offset = match token.token {
 			BaseTokenKind::String => 1,
 			BaseTokenKind::RecordIdString
@@ -321,7 +321,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 				EscapeTokenKind::EscUnicodeFixed => {
 					let mut char = 0u32;
 					let slice = lexer.slice();
-					let slice = &slice["\\u".len()..].as_bytes();
+					let slice = &&slice.as_bytes()["\\u".len()..];
 					for i in 0..4 {
 						match slice[i] {
 							c @ b'0'..=b'9' => {
@@ -342,7 +342,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 						}
 					}
 
-					offset_idx += char::from_u32(char).unwrap().len_utf8() as u32;
+					offset_idx += char::from_u32(char)
+						.expect("escape string should be valid")
+						.len_utf8() as u32;
 				}
 				EscapeTokenKind::EscUnicodeBracket => {
 					let mut char = 0u32;
@@ -368,12 +370,14 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 						}
 					}
 
-					offset_idx += char::from_u32(char).unwrap().len_utf8() as u32;
+					offset_idx += char::from_u32(char)
+						.expect("escape string should be valid")
+						.len_utf8() as u32;
 				}
 				EscapeTokenKind::Chars => {
 					let slice = lexer.span();
 					if offset_idx + slice.len() as u32 >= offset {
-						return ((slice.start as u32) + (offset - offset_idx)) as u32;
+						return (slice.start as u32) + (offset - offset_idx);
 					}
 					offset_idx += slice.len() as u32;
 				}

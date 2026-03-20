@@ -122,7 +122,7 @@ impl Parse for ast::Object {
 				let obj = parse_object_continue(parser, start.span).await?;
 				Ok(obj)
 			}
-			_ => return Err(parser.unexpected("an object key")),
+			_ => Err(parser.unexpected("an object key")),
 		}
 	}
 }
@@ -573,7 +573,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 							},
 						);
 					}
-					return Err(e);
+					Err(e)
 				}
 			}
 		}
@@ -650,7 +650,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				T![ACCESS] => parser.parse().await.map(Expr::DefineAccess),
 				_ => {
 					let _ = parser.next();
-					return Err(parser.unexpected(expected));
+					Err(parser.unexpected(expected))
 				}
 			}
 		}
@@ -678,7 +678,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				T![ACCESS] => parser.parse().await.map(Expr::RemoveAccess),
 				_ => {
 					let _ = parser.next();
-					return Err(parser.unexpected(expected));
+					Err(parser.unexpected(expected))
 				}
 			}
 		}
@@ -698,7 +698,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				T![SEQUENCE] => parser.parse().await.map(Expr::AlterSequence),
 				_ => {
 					let _ = parser.next();
-					return Err(parser.unexpected(expected));
+					Err(parser.unexpected(expected))
 				}
 			}
 		}

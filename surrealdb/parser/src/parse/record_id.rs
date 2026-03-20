@@ -152,7 +152,7 @@ pub fn peek_record_id_token(parser: &mut Parser<'_, '_>) -> ParseResult<Option<T
 		RecordIdKeyToken::Number => {
 			if parser.slice(span).starts_with('+') {
 				let token = Token {
-					token: T![+],
+					token: T![-],
 					joined: Joined::Joined,
 					span: Span {
 						start: span.start,
@@ -256,7 +256,10 @@ pub async fn try_parse_record_id_range(
 		Some(T![>]) => {
 			let _ = parser.next();
 			if !matches!(parser.peek_joined()?.map(|x| x.token), Some(T![..])) {
-				return Err(parser.unexpected_token("a range operator", peek.unwrap()));
+				let Some(peek) = peek else {
+					unreachable!()
+				};
+				return Err(parser.unexpected_token("a range operator", peek));
 			}
 			let _ = parser.next();
 			if peek_joined_starts_record_id_key(parser)? {

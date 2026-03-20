@@ -72,9 +72,9 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 
 		if OFFSET == 0 {
 			if self.read != self.write {
-				return Some(unsafe {
+				Some(unsafe {
 					self.peek.get_unchecked_mut((self.read & Self::MASK) as usize).assume_init()
-				});
+				})
 			} else {
 				let x = self.lex_token()?;
 				unsafe {

@@ -69,44 +69,44 @@ impl Parse for ast::Query {
 		let mut exprs = None;
 		let mut cur: Option<NodeListId<ast::TopLevelExpr>> = None;
 		while let Some(next) = parser.peek()? {
-			if let Some(cur) = cur {
-				if parser.eat(T![;])?.is_none() {
-					return Err(parser.with_error(|parser| {
-						let last_stmt = parser[cur].cur;
-						let last_stmt_span = last_stmt.ast_span(parser);
-						let last_stmt_end = Span {
-							start: last_stmt_span.end,
-							end: last_stmt_span.end,
-						};
-						let last_stmt_name = name_previous_statement(last_stmt, parser);
+			if let Some(cur) = cur
+				&& parser.eat(T![;])?.is_none()
+			{
+				return Err(parser.with_error(|parser| {
+					let last_stmt = parser[cur].cur;
+					let last_stmt_span = last_stmt.ast_span(parser);
+					let last_stmt_end = Span {
+						start: last_stmt_span.end,
+						end: last_stmt_span.end,
+					};
+					let last_stmt_name = name_previous_statement(last_stmt, parser);
 
-						Level::Error
-							.title(format!(
-								"Unexpected token `{}`, expected `;`",
-								parser.slice(next.span)
-							))
-							.snippet(
-								parser
-									.snippet()
-									.annotate(
-										AnnotationKind::Primary
-											.span(next.span)
-											.label("Maybe missing a semicolon before this token?"),
-									)
-									.annotate(AnnotationKind::Context.span(last_stmt_span).label(
-										format!(
-											"This last statement here was parsed as {last_stmt_name}"
-										),
-									))
-									.annotate(
-										AnnotationKind::Context
-											.span(last_stmt_end)
-											.label(format!("Expected a `;` here")),
+					Level::Error
+						.title(format!(
+							"Unexpected token `{}`, expected `;`",
+							parser.slice(next.span)
+						))
+						.snippet(
+							parser
+								.snippet()
+								.annotate(
+									AnnotationKind::Primary
+										.span(next.span)
+										.label("Maybe missing a semicolon before this token?"),
+								)
+								.annotate(AnnotationKind::Context.span(last_stmt_span).label(
+									format!(
+										"This last statement here was parsed as {last_stmt_name}"
 									),
-							)
-							.to_diagnostic()
-					}));
-				}
+								))
+								.annotate(
+									AnnotationKind::Context
+										.span(last_stmt_end)
+										.label("Expected a `;` here"),
+								),
+						)
+						.to_diagnostic()
+				}));
 			}
 
 			// eat all the empty statements.
@@ -155,30 +155,26 @@ impl Parse for ast::TopLevelExpr {
 					.await?;
 				Ok(TopLevelExpr::Transaction(tx))
 			}
-			T![CANCEL] => {
-				return Err(parser.with_error(|parser| {
-					Level::Error
-						.title("Unexpected token `CANCEL` expected an expression")
-						.snippet(parser.snippet().annotate(
-							AnnotationKind::Primary.span(next.span).label(
-								"`CANCEL` statements can only be used within a transaction block",
-							),
-						))
-						.to_diagnostic()
-				}));
-			}
-			T![COMMIT] => {
-				return Err(parser.with_error(|parser| {
-					Level::Error
-						.title("Unexpected token `COMMIT` expected an expression")
-						.snippet(parser.snippet().annotate(
-							AnnotationKind::Primary.span(next.span).label(
-								"`COMMIT` statements can only be used within a transaction block",
-							),
-						))
-						.to_diagnostic()
-				}));
-			}
+			T![CANCEL] => Err(parser.with_error(|parser| {
+				Level::Error
+					.title("Unexpected token `CANCEL` expected an expression")
+					.snippet(parser.snippet().annotate(
+						AnnotationKind::Primary.span(next.span).label(
+							"`CANCEL` statements can only be used within a transaction block",
+						),
+					))
+					.to_diagnostic()
+			})),
+			T![COMMIT] => Err(parser.with_error(|parser| {
+				Level::Error
+					.title("Unexpected token `COMMIT` expected an expression")
+					.snippet(parser.snippet().annotate(
+						AnnotationKind::Primary.span(next.span).label(
+							"`COMMIT` statements can only be used within a transaction block",
+						),
+					))
+					.to_diagnostic()
+			})),
 			T![USE] => Ok(TopLevelExpr::Use(parser.parse_sync()?)),
 			T![OPTION] => Ok(TopLevelExpr::Option(parser.parse_sync()?)),
 			T![KILL] => Ok(TopLevelExpr::Kill(parser.parse_sync()?)),

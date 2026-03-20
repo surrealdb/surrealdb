@@ -85,7 +85,7 @@ impl ParseError {
 
 	/// Returns a reference to the underlying diagnostic if the error is not missing data
 	/// or speculative.
-	pub fn as_diagnostic<'a>(&'a self) -> Option<&'a Diagnostic<'static>> {
+	pub fn as_diagnostic(&self) -> Option<&Diagnostic<'static>> {
 		if !self.is_diagnostic() {
 			return None;
 		}
@@ -94,7 +94,7 @@ impl ParseError {
 
 	/// Returns a mutable reference to the underlying diagnostic if the error is not missing data
 	/// or speculative.
-	pub fn as_mut_diagnostic<'a>(&'a mut self) -> Option<&'a mut Diagnostic<'static>> {
+	pub fn as_mut_diagnostic(&mut self) -> Option<&mut Diagnostic<'static>> {
 		if !self.is_diagnostic() {
 			return None;
 		}
