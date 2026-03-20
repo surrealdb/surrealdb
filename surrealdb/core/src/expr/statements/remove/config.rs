@@ -61,7 +61,7 @@ impl RemoveConfigStatement {
 				txn.del(&key).await?;
 			}
 			Base::Ns => {
-				unreachable!("config on namespace scope is not supported");
+				fail!("config on namespace scope is not supported");
 			}
 		}
 		txn.clear_cache();
