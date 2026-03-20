@@ -10,7 +10,7 @@ skip-api-request-id = true
 value = "{ body: { version: 'first' }, headers: {}, status: 200 }"
 
 [[test.results]]
-value = "NONE"
+error = "The api '/overwrite_test' already exists"
 
 [[test.results]]
 value = "NONE"
@@ -31,7 +31,7 @@ value = "NONE"
 
 [[test.results]]
 skip-api-request-id = true
-value = "{ body: { version: 'second' }, headers: {}, status: 200 }"
+value = "{ body: { version: 'first' }, headers: {}, status: 200 }"
 
 */
 
