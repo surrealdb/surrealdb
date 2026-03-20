@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 use std::io::stdout;
 
 use ast::Query;

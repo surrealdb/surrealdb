@@ -62,7 +62,7 @@ impl CharBuffer {
 		}
 	}
 
-	/// Add a character to the end of the buffer with the given styling.
+	//Add a character to the end of the buffer with the given styling.
 	pub fn push_char(&mut self, c: char, color: Color, style: Styling) {
 		if c == '\n' {
 			self.lines.push(Vec::new());

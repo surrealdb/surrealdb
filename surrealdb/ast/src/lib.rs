@@ -29,6 +29,7 @@ pub mod vis;
 pub use types::{AstSpan, Node, NodeId, NodeList, NodeListId, Spanned, UniqueNode};
 
 use crate::mac::{ast_type, impl_vis_debug, impl_vis_type};
+use crate::types::library;
 
 type NodeSet<T> = IdSet<u32, T>;
 

@@ -14,7 +14,8 @@ pub use ast::Ast;
 id!(NodeId<T>);
 
 impl<T: Any> NodeId<T> {
-	pub fn index<'a, L: NodeLibrary>(self, ast: &'a Ast<L>) -> &'a T {
+	#[allow(clippy::should_implement_trait)]
+	pub fn index<L: NodeLibrary>(self, ast: &Ast<L>) -> &T {
 		&ast[self]
 	}
 }
@@ -81,7 +82,8 @@ impl<T: Node> Node for NodeList<T> {}
 pub struct NodeListId<T>(pub NodeId<NodeList<T>>);
 
 impl<T: Any> NodeListId<T> {
-	pub fn index<'a, L: NodeLibrary>(self, ast: &'a Ast<L>) -> &'a NodeList<T> {
+	#[allow(clippy::should_implement_trait)]
+	pub fn index<L: NodeLibrary>(self, ast: &Ast<L>) -> &NodeList<T> {
 		&ast[self]
 	}
 }
@@ -101,7 +103,7 @@ pub trait AstSpan {
 
 impl AstSpan for Span {
 	fn ast_span<L: NodeLibrary>(&self, _: &Ast<L>) -> Span {
-		self.clone()
+		*self
 	}
 }
 
@@ -120,7 +122,10 @@ impl<T: AstSpan + Node> AstSpan for NodeId<T> {
 impl<T: AstSpan + Node> AstSpan for NodeListId<T> {
 	fn ast_span<L: NodeLibrary>(&self, ast: &Ast<L>) -> Span {
 		let start = self.index(ast).cur.index(ast).ast_span(ast);
-		let end = ast.iter_list(Some(*self)).last().unwrap();
+		let Some(end) = ast.iter_list(Some(*self)).last() else {
+			// trivially unreachable as is at least self to return an item.
+			unreachable!()
+		};
 		start.extend(end.ast_span(ast))
 	}
 }
@@ -150,7 +155,6 @@ pub trait NodeLibrary {
 }
 
 //TODO(MSRV): Add `const` blocks if we upgrade the MSRV to a version which has const TypeId::of
-#[macro_export]
 macro_rules! library {
     (
         $(#[$m:meta])*
@@ -212,7 +216,7 @@ macro_rules! library {
 				}
             }
 
-            fn insert<T: crate::types::Node>(&mut self, value: T) -> NodeId<T>{
+            fn insert<T: $crate::types::Node>(&mut self, value: T) -> NodeId<T>{
                 //llet type_id = const { std::any::TypeId::of::<T>() };
                 let type_id = std::any::TypeId::of::<T>();
                 $(
@@ -225,7 +229,7 @@ macro_rules! library {
 
             fn insert_set_entry<T, V>(&mut self, value: V) -> NodeId<T>
 				where
-					T: crate::types::UniqueNode,
+					T: $crate::types::UniqueNode,
 					V: common::ids::SetEntry<T>,
 			{
                 //let type_id = const { std::any::TypeId::of::<T>() };
@@ -284,3 +288,4 @@ macro_rules! library {
 		}
 	};
 }
+pub(crate) use library;
