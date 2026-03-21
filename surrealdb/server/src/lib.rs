@@ -35,15 +35,24 @@ use std::future::Future;
 use std::process::ExitCode;
 
 pub use cli::{Config, ConfigCheck, ConfigCheckRequirements};
-/// Re-export `RouterFactory` for convenience so embedders can `use surreal::RouterFactory`.
+/// Re-export `RouterFactory` for convenience so embedders can `use
+/// surrealdb_server::RouterFactory`.
 #[doc(inline)]
 pub use ntw::RouterFactory;
-/// Re-export `RpcState` for convenience so embedders can `use surreal::RpcState`.
+/// Re-export `RouterOptions` for convenience so embedders can `use
+/// surrealdb_server::RouterOptions`.
+#[doc(inline)]
+pub use ntw::RouterOptions;
+/// Re-export `SurrealRouter` for convenience so embedders can `use
+/// surrealdb_server::SurrealRouter`.
+#[doc(inline)]
+pub use ntw::SurrealRouter;
+/// Re-export `RpcState` for convenience so embedders can `use surrealdb_server::RpcState`.
 #[doc(inline)]
 pub use rpc::RpcState;
 #[doc(inline)]
 pub use surrealdb as sdk;
-/// Re-export `core` for convenience so embedders can `use surreal::core::...`.
+/// Re-export `core` for convenience so embedders can `use surrealdb_server::core::...`.
 #[doc(inline)]
 pub use surrealdb_core as core;
 use surrealdb_core::buc::BucketStoreProvider;
