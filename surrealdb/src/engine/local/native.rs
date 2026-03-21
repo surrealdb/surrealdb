@@ -58,6 +58,88 @@ impl conn::Sealed for Db {
 	}
 }
 
+impl Surreal<Db> {
+	/// Create a [`Surreal`] client from an existing [`Datastore`].
+	///
+	/// This allows the SDK client and other components (such as the SurrealDB
+	/// HTTP router) to share the **same** datastore instance.
+	///
+	/// # Shutdown
+	///
+	/// Because the datastore is shared, this method does **not** call
+	/// [`Datastore::shutdown`] when the client is dropped. The caller is
+	/// responsible for calling `datastore.shutdown().await` once all
+	/// consumers (SDK clients, HTTP routers, etc.) are finished.
+	///
+	/// # Parameters
+	///
+	/// - `canceller`: A [`CancellationToken`] for cooperative shutdown of background tasks
+	/// - `datastore`: A shared reference to an already-configured [`Datastore`]
+	/// - `engine`:    [`EngineOptions`] controlling background task intervals Use
+	///   [`EngineOptions::default()`] for the standard intervals.
+	///
+	/// # Example
+	///
+	/// ```rust,ignore
+	/// use std::sync::Arc;
+	/// use surrealdb::engine::local::Db;
+	/// use surrealdb::Surreal;
+	/// use surrealdb_core::kvs::Datastore;
+	/// use surrealdb_core::options::EngineOptions;
+	/// use tokio_util::sync::CancellationToken;
+	///
+	/// let ds = Arc::new(
+	///     Datastore::new("surrealkv://my.surkv")
+	///         .await?
+	///         .with_notifications(),
+	/// );
+	/// let ct = CancellationToken::new();
+	///
+	/// // Create an SDK client that shares `ds`
+	/// let db = Surreal::<Db>::from_datastore(ct, ds.clone(), EngineOptions::default()).await?;
+	/// db.use_ns("test").use_db("test").await?;
+	///
+	/// // `ds` can now also be handed to SurrealRouter::build(...)
+	///
+	/// // When shutting down, cancel the token and shut down the datastore:
+	/// // ct.cancel();
+	/// // ds.shutdown().await.ok();
+	/// ```
+	pub async fn from_datastore(
+		canceller: CancellationToken,
+		datastore: Arc<Datastore>,
+		engine: EngineOptions,
+	) -> Result<Self> {
+		let (route_tx, route_rx) = async_channel::unbounded();
+		let (conn_tx, conn_rx) = async_channel::bounded::<Result<()>>(1);
+		let session_clone = SessionClone::new();
+
+		tokio::spawn(run_router_with_datastore(
+			canceller,
+			datastore,
+			engine,
+			conn_tx,
+			route_rx,
+			session_clone.receiver.clone(),
+		));
+
+		conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+
+		let mut features = HashSet::new();
+		features.insert(ExtraFeatures::Backup);
+		features.insert(ExtraFeatures::LiveQueries);
+
+		let waiter = watch::channel(Some(WaitFor::Connection));
+		let router = Router {
+			features,
+			config: crate::opt::Config::default(),
+			sender: route_tx,
+		};
+
+		Ok((router, waiter, session_clone).into())
+	}
+}
+
 pub(crate) async fn run_router(
 	address: Endpoint,
 	conn_tx: Sender<Result<()>>,
@@ -138,6 +220,47 @@ pub(crate) async fn run_router(
 	}
 	let tasks = tasks::init(router_state.kvs.clone(), canceller.clone(), &opt);
 
+	router_loop(&router_state, canceller, tasks, route_rx, session_rx).await;
+
+	router_state.kvs.shutdown().await.ok();
+}
+
+/// Variant of [`run_router`] that uses a pre-existing [`Datastore`].
+///
+/// This is used by [`Surreal::<Db>::from_datastore`] so that an SDK client can
+/// share the exact same datastore instance with other components (e.g. the
+/// SurrealDB HTTP router).
+///
+/// The caller is responsible for having already configured the datastore
+/// (notifications, capabilities, timeouts, etc.) before passing it here.
+/// Background engine tasks are started using the provided [`EngineOptions`].
+pub(crate) async fn run_router_with_datastore(
+	canceller: CancellationToken,
+	datastore: Arc<Datastore>,
+	engine: EngineOptions,
+	conn_tx: Sender<Result<()>>,
+	route_rx: Receiver<Route>,
+	session_rx: Receiver<SessionId>,
+) {
+	conn_tx.send(Ok(())).await.ok();
+
+	let router_state = super::RouterState {
+		kvs: datastore,
+		sessions: HashMap::new(),
+	};
+
+	let tasks = tasks::init(router_state.kvs.clone(), canceller.clone(), &engine);
+
+	router_loop(&router_state, canceller, tasks, route_rx, session_rx).await;
+}
+
+async fn router_loop(
+	router_state: &super::RouterState,
+	canceller: CancellationToken,
+	tasks: tasks::Tasks,
+	route_rx: Receiver<Route>,
+	session_rx: Receiver<SessionId>,
+) {
 	let mut notifications = router_state.kvs.notifications().map(Box::pin);
 	let mut notification_stream = poll_fn(move |cx| match &mut notifications {
 		Some(rx) => rx.poll_next_unpin(cx),
@@ -243,6 +366,4 @@ pub(crate) async fn run_router(
 	canceller.cancel();
 	// Wait for background tasks to finish
 	tasks.resolve().await.ok();
-	// Delete this node from the cluster
-	router_state.kvs.shutdown().await.ok();
 }
