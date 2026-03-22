@@ -15,7 +15,7 @@ use crate::error::{ConversionError, LengthMismatchError, OutOfRangeError, Serial
 use crate::traits::ser::Serializer;
 use crate::{
 	Array, Bytes, Datetime, Duration, Error, File, Geometry, Kind, Number, Object, Range, RecordId,
-	SerializationError, Set, SurrealNone, SurrealNull, Table, Uuid, Value, kind,
+	Set, SurrealNone, SurrealNull, Table, Uuid, Value, kind,
 };
 
 /// Trait for converting between SurrealDB values and Rust types
