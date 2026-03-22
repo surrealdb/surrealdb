@@ -18,10 +18,15 @@ use surrealdb_types::{Error as TypesError, Number, ToSql, Value};
 pub async fn new_ds(ns: &str, db: &str) -> Result<Datastore> {
 	let ds =
 		Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications();
+	new_ns_db(&ds, ns, db).await?;
+	Ok(ds)
+}
+
+pub async fn new_ns_db(ds: &Datastore, ns: &str, db: &str) -> Result<()> {
 	let sess = Session::owner().with_ns(ns);
 	ds.execute(&format!("DEFINE NS `{ns}`"), &Session::owner(), None).await?;
 	ds.execute(&format!("DEFINE DB `{db}`"), &sess, None).await?;
-	Ok(ds)
+	Ok(())
 }
 
 #[allow(dead_code)]

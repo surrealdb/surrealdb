@@ -2,6 +2,7 @@ mod access;
 mod analyzer;
 mod api;
 mod bucket;
+mod config;
 mod database;
 mod event;
 mod field;
@@ -20,6 +21,7 @@ pub(crate) use analyzer::RemoveAnalyzerStatement;
 use anyhow::Result;
 pub(crate) use api::RemoveApiStatement;
 pub(crate) use bucket::RemoveBucketStatement;
+pub(crate) use config::RemoveConfigStatement;
 pub(crate) use database::RemoveDatabaseStatement;
 pub(crate) use event::RemoveEventStatement;
 pub(crate) use field::RemoveFieldStatement;
@@ -57,6 +59,7 @@ pub(crate) enum RemoveStatement {
 	Bucket(RemoveBucketStatement),
 	Sequence(RemoveSequenceStatement),
 	Module(RemoveModuleStatement),
+	Config(RemoveConfigStatement),
 }
 
 impl RemoveStatement {
@@ -85,6 +88,7 @@ impl RemoveStatement {
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Module(v) => v.compute(ctx, opt).await,
+			Self::Config(v) => v.compute(ctx, opt).await,
 		}
 	}
 }

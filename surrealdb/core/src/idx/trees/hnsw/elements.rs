@@ -62,12 +62,15 @@ impl HnswElements {
 
 	#[cfg(test)]
 	pub(super) async fn len(&self) -> usize {
-		self.vector_cache.len(self.table_id, self.index_id).await as usize
+		self.vector_cache.len(self.ikb.ns(), self.ikb.db(), self.table_id, self.index_id).await
+			as usize
 	}
 
 	#[cfg(test)]
 	pub(super) async fn contains(&self, e_id: ElementId) -> bool {
-		self.vector_cache.contains(self.table_id, self.index_id, e_id).await
+		self.vector_cache
+			.contains(self.ikb.ns(), self.ikb.db(), self.table_id, self.index_id, e_id)
+			.await
 	}
 
 	/// Stores a vector in the key-value store and caches it. Returns the shared vector.
@@ -81,7 +84,9 @@ impl HnswElements {
 		let key = self.ikb.new_he_key(id);
 		tx.set(&key, ser_vec, None).await?;
 		let pt: SharedVector = vec.into();
-		self.vector_cache.insert(self.table_id, self.index_id, id, pt.clone()).await;
+		self.vector_cache
+			.insert(self.ikb.ns(), self.ikb.db(), self.table_id, self.index_id, id, pt.clone())
+			.await;
 		Ok(pt)
 	}
 
@@ -91,7 +96,11 @@ impl HnswElements {
 		tx: &Transaction,
 		e_id: &ElementId,
 	) -> Result<Option<SharedVector>> {
-		if let Some(v) = self.vector_cache.get(self.table_id, self.index_id, *e_id).await {
+		if let Some(v) = self
+			.vector_cache
+			.get(self.ikb.ns(), self.ikb.db(), self.table_id, self.index_id, *e_id)
+			.await
+		{
 			return Ok(Some(v));
 		}
 		let key = self.ikb.new_he_key(*e_id);
@@ -100,7 +109,16 @@ impl HnswElements {
 			Some(vec) => {
 				let vec = Vector::from(vec);
 				let vec: SharedVector = vec.into();
-				self.vector_cache.insert(self.table_id, self.index_id, *e_id, vec.clone()).await;
+				self.vector_cache
+					.insert(
+						self.ikb.ns(),
+						self.ikb.db(),
+						self.table_id,
+						self.index_id,
+						*e_id,
+						vec.clone(),
+					)
+					.await;
 				Ok(Some(vec))
 			}
 		}
@@ -123,7 +141,9 @@ impl HnswElements {
 
 	/// Removes an element's vector from both the cache and the key-value store.
 	pub(super) async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<()> {
-		self.vector_cache.remove(self.table_id, self.index_id, e_id).await;
+		self.vector_cache
+			.remove(self.ikb.ns(), self.ikb.db(), self.table_id, self.index_id, e_id)
+			.await;
 		let key = self.ikb.new_he_key(e_id);
 		tx.del(&key).await?;
 		Ok(())

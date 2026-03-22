@@ -617,7 +617,7 @@ impl Value {
 			Value::String(s) => Unexpected::Str(s),
 			Value::Array(_) => Unexpected::Seq,
 			Value::Object(_) => Unexpected::Map,
-			Value::None => todo!(),
+			Value::None => Unexpected::Option,
 			Value::Bytes(_) => Unexpected::Seq,
 			Value::Duration(_) => Unexpected::Other("duration"),
 			Value::Datetime(_) => Unexpected::Other("datetime"),

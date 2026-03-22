@@ -19,7 +19,7 @@ pub use flatbuffers::*;
 pub use hashmap::HashMap;
 pub use kind::*;
 pub use notification::*;
-pub use sql::{SqlFormat, ToSql, write_sql};
+pub use sql::{SqlFormat, ToSql, fmt_non_finite_f64, write_sql};
 // Re-export the derive macro
 pub use surrealdb_types_derive::{SurrealValue, kind};
 pub use traits::*;

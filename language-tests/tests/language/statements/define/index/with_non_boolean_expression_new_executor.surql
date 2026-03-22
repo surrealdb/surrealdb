@@ -21,7 +21,7 @@ value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
 value = ''''SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: v > math::max(...)]
+    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward]
 ''''
 
 [[test.results]]
@@ -29,7 +29,7 @@ value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
 value = ''''SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: v > 3 - math::max(...)]
+    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward]
 ''''
 
 [[test.results]]
@@ -37,7 +37,7 @@ value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
 value = ''''SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: v > 3 - math::max(...) - 1]
+    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward]
 ''''
 
 [[test.results]]
@@ -45,7 +45,7 @@ value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
 value = ''''SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: v > 3 - math::max(...) + 1]
+    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward]
 ''''
 
 [[test.results]]
@@ -53,7 +53,7 @@ value = "[{ id: t:2, v: 2 }]"
 
 [[test.results]]
 value = ''''SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: v > 3 - math::max(...) + 1]
+    IndexScan [ctx: Db] [index: idx, access: >1, direction: Forward]
 ''''
 
 */

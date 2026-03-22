@@ -242,3 +242,13 @@ impl ToSql for rust_decimal::Decimal {
 		f.push_str("dec");
 	}
 }
+
+#[doc(hidden)]
+pub const fn fmt_non_finite_f64(v: f64) -> Option<&'static str> {
+	match v {
+		f64::INFINITY => Some("Infinity"),
+		f64::NEG_INFINITY => Some("-Infinity"),
+		float if float.is_nan() => Some("NaN"),
+		_ => None,
+	}
+}

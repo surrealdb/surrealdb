@@ -31,6 +31,9 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
+		if opt.import {
+			return Err(IgnoreError::Ignore);
+		}
 		// Check if we can view the output
 		self.check_output_permissions(stk, ctx, opt, stm).await?;
 		// Process the desired output
