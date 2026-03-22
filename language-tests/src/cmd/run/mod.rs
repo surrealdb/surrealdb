@@ -9,7 +9,7 @@ use semver::Version;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::env::VERSION;
-use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
+use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::{select, time};
@@ -588,14 +588,16 @@ async fn run_test_with_dbs(
 			.context("failed to remove used test namespace")?;
 	}
 
-	// Clean up root-level configs that may have been created during the test.
-	// The key prefix for root configs is [b'/', b'!', b'c', b'g'] (from RootConfig encoding).
-	// TODO(SDB-200): This is a hack to clean up root-level configs that may have been created during the test.
-	//                We need to add support for REMOVE CONFIG so we can do this cleanly.
+	// Clean up configs that may have been created during the test.
 	{
-		let tx = dbs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		tx.delr(vec![b'/', b'!', b'c', b'g']..vec![b'/', b'!', b'c', b'h']).await?;
-		tx.commit().await?;
+		let session = Session::owner();
+		dbs.execute(
+			"REMOVE CONFIG IF EXISTS GRAPHQL; REMOVE CONFIG IF EXISTS API; REMOVE CONFIG IF EXISTS DEFAULT;",
+			&session,
+			None,
+		)
+		.await
+		.context("failed to remove root config")?;
 	}
 
 	match result {
