@@ -59,12 +59,23 @@ impl RpcState {
 	}
 }
 
-/// Performs notification delivery to the WebSockets
-pub(crate) async fn notifications(
-	ds: Arc<Datastore>,
-	state: Arc<RpcState>,
-	canceller: CancellationToken,
-) {
+/// Performs notification delivery to the WebSockets.
+///
+/// This function listens on the datastore's notification channel and forwards
+/// LIVE query notifications to the appropriate WebSocket connections. It runs
+/// in a loop until the provided [`CancellationToken`] is cancelled.
+///
+/// # Parameters
+/// - `ds`:        The [`Datastore`] whose notification channel to listen on
+/// - `state`:     The [`RpcState`] containing WebSocket and LIVE query mappings
+/// - `canceller`: A [`CancellationToken`] that stops the loop when cancelled
+///
+/// # Usage
+///
+/// This is called automatically by
+/// [`SurrealRouter::spawn_notifications`](crate::ntw::SurrealRouter::spawn_notifications).
+/// If you need lower-level control you can call it directly inside your own `tokio::spawn`.
+pub async fn notifications(ds: Arc<Datastore>, state: Arc<RpcState>, canceller: CancellationToken) {
 	// Store messages being delivered
 	let mut futures = FuturesUnordered::new();
 	// Listen to the notifications channel
@@ -122,8 +133,11 @@ pub(crate) async fn notifications(
 	}
 }
 
-/// Closes all WebSocket connections, waiting for graceful shutdown
-pub(crate) async fn graceful_shutdown(state: Arc<RpcState>) {
+/// Closes all WebSocket connections, waiting for graceful shutdown.
+///
+/// Signals each connected WebSocket to shut down and then waits until all
+/// connections have been drained from the [`RpcState`].
+pub async fn graceful_shutdown(state: Arc<RpcState>) {
 	// Close WebSocket connections, ensuring queued messages are processed
 	for (_, rpc) in state.web_sockets.read().await.iter() {
 		rpc.shutdown.cancel();
@@ -134,8 +148,11 @@ pub(crate) async fn graceful_shutdown(state: Arc<RpcState>) {
 	}
 }
 
-/// Forces a fast shutdown of all WebSocket connections
-pub(crate) fn shutdown(state: Arc<RpcState>) {
+/// Forces a fast shutdown of all WebSocket connections.
+///
+/// Unlike [`graceful_shutdown`], this immediately drains the WebSocket map
+/// without waiting for in-flight messages to be delivered.
+pub fn shutdown(state: Arc<RpcState>) {
 	// Close all WebSocket connections immediately
 	if let Ok(mut writer) = state.web_sockets.try_write() {
 		writer.drain();
