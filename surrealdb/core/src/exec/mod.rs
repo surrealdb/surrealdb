@@ -142,6 +142,20 @@ pub(crate) trait ExecOperator: Debug + SendSyncRequirement {
 	/// has at least this context level before calling `execute()`.
 	fn required_context(&self) -> ContextLevel;
 
+	/// Whether the required namespace/database must already exist.
+	///
+	/// When `true` the executor uses strict lookups (`get_ns_by_name` /
+	/// `get_db_by_name`) and returns `NsNotFound` / `DbNotFound` if the
+	/// catalog entry is missing.  When `false` (default) the executor
+	/// creates missing entries via `get_or_add_ns` / `get_or_add_db`.
+	///
+	/// ALTER operators override this to `true` so that e.g.
+	/// `ALTER DATABASE COMPACT` on a non-existent database fails instead
+	/// of silently creating it.
+	fn strict_context(&self) -> bool {
+		false
+	}
+
 	/// Executes the execution plan and returns a stream of value batches.
 	///
 	/// The context is guaranteed to meet the requirements declared by `required_context()`

@@ -47,7 +47,7 @@ impl AlterIndexPlan {
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for AlterIndexPlan {
-	ddl_operator_common!("AlterIndex", ContextLevel::Database);
+	ddl_operator_common!("AlterIndex", ContextLevel::Database, strict);
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let name = self.name.clone();

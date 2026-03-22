@@ -711,6 +711,12 @@ impl<'ctx> Planner<'ctx> {
 	/// variable.  Multi-part dotted idioms are evaluated normally; use
 	/// [`physical_expr_as_field_name`] for contexts where dotted paths
 	/// should be coerced to a literal string (e.g. `REMOVE FIELD a.b`).
+	///
+	/// **Important**: This intentionally only coerces *single-part* idioms
+	/// (`idiom.0.len() == 1`).  Do **not** broaden the check to
+	/// multi-part idioms -- doing so would turn dotted expressions in
+	/// resource-name positions (e.g. `REMOVE DATABASE $ns.db`) into
+	/// literal strings instead of evaluating them at runtime.
 	pub async fn physical_expr_as_name(
 		&self,
 		expr: Expr,
@@ -733,21 +739,24 @@ impl<'ctx> Planner<'ctx> {
 	}
 
 	/// Convert an expression to a physical expression, treating any
-	/// idiom composed entirely of field parts as a literal dotted string.
+	/// idiom as a literal dotted string.
 	///
 	/// Used for field-name positions in DDL statements such as
 	/// `REMOVE FIELD document.visible ON test` where `document.visible`
-	/// is a dotted name, not a nested field access.
+	/// is a dotted name, not a nested field access.  Field names may
+	/// contain non-field parts (e.g. `foo.bar[0]`), so every
+	/// `Expr::Idiom` is coerced to its raw string form, matching the
+	/// legacy `expr_to_idiom` behaviour.
+	///
+	/// Do **not** use this for non-field resource names (databases, users,
+	/// etc.) -- use [`physical_expr_as_name`] instead.
 	pub async fn physical_expr_as_field_name(
 		&self,
 		expr: Expr,
 	) -> Result<Arc<dyn crate::exec::PhysicalExpr>, Error> {
 		use crate::exec::physical_expr::Literal as PhysicalLiteral;
-		use crate::expr::part::Part;
 
-		if let Expr::Idiom(ref idiom) = expr
-			&& idiom.0.iter().all(|p| matches!(p, Part::Field(_)))
-		{
+		if let Expr::Idiom(ref idiom) = expr {
 			return Ok(Arc::new(PhysicalLiteral(crate::val::Value::String(idiom.to_raw_string()))));
 		}
 

@@ -57,7 +57,7 @@ impl AlterTablePlan {
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for AlterTablePlan {
-	ddl_operator_common!("AlterTable", ContextLevel::Database);
+	ddl_operator_common!("AlterTable", ContextLevel::Database, strict);
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let name = self.name.clone();

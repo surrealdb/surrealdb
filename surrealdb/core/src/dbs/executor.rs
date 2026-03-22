@@ -241,23 +241,43 @@ impl Executor {
 		// Check what level of context we need
 		let required_level = plan.required_context();
 
+		let strict = plan.strict_context();
+
 		let exec_ctx = match required_level {
 			crate::exec::context::ContextLevel::Root => ExecutionContext::Root(root_ctx),
 			crate::exec::context::ContextLevel::Namespace => {
-				// Get namespace definition
 				let ns_name = self.opt.ns()?;
-				let ns_def = txn.get_or_add_ns(None, ns_name).await?;
+				let ns_def = if strict {
+					txn.get_ns_by_name(ns_name).await?.ok_or_else(|| Error::NsNotFound {
+						name: ns_name.to_owned(),
+					})?
+				} else {
+					txn.get_or_add_ns(None, ns_name).await?
+				};
 				ExecutionContext::Namespace(NamespaceContext {
 					root: root_ctx,
 					ns: ns_def,
 				})
 			}
 			crate::exec::context::ContextLevel::Database => {
-				// Get namespace and database definitions
 				let ns_name = self.opt.ns()?;
 				let db_name = self.opt.db()?;
-				let ns_def = txn.get_or_add_ns(None, ns_name).await?;
-				let db_def = txn.get_or_add_db_upwards(None, ns_name, db_name, true).await?;
+				let (ns_def, db_def) = if strict {
+					let ns_def =
+						txn.get_ns_by_name(ns_name).await?.ok_or_else(|| Error::NsNotFound {
+							name: ns_name.to_owned(),
+						})?;
+					let db_def = txn.get_db_by_name(ns_name, db_name).await?.ok_or_else(|| {
+						Error::DbNotFound {
+							name: db_name.to_owned(),
+						}
+					})?;
+					(ns_def, db_def)
+				} else {
+					let ns_def = txn.get_or_add_ns(None, ns_name).await?;
+					let db_def = txn.get_or_add_db_upwards(None, ns_name, db_name, true).await?;
+					(ns_def, db_def)
+				};
 				ExecutionContext::Database(DatabaseContext {
 					ns_ctx: NamespaceContext {
 						root: root_ctx,

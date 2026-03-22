@@ -112,6 +112,14 @@ macro_rules! ddl_operator_common {
 			Some(self.metrics.as_ref())
 		}
 	};
+
+	($name_str:expr, $ctx_level:expr, strict) => {
+		crate::exec::operators::ddl::helpers::ddl_operator_common!($name_str, $ctx_level);
+
+		fn strict_context(&self) -> bool {
+			true
+		}
+	};
 }
 
 pub(crate) use ddl_operator_common;

@@ -28,7 +28,7 @@ impl AlterNamespacePlan {
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for AlterNamespacePlan {
-	ddl_operator_common!("AlterNamespace", ContextLevel::Namespace);
+	ddl_operator_common!("AlterNamespace", ContextLevel::Namespace, strict);
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let compact = self.compact;

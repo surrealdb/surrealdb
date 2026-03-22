@@ -71,7 +71,7 @@ impl AlterFieldPlan {
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for AlterFieldPlan {
-	ddl_operator_common!("AlterField", ContextLevel::Database);
+	ddl_operator_common!("AlterField", ContextLevel::Database, strict);
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let name = self.name.clone();
