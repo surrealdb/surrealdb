@@ -1706,13 +1706,13 @@ impl<T: Serialize + DeserializeOwned + 'static> SurrealValue for SerdeWrapper<T>
 		value => match value.serialize(Serializer) {
 			Ok(value) => value,
 			Err(err) => {
-				debug_assert!(false, "SerdeWrapper serialization to value failed: {err}");
-				Error::serialization(
-					"serialization to value failed".to_string(),
-					SerializationError::Serialization,
-				)
-				.with_cause(err)
-				.into_value()
+				let error = format!("SerdeWrapper serialization to value failed: {err}");
+				debug_assert!(false, "{error}");
+				tracing::warn!("{error}");
+				// TODO: `into_value` should return `Result` so we can propagate
+				// this error instead of silently dropping it. For now we return
+				// `Value::None` since that's the least harmful fallback.
+				Value::None
 			}
 		},
 		})
