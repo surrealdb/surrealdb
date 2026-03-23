@@ -108,7 +108,7 @@ async-graphql-axum = "7.2.0"
 async-trait = "0.1.89"
 base64 = "0.22.1"
 bcrypt = "0.18.0"
-bitflags = "*" # TODO: pin version
+bitflags = "2.10.0"
 blake3 = "1.8.3"
 boxcar = "0.2.14"
 bytes = "1.11.1"
@@ -128,7 +128,7 @@ fuzzy-matcher = "0.3.7"
 geo = { version = "0.32.0", default-features = false }
 geo-types = "0.7.18"
 getrandom = "0.3.4"
-hashbrown = "*" # TODO: pin version
+hashbrown = "0.16.1"
 hex = "0.4.3"
 http = "1.4.0"
 hyper = "1.8"
@@ -137,7 +137,7 @@ indexmap = "2.13.0"
 ipnet = "2.11.0"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
 jsonwebtoken = { version = "10.3.0", default-features = false, features = ["use_pem"] }
-logos = "*" # TODO: pin version
+logos = "0.16.1" # TODO: pin version
 md-5 = "0.10.6"
 mimalloc = "0.1.48"
 native-tls = "0.2.14"

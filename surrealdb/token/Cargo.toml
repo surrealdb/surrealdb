@@ -13,7 +13,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-logos = { version = "0.16" }
+logos.workspace = true
 common.workspace = true
 
 [lints]

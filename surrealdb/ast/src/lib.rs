@@ -1412,7 +1412,7 @@ ast_type! {
 	pub struct AlterSequence{
 		pub if_exists: bool,
 		pub name: NodeId<Expr>,
-		pub timeout: Option<AlterKind<Expr>>,
+		pub timeout: Option<AlterKind<NodeId<Expr>>>,
 	}
 }
 
