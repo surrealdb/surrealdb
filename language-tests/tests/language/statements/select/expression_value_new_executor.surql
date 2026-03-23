@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test SELECT VALUE with negation and boolean NOT expressions (new executor)"
 

@@ -1432,6 +1432,13 @@ pub async fn idiom(
 				"week" => time::week,
 				"yday" => time::yday,
 				"year" => time::year,
+				"set_year" => time::set_year,
+				"set_month" => time::set_month,
+				"set_day" => time::set_day,
+				"set_hour" => time::set_hour,
+				"set_minute" => time::set_minute,
+				"set_second" => time::set_second,
+				"set_nanosecond" => time::set_nanosecond,
 
 				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,

@@ -72,15 +72,16 @@ macro_rules! define_set_closure_function {
 				args: Vec<Value>,
 			) -> crate::exec::BoxFut<'a, Result<Value>> {
 				Box::pin(async move {
+					use crate::doc::CursorDoc;
 					let args = FromArgs::from_args($func_name, args)?;
 					let frozen = ctx.exec_ctx.ctx();
 					let opt = ctx.exec_ctx.options();
-					// Note: CursorDoc is not available in the streaming executor context
-					let doc = None;
+					let doc = ctx.document_root.or(ctx.current_value)
+						.map(|v| CursorDoc::new(None, None, v.clone()));
 					let mut stack = TreeStack::new();
 					stack
 						.enter(|stk| async move {
-							$impl_path((stk, frozen, opt, doc), args).await
+							$impl_path((stk, frozen, opt, doc.as_ref()), args).await
 						})
 						.finish()
 						.await
@@ -89,6 +90,12 @@ macro_rules! define_set_closure_function {
 		}
 	};
 }
+
+// array::all - Check if all elements match a condition
+define_set_closure_function!(SetAll, "set::all", crate::fnc::set::all, set: Any, check: Any => Any);
+
+// set::any - Check if any element matches a condition
+define_set_closure_function!(SetAny, "set::any", crate::fnc::set::any, set: Any, check: Any => Any);
 
 // set::filter - Filter elements by closure/value
 define_set_closure_function!(SetFilter, "set::filter", crate::fnc::set::filter, set: Any, check: Any => Any);
@@ -128,6 +135,8 @@ pub fn register(registry: &mut FunctionRegistry) {
 	);
 
 	// Register closure-based functions
+	registry.register(SetAll);
+	registry.register(SetAny);
 	registry.register(SetFilter);
 	registry.register(SetFind);
 	registry.register(SetFold);

@@ -1,3 +1,4 @@
+use std::collections::{BTreeSet, BinaryHeap, HashSet, LinkedList, VecDeque};
 use std::ops::{Deref, DerefMut};
 
 use serde::{Deserialize, Serialize};
@@ -38,6 +39,36 @@ impl Array {
 
 impl<T: SurrealValue> From<Vec<T>> for Array {
 	fn from(v: Vec<T>) -> Self {
+		v.into_iter().map(T::into_value).collect()
+	}
+}
+
+impl<T: SurrealValue + Eq + std::hash::Hash> From<HashSet<T>> for Array {
+	fn from(v: HashSet<T>) -> Self {
+		v.into_iter().map(T::into_value).collect()
+	}
+}
+
+impl<T: SurrealValue + Ord> From<BTreeSet<T>> for Array {
+	fn from(v: BTreeSet<T>) -> Self {
+		v.into_iter().map(T::into_value).collect()
+	}
+}
+
+impl<T: SurrealValue> From<VecDeque<T>> for Array {
+	fn from(v: VecDeque<T>) -> Self {
+		v.into_iter().map(T::into_value).collect()
+	}
+}
+
+impl<T: SurrealValue> From<LinkedList<T>> for Array {
+	fn from(v: LinkedList<T>) -> Self {
+		v.into_iter().map(T::into_value).collect()
+	}
+}
+
+impl<T: SurrealValue + Ord> From<BinaryHeap<T>> for Array {
+	fn from(v: BinaryHeap<T>) -> Self {
 		v.into_iter().map(T::into_value).collect()
 	}
 }

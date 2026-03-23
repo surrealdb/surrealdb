@@ -4,6 +4,8 @@ backend = ["mem", "surrealkv"]
 versioned = true
 timeout = 5000
 
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "VERSION clause with aggregate functions should return correct results matching a plain SELECT with VERSION"
 issue = 6541

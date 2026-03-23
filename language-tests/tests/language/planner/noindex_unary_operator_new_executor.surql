@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test NOINDEX hint and unsupported unary operator fallback (new executor)"
 

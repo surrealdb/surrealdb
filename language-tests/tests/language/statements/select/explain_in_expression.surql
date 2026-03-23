@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test that EXPLAIN can be used inside expression context (e.g. object literals)"
 

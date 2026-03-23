@@ -25,7 +25,6 @@ url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 [imports.zcash]
 url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml"
 
-# All workspace crates: treat as trusted first-party (no per-version exemptions).
 [policy.demo]
 audit-as-crates-io = false
 
@@ -453,6 +452,14 @@ criteria = "safe-to-deploy"
 version = "1.6.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.dirs]]
+version = "6.0.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.dirs-sys]]
+version = "0.5.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.doc-comment]]
 version = "0.3.4"
 criteria = "safe-to-run"
@@ -865,6 +872,10 @@ criteria = "safe-to-deploy"
 version = "0.12.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.lz4_flex]]
+version = "0.12.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.lzma-rust2]]
 version = "0.15.7"
 criteria = "safe-to-deploy"
@@ -1235,6 +1246,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.redox_syscall]]
 version = "0.7.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.redox_users]]
+version = "0.5.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.regex-syntax]]
@@ -1920,17 +1935,3 @@ criteria = "safe-to-deploy"
 [[exemptions.zstd-sys]]
 version = "2.0.16+zstd.1.5.7"
 criteria = "safe-to-deploy"
-
-
-[[exemptions.dirs]]
-version = "6.0.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.dirs-sys]]
-version = "0.5.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.redox_users]]
-version = "0.5.2"
-criteria = "safe-to-deploy"
-

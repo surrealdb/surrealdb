@@ -17,7 +17,10 @@ use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
 	validate_record_user_access,
 };
-use crate::exec::planner::util::{resolve_condition_params, strip_knn_from_condition};
+use crate::exec::planner::util::{
+	SELECT_ITERATION_PARAMS, fold_condition_expressions, index_covers_ordering,
+	resolve_condition_params, resolve_projection_field_idioms, strip_knn_from_condition,
+};
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
@@ -427,7 +430,7 @@ impl ExecOperator for DynamicScan {
 			let pre_skip = if !needs_row_filtering { start_val } else { 0 };
 			let effective_storage_limit = if !needs_row_filtering { limit_val } else { None };
 
-			let direction = determine_scan_direction(&order);
+			let direction = determine_scan_direction(order.as_ref());
 
 			// Create the source stream based on scan type.
 			// `applied_pre_skip` tracks how many rows the source will skip
@@ -444,9 +447,10 @@ impl ExecOperator for DynamicScan {
 						with,
 						direction,
 						version,
-						storage_limit: effective_storage_limit,
-						pre_skip,
-						knn_context: knn_context.clone(),
+					storage_limit: effective_storage_limit,
+					pre_skip,
+					has_pushed_limit: effective_storage_limit.is_some(),
+					knn_context: knn_context.clone(),
 					},
 				).await?
 			};
@@ -499,6 +503,11 @@ struct TableScanConfig {
 	storage_limit: Option<usize>,
 	/// Number of KV pairs to skip before decoding (fast-path only).
 	pre_skip: usize,
+	/// Whether the LIMIT was actually pushed into the storage-level scan.
+	/// When true the scan truncates rows, so we must verify that the
+	/// runtime-selected BTree index covers the requested ordering.
+	/// If it doesn't, we fall back to a KV scan for correctness.
+	has_pushed_limit: bool,
 	/// KNN distance context for vector::distance::knn() support.
 	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 }
@@ -530,10 +539,18 @@ async fn resolve_table_scan_stream(
 	// Resolve bind-parameter references so that index analysis sees
 	// Expr::Literal instead of Expr::Param. Covers LET bindings, client
 	// bind params, and DEFINE PARAM (via txn store).
+	//
+	// After param resolution, re-fold constant expressions (pure functions
+	// whose arguments are now all literals) and rewrite type::field("name")
+	// to Expr::Idiom so the index analyzer can match them.
 	let resolved_cond = match cfg.cond.as_ref() {
 		Some(c) => {
 			let ns_db = Some((cfg.ns_id, cfg.db_id));
-			Some(resolve_condition_params(c, &ctx.root().ctx, ns_db).await)
+			let mut cond =
+				resolve_condition_params(c, &ctx.root().ctx, ns_db, SELECT_ITERATION_PARAMS).await;
+			fold_condition_expressions(&mut cond, ctx.function_registry());
+			resolve_projection_field_idioms(&mut cond, ctx.function_registry());
+			Some(cond)
 		}
 		None => None,
 	};
@@ -571,12 +588,21 @@ async fn resolve_table_scan_stream(
 	};
 
 	match access_path {
-		// B-tree index scan (single-column and compound)
+		// B-tree index scan (single-column and compound).
+		// When the LIMIT was pushed into storage, the scan truncates rows
+		// and assumes id-ordered output (via order_is_scan_compatible).
+		// Reject the index if it doesn't cover the requested ordering so
+		// we fall through to the KV scan fallback for correctness.
 		Some(AccessPath::BTreeScan {
 			index_ref,
 			access,
 			direction,
-		}) => {
+		}) if !cfg.has_pushed_limit
+			|| cfg
+				.order
+				.as_ref()
+				.is_none_or(|o| index_covers_ordering(&index_ref, &access, direction, o)) =>
+		{
 			let operator = IndexScan::new(
 				index_ref,
 				access,
@@ -637,7 +663,8 @@ async fn resolve_table_scan_stream(
 			Ok((stream, 0))
 		}
 
-		// Fall back to table KV scan (NOINDEX, etc.)
+		// Fall back to table KV scan (NOINDEX, BTree rejected by ordering
+		// check, etc.)
 		_ => {
 			let beg = record::prefix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;
 			let end = record::suffix(cfg.ns_id, cfg.db_id, &cfg.table_name)?;
@@ -794,7 +821,7 @@ mod tests {
 	#[test]
 	fn test_determine_scan_direction_no_order() {
 		// No order -> Forward
-		let direction = determine_scan_direction(&None);
+		let direction = determine_scan_direction(None);
 		assert!(matches!(direction, ScanDirection::Forward));
 	}
 
@@ -804,7 +831,7 @@ mod tests {
 
 		// Random order -> Forward
 		let order = Ordering::Random;
-		let direction = determine_scan_direction(&Some(order));
+		let direction = determine_scan_direction(Some(&order));
 		assert!(matches!(direction, ScanDirection::Forward));
 	}
 }
