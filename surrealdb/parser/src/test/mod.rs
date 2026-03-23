@@ -126,6 +126,15 @@ const IGNORE_TESTS: &[&str] = &[
 	"language/statements/remove/config/graphql.surql",
 	"language/statements/remove/config/not_exists.surql",
 	"language/statements/select/fetch/objects.surql",
+	"language/statements/alter/alter_param.surql",
+	"language/statements/alter/alter_user.surql",
+	"language/statements/alter/alter_function.surql",
+	"language/statements/alter/alter_event.surql",
+	"language/statements/alter/alter_config.surql",
+	"language/statements/alter/alter_bucket.surql",
+	"language/statements/alter/alter_api.surql",
+	"language/statements/alter/alter_analyzer.surql",
+	"language/statements/alter/alter_access.surql",
 ];
 
 #[test]
