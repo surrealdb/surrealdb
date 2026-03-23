@@ -814,6 +814,58 @@ impl MutVisitor for ParamResolver<'_> {
 	}
 }
 
+/// Parameters injected per-row during SELECT document iteration.
+/// These change value for every row and cannot be resolved at plan time.
+///
+/// - `this`/`self`: the current document being iterated
+/// - `parent`: the outer document in correlated subqueries
+///
+/// Event/live/field params (`$before`, `$after`, `$value`, `$input`, `$event`)
+/// are intentionally excluded because the exec planner only handles
+/// top-level statements.  SELECTs inside event handlers, live query
+/// notifications, and field evaluators run through the legacy `compute()`
+/// path, where those params are resolved at runtime via `ctx.value()`.
+/// If the exec planner is ever extended to those contexts, this guard
+/// set would need to be expanded accordingly.
+pub(crate) const SELECT_ITERATION_PARAMS: &[&str] = &["this", "self", "parent"];
+
+/// Resolve a single parameter to its value at plan time.
+///
+/// Resolution order:
+/// 1. Context values (LET bindings, client bind parameters, session params)
+/// 2. Row-scoped guard (skip params whose values change per-row)
+/// 3. DEFINE PARAM values with `Permission::Full` from the transaction store
+///
+/// Context values are checked first so that `LET` bindings shadow the
+/// row-scoped guard. The `row_scoped` set is caller-provided so that
+/// different planning contexts can guard the appropriate params (e.g.
+/// SELECT iteration guards `$this`/`$self`/`$parent`; a future LIVE query
+/// planner would additionally guard `$event`/`$before`/`$after`/`$value`).
+///
+/// DEFINE PARAMs with `Permission::None` or `Permission::Specific` are left
+/// for runtime resolution where the full permission machinery is available.
+pub(super) async fn resolve_param_value(
+	name: &str,
+	ctx: &crate::ctx::FrozenContext,
+	ns_db: Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)>,
+	row_scoped: &[&str],
+) -> Option<crate::val::Value> {
+	if let Some(value) = ctx.value(name) {
+		return Some(value.clone());
+	}
+	if row_scoped.contains(&name) {
+		return None;
+	}
+	if let Some((ns, db)) = ns_db
+		&& let Some(txn) = ctx.try_tx()
+		&& let Ok(param_def) = txn.get_db_param(ns, db, name).await
+		&& matches!(param_def.permissions, crate::catalog::Permission::Full)
+	{
+		return Some(param_def.value.clone());
+	}
+	None
+}
+
 /// Resolve bind-parameter references in a `WHERE` condition to their literal
 /// values. Returns a new `Cond` with `Expr::Param` nodes replaced by
 /// `Expr::Literal` wherever the value is available.
@@ -823,11 +875,16 @@ impl MutVisitor for ParamResolver<'_> {
 /// 2. Database-level defined parameters (`DEFINE PARAM`) via the transaction store, when `ns_db`
 ///    IDs are provided.
 ///
+/// `row_scoped` names are skipped during DEFINE PARAM fallback (step 2) since
+/// their values change per-row at runtime. Callers provide the appropriate
+/// set for their planning context (e.g. [`SELECT_ITERATION_PARAMS`]).
+///
 /// Parameters that cannot be resolved are left as-is.
 pub(crate) async fn resolve_condition_params(
 	cond: &Cond,
 	ctx: &crate::ctx::FrozenContext,
 	ns_db: Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)>,
+	row_scoped: &[&str],
 ) -> Cond {
 	// Pass 1: collect all param names referenced in the condition.
 	let mut collector = ParamCollector {
@@ -838,20 +895,11 @@ pub(crate) async fn resolve_condition_params(
 		return cond.clone();
 	}
 
-	// Pass 2: resolve each parameter.
+	// Pass 2: resolve each parameter via the shared resolution path.
 	let mut resolved = std::collections::HashMap::with_capacity(collector.names.len());
 	for name in &collector.names {
-		// Try context values first (LET, bind params, session).
-		if let Some(value) = ctx.value(name) {
-			resolved.insert(name.clone(), value.clone());
-			continue;
-		}
-		// Fall back to DEFINE PARAM in the transaction store.
-		if let Some((ns, db)) = ns_db
-			&& let Some(txn) = ctx.try_tx()
-			&& let Ok(param_def) = txn.get_db_param(ns, db, name).await
-		{
-			resolved.insert(name.clone(), param_def.value.clone());
+		if let Some(value) = resolve_param_value(name, ctx, ns_db, row_scoped).await {
+			resolved.insert(name.clone(), value);
 		}
 	}
 
@@ -866,6 +914,56 @@ pub(crate) async fn resolve_condition_params(
 	}
 	.visit_mut_expr(&mut expr);
 	Cond(expr)
+}
+
+/// Rewrite projection function calls with a single string literal argument
+/// (e.g. `type::field("name")`) to `Expr::Idiom` so the index analyzer can
+/// match them against indexed columns.
+///
+/// Projection functions like `type::field(s)` and a bare `Idiom(s)` both
+/// reference the same document field, but the index analyzer only recognises
+/// `Expr::Idiom`. This pass bridges the gap after param resolution and
+/// constant folding have reduced the argument to a string literal.
+///
+/// Uses `FunctionRegistry::is_projection` so any current or future
+/// projection function is handled without hardcoding names.
+pub(crate) fn resolve_projection_field_idioms(cond: &mut Cond, registry: &FunctionRegistry) {
+	let mut resolver = ProjectionFieldResolver {
+		registry,
+	};
+	let _ = resolver.visit_mut_expr(&mut cond.0);
+}
+
+struct ProjectionFieldResolver<'a> {
+	registry: &'a FunctionRegistry,
+}
+
+impl MutVisitor for ProjectionFieldResolver<'_> {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		use crate::expr::function::Function;
+
+		expr.visit_mut(self)?;
+
+		if let Expr::FunctionCall(fc) = expr
+			&& let Function::Normal(name) = &fc.receiver
+			&& self.registry.is_projection(name)
+			&& fc.arguments.len() == 1
+			&& let Expr::Literal(Literal::String(s)) = &fc.arguments[0]
+			&& let Ok(idiom) = crate::syn::idiom(s)
+		{
+			*expr = Expr::Idiom(idiom.into());
+		}
+		Ok(())
+	}
+
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
+	}
 }
 
 /// Extract a `Vec<Number>` from a literal array expression.
@@ -1147,7 +1245,7 @@ impl Visitor for ForbiddenParamChecker {
 /// Returns `true` when ORDER BY is absent, or is exactly `id ASC` or `id DESC`
 /// with no COLLATE/NUMERIC modifiers. In these cases the scan already produces
 /// rows in the requested order and no separate Sort operator is needed.
-pub(super) fn order_is_scan_compatible(order: &Option<crate::expr::order::Ordering>) -> bool {
+pub(super) fn order_is_scan_compatible(order: Option<&crate::expr::order::Ordering>) -> bool {
 	use crate::expr::order::Ordering;
 	match order {
 		None => true,
@@ -1173,7 +1271,7 @@ pub(super) fn order_is_scan_compatible(order: &Option<crate::expr::order::Orderi
 /// are constant, so they are all skipped.  Leading ORDER BY fields that
 /// reference constant (equality-pinned) columns are also stripped from the
 /// requirement because any direction trivially matches a single-valued column.
-pub(super) fn index_covers_ordering(
+pub(crate) fn index_covers_ordering(
 	index_ref: &crate::exec::index::access_path::IndexRef,
 	access: &crate::exec::index::access_path::BTreeAccess,
 	direction: crate::idx::planner::ScanDirection,

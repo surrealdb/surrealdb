@@ -1,6 +1,6 @@
 /**
 [env]
-new-planner-strategy = "compute-only"
+planner-strategy = ["compute-only"]
 
 [test]
 reason = "Test SELECT VALUE with negation and boolean NOT expressions"

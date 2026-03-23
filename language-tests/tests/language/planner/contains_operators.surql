@@ -1,6 +1,6 @@
 /**
 [env]
-new-planner-strategy = "compute-only"
+planner-strategy = ["compute-only"]
 
 [test]
 reason = "Test CONTAINS, CONTAINSALL, and CONTAINSANY with array fields and index"

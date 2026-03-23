@@ -1,5 +1,6 @@
 /**
 [env]
+planner-strategy = ["all-ro"]
 timeout = 5000
 
 [test]

@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Verify brute-force KNN with additional AND predicate correctly filters before computing top-K"
 
