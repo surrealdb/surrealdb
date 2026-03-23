@@ -10,6 +10,7 @@ use crate::catalog::{ApiActionDefinition, ApiDefinition, ApiMethod};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::iam::{Action, AuthLimit, ResourceKind};
 
@@ -37,13 +38,15 @@ impl DefineApiStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		// Resolve the path identifier
+		let path_name = expr_to_ident(stk, ctx, opt, doc, &self.path, "api path").await?;
 		// Check if the definition exists
-		if txn.get_db_api(ns, db, &self.path.to_sql()).await?.is_some() {
+		if txn.get_db_api(ns, db, &path_name).await?.is_some() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::ApAlreadyExists {
-							value: self.path.to_sql(),
+							value: path_name,
 						});
 					}
 				}
@@ -54,9 +57,7 @@ impl DefineApiStatement {
 			}
 		}
 
-		let path = stk.run(|stk| self.path.compute(stk, ctx, opt, doc)).await.catch_return()?;
-		// Process the statement
-		let path: Path = path.coerce_to::<String>()?.parse()?;
+		let path: Path = path_name.parse()?;
 
 		let config = self.config.compute(stk, ctx, opt, doc).await?;
 

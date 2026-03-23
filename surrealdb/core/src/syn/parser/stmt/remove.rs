@@ -1,8 +1,8 @@
 use reblessive::Stk;
 
 use crate::sql::statements::remove::{
-	RemoveAnalyzerStatement, RemoveApiStatement, RemoveBucketStatement, RemoveModuleStatement,
-	RemoveSequenceStatement,
+	RemoveAnalyzerStatement, RemoveApiStatement, RemoveBucketStatement, RemoveConfigKind,
+	RemoveConfigStatement, RemoveModuleStatement, RemoveSequenceStatement,
 };
 use crate::sql::statements::{
 	RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
@@ -317,7 +317,25 @@ impl Parser<'_> {
 					if_exists,
 				})
 			}
-			// TODO(raphaeldarley): add Config here
+			t!("CONFIG") => {
+				let if_exists = if self.eat(t!("IF")) {
+					expected!(self, t!("EXISTS"));
+					true
+				} else {
+					false
+				};
+				let next = self.next();
+				let kind = match next.kind {
+					t!("GRAPHQL") => RemoveConfigKind::GraphQL,
+					t!("API") => RemoveConfigKind::Api,
+					t!("DEFAULT") => RemoveConfigKind::Default,
+					_ => unexpected!(self, next, "a type of config"),
+				};
+				RemoveStatement::Config(RemoveConfigStatement {
+					kind,
+					if_exists,
+				})
+			}
 			_ => unexpected!(self, next, "a remove statement keyword"),
 		};
 		Ok(res)

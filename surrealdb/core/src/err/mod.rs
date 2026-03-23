@@ -313,7 +313,7 @@ pub(crate) enum Error {
 	},
 
 	/// The requested api does not exist
-	#[error("The api '/{value}' does not exist")]
+	#[error("The api '{value}' does not exist")]
 	ApNotFound {
 		value: String,
 	},
@@ -773,7 +773,7 @@ pub(crate) enum Error {
 	},
 
 	/// The requested api already exists
-	#[error("The api '/{value}' already exists")]
+	#[error("The api '{value}' already exists")]
 	ApAlreadyExists {
 		value: String,
 	},
