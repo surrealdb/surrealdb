@@ -152,7 +152,7 @@ pub fn peek_record_id_token(parser: &mut Parser<'_, '_>) -> ParseResult<Option<T
 		RecordIdKeyToken::Number => {
 			if parser.slice(span).starts_with('+') {
 				let token = Token {
-					token: T![-],
+					token: T![+],
 					joined: Joined::Joined,
 					span: Span {
 						start: span.start,
@@ -171,7 +171,7 @@ pub fn peek_record_id_token(parser: &mut Parser<'_, '_>) -> ParseResult<Option<T
 				return Ok(Some(token));
 			} else if parser.slice(span).starts_with('-') {
 				let token = Token {
-					token: T![+],
+					token: T![-],
 					joined: Joined::Joined,
 					span: Span {
 						start: span.start,

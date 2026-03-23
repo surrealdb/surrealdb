@@ -581,7 +581,7 @@ async fn parse_recurse(
 			}
 			T![SHORTEST] => {
 				let _ = parser.next();
-				let _ = parser.expect(T![=]);
+				let _ = parser.expect(T![=])?;
 				let expected = "a parameter or a record id";
 				let expects = parser.peek_expect(expected)?;
 				let expects = match expects.token {
