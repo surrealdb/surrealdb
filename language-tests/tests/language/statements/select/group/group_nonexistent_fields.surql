@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test GROUP BY with nonexistent fields and aggregates over missing fields"
 

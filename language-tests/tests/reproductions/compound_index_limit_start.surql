@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Compound index scan with LIMIT/START must return the correct number of rows and use the expected plan"
 

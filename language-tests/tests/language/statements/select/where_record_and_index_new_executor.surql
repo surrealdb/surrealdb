@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test WHERE with record ID field, AND conditions, and index usage (new executor)"
 

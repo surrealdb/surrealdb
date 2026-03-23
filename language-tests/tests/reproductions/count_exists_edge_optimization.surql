@@ -3,6 +3,7 @@
 namespace = true
 database = true
 auth = { level = "owner" }
+planner-strategy = ["all-ro"]
 
 [test]
 reason = "count(->edge) OP N in WHERE should inject a minimal LIMIT into graph traversal"

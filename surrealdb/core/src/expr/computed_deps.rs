@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::expr::visit::{Visit, Visitor};
-use crate::expr::{Expr, Idiom, Part};
+use crate::expr::{Expr, Idiom, Literal, Part};
 
 /// Dependency metadata for a computed field.
 ///
@@ -49,6 +49,18 @@ pub(crate) fn extract_computed_deps(expr: &Expr) -> ComputedDeps {
 	}
 }
 
+/// Extract a static field name from an idiom part, if it represents one.
+///
+/// Matches `Part::Field("name")` and `Part::Value(Literal::String("name"))` —
+/// the latter covers bracket access like `["name"]`.
+fn field_name_from_part(part: &Part) -> Option<String> {
+	match part {
+		Part::Field(name) => Some(name.clone()),
+		Part::Value(Expr::Literal(Literal::String(name))) => Some(name.clone()),
+		_ => None,
+	}
+}
+
 /// Visitor that walks an expression tree extracting field dependencies.
 struct FieldDependencyExtractor {
 	/// Collected same-table field dependencies (root field names only).
@@ -61,13 +73,32 @@ impl Visitor for FieldDependencyExtractor {
 	type Error = std::convert::Infallible;
 
 	fn visit_idiom(&mut self, idiom: &Idiom) -> Result<(), Self::Error> {
-		// Extract the root field name from the idiom.
-		// For `b.nested.path`, only `b` is a same-table dependency.
-		if let Some(Part::Field(name)) = idiom.0.first() {
-			self.deps.insert(name.clone());
-		}
-		// Walk nested parts for any embedded expressions (WHERE clauses, methods, etc.)
-		for p in idiom.0.iter() {
+		// Try to extract a root field name from the idiom, skipping the
+		// `$this`/`$self` prefix when present. Returns the number of
+		// leading parts that were consumed (0, 1, or 2).
+		let consumed = match idiom.0.as_slice() {
+			// Direct field access: `field_name` or `field.nested.path`
+			[Part::Field(name), ..] => {
+				self.deps.insert(name.clone());
+				1
+			}
+			// `$this.field` / `$self["field"]` — equivalent to bare field.
+			[Part::Start(Expr::Param(p)), second, ..] if matches!(p.as_str(), "this" | "self") => {
+				match field_name_from_part(second) {
+					Some(name) => {
+						self.deps.insert(name);
+						2
+					}
+					// $this.* / $this[0] / etc — can't determine field statically
+					None => 0,
+				}
+			}
+			_ => 0,
+		};
+		// Walk the remaining parts. When consumed == 0 (unrecognised
+		// pattern), all parts are walked, which correctly marks
+		// Part::Start and Part::Lookup as incomplete.
+		for p in idiom.0.iter().skip(consumed) {
 			self.visit_part(p)?;
 		}
 		Ok(())
@@ -340,6 +371,192 @@ mod tests {
 		let deps = extract_computed_deps(&expr);
 		assert_eq!(deps.fields, vec!["a"]);
 		assert!(deps.is_complete);
+	}
+
+	// ===== $this / $self field access tests =====
+
+	/// Helper: build `Expr::Idiom` for `$this.field_name`.
+	fn this_field_expr(name: &str) -> Expr {
+		Expr::Idiom(Idiom(vec![
+			Part::Start(Expr::Param(crate::expr::Param::from("this".to_string()))),
+			Part::Field(name.to_string()),
+		]))
+	}
+
+	/// Helper: build `Expr::Idiom` for `$self.field_name`.
+	fn self_field_expr(name: &str) -> Expr {
+		Expr::Idiom(Idiom(vec![
+			Part::Start(Expr::Param(crate::expr::Param::from("self".to_string()))),
+			Part::Field(name.to_string()),
+		]))
+	}
+
+	#[test]
+	fn this_dot_field() {
+		let deps = extract_computed_deps(&this_field_expr("a"));
+		assert_eq!(deps.fields, vec!["a"]);
+		assert!(deps.is_complete);
+	}
+
+	#[test]
+	fn self_dot_field() {
+		let deps = extract_computed_deps(&self_field_expr("a"));
+		assert_eq!(deps.fields, vec!["a"]);
+		assert!(deps.is_complete);
+	}
+
+	#[test]
+	fn this_dot_nested() {
+		// $this.a.b.c -- root dep is `a`
+		let expr = Expr::Idiom(Idiom(vec![
+			Part::Start(Expr::Param(crate::expr::Param::from("this".to_string()))),
+			Part::Field("a".to_string()),
+			Part::Field("b".to_string()),
+			Part::Field("c".to_string()),
+		]));
+		let deps = extract_computed_deps(&expr);
+		assert_eq!(deps.fields, vec!["a"]);
+		assert!(deps.is_complete);
+	}
+
+	#[test]
+	fn this_dot_field_in_binary() {
+		// $this.a + $this.b
+		let expr = Expr::Binary {
+			left: Box::new(this_field_expr("a")),
+			op: BinaryOperator::Add,
+			right: Box::new(this_field_expr("b")),
+		};
+		let deps = extract_computed_deps(&expr);
+		assert_eq!(deps.fields, vec!["a", "b"]);
+		assert!(deps.is_complete);
+	}
+
+	#[test]
+	fn mixed_bare_and_this() {
+		// a + $this.b + $self.c  →  (a + $this.b) + $self.c
+		let expr = Expr::Binary {
+			left: Box::new(Expr::Binary {
+				left: Box::new(field_expr("a")),
+				op: BinaryOperator::Add,
+				right: Box::new(this_field_expr("b")),
+			}),
+			op: BinaryOperator::Add,
+			right: Box::new(self_field_expr("c")),
+		};
+		let deps = extract_computed_deps(&expr);
+		assert_eq!(deps.fields, vec!["a", "b", "c"]);
+		assert!(deps.is_complete);
+	}
+
+	#[test]
+	fn this_in_function_args() {
+		// math::sum([$this.a, b, $self.c])
+		use crate::expr::function::{Function, FunctionCall};
+		let expr = Expr::FunctionCall(Box::new(FunctionCall {
+			receiver: Function::Normal("math::sum".to_string()),
+			arguments: vec![Expr::Literal(Literal::Array(vec![
+				this_field_expr("a"),
+				field_expr("b"),
+				self_field_expr("c"),
+			]))],
+		}));
+		let deps = extract_computed_deps(&expr);
+		assert_eq!(deps.fields, vec!["a", "b", "c"]);
+		assert!(deps.is_complete);
+	}
+
+	#[test]
+	fn this_in_nested_parens() {
+		// (a + ($this.b + $self.c))
+		let expr = Expr::Binary {
+			left: Box::new(field_expr("a")),
+			op: BinaryOperator::Add,
+			right: Box::new(Expr::Binary {
+				left: Box::new(this_field_expr("b")),
+				op: BinaryOperator::Add,
+				right: Box::new(self_field_expr("c")),
+			}),
+		};
+		let deps = extract_computed_deps(&expr);
+		assert_eq!(deps.fields, vec!["a", "b", "c"]);
+		assert!(deps.is_complete);
+	}
+
+	#[test]
+	fn this_alone_marks_incomplete() {
+		// $this (bare param, not an idiom)
+		let expr = Expr::Param(crate::expr::Param::from("this".to_string()));
+		let deps = extract_computed_deps(&expr);
+		assert!(deps.fields.is_empty());
+		assert!(!deps.is_complete);
+	}
+
+	#[test]
+	fn this_dot_wildcard_marks_incomplete() {
+		// $this.* -- can access any field
+		let expr = Expr::Idiom(Idiom(vec![
+			Part::Start(Expr::Param(crate::expr::Param::from("this".to_string()))),
+			Part::All,
+		]));
+		let deps = extract_computed_deps(&expr);
+		assert!(deps.fields.is_empty());
+		assert!(!deps.is_complete);
+	}
+
+	#[test]
+	fn this_bracket_string_field() {
+		// $this["a"] -- bracket string access, equivalent to $this.a
+		let expr = Expr::Idiom(Idiom(vec![
+			Part::Start(Expr::Param(crate::expr::Param::from("this".to_string()))),
+			Part::Value(Expr::Literal(Literal::String("a".to_string()))),
+		]));
+		let deps = extract_computed_deps(&expr);
+		assert_eq!(deps.fields, vec!["a"]);
+		assert!(deps.is_complete);
+	}
+
+	#[test]
+	fn self_bracket_string_field() {
+		// $self["c"] -- bracket string access, equivalent to $self.c
+		let expr = Expr::Idiom(Idiom(vec![
+			Part::Start(Expr::Param(crate::expr::Param::from("self".to_string()))),
+			Part::Value(Expr::Literal(Literal::String("c".to_string()))),
+		]));
+		let deps = extract_computed_deps(&expr);
+		assert_eq!(deps.fields, vec!["c"]);
+		assert!(deps.is_complete);
+	}
+
+	#[test]
+	fn mixed_dot_and_bracket() {
+		// (a + ($this.b + $self["c"]))
+		let expr = Expr::Binary {
+			left: Box::new(field_expr("a")),
+			op: BinaryOperator::Add,
+			right: Box::new(Expr::Binary {
+				left: Box::new(this_field_expr("b")),
+				op: BinaryOperator::Add,
+				right: Box::new(Expr::Idiom(Idiom(vec![
+					Part::Start(Expr::Param(crate::expr::Param::from("self".to_string()))),
+					Part::Value(Expr::Literal(Literal::String("c".to_string()))),
+				]))),
+			}),
+		};
+		let deps = extract_computed_deps(&expr);
+		assert_eq!(deps.fields, vec!["a", "b", "c"]);
+		assert!(deps.is_complete);
+	}
+
+	#[test]
+	fn other_param_dot_field_marks_incomplete() {
+		// $foo.a -- unknown param, not $this/$self
+		let expr = Expr::Idiom(Idiom(vec![
+			Part::Start(Expr::Param(crate::expr::Param::from("foo".to_string()))),
+			Part::Field("a".to_string()),
+		]));
+		let deps = extract_computed_deps(&expr);
+		assert!(!deps.is_complete);
 	}
 
 	// ===== Topological sort tests =====

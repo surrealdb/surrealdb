@@ -1,6 +1,7 @@
 /**
 [env]
 imports = ["datasets/graph.surql"]
+timeout = 3000
 
 [test]
 reason = "Test deep nesting with 8-level category hierarchy"

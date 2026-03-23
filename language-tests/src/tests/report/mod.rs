@@ -344,6 +344,7 @@ impl TestReport {
 		matches!(self.kind, TestReportKind::NoExpectation { .. })
 	}
 
+	#[allow(dead_code)]
 	pub fn test_id(&self) -> TestId {
 		self.id
 	}
