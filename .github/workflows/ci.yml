@@ -190,7 +190,7 @@ jobs:
         run: cargo build --manifest-path crates/fuzz/Cargo.toml
 
       - name: Check OSS-Fuzz
-        uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@master
+        uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@cafd7a0eb8ecb4e007c56897996a9b65c49c972f
         with:
           oss-fuzz-project-name: surrealdb
           language: rust
@@ -728,7 +728,7 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
+        uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a
         with:
           version: "7.1.61"
 
@@ -764,7 +764,7 @@ jobs:
         run: cargo install --debug --locked cargo-make
 
       - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@v.2.2.0
+        uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a
         with:
           version: "7.3.47"
 
