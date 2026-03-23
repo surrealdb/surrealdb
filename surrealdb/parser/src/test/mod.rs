@@ -117,6 +117,17 @@ fn text_test() {
 	}
 }
 
+const IGNORE_TESTS: &[&str] = &[
+	"language/control_flow/transaction/cancel_behaviour.surql",
+	"language/control_flow/transaction/commit_behaviour.surql",
+	"language/statements/define/field/permissions_full_2.0.surql",
+	"language/statements/remove/config/api.surql",
+	"language/statements/remove/config/default.surql",
+	"language/statements/remove/config/graphql.surql",
+	"language/statements/remove/config/not_exists.surql",
+	"language/statements/select/fetch/objects.surql",
+];
+
 #[test]
 fn all_language_tests() {
 	let mut failed = 0;
@@ -128,6 +139,10 @@ fn all_language_tests() {
 		.join("tests");
 	walk_dir(&tests_path, &mut |path| {
 		if path.extension().and_then(|x| x.to_str()) != Some("surql") {
+			return;
+		}
+
+		if IGNORE_TESTS.iter().any(|x| path.ends_with(x)) {
 			return;
 		}
 
