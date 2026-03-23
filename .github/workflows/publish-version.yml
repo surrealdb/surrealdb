@@ -65,9 +65,11 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
 
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ inputs.git-ref }}
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
@@ -188,6 +190,8 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -237,6 +241,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
@@ -270,7 +275,7 @@ jobs:
 
   publish:
     name: Publish crate and artifacts binaries
-    permissions: 
+    permissions:
       contents: write
     needs: [prepare-vars, test, lint, build]
     runs-on: [runner-amd64-2xlarge]
@@ -282,6 +287,8 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable (Actions must be pinned by commit hash)
+        with:
+          toolchain: stable
 
       - name: Install release-plz
         run: |
@@ -506,7 +513,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }} 
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
       - name: Delete ${{ needs.prepare-vars.outputs.release-branch }}
         run: git push origin --delete ${{ needs.prepare-vars.outputs.release-branch }} || true

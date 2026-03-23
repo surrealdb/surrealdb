@@ -43,7 +43,7 @@ defaults:
   run:
     shell: bash
 
-permissions: 
+permissions:
   contents: read
 
 jobs:
@@ -312,6 +312,7 @@ jobs:
       - name: Install Rust 1.86 toolchain
         uses: dtolnay/rust-toolchain@1.86.0
         with:
+          toolchain: stable
           targets: ${{ matrix.arch }}
 
       - name: Add target for Rust 1.86 toolchain

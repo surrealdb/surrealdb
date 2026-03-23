@@ -71,6 +71,8 @@ jobs:
 
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9
+        with:
+          toolchain: stable
 
       - name: Install a TOML parser
         run: |
