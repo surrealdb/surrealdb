@@ -267,7 +267,7 @@ impl Display for Kind {
 			Kind::Int => f.write_str("int"),
 			Kind::Number => f.write_str("number"),
 			Kind::Object => f.write_str("object"),
-			Kind::Point => f.write_str("geometry<point>"),
+			Kind::Point => f.write_str("point"),
 			Kind::String => f.write_str("string"),
 			Kind::Uuid => f.write_str("uuid"),
 			Kind::Regex => f.write_str("regex"),
