@@ -1,6 +1,4 @@
 /**
-[env]
-planner-strategy = ["compute-only"]
 
 [test]
 reason = "Ensure link.* works correctly with and without WHERE clause"

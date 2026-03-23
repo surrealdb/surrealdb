@@ -1,7 +1,4 @@
 /**
-[env]
-planner-strategy = ["compute-only"]
-
 [test]
 reason = "Test fulltext search with analyzer that has filters but no tokenizer"
 

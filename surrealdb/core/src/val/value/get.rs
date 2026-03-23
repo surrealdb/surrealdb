@@ -1,12 +1,13 @@
 use std::collections::BTreeMap;
 use std::ops::Deref;
+use std::sync::Arc;
 
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::cnf::MAX_COMPUTATION_DEPTH;
-use crate::ctx::FrozenContext;
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -315,6 +316,18 @@ impl Value {
 						}
 					},
 					Part::Where(w) => {
+						// Bind $parent to the enclosing document when not already
+						// in scope, so expressions like `->edge[WHERE $parent.x]`
+						// can reference the outer row.
+						let parent_ctx = match doc {
+							Some(d) if ctx.value("parent").is_none() => {
+								let mut child = Context::new(ctx);
+								child.add_value("parent", Arc::new(d.doc.as_ref().clone()));
+								Some(child.freeze())
+							}
+							_ => None,
+						};
+						let ctx = parent_ctx.as_ref().unwrap_or(ctx);
 						let mut a = Vec::new();
 						for v in v.iter() {
 							let cur = v.clone().into();
@@ -427,14 +440,13 @@ impl Value {
 								tempfiles: false,
 							};
 
-							let res = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all();
+							let res = stk.run(|stk| stm.compute(stk, ctx, opt, doc)).await?.all();
 
 							if last_part {
 								Ok(res)
 							} else {
-								let res = stk
-									.run(|stk| res.get(stk, ctx, opt, None, path.next()))
-									.await?;
+								let res =
+									stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await?;
 
 								match path.get(1) {
 									Some(Part::Lookup(_)) => Ok(res.flatten()),

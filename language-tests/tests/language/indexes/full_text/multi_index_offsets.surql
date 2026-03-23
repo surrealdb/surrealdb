@@ -1,7 +1,4 @@
 /**
-[env]
-planner-strategy = ["compute-only"]
-
 [test]
 reason = "Test search offsets with multiple fulltext indexes on different fields"
 
