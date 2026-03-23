@@ -41,9 +41,7 @@ impl Document {
 			DocKind::CurrentReduced => &mut self.current_reduced,
 		};
 
-		let needed_roots = match needed_roots {
-			Some(needed_roots) => needed_roots,
-			None => {
+		let needed_roots = let Some(needed_roots) =  needed_roots else {
 				return Document::computed_fields_inner(
 					stk,
 					ctx,
@@ -54,7 +52,6 @@ impl Document {
 					None,
 				)
 				.await;
-			}
 		};
 
 		// Build dependency metadata for computed fields only.
