@@ -114,7 +114,8 @@ impl Document {
 					} else {
 						// Process the permitted documents
 						let current = if self.reduced(stk, ctx, opt, Current).await? {
-							self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced, None).await?;
+							self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced, None)
+								.await?;
 							&self.current_reduced
 						} else {
 							self.computed_fields(stk, ctx, opt, DocKind::Current, None).await?;
@@ -227,25 +228,17 @@ impl Document {
 			} else {
 				// Process the permitted documents
 				let current = if self.reduced(stk, ctx, opt, Current).await? {
-					self
-						.computed_fields(
-							stk,
-							ctx,
-							opt,
-							DocKind::CurrentReduced,
-							needed_roots.as_ref(),
-						)
-						.await?;
+					self.computed_fields(
+						stk,
+						ctx,
+						opt,
+						DocKind::CurrentReduced,
+						needed_roots.as_ref(),
+					)
+					.await?;
 					&self.current_reduced
 				} else {
-					self
-						.computed_fields(
-							stk,
-							ctx,
-							opt,
-							DocKind::Current,
-							needed_roots.as_ref(),
-						)
+					self.computed_fields(stk, ctx, opt, DocKind::Current, needed_roots.as_ref())
 						.await?;
 					&self.current
 				};

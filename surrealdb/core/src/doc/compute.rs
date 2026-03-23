@@ -1,6 +1,7 @@
+use std::collections::{HashMap, HashSet};
+
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
-use std::collections::{HashMap, HashSet};
 
 use crate::catalog::FieldDefinition;
 use crate::ctx::FrozenContext;
@@ -41,17 +42,17 @@ impl Document {
 			DocKind::CurrentReduced => &mut self.current_reduced,
 		};
 
-		let needed_roots = let Some(needed_roots) =  needed_roots else {
-				return Document::computed_fields_inner(
-					stk,
-					ctx,
-					opt,
-					rid.as_ref(),
-					&table_fields,
-					doc,
-					None,
-				)
-				.await;
+		let Some(needed_roots) = needed_roots else {
+			return Document::computed_fields_inner(
+				stk,
+				ctx,
+				opt,
+				rid.as_ref(),
+				&table_fields,
+				doc,
+				None,
+			)
+			.await;
 		};
 
 		// Build dependency metadata for computed fields only.
