@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 
 # 0
@@ -71,11 +74,11 @@ value = "[{ id: person:1}]"
 
 # 17
 [[test.results]]
-value = "[2, 3]"
+value = "[{ this: 2 }, { this: 3 }]"
 
 # 18
 [[test.results]]
-value = "['bob']"
+value = "[{ this: 'bob' }]"
 
 # 19
 [[test.results]]

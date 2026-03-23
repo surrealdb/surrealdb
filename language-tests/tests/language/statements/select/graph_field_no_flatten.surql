@@ -1,6 +1,6 @@
 /**
 [env]
-new-planner-strategy = "compute-only"
+planner-strategy = ["compute-only"]
 
 [test]
 reason = "Test that SELECT VALUE ->edge.field does not flatten nested arrays"

@@ -1,6 +1,6 @@
 /**
 [env]
-new-planner-strategy = "all-ro"
+planner-strategy = ["all-ro"]
 
 [test]
 

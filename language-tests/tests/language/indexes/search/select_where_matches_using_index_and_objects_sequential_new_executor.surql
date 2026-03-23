@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 
 [[test.results]]

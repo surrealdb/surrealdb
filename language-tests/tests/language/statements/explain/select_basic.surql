@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test EXPLAIN with basic SELECT queries: table scan, predicates, specific records, and SELECT VALUE"
 

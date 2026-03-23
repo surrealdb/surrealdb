@@ -183,7 +183,7 @@ impl ScanPipeline {
 /// Determine scan direction from ORDER BY clause.
 /// Returns Backward if the first ORDER BY is `id DESC`, otherwise Forward.
 pub(crate) fn determine_scan_direction(
-	order: &Option<crate::expr::order::Ordering>,
+	order: Option<&crate::expr::order::Ordering>,
 ) -> ScanDirection {
 	use crate::expr::order::Ordering as OrderingType;
 	if let Some(OrderingType::Order(order_list)) = order

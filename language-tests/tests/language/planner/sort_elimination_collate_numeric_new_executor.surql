@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Sort elimination must not skip COLLATE/NUMERIC modifiers on ORDER BY terms"
 

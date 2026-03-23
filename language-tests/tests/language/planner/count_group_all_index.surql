@@ -1,6 +1,6 @@
 /**
 [env]
-new-planner-strategy = "compute-only"
+planner-strategy = ["compute-only"]
 timeout = 30000
 context-timeout = 30000
 

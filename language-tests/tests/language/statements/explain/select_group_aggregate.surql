@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test EXPLAIN with GROUP BY and GROUP ALL aggregation"
 

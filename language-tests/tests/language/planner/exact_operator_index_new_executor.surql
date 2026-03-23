@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test exact equality operator (==) uses index same as (=) (new executor)"
 

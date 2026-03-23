@@ -8,6 +8,7 @@ use std::str::FromStr;
 
 use semver::VersionReq;
 use serde::{Deserialize, Serialize, de};
+use surrealdb_core::dbs::NewPlannerStrategy;
 use surrealdb_core::dbs::capabilities::{
 	ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 };
@@ -58,6 +59,17 @@ impl TestConfig {
 	/// Versioned tests always need a fresh datastore since they require different configuration.
 	pub fn can_use_reusable_ds(&self) -> bool {
 		self.env.as_ref().map(|x| !x.clean && !x.versioned).unwrap_or(false)
+	}
+
+	/// Returns the planner strategies this test should run under.
+	/// Defaults to `[ComputeOnly, AllRo]` when no explicit list is provided.
+	pub fn planner_strategies(&self) -> &[NewPlannerStrategyConfig] {
+		let strategies = self.env.as_ref().map(|e| e.planner_strategy.as_slice()).unwrap_or(&[]);
+		if strategies.is_empty() {
+			NewPlannerStrategyConfig::DEFAULT_STRATEGIES
+		} else {
+			strategies
+		}
 	}
 
 	/// Returns a list of keys which are not in the schema but still define.
@@ -120,11 +132,11 @@ pub struct TestEnv {
 	/// When true, the datastore is created with `?versioned=true` in the connection string.
 	#[serde(default)]
 	pub versioned: bool,
-	/// Strategy for the new streaming planner/executor.
-	/// - "best-effort-ro" (default): try new planner, fall back on Unimplemented
-	/// - "all-ro": require new planner for all read-only statements (hard fail)
-	/// - "compute-only": skip new planner entirely
-	pub new_planner_strategy: Option<NewPlannerStrategyConfig>,
+	/// Planner strategies to run this test under.
+	/// Defaults to `["compute-only", "all-ro"]` when omitted; the test is
+	/// executed once per listed strategy.
+	#[serde(default)]
+	pub planner_strategy: Vec<NewPlannerStrategyConfig>,
 
 	/// Whether EXPLAIN ANALYZE output omits elapsed durations, making
 	/// output deterministic for test assertions. Defaults to true in the
@@ -224,6 +236,41 @@ pub enum NewPlannerStrategyConfig {
 	AllRo,
 	/// Skip new planner entirely; always use legacy compute.
 	ComputeOnly,
+}
+
+impl NewPlannerStrategyConfig {
+	pub const DEFAULT_STRATEGIES: &[NewPlannerStrategyConfig] =
+		&[NewPlannerStrategyConfig::ComputeOnly, NewPlannerStrategyConfig::AllRo];
+}
+
+impl fmt::Display for NewPlannerStrategyConfig {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::BestEffortRo => f.write_str("best-effort-ro"),
+			Self::AllRo => f.write_str("all-ro"),
+			Self::ComputeOnly => f.write_str("compute-only"),
+		}
+	}
+}
+
+impl From<NewPlannerStrategy> for NewPlannerStrategyConfig {
+	fn from(strategy: NewPlannerStrategy) -> Self {
+		match strategy {
+			NewPlannerStrategy::BestEffortReadOnlyStatements => Self::BestEffortRo,
+			NewPlannerStrategy::ComputeOnly => Self::ComputeOnly,
+			NewPlannerStrategy::AllReadOnlyStatements => Self::AllRo,
+		}
+	}
+}
+
+impl From<NewPlannerStrategyConfig> for NewPlannerStrategy {
+	fn from(strategy: NewPlannerStrategyConfig) -> Self {
+		match strategy {
+			NewPlannerStrategyConfig::BestEffortRo => NewPlannerStrategy::BestEffortReadOnlyStatements,
+			NewPlannerStrategyConfig::ComputeOnly => NewPlannerStrategy::ComputeOnly,
+			NewPlannerStrategyConfig::AllRo => NewPlannerStrategy::AllReadOnlyStatements,
+		}
+	}
 }
 
 #[derive(Clone, Debug, Serialize)]

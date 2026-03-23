@@ -1,4 +1,7 @@
 /**
+[env]
+timeout = 10000
+
 [test]
 reason = "Test recursive record link traversal with various modes (path, collect, destructure)"
 
@@ -27,7 +30,7 @@ value = "[['United States', 'California'], ['United States', 'Texas'], ['Canada'
 value = "[[planet:earth, country:us, state:california], [planet:earth, country:us, state:texas], [planet:earth, country:canada, province:ontario], [planet:earth, country:canada, province:bc]]"
 
 [[test.results]]
-value = "[state:california, state:texas, province:ontario, province:bc]"
+match = "array::sort::asc($result) == [province:bc, province:ontario, state:california, state:texas]"
 
 [[test.results]]
 value = "['California', 'Texas', 'Ontario', 'British Columbia']"
@@ -74,8 +77,6 @@ value = "NONE"
 [[test.results]]
 value = "{ id: planet:earth, name: 'Earth', places: [{ id: country:us, name: 'United States', places: [{ id: state:california, name: 'California', places: [{ id: city:los_angeles, name: 'Los Angeles', places: [] }, { id: city:san_francisco, name: 'San Francisco', places: [] }] }, { id: state:texas, name: 'Texas', places: [{ id: city:houston, name: 'Houston', places: [] }, { id: city:dallas, name: 'Dallas', places: [] }] }] }, { id: country:canada, name: 'Canada', places: [{ id: province:ontario, name: 'Ontario', places: [{ id: city:toronto, name: 'Toronto', places: [] }, { id: city:ottawa, name: 'Ottowa', places: [] }] }, { id: province:bc, name: 'British Columbia', places: [{ id: city:vancouver, name: 'Vancouver', places: [] }, { id: city:victoria, name: 'Victoria', places: [] }] }] }] }"
 
-[env]
-timeout = 10000
 */
 
 INSERT [

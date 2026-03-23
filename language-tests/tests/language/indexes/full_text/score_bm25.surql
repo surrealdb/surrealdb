@@ -1,6 +1,6 @@
 /**
 [env]
-new-planner-strategy = "compute-only"
+planner-strategy = ["compute-only"]
 
 [test]
 reason = "Test search::score() with BM25 scoring and fulltext index"
