@@ -199,7 +199,7 @@ jobs:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
+        uses: Swatinem/rust-cache@23869a5bd66c73db3c0ac40331f3206eb23791dc # v2.9.1
         with:
           save-if: ${{ inputs.git-ref == 'main' }}
 
@@ -222,7 +222,7 @@ jobs:
           cat /tmp/surrealdb.log || true
 
       - name: Upload coverage report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # (Actions must be pinned by commit hash) v4.6.2
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: code-coverage-report
           path: target/llvm-cov/html/
@@ -373,12 +373,12 @@ jobs:
 
       - name: Download artifacts
         if: ${{ inputs.publish }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
 
       - name: Publish release
-        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # (Actions must be pinned by commit hash) v2.2.2
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
         if: ${{ inputs.publish && inputs.create-release }}
         with:
           tag_name: v${{ needs.prepare-vars.outputs.version }}
@@ -451,13 +451,13 @@ jobs:
       FILE: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-universal
     steps:
       - name: Download amd64 binary
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-amd64
           path: amd64
 
       - name: Download arm64 binary
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: surreal-${{ needs.prepare-vars.outputs.name }}.darwin-arm64
           path: arm64
