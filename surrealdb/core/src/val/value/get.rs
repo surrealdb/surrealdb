@@ -32,6 +32,34 @@ macro_rules! fallback_function {
 	};
 }
 
+/// Returns true if the expression references the `$parent` parameter.
+/// Used to avoid allocating a child context in Part::Where when the
+/// predicate does not need `$parent`.
+fn expr_references_parent(expr: &Expr) -> bool {
+	use crate::expr::visit::{Visit, Visitor};
+	struct Check(bool);
+	impl Visitor for Check {
+		type Error = std::convert::Infallible;
+		fn visit_expr(&mut self, e: &Expr) -> Result<(), Self::Error> {
+			if let Expr::Param(p) = e
+				&& p.as_str() == "parent"
+			{
+				self.0 = true;
+			}
+			if self.0 {
+				return Ok(());
+			}
+			e.visit(self)
+		}
+		fn visit_select(&mut self, _: &crate::expr::SelectStatement) -> Result<(), Self::Error> {
+			Ok(())
+		}
+	}
+	let mut c = Check(false);
+	let _ = c.visit_expr(expr);
+	c.0
+}
+
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
 	///
@@ -316,11 +344,12 @@ impl Value {
 						}
 					},
 					Part::Where(w) => {
-						// Bind $parent to the enclosing document when not already
-						// in scope, so expressions like `->edge[WHERE $parent.x]`
-						// can reference the outer row.
+						// Bind $parent to the enclosing document when the
+						// predicate references it and it is not already in scope.
 						let parent_ctx = match doc {
-							Some(d) if ctx.value("parent").is_none() => {
+							Some(d)
+								if ctx.value("parent").is_none() && expr_references_parent(w) =>
+							{
 								let mut child = Context::new(ctx);
 								child.add_value("parent", Arc::new(d.doc.as_ref().clone()));
 								Some(child.freeze())
@@ -440,7 +469,14 @@ impl Value {
 								tempfiles: false,
 							};
 
-							let res = stk.run(|stk| stm.compute(stk, ctx, opt, doc)).await?.all();
+							// Only propagate doc as parent_doc when $parent is
+							// not already bound (e.g. by an outer subquery).
+							let parent_doc = match doc {
+								Some(_) if ctx.value("parent").is_none() => doc,
+								_ => None,
+							};
+							let res =
+								stk.run(|stk| stm.compute(stk, ctx, opt, parent_doc)).await?.all();
 
 							if last_part {
 								Ok(res)

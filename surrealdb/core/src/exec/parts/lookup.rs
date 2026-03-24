@@ -177,7 +177,10 @@ async fn evaluate_lookup_for_value(
 	let bound_ctx = ctx.exec_ctx.with_current_value(value.clone());
 	// Bind $parent from the outer document so that graph WHERE clauses
 	// (e.g. `->edge[WHERE out=$parent.field]`) can reference the enclosing row.
-	let bound_ctx = if let Some(parent) = ctx.document_root {
+	// Skip when $parent is already bound (e.g. by an outer ScalarSubquery).
+	let bound_ctx = if let Some(parent) = ctx.document_root
+		&& ctx.exec_ctx.value("parent").is_none()
+	{
 		bound_ctx.with_param("parent", parent.clone())
 	} else {
 		bound_ctx
