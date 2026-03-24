@@ -310,7 +310,7 @@ jobs:
           ref: ${{ inputs.release-branch }}
 
       - name: Install Rust 1.86 toolchain
-        uses: dtolnay/rust-toolchain@1.86.0
+        uses: dtolnay/rust-toolchain@3dd5273ed1de1fed7235f01571ea77b704362cc1 # 1.86.0 (Actions must be pinned by commit hash)
         with:
           toolchain: stable
           targets: ${{ matrix.arch }}
