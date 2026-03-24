@@ -1160,7 +1160,7 @@ version = "2.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-pki-types]]
-version = "1.11.0"
+version = "1.14.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-webpki]]
@@ -1168,7 +1168,7 @@ version = "0.101.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-webpki]]
-version = "0.103.0"
+version = "0.103.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustyline]]
@@ -1324,7 +1324,7 @@ version = "0.33.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.tar]]
-version = "0.4.44"
+version = "0.4.45"
 criteria = "safe-to-deploy"
 
 [[exemptions.temp-dir]]

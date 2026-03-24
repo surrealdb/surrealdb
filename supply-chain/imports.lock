@@ -5,9 +5,17 @@
 version = "2.6.2"
 audited_as = "2.6.1"
 
+[[unpublished.surrealdb]]
+version = "2.6.5"
+audited_as = "2.6.4"
+
 [[unpublished.surrealdb-core]]
 version = "2.6.2"
 audited_as = "2.6.1"
+
+[[unpublished.surrealdb-core]]
+version = "2.6.5"
+audited_as = "2.6.4"
 
 [[publisher.addr]]
 version = "0.15.6"
@@ -1358,7 +1366,7 @@ notes = "one use of unsafe to call windows specific api to get console handle."
 who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
 delta = "0.46.0 -> 0.50.1"
-notes = "Lots of stylistic/rust-related chanegs, plus new features, but nothing out of the ordrinary."
+notes = "Lots of stylistic/rust-related changes, plus new features, but nothing out of the ordrinary."
 
 [[audits.bytecode-alliance.audits.num-traits]]
 who = "Andrew Brown <andrew.brown@intel.com>"
