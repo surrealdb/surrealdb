@@ -46,7 +46,7 @@ jobs:
   #       uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable (Actions must be pinned by commit hash)
 
   #     - name: Configure AWS credentials
-  #       uses: aws-actions/configure-aws-credentials@97834a484a5ab3c40fa9e2eb40fcf8041105a573
+  #       uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # (Actions must be pinned by commit hash) v6.0.0
   #       with:
   #         aws-region: us-east-1
 
@@ -138,7 +138,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@97834a484a5ab3c40fa9e2eb40fcf8041105a573
+        uses: aws-actions/configure-aws-credentials@8df5847569e6427dd6c4fb1cf565c83acfa8afa7 # (Actions must be pinned by commit hash) v6.0.0
         with:
           aws-region: us-east-1
 
