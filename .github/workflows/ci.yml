@@ -407,6 +407,8 @@ jobs:
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@3216b6964cbfe053bb8b9a2ef245bd9300e2061d
+        with:
+          tool: cargo-llvm-cov
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make

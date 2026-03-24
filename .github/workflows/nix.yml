@@ -35,7 +35,7 @@ jobs:
 
   build-docker:
     name: Build Docker image
-    if: ${{ github.ref == 'refs/heads/main' }} || ${{ github.event.label.name == 'nix' }}
+    if: ${{ github.ref == 'refs/heads/main' || github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v4.2.2
@@ -50,7 +50,7 @@ jobs:
 
   build-native-linux:
     name: Build native Linux binary
-    if: ${{ github.ref == 'refs/heads/main' }} || ${{ github.event.label.name == 'nix' }}
+    if: ${{ github.ref == 'refs/heads/main' || github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v4.2.2
