@@ -63,7 +63,7 @@ jobs:
           components: rustfmt
 
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Install cargo-deny
         run: |
@@ -93,7 +93,7 @@ jobs:
           components: rustfmt
 
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Install cargo-vet
         run: cargo install --debug --locked cargo-vet
@@ -117,7 +117,7 @@ jobs:
           components: rustfmt
 
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Install cargo-acl
         run: |

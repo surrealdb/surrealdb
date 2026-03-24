@@ -55,7 +55,7 @@ jobs:
       tag: ${{ steps.image.outputs.tag }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # Actions must be pinned by hash
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # Actions must be pinned by hash
         with:
           ref: ${{ inputs.release-branch }}
 
@@ -305,7 +305,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ inputs.release-branch }}
 

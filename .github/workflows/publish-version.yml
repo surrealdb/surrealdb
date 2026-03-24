@@ -69,7 +69,7 @@ jobs:
           toolchain: stable
 
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ inputs.git-ref }}
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
@@ -194,7 +194,7 @@ jobs:
           toolchain: stable
 
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
@@ -234,7 +234,7 @@ jobs:
     runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
@@ -281,7 +281,7 @@ jobs:
     runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: ${{ needs.prepare-vars.outputs.release-branch }}
 
@@ -511,7 +511,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
