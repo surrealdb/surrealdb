@@ -42,9 +42,8 @@ RUN apk add --no-cache tzdata
 #
 # Development image (built on the CI environment)
 #
-FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/glibc-dynamic:latest-dev AS dev-ci
+FROM cgr.dev/chainguard/glibc-dynamic:latest-dev AS dev-ci
 
-ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -76,9 +75,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Production image (built on the CI environment)
 #
-FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/glibc-dynamic:latest AS prod-ci
-
-ARG TARGETPLATFORM
+FROM cgr.dev/chainguard/glibc-dynamic:latest AS prod-ci
 
 COPY --from=dev-ci /surreal /surreal
 
