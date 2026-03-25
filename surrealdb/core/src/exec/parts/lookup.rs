@@ -175,6 +175,16 @@ async fn evaluate_lookup_for_value(
 	// Create a new execution context with the current value set.
 	// The CurrentValueSource operator reads this to seed the operator chain.
 	let bound_ctx = ctx.exec_ctx.with_current_value(value.clone());
+	// Bind $parent from the outer document so that graph WHERE clauses
+	// (e.g. `->edge[WHERE out=$parent.field]`) can reference the enclosing row.
+	// Skip when $parent is already bound (e.g. by an outer ScalarSubquery).
+	let bound_ctx = if let Some(parent) = ctx.document_root
+		&& ctx.exec_ctx.value("parent").is_none()
+	{
+		bound_ctx.with_param("parent", parent.clone())
+	} else {
+		bound_ctx
+	};
 	let bound_ctx = if ctx.skip_fetch_perms {
 		bound_ctx.with_skip_fetch_perms(true)
 	} else {

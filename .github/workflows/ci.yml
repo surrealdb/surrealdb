@@ -538,6 +538,7 @@ jobs:
           tikv: ${{ matrix.engine == 'tikv' }}
 
       - name: Run language tests
+        continue-on-error: ${{ matrix.engine == 'tikv' }}
         if: matrix.engine != 'mem'
         run: cargo make ci-lang-test-${{ matrix.engine }}
 

@@ -3,13 +3,11 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["compute-only"]
 
 [test]
 reason = """Verify that LET bindings for doc-scoped param names ($parent) do not \
-interfere with correlated subquery behavior at plan time. \
-Restricted to compute-only: the streaming planner does not yet propagate \
-$parent correctly in correlated subquery WHERE clauses (produces empty results)."""
+interfere with correlated subquery behavior at plan time. Row-scoped params \
+must be deferred to runtime so that ScalarSubquery can bind $parent per-row."""
 
 [[test.results]]
 value = "NONE"
