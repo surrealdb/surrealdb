@@ -1,6 +1,4 @@
 /**
-[env]
-new-planner-strategy = "compute-only"
 
 [test]
 reason = "Test SELECT FROM NONE and NULL returns empty results"

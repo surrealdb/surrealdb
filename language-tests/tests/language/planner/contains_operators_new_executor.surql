@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test CONTAINS, CONTAINSALL, and CONTAINSANY with array fields and index (new executor)"
 

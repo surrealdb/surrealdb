@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Tests reverse iteration with a unique index using ORDER BY DESC (new executor)"
 

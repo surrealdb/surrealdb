@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test that FETCH clause works with WHERE + LIMIT and that LIMIT is pushed to IndexScan before FETCH"
 

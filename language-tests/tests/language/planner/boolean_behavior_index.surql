@@ -1,7 +1,4 @@
 /**
-[env]
-new-planner-strategy = "compute-only"
-
 [test]
 reason = "Test that boolean expressions in WHERE with index produce correct results"
 

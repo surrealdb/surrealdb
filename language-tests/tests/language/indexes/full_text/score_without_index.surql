@@ -1,7 +1,4 @@
 /**
-[env]
-new-planner-strategy = "compute-only"
-
 [test]
 reason = "Test search::score() when fulltext index is not directly used as the iterator"
 
