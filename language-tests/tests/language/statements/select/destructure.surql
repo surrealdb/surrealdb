@@ -1,7 +1,4 @@
 /**
-[env]
-planner-strategy = ["compute-only"]
-
 [test]
 reason = "Test object destructuring in SELECT and OMIT with nested fields"
 

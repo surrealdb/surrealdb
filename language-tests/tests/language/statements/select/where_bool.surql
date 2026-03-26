@@ -1,7 +1,4 @@
 /**
-[env]
-planner-strategy = ["compute-only"]
-
 [test]
 reason = "Test WHERE clause with boolean field comparisons"
 
