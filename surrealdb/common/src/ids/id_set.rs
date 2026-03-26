@@ -2,7 +2,7 @@ use std::fmt::{self, Debug};
 use std::hash::{BuildHasher, Hash, RandomState};
 use std::ops::{Index, IndexMut};
 
-use hashbrown::raw::RawTable;
+use hashbrown::HashTable;
 
 use super::Id;
 
@@ -37,7 +37,7 @@ impl SetEntry<String> for &str {
 /// id of the previous value.
 #[derive(Default)]
 pub struct IdSet<I, V, S = RandomState> {
-	map: RawTable<I>,
+	map: HashTable<I>,
 	storage: Vec<V>,
 	hasher: S,
 }
@@ -49,7 +49,7 @@ where
 {
 	pub fn new() -> Self {
 		IdSet {
-			map: RawTable::new(),
+			map: HashTable::new(),
 			storage: Vec::new(),
 			hasher: RandomState::new(),
 		}
@@ -63,9 +63,8 @@ where
 {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let mut fmt = f.debug_list();
-		for bucket in unsafe { self.map.iter() } {
-			let id = unsafe { *bucket.as_ref() };
-			fmt.entry(&self.storage[id.idx()]);
+		for idx in self.map.iter() {
+			fmt.entry(&self.storage[idx.idx()]);
 		}
 		fmt.finish()
 	}
@@ -82,16 +81,13 @@ where
 		T: SetEntry<V>,
 	{
 		let hash = self.hasher.hash_one(&v);
-		match self.map.find_or_find_insert_slot(
-			hash,
-			|s| v.equal(&self.storage[s.idx()]),
-			|s| self.hasher.hash_one(&self.storage[s.idx()]),
-		) {
-			Ok(x) => unsafe { Some(*x.as_ref()) },
+		match self.map.find_entry(hash, |s| v.equal(&self.storage[s.idx()])) {
+			Ok(x) => Some(*x.get()),
 			Err(slot) => {
 				let idx = I::from_idx(self.storage.len())?;
 				self.storage.push(v.into_owned());
-				unsafe { self.map.insert_in_slot(hash, slot, idx) };
+				slot.into_table()
+					.insert_unique(hash, idx, |x| self.hasher.hash_one(&self.storage[x.idx()]));
 				Some(idx)
 			}
 		}

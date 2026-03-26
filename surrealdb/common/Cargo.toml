@@ -12,7 +12,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-hashbrown = { workspace = true, features = ["raw"] }
+hashbrown.workspace = true
 
 [lints]
 workspace = true
