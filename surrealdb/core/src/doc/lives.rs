@@ -188,6 +188,7 @@ impl Document {
 				rid.as_ref(),
 				fields.as_ref(),
 				&mut doc,
+				None,
 			)
 			.await?;
 		};

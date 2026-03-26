@@ -220,10 +220,10 @@ impl Document {
 
 		// Process the permitted documents
 		let current = if self.reduced(stk, ctx, opt, Current).await? {
-			self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
+			self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced, None).await?;
 			&self.current_reduced
 		} else {
-			self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
+			self.computed_fields(stk, ctx, opt, DocKind::Current, None).await?;
 			&self.current
 		};
 		// Check if the expression is truthy
@@ -268,10 +268,10 @@ impl Document {
 
 		// Process the permitted documents
 		let current = if self.reduced(stk, ctx, opt, Current).await? {
-			self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
+			self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced, None).await?;
 			&self.current_reduced
 		} else {
-			self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
+			self.computed_fields(stk, ctx, opt, DocKind::Current, None).await?;
 			&self.current
 		};
 		// Check if the expression is truthy
