@@ -169,7 +169,7 @@ jobs:
         run: cargo make ci-check-release
 
   check-msrv:
-    name: Check workspace (MSRV)
+    name: Check workspace MSRV
     runs-on: ubuntu-latest
     env:
       msrv: "1.90" # This should be updated if the MSRV is updated.
@@ -491,7 +491,7 @@ jobs:
   # ----------------------------------------
 
   db-upgrade:
-    name: Database upgrade from previous versions
+    name: Database Upgrade from previous versions
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
