@@ -1261,6 +1261,15 @@ impl<'ctx> Planner<'ctx> {
 			&& fetch.is_none()
 			&& with.is_none()
 		{
+			let needed_fields = Self::extract_needed_fields(
+				&fields,
+				&omit,
+				cond.as_ref(),
+				order.as_ref(),
+				group.as_ref(),
+				split.as_ref(),
+			);
+
 			// Extract table name from the literal RecordId for plan-time resolution
 			let table_name_for_resolve = match &what[0] {
 				Expr::Literal(Literal::RecordId(rid_lit)) => Some(rid_lit.table.clone()),
@@ -1270,7 +1279,7 @@ impl<'ctx> Planner<'ctx> {
 				Some(e @ Expr::Literal(Literal::RecordId(_))) => self.physical_expr(e).await?,
 				_ => unreachable!("verified above"),
 			};
-			let mut scan = RecordIdScan::new(rid_expr, version, None, None);
+			let mut scan = RecordIdScan::new(rid_expr, version, needed_fields, None);
 			// Resolve table context at plan time
 			if let Some(ref tb) = table_name_for_resolve
 				&& let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db)

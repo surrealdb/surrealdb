@@ -6,8 +6,9 @@ use serde::de::{
 	self, Deserialize, DeserializeSeed, Deserializer as _, EnumAccess, Expected, IntoDeserializer,
 	MapAccess, SeqAccess, Unexpected, VariantAccess, Visitor,
 };
-use serde::forward_to_deserialize_any;
+use serde::{Serialize, forward_to_deserialize_any};
 
+use super::ser::Serializer;
 use crate::error::Error;
 use crate::number::Number;
 use crate::value::Value;
@@ -148,6 +149,39 @@ impl<'de> serde::Deserializer<'de> for Value {
 			Value::Object(v) => v.deserialize_any(visitor),
 			Value::None => visitor.visit_none(),
 			Value::Bytes(bytes) => visitor.visit_bytes(&bytes),
+			Value::Datetime(datetime) => {
+				let value = datetime
+					.into_inner()
+					.serialize(Serializer)
+					.map_err(|err| <Error as serde::de::Error>::custom(err.to_string()))?;
+				value.deserialize_any(visitor)
+			}
+			Value::Uuid(uuid) => {
+				let value = uuid
+					.into_inner()
+					.serialize(Serializer)
+					.map_err(|err| <Error as serde::de::Error>::custom(err.to_string()))?;
+				value.deserialize_any(visitor)
+			}
+			Value::Duration(duration) => {
+				let value = duration
+					.into_inner()
+					.serialize(Serializer)
+					.map_err(|err| <Error as serde::de::Error>::custom(err.to_string()))?;
+				value.deserialize_any(visitor)
+			}
+			Value::RecordId(record_id) => {
+				let mut object = Object::new();
+				object.insert("table".to_owned(), Value::String(record_id.table.to_string()));
+				object.insert(
+					"key".to_owned(),
+					record_id
+						.key
+						.serialize(Serializer)
+						.map_err(|err| <Error as serde::de::Error>::custom(err.to_string()))?,
+				);
+				Value::Object(object).deserialize_any(visitor)
+			}
 			_ => Err(self.invalid_type(&visitor)),
 		}
 	}
@@ -205,8 +239,30 @@ impl<'de> serde::Deserializer<'de> for Value {
 	where
 		V: Visitor<'de>,
 	{
-		let _ = name;
-		visitor.visit_newtype_struct(self)
+		match (name, self) {
+			("Datetime", Value::Datetime(datetime)) => {
+				let value = datetime
+					.into_inner()
+					.serialize(Serializer)
+					.map_err(|err| <Error as serde::de::Error>::custom(err.to_string()))?;
+				visitor.visit_newtype_struct(value)
+			}
+			("Uuid", Value::Uuid(uuid)) => {
+				let value = uuid
+					.into_inner()
+					.serialize(Serializer)
+					.map_err(|err| <Error as serde::de::Error>::custom(err.to_string()))?;
+				visitor.visit_newtype_struct(value)
+			}
+			("Duration", Value::Duration(duration)) => {
+				let value = duration
+					.into_inner()
+					.serialize(Serializer)
+					.map_err(|err| <Error as serde::de::Error>::custom(err.to_string()))?;
+				visitor.visit_newtype_struct(value)
+			}
+			(_, value) => visitor.visit_newtype_struct(value),
+		}
 	}
 
 	fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value, Error>
@@ -318,8 +374,8 @@ impl<'de> serde::Deserializer<'de> for Value {
 
 	fn deserialize_struct<V>(
 		self,
-		_name: &'static str,
-		_fields: &'static [&'static str],
+		name: &'static str,
+		fields: &'static [&'static str],
 		visitor: V,
 	) -> Result<V::Value, Error>
 	where
@@ -328,6 +384,19 @@ impl<'de> serde::Deserializer<'de> for Value {
 		match self {
 			Value::Array(v) => visit_array(v, visitor),
 			Value::Object(v) => v.deserialize_any(visitor),
+			Value::RecordId(record_id) if name == "RecordId" => {
+				let mut object = Object::new();
+				object.insert("table".to_owned(), Value::String(record_id.table.to_string()));
+				object.insert(
+					"key".to_owned(),
+					record_id
+						.key
+						.serialize(Serializer)
+						.map_err(|err| <Error as serde::de::Error>::custom(err.to_string()))?,
+				);
+				let value = Value::Object(object);
+				value.deserialize_struct(name, fields, visitor)
+			}
 			_ => Err(self.invalid_type(&visitor)),
 		}
 	}

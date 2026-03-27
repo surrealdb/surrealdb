@@ -1,6 +1,4 @@
 /**
-[env]
-planner-strategy = ["compute-only"]
 
 [test]
 reason = "Test dynamic array and object key access in SELECT and UPSERT"
