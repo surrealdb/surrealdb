@@ -674,6 +674,17 @@ pub(crate) async fn compute_fields_for_value(
 	let mut eval_ctx = EvalContext::from_exec_ctx(ctx);
 	eval_ctx.skip_fetch_perms = skip_fetch_perms;
 
+	// Extract the record ID before entering the loop so that field
+	// dereferences that target this same record can return raw data
+	// instead of re-computing fields (which would loop forever).
+	eval_ctx.computing_record = match &*value {
+		Value::Object(obj) => match obj.get("id") {
+			Some(Value::RecordId(rid)) => Some(rid.clone()),
+			_ => None,
+		},
+		_ => None,
+	};
+
 	for cf in &state.computed_fields {
 		// Evaluate with the current value as context
 		let row_ctx = eval_ctx.with_value(value);

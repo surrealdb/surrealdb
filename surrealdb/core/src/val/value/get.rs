@@ -474,7 +474,9 @@ impl Value {
 							let res = if g.only {
 								match res {
 									Value::Array(arr) if arr.is_empty() => Value::None,
-									Value::Array(mut arr) if arr.len() == 1 => arr.0.pop().unwrap(),
+									Value::Array(mut arr) if arr.len() == 1 => {
+										arr.0.pop().expect("Exactly one item in this array")
+									}
 									Value::Array(_) => {
 										return Err(crate::expr::ControlFlow::Err(
 											anyhow::anyhow!(crate::err::Error::SingleOnlyOutput),

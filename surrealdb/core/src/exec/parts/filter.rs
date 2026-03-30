@@ -45,6 +45,7 @@ impl PhysicalExpr for WherePart {
 				recursion_ctx: ctx.recursion_ctx,
 				document_root: ctx.document_root,
 				skip_fetch_perms: ctx.skip_fetch_perms,
+				computing_record: ctx.computing_record,
 			}
 		} else {
 			ctx

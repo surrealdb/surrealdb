@@ -240,7 +240,7 @@ async fn evaluate_lookup_for_value(
 		if lookup.only {
 			return match results.len() {
 				0 => Ok(Value::None),
-				1 => Ok(results.into_iter().next().unwrap()),
+				1 => Ok(results.into_iter().next().expect("Exactly one result in this branch")),
 				_ => Err(anyhow::anyhow!(Error::SingleOnlyOutput)),
 			};
 		}
@@ -250,7 +250,7 @@ async fn evaluate_lookup_for_value(
 	if lookup.only {
 		return match results.len() {
 			0 => Ok(Value::None),
-			1 => Ok(results.into_iter().next().unwrap()),
+			1 => Ok(results.into_iter().next().expect("Exactly one result in this branch")),
 			_ => Err(anyhow::anyhow!(Error::SingleOnlyOutput)),
 		};
 	}
