@@ -778,10 +778,7 @@ impl<'ctx> Planner<'ctx> {
 								// `in.creationDate` on edge tables).
 								// Single-part idioms can use FieldPath directly.
 								if inner_idiom.len() > 1
-									|| inner_idiom
-										.0
-										.iter()
-										.any(|p| matches!(p, Part::Lookup(_)))
+									|| inner_idiom.0.iter().any(|p| matches!(p, Part::Lookup(_)))
 								{
 									let name = registry
 										.register(
