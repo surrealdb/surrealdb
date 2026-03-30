@@ -2472,4 +2472,108 @@ mod http_integration {
 			assert!(res.contains("The HTTP route 'sql' is forbidden"), "body: {}", res);
 		}
 	}
+
+	// -----------------------------------------------------------------------
+	// Expired JWT must not block signin or sql endpoints (deadlock fix)
+	// -----------------------------------------------------------------------
+
+	#[test(tokio::test)]
+	async fn expired_jwt_does_not_block_signin() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+
+		let client =
+			reqwest::Client::builder().connect_timeout(Duration::from_millis(10)).build()?;
+
+		// Build a fabricated expired JWT (exp in the past).
+		// Header: {"alg":"HS512","typ":"JWT"}
+		// Payload: {"iat":1600000000,"exp":1600000001,"iss":"SurrealDB"}
+		// The signature is invalid, but the middleware checks expiry before
+		// cryptographic verification, so this is sufficient to trigger the
+		// expired-token path.
+		let expired_token = "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.\
+			eyJpYXQiOjE2MDAwMDAwMDAsImV4cCI6MTYwMDAwMDAwMSwiaXNzIjoiU3VycmVhbERCIn0.\
+			AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+		// 1. Signin via /signin with an expired Bearer — must NOT get 401
+		{
+			let req_body = serde_json::to_string(&json!({
+				"user": USER,
+				"pass": PASS,
+			}))?;
+
+			let res = client
+				.post(format!("http://{addr}/signin"))
+				.header(header::ACCEPT, "application/json")
+				.header(header::AUTHORIZATION, format!("Bearer {expired_token}"))
+				.body(req_body)
+				.send()
+				.await?;
+
+			assert_eq!(
+				res.status(),
+				200,
+				"signin with expired Bearer must succeed, got: {}",
+				res.text().await?
+			);
+		}
+
+		// 2. SQL query with expired Bearer — should get anonymous session (not 401)
+		{
+			let res = client
+				.post(format!("http://{addr}/sql"))
+				.header(header::ACCEPT, "application/json")
+				.header("surreal-ns", "test")
+				.header("surreal-db", "test")
+				.header(header::AUTHORIZATION, format!("Bearer {expired_token}"))
+				.body("RETURN 1")
+				.send()
+				.await?;
+
+			// The request should reach the handler. It may succeed with an
+			// anonymous session or fail with a permissions error — but it must
+			// NOT be rejected at the middleware level with 401.
+			assert_ne!(res.status(), 401, "expired Bearer must not cause 401 at middleware level");
+		}
+
+		// 3. Full recovery flow: signin, use token, expire it, re-signin
+		{
+			// Get a real token first
+			let req_body = serde_json::to_string(&json!({
+				"user": USER,
+				"pass": PASS,
+			}))?;
+
+			let res = client
+				.post(format!("http://{addr}/signin"))
+				.header(header::ACCEPT, "application/json")
+				.body(req_body)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+
+			// Now try to re-signin while carrying an expired token — the
+			// exact scenario that causes the deadlock in production.
+			let req_body = serde_json::to_string(&json!({
+				"user": USER,
+				"pass": PASS,
+			}))?;
+
+			let res = client
+				.post(format!("http://{addr}/signin"))
+				.header(header::ACCEPT, "application/json")
+				.header(header::AUTHORIZATION, format!("Bearer {expired_token}"))
+				.body(req_body)
+				.send()
+				.await?;
+
+			assert_eq!(
+				res.status(),
+				200,
+				"re-signin with expired Bearer must succeed (deadlock recovery), got: {}",
+				res.text().await?
+			);
+		}
+
+		Ok(())
+	}
 }
