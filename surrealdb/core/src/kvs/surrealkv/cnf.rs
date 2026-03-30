@@ -64,6 +64,35 @@ pub(super) static SURREALKV_BLOCK_CACHE_CAPACITY: LazyLock<u64> =
 		max(memory, 16 * 1024 * 1024)
 	});
 
+/// The maximum memtable size in bytes before flushing to disk
+/// This is the arena of memory that is used to store the memtable data.
+/// If a single transaction is larger than this size, it will throw an error.
+/// If a single transaction needs to store larger than this size, this value should be increased.
+pub(super) static SURREALKV_MAX_MEMTABLE_SIZE: LazyLock<usize> =
+	lazy_env_parse!(bytes, "SURREAL_SURREALKV_MAX_MEMTABLE_SIZE", usize, || {
+		// Load the system attributes
+		let mut system = System::new_all();
+		// Refresh the system memory
+		system.refresh_memory();
+		// Get the available memory
+		let memory = match system.cgroup_limits() {
+			Some(limits) => limits.total_memory,
+			None => system.total_memory(),
+		};
+		// Dynamically set the max memtable size
+		if memory < 1024 * 1024 * 1024 {
+			64 * 1024 * 1024 // For systems with < 1 GiB, use 64 MiB
+		} else if memory < 4 * 1024 * 1024 * 1024 {
+			128 * 1024 * 1024 // For systems with < 4 GiB, use 128 MiB
+		} else if memory < 16 * 1024 * 1024 * 1024 {
+			256 * 1024 * 1024 // For systems with < 16 GiB, use 256 MiB
+		} else if memory < 64 * 1024 * 1024 * 1024 {
+			1024 * 1024 * 1024 // For systems with < 64 GiB, use 1 GiB
+		} else {
+			4 * 1024 * 1024 * 1024 // For systems with >= 64 GiB, use 4 GiB
+		}
+	});
+
 /// The maximum wait time in nanoseconds before forcing a grouped commit (default: 5ms).
 /// This timeout ensures that transactions don't wait indefinitely under low concurrency and
 /// balances commit latency against write throughput.

@@ -772,10 +772,14 @@ impl<'ctx> Planner<'ctx> {
 					{
 						match &resolved_expr {
 							Expr::Idiom(inner_idiom) => {
-								let has_lookups =
-									inner_idiom.0.iter().any(|p| matches!(p, Part::Lookup(_)));
-
-								if has_lookups {
+								// Multi-part idioms or lookups require the
+								// Compute operator for context-aware evaluation
+								// (e.g., record-link traversal like
+								// `in.creationDate` on edge tables).
+								// Single-part idioms can use FieldPath directly.
+								if inner_idiom.len() > 1
+									|| inner_idiom.0.iter().any(|p| matches!(p, Part::Lookup(_)))
+								{
 									let name = registry
 										.register(
 											&resolved_expr,
