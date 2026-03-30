@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::err::Error;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::{AccessMode, ContextLevel, ExecOperator};
 use crate::expr::FlowResult;
@@ -64,6 +65,10 @@ pub struct LookupPart {
 	/// When true, the continuation logic in `evaluate_parts_with_continuation` maps
 	/// per-element over non-lookup arrays even when this is the last part in the idiom.
 	pub fused: bool,
+
+	/// When true, unwrap the result array into a single value (FROM ONLY semantics).
+	/// Empty results yield NONE; more than one result is an error.
+	pub only: bool,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -221,7 +226,7 @@ async fn evaluate_lookup_for_value(
 	// When extract_id is set, the scan used FullEdge mode for WHERE/SPLIT filtering
 	// but no explicit SELECT clause was present. Project results back to RecordIds.
 	if lookup.extract_id {
-		let results = results
+		let results: Vec<Value> = results
 			.into_iter()
 			.filter_map(|v| match v {
 				Value::Object(ref obj) => {
@@ -231,7 +236,23 @@ async fn evaluate_lookup_for_value(
 				_ => None,
 			})
 			.collect();
-		return Ok(Value::Array(results));
+
+		if lookup.only {
+			return match results.len() {
+				0 => Ok(Value::None),
+				1 => Ok(results.into_iter().next().unwrap()),
+				_ => Err(anyhow::anyhow!(Error::SingleOnlyOutput)),
+			};
+		}
+		return Ok(Value::Array(results.into()));
+	}
+
+	if lookup.only {
+		return match results.len() {
+			0 => Ok(Value::None),
+			1 => Ok(results.into_iter().next().unwrap()),
+			_ => Err(anyhow::anyhow!(Error::SingleOnlyOutput)),
+		};
 	}
 
 	Ok(Value::Array(results.into()))

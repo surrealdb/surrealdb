@@ -166,6 +166,7 @@ impl<'ctx> Planner<'ctx> {
 				//   GraphEdgeScan(->person, GraphEdgeScan(->likes, CurrentValueSource))
 				if let Part::Lookup(first_lookup) = part {
 					let (mut direction, mut extract_id) = lookup_metadata(&first_lookup);
+					let mut only = first_lookup.only;
 					let mut chain: Arc<dyn ExecOperator> = Arc::new(CurrentValueSource::new());
 					chain = self.plan_lookup_with_input(chain, first_lookup).await?;
 
@@ -178,6 +179,7 @@ impl<'ctx> Planner<'ctx> {
 						let (d, e) = lookup_metadata(&next_lookup);
 						direction = d;
 						extract_id = e;
+						only = next_lookup.only;
 						chain = self.plan_lookup_with_input(chain, next_lookup).await?;
 						fused = true;
 					}
@@ -187,6 +189,7 @@ impl<'ctx> Planner<'ctx> {
 						plan: chain,
 						extract_id,
 						fused,
+						only,
 					}));
 					continue;
 				}
@@ -277,12 +280,14 @@ impl<'ctx> Planner<'ctx> {
 				let needs_full_records =
 					needs_full_pipeline || lookup.cond.is_some() || lookup.split.is_some();
 				let extract_id = needs_full_records && !needs_full_pipeline;
+				let only = lookup.only;
 				let plan = self.plan_lookup(lookup).await?;
 				Ok(Arc::new(LookupPart {
 					direction,
 					plan,
 					extract_id,
 					fused: false,
+					only,
 				}))
 			}
 

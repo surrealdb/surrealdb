@@ -471,6 +471,21 @@ impl Value {
 
 							let res = stk.run(|stk| stm.compute(stk, ctx, opt, doc)).await?.all();
 
+							let res = if g.only {
+								match res {
+									Value::Array(arr) if arr.is_empty() => Value::None,
+									Value::Array(mut arr) if arr.len() == 1 => arr.0.pop().unwrap(),
+									Value::Array(_) => {
+										return Err(crate::expr::ControlFlow::Err(anyhow::anyhow!(
+											crate::err::Error::SingleOnlyOutput
+										)));
+									}
+									other => other,
+								}
+							} else {
+								res
+							};
+
 							if last_part {
 								Ok(res)
 							} else {

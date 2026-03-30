@@ -36,6 +36,15 @@ value = "{ edges: [knows:alice_ceo] }"
 # 7
 [[test.results]]
 value = "{ edges: [{ id: knows:alice_bob, in: person:alice, out: person:bob, since: d'2020-03-20T00:00:00Z', strength: 'strong' }, { id: knows:alice_ceo, in: person:alice, out: person:ceo, since: d'2022-12-15T00:00:00Z', strength: 'weak' }] }"
+
+# 8
+[[test.results]]
+value = "{ edge: { id: knows:alice_bob, in: person:alice, out: person:bob, since: d'2020-03-20T00:00:00Z', strength: 'strong' } }"
+
+# 9
+[[test.results]]
+value = "{ edge: { strength: 'strong' } }"
+
 */
 
 -- 0: Basic edge selection
@@ -61,3 +70,9 @@ SELECT ->(knows START 1) AS edges FROM ONLY person:alice;
 
 -- 7: Order, start, and limit together
 SELECT ->(SELECT * FROM knows ORDER BY since ASC START 0 LIMIT 2) AS edges FROM ONLY person:alice;
+
+-- 8: FROM ONLY with LIMIT 1 unwraps the single result
+SELECT ->(SELECT * FROM ONLY knows LIMIT 1) AS edge FROM ONLY person:alice;
+
+-- 9: FROM ONLY with WHERE clause returning a single match
+SELECT ->(SELECT strength FROM ONLY knows WHERE strength = "strong" LIMIT 1) AS edge FROM ONLY person:alice;
