@@ -750,7 +750,6 @@ impl<'ctx> Planner<'ctx> {
 		registry: &mut ExpressionRegistry,
 	) -> Result<(Arc<dyn ExecOperator>, Vec<String>), Error> {
 		use crate::expr::order::Ordering;
-		use crate::expr::part::Part;
 
 		match order {
 			Ordering::Random => {
@@ -770,54 +769,29 @@ impl<'ctx> Planner<'ctx> {
 					let field_path = if let Some((resolved_expr, alias)) =
 						resolve_order_by_alias(idiom, fields)
 					{
-						match &resolved_expr {
-							Expr::Idiom(inner_idiom) => {
-								let has_lookups =
-									inner_idiom.0.iter().any(|p| matches!(p, Part::Lookup(_)));
-
-								if has_lookups {
-									let name = registry
-										.register(
-											&resolved_expr,
-											ComputePoint::Sort,
-											Some(alias.clone()),
-											self.ctx,
-										)
-										.await?;
-									FieldPath::field(name)
-								} else {
-									match FieldPath::try_from(inner_idiom) {
-										Ok(path) => path,
-										Err(_) => {
-											let name = registry
-												.register(
-													&resolved_expr,
-													ComputePoint::Sort,
-													Some(alias.clone()),
-													self.ctx,
-												)
-												.await?;
-											FieldPath::field(name)
-										}
-									}
-								}
-							}
-							_ => {
-								let name = registry
-									.register(
-										&resolved_expr,
-										ComputePoint::Sort,
-										Some(alias.clone()),
-										self.ctx,
-									)
-									.await?;
-								FieldPath::field(name)
-							}
-						}
+						// Always register resolved alias expressions in the
+						// Compute operator. The underlying expression may
+						// require context-aware evaluation (e.g., record-link
+						// traversal like `in.creationDate` on edge tables)
+						// that FieldPath cannot provide synchronously.
+						let name = registry
+							.register(
+								&resolved_expr,
+								ComputePoint::Sort,
+								Some(alias.clone()),
+								self.ctx,
+							)
+							.await?;
+						FieldPath::field(name)
 					} else {
+						// For non-alias idioms, only use the FieldPath
+						// shortcut for single-part paths (simple field names
+						// like `name`). Multi-part paths (like
+						// `in.creationDate`) may involve record-link traversal
+						// that FieldPath cannot handle.
 						match FieldPath::try_from(idiom) {
-							Ok(path) => path,
-							Err(_) => {
+							Ok(path) if path.len() <= 1 => path,
+							_ => {
 								let expr = Expr::Idiom(idiom.clone());
 								let name = registry
 									.register(&expr, ComputePoint::Sort, None, self.ctx)
