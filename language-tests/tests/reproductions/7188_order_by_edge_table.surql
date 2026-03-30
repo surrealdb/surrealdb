@@ -19,9 +19,6 @@ value = "[{ creationDate: d'2026-01-01T00:00:00Z' }, { creationDate: d'2026-01-0
 
 [[test.results]]
 value = "[{ creationDate: d'2026-01-09T00:00:00Z' }, { creationDate: d'2026-01-08T00:00:00Z' }, { creationDate: d'2026-01-07T00:00:00Z' }, { creationDate: d'2026-01-06T00:00:00Z' }, { creationDate: d'2026-01-05T00:00:00Z' }, { creationDate: d'2026-01-04T00:00:00Z' }, { creationDate: d'2026-01-03T00:00:00Z' }, { creationDate: d'2026-01-02T00:00:00Z' }, { creationDate: d'2026-01-01T00:00:00Z' }]"
-
-[[test.results]]
-value = "[{ creationDate: d'2026-01-09T00:00:00Z' }, { creationDate: d'2026-01-08T00:00:00Z' }, { creationDate: d'2026-01-07T00:00:00Z' }, { creationDate: d'2026-01-06T00:00:00Z' }, { creationDate: d'2026-01-05T00:00:00Z' }, { creationDate: d'2026-01-04T00:00:00Z' }, { creationDate: d'2026-01-03T00:00:00Z' }, { creationDate: d'2026-01-02T00:00:00Z' }, { creationDate: d'2026-01-01T00:00:00Z' }]"
 */
 
 -- Setup: Create records and edges
@@ -64,14 +61,7 @@ FROM is_comment_of
 WHERE out = media_text_test:0
 ORDER BY creationDate ASC;
 
--- Test 3: ORDER BY in.field DESC directly (no alias)
-SELECT
-	in.creationDate as creationDate
-FROM is_comment_of
-WHERE out = media_text_test:0
-ORDER BY in.creationDate DESC;
-
--- Test 4: All edges should be returned (9 results)
+-- Test 3: All edges should be returned (9 results), correctly ordered
 SELECT
 	in.creationDate as creationDate
 FROM is_comment_of
