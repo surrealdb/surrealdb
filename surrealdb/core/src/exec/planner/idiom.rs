@@ -179,7 +179,7 @@ impl<'ctx> Planner<'ctx> {
 						let (d, e) = lookup_metadata(&next_lookup);
 						direction = d;
 						extract_id = e;
-						only = next_lookup.only;
+						only |= next_lookup.only;
 						chain = self.plan_lookup_with_input(chain, next_lookup).await?;
 						fused = true;
 					}
@@ -235,9 +235,11 @@ impl<'ctx> Planner<'ctx> {
 			}
 
 			Part::Where(expr) => {
+				let needs_parent = ast_expr_references_parent(&expr);
 				let phys_expr = self.physical_expr(expr).await?;
 				Ok(Arc::new(WherePart {
 					predicate: phys_expr,
+					needs_parent,
 				}))
 			}
 
@@ -496,6 +498,37 @@ fn extract_body_operator(path: &[Arc<dyn PhysicalExpr>]) -> Option<Arc<dyn ExecO
 	} else {
 		None
 	}
+}
+
+/// Returns true if an AST expression references the `$parent` parameter.
+///
+/// Used at planning time to set `WherePart::needs_parent`, avoiding a
+/// per-element `Value::clone()` + context allocation when the predicate
+/// never references `$parent`.
+fn ast_expr_references_parent(expr: &crate::expr::expression::Expr) -> bool {
+	use crate::expr::expression::Expr;
+	use crate::expr::visit::{Visit, Visitor};
+	struct Check(bool);
+	impl Visitor for Check {
+		type Error = std::convert::Infallible;
+		fn visit_expr(&mut self, e: &Expr) -> Result<(), Self::Error> {
+			if let Expr::Param(p) = e
+				&& p.as_str() == "parent"
+			{
+				self.0 = true;
+			}
+			if self.0 {
+				return Ok(());
+			}
+			e.visit(self)
+		}
+		fn visit_select(&mut self, _: &crate::expr::SelectStatement) -> Result<(), Self::Error> {
+			Ok(())
+		}
+	}
+	let mut c = Check(false);
+	let _ = c.visit_expr(expr);
+	c.0
 }
 
 /// Check if a slice of AST parts contains a `RepeatRecurse` marker at any nesting level.

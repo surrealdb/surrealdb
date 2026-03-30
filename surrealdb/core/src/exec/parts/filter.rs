@@ -14,6 +14,9 @@ use crate::val::Value;
 #[derive(Debug, Clone)]
 pub struct WherePart {
 	pub predicate: Arc<dyn PhysicalExpr>,
+	/// Whether the predicate references `$parent`. When false, we skip the
+	/// per-element context allocation for binding `$parent`.
+	pub needs_parent: bool,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -28,11 +31,12 @@ impl PhysicalExpr for WherePart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		// Bind $parent to the enclosing row (document_root) so that graph
-		// [WHERE $parent.field] refers to the current SELECT's row, not an
-		// outer subquery's parent. This creates a child exec_ctx scoped to
-		// the WHERE evaluation only.
-		let parent_ctx = if let Some(parent) = ctx.document_root {
+		// Only bind $parent when the predicate actually references it,
+		// avoiding a Value::clone() + context allocation per element for
+		// the common case (e.g. `[WHERE age > 30]`).
+		let parent_ctx = if self.needs_parent
+			&& let Some(parent) = ctx.document_root
+		{
 			Some(ctx.exec_ctx.with_param("parent", parent.clone()))
 		} else {
 			None
