@@ -345,11 +345,11 @@ impl Value {
 					},
 					Part::Where(w) => {
 						// Bind $parent to the enclosing document when the
-						// predicate references it and it is not already in scope.
+						// predicate references it. Always overrides any existing
+						// binding (e.g. from an outer subquery) so that $parent
+						// in a graph [WHERE] refers to the current SELECT's row.
 						let parent_ctx = match doc {
-							Some(d)
-								if ctx.value("parent").is_none() && expr_references_parent(w) =>
-							{
+							Some(d) if expr_references_parent(w) => {
 								let mut child = Context::new(ctx);
 								child.add_value("parent", Arc::new(d.doc.as_ref().clone()));
 								Some(child.freeze())
@@ -469,14 +469,7 @@ impl Value {
 								tempfiles: false,
 							};
 
-							// Only propagate doc as parent_doc when $parent is
-							// not already bound (e.g. by an outer subquery).
-							let parent_doc = match doc {
-								Some(_) if ctx.value("parent").is_none() => doc,
-								_ => None,
-							};
-							let res =
-								stk.run(|stk| stm.compute(stk, ctx, opt, parent_doc)).await?.all();
+							let res = stk.run(|stk| stm.compute(stk, ctx, opt, doc)).await?.all();
 
 							if last_part {
 								Ok(res)

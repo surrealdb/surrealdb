@@ -43,16 +43,13 @@ skip-record-id-key = true
 value = "[{ chain: [{ deep: { from_middle: 'Bob' }, from_outer: 'Alice', middle_name: 'Bob' }, { deep: { from_middle: 'Carol' }, from_outer: 'Alice', middle_name: 'Carol' }], name: 'Alice' }, { chain: [{ deep: { from_middle: 'Alice' }, from_outer: 'Bob', middle_name: 'Alice' }, { deep: { from_middle: 'Carol' }, from_outer: 'Bob', middle_name: 'Carol' }], name: 'Bob' }, { chain: [{ deep: { from_middle: 'Alice' }, from_outer: 'Carol', middle_name: 'Alice' }, { deep: { from_middle: 'Bob' }, from_outer: 'Carol', middle_name: 'Bob' }], name: 'Carol' }]"
 
 [[test.results]]
-value = "[{ name: 'Alice', sub: [{ edges_to_outer: [], who: 'Alice' }, { edges_to_outer: [], who: 'Bob' }, { edges_to_outer: [], who: 'Carol' }] }, { name: 'Bob', sub: [{ edges_to_outer: [knows:x], who: 'Alice' }, { edges_to_outer: [], who: 'Bob' }, { edges_to_outer: [], who: 'Carol' }] }, { name: 'Carol', sub: [{ edges_to_outer: [], who: 'Alice' }, { edges_to_outer: [knows:x], who: 'Bob' }, { edges_to_outer: [], who: 'Carol' }] }]"
-skip-record-id-key = true
+value = "[{ name: 'Alice', sub: [{ edges_to_self: [], who: 'Alice' }, { edges_to_self: [], who: 'Bob' }, { edges_to_self: [], who: 'Carol' }] }, { name: 'Bob', sub: [{ edges_to_self: [], who: 'Alice' }, { edges_to_self: [], who: 'Bob' }, { edges_to_self: [], who: 'Carol' }] }, { name: 'Carol', sub: [{ edges_to_self: [], who: 'Alice' }, { edges_to_self: [], who: 'Bob' }, { edges_to_self: [], who: 'Carol' }] }]"
 
 [[test.results]]
-value = "[{ id: person:alice, sub: { edges: [], outer_id: person:alice } }, { id: person:bob, sub: { edges: [knows:x], outer_id: person:bob } }, { id: person:carol, sub: { edges: [], outer_id: person:carol } }]"
-skip-record-id-key = true
+value = "[{ id: person:alice, sub: { edges: [], outer_id: person:alice } }, { id: person:bob, sub: { edges: [], outer_id: person:bob } }, { id: person:carol, sub: { edges: [], outer_id: person:carol } }]"
 
 [[test.results]]
-value = "[{ chain: [{ deep: [{ edges_to_mid: [knows:x], mid_name: 'Bob' }], mid: 'Bob' }, { deep: [{ edges_to_mid: [], mid_name: 'Carol' }], mid: 'Carol' }], name: 'Alice' }, { chain: [{ deep: [{ edges_to_mid: [], mid_name: 'Alice' }], mid: 'Alice' }, { deep: [{ edges_to_mid: [], mid_name: 'Carol' }], mid: 'Carol' }], name: 'Bob' }, { chain: [{ deep: [{ edges_to_mid: [], mid_name: 'Alice' }], mid: 'Alice' }, { deep: [{ edges_to_mid: [knows:x], mid_name: 'Bob' }], mid: 'Bob' }], name: 'Carol' }]"
-skip-record-id-key = true
+value = "[{ chain: [{ deep: [{ edges_to_mid: [], mid_name: 'Bob' }], mid: 'Bob' }, { deep: [{ edges_to_mid: [], mid_name: 'Carol' }], mid: 'Carol' }], name: 'Alice' }, { chain: [{ deep: [{ edges_to_mid: [], mid_name: 'Alice' }], mid: 'Alice' }, { deep: [{ edges_to_mid: [], mid_name: 'Carol' }], mid: 'Carol' }], name: 'Bob' }, { chain: [{ deep: [{ edges_to_mid: [], mid_name: 'Alice' }], mid: 'Alice' }, { deep: [{ edges_to_mid: [], mid_name: 'Bob' }], mid: 'Bob' }], name: 'Carol' }]"
 
 */
 
@@ -81,18 +78,18 @@ SELECT name,
 FROM person ORDER BY name;
 
 -- Graph WHERE inside a subquery that iterates a table.
--- sub1 iterates person, $parent = outer row.
--- The graph WHERE inside sub1 also sees $parent = outer row.
+-- sub1 iterates person. The graph WHERE's $parent = inner person row
+-- (the current SELECT's row), not the outer row.
 SELECT name,
   (SELECT
     name AS who,
-    ->knows[WHERE out = $parent.id] AS edges_to_outer
+    ->knows[WHERE out = $parent.id] AS edges_to_self
   FROM person ORDER BY name) AS sub
 FROM person ORDER BY name;
 
 -- Graph traversal at depth 2: outer -> sub1 (FROM ONLY true) -> graph WHERE.
--- $parent inside the graph WHERE must be the outer person row (bound by the
--- outermost ScalarSubquery), not the literal `true` from sub1's FROM source.
+-- $parent.id in the direct projection = outer person (subquery parent).
+-- $parent.id in the graph WHERE = inner row (true), so edges is always empty.
 SELECT id,
   (SELECT
     $parent.id AS outer_id,
@@ -101,8 +98,8 @@ SELECT id,
 FROM person ORDER BY id;
 
 -- 3-level with graph at the deepest level: outer -> sub1 (table) -> sub2 (record).
--- sub2's $parent = sub1's current row.
--- The graph inside sub2 uses $parent.id to find edges targeting the mid person.
+-- sub2's $parent in direct projection = sub1's current row (via update_parent).
+-- sub2's graph WHERE $parent = sub2's current row (alice).
 SELECT name,
   (SELECT
     name AS mid,
