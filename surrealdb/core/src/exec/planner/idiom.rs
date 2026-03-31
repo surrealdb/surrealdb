@@ -166,6 +166,7 @@ impl<'ctx> Planner<'ctx> {
 				//   GraphEdgeScan(->person, GraphEdgeScan(->likes, CurrentValueSource))
 				if let Part::Lookup(first_lookup) = part {
 					let (mut direction, mut extract_id) = lookup_metadata(&first_lookup);
+					let mut only = first_lookup.only;
 					let mut chain: Arc<dyn ExecOperator> = Arc::new(CurrentValueSource::new());
 					chain = self.plan_lookup_with_input(chain, first_lookup).await?;
 
@@ -178,6 +179,7 @@ impl<'ctx> Planner<'ctx> {
 						let (d, e) = lookup_metadata(&next_lookup);
 						direction = d;
 						extract_id = e;
+						only |= next_lookup.only;
 						chain = self.plan_lookup_with_input(chain, next_lookup).await?;
 						fused = true;
 					}
@@ -187,6 +189,7 @@ impl<'ctx> Planner<'ctx> {
 						plan: chain,
 						extract_id,
 						fused,
+						only,
 					}));
 					continue;
 				}
@@ -232,9 +235,11 @@ impl<'ctx> Planner<'ctx> {
 			}
 
 			Part::Where(expr) => {
+				let needs_parent = ast_expr_references_parent(&expr);
 				let phys_expr = self.physical_expr(expr).await?;
 				Ok(Arc::new(WherePart {
 					predicate: phys_expr,
+					needs_parent,
 				}))
 			}
 
@@ -277,12 +282,14 @@ impl<'ctx> Planner<'ctx> {
 				let needs_full_records =
 					needs_full_pipeline || lookup.cond.is_some() || lookup.split.is_some();
 				let extract_id = needs_full_records && !needs_full_pipeline;
+				let only = lookup.only;
 				let plan = self.plan_lookup(lookup).await?;
 				Ok(Arc::new(LookupPart {
 					direction,
 					plan,
 					extract_id,
 					fused: false,
+					only,
 				}))
 			}
 
@@ -491,6 +498,37 @@ fn extract_body_operator(path: &[Arc<dyn PhysicalExpr>]) -> Option<Arc<dyn ExecO
 	} else {
 		None
 	}
+}
+
+/// Returns true if an AST expression references the `$parent` parameter.
+///
+/// Used at planning time to set `WherePart::needs_parent`, avoiding a
+/// per-element `Value::clone()` + context allocation when the predicate
+/// never references `$parent`.
+fn ast_expr_references_parent(expr: &crate::expr::expression::Expr) -> bool {
+	use crate::expr::expression::Expr;
+	use crate::expr::visit::{Visit, Visitor};
+	struct Check(bool);
+	impl Visitor for Check {
+		type Error = std::convert::Infallible;
+		fn visit_expr(&mut self, e: &Expr) -> Result<(), Self::Error> {
+			if let Expr::Param(p) = e
+				&& p.as_str() == "parent"
+			{
+				self.0 = true;
+			}
+			if self.0 {
+				return Ok(());
+			}
+			e.visit(self)
+		}
+		fn visit_select(&mut self, _: &crate::expr::SelectStatement) -> Result<(), Self::Error> {
+			Ok(())
+		}
+	}
+	let mut c = Check(false);
+	let _ = c.visit_expr(expr);
+	c.0
 }
 
 /// Check if a slice of AST parts contains a `RepeatRecurse` marker at any nesting level.
