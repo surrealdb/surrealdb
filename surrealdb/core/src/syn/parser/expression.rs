@@ -3,7 +3,6 @@
 use reblessive::Stk;
 use surrealdb_types::ToSql;
 
-use super::enter_query_recursion;
 use super::mac::unexpected;
 use crate::sql::operator::{BindingPower, BooleanOperator, MatchesOperator, NearestNeighbor};
 use crate::sql::{BinaryOperator, Expr, Literal, Part, PostfixOperator, PrefixOperator};
@@ -34,9 +33,7 @@ impl Parser<'_> {
 	pub(crate) async fn parse_expr_table(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		let old = self.table_as_field;
 		self.table_as_field = false;
-		let res = enter_query_recursion!(this = self => {
-			this.pratt_parse_expr(stk, BindingPower::Base).await
-		});
+		let res = self.pratt_parse_expr(stk, BindingPower::Base).await;
 		self.table_as_field = old;
 		res
 	}
@@ -50,9 +47,7 @@ impl Parser<'_> {
 	pub(crate) async fn parse_expr_field(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		let old = self.table_as_field;
 		self.table_as_field = true;
-		let res = enter_query_recursion!(this = self => {
-			this.pratt_parse_expr(stk, BindingPower::Base).await
-		});
+		let res = self.pratt_parse_expr(stk, BindingPower::Base).await;
 		self.table_as_field = old;
 		res
 	}
@@ -61,9 +56,7 @@ impl Parser<'_> {
 	///
 	/// Inherits how loose identifiers are parsed from it's caller.
 	pub(super) async fn parse_expr_inherit(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
-		enter_query_recursion!(this = self => {
-			this.pratt_parse_expr(stk, BindingPower::Base).await
-		})
+		self.pratt_parse_expr(stk, BindingPower::Base).await
 	}
 
 	/// Returns the binding power of an infix operator.

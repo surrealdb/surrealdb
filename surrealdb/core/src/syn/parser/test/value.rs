@@ -79,8 +79,7 @@ fn parse_large_depth_object() {
 	let mut parser = Parser::new_with_settings(
 		text.as_bytes(),
 		ParserSettings {
-			query_recursion_limit: 100000,
-			object_recursion_limit: 100000,
+			recursion_limit: 100_000_000,
 			..Default::default()
 		},
 	);
@@ -117,8 +116,7 @@ fn parse_large_depth_record_id() {
 	let mut parser = Parser::new_with_settings(
 		text.as_bytes(),
 		ParserSettings {
-			query_recursion_limit: 100000,
-			object_recursion_limit: 100000,
+			recursion_limit: 100_000_000,
 			..Default::default()
 		},
 	);

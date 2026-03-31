@@ -10,7 +10,6 @@ use crate::sql::{
 use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
 use crate::syn::lexer::compound::{self};
-use crate::syn::parser::enter_object_recursion;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::token::{Span, TokenKind, t};
 use crate::types::{PublicDuration, PublicGeometry};
@@ -353,22 +352,19 @@ impl Parser<'_> {
 		start: Span,
 	) -> ParseResult<Vec<Expr>> {
 		let mut exprs = Vec::new();
-		enter_object_recursion!(this = self => {
-			loop {
-				if this.eat(t!("]")) {
-					break;
-				}
-
-				let value = stk.run(|ctx| this.parse_expr_inherit(ctx)).await?;
-				exprs.push(value);
-
-
-				if !this.eat(t!(",")) {
-					this.expect_closing_delimiter(t!("]"), start)?;
-					break;
-				}
+		loop {
+			if self.eat(t!("]")) {
+				break;
 			}
-		});
+
+			let value = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+			exprs.push(value);
+
+			if !self.eat(t!(",")) {
+				self.expect_closing_delimiter(t!("]"), start)?;
+				break;
+			}
+		}
 
 		Ok(exprs)
 	}

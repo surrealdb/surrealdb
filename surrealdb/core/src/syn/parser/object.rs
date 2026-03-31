@@ -5,7 +5,7 @@ use crate::sql::literal::ObjectEntry;
 use crate::sql::{Block, Expr, Literal};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::expected;
-use crate::syn::parser::{ParseResult, Parser, enter_object_recursion};
+use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Span, TokenKind, t};
 
 impl Parser<'_> {
@@ -46,25 +46,26 @@ impl Parser<'_> {
 		| TokenKind::VectorType(_) = self.peek().kind
 			&& let Some(x) = self
 				.speculate(stk, async |stk, this| {
-					enter_object_recursion!(this = this => {
-						let Ok(key) = this.parse_object_key() else {
-							return Ok(None)
-						};
+					let Ok(key) = this.parse_object_key() else {
+						return Ok(None);
+					};
 
-						if !this.eat(t!(":")){
-							return Ok(None)
-						}
+					if !this.eat(t!(":")) {
+						return Ok(None);
+					}
 
-						let value = stk.run(|stk| this.parse_expr_inherit(stk)).await?;
-						let res = vec![ObjectEntry{ key, value }];
+					let value = stk.run(|stk| this.parse_expr_inherit(stk)).await?;
+					let res = vec![ObjectEntry {
+						key,
+						value,
+					}];
 
-						if this.eat(t!(",")){
-							this.parse_object_inner(stk, start, res).await.map(Some)
-						}else{
-							this.expect_closing_delimiter(t!("}"), start)?;
-							Ok(Some(res))
-						}
-					})
+					if this.eat(t!(",")) {
+						this.parse_object_inner(stk, start, res).await.map(Some)
+					} else {
+						this.expect_closing_delimiter(t!("}"), start)?;
+						Ok(Some(res))
+					}
 				})
 				.await?
 		{
@@ -113,9 +114,7 @@ impl Parser<'_> {
 		stk: &mut Stk,
 		start: Span,
 	) -> ParseResult<Vec<ObjectEntry>> {
-		enter_object_recursion!(this = self => {
-			return this.parse_object_inner(stk, start, Vec::new()).await;
-		})
+		return self.parse_object_inner(stk, start, Vec::new()).await;
 	}
 
 	pub(super) async fn parse_object_inner(
@@ -144,12 +143,6 @@ impl Parser<'_> {
 	}
 
 	pub(crate) async fn parse_set(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Vec<Expr>> {
-		enter_object_recursion!(this = self => {
-			return this.parse_set_inner(stk, start).await;
-		})
-	}
-
-	async fn parse_set_inner(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Vec<Expr>> {
 		let mut res = Vec::new();
 		loop {
 			if self.eat(t!("}")) {

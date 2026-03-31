@@ -87,7 +87,7 @@ mod value;
 
 #[cfg(feature = "arbitrary")]
 pub(crate) use builtin::{PATHS, PathKind};
-pub(crate) use mac::{enter_object_recursion, enter_query_recursion, unexpected};
+pub(crate) use mac::unexpected;
 
 use super::error::{RenderedError, syntax_error};
 
@@ -125,14 +125,8 @@ pub struct ParserSettings {
 	/// `foo:0bar`. This would be rejected by normal identifier rules as most
 	/// identifiers can't start with a number.
 	pub flexible_record_id: bool,
-	/// Disallow a query to have objects deeper that limit.
-	/// Arrays also count towards objects. So `[{foo: [] }]` would be 3 deep.
-	pub object_recursion_limit: usize,
 	/// Disallow a query from being deeper than the give limit.
-	/// A query recurses when a statement contains another statement within
-	/// itself. Examples are subquery and blocks like block statements and if
-	/// statements and such.
-	pub query_recursion_limit: usize,
+	pub recursion_limit: usize,
 	/// Whether the files feature is enabled
 	pub files_enabled: bool,
 	/// Whether the surrealism feature is enabled
@@ -144,8 +138,7 @@ impl Default for ParserSettings {
 		ParserSettings {
 			legacy_strands: false,
 			flexible_record_id: true,
-			object_recursion_limit: 100,
-			query_recursion_limit: 20,
+			recursion_limit: 20 * 100,
 			files_enabled: false,
 			surrealism_enabled: false,
 		}

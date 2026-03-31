@@ -40,14 +40,9 @@ pub static MAX_CONCURRENT_TASKS: LazyLock<usize> =
 pub static MAX_COMPUTATION_DEPTH: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_MAX_COMPUTATION_DEPTH", u32, 120);
 
-/// Specifies how deep the parser will parse nested objects and arrays (default:
-/// 100)
-pub static MAX_OBJECT_PARSING_DEPTH: LazyLock<u32> =
-	lazy_env_parse!("SURREAL_MAX_OBJECT_PARSING_DEPTH", u32, 100);
-
-/// Specifies how deep the parser will parse recursive queries (default: 20)
-pub static MAX_QUERY_PARSING_DEPTH: LazyLock<u32> =
-	lazy_env_parse!("SURREAL_MAX_QUERY_PARSING_DEPTH", u32, 20);
+/// Specifies the maximum depth that the parser will recurse to.
+pub static MAX_PARSING_DEPTH: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_MAX_PARSING_DEPTH", u32, 100 * 20);
 
 /// The maximum recursive idiom path depth allowed (default: 256)
 pub static IDIOM_RECURSION_LIMIT: LazyLock<usize> =

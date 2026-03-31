@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use crate::cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH};
+use crate::cnf::MAX_PARSING_DEPTH;
 use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
@@ -48,25 +48,49 @@ where
 
 pub fn parse_with_settings<F, R>(input: &[u8], settings: ParserSettings, f: F) -> Result<R>
 where
-	F: for<'a> AsyncFnOnce(&'a mut Parser<'a>, &'a mut Stk) -> ParseResult<R>,
+	F: AsyncFnOnce(&mut Parser, &mut Stk) -> ParseResult<R>,
 {
+	fn run_with_limit<F, R>(
+		input: &[u8],
+		stack: &mut Stack,
+		parser: &mut Parser,
+		limit: usize,
+		f: F,
+	) -> Option<Result<R>>
+	where
+		F: AsyncFnOnce(&mut Parser, &mut Stk) -> ParseResult<R>,
+	{
+		let mut runner = stack.enter(|stk| f(parser, stk));
+		loop {
+			if let Some(x) = runner.step() {
+				return Some(x.map_err(|x| {
+					anyhow::Error::new(Error::InvalidQuery(x.render_on_bytes(input)))
+				}));
+			};
+
+			if runner.depth() > limit {
+				return None;
+			}
+		}
+	}
+
+	let rec_limit = settings.recursion_limit;
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 	let mut parser = Parser::new_with_settings(input, settings);
 	let mut stack = Stack::new();
-	stack
-		.enter(|stk| f(&mut parser, stk))
-		.finish()
-		.map_err(|e| e.render_on_bytes(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
+	if let Some(x) = run_with_limit(input, &mut stack, &mut parser, rec_limit, f) {
+		return x;
+	}
+	let error = error::SyntaxError::new("Exceeded recursion depth limit")
+		.with_span(parser.last_span(), error::MessageKind::Error);
+	bail!(Error::InvalidQuery(error.render_on_bytes(input)));
 }
 
 /// Creates the parser settings struct from the global configuration values as
 /// wel as the capabilities  struct.
 pub fn settings_from_capabilities(cap: &Capabilities) -> ParserSettings {
 	ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		recursion_limit: *MAX_PARSING_DEPTH as usize,
 		files_enabled: cap.allows_experimental(&ExperimentalTarget::Files),
 		surrealism_enabled: cap.allows_experimental(&ExperimentalTarget::Surrealism),
 		..Default::default()
@@ -253,8 +277,7 @@ pub(crate) fn expr_legacy_strand(input: &str) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		recursion_limit: *MAX_PARSING_DEPTH as usize,
 		legacy_strands: true,
 		..Default::default()
 	};
@@ -270,8 +293,7 @@ pub fn value(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		recursion_limit: *MAX_PARSING_DEPTH as usize,
 		..Default::default()
 	};
 
@@ -286,8 +308,7 @@ pub fn value_legacy_strand(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		recursion_limit: *MAX_PARSING_DEPTH as usize,
 		legacy_strands: true,
 		..Default::default()
 	};
@@ -304,8 +325,7 @@ pub fn json_legacy_strand(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		recursion_limit: *MAX_PARSING_DEPTH as usize,
 		legacy_strands: true,
 		..Default::default()
 	};
