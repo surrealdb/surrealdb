@@ -13,6 +13,7 @@
 //! An `ExpressionRegistry` is shared between ORDER BY and projection planning
 //! to deduplicate expressions that appear in both clauses.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use surrealdb_types::ToSql;
@@ -495,6 +496,9 @@ impl<'ctx> Planner<'ctx> {
 				// operator (projection functions, nested output paths), fall back.
 				let mut projections = Vec::with_capacity(field_list.len());
 				let mut needs_fallback = false;
+				// Track source field names read by simple Include/Rename projections.
+				// Used post-loop to detect shadowing by Compute internal names.
+				let mut simple_source_fields: HashSet<String> = HashSet::new();
 
 				if has_wildcard {
 					projections.push(Projection::All);
@@ -530,6 +534,7 @@ impl<'ctx> Planner<'ctx> {
 
 								if let Some(field_name) = physical.try_simple_field() {
 									// Simple aliased field: rename
+									simple_source_fields.insert(field_name.to_string());
 									if field_name == output_name {
 										projections.push(Projection::Include(output_name));
 									} else {
@@ -552,6 +557,7 @@ impl<'ctx> Planner<'ctx> {
 								// No alias
 								if let Some(field_name) = physical.try_simple_field() {
 									// Simple field: include directly
+									simple_source_fields.insert(field_name.to_string());
 									projections.push(Projection::Include(field_name.to_string()));
 								} else if let Expr::Idiom(idiom) = &selector.expr {
 									let path = idiom_to_field_path(idiom);
@@ -584,6 +590,27 @@ impl<'ctx> Planner<'ctx> {
 								}
 							}
 						}
+					}
+				}
+
+				// A Compute expression whose internal name matches a simple
+				// projection's source field will overwrite that field in the
+				// per-row object, causing the simple projection to read the
+				// computed value instead of the original. Fall back to the
+				// full Project operator which evaluates every field against
+				// the original row values. Check both Sort and Project
+				// compute points since Sort Compute also feeds into
+				// SelectProject.
+				if !needs_fallback && !simple_source_fields.is_empty() {
+					let has_shadow =
+						[ComputePoint::Sort, ComputePoint::Project].iter().any(|point| {
+							registry
+								.get_expressions_for_point(*point)
+								.iter()
+								.any(|(name, _)| simple_source_fields.contains(name))
+						});
+					if has_shadow {
+						needs_fallback = true;
 					}
 				}
 
