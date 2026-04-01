@@ -292,7 +292,16 @@ pub fn resolve_order_by_alias(order_idiom: &Idiom, fields: &Fields) -> Option<(E
 
 	// Search through SELECT fields for a matching alias
 	match fields {
-		Fields::Value(_) => None, // SELECT VALUE doesn't have aliases
+		Fields::Value(selector) => {
+			// SELECT VALUE v AS x — resolve ORDER BY x to expression v
+			if let Some(ref alias) = selector.alias {
+				let alias_str = idiom_to_string(alias);
+				if alias_str == alias_name {
+					return Some((selector.expr.clone(), alias_str));
+				}
+			}
+			None
+		}
 		Fields::Select(field_list) => {
 			for field in field_list {
 				if let Field::Single(selector) = field {

@@ -9,6 +9,7 @@ use crate::dbs::group::GroupCollector;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
+use crate::expr::FlowResultExt as _;
 use crate::expr::order::Ordering;
 use crate::idx::planner::RecordStrategy;
 use crate::val::Value;
@@ -171,6 +172,29 @@ impl Results {
 			Self::File(f) => f.take_vec().await?,
 			Self::None | Self::Groups(_) => vec![],
 		})
+	}
+
+	/// Apply a deferred SELECT VALUE projection to every collected result.
+	///
+	/// Called after ORDER BY + LIMIT when the VALUE projection was deferred
+	/// so that sorting could see the full document fields.
+	pub(super) async fn project_value(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		expr: &crate::expr::Expr,
+	) -> Result<()> {
+		let values = self.take().await?;
+		let mut projected = Vec::with_capacity(values.len());
+		for v in values {
+			let doc: crate::doc::CursorDoc = v.into();
+			let val =
+				stk.run(|stk| expr.compute(stk, ctx, opt, Some(&doc))).await.catch_return()?;
+			projected.push(val);
+		}
+		*self = Results::Memory(projected.into());
+		Ok(())
 	}
 
 	pub(super) fn explain(&self, exp: &mut Explanation) {

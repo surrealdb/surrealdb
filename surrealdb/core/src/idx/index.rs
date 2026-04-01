@@ -125,33 +125,49 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_unique(&mut self) -> Result<()> {
-		// Get the transaction
 		let txn = self.ctx.tx();
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
-				let key = self.get_unique_index_key(&o)?;
-				match txn.delc(&key, Some(self.rid)).await {
-					Err(e) => {
-						if matches!(
-							e.downcast_ref::<Error>(),
-							Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
-						) {
-							Ok(())
-						} else {
-							Err(e)
-						}
+				if o.is_any_none_or_null() {
+					// NONE/NULL tuples use the non-unique key format (with
+					// record ID suffix) so multiple such entries can coexist.
+					let key = self.get_non_unique_index_key(&o)?;
+					match txn.delc(&key, Some(self.rid)).await {
+						Err(e)
+							if matches!(
+								e.downcast_ref::<Error>(),
+								Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
+							) => {}
+						Err(e) => return Err(e),
+						Ok(()) => {}
 					}
-					Ok(v) => Ok(v),
-				}?
+				} else {
+					let key = self.get_unique_index_key(&o)?;
+					match txn.delc(&key, Some(self.rid)).await {
+						Err(e)
+							if matches!(
+								e.downcast_ref::<Error>(),
+								Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
+							) => {}
+						Err(e) => return Err(e),
+						Ok(()) => {}
+					}
+				}
 			}
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
-				if !n.is_any_none_or_null() {
+				if n.is_any_none_or_null() {
+					// NONE/NULL tuples are stored with the non-unique key
+					// format so they remain visible to index scans. No
+					// uniqueness check — NULL != NULL per SQL convention.
+					let key = self.get_non_unique_index_key(&n)?;
+					txn.set(&key, self.rid, None).await?;
+				} else {
 					let key = self.get_unique_index_key(&n)?;
 					if txn.putc(&key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;

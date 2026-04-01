@@ -243,9 +243,31 @@ impl Document {
 					&self.current
 				};
 
-				if stmt.group.is_some() {
-					// Field computation with groups is deferred to collection.
-					Ok(current.doc.as_ref().clone())
+				if stmt.group.is_some()
+					|| (stmt.order.is_some()
+						&& matches!(stmt.fields, crate::expr::field::Fields::Value(_)))
+				{
+					// Defer field computation: GROUP BY needs grouping first,
+					// SELECT VALUE + ORDER BY needs sorting on the full
+					// document before the VALUE projection strips fields.
+					let mut doc = current.doc.as_ref().clone();
+					// When SELECT VALUE has an alias, ORDER BY may reference the alias. Materialize
+					// it on the document so the sort comparator can find it by name.
+					if let crate::expr::field::Fields::Value(ref sel) = stmt.fields
+						&& let Some(ref alias) = sel.alias
+						&& alias.len() == 1
+						&& let Some(crate::expr::part::Part::Field(name)) = alias.first()
+					{
+						let val = stk
+							.run(|stk| sel.expr.compute(stk, ctx, opt, Some(current)))
+							.await
+							.catch_return()
+							.map_err(IgnoreError::from)?;
+						if let Value::Object(ref mut obj) = doc {
+							obj.insert(name.clone(), val);
+						}
+					}
+					Ok(doc)
 				} else {
 					// Process the SELECT statement fields
 					stmt.fields
