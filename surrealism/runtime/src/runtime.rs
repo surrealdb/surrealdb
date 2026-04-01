@@ -116,6 +116,7 @@ impl Runtime {
 			config,
 			exports,
 			fs,
+			logo: _,
 		}: SurrealismPackage,
 		server_pool_size: usize,
 		server_max_memory: Option<usize>,

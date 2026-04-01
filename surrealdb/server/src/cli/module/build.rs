@@ -47,6 +47,7 @@ pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>, debug: bool) -> R
 	};
 
 	let fs_dir = resolve_attach_fs(&path, &config)?;
+	let logo = resolve_logo(&path);
 
 	println!("Extracting function signatures...");
 	let exports = extract_exports(&wasm, &config).await?;
@@ -56,6 +57,7 @@ pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>, debug: bool) -> R
 		wasm,
 		exports,
 		fs: None,
+		logo,
 	};
 	let out = resolve_output_path(out, &package.config)?;
 	package.pack(out, fs_dir.as_deref()).prefix_err(|| "Failed to pack Surrealism package")?;
@@ -73,6 +75,7 @@ async fn extract_exports(wasm: &[u8], config: &SurrealismConfig) -> Result<Expor
 		wasm: wasm.to_vec(),
 		exports: ExportsManifest::empty(),
 		fs: None,
+		logo: None,
 	};
 
 	let runtime = Runtime::new(temp_package, 1, None, None, None, None)?;
@@ -397,6 +400,25 @@ fn metadata(path: &Path) -> Result<serde_json::Value> {
 		String::from_utf8(output.stdout).prefix_err(|| "Invalid UTF-8 in cargo metadata output")?;
 
 	Ok(serde_json::from_str(&metadata_str).prefix_err(|| "Failed to parse cargo metadata JSON")?)
+}
+
+/// Read `logo.png` from the project root if it exists.
+fn resolve_logo(project_root: &Path) -> Option<Vec<u8>> {
+	let logo_path = project_root.join("logo.png");
+	if logo_path.is_file() {
+		match fs::read(&logo_path) {
+			Ok(bytes) => {
+				println!("Including logo.png ({} bytes)", bytes.len());
+				Some(bytes)
+			}
+			Err(e) => {
+				eprintln!("Warning: failed to read logo.png: {e}");
+				None
+			}
+		}
+	} else {
+		None
+	}
 }
 
 /// Resolve the `[attach] fs` directory path from the config.

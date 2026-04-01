@@ -915,6 +915,7 @@ mod surrealism_integration {
 			wasm: vec![0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00],
 			exports: surrealism_runtime::exports::ExportsManifest::empty(),
 			fs: None,
+			logo: None,
 		};
 
 		let tmp = tempfile::TempDir::new().expect("Failed to create temp dir");

@@ -13,6 +13,10 @@ pub async fn init(file: PathBuf) -> Result<()> {
 	println!("\n{title}");
 	println!("{}\n", "=".repeat(title.len() + 2));
 
+	if let Some(ref logo) = package.logo {
+		println!("Logo: included ({} bytes)", logo.len());
+	}
+
 	for export in &package.exports.functions {
 		let name = match &export.name {
 			None => "<mod>".to_string(),

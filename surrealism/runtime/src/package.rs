@@ -59,6 +59,8 @@ pub struct SurrealismPackage {
 	/// Extracted filesystem from the archive. Present when the archive
 	/// contained `surrealism/fs/` entries.
 	pub fs: Option<AttachedFs>,
+	/// Optional logo image bundled as `surrealism/logo.png` in the archive.
+	pub logo: Option<Vec<u8>>,
 }
 
 /// Options controlling how `from_reader` extracts filesystem entries.
@@ -128,6 +130,7 @@ impl SurrealismPackage {
 		let mut config: Option<SurrealismConfig> = None;
 		let mut exports: Option<ExportsManifest> = None;
 		let mut fs_dir: Option<TempDir> = None;
+		let mut logo: Option<Vec<u8>> = None;
 
 		for entry in archive.entries().prefix_err(|| "Failed to read archive entries")? {
 			let mut entry = entry.prefix_err(|| "Failed to read archive entry")?;
@@ -158,6 +161,12 @@ impl SurrealismPackage {
 					ExportsManifest::parse(&buffer)
 						.prefix_err(|| "Failed to parse exports.toml")?,
 				);
+			} else if entry_str == "surrealism/logo.png" {
+				let mut buffer = Vec::new();
+				entry
+					.read_to_end(&mut buffer)
+					.prefix_err(|| "Failed to read logo.png from archive")?;
+				logo = Some(buffer);
 			} else if entry_str.starts_with(FS_PREFIX) {
 				if fs_dir.is_none() {
 					fs_dir = Some(create_temp_dir(opts)?);
@@ -199,6 +208,7 @@ impl SurrealismPackage {
 			wasm,
 			exports,
 			fs,
+			logo,
 		})
 	}
 
@@ -258,6 +268,16 @@ impl SurrealismPackage {
 		archive
 			.append_data(&mut exports_header, "surrealism/exports.toml", &mut exports_reader)
 			.prefix_err(|| "Failed to add exports.toml to archive")?;
+
+		if let Some(ref logo_bytes) = self.logo {
+			let mut logo_reader = std::io::Cursor::new(logo_bytes);
+			let mut logo_header = tar::Header::new_gnu();
+			logo_header.set_size(logo_bytes.len() as u64);
+			logo_header.set_mode(0o644);
+			archive
+				.append_data(&mut logo_header, "surrealism/logo.png", &mut logo_reader)
+				.prefix_err(|| "Failed to add logo.png to archive")?;
+		}
 
 		if let Some(dir) = fs_dir {
 			archive
