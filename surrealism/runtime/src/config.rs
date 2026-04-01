@@ -152,12 +152,12 @@ version = "0.1.0"
 	#[test]
 	fn parse_full_config() {
 		let toml = r#"
+abi = 2
+
 [package]
 organisation = "acme"
 name = "widget"
 version = "2.3.1"
-
-abi = 2
 
 [capabilities]
 allow_scripting = true
@@ -181,11 +181,12 @@ fs = "static"
 	#[test]
 	fn abi_version_integer() {
 		let toml = r#"
+abi = 2
+
 [package]
 organisation = "t"
 name = "t"
 version = "0.1.0"
-abi = 2
 "#;
 		let config = SurrealismConfig::parse(toml).unwrap();
 		assert_eq!(config.abi, AbiVersion(2));
@@ -194,11 +195,12 @@ abi = 2
 	#[test]
 	fn abi_version_legacy_string() {
 		let toml = r#"
+abi = "p2"
+
 [package]
 organisation = "t"
 name = "t"
 version = "0.1.0"
-abi = "p2"
 "#;
 		let config = SurrealismConfig::parse(toml).unwrap();
 		assert_eq!(config.abi, AbiVersion(2));
@@ -207,11 +209,12 @@ abi = "p2"
 	#[test]
 	fn abi_version_legacy_p1() {
 		let toml = r#"
+abi = "p1"
+
 [package]
 organisation = "t"
 name = "t"
 version = "0.1.0"
-abi = "p1"
 "#;
 		let config = SurrealismConfig::parse(toml).unwrap();
 		assert_eq!(config.abi, AbiVersion(1));

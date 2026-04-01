@@ -302,12 +302,18 @@ allow_scripting = false
 
 	#[test]
 	fn function_targets_roundtrip() {
-		let targets = FunctionTargets::Some(vec!["http::*".into(), "fn::check".into()]);
-		let serialized = toml::to_string(&targets).unwrap();
-		let deserialized: FunctionTargets = toml::from_str(&serialized).unwrap();
-		assert!(deserialized.allows("http::get"));
-		assert!(deserialized.allows("fn::check"));
-		assert!(!deserialized.allows("string::len"));
+		#[derive(Serialize, Deserialize)]
+		struct Wrapper {
+			targets: FunctionTargets,
+		}
+		let wrapper = Wrapper {
+			targets: FunctionTargets::Some(vec!["http::*".into(), "fn::check".into()]),
+		};
+		let serialized = toml::to_string(&wrapper).unwrap();
+		let deserialized: Wrapper = toml::from_str(&serialized).unwrap();
+		assert!(deserialized.targets.allows("http::get"));
+		assert!(deserialized.targets.allows("fn::check"));
+		assert!(!deserialized.targets.allows("string::len"));
 	}
 
 	#[test]
