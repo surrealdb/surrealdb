@@ -62,6 +62,7 @@ use crate::err::Error;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
 use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};
+use crate::http::HttpClient;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
@@ -138,6 +139,8 @@ pub struct Datastore {
 	surrealism_cache: Arc<SurrealismCache>,
 	// Async event processing trigger
 	async_event_trigger: Arc<Notify>,
+	// Http client used to make requests.
+	http_client: Arc<HttpClient>,
 }
 
 /// Represents a collection of metrics for a specific datastore flavor.
@@ -657,6 +660,9 @@ impl Datastore {
 		let async_event_trigger = Arc::new(Notify::new());
 		let tf = TransactionFactory::new(async_event_trigger.clone(), builder);
 		let id = Uuid::new_v4();
+		let capabilities = Arc::new(Capabilities::default());
+		let http_client =
+			Arc::new(HttpClient::new(capabilities).context("Could not create http client")?);
 		Ok(Self {
 			id,
 			transaction_factory: tf.clone(),
@@ -665,7 +671,7 @@ impl Datastore {
 			slow_log: None,
 			transaction_timeout: None,
 			notification_channel: None,
-			capabilities: Arc::new(Capabilities::default()),
+			capabilities,
 			index_stores: IndexStores::default(),
 			index_builder: IndexBuilder::new(tf.clone()),
 			#[cfg(feature = "jwks")]
@@ -678,6 +684,7 @@ impl Datastore {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 			async_event_trigger,
+			http_client,
 		})
 	}
 
@@ -705,7 +712,7 @@ impl Datastore {
 			dynamic_configuration: DynamicConfiguration::default(),
 			slow_log: self.slow_log,
 			transaction_timeout: self.transaction_timeout,
-			capabilities: self.capabilities,
+			capabilities: self.capabilities.clone(),
 			notification_channel: self.notification_channel,
 			index_stores: Default::default(),
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
@@ -720,6 +727,7 @@ impl Datastore {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 			async_event_trigger: self.async_event_trigger,
+			http_client: self.http_client,
 		}
 	}
 
@@ -944,7 +952,7 @@ impl Datastore {
 			);
 			let opt = Options::new(self.id, self.dynamic_configuration.clone())
 				.with_auth(Arc::new(Auth::for_root(Role::Owner)));
-			let mut ctx = Context::default();
+			let mut ctx = self.setup_ctx()?;
 			ctx.set_transaction(txn.clone());
 			let ctx = ctx.freeze();
 			let mut stack = TreeStack::new();
@@ -2036,7 +2044,7 @@ impl Datastore {
 		// Create a new query options
 		let opt = self.setup_options(sess);
 		// Create a default context
-		let mut ctx = Context::default();
+		let mut ctx = self.setup_ctx()?;
 		// Set context capabilities
 		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
@@ -2194,6 +2202,7 @@ impl Datastore {
 			self.index_builder.clone(),
 			self.sequences.clone(),
 			self.cache.clone(),
+			self.http_client.clone(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
@@ -2487,7 +2496,7 @@ mod test {
 			.with_max_computation_depth(u32::MAX);
 
 		// Create a default context
-		let mut ctx = Context::default();
+		let mut ctx = Context::new_test();
 		// Set context capabilities
 		ctx.add_capabilities(dbs.capabilities.clone());
 		// Start a new transaction

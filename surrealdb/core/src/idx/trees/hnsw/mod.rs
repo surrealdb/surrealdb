@@ -882,7 +882,7 @@ mod tests {
 
 	async fn new_ctx(ds: &Datastore, tt: TransactionType) -> FrozenContext {
 		let tx = Arc::new(ds.transaction(tt, Optimistic).await.unwrap());
-		let mut ctx = Context::default();
+		let mut ctx = Context::new_test();
 		ctx.set_transaction(tx);
 		ctx.freeze()
 	}

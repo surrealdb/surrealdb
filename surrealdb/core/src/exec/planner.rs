@@ -1186,7 +1186,7 @@ mod planner_tests {
 			kind: None,
 		}));
 
-		let ctx = Arc::new(Context::background());
+		let ctx = Arc::new(Context::new_test());
 		let plan = Planner::new(&ctx).plan(&expr).await.expect("Planning failed");
 
 		assert_eq!(plan.name(), "Let");
@@ -1197,7 +1197,7 @@ mod planner_tests {
 	async fn test_planner_creates_scalar_plan() {
 		let expr = Expr::Literal(crate::expr::literal::Literal::Integer(42));
 
-		let ctx = Arc::new(Context::background());
+		let ctx = Arc::new(Context::new_test());
 		let plan = Planner::new(&ctx).plan(&expr).await.expect("Planning failed");
 
 		assert_eq!(plan.name(), "Expr");

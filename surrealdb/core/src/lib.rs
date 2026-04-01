@@ -56,6 +56,7 @@ pub mod exec;
 pub mod expr;
 #[cfg(feature = "graphql")]
 pub mod gql;
+mod http;
 pub mod iam;
 pub mod idx;
 pub mod kvs;

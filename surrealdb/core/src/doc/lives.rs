@@ -89,6 +89,7 @@ impl Document {
 					.enter(|stk| {
 						doc.lq_compute(
 							stk,
+							ctx,
 							live_subscription.clone(),
 							lqopt,
 							ctx.tx(),
@@ -109,6 +110,7 @@ impl Document {
 	async fn lq_compute(
 		&self,
 		stk: &mut Stk,
+		ctx: &FrozenContext,
 		live_subscription: SubscriptionDefinition,
 		opt: Options,
 		tx: Arc<Transaction>,
@@ -144,7 +146,7 @@ impl Document {
 		// use for processing this LIVE query statement.
 		// This ensures that we are using the session
 		// of the user who created the LIVE query.
-		let mut ctx = Context::background();
+		let mut ctx = Context::background(ctx);
 		// Set the current transaction on the new LIVE
 		// query context to prevent unreachable behaviour
 		// and ensure that queries can be executed.
