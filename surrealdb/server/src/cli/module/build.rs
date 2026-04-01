@@ -47,7 +47,7 @@ pub async fn init(path: Option<PathBuf>, out: Option<PathBuf>, debug: bool) -> R
 	};
 
 	let fs_dir = resolve_attach_fs(&path, &config)?;
-	let logo = resolve_logo(&path);
+	let logo = resolve_logo(&path)?;
 
 	println!("Extracting function signatures...");
 	let exports = extract_exports(&wasm, &config).await?;
@@ -402,23 +402,25 @@ fn metadata(path: &Path) -> Result<serde_json::Value> {
 	Ok(serde_json::from_str(&metadata_str).prefix_err(|| "Failed to parse cargo metadata JSON")?)
 }
 
-/// Read `logo.png` from the project root if it exists.
-fn resolve_logo(project_root: &Path) -> Option<Vec<u8>> {
+/// Read `logo.png` from the project root if it exists, validating format and size.
+fn resolve_logo(project_root: &Path) -> Result<Option<Vec<u8>>> {
+	use surrealism_runtime::package::{MAX_LOGO_BYTES, verify_logo};
+
 	let logo_path = project_root.join("logo.png");
-	if logo_path.is_file() {
-		match fs::read(&logo_path) {
-			Ok(bytes) => {
-				println!("Including logo.png ({} bytes)", bytes.len());
-				Some(bytes)
-			}
-			Err(e) => {
-				eprintln!("Warning: failed to read logo.png: {e}");
-				None
-			}
-		}
-	} else {
-		None
+	if !logo_path.is_file() {
+		return Ok(None);
 	}
+
+	let bytes = fs::read(&logo_path).prefix_err(|| "Failed to read logo.png")?;
+	verify_logo(&bytes).prefix_err(|| {
+		format!(
+			"Invalid logo.png (must be a valid PNG, max {} KiB)",
+			MAX_LOGO_BYTES / 1024
+		)
+	})?;
+
+	println!("Including logo.png ({} bytes)", bytes.len());
+	Ok(Some(bytes))
 }
 
 /// Resolve the `[attach] fs` directory path from the config.

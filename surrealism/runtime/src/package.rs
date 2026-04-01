@@ -16,6 +16,12 @@ use crate::exports::ExportsManifest;
 /// The 8-byte preamble of a WASM component (layer 1, version 0x0d).
 const COMPONENT_PREAMBLE: [u8; 8] = [0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00];
 
+/// PNG file signature (first 8 bytes of any valid PNG).
+const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+
+/// Maximum allowed logo size: 256 KiB.
+pub const MAX_LOGO_BYTES: usize = 256 * 1024;
+
 /// Verify that the WASM bytes represent a component (not a core module).
 fn verify_component(wasm: &[u8]) -> SurrealismResult<()> {
 	if wasm.len() < 8 || wasm[..8] != COMPONENT_PREAMBLE {
@@ -23,6 +29,24 @@ fn verify_component(wasm: &[u8]) -> SurrealismResult<()> {
 			"expected a WASM component but found a core module. \
 			 Core modules (WASI Preview 1) are no longer supported — \
 			 compile with `--target wasm32-wasip2` to produce a component"
+		)));
+	}
+	Ok(())
+}
+
+/// Validate that logo bytes are a valid PNG within the size limit.
+pub fn verify_logo(bytes: &[u8]) -> SurrealismResult<()> {
+	if bytes.len() > MAX_LOGO_BYTES {
+		return Err(SurrealismError::Other(anyhow::anyhow!(
+			"logo.png is too large ({} bytes, max {} bytes / {} KiB)",
+			bytes.len(),
+			MAX_LOGO_BYTES,
+			MAX_LOGO_BYTES / 1024,
+		)));
+	}
+	if bytes.len() < 8 || bytes[..8] != PNG_SIGNATURE {
+		return Err(SurrealismError::Other(anyhow::anyhow!(
+			"logo.png is not a valid PNG file (invalid file signature)"
 		)));
 	}
 	Ok(())
@@ -194,6 +218,9 @@ impl SurrealismPackage {
 			exports.ok_or_else(|| anyhow::anyhow!("exports.toml not found in archive"))?;
 
 		verify_component(&wasm)?;
+		if let Some(ref logo_bytes) = logo {
+			verify_logo(logo_bytes)?;
+		}
 
 		let fs = fs_dir.map(|dir| {
 			let root = dir.path().join(FS_PREFIX.trim_end_matches('/'));
@@ -270,6 +297,7 @@ impl SurrealismPackage {
 			.prefix_err(|| "Failed to add exports.toml to archive")?;
 
 		if let Some(ref logo_bytes) = self.logo {
+			verify_logo(logo_bytes)?;
 			let mut logo_reader = std::io::Cursor::new(logo_bytes);
 			let mut logo_header = tar::Header::new_gnu();
 			logo_header.set_size(logo_bytes.len() as u64);
