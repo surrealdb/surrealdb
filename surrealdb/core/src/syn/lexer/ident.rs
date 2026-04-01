@@ -44,7 +44,7 @@ impl Lexer<'_> {
 			match x {
 				b'\\' => {
 					// Lexer already ensures there is a valid character after the \
-					Self::lex_common_escape_sequence(&mut reader, span, before, buffer)?;
+					Self::lex_common_escape_sequence(&mut reader, span, before, buffer, false)?;
 				}
 				b'`' => break,
 				x => {
@@ -73,7 +73,7 @@ impl Lexer<'_> {
 			match x {
 				b'\\' => {
 					// Lexer already ensures there is a valid character after the \
-					Self::lex_common_escape_sequence(&mut reader, span, before, buffer)?;
+					Self::lex_common_escape_sequence(&mut reader, span, before, buffer, false)?;
 				}
 				x if !x.is_ascii() => {
 					let c = reader.complete_char(x).expect("valid character");

@@ -2,25 +2,26 @@ use std::io::IsTerminal;
 use std::time::Duration;
 use std::{io, mem, str, thread};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use clap::ArgMatches;
 use provisioner::{Permit, PermitError, Provisioner};
 use semver::Version;
-use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::ExperimentalTarget;
+use surrealdb_core::dbs::Session;
 use surrealdb_core::env::VERSION;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
+use surrealdb_types::ToSql;
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::{select, time};
 
 use crate::cli::{Backend, ColorMode, ResultsMode};
 use crate::format::Progress;
 use crate::runner::Schedular;
-use crate::tests::TestSet;
 use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
 use crate::tests::schema::NewPlannerStrategyConfig;
 use crate::tests::set::TestId;
+use crate::tests::TestSet;
 
 mod provisioner;
 mod util;
@@ -426,6 +427,24 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 	Ok(())
 }
 
+/// Checks for keys retained in the datastore after clean up which should not be there.
+async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
+	const ALLOWED_KEY_PREFIXES: &[&[u8]] = &[b"/!ni", b"/!nh", b"/!nd", b"/!ic"];
+
+	let txn = dbs
+		.transaction(
+			surrealdb_core::kvs::TransactionType::Read,
+			surrealdb_core::kvs::LockType::Pessimistic,
+		)
+		.await?;
+	let res = txn.keys(vec![0]..vec![0xff], 1000, 0, None).await?;
+	txn.cancel().await?;
+	Ok(res
+		.into_iter()
+		.filter(|key| !ALLOWED_KEY_PREFIXES.iter().any(|allowed| key.starts_with(allowed)))
+		.collect())
+}
+
 async fn run_test_with_dbs(
 	id: TestId,
 	set: &TestSet,
@@ -598,6 +617,15 @@ async fn run_test_with_dbs(
 		)
 		.await
 		.context("failed to remove root config")?;
+	}
+
+	// If the test was not a clean test it should ensure that the datastore is reset for the next
+	// test.
+	if !set[id].config.env.as_ref().map(|x| x.clean).unwrap_or(false) {
+		let keys = check_retained_keys(dbs).await?;
+		if !keys.is_empty() {
+			return Ok(TestTaskResult::BadCleanup(keys));
+		}
 	}
 
 	match result {

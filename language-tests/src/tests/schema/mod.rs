@@ -568,6 +568,7 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			flexible_record_id: true,
 			files_enabled: true,
 			surrealism_enabled: true,
+			json_string_escapes: false,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
@@ -630,6 +631,7 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			flexible_record_id: true,
 			files_enabled: true,
 			surrealism_enabled: true,
+			json_string_escapes: false,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
@@ -672,6 +674,7 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			flexible_record_id: true,
 			files_enabled: true,
 			surrealism_enabled: true,
+			json_string_escapes: false,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
