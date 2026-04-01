@@ -4,8 +4,7 @@ use std::collections::BTreeMap;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn::error::RenderedError;
-use surrealdb_types::{Object, Value as SurValue};
-use surrealdb_types::Variables;
+use surrealdb_types::{Object, Value as SurValue, Variables};
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
 use crate::tests::TestSet;
@@ -57,6 +56,7 @@ pub enum TestTaskResult {
 	SignupError(anyhow::Error),
 	SigninError(anyhow::Error),
 	Import(String, String),
+	BadCleanup(Vec<Vec<u8>>),
 	Timeout,
 	Results(Vec<Result<SurValue, String>>),
 	Panicked(Box<dyn Any + Send + 'static>),
@@ -79,6 +79,7 @@ pub enum TestError {
 	Running(String),
 	Panicked(String),
 	Import(String, String),
+	BadCleanup(Vec<Vec<u8>>),
 }
 
 pub enum TestOutputs {
@@ -363,6 +364,7 @@ impl TestReport {
 			TestTaskResult::RunningError(_) => None,
 			TestTaskResult::Timeout => None,
 			TestTaskResult::Import(_, _) => None,
+			TestTaskResult::BadCleanup(_) => None,
 			TestTaskResult::Results(ref e) => Some(TestOutputs::Values(e.clone())),
 			TestTaskResult::Panicked(_) => None,
 		};
@@ -389,6 +391,7 @@ impl TestReport {
 			}
 			TestTaskResult::Timeout => TestReportKind::Error(TestError::Timeout),
 			TestTaskResult::Import(a, b) => TestReportKind::Error(TestError::Import(a, b)),
+			TestTaskResult::BadCleanup(x) => TestReportKind::Error(TestError::BadCleanup(x)),
 			TestTaskResult::Panicked(e) => {
 				let error = e
 					.downcast::<String>()
