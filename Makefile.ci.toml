@@ -606,6 +606,8 @@ args = [
     "--features",
     "allocator,allocation-tracking,storage-mem,storage-rocksdb,scripting,http,jwks,surrealism",
     "--workspace",
+    "--exclude", "demo",
+    "--exclude", "surrealdb-profiling",
     "--",
     "--skip", "api_integration",
     "--skip", "cli_integration",
