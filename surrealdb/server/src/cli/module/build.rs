@@ -413,10 +413,7 @@ fn resolve_logo(project_root: &Path) -> Result<Option<Vec<u8>>> {
 
 	let bytes = fs::read(&logo_path).prefix_err(|| "Failed to read logo.png")?;
 	verify_logo(&bytes).prefix_err(|| {
-		format!(
-			"Invalid logo.png (must be a valid PNG, max {} KiB)",
-			MAX_LOGO_BYTES / 1024
-		)
+		format!("Invalid logo.png (must be a valid PNG, max {} KiB)", MAX_LOGO_BYTES / 1024)
 	})?;
 
 	println!("Including logo.png ({} bytes)", bytes.len());
