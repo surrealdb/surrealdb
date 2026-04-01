@@ -205,6 +205,7 @@ impl<'ctx> Planner<'ctx> {
 		crate::expr::lookup::Lookup {
 			kind,
 			expr,
+			only: _,
 			what,
 			cond,
 			split,

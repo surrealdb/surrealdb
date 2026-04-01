@@ -142,6 +142,8 @@ pub(crate) static PATHS: phf::Map<
 		UniCase::ascii("encoding::base64::encode") => (PathKind::Function, None),
 		UniCase::ascii("encoding::cbor::decode") => (PathKind::Function, None),
 		UniCase::ascii("encoding::cbor::encode") => (PathKind::Function, None),
+		UniCase::ascii("encoding::json::decode") => (PathKind::Function, None),
+		UniCase::ascii("encoding::json::encode") => (PathKind::Function, None),
 		//
 		UniCase::ascii("file::bucket") => (PathKind::Function, None),
 		UniCase::ascii("file::key") => (PathKind::Function, None),

@@ -137,6 +137,9 @@ pub struct ParserSettings {
 	pub files_enabled: bool,
 	/// Whether the surrealism feature is enabled
 	pub surrealism_enabled: bool,
+	/// Whether to allow JSON-style UTF-16 surrogate pairs in \uXXXX escapes.
+	/// Only enabled when parsing JSON input, not SurrealQL.
+	pub json_string_escapes: bool,
 }
 
 impl Default for ParserSettings {
@@ -148,6 +151,7 @@ impl Default for ParserSettings {
 			query_recursion_limit: 20,
 			files_enabled: false,
 			surrealism_enabled: false,
+			json_string_escapes: false,
 		}
 	}
 }
@@ -443,7 +447,12 @@ impl<'a> Parser<'a> {
 
 	pub fn unescape_string_span(&mut self, span: Span) -> Result<&str, SyntaxError> {
 		let str = self.lexer.span_str(span);
-		Lexer::unescape_string_span(str, span, &mut self.unscape_buffer)
+		Lexer::unescape_string_span(
+			str,
+			span,
+			&mut self.unscape_buffer,
+			self.settings.json_string_escapes,
+		)
 	}
 
 	pub fn unescape_regex_span(&mut self, span: Span) -> Result<&str, SyntaxError> {
