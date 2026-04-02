@@ -180,6 +180,7 @@ impl<'ctx> Planner<'ctx> {
 		sub: Option<&str>,
 	) -> Result<bool, Error> {
 		use crate::catalog::providers::DatabaseProvider;
+		use crate::ctx::Context;
 		use crate::expr::module::ModuleExecutable;
 
 		let Some(txn) = &self.txn else {
@@ -199,8 +200,15 @@ impl<'ctx> Planner<'ctx> {
 			.await
 			.map_err(|e| Error::Internal(e.to_string()))?;
 		let executable: ModuleExecutable = val.executable.clone().into();
+		// The planner's self.ctx does not carry a transaction (the executor
+		// sets it after planning). Derive a context with the planner's txn
+		// so that a cache-miss in get_surrealism_runtime can access the
+		// bucket store without panicking.
+		let mut plan_ctx = Context::new(self.ctx);
+		plan_ctx.set_transaction(txn.clone());
+		let frozen = plan_ctx.freeze();
 		let sig = executable
-			.signature(self.ctx, &db_def.namespace_id, &db_def.database_id, sub)
+			.signature(&frozen, &db_def.namespace_id, &db_def.database_id, sub)
 			.await
 			.map_err(|e| Error::Internal(e.to_string()))?;
 		Ok(sig.writeable)
@@ -227,6 +235,7 @@ impl<'ctx> Planner<'ctx> {
 		patch: u32,
 		sub: Option<&str>,
 	) -> Result<bool, Error> {
+		use crate::ctx::Context;
 		use crate::expr::module::SiloExecutable;
 
 		let executable = SiloExecutable {
@@ -236,8 +245,17 @@ impl<'ctx> Planner<'ctx> {
 			minor,
 			patch,
 		};
+		// Same as resolve_module_writeable: derive a context with the
+		// planner's transaction so signature resolution can access stores.
+		let ctx = if let Some(txn) = &self.txn {
+			let mut plan_ctx = Context::new(self.ctx);
+			plan_ctx.set_transaction(txn.clone());
+			plan_ctx.freeze()
+		} else {
+			self.ctx.clone()
+		};
 		let sig = executable
-			.signature(self.ctx, sub)
+			.signature(&ctx, sub)
 			.await
 			.map_err(|e| Error::Internal(e.to_string()))?;
 		Ok(sig.writeable)
