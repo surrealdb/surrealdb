@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -11,6 +13,7 @@ use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, Memo
 use crate::dbs::{Options, Statement};
 use crate::expr::FlowResultExt as _;
 use crate::expr::order::Ordering;
+use crate::expr::part::Part;
 use crate::idx::planner::RecordStrategy;
 use crate::val::Value;
 
@@ -183,14 +186,36 @@ impl Results {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		expr: &crate::expr::Expr,
+		selector: &crate::expr::field::Selector,
 	) -> Result<()> {
 		let values = self.take().await?;
 		let mut projected = Vec::with_capacity(values.len());
+		// Check if the alias was materialized in pluck_select. This matches the
+		// same conditions used there: a single-part simple field alias.
+		let materialized_alias = match &selector.alias {
+			Some(alias) if alias.len() == 1 && matches!(alias.first(), Some(Part::Field(_))) => {
+				Some(alias)
+			}
+			_ => None,
+		};
 		for v in values {
-			let doc: crate::doc::CursorDoc = v.into();
-			let val =
-				stk.run(|stk| expr.compute(stk, ctx, opt, Some(&doc))).await.catch_return()?;
+			let val = if let Some(alias) = materialized_alias {
+				// The expression was already evaluated in pluck_select and stored
+				// under the alias name. Pick it to avoid double-evaluation of
+				// non-deterministic expressions like rand() or time::now().
+				v.pick(alias)
+			} else {
+				// Extract record ID from the document so expressions that depend
+				// on CursorDoc.rid (e.g. the @ / Part::Doc idiom) resolve correctly.
+				let rid = match &v {
+					Value::Object(obj) => obj.rid().map(Arc::new),
+					_ => None,
+				};
+				let doc = crate::doc::CursorDoc::new(rid, None, v);
+				stk.run(|stk| selector.expr.compute(stk, ctx, opt, Some(&doc)))
+					.await
+					.catch_return()?
+			};
 			projected.push(val);
 		}
 		*self = Results::Memory(projected.into());
