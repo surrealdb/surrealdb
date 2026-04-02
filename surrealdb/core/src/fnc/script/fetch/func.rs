@@ -5,16 +5,14 @@ use std::sync::Arc;
 use futures::TryStreamExt;
 use js::function::Opt;
 use js::{Class, Ctx, Exception, Result, Value};
+use reqwest::Body as ReqBody;
 use reqwest::header::{CONTENT_TYPE, HeaderValue};
-use reqwest::{Body as ReqBody, redirect};
-use tokio::runtime::Handle;
 
 use super::classes::Headers;
-use crate::fnc::http::resolver::FilteringResolver;
 use crate::fnc::script::fetch::RequestError;
 use crate::fnc::script::fetch::body::{Body, BodyData, BodyKind};
 use crate::fnc::script::fetch::classes::{
-	self, Request, RequestInit, Response, ResponseInit, ResponseType,
+	Request, RequestInit, Response, ResponseInit, ResponseType,
 };
 use crate::fnc::script::modules::surrealdb::query::QueryContext;
 

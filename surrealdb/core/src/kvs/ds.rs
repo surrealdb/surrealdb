@@ -661,8 +661,9 @@ impl Datastore {
 		let tf = TransactionFactory::new(async_event_trigger.clone(), builder);
 		let id = Uuid::new_v4();
 		let capabilities = Arc::new(Capabilities::default());
-		let http_client =
-			Arc::new(HttpClient::new(capabilities).context("Could not create http client")?);
+		let http_client = Arc::new(
+			HttpClient::new(capabilities.clone()).context("Could not create http client")?,
+		);
 		Ok(Self {
 			id,
 			transaction_factory: tf.clone(),
