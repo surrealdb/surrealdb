@@ -29,3 +29,9 @@ workspace = true
 
 [dev-dependencies]
 ast = { workspace = true, features = ["visualize"] }
+criterion.workspace = true
+
+
+[[bench]]
+name = "bench"
+harness = false
