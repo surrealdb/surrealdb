@@ -765,9 +765,10 @@ impl Iterator {
 			// and pagination are complete, project to the VALUE result.
 			if stm.order().is_some()
 				&& stm.group().is_none()
+				&& plan.explanation.is_none()
 				&& let Some(Fields::Value(selector)) = stm.expr()
 			{
-				self.results.project_value(stk, ctx, opt, &selector.expr).await?;
+				self.results.project_value(stk, ctx, opt, selector).await?;
 			}
 			// Process any FETCH clause
 			if let Some(e) = &mut plan.explanation {
