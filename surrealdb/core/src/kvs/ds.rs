@@ -26,7 +26,7 @@ use tokio::spawn;
 use tokio::sync::Notify;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
-use tokio::time::{Instant, sleep};
+use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, trace, warn};
 use uuid::Uuid;
@@ -850,7 +850,7 @@ impl Datastore {
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn check_version(&self) -> Result<(MajorVersion, bool)> {
 		// Retry because concurrent instances may conflict when writing the version key
-		let (version, is_new) = Self::retry(Duration::from_secs(60), || self.get_version()).await?;
+		let (version, is_new) = Self::retry(None, None, || self.get_version()).await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
 			bail!(Error::OutdatedStorageVersion {
@@ -920,8 +920,7 @@ impl Datastore {
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn initialise_credentials(&self, user: &str, pass: &str) -> Result<()> {
 		// Retry because concurrent instances may conflict when creating the root user
-		Self::retry(Duration::from_secs(60), || self.initialise_credentials_attempt(user, pass))
-			.await
+		Self::retry(None, None, || self.initialise_credentials_attempt(user, pass)).await
 	}
 
 	/// Single attempt to create the root user if none exists.
@@ -1017,13 +1016,12 @@ impl Datastore {
 	pub async fn bootstrap(&self) -> Result<()> {
 		// Each bootstrap step is retried independently, because concurrent instances
 		// writing to the same cluster metadata keys may cause transaction conflicts.
-		let time_out = Duration::from_secs(60);
 		// Insert this node in the cluster
-		Self::retry(time_out, || self.insert_node()).await?;
+		Self::retry(None, None, || self.insert_node()).await?;
 		// Mark inactive nodes as archived
-		Self::retry(time_out, || self.expire_nodes()).await?;
+		Self::retry(None, None, || self.expire_nodes()).await?;
 		// Remove archived nodes
-		Self::retry(time_out, || self.remove_nodes()).await?;
+		Self::retry(None, None, || self.remove_nodes()).await?;
 		// Everything ok
 		Ok(())
 	}
@@ -1043,28 +1041,41 @@ impl Datastore {
 	/// `timeout` by up to one attempt duration plus the preceding back-off.
 	/// If no attempt succeeds within the budget, the conflict error from
 	/// the last failed attempt is surfaced.
-	async fn retry<F, Fut, R>(timeout: Duration, func: F) -> Result<R>
+	async fn retry<F, Fut, R>(
+		global_time_out: Option<Duration>,
+		per_attempt_timeout: Option<Duration>,
+		func: F,
+	) -> Result<R>
 	where
 		F: Fn() -> Fut,
 		Fut: Future<Output = Result<R>>,
 	{
+		let global_time_out = global_time_out.unwrap_or(Duration::from_secs(60));
+		let per_attempt_timeout = per_attempt_timeout.unwrap_or(Duration::from_secs(20));
 		let time = Instant::now();
+		let mut last_error = None;
 		loop {
-			match func().await {
-				Ok(result) => return Ok(result),
-				Err(e) => {
-					if let Some(crate::kvs::Error::TransactionConflict(_)) = e.downcast_ref() {
-						if time.elapsed() > timeout {
-							bail!(e);
+			if let Ok(result) = timeout(per_attempt_timeout, func()).await {
+				match result {
+					Ok(result) => return Ok(result),
+					Err(e) => {
+						if let Some(crate::kvs::Error::TransactionConflict(_)) = e.downcast_ref() {
+							last_error = Some(e);
+						} else {
+							return Err(e);
 						}
-						// Randomised back-off to stagger retries across competing instances
-						let tempo = Duration::from_secs(thread_rng().gen_range(0..10));
-						sleep(tempo).await;
-					} else {
-						return Err(e);
 					}
 				}
 			}
+			if time.elapsed() > global_time_out {
+				if let Some(e) = last_error {
+					bail!(e);
+				}
+				bail!(Error::QueryTimedout(global_time_out.into()));
+			}
+			// Randomised back-off to stagger retries across competing instances
+			let tempo = Duration::from_secs(thread_rng().gen_range(0..10));
+			sleep(tempo).await;
 		}
 	}
 
