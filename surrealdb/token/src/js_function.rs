@@ -4,22 +4,28 @@ use crate::Joined;
 
 #[derive(Logos, Clone, Copy, PartialEq, Eq, Debug)]
 #[logos(extras = Joined)]
-#[logos(subpattern source = r#"[^\]\[\{\}\(\)"'`]|//[^\n]*\n|/\*([^*]|\*[^/])*\*/|"([^"]|\\")*"|'([^']|\\')*'|\\\{|\\\}|\\\(|\\\)|\\\[|\\\]"#)]
 pub enum JsFunctionToken {
-	#[regex(r"(?&source)*\{")]
+	#[token("{", priority = 10)]
 	BraceOpen,
-	#[regex(r"(?&source)*\}")]
+	#[token(r"}", priority = 10)]
 	BraceClose,
-	#[regex(r"(?&source)*\[")]
+	#[token(r"[", priority = 10)]
 	BracketOpen,
-	#[regex(r"(?&source)*\]")]
+	#[token(r"]", priority = 10)]
 	BracketClose,
-	#[regex(r"(?&source)*\(")]
+	#[token(r"(", priority = 10)]
 	ParenOpen,
-	#[regex(r"(?&source)*\)")]
+	#[token(r")", priority = 10)]
 	ParenClose,
-	#[regex(r"(?&source)*\`")]
+	#[token("`", priority = 10)]
 	TemplateOpen,
+	#[regex(r"(?s).")]
+	#[regex(r"(?s)\\.", priority = 11)]
+	#[regex(r#""([^\\"]|\\.)*""#)]
+	#[regex(r#"'([^\\']|\\.)*'"#)]
+	#[regex(r#"/*([^*]|\*[^\\])*\*/'"#)]
+	#[regex(r#"//[^\n\u2028\u2029]*"#)]
+	Characters,
 }
 
 #[derive(Logos, Clone, Copy, PartialEq, Eq, Debug)]

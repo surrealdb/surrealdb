@@ -923,6 +923,7 @@ impl ParseSync for ast::JsFunctionBody {
 					Some(Ok(JsFunctionToken::TemplateOpen)) => {
 						lex_template(&mut lexer, &mut delim_stack, partial)?;
 					}
+					Some(Ok(JsFunctionToken::Characters)) => {}
 					// lexer should have no invalid characters so it should never error.
 					Some(Err(_)) => unreachable!("{:?}", lexer.slice()),
 					None => {

@@ -1,10 +1,17 @@
 東京::Москва::Ĳsselmeer;
 /* ===== result =====
-ERROR:Error: Invalid token
-  |> ???:1:1
-  |
-1 | 東京::Москва::Ĳsselmeer;
-  | ^ 
-
-
+Query
+    .exprs: Some
+        -TopLevelExpr::Expr
+            Expr::Path
+                Path
+                    .start: Ident
+                        .text: "東京"
+                    .parts: Some
+                        -PathSegment::Ident
+                            Ident
+                                .text: "Москва"
+                        -PathSegment::Ident
+                            Ident
+                                .text: "Ĳsselmeer"
 */
