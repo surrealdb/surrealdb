@@ -209,6 +209,19 @@ impl DefineAccessStatement {
 				key: stk.run(|stk| x.key.compute(stk, ctx, opt, doc)).await.catch_return()?.cast_to()?,
 			});
 
+			// Reject ES512 as it is not currently supported by the underlying cryptography library.
+			// Existing ES512 definitions will continue to work (falling back to ES384) but new ones are blocked.
+			if let catalog::JwtAccessVerify::Key(ref ver) = verify {
+				if matches!(ver.alg, catalog::Algorithm::Es512) {
+					bail!(Error::AccessUnsupportedAlgorithm);
+				}
+			}
+			if let Some(ref iss) = issue {
+				if matches!(iss.alg, catalog::Algorithm::Es512) {
+					bail!(Error::AccessUnsupportedAlgorithm);
+				}
+			}
+
 			// Validate symmetric algorithm key consistency
 			if let (catalog::JwtAccessVerify::Key(ver), Some(iss)) = (&verify, &issue)
 				&& ver.alg.is_symmetric()

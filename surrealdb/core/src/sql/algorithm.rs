@@ -37,7 +37,9 @@ impl From<Algorithm> for jsonwebtoken::Algorithm {
 			Algorithm::EdDSA => jsonwebtoken::Algorithm::EdDSA,
 			Algorithm::Es256 => jsonwebtoken::Algorithm::ES256,
 			Algorithm::Es384 => jsonwebtoken::Algorithm::ES384,
-			Algorithm::Es512 => jsonwebtoken::Algorithm::ES384,
+			Algorithm::Es512 => {
+				panic!("ES512 is not supported by the jsonwebtoken crate. This should be caught earlier during access method configuration.")
+			}
 			Algorithm::Ps256 => jsonwebtoken::Algorithm::PS256,
 			Algorithm::Ps384 => jsonwebtoken::Algorithm::PS384,
 			Algorithm::Ps512 => jsonwebtoken::Algorithm::PS512,

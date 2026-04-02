@@ -44,7 +44,10 @@ fn algorithm_to_jwt_algorithm(alg: catalog::Algorithm) -> jsonwebtoken::Algorith
 		catalog::Algorithm::EdDSA => jsonwebtoken::Algorithm::EdDSA,
 		catalog::Algorithm::Es256 => jsonwebtoken::Algorithm::ES256,
 		catalog::Algorithm::Es384 => jsonwebtoken::Algorithm::ES384,
-		catalog::Algorithm::Es512 => jsonwebtoken::Algorithm::ES384,
+		catalog::Algorithm::Es512 => {
+			warn!("ES512 is not currently supported by the underlying cryptography library and will fall back to ES384. Please update your access definition to use ES384 or another supported algorithm.");
+			jsonwebtoken::Algorithm::ES384
+		}
 		catalog::Algorithm::Ps256 => jsonwebtoken::Algorithm::PS256,
 		catalog::Algorithm::Ps384 => jsonwebtoken::Algorithm::PS384,
 		catalog::Algorithm::Ps512 => jsonwebtoken::Algorithm::PS512,
