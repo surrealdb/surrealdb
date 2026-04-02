@@ -273,9 +273,12 @@ impl<'a> Arbitrary<'a> for Lookup {
 					_ => unreachable!(),
 				};
 
+				let only = expr.is_some() && u.arbitrary()?;
+
 				Lookup {
 					kind: u.arbitrary()?,
 					expr,
+					only,
 					what: u.arbitrary()?,
 					cond: u.arbitrary()?,
 					split,

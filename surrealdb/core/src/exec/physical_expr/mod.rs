@@ -11,7 +11,7 @@ use crate::exec::{AccessMode, ContextLevel, ExecOperator, ExecutionContext, Send
 use crate::expr::FlowResult;
 use crate::expr::idiom::Idiom;
 use crate::kvs::Transaction;
-use crate::val::Value;
+use crate::val::{RecordId, Value};
 
 mod block;
 mod collections;
@@ -103,6 +103,13 @@ pub struct EvalContext<'a> {
 	/// permission checks that would otherwise recurse infinitely on cyclic
 	/// links with conditional table permissions.
 	pub skip_fetch_perms: bool,
+
+	/// RecordId currently having its computed fields evaluated.
+	/// When a field dereference targets this same RecordId, raw data is
+	/// returned without re-evaluating computed fields, breaking what would
+	/// otherwise be infinite recursion (e.g. `$this.id.prop` on a record
+	/// whose computed field accesses `$this.id.prop`).
+	pub computing_record: Option<RecordId>,
 }
 
 impl<'a> EvalContext<'a> {
@@ -117,6 +124,7 @@ impl<'a> EvalContext<'a> {
 			recursion_ctx: None,
 			document_root: None,
 			skip_fetch_perms: exec_ctx.root().skip_fetch_perms,
+			computing_record: None,
 		}
 	}
 
@@ -129,6 +137,7 @@ impl<'a> EvalContext<'a> {
 			recursion_ctx: self.recursion_ctx.clone(),
 			document_root: self.document_root,
 			skip_fetch_perms: self.skip_fetch_perms,
+			computing_record: self.computing_record.clone(),
 		}
 	}
 
@@ -143,6 +152,7 @@ impl<'a> EvalContext<'a> {
 			recursion_ctx: self.recursion_ctx.clone(),
 			document_root: Some(value),
 			skip_fetch_perms: self.skip_fetch_perms,
+			computing_record: self.computing_record.clone(),
 		}
 	}
 
@@ -155,6 +165,7 @@ impl<'a> EvalContext<'a> {
 			recursion_ctx: Some(ctx),
 			document_root: self.document_root,
 			skip_fetch_perms: self.skip_fetch_perms,
+			computing_record: self.computing_record.clone(),
 		}
 	}
 

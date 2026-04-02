@@ -1,9 +1,11 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, HashMap, HashSet, LinkedList, VecDeque};
 use std::hash::Hash;
+use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use castaway::{cast, match_type};
 use rust_decimal::Decimal;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -1733,22 +1735,207 @@ impl<T: SurrealValue + Ord> SurrealValue for BinaryHeap<T> {
 ///
 /// As such, it's best to use SurrealValue directly where possible. This is intended for types where
 /// an implementation of SurrealValue isn't available or practical
-pub struct SerdeWrapper<T: Serialize + DeserializeOwned>(pub T);
+pub struct SerdeWrapper<T: Serialize + DeserializeOwned + 'static>(pub T);
 
-impl<T: Serialize + DeserializeOwned> SurrealValue for SerdeWrapper<T> {
+impl<T: Serialize + DeserializeOwned + 'static> SurrealValue for SerdeWrapper<T> {
 	fn kind_of() -> Kind {
 		Kind::Any
 	}
 
 	fn into_value(self) -> Value {
-		self.0.serialize(Serializer).expect("serialization to a value failed!")
+		match_type!(self.0, {
+			uuid::Uuid as uuid => Value::Uuid(Uuid::from(uuid)),
+			chrono::DateTime<chrono::Utc> as datetime => Value::Datetime(Datetime::from(datetime)),
+			std::time::Duration as duration => Value::Duration(Duration::from(duration)),
+			Vec<uuid::Uuid> as uuids => Value::Array(Array(
+				uuids.into_iter().map(|uuid| Value::Uuid(Uuid::from(uuid))).collect(),
+			)),
+			Vec<chrono::DateTime<chrono::Utc>> as datetimes => Value::Array(Array(
+				datetimes
+					.into_iter()
+					.map(|datetime| Value::Datetime(Datetime::from(datetime)))
+					.collect(),
+			)),
+			Vec<std::time::Duration> as durations => Value::Array(Array(
+				durations
+					.into_iter()
+					.map(|duration| Value::Duration(Duration::from(duration)))
+					.collect(),
+			)),
+			Option<uuid::Uuid> as uuid => uuid.map(|uuid| Value::Uuid(Uuid::from(uuid))).unwrap_or(Value::None),
+			Option<chrono::DateTime<chrono::Utc>> as datetime => datetime
+				.map(|datetime| Value::Datetime(Datetime::from(datetime)))
+				.unwrap_or(Value::None),
+			Option<std::time::Duration> as duration => duration
+				.map(|duration| Value::Duration(Duration::from(duration)))
+				.unwrap_or(Value::None),
+			BTreeMap<String, uuid::Uuid> as map => Value::Object(Object(
+				map
+					.into_iter()
+					.map(|(key, uuid)| (key, Value::Uuid(Uuid::from(uuid))))
+					.collect(),
+			)),
+			BTreeMap<String, chrono::DateTime<chrono::Utc>> as map => Value::Object(Object(
+				map
+					.into_iter()
+					.map(|(key, datetime)| (key, Value::Datetime(Datetime::from(datetime))))
+					.collect(),
+			)),
+		BTreeMap<String, std::time::Duration> as map => Value::Object(Object(
+			map
+				.into_iter()
+				.map(|(key, duration)| (key, Value::Duration(Duration::from(duration))))
+				.collect(),
+		)),
+		HashMap<String, uuid::Uuid> as map => Value::Object(Object(
+			map
+				.into_iter()
+				.map(|(key, uuid)| (key, Value::Uuid(Uuid::from(uuid))))
+				.collect(),
+		)),
+		HashMap<String, chrono::DateTime<chrono::Utc>> as map => Value::Object(Object(
+			map
+				.into_iter()
+				.map(|(key, datetime)| (key, Value::Datetime(Datetime::from(datetime))))
+				.collect(),
+		)),
+		HashMap<String, std::time::Duration> as map => Value::Object(Object(
+			map
+				.into_iter()
+				.map(|(key, duration)| (key, Value::Duration(Duration::from(duration))))
+				.collect(),
+		)),
+		value => match value.serialize(Serializer) {
+			Ok(value) => value,
+			Err(err) => {
+				let error = format!("SerdeWrapper serialization to value failed: {err}");
+				debug_assert!(false, "{error}");
+				tracing::warn!("{error}");
+				// TODO: `into_value` should return `Result` so we can propagate
+				// this error instead of silently dropping it. For now we return
+				// `Value::None` since that's the least harmful fallback.
+				Value::None
+			}
+		},
+		})
 	}
 
 	fn from_value(value: Value) -> Result<Self, Error>
 	where
 		Self: Sized,
 	{
-		Ok(Self(T::deserialize(value)?))
+		let cast_error = |target: &str| {
+			Error::serialization(
+				format!("failed to cast {target} wrapper type"),
+				SerializationError::Deserialization,
+			)
+		};
+
+		match_type!(PhantomData::<T>, {
+			PhantomData<uuid::Uuid> as _ => {
+				let uuid = uuid::Uuid::from_value(value)?;
+				let typed = cast!(uuid, T).map_err(|_| cast_error("uuid"))?;
+				Ok(Self(typed))
+			},
+			PhantomData<chrono::DateTime<chrono::Utc>> as _ => {
+				let datetime = chrono::DateTime::<chrono::Utc>::from_value(value)?;
+				let typed = cast!(datetime, T).map_err(|_| cast_error("datetime"))?;
+				Ok(Self(typed))
+			},
+			PhantomData<std::time::Duration> as _ => {
+				let duration = std::time::Duration::from_value(value)?;
+				let typed = cast!(duration, T).map_err(|_| cast_error("duration"))?;
+				Ok(Self(typed))
+			},
+			PhantomData<Vec<uuid::Uuid>> as _ => {
+				let uuids = Vec::<Uuid>::from_value(value)?
+					.into_iter()
+					.map(Uuid::into_inner)
+					.collect::<Vec<_>>();
+				let typed = cast!(uuids, T).map_err(|_| cast_error("uuid vec"))?;
+				Ok(Self(typed))
+			},
+			PhantomData<Vec<chrono::DateTime<chrono::Utc>>> as _ => {
+				let datetimes = Vec::<Datetime>::from_value(value)?
+					.into_iter()
+					.map(Datetime::into_inner)
+					.collect::<Vec<_>>();
+				let typed = cast!(datetimes, T).map_err(|_| cast_error("datetime vec"))?;
+				Ok(Self(typed))
+			},
+			PhantomData<Vec<std::time::Duration>> as _ => {
+				let durations = Vec::<Duration>::from_value(value)?
+					.into_iter()
+					.map(Duration::into_inner)
+					.collect::<Vec<_>>();
+				let typed = cast!(durations, T).map_err(|_| cast_error("duration vec"))?;
+				Ok(Self(typed))
+			},
+			PhantomData<Option<uuid::Uuid>> as _ => {
+				let uuid = Option::<Uuid>::from_value(value)?.map(Uuid::into_inner);
+				let typed = cast!(uuid, T).map_err(|_| cast_error("uuid option"))?;
+				Ok(Self(typed))
+			},
+			PhantomData<Option<chrono::DateTime<chrono::Utc>>> as _ => {
+				let datetime = Option::<Datetime>::from_value(value)?.map(Datetime::into_inner);
+				let typed = cast!(datetime, T).map_err(|_| cast_error("datetime option"))?;
+				Ok(Self(typed))
+			},
+			PhantomData<Option<std::time::Duration>> as _ => {
+				let duration = Option::<Duration>::from_value(value)?.map(Duration::into_inner);
+				let typed = cast!(duration, T).map_err(|_| cast_error("duration option"))?;
+				Ok(Self(typed))
+			},
+			PhantomData<BTreeMap<String, uuid::Uuid>> as _ => {
+				let map = BTreeMap::<String, Uuid>::from_value(value)?
+					.into_iter()
+					.map(|(key, uuid)| (key, uuid.into_inner()))
+					.collect::<BTreeMap<_, _>>();
+				let typed = cast!(map, T).map_err(|_| cast_error("uuid map"))?;
+				Ok(Self(typed))
+			},
+			PhantomData<BTreeMap<String, chrono::DateTime<chrono::Utc>>> as _ => {
+				let map = BTreeMap::<String, Datetime>::from_value(value)?
+					.into_iter()
+					.map(|(key, datetime)| (key, datetime.into_inner()))
+					.collect::<BTreeMap<_, _>>();
+				let typed = cast!(map, T).map_err(|_| cast_error("datetime map"))?;
+				Ok(Self(typed))
+			},
+		PhantomData<BTreeMap<String, std::time::Duration>> as _ => {
+			let map = BTreeMap::<String, Duration>::from_value(value)?
+				.into_iter()
+				.map(|(key, duration)| (key, duration.into_inner()))
+				.collect::<BTreeMap<_, _>>();
+			let typed = cast!(map, T).map_err(|_| cast_error("duration map"))?;
+			Ok(Self(typed))
+		},
+		PhantomData<HashMap<String, uuid::Uuid>> as _ => {
+			let map = HashMap::<String, Uuid>::from_value(value)?
+				.into_iter()
+				.map(|(key, uuid)| (key, uuid.into_inner()))
+				.collect::<HashMap<_, _>>();
+			let typed = cast!(map, T).map_err(|_| cast_error("uuid hashmap"))?;
+			Ok(Self(typed))
+		},
+		PhantomData<HashMap<String, chrono::DateTime<chrono::Utc>>> as _ => {
+			let map = HashMap::<String, Datetime>::from_value(value)?
+				.into_iter()
+				.map(|(key, datetime)| (key, datetime.into_inner()))
+				.collect::<HashMap<_, _>>();
+			let typed = cast!(map, T).map_err(|_| cast_error("datetime hashmap"))?;
+			Ok(Self(typed))
+		},
+		PhantomData<HashMap<String, std::time::Duration>> as _ => {
+			let map = HashMap::<String, Duration>::from_value(value)?
+				.into_iter()
+				.map(|(key, duration)| (key, duration.into_inner()))
+				.collect::<HashMap<_, _>>();
+			let typed = cast!(map, T).map_err(|_| cast_error("duration hashmap"))?;
+			Ok(Self(typed))
+		},
+		_ => Ok(Self(T::deserialize(value)?)),
+		})
 	}
 }
 
@@ -1760,6 +1947,7 @@ mod test {
 	use serde::{Deserialize, Serialize};
 
 	use super::*;
+	use crate::RecordIdKey;
 
 	#[derive(Serialize, Deserialize, PartialEq, Debug)]
 	enum Test {
@@ -1779,6 +1967,14 @@ mod test {
 
 	#[derive(Serialize, Deserialize, PartialEq, Debug)]
 	struct Gerald;
+
+	#[derive(Clone, Serialize, Deserialize, PartialEq, Debug)]
+	struct SpecialPayload {
+		uuid: Uuid,
+		datetime: Datetime,
+		duration: Duration,
+		record_id: RecordId,
+	}
 
 	#[rstest]
 	#[case::u8(64_u8)]
@@ -1812,6 +2008,74 @@ mod test {
 		let deserialized_value =
 			<_ as Deserialize>::deserialize(serialized_value).expect("this should work!");
 		assert_eq!(value, deserialized_value);
+	}
+
+	#[test]
+	fn wrapper_roundtrip_special_surreal_types_uses_native_variants() {
+		let datetime =
+			Datetime::from_timestamp(1_706_660_400, 123_000_000).expect("valid datetime");
+		let uuid = Uuid::new_v4();
+		let duration = Duration::new(42, 7);
+		let record_id = RecordId::new("person", RecordIdKey::Uuid(Uuid::new_v4()));
+
+		assert_eq!(SerdeWrapper(datetime).into_value(), datetime.into_value());
+		assert_eq!(SerdeWrapper(uuid).into_value(), uuid.into_value());
+		assert_eq!(SerdeWrapper(duration).into_value(), duration.into_value());
+		assert_eq!(SerdeWrapper(record_id.clone()).into_value(), record_id.clone().into_value());
+
+		assert_eq!(
+			SerdeWrapper::<Datetime>::from_value(datetime.into_value())
+				.expect("roundtrip Datetime")
+				.0,
+			datetime
+		);
+		assert_eq!(
+			SerdeWrapper::<Uuid>::from_value(uuid.into_value()).expect("roundtrip Uuid").0,
+			uuid
+		);
+		assert_eq!(
+			SerdeWrapper::<Duration>::from_value(duration.into_value())
+				.expect("roundtrip Duration")
+				.0,
+			duration
+		);
+		assert_eq!(
+			SerdeWrapper::<RecordId>::from_value(record_id.clone().into_value())
+				.expect("roundtrip RecordId")
+				.0,
+			record_id
+		);
+	}
+
+	#[test]
+	fn wrapper_roundtrip_nested_payload_keeps_surreal_types() {
+		let payload = SpecialPayload {
+			uuid: Uuid::new_v4(),
+			datetime: Datetime::from_timestamp(1_706_660_400, 0).expect("valid datetime"),
+			duration: Duration::new(3600, 500),
+			record_id: RecordId::new("person", "alice"),
+		};
+
+		let value = SerdeWrapper(payload.clone()).into_value();
+		let Value::Object(object) = &value else {
+			panic!("payload should serialize to object");
+		};
+		assert!(matches!(object.get("uuid"), Some(Value::Uuid(_))));
+		assert!(matches!(object.get("datetime"), Some(Value::Datetime(_))));
+		assert!(matches!(object.get("duration"), Some(Value::Duration(_))));
+		assert!(matches!(object.get("record_id"), Some(Value::RecordId(_))));
+
+		let roundtrip = SerdeWrapper::<SpecialPayload>::from_value(value)
+			.expect("payload should deserialize from value")
+			.0;
+		assert_eq!(roundtrip, payload);
+	}
+
+	#[test]
+	fn deserializing_none_into_non_option_is_an_error_not_a_panic() {
+		let result = std::panic::catch_unwind(|| i64::deserialize(Value::None));
+		assert!(result.is_ok(), "deserializing Value::None should not panic");
+		assert!(result.expect("no panic").is_err());
 	}
 
 	#[test]

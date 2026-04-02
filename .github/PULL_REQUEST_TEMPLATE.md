@@ -1,5 +1,11 @@
 Thank you for submitting this pull request. We really appreciate you spending the time to work on SurrealDB. 🚀 🎉 
 
+Before proceeding, please add any of the following labels that apply:
+
+* `breaking-change` if this PR includes a breaking change. This label is not needed for bug fixes, which change output in line with a user's original expectations.
+* `needs-documentation` if documentation is needed to explain the change made in the PR.
+* `Modifies env vars or commands` if any changes are made to environment variables or command flags.
+
 ## What is the motivation?
 
 <!-- Please provide details on the motivation for why you have made this change.-->
@@ -26,18 +32,6 @@ No details provided.
 <!-- If this pull request is related to other pull requests, or resolves any issues, then link all related or closed items here, using 'Closes #101' or 'Fixes #101' to automatically close any linked issues. -->
 
 - [ ] No related issues
-
-## Does this change need documentation?
-
-<!-- If this pull request requires changes, updates, or improvements to the documentation, then add a corresponding issue on the https://github.com/surrealdb/docs.surrealdb.com repository, and link to it here. -->
-
-- [ ] No documentation needed
-
-## Does this change make any alterations to environment variables or CLI commands?
-
-<!-- Please add the label "Modifies env vars or commands" from the Labels dropdown to the right and detail the changes. -->
-
-- [ ] No changes made to env vars
 
 ## Have you read the Contributing Guidelines?
 

@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Verify IN with arrays larger than the expansion limit (32) falls back to TableScan instead of creating excessive UnionIndexScan branches"
 

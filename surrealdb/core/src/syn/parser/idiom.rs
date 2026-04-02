@@ -661,14 +661,15 @@ impl Parser<'_> {
 			}
 			t!("(") => {
 				let span = self.pop_peek().span;
-				let expr = if self.eat(t!("SELECT")) {
+				let (expr, only) = if self.eat(t!("SELECT")) {
 					let before = self.peek().span;
 					let expr = self.parse_fields(stk).await?;
 					let fields_span = before.covers(self.last_span());
 					expected!(self, t!("FROM"));
-					Some((expr, fields_span))
+					let only = self.eat(t!("ONLY"));
+					(Some((expr, fields_span)), only)
 				} else {
-					None
+					(None, false)
 				};
 
 				let token = self.peek();
@@ -720,10 +721,11 @@ impl Parser<'_> {
 
 				Ok(Lookup {
 					kind: lookup_kind,
+					expr: expr.map(|(x, _)| x),
+					only,
 					what,
 					cond,
 					alias,
-					expr: expr.map(|(x, _)| x),
 					split,
 					group,
 					order,

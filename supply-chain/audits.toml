@@ -36,6 +36,11 @@ who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
 version = "0.25.5"
 
+[[audits.castaway]]
+who = "Rushmore Mushambi <rushmore@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.2 -> 0.2.4"
+
 [[audits.const-random]]
 who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"

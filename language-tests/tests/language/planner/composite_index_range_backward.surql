@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test composite index with equality prefix and range condition in backward (DESC) direction"
 

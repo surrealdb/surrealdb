@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test HNSW index for KNN queries with parameter-based vectors in the new executor"
 

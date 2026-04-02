@@ -206,6 +206,25 @@ impl TestReport {
 				writeln!(f, "> Test failed, running import `{import}` caused an error:")?;
 				f.indent(|f| writeln!(f, "- {error}"))
 			}
+			TestError::BadCleanup(x) => {
+				writeln!(
+					f,
+					"> Test failed, test was not specified as clean yet it retained database keys:"
+				)?;
+				f.indent(|f| {
+					for x in x.iter() {
+						write!(f, "- [")?;
+						for (idx, &b) in x.iter().enumerate() {
+							if idx != 0 {
+								write!(f, ",")?;
+							}
+							write!(f, "{}", (b as char).escape_debug())?;
+						}
+						writeln!(f, "]")?;
+					}
+					Ok(())
+				})
+			}
 		}
 	}
 

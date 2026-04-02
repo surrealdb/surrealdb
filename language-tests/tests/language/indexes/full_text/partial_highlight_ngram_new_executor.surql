@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test partial highlights and offsets with ngram analyzer (new executor)"
 
