@@ -175,11 +175,11 @@ pub enum BaseTokenKind {
 
 	#[regex(r"\$(?&backtick_ident)")]
 	#[regex(r"\$(?&bracket_ident)")]
-	#[regex(r"\$\p{XID_Continue}+", priority = 3)]
+	#[regex(r"\$[_0-9a-zA-Z]+", priority = 3)]
 	Param,
 	#[regex(r"(?&backtick_ident)")]
 	#[regex(r"(?&bracket_ident)")]
-	#[regex(r"[_\p{XID_Start}]\p{XID_Continue}*")]
+	#[regex(r"[_a-zA-Z][_0-9a-zA-Z]*")]
 	Ident,
 
 	#[token("NaN")]

@@ -29,6 +29,6 @@ pub enum RecordIdKeyToken {
 	Number,
 	#[regex(r"(?&backtick_ident)")]
 	#[regex(r"(?&bracket_ident)")]
-	#[regex(r"\p{XID_Continue}+")]
+	#[regex(r"[_0-9a-zA-Z]+")]
 	Identifier,
 }
