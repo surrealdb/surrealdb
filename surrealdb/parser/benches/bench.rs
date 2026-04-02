@@ -1,5 +1,7 @@
+use std::hint::black_box;
+use std::path::Path;
+
 use criterion::{Criterion, criterion_group, criterion_main};
-use std::{hint::black_box, path::Path};
 
 fn parse(s: &str) {
 	let x = surrealdb_parser::Parser::enter_parse::<ast::Query>(black_box(s), Default::default())

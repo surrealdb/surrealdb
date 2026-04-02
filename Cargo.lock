@@ -2977,10 +2977,6 @@ name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
-dependencies = [
- "ahash 0.8.12",
- "allocator-api2",
-]
 
 [[package]]
 name = "hashbrown"
@@ -6992,7 +6988,7 @@ dependencies = [
 name = "surrealdb-common"
 version = "3.1.0-alpha"
 dependencies = [
- "hashbrown 0.14.5",
+ "hashbrown 0.16.1",
 ]
 
 [[package]]
@@ -7130,6 +7126,7 @@ version = "3.1.0-alpha"
 dependencies = [
  "bitflags 2.10.0",
  "chrono",
+ "criterion 0.8.1",
  "logos",
  "reblessive",
  "rust_decimal",
