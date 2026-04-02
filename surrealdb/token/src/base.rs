@@ -14,7 +14,7 @@ fn whitespace_callback(lexer: &mut Lexer<BaseTokenKind>) {
 #[logos(subpattern duration_part = r"[0-9]+(y|w|d|h|m|s|ms|us|µs|ns)")]
 #[logos(subpattern backtick_ident = r"`([^`\\]|\\.)*`")]
 #[logos(subpattern bracket_ident = r"⟨([^⟩\\]|\\.)*⟩")]
-#[logos(subpattern whitespace = r"[\u{0009}\u{000b}\u{0000c}\u{FEFF}\p{Space_Separator}\n\r\u{2028}\u{2029}]+")]
+#[logos(subpattern whitespace = r"[ \n\r\u{0085}\u{00A0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}]+")]
 #[logos(subpattern multi_line_comment = r"/\*([^*]|\*[^/])*\*/")]
 #[logos(subpattern line_comment = r"(//|#|--)[^\n\r\u{2028}\u{2029}]*")]
 #[logos(skip(r"((?&whitespace)|(?&line_comment)|(?&multi_line_comment))+", whitespace_callback))]
