@@ -41,6 +41,8 @@ fn gather_lang_tests() -> String {
 		"language/statements/alter/alter_api.surql",
 		"language/statements/alter/alter_analyzer.surql",
 		"language/statements/alter/alter_access.surql",
+		"language/graph/edge_clauses.surql",
+		"reproductions/7169_from_only_in_graph_lookup.surql",
 	];
 
 	let mut res = String::new();
