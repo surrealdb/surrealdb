@@ -1027,36 +1027,38 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Retries an async operation until it succeeds or `timeout` elapses.
+	/// Retries an async operation until it succeeds or the global timeout elapses.
 	///
 	/// Only [`TransactionConflict`](crate::kvs::Error::TransactionConflict)
 	/// errors are retried; any other error is returned immediately to the
-	/// caller. On each retryable failure a randomised delay (0–10 s) is
+	/// caller. On each retryable failure a randomized delay (0–10 s) is
 	/// applied before the next attempt, adding jitter to reduce repeated
 	/// collisions when multiple instances start concurrently against the
 	/// same storage backend.
 	///
-	/// The timeout is checked only after a *failed* attempt; a successful
+	/// The global timeout is checked only after a *failed* attempt; a successful
 	/// result is always returned immediately, even if the elapsed time
 	/// exceeds the budget. This means the total wall-clock time can exceed
-	/// `timeout` by up to one attempt duration plus the preceding back-off.
-	/// If no attempt succeeds within the budget, the conflict error from
-	/// the last failed attempt is surfaced.
+	/// the global timeout by up to one attempt duration plus the preceding back-off.
+	/// Each attempt also has its own increasing timeout (10 s * attempt number).
+	/// If no attempt succeeds within the budget, an error is returned.
 	async fn retry<F, Fut, R>(task: &str, func: F) -> Result<R>
 	where
 		F: Fn() -> Fut,
 		Fut: Future<Output = Result<R>>,
 	{
-		let global_time_out = Duration::from_secs(120);
+		let global_timeout = Duration::from_secs(120);
 		let per_attempt_timeout = Duration::from_secs(10);
 		let time = Instant::now();
 		let mut last_error = None;
 		let mut attempt = 1;
 		loop {
+			// Each attempt has its own increasing timeout (10s, 20s, 30s, etc.)
 			if let Ok(result) = timeout(per_attempt_timeout * attempt, func()).await {
 				match result {
 					Ok(result) => return Ok(result),
 					Err(e) => {
+						// Only retry on transaction conflict errors
 						if let Some(crate::kvs::Error::TransactionConflict(_)) = e.downcast_ref() {
 							last_error = Some(e);
 						} else {
@@ -1065,13 +1067,18 @@ impl Datastore {
 					}
 				}
 			}
-			if time.elapsed() > global_time_out {
+			// Check if the global timeout has been exceeded
+			if time.elapsed() > global_timeout {
 				if let Some(e) = last_error {
 					error!(target: TARGET, "{task} - All {attempt} attempts failed. Last error: {e}");
+				} else {
+					error!(target: TARGET, "{task} - All {attempt} attempts failed.");
 				}
-				bail!(Error::QueryTimedout(global_time_out.into()));
+				bail!(Error::Internal(format!(
+					"{task} failed after {attempt} attempts due to timeout"
+				)));
 			}
-			// Randomised back-off to stagger retries across competing instances
+			// Randomized back-off to stagger retries across competing instances
 			let tempo = Duration::from_secs(thread_rng().gen_range(0..10));
 			sleep(tempo).await;
 			attempt += 1;
@@ -1082,7 +1089,7 @@ impl Datastore {
 	///
 	/// This function should be run at server or database startup.
 	///
-	/// This function ensures that this node is entered into the clister
+	/// This function ensures that this node is entered into the cluster
 	/// membership entries. This function must be run at server or database
 	/// startup, in order to write the initial entry and timestamp to storage.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
