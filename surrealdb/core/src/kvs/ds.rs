@@ -1038,10 +1038,11 @@ impl Datastore {
 	///
 	/// The global timeout is checked only after a *failed* attempt; a successful
 	/// result is always returned immediately, even if the elapsed time
-	/// exceeds the budget. This means the total wall-clock time can exceed
-	/// the global timeout by up to one attempt duration plus the preceding back-off.
-	/// Each attempt also has its own increasing timeout (10 s * attempt number).
-	/// If no attempt succeeds within the budget, an error is returned.
+	/// exceeds the budget. Each attempt's timeout is the lesser of its
+	/// natural timeout (10 s * attempt number) and the remaining global
+	/// budget, so total wall-clock time never significantly exceeds the
+	/// global timeout. If no attempt succeeds within the budget, an error
+	/// is returned.
 	async fn retry<F, Fut, R>(task: &str, func: F) -> Result<R>
 	where
 		F: Fn() -> Fut,
@@ -1053,8 +1054,13 @@ impl Datastore {
 		let mut last_error = None;
 		let mut attempt = 1;
 		loop {
-			// Each attempt has its own increasing timeout (10s, 20s, 30s, etc.)
-			if let Ok(result) = timeout(per_attempt_timeout * attempt, func()).await {
+			// Cap each attempt to the remaining global budget
+			let remaining = global_timeout.saturating_sub(time.elapsed());
+			if remaining.is_zero() {
+				break;
+			}
+			let attempt_timeout = (per_attempt_timeout * attempt).min(remaining);
+			if let Ok(result) = timeout(attempt_timeout, func()).await {
 				match result {
 					Ok(result) => return Ok(result),
 					Err(e) => {
@@ -1068,21 +1074,24 @@ impl Datastore {
 				}
 			}
 			// Check if the global timeout has been exceeded
-			if time.elapsed() > global_timeout {
-				if let Some(e) = last_error {
-					error!(target: TARGET, "{task} - All {attempt} attempts failed. Last error: {e}");
-				} else {
-					error!(target: TARGET, "{task} - All {attempt} attempts failed.");
-				}
-				bail!(Error::Internal(format!(
-					"{task} failed after {attempt} attempts due to timeout"
-				)));
+			if time.elapsed() >= global_timeout {
+				break;
 			}
-			// Randomized back-off to stagger retries across competing instances
-			let tempo = Duration::from_secs(thread_rng().gen_range(0..10));
+			// Randomized back-off capped to the remaining budget
+			let remaining = global_timeout.saturating_sub(time.elapsed());
+			if remaining.is_zero() {
+				break;
+			}
+			let tempo = Duration::from_secs(thread_rng().gen_range(0..10)).min(remaining);
 			sleep(tempo).await;
 			attempt += 1;
 		}
+		if let Some(e) = last_error {
+			error!(target: TARGET, "{task} - All {attempt} attempts failed. Last error: {e}");
+		} else {
+			error!(target: TARGET, "{task} - All {attempt} attempts failed.");
+		}
+		bail!(Error::Internal(format!("{task} failed after {attempt} attempts due to timeout")));
 	}
 
 	/// Inserts a node for the first time into the cluster.
