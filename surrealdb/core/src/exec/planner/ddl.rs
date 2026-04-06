@@ -243,6 +243,12 @@ impl<'ctx> Planner<'ctx> {
 			RemoveStatement::Module(s) => {
 				Ok(Arc::new(remove::RemoveModulePlan::new(s.name, s.if_exists)))
 			}
+			RemoveStatement::Config(s) => {
+				use crate::exec::context::ContextLevel;
+				let base: crate::expr::Base = s.kind.base().into();
+				let required_context = ContextLevel::from(base);
+				Ok(Arc::new(remove::RemoveConfigPlan::new(s.kind, s.if_exists, required_context)))
+			}
 		}
 	}
 
@@ -306,6 +312,95 @@ impl<'ctx> Planner<'ctx> {
 				s.comment,
 				s.reference,
 			))),
+			AlterStatement::Analyzer(s) => Ok(Arc::new(alter::AlterAnalyzerPlan::new(
+				s.name,
+				s.if_exists,
+				s.function,
+				s.tokenizers,
+				s.filters,
+				s.comment,
+			))),
+			AlterStatement::Bucket(s) => Ok(Arc::new(alter::AlterBucketPlan::new(
+				s.name,
+				s.if_exists,
+				s.backend,
+				s.permissions,
+				s.readonly,
+				s.comment,
+			))),
+			AlterStatement::Event(s) => Ok(Arc::new(alter::AlterEventPlan::new(
+				s.name,
+				s.what,
+				s.if_exists,
+				s.when,
+				s.then,
+				s.comment,
+				s.kind,
+			))),
+			AlterStatement::Function(s) => Ok(Arc::new(alter::AlterFunctionPlan::new(
+				s.name,
+				s.if_exists,
+				s.args,
+				s.block,
+				s.comment,
+				s.permissions,
+				s.returns,
+			))),
+			AlterStatement::Module(s) => Ok(Arc::new(alter::AlterModulePlan::new(
+				s.name,
+				s.if_exists,
+				s.comment,
+				s.permissions,
+			))),
+			AlterStatement::Param(s) => {
+				let value = match s.value {
+					Some(expr) => Some(Box::pin(self.physical_expr(expr)).await?),
+					None => None,
+				};
+				Ok(Arc::new(alter::AlterParamPlan::new(
+					s.name,
+					s.if_exists,
+					value,
+					s.comment,
+					s.permissions,
+				)))
+			}
+			AlterStatement::User(s) => {
+				use crate::exec::context::ContextLevel;
+				let required_context = ContextLevel::from(s.base);
+				Ok(Arc::new(alter::AlterUserPlan::new(
+					s.name,
+					s.base,
+					s.if_exists,
+					s.hash,
+					s.roles,
+					s.token_duration,
+					s.session_duration,
+					s.comment,
+					required_context,
+				)))
+			}
+			AlterStatement::Access(s) => {
+				use crate::exec::context::ContextLevel;
+				let required_context = ContextLevel::from(s.base);
+				Ok(Arc::new(alter::AlterAccessPlan::new(
+					s.name,
+					s.base,
+					s.if_exists,
+					s.authenticate,
+					s.grant_duration,
+					s.token_duration,
+					s.session_duration,
+					s.comment,
+					required_context,
+				)))
+			}
+			AlterStatement::Api(_) => Err(Error::PlannerUnsupported(
+				"ALTER API not yet supported in execution plans".to_string(),
+			)),
+			AlterStatement::Config(_) => Err(Error::PlannerUnsupported(
+				"ALTER CONFIG not yet supported in execution plans".to_string(),
+			)),
 		}
 	}
 }
