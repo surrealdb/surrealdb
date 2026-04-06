@@ -456,6 +456,18 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		match fields {
 			Fields::Value(selector) => {
+				// If the alias was registered for sort (Compute pre-evaluated
+				// it), read the pre-computed field to avoid re-evaluating
+				// non-deterministic expressions like rand() or time::now().
+				if let Some(ref alias) = selector.alias
+					&& alias.len() == 1
+					&& let Some(crate::expr::part::Part::Field(name)) = alias.first()
+					&& registry.contains_name(name)
+				{
+					let idiom = Idiom(vec![crate::expr::part::Part::Field(name.clone())]);
+					let expr = self.physical_expr(Expr::Idiom(idiom)).await?;
+					return Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>);
+				}
 				let expr = self.physical_expr(selector.expr).await?;
 				Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>)
 			}

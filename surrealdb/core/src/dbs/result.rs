@@ -199,7 +199,19 @@ impl Results {
 			_ => None,
 		};
 		for v in values {
-			let val = if let Some(alias) = materialized_alias {
+			let val = if let Some(alias) = materialized_alias
+				&& let Value::Object(ref obj) = v
+				&& alias
+					.first()
+					.and_then(|p| {
+						if let Part::Field(n) = p {
+							Some(n.as_str())
+						} else {
+							None
+						}
+					})
+					.is_some_and(|n| obj.contains_key(n))
+			{
 				// The expression was already evaluated in pluck_select and stored
 				// under the alias name. Pick it to avoid double-evaluation of
 				// non-deterministic expressions like rand() or time::now().

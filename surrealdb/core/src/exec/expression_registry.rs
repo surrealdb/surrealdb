@@ -265,6 +265,11 @@ impl ExpressionRegistry {
 	pub fn has_expressions_for_point(&self, point: ComputePoint) -> bool {
 		self.expressions.values().any(|info| info.compute_point == point)
 	}
+
+	/// Check if a name has been registered as an expression output field.
+	pub fn contains_name(&self, name: &str) -> bool {
+		self.expressions.values().any(|info| info.internal_name == name)
+	}
 }
 
 // ============================================================================

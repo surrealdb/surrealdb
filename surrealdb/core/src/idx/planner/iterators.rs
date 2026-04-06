@@ -1130,9 +1130,22 @@ impl IndexJoinThingIterator {
 	}
 }
 
+/// Equality lookup on a unique index (legacy planner).
+///
+/// NONE/NULL tuples are stored with non-unique key format (record-ID
+/// suffix), so they require a prefix range scan instead of a point-get.
 pub(crate) struct UniqueEqualThingIterator {
 	irf: IteratorRef,
-	key: Option<Key>,
+	inner: UniqueEqualThingInner,
+}
+
+enum UniqueEqualThingInner {
+	PointGet(Option<Key>),
+	PrefixScan {
+		beg: Key,
+		end: Key,
+		done: bool,
+	},
 }
 
 impl UniqueEqualThingIterator {
@@ -1143,31 +1156,79 @@ impl UniqueEqualThingIterator {
 		ix: &IndexDefinition,
 		a: &Array,
 	) -> Result<Self> {
-		let key = Index::new(ns, db, &ix.table_name, ix.index_id, a, None).encode_key()?;
+		let inner = if a.is_any_none_or_null() {
+			let beg = Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, a)?;
+			let end = Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, a)?;
+			UniqueEqualThingInner::PrefixScan {
+				beg,
+				end,
+				done: false,
+			}
+		} else {
+			let key = Index::new(ns, db, &ix.table_name, ix.index_id, a, None).encode_key()?;
+			UniqueEqualThingInner::PointGet(Some(key))
+		};
 		Ok(Self {
 			irf,
-			key: Some(key),
+			inner,
 		})
 	}
 
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B> {
-		if let Some(key) = self.key.take()
-			&& let Some(val) = tx.get(&key, None).await?
-		{
-			let rid: RecordId = revision::from_slice(&val)?;
-			let record = IndexItemRecord::new_key(rid, self.irf.into());
-			return Ok(B::from_one(record));
+		match &mut self.inner {
+			UniqueEqualThingInner::PointGet(key) => {
+				if let Some(key) = key.take()
+					&& let Some(val) = tx.get(&key, None).await?
+				{
+					let rid: RecordId = revision::from_slice(&val)?;
+					let record = IndexItemRecord::new_key(rid, self.irf.into());
+					return Ok(B::from_one(record));
+				}
+				Ok(B::empty())
+			}
+			UniqueEqualThingInner::PrefixScan {
+				beg,
+				end,
+				done,
+			} => {
+				if *done {
+					return Ok(B::empty());
+				}
+				*done = true;
+				let res = tx.scan(beg.clone()..end.clone(), u32::MAX, 0, None).await?;
+				let mut records = B::with_capacity(res.len());
+				for (_key, val) in res {
+					let rid: RecordId = revision::from_slice(&val)?;
+					records.add(IndexItemRecord::new_key(rid, self.irf.into()));
+				}
+				Ok(records)
+			}
 		}
-		Ok(B::empty())
 	}
 
 	async fn next_count(&mut self, tx: &Transaction) -> Result<usize> {
-		if let Some(key) = self.key.take()
-			&& tx.exists(&key, None).await?
-		{
-			return Ok(1);
+		match &mut self.inner {
+			UniqueEqualThingInner::PointGet(key) => {
+				if let Some(key) = key.take()
+					&& tx.exists(&key, None).await?
+				{
+					return Ok(1);
+				}
+				Ok(0)
+			}
+			UniqueEqualThingInner::PrefixScan {
+				beg,
+				end,
+				done,
+			} => {
+				if *done {
+					return Ok(0);
+				}
+				*done = true;
+				let res = tx.keys(beg.clone()..end.clone(), u32::MAX, 0, None).await?;
+				Ok(res.len())
+			}
 		}
-		Ok(0)
 	}
 }
 
@@ -1242,7 +1303,11 @@ impl UniqueRangeThingIterator {
 		if from.is_none() {
 			return Index::prefix_beg(ns, db, ix_what, index_id);
 		}
-		Index::new(ns, db, ix_what, index_id, &Array::from(vec![from.clone()]), None).encode_key()
+		let array = Array::from(vec![from.clone()]);
+		if array.is_any_none_or_null() {
+			return Index::prefix_ids_beg(ns, db, ix_what, index_id, &array);
+		}
+		Index::new(ns, db, ix_what, index_id, &array, None).encode_key()
 	}
 
 	fn compute_end(
@@ -1255,7 +1320,11 @@ impl UniqueRangeThingIterator {
 		if to.is_none() {
 			return Index::prefix_end(ns, db, ix_what, index_id);
 		}
-		Index::new(ns, db, ix_what, index_id, &Array::from(vec![to.clone()]), None).encode_key()
+		let array = Array::from(vec![to.clone()]);
+		if array.is_any_none_or_null() {
+			return Index::prefix_ids_end(ns, db, ix_what, index_id, &array);
+		}
+		Index::new(ns, db, ix_what, index_id, &array, None).encode_key()
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -1439,7 +1508,12 @@ impl UniqueRangeReverseThingIterator {
 
 pub(crate) struct UniqueUnionThingIterator {
 	irf: IteratorRef,
-	keys: VecDeque<Key>,
+	entries: VecDeque<UniqueUnionEntry>,
+}
+
+enum UniqueUnionEntry {
+	PointGet(Key),
+	PrefixScan(Key, Key),
 }
 
 impl UniqueUnionThingIterator {
@@ -1450,15 +1524,20 @@ impl UniqueUnionThingIterator {
 		ix: &IndexDefinition,
 		fds: &[Array],
 	) -> Result<Self> {
-		// We create a VecDeque to hold the key for each value in the array.
-		let mut keys = VecDeque::with_capacity(fds.len());
+		let mut entries = VecDeque::with_capacity(fds.len());
 		for fd in fds {
-			let key = Index::new(ns, db, &ix.table_name, ix.index_id, fd, None).encode_key()?;
-			keys.push_back(key);
+			if fd.is_any_none_or_null() {
+				let beg = Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, fd)?;
+				let end = Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, fd)?;
+				entries.push_back(UniqueUnionEntry::PrefixScan(beg, end));
+			} else {
+				let key = Index::new(ns, db, &ix.table_name, ix.index_id, fd, None).encode_key()?;
+				entries.push_back(UniqueUnionEntry::PointGet(key));
+			}
 		}
 		Ok(Self {
 			irf,
-			keys,
+			entries,
 		})
 	}
 
@@ -1469,19 +1548,31 @@ impl UniqueUnionThingIterator {
 		limit: u32,
 	) -> Result<B> {
 		let limit = limit as usize;
-		let mut results = B::with_capacity(limit.min(self.keys.len()));
+		let mut results = B::with_capacity(limit.min(self.entries.len()));
 		let mut count = 0;
-		while let Some(key) = self.keys.pop_front() {
+		while let Some(entry) = self.entries.pop_front() {
 			if ctx.is_done(Some(count)).await? {
 				break;
 			}
-			if let Some(val) = tx.get(&key, None).await? {
-				count += 1;
-				let rid: RecordId = revision::from_slice(&val)?;
-				results.add(IndexItemRecord::new_key(rid, self.irf.into()));
-				if results.len() >= limit {
-					break;
+			match entry {
+				UniqueUnionEntry::PointGet(key) => {
+					if let Some(val) = tx.get(&key, None).await? {
+						count += 1;
+						let rid: RecordId = revision::from_slice(&val)?;
+						results.add(IndexItemRecord::new_key(rid, self.irf.into()));
+					}
 				}
+				UniqueUnionEntry::PrefixScan(beg, end) => {
+					let res = tx.scan(beg..end, u32::MAX, 0, None).await?;
+					for (_key, val) in res {
+						count += 1;
+						let rid: RecordId = revision::from_slice(&val)?;
+						results.add(IndexItemRecord::new_key(rid, self.irf.into()));
+					}
+				}
+			}
+			if results.len() >= limit {
+				break;
 			}
 		}
 		Ok(results)
@@ -1495,15 +1586,23 @@ impl UniqueUnionThingIterator {
 	) -> Result<usize> {
 		let limit = limit as usize;
 		let mut count = 0;
-		while let Some(key) = self.keys.pop_front() {
+		while let Some(entry) = self.entries.pop_front() {
 			if ctx.is_done(Some(count)).await? {
 				break;
 			}
-			if tx.exists(&key, None).await? {
-				count += 1;
-				if count >= limit {
-					break;
+			match entry {
+				UniqueUnionEntry::PointGet(key) => {
+					if tx.exists(&key, None).await? {
+						count += 1;
+					}
 				}
+				UniqueUnionEntry::PrefixScan(beg, end) => {
+					let res = tx.keys(beg..end, u32::MAX, 0, None).await?;
+					count += res.len();
+				}
+			}
+			if count >= limit {
+				break;
 			}
 		}
 		Ok(count)
