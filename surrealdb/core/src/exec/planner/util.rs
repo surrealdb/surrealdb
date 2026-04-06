@@ -1054,6 +1054,177 @@ fn check_id_recordid_pair(
 	}
 }
 
+// ============================================================================
+// Record ID IN-Lookup Extraction
+// ============================================================================
+
+/// Maximum number of RecordIds to expand for `id IN [...]` point lookups.
+///
+/// Point lookups are O(1) per record so the limit can be generous. Beyond
+/// this threshold we fall back to normal index/table scan analysis.
+const MAX_ID_IN_EXPANSION: usize = 1000;
+
+/// Check whether a WHERE condition contains `id IN [RecordId, ...]` or
+/// `[RecordId, ...] CONTAINS id` in its top-level AND chain, where every
+/// RecordId's table matches the FROM table.
+///
+/// Returns deduplicated RecordId literal expressions when found, `None`
+/// otherwise. Does NOT extract from OR branches (those require a full
+/// table scan).
+///
+/// Only matches point-key RecordIds (not range keys like `table:1..5`).
+/// Arrays larger than [`MAX_ID_IN_EXPANSION`] are not expanded.
+pub(super) fn extract_record_id_in_lookup(
+	cond: &Cond,
+	table_name: &crate::val::TableName,
+) -> Option<Vec<Expr>> {
+	find_id_in_and_chain(&cond.0, table_name)
+}
+
+/// Walk the top-level AND chain looking for `id IN [RecordId, ...]` or
+/// `[RecordId, ...] CONTAINS id`.
+fn find_id_in_and_chain(expr: &Expr, table_name: &crate::val::TableName) -> Option<Vec<Expr>> {
+	match expr {
+		Expr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} => find_id_in_and_chain(left, table_name)
+			.or_else(|| find_id_in_and_chain(right, table_name)),
+
+		// id IN [RecordId, ...] — parsed as `id INSIDE [array]`
+		Expr::Binary {
+			left,
+			op: BinaryOperator::Inside,
+			right,
+		} => check_id_in_array(left, right, table_name),
+
+		// [RecordId, ...] CONTAINS id
+		Expr::Binary {
+			left,
+			op: BinaryOperator::Contain,
+			right,
+		} => check_id_in_array(right, left, table_name),
+
+		_ => None,
+	}
+}
+
+/// Check if `idiom_side` is the `id` idiom and `array_side` is an array of
+/// matching RecordId literals with non-range keys.
+///
+/// Returns a deduplicated list of RecordId expressions, or `None` if
+/// validation fails for any element.
+fn check_id_in_array(
+	idiom_side: &Expr,
+	array_side: &Expr,
+	table_name: &crate::val::TableName,
+) -> Option<Vec<Expr>> {
+	let Expr::Idiom(idiom) = idiom_side else {
+		return None;
+	};
+	if !idiom.is_id() {
+		return None;
+	}
+	let Expr::Literal(Literal::Array(elems)) = array_side else {
+		return None;
+	};
+	if elems.len() > MAX_ID_IN_EXPANSION {
+		return None;
+	}
+
+	let mut seen = std::collections::HashSet::with_capacity(elems.len());
+	let mut result = Vec::with_capacity(elems.len());
+
+	for elem in elems {
+		match elem {
+			Expr::Literal(Literal::RecordId(rid))
+				if &rid.table == table_name
+					&& !matches!(rid.key, crate::expr::RecordIdKeyLit::Range(_)) =>
+			{
+				if seen.insert(rid.clone()) {
+					result.push(elem.clone());
+				}
+			}
+			_ => return None,
+		}
+	}
+
+	Some(result)
+}
+
+/// Strip `id IN [...]` / `[...] CONTAINS id` from a WHERE clause, returning
+/// the residual condition (if any).
+///
+/// Returns `None` when the entire condition is consumed (no Filter needed),
+/// or `Some(residual)` when other conditions remain alongside the id-in clause.
+pub(super) fn strip_id_in_condition(cond: &Cond) -> Option<Cond> {
+	let mut expr = cond.0.clone();
+	let _ = IdInStripper.visit_mut_expr(&mut expr);
+	let _ = BoolSimplifier.visit_mut_expr(&mut expr);
+	if matches!(expr, Expr::Literal(Literal::Bool(true))) {
+		None
+	} else {
+		Some(Cond(expr))
+	}
+}
+
+/// Replaces `id IN [...]` and `[...] CONTAINS id` expressions with
+/// `Literal::Bool(true)`. Run `BoolSimplifier` afterwards to collapse
+/// the resulting `true AND x` chains.
+struct IdInStripper;
+
+impl MutVisitor for IdInStripper {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		let should_strip = match expr {
+			// id INSIDE [array] — i.e. id IN [...]
+			Expr::Binary {
+				left,
+				op: BinaryOperator::Inside,
+				right,
+			} => {
+				matches!(left.as_ref(), Expr::Idiom(idiom) if idiom.is_id())
+					&& matches!(right.as_ref(), Expr::Literal(Literal::Array(_)))
+			}
+			// [array] CONTAIN id — i.e. [...] CONTAINS id
+			Expr::Binary {
+				left,
+				op: BinaryOperator::Contain,
+				right,
+			} => {
+				matches!(right.as_ref(), Expr::Idiom(idiom) if idiom.is_id())
+					&& matches!(left.as_ref(), Expr::Literal(Literal::Array(_)))
+			}
+			_ => false,
+		};
+
+		if should_strip {
+			*expr = Expr::Literal(Literal::Bool(true));
+			return Ok(());
+		}
+
+		if let Expr::Binary {
+			left,
+			op: BinaryOperator::And,
+			right,
+		} = expr
+		{
+			self.visit_mut_expr(left)?;
+			self.visit_mut_expr(right)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
 /// Check if a source expression represents a "value source" (array, primitive).
 pub(super) fn is_value_source_expr(expr: &Expr) -> bool {
 	match expr {

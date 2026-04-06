@@ -22,12 +22,12 @@ use super::Planner;
 use super::util::{
 	SELECT_ITERATION_PARAMS, all_value_sources, check_forbidden_group_by_params, derive_field_name,
 	extract_bruteforce_knn, extract_count_field_names, extract_matches_context,
-	extract_record_id_point_lookup, extract_version, fold_condition_expressions,
-	get_effective_limit_literal, has_knn_k_operator, has_knn_operator, has_top_level_or,
-	idiom_to_field_name, idiom_to_field_path, index_covers_ordering, is_count_all_eligible,
-	is_indexed_count_eligible, order_is_scan_compatible, resolve_condition_params,
-	resolve_param_value, resolve_projection_field_idioms, strip_fts_condition,
-	strip_index_conditions, strip_knn_from_condition,
+	extract_record_id_in_lookup, extract_record_id_point_lookup, extract_version,
+	fold_condition_expressions, get_effective_limit_literal, has_knn_k_operator, has_knn_operator,
+	has_top_level_or, idiom_to_field_name, idiom_to_field_path, index_covers_ordering,
+	is_count_all_eligible, is_indexed_count_eligible, order_is_scan_compatible,
+	resolve_condition_params, resolve_param_value, resolve_projection_field_idioms,
+	strip_fts_condition, strip_id_in_condition, strip_index_conditions, strip_knn_from_condition,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
@@ -41,10 +41,10 @@ use crate::exec::operators::ExternalSort;
 use crate::exec::operators::scan::determine_scan_direction;
 use crate::exec::operators::scan::resolved::{ResolvedTableContext, resolve_table_context};
 use crate::exec::operators::{
-	Aggregate, AnalyzePlan, Compute, DynamicScan, ExplainPlan, Fetch, FieldSelection, Filter,
-	KnnTopK, Limit, Project, ProjectValue, Projection, RandomShuffle, RecordIdScan, SelectProject,
-	Sort, SortByKey, SortDirection, SortKey, SortTopK, SortTopKByKey, SourceExpr, Split, TableScan,
-	Timeout, Union, UnionIndexScan, UnwrapExactlyOne,
+	Aggregate, AnalyzePlan, Compute, DynamicScan, EmptyResult, ExplainPlan, Fetch, FieldSelection,
+	Filter, KnnTopK, Limit, Project, ProjectValue, Projection, RandomShuffle, RecordIdScan,
+	SelectProject, Sort, SortByKey, SortDirection, SortKey, SortTopK, SortTopKByKey, SourceExpr,
+	Split, TableScan, Timeout, Union, UnionIndexScan, UnwrapExactlyOne,
 };
 use crate::exec::{ExecOperator, OperatorMetrics};
 use crate::expr::field::{Field, Fields};
@@ -1747,6 +1747,58 @@ impl<'ctx> Planner<'ctx> {
 			return Ok(PlannedSource {
 				operator: Arc::new(scan) as Arc<dyn ExecOperator>,
 				filter_action,
+				limit_pushed: false,
+			});
+		}
+
+		// Optimisation: WHERE id IN [RecordId, ...] -> union of point lookups.
+		// Also handles [RecordId, ...] CONTAINS id.
+		// Bypasses index analysis and table scan entirely, avoiding
+		// computed-field evaluation for non-matching records on large tables.
+		if let Expr::Table(ref table_name) = expr
+			&& !cond.is_some_and(|c| has_knn_operator(&c.0))
+			&& let Some(rid_exprs) = cond.and_then(|c| extract_record_id_in_lookup(c, table_name))
+		{
+			// Strip the consumed id IN clause; compile only the residual
+			// (e.g. `AND score > 15`) as the predicate for each point lookup.
+			let residual_cond = cond.and_then(strip_id_in_condition);
+			let residual_predicate = match &residual_cond {
+				Some(c) => Some(self.physical_expr(c.0.clone()).await?),
+				None => None,
+			};
+
+			let table_ctx = if let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db)
+			{
+				Self::try_resolve_table_ctx(txn, self.ctx, ns, db, table_name).await
+			} else {
+				None
+			};
+
+			let mut inputs: Vec<Arc<dyn ExecOperator>> = Vec::with_capacity(rid_exprs.len());
+			for rid_expr in rid_exprs {
+				let record_id_expr = self.physical_expr(rid_expr).await?;
+				let mut scan = RecordIdScan::new(
+					record_id_expr,
+					version.clone(),
+					needed_fields.clone(),
+					residual_predicate.clone(),
+				);
+				if let Some(ref tc) = table_ctx {
+					scan = scan.with_resolved(tc.clone());
+				}
+				inputs.push(Arc::new(scan) as Arc<dyn ExecOperator>);
+			}
+
+			let operator: Arc<dyn ExecOperator> = if inputs.is_empty() {
+				Arc::new(EmptyResult::new())
+			} else if inputs.len() == 1 {
+				inputs.pop().expect("verified non-empty")
+			} else {
+				Arc::new(Union::new(inputs))
+			};
+			return Ok(PlannedSource {
+				operator,
+				filter_action: FilterAction::FullyConsumed,
 				limit_pushed: false,
 			});
 		}

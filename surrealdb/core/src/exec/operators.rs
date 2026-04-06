@@ -1,6 +1,7 @@
 mod aggregate;
 mod compute;
 mod current_value_source;
+mod empty_result;
 mod explain;
 mod expr;
 pub(crate) mod fetch;
@@ -30,6 +31,7 @@ pub use aggregate::{
 };
 pub use compute::Compute;
 pub use current_value_source::CurrentValueSource;
+pub use empty_result::EmptyResult;
 pub use explain::{AnalyzePlan, ExplainPlan};
 pub use expr::ExprPlan;
 pub use fetch::Fetch;
