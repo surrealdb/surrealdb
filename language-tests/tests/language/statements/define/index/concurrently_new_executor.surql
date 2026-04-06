@@ -1,5 +1,7 @@
 /**
 [env]
+planner-strategy = ["all-ro"]
+
 # Extra timeout because this test has a sleep.
 timeout = 5000
 context-timeout = 5000

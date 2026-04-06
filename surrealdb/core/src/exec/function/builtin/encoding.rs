@@ -11,6 +11,10 @@ define_pure_function!(EncodingBase64Encode, "encoding::base64::encode", (value: 
 define_pure_function!(EncodingCborDecode, "encoding::cbor::decode", (value: Any) -> Any, crate::fnc::encoding::cbor::decode);
 define_pure_function!(EncodingCborEncode, "encoding::cbor::encode", (value: Any) -> Any, crate::fnc::encoding::cbor::encode);
 
+// JSON encoding
+define_pure_function!(EncodingJsonDecode, "encoding::json::decode", (value: String) -> Any, crate::fnc::encoding::json::decode);
+define_pure_function!(EncodingJsonEncode, "encoding::json::encode", (value: Any) -> String, crate::fnc::encoding::json::encode);
+
 pub fn register(registry: &mut FunctionRegistry) {
 	register_functions!(
 		registry,
@@ -18,5 +22,7 @@ pub fn register(registry: &mut FunctionRegistry) {
 		EncodingBase64Encode,
 		EncodingCborDecode,
 		EncodingCborEncode,
+		EncodingJsonDecode,
+		EncodingJsonEncode,
 	);
 }

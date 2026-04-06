@@ -7,7 +7,7 @@ value = "'OK'"
 
 # 1: Array literal source - simple values
 [[test.results]]
-value = "[1, 2, 3]"
+value = "[{ this: 1 }, { this: 2 }, { this: 3 }]"
 
 # 2: Array literal source with projection
 [[test.results]]

@@ -128,11 +128,14 @@ impl Function {
 				// Duplicate context
 				let mut ctx = Context::new_isolated(ctx);
 				// Process the function arguments
-				for (val, (name, kind)) in args.into_iter().zip(&val.args) {
+				for (val, (param_name, kind)) in args.into_iter().zip(&val.args) {
 					ctx.add_value(
-						name.clone(),
+						param_name.clone(),
 						val.coerce_to_kind(kind)
-							.map_err(Error::from)
+							.map_err(|e| Error::InvalidFunctionArguments {
+								name: name.clone(),
+								message: format!("Failed to coerce argument `${param_name}`: {e}"),
+							})
 							.map_err(anyhow::Error::new)?
 							.into(),
 					);

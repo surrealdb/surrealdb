@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Sort elimination: ORDER BY id ASC should be eliminated when scanning in forward direction"
 

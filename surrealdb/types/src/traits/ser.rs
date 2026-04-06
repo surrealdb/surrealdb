@@ -2,11 +2,12 @@ use core::fmt::Display;
 
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
+use serde::Deserialize;
 use serde::ser::{Impossible, Serialize};
 
 use crate::error::Error;
 use crate::value::Value;
-use crate::{Array, Bytes, Number, Object, SerializationError};
+use crate::{Array, Bytes, Datetime, Duration, Number, Object, RecordId, SerializationError, Uuid};
 
 pub struct Serializer;
 
@@ -147,11 +148,33 @@ impl serde::Serializer for Serializer {
 	}
 
 	#[inline]
-	fn serialize_newtype_struct<T>(self, _name: &'static str, value: &T) -> Result<Value>
+	fn serialize_newtype_struct<T>(self, name: &'static str, value: &T) -> Result<Value>
 	where
 		T: ?Sized + Serialize,
 	{
-		value.serialize(self)
+		let serialized = value.serialize(self)?;
+		match name {
+			"Datetime" => {
+				let datetime =
+					chrono::DateTime::<chrono::Utc>::deserialize(serialized).map_err(|err| {
+						Error::serialization(err.to_string(), SerializationError::Deserialization)
+					})?;
+				Ok(Value::Datetime(Datetime::from(datetime)))
+			}
+			"Uuid" => {
+				let uuid = uuid::Uuid::deserialize(serialized).map_err(|err| {
+					Error::serialization(err.to_string(), SerializationError::Deserialization)
+				})?;
+				Ok(Value::Uuid(Uuid::from(uuid)))
+			}
+			"Duration" => {
+				let duration = std::time::Duration::deserialize(serialized).map_err(|err| {
+					Error::serialization(err.to_string(), SerializationError::Deserialization)
+				})?;
+				Ok(Value::Duration(Duration::from(duration)))
+			}
+			_ => Ok(serialized),
+		}
 	}
 
 	fn serialize_newtype_variant<T>(
@@ -217,11 +240,16 @@ impl serde::Serializer for Serializer {
 		Ok(SerializeMap {
 			map: Object::new(),
 			next_key: None,
+			record_id_struct: false,
 		})
 	}
 
-	fn serialize_struct(self, _name: &'static str, len: usize) -> Result<Self::SerializeStruct> {
-		self.serialize_map(Some(len))
+	fn serialize_struct(self, name: &'static str, len: usize) -> Result<Self::SerializeStruct> {
+		let mut map = self.serialize_map(Some(len))?;
+		if name == "RecordId" {
+			map.record_id_struct = true;
+		}
+		Ok(map)
 	}
 
 	fn serialize_struct_variant(
@@ -257,6 +285,7 @@ pub struct SerializeTupleVariant {
 pub struct SerializeMap {
 	map: Object,
 	next_key: Option<String>,
+	record_id_struct: bool,
 }
 
 pub struct SerializeStructVariant {
@@ -359,6 +388,12 @@ impl serde::ser::SerializeMap for SerializeMap {
 	}
 
 	fn end(self) -> Result<Value> {
+		if self.record_id_struct {
+			let record_id = RecordId::deserialize(Value::Object(self.map)).map_err(|err| {
+				Error::serialization(err.to_string(), SerializationError::Deserialization)
+			})?;
+			return Ok(Value::RecordId(record_id));
+		}
 		Ok(Value::Object(self.map))
 	}
 }

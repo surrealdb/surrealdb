@@ -178,6 +178,7 @@ impl PhysicalExpr for ClosureCallExec {
 					recursion_ctx: None,
 					document_root: None,
 					skip_fetch_perms: ctx.skip_fetch_perms,
+					computing_record: ctx.computing_record.clone(),
 				};
 
 				let result = match block_expr.evaluate(eval_ctx).await {

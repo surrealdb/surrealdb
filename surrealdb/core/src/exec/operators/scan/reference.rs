@@ -251,8 +251,9 @@ async fn compute_ref_key_range(
 		// Range-bounded scan requires both table and field
 		let table = referencing_table
 			.context("Range-bounded reference scans require a referencing table")?;
-		let field = referencing_field
-			.context("Range-bounded reference scans require a referencing field")?;
+		let field = referencing_field.context(
+			"Cannot scan a specific range of record references without a referencing field",
+		)?;
 
 		let beg = eval_ref_bound(ns_id, db_id, rid, table, field, range_start, true, ctx).await?;
 		let end = eval_ref_bound(ns_id, db_id, rid, table, field, range_end, false, ctx).await?;

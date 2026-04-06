@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test EXPLAIN ANALYZE with basic SELECT queries - executes and shows metrics"
 

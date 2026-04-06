@@ -31,6 +31,7 @@ arbitrary = [
 anyhow.workspace = true
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 bytes.workspace = true
+castaway.workspace = true
 papaya.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 flatbuffers.workspace = true
@@ -48,6 +49,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 surrealdb-protocol = { workspace = true, features = ["flatbuffers"] }
 surrealdb-types-derive.workspace = true
+tracing.workspace = true
 ulid.workspace = true
 rand.workspace = true
 

@@ -1,5 +1,7 @@
 /**
 [env]
+planner-strategy = ["all-ro"]
+
 imports = ["language/statements/select/group/count_group_all_permissions_import.surql"]
 auth = { namespace = "test", database = "test", access = "test", rid = "table_full:baz" }
 

@@ -628,6 +628,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "castaway"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dec551ab6e7578819132c713a93c022a05d60159dc86e7a7050223577484c55a"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4294,6 +4303,7 @@ version = "3.1.0-alpha"
 dependencies = [
  "anyhow",
  "bytes",
+ "castaway",
  "chrono",
  "flatbuffers",
  "geo 0.32.0",
@@ -4308,6 +4318,7 @@ dependencies = [
  "serde_json",
  "surrealdb-protocol",
  "surrealdb-types-derive",
+ "tracing",
  "ulid",
  "uuid",
 ]

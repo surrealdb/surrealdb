@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test query planner with multiple indexes and OR/AND conditions (new executor)"
 

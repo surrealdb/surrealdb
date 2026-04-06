@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test planner recognition of parameter, datetime, and UUID values in WHERE with index (new executor)"
 
