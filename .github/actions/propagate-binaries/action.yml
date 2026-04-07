@@ -24,14 +24,19 @@ runs:
       run: |
         regions=("af-south-1" "ap-east-1" "ap-south-1" "ap-southeast-1" "ap-southeast-2" "ca-central-1" "eu-central-1" "eu-west-2" "me-south-1" "sa-east-1" "us-west-2")
         failed_regions=()
+        succeeded_regions=()
         for region in ${regions[@]}; do
-            if ! aws s3 sync --delete --storage-class INTELLIGENT_TIERING --source-region eu-west-2 --region ${region} s3://download.surrealdb.com s3://download.${region}.surrealdb.com; then
-                echo "::error::Failed to sync to region: ${region}"
+            if aws s3 sync --delete --storage-class INTELLIGENT_TIERING --source-region eu-west-2 --region ${region} s3://download.surrealdb.com s3://download.${region}.surrealdb.com; then
+                succeeded_regions+=("${region}")
+            else
                 failed_regions+=("${region}")
             fi
         done
         if [ ${#failed_regions[@]} -gt 0 ]; then
-            echo "::error::Sync failed for regions: ${failed_regions[*]}"
+            echo "::warning::Sync failed for regions: ${failed_regions[*]}"
+        fi
+        if [ ${#succeeded_regions[@]} -eq 0 ]; then
+            echo "::error::Sync failed for all regions"
             exit 1
         fi
 
