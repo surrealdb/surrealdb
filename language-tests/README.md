@@ -467,9 +467,9 @@ to network latency).
 **Example:**
 ```toml
 [env]
-timeout = 2000           # Default timeout for memory backend
-timeout-tikv = 10000     # TiKV needs 5x more time due to network latency
-timeout-rocksdb = 3000   # RocksDB may need slightly more time for disk I/O
+timeout = 5000           # Timeout for memory backend
+timeout-tikv = 10000     # TiKV needs 2x more time due to network latency
+timeout-rocksdb = 6000   # RocksDB may need slightly more time for disk I/O
 ```
 
 #### `[env.context_timeout]`
@@ -488,8 +488,8 @@ overrides, these allow setting different query execution limits per backend.
 **Example:**
 ```toml
 [env]
-context-timeout = 1000           # Default context timeout
-context-timeout-tikv = 5000      # TiKV queries may take longer
+context-timeout = 5000           # Default context timeout
+context-timeout-tikv = 10000      # TiKV queries may take longer
 ```
 
 Note: `[env.timeout]` and `[env.context_timeout]` serve different purposes:
