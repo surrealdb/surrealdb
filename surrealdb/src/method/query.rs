@@ -1022,4 +1022,33 @@ mod tests {
 		let value: Value = response.take(4).unwrap();
 		assert_eq!(value, Value::from_int(3));
 	}
+
+	#[test]
+	fn query_chaining_indexes_results_correctly() {
+		// Simulate what happens when multiple queries are chained:
+		// db.query("SELECT * FROM a").query("SELECT * FROM b").query("SELECT * FROM c")
+		// Each statement should be accessible by its own index.
+		let mut response = IndexedResults {
+			results: to_map(vec![
+				Ok(Value::from_int(0)), // index 0: first chained query
+				Ok(Value::from_int(1)), // index 1: second chained query
+				Ok(Value::from_int(2)), // index 2: third chained query
+			]),
+			..IndexedResults::new()
+		};
+
+		// Each index is independently accessible
+		let first: Value = response.take(0).unwrap();
+		assert_eq!(first, Value::from_int(0));
+
+		let second: Value = response.take(1).unwrap();
+		assert_eq!(second, Value::from_int(1));
+
+		let third: Value = response.take(2).unwrap();
+		assert_eq!(third, Value::from_int(2));
+
+		// After taking all three, takes return Value::None
+		let none: Value = response.take(0).unwrap();
+		assert_eq!(none, Value::None);
+	}
 }
