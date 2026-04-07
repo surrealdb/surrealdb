@@ -2,26 +2,25 @@ use std::io::IsTerminal;
 use std::time::Duration;
 use std::{io, mem, str, thread};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 use provisioner::{Permit, PermitError, Provisioner};
 use semver::Version;
-use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::env::VERSION;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
-use surrealdb_types::ToSql;
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio::{select, time};
 
 use crate::cli::{Backend, ColorMode, ResultsMode};
 use crate::format::Progress;
 use crate::runner::Schedular;
+use crate::tests::TestSet;
 use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
 use crate::tests::schema::NewPlannerStrategyConfig;
 use crate::tests::set::TestId;
-use crate::tests::TestSet;
 
 mod provisioner;
 mod util;
@@ -148,29 +147,26 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			let config = test.config.clone();
 
 			// Ensure this test can run on this version.
-			if let Some(version_req) = config.test.as_ref().and_then(|x| x.version.as_ref()) {
-				if !version_req.matches(&core_version) {
-					return None;
-				}
+			if let Some(version_req) = config.test.as_ref().and_then(|x| x.version.as_ref())
+				&& !version_req.matches(&core_version)
+			{
+				return None;
 			}
 
 			// Ensure this test imports can run on this version as specified by the test itself.
 			if let Some(version_req) =
 				config.test.as_ref().and_then(|x| x.importing_version.as_ref())
-			{
-				if !version_req.matches(&core_version) {
-					return None;
-				}
+			&& !version_req.matches(&core_version) {
+				return None;
 			}
 
 			// Ensure this test imports can run on this version as specified by the imports.
 			for import in test.imports.iter() {
 				if let Some(version_req) =
 					subset[import.id].config.test.as_ref().and_then(|x| x.version.as_ref())
+					&& !version_req.matches(&core_version)
 				{
-					if !version_req.matches(&core_version) {
-						return None;
-					}
+					return None;
 				}
 			}
 
@@ -394,7 +390,7 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 				.map(Duration::from_millis)
 				.unwrap_or(Duration::MAX)
 		})
-		.unwrap_or(Duration::from_secs(3));
+		.unwrap_or(Duration::from_millis(crate::tests::schema::DEFAULT_TIMEOUT_MS));
 
 	let backend = context.backend;
 	let strategy = context.strategy.clone();
@@ -402,8 +398,8 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 		.ds
 		.with(
 			move |ds| {
-				ds.with_capabilities(capabilities)
-					.with_query_timeout(Some(context_timeout_duration))
+				Box::new(ds.with_capabilities(capabilities)
+					.with_query_timeout(Some(context_timeout_duration)))
 			},
 			async |ds| {
 				run_test_with_dbs(context.id, &context.testset, ds, backend, strategy.clone()).await
@@ -471,7 +467,7 @@ async fn run_test_with_dbs(
 		.env
 		.as_ref()
 		.map(|x| x.timeout(Some(&backend_str)).map(Duration::from_millis).unwrap_or(Duration::MAX))
-		.unwrap_or(Duration::from_secs(2));
+		.unwrap_or(Duration::from_millis(crate::tests::schema::DEFAULT_TIMEOUT_MS));
 
 	let mut import_session = Session::owner();
 	dbs.process_use(None, &mut import_session, session.ns.clone(), session.db.clone()).await?;
@@ -515,22 +511,20 @@ async fn run_test_with_dbs(
 		}
 	}
 
-	if let Some(signup_vars) = config.env.as_ref().and_then(|x| x.signup.as_ref()) {
-		if let Err(e) =
+	if let Some(signup_vars) = config.env.as_ref().and_then(|x| x.signup.as_ref())
+		&& let Err(e) =
 			surrealdb_core::iam::signup::signup(dbs, &mut session, signup_vars.0.clone().into())
 				.await
 		{
 			return Ok(TestTaskResult::SignupError(e));
-		}
 	}
 
-	if let Some(signin_vars) = config.env.as_ref().and_then(|x| x.signin.as_ref()) {
-		if let Err(e) =
+	if let Some(signin_vars) = config.env.as_ref().and_then(|x| x.signin.as_ref())
+		&& let Err(e) =
 			surrealdb_core::iam::signin::signin(dbs, &mut session, signin_vars.0.clone().into())
 				.await
 		{
 			return Ok(TestTaskResult::SigninError(e));
-		}
 	}
 
 	let source = &set[id].source;

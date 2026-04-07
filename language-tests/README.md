@@ -455,7 +455,7 @@ Specifies a duration in milliseconds within which the entire test should finish.
 This controls the overall test execution time from start to finish. If the test 
 takes longer than the given duration it will be considered an error and it will 
 cause a test run to fail. This key can also be set to `false` to disable the 
-timeout altogether or `true` to default to 1 second. Defaults to `1000` (1 second).
+timeout altogether or `true` to default to 5 seconds. Defaults to `5000` (5 seconds).
 
 #### `[env.timeout-tikv]`, `[env.timeout-rocksdb]`, `[env.timeout-surrealkv]`
 
@@ -467,9 +467,9 @@ to network latency).
 **Example:**
 ```toml
 [env]
-timeout = 2000           # Default timeout for memory backend
-timeout-tikv = 10000     # TiKV needs 5x more time due to network latency
-timeout-rocksdb = 3000   # RocksDB may need slightly more time for disk I/O
+timeout = 5000           # Timeout for memory backend
+timeout-tikv = 10000     # TiKV needs 2x more time due to network latency
+timeout-rocksdb = 6000   # RocksDB may need slightly more time for disk I/O
 ```
 
 #### `[env.context_timeout]`
@@ -478,7 +478,7 @@ Specifies a duration in milliseconds for individual query execution within the
 datastore context. This controls how long each query is allowed to run. If a 
 query takes longer than the given duration, it will be terminated. This key can 
 also be set to `false` to disable the context timeout altogether or `true` to 
-default to 1 second. Defaults to `1000` (1 second).
+default to 5 seconds. Defaults to `5000` (5 seconds).
 
 #### `[env.context-timeout-tikv]`, `[env.context-timeout-rocksdb]`, `[env.context-timeout-surrealkv]`
 
@@ -488,8 +488,8 @@ overrides, these allow setting different query execution limits per backend.
 **Example:**
 ```toml
 [env]
-context-timeout = 1000           # Default context timeout
-context-timeout-tikv = 5000      # TiKV queries may take longer
+context-timeout = 5000           # Default context timeout
+context-timeout-tikv = 10000      # TiKV queries may take longer
 ```
 
 Note: `[env.timeout]` and `[env.context_timeout]` serve different purposes:

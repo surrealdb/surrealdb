@@ -1,6 +1,6 @@
 //! Module defining the configuration schema.
 
-//mod bytes_hack;
+pub(crate) const DEFAULT_TIMEOUT_MS: u64 = 5000;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -49,10 +49,7 @@ impl TestConfig {
 
 	/// Returns if this test must be run without other test running.
 	pub fn should_run_sequentially(&self) -> bool {
-		self.env.as_ref().map(|x| x.sequential).unwrap_or(
-			// TODO(ssttuu): This should be `true` but we're currently having flakiness issues.
-			false,
-		)
+		self.env.as_ref().map(|x| x.sequential).unwrap_or(false)
 	}
 
 	/// Whether this test can use one of the datastorage struct which are reused between tests.
@@ -174,7 +171,7 @@ impl TestEnv {
 
 	/// Returns the timeout for this test in milliseconds.
 	/// If a backend-specific timeout is set and matches the current backend, it takes precedence.
-	/// Falls back to the base timeout, defaulting to 1000ms.
+	/// Falls back to the base timeout, defaulting to [`DEFAULT_TIMEOUT_MS`].
 	pub fn timeout(&self, backend: Option<&str>) -> Option<u64> {
 		// Check for backend-specific override first
 		let override_timeout = match backend {
@@ -185,16 +182,16 @@ impl TestEnv {
 		};
 
 		if let Some(t) = override_timeout {
-			return t.into_value(1000);
+			return t.into_value(DEFAULT_TIMEOUT_MS);
 		}
 
 		// Fall back to base timeout
-		self.timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
+		self.timeout.map(|x| x.into_value(DEFAULT_TIMEOUT_MS)).unwrap_or(Some(DEFAULT_TIMEOUT_MS))
 	}
 
 	/// Returns the context timeout for this test in milliseconds.
 	/// If a backend-specific context timeout is set and matches the current backend, it takes precedence.
-	/// Falls back to the base context_timeout, defaulting to 1000ms.
+	/// Falls back to the base context_timeout, defaulting to [`DEFAULT_TIMEOUT_MS`].
 	pub fn context_timeout(&self, backend: Option<&str>) -> Option<u64> {
 		// Check for backend-specific override first
 		let override_timeout = match backend {
@@ -205,11 +202,11 @@ impl TestEnv {
 		};
 
 		if let Some(t) = override_timeout {
-			return t.into_value(1000);
+			return t.into_value(DEFAULT_TIMEOUT_MS);
 		}
 
 		// Fall back to base context_timeout
-		self.context_timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
+		self.context_timeout.map(|x| x.into_value(DEFAULT_TIMEOUT_MS)).unwrap_or(Some(DEFAULT_TIMEOUT_MS))
 	}
 
 	pub fn unused_keys(&self) -> Vec<String> {
@@ -682,10 +679,10 @@ impl<'de> Deserialize<'de> for SurrealObject {
 		})
 		.map_err(<D::Error as serde::de::Error>::custom)?;
 
-		v.into_object().map(SurrealObject).or_else(|err| {
-			Err(<D::Error as serde::de::Error>::custom(format_args!(
+		v.into_object().map(SurrealObject).map_err(|err| {
+			<D::Error as serde::de::Error>::custom(format_args!(
 				"Expected a object, found '{source}': {err}"
-			)))
+			))
 		})
 	}
 }
