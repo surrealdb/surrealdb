@@ -107,6 +107,7 @@ impl Document {
 		Ok(())
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn lq_compute(
 		&self,
 		stk: &mut Stk,

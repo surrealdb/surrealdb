@@ -46,7 +46,7 @@ impl HttpClient {
 		};
 
 		let value =
-			HeaderValue::from_str(&*SURREALDB_USER_AGENT).context("Invalid user agent string")?;
+			HeaderValue::from_str(&SURREALDB_USER_AGENT).context("Invalid user agent string")?;
 
 		let mut headers = HeaderMap::new();
 		headers.insert(USER_AGENT, value);
