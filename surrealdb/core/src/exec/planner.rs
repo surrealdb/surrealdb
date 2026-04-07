@@ -254,10 +254,8 @@ impl<'ctx> Planner<'ctx> {
 		} else {
 			self.ctx.clone()
 		};
-		let sig = executable
-			.signature(&ctx, sub)
-			.await
-			.map_err(|e| Error::Internal(e.to_string()))?;
+		let sig =
+			executable.signature(&ctx, sub).await.map_err(|e| Error::Internal(e.to_string()))?;
 		Ok(sig.writeable)
 	}
 
