@@ -1,6 +1,6 @@
 //! Module defining the configuration schema.
 
-const DEFAULT_TIMEOUT_MS: u64 = 5000;
+pub(crate) const DEFAULT_TIMEOUT_MS: u64 = 5000;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -49,10 +49,7 @@ impl TestConfig {
 
 	/// Returns if this test must be run without other test running.
 	pub fn should_run_sequentially(&self) -> bool {
-		self.env.as_ref().map(|x| x.sequential).unwrap_or(
-			// TODO(ssttuu): This should be `true` but we're currently having flakiness issues.
-			false,
-		)
+		self.env.as_ref().map(|x| x.sequential).unwrap_or(false)
 	}
 
 	/// Whether this test can use one of the datastorage struct which are reused between tests.
@@ -682,10 +679,10 @@ impl<'de> Deserialize<'de> for SurrealObject {
 		})
 		.map_err(<D::Error as serde::de::Error>::custom)?;
 
-		v.into_object().map(SurrealObject).or_else(|err| {
-			Err(<D::Error as serde::de::Error>::custom(format_args!(
+		v.into_object().map(SurrealObject).map_err(|err| {
+			<D::Error as serde::de::Error>::custom(format_args!(
 				"Expected a object, found '{source}': {err}"
-			)))
+			))
 		})
 	}
 }

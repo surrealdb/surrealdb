@@ -40,12 +40,12 @@ impl<'a> Parser<'a> {
 	}
 
 	pub fn eat(&mut self, c: u8) -> bool {
-		if let Some(x) = self.peek() {
-			if x == c {
-				self.offset += 1;
-				self.peek = None;
-				return true;
-			}
+		if let Some(x) = self.peek()
+			&& x == c
+		{
+			self.offset += 1;
+			self.peek = None;
+			return true;
 		}
 		false
 	}
