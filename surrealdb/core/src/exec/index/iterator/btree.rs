@@ -244,14 +244,16 @@ impl UniqueEqualIterator {
 				if *done {
 					return Ok(Vec::new());
 				}
-				*done = true;
 				let res = tx.scan(beg.clone()..end.clone(), INDEX_BATCH_SIZE, 0, None).await?;
-				let mut records = Vec::with_capacity(res.len());
-				for (_key, val) in res {
-					let rid: RecordId = revision::from_slice(&val)?;
-					records.push(rid);
+				if res.is_empty() {
+					*done = true;
+					return Ok(Vec::new());
 				}
-				Ok(records)
+				if let Some((key, _)) = res.last() {
+					beg.clone_from(key);
+					beg.push(0x00);
+				}
+				decode_record_ids(res)
 			}
 		}
 	}
