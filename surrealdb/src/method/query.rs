@@ -27,7 +27,7 @@ use crate::{Connection, Error, Result, Surreal, opt};
 pub struct Query<'r, C: Connection> {
 	pub(crate) txn: Option<Uuid>,
 	pub(crate) client: Cow<'r, Surreal<C>>,
-	pub(crate) query: Cow<'r, str>,
+	pub(crate) queries: Vec<Cow<'r, str>>,
 	pub(crate) variables: Result<Variables>,
 }
 
@@ -78,9 +78,39 @@ where
 		Query {
 			txn: self.txn,
 			client: Cow::Owned(self.client.into_owned()),
-			query: Cow::Owned(self.query.into_owned()),
+			queries: self.queries.into_iter().map(|q| Cow::Owned(q.into_owned())).collect(),
 			variables: self.variables,
 		}
+	}
+
+	/// Chains an additional query statement onto this query builder
+	///
+	/// This allows multiple queries to be built up and sent together, with
+	/// results accessible by index via `.take(0)`, `.take(1)`, etc.
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// use surrealdb::RecordId;
+	///
+	/// let id = RecordId::from_table_key("user", "john");
+	/// let mut response = db
+	///     .query("SELECT * FROM $id<-knows.*")
+	///     .query("SELECT * FROM $id->knows.*")
+	///     .bind(("id", id))
+	///     .await?;
+	///
+	/// let followers = response.take::<Vec<_>>(0)?;
+	/// let following = response.take::<Vec<_>>(1)?;
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn query(mut self, query: impl Into<Cow<'r, str>>) -> Self {
+		self.queries.push(query.into());
+		self
 	}
 }
 
@@ -95,19 +125,20 @@ where
 		let Self {
 			txn,
 			client,
-			query,
+			queries,
 			variables,
 		} = self;
 
 		Box::pin(async move {
 			// Extract the router from the client
 			let router = client.inner.router.extract()?;
+			let query = queries.into_iter().map(|q| q.into_owned()).collect::<Vec<_>>().join("; ");
 
 			let results = router
 				.execute_query(
 					client.session_id,
 					Command::Query {
-						query: Cow::Owned(query.into_owned()),
+						query: Cow::Owned(query),
 						txn,
 						variables: variables?,
 					},
@@ -228,7 +259,7 @@ where
 		Query {
 			txn: self.txn,
 			client: self.client,
-			query: self.query,
+			queries: self.queries,
 			variables,
 		}
 	}
