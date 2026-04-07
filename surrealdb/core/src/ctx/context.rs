@@ -33,6 +33,7 @@ use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, NewPlannerStrategy, Options, Session, Variables};
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
+#[cfg(feature = "http")]
 use crate::http::HttpClient;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
@@ -105,6 +106,7 @@ pub struct Context {
 	// KNN context for index functions (vector::distance::knn)
 	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 	/// Client for making http requests.
+	#[cfg(feature = "http")]
 	http_client: Arc<HttpClient>,
 }
 
@@ -149,6 +151,7 @@ impl Context {
 			redact_volatile_explain_attrs: false,
 			matches_context: None,
 			knn_context: None,
+			#[cfg(feature = "http")]
 			http_client: parent.http_client.clone(),
 		}
 	}
@@ -182,6 +185,7 @@ impl Context {
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			matches_context: parent.matches_context.clone(),
 			knn_context: parent.knn_context.clone(),
+			#[cfg(feature = "http")]
 			http_client: parent.http_client.clone(),
 		}
 	}
@@ -217,6 +221,7 @@ impl Context {
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			matches_context: parent.matches_context.clone(),
 			knn_context: parent.knn_context.clone(),
+			#[cfg(feature = "http")]
 			http_client: parent.http_client.clone(),
 		}
 	}
@@ -259,6 +264,7 @@ impl Context {
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			matches_context: from.matches_context.clone(),
 			knn_context: from.knn_context.clone(),
+			#[cfg(feature = "http")]
 			http_client: from.http_client.clone(),
 		}
 	}
@@ -294,6 +300,7 @@ impl Context {
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			matches_context: from.matches_context.clone(),
 			knn_context: from.knn_context.clone(),
+			#[cfg(feature = "http")]
 			http_client: from.http_client.clone(),
 		}
 	}
@@ -308,7 +315,7 @@ impl Context {
 		index_builder: IndexBuilder,
 		sequences: Sequences,
 		cache: Arc<DatastoreCache>,
-		http_client: Arc<HttpClient>,
+		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: BucketsManager,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
@@ -341,6 +348,7 @@ impl Context {
 			redact_volatile_explain_attrs: false,
 			matches_context: None,
 			knn_context: None,
+			#[cfg(feature = "http")]
 			http_client,
 		};
 		if let Some(timeout) = time_out {
@@ -380,6 +388,7 @@ impl Context {
 			redact_volatile_explain_attrs: false,
 			matches_context: None,
 			knn_context: None,
+			#[cfg(feature = "http")]
 			http_client: Arc::new(
 				HttpClient::new(capabilities).expect("http client to be created"),
 			),
@@ -1019,6 +1028,7 @@ impl Context {
 			.await
 	}
 
+	#[cfg(feature = "http")]
 	pub(crate) fn http_client(&self) -> Arc<HttpClient> {
 		self.http_client.clone()
 	}

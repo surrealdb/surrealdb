@@ -62,6 +62,7 @@ use crate::err::Error;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
 use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};
+#[cfg(feature = "http")]
 use crate::http::HttpClient;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
@@ -140,6 +141,7 @@ pub struct Datastore {
 	// Async event processing trigger
 	async_event_trigger: Arc<Notify>,
 	// Http client used to make requests.
+	#[cfg(feature = "http")]
 	http_client: Arc<HttpClient>,
 }
 
@@ -661,6 +663,7 @@ impl Datastore {
 		let tf = TransactionFactory::new(async_event_trigger.clone(), builder);
 		let id = Uuid::new_v4();
 		let capabilities = Arc::new(Capabilities::default());
+		#[cfg(feature = "http")]
 		let http_client = Arc::new(
 			HttpClient::new(capabilities.clone()).context("Could not create http client")?,
 		);
@@ -685,6 +688,7 @@ impl Datastore {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 			async_event_trigger,
+			#[cfg(feature = "http")]
 			http_client,
 		})
 	}
@@ -728,6 +732,7 @@ impl Datastore {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 			async_event_trigger: self.async_event_trigger,
+		#[cfg(feature = "http")]
 			http_client: self.http_client,
 		}
 	}
@@ -2203,6 +2208,7 @@ impl Datastore {
 			self.index_builder.clone(),
 			self.sequences.clone(),
 			self.cache.clone(),
+			#[cfg(feature = "http")]
 			self.http_client.clone(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
