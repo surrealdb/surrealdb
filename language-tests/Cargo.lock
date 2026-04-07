@@ -4387,7 +4387,6 @@ name = "surrealql-test"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64 0.22.1",
  "cfg-if",
  "clap",
  "futures",

@@ -233,7 +233,7 @@ impl TestReport {
 		f.indent(|f| {
 			writeln!(f, "= Got:")?;
 			f.indent(|f| match outputs {
-				TestOutputs::Values(res) => Self::display_value_list(&res, f),
+				TestOutputs::Values(res) => Self::display_value_list(res, f),
 				TestOutputs::ParsingError(res) => {
 					writeln!(f, "- Parsing error: {res}")
 				}
@@ -257,7 +257,7 @@ impl TestReport {
 					None => writeln!(f, "- Any parsing error"),
 				},
 				super::TestExpectation::Values(e) => match e {
-					Some(e) => Self::display_expectation_list(&e, f),
+					Some(e) => Self::display_expectation_list(e, f),
 					None => writeln!(f, "- Any list of query result values"),
 				},
 				super::TestExpectation::Signin(e) => match e {
