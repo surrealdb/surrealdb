@@ -481,7 +481,8 @@ fn literal_to_base_kind(literal: &KindLiteral) -> Kind {
 			{
 				Kind::Array(Box::new(first.clone()), len)
 			} else {
-				// tuple-like literal arrays are represented as array<any> for GraphQL then validated
+				// tuple-like literal arrays are represented as array<any> for GraphQL then
+				// validated
 				Kind::Array(Box::new(Kind::Any), len)
 			}
 		}
