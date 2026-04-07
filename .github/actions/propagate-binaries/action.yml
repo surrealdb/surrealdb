@@ -32,11 +32,13 @@ runs:
                 failed_regions+=("${region}")
             fi
         done
+        total=${#regions[@]}
+        quorum=$(( total / 2 + 1 ))
         if [ ${#failed_regions[@]} -gt 0 ]; then
             echo "::warning::Sync failed for regions: ${failed_regions[*]}"
         fi
-        if [ ${#succeeded_regions[@]} -eq 0 ]; then
-            echo "::error::Sync failed for all regions"
+        if [ ${#succeeded_regions[@]} -lt ${quorum} ]; then
+            echo "::error::Only ${#succeeded_regions[@]}/${total} regions synced, quorum of ${quorum} not met"
             exit 1
         fi
 
