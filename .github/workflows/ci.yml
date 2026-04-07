@@ -59,7 +59,7 @@ jobs:
         run: cargo build --target ${{ matrix.target }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # (Actions must be pinned by commit hash) v4.6.2
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # (Actions must be pinned by commit hash) v7.0.0
         with:
           name: surreal-${{ matrix.name }}
           path: target/${{ matrix.target }}/debug/surreal
@@ -606,7 +606,7 @@ jobs:
           repository: "surrealdb/surrealdb.js"
 
       - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
@@ -659,7 +659,7 @@ jobs:
           repository: "surrealdb/surrealdb.go"
 
       - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
@@ -721,7 +721,7 @@ jobs:
           repository: "surrealdb/surrealdb.py"
 
       - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
@@ -790,7 +790,7 @@ jobs:
           repository: "surrealdb/surrealdb.php"
 
       - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
@@ -851,7 +851,7 @@ jobs:
           repository: "surrealdb/surrealdb.net"
 
       - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
