@@ -180,6 +180,15 @@ impl PhysicalExpr for Param {
 			return Ok(v.clone());
 		}
 
+		// $parent falls back to document_root when not explicitly bound.
+		// This allows `->edge[WHERE $parent.field]` and similar idiom-level
+		// WHERE clauses to reference the enclosing row being projected/filtered.
+		if self.0.as_str() == "parent"
+			&& let Some(v) = ctx.document_root
+		{
+			return Ok(v.clone());
+		}
+
 		// Try to fetch from database
 		// First check if we have database context directly
 		if let Ok(db_ctx) = ctx.exec_ctx.database() {

@@ -137,9 +137,9 @@ impl Builder {
 		self
 	}
 
-	/// Set the terminal log output format
+	/// Set the socket log output format
 	pub fn with_socket_format(mut self, format: LogFormat) -> Self {
-		self.format = format;
+		self.socket_format = format;
 		self
 	}
 

@@ -74,6 +74,7 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 			recursion_ctx: ctx.recursion_ctx,
 			document_root: ctx.document_root,
 			skip_fetch_perms: ctx.skip_fetch_perms,
+			computing_record: ctx.computing_record,
 		};
 
 		// 5. Check permissions (with limited auth)
@@ -114,6 +115,7 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 			recursion_ctx: None,
 			document_root: None,
 			skip_fetch_perms: ctx.skip_fetch_perms,
+			computing_record: ctx.computing_record.clone(),
 		};
 		let result = match block_expr.evaluate(eval_ctx).await {
 			Ok(v) => v,

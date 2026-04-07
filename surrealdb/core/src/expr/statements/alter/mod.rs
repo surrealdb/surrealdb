@@ -8,21 +8,41 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::Value;
 
+mod access;
+mod analyzer;
+mod api;
+mod bucket;
+mod config;
 mod database;
+mod event;
 mod field;
+mod function;
 mod index;
+mod module;
 mod namespace;
+mod param;
 mod sequence;
 mod system;
 mod table;
+mod user;
 
+pub(crate) use access::AlterAccessStatement;
+pub(crate) use analyzer::AlterAnalyzerStatement;
+pub(crate) use api::{AlterApiClause, AlterApiStatement};
+pub(crate) use bucket::AlterBucketStatement;
+pub(crate) use config::AlterConfigStatement;
 pub(crate) use database::AlterDatabaseStatement;
+pub(crate) use event::AlterEventStatement;
 pub(crate) use field::{AlterDefault, AlterFieldStatement};
+pub(crate) use function::AlterFunctionStatement;
 pub(crate) use index::AlterIndexStatement;
+pub(crate) use module::AlterModuleStatement;
 pub(crate) use namespace::AlterNamespaceStatement;
+pub(crate) use param::AlterParamStatement;
 pub(crate) use sequence::AlterSequenceStatement;
 pub(crate) use system::AlterSystemStatement;
 pub(crate) use table::AlterTableStatement;
+pub(crate) use user::AlterUserStatement;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 /// Helper to express a tri‑state alteration:
 /// - `None`: leave the current value unchanged
@@ -95,9 +115,19 @@ pub(crate) enum AlterStatement {
 	Namespace(AlterNamespaceStatement),
 	Database(AlterDatabaseStatement),
 	Table(AlterTableStatement),
+	Api(AlterApiStatement),
+	Event(AlterEventStatement),
 	Index(AlterIndexStatement),
 	Sequence(AlterSequenceStatement),
 	Field(AlterFieldStatement),
+	Param(AlterParamStatement),
+	Bucket(AlterBucketStatement),
+	Config(AlterConfigStatement),
+	Analyzer(AlterAnalyzerStatement),
+	Function(AlterFunctionStatement),
+	User(AlterUserStatement),
+	Access(AlterAccessStatement),
+	Module(AlterModuleStatement),
 }
 
 impl AlterStatement {
@@ -118,9 +148,19 @@ impl AlterStatement {
 			Self::Namespace(v) => v.compute(ctx, opt).await,
 			Self::Database(v) => v.compute(ctx, opt).await,
 			Self::Table(v) => v.compute(ctx, opt).await,
+			Self::Api(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Event(v) => v.compute(ctx, opt).await,
 			Self::Index(v) => v.compute(ctx, opt).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Field(v) => v.compute(ctx, opt).await,
+			Self::Param(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Bucket(v) => v.compute(ctx, opt).await,
+			Self::Config(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Analyzer(v) => v.compute(ctx, opt).await,
+			Self::Function(v) => v.compute(ctx, opt).await,
+			Self::User(v) => v.compute(ctx, opt).await,
+			Self::Access(v) => v.compute(ctx, opt).await,
+			Self::Module(v) => v.compute(ctx, opt).await,
 		}
 	}
 }
@@ -132,9 +172,19 @@ impl ToSql for AlterStatement {
 			Self::Namespace(v) => v.fmt_sql(f, fmt),
 			Self::Database(v) => v.fmt_sql(f, fmt),
 			Self::Table(v) => v.fmt_sql(f, fmt),
+			Self::Api(v) => v.fmt_sql(f, fmt),
+			Self::Event(v) => v.fmt_sql(f, fmt),
 			Self::Index(v) => v.fmt_sql(f, fmt),
 			Self::Sequence(v) => v.fmt_sql(f, fmt),
 			Self::Field(v) => v.fmt_sql(f, fmt),
+			Self::Param(v) => v.fmt_sql(f, fmt),
+			Self::Bucket(v) => v.fmt_sql(f, fmt),
+			Self::Config(v) => v.fmt_sql(f, fmt),
+			Self::Analyzer(v) => v.fmt_sql(f, fmt),
+			Self::Function(v) => v.fmt_sql(f, fmt),
+			Self::User(v) => v.fmt_sql(f, fmt),
+			Self::Access(v) => v.fmt_sql(f, fmt),
+			Self::Module(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

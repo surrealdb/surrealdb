@@ -183,7 +183,7 @@ impl ScanPipeline {
 /// Determine scan direction from ORDER BY clause.
 /// Returns Backward if the first ORDER BY is `id DESC`, otherwise Forward.
 pub(crate) fn determine_scan_direction(
-	order: &Option<crate::expr::order::Ordering>,
+	order: Option<&crate::expr::order::Ordering>,
 ) -> ScanDirection {
 	use crate::expr::order::Ordering as OrderingType;
 	if let Some(OrderingType::Order(order_list)) = order
@@ -673,6 +673,17 @@ pub(crate) async fn compute_fields_for_value(
 
 	let mut eval_ctx = EvalContext::from_exec_ctx(ctx);
 	eval_ctx.skip_fetch_perms = skip_fetch_perms;
+
+	// Extract the record ID before entering the loop so that field
+	// dereferences that target this same record can return raw data
+	// instead of re-computing fields (which would loop forever).
+	eval_ctx.computing_record = match &*value {
+		Value::Object(obj) => match obj.get("id") {
+			Some(Value::RecordId(rid)) => Some(rid.clone()),
+			_ => None,
+		},
+		_ => None,
+	};
 
 	for cf in &state.computed_fields {
 		// Evaluate with the current value as context

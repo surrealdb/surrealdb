@@ -45,10 +45,10 @@ pub(crate) use self::output::OutputStatement;
 pub(crate) use self::rebuild::RebuildStatement;
 pub(crate) use self::relate::RelateStatement;
 pub(crate) use self::remove::{
-	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
-	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement,
-	RemoveModuleStatement, RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement,
-	RemoveTableStatement, RemoveUserStatement,
+	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveConfigStatement, RemoveDatabaseStatement,
+	RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
+	RemoveModelStatement, RemoveModuleStatement, RemoveNamespaceStatement, RemoveParamStatement,
+	RemoveStatement, RemoveTableStatement, RemoveUserStatement,
 };
 pub(crate) use self::select::SelectStatement;
 pub(crate) use self::set::SetStatement;

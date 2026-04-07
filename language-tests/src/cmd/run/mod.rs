@@ -19,6 +19,7 @@ use crate::format::Progress;
 use crate::runner::Schedular;
 use crate::tests::TestSet;
 use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
+use crate::tests::schema::NewPlannerStrategyConfig;
 use crate::tests::set::TestId;
 
 mod provisioner;
@@ -26,23 +27,28 @@ mod util;
 
 use util::core_capabilities_from_test_config;
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) struct RunId(usize);
+
 pub struct TestTaskContext {
+	pub run_id: RunId,
 	pub id: TestId,
 	pub testset: TestSet,
 	pub ds: Permit,
-	pub result: Sender<(TestId, TestTaskResult)>,
+	pub result: Sender<(RunId, TestId, TestTaskResult, Option<String>)>,
 	pub backend: Backend,
+	pub strategy: NewPlannerStrategyConfig,
 }
 
 fn try_collect_reports<W: io::Write>(
 	reports: &mut Vec<TestReport>,
-	channel: &mut UnboundedReceiver<TestReport>,
-	progress: &mut Progress<TestId, W>,
+	channel: &mut UnboundedReceiver<(RunId, TestReport)>,
+	progress: &mut Progress<RunId, W>,
 ) {
-	while let Ok(x) = channel.try_recv() {
-		let grade = x.grade();
-		progress.finish_item(x.test_id(), grade).unwrap();
-		reports.push(x);
+	while let Ok((run_id, report)) = channel.try_recv() {
+		let grade = report.grade();
+		progress.finish_item(run_id, grade).unwrap();
+		reports.push(report);
 	}
 }
 
@@ -141,29 +147,26 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			let config = test.config.clone();
 
 			// Ensure this test can run on this version.
-			if let Some(version_req) = config.test.as_ref().and_then(|x| x.version.as_ref()) {
-				if !version_req.matches(&core_version) {
-					return None;
-				}
+			if let Some(version_req) = config.test.as_ref().and_then(|x| x.version.as_ref())
+				&& !version_req.matches(&core_version)
+			{
+				return None;
 			}
 
 			// Ensure this test imports can run on this version as specified by the test itself.
 			if let Some(version_req) =
 				config.test.as_ref().and_then(|x| x.importing_version.as_ref())
-			{
-				if !version_req.matches(&core_version) {
-					return None;
-				}
+			&& !version_req.matches(&core_version) {
+				return None;
 			}
 
 			// Ensure this test imports can run on this version as specified by the imports.
 			for import in test.imports.iter() {
 				if let Some(version_req) =
 					subset[import.id].config.test.as_ref().and_then(|x| x.version.as_ref())
+					&& !version_req.matches(&core_version)
 				{
-					if !version_req.matches(&core_version) {
-						return None;
-					}
+					return None;
 				}
 			}
 
@@ -186,50 +189,63 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	let mut provisioner = Provisioner::new(num_jobs as usize, backend).await?;
 
-	println!(" Found {} tests", subset.len());
+	let num_tests = tasks.len();
+	let num_runs: usize =
+		tasks.iter().map(|id| subset[*id].config.planner_strategies().len()).sum();
+	println!(" Found {} tests ({} runs)", subset.len(), num_runs);
 
 	tokio::spawn(grade_task(subset.clone(), res_recv, report_send));
 
 	let mut reports = Vec::new();
-	let num_tasks = tasks.len();
-	let mut progress = Progress::from_stderr(num_tasks, color);
+	let mut run_counter: usize = 0;
+	let mut progress = Progress::from_stderr(num_runs, color);
 
-	// spawn all tests.
+	// spawn all tests -- one task per (test, strategy) combination.
 	for id in tasks {
 		let config = subset[id].config.as_ref();
-		progress.start_item(id, subset[id].path.as_str()).unwrap();
+		let strategies = config.planner_strategies();
 
-		let versioned = config.env.as_ref().map(|e| e.versioned).unwrap_or(false);
-		let ds = if config.can_use_reusable_ds() {
-			provisioner.obtain().await
-		} else {
-			provisioner.create(versioned)
-		};
+		for strategy in strategies {
+			let run_id = RunId(run_counter);
+			run_counter += 1;
 
-		let context = TestTaskContext {
-			id,
-			testset: subset.clone(),
-			result: res_send.clone(),
-			ds,
-			backend,
-		};
-		let future = async move {
-			let name = context.testset[context.id].path.as_str().to_owned();
-			let future = test_task(context);
+			let run_label = format!("{} [{}]", subset[id].path.as_str(), strategy);
+			progress.start_item(run_id, &run_label).unwrap();
 
-			if let Err(e) = future.await {
-				println!("Error: {:?}", e.context(format!("Failed to run test '{name}'")))
+			let versioned = config.env.as_ref().map(|e| e.versioned).unwrap_or(false);
+			let ds = if config.can_use_reusable_ds() {
+				provisioner.obtain().await
+			} else {
+				provisioner.create(versioned)
+			};
+
+			let context = TestTaskContext {
+				run_id,
+				id,
+				testset: subset.clone(),
+				result: res_send.clone(),
+				ds,
+				backend,
+				strategy: strategy.clone(),
+			};
+			let future = async move {
+				let name = context.testset[context.id].path.as_str().to_owned();
+				let future = test_task(context);
+
+				if let Err(e) = future.await {
+					println!("Error: {:?}", e.context(format!("Failed to run test '{name}'")))
+				}
+			};
+
+			if config.should_run_sequentially() {
+				schedular.spawn_sequential(future).await;
+			} else {
+				schedular.spawn(future).await;
 			}
-		};
 
-		if config.should_run_sequentially() {
-			schedular.spawn_sequential(future).await;
-		} else {
-			schedular.spawn(future).await;
+			// Try to collect reports to give quick feedback on test completion.
+			try_collect_reports(&mut reports, &mut report_recv, &mut progress);
 		}
-
-		// Try to collect reports to give quick feedback on test completion.
-		try_collect_reports(&mut reports, &mut report_recv, &mut progress);
 	}
 
 	// all test are running.
@@ -238,10 +254,10 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	// when the report channel quits we can be sure we are done. since the report task has quit
 	// meaning the test tasks have all quit.
-	while let Some(x) = report_recv.recv().await {
-		let grade = x.grade();
-		progress.finish_item(x.test_id(), grade).unwrap();
-		reports.push(x);
+	while let Some((run_id, report)) = report_recv.recv().await {
+		let grade = report.grade();
+		progress.finish_item(run_id, grade).unwrap();
+		reports.push(report);
 	}
 
 	// Wait for all the tasks to finish.
@@ -266,10 +282,12 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	}
 
 	// Print summary line.
+	// passed/failed/warned are per-run counts (one report per test-strategy pair),
+	// while skipped is a per-test count (tests excluded before strategy expansion).
 	let passed = reports.iter().filter(|r| r.grade() == TestGrade::Success).count();
 	let failed = reports.iter().filter(|r| r.grade() == TestGrade::Failed).count();
 	let warned = reports.iter().filter(|r| r.grade() == TestGrade::Warning).count();
-	let skipped = subset.len() - num_tasks;
+	let skipped = subset.len() - num_tests;
 	let use_color = match color {
 		ColorMode::Always => true,
 		ColorMode::Never => false,
@@ -281,7 +299,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		let yellow = "\x1b[33m";
 		let dim = "\x1b[2m";
 		let reset = "\x1b[0m";
-		print!(" {green}{passed} passed{reset}");
+		print!(" {green}{passed} runs passed{reset}");
 		if failed > 0 {
 			print!(", {red}{failed} failed{reset}");
 		}
@@ -289,11 +307,11 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			print!(", {yellow}{warned} warnings{reset}");
 		}
 		if skipped > 0 {
-			print!(", {dim}{skipped} skipped{reset}");
+			print!(" | {dim}{skipped} tests skipped{reset}");
 		}
 		println!();
 	} else {
-		print!(" {passed} passed");
+		print!(" {passed} runs passed");
 		if failed > 0 {
 			print!(", {failed} failed");
 		}
@@ -301,7 +319,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			print!(", {warned} warnings");
 		}
 		if skipped > 0 {
-			print!(", {skipped} skipped");
+			print!(" | {skipped} tests skipped");
 		}
 		println!();
 	}
@@ -337,8 +355,8 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 pub async fn grade_task(
 	set: TestSet,
-	mut results: Receiver<(TestId, TestTaskResult)>,
-	sender: UnboundedSender<TestReport>,
+	mut results: Receiver<(RunId, TestId, TestTaskResult, Option<String>)>,
+	sender: UnboundedSender<(RunId, TestReport)>,
 ) {
 	let ds = Datastore::new("memory")
 		.await
@@ -350,12 +368,12 @@ pub async fn grade_task(
 		.unwrap();
 
 	loop {
-		let Some((id, res)) = results.recv().await else {
+		let Some((run_id, id, res, extra_name)) = results.recv().await else {
 			break;
 		};
 
-		let report = TestReport::from_test_result(id, &set, res, &ds, None).await;
-		sender.send(report).expect("report channel quit early");
+		let report = TestReport::from_test_result(id, &set, res, &ds, extra_name).await;
+		sender.send((run_id, report)).expect("report channel quit early");
 	}
 }
 
@@ -372,17 +390,20 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 				.map(Duration::from_millis)
 				.unwrap_or(Duration::MAX)
 		})
-		.unwrap_or(Duration::from_secs(3));
+		.unwrap_or(Duration::from_millis(crate::tests::schema::DEFAULT_TIMEOUT_MS));
 
 	let backend = context.backend;
+	let strategy = context.strategy.clone();
 	let res = context
 		.ds
 		.with(
 			move |ds| {
-				ds.with_capabilities(capabilities)
-					.with_query_timeout(Some(context_timeout_duration))
+				Box::new(ds.with_capabilities(capabilities)
+					.with_query_timeout(Some(context_timeout_duration)))
 			},
-			async |ds| run_test_with_dbs(context.id, &context.testset, ds, backend).await,
+			async |ds| {
+				run_test_with_dbs(context.id, &context.testset, ds, backend, strategy.clone()).await
+			},
 		)
 		.await;
 
@@ -392,9 +413,32 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 		Err(PermitError::Panic(e)) => TestTaskResult::Panicked(e),
 	};
 
-	context.result.send((context.id, res)).await.expect("result channel quit early");
+	let extra_name = Some(format!("[{}]", context.strategy));
+	context
+		.result
+		.send((context.run_id, context.id, res, extra_name))
+		.await
+		.expect("result channel quit early");
 
 	Ok(())
+}
+
+/// Checks for keys retained in the datastore after clean up which should not be there.
+async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
+	const ALLOWED_KEY_PREFIXES: &[&[u8]] = &[b"/!ni", b"/!nh", b"/!nd", b"/!ic"];
+
+	let txn = dbs
+		.transaction(
+			surrealdb_core::kvs::TransactionType::Read,
+			surrealdb_core::kvs::LockType::Pessimistic,
+		)
+		.await?;
+	let res = txn.keys(vec![0]..vec![0xff], 1000, 0, None).await?;
+	txn.cancel().await?;
+	Ok(res
+		.into_iter()
+		.filter(|key| !ALLOWED_KEY_PREFIXES.iter().any(|allowed| key.starts_with(allowed)))
+		.collect())
 }
 
 async fn run_test_with_dbs(
@@ -402,11 +446,12 @@ async fn run_test_with_dbs(
 	set: &TestSet,
 	dbs: &mut Datastore,
 	backend: Backend,
+	strategy: NewPlannerStrategyConfig,
 ) -> Result<TestTaskResult> {
 	let config = &set[id].config;
 	let backend_str = backend.to_string();
 
-	let mut session = util::session_from_test_config(config);
+	let mut session = util::session_from_test_config(config, strategy.into());
 
 	if let Some(ref x) = session.ns {
 		let db = session.db.take();
@@ -422,7 +467,7 @@ async fn run_test_with_dbs(
 		.env
 		.as_ref()
 		.map(|x| x.timeout(Some(&backend_str)).map(Duration::from_millis).unwrap_or(Duration::MAX))
-		.unwrap_or(Duration::from_secs(2));
+		.unwrap_or(Duration::from_millis(crate::tests::schema::DEFAULT_TIMEOUT_MS));
 
 	let mut import_session = Session::owner();
 	dbs.process_use(None, &mut import_session, session.ns.clone(), session.db.clone()).await?;
@@ -466,22 +511,20 @@ async fn run_test_with_dbs(
 		}
 	}
 
-	if let Some(signup_vars) = config.env.as_ref().and_then(|x| x.signup.as_ref()) {
-		if let Err(e) =
+	if let Some(signup_vars) = config.env.as_ref().and_then(|x| x.signup.as_ref())
+		&& let Err(e) =
 			surrealdb_core::iam::signup::signup(dbs, &mut session, signup_vars.0.clone().into())
 				.await
 		{
 			return Ok(TestTaskResult::SignupError(e));
-		}
 	}
 
-	if let Some(signin_vars) = config.env.as_ref().and_then(|x| x.signin.as_ref()) {
-		if let Err(e) =
+	if let Some(signin_vars) = config.env.as_ref().and_then(|x| x.signin.as_ref())
+		&& let Err(e) =
 			surrealdb_core::iam::signin::signin(dbs, &mut session, signin_vars.0.clone().into())
 				.await
 		{
 			return Ok(TestTaskResult::SigninError(e));
-		}
 	}
 
 	let source = &set[id].source;
@@ -556,6 +599,27 @@ async fn run_test_with_dbs(
 		dbs.execute(&format!("REMOVE NAMESPACE IF EXISTS `{ns}`;"), &session, None)
 			.await
 			.context("failed to remove used test namespace")?;
+	}
+
+	// Clean up configs that may have been created during the test.
+	{
+		let session = Session::owner();
+		dbs.execute(
+			"REMOVE CONFIG IF EXISTS GRAPHQL; REMOVE CONFIG IF EXISTS API; REMOVE CONFIG IF EXISTS DEFAULT;",
+			&session,
+			None,
+		)
+		.await
+		.context("failed to remove root config")?;
+	}
+
+	// If the test was not a clean test it should ensure that the datastore is reset for the next
+	// test.
+	if !set[id].config.env.as_ref().map(|x| x.clean).unwrap_or(false) {
+		let keys = check_retained_keys(dbs).await?;
+		if !keys.is_empty() {
+			return Ok(TestTaskResult::BadCleanup(keys));
+		}
 	}
 
 	match result {

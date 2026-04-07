@@ -76,6 +76,9 @@ impl Datastore {
 		info!(target: TARGET, "Versioning with versioned_index: {}", versioned_index);
 		let builder = builder.with_versioned_index(versioned_index);
 
+		// Configure the maximum memtable size
+		info!(target: TARGET, "Setting max memtable size: {}", *cnf::SURREALKV_MAX_MEMTABLE_SIZE);
+		let builder = builder.with_max_memtable_size(*cnf::SURREALKV_MAX_MEMTABLE_SIZE);
 		// Enable the block cache capacity
 		info!(target: TARGET, "Setting block cache capacity: {}", *cnf::SURREALKV_BLOCK_CACHE_CAPACITY);
 		let builder = builder.with_block_cache_capacity(*cnf::SURREALKV_BLOCK_CACHE_CAPACITY);

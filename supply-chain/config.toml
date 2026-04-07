@@ -25,7 +25,6 @@ url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 [imports.zcash]
 url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml"
 
-# All workspace crates: treat as trusted first-party (no per-version exemptions).
 [policy.demo]
 audit-as-crates-io = false
 
@@ -150,11 +149,11 @@ version = "1.0.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.aws-lc-rs]]
-version = "1.15.3"
+version = "1.16.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.aws-lc-sys]]
-version = "0.36.0"
+version = "0.39.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.axum]]
@@ -245,10 +244,6 @@ criteria = "safe-to-deploy"
 version = "5.0.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.bstr]]
-version = "1.12.1"
-criteria = "safe-to-run"
-
 [[exemptions.bytecheck]]
 version = "0.6.12"
 criteria = "safe-to-deploy"
@@ -295,10 +290,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.cmake]]
 version = "0.1.57"
-criteria = "safe-to-deploy"
-
-[[exemptions.codespan-reporting]]
-version = "0.13.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.combine]]
@@ -451,6 +442,14 @@ criteria = "safe-to-deploy"
 
 [[exemptions.deunicode]]
 version = "1.6.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.dirs]]
+version = "6.0.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.dirs-sys]]
+version = "0.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.doc-comment]]
@@ -845,10 +844,6 @@ criteria = "safe-to-deploy"
 version = "0.4.14"
 criteria = "safe-to-deploy"
 
-[[exemptions.log]]
-version = "0.4.29"
-criteria = "safe-to-deploy"
-
 [[exemptions.lru-slab]]
 version = "0.1.2"
 criteria = "safe-to-deploy"
@@ -862,7 +857,7 @@ version = "1.11.1+lz4-1.10.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.lz4_flex]]
-version = "0.12.0"
+version = "0.12.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.lzma-rust2]]
@@ -965,10 +960,6 @@ criteria = "safe-to-deploy"
 version = "0.8.6"
 criteria = "safe-to-deploy"
 
-[[exemptions.num-conv]]
-version = "0.2.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.num-format]]
 version = "0.4.4"
 criteria = "safe-to-deploy"
@@ -1043,10 +1034,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.papaya]]
 version = "0.2.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.parking]]
-version = "2.2.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.parking_lot_core]]
@@ -1237,6 +1224,10 @@ criteria = "safe-to-deploy"
 version = "0.7.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.redox_users]]
+version = "0.5.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.regex-syntax]]
 version = "0.8.8"
 criteria = "safe-to-deploy"
@@ -1386,7 +1377,7 @@ version = "0.101.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-webpki]]
-version = "0.103.9"
+version = "0.103.10"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustyline]]
@@ -1424,10 +1415,6 @@ criteria = "safe-to-deploy"
 [[exemptions.sdd]]
 version = "3.0.10"
 criteria = "safe-to-run"
-
-[[exemptions.seahash]]
-version = "4.1.0"
-criteria = "safe-to-deploy"
 
 [[exemptions.sec1]]
 version = "0.7.3"
@@ -1603,14 +1590,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.time]]
 version = "0.3.47"
-criteria = "safe-to-deploy"
-
-[[exemptions.time-core]]
-version = "0.1.8"
-criteria = "safe-to-deploy"
-
-[[exemptions.time-macros]]
-version = "0.2.27"
 criteria = "safe-to-deploy"
 
 [[exemptions.tinystr]]
@@ -1920,17 +1899,3 @@ criteria = "safe-to-deploy"
 [[exemptions.zstd-sys]]
 version = "2.0.16+zstd.1.5.7"
 criteria = "safe-to-deploy"
-
-
-[[exemptions.dirs]]
-version = "6.0.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.dirs-sys]]
-version = "0.5.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.redox_users]]
-version = "0.5.2"
-criteria = "safe-to-deploy"
-
