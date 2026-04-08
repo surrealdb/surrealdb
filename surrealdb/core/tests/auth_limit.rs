@@ -161,11 +161,22 @@ async fn auth_limit_alter_api_recomputes() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses_db, None).await?;
 	skip_ok(res, 1)?;
 
-	// NS-owner invokes the API
+	// NS-owner invokes the API -- the handler body must be blocked by the
+	// recomputed auth_limit, producing a 500 response with the IAM error.
 	let sql = r#"RETURN api::invoke("/test/escalate");"#;
-	let _ = dbs.execute(sql, &ses_ns, None).await?;
+	let res = &mut dbs.execute(sql, &ses_ns, None).await?;
+	assert_eq!(res.len(), 1);
+	let response = res.remove(0).result?.to_sql();
+	assert!(
+		response.contains("500"),
+		"Expected status 500 from blocked API handler, got: {response}"
+	);
+	assert!(
+		response.contains("Not enough permissions"),
+		"Expected IAM error in API response, got: {response}"
+	);
 
-	// Verify the backdoor user was NOT created
+	// Belt-and-suspenders: verify the backdoor user was NOT created
 	let mut t = Test::new_ds_session(dbs, ses_ns, "INFO FOR NS").await?;
 	let info = t.next_value()?.to_sql();
 	assert!(
