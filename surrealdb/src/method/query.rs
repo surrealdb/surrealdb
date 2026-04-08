@@ -132,7 +132,11 @@ where
 		Box::pin(async move {
 			// Extract the router from the client
 			let router = client.inner.router.extract()?;
-			let query = queries.into_iter().map(|q| q.into_owned()).collect::<Vec<_>>().join("; ");
+			let query = queries
+				.iter()
+				.map(|q| q.trim_end_matches(|c: char| c == ';' || c.is_whitespace()))
+				.collect::<Vec<_>>()
+				.join("; ");
 
 			let results = router
 				.execute_query(
@@ -442,7 +446,7 @@ impl IndexedResults {
 	/// # Examples
 	///
 	/// ```no_run
-	/// 
+	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -473,7 +477,7 @@ impl IndexedResults {
 	/// # Examples
 	///
 	/// ```no_run
-	/// 
+	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -503,7 +507,7 @@ impl IndexedResults {
 	/// # Examples
 	///
 	/// ```no_run
-	/// 
+	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -599,7 +603,7 @@ impl WithStats<IndexedResults> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// 
+	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -633,7 +637,7 @@ impl WithStats<IndexedResults> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// 
+	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -652,7 +656,7 @@ impl WithStats<IndexedResults> {
 	/// # Examples
 	///
 	/// ```no_run
-	/// 
+	///
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
