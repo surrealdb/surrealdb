@@ -227,13 +227,8 @@ pub enum TestExpectation {
 
 impl TestExpectation {
 	pub fn from_test_config(config: &TestConfig) -> Option<Self> {
-		let Some(details) = config.test.as_ref() else {
-			return None;
-		};
-
-		let Some(results) = details.results.as_ref() else {
-			return None;
-		};
+		let details = config.test.as_ref()?;
+		let results = details.results.as_ref()?;
 
 		let res = match results {
 			TestDetailsResults::QueryResult(r) => {
@@ -677,7 +672,7 @@ impl TestReport {
 			Ok(ref x) => Variables::from_iter([("result".to_string(), x.clone())]),
 			Err(ref e) => Variables::from_iter([(
 				"error".to_string(),
-				SurValue::String(e.clone().into()).clone(),
+				SurValue::String(e.clone()).clone(),
 			)]),
 		};
 
