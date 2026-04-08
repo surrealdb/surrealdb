@@ -1,3 +1,4 @@
+use std::sync::Once;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
@@ -16,7 +17,10 @@ pub(crate) fn config(alg: catalog::Algorithm, key: &str) -> Result<EncodingKey> 
 		catalog::Algorithm::Es256 => Ok(EncodingKey::from_ec_pem(key.as_ref())?),
 		catalog::Algorithm::Es384 => Ok(EncodingKey::from_ec_pem(key.as_ref())?),
 		catalog::Algorithm::Es512 => {
-			warn!("ES512 is not currently supported by the underlying cryptography library and will fall back to ES384. Please update your access definition to use ES384 or another supported algorithm.");
+			static ES512_WARN: Once = Once::new();
+			ES512_WARN.call_once(|| {
+				warn!("ES512 is not currently supported by the underlying cryptography library and will fall back to ES384. Please update your access definition to use ES384 or another supported algorithm.");
+			});
 			Ok(EncodingKey::from_ec_pem(key.as_ref())?)
 		}
 		catalog::Algorithm::Ps256 => Ok(EncodingKey::from_rsa_pem(key.as_ref())?),

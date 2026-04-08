@@ -37,10 +37,7 @@ impl From<Algorithm> for jsonwebtoken::Algorithm {
 			Algorithm::EdDSA => jsonwebtoken::Algorithm::EdDSA,
 			Algorithm::Es256 => jsonwebtoken::Algorithm::ES256,
 			Algorithm::Es384 => jsonwebtoken::Algorithm::ES384,
-			Algorithm::Es512 => {
-				warn!("ES512 is not currently supported by the underlying cryptography library and will fall back to ES384. Please update your access definition to use ES384 or another supported algorithm.");
-				jsonwebtoken::Algorithm::ES384
-			}
+			Algorithm::Es512 => jsonwebtoken::Algorithm::ES384,
 			Algorithm::Ps256 => jsonwebtoken::Algorithm::PS256,
 			Algorithm::Ps384 => jsonwebtoken::Algorithm::PS384,
 			Algorithm::Ps512 => jsonwebtoken::Algorithm::PS512,

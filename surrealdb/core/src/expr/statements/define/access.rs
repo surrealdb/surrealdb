@@ -209,19 +209,6 @@ impl DefineAccessStatement {
 				key: stk.run(|stk| x.key.compute(stk, ctx, opt, doc)).await.catch_return()?.cast_to()?,
 			});
 
-			// Reject ES512 as it is not currently supported by the underlying cryptography library.
-			// Existing ES512 definitions will continue to work (falling back to ES384) but new ones are blocked.
-			if let catalog::JwtAccessVerify::Key(ref ver) = verify {
-				if matches!(ver.alg, catalog::Algorithm::Es512) {
-					bail!(Error::AccessUnsupportedAlgorithm);
-				}
-			}
-			if let Some(ref iss) = issue {
-				if matches!(iss.alg, catalog::Algorithm::Es512) {
-					bail!(Error::AccessUnsupportedAlgorithm);
-				}
-			}
-
 			// Validate symmetric algorithm key consistency
 			if let (catalog::JwtAccessVerify::Key(ver), Some(iss)) = (&verify, &issue)
 				&& ver.alg.is_symmetric()
@@ -315,6 +302,35 @@ impl DefineAccessStatement {
 }
 
 impl DefineAccessStatement {
+	/// Check if the access definition uses ES512, which is not currently supported.
+	/// This should only be called for new definitions (not during import/restore).
+	fn reject_es512(definition: &AccessDefinition) -> Result<()> {
+		fn jwt_uses_es512(jwt: &catalog::JwtAccess) -> bool {
+			if let catalog::JwtAccessVerify::Key(ref ver) = jwt.verify
+				&& matches!(ver.alg, catalog::Algorithm::Es512)
+			{
+				return true;
+			}
+			if let Some(ref iss) = jwt.issue
+				&& matches!(iss.alg, catalog::Algorithm::Es512)
+			{
+				return true;
+			}
+			false
+		}
+
+		let uses_es512 = match &definition.access_type {
+			catalog::AccessType::Jwt(jwt) => jwt_uses_es512(jwt),
+			catalog::AccessType::Record(rec) => jwt_uses_es512(&rec.jwt),
+			catalog::AccessType::Bearer(bearer) => jwt_uses_es512(&bearer.jwt),
+		};
+
+		if uses_es512 {
+			bail!(Error::AccessUnsupportedAlgorithm);
+		}
+		Ok(())
+	}
+
 	/// Process this type returning a computed simple Value
 	#[instrument(level = "trace", name = "DefineAccessStatement::compute", skip_all)]
 	pub(crate) async fn compute(
@@ -347,6 +363,10 @@ impl DefineAccessStatement {
 						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
+				// Reject ES512 for new definitions (allow during import/restore)
+				if !opt.import {
+					Self::reject_es512(&definition)?;
+				}
 				// Process the statement
 				let key = crate::key::root::ac::new(&definition.name);
 				txn.set(&key, &definition, None).await?;
@@ -373,6 +393,10 @@ impl DefineAccessStatement {
 						DefineKind::Overwrite => {}
 						DefineKind::IfNotExists => return Ok(Value::None),
 					}
+				}
+				// Reject ES512 for new definitions (allow during import/restore)
+				if !opt.import {
+					Self::reject_es512(&definition)?;
 				}
 				// Process the statement
 				let key = crate::key::namespace::ac::new(ns, &definition.name);
@@ -402,6 +426,10 @@ impl DefineAccessStatement {
 						DefineKind::Overwrite => {}
 						DefineKind::IfNotExists => return Ok(Value::None),
 					}
+				}
+				// Reject ES512 for new definitions (allow during import/restore)
+				if !opt.import {
+					Self::reject_es512(&definition)?;
 				}
 				// Process the statement
 				let key = crate::key::database::ac::new(ns, db, &definition.name);

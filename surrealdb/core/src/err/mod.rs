@@ -997,7 +997,9 @@ pub(crate) enum Error {
 	#[error("The access method does not exist")]
 	AccessNotFound,
 
-	#[error("The ES512 algorithm is not currently supported. Please use ES384 or another supported algorithm")]
+	#[error(
+		"The ES512 algorithm is not currently supported. Please use ES384 or another supported algorithm"
+	)]
 	AccessUnsupportedAlgorithm,
 
 	#[error("This access method has an invalid duration")]

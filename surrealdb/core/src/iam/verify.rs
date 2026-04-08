@@ -1,5 +1,5 @@
 use std::str::{self, FromStr};
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 
 use anyhow::{Result, bail};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
@@ -45,7 +45,10 @@ fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Valid
 			(DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES384))
 		}
 		catalog::Algorithm::Es512 => {
-			warn!("ES512 is not currently supported by the underlying cryptography library and will fall back to ES384. Please update your access definition to use ES384 or another supported algorithm.");
+			static ES512_WARN: Once = Once::new();
+			ES512_WARN.call_once(|| {
+				warn!("ES512 is not currently supported by the underlying cryptography library and will fall back to ES384. Please update your access definition to use ES384 or another supported algorithm.");
+			});
 			(DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES384))
 		}
 		catalog::Algorithm::Ps256 => {
