@@ -89,6 +89,7 @@ pub fn into_types_error(error: Error) -> TypesError {
 		DuplicatedMatchRef {
 			..
 		} => TypesError::validation(message, None),
+		AccessUnsupportedAlgorithm => TypesError::validation(message, None),
 
 		// Not allowed (method, scripting, function, net target)
 		ScriptingNotAllowed => TypesError::not_allowed(message, NotAllowedError::Scripting),
