@@ -16,8 +16,8 @@ impl Document {
 	) -> Result<Value, IgnoreError> {
 		self.check_record_exists().await?;
 		self.check_permissions_quick(opt, stm).await?;
-		self.check_where_condition(stk, ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
+		self.check_where_condition(stk, ctx, opt, stm).await?;
 		self.cleanup_table_references(stk, ctx, opt).await?;
 		self.clear_record_data();
 		self.store_index_data(stk, ctx, opt).await?;
