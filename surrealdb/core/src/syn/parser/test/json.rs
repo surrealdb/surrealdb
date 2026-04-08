@@ -76,3 +76,23 @@ fn legacy_datetime() {
 		panic!()
 	};
 }
+
+#[test]
+fn json_surrogate_pair() {
+	let res = syn::json(r#""\uD83D\uDE00""#).unwrap();
+	assert_eq!(res, PublicValue::String("\u{1F600}".to_owned()));
+}
+
+#[test]
+fn json_surrogate_pair_in_object() {
+	let res = syn::json(r#"{"emoji": "\uD83D\uDE00"}"#).unwrap();
+	let object = res.into_object().unwrap();
+	let emoji = object.get("emoji").unwrap();
+	assert_eq!(*emoji, PublicValue::String("\u{1F600}".to_owned()));
+}
+
+#[test]
+fn surrealql_rejects_surrogate_pair() {
+	let res = syn::value(r#""\uD83D\uDE00""#);
+	assert!(res.is_err(), "SurrealQL should reject surrogate pairs");
+}
