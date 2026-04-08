@@ -383,6 +383,13 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		match fields {
 			Fields::Value(selector) => {
+				let input = if !omit.is_empty() {
+					let omit_fields = self.plan_omit(omit).await?;
+					Arc::new(Project::new(input, vec![], omit_fields, true))
+						as Arc<dyn ExecOperator>
+				} else {
+					input
+				};
 				let expr = self.physical_expr(selector.expr).await?;
 				Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>)
 			}

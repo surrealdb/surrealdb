@@ -9,6 +9,7 @@ use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::doc::compute::DocKind;
+use crate::doc::document::CursorDoc;
 use crate::exec::planner::Planner;
 use crate::expr::output::Output;
 use crate::expr::{Expr, FlowResultExt as _, Idiom, Operation, SelectStatement};
@@ -250,17 +251,17 @@ impl Document {
 					// Defer field computation: GROUP BY needs grouping first,
 					// SELECT VALUE + ORDER BY needs sorting on the full
 					// document before the VALUE projection strips fields.
-				let mut doc = current.doc.as_ref().clone();
-				// When SELECT VALUE has an alias, ORDER BY may reference
-				// the alias. Materialize it on the document so the sort
-				// comparator can find it by name. Only needed when ORDER
-				// BY is present — GROUP BY deferral doesn't need this.
-				if stmt.order.is_some()
-					&& let crate::expr::field::Fields::Value(ref sel) = stmt.fields
-					&& let Some(ref alias) = sel.alias
-					&& alias.len() == 1
-					&& let Some(crate::expr::part::Part::Field(name)) = alias.first()
-				{
+					let mut doc = current.doc.as_ref().clone();
+					// When SELECT VALUE has an alias, ORDER BY may reference
+					// the alias. Materialize it on the document so the sort
+					// comparator can find it by name. Only needed when ORDER
+					// BY is present — GROUP BY deferral doesn't need this.
+					if stmt.order.is_some()
+						&& let crate::expr::field::Fields::Value(ref sel) = stmt.fields
+						&& let Some(ref alias) = sel.alias
+						&& alias.len() == 1
+						&& let Some(crate::expr::part::Part::Field(name)) = alias.first()
+					{
 						let val = stk
 							.run(|stk| sel.expr.compute(stk, ctx, opt, Some(current)))
 							.await
@@ -271,6 +272,21 @@ impl Document {
 						}
 					}
 					Ok(doc)
+				} else if !omit.is_empty()
+					&& matches!(stmt.fields, crate::expr::field::Fields::Value(_))
+				{
+					// For SELECT VALUE with OMIT (no ORDER BY/GROUP BY),
+					// apply OMIT to the document before VALUE extraction so
+					// that omitted fields resolve to NONE.
+					let mut doc = current.doc.as_ref().clone();
+					for field in omit {
+						doc.del(stk, ctx, opt, field).await?;
+					}
+					let current = CursorDoc::from(doc);
+					stmt.fields
+						.compute(stk, ctx, opt, Some(&current))
+						.await
+						.map_err(IgnoreError::from)
 				} else {
 					// Process the SELECT statement fields
 					stmt.fields
@@ -320,9 +336,14 @@ impl Document {
 			}
 		}
 
-		// Remove any omitted fields from output
-		// But skip this if we have a GROUP BY clause, as OMIT will be applied after aggregation
-		if stmt.group.is_none() {
+		// Remove any omitted fields from output.
+		// Skip when GROUP BY is present (OMIT applied after aggregation) and
+		// when SELECT VALUE without ORDER BY (OMIT already applied to the
+		// document before VALUE extraction above).
+		if stmt.group.is_none()
+			&& !(matches!(stmt.fields, crate::expr::field::Fields::Value(_))
+				&& stmt.order.is_none())
+		{
 			for field in omit {
 				out.del(stk, ctx, opt, field).await?;
 			}
