@@ -321,7 +321,10 @@ impl DefineAccessStatement {
 
 		let uses_es512 = match &definition.access_type {
 			catalog::AccessType::Jwt(jwt) => jwt_uses_es512(jwt),
-			catalog::AccessType::Record(rec) => jwt_uses_es512(&rec.jwt),
+			catalog::AccessType::Record(rec) => {
+				jwt_uses_es512(&rec.jwt)
+					|| rec.bearer.as_ref().map_or(false, |b| jwt_uses_es512(&b.jwt))
+			}
 			catalog::AccessType::Bearer(bearer) => jwt_uses_es512(&bearer.jwt),
 		};
 
