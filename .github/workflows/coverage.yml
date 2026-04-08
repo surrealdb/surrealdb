@@ -50,7 +50,7 @@ jobs:
           retention-days: 30
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # (Actions must be pinned by commit hash) v5.5.1
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # (Actions must be pinned by commit hash) v6.0.0
         with:
           files: lcov.info
           fail_ci_if_error: false
