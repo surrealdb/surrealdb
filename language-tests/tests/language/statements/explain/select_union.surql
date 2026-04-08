@@ -17,12 +17,12 @@ value = ''''SelectProject [ctx: Db] [projections: *]
 
 [[test.results]]
 value = ''''SelectProject [ctx: Db] [projections: *]
-    SourceExpr [ctx: Rt] [expr: [1, 2, 3]]
+    SourceExpr [ctx: Db] [expr: [1, 2, 3]]
 ''''
 
 [[test.results]]
 value = ''''SelectProject [ctx: Db] [projections: *]
-    SourceExpr [ctx: Rt] [expr: <array>  0 .. 5]
+    SourceExpr [ctx: Db] [expr: <array>  0 .. 5]
 ''''
 */
 

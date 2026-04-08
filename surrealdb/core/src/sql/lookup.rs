@@ -12,6 +12,7 @@ use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, S
 pub(crate) struct Lookup {
 	pub kind: LookupKind,
 	pub expr: Option<Fields>,
+	pub only: bool,
 	pub what: Vec<LookupSubject>,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
@@ -54,6 +55,9 @@ impl ToSql for Lookup {
 			write_sql!(f, fmt, "{}(", self.kind);
 			if let Some(ref expr) = self.expr {
 				write_sql!(f, fmt, "SELECT {} FROM ", expr);
+				if self.only {
+					f.push_str("ONLY ");
+				}
 			}
 			if self.what.is_empty() {
 				f.push('?');
@@ -91,6 +95,7 @@ impl From<Lookup> for crate::expr::Lookup {
 		Self {
 			kind: v.kind.into(),
 			expr: v.expr.map(From::from),
+			only: v.only,
 			what: v.what.into_iter().map(From::from).collect(),
 			cond: v.cond.map(Into::into),
 			split: v.split.map(Into::into),
@@ -108,6 +113,7 @@ impl From<crate::expr::Lookup> for Lookup {
 		Lookup {
 			kind: v.kind.into(),
 			expr: v.expr.map(Into::into),
+			only: v.only,
 			what: v.what.into_iter().map(From::from).collect(),
 			cond: v.cond.map(Into::into),
 			split: v.split.map(Into::into),
