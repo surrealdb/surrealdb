@@ -176,23 +176,27 @@ async fn post_handler(
 	{
 		return Err(NetError::InvalidType.into());
 	}
-	// Use the shared HTTP instance with persistent sessions
 	let rpc = &*rpc_state.http;
-	// Update the default session (None key) with the session from middleware
-	// This is used for requests that don't specify a session_id
-	rpc.set_session(None, Arc::new(RwLock::new(session)));
+	// Isolate this request's session under a unique key to prevent
+	// concurrent requests from racing on a shared session slot.
+	let request_session_id = Uuid::new_v4();
+	rpc.set_session(Some(request_session_id), Arc::new(RwLock::new(session)));
 	// Check to see available memory
 	if ALLOC.is_beyond_threshold() {
+		rpc.session_map().remove(&Some(request_session_id));
 		return Err(NetError::ServerOverloaded.into());
 	}
 	// Parse the HTTP request body
-	match fmt.req_http(body) {
+	let result = match fmt.req_http(body) {
 		Ok(req) => {
+			// Use the client's session_id for persistent sessions, otherwise
+			// fall back to the per-request isolated session.
+			let session_id = req.session_id.map(Into::into).unwrap_or(request_session_id);
 			// Execute the specified method
 			let res = RpcProtocol::execute(
 				rpc,
 				req.txn.map(Into::into),
-				req.session_id.map(Into::into),
+				Some(session_id),
 				req.method,
 				req.params,
 			)
@@ -204,5 +208,8 @@ async fn post_handler(
 			})?)
 		}
 		Err(err) => Err(err.into()),
-	}
+	};
+	// Clean up the per-request session
+	rpc.session_map().remove(&Some(request_session_id));
+	result
 }

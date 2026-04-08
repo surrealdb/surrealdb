@@ -43,14 +43,11 @@ pub struct RpcState {
 }
 
 impl RpcState {
-	pub fn new(
-		datastore: Arc<surrealdb_core::kvs::Datastore>,
-		session: surrealdb_core::dbs::Session,
-	) -> Self {
+	pub fn new(datastore: Arc<surrealdb_core::kvs::Datastore>) -> Self {
 		Self {
 			web_sockets: RwLock::new(HashMap::new()),
 			live_queries: RwLock::new(HashMap::new()),
-			http: Arc::new(crate::rpc::http::Http::new(datastore, session)),
+			http: Arc::new(crate::rpc::http::Http::new(datastore)),
 			#[cfg(feature = "graphql")]
 			notification_router: Arc::new(NotificationRouter::new(
 				*GQL_SUBSCRIPTION_CHANNEL_CAPACITY,

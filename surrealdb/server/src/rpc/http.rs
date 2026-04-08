@@ -9,20 +9,21 @@ use uuid::Uuid;
 
 use crate::cnf::{PKG_NAME, PKG_VERSION};
 
+/// HTTP RPC handler with per-request session isolation.
+///
+/// Sessions are inserted under unique per-request keys by `post_handler`
+/// and removed after execution completes. No default session is stored.
 pub struct Http {
 	pub kvs: Arc<Datastore>,
 	pub sessions: HashMap<Option<Uuid>, Arc<RwLock<Session>>>,
 }
 
 impl Http {
-	pub fn new(kvs: Arc<Datastore>, session: Session) -> Self {
-		let http = Self {
+	pub fn new(kvs: Arc<Datastore>) -> Self {
+		Self {
 			kvs,
 			sessions: HashMap::new(),
-		};
-		// Store the default session with None key
-		http.sessions.insert(None, Arc::new(RwLock::new(session)));
-		http
+		}
 	}
 }
 

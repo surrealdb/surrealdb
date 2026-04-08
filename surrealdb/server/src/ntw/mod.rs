@@ -385,8 +385,7 @@ impl SurrealRouter {
 		let axum_app = axum_app.layer(service);
 
 		// Create RpcState with persistent HTTP handler
-		let rpc_state =
-			Arc::new(RpcState::new(ds.clone(), surrealdb_core::dbs::Session::default()));
+		let rpc_state = Arc::new(RpcState::new(ds.clone()));
 
 		// Apply state
 		let axum_app = axum_app.with_state(rpc_state.clone());
