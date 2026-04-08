@@ -456,6 +456,16 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		match fields {
 			Fields::Value(selector) => {
+				// Apply OMIT before evaluating the VALUE expression so
+				// that omitted fields resolve to NONE, matching the
+				// legacy compute path.
+				let input = if !omit.is_empty() {
+					let omit_fields = self.plan_omit(omit).await?;
+					Arc::new(Project::new(input, vec![], omit_fields, true))
+						as Arc<dyn ExecOperator>
+				} else {
+					input
+				};
 				// If the alias was registered for sort (Compute pre-evaluated
 				// it), read the pre-computed field to avoid re-evaluating
 				// non-deterministic expressions like rand() or time::now().

@@ -250,14 +250,17 @@ impl Document {
 					// Defer field computation: GROUP BY needs grouping first,
 					// SELECT VALUE + ORDER BY needs sorting on the full
 					// document before the VALUE projection strips fields.
-					let mut doc = current.doc.as_ref().clone();
-					// When SELECT VALUE has an alias, ORDER BY may reference the alias. Materialize
-					// it on the document so the sort comparator can find it by name.
-					if let crate::expr::field::Fields::Value(ref sel) = stmt.fields
-						&& let Some(ref alias) = sel.alias
-						&& alias.len() == 1
-						&& let Some(crate::expr::part::Part::Field(name)) = alias.first()
-					{
+				let mut doc = current.doc.as_ref().clone();
+				// When SELECT VALUE has an alias, ORDER BY may reference
+				// the alias. Materialize it on the document so the sort
+				// comparator can find it by name. Only needed when ORDER
+				// BY is present — GROUP BY deferral doesn't need this.
+				if stmt.order.is_some()
+					&& let crate::expr::field::Fields::Value(ref sel) = stmt.fields
+					&& let Some(ref alias) = sel.alias
+					&& alias.len() == 1
+					&& let Some(crate::expr::part::Part::Field(name)) = alias.first()
+				{
 						let val = stk
 							.run(|stk| sel.expr.compute(stk, ctx, opt, Some(current)))
 							.await
