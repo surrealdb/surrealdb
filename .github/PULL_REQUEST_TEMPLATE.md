@@ -27,6 +27,20 @@ No details provided.
 > [!WARNING]
 > No details provided.
 
+## Security Considerations
+
+<!-- Briefly assess the security implications of this change. Consider:
+- Does it touch authentication, authorization, or session handling?
+- Does it affect data isolation between namespaces or databases?
+- Does it process user input that reaches the query engine or storage layer?
+- Could error messages or logs expose internal details?
+- Are resource limits enforced for any new user-controlled operations?
+
+If there are no security implications, briefly state why (e.g. "documentation-only change"). -->
+
+> [!WARNING]
+> No details provided.
+
 ## Is this related to any issues?
 
 <!-- If this pull request is related to other pull requests, or resolves any issues, then link all related or closed items here, using 'Closes #101' or 'Fixes #101' to automatically close any linked issues. -->
