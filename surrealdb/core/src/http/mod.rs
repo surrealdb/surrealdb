@@ -1,18 +1,19 @@
 mod resolve;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
+
 use anyhow::{Context as _, Result};
-use http::{HeaderMap, HeaderValue, Method, header::USER_AGENT};
+use http::header::USER_AGENT;
+use http::{HeaderMap, HeaderValue, Method};
+use reqwest::redirect::{Attempt, Policy};
+use reqwest::{Client, RequestBuilder};
 use resolve::FilteringResolver;
 use url::Url;
 
-use crate::{
-	cnf::SURREALDB_USER_AGENT,
-	dbs::{Capabilities, capabilities::NetTarget},
-};
-use reqwest::{
-	Client, RequestBuilder,
-	redirect::{Attempt, Policy},
-};
-use std::{str::FromStr, sync::Arc, time::Duration};
+use crate::cnf::SURREALDB_USER_AGENT;
+use crate::dbs::Capabilities;
+use crate::dbs::capabilities::NetTarget;
 
 pub struct HttpClient {
 	client: Client,
@@ -69,7 +70,7 @@ impl HttpClient {
 		})
 	}
 
-	#[cfg(not(target_family = "wasm"))]
+	#[cfg(target_family = "wasm")]
 	pub fn new(capabilities: Arc<Capabilities>) -> Result<Self> {
 		let _ = capabilities;
 		let client = Client::builder().build()?;

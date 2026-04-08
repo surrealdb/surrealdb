@@ -732,7 +732,7 @@ impl Datastore {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 			async_event_trigger: self.async_event_trigger,
-		#[cfg(feature = "http")]
+			#[cfg(feature = "http")]
 			http_client: self.http_client,
 		}
 	}

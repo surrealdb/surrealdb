@@ -199,11 +199,12 @@ async fn http_request(
 	body: Option<Value>,
 	opts: Object,
 ) -> Result<Value> {
+	use http::header::CONTENT_TYPE;
+
 	use crate::err::Error;
 	use crate::sql::expression::convert_public_value_to_internal;
 	use crate::syn;
 	use crate::types::{PublicBytes, PublicValue};
-	use http::header::CONTENT_TYPE;
 
 	let url = url::Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.clone()))?;
 
