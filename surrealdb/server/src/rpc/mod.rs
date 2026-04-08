@@ -29,7 +29,7 @@ type WebSocket = Arc<Websocket>;
 /// Mapping of WebSocket ID to WebSocket
 type WebSockets = RwLock<HashMap<Uuid, WebSocket>>;
 /// Mapping of LIVE Query ID to WebSocket ID + Session ID
-type LiveQueries = RwLock<HashMap<Uuid, (Uuid, Option<Uuid>)>>;
+type LiveQueries = RwLock<HashMap<Uuid, (Uuid, Uuid)>>;
 
 pub struct RpcState {
 	/// Stores the currently connected WebSockets
@@ -107,7 +107,7 @@ pub async fn notifications(ds: Arc<Datastore>, state: Arc<RpcState>, canceller: 
 						// Ensure the specified WebSocket exists
 						if let Some(rpc) = websocket {
 							// Serialize the message to send
-							let message = DbResponse::success(None, session_id.map(Into::into), DbResult::Live(notification));
+							let message = DbResponse::success(None, Some(*session_id), DbResult::Live(notification));
 							// Add telemetry metrics
 							let cx = TelemetryContext::new();
 							let not_ctx = NotificationContext::default()

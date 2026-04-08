@@ -180,10 +180,10 @@ async fn post_handler(
 	// Isolate this request's session under a unique key to prevent
 	// concurrent requests from racing on a shared session slot.
 	let request_session_id = Uuid::new_v4();
-	rpc.set_session(Some(request_session_id), Arc::new(RwLock::new(session)));
+	rpc.set_session(request_session_id, Arc::new(RwLock::new(session)));
 	// Check to see available memory
 	if ALLOC.is_beyond_threshold() {
-		rpc.session_map().remove(&Some(request_session_id));
+		rpc.session_map().remove(&request_session_id);
 		return Err(NetError::ServerOverloaded.into());
 	}
 	// Parse the HTTP request body
@@ -196,7 +196,7 @@ async fn post_handler(
 			let res = RpcProtocol::execute(
 				rpc,
 				req.txn.map(Into::into),
-				Some(session_id),
+				session_id,
 				req.method,
 				req.params,
 			)
@@ -210,6 +210,6 @@ async fn post_handler(
 		Err(err) => Err(err.into()),
 	};
 	// Clean up the per-request session
-	rpc.session_map().remove(&Some(request_session_id));
+	rpc.session_map().remove(&request_session_id);
 	result
 }

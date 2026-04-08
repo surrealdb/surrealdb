@@ -94,15 +94,11 @@ pub fn deserialize(msg: impl Into<String>) -> TypesError {
 }
 
 /// Session not found.
-pub fn session_not_found(id: Option<Uuid>) -> TypesError {
-	let (message, id_str) = match id {
-		Some(id) => (format!("Session not found: {id:?}"), Some(id.to_string())),
-		None => ("Default session not found".to_string(), None),
-	};
+pub fn session_not_found(id: Uuid) -> TypesError {
 	TypesError::not_found(
-		message,
+		format!("Session not found: {id:?}"),
 		NotFoundError::Session {
-			id: id_str,
+			id: Some(id.to_string()),
 		},
 	)
 }

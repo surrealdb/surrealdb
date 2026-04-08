@@ -15,7 +15,7 @@ use crate::cnf::{PKG_NAME, PKG_VERSION};
 /// and removed after execution completes. No default session is stored.
 pub struct Http {
 	pub kvs: Arc<Datastore>,
-	pub sessions: HashMap<Option<Uuid>, Arc<RwLock<Session>>>,
+	pub sessions: HashMap<Uuid, Arc<RwLock<Session>>>,
 }
 
 impl Http {
@@ -40,7 +40,7 @@ impl RpcProtocol for Http {
 	}
 
 	/// A pointer to all active sessions
-	fn session_map(&self) -> &HashMap<Option<Uuid>, Arc<RwLock<Session>>> {
+	fn session_map(&self) -> &HashMap<Uuid, Arc<RwLock<Session>>> {
 		&self.sessions
 	}
 
@@ -52,7 +52,7 @@ impl RpcProtocol for Http {
 	const LQ_SUPPORT: bool = false;
 
 	/// Handles the cleanup of live queries
-	async fn cleanup_lqs(&self, _session_id: Option<&Uuid>) {
+	async fn cleanup_lqs(&self, _session_id: &Uuid) {
 		// Do nothing as HTTP is stateless
 	}
 
@@ -66,11 +66,7 @@ impl RpcProtocol for Http {
 	// ------------------------------
 
 	/// Transactions are not supported on HTTP RPC context
-	async fn begin(
-		&self,
-		_txn: Option<Uuid>,
-		_session_id: Option<Uuid>,
-	) -> Result<DbResult, TypesError> {
+	async fn begin(&self, _txn: Option<Uuid>, _session_id: Uuid) -> Result<DbResult, TypesError> {
 		Err(method_not_found(Method::Begin.to_string()))
 	}
 
@@ -78,7 +74,7 @@ impl RpcProtocol for Http {
 	async fn commit(
 		&self,
 		_txn: Option<Uuid>,
-		_session_id: Option<Uuid>,
+		_session_id: Uuid,
 		_params: Array,
 	) -> Result<DbResult, TypesError> {
 		Err(method_not_found(Method::Commit.to_string()))
@@ -88,7 +84,7 @@ impl RpcProtocol for Http {
 	async fn cancel(
 		&self,
 		_txn: Option<Uuid>,
-		_session_id: Option<Uuid>,
+		_session_id: Uuid,
 		_params: Array,
 	) -> Result<DbResult, TypesError> {
 		Err(method_not_found(Method::Cancel.to_string()))
