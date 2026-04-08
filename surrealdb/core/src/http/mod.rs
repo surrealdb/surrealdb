@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use http::{ Method};
 use anyhow::Result;
-
+use http::Method;
 use reqwest::{Client, RequestBuilder};
 use url::Url;
 
@@ -21,11 +20,11 @@ impl HttpClient {
 		use std::str::FromStr;
 		use std::time::Duration;
 
-		use anyhow::{Context as _};
+		use anyhow::Context as _;
+		use http::header::USER_AGENT;
+		use http::{HeaderMap, HeaderValue, Method};
 		use reqwest::redirect::{Attempt, Policy};
 		use resolve::FilteringResolver;
-		use http::{HeaderMap, HeaderValue, Method};
-		use http::header::USER_AGENT;
 
 		use crate::cnf::SURREALDB_USER_AGENT;
 		use crate::dbs::capabilities::NetTarget;
