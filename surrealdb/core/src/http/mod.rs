@@ -22,7 +22,7 @@ impl HttpClient {
 
 		use anyhow::Context as _;
 		use http::header::USER_AGENT;
-		use http::{HeaderMap, HeaderValue, Method};
+		use http::{HeaderMap, HeaderValue};
 		use reqwest::redirect::{Attempt, Policy};
 		use resolve::FilteringResolver;
 
