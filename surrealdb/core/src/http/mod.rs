@@ -1,19 +1,15 @@
-mod resolve;
-use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 
-use anyhow::{Context as _, Result};
-use http::header::USER_AGENT;
-use http::{HeaderMap, HeaderValue, Method};
-use reqwest::redirect::{Attempt, Policy};
+use http::{ Method};
+use anyhow::Result;
+
 use reqwest::{Client, RequestBuilder};
-use resolve::FilteringResolver;
 use url::Url;
 
-use crate::cnf::SURREALDB_USER_AGENT;
 use crate::dbs::Capabilities;
-use crate::dbs::capabilities::NetTarget;
+
+#[cfg(not(target_family = "wasm"))]
+mod resolve;
 
 pub struct HttpClient {
 	client: Client,
@@ -22,6 +18,18 @@ pub struct HttpClient {
 impl HttpClient {
 	#[cfg(not(target_family = "wasm"))]
 	pub fn new(capabilities: Arc<Capabilities>) -> Result<Self> {
+		use std::str::FromStr;
+		use std::time::Duration;
+
+		use anyhow::{Context as _};
+		use reqwest::redirect::{Attempt, Policy};
+		use resolve::FilteringResolver;
+		use http::{HeaderMap, HeaderValue, Method};
+		use http::header::USER_AGENT;
+
+		use crate::cnf::SURREALDB_USER_AGENT;
+		use crate::dbs::capabilities::NetTarget;
+
 		let cap_clone = capabilities.clone();
 		let max_redirects = *crate::cnf::MAX_HTTP_REDIRECTS;
 		let redirect_function = move |attempt: Attempt| {
