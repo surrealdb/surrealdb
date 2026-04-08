@@ -1220,7 +1220,9 @@ impl Error {
 	#[track_caller]
 	pub fn unreachable<T: fmt::Display>(message: T) -> Error {
 		let location = std::panic::Location::caller();
-		let message = format!("{}:{}: {}", location.file(), location.line(), message);
+		// Normalize path separators so error messages are consistent across platforms
+		let file = location.file().replace('\\', "/");
+		let message = format!("{}:{}: {}", file, location.line(), message);
 		Error::Unreachable(message)
 	}
 

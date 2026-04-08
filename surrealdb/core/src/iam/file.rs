@@ -41,6 +41,16 @@ fn check_is_path_allowed(path: &Path, allowed_paths: &[PathBuf]) -> Result<PathB
 					.to_string();
 			}
 
+			// Also strip Windows canonical prefix from allowed path
+			let allowed_str = if allowed_str.starts_with(WINDOWS_CANONICAL_PREFIX) {
+				allowed_str
+					.strip_prefix(WINDOWS_CANONICAL_PREFIX)
+					.unwrap_or(&allowed_str)
+					.to_string()
+			} else {
+				allowed_str
+			};
+
 			canonical_str.starts_with(&allowed_str)
 		}
 		#[cfg(not(windows))]

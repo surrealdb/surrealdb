@@ -113,7 +113,9 @@ impl TestSet {
 	where
 		S: AsRef<str>,
 	{
-		let mut name = Cow::Borrowed(name.as_ref());
+		// Normalize forward slashes to OS separator so lookups work on Windows.
+		let normalized = name.as_ref().replace('/', &path::MAIN_SEPARATOR.to_string());
+		let mut name: Cow<'_, str> = Cow::Owned(normalized);
 		if !name.starts_with(path::MAIN_SEPARATOR) {
 			name = Cow::Owned(format!("{}{name}", path::MAIN_SEPARATOR));
 		}
@@ -146,7 +148,10 @@ impl TestSet {
 		// resolve all import paths.
 		for t in all.iter_mut() {
 			for import_path in t.config.imports() {
-				let mut import_name = Cow::Borrowed(import_path);
+				// Normalize forward slashes to the OS path separator so imports
+				// resolve correctly on Windows where map keys use `\`.
+				let normalized = import_path.replace('/', &path::MAIN_SEPARATOR.to_string());
+				let mut import_name: Cow<'_, str> = Cow::Owned(normalized);
 				if !import_name.starts_with(path::MAIN_SEPARATOR) {
 					import_name = Cow::Owned(format!("{}{import_name}", path::MAIN_SEPARATOR));
 				}

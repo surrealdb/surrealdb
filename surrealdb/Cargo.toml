@@ -122,7 +122,6 @@ env_logger.workspace = true
 flate2.workspace = true
 parking_lot.workspace = true
 web-time.workspace = true
-pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 radix_trie.workspace = true
 rand.workspace = true
 rayon.workspace = true
@@ -136,6 +135,9 @@ tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 ulid = { workspace = true, features = ["serde"] }
 wiremock.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 
 [package.metadata.cargo-machete]
 # Unused in our source; only needed so the derive is built with sdk-path

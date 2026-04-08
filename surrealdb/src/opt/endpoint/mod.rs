@@ -135,7 +135,14 @@ mod tests {
 			assert_eq!(expanded, path, "failed to replace `{path}`");
 
 			let converted = path_to_string(scheme, path);
-			assert_eq!(converted, format!("{scheme}{path}"), "failed to convert `{path}`");
+			// On Windows, Path::clean() normalizes forward slashes to backslashes,
+			// so we compare with normalized path separators on each platform.
+			#[cfg(windows)]
+			let expected_path = path.replace('/', "\\");
+			#[cfg(not(windows))]
+			let expected_path = path.to_string();
+			let expected = format!("{scheme}{expected_path}");
+			assert_eq!(converted, expected, "failed to convert `{path}`");
 		}
 	}
 }

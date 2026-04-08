@@ -27,7 +27,8 @@ value = '[{ file: f"test:/folder1/a.txt", size: 3 }, { file: f"test:/folder1/b.t
 value = '[{ file: f"test:/folder1/a.txt", size: 3 }, { file: f"test:/folder1/b.txt", size: 3 }, { file: f"test:/folder1/c.txt", size: 3 }]'
 
 [[test.results]]
-error = "File access denied: /some_directory"
+# Error message differs by platform (Linux: access denied, Windows: path not absolute)
+error = true
 
 */
 

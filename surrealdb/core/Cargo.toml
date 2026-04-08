@@ -224,7 +224,6 @@ criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
 paste.workspace = true
-pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 rstest.workspace = true
 serial_test.workspace = true
 temp-dir.workspace = true
@@ -234,6 +233,9 @@ tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
 tokio-util.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 
 [package.metadata.cargo-machete]
 # md-5 crate is imported as md5::, regex-syntax is optional (tied to arbitrary feature)

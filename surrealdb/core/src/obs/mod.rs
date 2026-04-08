@@ -127,8 +127,17 @@ mod tests {
 	use super::*;
 	#[test]
 	fn test_initialize_store_env_var() {
-		let url = "file:///tmp/test_store";
-		unsafe { env::set_var("SURREAL_OBJECT_STORE", url) };
+		// Use a platform-appropriate file URL for the temp directory
+		#[cfg(windows)]
+		let url = {
+			let tmp = env::temp_dir().join("surreal_test_store");
+			let tmp_str = tmp.to_string_lossy().replace('\\', "/");
+			format!("file:///{tmp_str}")
+		};
+		#[cfg(not(windows))]
+		let url = "file:///tmp/test_store".to_string();
+
+		unsafe { env::set_var("SURREAL_OBJECT_STORE", &url) };
 		let store = initialize_store("SURREAL_OBJECT_STORE", "store");
 		// Assert the store is initialized with the correct URL
 		assert!(store.to_string().contains("store"));

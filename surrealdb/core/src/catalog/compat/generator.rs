@@ -1054,8 +1054,10 @@ fn test_v3_0_0_beta_1_remains_unchanged() {
 	use sha2::{Digest, Sha256};
 
 	// Read the v3_0_0_beta_1.rs file, hash it and assert on the hash.
-	let v3_0_0_beta_1 = include_bytes!("v3_0_0_beta_1.rs");
-	let hash = Sha256::digest(v3_0_0_beta_1);
+	// Strip \r bytes so the hash is consistent regardless of git line-ending config (CRLF vs LF).
+	let v3_0_0_beta_1: Vec<u8> =
+		include_bytes!("v3_0_0_beta_1.rs").iter().copied().filter(|&b| b != b'\r').collect();
+	let hash = Sha256::digest(&v3_0_0_beta_1);
 	let hash_str = hex::encode(hash);
 	assert_eq!(hash_str, "def0c55d4279b9429795f9e2ff443309a8a243c3dc4bf593fd38e0109c6f53f2");
 }
@@ -1065,8 +1067,10 @@ fn test_v3_0_0_beta_3_remains_unchanged() {
 	use sha2::{Digest, Sha256};
 
 	// Read the v3_0_0_beta_3.rs file, hash it and assert on the hash.
-	let v3_0_0_beta_3 = include_bytes!("v3_0_0_beta_3.rs");
-	let hash = Sha256::digest(v3_0_0_beta_3);
+	// Strip \r bytes so the hash is consistent regardless of git line-ending config (CRLF vs LF).
+	let v3_0_0_beta_3: Vec<u8> =
+		include_bytes!("v3_0_0_beta_3.rs").iter().copied().filter(|&b| b != b'\r').collect();
+	let hash = Sha256::digest(&v3_0_0_beta_3);
 	let hash_str = hex::encode(hash);
 	assert_eq!(hash_str, "696a85c143d53c01f3f842ee45cc64e45e4d9c1251c99e083467d07db8c29805");
 }
@@ -1076,8 +1080,10 @@ fn test_v3_0_0_remains_unchanged() {
 	use sha2::{Digest, Sha256};
 
 	// Read the v3_0_0.rs file, hash it and assert on the hash.
-	let v3_0_0 = include_bytes!("v3_0_0.rs");
-	let hash = Sha256::digest(v3_0_0);
+	// Strip \r bytes so the hash is consistent regardless of git line-ending config (CRLF vs LF).
+	let v3_0_0: Vec<u8> =
+		include_bytes!("v3_0_0.rs").iter().copied().filter(|&b| b != b'\r').collect();
+	let hash = Sha256::digest(&v3_0_0);
 	let hash_str = hex::encode(hash);
 	assert_eq!(hash_str, "042aa56204bff3007e371be6968e9c684430556f32654b5cee7107a5c1677f4d");
 }

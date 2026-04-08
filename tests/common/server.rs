@@ -137,6 +137,16 @@ pub fn run_internal<P: AsRef<Path>>(
 	if let Some(v) = vars {
 		cmd.envs(v);
 	}
+	// On Windows, env_clear() removes system environment variables required for
+	// DNS resolution, TLS, and temp directory access. Pass them through.
+	#[cfg(windows)]
+	{
+		for key in &["SystemRoot", "SYSTEMROOT", "COMPUTERNAME", "TEMP", "TMP", "USERPROFILE"] {
+			if let Ok(val) = std::env::var(key) {
+				cmd.env(key, val);
+			}
+		}
+	}
 	cmd.stdin(Stdio::piped());
 	cmd.stdout(stdout);
 	cmd.stderr(stderr);

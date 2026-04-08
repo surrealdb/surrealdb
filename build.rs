@@ -22,6 +22,11 @@ fn main() {
 	if let Some(metadata) = build_metadata() {
 		println!("cargo:rustc-env={BUILD_METADATA}={metadata}");
 	}
+	// On Windows the default main-thread stack is 1 MB which is not enough
+	// for deep call chains especially in debug/test builds (stack overflow).
+	// Request an 8 MB stack via the MSVC linker.
+	#[cfg(target_os = "windows")]
+	println!("cargo:rustc-link-arg=/STACK:8388608");
 }
 
 fn build_version() -> Option<String> {

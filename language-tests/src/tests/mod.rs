@@ -85,6 +85,12 @@ impl TestCase {
 		let config_source =
 			String::from_utf8(config_source).context("Test configuration was not valid utf8")?;
 
+		// Normalize line endings for cross-platform compatibility.
+		// On Windows, git autocrlf may convert LF to CRLF in .surql files,
+		// causing expected values in the TOML config to contain \r\n while the
+		// SurrealDB engine produces \n-only output.
+		let config_source = config_source.replace('\r', "");
+
 		let toml: DocumentMut =
 			config_source.parse().context("Failed to parse test case config")?;
 
