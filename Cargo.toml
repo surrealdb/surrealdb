@@ -6,6 +6,7 @@ members = [
     # SurrealDB crates
     "surrealdb",
     "surrealdb/core",
+    "surrealdb/mcp",
     "surrealdb/server",
     "surrealdb/types",
     "surrealdb/types/derive",
@@ -44,6 +45,7 @@ categories = ["database-implementations", "data-structures", "embedded"]
 surrealdb = { version = "3.1.0-alpha", path = "surrealdb" }
 surrealdb-core = { version = "3.1.0-alpha", path = "surrealdb/core", default-features = false }
 surrealdb-server = { version = "3.1.0-alpha", path = "surrealdb/server", default-features = false }
+surrealdb-mcp = { version = "3.1.0-alpha", path = "surrealdb/mcp", default-features = false }
 surrealdb-types = { version = "3.1.0-alpha", path = "surrealdb/types" }
 surrealdb-types-derive = { version = "3.1.0-alpha", path = "surrealdb/types/derive" }
 # SurrealML crates
@@ -230,6 +232,7 @@ default = [
     "http",
     "surrealism",
     "graphql",
+    "mcp",
     "cli",
 ]
 
@@ -247,6 +250,8 @@ storage-tikv = ["surrealdb-server/storage-tikv"]
 storage-indxdb = ["surrealdb-server/storage-indxdb"]
 # GraphQL API support
 graphql = ["surrealdb-server/graphql"]
+# MCP (Model Context Protocol) server support
+mcp = ["surrealdb-server/mcp"]
 # Interactive SQL CLI support
 cli = ["surrealdb-server/cli"]
 

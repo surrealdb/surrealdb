@@ -6,6 +6,8 @@ mod export;
 mod fix;
 mod import;
 mod isready;
+#[cfg(feature = "mcp")]
+pub(crate) mod mcp;
 mod ml;
 #[cfg(feature = "surrealism")]
 mod module;
@@ -32,6 +34,8 @@ use export::ExportCommandArguments;
 use fix::FixCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
+#[cfg(feature = "mcp")]
+use mcp::McpCommandArguments;
 use ml::MlCommand;
 #[cfg(feature = "surrealism")]
 use module::ModuleCommand;
@@ -176,6 +180,9 @@ enum Commands {
 	#[cfg(feature = "cli")]
 	#[command(about = "Start an SQL REPL in your terminal with pipe support")]
 	Sql(SqlCommandArguments),
+	#[cfg(feature = "mcp")]
+	#[command(about = "Start the MCP server over stdio for AI assistant integration")]
+	Mcp(McpCommandArguments),
 	#[command(subcommand, about = "Manage SurrealML models within an existing database")]
 	Ml(MlCommand),
 	#[cfg(feature = "surrealism")]
@@ -295,6 +302,8 @@ pub async fn init<
 		Commands::Upgrade(args) => upgrade::init(args).await,
 		#[cfg(feature = "cli")]
 		Commands::Sql(args) => sql::init(args).await,
+		#[cfg(feature = "mcp")]
+		Commands::Mcp(args) => mcp::init::<C>(composer, args).await,
 		Commands::Ml(args) => ml::init(args).await,
 		#[cfg(feature = "surrealism")]
 		Commands::Module(args) => module::init(args).await,

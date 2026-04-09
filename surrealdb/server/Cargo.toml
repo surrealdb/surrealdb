@@ -51,6 +51,8 @@ graphql = [
     "dep:async-graphql",
     "dep:async-graphql-axum",
 ]
+# MCP (Model Context Protocol) server support
+mcp = ["dep:surrealdb-mcp", "surrealdb-mcp/server-http", "surrealdb-mcp/transport-io"]
 # Interactive CLI support (SQL shell)
 cli = ["dep:rustyline"]
 
@@ -142,6 +144,7 @@ pprof = { workspace = true, features = [
     "flamegraph",
     "prost-codec",
 ], optional = true }
+surrealdb-mcp = { workspace = true, optional = true }
 surrealism-runtime = { workspace = true, optional = true }
 surrealism-types = { workspace = true, features = ["host"], optional = true }
 walrus = { workspace = true, optional = true }

@@ -1,0 +1,42 @@
+[package]
+name = "surrealdb-mcp"
+publish = false
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+version.workspace = true
+description = "Built-in MCP (Model Context Protocol) server for SurrealDB"
+
+[features]
+default = ["server-http"]
+server-http = [
+    "rmcp/server-side-http",
+    "rmcp/transport-streamable-http-server",
+    "rmcp/transport-streamable-http-server-session",
+    "rmcp/transport-worker",
+]
+transport-io = ["rmcp/transport-io"]
+
+[dependencies]
+rmcp = { version = "1.3.0", default-features = false, features = [
+    "server",
+    "macros",
+] }
+surrealdb-core = { workspace = true }
+surrealdb-types = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+http = { workspace = true }
+schemars = "1.0"
+tokio = { workspace = true, features = ["sync"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+surrealdb-core = { workspace = true, features = ["kv-mem"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[lints]
+workspace = true

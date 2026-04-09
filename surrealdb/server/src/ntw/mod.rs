@@ -10,6 +10,8 @@ pub mod health;
 pub mod import;
 mod input;
 pub mod key;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 pub mod ml;
 pub(crate) mod output;
 mod params;
@@ -142,6 +144,9 @@ impl RouterFactory for CommunityComposer {
 
 		#[cfg(feature = "graphql")]
 		let router = router.merge(gql::router());
+
+		#[cfg(feature = "mcp")]
+		let router = router.merge(mcp::router());
 
 		router
 	}
@@ -333,7 +338,7 @@ impl SurrealRouter {
 			AllowOrigin::list(origins)
 		};
 
-		let allow_header = [
+		let mut allow_header = vec![
 			header::ACCEPT,
 			header::ACCEPT_ENCODING,
 			header::AUTHORIZATION,
@@ -345,6 +350,14 @@ impl SurrealRouter {
 			AUTH_NS.clone(),
 			AUTH_DB.clone(),
 		];
+
+		// MCP protocol headers for cross-origin browser clients
+		#[cfg(feature = "mcp")]
+		{
+			allow_header.push(http::HeaderName::from_static("mcp-session-id"));
+			allow_header.push(http::HeaderName::from_static("mcp-protocol-version"));
+			allow_header.push(http::HeaderName::from_static("last-event-id"));
+		}
 
 		let service = service
 			.layer(AddExtensionLayer::new(app_state))
