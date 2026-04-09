@@ -1,6 +1,5 @@
 /**
 [env]
-planner-strategy = ["all-ro"]
 namespace = true
 database = true
 auth = { level = "owner" }
