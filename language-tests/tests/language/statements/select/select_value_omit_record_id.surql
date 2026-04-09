@@ -34,6 +34,12 @@ value = "[{ age: 21, nested: {  }, security: 'secure' }, { age: 22, nested: {  }
 [[test.results]]
 value = "[{ nested: {  }, security: 'secure' }, { nested: {  }, security: 'open' }, { nested: {  }, security: 'private' }]"
 
+[[test.results]]
+value = "[person:a]"
+
+[[test.results]]
+value = "[person:a, person:b, person:c]"
+
 */
 
 {
@@ -70,3 +76,6 @@ SELECT VALUE opts OMIT opts.age, opts.nested.data FROM person:a;
 -- Nested OMIT with VALUE: table scan without ORDER BY
 SELECT VALUE opts OMIT opts.nested.data FROM person;
 SELECT VALUE opts OMIT opts.age, opts.nested.data FROM person;
+-- SELECT VALUE id with OMIT: id must still resolve through the OMIT early path
+SELECT VALUE id OMIT name FROM person:a;
+SELECT VALUE id OMIT name FROM person;

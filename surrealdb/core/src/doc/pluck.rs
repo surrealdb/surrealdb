@@ -282,7 +282,7 @@ impl Document {
 					for field in omit {
 						doc.del(stk, ctx, opt, field).await?;
 					}
-					let current = CursorDoc::from(doc);
+					let current = CursorDoc::new(current.rid.clone(), None, doc);
 					stmt.fields
 						.compute(stk, ctx, opt, Some(&current))
 						.await

@@ -504,7 +504,7 @@ impl IndexRangeThingIterator {
 		// lower bounds because a strict '>' becomes an exclusive range start.
 		let from = if let Some((_, inclusivity, val)) = from.into_iter().next() {
 			RangeValue {
-				value: val,
+				value: Some(val),
 				inclusive: !inclusivity,
 			}
 		} else {
@@ -514,7 +514,7 @@ impl IndexRangeThingIterator {
 		// Here the inclusive flag matches the operator: '<=' is inclusive, '<' is exclusive.
 		let to = if let Some((_, inclusivity, val)) = to.into_iter().next_back() {
 			RangeValue {
-				value: val,
+				value: Some(val),
 				inclusive: inclusivity,
 			}
 		} else {
@@ -538,8 +538,8 @@ impl IndexRangeThingIterator {
 
 	/// Compute the begin key for a range scan over an index by value.
 	///
-	/// - If `from.value` is `None`, use the index-prefix begin to start at the first key in the
-	///   index keyspace.
+	/// - If `from.value` is `None` (unbounded), use the index-prefix begin to start at the first
+	///   key in the index keyspace.
 	/// - Otherwise, serialize the `from` value into an index field array and construct the boundary
 	///   key. For an inclusive lower bound use `prefix_ids_beg` (include all records with that
 	///   value); for an exclusive lower bound use `prefix_ids_end` so the scan starts after all
@@ -551,32 +551,21 @@ impl IndexRangeThingIterator {
 		index_id: IndexId,
 		from: RangeValue,
 	) -> Result<Vec<u8>> {
-		if from.value.is_none() {
+		let Some(value) = from.value else {
 			return Index::prefix_beg(ns, db, ix_what, index_id);
-		}
+		};
+		let array = Array::from(vec![value.as_ref().clone()]);
 		if from.inclusive {
-			Index::prefix_ids_beg(
-				ns,
-				db,
-				ix_what,
-				index_id,
-				&Array::from(vec![from.value.as_ref().clone()]),
-			)
+			Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)
 		} else {
-			Index::prefix_ids_end(
-				ns,
-				db,
-				ix_what,
-				index_id,
-				&Array::from(vec![from.value.as_ref().clone()]),
-			)
+			Index::prefix_ids_end(ns, db, ix_what, index_id, &array)
 		}
 	}
 
 	/// Compute the end key for a range scan over an index by value.
 	///
-	/// - If `to.value` is `None`, use the index-prefix end to stop at the last key in the index
-	///   keyspace.
+	/// - If `to.value` is `None` (unbounded), use the index-prefix end to stop at the last key in
+	///   the index keyspace.
 	/// - Otherwise, serialize the `to` value and construct the boundary key. For an inclusive upper
 	///   bound use `prefix_ids_end` so the scan can include all records with that exact value; for
 	///   an exclusive upper bound use `prefix_ids_beg` so the scan stops just before any key
@@ -588,25 +577,14 @@ impl IndexRangeThingIterator {
 		index_id: IndexId,
 		to: RangeValue,
 	) -> Result<Vec<u8>> {
-		if to.value.is_none() {
+		let Some(value) = to.value else {
 			return Index::prefix_end(ns, db, ix_what, index_id);
-		}
+		};
+		let array = Array::from(vec![value.as_ref().clone()]);
 		if to.inclusive {
-			Index::prefix_ids_end(
-				ns,
-				db,
-				ix_what,
-				index_id,
-				&Array::from(vec![to.value.as_ref().clone()]),
-			)
+			Index::prefix_ids_end(ns, db, ix_what, index_id, &array)
 		} else {
-			Index::prefix_ids_beg(
-				ns,
-				db,
-				ix_what,
-				index_id,
-				&Array::from(vec![to.value.as_ref().clone()]),
-			)
+			Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)
 		}
 	}
 
@@ -632,39 +610,52 @@ impl IndexRangeThingIterator {
 			Array::from(prefix.to_vec())
 		};
 		let (from_inclusive, to_inclusive) = (from.inclusive, to.inclusive);
-		// Compute the lower bound for the scan
-		let beg = if from.value.is_none() {
-			Index::prefix_ids_composite_beg(ns, db, &ix.table_name, ix.index_id, &prefix_array)?
-		} else {
-			Self::compute_beg_with_prefix(ns, db, &ix.table_name, ix.index_id, &prefix_array, from)?
+		let beg = match from.value {
+			None => {
+				Index::prefix_ids_composite_beg(ns, db, &ix.table_name, ix.index_id, &prefix_array)?
+			}
+			Some(v) => Self::compute_beg_with_prefix(
+				ns,
+				db,
+				&ix.table_name,
+				ix.index_id,
+				&prefix_array,
+				&v,
+				from_inclusive,
+			)?,
 		};
-		// Compute the upper bound for the scan
-		let end = if to.value.is_none() {
-			Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &prefix_array)?
-		} else {
-			Self::compute_end_with_prefix(ns, db, &ix.table_name, ix.index_id, &prefix_array, to)?
+		let end = match to.value {
+			None => {
+				Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &prefix_array)?
+			}
+			Some(v) => Self::compute_end_with_prefix(
+				ns,
+				db,
+				&ix.table_name,
+				ix.index_id,
+				&prefix_array,
+				&v,
+				to_inclusive,
+			)?,
 		};
 		Ok(RangeScan::new(beg, from_inclusive, end, to_inclusive))
 	}
 
 	/// Compute the begin key for a composite index range when a fixed `prefix`
-	/// (values for leading columns) is provided and an optional `from`
-	/// value applies to the next column.
-	///
-	/// Inclusive `from` uses `prefix_ids_beg` to include all rows equal to the
-	/// boundary value; exclusive `from` uses `prefix_ids_end` to start just
-	/// after all keys equal to that boundary.
+	/// (values for leading columns) is provided and an explicit `from` value
+	/// applies to the next column.
 	fn compute_beg_with_prefix(
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix_what: &TableName,
 		index_id: IndexId,
 		prefix: &Array,
-		from: RangeValue,
+		value: &Arc<Value>,
+		inclusive: bool,
 	) -> Result<Vec<u8>> {
 		let mut fd = prefix.clone();
-		fd.0.push(from.value.as_ref().clone());
-		if from.inclusive {
+		fd.0.push(value.as_ref().clone());
+		if inclusive {
 			Index::prefix_ids_beg(ns, db, ix_what, index_id, &fd)
 		} else {
 			Index::prefix_ids_end(ns, db, ix_what, index_id, &fd)
@@ -672,23 +663,19 @@ impl IndexRangeThingIterator {
 	}
 
 	/// Compute the end key for a composite index range when a fixed `prefix`
-	/// is provided and an optional `to` value applies to the next
-	/// column.
-	///
-	/// Inclusive `to` uses `prefix_ids_end` so rows equal to the boundary are
-	/// still reachable by the scan; exclusive `to` uses `prefix_ids_beg` to
-	/// stop just before any key matching that boundary value.
+	/// is provided and an explicit `to` value applies to the next column.
 	fn compute_end_with_prefix(
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix_what: &TableName,
 		index_id: IndexId,
 		prefix: &Array,
-		to: RangeValue,
+		value: &Arc<Value>,
+		inclusive: bool,
 	) -> Result<Vec<u8>> {
 		let mut fd = prefix.clone();
-		fd.0.push(to.value.as_ref().clone());
-		if to.inclusive {
+		fd.0.push(value.as_ref().clone());
+		if inclusive {
 			Index::prefix_ids_end(ns, db, ix_what, index_id, &fd)
 		} else {
 			Index::prefix_ids_beg(ns, db, ix_what, index_id, &fd)
@@ -1260,22 +1247,10 @@ impl UniqueRangeThingIterator {
 		from: RangeValue,
 		to: RangeValue,
 	) -> Result<RangeScan> {
-		let (beg, beg_incl) = Self::compute_beg(
-			ns,
-			db,
-			&ix.table_name,
-			ix.index_id,
-			from.value.as_ref(),
-			from.inclusive,
-		)?;
-		let (end, end_incl) = Self::compute_end(
-			ns,
-			db,
-			&ix.table_name,
-			ix.index_id,
-			to.value.as_ref(),
-			to.inclusive,
-		)?;
+		let from_bound = from.value.as_ref().map(|v| (v.as_ref(), from.inclusive));
+		let to_bound = to.value.as_ref().map(|v| (v.as_ref(), to.inclusive));
+		let (beg, beg_incl) = Self::compute_beg(ns, db, &ix.table_name, ix.index_id, from_bound)?;
+		let (end, end_incl) = Self::compute_end(ns, db, &ix.table_name, ix.index_id, to_bound)?;
 		Ok(RangeScan::new(beg, beg_incl, end, end_incl))
 	}
 
@@ -1321,22 +1296,24 @@ impl UniqueRangeThingIterator {
 		})
 	}
 
+	/// Compute the begin key for a unique-index range scan.
+	///
+	/// `from` is `None` for an unbounded lower side, or `Some((value, inclusive))`
+	/// for an explicit bound. NONE/NULL values use the non-unique key format
+	/// (with record-ID suffix), so they get prefix-based boundaries rather than
+	/// a single point-key.
 	fn compute_beg(
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix_what: &TableName,
 		index_id: IndexId,
-		from: &Value,
-		inclusive: bool,
+		from: Option<(&Value, bool)>,
 	) -> Result<(Vec<u8>, bool)> {
-		if from.is_none() {
+		let Some((from, inclusive)) = from else {
 			return Ok((Index::prefix_beg(ns, db, ix_what, index_id)?, true));
-		}
+		};
 		let array = Array::from(vec![from.clone()]);
 		if array.is_any_none_or_null() {
-			// NONE/NULL entries use non-unique key format (with record-ID
-			// suffix). Bake inclusive/exclusive into the key choice so the
-			// RangeScan boundaries land correctly.
 			let key = if inclusive {
 				Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)?
 			} else {
@@ -1347,17 +1324,17 @@ impl UniqueRangeThingIterator {
 		Ok((Index::new(ns, db, ix_what, index_id, &array, None).encode_key()?, inclusive))
 	}
 
+	/// Compute the end key for a unique-index range scan (symmetric to `compute_beg`).
 	fn compute_end(
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix_what: &TableName,
 		index_id: IndexId,
-		to: &Value,
-		inclusive: bool,
+		to: Option<(&Value, bool)>,
 	) -> Result<(Vec<u8>, bool)> {
-		if to.is_none() {
+		let Some((to, inclusive)) = to else {
 			return Ok((Index::prefix_end(ns, db, ix_what, index_id)?, true));
-		}
+		};
 		let array = Array::from(vec![to.clone()]);
 		if array.is_any_none_or_null() {
 			let key = if inclusive {
