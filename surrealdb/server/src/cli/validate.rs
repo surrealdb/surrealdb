@@ -30,9 +30,9 @@ pub async fn init(args: ValidateCommandArguments) -> Result<()> {
 			Err(error) => {
 				println!("<stdin>: KO");
 				eprintln!("{error}");
-				bail!(error)
 			}
 		}
+
 		return Ok(());
 	}
 
@@ -65,8 +65,7 @@ pub async fn init(args: ValidateCommandArguments) -> Result<()> {
 			Err(error) => {
 				println!("{}: KO", entry.display());
 				eprintln!("{error}");
-
-				bail!(error)
+				return Ok(());
 			}
 		}
 
