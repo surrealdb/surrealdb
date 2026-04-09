@@ -12,7 +12,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::reference::Reference;
 use crate::expr::{Base, Expr, Idiom, Kind};
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -133,7 +133,9 @@ impl AlterFieldStatement {
 		// Disallow mismatched types
 		//df.disallow_mismatched_types(ctx, ns, db).await?;
 
-		// Set the table definition
+		// Recompute auth_limit from the current principal to prevent privilege escalation
+		df.auth_limit = AuthLimit::new_from_auth(opt.auth.as_ref()).into();
+
 		let key = crate::key::table::fd::new(ns, db, &self.what, &name);
 		txn.set(&key, &df, None).await?;
 		// Refresh the table cache
