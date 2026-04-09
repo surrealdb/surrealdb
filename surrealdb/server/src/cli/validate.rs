@@ -8,12 +8,33 @@ pub struct ValidateCommandArguments {
 	#[arg(help = "Glob pattern for the files to validate")]
 	#[arg(default_value = "**/*.surql")]
 	patterns: Vec<String>,
+	#[arg(long, help = "Read query from standard input")]
+	#[arg(conflicts_with = "patterns")]
+	stdin: bool,
 }
 
 pub async fn init(args: ValidateCommandArguments) -> Result<()> {
 	let ValidateCommandArguments {
 		patterns,
+		stdin,
 	} = args;
+
+	if stdin {
+		use tokio::io::AsyncReadExt;
+		let mut input = String::new();
+
+		tokio::io::stdin().read_to_string(&mut input).await?;
+
+		match syn::parse(&input) {
+			Ok(_) => println!("<stdin>: OK"),
+			Err(error) => {
+				println!("<stdin>: KO");
+				eprintln!("{error}");
+				bail!(error)
+			}
+		}
+		return Ok(());
+	}
 
 	let mut entries = vec![];
 
