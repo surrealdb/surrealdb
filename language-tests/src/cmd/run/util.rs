@@ -98,7 +98,7 @@ pub fn session_from_test_config(
 					AuthLevel::Editor => Session::editor(),
 					AuthLevel::Viewer => Session::viewer(),
 				};
-				session.with_ns(&namespace)
+				session.with_ns(namespace)
 			}
 			TestAuth::Database {
 				namespace,
@@ -110,7 +110,7 @@ pub fn session_from_test_config(
 					AuthLevel::Editor => Session::editor(),
 					AuthLevel::Viewer => Session::viewer(),
 				};
-				session.with_ns(&namespace).with_db(&database)
+				session.with_ns(namespace).with_db(database)
 			}
 			TestAuth::Record {
 				namespace,
@@ -119,7 +119,7 @@ pub fn session_from_test_config(
 				rid,
 			} => {
 				let v = SurValue::RecordId(rid.0.clone());
-				Session::for_record(&namespace, &database, &access, v.into())
+				Session::for_record(namespace, database, access, v)
 			}
 		}
 	} else if env.signin.is_none() && env.signin.is_none() {
