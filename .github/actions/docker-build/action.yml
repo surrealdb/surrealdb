@@ -34,15 +34,15 @@ runs:
   using: 'composite'
   steps:
     - name: Set up Buildx
-      uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2aedd5d36ec1b5c232a2 # v3.10.0
+      uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
     - name: Download artifacts
-      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         path: artifacts
 
     - name: Build Docker image (amd64)
-      uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
+      uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
       id: build-amd64
       with:
         context: artifacts
@@ -55,7 +55,7 @@ runs:
           ARTIFACT_PREFIX=surreal-${{ inputs.tag-prefix }}
 
     - name: Build Docker image (arm64)
-      uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
+      uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
       id: build-arm64
       with:
         context: artifacts
@@ -72,7 +72,7 @@ runs:
       run: docker run --platform linux/amd64 --rm surrealdb-local:amd64 version
 
     - name: Configure DockerHub
-      uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+      uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
       if: ${{ inputs.push == 'true' }}
       with:
         username: ${{ inputs.docker-user }}
@@ -96,7 +96,7 @@ runs:
         fi
 
     - name: Push to DockerHub
-      uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
+      uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
       if: ${{ inputs.push == 'true' }}
       with:
         context: artifacts
@@ -116,7 +116,7 @@ runs:
         docker pull '${{ steps.tags.outputs.tag }}'
 
     - name: Run Trivy vulnerability scanner
-      uses: aquasecurity/trivy-action@97e0b3872f55f89b95b2f65b3dbab56962816478 # 0.34.2
+      uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
       if: ${{ inputs.push == 'true' }}
       with:
         image-ref: '${{ steps.tags.outputs.tag }}'
@@ -126,7 +126,7 @@ runs:
         severity: 'CRITICAL,HIGH'
 
     - name: Push to DockerHub (latest)
-      uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5.4.0
+      uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
       if: ${{ inputs.push == 'true' && inputs.latest == 'true' }}
       with:
         context: artifacts
