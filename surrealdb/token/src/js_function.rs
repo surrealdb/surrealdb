@@ -46,6 +46,14 @@ mod test {
 	#[test]
 	fn test() {
 		let tokens = JsFunctionToken::lexer("a\nb}").map(|x| x.unwrap()).collect::<Vec<_>>();
-		assert_eq!(tokens, &[JsFunctionToken::BraceClose]);
+		assert_eq!(
+			tokens,
+			&[
+				JsFunctionToken::Characters,
+				JsFunctionToken::Characters,
+				JsFunctionToken::Characters,
+				JsFunctionToken::BraceClose
+			]
+		);
 	}
 }
