@@ -25,9 +25,9 @@ use super::util::{
 	extract_record_id_point_lookup, extract_version, fold_condition_expressions,
 	get_effective_limit_literal, has_knn_k_operator, has_knn_operator, has_top_level_or,
 	idiom_to_field_name, idiom_to_field_path, index_covers_ordering, is_count_all_eligible,
-	is_indexed_count_eligible, order_is_scan_compatible, resolve_condition_params, resolve_param_value,
-	resolve_projection_field_idioms, strip_fts_condition, strip_index_conditions,
-	strip_knn_from_condition,
+	is_indexed_count_eligible, order_is_scan_compatible, resolve_condition_params,
+	resolve_param_value, resolve_projection_field_idioms, strip_fts_condition,
+	strip_index_conditions, strip_knn_from_condition,
 };
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
