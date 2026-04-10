@@ -20,19 +20,19 @@ runs:
   using: 'composite'
   steps:
     - name: Download amd64 binary
-      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         name: surreal-${{ inputs.name }}.darwin-amd64
         path: amd64
 
     - name: Download arm64 binary
-      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
         name: surreal-${{ inputs.name }}.darwin-arm64
         path: arm64
 
     - name: Configure AWS
-      uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v5.0.0
+      uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
       with:
         aws-region: us-east-2
         aws-access-key-id: ${{ inputs.aws-access-key-id }}

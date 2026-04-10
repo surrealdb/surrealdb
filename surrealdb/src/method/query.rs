@@ -27,7 +27,7 @@ use crate::{Connection, Error, Result, Surreal, opt};
 pub struct Query<'r, C: Connection> {
 	pub(crate) txn: Option<Uuid>,
 	pub(crate) client: Cow<'r, Surreal<C>>,
-	pub(crate) query: Cow<'r, str>,
+	pub(crate) queries: Vec<Cow<'r, str>>,
 	pub(crate) variables: Result<Variables>,
 }
 
@@ -78,9 +78,39 @@ where
 		Query {
 			txn: self.txn,
 			client: Cow::Owned(self.client.into_owned()),
-			query: Cow::Owned(self.query.into_owned()),
+			queries: self.queries.into_iter().map(|q| Cow::Owned(q.into_owned())).collect(),
 			variables: self.variables,
 		}
+	}
+
+	/// Chains an additional query statement onto this query builder
+	///
+	/// This allows multiple queries to be built up and sent together, with
+	/// results accessible by index via `.take(0)`, `.take(1)`, etc.
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// use surrealdb::RecordId;
+	///
+	/// let id = RecordId::from_table_key("user", "john");
+	/// let mut response = db
+	///     .query("SELECT * FROM $id<-knows.*")
+	///     .query("SELECT * FROM $id->knows.*")
+	///     .bind(("id", id))
+	///     .await?;
+	///
+	/// let followers = response.take::<Vec<_>>(0)?;
+	/// let following = response.take::<Vec<_>>(1)?;
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn query(mut self, query: impl Into<Cow<'r, str>>) -> Self {
+		self.queries.push(query.into());
+		self
 	}
 }
 
@@ -95,19 +125,24 @@ where
 		let Self {
 			txn,
 			client,
-			query,
+			queries,
 			variables,
 		} = self;
 
 		Box::pin(async move {
 			// Extract the router from the client
 			let router = client.inner.router.extract()?;
+			let query = queries
+				.iter()
+				.map(|q| q.trim_end_matches(|c: char| c == ';' || c.is_whitespace()))
+				.collect::<Vec<_>>()
+				.join("; ");
 
 			let results = router
 				.execute_query(
 					client.session_id,
 					Command::Query {
-						query: Cow::Owned(query.into_owned()),
+						query: Cow::Owned(query),
 						txn,
 						variables: variables?,
 					},
@@ -228,7 +263,7 @@ where
 		Query {
 			txn: self.txn,
 			client: self.client,
-			query: self.query,
+			queries: self.queries,
 			variables,
 		}
 	}
@@ -990,5 +1025,34 @@ mod tests {
 		assert_eq!(value, 2);
 		let value: Value = response.take(4).unwrap();
 		assert_eq!(value, Value::from_int(3));
+	}
+
+	#[test]
+	fn query_chaining_indexes_results_correctly() {
+		// Simulate what happens when multiple queries are chained:
+		// db.query("SELECT * FROM a").query("SELECT * FROM b").query("SELECT * FROM c")
+		// Each statement should be accessible by its own index.
+		let mut response = IndexedResults {
+			results: to_map(vec![
+				Ok(Value::from_int(0)), // index 0: first chained query
+				Ok(Value::from_int(1)), // index 1: second chained query
+				Ok(Value::from_int(2)), // index 2: third chained query
+			]),
+			..IndexedResults::new()
+		};
+
+		// Each index is independently accessible
+		let first: Value = response.take(0).unwrap();
+		assert_eq!(first, Value::from_int(0));
+
+		let second: Value = response.take(1).unwrap();
+		assert_eq!(second, Value::from_int(1));
+
+		let third: Value = response.take(2).unwrap();
+		assert_eq!(third, Value::from_int(2));
+
+		// After taking all three, takes return Value::None
+		let none: Value = response.take(0).unwrap();
+		assert_eq!(none, Value::None);
 	}
 }

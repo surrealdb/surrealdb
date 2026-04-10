@@ -16,6 +16,18 @@ impl Value {
 			.map_err(Error::InvalidPatch)
 			.map_err(anyhow::Error::new)?
 		{
+			let to_parts = |path: Vec<String>| {
+				path.into_iter()
+					.map(|p| {
+						if let Ok(i) = p.parse::<i64>() {
+							Part::index_int(i)
+						} else {
+							Part::Field(p)
+						}
+					})
+					.collect::<Vec<_>>()
+			};
+
 			match operation {
 				// Add a value
 				Operation::Add {
@@ -70,7 +82,7 @@ impl Value {
 				Operation::Remove {
 					path,
 				} => {
-					let path = path.into_iter().map(Part::Field).collect::<Vec<_>>();
+					let path = to_parts(path);
 					this.cut(&path);
 				}
 				// Replace a value at the specified path
@@ -243,6 +255,17 @@ mod tests {
 		let ops = parse_val!("[{ op: 'remove', path: '/test/other' }]");
 		let res = parse_val!("{ test: { something: 123 }, temp: true }");
 		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_remove_array_index() {
+		let mut val = parse_val!("{ id: todo:1 }");
+		let add = parse_val!("[{ op: 'add', path: '/list', value: ['Item here'] }]");
+		let remove = parse_val!("[{ op: 'remove', path: '/list/0' }]");
+		let res = parse_val!("{ id: todo:1, list: [] }");
+		val.patch(add).unwrap();
+		val.patch(remove).unwrap();
 		assert_eq!(res, val);
 	}
 
