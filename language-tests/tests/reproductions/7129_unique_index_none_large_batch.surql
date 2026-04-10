@@ -31,6 +31,9 @@ value = "1100"
 
 [[test.results]]
 value = "1099"
+
+[[test.results]]
+value = "1100"
 */
 
 DEFINE TABLE OVERWRITE t SCHEMAFULL;
@@ -52,3 +55,6 @@ RETURN count(SELECT * FROM t ORDER BY i ASC);
 
 -- Spot-check: the highest record must appear via DESC ORDER BY
 RETURN (SELECT * FROM t ORDER BY i DESC LIMIT 1)[0].i;
+
+-- Equality on NONE must paginate PrefixScan past INDEX_BATCH_SIZE
+RETURN count(SELECT * FROM t WHERE j = NONE);

@@ -11,9 +11,9 @@ use crate::dbs::group::GroupCollector;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
-use crate::expr::FlowResultExt as _;
 use crate::expr::order::Ordering;
 use crate::expr::part::Part;
+use crate::expr::{FlowResultExt as _, Idiom};
 use crate::idx::planner::RecordStrategy;
 use crate::val::Value;
 
@@ -187,6 +187,7 @@ impl Results {
 		ctx: &FrozenContext,
 		opt: &Options,
 		selector: &crate::expr::field::Selector,
+		omit: &[Idiom],
 	) -> Result<()> {
 		let values = self.take().await?;
 		let mut projected = Vec::with_capacity(values.len());
@@ -198,7 +199,10 @@ impl Results {
 			}
 			_ => None,
 		};
-		for v in values {
+		for mut v in values {
+			for field in omit {
+				v.del(stk, ctx, opt, field).await?;
+			}
 			let val = if let Some(alias) = materialized_alias
 				&& let Value::Object(ref obj) = v
 				&& alias

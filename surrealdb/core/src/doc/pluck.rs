@@ -338,12 +338,9 @@ impl Document {
 
 		// Remove any omitted fields from output.
 		// Skip when GROUP BY is present (OMIT applied after aggregation) and
-		// when SELECT VALUE without ORDER BY (OMIT already applied to the
-		// document before VALUE extraction above).
-		if stmt.group.is_none()
-			&& !(matches!(stmt.fields, crate::expr::field::Fields::Value(_))
-				&& stmt.order.is_none())
-		{
+		// when SELECT VALUE (OMIT is applied either in the early branch above
+		// without ORDER BY, or after sorting in `Results::project_value`).
+		if stmt.group.is_none() && !matches!(stmt.fields, crate::expr::field::Fields::Value(_)) {
 			for field in omit {
 				out.del(stk, ctx, opt, field).await?;
 			}

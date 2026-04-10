@@ -11,6 +11,9 @@ value = "['C', 'B', 'A']"
 [[test.results]]
 value = "[NONE, NONE, NONE]"
 
+[[test.results]]
+value = "[2, 2, 1]"
+
 */
 
 {
@@ -22,3 +25,4 @@ value = "[NONE, NONE, NONE]"
 
 SELECT VALUE name FROM person ORDER BY name DESC;
 SELECT VALUE name OMIT name FROM person ORDER BY name DESC;
+SELECT VALUE age OMIT name FROM person ORDER BY name DESC;

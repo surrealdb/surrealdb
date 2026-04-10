@@ -597,7 +597,9 @@ fn compute_unique_range_end_key(
 			} else {
 				Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &array)?
 			};
-			Ok((key, true))
+			// Sentinel boundary keys never store a row; avoid a trailing `get(end)` in
+			// `UniqueRangeForwardIterator::next_batch`.
+			Ok((key, false))
 		} else {
 			let key = Index::new(ns, db, &ix.table_name, ix.index_id, &array, None).encode_key()?;
 			Ok((key, to.inclusive))
