@@ -109,6 +109,14 @@ impl FunctionRegistry {
 		}
 	}
 
+	pub fn get_storage_aggregate(&self, has_arguments: bool) -> Arc<dyn AggregateFunction> {
+		if has_arguments {
+			Arc::new(builtin::aggregates::StorageField)
+		} else {
+			self.aggregates.get("storage").expect("storage should be registered").clone()
+		}
+	}
+
 	// =========================================================================
 	// Projection function methods
 	// =========================================================================

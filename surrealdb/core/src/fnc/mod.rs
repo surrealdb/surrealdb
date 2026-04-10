@@ -35,6 +35,7 @@ pub mod sequence;
 pub mod session;
 pub mod set;
 pub mod sleep;
+pub mod storage;
 pub mod string;
 pub mod time;
 pub mod r#type;
@@ -101,6 +102,11 @@ pub async fn run(
 	{
 		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
+		if name == "storage" && args.is_empty() {
+			if let Some(doc) = doc {
+				return synchronous(ctx, None, name, vec![doc.doc.as_ref().clone()]);
+			}
+		}
 		synchronous(ctx, doc, name, args)
 	}
 }
@@ -365,6 +371,8 @@ pub fn synchronous(
 		"set::remove" => set::remove,
 		"set::slice" => set::slice,
 		"set::union" => set::union,
+		//
+		"storage" => storage::storage,
 		//
 		"string::capitalize" => string::capitalize,
 		"string::concat" => string::concat,

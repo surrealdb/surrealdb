@@ -12,7 +12,7 @@ use crate::exec::operators::{
 };
 use crate::expr::field::{Field, Fields};
 use crate::expr::visit::{MutVisitor, VisitMut};
-use crate::expr::{Expr, Function, FunctionCall, Idiom, Literal};
+use crate::expr::{Expr, Function, FunctionCall, Idiom, Literal, Param};
 
 // ============================================================================
 // impl Planner — Aggregation
@@ -178,15 +178,20 @@ impl<'ctx> Planner<'ctx> {
 
 		let mut extracted_aggregates = Vec::new();
 		for (name, call) in extractor.aggregates {
-			let func = if name.as_str() == "count" {
-				registry.get_count_aggregate(!call.arguments.is_empty())
-			} else {
-				registry.get_aggregate(&name).expect("aggregate function should exist").clone()
+			let has_args = !call.arguments.is_empty();
+			let func = match name.as_str() {
+				"count" => registry.get_count_aggregate(has_args),
+				"storage" => registry.get_storage_aggregate(has_args),
+				_ => {
+					registry.get_aggregate(&name).expect("aggregate function should exist").clone()
+				}
 			};
 
 			let mut args = call.arguments.into_iter();
 			let argument_expr = if let Some(first_arg) = args.next() {
 				self.physical_expr(first_arg).await
+			} else if name.as_str() == "storage" {
+				self.physical_expr(Expr::Param(Param::from("this".to_string()))).await
 			} else {
 				self.physical_expr(Expr::Literal(Literal::None)).await
 			}?;
