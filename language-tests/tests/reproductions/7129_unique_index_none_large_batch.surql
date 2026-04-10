@@ -39,9 +39,10 @@ value = "1100"
 DEFINE TABLE OVERWRITE t SCHEMAFULL;
 DEFINE FIELD OVERWRITE i ON t TYPE int;
 DEFINE FIELD OVERWRITE j ON t TYPE option<string>;
-DEFINE INDEX OVERWRITE t_idx ON t FIELDS i, j UNIQUE;
+-- Single-column unique on j so WHERE j = NONE routes through UniqueEqual PrefixScan pagination.
+DEFINE INDEX OVERWRITE t_idx ON t FIELDS j UNIQUE;
 
--- Create 1100 records where j is NONE (stored with non-unique key format).
+-- Create 1100 records where j is NONE (rid-suffixed keys under UNIQUE).
 -- This exceeds INDEX_BATCH_SIZE (1000) to exercise pagination.
 FOR $n IN 0..1100 {
     CREATE type::record("t", $n) SET i = $n;

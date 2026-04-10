@@ -1342,7 +1342,9 @@ impl UniqueRangeThingIterator {
 			} else {
 				Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)?
 			};
-			return Ok((key, true));
+			// Sentinel boundary keys never store a row; avoid a trailing `get(end)` in
+			// `RangeScan` when the scan is exhausted (mirrors `compute_unique_range_end_key`).
+			return Ok((key, false));
 		}
 		Ok((Index::new(ns, db, ix_what, index_id, &array, None).encode_key()?, inclusive))
 	}

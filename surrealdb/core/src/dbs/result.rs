@@ -200,6 +200,12 @@ impl Results {
 			_ => None,
 		};
 		for mut v in values {
+			// Preserve rid before OMIT may delete the `id` field from the document.
+			// Mirrors the non-deferred pluck path which keeps `current.rid` separate.
+			let rid = match &v {
+				Value::Object(obj) => obj.rid().map(Arc::new),
+				_ => None,
+			};
 			for field in omit {
 				v.del(stk, ctx, opt, field).await?;
 			}
@@ -221,12 +227,6 @@ impl Results {
 				// non-deterministic expressions like rand() or time::now().
 				v.pick(alias)
 			} else {
-				// Extract record ID from the document so expressions that depend
-				// on CursorDoc.rid (e.g. the @ / Part::Doc idiom) resolve correctly.
-				let rid = match &v {
-					Value::Object(obj) => obj.rid().map(Arc::new),
-					_ => None,
-				};
 				let doc = crate::doc::CursorDoc::new(rid, None, v);
 				stk.run(|stk| selector.expr.compute(stk, ctx, opt, Some(&doc)))
 					.await

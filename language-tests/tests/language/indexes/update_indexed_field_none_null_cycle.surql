@@ -5,7 +5,7 @@ database = true
 auth = { level = "owner" }
 
 [test]
-reason = "INDEX on a field must stay consistent when UPDATE cycles that field through a value, NONE, NULL, NONE, and back to a value"
+reason = "UNIQUE index on a field must stay consistent when UPDATE cycles that field through a value, NONE, NULL, NONE, and back to a value"
 
 [[test.results]]
 value = "'OK'"
@@ -44,7 +44,7 @@ value = "[{ k: 'a', v: 15 }, { k: 'b', v: 20 }, { k: 'c', v: 30 }]"
 	CREATE t:a SET v = 10, k = 'a';
 	CREATE t:b SET v = 20, k = 'b';
 	CREATE t:c SET v = 30, k = 'c';
-	DEFINE INDEX OVERWRITE t_v ON t FIELDS v;
+	DEFINE INDEX OVERWRITE t_v ON t FIELDS v UNIQUE;
 	RETURN "OK";
 };
 

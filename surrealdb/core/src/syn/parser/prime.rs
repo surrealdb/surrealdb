@@ -47,18 +47,12 @@ impl Parser<'_> {
 		let value = match token.kind {
 			t!("@") => {
 				self.pop_peek();
-				let res = vec![Part::Doc];
-				if self.peek_kind() == t!("{") {
-					self.pop_peek();
-					let mut res = res;
-					res.push(stk.run(|ctx| self.parse_curly_part(ctx)).await?);
-					Expr::Idiom(self.parse_remaining_idiom(stk, res).await?)
-				} else if self.peek_continues_idiom() {
-					Expr::Idiom(self.parse_remaining_idiom(stk, res).await?)
-				} else {
-					// Bare `@` is the current document record id (`Part::Doc`).
-					Expr::Idiom(Idiom(res))
+				let mut res = vec![Part::Doc];
+				if !self.peek_continues_idiom() {
+					res.push(self.parse_dot_part(stk).await?);
 				}
+
+				Expr::Idiom(Idiom(res))
 			}
 			t!("NONE") => {
 				self.pop_peek();
