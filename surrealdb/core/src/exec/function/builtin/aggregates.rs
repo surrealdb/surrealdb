@@ -26,9 +26,14 @@ use crate::exec::function::FunctionRegistry;
 
 /// Register all built-in aggregate functions with the registry.
 pub fn register(registry: &mut FunctionRegistry) {
+	// Count aggregates
 	registry.register_aggregate(Count);
+	// Note: CountField is handled specially - "count" with args becomes CountField
+
+	// Storage aggregates
 	registry.register_aggregate(Storage);
 
+	// Math aggregates
 	registry.register_aggregate(MathSum);
 	registry.register_aggregate(MathMean);
 	registry.register_aggregate(MathMin);
@@ -37,9 +42,11 @@ pub fn register(registry: &mut FunctionRegistry) {
 	registry.register_aggregate(MathVariance);
 	registry.register_aggregate(MathMedian);
 
+	// Time aggregates
 	registry.register_aggregate(TimeMin);
 	registry.register_aggregate(TimeMax);
 
+	// Array aggregates
 	registry.register_aggregate(ArrayGroup);
 	registry.register_aggregate(ArrayJoin);
 	registry.register_aggregate(ArrayDistinct);
