@@ -449,6 +449,9 @@ unwrap_used = "warn"
 used_underscore_binding = "warn"
 
 # Profiles
+[profile.dev]
+split-debuginfo = "unpacked"
+
 [profile.release]
 codegen-units = 1
 lto = true
