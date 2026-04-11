@@ -67,6 +67,8 @@ pub enum Aggregation {
 	/// The usizes are index into the exprs field on the aggregate collector and represent the
 	/// expression which was fed as an argument to the aggregate expression
 	CountValue(usize),
+	Storage,
+	StorageValue(usize),
 	NumberMax(usize),
 	NumberMin(usize),
 	Sum(usize),
@@ -87,6 +89,13 @@ impl Aggregation {
 			Aggregation::CountValue(arg) => AggregationStat::CountValue {
 				arg,
 				count: 0,
+			},
+			Aggregation::Storage => AggregationStat::Storage {
+				total_bytes: 0,
+			},
+			Aggregation::StorageValue(arg) => AggregationStat::StorageValue {
+				arg,
+				total_bytes: 0,
 			},
 			Aggregation::NumberMax(arg) => AggregationStat::NumberMax {
 				arg,
@@ -141,9 +150,15 @@ pub enum AggregationStat {
 		count: i64,
 	},
 	CountValue {
-		/// Index into the exprs field on the view definition.
 		arg: usize,
 		count: i64,
+	},
+	Storage {
+		total_bytes: i64,
+	},
+	StorageValue {
+		arg: usize,
+		total_bytes: i64,
 	},
 	NumberMax {
 		arg: usize,
@@ -255,6 +270,18 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				count,
 			} => {
 				*count += arguments[*arg].is_truthy() as i64;
+			}
+			AggregationStat::Storage {
+				..
+			} => {
+				// No-arg storage() is handled by GroupCollector::push() directly
+			}
+			AggregationStat::StorageValue {
+				arg,
+				total_bytes,
+			} => {
+				let bytes = revision::to_vec(&arguments[*arg]).unwrap_or_default();
+				*total_bytes += bytes.len() as i64;
 			}
 			AggregationStat::NumberMax {
 				arg,
@@ -424,6 +451,13 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 				count,
 				..
 			} => Value::from(Number::from(*count)),
+			AggregationStat::Storage {
+				total_bytes,
+			}
+			| AggregationStat::StorageValue {
+				total_bytes,
+				..
+			} => Value::from(Number::from(*total_bytes)),
 			AggregationStat::NumberMax {
 				max,
 				..
@@ -543,6 +577,17 @@ impl MutVisitor for AggregateExprCollector<'_> {
 									"count",
 									&f.arguments,
 									Aggregation::CountValue,
+								)?;
+							}
+						}
+						"storage" => {
+							if f.arguments.is_empty() {
+								self.aggregations.push(Aggregation::Storage);
+							} else {
+								self.push_aggregate_function(
+									"storage",
+									&f.arguments,
+									Aggregation::StorageValue,
 								)?;
 							}
 						}

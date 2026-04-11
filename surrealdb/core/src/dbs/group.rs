@@ -105,6 +105,8 @@ impl GroupCollector {
 					aggregation::Aggregation::Variance(x) => format!("Variance(expr{x})"),
 					aggregation::Aggregation::DatetimeMax(x) => format!("DatetimeMax(expr{x})"),
 					aggregation::Aggregation::DatetimeMin(x) => format!("DatetimeMin(expr{x})"),
+					aggregation::Aggregation::Storage => "Storage".to_string(),
+					aggregation::Aggregation::StorageValue(x) => format!("StorageValue(expr{x})"),
 					aggregation::Aggregation::Accumulate(x) => format!("Accumulate(expr{x})"),
 				};
 				(format!("_a{idx}"), Value::from(res))
@@ -171,6 +173,16 @@ impl GroupCollector {
 			aggregation::add_to_aggregation_stats(&self.exprs_buffer, aggragates)?;
 		}
 
+		for a in aggragates.iter_mut() {
+			if let AggregationStat::Storage {
+				total_bytes,
+			} = a
+			{
+				let bytes = revision::to_vec(doc.doc.as_ref()).unwrap_or_default();
+				*total_bytes += bytes.len() as i64;
+			}
+		}
+
 		Ok(())
 	}
 
@@ -204,6 +216,13 @@ impl GroupCollector {
 						count,
 						..
 					} => Value::from(Number::from(count)),
+					AggregationStat::Storage {
+						total_bytes,
+					}
+					| AggregationStat::StorageValue {
+						total_bytes,
+						..
+					} => Value::from(Number::from(total_bytes)),
 					AggregationStat::NumberMax {
 						max,
 						..
