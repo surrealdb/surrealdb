@@ -1,5 +1,7 @@
 pub mod socket;
 
+use std::io::IsTerminal;
+
 use anyhow::Result;
 use tracing::{Level, Subscriber};
 use tracing_appender::non_blocking::NonBlocking;
@@ -9,6 +11,15 @@ use tracing_subscriber::fmt::writer::MakeWriterExt;
 
 use crate::cli::LogFormat;
 use crate::cli::validator::parser::tracing::CustomFilter;
+
+/// Determine whether ANSI escape codes should be emitted to the console.
+/// Returns `true` only when both stdout and stderr are TTYs and the
+/// `NO_COLOR` environment variable (https://no-color.org) is not set.
+fn use_ansi() -> bool {
+	std::io::stdout().is_terminal()
+		&& std::io::stderr().is_terminal()
+		&& std::env::var_os("NO_COLOR").is_none()
+}
 
 pub fn file<S>(
 	filter: CustomFilter,
@@ -64,6 +75,8 @@ where
 {
 	// Log INFO, DEBUG, TRACE to stdout, WARN, ERROR to stderr
 	let writer = stderr.with_max_level(Level::WARN).or_else(stdout);
+	// Check if ANSI escape codes should be used
+	let ansi = use_ansi();
 	// Configure the log tracer for production
 	#[cfg(not(debug_assertions))]
 	{
@@ -72,7 +85,7 @@ where
 		match format {
 			LogFormat::Json => Ok(layer
 				.json()
-				.with_ansi(true)
+				.with_ansi(ansi)
 				.with_file(false)
 				.with_target(true)
 				.with_line_number(false)
@@ -85,7 +98,7 @@ where
 				.boxed()),
 			LogFormat::Text => Ok(layer
 				.compact()
-				.with_ansi(true)
+				.with_ansi(ansi)
 				.with_file(false)
 				.with_target(true)
 				.with_line_number(false)
@@ -106,7 +119,7 @@ where
 		match format {
 			LogFormat::Json => Ok(layer
 				.json()
-				.with_ansi(true)
+				.with_ansi(ansi)
 				.with_file(true)
 				.with_target(true)
 				.with_line_number(true)
@@ -119,7 +132,7 @@ where
 				.boxed()),
 			LogFormat::Text => Ok(layer
 				.compact()
-				.with_ansi(true)
+				.with_ansi(ansi)
 				.with_file(true)
 				.with_target(true)
 				.with_line_number(true)
