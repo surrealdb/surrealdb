@@ -620,7 +620,7 @@ impl Iterator {
 							.await;
 					};
 
-					let Part::Lookup(ref lookup) = x[0] else {
+					let Part::Lookup(ref lookup) = x[1] else {
 						return self
 							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v)
 							.await;
