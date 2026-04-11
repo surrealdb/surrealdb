@@ -6,6 +6,7 @@ use anyhow::Result;
 use tracing::{Level, Subscriber};
 use tracing_appender::non_blocking::NonBlocking;
 use tracing_subscriber::Layer;
+use tracing_subscriber::filter::LevelFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
@@ -98,6 +99,7 @@ where
 				.with_writer(stderr_writer)
 				.with_filter(stderr_filter.env())
 				.with_filter(stderr_filter.span_filter::<S>())
+				.with_filter(LevelFilter::WARN)
 				.boxed(),
 			LogFormat::Text => layer
 				.compact()
@@ -111,12 +113,15 @@ where
 				.with_writer(stderr_writer)
 				.with_filter(stderr_filter.env())
 				.with_filter(stderr_filter.span_filter::<S>())
+				.with_filter(LevelFilter::WARN)
 				.boxed(),
 		}
 	};
 	// Build the stdout layer (INFO, DEBUG, and TRACE)
 	let stdout_layer = {
 		let layer = tracing_subscriber::fmt::layer();
+		let level_filter =
+			tracing_subscriber::filter::filter_fn(|meta| *meta.level() > Level::WARN);
 		match format {
 			LogFormat::Json => layer
 				.json()
@@ -130,6 +135,7 @@ where
 				.with_writer(stdout_writer)
 				.with_filter(filter.env())
 				.with_filter(filter.span_filter::<S>())
+				.with_filter(level_filter)
 				.boxed(),
 			LogFormat::Text => layer
 				.compact()
@@ -143,6 +149,7 @@ where
 				.with_writer(stdout_writer)
 				.with_filter(filter.env())
 				.with_filter(filter.span_filter::<S>())
+				.with_filter(level_filter)
 				.boxed(),
 		}
 	};
