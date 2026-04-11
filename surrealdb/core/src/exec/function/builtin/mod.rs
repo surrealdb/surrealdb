@@ -28,6 +28,7 @@ mod sequence;
 mod session;
 mod set;
 mod sleep;
+mod storage;
 mod string;
 mod time;
 mod r#type;
@@ -63,6 +64,7 @@ pub fn register_all(registry: &mut FunctionRegistry) {
 	session::register(registry);
 	set::register(registry);
 	sleep::register(registry);
+	storage::register(registry);
 	string::register(registry);
 	time::register(registry);
 	r#type::register(registry);

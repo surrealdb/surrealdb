@@ -102,6 +102,11 @@ pub async fn run(
 	{
 		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
+		if name == "storage" && args.is_empty() {
+			if let Some(doc) = doc {
+				return synchronous(ctx, None, name, vec![doc.doc.as_ref().clone()]);
+			}
+		}
 		synchronous(ctx, doc, name, args)
 	}
 }
