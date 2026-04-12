@@ -12,15 +12,14 @@ use crate::kvs::{KVKey, KVValue};
 /// (e.g. systemd `ProcSubset=pid` hardening).
 pub(crate) static TOTAL_SYSTEM_MEMORY: LazyLock<u64> = LazyLock::new(|| {
 	// Load the system attributes
-	let mut system = System::new_all();
+	let mut system = System::new();
 	// Refresh the system memory
 	system.refresh_memory();
 	// Get the total system memory
 	let host_memory = system.total_memory();
 	// If the total system memory is 0, use a safe default
 	if host_memory == 0 {
-		// Memory info unavailable (restricted /proc); use a safe default
-		return 1024 * 1024 * 1024; // 1 GiB
+		return 1024 * 1024 * 1024;
 	}
 	// Prefer cgroup limits when available (container environments)
 	match system.cgroup_limits() {
