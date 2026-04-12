@@ -106,6 +106,91 @@ fn test_simple_struct_with_renamed_fields() {
 }
 
 ////////////////////////////////////////////////////
+/////// Struct with raw identifier fields //////////
+////////////////////////////////////////////////////
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
+struct RawIdentStruct {
+	r#type: String,
+	name: String,
+}
+
+#[test]
+fn test_raw_identifier_field_uses_unescaped_name() {
+	let val = RawIdentStruct {
+		r#type: "span".to_string(),
+		name: "test".to_string(),
+	};
+
+	let value = val.into_value();
+	if let Value::Object(obj) = &value {
+		assert_eq!(obj.get("type"), Some(&Value::String("span".to_string())));
+		assert!(obj.get("r#type").is_none(), "key must be 'type', not 'r#type'");
+		assert_eq!(obj.get("name"), Some(&Value::String("test".to_string())));
+	} else {
+		panic!("Expected Object value");
+	}
+
+	let converted = RawIdentStruct::from_value(value.clone()).unwrap();
+	assert_eq!(converted.r#type, "span");
+	assert_eq!(converted.name, "test");
+
+	let kind = RawIdentStruct::kind_of();
+	let debug = format!("{:?}", kind);
+	assert!(debug.contains(r#""type": String"#), "kind_of should use 'type' not 'r#type': {debug}");
+	assert!(!debug.contains("r#type"), "kind_of must not contain 'r#type': {debug}");
+
+	assert!(RawIdentStruct::is_value(&value));
+	assert!(value.is::<RawIdentStruct>());
+	assert!(!RawIdentStruct::is_value(&Value::None));
+	assert!(!RawIdentStruct::is_value(&Value::Object(Object::new())));
+}
+
+////////////////////////////////////////////////////
+///// Enum with raw identifier variant names ///////
+////////////////////////////////////////////////////
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
+#[surreal(tag = "kind")]
+#[allow(non_camel_case_types)]
+enum RawIdentEnum {
+	r#type {
+		name: String,
+	},
+	Normal {
+		name: String,
+	},
+}
+
+#[test]
+fn test_raw_identifier_enum_variant_uses_unescaped_name() {
+	let val = RawIdentEnum::r#type {
+		name: "test".to_string(),
+	};
+
+	let value = val.into_value();
+	if let Value::Object(obj) = &value {
+		assert_eq!(obj.get("kind"), Some(&Value::String("type".to_string())));
+		assert_eq!(obj.get("name"), Some(&Value::String("test".to_string())));
+	} else {
+		panic!("Expected Object value");
+	}
+
+	let converted = RawIdentEnum::from_value(value.clone()).unwrap();
+	assert_eq!(
+		converted,
+		RawIdentEnum::r#type {
+			name: "test".to_string()
+		}
+	);
+
+	assert!(RawIdentEnum::is_value(&value));
+	assert!(value.is::<RawIdentEnum>());
+}
+
+////////////////////////////////////////////////////
 /////////// Simple single field struct /////////////
 ////////////////////////////////////////////////////
 

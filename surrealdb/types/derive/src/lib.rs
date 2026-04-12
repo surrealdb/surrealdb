@@ -22,6 +22,13 @@ mod kind;
 mod write_sql;
 use crate_path::CratePath;
 
+/// Returns the string representation of an identifier with any raw prefix (`r#`) stripped.
+/// Rust raw identifiers like `r#type` should serialize as `"type"`, not `"r#type"`.
+pub(crate) fn unraw(ident: &syn::Ident) -> String {
+	let s = ident.to_string();
+	s.strip_prefix("r#").unwrap_or(&s).to_string()
+}
+
 /// Derives the `SurrealValue` trait for a struct or enum.
 ///
 /// This macro automatically implements the `SurrealValue` trait, which provides conversion
