@@ -144,6 +144,13 @@ pub struct RootContext {
 	/// so that permission predicate evaluation does not re-enter table permissions
 	/// and recurse infinitely on cyclic record links.
 	pub(crate) skip_fetch_perms: bool,
+	/// Evaluated VERSION timestamp for time-travel queries.
+	///
+	/// Set by the `VersionScope` operator when a SELECT has a VERSION clause.
+	/// Read by `fetch_record`, `fetch_record_no_perms`, and `FieldPart` so
+	/// that record dereferences and FETCH resolution honour the same version
+	/// as the source scan.
+	pub(crate) version_stamp: Option<u64>,
 }
 
 impl std::fmt::Debug for RootContext {
@@ -156,6 +163,7 @@ impl std::fmt::Debug for RootContext {
 			.field("session", &self.session)
 			.field("current_value", &self.current_value.as_ref().map(|_| "<Value>"))
 			.field("skip_fetch_perms", &self.skip_fetch_perms)
+			.field("version_stamp", &self.version_stamp)
 			.field("ctx", &"<FrozenContext>")
 			.finish()
 	}
@@ -498,6 +506,7 @@ impl ExecutionContext {
 				session: r.session.clone(),
 				current_value: r.current_value.clone(),
 				skip_fetch_perms: r.skip_fetch_perms,
+				version_stamp: r.version_stamp,
 			}),
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
 				root: RootContext {
@@ -510,6 +519,7 @@ impl ExecutionContext {
 					session: n.root.session.clone(),
 					current_value: n.root.current_value.clone(),
 					skip_fetch_perms: n.root.skip_fetch_perms,
+					version_stamp: n.root.version_stamp,
 				},
 				ns: n.ns.clone(),
 			}),
@@ -525,6 +535,7 @@ impl ExecutionContext {
 						session: d.ns_ctx.root.session.clone(),
 						current_value: d.ns_ctx.root.current_value.clone(),
 						skip_fetch_perms: d.ns_ctx.root.skip_fetch_perms,
+						version_stamp: d.ns_ctx.root.version_stamp,
 					},
 					ns: d.ns_ctx.ns.clone(),
 				},
@@ -577,6 +588,34 @@ impl ExecutionContext {
 		};
 		root.skip_fetch_perms = skip;
 		new
+	}
+
+	/// Set the evaluated VERSION timestamp for time-travel queries.
+	///
+	/// Used by `VersionScope` to propagate the version to downstream
+	/// operators so that record dereferences and FETCH resolution honour
+	/// the same timestamp as the source scan.
+	pub fn with_version_stamp(self, version: Option<u64>) -> Self {
+		if version == self.root().version_stamp {
+			return self;
+		}
+		let mut new = self;
+		let root = match &mut new {
+			Self::Root(r) => r,
+			Self::Namespace(n) => &mut n.root,
+			Self::Database(d) => &mut d.ns_ctx.root,
+		};
+		root.version_stamp = version;
+		new
+	}
+
+	/// Get the evaluated VERSION timestamp (if set).
+	///
+	/// Returns the version stamp set by `VersionScope`. Used by
+	/// `fetch_record`, `fetch_record_no_perms`, and `FieldPart` to
+	/// read records at the correct point in time.
+	pub fn version_stamp(&self) -> Option<u64> {
+		self.root().version_stamp
 	}
 
 	/// Create a new context with an additional parameter.

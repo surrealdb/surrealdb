@@ -340,7 +340,7 @@ pub(crate) async fn fetch_record_no_perms(
 	ctx: &ExecutionContext,
 	rid: &RecordId,
 ) -> crate::expr::FlowResult<Value> {
-	let Some(mut val) = fetch_raw_record(ctx, rid, None).await? else {
+	let Some(mut val) = fetch_raw_record(ctx, rid, ctx.version_stamp()).await? else {
 		return Ok(Value::None);
 	};
 	let field_state =
@@ -358,7 +358,7 @@ pub(crate) async fn fetch_record(
 	ctx: &ExecutionContext,
 	rid: &RecordId,
 ) -> crate::expr::FlowResult<Value> {
-	let Some(mut val) = fetch_raw_record(ctx, rid, None).await? else {
+	let Some(mut val) = fetch_raw_record(ctx, rid, ctx.version_stamp()).await? else {
 		return Ok(Value::None);
 	};
 	if !process_fetched_record(ctx, rid, &mut val).await? {

@@ -326,6 +326,7 @@ impl<'ctx> Planner<'ctx> {
 					ref_output_mode,
 					range_start,
 					range_end,
+					self.version.clone(),
 				))
 			}
 		};

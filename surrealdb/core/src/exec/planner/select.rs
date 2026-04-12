@@ -44,7 +44,7 @@ use crate::exec::operators::{
 	Aggregate, AnalyzePlan, Compute, DynamicScan, ExplainPlan, Fetch, FieldSelection, Filter,
 	KnnTopK, Limit, Project, ProjectValue, Projection, RandomShuffle, RecordIdScan, SelectProject,
 	Sort, SortByKey, SortDirection, SortKey, SortTopK, SortTopKByKey, SourceExpr, Split, TableScan,
-	Timeout, Union, UnionIndexScan, UnwrapExactlyOne,
+	Timeout, Union, UnionIndexScan, UnwrapExactlyOne, VersionScope,
 };
 use crate::exec::{ExecOperator, OperatorMetrics};
 use crate::expr::field::{Field, Fields};
@@ -1535,7 +1535,7 @@ impl<'ctx> Planner<'ctx> {
 		let mut planned = pp
 			.plan_sources(
 				what,
-				version,
+				version.clone(),
 				cond_for_index.as_ref(),
 				order.as_ref(),
 				with.as_ref(),
@@ -1639,10 +1639,14 @@ impl<'ctx> Planner<'ctx> {
 				Arc::new(Timeout::new(fetched, Some(tp))) as Arc<dyn ExecOperator>
 			}
 		};
+		let versioned: Arc<dyn ExecOperator> = match version {
+			Some(v) => Arc::new(VersionScope::new(timed, v)),
+			None => timed,
+		};
 		if only {
-			Ok(Arc::new(UnwrapExactlyOne::new(timed, !is_value_source)))
+			Ok(Arc::new(UnwrapExactlyOne::new(versioned, !is_value_source)))
 		} else {
-			Ok(timed)
+			Ok(versioned)
 		}
 	}
 
