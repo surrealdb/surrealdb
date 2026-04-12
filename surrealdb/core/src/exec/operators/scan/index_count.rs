@@ -170,7 +170,7 @@ impl ExecOperator for IndexCountScan {
 							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// Evaluate source expression to get the table name.

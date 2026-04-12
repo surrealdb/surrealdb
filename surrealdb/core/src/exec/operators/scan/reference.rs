@@ -179,7 +179,7 @@ impl ExecOperator for ReferenceScan {
 							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// Read from the child operator stream and extract RecordIds

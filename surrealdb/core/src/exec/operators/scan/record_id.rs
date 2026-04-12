@@ -197,7 +197,7 @@ impl ExecOperator for RecordIdScan {
 							.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// 3. Delegate to the shared lookup helper

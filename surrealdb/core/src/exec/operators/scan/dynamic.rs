@@ -255,7 +255,7 @@ impl ExecOperator for DynamicScan {
 								.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?,
 						)
 					}
-					None => None,
+					None => ctx.version_stamp(),
 				};
 
 				// Evaluate pushed-down LIMIT and START expressions
@@ -533,7 +533,7 @@ async fn resolve_table_scan_stream(
 					.to_version_stamp(txn.timestamp_impl().as_ref())?,
 			)
 		}
-		None => None,
+		None => ctx.version_stamp(),
 	};
 
 	// Resolve bind-parameter references so that index analysis sees

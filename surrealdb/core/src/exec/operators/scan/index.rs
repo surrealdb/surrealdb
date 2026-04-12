@@ -377,7 +377,7 @@ impl ExecOperator for IndexScan {
 							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// Early exit if limit is 0

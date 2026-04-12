@@ -20,19 +20,23 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "'OK'"
 
 [[test.results]]
-value = "[{ friends: [{ city: 'London', id: person:bob, name: 'Bob (updated)' }, { city: 'London', id: person:carol, name: 'Carol' }] }]"
+value = "[{ friends: [{ address: address:hq, id: person:carol, name: 'Carol' }, { address: address:hq, id: person:bob, name: 'Bob (updated)' }] }]"
 
 [[test.results]]
-value = "[{ friends: [{ city: 'Paris', id: person:bob, name: 'Bob' }] }]"
+value = "[{ friends: [{ address: address:hq, id: person:bob, name: 'Bob' }] }]"
 
 [[test.results]]
-value = "[{ friends: [{ address: { city: 'London', id: address:hq }, id: person:bob, name: 'Bob (updated)' }, { address: { city: 'London', id: address:hq }, id: person:carol, name: 'Carol' }] }]"
+value = "[{ friends: [{ address: { city: 'London', id: address:hq }, id: person:carol, name: 'Carol' }, { address: { city: 'London', id: address:hq }, id: person:bob, name: 'Bob (updated)' }] }]"
 
 [[test.results]]
 value = "[{ friends: [{ address: { city: 'Paris', id: address:hq }, id: person:bob, name: 'Bob' }] }]"
+
 */
 
 -- VERSION should propagate through graph traversal, FETCH, and nested dereference together
@@ -77,4 +81,4 @@ SELECT ->knows->person.* AS friends FROM person:alice VERSION $t1;
 SELECT ->knows->person.* AS friends FROM person:alice FETCH friends.address;
 
 -- VERSION: graph + FETCH — resolves address link to Paris
-SELECT ->knows->person.* AS friends FROM person:alice VERSION $t1 FETCH friends.address;
+SELECT ->knows->person.* AS friends FROM person:alice FETCH friends.address VERSION $t1;

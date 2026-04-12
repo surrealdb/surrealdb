@@ -20,19 +20,23 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "'OK'"
 
 [[test.results]]
-value = "[{ address: address:home, city: 'London', id: person:alice }]"
+value = "[{ address: address:home, city: 'London' }]"
 
 [[test.results]]
-value = "[{ address: address:home, city: 'Paris', id: person:alice }]"
+value = "[{ address: address:home, city: 'Paris' }]"
 
 [[test.results]]
 value = "[{ address: { city: 'London', id: address:home }, id: person:alice }]"
 
 [[test.results]]
 value = "[{ address: { city: 'Paris', id: address:home }, id: person:alice }]"
+
 */
 
 -- VERSION clause should propagate through FETCH and record field dereferences
@@ -71,4 +75,4 @@ SELECT address, address.city AS city FROM person:alice VERSION $t1;
 SELECT * FROM person:alice FETCH address;
 
 -- Query 4: VERSION — FETCH should resolve to Paris (the value at $t1)
-SELECT * FROM person:alice VERSION $t1 FETCH address;
+SELECT * FROM person:alice FETCH address VERSION $t1;

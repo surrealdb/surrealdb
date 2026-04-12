@@ -183,7 +183,7 @@ impl ExecOperator for TableScan {
 							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			if limit_val == Some(0) {

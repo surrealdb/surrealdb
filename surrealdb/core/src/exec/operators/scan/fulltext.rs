@@ -156,7 +156,7 @@ impl ExecOperator for FullTextScan {
 							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// Get the FrozenContext and Options from the root context

@@ -148,7 +148,7 @@ impl ExecOperator for CountScan {
 							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// Evaluate the source expression to get the table name (or range).

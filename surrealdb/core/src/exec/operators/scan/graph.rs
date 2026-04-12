@@ -195,7 +195,7 @@ impl ExecOperator for GraphEdgeScan {
 							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// Determine the directions to scan

@@ -1226,7 +1226,7 @@ impl<'ctx> Planner<'ctx> {
 				.await?;
 			let field_names = extract_count_field_names(&fields);
 			let count_scan: Arc<dyn ExecOperator> =
-				Arc::new(CountScan::new(table_expr, version, field_names));
+				Arc::new(CountScan::new(table_expr, version.clone(), field_names));
 			let timed = match timeout {
 				Expr::Literal(Literal::None) => count_scan,
 				te => {
@@ -1234,10 +1234,14 @@ impl<'ctx> Planner<'ctx> {
 					Arc::new(Timeout::new(count_scan, Some(tp))) as Arc<dyn ExecOperator>
 				}
 			};
+			let versioned: Arc<dyn ExecOperator> = match &version {
+				Some(v) => Arc::new(VersionScope::new(timed, v.clone())),
+				None => timed,
+			};
 			return if only {
-				Ok(Arc::new(UnwrapExactlyOne::new(timed, true)))
+				Ok(Arc::new(UnwrapExactlyOne::new(versioned, true)))
 			} else {
-				Ok(timed)
+				Ok(versioned)
 			};
 		}
 
@@ -1264,8 +1268,14 @@ impl<'ctx> Planner<'ctx> {
 				let predicate = self.physical_expr(condition.0.clone()).await?;
 				let field_names = extract_count_field_names(&fields);
 				let index_count_scan: Arc<dyn ExecOperator> = Arc::new(
-					IndexCountScan::new(table_expr, predicate, condition, version, field_names)
-						.with_btree_access(btree_access),
+					IndexCountScan::new(
+						table_expr,
+						predicate,
+						condition,
+						version.clone(),
+						field_names,
+					)
+					.with_btree_access(btree_access),
 				);
 				let timed = match timeout {
 					Expr::Literal(Literal::None) => index_count_scan,
@@ -1274,10 +1284,14 @@ impl<'ctx> Planner<'ctx> {
 						Arc::new(Timeout::new(index_count_scan, Some(tp))) as Arc<dyn ExecOperator>
 					}
 				};
+				let versioned: Arc<dyn ExecOperator> = match &version {
+					Some(v) => Arc::new(VersionScope::new(timed, v.clone())),
+					None => timed,
+				};
 				return if only {
-					Ok(Arc::new(UnwrapExactlyOne::new(timed, true)))
+					Ok(Arc::new(UnwrapExactlyOne::new(versioned, true)))
 				} else {
-					Ok(timed)
+					Ok(versioned)
 				};
 			}
 		}
@@ -1310,7 +1324,7 @@ impl<'ctx> Planner<'ctx> {
 				Some(e @ Expr::Literal(Literal::RecordId(_))) => self.physical_expr(e).await?,
 				_ => unreachable!("verified above"),
 			};
-			let mut scan = RecordIdScan::new(rid_expr, version, needed_fields, None);
+			let mut scan = RecordIdScan::new(rid_expr, version.clone(), needed_fields, None);
 			// Resolve table context at plan time
 			if let Some(ref tb) = table_name_for_resolve
 				&& let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db)
@@ -1340,10 +1354,14 @@ impl<'ctx> Planner<'ctx> {
 					Arc::new(Timeout::new(projected, Some(tp))) as Arc<dyn ExecOperator>
 				}
 			};
+			let versioned: Arc<dyn ExecOperator> = match &version {
+				Some(v) => Arc::new(VersionScope::new(timed, v.clone())),
+				None => timed,
+			};
 			return if only {
-				Ok(Arc::new(UnwrapExactlyOne::new(timed, true)))
+				Ok(Arc::new(UnwrapExactlyOne::new(versioned, true)))
 			} else {
-				Ok(timed)
+				Ok(versioned)
 			};
 		}
 

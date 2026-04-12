@@ -172,7 +172,7 @@ impl ExecOperator for KnnScan {
 							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// Get the FrozenContext from the root context
