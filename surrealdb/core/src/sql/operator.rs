@@ -643,13 +643,7 @@ impl BindingPower {
 			Expr::Postfix {
 				op,
 				..
-			} => {
-				if let PostfixOperator::Range | PostfixOperator::RangeSkip = *op {
-					BindingPower::Range
-				} else {
-					BindingPower::Prefix
-				}
-			}
+			} => BindingPower::for_postfix_operator(op),
 			Expr::Binary {
 				op,
 				..

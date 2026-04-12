@@ -41,7 +41,7 @@ const PRODUCT_BP: (u8, u8) = (9, 10);
 // So the binding power is reversed from the left associative operators.
 const POWER_BP: (u8, u8) = (12, 11);
 
-const NULLISH_BP: (u8, u8) = (13, 14);
+const NULLISH_BP: (u8, u8) = (0, 0);
 
 const RANGE_BP: u8 = 7;
 
