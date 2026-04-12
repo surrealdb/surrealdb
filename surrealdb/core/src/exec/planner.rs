@@ -120,6 +120,11 @@ pub struct Planner<'ctx> {
 	pub(crate) ns: Option<String>,
 	/// Optional database name for plan-time catalog lookups.
 	pub(crate) db: Option<String>,
+	/// Optional VERSION expression from the enclosing SELECT statement.
+	///
+	/// Propagated to `GraphEdgeScan` operators created during idiom
+	/// conversion so that graph edge traversals respect the VERSION clause.
+	pub(crate) version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 }
 
 impl<'ctx> Planner<'ctx> {
@@ -135,6 +140,7 @@ impl<'ctx> Planner<'ctx> {
 			txn: None,
 			ns: None,
 			db: None,
+			version: None,
 		}
 	}
 
@@ -156,7 +162,14 @@ impl<'ctx> Planner<'ctx> {
 			txn: Some(txn),
 			ns,
 			db,
+			version: None,
 		}
+	}
+
+	/// Set the VERSION expression for propagation to graph edge scans.
+	pub fn with_version(mut self, version: Option<Arc<dyn crate::exec::PhysicalExpr>>) -> Self {
+		self.version = version;
+		self
 	}
 
 	/// Get the function registry.

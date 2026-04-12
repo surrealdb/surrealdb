@@ -1395,12 +1395,13 @@ impl<'ctx> Planner<'ctx> {
 				std::borrow::Cow::Borrowed(self.ctx)
 			};
 
-		// Propagate txn to the inner planner
+		// Propagate txn and version to the inner planner
 		let pp = if let Some(ref txn) = self.txn {
 			Planner::with_txn(&planning_ctx, txn.clone(), self.ns.clone(), self.db.clone())
 		} else {
 			Planner::new(&planning_ctx)
-		};
+		}
+		.with_version(version.clone());
 
 		let needed_fields = Self::extract_needed_fields(
 			&fields,
