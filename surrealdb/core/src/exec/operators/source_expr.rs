@@ -81,7 +81,16 @@ impl ExecOperator for SourceExpr {
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
+			// In a correlated subquery, ScalarSubquery binds the outer document
+			// as `$this`. Use it as current_value so that bare field paths in
+			// the FROM expression resolve against the outer row (e.g.
+			// `FROM data.files` where `data` is a record link on the outer row).
+			let this_value = ctx.value("this").cloned();
 			let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+			let eval_ctx = match this_value {
+				Some(ref v) => eval_ctx.with_value(v),
+				None => eval_ctx,
+			};
 			let value = expr.evaluate(eval_ctx).await?;
 
 			match value {

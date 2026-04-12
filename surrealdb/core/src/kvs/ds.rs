@@ -26,7 +26,7 @@ use tokio::spawn;
 use tokio::sync::Notify;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
-use tokio::time::{Instant, sleep};
+use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, trace, warn};
 use uuid::Uuid;
@@ -850,7 +850,7 @@ impl Datastore {
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn check_version(&self) -> Result<(MajorVersion, bool)> {
 		// Retry because concurrent instances may conflict when writing the version key
-		let (version, is_new) = Self::retry(Duration::from_secs(60), || self.get_version()).await?;
+		let (version, is_new) = Self::retry("Check version", || self.get_version()).await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
 			bail!(Error::OutdatedStorageVersion {
@@ -920,7 +920,7 @@ impl Datastore {
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn initialise_credentials(&self, user: &str, pass: &str) -> Result<()> {
 		// Retry because concurrent instances may conflict when creating the root user
-		Self::retry(Duration::from_secs(60), || self.initialise_credentials_attempt(user, pass))
+		Self::retry("Initialise credentials", || self.initialise_credentials_attempt(user, pass))
 			.await
 	}
 
@@ -1017,62 +1017,88 @@ impl Datastore {
 	pub async fn bootstrap(&self) -> Result<()> {
 		// Each bootstrap step is retried independently, because concurrent instances
 		// writing to the same cluster metadata keys may cause transaction conflicts.
-		let time_out = Duration::from_secs(60);
 		// Insert this node in the cluster
-		Self::retry(time_out, || self.insert_node()).await?;
+		Self::retry("Insert node", || self.insert_node()).await?;
 		// Mark inactive nodes as archived
-		Self::retry(time_out, || self.expire_nodes()).await?;
+		Self::retry("Expire nodes", || self.expire_nodes()).await?;
 		// Remove archived nodes
-		Self::retry(time_out, || self.remove_nodes()).await?;
+		Self::retry("Remove nodes", || self.remove_nodes()).await?;
 		// Everything ok
 		Ok(())
 	}
 
-	/// Retries an async operation until it succeeds or `timeout` elapses.
+	/// Retries an async operation until it succeeds or the global timeout elapses.
 	///
 	/// Only [`TransactionConflict`](crate::kvs::Error::TransactionConflict)
 	/// errors are retried; any other error is returned immediately to the
-	/// caller. On each retryable failure a randomised delay (0–10 s) is
+	/// caller. On each retryable failure a randomized delay (0–10 s) is
 	/// applied before the next attempt, adding jitter to reduce repeated
 	/// collisions when multiple instances start concurrently against the
 	/// same storage backend.
 	///
-	/// The timeout is checked only after a *failed* attempt; a successful
+	/// The global timeout is checked only after a *failed* attempt; a successful
 	/// result is always returned immediately, even if the elapsed time
-	/// exceeds the budget. This means the total wall-clock time can exceed
-	/// `timeout` by up to one attempt duration plus the preceding back-off.
-	/// If no attempt succeeds within the budget, the conflict error from
-	/// the last failed attempt is surfaced.
-	async fn retry<F, Fut, R>(timeout: Duration, func: F) -> Result<R>
+	/// exceeds the budget. Each attempt's timeout is the lesser of its
+	/// natural timeout (10 s * attempt number) and the remaining global
+	/// budget, so total wall-clock time never significantly exceeds the
+	/// global timeout. If no attempt succeeds within the budget, an error
+	/// is returned.
+	async fn retry<F, Fut, R>(task: &str, func: F) -> Result<R>
 	where
 		F: Fn() -> Fut,
 		Fut: Future<Output = Result<R>>,
 	{
+		let global_timeout = Duration::from_secs(120);
+		let per_attempt_timeout = Duration::from_secs(10);
 		let time = Instant::now();
+		let mut last_error = None;
+		let mut attempt = 1;
 		loop {
-			match func().await {
-				Ok(result) => return Ok(result),
-				Err(e) => {
-					if let Some(crate::kvs::Error::TransactionConflict(_)) = e.downcast_ref() {
-						if time.elapsed() > timeout {
-							bail!(e);
+			// Cap each attempt to the remaining global budget
+			let remaining = global_timeout.saturating_sub(time.elapsed());
+			if remaining.is_zero() {
+				break;
+			}
+			let attempt_timeout = (per_attempt_timeout * attempt).min(remaining);
+			if let Ok(result) = timeout(attempt_timeout, func()).await {
+				match result {
+					Ok(result) => return Ok(result),
+					Err(e) => {
+						// Only retry on transaction conflict errors
+						if let Some(crate::kvs::Error::TransactionConflict(_)) = e.downcast_ref() {
+							last_error = Some(e);
+						} else {
+							return Err(e);
 						}
-						// Randomised back-off to stagger retries across competing instances
-						let tempo = Duration::from_secs(thread_rng().gen_range(0..10));
-						sleep(tempo).await;
-					} else {
-						return Err(e);
 					}
 				}
 			}
+			// Check if the global timeout has been exceeded
+			if time.elapsed() >= global_timeout {
+				break;
+			}
+			// Randomized back-off capped to the remaining budget
+			let remaining = global_timeout.saturating_sub(time.elapsed());
+			if remaining.is_zero() {
+				break;
+			}
+			let tempo = Duration::from_secs(thread_rng().gen_range(0..10)).min(remaining);
+			sleep(tempo).await;
+			attempt += 1;
 		}
+		if let Some(e) = last_error {
+			error!(target: TARGET, "{task} - All {attempt} attempts failed. Last error: {e}");
+		} else {
+			error!(target: TARGET, "{task} - All {attempt} attempts failed.");
+		}
+		bail!(Error::Internal(format!("{task} failed after {attempt} attempts due to timeout")));
 	}
 
 	/// Inserts a node for the first time into the cluster.
 	///
 	/// This function should be run at server or database startup.
 	///
-	/// This function ensures that this node is entered into the clister
+	/// This function ensures that this node is entered into the cluster
 	/// membership entries. This function must be run at server or database
 	/// startup, in order to write the initial entry and timestamp to storage.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]

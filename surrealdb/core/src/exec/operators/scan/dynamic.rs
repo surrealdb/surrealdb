@@ -611,6 +611,7 @@ async fn resolve_table_scan_stream(
 				None,
 				None,
 				cfg.version,
+				None,
 			);
 			let stream = operator.execute(ctx)?;
 			Ok((stream, 0))
@@ -622,7 +623,8 @@ async fn resolve_table_scan_stream(
 			query,
 			operator,
 		}) => {
-			let ft_op = FullTextScan::new(index_ref, query, operator, cfg.table_name, cfg.version);
+			let ft_op =
+				FullTextScan::new(index_ref, query, operator, cfg.table_name, cfg.version, None);
 			let stream = ft_op.execute(ctx)?;
 			Ok((stream, 0))
 		}
@@ -646,6 +648,7 @@ async fn resolve_table_scan_stream(
 				cfg.version,
 				cfg.knn_context.clone(),
 				residual_cond,
+				None,
 			);
 			let stream = knn_op.execute(ctx)?;
 			Ok((stream, 0))
@@ -709,6 +712,7 @@ fn create_index_operator(
 			None,
 			None,
 			cfg.version.clone(),
+			None,
 		)),
 		AccessPath::FullTextSearch {
 			index_ref,
@@ -720,6 +724,7 @@ fn create_index_operator(
 			operator.clone(),
 			cfg.table_name.clone(),
 			cfg.version.clone(),
+			None,
 		)),
 		AccessPath::KnnSearch {
 			index_ref,
@@ -737,6 +742,7 @@ fn create_index_operator(
 				cfg.version.clone(),
 				cfg.knn_context.clone(),
 				residual_cond,
+				None,
 			))
 		}
 		// TableScan and nested Union should not appear as sub-paths.

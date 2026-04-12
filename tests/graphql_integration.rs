@@ -5516,6 +5516,359 @@ mod graphql_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn literal_kind_field_schema_and_mutation() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE sample SCHEMAFULL;
+					DEFINE FIELD OVERWRITE status ON sample TYPE "active";
+					CREATE sample:one SET status = "active";
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Kind::Literal field should no longer fail schema generation.
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"query { sample { id status } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected query to succeed for Kind::Literal field, got: {:?}",
+				body["errors"]
+			);
+			assert_eq!(body["data"]["sample"][0]["id"], "sample:one");
+			assert_eq!(body["data"]["sample"][0]["status"], "active");
+		}
+
+		// Mutation input should accept matching literal values.
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createSample(data: { status: "active" }) {
+							id
+							status
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected matching literal mutation to succeed, got: {:?}",
+				body["errors"]
+			);
+			assert_eq!(body["data"]["createSample"]["status"], "active");
+		}
+
+		// Mutation input should reject non-matching literal values.
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createSample(data: { status: "inactive" }) {
+							id
+							status
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_array(),
+				"Expected non-matching literal mutation to fail, got: {:?}",
+				body
+			);
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn literal_object_kind_field_schema_and_mutation()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE sampleobj SCHEMAFULL;
+					DEFINE FIELD OVERWRITE meta ON sampleobj TYPE { status: "active", score: int };
+					CREATE sampleobj:one SET meta = { status: "active", score: 10 };
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"query { sampleobj { id meta } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected query to succeed for Kind::Literal(Object), got: {:?}",
+				body["errors"]
+			);
+			assert_eq!(body["data"]["sampleobj"][0]["id"], "sampleobj:one");
+			assert_eq!(body["data"]["sampleobj"][0]["meta"]["status"], "active");
+			assert_eq!(body["data"]["sampleobj"][0]["meta"]["score"], 10);
+		}
+
+		// Mutation input should accept matching literal object values.
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createSampleobj(data: { meta: { status: "active", score: 11 } }) {
+							id
+							meta
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected matching literal object mutation to succeed, got: {:?}",
+				body["errors"]
+			);
+			assert_eq!(body["data"]["createSampleobj"]["meta"]["status"], "active");
+			assert_eq!(body["data"]["createSampleobj"]["meta"]["score"], 11);
+		}
+
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createSampleobj(data: { meta: { status: "inactive", score: 12 } }) {
+							id
+							meta
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_array(),
+				"Expected non-matching literal object mutation to fail, got: {:?}",
+				body
+			);
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn literal_numeric_bool_array_kinds_schema_and_mutation()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE litnum SCHEMAFULL;
+					DEFINE FIELD OVERWRITE intLit ON litnum TYPE 42;
+					DEFINE FIELD OVERWRITE floatLit ON litnum TYPE 3.5f;
+					DEFINE FIELD OVERWRITE decLit ON litnum TYPE 2.5dec;
+					DEFINE FIELD OVERWRITE boolLit ON litnum TYPE true;
+					DEFINE FIELD OVERWRITE arrLit ON litnum TYPE [1, "ok", true];
+					CREATE litnum:one SET
+						intLit = 42,
+						floatLit = 3.5f,
+						decLit = 2.5dec,
+						boolLit = true,
+						arrLit = [1, "ok", true];
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						litnum {
+							id
+							intLit
+							floatLit
+							boolLit
+							arrLit
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected query to succeed for numeric/bool/array literal kinds, got: {:?}",
+				body["errors"]
+			);
+			assert_eq!(body["data"]["litnum"][0]["id"], "litnum:one");
+			assert_eq!(body["data"]["litnum"][0]["intLit"], 42);
+			assert_eq!(body["data"]["litnum"][0]["floatLit"], 3.5);
+			assert_eq!(body["data"]["litnum"][0]["boolLit"], true);
+			assert_eq!(body["data"]["litnum"][0]["arrLit"][0], 1);
+			assert_eq!(body["data"]["litnum"][0]["arrLit"][1], "ok");
+			assert_eq!(body["data"]["litnum"][0]["arrLit"][2], true);
+		}
+
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createLitnum(data: {
+							intLit: 42,
+							floatLit: 3.5,
+							decLit: 2.5,
+							boolLit: true,
+							arrLit: [1, "ok", true]
+						}) {
+							id
+							intLit
+							floatLit
+							boolLit
+							arrLit
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected matching numeric/bool/array literal mutation to succeed, got: {:?}",
+				body["errors"]
+			);
+			assert_eq!(body["data"]["createLitnum"]["intLit"], 42);
+			assert_eq!(body["data"]["createLitnum"]["floatLit"], 3.5);
+			assert_eq!(body["data"]["createLitnum"]["boolLit"], true);
+			assert_eq!(body["data"]["createLitnum"]["arrLit"][0], 1);
+			assert_eq!(body["data"]["createLitnum"]["arrLit"][1], "ok");
+			assert_eq!(body["data"]["createLitnum"]["arrLit"][2], true);
+		}
+
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createLitnum(data: {
+							intLit: 43,
+							floatLit: 3.5,
+							decLit: 2.5,
+							boolLit: true,
+							arrLit: [1, "ok", true]
+						}) {
+							id
+							intLit
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_array(),
+				"Expected non-matching numeric literal mutation to fail, got: {:?}",
+				body
+			);
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
 	async fn subscriptions_live_query_stream() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_without_auth().await.unwrap();
 		let gql_ws_url = &format!("ws://{addr}/graphql");

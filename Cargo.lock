@@ -3939,6 +3939,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
+name = "logos"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb2c55a318a87600ea870ff8c2012148b44bf18b74fad48d0f835c38c7d07c5f"
+dependencies = [
+ "logos-derive",
+]
+
+[[package]]
+name = "logos-codegen"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58b3ffaa284e1350d017a57d04ada118c4583cf260c8fb01e0fe28a2e9cf8970"
+dependencies = [
+ "fnv",
+ "proc-macro2",
+ "quote",
+ "regex-automata",
+ "regex-syntax",
+ "syn 2.0.114",
+]
+
+[[package]]
+name = "logos-derive"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52d3a9855747c17eaf4383823f135220716ab49bea5fbea7dd42cc9a92f8aa31"
+dependencies = [
+ "logos-codegen",
+]
+
+[[package]]
 name = "lru-slab"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6943,6 +6975,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-ast"
+version = "3.1.0-alpha"
+dependencies = [
+ "chrono",
+ "rust_decimal",
+ "surrealdb-common",
+ "uuid",
+]
+
+[[package]]
+name = "surrealdb-common"
+version = "3.1.0-alpha"
+dependencies = [
+ "hashbrown 0.16.1",
+]
+
+[[package]]
 name = "surrealdb-core"
 version = "3.1.0-alpha"
 dependencies = [
@@ -7069,6 +7118,22 @@ dependencies = [
  "libz-sys",
  "lz4-sys",
  "zstd-sys",
+]
+
+[[package]]
+name = "surrealdb-parser"
+version = "3.1.0-alpha"
+dependencies = [
+ "bitflags 2.10.0",
+ "chrono",
+ "criterion 0.8.1",
+ "logos",
+ "reblessive",
+ "rust_decimal",
+ "surrealdb-ast",
+ "surrealdb-common",
+ "surrealdb-token",
+ "uuid",
 ]
 
 [[package]]
@@ -7218,6 +7283,14 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tonic 0.10.2",
+]
+
+[[package]]
+name = "surrealdb-token"
+version = "3.1.0-alpha"
+dependencies = [
+ "logos",
+ "surrealdb-common",
 ]
 
 [[package]]

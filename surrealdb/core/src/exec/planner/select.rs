@@ -1830,6 +1830,7 @@ impl<'ctx> Planner<'ctx> {
 							idx_limit,
 							idx_start,
 							version.clone(),
+							Some(needed_fields),
 						)
 						.with_batch_ceiling(batch_ceiling);
 						if let Some(ref tc) = table_ctx {
@@ -1846,8 +1847,14 @@ impl<'ctx> Planner<'ctx> {
 						query,
 						operator,
 					} => {
-						let mut scan =
-							FullTextScan::new(index_ref, query, operator, table, version.clone());
+						let mut scan = FullTextScan::new(
+							index_ref,
+							query,
+							operator,
+							table,
+							version.clone(),
+							Some(needed_fields),
+						);
 						if let Some(ref tc) = table_ctx {
 							scan = scan.with_resolved(tc.clone());
 						}
@@ -1884,6 +1891,7 @@ impl<'ctx> Planner<'ctx> {
 							version.clone(),
 							knn_ctx,
 							residual_cond,
+							Some(needed_fields),
 						);
 						if let Some(ref tc) = table_ctx {
 							scan = scan.with_resolved(tc.clone());
@@ -1971,6 +1979,8 @@ impl<'ctx> Planner<'ctx> {
 									access,
 									direction,
 								} => {
+									// UnionIndexScan handles computed fields; sub-operators don't
+									// need them
 									let mut scan = IndexScan::new(
 										index_ref,
 										access,
@@ -1979,6 +1989,7 @@ impl<'ctx> Planner<'ctx> {
 										None,
 										None,
 										version.clone(),
+										None,
 									);
 									if let Some(ref ceiling) = merge_batch_ceiling {
 										scan = scan.with_batch_ceiling(Some(Arc::clone(ceiling)));
@@ -1999,6 +2010,7 @@ impl<'ctx> Planner<'ctx> {
 										operator,
 										table.clone(),
 										version.clone(),
+										None,
 									);
 									if let Some(ref tc) = table_ctx {
 										scan = scan.with_resolved(tc.clone());
@@ -2021,6 +2033,7 @@ impl<'ctx> Planner<'ctx> {
 										version.clone(),
 										knn_ctx.clone(),
 										residual_cond,
+										None,
 									);
 									if let Some(ref tc) = table_ctx {
 										scan = scan.with_resolved(tc.clone());

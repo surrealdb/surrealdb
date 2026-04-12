@@ -74,10 +74,11 @@ impl EnumAttributes {
 	}
 
 	pub fn variant_string(&self, variant: &Ident) -> String {
+		let s = crate::unraw(variant);
 		match self.casing {
-			Some(Casing::Uppercase) => variant.to_string().to_uppercase(),
-			Some(Casing::Lowercase) => variant.to_string().to_lowercase(),
-			None => variant.to_string(),
+			Some(Casing::Uppercase) => s.to_uppercase(),
+			Some(Casing::Lowercase) => s.to_lowercase(),
+			None => s,
 		}
 	}
 }

@@ -155,7 +155,14 @@ pub fn function_with_capabilities(input: &str, capabilities: &Capabilities) -> R
 pub fn json(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing inert JSON value");
 
-	parse_with(input.as_bytes(), async |parser, stk| parser.parse_json(stk).await)
+	let settings = ParserSettings {
+		json_string_escapes: true,
+		..settings_from_capabilities(&Capabilities::all())
+	};
+
+	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
+		parser.parse_json(stk).await
+	})
 }
 
 /// Parses a SurrealQL [`Idiom`]
@@ -307,6 +314,7 @@ pub fn json_legacy_strand(input: &str) -> Result<PublicValue> {
 		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
 		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
 		legacy_strands: true,
+		json_string_escapes: true,
 		..Default::default()
 	};
 

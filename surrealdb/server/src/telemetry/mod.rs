@@ -137,9 +137,9 @@ impl Builder {
 		self
 	}
 
-	/// Set the terminal log output format
+	/// Set the socket log output format
 	pub fn with_socket_format(mut self, format: LogFormat) -> Self {
-		self.format = format;
+		self.socket_format = format;
 		self
 	}
 
@@ -183,12 +183,12 @@ impl Builder {
 			.lossy(true)
 			.thread_name("surrealdb-logger-stderr")
 			.finish(std::io::stderr());
-		// Create the display destination layer
-		let stdio_layer = logs::output(self.filter.clone(), stdout, stderr, self.format)?;
+		// Create the display destination layers (separate stdout/stderr)
+		let stdio_layers = logs::output(self.filter.clone(), stdout, stderr, self.format)?;
 		// Setup a registry for composing layers
 		let registry = tracing_subscriber::registry();
-		// Setup stdio destination layer
-		let registry = registry.with(stdio_layer);
+		// Setup stdio destination layers
+		let registry = registry.with(stdio_layers);
 		// Setup guards
 		let mut guards = vec![stdout_guard, stderr_guard];
 		// Setup layers

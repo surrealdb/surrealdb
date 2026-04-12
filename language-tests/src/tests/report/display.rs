@@ -206,6 +206,25 @@ impl TestReport {
 				writeln!(f, "> Test failed, running import `{import}` caused an error:")?;
 				f.indent(|f| writeln!(f, "- {error}"))
 			}
+			TestError::BadCleanup(x) => {
+				writeln!(
+					f,
+					"> Test failed, test was not specified as clean yet it retained database keys:"
+				)?;
+				f.indent(|f| {
+					for x in x.iter() {
+						write!(f, "- [")?;
+						for (idx, &b) in x.iter().enumerate() {
+							if idx != 0 {
+								write!(f, ",")?;
+							}
+							write!(f, "{}", (b as char).escape_debug())?;
+						}
+						writeln!(f, "]")?;
+					}
+					Ok(())
+				})
+			}
 		}
 	}
 
@@ -214,7 +233,7 @@ impl TestReport {
 		f.indent(|f| {
 			writeln!(f, "= Got:")?;
 			f.indent(|f| match outputs {
-				TestOutputs::Values(res) => Self::display_value_list(&res, f),
+				TestOutputs::Values(res) => Self::display_value_list(res, f),
 				TestOutputs::ParsingError(res) => {
 					writeln!(f, "- Parsing error: {res}")
 				}
@@ -238,7 +257,7 @@ impl TestReport {
 					None => writeln!(f, "- Any parsing error"),
 				},
 				super::TestExpectation::Values(e) => match e {
-					Some(e) => Self::display_expectation_list(&e, f),
+					Some(e) => Self::display_expectation_list(e, f),
 					None => writeln!(f, "- Any list of query result values"),
 				},
 				super::TestExpectation::Signin(e) => match e {

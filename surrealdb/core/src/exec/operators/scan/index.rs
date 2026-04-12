@@ -3,13 +3,14 @@
 //! This operator retrieves records using B-tree index structures (Idx and Uniq),
 //! supporting equality lookups, range scans, and union operations.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use surrealdb_types::ToSql;
 
 use super::common::fetch_and_filter_records_batch;
-use super::pipeline::eval_limit_expr;
+use super::pipeline::{build_field_state, eval_limit_expr};
 use super::resolved::ResolvedTableContext;
 use crate::err::Error;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
@@ -57,6 +58,10 @@ pub struct IndexScan {
 	/// Plan-time resolved table context. When present, `execute()` skips
 	/// runtime table def + permission lookup.
 	pub(crate) resolved: Option<ResolvedTableContext>,
+	/// Projection-aware field set for computed-field materialization.
+	/// Outer `None` = sub-operator mode (parent handles fields).
+	/// `Some(None)` = all fields, `Some(Some(set))` = specific fields.
+	pub(crate) needed_fields: Option<Option<HashSet<String>>>,
 	/// Per-batch size ceiling when LIMIT wasn't pushed (due to a residual
 	/// filter preventing direct pushdown).  The scan reads batches of at
 	/// most this many entries, enabling faster early termination from the
@@ -69,6 +74,7 @@ pub struct IndexScan {
 }
 
 impl IndexScan {
+	#[allow(clippy::too_many_arguments)]
 	pub(crate) fn new(
 		index_ref: IndexRef,
 		access: BTreeAccess,
@@ -77,6 +83,7 @@ impl IndexScan {
 		limit: Option<Arc<dyn PhysicalExpr>>,
 		start: Option<Arc<dyn PhysicalExpr>>,
 		version: Option<Arc<dyn PhysicalExpr>>,
+		needed_fields: Option<Option<HashSet<String>>>,
 	) -> Self {
 		Self {
 			index_ref,
@@ -87,6 +94,7 @@ impl IndexScan {
 			start,
 			version,
 			resolved: None,
+			needed_fields,
 			batch_ceiling: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
@@ -321,6 +329,7 @@ impl ExecOperator for IndexScan {
 		let ceiling_expr = self.batch_ceiling.clone();
 		let version_expr = self.version.clone();
 		let resolved = self.resolved.clone();
+		let needed_fields = self.needed_fields.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -402,15 +411,30 @@ impl ExecOperator for IndexScan {
 				return;
 			}
 
-			// Create a ScanPipeline for limit/start tracking.
-			// Permissions are already handled by fetch_and_filter_records_batch,
-			// so we use Allow and an empty FieldState here — the pipeline is
-			// only used for limit/start counting.
+			// Resolve field state for computed fields and field-level
+			// permissions. When needed_fields is None (sub-operator mode),
+			// the parent operator handles field processing.
+			let field_state = match &needed_fields {
+				Some(nf) => {
+					if let Some(ref res) = resolved {
+						res.field_state_for_projection(nf.as_ref())
+					} else {
+						build_field_state(
+							&ctx, &table_name, check_perms, nf.as_ref(),
+						).await?
+					}
+				}
+				None => super::pipeline::FieldState::empty(),
+			};
+
+			// Table-level permissions are already handled by
+			// fetch_and_filter_records_batch, so the pipeline uses Allow
+			// to avoid double-checking.
 			let mut pipeline = super::pipeline::ScanPipeline::new(
 				PhysicalPermission::Allow,
-				None, // no predicate
-				super::pipeline::FieldState::empty(),
-				false, // permissions handled by fetch_and_filter_records_batch
+				None,
+				field_state,
+				check_perms,
 				limit_val,
 				start_val,
 			);
