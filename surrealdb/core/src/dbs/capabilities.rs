@@ -879,9 +879,9 @@ impl Capabilities {
 		match &capabilities.allow_functions {
 			FunctionTargets::None => {}
 			FunctionTargets::All => {
-				if matches!(self.allow_funcs, Targets::None) {
+				if !matches!(self.allow_funcs, Targets::All) {
 					bail!(
-						"Surrealism package requires access to all functions, but the server allows none"
+						"Surrealism package requires access to all functions, but the server does not allow all functions"
 					);
 				}
 			}

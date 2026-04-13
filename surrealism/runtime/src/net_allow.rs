@@ -39,69 +39,71 @@ impl ResolvedNetAllow {
 /// 1. `IpNet` (CIDR)
 /// 2. `IpAddr` → `/32` or `/128`
 /// 3. URL-style host, optional port; hostnames → DNS to IPs (blocking).
-pub fn resolve_allow_net(entries: &[String]) -> Arc<Vec<ResolvedNetAllow>> {
+///
+/// Returns an error if any entry fails to parse or any hostname fails to resolve,
+/// aligning with the core pattern where DNS failures propagate rather than being
+/// silently swallowed.
+pub fn resolve_allow_net(entries: &[String]) -> anyhow::Result<Arc<Vec<ResolvedNetAllow>>> {
 	let mut out = Vec::new();
 	for entry in entries {
-		resolve_one(entry, &mut out);
+		resolve_one(entry, &mut out)?;
 	}
-	Arc::new(out)
+	Ok(Arc::new(out))
 }
 
-fn resolve_one(entry: &str, out: &mut Vec<ResolvedNetAllow>) {
+fn resolve_one(entry: &str, out: &mut Vec<ResolvedNetAllow>) -> anyhow::Result<()> {
 	if let Ok(net) = entry.parse::<IpNet>() {
 		out.push(ResolvedNetAllow::Net(net));
-		return;
+		return Ok(());
 	}
 	if let Ok(ip) = entry.parse::<IpAddr>() {
 		out.push(ResolvedNetAllow::Net(IpNet::from(ip)));
-		return;
+		return Ok(());
 	}
-	if let Ok(url) = url::Url::parse(&format!("http://{entry}")) {
-		let Some(host) = url.host() else {
-			tracing::warn!(entry, "allow_net entry has no host after URL parse");
-			return;
-		};
+	let url = url::Url::parse(&format!("http://{entry}"))
+		.map_err(|e| anyhow::anyhow!("failed to parse allow_net entry '{entry}': {e}"))?;
+	let host =
+		url.host().ok_or_else(|| anyhow::anyhow!("allow_net entry '{entry}' has no host"))?;
 
-		let port: Option<u16> = entry.rsplit_once(':').and_then(|(_, p)| p.parse::<u16>().ok());
+	let port: Option<u16> = entry.rsplit_once(':').and_then(|(_, p)| p.parse::<u16>().ok());
 
-		match host {
-			url::Host::Ipv4(ip) => {
-				let ip: IpAddr = ip.into();
-				if let Some(port) = port {
-					out.push(ResolvedNetAllow::IpPort(ip, port));
-				} else {
-					out.push(ResolvedNetAllow::Net(IpNet::from(ip)));
-				}
-			}
-			url::Host::Ipv6(ip) => {
-				let ip: IpAddr = ip.into();
-				if let Some(port) = port {
-					out.push(ResolvedNetAllow::IpPort(ip, port));
-				} else {
-					out.push(ResolvedNetAllow::Net(IpNet::from(ip)));
-				}
-			}
-			url::Host::Domain(domain) => {
-				resolve_hostname(domain, port, out);
+	match host {
+		url::Host::Ipv4(ip) => {
+			let ip: IpAddr = ip.into();
+			if let Some(port) = port {
+				out.push(ResolvedNetAllow::IpPort(ip, port));
+			} else {
+				out.push(ResolvedNetAllow::Net(IpNet::from(ip)));
 			}
 		}
-	} else {
-		tracing::warn!(entry, "failed to parse allow_net entry");
+		url::Host::Ipv6(ip) => {
+			let ip: IpAddr = ip.into();
+			if let Some(port) = port {
+				out.push(ResolvedNetAllow::IpPort(ip, port));
+			} else {
+				out.push(ResolvedNetAllow::Net(IpNet::from(ip)));
+			}
+		}
+		url::Host::Domain(domain) => {
+			resolve_hostname(domain, port, out)?;
+		}
 	}
+	Ok(())
 }
 
 /// Blocking DNS — only call from module load / `Runtime::new`, not from async request paths.
-fn resolve_hostname(hostname: &str, port: Option<u16>, out: &mut Vec<ResolvedNetAllow>) {
-	match (hostname, port.unwrap_or(80)).to_socket_addrs() {
-		Ok(addrs) => {
-			for addr in addrs {
-				ResolvedNetAllow::push_from_socket_addr(port, addr, out);
-			}
-		}
-		Err(e) => {
-			tracing::warn!(hostname, %e, "failed to resolve allow_net hostname");
-		}
+fn resolve_hostname(
+	hostname: &str,
+	port: Option<u16>,
+	out: &mut Vec<ResolvedNetAllow>,
+) -> anyhow::Result<()> {
+	let addrs = (hostname, port.unwrap_or(80))
+		.to_socket_addrs()
+		.map_err(|e| anyhow::anyhow!("failed to resolve allow_net hostname '{hostname}': {e}"))?;
+	for addr in addrs {
+		ResolvedNetAllow::push_from_socket_addr(port, addr, out);
 	}
+	Ok(())
 }
 
 #[cfg(test)]
@@ -112,7 +114,7 @@ mod tests {
 
 	#[test]
 	fn parses_ip_and_cidr() {
-		let r = resolve_allow_net(&["192.168.1.1".into(), "10.0.0.0/8".into()]);
+		let r = resolve_allow_net(&["192.168.1.1".into(), "10.0.0.0/8".into()]).unwrap();
 		assert_eq!(r.len(), 2);
 		let a: SocketAddr = "192.168.1.1:8080".parse().unwrap();
 		assert!(r[0].matches_socket_addr(&a));
@@ -122,7 +124,7 @@ mod tests {
 
 	#[test]
 	fn parses_ip_with_port() {
-		let r = resolve_allow_net(&["192.168.1.1:80".into()]);
+		let r = resolve_allow_net(&["192.168.1.1:80".into()]).unwrap();
 		assert_eq!(r.len(), 1);
 		let ok: SocketAddr = "192.168.1.1:80".parse().unwrap();
 		assert!(r[0].matches_socket_addr(&ok));

@@ -18,14 +18,7 @@ impl SurrealismCache {
 	pub fn new() -> Self {
 		let count = *crate::cnf::SURREALISM_CACHE_SIZE;
 		Self {
-			cache: quick_cache::sync::Cache::with_weighter(
-				count,
-				// Weight is in MB. Budget = count * 100 MB each, so the default
-				// of 100 modules gives a ~10 GB budget — effectively count-limited
-				// for typical module sizes while still evicting large modules first.
-				(count as u64) * 100,
-				Weight,
-			),
+			cache: quick_cache::sync::Cache::with_weighter(count, count as u64, Weight),
 		}
 	}
 
@@ -139,8 +132,12 @@ pub struct SurrealismCacheValue {
 pub(crate) struct Weight;
 
 impl Weighter<SurrealismCacheKey, SurrealismCacheValue> for Weight {
-	fn weight(&self, _key: &SurrealismCacheKey, val: &SurrealismCacheValue) -> u64 {
-		// Weight in MB so larger modules are evicted first under pressure.
-		(val.runtime.wasm_size() as u64 / (1024 * 1024)).max(1)
+	fn weight(&self, _key: &SurrealismCacheKey, _val: &SurrealismCacheValue) -> u64 {
+		// Uniform weight: each cached module counts as 1 toward the budget,
+		// giving a hard cap of SURREALISM_CACHE_SIZE modules. Size-proportional
+		// weighting was removed because (a) typical WASM binaries (50 KB–5 MB)
+		// all round to weight=1 anyway, defeating the budget, and (b) higher
+		// weights for large modules caused them to be evicted too aggressively.
+		1
 	}
 }

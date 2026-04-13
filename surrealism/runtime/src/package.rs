@@ -22,6 +22,9 @@ const PNG_SIGNATURE: [u8; 8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 /// Maximum allowed logo size: 256 KiB.
 pub const MAX_LOGO_BYTES: usize = 256 * 1024;
 
+/// Default aggregate size limit for attached filesystem entries: 100 MiB.
+pub const DEFAULT_MAX_FS_BYTES: u64 = 100 * 1024 * 1024;
+
 /// Verify that the WASM bytes represent a component (not a core module).
 fn verify_component(wasm: &[u8]) -> SurrealismResult<()> {
 	if wasm.len() < 8 || wasm[..8] != COMPONENT_PREAMBLE {
@@ -94,6 +97,10 @@ pub struct UnpackOptions<'a> {
 	pub temp_base: Option<&'a Path>,
 	/// Prefix for the temp directory name (e.g. `SURREAL_MODFS_ns_db_mod_`).
 	pub temp_prefix: &'a str,
+	/// Maximum aggregate size in bytes for attached filesystem entries.
+	/// Defaults to [`DEFAULT_MAX_FS_BYTES`] (100 MiB). Configurable via
+	/// `SURREAL_SURREALISM_MAX_FS_BYTES` in server deployments.
+	pub max_fs_bytes: u64,
 }
 
 impl Default for UnpackOptions<'_> {
@@ -101,6 +108,7 @@ impl Default for UnpackOptions<'_> {
 		Self {
 			temp_base: None,
 			temp_prefix: "SURREAL_MODFS_local_",
+			max_fs_bytes: DEFAULT_MAX_FS_BYTES,
 		}
 	}
 }
@@ -183,6 +191,7 @@ impl SurrealismPackage {
 		let mut exports: Option<ExportsManifest> = None;
 		let mut fs_dir: Option<TempDir> = None;
 		let mut logo: Option<Vec<u8>> = None;
+		let mut fs_bytes_total: u64 = 0;
 
 		for entry in archive.entries().prefix_err(|| "Failed to read archive entries")? {
 			let mut entry = entry.prefix_err(|| "Failed to read archive entry")?;
@@ -194,6 +203,7 @@ impl SurrealismPackage {
 				entry
 					.read_to_end(&mut buffer)
 					.prefix_err(|| "Failed to read WASM file from archive")?;
+				verify_component(&buffer)?;
 				wasm = Some(buffer);
 			} else if entry_str == "surrealism/surrealism.toml" {
 				let mut buffer = String::new();
@@ -231,6 +241,19 @@ impl SurrealismPackage {
 					.prefix_err(|| "Failed to read logo.png from archive")?;
 				logo = Some(buffer);
 			} else if entry_str.starts_with(FS_PREFIX) {
+				let entry_size = entry
+					.header()
+					.size()
+					.prefix_err(|| format!("Failed to read tar header for: {entry_str}"))?;
+				fs_bytes_total += entry_size;
+				if fs_bytes_total > opts.max_fs_bytes {
+					return Err(SurrealismError::Other(anyhow::anyhow!(
+						"attached filesystem exceeds {} MiB limit ({} bytes)",
+						opts.max_fs_bytes / (1024 * 1024),
+						opts.max_fs_bytes,
+					)));
+				}
+
 				if fs_dir.is_none() {
 					fs_dir = Some(create_temp_dir(opts)?);
 				}
@@ -256,7 +279,6 @@ impl SurrealismPackage {
 		let exports =
 			exports.ok_or_else(|| anyhow::anyhow!("exports.toml not found in archive"))?;
 
-		verify_component(&wasm)?;
 		if let Some(ref logo_bytes) = logo {
 			verify_logo(logo_bytes)?;
 		}

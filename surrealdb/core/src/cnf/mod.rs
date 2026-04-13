@@ -138,6 +138,22 @@ pub static SURREALISM_MAX_KV_VALUE_BYTES: LazyLock<Option<usize>> = LazyLock::ne
 	})
 });
 
+/// Maximum aggregate size in bytes for attached filesystem entries in `.surli` archives
+/// (default: 100 MiB). Applied when unpacking module archives during `DEFINE MODULE` or
+/// eager loading.
+pub static SURREALISM_MAX_FS_BYTES: LazyLock<u64> = LazyLock::new(|| {
+	std::env::var("SURREAL_SURREALISM_MAX_FS_BYTES")
+		.ok()
+		.and_then(|s| match s.parse::<u64>() {
+			Ok(v) => Some(v),
+			Err(e) => {
+				tracing::warn!("Invalid SURREAL_SURREALISM_MAX_FS_BYTES: {e}");
+				None
+			}
+		})
+		.unwrap_or(100 * 1024 * 1024)
+});
+
 /// Log level for Surrealism module stdout output (default: "debug").
 /// Controls the tracing level at which module stdout is emitted.
 /// Valid values: "trace", "debug", "info", "warn", "error".

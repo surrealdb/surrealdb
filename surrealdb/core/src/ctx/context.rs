@@ -987,6 +987,7 @@ impl Context {
 					#[cfg(not(storage))]
 					temp_base: None,
 					temp_prefix: &temp_prefix,
+					max_fs_bytes: *crate::cnf::SURREALISM_MAX_FS_BYTES,
 				};
 				let package =
 					SurrealismPackage::from_reader(std::io::Cursor::new(surli), &unpack_opts)?;

@@ -199,7 +199,8 @@ impl Runtime {
 		let instance_pre = Self::build(engine_handle.engine(), &wasm)?;
 		tracing::debug!(elapsed = ?t0.elapsed(), "Runtime::new build done");
 
-		let resolved_allow_net = resolve_allow_net(&config.capabilities.allow_net);
+		let resolved_allow_net = resolve_allow_net(&config.capabilities.allow_net)
+			.prefix_err(|| "Failed to resolve allow_net entries")?;
 
 		let controller_slots = Arc::new(Semaphore::new(max_pool_size.max(1)));
 
@@ -281,11 +282,16 @@ impl Runtime {
 	/// (preserving WASM memory / statics from prior runs), otherwise creates and initializes
 	/// a fresh one — waiting on [`Semaphore`] if `max_pool_size` controllers are already checked
 	/// out. The supplied context is installed before returning.
+	///
+	/// The semaphore permit is acquired **before** checking the pool so that a
+	/// popped controller is never outstanding without a matching permit.
 	#[tracing::instrument(skip_all)]
 	pub async fn acquire_controller(
 		&self,
 		context: Box<dyn InvocationContext>,
 	) -> SurrealismResult<Controller> {
+		let permit = self.acquire_slot().await?;
+
 		let pooled = {
 			let mut pool = self.pool.lock();
 			let size = pool.len();
@@ -301,11 +307,6 @@ impl Runtime {
 		match pooled {
 			Some(mut ctrl) => {
 				tracing::debug!("acquire_controller: reusing pooled controller");
-				let permit = self.controller_slots.clone().acquire_owned().await.map_err(|_| {
-					SurrealismError::Other(anyhow::anyhow!(
-						"Surrealism controller semaphore closed (runtime shutdown?)"
-					))
-				})?;
 				ctrl.attach_controller_slot(permit);
 				ctrl.reset_epoch_deadline();
 				ctrl.set_context(context);
@@ -313,7 +314,7 @@ impl Runtime {
 			}
 			None => {
 				tracing::info!("acquire_controller: creating NEW controller + init()");
-				let mut ctrl = self.new_controller(context).await?;
+				let mut ctrl = self.create_controller(context, permit).await?;
 				ctrl.init().await?;
 				Ok(ctrl)
 			}
@@ -377,14 +378,26 @@ impl Runtime {
 		&self,
 		context: Box<dyn InvocationContext>,
 	) -> SurrealismResult<Controller> {
-		let t0 = Instant::now();
+		let permit = self.acquire_slot().await?;
+		self.create_controller(context, permit).await
+	}
 
-		let controller_slot =
-			self.controller_slots.clone().acquire_owned().await.map_err(|_| {
-				SurrealismError::Other(anyhow::anyhow!(
-					"Surrealism controller semaphore closed (runtime shutdown?)"
-				))
-			})?;
+	async fn acquire_slot(&self) -> SurrealismResult<tokio::sync::OwnedSemaphorePermit> {
+		self.controller_slots.clone().acquire_owned().await.map_err(|_| {
+			SurrealismError::Other(anyhow::anyhow!(
+				"Surrealism controller semaphore closed (runtime shutdown?)"
+			))
+		})
+	}
+
+	/// Inner constructor that takes a pre-acquired semaphore permit.
+	#[tracing::instrument(skip_all)]
+	async fn create_controller(
+		&self,
+		context: Box<dyn InvocationContext>,
+		controller_slot: tokio::sync::OwnedSemaphorePermit,
+	) -> SurrealismResult<Controller> {
+		let t0 = Instant::now();
 
 		let fs_root = self.fs_dir.as_ref().map(|fs| fs.path());
 		let stdout_cb = crate::wasi_context::new_stdout_callback();
