@@ -4,8 +4,6 @@ backend = ["mem", "rocksdb", "surrealkv"]
 versioned = true
 timeout = 5000
 
-planner-strategy = ["all-ro"]
-
 [test]
 reason = "VERSION should resolve DEFINE PARAM values from the versioned schema"
 
