@@ -4,8 +4,6 @@ backend = ["mem", "rocksdb", "surrealkv"]
 versioned = true
 timeout = 5000
 
-planner-strategy = ["all-ro"]
-
 [test]
 reason = "VERSION clause should propagate through chained multi-hop graph traversals"
 issue = 7245

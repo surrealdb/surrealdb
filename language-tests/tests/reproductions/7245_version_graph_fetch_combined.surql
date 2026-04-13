@@ -4,8 +4,6 @@ backend = ["mem", "rocksdb", "surrealkv"]
 versioned = true
 timeout = 5000
 
-planner-strategy = ["all-ro"]
-
 [test]
 reason = "VERSION clause should propagate through graph traversal combined with FETCH and nested dereference"
 issue = 7245

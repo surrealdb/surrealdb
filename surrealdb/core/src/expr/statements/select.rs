@@ -85,7 +85,7 @@ impl SelectStatement {
 			.cast_to::<Option<Datetime>>()?
 			.map(|x| x.to_version_stamp(ts_impl.as_ref()))
 			.transpose()?;
-		let opt = Arc::new(opt.clone().with_version(version));
+		let opt = Arc::new(opt.clone().with_version(version.or(opt.version)));
 
 		// Extract the limits
 		iterator.setup_limit(stk, ctx, &opt, &stm).await?;

@@ -4,8 +4,6 @@ backend = ["mem", "rocksdb", "surrealkv"]
 versioned = true
 timeout = 5000
 
-planner-strategy = ["all-ro"]
-
 [test]
 reason = "Inner VERSION clause should override outer VERSION in subqueries"
 
