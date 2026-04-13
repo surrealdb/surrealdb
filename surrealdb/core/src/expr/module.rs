@@ -16,7 +16,7 @@ use crate::expr::{Kind, Value};
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCacheLookup;
 #[cfg(feature = "surrealism")]
-use crate::surrealism::host::Host;
+use crate::surrealism::host::{Host, module_allow_net_targets};
 use crate::val::File;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -320,7 +320,15 @@ async fn run_on_runtime(
 
 	let module_name =
 		format!("{}::{}", runtime.config().meta.organisation, runtime.config().meta.name,);
-	let host = Box::new(Host::new(ctx, opt, doc, runtime.kv_store().clone(), module_name));
+	let module_net_targets = Arc::new(module_allow_net_targets(&runtime.config().capabilities));
+	let host = Box::new(Host::new(
+		ctx,
+		opt,
+		doc,
+		runtime.kv_store().clone(),
+		module_name,
+		module_net_targets,
+	));
 	let mut controller = runtime.acquire_controller(host).await?;
 
 	let ctx_timeout = ctx.timeout();

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -26,6 +27,11 @@ pub(crate) struct Host {
 	pub(crate) doc: Option<CursorDoc>,
 	kv: Arc<BTreeMapStore>,
 	module_name: String,
+	/// Parsed [`NetTarget`]s from the module's `allow_net` strings (hostnames, IPs, CIDRs).
+	/// HTTP/`run()` checks use these names — not load-time DNS expansion — so a shared IP does
+	/// not imply every hostname on that IP is allowed. WASI still uses
+	/// [`Runtime::resolved_allow_net`].
+	module_net_targets: Arc<HashSet<NetTarget>>,
 }
 
 impl Host {
@@ -35,6 +41,7 @@ impl Host {
 		doc: Option<&CursorDoc>,
 		kv: Arc<BTreeMapStore>,
 		module_name: String,
+		module_net_targets: Arc<HashSet<NetTarget>>,
 	) -> Self {
 		Self {
 			stk: TreeStack::new(),
@@ -43,6 +50,7 @@ impl Host {
 			doc: doc.cloned(),
 			kv,
 			module_name,
+			module_net_targets,
 		}
 	}
 
@@ -52,10 +60,33 @@ impl Host {
 	/// bounds, so here we only need to restrict downward.
 	fn module_context(&self, config: &SurrealismConfig) -> Context {
 		let mut ctx = Context::new(&self.ctx);
-		let scoped = module_scoped_capabilities(&ctx.get_capabilities(), &config.capabilities);
+		let scoped = module_scoped_capabilities(
+			&ctx.get_capabilities(),
+			&config.capabilities,
+			&self.module_net_targets,
+		);
 		ctx.add_capabilities(Arc::new(scoped));
 		ctx
 	}
+}
+
+/// Parse the module's `allow_net` entries as [`NetTarget`] (same strings as in config).
+pub(crate) fn module_allow_net_targets(module: &SurrealismCapabilities) -> HashSet<NetTarget> {
+	module
+		.allow_net
+		.iter()
+		.filter_map(|n| match NetTarget::from_str(n) {
+			Ok(t) => Some(t),
+			Err(e) => {
+				tracing::warn!(
+					pattern = %n,
+					error = %e,
+					"Ignoring unparseable network target pattern"
+				);
+				None
+			}
+		})
+		.collect()
 }
 
 /// Narrow the server's `Capabilities` to only what the module declares.
@@ -63,6 +94,7 @@ impl Host {
 fn module_scoped_capabilities(
 	server: &Capabilities,
 	module: &SurrealismCapabilities,
+	module_net_targets: &Arc<HashSet<NetTarget>>,
 ) -> Capabilities {
 	let mut caps = server.clone();
 
@@ -97,22 +129,7 @@ fn module_scoped_capabilities(
 	if module.allow_net.is_empty() {
 		caps = caps.with_network_targets(Targets::None);
 	} else {
-		let targets = module
-			.allow_net
-			.iter()
-			.filter_map(|n| match NetTarget::from_str(n) {
-				Ok(t) => Some(t),
-				Err(e) => {
-					tracing::warn!(
-						pattern = %n,
-						error = %e,
-						"Ignoring unparseable network target pattern"
-					);
-					None
-				}
-			})
-			.collect();
-		caps = caps.with_network_targets(Targets::Some(targets));
+		caps = caps.with_network_targets(Targets::Some((**module_net_targets).clone()));
 	}
 
 	caps

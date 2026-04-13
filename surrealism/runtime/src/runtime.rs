@@ -3,7 +3,9 @@
 //! # Architecture
 //!
 //! - **`Runtime`**: Compiled WASM component. Thread-safe, shareable (`Arc<Runtime>`). Compile once,
-//!   instantiate many times. Holds a pool of initialized Controllers for reuse.
+//!   instantiate many times. Holds a pool of initialized Controllers for reuse. A Tokio semaphore
+//!   caps **total** live controllers (idle pool plus in-flight); `max_pool_size` is both that cap
+//!   and the maximum idle pool size when returning controllers.
 //!
 //! - **`Controller`**: Per-execution instance. Single-threaded. Can be reused across invocations by
 //!   swapping the host context between calls, preserving WASM linear memory (statics, heap).
@@ -45,6 +47,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use surrealism_types::err::{PrefixErr, SurrealismError, SurrealismResult};
+use tokio::sync::Semaphore;
 use wasmtime::*;
 use web_time::Instant;
 
@@ -54,6 +57,7 @@ use crate::epoch::{self, EngineHandle};
 use crate::exports::ExportsManifest;
 use crate::host::{InvocationContext, implement_host_functions};
 use crate::kv::BTreeMapStore;
+use crate::net_allow::{ResolvedNetAllow, resolve_allow_net};
 use crate::package::{AttachedFs, SurrealismPackage};
 use crate::store::StoreData;
 
@@ -69,10 +73,13 @@ pub struct Runtime {
 	/// Holds the extracted filesystem alive for the lifetime of the runtime.
 	/// When present, its root is mounted as a read-only preopened dir for WASM modules.
 	fs_dir: Option<AttachedFs>,
-	/// Pool of initialized, reusable controllers (capped at `max_pool_size`).
+	/// Pool of initialized, reusable controllers (retention capped at `max_pool_size`).
 	/// Controllers in the pool have a NullContext and have already run init().
 	/// Uses `parking_lot::Mutex` for non-poisoning, lower-overhead locking.
 	pool: parking_lot::Mutex<Vec<Controller>>,
+	/// Bounds total live `Controller` instances (in pool + checked out). Each controller holds an
+	/// [`OwnedSemaphorePermit`](tokio::sync::OwnedSemaphorePermit) until dropped.
+	controller_slots: Arc<Semaphore>,
 	/// Function signatures loaded from the exports manifest at build time.
 	exports: ExportsManifest,
 	/// Per-module KV store shared across all invocations. Persists for the
@@ -85,6 +92,8 @@ pub struct Runtime {
 	/// Effective per-invocation execution time limit from module config.
 	/// Combined with context timeout and server cap at invoke time.
 	module_execution_time: Option<Duration>,
+	/// `allow_net` resolved once at load (DNS, etc.); shared by WASI and core capabilities.
+	resolved_allow_net: Arc<Vec<ResolvedNetAllow>>,
 }
 
 impl fmt::Debug for Runtime {
@@ -188,6 +197,10 @@ impl Runtime {
 		let instance_pre = Self::build(engine_handle.engine(), &wasm)?;
 		tracing::debug!(elapsed = ?t0.elapsed(), "Runtime::new build done");
 
+		let resolved_allow_net = resolve_allow_net(&config.capabilities.allow_net);
+
+		let controller_slots = Arc::new(Semaphore::new(max_pool_size.max(1)));
+
 		Ok(Self {
 			engine_handle,
 			instance_pre,
@@ -195,11 +208,13 @@ impl Runtime {
 			wasm_size,
 			fs_dir: fs,
 			pool: parking_lot::Mutex::new(Vec::new()),
+			controller_slots,
 			exports,
 			kv_store,
 			max_pool_size,
 			max_memory_bytes,
 			module_execution_time,
+			resolved_allow_net,
 		})
 	}
 
@@ -217,6 +232,11 @@ impl Runtime {
 	/// Returns the module configuration.
 	pub fn config(&self) -> &SurrealismConfig {
 		&self.config
+	}
+
+	/// Resolved `allow_net` from module load (same snapshot used for WASI socket filtering).
+	pub fn resolved_allow_net(&self) -> Arc<Vec<ResolvedNetAllow>> {
+		self.resolved_allow_net.clone()
 	}
 
 	/// Compute the maximum epoch delta that won't overflow when wasmtime adds
@@ -257,7 +277,8 @@ impl Runtime {
 
 	/// Acquire a controller ready for invocation. Reuses a pooled controller if available
 	/// (preserving WASM memory / statics from prior runs), otherwise creates and initializes
-	/// a fresh one. The supplied context is installed before returning.
+	/// a fresh one — waiting on [`Semaphore`] if `max_pool_size` instances already exist.
+	/// The supplied context is installed before returning.
 	#[tracing::instrument(skip_all)]
 	pub async fn acquire_controller(
 		&self,
@@ -346,9 +367,16 @@ impl Runtime {
 	) -> SurrealismResult<Controller> {
 		let t0 = Instant::now();
 
+		let controller_slot =
+			self.controller_slots.clone().acquire_owned().await.map_err(|_| {
+				SurrealismError::Other(anyhow::anyhow!(
+					"Surrealism controller semaphore closed (runtime shutdown?)"
+				))
+			})?;
+
 		let fs_root = self.fs_dir.as_ref().map(|fs| fs.path());
 		let (wasi_ctx, table) =
-			crate::wasi_context::build(fs_root, &self.config.capabilities.allow_net)?;
+			crate::wasi_context::build(fs_root, self.resolved_allow_net.clone())?;
 		tracing::debug!(elapsed = ?t0.elapsed(), "new_controller: wasi_context::build");
 
 		let mut limits_builder = StoreLimitsBuilder::new();
@@ -416,6 +444,7 @@ impl Runtime {
 			init_fn,
 			self.module_execution_time,
 			self.engine_handle.epoch_counter().clone(),
+			controller_slot,
 		))
 	}
 }

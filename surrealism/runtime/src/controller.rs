@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use surrealism_types::args::Args;
 use surrealism_types::err::{SurrealismError, SurrealismResult};
+use tokio::sync::OwnedSemaphorePermit;
 use wasmtime::*;
 use web_time::Instant;
 
@@ -43,6 +44,8 @@ pub struct Controller {
 	module_execution_time: Option<Duration>,
 	/// Shared epoch counter from the global engine, used to compute safe epoch deltas.
 	epoch_counter: Arc<std::sync::atomic::AtomicU64>,
+	/// Held until this controller is dropped; bounds total live instances with the runtime pool.
+	_controller_slot: OwnedSemaphorePermit,
 }
 
 impl fmt::Debug for Controller {
@@ -64,6 +67,7 @@ impl Controller {
 		init_fn: Option<component::Func>,
 		module_execution_time: Option<Duration>,
 		epoch_counter: Arc<std::sync::atomic::AtomicU64>,
+		controller_slot: OwnedSemaphorePermit,
 	) -> Self {
 		Self {
 			store,
@@ -76,6 +80,7 @@ impl Controller {
 			init_fn,
 			module_execution_time,
 			epoch_counter,
+			_controller_slot: controller_slot,
 		}
 	}
 
