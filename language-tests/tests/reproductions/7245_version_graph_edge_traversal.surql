@@ -20,6 +20,9 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "'OK'"
 
 [[test.results]]

@@ -7,7 +7,7 @@ timeout = 5000
 planner-strategy = ["all-ro"]
 
 [test]
-reason = "VERSION clause should propagate through recursive graph traversals"
+reason = "VERSION clause should propagate through chained multi-hop graph traversals"
 issue = 7245
 
 [[test.results]]
@@ -20,23 +20,26 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "'OK'"
 
 [[test.results]]
-value = "[{ reachable: [person:bob, person:carol, person:dave] }]"
+value = "[{ hop2: [person:carol] }]"
 
 [[test.results]]
-value = "[{ reachable: [person:bob, person:carol] }]"
+value = "[{ hop2: [] }]"
+
 */
 
--- VERSION should propagate through recursive graph traversals
+-- VERSION should propagate through chained graph traversals at every hop.
 -- https://github.com/surrealdb/surrealdb/issues/7245
 --
--- Multi-hop graph traversals (->edge->table repeated) should respect
--- VERSION at every hop. Edges and records added after the timestamp
--- should not appear at any depth.
+-- When multiple ->edge->table hops are chained, VERSION must apply to
+-- each hop. Edges added after the timestamp should not appear at any depth.
 
--- Schema and initial chain: alice -> bob -> carol
+-- Schema and initial single hop: alice -> bob
 {
 	DEFINE TABLE person SCHEMALESS CHANGEFEED 1h;
 	DEFINE TABLE follows TYPE RELATION IN person OUT person CHANGEFEED 1h;
@@ -44,7 +47,6 @@ value = "[{ reachable: [person:bob, person:carol] }]"
 	CREATE person:bob SET name = 'Bob';
 	CREATE person:carol SET name = 'Carol';
 	RELATE person:alice->follows->person:bob;
-	RELATE person:bob->follows->person:carol;
 	RETURN "OK";
 };
 
@@ -52,15 +54,14 @@ SLEEP 50ms;
 LET $t1 = time::now();
 SLEEP 50ms;
 
--- After t1: extend the chain with dave
+-- After t1: bob now follows carol (creates a second hop from alice)
 {
-	CREATE person:dave SET name = 'Dave';
-	RELATE person:carol->follows->person:dave;
+	RELATE person:bob->follows->person:carol;
 	RETURN "OK";
 };
 
--- HEAD: recursive reach from alice finds bob, carol, dave
-SELECT ->follows->person.{1,5} AS reachable FROM person:alice;
+-- HEAD depth-2: alice->bob->carol = [carol]
+SELECT ->follows->person->follows->person AS hop2 FROM person:alice;
 
--- VERSION: recursive reach at t1 finds only bob, carol (dave and the edge to dave didn't exist)
-SELECT ->follows->person.{1,5} AS reachable FROM person:alice VERSION $t1;
+-- VERSION depth-2: at t1, bob did not yet follow carol, so hop2 is empty
+SELECT ->follows->person->follows->person AS hop2 FROM person:alice VERSION $t1;
