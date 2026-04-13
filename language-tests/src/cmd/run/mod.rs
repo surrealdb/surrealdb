@@ -99,6 +99,13 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 				return false
 			}
 
+
+		if let Some(x) = &x.case.config.config.test.importing_version
+			&& !x.matches(&core_version){
+				return false
+			}
+
+
 		for i in x.imports.iter() {
 			if let Some(x) = &i.config.config.test.version &&
 				!x.matches(&core_version){
