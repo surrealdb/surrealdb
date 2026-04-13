@@ -496,7 +496,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the INSERT statement when the table has to be created
 		{
-			let (_, ds) = new_ds("test", "test", auth_enabled).await.unwrap();
+			let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 			// Define additional namespaces/databases for cross-namespace tests
 			ds.execute(
@@ -511,7 +511,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let res = resp.remove(0).output();
 
 			if should_succeed {
-				assert!(res.is_ok() && res.unwrap() != Value::Array(Array::new()), "{}", msg);
+				assert!(res.unwrap() != Value::Array(Array::new()), "{}", msg);
 			} else if res.is_ok() {
 				assert!(res.unwrap() == Value::Array(Array::new()), "{}", msg);
 			} else {
@@ -528,7 +528,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the INSERT statement when the table already exists
 		{
-			let (_, ds) = new_ds("test", "test", auth_enabled).await.unwrap();
+			let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 			// Define additional namespaces/databases for cross-namespace tests
 			ds.execute(

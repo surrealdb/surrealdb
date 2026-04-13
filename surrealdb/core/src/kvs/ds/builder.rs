@@ -5,6 +5,8 @@ use std::time::Duration;
 use anyhow::Result;
 use async_channel::Sender;
 use tokio::sync::Notify;
+#[cfg(feature = "jwks")]
+use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -13,6 +15,8 @@ use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
 use crate::cnf::dynamic::DynamicConfiguration;
 use crate::dbs::Capabilities;
+#[cfg(feature = "jwks")]
+use crate::iam::jwks::JwksCache;
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::index::IndexBuilder;
@@ -107,7 +111,7 @@ impl Builder {
 	///   logged when a query is slow.
 	/// - `param_deny`: Parameter names that should never be logged. This list always takes
 	///   precedence over `param_allow`.
-	pub fn with_slog_log(
+	pub fn with_slow_log(
 		mut self,
 		timeout: Duration,
 		allowed_params: Vec<String>,

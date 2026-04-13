@@ -7,12 +7,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::channel::mpsc::Receiver;
 use futures::stream::FuturesUnordered;
 use opentelemetry::Context as TelemetryContext;
+use surrealdb_core::channel::Receiver;
 #[cfg(feature = "graphql")]
 use surrealdb_core::gql::NotificationRouter;
-use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::{DbResponse, DbResult};
 use surrealdb_types::Notification;
 use tokio::sync::RwLock;

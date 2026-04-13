@@ -5,12 +5,7 @@ use std::time::{Duration, Instant};
 mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
-use rust_decimal::Decimal;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::syn;
-use surrealdb_types::{Geometry, Number, Value};
-
-use crate::helpers::skip_ok;
 
 #[tokio::test]
 async fn script_function_module_os() -> Result<()> {

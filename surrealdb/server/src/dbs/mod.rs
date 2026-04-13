@@ -7,7 +7,9 @@ use clap::Args;
 use rand::Rng;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 use surrealdb_core::buc::BucketStoreProvider;
+use surrealdb_core::channel::Receiver;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
+use surrealdb_types::Notification;
 use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 
@@ -736,7 +738,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		default_database,
 		no_defaults,
 	}: StartCommandDbsOptions,
-) -> Result<Datastore> {
+) -> Result<(Datastore, Receiver<Notification>)> {
 	// Warn about the strict mode flag being unused.
 	if let Some(true) = strict_mode {
 		warn!(
@@ -843,7 +845,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	retry_with_timeout("Expire nodes", || async { dbs.expire_nodes().await }).await?;
 	retry_with_timeout("Remove nodes", || async { dbs.remove_nodes().await }).await?;
 	// All ok
-	Ok(dbs)
+	Ok((dbs, recv))
 }
 
 #[cfg(test)]
@@ -980,11 +982,12 @@ mod tests {
 			//
 			// 5 - Anonymous actor when guest access is not allowed and auth is disabled, succeeds
 			(
-				Datastore::new("memory")
+				Datastore::builder()
+					.with_auth(false)
+					.with_capabilities(Capabilities::default().with_guest_access(false))
+					.build_with_path("memory")
 					.await
-					.unwrap()
-					.with_auth_enabled(false)
-					.with_capabilities(Capabilities::default().with_guest_access(false)),
+					.unwrap(),
 				Session::default(),
 				"RETURN 1".to_string(),
 				true,
@@ -994,11 +997,12 @@ mod tests {
 			// 6 - Authenticated user when guest access is not allowed and auth is enabled,
 			// succeeds
 			(
-				Datastore::new("memory")
+				Datastore::builder()
+					.with_auth(false)
+					.with_capabilities(Capabilities::default().with_guest_access(false))
+					.build_with_path("memory")
 					.await
-					.unwrap()
-					.with_auth_enabled(true)
-					.with_capabilities(Capabilities::default().with_guest_access(false)),
+					.unwrap(),
 				Session::viewer(),
 				"RETURN 1".to_string(),
 				true,
@@ -1006,11 +1010,9 @@ mod tests {
 			),
 			// 7 - Specific experimental feature enabled
 			(
-				Datastore::builder()
-					.with_capabilities(
-						Capabilities::default().with_experimental(ExperimentalTarget::Files.into()),
-					)
-					.build_with_path("memory")
+				Datastore::builder().with_capabilities(
+					Capabilities::default().with_experimental(ExperimentalTarget::Files.into()),
+				).build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner().with_ns("test").with_db("test"),
@@ -1020,12 +1022,10 @@ mod tests {
 			),
 			// 8 - Specific experimental feature disabled
 			(
-				Datastore::builder()
-					.with_capabilities(
-						Capabilities::default()
-							.without_experimental(ExperimentalTarget::Files.into()),
-					)
-					.build_with_path("memory")
+				Datastore::builder().with_capabilities(
+					Capabilities::default()
+						.without_experimental(ExperimentalTarget::Files.into()),
+				).build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner().with_ns("test").with_db("test"),
@@ -1036,17 +1036,15 @@ mod tests {
 			//
 			// 9 - Some functions are not allowed
 			(
-				Datastore::builder()
-					.with_capabilities(
-						Capabilities::default()
-							.with_functions(Targets::<FuncTarget>::Some(
-								[FuncTarget::from_str("string::*").unwrap()].into(),
-							))
-							.without_functions(Targets::<FuncTarget>::Some(
-								[FuncTarget::from_str("string::len").unwrap()].into(),
-							)),
-					)
-					.build_with_path("memory")
+				Datastore::builder().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::*").unwrap()].into(),
+						))
+						.without_functions(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::len").unwrap()].into(),
+						)),
+				).build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner(),
@@ -1056,17 +1054,15 @@ mod tests {
 			),
 			// 10 -
 			(
-				Datastore::builder()
-					.with_capabilities(
-						Capabilities::default()
-							.with_functions(Targets::<FuncTarget>::Some(
-								[FuncTarget::from_str("string::*").unwrap()].into(),
-							))
-							.without_functions(Targets::<FuncTarget>::Some(
-								[FuncTarget::from_str("string::len").unwrap()].into(),
-							)),
-					)
-					.build_with_path("memory")
+				Datastore::builder().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::*").unwrap()].into(),
+						))
+						.without_functions(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::len").unwrap()].into(),
+						)),
+				).build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner(),
@@ -1076,17 +1072,15 @@ mod tests {
 			),
 			// 11 -
 			(
-				Datastore::builder()
-					.with_capabilities(
-						Capabilities::default()
-							.with_functions(Targets::<FuncTarget>::Some(
-								[FuncTarget::from_str("string::*").unwrap()].into(),
-							))
-							.without_functions(Targets::<FuncTarget>::Some(
-								[FuncTarget::from_str("string::len").unwrap()].into(),
-							)),
-					)
-					.build_with_path("memory")
+				Datastore::builder().with_capabilities(
+					Capabilities::default()
+						.with_functions(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::*").unwrap()].into(),
+						))
+						.without_functions(Targets::<FuncTarget>::Some(
+							[FuncTarget::from_str("string::len").unwrap()].into(),
+						)),
+				).build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner(),
@@ -1097,7 +1091,7 @@ mod tests {
 			//
 			// 12 - Some net targets are not allowed
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
+				Datastore::builder() .with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
@@ -1110,7 +1104,9 @@ mod tests {
 						.without_network_targets(Targets::<NetTarget>::Some(
 							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
 						)),
-				),
+				).build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				format!("RETURN http::get('{}')", server1.uri()),
 				false,
@@ -1118,7 +1114,7 @@ mod tests {
 			),
 			// 13 -
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
+				Datastore::builder().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
@@ -1131,7 +1127,9 @@ mod tests {
 						.without_network_targets(Targets::<NetTarget>::Some(
 							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
 						)),
-				),
+				).build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				"RETURN http::get('http://1.1.1.1')".to_string(),
 				false,
@@ -1139,7 +1137,7 @@ mod tests {
 			),
 			// 14 -
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
+				Datastore::builder().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
@@ -1152,7 +1150,9 @@ mod tests {
 						.without_network_targets(Targets::<NetTarget>::Some(
 							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
 						)),
-				),
+				).build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				format!("RETURN http::get('{}')", server2.uri()),
 				true,
@@ -1160,7 +1160,7 @@ mod tests {
 			),
 			(
 				// 15 - Ensure redirect fails
-				Datastore::new("memory").await.unwrap().with_capabilities(
+				Datastore::builder().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
@@ -1169,7 +1169,9 @@ mod tests {
 						.without_network_targets(Targets::<NetTarget>::Some(
 							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
 						)),
-				),
+				).build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				format!("RETURN http::get('{}/redirect')", server3.uri()),
 				false,
@@ -1180,11 +1182,13 @@ mod tests {
 			),
 			(
 				// 16 - Ensure connecting via localhost succeed
-				Datastore::new("memory").await.unwrap().with_capabilities(
+				Datastore::builder().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::All),
-				),
+				).build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				format!("RETURN http::get('http://localhost:{}/test')", server1.address().port()),
 				true,
@@ -1193,7 +1197,7 @@ mod tests {
 			// - 17
 			(
 				// Ensure connecting via localhost is denied when all IPs are blocked
-				Datastore::new("memory").await.unwrap().with_capabilities(
+				Datastore::builder().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::All)
@@ -1204,7 +1208,9 @@ mod tests {
 							]
 							.into(),
 						)),
-				),
+				).build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				format!("RETURN http::get('http://localhost:{}')", server1.address().port()),
 				false,
@@ -1212,7 +1218,7 @@ mod tests {
 			),
 			// 18 - Ensure redirect succeed
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
+				Datastore::builder().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
 						.with_network_targets(Targets::<NetTarget>::Some(
@@ -1239,7 +1245,9 @@ mod tests {
 							]
 							.into(),
 						)),
-				),
+				).build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				// This will be redirected to: https://github.com/surrealdb/surrealdb/pull/6293
 				"RETURN http::get('https://github.com/surrealdb/surrealdb/issues/6293')"

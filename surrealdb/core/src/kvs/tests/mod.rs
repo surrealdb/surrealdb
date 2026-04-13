@@ -170,7 +170,7 @@ mod tikv {
 		// Setup the TiKV datastore
 		let ds = Datastore::builder()
 			.with_id(id)
-			.build_with_factory_path(&path, CommunityComposer())
+			.build_with_factory_path(path, CommunityComposer())
 			.await
 			.unwrap();
 		// Clear any previous test entries

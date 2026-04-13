@@ -494,10 +494,11 @@ impl SurrealRouter {
 pub async fn init<F: RouterFactory>(
 	opt: &Config,
 	ds: Arc<Datastore>,
+	recv: Receiver<Notification>,
 	ct: CancellationToken,
 ) -> Result<()> {
 	// Build the fully-configured router
-	let surreal = SurrealRouter::build::<F>(opt, ds, ct).await?;
+	let surreal = SurrealRouter::build::<F>(opt, ds, recv, ct).await?;
 
 	// Get a new server handler
 	let handle = Handle::new();
