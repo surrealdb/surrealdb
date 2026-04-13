@@ -14,6 +14,10 @@ pub fn build(
 	allow_net: Arc<Vec<ResolvedNetAllow>>,
 ) -> Result<(WasiCtx, ResourceTable)> {
 	let mut builder = WasiCtxBuilder::new();
+	// TODO: Guest WASI stdio (`println!`, C printf, etc.) is wired to the host process fds here,
+	// so output bypasses `Host::stdout` / `Host::stderr` WIT imports in `host.rs`, which attach
+	// `module` / `ns` / `db` to traces. A future fix is custom `OutputStream` implementations that
+	// forward bytes through the same structured logging path as those imports.
 	builder.inherit_stdout().inherit_stderr();
 
 	if allow_net.is_empty() {

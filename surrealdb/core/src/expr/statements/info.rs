@@ -494,12 +494,13 @@ async fn get_module_exports(
 		ModuleExecutable::Surrealism(s) => {
 			if let Ok(bucket) = ctx.get_bucket_store(*ns, *db, &s.bucket).await {
 				let key = ObjectKey::new(s.key.clone());
-				if let Ok(Some(bytes)) = bucket.get(&key).await {
-					if let Ok(manifest) = surrealism_runtime::package::exports_manifest_from_reader(
-						std::io::Cursor::new(bytes),
-					) {
-						return Some(surrealism_exports_manifest_to_value(&manifest));
-					}
+				if let Ok(Some(bytes)) = bucket.get(&key).await
+					&& let Ok(manifest) =
+						surrealism_runtime::package::exports_manifest_from_reader(
+							std::io::Cursor::new(bytes),
+						)
+				{
+					return Some(surrealism_exports_manifest_to_value(&manifest));
 				}
 			}
 
