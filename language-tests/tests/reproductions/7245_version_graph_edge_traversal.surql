@@ -66,10 +66,10 @@ SLEEP 50ms;
 };
 
 -- Query 1: current state — both edges visible
-SELECT ->knows->person.name AS friends FROM person:alice;
+SELECT array::sort(->knows->person.name) AS friends FROM person:alice;
 
 -- Query 2: VERSION should traverse only edges that existed at $t1
-SELECT ->knows->person.name AS friends FROM person:alice VERSION $t1;
+SELECT array::sort(->knows->person.name) AS friends FROM person:alice VERSION $t1;
 
 -- Query 3: sanity check — VERSION works for direct fields
 SELECT name FROM person:alice VERSION $t1;
