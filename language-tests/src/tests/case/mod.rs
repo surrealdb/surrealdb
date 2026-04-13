@@ -24,6 +24,7 @@ pub struct Origin{
 
 
 /// A single test case, which might produce multiple test runs depending on configuration.
+#[derive(Debug)]
 pub struct TestCase {
 	pub id: CaseId,
 	pub origin: Arc<Origin>,

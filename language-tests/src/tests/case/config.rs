@@ -8,6 +8,7 @@ use anyhow::{bail, ensure, Context, Result};
 
 use crate::tests::schema::TestConfig;
 
+#[derive(Debug)]
 pub struct CaseConfig{
 	/// The toml document from which the config is serialized,
 	/// Is non if no config was found.
@@ -74,11 +75,11 @@ impl<'a> Parser<'a> {
 				let start = parser.offset();
 
 				let end = loop{
+					let offset = parser.offset();
+
 					let Some(x) = parser.next() else {
 						bail!("Test case config was not closed")
 					};
-
-					let offset = parser.offset();
 
 					if x == '*' && parser.eat('/'){
 						break offset

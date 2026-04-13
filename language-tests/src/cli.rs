@@ -73,8 +73,8 @@ impl<'de> Deserialize<'de> for Backend{
     where
         D: serde::Deserializer<'de> {
 
-		let s = <&str>::deserialize(deserializer)?;
-		match s {
+		let s = String::deserialize(deserializer)?;
+		match s.as_str() {
 			"mem" => Ok(Backend::Memory),
 			"rocksdb" => Ok(Backend::RocksDb),
 			"surrealkv" => Ok(Backend::SurrealKv),

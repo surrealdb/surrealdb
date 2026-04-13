@@ -125,7 +125,7 @@ impl Builder{
 		let async_event_trigger = Arc::new(Notify::new());
 		let tf = TransactionFactory::new(async_event_trigger.clone(), builder);
 		let id = self.id.unwrap_or_else(Uuid::new_v4);
-		let capabilities = Arc::new(Capabilities::default());
+		let capabilities = Arc::new(self.capabilities);
 		#[cfg(feature = "http")]
 		let http_client = Arc::new(
 			HttpClient::new(capabilities.clone()).context("Could not create http client")?,

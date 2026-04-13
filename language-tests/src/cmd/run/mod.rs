@@ -146,8 +146,10 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		}
 	}
 
+
 	// when the report channel quits we can be sure we are done. since the report task has quit
 	// meaning the test tasks have all quit.
+	std::mem::drop(report_send);
 	while let Some(report) = report_recv.recv().await {
 		let grade = report.grade();
 		progress.finish_item(report.run.id, grade).unwrap();

@@ -57,6 +57,7 @@ impl CreateInfo {
 
 		let allows_live = cap.allows_live_query_notifications();
 
+
 		let builder = Datastore::builder()
 			.with_capabilities(cap)
 			.with_auth(true);
@@ -277,7 +278,7 @@ impl Provisioner {
 
 		let (send, recv) = mpsc::channel(num_jobs);
 		for _ in 0..num_jobs {
-			let ds = info.produce_ds(false, Capabilities::all()).await?;
+			let ds = info.produce_ds(false, Capabilities::all().with_experimental(Targets::All)).await?;
 			send.try_send(ds).unwrap();
 		}
 		let (grade_send, grade_recv) = mpsc::channel(num_jobs);
@@ -310,7 +311,7 @@ impl Provisioner {
 			}
 		}else{
 			let capabilities = match &env.capabilities{
-				BoolOr::Bool(true) => Capabilities::all(),
+				BoolOr::Bool(true) => Capabilities::all().with_experimental(Targets::All),
 				BoolOr::Bool(false) => Capabilities::none(),
 				BoolOr::Value(x) => core_capabilities_from_test_config(x),
 			};

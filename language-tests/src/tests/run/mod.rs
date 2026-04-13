@@ -4,11 +4,13 @@ use anyhow::Error;
 
 use crate::{cli::Backend, tests::{case::{CaseSet, TestCase}, schema::NewPlannerStrategyConfig, TestLoadError}};
 
+#[derive(Debug)]
 pub struct TestRunConfig{
 	pub planner_config: NewPlannerStrategyConfig,
 	pub backend: Backend,
 }
 
+#[derive(Debug)]
 pub struct CaseImports{
 	pub case: Arc<TestCase>,
 	pub imports: Vec<Arc<TestCase>>,
@@ -18,6 +20,7 @@ pub struct CaseImports{
 pub struct TestRunId(usize);
 
 /// A single instance of test being run with a given configuration of datastore.
+#[derive(Debug)]
 pub struct TestRun{
 	pub id: TestRunId,
 	pub case: Arc<CaseImports>,
