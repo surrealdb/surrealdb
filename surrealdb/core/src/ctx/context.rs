@@ -1004,14 +1004,20 @@ impl Context {
 				let server_max_kv_entries = *crate::cnf::SURREALISM_MAX_KV_ENTRIES;
 				let server_max_kv_value_bytes = *crate::cnf::SURREALISM_MAX_KV_VALUE_BYTES;
 
-				let runtime = Arc::new(Runtime::new(
-					package,
-					server_pool_size,
-					server_max_memory,
-					server_max_execution_time,
-					server_max_kv_entries,
-					server_max_kv_value_bytes,
-				)?);
+				let runtime = tokio::task::spawn_blocking(move || {
+					Runtime::new(
+						package,
+						server_pool_size,
+						server_max_memory,
+						server_max_execution_time,
+						server_max_kv_entries,
+						server_max_kv_value_bytes,
+					)
+				})
+				.await
+				.map_err(|e| anyhow::anyhow!("WASM compile task aborted: {e}"))?
+				.map_err(|e| anyhow::anyhow!("{e}"))?;
+				let runtime = Arc::new(runtime);
 
 				let module_display_name: Arc<str> = format!("{org}::{name}").into();
 				let module_net_targets = Arc::new(module_allow_net_targets(&module_caps));

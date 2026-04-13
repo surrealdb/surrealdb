@@ -128,6 +128,34 @@ fn create_temp_dir(opts: &UnpackOptions<'_>) -> SurrealismResult<TempDir> {
 	})
 }
 
+/// Read only `surrealism/exports.toml` from a `.surli` (zstd tar) archive without loading WASM,
+/// config, or attached filesystem — avoids JIT compilation when only export metadata is needed.
+pub fn exports_manifest_from_reader<R: Read>(reader: R) -> SurrealismResult<ExportsManifest> {
+	let zstd_decoder =
+		Decoder::new(BufReader::new(reader)).prefix_err(|| "Failed to create zstd decoder")?;
+	let mut archive = Archive::new(zstd_decoder);
+
+	for entry in archive.entries().prefix_err(|| "Failed to read archive entries")? {
+		let mut entry = entry.prefix_err(|| "Failed to read archive entry")?;
+		let entry_path = entry.path().prefix_err(|| "Failed to get entry path")?;
+		let entry_str = entry_path.to_string_lossy().to_string();
+
+		if entry_str == "surrealism/exports.toml" {
+			let mut buffer = String::new();
+			entry
+				.read_to_string(&mut buffer)
+				.prefix_err(|| "Failed to read exports file from archive")?;
+			return ExportsManifest::parse(&buffer).prefix_err(|| "Failed to parse exports.toml");
+		}
+
+		// Discard this member's payload without buffering large entries (e.g. mod.wasm) in memory.
+		std::io::copy(&mut entry, &mut std::io::sink())
+			.prefix_err(|| format!("Failed to skip archive entry: {entry_str}"))?;
+	}
+
+	Err(SurrealismError::Other(anyhow::anyhow!("surrealism/exports.toml not found in archive")))
+}
+
 impl SurrealismPackage {
 	pub fn from_file(file: PathBuf) -> SurrealismResult<Self> {
 		if file.extension().and_then(|s| s.to_str()) != Some("surli") {

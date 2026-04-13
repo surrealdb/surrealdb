@@ -442,31 +442,9 @@ async fn system() -> Value {
 }
 
 #[cfg(feature = "surrealism")]
-async fn get_module_exports(
-	ctx: &FrozenContext,
-	ns: &crate::catalog::NamespaceId,
-	db: &crate::catalog::DatabaseId,
-	executable: &crate::catalog::ModuleExecutable,
-) -> Option<Value> {
-	use crate::catalog::ModuleExecutable;
-	use crate::surrealism::cache::SurrealismCacheLookup;
-
-	let lookup = match executable {
-		ModuleExecutable::Surrealism(s) => SurrealismCacheLookup::File(ns, db, &s.bucket, &s.key),
-		ModuleExecutable::Silo(s) => {
-			SurrealismCacheLookup::Silo(&s.organisation, &s.package, s.major, s.minor, s.patch)
-		}
-	};
-
-	let runtime = match ctx.get_surrealism_runtime(lookup).await {
-		Ok(r) => r,
-		Err(e) => {
-			tracing::trace!("Could not load module runtime for exports: {e}");
-			return None;
-		}
-	};
-
-	let exports = runtime.exports();
+fn surrealism_exports_manifest_to_value(
+	exports: &surrealism_runtime::exports::ExportsManifest,
+) -> Value {
 	let values: Vec<Value> = exports
 		.functions
 		.iter()
@@ -498,7 +476,56 @@ async fn get_module_exports(
 		})
 		.collect();
 
-	Some(Value::Array(values.into()))
+	Value::Array(values.into())
+}
+
+#[cfg(feature = "surrealism")]
+async fn get_module_exports(
+	ctx: &FrozenContext,
+	ns: &crate::catalog::NamespaceId,
+	db: &crate::catalog::DatabaseId,
+	executable: &crate::catalog::ModuleExecutable,
+) -> Option<Value> {
+	use crate::buc::store::ObjectKey;
+	use crate::catalog::ModuleExecutable;
+	use crate::surrealism::cache::SurrealismCacheLookup;
+
+	match executable {
+		ModuleExecutable::Surrealism(s) => {
+			if let Ok(bucket) = ctx.get_bucket_store(*ns, *db, &s.bucket).await {
+				let key = ObjectKey::new(s.key.clone());
+				if let Ok(Some(bytes)) = bucket.get(&key).await {
+					if let Ok(manifest) = surrealism_runtime::package::exports_manifest_from_reader(
+						std::io::Cursor::new(bytes),
+					) {
+						return Some(surrealism_exports_manifest_to_value(&manifest));
+					}
+				}
+			}
+
+			let lookup = SurrealismCacheLookup::File(ns, db, &s.bucket, &s.key);
+			let runtime = match ctx.get_surrealism_runtime(lookup).await {
+				Ok(r) => r,
+				Err(e) => {
+					tracing::trace!("Could not load module runtime for exports: {e}");
+					return None;
+				}
+			};
+			Some(surrealism_exports_manifest_to_value(runtime.exports()))
+		}
+		ModuleExecutable::Silo(s) => {
+			let lookup =
+				SurrealismCacheLookup::Silo(&s.organisation, &s.package, s.major, s.minor, s.patch);
+			let runtime = match ctx.get_surrealism_runtime(lookup).await {
+				Ok(r) => r,
+				Err(e) => {
+					tracing::trace!("Could not load module runtime for exports: {e}");
+					return None;
+				}
+			};
+			Some(surrealism_exports_manifest_to_value(runtime.exports()))
+		}
+	}
 }
 
 /// Process module definitions into structured Values, enriching each with

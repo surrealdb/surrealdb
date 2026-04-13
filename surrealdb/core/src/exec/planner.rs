@@ -195,10 +195,19 @@ impl<'ctx> Planner<'ctx> {
 			return Ok(false);
 		};
 		let mod_name = format!("mod::{module}");
-		let val = txn
-			.get_db_module(db_def.namespace_id, db_def.database_id, &mod_name)
-			.await
-			.map_err(|e| Error::Internal(e.to_string()))?;
+		let val = match txn.get_db_module(db_def.namespace_id, db_def.database_id, &mod_name).await
+		{
+			Ok(v) => v,
+			Err(e) => {
+				if let Some(Error::MdNotFound {
+					..
+				}) = e.downcast_ref::<Error>()
+				{
+					return Ok(false);
+				}
+				return Err(Error::Internal(e.to_string()));
+			}
+		};
 		let executable: ModuleExecutable = val.executable.clone().into();
 		// The planner's self.ctx does not carry a transaction (the executor
 		// sets it after planning). Derive a context with the planner's txn

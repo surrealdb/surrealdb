@@ -1130,10 +1130,19 @@ impl Datastore {
 		let total = lookups.len();
 		debug!(target: TARGET, count = total, "Surrealism eager load: loading modules");
 
+		let concurrency =
+			std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8).max(2).min(16);
+		let load_sem = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
+
 		let mut join_set = tokio::task::JoinSet::new();
 		for lookup in lookups {
 			let ctx = ctx.clone();
+			let load_sem = load_sem.clone();
 			join_set.spawn(async move {
+				let _permit = load_sem
+					.acquire_owned()
+					.await
+					.expect("Surrealism eager load semaphore must not be closed");
 				let cache_lookup = SurrealismCacheLookup::File(
 					&lookup.ns_id,
 					&lookup.db_id,
