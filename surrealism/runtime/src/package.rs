@@ -186,7 +186,18 @@ impl SurrealismPackage {
 						.prefix_err(|| "Failed to parse exports.toml")?,
 				);
 			} else if entry_str == "surrealism/logo.png" {
-				let mut buffer = Vec::new();
+				let declared = entry
+					.header()
+					.size()
+					.prefix_err(|| "Failed to read surrealism/logo.png tar header")?;
+				if declared > MAX_LOGO_BYTES as u64 {
+					return Err(SurrealismError::Other(anyhow::anyhow!(
+						"surrealism/logo.png is too large ({} bytes, max {} KiB)",
+						declared,
+						MAX_LOGO_BYTES / 1024
+					)));
+				}
+				let mut buffer = Vec::with_capacity(declared as usize);
 				entry
 					.read_to_end(&mut buffer)
 					.prefix_err(|| "Failed to read logo.png from archive")?;

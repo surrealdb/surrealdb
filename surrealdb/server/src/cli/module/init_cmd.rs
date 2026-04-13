@@ -4,8 +4,9 @@ use std::{env, fs};
 
 use anyhow::Result;
 use dialoguer::Input;
+use semver::Version;
 use surrealism_runtime::PrefixErr;
-use surrealism_runtime::config::Target;
+use surrealism_runtime::config::{AbiVersion, SurrealismConfig, SurrealismMeta, Target};
 
 const SURREALISM_VERSION: &str = surrealism_runtime::SDK_VERSION;
 const SURREALDB_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -236,18 +237,18 @@ fn add(a: i64, b: i64) -> i64 {
 // ---------------------------------------------------------------------------
 
 fn write_surrealism_toml(path: &Path, target: Target, org: &str, name: &str) -> Result<()> {
-	let toml = format!(
-		r#"target = "{target}"
-
-[package]
-organisation = "{org}"
-name = "{name}"
-version = "1.0.0"
-"#,
-		target = target,
-		org = org,
-		name = name,
-	);
+	let config = SurrealismConfig {
+		target,
+		meta: SurrealismMeta {
+			organisation: org.to_string(),
+			name: name.to_string(),
+			version: Version::new(1, 0, 0),
+		},
+		capabilities: Default::default(),
+		abi: AbiVersion::CURRENT,
+		attach: Default::default(),
+	};
+	let toml = config.to_toml().prefix_err(|| "Failed to serialize surrealism.toml")?;
 
 	fs::write(path.join("surrealism.toml"), toml)
 		.prefix_err(|| "Failed to write surrealism.toml")?;

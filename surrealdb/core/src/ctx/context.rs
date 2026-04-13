@@ -44,7 +44,9 @@ use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
 use crate::sql::expression::convert_public_value_to_internal;
 #[cfg(feature = "surrealism")]
-use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup};
+use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup, SurrealismCachedModule};
+#[cfg(feature = "surrealism")]
+use crate::surrealism::host::module_allow_net_targets;
 use crate::types::{PublicNotification, PublicVariables};
 use crate::val::Value;
 
@@ -912,7 +914,6 @@ impl Context {
 				#[cfg(target_family = "wasm")]
 				let targets = target.resolve()?;
 				for t in &targets {
-					// For each IP address resolved, check it is allowed
 					match_any_deny_net(t)?;
 				}
 				trace!("Capabilities allowed outgoing network connection, target: '{target}'");
@@ -947,10 +948,10 @@ impl Context {
 	}
 
 	#[cfg(feature = "surrealism")]
-	pub(crate) async fn get_surrealism_runtime(
+	pub(crate) async fn get_surrealism_module(
 		&self,
 		lookup: SurrealismCacheLookup<'_>,
-	) -> Result<Arc<Runtime>> {
+	) -> Result<SurrealismCachedModule> {
 		if !self.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
 			bail!(
 				"Failed to get surrealism runtime: Experimental capability `surrealism` is not enabled"
@@ -990,8 +991,11 @@ impl Context {
 				let package =
 					SurrealismPackage::from_reader(std::io::Cursor::new(surli), &unpack_opts)?;
 
-				self.get_capabilities()
-					.validate_surrealism_capabilities(package.config.capabilities.clone())?;
+				let module_caps = package.config.capabilities.clone();
+				self.get_capabilities().validate_surrealism_capabilities(module_caps.clone())?;
+
+				let org = package.config.meta.organisation.clone();
+				let name = package.config.meta.name.clone();
 
 				let server_pool_size = *crate::cnf::SURREALISM_MAX_POOL_SIZE;
 				let server_max_memory = *crate::cnf::SURREALISM_MAX_MEMORY;
@@ -1009,9 +1013,24 @@ impl Context {
 					server_max_kv_value_bytes,
 				)?);
 
-				Ok(runtime)
+				let module_display_name: Arc<str> = format!("{org}::{name}").into();
+				let module_net_targets = Arc::new(module_allow_net_targets(&module_caps));
+
+				Ok(SurrealismCachedModule {
+					runtime,
+					module_display_name,
+					module_net_targets,
+				})
 			})
 			.await
+	}
+
+	#[cfg(feature = "surrealism")]
+	pub(crate) async fn get_surrealism_runtime(
+		&self,
+		lookup: SurrealismCacheLookup<'_>,
+	) -> Result<Arc<Runtime>> {
+		Ok(self.get_surrealism_module(lookup).await?.runtime)
 	}
 }
 

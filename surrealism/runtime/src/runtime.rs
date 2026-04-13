@@ -4,8 +4,10 @@
 //!
 //! - **`Runtime`**: Compiled WASM component. Thread-safe, shareable (`Arc<Runtime>`). Compile once,
 //!   instantiate many times. Holds a pool of initialized Controllers for reuse. A Tokio semaphore
-//!   caps **total** live controllers (idle pool plus in-flight); `max_pool_size` is both that cap
-//!   and the maximum idle pool size when returning controllers.
+//!   caps **checked-out** controllers (in-flight use). Idle controllers in the pool **release**
+//!   their semaphore permits so waiters can proceed; permits are re-acquired when a pooled
+//!   controller is checked out again. `max_pool_size` bounds the pool size and the maximum
+//!   concurrent instances.
 //!
 //! - **`Controller`**: Per-execution instance. Single-threaded. Can be reused across invocations by
 //!   swapping the host context between calls, preserving WASM linear memory (statics, heap).
@@ -77,8 +79,8 @@ pub struct Runtime {
 	/// Controllers in the pool have a NullContext and have already run init().
 	/// Uses `parking_lot::Mutex` for non-poisoning, lower-overhead locking.
 	pool: parking_lot::Mutex<Vec<Controller>>,
-	/// Bounds total live `Controller` instances (in pool + checked out). Each controller holds an
-	/// [`OwnedSemaphorePermit`](tokio::sync::OwnedSemaphorePermit) until dropped.
+	/// Bounds concurrent **in-use** `Controller` instances. Permits are held only while a
+	/// controller is actively checked out; idle pooled controllers release their permits.
 	controller_slots: Arc<Semaphore>,
 	/// Function signatures loaded from the exports manifest at build time.
 	exports: ExportsManifest,
@@ -277,8 +279,8 @@ impl Runtime {
 
 	/// Acquire a controller ready for invocation. Reuses a pooled controller if available
 	/// (preserving WASM memory / statics from prior runs), otherwise creates and initializes
-	/// a fresh one — waiting on [`Semaphore`] if `max_pool_size` instances already exist.
-	/// The supplied context is installed before returning.
+	/// a fresh one — waiting on [`Semaphore`] if `max_pool_size` controllers are already checked
+	/// out. The supplied context is installed before returning.
 	#[tracing::instrument(skip_all)]
 	pub async fn acquire_controller(
 		&self,
@@ -299,6 +301,12 @@ impl Runtime {
 		match pooled {
 			Some(mut ctrl) => {
 				tracing::debug!("acquire_controller: reusing pooled controller");
+				let permit = self.controller_slots.clone().acquire_owned().await.map_err(|_| {
+					SurrealismError::Other(anyhow::anyhow!(
+						"Surrealism controller semaphore closed (runtime shutdown?)"
+					))
+				})?;
+				ctrl.attach_controller_slot(permit);
 				ctrl.reset_epoch_deadline();
 				ctrl.set_context(context);
 				Ok(ctrl)
@@ -320,6 +328,10 @@ impl Runtime {
 	/// potentially inconsistent instance state.
 	pub fn release_controller(&self, mut controller: Controller) {
 		controller.clear_context();
+		// Idle pool slots must not hold semaphore permits, or `acquire_owned` starves once the
+		// pool fills even though controllers are available (see controller pool + semaphore
+		// design).
+		drop(controller.take_controller_slot());
 		let mut pool = self.pool.lock();
 		if pool.len() < self.max_pool_size {
 			tracing::debug!(

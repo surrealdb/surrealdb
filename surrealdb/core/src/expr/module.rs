@@ -1,6 +1,3 @@
-#[cfg(feature = "surrealism")]
-use std::sync::Arc;
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
@@ -16,7 +13,9 @@ use crate::expr::{Kind, Value};
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCacheLookup;
 #[cfg(feature = "surrealism")]
-use crate::surrealism::host::{Host, module_allow_net_targets};
+use crate::surrealism::cache::SurrealismCachedModule;
+#[cfg(feature = "surrealism")]
+use crate::surrealism::host::Host;
 use crate::val::File;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -147,8 +146,8 @@ impl SurrealismExecutable {
 		check_surrealism_enabled(ctx)?;
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let lookup = SurrealismCacheLookup::File(&ns, &db, &self.0.bucket, &self.0.key);
-		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-		run_on_runtime(runtime, ctx, opt, doc, args, sub).await
+		let cached = ctx.get_surrealism_module(lookup).await?;
+		run_on_runtime(cached, ctx, opt, doc, args, sub).await
 	}
 }
 
@@ -253,8 +252,8 @@ impl SiloExecutable {
 			self.minor,
 			self.patch,
 		);
-		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-		run_on_runtime(runtime, ctx, opt, doc, args, sub).await
+		let cached = ctx.get_surrealism_module(lookup).await?;
+		run_on_runtime(cached, ctx, opt, doc, args, sub).await
 	}
 }
 
@@ -304,7 +303,7 @@ fn signature_from_runtime(
 
 #[cfg(feature = "surrealism")]
 async fn run_on_runtime(
-	runtime: Arc<surrealism_runtime::runtime::Runtime>,
+	cached: SurrealismCachedModule,
 	ctx: &FrozenContext,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
@@ -318,9 +317,12 @@ async fn run_on_runtime(
 		args.into_iter().map(|x| x.try_into()).collect();
 	let args = args?;
 
-	let module_name =
-		format!("{}::{}", runtime.config().meta.organisation, runtime.config().meta.name,);
-	let module_net_targets = Arc::new(module_allow_net_targets(&runtime.config().capabilities));
+	let SurrealismCachedModule {
+		runtime,
+		module_display_name,
+		module_net_targets,
+	} = cached;
+	let module_name = module_display_name.as_ref().to_string();
 	let host = Box::new(Host::new(
 		ctx,
 		opt,

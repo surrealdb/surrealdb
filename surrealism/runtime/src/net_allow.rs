@@ -1,8 +1,7 @@
 //! Resolve `allow_net` strings once at module load time.
 //!
 //! DNS lookups run here (sync, on the thread loading the module — typically not on a Tokio
-//! worker). Results are shared by the WASI socket filter and SurrealDB capability narrowing
-//! so both paths use the same frozen IP / IP:port allowlist semantics.
+//! worker). Used to build the outbound socket allowlist for WASI (`parse_filters`).
 
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;

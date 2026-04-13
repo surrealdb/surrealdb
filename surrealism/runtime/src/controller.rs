@@ -44,8 +44,10 @@ pub struct Controller {
 	module_execution_time: Option<Duration>,
 	/// Shared epoch counter from the global engine, used to compute safe epoch deltas.
 	epoch_counter: Arc<std::sync::atomic::AtomicU64>,
-	/// Held until this controller is dropped; bounds total live instances with the runtime pool.
-	_controller_slot: OwnedSemaphorePermit,
+	/// While [`None`], this controller is idle in the pool and does **not** consume a slot on
+	/// [`Runtime`](crate::runtime::Runtime)'s controller semaphore. While [`Some`], the permit
+	/// counts toward the concurrent-instance cap.
+	controller_slot: Option<OwnedSemaphorePermit>,
 }
 
 impl fmt::Debug for Controller {
@@ -80,8 +82,20 @@ impl Controller {
 			init_fn,
 			module_execution_time,
 			epoch_counter,
-			_controller_slot: controller_slot,
+			controller_slot: Some(controller_slot),
 		}
+	}
+
+	/// Attach a semaphore permit after taking this controller from the idle pool.
+	pub(crate) fn attach_controller_slot(&mut self, permit: OwnedSemaphorePermit) {
+		debug_assert!(self.controller_slot.is_none(), "controller already holds a slot permit");
+		self.controller_slot = Some(permit);
+	}
+
+	/// Remove and return the slot permit so the controller can sit in the pool without holding
+	/// capacity on the runtime semaphore.
+	pub(crate) fn take_controller_slot(&mut self) -> Option<OwnedSemaphorePermit> {
+		self.controller_slot.take()
 	}
 
 	/// Replace the invocation context. Used when reusing a pooled controller

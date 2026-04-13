@@ -13,9 +13,8 @@
 //! Modules opt in via `strict_timeout` in `surrealism.toml` (default `true`
 //! → guarded engine). Compute-heavy trusted modules can set it to `false`.
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
-use std::thread::JoinHandle;
 use std::time::Duration;
 
 use wasmtime::*;
@@ -27,15 +26,14 @@ pub const EPOCH_TICK_MS: u64 = 10;
 static SHARED: OnceLock<SharedEngines> = OnceLock::new();
 
 /// Holds both engine variants and the epoch ticker for the guarded engine.
+///
+/// The ticker thread runs for the process lifetime; we intentionally do not stop it on shutdown
+/// (the static [`OnceLock`] never drops). Epoch advancement must continue until exit so in-flight
+/// guarded stores keep meaningful deadlines.
 struct SharedEngines {
 	fast: Engine,
 	guarded: Engine,
 	epoch_counter: Arc<AtomicU64>,
-	ref_count: Arc<AtomicU64>,
-	#[allow(dead_code)]
-	shutdown: Arc<AtomicBool>,
-	#[allow(dead_code)]
-	thread: std::sync::Mutex<Option<JoinHandle<()>>>,
 }
 
 fn base_config() -> Config {
@@ -60,17 +58,14 @@ impl SharedEngines {
 		guarded_cfg.epoch_interruption(true);
 		let guarded = Engine::new(&guarded_cfg).expect("failed to create guarded wasmtime Engine");
 
-		let shutdown = Arc::new(AtomicBool::new(false));
 		let epoch_counter = Arc::new(AtomicU64::new(0));
-		let ref_count = Arc::new(AtomicU64::new(0));
 
-		let flag = shutdown.clone();
 		let counter = epoch_counter.clone();
 		let engine_clone = guarded.clone();
-		let handle = std::thread::Builder::new()
+		std::thread::Builder::new()
 			.name("surrealism-epoch-ticker".into())
 			.spawn(move || {
-				while !flag.load(Ordering::Relaxed) {
+				loop {
 					std::thread::sleep(Duration::from_millis(EPOCH_TICK_MS));
 					counter.fetch_add(1, Ordering::Release);
 					engine_clone.increment_epoch();
@@ -82,9 +77,6 @@ impl SharedEngines {
 			fast,
 			guarded,
 			epoch_counter,
-			ref_count,
-			shutdown,
-			thread: std::sync::Mutex::new(Some(handle)),
 		}
 	}
 }
@@ -115,20 +107,12 @@ impl EngineHandle {
 	}
 }
 
-impl Drop for EngineHandle {
-	fn drop(&mut self) {
-		let shared = SHARED.get().expect("SharedEngines not initialised");
-		shared.ref_count.fetch_sub(1, Ordering::Release);
-	}
-}
-
 /// Obtain a handle to the shared engine.
 ///
 /// - `guarded = true`: epoch-enabled engine, timeout enforcement, higher overhead.
 /// - `guarded = false`: fast engine, no timeout enforcement, zero overhead.
 pub fn shared_engine(guarded: bool) -> EngineHandle {
 	let shared = SHARED.get_or_init(SharedEngines::new);
-	shared.ref_count.fetch_add(1, Ordering::Release);
 	let engine = if guarded {
 		shared.guarded.clone()
 	} else {

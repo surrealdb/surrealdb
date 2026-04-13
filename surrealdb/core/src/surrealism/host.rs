@@ -28,9 +28,9 @@ pub(crate) struct Host {
 	kv: Arc<BTreeMapStore>,
 	module_name: String,
 	/// Parsed [`NetTarget`]s from the module's `allow_net` strings (hostnames, IPs, CIDRs).
-	/// HTTP/`run()` checks use these names — not load-time DNS expansion — so a shared IP does
-	/// not imply every hostname on that IP is allowed. WASI still uses
-	/// [`Runtime::resolved_allow_net`].
+	/// HTTP/`run()` checks use these patterns; WASI outbound filtering uses
+	/// [`Runtime::resolved_allow_net`](surrealism_runtime::runtime::Runtime::resolved_allow_net)
+	/// separately.
 	module_net_targets: Arc<HashSet<NetTarget>>,
 }
 
@@ -266,5 +266,11 @@ impl InvocationContext for Host {
 fn parse_semver(version: &str) -> Result<(u32, u32, u32)> {
 	let v = semver::Version::parse(version)
 		.map_err(|e| anyhow::anyhow!("Invalid semver '{version}': {e}"))?;
-	Ok((v.major as u32, v.minor as u32, v.patch as u32))
+	let major = u32::try_from(v.major)
+		.map_err(|_| anyhow::anyhow!("semver major component too large: {}", v.major))?;
+	let minor = u32::try_from(v.minor)
+		.map_err(|_| anyhow::anyhow!("semver minor component too large: {}", v.minor))?;
+	let patch = u32::try_from(v.patch)
+		.map_err(|_| anyhow::anyhow!("semver patch component too large: {}", v.patch))?;
+	Ok((major, minor, patch))
 }

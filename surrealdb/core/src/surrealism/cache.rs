@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::future::Future;
 use std::hash::Hash;
 use std::sync::Arc;
@@ -7,6 +8,7 @@ use quick_cache::{Equivalent, Weighter};
 use surrealism_runtime::runtime::Runtime;
 
 use crate::catalog::{DatabaseId, NamespaceId};
+use crate::dbs::capabilities::NetTarget;
 
 pub struct SurrealismCache {
 	cache: quick_cache::sync::Cache<SurrealismCacheKey, SurrealismCacheValue, Weight>,
@@ -36,27 +38,34 @@ impl SurrealismCache {
 		&self,
 		lookup: &SurrealismCacheLookup<'_>,
 		compute: F,
-	) -> Result<Arc<Runtime>>
+	) -> Result<SurrealismCachedModule>
 	where
 		F: FnOnce() -> Fut,
-		Fut: Future<Output = Result<Arc<Runtime>>>,
+		Fut: Future<Output = Result<SurrealismCachedModule>>,
 	{
 		// This match is only needed to avoid allocating for the key in the fast path
 		let value = match self.cache.get(lookup) {
-			Some(runtime) => runtime,
+			Some(cached) => cached,
 			None => {
 				let compute = async {
-					let value = SurrealismCacheValue {
-						runtime: compute().await?,
+					let value = compute().await?;
+					let wrapped = SurrealismCacheValue {
+						runtime: value.runtime,
+						module_display_name: value.module_display_name,
+						module_net_targets: value.module_net_targets,
 					};
-					Result::<_, Error>::Ok(value)
+					Result::<_, Error>::Ok(wrapped)
 				};
 
 				self.cache.get_or_insert_async(&lookup.to_key(), compute).await?
 			}
 		};
 
-		Ok(value.runtime)
+		Ok(SurrealismCachedModule {
+			runtime: value.runtime,
+			module_display_name: value.module_display_name,
+			module_net_targets: value.module_net_targets,
+		})
 	}
 }
 
@@ -109,9 +118,21 @@ impl Equivalent<SurrealismCacheKey> for SurrealismCacheLookup<'_> {
 	}
 }
 
+/// Cached surrealism module: compiled runtime plus values derived once from the loaded package.
+#[derive(Clone)]
+pub(crate) struct SurrealismCachedModule {
+	pub runtime: Arc<Runtime>,
+	/// `organisation::name` for logging / host context.
+	pub module_display_name: Arc<str>,
+	/// `allow_net` parsed once as [`NetTarget`]s (same strings as in `surrealism.toml`).
+	pub module_net_targets: Arc<HashSet<NetTarget>>,
+}
+
 #[derive(Clone)]
 pub struct SurrealismCacheValue {
 	pub(crate) runtime: Arc<Runtime>,
+	pub(crate) module_display_name: Arc<str>,
+	pub(crate) module_net_targets: Arc<HashSet<NetTarget>>,
 }
 
 #[derive(Clone)]
