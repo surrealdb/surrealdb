@@ -1,3 +1,10 @@
+/**
+[test]
+
+[[test.results]]
+value = "{ a: 9007199254740991f, b: -9007199254740992f, c: 100000000000000000, d: 9223372036854775808dec }"
+
+*/
 RETURN function() {
 	if(await surrealdb.value(`2147483647`) !== 2147483647){
 		throw new Error(1)

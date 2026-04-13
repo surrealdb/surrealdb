@@ -1,3 +1,10 @@
+/**
+[test]
+
+[[test.results]]
+value = "NONE"
+
+*/
 RETURN function(<bytes> "hello world") {
 	let arg = arguments[0];
 	if (!(arg instanceof Uint8Array)){

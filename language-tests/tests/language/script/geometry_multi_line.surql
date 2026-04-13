@@ -1,3 +1,10 @@
+/**
+[test]
+
+[[test.results]]
+value = "{ type: 'MultiLineString', coordinates: [[[1f, 2f], [3f, 4f]], [[5f, 6f], [7f, 8f]]] }"
+
+*/
 RETURN function() {
 	return {
 		type: "MultiLineString",

@@ -1,3 +1,10 @@
+/**
+[test]
+
+[[test.results]]
+value = "(1f, 2f)"
+
+*/
 RETURN function() {
 	return {
 		type: "Point",

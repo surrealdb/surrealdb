@@ -1,3 +1,10 @@
+/**
+[test]
+
+[[test.results]]
+value = "{ type: 'GeometryCollection', geometries: [(1f, 2f), { type: 'LineString', coordinates: [[3f, 4f], [5f, 6f]] }] }"
+
+*/
 RETURN function() {
 	return {
 		type: "GeometryCollection",

@@ -1,6 +1,13 @@
+/**
+[test]
+
+[[test.results]]
+value = "[1f, 1f]"
+
+*/
 RETURN function() {
-	await Promise.all([
-		surrealdb.query("1")
+	return await Promise.all([
+		surrealdb.query("1"),
 		surrealdb.query("1")
 	])
 }
