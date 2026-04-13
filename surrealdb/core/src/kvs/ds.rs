@@ -1,3 +1,4 @@
+
 #[cfg(not(target_family = "wasm"))]
 use std::collections::HashMap;
 #[cfg(target_family = "wasm")]
@@ -15,7 +16,7 @@ use std::time::Duration;
 #[allow(unused_imports)]
 use anyhow::bail;
 use anyhow::{Context as _, Result, ensure};
-use async_channel::{Receiver, Sender};
+use async_channel::{ Sender};
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use rand::{Rng, thread_rng};
@@ -40,7 +41,6 @@ use crate::api::err::ApiError;
 use crate::api::invocation::process_api_request;
 use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
-use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
 use crate::catalog::providers::{
 	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider,
@@ -89,11 +89,10 @@ use crate::types::{PublicNotification, PublicValue, PublicVariables};
 use crate::val::convert_value_to_public_value;
 use crate::{CommunityComposer, syn};
 
-const TARGET: &str = "surrealdb::core::kvs::ds";
+mod builder;
+pub use builder::Builder;
 
-/// If there are an infinite number of heartbeats, then we want to go
-/// batch-by-batch spread over several checks
-const LQ_CHANNEL_SIZE: usize = 15_000;
+const TARGET: &str = "surrealdb::core::kvs::ds";
 
 /// The role assigned to the initial user created when starting the server with
 /// credentials for the first time
@@ -116,7 +115,7 @@ pub struct Datastore {
 	/// The security and feature capabilities for this datastore.
 	capabilities: Arc<Capabilities>,
 	// Whether this datastore enables live query notifications to subscribers.
-	notification_channel: Option<(Sender<PublicNotification>, Receiver<PublicNotification>)>,
+	notification_channel: Option<Sender<PublicNotification>>,
 	// The index store cache
 	index_stores: IndexStores,
 	// The cross transaction cache
@@ -584,6 +583,9 @@ impl Display for Datastore {
 }
 
 impl Datastore {
+	pub fn builder() -> Builder{
+		Builder::new()
+	}
 	/// Creates a new datastore instance
 	///
 	/// # Examples
@@ -622,63 +624,7 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Self> {
-		Self::new_with_factory(CommunityComposer(), path, CancellationToken::new()).await
-	}
-
-	/// Creates a new datastore instance with a custom transaction builder factory.
-	///
-	/// This allows embedders to provide their own factory implementation for custom
-	/// backend selection or configuration.
-	///
-	/// # Parameters
-	/// - `factory`: Transaction builder factory for backend selection
-	/// - `path`: Database path (e.g., "memory", "surrealkv://path", "tikv://host:port")
-	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
-	///
-	/// # Generic parameters
-	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-	pub async fn new_with_factory<F: TransactionBuilderFactory + BucketStoreProvider + 'static>(
-		composer: F,
-		path: &str,
-		canceller: CancellationToken,
-	) -> Result<Self> {
-		// Initiate the desired datastore
-		let builder = composer.new_transaction_builder(path, canceller).await?;
-		//
-		let buckets = BucketsManager::new(Arc::new(composer));
-		// Set the properties on the datastore
-		Self::new_with_builder(builder, buckets)
-	}
-
-	pub(crate) fn new_with_builder(
-		builder: Box<dyn TransactionBuilder>,
-		buckets: BucketsManager,
-	) -> Result<Self> {
-		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(async_event_trigger.clone(), builder);
-		let id = Uuid::new_v4();
-		Ok(Self {
-			id,
-			transaction_factory: tf.clone(),
-			auth_enabled: false,
-			dynamic_configuration: DynamicConfiguration::default(),
-			slow_log: None,
-			transaction_timeout: None,
-			notification_channel: None,
-			capabilities: Arc::new(Capabilities::default()),
-			index_stores: IndexStores::default(),
-			index_builder: IndexBuilder::new(tf.clone()),
-			#[cfg(feature = "jwks")]
-			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
-			#[cfg(storage)]
-			temporary_directory: None,
-			cache: Arc::new(DatastoreCache::new()),
-			buckets,
-			sequences: Sequences::new(tf, id),
-			#[cfg(feature = "surrealism")]
-			surrealism_cache: Arc::new(SurrealismCache::new()),
-			async_event_trigger,
-		})
+		Builder::new().build_with_path(path).await
 	}
 
 	/// Registers metrics for the current datastore flavor if supported.
@@ -729,37 +675,6 @@ impl Datastore {
 		self
 	}
 
-	/// Specify whether this datastore should enable live query notifications
-	pub fn with_notifications(mut self) -> Self {
-		self.notification_channel = Some(async_channel::bounded(LQ_CHANNEL_SIZE));
-		self
-	}
-
-	/// Set a global query timeout for this Datastore
-	pub fn with_query_timeout(self, duration: Option<Duration>) -> Self {
-		self.dynamic_configuration.set_query_timeout(duration);
-		self
-	}
-
-	/// Set a global slow log configuration
-	///
-	/// Parameters:
-	/// - `duration`: Minimum execution time for a statement to be considered "slow". When `None`,
-	///   slow logging is disabled.
-	/// - `param_allow`: If non-empty, only parameters with names present in this list will be
-	///   logged when a query is slow.
-	/// - `param_deny`: Parameter names that should never be logged. This list always takes
-	///   precedence over `param_allow`.
-	pub fn with_slow_log(
-		mut self,
-		duration: Option<Duration>,
-		param_allow: Vec<String>,
-		param_deny: Vec<String>,
-	) -> Self {
-		self.slow_log = duration.map(|d| SlowLog::new(d, param_allow, param_deny));
-		self
-	}
-
 	/// Set a global transaction timeout for this Datastore
 	pub fn with_transaction_timeout(mut self, duration: Option<Duration>) -> Self {
 		self.transaction_timeout = duration;
@@ -771,17 +686,6 @@ impl Datastore {
 		self.transaction_timeout
 	}
 
-	/// Set whether authentication is enabled for this Datastore
-	pub fn with_auth_enabled(mut self, enabled: bool) -> Self {
-		self.auth_enabled = enabled;
-		self
-	}
-
-	/// Set specific capabilities for this Datastore
-	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
-		self.capabilities = Arc::new(caps);
-		self
-	}
 
 	#[cfg(storage)]
 	/// Set a temporary directory for ordering of large result sets
@@ -2070,9 +1974,7 @@ impl Datastore {
 			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
+		ctx.add_notifications(self.notification_channel.as_ref());
 
 		let txn_type = if val.read_only() {
 			TransactionType::Read
@@ -2108,29 +2010,29 @@ impl Datastore {
 		convert_value_to_public_value(res?)
 	}
 
-	/// Subscribe to live notifications
-	///
-	/// ```rust,no_run
-	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::dbs::Session;
-	/// use anyhow::Error;
-	///
-	/// #[tokio::main]
-	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("memory").await?.with_notifications();
-	///     let ses = Session::owner();
-	/// 	if let Some(channel) = ds.notifications() {
-	///     	while let Ok(v) = channel.recv().await {
-	///     	    println!("Received notification: {v:?}");
-	///     	}
-	/// 	}
-	///     Ok(())
-	/// }
-	/// ```
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub fn notifications(&self) -> Option<Receiver<PublicNotification>> {
-		self.notification_channel.as_ref().map(|v| v.1.clone())
-	}
+	// Subscribe to live notifications
+	//
+	// ```rust,no_run
+	// use surrealdb_core::kvs::Datastore;
+	// use surrealdb_core::dbs::Session;
+	// use anyhow::Error;
+	//
+	// #[tokio::main]
+	// async fn main() -> Result<(),Error> {
+	//     let ds = Datastore::new("memory").await?.with_notifications();
+	//     let ses = Session::owner();
+	// 	if let Some(channel) = ds.notifications() {
+	//     	while let Ok(v) = channel.recv().await {
+	//     	    println!("Received notification: {v:?}");
+	//     	}
+	// 	}
+	//     Ok(())
+	// }
+	// ```
+	//#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	//pub fn notifications(&self) -> Option<Receiver<PublicNotification>> {
+		//self.notification_channel.as_ref().map(|v| v.1.clone())
+	//}
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
@@ -2227,9 +2129,7 @@ impl Datastore {
 			self.surrealism_cache.clone(),
 		)?;
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
+		ctx.add_notifications(self.notification_channel.as_ref());
 		Ok(ctx)
 	}
 
@@ -2503,7 +2403,7 @@ mod test {
 		}
 		let val = stack.enter(|stk| build_query(stk, 1000)).finish();
 
-		let dbs = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+		let dbs = Datastore::builder().with_capabilities(Capabilities::all()).build_with_path("memory").await.unwrap();
 
 		let opt = Options::new(dbs.id(), DynamicConfiguration::default())
 			.with_ns(Some("test".into()))
@@ -2537,10 +2437,13 @@ mod test {
 
 	#[tokio::test]
 	async fn cross_transaction_caching_uuids_updated() -> Result<()> {
-		let ds = Datastore::new("memory")
-			.await?
+		// TODO: Put `15_000` in a global somewhere.
+		let (send,_recv) = crate::channel::bounded(15_000);
+		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all())
-			.with_notifications();
+			.with_notify(send)
+			.build_with_path("memory")
+			.await?;
 		let cache = ds.get_cache();
 		let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 

@@ -3,7 +3,9 @@ use std::fmt::{Display, Formatter};
 
 use clap::builder::{EnumValueParser, PossibleValue};
 use clap::{ArgMatches, Command, ValueEnum, arg, command, value_parser};
+use rust_decimal::serde::str;
 use semver::Version;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ResultsMode {
@@ -32,7 +34,7 @@ impl ValueEnum for ResultsMode {
 	}
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum Backend {
 	Memory,
 	RocksDb,
@@ -64,6 +66,36 @@ impl Display for Backend {
 			Self::TikV => f.write_str("tikv"),
 		}
 	}
+}
+
+impl<'de> Deserialize<'de> for Backend{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de> {
+
+		let s = <&str>::deserialize(deserializer)?;
+		match s {
+			"mem" => Ok(Backend::Memory),
+			"rocksdb" => Ok(Backend::RocksDb),
+			"surrealkv" => Ok(Backend::SurrealKv),
+			"tikv" => Ok(Backend::TikV),
+			_ => Err(<D::Error as serde::de::Error>::custom(format_args!("Invalid backend kind")))
+		}
+    }
+}
+
+impl Serialize for Backend{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer {
+
+		match self {
+			Backend::Memory => serializer.serialize_str("mem"),
+			Backend::RocksDb => serializer.serialize_str("rocksdb"),
+			Backend::SurrealKv => serializer.serialize_str("surrealkv"),
+			Backend::TikV => serializer.serialize_str("tikv"),
+		}
+    }
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
@@ -108,32 +140,6 @@ impl DsVersion {
 		Ok(DsVersion::Path(s.to_string()))
 	}
 }
-
-/*
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum LogLevel {
-	Trace,
-	Debug,
-	Info,
-	Warn,
-	Error,
-}
-
-impl ValueEnum for LogLevel {
-	fn value_variants<'a>() -> &'a [Self] {
-		&[LogLevel::Trace, LogLevel::Debug, LogLevel::Info, LogLevel::Warn, LogLevel::Error]
-	}
-
-	fn to_possible_value(&self) -> Option<PossibleValue> {
-		match self {
-			LogLevel::Trace => Some(PossibleValue::new("trace")),
-			LogLevel::Debug => Some(PossibleValue::new("debug")),
-			LogLevel::Info => Some(PossibleValue::new("info")),
-			LogLevel::Warn => Some(PossibleValue::new("warn")),
-			LogLevel::Error => Some(PossibleValue::new("error")),
-		}
-	}
-}*/
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ColorMode {

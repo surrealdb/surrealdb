@@ -88,9 +88,9 @@ pub async fn get(
 	ctx: &FrozenContext,
 	(uri, Optional(opts)): (Value, Optional<Value>),
 ) -> Result<Value> {
-	let uri = try_as_uri("http::get", uri)?;
-	let opts = try_as_opts("http::get", "The second argument should be an object.", opts)?;
-	crate::fnc::util::http::get(ctx, uri, opts).await
+	let uri = dbg!(try_as_uri("http::get", uri))?;
+	let opts = dbg!(try_as_opts("http::get", "The second argument should be an object.", opts))?;
+	dbg!(crate::fnc::util::http::get(ctx, uri, opts).await)
 }
 
 #[cfg(feature = "http")]

@@ -13,13 +13,19 @@ use surrealdb_core::dbs::{QueryResult, Session};
 use surrealdb_core::iam::{Auth, Level, Role};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
-use surrealdb_types::{Error as TypesError, Number, ToSql, Value};
+use surrealdb_core::channel::{self,Receiver as NotifyReceiver};
+use surrealdb_types::{Error as TypesError, Number, ToSql, Value, Notification};
+use tokio::net::unix::pipe::Receiver;
 
-pub async fn new_ds(ns: &str, db: &str) -> Result<Datastore> {
+pub async fn new_ds(ns: &str, db: &str, auth: bool) -> Result<(NotifyReceiver<Notification>,Datastore)> {
+	let (send,recv) = channel::bounded(15_000);
+
 	let ds =
-		Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications();
+		Datastore::builder().with_capabilities(Capabilities::all()).with_notify(send)
+	.build_with_path("memory").await?
+		;
 	new_ns_db(&ds, ns, db).await?;
-	Ok(ds)
+	Ok((recv,ds))
 }
 
 pub async fn new_ns_db(ds: &Datastore, ns: &str, db: &str) -> Result<()> {
@@ -161,12 +167,14 @@ pub async fn iam_check_cases_impl(
 
 		// Auth enabled
 		{
-			let ds = Datastore::new("memory")
-				.await
-				.unwrap()
+			let (send,_) = channel::bounded(15_000);
+			let ds = Datastore::builder()
 				.with_capabilities(Capabilities::all())
-				.with_notifications()
-				.with_auth_enabled(true);
+				.with_notify(send)
+				.with_auth(true)
+				.build_with_path("memory")
+				.await
+				.unwrap();
 			iam_run_case(
 				test_index as i32,
 				prepare,
@@ -184,12 +192,14 @@ pub async fn iam_check_cases_impl(
 
 		// Auth disabled
 		{
-			let ds = Datastore::new("memory")
-				.await
-				.unwrap()
+			let (send,_) = channel::bounded(15_000);
+			let ds = Datastore::builder()
 				.with_capabilities(Capabilities::all())
-				.with_notifications()
-				.with_auth_enabled(false);
+				.with_notify(send)
+				.with_auth(false)
+				.build_with_path("memory")
+				.await
+				.unwrap();
 			iam_run_case(
 				test_index as i32,
 				prepare,
@@ -219,12 +229,14 @@ pub async fn iam_check_cases_impl(
 					"auth disabled"
 				}
 			);
-			let ds = Datastore::new("memory")
-				.await
-				.unwrap()
+			let (send,_) = channel::bounded(15_000);
+			let ds = Datastore::builder()
 				.with_capabilities(Capabilities::all())
-				.with_notifications()
-				.with_auth_enabled(auth_enabled);
+				.with_notify(send)
+				.with_auth(auth_enabled)
+				.build_with_path("memory")
+				.await
+				.unwrap();
 			let expected_result = if auth_enabled {
 				expected_anonymous_failure_result
 			} else {
@@ -308,6 +320,7 @@ pub fn skip_ok(res: &mut Vec<QueryResult>, skip: usize) -> Result<()> {
 /// - `pos`: The current position in the responses list.
 #[allow(dead_code)]
 pub struct Test {
+	pub notifications: NotifyReceiver<Notification>,
 	pub ds: Datastore,
 	pub session: Session,
 	pub responses: Vec<QueryResult>,
@@ -322,9 +335,10 @@ impl Debug for Test {
 
 impl Test {
 	#[allow(dead_code)]
-	pub async fn new_ds_session(ds: Datastore, session: Session, sql: &str) -> Result<Self> {
+	pub async fn new_ds_session(ds: Datastore,notify: NotifyReceiver<Notification>, session: Session, sql: &str) -> Result<Self> {
 		let responses = ds.execute(sql, &session, None).await?;
 		Ok(Self {
+			notifications: notify,
 			ds,
 			session,
 			responses,
@@ -333,13 +347,13 @@ impl Test {
 	}
 
 	#[allow(dead_code)]
-	pub async fn new_ds(ds: Datastore, sql: &str) -> Result<Self> {
-		Self::new_ds_session(ds, Session::owner().with_ns("test").with_db("test"), sql).await
+	pub async fn new_ds(ds: Datastore,notify: NotifyReceiver<Notification>, sql: &str) -> Result<Self> {
+		Self::new_ds_session(ds, notify,Session::owner().with_ns("test").with_db("test"), sql).await
 	}
 
 	#[allow(dead_code)]
 	pub async fn new_sql(self, sql: &str) -> Result<Self> {
-		Self::new_ds(self.ds, sql).await
+		Self::new_ds(self.ds,self.notifications, sql).await
 	}
 
 	/// Creates a new instance of the `Self` struct with the given SQL query.
@@ -347,7 +361,8 @@ impl Test {
 	/// Panics if an error occurs.#[expect(dead_code)]
 	#[allow(dead_code)]
 	pub async fn new(sql: &str) -> Result<Self> {
-		Self::new_ds(new_ds("test", "test").await?, sql).await
+		let (notify,ds) = new_ds("test", "test",false).await?;
+		Self::new_ds(ds,notify, sql).await
 	}
 
 	/// Simulates restarting the Datastore
@@ -355,7 +370,7 @@ impl Test {
 	/// - Flushing caches (jwks, IndexStore, ...)
 	#[allow(dead_code)]
 	pub async fn restart(self, sql: &str) -> Result<Self> {
-		Self::new_ds(self.ds.restart(), sql).await
+		Self::new_ds(self.ds.restart(),self.notifications, sql).await
 	}
 
 	/// Checks if the number of responses matches the expected size.

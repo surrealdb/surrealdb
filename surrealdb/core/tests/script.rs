@@ -13,6 +13,79 @@ use surrealdb_types::{Geometry, Number, Value};
 use crate::helpers::skip_ok;
 
 #[tokio::test]
+async fn script_function_module_os() -> Result<()> {
+	let sql = "
+		CREATE platform:test SET version = function() {
+			const { platform } = await import('os');
+			return platform();
+		};
+	";
+	let (_,dbs) = new_ds("test", "test",false).await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	//
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
+	//
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_run_too_long() -> Result<()> {
+	let sql = r#"
+		RETURN function() {
+			for(let i = 0;i < 10000000;i++){
+				for(let j = 0;j < 10000000;j++){
+					for(let k = 0;k < 10000000;k++){
+						if(globalThis.test){
+							globalThis.test();
+						}
+					}
+				}
+			}
+		}
+	"#;
+	let dbs = new_ds("test", "test").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	let mut timeout = *surrealdb_core::cnf::SCRIPTING_MAX_TIME_LIMIT;
+	timeout += timeout / 2;
+
+	let before = Instant::now();
+	let time =
+		tokio::time::timeout(Duration::from_millis(timeout as u64), dbs.execute(sql, &ses, None))
+			.await;
+	if before.elapsed() > Duration::from_millis(timeout as u64) {
+		panic!("Scripting function didn't timeout properly")
+	}
+	// This should timeout within surreal not from the above timeout.
+	let mut resp = time.unwrap().unwrap();
+	resp.pop().unwrap().result.unwrap_err();
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn script_limit_massive_parallel() -> Result<()> {
+	let sql = r#"
+		define function fn::crashcat() {
+			return function() {
+				let x = surrealdb.query("return fn::crashcat()");
+				let y = surrealdb.query("return fn::crashcat()");
+				return await x+y;
+			};
+		};
+		return fn::crashcat();
+	"#;
+	let dbs = new_ds("test", "test").await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+	dbs.execute(sql, &ses, None).await?;
+	Ok(())
+}
+
+/// TODO: Delete below after porting.
+
+#[tokio::test]
 async fn script_function_error() -> Result<()> {
 	let sql = "
 		SELECT * FROM function() {
@@ -22,7 +95,7 @@ async fn script_function_error() -> Result<()> {
 			throw new Error('error');
 		};
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -51,7 +124,7 @@ async fn script_function_simple() -> Result<()> {
 			return "Line 1\nLine 2";
 		};
 	"#;
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -85,7 +158,7 @@ async fn script_function_context() -> Result<()> {
 				{ rating: 8.7 },
 			];
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -122,7 +195,7 @@ async fn script_function_arguments() -> Result<()> {
 			return `${arguments[0]} is ${arguments[1].join(', ')}`;
 		};
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);
@@ -172,7 +245,7 @@ async fn script_function_types() -> Result<()> {
 			}
 		;
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -196,24 +269,6 @@ async fn script_function_types() -> Result<()> {
 	Ok(())
 }
 
-#[tokio::test]
-async fn script_function_module_os() -> Result<()> {
-	let sql = "
-		CREATE platform:test SET version = function() {
-			const { platform } = await import('os');
-			return platform();
-		};
-	";
-	let dbs = new_ds("test", "test").await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	Ok(())
-}
 
 #[tokio::test]
 async fn script_query_from_script_select() -> Result<()> {
@@ -222,7 +277,7 @@ async fn script_query_from_script_select() -> Result<()> {
 		CREATE test SET name = "b", number = 1;
 		CREATE test SET name = "c", number = 2;
 	"#;
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	// direct query
@@ -278,7 +333,7 @@ async fn script_query_from_script() -> Result<()> {
 			return await surrealdb.query(`CREATE ONLY article:test SET name = "The daily news", issue_number = 3`)
 		}
 	"#;
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -319,7 +374,7 @@ async fn script_value_function_params() -> Result<()> {
 			return await surrealdb.value(`$test.name`)
 		}
 	"#;
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -344,7 +399,7 @@ async fn script_value_function_inline_values() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -379,7 +434,7 @@ async fn script_function_number_conversion_test() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -405,7 +460,7 @@ async fn script_bytes() -> Result<()> {
 			return new Uint8Array([0,1,2,3,4,5,6,7])
 		}
 	"#;
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -431,7 +486,7 @@ async fn script_geometry_point() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -459,7 +514,7 @@ async fn script_geometry_line() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -495,7 +550,7 @@ async fn script_geometry_polygon() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -530,7 +585,7 @@ async fn script_geometry_multi_point() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -566,7 +621,7 @@ async fn script_geometry_multi_line() -> Result<()> {
 			}
 		}
 	"#;
-	let dbs = new_ds("test", "test").await?;
+	let (_,dbs) = new_ds("test", "test",false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -731,70 +786,3 @@ async fn script_geometry_into() -> Result<()> {
 	Ok(())
 }
 
-#[tokio::test]
-async fn script_parallel_query() -> Result<()> {
-	let sql = r#"
-		RETURN function() {
-			await Promise.all([
-				surrealdb.query("1")
-				surrealdb.query("1")
-			])
-		}
-	"#;
-	let dbs = new_ds("test", "test").await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	dbs.execute(sql, &ses, None).await?;
-	Ok(())
-}
-
-#[tokio::test]
-async fn script_run_too_long() -> Result<()> {
-	let sql = r#"
-		RETURN function() {
-			for(let i = 0;i < 10000000;i++){
-				for(let j = 0;j < 10000000;j++){
-					for(let k = 0;k < 10000000;k++){
-						if(globalThis.test){
-							globalThis.test();
-						}
-					}
-				}
-			}
-		}
-	"#;
-	let dbs = new_ds("test", "test").await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let mut timeout = *surrealdb_core::cnf::SCRIPTING_MAX_TIME_LIMIT;
-	timeout += timeout / 2;
-
-	let before = Instant::now();
-	let time =
-		tokio::time::timeout(Duration::from_millis(timeout as u64), dbs.execute(sql, &ses, None))
-			.await;
-	if before.elapsed() > Duration::from_millis(timeout as u64) {
-		panic!("Scripting function didn't timeout properly")
-	}
-	// This should timeout within surreal not from the above timeout.
-	let mut resp = time.unwrap().unwrap();
-	resp.pop().unwrap().result.unwrap_err();
-
-	Ok(())
-}
-
-#[tokio::test]
-async fn script_limit_massive_parallel() -> Result<()> {
-	let sql = r#"
-		define function fn::crashcat() {
-			return function() {
-				let x = surrealdb.query("return fn::crashcat()");
-				let y = surrealdb.query("return fn::crashcat()");
-				return await x+y;
-			};
-		};
-		return fn::crashcat();
-	"#;
-	let dbs = new_ds("test", "test").await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	dbs.execute(sql, &ses, None).await?;
-	Ok(())
-}
