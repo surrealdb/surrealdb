@@ -8,6 +8,9 @@ value = "'OK'"
 [[test.results]]
 value = "[{ a: item:5, b: { c: d'2025-01-05T00:00:00Z', d: d'2025-01-05T00:00:00Z' } }, { a: item:4, b: { c: d'2025-01-04T00:00:00Z', d: d'2025-01-04T00:00:00Z' } }, { a: item:3, b: { c: d'2025-01-03T00:00:00Z', d: d'2025-01-03T00:00:00Z' } }]"
 
+[[test.results]]
+value = "[d'2025-01-05T00:00:00Z', d'2025-01-04T00:00:00Z', d'2025-01-03T00:00:00Z']"
+
 */
 
 -- Setup: table with nested fields and indexes
@@ -30,3 +33,6 @@ value = "[{ a: item:5, b: { c: d'2025-01-05T00:00:00Z', d: d'2025-01-05T00:00:00
 
 -- Non-grouped: ORDER BY nested alias DESC with LIMIT
 SELECT id AS a, modified AS b.c, nested.deep.modified AS b.d FROM item ORDER BY b.c DESC LIMIT 3;
+
+-- SELECT VALUE with multi-part alias: sort must use the pre-computed alias value
+SELECT VALUE modified AS b.c FROM item ORDER BY b.c DESC LIMIT 3;
