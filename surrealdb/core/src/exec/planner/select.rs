@@ -383,15 +383,13 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		match fields {
 			Fields::Value(selector) => {
-				let input = if !omit.is_empty() {
-					let omit_fields = self.plan_omit(omit).await?;
-					Arc::new(Project::new(input, vec![], omit_fields, true))
-						as Arc<dyn ExecOperator>
+				let omit_fields = if !omit.is_empty() {
+					self.plan_omit(omit).await?
 				} else {
-					input
+					vec![]
 				};
 				let expr = self.physical_expr(selector.expr).await?;
-				Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(ProjectValue::new(input, expr, omit_fields)) as Arc<dyn ExecOperator>)
 			}
 
 			Fields::Select(field_list) => {
@@ -463,15 +461,10 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		match fields {
 			Fields::Value(selector) => {
-				// Apply OMIT before evaluating the VALUE expression so
-				// that omitted fields resolve to NONE, matching the
-				// legacy compute path.
-				let input = if !omit.is_empty() {
-					let omit_fields = self.plan_omit(omit).await?;
-					Arc::new(Project::new(input, vec![], omit_fields, true))
-						as Arc<dyn ExecOperator>
+				let omit_fields = if !omit.is_empty() {
+					self.plan_omit(omit).await?
 				} else {
-					input
+					vec![]
 				};
 				// If the alias was registered for sort (Compute pre-evaluated
 				// it), read the pre-computed field to avoid re-evaluating
@@ -483,10 +476,11 @@ impl<'ctx> Planner<'ctx> {
 				{
 					let idiom = Idiom(vec![crate::expr::part::Part::Field(name.clone())]);
 					let expr = self.physical_expr(Expr::Idiom(idiom)).await?;
-					return Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>);
+					return Ok(Arc::new(ProjectValue::new(input, expr, omit_fields))
+						as Arc<dyn ExecOperator>);
 				}
 				let expr = self.physical_expr(selector.expr).await?;
-				Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(ProjectValue::new(input, expr, omit_fields)) as Arc<dyn ExecOperator>)
 			}
 
 			Fields::Select(ref field_list) => {

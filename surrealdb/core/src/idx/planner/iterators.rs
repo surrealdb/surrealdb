@@ -1333,7 +1333,8 @@ impl UniqueRangeThingIterator {
 		to: Option<(&Value, bool)>,
 	) -> Result<(Vec<u8>, bool)> {
 		let Some((to, inclusive)) = to else {
-			return Ok((Index::prefix_end(ns, db, ix_what, index_id)?, true));
+			// Sentinel boundary key — no real record is stored here.
+			return Ok((Index::prefix_end(ns, db, ix_what, index_id)?, false));
 		};
 		let array = Array::from(vec![to.clone()]);
 		if array.is_any_none_or_null() {
