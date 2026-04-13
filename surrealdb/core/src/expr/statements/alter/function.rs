@@ -9,7 +9,7 @@ use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::expr::{Base, Block, Kind};
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -68,6 +68,9 @@ impl AlterFunctionStatement {
 			AlterKind::Drop => fc.returns = None,
 			AlterKind::None => {}
 		}
+
+		// Recompute auth_limit from the current principal to prevent privilege escalation
+		fc.auth_limit = AuthLimit::new_from_auth(&opt.auth).into();
 
 		let key = crate::key::database::fc::new(ns, db, &self.name);
 		txn.set(&key, &fc, None).await?;

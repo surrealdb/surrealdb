@@ -15,7 +15,7 @@ use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::define::ApiAction;
 use crate::expr::statements::define::config::api::ApiConfig;
 use crate::expr::{Base, Expr, Literal};
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::val::Value;
 
 /// A single `FOR` clause within an `ALTER API` statement.
@@ -131,6 +131,9 @@ impl AlterApiStatement {
 			AlterKind::Drop => ap.comment = None,
 			AlterKind::None => {}
 		}
+
+		// Recompute auth_limit from the current principal to prevent privilege escalation
+		ap.auth_limit = AuthLimit::new_from_auth(opt.auth.as_ref()).into();
 
 		let key = crate::key::database::ap::new(ns, db, &path_name);
 		txn.set(&key, &ap, None).await?;

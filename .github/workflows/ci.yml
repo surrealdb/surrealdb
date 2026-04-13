@@ -59,7 +59,7 @@ jobs:
         run: cargo build --target ${{ matrix.target }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # (Actions must be pinned by commit hash) v4.6.2
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # (Actions must be pinned by commit hash) v7.0.0
         with:
           name: surreal-${{ matrix.name }}
           path: target/${{ matrix.target }}/debug/surreal
@@ -548,7 +548,7 @@ jobs:
 
       - name: Upload language test coverage to Codecov
         if: matrix.engine == 'mem'
-        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # (Actions must be pinned by commit hash) v5.5.1
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # (Actions must be pinned by commit hash) v6.0.0
         with:
           files: language-tests-lcov.info
           fail_ci_if_error: false
@@ -606,7 +606,7 @@ jobs:
           repository: "surrealdb/surrealdb.js"
 
       - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
@@ -615,7 +615,7 @@ jobs:
         run: chmod +x ${{ github.workspace }}/artifacts/surreal
 
       - name: Setup JavaScript
-        uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ matrix.version }}
 
@@ -629,7 +629,7 @@ jobs:
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
       - name: Publish Test Report
-        uses: mikepenz/action-junit-report@49b2ca06f62aa7ef83ae6769a2179271e160d8e4 # v6
+        uses: mikepenz/action-junit-report@bccf2e31636835cf0874589931c4116687171386 # v6.4.0
         if: success() || failure()
         with:
           report_paths: junit.xml
@@ -659,7 +659,7 @@ jobs:
           repository: "surrealdb/surrealdb.go"
 
       - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
@@ -668,7 +668,7 @@ jobs:
         run: chmod +x ${{ github.workspace }}/artifacts/surreal
 
       - name: Setup Golang
-        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version: ${{ matrix.version }}
           check-latest: true
@@ -721,7 +721,7 @@ jobs:
           repository: "surrealdb/surrealdb.py"
 
       - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
@@ -730,12 +730,12 @@ jobs:
         run: chmod +x ${{ github.workspace }}/artifacts/surreal
 
       - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: ${{ matrix.version }}
 
       - name: Setup uv
-        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
         with:
           version: "latest"
           enable-cache: true
@@ -790,7 +790,7 @@ jobs:
           repository: "surrealdb/surrealdb.php"
 
       - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
@@ -799,7 +799,7 @@ jobs:
         run: chmod +x ${{ github.workspace }}/artifacts/surreal
 
       - name: Setup PHP
-        uses: shivammathur/setup-php@cf4cade2721270509d5b1c766ab3549210a39a2a # (Actions must be pinned by commit hash) v2
+        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f # (Actions must be pinned by commit hash) v2.37.0
         with:
           php-version: ${{ matrix.version }}
 
@@ -851,7 +851,7 @@ jobs:
           repository: "surrealdb/surrealdb.net"
 
       - name: Download artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # (Actions must be pinned by commit hash) v4.3.0
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
         with:
           name: surreal-amd64
           path: ${{ github.workspace }}/artifacts
@@ -860,7 +860,7 @@ jobs:
         run: chmod +x ${{ github.workspace }}/artifacts/surreal
 
       - name: Setup dotnet
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # (Actions must be pinned by commit hash) v4.3.1
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # (Actions must be pinned by commit hash) v5.2.0
         with:
           dotnet-version: ${{ matrix.version }}
 

@@ -321,31 +321,24 @@ pub async fn init<
 		file.write_all(&content).unwrap();
 	};
 	// Error and exit the program
-	if let Err(e) = output {
+	let res = if let Err(e) = output {
 		// Output any error
 		error!("{:?}", e);
-		// Drop the log guards
-		for guard in guards {
-			drop(guard);
-		}
-		// Final message
-		if server {
-			println!("Goodbye!");
-		}
 		// Return failure
 		ExitCode::FAILURE
 	} else {
-		// Drop the log guards
-		for guard in guards {
-			drop(guard);
-		}
-		// Final message
-		if server {
-			println!("Goodbye!");
-		}
 		// Return success
 		ExitCode::SUCCESS
+	};
+	// Drop the log guards
+	for guard in guards {
+		drop(guard);
 	}
+	// Final message
+	if server {
+		println!("Goodbye!");
+	}
+	res
 }
 
 /// Check if there is a newer version available.

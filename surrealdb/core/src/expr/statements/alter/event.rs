@@ -10,7 +10,7 @@ use crate::catalog::{EventKind, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::expr::{Base, Expr};
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -66,6 +66,9 @@ impl AlterEventStatement {
 			AlterKind::Drop => ev.kind = EventKind::Sync,
 			AlterKind::None => {}
 		}
+
+		// Recompute auth_limit from the current principal to prevent privilege escalation
+		ev.auth_limit = AuthLimit::new_from_auth(opt.auth.as_ref()).into();
 
 		let key = crate::key::table::ev::new(ns, db, &self.what, ev_name);
 		txn.set(&key, &ev, None).await?;

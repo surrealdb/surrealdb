@@ -82,6 +82,22 @@ who = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
 criteria = "safe-to-deploy"
 delta = "0.2.162 -> 0.2.168"
 
+[[audits.logos]]
+who = "Mees Delzenne <mees.delzenne@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.16.1"
+
+[[audits.logos-codegen]]
+who = "Mees Delzenne <mees.delzenne@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.16.1"
+
+[[audits.logos-derive]]
+who = "Mees Delzenne <mees.delzenne@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.16.1"
+notes = "Tiny crate, just calling code in logos-codegen"
+
 [[audits.md5]]
 who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"

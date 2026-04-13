@@ -607,26 +607,10 @@ impl Iterator {
 					self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, table_name).await?
 				}
 				Expr::Idiom(x) => {
-					// match against what previously would be an edge.
-					if x.len() != 2 {
-						return self
-							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v)
-							.await;
-					}
-
-					let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
-						return self
-							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v)
-							.await;
-					};
-
-					let Part::Lookup(ref lookup) = x[0] else {
-						return self
-							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v)
-							.await;
-					};
-
-					if lookup.alias.is_none()
+					if x.len() == 2
+						&& let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0]
+						&& let Part::Lookup(ref lookup) = x[1]
+						&& lookup.alias.is_none()
 						&& lookup.cond.is_none()
 						&& lookup.group.is_none()
 						&& lookup.limit.is_none()
@@ -635,33 +619,29 @@ impl Iterator {
 						&& lookup.start.is_none()
 						&& lookup.expr.is_none()
 					{
-						// TODO: Do we support `RETURN a:b` here? What do we do when it is not of
-						// the right type?
 						let from = match from.compute(stk, ctx, opt, doc).await {
 							Ok(x) => x,
 							Err(ControlFlow::Err(e)) => return Err(e),
 							Err(_) => bail!(Error::InvalidControlFlow),
-							//
 						};
 						let mut what = Vec::new();
 						for s in lookup.what.iter() {
 							what.push(s.compute(stk, ctx, opt, doc).await?);
 						}
-						// idiom matches the Edges pattern.
-						return self
-							.prepare_lookup(
-								ctx,
-								opt,
-								stm_ctx.stm,
-								doc_ctx,
-								from,
-								lookup.kind.clone(),
-								what,
-							)
-							.await;
+						self.prepare_lookup(
+							ctx,
+							opt,
+							stm_ctx.stm,
+							doc_ctx,
+							from,
+							lookup.kind.clone(),
+							what,
+						)
+						.await?;
+					} else {
+						self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v)
+							.await?;
 					}
-
-					self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v).await?
 				}
 				v => {
 					self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v).await?
