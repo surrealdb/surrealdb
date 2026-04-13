@@ -169,7 +169,7 @@ impl ExecOperator for CountScan {
 
 			// Verify that the table exists.
 			let table_def = db_ctx
-				.get_table_def(&table_name)
+				.get_table_def(&table_name, version)
 				.await
 				.context("Failed to get table")?;
 
@@ -224,7 +224,7 @@ impl ExecOperator for CountScan {
 				// Check for an unconditional COUNT index first (O(deltas) vs O(records))
 				let count_from_index = if version.is_none() {
 					let indexes = db_ctx
-						.get_table_indexes(&table_name)
+						.get_table_indexes(&table_name, version)
 						.await
 						.ok();
 					if let Some(indexes) = indexes {

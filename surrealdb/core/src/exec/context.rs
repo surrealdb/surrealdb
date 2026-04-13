@@ -280,25 +280,33 @@ impl DatabaseContext {
 	/// This avoids repeated `get_tb_by_name` KV roundtrips for the same table
 	/// across multiple scan operators within the same query execution (e.g.,
 	/// repeated record lookups).
+	///
+	/// When `version` is `Some`, the cache is bypassed and the lookup goes
+	/// directly to versioned storage so that the schema matches the point
+	/// in time being queried.
 	pub(crate) async fn get_table_def(
 		&self,
 		table: &crate::val::TableName,
+		version: Option<u64>,
 	) -> anyhow::Result<Option<Arc<crate::catalog::TableDefinition>>> {
 		use crate::catalog::providers::TableProvider;
-		// Check execution-level cache (read lock — concurrent reads allowed)
-		{
+		if version.is_none() {
+			// Check execution-level cache (read lock — concurrent reads allowed)
 			let cache = self.table_def_cache.read().await;
 			if let Some(cached) = cache.get(table) {
 				return Ok(cached.clone());
 			}
 		}
 
-		// Cache miss — look up via the transaction
+		// Cache miss or versioned lookup — go to the transaction
 		let txn = self.txn();
-		let result = txn.get_tb_by_name(&self.ns_ctx.ns.name, &self.db.name, table, None).await?;
+		let result =
+			txn.get_tb_by_name(&self.ns_ctx.ns.name, &self.db.name, table, version).await?;
 
-		// Populate cache (write lock — brief exclusive access)
-		self.table_def_cache.write().await.insert(table.clone(), result.clone());
+		if version.is_none() {
+			// Populate cache (write lock — brief exclusive access)
+			self.table_def_cache.write().await.insert(table.clone(), result.clone());
+		}
 
 		Ok(result)
 	}
@@ -307,27 +315,33 @@ impl DatabaseContext {
 	///
 	/// This avoids repeated `all_tb_indexes` KV roundtrips for the same table
 	/// across multiple DynamicScan operations within the same query execution.
+	///
+	/// When `version` is `Some`, the cache is bypassed for the same reason
+	/// as `get_table_def`.
 	pub(crate) async fn get_table_indexes(
 		&self,
 		table: &crate::val::TableName,
+		version: Option<u64>,
 	) -> anyhow::Result<Arc<[crate::catalog::IndexDefinition]>> {
 		use crate::catalog::providers::TableProvider;
-		// Check execution-level cache (read lock — concurrent reads allowed)
-		{
+		if version.is_none() {
+			// Check execution-level cache (read lock — concurrent reads allowed)
 			let cache = self.index_def_cache.read().await;
 			if let Some(cached) = cache.get(table) {
 				return Ok(Arc::clone(cached));
 			}
 		}
 
-		// Cache miss — look up via the transaction
+		// Cache miss or versioned lookup — go to the transaction
 		let txn = self.txn();
 		let result = txn
-			.all_tb_indexes(self.ns_ctx.ns.namespace_id, self.db.database_id, table, None)
+			.all_tb_indexes(self.ns_ctx.ns.namespace_id, self.db.database_id, table, version)
 			.await?;
 
-		// Populate cache (write lock — brief exclusive access)
-		self.index_def_cache.write().await.insert(table.clone(), Arc::clone(&result));
+		if version.is_none() {
+			// Populate cache (write lock — brief exclusive access)
+			self.index_def_cache.write().await.insert(table.clone(), Arc::clone(&result));
+		}
 
 		Ok(result)
 	}

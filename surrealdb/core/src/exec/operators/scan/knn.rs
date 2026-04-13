@@ -185,7 +185,7 @@ impl ExecOperator for KnnScan {
 				(perm, res.table_def.table_id)
 			} else {
 				let table_def = db_ctx
-					.get_table_def(&table_name)
+					.get_table_def(&table_name, version)
 					.await
 					.context("Failed to get table")?;
 

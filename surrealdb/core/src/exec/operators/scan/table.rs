@@ -200,7 +200,7 @@ impl ExecOperator for TableScan {
 			} else {
 				// Runtime fallback (DynamicScan path or no txn at plan time)
 				let table_def = db_ctx
-					.get_table_def(&table_name)
+					.get_table_def(&table_name, version)
 					.await
 					.context("Failed to get table")?;
 

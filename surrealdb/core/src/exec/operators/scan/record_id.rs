@@ -257,7 +257,8 @@ pub(crate) async fn execute_record_lookup(
 		(perm, fs)
 	} else {
 		// Runtime fallback
-		let table_def = db_ctx.get_table_def(&rid.table).await.context("Failed to get table")?;
+		let table_def =
+			db_ctx.get_table_def(&rid.table, version).await.context("Failed to get table")?;
 
 		if table_def.is_none() {
 			return Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {

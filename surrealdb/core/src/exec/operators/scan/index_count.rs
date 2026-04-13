@@ -189,7 +189,7 @@ impl ExecOperator for IndexCountScan {
 
 			// Verify table exists.
 			let table_def = db_ctx
-				.get_table_def(&table_name)
+				.get_table_def(&table_name, version)
 				.await
 				.context("Failed to get table")?;
 
@@ -238,7 +238,7 @@ impl ExecOperator for IndexCountScan {
 
 			// Look up all indexes for the table (using the execution-level cache).
 			let indexes = db_ctx
-				.get_table_indexes(&table_name)
+				.get_table_indexes(&table_name, version)
 				.await
 				.context("Failed to fetch table indexes")?;
 

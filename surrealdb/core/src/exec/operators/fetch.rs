@@ -293,8 +293,10 @@ pub(crate) async fn process_fetched_record(
 
 	// 1. Table-level permission check (on raw value, before computing fields)
 	if check_perms {
-		let table_def =
-			db_ctx.get_table_def(&rid.table).await.context("Failed to get table definition")?;
+		let table_def = db_ctx
+			.get_table_def(&rid.table, ctx.version_stamp())
+			.await
+			.context("Failed to get table definition")?;
 		let catalog_perm = resolve_select_permission(table_def.as_deref());
 		let select_perm = convert_permission_to_physical(catalog_perm, ctx.ctx())
 			.await

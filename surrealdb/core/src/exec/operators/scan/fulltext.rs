@@ -169,7 +169,7 @@ impl ExecOperator for FullTextScan {
 				res.select_permission(check_perms)
 			} else if check_perms {
 				let table_def = db_ctx
-					.get_table_def(&table_name)
+					.get_table_def(&table_name, version)
 					.await
 					.context("Failed to get table")?;
 
