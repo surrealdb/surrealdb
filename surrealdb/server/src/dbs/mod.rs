@@ -1010,9 +1010,11 @@ mod tests {
 			),
 			// 7 - Specific experimental feature enabled
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default().with_experimental(ExperimentalTarget::Files.into()),
-				).build_with_path("memory")
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default().with_experimental(ExperimentalTarget::Files.into()),
+					)
+					.build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner().with_ns("test").with_db("test"),
@@ -1022,10 +1024,12 @@ mod tests {
 			),
 			// 8 - Specific experimental feature disabled
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default()
-						.without_experimental(ExperimentalTarget::Files.into()),
-				).build_with_path("memory")
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.without_experimental(ExperimentalTarget::Files.into()),
+					)
+					.build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner().with_ns("test").with_db("test"),
@@ -1036,15 +1040,17 @@ mod tests {
 			//
 			// 9 - Some functions are not allowed
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::*").unwrap()].into(),
-						))
-						.without_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::len").unwrap()].into(),
-						)),
-				).build_with_path("memory")
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::*").unwrap()].into(),
+							))
+							.without_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::len").unwrap()].into(),
+							)),
+					)
+					.build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner(),
@@ -1054,15 +1060,17 @@ mod tests {
 			),
 			// 10 -
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::*").unwrap()].into(),
-						))
-						.without_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::len").unwrap()].into(),
-						)),
-				).build_with_path("memory")
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::*").unwrap()].into(),
+							))
+							.without_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::len").unwrap()].into(),
+							)),
+					)
+					.build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner(),
@@ -1072,15 +1080,17 @@ mod tests {
 			),
 			// 11 -
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::*").unwrap()].into(),
-						))
-						.without_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::len").unwrap()].into(),
-						)),
-				).build_with_path("memory")
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::*").unwrap()].into(),
+							))
+							.without_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::len").unwrap()].into(),
+							)),
+					)
+					.build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner(),
@@ -1091,20 +1101,23 @@ mod tests {
 			//
 			// 12 - Some net targets are not allowed
 			(
-				Datastore::builder() .with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::Some(
-							[
-								NetTarget::from_str(&server1.address().to_string()).unwrap(),
-								NetTarget::from_str(&server2.address().to_string()).unwrap(),
-							]
-							.into(),
-						))
-						.without_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
-						)),
-				).build_with_path("memory")
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::Some(
+								[
+									NetTarget::from_str(&server1.address().to_string()).unwrap(),
+									NetTarget::from_str(&server2.address().to_string()).unwrap(),
+								]
+								.into(),
+							))
+							.without_network_targets(Targets::<NetTarget>::Some(
+								[NetTarget::from_str(&server1.address().to_string()).unwrap()]
+									.into(),
+							)),
+					)
+					.build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner(),
@@ -1114,20 +1127,23 @@ mod tests {
 			),
 			// 13 -
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::Some(
-							[
-								NetTarget::from_str(&server1.address().to_string()).unwrap(),
-								NetTarget::from_str(&server2.address().to_string()).unwrap(),
-							]
-							.into(),
-						))
-						.without_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
-						)),
-				).build_with_path("memory")
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::Some(
+								[
+									NetTarget::from_str(&server1.address().to_string()).unwrap(),
+									NetTarget::from_str(&server2.address().to_string()).unwrap(),
+								]
+								.into(),
+							))
+							.without_network_targets(Targets::<NetTarget>::Some(
+								[NetTarget::from_str(&server1.address().to_string()).unwrap()]
+									.into(),
+							)),
+					)
+					.build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner(),
@@ -1137,20 +1153,23 @@ mod tests {
 			),
 			// 14 -
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::Some(
-							[
-								NetTarget::from_str(&server1.address().to_string()).unwrap(),
-								NetTarget::from_str(&server2.address().to_string()).unwrap(),
-							]
-							.into(),
-						))
-						.without_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
-						)),
-				).build_with_path("memory")
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::Some(
+								[
+									NetTarget::from_str(&server1.address().to_string()).unwrap(),
+									NetTarget::from_str(&server2.address().to_string()).unwrap(),
+								]
+								.into(),
+							))
+							.without_network_targets(Targets::<NetTarget>::Some(
+								[NetTarget::from_str(&server1.address().to_string()).unwrap()]
+									.into(),
+							)),
+					)
+					.build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner(),
@@ -1160,16 +1179,20 @@ mod tests {
 			),
 			(
 				// 15 - Ensure redirect fails
-				Datastore::builder().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str(&server3.address().to_string()).unwrap()].into(),
-						))
-						.without_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
-						)),
-				).build_with_path("memory")
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::Some(
+								[NetTarget::from_str(&server3.address().to_string()).unwrap()]
+									.into(),
+							))
+							.without_network_targets(Targets::<NetTarget>::Some(
+								[NetTarget::from_str(&server1.address().to_string()).unwrap()]
+									.into(),
+							)),
+					)
+					.build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner(),
@@ -1182,11 +1205,13 @@ mod tests {
 			),
 			(
 				// 16 - Ensure connecting via localhost succeed
-				Datastore::builder().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::All),
-				).build_with_path("memory")
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::All),
+					)
+					.build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner(),
@@ -1197,18 +1222,20 @@ mod tests {
 			// - 17
 			(
 				// Ensure connecting via localhost is denied when all IPs are blocked
-				Datastore::builder().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::All)
-						.without_network_targets(Targets::<NetTarget>::Some(
-							[
-								NetTarget::from_str("127.0.0.1/0").unwrap(),
-								NetTarget::from_str("::/0").unwrap(),
-							]
-							.into(),
-						)),
-				).build_with_path("memory")
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::All)
+							.without_network_targets(Targets::<NetTarget>::Some(
+								[
+									NetTarget::from_str("127.0.0.1/0").unwrap(),
+									NetTarget::from_str("::/0").unwrap(),
+								]
+								.into(),
+							)),
+					)
+					.build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner(),
@@ -1218,34 +1245,36 @@ mod tests {
 			),
 			// 18 - Ensure redirect succeed
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str("github.com").unwrap()].into(),
-						))
-						.without_network_targets(Targets::<NetTarget>::Some(
-							[
-								NetTarget::from_str("0.0.0.0/8").unwrap(),
-								NetTarget::from_str("10.0.0.0/8").unwrap(),
-								NetTarget::from_str("10.18.0.0/16").unwrap(),
-								NetTarget::from_str("10.2.0.0/16").unwrap(),
-								NetTarget::from_str("100.64.0.0/10").unwrap(),
-								NetTarget::from_str("127.0.0.0/8").unwrap(),
-								NetTarget::from_str("169.254.0.0/16").unwrap(),
-								NetTarget::from_str("172.16.0.0/12").unwrap(),
-								NetTarget::from_str("172.20.0.0/16").unwrap(),
-								NetTarget::from_str("192.0.0.0/24").unwrap(),
-								NetTarget::from_str("192.168.0.0/16").unwrap(),
-								NetTarget::from_str("192.88.99.0/24").unwrap(),
-								NetTarget::from_str("198.18.0.0/15").unwrap(),
-								NetTarget::from_str("::1/128").unwrap(),
-								NetTarget::from_str("fc00::/7").unwrap(),
-								NetTarget::from_str("fc00::/8").unwrap(),
-							]
-							.into(),
-						)),
-				).build_with_path("memory")
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::Some(
+								[NetTarget::from_str("github.com").unwrap()].into(),
+							))
+							.without_network_targets(Targets::<NetTarget>::Some(
+								[
+									NetTarget::from_str("0.0.0.0/8").unwrap(),
+									NetTarget::from_str("10.0.0.0/8").unwrap(),
+									NetTarget::from_str("10.18.0.0/16").unwrap(),
+									NetTarget::from_str("10.2.0.0/16").unwrap(),
+									NetTarget::from_str("100.64.0.0/10").unwrap(),
+									NetTarget::from_str("127.0.0.0/8").unwrap(),
+									NetTarget::from_str("169.254.0.0/16").unwrap(),
+									NetTarget::from_str("172.16.0.0/12").unwrap(),
+									NetTarget::from_str("172.20.0.0/16").unwrap(),
+									NetTarget::from_str("192.0.0.0/24").unwrap(),
+									NetTarget::from_str("192.168.0.0/16").unwrap(),
+									NetTarget::from_str("192.88.99.0/24").unwrap(),
+									NetTarget::from_str("198.18.0.0/15").unwrap(),
+									NetTarget::from_str("::1/128").unwrap(),
+									NetTarget::from_str("fc00::/7").unwrap(),
+									NetTarget::from_str("fc00::/8").unwrap(),
+								]
+								.into(),
+							)),
+					)
+					.build_with_path("memory")
 					.await
 					.unwrap(),
 				Session::owner(),
