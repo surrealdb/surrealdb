@@ -2,7 +2,6 @@ mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::syn;
 
 use crate::helpers::skip_ok;
 
@@ -54,7 +53,7 @@ async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<()> {
 		SELECT agr, day FROM wallet_agr;
 	"
 	);
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 29);

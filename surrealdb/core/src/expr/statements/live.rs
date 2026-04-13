@@ -145,6 +145,7 @@ mod tests {
 	use anyhow::Result;
 
 	use crate::catalog::providers::{CatalogProvider, TableProvider};
+	use crate::channel::Receiver;
 	use crate::dbs::{Capabilities, Session};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
@@ -153,21 +154,20 @@ mod tests {
 	use crate::types::{
 		PublicAction, PublicNotification, PublicRecordId, PublicRecordIdKey, PublicValue,
 	};
-	use crate::channel::{Receiver};
 
 	pub async fn new_ds() -> Result<(Receiver<PublicNotification>, Datastore)> {
-		let (send,recv) = crate::channel::bounded(1000);
+		let (send, recv) = crate::channel::bounded(1000);
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all())
 			.with_notify(send)
 			.build_with_path("memory")
 			.await?;
-		Ok((recv,ds))
+		Ok((recv, ds))
 	}
 
 	#[tokio::test]
 	async fn test_table_definition_is_created_for_live_query() {
-		let (recv,dbs) = new_ds().await.unwrap();
+		let (recv, dbs) = new_ds().await.unwrap();
 		let (ns, db, tb) = ("test", "test", "person");
 		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 
@@ -249,7 +249,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_table_exists_for_live_query() {
-		let (_,dbs) = new_ds().await.unwrap();
+		let (_, dbs) = new_ds().await.unwrap();
 		let (ns, db, tb) = ("test", "test", "person");
 		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 

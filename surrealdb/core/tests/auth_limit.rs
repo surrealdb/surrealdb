@@ -6,7 +6,7 @@ use surrealdb_core::iam::{Level, Role};
 
 #[tokio::test]
 async fn auth_limit_diff_role() -> Result<()> {
-	let (_,dbs) = new_ds("test", "test",true).await?;
+	let (_, dbs) = new_ds("test", "test", true).await?;
 
 	let ses_owner = Session::owner().with_ns("test").with_db("test");
 	let ses_editor = Session::editor().with_ns("test").with_db("test");
@@ -38,7 +38,7 @@ async fn auth_limit_diff_role() -> Result<()> {
 
 #[tokio::test]
 async fn auth_limit_diff_level() -> Result<()> {
-	let (_,dbs) = new_ds("test", "test",true).await?;
+	let (_, dbs) = new_ds("test", "test", true).await?;
 
 	let ses_ns = Session::for_level(Level::Namespace("test".to_string()), Role::Owner)
 		.with_ns("test")

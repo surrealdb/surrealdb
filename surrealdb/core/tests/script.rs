@@ -20,7 +20,7 @@ async fn script_function_module_os() -> Result<()> {
 			return platform();
 		};
 	";
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -46,7 +46,7 @@ async fn script_run_too_long() -> Result<()> {
 			}
 		}
 	"#;
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let mut timeout = *surrealdb_core::cnf::SCRIPTING_MAX_TIME_LIMIT;
 	timeout += timeout / 2;
@@ -77,9 +77,8 @@ async fn script_limit_massive_parallel() -> Result<()> {
 		};
 		return fn::crashcat();
 	"#;
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	dbs.execute(sql, &ses, None).await?;
 	Ok(())
 }
-

@@ -86,12 +86,12 @@ pub(crate) async fn run_router(
 	#[cfg(storage)]
 	let builder = builder.with_temporary_directory(address.config.temporary_directory);
 
-	let (notify, builder) = if address.config.capabilities.allows_live_query_notifications(){
+	let (notify, builder) = if address.config.capabilities.allows_live_query_notifications() {
 		// TODO: Move value to a global somewhere
-		let (send,recv) = surrealdb_core::channel::bounded(15_000);
-		(Some(recv),builder.with_notify(send))
-	}else{
-		(None,builder)
+		let (send, recv) = surrealdb_core::channel::bounded(15_000);
+		(Some(recv), builder.with_notify(send))
+	} else {
+		(None, builder)
 	};
 
 	let builder = builder.with_capabilities(address.config.capabilities);
@@ -121,7 +121,6 @@ pub(crate) async fn run_router(
 			return;
 		}
 	};
-
 
 	let router_state = super::RouterState {
 		kvs: Arc::new(kvs),

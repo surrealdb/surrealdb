@@ -1,23 +1,30 @@
-use std::{path::{Path, PathBuf}, sync::Arc, time::Duration};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
-#[cfg(feature = "http")]
-use anyhow::Context as _;
-use async_channel::{ Sender};
+use anyhow::Result;
+use async_channel::Sender;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-use anyhow::Result;
 
-#[cfg(feature = "http")]
-use crate::http::HttpClient;
+use crate::CommunityComposer;
+use crate::buc::BucketStoreProvider;
+use crate::buc::manager::BucketsManager;
+use crate::cnf::dynamic::DynamicConfiguration;
+use crate::dbs::Capabilities;
+use crate::idx::trees::store::IndexStores;
+use crate::kvs::cache::ds::DatastoreCache;
+use crate::kvs::index::IndexBuilder;
+use crate::kvs::sequences::Sequences;
+use crate::kvs::slowlog::SlowLog;
+use crate::kvs::{Datastore, TransactionBuilder, TransactionBuilderFactory, TransactionFactory};
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
-use crate::{buc::{manager::BucketsManager, BucketStoreProvider}, cnf::dynamic::DynamicConfiguration, dbs::Capabilities, idx::trees::store::IndexStores, kvs::{cache::ds::DatastoreCache, index::IndexBuilder, sequences::Sequences, slowlog::SlowLog, Datastore, TransactionBuilder, TransactionBuilderFactory, TransactionFactory}, CommunityComposer};
-use crate::types::{PublicNotification};
-
+use crate::types::PublicNotification;
 
 /// A builder struct for creating a Datastore.
-pub struct Builder{
+pub struct Builder {
 	capabilities: Capabilities,
 	shutdown: CancellationToken,
 	notify_channel: Option<Sender<PublicNotification>>,
@@ -29,15 +36,15 @@ pub struct Builder{
 	authenticate: bool,
 }
 
-impl Default for Builder{
+impl Default for Builder {
 	fn default() -> Self {
-	    Self::new()
+		Self::new()
 	}
 }
 
-impl Builder{
-	pub fn new() -> Self{
-		Builder{
+impl Builder {
+	pub fn new() -> Self {
+		Builder {
 			capabilities: Default::default(),
 			shutdown: CancellationToken::new(),
 			notify_channel: None,
@@ -51,42 +58,42 @@ impl Builder{
 	}
 
 	/// Sets the capabilities for the datastore.
-	pub fn with_capabilities(mut self, cap: Capabilities) -> Self{
+	pub fn with_capabilities(mut self, cap: Capabilities) -> Self {
 		self.capabilities = cap;
 		self
 	}
 
-	pub fn with_auth(mut self, enabled: bool) -> Self{
+	pub fn with_auth(mut self, enabled: bool) -> Self {
 		self.authenticate = enabled;
 		self
 	}
 
 	/// Adds a channel for receiving notifications from this datastore
-	pub fn with_notify(mut self, channel: Sender<PublicNotification>) -> Self{
+	pub fn with_notify(mut self, channel: Sender<PublicNotification>) -> Self {
 		self.notify_channel = Some(channel);
 		self
 	}
 
 	/// Sets the transaction timeout for this datastore
-	pub fn with_transaction_timeout(mut self, timeout: Option<Duration>) -> Self{
+	pub fn with_transaction_timeout(mut self, timeout: Option<Duration>) -> Self {
 		self.transaction_timeout = timeout;
 		self
 	}
 
 	/// Sets the transaction timeout for this datastore
-	pub fn with_query_timeout(mut self, timeout: Option<Duration>) -> Self{
+	pub fn with_query_timeout(mut self, timeout: Option<Duration>) -> Self {
 		self.query_timeout = timeout;
 		self
 	}
 
 	/// Sets the node id for this datastore
-	pub fn with_id(mut self, id: Uuid) -> Self{
+	pub fn with_id(mut self, id: Uuid) -> Self {
 		self.id = Some(id);
 		self
 	}
 
 	/// Sets the node id for this datastore
-	pub fn with_shutdown_cancel(mut self, cancel: CancellationToken) -> Self{
+	pub fn with_shutdown_cancel(mut self, cancel: CancellationToken) -> Self {
 		self.shutdown = cancel;
 		self
 	}
@@ -100,41 +107,48 @@ impl Builder{
 	///   logged when a query is slow.
 	/// - `param_deny`: Parameter names that should never be logged. This list always takes
 	///   precedence over `param_allow`.
-	pub fn with_slog_log(mut self, timeout: Duration, allowed_params: Vec<String>, disallowed_params: Vec<String>) -> Self{
-		self.slowlog = Some(SlowLog::new(timeout,allowed_params,disallowed_params));
+	pub fn with_slog_log(
+		mut self,
+		timeout: Duration,
+		allowed_params: Vec<String>,
+		disallowed_params: Vec<String>,
+	) -> Self {
+		self.slowlog = Some(SlowLog::new(timeout, allowed_params, disallowed_params));
 		self
 	}
 
-	pub fn with_temporary_directory<P: AsRef<Path>>(mut self, directory: Option<P>) -> Self{
+	pub fn with_temporary_directory<P: AsRef<Path>>(mut self, directory: Option<P>) -> Self {
 		self.temporary_directory = directory.map(|x| Arc::new(x.as_ref().to_path_buf()));
 		self
 	}
 
-	pub async fn build_with_path(self,path: &str) -> Result<Datastore>{
+	pub async fn build_with_path(self, path: &str) -> Result<Datastore> {
 		self.build_with_factory_path(path, CommunityComposer()).await
 	}
 
-	pub async fn build_with_factory_path<F>(self,path: &str, composer: F) -> Result<Datastore> where F: TransactionBuilderFactory + BucketStoreProvider + 'static {
+	pub async fn build_with_factory_path<F>(self, path: &str, composer: F) -> Result<Datastore>
+	where
+		F: TransactionBuilderFactory + BucketStoreProvider + 'static,
+	{
 		let tx_builder = composer.new_transaction_builder(path, self.shutdown.clone()).await?;
 		let buckets = BucketsManager::new(Arc::new(composer));
 
-		self.build_with_tx_builder_buckets(tx_builder,buckets).await
+		self.build_with_tx_builder_buckets(tx_builder, buckets).await
 	}
 
-	pub async fn build_with_tx_builder_buckets(self,builder: Box<dyn TransactionBuilder>, buckets:BucketsManager) -> Result<Datastore>{
+	pub(crate) async fn build_with_tx_builder_buckets(
+		self,
+		builder: Box<dyn TransactionBuilder>,
+		buckets: BucketsManager,
+	) -> Result<Datastore> {
 		let async_event_trigger = Arc::new(Notify::new());
 		let tf = TransactionFactory::new(async_event_trigger.clone(), builder);
 		let id = self.id.unwrap_or_else(Uuid::new_v4);
 		let capabilities = Arc::new(self.capabilities);
-		#[cfg(feature = "http")]
-		let http_client = Arc::new(
-			HttpClient::new(capabilities.clone()).context("Could not create http client")?,
-		);
-
 		let dynamic_configuration = DynamicConfiguration::default();
 		dynamic_configuration.set_query_timeout(self.query_timeout);
 
-		Ok(Datastore{
+		Ok(Datastore {
 			id,
 			transaction_factory: tf.clone(),
 			auth_enabled: self.authenticate,
@@ -155,8 +169,6 @@ impl Builder{
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 			async_event_trigger,
-			#[cfg(feature = "http")]
-			http_client,
 		})
 	}
 }

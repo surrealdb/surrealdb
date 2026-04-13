@@ -1372,7 +1372,8 @@ mod tests {
 			let (session, should_succeed, msg) = test;
 
 			{
-				let ds = Datastore::builder().with_auth(true).build_with_path("memory").await.unwrap();
+				let ds =
+					Datastore::builder().with_auth(true).build_with_path("memory").await.unwrap();
 
 				let res = ds.execute(statement, session, None).await;
 

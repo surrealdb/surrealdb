@@ -16,7 +16,7 @@ async fn clear_transaction_cache_table() -> Result<()> {
 		COMMIT;
 		SELECT * FROM other;
 	";
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -85,7 +85,7 @@ async fn clear_transaction_cache_field() -> Result<()> {
 		SELECT * FROM person;
 		COMMIT;
 	";
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 8);

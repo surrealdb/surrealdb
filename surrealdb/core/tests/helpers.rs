@@ -8,24 +8,29 @@ use std::thread::Builder;
 
 use anyhow::{Context, Result, ensure};
 use regex::Regex;
+use surrealdb_core::channel::{self, Receiver as NotifyReceiver};
 use surrealdb_core::dbs::capabilities::Capabilities;
 use surrealdb_core::dbs::{QueryResult, Session};
 use surrealdb_core::iam::{Auth, Level, Role};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
-use surrealdb_core::channel::{self,Receiver as NotifyReceiver};
-use surrealdb_types::{Error as TypesError, Number, ToSql, Value, Notification};
-use tokio::net::unix::pipe::Receiver;
+use surrealdb_types::{Error as TypesError, Notification, Number, ToSql, Value};
 
-pub async fn new_ds(ns: &str, db: &str, auth: bool) -> Result<(NotifyReceiver<Notification>,Datastore)> {
-	let (send,recv) = channel::bounded(15_000);
+pub async fn new_ds(
+	ns: &str,
+	db: &str,
+	auth: bool,
+) -> Result<(NotifyReceiver<Notification>, Datastore)> {
+	let (send, recv) = channel::bounded(15_000);
 
-	let ds =
-		Datastore::builder().with_capabilities(Capabilities::all()).with_notify(send)
-	.build_with_path("memory").await?
-		;
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.with_notify(send)
+		.with_auth(auth)
+		.build_with_path("memory")
+		.await?;
 	new_ns_db(&ds, ns, db).await?;
-	Ok((recv,ds))
+	Ok((recv, ds))
 }
 
 pub async fn new_ns_db(ds: &Datastore, ns: &str, db: &str) -> Result<()> {
@@ -167,7 +172,7 @@ pub async fn iam_check_cases_impl(
 
 		// Auth enabled
 		{
-			let (send,_) = channel::bounded(15_000);
+			let (send, _) = channel::bounded(15_000);
 			let ds = Datastore::builder()
 				.with_capabilities(Capabilities::all())
 				.with_notify(send)
@@ -192,7 +197,7 @@ pub async fn iam_check_cases_impl(
 
 		// Auth disabled
 		{
-			let (send,_) = channel::bounded(15_000);
+			let (send, _) = channel::bounded(15_000);
 			let ds = Datastore::builder()
 				.with_capabilities(Capabilities::all())
 				.with_notify(send)
@@ -229,7 +234,7 @@ pub async fn iam_check_cases_impl(
 					"auth disabled"
 				}
 			);
-			let (send,_) = channel::bounded(15_000);
+			let (send, _) = channel::bounded(15_000);
 			let ds = Datastore::builder()
 				.with_capabilities(Capabilities::all())
 				.with_notify(send)
@@ -335,7 +340,12 @@ impl Debug for Test {
 
 impl Test {
 	#[allow(dead_code)]
-	pub async fn new_ds_session(ds: Datastore,notify: NotifyReceiver<Notification>, session: Session, sql: &str) -> Result<Self> {
+	pub async fn new_ds_session(
+		ds: Datastore,
+		notify: NotifyReceiver<Notification>,
+		session: Session,
+		sql: &str,
+	) -> Result<Self> {
 		let responses = ds.execute(sql, &session, None).await?;
 		Ok(Self {
 			notifications: notify,
@@ -347,13 +357,18 @@ impl Test {
 	}
 
 	#[allow(dead_code)]
-	pub async fn new_ds(ds: Datastore,notify: NotifyReceiver<Notification>, sql: &str) -> Result<Self> {
-		Self::new_ds_session(ds, notify,Session::owner().with_ns("test").with_db("test"), sql).await
+	pub async fn new_ds(
+		ds: Datastore,
+		notify: NotifyReceiver<Notification>,
+		sql: &str,
+	) -> Result<Self> {
+		Self::new_ds_session(ds, notify, Session::owner().with_ns("test").with_db("test"), sql)
+			.await
 	}
 
 	#[allow(dead_code)]
 	pub async fn new_sql(self, sql: &str) -> Result<Self> {
-		Self::new_ds(self.ds,self.notifications, sql).await
+		Self::new_ds(self.ds, self.notifications, sql).await
 	}
 
 	/// Creates a new instance of the `Self` struct with the given SQL query.
@@ -361,8 +376,8 @@ impl Test {
 	/// Panics if an error occurs.#[expect(dead_code)]
 	#[allow(dead_code)]
 	pub async fn new(sql: &str) -> Result<Self> {
-		let (notify,ds) = new_ds("test", "test",false).await?;
-		Self::new_ds(ds,notify, sql).await
+		let (notify, ds) = new_ds("test", "test", false).await?;
+		Self::new_ds(ds, notify, sql).await
 	}
 
 	/// Simulates restarting the Datastore
@@ -370,7 +385,7 @@ impl Test {
 	/// - Flushing caches (jwks, IndexStore, ...)
 	#[allow(dead_code)]
 	pub async fn restart(self, sql: &str) -> Result<Self> {
-		Self::new_ds(self.ds.restart(),self.notifications, sql).await
+		Self::new_ds(self.ds.restart(), self.notifications, sql).await
 	}
 
 	/// Checks if the number of responses matches the expected size.

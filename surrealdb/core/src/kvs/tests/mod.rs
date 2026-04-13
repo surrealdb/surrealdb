@@ -74,7 +74,7 @@ mod mem {
 		// Setup the in-memory datastore
 		let ds = Datastore::builder()
 			.with_id(id)
-			.build_with_factory_path(path,CommunityComposer())
+			.build_with_factory_path(path, CommunityComposer())
 			.await
 			.unwrap();
 		// Return the datastore
@@ -104,7 +104,9 @@ mod rocksdb {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		let path = format!("rocksdb:{path}");
 		// Setup the RocksDB datastore
-		let ds = Datastore::builder().with_id(id).build_with_factory_path(&path,CommunityComposer())
+		let ds = Datastore::builder()
+			.with_id(id)
+			.build_with_factory_path(&path, CommunityComposer())
 			.await
 			.unwrap();
 		// Return the datastore
@@ -138,7 +140,7 @@ mod surrealkv {
 		// Setup the SurrealKV datastore
 		let ds = Datastore::builder()
 			.with_id(id)
-			.build_with_factory_path(&path,CommunityComposer())
+			.build_with_factory_path(&path, CommunityComposer())
 			.await
 			.unwrap();
 		// Return the datastore
@@ -168,7 +170,7 @@ mod tikv {
 		// Setup the TiKV datastore
 		let ds = Datastore::builder()
 			.with_id(id)
-			.build_with_factory_path(&path,CommunityComposer())
+			.build_with_factory_path(&path, CommunityComposer())
 			.await
 			.unwrap();
 		// Clear any previous test entries

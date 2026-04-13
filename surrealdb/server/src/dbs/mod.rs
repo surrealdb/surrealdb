@@ -777,7 +777,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
 
-	let (send,recv) = surrealdb_core::channel::bounded(15_000);
+	let (send, recv) = surrealdb_core::channel::bounded(15_000);
 
 	// Parse and setup the desired kv datastore
 	let builder = Datastore::builder()
@@ -792,15 +792,12 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	let builder = builder.with_temporary_directory(temporary_directory);
 
 	let builder = if let Some(slow_log_threshold) = slow_log_threshold {
-		builder.with_slow_log(slow_log_threshold,slow_log_param_allow, slow_log_param_deny)
-	}else{
+		builder.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny)
+	} else {
 		builder
 	};
 
-
-	let dbs = builder.
-		build_with_factory_path::<C>(&opt.path, composer)
-		.await?;
+	let dbs = builder.build_with_factory_path::<C>(&opt.path, composer).await?;
 	// Ensure the storage version is up to date to prevent corruption.
 	// OutdatedStorageVersion is a permanent condition (the data on disk is from
 	// an older version), so retrying it would waste time and delay pod restarts
@@ -911,11 +908,15 @@ mod tests {
 			//
 			// 0 - Functions and Networking are allowed
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::All),
-				).build_with_path("memory").await.unwrap(),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::All),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				format!("RETURN http::get('{}')", server1.uri()),
 				true,
@@ -924,9 +925,11 @@ mod tests {
 			//
 			// 1 - Scripting is allowed
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default().with_scripting(true)
-				).build_with_path("memory").await.unwrap(),
+				Datastore::builder()
+					.with_capabilities(Capabilities::default().with_scripting(true))
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				"RETURN function() { return '1' }".to_string(),
 				true,
@@ -935,9 +938,11 @@ mod tests {
 			//
 			// 2 - Scripting is not allowed
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default().with_scripting(false)
-				).build_with_path("memory").await.unwrap(),
+				Datastore::builder()
+					.with_capabilities(Capabilities::default().with_scripting(false))
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				"RETURN function() { return '1' }".to_string(),
 				false,
@@ -949,7 +954,9 @@ mod tests {
 				Datastore::builder()
 					.with_capabilities(Capabilities::default().with_guest_access(true))
 					.with_auth(true)
-					.build_with_path("memory").await.unwrap(),
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::default(),
 				"RETURN 1".to_string(),
 				true,
@@ -962,7 +969,9 @@ mod tests {
 				Datastore::builder()
 					.with_capabilities(Capabilities::default().with_guest_access(false))
 					.with_auth(true)
-					.build_with_path("memory").await.unwrap(),
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::default(),
 				"RETURN 1".to_string(),
 				false,
@@ -997,9 +1006,13 @@ mod tests {
 			),
 			// 7 - Specific experimental feature enabled
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default().with_experimental(ExperimentalTarget::Files.into()),
-				).build_with_path("memory").await.unwrap(),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default().with_experimental(ExperimentalTarget::Files.into()),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner().with_ns("test").with_db("test"),
 				"DEFINE BUCKET test BACKEND \"memory\";".to_string(),
 				true,
@@ -1007,9 +1020,14 @@ mod tests {
 			),
 			// 8 - Specific experimental feature disabled
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default().without_experimental(ExperimentalTarget::Files.into()),
-				).build_with_path("memory").await.unwrap(),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.without_experimental(ExperimentalTarget::Files.into()),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner().with_ns("test").with_db("test"),
 				"DEFINE BUCKET test BACKEND \"memory\";".to_string(),
 				false,
@@ -1018,15 +1036,19 @@ mod tests {
 			//
 			// 9 - Some functions are not allowed
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::*").unwrap()].into(),
-						))
-						.without_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::len").unwrap()].into(),
-						)),
-				).build_with_path("memory").await.unwrap(),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::*").unwrap()].into(),
+							))
+							.without_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::len").unwrap()].into(),
+							)),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				"RETURN string::len('a')".to_string(),
 				false,
@@ -1034,15 +1056,19 @@ mod tests {
 			),
 			// 10 -
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::*").unwrap()].into(),
-						))
-						.without_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::len").unwrap()].into(),
-						)),
-				).build_with_path("memory").await.unwrap(),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::*").unwrap()].into(),
+							))
+							.without_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::len").unwrap()].into(),
+							)),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				"RETURN string::lowercase('A')".to_string(),
 				true,
@@ -1050,15 +1076,19 @@ mod tests {
 			),
 			// 11 -
 			(
-				Datastore::builder().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::*").unwrap()].into(),
-						))
-						.without_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::len").unwrap()].into(),
-						)),
-				).build_with_path("memory").await.unwrap(),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::*").unwrap()].into(),
+							))
+							.without_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::len").unwrap()].into(),
+							)),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				"RETURN time::now()".to_string(),
 				false,

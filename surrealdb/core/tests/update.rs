@@ -8,7 +8,6 @@ use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::Role;
 
-
 //
 // Permissions
 //
@@ -144,7 +143,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the statement when the table already exists
 		{
-			let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+			let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 			// Define additional namespaces/databases for cross-namespace tests
 			ds.execute(
@@ -250,7 +249,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table grants no permissions
 	{
-		let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -302,7 +301,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -370,7 +369,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table grants no permissions
 	{
-		let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -422,7 +421,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -472,4 +471,3 @@ async fn check_permissions_auth_disabled() {
 		);
 	}
 }
-

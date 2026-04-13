@@ -77,7 +77,11 @@ impl RpcState {
 /// This is called automatically by
 /// [`SurrealRouter::spawn_notifications`](crate::ntw::SurrealRouter::spawn_notifications).
 /// If you need lower-level control you can call it directly inside your own `tokio::spawn`.
-pub async fn notifications(channel: Receiver<Notification>, state: Arc<RpcState>, canceller: CancellationToken) {
+pub async fn notifications(
+	channel: Receiver<Notification>,
+	state: Arc<RpcState>,
+	canceller: CancellationToken,
+) {
 	// Store messages being delivered
 	let mut futures = FuturesUnordered::new();
 	// Loop continuously
@@ -129,7 +133,6 @@ pub async fn notifications(channel: Receiver<Notification>, state: Arc<RpcState>
 				}
 			},
 		}
-
 	}
 }
 

@@ -1,4 +1,3 @@
-
 #[cfg(not(target_family = "wasm"))]
 use std::collections::HashMap;
 #[cfg(target_family = "wasm")]
@@ -16,7 +15,7 @@ use std::time::Duration;
 #[allow(unused_imports)]
 use anyhow::bail;
 use anyhow::{Context as _, Result, ensure};
-use async_channel::{ Sender};
+use async_channel::Sender;
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use rand::{Rng, thread_rng};
@@ -583,7 +582,7 @@ impl Display for Datastore {
 }
 
 impl Datastore {
-	pub fn builder() -> Builder{
+	pub fn builder() -> Builder {
 		Builder::new()
 	}
 	/// Creates a new datastore instance
@@ -685,7 +684,6 @@ impl Datastore {
 	pub(crate) fn transaction_timeout(&self) -> Option<Duration> {
 		self.transaction_timeout
 	}
-
 
 	#[cfg(storage)]
 	/// Set a temporary directory for ordering of large result sets
@@ -2031,7 +2029,7 @@ impl Datastore {
 	// ```
 	//#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	//pub fn notifications(&self) -> Option<Receiver<PublicNotification>> {
-		//self.notification_channel.as_ref().map(|v| v.1.clone())
+	//self.notification_channel.as_ref().map(|v| v.1.clone())
 	//}
 
 	/// Performs a database import from SQL
@@ -2403,7 +2401,11 @@ mod test {
 		}
 		let val = stack.enter(|stk| build_query(stk, 1000)).finish();
 
-		let dbs = Datastore::builder().with_capabilities(Capabilities::all()).build_with_path("memory").await.unwrap();
+		let dbs = Datastore::builder()
+			.with_capabilities(Capabilities::all())
+			.build_with_path("memory")
+			.await
+			.unwrap();
 
 		let opt = Options::new(dbs.id(), DynamicConfiguration::default())
 			.with_ns(Some("test".into()))
@@ -2438,7 +2440,7 @@ mod test {
 	#[tokio::test]
 	async fn cross_transaction_caching_uuids_updated() -> Result<()> {
 		// TODO: Put `15_000` in a global somewhere.
-		let (send,_recv) = crate::channel::bounded(15_000);
+		let (send, _recv) = crate::channel::bounded(15_000);
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all())
 			.with_notify(send)

@@ -21,7 +21,7 @@ async fn insert_statement_object_single() -> Result<()> {
 			something: 'other',
 		};
 	";
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -167,7 +167,7 @@ async fn insert_statement_values_single() -> Result<()> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other');
 	";
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -184,7 +184,7 @@ async fn insert_statement_values_multiple() -> Result<()> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES (1, true, 'other'), (2, false, 'else');
 	";
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -207,7 +207,7 @@ async fn insert_statement_values_retable_id() -> Result<()> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES (person:1, true, 'other'), (person:2, false, 'else');
 	";
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -231,7 +231,7 @@ async fn insert_statement_on_duplicate_key() -> Result<()> {
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other');
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other') ON DUPLICATE KEY UPDATE something = 'else';
 	";
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -318,7 +318,7 @@ async fn insert_statement_output() -> Result<()> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other') RETURN something;
 	";
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -338,7 +338,7 @@ async fn insert_statement_duplicate_key_update() -> Result<()> {
 		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-11') ON DUPLICATE KEY UPDATE founded = $input.founded;
 		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-12') ON DUPLICATE KEY UPDATE founded = $input.founded;
 	";
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -496,7 +496,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the INSERT statement when the table has to be created
 		{
-			let (_,ds) = new_ds("test", "test",auth_enabled).await.unwrap();
+			let (_, ds) = new_ds("test", "test", auth_enabled).await.unwrap();
 
 			// Define additional namespaces/databases for cross-namespace tests
 			ds.execute(
@@ -528,7 +528,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the INSERT statement when the table already exists
 		{
-			let (_,ds) = new_ds("test", "test",auth_enabled).await.unwrap();
+			let (_, ds) = new_ds("test", "test", auth_enabled).await.unwrap();
 
 			// Define additional namespaces/databases for cross-namespace tests
 			ds.execute(
@@ -606,7 +606,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table doesn't exist
 	{
-		let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -629,7 +629,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists but grants no permissions
 	{
-		let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -661,7 +661,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -706,7 +706,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table doesn't exist
 	{
-		let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -727,7 +727,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists but grants no permissions
 	{
-		let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -759,7 +759,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -819,7 +819,7 @@ async fn insert_relation() -> Result<()> {
 			VALUES (person:1, 'values', person:2);
 		SELECT VALUE ->likes FROM person;
 	";
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);

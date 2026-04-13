@@ -18,7 +18,7 @@ async fn field_definition_value_reference() -> Result<()> {
 		UPDATE product;
 		SELECT * FROM product;
 	";
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
@@ -123,7 +123,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 		INSERT INTO user (id) VALUES (user:one), (user:two);
 		INSERT INTO business (id, owner) VALUES (business:one, user:one), (business:two, user:two);
 	";
-	let (_,dbs) = new_ds("test", "test",true).await?;
+	let (_, dbs) = new_ds("test", "test", true).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
@@ -212,7 +212,7 @@ async fn field_definition_readonly() -> Result<()> {
 		UPSERT person:test SET birthdate = d'2023-12-13T21:27:55.632Z';
 		UPSERT person:test SET birthdate = d'2024-12-13T21:27:55.632Z';
 	";
-	let (_,dbs) = new_ds("test", "test",false).await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);

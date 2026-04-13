@@ -1,11 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
 use surrealdb_core::iam::Level;
-use surrealdb_core::syn;
 use surrealdb_types::{Array, ToSql, Value};
 
 mod helpers;
-use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::Role;
@@ -145,7 +143,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		// Test the statement when the table has to be created
 
 		{
-			let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+			let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 			// Define additional namespaces/databases for cross-namespace tests
 			ds.execute(
@@ -177,7 +175,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the statement when the table already exists
 		{
-			let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+			let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 			// Define additional namespaces/databases for cross-namespace tests
 			ds.execute(
@@ -282,7 +280,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table doesn't exist
 	{
-			let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -301,7 +299,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table grants no permissions
 	{
-			let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -354,7 +352,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-			let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -422,7 +420,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table doesn't exist
 	{
-			let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -439,7 +437,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table grants no permissions
 	{
-			let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -491,7 +489,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists and grants full permissions
 	{
-			let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(

@@ -143,7 +143,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 
 		{
-			let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+			let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 			let mut resp = ds
 				.execute("CREATE person:test", &Session::owner().with_ns("NS").with_db("DB"), None)
@@ -270,7 +270,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists but grants no permissions
 	{
-			let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -316,7 +316,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-			let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -377,7 +377,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists but grants no permissions
 	{
-			let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -422,7 +422,7 @@ async fn check_permissions_auth_disabled() {
 	}
 
 	{
-			let (_,ds) = new_ds("NS", "DB",auth_enabled).await.unwrap();
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		// When the table exists and grants full permissions
 		let mut resp = ds
@@ -470,7 +470,7 @@ async fn check_permissions_auth_disabled() {
 
 #[tokio::test]
 async fn delete_filtered_live_notification() -> Result<()> {
-	let (notifications,dbs) = new_ds("test", "test",false).await?;
+	let (notifications, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 	let res = &mut dbs.execute("CREATE person:test_true SET condition = true", &ses, None).await?;
 	assert_eq!(res.len(), 1);
