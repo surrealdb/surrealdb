@@ -994,12 +994,17 @@ impl Fields {
 		}
 	}
 
-	pub fn kind_of(&self, strategy: &Strategy, crate_path: &CratePath) -> TokenStream2 {
+	pub fn kind_of(
+		&self,
+		type_name: &syn::Ident,
+		strategy: &Strategy,
+		crate_path: &CratePath,
+	) -> TokenStream2 {
 		let kind_ty = crate_path.kind();
 		let kind_literal_ty = crate_path.kind_literal();
 		match self {
 			Fields::Named(fields) => {
-				let map_types = fields.map_types(crate_path);
+				let map_types = fields.map_types(type_name, crate_path);
 
 				match strategy {
 					Strategy::VariantKey {
@@ -1057,14 +1062,16 @@ impl Fields {
 			Fields::Unnamed(fields) => {
 				let kind_of = if !fields.tuple && fields.fields.len() == 1 {
 					let ty = &fields.fields[0];
-					if fields.wrap[0] {
+					if crate::type_contains_ident(ty, type_name) {
+						quote!( #kind_ty::Any )
+					} else if fields.wrap[0] {
 						let wrapper = crate_path.wrapper();
 						quote!( <#wrapper::<#ty> as SurrealValue>::kind_of() )
 					} else {
 						quote!( <#ty as SurrealValue>::kind_of() )
 					}
 				} else {
-					let arr_types = fields.arr_types(crate_path);
+					let arr_types = fields.arr_types(type_name, crate_path);
 
 					quote! {{
 						let mut arr = Vec::new();

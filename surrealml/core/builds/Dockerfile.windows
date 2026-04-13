@@ -19,7 +19,7 @@
 # CMD ["cargo", "run"]
 
 # Use the latest Windows Server Core image
-FROM mcr.microsoft.com/windows:ltsc2019
+FROM mcr.microsoft.com/windows:ltsc2019@sha256:5dc542418c860e622a8da5d2db2dd3f3eb1212c104857ca947dac2fd171a26b5
 
 # Set the working directory to C:\app
 WORKDIR C:\app
