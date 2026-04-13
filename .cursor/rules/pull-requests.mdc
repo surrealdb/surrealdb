@@ -1,0 +1,40 @@
+---
+alwaysApply: true
+---
+
+# Pull request guidelines
+
+When creating a pull request, always follow the project's PR template format.
+
+## PR body format
+
+Every pull request body must include the following sections, filled in with relevant details:
+
+### What is the motivation?
+Explain why this change is needed - the problem being solved or the improvement being made.
+
+### What does this change do?
+Describe what the PR does and how it solves the problem. Be specific about the approach taken.
+
+### What is your testing strategy?
+If there is a specific testing strategy, and new tests are added, describe the changes. Otherwise insert 'GitHub Actions testing'.
+
+### Security Considerations
+Briefly assess security implications. If there are none, state why (e.g. "documentation-only change", "build profile change only"). If there are security implications, assign the `security-review` label and request review from `@surrealdb/security`.
+
+### Is this related to any issues?
+Link related issues using `Closes #123` or `Fixes #123` to auto-close them. If none, check "No related issues".
+
+### Have you read the Contributing Guidelines?
+Confirm with a checked box.
+
+## Labels
+
+Apply these labels when relevant:
+- `breaking-change` — if the PR includes a breaking change (not needed for bug fixes that correct behaviour)
+- `needs-documentation` — if documentation is needed to explain the change
+- `Modifies env vars or commands` — if environment variables or command flags are changed
+
+## Force-pushing
+
+After creating a PR, do not force-push to the branch unless the user explicitly asks for it.

@@ -17,7 +17,6 @@ use crate::cnf::SURREALDB_USER_AGENT;
 use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::sql::expression::convert_public_value_to_internal;
-use crate::syn;
 use crate::types::{PublicBytes, PublicValue};
 use crate::val::{Object, Value};
 
@@ -146,10 +145,10 @@ async fn decode_response(res: Response) -> Result<PublicValue> {
 			Some(mime) => match mime.to_str() {
 				Ok(v) if v.starts_with("application/json") => {
 					let txt = res.text().await.map_err(Error::from)?;
-					let val = syn::json(&txt)
+					let json: serde_json::Value = serde_json::from_str(&txt)
 						.context("Failed to parse JSON response")
 						.map_err(|e| Error::Http(e.to_string()))?;
-					Ok(val)
+					Ok(crate::rpc::format::json::json_to_value(json))
 				}
 				Ok(v) if v.starts_with("application/octet-stream") => {
 					let bytes = res.bytes().await.map_err(Error::from)?;
