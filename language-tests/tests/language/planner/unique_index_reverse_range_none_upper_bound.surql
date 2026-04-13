@@ -40,6 +40,12 @@ value = "[{ id: w:b }, { id: w:d }]"
 [[test.results]]
 value = "[{ id: w:d }, { id: w:b }]"
 
+[[test.results]]
+value = "[{ id: u:a, v: 10 }, { id: u:d }, { id: u:b }]"
+
+[[test.results]]
+value = "[{ id: u:c, v: 20 }, { id: u:a, v: 10 }, { id: u:d }, { id: u:b }]"
+
 */
 
 {
@@ -76,3 +82,7 @@ RETURN SELECT * FROM w WHERE v <= NULL ORDER BY v ASC;
 RETURN SELECT * FROM w WHERE v <= NULL ORDER BY v DESC;
 RETURN SELECT * FROM w WHERE v < NULL ORDER BY v ASC;
 RETURN SELECT * FROM w WHERE v < NULL ORDER BY v DESC;
+
+-- Non-NULL inclusive upper bound: boundary row must not be dropped in DESC scan
+RETURN SELECT * FROM u WHERE v <= 10 ORDER BY v DESC;
+RETURN SELECT * FROM u WHERE v <= 20 ORDER BY v DESC;

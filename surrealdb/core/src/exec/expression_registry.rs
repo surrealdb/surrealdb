@@ -333,7 +333,7 @@ pub fn resolve_order_by_alias(order_idiom: &Idiom, fields: &Fields) -> Option<(E
 }
 
 /// Convert an alias idiom to a flat string for registry internal names.
-fn idiom_to_flat_name(idiom: &Idiom) -> String {
+pub(crate) fn idiom_to_flat_name(idiom: &Idiom) -> String {
 	if idiom.len() == 1
 		&& let Some(Part::Field(name)) = idiom.first()
 	{

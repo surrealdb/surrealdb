@@ -469,15 +469,21 @@ impl<'ctx> Planner<'ctx> {
 				// If the alias was registered for sort (Compute pre-evaluated
 				// it), read the pre-computed field to avoid re-evaluating
 				// non-deterministic expressions like rand() or time::now().
-				if let Some(ref alias) = selector.alias
-					&& alias.len() == 1
-					&& let Some(crate::expr::part::Part::Field(name)) = alias.first()
-					&& registry.contains_name(name)
-				{
-					let idiom = Idiom(vec![crate::expr::part::Part::Field(name.clone())]);
-					let expr = self.physical_expr(Expr::Idiom(idiom)).await?;
-					return Ok(Arc::new(ProjectValue::new(input, expr, omit_fields))
-						as Arc<dyn ExecOperator>);
+				// Skip when the alias is being OMITted — OMIT deletes the
+				// pre-computed field before evaluation, so we must fall
+				// through to re-evaluate the expression directly.
+				if let Some(ref alias) = selector.alias {
+					let flat_name = crate::exec::expression_registry::idiom_to_flat_name(alias);
+					if registry.contains_name(&flat_name)
+						&& !omit_fields.iter().any(|f| {
+							f.len() == 1
+								&& matches!(f.first(), Some(crate::expr::part::Part::Field(n)) if n.as_str() == flat_name)
+						}) {
+						let idiom = Idiom(vec![crate::expr::part::Part::Field(flat_name)]);
+						let expr = self.physical_expr(Expr::Idiom(idiom)).await?;
+						return Ok(Arc::new(ProjectValue::new(input, expr, omit_fields))
+							as Arc<dyn ExecOperator>);
+					}
 				}
 				let expr = self.physical_expr(selector.expr).await?;
 				Ok(Arc::new(ProjectValue::new(input, expr, omit_fields)) as Arc<dyn ExecOperator>)
