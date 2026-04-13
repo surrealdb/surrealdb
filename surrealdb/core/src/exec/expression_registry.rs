@@ -287,11 +287,15 @@ use crate::expr::field::{Field, Fields};
 pub fn resolve_order_by_alias(order_idiom: &Idiom, fields: &Fields) -> Option<(Expr, String)> {
 	match fields {
 		Fields::Value(selector) => {
-			// Alias match (any depth: `x` or `b.c`)
+			// SELECT VALUE aliases are guaranteed single-part by the parser.
 			if let Some(ref alias) = selector.alias
-				&& *order_idiom == *alias
+				&& alias.len() == 1
+				&& let Some(Part::Field(alias_name)) = alias.first()
+				&& order_idiom.len() == 1
+				&& let Some(Part::Field(order_name)) = order_idiom.first()
+				&& alias_name == order_name
 			{
-				return Some((selector.expr.clone(), idiom_to_flat_name(alias)));
+				return Some((selector.expr.clone(), alias_name.clone()));
 			}
 			// Unaliased single-part field match
 			if order_idiom.len() == 1

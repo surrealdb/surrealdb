@@ -191,25 +191,16 @@ impl Results {
 	) -> Result<()> {
 		let values = self.take().await?;
 		let mut projected = Vec::with_capacity(values.len());
-		// Check if the alias was materialized in pluck_select via `doc.set(alias, val)`.
-		// For single-part aliases the value is a top-level key; for multi-part (b.c)
-		// it is stored as nested structure.  We detect materialization by checking
-		// whether the first part of the alias exists as a key on the object.
-		let materialized_alias: Option<&Idiom> = selector.alias.as_ref().filter(|alias| {
-			alias
-				.first()
-				.and_then(|p| {
-					if let Part::Field(n) = p {
-						Some(n.as_str())
-					} else {
-						None
-					}
-				})
-				.is_some()
-		});
+		// Check if the alias was materialized in pluck_select. SELECT VALUE
+		// aliases are guaranteed single-part by the parser.
+		let materialized_alias = match &selector.alias {
+			Some(alias) if alias.len() == 1 && matches!(alias.first(), Some(Part::Field(_))) => {
+				Some(alias)
+			}
+			_ => None,
+		};
 		for mut v in values {
 			// Preserve rid before OMIT may delete the `id` field from the document.
-			// Mirrors the non-deferred pluck path which keeps `current.rid` separate.
 			let rid = match &v {
 				Value::Object(obj) => obj.rid().map(Arc::new),
 				_ => None,
@@ -230,9 +221,6 @@ impl Results {
 					})
 					.is_some_and(|n| obj.contains_key(n))
 			{
-				// The expression was already evaluated in pluck_select and stored
-				// under the alias path. Pick it to avoid double-evaluation of
-				// non-deterministic expressions like rand() or time::now().
 				v.pick(alias)
 			} else {
 				let doc = crate::doc::CursorDoc::new(rid, None, v);

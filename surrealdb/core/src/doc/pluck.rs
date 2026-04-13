@@ -254,17 +254,21 @@ impl Document {
 					let mut doc = current.doc.as_ref().clone();
 					// When SELECT VALUE has an alias, ORDER BY may reference
 					// the alias. Materialize it on the document so the sort
-					// comparator can find it by walking the alias idiom path.
+					// comparator can find it by name.
 					if stmt.order.is_some()
 						&& let crate::expr::field::Fields::Value(ref sel) = stmt.fields
 						&& let Some(ref alias) = sel.alias
+						&& alias.len() == 1
+						&& let Some(crate::expr::part::Part::Field(name)) = alias.first()
 					{
 						let val = stk
 							.run(|stk| sel.expr.compute(stk, ctx, opt, Some(current)))
 							.await
 							.catch_return()
 							.map_err(IgnoreError::from)?;
-						doc.set(stk, ctx, opt, alias, val).await?;
+						if let Value::Object(ref mut obj) = doc {
+							obj.insert(name.clone(), val);
+						}
 					}
 					Ok(doc)
 				} else if !omit.is_empty()
