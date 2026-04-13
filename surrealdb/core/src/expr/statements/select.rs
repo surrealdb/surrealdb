@@ -111,6 +111,19 @@ impl SelectStatement {
 			db: Arc::clone(&db),
 		};
 
+		// Reject VERSION with subquery sources
+		if opt.version.is_some() {
+			for w in self.what.iter() {
+				if matches!(w, Expr::Select(_)) {
+					return Err(anyhow::Error::new(Error::Query {
+						message: "VERSION clause cannot be used with a subquery source. \
+								  Place the VERSION clause inside the subquery instead."
+							.to_string(),
+					}));
+				}
+			}
+		}
+
 		// Loop over the select targets
 		for w in self.what.iter() {
 			// The target is also calculated on the parent doc
