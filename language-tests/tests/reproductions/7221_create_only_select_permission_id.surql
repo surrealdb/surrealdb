@@ -18,6 +18,7 @@ value = "[{ id: a:0123456789abcdef0123 }]"
 skip-record-id-key = true
 
 [env]
+clean = true
 imports = ["reproductions/7221_create_only_select_permission_id_import.surql"]
 auth = { namespace = "test", database = "test", access = "user", rid = "user:test" }
 
