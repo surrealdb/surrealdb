@@ -261,6 +261,39 @@ impl InvocationContext for Host {
 		tracing::warn!(target: "surrealism::module", module, ns, db, "{output}");
 		Ok(())
 	}
+
+	fn stdout_callback(&self) -> Arc<dyn Fn(&str) + Send + Sync> {
+		let module = self.module_name.clone();
+		let ns = self.opt.ns().unwrap_or("?").to_string();
+		let db = self.opt.db().unwrap_or("?").to_string();
+		let level = crate::cnf::SURREALISM_LOG_LEVEL.clone();
+		Arc::new(move |output| match level.as_str() {
+			"trace" => {
+				tracing::trace!(target: "surrealism::module", module = %module, ns = %ns, db = %db, "{output}")
+			}
+			"info" => {
+				tracing::info!(target: "surrealism::module", module = %module, ns = %ns, db = %db, "{output}")
+			}
+			"warn" => {
+				tracing::warn!(target: "surrealism::module", module = %module, ns = %ns, db = %db, "{output}")
+			}
+			"error" => {
+				tracing::error!(target: "surrealism::module", module = %module, ns = %ns, db = %db, "{output}")
+			}
+			_ => {
+				tracing::debug!(target: "surrealism::module", module = %module, ns = %ns, db = %db, "{output}")
+			}
+		})
+	}
+
+	fn stderr_callback(&self) -> Arc<dyn Fn(&str) + Send + Sync> {
+		let module = self.module_name.clone();
+		let ns = self.opt.ns().unwrap_or("?").to_string();
+		let db = self.opt.db().unwrap_or("?").to_string();
+		Arc::new(
+			move |output| tracing::warn!(target: "surrealism::module", module = %module, ns = %ns, db = %db, "{output}"),
+		)
+	}
 }
 
 fn parse_semver(version: &str) -> Result<(u32, u32, u32)> {

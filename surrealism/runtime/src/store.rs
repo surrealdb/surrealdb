@@ -9,6 +9,7 @@ use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 
 use crate::config::SurrealismConfig;
 use crate::host::InvocationContext;
+use crate::wasi_context::StdioCallback;
 
 /// Store data for WASI component model execution.
 pub struct StoreData {
@@ -17,6 +18,8 @@ pub struct StoreData {
 	pub config: Arc<SurrealismConfig>,
 	pub(crate) context: Box<dyn InvocationContext>,
 	pub(crate) limiter: StoreLimits,
+	pub(crate) stdout_cb: StdioCallback,
+	pub(crate) stderr_cb: StdioCallback,
 }
 
 impl WasiView for StoreData {

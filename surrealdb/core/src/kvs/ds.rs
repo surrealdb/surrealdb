@@ -1130,10 +1130,8 @@ impl Datastore {
 		let total = lookups.len();
 		debug!(target: TARGET, count = total, "Surrealism eager load: loading modules");
 
-		let concurrency = std::thread::available_parallelism()
-			.map(|n| n.get())
-			.unwrap_or(8)
-			.clamp(2, 16);
+		let concurrency =
+			std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8).clamp(2, 16);
 		let load_sem = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
 
 		let mut join_set = tokio::task::JoinSet::new();

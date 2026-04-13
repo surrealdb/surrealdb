@@ -27,7 +27,7 @@ semver.workspace = true
 wasmtime-wasi.workspace = true
 toml.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, default-features = false, features = ["sync"] }
+tokio = { workspace = true, default-features = false, features = ["sync", "io-util"] }
 tracing.workspace = true
 web-time.workspace = true
 

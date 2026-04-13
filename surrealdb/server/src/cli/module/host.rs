@@ -112,4 +112,12 @@ impl InvocationContext for DemoHost {
 		eprintln!("[surli::err] {}", output);
 		Ok(())
 	}
+
+	fn stdout_callback(&self) -> std::sync::Arc<dyn Fn(&str) + Send + Sync> {
+		std::sync::Arc::new(|output| println!("[surli::out] {}", output))
+	}
+
+	fn stderr_callback(&self) -> std::sync::Arc<dyn Fn(&str) + Send + Sync> {
+		std::sync::Arc::new(|output| eprintln!("[surli::err] {}", output))
+	}
 }

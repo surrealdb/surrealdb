@@ -99,16 +99,24 @@ impl Controller {
 	}
 
 	/// Replace the invocation context. Used when reusing a pooled controller
-	/// for a new request with different permissions.
+	/// for a new request with different permissions. Also updates the WASI
+	/// stdio callbacks so guest `println!` output routes through the same
+	/// structured logging path as the WIT `stdout`/`stderr` imports.
 	pub fn set_context(&mut self, context: Box<dyn InvocationContext>) {
-		self.store.data_mut().context = context;
+		let data = self.store.data_mut();
+		*data.stdout_cb.lock() = context.stdout_callback();
+		*data.stderr_cb.lock() = context.stderr_callback();
+		data.context = context;
 	}
 
 	/// Clear the invocation context, replacing it with a NullContext.
 	/// Called before returning a controller to the pool so no per-request state
-	/// (auth, permissions, KV) is retained.
+	/// (auth, permissions, KV) is retained. Resets WASI stdio to host defaults.
 	pub fn clear_context(&mut self) {
-		self.store.data_mut().context = Box::new(NullContext);
+		let data = self.store.data_mut();
+		*data.stdout_cb.lock() = Arc::new(|output| print!("{}", output));
+		*data.stderr_cb.lock() = Arc::new(|output| eprint!("{}", output));
+		data.context = Box::new(NullContext);
 	}
 
 	/// Reset the epoch deadline to the maximum safe value. Wasmtime internally

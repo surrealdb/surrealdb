@@ -3,6 +3,8 @@
 //! Implementations supply `sql`/`run`/`kv`/stdio per call. Host functions
 //! decode FlatBuffers, call the context, and encode results.
 
+use std::sync::Arc;
+
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 use surrealism_types::err::{PrefixErr, SurrealismResult};
@@ -44,6 +46,24 @@ pub trait InvocationContext: Send + Sync {
 	fn stderr(&mut self, output: &str) -> Result<()> {
 		eprint!("{}", output);
 		Ok(())
+	}
+
+	/// Returns a self-contained callback for forwarding WASI stdout output.
+	///
+	/// This is used by the WASI output stream to route guest `println!` / C `printf`
+	/// output through the same path as the WIT `stdout` import. Override this to
+	/// capture structured context (module name, namespace, database, etc.) inside
+	/// the closure so the callback can be invoked independently of `&mut self`.
+	///
+	/// The returned `Arc` is cheap to clone and allows the WASI stream to
+	/// snapshot the callback without holding a lock during invocation.
+	fn stdout_callback(&self) -> Arc<dyn Fn(&str) + Send + Sync> {
+		Arc::new(|output| print!("{}", output))
+	}
+
+	/// Same as [`stdout_callback`](Self::stdout_callback) but for stderr.
+	fn stderr_callback(&self) -> Arc<dyn Fn(&str) + Send + Sync> {
+		Arc::new(|output| eprint!("{}", output))
 	}
 }
 

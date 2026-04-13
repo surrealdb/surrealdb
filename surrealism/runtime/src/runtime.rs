@@ -387,8 +387,16 @@ impl Runtime {
 			})?;
 
 		let fs_root = self.fs_dir.as_ref().map(|fs| fs.path());
-		let (wasi_ctx, table) =
-			crate::wasi_context::build(fs_root, self.resolved_allow_net.clone())?;
+		let stdout_cb = crate::wasi_context::new_stdout_callback();
+		let stderr_cb = crate::wasi_context::new_stderr_callback();
+		*stdout_cb.lock() = context.stdout_callback();
+		*stderr_cb.lock() = context.stderr_callback();
+		let (wasi_ctx, table) = crate::wasi_context::build(
+			fs_root,
+			self.resolved_allow_net.clone(),
+			stdout_cb.clone(),
+			stderr_cb.clone(),
+		)?;
 		tracing::debug!(elapsed = ?t0.elapsed(), "new_controller: wasi_context::build");
 
 		let mut limits_builder = StoreLimitsBuilder::new();
@@ -403,6 +411,8 @@ impl Runtime {
 			config: self.config.clone(),
 			context,
 			limiter,
+			stdout_cb,
+			stderr_cb,
 		};
 		let mut store = Store::new(self.engine_handle.engine(), store_data);
 		store.limiter(|data| &mut data.limiter);
