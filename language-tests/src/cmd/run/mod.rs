@@ -231,7 +231,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let failed = reports.iter().filter(|r| r.grade() == TestGrade::Failed).count();
 	let warned = reports.iter().filter(|r| r.grade() == TestGrade::Warning).count();
 	if use_color {
-		print!(ansi!(green,"{} runs passed",reset_format),passed);
+		print!(ansi!(green," {} runs passed",reset_format),passed);
 		if failed > 0 {
 			print!(ansi!(", ",red,"{} failed",reset_format),failed);
 		}
@@ -423,10 +423,6 @@ async fn run_test_with_dbs(
 	let result = dbs.process(query, &session, None).await;
 	let did_timeout = start.elapsed() > timeout_duration;
 
-	if did_timeout {
-		return Ok(TestTaskResult::Timeout);
-	};
-
 
 	if let Some(ref ns) = session.ns {
 		if let Some(ref db) = session.db {
@@ -466,7 +462,10 @@ async fn run_test_with_dbs(
 	match result {
 		Ok(x) => {
 			let x = x.into_iter().map(|x| x.result.map_err(|e| e.to_string())).collect();
-			Ok(TestTaskResult::Results(x))
+			Ok(TestTaskResult::Results{
+				did_timeout,
+				res: x
+			})
 		}
 		Err(e) => Ok(TestTaskResult::RunningError(anyhow::anyhow!(e))),
 	}

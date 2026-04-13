@@ -40,7 +40,12 @@ impl TestReport {
 			super::TestReportKind::NoExpectation {
 				ref output,
 			} => Self::display_unspecified(output, f),
-			super::TestReportKind::Valid => Ok(()),
+			super::TestReportKind::Valid => {
+				if self.timeout {
+					writeln!(f, "> Test ran longer then the allowed timeout, maybe shrink test or increase allowed timeout")?;
+				}
+				Ok(())
+			}
 			super::TestReportKind::MismatchedType(ref mismatch) => {
 				Self::display_type_mismatch(mismatch, f)
 			}
@@ -186,9 +191,6 @@ impl TestReport {
 
 	fn display_run_error(&self, err: &TestError, f: &mut Fmt) -> fmt::Result {
 		match err {
-			TestError::Timeout => {
-				writeln!(f, "> Test exceeded the set time limit")
-			}
 			TestError::Running(e) => {
 				writeln!(f, "> Test failed to run, returning an error before the test could run.")?;
 				f.indent(|f| writeln!(f, "- Error: {e}"))
