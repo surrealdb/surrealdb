@@ -570,7 +570,9 @@ impl<'a> TreeBuilder<'a> {
 
 		let (k, ef) = match &**nn {
 			NearestNeighbor::Approximate(k, ef) => (*k, *ef),
-			NearestNeighbor::K(k, d) if *d == hnsw.distance => (*k, 0),
+			NearestNeighbor::K(k, d) if *d == hnsw.distance => {
+				(*k, (*k).max(hnsw.ef_construction as u32))
+			}
 			_ => return Ok(None),
 		};
 

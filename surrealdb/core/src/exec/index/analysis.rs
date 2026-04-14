@@ -999,9 +999,9 @@ impl<'a> IndexAnalyzer<'a> {
 		candidates: &mut Vec<IndexCandidate>,
 	) {
 		// Approximate always uses HNSW; K(k,d) uses HNSW when distance matches
-		let (k, ef, required_distance) = match nn {
-			NearestNeighbor::Approximate(k, ef) => (*k, *ef, None),
-			NearestNeighbor::K(k, d) => (*k, 0u32, Some(d)),
+		let (k, user_ef, required_distance) = match nn {
+			NearestNeighbor::Approximate(k, ef) => (*k, Some(*ef), None),
+			NearestNeighbor::K(k, d) => (*k, None, Some(d)),
 			_ => return,
 		};
 
@@ -1044,15 +1044,16 @@ impl<'a> IndexAnalyzer<'a> {
 				continue;
 			};
 
-			if let Some(d) = required_distance {
-				if *d != hnsw.distance {
-					continue;
-				}
+			if let Some(d) = required_distance
+				&& *d != hnsw.distance
+			{
+				continue;
 			}
 
 			if let Some(first_col) = ix_def.cols.first()
 				&& idiom_matches(idiom, first_col)
 			{
+				let ef = user_ef.unwrap_or_else(|| k.max(hnsw.ef_construction as u32));
 				let index_ref = IndexRef::new(self.indexes.clone(), idx);
 				let candidate = IndexCandidate {
 					index_ref,
