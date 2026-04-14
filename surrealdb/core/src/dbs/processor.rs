@@ -173,7 +173,7 @@ impl Collectable {
 
 	#[instrument(level = "trace", skip_all)]
 	async fn process_lookup(
-		doc_ctx: NsDbTbCtx,
+		mut doc_ctx: NsDbTbCtx,
 		opt: &Options,
 		txn: &Transaction,
 		kind: LookupKind,
@@ -192,24 +192,28 @@ impl Collectable {
 			}
 		};
 
-		// When the resolved target belongs to a different table (e.g. an edge
-		// record reached via a graph traversal from a vertex), we must use that
-		// table's definition so that index maintenance, permissions, and field
-		// validation operate on the correct table.
-		let doc_ctx = if ft.as_ref() == &*doc_ctx.tb.name {
-			doc_ctx
-		} else {
-			let ns_id = doc_ctx.ns.namespace_id;
-			let db_id = doc_ctx.db.database_id;
-			let tb = txn.expect_tb(ns_id, db_id, ft.as_ref()).await?;
-			let fields = txn.all_tb_fields(ns_id, db_id, ft.as_ref(), opt.version).await?;
-			NsDbTbCtx {
-				ns: doc_ctx.ns,
-				db: doc_ctx.db,
+		// Graph/reference keys may point to a table different from the originating
+		// vertex table stored in doc_ctx (e.g. edge tables during cascade delete).
+		// Rebuild the context so downstream processing (events, views, lives,
+		// changefeeds, field validation) uses the correct table definition.
+		if ft.as_ref() != doc_ctx.tb.name {
+			let tb =
+				txn.get_or_add_tb(None, &doc_ctx.ns.name, &doc_ctx.db.name, ft.as_ref()).await?;
+			let fields = txn
+				.all_tb_fields(
+					doc_ctx.ns.namespace_id,
+					doc_ctx.db.database_id,
+					ft.as_ref(),
+					opt.version,
+				)
+				.await?;
+			doc_ctx = NsDbTbCtx {
+				ns: Arc::clone(&doc_ctx.ns),
+				db: Arc::clone(&doc_ctx.db),
 				tb,
 				fields,
-			}
-		};
+			};
+		}
 
 		// Fetch the data from the store
 		let record = if rid_only {
