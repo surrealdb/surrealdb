@@ -79,6 +79,10 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_NO_DEFAULTS", long = "no-defaults", conflicts_with_all = ["default_namespace", "default_database"])]
 	#[arg(default_value_t = false)]
 	no_defaults: bool,
+	#[arg(help = "Load Surrealism modules lazily on first use instead of eagerly at startup")]
+	#[arg(env = "SURREAL_LAZY_SURREALISM", long = "lazy-surrealism")]
+	#[arg(default_value_t = false)]
+	lazy_surrealism: bool,
 }
 
 #[derive(Args, Debug)]
@@ -737,6 +741,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		default_namespace,
 		default_database,
 		no_defaults,
+		lazy_surrealism,
 	}: StartCommandDbsOptions,
 ) -> Result<(Datastore, Receiver<Notification>)> {
 	// Warn about the strict mode flag being unused.
@@ -798,6 +803,9 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	} else {
 		builder
 	};
+
+	#[cfg(feature = "surrealism")]
+	let builder = builder.with_lazy_surrealism(lazy_surrealism);
 
 	let dbs = builder.build_with_factory_path::<C>(&opt.path, composer).await?;
 	// Ensure the storage version is up to date to prevent corruption.

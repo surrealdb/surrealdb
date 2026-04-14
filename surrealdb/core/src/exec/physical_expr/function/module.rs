@@ -27,6 +27,9 @@ pub struct SurrealismModuleExec {
 	pub(crate) module: String,
 	pub(crate) sub: Option<String>,
 	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
+	/// Whether this function is declared writeable by the module author.
+	/// When `false`, the function is read-only and the host can use a read transaction.
+	pub(crate) writeable: bool,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -150,8 +153,12 @@ impl PhysicalExpr for SurrealismModuleExec {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// Module functions are always potentially read-write
-		AccessMode::ReadWrite.combine(args_access_mode(&self.arguments))
+		let func_mode = if self.writeable {
+			AccessMode::ReadWrite
+		} else {
+			AccessMode::ReadOnly
+		};
+		func_mode.combine(args_access_mode(&self.arguments))
 	}
 }
 
@@ -181,6 +188,8 @@ pub struct SiloModuleExec {
 	pub(crate) patch: u32,
 	pub(crate) sub: Option<String>,
 	pub(crate) arguments: Vec<Arc<dyn PhysicalExpr>>,
+	/// Whether this function is declared writeable by the module author.
+	pub(crate) writeable: bool,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -209,8 +218,12 @@ impl PhysicalExpr for SiloModuleExec {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		// Silo functions are always potentially read-write
-		AccessMode::ReadWrite.combine(args_access_mode(&self.arguments))
+		let func_mode = if self.writeable {
+			AccessMode::ReadWrite
+		} else {
+			AccessMode::ReadOnly
+		};
+		func_mode.combine(args_access_mode(&self.arguments))
 	}
 }
 

@@ -174,7 +174,7 @@ impl InfoStatement {
 						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
 						"buckets".to_string() => process(txn.all_db_buckets(ns, db).await?),
 						"functions".to_string() => process(txn.all_db_functions(ns, db).await?),
-						"modules".to_string() => process(txn.all_db_modules(ns, db).await?),
+						"modules".to_string() => process_modules(ctx, ns, db, txn.all_db_modules(ns, db).await?).await,
 						"models".to_string() => process(txn.all_db_models(ns, db).await?),
 						"params".to_string() => process(txn.all_db_params(ns, db).await?),
 						"tables".to_string() => process(txn.all_tb(ns, db, version).await?),
@@ -439,4 +439,115 @@ async fn system() -> Value {
 		"physical_cores".to_string() => info.physical_cores.into(),
 		"memory_allocated".to_string() => info.memory_allocated.into(),
 	})
+}
+
+#[cfg(feature = "surrealism")]
+fn surrealism_exports_manifest_to_value(
+	exports: &surrealism_runtime::exports::ExportsManifest,
+) -> Value {
+	let values: Vec<Value> = exports
+		.functions
+		.iter()
+		.map(|f| {
+			let mut obj = Object::default();
+			if let Some(name) = &f.name {
+				obj.insert("name".to_string(), Value::from(name.clone()));
+			}
+			obj.insert(
+				"args".to_string(),
+				Value::Array(
+					f.args
+						.iter()
+						.map(|(arg_name, kind)| {
+							let mut arg_obj = Object::default();
+							arg_obj.insert("name".to_string(), Value::from(arg_name.clone()));
+							arg_obj.insert("kind".to_string(), Value::from(format!("{kind}")));
+							Value::Object(arg_obj)
+						})
+						.collect(),
+				),
+			);
+			obj.insert("returns".to_string(), Value::from(format!("{}", f.returns)));
+			obj.insert("writeable".to_string(), Value::from(f.writeable));
+			if let Some(comment) = &f.comment {
+				obj.insert("comment".to_string(), Value::from(comment.clone()));
+			}
+			Value::Object(obj)
+		})
+		.collect();
+
+	Value::Array(values.into())
+}
+
+#[cfg(feature = "surrealism")]
+async fn get_module_exports(
+	ctx: &FrozenContext,
+	ns: &crate::catalog::NamespaceId,
+	db: &crate::catalog::DatabaseId,
+	executable: &crate::catalog::ModuleExecutable,
+) -> Option<Value> {
+	use crate::buc::store::ObjectKey;
+	use crate::catalog::ModuleExecutable;
+	use crate::surrealism::cache::SurrealismCacheLookup;
+
+	match executable {
+		ModuleExecutable::Surrealism(s) => {
+			if let Ok(bucket) = ctx.get_bucket_store(*ns, *db, &s.bucket).await {
+				let key = ObjectKey::new(s.key.clone());
+				if let Ok(Some(bytes)) = bucket.get(&key).await
+					&& let Ok(manifest) = surrealism_runtime::package::exports_manifest_from_reader(
+						std::io::Cursor::new(bytes),
+					) {
+					return Some(surrealism_exports_manifest_to_value(&manifest));
+				}
+			}
+
+			let lookup = SurrealismCacheLookup::File(ns, db, &s.bucket, &s.key);
+			let runtime = match ctx.get_surrealism_runtime(lookup).await {
+				Ok(r) => r,
+				Err(e) => {
+					tracing::trace!("Could not load module runtime for exports: {e}");
+					return None;
+				}
+			};
+			Some(surrealism_exports_manifest_to_value(runtime.exports()))
+		}
+		ModuleExecutable::Silo(s) => {
+			let lookup =
+				SurrealismCacheLookup::Silo(&s.organisation, &s.package, s.major, s.minor, s.patch);
+			let runtime = match ctx.get_surrealism_runtime(lookup).await {
+				Ok(r) => r,
+				Err(e) => {
+					tracing::trace!("Could not load module runtime for exports: {e}");
+					return None;
+				}
+			};
+			Some(surrealism_exports_manifest_to_value(runtime.exports()))
+		}
+	}
+}
+
+/// Process module definitions into structured Values, enriching each with
+/// export signatures from the cached surrealism runtime when available.
+pub(crate) async fn process_modules(
+	ctx: &FrozenContext,
+	ns: crate::catalog::NamespaceId,
+	db: crate::catalog::DatabaseId,
+	modules: Arc<[crate::catalog::ModuleDefinition]>,
+) -> Value {
+	let mut values = Vec::with_capacity(modules.len());
+	for module in modules.iter() {
+		#[allow(unused_mut)]
+		let mut val = module.clone().structure();
+		#[cfg(feature = "surrealism")]
+		if let Value::Object(ref mut obj) = val
+			&& let Some(exports) = get_module_exports(ctx, &ns, &db, &module.executable).await
+		{
+			obj.insert("exports".to_string(), exports);
+		}
+		values.push(val);
+	}
+	#[cfg(not(feature = "surrealism"))]
+	let _ = (ctx, ns, db);
+	Value::Array(values.into())
 }

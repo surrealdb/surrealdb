@@ -172,7 +172,7 @@ jobs:
     name: Check workspace (MSRV)
     runs-on: ubuntu-latest
     env:
-      msrv: "1.90" # This should be updated if the MSRV is updated.
+      msrv: "1.91" # This should be updated if the MSRV is updated.
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

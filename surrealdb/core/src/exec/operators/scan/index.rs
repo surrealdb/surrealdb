@@ -445,28 +445,38 @@ impl ExecOperator for IndexScan {
 
 			// Collect record IDs from index and batch-fetch full records
 			match (&access, is_unique) {
-				// Unique equality - at most one record
+				// Unique equality — single record for non-NULL values,
+				// but NONE/NULL entries use prefix scanning and can
+				// match multiple records requiring pagination.
 				(BTreeAccess::Equality(value), true) => {
-					if ctx.cancellation().is_cancelled() {
-						Err(ControlFlow::Err(anyhow::anyhow!(
-							crate::err::Error::QueryCancelled
-						)))?;
-					}
 					let mut iter = UniqueEqualIterator::new(ns_id, db_id, ix, value)
 						.context("Failed to create iterator")?;
 
-					let rids = iter.next_batch(&txn).await
-						.context("Failed to iterate index")?;
+					loop {
+						if ctx.cancellation().is_cancelled() {
+							Err(ControlFlow::Err(anyhow::anyhow!(
+								crate::err::Error::QueryCancelled
+							)))?;
+						}
+						let rids = iter.next_batch(&txn).await
+							.context("Failed to iterate index")?;
+						if rids.is_empty() {
+							break;
+						}
 
-					let mut values = fetch_and_filter_records_batch(
-						&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
-						CachePolicy::ReadWrite,
-					).await?;
+						let mut values = fetch_and_filter_records_batch(
+							&ctx, &txn, ns_id, db_id, &rids, &select_permission, check_perms, version,
+							CachePolicy::ReadOnly,
+						).await?;
 
-					pipeline.process_batch(&mut values, &ctx).await?;
+						let cont = pipeline.process_batch(&mut values, &ctx).await?;
 
-					if !values.is_empty() {
-						yield ValueBatch { values };
+						if !values.is_empty() {
+							yield ValueBatch { values };
+						}
+						if !cont {
+							break;
+						}
 					}
 				}
 

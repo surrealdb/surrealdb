@@ -33,11 +33,13 @@ pub struct Builder {
 	shutdown: CancellationToken,
 	notify_channel: Option<Sender<PublicNotification>>,
 	id: Option<Uuid>,
-	slowlog: Option<SlowLog>,
+	slow_log: Option<SlowLog>,
 	transaction_timeout: Option<Duration>,
 	query_timeout: Option<Duration>,
 	temporary_directory: Option<Arc<PathBuf>>,
 	authenticate: bool,
+	#[cfg(feature = "surrealism")]
+	lazy_surrealism: bool,
 }
 
 impl Default for Builder {
@@ -53,11 +55,13 @@ impl Builder {
 			shutdown: CancellationToken::new(),
 			notify_channel: None,
 			id: None,
-			slowlog: None,
+			slow_log: None,
 			transaction_timeout: None,
 			query_timeout: None,
 			temporary_directory: None,
 			authenticate: false,
+			#[cfg(feature = "surrealism")]
+			lazy_surrealism: false,
 		}
 	}
 
@@ -117,12 +121,17 @@ impl Builder {
 		allowed_params: Vec<String>,
 		disallowed_params: Vec<String>,
 	) -> Self {
-		self.slowlog = Some(SlowLog::new(timeout, allowed_params, disallowed_params));
+		self.slow_log = Some(SlowLog::new(timeout, allowed_params, disallowed_params));
 		self
 	}
 
 	pub fn with_temporary_directory<P: AsRef<Path>>(mut self, directory: Option<P>) -> Self {
 		self.temporary_directory = directory.map(|x| Arc::new(x.as_ref().to_path_buf()));
+		self
+	}
+
+	pub fn with_lazy_surrealism(mut self, lazy_surrealism: bool) -> Self{
+		self.lazy_surrealism = lazy_surrealism;
 		self
 	}
 
@@ -157,7 +166,7 @@ impl Builder {
 			transaction_factory: tf.clone(),
 			auth_enabled: self.authenticate,
 			dynamic_configuration,
-			slow_log: None,
+			slow_log: self.slow_log,
 			transaction_timeout: self.transaction_timeout,
 			notification_channel: self.notify_channel,
 			capabilities,
@@ -173,6 +182,8 @@ impl Builder {
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 			async_event_trigger,
+			#[cfg(feature = "surrealism")]
+			lazy_surrealism: self.lazy_surrealism,
 		})
 	}
 }

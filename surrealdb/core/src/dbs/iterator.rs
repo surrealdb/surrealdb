@@ -739,6 +739,17 @@ impl Iterator {
 			self.results.sort().await?;
 			// Process any START & LIMIT clause
 			self.results.start_limit(self.start_skip, self.start, self.limit).await?;
+			// Apply deferred SELECT VALUE projection. When ORDER BY is
+			// present with SELECT VALUE, field projection is deferred so
+			// that sorting can access document fields. Now that sorting
+			// and pagination are complete, project to the VALUE result.
+			if stm.order().is_some()
+				&& stm.group().is_none()
+				&& plan.explanation.is_none()
+				&& let Some(Fields::Value(selector)) = stm.expr()
+			{
+				self.results.project_value(stk, ctx, opt, selector, stm.omit()).await?;
+			}
 			// Process any FETCH clause
 			if let Some(e) = &mut plan.explanation {
 				e.add_fetch(self.results.len());
