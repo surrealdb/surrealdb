@@ -52,32 +52,19 @@ DEFINE INDEX OVERWRITE t_idx ON t FIELDS i, j UNIQUE;
 
 CREATE t:1 SET i = 1;
 CREATE t:2 SET i = 2;
-<<<<<<< HEAD
-
--- Core reproduction: ORDER BY DESC should return both records
-SELECT * FROM t ORDER BY i DESC;
-
--- ORDER BY ASC should also return both records
-=======
 CREATE t:3 SET i = 3, j = "hello";
 
 -- Core reproduction: ORDER BY DESC should return all records
 SELECT * FROM t ORDER BY i DESC;
 
 -- ORDER BY ASC should also return all records
->>>>>>> upstream/main
 SELECT * FROM t ORDER BY i ASC;
 
 -- Verify records exist via unordered select
 SELECT * FROM t;
 
-<<<<<<< HEAD
--- Verify with a WHERE clause
-SELECT * FROM t WHERE i >= 1 ORDER BY i DESC;
-=======
 -- WHERE on the non-NONE record
 SELECT * FROM t WHERE i >= 1 ORDER BY i DESC;
 
 -- WHERE on a range that includes NONE-valued records
 SELECT * FROM t WHERE i >= 2 ORDER BY i ASC;
->>>>>>> upstream/main
