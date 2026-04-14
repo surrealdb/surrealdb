@@ -130,7 +130,7 @@ impl Builder {
 		self
 	}
 
-	pub fn with_lazy_surrealism(mut self, lazy_surrealism: bool) -> Self{
+	pub fn with_lazy_surrealism(mut self, lazy_surrealism: bool) -> Self {
 		self.lazy_surrealism = lazy_surrealism;
 		self
 	}
