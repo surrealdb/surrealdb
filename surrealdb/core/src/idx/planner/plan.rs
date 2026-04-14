@@ -539,19 +539,21 @@ impl IndexOption {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq, Hash)]
 pub(super) struct RangeValue {
-	pub(super) value: Arc<Value>,
+	/// `None` means "no bound" (unbounded). `Some(v)` is an explicit bound,
+	/// including `Some(Arc<Value::None>)` for an explicit NONE predicate.
+	pub(super) value: Option<Arc<Value>>,
 	pub(super) inclusive: bool,
 }
 
 impl RangeValue {
 	fn set_to(&mut self, v: &Arc<Value>) {
 		// Merge an exclusive upper bound (e.g., < v). We choose the maximum 'to' value.
-		if self.value.is_none() {
-			self.value = v.clone();
+		let Some(current) = &self.value else {
+			self.value = Some(v.clone());
 			return;
-		}
-		if self.value.lt(v) {
-			self.value = v.clone();
+		};
+		if current.lt(v) {
+			self.value = Some(v.clone());
 			// A stricter (exclusive) bound dominates when we move the upper limit up.
 			self.inclusive = false;
 		}
@@ -560,17 +562,17 @@ impl RangeValue {
 	fn set_to_inclusive(&mut self, v: &Arc<Value>) {
 		// Merge an inclusive upper bound (e.g., <= v). Prefer the highest value; if
 		// values are equal, inclusive wins over exclusive.
-		if self.value.is_none() {
-			self.value = v.clone();
+		let Some(current) = &self.value else {
+			self.value = Some(v.clone());
 			self.inclusive = true;
 			return;
-		}
+		};
 		if self.inclusive {
-			if self.value.lt(v) {
-				self.value = v.clone();
+			if current.lt(v) {
+				self.value = Some(v.clone());
 			}
-		} else if self.value.le(v) {
-			self.value = v.clone();
+		} else if current.le(v) {
+			self.value = Some(v.clone());
 			self.inclusive = true;
 		}
 	}
@@ -578,12 +580,12 @@ impl RangeValue {
 	fn set_from(&mut self, v: &Arc<Value>) {
 		// Merge an exclusive lower bound (e.g., > v). We choose the minimum 'from' value
 		// that is still >= all constraints; moving the bound down uses exclusive.
-		if self.value.is_none() {
-			self.value = v.clone();
+		let Some(current) = &self.value else {
+			self.value = Some(v.clone());
 			return;
-		}
-		if self.value.as_ref().gt(v.as_ref()) {
-			self.value = v.clone();
+		};
+		if current.as_ref().gt(v.as_ref()) {
+			self.value = Some(v.clone());
 			self.inclusive = false;
 		}
 	}
@@ -591,17 +593,17 @@ impl RangeValue {
 	fn set_from_inclusive(&mut self, v: &Arc<Value>) {
 		// Merge an inclusive lower bound (e.g., >= v). If multiple constraints target
 		// the same value, inclusive should override exclusive.
-		if self.value.as_ref().is_none() {
-			self.value = v.clone();
+		let Some(current) = &self.value else {
+			self.value = Some(v.clone());
 			self.inclusive = true;
 			return;
-		}
+		};
 		if self.inclusive {
-			if self.value.as_ref().gt(v.as_ref()) {
-				self.value = v.clone();
+			if current.as_ref().gt(v.as_ref()) {
+				self.value = Some(v.clone());
 			}
-		} else if self.value.as_ref().ge(v.as_ref()) {
-			self.value = v.clone();
+		} else if current.as_ref().ge(v.as_ref()) {
+			self.value = Some(v.clone());
 			self.inclusive = true;
 		}
 	}
@@ -609,8 +611,12 @@ impl RangeValue {
 
 impl From<&RangeValue> for Value {
 	fn from(rv: &RangeValue) -> Self {
+		let val = match &rv.value {
+			Some(v) => v.as_ref().clone(),
+			None => Value::None,
+		};
 		Value::from(Object::from(HashMap::from([
-			("value", rv.value.as_ref().clone()),
+			("value", val),
 			("inclusive", Value::from(rv.inclusive)),
 		])))
 	}
@@ -738,13 +744,13 @@ mod tests {
 	fn test_range_value_from_inclusive() {
 		let mut r = RangeValue::default();
 		r.set_from_inclusive(&Arc::new(20.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(20));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
 		assert!(r.inclusive);
 		r.set_from_inclusive(&Arc::new(10.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(10));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(10)));
 		assert!(r.inclusive);
 		r.set_from_inclusive(&Arc::new(20.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(10));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(10)));
 		assert!(r.inclusive);
 	}
 
@@ -752,13 +758,13 @@ mod tests {
 	fn test_range_value_from() {
 		let mut r = RangeValue::default();
 		r.set_from(&Arc::new(20.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(20));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
 		assert!(!r.inclusive);
 		r.set_from(&Arc::new(10.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(10));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(10)));
 		assert!(!r.inclusive);
 		r.set_from(&Arc::new(20.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(10));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(10)));
 		assert!(!r.inclusive);
 	}
 
@@ -766,13 +772,13 @@ mod tests {
 	fn test_range_value_to_inclusive() {
 		let mut r = RangeValue::default();
 		r.set_to_inclusive(&Arc::new(10.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(10));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(10)));
 		assert!(r.inclusive);
 		r.set_to_inclusive(&Arc::new(20.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(20));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
 		assert!(r.inclusive);
 		r.set_to_inclusive(&Arc::new(10.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(20));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
 		assert!(r.inclusive);
 	}
 
@@ -780,13 +786,13 @@ mod tests {
 	fn test_range_value_to() {
 		let mut r = RangeValue::default();
 		r.set_to(&Arc::new(10.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(10));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(10)));
 		assert!(!r.inclusive);
 		r.set_to(&Arc::new(20.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(20));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
 		assert!(!r.inclusive);
 		r.set_to(&Arc::new(10.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(20));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
 		assert!(!r.inclusive);
 	}
 
@@ -794,13 +800,13 @@ mod tests {
 	fn test_range_value_to_switch_inclusive() {
 		let mut r = RangeValue::default();
 		r.set_to(&Arc::new(20.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(20));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
 		assert!(!r.inclusive);
 		r.set_to_inclusive(&Arc::new(20.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(20));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
 		assert!(r.inclusive);
 		r.set_to(&Arc::new(20.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(20));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
 		assert!(r.inclusive);
 	}
 
@@ -808,13 +814,13 @@ mod tests {
 	fn test_range_value_from_switch_inclusive() {
 		let mut r = RangeValue::default();
 		r.set_from(&Arc::new(20.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(20));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
 		assert!(!r.inclusive);
 		r.set_from_inclusive(&Arc::new(20.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(20));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
 		assert!(r.inclusive);
 		r.set_from(&Arc::new(20.into()));
-		assert_eq!(r.value.as_ref(), &Value::from(20));
+		assert_eq!(r.value.as_deref(), Some(&Value::from(20)));
 		assert!(r.inclusive);
 	}
 }

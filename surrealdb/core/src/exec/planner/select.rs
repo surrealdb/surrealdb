@@ -383,8 +383,13 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		match fields {
 			Fields::Value(selector) => {
+				let omit_fields = if !omit.is_empty() {
+					self.plan_omit(omit).await?
+				} else {
+					vec![]
+				};
 				let expr = self.physical_expr(selector.expr).await?;
-				Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(ProjectValue::new(input, expr, omit_fields)) as Arc<dyn ExecOperator>)
 			}
 
 			Fields::Select(field_list) => {
@@ -456,8 +461,33 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		match fields {
 			Fields::Value(selector) => {
+				let omit_fields = if !omit.is_empty() {
+					self.plan_omit(omit).await?
+				} else {
+					vec![]
+				};
+				// If the alias was registered for sort (Compute pre-evaluated
+				// it), read the pre-computed field to avoid re-evaluating
+				// non-deterministic expressions like rand() or time::now().
+				// Skip when the alias is being OMITted — OMIT deletes the
+				// pre-computed field before evaluation, so we must fall
+				// through to re-evaluate the expression directly.
+				// SELECT VALUE aliases are guaranteed single-part by the parser.
+				if let Some(ref alias) = selector.alias
+					&& alias.len() == 1
+					&& let Some(crate::expr::part::Part::Field(name)) = alias.first()
+					&& registry.contains_name(name)
+					&& !omit_fields.iter().any(|f| {
+						f.len() == 1
+							&& matches!(f.first(), Some(crate::expr::part::Part::Field(n)) if n == name)
+					}) {
+					let idiom = Idiom(vec![crate::expr::part::Part::Field(name.clone())]);
+					let expr = self.physical_expr(Expr::Idiom(idiom)).await?;
+					return Ok(Arc::new(ProjectValue::new(input, expr, omit_fields))
+						as Arc<dyn ExecOperator>);
+				}
 				let expr = self.physical_expr(selector.expr).await?;
-				Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(ProjectValue::new(input, expr, omit_fields)) as Arc<dyn ExecOperator>)
 			}
 
 			Fields::Select(ref field_list) => {

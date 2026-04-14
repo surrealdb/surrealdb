@@ -748,7 +748,7 @@ impl Iterator {
 				&& plan.explanation.is_none()
 				&& let Some(Fields::Value(selector)) = stm.expr()
 			{
-				self.results.project_value(stk, ctx, opt, selector).await?;
+				self.results.project_value(stk, ctx, opt, selector, stm.omit()).await?;
 			}
 			// Process any FETCH clause
 			if let Some(e) = &mut plan.explanation {
