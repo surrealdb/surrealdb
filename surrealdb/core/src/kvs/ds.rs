@@ -136,6 +136,10 @@ pub struct Datastore {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Arc<SurrealismCache>,
+	/// When `true`, surrealism modules are loaded lazily on first use
+	/// instead of being eagerly compiled at startup.
+	#[cfg(feature = "surrealism")]
+	lazy_surrealism: bool,
 	// Async event processing trigger
 	async_event_trigger: Arc<Notify>,
 }
@@ -677,6 +681,8 @@ impl Datastore {
 			sequences: Sequences::new(tf, id),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			#[cfg(feature = "surrealism")]
+			lazy_surrealism: false,
 			async_event_trigger,
 		})
 	}
@@ -719,6 +725,8 @@ impl Datastore {
 			transaction_factory: self.transaction_factory,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			#[cfg(feature = "surrealism")]
+			lazy_surrealism: self.lazy_surrealism,
 			async_event_trigger: self.async_event_trigger,
 		}
 	}
@@ -788,6 +796,20 @@ impl Datastore {
 	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = path.map(Arc::new);
 		self
+	}
+
+	/// Configure whether surrealism modules are loaded lazily on first use
+	/// rather than eagerly at startup.
+	#[cfg(feature = "surrealism")]
+	pub fn with_lazy_surrealism(mut self, lazy: bool) -> Self {
+		self.lazy_surrealism = lazy;
+		self
+	}
+
+	/// Returns `true` if surrealism modules are loaded lazily.
+	#[cfg(feature = "surrealism")]
+	pub fn is_lazy_surrealism(&self) -> bool {
+		self.lazy_surrealism
 	}
 
 	pub fn index_store(&self) -> &IndexStores {
@@ -1006,6 +1028,175 @@ impl Datastore {
 		self.delete_node().await?;
 		// Run any storage engine shutdown tasks
 		self.transaction_factory.builder.shutdown().await
+	}
+
+	// --------------------------------------------------
+	// Surrealism eager loading
+	// --------------------------------------------------
+
+	/// Pre-load all Surrealism module runtimes into the cache so that
+	/// subsequent query planning can resolve function metadata (e.g. the
+	/// `writeable` flag) without triggering on-demand compilation.
+	///
+	/// Modules are loaded in parallel using a `JoinSet`. Any individual
+	/// failure is logged but does not abort the overall loading process.
+	#[cfg(feature = "surrealism")]
+	pub async fn eager_load_surrealism_modules(&self) {
+		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
+		use crate::surrealism::cache::SurrealismCacheLookup;
+
+		let txn = match self.transaction(Read, Optimistic).await {
+			Ok(txn) => Arc::new(txn),
+			Err(e) => {
+				warn!(target: TARGET, error = %e, "Surrealism eager load: failed to open transaction");
+				return;
+			}
+		};
+
+		let mut ctx = match self.setup_ctx() {
+			Ok(ctx) => ctx,
+			Err(e) => {
+				warn!(target: TARGET, error = %e, "Surrealism eager load: failed to set up context");
+				return;
+			}
+		};
+		ctx.set_transaction(txn.clone());
+		let ctx = ctx.freeze();
+
+		let nss = match txn.all_ns().await {
+			Ok(nss) => nss,
+			Err(e) => {
+				warn!(target: TARGET, error = %e, "Surrealism eager load: failed to list namespaces");
+				return;
+			}
+		};
+
+		// Collect all module lookups first, then load in parallel.
+		struct ModuleLookup {
+			ns_id: crate::catalog::NamespaceId,
+			db_id: crate::catalog::DatabaseId,
+			bucket: String,
+			key: String,
+			display_name: String,
+		}
+
+		let mut lookups = Vec::new();
+		for ns in nss.iter() {
+			let dbs = match txn.all_db(ns.namespace_id).await {
+				Ok(dbs) => dbs,
+				Err(e) => {
+					warn!(
+						target: TARGET,
+						error = %e, ns = %ns.name,
+						"Surrealism eager load: failed to list databases"
+					);
+					continue;
+				}
+			};
+			for db in dbs.iter() {
+				let modules = match txn.all_db_modules(ns.namespace_id, db.database_id).await {
+					Ok(m) => m,
+					Err(e) => {
+						warn!(
+							target: TARGET,
+							error = %e, ns = %ns.name, db = %db.name,
+							"Surrealism eager load: failed to list modules"
+						);
+						continue;
+					}
+				};
+				for md in modules.iter() {
+					if let crate::catalog::ModuleExecutable::Surrealism(s) = &md.executable {
+						lookups.push(ModuleLookup {
+							ns_id: ns.namespace_id,
+							db_id: db.database_id,
+							bucket: s.bucket.clone(),
+							key: s.key.clone(),
+							display_name: md
+								.name
+								.clone()
+								.unwrap_or_else(|| "<unnamed>".to_string()),
+						});
+					}
+				}
+			}
+		}
+
+		if lookups.is_empty() {
+			debug!(target: TARGET, "Surrealism eager load: no modules to load");
+			return;
+		}
+
+		let total = lookups.len();
+		debug!(target: TARGET, count = total, "Surrealism eager load: loading modules");
+
+		let concurrency =
+			std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8).clamp(2, 16);
+		let load_sem = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
+
+		let mut join_set = tokio::task::JoinSet::new();
+		for lookup in lookups {
+			let ctx = ctx.clone();
+			let load_sem = load_sem.clone();
+			join_set.spawn(async move {
+				let _permit = load_sem
+					.acquire_owned()
+					.await
+					.expect("Surrealism eager load semaphore must not be closed");
+				let cache_lookup = SurrealismCacheLookup::File(
+					&lookup.ns_id,
+					&lookup.db_id,
+					&lookup.bucket,
+					&lookup.key,
+				);
+				match ctx.get_surrealism_runtime(cache_lookup).await {
+					Ok(_) => {
+						debug!(
+							target: TARGET,
+							module = %lookup.display_name,
+							"Surrealism eager load: loaded module"
+						);
+						true
+					}
+					Err(e) => {
+						warn!(
+							target: TARGET,
+							module = %lookup.display_name,
+							error = %e,
+							"Surrealism eager load: failed to load module"
+						);
+						false
+					}
+				}
+			});
+		}
+
+		let mut loaded = 0usize;
+		let mut failed = 0usize;
+		while let Some(result) = join_set.join_next().await {
+			match result {
+				Ok(true) => loaded += 1,
+				Ok(false) => failed += 1,
+				Err(e) => {
+					warn!(target: TARGET, error = %e, "Surrealism eager load: task panicked");
+					failed += 1;
+				}
+			}
+		}
+
+		if failed > 0 {
+			warn!(
+				target: TARGET,
+				loaded, failed, total,
+				"Surrealism eager load: completed with failures"
+			);
+		} else {
+			tracing::info!(
+				target: TARGET,
+				loaded, total,
+				"Surrealism eager load: all modules loaded"
+			);
+		}
 	}
 
 	// --------------------------------------------------

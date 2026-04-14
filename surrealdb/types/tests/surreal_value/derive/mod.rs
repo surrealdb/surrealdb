@@ -106,6 +106,91 @@ fn test_simple_struct_with_renamed_fields() {
 }
 
 ////////////////////////////////////////////////////
+/////// Struct with raw identifier fields //////////
+////////////////////////////////////////////////////
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
+struct RawIdentStruct {
+	r#type: String,
+	name: String,
+}
+
+#[test]
+fn test_raw_identifier_field_uses_unescaped_name() {
+	let val = RawIdentStruct {
+		r#type: "span".to_string(),
+		name: "test".to_string(),
+	};
+
+	let value = val.into_value();
+	if let Value::Object(obj) = &value {
+		assert_eq!(obj.get("type"), Some(&Value::String("span".to_string())));
+		assert!(obj.get("r#type").is_none(), "key must be 'type', not 'r#type'");
+		assert_eq!(obj.get("name"), Some(&Value::String("test".to_string())));
+	} else {
+		panic!("Expected Object value");
+	}
+
+	let converted = RawIdentStruct::from_value(value.clone()).unwrap();
+	assert_eq!(converted.r#type, "span");
+	assert_eq!(converted.name, "test");
+
+	let kind = RawIdentStruct::kind_of();
+	let debug = format!("{:?}", kind);
+	assert!(debug.contains(r#""type": String"#), "kind_of should use 'type' not 'r#type': {debug}");
+	assert!(!debug.contains("r#type"), "kind_of must not contain 'r#type': {debug}");
+
+	assert!(RawIdentStruct::is_value(&value));
+	assert!(value.is::<RawIdentStruct>());
+	assert!(!RawIdentStruct::is_value(&Value::None));
+	assert!(!RawIdentStruct::is_value(&Value::Object(Object::new())));
+}
+
+////////////////////////////////////////////////////
+///// Enum with raw identifier variant names ///////
+////////////////////////////////////////////////////
+
+#[derive(SurrealValue, Debug, PartialEq)]
+#[surreal(crate = "surrealdb_types")]
+#[surreal(tag = "kind")]
+#[allow(non_camel_case_types)]
+enum RawIdentEnum {
+	r#type {
+		name: String,
+	},
+	Normal {
+		name: String,
+	},
+}
+
+#[test]
+fn test_raw_identifier_enum_variant_uses_unescaped_name() {
+	let val = RawIdentEnum::r#type {
+		name: "test".to_string(),
+	};
+
+	let value = val.into_value();
+	if let Value::Object(obj) = &value {
+		assert_eq!(obj.get("kind"), Some(&Value::String("type".to_string())));
+		assert_eq!(obj.get("name"), Some(&Value::String("test".to_string())));
+	} else {
+		panic!("Expected Object value");
+	}
+
+	let converted = RawIdentEnum::from_value(value.clone()).unwrap();
+	assert_eq!(
+		converted,
+		RawIdentEnum::r#type {
+			name: "test".to_string()
+		}
+	);
+
+	assert!(RawIdentEnum::is_value(&value));
+	assert!(value.is::<RawIdentEnum>());
+}
+
+////////////////////////////////////////////////////
 /////////// Simple single field struct /////////////
 ////////////////////////////////////////////////////
 
@@ -417,4 +502,201 @@ fn test_per_field_default_roundtrip() {
 	let value = s.clone().into_value();
 	let parsed = StructWithFieldDefaults::from_value(value).unwrap();
 	assert_eq!(parsed, s);
+}
+
+// -------------------------------------------------
+// Recursive enum (issue #6829)
+// -------------------------------------------------
+
+#[derive(Clone, Debug, PartialEq, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
+enum RecursiveEnum {
+	Leaf(String),
+	BoxChild(Box<RecursiveEnum>),
+	VecChildren(Vec<RecursiveEnum>),
+}
+
+#[test]
+fn test_recursive_enum_kind_of_does_not_stack_overflow() {
+	let kind = RecursiveEnum::kind_of();
+	let debug = format!("{kind:?}");
+	assert!(debug.contains("Any"), "Recursive references should resolve to Kind::Any");
+}
+
+#[test]
+fn test_recursive_enum_roundtrip() {
+	let value = RecursiveEnum::BoxChild(Box::new(RecursiveEnum::Leaf("hello".to_string())));
+	let converted = value.clone().into_value();
+	let parsed = RecursiveEnum::from_value(converted).unwrap();
+	assert_eq!(parsed, value);
+
+	let nested = RecursiveEnum::VecChildren(vec![
+		RecursiveEnum::Leaf("a".to_string()),
+		RecursiveEnum::BoxChild(Box::new(RecursiveEnum::Leaf("b".to_string()))),
+	]);
+	let converted = nested.clone().into_value();
+	let parsed = RecursiveEnum::from_value(converted).unwrap();
+	assert_eq!(parsed, nested);
+}
+
+// -------------------------------------------------
+// Recursive struct (issue #6829)
+// -------------------------------------------------
+
+#[derive(Clone, Debug, PartialEq, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
+struct RecursiveStruct {
+	name: String,
+	children: Vec<RecursiveStruct>,
+}
+
+#[test]
+fn test_recursive_struct_kind_of_does_not_stack_overflow() {
+	let kind = RecursiveStruct::kind_of();
+	let debug = format!("{kind:?}");
+	assert!(debug.contains("Any"), "Recursive references should resolve to Kind::Any");
+}
+
+#[test]
+fn test_recursive_struct_roundtrip() {
+	let value = RecursiveStruct {
+		name: "root".to_string(),
+		children: vec![
+			RecursiveStruct {
+				name: "child1".to_string(),
+				children: vec![],
+			},
+			RecursiveStruct {
+				name: "child2".to_string(),
+				children: vec![RecursiveStruct {
+					name: "grandchild".to_string(),
+					children: vec![],
+				}],
+			},
+		],
+	};
+	let converted = value.clone().into_value();
+	let parsed = RecursiveStruct::from_value(converted).unwrap();
+	assert_eq!(parsed, value);
+}
+
+// -------------------------------------------------
+// Generic struct cross-monomorphization
+// -------------------------------------------------
+
+#[derive(Clone, Debug, PartialEq, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
+struct GenericWrapper<T: SurrealValue + Clone + std::fmt::Debug + PartialEq> {
+	inner: T,
+	nested: Option<Box<GenericWrapper<String>>>,
+}
+
+#[test]
+fn test_generic_kind_of_no_false_recursion_across_monomorphizations() {
+	// Each monomorphization should correctly compute its non-recursive fields.
+	// The compile-time detection marks fields containing the type name as
+	// Kind::Any, so the `nested` field (which contains GenericWrapper) is
+	// always Any regardless of the type parameter.
+	let i64_kind = GenericWrapper::<i64>::kind_of();
+	let i64_debug = format!("{i64_kind:?}");
+	assert!(
+		i64_debug.contains("Int"),
+		"inner field of GenericWrapper<i64> should be Int: {i64_debug}"
+	);
+	assert!(
+		i64_debug.contains("Any"),
+		"nested field should be Any (self-referential): {i64_debug}"
+	);
+
+	// Calling GenericWrapper<String>::kind_of() independently should produce
+	// String for the inner field, confirming each monomorphization is correct.
+	let string_kind = GenericWrapper::<String>::kind_of();
+	let string_debug = format!("{string_kind:?}");
+	assert!(
+		string_debug.contains("String"),
+		"inner field of GenericWrapper<String> should be String: {string_debug}"
+	);
+	assert!(
+		string_debug.contains("Any"),
+		"nested field should be Any (self-referential): {string_debug}"
+	);
+}
+
+// -------------------------------------------------
+// Module-qualified field is not self-referential
+// -------------------------------------------------
+
+mod other {
+	use super::*;
+
+	#[derive(Clone, Debug, PartialEq, SurrealValue)]
+	#[surreal(crate = "surrealdb_types")]
+	pub struct Shared {
+		pub value: i64,
+	}
+}
+
+/// A struct whose name matches the last segment of a module-qualified field
+/// type (`other::Shared`). The field must NOT be treated as self-referential
+/// because the fully-qualified path points to a different type.
+#[derive(Clone, Debug, PartialEq, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
+struct Shared {
+	name: String,
+	foreign: other::Shared,
+}
+
+#[test]
+fn test_module_qualified_same_name_is_not_self_referential() {
+	let kind = Shared::kind_of();
+	let debug = format!("{kind:?}");
+	// `other::Shared` is a different type than `Shared` — its kind should be
+	// fully computed, not short-circuited to Kind::Any.
+	assert!(debug.contains("Int"), "foreign field should have its kind fully computed: {debug}");
+	assert!(
+		!debug.contains("Any"),
+		"no field should be Any since nothing is self-referential: {debug}"
+	);
+}
+
+// -------------------------------------------------
+// Self keyword in field types
+// -------------------------------------------------
+
+#[derive(Clone, Debug, PartialEq, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
+struct SelfRefStruct {
+	name: String,
+	child: Option<Box<Self>>,
+}
+
+#[test]
+fn test_self_keyword_is_detected_as_recursive() {
+	let kind = SelfRefStruct::kind_of();
+	let debug = format!("{kind:?}");
+	assert!(
+		debug.contains("Any"),
+		"Self-referential field via `Self` keyword should resolve to Kind::Any: {debug}"
+	);
+}
+
+// -------------------------------------------------
+// self::Type path in field types
+// -------------------------------------------------
+
+#[derive(Clone, Debug, PartialEq, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
+struct SelfModuleRef {
+	name: String,
+	child: Option<Box<self::SelfModuleRef>>,
+}
+
+#[test]
+fn test_self_module_path_is_detected_as_recursive() {
+	let kind = SelfModuleRef::kind_of();
+	let debug = format!("{kind:?}");
+	assert!(
+		debug.contains("Any"),
+		"Self-referential field via `self::Type` path should resolve to Kind::Any: {debug}"
+	);
 }

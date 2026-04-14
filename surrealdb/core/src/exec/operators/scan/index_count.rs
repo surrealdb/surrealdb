@@ -465,11 +465,18 @@ async fn count_btree_index_keys(
 
 	match (access, is_unique) {
 		(BTreeAccess::Equality(value), true) => {
-			// Unique equality: at most one record.
 			let mut iter = UniqueEqualIterator::new(ns_id, db_id, ix, value)
 				.context("Failed to create unique equal iterator")?;
-			let rids = iter.next_batch(txn).await.context("Failed to iterate index")?;
-			count = rids.len();
+			loop {
+				if ctx.cancellation().is_cancelled() {
+					return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
+				}
+				let rids = iter.next_batch(txn).await.context("Failed to iterate index")?;
+				if rids.is_empty() {
+					break;
+				}
+				count += rids.len();
+			}
 		}
 		(BTreeAccess::Equality(value), false) => {
 			// Non-unique equality: iterate all matching entries.

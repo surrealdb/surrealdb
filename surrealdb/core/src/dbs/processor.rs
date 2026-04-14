@@ -130,7 +130,7 @@ impl Collectable {
 		match self {
 			// Graph edge traversal results - requires special graph parsing and record lookup
 			Self::Lookup(doc_ctx, kind, key) => {
-				Self::process_lookup(doc_ctx, txn, kind, key, rid_only).await
+				Self::process_lookup(doc_ctx, opt, txn, kind, key, rid_only).await
 			}
 			// Range scan results - lightweight processing for range queries
 			Self::RangeKey(doc_ctx, key) => Self::process_range_key(doc_ctx, key).await,
@@ -173,7 +173,8 @@ impl Collectable {
 
 	#[instrument(level = "trace", skip_all)]
 	async fn process_lookup(
-		doc_ctx: NsDbTbCtx,
+		mut doc_ctx: NsDbTbCtx,
+		opt: &Options,
 		txn: &Transaction,
 		kind: LookupKind,
 		key: Key,
@@ -190,6 +191,29 @@ impl Collectable {
 				(refe.ft, refe.fk)
 			}
 		};
+
+		// Graph/reference keys may point to a table different from the originating
+		// vertex table stored in doc_ctx (e.g. edge tables during cascade delete).
+		// Rebuild the context so downstream processing (events, views, lives,
+		// changefeeds, field validation) uses the correct table definition.
+		if ft.as_ref() != doc_ctx.tb.name {
+			let tb =
+				txn.get_or_add_tb(None, &doc_ctx.ns.name, &doc_ctx.db.name, ft.as_ref()).await?;
+			let fields = txn
+				.all_tb_fields(
+					doc_ctx.ns.namespace_id,
+					doc_ctx.db.database_id,
+					ft.as_ref(),
+					opt.version,
+				)
+				.await?;
+			doc_ctx = NsDbTbCtx {
+				ns: Arc::clone(&doc_ctx.ns),
+				db: Arc::clone(&doc_ctx.db),
+				tb,
+				fields,
+			};
+		}
 
 		// Fetch the data from the store
 		let record = if rid_only {

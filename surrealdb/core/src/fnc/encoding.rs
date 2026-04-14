@@ -87,13 +87,15 @@ pub mod json {
 		Ok(Value::from(val))
 	}
 
-	/// Decodes a JSON string into a SurrealDB value.
+	/// Decodes a JSON string into a SurrealDB value using an RFC 8259
+	/// compliant parser, supporting all valid JSON escape sequences.
 	pub fn decode((arg,): (String,)) -> Result<Value> {
-		let public_val =
-			json::decode(arg.as_bytes()).map_err(|_| Error::InvalidFunctionArguments {
+		let json: serde_json::Value =
+			serde_json::from_str(&arg).map_err(|_| Error::InvalidFunctionArguments {
 				name: "encoding::json::decode".to_owned(),
 				message: "Invalid JSON".to_owned(),
 			})?;
+		let public_val = crate::rpc::format::json::json_to_value(json);
 		Ok(crate::sql::expression::convert_public_value_to_internal(public_val))
 	}
 }

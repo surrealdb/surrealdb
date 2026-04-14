@@ -188,7 +188,12 @@ impl Enum {
 		}
 	}
 
-	pub fn kind_of(&self, attrs: &EnumAttributes, crate_path: &CratePath) -> TokenStream2 {
+	pub fn kind_of(
+		&self,
+		type_name: &syn::Ident,
+		attrs: &EnumAttributes,
+		crate_path: &CratePath,
+	) -> TokenStream2 {
 		let kind_ty = crate_path.kind();
 
 		let variants = self
@@ -196,7 +201,7 @@ impl Enum {
 			.iter()
 			.map(|variant| {
 				let strategy = Self::strategy_for_variant(variant, attrs);
-				variant.fields.kind_of(&strategy, crate_path)
+				variant.fields.kind_of(type_name, &strategy, crate_path)
 			})
 			.collect::<Vec<_>>();
 

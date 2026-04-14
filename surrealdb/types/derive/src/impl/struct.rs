@@ -80,7 +80,7 @@ pub fn impl_struct(
 		},
 		With::Value(x) => x,
 	};
-	let kind_of = fields.kind_of(&strategy, crate_path);
+	let kind_of = fields.kind_of(name, &strategy, crate_path);
 
 	let let_fields = if fields.has_fields() {
 		quote!( let Self #match_fields = self; )
