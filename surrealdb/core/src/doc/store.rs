@@ -26,16 +26,10 @@ impl Document {
 		// Get NS & DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 
-		// Remove the id field from the doc so that it's not duplicated,
-		// because it's always present as a key in the underlying key-value
-		// datastore. When the doc is read from the datastore, the key is set
-		// as its id field.
 		// The cloning of the doc is required because the resulting doc
 		// must be returned to the caller with the id present.
-		let mut doc_without_id = self.current.doc.clone();
-		if let crate::val::Value::Object(obj) = doc_without_id.to_mut() {
-			obj.0.remove("id");
-		}
+		let doc = self.current.doc.clone();
+
 		// Match the statement type
 		match stm {
 			// This is a INSERT statement so try to insert the key.
@@ -55,7 +49,7 @@ impl Document {
 						db,
 						&rid.table,
 						&rid.key,
-						doc_without_id.into_read_only(),
+						doc.into_read_only(),
 						opt.version,
 					)
 					.await
@@ -91,7 +85,7 @@ impl Document {
 						db,
 						&rid.table,
 						&rid.key,
-						doc_without_id.into_read_only(),
+						doc.into_read_only(),
 						opt.version,
 					)
 					.await
@@ -127,7 +121,7 @@ impl Document {
 						db,
 						&rid.table,
 						&rid.key,
-						doc_without_id.into_read_only(),
+						doc.into_read_only(),
 						opt.version,
 					)
 					.await
@@ -156,7 +150,7 @@ impl Document {
 						db,
 						&rid.table,
 						&rid.key,
-						doc_without_id.into_read_only(),
+						doc.into_read_only(),
 						opt.version,
 					)
 					.await

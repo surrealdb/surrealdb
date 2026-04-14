@@ -33,7 +33,7 @@ use crate::kvs::index::{BatchId, BatchIdsCleanQueue, SharedIndexKey};
 use crate::kvs::scanner::Direction;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{BoxTimeStamp, BoxTimeStampImpl, KVKey, KVValue, Transactor, cache};
-use crate::val::{RecordId, RecordIdKey, TableName};
+use crate::val::{RecordId, RecordIdKey, TableName, Value};
 
 /// Controls whether `getm_records` populates the transaction cache on miss.
 ///
@@ -851,6 +851,21 @@ impl Transaction {
 		// Set the value in the cache
 		let qey = cache::tx::Lookup::Record(ns, db, tb, id);
 		self.cache.insert(qey, cache::tx::Entry::Val(record));
+	}
+
+	// Remove the id field from the doc so that it's not duplicated,
+	// because it's always present as a key in the underlying key-value
+	// datastore. When the doc is read from the datastore, the key is set
+	// as its id field.
+	// The cloning of the record is required because the original record
+	// will be returned or cached.
+	#[inline]
+	fn purge_doc_id(&self, record: &Record) -> Record {
+		let mut record = record.clone();
+		if let Value::Object(obj) = &mut record.data {
+			obj.0.remove("id");
+		}
+		record
 	}
 
 	/// Clears all keys from the transaction cache.
@@ -2152,7 +2167,9 @@ impl TableProvider for Transaction {
 		version: Option<u64>,
 	) -> Result<()> {
 		let key = crate::key::record::new(ns, db, tb, id);
-		self.put(&key, &record, version).await?;
+		// Create a record without doc id.
+		let store_record = self.purge_doc_id(&record);
+		self.put(&key, &store_record, version).await?;
 		self.set_record_cache(ns, db, tb, id, record);
 		Ok(())
 	}
@@ -2169,7 +2186,9 @@ impl TableProvider for Transaction {
 	) -> Result<()> {
 		// Set the value in the datastore
 		let key = crate::key::record::new(ns, db, tb, id);
-		self.set(&key, &record, version).await?;
+		// Create a record without doc id.
+		let store_record = self.purge_doc_id(&record);
+		self.set(&key, &store_record, version).await?;
 		// Set the value in the cache
 		self.set_record_cache(ns, db, tb, id, record);
 		// Return nothing
