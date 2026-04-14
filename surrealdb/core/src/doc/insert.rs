@@ -163,7 +163,10 @@ impl Document {
 		self.default_record_data(ctx, opt, stm).await?;
 		self.process_table_fields(stk, ctx, opt, stm).await?;
 		self.cleanup_table_fields(ctx, opt, stm).await?;
-		self.check_permissions_table(stk, ctx, opt, stm).await?;
+		if let Err(e) = self.check_permissions_table(stk, ctx, opt, stm).await {
+			self.cleanup_table_references(stk, ctx, opt).await?;
+			return Err(e);
+		}
 		self.store_index_data(stk, ctx, opt).await?;
 		self.store_record_data(ctx, opt, stm).await?;
 		self.process_table_views(stk, ctx, opt, stm).await?;
@@ -189,7 +192,10 @@ impl Document {
 		self.default_record_data(ctx, opt, stm).await?;
 		self.process_table_fields(stk, ctx, opt, stm).await?;
 		self.cleanup_table_fields(ctx, opt, stm).await?;
-		self.check_permissions_table(stk, ctx, opt, stm).await?;
+		if let Err(e) = self.check_permissions_table(stk, ctx, opt, stm).await {
+			self.cleanup_table_references(stk, ctx, opt).await?;
+			return Err(e);
+		}
 		self.store_index_data(stk, ctx, opt).await?;
 		self.store_record_data(ctx, opt, stm).await?;
 		self.process_table_views(stk, ctx, opt, stm).await?;
