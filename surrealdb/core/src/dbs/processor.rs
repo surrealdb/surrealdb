@@ -130,7 +130,7 @@ impl Collectable {
 		match self {
 			// Graph edge traversal results - requires special graph parsing and record lookup
 			Self::Lookup(doc_ctx, kind, key) => {
-				Self::process_lookup(doc_ctx, txn, kind, key, rid_only).await
+				Self::process_lookup(doc_ctx, opt, txn, kind, key, rid_only).await
 			}
 			// Range scan results - lightweight processing for range queries
 			Self::RangeKey(doc_ctx, key) => Self::process_range_key(doc_ctx, key).await,
@@ -174,6 +174,7 @@ impl Collectable {
 	#[instrument(level = "trace", skip_all)]
 	async fn process_lookup(
 		doc_ctx: NsDbTbCtx,
+		opt: &Options,
 		txn: &Transaction,
 		kind: LookupKind,
 		key: Key,
@@ -188,6 +189,25 @@ impl Collectable {
 			LookupKind::Reference => {
 				let refe = r#ref::Ref::decode_key(&key)?;
 				(refe.ft, refe.fk)
+			}
+		};
+
+		// When the resolved target belongs to a different table (e.g. an edge
+		// record reached via a graph traversal from a vertex), we must use that
+		// table's definition so that index maintenance, permissions, and field
+		// validation operate on the correct table.
+		let doc_ctx = if ft.as_ref() == &*doc_ctx.tb.name {
+			doc_ctx
+		} else {
+			let ns_id = doc_ctx.ns.namespace_id;
+			let db_id = doc_ctx.db.database_id;
+			let tb = txn.expect_tb(ns_id, db_id, ft.as_ref()).await?;
+			let fields = txn.all_tb_fields(ns_id, db_id, ft.as_ref(), opt.version).await?;
+			NsDbTbCtx {
+				ns: doc_ctx.ns,
+				db: doc_ctx.db,
+				tb,
+				fields,
 			}
 		};
 

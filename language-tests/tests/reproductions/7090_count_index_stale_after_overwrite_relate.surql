@@ -7,7 +7,6 @@ auth = { level = "owner" }
 [test]
 reason = "COUNT index returns stale results after DEFINE TABLE OVERWRITE + RELATE in stored function"
 issue = 7090
-wip = true
 
 # -- Setup + cycle 1
 [[test.results]]
@@ -24,7 +23,7 @@ value = "[{ cnt: 2 }]"
 [[test.results]]
 value = "NONE"
 
-# -- count() via COUNT index after cycle 2 — BUG: returns 1 instead of 2
+# -- count() via COUNT index after cycle 2
 [[test.results]]
 value = "[{ cnt: 2 }]"
 # -- count(id) via full scan after cycle 2
@@ -35,7 +34,7 @@ value = "[{ cnt: 2 }]"
 [[test.results]]
 value = "NONE"
 
-# -- count() via COUNT index after cycle 3 — BUG: returns 0 instead of 2 (cumulative)
+# -- count() via COUNT index after cycle 3
 [[test.results]]
 value = "[{ cnt: 2 }]"
 # -- count(id) via full scan after cycle 3
