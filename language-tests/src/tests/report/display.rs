@@ -27,7 +27,7 @@ impl TestReport {
 		};
 		let mut buffer = String::new();
 		let mut f = Fmt::new(&mut buffer, 2);
-		f.indent(|f| self.display_grade( use_color, f)).unwrap();
+		f.indent(|f| self.display_grade(use_color, f)).unwrap();
 
 		println!("{buffer}");
 	}
@@ -42,7 +42,10 @@ impl TestReport {
 			} => Self::display_unspecified(output, f),
 			super::TestReportKind::Valid => {
 				if self.timeout {
-					writeln!(f, "> Test ran longer then the allowed timeout, maybe shrink test or increase allowed timeout")?;
+					writeln!(
+						f,
+						"> Test ran longer then the allowed timeout, maybe shrink test or increase allowed timeout"
+					)?;
 				}
 				Ok(())
 			}
@@ -92,7 +95,6 @@ impl TestReport {
 	}
 
 	fn display_grade_header(&self, use_color: bool, f: &mut Fmt) -> fmt::Result {
-
 		match self.grade() {
 			TestGrade::Success => {
 				if self.is_wip() {
@@ -113,7 +115,7 @@ impl TestReport {
 							self.name
 						)?;
 					} else {
-						writeln!(f, " ==> Success for {}:",self.name)?;
+						writeln!(f, " ==> Success for {}:", self.name)?;
 					}
 					f.indent(|f| {
 						writeln!(f, "> Tests succeeded even though it is marked Work in Progress")

@@ -8,8 +8,8 @@ use surrealdb_core::syn::error::RenderedError;
 use surrealdb_types::{Object, Value as SurValue, Variables};
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
+use crate::tests::TestRun;
 use crate::tests::run::{CaseImports, RunConfig, TestRunId};
-use crate::tests::{TestRun};
 use crate::tests::schema::{self, BoolOr, TestConfig, TestDetailsResults};
 
 mod display;
@@ -58,9 +58,9 @@ pub enum TestTaskResult {
 	SigninError(anyhow::Error),
 	Import(String, String),
 	BadCleanup(Vec<Vec<u8>>),
-	Results{
+	Results {
 		did_timeout: bool,
-		res: Vec<Result<SurValue, String>>
+		res: Vec<Result<SurValue, String>>,
 	},
 }
 
@@ -308,11 +308,13 @@ pub struct TestReport {
 impl TestReport {
 	pub fn grade(&self) -> TestGrade {
 		match &self.kind {
-			TestReportKind::Valid => if self.timeout {
-				TestGrade::Warning
-			}else{
-				TestGrade::Success
-			},
+			TestReportKind::Valid => {
+				if self.timeout {
+					TestGrade::Warning
+				} else {
+					TestGrade::Success
+				}
+			}
 			TestReportKind::MismatchedType(_)
 			| TestReportKind::MismatchedParsing {
 				..
@@ -333,7 +335,7 @@ impl TestReport {
 			TestReportKind::Error(_) => {
 				if self.is_wip() {
 					TestGrade::Warning
-				}else{
+				} else {
 					TestGrade::Failed
 				}
 			}
@@ -356,17 +358,23 @@ impl TestReport {
 		job_result: TestTaskResult,
 		matching_datastore: &Datastore,
 	) -> Self {
-		let (timeout,outputs) = match &job_result {
-			TestTaskResult::ParserError(e) => (false, Some(TestOutputs::ParsingError(e.to_string()))),
-			TestTaskResult::SignupError(e) => (false, Some(TestOutputs::SignupError(e.to_string()))),
-			TestTaskResult::SigninError(e) => (false, Some(TestOutputs::SigninError(e.to_string()))),
+		let (timeout, outputs) = match &job_result {
+			TestTaskResult::ParserError(e) => {
+				(false, Some(TestOutputs::ParsingError(e.to_string())))
+			}
+			TestTaskResult::SignupError(e) => {
+				(false, Some(TestOutputs::SignupError(e.to_string())))
+			}
+			TestTaskResult::SigninError(e) => {
+				(false, Some(TestOutputs::SigninError(e.to_string())))
+			}
 			TestTaskResult::RunningError(_) => (false, None),
 			TestTaskResult::Import(_, _) => (false, None),
 			TestTaskResult::BadCleanup(_) => (false, None),
-			TestTaskResult::Results{
+			TestTaskResult::Results {
 				did_timeout,
 				res,
-			} => (*did_timeout,Some(TestOutputs::Values(res.clone()))),
+			} => (*did_timeout, Some(TestOutputs::Values(res.clone()))),
 		};
 
 		let cfg = &run.case.test.config.parsed;
@@ -521,7 +529,10 @@ impl TestReport {
 					expected: expected_error,
 				}
 			}
-			TestTaskResult::Results{  res, .. } => {
+			TestTaskResult::Results {
+				res,
+				..
+			} => {
 				let expectation = TestExpectation::from_test_config(config);
 				Self::grade_value_results(expectation, res, matcher_datastore).await
 			}

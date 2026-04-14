@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
 use surrealdb_core::channel;
-use surrealdb_core::dbs::capabilities::Targets;
 use surrealdb_core::dbs::Capabilities;
+use surrealdb_core::dbs::capabilities::Targets;
 use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
@@ -19,7 +19,6 @@ struct CreateInfo {
 	backend: Backend,
 	dir: Option<String>,
 }
-
 
 impl CreateInfo {
 	pub async fn new(backend: Backend) -> Result<Self> {
@@ -57,15 +56,12 @@ impl CreateInfo {
 
 		let allows_live = cap.allows_live_query_notifications();
 
-
-		let builder = Datastore::builder()
-			.with_capabilities(cap)
-			.with_auth(true);
+		let builder = Datastore::builder().with_capabilities(cap).with_auth(true);
 
 		let builder = if allows_live {
 			let (send, _) = channel::bounded(15_000);
 			builder.with_notify(send)
-		}else{
+		} else {
 			builder
 		};
 
@@ -105,9 +101,9 @@ impl CreateInfo {
 
 		ds.bootstrap().await?;
 
-		Ok(Ds{
+		Ok(Ds {
 			store: Box::new(ds),
-			path
+			path,
 		})
 	}
 
@@ -121,7 +117,7 @@ impl CreateInfo {
 	}
 }
 
-pub struct Ds{
+pub struct Ds {
 	/// The store itself
 	store: Box<Datastore>,
 	/// The path where you can find the store, none if the store is in-memory
@@ -137,7 +133,6 @@ pub struct Provisioner {
 	create_info: Arc<CreateInfo>,
 }
 
-
 enum PermitInner {
 	Reuse {
 		ds: Ds,
@@ -149,7 +144,7 @@ enum PermitInner {
 	},
 }
 
-pub enum CanReuse{
+pub enum CanReuse {
 	Reusable,
 	Reset,
 }
@@ -163,10 +158,7 @@ pub struct Permit {
 }
 
 impl Permit {
-	pub async fn with<
-		F: AsyncFnOnce(&mut Box<Datastore>, &Box<Datastore>) -> (CanReuse,R),
-		R,
-	>(
+	pub async fn with<F: AsyncFnOnce(&mut Box<Datastore>, &Box<Datastore>) -> (CanReuse, R), R>(
 		self,
 		f: F,
 	) -> Result<R> {
@@ -182,28 +174,28 @@ impl Permit {
 			}
 			PermitInner::Create {
 				versioned,
-				capabilities
-			} => {
-				self.info.produce_ds(versioned, *capabilities).await?
-			}
+				capabilities,
+			} => self.info.produce_ds(versioned, *capabilities).await?,
 		};
 
-		let (can_reuse,res) = f(&mut store.store, &self.grade_ds).await;
+		let (can_reuse, res) = f(&mut store.store, &self.grade_ds).await;
 
-		if let CanReuse::Reset = can_reuse{
+		if let CanReuse::Reset = can_reuse {
 			if let Err(e) = self.grade_ds.shutdown().await {
 				println!("Failed to shutdown panicking datastore: {e}");
 			}
 			let new_ds = create_grade_ds().await;
-			self.grade_send.try_send(new_ds)
-					.expect("Too many datastores entered into datastore channel");
-		}else{
-			self.grade_send.try_send(self.grade_ds)
-					.expect("Too many datastores entered into datastore channel");
+			self.grade_send
+				.try_send(new_ds)
+				.expect("Too many datastores entered into datastore channel");
+		} else {
+			self.grade_send
+				.try_send(self.grade_ds)
+				.expect("Too many datastores entered into datastore channel");
 		}
 
 		if let Some(sender) = sender {
-			if let CanReuse::Reset = can_reuse{
+			if let CanReuse::Reset = can_reuse {
 				// Shutdown the panicking datastore to release resources
 				if let Err(e) = store.store.shutdown().await {
 					println!("Failed to shutdown panicking datastore: {e}");
@@ -219,16 +211,12 @@ impl Permit {
 						return Ok(res);
 					}
 				};
-				sender
-					.try_send(ds)
-					.expect("Too many datastores entered into datastore channel");
+				sender.try_send(ds).expect("Too many datastores entered into datastore channel");
 			} else {
 				sender.try_send(store).expect("Too many datastores entered into datastore channel");
 			}
 			return Ok(res);
 		}
-
-
 
 		// Shutdown the datastore before removing its directory to ensure all file descriptors
 		// are closed This is critical for RocksDB which can have many open file handles
@@ -247,20 +235,18 @@ impl Permit {
 	}
 }
 
-async fn create_grade_ds() -> Box<Datastore>{
+async fn create_grade_ds() -> Box<Datastore> {
 	let ds = Datastore::builder()
 		.with_capabilities(
 			Capabilities::none()
-			.with_functions(Targets::All)
-			.without_functions(Targets::None)
-			.with_scripting(true)
+				.with_functions(Targets::All)
+				.without_functions(Targets::None)
+				.with_scripting(true),
 		)
 		.with_query_timeout(None)
 		.build_with_path("memory")
 		.await
 		.expect("datastore to build successfully");
-
-
 
 	ds.bootstrap().await.unwrap();
 
@@ -278,11 +264,12 @@ impl Provisioner {
 
 		let (send, recv) = mpsc::channel(num_jobs);
 		for _ in 0..num_jobs {
-			let ds = info.produce_ds(false, Capabilities::all().with_experimental(Targets::All)).await?;
+			let ds =
+				info.produce_ds(false, Capabilities::all().with_experimental(Targets::All)).await?;
 			send.try_send(ds).unwrap();
 		}
 		let (grade_send, grade_recv) = mpsc::channel(num_jobs);
-		for _ in 0..num_jobs{
+		for _ in 0..num_jobs {
 			let ds = create_grade_ds().await;
 			grade_send.try_send(ds).unwrap();
 		}
@@ -298,7 +285,7 @@ impl Provisioner {
 
 	pub async fn obtain(&mut self, env: &TestEnv) -> Permit {
 		let grade_ds = self.grade_recv.recv().await.expect("Datastore channel closed early");
-		if is_base_environment(env){
+		if is_base_environment(env) {
 			let ds = self.recv.recv().await.expect("Datastore channel closed early");
 			Permit {
 				info: self.create_info.clone(),
@@ -309,23 +296,22 @@ impl Provisioner {
 					channel: self.send.clone(),
 				},
 			}
-		}else{
-			let capabilities = match &env.capabilities{
+		} else {
+			let capabilities = match &env.capabilities {
 				BoolOr::Bool(true) => Capabilities::all().with_experimental(Targets::All),
 				BoolOr::Bool(false) => Capabilities::none(),
 				BoolOr::Value(x) => core_capabilities_from_test_config(x),
 			};
-			Permit{
+			Permit {
 				info: self.create_info.clone(),
 				grade_send: self.grade_send.clone(),
 				grade_ds,
 				inner: PermitInner::Create {
 					versioned: env.versioned,
-					capabilities: Box::new(capabilities)
-				}
+					capabilities: Box::new(capabilities),
+				},
 			}
 		}
-
 	}
 
 	pub async fn shutdown(mut self) -> Result<()> {
@@ -359,10 +345,9 @@ impl Provisioner {
 	}
 }
 
-fn is_base_environment(env: &TestEnv) -> bool{
-	!env.clean && !env.versioned && matches!(env.capabilities,BoolOr::Bool(true))
+fn is_base_environment(env: &TestEnv) -> bool {
+	!env.clean && !env.versioned && matches!(env.capabilities, BoolOr::Bool(true))
 }
-
 
 /// Creates the right core capabilities from a test config.
 pub fn core_capabilities_from_test_config(cap: &TestCapabilities) -> Capabilities {
@@ -372,9 +357,7 @@ pub fn core_capabilities_from_test_config(cap: &TestCapabilities) -> Capabilitie
 	///
 	/// If there is a value it will return Targets::All on the value true, Targets::None on the
 	/// value false, and otherwise the returns the specified values.
-	fn extract_targets<T>(
-		v: &BoolOr<Vec<SchemaTarget<T>>>,
-	) -> Targets<T>
+	fn extract_targets<T>(v: &BoolOr<Vec<SchemaTarget<T>>>) -> Targets<T>
 	where
 		T: Eq + std::hash::Hash + Ord + Clone,
 	{
@@ -400,4 +383,3 @@ pub fn core_capabilities_from_test_config(cap: &TestCapabilities) -> Capabilitie
 		.with_experimental(extract_targets(&cap.allow_experimental))
 		.without_experimental(extract_targets(&cap.deny_experimental))
 }
-

@@ -9,7 +9,6 @@ pub struct TempDir {
 	id_gen: AtomicUsize,
 }
 
-
 impl TempDir {
 	#[allow(dead_code)]
 	pub async fn new(prefix: &str) -> Result<Self, io::Error> {

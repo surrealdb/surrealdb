@@ -1,43 +1,43 @@
-use std::io::IsTerminal;
 use std::fmt::Write;
+use std::io::IsTerminal;
 use std::panic::AssertUnwindSafe;
+use std::thread;
 use std::time::{Duration, Instant};
-use std::{ thread};
 
 use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 use futures::FutureExt as _;
-use provisioner::{Provisioner};
+use provisioner::Provisioner;
 use semver::Version;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::env::VERSION;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
-use tokio::sync::mpsc::{self,    UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::cli::{Backend, ColorMode, ResultsMode};
 use crate::cmd::run::provisioner::CanReuse;
-use crate::format::{ansi, IndentFormatter, Progress};
+use crate::format::{IndentFormatter, Progress, ansi};
 use crate::runner::Schedular;
-use crate::tests::run::{CaseImports, RunConfig};
-use crate::tests::{CaseSet, RunSetBuilder, TestRun};
 use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
-use crate::tests::schema::{ NewPlannerStrategyConfig, ENV_DEFAULT_TIMEOUT};
+use crate::tests::run::{CaseImports, RunConfig};
+use crate::tests::schema::{ENV_DEFAULT_TIMEOUT, NewPlannerStrategyConfig};
+use crate::tests::{CaseSet, RunSetBuilder, TestRun};
 
 mod provisioner;
 mod util;
 
 #[derive(Debug)]
-pub struct TestRunConfig{
+pub struct TestRunConfig {
 	pub planner_config: NewPlannerStrategyConfig,
 	pub backend: Backend,
 }
 
-impl RunConfig for TestRunConfig{
-    fn name(&self, case: &CaseImports) -> String {
-		format!("{} on {} [{}]", case.test.origin.path, self.backend,self.planner_config)
-    }
+impl RunConfig for TestRunConfig {
+	fn name(&self, case: &CaseImports) -> String {
+		format!("{} on {} [{}]", case.test.origin.path, self.backend, self.planner_config)
+	}
 }
 
 pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
@@ -77,12 +77,17 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		})
 		// Run for all config the test has configured.
 		.with_expander(|x| {
-			x.test.config.parsed.env.planner_strategy.iter().map(|x|{
-				TestRunConfig{
+			x.test
+				.config
+				.parsed
+				.env
+				.planner_strategy
+				.iter()
+				.map(|x| TestRunConfig {
 					planner_config: *x,
 					backend,
-				}
-			}).collect()
+				})
+				.collect()
 		});
 
 	let set_builder = if let Some(name_filter) = matches.get_one::<String>("filter") {
@@ -106,21 +111,22 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	// Filter out test which cannot run on the current version.
 	let set_builder = set_builder.with_filter(|x| {
 		if let Some(x) = &x.test.config.parsed.test.version
-			&& !x.matches(&core_version){
-				return false
-			}
-
+			&& !x.matches(&core_version)
+		{
+			return false;
+		}
 
 		if let Some(x) = &x.test.config.parsed.test.importing_version
-			&& !x.matches(&core_version){
-				return false
-			}
-
+			&& !x.matches(&core_version)
+		{
+			return false;
+		}
 
 		for i in x.imports.iter() {
-			if let Some(x) = &i.config.parsed.test.version &&
-				!x.matches(&core_version){
-					return false
+			if let Some(x) = &i.config.parsed.test.version
+				&& !x.matches(&core_version)
+			{
+				return false;
 			}
 		}
 
@@ -135,7 +141,6 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		.unwrap_or_else(|| thread::available_parallelism().map(|x| x.get() as u32).unwrap_or(8));
 
 	let failure_mode = matches.get_one::<ResultsMode>("results").unwrap();
-
 
 	println!(" Running with {num_jobs} jobs");
 	let mut schedular = Schedular::new(num_jobs);
@@ -157,13 +162,12 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		schedule_run(run, &mut schedular, &mut provisioner, report_send.clone()).await;
 
 		// Handle possible done reports.
-		while let Ok(report) = report_recv.try_recv(){
+		while let Ok(report) = report_recv.try_recv() {
 			let grade = report.grade();
 			progress.finish_item(report.id, grade).unwrap();
 			reports.push(report);
 		}
 	}
-
 
 	// when the report channel quits we can be sure we are done. since the report task has quit
 	// meaning the test tasks have all quit.
@@ -202,11 +206,11 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	};
 
 	let mut buffer = String::new();
-	let mut f = IndentFormatter::new(&mut buffer,2);
-	f.indent(|f|{
-		for c in set.iter(){
+	let mut f = IndentFormatter::new(&mut buffer, 2);
+	f.indent(|f| {
+		for c in set.iter() {
 			let mut first = true;
-			for k in c.config.parsed.unused_keys(){
+			for k in c.config.parsed.unused_keys() {
 				if first {
 					first = false;
 					if use_color {
@@ -225,15 +229,16 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 							),
 							c.origin.path
 						)?;
-					}else{
+					} else {
 						writeln!(f, " ==> Warning for {}", c.origin.path)?;
 					}
 				}
-				f.indent(|f| writeln!(f,"> Test config contains unused key: {}",k))?;
+				f.indent(|f| writeln!(f, "> Test config contains unused key: {}", k))?;
 			}
 		}
 		Ok(())
-	}).unwrap();
+	})
+	.unwrap();
 
 	// Print summary line.
 	// passed/failed/warned are per-run counts (one report per test-strategy pair),
@@ -242,12 +247,12 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let failed = reports.iter().filter(|r| r.grade() == TestGrade::Failed).count();
 	let warned = reports.iter().filter(|r| r.grade() == TestGrade::Warning).count();
 	if use_color {
-		print!(ansi!(green," {} runs passed",reset_format),passed);
+		print!(ansi!(green, " {} runs passed", reset_format), passed);
 		if failed > 0 {
-			print!(ansi!(", ",red,"{} failed",reset_format),failed);
+			print!(ansi!(", ", red, "{} failed", reset_format), failed);
 		}
 		if warned > 0 {
-			print!(ansi!(", ",yellow,"{} warnings",reset_format), warned);
+			print!(ansi!(", ", yellow, "{} warnings", reset_format), warned);
 		}
 		println!();
 	} else {
@@ -290,28 +295,38 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	Ok(())
 }
 
-pub async fn schedule_run(run: TestRun<TestRunConfig>, schedular: &mut Schedular, provisioner: &mut Provisioner, report_sender: UnboundedSender<TestReport>){
+pub async fn schedule_run(
+	run: TestRun<TestRunConfig>,
+	schedular: &mut Schedular,
+	provisioner: &mut Provisioner,
+	report_sender: UnboundedSender<TestReport>,
+) {
 	let permit = provisioner.obtain(&run.case.test.config.parsed.env).await;
 	let sequential = run.case.test.config.parsed.env.sequential;
 
 	let future = async move {
-		let res = permit.with(async |ds, grade_ds|{
-			let fut = run_test_with_dbs(&run, ds);
-			let res = AssertUnwindSafe(fut).catch_unwind().await;
+		let res = permit
+			.with(async |ds, grade_ds| {
+				let fut = run_test_with_dbs(&run, ds);
+				let res = AssertUnwindSafe(fut).catch_unwind().await;
 
-			match res {
-				Ok(Ok(x)) => (CanReuse::Reusable,Ok(TestReport::from_test_result(run, x, grade_ds).await)),
-				Ok(Err(e)) => (CanReuse::Reusable,Err(e)),
-				Err(e) => (CanReuse::Reset,Ok(TestReport::from_panic(run, e)))
-			}
-		}).await;
+				match res {
+					Ok(Ok(x)) => (
+						CanReuse::Reusable,
+						Ok(TestReport::from_test_result(run, x, grade_ds).await),
+					),
+					Ok(Err(e)) => (CanReuse::Reusable, Err(e)),
+					Err(e) => (CanReuse::Reset, Ok(TestReport::from_panic(run, e))),
+				}
+			})
+			.await;
 
 		let res = match res {
 			Ok(Ok(x)) => x,
 			Ok(Err(e)) | Err(e) => {
 				eprintln!("Task returned an error!: {e}");
-				return
-			},
+				return;
+			}
 		};
 
 		report_sender.send(res).expect("Channel closed too early");
@@ -319,7 +334,7 @@ pub async fn schedule_run(run: TestRun<TestRunConfig>, schedular: &mut Schedular
 
 	if sequential {
 		schedular.spawn_sequential(future).await
-	}else{
+	} else {
 		schedular.spawn(future).await
 	}
 }
@@ -360,8 +375,7 @@ async fn run_test_with_dbs(
 		dbs.execute(&format!("DEFINE DATABASE `{x}`"), &session, None).await?;
 	}
 
-	let timeout_duration = config
-		.env.timeout.into_value(ENV_DEFAULT_TIMEOUT).unwrap_or(u64::MAX);
+	let timeout_duration = config.env.timeout.into_value(ENV_DEFAULT_TIMEOUT).unwrap_or(u64::MAX);
 	let timeout_duration = Duration::from_millis(timeout_duration);
 
 	let mut import_session = Session::owner();
@@ -383,7 +397,7 @@ async fn run_test_with_dbs(
 				for result in &results {
 					if let Err(ref e) = result.result {
 						return Ok(TestTaskResult::Import(
-					import.origin.path.clone(),
+							import.origin.path.clone(),
 							format!("Import produced an error: `{e}`"),
 						));
 					}
@@ -434,7 +448,6 @@ async fn run_test_with_dbs(
 	let result = dbs.process(query, &session, None).await;
 	let did_timeout = start.elapsed() > timeout_duration;
 
-
 	if let Some(ref ns) = session.ns {
 		if let Some(ref db) = session.db {
 			let session = Session::owner().with_ns(ns);
@@ -473,9 +486,9 @@ async fn run_test_with_dbs(
 	match result {
 		Ok(x) => {
 			let x = x.into_iter().map(|x| x.result.map_err(|e| e.to_string())).collect();
-			Ok(TestTaskResult::Results{
+			Ok(TestTaskResult::Results {
 				did_timeout,
-				res: x
+				res: x,
 			})
 		}
 		Err(e) => Ok(TestTaskResult::RunningError(anyhow::anyhow!(e))),

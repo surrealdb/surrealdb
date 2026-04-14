@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
 
-use semver::{ VersionReq};
+use semver::VersionReq;
 use serde::{Deserialize, Serialize, de};
 use surrealdb_core::dbs::NewPlannerStrategy;
 use surrealdb_core::dbs::capabilities::{
@@ -18,7 +18,6 @@ fn bool_or_f<T>() -> BoolOr<T> {
 	BoolOr::Bool(false)
 }
 
-
 fn default_planner_strategy() -> Vec<NewPlannerStrategyConfig> {
 	vec![
 		NewPlannerStrategyConfig::ComputeOnly,
@@ -30,7 +29,6 @@ fn default_planner_strategy() -> Vec<NewPlannerStrategyConfig> {
 pub const ENV_DEFAULT_TIMEOUT: u64 = 1000;
 pub const ENV_DEFAULT_NAMESPACE: &str = "test";
 pub const ENV_DEFAULT_DATABASE: &str = "test";
-
 
 /// Root test config struct.
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
@@ -54,7 +52,6 @@ impl TestConfig {
 		res
 	}
 }
-
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -161,7 +158,7 @@ impl TestEnv {
 ///
 /// Maps to `surrealdb_core::dbs::NewPlannerStrategy` but uses shorter
 /// kebab-case names for TOML configuration.
-#[derive(Clone, Copy,Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NewPlannerStrategyConfig {
 	/// Try new planner, fall back on Unimplemented.
@@ -678,36 +675,36 @@ pub enum TestAuth {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Capabilities {
-    #[serde(default = "t")]
+	#[serde(default = "t")]
 	pub scripting: bool,
-    #[serde(default = "t")]
+	#[serde(default = "t")]
 	pub quest_access: bool,
-    #[serde(default = "t")]
+	#[serde(default = "t")]
 	pub live_query_notifications: bool,
 
-    #[serde(default)]
+	#[serde(default)]
 	pub allow_functions: BoolOr<Vec<SchemaTarget<FuncTarget>>>,
-    #[serde(default = "bool_or_f")]
+	#[serde(default = "bool_or_f")]
 	pub deny_functions: BoolOr<Vec<SchemaTarget<FuncTarget>>>,
 
-    #[serde(default)]
+	#[serde(default)]
 	pub allow_net: BoolOr<Vec<SchemaTarget<NetTarget>>>,
-    #[serde(default = "bool_or_f")]
+	#[serde(default = "bool_or_f")]
 	pub deny_net: BoolOr<Vec<SchemaTarget<NetTarget>>>,
 
-    #[serde(default)]
+	#[serde(default)]
 	pub allow_rpc: BoolOr<Vec<SchemaTarget<MethodTarget>>>,
-    #[serde(default = "bool_or_f")]
+	#[serde(default = "bool_or_f")]
 	pub deny_rpc: BoolOr<Vec<SchemaTarget<MethodTarget>>>,
 
-    #[serde(default)]
+	#[serde(default)]
 	pub allow_http: BoolOr<Vec<SchemaTarget<RouteTarget>>>,
-    #[serde(default = "bool_or_f")]
+	#[serde(default = "bool_or_f")]
 	pub deny_http: BoolOr<Vec<SchemaTarget<RouteTarget>>>,
 
-    #[serde(default)]
+	#[serde(default)]
 	pub allow_experimental: BoolOr<Vec<SchemaTarget<ExperimentalTarget>>>,
-    #[serde(default = "bool_or_f")]
+	#[serde(default = "bool_or_f")]
 	pub deny_experimental: BoolOr<Vec<SchemaTarget<ExperimentalTarget>>>,
 
 	#[serde(skip_serializing)]
@@ -718,7 +715,7 @@ pub struct Capabilities {
 impl Default for Capabilities {
 	fn default() -> Self {
 		Self {
-			scripting: true ,
+			scripting: true,
 			quest_access: true,
 			live_query_notifications: true,
 

@@ -1,15 +1,18 @@
+pub mod case;
 pub mod cmp;
 pub mod report;
-pub mod schema;
-pub mod case;
 pub mod run;
+pub mod schema;
 
-use std::{io::{self, IsTerminal as _}, sync::Arc, fmt::Write};
+use std::fmt::Write;
+use std::io::{self, IsTerminal as _};
+use std::sync::Arc;
 
-pub use run::{TestRun,RunSetBuilder};
-pub use case::{CaseSet,   Origin};
+pub use case::{CaseSet, Origin};
+pub use run::{RunSetBuilder, TestRun};
 
-use crate::{cli::ColorMode, format::{ansi, IndentFormatter}};
+use crate::cli::ColorMode;
+use crate::format::{IndentFormatter, ansi};
 
 /// An error that happened during loading of a test case.
 #[derive(Debug)]

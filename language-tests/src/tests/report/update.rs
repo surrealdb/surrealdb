@@ -31,23 +31,15 @@ impl TestReport {
 		let mut existing = self.case.test.source.clone().into_bytes();
 
 		if let Some(slice) = self.case.test.config.range.clone() {
-			insert_slice(
-				&mut existing,
-				slice.clone(),
-				doc.to_string().as_bytes(),
-			);
-		}else{
-			insert_slice(
-				&mut existing,
-				0..0,
-				format!("/**\n{}\n*/\n", doc).as_bytes(),
-			);
+			insert_slice(&mut existing, slice.clone(), doc.to_string().as_bytes());
+		} else {
+			insert_slice(&mut existing, 0..0, format!("/**\n{}\n*/\n", doc).as_bytes());
 		}
 
-		let full_path = if root_path.ends_with("/"){
-			format!("{}{}",root_path,self.case.test.origin.path)
-		}else{
-			format!("{}/{}",root_path,self.case.test.origin.path)
+		let full_path = if root_path.ends_with("/") {
+			format!("{}{}", root_path, self.case.test.origin.path)
+		} else {
+			format!("{}/{}", root_path, self.case.test.origin.path)
 		};
 
 		let mut f = fs::OpenOptions::new()

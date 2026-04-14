@@ -318,7 +318,10 @@ impl SurrealConnection {
 					})
 					.collect::<Result<Vec<Result<Value, String>>, anyhow::Error>>()?;
 
-				Ok(TestTaskResult::Results{ did_timeout: false, res: results})
+				Ok(TestTaskResult::Results {
+					did_timeout: false,
+					res: results,
+				})
 			}
 			Ok(_) => bail!("Got invalid response type"),
 			Err(e) => Ok(TestTaskResult::RunningError(anyhow::Error::msg(e.message().to_string()))),

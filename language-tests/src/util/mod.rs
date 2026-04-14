@@ -1,26 +1,23 @@
-use std::{mem, time::SystemTime};
+use std::mem;
+use std::time::SystemTime;
 
-use anyhow::{Result,Context as _, anyhow};
+use anyhow::{Context as _, Result, anyhow};
 use tokio::fs;
 
 mod temp_dir;
 #[allow(unused_imports)]
 pub use temp_dir::TempDir;
 
-
 /// Walk a directory, calling the callback for every file in the directory.
 pub async fn walk_directory<F>(root: &str, cb: &mut F) -> Result<()>
-where F: AsyncFnMut(&str) -> Result<()>
+where
+	F: AsyncFnMut(&str) -> Result<()>,
 {
-	let mut dir_entries = fs::read_dir(root)
-		.await
-		.with_context(|| format!("Failed to read directory '{root}'"))?;
-
+	let mut dir_entries =
+		fs::read_dir(root).await.with_context(|| format!("Failed to read directory '{root}'"))?;
 
 	while let Some(entry) = dir_entries.next_entry().await.transpose() {
-		let entry =
-			entry.with_context(|| format!("Failed to read entry in directory '{root}'"))?;
-
+		let entry = entry.with_context(|| format!("Failed to read entry in directory '{root}'"))?;
 
 		let p: String = entry
 			.path()

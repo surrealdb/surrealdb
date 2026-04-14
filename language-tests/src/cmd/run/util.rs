@@ -3,7 +3,6 @@ use surrealdb_types::Value as SurValue;
 
 use crate::tests::schema::{AuthLevel, TestAuth, TestConfig};
 
-
 /// Builds a `Session` from a test config and a specific planner strategy.
 pub fn session_from_test_config(config: &TestConfig, strategy: NewPlannerStrategy) -> Session {
 	let env = &config.env;

@@ -68,34 +68,34 @@ impl Display for Backend {
 	}
 }
 
-impl<'de> Deserialize<'de> for Backend{
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de> {
-
+impl<'de> Deserialize<'de> for Backend {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
 		let s = String::deserialize(deserializer)?;
 		match s.as_str() {
 			"mem" => Ok(Backend::Memory),
 			"rocksdb" => Ok(Backend::RocksDb),
 			"surrealkv" => Ok(Backend::SurrealKv),
 			"tikv" => Ok(Backend::TikV),
-			_ => Err(<D::Error as serde::de::Error>::custom(format_args!("Invalid backend kind")))
+			_ => Err(<D::Error as serde::de::Error>::custom(format_args!("Invalid backend kind"))),
 		}
-    }
+	}
 }
 
-impl Serialize for Backend{
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer {
-
+impl Serialize for Backend {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
 		match self {
 			Backend::Memory => serializer.serialize_str("mem"),
 			Backend::RocksDb => serializer.serialize_str("rocksdb"),
 			Backend::SurrealKv => serializer.serialize_str("surrealkv"),
 			Backend::TikV => serializer.serialize_str("tikv"),
 		}
-    }
+	}
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]

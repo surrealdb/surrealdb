@@ -4,7 +4,7 @@ mod protocol;
 
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
-use std::path::{Path};
+use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 
@@ -18,23 +18,23 @@ use tokio::task::JoinSet;
 
 use crate::cli::{ColorMode, DsVersion, ResultsMode, UpgradeBackend};
 use crate::format::Progress;
+use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
 use crate::tests::run::{CaseImports, RunConfig};
 use crate::tests::schema::{BoolOr, ENV_DEFAULT_DATABASE, ENV_DEFAULT_NAMESPACE};
 use crate::tests::{CaseSet, RunSetBuilder, TestRun};
 use crate::util::TempDir;
-use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
 
-pub struct UpgradeTestConfig{
+pub struct UpgradeTestConfig {
 	from: DsVersion,
 	to: DsVersion,
 	port: u16,
 	path: String,
 }
 
-impl RunConfig for UpgradeTestConfig{
-    fn name(&self, case: &CaseImports) -> String {
-		format!("{} {} => {}",case.test.origin.path, self.from,self.to)
-    }
+impl RunConfig for UpgradeTestConfig {
+	fn name(&self, case: &CaseImports) -> String {
+		format!("{} {} => {}", case.test.origin.path, self.from, self.to)
+	}
 }
 
 pub struct Config {
@@ -88,12 +88,13 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		UpgradeBackend::SurrealKv => bail!("SurrealKV backend feature is not enabled"),
 	}
 
-	if UpgradeBackend::SurrealKv == config.backend &&
-		let Some(DsVersion::Version(v)) = all_versions.iter().find(|x| **x < DsVersion::Version(Version::new(2, 0, 0)))
-		{
-			bail!(
-				"Cannot run with backend surrealkv and version {v}, surrealkv was not yet available on this version"
-			)
+	if UpgradeBackend::SurrealKv == config.backend
+		&& let Some(DsVersion::Version(v)) =
+			all_versions.iter().find(|x| **x < DsVersion::Version(Version::new(2, 0, 0)))
+	{
+		bail!(
+			"Cannot run with backend surrealkv and version {v}, surrealkv was not yet available on this version"
+		)
 	}
 
 	let mut actual_version = HashMap::new();
@@ -110,14 +111,13 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	let case_set = CaseSet::load_surrealql_files(path.as_str(), &mut load_errors).await?;
 
-
-	let run_set = RunSetBuilder::new(&case_set,&mut load_errors)
+	let run_set = RunSetBuilder::new(&case_set, &mut load_errors)
 		.with_filter(|x| x.test.config.parsed.test.run)
 		.with_filter(|x| x.test.config.parsed.test.upgrade)
 		.with_filter(|x| x.test.origin.path.contains(&filter))
 		.with_filter(|x| no_wip || !x.test.config.parsed.test.wip)
 		.with_filter(|x| no_results || x.test.config.parsed.test.results.is_some())
-		.with_expander(|x|{
+		.with_expander(|x| {
 			let mut res = Vec::new();
 
 			for from in from_versions.iter() {
@@ -125,22 +125,31 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 					let from_v = actual_version.get(from).unwrap();
 					let to_v = actual_version.get(to).unwrap();
 
-					if let Some(ver_req) = x.test.config.parsed.test.version.as_ref() &&
-						!ver_req.matches(to_v){
-							continue
+					if let Some(ver_req) = x.test.config.parsed.test.version.as_ref()
+						&& !ver_req.matches(to_v)
+					{
+						continue;
 					}
 
-					if let Some(ver_req) = x.test.config.parsed.test.importing_version.as_ref() &&
-						!ver_req.matches(from_v){
-							continue
+					if let Some(ver_req) = x.test.config.parsed.test.importing_version.as_ref()
+						&& !ver_req.matches(from_v)
+					{
+						continue;
 					}
 
-					if let Some(ver_req) = i.config.parsed.test.version.as_ref()
-						&& x.imports.iter().any(|ver_req| !ver_req.matches(from_v)) {
-						continue
+					if x.imports.iter().any(|imp| {
+						imp.config
+							.parsed
+							.test
+							.version
+							.as_ref()
+							.map(|x| !x.matches(from_v))
+							.unwrap_or(false)
+					}) {
+						continue;
 					}
 
-					res.push(UpgradeTestConfig{
+					res.push(UpgradeTestConfig {
 						from: from.clone(),
 						to: to.clone(),
 						// Set later.
@@ -154,8 +163,8 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 				}
 			}
 			res
-		}).build();
-
+		})
+		.build();
 
 	println!("Using directory '{}' as a store directory", temp_dir.path().display());
 	println!("Running {} test runs for {} test cases", run_set.len(), case_set.len());
@@ -223,10 +232,10 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		reuse_port.push(run.config.port);
 
 		let id = run.id;
-		let report = TestReport::from_test_result(run,  result, &ds).await;
+		let report = TestReport::from_test_result(run, result, &ds).await;
 		let grade = report.grade();
 		reports.push(report);
-		progress.finish_item(id,grade).unwrap();
+		progress.finish_item(id, grade).unwrap();
 	}
 
 	if config.keep_files {
@@ -418,7 +427,10 @@ async fn run_upgrade_test(
 		.await?
 }
 
-async fn run_task(run: TestRun<UpgradeTestConfig>, config: Arc<Config>) -> (TestRun<UpgradeTestConfig>, TestTaskResult) {
+async fn run_task(
+	run: TestRun<UpgradeTestConfig>,
+	config: Arc<Config>,
+) -> (TestRun<UpgradeTestConfig>, TestTaskResult) {
 	match run_task_inner(&run, config).await {
 		Ok(x) => (run, x),
 		Err(e) => (run, TestTaskResult::RunningError(e)),
@@ -435,25 +447,45 @@ async fn run_task_inner(
 	// no need to write the info if it is going to be deleted anyway.
 	if config.keep_files {
 		// write some info to the test directory usefull for later debugging.
-		tokio::fs::write(Path::new(dir).join("test.info"), format!("{} => {}", run.config.from, run.config.to))
-			.await?;
+		tokio::fs::write(
+			Path::new(dir).join("test.info"),
+			format!("{} => {}", run.config.from, run.config.to),
+		)
+		.await?;
 	}
 
 	let BoolOr::Bool(false) = run.case.test.config.parsed.env.capabilities else {
 		bail!("Setting capabilities are not supported for upgrade tests")
 	};
 
-	let namespace =
-		run.case.test.config.parsed.env.namespace.as_ref().map(|x| x.as_ref()).into_value(ENV_DEFAULT_NAMESPACE);
-	let database =
-		run.case.test.config.parsed.env.database.as_ref().map(|x| x.as_ref()).into_value(ENV_DEFAULT_DATABASE);
+	let namespace = run
+		.case
+		.test
+		.config
+		.parsed
+		.env
+		.namespace
+		.as_ref()
+		.map(|x| x.as_ref())
+		.into_value(ENV_DEFAULT_NAMESPACE);
+	let database = run
+		.case
+		.test
+		.config
+		.parsed
+		.env
+		.database
+		.as_ref()
+		.map(|x| x.as_ref())
+		.into_value(ENV_DEFAULT_DATABASE);
 
 	if database.is_some() && namespace.is_none() {
 		bail!("Cannot have a database set but not a namespace.")
 	}
 
 	// run imports
-	let mut process = process::SurrealProcess::new(&config, &run.config.from, dir, run.config.port).await?;
+	let mut process =
+		process::SurrealProcess::new(&config, &run.config.from, dir, run.config.port).await?;
 	match run_imports(run, &mut process, namespace, database).await {
 		Ok(Some(x)) => return Ok(x),
 		Ok(None) => {}
@@ -473,7 +505,8 @@ async fn run_task_inner(
 	// excessivly slow, so we just retry once in this case.
 	let mut retried = false;
 	let result = loop {
-		let process = process::SurrealProcess::new(&config, &run.config.to, dir, run.config.port).await?;
+		let process =
+			process::SurrealProcess::new(&config, &run.config.to, dir, run.config.port).await?;
 		match run_upgrade_test(run, process, namespace, database).await {
 			Ok(x) => break x,
 			Err(e) => {

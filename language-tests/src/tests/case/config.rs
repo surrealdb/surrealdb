@@ -1,15 +1,15 @@
+use std::ops::Range;
+use std::str::CharIndices;
 
-use std::{ops::Range, str::{CharIndices}};
-
+use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
-use toml_edit::DocumentMut;
 use serde::de::IntoDeserializer;
-use anyhow::{bail, ensure, Context, Result};
+use toml_edit::DocumentMut;
 
 use crate::tests::schema::TestConfig;
 
 #[derive(Debug)]
-pub struct CaseConfig{
+pub struct CaseConfig {
 	/// The toml document from which the config is serialized,
 	/// Is non if no config was found.
 	pub toml: Option<DocumentMut>,
@@ -23,7 +23,7 @@ pub struct CaseConfig{
 struct Parser<'a> {
 	source: &'a str,
 	chars: CharIndices<'a>,
-	peek: Option<(usize,char)>,
+	peek: Option<(usize, char)>,
 }
 
 impl<'a> Parser<'a> {
@@ -37,14 +37,14 @@ impl<'a> Parser<'a> {
 
 	pub fn next(&mut self) -> Option<char> {
 		if let Some((_, x)) = self.peek.take() {
-			return Some(x)
+			return Some(x);
 		}
 		self.chars.next().map(|x| x.1)
 	}
 
 	pub fn peek(&mut self) -> Option<char> {
-		if let Some((_,x)) = self.peek{
-			return Some(x)
+		if let Some((_, x)) = self.peek {
+			return Some(x);
 		}
 		Some(self.peek.insert(self.chars.next()?).1)
 	}
@@ -64,25 +64,25 @@ impl<'a> Parser<'a> {
 		self.peek.map(|x| x.0).unwrap_or(self.source.len())
 	}
 
-	pub fn extract_config(source: &'a str) -> Result<Option<Range<usize>>>{
+	pub fn extract_config(source: &'a str) -> Result<Option<Range<usize>>> {
 		let mut parser = Self::new(source);
 		let mut res = None;
 
-		while let Some(x) = parser.next(){
-			if x == '/' &&parser.eat('*') && parser.eat('*') {
-				ensure!(res.is_none(),"Test case contains multiple config sections");
+		while let Some(x) = parser.next() {
+			if x == '/' && parser.eat('*') && parser.eat('*') {
+				ensure!(res.is_none(), "Test case contains multiple config sections");
 
 				let start = parser.offset();
 
-				let end = loop{
+				let end = loop {
 					let offset = parser.offset();
 
 					let Some(x) = parser.next() else {
 						bail!("Test case config was not closed")
 					};
 
-					if x == '*' && parser.eat('/'){
-						break offset
+					if x == '*' && parser.eat('/') {
+						break offset;
 					}
 				};
 
@@ -92,29 +92,29 @@ impl<'a> Parser<'a> {
 
 		Ok(res)
 	}
-
 }
 
-impl CaseConfig{
-	pub fn parse(source: &str) -> Result<Self>{
+impl CaseConfig {
+	pub fn parse(source: &str) -> Result<Self> {
 		if let Some(config_range) = Parser::extract_config(source)? {
 			let config_source = &source[config_range.clone()];
 
-			let toml: DocumentMut = config_source.parse().context("Could not parse test case config toml")?;
+			let toml: DocumentMut =
+				config_source.parse().context("Could not parse test case config toml")?;
 
 			let config = TestConfig::deserialize(toml.clone().into_deserializer())
 				.context("Could not deserialize test case config")?;
 
-			Ok(Self{
+			Ok(Self {
 				range: Some(config_range),
 				toml: Some(toml),
-				parsed: config
+				parsed: config,
 			})
-		}else{
-			Ok(Self{
+		} else {
+			Ok(Self {
 				range: None,
 				toml: None,
-				parsed: Default::default()
+				parsed: Default::default(),
 			})
 		}
 	}
