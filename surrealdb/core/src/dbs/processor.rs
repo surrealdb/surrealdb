@@ -219,8 +219,14 @@ impl Collectable {
 		let record = if rid_only {
 			Arc::new(Default::default())
 		} else {
-			txn.get_record(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, ft.as_ref(), &fk, opt.version)
-				.await?
+			txn.get_record(
+				doc_ctx.ns.namespace_id,
+				doc_ctx.db.database_id,
+				ft.as_ref(),
+				&fk,
+				opt.version,
+			)
+			.await?
 		};
 		let rid = RecordId {
 			table: ft.into_owned(),
