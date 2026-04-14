@@ -268,6 +268,7 @@ pub struct Surreal<C: Connection> {
 	engine: PhantomData<C>,
 }
 
+
 #[doc(hidden)]
 impl<C> From<Arc<Inner>> for Surreal<C>
 where

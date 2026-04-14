@@ -8,6 +8,7 @@ use futures::stream::poll_fn;
 use surrealdb_core::iam::Level;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
+use surrealdb_core::channel::Receiver as CoreReceiver;
 use surrealdb_types::Notification;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
@@ -56,6 +57,55 @@ impl conn::Sealed for Db {
 
 			Ok((router, waiter, session_clone).into())
 		})
+	}
+}
+
+impl Surreal<Db> {
+	// This function was introduced by a community PR,
+	//
+	// It exposes internal types in the public API so it is marked as doc(hidden).
+	// This function is not stable nor subject to semver stability guarentees.
+	#[doc(hidden)]
+	pub async fn unstable_from_datastore(
+		canceller: CancellationToken,
+		datastore: Arc<Datastore>,
+		notifications: Option<CoreReceiver<Notification>>,
+		engine: EngineOptions,
+	) -> Result<Self> {
+		let (route_tx, route_rx) = async_channel::unbounded();
+		let (conn_tx, conn_rx) = async_channel::bounded::<Result<()>>(1);
+		let session_clone = SessionClone::new();
+		let recv = session_clone.receiver.clone();
+
+		tokio::spawn(async move {
+			conn_tx.send(Ok(())).await.ok();
+
+			let router_state = super::RouterState {
+				kvs: datastore,
+				sessions: HashMap::new(),
+			};
+
+			let tasks = tasks::init(router_state.kvs.clone(), canceller.clone(), &engine);
+
+			router_loop(&router_state, canceller, tasks, route_rx, recv, notifications).await;
+
+			router_state.kvs.shutdown().await
+		});
+
+		conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+
+		let mut features = HashSet::new();
+		features.insert(ExtraFeatures::Backup);
+		features.insert(ExtraFeatures::LiveQueries);
+
+		let waiter = watch::channel(Some(WaitFor::Connection));
+		let router = Router {
+			features,
+			config: crate::opt::Config::default(),
+			sender: route_tx,
+		};
+
+		Ok((router, waiter, session_clone).into())
 	}
 }
 
