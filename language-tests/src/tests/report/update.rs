@@ -14,13 +14,13 @@ impl TestReport {
 	pub async fn update_config_results(&self, root_path: &str) -> Result<()> {
 		//TODO: Improve for multiple test cases in a single file.
 		let Some(values) = self.outputs.as_ref() else {
-			println!("tried to update test {} without results", self.run.case.case.origin.path);
+			println!("tried to update test {} without results", self.case.test.origin.path);
 			return Ok(());
 		};
 
-		let mut doc = self.run.case.case.config.toml.clone().unwrap_or_default();
+		let mut doc = self.case.test.config.toml.clone().unwrap_or_default();
 
-		println!("Updating test `{}`", self.run.case.case.origin.path);
+		println!("Updating test `{}`", self.case.test.origin.path);
 		match values {
 			TestOutputs::Values(values) => apply_results(&mut doc, values),
 			TestOutputs::ParsingError(error) => apply_error(&mut doc, "parsing-error", error),
@@ -28,9 +28,9 @@ impl TestReport {
 			TestOutputs::SignupError(error) => apply_error(&mut doc, "signup-error", error),
 		}
 
-		let mut existing = self.run.case.case.source.clone().into_bytes();
+		let mut existing = self.case.test.source.clone().into_bytes();
 
-		if let Some(slice) = self.run.case.case.config.range.clone() {
+		if let Some(slice) = self.case.test.config.range.clone() {
 			insert_slice(
 				&mut existing,
 				slice.clone(),
@@ -45,9 +45,9 @@ impl TestReport {
 		}
 
 		let full_path = if root_path.ends_with("/"){
-			format!("{}{}",root_path,self.run.case.case.origin.path)
+			format!("{}{}",root_path,self.case.test.origin.path)
 		}else{
-			format!("{}/{}",root_path,self.run.case.case.origin.path)
+			format!("{}/{}",root_path,self.case.test.origin.path)
 		};
 
 		let mut f = fs::OpenOptions::new()

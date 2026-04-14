@@ -17,7 +17,7 @@ pub struct CaseConfig{
 	/// Is none if no config was found.
 	pub range: Option<Range<usize>>,
 	/// The serialized config.
-	pub config: TestConfig,
+	pub parsed: TestConfig,
 }
 
 struct Parser<'a> {
@@ -108,13 +108,13 @@ impl CaseConfig{
 			Ok(Self{
 				range: Some(config_range),
 				toml: Some(toml),
-				config
+				parsed: config
 			})
 		}else{
 			Ok(Self{
 				range: None,
 				toml: None,
-				config: Default::default()
+				parsed: Default::default()
 			})
 		}
 	}

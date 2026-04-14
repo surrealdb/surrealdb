@@ -2,17 +2,16 @@ use std::sync::Arc;
 
 use anyhow::Error;
 
-use crate::{cli::Backend, tests::{case::{CaseSet, TestCase}, schema::NewPlannerStrategyConfig, TestLoadError}};
+use crate::{tests::{case::{CaseSet, TestCase}, TestLoadError}};
 
-#[derive(Debug)]
-pub struct TestRunConfig{
-	pub planner_config: NewPlannerStrategyConfig,
-	pub backend: Backend,
+
+pub trait RunConfig{
+	fn name(&self, case: &CaseImports) -> String;
 }
 
 #[derive(Debug)]
 pub struct CaseImports{
-	pub case: Arc<TestCase>,
+	pub test: Arc<TestCase>,
 	pub imports: Vec<Arc<TestCase>>,
 }
 
@@ -21,29 +20,29 @@ pub struct TestRunId(usize);
 
 /// A single instance of test being run with a given configuration of datastore.
 #[derive(Debug)]
-pub struct TestRun{
+pub struct TestRun<T: RunConfig>{
 	pub id: TestRunId,
 	pub case: Arc<CaseImports>,
-	pub config: TestRunConfig,
+	pub config: T,
 }
 
-impl TestRun{
+impl<T: RunConfig> TestRun<T>{
 	pub fn name(&self) -> String{
-		format!("{} on {} [{}]", self.case.case.origin.path, self.config.backend,self.config.planner_config)
+		self.config.name(&self.case)
 	}
 }
 
 type FilterFn<'a> = Box<dyn FnMut(&CaseImports) -> bool + 'a>;
-type ExpandFn<'a> = Box<dyn FnMut(&CaseImports) -> Vec<TestRunConfig> + 'a>;
+type ExpandFn<'a, T> = Box<dyn FnMut(&CaseImports) -> Vec<T> + 'a>;
 
-pub struct RunSetBuilder<'set,'error,'a>{
+pub struct RunSetBuilder<'set,'error,'a, T: RunConfig>{
 	set: &'set CaseSet,
 	errors: &'error mut Vec<TestLoadError>,
 	filters: Vec<FilterFn<'a>>,
-	expanders: Vec<ExpandFn<'a>>,
+	expanders: Vec<ExpandFn<'a,T>>,
 }
 
-impl<'set,'error, 'a> RunSetBuilder<'set,'error,'a>{
+impl<'set,'error, 'a, T: RunConfig> RunSetBuilder<'set,'error,'a,T>{
 	pub fn new(set: &'set CaseSet, errors: &'error mut Vec<TestLoadError>) -> Self{
 		RunSetBuilder{
 			set,
@@ -61,13 +60,13 @@ impl<'set,'error, 'a> RunSetBuilder<'set,'error,'a>{
 	}
 
 	pub fn with_expander<F>(mut self, expander: F) -> Self
-		where F: FnMut(&CaseImports) -> Vec<TestRunConfig> + 'a
+		where F: FnMut(&CaseImports) -> Vec<T> + 'a
 	{
 		self.expanders.push(Box::new(expander));
 		self
 	}
 
-	pub fn build(mut self) -> Vec<TestRun>{
+	pub fn build(mut self) -> Vec<TestRun<T>>{
 		let mut runs = Vec::new();
 
 		for case in self.set.iter(){
@@ -75,7 +74,7 @@ impl<'set,'error, 'a> RunSetBuilder<'set,'error,'a>{
 			// TODO: Also resolve imports for imports
 			let mut imports = Vec::new();
 			let mut had_errors = false;
-			for import in case.config.config.env.imports.iter() {
+			for import in case.config.parsed.env.imports.iter() {
 				match self.set.find_import(import, case.id) {
 					Some(x) => {
 						if x.len() > 1 {
@@ -103,7 +102,7 @@ impl<'set,'error, 'a> RunSetBuilder<'set,'error,'a>{
 			}
 
 			let case_imports = CaseImports{
-				case: case.clone(),
+				test: case.clone(),
 				imports
 			};
 

@@ -69,6 +69,10 @@ impl Index<CaseId> for CaseSet{
 }
 
 impl CaseSet{
+	pub fn len(&self) -> usize{
+		self.cases.len()
+	}
+
 	pub fn get_by_path(&self, path: &str) -> Option<&[Arc<TestCase>]> {
 		self.by_path.get(path).map(|x| x.as_ref())
 	}

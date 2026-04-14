@@ -234,7 +234,7 @@ impl SurrealConnection {
 		object.insert("id".to_owned(), ProxyValue::from(id));
 
 		// Convert ProxyObject to Value
-		let value = object.to_value();
+		let value = object.into_value();
 
 		let message = surrealdb_core::rpc::format::flatbuffers::encode(&value)
 			.map_err(|e| TypesError::serialization(e.to_string(), None))?;
@@ -318,7 +318,7 @@ impl SurrealConnection {
 					})
 					.collect::<Result<Vec<Result<Value, String>>, anyhow::Error>>()?;
 
-				Ok(TestTaskResult::Results(results))
+				Ok(TestTaskResult::Results{ did_timeout: false, res: results})
 			}
 			Ok(_) => bail!("Got invalid response type"),
 			Err(e) => Ok(TestTaskResult::RunningError(anyhow::Error::msg(e.message().to_string()))),

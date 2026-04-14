@@ -92,7 +92,6 @@ impl TestReport {
 	}
 
 	fn display_grade_header(&self, use_color: bool, f: &mut Fmt) -> fmt::Result {
-		let name = self.run.name();
 
 		match self.grade() {
 			TestGrade::Success => {
@@ -111,16 +110,16 @@ impl TestReport {
 								reset_format,
 								":"
 							),
-							name
+							self.name
 						)?;
 					} else {
-						writeln!(f, " ==> Success for {name}:")?;
+						writeln!(f, " ==> Success for {}:",self.name)?;
 					}
 					f.indent(|f| {
 						writeln!(f, "> Tests succeeded even though it is marked Work in Progress")
 					})?;
 
-					if let Some(issue) = self.run.case.case.config.config.test.issue {
+					if let Some(issue) = self.case.test.config.parsed.test.issue {
 						f.indent(|f| {
 							writeln!(f, "> Issue {issue} could maybe be closed.")?;
 							f.indent(|f| {
@@ -150,10 +149,10 @@ impl TestReport {
 							reset_format,
 							":"
 						),
-						name
+						self.name
 					)?;
 				} else {
-					writeln!(f, " ==> Error for {name}:")?;
+					writeln!(f, " ==> Error for {}:", self.name)?;
 				}
 				f.increase_depth();
 			}
@@ -172,10 +171,10 @@ impl TestReport {
 							reset_format,
 							":"
 						),
-						name
+						self.name
 					)?;
 				} else {
-					writeln!(f, " ==> Warning for {name}")?;
+					writeln!(f, " ==> Warning for {}", self.name)?;
 				}
 				f.increase_depth();
 				if self.is_wip() {

@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
@@ -7,6 +8,7 @@ use surrealdb_core::syn::error::RenderedError;
 use surrealdb_types::{Object, Value as SurValue, Variables};
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
+use crate::tests::run::{CaseImports, RunConfig, TestRunId};
 use crate::tests::{TestRun};
 use crate::tests::schema::{self, BoolOr, TestConfig, TestDetailsResults};
 
@@ -295,7 +297,9 @@ impl TestExpectation {
 }
 
 pub struct TestReport {
-	pub run: TestRun,
+	pub id: TestRunId,
+	pub case: Arc<CaseImports>,
+	name: String,
 	timeout: bool,
 	kind: TestReportKind,
 	outputs: Option<TestOutputs>,
@@ -340,15 +344,15 @@ impl TestReport {
 	}
 
 	pub fn is_wip(&self) -> bool {
-		self.run.case.case.config.config.test.wip
+		self.case.test.config.parsed.test.wip
 	}
 
 	pub fn is_unspecified_test(&self) -> bool {
 		matches!(self.kind, TestReportKind::NoExpectation { .. })
 	}
 
-	pub async fn from_test_result(
-		run: TestRun,
+	pub async fn from_test_result<T: RunConfig>(
+		run: TestRun<T>,
 		job_result: TestTaskResult,
 		matching_datastore: &Datastore,
 	) -> Self {
@@ -365,19 +369,21 @@ impl TestReport {
 			} => (*did_timeout,Some(TestOutputs::Values(res.clone()))),
 		};
 
-		let cfg = &run.case.case.config.config;
+		let cfg = &run.case.test.config.parsed;
 		let kind = Self::grade_result(cfg, job_result, matching_datastore).await;
 
 		TestReport {
-			run,
+			id: run.id,
+			name: run.name(),
+			case: run.case,
 			kind,
 			timeout,
 			outputs,
 		}
 	}
 
-	pub fn from_panic(
-		run: TestRun,
+	pub fn from_panic<T: RunConfig>(
+		run: TestRun<T>,
 		panic_error: Box<dyn Any + Send + 'static>,
 	) -> Self {
 		let error = panic_error
@@ -389,7 +395,9 @@ impl TestReport {
 		let kind = TestReportKind::Error(TestError::Panicked(error));
 
 		TestReport {
-			run,
+			id: run.id,
+			name: run.name(),
+			case: run.case,
 			kind,
 			timeout: false,
 			outputs: None,

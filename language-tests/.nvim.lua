@@ -1,7 +1,9 @@
 vim.lsp.config("rust_analyzer", {
 	settings = {
 		["rust-analyzer"] = {
-			cargo = {},
+			cargo = {
+				features = {"upgrade"}
+			},
 			check = {
 				command = "clippy",
 				extraArgs = { "--lib" },

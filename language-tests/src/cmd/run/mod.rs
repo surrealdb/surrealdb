@@ -20,14 +20,25 @@ use crate::cli::{Backend, ColorMode, ResultsMode};
 use crate::cmd::run::provisioner::CanReuse;
 use crate::format::{ansi, IndentFormatter, Progress};
 use crate::runner::Schedular;
-use crate::tests::run::TestRunConfig;
+use crate::tests::run::{CaseImports, RunConfig};
 use crate::tests::{CaseSet, RunSetBuilder, TestRun};
 use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
-use crate::tests::schema::{ ENV_DEFAULT_TIMEOUT};
+use crate::tests::schema::{ NewPlannerStrategyConfig, ENV_DEFAULT_TIMEOUT};
 
 mod provisioner;
 mod util;
 
+#[derive(Debug)]
+pub struct TestRunConfig{
+	pub planner_config: NewPlannerStrategyConfig,
+	pub backend: Backend,
+}
+
+impl RunConfig for TestRunConfig{
+    fn name(&self, case: &CaseImports) -> String {
+		format!("{} on {} [{}]", case.test.origin.path, self.backend,self.planner_config)
+    }
+}
 
 pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let mut load_errors = Vec::new();
@@ -58,15 +69,15 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	let set_builder = RunSetBuilder::new(&set, &mut load_errors)
 		// Only run test for which run is enabled.
-		.with_filter(|x| x.case.config.config.test.run)
+		.with_filter(|x| x.test.config.parsed.test.run)
 		// Only run test for this backend.
 		.with_filter(|x| {
-			let config_backend = &x.case.config.config.env.backend;
+			let config_backend = &x.test.config.parsed.env.backend;
 			config_backend.is_empty() || config_backend.contains(&backend)
 		})
 		// Run for all config the test has configured.
 		.with_expander(|x| {
-			x.case.config.config.env.planner_strategy.iter().map(|x|{
+			x.test.config.parsed.env.planner_strategy.iter().map(|x|{
 				TestRunConfig{
 					planner_config: *x,
 					backend,
@@ -75,39 +86,39 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		});
 
 	let set_builder = if let Some(name_filter) = matches.get_one::<String>("filter") {
-		set_builder.with_filter(move |x| x.case.origin.path.contains(name_filter))
+		set_builder.with_filter(move |x| x.test.origin.path.contains(name_filter))
 	} else {
 		set_builder
 	};
 
 	let set_builder = if matches.get_flag("no-wip") {
-		set_builder.with_filter(|x| !x.case.config.config.test.wip)
+		set_builder.with_filter(|x| !x.test.config.parsed.test.wip)
 	} else {
 		set_builder
 	};
 
 	let set_builder = if matches.get_flag("no-results") {
-		set_builder.with_filter(|x| x.case.config.config.test.results.is_none())
+		set_builder.with_filter(|x| x.test.config.parsed.test.results.is_none())
 	} else {
 		set_builder
 	};
 
 	// Filter out test which cannot run on the current version.
 	let set_builder = set_builder.with_filter(|x| {
-		if let Some(x) = &x.case.config.config.test.version
+		if let Some(x) = &x.test.config.parsed.test.version
 			&& !x.matches(&core_version){
 				return false
 			}
 
 
-		if let Some(x) = &x.case.config.config.test.importing_version
+		if let Some(x) = &x.test.config.parsed.test.importing_version
 			&& !x.matches(&core_version){
 				return false
 			}
 
 
 		for i in x.imports.iter() {
-			if let Some(x) = &i.config.config.test.version &&
+			if let Some(x) = &i.config.parsed.test.version &&
 				!x.matches(&core_version){
 					return false
 			}
@@ -148,7 +159,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		// Handle possible done reports.
 		while let Ok(report) = report_recv.try_recv(){
 			let grade = report.grade();
-			progress.finish_item(report.run.id, grade).unwrap();
+			progress.finish_item(report.id, grade).unwrap();
 			reports.push(report);
 		}
 	}
@@ -159,7 +170,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	std::mem::drop(report_send);
 	while let Some(report) = report_recv.recv().await {
 		let grade = report.grade();
-		progress.finish_item(report.run.id, grade).unwrap();
+		progress.finish_item(report.id, grade).unwrap();
 		reports.push(report);
 	}
 
@@ -195,7 +206,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	f.indent(|f|{
 		for c in set.iter(){
 			let mut first = true;
-			for k in c.config.config.unused_keys(){
+			for k in c.config.parsed.unused_keys(){
 				if first {
 					first = false;
 					if use_color {
@@ -279,9 +290,9 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	Ok(())
 }
 
-pub async fn schedule_run(run: TestRun, schedular: &mut Schedular, provisioner: &mut Provisioner, report_sender: UnboundedSender<TestReport>){
-	let permit = provisioner.obtain(&run.case.case.config.config.env).await;
-	let sequential = run.case.case.config.config.env.sequential;
+pub async fn schedule_run(run: TestRun<TestRunConfig>, schedular: &mut Schedular, provisioner: &mut Provisioner, report_sender: UnboundedSender<TestReport>){
+	let permit = provisioner.obtain(&run.case.test.config.parsed.env).await;
+	let sequential = run.case.test.config.parsed.env.sequential;
 
 	let future = async move {
 		let res = permit.with(async |ds, grade_ds|{
@@ -332,10 +343,10 @@ async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
 }
 
 async fn run_test_with_dbs(
-	run: &TestRun,
+	run: &TestRun<TestRunConfig>,
 	dbs: &Datastore,
 ) -> Result<TestTaskResult> {
-	let config = &run.case.case.config.config;
+	let config = &run.case.test.config.parsed;
 
 	let mut session = util::session_from_test_config(config, run.config.planner_config.into());
 
@@ -405,7 +416,7 @@ async fn run_test_with_dbs(
 		..Default::default()
 	};
 
-	let source = &run.case.case.source.as_bytes();
+	let source = &run.case.test.source.as_bytes();
 	let mut parser = syn::parser::Parser::new_with_settings(source, settings);
 	let mut stack = reblessive::Stack::new();
 
@@ -452,7 +463,7 @@ async fn run_test_with_dbs(
 
 	// If the test was not a clean test it should ensure that the datastore is reset for the next
 	// test.
-	if !run.case.case.config.config.env.clean {
+	if !run.case.test.config.parsed.env.clean {
 		let keys = check_retained_keys(dbs).await?;
 		if !keys.is_empty() {
 			return Ok(TestTaskResult::BadCleanup(keys));
