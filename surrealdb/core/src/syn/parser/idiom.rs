@@ -29,8 +29,9 @@ impl Parser<'_> {
 		if self.eat(t!("VALUE")) {
 			let expr = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 			let alias = if self.eat(t!("AS")) {
-				// When using `SELECT VALUE ... AS ...`, only parse an alias if it is a valid identifier.
-				// It does not make sense to alias as a multi-part idiom because the alias will be not be projected.
+				// When using `SELECT VALUE ... AS ...`, only parse an alias if it is a valid
+				// identifier. It does not make sense to alias as a multi-part idiom because the
+				// alias will be not be projected.
 				let ident = self.parse_ident()?;
 				Some(Idiom(vec![Part::Field(ident)]))
 			} else {
