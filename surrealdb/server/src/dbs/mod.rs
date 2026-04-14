@@ -77,6 +77,10 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_NO_DEFAULTS", long = "no-defaults", conflicts_with_all = ["default_namespace", "default_database"])]
 	#[arg(default_value_t = false)]
 	no_defaults: bool,
+	#[arg(help = "Load Surrealism modules lazily on first use instead of eagerly at startup")]
+	#[arg(env = "SURREAL_LAZY_SURREALISM", long = "lazy-surrealism")]
+	#[arg(default_value_t = false)]
+	lazy_surrealism: bool,
 }
 
 #[derive(Args, Debug)]
@@ -735,6 +739,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		default_namespace,
 		default_database,
 		no_defaults,
+		lazy_surrealism,
 	}: StartCommandDbsOptions,
 ) -> Result<Datastore> {
 	// Warn about the strict mode flag being unused.
@@ -787,6 +792,8 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny);
 	#[cfg(storage)]
 	let dbs = dbs.with_temporary_directory(temporary_directory);
+	#[cfg(feature = "surrealism")]
+	let dbs = dbs.with_lazy_surrealism(lazy_surrealism);
 	// Ensure the storage version is up to date to prevent corruption.
 	// OutdatedStorageVersion is a permanent condition (the data on disk is from
 	// an older version), so retrying it would waste time and delay pod restarts

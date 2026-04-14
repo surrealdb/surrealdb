@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -10,6 +12,8 @@ use crate::dbs::plan::Explanation;
 use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
 use crate::expr::order::Ordering;
+use crate::expr::part::Part;
+use crate::expr::{FlowResultExt as _, Idiom};
 use crate::idx::planner::RecordStrategy;
 use crate::val::Value;
 
@@ -171,6 +175,63 @@ impl Results {
 			Self::File(f) => f.take_vec().await?,
 			Self::None | Self::Groups(_) => vec![],
 		})
+	}
+
+	/// Apply a deferred SELECT VALUE projection to every collected result.
+	///
+	/// Called after ORDER BY + LIMIT when the VALUE projection was deferred
+	/// so that sorting could see the full document fields.
+	pub(super) async fn project_value(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		selector: &crate::expr::field::Selector,
+		omit: &[Idiom],
+	) -> Result<()> {
+		let values = self.take().await?;
+		let mut projected = Vec::with_capacity(values.len());
+		// Check if the alias was materialized in pluck_select. SELECT VALUE
+		// aliases are guaranteed single-part by the parser.
+		let materialized_alias = match &selector.alias {
+			Some(alias) if alias.len() == 1 && matches!(alias.first(), Some(Part::Field(_))) => {
+				Some(alias)
+			}
+			_ => None,
+		};
+		for mut v in values {
+			// Preserve rid before OMIT may delete the `id` field from the document.
+			let rid = match &v {
+				Value::Object(obj) => obj.rid().map(Arc::new),
+				_ => None,
+			};
+			for field in omit {
+				v.del(stk, ctx, opt, field).await?;
+			}
+			let val = if let Some(alias) = materialized_alias
+				&& let Value::Object(ref obj) = v
+				&& alias
+					.first()
+					.and_then(|p| {
+						if let Part::Field(n) = p {
+							Some(n.as_str())
+						} else {
+							None
+						}
+					})
+					.is_some_and(|n| obj.contains_key(n))
+			{
+				v.pick(alias)
+			} else {
+				let doc = crate::doc::CursorDoc::new(rid, None, v);
+				stk.run(|stk| selector.expr.compute(stk, ctx, opt, Some(&doc)))
+					.await
+					.catch_return()?
+			};
+			projected.push(val);
+		}
+		*self = Results::Memory(projected.into());
+		Ok(())
 	}
 
 	pub(super) fn explain(&self, exp: &mut Explanation) {
