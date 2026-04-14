@@ -122,7 +122,7 @@ impl ScalarFunction for SearchAnalyze {
 			// Get the analyzer definition from the database
 			let az_def = ctx
 				.txn()
-				.get_db_analyzer(ns_id, db_id, &az)
+				.get_db_analyzer(ns_id, db_id, &az, ctx.exec_ctx.version_stamp())
 				.await
 				.map_err(|e| anyhow::anyhow!("Analyzer '{}' not found: {}", az, e))?;
 

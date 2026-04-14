@@ -52,7 +52,7 @@ impl AlterFieldStatement {
 		let txn = ctx.tx();
 		// Get the table definition
 		let name = self.name.to_sql();
-		let mut df = match txn.get_tb_field(ns, db, &self.what, &name).await? {
+		let mut df = match txn.get_tb_field(ns, db, &self.what, &name, None).await? {
 			Some(tb) => tb.deref().clone(),
 			None => {
 				if self.if_exists {
@@ -137,9 +137,9 @@ impl AlterFieldStatement {
 		df.auth_limit = AuthLimit::new_from_auth(opt.auth.as_ref()).into();
 
 		let key = crate::key::table::fd::new(ns, db, &self.what, &name);
-		txn.set(&key, &df, None).await?;
+		txn.set(&key, &df).await?;
 		// Refresh the table cache
-		let Some(tb) = txn.get_tb(ns, db, &self.what).await? else {
+		let Some(tb) = txn.get_tb(ns, db, &self.what, None).await? else {
 			return Err(Error::TbNotFound {
 				name: self.what.clone(),
 			}

@@ -194,10 +194,10 @@ impl ExecOperator for RecordIdScan {
 					Some(
 						v.cast_to::<crate::val::Datetime>()
 							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp()?,
+							.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// 3. Delegate to the shared lookup helper
@@ -257,7 +257,8 @@ pub(crate) async fn execute_record_lookup(
 		(perm, fs)
 	} else {
 		// Runtime fallback
-		let table_def = db_ctx.get_table_def(&rid.table).await.context("Failed to get table")?;
+		let table_def =
+			db_ctx.get_table_def(&rid.table, version).await.context("Failed to get table")?;
 
 		if table_def.is_none() {
 			return Err(ControlFlow::Err(anyhow::Error::new(crate::err::Error::TbNotFound {

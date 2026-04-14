@@ -109,11 +109,11 @@ impl SeqDocIds {
 			.next_fts_doc_id(Some(ctx), self.ikb.clone(), self.batch)
 			.await? as DocId;
 		{
-			tx.set(&id_key, &new_doc_id, None).await?;
+			tx.set(&id_key, &new_doc_id).await?;
 		}
 		{
 			let k = self.ikb.new_ii_key(new_doc_id);
-			tx.set(&k, &id, None).await?;
+			tx.set(&k, &id).await?;
 		}
 		Ok(Resolved::New(new_doc_id))
 	}

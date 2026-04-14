@@ -95,7 +95,7 @@ impl BoxTimeStamp {
 /// The counter is treated as milliseconds since epoch for datetime conversions.
 /// This provides monotonicity without using system time or bit-splitting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct IncTimeStamp(u64);
+pub struct IncTimeStamp(pub(crate) u64);
 
 pub struct IncTimeStampImpl;
 

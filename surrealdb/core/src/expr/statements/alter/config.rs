@@ -54,7 +54,7 @@ impl AlterConfigStatement {
 			ConfigInner::Default(_) => "default",
 		};
 
-		let existing = txn.get_db_config(ns, db, config_name).await?;
+		let existing = txn.get_db_config(ns, db, config_name, None).await?;
 
 		if existing.is_none() && self.if_exists {
 			return Ok(Value::None);
@@ -62,7 +62,7 @@ impl AlterConfigStatement {
 
 		let new_def = self.inner.compute(stk, ctx, opt, doc).await?;
 		let key = crate::key::database::cg::new(ns, db, config_name);
-		txn.set(&key, &new_def, None).await?;
+		txn.set(&key, &new_def).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

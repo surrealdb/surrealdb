@@ -201,7 +201,7 @@ pub async fn create_grant(
 		Base::Root => txn.expect_root_access(&access).await?,
 		Base::Ns => {
 			let ns = ctx.expect_ns_id(opt).await?;
-			txn.get_ns_access(ns, &access).await?.ok_or_else(|| Error::AccessNsNotFound {
+			txn.get_ns_access(ns, &access, None).await?.ok_or_else(|| Error::AccessNsNotFound {
 				ac: access.clone(),
 				// The namespace is expected above
 				ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
@@ -209,11 +209,21 @@ pub async fn create_grant(
 		}
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			txn.get_db_access(ns, db, &access).await?.ok_or_else(|| Error::AccessDbNotFound {
-				ac: access.clone(),
-				// The namespace and database is expected above
-				ns: opt.ns.as_deref().expect("namespace validated by expect_ns_db_ids").to_owned(),
-				db: opt.db.as_deref().expect("database validated by expect_ns_db_ids").to_owned(),
+			txn.get_db_access(ns, db, &access, None).await?.ok_or_else(|| {
+				Error::AccessDbNotFound {
+					ac: access.clone(),
+					// The namespace and database is expected above
+					ns: opt
+						.ns
+						.as_deref()
+						.expect("namespace validated by expect_ns_db_ids")
+						.to_owned(),
+					db: opt
+						.db
+						.as_deref()
+						.expect("database validated by expect_ns_db_ids")
+						.to_owned(),
+				}
 			})?
 		}
 	};
@@ -270,7 +280,7 @@ pub async fn create_grant(
 
 					let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 					let key = crate::key::database::access::gr::new(ns, db, &gr.ac, &gr.id);
-					txn.put(&key, &gr_store, None).await
+					txn.put(&key, &gr_store).await
 				}
 				_ => bail!(Error::AccessLevelMismatch),
 			};
@@ -320,7 +330,7 @@ pub async fn create_grant(
 						Base::Root => txn.expect_root_user(user).await?,
 						Base::Ns => {
 							let ns_id = ctx.get_ns_id(opt).await?;
-							txn.get_ns_user(ns_id, user).await?.ok_or_else(|| {
+							txn.get_ns_user(ns_id, user, None).await?.ok_or_else(|| {
 								Error::UserNsNotFound {
 									name: user.clone(),
 									// We just retrieved the ns_id above
@@ -333,7 +343,7 @@ pub async fn create_grant(
 						}
 						Base::Db => {
 							let (ns_id, db_id) = ctx.expect_ns_db_ids(opt).await?;
-							txn.get_db_user(ns_id, db_id, user).await?.ok_or_else(|| {
+							txn.get_db_user(ns_id, db_id, user, None).await?.ok_or_else(|| {
 								Error::UserDbNotFound {
 									name: user.clone(),
 									// We just retrieved the ns_id and db_id above
@@ -388,13 +398,13 @@ pub async fn create_grant(
 			let res = match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&gr.ac, &gr.id);
-					txn.put(&key, &gr_store, None).await
+					txn.put(&key, &gr_store).await
 				}
 				Base::Ns => {
 					let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
 					let key =
 						crate::key::namespace::access::gr::new(ns.namespace_id, &gr.ac, &gr.id);
-					txn.put(&key, &gr_store, None).await
+					txn.put(&key, &gr_store).await
 				}
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
@@ -406,7 +416,7 @@ pub async fn create_grant(
 						&gr.ac,
 						&gr.id,
 					);
-					txn.put(&key, &gr_store, None).await
+					txn.put(&key, &gr_store).await
 				}
 			};
 
@@ -482,7 +492,7 @@ async fn compute_show(
 		}
 		Base::Ns => {
 			let ns = ctx.expect_ns_id(opt).await?;
-			if txn.get_ns_access(ns, &stmt.ac).await?.is_none() {
+			if txn.get_ns_access(ns, &stmt.ac, None).await?.is_none() {
 				bail!(Error::AccessNsNotFound {
 					ac: stmt.ac.clone(),
 					// We expected a namespace above
@@ -493,7 +503,7 @@ async fn compute_show(
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			// We expected a namespace above
-			if txn.get_db_access(ns, db, &stmt.ac).await?.is_none() {
+			if txn.get_db_access(ns, db, &stmt.ac, None).await?.is_none() {
 				bail!(Error::AccessDbNotFound {
 					ac: stmt.ac.clone(),
 					// We expected a namespace and database above
@@ -516,7 +526,7 @@ async fn compute_show(
 	match &stmt.gr {
 		Some(gr) => {
 			let grant = match base {
-				Base::Root => match txn.get_root_access_grant(&stmt.ac, gr).await? {
+				Base::Root => match txn.get_root_access_grant(&stmt.ac, gr, None).await? {
 					Some(val) => val,
 					None => bail!(Error::AccessGrantRootNotFound {
 						ac: stmt.ac.clone(),
@@ -525,7 +535,7 @@ async fn compute_show(
 				},
 				Base::Ns => {
 					let ns = ctx.expect_ns_id(opt).await?;
-					match txn.get_ns_access_grant(ns, &stmt.ac, gr).await? {
+					match txn.get_ns_access_grant(ns, &stmt.ac, gr, None).await? {
 						Some(val) => val,
 						None => bail!(Error::AccessGrantNsNotFound {
 							ac: stmt.ac.clone(),
@@ -536,7 +546,7 @@ async fn compute_show(
 				}
 				Base::Db => {
 					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-					match txn.get_db_access_grant(ns, db, &stmt.ac, gr).await? {
+					match txn.get_db_access_grant(ns, db, &stmt.ac, gr, None).await? {
 						Some(val) => val,
 						None => bail!(Error::AccessGrantDbNotFound {
 							ac: stmt.ac.clone(),
@@ -553,14 +563,14 @@ async fn compute_show(
 		None => {
 			// Get all grants.
 			let grs = match base {
-				Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
+				Base::Root => txn.all_root_access_grants(&stmt.ac, None).await?,
 				Base::Ns => {
 					let ns = ctx.expect_ns_id(opt).await?;
-					txn.all_ns_access_grants(ns, &stmt.ac).await?
+					txn.all_ns_access_grants(ns, &stmt.ac, None).await?
 				}
 				Base::Db => {
 					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-					txn.all_db_access_grants(ns, db, &stmt.ac).await?
+					txn.all_db_access_grants(ns, db, &stmt.ac, None).await?
 				}
 			};
 
@@ -622,14 +632,14 @@ pub async fn revoke_grant(
 	txn.clear_cache();
 	// Check if the access method exists.
 	match base {
-		Base::Root => txn.get_root_access(&stmt.ac).await?,
+		Base::Root => txn.get_root_access(&stmt.ac, None).await?,
 		Base::Ns => {
 			let ns = ctx.expect_ns_id(opt).await?;
-			txn.get_ns_access(ns, &stmt.ac).await?
+			txn.get_ns_access(ns, &stmt.ac, None).await?
 		}
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			txn.get_db_access(ns, db, &stmt.ac).await?
+			txn.get_db_access(ns, db, &stmt.ac, None).await?
 		}
 	};
 
@@ -638,7 +648,7 @@ pub async fn revoke_grant(
 	match &stmt.gr {
 		Some(gr) => {
 			let mut revoke = match base {
-				Base::Root => match txn.get_root_access_grant(&stmt.ac, gr).await? {
+				Base::Root => match txn.get_root_access_grant(&stmt.ac, gr, None).await? {
 					Some(val) => (*val).clone(),
 					None => bail!(Error::AccessGrantRootNotFound {
 						ac: stmt.ac.clone(),
@@ -647,7 +657,7 @@ pub async fn revoke_grant(
 				},
 				Base::Ns => {
 					let ns = ctx.expect_ns_id(opt).await?;
-					match txn.get_ns_access_grant(ns, &stmt.ac, gr).await? {
+					match txn.get_ns_access_grant(ns, &stmt.ac, gr, None).await? {
 						Some(val) => (*val).clone(),
 						None => {
 							let ns = opt.ns()?;
@@ -661,7 +671,7 @@ pub async fn revoke_grant(
 				}
 				Base::Db => {
 					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-					match txn.get_db_access_grant(ns, db, &stmt.ac, gr).await? {
+					match txn.get_db_access_grant(ns, db, &stmt.ac, gr, None).await? {
 						Some(val) => (*val).clone(),
 						None => {
 							let (ns, db) = opt.ns_db()?;
@@ -682,12 +692,12 @@ pub async fn revoke_grant(
 			match base {
 				Base::Root => {
 					let key = crate::key::root::access::gr::new(&stmt.ac, gr);
-					txn.set(&key, &revoke, None).await?;
+					txn.set(&key, &revoke).await?;
 				}
 				Base::Ns => {
 					let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
 					let key = crate::key::namespace::access::gr::new(ns.namespace_id, &stmt.ac, gr);
-					txn.set(&key, &revoke, None).await?;
+					txn.set(&key, &revoke).await?;
 				}
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
@@ -699,7 +709,7 @@ pub async fn revoke_grant(
 						&stmt.ac,
 						gr,
 					);
-					txn.set(&key, &revoke, None).await?;
+					txn.set(&key, &revoke).await?;
 				}
 			};
 
@@ -717,14 +727,14 @@ pub async fn revoke_grant(
 		None => {
 			// Get all grants.
 			let grs = match base {
-				Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
+				Base::Root => txn.all_root_access_grants(&stmt.ac, None).await?,
 				Base::Ns => {
 					let ns = ctx.expect_ns_id(opt).await?;
-					txn.all_ns_access_grants(ns, &stmt.ac).await?
+					txn.all_ns_access_grants(ns, &stmt.ac, None).await?
 				}
 				Base::Db => {
 					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-					txn.all_db_access_grants(ns, db, &stmt.ac).await?
+					txn.all_db_access_grants(ns, db, &stmt.ac, None).await?
 				}
 			};
 
@@ -772,7 +782,7 @@ pub async fn revoke_grant(
 				match base {
 					Base::Root => {
 						let key = crate::key::root::access::gr::new(&stmt.ac, &gr.id);
-						txn.set(&key, &gr, None).await?;
+						txn.set(&key, &gr).await?;
 					}
 					Base::Ns => {
 						let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
@@ -781,7 +791,7 @@ pub async fn revoke_grant(
 							&stmt.ac,
 							&gr.id,
 						);
-						txn.set(&key, &gr, None).await?;
+						txn.set(&key, &gr).await?;
 					}
 					Base::Db => {
 						let (ns, db) = opt.ns_db()?;
@@ -793,7 +803,7 @@ pub async fn revoke_grant(
 							&stmt.ac,
 							&gr.id,
 						);
-						txn.set(&key, &gr, None).await?;
+						txn.set(&key, &gr).await?;
 					}
 				};
 
@@ -845,27 +855,27 @@ async fn compute_purge(
 	txn.clear_cache();
 	// Check if the access method exists.
 	match base {
-		Base::Root => txn.get_root_access(&stmt.ac).await?,
+		Base::Root => txn.get_root_access(&stmt.ac, None).await?,
 		Base::Ns => {
 			let ns = ctx.get_ns_id(opt).await?;
-			txn.get_ns_access(ns, &stmt.ac).await?
+			txn.get_ns_access(ns, &stmt.ac, None).await?
 		}
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			txn.get_db_access(ns, db, &stmt.ac).await?
+			txn.get_db_access(ns, db, &stmt.ac, None).await?
 		}
 	};
 	// Get all grants to purge.
 	let mut purged = Array::new();
 	let grs = match base {
-		Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
+		Base::Root => txn.all_root_access_grants(&stmt.ac, None).await?,
 		Base::Ns => {
 			let ns = ctx.get_ns_id(opt).await?;
-			txn.all_ns_access_grants(ns, &stmt.ac).await?
+			txn.all_ns_access_grants(ns, &stmt.ac, None).await?
 		}
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			txn.all_db_access_grants(ns, db, &stmt.ac).await?
+			txn.all_db_access_grants(ns, db, &stmt.ac, None).await?
 		}
 	};
 	for gr in grs.iter() {

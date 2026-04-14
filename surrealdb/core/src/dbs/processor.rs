@@ -197,8 +197,9 @@ impl Collectable {
 		// Rebuild the context so downstream processing (events, views, lives,
 		// changefeeds, field validation) uses the correct table definition.
 		if ft.as_ref() != doc_ctx.tb.name {
-			let tb =
-				txn.get_or_add_tb(None, &doc_ctx.ns.name, &doc_ctx.db.name, ft.as_ref()).await?;
+			let tb = txn
+				.get_or_add_tb(None, &doc_ctx.ns.name, &doc_ctx.db.name, ft.as_ref(), None)
+				.await?;
 			let fields = txn
 				.all_tb_fields(
 					doc_ctx.ns.namespace_id,

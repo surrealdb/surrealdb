@@ -15,8 +15,9 @@ use super::common::{
 };
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::{
-	AccessMode, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+	AccessMode, ContextLevel, ControlFlowExt, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
+	monitor_stream,
 };
 use crate::expr::ControlFlow;
 use crate::idx::planner::ScanDirection;
@@ -67,6 +68,9 @@ pub struct ReferenceScan {
 	/// When `Unbounded`, ends at the field/table suffix.
 	pub(crate) range_end: Bound<Arc<dyn PhysicalExpr>>,
 
+	/// Optional VERSION timestamp for time-travel queries.
+	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
+
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -79,6 +83,7 @@ impl ReferenceScan {
 		output_mode: ReferenceScanOutput,
 		range_start: Bound<Arc<dyn PhysicalExpr>>,
 		range_end: Bound<Arc<dyn PhysicalExpr>>,
+		version: Option<Arc<dyn PhysicalExpr>>,
 	) -> Self {
 		Self {
 			input,
@@ -87,6 +92,7 @@ impl ReferenceScan {
 			output_mode,
 			range_start,
 			range_end,
+			version,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -127,7 +133,11 @@ impl ExecOperator for ReferenceScan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		self.input.access_mode()
+		let mut mode = self.input.access_mode();
+		if let Some(ref version) = self.version {
+			mode = mode.combine(version.access_mode());
+		}
+		mode
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
@@ -152,11 +162,25 @@ impl ExecOperator for ReferenceScan {
 		let range_end = self.range_end.clone();
 		let ctx = ctx.clone();
 		let fetch_full = output_mode == ReferenceScanOutput::FullRecord;
+		let version_expr = self.version.clone();
 
 		let stream = async_stream::try_stream! {
 			let txn = ctx.txn();
 			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 			let db_id = db_ctx.db.database_id;
+
+			let version: Option<u64> = match &version_expr {
+				Some(expr) => {
+					let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+					let v = expr.evaluate(eval_ctx).await?;
+					Some(
+						v.cast_to::<crate::val::Datetime>()
+							.map_err(|e| anyhow::anyhow!("{e}"))?
+							.to_version_stamp(txn.timestamp_impl().as_ref())?,
+					)
+				}
+				None => ctx.version_stamp(),
+			};
 
 			// Read from the child operator stream and extract RecordIds
 			futures::pin_mut!(input_stream);
@@ -183,7 +207,7 @@ impl ExecOperator for ReferenceScan {
 						&ctx,
 					).await?;
 
-					let kv_stream = txn.stream_keys(beg..end, None, None, 0, ScanDirection::Forward);
+					let kv_stream = txn.stream_keys(beg..end, version, None, 0, ScanDirection::Forward);
 					futures::pin_mut!(kv_stream);
 
 					while let Some(result) = kv_stream.next().await {
@@ -200,7 +224,7 @@ impl ExecOperator for ReferenceScan {
 
 							if rid_batch.len() >= BATCH_SIZE {
 								let values = resolve_record_batch(
-									&txn, ns_id, db_id, &rid_batch, fetch_full, None,
+									&txn, ns_id, db_id, &rid_batch, fetch_full, version,
 									CachePolicy::ReadWrite,
 								).await?;
 								yield ValueBatch { values };
@@ -214,7 +238,7 @@ impl ExecOperator for ReferenceScan {
 			// Yield remaining batch
 			if !rid_batch.is_empty() {
 				let values = resolve_record_batch(
-					&txn, ns_id, db_id, &rid_batch, fetch_full, None,
+					&txn, ns_id, db_id, &rid_batch, fetch_full, version,
 					CachePolicy::ReadWrite,
 				).await?;
 				yield ValueBatch { values };
@@ -356,6 +380,7 @@ mod tests {
 			ReferenceScanOutput::RecordId,
 			Bound::Unbounded,
 			Bound::Unbounded,
+			None,
 		);
 
 		assert_eq!(scan.name(), "ReferenceScan");

@@ -236,6 +236,7 @@ impl Executor {
 			session: self.get_session_info(),
 			current_value: None,
 			skip_fetch_perms: false,
+			version_stamp: None,
 		};
 
 		// Check what level of context we need

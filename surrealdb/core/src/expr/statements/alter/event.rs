@@ -33,7 +33,7 @@ impl AlterEventStatement {
 		let txn = ctx.tx();
 
 		let ev_name = &self.name;
-		let mut ev = match txn.get_tb_event(ns, db, &self.what, ev_name).await {
+		let mut ev = match txn.get_tb_event(ns, db, &self.what, ev_name, None).await {
 			Ok(v) => v.deref().clone(),
 			Err(e) => {
 				if self.if_exists {
@@ -71,10 +71,10 @@ impl AlterEventStatement {
 		ev.auth_limit = AuthLimit::new_from_auth(opt.auth.as_ref()).into();
 
 		let key = crate::key::table::ev::new(ns, db, &self.what, ev_name);
-		txn.set(&key, &ev, None).await?;
+		txn.set(&key, &ev).await?;
 
 		// Refresh the table cache
-		if let Some(tb) = txn.get_tb(ns, db, &self.what).await? {
+		if let Some(tb) = txn.get_tb(ns, db, &self.what, None).await? {
 			let tb = TableDefinition {
 				cache_events_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
