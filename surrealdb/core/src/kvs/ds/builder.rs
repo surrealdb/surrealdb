@@ -130,6 +130,7 @@ impl Builder {
 		self
 	}
 
+	#[cfg(feature = "surrealism")]
 	pub fn with_lazy_surrealism(mut self, lazy_surrealism: bool) -> Self {
 		self.lazy_surrealism = lazy_surrealism;
 		self
