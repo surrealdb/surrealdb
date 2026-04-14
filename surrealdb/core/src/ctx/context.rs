@@ -10,9 +10,9 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use async_channel::Sender;
 #[cfg(feature = "surrealism")]
-use surrealism_runtime::controller::Runtime;
+use surrealism_runtime::package::{SurrealismPackage, UnpackOptions};
 #[cfg(feature = "surrealism")]
-use surrealism_runtime::package::SurrealismPackage;
+use surrealism_runtime::runtime::Runtime;
 #[cfg(feature = "http")]
 use url::Url;
 use web_time::Instant;
@@ -44,7 +44,9 @@ use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
 use crate::sql::expression::convert_public_value_to_internal;
 #[cfg(feature = "surrealism")]
-use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup};
+use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup, SurrealismCachedModule};
+#[cfg(feature = "surrealism")]
+use crate::surrealism::host::module_allow_net_targets;
 use crate::types::{PublicNotification, PublicVariables};
 use crate::val::Value;
 
@@ -912,7 +914,6 @@ impl Context {
 				#[cfg(target_family = "wasm")]
 				let targets = target.resolve()?;
 				for t in &targets {
-					// For each IP address resolved, check it is allowed
 					match_any_deny_net(t)?;
 				}
 				trace!("Capabilities allowed outgoing network connection, target: '{target}'");
@@ -947,10 +948,10 @@ impl Context {
 	}
 
 	#[cfg(feature = "surrealism")]
-	pub(crate) async fn get_surrealism_runtime(
+	pub(crate) async fn get_surrealism_module(
 		&self,
 		lookup: SurrealismCacheLookup<'_>,
-	) -> Result<Arc<Runtime>> {
+	) -> Result<SurrealismCachedModule> {
 		if !self.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
 			bail!(
 				"Failed to get surrealism runtime: Experimental capability `surrealism` is not enabled"
@@ -978,12 +979,65 @@ impl Context {
 					bail!("file not found");
 				};
 
-				let package = SurrealismPackage::from_reader(std::io::Cursor::new(surli))?;
-				let runtime = Arc::new(Runtime::new(package)?);
+				let safe_key = key.to_string().replace(['/', '\\'], "_");
+				let temp_prefix = format!("SURREAL_MODFS_{ns}_{db}_{safe_key}_");
+				let unpack_opts = UnpackOptions {
+					#[cfg(storage)]
+					temp_base: self.temporary_directory().map(|p| p.as_path()),
+					#[cfg(not(storage))]
+					temp_base: None,
+					temp_prefix: &temp_prefix,
+					max_fs_bytes: *crate::cnf::SURREALISM_MAX_FS_BYTES,
+				};
+				let package =
+					SurrealismPackage::from_reader(std::io::Cursor::new(surli), &unpack_opts)?;
 
-				Ok(runtime)
+				let module_caps = package.config.capabilities.clone();
+				self.get_capabilities().validate_surrealism_capabilities(module_caps.clone())?;
+
+				let org = package.config.meta.organisation.clone();
+				let name = package.config.meta.name.clone();
+
+				let server_pool_size = *crate::cnf::SURREALISM_MAX_POOL_SIZE;
+				let server_max_memory = *crate::cnf::SURREALISM_MAX_MEMORY;
+				let server_max_execution_time =
+					crate::cnf::SURREALISM_MAX_EXECUTION_TIME.map(std::time::Duration::from_millis);
+				let server_max_kv_entries = *crate::cnf::SURREALISM_MAX_KV_ENTRIES;
+				let server_max_kv_value_bytes = *crate::cnf::SURREALISM_MAX_KV_VALUE_BYTES;
+
+				let runtime = tokio::task::spawn_blocking(move || {
+					Runtime::new(
+						package,
+						server_pool_size,
+						server_max_memory,
+						server_max_execution_time,
+						server_max_kv_entries,
+						server_max_kv_value_bytes,
+					)
+				})
+				.await
+				.map_err(|e| anyhow::anyhow!("WASM compile task aborted: {e}"))?
+				.map_err(|e| anyhow::anyhow!("{e}"))?;
+				let runtime = Arc::new(runtime);
+
+				let module_display_name: Arc<str> = format!("{org}::{name}").into();
+				let module_net_targets = Arc::new(module_allow_net_targets(&module_caps));
+
+				Ok(SurrealismCachedModule {
+					runtime,
+					module_display_name,
+					module_net_targets,
+				})
 			})
 			.await
+	}
+
+	#[cfg(feature = "surrealism")]
+	pub(crate) async fn get_surrealism_runtime(
+		&self,
+		lookup: SurrealismCacheLookup<'_>,
+	) -> Result<Arc<Runtime>> {
+		Ok(self.get_surrealism_module(lookup).await?.runtime)
 	}
 }
 
