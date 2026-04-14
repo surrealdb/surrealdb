@@ -388,7 +388,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: ubuntu-latest
+    runs-on: [runner-amd64-2xlarge]
     steps:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -704,7 +704,7 @@ jobs:
 
   sdk-python:
     name: SDK - Python (${{ matrix.version }}, ${{ matrix.protocol }})
-    runs-on: [runner-amd64-2xlarge]
+    runs-on: ubuntu-latest
     needs: build
     strategy:
       fail-fast: false
