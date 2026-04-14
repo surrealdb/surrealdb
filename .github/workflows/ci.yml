@@ -704,7 +704,7 @@ jobs:
 
   sdk-python:
     name: SDK - Python (${{ matrix.version }}, ${{ matrix.protocol }})
-    runs-on: ubuntu-latest
+    runs-on: [runner-amd64-2xlarge]
     needs: build
     strategy:
       fail-fast: false
