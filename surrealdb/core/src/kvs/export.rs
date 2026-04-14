@@ -348,10 +348,14 @@ impl Transaction {
 		chn.send(bytes!("")).await?;
 		chn.send(bytes!(format!("{};", table.to_sql()))).await?;
 		chn.send(bytes!("")).await?;
-		// Export all table field definitions for this table
+		// Export all table field definitions with OVERWRITE to ensure
+		// idempotent re-import (relation tables auto-generate in/out fields,
+		// and array types generate sub-field definitions that would conflict).
 		let fields = self.all_tb_fields(ns, db, &table.name, None).await?;
 		for field in fields.iter() {
-			chn.send(bytes!(format!("{};", field.to_sql()))).await?;
+			let mut stmt = field.to_sql_definition();
+			stmt.kind = crate::sql::statements::define::DefineKind::Overwrite;
+			chn.send(bytes!(format!("{};", stmt.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table index definitions for this table
