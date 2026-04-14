@@ -1006,7 +1006,7 @@ mod tests {
 			// succeeds
 			(
 				Datastore::builder()
-					.with_auth(false)
+					.with_auth(true)
 					.with_capabilities(Capabilities::default().with_guest_access(false))
 					.build_with_path("memory")
 					.await

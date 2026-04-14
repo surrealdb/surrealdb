@@ -181,7 +181,6 @@ async fn request(
 	body: Option<Value>,
 	opts: impl Into<Object>,
 ) -> Result<Value> {
-	dbg!("TEST");
 	// Check if the URI is valid and allowed
 	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.clone()))?;
 	ctx.check_allowed_net(&url).await?;
@@ -264,7 +263,7 @@ async fn request(
 		}
 	} else {
 		// Receive the response as a value
-		let val = dbg!(decode_response(res).await)?;
+		let val = decode_response(res).await?;
 		Ok(convert_public_value_to_internal(val))
 	}
 }
@@ -274,7 +273,6 @@ pub async fn head(ctx: &FrozenContext, uri: String, opts: impl Into<Object>) -> 
 }
 
 pub async fn get(ctx: &FrozenContext, uri: String, opts: impl Into<Object>) -> Result<Value> {
-	dbg!("CALLED");
 	request(ctx, Method::GET, uri, None, opts).await
 }
 

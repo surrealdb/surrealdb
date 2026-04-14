@@ -295,7 +295,7 @@ async fn http_request(
 	}
 
 	// Send the request
-	let res = dbg!(req.send().await).map_err(Error::from)?;
+	let res = req.send().await.map_err(Error::from)?;
 
 	if is_head {
 		// For HEAD, just check status

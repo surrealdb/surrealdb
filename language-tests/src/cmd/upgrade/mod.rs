@@ -135,11 +135,9 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 							continue
 					}
 
-					for i in x.imports.iter(){
-						if let Some(ver_req) = i.config.parsed.test.version.as_ref() &&
-							!ver_req.matches(from_v){
-								continue
-							}
+					if let Some(ver_req) = i.config.parsed.test.version.as_ref()
+						&& x.imports.iter().any(|ver_req| !ver_req.matches(from_v)) {
+						continue
 					}
 
 					res.push(UpgradeTestConfig{
