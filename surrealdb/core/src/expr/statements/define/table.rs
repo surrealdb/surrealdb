@@ -314,8 +314,21 @@ impl DefineTableStatement {
 				fail!("initial select for view did not return an array of objects");
 			};
 
-			let Some(Value::RecordId(id)) = o.remove("id") else {
-				fail!("select results did not contain a record id");
+			let id = if let Some(Value::RecordId(id)) = o.remove("id") {
+				id
+			} else {
+				let mut found = None;
+				for (key, val) in o.iter() {
+					if let Value::RecordId(rid) = val {
+						found = Some((key.clone(), rid.clone()));
+						break;
+					}
+				}
+				let Some((key, id)) = found else {
+					fail!("select results did not contain a record id");
+				};
+				o.remove(&key);
+				id
 			};
 
 			let key = key::record::new(ns, db, view_table_name, &id.key);
