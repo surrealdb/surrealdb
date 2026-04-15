@@ -47,7 +47,7 @@ impl RemoveConfigStatement {
 			}
 			Base::Db => {
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-				if txn.get_db_config(ns, db, cg).await?.is_none() {
+				if txn.get_db_config(ns, db, cg, None).await?.is_none() {
 					if self.if_exists {
 						return Ok(Value::None);
 					} else {

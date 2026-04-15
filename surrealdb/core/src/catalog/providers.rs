@@ -54,10 +54,14 @@ pub(crate) trait RootProvider {
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 pub(crate) trait NamespaceProvider {
 	/// Retrieve all namespace definitions in a datastore.
-	async fn all_ns(&self) -> Result<Arc<[NamespaceDefinition]>>;
+	async fn all_ns(&self, version: Option<u64>) -> Result<Arc<[NamespaceDefinition]>>;
 
 	/// Retrieve a specific namespace definition.
-	async fn get_ns_by_name(&self, ns: &str) -> Result<Option<Arc<NamespaceDefinition>>>;
+	async fn get_ns_by_name(
+		&self,
+		ns: &str,
+		version: Option<u64>,
+	) -> Result<Option<Arc<NamespaceDefinition>>>;
 
 	/// Get or add a namespace with a default configuration, only if we are in
 	/// dynamic mode.
@@ -67,7 +71,7 @@ pub(crate) trait NamespaceProvider {
 		ctx: Option<&Context>,
 		ns: &str,
 	) -> Result<Arc<NamespaceDefinition>> {
-		match self.get_ns_by_name(ns).await? {
+		match self.get_ns_by_name(ns, None).await? {
 			Some(val) => Ok(val),
 			// The entry is not in the database
 			None => {
@@ -89,7 +93,7 @@ pub(crate) trait NamespaceProvider {
 
 	/// Retrieve a specific namespace definition returning an error if it does not exist.
 	async fn expect_ns_by_name(&self, ns: &str) -> Result<Arc<NamespaceDefinition>> {
-		match self.get_ns_by_name(ns).await? {
+		match self.get_ns_by_name(ns, None).await? {
 			Some(val) => Ok(val),
 			None => anyhow::bail!(Error::NsNotFound {
 				name: ns.to_owned(),
@@ -103,10 +107,19 @@ pub(crate) trait NamespaceProvider {
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 pub(crate) trait DatabaseProvider: NamespaceProvider {
 	/// Retrieve all database definitions in a namespace.
-	async fn all_db(&self, ns: NamespaceId) -> Result<Arc<[DatabaseDefinition]>>;
+	async fn all_db(
+		&self,
+		ns: NamespaceId,
+		version: Option<u64>,
+	) -> Result<Arc<[DatabaseDefinition]>>;
 
 	/// Retrieve a specific database definition.
-	async fn get_db_by_name(&self, ns: &str, db: &str) -> Result<Option<Arc<DatabaseDefinition>>>;
+	async fn get_db_by_name(
+		&self,
+		ns: &str,
+		db: &str,
+		version: Option<u64>,
+	) -> Result<Option<Arc<DatabaseDefinition>>>;
 
 	/// Get or add a database with a default configuration, only if we are in
 	/// dynamic mode.
@@ -129,7 +142,7 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 
 	/// Retrieve a specific database definition returning an error if it does not exist.
 	async fn expect_db_by_name(&self, ns: &str, db: &str) -> Result<Arc<DatabaseDefinition>> {
-		match self.get_db_by_name(ns, db).await? {
+		match self.get_db_by_name(ns, db, None).await? {
 			Some(val) => Ok(val),
 			None => {
 				// Check if the namespace exists.
@@ -149,6 +162,7 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::AnalyzerDefinition]>>;
 
 	/// Retrieve all sequences definitions for a specific database.
@@ -156,6 +170,7 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::SequenceDefinition]>>;
 
 	/// Retrieve all function definitions for a specific database.
@@ -163,6 +178,7 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::FunctionDefinition]>>;
 
 	/// Retrieve all module definitions for a specific database.
@@ -170,6 +186,7 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::ModuleDefinition]>>;
 
 	/// Retrieve all param definitions for a specific database.
@@ -177,6 +194,7 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::ParamDefinition]>>;
 
 	/// Retrieve all model definitions for a specific database.
@@ -184,13 +202,15 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::MlModelDefinition]>>;
 
-	/// Retrieve all model definitions for a specific database.
+	/// Retrieve all config definitions for a specific database.
 	async fn all_db_configs(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::ConfigDefinition]>>;
 
 	/// Retrieve a specific model definition from a database.
@@ -200,6 +220,7 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		db: DatabaseId,
 		ml: &str,
 		vn: &str,
+		version: Option<u64>,
 	) -> Result<Option<Arc<catalog::MlModelDefinition>>>;
 
 	/// Retrieve a specific analyzer definition.
@@ -208,6 +229,7 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		az: &str,
+		version: Option<u64>,
 	) -> Result<Arc<catalog::AnalyzerDefinition>>;
 
 	async fn get_db_sequence(
@@ -215,6 +237,7 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		sq: &str,
+		version: Option<u64>,
 	) -> Result<Arc<catalog::SequenceDefinition>>;
 
 	/// Retrieve a specific function definition from a database.
@@ -223,6 +246,7 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		fc: &str,
+		version: Option<u64>,
 	) -> Result<Arc<catalog::FunctionDefinition>>;
 
 	/// Put a function definition into a database.
@@ -239,6 +263,7 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		md: &str,
+		version: Option<u64>,
 	) -> Result<Arc<catalog::ModuleDefinition>>;
 
 	/// Put a module definition into a database.
@@ -249,12 +274,13 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		md: &catalog::ModuleDefinition,
 	) -> Result<()>;
 
-	/// Retrieve a specific function definition from a database.
+	/// Retrieve a specific param definition from a database.
 	async fn get_db_param(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		pa: &str,
+		version: Option<u64>,
 	) -> Result<Arc<catalog::ParamDefinition>>;
 
 	/// Put a param definition into a database.
@@ -271,16 +297,18 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		cg: &str,
+		version: Option<u64>,
 	) -> Result<Option<Arc<catalog::ConfigDefinition>>>;
 
-	/// Retrieve a specific config definition from a database.
+	/// Retrieve a specific config definition from a database returning an error if it does not
+	/// exist.
 	async fn expect_db_config(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		cg: &str,
 	) -> Result<Arc<catalog::ConfigDefinition>> {
-		if let Some(val) = self.get_db_config(ns, db, cg).await? {
+		if let Some(val) = self.get_db_config(ns, db, cg, None).await? {
 			Ok(val)
 		} else {
 			Err(anyhow::Error::new(Error::CgNotFound {
@@ -308,6 +336,7 @@ pub(crate) trait TableProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
+		version: Option<u64>,
 	) -> Result<Arc<[TableDefinition]>>;
 
 	/// Retrieve a specific table definition.
@@ -316,6 +345,7 @@ pub(crate) trait TableProvider {
 		ns: &str,
 		db: &str,
 		tb: &TableName,
+		version: Option<u64>,
 	) -> Result<Option<Arc<TableDefinition>>>;
 
 	/// Retrieve a specific table definition returning an error if it does not exist.
@@ -325,7 +355,7 @@ pub(crate) trait TableProvider {
 		db: &str,
 		tb: &TableName,
 	) -> Result<Arc<TableDefinition>> {
-		match self.get_tb_by_name(ns, db, tb).await? {
+		match self.get_tb_by_name(ns, db, tb, None).await? {
 			Some(val) => Ok(val),
 			None => anyhow::bail!(Error::TbNotFound {
 				name: tb.to_owned(),
@@ -341,6 +371,7 @@ pub(crate) trait TableProvider {
 		ns: &str,
 		db: &str,
 		tb: &TableName,
+		version: Option<u64>,
 	) -> Result<Arc<TableDefinition>>;
 
 	/// Get the next namespace id.
@@ -371,6 +402,7 @@ pub(crate) trait TableProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::EventDefinition]>>;
 
 	/// Retrieve all field definitions for a specific table.
@@ -388,6 +420,7 @@ pub(crate) trait TableProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::IndexDefinition]>>;
 
 	/// Retrieve all live definitions for a specific table.
@@ -396,6 +429,7 @@ pub(crate) trait TableProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::SubscriptionDefinition]>>;
 
 	/// Retrieve a specific table definition.
@@ -404,6 +438,7 @@ pub(crate) trait TableProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
+		version: Option<u64>,
 	) -> Result<Option<Arc<TableDefinition>>>;
 
 	/// Retrieve a specific table definition returning an error if it does not exist.
@@ -413,7 +448,7 @@ pub(crate) trait TableProvider {
 		db: DatabaseId,
 		tb: &TableName,
 	) -> Result<Arc<TableDefinition>> {
-		match self.get_tb(ns, db, tb).await? {
+		match self.get_tb(ns, db, tb, None).await? {
 			Some(val) => Ok(val),
 			None => anyhow::bail!(Error::TbNotFound {
 				name: tb.to_owned(),
@@ -428,6 +463,7 @@ pub(crate) trait TableProvider {
 		db: DatabaseId,
 		tb: &TableName,
 		ev: &str,
+		version: Option<u64>,
 	) -> Result<Arc<catalog::EventDefinition>>;
 
 	/// Retrieve a field for a table.
@@ -437,6 +473,7 @@ pub(crate) trait TableProvider {
 		db: DatabaseId,
 		tb: &TableName,
 		fd: &str,
+		version: Option<u64>,
 	) -> Result<Option<Arc<catalog::FieldDefinition>>>;
 
 	/// Put a field definition into a table.
@@ -455,6 +492,7 @@ pub(crate) trait TableProvider {
 		db: DatabaseId,
 		tb: &TableName,
 		ix: &str,
+		version: Option<u64>,
 	) -> Result<Option<Arc<catalog::IndexDefinition>>>;
 
 	/// Retrieve an index for a table.
@@ -464,6 +502,7 @@ pub(crate) trait TableProvider {
 		db: DatabaseId,
 		tb: &TableName,
 		ix: IndexId,
+		version: Option<u64>,
 	) -> Result<Option<Arc<catalog::IndexDefinition>>>;
 
 	/// Retrieve an index for a table returning an error if it does not exist.
@@ -474,7 +513,7 @@ pub(crate) trait TableProvider {
 		tb: &TableName,
 		ix: &str,
 	) -> Result<Arc<catalog::IndexDefinition>> {
-		self.get_tb_index(ns, db, tb, ix).await?.ok_or_else(|| {
+		self.get_tb_index(ns, db, tb, ix, None).await?.ok_or_else(|| {
 			Error::IxNotFound {
 				name: ix.to_owned(),
 			}
@@ -516,6 +555,7 @@ pub(crate) trait TableProvider {
 		db: DatabaseId,
 		tb: &TableName,
 		id: &RecordIdKey,
+		version: Option<u64>,
 	) -> Result<bool>;
 
 	/// Put record into the datastore.
@@ -528,7 +568,6 @@ pub(crate) trait TableProvider {
 		tb: &TableName,
 		id: &RecordIdKey,
 		record: Arc<Record>,
-		version: Option<u64>,
 	) -> Result<()>;
 
 	/// Set record into the datastore.
@@ -541,7 +580,6 @@ pub(crate) trait TableProvider {
 		tb: &TableName,
 		id: &RecordIdKey,
 		record: Arc<Record>,
-		version: Option<u64>,
 	) -> Result<()>;
 
 	/// Delete record from the datastore.
@@ -559,22 +597,40 @@ pub(crate) trait TableProvider {
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 pub(crate) trait UserProvider {
 	/// Retrieve all user definitions in a namespace.
-	async fn all_root_users(&self) -> Result<Arc<[UserDefinition]>>;
+	async fn all_root_users(&self, version: Option<u64>) -> Result<Arc<[UserDefinition]>>;
 
 	/// Retrieve all namespace user definitions for a specific namespace.
-	async fn all_ns_users(&self, ns: NamespaceId) -> Result<Arc<[catalog::UserDefinition]>>;
+	async fn all_ns_users(
+		&self,
+		ns: NamespaceId,
+		version: Option<u64>,
+	) -> Result<Arc<[catalog::UserDefinition]>>;
 
 	/// Retrieve all database user definitions for a specific database.
-	async fn all_db_users(&self, ns: NamespaceId, db: DatabaseId) -> Result<Arc<[UserDefinition]>>;
+	async fn all_db_users(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		version: Option<u64>,
+	) -> Result<Arc<[UserDefinition]>>;
 
 	/// Retrieve a specific root user definition.
-	async fn get_root_user(&self, us: &str) -> Result<Option<Arc<UserDefinition>>>;
+	async fn get_root_user(
+		&self,
+		us: &str,
+		version: Option<u64>,
+	) -> Result<Option<Arc<UserDefinition>>>;
 
 	/// Put a user definition into a root.
 	async fn put_root_user(&self, us: &UserDefinition) -> Result<()>;
 
 	/// Retrieve a specific namespace user definition.
-	async fn get_ns_user(&self, ns: NamespaceId, us: &str) -> Result<Option<Arc<UserDefinition>>>;
+	async fn get_ns_user(
+		&self,
+		ns: NamespaceId,
+		us: &str,
+		version: Option<u64>,
+	) -> Result<Option<Arc<UserDefinition>>>;
 
 	/// Put a user definition into a namespace.
 	async fn put_ns_user(&self, ns: NamespaceId, us: &UserDefinition) -> Result<()>;
@@ -585,6 +641,7 @@ pub(crate) trait UserProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		us: &str,
+		version: Option<u64>,
 	) -> Result<Option<Arc<UserDefinition>>>;
 
 	/// Put a user definition into a database.
@@ -593,7 +650,7 @@ pub(crate) trait UserProvider {
 
 	/// Retrieve a specific user definition from a root returning an error if it does not exist.
 	async fn expect_root_user(&self, us: &str) -> Result<Arc<UserDefinition>> {
-		match self.get_root_user(us).await? {
+		match self.get_root_user(us, None).await? {
 			Some(val) => Ok(val),
 			None => anyhow::bail!(Error::UserRootNotFound {
 				name: us.to_owned(),
@@ -605,7 +662,7 @@ pub(crate) trait UserProvider {
 	/// exist.
 	#[allow(unused)]
 	async fn expect_ns_user(&self, ns: NamespaceId, us: &str) -> Result<Arc<UserDefinition>> {
-		match self.get_ns_user(ns, us).await? {
+		match self.get_ns_user(ns, us, None).await? {
 			Some(val) => Ok(val),
 			None => anyhow::bail!(Error::UserNsNotFound {
 				name: us.to_owned(),
@@ -622,7 +679,7 @@ pub(crate) trait UserProvider {
 		db: DatabaseId,
 		us: &str,
 	) -> Result<Arc<UserDefinition>> {
-		match self.get_db_user(ns, db, us).await? {
+		match self.get_db_user(ns, db, us, None).await? {
 			Some(val) => Ok(val),
 			None => anyhow::bail!(Error::UserDbNotFound {
 				name: us.to_owned(),
@@ -637,19 +694,31 @@ pub(crate) trait UserProvider {
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 pub(crate) trait AuthorisationProvider {
 	/// Retrieve all ROOT level accesses in a datastore.
-	async fn all_root_accesses(&self) -> Result<Arc<[catalog::AccessDefinition]>>;
+	async fn all_root_accesses(
+		&self,
+		version: Option<u64>,
+	) -> Result<Arc<[catalog::AccessDefinition]>>;
 
 	/// Retrieve all root access grants in a datastore.
-	async fn all_root_access_grants(&self, ra: &str) -> Result<Arc<[catalog::AccessGrant]>>;
+	async fn all_root_access_grants(
+		&self,
+		ra: &str,
+		version: Option<u64>,
+	) -> Result<Arc<[catalog::AccessGrant]>>;
 
 	/// Retrieve all namespace access definitions for a specific namespace.
-	async fn all_ns_accesses(&self, ns: NamespaceId) -> Result<Arc<[catalog::AccessDefinition]>>;
+	async fn all_ns_accesses(
+		&self,
+		ns: NamespaceId,
+		version: Option<u64>,
+	) -> Result<Arc<[catalog::AccessDefinition]>>;
 
 	/// Retrieve all namespace access grants for a specific namespace.
 	async fn all_ns_access_grants(
 		&self,
 		ns: NamespaceId,
 		na: &str,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::AccessGrant]>>;
 
 	/// Retrieve all database access definitions for a specific database.
@@ -657,6 +726,7 @@ pub(crate) trait AuthorisationProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::AccessDefinition]>>;
 
 	/// Retrieve all database access grants for a specific database.
@@ -665,14 +735,19 @@ pub(crate) trait AuthorisationProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		da: &str,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::AccessGrant]>>;
 
 	/// Retrieve a specific root access definition.
-	async fn get_root_access(&self, ra: &str) -> Result<Option<Arc<catalog::AccessDefinition>>>;
+	async fn get_root_access(
+		&self,
+		ra: &str,
+		version: Option<u64>,
+	) -> Result<Option<Arc<catalog::AccessDefinition>>>;
 
 	/// Retrieve a specific root access definition returning an error if it does not exist.
 	async fn expect_root_access(&self, ra: &str) -> Result<Arc<catalog::AccessDefinition>> {
-		match self.get_root_access(ra).await? {
+		match self.get_root_access(ra, None).await? {
 			Some(val) => Ok(val),
 			None => anyhow::bail!(Error::AccessRootNotFound {
 				ac: ra.to_owned(),
@@ -685,6 +760,7 @@ pub(crate) trait AuthorisationProvider {
 		&self,
 		ac: &str,
 		gr: &str,
+		version: Option<u64>,
 	) -> Result<Option<Arc<catalog::AccessGrant>>>;
 
 	/// Retrieve a specific namespace access definition.
@@ -692,6 +768,7 @@ pub(crate) trait AuthorisationProvider {
 		&self,
 		ns: NamespaceId,
 		na: &str,
+		version: Option<u64>,
 	) -> Result<Option<Arc<catalog::AccessDefinition>>>;
 
 	/// Retrieve a specific namespace access grant.
@@ -700,6 +777,7 @@ pub(crate) trait AuthorisationProvider {
 		ns: NamespaceId,
 		ac: &str,
 		gr: &str,
+		version: Option<u64>,
 	) -> Result<Option<Arc<catalog::AccessGrant>>>;
 
 	/// Retrieve a specific database access definition.
@@ -708,6 +786,7 @@ pub(crate) trait AuthorisationProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		da: &str,
+		version: Option<u64>,
 	) -> Result<Option<Arc<catalog::AccessDefinition>>>;
 
 	/// Retrieve a specific database access grant.
@@ -717,6 +796,7 @@ pub(crate) trait AuthorisationProvider {
 		db: DatabaseId,
 		ac: &str,
 		gr: &str,
+		version: Option<u64>,
 	) -> Result<Option<Arc<catalog::AccessGrant>>>;
 
 	/// Delete a root access definition.
@@ -738,6 +818,7 @@ pub(crate) trait ApiProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::ApiDefinition]>>;
 
 	/// Retrieve a specific api definition.
@@ -746,6 +827,7 @@ pub(crate) trait ApiProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ap: &str,
+		version: Option<u64>,
 	) -> Result<Option<Arc<catalog::ApiDefinition>>>;
 
 	/// Put an api definition into a database.
@@ -766,6 +848,7 @@ pub(crate) trait BucketProvider {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
+		version: Option<u64>,
 	) -> Result<Arc<[catalog::BucketDefinition]>>;
 
 	/// Retrieve a specific bucket definition.
@@ -774,6 +857,7 @@ pub(crate) trait BucketProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		bu: &str,
+		version: Option<u64>,
 	) -> Result<Option<Arc<catalog::BucketDefinition>>>;
 
 	/// Retrieve a specific bucket definition returning an error if it does not exist.
@@ -783,7 +867,7 @@ pub(crate) trait BucketProvider {
 		db: DatabaseId,
 		bu: &str,
 	) -> Result<Arc<catalog::BucketDefinition>> {
-		match self.get_db_bucket(ns, db, bu).await? {
+		match self.get_db_bucket(ns, db, bu, None).await? {
 			Some(val) => Ok(val),
 			None => anyhow::bail!(Error::BuNotFound {
 				name: bu.to_owned(),

@@ -210,7 +210,7 @@ impl Sequences {
 	/// This method is called when a namespace is deleted to remove all cached
 	/// sequence state for databases within that namespace.
 	pub(crate) async fn namespace_removed(&self, tx: &Transaction, ns: NamespaceId) -> Result<()> {
-		for db in tx.all_db(ns).await?.iter() {
+		for db in tx.all_db(ns, None).await?.iter() {
 			self.database_removed(tx, ns, db.database_id).await?;
 		}
 		Ok(())
@@ -226,7 +226,7 @@ impl Sequences {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<()> {
-		for sqs in tx.all_db_sequences(ns, db).await?.iter() {
+		for sqs in tx.all_db_sequences(ns, db, None).await?.iter() {
 			self.sequence_removed(ns, db, &sqs.name).await;
 		}
 		Ok(())
@@ -371,7 +371,7 @@ impl Sequences {
 		db: DatabaseId,
 		sq: &str,
 	) -> Result<i64> {
-		let seq = tx.get_db_sequence(ns, db, sq).await?;
+		let seq = tx.get_db_sequence(ns, db, sq, None).await?;
 		let domain = Arc::new(SequenceDomain::new_user(ns, db, sq));
 		self.next_val(ctx, domain, seq.start, seq.batch, seq.timeout).await
 	}
@@ -492,7 +492,7 @@ impl Sequence {
 			self.tf.transaction(TransactionType::Write, LockType::Optimistic, sqs.clone()).await?;
 
 		// Execute operations and ensure transaction is cancelled on error
-		match tx.set(&self.state_key, &revision::to_vec(&self.st)?, None).await {
+		match tx.set(&self.state_key, &revision::to_vec(&self.st)?).await {
 			Ok(_) => {
 				tx.commit().await?;
 				Ok(v)
@@ -615,7 +615,7 @@ impl Sequence {
 				owner: sqs.nid,
 			})?;
 			let batch_key = seq.new_batch_key(next_start)?;
-			tx.set(&batch_key, &bv, None).await?;
+			tx.set(&batch_key, &bv).await?;
 			Ok::<(i64, i64), anyhow::Error>((next_start, next_to))
 		}
 		.await;

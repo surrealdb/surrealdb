@@ -44,7 +44,7 @@ pub struct Options {
 	pub(crate) perms: bool,
 	/// Should we process field queries?
 	pub(crate) import: bool,
-	/// The data version as nanosecond timestamp
+	/// The data version as a timestamp
 	pub(crate) version: Option<u64>,
 	/// Optional message broker for live notifications
 	pub(crate) broker: Option<Arc<dyn MessageBroker>>,

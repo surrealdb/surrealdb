@@ -87,7 +87,7 @@ js = { version = "0.11.0", package = "rquickjs", features = ["rust-alloc"] }
 reblessive = "0.4.3"
 
 # External KV stores
-rocksdb = { version = "0.24.0-surreal.1", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
+rocksdb = { version = "0.24.0-surreal.3", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
 tikv = { version = "0.3.0-surreal.4", default-features = false, package = "surrealdb-tikv-client" }
 
 # Other crates

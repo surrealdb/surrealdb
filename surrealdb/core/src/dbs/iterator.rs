@@ -283,9 +283,18 @@ impl Iterator {
 		table: &TableName,
 	) -> Result<()> {
 		let tb = if stm_ctx.stm.requires_table_existence() {
-			ctx.tx().expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, table).await?
+			ctx.tx()
+				.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, table, opt.version)
+				.await?
+				.ok_or_else(|| {
+					anyhow::anyhow!(Error::TbNotFound {
+						name: table.to_owned(),
+					})
+				})?
 		} else {
-			ctx.tx().get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, table).await?
+			ctx.tx()
+				.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, table, opt.version)
+				.await?
 		};
 
 		let fields = ctx
@@ -330,10 +339,23 @@ impl Iterator {
 		rid: RecordId,
 	) -> Result<()> {
 		let tb = if stm_ctx.stm.requires_table_existence() {
-			ctx.tx().expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table).await?
+			ctx.tx()
+				.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table, opt.version)
+				.await?
+				.ok_or_else(|| {
+					anyhow::anyhow!(Error::TbNotFound {
+						name: rid.table.clone(),
+					})
+				})?
 		} else {
 			ctx.tx()
-				.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &rid.table)
+				.get_or_add_tb(
+					Some(ctx),
+					&doc_ctx.ns.name,
+					&doc_ctx.db.name,
+					&rid.table,
+					opt.version,
+				)
 				.await?
 		};
 		let fields = ctx
@@ -381,12 +403,23 @@ impl Iterator {
 		// For deferable statements (CREATE, UPSERT without condition), auto-create the table
 		let tb = if stm_ctx.stm.is_deferable() {
 			ctx.tx()
-				.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, mock.table())
+				.get_or_add_tb(
+					Some(ctx),
+					&doc_ctx.ns.name,
+					&doc_ctx.db.name,
+					mock.table(),
+					opt.version,
+				)
 				.await?
 		} else {
 			ctx.tx()
-				.expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, mock.table())
+				.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, mock.table(), opt.version)
 				.await?
+				.ok_or_else(|| {
+					anyhow::anyhow!(Error::TbNotFound {
+						name: mock.table().to_owned(),
+					})
+				})?
 		};
 		let fields = ctx
 			.tx()
@@ -453,9 +486,22 @@ impl Iterator {
 
 		let txn = ctx.tx();
 		let tb = if stm.requires_table_existence() {
-			txn.expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &from.table).await?
+			txn.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &from.table, opt.version)
+				.await?
+				.ok_or_else(|| {
+					anyhow::anyhow!(Error::TbNotFound {
+						name: from.table.clone(),
+					})
+				})?
 		} else {
-			txn.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &from.table).await?
+			txn.get_or_add_tb(
+				Some(ctx),
+				&doc_ctx.ns.name,
+				&doc_ctx.db.name,
+				&from.table,
+				opt.version,
+			)
+			.await?
 		};
 		let fields = txn
 			.all_tb_fields(

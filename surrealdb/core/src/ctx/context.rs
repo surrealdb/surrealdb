@@ -382,7 +382,7 @@ impl Context {
 	/// If the namespace does not exist, it will return an error.
 	pub(crate) async fn expect_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
-		let Some(ns_def) = self.tx().get_ns_by_name(ns).await? else {
+		let Some(ns_def) = self.tx().get_ns_by_name(ns, None).await? else {
 			return Err(Error::NsNotFound {
 				name: ns.to_string(),
 			}
@@ -408,7 +408,7 @@ impl Context {
 		opt: &Options,
 	) -> Result<Option<(NamespaceId, DatabaseId)>> {
 		let (ns, db) = opt.ns_db()?;
-		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
+		let Some(db_def) = self.tx().get_db_by_name(ns, db, None).await? else {
 			return Ok(None);
 		};
 		Ok(Some((db_def.namespace_id, db_def.database_id)))
@@ -421,7 +421,7 @@ impl Context {
 		opt: &Options,
 	) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
-		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
+		let Some(db_def) = self.tx().get_db_by_name(ns, db, None).await? else {
 			return Err(Error::DbNotFound {
 				name: db.to_string(),
 			}

@@ -1,8 +1,3 @@
-//! WAL synchronization components for SurrealKV.
-//!
-//! This module provides background WAL flushing and grouped commit coordination
-//! for the SurrealKV storage engine.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -14,92 +9,6 @@ use tokio::sync::oneshot::{self, Sender};
 
 use super::TARGET;
 use crate::kvs::err::{Error, Result};
-
-// ============================================================================
-// BackgroundFlusher
-// ============================================================================
-
-/// Background flusher for periodically syncing the Write-Ahead Log (WAL) to disk.
-///
-/// This component manages a dedicated background thread that periodically flushes and syncs
-/// SurrealKV's Write-Ahead Log to persistent storage at configurable intervals. It provides
-/// a trade-off between write performance and durability guarantees.
-///
-/// ## Configuration
-///
-/// Background flushing is configured via the `sync` query parameter on the connection string:
-/// - `surrealkv:///path?sync=200ms` -- flush every 200 milliseconds
-/// - `surrealkv:///path?sync=1s` -- flush every second
-///
-/// ## Durability
-///
-/// When background flushing is enabled:
-/// - Transaction commits are written to the WAL in memory buffers
-/// - The background thread periodically flushes these buffers to disk
-/// - **Data committed between flushes may be lost** in the event of a system crash or power failure
-/// - Write operations are faster due to reduced fsync overhead
-///
-/// When enabled, this component provides loose durability guarantees. All committed transactions
-/// are persisted to disk, but the operating system may buffer the data in memory, and it may be
-/// lost in the event of a system crash or power failure. Full durability is only guaranteed
-/// once the data is flushed to disk at the specified interval.
-pub(super) struct BackgroundFlusher {
-	/// Shutdown flag
-	shutdown: Arc<AtomicBool>,
-	/// Thread handle
-	handle: Mutex<Option<thread::JoinHandle<()>>>,
-}
-
-impl BackgroundFlusher {
-	/// Create a new background flusher.
-	pub fn new(db: Tree, interval: Duration) -> Result<Self> {
-		// Create a new shutdown flag
-		let shutdown = Arc::new(AtomicBool::new(false));
-		// Clone the shutdown flag
-		let finished = shutdown.clone();
-		// Spawn the background flusher thread
-		let handle = thread::Builder::new()
-			.name("surrealkv-background-flusher".to_string())
-			.spawn(move || {
-				loop {
-					// Wait for the specified interval
-					thread::sleep(interval);
-					// Check shutdown flag again after sleep
-					if finished.load(Ordering::Relaxed) {
-						break;
-					}
-					// Flush the WAL to disk periodically
-					if let Err(err) = db.flush_wal(true) {
-						error!(target: TARGET, "Failed to flush WAL: {err}");
-					}
-				}
-			})
-			.map_err(|_| {
-				Error::Datastore("failed to spawn SurrealKV background flush thread".to_string())
-			})?;
-		// Create a new background flusher
-		Ok(Self {
-			shutdown,
-			handle: Mutex::new(Some(handle)),
-		})
-	}
-
-	/// Shutdown the background flusher.
-	pub fn shutdown(&self) -> Result<()> {
-		// Signal shutdown
-		self.shutdown.store(true, Ordering::Relaxed);
-		// Wait for thread to finish
-		if let Some(handle) = self.handle.lock().take() {
-			let _ = handle.join();
-		}
-		// All good
-		Ok(())
-	}
-}
-
-// ============================================================================
-// CommitCoordinator
-// ============================================================================
 
 /// Shared state for producer-consumer communication between transaction submitters and the batcher.
 ///

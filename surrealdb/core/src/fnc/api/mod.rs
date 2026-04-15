@@ -69,7 +69,7 @@ pub async fn invoke(
 	trace!(request_id = %request_id, path = %path, "fnc::api::invoke called");
 
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-	let apis = ctx.tx().all_db_apis(ns, db).await?;
+	let apis = ctx.tx().all_db_apis(ns, db, None).await?;
 
 	if !path.starts_with('/') {
 		// align behaviour with the path provided in DEFINE API statement

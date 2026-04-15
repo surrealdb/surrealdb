@@ -68,21 +68,25 @@ impl CreateInfo {
 		let ds = match self.backend {
 			Backend::Memory => {
 				if versioned {
-					builder.build_with_path("mem://?versioned=true").await?
+					builder.build_with_path("mem://?versioned=true&retention=1h").await?
 				} else {
 					builder.build_with_path("mem://").await?
 				}
 			}
 			Backend::RocksDb => {
 				let p = self.produce_path();
-				let ds = builder.build_with_path(&format!("rocksdb://{p}")).await?;
+				let ds = if versioned {
+					builder.build_with_path(&format!("rocksdb://{p}?versioned=true&retention=1h")).await?;
+				}else{
+					builder.build_with_path(&format!("rocksdb://{p}")).await?;
+				}
 				path = Some(p);
 				ds
 			}
 			Backend::SurrealKv => {
 				let p = self.produce_path();
 				let ds = if versioned {
-					builder.build_with_path(&format!("surrealkv://{p}?versioned=true")).await?
+					builder.build_with_path(&format!("surrealkv://{p}?versioned=true&retention=1h")).await?
 				} else {
 					builder.build_with_path(&format!("surrealkv://{p}")).await?
 				};

@@ -1915,25 +1915,43 @@ fn parse_info() {
 		parser.parse_expr_inherit(stk).await
 	})
 	.unwrap();
-	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Root(false))));
+	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Root(false, None))));
 
 	let res = syn::parse_with("INFO FOR KV".as_bytes(), async |parser, stk| {
 		parser.parse_expr_inherit(stk).await
 	})
 	.unwrap();
-	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Root(false))));
+	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Root(false, None))));
+
+	let res = syn::parse_with(
+		"INFO FOR ROOT VERSION d'2025-01-01T00:00:00Z'".as_bytes(),
+		async |parser, stk| parser.parse_expr_inherit(stk).await,
+	)
+	.unwrap();
+	assert!(
+		matches!(res, Expr::Info(ref i) if matches!(i.as_ref(), InfoStatement::Root(false, Some(_))))
+	);
 
 	let res = syn::parse_with("INFO FOR NAMESPACE".as_bytes(), async |parser, stk| {
 		parser.parse_expr_inherit(stk).await
 	})
 	.unwrap();
-	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Ns(false))));
+	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Ns(false, None))));
 
 	let res = syn::parse_with("INFO FOR NS".as_bytes(), async |parser, stk| {
 		parser.parse_expr_inherit(stk).await
 	})
 	.unwrap();
-	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Ns(false))));
+	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Ns(false, None))));
+
+	let res = syn::parse_with(
+		"INFO FOR NS VERSION d'2025-01-01T00:00:00Z'".as_bytes(),
+		async |parser, stk| parser.parse_expr_inherit(stk).await,
+	)
+	.unwrap();
+	assert!(
+		matches!(res, Expr::Info(ref i) if matches!(i.as_ref(), InfoStatement::Ns(false, Some(_))))
+	);
 
 	let res = syn::parse_with("INFO FOR TABLE table".as_bytes(), async |parser, stk| {
 		parser.parse_expr_inherit(stk).await
