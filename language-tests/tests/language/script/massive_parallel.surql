@@ -22,7 +22,6 @@ Problem with embedded script function. An exception occurred: Problem with embed
 
 
 """
-
 */
 
 define function fn::deep_parallel() {

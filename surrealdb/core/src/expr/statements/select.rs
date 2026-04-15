@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use anyhow::{Result, ensure};
@@ -124,15 +125,31 @@ impl SelectStatement {
 			}
 		}
 
+		// `$parent` must be visible while planning FROM targets (e.g. `FROM
+		// $parent->edge`), not only during output — same binding as
+		// `CursorDoc::update_parent`.
+		let prepare_ctx: Cow<'_, FrozenContext> = CursorDoc::with_parent_ctx(&ctx, parent_doc);
+
 		// Loop over the select targets
 		for w in self.what.iter() {
 			// The target is also calculated on the parent doc
 			iterator
-				.prepare(stk, &ctx, &opt, parent_doc, &mut planner, &stm_ctx, &doc_ctx, w)
+				.prepare(
+					stk,
+					prepare_ctx.as_ref(),
+					&opt,
+					parent_doc,
+					&mut planner,
+					&stm_ctx,
+					&doc_ctx,
+					w,
+				)
 				.await?;
 		}
 
-		CursorDoc::update_parent(&ctx, parent_doc, async |ctx| {
+		// Reuse `prepare_ctx` so we do not clone the parent document again inside
+		// `update_parent` (see `CursorDoc::with_parent_ctx`).
+		CursorDoc::update_parent(prepare_ctx.as_ref(), None, async |ctx| {
 			// Attach the query planner to the context
 			let ctx = stm.setup_query_planner(planner, ctx);
 			// Process the statement

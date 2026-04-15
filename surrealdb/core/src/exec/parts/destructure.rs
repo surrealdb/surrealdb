@@ -159,11 +159,24 @@ async fn evaluate_destructure(
 			for field in fields {
 				match field {
 					DestructureField::All(name) => {
-						// Include all fields from the nested object
-						if let Some(Value::Object(nested)) = obj.get(name.as_str()) {
-							for (k, v) in nested.iter() {
-								result.insert(k.clone(), v.clone());
+						let field_val = obj.get(name.as_str()).cloned().unwrap_or(Value::None);
+						let resolved = match field_val {
+							Value::RecordId(rid) => {
+								if ctx.skip_fetch_perms {
+									crate::exec::operators::fetch::fetch_record_no_perms(
+										ctx.exec_ctx,
+										&rid,
+									)
+									.await?
+								} else {
+									crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, &rid)
+										.await?
+								}
 							}
+							other => other,
+						};
+						if let Value::Object(nested) = &resolved {
+							result.insert(name.clone(), Value::Object(nested.clone()));
 						}
 					}
 					DestructureField::Field(name) => {

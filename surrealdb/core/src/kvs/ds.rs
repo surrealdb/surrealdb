@@ -1956,6 +1956,9 @@ impl Datastore {
 				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})?;
 
+		// Start an execution context
+		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
+
 		// Store the query variables
 		if let Some(vars) = vars {
 			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
