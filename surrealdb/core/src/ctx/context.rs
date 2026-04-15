@@ -1065,6 +1065,9 @@ impl Context {
 				let server_max_kv_entries = *crate::cnf::SURREALISM_MAX_KV_ENTRIES;
 				let server_max_kv_value_bytes = *crate::cnf::SURREALISM_MAX_KV_VALUE_BYTES;
 
+				#[cfg(feature = "http")]
+				let module_net_targets = module_allow_net_targets(&package.config.capabilities);
+
 				let runtime = tokio::task::spawn_blocking(move || {
 					Runtime::new(
 						package,
@@ -1081,8 +1084,6 @@ impl Context {
 
 				let module_display_name: Arc<str> = format!("{org}::{name}").into();
 
-				#[cfg(feature = "http")]
-				let module_net_targets = module_allow_net_targets(&package.config.capabilities);
 				#[cfg(feature = "http")]
 				let client = if module_net_targets.is_empty() {
 					Arc::new(
