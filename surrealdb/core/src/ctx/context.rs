@@ -1090,7 +1090,7 @@ impl Context {
 							.context("Failed to create http client for WASM module")?,
 					)
 				} else {
-					let allow = Targets::Some(_module_net_targets);
+					let allow = Targets::Some(module_net_targets);
 					Arc::new(
 						HttpClient::new(
 							allow,
