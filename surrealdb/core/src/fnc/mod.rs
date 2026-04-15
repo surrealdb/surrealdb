@@ -674,6 +674,7 @@ pub async fn idiom(
 				"add" => set::add,
 				"all" => set::all((stk, ctx, Some(opt), doc)).await,
 				"any" => set::any((stk, ctx, Some(opt), doc)).await,
+				"at" => set::at,
 				"complement" => set::complement,
 				"contains" => set::contains,
 				"difference" => set::difference,
