@@ -55,7 +55,7 @@ impl RebuildIndexStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the index definition
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let res = ctx.tx().get_tb_index(ns, db, &self.table, &self.name).await?;
+		let res = ctx.tx().get_tb_index(ns, db, &self.table, &self.name, None).await?;
 		let ix = match res {
 			Some(x) => x,
 			None => {

@@ -1922,7 +1922,7 @@ impl IndexCountThingIterator {
 		let count = count.unsigned_abs();
 		let compact_key =
 			IndexCountKey::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None, pos, count);
-		txn.set(&compact_key, &(), None).await?;
+		txn.set(&compact_key, &()).await?;
 		Ok(())
 	}
 }
@@ -1965,8 +1965,8 @@ mod tests {
 			let uid2 = (Uuid::new_v4(), Uuid::new_v4());
 			let k1 = IndexCountKey::new(ns, db, &tb, ix, Some(uid1), true, 10);
 			let k2 = IndexCountKey::new(ns, db, &tb, ix, Some(uid2), true, 5);
-			tx.set(&k1, &(), None).await.unwrap();
-			tx.set(&k2, &(), None).await.unwrap();
+			tx.set(&k1, &()).await.unwrap();
+			tx.set(&k2, &()).await.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -1997,7 +1997,7 @@ mod tests {
 			let tx = ds.transaction(Write, Optimistic).await.unwrap();
 			let uid3 = (Uuid::new_v4(), Uuid::new_v4());
 			let k3 = IndexCountKey::new(ns, db, &tb, ix, Some(uid3), true, 7);
-			tx.set(&k3, &(), None).await.unwrap();
+			tx.set(&k3, &()).await.unwrap();
 			tx.commit().await.unwrap();
 		}
 

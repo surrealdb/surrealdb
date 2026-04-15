@@ -39,7 +39,7 @@ impl DefineModelStatement {
 		let txn = ctx.tx();
 		// Check if the definition exists
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-		if let Some(model) = txn.get_db_model(ns, db, &self.name, &self.version).await? {
+		if let Some(model) = txn.get_db_model(ns, db, &self.name, &self.version, None).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -70,7 +70,6 @@ impl DefineModelStatement {
 				comment,
 				permissions: self.permissions.clone(),
 			},
-			None,
 		)
 		.await?;
 		// Clear the cache

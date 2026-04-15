@@ -153,10 +153,10 @@ impl ExecOperator for FullTextScan {
 					Some(
 						v.cast_to::<crate::val::Datetime>()
 							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp()?,
+							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// Get the FrozenContext and Options from the root context
@@ -169,7 +169,7 @@ impl ExecOperator for FullTextScan {
 				res.select_permission(check_perms)
 			} else if check_perms {
 				let table_def = db_ctx
-					.get_table_def(&table_name)
+					.get_table_def(&table_name, version)
 					.await
 					.context("Failed to get table")?;
 

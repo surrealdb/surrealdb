@@ -40,7 +40,7 @@ impl DefineModuleStatement {
 		// Check if the definition exists
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let storage_name = ModuleName::try_from(self)?.get_storage_name();
-		if txn.get_db_module(ns, db, &storage_name).await.is_ok() {
+		if txn.get_db_module(ns, db, &storage_name, None).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {

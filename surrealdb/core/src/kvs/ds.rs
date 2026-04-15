@@ -952,7 +952,7 @@ impl Datastore {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.enclose();
 		// Fetch the root users from the storage
-		let users = catch!(txn, txn.all_root_users().await);
+		let users = catch!(txn, txn.all_root_users(None).await);
 		// Process credentials, depending on existing users
 		if users.is_empty() {
 			// Display information in the logs
@@ -1063,7 +1063,7 @@ impl Datastore {
 		ctx.set_transaction(txn.clone());
 		let ctx = ctx.freeze();
 
-		let nss = match txn.all_ns().await {
+		let nss = match txn.all_ns(None).await {
 			Ok(nss) => nss,
 			Err(e) => {
 				warn!(target: TARGET, error = %e, "Surrealism eager load: failed to list namespaces");
@@ -1082,7 +1082,7 @@ impl Datastore {
 
 		let mut lookups = Vec::new();
 		for ns in nss.iter() {
-			let dbs = match txn.all_db(ns.namespace_id).await {
+			let dbs = match txn.all_db(ns.namespace_id, None).await {
 				Ok(dbs) => dbs,
 				Err(e) => {
 					warn!(
@@ -1094,7 +1094,8 @@ impl Datastore {
 				}
 			};
 			for db in dbs.iter() {
-				let modules = match txn.all_db_modules(ns.namespace_id, db.database_id).await {
+				let modules = match txn.all_db_modules(ns.namespace_id, db.database_id, None).await
+				{
 					Ok(m) => m,
 					Err(e) => {
 						warn!(
@@ -1303,7 +1304,7 @@ impl Datastore {
 		let key = crate::key::root::nd::Nd::new(self.id);
 		let now = self.clock_now();
 		let node = Node::new(self.id, now, false);
-		let res = run!(txn, txn.put(&key, &node, None).await);
+		let res = run!(txn, txn.put(&key, &node).await);
 		match res {
 			Err(e) => {
 				if matches!(
@@ -1504,7 +1505,7 @@ impl Datastore {
 		// Fetch all namespaces
 		let nss = {
 			let txn = self.transaction(Read, Optimistic).await?;
-			let res = catch!(txn, txn.all_ns().await);
+			let res = catch!(txn, txn.all_ns(None).await);
 			txn.cancel().await?;
 			res
 		};
@@ -1515,7 +1516,7 @@ impl Datastore {
 			// Fetch all databases
 			let dbs = {
 				let txn = self.transaction(Read, Optimistic).await?;
-				let res = catch!(txn, txn.all_db(ns.namespace_id).await);
+				let res = catch!(txn, txn.all_db(ns.namespace_id, None).await);
 				txn.cancel().await?;
 				res
 			};
@@ -1850,7 +1851,7 @@ impl Datastore {
 		txn: Arc<Transaction>,
 		ikb: &IndexKeyBase,
 	) -> Result<()> {
-		match txn.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index()).await? {
+		match txn.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None).await? {
 			Some(ix) if !ix.prepare_remove => match &ix.index {
 				Index::FullText(p) => {
 					IndexOperation::index_fulltext_compaction(&self.index_stores, ikb, &txn, p)
@@ -2512,8 +2513,9 @@ impl Datastore {
 	) -> Result<Option<Arc<crate::catalog::MlModelDefinition>>> {
 		let tx = self.transaction(Read, Optimistic).await?;
 		let db = tx.expect_db_by_name(ns, db).await?;
-		let model =
-			tx.get_db_model(db.namespace_id, db.database_id, model_name, model_version).await?;
+		let model = tx
+			.get_db_model(db.namespace_id, db.database_id, model_name, model_version, None)
+			.await?;
 		tx.cancel().await?;
 		Ok(model)
 	}
@@ -2533,7 +2535,7 @@ impl Datastore {
 
 		let db = tx.ensure_ns_db(None, ns, db).await?;
 
-		let apis = tx.all_db_apis(db.namespace_id, db.database_id).await?;
+		let apis = tx.all_db_apis(db.namespace_id, db.database_id, None).await?;
 		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
 		let res = match ApiDefinition::find_definition(apis.as_ref(), segments, req.method) {
@@ -2635,13 +2637,13 @@ mod test {
 		// Setup the initial user if there are no root users
 		{
 			let txn = ds.transaction(Read, Optimistic).await.unwrap();
-			assert_eq!(txn.all_root_users().await.unwrap().len(), 0);
+			assert_eq!(txn.all_root_users(None).await.unwrap().len(), 0);
 			txn.cancel().await.unwrap();
 		}
 		ds.initialise_credentials(username, password).await.unwrap();
 		{
 			let txn = ds.transaction(Read, Optimistic).await.unwrap();
-			assert_eq!(txn.all_root_users().await.unwrap().len(), 1);
+			assert_eq!(txn.all_root_users(None).await.unwrap().len(), 1);
 			txn.cancel().await.unwrap();
 		}
 		verify_root_creds(&ds, username, password).await.unwrap();
@@ -2751,7 +2753,7 @@ mod test {
 			// Obtain the initial uuids
 			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 			let tb = TableName::from("test");
-			let initial = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
+			let initial = txn.get_tb(db.namespace_id, db.database_id, &tb, None).await?.unwrap();
 			let initial_live_query_version =
 				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
 			txn.cancel().await?;
@@ -2783,7 +2785,8 @@ mod test {
 		let (after_define, after_define_live_query_version) = {
 			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 			let tb = TableName::from("test");
-			let after_define = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
+			let after_define =
+				txn.get_tb(db.namespace_id, db.database_id, &tb, None).await?.unwrap();
 			let after_define_live_query_version =
 				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
 			txn.cancel().await?;
@@ -2819,7 +2822,8 @@ mod test {
 		{
 			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 			let tb = TableName::from("test");
-			let after_remove = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
+			let after_remove =
+				txn.get_tb(db.namespace_id, db.database_id, &tb, None).await?.unwrap();
 			let after_remove_live_query_version =
 				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
 			txn.cancel().await?;

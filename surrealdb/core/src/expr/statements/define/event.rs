@@ -48,7 +48,7 @@ impl DefineEventStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		if txn.get_tb_event(ns, db, &target_table, &name).await.is_ok() {
+		if txn.get_tb_event(ns, db, &target_table, &name, None).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -63,7 +63,7 @@ impl DefineEventStatement {
 		}
 
 		// Ensure the table exists
-		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &target_table).await?;
+		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &target_table, None).await?;
 
 		let comment = stk
 			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
@@ -84,7 +84,6 @@ impl DefineEventStatement {
 				comment,
 				kind: self.event_kind.clone(),
 			},
-			None,
 		)
 		.await?;
 

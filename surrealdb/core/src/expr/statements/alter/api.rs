@@ -82,7 +82,7 @@ impl AlterApiStatement {
 		let txn = ctx.tx();
 
 		let path_name = expr_to_ident(stk, ctx, opt, doc, &self.path, "api path").await?;
-		let mut ap = match txn.get_db_api(ns, db, &path_name).await? {
+		let mut ap = match txn.get_db_api(ns, db, &path_name, None).await? {
 			Some(v) => v.deref().clone(),
 			None => {
 				if self.if_exists {
@@ -136,7 +136,7 @@ impl AlterApiStatement {
 		ap.auth_limit = AuthLimit::new_from_auth(opt.auth.as_ref()).into();
 
 		let key = crate::key::database::ap::new(ns, db, &path_name);
-		txn.set(&key, &ap, None).await?;
+		txn.set(&key, &ap).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

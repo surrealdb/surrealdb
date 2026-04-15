@@ -31,7 +31,7 @@ impl AlterFunctionStatement {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let txn = ctx.tx();
 
-		let mut fc = match txn.get_db_function(ns, db, &self.name).await {
+		let mut fc = match txn.get_db_function(ns, db, &self.name, None).await {
 			Ok(v) => v.deref().clone(),
 			Err(e) => {
 				if self.if_exists {
@@ -73,7 +73,7 @@ impl AlterFunctionStatement {
 		fc.auth_limit = AuthLimit::new_from_auth(&opt.auth).into();
 
 		let key = crate::key::database::fc::new(ns, db, &self.name);
-		txn.set(&key, &fc, None).await?;
+		txn.set(&key, &fc).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

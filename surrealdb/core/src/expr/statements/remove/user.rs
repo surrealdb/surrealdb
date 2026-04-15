@@ -46,7 +46,7 @@ impl RemoveUserStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let us = match txn.get_root_user(&name).await? {
+				let us = match txn.get_root_user(&name, None).await? {
 					Some(x) => x,
 					None => {
 						if self.if_exists {
@@ -73,7 +73,7 @@ impl RemoveUserStatement {
 				let txn = ctx.tx();
 				// Get the definition
 				let ns = ctx.get_ns_id(opt).await?;
-				let us = match txn.get_ns_user(ns, &name).await? {
+				let us = match txn.get_ns_user(ns, &name, None).await? {
 					Some(x) => x,
 					None => {
 						if self.if_exists {
@@ -100,7 +100,7 @@ impl RemoveUserStatement {
 				let txn = ctx.tx();
 				// Get the definition
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-				let us = match txn.get_db_user(ns, db, &name).await? {
+				let us = match txn.get_db_user(ns, db, &name, None).await? {
 					Some(x) => x,
 					None => {
 						if self.if_exists {

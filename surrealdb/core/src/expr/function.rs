@@ -113,7 +113,7 @@ impl Function {
 				ctx.check_allowed_function(name.as_str())?;
 				// Get the function definition
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-				let val = ctx.tx().get_db_function(ns, db, s).await?;
+				let val = ctx.tx().get_db_function(ns, db, s, opt.version).await?;
 				let opt = AuthLimit::try_from(&val.auth_limit)?.limit_opt(opt);
 
 				// Check permissions
@@ -159,7 +159,7 @@ impl Function {
 				ctx.check_allowed_function(fnc_name.as_str())?;
 				// Get the module definition
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-				let val = ctx.tx().get_db_module(ns, db, mod_name.as_str()).await?;
+				let val = ctx.tx().get_db_module(ns, db, mod_name.as_str(), opt.version).await?;
 
 				// Check permissions
 				if opt.check_perms(Action::View)? {
@@ -196,7 +196,7 @@ impl Function {
 				ctx.check_allowed_function(fnc_name.as_str())?;
 				// Get the module definition
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-				let val = ctx.tx().get_db_module(ns, db, mod_name.as_str()).await?;
+				let val = ctx.tx().get_db_module(ns, db, mod_name.as_str(), opt.version).await?;
 
 				// Check permissions
 				if opt.check_perms(Action::View)? {

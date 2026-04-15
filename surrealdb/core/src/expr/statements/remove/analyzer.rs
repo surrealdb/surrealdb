@@ -41,7 +41,7 @@ impl RemoveAnalyzerStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the definition
-		let az = txn.get_db_analyzer(ns, db, &name).await;
+		let az = txn.get_db_analyzer(ns, db, &name, None).await;
 		let az = match az {
 			Ok(x) => x,
 			Err(e) => {
@@ -58,7 +58,7 @@ impl RemoveAnalyzerStatement {
 		// Clear the cache
 		txn.clear_cache();
 		// Cleanup in-memory mappers if not used anymore
-		let azs = txn.all_db_analyzers(ns, db).await?;
+		let azs = txn.all_db_analyzers(ns, db, None).await?;
 		ctx.get_index_stores().mappers().cleanup(&azs);
 		// TODO Check that the analyzer is not used in any schema
 		// Ok all good

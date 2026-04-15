@@ -15,7 +15,7 @@ use crate::kvs::{BoxTimeStamp, BoxTimeStampImpl, KVKey, Transaction};
 #[instrument(level = "trace", target = "surrealdb::core::cfs", skip_all)]
 pub async fn gc_all_at(lh: &LeaseHandler, tx: &Transaction) -> Result<()> {
 	// Fetch all namespaces
-	let nss = tx.all_ns().await?;
+	let nss = tx.all_ns(None).await?;
 
 	let ts_impl = tx.timestamp_impl();
 	// Loop over each namespace
@@ -23,7 +23,7 @@ pub async fn gc_all_at(lh: &LeaseHandler, tx: &Transaction) -> Result<()> {
 		// Trace for debugging
 		trace!("Performing garbage collection on {}", ns.name);
 		// Fetch all databases
-		let dbs = tx.all_db(ns.namespace_id).await?;
+		let dbs = tx.all_db(ns.namespace_id, None).await?;
 		// Loop over each database
 		for db in dbs.as_ref() {
 			// Trace for debugging
