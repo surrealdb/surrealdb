@@ -76,10 +76,10 @@ impl CreateInfo {
 			Backend::RocksDb => {
 				let p = self.produce_path();
 				let ds = if versioned {
-					builder.build_with_path(&format!("rocksdb://{p}?versioned=true&retention=1h")).await?;
+					builder.build_with_path(&format!("rocksdb://{p}?versioned=true&retention=1h")).await?
 				}else{
-					builder.build_with_path(&format!("rocksdb://{p}")).await?;
-				}
+					builder.build_with_path(&format!("rocksdb://{p}")).await?
+				};
 				path = Some(p);
 				ds
 			}

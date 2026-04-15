@@ -395,10 +395,11 @@ async fn test_single_tx_cache_invalidation_on_param_put() {
 /// None (current) read would see stale data.
 #[tokio::test]
 async fn test_versioned_read_does_not_pollute_table_cache() {
-	let ds = Datastore::new("memory?versioned=true")
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory?versioned=true")
 		.await
-		.unwrap()
-		.with_capabilities(Capabilities::all());
+		.unwrap();
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	ds.execute("DEFINE NAMESPACE test", &Session::owner(), None).await.unwrap();
@@ -426,10 +427,11 @@ async fn test_versioned_read_does_not_pollute_table_cache() {
 /// Test that a versioned read of field definitions does not pollute the current-view cache.
 #[tokio::test]
 async fn test_versioned_read_does_not_pollute_field_cache() {
-	let ds = Datastore::new("memory?versioned=true")
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory?versioned=true")
 		.await
-		.unwrap()
-		.with_capabilities(Capabilities::all());
+		.unwrap();
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	ds.execute("DEFINE NAMESPACE test", &Session::owner(), None).await.unwrap();
