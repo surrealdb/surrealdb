@@ -12,13 +12,13 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-#[cfg(feature = "http")]
-use crate::http::HttpClient;
 use crate::CommunityComposer;
 use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
 use crate::cnf::dynamic::DynamicConfiguration;
 use crate::dbs::Capabilities;
+#[cfg(feature = "http")]
+use crate::http::HttpClient;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::idx::trees::store::IndexStores;
@@ -166,7 +166,9 @@ impl Builder {
 		let dynamic_configuration = DynamicConfiguration::default();
 		dynamic_configuration.set_query_timeout(self.query_timeout);
 		#[cfg(feature = "http")]
-		let http_client = Arc::new(HttpClient::new(capabilities.clone()).context("Could not create http client")?);
+		let http_client = Arc::new(
+			HttpClient::new(capabilities.clone()).context("Could not create http client")?,
+		);
 
 		Ok(Datastore {
 			id,
