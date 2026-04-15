@@ -26,6 +26,9 @@ define_pure_function!(SetComplement, "set::complement", (a: Any, b: Any) -> Any,
 define_pure_function!(SetContains, "set::contains", (set: Any, value: Any) -> Bool, crate::fnc::set::contains);
 define_pure_function!(SetDifference, "set::difference", (a: Any, b: Any) -> Any, crate::fnc::set::difference);
 define_pure_function!(SetIntersect, "set::intersect", (a: Any, b: Any) -> Any, crate::fnc::set::intersect);
+define_pure_function!(SetIsDisjoint, "set::is_disjoint", (a: Any, b: Any) -> Bool, crate::fnc::set::is_disjoint);
+define_pure_function!(SetIsSubsetOf, "set::is_subset_of", (a: Any, b: Any) -> Bool, crate::fnc::set::is_subset_of);
+define_pure_function!(SetIsSupersetOf, "set::is_superset_of", (a: Any, b: Any) -> Bool, crate::fnc::set::is_superset_of);
 define_pure_function!(SetJoin, "set::join", (set: Any, separator: String) -> String, crate::fnc::set::join);
 define_pure_function!(SetRemove, "set::remove", (set: Any, value: Any) -> Any, crate::fnc::set::remove);
 define_pure_function!(SetUnion, "set::union", (a: Any, b: Any) -> Any, crate::fnc::set::union);
@@ -123,7 +126,10 @@ pub fn register(registry: &mut FunctionRegistry) {
 		SetFirst,
 		SetFlatten,
 		SetIntersect,
+		SetIsDisjoint,
 		SetIsEmpty,
+		SetIsSubsetOf,
+		SetIsSupersetOf,
 		SetJoin,
 		SetLast,
 		SetLen,

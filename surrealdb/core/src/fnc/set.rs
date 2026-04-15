@@ -294,6 +294,21 @@ pub async fn reduce(
 	}
 }
 
+/// Check if the set has no elements in common with another set
+pub fn is_disjoint((set1, set2): (Set, Set)) -> Result<Value> {
+	Ok(set1.0.is_disjoint(&set2.0).into())
+}
+
+/// Check if the set is a subset of another set (A ⊆ B)
+pub fn is_subset_of((set1, set2): (Set, Set)) -> Result<Value> {
+	Ok(set1.0.is_subset(&set2.0).into())
+}
+
+/// Check if the set is a superset of another set (A ⊇ B)
+pub fn is_superset_of((set1, set2): (Set, Set)) -> Result<Value> {
+	Ok(set1.0.is_superset(&set2.0).into())
+}
+
 /// Extract a range of elements from the set by position (in BTree order)
 pub fn slice(
 	(set, Optional(range_start), Optional(end)): (Set, Optional<Value>, Optional<i64>),
