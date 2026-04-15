@@ -107,8 +107,6 @@ impl Function {
 			}
 			Function::Model(m) => m.compute(stk, ctx, opt, doc, args).await,
 			Function::Custom(s) => {
-				// Track function call depth to prevent stack overflow
-				let opt = &opt.dive(1)?;
 				// Get the full name of this function
 				let name = format!("fn::{s}");
 				// Check if this function is allowed
