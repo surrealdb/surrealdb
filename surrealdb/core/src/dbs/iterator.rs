@@ -774,6 +774,10 @@ impl Iterator {
 					self.ingest(guaranteed);
 					// Process the pre-defined guaranteed document
 					self.iterate(stk, ctx, opt, stm, is_specific_permission, None).await?;
+					// Return any document errors from guaranteed iteration (e.g. UPSERT-as-INSERT schema validation)
+					if let Some(e) = self.error.take() {
+						return Err(e);
+					}
 				}
 			}
 			// Process any SPLIT AT clause
