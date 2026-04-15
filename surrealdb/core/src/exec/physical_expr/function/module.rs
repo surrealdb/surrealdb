@@ -75,7 +75,9 @@ impl PhysicalExpr for SurrealismModuleExec {
 		let val = ctx.txn().get_db_module(ns_id, db_id, &mod_name).await?;
 
 		// Check permissions
-		check_permission(&val.permissions, &mod_name, &ctx).await?;
+		if ctx.exec_ctx.should_check_perms(crate::iam::Action::View)? {
+			check_permission(&val.permissions, &mod_name, &ctx).await?;
+		}
 
 		// Get the executable and signature
 		let executable: ModuleExecutable = val.executable.clone().into();
