@@ -1239,9 +1239,11 @@ impl Visitor for MigratorPass<'_> {
 		fn kind_contains_object(kind: &Kind) -> bool {
 			match kind {
 				Kind::Object => true,
+				Kind::Option(x) => kind_contains_object(x),
 				Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
 				Kind::Array(inner, _) | Kind::Set(inner, _) => kind_contains_object(inner),
 				Kind::Literal(Literal::Object(_)) => true,
+				Kind::Literal(Literal::DiscriminatedObject(..)) => true,
 				Kind::Literal(Literal::Array(x)) => x.iter().any(kind_contains_object),
 				_ => false,
 			}
