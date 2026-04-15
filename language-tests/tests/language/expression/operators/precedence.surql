@@ -12,10 +12,10 @@ value = "5"
 value = "8"
 
 [[test.results]]
-value = "4"
+value = "3"
 
 [[test.results]]
-value = "4"
+value = "3"
 
 [[test.results]]
 value = "1"

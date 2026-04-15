@@ -236,6 +236,7 @@ impl Executor {
 			session: self.get_session_info(),
 			current_value: None,
 			skip_fetch_perms: false,
+			version_stamp: None,
 		};
 
 		// Check what level of context we need
@@ -1372,7 +1373,8 @@ mod tests {
 			let (session, should_succeed, msg) = test;
 
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
+				let ds =
+					Datastore::builder().with_auth(true).build_with_path("memory").await.unwrap();
 
 				let res = ds.execute(statement, session, None).await;
 
@@ -1392,7 +1394,7 @@ mod tests {
 
 		// Anonymous with auth enabled
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
+			let ds = Datastore::builder().with_auth(true).build_with_path("memory").await.unwrap();
 
 			let res =
 				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;
@@ -1407,7 +1409,7 @@ mod tests {
 
 		// Anonymous with auth disabled
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(false);
+			let ds = Datastore::builder().with_auth(false).build_with_path("memory").await.unwrap();
 
 			let res =
 				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;

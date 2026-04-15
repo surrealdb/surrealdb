@@ -565,6 +565,10 @@ impl Document {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb().await?;
+		// Versioned reads bypass the cache
+		if opt.version.is_some() {
+			return ctx.tx().all_tb_views(ns, db, &tb.name, opt.version).await;
+		}
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -575,14 +579,14 @@ impl Document {
 				match cache.get(&key) {
 					Some(val) => val.try_into_fts(),
 					None => {
-						let val = ctx.tx().all_tb_views(ns, db, &tb.name).await?;
+						let val = ctx.tx().all_tb_views(ns, db, &tb.name, None).await?;
 						cache.insert(key, cache::ds::Entry::Fts(val.clone()));
 						Ok(val)
 					}
 				}
 			}
 			// No cache is present on the context
-			None => ctx.tx().all_tb_views(ns, db, &tb.name).await,
+			None => ctx.tx().all_tb_views(ns, db, &tb.name, None).await,
 		}
 	}
 
@@ -600,6 +604,10 @@ impl Document {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb().await?;
+		// Versioned reads bypass the cache
+		if opt.version.is_some() {
+			return ctx.tx().all_tb_events(ns, db, &tb.name, opt.version).await;
+		}
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -610,7 +618,7 @@ impl Document {
 				match cache.get(&key) {
 					Some(val) => val.try_into_evs(),
 					None => {
-						let val = ctx.tx().all_tb_events(ns, db, &tb.name).await?;
+						let val = ctx.tx().all_tb_events(ns, db, &tb.name, None).await?;
 						cache.insert(key, cache::ds::Entry::Evs(val.clone()));
 						Ok(val)
 					}
@@ -618,7 +626,7 @@ impl Document {
 			}
 
 			// No cache is present on the context
-			None => ctx.tx().all_tb_events(ns, db, &tb.name).await,
+			None => ctx.tx().all_tb_events(ns, db, &tb.name, None).await,
 		}
 	}
 
@@ -649,6 +657,10 @@ impl Document {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb().await?;
+		// Versioned reads bypass the cache
+		if opt.version.is_some() {
+			return ctx.tx().all_tb_indexes(ns, db, &tb.name, opt.version).await;
+		}
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -659,14 +671,14 @@ impl Document {
 				match cache.get(&key) {
 					Some(val) => val.try_into_ixs(),
 					None => {
-						let val = ctx.tx().all_tb_indexes(ns, db, &tb.name).await?;
+						let val = ctx.tx().all_tb_indexes(ns, db, &tb.name, None).await?;
 						cache.insert(key, cache::ds::Entry::Ixs(val.clone()));
 						Ok(val)
 					}
 				}
 			}
 			// No cache is present on the context
-			None => ctx.tx().all_tb_indexes(ns, db, &tb.name).await,
+			None => ctx.tx().all_tb_indexes(ns, db, &tb.name, None).await,
 		}
 	}
 
@@ -684,6 +696,10 @@ impl Document {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb().await?;
+		// Versioned reads bypass the cache
+		if opt.version.is_some() {
+			return ctx.tx().all_tb_lives(ns, db, &tb.name, opt.version).await;
+		}
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -696,14 +712,14 @@ impl Document {
 				match cache.get(&key) {
 					Some(val) => val.try_into_lvs(),
 					None => {
-						let val = ctx.tx().all_tb_lives(ns, db, &tb.name).await?;
+						let val = ctx.tx().all_tb_lives(ns, db, &tb.name, None).await?;
 						cache.insert(key, cache::ds::Entry::Lvs(val.clone()));
 						Ok(val)
 					}
 				}
 			}
 			// No cache is present on the context
-			None => ctx.tx().all_tb_lives(ns, db, &tb.name).await,
+			None => ctx.tx().all_tb_lives(ns, db, &tb.name, None).await,
 		}
 	}
 }

@@ -68,7 +68,7 @@ impl GraphQLSchemaCache {
 		let kvs = datastore;
 		let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
 
-		let db_def = match tx.get_db_by_name(ns, db).await? {
+		let db_def = match tx.get_db_by_name(ns, db, None).await? {
 			Some(db) => db,
 			None => return Err(GqlError::NotConfigured),
 		};

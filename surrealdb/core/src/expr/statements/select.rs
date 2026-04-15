@@ -77,14 +77,15 @@ impl SelectStatement {
 		let mut iterator = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
 
+		let ts_impl = ctx.tx().timestamp_impl();
 		let version = stk
 			.run(|stk| self.version.compute(stk, ctx, opt, parent_doc))
 			.await
 			.catch_return()?
 			.cast_to::<Option<Datetime>>()?
-			.map(|x| x.to_version_stamp())
+			.map(|x| x.to_version_stamp(ts_impl.as_ref()))
 			.transpose()?;
-		let opt = Arc::new(opt.clone().with_version(version));
+		let opt = Arc::new(opt.clone().with_version(version.or(opt.version)));
 
 		// Extract the limits
 		iterator.setup_limit(stk, ctx, &opt, &stm).await?;
@@ -109,6 +110,19 @@ impl SelectStatement {
 			ns: Arc::clone(&ns),
 			db: Arc::clone(&db),
 		};
+
+		// Reject VERSION with subquery sources
+		if opt.version.is_some() {
+			for w in self.what.iter() {
+				if matches!(w, Expr::Select(_)) {
+					return Err(anyhow::Error::new(Error::Query {
+						message: "VERSION clause cannot be used with a subquery source. \
+								  Place the VERSION clause inside the subquery instead."
+							.to_string(),
+					}));
+				}
+			}
+		}
 
 		// Loop over the select targets
 		for w in self.what.iter() {

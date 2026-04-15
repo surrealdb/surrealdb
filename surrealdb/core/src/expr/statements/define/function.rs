@@ -40,7 +40,7 @@ impl DefineFunctionStatement {
 		let txn = ctx.tx();
 		// Check if the definition exists
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-		if txn.get_db_function(ns, db, &self.name).await.is_ok() {
+		if txn.get_db_function(ns, db, &self.name, None).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {

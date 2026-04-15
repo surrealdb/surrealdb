@@ -68,7 +68,7 @@ impl AlterAccessStatement {
 
 	async fn compute_root(&self, ctx: &FrozenContext) -> Result<Value> {
 		let txn = ctx.tx();
-		let mut ac = match txn.get_root_access(&self.name).await? {
+		let mut ac = match txn.get_root_access(&self.name, None).await? {
 			Some(v) => v.deref().clone(),
 			None => {
 				if self.if_exists {
@@ -82,7 +82,7 @@ impl AlterAccessStatement {
 		};
 		self.apply(&mut ac);
 		let key = crate::key::root::ac::new(&self.name);
-		txn.set(&key, &ac, None).await?;
+		txn.set(&key, &ac).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}
@@ -90,7 +90,7 @@ impl AlterAccessStatement {
 	async fn compute_ns(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
 		let txn = ctx.tx();
 		let ns = ctx.get_ns_id(opt).await?;
-		let mut ac = match txn.get_ns_access(ns, &self.name).await? {
+		let mut ac = match txn.get_ns_access(ns, &self.name, None).await? {
 			Some(v) => v.deref().clone(),
 			None => {
 				if self.if_exists {
@@ -105,7 +105,7 @@ impl AlterAccessStatement {
 		};
 		self.apply(&mut ac);
 		let key = crate::key::namespace::ac::new(ns, &self.name);
-		txn.set(&key, &ac, None).await?;
+		txn.set(&key, &ac).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}
@@ -113,7 +113,7 @@ impl AlterAccessStatement {
 	async fn compute_db(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
 		let txn = ctx.tx();
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let mut ac = match txn.get_db_access(ns, db, &self.name).await? {
+		let mut ac = match txn.get_db_access(ns, db, &self.name, None).await? {
 			Some(v) => v.deref().clone(),
 			None => {
 				if self.if_exists {
@@ -130,7 +130,7 @@ impl AlterAccessStatement {
 		};
 		self.apply(&mut ac);
 		let key = crate::key::database::ac::new(ns, db, &self.name);
-		txn.set(&key, &ac, None).await?;
+		txn.set(&key, &ac).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

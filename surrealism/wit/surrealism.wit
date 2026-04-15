@@ -1,0 +1,163 @@
+/// The Surrealism plugin interface defines the contract between a SurrealDB host
+/// and a guest WASM module (plugin). All structured data crossing the boundary is
+/// serialized with FlatBuffers; the `serialized-*` type aliases carry those opaque
+/// byte buffers.
+package surrealism:plugin;
+
+/// Shared serialization types used by both host and guest.
+///
+/// Every `serialized-*` alias wraps a FlatBuffers-encoded byte buffer.
+/// The schemas live in `surrealdb/types/src/flatbuffers/` and must stay
+/// in sync between host and guest SDK versions.
+interface types {
+    /// A single SurrealDB value (any type: record, object, array, scalar, etc.)
+    /// encoded as a FlatBuffers byte buffer.
+    type serialized-value = list<u8>;
+
+    /// Query bind variables encoded as a FlatBuffers byte buffer.
+    /// Represents a map of variable names to SurrealDB values.
+    type serialized-vars = list<u8>;
+
+    /// Ordered function arguments encoded as a FlatBuffers byte buffer.
+    type serialized-args = list<u8>;
+
+    /// A SurrealDB type descriptor (kind) encoded as a FlatBuffers byte buffer.
+    /// Used to describe the return type of a function.
+    type serialized-kind = list<u8>;
+
+    /// Named function arguments encoded as a FlatBuffers `ArgumentList` byte buffer.
+    /// Each entry pairs an argument name with its SurrealDB type descriptor (`Kind`).
+    type serialized-arguments = list<u8>;
+}
+
+/// Host-provided capabilities imported by the guest module.
+///
+/// All functions return `result<T, string>` where the error variant is a
+/// human-readable message. The host may return errors for permission violations,
+/// serialization failures, or datastore errors.
+interface host {
+    use types.{serialized-value, serialized-vars, serialized-args};
+
+    /// Execute a SurrealQL query string against the host datastore.
+    ///
+    /// The query runs with the permissions of the module's configured auth scope.
+    /// `vars` supplies bind variables (pass an empty buffer for no variables).
+    /// Returns the query result as a serialized value.
+    sql: func(query: string, vars: serialized-vars) -> result<serialized-value, string>;
+
+    /// Call another surrealism function by fully-qualified name (e.g. `"mymod::greet"`).
+    ///
+    /// `version` optionally pins a specific module version; `none` resolves the latest.
+    /// Cross-module calls are subject to the caller's capability grants.
+    run: func(fnc: string, version: option<string>, args: serialized-args) -> result<serialized-value, string>;
+
+    // ── Key-value store ──────────────────────────────────────────────
+    //
+    // Per-module in-memory storage, scoped to the module's identity.
+    // Modules cannot read or write keys belonging to other modules.
+    // Keys are UTF-8 strings (max 1024 bytes); values are serialized
+    // SurrealDB values.
+    //
+    // IMPORTANT: The KV store is volatile — data lives only in process
+    // memory and is lost on server restart, module eviction from cache,
+    // or Runtime drop. Do not use it for durable state.
+    //
+    // Range parameters are FlatBuffers-encoded range descriptors that
+    // specify a key prefix or inclusive/exclusive bounds.
+
+    /// Get a single key. Returns `none` if the key does not exist.
+    kv-get: func(key: string) -> result<option<serialized-value>, string>;
+
+    /// Set a single key, creating or overwriting it.
+    kv-set: func(key: string, value: serialized-value) -> result<_, string>;
+
+    /// Delete a single key. No-op if the key does not exist.
+    kv-del: func(key: string) -> result<_, string>;
+
+    /// Check whether a key exists without fetching its value.
+    kv-exists: func(key: string) -> result<bool, string>;
+
+    /// Delete all keys that fall within the given range.
+    kv-del-rng: func(range: serialized-value) -> result<_, string>;
+
+    /// Batch-get multiple keys in a single host call.
+    /// Returns a serialized list of optional values, positionally matching the input keys.
+    kv-get-batch: func(keys: list<string>) -> result<serialized-value, string>;
+
+    /// Batch-set multiple key-value pairs atomically.
+    /// `entries` is a serialized list of (key, value) tuples.
+    kv-set-batch: func(entries: serialized-value) -> result<_, string>;
+
+    /// Batch-delete multiple keys in a single host call.
+    kv-del-batch: func(keys: list<string>) -> result<_, string>;
+
+    /// List all keys within the given range.
+    kv-keys: func(range: serialized-value) -> result<list<string>, string>;
+
+    /// List all values within the given range (keys are not returned).
+    kv-values: func(range: serialized-value) -> result<serialized-value, string>;
+
+    /// List all key-value entries within the given range.
+    /// Returns a serialized list of (key, value) tuples.
+    kv-entries: func(range: serialized-value) -> result<serialized-value, string>;
+
+    /// Count the number of entries within the given range.
+    kv-count: func(range: serialized-value) -> result<u64, string>;
+}
+
+/// The `plugin` world is the top-level contract that every surrealism guest
+/// module must satisfy.
+///
+/// ## Lifecycle
+///
+/// 1. The host instantiates the WASM component.
+/// 2. The host calls `init` (if exported). The module may use this to set up
+///    state, warm caches, or validate its KV schema. If `init` returns an error
+///    the module is considered unhealthy and will not receive `invoke` calls.
+/// 3. For each incoming request the host calls `invoke` with the target
+///    function name and serialized arguments.
+///
+/// ## Introspection
+///
+/// `list-functions`, `function-args`, and `function-returns` allow the host
+/// (and tooling such as `surreal module info`) to discover the module's API
+/// surface without executing any functions.
+world plugin {
+    import host;
+    use types.{serialized-value, serialized-args, serialized-kind, serialized-arguments};
+
+    /// Invoke a function exported by this module.
+    ///
+    /// `name` identifies the function; pass `none` to call the module's default
+    /// export (the unnamed function). Returns an error if the function does not
+    /// exist or execution fails.
+    export invoke: func(name: option<string>, args: serialized-args) -> result<serialized-value, string>;
+
+    /// Return the names of all functions exported by this module.
+    /// A `none` entry represents the default (unnamed) export.
+    export list-functions: func() -> list<option<string>>;
+
+    /// Return the named argument types for the given function.
+    /// Used by the host for arity/type checking before invocation.
+    export function-args: func(name: option<string>) -> result<serialized-arguments, string>;
+
+    /// Return the declared return type for the given function.
+    export function-returns: func(name: option<string>) -> result<serialized-kind, string>;
+
+    /// Return whether the given function is marked as writeable.
+    /// Functions that are not writeable are treated as read-only by the host,
+    /// enabling optimizations such as read-only transactions and parallel execution.
+    export function-writeable: func(name: option<string>) -> result<bool, string>;
+
+    /// Return the comment for the given function, if one was provided.
+    /// Sourced from Rust doc comments or an explicit `#[surrealism(comment = "...")]`.
+    /// Returns `none` when the function has no comment.
+    export function-comment: func(name: option<string>) -> result<option<string>, string>;
+
+    /// Optional initialization hook called once after instantiation.
+    ///
+    /// If this returns an error, the host marks the module as failed and will
+    /// not route any `invoke` calls to it. Host imports (`sql`, `kv-*`, `run`)
+    /// are available during `init`.
+    export init: func() -> result<_, string>;
+}

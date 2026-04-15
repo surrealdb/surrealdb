@@ -121,7 +121,9 @@ impl MatchesOp {
 				};
 
 				// Find the full-text index for this table and idiom
-				let indexes = tx.all_tb_indexes(ns_id, db_id, &table_name).await?;
+				let indexes = tx
+					.all_tb_indexes(ns_id, db_id, &table_name, ctx.exec_ctx.version_stamp())
+					.await?;
 				let index_def = indexes.iter().find(|idx| {
 					matches!(&idx.index, crate::catalog::Index::FullText(_))
 						&& idx.cols.iter().any(|col| col.0 == self.idiom.0)

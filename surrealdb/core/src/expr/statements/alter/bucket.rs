@@ -31,7 +31,7 @@ impl AlterBucketStatement {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let txn = ctx.tx();
 
-		let mut bu = match txn.get_db_bucket(ns, db, &self.name).await? {
+		let mut bu = match txn.get_db_bucket(ns, db, &self.name, None).await? {
 			Some(v) => v.deref().clone(),
 			None => {
 				if self.if_exists {
@@ -67,7 +67,7 @@ impl AlterBucketStatement {
 		}
 
 		let key = crate::key::database::bu::new(ns, db, &self.name);
-		txn.set(&key, &bu, None).await?;
+		txn.set(&key, &bu).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

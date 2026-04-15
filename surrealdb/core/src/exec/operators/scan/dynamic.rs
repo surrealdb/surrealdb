@@ -252,10 +252,10 @@ impl ExecOperator for DynamicScan {
 						Some(
 							v.cast_to::<crate::val::Datetime>()
 								.map_err(|e| anyhow::anyhow!("{e}"))?
-								.to_version_stamp()?,
+								.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?,
 						)
 					}
-					None => None,
+					None => ctx.version_stamp(),
 				};
 
 				// Evaluate pushed-down LIMIT and START expressions
@@ -390,9 +390,23 @@ impl ExecOperator for DynamicScan {
 				return;
 			}
 
+			// VERSION stamp for metadata lookups (same evaluation as `resolve_table_scan_stream`).
+			let version_stamp: Option<u64> = match &version {
+				Some(expr) => {
+					let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+					let v = expr.evaluate(eval_ctx).await?;
+					Some(
+						v.cast_to::<crate::val::Datetime>()
+							.map_err(|e| anyhow::anyhow!("{e}"))?
+							.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?,
+					)
+				}
+				None => ctx.version_stamp(),
+			};
+
 			// Check table existence and resolve SELECT permission
 			let table_def = db_ctx
-				.get_table_def(&table_name)
+				.get_table_def(&table_name, version_stamp)
 				.await
 				.context("Failed to get table")?;
 
@@ -530,10 +544,10 @@ async fn resolve_table_scan_stream(
 			Some(
 				v.cast_to::<crate::val::Datetime>()
 					.map_err(|e| anyhow::anyhow!("{e}"))?
-					.to_version_stamp()?,
+					.to_version_stamp(txn.timestamp_impl().as_ref())?,
 			)
 		}
-		None => None,
+		None => ctx.version_stamp(),
 	};
 
 	// Resolve bind-parameter references so that index analysis sees
@@ -560,8 +574,10 @@ async fn resolve_table_scan_stream(
 	} else {
 		let db_ctx =
 			ctx.database().context("DynamicScan index analysis requires database context")?;
-		let indexes =
-			db_ctx.get_table_indexes(&cfg.table_name).await.context("Failed to fetch indexes")?;
+		let indexes = db_ctx
+			.get_table_indexes(&cfg.table_name, version_stamp)
+			.await
+			.context("Failed to fetch indexes")?;
 
 		let analyzer = IndexAnalyzer::new(indexes, cfg.with.as_ref());
 		let candidates = analyzer.analyze(resolved_cond.as_ref(), cfg.order.as_ref());

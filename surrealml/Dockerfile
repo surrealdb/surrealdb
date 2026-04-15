@@ -1,5 +1,5 @@
 # Use an official Rust image
-FROM rust:1.88-slim
+FROM rust:1.88-slim@sha256:38bc5a86d998772d4aec2348656ed21438d20fcdce2795b56ca434cf21430d89
 
 # Install necessary tools
 RUN apt-get update && apt-get install -y \

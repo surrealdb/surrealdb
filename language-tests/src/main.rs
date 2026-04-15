@@ -4,8 +4,8 @@ mod cli;
 mod cmd;
 mod format;
 mod runner;
-mod temp_dir;
 mod tests;
+mod util;
 
 use anyhow::{self, Result};
 use cli::ColorMode;
@@ -17,8 +17,6 @@ async fn main() -> Result<()> {
 	let color: ColorMode = matches.get_one("color").copied().unwrap();
 
 	let (sub, args) = matches.subcommand().unwrap();
-
-	//log::init(Level::INFO);
 
 	match sub {
 		"test" => cmd::run::run(color, args).await,

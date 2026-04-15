@@ -1,5 +1,5 @@
 # Start from a base image, e.g., Ubuntu
-FROM nixos/nix:latest
+FROM nixos/nix:latest@sha256:4e211f6763c542b08e9cdba448381286a3638903359390b46eab5f43ce6a6ed1
 
 # Update Nix channel
 RUN nix-channel --update

@@ -116,11 +116,16 @@ impl UnnamedFields {
 			.collect()
 	}
 
-	pub fn arr_types(&self, crate_path: &CratePath) -> Vec<TokenStream2> {
+	pub fn arr_types(&self, type_name: &syn::Ident, crate_path: &CratePath) -> Vec<TokenStream2> {
+		let kind_ty = crate_path.kind();
 		self.fields
 			.iter()
 			.enumerate()
 			.map(|(i, ty)| {
+				if crate::type_contains_ident(ty, type_name) {
+					return quote! { arr.push(#kind_ty::Any); };
+				}
+
 				let potentially_wrapped = if self.wrap[i] {
 					let crate_path = crate_path.wrapper();
 					quote! {#crate_path::<#ty>}

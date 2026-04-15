@@ -145,10 +145,10 @@ impl ExecOperator for CountScan {
 					Some(
 						v.cast_to::<crate::val::Datetime>()
 							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp()?,
+							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// Evaluate the source expression to get the table name (or range).
@@ -169,7 +169,7 @@ impl ExecOperator for CountScan {
 
 			// Verify that the table exists.
 			let table_def = db_ctx
-				.get_table_def(&table_name)
+				.get_table_def(&table_name, version)
 				.await
 				.context("Failed to get table")?;
 
@@ -224,7 +224,7 @@ impl ExecOperator for CountScan {
 				// Check for an unconditional COUNT index first (O(deltas) vs O(records))
 				let count_from_index = if version.is_none() {
 					let indexes = db_ctx
-						.get_table_indexes(&table_name)
+						.get_table_indexes(&table_name, version)
 						.await
 						.ok();
 					if let Some(indexes) = indexes {

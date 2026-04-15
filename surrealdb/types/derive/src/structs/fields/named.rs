@@ -2,8 +2,8 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{Ident, Type};
 
-use crate::CratePath;
 use crate::attr::FieldDefault;
+use crate::{CratePath, unraw};
 
 #[derive(Debug)]
 pub struct NamedField {
@@ -39,7 +39,7 @@ impl NamedFields {
 				} else {
 					quote! {#field_name}
 				};
-				let field_name_str = field.ident.to_string();
+				let field_name_str = unraw(&field.ident);
 				let obj_key = field.rename.as_ref().unwrap_or(&field_name_str);
 
 				if field.flatten {
@@ -67,7 +67,7 @@ impl NamedFields {
 				.iter()
 				.map(|field| {
 					let field_name = &field.ident;
-					let field_name_str = field.ident.to_string();
+					let field_name_str = unraw(&field.ident);
 					let obj_key = field.rename.as_ref().unwrap_or(&field_name_str);
 					let ty = &field.ty;
 					let (potentially_wrapped_ty, val_access) = if field.wrap {
@@ -109,7 +109,7 @@ impl NamedFields {
 
 			for field in &self.fields {
 				let field_name = &field.ident;
-				let field_name_str = field.ident.to_string();
+				let field_name_str = unraw(&field.ident);
 				let obj_key = field.rename.as_ref().unwrap_or(&field_name_str);
 				let ty = &field.ty;
 				let (potentially_wrapped_ty, val_access) = if field.wrap {
@@ -185,7 +185,7 @@ impl NamedFields {
 			.iter()
 			.filter(|field| !field.flatten) // Flatten fields don't have a specific key to check
 			.map(|field| {
-				let struct_name = field.ident.to_string();
+				let struct_name = unraw(&field.ident);
 				let obj_key = field.rename.as_ref().unwrap_or(&struct_name);
 				let ty = &field.ty;
 				let potentially_wrapped_ty = if field.wrap {
@@ -223,14 +223,22 @@ impl NamedFields {
 			.collect()
 	}
 
-	pub fn map_types(&self, crate_path: &CratePath) -> Vec<TokenStream2> {
+	pub fn map_types(&self, type_name: &Ident, crate_path: &CratePath) -> Vec<TokenStream2> {
+		let kind_ty = crate_path.kind();
 		self.fields
 			.iter()
 			.filter(|field| !field.flatten) // Flatten fields don't have a specific key
 			.map(|field| {
 				let ty = &field.ty;
-				let struct_name = field.ident.to_string();
+				let struct_name = unraw(&field.ident);
 				let obj_key = field.rename.as_ref().unwrap_or(&struct_name);
+
+				if crate::type_contains_ident(ty, type_name) {
+					return quote! {
+						map.insert(#obj_key.to_string(), #kind_ty::Any);
+					};
+				}
+
 				let potentially_wrapped_ty = if field.wrap {
 					let crate_path = crate_path.wrapper();
 					quote! { #crate_path::<#ty> }
@@ -246,8 +254,6 @@ impl NamedFields {
 	}
 
 	pub fn contains_key(&self, key: &str) -> bool {
-		self.fields
-			.iter()
-			.any(|field| field.rename.as_ref().unwrap_or(&field.ident.to_string()) == key)
+		self.fields.iter().any(|field| field.rename.as_ref().unwrap_or(&unraw(&field.ident)) == key)
 	}
 }

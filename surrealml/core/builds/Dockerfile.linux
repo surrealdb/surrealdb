@@ -1,8 +1,11 @@
 # Start from a base image, e.g., Ubuntu
-FROM ubuntu:latest
+FROM ubuntu:latest@sha256:84e77dee7d1bc93fb029a45e3c6cb9d8aa4831ccfcc7103d36e876938d28895b
 
+ARG RUSTUP_SHA256=6c30b75a75b28a96fd913a037c8581b580080b6ee9b8169a3c0feb1af7fe8caf
 RUN apt-get update && apt-get install -y curl build-essential
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh \
+    && echo "${RUSTUP_SHA256}  /tmp/rustup.sh" | sha256sum -c - \
+    && sh /tmp/rustup.sh -s -- -y
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 

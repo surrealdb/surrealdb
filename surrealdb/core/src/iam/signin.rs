@@ -257,7 +257,8 @@ pub async fn db_access(
 	let db_def = catch!(tx, tx.expect_db_by_name(&ns, &db).await);
 
 	// Fetch the specified access method from storage
-	let Some(av) = catch!(tx, tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac).await)
+	let Some(av) =
+		catch!(tx, tx.get_db_access(db_def.namespace_id, db_def.database_id, &ac, None).await)
 	else {
 		let _ = tx.cancel().await;
 		bail!(Error::AccessNotFound);
@@ -529,7 +530,7 @@ pub async fn ns_access(
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	let ns_def = catch!(tx, tx.expect_ns_by_name(&ns).await);
 	// Fetch the specified access method from storage
-	let Some(av) = catch!(tx, tx.get_ns_access(ns_def.namespace_id, &ac).await) else {
+	let Some(av) = catch!(tx, tx.get_ns_access(ns_def.namespace_id, &ac, None).await) else {
 		let _ = tx.cancel().await;
 		bail!(Error::AccessNotFound);
 	};
@@ -664,7 +665,7 @@ pub async fn root_access(
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
-	let Some(av) = catch!(tx, tx.get_root_access(&ac).await) else {
+	let Some(av) = catch!(tx, tx.get_root_access(&ac, None).await) else {
 		let _ = tx.cancel().await;
 		bail!(Error::AccessNotFound);
 	};
@@ -748,13 +749,13 @@ pub async fn signin_bearer(
 		(Some(ns), Some(db)) => {
 			catch!(
 				tx,
-				tx.get_db_access_grant(ns.namespace_id, db.database_id, &av.name, &kid).await
+				tx.get_db_access_grant(ns.namespace_id, db.database_id, &av.name, &kid, None).await
 			)
 		}
 		(Some(ns), None) => {
-			catch!(tx, tx.get_ns_access_grant(ns.namespace_id, &av.name, &kid).await)
+			catch!(tx, tx.get_ns_access_grant(ns.namespace_id, &av.name, &kid, None).await)
 		}
-		(None, None) => catch!(tx, tx.get_root_access_grant(&av.name, &kid).await),
+		(None, None) => catch!(tx, tx.get_root_access_grant(&av.name, &kid, None).await),
 		(None, Some(_)) => {
 			let _ = tx.cancel().await;
 			bail!(Error::NsEmpty)
@@ -784,14 +785,16 @@ pub async fn signin_bearer(
 			(Some(ns), Some(db)) => {
 				let res = catch!(
 					tx,
-					tx.get_db_user(ns.namespace_id, db.database_id, user).await.map_err(|e| {
-						debug!(
-							"Error retrieving user for bearer access to database `{}/{}`: {}",
-							ns.name, db.name, e
-						);
-						// Return opaque error to avoid leaking grant subject existence.
-						anyhow::Error::new(Error::InvalidAuth)
-					})
+					tx.get_db_user(ns.namespace_id, db.database_id, user, None).await.map_err(
+						|e| {
+							debug!(
+								"Error retrieving user for bearer access to database `{}/{}`: {}",
+								ns.name, db.name, e
+							);
+							// Return opaque error to avoid leaking grant subject existence.
+							anyhow::Error::new(Error::InvalidAuth)
+						}
+					)
 				);
 				match res {
 					Some(v) => v,
@@ -804,7 +807,7 @@ pub async fn signin_bearer(
 			(Some(ns), None) => {
 				let res = catch!(
 					tx,
-					tx.get_ns_user(ns.namespace_id, user).await.map_err(|e| {
+					tx.get_ns_user(ns.namespace_id, user, None).await.map_err(|e| {
 						debug!(
 							"Error retrieving user for bearer access to namespace `{}`: {}",
 							ns.name, e
@@ -824,7 +827,7 @@ pub async fn signin_bearer(
 			(None, None) => {
 				let res = catch!(
 					tx,
-					tx.get_root_user(user).await.map_err(|e| {
+					tx.get_root_user(user, None).await.map_err(|e| {
 						debug!("Error retrieving user for bearer access to root: {e}");
 						// Return opaque error to avoid leaking grant subject existence.
 						anyhow::Error::new(Error::InvalidAuth)
@@ -1586,7 +1589,7 @@ mod tests {
 			// Get the stored bearer key representing the refresh token
 			let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
 			let grant = tx
-				.get_db_access_grant(NamespaceId(0), DatabaseId(0), "user", id)
+				.get_db_access_grant(NamespaceId(0), DatabaseId(0), "user", id, None)
 				.await
 				.unwrap()
 				.unwrap();
@@ -3398,15 +3401,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							.expect_db_by_name(level.ns.unwrap(), level.db.unwrap())
 							.await
 							.unwrap();
-						tx.get_db_access_grant(db.namespace_id, db.database_id, "api", &id)
+						tx.get_db_access_grant(db.namespace_id, db.database_id, "api", &id, None)
 							.await
 							.unwrap()
 					}
 					"NS" => {
 						let ns = tx.expect_ns_by_name(level.ns.unwrap()).await.unwrap();
-						tx.get_ns_access_grant(ns.namespace_id, "api", &id).await.unwrap()
+						tx.get_ns_access_grant(ns.namespace_id, "api", &id, None).await.unwrap()
 					}
-					"ROOT" => tx.get_root_access_grant("api", &id).await.unwrap(),
+					"ROOT" => tx.get_root_access_grant("api", &id, None).await.unwrap(),
 					_ => panic!("Unsupported level"),
 				}
 				.unwrap();
@@ -4175,7 +4178,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			// Get the stored bearer grant
 			let tx = ds.transaction(Read, Optimistic).await.unwrap().enclose();
 			let grant = tx
-				.get_db_access_grant(NamespaceId(0), DatabaseId(0), "api", &id)
+				.get_db_access_grant(NamespaceId(0), DatabaseId(0), "api", &id, None)
 				.await
 				.unwrap()
 				.unwrap();

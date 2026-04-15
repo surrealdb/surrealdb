@@ -10,7 +10,7 @@ use crate::catalog::{EventKind, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::expr::{Base, Expr};
-use crate::iam::{Action, ResourceKind};
+use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -33,7 +33,7 @@ impl AlterEventStatement {
 		let txn = ctx.tx();
 
 		let ev_name = &self.name;
-		let mut ev = match txn.get_tb_event(ns, db, &self.what, ev_name).await {
+		let mut ev = match txn.get_tb_event(ns, db, &self.what, ev_name, None).await {
 			Ok(v) => v.deref().clone(),
 			Err(e) => {
 				if self.if_exists {
@@ -67,11 +67,14 @@ impl AlterEventStatement {
 			AlterKind::None => {}
 		}
 
+		// Recompute auth_limit from the current principal to prevent privilege escalation
+		ev.auth_limit = AuthLimit::new_from_auth(opt.auth.as_ref()).into();
+
 		let key = crate::key::table::ev::new(ns, db, &self.what, ev_name);
-		txn.set(&key, &ev, None).await?;
+		txn.set(&key, &ev).await?;
 
 		// Refresh the table cache
-		if let Some(tb) = txn.get_tb(ns, db, &self.what).await? {
+		if let Some(tb) = txn.get_tb(ns, db, &self.what, None).await? {
 			let tb = TableDefinition {
 				cache_events_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()

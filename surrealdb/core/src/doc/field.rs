@@ -756,7 +756,7 @@ impl FieldEditContext<'_> {
 							&self.rid.key,
 						);
 
-						self.ctx.tx().set(&key, &(), None).await?;
+						self.ctx.tx().set(&key, &()).await?;
 					}
 					RefAction::Delete(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;

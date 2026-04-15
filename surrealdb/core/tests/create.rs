@@ -22,7 +22,7 @@ async fn create_or_insert_with_permissions() -> Result<()> {
 		DEFINE TABLE OVERWRITE foo SCHEMAFULL PERMISSIONS FOR select,create WHERE TRUE;
 		DEFINE FUNCTION OVERWRITE fn::client::foo() { RETURN CREATE ONLY foo:bar CONTENT {};};
 	";
-	let dbs = new_ds("test", "test").await?.with_auth_enabled(true);
+	let (_, dbs) = new_ds("test", "test", true).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
@@ -199,7 +199,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
 
 		{
-			let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+			let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 			ds.execute(&format!("USE NS {ns} DB {db}"), &sess, None).await.unwrap();
 
@@ -226,7 +226,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the CREATE statement when the table already exists
 		{
-			let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+			let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 			// Define additional namespaces/databases for cross-namespace tests
 			ds.execute(
@@ -307,7 +307,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table doesn't exist
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
@@ -326,7 +326,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists but grants no permissions
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -354,7 +354,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -395,7 +395,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table doesn't exist
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute("CREATE person", &Session::default().with_ns("NS").with_db("DB"), None)
@@ -412,7 +412,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists but grants no permissions
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -439,7 +439,7 @@ async fn check_permissions_auth_disabled() {
 	}
 
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		// When the table exists and grants full permissions
 		let mut resp = ds

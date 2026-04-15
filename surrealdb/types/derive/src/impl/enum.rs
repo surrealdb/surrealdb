@@ -13,7 +13,7 @@ pub fn impl_enum(
 	let into_value = r#enum.into_value(&r#enum.attrs, crate_path);
 	let from_value = r#enum.from_value(&name.to_string(), &r#enum.attrs, crate_path);
 	let is_value = r#enum.is_value(&r#enum.attrs, crate_path);
-	let kind_of = r#enum.kind_of(&r#enum.attrs, crate_path);
+	let kind_of = r#enum.kind_of(name, &r#enum.attrs, crate_path);
 
 	let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
 

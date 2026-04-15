@@ -497,9 +497,10 @@ pub(crate) async fn build_field_state_raw(
 	db_id: crate::catalog::DatabaseId,
 	table_name: &TableName,
 	check_perms: bool,
+	version: Option<u64>,
 ) -> Result<FieldState, ControlFlow> {
 	let field_defs = txn
-		.all_tb_fields(ns_id, db_id, table_name, None)
+		.all_tb_fields(ns_id, db_id, table_name, version)
 		.await
 		.context("Failed to get field definitions")?;
 
@@ -591,10 +592,12 @@ pub(crate) async fn build_field_state(
 	needed_fields: Option<&std::collections::HashSet<String>>,
 ) -> Result<FieldState, ControlFlow> {
 	let db_ctx = ctx.database().context("build_field_state requires database context")?;
+	let version = ctx.version_stamp();
 	let cache_key = (table_name.clone(), check_perms);
 
 	// Check the cache first (keyed by table name + check_perms flag).
-	{
+	// Versioned reads bypass the cache to get field defs at the correct point in time.
+	if version.is_none() {
 		let cache = db_ctx.field_state_cache.read().await;
 		if let Some(cached) = cache.get(&cache_key) {
 			return Ok(filter_field_state_for_projection(cached, needed_fields));
@@ -609,12 +612,15 @@ pub(crate) async fn build_field_state(
 		db_ctx.db.database_id,
 		table_name,
 		check_perms,
+		version,
 	)
 	.await?;
 
-	// Cache the full (unfiltered) state
+	// Cache the full (unfiltered) state (skip for versioned reads)
 	let cached = Arc::new(full_state);
-	db_ctx.field_state_cache.write().await.insert(cache_key, Arc::clone(&cached));
+	if version.is_none() {
+		db_ctx.field_state_cache.write().await.insert(cache_key, Arc::clone(&cached));
+	}
 
 	// Return filtered if needed_fields is specified
 	Ok(filter_field_state_for_projection(&cached, needed_fields))
