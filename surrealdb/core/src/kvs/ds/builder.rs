@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(feature = "http")]
+use anyhow::Context as _;
 use anyhow::Result;
 use async_channel::Sender;
 use tokio::sync::Notify;
@@ -10,6 +12,8 @@ use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+#[cfg(feature = "http")]
+use crate::http::HttpClient;
 use crate::CommunityComposer;
 use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
@@ -161,6 +165,8 @@ impl Builder {
 		let capabilities = Arc::new(self.capabilities);
 		let dynamic_configuration = DynamicConfiguration::default();
 		dynamic_configuration.set_query_timeout(self.query_timeout);
+		#[cfg(feature = "http")]
+		let http_client = Arc::new(HttpClient::new(capabilities.clone()).context("Could not create http client")?);
 
 		Ok(Datastore {
 			id,
@@ -185,6 +191,8 @@ impl Builder {
 			async_event_trigger,
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: self.lazy_surrealism,
+			#[cfg(feature = "http")]
+			http_client,
 		})
 	}
 }
