@@ -21,7 +21,7 @@ async fn insert_statement_object_single() -> Result<()> {
 			something: 'other',
 		};
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -40,24 +40,24 @@ async fn insert_relation_with_extra_fields() -> Result<()> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD name ON person TYPE string;
-		
+
 		DEFINE TABLE friendship TYPE RELATION IN person OUT person SCHEMAFULL;
 		DEFINE FIELD strength ON friendship TYPE int;
 		DEFINE FIELD since ON friendship TYPE string;
-		
+
 		INSERT INTO person [
 			{ id: person:alice, name: 'Alice' },
 			{ id: person:bob, name: 'Bob' }
 		];
-		
+
 		-- Test single object with extra fields
-		INSERT RELATION INTO friendship { 
-			in: person:alice, 
-			out: person:bob, 
+		INSERT RELATION INTO friendship {
+			in: person:alice,
+			out: person:bob,
 			strength: 100,
 			since: '2024-01-01'
 		};
-		
+
 		SELECT strength, since FROM friendship;
 	";
 	let mut t = Test::new(sql).await?;
@@ -82,21 +82,21 @@ async fn insert_relation_array_with_extra_fields() -> Result<()> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD name ON person TYPE string;
-		
+
 		DEFINE TABLE likes TYPE RELATION IN person OUT person SCHEMAFULL;
 		DEFINE FIELD rating ON likes TYPE int;
-		
+
 		INSERT INTO person [
 			{ id: person:a, name: 'A' },
 			{ id: person:b, name: 'B' },
 			{ id: person:c, name: 'C' }
 		];
-		
+
 		INSERT RELATION INTO likes [
 			{ in: person:a, out: person:b, rating: 5 },
 			{ in: person:b, out: person:c, rating: 3 }
 		];
-		
+
 		SELECT rating FROM likes ORDER BY rating DESC;
 	";
 	let mut t = Test::new(sql).await?;
@@ -122,23 +122,23 @@ async fn insert_relation_on_duplicate_key_update_extra_fields() -> Result<()> {
 	let sql = "
 		DEFINE TABLE person SCHEMAFULL;
 		DEFINE FIELD name ON person TYPE string;
-		
+
 		DEFINE TABLE follows TYPE RELATION IN person OUT person SCHEMAFULL;
 		DEFINE FIELD priority ON follows TYPE int;
 		DEFINE INDEX idx_follows_unique ON follows FIELDS in, out UNIQUE;
-		
+
 		INSERT INTO person [
 			{ id: person:x, name: 'X' },
 			{ id: person:y, name: 'Y' }
 		];
-		
+
 		-- Initial insert
 		INSERT RELATION INTO follows { in: person:x, out: person:y, priority: 1 };
-		
-		-- Update with ON DUPLICATE KEY UPDATE  
+
+		-- Update with ON DUPLICATE KEY UPDATE
 		INSERT RELATION INTO follows { in: person:x, out: person:y, priority: 99 }
 			ON DUPLICATE KEY UPDATE priority = $input.priority;
-		
+
 		SELECT priority FROM follows;
 	";
 	let mut t = Test::new(sql).await?;
@@ -167,7 +167,7 @@ async fn insert_statement_values_single() -> Result<()> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other');
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -184,7 +184,7 @@ async fn insert_statement_values_multiple() -> Result<()> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES (1, true, 'other'), (2, false, 'else');
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -207,7 +207,7 @@ async fn insert_statement_values_retable_id() -> Result<()> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES (person:1, true, 'other'), (person:2, false, 'else');
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -231,7 +231,7 @@ async fn insert_statement_on_duplicate_key() -> Result<()> {
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other');
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other') ON DUPLICATE KEY UPDATE something = 'else';
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -318,7 +318,7 @@ async fn insert_statement_output() -> Result<()> {
 	let sql = "
 		INSERT INTO test (id, test, something) VALUES ('tester', true, 'other') RETURN something;
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
@@ -338,7 +338,7 @@ async fn insert_statement_duplicate_key_update() -> Result<()> {
 		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-11') ON DUPLICATE KEY UPDATE founded = $input.founded;
 		INSERT INTO company (name, founded) VALUES ('SurrealDB', '2021-09-12') ON DUPLICATE KEY UPDATE founded = $input.founded;
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -496,7 +496,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the INSERT statement when the table has to be created
 		{
-			let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+			let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 			// Define additional namespaces/databases for cross-namespace tests
 			ds.execute(
@@ -511,7 +511,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let res = resp.remove(0).output();
 
 			if should_succeed {
-				assert!(res.is_ok() && res.unwrap() != Value::Array(Array::new()), "{}", msg);
+				assert!(res.unwrap() != Value::Array(Array::new()), "{}", msg);
 			} else if res.is_ok() {
 				assert!(res.unwrap() == Value::Array(Array::new()), "{}", msg);
 			} else {
@@ -528,7 +528,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the INSERT statement when the table already exists
 		{
-			let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+			let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 			// Define additional namespaces/databases for cross-namespace tests
 			ds.execute(
@@ -606,7 +606,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table doesn't exist
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -629,7 +629,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists but grants no permissions
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -661,7 +661,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -706,7 +706,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table doesn't exist
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -727,7 +727,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists but grants no permissions
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -759,7 +759,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -819,7 +819,7 @@ async fn insert_relation() -> Result<()> {
 			VALUES (person:1, 'values', person:2);
 		SELECT VALUE ->likes FROM person;
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 5);

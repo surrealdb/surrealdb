@@ -36,7 +36,9 @@ use axum_server::tls_rustls::RustlsConfig;
 use http::header;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use surrealdb_core::CommunityComposer;
+use surrealdb_core::channel::Receiver;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_types::Notification;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
@@ -263,6 +265,7 @@ pub struct SurrealRouter {
 	router: Router,
 	rpc_state: Arc<RpcState>,
 	datastore: Arc<Datastore>,
+	notifications: Receiver<Notification>,
 	canceller: CancellationToken,
 }
 
@@ -284,6 +287,7 @@ impl SurrealRouter {
 	pub async fn build<F: RouterFactory>(
 		opt: impl Into<RouterOptions>,
 		ds: Arc<Datastore>,
+		notifications: Receiver<Notification>,
 		ct: CancellationToken,
 	) -> Result<Self> {
 		let opt = opt.into();
@@ -395,6 +399,7 @@ impl SurrealRouter {
 			router: axum_app,
 			rpc_state,
 			datastore: ds,
+			notifications,
 			canceller: ct,
 		})
 	}
@@ -464,10 +469,10 @@ impl SurrealRouter {
 	/// Call this **after** you have set up your server and are ready to begin
 	/// processing requests.
 	pub fn spawn_notifications(&self) -> JoinHandle<()> {
-		let ds = self.datastore.clone();
+		let notify = self.notifications.clone();
 		let state = self.rpc_state.clone();
 		let ct = self.canceller.clone();
-		tokio::spawn(async move { notifications(ds, state, ct).await })
+		tokio::spawn(async move { notifications(notify, state, ct).await })
 	}
 }
 
@@ -489,10 +494,11 @@ impl SurrealRouter {
 pub async fn init<F: RouterFactory>(
 	opt: &Config,
 	ds: Arc<Datastore>,
+	recv: Receiver<Notification>,
 	ct: CancellationToken,
 ) -> Result<()> {
 	// Build the fully-configured router
-	let surreal = SurrealRouter::build::<F>(opt, ds, ct).await?;
+	let surreal = SurrealRouter::build::<F>(opt, ds, recv, ct).await?;
 
 	// Get a new server handler
 	let handle = Handle::new();

@@ -1,487 +1,12 @@
 #![allow(clippy::unwrap_used)]
 
 use surrealdb_core::iam::Level;
-use surrealdb_core::syn;
 use surrealdb_types::{Array, ToSql, Value};
 
 mod helpers;
-use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::Role;
-
-use crate::helpers::Test;
-
-#[tokio::test]
-async fn upsert_merge_and_content() -> Result<()> {
-	let sql = "
-		CREATE person:test CONTENT { name: 'Tobie' };
-		UPSERT person:test CONTENT { name: 'Jaime' };
-		UPSERT person:test CONTENT 'some content';
-		UPSERT person:test REPLACE 'some content';
-		UPSERT person:test MERGE { age: 50 };
-		UPSERT person:test MERGE 'some content';
-	";
-	let dbs = new_ds("test", "test").await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 6);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				id: person:test,
-				name: 'Tobie',
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				id: person:test,
-				name: 'Jaime',
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == r#"Cannot use 'some content' in a CONTENT clause"#
-	));
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == r#"Cannot use 'some content' in a CONTENT clause"#
-	));
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				id: person:test,
-				name: 'Jaime',
-				age: 50,
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == r#"Cannot use 'some content' in a MERGE clause"#
-	));
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn upsert_simple_with_input() -> Result<()> {
-	let sql = "
-		DEFINE FIELD name ON TABLE person
-			ASSERT
-				IF $input THEN
-					$input = /^[A-Z]{1}[a-z]+$/
-				ELSE
-					true
-				END
-			VALUE
-				IF $input THEN
-					'Name: ' + $input
-				ELSE
-					$value
-				END
-		;
-		UPSERT person:test;
-		UPSERT person:test CONTENT { name: 'Tobie' };
-		UPSERT person:test REPLACE { name: 'jaime' };
-		UPSERT person:test MERGE { name: 'Jaime' };
-		UPSERT person:test SET name = 'tobie';
-		UPSERT person:test SET name = 'Tobie';
-		SELECT * FROM person:test;
-	";
-	let dbs = new_ds("test", "test").await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 8);
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				id: person:test,
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				id: person:test,
-				name: 'Name: Tobie',
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == r#"Found 'Name: jaime' for field `name`, with record `person:test`, but field must conform to: IF $input THEN $input = /^[A-Z]{1}[a-z]+$/ ELSE true END"#
-	));
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				id: person:test,
-				name: 'Name: Jaime',
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == r#"Found 'Name: tobie' for field `name`, with record `person:test`, but field must conform to: IF $input THEN $input = /^[A-Z]{1}[a-z]+$/ ELSE true END"#
-	));
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				id: person:test,
-				name: 'Name: Tobie',
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				id: person:test,
-				name: 'Name: Tobie',
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn update_complex_with_input() -> Result<()> {
-	let sql = "
-		DEFINE FIELD images ON product
-			TYPE array
-			ASSERT array::len($value) > 0
-		;
-		DEFINE FIELD images.* ON product TYPE string
-			VALUE string::trim($input)
-			ASSERT $input AND string::len($value) > 0
-		;
-		CREATE product:test SET images = [' test.png '];
-	";
-	let mut t = Test::new(sql).await?;
-	t.skip_ok(2)?;
-	t.expect_val(
-		"[
-			{
-				id: product:test,
-				images: ['test.png'],
-			}
-		]",
-	)?;
-	Ok(())
-}
-
-#[tokio::test]
-async fn upsert_with_return_clause() -> Result<()> {
-	let sql = "
-		CREATE person:test SET age = 18, name = 'John';
-		UPSERT person:test SET age = 25 RETURN VALUE $before;
-		UPSERT person:test SET age = 30 RETURN VALUE { old_age: $before.age, new_age: $after.age };
-		UPSERT person:test SET age = 35 RETURN age, name;
-		DELETE person:test RETURN VALUE $before;
-	";
-	let dbs = new_ds("test", "test").await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				age: 18,
-				id: person:test,
-				name: 'John'
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				age: 18,
-				id: person:test,
-				name: 'John'
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				new_age: 30,
-				old_age: 25
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				age: 35,
-				name: 'John'
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				age: 35,
-				id: person:test,
-				name: 'John'
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn upsert_new_record_with_table() -> Result<()> {
-	let sql = "
-		-- This will return the created record
-		UPSERT person SET one = 'one', two = 'two', three = 'three';
-		-- Select all created records
-		SELECT count() FROM person GROUP ALL;
-	";
-	let dbs = new_ds("test", "test").await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 2);
-	//
-	let tmp = res.remove(0).result?;
-	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				count: 1,
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn upsert_new_records_with_table_and_unique_index() -> Result<()> {
-	let sql = "
-		-- This will define a unique index on the table
-		DEFINE INDEX OVERWRITE testing ON person FIELDS one, two, three UNIQUE;
-		-- This will create a record, and populate the unique index with this record id
-		UPSERT person SET one = 'something', two = 'something', three = 'something';
-		-- This will update the record, returning the same record id created in the statement above
-		UPSERT person SET one = 'something', two = 'something', three = 'something';
-		-- This will throw an error, because the unique index already has a record with a different record id
-		UPSERT person:test SET one = 'something', two = 'something', three = 'something';
-		-- Select all created records
-		SELECT count() FROM person GROUP ALL;
-	";
-	let dbs = new_ds("test", "test").await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result?;
-	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
-	//
-	let tmp = res.remove(0).result?;
-	assert!(matches!(tmp, Value::Array(v) if v.len() == 1));
-	//
-	let tmp = res.remove(0).result;
-	assert!(tmp.is_err());
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				count: 1,
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fields() -> Result<()> {
-	let sql = "
-		-- Setup the schemaful table
-		DEFINE TABLE person SCHEMALESS;
-		DEFINE FIELD created ON person TYPE datetime READONLY DEFAULT d'2024-01-01';
-		DEFINE FIELD age ON person TYPE number;
-		DEFINE FIELD data ON person TYPE object;
-		-- This record will be created successfully
-		UPSERT person:test CONTENT { age: 1, data: { some: true, other: false } };
-		-- This record will be updated successfully, with the readonly field untouched
-		UPSERT person:test CONTENT { age: 2, data: { nothing: true } };
-		-- This record will be updated successfully, with the readonly and flexible fields untouched
-		UPSERT person:test MERGE { age: 3 };
-		-- This record will be updated successfully, with the readonly and flexible fields untouched
-		UPSERT person:test SET age = 4, data.nothing = false;
-		-- This will return an error, as the readonly field is modified
-		UPSERT person:test REPLACE { age: 5, data: { other: true } };
-	";
-	let dbs = new_ds("test", "test").await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 9);
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result;
-	tmp.unwrap();
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				age: 1,
-				created: d'2024-01-01T00:00:00Z',
-				data: {
-					other: false,
-					some: true
-				},
-				id: person:test
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				age: 2,
-				created: d'2024-01-01T00:00:00Z',
-				data: {
-					nothing: true
-				},
-				id: person:test
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				age: 3,
-				created: d'2024-01-01T00:00:00Z',
-				data: {
-					nothing: true
-				},
-				id: person:test
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				age: 4,
-				created: d'2024-01-01T00:00:00Z',
-				data: {
-					nothing: false
-				},
-				id: person:test
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result;
-	assert!(matches!(
-		tmp.err(),
-		Some(e) if e.to_string() == r#"Found changed value for field `created`, with record `person:test`, but field is readonly"#
-	));
-	//
-	Ok(())
-}
 
 //
 // Permissions
@@ -618,7 +143,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		// Test the statement when the table has to be created
 
 		{
-			let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+			let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 			// Define additional namespaces/databases for cross-namespace tests
 			ds.execute(
@@ -650,7 +175,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 		// Test the statement when the table already exists
 		{
-			let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+			let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 			// Define additional namespaces/databases for cross-namespace tests
 			ds.execute(
@@ -755,7 +280,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table doesn't exist
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -774,7 +299,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table grants no permissions
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -827,7 +352,7 @@ async fn check_permissions_auth_enabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -895,7 +420,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table doesn't exist
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
@@ -912,7 +437,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table grants no permissions
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -964,7 +489,7 @@ async fn check_permissions_auth_disabled() {
 
 	// When the table exists and grants full permissions
 	{
-		let ds = new_ds("NS", "DB").await.unwrap().with_auth_enabled(auth_enabled);
+		let (_, ds) = new_ds("NS", "DB", auth_enabled).await.unwrap();
 
 		let mut resp = ds
 			.execute(
@@ -1013,102 +538,4 @@ async fn check_permissions_auth_disabled() {
 			res
 		);
 	}
-}
-
-#[tokio::test]
-async fn upsert_none_removes_field() -> Result<()> {
-	let sql = "
-		UPSERT test:1 CONTENT {
-			a: 1,
-			b: {
-				c: 1
-			}
-		};
-
-		UPSERT test:1 CONTENT {
-			a: NONE,
-			b: {
-				c: NONE,
-			}
-		};
-
-		DEFINE TABLE flex SCHEMAFULL;
-		DEFINE FIELD obj ON flex TYPE object FLEXIBLE;
-		UPSERT flex:1 CONTENT {
-			obj: {
-				a: 1
-			}
-		};
-
-		UPSERT flex:1 CONTENT {
-			obj: {
-				a: NONE,
-			}
-		};
-	";
-	let dbs = new_ds("test", "test").await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 6);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				id: test:1,
-				a: 1,
-				b: {
-					c: 1
-				}
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				id: test:1,
-				b: {}
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).output();
-	assert!(tmp.is_ok(), "failed to create table: {:?}", tmp);
-	//
-	let tmp = res.remove(0).output();
-	assert!(tmp.is_ok(), "failed to create field: {:?}", tmp);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				id: flex:1,
-				obj: {
-					a: 1
-				}
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		"[
-			{
-				id: flex:1,
-				obj: {}
-			}
-		]",
-	)
-	.unwrap();
-	assert_eq!(tmp, val);
-	//
-	Ok(())
 }

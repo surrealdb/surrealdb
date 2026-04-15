@@ -147,18 +147,24 @@ impl ExpressionRegistry {
 		alias: Option<String>,
 		ctx: &FrozenContext,
 	) -> Result<String, Error> {
-		// Generate SQL representation for deduplication
+		// Generate SQL representation for deduplication.
+		// When an alias is present, include it in the key so that
+		// `false AS isLiked` and `false AS isLocked` are distinct entries.
 		let expr_sql = expr.to_sql();
+		let dedup_key = match &alias {
+			Some(a) => format!("{expr_sql}\0{a}"),
+			None => expr_sql,
+		};
 
 		// Check if already registered
-		if let Some(info) = self.expressions.get(&expr_sql) {
+		if let Some(info) = self.expressions.get(&dedup_key) {
 			// If registered at a later point, update to earlier (we need it sooner)
 			if compute_point < info.compute_point {
 				let mut updated = info.clone();
 				updated.compute_point = compute_point;
-				self.expressions.insert(expr_sql.clone(), updated);
+				self.expressions.insert(dedup_key.clone(), updated);
 			}
-			return Ok(self.expressions[&expr_sql].internal_name.clone());
+			return Ok(self.expressions[&dedup_key].internal_name.clone());
 		}
 
 		// Convert to physical expression
@@ -173,7 +179,7 @@ impl ExpressionRegistry {
 			compute_point,
 		};
 
-		self.expressions.insert(expr_sql, info);
+		self.expressions.insert(dedup_key, info);
 
 		Ok(internal_name)
 	}
@@ -189,15 +195,21 @@ impl ExpressionRegistry {
 		compute_point: ComputePoint,
 		alias: Option<String>,
 	) -> String {
+		// Include alias in the dedup key (same logic as `register`)
+		let dedup_key = match &alias {
+			Some(a) => format!("{expr_key}\0{a}"),
+			None => expr_key,
+		};
+
 		// Check if already registered
-		if let Some(info) = self.expressions.get(&expr_key) {
+		if let Some(info) = self.expressions.get(&dedup_key) {
 			// Promote to earlier compute point if needed (same logic as `register`)
 			if compute_point < info.compute_point {
 				let mut updated = info.clone();
 				updated.compute_point = compute_point;
-				self.expressions.insert(expr_key.clone(), updated);
+				self.expressions.insert(dedup_key.clone(), updated);
 			}
-			return self.expressions[&expr_key].internal_name.clone();
+			return self.expressions[&dedup_key].internal_name.clone();
 		}
 
 		let internal_name = self.choose_internal_name(&alias);
@@ -208,7 +220,7 @@ impl ExpressionRegistry {
 			compute_point,
 		};
 
-		self.expressions.insert(expr_key, info);
+		self.expressions.insert(dedup_key, info);
 
 		internal_name
 	}

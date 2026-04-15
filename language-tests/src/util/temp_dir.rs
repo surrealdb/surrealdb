@@ -1,20 +1,12 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::SystemTime;
+
+use crate::util::{get_timestamp, xorshift};
 
 pub struct TempDir {
 	path: Option<PathBuf>,
 	id_gen: AtomicUsize,
-}
-
-fn xorshift(state: &mut u32) -> u32 {
-	let mut x = *state;
-	x ^= x << 13;
-	x ^= x >> 17;
-	x ^= x << 5;
-	*state = x;
-	x
 }
 
 impl TempDir {
@@ -22,9 +14,7 @@ impl TempDir {
 	pub async fn new(prefix: &str) -> Result<Self, io::Error> {
 		let temp_dir = std::env::temp_dir();
 
-		let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap();
-		let time = time.as_secs() ^ time.subsec_nanos() as u64;
-		let mut state = (time >> 32) as u32 ^ time as u32;
+		let mut state = get_timestamp();
 
 		let rand = xorshift(&mut state);
 

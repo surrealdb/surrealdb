@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
@@ -7,9 +8,9 @@ use surrealdb_core::syn::error::RenderedError;
 use surrealdb_types::{Object, Value as SurValue, Variables};
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
-use crate::tests::TestSet;
+use crate::tests::TestRun;
+use crate::tests::run::{CaseImports, RunConfig, TestRunId};
 use crate::tests::schema::{self, BoolOr, TestConfig, TestDetailsResults};
-use crate::tests::set::TestId;
 
 mod display;
 mod update;
@@ -57,9 +58,10 @@ pub enum TestTaskResult {
 	SigninError(anyhow::Error),
 	Import(String, String),
 	BadCleanup(Vec<Vec<u8>>),
-	Timeout,
-	Results(Vec<Result<SurValue, String>>),
-	Panicked(Box<dyn Any + Send + 'static>),
+	Results {
+		did_timeout: bool,
+		res: Vec<Result<SurValue, String>>,
+	},
 }
 
 /// Enum with the outcome of a test
@@ -75,7 +77,6 @@ pub enum TestGrade {
 }
 
 pub enum TestError {
-	Timeout,
 	Running(String),
 	Panicked(String),
 	Import(String, String),
@@ -227,8 +228,7 @@ pub enum TestExpectation {
 
 impl TestExpectation {
 	pub fn from_test_config(config: &TestConfig) -> Option<Self> {
-		let details = config.test.as_ref()?;
-		let results = details.results.as_ref()?;
+		let results = config.test.results.as_ref()?;
 
 		let res = match results {
 			TestDetailsResults::QueryResult(r) => {
@@ -297,17 +297,24 @@ impl TestExpectation {
 }
 
 pub struct TestReport {
-	id: TestId,
-	is_wip: bool,
+	pub id: TestRunId,
+	pub case: Arc<CaseImports>,
+	name: String,
+	timeout: bool,
 	kind: TestReportKind,
 	outputs: Option<TestOutputs>,
-	extra_name: Option<String>,
 }
 
 impl TestReport {
 	pub fn grade(&self) -> TestGrade {
-		match self.kind {
-			TestReportKind::Valid => TestGrade::Success,
+		match &self.kind {
+			TestReportKind::Valid => {
+				if self.timeout {
+					TestGrade::Warning
+				} else {
+					TestGrade::Success
+				}
+			}
 			TestReportKind::MismatchedType(_)
 			| TestReportKind::MismatchedParsing {
 				..
@@ -319,13 +326,19 @@ impl TestReport {
 				..
 			}
 			| TestReportKind::MismatchedValues(_) => {
-				if self.is_wip {
+				if self.is_wip() {
 					TestGrade::Warning
 				} else {
 					TestGrade::Failed
 				}
 			}
-			TestReportKind::Error(_) => TestGrade::Failed,
+			TestReportKind::Error(_) => {
+				if self.is_wip() {
+					TestGrade::Warning
+				} else {
+					TestGrade::Failed
+				}
+			}
 			TestReportKind::NoExpectation {
 				..
 			} => TestGrade::Warning,
@@ -333,45 +346,69 @@ impl TestReport {
 	}
 
 	pub fn is_wip(&self) -> bool {
-		self.is_wip
+		self.case.test.config.parsed.test.wip
 	}
 
 	pub fn is_unspecified_test(&self) -> bool {
 		matches!(self.kind, TestReportKind::NoExpectation { .. })
 	}
 
-	#[allow(dead_code)]
-	pub fn test_id(&self) -> TestId {
-		self.id
-	}
-
-	pub async fn from_test_result(
-		id: TestId,
-		set: &TestSet,
+	pub async fn from_test_result<T: RunConfig>(
+		run: TestRun<T>,
 		job_result: TestTaskResult,
 		matching_datastore: &Datastore,
-		extra_name: Option<String>,
 	) -> Self {
-		let outputs = match job_result {
-			TestTaskResult::ParserError(ref e) => Some(TestOutputs::ParsingError(e.to_string())),
-			TestTaskResult::SignupError(ref e) => Some(TestOutputs::SignupError(e.to_string())),
-			TestTaskResult::SigninError(ref e) => Some(TestOutputs::SigninError(e.to_string())),
-			TestTaskResult::RunningError(_) => None,
-			TestTaskResult::Timeout => None,
-			TestTaskResult::Import(_, _) => None,
-			TestTaskResult::BadCleanup(_) => None,
-			TestTaskResult::Results(ref e) => Some(TestOutputs::Values(e.clone())),
-			TestTaskResult::Panicked(_) => None,
+		let (timeout, outputs) = match &job_result {
+			TestTaskResult::ParserError(e) => {
+				(false, Some(TestOutputs::ParsingError(e.to_string())))
+			}
+			TestTaskResult::SignupError(e) => {
+				(false, Some(TestOutputs::SignupError(e.to_string())))
+			}
+			TestTaskResult::SigninError(e) => {
+				(false, Some(TestOutputs::SigninError(e.to_string())))
+			}
+			TestTaskResult::RunningError(_) => (false, None),
+			TestTaskResult::Import(_, _) => (false, None),
+			TestTaskResult::BadCleanup(_) => (false, None),
+			TestTaskResult::Results {
+				did_timeout,
+				res,
+			} => (*did_timeout, Some(TestOutputs::Values(res.clone()))),
 		};
 
-		let kind = Self::grade_result(&set[id].config, job_result, matching_datastore).await;
+		let cfg = &run.case.test.config.parsed;
+		let kind = Self::grade_result(cfg, job_result, matching_datastore).await;
 
 		TestReport {
-			id,
-			is_wip: set[id].config.is_wip(),
+			id: run.id,
+			name: run.name(),
+			case: run.case,
 			kind,
+			timeout,
 			outputs,
-			extra_name,
+		}
+	}
+
+	pub fn from_panic<T: RunConfig>(
+		run: TestRun<T>,
+		panic_error: Box<dyn Any + Send + 'static>,
+	) -> Self {
+		let error = panic_error
+			.downcast::<String>()
+			.map(|x| *x)
+			.or_else(|e| e.downcast::<&'static str>().map(|x| (*x).to_owned()))
+			.unwrap_or_else(|_| "Could not retrieve panic payload".to_owned());
+
+		let kind = TestReportKind::Error(TestError::Panicked(error));
+
+		TestReport {
+			id: run.id,
+			name: run.name(),
+			case: run.case,
+			kind,
+			timeout: false,
+			outputs: None,
 		}
 	}
 
@@ -384,18 +421,8 @@ impl TestReport {
 			TestTaskResult::RunningError(e) => {
 				TestReportKind::Error(TestError::Running(format!("{:?}", e)))
 			}
-			TestTaskResult::Timeout => TestReportKind::Error(TestError::Timeout),
 			TestTaskResult::Import(a, b) => TestReportKind::Error(TestError::Import(a, b)),
 			TestTaskResult::BadCleanup(x) => TestReportKind::Error(TestError::BadCleanup(x)),
-			TestTaskResult::Panicked(e) => {
-				let error = e
-					.downcast::<String>()
-					.map(|x| *x)
-					.or_else(|e| e.downcast::<&'static str>().map(|x| (*x).to_owned()))
-					.unwrap_or_else(|_| "Could not retrieve panic payload".to_owned());
-
-				TestReportKind::Error(TestError::Panicked(error))
-			}
 			TestTaskResult::SignupError(err) => {
 				let expectation = TestExpectation::from_test_config(config);
 
@@ -502,9 +529,12 @@ impl TestReport {
 					expected: expected_error,
 				}
 			}
-			TestTaskResult::Results(results) => {
+			TestTaskResult::Results {
+				res,
+				..
+			} => {
 				let expectation = TestExpectation::from_test_config(config);
-				Self::grade_value_results(expectation, results, matcher_datastore).await
+				Self::grade_value_results(expectation, res, matcher_datastore).await
 			}
 		}
 	}
@@ -670,10 +700,9 @@ impl TestReport {
 
 		let run_vars = match value {
 			Ok(ref x) => Variables::from_iter([("result".to_string(), x.clone())]),
-			Err(ref e) => Variables::from_iter([(
-				"error".to_string(),
-				SurValue::String(e.clone()).clone(),
-			)]),
+			Err(ref e) => {
+				Variables::from_iter([("error".to_string(), SurValue::String(e.clone()).clone())])
+			}
 		};
 
 		let session = Session::viewer().with_ns("match").with_db("match");

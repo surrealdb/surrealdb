@@ -57,7 +57,7 @@ impl PhysicalExpr for MethodPart {
 		}
 
 		// Invoke the resolved function
-		let result = if func.is_pure() {
+		let result = if func.is_pure() && !func.is_async() {
 			func.invoke(func_args)
 		} else {
 			func.invoke_async(&ctx, func_args).await
