@@ -119,9 +119,9 @@ impl CursorDoc {
 
 	/// Updates the `"parent"` doc field for statements with a meaning full
 	/// document.
-	pub async fn update_parent<F, R>(ctx: &FrozenContext, doc: Option<&CursorDoc>, f: F) -> R
+	pub async fn update_parent<'a, F, R>(ctx: &'a FrozenContext, doc: Option<&CursorDoc>, f: F) -> R
 	where
-		F: AsyncFnOnce(Cow<FrozenContext>) -> R,
+		F: AsyncFnOnce(Cow<'a, FrozenContext>) -> R,
 	{
 		let ctx = Self::with_parent_ctx(ctx, doc);
 		f(ctx).await
