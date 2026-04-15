@@ -560,6 +560,51 @@ mod rocksdb {
 	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 
+#[cfg(feature = "kv-rocksdb")]
+mod rocksdb_versioned {
+	use surrealdb::Surreal;
+	use surrealdb::engine::local::{Db, RocksDb};
+	use surrealdb::opt::Config;
+	use surrealdb::opt::auth::Root;
+	use tokio::sync::{Semaphore, SemaphorePermit};
+	use ulid::Ulid;
+
+	use super::{ROOT_PASS, ROOT_USER, TEMP_DIR};
+
+	static PERMITS: Semaphore = Semaphore::const_new(1);
+
+	async fn new_db(config: Config) -> (SemaphorePermit<'static>, Surreal<Db>) {
+		let permit = PERMITS.acquire().await.unwrap();
+		let path = TEMP_DIR.join(Ulid::new().to_string());
+		let root = Root {
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
+		};
+		let config = config.user(root.clone());
+		let db = Surreal::new::<RocksDb>((path, config)).versioned().await.unwrap();
+		db.signin(root).await.unwrap();
+		(permit, db)
+	}
+
+	#[test_log::test(tokio::test)]
+	async fn any_engine_can_connect() {
+		let db_dir = Ulid::new().to_string();
+		surrealdb::engine::any::connect(format!(
+			"rocksdb://{}?versioned=true",
+			TEMP_DIR.join("absolute").join(&db_dir).display()
+		))
+		.await
+		.unwrap();
+		if std::env::set_current_dir(&*TEMP_DIR).is_ok() {
+			surrealdb::engine::any::connect(format!("rocksdb://relative/{db_dir}?versioned=true"))
+				.await
+				.unwrap();
+		}
+	}
+
+	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run, version, backup_version);
+}
+
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv {
 	use surrealdb::Surreal;

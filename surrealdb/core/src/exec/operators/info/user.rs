@@ -150,7 +150,7 @@ async fn execute_user_info(
 		Base::Ns => {
 			let ns_name = opt.ns()?;
 			let ns = txn.expect_ns_by_name(ns_name).await?;
-			match txn.get_ns_user(ns.namespace_id, &user).await? {
+			match txn.get_ns_user(ns.namespace_id, &user, None).await? {
 				Some(user_def) => user_def,
 				None => {
 					return Err(Error::UserNsNotFound {
@@ -163,7 +163,7 @@ async fn execute_user_info(
 		}
 		Base::Db => {
 			let (ns_name, db_name) = opt.ns_db()?;
-			let Some(db_def) = txn.get_db_by_name(ns_name, db_name).await? else {
+			let Some(db_def) = txn.get_db_by_name(ns_name, db_name, None).await? else {
 				return Err(Error::UserDbNotFound {
 					name: user,
 					ns: ns_name.to_string(),
@@ -171,13 +171,13 @@ async fn execute_user_info(
 				}
 				.into());
 			};
-			txn.get_db_user(db_def.namespace_id, db_def.database_id, &user).await?.ok_or_else(
-				|| Error::UserDbNotFound {
+			txn.get_db_user(db_def.namespace_id, db_def.database_id, &user, None)
+				.await?
+				.ok_or_else(|| Error::UserDbNotFound {
 					name: user,
 					ns: ns_name.to_string(),
 					db: db_name.to_string(),
-				},
-			)?
+				})?
 		}
 	};
 

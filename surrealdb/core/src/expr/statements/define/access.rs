@@ -321,7 +321,7 @@ impl DefineAccessStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if access method already exists
-				if let Some(access) = txn.get_root_access(&definition.name).await? {
+				if let Some(access) = txn.get_root_access(&definition.name, None).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -336,7 +336,7 @@ impl DefineAccessStatement {
 				}
 				// Process the statement
 				let key = crate::key::root::ac::new(&definition.name);
-				txn.set(&key, &definition, None).await?;
+				txn.set(&key, &definition).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -347,7 +347,7 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				let ns = ctx.get_ns_id(opt).await?;
-				if let Some(access) = txn.get_ns_access(ns, &definition.name).await? {
+				if let Some(access) = txn.get_ns_access(ns, &definition.name, None).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -364,7 +364,7 @@ impl DefineAccessStatement {
 				// Process the statement
 				let key = crate::key::namespace::ac::new(ns, &definition.name);
 				txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
-				txn.set(&key, &definition, None).await?;
+				txn.set(&key, &definition).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -375,7 +375,7 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-				if let Some(access) = txn.get_db_access(ns, db, &definition.name).await? {
+				if let Some(access) = txn.get_db_access(ns, db, &definition.name, None).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -392,7 +392,7 @@ impl DefineAccessStatement {
 				}
 				// Process the statement
 				let key = crate::key::database::ac::new(ns, db, &definition.name);
-				txn.set(&key, &definition, None).await?;
+				txn.set(&key, &definition).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good

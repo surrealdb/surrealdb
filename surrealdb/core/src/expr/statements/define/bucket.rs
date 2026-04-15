@@ -52,7 +52,7 @@ impl DefineBucketStatement {
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
-		if let Some(bucket) = txn.get_db_bucket(ns, db, &name).await? {
+		if let Some(bucket) = txn.get_db_bucket(ns, db, &name, None).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -103,7 +103,7 @@ impl DefineBucketStatement {
 			readonly: self.readonly,
 			comment,
 		};
-		txn.set(&key, &ap, None).await?;
+		txn.set(&key, &ap).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

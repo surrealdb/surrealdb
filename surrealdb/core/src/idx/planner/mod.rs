@@ -97,7 +97,7 @@ impl<'a> StatementContext<'a> {
 		}
 		let (ns, db) = self.ctx.get_ns_db_ids(self.opt).await?;
 		// Get the table for this planner
-		match self.ctx.tx().get_tb(ns, db, tb).await? {
+		match self.ctx.tx().get_tb(ns, db, tb, None).await? {
 			Some(table) => {
 				// TODO(tobiemh): we should really
 				// not even get here if the table

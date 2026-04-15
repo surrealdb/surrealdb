@@ -37,7 +37,7 @@ impl AlterParamStatement {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let txn = ctx.tx();
 
-		let mut pa = match txn.get_db_param(ns, db, &self.name).await {
+		let mut pa = match txn.get_db_param(ns, db, &self.name, None).await {
 			Ok(v) => v.deref().clone(),
 			Err(e) => {
 				if self.if_exists {
@@ -62,7 +62,7 @@ impl AlterParamStatement {
 		}
 
 		let key = crate::key::database::pa::new(ns, db, &self.name);
-		txn.set(&key, &pa, None).await?;
+		txn.set(&key, &pa).await?;
 		txn.clear_cache();
 		Ok(Value::None)
 	}

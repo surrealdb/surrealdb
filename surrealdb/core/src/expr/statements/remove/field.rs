@@ -55,7 +55,7 @@ impl RemoveFieldStatement {
 		// Get the field name
 		let name = name.to_raw_string();
 		// Get the definition
-		let _fd = match txn.get_tb_field(ns, db, &table_name, &name).await? {
+		let _fd = match txn.get_tb_field(ns, db, &table_name, &name, None).await? {
 			Some(x) => x,
 			None => {
 				if self.if_exists {
@@ -72,7 +72,7 @@ impl RemoveFieldStatement {
 		let key = crate::key::table::fd::new(ns, db, &table_name, &name);
 		txn.del(&key).await?;
 		// Refresh the table cache for fields
-		let Some(tb) = txn.get_tb(ns, db, &table_name).await? else {
+		let Some(tb) = txn.get_tb(ns, db, &table_name, None).await? else {
 			return Err(Error::TbNotFound {
 				name: table_name,
 			}

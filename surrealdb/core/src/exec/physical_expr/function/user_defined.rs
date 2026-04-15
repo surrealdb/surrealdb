@@ -57,7 +57,7 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 		let db_id = db_ctx.db.database_id;
 		let func_def = ctx
 			.txn()
-			.get_db_function(ns_id, db_id, &self.name)
+			.get_db_function(ns_id, db_id, &self.name, ctx.exec_ctx.version_stamp())
 			.await
 			.map_err(|e| anyhow::anyhow!("Function '{}' not found: {}", func_name, e))?;
 

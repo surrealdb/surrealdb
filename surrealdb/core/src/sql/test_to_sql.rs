@@ -164,7 +164,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::expr_alter(Expr::Alter(Box::new(AlterStatement::Table(AlterTableStatement { name: "user".to_string(), if_exists: false, schemafull: AlterKind::None, permissions: None, changefeed: AlterKind::None, comment: AlterKind::None, kind: None, compact: false }))), "ALTER TABLE user", "ALTER TABLE user")]
 // Expression: Info
 #[case::expr_info(
-	Expr::Info(Box::new(InfoStatement::Root(false))),
+	Expr::Info(Box::new(InfoStatement::Root(false, None))),
 	"INFO FOR ROOT",
 	"INFO FOR ROOT"
 )]

@@ -120,6 +120,11 @@ pub struct Planner<'ctx> {
 	pub(crate) ns: Option<String>,
 	/// Optional database name for plan-time catalog lookups.
 	pub(crate) db: Option<String>,
+	/// Optional VERSION expression from the enclosing SELECT statement.
+	///
+	/// Propagated to `GraphEdgeScan` operators created during idiom
+	/// conversion so that graph edge traversals respect the VERSION clause.
+	pub(crate) version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 }
 
 impl<'ctx> Planner<'ctx> {
@@ -135,6 +140,7 @@ impl<'ctx> Planner<'ctx> {
 			txn: None,
 			ns: None,
 			db: None,
+			version: None,
 		}
 	}
 
@@ -156,7 +162,14 @@ impl<'ctx> Planner<'ctx> {
 			txn: Some(txn),
 			ns,
 			db,
+			version: None,
 		}
+	}
+
+	/// Set the VERSION expression for propagation to graph edge scans.
+	pub fn with_version(mut self, version: Option<Arc<dyn crate::exec::PhysicalExpr>>) -> Self {
+		self.version = version;
+		self
 	}
 
 	/// Get the function registry.
@@ -190,24 +203,25 @@ impl<'ctx> Planner<'ctx> {
 			return Ok(false);
 		};
 		let Some(db_def) =
-			txn.get_db_by_name(ns, db).await.map_err(|e| Error::Internal(e.to_string()))?
+			txn.get_db_by_name(ns, db, None).await.map_err(|e| Error::Internal(e.to_string()))?
 		else {
 			return Ok(false);
 		};
 		let mod_name = format!("mod::{module}");
-		let val = match txn.get_db_module(db_def.namespace_id, db_def.database_id, &mod_name).await
-		{
-			Ok(v) => v,
-			Err(e) => {
-				if let Some(Error::MdNotFound {
-					..
-				}) = e.downcast_ref::<Error>()
-				{
-					return Ok(false);
+		let val =
+			match txn.get_db_module(db_def.namespace_id, db_def.database_id, &mod_name, None).await
+			{
+				Ok(v) => v,
+				Err(e) => {
+					if let Some(Error::MdNotFound {
+						..
+					}) = e.downcast_ref::<Error>()
+					{
+						return Ok(false);
+					}
+					return Err(Error::Internal(e.to_string()));
 				}
-				return Err(Error::Internal(e.to_string()));
-			}
-		};
+			};
 		let executable: ModuleExecutable = val.executable.clone().into();
 		// The planner's self.ctx does not carry a transaction (the executor
 		// sets it after planning). Derive a context with the planner's txn
@@ -1110,11 +1124,19 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		use crate::expr::statements::info::InfoStatement;
 		match info {
-			InfoStatement::Root(structured) => {
-				Ok(Arc::new(RootInfoPlan::new(structured)) as Arc<dyn ExecOperator>)
+			InfoStatement::Root(structured, version) => {
+				let version = match version {
+					Some(v) => Some(Box::pin(self.physical_expr(v)).await?),
+					None => None,
+				};
+				Ok(Arc::new(RootInfoPlan::new(structured, version)) as Arc<dyn ExecOperator>)
 			}
-			InfoStatement::Ns(structured) => {
-				Ok(Arc::new(NamespaceInfoPlan::new(structured)) as Arc<dyn ExecOperator>)
+			InfoStatement::Ns(structured, version) => {
+				let version = match version {
+					Some(v) => Some(Box::pin(self.physical_expr(v)).await?),
+					None => None,
+				};
+				Ok(Arc::new(NamespaceInfoPlan::new(structured, version)) as Arc<dyn ExecOperator>)
 			}
 			InfoStatement::Db(structured, version) => {
 				let version = match version {

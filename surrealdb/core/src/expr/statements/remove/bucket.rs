@@ -42,7 +42,7 @@ impl RemoveBucketStatement {
 		let txn = ctx.tx();
 		// Get the definition
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let Some(bu) = txn.get_db_bucket(ns, db, &name).await? else {
+		let Some(bu) = txn.get_db_bucket(ns, db, &name, None).await? else {
 			if self.if_exists {
 				return Ok(Value::None);
 			} else {

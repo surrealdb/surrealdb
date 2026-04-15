@@ -791,8 +791,8 @@ implement_visitor! {
 
 	fn visit_info(this, i: &InfoStatement){
 		match i{
-			InfoStatement::Root(_) |
-			InfoStatement::Ns(_) => {}
+			InfoStatement::Root(_, expr) |
+			InfoStatement::Ns(_, expr) |
 			InfoStatement::Db(_, expr) => {
 				if let Some(e) = expr.as_ref(){
 					this.visit_expr(e)?;
@@ -2301,8 +2301,8 @@ implement_visitor_mut! {
 
 	fn visit_mut_info(this, i: &mut InfoStatement){
 		match i{
-			InfoStatement::Root(_) |
-			InfoStatement::Ns(_) => {}
+			InfoStatement::Root(_, expr) |
+			InfoStatement::Ns(_, expr) |
 			InfoStatement::Db(_, expr) => {
 				if let Some(e) = expr.as_mut(){
 					this.visit_mut_expr(e)?;

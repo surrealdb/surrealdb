@@ -107,7 +107,7 @@ impl DefineFieldStatement {
 		// this field (or has it as a prefix for sub-field paths).
 		if self.computed.is_some() {
 			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-			for ix in ctx.tx().all_tb_indexes(ns, db, &table).await?.iter() {
+			for ix in ctx.tx().all_tb_indexes(ns, db, &table, None).await?.iter() {
 				if ix.cols.iter().any(|col| col.starts_with(&name)) {
 					bail!(Error::ComputedFieldCannotBeIndexed {
 						index: ix.name.clone(),
@@ -180,12 +180,12 @@ impl DefineFieldStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 
-		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &definition.table).await?;
+		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &definition.table, None).await?;
 
 		// Get the name of the field
 		let fd = self.name.to_raw_string();
 		// Check if the definition exists
-		if let Some(fd) = txn.get_tb_field(ns, db, &tb.name, &fd).await? {
+		if let Some(fd) = txn.get_tb_field(ns, db, &tb.name, &fd, None).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -335,7 +335,7 @@ impl DefineFieldStatement {
 						..Default::default()
 					}
 				};
-				txn.set(&key, &val, None).await?;
+				txn.set(&key, &val).await?;
 				// Process to any sub field
 				if let Some(new_kind) = new_kind {
 					cur_kind = new_kind;
@@ -637,7 +637,7 @@ impl DefineFieldStatement {
 		if self.flexible {
 			// Get the table definition
 			let txn = ctx.tx();
-			let Some(tb) = txn.get_tb(ns, db, &definition.table).await? else {
+			let Some(tb) = txn.get_tb(ns, db, &definition.table, None).await? else {
 				bail!(Error::TbNotFound {
 					name: definition.table.clone(),
 				});

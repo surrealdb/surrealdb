@@ -43,7 +43,7 @@ impl RemoveApiStatement {
 		// Get the definition
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Check if the api exists
-		let Some(ap) = txn.get_db_api(ns, db, &name).await? else {
+		let Some(ap) = txn.get_db_api(ns, db, &name, None).await? else {
 			if self.if_exists {
 				return Ok(Value::None);
 			} else {

@@ -93,7 +93,7 @@ pub async fn generate_schema(
 	let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
 	let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
 
-	let db_def = match tx.get_db_by_name(ns, db).await? {
+	let db_def = match tx.get_db_by_name(ns, db, None).await? {
 		Some(db) => db,
 		None => return Err(GqlError::NotConfigured),
 	};
@@ -121,7 +121,7 @@ pub async fn generate_schema(
 	let fns = match gql_config.functions {
 		GraphQLFunctionsConfig::None => None,
 		_ => {
-			let fns = tx.all_db_functions(db_def.namespace_id, db_def.database_id).await?;
+			let fns = tx.all_db_functions(db_def.namespace_id, db_def.database_id, None).await?;
 			match gql_config.functions {
 				GraphQLFunctionsConfig::None => None,
 				GraphQLFunctionsConfig::Auto => Some(fns),
@@ -188,7 +188,7 @@ pub async fn generate_schema(
 
 	// Generate auth mutations (signIn/signUp) from access definitions
 	{
-		let accesses = tx.all_db_accesses(db_def.namespace_id, db_def.database_id).await?;
+		let accesses = tx.all_db_accesses(db_def.namespace_id, db_def.database_id, None).await?;
 		if !accesses.is_empty() {
 			let mut auth_mutation = mutation_obj.take().unwrap_or_else(|| Object::new("Mutation"));
 			auth_mutation = add_auth_mutations(auth_mutation, &accesses, ns, db, datastore);

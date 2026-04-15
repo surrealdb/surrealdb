@@ -168,7 +168,7 @@ impl HnswIndex {
 			old_vectors,
 			new_vectors,
 		};
-		tx.put(&key, &pending, None).await?;
+		tx.put(&key, &pending).await?;
 		Ok(())
 	}
 

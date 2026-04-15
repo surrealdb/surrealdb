@@ -60,7 +60,7 @@ impl DefineSequenceStatement {
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
-		if txn.get_db_sequence(ns, db, &name).await.is_ok() {
+		if txn.get_db_sequence(ns, db, &name, None).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -110,7 +110,7 @@ impl DefineSequenceStatement {
 			timeout,
 		};
 		// Set the definition
-		txn.set(&key, &sq, None).await?;
+		txn.set(&key, &sq).await?;
 
 		// Clear any pre-existing sequence records
 		let ba_range = Prefix::new_ba_range(db.namespace_id, db.database_id, &sq.name)?;

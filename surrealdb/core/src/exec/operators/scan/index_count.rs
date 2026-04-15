@@ -167,10 +167,10 @@ impl ExecOperator for IndexCountScan {
 					Some(
 						v.cast_to::<crate::val::Datetime>()
 							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp()?,
+							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// Evaluate source expression to get the table name.
@@ -189,7 +189,7 @@ impl ExecOperator for IndexCountScan {
 
 			// Verify table exists.
 			let table_def = db_ctx
-				.get_table_def(&table_name)
+				.get_table_def(&table_name, version)
 				.await
 				.context("Failed to get table")?;
 
@@ -238,7 +238,7 @@ impl ExecOperator for IndexCountScan {
 
 			// Look up all indexes for the table (using the execution-level cache).
 			let indexes = db_ctx
-				.get_table_indexes(&table_name)
+				.get_table_indexes(&table_name, version)
 				.await
 				.context("Failed to fetch table indexes")?;
 

@@ -41,7 +41,7 @@ impl DefineApiStatement {
 		// Resolve the path identifier
 		let path_name = expr_to_ident(stk, ctx, opt, doc, &self.path, "api path").await?;
 		// Check if the definition exists
-		if txn.get_db_api(ns, db, &path_name).await?.is_some() {
+		if txn.get_db_api(ns, db, &path_name, None).await?.is_some() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
