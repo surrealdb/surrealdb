@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use rocksdb::{OptimisticTransactionDB, Options};
 
 use super::TARGET;
@@ -36,10 +36,17 @@ use crate::kvs::err::{Error, Result};
 /// lost in the event of a system crash or power failure. Full durability is only guaranteed if
 /// the operating once the data is flushed to disk at the specified interval.
 pub struct BackgroundFlusher {
-	/// Shutdown flag
-	shutdown: Arc<AtomicBool>,
+	/// Shared state for signalling shutdown to the background thread
+	notify: Arc<ShutdownSignal>,
 	/// Thread handle
 	handle: Mutex<Option<thread::JoinHandle<()>>>,
+}
+
+/// Shared state for signalling shutdown to the background thread
+struct ShutdownSignal {
+	flag: AtomicBool,
+	condvar: Condvar,
+	mutex: Mutex<()>,
 }
 
 impl BackgroundFlusher {
@@ -63,24 +70,30 @@ impl BackgroundFlusher {
 
 	/// Create and new background flusher
 	pub fn new(db: Pin<Arc<OptimisticTransactionDB>>, interval: Duration) -> Result<Self> {
-		// Create a new shutdown flag
-		let shutdown = Arc::new(AtomicBool::new(false));
-		// Clone the shutdown flag
-		let finished = shutdown.clone();
+		// Create a new shutdown notifier
+		let notify = Arc::new(ShutdownSignal {
+			flag: AtomicBool::new(false),
+			condvar: Condvar::new(),
+			mutex: Mutex::new(()),
+		});
+		// Clone the shutdown notifier
+		let signal = notify.clone();
 		// Spawn the background flusher thread
 		let handle = thread::Builder::new()
 			.name("rocksdb-background-flusher".to_string())
 			.spawn(move || {
 				loop {
 					// Wait for the specified interval
-					thread::sleep(interval);
+					let mut guard = signal.mutex.lock();
+					signal.condvar.wait_for(&mut guard, interval);
+					drop(guard);
 					// Check shutdown flag again after sleep
-					if finished.load(Ordering::Relaxed) {
+					if signal.flag.load(Ordering::Relaxed) {
 						break;
 					}
 					// Flush the WAL to disk periodically
 					if let Err(err) = db.flush_wal(true) {
-						error!("Failed to flush WAL: {err}");
+						error!(target: TARGET, "Failed to flush WAL: {err}");
 					}
 				}
 			})
@@ -89,7 +102,7 @@ impl BackgroundFlusher {
 			})?;
 		// Create a new background flusher
 		Ok(Self {
-			shutdown,
+			notify,
 			handle: Mutex::new(Some(handle)),
 		})
 	}
@@ -97,12 +110,13 @@ impl BackgroundFlusher {
 	/// Shutdown the background flusher
 	pub fn shutdown(&self) -> Result<()> {
 		// Signal shutdown
-		self.shutdown.store(true, Ordering::Relaxed);
-		// Wait for thread to finish
+		self.notify.flag.store(true, Ordering::Relaxed);
+		// Notify the background flusher thread
+		self.notify.condvar.notify_one();
+		// Wait for the background flusher thread to finish
 		if let Some(handle) = self.handle.lock().take() {
 			let _ = handle.join();
 		}
-		// All good
 		Ok(())
 	}
 }

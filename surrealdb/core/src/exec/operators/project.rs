@@ -389,7 +389,7 @@ async fn evaluate_and_set_field(
 
 /// Synchronously remove a field from a value by idiom path.
 #[inline]
-fn omit_field_sync(value: &mut Value, idiom: &Idiom) {
+pub(crate) fn omit_field_sync(value: &mut Value, idiom: &Idiom) {
 	// For simple single-part idioms, directly remove from object
 	if idiom.len() == 1 {
 		if let Some(Part::Field(field_name)) = idiom.first()

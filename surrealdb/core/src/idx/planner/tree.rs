@@ -139,7 +139,7 @@ impl<'a> TreeBuilder<'a> {
 			return Ok(sc);
 		}
 		let (ns, db) = self.ctx.ctx.expect_ns_db_ids(self.ctx.opt).await?;
-		let sc = SchemaCache::new(ns, db, table, tx).await?;
+		let sc = SchemaCache::new(ns, db, table, tx, self.ctx.opt.version).await?;
 		self.schemas.insert(table.clone(), sc.clone());
 		Ok(sc)
 	}
@@ -787,9 +787,10 @@ impl SchemaCache {
 		db: DatabaseId,
 		table: &TableName,
 		tx: &Transaction,
+		version: Option<u64>,
 	) -> Result<Self> {
-		let indexes = tx.all_tb_indexes(ns, db, table).await?;
-		let fields = tx.all_tb_fields(ns, db, table, None).await?;
+		let indexes = tx.all_tb_indexes(ns, db, table, version).await?;
+		let fields = tx.all_tb_fields(ns, db, table, version).await?;
 		Ok(Self {
 			indexes,
 			fields,

@@ -172,7 +172,9 @@ impl ToSql for FunctionCall {
 				f.push_str("mod::");
 				write_sql!(f, fmt, " {}", EscapeKwFreeIdent(m));
 				if let Some(s) = s {
-					write_sql!(f, fmt, "::{}", EscapeKwFreeIdent(s));
+					for segment in s.split("::") {
+						write_sql!(f, fmt, "::{}", EscapeKwFreeIdent(segment));
+					}
 				}
 			}
 			Function::Silo {
@@ -182,23 +184,20 @@ impl ToSql for FunctionCall {
 				ref minor,
 				ref patch,
 				ref sub,
-			} => match sub {
-				Some(s) => write_sql!(
-					f,
-					fmt,
-					"silo::{}::{}<{major}.{minor}.{patch}>::{}",
-					EscapeKwFreeIdent(org),
-					EscapeKwFreeIdent(pkg),
-					EscapeKwFreeIdent(s),
-				),
-				None => write_sql!(
+			} => {
+				write_sql!(
 					f,
 					fmt,
 					"silo::{}::{}<{major}.{minor}.{patch}>",
 					EscapeKwFreeIdent(org),
 					EscapeKwFreeIdent(pkg),
-				),
-			},
+				);
+				if let Some(s) = sub {
+					for segment in s.split("::") {
+						write_sql!(f, fmt, "::{}", EscapeKwFreeIdent(segment));
+					}
+				}
+			}
 		}
 		write_sql!(f, fmt, "({})", Fmt::comma_separated(self.arguments.iter().map(CoverStmts)))
 	}

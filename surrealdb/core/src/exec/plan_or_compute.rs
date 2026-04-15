@@ -331,8 +331,8 @@ pub(crate) fn block_required_context(block: &Block) -> ContextLevel {
 /// Determine the minimum [`ContextLevel`] required by an [`InfoStatement`].
 fn info_stmt_required_context(info: &InfoStatement) -> ContextLevel {
 	match info {
-		InfoStatement::Root(_) => ContextLevel::Root,
-		InfoStatement::Ns(_) => ContextLevel::Namespace,
+		InfoStatement::Root(_, _) => ContextLevel::Root,
+		InfoStatement::Ns(_, _) => ContextLevel::Namespace,
 		InfoStatement::Db(_, _) | InfoStatement::Tb(_, _, _) | InfoStatement::Index(_, _, _) => {
 			ContextLevel::Database
 		}

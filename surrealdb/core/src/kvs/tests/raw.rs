@@ -10,7 +10,7 @@ pub async fn initialise(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test", &"ok".as_bytes().to_vec(), None).await.unwrap();
+	tx.put(&"test", &"ok".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 }
 
@@ -20,7 +20,7 @@ pub async fn exists(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test", &"ok".as_bytes().to_vec(), None).await.unwrap();
+	tx.put(&"test", &"ok".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
@@ -37,7 +37,7 @@ pub async fn get(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test", &"ok".as_bytes().to_vec(), None).await.unwrap();
+	tx.put(&"test", &"ok".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
@@ -54,7 +54,7 @@ pub async fn set(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(&"test", &"one".as_bytes().to_vec(), None).await.unwrap();
+	tx.set(&"test", &"one".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
@@ -63,7 +63,7 @@ pub async fn set(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(&"test", &"two".as_bytes().to_vec(), None).await.unwrap();
+	tx.set(&"test", &"two".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
@@ -78,7 +78,7 @@ pub async fn put(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test", &"one".as_bytes().to_vec(), None).await.unwrap();
+	tx.put(&"test", &"one".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
@@ -87,7 +87,7 @@ pub async fn put(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	assert!(tx.put(&"test", &"two".as_bytes().to_vec(), None).await.is_err());
+	assert!(tx.put(&"test", &"two".as_bytes().to_vec()).await.is_err());
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
@@ -102,7 +102,7 @@ pub async fn putc(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test", &"one".as_bytes().to_vec(), None).await.unwrap();
+	tx.put(&"test", &"one".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
@@ -139,7 +139,7 @@ pub async fn del(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test", &"one".as_bytes().to_vec(), None).await.unwrap();
+	tx.put(&"test", &"one".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
@@ -158,7 +158,7 @@ pub async fn delc(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test", &"one".as_bytes().to_vec(), None).await.unwrap();
+	tx.put(&"test", &"one".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
@@ -186,11 +186,11 @@ pub async fn keys(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test1", &"1".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test2", &"2".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test3", &"3".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test4", &"4".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test5", &"5".as_bytes().to_vec(), None).await.unwrap();
+	tx.put(&"test1", &"1".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test2", &"2".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test3", &"3".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test4", &"4".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test5", &"5".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
@@ -224,11 +224,11 @@ pub async fn keysr(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test1", &"1".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test2", &"2".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test3", &"3".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test4", &"4".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test5", &"5".as_bytes().to_vec(), None).await.unwrap();
+	tx.put(&"test1", &"1".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test2", &"2".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test3", &"3".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test4", &"4".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test5", &"5".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
@@ -262,11 +262,11 @@ pub async fn scan(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test1", &"1".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test2", &"2".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test3", &"3".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test4", &"4".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test5", &"5".as_bytes().to_vec(), None).await.unwrap();
+	tx.put(&"test1", &"1".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test2", &"2".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test3", &"3".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test4", &"4".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test5", &"5".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
@@ -309,11 +309,11 @@ pub async fn scanr(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test1", &"1".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test2", &"2".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test3", &"3".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test4", &"4".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test5", &"5".as_bytes().to_vec(), None).await.unwrap();
+	tx.put(&"test1", &"1".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test2", &"2".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test3", &"3".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test4", &"4".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test5", &"5".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
@@ -356,11 +356,11 @@ pub async fn skip(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test1", &"1".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test2", &"2".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test3", &"3".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test4", &"4".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test5", &"5".as_bytes().to_vec(), None).await.unwrap();
+	tx.put(&"test1", &"1".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test2", &"2".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test3", &"3".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test4", &"4".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test5", &"5".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Test keys with skip 2
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();
@@ -425,11 +425,11 @@ pub async fn batch(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Create a writeable transaction
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.put(&"test1", &"1".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test2", &"2".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test3", &"3".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test4", &"4".as_bytes().to_vec(), None).await.unwrap();
-	tx.put(&"test5", &"5".as_bytes().to_vec(), None).await.unwrap();
+	tx.put(&"test1", &"1".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test2", &"2".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test3", &"3".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test4", &"4".as_bytes().to_vec()).await.unwrap();
+	tx.put(&"test5", &"5".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await.unwrap();

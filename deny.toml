@@ -62,7 +62,11 @@ yanked = "warn"
 #   see https://github.com/RustCrypto/RSA/issues/19#issuecomment-1822995643 for more information
 # - for RUSTSEC-2024-0436, paste is now unmaintained and archived, but we only use paste in tests
 #   so we could wait for ${concat(...)} metavariable expressions (issue #124225) to stabilize
-ignore = ["RUSTSEC-2025-0134", "RUSTSEC-2025-0141", "RUSTSEC-2023-0071", "RUSTSEC-2024-0436"]
+# - for RUSTSEC-2026-0097, rand ThreadRng unsoundness under a narrow combination (custom log
+#   handler calling thread_rng while reseeding). Transitive rand 0.7/0.8 remain via surrealdb-tikv-client
+#   (fail, direct rand dep) and other crates on rand 0.8 until those dependencies move to rand
+#   >=0.9.3 or >=0.10.1. The lockfile uses rand 0.9.3 where the 0.9 series is selected.
+ignore = ["RUSTSEC-2025-0134", "RUSTSEC-2025-0141", "RUSTSEC-2023-0071", "RUSTSEC-2024-0436", "RUSTSEC-2026-0097"]
 
 # --------------------------------------------------
 # LICENSES
@@ -178,6 +182,11 @@ expression = "BUSL-1.1"
 license-files = []
 
 # Specify overrides for crates where licenses are hard to guess.
+
+[[licenses.clarify]]
+name = "tokio-tungstenite-wasm"
+expression = "MIT"
+license-files = []
 
 [[licenses.clarify]]
 name = "aws-lc-sys"

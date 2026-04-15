@@ -246,6 +246,14 @@ pub async fn init<
 	let canceller = CancellationToken::new();
 	// Start the datastore
 	let datastore = Arc::new(dbs::init::<C>(composer, &config, canceller.clone(), dbs).await?);
+	// Eagerly load surrealism modules in the background unless opted out
+	#[cfg(feature = "surrealism")]
+	if !datastore.is_lazy_surrealism() {
+		let ds = datastore.clone();
+		tokio::spawn(async move {
+			ds.eager_load_surrealism_modules().await;
+		});
+	}
 	// Register datastore metrics
 	register_datastore_metrics(datastore.clone());
 	// Start the node agent

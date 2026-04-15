@@ -147,29 +147,26 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			let config = test.config.clone();
 
 			// Ensure this test can run on this version.
-			if let Some(version_req) = config.test.as_ref().and_then(|x| x.version.as_ref()) {
-				if !version_req.matches(&core_version) {
-					return None;
-				}
+			if let Some(version_req) = config.test.as_ref().and_then(|x| x.version.as_ref())
+				&& !version_req.matches(&core_version)
+			{
+				return None;
 			}
 
 			// Ensure this test imports can run on this version as specified by the test itself.
 			if let Some(version_req) =
 				config.test.as_ref().and_then(|x| x.importing_version.as_ref())
-			{
-				if !version_req.matches(&core_version) {
-					return None;
-				}
+			&& !version_req.matches(&core_version) {
+				return None;
 			}
 
 			// Ensure this test imports can run on this version as specified by the imports.
 			for import in test.imports.iter() {
 				if let Some(version_req) =
 					subset[import.id].config.test.as_ref().and_then(|x| x.version.as_ref())
+					&& !version_req.matches(&core_version)
 				{
-					if !version_req.matches(&core_version) {
-						return None;
-					}
+					return None;
 				}
 			}
 
@@ -393,7 +390,7 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 				.map(Duration::from_millis)
 				.unwrap_or(Duration::MAX)
 		})
-		.unwrap_or(Duration::from_secs(3));
+		.unwrap_or(Duration::from_millis(crate::tests::schema::DEFAULT_TIMEOUT_MS));
 
 	let backend = context.backend;
 	let strategy = context.strategy.clone();
@@ -401,8 +398,8 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 		.ds
 		.with(
 			move |ds| {
-				ds.with_capabilities(capabilities)
-					.with_query_timeout(Some(context_timeout_duration))
+				Box::new(ds.with_capabilities(capabilities)
+					.with_query_timeout(Some(context_timeout_duration)))
 			},
 			async |ds| {
 				run_test_with_dbs(context.id, &context.testset, ds, backend, strategy.clone()).await
@@ -424,6 +421,24 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 		.expect("result channel quit early");
 
 	Ok(())
+}
+
+/// Checks for keys retained in the datastore after clean up which should not be there.
+async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
+	const ALLOWED_KEY_PREFIXES: &[&[u8]] = &[b"/!ni", b"/!nh", b"/!nd", b"/!ic"];
+
+	let txn = dbs
+		.transaction(
+			surrealdb_core::kvs::TransactionType::Read,
+			surrealdb_core::kvs::LockType::Pessimistic,
+		)
+		.await?;
+	let res = txn.keys(vec![0]..vec![0xff], 1000, 0, None).await?;
+	txn.cancel().await?;
+	Ok(res
+		.into_iter()
+		.filter(|key| !ALLOWED_KEY_PREFIXES.iter().any(|allowed| key.starts_with(allowed)))
+		.collect())
 }
 
 async fn run_test_with_dbs(
@@ -452,7 +467,7 @@ async fn run_test_with_dbs(
 		.env
 		.as_ref()
 		.map(|x| x.timeout(Some(&backend_str)).map(Duration::from_millis).unwrap_or(Duration::MAX))
-		.unwrap_or(Duration::from_secs(2));
+		.unwrap_or(Duration::from_millis(crate::tests::schema::DEFAULT_TIMEOUT_MS));
 
 	let mut import_session = Session::owner();
 	dbs.process_use(None, &mut import_session, session.ns.clone(), session.db.clone()).await?;
@@ -496,22 +511,20 @@ async fn run_test_with_dbs(
 		}
 	}
 
-	if let Some(signup_vars) = config.env.as_ref().and_then(|x| x.signup.as_ref()) {
-		if let Err(e) =
+	if let Some(signup_vars) = config.env.as_ref().and_then(|x| x.signup.as_ref())
+		&& let Err(e) =
 			surrealdb_core::iam::signup::signup(dbs, &mut session, signup_vars.0.clone().into())
 				.await
 		{
 			return Ok(TestTaskResult::SignupError(e));
-		}
 	}
 
-	if let Some(signin_vars) = config.env.as_ref().and_then(|x| x.signin.as_ref()) {
-		if let Err(e) =
+	if let Some(signin_vars) = config.env.as_ref().and_then(|x| x.signin.as_ref())
+		&& let Err(e) =
 			surrealdb_core::iam::signin::signin(dbs, &mut session, signin_vars.0.clone().into())
 				.await
 		{
 			return Ok(TestTaskResult::SigninError(e));
-		}
 	}
 
 	let source = &set[id].source;
@@ -598,6 +611,15 @@ async fn run_test_with_dbs(
 		)
 		.await
 		.context("failed to remove root config")?;
+	}
+
+	// If the test was not a clean test it should ensure that the datastore is reset for the next
+	// test.
+	if !set[id].config.env.as_ref().map(|x| x.clean).unwrap_or(false) {
+		let keys = check_retained_keys(dbs).await?;
+		if !keys.is_empty() {
+			return Ok(TestTaskResult::BadCleanup(keys));
+		}
 	}
 
 	match result {

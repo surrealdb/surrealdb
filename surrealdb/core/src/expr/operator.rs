@@ -202,6 +202,7 @@ impl ToSql for AssignOperator {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 #[allow(dead_code)]
 pub enum BindingPower {
+	Nullish,
 	Or,
 	And,
 	Equality,
@@ -210,7 +211,6 @@ pub enum BindingPower {
 	MulDiv,
 	Power,
 	Range,
-	Nullish,
 	Prefix,
 	Postfix,
 	Prime,

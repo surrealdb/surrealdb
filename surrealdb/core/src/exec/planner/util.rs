@@ -832,15 +832,15 @@ pub(crate) const SELECT_ITERATION_PARAMS: &[&str] = &["this", "self", "parent"];
 /// Resolve a single parameter to its value at plan time.
 ///
 /// Resolution order:
-/// 1. Context values (LET bindings, client bind parameters, session params)
-/// 2. Row-scoped guard (skip params whose values change per-row)
+/// 1. Row-scoped guard (skip params whose values change per-row)
+/// 2. Context values (LET bindings, client bind parameters, session params)
 /// 3. DEFINE PARAM values with `Permission::Full` from the transaction store
 ///
-/// Context values are checked first so that `LET` bindings shadow the
-/// row-scoped guard. The `row_scoped` set is caller-provided so that
-/// different planning contexts can guard the appropriate params (e.g.
-/// SELECT iteration guards `$this`/`$self`/`$parent`; a future LIVE query
-/// planner would additionally guard `$event`/`$before`/`$after`/`$value`).
+/// Row-scoped params (`$this`, `$self`, `$parent`) are bound per-row at
+/// execution time (e.g. `$parent` by `ScalarSubquery`, `$this`/`$self` by
+/// per-row evaluation). They must never be folded at plan time, even when
+/// a `LET` binding shadows the name, because the runtime binding takes
+/// precedence.
 ///
 /// DEFINE PARAMs with `Permission::None` or `Permission::Specific` are left
 /// for runtime resolution where the full permission machinery is available.
@@ -850,15 +850,15 @@ pub(super) async fn resolve_param_value(
 	ns_db: Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)>,
 	row_scoped: &[&str],
 ) -> Option<crate::val::Value> {
-	if let Some(value) = ctx.value(name) {
-		return Some(value.clone());
-	}
 	if row_scoped.contains(&name) {
 		return None;
 	}
+	if let Some(value) = ctx.value(name) {
+		return Some(value.clone());
+	}
 	if let Some((ns, db)) = ns_db
 		&& let Some(txn) = ctx.try_tx()
-		&& let Ok(param_def) = txn.get_db_param(ns, db, name).await
+		&& let Ok(param_def) = txn.get_db_param(ns, db, name, None).await
 		&& matches!(param_def.permissions, crate::catalog::Permission::Full)
 	{
 		return Some(param_def.value.clone());
@@ -870,14 +870,9 @@ pub(super) async fn resolve_param_value(
 /// values. Returns a new `Cond` with `Expr::Param` nodes replaced by
 /// `Expr::Literal` wherever the value is available.
 ///
-/// Resolution order for each parameter:
-/// 1. Context values (`LET` bindings, client bind parameters, session params)
-/// 2. Database-level defined parameters (`DEFINE PARAM`) via the transaction store, when `ns_db`
-///    IDs are provided.
-///
-/// `row_scoped` names are skipped during DEFINE PARAM fallback (step 2) since
-/// their values change per-row at runtime. Callers provide the appropriate
-/// set for their planning context (e.g. [`SELECT_ITERATION_PARAMS`]).
+/// Delegates to [`resolve_param_value`] per parameter. Row-scoped names
+/// (e.g. [`SELECT_ITERATION_PARAMS`]) are never resolved; all other params
+/// are looked up first in the context, then as `DEFINE PARAM` values.
 ///
 /// Parameters that cannot be resolved are left as-is.
 pub(crate) async fn resolve_condition_params(

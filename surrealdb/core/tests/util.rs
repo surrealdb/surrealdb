@@ -9,7 +9,7 @@ macro_rules! assert_empty_val {
 #[expect(unused_macros)]
 macro_rules! assert_empty_prefix {
 	($tx:expr, $rng:expr) => {{
-		let r = $tx.getp($rng).await?;
+		let r = $tx.getp($rng, None).await?;
 		assert!(r.is_empty());
 	}};
 }

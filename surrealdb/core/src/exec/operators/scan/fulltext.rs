@@ -3,12 +3,14 @@
 //! This operator retrieves records using full-text search indexes,
 //! supporting the MATCHES operator with BM25 or VS scoring.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use reblessive::TreeStack;
 
 use super::common::fetch_and_filter_records_batch;
+use super::pipeline::{ScanPipeline, build_field_state};
 use super::resolved::ResolvedTableContext;
 use crate::catalog::Index;
 use crate::err::Error;
@@ -55,6 +57,10 @@ pub struct FullTextScan {
 	/// Plan-time resolved table context. When present, `execute()` skips
 	/// runtime table def + permission lookup.
 	pub(crate) resolved: Option<ResolvedTableContext>,
+	/// Projection-aware field set for computed-field materialization.
+	/// Outer `None` = sub-operator mode (parent handles fields).
+	/// `Some(None)` = all fields, `Some(Some(set))` = specific fields.
+	pub(crate) needed_fields: Option<Option<HashSet<String>>>,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -66,6 +72,7 @@ impl FullTextScan {
 		operator: MatchesOperator,
 		table_name: crate::val::TableName,
 		version: Option<Arc<dyn PhysicalExpr>>,
+		needed_fields: Option<Option<HashSet<String>>>,
 	) -> Self {
 		Self {
 			index_ref,
@@ -74,6 +81,7 @@ impl FullTextScan {
 			table_name,
 			version,
 			resolved: None,
+			needed_fields,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -127,6 +135,7 @@ impl ExecOperator for FullTextScan {
 		let table_name = self.table_name.clone();
 		let version_expr = self.version.clone();
 		let resolved = self.resolved.clone();
+		let needed_fields = self.needed_fields.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -144,10 +153,10 @@ impl ExecOperator for FullTextScan {
 					Some(
 						v.cast_to::<crate::val::Datetime>()
 							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp()?,
+							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// Get the FrozenContext and Options from the root context
@@ -160,7 +169,7 @@ impl ExecOperator for FullTextScan {
 				res.select_permission(check_perms)
 			} else if check_perms {
 				let table_def = db_ctx
-					.get_table_def(&table_name)
+					.get_table_def(&table_name, version)
 					.await
 					.context("Failed to get table")?;
 
@@ -180,6 +189,33 @@ impl ExecOperator for FullTextScan {
 			if matches!(select_permission, PhysicalPermission::Deny) {
 				return;
 			}
+
+			// Resolve field state for computed fields and field-level
+			// permissions. When needed_fields is None (sub-operator mode),
+			// the parent operator handles field processing.
+			let field_state = match &needed_fields {
+				Some(nf) => {
+					if let Some(ref res) = resolved {
+						res.field_state_for_projection(nf.as_ref())
+					} else {
+						build_field_state(
+							&ctx, &table_name, check_perms, nf.as_ref(),
+						).await?
+					}
+				}
+				None => super::pipeline::FieldState::empty(),
+			};
+
+			// Table-level permissions are handled by fetch_and_filter_records_batch.
+			// The pipeline handles computed fields and field-level permissions.
+			let mut pipeline = ScanPipeline::new(
+				PhysicalPermission::Allow,
+				None,
+				field_state,
+				check_perms,
+				None,
+				0,
+			);
 
 			// Get the FullText index parameters from the index definition
 			let index_def = index_ref.definition();
@@ -248,7 +284,7 @@ impl ExecOperator for FullTextScan {
 						rid_batch.push(rid);
 
 						if rid_batch.len() >= BATCH_SIZE {
-							let values = fetch_and_filter_records_batch(
+							let mut values = fetch_and_filter_records_batch(
 								&ctx,
 								&txn,
 								ns.namespace_id,
@@ -259,6 +295,7 @@ impl ExecOperator for FullTextScan {
 								version,
 								CachePolicy::ReadOnly,
 							).await?;
+							pipeline.process_batch(&mut values, &ctx).await?;
 							if !values.is_empty() {
 								yield ValueBatch { values };
 							}
@@ -274,7 +311,7 @@ impl ExecOperator for FullTextScan {
 
 			// Yield any remaining records
 			if !rid_batch.is_empty() {
-				let values = fetch_and_filter_records_batch(
+				let mut values = fetch_and_filter_records_batch(
 					&ctx,
 					&txn,
 					ns.namespace_id,
@@ -285,6 +322,7 @@ impl ExecOperator for FullTextScan {
 					version,
 					CachePolicy::ReadOnly,
 				).await?;
+				pipeline.process_batch(&mut values, &ctx).await?;
 				if !values.is_empty() {
 					yield ValueBatch { values };
 				}

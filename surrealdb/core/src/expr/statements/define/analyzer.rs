@@ -92,7 +92,7 @@ impl DefineAnalyzerStatement {
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
-		if txn.get_db_analyzer(ns, db, &definition.name).await.is_ok() {
+		if txn.get_db_analyzer(ns, db, &definition.name, None).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -108,7 +108,7 @@ impl DefineAnalyzerStatement {
 		// Process the statement
 		let key = crate::key::database::az::new(ns, db, &definition.name);
 		ctx.get_index_stores().mappers().load(&definition).await?;
-		txn.set(&key, &definition, None).await?;
+		txn.set(&key, &definition).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

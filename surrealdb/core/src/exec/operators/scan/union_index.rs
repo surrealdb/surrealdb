@@ -191,6 +191,7 @@ impl ExecOperator for UnionIndexScan {
 
 		let stream: ValueBatchStream = Box::pin(async_stream::try_stream! {
 			let db_ctx = ctx.database().context("UnionIndexScan requires database context")?;
+			let version = ctx.version_stamp();
 
 			// Resolve table permissions and field state: plan-time fast path or runtime fallback
 			let (select_permission, field_state) = if let Some(ref res) = resolved {
@@ -200,7 +201,7 @@ impl ExecOperator for UnionIndexScan {
 			} else {
 				// Check table existence and resolve SELECT permission
 				let table_def = db_ctx
-					.get_table_def(&table_name)
+					.get_table_def(&table_name, version)
 					.await
 					.context("Failed to get table")?;
 

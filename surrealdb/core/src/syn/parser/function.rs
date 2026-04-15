@@ -33,7 +33,12 @@ impl Parser<'_> {
 				expected!(self, t!("::"));
 				let name = self.parse_ident()?;
 				let sub = if self.eat(t!("::")) {
-					Some(self.parse_ident()?)
+					let mut sub = self.parse_ident()?;
+					while self.eat(t!("::")) {
+						sub.push_str("::");
+						sub.push_str(self.parse_ident_str()?);
+					}
+					Some(sub)
 				} else {
 					None
 				};
@@ -61,7 +66,12 @@ impl Parser<'_> {
 				let patch = self.parse_version_digits()?;
 				expected!(self, t!(">"));
 				let sub = if self.eat(t!("::")) {
-					Some(self.parse_ident()?)
+					let mut sub = self.parse_ident()?;
+					while self.eat(t!("::")) {
+						sub.push_str("::");
+						sub.push_str(self.parse_ident_str()?);
+					}
+					Some(sub)
 				} else {
 					None
 				};
@@ -158,7 +168,12 @@ impl Parser<'_> {
 		expected!(self, t!("::"));
 		let name = self.parse_ident()?;
 		let sub = if self.eat(t!("::")) {
-			Some(self.parse_ident()?)
+			let mut sub = self.parse_ident()?;
+			while self.eat(t!("::")) {
+				sub.push_str("::");
+				sub.push_str(self.parse_ident_str()?);
+			}
+			Some(sub)
 		} else {
 			None
 		};
@@ -195,7 +210,12 @@ impl Parser<'_> {
 		let patch = self.parse_version_digits()?;
 		expected!(self, t!(">"));
 		let sub = if self.eat(t!("::")) {
-			Some(self.parse_ident()?)
+			let mut sub = self.parse_ident()?;
+			while self.eat(t!("::")) {
+				sub.push_str("::");
+				sub.push_str(self.parse_ident_str()?);
+			}
+			Some(sub)
 		} else {
 			None
 		};

@@ -419,12 +419,22 @@ impl Parser<'_> {
 		let next = self.next();
 		let stmt = match next.kind {
 			t!("ROOT") => {
+				let version = if self.eat(t!("VERSION")) {
+					Some(stk.run(|stk| self.parse_expr_inherit(stk)).await?)
+				} else {
+					None
+				};
 				let structure = self.eat(t!("STRUCTURE"));
-				InfoStatement::Root(structure)
+				InfoStatement::Root(structure, version)
 			}
 			t!("NAMESPACE") => {
+				let version = if self.eat(t!("VERSION")) {
+					Some(stk.run(|stk| self.parse_expr_inherit(stk)).await?)
+				} else {
+					None
+				};
 				let structure = self.eat(t!("STRUCTURE"));
-				InfoStatement::Ns(structure)
+				InfoStatement::Ns(structure, version)
 			}
 			t!("DATABASE") => {
 				let version = if self.eat(t!("VERSION")) {

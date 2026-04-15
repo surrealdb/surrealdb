@@ -29,7 +29,11 @@ impl Parser<'_> {
 		if self.eat(t!("VALUE")) {
 			let expr = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 			let alias = if self.eat(t!("AS")) {
-				Some(self.parse_basic_idiom()?)
+				// When using `SELECT VALUE ... AS ...`, only parse an alias if it is a valid
+				// identifier. It does not make sense to alias as a multi-part idiom because the
+				// alias will be not be projected.
+				let ident = self.parse_ident()?;
+				Some(Idiom(vec![Part::Field(ident)]))
 			} else {
 				None
 			};
@@ -661,14 +665,15 @@ impl Parser<'_> {
 			}
 			t!("(") => {
 				let span = self.pop_peek().span;
-				let expr = if self.eat(t!("SELECT")) {
+				let (expr, only) = if self.eat(t!("SELECT")) {
 					let before = self.peek().span;
 					let expr = self.parse_fields(stk).await?;
 					let fields_span = before.covers(self.last_span());
 					expected!(self, t!("FROM"));
-					Some((expr, fields_span))
+					let only = self.eat(t!("ONLY"));
+					(Some((expr, fields_span)), only)
 				} else {
-					None
+					(None, false)
 				};
 
 				let token = self.peek();
@@ -720,10 +725,11 @@ impl Parser<'_> {
 
 				Ok(Lookup {
 					kind: lookup_kind,
+					expr: expr.map(|(x, _)| x),
+					only,
 					what,
 					cond,
 					alias,
-					expr: expr.map(|(x, _)| x),
 					split,
 					group,
 					order,

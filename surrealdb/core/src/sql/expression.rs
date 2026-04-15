@@ -114,9 +114,7 @@ impl Expr {
 				Expr::Literal(Literal::Array(x.into_iter().map(Expr::from_public_value).collect()))
 			}
 			PublicValue::Set(x) => {
-				// Convert set to array for literal representation since there's no set literal
-				// syntax
-				Expr::Literal(Literal::Array(x.into_iter().map(Expr::from_public_value).collect()))
+				Expr::Literal(Literal::Set(x.into_iter().map(Expr::from_public_value).collect()))
 			}
 			PublicValue::Object(x) => Expr::Literal(Literal::Object(
 				x.into_iter()

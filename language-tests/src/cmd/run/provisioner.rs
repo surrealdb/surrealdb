@@ -62,27 +62,30 @@ impl CreateInfo {
 		})
 	}
 
-	pub async fn produce_ds(&self, versioned: bool) -> Result<(Datastore, Option<String>)> {
+	pub async fn produce_ds(&self, versioned: bool) -> Result<(Box<Datastore>, Option<String>)> {
 		let mut path = None;
 		let ds = match self.backend {
 			Backend::Memory => {
-				let ds = if versioned {
-					Datastore::new("mem://?versioned=true").await?
+				if versioned {
+					Datastore::new("mem://?versioned=true&retention=1h").await?
 				} else {
 					Datastore::new("mem://").await?
-				};
-				ds
+				}
 			}
 			Backend::RocksDb => {
 				let p = self.produce_path();
-				let ds = Datastore::new(&format!("rocksdb://{p}")).await?;
+				let ds = if versioned {
+					Datastore::new(&format!("rocksdb://{p}?versioned=true&retention=1h")).await?
+				} else {
+					Datastore::new(&format!("rocksdb://{p}")).await?
+				};
 				path = Some(p);
 				ds
 			}
 			Backend::SurrealKv => {
 				let p = self.produce_path();
 				let ds = if versioned {
-					Datastore::new(&format!("surrealkv://{p}?versioned=true")).await?
+					Datastore::new(&format!("surrealkv://{p}?versioned=true&retention=1h")).await?
 				} else {
 					Datastore::new(&format!("surrealkv://{p}")).await?
 				};
@@ -104,7 +107,7 @@ impl CreateInfo {
 
 		ds.bootstrap().await?;
 
-		Ok((ds, path))
+		Ok((Box::new(ds), path))
 	}
 
 	fn produce_path(&self) -> String {
@@ -119,8 +122,8 @@ impl CreateInfo {
 
 #[must_use]
 pub struct Provisioner {
-	send: Sender<Datastore>,
-	recv: Receiver<Datastore>,
+	send: Sender<Box<Datastore>>,
+	recv: Receiver<Box<Datastore>>,
 	create_info: Arc<CreateInfo>,
 }
 
@@ -131,8 +134,8 @@ pub enum PermitError {
 
 enum PermitInner {
 	Reuse {
-		ds: Datastore,
-		channel: Sender<Datastore>,
+		ds: Box<Datastore>,
+		channel: Sender<Box<Datastore>>,
 	},
 	Create {
 		info: Arc<CreateInfo>,
@@ -140,7 +143,7 @@ enum PermitInner {
 	},
 }
 
-async fn create_base_datastore() -> Result<Datastore> {
+async fn create_base_datastore() -> Result<Box<Datastore>> {
 	let db = Datastore::new("memory")
 		.await?
 		.with_capabilities(Capabilities::all())
@@ -149,7 +152,7 @@ async fn create_base_datastore() -> Result<Datastore> {
 
 	db.bootstrap().await?;
 
-	Ok(db)
+	Ok(Box::new(db))
 }
 
 #[must_use]
@@ -158,7 +161,7 @@ pub struct Permit {
 }
 
 impl Permit {
-	pub async fn with<U: FnOnce(Datastore) -> Datastore, F: AsyncFnOnce(&mut Datastore) -> R, R>(
+	pub async fn with<U: FnOnce(Box<Datastore>) -> Box<Datastore>, F: AsyncFnOnce(&mut Box<Datastore>) -> R, R>(
 		self,
 		u: U,
 		f: F,

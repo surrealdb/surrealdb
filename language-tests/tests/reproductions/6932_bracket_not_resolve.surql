@@ -13,7 +13,7 @@ value = "[{ id: Test:2, ref: Test:1 }]"
 [[test.results]]
 value = ''''SelectProject [ctx: Db] [projections: id, ref]
     Compute [ctx: Db] [fields: ref = ref.{ id }]
-        SourceExpr [ctx: Rt] [expr: [Test:1, Test:2]]
+        SourceExpr [ctx: Db] [expr: [Test:1, Test:2]]
 ''''
 
 [[test.results]]

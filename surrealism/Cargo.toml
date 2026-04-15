@@ -1,6 +1,6 @@
 [package]
 name = "surrealism"
-version = "0.1.9"
+version = "0.2.0"
 edition.workspace = true
 authors.workspace = true
 description.workspace = true
@@ -12,10 +12,11 @@ license-file.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-thiserror.workspace = true
 surrealdb-types.workspace = true
 surrealism-macros = { workspace = true, default-features = false }
 surrealism-types = { workspace = true, default-features = false }
+wit-bindgen.workspace = true
+inventory = "0.3.22"
 
 [lints]
 workspace = true

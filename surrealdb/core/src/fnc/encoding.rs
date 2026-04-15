@@ -70,6 +70,36 @@ pub mod cbor {
 	}
 }
 
+pub mod json {
+	use anyhow::Result;
+
+	use crate::err::Error;
+	use crate::rpc::format::json;
+	use crate::val::Value;
+
+	/// Encodes a SurrealDB value to a JSON string.
+	pub fn encode((arg,): (Value,)) -> Result<Value> {
+		let public_val = crate::val::convert_value_to_public_value(arg)?;
+		let val = json::encode_str(public_val).map_err(|_| Error::InvalidFunctionArguments {
+			name: "encoding::json::encode".to_owned(),
+			message: "Value could not be encoded into JSON".to_owned(),
+		})?;
+		Ok(Value::from(val))
+	}
+
+	/// Decodes a JSON string into a SurrealDB value using an RFC 8259
+	/// compliant parser, supporting all valid JSON escape sequences.
+	pub fn decode((arg,): (String,)) -> Result<Value> {
+		let json: serde_json::Value =
+			serde_json::from_str(&arg).map_err(|_| Error::InvalidFunctionArguments {
+				name: "encoding::json::decode".to_owned(),
+				message: "Invalid JSON".to_owned(),
+			})?;
+		let public_val = crate::rpc::format::json::json_to_value(json);
+		Ok(crate::sql::expression::convert_public_value_to_internal(public_val))
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -105,5 +135,45 @@ mod tests {
 		let input = "aGVsbG8=".to_string();
 		let result = base64::decode((input,)).unwrap();
 		assert_eq!(result, Value::from(Bytes::from(b"hello".to_vec())));
+	}
+
+	#[test]
+	fn test_json_encode_string() {
+		let input = Value::from("hello");
+		let result = json::encode((input,)).unwrap();
+		assert_eq!(result, Value::from("\"hello\""));
+	}
+
+	#[test]
+	fn test_json_encode_number() {
+		let input = Value::from(42);
+		let result = json::encode((input,)).unwrap();
+		assert_eq!(result, Value::from("42"));
+	}
+
+	#[test]
+	fn test_json_decode_object() {
+		let input = r#"{"name":"test","value":42}"#.to_string();
+		let result = json::decode((input,)).unwrap();
+		match result {
+			Value::Object(_) => {}
+			other => panic!("expected object, got: {other:?}"),
+		}
+	}
+
+	#[test]
+	fn test_json_decode_array() {
+		let input = r#"[1, 2, 3]"#.to_string();
+		let result = json::decode((input,)).unwrap();
+		match result {
+			Value::Array(_) => {}
+			other => panic!("expected array, got: {other:?}"),
+		}
+	}
+
+	#[test]
+	fn test_json_decode_invalid() {
+		let input = r#"{invalid json"#.to_string();
+		assert!(json::decode((input,)).is_err());
 	}
 }
