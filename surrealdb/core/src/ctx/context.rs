@@ -1084,7 +1084,7 @@ impl Context {
 				#[cfg(feature = "http")]
 				let module_net_targets = module_allow_net_targets(&package.config.capabilities);
 				#[cfg(feature = "http")]
-				let client = if _module_net_targets.is_empty() {
+				let client = if module_net_targets.is_empty() {
 					Arc::new(
 						HttpClient::new(Targets::None, Targets::All)
 							.context("Failed to create http client for WASM module")?,
