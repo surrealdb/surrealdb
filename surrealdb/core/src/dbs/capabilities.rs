@@ -773,11 +773,9 @@ impl Capabilities {
 		self
 	}
 
-
 	pub fn denied_network_targets_ref(&self) -> &Targets<NetTarget> {
 		&self.deny_net
 	}
-
 
 	pub fn denied_network_targets_mut(&mut self) -> &mut Targets<NetTarget> {
 		&mut self.deny_net

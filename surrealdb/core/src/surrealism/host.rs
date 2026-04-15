@@ -16,11 +16,11 @@ use crate::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
 use crate::doc::CursorDoc;
 use crate::expr::function::Function;
 use crate::expr::{Expr, FlowResultExt, FunctionCall, Model};
+#[cfg(feature = "http")]
+use crate::http::HttpClient;
 use crate::syn;
 use crate::types::{PublicObject, PublicValue};
 use crate::val::convert_value_to_public_value;
-#[cfg(feature = "http")]
-use crate::http::HttpClient;
 
 pub(crate) struct Host {
 	// FIXME: We shouldn't be creating a tree stack here.
@@ -34,7 +34,7 @@ pub(crate) struct Host {
 	module_name: String,
 	#[cfg(feature = "http")]
 	/// Surrealism modules have their own http limitations so it needs it's own client.
-	http_client: Arc<HttpClient>
+	http_client: Arc<HttpClient>,
 }
 
 impl Host {
@@ -44,8 +44,7 @@ impl Host {
 		doc: Option<&CursorDoc>,
 		kv: Arc<BTreeMapStore>,
 		module_name: String,
-		#[cfg(feature = "http")]
-		http_client: Arc<HttpClient>,
+		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
 	) -> Self {
 		Self {
 			stk: TreeStack::new(),
@@ -67,12 +66,12 @@ impl Host {
 			&self.ctx.get_capabilities(),
 			&config.capabilities,
 		));
-		let ctx = Context::new_child_with_capabilities(&self.ctx,
+		Context::new_child_with_capabilities(
+			&self.ctx,
 			scoped,
 			#[cfg(feature = "http")]
-			self.http_client.clone()
-		);
-		ctx
+			self.http_client.clone(),
+		)
 	}
 }
 

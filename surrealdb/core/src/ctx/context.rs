@@ -1,24 +1,44 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
+#[cfg(storage)]
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+#[cfg(feature = "surrealism")]
+use anyhow::Context as _;
 use anyhow::{Result, bail};
 use async_channel::Sender;
+#[cfg(feature = "surrealism")]
+use surrealism_runtime::package::{SurrealismPackage, UnpackOptions};
+#[cfg(feature = "surrealism")]
+use surrealism_runtime::runtime::Runtime;
+#[cfg(feature = "http")]
+use url::Url;
 use web_time::Instant;
 
 use crate::buc::manager::BucketsManager;
+#[cfg(feature = "surrealism")]
+use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider};
 use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
+#[cfg(feature = "surrealism")]
+use crate::dbs::capabilities::ExperimentalTarget;
+#[cfg(feature = "http")]
+use crate::dbs::capabilities::NetTarget;
+#[cfg(all(feature = "http", feature = "surrealism"))]
+use crate::dbs::capabilities::Targets;
 use crate::dbs::{Capabilities, NewPlannerStrategy, Options, Session, Variables};
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
+#[cfg(feature = "http")]
+use crate::http::HttpClient;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
@@ -29,37 +49,12 @@ use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
 use crate::sql::expression::convert_public_value_to_internal;
-use crate::types::{PublicNotification, PublicVariables};
-use crate::val::Value;
-
-#[cfg(storage)]
-use std::path::PathBuf;
-
-#[cfg(feature = "surrealism")]
-use anyhow::Context as _;
-#[cfg(feature = "surrealism")]
-use surrealism_runtime::package::{SurrealismPackage, UnpackOptions};
-#[cfg(feature = "surrealism")]
-use surrealism_runtime::runtime::Runtime;
-#[cfg(feature = "http")]
-use url::Url;
-
-#[cfg(feature = "http")]
-use crate::http::HttpClient;
-#[cfg(feature = "http")]
-use crate::dbs::capabilities::NetTarget;
-
-#[cfg(feature = "surrealism")]
-use crate::buc::store::ObjectKey;
-#[cfg(feature = "surrealism")]
-use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup, SurrealismCachedModule};
 #[cfg(feature = "surrealism")]
 use crate::surrealism::host::module_allow_net_targets;
-
-#[cfg(all(feature = "http",feature = "surrealism"))]
-use crate::dbs::capabilities::Targets;
+use crate::types::{PublicNotification, PublicVariables};
+use crate::val::Value;
 
 pub type FrozenContext = Arc<Context>;
 
@@ -173,7 +168,7 @@ impl Context {
 			parent,
 			parent.capabilities.clone(),
 			#[cfg(feature = "http")]
-			parent.http_client.clone()
+			parent.http_client.clone(),
 		)
 	}
 
@@ -183,8 +178,7 @@ impl Context {
 	pub(crate) fn new_child_with_capabilities(
 		parent: &FrozenContext,
 		cap: Arc<Capabilities>,
-		#[cfg(feature = "http")]
-		http_client: Arc<HttpClient>,
+		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
 	) -> Self {
 		Context {
 			values: HashMap::default(),
@@ -419,8 +413,9 @@ impl Context {
 			http_client: Arc::new(
 				HttpClient::new(
 					crate::dbs::capabilities::Targets::All,
-					crate::dbs::capabilities::Targets::None
-				).expect("http client to be created"),
+					crate::dbs::capabilities::Targets::None,
+				)
+				.expect("http client to be created"),
 			),
 		}
 	}
@@ -1029,7 +1024,6 @@ impl Context {
 
 		cache
 			.get_or_insert_with(&lookup, async || {
-
 				let SurrealismCacheLookup::File(ns, db, bucket, key) = lookup else {
 					bail!("silo lookups are not supported yet");
 				};
@@ -1058,8 +1052,8 @@ impl Context {
 				let package =
 					SurrealismPackage::from_reader(std::io::Cursor::new(surli), &unpack_opts)?;
 
-				let module_caps = package.config.capabilities.clone();
-				self.get_capabilities().validate_surrealism_capabilities(module_caps.clone())?;
+				self.get_capabilities()
+					.validate_surrealism_capabilities(package.config.capabilities.clone())?;
 
 				let org = package.config.meta.organisation.clone();
 				let name = package.config.meta.name.clone();
@@ -1086,14 +1080,24 @@ impl Context {
 				let runtime = Arc::new(runtime);
 
 				let module_display_name: Arc<str> = format!("{org}::{name}").into();
-				let _module_net_targets = module_allow_net_targets(&module_caps);
 
 				#[cfg(feature = "http")]
-				let client = if _module_net_targets.is_empty(){
-					Arc::new(HttpClient::new(Targets::None, Targets::All).context("Failed to create http client for WASM module")?)
-				}else{
+				let module_net_targets = module_allow_net_targets(&package.config.capabilities);
+				#[cfg(feature = "http")]
+				let client = if _module_net_targets.is_empty() {
+					Arc::new(
+						HttpClient::new(Targets::None, Targets::All)
+							.context("Failed to create http client for WASM module")?,
+					)
+				} else {
 					let allow = Targets::Some(_module_net_targets);
-					Arc::new(HttpClient::new(allow, self.capabilities.denied_network_targets_ref().clone()).context("Failed to create http client for WASM module")?)
+					Arc::new(
+						HttpClient::new(
+							allow,
+							self.capabilities.denied_network_targets_ref().clone(),
+						)
+						.context("Failed to create http client for WASM module")?,
+					)
 				};
 
 				Ok(SurrealismCachedModule {

@@ -120,7 +120,7 @@ pub(crate) struct SurrealismCachedModule {
 	pub module_display_name: Arc<str>,
 	/// Http client with the right filter the module
 	#[cfg(feature = "http")]
-	pub client: Arc<HttpClient>
+	pub client: Arc<HttpClient>,
 }
 
 #[derive(Clone)]

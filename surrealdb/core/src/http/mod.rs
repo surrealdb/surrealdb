@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use anyhow::Result;
 use http::Method;
 #[cfg(not(target_family = "wasm"))]
@@ -7,7 +5,7 @@ use reqwest::redirect::{Action, Attempt};
 use reqwest::{Client, RequestBuilder};
 use url::Url;
 
-use crate::dbs::{capabilities::{NetTarget, Targets}};
+use crate::dbs::capabilities::{NetTarget, Targets};
 
 #[cfg(not(target_family = "wasm"))]
 mod resolve;
@@ -16,8 +14,8 @@ pub struct HttpClient {
 	client: Client,
 }
 
-
-struct NetFilter{
+#[cfg(not(target_family = "wasm"))]
+struct NetFilter {
 	allow: Targets<NetTarget>,
 	deny: Targets<NetTarget>,
 }
@@ -28,12 +26,17 @@ impl HttpClient {
 		Self::new_with_redirect_policy(allow, deny, |policy| policy.follow())
 	}
 
-
 	#[cfg(not(target_family = "wasm"))]
-	pub fn new_with_redirect_policy<F>(allow: Targets<NetTarget>, deny: Targets<NetTarget>, policy: F) -> Result<Self>
-		where F: Fn(Attempt) -> Action + Send + Sync + 'static
+	pub fn new_with_redirect_policy<F>(
+		allow: Targets<NetTarget>,
+		deny: Targets<NetTarget>,
+		policy: F,
+	) -> Result<Self>
+	where
+		F: Fn(Attempt) -> Action + Send + Sync + 'static,
 	{
 		use std::str::FromStr;
+		use std::sync::Arc;
 		use std::time::Duration;
 
 		use anyhow::Context as _;
@@ -45,9 +48,9 @@ impl HttpClient {
 		use crate::cnf::SURREALDB_USER_AGENT;
 		use crate::dbs::capabilities::NetTarget;
 
-		let filter = Arc::new(NetFilter{
+		let filter = Arc::new(NetFilter {
 			allow,
-			deny
+			deny,
 		});
 
 		let filter_clone = filter.clone();
@@ -66,8 +69,7 @@ impl HttpClient {
 				Err(e) => return attempt.error(e),
 			};
 
-			if !filter_clone.allow.matches(&target) || filter_clone.deny.matches(&target)
-			{
+			if !filter_clone.allow.matches(&target) || filter_clone.deny.matches(&target) {
 				let url = url.to_string();
 				return attempt.error(crate::err::Error::NetTargetNotAllowed(url));
 			}
@@ -99,8 +101,9 @@ impl HttpClient {
 	}
 
 	#[cfg(target_family = "wasm")]
-	pub fn new(capabilities: Arc<Capabilities>) -> Result<Self> {
-		let _ = capabilities;
+	pub fn new(allow: Targets<NetTarget>, deny: Targets<NetTarget>) -> Result<Self> {
+		let _ = allow;
+		let _ = deny;
 		let client = Client::builder().build()?;
 		Ok(HttpClient {
 			client,

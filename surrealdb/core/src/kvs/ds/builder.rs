@@ -167,7 +167,8 @@ impl Builder {
 		dynamic_configuration.set_query_timeout(self.query_timeout);
 		#[cfg(feature = "http")]
 		let http_client = Arc::new(
-			HttpClient::new(capabilities.allow_net.clone(), capabilities.deny_net.clone()).context("Could not create http client")?,
+			HttpClient::new(capabilities.allow_net.clone(), capabilities.deny_net.clone())
+				.context("Could not create http client")?,
 		);
 
 		Ok(Datastore {

@@ -6,9 +6,8 @@ use ipnet::IpNet;
 use reqwest::dns::{Addrs, Name, Resolve, Resolving};
 use tokio::net::lookup_host;
 
-use crate::dbs::capabilities::{NetTarget};
 use super::NetFilter;
-
+use crate::dbs::capabilities::NetTarget;
 
 pub struct FilteringResolver {
 	pub filter: Arc<NetFilter>,
@@ -17,7 +16,7 @@ pub struct FilteringResolver {
 impl FilteringResolver {
 	pub fn from_net_filter(filter: Arc<NetFilter>) -> Self {
 		FilteringResolver {
-			filter
+			filter,
 		}
 	}
 }
