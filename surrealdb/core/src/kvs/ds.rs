@@ -2198,30 +2198,6 @@ impl Datastore {
 		convert_value_to_public_value(res?)
 	}
 
-	// Subscribe to live notifications
-	//
-	// ```rust,no_run
-	// use surrealdb_core::kvs::Datastore;
-	// use surrealdb_core::dbs::Session;
-	// use anyhow::Error;
-	//
-	// #[tokio::main]
-	// async fn main() -> Result<(),Error> {
-	//     let ds = Datastore::new("memory").await?.with_notifications();
-	//     let ses = Session::owner();
-	// 	if let Some(channel) = ds.notifications() {
-	//     	while let Ok(v) = channel.recv().await {
-	//     	    println!("Received notification: {v:?}");
-	//     	}
-	// 	}
-	//     Ok(())
-	// }
-	// ```
-	//#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	//pub fn notifications(&self) -> Option<Receiver<PublicNotification>> {
-	//self.notification_channel.as_ref().map(|v| v.1.clone())
-	//}
-
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
