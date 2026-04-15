@@ -248,7 +248,7 @@ impl Document {
 							};
 
 							// Set the `$reference` variable in the context
-							let mut ctx = Context::new(ctx);
+							let mut ctx = Context::new_child(ctx);
 							ctx.add_value("reference", reference.into());
 							let ctx = ctx.freeze();
 

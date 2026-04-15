@@ -12,9 +12,10 @@ use super::classes::Headers;
 use crate::fnc::script::fetch::RequestError;
 use crate::fnc::script::fetch::body::{Body, BodyData, BodyKind};
 use crate::fnc::script::fetch::classes::{
-	Request, RequestInit, Response, ResponseInit, ResponseType,
+	Request, RequestInit, RequestRedirect, Response, ResponseInit, ResponseType
 };
 use crate::fnc::script::modules::surrealdb::query::QueryContext;
+use crate::http::HttpClient;
 
 #[js::function]
 pub async fn fetch<'js>(
@@ -47,7 +48,23 @@ pub async fn fetch<'js>(
 	let headers = headers.borrow();
 	let mut headers = headers.inner.clone();
 
-	let client = query_ctx.http_client();
+	let client = match js_req.init.request_redirect {
+		RequestRedirect::Follow => query_ctx.http_client(),
+		RequestRedirect::Error => {
+			let cap  =query_ctx.get_capabilities();
+			Arc::new(
+				HttpClient::new_with_redirect_policy(cap.allow_net.clone(),cap.allow_net.clone(),|attempt| attempt.error("unexpected redirect"))
+				.map_err(|e| Exception::throw_internal(&ctx, &format!("Could not initialize http client: {e}")))?
+			)
+		}
+		RequestRedirect::Manual => {
+			let cap = query_ctx.get_capabilities();
+			Arc::new(
+				HttpClient::new_with_redirect_policy(cap.allow_net.clone(),cap.allow_net.clone(),|attempt| attempt.stop())
+					.map_err(|e| Exception::throw_internal(&ctx, &format!("Could not initialize http client: {e}")))?
+			)
+		}
+	};
 
 	let mut req_builder = client.request(js_req.init.method, url.clone());
 	// Set the body for the request.

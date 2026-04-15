@@ -1,40 +1,24 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
-#[cfg(storage)]
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Result, bail};
 use async_channel::Sender;
-#[cfg(feature = "surrealism")]
-use surrealism_runtime::package::{SurrealismPackage, UnpackOptions};
-#[cfg(feature = "surrealism")]
-use surrealism_runtime::runtime::Runtime;
-#[cfg(feature = "http")]
-use url::Url;
 use web_time::Instant;
 
 use crate::buc::manager::BucketsManager;
-#[cfg(feature = "surrealism")]
-use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider};
 use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
-#[cfg(feature = "surrealism")]
-use crate::dbs::capabilities::ExperimentalTarget;
-#[cfg(feature = "http")]
-use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, NewPlannerStrategy, Options, Session, Variables};
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
-#[cfg(feature = "http")]
-use crate::http::HttpClient;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
@@ -45,12 +29,37 @@ use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
 use crate::sql::expression::convert_public_value_to_internal;
+use crate::types::{PublicNotification, PublicVariables};
+use crate::val::Value;
+
+#[cfg(storage)]
+use std::path::PathBuf;
+
+#[cfg(feature = "surrealism")]
+use anyhow::Context as _;
+#[cfg(feature = "surrealism")]
+use surrealism_runtime::package::{SurrealismPackage, UnpackOptions};
+#[cfg(feature = "surrealism")]
+use surrealism_runtime::runtime::Runtime;
+#[cfg(feature = "http")]
+use url::Url;
+
+#[cfg(feature = "http")]
+use crate::http::HttpClient;
+#[cfg(feature = "http")]
+use crate::dbs::capabilities::NetTarget;
+
+#[cfg(feature = "surrealism")]
+use crate::buc::store::ObjectKey;
+#[cfg(feature = "surrealism")]
+use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup, SurrealismCachedModule};
 #[cfg(feature = "surrealism")]
 use crate::surrealism::host::module_allow_net_targets;
-use crate::types::{PublicNotification, PublicVariables};
-use crate::val::Value;
+
+#[cfg(all(feature = "http",feature = "surrealism"))]
+use crate::dbs::capabilities::Targets;
 
 pub type FrozenContext = Arc<Context>;
 
@@ -158,8 +167,25 @@ impl Context {
 		}
 	}
 
-	/// Creates a new context from a frozen parent context.
-	pub(crate) fn new(parent: &FrozenContext) -> Self {
+	/// Creates a new child context from a frozen parent context.
+	pub(crate) fn new_child(parent: &FrozenContext) -> Self {
+		Self::new_child_with_capabilities(
+			parent,
+			parent.capabilities.clone(),
+			#[cfg(feature = "http")]
+			parent.http_client.clone()
+		)
+	}
+
+	/// Creates a new context from a frozen parent context with a given capabilities.
+	///
+	/// Make sure that the capabilities and http_client were created with the same capabilities.
+	pub(crate) fn new_child_with_capabilities(
+		parent: &FrozenContext,
+		cap: Arc<Capabilities>,
+		#[cfg(feature = "http")]
+		http_client: Arc<HttpClient>,
+	) -> Self {
 		Context {
 			values: HashMap::default(),
 			deadline: parent.deadline,
@@ -169,7 +195,7 @@ impl Context {
 			query_planner: parent.query_planner.clone(),
 			query_executor: parent.query_executor.clone(),
 			iteration_stage: parent.iteration_stage.clone(),
-			capabilities: parent.capabilities.clone(),
+			capabilities: cap,
 			index_stores: parent.index_stores.clone(),
 			cache: parent.cache.clone(),
 			index_builder: parent.index_builder.clone(),
@@ -188,7 +214,7 @@ impl Context {
 			matches_context: parent.matches_context.clone(),
 			knn_context: parent.knn_context.clone(),
 			#[cfg(feature = "http")]
-			http_client: parent.http_client.clone(),
+			http_client,
 		}
 	}
 
@@ -362,7 +388,6 @@ impl Context {
 	/// Create a context for tests only
 	#[cfg(test)]
 	pub(crate) fn new_test() -> Context {
-		let capabilities = Arc::new(Capabilities::default());
 		Self {
 			values: HashMap::default(),
 			parent: None,
@@ -373,7 +398,7 @@ impl Context {
 			query_planner: None,
 			query_executor: None,
 			iteration_stage: None,
-			capabilities: capabilities.clone(),
+			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
 			cache: None,
 			index_builder: None,
@@ -392,7 +417,10 @@ impl Context {
 			knn_context: None,
 			#[cfg(feature = "http")]
 			http_client: Arc::new(
-				HttpClient::new(capabilities).expect("http client to be created"),
+				HttpClient::new(
+					crate::dbs::capabilities::Targets::All,
+					crate::dbs::capabilities::Targets::None
+				).expect("http client to be created"),
 			),
 		}
 	}
@@ -824,11 +852,6 @@ impl Context {
 	// Capabilities
 	//
 
-	/// Set the capabilities for this context
-	pub(crate) fn add_capabilities(&mut self, caps: Arc<Capabilities>) {
-		self.capabilities = caps;
-	}
-
 	/// Get the capabilities for this context
 	pub(crate) fn get_capabilities(&self) -> Arc<Capabilities> {
 		self.capabilities.clone()
@@ -1006,6 +1029,7 @@ impl Context {
 
 		cache
 			.get_or_insert_with(&lookup, async || {
+
 				let SurrealismCacheLookup::File(ns, db, bucket, key) = lookup else {
 					bail!("silo lookups are not supported yet");
 				};
@@ -1058,17 +1082,25 @@ impl Context {
 					)
 				})
 				.await
-				.map_err(|e| anyhow::anyhow!("WASM compile task aborted: {e}"))?
-				.map_err(|e| anyhow::anyhow!("{e}"))?;
+				.context("WASM compile task aborted")??;
 				let runtime = Arc::new(runtime);
 
 				let module_display_name: Arc<str> = format!("{org}::{name}").into();
-				let module_net_targets = Arc::new(module_allow_net_targets(&module_caps));
+				let _module_net_targets = module_allow_net_targets(&module_caps);
+
+				#[cfg(feature = "http")]
+				let client = if _module_net_targets.is_empty(){
+					Arc::new(HttpClient::new(Targets::None, Targets::All).context("Failed to create http client for WASM module")?)
+				}else{
+					let allow = Targets::Some(_module_net_targets);
+					Arc::new(HttpClient::new(allow, self.capabilities.denied_network_targets_ref().clone()).context("Failed to create http client for WASM module")?)
+				};
 
 				Ok(SurrealismCachedModule {
 					runtime,
 					module_display_name,
-					module_net_targets,
+					#[cfg(feature = "http")]
+					client,
 				})
 			})
 			.await

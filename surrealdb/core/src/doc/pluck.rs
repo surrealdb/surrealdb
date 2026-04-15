@@ -92,7 +92,7 @@ impl Document {
 						(&mut self.initial, &mut self.current)
 					};
 					// Configure the context
-					let mut ctx = Context::new(ctx);
+					let mut ctx = Context::new_child(ctx);
 					ctx.add_value("after", current.doc.as_arc());
 					ctx.add_value("before", initial.doc.as_arc());
 					let ctx = ctx.freeze();
@@ -175,7 +175,7 @@ impl Document {
 								// Get the current value
 								let val = Arc::new(self.current.doc.as_ref().pick(k));
 								// Configure the context
-								let mut ctx = Context::new(ctx);
+								let mut ctx = Context::new_child(ctx);
 								ctx.add_value("value", val);
 								let ctx = ctx.freeze();
 								// Process the PERMISSION clause
@@ -316,7 +316,7 @@ impl Document {
 								// Get the current value
 								let val = Arc::new(self.current.doc.as_ref().pick(k));
 								// Configure the context
-								let mut ctx = Context::new(ctx);
+								let mut ctx = Context::new_child(ctx);
 								ctx.add_value("value", val);
 								let ctx = ctx.freeze();
 								// Process the PERMISSION clause

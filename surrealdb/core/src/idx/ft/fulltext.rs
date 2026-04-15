@@ -1080,7 +1080,7 @@ mod tests {
 		}
 
 		async fn remove_insert_task(&self, stk: &mut Stk, rid: &RecordId) {
-			let mut ctx = Context::new(&self.ctx);
+			let mut ctx = Context::new_child(&self.ctx);
 			let tx = self.new_tx(TransactionType::Write).await;
 			ctx.set_transaction(tx.clone());
 			let ctx = ctx.freeze();
@@ -1239,7 +1239,7 @@ mod tests {
 		let frozen_read_ctx = |test: &TestContext| {
 			let test = test.clone();
 			async move {
-				let mut ctx = Context::new(&test.ctx);
+				let mut ctx = Context::new_child(&test.ctx);
 				let tx = test.new_tx(TransactionType::Read).await;
 				ctx.set_transaction(tx.clone());
 				(ctx.freeze(), tx)

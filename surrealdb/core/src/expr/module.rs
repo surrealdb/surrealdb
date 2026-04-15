@@ -320,7 +320,8 @@ async fn run_on_runtime(
 	let SurrealismCachedModule {
 		runtime,
 		module_display_name,
-		module_net_targets,
+		#[cfg(feature = "http")]
+		client,
 	} = cached;
 	let module_name = module_display_name.as_ref().to_string();
 	let host = Box::new(Host::new(
@@ -329,7 +330,8 @@ async fn run_on_runtime(
 		doc,
 		runtime.kv_store().clone(),
 		module_name,
-		module_net_targets,
+		#[cfg(feature = "http")]
+		client,
 	));
 	let mut controller = runtime.acquire_controller(host).await?;
 

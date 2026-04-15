@@ -2162,8 +2162,6 @@ impl Datastore {
 		let opt = self.setup_options(sess);
 		// Create a default context
 		let mut ctx = self.setup_ctx()?;
-		// Set context capabilities
-		ctx.add_capabilities(self.capabilities.clone());
 		// Set the global query timeout
 		if let Some(timeout) = self.dynamic_configuration.get_query_timeout() {
 			ctx.add_timeout(timeout)?;
@@ -2591,9 +2589,7 @@ mod test {
 			.with_max_computation_depth(u32::MAX);
 
 		// Create a default context
-		let mut ctx = Context::new_test();
-		// Set context capabilities
-		ctx.add_capabilities(dbs.capabilities.clone());
+		let mut ctx = dbs.setup_ctx()?;
 		// Start a new transaction
 		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?.enclose();
 		// Store the transaction

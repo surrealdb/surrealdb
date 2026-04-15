@@ -59,7 +59,7 @@ fn create_planning_context(
 	}
 
 	// Create a child context that adds local params (shadowing global params)
-	let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
+	let mut ctx = crate::ctx::Context::new_child(exec_ctx.ctx());
 	for (name, value) in local_params.iter() {
 		ctx.add_value(name.clone(), Arc::new(value.clone()));
 	}
@@ -235,7 +235,7 @@ impl BlockPhysicalExpr {
 
 				// Update the legacy context with the new parameter
 				if let Some(ctx) = legacy_ctx {
-					let mut new_ctx = crate::ctx::Context::new(ctx);
+					let mut new_ctx = crate::ctx::Context::new_child(ctx);
 					new_ctx.add_value(set_stmt.name.clone(), Arc::new(value));
 					*ctx = new_ctx.freeze();
 				}

@@ -1422,7 +1422,7 @@ impl<'ctx> Planner<'ctx> {
 				let mc = extract_matches_context(c, Some(self.ctx));
 				let hm = !mc.is_empty();
 				if hm || has_knn_early {
-					let mut child = crate::ctx::Context::new(self.ctx);
+					let mut child = crate::ctx::Context::new_child(self.ctx);
 					if hm {
 						let mut mc = mc;
 						if let Some(ref t) = primary_table {

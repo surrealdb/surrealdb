@@ -227,7 +227,7 @@ impl<'ctx> Planner<'ctx> {
 		// sets it after planning). Derive a context with the planner's txn
 		// so that a cache-miss in get_surrealism_runtime can access the
 		// bucket store without panicking.
-		let mut plan_ctx = Context::new(self.ctx);
+		let mut plan_ctx = Context::new_child(self.ctx);
 		plan_ctx.set_transaction(txn.clone());
 		let frozen = plan_ctx.freeze();
 		let sig = executable
@@ -271,7 +271,7 @@ impl<'ctx> Planner<'ctx> {
 		// Same as resolve_module_writeable: derive a context with the
 		// planner's transaction so signature resolution can access stores.
 		let ctx = if let Some(txn) = &self.txn {
-			let mut plan_ctx = Context::new(self.ctx);
+			let mut plan_ctx = Context::new_child(self.ctx);
 			plan_ctx.set_transaction(txn.clone());
 			plan_ctx.freeze()
 		} else {

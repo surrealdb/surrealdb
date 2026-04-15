@@ -511,7 +511,7 @@ impl FieldEditContext<'_> {
 					ctx
 				}
 				None => {
-					let mut ctx = Context::new(self.ctx);
+					let mut ctx = Context::new_child(self.ctx);
 					ctx.add_value("before", self.old.clone());
 					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
@@ -548,7 +548,7 @@ impl FieldEditContext<'_> {
 					ctx
 				}
 				None => {
-					let mut ctx = Context::new(self.ctx);
+					let mut ctx = Context::new_child(self.ctx);
 					ctx.add_value("before", self.old.clone());
 					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
@@ -591,7 +591,7 @@ impl FieldEditContext<'_> {
 					ctx
 				}
 				None => {
-					let mut ctx = Context::new(self.ctx);
+					let mut ctx = Context::new_child(self.ctx);
 					ctx.add_value("before", self.old.clone());
 					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
@@ -666,7 +666,7 @@ impl FieldEditContext<'_> {
 							ctx
 						}
 						None => {
-							let mut ctx = Context::new(self.ctx);
+							let mut ctx = Context::new_child(self.ctx);
 							ctx.add_value("before", self.old.clone());
 							ctx.add_value("input", self.user_input.clone());
 							ctx.add_value("after", now.clone());

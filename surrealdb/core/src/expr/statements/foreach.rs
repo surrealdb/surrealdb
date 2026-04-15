@@ -70,7 +70,7 @@ impl ForeachStatement {
 				return Err(ControlFlow::from(anyhow::Error::new(Error::QueryTimedout(d.into()))));
 			}
 			// Duplicate context
-			let ctx = Context::new(ctx).freeze();
+			let ctx = Context::new_child(ctx).freeze();
 			// Set the current parameter
 			let key = self.param.as_str().to_owned();
 			let mut ctx = Context::unfreeze(ctx)?;
