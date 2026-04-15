@@ -147,7 +147,9 @@ impl SelectStatement {
 				.await?;
 		}
 
-		CursorDoc::update_parent(&ctx, parent_doc, async |ctx| {
+		// Reuse `prepare_ctx` so we do not clone the parent document again inside
+		// `update_parent` (see `CursorDoc::with_parent_ctx`).
+		CursorDoc::update_parent(prepare_ctx.as_ref(), None, async |ctx| {
 			// Attach the query planner to the context
 			let ctx = stm.setup_query_planner(planner, ctx);
 			// Process the statement
