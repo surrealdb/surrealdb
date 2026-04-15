@@ -102,20 +102,28 @@ pub(crate) struct CursorDoc {
 }
 
 impl CursorDoc {
+	/// Context with `$parent` bound to the enclosing row (same binding as
+	/// [`Self::update_parent`] applies before running nested statement bodies).
+	pub(crate) fn with_parent_ctx<'a>(
+		ctx: &'a FrozenContext,
+		doc: Option<&CursorDoc>,
+	) -> Cow<'a, FrozenContext> {
+		if let Some(doc) = doc {
+			let mut new_ctx = Context::new(ctx);
+			new_ctx.add_value("parent", Arc::new(doc.doc.as_ref().clone()));
+			Cow::Owned(new_ctx.freeze())
+		} else {
+			Cow::Borrowed(ctx)
+		}
+	}
+
 	/// Updates the `"parent"` doc field for statements with a meaning full
 	/// document.
 	pub async fn update_parent<F, R>(ctx: &FrozenContext, doc: Option<&CursorDoc>, f: F) -> R
 	where
 		F: AsyncFnOnce(Cow<FrozenContext>) -> R,
 	{
-		let ctx = if let Some(doc) = doc {
-			let mut new_ctx = Context::new(ctx);
-			new_ctx.add_value("parent", Arc::new(doc.doc.as_ref().clone()));
-			Cow::Owned(new_ctx.freeze())
-		} else {
-			Cow::Borrowed(ctx)
-		};
-
+		let ctx = Self::with_parent_ctx(ctx, doc);
 		f(ctx).await
 	}
 }

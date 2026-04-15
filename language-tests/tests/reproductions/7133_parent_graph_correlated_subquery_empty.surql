@@ -3,7 +3,6 @@
 namespace = true
 database = true
 auth = { level = "owner" }
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "$parent->table correlated subquery returns empty results"
@@ -78,14 +77,14 @@ RELATE bug_user:alice -> bug_speak -> bug_locale:zh CONTENT {
     in: bug_user:alice, out: bug_locale:zh, is_default: true
 };
 
--- Fixed in all-ro planner; compute-only returns locales: []
+-- Correlated subquery: $parent->relation must resolve to outer row
 SELECT (
     SELECT out.code AS code FROM $parent->bug_speak ORDER BY code
 ) AS locales
 FROM bug_user:alice;
 
--- Workaround: direct query on relation table works in both planners
+-- Baseline: direct query on relation table
 SELECT out.code AS code FROM bug_speak WHERE in = bug_user:alice ORDER BY code;
 
--- Workaround: graph traversal outside subquery works in both planners
+-- Baseline: graph traversal outside subquery
 SELECT out.code AS code FROM bug_user:alice->bug_speak ORDER BY code;
