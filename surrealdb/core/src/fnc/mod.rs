@@ -651,7 +651,7 @@ pub async fn asynchronous(
 	)
 }
 
-/// Attempts to run any synchronous function.
+/// Attempts to run any function using method syntax.
 pub async fn idiom(
 	stk: &mut Stk,
 	ctx: &FrozenContext,
@@ -678,10 +678,21 @@ pub async fn idiom(
 				"complement" => set::complement,
 				"contains" => set::contains,
 				"difference" => set::difference,
+				"filter" => set::filter((stk, ctx, Some(opt), doc)).await,
+				"find" => set::find((stk, ctx, Some(opt), doc)).await,
+				"first" => set::first,
+				"flatten" => set::flatten,
+				"fold" => set::fold((stk, ctx, Some(opt), doc)).await,
+				"join" => set::join,
 				"intersect" => set::intersect,
-				"is_empty" => set::is_empty,
+				"last" => set::last,
 				"len" => set::len,
+				"map" => set::map((stk, ctx, Some(opt), doc)).await,
+				"max" => set::max,
+				"min" => set::min,
+				"reduce" => set::reduce((stk, ctx, Some(opt), doc)).await,
 				"remove" => set::remove,
+				"slice" => set::slice,
 				"union" => set::union,
 				//
 				"type_of" => r#type::type_of,
@@ -692,6 +703,7 @@ pub async fn idiom(
 				"is_datetime" => r#type::is::datetime,
 				"is_decimal" => r#type::is::decimal,
 				"is_duration" => r#type::is::duration,
+				"is_empty" => set::is_empty,
 				"is_float" => r#type::is::float,
 				"is_geometry" => r#type::is::geometry,
 				"is_int" => r#type::is::int,
