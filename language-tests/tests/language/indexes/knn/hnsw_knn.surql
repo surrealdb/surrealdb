@@ -47,7 +47,7 @@ UPDATE pts:3 SET point = [8,9,10,11];
 LET $pt = [2,3,4,5];
 SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,100|> $pt;
 SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,100|> $pt EXPLAIN;
--- Brute force for comparison (EUCLIDEAN distance type instead of threshold)
+-- Explicit distance metric (EUCLIDEAN) vs threshold form <|k,ef|> above; planner may use index or table scan depending on routing
 SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt;
 SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt EXPLAIN;
 DELETE pts:3;
