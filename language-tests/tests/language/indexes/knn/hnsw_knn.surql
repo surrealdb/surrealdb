@@ -33,7 +33,7 @@ value = "[{ detail: { plan: { index: 'hnsw_pts', operator: '<|2,100|>', value: [
 value = "[{ dist: 2f, id: pts:1 }, { dist: 4f, id: pts:2 }]"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'pts' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { index: 'hnsw_pts', operator: '<|2,500|>', value: [2, 3, 4, 5] }, table: 'pts' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[]"
