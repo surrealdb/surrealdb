@@ -224,7 +224,7 @@ async fn run_queries(
 	sql: &str,
 ) -> impl ExactSizeIterator<Item = std::result::Result<Value, TypesError>> + DoubleEndedIterator + 'static
 {
-	let dbs = new_ds("test", "test").await.expect("Failed to create new datastore");
+	let (_, dbs) = new_ds("test", "test", false).await.expect("Failed to create new datastore");
 	let ses = Session::owner().with_ns("test").with_db("test");
 	dbs.execute(sql, &ses, None)
 		.await

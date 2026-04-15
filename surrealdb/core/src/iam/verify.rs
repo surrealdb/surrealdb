@@ -1555,11 +1555,13 @@ mod tests {
 		let server_url = mock_server.uri();
 
 		// We allow requests to the local server serving the JWKS object
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
 
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute(

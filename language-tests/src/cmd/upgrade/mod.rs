@@ -18,36 +18,26 @@ use tokio::task::JoinSet;
 
 use crate::cli::{ColorMode, DsVersion, ResultsMode, UpgradeBackend};
 use crate::format::Progress;
-use crate::temp_dir::TempDir;
-use crate::tests::TestSet;
 use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
-use crate::tests::set::TestId;
+use crate::tests::run::{CaseImports, RunConfig};
+use crate::tests::schema::{BoolOr, ENV_DEFAULT_DATABASE, ENV_DEFAULT_NAMESPACE};
+use crate::tests::{CaseSet, RunSetBuilder, TestRun};
+use crate::util::TempDir;
 
-#[derive(Clone, Copy, Eq, PartialEq, Hash)]
-pub struct TaskId(usize);
-impl TaskId {
-	pub fn from_usize(v: usize) -> TaskId {
-		TaskId(v)
-	}
-}
-
-pub struct Task {
-	id: TaskId,
+pub struct UpgradeTestConfig {
 	from: DsVersion,
 	to: DsVersion,
-	test: TestId,
-	path: String,
 	port: u16,
+	path: String,
 }
 
-impl Task {
-	pub fn name(&self, set: &TestSet) -> String {
-		format!("{} {} => {}", &set[self.test].path, self.from, self.to)
+impl RunConfig for UpgradeTestConfig {
+	fn name(&self, case: &CaseImports) -> String {
+		format!("{} {} => {}", case.test.origin.path, self.from, self.to)
 	}
 }
 
 pub struct Config {
-	test_path: String,
 	jobs: u32,
 	download_permission: bool,
 	backend: UpgradeBackend,
@@ -58,7 +48,6 @@ impl Config {
 	pub fn from_matches(matches: &ArgMatches) -> Self {
 		Config {
 			backend: *matches.get_one::<UpgradeBackend>("backend").unwrap(),
-			test_path: matches.get_one::<String>("path").unwrap().clone(),
 			download_permission: matches.get_one("allow-download").copied().unwrap_or(false),
 			jobs: matches.get_one::<u32>("jobs").copied().unwrap_or_else(|| {
 				thread::available_parallelism().map(|x| x.get() as u32).unwrap_or(1)
@@ -68,113 +57,17 @@ impl Config {
 	}
 }
 
-/// Function which generates the actual test tasks.
-pub fn generate_tasks(
-	from_versions: &[DsVersion],
-	to_versions: &[DsVersion],
-	actual_version: &HashMap<DsVersion, Version>,
-	subset: &TestSet,
-	temp_dir: &TempDir,
-) -> Vec<Task> {
-	let mut tasks = Vec::new();
-	for from in from_versions.iter() {
-		for to in to_versions.iter() {
-			let from_v = actual_version.get(from).unwrap();
-			let to_v = actual_version.get(to).unwrap();
-
-			if from_v >= to_v {
-				continue;
-			}
-
-			'include_test: for (t, case) in subset.iter_ids() {
-				// if the test contains an error don't run it.
-				if case.contains_error {
-					continue;
-				}
-
-				if !case.config.should_run() {
-					continue;
-				}
-
-				// Ensure that the test can run on the upgrading version.
-				if let Some(ver_req) = case.config.test.as_ref().and_then(|x| x.version.as_ref()) {
-					if !ver_req.matches(to_v) {
-						continue 'include_test;
-					}
-				}
-
-				// Ensure that the test can run on the importing version.
-				if let Some(ver_req) =
-					case.config.test.as_ref().and_then(|x| x.importing_version.as_ref())
-				{
-					if !ver_req.matches(from_v) {
-						continue 'include_test;
-					}
-				}
-
-				// Ensure that the imports can run on importing version.
-				for import in case.imports.iter() {
-					if let Some(ver_req) =
-						subset[import.id].config.test.as_ref().and_then(|x| x.version.as_ref())
-					{
-						if !ver_req.matches(from_v) {
-							continue 'include_test;
-						}
-					}
-				}
-
-				tasks.push(Task {
-					id: TaskId::from_usize(tasks.len()),
-					from: from.clone(),
-					to: to.clone(),
-					test: t,
-					// Set later.
-					port: 0,
-					path: temp_dir
-						.sub_dir_path()
-						.to_str()
-						.expect("Paths should be utf-8")
-						.to_owned(),
-				})
-			}
-		}
-	}
-	tasks
-}
-
-pub fn filter_tests(testset: TestSet, matches: &ArgMatches) -> TestSet {
-	let subset =
-		testset.filter_map(|_, test| test.config.test.as_ref().map(|x| x.upgrade).unwrap_or(false));
-
-	let subset = if let Some(x) = matches.get_one::<String>("filter") {
-		subset.filter_map(|name, _| name.contains(x))
-	} else {
-		subset
-	};
-
-	let subset = if matches.get_flag("no-wip") {
-		subset.filter_map(|_, set| !set.config.is_wip())
-	} else {
-		subset
-	};
-
-	if matches.get_flag("no-results") {
-		subset.filter_map(|_, set| {
-			!set.config.test.as_ref().map(|x| x.results.is_some()).unwrap_or(false)
-		})
-	} else {
-		subset
-	}
-}
-
 /// Main subcommand function, runs the actual subcommand.
 pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let config = Config::from_matches(matches);
 	let config = Arc::new(config);
+	let mut load_errors = Vec::new();
 
-	let (testset, load_errors) = TestSet::collect_directory(&config.test_path).await?;
-
+	let path: &String = matches.get_one("path").unwrap();
 	let results_mode = matches.get_one::<ResultsMode>("results").unwrap();
+	let filter = matches.get_one::<String>("filter").cloned().unwrap_or_default();
+	let no_wip = matches.get_flag("no-wip");
+	let no_results = matches.get_flag("no-results");
 
 	let from_versions = matches.get_many::<DsVersion>("from").unwrap().cloned().collect::<Vec<_>>();
 	let to_versions = matches.get_many::<DsVersion>("to").unwrap().cloned().collect::<Vec<_>>();
@@ -195,17 +88,14 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		UpgradeBackend::SurrealKv => bail!("SurrealKV backend feature is not enabled"),
 	}
 
-	if UpgradeBackend::SurrealKv == config.backend {
-		if let Some(DsVersion::Version(v)) =
+	if UpgradeBackend::SurrealKv == config.backend
+		&& let Some(DsVersion::Version(v)) =
 			all_versions.iter().find(|x| **x < DsVersion::Version(Version::new(2, 0, 0)))
-		{
-			bail!(
-				"Cannot run with backend surrealkv and version {v}, surrealkv was not yet available on this version"
-			)
-		}
+	{
+		bail!(
+			"Cannot run with backend surrealkv and version {v}, surrealkv was not yet available on this version"
+		)
 	}
-
-	let subset = filter_tests(testset, matches);
 
 	let mut actual_version = HashMap::new();
 	println!("Preparing used versions of surrealdb");
@@ -219,13 +109,67 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		.await
 		.context("Failed to create temporary directory for datastore")?;
 
-	let tasks = generate_tasks(&from_versions, &to_versions, &actual_version, &subset, &temp_dir);
+	let case_set = CaseSet::load_surrealql_files(path.as_str(), &mut load_errors).await?;
+
+	let run_set = RunSetBuilder::new(&case_set, &mut load_errors)
+		.with_filter(|x| x.test.config.parsed.test.run)
+		.with_filter(|x| x.test.config.parsed.test.upgrade)
+		.with_filter(|x| x.test.origin.path.contains(&filter))
+		.with_filter(|x| no_wip || !x.test.config.parsed.test.wip)
+		.with_filter(|x| no_results || x.test.config.parsed.test.results.is_some())
+		.with_expander(|x| {
+			let mut res = Vec::new();
+
+			for from in from_versions.iter() {
+				for to in to_versions.iter() {
+					let from_v = actual_version.get(from).unwrap();
+					let to_v = actual_version.get(to).unwrap();
+
+					if let Some(ver_req) = x.test.config.parsed.test.version.as_ref()
+						&& !ver_req.matches(to_v)
+					{
+						continue;
+					}
+
+					if let Some(ver_req) = x.test.config.parsed.test.importing_version.as_ref()
+						&& !ver_req.matches(from_v)
+					{
+						continue;
+					}
+
+					if x.imports.iter().any(|imp| {
+						imp.config
+							.parsed
+							.test
+							.version
+							.as_ref()
+							.map(|x| !x.matches(from_v))
+							.unwrap_or(false)
+					}) {
+						continue;
+					}
+
+					res.push(UpgradeTestConfig {
+						from: from.clone(),
+						to: to.clone(),
+						// Set later.
+						port: 0,
+						path: temp_dir
+							.sub_dir_path()
+							.to_str()
+							.expect("Paths should be utf-8")
+							.to_owned(),
+					})
+				}
+			}
+			res
+		})
+		.build();
 
 	println!("Using directory '{}' as a store directory", temp_dir.path().display());
-	println!("Running {} tasks for {} tests", tasks.len(), subset.len());
+	println!("Running {} test runs for {} test cases", run_set.len(), case_set.len());
 
-	let mut progress = Progress::from_stderr(tasks.len(), color);
-	let mut task_iter = tasks.into_iter();
+	let mut progress = Progress::from_stderr(run_set.len(), color);
 
 	let mut reports = Vec::new();
 
@@ -244,12 +188,13 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	// The join set to spawn futures into and await.
 	let mut join_set = JoinSet::new();
+	let mut run_iter = run_set.into_iter();
 
 	loop {
 		while join_set.len() < config.jobs as usize {
 			// Schedule new tasks.
-			match task_iter.next() {
-				Some(mut task) => {
+			match run_iter.next() {
+				Some(mut run) => {
 					// find a port.
 					let port = reuse_port.pop().or_else(|| {
 						while let Some(x) = start_port.checked_add(1) {
@@ -266,11 +211,11 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 						break;
 					};
 
-					task.port = port;
+					run.config.port = port;
 
-					let id = task.id;
-					let name = task.name(&subset);
-					join_set.spawn(run_task(task, subset.clone(), config.clone()));
+					let id = run.id;
+					let name = run.name();
+					join_set.spawn(run_task(run, config.clone()));
 					progress.start_item(id, &name).unwrap();
 				}
 				_ => {
@@ -283,15 +228,14 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			break;
 		};
 
-		let (task, result) = res.unwrap();
-		reuse_port.push(task.port);
+		let (run, result) = res.unwrap();
+		reuse_port.push(run.config.port);
 
-		let extra_name = format!("{} => {}", task.from, task.to);
-		let report =
-			TestReport::from_test_result(task.test, &subset, result, &ds, Some(extra_name)).await;
+		let id = run.id;
+		let report = TestReport::from_test_result(run, result, &ds).await;
 		let grade = report.grade();
 		reports.push(report);
-		progress.finish_item(task.id, grade).unwrap();
+		progress.finish_item(id, grade).unwrap();
 	}
 
 	if config.keep_files {
@@ -304,7 +248,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	println!();
 
 	for v in reports.iter() {
-		v.display(&subset, color);
+		v.display(color);
 	}
 
 	println!();
@@ -317,14 +261,14 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		ResultsMode::Default => {}
 		ResultsMode::Accept => {
 			for report in reports.iter().filter(|x| x.is_unspecified_test() && !x.is_wip()) {
-				report.update_config_results(&subset).await?;
+				report.update_config_results(path).await?;
 			}
 		}
 		ResultsMode::Overwrite => {
 			for report in reports.iter().filter(|x| {
 				matches!(x.grade(), TestGrade::Failed | TestGrade::Warning) && !x.is_wip()
 			}) {
-				report.update_config_results(&subset).await?;
+				report.update_config_results(path).await?;
 			}
 		}
 	}
@@ -345,8 +289,7 @@ fn is_port_available(port: u16) -> bool {
 }
 
 async fn run_imports(
-	task: &Task,
-	set: &TestSet,
+	run: &TestRun<UpgradeTestConfig>,
 	process: &mut SurrealProcess,
 	namespace: Option<&str>,
 	database: Option<&str>,
@@ -358,7 +301,7 @@ async fn run_imports(
 
 	process
 		.assert_running_while(async {
-			let imports = &set[task.test].imports;
+			let imports = &run.case.imports;
 
 			let mut params = Vec::new();
 			if let Some(ns) = namespace {
@@ -399,23 +342,16 @@ async fn run_imports(
 			}
 
 			for import in imports {
-				let Ok(source) = std::str::from_utf8(&set[import.id].source) else {
-					return Ok(Some(TestTaskResult::Import(
-						import.path.clone(),
-						"Import file was not valid utf-8.".to_string(),
-					)));
-				};
-
-				match connection.query(source).await {
+				match connection.query(&import.source).await {
 					Ok(TestTaskResult::RunningError(e)) => {
 						return Ok(Some(TestTaskResult::Import(
-							import.path.clone().to_owned(),
+							import.origin.path.clone(),
 							format!("Failed to run import: {e:?}"),
 						)));
 					}
 					Err(e) => {
 						return Ok(Some(TestTaskResult::Import(
-							import.path.clone().to_owned(),
+							import.origin.path.clone(),
 							format!("Failed to run import: {e:?}."),
 						)));
 					}
@@ -428,8 +364,7 @@ async fn run_imports(
 }
 
 async fn run_upgrade_test(
-	task: &Task,
-	set: &TestSet,
+	run: &TestRun<UpgradeTestConfig>,
 	mut process: SurrealProcess,
 	namespace: Option<&str>,
 	database: Option<&str>,
@@ -486,51 +421,72 @@ async fn run_upgrade_test(
 				bail!("Failed to authenticate on upgrading database: {}", e.message())
 			}
 
-			let source = &set[task.test].source;
-			let source = std::str::from_utf8(source).context("Text source was not valid utf-8")?;
+			let source = &run.case.test.source;
 			connection.query(source).await
 		})
 		.await?
 }
 
-async fn run_task(task: Task, test_set: TestSet, config: Arc<Config>) -> (Task, TestTaskResult) {
-	match run_task_inner(&task, test_set, config).await {
-		Ok(x) => (task, x),
-		Err(e) => (task, TestTaskResult::RunningError(e)),
+async fn run_task(
+	run: TestRun<UpgradeTestConfig>,
+	config: Arc<Config>,
+) -> (TestRun<UpgradeTestConfig>, TestTaskResult) {
+	match run_task_inner(&run, config).await {
+		Ok(x) => (run, x),
+		Err(e) => (run, TestTaskResult::RunningError(e)),
 	}
 }
 
 async fn run_task_inner(
-	task: &Task,
-	test_set: TestSet,
+	run: &TestRun<UpgradeTestConfig>,
 	config: Arc<Config>,
 ) -> Result<TestTaskResult> {
-	let dir = &task.path;
+	let dir = &run.config.path;
 	tokio::fs::create_dir(dir).await.context("Failed to create tempory directory for datastore")?;
 
 	// no need to write the info if it is going to be deleted anyway.
 	if config.keep_files {
 		// write some info to the test directory usefull for later debugging.
-		tokio::fs::write(Path::new(dir).join("test.info"), format!("{} => {}", task.from, task.to))
-			.await?;
+		tokio::fs::write(
+			Path::new(dir).join("test.info"),
+			format!("{} => {}", run.config.from, run.config.to),
+		)
+		.await?;
 	}
 
-	if test_set[task.test].config.env.as_ref().and_then(|x| x.capabilities.as_ref()).is_some() {
+	let BoolOr::Bool(false) = run.case.test.config.parsed.env.capabilities else {
 		bail!("Setting capabilities are not supported for upgrade tests")
-	}
+	};
 
-	let namespace =
-		test_set[task.test].config.env.as_ref().map(|x| x.namespace()).unwrap_or(Some("test"));
-	let database =
-		test_set[task.test].config.env.as_ref().map(|x| x.database()).unwrap_or(Some("test"));
+	let namespace = run
+		.case
+		.test
+		.config
+		.parsed
+		.env
+		.namespace
+		.as_ref()
+		.map(|x| x.as_ref())
+		.into_value(ENV_DEFAULT_NAMESPACE);
+	let database = run
+		.case
+		.test
+		.config
+		.parsed
+		.env
+		.database
+		.as_ref()
+		.map(|x| x.as_ref())
+		.into_value(ENV_DEFAULT_DATABASE);
 
 	if database.is_some() && namespace.is_none() {
 		bail!("Cannot have a database set but not a namespace.")
 	}
 
 	// run imports
-	let mut process = process::SurrealProcess::new(&config, &task.from, dir, task.port).await?;
-	match run_imports(task, &test_set, &mut process, namespace, database).await {
+	let mut process =
+		process::SurrealProcess::new(&config, &run.config.from, dir, run.config.port).await?;
+	match run_imports(run, &mut process, namespace, database).await {
 		Ok(Some(x)) => return Ok(x),
 		Ok(None) => {}
 		Err(e) => {
@@ -549,8 +505,9 @@ async fn run_task_inner(
 	// excessivly slow, so we just retry once in this case.
 	let mut retried = false;
 	let result = loop {
-		let process = process::SurrealProcess::new(&config, &task.to, dir, task.port).await?;
-		match run_upgrade_test(task, &test_set, process, namespace, database).await {
+		let process =
+			process::SurrealProcess::new(&config, &run.config.to, dir, run.config.port).await?;
+		match run_upgrade_test(run, process, namespace, database).await {
 			Ok(x) => break x,
 			Err(e) => {
 				if retried || !format!("{:#?}", e).contains("open connection") {

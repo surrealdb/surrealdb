@@ -1,5 +1,4 @@
 use std::cmp::Ordering;
-use std::fmt::Write;
 use std::ops::Range;
 
 use anyhow::Result;
@@ -10,18 +9,18 @@ use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
 
 use super::TestReport;
 use crate::tests::report::TestOutputs;
-use crate::tests::{ConfigKind, TestSet};
 
 impl TestReport {
-	pub async fn update_config_results(&self, set: &TestSet) -> Result<()> {
+	pub async fn update_config_results(&self, root_path: &str) -> Result<()> {
+		//TODO: Improve for multiple test cases in a single file.
 		let Some(values) = self.outputs.as_ref() else {
-			println!("tried to update test {} without results", set[self.id].path);
+			println!("tried to update test {} without results", self.case.test.origin.path);
 			return Ok(());
 		};
 
-		let mut doc = set[self.id].toml.clone();
-		println!("Updating test `{}`", set[self.id].path);
+		let mut doc = self.case.test.config.toml.clone().unwrap_or_default();
 
+		println!("Updating test `{}`", self.case.test.origin.path);
 		match values {
 			TestOutputs::Values(values) => apply_results(&mut doc, values),
 			TestOutputs::ParsingError(error) => apply_error(&mut doc, "parsing-error", error),
@@ -29,42 +28,28 @@ impl TestReport {
 			TestOutputs::SignupError(error) => apply_error(&mut doc, "signup-error", error),
 		}
 
-		let mut existing = set[self.id].source.clone();
+		let mut existing = self.case.test.source.clone().into_bytes();
 
-		match set[self.id].config_kind {
-			ConfigKind::SingleLine => {
-				let doc: String =
-					doc.to_string().trim_end().lines().fold(String::new(), |mut acc, x| {
-						writeln!(&mut acc, "//! {x}").unwrap();
-						acc
-					});
-				insert_slice(&mut existing, set[self.id].config_slice.clone(), doc.as_bytes());
-			}
-			ConfigKind::MultiLine => {
-				insert_slice(
-					&mut existing,
-					set[self.id].config_slice.clone(),
-					doc.to_string().as_bytes(),
-				);
-			}
-			ConfigKind::None => {
-				insert_slice(
-					&mut existing,
-					set[self.id].config_slice.clone(),
-					format!("/**\n{}\n*/\n", doc).as_bytes(),
-				);
-			}
+		if let Some(slice) = self.case.test.config.range.clone() {
+			insert_slice(&mut existing, slice.clone(), doc.to_string().as_bytes());
+		} else {
+			insert_slice(&mut existing, 0..0, format!("/**\n{}\n*/\n", doc).as_bytes());
 		}
+
+		let full_path = if root_path.ends_with("/") {
+			format!("{}{}", root_path, self.case.test.origin.path)
+		} else {
+			format!("{}/{}", root_path, self.case.test.origin.path)
+		};
 
 		let mut f = fs::OpenOptions::new()
 			.write(true)
 			.create(false)
 			.truncate(true)
-			.open(&set[self.id].path)
+			.open(&full_path)
 			.await?;
 
 		f.write_all(&existing).await?;
-
 		Ok(())
 	}
 }

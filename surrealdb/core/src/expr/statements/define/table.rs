@@ -21,7 +21,7 @@ use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
 use crate::expr::field::Selector;
 use crate::expr::parameterize::expr_to_ident;
-use crate::expr::paths::{IN, OUT};
+use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::{
 	Base, BinaryOperator, Cond, Expr, Field, Fields, FlowResultExt, Function, FunctionCall, Group,
 	Groups, Idiom, Kind, Literal, SelectStatement, View,
@@ -285,8 +285,23 @@ impl DefineTableStatement {
 		tables: &[TableName],
 		condition: Option<&Expr>,
 	) -> Result<()> {
+		// Build the initialization SELECT with `id` always included so we can
+		// extract the source record's key regardless of the user's field list.
+		let init_fields = match fields {
+			Fields::Select(user_fields) => {
+				let id_field = Field::Single(Selector {
+					expr: Expr::Idiom(Idiom::from(ID.to_vec())),
+					alias: None,
+				});
+				let mut all = vec![id_field];
+				all.extend(user_fields.iter().cloned());
+				Fields::Select(all)
+			}
+			other => other.clone(),
+		};
+
 		let select = SelectStatement {
-			fields: fields.clone(),
+			fields: init_fields,
 			what: tables.iter().map(|x| Expr::Table(x.clone())).collect(),
 			cond: condition.cloned().map(Cond),
 			omit: vec![],

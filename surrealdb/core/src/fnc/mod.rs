@@ -1813,10 +1813,11 @@ mod tests {
 				let name = name.replace("::", ".");
 				let sql =
 					format!("RETURN function() {{ return typeof surrealdb.functions.{name}; }}");
-				let dbs = crate::kvs::Datastore::new("memory")
+				let dbs = crate::kvs::Datastore::builder()
+					.with_capabilities(Capabilities::all())
+					.build_with_path("memory")
 					.await
-					.unwrap()
-					.with_capabilities(Capabilities::all());
+					.unwrap();
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();

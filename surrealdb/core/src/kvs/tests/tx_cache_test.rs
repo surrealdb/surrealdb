@@ -15,7 +15,11 @@ use crate::val::TableName;
 
 /// Helper to create a Datastore and write transaction with namespace and database set up
 async fn setup_tx_with_ns_db() -> (Datastore, crate::kvs::Transaction, NamespaceId, DatabaseId) {
-	let ds = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory")
+		.await
+		.unwrap();
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 
 	let ns_def = NamespaceDefinition {
@@ -41,7 +45,11 @@ async fn setup_tx_with_ns_db() -> (Datastore, crate::kvs::Transaction, Namespace
 /// Test that verifies index is usable after creation
 #[tokio::test]
 async fn test_index_usable_after_creation() {
-	let ds = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory")
+		.await
+		.unwrap();
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	// Setup
@@ -183,7 +191,11 @@ async fn test_single_tx_cache_invalidation_on_field_put() {
 /// Test that verifies multiple sequential index operations work correctly
 #[tokio::test]
 async fn test_multiple_index_operations_cache_consistency() {
-	let ds = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory")
+		.await
+		.unwrap();
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	// Setup
@@ -224,7 +236,11 @@ async fn test_multiple_index_operations_cache_consistency() {
 /// Test cache invalidation for put_ns (namespace list cache).
 #[tokio::test]
 async fn test_single_tx_cache_invalidation_on_ns_put() {
-	let ds = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory")
+		.await
+		.unwrap();
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 
 	// Populate the cache with an empty namespace list
@@ -253,7 +269,11 @@ async fn test_single_tx_cache_invalidation_on_ns_put() {
 /// Test cache invalidation for put_db and del_db (database list cache).
 #[tokio::test]
 async fn test_single_tx_cache_invalidation_on_db_put_and_del() {
-	let ds = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory")
+		.await
+		.unwrap();
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 
 	let ns_def = NamespaceDefinition {
@@ -375,10 +395,11 @@ async fn test_single_tx_cache_invalidation_on_param_put() {
 /// None (current) read would see stale data.
 #[tokio::test]
 async fn test_versioned_read_does_not_pollute_table_cache() {
-	let ds = Datastore::new("memory?versioned=true")
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory?versioned=true")
 		.await
-		.unwrap()
-		.with_capabilities(Capabilities::all());
+		.unwrap();
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	ds.execute("DEFINE NAMESPACE test", &Session::owner(), None).await.unwrap();
@@ -406,10 +427,11 @@ async fn test_versioned_read_does_not_pollute_table_cache() {
 /// Test that a versioned read of field definitions does not pollute the current-view cache.
 #[tokio::test]
 async fn test_versioned_read_does_not_pollute_field_cache() {
-	let ds = Datastore::new("memory?versioned=true")
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory?versioned=true")
 		.await
-		.unwrap()
-		.with_capabilities(Capabilities::all());
+		.unwrap();
 	let ses = Session::owner().with_ns("test").with_db("test");
 
 	ds.execute("DEFINE NAMESPACE test", &Session::owner(), None).await.unwrap();

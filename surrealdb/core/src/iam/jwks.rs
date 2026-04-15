@@ -439,11 +439,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_golden_path() {
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
 		let jwks = DEFAULT_JWKS.clone();
 
 		let jwks_path = format!("{}/jwks.json", random_path());
@@ -483,7 +485,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_capabilities_default() {
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::default());
+		let ds = Datastore::new("memory").await.unwrap();
 		let jwks = DEFAULT_JWKS.clone();
 
 		let jwks_path = format!("{}/jwks.json", random_path());
@@ -510,12 +512,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_capabilities_specific_port() {
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1:443").unwrap()].into(), /* Different port from
-				                                                         * server */
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1:443").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
 		let jwks = DEFAULT_JWKS.clone();
 
 		let jwks_path = format!("{}/jwks.json", random_path());
@@ -542,11 +545,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_cache_expiration() {
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
 		let jwks = DEFAULT_JWKS.clone();
 
 		let jwks_path = format!("{}/jwks.json", random_path());
@@ -589,11 +594,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_cache_cooldown() {
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
 		let jwks = DEFAULT_JWKS.clone();
 
 		let jwks_path = format!("{}/jwks.json", random_path());
@@ -634,11 +641,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_cache_expiration_remote_down() {
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
 		let jwks = DEFAULT_JWKS.clone();
 
 		let jwks_path = format!("{}/jwks.json", random_path());
@@ -681,11 +690,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_no_algorithm() {
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.key_algorithm = None;
 
@@ -720,11 +731,14 @@ mod tests {
 	// SurrealDB will not trust a token specifying an algorithm that does not match
 	// the key type Reference: https://auth0.com/blog/critical-vulnerabilities-in-json-web-token-libraries/#RSA-or-HMAC
 	async fn test_no_algorithm_invalid() {
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
+
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.key_algorithm = None;
 
@@ -754,11 +768,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_unsupported_algorithm() {
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.key_algorithm = Some(KeyAlgorithm::RSA_OAEP_256);
 
@@ -787,11 +803,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_no_key_use() {
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.public_key_use = None;
 
@@ -821,11 +839,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_key_use_enc() {
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.public_key_use = Some(jsonwebtoken::jwk::PublicKeyUse::Encryption);
 
@@ -854,11 +874,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_key_ops_encrypt_only() {
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
 		let mut jwks = DEFAULT_JWKS.clone();
 		jwks.keys[0].common.key_operations = Some(vec![jsonwebtoken::jwk::KeyOperations::Encrypt]);
 
@@ -887,11 +909,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_remote_down() {
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
 		let jwks_path = format!("{}/jwks.json", random_path());
 		let mock_server = MockServer::start().await;
 		let response = ResponseTemplate::new(500);
@@ -921,11 +945,13 @@ mod tests {
 	#[tokio::test]
 	#[cfg(not(target_family = "wasm"))]
 	async fn test_remote_timeout() {
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
 		let jwks = DEFAULT_JWKS.clone();
 
 		let jwks_path = format!("{}/jwks.json", random_path());

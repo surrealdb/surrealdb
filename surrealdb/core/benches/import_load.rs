@@ -174,8 +174,11 @@ fn bench_import_throughput(c: &mut Criterion) {
 
 			for iteration in 0..iters {
 				// Fresh datastore per iteration so records don't accumulate.
-				let dbs = Datastore::new("memory").await.unwrap();
-				let dbs = dbs.with_capabilities(Capabilities::all());
+				let dbs = Datastore::builder()
+					.with_capabilities(Capabilities::all())
+					.build_with_path("memory")
+					.await
+					.unwrap();
 				let ses = Session::owner().with_ns("test").with_db("test");
 				dbs.execute("USE NAMESPACE test DATABASE test", &ses, None).await.unwrap();
 

@@ -2,9 +2,10 @@
 [env]
 namespace = true
 database = true
+auth = { level = "owner" }
 
 [test]
-reason = "Re-import after export should not fail with 'field already exists' for array sub-fields"
+reason = "Array fields auto-generate sub-field definitions; re-defining with OVERWRITE (as export now produces) must not error"
 issue = 6297
 
 [[test.results]]
@@ -29,19 +30,27 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = """{ embedding: 'DEFINE FIELD embedding ON chunk TYPE none | array<float> PERMISSIONS FULL', "embedding.*": 'DEFINE FIELD embedding.* ON chunk TYPE float PERMISSIONS FULL' }"""
+value = """{ events: {  }, fields: { embedding: 'DEFINE FIELD embedding ON chunk TYPE none | array<float> PERMISSIONS FULL', "embedding.*": 'DEFINE FIELD embedding.* ON chunk TYPE float PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"""
 
 [[test.results]]
-value = """{ "extracted.authors": "DEFINE FIELD extracted.authors ON document TYPE array<string> DEFAULT [] COMMENT 'Authors of the document' PERMISSIONS FULL", "extracted.authors.*": 'DEFINE FIELD extracted.authors.* ON document TYPE string PERMISSIONS FULL' }"""
-
+value = """{ events: {  }, fields: { extracted: 'DEFINE FIELD extracted ON document TYPE object PERMISSIONS FULL', "extracted.authors": 'DEFINE FIELD extracted.authors ON document TYPE array<string> DEFAULT [] PERMISSIONS FULL', "extracted.authors.*": 'DEFINE FIELD extracted.authors.* ON document TYPE string PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"""
 */
-OPTION IMPORT;
-DEFINE TABLE OVERWRITE chunk TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
-DEFINE FIELD embedding ON chunk TYPE option<array<float>> PERMISSIONS FULL;
-DEFINE FIELD embedding[*] ON chunk TYPE float PERMISSIONS FULL;
-DEFINE TABLE OVERWRITE document TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
-DEFINE FIELD extracted.authors ON document TYPE array<string> DEFAULT [] COMMENT 'Authors of the document' PERMISSIONS FULL;
-DEFINE FIELD extracted.authors[*] ON document TYPE string PERMISSIONS FULL;
 
-(INFO FOR TB chunk).fields;
-(INFO FOR TB document).fields;
+-- Define a table with an array field (auto-generates embedding[*])
+DEFINE TABLE OVERWRITE chunk TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
+DEFINE FIELD OVERWRITE embedding ON chunk TYPE option<array<float>> PERMISSIONS FULL;
+
+-- Simulate what the fixed export produces: re-define the auto-generated sub-field with OVERWRITE
+DEFINE FIELD OVERWRITE embedding[*] ON chunk TYPE float PERMISSIONS FULL;
+
+-- Also test nested object array fields
+DEFINE TABLE OVERWRITE document TYPE NORMAL SCHEMALESS PERMISSIONS NONE;
+DEFINE FIELD OVERWRITE extracted ON document TYPE object PERMISSIONS FULL;
+DEFINE FIELD OVERWRITE extracted.authors ON document TYPE array<string> DEFAULT [] PERMISSIONS FULL;
+
+-- Re-define the auto-generated sub-field with OVERWRITE
+DEFINE FIELD OVERWRITE extracted.authors[*] ON document TYPE string PERMISSIONS FULL;
+
+-- Verify tables are intact
+INFO FOR TABLE chunk;
+INFO FOR TABLE document;

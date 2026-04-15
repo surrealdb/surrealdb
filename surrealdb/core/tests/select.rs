@@ -63,7 +63,7 @@ async fn query_count_value(
 /// Regression: ASC range scan with literal bounds on an indexed datetime field.
 #[tokio::test(flavor = "multi_thread")]
 async fn select_indexed_range_literal_datetime() -> Result<()> {
-	let ds = new_ds("test", "test").await?;
+	let (_, ds) = new_ds("test", "test", true).await?;
 	let sess = Session::owner().with_ns("test").with_db("test");
 
 	ds.execute("DEFINE INDEX idx_ts ON test FIELDS ts", &sess, None).await?;
@@ -113,7 +113,7 @@ async fn select_indexed_range_literal_datetime() -> Result<()> {
 /// Ensures the fix is not specific to datetime indexes.
 #[tokio::test(flavor = "multi_thread")]
 async fn select_indexed_range_expression_integer() -> Result<()> {
-	let ds = new_ds("test", "test").await?;
+	let (_, ds) = new_ds("test", "test", true).await?;
 	let sess = Session::owner().with_ns("test").with_db("test");
 
 	ds.execute("DEFINE INDEX idx_score ON item FIELDS score", &sess, None).await?;
@@ -154,7 +154,7 @@ async fn select_indexed_range_expression_integer() -> Result<()> {
 /// Regression: expression-valued bounds on an indexed string field.
 #[tokio::test(flavor = "multi_thread")]
 async fn select_indexed_range_expression_string() -> Result<()> {
-	let ds = new_ds("test", "test").await?;
+	let (_, ds) = new_ds("test", "test", true).await?;
 	let sess = Session::owner().with_ns("test").with_db("test");
 
 	ds.execute("DEFINE INDEX idx_name ON item FIELDS name", &sess, None).await?;
@@ -195,7 +195,7 @@ async fn select_indexed_range_expression_string() -> Result<()> {
 /// compound-condition WHERE clause where only part is consumed by the index.
 #[tokio::test(flavor = "multi_thread")]
 async fn select_indexed_partial_filter_limit_not_pushed() -> Result<()> {
-	let ds = new_ds("test", "test").await?;
+	let (_, ds) = new_ds("test", "test", true).await?;
 	let sess = Session::owner().with_ns("test").with_db("test");
 
 	// Index on `score` only — the `active` condition is NOT indexed.
@@ -246,7 +246,7 @@ async fn select_indexed_partial_filter_limit_not_pushed() -> Result<()> {
 /// index available), so this case works even without the fix.
 #[tokio::test(flavor = "multi_thread")]
 async fn select_where_in_order_by_limit() -> Result<()> {
-	let ds = new_ds("test", "test").await?;
+	let (_, ds) = new_ds("test", "test", true).await?;
 	let sess = Session::owner().with_ns("test").with_db("test");
 
 	ds.execute("DEFINE INDEX idx_status ON item FIELDS status", &sess, None).await?;
@@ -297,7 +297,7 @@ async fn select_where_in_order_by_limit() -> Result<()> {
 /// result below LIMIT.
 #[tokio::test(flavor = "multi_thread")]
 async fn select_where_in_separate_order_index_limit() -> Result<()> {
-	let ds = new_ds("test", "test").await?;
+	let (_, ds) = new_ds("test", "test", true).await?;
 	let sess = Session::owner().with_ns("test").with_db("test");
 
 	// Two separate indexes — the key to reproducing the bug.
@@ -351,7 +351,7 @@ async fn select_where_in_separate_order_index_limit() -> Result<()> {
 /// real-world schemas where the planner has multiple index choices.
 #[tokio::test(flavor = "multi_thread")]
 async fn select_where_in_compound_index_order_by_limit() -> Result<()> {
-	let ds = new_ds("test", "test").await?;
+	let (_, ds) = new_ds("test", "test", true).await?;
 	let sess = Session::owner().with_ns("test").with_db("test");
 
 	// Multiple indexes: compound + separate ORDER BY index (mirrors benchmark schema).
@@ -404,7 +404,7 @@ async fn select_where_in_compound_index_order_by_limit() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn select_where_in_order_by_id_limit() -> Result<()> {
-	let ds = new_ds("test", "test").await?;
+	let (_, ds) = new_ds("test", "test", true).await?;
 	let sess = Session::owner().with_ns("test").with_db("test");
 
 	ds.execute("DEFINE INDEX idx_status ON item FIELDS status", &sess, None).await?;
@@ -444,7 +444,7 @@ async fn select_where_in_order_by_id_limit() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn select_count_where_btree_paths() -> Result<()> {
-	let ds = new_ds("test", "test").await?;
+	let (_, ds) = new_ds("test", "test", true).await?;
 	let sess = Session::owner().with_ns("test").with_db("test");
 
 	ds.execute(
