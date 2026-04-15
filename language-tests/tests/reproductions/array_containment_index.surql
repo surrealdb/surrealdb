@@ -4,6 +4,8 @@ namespace = true
 database = true
 auth = { level = "owner" }
 
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "WHERE field CONTAINS scalar and scalar INSIDE field should use array indexes with Part::All"
 

@@ -77,6 +77,92 @@ pub static DATASTORE_CACHE_SIZE: LazyLock<usize> =
 pub static SURREALISM_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_SURREALISM_CACHE_SIZE", usize, 100);
 
+/// Per-module controller pool size ceiling for Surrealism WASM modules (default: 8).
+/// Each pooled controller holds an instantiated WASM store. Effective pool size is
+/// `min(this, module_config.max_pool_size.unwrap_or(this))`.
+pub static SURREALISM_MAX_POOL_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_SURREALISM_MAX_POOL_SIZE", usize, 8);
+
+/// Per-module WASM linear memory ceiling in bytes (default: none / unlimited).
+/// When set, each WASM store is limited via `StoreLimits`. Effective limit is
+/// `min(this, module_config.max_memory_bytes)` when both are set.
+pub static SURREALISM_MAX_MEMORY: LazyLock<Option<usize>> = LazyLock::new(|| {
+	std::env::var("SURREAL_SURREALISM_MAX_MEMORY").ok().and_then(|s| match s.parse::<usize>() {
+		Ok(v) => Some(v),
+		Err(e) => {
+			tracing::warn!("Invalid SURREAL_SURREALISM_MAX_MEMORY: {e}");
+			None
+		}
+	})
+});
+
+/// Per-invocation execution time ceiling in milliseconds for Surrealism WASM modules
+/// (default: none / unlimited). Combined with module config and query context timeout
+/// via `min()` to produce the effective deadline.
+pub static SURREALISM_MAX_EXECUTION_TIME: LazyLock<Option<u64>> = LazyLock::new(|| {
+	std::env::var("SURREAL_SURREALISM_MAX_EXECUTION_TIME").ok().and_then(|s| {
+		match s.parse::<u64>() {
+			Ok(v) => Some(v),
+			Err(e) => {
+				tracing::warn!("Invalid SURREAL_SURREALISM_MAX_EXECUTION_TIME: {e}");
+				None
+			}
+		}
+	})
+});
+
+/// Per-module KV store entry count ceiling for Surrealism WASM modules (default: none / unlimited).
+/// Effective limit is `min(this, module_config.max_kv_entries)` when both are set.
+pub static SURREALISM_MAX_KV_ENTRIES: LazyLock<Option<usize>> = LazyLock::new(|| {
+	std::env::var("SURREAL_SURREALISM_MAX_KV_ENTRIES").ok().and_then(|s| match s.parse::<usize>() {
+		Ok(v) => Some(v),
+		Err(e) => {
+			tracing::warn!("Invalid SURREAL_SURREALISM_MAX_KV_ENTRIES: {e}");
+			None
+		}
+	})
+});
+
+/// Per-module KV store maximum value size in bytes for Surrealism WASM modules
+/// (default: none / unlimited). Effective limit is
+/// `min(this, module_config.max_kv_value_bytes)` when both are set.
+pub static SURREALISM_MAX_KV_VALUE_BYTES: LazyLock<Option<usize>> = LazyLock::new(|| {
+	std::env::var("SURREAL_SURREALISM_MAX_KV_VALUE_BYTES").ok().and_then(|s| {
+		match s.parse::<usize>() {
+			Ok(v) => Some(v),
+			Err(e) => {
+				tracing::warn!("Invalid SURREAL_SURREALISM_MAX_KV_VALUE_BYTES: {e}");
+				None
+			}
+		}
+	})
+});
+
+/// Maximum aggregate size in bytes for attached filesystem entries in `.surli` archives
+/// (default: 100 MiB). Applied when unpacking module archives during `DEFINE MODULE` or
+/// eager loading.
+pub static SURREALISM_MAX_FS_BYTES: LazyLock<u64> = LazyLock::new(|| {
+	std::env::var("SURREAL_SURREALISM_MAX_FS_BYTES")
+		.ok()
+		.and_then(|s| match s.parse::<u64>() {
+			Ok(v) => Some(v),
+			Err(e) => {
+				tracing::warn!("Invalid SURREAL_SURREALISM_MAX_FS_BYTES: {e}");
+				None
+			}
+		})
+		.unwrap_or(100 * 1024 * 1024)
+});
+
+/// Log level for Surrealism module stdout output (default: "debug").
+/// Controls the tracing level at which module stdout is emitted.
+/// Valid values: "trace", "debug", "info", "warn", "error".
+pub static SURREALISM_LOG_LEVEL: LazyLock<String> = LazyLock::new(|| {
+	std::env::var("SURREAL_SURREALISM_LOG_LEVEL")
+		.unwrap_or_else(|_| "debug".to_string())
+		.to_lowercase()
+});
+
 /// The maximum number of keys that should be scanned at once in general queries
 /// (default: 500)
 pub static NORMAL_FETCH_SIZE: LazyLock<u32> =

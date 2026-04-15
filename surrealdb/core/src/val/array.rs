@@ -8,7 +8,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::expr::Expr;
-use crate::val::{IndexFormat, Value};
+use crate::val::{IndexFormat, Set, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
@@ -118,9 +118,21 @@ impl Array {
 		self
 	}
 
+	// Removes all values in the array from those in a BTreeSet which are equal to a value.
+	pub fn remove_all_set(mut self, other: &BTreeSet<Value>) -> Self {
+		self.retain(|x| !other.contains(x));
+		self
+	}
+
 	/// Concatenates the two arrays returning an array with the values of both arrays.
 	pub fn concat(mut self, mut other: Array) -> Self {
 		self.0.append(&mut other.0);
+		self
+	}
+
+	/// Concatenates the items of a set into an array, returning an array with the values of both.
+	pub fn concat_set(mut self, other: Set) -> Self {
+		self.0.append(&mut other.0.into_iter().collect());
 		self
 	}
 

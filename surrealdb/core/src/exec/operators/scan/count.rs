@@ -20,8 +20,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::instrument;
 
-use crate::catalog::{DatabaseId, NamespaceId, Permission};
+use crate::catalog::{DatabaseId, Index, NamespaceId, Permission};
 use crate::err::Error;
+use crate::exec::operators::scan::index_count::sum_index_count_deltas;
 use crate::exec::permission::{
 	PhysicalPermission, convert_permission_to_physical, should_check_perms,
 	validate_record_user_access,
@@ -144,10 +145,10 @@ impl ExecOperator for CountScan {
 					Some(
 						v.cast_to::<crate::val::Datetime>()
 							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp()?,
+							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// Evaluate the source expression to get the table name (or range).
@@ -168,7 +169,7 @@ impl ExecOperator for CountScan {
 
 			// Verify that the table exists.
 			let table_def = db_ctx
-				.get_table_def(&table_name)
+				.get_table_def(&table_name, version)
 				.await
 				.context("Failed to get table")?;
 
@@ -220,11 +221,44 @@ impl ExecOperator for CountScan {
 					&rid.key, &txn, version,
 				).await?
 			} else {
-				// Full table
-				let beg = record::prefix(ns.namespace_id, db.database_id, &table_name)?;
-				let end = record::suffix(ns.namespace_id, db.database_id, &table_name)?;
-				txn.count(beg..end, version).await
-					.context("Failed to count table records")?
+				// Check for an unconditional COUNT index first (O(deltas) vs O(records))
+				let count_from_index = if version.is_none() {
+					let indexes = db_ctx
+						.get_table_indexes(&table_name, version)
+						.await
+						.ok();
+					if let Some(indexes) = indexes {
+						let matching = indexes.iter().find(|ix| {
+							matches!(&ix.index, Index::Count(None))
+						});
+						if let Some(ix_def) = matching {
+							sum_index_count_deltas(
+								&ctx,
+								&txn,
+								ns.namespace_id,
+								db.database_id,
+								&table_name,
+								ix_def.index_id,
+							).await.ok()
+						} else {
+							None
+						}
+					} else {
+						None
+					}
+				} else {
+					None
+				};
+
+				if let Some(count) = count_from_index {
+					count
+				} else {
+					// Fallback: iterate all KV keys
+					let beg = record::prefix(ns.namespace_id, db.database_id, &table_name)?;
+					let end = record::suffix(ns.namespace_id, db.database_id, &table_name)?;
+					txn.count(beg..end, version).await
+						.context("Failed to count table records")?
+				}
 			};
 
 			yield make_count_batch(count, &field_names);

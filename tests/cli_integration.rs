@@ -1143,6 +1143,19 @@ mod cli_integration {
 		assert!(common::run_in_dir("validate", &temp_dir).output().is_err());
 	}
 
+	#[test]
+	fn validate_stdin_with_valid_query() {
+		let mut child = common::run("validate --stdin").input("CREATE thing:success;");
+		let output = child.output().unwrap();
+		assert!(output.contains("<stdin>: OK"), "expected OK, got: {output}");
+	}
+
+	#[test]
+	fn validate_stdin_with_invalid_query() {
+		let mut child = common::run("validate --stdin").input("CREATE $thing WHERE value = '';");
+		assert!(child.output().is_err());
+	}
+
 	#[cfg(unix)]
 	#[test(tokio::test)]
 	async fn test_server_graceful_shutdown() {

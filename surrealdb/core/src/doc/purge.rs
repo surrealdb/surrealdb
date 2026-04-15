@@ -138,8 +138,9 @@ impl Document {
 				// Decode the key
 				let ref_key = Ref::decode_key(&key)?;
 				// Obtain the remote field definition
-				let Some(fd) =
-					txn.get_tb_field(ns, db, ref_key.ft.as_ref(), ref_key.ff.as_ref()).await?
+				let Some(fd) = txn
+					.get_tb_field(ns, db, ref_key.ft.as_ref(), ref_key.ff.as_ref(), None)
+					.await?
 				else {
 					return Err(Error::FdNotFound {
 						name: ref_key.ff.to_string(),

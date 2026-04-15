@@ -470,7 +470,7 @@ where
 		for &node_id in nodes {
 			if let Some(val) = self.graph.node_to_val(&node_id) {
 				let key = self.ikb.new_hn_key(self.level, node_id);
-				tx.set(&key, &val, None).await?;
+				tx.set(&key, &val).await?;
 			}
 		}
 		// Increase the version
@@ -548,7 +548,7 @@ where
 			for &node_id in &self.graph.node_ids() {
 				if let Some(node_val) = self.graph.node_to_val(&node_id) {
 					let key = self.ikb.new_hn_key(self.level, node_id);
-					tx.set(&key, &node_val, None).await?;
+					tx.set(&key, &node_val).await?;
 				}
 			}
 			// Delete old Hl chunk keys in a single range deletion

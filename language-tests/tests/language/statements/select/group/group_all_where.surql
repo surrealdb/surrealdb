@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test GROUP ALL with WHERE clause for filtering before aggregating entire dataset"
 

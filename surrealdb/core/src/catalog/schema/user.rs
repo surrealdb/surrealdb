@@ -71,7 +71,7 @@ impl InfoStructure for UserDefinition {
 			"roles".to_string() => Array::from(self.roles.into_iter().map(Value::from).collect::<Vec<_>>()).into(),
 			"duration".to_string() => Value::from(map! {
 				"token".to_string() => self.token_duration.map(Value::from).unwrap_or(Value::None),
-				"session".to_string() => self.token_duration.map(Value::from).unwrap_or(Value::None),
+				"session".to_string() => self.session_duration.map(Value::from).unwrap_or(Value::None),
 			}),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})

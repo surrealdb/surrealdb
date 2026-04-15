@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test limit pushdown to IndexScan when index covers ORDER BY"
 

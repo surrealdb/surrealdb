@@ -156,7 +156,7 @@ async fn execute_table_info(
 				value
 					.cast_to::<Datetime>()
 					.map_err(|e| anyhow::anyhow!("{e}"))?
-					.to_version_stamp()?,
+					.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?,
 			)
 		}
 		None => None,
@@ -168,17 +168,17 @@ async fn execute_table_info(
 	// Create the result set
 	if structured {
 		Ok(Value::from(map! {
-			"events".to_string() => process(txn.all_tb_events(ns, db, &tb).await?),
+			"events".to_string() => process(txn.all_tb_events(ns, db, &tb, version).await?),
 			"fields".to_string() => process(txn.all_tb_fields(ns, db, &tb, version).await?),
-			"indexes".to_string() => process(txn.all_tb_indexes(ns, db, &tb).await?),
-			"lives".to_string() => process(txn.all_tb_lives(ns, db, &tb).await?),
-			"tables".to_string() => process(txn.all_tb_views(ns, db, &tb).await?),
+			"indexes".to_string() => process(txn.all_tb_indexes(ns, db, &tb, version).await?),
+			"lives".to_string() => process(txn.all_tb_lives(ns, db, &tb, version).await?),
+			"tables".to_string() => process(txn.all_tb_views(ns, db, &tb, version).await?),
 		}))
 	} else {
 		Ok(Value::from(map! {
 			"events".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_tb_events(ns, db, &tb).await?.iter() {
+				for v in txn.all_tb_events(ns, db, &tb, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
@@ -192,21 +192,21 @@ async fn execute_table_info(
 			},
 			"indexes".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_tb_indexes(ns, db, &tb).await?.iter() {
+				for v in txn.all_tb_indexes(ns, db, &tb, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
 			"lives".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_tb_lives(ns, db, &tb).await?.iter() {
+				for v in txn.all_tb_lives(ns, db, &tb, version).await?.iter() {
 					out.insert(v.id.to_string(), v.to_sql().into());
 				}
 				out.into()
 			},
 			"tables".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_tb_views(ns, db, &tb).await?.iter() {
+				for v in txn.all_tb_views(ns, db, &tb, version).await?.iter() {
 					out.insert(v.name.clone().into_string(), v.to_sql().into());
 				}
 				out.into()

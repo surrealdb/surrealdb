@@ -209,7 +209,6 @@ async fn http_request(
 	use crate::cnf::SURREALDB_USER_AGENT;
 	use crate::err::Error;
 	use crate::sql::expression::convert_public_value_to_internal;
-	use crate::syn;
 	use crate::types::{PublicBytes, PublicValue};
 
 	let url = url::Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.clone()))?;
@@ -318,8 +317,9 @@ async fn http_request(
 				Some(mime) => match mime.to_str() {
 					Ok(v) if v.starts_with("application/json") => {
 						let txt = res.text().await.map_err(Error::from)?;
-						let val = syn::json(&txt)
+						let json: serde_json::Value = serde_json::from_str(&txt)
 							.map_err(|e| Error::Http(format!("Failed to parse JSON: {}", e)))?;
+						let val = crate::rpc::format::json::json_to_value(json);
 						Ok(convert_public_value_to_internal(val))
 					}
 					Ok(v) if v.starts_with("application/octet-stream") => {

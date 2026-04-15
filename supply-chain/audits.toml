@@ -36,6 +36,11 @@ who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
 version = "0.25.5"
 
+[[audits.castaway]]
+who = "Rushmore Mushambi <rushmore@surrealdb.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.2 -> 0.2.4"
+
 [[audits.const-random]]
 who = "Micha de Vries <micha@devrie.sh>"
 criteria = "safe-to-deploy"
@@ -76,6 +81,22 @@ delta = "0.2.161 -> 0.2.162"
 who = "Tobie Morgan Hitchcock <tobie@surrealdb.com>"
 criteria = "safe-to-deploy"
 delta = "0.2.162 -> 0.2.168"
+
+[[audits.logos]]
+who = "Mees Delzenne <mees.delzenne@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.16.1"
+
+[[audits.logos-codegen]]
+who = "Mees Delzenne <mees.delzenne@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.16.1"
+
+[[audits.logos-derive]]
+who = "Mees Delzenne <mees.delzenne@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.16.1"
+notes = "Tiny crate, just calling code in logos-codegen"
 
 [[audits.md5]]
 who = "Micha de Vries <micha@devrie.sh>"
@@ -465,6 +486,12 @@ user-id = 131098
 start = "2023-07-29"
 end = "2026-05-06"
 
+[[trusted.dialoguer]]
+criteria = "safe-to-deploy"
+user-id = 4556 # Dirkjan Ochtman (djc)
+start = "2025-08-23"
+end = "2027-03-20"
+
 [[trusted.digest]]
 criteria = "safe-to-deploy"
 user-id = 267 # Tony Arcieri (tarcieri)
@@ -656,6 +683,12 @@ criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-02-19"
 end = "2025-01-24"
+
+[[trusted.inventory]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-08-15"
+end = "2027-03-20"
 
 [[trusted.io-extras]]
 criteria = "safe-to-deploy"
@@ -1613,7 +1646,7 @@ end = "2026-10-30"
 
 [[trusted.wasmtime-versioned-export-macros]]
 criteria = "safe-to-deploy"
-user-id = 73222
+user-id = 73222 # wasmtime-publish
 start = "2023-08-21"
 end = "2026-10-30"
 
@@ -1670,6 +1703,12 @@ criteria = "safe-to-deploy"
 user-id = 64539 # Kenny Kerr (kennykerr)
 start = "2024-02-02"
 end = "2025-09-03"
+
+[[trusted.windows-sys]]
+criteria = "safe-to-deploy"
+user-id = 64539 # Kenny Kerr (kennykerr)
+start = "2021-11-15"
+end = "2027-03-20"
 
 [[trusted.windows-targets]]
 criteria = "safe-to-deploy"

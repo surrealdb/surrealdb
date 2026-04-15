@@ -23,7 +23,7 @@ impl RemoveModelStatement {
 		let txn = ctx.tx();
 		// Get the defined model
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let ml = match txn.get_db_model(ns, db, &self.name, &self.version).await? {
+		let ml = match txn.get_db_model(ns, db, &self.name, &self.version, None).await? {
 			Some(x) => x,
 			None => {
 				if self.if_exists {

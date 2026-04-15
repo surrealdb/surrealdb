@@ -1,7 +1,4 @@
 /**
-[env]
-new-planner-strategy = "best-effort-ro"
-
 [test]
 
 [[test.results]]
@@ -26,9 +23,6 @@ value = "NONE"
 value = "[{ id: page:1, sc1: 0f, sc2: 0f }, { id: page:2, sc1: 0f, sc2: 0f }]"
 
 [[test.results]]
-value = """{ attributes: { projections: 'id, sc1, sc2' }, children: [{ attributes: { fields: 'sc1 = search::score(...), sc2 = search::score(...)' }, children: [{ attributes: { predicate: "title @1@ 'dog' OR content @2@ 'dog'" }, children: [{ attributes: { access: "= 'test'", direction: 'Forward', index: 'page_host' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', expressions: [{ role: 'predicate', sql: "title @1@ 'dog' OR content @2@ 'dog'" }], operator: 'Filter' }], context: 'Db', expressions: [{ role: 'sc1', sql: 'search::score(...)' }, { role: 'sc2', sql: 'search::score(...)' }], operator: 'Compute' }], context: 'Db', operator: 'SelectProject' }"""
-
-[[test.results]]
 value = "[{ id: page:1, sc1: 0f, sc2: 0f }, { id: page:2, sc1: 0f, sc2: 0f }]"
 
 [[test.results]]
@@ -43,9 +37,6 @@ DEFINE INDEX page_content ON page FIELDS content FULLTEXT ANALYZER simple BM25;
 DEFINE INDEX page_host ON page FIELDS host;
 SELECT id, search::score(1) as sc1, search::score(2) as sc2
 	FROM page WHERE (title @1@ 'dog' OR content @2@ 'dog');
-SELECT id, search::score(1) as sc1, search::score(2) as sc2
-	FROM page WHERE host = 'test'
-	AND (title @1@ 'dog' OR content @2@ 'dog') explain;
 SELECT id, search::score(1) as sc1, search::score(2) as sc2
 	FROM page WHERE
 	host = 'test'

@@ -70,7 +70,7 @@ impl IndexStores {
 		tx: &Transaction,
 		ns: NamespaceId,
 	) -> Result<()> {
-		for db in tx.all_db(ns).await?.iter() {
+		for db in tx.all_db(ns, None).await?.iter() {
 			self.database_removed(ib, tx, ns, db.database_id).await?;
 		}
 		Ok(())
@@ -97,7 +97,7 @@ impl IndexStores {
 		db: DatabaseId,
 		tb: &TableDefinition,
 	) -> Result<()> {
-		for ix in tx.all_tb_indexes(ns, db, &tb.name).await?.iter() {
+		for ix in tx.all_tb_indexes(ns, db, &tb.name, None).await?.iter() {
 			if let Some(ib) = ib {
 				ib.remove_index(ns, db, &tb.name, ix.index_id).await?;
 			}
@@ -122,7 +122,7 @@ impl IndexStores {
 
 	async fn remove_hnsw_index(&self, tb: TableId, ikb: IndexKeyBase) -> Result<()> {
 		self.0.hnsw_indexes.remove(tb, &ikb).await?;
-		self.0.vector_cache.remove_index(tb, ikb.index()).await;
+		self.0.vector_cache.remove_index(ikb.ns(), ikb.db(), tb, ikb.index()).await;
 		Ok(())
 	}
 

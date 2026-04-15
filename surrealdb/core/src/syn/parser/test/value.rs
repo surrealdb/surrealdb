@@ -215,13 +215,13 @@ fn constant_lowercase() {
 		parser.parse_expr_field(stk).await
 	})
 	.unwrap();
-	assert_eq!(out, Expr::Constant(Constant::MathInf));
+	assert_eq!(out, Expr::Constant(Constant::MathInfinity));
 
 	let out = syn::parse_with(r#" math::neg_inf "#.as_bytes(), async |parser, stk| {
 		parser.parse_expr_field(stk).await
 	})
 	.unwrap();
-	assert_eq!(out, Expr::Constant(Constant::MathNegInf));
+	assert_eq!(out, Expr::Constant(Constant::MathNegInfinity));
 
 	let out = syn::parse_with(r#" time::epoch "#.as_bytes(), async |parser, stk| {
 		parser.parse_expr_field(stk).await
@@ -238,17 +238,17 @@ fn constant_uppercase() {
 	.unwrap();
 	assert_eq!(out, Expr::Constant(Constant::MathPi));
 
-	let out = syn::parse_with(r#" MATH::INF "#.as_bytes(), async |parser, stk| {
+	let out = syn::parse_with(r#" MATH::INFINITY "#.as_bytes(), async |parser, stk| {
 		parser.parse_expr_field(stk).await
 	})
 	.unwrap();
-	assert_eq!(out, Expr::Constant(Constant::MathInf));
+	assert_eq!(out, Expr::Constant(Constant::MathInfinity));
 
-	let out = syn::parse_with(r#" MATH::NEG_INF "#.as_bytes(), async |parser, stk| {
+	let out = syn::parse_with(r#" MATH::NEG_INFINITY "#.as_bytes(), async |parser, stk| {
 		parser.parse_expr_field(stk).await
 	})
 	.unwrap();
-	assert_eq!(out, Expr::Constant(Constant::MathNegInf));
+	assert_eq!(out, Expr::Constant(Constant::MathNegInfinity));
 
 	let out = syn::parse_with(r#" TIME::EPOCH "#.as_bytes(), async |parser, stk| {
 		parser.parse_expr_field(stk).await
@@ -265,17 +265,17 @@ fn constant_mixedcase() {
 	.unwrap();
 	assert_eq!(out, Expr::Constant(Constant::MathPi));
 
-	let out = syn::parse_with(r#" MaTh::Inf "#.as_bytes(), async |parser, stk| {
+	let out = syn::parse_with(r#" MaTh::InfiniTy "#.as_bytes(), async |parser, stk| {
 		parser.parse_expr_field(stk).await
 	})
 	.unwrap();
-	assert_eq!(out, Expr::Constant(Constant::MathInf));
+	assert_eq!(out, Expr::Constant(Constant::MathInfinity));
 
-	let out = syn::parse_with(r#" MaTh::Neg_Inf "#.as_bytes(), async |parser, stk| {
+	let out = syn::parse_with(r#" MaTh::Neg_InfiniTy "#.as_bytes(), async |parser, stk| {
 		parser.parse_expr_field(stk).await
 	})
 	.unwrap();
-	assert_eq!(out, Expr::Constant(Constant::MathNegInf));
+	assert_eq!(out, Expr::Constant(Constant::MathNegInfinity));
 
 	let out = syn::parse_with(r#" TiME::ePoCH "#.as_bytes(), async |parser, stk| {
 		parser.parse_expr_field(stk).await

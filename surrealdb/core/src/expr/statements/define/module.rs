@@ -40,7 +40,7 @@ impl DefineModuleStatement {
 		// Check if the definition exists
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let storage_name = ModuleName::try_from(self)?.get_storage_name();
-		if txn.get_db_module(ns, db, &storage_name).await.is_ok() {
+		if txn.get_db_module(ns, db, &storage_name, None).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -103,6 +103,19 @@ impl DefineModuleStatement {
 		.await?;
 		// Clear the cache
 		txn.clear_cache();
+		// Warm the surrealism runtime cache for the newly defined module
+		#[cfg(feature = "surrealism")]
+		if let ModuleExecutable::Surrealism(surrealism) = &self.executable {
+			let lookup =
+				SurrealismCacheLookup::File(&ns, &db, &surrealism.0.bucket, &surrealism.0.key);
+			if let Err(e) = ctx.get_surrealism_runtime(lookup).await {
+				tracing::warn!(
+					module = ?self.name,
+					error = %e,
+					"Failed to eagerly load surrealism module into cache"
+				);
+			}
+		}
 		// Ok all good
 		Ok(Value::None)
 	}

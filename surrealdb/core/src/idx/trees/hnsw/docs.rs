@@ -11,15 +11,13 @@ use crate::idx::trees::hnsw::index::HnswContext;
 use crate::idx::trees::knn::Ids64;
 use crate::idx::trees::vector::{SerializedVector, Vector};
 use crate::kvs::{KVValue, Transaction};
-use crate::val::{RecordId, RecordIdKey, TableName};
+use crate::val::{RecordId, RecordIdKey};
 
 /// Manages the bidirectional mapping between record IDs and internal document IDs.
 ///
 /// Maintains a pool of available (recycled) doc IDs and a monotonic counter
 /// for allocating new ones, persisting the state to the key-value store.
 pub(in crate::idx) struct HnswDocs {
-	/// The table name, used to reconstruct full record IDs.
-	tb: TableName,
 	/// Key base for generating storage keys.
 	ikb: IndexKeyBase,
 	/// Whether the state has been modified and needs to be persisted.
@@ -40,15 +38,10 @@ pub(crate) struct HnswDocsState {
 
 impl HnswDocs {
 	/// Creates a new `HnswDocs`, loading existing state from the key-value store.
-	pub(in crate::idx) async fn new(
-		tx: &Transaction,
-		tb: TableName,
-		ikb: IndexKeyBase,
-	) -> Result<Self> {
+	pub(in crate::idx) async fn new(tx: &Transaction, ikb: IndexKeyBase) -> Result<Self> {
 		let state_key = ikb.new_hd_root_key();
 		let state = tx.get(&state_key, None).await?.unwrap_or_default();
 		Ok(Self {
-			tb,
 			ikb,
 			state_updated: false,
 			state,
@@ -56,12 +49,15 @@ impl HnswDocs {
 	}
 
 	/// Looks up the internal doc ID for a given record key, if it exists.
+	///
+	/// This is a static method that reads directly from the key-value store,
+	/// avoiding the need to hold a lock on `HnswDocs`.
 	pub(super) async fn get_doc_id(
-		&self,
+		ikb: &IndexKeyBase,
 		tx: &Transaction,
 		id: &RecordIdKey,
 	) -> Result<Option<DocId>> {
-		tx.get(&self.ikb.new_hi_key(id), None).await
+		tx.get(&ikb.new_hi_key(id), None).await
 	}
 
 	/// Resolves a record key to its internal doc ID, creating a new mapping if needed.
@@ -71,9 +67,9 @@ impl HnswDocs {
 		} else {
 			let doc_id = self.next_doc_id();
 			let id_key = self.ikb.new_hi_key(id);
-			tx.set(&id_key, &doc_id, None).await?;
+			tx.set(&id_key, &doc_id).await?;
 			let doc_key = self.ikb.new_hd_key(doc_id);
-			tx.set(&doc_key, id, None).await?;
+			tx.set(&doc_key, id).await?;
 			Ok(doc_id)
 		}
 	}
@@ -92,15 +88,19 @@ impl HnswDocs {
 	}
 
 	/// Retrieves the full record ID for a given internal doc ID.
+	///
+	/// This is a static method that reads directly from the key-value store,
+	/// reconstructing the table name from the [`IndexKeyBase`]. This avoids
+	/// the need to hold a lock on `HnswDocs`.
 	pub(super) async fn get_thing(
-		&self,
+		ikb: &IndexKeyBase,
 		tx: &Transaction,
 		doc_id: DocId,
 	) -> Result<Option<RecordId>> {
-		let doc_key = self.ikb.new_hd_key(doc_id);
+		let doc_key = ikb.new_hd_key(doc_id);
 		if let Some(id) = tx.get(&doc_key, None).await? {
 			Ok(Some(RecordId {
-				table: self.tb.clone(),
+				table: ikb.table().clone(),
 				key: id,
 			}))
 		} else {
@@ -119,6 +119,7 @@ impl HnswDocs {
 		let Some(id) = tx.get(&doc_key, None).await? else {
 			return Ok(None);
 		};
+		self.state_updated = true;
 		tx.del(&doc_key).await?;
 		let id_key = self.ikb.new_hi_key(&id);
 		if let Some(doc_id) = tx.get(&id_key, None).await? {
@@ -130,12 +131,14 @@ impl HnswDocs {
 		}
 	}
 
-	/// Persists the document allocation state if it has been modified.
+	/// Persists the document allocation state if it has been modified,
+	/// then resets the dirty flag so subsequent calls are no-ops until
+	/// the state is modified again.
 	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
 		if self.state_updated {
 			let state_key = self.ikb.new_hd_root_key();
-			tx.set(&state_key, &self.state, None).await?;
-			self.state_updated = true;
+			tx.set(&state_key, &self.state).await?;
+			self.state_updated = false;
 		}
 		Ok(())
 	}
@@ -143,14 +146,14 @@ impl HnswDocs {
 
 impl KVValue for HnswDocsState {
 	#[inline]
-	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		let mut val = Vec::new();
 		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
 		Ok(val)
 	}
 
 	#[inline]
-	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
+	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
 		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
@@ -336,20 +339,20 @@ impl VecDocs {
 				//  We don't have the vector, we insert it in the graph
 				let element_id = h.insert(ctx, o).await?;
 				let ehd = ElementHashedDocs::new(element_id, ser_vec, doc_id);
-				ctx.tx.set(&key, &ehd, None).await?;
+				ctx.tx.set(&key, &ehd).await?;
 			}
 			Some(mut ehd) => {
 				if let Some(ed) = ehd.get_element_docs(&ser_vec) {
 					// We already have the vector
 					if let Some(docs) = ed.docs.insert(doc_id) {
 						ed.docs = docs;
-						ctx.tx.set(&key, &ehd, None).await?;
+						ctx.tx.set(&key, &ehd).await?;
 					};
 				} else {
 					//  We don't have the vector, we insert it in the graph
 					let element_id = h.insert(ctx, o).await?;
 					ehd.add(element_id, ser_vec, doc_id);
-					ctx.tx.set(&key, &ehd, None).await?;
+					ctx.tx.set(&key, &ehd).await?;
 				}
 			}
 		};
@@ -384,7 +387,7 @@ impl VecDocs {
 				Some(ed)
 			}
 		} {
-			ctx.tx.set(&key, &ed, None).await?;
+			ctx.tx.set(&key, &ed).await?;
 		}
 		Ok(())
 	}
@@ -405,7 +408,7 @@ impl VecDocs {
 					h.remove(ctx, deleted_element_id).await?;
 				}
 				RemoveResult::Updated(deleted_element_id) => {
-					ctx.tx.set(&key, &ehd, None).await?;
+					ctx.tx.set(&key, &ehd).await?;
 					if let Some(deleted_element_id) = deleted_element_id {
 						h.remove(ctx, deleted_element_id).await?;
 					}
@@ -439,7 +442,7 @@ impl VecDocs {
 				h.remove(ctx, ed.e_id).await?;
 			} else {
 				ed.docs = new_docs;
-				ctx.tx.set(&key, &ed, None).await?;
+				ctx.tx.set(&key, &ed).await?;
 			}
 		};
 		Ok(())

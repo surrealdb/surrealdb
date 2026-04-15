@@ -1,6 +1,6 @@
 //! Module defining the configuration schema.
 
-//mod bytes_hack;
+pub(crate) const DEFAULT_TIMEOUT_MS: u64 = 5000;
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -8,6 +8,7 @@ use std::str::FromStr;
 
 use semver::VersionReq;
 use serde::{Deserialize, Serialize, de};
+use surrealdb_core::dbs::NewPlannerStrategy;
 use surrealdb_core::dbs::capabilities::{
 	ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 };
@@ -48,16 +49,24 @@ impl TestConfig {
 
 	/// Returns if this test must be run without other test running.
 	pub fn should_run_sequentially(&self) -> bool {
-		self.env.as_ref().map(|x| x.sequential).unwrap_or(
-			// TODO(ssttuu): This should be `true` but we're currently having flakiness issues.
-			false,
-		)
+		self.env.as_ref().map(|x| x.sequential).unwrap_or(false)
 	}
 
 	/// Whether this test can use one of the datastorage struct which are reused between tests.
 	/// Versioned tests always need a fresh datastore since they require different configuration.
 	pub fn can_use_reusable_ds(&self) -> bool {
 		self.env.as_ref().map(|x| !x.clean && !x.versioned).unwrap_or(false)
+	}
+
+	/// Returns the planner strategies this test should run under.
+	/// Defaults to `[ComputeOnly, AllRo]` when no explicit list is provided.
+	pub fn planner_strategies(&self) -> &[NewPlannerStrategyConfig] {
+		let strategies = self.env.as_ref().map(|e| e.planner_strategy.as_slice()).unwrap_or(&[]);
+		if strategies.is_empty() {
+			NewPlannerStrategyConfig::DEFAULT_STRATEGIES
+		} else {
+			strategies
+		}
 	}
 
 	/// Returns a list of keys which are not in the schema but still define.
@@ -120,11 +129,11 @@ pub struct TestEnv {
 	/// When true, the datastore is created with `?versioned=true` in the connection string.
 	#[serde(default)]
 	pub versioned: bool,
-	/// Strategy for the new streaming planner/executor.
-	/// - "best-effort-ro" (default): try new planner, fall back on Unimplemented
-	/// - "all-ro": require new planner for all read-only statements (hard fail)
-	/// - "compute-only": skip new planner entirely
-	pub new_planner_strategy: Option<NewPlannerStrategyConfig>,
+	/// Planner strategies to run this test under.
+	/// Defaults to `["compute-only", "all-ro"]` when omitted; the test is
+	/// executed once per listed strategy.
+	#[serde(default)]
+	pub planner_strategy: Vec<NewPlannerStrategyConfig>,
 
 	/// Whether EXPLAIN ANALYZE output omits elapsed durations, making
 	/// output deterministic for test assertions. Defaults to true in the
@@ -162,7 +171,7 @@ impl TestEnv {
 
 	/// Returns the timeout for this test in milliseconds.
 	/// If a backend-specific timeout is set and matches the current backend, it takes precedence.
-	/// Falls back to the base timeout, defaulting to 1000ms.
+	/// Falls back to the base timeout, defaulting to [`DEFAULT_TIMEOUT_MS`].
 	pub fn timeout(&self, backend: Option<&str>) -> Option<u64> {
 		// Check for backend-specific override first
 		let override_timeout = match backend {
@@ -173,16 +182,16 @@ impl TestEnv {
 		};
 
 		if let Some(t) = override_timeout {
-			return t.into_value(1000);
+			return t.into_value(DEFAULT_TIMEOUT_MS);
 		}
 
 		// Fall back to base timeout
-		self.timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
+		self.timeout.map(|x| x.into_value(DEFAULT_TIMEOUT_MS)).unwrap_or(Some(DEFAULT_TIMEOUT_MS))
 	}
 
 	/// Returns the context timeout for this test in milliseconds.
 	/// If a backend-specific context timeout is set and matches the current backend, it takes precedence.
-	/// Falls back to the base context_timeout, defaulting to 1000ms.
+	/// Falls back to the base context_timeout, defaulting to [`DEFAULT_TIMEOUT_MS`].
 	pub fn context_timeout(&self, backend: Option<&str>) -> Option<u64> {
 		// Check for backend-specific override first
 		let override_timeout = match backend {
@@ -193,11 +202,11 @@ impl TestEnv {
 		};
 
 		if let Some(t) = override_timeout {
-			return t.into_value(1000);
+			return t.into_value(DEFAULT_TIMEOUT_MS);
 		}
 
 		// Fall back to base context_timeout
-		self.context_timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
+		self.context_timeout.map(|x| x.into_value(DEFAULT_TIMEOUT_MS)).unwrap_or(Some(DEFAULT_TIMEOUT_MS))
 	}
 
 	pub fn unused_keys(&self) -> Vec<String> {
@@ -224,6 +233,41 @@ pub enum NewPlannerStrategyConfig {
 	AllRo,
 	/// Skip new planner entirely; always use legacy compute.
 	ComputeOnly,
+}
+
+impl NewPlannerStrategyConfig {
+	pub const DEFAULT_STRATEGIES: &[NewPlannerStrategyConfig] =
+		&[NewPlannerStrategyConfig::ComputeOnly, NewPlannerStrategyConfig::AllRo];
+}
+
+impl fmt::Display for NewPlannerStrategyConfig {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::BestEffortRo => f.write_str("best-effort-ro"),
+			Self::AllRo => f.write_str("all-ro"),
+			Self::ComputeOnly => f.write_str("compute-only"),
+		}
+	}
+}
+
+impl From<NewPlannerStrategy> for NewPlannerStrategyConfig {
+	fn from(strategy: NewPlannerStrategy) -> Self {
+		match strategy {
+			NewPlannerStrategy::BestEffortReadOnlyStatements => Self::BestEffortRo,
+			NewPlannerStrategy::ComputeOnly => Self::ComputeOnly,
+			NewPlannerStrategy::AllReadOnlyStatements => Self::AllRo,
+		}
+	}
+}
+
+impl From<NewPlannerStrategyConfig> for NewPlannerStrategy {
+	fn from(strategy: NewPlannerStrategyConfig) -> Self {
+		match strategy {
+			NewPlannerStrategyConfig::BestEffortRo => NewPlannerStrategy::BestEffortReadOnlyStatements,
+			NewPlannerStrategyConfig::ComputeOnly => NewPlannerStrategy::ComputeOnly,
+			NewPlannerStrategyConfig::AllRo => NewPlannerStrategy::AllReadOnlyStatements,
+		}
+	}
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -521,6 +565,7 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			flexible_record_id: true,
 			files_enabled: true,
 			surrealism_enabled: true,
+			json_string_escapes: false,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
@@ -583,6 +628,7 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			flexible_record_id: true,
 			files_enabled: true,
 			surrealism_enabled: true,
+			json_string_escapes: false,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
@@ -625,6 +671,7 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			flexible_record_id: true,
 			files_enabled: true,
 			surrealism_enabled: true,
+			json_string_escapes: false,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
@@ -632,10 +679,10 @@ impl<'de> Deserialize<'de> for SurrealObject {
 		})
 		.map_err(<D::Error as serde::de::Error>::custom)?;
 
-		v.into_object().map(SurrealObject).or_else(|err| {
-			Err(<D::Error as serde::de::Error>::custom(format_args!(
+		v.into_object().map(SurrealObject).map_err(|err| {
+			<D::Error as serde::de::Error>::custom(format_args!(
 				"Expected a object, found '{source}': {err}"
-			)))
+			))
 		})
 	}
 }

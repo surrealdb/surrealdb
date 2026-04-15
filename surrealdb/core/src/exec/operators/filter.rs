@@ -80,6 +80,10 @@ impl ExecOperator for Filter {
 		self.input.output_ordering()
 	}
 
+	fn constant_output_fields(&self) -> Vec<crate::exec::field_path::FieldPath> {
+		self.input.constant_output_fields()
+	}
+
 	#[instrument(name = "Filter::execute", level = "trace", skip_all)]
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
 		let input_stream = buffer_stream(

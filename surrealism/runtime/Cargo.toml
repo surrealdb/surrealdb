@@ -1,6 +1,6 @@
 [package]
 name = "surrealism-runtime"
-version = "0.1.9"
+version = "0.2.0"
 description = "Runtime for Surrealism"
 edition.workspace = true
 authors.workspace = true
@@ -13,8 +13,12 @@ license-file.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+hex.workspace = true
+ipnet.workspace = true
+parking_lot.workspace = true
 serde.workspace = true
 surrealdb-types.workspace = true
+url.workspace = true
 wasmtime.workspace = true
 surrealism-types = { workspace = true, features = ["host"] }
 tar.workspace = true
@@ -22,6 +26,13 @@ zstd.workspace = true
 semver.workspace = true
 wasmtime-wasi.workspace = true
 toml.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, default-features = false, features = ["sync", "io-util"] }
+tracing.workspace = true
+web-time.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
 
 [lints]
 workspace = true

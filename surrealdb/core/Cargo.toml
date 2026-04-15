@@ -264,3 +264,7 @@ harness = false
 [[bench]]
 name = "scanner"
 harness = false
+
+[[bench]]
+name = "import_load"
+harness = false

@@ -1,29 +1,13 @@
+use std::sync::OnceLock;
+
 use anyhow::Result;
 use surrealdb_types::SurrealValue;
 use surrealism::surrealism;
-// use surrealism::types::value::Value;
-// use surrealism::types::number::Number;
 
-// #[surrealism(init)]
-// fn init() -> Result<(), String> {
-//     // let _: () = surrealism::sql(r#"
-//     //     DEFINE TABLE demo_module_data;
-//     //     // some fields
-//     // "#).unwrap();
-
-//     // Simulate some initialization that could fail
-//     if std::env::var("FAIL_INIT").is_ok() {
-//         Err("Initialization failed due to environment variable".to_string())
-//     } else {
-//         Ok(())
-//     }
-// }
-
+/// Check whether a person is old enough to drive.
 #[surrealism]
 fn can_drive(age: i64) -> bool {
 	age >= 18
-
-	// surrealism::ml::some_sys_call()
 }
 
 #[derive(Debug, SurrealValue)]
@@ -33,7 +17,8 @@ struct User {
 	enabled: bool,
 }
 
-#[surrealism]
+/// Create a new user record if one does not already exist.
+#[surrealism(writeable)]
 fn create_user(user: User) -> Result<String> {
 	let exists: bool =
 		surrealism::run("fn::user_exists".to_string(), None, (user.name.clone(), user.age))?;
@@ -48,13 +33,19 @@ fn can_drive_bla(age: i64) -> bool {
 	age >= 18
 }
 
+/// Check whether a person is old enough to drink.
+#[surrealism]
+fn can_drink(#[name = "person_age"] age: i64) -> bool {
+	age >= 21
+}
+
 #[surrealism(default)]
 fn def(age: i64) -> bool {
 	age >= 18
 }
 
-// Test function that returns a Result
-#[surrealism]
+/// This doc comment is overridden by the explicit comment below.
+#[surrealism(comment = "Divide two integers, returning an error on division by zero.")]
 fn safe_divide(a: i64, b: i64) -> Result<i64, String> {
 	if b == 0 {
 		Err("Division by zero".to_string())
@@ -63,7 +54,6 @@ fn safe_divide(a: i64, b: i64) -> Result<i64, String> {
 	}
 }
 
-// Test function with a different error type
 #[surrealism]
 fn parse_number(input: String) -> Result<i64, std::num::ParseIntError> {
 	input.parse::<i64>()
@@ -80,7 +70,6 @@ fn result(should_fail: bool) -> Result<String> {
 
 #[surrealism]
 fn test_kv() -> Result<()> {
-	// set/get/del/exists
 	surrealism::kv::set("test", 0).expect("set test");
 	let tmp: Option<i64> = surrealism::kv::get("test").expect("get test");
 	assert_eq!(tmp, Some(0), "get test value");
@@ -88,7 +77,6 @@ fn test_kv() -> Result<()> {
 	let exists = surrealism::kv::exists("test").expect("exists test");
 	assert!(!exists, "test should not exist after delete");
 
-	// set multiple
 	surrealism::kv::set("test1", 1).expect("set test1");
 	surrealism::kv::set("test2", 2).expect("set test2");
 	surrealism::kv::set("test3", 3).expect("set test3");
@@ -96,7 +84,6 @@ fn test_kv() -> Result<()> {
 	surrealism::kv::set("test5", 5).expect("set test5");
 	surrealism::kv::set("test6", 6).expect("set test6");
 
-	// keys/values/entries/count
 	let keys = surrealism::kv::keys(..).expect("keys");
 	assert_eq!(keys, vec!["test1", "test2", "test3", "test4", "test5", "test6"], "keys");
 	let values: Vec<i64> = surrealism::kv::values(..).expect("values");
@@ -117,7 +104,6 @@ fn test_kv() -> Result<()> {
 	let count = surrealism::kv::count(..).expect("count");
 	assert_eq!(count, 6, "count");
 
-	// range queries
 	let keys_to_4 = surrealism::kv::keys(.."test4".to_string()).expect("keys_to_4");
 	assert_eq!(keys_to_4, vec!["test1", "test2", "test3"], "keys_to_4");
 	let values_to_4: Vec<i64> = surrealism::kv::values(.."test4".to_string()).expect("values_to_4");
@@ -132,7 +118,6 @@ fn test_kv() -> Result<()> {
 	let count_to_4 = surrealism::kv::count(.."test4".to_string()).expect("count_to_4");
 	assert_eq!(count_to_4, 3, "count_to_4");
 
-	// batch ops
 	let batch = surrealism::kv::get_batch(vec!["test1", "test3", "test5"]).expect("get_batch");
 	assert_eq!(batch, vec![Some(1), Some(3), Some(5)], "get_batch values");
 	surrealism::kv::set_batch(vec![("test1", 10), ("test3", 30), ("test5", 50)])
@@ -143,7 +128,6 @@ fn test_kv() -> Result<()> {
 	let values: Vec<i64> = surrealism::kv::values(..).expect("values after del_batch");
 	assert_eq!(values, vec![10, 30, 50], "values after del_batch");
 
-	// range delete
 	surrealism::kv::del_rng(.."test4".to_string()).expect("del_rng_to_4");
 	let values: Vec<i64> = surrealism::kv::values(..).expect("values after del_rng_to_4");
 	assert_eq!(values, vec![50], "values after del_rng_to_4");
@@ -151,7 +135,6 @@ fn test_kv() -> Result<()> {
 	let count = surrealism::kv::count(..).expect("count after del_rng");
 	assert_eq!(count, 0, "count after del_rng");
 
-	// Additional range examples
 	surrealism::kv::set("a", 1).expect("set a");
 	surrealism::kv::set("b", 2).expect("set b");
 	surrealism::kv::set("c", 3).expect("set c");
@@ -189,4 +172,110 @@ fn test_io() -> Result<String> {
 #[surrealism]
 fn test_none_value() -> Result<Vec<surrealdb_types::Value>> {
 	Ok(vec![surrealdb_types::Value::None])
+}
+
+static GREETING_CACHE: OnceLock<String> = OnceLock::new();
+
+#[surrealism(init)]
+fn init_greeting() -> Result<()> {
+	GREETING_CACHE.get_or_init(|| match std::fs::read_to_string("/greeting.txt") {
+		Ok(content) => content,
+		Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+			eprintln!("greeting.txt not found, using default");
+			"Hello".to_string()
+		}
+		Err(e) => {
+			eprintln!("Failed to read greeting.txt: {e}");
+			"Hello".to_string()
+		}
+	});
+	Ok(())
+}
+
+#[surrealism]
+fn cached_greeting() -> Result<String> {
+	let greeting = GREETING_CACHE.get().ok_or(anyhow::anyhow!("greeting not loaded"))?;
+	Ok(greeting.clone())
+}
+
+#[surrealism]
+fn read_greeting() -> Result<String> {
+	std::fs::read_to_string("/greeting.txt")
+		.map_err(|e| anyhow::anyhow!("Failed to read /greeting.txt: {e}"))
+}
+
+#[surrealism]
+fn read_config_version() -> Result<i64> {
+	let raw = std::fs::read_to_string("/data/config.json")
+		.map_err(|e| anyhow::anyhow!("Failed to read /data/config.json: {e}"))?;
+	let parsed: serde_json::Value = serde_json::from_str(&raw)
+		.map_err(|e| anyhow::anyhow!("Failed to parse config.json: {e}"))?;
+	parsed["version"]
+		.as_i64()
+		.ok_or_else(|| anyhow::anyhow!("version field missing or not an integer"))
+}
+
+#[surrealism]
+fn list_fs_root() -> Result<Vec<String>> {
+	let mut entries: Vec<String> = std::fs::read_dir("/")
+		.map_err(|e| anyhow::anyhow!("Failed to read /: {e}"))?
+		.filter_map(|entry| entry.ok().map(|e| e.file_name().to_string_lossy().to_string()))
+		.collect();
+	entries.sort();
+	Ok(entries)
+}
+
+#[surrealism]
+fn kv_set_value(key: String, value: i64) -> Result<()> {
+	surrealism::kv::set(&key, value)?;
+	Ok(())
+}
+
+#[surrealism]
+fn kv_get_value(key: String) -> Result<Option<i64>> {
+	surrealism::kv::get(&key)
+}
+
+// ---------------------------------------------------------------------------
+// Module namespace demo: exercises #[surrealism] on mod blocks
+// ---------------------------------------------------------------------------
+
+#[surrealism]
+mod math {
+	#[surrealism(default)]
+	fn double(x: i64) -> i64 {
+		x * 2
+	}
+
+	/// Add two integers.
+	#[surrealism]
+	fn add(a: i64, b: i64) -> i64 {
+		a + b
+	}
+
+	#[surrealism(name = "multiply")]
+	fn mul(a: i64, b: i64) -> i64 {
+		a * b
+	}
+}
+
+#[surrealism(name = "util")]
+mod utility_helpers {
+	#[surrealism(default)]
+	fn identity(x: i64) -> i64 {
+		x
+	}
+
+	#[surrealism(name = "negate")]
+	fn neg(x: i64) -> i64 {
+		-x
+	}
+
+	#[surrealism]
+	mod nested {
+		#[surrealism]
+		fn deep(x: i64) -> i64 {
+			x + 100
+		}
+	}
 }

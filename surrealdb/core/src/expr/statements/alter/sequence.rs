@@ -37,7 +37,7 @@ impl AlterSequenceStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the sequence definition
-		let mut sq = match txn.get_db_sequence(ns, db, &self.name).await {
+		let mut sq = match txn.get_db_sequence(ns, db, &self.name, None).await {
 			Ok(tb) => tb.deref().clone(),
 			Err(e) => {
 				if self.if_exists && matches!(e.downcast_ref(), Some(Error::SeqNotFound { .. })) {
@@ -63,7 +63,7 @@ impl AlterSequenceStatement {
 		}
 		// Set the sequence definition
 		let key = Sq::new(ns, db, &self.name);
-		txn.set(&key, &sq, None).await?;
+		txn.set(&key, &sq).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

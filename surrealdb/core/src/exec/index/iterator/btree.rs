@@ -71,24 +71,40 @@ fn decode_record_ids(res: Vec<(Key, Val)>) -> Result<Vec<RecordId>> {
 ///
 /// Non-unique indexes store one KV entry per (value, record-id) pair, so an
 /// equality lookup may match many entries.  This iterator scans the
-/// half-open range `[prefix_ids_beg, prefix_ids_end)` in forward order,
-/// advancing the `beg` cursor after each batch.
+/// half-open range `[prefix_ids_beg, prefix_ids_end)` in forward or
+/// backward order, advancing/retreating the cursor after each batch.
 pub(crate) struct IndexEqualIterator {
 	/// Lower bound of the remaining scan range (inclusive).
 	beg: Vec<u8>,
 	/// Upper bound of the scan range (exclusive, fixed).
 	end: Vec<u8>,
+	/// Whether to scan in reverse (highest to lowest key order).
+	reverse: bool,
 	/// `true` once the scan range is exhausted.
 	done: bool,
 }
 
 impl IndexEqualIterator {
-	/// Create a new equality iterator for the given index value.
+	/// Create a new equality iterator for the given index value (always forward).
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
 		value: &Value,
+	) -> Result<Self> {
+		Self::with_direction(ns, db, ix, value, false)
+	}
+
+	/// Create a new equality iterator with explicit direction.
+	///
+	/// When `reverse` is true, the iterator uses `tx.scanr()` to return
+	/// records in descending key order (highest to lowest record ID).
+	pub(crate) fn with_direction(
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &IndexDefinition,
+		value: &Value,
+		reverse: bool,
 	) -> Result<Self> {
 		let array = Array::from(vec![value.clone()]);
 		let beg = Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &array)?;
@@ -96,6 +112,7 @@ impl IndexEqualIterator {
 		Ok(Self {
 			beg,
 			end,
+			reverse,
 			done: false,
 		})
 	}
@@ -103,11 +120,20 @@ impl IndexEqualIterator {
 	/// Fetch the next batch of matching record IDs.
 	///
 	/// Returns an empty `Vec` when iteration is complete.
-	pub async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
+	pub(crate) async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
 		if self.done {
 			return Ok(Vec::new());
 		}
 
+		if self.reverse {
+			self.next_batch_reverse(tx).await
+		} else {
+			self.next_batch_forward(tx).await
+		}
+	}
+
+	/// Forward scan: iterate from beg to end in ascending key order.
+	async fn next_batch_forward(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
 		let res = tx.scan(self.beg.clone()..self.end.clone(), INDEX_BATCH_SIZE, 0, None).await?;
 
 		if res.is_empty() {
@@ -125,20 +151,54 @@ impl IndexEqualIterator {
 
 		decode_record_ids(res)
 	}
+
+	/// Reverse scan: iterate from end to beg in descending key order.
+	async fn next_batch_reverse(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
+		let res = tx.scanr(self.beg.clone()..self.end.clone(), INDEX_BATCH_SIZE, 0, None).await?;
+
+		if res.is_empty() {
+			self.done = true;
+			return Ok(Vec::new());
+		}
+
+		// scanr returns [highest_key, ..., lowest_key].
+		// Update end key for next batch to the lowest key (last in result).
+		if let Some((key, _)) = res.last() {
+			self.end.clone_from(key);
+		}
+
+		// Decode record IDs from values
+		let mut records = Vec::with_capacity(res.len());
+		for (_, val) in res {
+			let rid: RecordId = revision::from_slice(&val)?;
+			records.push(rid);
+		}
+
+		Ok(records)
+	}
 }
 
 /// Iterator for equality lookups on unique (`Uniq`) indexes.
 ///
-/// A unique index stores exactly one KV entry per indexed value, so an
-/// equality lookup is a single point-get.  The key is consumed on the
-/// first call; subsequent calls return an empty batch.
+/// Equality lookup on a unique index.
+///
+/// For non-nullish values this is a single point-get (one KV entry per
+/// value).  NONE/NULL tuples are stored with the non-unique key format
+/// (record-ID suffix) so they require a prefix range scan instead.
 pub(crate) struct UniqueEqualIterator {
-	/// The key to look up, consumed (`take`) on the first call.
-	key: Option<Key>,
+	inner: UniqueEqualInner,
+}
+
+enum UniqueEqualInner {
+	PointGet(Option<Key>),
+	PrefixScan {
+		beg: Key,
+		end: Key,
+		done: bool,
+	},
 }
 
 impl UniqueEqualIterator {
-	/// Create a new unique equality iterator.
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -146,25 +206,55 @@ impl UniqueEqualIterator {
 		value: &Value,
 	) -> Result<Self> {
 		let array = Array::from(vec![value.clone()]);
-		let key = Index::new(ns, db, &ix.table_name, ix.index_id, &array, None).encode_key()?;
+		let inner = if array.is_any_none_or_null() {
+			let beg = Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &array)?;
+			let end = Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &array)?;
+			UniqueEqualInner::PrefixScan {
+				beg,
+				end,
+				done: false,
+			}
+		} else {
+			let key = Index::new(ns, db, &ix.table_name, ix.index_id, &array, None).encode_key()?;
+			UniqueEqualInner::PointGet(Some(key))
+		};
 		Ok(Self {
-			key: Some(key),
+			inner,
 		})
 	}
 
-	/// Fetch the single matching record ID, if it exists.
-	///
-	/// Returns at most one element on the first call; always empty afterwards.
 	pub async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
-		let Some(key) = self.key.take() else {
-			return Ok(Vec::new());
-		};
-
-		if let Some(val) = tx.get(&key, None).await? {
-			let rid: RecordId = revision::from_slice(&val)?;
-			Ok(vec![rid])
-		} else {
-			Ok(Vec::new())
+		match &mut self.inner {
+			UniqueEqualInner::PointGet(key) => {
+				let Some(key) = key.take() else {
+					return Ok(Vec::new());
+				};
+				if let Some(val) = tx.get(&key, None).await? {
+					let rid: RecordId = revision::from_slice(&val)?;
+					Ok(vec![rid])
+				} else {
+					Ok(Vec::new())
+				}
+			}
+			UniqueEqualInner::PrefixScan {
+				beg,
+				end,
+				done,
+			} => {
+				if *done {
+					return Ok(Vec::new());
+				}
+				let res = tx.scan(beg.clone()..end.clone(), INDEX_BATCH_SIZE, 0, None).await?;
+				if res.is_empty() {
+					*done = true;
+					return Ok(Vec::new());
+				}
+				if let Some((key, _)) = res.last() {
+					beg.clone_from(key);
+					beg.push(0x00);
+				}
+				decode_record_ids(res)
+			}
 		}
 	}
 }
@@ -463,10 +553,9 @@ impl IndexRangeIterator {
 
 /// Compute the begin key for a unique index range scan.
 ///
-/// Unlike the non-unique variant, a unique index stores a single key per
-/// value (no per-record-id suffix).  Therefore the key is always the
-/// exact encoded value; the `inclusive` flag is passed through so the
-/// caller can decide how to filter.
+/// Non-nullish values use the exact encoded unique key (no record-ID
+/// suffix).  NONE/NULL values are stored with the non-unique key format
+/// (record-ID suffix), so we use prefix-based bounds to match them.
 fn compute_unique_range_beg_key(
 	ns: NamespaceId,
 	db: DatabaseId,
@@ -475,8 +564,17 @@ fn compute_unique_range_beg_key(
 ) -> Result<(Key, bool)> {
 	if let Some(from) = from {
 		let array = Array::from(vec![from.value.clone()]);
-		let key = Index::new(ns, db, &ix.table_name, ix.index_id, &array, None).encode_key()?;
-		Ok((key, from.inclusive))
+		if array.is_any_none_or_null() {
+			let key = if from.inclusive {
+				Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &array)?
+			} else {
+				Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &array)?
+			};
+			Ok((key, true))
+		} else {
+			let key = Index::new(ns, db, &ix.table_name, ix.index_id, &array, None).encode_key()?;
+			Ok((key, from.inclusive))
+		}
 	} else {
 		Ok((Index::prefix_beg(ns, db, &ix.table_name, ix.index_id)?, true))
 	}
@@ -484,9 +582,7 @@ fn compute_unique_range_beg_key(
 
 /// Compute the end key for a unique index range scan.
 ///
-/// See [`compute_unique_range_beg_key`] for the rationale.  The key is
-/// the exact encoded value; `inclusive` indicates whether the caller
-/// should include or exclude it.
+/// See [`compute_unique_range_beg_key`] for the rationale.
 fn compute_unique_range_end_key(
 	ns: NamespaceId,
 	db: DatabaseId,
@@ -495,10 +591,21 @@ fn compute_unique_range_end_key(
 ) -> Result<(Key, bool)> {
 	if let Some(to) = to {
 		let array = Array::from(vec![to.value.clone()]);
-		let key = Index::new(ns, db, &ix.table_name, ix.index_id, &array, None).encode_key()?;
-		Ok((key, to.inclusive))
+		if array.is_any_none_or_null() {
+			let key = if to.inclusive {
+				Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, &array)?
+			} else {
+				Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, &array)?
+			};
+			// Sentinel boundary keys never store a row; avoid a trailing `get(end)`.
+			Ok((key, false))
+		} else {
+			let key = Index::new(ns, db, &ix.table_name, ix.index_id, &array, None).encode_key()?;
+			Ok((key, to.inclusive))
+		}
 	} else {
-		Ok((Index::prefix_end(ns, db, &ix.table_name, ix.index_id)?, true))
+		// Sentinel boundary key — no real record is stored here.
+		Ok((Index::prefix_end(ns, db, &ix.table_name, ix.index_id)?, false))
 	}
 }
 
@@ -623,6 +730,14 @@ pub(crate) struct UniqueRangeBackwardIterator {
 	/// `true` once the leading-edge exclusive `end` boundary has been
 	/// handled.  Initialised to `true` when the upper bound is inclusive.
 	end_checked: bool,
+	/// When `true`, the first `next_batch` call issues a point-get on
+	/// `original_end` to retrieve the inclusive upper-bound record that
+	/// the half-open `scanr` excludes (symmetric with the forward
+	/// iterator's trailing-get in `UniqueRangeForwardIterator`).
+	end_inclusive: bool,
+	/// The original end key before any cursor retreat.  Needed for the
+	/// inclusive upper-bound point-get.
+	original_end: Key,
 	/// Key to exclude at the `beg` (trailing) edge.  `Some` when the
 	/// lower bound is exclusive; checked on every batch.
 	exclude_beg_key: Option<Key>,
@@ -649,8 +764,10 @@ impl UniqueRangeBackwardIterator {
 
 		Ok(Self {
 			beg,
+			original_end: end.clone(),
 			end,
 			end_checked: end_inclusive,
+			end_inclusive,
 			exclude_beg_key,
 			done: false,
 		})
@@ -658,12 +775,27 @@ impl UniqueRangeBackwardIterator {
 
 	/// Fetch the next batch of record IDs in descending key order.
 	///
-	/// On the first call, if the upper bound is exclusive, keys equal to
-	/// `end` are skipped.  On *every* call, if the lower bound is exclusive,
-	/// keys equal to `beg` are skipped.
+	/// On the first call, if the upper bound is inclusive, a point-get on
+	/// the original end key retrieves the boundary record that `scanr`'s
+	/// half-open range excludes.  If the upper bound is exclusive, keys
+	/// equal to `end` are skipped.  On *every* call, if the lower bound
+	/// is exclusive, keys equal to `beg` are skipped.
 	pub(crate) async fn next_batch(&mut self, tx: &Transaction) -> Result<Vec<RecordId>> {
 		if self.done {
 			return Ok(Vec::new());
+		}
+
+		let mut records = Vec::new();
+
+		// Inclusive upper bound: the half-open scan excludes `end`, so
+		// retrieve it via point-get.  In DESC order the boundary key is
+		// the largest and appears first.
+		if self.end_inclusive {
+			self.end_inclusive = false;
+			if let Some(val) = tx.get(&self.original_end, None).await? {
+				let rid: RecordId = revision::from_slice(&val)?;
+				records.push(rid);
+			}
 		}
 
 		// Capture the key to exclude *before* we retreat the cursor.
@@ -678,7 +810,10 @@ impl UniqueRangeBackwardIterator {
 
 		if res.is_empty() {
 			self.done = true;
-			return Ok(Vec::new());
+			if records.is_empty() {
+				return Ok(Vec::new());
+			}
+			return Ok(records);
 		}
 
 		// Retreat `end` to the last returned key.  The half-open range
@@ -689,7 +824,7 @@ impl UniqueRangeBackwardIterator {
 
 		self.end_checked = true;
 
-		let mut records = Vec::with_capacity(res.len());
+		records.reserve(res.len());
 		for (key, val) in res {
 			// Skip the excluded leading-edge key (first batch only).
 			if let Some(ref exclusive_key) = check_exclusive_end

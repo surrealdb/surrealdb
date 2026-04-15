@@ -147,7 +147,7 @@ impl RecordIterator {
 	) -> Result<B> {
 		match self {
 			Self::IndexEqual(i) => i.next_batch(txn, size).await,
-			Self::UniqueEqual(i) => i.next_batch(txn).await,
+			Self::UniqueEqual(i) => i.next_batch(txn, size).await,
 			Self::IndexRange(i) => i.next_batch(txn, size).await,
 			Self::IndexRangeReverse(i) => i.next_batch(txn, size).await,
 			Self::UniqueRange(i) => i.next_batch(txn, size).await,
@@ -176,7 +176,7 @@ impl RecordIterator {
 	) -> Result<usize> {
 		match self {
 			Self::IndexEqual(i) => i.next_count(txn, size).await,
-			Self::UniqueEqual(i) => i.next_count(txn).await,
+			Self::UniqueEqual(i) => i.next_count(txn, size).await,
 			Self::IndexRange(i) => i.next_count(txn, size).await,
 			Self::IndexRangeReverse(i) => i.next_count(txn, size).await,
 			Self::UniqueRange(i) => i.next_count(txn, size).await,
@@ -504,7 +504,7 @@ impl IndexRangeThingIterator {
 		// lower bounds because a strict '>' becomes an exclusive range start.
 		let from = if let Some((_, inclusivity, val)) = from.into_iter().next() {
 			RangeValue {
-				value: val,
+				value: Some(val),
 				inclusive: !inclusivity,
 			}
 		} else {
@@ -514,7 +514,7 @@ impl IndexRangeThingIterator {
 		// Here the inclusive flag matches the operator: '<=' is inclusive, '<' is exclusive.
 		let to = if let Some((_, inclusivity, val)) = to.into_iter().next_back() {
 			RangeValue {
-				value: val,
+				value: Some(val),
 				inclusive: inclusivity,
 			}
 		} else {
@@ -538,8 +538,8 @@ impl IndexRangeThingIterator {
 
 	/// Compute the begin key for a range scan over an index by value.
 	///
-	/// - If `from.value` is `None`, use the index-prefix begin to start at the first key in the
-	///   index keyspace.
+	/// - If `from.value` is `None` (unbounded), use the index-prefix begin to start at the first
+	///   key in the index keyspace.
 	/// - Otherwise, serialize the `from` value into an index field array and construct the boundary
 	///   key. For an inclusive lower bound use `prefix_ids_beg` (include all records with that
 	///   value); for an exclusive lower bound use `prefix_ids_end` so the scan starts after all
@@ -551,32 +551,21 @@ impl IndexRangeThingIterator {
 		index_id: IndexId,
 		from: RangeValue,
 	) -> Result<Vec<u8>> {
-		if from.value.is_none() {
+		let Some(value) = from.value else {
 			return Index::prefix_beg(ns, db, ix_what, index_id);
-		}
+		};
+		let array = Array::from(vec![value.as_ref().clone()]);
 		if from.inclusive {
-			Index::prefix_ids_beg(
-				ns,
-				db,
-				ix_what,
-				index_id,
-				&Array::from(vec![from.value.as_ref().clone()]),
-			)
+			Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)
 		} else {
-			Index::prefix_ids_end(
-				ns,
-				db,
-				ix_what,
-				index_id,
-				&Array::from(vec![from.value.as_ref().clone()]),
-			)
+			Index::prefix_ids_end(ns, db, ix_what, index_id, &array)
 		}
 	}
 
 	/// Compute the end key for a range scan over an index by value.
 	///
-	/// - If `to.value` is `None`, use the index-prefix end to stop at the last key in the index
-	///   keyspace.
+	/// - If `to.value` is `None` (unbounded), use the index-prefix end to stop at the last key in
+	///   the index keyspace.
 	/// - Otherwise, serialize the `to` value and construct the boundary key. For an inclusive upper
 	///   bound use `prefix_ids_end` so the scan can include all records with that exact value; for
 	///   an exclusive upper bound use `prefix_ids_beg` so the scan stops just before any key
@@ -588,25 +577,14 @@ impl IndexRangeThingIterator {
 		index_id: IndexId,
 		to: RangeValue,
 	) -> Result<Vec<u8>> {
-		if to.value.is_none() {
+		let Some(value) = to.value else {
 			return Index::prefix_end(ns, db, ix_what, index_id);
-		}
+		};
+		let array = Array::from(vec![value.as_ref().clone()]);
 		if to.inclusive {
-			Index::prefix_ids_end(
-				ns,
-				db,
-				ix_what,
-				index_id,
-				&Array::from(vec![to.value.as_ref().clone()]),
-			)
+			Index::prefix_ids_end(ns, db, ix_what, index_id, &array)
 		} else {
-			Index::prefix_ids_beg(
-				ns,
-				db,
-				ix_what,
-				index_id,
-				&Array::from(vec![to.value.as_ref().clone()]),
-			)
+			Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)
 		}
 	}
 
@@ -632,39 +610,52 @@ impl IndexRangeThingIterator {
 			Array::from(prefix.to_vec())
 		};
 		let (from_inclusive, to_inclusive) = (from.inclusive, to.inclusive);
-		// Compute the lower bound for the scan
-		let beg = if from.value.is_none() {
-			Index::prefix_ids_composite_beg(ns, db, &ix.table_name, ix.index_id, &prefix_array)?
-		} else {
-			Self::compute_beg_with_prefix(ns, db, &ix.table_name, ix.index_id, &prefix_array, from)?
+		let beg = match from.value {
+			None => {
+				Index::prefix_ids_composite_beg(ns, db, &ix.table_name, ix.index_id, &prefix_array)?
+			}
+			Some(v) => Self::compute_beg_with_prefix(
+				ns,
+				db,
+				&ix.table_name,
+				ix.index_id,
+				&prefix_array,
+				&v,
+				from_inclusive,
+			)?,
 		};
-		// Compute the upper bound for the scan
-		let end = if to.value.is_none() {
-			Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &prefix_array)?
-		} else {
-			Self::compute_end_with_prefix(ns, db, &ix.table_name, ix.index_id, &prefix_array, to)?
+		let end = match to.value {
+			None => {
+				Index::prefix_ids_composite_end(ns, db, &ix.table_name, ix.index_id, &prefix_array)?
+			}
+			Some(v) => Self::compute_end_with_prefix(
+				ns,
+				db,
+				&ix.table_name,
+				ix.index_id,
+				&prefix_array,
+				&v,
+				to_inclusive,
+			)?,
 		};
 		Ok(RangeScan::new(beg, from_inclusive, end, to_inclusive))
 	}
 
 	/// Compute the begin key for a composite index range when a fixed `prefix`
-	/// (values for leading columns) is provided and an optional `from`
-	/// value applies to the next column.
-	///
-	/// Inclusive `from` uses `prefix_ids_beg` to include all rows equal to the
-	/// boundary value; exclusive `from` uses `prefix_ids_end` to start just
-	/// after all keys equal to that boundary.
+	/// (values for leading columns) is provided and an explicit `from` value
+	/// applies to the next column.
 	fn compute_beg_with_prefix(
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix_what: &TableName,
 		index_id: IndexId,
 		prefix: &Array,
-		from: RangeValue,
+		value: &Arc<Value>,
+		inclusive: bool,
 	) -> Result<Vec<u8>> {
 		let mut fd = prefix.clone();
-		fd.0.push(from.value.as_ref().clone());
-		if from.inclusive {
+		fd.0.push(value.as_ref().clone());
+		if inclusive {
 			Index::prefix_ids_beg(ns, db, ix_what, index_id, &fd)
 		} else {
 			Index::prefix_ids_end(ns, db, ix_what, index_id, &fd)
@@ -672,23 +663,19 @@ impl IndexRangeThingIterator {
 	}
 
 	/// Compute the end key for a composite index range when a fixed `prefix`
-	/// is provided and an optional `to` value applies to the next
-	/// column.
-	///
-	/// Inclusive `to` uses `prefix_ids_end` so rows equal to the boundary are
-	/// still reachable by the scan; exclusive `to` uses `prefix_ids_beg` to
-	/// stop just before any key matching that boundary value.
+	/// is provided and an explicit `to` value applies to the next column.
 	fn compute_end_with_prefix(
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix_what: &TableName,
 		index_id: IndexId,
 		prefix: &Array,
-		to: RangeValue,
+		value: &Arc<Value>,
+		inclusive: bool,
 	) -> Result<Vec<u8>> {
 		let mut fd = prefix.clone();
-		fd.0.push(to.value.as_ref().clone());
-		if to.inclusive {
+		fd.0.push(value.as_ref().clone());
+		if inclusive {
 			Index::prefix_ids_end(ns, db, ix_what, index_id, &fd)
 		} else {
 			Index::prefix_ids_beg(ns, db, ix_what, index_id, &fd)
@@ -1130,9 +1117,22 @@ impl IndexJoinThingIterator {
 	}
 }
 
+/// Equality lookup on a unique index (legacy planner).
+///
+/// NONE/NULL tuples are stored with non-unique key format (record-ID
+/// suffix), so they require a prefix range scan instead of a point-get.
 pub(crate) struct UniqueEqualThingIterator {
 	irf: IteratorRef,
-	key: Option<Key>,
+	inner: UniqueEqualThingInner,
+}
+
+enum UniqueEqualThingInner {
+	PointGet(Option<Key>),
+	PrefixScan {
+		beg: Key,
+		end: Key,
+		done: bool,
+	},
 }
 
 impl UniqueEqualThingIterator {
@@ -1143,31 +1143,93 @@ impl UniqueEqualThingIterator {
 		ix: &IndexDefinition,
 		a: &Array,
 	) -> Result<Self> {
-		let key = Index::new(ns, db, &ix.table_name, ix.index_id, a, None).encode_key()?;
+		let inner = if a.is_any_none_or_null() {
+			let beg = Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, a)?;
+			let end = Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, a)?;
+			UniqueEqualThingInner::PrefixScan {
+				beg,
+				end,
+				done: false,
+			}
+		} else {
+			let key = Index::new(ns, db, &ix.table_name, ix.index_id, a, None).encode_key()?;
+			UniqueEqualThingInner::PointGet(Some(key))
+		};
 		Ok(Self {
 			irf,
-			key: Some(key),
+			inner,
 		})
 	}
 
-	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B> {
-		if let Some(key) = self.key.take()
-			&& let Some(val) = tx.get(&key, None).await?
-		{
-			let rid: RecordId = revision::from_slice(&val)?;
-			let record = IndexItemRecord::new_key(rid, self.irf.into());
-			return Ok(B::from_one(record));
+	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction, limit: u32) -> Result<B> {
+		match &mut self.inner {
+			UniqueEqualThingInner::PointGet(key) => {
+				if let Some(key) = key.take()
+					&& let Some(val) = tx.get(&key, None).await?
+				{
+					let rid: RecordId = revision::from_slice(&val)?;
+					let record = IndexItemRecord::new_key(rid, self.irf.into());
+					return Ok(B::from_one(record));
+				}
+				Ok(B::empty())
+			}
+			UniqueEqualThingInner::PrefixScan {
+				beg,
+				end,
+				done,
+			} => {
+				if *done {
+					return Ok(B::empty());
+				}
+				let res = tx.scan(beg.clone()..end.clone(), limit, 0, None).await?;
+				if res.is_empty() {
+					*done = true;
+					return Ok(B::empty());
+				}
+				if let Some((key, _)) = res.last() {
+					beg.clone_from(key);
+					beg.push(0x00);
+				}
+				let mut records = B::with_capacity(res.len());
+				for (_key, val) in res {
+					let rid: RecordId = revision::from_slice(&val)?;
+					records.add(IndexItemRecord::new_key(rid, self.irf.into()));
+				}
+				Ok(records)
+			}
 		}
-		Ok(B::empty())
 	}
 
-	async fn next_count(&mut self, tx: &Transaction) -> Result<usize> {
-		if let Some(key) = self.key.take()
-			&& tx.exists(&key, None).await?
-		{
-			return Ok(1);
+	async fn next_count(&mut self, tx: &Transaction, limit: u32) -> Result<usize> {
+		match &mut self.inner {
+			UniqueEqualThingInner::PointGet(key) => {
+				if let Some(key) = key.take()
+					&& tx.exists(&key, None).await?
+				{
+					return Ok(1);
+				}
+				Ok(0)
+			}
+			UniqueEqualThingInner::PrefixScan {
+				beg,
+				end,
+				done,
+			} => {
+				if *done {
+					return Ok(0);
+				}
+				let res = tx.keys(beg.clone()..end.clone(), limit, 0, None).await?;
+				if res.is_empty() {
+					*done = true;
+					return Ok(0);
+				}
+				if let Some(key) = res.last() {
+					beg.clone_from(key);
+					beg.push(0x00);
+				}
+				Ok(res.len())
+			}
 		}
-		Ok(0)
 	}
 }
 
@@ -1185,9 +1247,11 @@ impl UniqueRangeThingIterator {
 		from: RangeValue,
 		to: RangeValue,
 	) -> Result<RangeScan> {
-		let beg = Self::compute_beg(ns, db, &ix.table_name, ix.index_id, from.value.as_ref())?;
-		let end = Self::compute_end(ns, db, &ix.table_name, ix.index_id, to.value.as_ref())?;
-		Ok(RangeScan::new(beg, from.inclusive, end, to.inclusive))
+		let from_bound = from.value.as_ref().map(|v| (v.as_ref(), from.inclusive));
+		let to_bound = to.value.as_ref().map(|v| (v.as_ref(), to.inclusive));
+		let (beg, beg_incl) = Self::compute_beg(ns, db, &ix.table_name, ix.index_id, from_bound)?;
+		let (end, end_incl) = Self::compute_end(ns, db, &ix.table_name, ix.index_id, to_bound)?;
+		Ok(RangeScan::new(beg, beg_incl, end, end_incl))
 	}
 
 	pub(super) fn new(
@@ -1232,30 +1296,58 @@ impl UniqueRangeThingIterator {
 		})
 	}
 
+	/// Compute the begin key for a unique-index range scan.
+	///
+	/// `from` is `None` for an unbounded lower side, or `Some((value, inclusive))`
+	/// for an explicit bound. NONE/NULL values use the non-unique key format
+	/// (with record-ID suffix), so they get prefix-based boundaries rather than
+	/// a single point-key.
 	fn compute_beg(
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix_what: &TableName,
 		index_id: IndexId,
-		from: &Value,
-	) -> Result<Vec<u8>> {
-		if from.is_none() {
-			return Index::prefix_beg(ns, db, ix_what, index_id);
+		from: Option<(&Value, bool)>,
+	) -> Result<(Vec<u8>, bool)> {
+		let Some((from, inclusive)) = from else {
+			return Ok((Index::prefix_beg(ns, db, ix_what, index_id)?, true));
+		};
+		let array = Array::from(vec![from.clone()]);
+		if array.is_any_none_or_null() {
+			let key = if inclusive {
+				Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)?
+			} else {
+				Index::prefix_ids_end(ns, db, ix_what, index_id, &array)?
+			};
+			return Ok((key, true));
 		}
-		Index::new(ns, db, ix_what, index_id, &Array::from(vec![from.clone()]), None).encode_key()
+		Ok((Index::new(ns, db, ix_what, index_id, &array, None).encode_key()?, inclusive))
 	}
 
+	/// Compute the end key for a unique-index range scan (symmetric to `compute_beg`).
 	fn compute_end(
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix_what: &TableName,
 		index_id: IndexId,
-		to: &Value,
-	) -> Result<Vec<u8>> {
-		if to.is_none() {
-			return Index::prefix_end(ns, db, ix_what, index_id);
+		to: Option<(&Value, bool)>,
+	) -> Result<(Vec<u8>, bool)> {
+		let Some((to, inclusive)) = to else {
+			// Sentinel boundary key — no real record is stored here.
+			return Ok((Index::prefix_end(ns, db, ix_what, index_id)?, false));
+		};
+		let array = Array::from(vec![to.clone()]);
+		if array.is_any_none_or_null() {
+			let key = if inclusive {
+				Index::prefix_ids_end(ns, db, ix_what, index_id, &array)?
+			} else {
+				Index::prefix_ids_beg(ns, db, ix_what, index_id, &array)?
+			};
+			// Sentinel boundary keys never store a row; avoid a trailing `get(end)` in
+			// `RangeScan` when the scan is exhausted (mirrors `compute_unique_range_end_key`).
+			return Ok((key, false));
 		}
-		Index::new(ns, db, ix_what, index_id, &Array::from(vec![to.clone()]), None).encode_key()
+		Ok((Index::new(ns, db, ix_what, index_id, &array, None).encode_key()?, inclusive))
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -1439,7 +1531,15 @@ impl UniqueRangeReverseThingIterator {
 
 pub(crate) struct UniqueUnionThingIterator {
 	irf: IteratorRef,
-	keys: VecDeque<Key>,
+	entries: VecDeque<UniqueUnionEntry>,
+}
+
+enum UniqueUnionEntry {
+	PointGet(Key),
+	PrefixScan {
+		beg: Key,
+		end: Key,
+	},
 }
 
 impl UniqueUnionThingIterator {
@@ -1450,15 +1550,23 @@ impl UniqueUnionThingIterator {
 		ix: &IndexDefinition,
 		fds: &[Array],
 	) -> Result<Self> {
-		// We create a VecDeque to hold the key for each value in the array.
-		let mut keys = VecDeque::with_capacity(fds.len());
+		let mut entries = VecDeque::with_capacity(fds.len());
 		for fd in fds {
-			let key = Index::new(ns, db, &ix.table_name, ix.index_id, fd, None).encode_key()?;
-			keys.push_back(key);
+			if fd.is_any_none_or_null() {
+				let beg = Index::prefix_ids_beg(ns, db, &ix.table_name, ix.index_id, fd)?;
+				let end = Index::prefix_ids_end(ns, db, &ix.table_name, ix.index_id, fd)?;
+				entries.push_back(UniqueUnionEntry::PrefixScan {
+					beg,
+					end,
+				});
+			} else {
+				let key = Index::new(ns, db, &ix.table_name, ix.index_id, fd, None).encode_key()?;
+				entries.push_back(UniqueUnionEntry::PointGet(key));
+			}
 		}
 		Ok(Self {
 			irf,
-			keys,
+			entries,
 		})
 	}
 
@@ -1469,19 +1577,43 @@ impl UniqueUnionThingIterator {
 		limit: u32,
 	) -> Result<B> {
 		let limit = limit as usize;
-		let mut results = B::with_capacity(limit.min(self.keys.len()));
+		let mut results = B::with_capacity(limit.min(self.entries.len()));
 		let mut count = 0;
-		while let Some(key) = self.keys.pop_front() {
+		while let Some(entry) = self.entries.pop_front() {
 			if ctx.is_done(Some(count)).await? {
 				break;
 			}
-			if let Some(val) = tx.get(&key, None).await? {
-				count += 1;
-				let rid: RecordId = revision::from_slice(&val)?;
-				results.add(IndexItemRecord::new_key(rid, self.irf.into()));
-				if results.len() >= limit {
-					break;
+			let remaining = (limit - results.len()) as u32;
+			match entry {
+				UniqueUnionEntry::PointGet(key) => {
+					if let Some(val) = tx.get(&key, None).await? {
+						count += 1;
+						let rid: RecordId = revision::from_slice(&val)?;
+						results.add(IndexItemRecord::new_key(rid, self.irf.into()));
+					}
 				}
+				UniqueUnionEntry::PrefixScan {
+					mut beg,
+					end,
+				} => {
+					let res = tx.scan(beg.clone()..end.clone(), remaining, 0, None).await?;
+					for (key, val) in &res {
+						count += 1;
+						let rid: RecordId = revision::from_slice(val)?;
+						results.add(IndexItemRecord::new_key(rid, self.irf.into()));
+						beg.clone_from(key);
+					}
+					if !res.is_empty() {
+						beg.push(0x00);
+						self.entries.push_front(UniqueUnionEntry::PrefixScan {
+							beg,
+							end,
+						});
+					}
+				}
+			}
+			if results.len() >= limit {
+				break;
 			}
 		}
 		Ok(results)
@@ -1495,15 +1627,35 @@ impl UniqueUnionThingIterator {
 	) -> Result<usize> {
 		let limit = limit as usize;
 		let mut count = 0;
-		while let Some(key) = self.keys.pop_front() {
+		while let Some(entry) = self.entries.pop_front() {
 			if ctx.is_done(Some(count)).await? {
 				break;
 			}
-			if tx.exists(&key, None).await? {
-				count += 1;
-				if count >= limit {
-					break;
+			let remaining = (limit - count) as u32;
+			match entry {
+				UniqueUnionEntry::PointGet(key) => {
+					if tx.exists(&key, None).await? {
+						count += 1;
+					}
 				}
+				UniqueUnionEntry::PrefixScan {
+					mut beg,
+					end,
+				} => {
+					let res = tx.keys(beg.clone()..end.clone(), remaining, 0, None).await?;
+					count += res.len();
+					if let Some(key) = res.last() {
+						beg.clone_from(key);
+						beg.push(0x00);
+						self.entries.push_front(UniqueUnionEntry::PrefixScan {
+							beg,
+							end,
+						});
+					}
+				}
+			}
+			if count >= limit {
+				break;
 			}
 		}
 		Ok(count)
@@ -1770,7 +1922,7 @@ impl IndexCountThingIterator {
 		let count = count.unsigned_abs();
 		let compact_key =
 			IndexCountKey::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None, pos, count);
-		txn.set(&compact_key, &(), None).await?;
+		txn.set(&compact_key, &()).await?;
 		Ok(())
 	}
 }
@@ -1813,8 +1965,8 @@ mod tests {
 			let uid2 = (Uuid::new_v4(), Uuid::new_v4());
 			let k1 = IndexCountKey::new(ns, db, &tb, ix, Some(uid1), true, 10);
 			let k2 = IndexCountKey::new(ns, db, &tb, ix, Some(uid2), true, 5);
-			tx.set(&k1, &(), None).await.unwrap();
-			tx.set(&k2, &(), None).await.unwrap();
+			tx.set(&k1, &()).await.unwrap();
+			tx.set(&k2, &()).await.unwrap();
 			tx.commit().await.unwrap();
 		}
 
@@ -1845,7 +1997,7 @@ mod tests {
 			let tx = ds.transaction(Write, Optimistic).await.unwrap();
 			let uid3 = (Uuid::new_v4(), Uuid::new_v4());
 			let k3 = IndexCountKey::new(ns, db, &tb, ix, Some(uid3), true, 7);
-			tx.set(&k3, &(), None).await.unwrap();
+			tx.set(&k3, &()).await.unwrap();
 			tx.commit().await.unwrap();
 		}
 

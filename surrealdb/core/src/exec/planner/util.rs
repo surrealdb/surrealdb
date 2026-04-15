@@ -9,6 +9,7 @@ use crate::catalog::Distance;
 use crate::catalog::providers::DatabaseProvider;
 use crate::err::Error;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
+use crate::exec::function::FunctionRegistry;
 use crate::expr::field::{Field, Fields};
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::visit::{MutVisitor, Visit, VisitMut, Visitor};
@@ -77,6 +78,138 @@ pub(crate) fn try_literal_to_value(
 pub(crate) fn try_expr_to_value(expr: &Expr) -> Option<crate::val::Value> {
 	match expr {
 		Expr::Literal(lit) => try_literal_to_value(lit),
+		_ => None,
+	}
+}
+
+// ============================================================================
+// Constant-folding: resolve deterministic expressions to literals
+// ============================================================================
+
+/// Fold constant, document-independent expressions in a `WHERE` condition to
+/// literal values. This enables proper index range access for expressions like
+/// `time::now() - 365d` which would otherwise be opaque to index analysis.
+///
+/// Must be called **after** [`resolve_condition_params`] so that parameter
+/// references have already been replaced with literals.
+///
+/// Only folds expressions that:
+/// - Contain no field/idiom references (document-independent)
+/// - Are deterministic built-in functions or arithmetic on literals
+/// - Pure functions (math::*, string::*, type::*, etc.) where all args are literals
+///
+/// `time::now()` is evaluated once at plan time, consistent with how most
+/// databases evaluate `NOW()` once per statement/transaction.
+pub(crate) fn fold_condition_expressions(cond: &mut Cond, registry: &FunctionRegistry) {
+	let mut folder = ExpressionFolder {
+		registry,
+	};
+	let _ = folder.visit_mut_expr(&mut cond.0);
+}
+
+/// MutVisitor that replaces constant expression subtrees with their literal
+/// values. Processes bottom-up: children are folded first, then the parent
+/// node is checked.
+struct ExpressionFolder<'a> {
+	registry: &'a FunctionRegistry,
+}
+
+impl MutVisitor for ExpressionFolder<'_> {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		// First recurse into children (bottom-up folding)
+		expr.visit_mut(self)?;
+
+		// Then try to fold this node to a literal
+		if let Some(folded) = try_fold_to_literal(expr, self.registry) {
+			*expr = folded;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
+		// Don't recurse into subqueries — they have their own planning.
+		Ok(())
+	}
+}
+
+/// Attempt to reduce a constant expression to an `Expr::Literal`.
+///
+/// Handles:
+/// - `time::now()` → `Literal::Datetime(now)` (special case: non-pure but per-statement)
+/// - Pure function calls where all arguments are already literals (math::floor, string::lowercase,
+///   type::int, etc.)
+/// - Binary arithmetic on two literals (datetime ± duration, number ± number, etc.)
+fn try_fold_to_literal(expr: &Expr, registry: &FunctionRegistry) -> Option<Expr> {
+	use crate::expr::Function;
+	use crate::val::{Datetime, Value};
+
+	match expr {
+		// time::now() → current datetime literal
+		// Special case: time::now() is not pure (depends on clock) but we
+		// intentionally fold it once per statement, matching SQL semantics.
+		Expr::FunctionCall(fc)
+			if matches!(&fc.receiver, Function::Normal(name) if name == "time::now")
+				&& fc.arguments.is_empty() =>
+		{
+			Some(Value::Datetime(Datetime::now()).into_literal())
+		}
+
+		// Pure function call where all arguments are already literals.
+		// After bottom-up folding, nested expressions like `math::floor(20 + 0.5)`
+		// will have their arguments folded first, so we only need to check
+		// whether the immediate arguments are literals.
+		Expr::FunctionCall(fc) => {
+			let Function::Normal(name) = &fc.receiver else {
+				return None;
+			};
+			let func = registry.get(name.as_str())?;
+			if !func.is_pure() || func.is_async() {
+				return None;
+			}
+			// All arguments must be convertible to constant Values
+			let args: Option<Vec<Value>> = fc.arguments.iter().map(try_expr_to_value).collect();
+			let args = args?;
+			// Invoke the function synchronously — safe because it's pure
+			let result = func.invoke(args).ok()?;
+			Some(result.into_literal())
+		}
+
+		// Binary operation where both operands are already literals
+		Expr::Binary {
+			left,
+			op,
+			right,
+		} => {
+			let left_val = try_expr_to_value(left)?;
+			let right_val = try_expr_to_value(right)?;
+			let result = try_eval_binary(op, left_val, right_val)?;
+			Some(result.into_literal())
+		}
+
+		_ => None,
+	}
+}
+
+/// Evaluate a binary operation on two concrete Values.
+/// Returns `None` if the operation is unsupported or fails.
+fn try_eval_binary(
+	op: &BinaryOperator,
+	left: crate::val::Value,
+	right: crate::val::Value,
+) -> Option<crate::val::Value> {
+	use crate::val::{TryAdd, TrySub};
+
+	match op {
+		BinaryOperator::Add => left.try_add(right).ok(),
+		BinaryOperator::Subtract => left.try_sub(right).ok(),
+		// We intentionally limit folding to add/sub to avoid unexpected
+		// behavior with division-by-zero, overflow, etc. These cover the
+		// common datetime ± duration patterns.
 		_ => None,
 	}
 }
@@ -681,20 +814,72 @@ impl MutVisitor for ParamResolver<'_> {
 	}
 }
 
+/// Parameters injected per-row during SELECT document iteration.
+/// These change value for every row and cannot be resolved at plan time.
+///
+/// - `this`/`self`: the current document being iterated
+/// - `parent`: the outer document in correlated subqueries
+///
+/// Event/live/field params (`$before`, `$after`, `$value`, `$input`, `$event`)
+/// are intentionally excluded because the exec planner only handles
+/// top-level statements.  SELECTs inside event handlers, live query
+/// notifications, and field evaluators run through the legacy `compute()`
+/// path, where those params are resolved at runtime via `ctx.value()`.
+/// If the exec planner is ever extended to those contexts, this guard
+/// set would need to be expanded accordingly.
+pub(crate) const SELECT_ITERATION_PARAMS: &[&str] = &["this", "self", "parent"];
+
+/// Resolve a single parameter to its value at plan time.
+///
+/// Resolution order:
+/// 1. Row-scoped guard (skip params whose values change per-row)
+/// 2. Context values (LET bindings, client bind parameters, session params)
+/// 3. DEFINE PARAM values with `Permission::Full` from the transaction store
+///
+/// Row-scoped params (`$this`, `$self`, `$parent`) are bound per-row at
+/// execution time (e.g. `$parent` by `ScalarSubquery`, `$this`/`$self` by
+/// per-row evaluation). They must never be folded at plan time, even when
+/// a `LET` binding shadows the name, because the runtime binding takes
+/// precedence.
+///
+/// DEFINE PARAMs with `Permission::None` or `Permission::Specific` are left
+/// for runtime resolution where the full permission machinery is available.
+pub(super) async fn resolve_param_value(
+	name: &str,
+	ctx: &crate::ctx::FrozenContext,
+	ns_db: Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)>,
+	row_scoped: &[&str],
+) -> Option<crate::val::Value> {
+	if row_scoped.contains(&name) {
+		return None;
+	}
+	if let Some(value) = ctx.value(name) {
+		return Some(value.clone());
+	}
+	if let Some((ns, db)) = ns_db
+		&& let Some(txn) = ctx.try_tx()
+		&& let Ok(param_def) = txn.get_db_param(ns, db, name, None).await
+		&& matches!(param_def.permissions, crate::catalog::Permission::Full)
+	{
+		return Some(param_def.value.clone());
+	}
+	None
+}
+
 /// Resolve bind-parameter references in a `WHERE` condition to their literal
 /// values. Returns a new `Cond` with `Expr::Param` nodes replaced by
 /// `Expr::Literal` wherever the value is available.
 ///
-/// Resolution order for each parameter:
-/// 1. Context values (`LET` bindings, client bind parameters, session params)
-/// 2. Database-level defined parameters (`DEFINE PARAM`) via the transaction store, when `ns_db`
-///    IDs are provided.
+/// Delegates to [`resolve_param_value`] per parameter. Row-scoped names
+/// (e.g. [`SELECT_ITERATION_PARAMS`]) are never resolved; all other params
+/// are looked up first in the context, then as `DEFINE PARAM` values.
 ///
 /// Parameters that cannot be resolved are left as-is.
 pub(crate) async fn resolve_condition_params(
 	cond: &Cond,
 	ctx: &crate::ctx::FrozenContext,
 	ns_db: Option<(crate::catalog::NamespaceId, crate::catalog::DatabaseId)>,
+	row_scoped: &[&str],
 ) -> Cond {
 	// Pass 1: collect all param names referenced in the condition.
 	let mut collector = ParamCollector {
@@ -705,20 +890,11 @@ pub(crate) async fn resolve_condition_params(
 		return cond.clone();
 	}
 
-	// Pass 2: resolve each parameter.
+	// Pass 2: resolve each parameter via the shared resolution path.
 	let mut resolved = std::collections::HashMap::with_capacity(collector.names.len());
 	for name in &collector.names {
-		// Try context values first (LET, bind params, session).
-		if let Some(value) = ctx.value(name) {
-			resolved.insert(name.clone(), value.clone());
-			continue;
-		}
-		// Fall back to DEFINE PARAM in the transaction store.
-		if let Some((ns, db)) = ns_db
-			&& let Some(txn) = ctx.try_tx()
-			&& let Ok(param_def) = txn.get_db_param(ns, db, name).await
-		{
-			resolved.insert(name.clone(), param_def.value.clone());
+		if let Some(value) = resolve_param_value(name, ctx, ns_db, row_scoped).await {
+			resolved.insert(name.clone(), value);
 		}
 	}
 
@@ -733,6 +909,56 @@ pub(crate) async fn resolve_condition_params(
 	}
 	.visit_mut_expr(&mut expr);
 	Cond(expr)
+}
+
+/// Rewrite projection function calls with a single string literal argument
+/// (e.g. `type::field("name")`) to `Expr::Idiom` so the index analyzer can
+/// match them against indexed columns.
+///
+/// Projection functions like `type::field(s)` and a bare `Idiom(s)` both
+/// reference the same document field, but the index analyzer only recognises
+/// `Expr::Idiom`. This pass bridges the gap after param resolution and
+/// constant folding have reduced the argument to a string literal.
+///
+/// Uses `FunctionRegistry::is_projection` so any current or future
+/// projection function is handled without hardcoding names.
+pub(crate) fn resolve_projection_field_idioms(cond: &mut Cond, registry: &FunctionRegistry) {
+	let mut resolver = ProjectionFieldResolver {
+		registry,
+	};
+	let _ = resolver.visit_mut_expr(&mut cond.0);
+}
+
+struct ProjectionFieldResolver<'a> {
+	registry: &'a FunctionRegistry,
+}
+
+impl MutVisitor for ProjectionFieldResolver<'_> {
+	type Error = std::convert::Infallible;
+
+	fn visit_mut_expr(&mut self, expr: &mut Expr) -> Result<(), Self::Error> {
+		use crate::expr::function::Function;
+
+		expr.visit_mut(self)?;
+
+		if let Expr::FunctionCall(fc) = expr
+			&& let Function::Normal(name) = &fc.receiver
+			&& self.registry.is_projection(name)
+			&& fc.arguments.len() == 1
+			&& let Expr::Literal(Literal::String(s)) = &fc.arguments[0]
+			&& let Ok(idiom) = crate::syn::idiom(s)
+		{
+			*expr = Expr::Idiom(idiom.into());
+		}
+		Ok(())
+	}
+
+	fn visit_mut_select(
+		&mut self,
+		_: &mut crate::expr::SelectStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
+	}
 }
 
 /// Extract a `Vec<Number>` from a literal array expression.
@@ -1014,7 +1240,7 @@ impl Visitor for ForbiddenParamChecker {
 /// Returns `true` when ORDER BY is absent, or is exactly `id ASC` or `id DESC`
 /// with no COLLATE/NUMERIC modifiers. In these cases the scan already produces
 /// rows in the requested order and no separate Sort operator is needed.
-pub(super) fn order_is_scan_compatible(order: &Option<crate::expr::order::Ordering>) -> bool {
+pub(super) fn order_is_scan_compatible(order: Option<&crate::expr::order::Ordering>) -> bool {
 	use crate::expr::order::Ordering;
 	match order {
 		None => true,
@@ -1035,7 +1261,12 @@ pub(super) fn order_is_scan_compatible(order: &Option<crate::expr::order::Orderi
 /// For compound access with an equality prefix, the prefix columns all have
 /// the same value and do not define ordering. They are skipped so that the
 /// effective ordering starts from the first non-equality column.
-pub(super) fn index_covers_ordering(
+///
+/// For single-column Equality access (`WHERE col = val`), ALL index columns
+/// are constant, so they are all skipped.  Leading ORDER BY fields that
+/// reference constant (equality-pinned) columns are also stripped from the
+/// requirement because any direction trivially matches a single-valued column.
+pub(crate) fn index_covers_ordering(
 	index_ref: &crate::exec::index::access_path::IndexRef,
 	access: &crate::exec::index::access_path::BTreeAccess,
 	direction: crate::idx::planner::ScanDirection,
@@ -1074,21 +1305,43 @@ pub(super) fn index_covers_ordering(
 		return false;
 	}
 
-	// For compound access with equality prefix, skip the prefix columns
-	let skip_cols = match access {
+	// Determine which index columns are equality-pinned (constant value).
+	let ix_def = index_ref.definition();
+	let (skip_cols, equality_field_paths) = match access {
 		BTreeAccess::Compound {
 			prefix,
 			..
-		} => prefix.len(),
-		_ => 0,
+		} => {
+			let paths: Vec<_> = ix_def
+				.cols
+				.iter()
+				.take(prefix.len())
+				.filter_map(|idiom| crate::exec::field_path::FieldPath::try_from(idiom).ok())
+				.collect();
+			(prefix.len(), paths)
+		}
+		BTreeAccess::Equality(_) => {
+			let paths: Vec<_> = ix_def
+				.cols
+				.iter()
+				.filter_map(|idiom| crate::exec::field_path::FieldPath::try_from(idiom).ok())
+				.collect();
+			(ix_def.cols.len(), paths)
+		}
+		_ => (0, vec![]),
 	};
+
+	// Strip leading ORDER BY fields that reference equality-pinned columns.
+	// These columns have a single constant value, so any direction trivially
+	// satisfies the ordering requirement for them.
+	let required: Vec<SortProperty> =
+		required.into_iter().skip_while(|prop| equality_field_paths.contains(&prop.path)).collect();
 
 	// Build the index ordering (same as IndexScan::output_ordering())
 	let dir = match direction {
 		crate::idx::planner::ScanDirection::Forward => SortDirection::Asc,
 		crate::idx::planner::ScanDirection::Backward => SortDirection::Desc,
 	};
-	let ix_def = index_ref.definition();
 	let mut cols: Vec<SortProperty> = ix_def
 		.cols
 		.iter()
@@ -1108,13 +1361,22 @@ pub(super) fn index_covers_ordering(
 	// ID, so we append an `id` property to the effective ordering.  This
 	// allows `ORDER BY col DESC, id DESC` to be satisfied by a backward
 	// compound index scan.
-	if !index_ref.is_unique() && !cols.is_empty() {
+	//
+	// When all index columns are skipped (Equality), the ordering is
+	// *only* by record ID — we still append it.
+	if !index_ref.is_unique() && !ix_def.cols.is_empty() {
 		cols.push(SortProperty {
 			path: crate::exec::field_path::FieldPath::field("id"),
 			direction: dir,
 			collate: false,
 			numeric: false,
 		});
+	}
+
+	// If all required fields were stripped (all constant), the ordering
+	// is trivially satisfied.
+	if required.is_empty() {
+		return true;
 	}
 
 	if cols.is_empty() {

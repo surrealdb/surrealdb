@@ -65,7 +65,7 @@ impl Param {
 		ns_id: NamespaceId,
 		db_id: DatabaseId,
 	) -> anyhow::Result<Value> {
-		match txn.get_db_param(ns_id, db_id, &self.0).await {
+		match txn.get_db_param(ns_id, db_id, &self.0, ctx.exec_ctx.version_stamp()).await {
 			Ok(param_def) => {
 				// Check permissions
 				if ctx.exec_ctx.should_check_perms(Action::View)? {
@@ -180,6 +180,15 @@ impl PhysicalExpr for Param {
 			return Ok(v.clone());
 		}
 
+		// $parent falls back to document_root when not explicitly bound.
+		// This allows `->edge[WHERE $parent.field]` and similar idiom-level
+		// WHERE clauses to reference the enclosing row being projected/filtered.
+		if self.0.as_str() == "parent"
+			&& let Some(v) = ctx.document_root
+		{
+			return Ok(v.clone());
+		}
+
 		// Try to fetch from database
 		// First check if we have database context directly
 		if let Ok(db_ctx) = ctx.exec_ctx.database() {
@@ -204,7 +213,9 @@ impl PhysicalExpr for Param {
 
 			let txn = ctx.exec_ctx.txn();
 			// Look up database definition by name to get the IDs
-			if let Ok(Some(db_def)) = txn.get_db_by_name(ns_name, db_name).await {
+			if let Ok(Some(db_def)) =
+				txn.get_db_by_name(ns_name, db_name, ctx.exec_ctx.version_stamp()).await
+			{
 				let ns_id = db_def.namespace_id;
 				let db_id = db_def.database_id;
 

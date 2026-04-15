@@ -45,7 +45,7 @@ impl AlterIndexStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the index definition
-		let mut ix = match txn.get_tb_index(ns, db, &self.table, &self.name).await? {
+		let mut ix = match txn.get_tb_index(ns, db, &self.table, &self.name, None).await? {
 			Some(tb) => tb.deref().clone(),
 			None => {
 				if self.if_exists {

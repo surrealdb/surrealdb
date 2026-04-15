@@ -114,7 +114,7 @@ impl Param {
 						return Ok(Value::None);
 					};
 
-					let val = ctx.tx().get_db_param(ns, db, v).await;
+					let val = ctx.tx().get_db_param(ns, db, v, opt.version).await;
 					// Check if the param has been set globally
 					let val = match val {
 						Ok(x) => x,

@@ -28,7 +28,7 @@ impl RemoveModuleStatement {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let storage_name = self.name.get_storage_name();
 		#[cfg_attr(not(feature = "surrealism"), allow(unused_variables))]
-		let md = match txn.get_db_module(ns, db, &storage_name).await {
+		let md = match txn.get_db_module(ns, db, &storage_name, None).await {
 			Ok(x) => x,
 			Err(e) => {
 				if self.if_exists && matches!(e.downcast_ref(), Some(Error::MdNotFound { .. })) {

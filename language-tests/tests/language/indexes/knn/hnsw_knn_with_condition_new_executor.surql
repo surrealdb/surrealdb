@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test HNSW KNN query with additional WHERE condition filter (new executor)"
 

@@ -172,6 +172,11 @@ impl Parser<'_> {
 	) -> ParseResult<()> {
 		let is_group = matches!(kind, MissingKind::Group);
 
+		// ORDER BY on `SELECT VALUE ...` runs on the full row before VALUE projection.
+		if matches!(kind, MissingKind::Order) && matches!(fields, Fields::Value(_)) {
+			return Ok(());
+		}
+
 		match fields {
 			Fields::Value(field) => {
 				if let Some(alias) = &field.alias

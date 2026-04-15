@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Verify NOT (field INSIDE [...]) is NOT expanded into index lookups and returns correct results"
 

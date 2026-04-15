@@ -403,8 +403,7 @@ impl fmt::Display for TokenKind {
 	}
 }
 
-/// An assertion statically checking that the size of Tokenkind remains two
-/// bytes
+/// An assertion statically checking the size of TokenKind.
 const _TOKEN_KIND_SIZE_ASSERT: [(); 2] = [(); std::mem::size_of::<TokenKind>()];
 
 impl TokenKind {

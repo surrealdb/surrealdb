@@ -8,8 +8,8 @@ use crate::sql::{Base, Expr};
 pub enum InfoStatement {
 	// revision discriminant override accounting for previous behavior when adding variants and
 	// removing not at the end of the enum definition.
-	Root(bool),
-	Ns(bool),
+	Root(bool, Option<Expr>),
+	Ns(bool, Option<Expr>),
 	Db(bool, Option<Expr>),
 	Tb(Expr, bool, Option<Expr>),
 	User(Expr, Option<Base>, bool),
@@ -19,10 +19,28 @@ pub enum InfoStatement {
 impl ToSql for InfoStatement {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
-			Self::Root(false) => f.push_str("INFO FOR ROOT"),
-			Self::Root(true) => f.push_str("INFO FOR ROOT STRUCTURE"),
-			Self::Ns(false) => f.push_str("INFO FOR NAMESPACE"),
-			Self::Ns(true) => f.push_str("INFO FOR NAMESPACE STRUCTURE"),
+			Self::Root(false, v) => match v {
+				Some(v) => write_sql!(f, sql_fmt, "INFO FOR ROOT VERSION {}", CoverStmts(v)),
+				None => f.push_str("INFO FOR ROOT"),
+			},
+			Self::Root(true, v) => match v {
+				Some(v) => {
+					write_sql!(f, sql_fmt, "INFO FOR ROOT VERSION {} STRUCTURE", CoverStmts(v))
+				}
+				None => f.push_str("INFO FOR ROOT STRUCTURE"),
+			},
+			Self::Ns(false, v) => match v {
+				Some(v) => {
+					write_sql!(f, sql_fmt, "INFO FOR NAMESPACE VERSION {}", CoverStmts(v))
+				}
+				None => f.push_str("INFO FOR NAMESPACE"),
+			},
+			Self::Ns(true, v) => match v {
+				Some(v) => {
+					write_sql!(f, sql_fmt, "INFO FOR NAMESPACE VERSION {} STRUCTURE", CoverStmts(v))
+				}
+				None => f.push_str("INFO FOR NAMESPACE STRUCTURE"),
+			},
 			Self::Db(false, v) => match v {
 				Some(v) => write_sql!(f, sql_fmt, "INFO FOR DATABASE VERSION {}", CoverStmts(v)),
 				None => f.push_str("INFO FOR DATABASE"),
@@ -84,8 +102,8 @@ impl ToSql for InfoStatement {
 impl From<InfoStatement> for crate::expr::statements::InfoStatement {
 	fn from(v: InfoStatement) -> Self {
 		match v {
-			InfoStatement::Root(v) => Self::Root(v),
-			InfoStatement::Ns(v) => Self::Ns(v),
+			InfoStatement::Root(v, ver) => Self::Root(v, ver.map(From::from)),
+			InfoStatement::Ns(v, ver) => Self::Ns(v, ver.map(From::from)),
 			InfoStatement::Db(v, ver) => Self::Db(v, ver.map(From::from)),
 			InfoStatement::Tb(t, v, ver) => Self::Tb(t.into(), v, ver.map(From::from)),
 			InfoStatement::User(u, b, v) => Self::User(u.into(), b.map(Into::into), v),
@@ -97,8 +115,10 @@ impl From<InfoStatement> for crate::expr::statements::InfoStatement {
 impl From<crate::expr::statements::InfoStatement> for InfoStatement {
 	fn from(v: crate::expr::statements::InfoStatement) -> Self {
 		match v {
-			crate::expr::statements::InfoStatement::Root(v) => Self::Root(v),
-			crate::expr::statements::InfoStatement::Ns(v) => Self::Ns(v),
+			crate::expr::statements::InfoStatement::Root(v, ver) => {
+				Self::Root(v, ver.map(From::from))
+			}
+			crate::expr::statements::InfoStatement::Ns(v, ver) => Self::Ns(v, ver.map(From::from)),
 			crate::expr::statements::InfoStatement::Db(v, ver) => Self::Db(v, ver.map(From::from)),
 			crate::expr::statements::InfoStatement::Tb(t, v, ver) => {
 				Self::Tb(t.into(), v, ver.map(From::from))

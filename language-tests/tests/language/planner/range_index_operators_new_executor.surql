@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test all range operator combinations (inclusive/exclusive) with standard and unique indexes (new executor)"
 

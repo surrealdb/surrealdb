@@ -20,6 +20,7 @@ use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, TableName};
 pub(crate) struct Lookup {
 	pub(crate) kind: LookupKind,
 	pub(crate) expr: Option<Fields>,
+	pub(crate) only: bool,
 	pub(crate) what: Vec<LookupSubject>,
 	pub(crate) cond: Option<Cond>,
 	pub(crate) split: Option<Splits>,

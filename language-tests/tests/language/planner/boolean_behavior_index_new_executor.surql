@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "Test that boolean expressions in WHERE with index produce correct results (new executor)"
 

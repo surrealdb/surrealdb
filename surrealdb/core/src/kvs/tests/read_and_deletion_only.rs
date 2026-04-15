@@ -40,13 +40,13 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	// Phase 1: Initial writes in normal mode (before reaching space limit)
 	{
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		tx.set(&"initial_key", &"initial_value".as_bytes().to_vec(), None).await.unwrap();
+		tx.set(&"initial_key", &"initial_value".as_bytes().to_vec()).await.unwrap();
 		tx.commit().await.unwrap();
 	}
 
 	// Start a transaction that will be left uncommitted until after mode transition
 	let ongoing_tx = ds.transaction(Write, Optimistic).await.unwrap();
-	ongoing_tx.set(&"ongoing_key", &"ongoing_value".as_bytes().to_vec(), None).await.unwrap();
+	ongoing_tx.set(&"ongoing_key", &"ongoing_value".as_bytes().to_vec()).await.unwrap();
 
 	// Phase 2: Write data until space limit is reached and mode transitions to
 	// read-and-deletion-only Write ~20MB of data (200 transactions × 100 keys × 1KB each)
@@ -57,7 +57,7 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 		for i in 0..100 {
 			let key = format!("unlimited_key_{}_{}", i, j);
 			let value = vec![0u8; 1024]; // 1KB per value
-			if let Err(e) = tx.set(&key, &value, None).await {
+			if let Err(e) = tx.set(&key, &value).await {
 				assert!(
 					e.to_string().contains("read-and-deletion-only mode"),
 					"Unexpected error: {e}"
@@ -78,7 +78,7 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	// Confirm new write transactions are blocked
 	{
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let res = tx.put(&"other_key", &"other_value".as_bytes().to_vec(), None).await;
+		let res = tx.put(&"other_key", &"other_value".as_bytes().to_vec()).await;
 		assert!(
 			res.unwrap_err().to_string().contains("read-and-deletion-only mode"),
 			"Expected read-and-deletion-only error"
@@ -118,7 +118,7 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	// Confirm writes are allowed again after space usage drops below limit
 	{
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		tx.put(&"other_key", &"other_value".as_bytes().to_vec(), None).await.unwrap();
+		tx.put(&"other_key", &"other_value".as_bytes().to_vec()).await.unwrap();
 		tx.commit().await.unwrap();
 	}
 }

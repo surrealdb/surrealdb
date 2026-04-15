@@ -18,6 +18,8 @@ use crate::cli::upgrade::file_platform_suffix;
 pub struct V2Commands {
 	#[arg(long, help = "Give the cli permission in advance to download new binaries if required")]
 	accept: bool,
+	#[arg(long, help = "Check if a new surrealdb 2.0 binary is available.")]
+	upgrade: bool,
 	#[arg(
 		trailing_var_arg = true,
 		allow_hyphen_values = true,
@@ -204,7 +206,7 @@ pub async fn move_binary(from: &Path, to: &Path) -> std::io::Result<()> {
 	}
 }
 
-pub async fn ensure_binary_present(has_permission: bool) -> Result<PathBuf> {
+pub async fn ensure_binary_present(args: &V2Commands) -> Result<PathBuf> {
 	let dir = dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("surrealdb");
 	let file = dir.join("surreal_v2");
 
@@ -214,12 +216,13 @@ pub async fn ensure_binary_present(has_permission: bool) -> Result<PathBuf> {
 			.context("Cannot read metadata of cached v2 surrealdb executable")?;
 		let modified =
 			meta.modified().context("Cannot read modified time of surrealdb executable")?;
-		if modified.elapsed().map(|x| x > Duration::from_secs(24 * 60 * 60)).unwrap_or(true) {
+		if args.upgrade
+			|| modified.elapsed().map(|x| x > Duration::from_secs(60 * 60)).unwrap_or(true)
+		{
 			if let Some(exiting_version) = get_existing_version(&file).await {
 				if let Some(latest_version) = get_latest_version().await
 					&& exiting_version < latest_version
-					&& let Some(tmp_path) =
-						download_v2(has_permission, &file, &latest_version).await?
+					&& let Some(tmp_path) = download_v2(args.accept, &file, &latest_version).await?
 				{
 					tokio::fs::remove_file(&file)
 						.await
@@ -236,7 +239,7 @@ pub async fn ensure_binary_present(has_permission: bool) -> Result<PathBuf> {
 					);
 				};
 				let _ = tokio::fs::remove_file(&file).await;
-				if let Some(tmp_path) = download_v2(has_permission, &file, &latest_version).await? {
+				if let Some(tmp_path) = download_v2(args.accept, &file, &latest_version).await? {
 					tokio::fs::rename(tmp_path, &file)
 						.await
 						.context("Could not rename downloaded binary")?;
@@ -252,7 +255,7 @@ pub async fn ensure_binary_present(has_permission: bool) -> Result<PathBuf> {
 				"Could not retrieve latest surrealdb version, cannot download nor run the v2 binary"
 			);
 		};
-		if let Some(tmp_path) = download_v2(has_permission, &file, &latest_version).await? {
+		if let Some(tmp_path) = download_v2(args.accept, &file, &latest_version).await? {
 			tokio::fs::create_dir_all(dir)
 				.await
 				.context("Could not create surrealdb v2 binary cache directory")?;
@@ -267,7 +270,7 @@ pub async fn ensure_binary_present(has_permission: bool) -> Result<PathBuf> {
 }
 
 pub async fn init(args: V2Commands) -> Result<()> {
-	let path = ensure_binary_present(args.accept).await?;
+	let path = ensure_binary_present(&args).await?;
 
 	let mut child = tokio::process::Command::new(path)
 		.args(&args.args)

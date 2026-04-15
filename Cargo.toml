@@ -5,6 +5,10 @@ members = [
     ".",
     # SurrealDB crates
     "surrealdb",
+    "surrealdb/common",
+    "surrealdb/ast",
+    "surrealdb/token",
+    "surrealdb/parser",
     "surrealdb/core",
     "surrealdb/server",
     "surrealdb/types",
@@ -41,19 +45,23 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # SurrealDB crates
-surrealdb = { version = "3.1.0-alpha", path = "surrealdb" }
+surrealdb = { version = "3.1.0-alpha", path = "surrealdb", default-features = false }
 surrealdb-core = { version = "3.1.0-alpha", path = "surrealdb/core", default-features = false }
 surrealdb-server = { version = "3.1.0-alpha", path = "surrealdb/server", default-features = false }
 surrealdb-types = { version = "3.1.0-alpha", path = "surrealdb/types" }
 surrealdb-types-derive = { version = "3.1.0-alpha", path = "surrealdb/types/derive" }
+ast = { package = "surrealdb-ast", path = "surrealdb/ast" }
+token = { package = "surrealdb-token", path = "surrealdb/token" }
+parser = { package = "surrealdb-parser", path = "surrealdb/parser" }
+common = { package = "surrealdb-common", path = "surrealdb/common" }
+
 # SurrealML crates
 surrealml-core = { version = "0.1", path = "surrealml/core" }
 # Surrealism crates
-surrealism = { version = "0.1", path = "surrealism" }
-surrealism-macros = { version = "0.1", path = "surrealism/macros", default-features = false }
-surrealism-runtime = { version = "0.1", path = "surrealism/runtime" }
-surrealism-types = { version = "0.1", path = "surrealism/types", default-features = false }
-
+surrealism = { version = "0.2", path = "surrealism" }
+surrealism-macros = { version = "0.2", path = "surrealism/macros", default-features = false }
+surrealism-runtime = { version = "0.2", path = "surrealism/runtime" }
+surrealism-types = { version = "0.2", path = "surrealism/types", default-features = false }
 # External surreal crates
 affinitypool = "0.4.0"
 dmp = "0.2.3"
@@ -79,7 +87,7 @@ js = { version = "0.11.0", package = "rquickjs", features = ["rust-alloc"] }
 reblessive = "0.4.3"
 
 # External KV stores
-rocksdb = { version = "0.24.0-surreal.1", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
+rocksdb = { version = "0.24.0-surreal.3", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
 tikv = { version = "0.3.0-surreal.4", default-features = false, package = "surrealdb-tikv-client" }
 
 # Other crates
@@ -99,14 +107,16 @@ async-graphql-axum = "7.2.0"
 async-trait = "0.1.89"
 base64 = "0.22.1"
 bcrypt = "0.18.0"
+bitflags = "2.10.0"
 blake3 = "1.8.3"
 boxcar = "0.2.14"
 bytes = "1.11.1"
 castaway = "0.2.4"
-chrono = "0.4.43"
+chrono = { version = "0.4.43", default-features = false }
 ciborium = "0.2.2"
 clap = "4.5.54"
 dashmap = "6.1.0"
+dialoguer = "0.11"
 deunicode = "1.6.2"
 ext-sort = "^0.1.5"
 fastnum = "0.7.4"
@@ -118,6 +128,7 @@ fuzzy-matcher = "0.3.7"
 geo = { version = "0.32.0", default-features = false }
 geo-types = "0.7.18"
 getrandom = "0.3.4"
+hashbrown = "0.16.1"
 hex = "0.4.3"
 http = "1.4.0"
 hyper = "1.8"
@@ -126,6 +137,7 @@ indexmap = "2.13.0"
 ipnet = "2.11.0"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
 jsonwebtoken = { version = "10.3.0", default-features = false, features = ["use_pem"] }
+logos = "0.16.1" # TODO: pin version
 md-5 = "0.10.6"
 mimalloc = "0.1.48"
 native-tls = "0.2.14"
@@ -164,7 +176,7 @@ sha2 = "0.10.9"
 snap = "1.1.1"
 strsim = "0.11.1"
 subtle = "2.6"
-surrealdb-protocol = { version = "0.8.3", default-features = false }
+surrealdb-protocol = { version = "0.10.1", default-features = false }
 sysinfo = "0.37.2"
 tempfile = "3.24.0"
 thiserror = "2.0.17"
@@ -182,16 +194,16 @@ wasm-bindgen-futures = "0.4.58"
 wasmtimer = { version = "0.4.3", default-features = false }
 
 # Dev dependencies
-criterion = "0.8.1"
-env_logger = "0.11.8"
-flate2 = "1.1.8"
-rstest = "0.26.1"
-serial_test = "3.3.1"
-temp-dir = "0.1.16"
-test-log = "0.2.19"
-time = "0.3.47"
-tracing-subscriber = "0.3.22"
-wiremock = "0.6.5"
+criterion = "0.8"
+env_logger = "0.11"
+flate2 = "1.1"
+rstest = "0.26"
+serial_test = "3.4"
+temp-dir = "0.2"
+test-log = "0.2"
+time = "0.3"
+tracing-subscriber = "0.3"
+wiremock = "0.6"
 
 # SurrealML specific dependencies
 ort = { version = "2.0.0-rc.11", features = ["cuda", "ndarray"] }
@@ -199,10 +211,12 @@ ort = { version = "2.0.0-rc.11", features = ["cuda", "ndarray"] }
 # Surrealism specific dependencies
 tar = "0.4.44"
 toml = "0.9.11"
-walrus = "0.24.4"
+wasm-encoder = "0.245"
 wasm-opt = "0.116.1"
-wasmtime = { version = "41.0.4", default-features = false, features = ["cranelift", "winch", "runtime", "std", "wat"] }
-wasmtime-wasi = { version = "41.0.4", features = ["p1"] }
+wasmparser = "0.245"
+wasmtime = { version = "43.0.1", default-features = false, features = ["async", "cranelift", "winch", "runtime", "std", "wat", "component-model", "parallel-compilation"] }
+wasmtime-wasi = { version = "43.0.1", features = ["p1", "p2"] }
+wit-bindgen = { version = "0.51", default-features = false, features = ["macros", "realloc"] }
 zstd = "0.13.3"
 
 [package]
@@ -279,8 +293,10 @@ reqwest = { workspace = true, default-features = false, features = [
     "gzip",
     "http2",
 ] }
+semver.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+surrealism-runtime.workspace = true
 surrealdb-types.workspace = true
 test-log = { workspace = true, features = ["trace"] }
 thiserror.workspace = true

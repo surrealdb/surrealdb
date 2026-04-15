@@ -264,4 +264,18 @@ pub(crate) trait ExecOperator: Debug + SendSyncRequirement {
 	fn output_ordering(&self) -> OutputOrdering {
 		OutputOrdering::Unordered
 	}
+
+	/// Returns field paths that are guaranteed to have a single constant
+	/// value across all output rows.
+	///
+	/// Used by sort-elimination: if a leading ORDER BY field references a
+	/// constant column, it can be stripped from the requirement because any
+	/// direction trivially holds for a single-valued column.
+	///
+	/// The default is an empty list (no constant fields).  IndexScan
+	/// overrides this for equality-pinned columns.  Pass-through operators
+	/// (Filter, Limit, etc.) should delegate to their input.
+	fn constant_output_fields(&self) -> Vec<crate::exec::field_path::FieldPath> {
+		vec![]
+	}
 }

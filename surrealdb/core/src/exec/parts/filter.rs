@@ -14,6 +14,9 @@ use crate::val::Value;
 #[derive(Debug, Clone)]
 pub struct WherePart {
 	pub predicate: Arc<dyn PhysicalExpr>,
+	/// Whether the predicate references `$parent`. When false, we skip the
+	/// per-element context allocation for binding `$parent`.
+	pub needs_parent: bool,
 }
 
 #[cfg_attr(target_family = "wasm", async_trait(?Send))]
@@ -28,6 +31,30 @@ impl PhysicalExpr for WherePart {
 	}
 
 	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
+		// Only bind $parent when the predicate actually references it,
+		// avoiding a Value::clone() + context allocation per element for
+		// the common case (e.g. `[WHERE age > 30]`).
+		let parent_ctx = if self.needs_parent
+			&& let Some(parent) = ctx.document_root
+		{
+			Some(ctx.exec_ctx.with_param("parent", parent.clone()))
+		} else {
+			None
+		};
+		let ctx = if let Some(ref pc) = parent_ctx {
+			EvalContext {
+				exec_ctx: pc,
+				current_value: ctx.current_value,
+				local_params: ctx.local_params,
+				recursion_ctx: ctx.recursion_ctx,
+				document_root: ctx.document_root,
+				skip_fetch_perms: ctx.skip_fetch_perms,
+				computing_record: ctx.computing_record,
+			}
+		} else {
+			ctx
+		};
+
 		let value = ctx.current_value.cloned().unwrap_or(Value::None);
 		match value {
 			Value::Array(arr) => {
