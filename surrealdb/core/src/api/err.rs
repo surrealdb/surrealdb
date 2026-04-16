@@ -27,7 +27,7 @@ pub enum ApiError {
 	#[error("Missing Accept or Content-Type header")]
 	MissingFormat,
 
-	#[error("An unreachable error occured: {0}")]
+	#[error("An unreachable error occurred: {0}")]
 	Unreachable(String),
 
 	// Status code errors
