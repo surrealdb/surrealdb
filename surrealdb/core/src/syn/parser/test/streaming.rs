@@ -447,8 +447,8 @@ fn statements() -> Vec<TopLevelExpr> {
 			],
 			close: Some(Expr::Block(Box::new(Block(vec![ident_field("baq")])))),
 		}))),
-		TopLevelExpr::Expr(Expr::Info(Box::new(InfoStatement::Root(false)))),
-		TopLevelExpr::Expr(Expr::Info(Box::new(InfoStatement::Ns(false)))),
+		TopLevelExpr::Expr(Expr::Info(Box::new(InfoStatement::Root(false, None)))),
+		TopLevelExpr::Expr(Expr::Info(Box::new(InfoStatement::Ns(false, None)))),
 		TopLevelExpr::Expr(Expr::Info(Box::new(InfoStatement::User(
 			Expr::Idiom(Idiom::field("user".to_string())),
 			Some(Base::Ns),

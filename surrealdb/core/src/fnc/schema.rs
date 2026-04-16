@@ -18,7 +18,7 @@ pub mod table {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			let txn = ctx.tx();
 			let tb: TableName = arg.into();
-			let table_exists = txn.get_tb(ns, db, &tb).await?.is_some();
+			let table_exists = txn.get_tb(ns, db, &tb, None).await?.is_some();
 			Ok(Value::Bool(table_exists))
 		} else {
 			Ok(Value::None)

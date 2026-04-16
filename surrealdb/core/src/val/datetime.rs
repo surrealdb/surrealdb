@@ -12,6 +12,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
 use crate::fmt::QuoteStr;
+use crate::kvs::TimeStampImpl;
 use crate::syn;
 use crate::val::{Duration, TrySub};
 
@@ -83,13 +84,12 @@ impl Deref for Datetime {
 }
 
 impl Datetime {
-	/// Convert to nanosecond timestamp.
-	pub fn to_u64(&self) -> Option<u64> {
-		self.0.timestamp_nanos_opt().map(|v| v as u64)
-	}
-
-	pub fn to_version_stamp(&self) -> Result<u64> {
-		self.to_u64().ok_or_else(|| anyhow!(Error::TimestampOverflow(self.to_string())))
+	/// Convert the datetime to a version stamp using the datastore's timestamp implementation.
+	pub fn to_version_stamp(&self, ts_impl: &dyn TimeStampImpl) -> Result<u64> {
+		let ts = ts_impl
+			.create_from_datetime(self.0)
+			.ok_or_else(|| anyhow!(Error::TimestampOverflow(self.to_string())))?;
+		Ok(ts.as_versionstamp() as u64)
 	}
 
 	/// Convert to nanosecond timestamp.

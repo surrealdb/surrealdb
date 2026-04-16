@@ -15,7 +15,7 @@ async fn relate_with_parameters() -> Result<()> {
 		LET $jaime = person:jaime;
 		RELATE $tobie->knows->$jaime SET id = knows:test, brother = true;
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_, dbs) = new_ds("test", "test", true).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 4);
@@ -59,7 +59,7 @@ async fn relate_and_overwrite() -> Result<()> {
 		UPDATE knows:test CONTENT { test: true };
 		SELECT * FROM knows:test;
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_, dbs) = new_ds("test", "test", true).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
@@ -134,7 +134,7 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 		RELATE $tobie->$relation->$jaime;
 		RELATE $tobie->(type::record("knows:bar"))->$jaime;
 	"#;
-	let dbs = new_ds("test", "test").await?;
+	let (_, dbs) = new_ds("test", "test", true).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 9);
@@ -213,7 +213,7 @@ async fn relate_with_complex_table() -> Result<()> {
 		RELATE a:1->`-`:`-`->a:2;
 		select ->`-` as rel from a:1;
 	";
-	let dbs = new_ds("test", "test").await?;
+	let (_, dbs) = new_ds("test", "test", true).await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 3);

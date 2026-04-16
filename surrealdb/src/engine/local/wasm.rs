@@ -72,7 +72,20 @@ pub(crate) async fn run_router(
 		_ => None,
 	};
 
-	let kvs = match Datastore::new(&address.path).await {
+	let builder = Datastore::builder()
+		.with_query_timeout(address.config.query_timeout)
+		.with_transaction_timeout(address.config.transaction_timeout)
+		.with_auth(configured_root.is_some());
+
+	let (notify, builder) = if address.config.capabilities.allows_live_query_notifications() {
+		// TODO: Move value to a global somewhere
+		let (send, recv) = surrealdb_core::channel::bounded(15_000);
+		(Some(recv), builder.with_notify(send))
+	} else {
+		(None, builder)
+	};
+
+	let kvs = match builder.build_with_path(&address.path).await {
 		Ok(kvs) => {
 			if let Err(error) = kvs.check_version().await {
 				conn_tx.send(Err(crate::Error::internal(error.to_string()))).await.ok();
@@ -90,23 +103,13 @@ pub(crate) async fn run_router(
 				return;
 			}
 			conn_tx.send(Ok(())).await.ok();
-			kvs.with_auth_enabled(configured_root.is_some())
+			kvs
 		}
 		Err(error) => {
 			conn_tx.send(Err(crate::Error::internal(error.to_string()))).await.ok();
 			return;
 		}
 	};
-
-	let kvs = match address.config.capabilities.allows_live_query_notifications() {
-		true => kvs.with_notifications(),
-		false => kvs,
-	};
-
-	let kvs = kvs
-		.with_query_timeout(address.config.query_timeout)
-		.with_transaction_timeout(address.config.transaction_timeout)
-		.with_capabilities(address.config.capabilities);
 
 	let router_state = super::RouterState {
 		kvs: Arc::new(kvs),
@@ -130,8 +133,8 @@ pub(crate) async fn run_router(
 	}
 	let tasks = tasks::init(router_state.kvs.clone(), canceller.clone(), &opt);
 
-	let mut notifications = router_state.kvs.notifications().map(Box::pin);
-	let mut notification_stream = poll_fn(move |cx| match &mut notifications {
+	let mut notify = notify.map(Box::pin);
+	let mut notification_stream = poll_fn(move |cx| match &mut notify {
 		Some(rx) => rx.poll_next_unpin(cx),
 		// return poll pending so that this future is never woken up again and therefore not
 		// constantly polled.

@@ -23,7 +23,7 @@ impl RemoveFunctionStatement {
 		let txn = ctx.tx();
 		// Get the definition
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let fc = match txn.get_db_function(ns, db, &self.name).await {
+		let fc = match txn.get_db_function(ns, db, &self.name, None).await {
 			Ok(x) => x,
 			Err(e) => {
 				if self.if_exists && matches!(e.downcast_ref(), Some(Error::FcNotFound { .. })) {

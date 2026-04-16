@@ -10,6 +10,7 @@ use crate::kvs::{KVKey, KVValue};
 /// Falls back to cgroup limits when running inside a container, and
 /// uses a conservative 1 GiB default when `/proc` is inaccessible
 /// (e.g. systemd `ProcSubset=pid` hardening).
+#[cfg_attr(not(any(feature = "kv-rocksdb", feature = "kv-surrealkv")), allow(dead_code))]
 pub(crate) static TOTAL_SYSTEM_MEMORY: LazyLock<u64> = LazyLock::new(|| {
 	// Load the system attributes
 	let mut system = System::new();

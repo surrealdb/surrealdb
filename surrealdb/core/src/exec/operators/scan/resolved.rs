@@ -82,7 +82,7 @@ pub(crate) async fn resolve_table_context(
 
 	// Look up table definition
 	let table_def = match txn
-		.get_tb_by_name(ns, db, table_name)
+		.get_tb_by_name(ns, db, table_name, None)
 		.await
 		.map_err(|e| Error::Internal(e.to_string()))?
 	{
@@ -96,12 +96,12 @@ pub(crate) async fn resolve_table_context(
 
 	// Build field state with permissions enabled (conservative -- the operator
 	// will skip permission evaluation if should_check_perms returns false).
-	let field_state = build_field_state_raw(txn, ctx, ns_id, db_id, table_name, true)
+	let field_state = build_field_state_raw(txn, ctx, ns_id, db_id, table_name, true, None)
 		.await
 		.map_err(|cf| match cf {
-			crate::expr::ControlFlow::Err(e) => Error::Internal(e.to_string()),
-			_ => Error::Internal("Unexpected control flow in field state resolution".into()),
-		})?;
+		crate::expr::ControlFlow::Err(e) => Error::Internal(e.to_string()),
+		_ => Error::Internal("Unexpected control flow in field state resolution".into()),
+	})?;
 
 	Ok(Some(ResolvedTableContext {
 		table_def,

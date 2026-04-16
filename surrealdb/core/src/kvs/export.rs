@@ -167,7 +167,7 @@ impl Transaction {
 		cfg: Config,
 		chn: Sender<Vec<u8>>,
 	) -> Result<()> {
-		let db = self.get_db_by_name(ns, db).await?.ok_or_else(|| {
+		let db = self.get_db_by_name(ns, db, None).await?.ok_or_else(|| {
 			anyhow::Error::new(Error::DbNotFound {
 				name: db.to_owned(),
 			})
@@ -192,7 +192,7 @@ impl Transaction {
 
 		// Output USERS
 		if cfg.users {
-			let users = self.all_db_users(ns, db).await?;
+			let users = self.all_db_users(ns, db, None).await?;
 			self.export_section(
 				"USERS",
 				users.iter().map(|x| DefineUserStatement::from_definition(Base::Db, x)),
@@ -203,7 +203,7 @@ impl Transaction {
 
 		// Output ACCESSES
 		if cfg.accesses {
-			let accesses = self.all_db_accesses(ns, db).await?;
+			let accesses = self.all_db_accesses(ns, db, None).await?;
 			self.export_section(
 				"ACCESSES",
 				accesses
@@ -216,19 +216,19 @@ impl Transaction {
 
 		// Output PARAMS
 		if cfg.params {
-			let params = self.all_db_params(ns, db).await?;
+			let params = self.all_db_params(ns, db, None).await?;
 			self.export_section("PARAMS", params.iter(), chn).await?;
 		}
 
 		// Output FUNCTIONS
 		if cfg.functions {
-			let functions = self.all_db_functions(ns, db).await?;
+			let functions = self.all_db_functions(ns, db, None).await?;
 			self.export_section("FUNCTIONS", functions.iter(), chn).await?;
 		}
 
 		// Output ANALYZERS
 		if cfg.analyzers {
-			let analyzers = self.all_db_analyzers(ns, db).await?;
+			let analyzers = self.all_db_analyzers(ns, db, None).await?;
 			self.export_section(
 				"ANALYZERS",
 				analyzers.iter().map(DefineAnalyzerStatement::from_definition),
@@ -239,31 +239,31 @@ impl Transaction {
 
 		// Output APIS
 		if cfg.apis {
-			let apis = self.all_db_apis(ns, db).await?;
+			let apis = self.all_db_apis(ns, db, None).await?;
 			self.export_section("APIS", apis.iter(), chn).await?;
 		}
 
 		// Output BUCKETS
 		if cfg.buckets {
-			let buckets = self.all_db_buckets(ns, db).await?;
+			let buckets = self.all_db_buckets(ns, db, None).await?;
 			self.export_section("BUCKETS", buckets.iter(), chn).await?;
 		}
 
 		// Output MODULES
 		if cfg.modules {
-			let modules = self.all_db_modules(ns, db).await?;
+			let modules = self.all_db_modules(ns, db, None).await?;
 			self.export_section("MODULES", modules.iter(), chn).await?;
 		}
 
 		// Output CONFIGS
 		if cfg.configs {
-			let configs = self.all_db_configs(ns, db).await?;
+			let configs = self.all_db_configs(ns, db, None).await?;
 			self.export_section("CONFIGS", configs.iter(), chn).await?;
 		}
 
 		// Output SEQUENCES
 		if cfg.sequences {
-			let sequences = self.all_db_sequences(ns, db).await?;
+			let sequences = self.all_db_sequences(ns, db, None).await?;
 			self.export_section("SEQUENCES", sequences.iter(), chn).await?;
 		}
 
@@ -348,20 +348,24 @@ impl Transaction {
 		chn.send(bytes!("")).await?;
 		chn.send(bytes!(format!("{};", table.to_sql()))).await?;
 		chn.send(bytes!("")).await?;
-		// Export all table field definitions for this table
+		// Export all table field definitions with OVERWRITE to ensure
+		// idempotent re-import (relation tables auto-generate in/out fields,
+		// and array types generate sub-field definitions that would conflict).
 		let fields = self.all_tb_fields(ns, db, &table.name, None).await?;
 		for field in fields.iter() {
-			chn.send(bytes!(format!("{};", field.to_sql()))).await?;
+			let mut stmt = field.to_sql_definition();
+			stmt.kind = crate::sql::statements::define::DefineKind::Overwrite;
+			chn.send(bytes!(format!("{};", stmt.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table index definitions for this table
-		let indexes = self.all_tb_indexes(ns, db, &table.name).await?;
+		let indexes = self.all_tb_indexes(ns, db, &table.name, None).await?;
 		for index in indexes.iter() {
 			chn.send(bytes!(format!("{};", index.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table event definitions for this table
-		let events = self.all_tb_events(ns, db, &table.name).await?;
+		let events = self.all_tb_events(ns, db, &table.name, None).await?;
 		for event in events.iter() {
 			chn.send(bytes!(format!("{};", event.to_sql()))).await?;
 		}

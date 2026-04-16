@@ -148,7 +148,7 @@ async fn execute_database_info(
 				value
 					.cast_to::<Datetime>()
 					.map_err(|e| anyhow::anyhow!("{e}"))?
-					.to_version_stamp()?,
+					.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?,
 			)
 		}
 		None => None,
@@ -160,74 +160,74 @@ async fn execute_database_info(
 	// Create the result set
 	if structured {
 		let object = map! {
-			"accesses".to_string() => process(txn.all_db_accesses(ns, db).await?),
-			"apis".to_string() => process(txn.all_db_apis(ns, db).await?),
-			"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
-			"buckets".to_string() => process(txn.all_db_buckets(ns, db).await?),
-			"functions".to_string() => process(txn.all_db_functions(ns, db).await?),
-			"modules".to_string() => process(txn.all_db_modules(ns, db).await?),
-			"models".to_string() => process(txn.all_db_models(ns, db).await?),
-			"params".to_string() => process(txn.all_db_params(ns, db).await?),
+			"accesses".to_string() => process(txn.all_db_accesses(ns, db, version).await?),
+			"apis".to_string() => process(txn.all_db_apis(ns, db, version).await?),
+			"analyzers".to_string() => process(txn.all_db_analyzers(ns, db, version).await?),
+			"buckets".to_string() => process(txn.all_db_buckets(ns, db, version).await?),
+			"functions".to_string() => process(txn.all_db_functions(ns, db, version).await?),
+			"modules".to_string() => crate::expr::statements::info::process_modules(ctx.ctx(), ns, db, txn.all_db_modules(ns, db, version).await?).await,
+			"models".to_string() => process(txn.all_db_models(ns, db, version).await?),
+			"params".to_string() => process(txn.all_db_params(ns, db, version).await?),
 			"tables".to_string() => process(txn.all_tb(ns, db, version).await?),
-			"users".to_string() => process(txn.all_db_users(ns, db).await?),
-			"configs".to_string() => process(txn.all_db_configs(ns, db).await?),
-			"sequences".to_string() => process(txn.all_db_sequences(ns, db).await?),
+			"users".to_string() => process(txn.all_db_users(ns, db, version).await?),
+			"configs".to_string() => process(txn.all_db_configs(ns, db, version).await?),
+			"sequences".to_string() => process(txn.all_db_sequences(ns, db, version).await?),
 		};
 		Ok(Value::Object(Object(object)))
 	} else {
 		let object = map! {
 			"accesses".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_db_accesses(ns, db).await?.iter() {
+				for v in txn.all_db_accesses(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
 			"apis".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_db_apis(ns, db).await?.iter() {
+				for v in txn.all_db_apis(ns, db, version).await?.iter() {
 					out.insert(v.path.to_string(), v.to_sql().into());
 				}
 				out.into()
 			},
 			"analyzers".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_db_analyzers(ns, db).await?.iter() {
+				for v in txn.all_db_analyzers(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
 			"buckets".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_db_buckets(ns, db).await?.iter() {
+				for v in txn.all_db_buckets(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
 			"functions".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_db_functions(ns, db).await?.iter() {
+				for v in txn.all_db_functions(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
 			"modules".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_db_modules(ns, db).await?.iter() {
+				for v in txn.all_db_modules(ns, db, version).await?.iter() {
 					out.insert(v.get_storage_name()?, v.to_sql().into());
 				}
 				out.into()
 			},
 			"models".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_db_models(ns, db).await?.iter() {
+				for v in txn.all_db_models(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
 			"params".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_db_params(ns, db).await?.iter() {
+				for v in txn.all_db_params(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
@@ -241,21 +241,21 @@ async fn execute_database_info(
 			},
 			"users".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_db_users(ns, db).await?.iter() {
+				for v in txn.all_db_users(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
 			"configs".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_db_configs(ns, db).await?.iter() {
+				for v in txn.all_db_configs(ns, db, version).await?.iter() {
 					out.insert(v.name(), v.to_sql().into());
 				}
 				out.into()
 			},
 			"sequences".to_string() => {
 				let mut out = Object::default();
-				for v in txn.all_db_sequences(ns, db).await?.iter() {
+				for v in txn.all_db_sequences(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()

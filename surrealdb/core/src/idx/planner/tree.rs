@@ -139,7 +139,7 @@ impl<'a> TreeBuilder<'a> {
 			return Ok(sc);
 		}
 		let (ns, db) = self.ctx.ctx.expect_ns_db_ids(self.ctx.opt).await?;
-		let sc = SchemaCache::new(ns, db, table, tx).await?;
+		let sc = SchemaCache::new(ns, db, table, tx, self.ctx.opt.version).await?;
 		self.schemas.insert(table.clone(), sc.clone());
 		Ok(sc)
 	}
@@ -524,7 +524,7 @@ impl<'a> TreeBuilder<'a> {
 				Index::FullText {
 					..
 				} if *col == 0 => Self::eval_matches_operator(op, n),
-				Index::Hnsw(_) if *col == 0 => self.eval_hnsw_knn(e, op, n)?,
+				Index::Hnsw(h) if *col == 0 => self.eval_hnsw_knn(e, op, n, h)?,
 				_ => None,
 			};
 			if res.is_none()
@@ -562,24 +562,34 @@ impl<'a> TreeBuilder<'a> {
 		exp: &Arc<Expr>,
 		op: &BinaryOperator,
 		n: &Node,
+		hnsw: &catalog::HnswParams,
 	) -> Result<Option<IndexOperator>> {
 		let BinaryOperator::NearestNeighbor(nn) = op else {
 			return Ok(None);
 		};
-		let NearestNeighbor::Approximate(k, ef) = &**nn else {
-			return Ok(None);
+
+		let (k, ef) = match &**nn {
+			NearestNeighbor::Approximate(k, ef) => (*k, *ef),
+			NearestNeighbor::K(k, d) if *d == hnsw.distance => {
+				(*k, (*k).max(hnsw.ef_construction as u32))
+			}
+			_ => return Ok(None),
 		};
 
 		if let Node::Computed(v) = n {
 			let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
 			self.knn_expressions.insert(exp.clone());
-			return Ok(Some(IndexOperator::Ann(vec, *k, *ef)));
+			return Ok(Some(IndexOperator::Ann(vec, k, ef)));
 		}
 
 		Ok(None)
 	}
 
 	fn eval_bruteforce_knn(&mut self, id: &Idiom, val: &Node, exp: &Arc<Expr>) -> Result<()> {
+		if self.knn_expressions.contains(exp) {
+			return Ok(());
+		}
+
 		let Expr::Binary {
 			op,
 			..
@@ -787,9 +797,10 @@ impl SchemaCache {
 		db: DatabaseId,
 		table: &TableName,
 		tx: &Transaction,
+		version: Option<u64>,
 	) -> Result<Self> {
-		let indexes = tx.all_tb_indexes(ns, db, table).await?;
-		let fields = tx.all_tb_fields(ns, db, table, None).await?;
+		let indexes = tx.all_tb_indexes(ns, db, table, version).await?;
+		let fields = tx.all_tb_fields(ns, db, table, version).await?;
 		Ok(Self {
 			indexes,
 			fields,

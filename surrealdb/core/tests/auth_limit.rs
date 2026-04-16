@@ -7,7 +7,7 @@ use surrealdb_types::ToSql;
 
 #[tokio::test]
 async fn auth_limit_diff_role() -> Result<()> {
-	let dbs = new_ds("test", "test").await?.with_auth_enabled(true).with_notifications();
+	let (_, dbs) = new_ds("test", "test", true).await?;
 
 	let ses_owner = Session::owner().with_ns("test").with_db("test");
 	let ses_editor = Session::editor().with_ns("test").with_db("test");
@@ -39,7 +39,7 @@ async fn auth_limit_diff_role() -> Result<()> {
 
 #[tokio::test]
 async fn auth_limit_diff_level() -> Result<()> {
-	let dbs = new_ds("test", "test").await?.with_auth_enabled(true).with_notifications();
+	let (_, dbs) = new_ds("test", "test", true).await?;
 
 	let ses_ns = Session::for_level(Level::Namespace("test".to_string()), Role::Owner)
 		.with_ns("test")
@@ -82,7 +82,7 @@ async fn auth_limit_diff_level() -> Result<()> {
 /// prevent the escalation even when invoked by a NS-owner.
 #[tokio::test]
 async fn auth_limit_alter_function_recomputes() -> Result<()> {
-	let dbs = new_ds("test", "test").await?.with_auth_enabled(true).with_notifications();
+	let (_, dbs) = new_ds("test", "test", true).await?;
 
 	let ses_ns = Session::for_level(Level::Namespace("test".to_string()), Role::Owner)
 		.with_ns("test")
@@ -129,7 +129,7 @@ async fn auth_limit_alter_function_recomputes() -> Result<()> {
 /// prevent the escalation: no new user should appear in INFO FOR NS.
 #[tokio::test]
 async fn auth_limit_alter_api_recomputes() -> Result<()> {
-	let dbs = new_ds("test", "test").await?.with_auth_enabled(true).with_notifications();
+	let (not, dbs) = new_ds("test", "test", true).await?;
 
 	let ses_ns = Session::for_level(Level::Namespace("test".to_string()), Role::Owner)
 		.with_ns("test")
@@ -177,7 +177,7 @@ async fn auth_limit_alter_api_recomputes() -> Result<()> {
 	);
 
 	// Belt-and-suspenders: verify the backdoor user was NOT created
-	let mut t = Test::new_ds_session(dbs, ses_ns, "INFO FOR NS").await?;
+	let mut t = Test::new_ds_session(dbs, not, ses_ns, "INFO FOR NS").await?;
 	let info = t.next_value()?.to_sql();
 	assert!(
 		!info.contains("backdoor"),

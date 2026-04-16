@@ -208,7 +208,9 @@ impl MatchContext {
 				let db_id = db_ctx.db.database_id;
 
 				// Find the full-text index for this table and idiom
-				let indexes = tx.all_tb_indexes(ns_id, db_id, &self.table).await?;
+				let indexes = tx
+					.all_tb_indexes(ns_id, db_id, &self.table, ctx.exec_ctx.version_stamp())
+					.await?;
 				let index_def = indexes
 					.iter()
 					.find(|idx| {

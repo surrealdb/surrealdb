@@ -159,7 +159,7 @@ impl Document {
 			node_id,
 		);
 		let event_record = AsyncEventRecord::new(&opt, &ctx, ev, cursor_doc)?;
-		tx.put(&key, &event_record, None).await?;
+		tx.put(&key, &event_record).await?;
 		tx.trigger_async_event();
 		Ok(())
 	}
@@ -482,7 +482,7 @@ impl AsyncEventContext {
 		if ev.attempt <= ev.event_definition.retry() {
 			// Requeue with the same key so the event keeps its original queue position; retries are
 			// bounded here and no backoff is applied.
-			catch!(tx, tx.set(eq, ev, None).await);
+			catch!(tx, tx.set(eq, ev).await);
 		} else {
 			warn!(
 				"Final error after processing the event `{}` on table {} {} times: {e}",
