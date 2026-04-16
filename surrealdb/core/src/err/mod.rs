@@ -1120,7 +1120,7 @@ pub(crate) enum Error {
 	ReferenceNestedField(String),
 
 	/// Something went wrong while updating references
-	#[error("An error occured while updating references for `{0}`: {1}")]
+	#[error("An error occurred while updating references for `{0}`: {1}")]
 	RefsUpdateFailure(String, String),
 
 	#[error(
