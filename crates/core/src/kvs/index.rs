@@ -282,7 +282,6 @@ impl IndexBuilder {
 		spawn(async move {
 			// Ensure that the daemon running flag is properly managed
 			let daemon_guard = DeferredDaemonGuard(building.clone());
-			building.deferred_daemon_running.store(true, Ordering::Release);
 			loop {
 				if building.is_aborted().await {
 					building.set_status(BuildingStatus::Aborted).await;
@@ -875,6 +874,7 @@ impl Building {
 							}
 						}
 						Err(Error::TxRetryable) => {
+							let _ = tx.cancel().await;
 							warn!("{}: transient conflict on commit, retrying batch", self.ix.name);
 							sleep(Duration::from_millis(100)).await;
 						}
@@ -1024,8 +1024,11 @@ impl Building {
 		trace!("{}: index_appending_range STARTS- len: {}", self.ix.name, keys.len());
 		for k in keys {
 			if self.is_aborted().await {
+				// Best-effort: persist FtIndex progress made so far in this batch
 				if let Some(ref ft) = ft_index {
-					ft.finish(ctx).await?;
+					if let Err(e) = ft.finish(ctx).await {
+						warn!("{}: failed to finish FtIndex on abort: {}", self.ix.name, e);
+					}
 				}
 				return Ok(indexed);
 			}
