@@ -241,8 +241,16 @@ impl IndexBuilder {
 				return;
 			}
 			if b.ix.defer {
-				// If it is a deferred indexing, start the daemon and return
+				// Set deferred_daemon_running BEFORE marking the initial build complete,
+				// so that is_finished() does not momentarily return true.
+				b.deferred_daemon_running.store(true, Ordering::Release);
+				// Mark the initial build as complete BEFORE spawning the daemon.
+				// This prevents write-write conflicts on !ip keys between the daemon
+				// (which deletes them) and maybe_consume (which writes them while
+				// initial_build_complete is false).
+				drop(initial_guard);
 				Self::spawn_deferred_daemon(b.clone());
+				return;
 			}
 			drop(initial_guard);
 		});
@@ -261,7 +269,8 @@ impl IndexBuilder {
 	) -> Result<IndexBuilding, Error> {
 		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix, ix_key)?);
 		building.recover_queue().await?;
-		building.initial_build_complete.store(true, Ordering::Relaxed);
+		building.deferred_daemon_running.store(true, Ordering::Release);
+		building.initial_build_complete.store(true, Ordering::Release);
 		Self::spawn_deferred_daemon(building.clone());
 		Ok(building)
 	}
@@ -273,13 +282,20 @@ impl IndexBuilder {
 		spawn(async move {
 			// Ensure that the daemon running flag is properly managed
 			let daemon_guard = DeferredDaemonGuard(building.clone());
-			building.deferred_daemon_running.store(true, Ordering::Relaxed);
+			building.deferred_daemon_running.store(true, Ordering::Release);
 			loop {
 				if building.is_aborted().await {
 					building.set_status(BuildingStatus::Aborted).await;
 					break;
 				}
 				if let Err(e) = building.index_appending_loop(None).await {
+					if matches!(e, Error::TxRetryable) {
+						// Transient conflicts are retried within index_appending_loop,
+						// but handle any that still propagate as a safety net.
+						warn!("{}: deferred daemon transient conflict, retrying", building.ix.name);
+						sleep(Duration::from_millis(100)).await;
+						continue;
+					}
 					error!("Index appending loop error: {}", e);
 					building.set_status(BuildingStatus::Error(e.to_string())).await;
 					break;
@@ -639,7 +655,8 @@ impl Building {
 		// for a record being initially indexed. Once the initial build is complete
 		// (appending phase), we skip setting ip to avoid write-write conflicts with the
 		// deferred daemon which deletes ip keys.
-		if !self.initial_build_complete.load(Ordering::Relaxed) {
+		// Acquire pairs with the Release in InitialBuildGuard::drop / start_deferred_index.
+		if !self.initial_build_complete.load(Ordering::Acquire) {
 			let ip = self.new_ip_key(rid.id.clone())?;
 			let v = tx.get(ip.clone(), None).await?;
 			let pa: Option<PrimaryAppending> = if let Some(v) = v {
@@ -835,34 +852,48 @@ impl Building {
 				keys
 			};
 			if !keys.is_empty() {
-				// Create a new context with a write transaction
+				let ctx = self.new_write_tx_ctx().await?;
+				let tx = ctx.tx();
+				match self
+					.index_appending_range(&ctx, &tx, keys, initial_count, &mut updates_count)
+					.await
 				{
-					let ctx = self.new_write_tx_ctx().await?;
-					let tx = ctx.tx();
-					let indexed = catch!(
-						tx,
-						self.index_appending_range(
-							&ctx,
-							&tx,
-							keys,
-							initial_count,
-							&mut updates_count
-						)
-						.await
-					);
-					catch!(tx, tx.commit().await);
-					if !indexed.is_empty() {
-						{
-							let mut clean_queue = self.clean_queue.lock().await;
-							for batch_id in indexed.keys() {
-								if let Some(idx) =
-									clean_queue.iter().position(|&id| id == *batch_id)
+					Ok(indexed) => match tx.commit().await {
+						Ok(()) => {
+							if !indexed.is_empty() {
 								{
-									clean_queue.remove(idx);
+									let mut clean_queue = self.clean_queue.lock().await;
+									for batch_id in indexed.keys() {
+										if let Some(idx) =
+											clean_queue.iter().position(|&id| id == *batch_id)
+										{
+											clean_queue.remove(idx);
+										}
+									}
 								}
+								self.queue.write().await.clean(indexed);
 							}
 						}
-						self.queue.write().await.clean(indexed);
+						Err(Error::TxRetryable) => {
+							warn!("{}: transient conflict on commit, retrying batch", self.ix.name);
+							sleep(Duration::from_millis(100)).await;
+						}
+						Err(e) => {
+							let _ = tx.cancel().await;
+							return Err(e);
+						}
+					},
+					Err(Error::TxRetryable) => {
+						let _ = tx.cancel().await;
+						warn!(
+							"{}: transient conflict in appending range, retrying batch",
+							self.ix.name
+						);
+						sleep(Duration::from_millis(100)).await;
+					}
+					Err(e) => {
+						let _ = tx.cancel().await;
+						return Err(e);
 					}
 				}
 			} else {
