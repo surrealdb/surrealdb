@@ -853,6 +853,12 @@ impl Building {
 			if !keys.is_empty() {
 				let ctx = self.new_write_tx_ctx().await?;
 				let tx = ctx.tx();
+				// Snapshot so we can roll back counter-side effects on retry:
+				// tx.cancel() does not undo increments already applied to updates_count
+				// inside index_appending_range, and the same !ib keys will be re-read
+				// and re-processed on the next iteration since their deletions were
+				// rolled back with the transaction.
+				let saved_updates_count = updates_count;
 				match self
 					.index_appending_range(&ctx, &tx, keys, initial_count, &mut updates_count)
 					.await
@@ -875,6 +881,7 @@ impl Building {
 						}
 						Err(Error::TxRetryable) => {
 							let _ = tx.cancel().await;
+							updates_count = saved_updates_count;
 							warn!("{}: transient conflict on commit, retrying batch", self.ix.name);
 							sleep(Duration::from_millis(100)).await;
 						}
@@ -885,6 +892,7 @@ impl Building {
 					},
 					Err(Error::TxRetryable) => {
 						let _ = tx.cancel().await;
+						updates_count = saved_updates_count;
 						warn!(
 							"{}: transient conflict in appending range, retrying batch",
 							self.ix.name
