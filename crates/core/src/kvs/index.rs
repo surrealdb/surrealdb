@@ -1024,11 +1024,12 @@ impl Building {
 		trace!("{}: index_appending_range STARTS- len: {}", self.ix.name, keys.len());
 		for k in keys {
 			if self.is_aborted().await {
-				// Best-effort: persist FtIndex progress made so far in this batch
+				// Persist FtIndex progress made so far in this batch.
+				// Propagate errors so the caller cancels the transaction and we
+				// avoid committing !ip/!ib deletions without the corresponding
+				// FtIndex state (symmetric with index_initial_batch).
 				if let Some(ref ft) = ft_index {
-					if let Err(e) = ft.finish(ctx).await {
-						warn!("{}: failed to finish FtIndex on abort: {}", self.ix.name, e);
-					}
+					ft.finish(ctx).await?;
 				}
 				return Ok(indexed);
 			}
