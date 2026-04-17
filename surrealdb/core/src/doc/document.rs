@@ -109,7 +109,7 @@ impl CursorDoc {
 		doc: Option<&CursorDoc>,
 	) -> Cow<'a, FrozenContext> {
 		if let Some(doc) = doc {
-			let mut new_ctx = Context::new(ctx);
+			let mut new_ctx = Context::new_child(ctx);
 			new_ctx.add_value("parent", Arc::new(doc.doc.as_ref().clone()));
 			Cow::Owned(new_ctx.freeze())
 		} else {
@@ -479,7 +479,7 @@ impl Document {
 						// Get the initial value
 						let val = Arc::new(full.doc.as_ref().pick(k));
 						// Configure the context
-						let mut ctx = Context::new(ctx);
+						let mut ctx = Context::new_child(ctx);
 						ctx.add_value("value", val);
 						let ctx = ctx.freeze();
 						// Process the PERMISSION clause

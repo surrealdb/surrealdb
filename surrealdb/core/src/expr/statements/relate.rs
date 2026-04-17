@@ -53,7 +53,7 @@ impl RelateStatement {
 			.cast_to::<Option<Duration>>()?
 		{
 			Some(timeout) => {
-				let mut new_ctx = Context::new(ctx);
+				let mut new_ctx = Context::new_child(ctx);
 				new_ctx.add_timeout(timeout.0)?;
 				ctx_store = new_ctx.freeze();
 				&ctx_store

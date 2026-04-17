@@ -547,7 +547,7 @@ impl Building {
 			.transaction(TransactionType::Write, Optimistic, self.ctx.try_get_sequences()?.clone())
 			.await?
 			.into();
-		let mut ctx = Context::new(&self.ctx);
+		let mut ctx = Context::new_child(&self.ctx);
 		ctx.set_transaction(tx);
 		Ok(ctx.freeze())
 	}

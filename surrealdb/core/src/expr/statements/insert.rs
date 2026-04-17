@@ -50,7 +50,7 @@ impl InsertStatement {
 			.cast_to::<Option<Duration>>()?
 		{
 			Some(timeout) => {
-				let mut ctx = Context::new(ctx);
+				let mut ctx = Context::new_child(ctx);
 				ctx.add_timeout(timeout.0)?;
 				ctx_store = ctx.freeze();
 				&ctx_store

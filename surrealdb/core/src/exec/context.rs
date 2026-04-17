@@ -638,7 +638,7 @@ impl ExecutionContext {
 	/// Creates a proper child FrozenContext, preserving the parent chain for
 	/// correct scoped parameter lookup and shadowing.
 	pub fn with_param(&self, name: impl Into<Cow<'static, str>>, value: Value) -> Self {
-		let mut child = Context::new(self.ctx());
+		let mut child = Context::new_child(self.ctx());
 		child.add_value(name.into(), Arc::new(value));
 		self.with_new_ctx(child.freeze())
 	}
@@ -695,7 +695,7 @@ impl ExecutionContext {
 	/// The new transaction replaces the existing one in the context by
 	/// creating a child FrozenContext with the new transaction set.
 	pub fn with_transaction(&self, txn: Arc<Transaction>) -> Result<Self, Error> {
-		let mut child = Context::new(self.ctx());
+		let mut child = Context::new_child(self.ctx());
 		child.set_transaction(txn);
 		Ok(self.with_new_ctx(child.freeze()))
 	}

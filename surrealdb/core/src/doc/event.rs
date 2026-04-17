@@ -107,7 +107,7 @@ impl Document {
 				&mut self.current
 			};
 			// Configure the context
-			let mut ctx = Context::new(ctx);
+			let mut ctx = Context::new_child(ctx);
 			ctx.add_value("event", evt.into());
 			ctx.add_value("value", doc.doc.as_arc());
 			ctx.add_value("after", after);
@@ -255,7 +255,7 @@ impl AsyncEventRecord {
 
 	/// Rebuild the event context when processing a queued event.
 	fn build_event_context(&self, ctx: &FrozenContext) -> FrozenContext {
-		let mut ctx = Context::new(ctx);
+		let mut ctx = Context::new_child(ctx);
 		ctx.add_values(self.values.clone());
 		ctx.freeze()
 	}

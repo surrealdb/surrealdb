@@ -784,7 +784,7 @@ mod tests {
 
 	/// Helper to create a Scan with all fields for testing
 	async fn create_test_scan(table_name: &str, with_index_hints: bool) -> DynamicScan {
-		let ctx = std::sync::Arc::new(Context::background());
+		let ctx = std::sync::Arc::new(Context::new_test());
 		let source = expr_to_physical_expr(
 			crate::expr::Expr::Literal(crate::expr::literal::Literal::String(
 				table_name.to_string(),
