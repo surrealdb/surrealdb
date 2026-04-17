@@ -884,9 +884,16 @@ impl Building {
 	) -> Result<(), Error> {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
+		// For search indexes, create the FtIndex once for the entire batch
+		// instead of per-document, avoiding repeated BTree load/save overhead.
+		let mut ft_index = IndexOperation::create_ft_index(ctx, &self.opt, &self.ix).await?;
 		// Index the records
 		for (k, v) in values.into_iter() {
 			if self.is_aborted().await {
+				// Finish FtIndex to persist progress made so far in this batch
+				if let Some(ref ft) = ft_index {
+					ft.finish(ctx).await?;
+				}
 				return Ok(());
 			}
 			let key = thing::Thing::decode(&k)?;
@@ -912,17 +919,25 @@ impl Building {
 			// Index the record
 			let mut io =
 				IndexOperation::new(ctx, &self.opt, &self.ix, None, opt_values.clone(), &rid);
-			stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+			if let Some(ft) = &mut ft_index {
+				stack.enter(|stk| io.compute_search_with_ft(stk, ft)).finish().await?;
+			} else {
+				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+			}
 
-			// Increment the count and update the status
 			*count += 1;
-			self.set_status(BuildingStatus::Indexing {
-				initial: Some(*count),
-				pending: Some(self.queue.read().await.pending() as usize),
-				updated: None,
-			})
-			.await;
 		}
+		// Finish the FtIndex once for the entire batch
+		if let Some(ref ft) = ft_index {
+			ft.finish(ctx).await?;
+		}
+		// Update status once per batch instead of per record
+		self.set_status(BuildingStatus::Indexing {
+			initial: Some(*count),
+			pending: Some(self.queue.read().await.pending() as usize),
+			updated: None,
+		})
+		.await;
 		// Check if we trigger the compaction
 		self.check_index_compaction(tx, &mut rc).await?;
 		// We're done
@@ -973,9 +988,14 @@ impl Building {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
 		let mut indexed = HashMap::new();
+		// For search indexes, create the FtIndex once for the entire batch
+		let mut ft_index = IndexOperation::create_ft_index(ctx, &self.opt, &self.ix).await?;
 		trace!("{}: index_appending_range STARTS- len: {}", self.ix.name, keys.len());
 		for k in keys {
 			if self.is_aborted().await {
+				if let Some(ref ft) = ft_index {
+					ft.finish(ctx).await?;
+				}
 				return Ok(indexed);
 			}
 			let ib = Ib::decode(&k)?;
@@ -984,7 +1004,11 @@ impl Building {
 				let rid = Thing::from((self.tb.clone(), a.id));
 				let mut io =
 					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);
-				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+				if let Some(ft) = &mut ft_index {
+					stack.enter(|stk| io.compute_search_with_ft(stk, ft)).finish().await?;
+				} else {
+					stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+				}
 
 				// Delete the ip (primary appending) key if any
 				let ip = self.new_ip_key(rid.id)?;
@@ -993,15 +1017,20 @@ impl Building {
 			if let Some(c) = count {
 				*c += 1;
 			}
-			self.set_status(BuildingStatus::Indexing {
-				initial,
-				pending: Some(self.queue.read().await.pending() as usize),
-				updated: *count,
-			})
-			.await;
 			indexed.entry(ib.batch_id).or_insert(vec![]).push(ib.appending_id);
 			tx.del(ib).await?;
 		}
+		// Finish the FtIndex once for the entire batch
+		if let Some(ref ft) = ft_index {
+			ft.finish(ctx).await?;
+		}
+		// Update status once per batch instead of per record
+		self.set_status(BuildingStatus::Indexing {
+			initial,
+			pending: Some(self.queue.read().await.pending() as usize),
+			updated: *count,
+		})
+		.await;
 		trace!("{}: index_appending_range EXIT: {:?}", self.ix.name, indexed);
 		// Check if we trigger the compaction
 		self.check_index_compaction(tx, &mut rc).await?;

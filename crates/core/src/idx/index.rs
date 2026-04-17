@@ -62,6 +62,38 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
+	/// Create a reusable FtIndex for batch operations on search indexes.
+	/// Returns None for non-search indexes.
+	/// The caller must call `FtIndex::finish()` after all documents are processed.
+	pub(crate) async fn create_ft_index(
+		ctx: &Context,
+		opt: &Options,
+		ix: &DefineIndexStatement,
+	) -> Result<Option<FtIndex>, Error> {
+		if let Index::Search(p) = &ix.index {
+			let (ns, db) = opt.ns_db()?;
+			let ikb = IndexKeyBase::new(ns, db, ix)?;
+			Ok(Some(FtIndex::new(ctx, opt, &p.az, ikb, p, TransactionType::Write).await?))
+		} else {
+			Ok(None)
+		}
+	}
+
+	/// Index a document using a pre-existing FtIndex, avoiding the per-document
+	/// creation/teardown overhead of `FtIndex::new()` + `FtIndex::finish()`.
+	pub(crate) async fn compute_search_with_ft(
+		&mut self,
+		stk: &mut Stk,
+		ft: &mut FtIndex,
+	) -> Result<(), Error> {
+		if let Some(n) = self.n.take() {
+			ft.index_document(stk, self.ctx, self.opt, self.rid, n).await?;
+		} else {
+			ft.remove_document(self.ctx, self.rid).await?;
+		}
+		Ok(())
+	}
+
 	fn get_unique_index_key(&self, v: &'a Array) -> Result<key::index::Index<'_>, Error> {
 		let (ns, db) = self.opt.ns_db()?;
 		Ok(key::index::Index::new(ns, db, &self.ix.what, &self.ix.name, v, None))
