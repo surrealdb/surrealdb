@@ -7041,6 +7041,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "surrealdb-client-core"
+version = "3.1.0-alpha"
+
+[[package]]
 name = "surrealdb-common"
 version = "3.1.0-alpha"
 dependencies = [
@@ -7130,6 +7134,7 @@ dependencies = [
  "storekey",
  "strsim",
  "subtle",
+ "surrealdb-client-core",
  "surrealdb-protocol",
  "surrealdb-rocksdb",
  "surrealdb-tikv-client",

@@ -71,6 +71,7 @@ targets = []
 surrealmx = { workspace = true, optional = true }
 surrealkv = { workspace = true, optional = true }
 surrealml-core = { workspace = true, optional = true }
+surrealdb-client-core = { workspace = true }
 
 affinitypool = { workspace = true, optional = true }
 dmp.workspace = true
