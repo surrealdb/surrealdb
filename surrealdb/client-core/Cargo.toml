@@ -10,3 +10,10 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 license-file.workspace = true
+[dependencies]
+serde.workspace = true
+web-time.workspace = true
+humantime.workspace = true
+revision.workspace = true
+surrealdb-types.workspace = true
+tracing = "0.1.44"

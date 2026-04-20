@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use async_channel::Sender;
 use futures::{Sink, SinkExt};
-use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
+use surrealdb_client_core::response::{QueryResult, QueryResultBuilder};
 use surrealdb_core::iam::token::Token;
 use surrealdb_core::rpc::{DbResponse, DbResult};
 use surrealdb_types::{AuthError, Error as TypesError, NotAllowedError};

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use async_channel::{Receiver, Sender};
-use surrealdb_core::dbs::QueryResult;
+use surrealdb_client_core::response::QueryResult;
 use uuid::Uuid;
 
 use crate::method::BoxFuture;

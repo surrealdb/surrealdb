@@ -1203,7 +1203,7 @@ impl Executor {
 					}
 				}
 				stmt => {
-					let query_type: QueryType = QueryType::for_toplevel_expr(&stmt);
+					let query_type: QueryType = query_type_for_toplevel_expr(&stmt);
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, &now, stmt).await;
@@ -1233,6 +1233,15 @@ impl Executor {
 		Ok(this.results)
 	}
 }
+
+fn query_type_for_toplevel_expr(expr: &TopLevelExpr) -> QueryType {
+	match expr {
+		TopLevelExpr::Live(_) => QueryType::Live,
+		TopLevelExpr::Kill(_) => QueryType::Kill,
+		_ => QueryType::Other,
+	}
+}
+
 
 #[cfg(test)]
 mod tests {
