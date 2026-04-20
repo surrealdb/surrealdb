@@ -64,9 +64,8 @@ use futures::TryStreamExt;
 use reqwest::RequestBuilder;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
-use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
-use surrealdb_core::iam::Token as CoreToken;
-use surrealdb_core::rpc::{self, DbResponse, DbResult};
+use surrealdb_client_core::response::{QueryResult, QueryResultBuilder};
+use surrealdb_client_core::rpc::{DbResponse, DbResult, check_protected_param};
 use surrealdb_types::{AuthError, NotAllowedError};
 #[cfg(not(target_family = "wasm"))]
 use tokio::fs::OpenOptions;
@@ -90,6 +89,7 @@ use crate::types::{HashMap, SurrealValue, Value};
 use crate::{Connect, Error, Result, Surreal};
 
 const RPC_PATH: &str = "rpc";
+const FLATBUFFERS_CONTENT_TYPE: &str = "application/vnd.surrealdb.flatbuffers";
 
 /// Per-session state for HTTP connections.
 /// Uses RwLock for headers and auth to allow concurrent request handling
@@ -338,9 +338,8 @@ impl Surreal<Client> {
 
 pub(crate) fn default_headers() -> HeaderMap {
 	let mut headers = HeaderMap::new();
-	headers.insert(ACCEPT, HeaderValue::from_static(surrealdb_core::api::format::FLATBUFFERS));
-	headers
-		.insert(CONTENT_TYPE, HeaderValue::from_static(surrealdb_core::api::format::FLATBUFFERS));
+	headers.insert(ACCEPT, HeaderValue::from_static(FLATBUFFERS_CONTENT_TYPE));
+	headers.insert(CONTENT_TYPE, HeaderValue::from_static(FLATBUFFERS_CONTENT_TYPE));
 	headers
 }
 
@@ -472,7 +471,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	};
 
 	let res = request
-		.header(ACCEPT, surrealdb_core::api::format::FLATBUFFERS)
+		.header(ACCEPT, FLATBUFFERS_CONTENT_TYPE)
 		.body(file)
 		.send()
 		.await
@@ -497,7 +496,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 
 	let bytes = res.bytes().await.map_err(crate::std_error_to_types_error)?;
 
-	let value: Value = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
+	let value: Value = surrealdb_types::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x:?}"))
 		.map_err(|e| {
 			crate::Error::internal(format!("The server returned an unexpected response: {e}"))
@@ -547,7 +546,7 @@ async fn send_request(
 	let url = base_url.join(RPC_PATH).expect("valid RPC path");
 
 	let req_value = req.into_value();
-	let body = surrealdb_core::rpc::format::flatbuffers::encode(&req_value)
+	let body = surrealdb_types::encode(&req_value)
 		.map_err(|x| format!("Failed to serialize to flatbuffers: {x}"))
 		.map_err(|e| {
 			crate::Error::internal(format!(
@@ -567,7 +566,7 @@ async fn send_request(
 		.map_err(crate::std_error_to_types_error)?;
 	let bytes = response.bytes().await.map_err(crate::std_error_to_types_error)?;
 
-	let response: DbResponse = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
+	let response: DbResponse = surrealdb_types::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x}"))
 		.map_err(|e| {
 			crate::Error::internal(format!("The server returned an unexpected response: {e}"))
@@ -585,7 +584,7 @@ async fn send_request(
 }
 
 async fn refresh_token(
-	token: CoreToken,
+	token: Token,
 	base_url: &Url,
 	client: &reqwest::Client,
 	headers: &HeaderMap,
@@ -757,9 +756,7 @@ async fn router(
 						// If authentication fails with "token has expired" and we have a refresh
 						// token, automatically attempt to refresh the authentication and
 						// update the stored auth.
-						if let CoreToken::WithRefresh {
-							..
-						} = &token
+						if token.refresh.is_some()
 						{
 							// If the error is due to token expiration, attempt automatic refresh
 							if error.not_allowed_details().is_some_and(|a| {
@@ -828,7 +825,7 @@ async fn router(
 			key,
 			value,
 		} => {
-			surrealdb_core::rpc::check_protected_param(&key)?;
+			check_protected_param(&key)?;
 			let req = Command::Set {
 				key,
 				value,
@@ -894,7 +891,7 @@ async fn router(
 			let request =
 				client
 					.post(req_path)
-					.body(rpc::format::json::encode_str(config_value).map_err(|e| {
+					.body(serde_json::to_string(&config_value).map_err(|e| {
 						Error::internal(format!("failed to serialize Value: {}", e))
 					})?)
 					.headers(headers.clone())
@@ -916,7 +913,7 @@ async fn router(
 			let request =
 				client
 					.post(req_path)
-					.body(rpc::format::json::encode_str(config_value).map_err(|e| {
+					.body(serde_json::to_string(&config_value).map_err(|e| {
 						Error::internal(format!("failed to serialize Value: {}", e))
 					})?)
 					.headers(headers.clone())

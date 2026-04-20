@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::response::{QueryResult, QueryType};
 
 const SESSION_ID: &str = "session";
+const PROTECTED_PARAM_NAMES: &[&str] = &["access", "auth", "token", "session"];
 
 /// Query statistics.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -222,4 +223,13 @@ impl SurrealValue for DbResponse {
 			result,
 		})
 	}
+}
+
+pub fn check_protected_param(key: &str) -> Result<(), TypesError> {
+	if PROTECTED_PARAM_NAMES.contains(&key) {
+		return Err(TypesError::internal(format!(
+			"Invalid parameters: Cannot set protected variable: {key}"
+		)));
+	}
+	Ok(())
 }
