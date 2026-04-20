@@ -336,12 +336,8 @@ impl HnswIndex {
 
 	/// Searches for nearest neighbors in the committed HNSW graph.
 	///
-	/// Performs KNN search under a read lock, then resolves vectors into
-	/// document results. The two phases use **separate** read-lock acquisitions
-	/// so we do not hold the lock across the entire `add_graph_results` phase
-	/// (which awaits further I/O). This reduces Tokio `RwLock` contention where
-	/// a queued writer would otherwise block all new readers for the full
-	/// duration of vector resolution (see issue #6819).
+	/// Acquires a read lock on the graph and performs KNN search, optionally
+	/// excluding documents that are present in `pending_docs`.
 	pub(super) async fn search_graph(
 		&self,
 		ctx: &HnswContext<'_>,
@@ -351,21 +347,18 @@ impl HnswIndex {
 		filter: &mut Option<HnswTruthyDocumentFilter<'_>>,
 		builder: &mut KnnResultBuilder,
 	) -> Result<()> {
-		let neighbours = {
-			let hnsw = self.hnsw.read().await;
-			if let Some(filter) = filter.as_mut() {
-				hnsw.knn_search_with_filter(ctx, search, stk, filter, pending_docs.as_ref()).await?
-			} else {
-				hnsw.knn_search(ctx, search, pending_docs.as_ref()).await?
-			}
-		};
 		let hnsw = self.hnsw.read().await;
-		if let Some(f) = filter.as_mut() {
+		// Do the search
+		if let Some(filter) = filter {
+			let neighbours = hnsw
+				.knn_search_with_filter(ctx, search, stk, filter, pending_docs.as_ref())
+				.await?;
 			self.add_graph_results(&ctx.tx, &hnsw, neighbours, builder, |evicted_docs| {
-				f.expires(&evicted_docs)
+				filter.expires(&evicted_docs)
 			})
 			.await
 		} else {
+			let neighbours = hnsw.knn_search(ctx, search, pending_docs.as_ref()).await?;
 			self.add_graph_results(&ctx.tx, &hnsw, neighbours, builder, |_| {}).await
 		}
 	}
