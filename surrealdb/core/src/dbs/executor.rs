@@ -955,60 +955,79 @@ impl Executor {
 					// reintroduce planner later.
 					let plan = stmt;
 
-					let r =
-						match self.execute_plan_in_transaction(txn.clone(), &before, plan).await {
-							Ok(x) => Ok(x),
-							Err(ControlFlow::Return(value)) => {
-								skip_remaining = true;
-								Ok(value)
+					let r = match self.execute_plan_in_transaction(txn.clone(), &before, plan).await
+					{
+						Ok(x) => Ok(x),
+						Err(ControlFlow::Return(value)) => {
+							skip_remaining = true;
+							Ok(value)
+						}
+						Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
+							Err(anyhow!(Error::InvalidControlFlow))
+						}
+						Err(ControlFlow::Err(e)) => {
+							for res in &mut self.results[start_results..] {
+								res.query_type = QueryType::Other;
+								res.result = Err(TypesError::query(
+									"The query was not executed due to a failed transaction"
+										.to_string(),
+									Some(QueryError::NotExecuted),
+								));
 							}
-							Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
-								Err(anyhow!(Error::InvalidControlFlow))
-							}
-							Err(ControlFlow::Err(e)) => {
-								for res in &mut self.results[start_results..] {
-									res.query_type = QueryType::Other;
-									res.result = Err(TypesError::query(
-										"The query was not executed due to a failed transaction"
-											.to_string(),
-										Some(QueryError::NotExecuted),
-									));
-								}
 
-								// statement return an error. Consume all the other statement until
-								// we hit a cancel or commit.
-								self.results.push(QueryResult {
-									time: before.elapsed(),
-									result: Err(types_error_from_anyhow(e)),
-									query_type,
-								});
+							// statement return an error. Consume all the other statement until
+							// we hit a cancel or commit.
+							self.results.push(QueryResult {
+								time: before.elapsed(),
+								result: Err(types_error_from_anyhow(e)),
+								query_type,
+							});
 
-								let _ = txn.cancel().await;
+							let _ = txn.cancel().await;
 
-								self.opt.broker = None;
+							self.opt.broker = None;
 
-								while let Some(stmt) = stream.next().await {
-									yield_now!();
-									let stmt = stmt?;
-									if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
+							while let Some(stmt) = stream.next().await {
+								yield_now!();
+								let stmt = stmt?;
+								match stmt {
+									TopLevelExpr::Commit => {
+										// Transaction already aborted; emit an explicit
+										// error so clients (e.g. SDKs) do not assume COMMIT
+										// succeeded when no result row was returned (#7207).
+										self.results.push(QueryResult {
+												time: Duration::ZERO,
+												result: Err(TypesError::query(
+													"Cannot COMMIT: the transaction was aborted due to a prior error"
+														.to_string(),
+													Some(QueryError::NotExecuted),
+												)),
+												query_type: QueryType::Other,
+											});
 										return Ok(());
 									}
-
-									self.results.push(QueryResult {
-										time: Duration::ZERO,
-										result: Err(TypesError::query(
-											"The query was not executed due to a cancelled transaction".to_string(),
-											Some(QueryError::Cancelled),
-										)),
-										query_type: QueryType::Other,
-									});
+									TopLevelExpr::Cancel => {
+										return Ok(());
+									}
+									_ => {
+										self.results.push(QueryResult {
+												time: Duration::ZERO,
+												result: Err(TypesError::query(
+													"The query was not executed due to a cancelled transaction"
+														.to_string(),
+													Some(QueryError::Cancelled),
+												)),
+												query_type: QueryType::Other,
+											});
+									}
 								}
-
-								// ran out of statements before the transaction ended.
-								// Just break as we have nothing else we can do.
-								return Ok(());
 							}
-						};
+
+							// ran out of statements before the transaction ended.
+							// Just break as we have nothing else we can do.
+							return Ok(());
+						}
+					};
 
 					match r {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
