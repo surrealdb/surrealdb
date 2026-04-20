@@ -1,7 +1,10 @@
 /**
 [test]
-reason = "THROW/RETURN in BEGIN/COMMIT: QueryResult order still differs between planner strategies (streaming vs legacy), and explicit COMMIT-after-abort errors (#7207) change the row list. Re-enable when those are aligned."
-run = false
+reason = "Transaction error handling with THROW and RETURN; includes COMMIT after abort (#7207)"
+
+[env]
+namespace = "test"
+database = "test"
 
 [[test.results]]
 value = "NONE"
@@ -14,6 +17,9 @@ error = "The query was not executed due to a failed transaction"
 
 [[test.results]]
 error = "An error occurred: Some error"
+
+[[test.results]]
+error = "Cannot COMMIT: the transaction was aborted due to a prior error"
 
 [[test.results]]
 value = "NONE"
@@ -30,9 +36,8 @@ error = "An error occurred: Some error"
 [[test.results]]
 error = "The query was not executed due to a cancelled transaction"
 
-[env]
-namespace = "test"
-database = "test"
+[[test.results]]
+error = "Cannot COMMIT: the transaction was aborted due to a prior error"
 
 */
 

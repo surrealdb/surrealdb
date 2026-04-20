@@ -929,10 +929,15 @@ impl Executor {
 						return Ok(());
 					};
 
-					// failed to commit
+					// `txn.commit()` failed (e.g. constraint on commit, or txn already finished).
+					// Same user-facing prefix as the post-abort COMMIT arm below (#7207) so
+					// clients always see `Cannot COMMIT: …` instead of a silent success.
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(TypesError::internal(format!("Query not executed: {e}")));
+						res.result = Err(TypesError::query(
+							format!("Cannot COMMIT: {e}"),
+							Some(QueryError::NotExecuted),
+						));
 					}
 
 					self.opt.broker = None;
@@ -992,9 +997,9 @@ impl Executor {
 								let stmt = stmt?;
 								match stmt {
 									TopLevelExpr::Commit => {
-										// Transaction already aborted; emit an explicit
-										// error so clients (e.g. SDKs) do not assume COMMIT
-										// succeeded when no result row was returned (#7207).
+										// Aborted txn: COMMIT must error (same intent as
+										// `txn.commit()` failure above — descriptive
+										// `Cannot COMMIT:` prefix) (#7207).
 										self.results.push(QueryResult {
 												time: Duration::ZERO,
 												result: Err(TypesError::query(
