@@ -17,3 +17,4 @@ humantime.workspace = true
 revision.workspace = true
 surrealdb-types.workspace = true
 tracing = "0.1.44"
+uuid.workspace = true
