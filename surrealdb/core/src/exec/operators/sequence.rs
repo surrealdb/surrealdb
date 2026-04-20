@@ -215,7 +215,12 @@ fn get_legacy_context_cached<'a>(
 		Error::Internal("Options not available for legacy compute fallback".into())
 	})?;
 
-	let frozen = cached_ctx.clone().unwrap_or_else(|| exec_ctx.ctx().clone());
+	// Always derive the legacy `FrozenContext` from the current execution
+	// context. A prior statement may have used the planned `LetPlan` path
+	// (`output_context` / `with_param`) without updating the cached legacy
+	// snapshot; reusing an older `cached_ctx` would drop those bindings and
+	// break mixed planned+legacy blocks (issue #7131: LET + CREATE ONLY).
+	let frozen = exec_ctx.ctx().clone();
 	*cached_ctx = Some(frozen.clone());
 
 	Ok((options, frozen))
