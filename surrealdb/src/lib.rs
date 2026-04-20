@@ -40,6 +40,20 @@ pub mod channel {
 	pub use async_channel::{Receiver, Sender, bounded, unbounded};
 }
 
+#[cfg(any(
+	feature = "allocator",
+	feature = "kv-mem",
+	feature = "kv-indxdb",
+	feature = "kv-rocksdb",
+	feature = "kv-tikv",
+	feature = "kv-surrealkv",
+	feature = "scripting",
+	feature = "http",
+	feature = "ml",
+	feature = "jwks",
+	feature = "arbitrary",
+	feature = "allocation-tracking",
+))]
 pub mod parse {
 	pub use surrealdb_core::syn::value;
 }

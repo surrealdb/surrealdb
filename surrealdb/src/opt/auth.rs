@@ -194,7 +194,7 @@ impl<T, P> Credentials<T> for Record<P> where P: SurrealValue {}
 ///     // Use refresh token to get new access token
 /// }
 /// ```
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Token {
 	/// The access token used for API authentication.
@@ -310,7 +310,7 @@ impl AccessToken {
 /// // Use the token string to request a new access token
 /// // (implementation depends on your authentication flow)
 /// ```
-#[derive(Debug, Serialize, Deserialize, SurrealValue)]
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
 #[surreal(crate = "crate::types")]
 pub struct RefreshToken(pub(crate) SecureToken);
 

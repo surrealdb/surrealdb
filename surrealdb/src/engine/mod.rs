@@ -12,6 +12,13 @@ pub mod local;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
 pub mod remote;
 #[doc(hidden)]
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+))]
 pub mod tasks;
 
 use std::pin::Pin;
