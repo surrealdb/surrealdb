@@ -16,22 +16,25 @@ use crate::dbs::capabilities::{Capabilities, FuncTarget, NetTarget, Targets};
 use crate::doc::CursorDoc;
 use crate::expr::function::Function;
 use crate::expr::{Expr, FlowResultExt, FunctionCall, Model};
+#[cfg(feature = "http")]
+use crate::http::HttpClient;
 use crate::syn;
 use crate::types::{PublicObject, PublicValue};
 use crate::val::convert_value_to_public_value;
 
 pub(crate) struct Host {
+	// FIXME: We shouldn't be creating a tree stack here.
+	// This is here so that a wasm executable can run the executor, however because it
+	// creates it's own tree-stack this removes it reblessive stack protection ability.
 	pub(crate) stk: TreeStack,
 	pub(crate) ctx: FrozenContext,
 	pub(crate) opt: Options,
 	pub(crate) doc: Option<CursorDoc>,
 	kv: Arc<BTreeMapStore>,
 	module_name: String,
-	/// Parsed [`NetTarget`]s from the module's `allow_net` strings (hostnames, IPs, CIDRs).
-	/// HTTP/`run()` checks use these patterns; WASI outbound filtering uses
-	/// [`Runtime::resolved_allow_net`](surrealism_runtime::runtime::Runtime::resolved_allow_net)
-	/// separately.
-	module_net_targets: Arc<HashSet<NetTarget>>,
+	#[cfg(feature = "http")]
+	/// Surrealism modules have their own http limitations so it needs it's own client.
+	http_client: Arc<HttpClient>,
 }
 
 impl Host {
@@ -41,7 +44,7 @@ impl Host {
 		doc: Option<&CursorDoc>,
 		kv: Arc<BTreeMapStore>,
 		module_name: String,
-		module_net_targets: Arc<HashSet<NetTarget>>,
+		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
 	) -> Self {
 		Self {
 			stk: TreeStack::new(),
@@ -50,7 +53,7 @@ impl Host {
 			doc: doc.cloned(),
 			kv,
 			module_name,
-			module_net_targets,
+			http_client,
 		}
 	}
 
@@ -59,14 +62,16 @@ impl Host {
 	/// at load time that the module's requests are within the server's
 	/// bounds, so here we only need to restrict downward.
 	fn module_context(&self, config: &SurrealismConfig) -> Context {
-		let mut ctx = Context::new(&self.ctx);
-		let scoped = module_scoped_capabilities(
-			&ctx.get_capabilities(),
+		let scoped = Arc::new(module_scoped_capabilities(
+			&self.ctx.get_capabilities(),
 			&config.capabilities,
-			&self.module_net_targets,
-		);
-		ctx.add_capabilities(Arc::new(scoped));
-		ctx
+		));
+		Context::new_child_with_capabilities(
+			&self.ctx,
+			scoped,
+			#[cfg(feature = "http")]
+			self.http_client.clone(),
+		)
 	}
 }
 
@@ -94,7 +99,6 @@ pub(crate) fn module_allow_net_targets(module: &SurrealismCapabilities) -> HashS
 fn module_scoped_capabilities(
 	server: &Capabilities,
 	module: &SurrealismCapabilities,
-	module_net_targets: &Arc<HashSet<NetTarget>>,
 ) -> Capabilities {
 	let mut caps = server.clone();
 
@@ -124,12 +128,6 @@ fn module_scoped_capabilities(
 			caps = caps.with_functions(Targets::Some(targets));
 		}
 		FunctionTargets::All => {}
-	}
-
-	if module.allow_net.is_empty() {
-		caps = caps.with_network_targets(Targets::None);
-	} else {
-		caps = caps.with_network_targets(Targets::Some((**module_net_targets).clone()));
 	}
 
 	caps

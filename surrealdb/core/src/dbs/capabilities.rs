@@ -585,8 +585,8 @@ pub struct Capabilities {
 
 	allow_funcs: Targets<FuncTarget>,
 	deny_funcs: Targets<FuncTarget>,
-	allow_net: Targets<NetTarget>,
-	deny_net: Targets<NetTarget>,
+	pub(crate) allow_net: Targets<NetTarget>,
+	pub(crate) deny_net: Targets<NetTarget>,
 	allow_rpc: Targets<MethodTarget>,
 	deny_rpc: Targets<MethodTarget>,
 	allow_http: Targets<RouteTarget>,
@@ -771,6 +771,10 @@ impl Capabilities {
 	pub fn without_network_targets(mut self, deny_net: Targets<NetTarget>) -> Self {
 		self.deny_net = deny_net;
 		self
+	}
+
+	pub fn denied_network_targets_ref(&self) -> &Targets<NetTarget> {
+		&self.deny_net
 	}
 
 	pub fn denied_network_targets_mut(&mut self) -> &mut Targets<NetTarget> {

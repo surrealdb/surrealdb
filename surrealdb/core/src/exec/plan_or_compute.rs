@@ -50,7 +50,7 @@ pub(crate) fn get_legacy_context_with_param<'a>(
 		.options()
 		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
 
-	let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
+	let mut ctx = crate::ctx::Context::new_child(exec_ctx.ctx());
 	ctx.add_value(param_name.to_string(), std::sync::Arc::new(param_value.clone()));
 
 	Ok((options, ctx.freeze()))

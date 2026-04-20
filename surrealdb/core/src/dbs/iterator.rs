@@ -710,7 +710,7 @@ impl Iterator {
 		// Log the statement
 		trace!(target: TARGET, statement = %stm.to_sql(), "Iterating statement");
 		// Enable context override
-		let mut cancel_ctx = Context::new(ctx);
+		let mut cancel_ctx = Context::new_child(ctx);
 		self.canceller = cancel_ctx.add_cancel();
 		let mut cancel_ctx = cancel_ctx.freeze();
 		// Process the query LIMIT clause

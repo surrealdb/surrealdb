@@ -187,7 +187,7 @@ async fn execute_block_with_context(
 					current_ctx = current_ctx.with_param(set_stmt.name.clone(), value.clone());
 					// Update the legacy context too
 					if let Some(ref mut ctx) = legacy_ctx {
-						let mut new_ctx = Context::new(ctx);
+						let mut new_ctx = Context::new_child(ctx);
 						new_ctx.add_value(set_stmt.name.clone(), Arc::new(value));
 						*ctx = new_ctx.freeze();
 					}

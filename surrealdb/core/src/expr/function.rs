@@ -11,7 +11,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Expr, Idiom, Kind, Model, ModuleExecutable, Script, Value};
 use crate::fnc;
-use crate::iam::AuthLimit;
+use crate::iam::{Action, AuthLimit};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum Function {
@@ -117,7 +117,9 @@ impl Function {
 				let opt = AuthLimit::try_from(&val.auth_limit)?.limit_opt(opt);
 
 				// Check permissions
-				check_perms(stk, ctx, &opt, doc, &name, &val.permissions).await?;
+				if opt.check_perms(Action::View)? {
+					check_perms(stk, ctx, &opt, doc, &name, &val.permissions).await?;
+				}
 				// Validate the arguments
 				validate_args(
 					&name,
@@ -160,7 +162,9 @@ impl Function {
 				let val = ctx.tx().get_db_module(ns, db, mod_name.as_str(), opt.version).await?;
 
 				// Check permissions
-				check_perms(stk, ctx, opt, doc, &mod_name, &val.permissions).await?;
+				if opt.check_perms(Action::View)? {
+					check_perms(stk, ctx, opt, doc, &mod_name, &val.permissions).await?;
+				}
 
 				// Get the executable & signature
 				let executable: ModuleExecutable = val.executable.clone().into();
@@ -195,7 +199,9 @@ impl Function {
 				let val = ctx.tx().get_db_module(ns, db, mod_name.as_str(), opt.version).await?;
 
 				// Check permissions
-				check_perms(stk, ctx, opt, doc, &mod_name, &val.permissions).await?;
+				if opt.check_perms(Action::View)? {
+					check_perms(stk, ctx, opt, doc, &mod_name, &val.permissions).await?;
+				}
 
 				// Get the executable & signature
 				let executable: ModuleExecutable = val.executable.clone().into();

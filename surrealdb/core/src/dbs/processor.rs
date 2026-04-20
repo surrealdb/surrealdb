@@ -622,7 +622,7 @@ pub(super) trait Collector {
 			//   every document.
 			// - This keeps the hot path allocation-free and avoids repeated hash lookups inside
 			//   tight iteration loops.
-			let mut ctx = Context::new(ctx);
+			let mut ctx = Context::new_child(ctx);
 			ctx.set_query_executor(exe.clone());
 			return Cow::Owned(ctx.freeze());
 		}
@@ -695,7 +695,7 @@ pub(super) trait Collector {
 					// Attach the table-specific QueryExecutor to the Context to avoid
 					// per-record lookups in the QueryPlanner during index scans.
 					// This significantly reduces overhead inside tight iterator loops.
-					let mut ctx = Context::new(ctx);
+					let mut ctx = Context::new_child(ctx);
 					ctx.set_query_executor(exe.clone());
 					let ctx = ctx.freeze();
 					return self.collect_index_items(&ctx, doc_ctx, irf, rs).await;

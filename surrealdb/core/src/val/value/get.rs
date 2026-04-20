@@ -350,7 +350,7 @@ impl Value {
 						// in a graph [WHERE] refers to the current SELECT's row.
 						let parent_ctx = match doc {
 							Some(d) if expr_references_parent(w) => {
-								let mut child = Context::new(ctx);
+								let mut child = Context::new_child(ctx);
 								child.add_value("parent", Arc::new(d.doc.as_ref().clone()));
 								Some(child.freeze())
 							}

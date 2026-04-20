@@ -102,20 +102,28 @@ pub(crate) struct CursorDoc {
 }
 
 impl CursorDoc {
-	/// Updates the `"parent"` doc field for statements with a meaning full
-	/// document.
-	pub async fn update_parent<F, R>(ctx: &FrozenContext, doc: Option<&CursorDoc>, f: F) -> R
-	where
-		F: AsyncFnOnce(Cow<FrozenContext>) -> R,
-	{
-		let ctx = if let Some(doc) = doc {
-			let mut new_ctx = Context::new(ctx);
+	/// Context with `$parent` bound to the enclosing row (same binding as
+	/// [`Self::update_parent`] applies before running nested statement bodies).
+	pub(crate) fn with_parent_ctx<'a>(
+		ctx: &'a FrozenContext,
+		doc: Option<&CursorDoc>,
+	) -> Cow<'a, FrozenContext> {
+		if let Some(doc) = doc {
+			let mut new_ctx = Context::new_child(ctx);
 			new_ctx.add_value("parent", Arc::new(doc.doc.as_ref().clone()));
 			Cow::Owned(new_ctx.freeze())
 		} else {
 			Cow::Borrowed(ctx)
-		};
+		}
+	}
 
+	/// Updates the `"parent"` doc field for statements with a meaning full
+	/// document.
+	pub async fn update_parent<'a, F, R>(ctx: &'a FrozenContext, doc: Option<&CursorDoc>, f: F) -> R
+	where
+		F: AsyncFnOnce(Cow<'a, FrozenContext>) -> R,
+	{
+		let ctx = Self::with_parent_ctx(ctx, doc);
 		f(ctx).await
 	}
 }
@@ -471,7 +479,7 @@ impl Document {
 						// Get the initial value
 						let val = Arc::new(full.doc.as_ref().pick(k));
 						// Configure the context
-						let mut ctx = Context::new(ctx);
+						let mut ctx = Context::new_child(ctx);
 						ctx.add_value("value", val);
 						let ctx = ctx.freeze();
 						// Process the PERMISSION clause

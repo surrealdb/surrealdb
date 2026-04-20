@@ -7,6 +7,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+#[cfg(feature = "surrealism")]
+use anyhow::Context as _;
 use anyhow::{Result, bail};
 use async_channel::Sender;
 #[cfg(feature = "surrealism")]
@@ -30,9 +32,13 @@ use crate::ctx::reason::Reason;
 use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
+#[cfg(all(feature = "http", feature = "surrealism"))]
+use crate::dbs::capabilities::Targets;
 use crate::dbs::{Capabilities, NewPlannerStrategy, Options, Session, Variables};
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
+#[cfg(feature = "http")]
+use crate::http::HttpClient;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
@@ -105,20 +111,9 @@ pub struct Context {
 	matches_context: Option<Arc<crate::exec::function::MatchesContext>>,
 	// KNN context for index functions (vector::distance::knn)
 	knn_context: Option<Arc<crate::exec::function::KnnContext>>,
-}
-
-impl Default for Context {
-	fn default() -> Self {
-		Context::background()
-	}
-}
-
-impl From<Transaction> for Context {
-	fn from(txn: Transaction) -> Self {
-		let mut ctx = Context::background();
-		ctx.set_transaction(Arc::new(txn));
-		ctx
-	}
+	/// Client for making http requests.
+	#[cfg(feature = "http")]
+	http_client: Arc<HttpClient>,
 }
 
 impl Debug for Context {
@@ -134,7 +129,7 @@ impl Debug for Context {
 
 impl Context {
 	/// Creates a new empty background context.
-	pub(crate) fn background() -> Self {
+	pub(crate) fn background(parent: &Context) -> Self {
 		Self {
 			values: HashMap::default(),
 			parent: None,
@@ -145,7 +140,7 @@ impl Context {
 			query_planner: None,
 			query_executor: None,
 			iteration_stage: None,
-			capabilities: Arc::new(Capabilities::default()),
+			capabilities: parent.capabilities.clone(),
 			index_stores: IndexStores::default(),
 			cache: None,
 			index_builder: None,
@@ -162,11 +157,29 @@ impl Context {
 			redact_volatile_explain_attrs: false,
 			matches_context: None,
 			knn_context: None,
+			#[cfg(feature = "http")]
+			http_client: parent.http_client.clone(),
 		}
 	}
 
-	/// Creates a new context from a frozen parent context.
-	pub(crate) fn new(parent: &FrozenContext) -> Self {
+	/// Creates a new child context from a frozen parent context.
+	pub(crate) fn new_child(parent: &FrozenContext) -> Self {
+		Self::new_child_with_capabilities(
+			parent,
+			parent.capabilities.clone(),
+			#[cfg(feature = "http")]
+			parent.http_client.clone(),
+		)
+	}
+
+	/// Creates a new context from a frozen parent context with a given capabilities.
+	///
+	/// Make sure that the capabilities and http_client were created with the same capabilities.
+	pub(crate) fn new_child_with_capabilities(
+		parent: &FrozenContext,
+		cap: Arc<Capabilities>,
+		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
+	) -> Self {
 		Context {
 			values: HashMap::default(),
 			deadline: parent.deadline,
@@ -176,7 +189,7 @@ impl Context {
 			query_planner: parent.query_planner.clone(),
 			query_executor: parent.query_executor.clone(),
 			iteration_stage: parent.iteration_stage.clone(),
-			capabilities: parent.capabilities.clone(),
+			capabilities: cap,
 			index_stores: parent.index_stores.clone(),
 			cache: parent.cache.clone(),
 			index_builder: parent.index_builder.clone(),
@@ -194,6 +207,8 @@ impl Context {
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			matches_context: parent.matches_context.clone(),
 			knn_context: parent.knn_context.clone(),
+			#[cfg(feature = "http")]
+			http_client,
 		}
 	}
 
@@ -228,6 +243,8 @@ impl Context {
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
 			matches_context: parent.matches_context.clone(),
 			knn_context: parent.knn_context.clone(),
+			#[cfg(feature = "http")]
+			http_client: parent.http_client.clone(),
 		}
 	}
 
@@ -269,6 +286,8 @@ impl Context {
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			matches_context: from.matches_context.clone(),
 			knn_context: from.knn_context.clone(),
+			#[cfg(feature = "http")]
+			http_client: from.http_client.clone(),
 		}
 	}
 
@@ -303,6 +322,8 @@ impl Context {
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
 			matches_context: from.matches_context.clone(),
 			knn_context: from.knn_context.clone(),
+			#[cfg(feature = "http")]
+			http_client: from.http_client.clone(),
 		}
 	}
 
@@ -316,6 +337,7 @@ impl Context {
 		index_builder: IndexBuilder,
 		sequences: Sequences,
 		cache: Arc<DatastoreCache>,
+		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: BucketsManager,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
@@ -348,11 +370,54 @@ impl Context {
 			redact_volatile_explain_attrs: false,
 			matches_context: None,
 			knn_context: None,
+			#[cfg(feature = "http")]
+			http_client,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
 		}
 		Ok(ctx)
+	}
+
+	/// Create a context for tests only
+	#[cfg(test)]
+	pub(crate) fn new_test() -> Context {
+		Self {
+			values: HashMap::default(),
+			parent: None,
+			deadline: None,
+			slow_log: None,
+			cancelled: Arc::new(AtomicBool::new(false)),
+			notifications: None,
+			query_planner: None,
+			query_executor: None,
+			iteration_stage: None,
+			capabilities: Arc::new(Capabilities::default()),
+			index_stores: IndexStores::default(),
+			cache: None,
+			index_builder: None,
+			sequences: None,
+			#[cfg(storage)]
+			temporary_directory: None,
+			transaction: None,
+			isolated: false,
+			buckets: None,
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: None,
+			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			new_planner_strategy: NewPlannerStrategy::default(),
+			redact_volatile_explain_attrs: false,
+			matches_context: None,
+			knn_context: None,
+			#[cfg(feature = "http")]
+			http_client: Arc::new(
+				HttpClient::new(
+					crate::dbs::capabilities::Targets::All,
+					crate::dbs::capabilities::Targets::None,
+				)
+				.expect("http client to be created"),
+			),
+		}
 	}
 
 	/// Freezes this context, allowing it to be used as a parent context.
@@ -782,11 +847,6 @@ impl Context {
 	// Capabilities
 	//
 
-	/// Set the capabilities for this context
-	pub(crate) fn add_capabilities(&mut self, caps: Arc<Capabilities>) {
-		self.capabilities = caps;
-	}
-
 	/// Get the capabilities for this context
 	pub(crate) fn get_capabilities(&self) -> Arc<Capabilities> {
 		self.capabilities.clone()
@@ -992,8 +1052,8 @@ impl Context {
 				let package =
 					SurrealismPackage::from_reader(std::io::Cursor::new(surli), &unpack_opts)?;
 
-				let module_caps = package.config.capabilities.clone();
-				self.get_capabilities().validate_surrealism_capabilities(module_caps.clone())?;
+				self.get_capabilities()
+					.validate_surrealism_capabilities(package.config.capabilities.clone())?;
 
 				let org = package.config.meta.organisation.clone();
 				let name = package.config.meta.name.clone();
@@ -1004,6 +1064,9 @@ impl Context {
 					crate::cnf::SURREALISM_MAX_EXECUTION_TIME.map(std::time::Duration::from_millis);
 				let server_max_kv_entries = *crate::cnf::SURREALISM_MAX_KV_ENTRIES;
 				let server_max_kv_value_bytes = *crate::cnf::SURREALISM_MAX_KV_VALUE_BYTES;
+
+				#[cfg(feature = "http")]
+				let module_net_targets = module_allow_net_targets(&package.config.capabilities);
 
 				let runtime = tokio::task::spawn_blocking(move || {
 					Runtime::new(
@@ -1016,20 +1079,41 @@ impl Context {
 					)
 				})
 				.await
-				.map_err(|e| anyhow::anyhow!("WASM compile task aborted: {e}"))?
-				.map_err(|e| anyhow::anyhow!("{e}"))?;
+				.context("WASM compile task aborted")??;
 				let runtime = Arc::new(runtime);
 
 				let module_display_name: Arc<str> = format!("{org}::{name}").into();
-				let module_net_targets = Arc::new(module_allow_net_targets(&module_caps));
+
+				#[cfg(feature = "http")]
+				let client = if module_net_targets.is_empty() {
+					Arc::new(
+						HttpClient::new(Targets::None, Targets::All)
+							.context("Failed to create http client for WASM module")?,
+					)
+				} else {
+					let allow = Targets::Some(module_net_targets);
+					Arc::new(
+						HttpClient::new(
+							allow,
+							self.capabilities.denied_network_targets_ref().clone(),
+						)
+						.context("Failed to create http client for WASM module")?,
+					)
+				};
 
 				Ok(SurrealismCachedModule {
 					runtime,
 					module_display_name,
-					module_net_targets,
+					#[cfg(feature = "http")]
+					client,
 				})
 			})
 			.await
+	}
+
+	#[cfg(feature = "http")]
+	pub(crate) fn http_client(&self) -> Arc<HttpClient> {
+		self.http_client.clone()
 	}
 
 	#[cfg(feature = "surrealism")]
@@ -1065,7 +1149,7 @@ mod tests {
 		let cap = Capabilities::all().without_network_targets(Targets::Some(
 			[NetTarget::from_str("127.0.0.1").unwrap()].into(),
 		));
-		let mut ctx = Context::background();
+		let mut ctx = Context::new_test();
 		ctx.capabilities = cap.into();
 		let ctx = ctx.freeze();
 		let r = ctx.check_allowed_net(&Url::parse("http://localhost").unwrap()).await;
@@ -1078,7 +1162,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_context_cancellation_priority() {
 		// Test that cancellation is detected even when a deadline is set and exceeded
-		let mut ctx = Context::background();
+		let mut ctx = Context::new_test();
 
 		// Set a deadline in the past (already exceeded)
 		ctx.add_timeout(Duration::from_nanos(1)).unwrap();
@@ -1100,7 +1184,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_context_deadline_detection() {
 		// Test that deadline timeout is detected when context is not cancelled
-		let mut ctx = Context::background();
+		let mut ctx = Context::new_test();
 
 		// Set a very short timeout
 		ctx.add_timeout(Duration::from_nanos(1)).unwrap();
@@ -1118,7 +1202,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_context_no_deadline() {
 		// Test that a context without deadline or cancellation returns None
-		let ctx = Context::background();
+		let ctx = Context::new_test();
 		let ctx = ctx.freeze();
 
 		// Should return None (ok to continue)
@@ -1130,7 +1214,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_context_is_done_adaptive_backoff() {
 		// Test the adaptive back-off strategy in is_done()
-		let ctx = Context::background();
+		let ctx = Context::new_test();
 		let ctx = ctx.freeze();
 
 		// Test that early iterations trigger deep checks (1, 2, 4, 8, 16, 32)
@@ -1157,7 +1241,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_context_is_done_with_none() {
 		// Test that is_done(None) always performs a deep check
-		let ctx = Context::background();
+		let ctx = Context::new_test();
 		let ctx = ctx.freeze();
 
 		// Should perform deep check and return Ok(false) since no cancellation/timeout
@@ -1169,7 +1253,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_context_is_done_detects_cancellation() {
 		// Test that is_done detects cancellation
-		let mut ctx = Context::background();
+		let mut ctx = Context::new_test();
 		let canceller = ctx.add_cancel();
 		canceller.cancel();
 		let ctx = ctx.freeze();
@@ -1207,7 +1291,7 @@ mod tests {
 		// Error::QueryBeyondMemoryThreshold before checking the deadline.
 		// This ensures memory violations are always detected before timeout errors.
 
-		let ctx = Context::background();
+		let ctx = Context::new_test();
 		let ctx = ctx.freeze();
 
 		// With no memory pressure, deadline not set, and no cancellation:
@@ -1261,7 +1345,7 @@ mod tests {
 		// Give the allocator tracking time to register the allocation
 		tokio::time::sleep(Duration::from_millis(10)).await;
 
-		let ctx = Context::background();
+		let ctx = Context::new_test();
 		let ctx = ctx.freeze();
 
 		// The memory threshold check should detect that we've exceeded the limit

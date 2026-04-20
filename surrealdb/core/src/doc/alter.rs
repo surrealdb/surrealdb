@@ -246,7 +246,7 @@ impl Document {
 					let assignments = {
 						let ctx = if matches!(x, Data::UpdateExpression(_)) {
 							// Duplicate context
-							let mut ctx = Context::new(ctx);
+							let mut ctx = Context::new_child(ctx);
 							// Add insertable value
 							if let Workable::Insert(value) = &self.extras {
 								ctx.add_value("input", value.clone());

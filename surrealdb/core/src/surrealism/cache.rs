@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::future::Future;
 use std::hash::Hash;
 use std::sync::Arc;
@@ -8,7 +7,7 @@ use quick_cache::{Equivalent, Weighter};
 use surrealism_runtime::runtime::Runtime;
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::dbs::capabilities::NetTarget;
+use crate::http::HttpClient;
 
 pub struct SurrealismCache {
 	cache: quick_cache::sync::Cache<SurrealismCacheKey, SurrealismCacheValue, Weight>,
@@ -45,7 +44,8 @@ impl SurrealismCache {
 					let wrapped = SurrealismCacheValue {
 						runtime: value.runtime,
 						module_display_name: value.module_display_name,
-						module_net_targets: value.module_net_targets,
+						#[cfg(feature = "http")]
+						client: value.client,
 					};
 					Result::<_, Error>::Ok(wrapped)
 				};
@@ -57,7 +57,8 @@ impl SurrealismCache {
 		Ok(SurrealismCachedModule {
 			runtime: value.runtime,
 			module_display_name: value.module_display_name,
-			module_net_targets: value.module_net_targets,
+			#[cfg(feature = "http")]
+			client: value.client,
 		})
 	}
 }
@@ -117,15 +118,17 @@ pub(crate) struct SurrealismCachedModule {
 	pub runtime: Arc<Runtime>,
 	/// `organisation::name` for logging / host context.
 	pub module_display_name: Arc<str>,
-	/// `allow_net` parsed once as [`NetTarget`]s (same strings as in `surrealism.toml`).
-	pub module_net_targets: Arc<HashSet<NetTarget>>,
+	/// Http client with the right filter the module
+	#[cfg(feature = "http")]
+	pub client: Arc<HttpClient>,
 }
 
 #[derive(Clone)]
 pub struct SurrealismCacheValue {
 	pub(crate) runtime: Arc<Runtime>,
 	pub(crate) module_display_name: Arc<str>,
-	pub(crate) module_net_targets: Arc<HashSet<NetTarget>>,
+	#[cfg(feature = "http")]
+	pub(crate) client: Arc<HttpClient>,
 }
 
 #[derive(Clone)]

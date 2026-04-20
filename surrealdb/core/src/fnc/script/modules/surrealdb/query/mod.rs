@@ -76,7 +76,7 @@ pub fn query<'js>(
 				query_store.insert(Query::new(ctx.clone(), query_text, variables)?)
 			};
 
-			let mut context = Context::new(query_ctx.context);
+			let mut context = Context::new_child(query_ctx.context);
 			if let Some(v) = query.clone().vars {
 				context
 					.attach_variables(v)

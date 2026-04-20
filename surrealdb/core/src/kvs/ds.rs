@@ -61,6 +61,8 @@ use crate::err::Error;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
 use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};
+#[cfg(feature = "http")]
+use crate::http::HttpClient;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
@@ -140,6 +142,9 @@ pub struct Datastore {
 	lazy_surrealism: bool,
 	// Async event processing trigger
 	async_event_trigger: Arc<Notify>,
+	// Http client used to make requests.
+	#[cfg(feature = "http")]
+	http_client: Arc<HttpClient>,
 }
 
 /// Represents a collection of metrics for a specific datastore flavor.
@@ -654,7 +659,7 @@ impl Datastore {
 			dynamic_configuration: DynamicConfiguration::default(),
 			slow_log: self.slow_log,
 			transaction_timeout: self.transaction_timeout,
-			capabilities: self.capabilities,
+			capabilities: self.capabilities.clone(),
 			notification_channel: self.notification_channel,
 			index_stores: Default::default(),
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
@@ -671,6 +676,8 @@ impl Datastore {
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: self.lazy_surrealism,
 			async_event_trigger: self.async_event_trigger,
+			#[cfg(feature = "http")]
+			http_client: self.http_client,
 		}
 	}
 
@@ -866,7 +873,7 @@ impl Datastore {
 			);
 			let opt = Options::new(self.id, self.dynamic_configuration.clone())
 				.with_auth(Arc::new(Auth::for_root(Role::Owner)));
-			let mut ctx = Context::default();
+			let mut ctx = self.setup_ctx()?;
 			ctx.set_transaction(txn.clone());
 			let ctx = ctx.freeze();
 			let mut stack = TreeStack::new();
@@ -2157,9 +2164,7 @@ impl Datastore {
 		// Create a new query options
 		let opt = self.setup_options(sess);
 		// Create a default context
-		let mut ctx = Context::default();
-		// Set context capabilities
-		ctx.add_capabilities(self.capabilities.clone());
+		let mut ctx = self.setup_ctx()?;
 		// Set the global query timeout
 		if let Some(timeout) = self.dynamic_configuration.get_query_timeout() {
 			ctx.add_timeout(timeout)?;
@@ -2289,6 +2294,8 @@ impl Datastore {
 			self.index_builder.clone(),
 			self.sequences.clone(),
 			self.cache.clone(),
+			#[cfg(feature = "http")]
+			self.http_client.clone(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
@@ -2585,9 +2592,7 @@ mod test {
 			.with_max_computation_depth(u32::MAX);
 
 		// Create a default context
-		let mut ctx = Context::default();
-		// Set context capabilities
-		ctx.add_capabilities(dbs.capabilities.clone());
+		let mut ctx = dbs.setup_ctx()?;
 		// Start a new transaction
 		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?.enclose();
 		// Store the transaction
