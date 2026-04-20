@@ -784,27 +784,54 @@ impl Executor {
 				while let Some(stmt) = stream.next().await {
 					yield_now!();
 					let stmt = stmt?;
-					if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
-						return Ok(());
-					}
-
-					self.results.push(QueryResult {
-						time: Duration::ZERO,
-						result: Err(match done {
-							Reason::Timedout(d) => TypesError::query(
-								format!("Timed out: {d}"),
-								Some(QueryError::TimedOut {
-									duration: d.0,
+					match stmt {
+						TopLevelExpr::Commit => {
+							// After timeout/cancel the txn is already gone: COMMIT cannot succeed.
+							// Still emit one `QueryResult` for this COMMIT statement so the batch has
+							// one row per statement (mirrors successful COMMIT, which pushes Ok(NONE)
+							// in the main `TopLevelExpr::Commit` branch below) (#7207).
+							self.results.push(QueryResult {
+								time: Duration::ZERO,
+								result: Err(match done {
+									Reason::Timedout(d) => TypesError::query(
+										format!("Cannot COMMIT: timed out ({d})"),
+										Some(QueryError::TimedOut {
+											duration: d.0,
+										}),
+									),
+									Reason::Canceled => TypesError::query(
+										"Cannot COMMIT: the transaction was cancelled".to_string(),
+										Some(QueryError::Cancelled),
+									),
 								}),
-							),
-							Reason::Canceled => TypesError::query(
-								"The query was not executed due to a cancelled transaction"
-									.to_string(),
-								Some(QueryError::Cancelled),
-							),
-						}),
-						query_type: QueryType::Other,
-					});
+								query_type: QueryType::Other,
+							});
+							return Ok(());
+						}
+						ref stmt => {
+							let result = Err(match done {
+								Reason::Timedout(d) => TypesError::query(
+									format!("Timed out: {d}"),
+									Some(QueryError::TimedOut {
+										duration: d.0,
+									}),
+								),
+								Reason::Canceled => TypesError::query(
+									"The query was not executed due to a cancelled transaction"
+										.to_string(),
+									Some(QueryError::Cancelled),
+								),
+							});
+							self.results.push(QueryResult {
+								time: Duration::ZERO,
+								result,
+								query_type: QueryType::Other,
+							});
+							if matches!(stmt, TopLevelExpr::Cancel) {
+								return Ok(());
+							}
+						}
+					}
 				}
 
 				// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
@@ -854,21 +881,36 @@ impl Executor {
 					while let Some(stmt) = stream.next().await {
 						yield_now!();
 						let stmt = stmt?;
-						if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
-							return Ok(());
+						match stmt {
+							TopLevelExpr::Commit => {
+								self.results.push(QueryResult {
+									time: Duration::ZERO,
+									result: Err(TypesError::query(
+										"Cannot COMMIT: the transaction was aborted due to a nested BEGIN"
+											.to_string(),
+										Some(QueryError::NotExecuted),
+									)),
+									query_type: QueryType::Other,
+								});
+								return Ok(());
+							}
+							ref stmt => {
+								self.results.push(QueryResult {
+									time: Duration::ZERO,
+									result: Err(TypesError::query(
+										format!(
+											"The query was not executed due to a failed transaction: {}",
+											stmt.to_sql()
+										),
+										Some(QueryError::NotExecuted),
+									)),
+									query_type: QueryType::Other,
+								});
+								if matches!(stmt, TopLevelExpr::Cancel) {
+									return Ok(());
+								}
+							}
 						}
-
-						self.results.push(QueryResult {
-							time: Duration::ZERO,
-							result: Err(TypesError::query(
-								format!(
-									"The query was not executed due to a failed transaction: {}",
-									stmt.to_sql()
-								),
-								Some(QueryError::NotExecuted),
-							)),
-							query_type: QueryType::Other,
-						});
 					}
 
 					// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
@@ -930,17 +972,26 @@ impl Executor {
 					};
 
 					// `txn.commit()` failed (e.g. constraint on commit, or txn already finished).
-					// Same user-facing prefix as the post-abort COMMIT arm below (#7207) so
-					// clients always see `Cannot COMMIT: …` instead of a silent success.
+					// Surface the failure on a dedicated COMMIT result row; mark prior statement
+					// slots as not executed so nothing implies a successful commit (#7207).
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
 						res.result = Err(TypesError::query(
-							format!("Cannot COMMIT: {e}"),
+							"The query was not executed due to a failed transaction".to_string(),
 							Some(QueryError::NotExecuted),
 						));
 					}
 
 					self.opt.broker = None;
+
+					self.results.push(QueryResult {
+						time: before.elapsed(),
+						result: Err(TypesError::query(
+							format!("Cannot COMMIT: {e}"),
+							Some(QueryError::NotExecuted),
+						)),
+						query_type: QueryType::Other,
+					});
 
 					return Ok(());
 				}
