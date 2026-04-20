@@ -78,7 +78,9 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 		};
 
 		// 5. Check permissions (with limited auth)
-		check_permission(&func_def.permissions, &func_name, &ctx).await?;
+		if ctx.exec_ctx.should_check_perms(crate::iam::Action::View)? {
+			check_permission(&func_def.permissions, &func_name, &ctx).await?;
+		}
 
 		// 6. Evaluate all arguments
 		let evaluated_args = evaluate_args(&self.arguments, ctx.clone()).await?;
