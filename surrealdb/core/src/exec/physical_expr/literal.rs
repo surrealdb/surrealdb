@@ -174,18 +174,18 @@ impl PhysicalExpr for Param {
 			return Ok(value.clone());
 		}
 
-		// Correlated `$parent`: prefer the explicit outer document before global
-		// / session parameters so `$parent.refs` in subqueries cannot be
-		// shadowed by a stray `parent` binding (issue #7154).
-		if self.0.as_str() == "parent"
-			&& let Some(v) = ctx.document_root
-		{
-			return Ok(v.clone());
-		}
-
 		// FrozenContext handles scoped parameter lookup via parent-chain,
 		// including protected params ($auth, $access, $token, $session)
 		if let Some(v) = ctx.exec_ctx.value(&self.0) {
+			return Ok(v.clone());
+		}
+
+		// $parent falls back to document_root when not explicitly bound.
+		// This allows `->edge[WHERE $parent.field]` and similar idiom-level
+		// WHERE clauses to reference the enclosing row being projected/filtered.
+		if self.0.as_str() == "parent"
+			&& let Some(v) = ctx.document_root
+		{
 			return Ok(v.clone());
 		}
 
