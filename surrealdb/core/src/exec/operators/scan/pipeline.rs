@@ -692,8 +692,9 @@ pub(crate) async fn compute_fields_for_value(
 	};
 
 	for cf in &state.computed_fields {
-		// Evaluate with the current value as context
-		let row_ctx = eval_ctx.with_value(value);
+		// Evaluate with the row as both current value and document root so
+		// nested subqueries see the same `$parent` as top-level projections (#7154).
+		let row_ctx = eval_ctx.with_value_and_doc(value);
 		let computed_value = match cf.expr.evaluate(row_ctx).await {
 			Ok(v) => v,
 			Err(ControlFlow::Return(v)) => v,

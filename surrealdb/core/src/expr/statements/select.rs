@@ -4,7 +4,7 @@ use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
-use crate::ctx::FrozenContext;
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::{CursorDoc, NsDbCtx};
 use crate::err::Error;
@@ -96,7 +96,20 @@ impl SelectStatement {
 		);
 		// Check if there is a timeout
 		// This is calculated on the parent doc
-		let ctx = stm.setup_timeout(stk, ctx, &opt, parent_doc).await?;
+		let ctx = stm.setup_timeout(stk, ctx, &opt, parent_doc).await?.into_owned();
+
+		// Bind `$parent` before `iterator.prepare()`. `prepare` evaluates FROM sources
+		// (e.g. `$parent.refs`) via `Param::compute`, which reads `ctx.value("parent")`.
+		// That was previously only set inside `CursorDoc::update_parent`, which runs
+		// after prepare — so nested SELECT ... FROM $parent.* failed in legacy iteration
+		// (#7154).
+		let ctx = if let Some(doc) = parent_doc {
+			let mut c = Context::new(&ctx);
+			c.add_value("parent", Arc::new(doc.doc.as_ref().clone()));
+			c.freeze()
+		} else {
+			ctx
+		};
 
 		// Get a query planner
 		let mut planner = QueryPlanner::new();

@@ -31,7 +31,13 @@ impl PhysicalExpr for ScalarSubquery {
 		// Create a derived execution context with the parent value set.
 		// This allows $parent and $this references in the subquery to access the outer document.
 		// $this is needed for correlated subqueries like `(SELECT ... FROM $this.field)`.
-		let subquery_ctx = if let Some(parent_value) = ctx.current_value {
+		//
+		// Prefer `document_root` over `current_value` when both are set: nested evaluation
+		// (e.g. view projections and graph traversals) may advance `current_value` along a
+		// field chain while `document_root` still refers to the outer row that `$parent`
+		// should denote (issue #7154).
+		let outer_row = ctx.document_root.or(ctx.current_value);
+		let subquery_ctx = if let Some(parent_value) = outer_row {
 			ctx.exec_ctx
 				.with_param("parent", parent_value.clone())
 				.with_param("this", parent_value.clone())
@@ -81,15 +87,19 @@ impl PhysicalExpr for ScalarSubquery {
 		values: &[Value],
 	) -> FlowResult<Vec<Value>> {
 		if values.len() < 2 || self.plan.access_mode() == AccessMode::ReadWrite {
-			// Sequential for small batches or mutation subqueries
+			// Sequential for small batches or mutation subqueries.
+			// Use `with_value_and_doc` so single-row batches still set
+			// `document_root` for `$parent` / nested correlation (#7154).
 			let mut results = Vec::with_capacity(values.len());
 			for value in values {
-				results.push(self.evaluate(ctx.with_value(value)).await?);
+				results.push(self.evaluate(ctx.with_value_and_doc(value)).await?);
 			}
 			return Ok(results);
 		}
+		// Bind both current value and document root so `$parent` / nested
+		// subqueries match `with_value_and_doc` single-row evaluation (#7154).
 		let futures: Vec<_> =
-			values.iter().map(|value| self.evaluate(ctx.with_value(value))).collect();
+			values.iter().map(|value| self.evaluate(ctx.with_value_and_doc(value))).collect();
 		futures::future::try_join_all(futures).await
 	}
 

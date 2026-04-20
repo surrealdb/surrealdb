@@ -1096,11 +1096,27 @@ impl<'ctx> Planner<'ctx> {
 			type Error = std::convert::Infallible;
 
 			fn visit_idiom(&mut self, idiom: &crate::expr::Idiom) -> Result<(), Self::Error> {
-				if let Some(Part::Field(name)) = idiom.0.first() {
+				// `$parent.field` / `$this.field` refer to outer row columns; the
+				// first segment is a correlation anchor, not a table column.
+				// Counting `parent`/`this` as needed fields breaks selective scans
+				// (e.g. views with `$parent.refs` would omit `refs`) — issue #7154.
+				let parts = idiom.0.as_slice();
+				if let Some(Part::Field(anchor)) = parts.first()
+					&& (anchor == "parent" || anchor == "this")
+				{
+					for p in parts.iter().skip(1) {
+						if let Part::Field(name) = p {
+							self.fields.insert(name.clone());
+						}
+						self.visit_part(p)?;
+					}
+					return Ok(());
+				}
+
+				if let Some(Part::Field(name)) = parts.first() {
 					self.fields.insert(name.clone());
 				}
-				// Walk nested parts for embedded expressions
-				for p in idiom.0.iter() {
+				for p in parts.iter() {
 					self.visit_part(p)?;
 				}
 				Ok(())
