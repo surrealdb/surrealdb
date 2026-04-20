@@ -12,6 +12,7 @@ use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::expr::FlowResult;
 use crate::expr::mock::Mock;
+use crate::expr::part::Part;
 use crate::iam::Action;
 use crate::kvs::Transaction;
 use crate::val::{Array, Value};
@@ -172,6 +173,20 @@ impl PhysicalExpr for Param {
 			&& let Some(value) = local_params.get(&self.0)
 		{
 			return Ok(value.clone());
+		}
+
+		// Table permission predicates (`skip_fetch_perms`) evaluate `id` as the
+		// subject row's record id. The FrozenContext may also expose an `id`
+		// parameter from the authenticated session (e.g. record auth), which
+		// would incorrectly shadow the row — prefer the current row's `id`
+		// field when present (issue #7237).
+		if ctx.skip_fetch_perms && self.0.as_str() == "id" {
+			if let Some(cv) = ctx.current_value {
+				let idv = cv.pick(&[Part::Field(String::from("id"))]);
+				if !matches!(idv, Value::None) {
+					return Ok(idv);
+				}
+			}
 		}
 
 		// FrozenContext handles scoped parameter lookup via parent-chain,
