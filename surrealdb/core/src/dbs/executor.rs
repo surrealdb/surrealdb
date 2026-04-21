@@ -787,9 +787,10 @@ impl Executor {
 					match stmt {
 						TopLevelExpr::Commit => {
 							// After timeout/cancel the txn is already gone: COMMIT cannot succeed.
-							// Still emit one `QueryResult` for this COMMIT statement so the batch has
-							// one row per statement (mirrors successful COMMIT, which pushes Ok(NONE)
-							// in the main `TopLevelExpr::Commit` branch below) (#7207).
+							// Still emit one `QueryResult` for this COMMIT statement so the batch
+							// has one row per statement (mirrors successful COMMIT, which
+							// pushes Ok(NONE) in the main `TopLevelExpr::Commit` branch
+							// below) (#7207).
 							self.results.push(QueryResult {
 								time: Duration::ZERO,
 								result: Err(match done {

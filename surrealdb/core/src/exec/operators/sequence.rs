@@ -199,9 +199,9 @@ async fn execute_block_with_context(
 /// Always clones from [`ExecutionContext`]: LET bindings from the planned path
 /// (`with_param` / `output_context`) must be visible to legacy `Expr::compute`
 /// (issue #7131).
-fn legacy_context_for_fallback<'a>(
-	exec_ctx: &'a ExecutionContext,
-) -> Result<(&'a crate::dbs::Options, FrozenContext), Error> {
+fn legacy_context_for_fallback(
+	exec_ctx: &ExecutionContext,
+) -> Result<(&crate::dbs::Options, FrozenContext), Error> {
 	let options = exec_ctx.options().ok_or_else(|| {
 		Error::Internal("Options not available for legacy compute fallback".into())
 	})?;
