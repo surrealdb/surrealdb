@@ -10,6 +10,7 @@ members = [
     "surrealdb/token",
     "surrealdb/parser",
     "surrealdb/core",
+    "surrealdb/client-core",
     "surrealdb/server",
     "surrealdb/types",
     "surrealdb/types/derive",
@@ -54,7 +55,7 @@ ast = { package = "surrealdb-ast", path = "surrealdb/ast" }
 token = { package = "surrealdb-token", path = "surrealdb/token" }
 parser = { package = "surrealdb-parser", path = "surrealdb/parser" }
 common = { package = "surrealdb-common", path = "surrealdb/common" }
-
+surrealdb-client-core = { version = "3.1.0-alpha", path = "surrealdb/client-core" }
 # SurrealML crates
 surrealml-core = { version = "0.1", path = "surrealml/core" }
 # Surrealism crates

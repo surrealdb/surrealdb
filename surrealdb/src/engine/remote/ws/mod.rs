@@ -15,11 +15,10 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use async_channel::Sender;
+use surrealdb_client_core::rpc::{DbResponse, DbResult};
 use futures::{Sink, SinkExt};
-use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
-use surrealdb_core::iam::token::Token;
-use surrealdb_core::rpc::{DbResponse, DbResult};
-use surrealdb_types::{AuthError, Error as TypesError, NotAllowedError};
+use surrealdb_client_core::response::{QueryResult, QueryResultBuilder};
+use surrealdb_types::{AuthError, Error as TypesError, NotAllowedError, decode, encode};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -118,8 +117,7 @@ trait WsMessage: Sized + Clone + Unpin + Send {
 /// Serialize a router request to a WebSocket message.
 fn serialize_request<M: WsMessage>(request: RouterRequest) -> M {
 	let request_value = request.into_value();
-	let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
-		.expect("router request should serialize");
+	let payload = encode(&request_value).expect("router request should serialize");
 	M::binary(payload)
 }
 
@@ -418,9 +416,8 @@ where
 				token,
 				..
 			}) = pending.command
-				&& let Token::WithRefresh {
-					..
-				} = &token && error
+				&& token.refresh.is_some()
+				&& error
 				.not_allowed_details()
 				.is_some_and(|a| matches!(a, NotAllowedError::Auth(AuthError::TokenExpired)))
 			{
@@ -502,7 +499,7 @@ async fn handle_parse_error(
 		session_id: Option<Uuid>,
 	}
 
-	match surrealdb_core::rpc::format::flatbuffers::decode::<ErrorResponse>(binary) {
+	match decode::<ErrorResponse>(binary) {
 		Ok(ErrorResponse {
 			id,
 			session_id,

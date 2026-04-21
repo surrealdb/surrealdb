@@ -1,6 +1,13 @@
 //! The different options and types for use in API functions
 
 pub mod auth;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+))]
 pub mod capabilities;
 
 mod config;

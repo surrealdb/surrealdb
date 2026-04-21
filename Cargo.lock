@@ -7007,6 +7007,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "surrealdb-client-core",
  "surrealdb-core",
  "surrealdb-types",
  "surrealdb-types-derive",
@@ -7038,6 +7039,19 @@ dependencies = [
  "rust_decimal",
  "surrealdb-common",
  "uuid",
+]
+
+[[package]]
+name = "surrealdb-client-core"
+version = "3.1.0-alpha"
+dependencies = [
+ "humantime",
+ "revision",
+ "serde",
+ "surrealdb-types",
+ "tracing",
+ "uuid",
+ "web-time",
 ]
 
 [[package]]
@@ -7130,6 +7144,7 @@ dependencies = [
  "storekey",
  "strsim",
  "subtle",
+ "surrealdb-client-core",
  "surrealdb-protocol",
  "surrealdb-rocksdb",
  "surrealdb-tikv-client",

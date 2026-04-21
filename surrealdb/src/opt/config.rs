@@ -2,9 +2,30 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+))]
 use surrealdb_core::dbs::Capabilities as CoreCapabilities;
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+))]
 use surrealdb_core::iam::Level;
 
+#[cfg(any(
+	feature = "kv-mem",
+	feature = "kv-tikv",
+	feature = "kv-rocksdb",
+	feature = "kv-indxdb",
+	feature = "kv-surrealkv",
+))]
 use crate::opt::capabilities::Capabilities;
 use crate::opt::websocket::WebsocketConfig;
 
@@ -19,9 +40,37 @@ pub struct Config {
 	pub(crate) tls_config: Option<super::Tls>,
 	// Only used by the local engines
 	// `Level::No` in this context means no authentication information was configured
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-tikv",
+		feature = "kv-rocksdb",
+		feature = "kv-indxdb",
+		feature = "kv-surrealkv",
+	))]
 	pub(crate) auth: Level,
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-tikv",
+		feature = "kv-rocksdb",
+		feature = "kv-indxdb",
+		feature = "kv-surrealkv",
+	))]
 	pub(crate) username: String,
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-tikv",
+		feature = "kv-rocksdb",
+		feature = "kv-indxdb",
+		feature = "kv-surrealkv",
+	))]
 	pub(crate) password: String,
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-tikv",
+		feature = "kv-rocksdb",
+		feature = "kv-indxdb",
+		feature = "kv-surrealkv",
+	))]
 	pub(crate) capabilities: CoreCapabilities,
 	pub(crate) websocket: WebsocketConfig,
 	#[cfg(storage)]
@@ -63,6 +112,13 @@ impl Config {
 	}
 
 	/// Set the default user
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-tikv",
+		feature = "kv-rocksdb",
+		feature = "kv-indxdb",
+		feature = "kv-surrealkv",
+	))]
 	pub fn user(mut self, user: crate::opt::auth::Root) -> Self {
 		self.auth = Level::Root;
 		user.username.clone_into(&mut self.username);
@@ -95,6 +151,13 @@ impl Config {
 	}
 
 	/// Set the capabilities for the database
+	#[cfg(any(
+		feature = "kv-mem",
+		feature = "kv-tikv",
+		feature = "kv-rocksdb",
+		feature = "kv-indxdb",
+		feature = "kv-surrealkv",
+	))]
 	pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
 		self.capabilities = capabilities.into();
 		self

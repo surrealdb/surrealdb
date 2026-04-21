@@ -5,7 +5,7 @@ use std::mem;
 
 use futures::future::Either;
 use futures::stream::select_all;
-use surrealdb_core::rpc::DbResultStats;
+use surrealdb_client_core::rpc::DbResultStats;
 
 use crate::method::live::Stream;
 use crate::notification::Notification;
@@ -20,7 +20,7 @@ where
 }
 
 mod query_result {
-	use surrealdb_core::rpc::DbResultStats;
+	use surrealdb_client_core::rpc::DbResultStats;
 
 	pub trait Sealed<Response>
 	where

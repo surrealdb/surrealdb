@@ -17,12 +17,4 @@ pub use method::Method;
 pub use protocol::RpcProtocol;
 pub use request::Request;
 pub use response::{DbResponse, DbResult, DbResultStats};
-
-use crate::cnf::PROTECTED_PARAM_NAMES;
-
-pub fn check_protected_param(key: &str) -> Result<(), surrealdb_types::Error> {
-	if PROTECTED_PARAM_NAMES.contains(&key) {
-		return Err(invalid_params(format!("Cannot set protected variable: {key}")));
-	}
-	Ok(())
-}
+pub use surrealdb_client_core::rpc::check_protected_param;
