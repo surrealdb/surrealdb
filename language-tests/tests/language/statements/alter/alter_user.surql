@@ -1,5 +1,6 @@
 /**
 [env]
+timeout = 3000
 auth = { level = "owner" }
 
 [test]

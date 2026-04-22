@@ -1,104 +1,53 @@
+use std::fmt::Write;
 use std::io::IsTerminal;
-use std::time::Duration;
-use std::{io, mem, str, thread};
+use std::panic::AssertUnwindSafe;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
-use provisioner::{Permit, PermitError, Provisioner};
+use futures::FutureExt as _;
+use provisioner::Provisioner;
 use semver::Version;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::env::VERSION;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
-use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
-use tokio::{select, time};
+use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::cli::{Backend, ColorMode, ResultsMode};
-use crate::format::Progress;
+use crate::cmd::run::provisioner::CanReuse;
+use crate::format::{IndentFormatter, Progress, ansi};
 use crate::runner::Schedular;
-use crate::tests::TestSet;
 use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
-use crate::tests::schema::NewPlannerStrategyConfig;
-use crate::tests::set::TestId;
+use crate::tests::run::{CaseImports, RunConfig};
+use crate::tests::schema::{ENV_DEFAULT_TIMEOUT, NewPlannerStrategyConfig};
+use crate::tests::{CaseSet, RunSetBuilder, TestRun};
 
 mod provisioner;
 mod util;
 
-use util::core_capabilities_from_test_config;
-
-#[derive(Clone, Copy, Eq, PartialEq)]
-pub(crate) struct RunId(usize);
-
-pub struct TestTaskContext {
-	pub run_id: RunId,
-	pub id: TestId,
-	pub testset: TestSet,
-	pub ds: Permit,
-	pub result: Sender<(RunId, TestId, TestTaskResult, Option<String>)>,
+#[derive(Debug)]
+pub struct TestRunConfig {
+	pub planner_config: NewPlannerStrategyConfig,
 	pub backend: Backend,
-	pub strategy: NewPlannerStrategyConfig,
 }
 
-fn try_collect_reports<W: io::Write>(
-	reports: &mut Vec<TestReport>,
-	channel: &mut UnboundedReceiver<(RunId, TestReport)>,
-	progress: &mut Progress<RunId, W>,
-) {
-	while let Ok((run_id, report)) = channel.try_recv() {
-		let grade = report.grade();
-		progress.finish_item(run_id, grade).unwrap();
-		reports.push(report);
-	}
-}
-
-fn filter_testset_from_arguments(testset: TestSet, matches: &ArgMatches) -> TestSet {
-	let subset = if let Some(x) = matches.get_one::<String>("filter") {
-		testset.filter_map(|name, _| name.contains(x))
-	} else {
-		testset
-	};
-
-	let subset = if matches.get_flag("no-wip") {
-		subset.filter_map(|_, set| !set.config.is_wip())
-	} else {
-		subset
-	};
-
-	// Filter tests based on backend specification in their environment configuration.
-	// Tests are included if:
-	// - They have no env config (run on all backends)
-	// - They have an empty backend list (run on all backends)
-	// - Their backend list contains the current backend
-	let subset = if let Some(backend) = matches.get_one::<Backend>("backend") {
-		subset.filter_map(|_, test| {
-			if let Some(env) = &test.config.env {
-				if !env.backend.is_empty() {
-					env.backend.contains(&backend.to_string())
-				} else {
-					true
-				}
-			} else {
-				true
-			}
-		})
-	} else {
-		subset
-	};
-
-	if matches.get_flag("no-results") {
-		subset.filter_map(|_, set| {
-			!set.config.test.as_ref().map(|x| x.results.is_some()).unwrap_or(false)
-		})
-	} else {
-		subset
+impl RunConfig for TestRunConfig {
+	fn name(&self, case: &CaseImports) -> String {
+		format!("{} on {} [{}]", case.test.origin.path, self.backend, self.planner_config)
 	}
 }
 
 pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
+	let mut load_errors = Vec::new();
+
 	let path: &String = matches.get_one("path").unwrap();
-	let (testset, load_errors) = TestSet::collect_directory(path).await?;
+	let set = CaseSet::load_surrealql_files(path, &mut load_errors).await?;
+
 	let backend = *matches.get_one::<Backend>("backend").unwrap();
+	let core_version = Version::parse(VERSION).unwrap();
 
 	// Check if the backend is supported by the enabled features.
 	match backend {
@@ -118,14 +67,73 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		Backend::TikV => bail!("TiKV backend feature is not enabled"),
 	}
 
-	let subset = filter_testset_from_arguments(testset, matches);
+	let set_builder = RunSetBuilder::new(&set, &mut load_errors)
+		// Only run test for which run is enabled.
+		.with_filter(|x| x.test.config.parsed.test.run)
+		// Only run test for this backend.
+		.with_filter(|x| {
+			let config_backend = &x.test.config.parsed.env.backend;
+			config_backend.is_empty() || config_backend.contains(&backend)
+		})
+		// Run for all config the test has configured.
+		.with_expander(|x| {
+			x.test
+				.config
+				.parsed
+				.env
+				.planner_strategy
+				.iter()
+				.map(|x| TestRunConfig {
+					planner_config: *x,
+					backend,
+				})
+				.collect()
+		});
 
-	// check for unused keys in tests
-	for t in subset.iter() {
-		for k in t.config.unused_keys() {
-			println!("Test `{}` contained unused key `{k}` in config", t.path);
+	let set_builder = if let Some(name_filter) = matches.get_one::<String>("filter") {
+		set_builder.with_filter(move |x| x.test.origin.path.contains(name_filter))
+	} else {
+		set_builder
+	};
+
+	let set_builder = if matches.get_flag("no-wip") {
+		set_builder.with_filter(|x| !x.test.config.parsed.test.wip)
+	} else {
+		set_builder
+	};
+
+	let set_builder = if matches.get_flag("no-results") {
+		set_builder.with_filter(|x| x.test.config.parsed.test.results.is_none())
+	} else {
+		set_builder
+	};
+
+	// Filter out test which cannot run on the current version.
+	let set_builder = set_builder.with_filter(|x| {
+		if let Some(x) = &x.test.config.parsed.test.version
+			&& !x.matches(&core_version)
+		{
+			return false;
 		}
-	}
+
+		if let Some(x) = &x.test.config.parsed.test.importing_version
+			&& !x.matches(&core_version)
+		{
+			return false;
+		}
+
+		for i in x.imports.iter() {
+			if let Some(x) = &i.config.parsed.test.version
+				&& !x.matches(&core_version)
+			{
+				return false;
+			}
+		}
+
+		true
+	});
+
+	let runs = set_builder.build();
 
 	let num_jobs = matches
 		.get_one::<u32>("jobs")
@@ -134,132 +142,39 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	let failure_mode = matches.get_one::<ResultsMode>("results").unwrap();
 
-	let core_version = Version::parse(VERSION).unwrap();
-
-	// filter tasks.
-	let tasks: Vec<_> = subset
-		.iter_ids()
-		.filter_map(|(id, test)| {
-			if test.contains_error {
-				return None;
-			}
-
-			let config = test.config.clone();
-
-			// Ensure this test can run on this version.
-			if let Some(version_req) = config.test.as_ref().and_then(|x| x.version.as_ref()) {
-				if !version_req.matches(&core_version) {
-					return None;
-				}
-			}
-
-			// Ensure this test imports can run on this version as specified by the test itself.
-			if let Some(version_req) =
-				config.test.as_ref().and_then(|x| x.importing_version.as_ref())
-			{
-				if !version_req.matches(&core_version) {
-					return None;
-				}
-			}
-
-			// Ensure this test imports can run on this version as specified by the imports.
-			for import in test.imports.iter() {
-				if let Some(version_req) =
-					subset[import.id].config.test.as_ref().and_then(|x| x.version.as_ref())
-				{
-					if !version_req.matches(&core_version) {
-						return None;
-					}
-				}
-			}
-
-			if !config.should_run() {
-				return None;
-			}
-
-			Some(id)
-		})
-		.collect();
-
 	println!(" Running with {num_jobs} jobs");
 	let mut schedular = Schedular::new(num_jobs);
 
-	// give the result channel some slack to catch up to tasks.
-	let (res_send, res_recv) = mpsc::channel(num_jobs as usize * 4);
 	// all reports are collected into the channel before processing.
 	// So unbounded is required.
 	let (report_send, mut report_recv) = mpsc::unbounded_channel();
 
 	let mut provisioner = Provisioner::new(num_jobs as usize, backend).await?;
 
-	let num_tests = tasks.len();
-	let num_runs: usize =
-		tasks.iter().map(|id| subset[*id].config.planner_strategies().len()).sum();
-	println!(" Found {} tests ({} runs)", subset.len(), num_runs);
-
-	tokio::spawn(grade_task(subset.clone(), res_recv, report_send));
+	println!("Found {} tests ", runs.len());
 
 	let mut reports = Vec::new();
-	let mut run_counter: usize = 0;
-	let mut progress = Progress::from_stderr(num_runs, color);
+	let mut progress = Progress::from_stderr(runs.len(), color);
 
 	// spawn all tests -- one task per (test, strategy) combination.
-	for id in tasks {
-		let config = subset[id].config.as_ref();
-		let strategies = config.planner_strategies();
+	for run in runs {
+		progress.start_item(run.id, &run.name()).unwrap();
+		schedule_run(run, &mut schedular, &mut provisioner, report_send.clone()).await;
 
-		for strategy in strategies {
-			let run_id = RunId(run_counter);
-			run_counter += 1;
-
-			let run_label = format!("{} [{}]", subset[id].path.as_str(), strategy);
-			progress.start_item(run_id, &run_label).unwrap();
-
-			let versioned = config.env.as_ref().map(|e| e.versioned).unwrap_or(false);
-			let ds = if config.can_use_reusable_ds() {
-				provisioner.obtain().await
-			} else {
-				provisioner.create(versioned)
-			};
-
-			let context = TestTaskContext {
-				run_id,
-				id,
-				testset: subset.clone(),
-				result: res_send.clone(),
-				ds,
-				backend,
-				strategy: strategy.clone(),
-			};
-			let future = async move {
-				let name = context.testset[context.id].path.as_str().to_owned();
-				let future = test_task(context);
-
-				if let Err(e) = future.await {
-					println!("Error: {:?}", e.context(format!("Failed to run test '{name}'")))
-				}
-			};
-
-			if config.should_run_sequentially() {
-				schedular.spawn_sequential(future).await;
-			} else {
-				schedular.spawn(future).await;
-			}
-
-			// Try to collect reports to give quick feedback on test completion.
-			try_collect_reports(&mut reports, &mut report_recv, &mut progress);
+		// Handle possible done reports.
+		while let Ok(report) = report_recv.try_recv() {
+			let grade = report.grade();
+			progress.finish_item(report.id, grade).unwrap();
+			reports.push(report);
 		}
 	}
 
-	// all test are running.
-	// drop the result sender so that tasks properly quit when the channel does.
-	mem::drop(res_send);
-
 	// when the report channel quits we can be sure we are done. since the report task has quit
 	// meaning the test tasks have all quit.
-	while let Some((run_id, report)) = report_recv.recv().await {
+	std::mem::drop(report_send);
+	while let Some(report) = report_recv.recv().await {
 		let grade = report.grade();
-		progress.finish_item(run_id, grade).unwrap();
+		progress.finish_item(report.id, grade).unwrap();
 		reports.push(report);
 	}
 
@@ -277,12 +192,53 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	// done, report the results.
 	for v in reports.iter() {
-		v.display(&subset, color)
+		v.display(color)
 	}
 
 	for e in load_errors.iter() {
 		e.display(color);
 	}
+
+	let use_color = match color {
+		ColorMode::Always => true,
+		ColorMode::Never => false,
+		ColorMode::Auto => std::io::stdout().is_terminal(),
+	};
+
+	let mut buffer = String::new();
+	let mut f = IndentFormatter::new(&mut buffer, 2);
+	f.indent(|f| {
+		for c in set.iter() {
+			let mut first = true;
+			for k in c.config.parsed.unused_keys() {
+				if first {
+					first = false;
+					if use_color {
+						writeln!(
+							f,
+							ansi!(
+								" ==> ",
+								yellow,
+								"Warning",
+								reset_format,
+								" for ",
+								bold,
+								"{}",
+								reset_format,
+								":"
+							),
+							c.origin.path
+						)?;
+					} else {
+						writeln!(f, " ==> Warning for {}", c.origin.path)?;
+					}
+				}
+				f.indent(|f| writeln!(f, "> Test config contains unused key: {}", k))?;
+			}
+		}
+		Ok(())
+	})
+	.unwrap();
 
 	// Print summary line.
 	// passed/failed/warned are per-run counts (one report per test-strategy pair),
@@ -290,27 +246,13 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	let passed = reports.iter().filter(|r| r.grade() == TestGrade::Success).count();
 	let failed = reports.iter().filter(|r| r.grade() == TestGrade::Failed).count();
 	let warned = reports.iter().filter(|r| r.grade() == TestGrade::Warning).count();
-	let skipped = subset.len() - num_tests;
-	let use_color = match color {
-		ColorMode::Always => true,
-		ColorMode::Never => false,
-		ColorMode::Auto => std::io::stdout().is_terminal(),
-	};
 	if use_color {
-		let green = "\x1b[32m";
-		let red = "\x1b[31m";
-		let yellow = "\x1b[33m";
-		let dim = "\x1b[2m";
-		let reset = "\x1b[0m";
-		print!(" {green}{passed} runs passed{reset}");
+		print!(ansi!(green, " {} runs passed", reset_format), passed);
 		if failed > 0 {
-			print!(", {red}{failed} failed{reset}");
+			print!(ansi!(", ", red, "{} failed", reset_format), failed);
 		}
 		if warned > 0 {
-			print!(", {yellow}{warned} warnings{reset}");
-		}
-		if skipped > 0 {
-			print!(" | {dim}{skipped} tests skipped{reset}");
+			print!(ansi!(", ", yellow, "{} warnings", reset_format), warned);
 		}
 		println!();
 	} else {
@@ -321,9 +263,6 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		if warned > 0 {
 			print!(", {warned} warnings");
 		}
-		if skipped > 0 {
-			print!(" | {skipped} tests skipped");
-		}
 		println!();
 	}
 	println!();
@@ -333,14 +272,14 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		ResultsMode::Default => {}
 		ResultsMode::Accept => {
 			for report in reports.iter().filter(|x| x.is_unspecified_test() && !x.is_wip()) {
-				report.update_config_results(&subset).await?;
+				report.update_config_results(path).await?;
 			}
 		}
 		ResultsMode::Overwrite => {
 			for report in reports.iter().filter(|x| {
 				matches!(x.grade(), TestGrade::Failed | TestGrade::Warning) && !x.is_wip()
 			}) {
-				report.update_config_results(&subset).await?;
+				report.update_config_results(path).await?;
 			}
 		}
 	}
@@ -356,87 +295,75 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 	Ok(())
 }
 
-pub async fn grade_task(
-	set: TestSet,
-	mut results: Receiver<(RunId, TestId, TestTaskResult, Option<String>)>,
-	sender: UnboundedSender<(RunId, TestReport)>,
+pub async fn schedule_run(
+	run: TestRun<TestRunConfig>,
+	schedular: &mut Schedular,
+	provisioner: &mut Provisioner,
+	report_sender: UnboundedSender<TestReport>,
 ) {
-	let ds = Datastore::new("memory")
-		.await
-		.expect("failed to create datastore for running matching expressions");
+	let permit = provisioner.obtain(&run.case.test.config.parsed.env).await;
+	let sequential = run.case.test.config.parsed.env.sequential;
 
-	let mut session = surrealdb_core::dbs::Session::default();
-	ds.process_use(None, &mut session, Some("match".to_string()), Some("match".to_string()))
-		.await
-		.unwrap();
+	let future = async move {
+		let res = permit
+			.with(async |ds, grade_ds| {
+				let fut = run_test_with_dbs(&run, ds);
+				let res = AssertUnwindSafe(fut).catch_unwind().await;
 
-	loop {
-		let Some((run_id, id, res, extra_name)) = results.recv().await else {
-			break;
+				match res {
+					Ok(Ok(x)) => (
+						CanReuse::Reusable,
+						Ok(TestReport::from_test_result(run, x, grade_ds).await),
+					),
+					Ok(Err(e)) => (CanReuse::Reusable, Err(e)),
+					Err(e) => (CanReuse::Reset, Ok(TestReport::from_panic(run, e))),
+				}
+			})
+			.await;
+
+		let res = match res {
+			Ok(Ok(x)) => x,
+			Ok(Err(e)) | Err(e) => {
+				eprintln!("Task returned an error!: {e}");
+				return;
+			}
 		};
 
-		let report = TestReport::from_test_result(id, &set, res, &ds, extra_name).await;
-		sender.send((run_id, report)).expect("report channel quit early");
+		report_sender.send(res).expect("Channel closed too early");
+	};
+
+	if sequential {
+		schedular.spawn_sequential(future).await
+	} else {
+		schedular.spawn(future).await
 	}
 }
 
-pub async fn test_task(context: TestTaskContext) -> Result<()> {
-	let config = &context.testset[context.id].config;
-	let capabilities = core_capabilities_from_test_config(config);
-	let backend_str = context.backend.to_string();
+/// Checks for keys retained in the datastore after clean up which should not be there.
+async fn check_retained_keys(dbs: &Datastore) -> Result<Vec<Vec<u8>>> {
+	const ALLOWED_KEY_PREFIXES: &[&[u8]] = &[b"/!ni", b"/!nh", b"/!nd", b"/!ic"];
 
-	let context_timeout_duration = config
-		.env
-		.as_ref()
-		.map(|x| {
-			x.context_timeout(Some(&backend_str))
-				.map(Duration::from_millis)
-				.unwrap_or(Duration::MAX)
-		})
-		.unwrap_or(Duration::from_secs(3));
-
-	let backend = context.backend;
-	let strategy = context.strategy.clone();
-	let res = context
-		.ds
-		.with(
-			move |ds| {
-				ds.with_capabilities(capabilities)
-					.with_query_timeout(Some(context_timeout_duration))
-			},
-			async |ds| {
-				run_test_with_dbs(context.id, &context.testset, ds, backend, strategy.clone()).await
-			},
+	let txn = dbs
+		.transaction(
+			surrealdb_core::kvs::TransactionType::Read,
+			surrealdb_core::kvs::LockType::Pessimistic,
 		)
-		.await;
-
-	let res = match res {
-		Ok(x) => x?,
-		Err(PermitError::Other(e)) => return Err(e),
-		Err(PermitError::Panic(e)) => TestTaskResult::Panicked(e),
-	};
-
-	let extra_name = Some(format!("[{}]", context.strategy));
-	context
-		.result
-		.send((context.run_id, context.id, res, extra_name))
-		.await
-		.expect("result channel quit early");
-
-	Ok(())
+		.await?;
+	let res = txn.keys(vec![0]..vec![0xff], 1000, 0, None).await?;
+	txn.cancel().await?;
+	Ok(res
+		.into_iter()
+		.filter(|key| !ALLOWED_KEY_PREFIXES.iter().any(|allowed| key.starts_with(allowed)))
+		.collect())
 }
 
 async fn run_test_with_dbs(
-	id: TestId,
-	set: &TestSet,
-	dbs: &mut Datastore,
-	backend: Backend,
-	strategy: NewPlannerStrategyConfig,
+	run: &TestRun<TestRunConfig>,
+	dbs: &Datastore,
 ) -> Result<TestTaskResult> {
-	let config = &set[id].config;
-	let backend_str = backend.to_string();
+	let config = &run.case.test.config.parsed;
 
-	let mut session = util::session_from_test_config(config, strategy.into());
+	let mut session = util::session_from_test_config(config, run.config.planner_config.into());
 
 	if let Some(ref x) = session.ns {
 		let db = session.db.take();
@@ -448,34 +375,17 @@ async fn run_test_with_dbs(
 		dbs.execute(&format!("DEFINE DATABASE `{x}`"), &session, None).await?;
 	}
 
-	let timeout_duration = config
-		.env
-		.as_ref()
-		.map(|x| x.timeout(Some(&backend_str)).map(Duration::from_millis).unwrap_or(Duration::MAX))
-		.unwrap_or(Duration::from_secs(2));
+	let timeout_duration = config.env.timeout.into_value(ENV_DEFAULT_TIMEOUT).unwrap_or(u64::MAX);
+	let timeout_duration = Duration::from_millis(timeout_duration);
 
 	let mut import_session = Session::owner();
 	dbs.process_use(None, &mut import_session, session.ns.clone(), session.db.clone()).await?;
 
-	for import in set[id].config.imports() {
-		let Some(test) = set.find_all(import) else {
-			return Ok(TestTaskResult::Import(
-				import.to_string(),
-				"Could not find import.".to_string(),
-			));
-		};
-
-		let Ok(source) = str::from_utf8(&set[test].source) else {
-			return Ok(TestTaskResult::Import(
-				import.to_string(),
-				"Import file was not valid utf-8.".to_string(),
-			));
-		};
-
-		match dbs.execute(source, &import_session, None).await {
+	for import in run.case.imports.iter() {
+		match dbs.execute(&import.source, &import_session, None).await {
 			Err(e) => {
 				return Ok(TestTaskResult::Import(
-					import.to_string(),
+					import.origin.path.clone(),
 					format!("Failed to run import: `{e}`"),
 				));
 			}
@@ -487,7 +397,7 @@ async fn run_test_with_dbs(
 				for result in &results {
 					if let Err(ref e) = result.result {
 						return Ok(TestTaskResult::Import(
-							import.to_string(),
+							import.origin.path.clone(),
 							format!("Import produced an error: `{e}`"),
 						));
 					}
@@ -496,25 +406,22 @@ async fn run_test_with_dbs(
 		}
 	}
 
-	if let Some(signup_vars) = config.env.as_ref().and_then(|x| x.signup.as_ref()) {
-		if let Err(e) =
+	if let Some(signup_vars) = config.env.signup.as_ref()
+		&& let Err(e) =
 			surrealdb_core::iam::signup::signup(dbs, &mut session, signup_vars.0.clone().into())
 				.await
-		{
-			return Ok(TestTaskResult::SignupError(e));
-		}
+	{
+		return Ok(TestTaskResult::SignupError(e));
 	}
 
-	if let Some(signin_vars) = config.env.as_ref().and_then(|x| x.signin.as_ref()) {
-		if let Err(e) =
+	if let Some(signin_vars) = config.env.signin.as_ref()
+		&& let Err(e) =
 			surrealdb_core::iam::signin::signin(dbs, &mut session, signin_vars.0.clone().into())
 				.await
-		{
-			return Ok(TestTaskResult::SigninError(e));
-		}
+	{
+		return Ok(TestTaskResult::SigninError(e));
 	}
 
-	let source = &set[id].source;
 	let settings = syn::parser::ParserSettings {
 		files_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
 		surrealism_enabled: dbs
@@ -523,6 +430,7 @@ async fn run_test_with_dbs(
 		..Default::default()
 	};
 
+	let source = &run.case.test.source.as_bytes();
 	let mut parser = syn::parser::Parser::new_with_settings(source, settings);
 	let mut stack = reblessive::Stack::new();
 
@@ -536,43 +444,9 @@ async fn run_test_with_dbs(
 		Err(e) => return Ok(TestTaskResult::ParserError(e.render_on_bytes(source))),
 	};
 
-	let mut process_future = Box::pin(dbs.process(query, &session, None));
-	let timeout_future = time::sleep(timeout_duration);
-
-	let mut did_timeout = false;
-	let result = select! {
-		_ = timeout_future => {
-			did_timeout = true;
-
-
-			// Ideally still need to finish the future cause it might panic otherwise.
-			select!{
-				_ = time::sleep(Duration::from_secs(10)) => {
-					// Test doesn't want to quit. Time to force it with a bit of hack to avoid a
-					// panic
-					std::thread::scope(|scope|{
-						scope.spawn(move ||{
-							std::mem::drop(process_future)
-						});
-					});
-				}
-			   _ = process_future.as_mut() => {}
-			}
-
-			None
-		}
-		x = process_future.as_mut() => {
-			Some(x)
-		}
-	};
-
-	if did_timeout {
-		return Ok(TestTaskResult::Timeout);
-	};
-
-	let Some(result) = result else {
-		unreachable!()
-	};
+	let start = Instant::now();
+	let result = dbs.process(query, &session, None).await;
+	let did_timeout = start.elapsed() > timeout_duration;
 
 	if let Some(ref ns) = session.ns {
 		if let Some(ref db) = session.db {
@@ -600,10 +474,22 @@ async fn run_test_with_dbs(
 		.context("failed to remove root config")?;
 	}
 
+	// If the test was not a clean test it should ensure that the datastore is reset for the next
+	// test.
+	if !run.case.test.config.parsed.env.clean {
+		let keys = check_retained_keys(dbs).await?;
+		if !keys.is_empty() {
+			return Ok(TestTaskResult::BadCleanup(keys));
+		}
+	}
+
 	match result {
 		Ok(x) => {
 			let x = x.into_iter().map(|x| x.result.map_err(|e| e.to_string())).collect();
-			Ok(TestTaskResult::Results(x))
+			Ok(TestTaskResult::Results {
+				did_timeout,
+				res: x,
+			})
 		}
 		Err(e) => Ok(TestTaskResult::RunningError(anyhow::anyhow!(e))),
 	}

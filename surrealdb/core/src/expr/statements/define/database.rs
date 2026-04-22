@@ -62,7 +62,7 @@ impl DefineDatabaseStatement {
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "database name").await?;
 
 		// Check if the definition exists
-		let database_id = if let Some(db) = txn.get_db_by_name(ns, &name).await? {
+		let database_id = if let Some(db) = txn.get_db_by_name(ns, &name, None).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {

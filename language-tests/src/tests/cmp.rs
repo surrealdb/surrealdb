@@ -195,7 +195,7 @@ impl RoughlyEq for Uuid {
 /// Tolerance for floating point comparisons.
 const EPSILON: f64 = 1e-15;
 /// Tolerance for decimal comparisons (1e-15).
-const EPSILON_DECIMAL: LazyLock<Decimal> = LazyLock::new(|| Decimal::try_new(1, 15).unwrap());
+static EPSILON_DECIMAL: LazyLock<Decimal> = LazyLock::new(|| Decimal::try_new(1, 15).unwrap());
 
 impl RoughlyEq for f64 {
 	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {

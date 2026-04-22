@@ -14,6 +14,9 @@ error = "The query was not executed due to a failed transaction"
 [[test.results]]
 error = "An error occurred: there was an error"
 
+[[test.results]]
+error = "Cannot COMMIT: the transaction was aborted due to a prior error"
+
 [env]
 namespace = "test"
 database = "test"

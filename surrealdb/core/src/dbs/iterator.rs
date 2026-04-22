@@ -283,9 +283,18 @@ impl Iterator {
 		table: &TableName,
 	) -> Result<()> {
 		let tb = if stm_ctx.stm.requires_table_existence() {
-			ctx.tx().expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, table).await?
+			ctx.tx()
+				.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, table, opt.version)
+				.await?
+				.ok_or_else(|| {
+					anyhow::anyhow!(Error::TbNotFound {
+						name: table.to_owned(),
+					})
+				})?
 		} else {
-			ctx.tx().get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, table).await?
+			ctx.tx()
+				.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, table, opt.version)
+				.await?
 		};
 
 		let fields = ctx
@@ -330,10 +339,23 @@ impl Iterator {
 		rid: RecordId,
 	) -> Result<()> {
 		let tb = if stm_ctx.stm.requires_table_existence() {
-			ctx.tx().expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table).await?
+			ctx.tx()
+				.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table, opt.version)
+				.await?
+				.ok_or_else(|| {
+					anyhow::anyhow!(Error::TbNotFound {
+						name: rid.table.clone(),
+					})
+				})?
 		} else {
 			ctx.tx()
-				.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &rid.table)
+				.get_or_add_tb(
+					Some(ctx),
+					&doc_ctx.ns.name,
+					&doc_ctx.db.name,
+					&rid.table,
+					opt.version,
+				)
 				.await?
 		};
 		let fields = ctx
@@ -381,12 +403,23 @@ impl Iterator {
 		// For deferable statements (CREATE, UPSERT without condition), auto-create the table
 		let tb = if stm_ctx.stm.is_deferable() {
 			ctx.tx()
-				.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, mock.table())
+				.get_or_add_tb(
+					Some(ctx),
+					&doc_ctx.ns.name,
+					&doc_ctx.db.name,
+					mock.table(),
+					opt.version,
+				)
 				.await?
 		} else {
 			ctx.tx()
-				.expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, mock.table())
+				.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, mock.table(), opt.version)
 				.await?
+				.ok_or_else(|| {
+					anyhow::anyhow!(Error::TbNotFound {
+						name: mock.table().to_owned(),
+					})
+				})?
 		};
 		let fields = ctx
 			.tx()
@@ -453,9 +486,22 @@ impl Iterator {
 
 		let txn = ctx.tx();
 		let tb = if stm.requires_table_existence() {
-			txn.expect_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &from.table).await?
+			txn.get_tb(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &from.table, opt.version)
+				.await?
+				.ok_or_else(|| {
+					anyhow::anyhow!(Error::TbNotFound {
+						name: from.table.clone(),
+					})
+				})?
 		} else {
-			txn.get_or_add_tb(Some(ctx), &doc_ctx.ns.name, &doc_ctx.db.name, &from.table).await?
+			txn.get_or_add_tb(
+				Some(ctx),
+				&doc_ctx.ns.name,
+				&doc_ctx.db.name,
+				&from.table,
+				opt.version,
+			)
+			.await?
 		};
 		let fields = txn
 			.all_tb_fields(
@@ -607,26 +653,10 @@ impl Iterator {
 					self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, table_name).await?
 				}
 				Expr::Idiom(x) => {
-					// match against what previously would be an edge.
-					if x.len() != 2 {
-						return self
-							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v)
-							.await;
-					}
-
-					let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
-						return self
-							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v)
-							.await;
-					};
-
-					let Part::Lookup(ref lookup) = x[0] else {
-						return self
-							.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v)
-							.await;
-					};
-
-					if lookup.alias.is_none()
+					if x.len() == 2
+						&& let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0]
+						&& let Part::Lookup(ref lookup) = x[1]
+						&& lookup.alias.is_none()
 						&& lookup.cond.is_none()
 						&& lookup.group.is_none()
 						&& lookup.limit.is_none()
@@ -635,33 +665,29 @@ impl Iterator {
 						&& lookup.start.is_none()
 						&& lookup.expr.is_none()
 					{
-						// TODO: Do we support `RETURN a:b` here? What do we do when it is not of
-						// the right type?
 						let from = match from.compute(stk, ctx, opt, doc).await {
 							Ok(x) => x,
 							Err(ControlFlow::Err(e)) => return Err(e),
 							Err(_) => bail!(Error::InvalidControlFlow),
-							//
 						};
 						let mut what = Vec::new();
 						for s in lookup.what.iter() {
 							what.push(s.compute(stk, ctx, opt, doc).await?);
 						}
-						// idiom matches the Edges pattern.
-						return self
-							.prepare_lookup(
-								ctx,
-								opt,
-								stm_ctx.stm,
-								doc_ctx,
-								from,
-								lookup.kind.clone(),
-								what,
-							)
-							.await;
+						self.prepare_lookup(
+							ctx,
+							opt,
+							stm_ctx.stm,
+							doc_ctx,
+							from,
+							lookup.kind.clone(),
+							what,
+						)
+						.await?;
+					} else {
+						self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v)
+							.await?;
 					}
-
-					self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v).await?
 				}
 				v => {
 					self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, v).await?
@@ -684,7 +710,7 @@ impl Iterator {
 		// Log the statement
 		trace!(target: TARGET, statement = %stm.to_sql(), "Iterating statement");
 		// Enable context override
-		let mut cancel_ctx = Context::new(ctx);
+		let mut cancel_ctx = Context::new_child(ctx);
 		self.canceller = cancel_ctx.add_cancel();
 		let mut cancel_ctx = cancel_ctx.freeze();
 		// Process the query LIMIT clause
@@ -759,6 +785,17 @@ impl Iterator {
 			self.results.sort().await?;
 			// Process any START & LIMIT clause
 			self.results.start_limit(self.start_skip, self.start, self.limit).await?;
+			// Apply deferred SELECT VALUE projection. When ORDER BY is
+			// present with SELECT VALUE, field projection is deferred so
+			// that sorting can access document fields. Now that sorting
+			// and pagination are complete, project to the VALUE result.
+			if stm.order().is_some()
+				&& stm.group().is_none()
+				&& plan.explanation.is_none()
+				&& let Some(Fields::Value(selector)) = stm.expr()
+			{
+				self.results.project_value(stk, ctx, opt, selector, stm.omit()).await?;
+			}
 			// Process any FETCH clause
 			if let Some(e) = &mut plan.explanation {
 				e.add_fetch(self.results.len());

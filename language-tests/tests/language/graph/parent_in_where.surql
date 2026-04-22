@@ -57,8 +57,7 @@ value = "[{ id: person:alice, self_referencing: [] }, { id: person:bob, self_ref
 value = "[{ alice_knows_me: false, id: person:alice }, { alice_knows_me: true, id: person:bob }, { alice_knows_me: false, id: person:carol }]"
 
 [[test.results]]
-value = "[{ id: person:alice, sub: { edges: [], outer_id: person:alice } }, { id: person:bob, sub: { edges: [knows:x], outer_id: person:bob } }, { id: person:carol, sub: { edges: [], outer_id: person:carol } }]"
-skip-record-id-key = true
+value = "[{ id: person:alice, sub: { edges: [], outer_id: person:alice } }, { id: person:bob, sub: { edges: [], outer_id: person:bob } }, { id: person:carol, sub: { edges: [], outer_id: person:carol } }]"
 
 [[test.results]]
 value = "[{ distant_contacts: ['Bob'], id: person:alice, name: 'Alice' }, { distant_contacts: ['Carol'], id: person:bob, name: 'Bob' }, { distant_contacts: ['Alice'], id: person:carol, name: 'Carol' }]"
@@ -105,7 +104,9 @@ SELECT
   !!(person:alice->knows[WHERE out = $parent.id]) AS alice_knows_me
 FROM person ORDER BY id;
 
--- $parent in graph WHERE inside a subquery projection
+-- $parent in graph WHERE inside a subquery (FROM ONLY true).
+-- $parent.id in the direct projection = outer row (subquery parent).
+-- $parent.id in the graph WHERE = inner row (true), so edges is always empty.
 SELECT
   id,
   (SELECT $parent.id AS outer_id, person:alice->knows[WHERE out = $parent.id] AS edges FROM ONLY true) AS sub

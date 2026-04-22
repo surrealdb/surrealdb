@@ -82,7 +82,7 @@ impl HnswElements {
 		ser_vec: &SerializedVector,
 	) -> Result<SharedVector> {
 		let key = self.ikb.new_he_key(id);
-		tx.set(&key, ser_vec, None).await?;
+		tx.set(&key, ser_vec).await?;
 		let pt: SharedVector = vec.into();
 		self.vector_cache
 			.insert(self.ikb.ns(), self.ikb.db(), self.table_id, self.index_id, id, pt.clone())

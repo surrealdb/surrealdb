@@ -22,7 +22,7 @@ impl RemoveParamStatement {
 		let txn = ctx.tx();
 		// Get the definition
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let pa = match txn.get_db_param(ns, db, &self.name).await {
+		let pa = match txn.get_db_param(ns, db, &self.name, None).await {
 			Ok(x) => x,
 			Err(e) => {
 				if self.if_exists && matches!(e.downcast_ref(), Some(Error::PaNotFound { .. })) {

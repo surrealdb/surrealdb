@@ -15,7 +15,7 @@ use std::time::Duration;
 #[allow(unused_imports)]
 use anyhow::bail;
 use anyhow::{Context as _, Result, ensure};
-use async_channel::{Receiver, Sender};
+use async_channel::Sender;
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
 use rand::{Rng, thread_rng};
@@ -26,7 +26,7 @@ use tokio::spawn;
 use tokio::sync::Notify;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
-use tokio::time::{Instant, sleep};
+use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, trace, warn};
 use uuid::Uuid;
@@ -40,7 +40,6 @@ use crate::api::err::ApiError;
 use crate::api::invocation::process_api_request;
 use crate::api::request::ApiRequest;
 use crate::api::response::ApiResponse;
-use crate::buc::BucketStoreProvider;
 use crate::buc::manager::BucketsManager;
 use crate::catalog::providers::{
 	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider,
@@ -62,6 +61,8 @@ use crate::err::Error;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
 use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};
+#[cfg(feature = "http")]
+use crate::http::HttpClient;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
@@ -89,11 +90,10 @@ use crate::types::{PublicNotification, PublicValue, PublicVariables};
 use crate::val::convert_value_to_public_value;
 use crate::{CommunityComposer, syn};
 
-const TARGET: &str = "surrealdb::core::kvs::ds";
+mod builder;
+pub use builder::Builder;
 
-/// If there are an infinite number of heartbeats, then we want to go
-/// batch-by-batch spread over several checks
-const LQ_CHANNEL_SIZE: usize = 15_000;
+const TARGET: &str = "surrealdb::core::kvs::ds";
 
 /// The role assigned to the initial user created when starting the server with
 /// credentials for the first time
@@ -116,7 +116,7 @@ pub struct Datastore {
 	/// The security and feature capabilities for this datastore.
 	capabilities: Arc<Capabilities>,
 	// Whether this datastore enables live query notifications to subscribers.
-	notification_channel: Option<(Sender<PublicNotification>, Receiver<PublicNotification>)>,
+	notification_channel: Option<Sender<PublicNotification>>,
 	// The index store cache
 	index_stores: IndexStores,
 	// The cross transaction cache
@@ -136,8 +136,15 @@ pub struct Datastore {
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Arc<SurrealismCache>,
+	/// When `true`, surrealism modules are loaded lazily on first use
+	/// instead of being eagerly compiled at startup.
+	#[cfg(feature = "surrealism")]
+	lazy_surrealism: bool,
 	// Async event processing trigger
 	async_event_trigger: Arc<Notify>,
+	// Http client used to make requests.
+	#[cfg(feature = "http")]
+	http_client: Arc<HttpClient>,
 }
 
 /// Represents a collection of metrics for a specific datastore flavor.
@@ -584,6 +591,9 @@ impl Display for Datastore {
 }
 
 impl Datastore {
+	pub fn builder() -> Builder {
+		Builder::new()
+	}
 	/// Creates a new datastore instance
 	///
 	/// # Examples
@@ -622,63 +632,7 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Self> {
-		Self::new_with_factory(CommunityComposer(), path, CancellationToken::new()).await
-	}
-
-	/// Creates a new datastore instance with a custom transaction builder factory.
-	///
-	/// This allows embedders to provide their own factory implementation for custom
-	/// backend selection or configuration.
-	///
-	/// # Parameters
-	/// - `factory`: Transaction builder factory for backend selection
-	/// - `path`: Database path (e.g., "memory", "surrealkv://path", "tikv://host:port")
-	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
-	///
-	/// # Generic parameters
-	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-	pub async fn new_with_factory<F: TransactionBuilderFactory + BucketStoreProvider + 'static>(
-		composer: F,
-		path: &str,
-		canceller: CancellationToken,
-	) -> Result<Self> {
-		// Initiate the desired datastore
-		let builder = composer.new_transaction_builder(path, canceller).await?;
-		//
-		let buckets = BucketsManager::new(Arc::new(composer));
-		// Set the properties on the datastore
-		Self::new_with_builder(builder, buckets)
-	}
-
-	pub(crate) fn new_with_builder(
-		builder: Box<dyn TransactionBuilder>,
-		buckets: BucketsManager,
-	) -> Result<Self> {
-		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(async_event_trigger.clone(), builder);
-		let id = Uuid::new_v4();
-		Ok(Self {
-			id,
-			transaction_factory: tf.clone(),
-			auth_enabled: false,
-			dynamic_configuration: DynamicConfiguration::default(),
-			slow_log: None,
-			transaction_timeout: None,
-			notification_channel: None,
-			capabilities: Arc::new(Capabilities::default()),
-			index_stores: IndexStores::default(),
-			index_builder: IndexBuilder::new(tf.clone()),
-			#[cfg(feature = "jwks")]
-			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
-			#[cfg(storage)]
-			temporary_directory: None,
-			cache: Arc::new(DatastoreCache::new()),
-			buckets,
-			sequences: Sequences::new(tf, id),
-			#[cfg(feature = "surrealism")]
-			surrealism_cache: Arc::new(SurrealismCache::new()),
-			async_event_trigger,
-		})
+		Builder::new().build_with_path(path).await
 	}
 
 	/// Registers metrics for the current datastore flavor if supported.
@@ -705,7 +659,7 @@ impl Datastore {
 			dynamic_configuration: DynamicConfiguration::default(),
 			slow_log: self.slow_log,
 			transaction_timeout: self.transaction_timeout,
-			capabilities: self.capabilities,
+			capabilities: self.capabilities.clone(),
 			notification_channel: self.notification_channel,
 			index_stores: Default::default(),
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
@@ -719,44 +673,17 @@ impl Datastore {
 			transaction_factory: self.transaction_factory,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
+			#[cfg(feature = "surrealism")]
+			lazy_surrealism: self.lazy_surrealism,
 			async_event_trigger: self.async_event_trigger,
+			#[cfg(feature = "http")]
+			http_client: self.http_client,
 		}
 	}
 
 	/// Set the node id for this datastore.
 	pub fn with_node_id(mut self, id: Uuid) -> Self {
 		self.id = id;
-		self
-	}
-
-	/// Specify whether this datastore should enable live query notifications
-	pub fn with_notifications(mut self) -> Self {
-		self.notification_channel = Some(async_channel::bounded(LQ_CHANNEL_SIZE));
-		self
-	}
-
-	/// Set a global query timeout for this Datastore
-	pub fn with_query_timeout(self, duration: Option<Duration>) -> Self {
-		self.dynamic_configuration.set_query_timeout(duration);
-		self
-	}
-
-	/// Set a global slow log configuration
-	///
-	/// Parameters:
-	/// - `duration`: Minimum execution time for a statement to be considered "slow". When `None`,
-	///   slow logging is disabled.
-	/// - `param_allow`: If non-empty, only parameters with names present in this list will be
-	///   logged when a query is slow.
-	/// - `param_deny`: Parameter names that should never be logged. This list always takes
-	///   precedence over `param_allow`.
-	pub fn with_slow_log(
-		mut self,
-		duration: Option<Duration>,
-		param_allow: Vec<String>,
-		param_deny: Vec<String>,
-	) -> Self {
-		self.slow_log = duration.map(|d| SlowLog::new(d, param_allow, param_deny));
 		self
 	}
 
@@ -771,23 +698,25 @@ impl Datastore {
 		self.transaction_timeout
 	}
 
-	/// Set whether authentication is enabled for this Datastore
-	pub fn with_auth_enabled(mut self, enabled: bool) -> Self {
-		self.auth_enabled = enabled;
-		self
-	}
-
-	/// Set specific capabilities for this Datastore
-	pub fn with_capabilities(mut self, caps: Capabilities) -> Self {
-		self.capabilities = Arc::new(caps);
-		self
-	}
-
 	#[cfg(storage)]
 	/// Set a temporary directory for ordering of large result sets
 	pub fn with_temporary_directory(mut self, path: Option<PathBuf>) -> Self {
 		self.temporary_directory = path.map(Arc::new);
 		self
+	}
+
+	/// Configure whether surrealism modules are loaded lazily on first use
+	/// rather than eagerly at startup.
+	#[cfg(feature = "surrealism")]
+	pub fn with_lazy_surrealism(mut self, lazy: bool) -> Self {
+		self.lazy_surrealism = lazy;
+		self
+	}
+
+	/// Returns `true` if surrealism modules are loaded lazily.
+	#[cfg(feature = "surrealism")]
+	pub fn is_lazy_surrealism(&self) -> bool {
+		self.lazy_surrealism
 	}
 
 	pub fn index_store(&self) -> &IndexStores {
@@ -850,7 +779,7 @@ impl Datastore {
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn check_version(&self) -> Result<(MajorVersion, bool)> {
 		// Retry because concurrent instances may conflict when writing the version key
-		let (version, is_new) = Self::retry(Duration::from_secs(60), || self.get_version()).await?;
+		let (version, is_new) = Self::retry("Check version", || self.get_version()).await?;
 		// Check we are running the latest version
 		if !version.is_latest() {
 			bail!(Error::OutdatedStorageVersion {
@@ -920,7 +849,7 @@ impl Datastore {
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn initialise_credentials(&self, user: &str, pass: &str) -> Result<()> {
 		// Retry because concurrent instances may conflict when creating the root user
-		Self::retry(Duration::from_secs(60), || self.initialise_credentials_attempt(user, pass))
+		Self::retry("Initialise credentials", || self.initialise_credentials_attempt(user, pass))
 			.await
 	}
 
@@ -930,7 +859,7 @@ impl Datastore {
 		// Start a new writeable transaction
 		let txn = self.transaction(Write, Optimistic).await?.enclose();
 		// Fetch the root users from the storage
-		let users = catch!(txn, txn.all_root_users().await);
+		let users = catch!(txn, txn.all_root_users(None).await);
 		// Process credentials, depending on existing users
 		if users.is_empty() {
 			// Display information in the logs
@@ -944,7 +873,7 @@ impl Datastore {
 			);
 			let opt = Options::new(self.id, self.dynamic_configuration.clone())
 				.with_auth(Arc::new(Auth::for_root(Role::Owner)));
-			let mut ctx = Context::default();
+			let mut ctx = self.setup_ctx()?;
 			ctx.set_transaction(txn.clone());
 			let ctx = ctx.freeze();
 			let mut stack = TreeStack::new();
@@ -1009,6 +938,176 @@ impl Datastore {
 	}
 
 	// --------------------------------------------------
+	// Surrealism eager loading
+	// --------------------------------------------------
+
+	/// Pre-load all Surrealism module runtimes into the cache so that
+	/// subsequent query planning can resolve function metadata (e.g. the
+	/// `writeable` flag) without triggering on-demand compilation.
+	///
+	/// Modules are loaded in parallel using a `JoinSet`. Any individual
+	/// failure is logged but does not abort the overall loading process.
+	#[cfg(feature = "surrealism")]
+	pub async fn eager_load_surrealism_modules(&self) {
+		use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
+		use crate::surrealism::cache::SurrealismCacheLookup;
+
+		let txn = match self.transaction(Read, Optimistic).await {
+			Ok(txn) => Arc::new(txn),
+			Err(e) => {
+				warn!(target: TARGET, error = %e, "Surrealism eager load: failed to open transaction");
+				return;
+			}
+		};
+
+		let mut ctx = match self.setup_ctx() {
+			Ok(ctx) => ctx,
+			Err(e) => {
+				warn!(target: TARGET, error = %e, "Surrealism eager load: failed to set up context");
+				return;
+			}
+		};
+		ctx.set_transaction(txn.clone());
+		let ctx = ctx.freeze();
+
+		let nss = match txn.all_ns(None).await {
+			Ok(nss) => nss,
+			Err(e) => {
+				warn!(target: TARGET, error = %e, "Surrealism eager load: failed to list namespaces");
+				return;
+			}
+		};
+
+		// Collect all module lookups first, then load in parallel.
+		struct ModuleLookup {
+			ns_id: crate::catalog::NamespaceId,
+			db_id: crate::catalog::DatabaseId,
+			bucket: String,
+			key: String,
+			display_name: String,
+		}
+
+		let mut lookups = Vec::new();
+		for ns in nss.iter() {
+			let dbs = match txn.all_db(ns.namespace_id, None).await {
+				Ok(dbs) => dbs,
+				Err(e) => {
+					warn!(
+						target: TARGET,
+						error = %e, ns = %ns.name,
+						"Surrealism eager load: failed to list databases"
+					);
+					continue;
+				}
+			};
+			for db in dbs.iter() {
+				let modules = match txn.all_db_modules(ns.namespace_id, db.database_id, None).await
+				{
+					Ok(m) => m,
+					Err(e) => {
+						warn!(
+							target: TARGET,
+							error = %e, ns = %ns.name, db = %db.name,
+							"Surrealism eager load: failed to list modules"
+						);
+						continue;
+					}
+				};
+				for md in modules.iter() {
+					if let crate::catalog::ModuleExecutable::Surrealism(s) = &md.executable {
+						lookups.push(ModuleLookup {
+							ns_id: ns.namespace_id,
+							db_id: db.database_id,
+							bucket: s.bucket.clone(),
+							key: s.key.clone(),
+							display_name: md
+								.name
+								.clone()
+								.unwrap_or_else(|| "<unnamed>".to_string()),
+						});
+					}
+				}
+			}
+		}
+
+		if lookups.is_empty() {
+			debug!(target: TARGET, "Surrealism eager load: no modules to load");
+			return;
+		}
+
+		let total = lookups.len();
+		debug!(target: TARGET, count = total, "Surrealism eager load: loading modules");
+
+		let concurrency =
+			std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8).clamp(2, 16);
+		let load_sem = std::sync::Arc::new(tokio::sync::Semaphore::new(concurrency));
+
+		let mut join_set = tokio::task::JoinSet::new();
+		for lookup in lookups {
+			let ctx = ctx.clone();
+			let load_sem = load_sem.clone();
+			join_set.spawn(async move {
+				let _permit = load_sem
+					.acquire_owned()
+					.await
+					.expect("Surrealism eager load semaphore must not be closed");
+				let cache_lookup = SurrealismCacheLookup::File(
+					&lookup.ns_id,
+					&lookup.db_id,
+					&lookup.bucket,
+					&lookup.key,
+				);
+				match ctx.get_surrealism_runtime(cache_lookup).await {
+					Ok(_) => {
+						debug!(
+							target: TARGET,
+							module = %lookup.display_name,
+							"Surrealism eager load: loaded module"
+						);
+						true
+					}
+					Err(e) => {
+						warn!(
+							target: TARGET,
+							module = %lookup.display_name,
+							error = %e,
+							"Surrealism eager load: failed to load module"
+						);
+						false
+					}
+				}
+			});
+		}
+
+		let mut loaded = 0usize;
+		let mut failed = 0usize;
+		while let Some(result) = join_set.join_next().await {
+			match result {
+				Ok(true) => loaded += 1,
+				Ok(false) => failed += 1,
+				Err(e) => {
+					warn!(target: TARGET, error = %e, "Surrealism eager load: task panicked");
+					failed += 1;
+				}
+			}
+		}
+
+		if failed > 0 {
+			warn!(
+				target: TARGET,
+				loaded, failed, total,
+				"Surrealism eager load: completed with failures"
+			);
+		} else {
+			tracing::info!(
+				target: TARGET,
+				loaded, total,
+				"Surrealism eager load: all modules loaded"
+			);
+		}
+	}
+
+	// --------------------------------------------------
 	// Node functions
 	// --------------------------------------------------
 
@@ -1017,62 +1116,88 @@ impl Datastore {
 	pub async fn bootstrap(&self) -> Result<()> {
 		// Each bootstrap step is retried independently, because concurrent instances
 		// writing to the same cluster metadata keys may cause transaction conflicts.
-		let time_out = Duration::from_secs(60);
 		// Insert this node in the cluster
-		Self::retry(time_out, || self.insert_node()).await?;
+		Self::retry("Insert node", || self.insert_node()).await?;
 		// Mark inactive nodes as archived
-		Self::retry(time_out, || self.expire_nodes()).await?;
+		Self::retry("Expire nodes", || self.expire_nodes()).await?;
 		// Remove archived nodes
-		Self::retry(time_out, || self.remove_nodes()).await?;
+		Self::retry("Remove nodes", || self.remove_nodes()).await?;
 		// Everything ok
 		Ok(())
 	}
 
-	/// Retries an async operation until it succeeds or `timeout` elapses.
+	/// Retries an async operation until it succeeds or the global timeout elapses.
 	///
 	/// Only [`TransactionConflict`](crate::kvs::Error::TransactionConflict)
 	/// errors are retried; any other error is returned immediately to the
-	/// caller. On each retryable failure a randomised delay (0–10 s) is
+	/// caller. On each retryable failure a randomized delay (0–10 s) is
 	/// applied before the next attempt, adding jitter to reduce repeated
 	/// collisions when multiple instances start concurrently against the
 	/// same storage backend.
 	///
-	/// The timeout is checked only after a *failed* attempt; a successful
+	/// The global timeout is checked only after a *failed* attempt; a successful
 	/// result is always returned immediately, even if the elapsed time
-	/// exceeds the budget. This means the total wall-clock time can exceed
-	/// `timeout` by up to one attempt duration plus the preceding back-off.
-	/// If no attempt succeeds within the budget, the conflict error from
-	/// the last failed attempt is surfaced.
-	async fn retry<F, Fut, R>(timeout: Duration, func: F) -> Result<R>
+	/// exceeds the budget. Each attempt's timeout is the lesser of its
+	/// natural timeout (10 s * attempt number) and the remaining global
+	/// budget, so total wall-clock time never significantly exceeds the
+	/// global timeout. If no attempt succeeds within the budget, an error
+	/// is returned.
+	async fn retry<F, Fut, R>(task: &str, func: F) -> Result<R>
 	where
 		F: Fn() -> Fut,
 		Fut: Future<Output = Result<R>>,
 	{
+		let global_timeout = Duration::from_secs(120);
+		let per_attempt_timeout = Duration::from_secs(10);
 		let time = Instant::now();
+		let mut last_error = None;
+		let mut attempt = 1;
 		loop {
-			match func().await {
-				Ok(result) => return Ok(result),
-				Err(e) => {
-					if let Some(crate::kvs::Error::TransactionConflict(_)) = e.downcast_ref() {
-						if time.elapsed() > timeout {
-							bail!(e);
+			// Cap each attempt to the remaining global budget
+			let remaining = global_timeout.saturating_sub(time.elapsed());
+			if remaining.is_zero() {
+				break;
+			}
+			let attempt_timeout = (per_attempt_timeout * attempt).min(remaining);
+			if let Ok(result) = timeout(attempt_timeout, func()).await {
+				match result {
+					Ok(result) => return Ok(result),
+					Err(e) => {
+						// Only retry on transaction conflict errors
+						if let Some(crate::kvs::Error::TransactionConflict(_)) = e.downcast_ref() {
+							last_error = Some(e);
+						} else {
+							return Err(e);
 						}
-						// Randomised back-off to stagger retries across competing instances
-						let tempo = Duration::from_secs(thread_rng().gen_range(0..10));
-						sleep(tempo).await;
-					} else {
-						return Err(e);
 					}
 				}
 			}
+			// Check if the global timeout has been exceeded
+			if time.elapsed() >= global_timeout {
+				break;
+			}
+			// Randomized back-off capped to the remaining budget
+			let remaining = global_timeout.saturating_sub(time.elapsed());
+			if remaining.is_zero() {
+				break;
+			}
+			let tempo = Duration::from_secs(thread_rng().gen_range(0..10)).min(remaining);
+			sleep(tempo).await;
+			attempt += 1;
 		}
+		if let Some(e) = last_error {
+			error!(target: TARGET, "{task} - All {attempt} attempts failed. Last error: {e}");
+		} else {
+			error!(target: TARGET, "{task} - All {attempt} attempts failed.");
+		}
+		bail!(Error::Internal(format!("{task} failed after {attempt} attempts due to timeout")));
 	}
 
 	/// Inserts a node for the first time into the cluster.
 	///
 	/// This function should be run at server or database startup.
 	///
-	/// This function ensures that this node is entered into the clister
+	/// This function ensures that this node is entered into the cluster
 	/// membership entries. This function must be run at server or database
 	/// startup, in order to write the initial entry and timestamp to storage.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
@@ -1086,7 +1211,7 @@ impl Datastore {
 		let key = crate::key::root::nd::Nd::new(self.id);
 		let now = self.clock_now();
 		let node = Node::new(self.id, now, false);
-		let res = run!(txn, txn.put(&key, &node, None).await);
+		let res = run!(txn, txn.put(&key, &node).await);
 		match res {
 			Err(e) => {
 				if matches!(
@@ -1287,7 +1412,7 @@ impl Datastore {
 		// Fetch all namespaces
 		let nss = {
 			let txn = self.transaction(Read, Optimistic).await?;
-			let res = catch!(txn, txn.all_ns().await);
+			let res = catch!(txn, txn.all_ns(None).await);
 			txn.cancel().await?;
 			res
 		};
@@ -1298,7 +1423,7 @@ impl Datastore {
 			// Fetch all databases
 			let dbs = {
 				let txn = self.transaction(Read, Optimistic).await?;
-				let res = catch!(txn, txn.all_db(ns.namespace_id).await);
+				let res = catch!(txn, txn.all_db(ns.namespace_id, None).await);
 				txn.cancel().await?;
 				res
 			};
@@ -1633,7 +1758,7 @@ impl Datastore {
 		txn: Arc<Transaction>,
 		ikb: &IndexKeyBase,
 	) -> Result<()> {
-		match txn.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index()).await? {
+		match txn.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None).await? {
 			Some(ix) if !ix.prepare_remove => match &ix.index {
 				Index::FullText(p) => {
 					IndexOperation::index_fulltext_compaction(&self.index_stores, ikb, &txn, p)
@@ -1830,6 +1955,9 @@ impl Datastore {
 				.map(crate::err::into_types_error)
 				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})?;
+
+		// Start an execution context
+		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
 
 		// Store the query variables
 		if let Some(vars) = vars {
@@ -2036,17 +2164,13 @@ impl Datastore {
 		// Create a new query options
 		let opt = self.setup_options(sess);
 		// Create a default context
-		let mut ctx = Context::default();
-		// Set context capabilities
-		ctx.add_capabilities(self.capabilities.clone());
+		let mut ctx = self.setup_ctx()?;
 		// Set the global query timeout
 		if let Some(timeout) = self.dynamic_configuration.get_query_timeout() {
 			ctx.add_timeout(timeout)?;
 		}
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
+		ctx.add_notifications(self.notification_channel.as_ref());
 
 		let txn_type = if val.read_only() {
 			TransactionType::Read
@@ -2080,30 +2204,6 @@ impl Datastore {
 		};
 		// Return result
 		convert_value_to_public_value(res?)
-	}
-
-	/// Subscribe to live notifications
-	///
-	/// ```rust,no_run
-	/// use surrealdb_core::kvs::Datastore;
-	/// use surrealdb_core::dbs::Session;
-	/// use anyhow::Error;
-	///
-	/// #[tokio::main]
-	/// async fn main() -> Result<(),Error> {
-	///     let ds = Datastore::new("memory").await?.with_notifications();
-	///     let ses = Session::owner();
-	/// 	if let Some(channel) = ds.notifications() {
-	///     	while let Ok(v) = channel.recv().await {
-	///     	    println!("Received notification: {v:?}");
-	///     	}
-	/// 	}
-	///     Ok(())
-	/// }
-	/// ```
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub fn notifications(&self) -> Option<Receiver<PublicNotification>> {
-		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
 	/// Performs a database import from SQL
@@ -2194,6 +2294,8 @@ impl Datastore {
 			self.index_builder.clone(),
 			self.sequences.clone(),
 			self.cache.clone(),
+			#[cfg(feature = "http")]
+			self.http_client.clone(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
@@ -2201,9 +2303,7 @@ impl Datastore {
 			self.surrealism_cache.clone(),
 		)?;
 		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
+		ctx.add_notifications(self.notification_channel.as_ref());
 		Ok(ctx)
 	}
 
@@ -2295,8 +2395,9 @@ impl Datastore {
 	) -> Result<Option<Arc<crate::catalog::MlModelDefinition>>> {
 		let tx = self.transaction(Read, Optimistic).await?;
 		let db = tx.expect_db_by_name(ns, db).await?;
-		let model =
-			tx.get_db_model(db.namespace_id, db.database_id, model_name, model_version).await?;
+		let model = tx
+			.get_db_model(db.namespace_id, db.database_id, model_name, model_version, None)
+			.await?;
 		tx.cancel().await?;
 		Ok(model)
 	}
@@ -2316,7 +2417,7 @@ impl Datastore {
 
 		let db = tx.ensure_ns_db(None, ns, db).await?;
 
-		let apis = tx.all_db_apis(db.namespace_id, db.database_id).await?;
+		let apis = tx.all_db_apis(db.namespace_id, db.database_id, None).await?;
 		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
 		let res = match ApiDefinition::find_definition(apis.as_ref(), segments, req.method) {
@@ -2418,13 +2519,13 @@ mod test {
 		// Setup the initial user if there are no root users
 		{
 			let txn = ds.transaction(Read, Optimistic).await.unwrap();
-			assert_eq!(txn.all_root_users().await.unwrap().len(), 0);
+			assert_eq!(txn.all_root_users(None).await.unwrap().len(), 0);
 			txn.cancel().await.unwrap();
 		}
 		ds.initialise_credentials(username, password).await.unwrap();
 		{
 			let txn = ds.transaction(Read, Optimistic).await.unwrap();
-			assert_eq!(txn.all_root_users().await.unwrap().len(), 1);
+			assert_eq!(txn.all_root_users(None).await.unwrap().len(), 1);
 			txn.cancel().await.unwrap();
 		}
 		verify_root_creds(&ds, username, password).await.unwrap();
@@ -2477,7 +2578,11 @@ mod test {
 		}
 		let val = stack.enter(|stk| build_query(stk, 1000)).finish();
 
-		let dbs = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+		let dbs = Datastore::builder()
+			.with_capabilities(Capabilities::all())
+			.build_with_path("memory")
+			.await
+			.unwrap();
 
 		let opt = Options::new(dbs.id(), DynamicConfiguration::default())
 			.with_ns(Some("test".into()))
@@ -2487,9 +2592,7 @@ mod test {
 			.with_max_computation_depth(u32::MAX);
 
 		// Create a default context
-		let mut ctx = Context::default();
-		// Set context capabilities
-		ctx.add_capabilities(dbs.capabilities.clone());
+		let mut ctx = dbs.setup_ctx()?;
 		// Start a new transaction
 		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?.enclose();
 		// Store the transaction
@@ -2511,10 +2614,13 @@ mod test {
 
 	#[tokio::test]
 	async fn cross_transaction_caching_uuids_updated() -> Result<()> {
-		let ds = Datastore::new("memory")
-			.await?
+		// TODO: Put `15_000` in a global somewhere.
+		let (send, _recv) = crate::channel::bounded(15_000);
+		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all())
-			.with_notifications();
+			.with_notify(send)
+			.build_with_path("memory")
+			.await?;
 		let cache = ds.get_cache();
 		let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
@@ -2534,7 +2640,7 @@ mod test {
 			// Obtain the initial uuids
 			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 			let tb = TableName::from("test");
-			let initial = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
+			let initial = txn.get_tb(db.namespace_id, db.database_id, &tb, None).await?.unwrap();
 			let initial_live_query_version =
 				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
 			txn.cancel().await?;
@@ -2566,7 +2672,8 @@ mod test {
 		let (after_define, after_define_live_query_version) = {
 			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 			let tb = TableName::from("test");
-			let after_define = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
+			let after_define =
+				txn.get_tb(db.namespace_id, db.database_id, &tb, None).await?.unwrap();
 			let after_define_live_query_version =
 				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
 			txn.cancel().await?;
@@ -2602,7 +2709,8 @@ mod test {
 		{
 			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 			let tb = TableName::from("test");
-			let after_remove = txn.get_tb(db.namespace_id, db.database_id, &tb).await?.unwrap();
+			let after_remove =
+				txn.get_tb(db.namespace_id, db.database_id, &tb, None).await?.unwrap();
 			let after_remove_live_query_version =
 				cache.get_live_queries_version(db.namespace_id, db.database_id, &tb)?;
 			txn.cancel().await?;

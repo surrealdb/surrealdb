@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -72,10 +73,12 @@ impl CreateStatement {
 			db: Arc::clone(&db),
 		};
 
+		let prepare_ctx: Cow<'_, FrozenContext> = CursorDoc::with_parent_ctx(&ctx, doc);
+
 		// Loop over the create targets
 		for w in self.what.iter() {
 			iterator
-				.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, &doc_ctx, w)
+				.prepare(stk, prepare_ctx.as_ref(), opt, doc, &mut planner, &stm_ctx, &doc_ctx, w)
 				.await
 				.map_err(|e| {
 					// double match to avoid allocation
@@ -94,13 +97,12 @@ impl CreateStatement {
 					}
 				})?;
 		}
-		// Attach the query planner to the context
-		let ctx = stm.setup_query_planner(planner, ctx);
 
 		// Ensure the database exists.
 		// ctx.get_db(opt).await?;
 
-		CursorDoc::update_parent(&ctx, doc, async |ctx| {
+		CursorDoc::update_parent(prepare_ctx.as_ref(), None, async |ctx| {
+			let ctx = stm.setup_query_planner(planner, ctx);
 			// Process the statement
 			let res = iterator.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 			// Catch statement timeout

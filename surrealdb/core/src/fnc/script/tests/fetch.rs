@@ -21,7 +21,11 @@ async fn test_fetch_get() {
 		.await;
 
 	// Execute test
-	let ds = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory")
+		.await
+		.unwrap();
 	let sess = Session::owner();
 	let sql = format!(
 		r#"
@@ -70,7 +74,11 @@ async fn test_fetch_put() {
 		.await;
 
 	// Execute test
-	let ds = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory")
+		.await
+		.unwrap();
 	let sess = Session::owner();
 	let sql = format!(
 		r#"
@@ -122,7 +130,11 @@ async fn test_fetch_error() {
 		.await;
 
 	// Execute test
-	let ds = Datastore::new("memory").await.unwrap().with_capabilities(Capabilities::all());
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory")
+		.await
+		.unwrap();
 	let sess = Session::owner();
 	let sql = format!(
 		r#"
@@ -173,11 +185,13 @@ async fn test_fetch_denied() {
 		.await;
 
 	// Execute test
-	let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-		Capabilities::all().without_network_targets(Targets::Some(
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all().without_network_targets(Targets::Some(
 			[NetTarget::from_str(&server.address().to_string()).unwrap()].into(),
-		)),
-	);
+		)))
+		.build_with_path("memory")
+		.await
+		.unwrap();
 	let sess = Session::owner();
 	let sql = format!(
 		r#"

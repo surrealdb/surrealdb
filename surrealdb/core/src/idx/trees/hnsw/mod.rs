@@ -381,7 +381,7 @@ where
 	/// Persists the current graph state to the key-value store.
 	async fn save_state(&self, tx: &Transaction) -> Result<()> {
 		let state_key = self.ikb.new_hs_key();
-		tx.set(&state_key, &self.state, None).await?;
+		tx.set(&state_key, &self.state).await?;
 		Ok(())
 	}
 
@@ -882,7 +882,7 @@ mod tests {
 
 	async fn new_ctx(ds: &Datastore, tt: TransactionType) -> FrozenContext {
 		let tx = Arc::new(ds.transaction(tt, Optimistic).await.unwrap());
-		let mut ctx = Context::default();
+		let mut ctx = Context::new_test();
 		ctx.set_transaction(tx);
 		ctx.freeze()
 	}

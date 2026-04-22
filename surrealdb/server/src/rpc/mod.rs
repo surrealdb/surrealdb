@@ -9,10 +9,11 @@ use std::time::Duration;
 
 use futures::stream::FuturesUnordered;
 use opentelemetry::Context as TelemetryContext;
+use surrealdb_core::channel::Receiver;
 #[cfg(feature = "graphql")]
 use surrealdb_core::gql::NotificationRouter;
-use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::{DbResponse, DbResult};
+use surrealdb_types::Notification;
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
@@ -75,60 +76,61 @@ impl RpcState {
 /// This is called automatically by
 /// [`SurrealRouter::spawn_notifications`](crate::ntw::SurrealRouter::spawn_notifications).
 /// If you need lower-level control you can call it directly inside your own `tokio::spawn`.
-pub async fn notifications(ds: Arc<Datastore>, state: Arc<RpcState>, canceller: CancellationToken) {
+pub async fn notifications(
+	channel: Receiver<Notification>,
+	state: Arc<RpcState>,
+	canceller: CancellationToken,
+) {
 	// Store messages being delivered
 	let mut futures = FuturesUnordered::new();
-	// Listen to the notifications channel
-	if let Some(channel) = ds.notifications() {
-		// Loop continuously
-		loop {
-			tokio::select! {
-				//
-				biased;
-				// Check if this has shutdown
-				_ = canceller.cancelled() => break,
-				// Process any buffered messages
-				Some(_) = futures.next() => continue,
-				// Receive a notification on the channel
-				Ok(notification) = channel.recv() => {
-					#[cfg(feature = "graphql")]
-					if state.notification_router.has_subscribers() {
-						state.notification_router.dispatch(&notification);
-					}
-					// Get the id for this notification
-					let id = notification.id.as_ref();
+	// Loop continuously
+	loop {
+		tokio::select! {
+			//
+			biased;
+			// Check if this has shutdown
+			_ = canceller.cancelled() => break,
+			// Process any buffered messages
+			Some(_) = futures.next() => continue,
+			// Receive a notification on the channel
+			Ok(notification) = channel.recv() => {
+				#[cfg(feature = "graphql")]
+				if state.notification_router.has_subscribers() {
+					state.notification_router.dispatch(&notification);
+				}
+				// Get the id for this notification
+				let id = notification.id.as_ref();
+				// Get the WebSocket for this notification
+				let websocket = {
+					state.live_queries.read().await.get(id).copied()
+				};
+				// Ensure the specified WebSocket exists
+				if let Some((id, session_id)) = websocket.as_ref() {
 					// Get the WebSocket for this notification
 					let websocket = {
-						state.live_queries.read().await.get(id).copied()
+						state.web_sockets.read().await.get(id).cloned()
 					};
 					// Ensure the specified WebSocket exists
-					if let Some((id, session_id)) = websocket.as_ref() {
-						// Get the WebSocket for this notification
-						let websocket = {
-							state.web_sockets.read().await.get(id).cloned()
-						};
-						// Ensure the specified WebSocket exists
-						if let Some(rpc) = websocket {
-							// Serialize the message to send
-							let message = DbResponse::success(None, session_id.map(Into::into), DbResult::Live(notification));
-							// Add telemetry metrics
-							let cx = TelemetryContext::new();
-							let not_ctx = NotificationContext::default()
-								  .with_live_id(id.to_string());
-							let cx = Arc::new(cx.with_value(not_ctx));
-							// Get the WebSocket output format
-							let format = rpc.format;
-							// Get the WebSocket sending channel
-							let sender = rpc.channel.clone();
-							// Send the notification to the client
-							// let future = message.send(cx, format, sender);
-							let future = crate::rpc::response::send(message, cx, format, sender);
-							// Pus the future to the pipeline
-							futures.push(future);
-						}
+					if let Some(rpc) = websocket {
+						// Serialize the message to send
+						let message = DbResponse::success(None, session_id.map(Into::into), DbResult::Live(notification));
+						// Add telemetry metrics
+						let cx = TelemetryContext::new();
+						let not_ctx = NotificationContext::default()
+							.with_live_id(id.to_string());
+						let cx = Arc::new(cx.with_value(not_ctx));
+						// Get the WebSocket output format
+						let format = rpc.format;
+						// Get the WebSocket sending channel
+						let sender = rpc.channel.clone();
+						// Send the notification to the client
+						// let future = message.send(cx, format, sender);
+						let future = crate::rpc::response::send(message, cx, format, sender);
+						// Pus the future to the pipeline
+						futures.push(future);
 					}
-				},
-			}
+				}
+			},
 		}
 	}
 }

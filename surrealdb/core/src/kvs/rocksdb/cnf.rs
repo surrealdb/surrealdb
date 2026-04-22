@@ -2,7 +2,7 @@ use std::cmp::max;
 use std::sync::LazyLock;
 use std::time::Duration;
 
-use sysinfo::System;
+use crate::kvs::util::TOTAL_SYSTEM_MEMORY;
 
 // --------------------------------------------------
 // Basic options
@@ -47,16 +47,7 @@ pub(super) static ROCKSDB_FILE_COMPACTION_TRIGGER: LazyLock<usize> =
 /// (default: dynamic from 4 MiB to 16 MiB)
 pub(super) static ROCKSDB_COMPACTION_READAHEAD_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_COMPACTION_READAHEAD_SIZE", usize, || {
-		// Load the system attributes
-		let mut system = System::new_all();
-		// Refresh the system memory
-		system.refresh_memory();
-		// Get the available memory
-		let memory = match system.cgroup_limits() {
-			Some(limits) => limits.total_memory,
-			None => system.total_memory(),
-		};
-		// Dynamically set the compaction readahead size
+		let memory = *TOTAL_SYSTEM_MEMORY;
 		if memory < 4 * 1024 * 1024 * 1024 {
 			4 * 1024 * 1024 // For systems with < 4 GiB, use 4 MiB
 		} else if memory < 16 * 1024 * 1024 * 1024 {
@@ -144,15 +135,7 @@ pub(super) static ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE: LazyLock<u64> =
 /// (default: dynamic depending on system memory)
 pub(super) static ROCKSDB_BLOCK_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_BLOCK_CACHE_SIZE", usize, || {
-		// Load the system attributes
-		let mut system = System::new_all();
-		// Refresh the system memory
-		system.refresh_memory();
-		// Get the available memory
-		let memory = match system.cgroup_limits() {
-			Some(limits) => limits.total_memory,
-			None => system.total_memory(),
-		};
+		let memory = *TOTAL_SYSTEM_MEMORY;
 		// Divide the total memory by 2
 		let memory = memory.saturating_div(2);
 		// Subtract 1 GiB from the memory size
@@ -165,16 +148,7 @@ pub(super) static ROCKSDB_BLOCK_CACHE_SIZE: LazyLock<usize> =
 /// (default: dynamic from 32 MiB to 128 MiB)
 pub(super) static ROCKSDB_WRITE_BUFFER_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_WRITE_BUFFER_SIZE", usize, || {
-		// Load the system attributes
-		let mut system = System::new_all();
-		// Refresh the system memory
-		system.refresh_memory();
-		// Get the available memory
-		let memory = match system.cgroup_limits() {
-			Some(limits) => limits.total_memory,
-			None => system.total_memory(),
-		};
-		// Dynamically set the number of write buffers
+		let memory = *TOTAL_SYSTEM_MEMORY;
 		if memory < 1024 * 1024 * 1024 {
 			32 * 1024 * 1024 // For systems with < 1 GiB, use 32 MiB
 		} else if memory < 16 * 1024 * 1024 * 1024 {
@@ -188,16 +162,7 @@ pub(super) static ROCKSDB_WRITE_BUFFER_SIZE: LazyLock<usize> =
 /// (default: dynamic from 2 to 32)
 pub(super) static ROCKSDB_MAX_WRITE_BUFFER_NUMBER: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_ROCKSDB_MAX_WRITE_BUFFER_NUMBER", usize, || {
-		// Load the system attributes
-		let mut system = System::new_all();
-		// Refresh the system memory
-		system.refresh_memory();
-		// Get the available memory
-		let memory = match system.cgroup_limits() {
-			Some(limits) => limits.total_memory,
-			None => system.total_memory(),
-		};
-		// Dynamically set the number of write buffers
+		let memory = *TOTAL_SYSTEM_MEMORY;
 		if memory < 4 * 1024 * 1024 * 1024 {
 			2 // For systems with < 4 GiB, use 2 buffers
 		} else if memory < 16 * 1024 * 1024 * 1024 {

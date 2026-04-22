@@ -57,7 +57,7 @@ impl PhysicalExpr for MethodPart {
 		}
 
 		// Invoke the resolved function
-		let result = if func.is_pure() {
+		let result = if func.is_pure() && !func.is_async() {
 			func.invoke(func_args)
 		} else {
 			func.invoke_async(&ctx, func_args).await
@@ -224,6 +224,7 @@ impl PhysicalExpr for ClosureFieldCallPart {
 					recursion_ctx: None,
 					document_root: ctx.document_root,
 					skip_fetch_perms: ctx.skip_fetch_perms,
+					computing_record: ctx.computing_record.clone(),
 				};
 
 				let result = match block_expr.evaluate(eval_ctx).await {

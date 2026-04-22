@@ -42,7 +42,7 @@ impl RemoveNamespaceStatement {
 		let txn = ctx.tx();
 		// Compute the name
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "namespace name").await?;
-		let ns = match txn.get_ns_by_name(&name).await? {
+		let ns = match txn.get_ns_by_name(&name, None).await? {
 			Some(x) => x,
 			None => {
 				if self.if_exists {

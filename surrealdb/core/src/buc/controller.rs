@@ -291,7 +291,7 @@ impl<'a> BucketController<'a> {
 					let opt = &self.opt.new_with_perms(false);
 
 					// Add $action, $file and $target to context
-					let mut ctx = Context::new(self.ctx);
+					let mut ctx = Context::new_child(self.ctx);
 					ctx.add_value("action", Value::from(op.to_string()).into());
 					if let Some(key) = key {
 						ctx.add_value(

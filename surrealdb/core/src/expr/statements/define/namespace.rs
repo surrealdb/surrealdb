@@ -50,7 +50,7 @@ impl DefineNamespaceStatement {
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "namespace name").await?;
 
 		// Check if the definition exists
-		let namespace_id = if let Some(ns) = txn.get_ns_by_name(&name).await? {
+		let namespace_id = if let Some(ns) = txn.get_ns_by_name(&name, None).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -70,10 +71,12 @@ impl DeleteStatement {
 			db: Arc::clone(&db),
 		};
 
+		let prepare_ctx: Cow<'_, FrozenContext> = CursorDoc::with_parent_ctx(&ctx, doc);
+
 		// Loop over the delete targets
 		for w in self.what.iter() {
 			iterator
-				.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, &doc_ctx, w)
+				.prepare(stk, prepare_ctx.as_ref(), opt, doc, &mut planner, &stm_ctx, &doc_ctx, w)
 				.await
 				.map_err(|e| {
 					if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
@@ -91,7 +94,7 @@ impl DeleteStatement {
 					}
 				})?;
 		}
-		CursorDoc::update_parent(&ctx, doc, async |ctx| {
+		CursorDoc::update_parent(prepare_ctx.as_ref(), None, async |ctx| {
 			// Attach the query planner to the context
 			let ctx = stm.setup_query_planner(planner, ctx);
 

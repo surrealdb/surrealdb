@@ -50,7 +50,7 @@ pub(crate) fn get_legacy_context_with_param<'a>(
 		.options()
 		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
 
-	let mut ctx = crate::ctx::Context::new(exec_ctx.ctx());
+	let mut ctx = crate::ctx::Context::new_child(exec_ctx.ctx());
 	ctx.add_value(param_name.to_string(), std::sync::Arc::new(param_value.clone()));
 
 	Ok((options, ctx.freeze()))
@@ -331,8 +331,8 @@ pub(crate) fn block_required_context(block: &Block) -> ContextLevel {
 /// Determine the minimum [`ContextLevel`] required by an [`InfoStatement`].
 fn info_stmt_required_context(info: &InfoStatement) -> ContextLevel {
 	match info {
-		InfoStatement::Root(_) => ContextLevel::Root,
-		InfoStatement::Ns(_) => ContextLevel::Namespace,
+		InfoStatement::Root(_, _) => ContextLevel::Root,
+		InfoStatement::Ns(_, _) => ContextLevel::Namespace,
 		InfoStatement::Db(_, _) | InfoStatement::Tb(_, _, _) | InfoStatement::Index(_, _, _) => {
 			ContextLevel::Database
 		}

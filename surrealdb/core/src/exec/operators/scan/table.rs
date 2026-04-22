@@ -180,10 +180,10 @@ impl ExecOperator for TableScan {
 					Some(
 						v.cast_to::<crate::val::Datetime>()
 							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp()?,
+							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			if limit_val == Some(0) {
@@ -200,7 +200,7 @@ impl ExecOperator for TableScan {
 			} else {
 				// Runtime fallback (DynamicScan path or no txn at plan time)
 				let table_def = db_ctx
-					.get_table_def(&table_name)
+					.get_table_def(&table_name, version)
 					.await
 					.context("Failed to get table")?;
 

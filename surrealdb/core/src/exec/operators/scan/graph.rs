@@ -16,8 +16,9 @@ use super::common::{
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::parts::LookupDirection;
 use crate::exec::{
-	AccessMode, ContextLevel, ControlFlowExt, ExecOperator, ExecutionContext, FlowResult,
-	OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream, monitor_stream,
+	AccessMode, ContextLevel, ControlFlowExt, EvalContext, ExecOperator, ExecutionContext,
+	FlowResult, OperatorMetrics, PhysicalExpr, ValueBatch, ValueBatchStream, buffer_stream,
+	monitor_stream,
 };
 use crate::expr::{ControlFlow, Dir};
 use crate::idx::planner::ScanDirection;
@@ -74,6 +75,9 @@ pub struct GraphEdgeScan {
 	/// What to output: EdgeId, TargetId, or FullEdge
 	pub(crate) output_mode: GraphScanOutput,
 
+	/// Optional VERSION timestamp for time-travel queries.
+	pub(crate) version: Option<Arc<dyn PhysicalExpr>>,
+
 	/// Optional limit on the total number of edges yielded per source record.
 	/// When set, edge scanning stops early after this many results.
 	pub(crate) limit: Option<usize>,
@@ -88,12 +92,14 @@ impl GraphEdgeScan {
 		direction: LookupDirection,
 		edge_tables: Vec<EdgeTableSpec>,
 		output_mode: GraphScanOutput,
+		version: Option<Arc<dyn PhysicalExpr>>,
 	) -> Self {
 		Self {
 			input,
 			direction,
 			edge_tables,
 			output_mode,
+			version,
 			limit: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
@@ -129,6 +135,9 @@ impl ExecOperator for GraphEdgeScan {
 			("tables".to_string(), tables),
 			("output".to_string(), format!("{:?}", self.output_mode)),
 		];
+		if let Some(ref version) = self.version {
+			attrs.push(("version".to_string(), version.to_sql()));
+		}
 		if let Some(limit) = self.limit {
 			attrs.push(("limit".to_string(), limit.to_string()));
 		}
@@ -141,7 +150,11 @@ impl ExecOperator for GraphEdgeScan {
 	}
 
 	fn access_mode(&self) -> AccessMode {
-		self.input.access_mode()
+		let mut mode = self.input.access_mode();
+		if let Some(ref version) = self.version {
+			mode = mode.combine(version.access_mode());
+		}
+		mode
 	}
 
 	fn metrics(&self) -> Option<&OperatorMetrics> {
@@ -163,6 +176,7 @@ impl ExecOperator for GraphEdgeScan {
 		let edge_tables = self.edge_tables.clone();
 		let output_mode = self.output_mode;
 		let edge_limit = self.limit;
+		let version_expr = self.version.clone();
 		let ctx = ctx.clone();
 		let fetch_full = output_mode == GraphScanOutput::FullEdge;
 
@@ -170,6 +184,19 @@ impl ExecOperator for GraphEdgeScan {
 			let txn = ctx.txn();
 			let ns_id = db_ctx.ns_ctx.ns.namespace_id;
 			let db_id = db_ctx.db.database_id;
+
+			let version: Option<u64> = match &version_expr {
+				Some(expr) => {
+					let eval_ctx = EvalContext::from_exec_ctx(&ctx);
+					let v = expr.evaluate(eval_ctx).await?;
+					Some(
+						v.cast_to::<crate::val::Datetime>()
+							.map_err(|e| anyhow::anyhow!("{e}"))?
+							.to_version_stamp(txn.timestamp_impl().as_ref())?,
+					)
+				}
+				None => ctx.version_stamp(),
+			};
 
 			// Determine the directions to scan
 			// Note: For Both, we scan In first then Out to match legacy executor behavior
@@ -210,7 +237,7 @@ impl ExecOperator for GraphEdgeScan {
 						for (beg, end) in ranges {
 							let remaining = edge_limit.map(|l| l.saturating_sub(edges_yielded));
 							let kv_stream = txn.stream_keys(
-								beg..end, None, remaining, 0, ScanDirection::Forward,
+								beg..end, version, remaining, 0, ScanDirection::Forward,
 							);
 							futures::pin_mut!(kv_stream);
 
@@ -224,7 +251,7 @@ impl ExecOperator for GraphEdgeScan {
 
 									if rid_batch.len() >= BATCH_SIZE {
 										let values = resolve_record_batch(
-											&txn, ns_id, db_id, &rid_batch, fetch_full, None,
+											&txn, ns_id, db_id, &rid_batch, fetch_full, version,
 											CachePolicy::ReadWrite,
 										).await?;
 										yield ValueBatch { values };
@@ -244,7 +271,7 @@ impl ExecOperator for GraphEdgeScan {
 			// Yield remaining batch
 			if !rid_batch.is_empty() {
 				let values = resolve_record_batch(
-					&txn, ns_id, db_id, &rid_batch, fetch_full, None,
+					&txn, ns_id, db_id, &rid_batch, fetch_full, version,
 					CachePolicy::ReadWrite,
 				).await?;
 				yield ValueBatch { values };
@@ -403,6 +430,7 @@ mod tests {
 				},
 			],
 			GraphScanOutput::TargetId,
+			None,
 		);
 
 		assert_eq!(scan.name(), "GraphEdgeScan");

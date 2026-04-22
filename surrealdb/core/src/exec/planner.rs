@@ -120,6 +120,11 @@ pub struct Planner<'ctx> {
 	pub(crate) ns: Option<String>,
 	/// Optional database name for plan-time catalog lookups.
 	pub(crate) db: Option<String>,
+	/// Optional VERSION expression from the enclosing SELECT statement.
+	///
+	/// Propagated to `GraphEdgeScan` operators created during idiom
+	/// conversion so that graph edge traversals respect the VERSION clause.
+	pub(crate) version: Option<Arc<dyn crate::exec::PhysicalExpr>>,
 }
 
 impl<'ctx> Planner<'ctx> {
@@ -135,6 +140,7 @@ impl<'ctx> Planner<'ctx> {
 			txn: None,
 			ns: None,
 			db: None,
+			version: None,
 		}
 	}
 
@@ -156,13 +162,137 @@ impl<'ctx> Planner<'ctx> {
 			txn: Some(txn),
 			ns,
 			db,
+			version: None,
 		}
+	}
+
+	/// Set the VERSION expression for propagation to graph edge scans.
+	pub fn with_version(mut self, version: Option<Arc<dyn crate::exec::PhysicalExpr>>) -> Self {
+		self.version = version;
+		self
 	}
 
 	/// Get the function registry.
 	#[inline]
 	pub fn function_registry(&self) -> &'ctx FunctionRegistry {
 		self.function_registry
+	}
+
+	/// Resolve the `writeable` flag for a Surrealism module function from
+	/// the cached runtime's exports manifest.
+	///
+	/// Returns `Ok(false)` when the planner lacks the transaction or
+	/// namespace/database context needed for the lookup. In all other cases
+	/// the module is loaded (blocking on first use if necessary) and the
+	/// signature is read so the flag is always consistent with the module's
+	/// declaration.
+	#[cfg(feature = "surrealism")]
+	async fn resolve_module_writeable(
+		&self,
+		module: &str,
+		sub: Option<&str>,
+	) -> Result<bool, Error> {
+		use crate::catalog::providers::DatabaseProvider;
+		use crate::ctx::Context;
+		use crate::expr::module::ModuleExecutable;
+
+		let Some(txn) = &self.txn else {
+			return Ok(false);
+		};
+		let (Some(ns), Some(db)) = (&self.ns, &self.db) else {
+			return Ok(false);
+		};
+		let Some(db_def) =
+			txn.get_db_by_name(ns, db, None).await.map_err(|e| Error::Internal(e.to_string()))?
+		else {
+			return Ok(false);
+		};
+		let mod_name = format!("mod::{module}");
+		let val =
+			match txn.get_db_module(db_def.namespace_id, db_def.database_id, &mod_name, None).await
+			{
+				Ok(v) => v,
+				Err(e) => {
+					if let Some(Error::MdNotFound {
+						..
+					}) = e.downcast_ref::<Error>()
+					{
+						return Ok(false);
+					}
+					return Err(Error::Internal(e.to_string()));
+				}
+			};
+		let executable: ModuleExecutable = val.executable.clone().into();
+		// The planner's self.ctx does not carry a transaction (the executor
+		// sets it after planning). Derive a context with the planner's txn
+		// so that a cache-miss in get_surrealism_runtime can access the
+		// bucket store without panicking.
+		let mut plan_ctx = Context::new_child(self.ctx);
+		plan_ctx.set_transaction(txn.clone());
+		let frozen = plan_ctx.freeze();
+		let sig = executable
+			.signature(&frozen, &db_def.namespace_id, &db_def.database_id, sub)
+			.await
+			.map_err(|e| Error::Internal(e.to_string()))?;
+		Ok(sig.writeable)
+	}
+
+	#[cfg(not(feature = "surrealism"))]
+	async fn resolve_module_writeable(
+		&self,
+		_module: &str,
+		_sub: Option<&str>,
+	) -> Result<bool, Error> {
+		Ok(false)
+	}
+
+	/// Resolve the `writeable` flag for a Silo package function from
+	/// the cached runtime's exports manifest.
+	#[cfg(feature = "surrealism")]
+	async fn resolve_silo_writeable(
+		&self,
+		org: &str,
+		pkg: &str,
+		major: u32,
+		minor: u32,
+		patch: u32,
+		sub: Option<&str>,
+	) -> Result<bool, Error> {
+		use crate::ctx::Context;
+		use crate::expr::module::SiloExecutable;
+
+		let executable = SiloExecutable {
+			organisation: org.to_string(),
+			package: pkg.to_string(),
+			major,
+			minor,
+			patch,
+		};
+		// Same as resolve_module_writeable: derive a context with the
+		// planner's transaction so signature resolution can access stores.
+		let ctx = if let Some(txn) = &self.txn {
+			let mut plan_ctx = Context::new_child(self.ctx);
+			plan_ctx.set_transaction(txn.clone());
+			plan_ctx.freeze()
+		} else {
+			self.ctx.clone()
+		};
+		let sig =
+			executable.signature(&ctx, sub).await.map_err(|e| Error::Internal(e.to_string()))?;
+		Ok(sig.writeable)
+	}
+
+	#[cfg(not(feature = "surrealism"))]
+	async fn resolve_silo_writeable(
+		&self,
+		_org: &str,
+		_pkg: &str,
+		_major: u32,
+		_minor: u32,
+		_patch: u32,
+		_sub: Option<&str>,
+	) -> Result<bool, Error> {
+		Ok(false)
 	}
 
 	// ========================================================================
@@ -590,10 +720,12 @@ impl<'ctx> Planner<'ctx> {
 			}
 			Function::Module(module, sub) => {
 				let arguments = self.physical_args(arguments).await?;
+				let writeable = self.resolve_module_writeable(&module, sub.as_deref()).await?;
 				Ok(Arc::new(SurrealismModuleExec {
 					module,
 					sub,
 					arguments,
+					writeable,
 				}))
 			}
 			Function::Silo {
@@ -605,6 +737,9 @@ impl<'ctx> Planner<'ctx> {
 				sub,
 			} => {
 				let arguments = self.physical_args(arguments).await?;
+				let writeable = self
+					.resolve_silo_writeable(&org, &pkg, major, minor, patch, sub.as_deref())
+					.await?;
 				Ok(Arc::new(SiloModuleExec {
 					org,
 					pkg,
@@ -613,6 +748,7 @@ impl<'ctx> Planner<'ctx> {
 					patch,
 					sub,
 					arguments,
+					writeable,
 				}))
 			}
 		}
@@ -988,11 +1124,19 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		use crate::expr::statements::info::InfoStatement;
 		match info {
-			InfoStatement::Root(structured) => {
-				Ok(Arc::new(RootInfoPlan::new(structured)) as Arc<dyn ExecOperator>)
+			InfoStatement::Root(structured, version) => {
+				let version = match version {
+					Some(v) => Some(Box::pin(self.physical_expr(v)).await?),
+					None => None,
+				};
+				Ok(Arc::new(RootInfoPlan::new(structured, version)) as Arc<dyn ExecOperator>)
 			}
-			InfoStatement::Ns(structured) => {
-				Ok(Arc::new(NamespaceInfoPlan::new(structured)) as Arc<dyn ExecOperator>)
+			InfoStatement::Ns(structured, version) => {
+				let version = match version {
+					Some(v) => Some(Box::pin(self.physical_expr(v)).await?),
+					None => None,
+				};
+				Ok(Arc::new(NamespaceInfoPlan::new(structured, version)) as Arc<dyn ExecOperator>)
 			}
 			InfoStatement::Db(structured, version) => {
 				let version = match version {
@@ -1186,7 +1330,7 @@ mod planner_tests {
 			kind: None,
 		}));
 
-		let ctx = Arc::new(Context::background());
+		let ctx = Arc::new(Context::new_test());
 		let plan = Planner::new(&ctx).plan(&expr).await.expect("Planning failed");
 
 		assert_eq!(plan.name(), "Let");
@@ -1197,7 +1341,7 @@ mod planner_tests {
 	async fn test_planner_creates_scalar_plan() {
 		let expr = Expr::Literal(crate::expr::literal::Literal::Integer(42));
 
-		let ctx = Arc::new(Context::background());
+		let ctx = Arc::new(Context::new_test());
 		let plan = Planner::new(&ctx).plan(&expr).await.expect("Planning failed");
 
 		assert_eq!(plan.name(), "Expr");

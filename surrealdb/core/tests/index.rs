@@ -199,7 +199,9 @@ async fn multi_index_concurrent_test(
 	DEFINE INDEX field4 ON aaa FIELDS field4 FULLTEXT ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;
 	DEFINE INDEX field5 ON aaa FIELDS field5 FULLTEXT ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;
 ";
-	let dbs = Arc::new(new_ds("test", "test").await?);
+
+	let (_, dbs) = new_ds("test", "test", false).await?;
+	let dbs = Arc::new(dbs);
 
 	// Start the index compaction
 	let abort_compaction = CancellationToken::new();
@@ -342,7 +344,8 @@ async fn collect_query(
 #[tokio::test(flavor = "multi_thread")]
 #[test_log::test]
 async fn hnsw_concurrent_writes() -> Result<()> {
-	let dbs = Arc::new(new_ds("test", "test").await?);
+	let (_, dbs) = new_ds("test", "test", false).await?;
+	let dbs = Arc::new(dbs);
 	let session = Session::owner().with_ns("test").with_db("test");
 
 	// Define the table and the index.
@@ -428,7 +431,8 @@ where
 async fn multi_index_concurrent_test_index_compaction() -> Result<()> {
 	// Step 1: Create a shared datastore and set up 3 namespaces × 3 databases = 9 isolated
 	// environments. Each combination gets its own owner session, simulating a multi-tenant setup.
-	let dbs = Arc::new(new_ds("test", "test").await?);
+	let (_, dbs) = new_ds("test", "test", false).await?;
+	let dbs = Arc::new(dbs);
 	let mut sessions = Vec::new();
 	for ns in ["ns1", "ns2", "ns3"] {
 		for db in ["db1", "db2", "db3"] {

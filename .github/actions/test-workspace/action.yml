@@ -14,6 +14,11 @@ runs:
       uses: ./.github/actions/setup-environment
       with:
         save-cache: ${{ inputs.save-cache }}
+        targets: wasm32-wasip2
+
+    - name: Install wasm32-wasip2 target
+      shell: bash
+      run: rustup target add wasm32-wasip2
 
     - name: Install tools
       uses: ./.github/actions/install-tools

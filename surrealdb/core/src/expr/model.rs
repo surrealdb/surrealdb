@@ -62,7 +62,8 @@ impl Model {
 		ctx.check_allowed_function(name.as_str())?;
 		// Get the model definition
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let Some(val) = ctx.tx().get_db_model(ns, db, &self.name, &self.version).await? else {
+		let Some(val) = ctx.tx().get_db_model(ns, db, &self.name, &self.version, None).await?
+		else {
 			return Err(ControlFlow::from(anyhow::Error::new(Error::MlNotFound {
 				name: format!("{}<{}>", self.name, self.version),
 			})));

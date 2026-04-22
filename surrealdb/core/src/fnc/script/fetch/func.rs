@@ -5,18 +5,17 @@ use std::sync::Arc;
 use futures::TryStreamExt;
 use js::function::Opt;
 use js::{Class, Ctx, Exception, Result, Value};
+use reqwest::Body as ReqBody;
 use reqwest::header::{CONTENT_TYPE, HeaderValue};
-use reqwest::{Body as ReqBody, redirect};
-use tokio::runtime::Handle;
 
 use super::classes::Headers;
-use crate::fnc::http::resolver::FilteringResolver;
 use crate::fnc::script::fetch::RequestError;
 use crate::fnc::script::fetch::body::{Body, BodyData, BodyKind};
 use crate::fnc::script::fetch::classes::{
-	self, Request, RequestInit, Response, ResponseInit, ResponseType,
+	Request, RequestInit, RequestRedirect, Response, ResponseInit, ResponseType,
 };
 use crate::fnc::script::modules::surrealdb::query::QueryContext;
+use crate::http::HttpClient;
 
 #[js::function]
 pub async fn fetch<'js>(
@@ -42,9 +41,6 @@ pub async fn fetch<'js>(
 		.check_allowed_net(&url)
 		.await
 		.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
-	let capabilities = query_ctx.get_capabilities();
-
-	let req = reqwest::Request::new(js_req.init.method, url.clone());
 
 	// SurrealDB Implementation keeps all javascript parts inside the context::with
 	// scope so this unwrap should never panic.
@@ -52,38 +48,44 @@ pub async fn fetch<'js>(
 	let headers = headers.borrow();
 	let mut headers = headers.inner.clone();
 
-	let redirect = js_req.init.request_redirect;
-	let redirect_limit = *crate::cnf::MAX_HTTP_REDIRECTS;
-
-	// set the policy for redirecting requests.
-	let policy = redirect::Policy::custom(move |attempt| {
-		if let Err(e) = Handle::current().block_on(query_ctx.check_allowed_net(attempt.url())) {
-			return attempt.error(e.to_string());
+	let client = match js_req.init.request_redirect {
+		RequestRedirect::Follow => query_ctx.http_client(),
+		RequestRedirect::Error => {
+			let cap = query_ctx.get_capabilities();
+			Arc::new(
+				HttpClient::new_with_redirect_policy(
+					cap.allow_net.clone(),
+					cap.allow_net.clone(),
+					|attempt| attempt.error("unexpected redirect"),
+				)
+				.map_err(|e| {
+					Exception::throw_internal(
+						&ctx,
+						&format!("Could not initialize http client: {e}"),
+					)
+				})?,
+			)
 		}
-		match redirect {
-			classes::RequestRedirect::Follow => {
-				// Fetch spec limits redirect to a max of 20 but we follow the configuration.
-				if attempt.previous().len() >= redirect_limit {
-					attempt.error("too many redirects")
-				} else {
-					attempt.follow()
-				}
-			}
-			classes::RequestRedirect::Error => attempt.error("unexpected redirect"),
-			classes::RequestRedirect::Manual => attempt.stop(),
+		RequestRedirect::Manual => {
+			let cap = query_ctx.get_capabilities();
+			Arc::new(
+				HttpClient::new_with_redirect_policy(
+					cap.allow_net.clone(),
+					cap.allow_net.clone(),
+					|attempt| attempt.stop(),
+				)
+				.map_err(|e| {
+					Exception::throw_internal(
+						&ctx,
+						&format!("Could not initialize http client: {e}"),
+					)
+				})?,
+			)
 		}
-	});
+	};
 
-	let client = reqwest::Client::builder()
-		.redirect(policy)
-		.dns_resolver(std::sync::Arc::new(FilteringResolver::from_capabilities(capabilities)))
-		.build()
-		.map_err(|e| {
-			Exception::throw_internal(&ctx, &format!("Could not initialize http client: {e}"))
-		})?;
-
+	let mut req_builder = client.request(js_req.init.method, url.clone());
 	// Set the body for the request.
-	let mut req_builder = reqwest::RequestBuilder::from_parts(client, req);
 	if let Some(body) = js_req.init.body {
 		match body.data.replace(BodyData::Used) {
 			BodyData::Stream(x) => {

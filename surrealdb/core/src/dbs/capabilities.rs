@@ -585,8 +585,8 @@ pub struct Capabilities {
 
 	allow_funcs: Targets<FuncTarget>,
 	deny_funcs: Targets<FuncTarget>,
-	allow_net: Targets<NetTarget>,
-	deny_net: Targets<NetTarget>,
+	pub(crate) allow_net: Targets<NetTarget>,
+	pub(crate) deny_net: Targets<NetTarget>,
 	allow_rpc: Targets<MethodTarget>,
 	deny_rpc: Targets<MethodTarget>,
 	allow_http: Targets<RouteTarget>,
@@ -773,6 +773,10 @@ impl Capabilities {
 		self
 	}
 
+	pub fn denied_network_targets_ref(&self) -> &Targets<NetTarget> {
+		&self.deny_net
+	}
+
 	pub fn denied_network_targets_mut(&mut self) -> &mut Targets<NetTarget> {
 		&mut self.deny_net
 	}
@@ -822,6 +826,12 @@ impl Capabilities {
 		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
 	}
 
+	/// Check whether a parsed `FuncTarget` (possibly a wildcard like `fn::*`)
+	/// is covered by the server's function capability configuration.
+	pub fn allows_function_target(&self, target: &FuncTarget) -> bool {
+		self.allow_funcs.matches(target) && !self.deny_funcs.matches(target)
+	}
+
 	pub fn allows_experimental(&self, target: &ExperimentalTarget) -> bool {
 		self.allow_experimental.matches(target) && !self.deny_experimental.matches(target)
 	}
@@ -856,22 +866,44 @@ impl Capabilities {
 		self.allow_http.matches(target) && !self.deny_http.matches(target)
 	}
 
-	/// Checks wether capabilities required by a Surrealism package are allowed.
-	/// The `allow_arbitrary_queries` capability is not checked as that is to be used by the
-	/// runtime.
+	/// Checks whether capabilities required by a Surrealism package are allowed
+	/// by the server configuration. The `allow_arbitrary_queries` capability is
+	/// not checked here as that is enforced at runtime by the host `sql()` call.
 	#[cfg(feature = "surrealism")]
 	pub fn validate_surrealism_capabilities(
 		&self,
 		capabilities: SurrealismCapabilities,
 	) -> anyhow::Result<()> {
+		use surrealism_runtime::capabilities::FunctionTargets;
+
 		if capabilities.allow_scripting && !self.allows_scripting() {
 			bail!("Surrealism package requires scripting, but it is not allowed");
 		}
 
-		if !capabilities.allow_functions.is_empty() {
-			for fnc in capabilities.allow_functions.iter() {
-				if !self.allows_function_name(fnc) {
-					bail!("Surrealism package requires function '{}', but it is not allowed", fnc);
+		match &capabilities.allow_functions {
+			FunctionTargets::None => {}
+			FunctionTargets::All => {
+				if !matches!(self.allow_funcs, Targets::All) {
+					bail!(
+						"Surrealism package requires access to all functions, but the server does not allow all functions"
+					);
+				}
+			}
+			FunctionTargets::Some(patterns) => {
+				for pattern in patterns {
+					let target = FuncTarget::from_str(pattern).map_err(|e| {
+						anyhow::anyhow!(
+							"Surrealism package has invalid function pattern '{}': {}",
+							pattern,
+							e
+						)
+					})?;
+					if !self.allows_function_target(&target) {
+						bail!(
+							"Surrealism package requires function pattern '{}', but it is not allowed by the server",
+							pattern
+						);
+					}
 				}
 			}
 		}

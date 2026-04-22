@@ -858,7 +858,7 @@ pub(super) async fn resolve_param_value(
 	}
 	if let Some((ns, db)) = ns_db
 		&& let Some(txn) = ctx.try_tx()
-		&& let Ok(param_def) = txn.get_db_param(ns, db, name).await
+		&& let Ok(param_def) = txn.get_db_param(ns, db, name, None).await
 		&& matches!(param_def.permissions, crate::catalog::Permission::Full)
 	{
 		return Some(param_def.value.clone());

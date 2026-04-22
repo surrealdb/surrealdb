@@ -24,8 +24,8 @@ jobs:
   #   runs-on: ubuntu-latest
   #   steps:
   #     - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-  #     - uses: cachix/install-nix-action@8887e596b4ee1134dae06b98d573bd674693f47c # v26
-  #     - uses: cachix/cachix-action@18cf96c7c98e048e10a83abd92116114cd8504be # v14
+  #     - uses: cachix/install-nix-action@616559265b40713947b9c190a8ff4b507b5df49b # v31.10.4
+  #     - uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # v17
   #       with:
   #         name: surrealdb
   #         authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
@@ -38,9 +38,14 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' || github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
-      - uses: cachix/install-nix-action@8887e596b4ee1134dae06b98d573bd674693f47c # (Actions must be pinned by commit hash) v26
-      - uses: cachix/cachix-action@18cf96c7c98e048e10a83abd92116114cd8504be # (Actions must be pinned by commit hash) v14
+      - uses: cachix/install-nix-action@616559265b40713947b9c190a8ff4b507b5df49b # (Actions must be pinned by commit hash) v31.10.4
+      - uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # (Actions must be pinned by commit hash) v17
         with:
           name: surrealdb
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
@@ -53,9 +58,14 @@ jobs:
     if: ${{ github.ref == 'refs/heads/main' || github.event.label.name == 'nix' }}
     runs-on: ubuntu-latest
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
-      - uses: cachix/install-nix-action@8887e596b4ee1134dae06b98d573bd674693f47c # (Actions must be pinned by commit hash) v26
-      - uses: cachix/cachix-action@18cf96c7c98e048e10a83abd92116114cd8504be # (Actions must be pinned by commit hash) v14
+      - uses: cachix/install-nix-action@616559265b40713947b9c190a8ff4b507b5df49b # (Actions must be pinned by commit hash) v31.10.4
+      - uses: cachix/cachix-action@1eb2ef646ac0255473d23a5907ad7b04ce94065c # (Actions must be pinned by commit hash) v17
         with:
           name: surrealdb
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'

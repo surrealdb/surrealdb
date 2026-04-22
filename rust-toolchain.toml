@@ -4,4 +4,4 @@
 # adding only the minor version will already run on the latest patch version.
 channel = "1.91"
 components = [ "rustfmt", "clippy" ]
-targets = [ "wasm32-unknown-unknown" ]
+targets = ["wasm32-unknown-unknown"]

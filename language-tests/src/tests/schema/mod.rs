@@ -1,7 +1,3 @@
-//! Module defining the configuration schema.
-
-//mod bytes_hack;
-
 use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
@@ -16,88 +12,60 @@ use surrealdb_core::syn::parser::ParserSettings;
 use surrealdb_core::syn::{self};
 use surrealdb_types::{Object, RecordId, ToSql, Value};
 
+use crate::cli::Backend;
+
+fn bool_or_f<T>() -> BoolOr<T> {
+	BoolOr::Bool(false)
+}
+
+fn default_planner_strategy() -> Vec<NewPlannerStrategyConfig> {
+	vec![
+		NewPlannerStrategyConfig::ComputeOnly,
+		NewPlannerStrategyConfig::AllRo,
+		NewPlannerStrategyConfig::BestEffortRo,
+	]
+}
+
+pub const ENV_DEFAULT_TIMEOUT: u64 = 1000;
+pub const ENV_DEFAULT_NAMESPACE: &str = "test";
+pub const ENV_DEFAULT_DATABASE: &str = "test";
+
 /// Root test config struct.
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct TestConfig {
-	pub env: Option<TestEnv>,
-	pub test: Option<TestDetails>,
+	#[serde(default)]
+	pub env: TestEnv,
+	#[serde(default)]
+	pub test: TestDetails,
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
 impl TestConfig {
-	/// Returns true if the test should be run.
-	/// returns false if the test is configured to be skipped.
-	pub fn should_run(&self) -> bool {
-		self.test.as_ref().map(|x| x.should_run()).unwrap_or(true)
-	}
-
-	pub fn is_wip(&self) -> bool {
-		self.test.as_ref().map(|x| x.is_wip()).unwrap_or(false)
-	}
-
-	pub fn issue(&self) -> Option<u64> {
-		self.test.as_ref().and_then(|x| x.issue())
-	}
-
-	/// Returns the imports for this file, empty if no imports are defined.
-	pub fn imports(&self) -> &[String] {
-		self.env.as_ref().map(|x| x.imports.as_slice()).unwrap_or(&[])
-	}
-
-	/// Returns if this test must be run without other test running.
-	pub fn should_run_sequentially(&self) -> bool {
-		self.env.as_ref().map(|x| x.sequential).unwrap_or(
-			// TODO(ssttuu): This should be `true` but we're currently having flakiness issues.
-			false,
-		)
-	}
-
-	/// Whether this test can use one of the datastorage struct which are reused between tests.
-	/// Versioned tests always need a fresh datastore since they require different configuration.
-	pub fn can_use_reusable_ds(&self) -> bool {
-		self.env.as_ref().map(|x| !x.clean && !x.versioned).unwrap_or(false)
-	}
-
-	/// Returns the planner strategies this test should run under.
-	/// Defaults to `[ComputeOnly, AllRo]` when no explicit list is provided.
-	pub fn planner_strategies(&self) -> &[NewPlannerStrategyConfig] {
-		let strategies = self.env.as_ref().map(|e| e.planner_strategy.as_slice()).unwrap_or(&[]);
-		if strategies.is_empty() {
-			NewPlannerStrategyConfig::DEFAULT_STRATEGIES
-		} else {
-			strategies
-		}
-	}
-
-	/// Returns a list of keys which are not in the schema but still define.
+	/// Returns a list of keys which are not in the schema but still defined.
 	pub fn unused_keys(&self) -> Vec<String> {
 		let mut res: Vec<_> = self._unused_keys.keys().cloned().collect();
-
-		if let Some(x) = self.env.as_ref() {
-			res.append(&mut x.unused_keys())
-		}
-
-		if let Some(x) = self.test.as_ref() {
-			res.append(&mut x.unused_keys())
-		}
-
+		res.append(&mut self.env.unused_keys());
+		res.append(&mut self.test.unused_keys());
 		res
 	}
 }
 
-#[derive(Default, Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct TestEnv {
+	/// Should the test be run sequentially
 	#[serde(default)]
 	pub sequential: bool,
 	#[serde(default)]
 	pub clean: bool,
 
-	pub namespace: Option<BoolOr<String>>,
-	pub database: Option<BoolOr<String>>,
+	#[serde(default)]
+	pub namespace: BoolOr<String>,
+	#[serde(default)]
+	pub database: BoolOr<String>,
 
 	pub auth: Option<TestAuth>,
 	pub signup: Option<SurrealObject>,
@@ -105,28 +73,17 @@ pub struct TestEnv {
 
 	#[serde(default)]
 	pub imports: Vec<String>,
-	pub timeout: Option<BoolOr<u64>>,
-	pub context_timeout: Option<BoolOr<u64>>,
-	pub capabilities: Option<BoolOr<Capabilities>>,
-
-	/// Backend-specific timeout overrides (in milliseconds).
-	/// These take precedence over the base `timeout` when running on the corresponding backend.
-	pub timeout_tikv: Option<BoolOr<u64>>,
-	pub timeout_rocksdb: Option<BoolOr<u64>>,
-	pub timeout_surrealkv: Option<BoolOr<u64>>,
-
-	/// Backend-specific context timeout overrides (in milliseconds).
-	/// These take precedence over the base `context_timeout` when running on the corresponding backend.
-	pub context_timeout_tikv: Option<BoolOr<u64>>,
-	pub context_timeout_rocksdb: Option<BoolOr<u64>>,
-	pub context_timeout_surrealkv: Option<BoolOr<u64>>,
+	#[serde(default)]
+	pub timeout: BoolOr<u64>,
+	#[serde(default)]
+	pub capabilities: BoolOr<Capabilities>,
 
 	/// Specifies which backends this test should run on.
 	/// If empty, the test runs on all backends.
 	/// If specified, the test only runs when the selected backend is in this list.
 	/// Valid values: "mem", "rocksdb", "surrealkv", "tikv"
 	#[serde(default)]
-	pub backend: Vec<String>,
+	pub backend: Vec<Backend>,
 
 	/// Whether the test requires MVCC versioning to be enabled on the datastore.
 	/// When true, the datastore is created with `?versioned=true` in the connection string.
@@ -135,7 +92,7 @@ pub struct TestEnv {
 	/// Planner strategies to run this test under.
 	/// Defaults to `["compute-only", "all-ro"]` when omitted; the test is
 	/// executed once per listed strategy.
-	#[serde(default)]
+	#[serde(default = "default_planner_strategy")]
 	pub planner_strategy: Vec<NewPlannerStrategyConfig>,
 
 	/// Whether EXPLAIN ANALYZE output omits elapsed durations, making
@@ -149,73 +106,47 @@ pub struct TestEnv {
 	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
+impl Default for TestEnv {
+	fn default() -> Self {
+		Self {
+			sequential: Default::default(),
+			clean: Default::default(),
+			namespace: Default::default(),
+			database: Default::default(),
+			auth: Default::default(),
+			signup: None,
+			signin: None,
+			imports: Default::default(),
+			timeout: Default::default(),
+			capabilities: Default::default(),
+			backend: Default::default(),
+			versioned: Default::default(),
+			planner_strategy: default_planner_strategy(),
+			redact_volatile_explain_attrs: Default::default(),
+			_unused_keys: Default::default(),
+		}
+	}
+}
+
 impl TestEnv {
 	/// Returns the namespace if the environment specifies one, none otherwise
 	///
 	/// Defaults to "test"
 	pub fn namespace(&self) -> Option<&str> {
-		if let Some(x) = &self.namespace {
-			x.as_ref().map(|x| x.as_str()).into_value("test")
-		} else {
-			Some("test")
-		}
+		self.namespace.as_ref().map(|x| x.as_str()).into_value(ENV_DEFAULT_NAMESPACE)
 	}
 
 	/// Returns the namespace if the environment specifies one, none otherwise
 	///
 	/// Defaults to "test"
 	pub fn database(&self) -> Option<&str> {
-		if let Some(x) = &self.database {
-			x.as_ref().map(|x| x.as_str()).into_value("test")
-		} else {
-			Some("test")
-		}
-	}
-
-	/// Returns the timeout for this test in milliseconds.
-	/// If a backend-specific timeout is set and matches the current backend, it takes precedence.
-	/// Falls back to the base timeout, defaulting to 1000ms.
-	pub fn timeout(&self, backend: Option<&str>) -> Option<u64> {
-		// Check for backend-specific override first
-		let override_timeout = match backend {
-			Some("tikv") => self.timeout_tikv,
-			Some("rocksdb") => self.timeout_rocksdb,
-			Some("surrealkv") => self.timeout_surrealkv,
-			_ => None,
-		};
-
-		if let Some(t) = override_timeout {
-			return t.into_value(1000);
-		}
-
-		// Fall back to base timeout
-		self.timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
-	}
-
-	/// Returns the context timeout for this test in milliseconds.
-	/// If a backend-specific context timeout is set and matches the current backend, it takes precedence.
-	/// Falls back to the base context_timeout, defaulting to 1000ms.
-	pub fn context_timeout(&self, backend: Option<&str>) -> Option<u64> {
-		// Check for backend-specific override first
-		let override_timeout = match backend {
-			Some("tikv") => self.context_timeout_tikv,
-			Some("rocksdb") => self.context_timeout_rocksdb,
-			Some("surrealkv") => self.context_timeout_surrealkv,
-			_ => None,
-		};
-
-		if let Some(t) = override_timeout {
-			return t.into_value(1000);
-		}
-
-		// Fall back to base context_timeout
-		self.context_timeout.map(|x| x.into_value(1000)).unwrap_or(Some(1000))
+		self.database.as_ref().map(|x| x.as_str()).into_value(ENV_DEFAULT_DATABASE)
 	}
 
 	pub fn unused_keys(&self) -> Vec<String> {
 		let mut res: Vec<_> = self._unused_keys.keys().map(|x| format!("env.{x}")).collect();
 
-		if let Some(BoolOr::Value(x)) = self.capabilities.as_ref() {
+		if let BoolOr::Value(x) = self.capabilities.as_ref() {
 			res.append(&mut x.unused_keys());
 		}
 
@@ -227,7 +158,7 @@ impl TestEnv {
 ///
 /// Maps to `surrealdb_core::dbs::NewPlannerStrategy` but uses shorter
 /// kebab-case names for TOML configuration.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NewPlannerStrategyConfig {
 	/// Try new planner, fall back on Unimplemented.
@@ -266,7 +197,9 @@ impl From<NewPlannerStrategy> for NewPlannerStrategyConfig {
 impl From<NewPlannerStrategyConfig> for NewPlannerStrategy {
 	fn from(strategy: NewPlannerStrategyConfig) -> Self {
 		match strategy {
-			NewPlannerStrategyConfig::BestEffortRo => NewPlannerStrategy::BestEffortReadOnlyStatements,
+			NewPlannerStrategyConfig::BestEffortRo => {
+				NewPlannerStrategy::BestEffortReadOnlyStatements
+			}
 			NewPlannerStrategyConfig::ComputeOnly => NewPlannerStrategy::ComputeOnly,
 			NewPlannerStrategyConfig::AllRo => NewPlannerStrategy::AllReadOnlyStatements,
 		}
@@ -373,6 +306,12 @@ pub enum BoolOr<T> {
 	Value(T),
 }
 
+impl<T> Default for BoolOr<T> {
+	fn default() -> Self {
+		BoolOr::Bool(true)
+	}
+}
+
 impl<'d, T: Deserialize<'d>> Deserialize<'d> for BoolOr<T> {
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
 	where
@@ -413,14 +352,21 @@ impl<T> BoolOr<T> {
 	}
 }
 
-#[derive(Default, Clone, Debug, Deserialize, Serialize)]
+fn t() -> bool {
+	true
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct TestDetails {
+	#[serde(default)]
 	pub reason: Option<String>,
-	run: Option<bool>,
-	issue: Option<u64>,
-	wip: Option<bool>,
-	pub fuzzing_reproduction: Option<String>,
+	#[serde(default = "t")]
+	pub run: bool,
+	#[serde(default)]
+	pub issue: Option<u64>,
+	#[serde(default)]
+	pub wip: bool,
 
 	#[serde(default)]
 	pub upgrade: bool,
@@ -430,6 +376,7 @@ pub struct TestDetails {
 	#[serde(default)]
 	pub importing_version: Option<VersionReq>,
 
+	#[serde(default)]
 	pub results: Option<TestDetailsResults>,
 
 	#[serde(skip_serializing)]
@@ -437,22 +384,23 @@ pub struct TestDetails {
 	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
+impl Default for TestDetails {
+	fn default() -> Self {
+		Self {
+			reason: Default::default(),
+			run: true,
+			issue: Default::default(),
+			wip: false,
+			upgrade: Default::default(),
+			version: Default::default(),
+			importing_version: Default::default(),
+			results: Default::default(),
+			_unused_keys: Default::default(),
+		}
+	}
+}
+
 impl TestDetails {
-	/// Returns whether this test should be run.
-	pub fn should_run(&self) -> bool {
-		self.run.unwrap_or(true)
-	}
-
-	/// Returns the whether this test is tests a work in progress feature.
-	pub fn is_wip(&self) -> bool {
-		self.wip.unwrap_or(false)
-	}
-
-	/// Returns the issue number for this test if any exists.
-	pub fn issue(&self) -> Option<u64> {
-		self.issue
-	}
-
 	pub fn unused_keys(&self) -> Vec<String> {
 		let mut res: Vec<_> = self._unused_keys.keys().map(|x| format!("test.{x}")).collect();
 
@@ -568,6 +516,7 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			flexible_record_id: true,
 			files_enabled: true,
 			surrealism_enabled: true,
+			json_string_escapes: false,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
@@ -630,6 +579,7 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			flexible_record_id: true,
 			files_enabled: true,
 			surrealism_enabled: true,
+			json_string_escapes: false,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
@@ -672,6 +622,7 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			flexible_record_id: true,
 			files_enabled: true,
 			surrealism_enabled: true,
+			json_string_escapes: false,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
@@ -679,10 +630,10 @@ impl<'de> Deserialize<'de> for SurrealObject {
 		})
 		.map_err(<D::Error as serde::de::Error>::custom)?;
 
-		v.into_object().map(SurrealObject).or_else(|err| {
-			Err(<D::Error as serde::de::Error>::custom(format_args!(
+		v.into_object().map(SurrealObject).map_err(|err| {
+			<D::Error as serde::de::Error>::custom(format_args!(
 				"Expected a object, found '{source}': {err}"
-			)))
+			))
 		})
 	}
 }
@@ -724,28 +675,64 @@ pub enum TestAuth {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Capabilities {
-	pub scripting: Option<bool>,
-	pub quest_access: Option<bool>,
-	pub live_query_notifications: Option<bool>,
+	#[serde(default = "t")]
+	pub scripting: bool,
+	#[serde(default = "t")]
+	pub quest_access: bool,
+	#[serde(default = "t")]
+	pub live_query_notifications: bool,
 
-	pub allow_functions: Option<BoolOr<Vec<SchemaTarget<FuncTarget>>>>,
-	pub deny_functions: Option<BoolOr<Vec<SchemaTarget<FuncTarget>>>>,
+	#[serde(default)]
+	pub allow_functions: BoolOr<Vec<SchemaTarget<FuncTarget>>>,
+	#[serde(default = "bool_or_f")]
+	pub deny_functions: BoolOr<Vec<SchemaTarget<FuncTarget>>>,
 
-	pub allow_net: Option<BoolOr<Vec<SchemaTarget<NetTarget>>>>,
-	pub deny_net: Option<BoolOr<Vec<SchemaTarget<NetTarget>>>>,
+	#[serde(default)]
+	pub allow_net: BoolOr<Vec<SchemaTarget<NetTarget>>>,
+	#[serde(default = "bool_or_f")]
+	pub deny_net: BoolOr<Vec<SchemaTarget<NetTarget>>>,
 
-	pub allow_rpc: Option<BoolOr<Vec<SchemaTarget<MethodTarget>>>>,
-	pub deny_rpc: Option<BoolOr<Vec<SchemaTarget<MethodTarget>>>>,
+	#[serde(default)]
+	pub allow_rpc: BoolOr<Vec<SchemaTarget<MethodTarget>>>,
+	#[serde(default = "bool_or_f")]
+	pub deny_rpc: BoolOr<Vec<SchemaTarget<MethodTarget>>>,
 
-	pub allow_http: Option<BoolOr<Vec<SchemaTarget<RouteTarget>>>>,
-	pub deny_http: Option<BoolOr<Vec<SchemaTarget<RouteTarget>>>>,
+	#[serde(default)]
+	pub allow_http: BoolOr<Vec<SchemaTarget<RouteTarget>>>,
+	#[serde(default = "bool_or_f")]
+	pub deny_http: BoolOr<Vec<SchemaTarget<RouteTarget>>>,
 
-	pub allow_experimental: Option<BoolOr<Vec<SchemaTarget<ExperimentalTarget>>>>,
-	pub deny_experimental: Option<BoolOr<Vec<SchemaTarget<ExperimentalTarget>>>>,
+	#[serde(default)]
+	pub allow_experimental: BoolOr<Vec<SchemaTarget<ExperimentalTarget>>>,
+	#[serde(default = "bool_or_f")]
+	pub deny_experimental: BoolOr<Vec<SchemaTarget<ExperimentalTarget>>>,
 
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
+}
+
+impl Default for Capabilities {
+	fn default() -> Self {
+		Self {
+			scripting: true,
+			quest_access: true,
+			live_query_notifications: true,
+
+			allow_functions: Default::default(),
+			deny_functions: BoolOr::Bool(false),
+
+			allow_net: Default::default(),
+			deny_net: BoolOr::Bool(false),
+			allow_rpc: Default::default(),
+			deny_rpc: BoolOr::Bool(false),
+			allow_http: Default::default(),
+			deny_http: BoolOr::Bool(false),
+			allow_experimental: Default::default(),
+			deny_experimental: BoolOr::Bool(false),
+			_unused_keys: Default::default(),
+		}
+	}
 }
 
 #[derive(Clone, Debug)]

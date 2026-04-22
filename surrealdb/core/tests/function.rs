@@ -36,7 +36,7 @@ macro_rules! assert_delta {
 
 #[tokio::test]
 async fn error_on_invalid_function() -> Result<()> {
-	let dbs = new_ds("test", "test").await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let query = "`this is an invalid function name`()";
 	let session = Session::owner().with_ns("test").with_db("test");
 	let err = dbs.execute(query, &session, None).await.unwrap_err();
@@ -3879,7 +3879,7 @@ pub async fn function_http_disabled() -> Result<()> {
 #[tokio::test]
 async fn function_outside_database() -> Result<()> {
 	let sql = "RETURN fn::does_not_exist();";
-	let dbs = new_ds("test", "test").await?;
+	let (_, dbs) = new_ds("test", "test", false).await?;
 	let ses = Session::owner().with_ns("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 

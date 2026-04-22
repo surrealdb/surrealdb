@@ -130,7 +130,7 @@ impl Collectable {
 		match self {
 			// Graph edge traversal results - requires special graph parsing and record lookup
 			Self::Lookup(doc_ctx, kind, key) => {
-				Self::process_lookup(doc_ctx, txn, kind, key, rid_only).await
+				Self::process_lookup(doc_ctx, opt, txn, kind, key, rid_only).await
 			}
 			// Range scan results - lightweight processing for range queries
 			Self::RangeKey(doc_ctx, key) => Self::process_range_key(doc_ctx, key).await,
@@ -173,7 +173,8 @@ impl Collectable {
 
 	#[instrument(level = "trace", skip_all)]
 	async fn process_lookup(
-		doc_ctx: NsDbTbCtx,
+		mut doc_ctx: NsDbTbCtx,
+		opt: &Options,
 		txn: &Transaction,
 		kind: LookupKind,
 		key: Key,
@@ -190,6 +191,30 @@ impl Collectable {
 				(refe.ft, refe.fk)
 			}
 		};
+
+		// Graph/reference keys may point to a table different from the originating
+		// vertex table stored in doc_ctx (e.g. edge tables during cascade delete).
+		// Rebuild the context so downstream processing (events, views, lives,
+		// changefeeds, field validation) uses the correct table definition.
+		if ft.as_ref() != doc_ctx.tb.name {
+			let tb = txn
+				.get_or_add_tb(None, &doc_ctx.ns.name, &doc_ctx.db.name, ft.as_ref(), None)
+				.await?;
+			let fields = txn
+				.all_tb_fields(
+					doc_ctx.ns.namespace_id,
+					doc_ctx.db.database_id,
+					ft.as_ref(),
+					opt.version,
+				)
+				.await?;
+			doc_ctx = NsDbTbCtx {
+				ns: Arc::clone(&doc_ctx.ns),
+				db: Arc::clone(&doc_ctx.db),
+				tb,
+				fields,
+			};
+		}
 
 		// Fetch the data from the store
 		let record = if rid_only {
@@ -597,7 +622,7 @@ pub(super) trait Collector {
 			//   every document.
 			// - This keeps the hot path allocation-free and avoids repeated hash lookups inside
 			//   tight iteration loops.
-			let mut ctx = Context::new(ctx);
+			let mut ctx = Context::new_child(ctx);
 			ctx.set_query_executor(exe.clone());
 			return Cow::Owned(ctx.freeze());
 		}
@@ -670,7 +695,7 @@ pub(super) trait Collector {
 					// Attach the table-specific QueryExecutor to the Context to avoid
 					// per-record lookups in the QueryPlanner during index scans.
 					// This significantly reduces overhead inside tight iterator loops.
-					let mut ctx = Context::new(ctx);
+					let mut ctx = Context::new_child(ctx);
 					ctx.set_query_executor(exe.clone());
 					let ctx = ctx.freeze();
 					return self.collect_index_items(&ctx, doc_ctx, irf, rs).await;

@@ -102,20 +102,28 @@ pub(crate) struct CursorDoc {
 }
 
 impl CursorDoc {
-	/// Updates the `"parent"` doc field for statements with a meaning full
-	/// document.
-	pub async fn update_parent<F, R>(ctx: &FrozenContext, doc: Option<&CursorDoc>, f: F) -> R
-	where
-		F: AsyncFnOnce(Cow<FrozenContext>) -> R,
-	{
-		let ctx = if let Some(doc) = doc {
-			let mut new_ctx = Context::new(ctx);
+	/// Context with `$parent` bound to the enclosing row (same binding as
+	/// [`Self::update_parent`] applies before running nested statement bodies).
+	pub(crate) fn with_parent_ctx<'a>(
+		ctx: &'a FrozenContext,
+		doc: Option<&CursorDoc>,
+	) -> Cow<'a, FrozenContext> {
+		if let Some(doc) = doc {
+			let mut new_ctx = Context::new_child(ctx);
 			new_ctx.add_value("parent", Arc::new(doc.doc.as_ref().clone()));
 			Cow::Owned(new_ctx.freeze())
 		} else {
 			Cow::Borrowed(ctx)
-		};
+		}
+	}
 
+	/// Updates the `"parent"` doc field for statements with a meaning full
+	/// document.
+	pub async fn update_parent<'a, F, R>(ctx: &'a FrozenContext, doc: Option<&CursorDoc>, f: F) -> R
+	where
+		F: AsyncFnOnce(Cow<'a, FrozenContext>) -> R,
+	{
+		let ctx = Self::with_parent_ctx(ctx, doc);
 		f(ctx).await
 	}
 }
@@ -471,7 +479,7 @@ impl Document {
 						// Get the initial value
 						let val = Arc::new(full.doc.as_ref().pick(k));
 						// Configure the context
-						let mut ctx = Context::new(ctx);
+						let mut ctx = Context::new_child(ctx);
 						ctx.add_value("value", val);
 						let ctx = ctx.freeze();
 						// Process the PERMISSION clause
@@ -565,6 +573,10 @@ impl Document {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb().await?;
+		// Versioned reads bypass the cache
+		if opt.version.is_some() {
+			return ctx.tx().all_tb_views(ns, db, &tb.name, opt.version).await;
+		}
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -575,14 +587,14 @@ impl Document {
 				match cache.get(&key) {
 					Some(val) => val.try_into_fts(),
 					None => {
-						let val = ctx.tx().all_tb_views(ns, db, &tb.name).await?;
+						let val = ctx.tx().all_tb_views(ns, db, &tb.name, None).await?;
 						cache.insert(key, cache::ds::Entry::Fts(val.clone()));
 						Ok(val)
 					}
 				}
 			}
 			// No cache is present on the context
-			None => ctx.tx().all_tb_views(ns, db, &tb.name).await,
+			None => ctx.tx().all_tb_views(ns, db, &tb.name, None).await,
 		}
 	}
 
@@ -600,6 +612,10 @@ impl Document {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb().await?;
+		// Versioned reads bypass the cache
+		if opt.version.is_some() {
+			return ctx.tx().all_tb_events(ns, db, &tb.name, opt.version).await;
+		}
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -610,7 +626,7 @@ impl Document {
 				match cache.get(&key) {
 					Some(val) => val.try_into_evs(),
 					None => {
-						let val = ctx.tx().all_tb_events(ns, db, &tb.name).await?;
+						let val = ctx.tx().all_tb_events(ns, db, &tb.name, None).await?;
 						cache.insert(key, cache::ds::Entry::Evs(val.clone()));
 						Ok(val)
 					}
@@ -618,7 +634,7 @@ impl Document {
 			}
 
 			// No cache is present on the context
-			None => ctx.tx().all_tb_events(ns, db, &tb.name).await,
+			None => ctx.tx().all_tb_events(ns, db, &tb.name, None).await,
 		}
 	}
 
@@ -649,6 +665,10 @@ impl Document {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb().await?;
+		// Versioned reads bypass the cache
+		if opt.version.is_some() {
+			return ctx.tx().all_tb_indexes(ns, db, &tb.name, opt.version).await;
+		}
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -659,14 +679,14 @@ impl Document {
 				match cache.get(&key) {
 					Some(val) => val.try_into_ixs(),
 					None => {
-						let val = ctx.tx().all_tb_indexes(ns, db, &tb.name).await?;
+						let val = ctx.tx().all_tb_indexes(ns, db, &tb.name, None).await?;
 						cache.insert(key, cache::ds::Entry::Ixs(val.clone()));
 						Ok(val)
 					}
 				}
 			}
 			// No cache is present on the context
-			None => ctx.tx().all_tb_indexes(ns, db, &tb.name).await,
+			None => ctx.tx().all_tb_indexes(ns, db, &tb.name, None).await,
 		}
 	}
 
@@ -684,6 +704,10 @@ impl Document {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the document table
 		let tb = self.tb().await?;
+		// Versioned reads bypass the cache
+		if opt.version.is_some() {
+			return ctx.tx().all_tb_lives(ns, db, &tb.name, opt.version).await;
+		}
 		// Get the cache from the context
 		match ctx.get_cache() {
 			// A cache is present on the context
@@ -696,14 +720,14 @@ impl Document {
 				match cache.get(&key) {
 					Some(val) => val.try_into_lvs(),
 					None => {
-						let val = ctx.tx().all_tb_lives(ns, db, &tb.name).await?;
+						let val = ctx.tx().all_tb_lives(ns, db, &tb.name, None).await?;
 						cache.insert(key, cache::ds::Entry::Lvs(val.clone()));
 						Ok(val)
 					}
 				}
 			}
 			// No cache is present on the context
-			None => ctx.tx().all_tb_lives(ns, db, &tb.name).await,
+			None => ctx.tx().all_tb_lives(ns, db, &tb.name, None).await,
 		}
 	}
 }

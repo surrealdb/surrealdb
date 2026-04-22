@@ -23,13 +23,13 @@ value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, tim
 value = "[{ detail: { plan: { index: 'time', operator: 'Order' }, table: 'session' }, operation: 'Iterate Index' }, { detail: { limit: 3, type: 'MemoryOrderedLimit' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { CancelOnLimit: 3 }, operation: 'StartLimitStrategy' }, { detail: { count: 0 }, operation: 'Fetch' }]"
 
 [[test.results]]
-value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }]"
+value = "[{ id: session:3, other: 'test' }, { id: session:4, time: NULL }, { id: session:2, time: d'2024-06-30T23:00:00Z' }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'time', operator: 'Order' }, table: 'session' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 4 }, operation: 'Fetch' }]"
+value = "[{ detail: { plan: { index: 'time', operator: 'Order' }, table: 'session' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 6 }, operation: 'Fetch' }]"
 
 [[test.results]]
-value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
+value = "[{ id: session:3, other: 'test' }, { id: session:4, time: NULL }, { id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
 
 [[test.results]]
 value = "[{ detail: { plan: { index: 'time', operator: 'ReverseOrder' }, table: 'session' }, operation: 'Iterate Index' }, { detail: { limit: 3, type: 'MemoryOrderedLimit' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { CancelOnLimit: 3 }, operation: 'StartLimitStrategy' }, { detail: { count: 0 }, operation: 'Fetch' }]"
@@ -38,10 +38,16 @@ value = "[{ detail: { plan: { index: 'time', operator: 'ReverseOrder' }, table: 
 value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'time', operator: 'ReverseOrder' }, table: 'session' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 4 }, operation: 'Fetch' }]"
+value = "[{ detail: { plan: { index: 'time', operator: 'ReverseOrder' }, table: 'session' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 6 }, operation: 'Fetch' }]"
 
 [[test.results]]
-value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:2, time: d'2024-06-30T23:00:00Z' }]"
+value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:4, time: NULL }, { id: session:3, other: 'test' }]"
+
+[[test.results]]
+value = "[{ id: session:3, other: 'test' }]"
+
+[[test.results]]
+value = "[{ id: session:4, time: NULL }]"
 
 */
 
@@ -70,3 +76,7 @@ SELECT * FROM session ORDER BY time DESC LIMIT 3 EXPLAIN FULL;
 SELECT * FROM session ORDER BY time DESC LIMIT 3;
 SELECT * FROM session ORDER BY time DESC EXPLAIN FULL;
 SELECT * FROM session ORDER BY time DESC;
+
+-- Equality on NONE/NULL (exercises UniqueEqualThingIterator PrefixScan path)
+SELECT * FROM session WHERE time = NONE;
+SELECT * FROM session WHERE time = NULL;

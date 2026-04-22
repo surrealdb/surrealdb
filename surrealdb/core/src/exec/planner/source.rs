@@ -205,6 +205,7 @@ impl<'ctx> Planner<'ctx> {
 		crate::expr::lookup::Lookup {
 			kind,
 			expr,
+			only: _,
 			what,
 			cond,
 			split,
@@ -253,8 +254,13 @@ impl<'ctx> Planner<'ctx> {
 					edge_tables.push(spec);
 				}
 
-				let scan =
-					GraphEdgeScan::new(input, LookupDirection::from(dir), edge_tables, output_mode);
+				let scan = GraphEdgeScan::new(
+					input,
+					LookupDirection::from(dir),
+					edge_tables,
+					output_mode,
+					self.version.clone(),
+				);
 				// Push limit into the scan when no filter/sort/split would
 				// change the result count. This avoids scanning all edges
 				// when only a few are needed. When START is present, add
@@ -320,6 +326,7 @@ impl<'ctx> Planner<'ctx> {
 					ref_output_mode,
 					range_start,
 					range_end,
+					self.version.clone(),
 				))
 			}
 		};
