@@ -9,7 +9,8 @@ reason = "Nested .* destructure inside a block must resolve record links"
 issue = 6948
 
 [[test.results]]
-value = "{ city: { name: 'New York' }, name: 'Alice' }"
+skip-record-id-key = true
+value = "{ city: { id: city:s1nxmjwxsnskoziryr7v, name: 'New York' }, name: 'Alice' }"
 */
 
 {
