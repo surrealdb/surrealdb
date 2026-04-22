@@ -184,16 +184,8 @@ impl Document {
 
 		if let Ok(rid) = self.id() {
 			let fields = self.fd(&ctx, &opt).await?;
-			Document::computed_fields_inner(
-				stk,
-				&ctx,
-				&opt,
-				rid.as_ref(),
-				fields.as_ref(),
-				&mut doc,
-				None,
-			)
-			.await?;
+			Document::computed_fields_inner(stk, &ctx, &opt, &rid, fields.as_ref(), &mut doc, None)
+				.await?;
 		};
 
 		// First of all, let's check to see if the WHERE
