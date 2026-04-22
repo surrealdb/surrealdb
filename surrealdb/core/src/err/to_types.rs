@@ -3,13 +3,16 @@
 //! This is the single place that defines how embedded database errors are mapped to the
 //! public types-layer error used over RPC and in the SDK.
 
+use std::error::Error as StdError;
+
 use surrealdb_types::{
-	AlreadyExistsError, AuthError, ConfigurationError, Error as TypesError, NotAllowedError,
-	NotFoundError, QueryError, SerializationError, ToSql, ValidationError,
+	AlreadyExistsError, AuthError, ConfigurationError, ConnectionError, Error as TypesError,
+	NotAllowedError, NotFoundError, QueryError, SerializationError, ToSql, ValidationError,
 };
 
 use crate::err::Error;
 use crate::iam::Error as IamErrorKind;
+use crate::kvs::Error as KvsError;
 
 /// Converts a core database error into the public wire-friendly error type.
 ///
@@ -20,7 +23,8 @@ use crate::iam::Error as IamErrorKind;
 pub fn into_types_error(error: Error) -> TypesError {
 	use Error::*;
 	let message = error.to_string();
-	match error {
+	let source = error.source().map(|s| TypesError::internal(s.to_string()));
+	let mapped = match error {
 		// Auth
 		ExpiredSession => TypesError::not_allowed(message, AuthError::SessionExpired),
 		ExpiredToken => TypesError::not_allowed(message, AuthError::TokenExpired),
@@ -127,6 +131,10 @@ pub fn into_types_error(error: Error) -> TypesError {
 		QueryNotExecuted {
 			message,
 		} => TypesError::query(message, QueryError::NotExecuted),
+		AccessRecordSignupQueryFailed | AccessRecordSigninQueryFailed => {
+			TypesError::query(message, None)
+		}
+		AccessRecordNoSignup | AccessRecordNoSignin => TypesError::query(message, None),
 
 		// Serialization
 		Unencodable => TypesError::serialization(message, None),
@@ -275,12 +283,40 @@ pub fn into_types_error(error: Error) -> TypesError {
 		// Thrown
 		Thrown(..) => TypesError::thrown(message),
 
+		// Connection/transport (remote request failure)
+		Http(..) => TypesError::connection(message, ConnectionError::ConnectionFailed),
+
+		// Not found (no record returned)
+		NoRecordFound => TypesError::not_found(message, None),
+
+		// KVS: preserve type information for wire and client retry/UX
+		Kvs(kvs_err) => match kvs_err {
+			KvsError::TransactionConflict(_) => {
+				TypesError::query(message, QueryError::TransactionConflict)
+			}
+			KvsError::ConnectionFailed(_) => {
+				TypesError::connection(message, ConnectionError::ConnectionFailed)
+			}
+			KvsError::TransactionKeyAlreadyExists => TypesError::already_exists(message, None),
+			KvsError::ReadAndDeleteOnly => TypesError::not_allowed(message, None),
+			KvsError::TransactionTooLarge | KvsError::TransactionKeyTooLarge => {
+				TypesError::validation(message, ValidationError::InvalidParams)
+			}
+			KvsError::TransactionFinished
+			| KvsError::TransactionReadonly
+			| KvsError::TransactionConditionNotMet => TypesError::query(message, None),
+			KvsError::UnsupportedVersionedQueries => TypesError::configuration(message, None),
+			KvsError::Datastore(_)
+			| KvsError::Transaction(_)
+			| KvsError::TimestampInvalid(_)
+			| KvsError::Internal(_)
+			| KvsError::CompactionNotSupported => TypesError::internal(message),
+		},
+
 		// Internal and everything else
-		Kvs(..) => TypesError::internal(message),
 		Internal(..) => TypesError::internal(message),
 		Unimplemented(..) => TypesError::internal(message),
 		Io(..) => TypesError::internal(message),
-		Http(..) => TypesError::internal(message),
 		Channel(..) => TypesError::internal(message),
 		CorruptedIndex(_) => TypesError::internal(message),
 		NoIndexFoundForMatch {
@@ -291,9 +327,14 @@ pub fn into_types_error(error: Error) -> TypesError {
 		FstError(_) => TypesError::internal(message),
 		ObsError(_) => TypesError::internal(message),
 		TimestampOverflow(..) => TypesError::internal(message),
-		NoRecordFound => TypesError::internal(message),
 		ApiError(error) => error.into_types_error(),
 
 		_ => TypesError::internal(message),
+	};
+
+	if let Some(cause) = source {
+		mapped.with_cause(cause)
+	} else {
+		mapped
 	}
 }

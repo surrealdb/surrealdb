@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::ctx::{Context, FrozenContext};
+use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::plan_or_compute::{block_required_context, collect_stream, legacy_compute};
@@ -144,9 +144,6 @@ async fn execute_block_with_context(
 	let mut current_ctx = initial_ctx.clone();
 	let mut result = Value::None;
 
-	// Track a mutable frozen context for legacy compute fallback
-	let mut legacy_ctx: Option<FrozenContext> = None;
-
 	for expr in block.0.iter() {
 		// Check for cancellation between statements
 		if current_ctx.cancellation().is_cancelled() {
@@ -177,7 +174,7 @@ async fn execute_block_with_context(
 					tracing::warn!("PlannerUnimplemented fallback in sequence: {msg}");
 				}
 				// Fallback to legacy compute path
-				let (opt, frozen) = get_legacy_context_cached(&current_ctx, &mut legacy_ctx)
+				let (opt, frozen) = legacy_context_for_fallback(&current_ctx)
 					.context("Legacy compute fallback context unavailable")?;
 
 				if let Expr::Let(set_stmt) = expr {
@@ -185,12 +182,6 @@ async fn execute_block_with_context(
 
 					// Update context with the new variable
 					current_ctx = current_ctx.with_param(set_stmt.name.clone(), value.clone());
-					// Update the legacy context too
-					if let Some(ref mut ctx) = legacy_ctx {
-						let mut new_ctx = Context::new_child(ctx);
-						new_ctx.add_value(set_stmt.name.clone(), Arc::new(value));
-						*ctx = new_ctx.freeze();
-					}
 					result = Value::None;
 				} else {
 					result = legacy_compute(expr, &frozen, opt, None).await?;
@@ -203,22 +194,18 @@ async fn execute_block_with_context(
 	Ok((result, current_ctx))
 }
 
-/// Get the Options and FrozenContext for legacy compute fallback, with caching.
+/// Options and frozen context for [`legacy_compute`] when the planner falls back.
 ///
-/// Sequence needs a cached legacy context because LET statements may update it
-/// incrementally across iterations of the block.
-fn get_legacy_context_cached<'a>(
-	exec_ctx: &'a ExecutionContext,
-	cached_ctx: &mut Option<FrozenContext>,
-) -> Result<(&'a crate::dbs::Options, FrozenContext), Error> {
+/// Always clones from [`ExecutionContext`]: LET bindings from the planned path
+/// (`with_param` / `output_context`) must be visible to legacy `Expr::compute`
+/// (issue #7131).
+fn legacy_context_for_fallback(
+	exec_ctx: &ExecutionContext,
+) -> Result<(&crate::dbs::Options, FrozenContext), Error> {
 	let options = exec_ctx.options().ok_or_else(|| {
 		Error::Internal("Options not available for legacy compute fallback".into())
 	})?;
-
-	let frozen = cached_ctx.clone().unwrap_or_else(|| exec_ctx.ctx().clone());
-	*cached_ctx = Some(frozen.clone());
-
-	Ok((options, frozen))
+	Ok((options, exec_ctx.ctx().clone()))
 }
 
 impl ToSql for SequencePlan {

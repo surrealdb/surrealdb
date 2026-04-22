@@ -1,5 +1,5 @@
 use http::StatusCode;
-use surrealdb_types::Error as TypesError;
+use surrealdb_types::{Error as TypesError, SerializationError};
 use thiserror::Error;
 
 use crate::expr::Bytesize;
@@ -133,12 +133,20 @@ impl ApiError {
 		match &self {
 			Self::NotFound => TypesError::not_found(msg, None),
 			Self::PermissionDenied => TypesError::not_allowed(msg, None),
+			Self::BodyDecodeFailure | Self::InvalidApiResponse(_) => {
+				TypesError::serialization(msg, SerializationError::Deserialization)
+			}
+			Self::BodyEncodeFailure => {
+				TypesError::serialization(msg, SerializationError::Serialization)
+			}
+			Self::MiddlewareFunctionNotFound {
+				..
+			} => TypesError::configuration(msg, None),
 			Self::MiddlewareRequestParseFailure {
 				..
 			}
 			| Self::FinalActionRequestParseFailure
 			| Self::InvalidRequestBody
-			| Self::BodyDecodeFailure
 			| Self::InvalidFormat
 			| Self::MissingFormat
 			| Self::InvalidStatusCode(_)
@@ -152,7 +160,10 @@ impl ApiError {
 			| Self::InvalidRequestBodyType {
 				..
 			}
-			| Self::RequestBodyNotBinary => TypesError::validation(msg, None),
+			| Self::RequestBodyNotBinary
+			| Self::RequestBodyTooLarge(_)
+			| Self::NoOutputStrategy
+			| Self::UnsupportedContentType(_) => TypesError::validation(msg, None),
 			_ => TypesError::internal(msg),
 		}
 	}

@@ -17,7 +17,7 @@ license-file.workspace = true
 # Public features
 default = ["protocol-ws", "rustls"]
 allocator = ["surrealdb-core/allocator"]
-protocol-http = ["dep:reqwest"]
+protocol-http = ["dep:reqwest", "surrealdb-types/reqwest"]
 protocol-ws = ["dep:tokio-tungstenite", "tokio/time"]
 kv-mem = ["surrealdb-core/kv-mem", "tokio/time"]
 kv-indxdb = ["surrealdb-core/kv-indxdb"]
@@ -58,7 +58,7 @@ targets = []
 [dependencies]
 # workspace internal dependencies
 surrealdb-core = { workspace = true, default-features = false }
-surrealdb-types.workspace = true
+surrealdb-types = { workspace = true, features = ["convert"] }
 surrealdb-types-derive = { workspace = true, features = ["sdk-path"] }
 
 # Other crates (anyhow used for import stream compat with core's execute_import)

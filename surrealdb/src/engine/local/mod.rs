@@ -524,7 +524,7 @@ async fn export_ml(
 		.map_err(|e| crate::Error::internal(e.to_string()))?
 	else {
 		// Attempt to get the model definition
-		return Err(crate::Error::internal("Model not found".to_string()));
+		return Err(crate::Error::not_found("Model not found".to_string(), None));
 	};
 	// Export the file data in to the store
 	let mut data = surrealdb_core::obs::stream(model.hash.clone())
@@ -589,7 +589,7 @@ async fn router(
 			let signup_data = {
 				iam::signup::signup(kvs, &mut *state.session.write().await, credentials.into())
 					.await
-					.map_err(|e| TypesError::not_allowed(e.to_string(), None))?
+					.map_err(surrealdb_core::err::anyhow_to_types_error)?
 			};
 			let token = match signup_data {
 				iam::Token::Access(token) => Token {
@@ -614,7 +614,7 @@ async fn router(
 			let signin_data = {
 				iam::signin::signin(kvs, &mut *state.session.write().await, credentials.into())
 					.await
-					.map_err(|e| TypesError::not_allowed(e.to_string(), None))?
+					.map_err(surrealdb_core::err::anyhow_to_types_error)?
 			};
 			let token = match signin_data {
 				iam::Token::Access(token) => Token {

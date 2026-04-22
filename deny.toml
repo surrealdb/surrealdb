@@ -66,7 +66,12 @@ yanked = "warn"
 #   handler calling thread_rng while reseeding). Transitive rand 0.7/0.8 remain via surrealdb-tikv-client
 #   (fail, direct rand dep) and other crates on rand 0.8 until those dependencies move to rand
 #   >=0.9.3 or >=0.10.1. The lockfile uses rand 0.9.3 where the 0.9 series is selected.
-ignore = ["RUSTSEC-2025-0134", "RUSTSEC-2025-0141", "RUSTSEC-2023-0071", "RUSTSEC-2024-0436", "RUSTSEC-2026-0097"]
+# - for RUSTSEC-2026-0098 and RUSTSEC-2026-0099, rustls-webpki 0.101.7 has name-constraint
+#   handling bugs (URI names accepted, wildcard DNS names accepted under subtree constraints).
+#   The fix requires >=0.103.12, but rustls-webpki 0.101.x is pinned transitively via
+#   surrealdb-tikv-client -> tonic 0.10.2 -> rustls 0.21.12. Remove once surrealdb-tikv-client
+#   moves to a tonic version that uses rustls 0.23+ (rustls-webpki >=0.103.12).
+ignore = ["RUSTSEC-2025-0134", "RUSTSEC-2025-0141", "RUSTSEC-2023-0071", "RUSTSEC-2024-0436", "RUSTSEC-2026-0097", "RUSTSEC-2026-0098", "RUSTSEC-2026-0099"]
 
 # --------------------------------------------------
 # LICENSES

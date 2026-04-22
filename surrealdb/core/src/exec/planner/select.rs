@@ -1071,8 +1071,8 @@ impl<'ctx> Planner<'ctx> {
 		group: Option<&crate::expr::group::Groups>,
 		split: Option<&crate::expr::split::Splits>,
 	) -> Option<std::collections::HashSet<String>> {
-		use crate::expr::Part;
 		use crate::expr::visit::{Visit, Visitor};
+		use crate::expr::{Expr, Part};
 
 		// Check for SELECT * (wildcard) -- need all fields
 		match fields {
@@ -1096,11 +1096,28 @@ impl<'ctx> Planner<'ctx> {
 			type Error = std::convert::Infallible;
 
 			fn visit_idiom(&mut self, idiom: &crate::expr::Idiom) -> Result<(), Self::Error> {
-				if let Some(Part::Field(name)) = idiom.0.first() {
+				// `$parent.field` / `$this.field` use `Part::Start(Expr::Param(...))`; the
+				// first segment is a correlation anchor, not a table column. Counting those
+				// as ordinary field names breaks selective scans (e.g. `$parent.refs` would
+				// omit `refs`) — issue #7154. Bare identifiers `parent` / `this` are **not**
+				// correlation anchors: they can be real column names (`parent.sub`).
+				let parts = idiom.0.as_slice();
+				if let Some(Part::Start(Expr::Param(p))) = parts.first()
+					&& matches!(p.as_str(), "parent" | "this")
+				{
+					for p in parts.iter().skip(1) {
+						if let Part::Field(name) = p {
+							self.fields.insert(name.clone());
+						}
+						self.visit_part(p)?;
+					}
+					return Ok(());
+				}
+
+				if let Some(Part::Field(name)) = parts.first() {
 					self.fields.insert(name.clone());
 				}
-				// Walk nested parts for embedded expressions
-				for p in idiom.0.iter() {
+				for p in parts.iter() {
 					self.visit_part(p)?;
 				}
 				Ok(())

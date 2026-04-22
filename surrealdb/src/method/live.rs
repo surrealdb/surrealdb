@@ -6,6 +6,7 @@ use std::task::{Context, Poll};
 
 use async_channel::Receiver;
 use futures::StreamExt;
+use surrealdb_types::{ConfigurationError, QueryError, SerializationError, ValidationError};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use uuid::Uuid;
@@ -34,9 +35,10 @@ where
 	Box::pin(async move {
 		let router = client.inner.router.extract()?;
 		if !router.features.contains(&ExtraFeatures::LiveQueries) {
-			return Err(Error::internal(
+			return Err(Error::configuration(
 				"The protocol or storage engine does not support live queries on this architecture"
 					.to_string(),
+				ConfigurationError::LiveQueryNotSupported,
 			));
 		}
 
@@ -59,10 +61,16 @@ where
 				"LIVE SELECT * FROM $_table WHERE id = $_record_id".to_string()
 			}
 			Resource::Object(_) => {
-				return Err(Error::internal("Live queries on objects not supported".to_string()));
+				return Err(Error::validation(
+					"Live queries on objects not supported".to_string(),
+					ValidationError::InvalidParams,
+				));
 			}
 			Resource::Array(_) => {
-				return Err(Error::internal("Live queries on arrays not supported".to_string()));
+				return Err(Error::validation(
+					"Live queries on arrays not supported".to_string(),
+					ValidationError::InvalidParams,
+				));
 			}
 			Resource::Range(query_range) => {
 				// For live queries with ranges, we can't use the range in FROM clause
@@ -133,10 +141,9 @@ where
 			.await?;
 
 		// Get the first result which should be the UUID
-		let result = results
-			.into_iter()
-			.next()
-			.ok_or_else(|| Error::internal("LIVE query returned no results".to_string()))?;
+		let result = results.into_iter().next().ok_or_else(|| {
+			Error::query("LIVE query returned no results".to_string(), QueryError::NotExecuted)
+		})?;
 
 		let id = match result.result? {
 			Value::Uuid(id) => *id,
@@ -372,7 +379,10 @@ where
 				data,
 				action,
 			})),
-			Err(error) => Some(Err(Error::internal(error.to_string()))),
+			Err(error) => Some(Err(Error::serialization(
+				error.to_string(),
+				SerializationError::Deserialization,
+			))),
 		},
 	}
 }

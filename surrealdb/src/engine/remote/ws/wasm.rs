@@ -167,7 +167,13 @@ pub(crate) async fn run_router(
 	let socket = match connect_with_protocols(ws_url, &["flatbuffers"]).await {
 		Ok(socket) => socket,
 		Err(error) => {
-			conn_tx.send(Err(Error::internal(format!("WebSocket error: {}", error)))).await.ok();
+			conn_tx
+				.send(Err(Error::connection(
+					format!("WebSocket error: {}", error),
+					surrealdb_types::ConnectionError::ConnectionFailed,
+				)))
+				.await
+				.ok();
 			return;
 		}
 	};

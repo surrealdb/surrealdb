@@ -214,10 +214,12 @@ mod cli_integration {
 				.output()
 				.unwrap();
 
+			// BEGIN batch: failed txn, then cancelled (skipped stmts), then explicit COMMIT error
+			// (#7207).
 			assert_eq!(
 				output.lines().filter(|s| s.contains("transaction")).count(),
-				3,
-				"missing failed txn errors in {output:?}"
+				4,
+				"missing txn-related errors in {output:?}"
 			);
 			assert!(output.contains("rgument"), "missing argument error in {output}");
 		}

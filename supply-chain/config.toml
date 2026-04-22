@@ -1216,10 +1216,6 @@ criteria = "safe-to-deploy"
 version = "0.2.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.rand_xorshift]]
-version = "0.4.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.rcgen]]
 version = "0.14.7"
 criteria = "safe-to-run"
@@ -1389,7 +1385,7 @@ version = "0.101.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls-webpki]]
-version = "0.103.10"
+version = "0.103.13"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustyline]]
@@ -1706,10 +1702,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.ulid]]
 version = "1.2.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.unarray]]
-version = "0.1.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.unicase]]

@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
 
+use surrealdb_types::ValidationError;
 use url::Url;
 
 use crate::engine::remote::http::{Client, Http, Https};
@@ -16,7 +17,7 @@ macro_rules! endpoints {
 
 				fn into_endpoint(self) -> Result<Endpoint> {
 					let url = format!("http://{self}");
-					Ok(Endpoint::new(Url::parse(&url).map_err(|_| Error::internal(format!("Invalid URL: {url}")))?))
+					Ok(Endpoint::new(Url::parse(&url).map_err(|_| Error::validation(format!("Invalid URL: {url}"), ValidationError::InvalidRequest))?))
 				}
 			}
 
@@ -37,7 +38,7 @@ macro_rules! endpoints {
 
 				fn into_endpoint(self) -> Result<Endpoint> {
 					let url = format!("https://{self}");
-					Ok(Endpoint::new(Url::parse(&url).map_err(|_| Error::internal(format!("Invalid URL: {url}")))?))
+					Ok(Endpoint::new(Url::parse(&url).map_err(|_| Error::validation(format!("Invalid URL: {url}"), ValidationError::InvalidRequest))?))
 				}
 			}
 

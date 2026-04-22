@@ -15,6 +15,9 @@ categories.workspace = true
 
 [features]
 default = []
+convert = ["dep:async-channel", "dep:url", "dep:semver"]
+# Enables From<reqwest::Error>; use with protocol-http or similar
+reqwest = ["dep:reqwest"]
 js = ["dep:js"]
 arbitrary = [
     "dep:arbitrary",
@@ -29,6 +32,10 @@ arbitrary = [
 
 [dependencies]
 anyhow.workspace = true
+async-channel = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+semver = { workspace = true, optional = true, features = ["serde"] }
+reqwest = { workspace = true, optional = true, default-features = false }
 arbitrary = { workspace = true, features = ["derive"], optional = true }
 bytes.workspace = true
 castaway.workspace = true

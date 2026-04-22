@@ -51,7 +51,7 @@ pub fn invalid_params(msg: impl Into<String>) -> TypesError {
 
 /// Internal error (wraps anyhow).
 pub fn internal_error(err: anyhow::Error) -> TypesError {
-	TypesError::internal(err.to_string())
+	TypesError::from_anyhow_with_chain(err)
 }
 
 /// Live query not supported.
@@ -129,7 +129,7 @@ pub fn session_expired() -> TypesError {
 /// 1. `TypesError` — already a wire error, return as-is.
 /// 2. `ApiError` — convert via `to_types_error()`.
 /// 3. `err::Error` (core database error) — convert via `into_types_error()`.
-/// 4. Fallback — wrap the display string as an internal error.
+/// 4. Fallback — convert with chain-preserving internal error details.
 pub fn types_error_from_anyhow(error: anyhow::Error) -> TypesError {
 	// If the error is already a TypesError, return it directly (preserves kind/details/cause)
 	match error.downcast::<TypesError>() {
@@ -142,7 +142,7 @@ pub fn types_error_from_anyhow(error: anyhow::Error) -> TypesError {
 			error
 				.downcast::<err::Error>()
 				.map(into_types_error)
-				.unwrap_or_else(|error| TypesError::internal(error.to_string()))
+				.unwrap_or_else(TypesError::from_anyhow_with_chain)
 		}
 	}
 }
