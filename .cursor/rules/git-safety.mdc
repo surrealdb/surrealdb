@@ -6,6 +6,7 @@ alwaysApply: true
 
 ## Commits
 
+- Never commit, push, or open a pull request unless the user explicitly asks.
 - Never amend a commit that has already been pushed to a remote, unless specifically requested. Always create a new commit instead.
 - Never amend a commit unless the user explicitly asks for it.
 - When formatting or linting produces changes after a commit, create a new follow-up commit (e.g. "Format code") rather than amending.
