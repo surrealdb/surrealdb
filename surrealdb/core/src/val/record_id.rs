@@ -453,17 +453,8 @@ impl RecordId {
 			explain: None,
 			tempfiles: false,
 		};
-		if let Value::Object(x) = stk.run(|stk| stm.compute(stk, ctx, opt, doc)).await?.first() {
-			// Re-inject `id`, the stored value omits it (encoded in the key)
-			// and a cache hit on a just-written record returns it as-is, so
-			// `$record.id` in a permission clause would otherwise be `NONE`
-			// if !matches!(x.get("id"), Some(Value::RecordId(_))) {
-			// 	x.insert("id".to_owned(), Value::RecordId(self));
-			// }
-			Ok(Some(x))
-		} else {
-			Ok(None)
-		}
+
+		Ok(stk.run(|stk| stm.compute(stk, ctx, opt, doc)).await?.first().into_object())
 	}
 }
 
