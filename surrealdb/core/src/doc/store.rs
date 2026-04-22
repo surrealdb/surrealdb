@@ -25,17 +25,9 @@ impl Document {
 		let rid = self.id()?;
 		// Get NS & DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		// Prep the doc
+		let doc = self.current.doc.clone().into_read_only();
 
-		// Remove the id field from the doc so that it's not duplicated,
-		// because it's always present as a key in the underlying key-value
-		// datastore. When the doc is read from the datastore, the key is set
-		// as its id field.
-		// The cloning of the doc is required because the resulting doc
-		// must be returned to the caller with the id present.
-		let mut doc_without_id = self.current.doc.clone();
-		if let crate::val::Value::Object(obj) = doc_without_id.to_mut() {
-			obj.0.remove("id");
-		}
 		// Match the statement type
 		match stm {
 			// This is a INSERT statement so try to insert the key.
@@ -48,11 +40,7 @@ impl Document {
 			// set and update the key, without checking if the key
 			// already exists in the storage engine.
 			Statement::Insert(_) if self.is_iteration_initial() => {
-				match ctx
-					.tx()
-					.put_record(ns, db, &rid.table, &rid.key, doc_without_id.into_read_only())
-					.await
-				{
+				match ctx.tx().put_record(ns, db, &rid.table, &rid.key, doc).await {
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(
@@ -77,11 +65,7 @@ impl Document {
 			// key does not exist.  If the record value exists then we
 			// retry and attempt to update the record which exists.
 			Statement::Upsert(_) if self.is_iteration_initial() => {
-				match ctx
-					.tx()
-					.put_record(ns, db, &rid.table, &rid.key, doc_without_id.into_read_only())
-					.await
-				{
+				match ctx.tx().put_record(ns, db, &rid.table, &rid.key, doc).await {
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(
@@ -106,11 +90,7 @@ impl Document {
 			// key does not exist. If it already exists, then we
 			// return an error, and the statement fails.
 			Statement::Create(_) => {
-				match ctx
-					.tx()
-					.put_record(ns, db, &rid.table, &rid.key, doc_without_id.into_read_only())
-					.await
-				{
+				match ctx.tx().put_record(ns, db, &rid.table, &rid.key, doc).await {
 					// The key already exists, so return an error
 					Err(e) => {
 						if matches!(
@@ -128,11 +108,7 @@ impl Document {
 				}
 			}
 			// Let's update the stored value for the specified key
-			_ => {
-				ctx.tx()
-					.set_record(ns, db, &rid.table, &rid.key, doc_without_id.into_read_only())
-					.await
-			}
+			_ => ctx.tx().set_record(ns, db, &rid.table, &rid.key, doc).await,
 		}?;
 		// Carry on
 		Ok(())
