@@ -1,6 +1,6 @@
 [package]
 name = "surrealism-macros"
-version = "0.1.9"
+version = "0.2.0"
 description = "Macros for Surrealism"
 edition.workspace = true
 authors.workspace = true

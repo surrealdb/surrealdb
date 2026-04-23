@@ -67,9 +67,9 @@ impl HnswDocs {
 		} else {
 			let doc_id = self.next_doc_id();
 			let id_key = self.ikb.new_hi_key(id);
-			tx.set(&id_key, &doc_id, None).await?;
+			tx.set(&id_key, &doc_id).await?;
 			let doc_key = self.ikb.new_hd_key(doc_id);
-			tx.set(&doc_key, id, None).await?;
+			tx.set(&doc_key, id).await?;
 			Ok(doc_id)
 		}
 	}
@@ -137,7 +137,7 @@ impl HnswDocs {
 	pub(in crate::idx) async fn finish(&mut self, tx: &Transaction) -> Result<()> {
 		if self.state_updated {
 			let state_key = self.ikb.new_hd_root_key();
-			tx.set(&state_key, &self.state, None).await?;
+			tx.set(&state_key, &self.state).await?;
 			self.state_updated = false;
 		}
 		Ok(())
@@ -339,20 +339,20 @@ impl VecDocs {
 				//  We don't have the vector, we insert it in the graph
 				let element_id = h.insert(ctx, o).await?;
 				let ehd = ElementHashedDocs::new(element_id, ser_vec, doc_id);
-				ctx.tx.set(&key, &ehd, None).await?;
+				ctx.tx.set(&key, &ehd).await?;
 			}
 			Some(mut ehd) => {
 				if let Some(ed) = ehd.get_element_docs(&ser_vec) {
 					// We already have the vector
 					if let Some(docs) = ed.docs.insert(doc_id) {
 						ed.docs = docs;
-						ctx.tx.set(&key, &ehd, None).await?;
+						ctx.tx.set(&key, &ehd).await?;
 					};
 				} else {
 					//  We don't have the vector, we insert it in the graph
 					let element_id = h.insert(ctx, o).await?;
 					ehd.add(element_id, ser_vec, doc_id);
-					ctx.tx.set(&key, &ehd, None).await?;
+					ctx.tx.set(&key, &ehd).await?;
 				}
 			}
 		};
@@ -387,7 +387,7 @@ impl VecDocs {
 				Some(ed)
 			}
 		} {
-			ctx.tx.set(&key, &ed, None).await?;
+			ctx.tx.set(&key, &ed).await?;
 		}
 		Ok(())
 	}
@@ -408,7 +408,7 @@ impl VecDocs {
 					h.remove(ctx, deleted_element_id).await?;
 				}
 				RemoveResult::Updated(deleted_element_id) => {
-					ctx.tx.set(&key, &ehd, None).await?;
+					ctx.tx.set(&key, &ehd).await?;
 					if let Some(deleted_element_id) = deleted_element_id {
 						h.remove(ctx, deleted_element_id).await?;
 					}
@@ -442,7 +442,7 @@ impl VecDocs {
 				h.remove(ctx, ed.e_id).await?;
 			} else {
 				ed.docs = new_docs;
-				ctx.tx.set(&key, &ed, None).await?;
+				ctx.tx.set(&key, &ed).await?;
 			}
 		};
 		Ok(())

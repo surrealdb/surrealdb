@@ -45,7 +45,7 @@ impl RemoveDatabaseStatement {
 		// Compute the name
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "database name").await?;
 		let ns = opt.ns()?;
-		let db = match txn.get_db_by_name(ns, &name).await? {
+		let db = match txn.get_db_by_name(ns, &name, None).await? {
 			Some(x) => x,
 			None => {
 				if self.if_exists {

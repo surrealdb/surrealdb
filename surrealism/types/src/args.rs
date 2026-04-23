@@ -147,7 +147,7 @@ impl_args! {
 	5 => (A, B, C, D, E),
 	6 => (A, B, C, D, E, F),
 	7 => (A, B, C, D, E, F, G),
-	8 => (A, Bq, C, D, E, F, G, H),
+	8 => (A, B, C, D, E, F, G, H),
 	9 => (A, B, C, D, E, F, G, H, I),
 	10 => (A, B, C, D, E, F, G, H, I, J),
 }

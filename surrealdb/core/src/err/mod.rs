@@ -30,6 +30,17 @@ use crate::val::{CastError, CoerceError, Duration, RecordId, TableName, Value};
 mod to_types;
 pub(crate) use to_types::into_types_error;
 
+/// Convert an [`anyhow::Error`] into a structured [`surrealdb_types::Error`].
+///
+/// If the inner error is a core database error, it is downcast and converted using the full
+/// typed mapping. Otherwise the anyhow chain is preserved as an internal error chain.
+pub fn anyhow_to_types_error(error: anyhow::Error) -> surrealdb_types::Error {
+	match error.downcast::<Error>() {
+		Ok(e) => into_types_error(e),
+		Err(e) => surrealdb_types::Error::from_anyhow_with_chain(e),
+	}
+}
+
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)]
@@ -471,7 +482,7 @@ pub(crate) enum Error {
 	},
 
 	/// The permissions do not allow this query to be run on this table
-	#[error("You don't have permission to run the fn::{name} function")]
+	#[error("You don't have permission to run the {name} function")]
 	FunctionPermissions {
 		name: String,
 	},
@@ -1125,7 +1136,7 @@ pub(crate) enum Error {
 	ReferenceNestedField(String),
 
 	/// Something went wrong while updating references
-	#[error("An error occured while updating references for `{0}`: {1}")]
+	#[error("An error occurred while updating references for `{0}`: {1}")]
 	RefsUpdateFailure(String, String),
 
 	#[error(
@@ -1357,5 +1368,34 @@ impl serde::ser::Error for Error {
 		T: Display,
 	{
 		Self::Serialization(msg.to_string())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_anyhow_to_types_error_signup_query_failed() {
+		let error = anyhow::Error::new(Error::AccessRecordSignupQueryFailed);
+		let types_error = anyhow_to_types_error(error);
+		assert!(
+			types_error.is_query(),
+			"expected Query error, got {} with message: {}",
+			types_error.kind_str(),
+			types_error.message()
+		);
+	}
+
+	#[test]
+	fn test_anyhow_to_types_error_signin_query_failed() {
+		let error = anyhow::Error::new(Error::AccessRecordSigninQueryFailed);
+		let types_error = anyhow_to_types_error(error);
+		assert!(
+			types_error.is_query(),
+			"expected Query error, got {} with message: {}",
+			types_error.kind_str(),
+			types_error.message()
+		);
 	}
 }

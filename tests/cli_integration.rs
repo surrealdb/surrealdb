@@ -214,10 +214,12 @@ mod cli_integration {
 				.output()
 				.unwrap();
 
+			// BEGIN batch: failed txn, then cancelled (skipped stmts), then explicit COMMIT error
+			// (#7207).
 			assert_eq!(
 				output.lines().filter(|s| s.contains("transaction")).count(),
-				3,
-				"missing failed txn errors in {output:?}"
+				4,
+				"missing txn-related errors in {output:?}"
 			);
 			assert!(output.contains("rgument"), "missing argument error in {output}");
 		}
@@ -1141,6 +1143,19 @@ mod cli_integration {
 		statement_file.write_str("CREATE $thing WHERE value = '';").unwrap();
 
 		assert!(common::run_in_dir("validate", &temp_dir).output().is_err());
+	}
+
+	#[test]
+	fn validate_stdin_with_valid_query() {
+		let mut child = common::run("validate --stdin").input("CREATE thing:success;");
+		let output = child.output().unwrap();
+		assert!(output.contains("<stdin>: OK"), "expected OK, got: {output}");
+	}
+
+	#[test]
+	fn validate_stdin_with_invalid_query() {
+		let mut child = common::run("validate --stdin").input("CREATE $thing WHERE value = '';");
+		assert!(child.output().is_err());
 	}
 
 	#[cfg(unix)]

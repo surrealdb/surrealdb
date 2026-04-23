@@ -1,10 +1,8 @@
 /**
 [env]
-backend = ["mem", "surrealkv"]
+backend = ["mem", "rocksdb", "surrealkv"]
 versioned = true
 timeout = 5000
-
-planner-strategy = ["all-ro"]
 
 [test]
 reason = "VERSION clause with aggregate functions should return correct results matching a plain SELECT with VERSION"
@@ -38,7 +36,7 @@ value = "[{ count: 7 }]"
 value = "[{ count: 4 }]"
 
 [[test.results]]
-value = "[{ count: 0 }]"
+error = "The table 'something' does not exist"
 
 [[test.results]]
 error = "Invalid query: VERSION clause cannot be used with a subquery source. Place the VERSION clause inside the subquery instead."

@@ -56,8 +56,10 @@ impl Strategy {
 		}
 	}
 
-	pub fn for_enum(variant: &Ident, attrs: &EnumAttributes) -> Self {
-		let variant = attrs.variant_string(variant);
+	pub fn for_enum(variant: &Ident, attrs: &EnumAttributes, variant_rename: Option<&str>) -> Self {
+		let variant = variant_rename
+			.map(ToString::to_string)
+			.unwrap_or_else(|| attrs.variant_string(variant));
 
 		if attrs.untagged {
 			if attrs.tag.is_some() || attrs.content.is_some() {

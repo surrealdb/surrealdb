@@ -107,7 +107,7 @@ impl Document {
 				&mut self.current
 			};
 			// Configure the context
-			let mut ctx = Context::new(ctx);
+			let mut ctx = Context::new_child(ctx);
 			ctx.add_value("event", evt.into());
 			ctx.add_value("value", doc.doc.as_arc());
 			ctx.add_value("after", after);
@@ -159,7 +159,7 @@ impl Document {
 			node_id,
 		);
 		let event_record = AsyncEventRecord::new(&opt, &ctx, ev, cursor_doc)?;
-		tx.put(&key, &event_record, None).await?;
+		tx.put(&key, &event_record).await?;
 		tx.trigger_async_event();
 		Ok(())
 	}
@@ -255,7 +255,7 @@ impl AsyncEventRecord {
 
 	/// Rebuild the event context when processing a queued event.
 	fn build_event_context(&self, ctx: &FrozenContext) -> FrozenContext {
-		let mut ctx = Context::new(ctx);
+		let mut ctx = Context::new_child(ctx);
 		ctx.add_values(self.values.clone());
 		ctx.freeze()
 	}
@@ -482,7 +482,7 @@ impl AsyncEventContext {
 		if ev.attempt <= ev.event_definition.retry() {
 			// Requeue with the same key so the event keeps its original queue position; retries are
 			// bounded here and no backoff is applied.
-			catch!(tx, tx.set(eq, ev, None).await);
+			catch!(tx, tx.set(eq, ev).await);
 		} else {
 			warn!(
 				"Final error after processing the event `{}` on table {} {} times: {e}",

@@ -1,9 +1,11 @@
 use syn::{Attribute, LitStr};
 
-use crate::SkipContent;
+use crate::{Casing, SkipContent};
 
 #[derive(Debug, Default)]
 pub struct NamedFieldsAttributes {
+	pub rename: Option<String>,
+	pub rename_all: Option<Casing>,
 	pub default: bool,
 	/// Per-variant content skipping. `Always` for `#[surreal(skip_content)]`,
 	/// `If(path)` for `#[surreal(skip_content_if = "predicate")]`.
@@ -17,7 +19,26 @@ impl NamedFieldsAttributes {
 		for attr in attrs {
 			if attr.path().is_ident("surreal") {
 				attr.parse_nested_meta(|meta| {
-					if meta.path.is_ident("default") {
+					if meta.path.is_ident("rename") {
+						let Ok(value) = meta.value() else {
+							panic!("Failed to parse rename attribute");
+						};
+						let Ok(lit_str) = value.parse::<LitStr>() else {
+							panic!("Failed to parse rename attribute");
+						};
+						named_field_attrs.rename = Some(lit_str.value());
+					} else if meta.path.is_ident("rename_all") {
+						let Ok(value) = meta.value() else {
+							panic!("Failed to parse rename_all attribute");
+						};
+						let Ok(lit_str) = value.parse::<LitStr>() else {
+							panic!("Failed to parse rename_all attribute");
+						};
+						let Some(casing) = Casing::from_rename_all(&lit_str.value()) else {
+							panic!("Invalid rename_all value: {}", lit_str.value());
+						};
+						named_field_attrs.rename_all = Some(casing);
+					} else if meta.path.is_ident("default") {
 						named_field_attrs.default = true;
 					} else if meta.path.is_ident("skip_content") {
 						if named_field_attrs.skip_content.is_some() {

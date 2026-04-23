@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use anyhow::{Result, ensure};
@@ -77,14 +78,15 @@ impl SelectStatement {
 		let mut iterator = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
 
+		let ts_impl = ctx.tx().timestamp_impl();
 		let version = stk
 			.run(|stk| self.version.compute(stk, ctx, opt, parent_doc))
 			.await
 			.catch_return()?
 			.cast_to::<Option<Datetime>>()?
-			.map(|x| x.to_version_stamp())
+			.map(|x| x.to_version_stamp(ts_impl.as_ref()))
 			.transpose()?;
-		let opt = Arc::new(opt.clone().with_version(version));
+		let opt = Arc::new(opt.clone().with_version(version.or(opt.version)));
 
 		// Extract the limits
 		iterator.setup_limit(stk, ctx, &opt, &stm).await?;
@@ -110,15 +112,44 @@ impl SelectStatement {
 			db: Arc::clone(&db),
 		};
 
+		// Reject VERSION with subquery sources
+		if opt.version.is_some() {
+			for w in self.what.iter() {
+				if matches!(w, Expr::Select(_)) {
+					return Err(anyhow::Error::new(Error::Query {
+						message: "VERSION clause cannot be used with a subquery source. \
+								  Place the VERSION clause inside the subquery instead."
+							.to_string(),
+					}));
+				}
+			}
+		}
+
+		// `$parent` must be visible while planning FROM targets (e.g. `FROM
+		// $parent->edge`), not only during output — same binding as
+		// `CursorDoc::update_parent`.
+		let prepare_ctx: Cow<'_, FrozenContext> = CursorDoc::with_parent_ctx(&ctx, parent_doc);
+
 		// Loop over the select targets
 		for w in self.what.iter() {
 			// The target is also calculated on the parent doc
 			iterator
-				.prepare(stk, &ctx, &opt, parent_doc, &mut planner, &stm_ctx, &doc_ctx, w)
+				.prepare(
+					stk,
+					prepare_ctx.as_ref(),
+					&opt,
+					parent_doc,
+					&mut planner,
+					&stm_ctx,
+					&doc_ctx,
+					w,
+				)
 				.await?;
 		}
 
-		CursorDoc::update_parent(&ctx, parent_doc, async |ctx| {
+		// Reuse `prepare_ctx` so we do not clone the parent document again inside
+		// `update_parent` (see `CursorDoc::with_parent_ctx`).
+		CursorDoc::update_parent(prepare_ctx.as_ref(), None, async |ctx| {
 			// Attach the query planner to the context
 			let ctx = stm.setup_query_planner(planner, ctx);
 			// Process the statement

@@ -50,7 +50,7 @@ impl InsertStatement {
 			.cast_to::<Option<Duration>>()?
 		{
 			Some(timeout) => {
-				let mut ctx = Context::new(ctx);
+				let mut ctx = Context::new_child(ctx);
 				ctx.add_timeout(timeout.0)?;
 				ctx_store = ctx.freeze();
 				&ctx_store
@@ -92,7 +92,7 @@ impl InsertStatement {
 
 		let mut doc_ctx = None;
 		if let Some(tb) = &tb {
-			let tb_def = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, tb).await?;
+			let tb_def = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, tb, None).await?;
 			let fields =
 				ctx.tx().all_tb_fields(ns.namespace_id, db.database_id, tb, opt.version).await?;
 			doc_ctx = Some(NsDbTbCtx {
@@ -123,7 +123,7 @@ impl InsertStatement {
 						Some(doc_ctx) if doc_ctx.tb.name == tb => Some(doc_ctx),
 						Some(_) | None => {
 							let tb_def =
-								txn.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb).await?;
+								txn.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb, None).await?;
 							let fields = txn
 								.all_tb_fields(ns.namespace_id, db.database_id, &tb, opt.version)
 								.await?;
@@ -159,7 +159,7 @@ impl InsertStatement {
 								Some(doc_ctx) if doc_ctx.tb.name == tb => Some(doc_ctx),
 								Some(_) | None => {
 									let tb_def = txn
-										.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb)
+										.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb, None)
 										.await?;
 									let fields = txn
 										.all_tb_fields(
@@ -195,8 +195,9 @@ impl InsertStatement {
 						doc_ctx = match doc_ctx {
 							Some(doc_ctx) if doc_ctx.tb.name == tb => Some(doc_ctx),
 							Some(_) | None => {
-								let tb_def =
-									txn.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb).await?;
+								let tb_def = txn
+									.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb, None)
+									.await?;
 								let fields = txn
 									.all_tb_fields(
 										ns.namespace_id,

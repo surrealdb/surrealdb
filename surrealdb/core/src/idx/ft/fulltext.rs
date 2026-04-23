@@ -171,7 +171,7 @@ impl FullTextIndex {
 		ikb: IndexKeyBase,
 		p: &FullTextParams,
 	) -> Result<Self> {
-		let az = tx.get_db_analyzer(ikb.0.ns, ikb.0.db, &p.analyzer).await?;
+		let az = tx.get_db_analyzer(ikb.0.ns, ikb.0.db, &p.analyzer, None).await?;
 		ixs.mappers().check(&az).await?;
 		Self::with_analyzer(ixs, az, ikb, p)
 	}
@@ -255,7 +255,7 @@ impl FullTextIndex {
 						doc_count: -1,
 					};
 					let key = self.ikb.new_dc_with_id(doc_id, opt.id(), Uuid::now_v7());
-					tx.put(&key, &dcl, None).await?;
+					tx.put(&key, &dcl).await?;
 					*require_compaction = true;
 				}
 			}
@@ -301,7 +301,7 @@ impl FullTextIndex {
 		{
 			// Set the doc length
 			let key = self.ikb.new_dl(id.doc_id());
-			tx.set(&key, &dl, None).await?;
+			tx.set(&key, &dl).await?;
 		}
 		{
 			// Increase the doc count and total doc length
@@ -310,7 +310,7 @@ impl FullTextIndex {
 				total_docs_length: dl as i128,
 				doc_count: 1,
 			};
-			tx.put(&key, &dcl, None).await?;
+			tx.put(&key, &dcl).await?;
 			*require_compaction = true;
 		}
 		// We're done
@@ -335,7 +335,7 @@ impl FullTextIndex {
 			let key = self.ikb.new_td(t, id);
 			td.f = o.len() as TermFrequency;
 			td.o = o;
-			tx.set(&key, &td, None).await?;
+			tx.set(&key, &td).await?;
 			self.set_tt(tx, t, id, nid, true).await?;
 		}
 		Ok(dl)
@@ -353,7 +353,7 @@ impl FullTextIndex {
 		for (t, f) in tf {
 			let key = self.ikb.new_td(t, id);
 			td.f = f;
-			tx.set(&key, &td, None).await?;
+			tx.set(&key, &td).await?;
 			self.set_tt(tx, t, id, nid, true).await?;
 		}
 		Ok(dl)
@@ -368,7 +368,7 @@ impl FullTextIndex {
 		add: bool,
 	) -> Result<()> {
 		let key = self.ikb.new_tt(term, doc_id, *nid, Uuid::now_v7(), add);
-		tx.set(&key, &String::new(), None).await
+		tx.set(&key, &String::new()).await
 	}
 
 	/// Extracts query terms from a search string
@@ -510,7 +510,7 @@ impl FullTextIndex {
 		if docs.is_empty() {
 			tx.del(&td).await?;
 		} else {
-			tx.set(&td, &docs, None).await?;
+			tx.set(&td, &docs).await?;
 		}
 		Ok(())
 	}
@@ -726,7 +726,7 @@ impl FullTextIndex {
 		let mut has_logs = false;
 		let dlc = self.compute_doc_length_and_count(tx, Some(&mut has_logs)).await?;
 		let key = self.ikb.new_dc_compacted()?;
-		tx.set(&key, &revision::to_vec(&dlc)?, None).await?;
+		tx.set(&key, &revision::to_vec(&dlc)?).await?;
 		Ok(has_logs)
 	}
 
@@ -1080,7 +1080,7 @@ mod tests {
 		}
 
 		async fn remove_insert_task(&self, stk: &mut Stk, rid: &RecordId) {
-			let mut ctx = Context::new(&self.ctx);
+			let mut ctx = Context::new_child(&self.ctx);
 			let tx = self.new_tx(TransactionType::Write).await;
 			ctx.set_transaction(tx.clone());
 			let ctx = ctx.freeze();
@@ -1239,7 +1239,7 @@ mod tests {
 		let frozen_read_ctx = |test: &TestContext| {
 			let test = test.clone();
 			async move {
-				let mut ctx = Context::new(&test.ctx);
+				let mut ctx = Context::new_child(&test.ctx);
 				let tx = test.new_tx(TransactionType::Read).await;
 				ctx.set_transaction(tx.clone());
 				(ctx.freeze(), tx)

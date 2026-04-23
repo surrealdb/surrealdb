@@ -29,7 +29,7 @@ impl AlterModuleStatement {
 		let txn = ctx.tx();
 
 		let storage_name = self.name.get_storage_name();
-		let mut md = match txn.get_db_module(ns, db, &storage_name).await {
+		let mut md = match txn.get_db_module(ns, db, &storage_name, None).await {
 			Ok(v) => v.deref().clone(),
 			Err(e) => {
 				if self.if_exists {

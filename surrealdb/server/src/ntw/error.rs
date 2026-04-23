@@ -6,6 +6,8 @@ use http::{HeaderName, HeaderValue, StatusCode};
 use serde::{Serialize, Serializer};
 use surrealdb_core::api::X_SURREAL_REQUEST_ID;
 use surrealdb_core::api::err::ApiError;
+use surrealdb_core::err::anyhow_to_types_error;
+use surrealdb_types::{AuthError, NotAllowedError};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -136,64 +138,74 @@ impl IntoResponse for ResponseError {
 			.into_response();
 		}
 
-		// Check for our local Error type
-		if self.0.is::<Error>() {
-			match self.0.downcast::<Error>() {
-				Ok(e) => {
-					return e.into_response();
-				}
-				Err(e) => {
-					return ErrorMessage {
-						code: StatusCode::INTERNAL_SERVER_ERROR,
-						details: Some(
-							"An error occurred while processing this API request".to_string(),
-						),
-						description: Some(e.to_string()),
-						information: None,
-					}
-					.into_response();
-				}
-			}
-		}
+		// Check for our local Error type (consumes on success)
+		let err = match self.0.downcast::<Error>() {
+			Ok(e) => return e.into_response(),
+			Err(e) => e,
+		};
 
-		// Handle errors based on their string representation
-		let error_str = self.0.to_string();
+		// Check for surrealdb_types::Error
+		let err = match err.downcast::<surrealdb_types::Error>() {
+			Ok(e) => return types_error_into_response(e),
+			Err(e) => e,
+		};
 
-		let error_str_lower = error_str.to_lowercase();
-
-		// Check for authentication errors
-		if error_str_lower.contains("authentication") || error_str_lower.contains("invalidauth") {
-			return ErrorMessage{
-				code: StatusCode::UNAUTHORIZED,
-				details: Some("Authentication failed".to_string()),
-				description: Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
-				information: Some("There was a problem with authentication".to_string())
-			}.into_response();
-		}
-
-		// Check for forbidden/not allowed errors
-		if error_str_lower.contains("notallowed")
-			|| error_str_lower.contains("not allowed")
-			|| error_str_lower.contains("forbidden")
-			|| error_str_lower.contains("not enough permissions")
-		{
-			return ErrorMessage {
-				code: StatusCode::FORBIDDEN,
-				details: Some("Forbidden".to_string()),
-				description: Some("Not allowed to do this.".to_string()),
-				information: Some(error_str),
-			}
-			.into_response();
-		}
-
-		// Default error response
-		ErrorMessage {
-			code: StatusCode::BAD_REQUEST,
-			details: Some("Request problems dectected".to_string()),
-			description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
-			information: Some(error_str),
-		}.into_response()
+		// Convert via core downcast (handles core::err::Error internally)
+		// or fall back to anyhow chain preservation.
+		types_error_into_response(anyhow_to_types_error(err))
 	}
+}
+
+/// Map a structured [`surrealdb_types::Error`] to an HTTP response with the appropriate status
+/// code based on the error kind and details.
+fn types_error_into_response(e: surrealdb_types::Error) -> Response {
+	if e.is_not_allowed() {
+		let (code, details, description, information) = match e.not_allowed_details() {
+			Some(NotAllowedError::Auth(AuthError::InvalidAuth))
+			| Some(NotAllowedError::Auth(AuthError::TokenExpired))
+			| Some(NotAllowedError::Auth(AuthError::SessionExpired))
+			| Some(NotAllowedError::Auth(AuthError::UnexpectedAuth))
+			| Some(NotAllowedError::Auth(AuthError::MissingUserOrPass))
+			| Some(NotAllowedError::Auth(AuthError::NoSigninTarget))
+			| Some(NotAllowedError::Auth(AuthError::InvalidPass))
+			| Some(NotAllowedError::Auth(AuthError::TokenMakingFailed))
+			| Some(NotAllowedError::Auth(AuthError::InvalidSignup)) => (
+				StatusCode::UNAUTHORIZED,
+				Some("Authentication failed".to_string()),
+				Some("Your authentication details are invalid. Reauthenticate using valid authentication parameters.".to_string()),
+				Some("There was a problem with authentication".to_string()),
+			),
+			_ => (
+				StatusCode::FORBIDDEN,
+				Some("Forbidden".to_string()),
+				Some("Not allowed to do this.".to_string()),
+				Some(e.message().to_string()),
+			),
+		};
+		return ErrorMessage {
+			code,
+			details,
+			description,
+			information,
+		}
+		.into_response();
+	}
+	if e.is_not_found() {
+		return ErrorMessage {
+			code: StatusCode::NOT_FOUND,
+			details: Some("Not found".to_string()),
+			description: Some("The requested resource was not found.".to_string()),
+			information: Some(e.message().to_string()),
+		}
+		.into_response();
+	}
+	ErrorMessage {
+		code: StatusCode::BAD_REQUEST,
+		details: Some("Request problems dectected".to_string()),
+		description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
+		information: Some(e.message().to_string()),
+	}
+	.into_response()
 }
 
 /// Error wrapper for the API HTTP handler that attaches a request ID to the response

@@ -65,6 +65,12 @@ impl FieldAttributes {
 			}
 		}
 
+		if field_attrs.flatten && field_attrs.rename.is_some() {
+			panic!(
+				"Cannot combine #[surreal(flatten)] with #[surreal(rename)] on the same field; `flatten` merges the field's contents into the parent object, so there is no key for `rename` to change"
+			);
+		}
+
 		field_attrs
 	}
 }

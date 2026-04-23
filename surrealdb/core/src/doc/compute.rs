@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
@@ -43,16 +44,8 @@ impl Document {
 		};
 
 		let Some(needed_roots) = needed_roots else {
-			return Document::computed_fields_inner(
-				stk,
-				ctx,
-				opt,
-				rid.as_ref(),
-				&table_fields,
-				doc,
-				None,
-			)
-			.await;
+			return Document::computed_fields_inner(stk, ctx, opt, &rid, &table_fields, doc, None)
+				.await;
 		};
 
 		// Build dependency metadata for computed fields only.
@@ -87,7 +80,7 @@ impl Document {
 					stk,
 					ctx,
 					opt,
-					rid.as_ref(),
+					&rid,
 					&table_fields,
 					doc,
 					None,
@@ -103,16 +96,8 @@ impl Document {
 			return Ok(());
 		}
 
-		Document::computed_fields_inner(
-			stk,
-			ctx,
-			opt,
-			rid.as_ref(),
-			&table_fields,
-			doc,
-			Some(&required),
-		)
-		.await?;
+		Document::computed_fields_inner(stk, ctx, opt, &rid, &table_fields, doc, Some(&required))
+			.await?;
 
 		Ok(())
 	}
@@ -125,7 +110,7 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		rid: &RecordId,
+		rid: &Arc<RecordId>,
 		fields: &[FieldDefinition],
 		doc: &mut CursorDoc,
 		required: Option<&HashSet<String>>,
@@ -133,6 +118,18 @@ impl Document {
 		// Check if the fields have already been computed
 		if doc.fields_computed {
 			return Ok(());
+		}
+
+		// Ensure the cursor document's record id is synchronised with the
+		// authoritative id. `Document::new` copies `self.id` into each
+		// `CursorDoc` at construction time, but auto-generated ids are set
+		// later via `generate_record_id` and leave the per-cursor `rid`
+		// unpopulated. Keeping them in sync allows downstream expression
+		// evaluation (e.g. the `Value::get` self-reference cycle guard) to
+		// reliably identify dereferences of the record currently being
+		// computed.
+		if doc.rid.as_deref() != Some(rid.as_ref()) {
+			doc.rid = Some(Arc::clone(rid));
 		}
 
 		// Compute the fields

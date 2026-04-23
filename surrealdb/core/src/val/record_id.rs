@@ -437,7 +437,7 @@ impl RecordId {
 		// Fetch the record id's contents
 		let stm = SelectStatement {
 			fields: Fields::Select(vec![Field::All]),
-			what: vec![Expr::Literal(Literal::RecordId(self.into_literal()))],
+			what: vec![Expr::Literal(Literal::RecordId(self.clone().into_literal()))],
 			omit: vec![],
 			only: false,
 			with: None,
@@ -453,11 +453,8 @@ impl RecordId {
 			explain: None,
 			tempfiles: false,
 		};
-		if let Value::Object(x) = stk.run(|stk| stm.compute(stk, ctx, opt, doc)).await?.first() {
-			Ok(Some(x))
-		} else {
-			Ok(None)
-		}
+
+		Ok(stk.run(|stk| stm.compute(stk, ctx, opt, doc)).await?.first().into_object())
 	}
 }
 

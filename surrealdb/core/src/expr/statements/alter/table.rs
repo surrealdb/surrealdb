@@ -68,7 +68,7 @@ impl AlterTableStatement {
 		let txn = ctx.tx();
 
 		// Get the table definition
-		let mut dt = match txn.get_tb(ns, db, &self.name).await? {
+		let mut dt = match txn.get_tb(ns, db, &self.name, None).await? {
 			Some(tb) => tb.deref().clone(),
 			None => {
 				if self.if_exists {

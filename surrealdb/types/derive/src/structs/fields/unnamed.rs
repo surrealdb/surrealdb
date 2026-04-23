@@ -6,6 +6,7 @@ use crate::CratePath;
 
 #[derive(Debug)]
 pub struct UnnamedFields {
+	pub rename: Option<String>,
 	pub fields: Vec<syn::Type>,
 	pub field_names: Vec<Ident>,
 	/// When true, the type will be wrapped in the SerdeWrapper type to provide interop with
@@ -21,6 +22,7 @@ impl UnnamedFields {
 		wrap: Vec<bool>,
 		tuple: bool,
 		skip_content: Option<crate::SkipContent>,
+		rename: Option<String>,
 	) -> Self {
 		let field_names = fields
 			.iter()
@@ -29,6 +31,7 @@ impl UnnamedFields {
 			.collect();
 
 		Self {
+			rename,
 			fields,
 			field_names,
 			tuple,
@@ -116,11 +119,16 @@ impl UnnamedFields {
 			.collect()
 	}
 
-	pub fn arr_types(&self, crate_path: &CratePath) -> Vec<TokenStream2> {
+	pub fn arr_types(&self, type_name: &syn::Ident, crate_path: &CratePath) -> Vec<TokenStream2> {
+		let kind_ty = crate_path.kind();
 		self.fields
 			.iter()
 			.enumerate()
 			.map(|(i, ty)| {
+				if crate::type_contains_ident(ty, type_name) {
+					return quote! { arr.push(#kind_ty::Any); };
+				}
+
 				let potentially_wrapped = if self.wrap[i] {
 					let crate_path = crate_path.wrapper();
 					quote! {#crate_path::<#ty>}

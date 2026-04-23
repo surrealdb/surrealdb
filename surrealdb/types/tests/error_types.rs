@@ -1,6 +1,6 @@
 use surrealdb_types::{
-	AlreadyExistsError, AuthError, ConfigurationError, ConnectionError, ConversionError, Error,
-	ErrorDetails, Kind, LengthMismatchError, NotAllowedError, NotFoundError, Number, Object,
+	AlreadyExistsError, AuthError, Chain, ConfigurationError, ConnectionError, ConversionError,
+	Error, ErrorDetails, Kind, LengthMismatchError, NotAllowedError, NotFoundError, Number, Object,
 	OutOfRangeError, QueryError, SerializationError, SurrealValue, TypeError, ValidationError,
 	Value,
 };
@@ -1387,6 +1387,28 @@ fn test_error_wire_query_cancelled() {
 }
 
 #[test]
+fn test_error_wire_query_transaction_conflict() {
+	// Wire format:
+	// {
+	//   "code": -32009,
+	//   "message": "Transaction conflict",
+	//   "kind": "Query",
+	//   "details": { "kind": "TransactionConflict" }
+	// }
+	let err = Error::query("Transaction conflict".into(), QueryError::TransactionConflict);
+	let val = err.into_value();
+
+	let Value::Object(ref obj) = val else {
+		panic!();
+	};
+	assert_eq!(obj.get("code"), Some(&Value::Number(Number::Int(-32009))));
+
+	let parsed = Error::from_value(val).unwrap();
+	assert!(parsed.is_query());
+	assert_eq!(parsed.query_details(), Some(&QueryError::TransactionConflict));
+}
+
+#[test]
 fn test_error_wire_query_not_executed() {
 	// Wire format:
 	// {
@@ -1891,4 +1913,96 @@ fn test_error_without_cause_omitted_on_wire() {
 	let parsed = Error::from_value(value).unwrap();
 	assert_eq!(parsed.message(), "no cause");
 	assert!(parsed.cause().is_none());
+}
+
+#[test]
+fn test_error_from_anyhow_with_chain_preserves_order() {
+	let root = anyhow::anyhow!("root cause");
+	let middle = root.context("middle cause");
+	let top = middle.context("top cause");
+
+	let err = Error::from_anyhow_with_chain(top);
+	assert_eq!(err.message(), "top cause");
+
+	let cause1 = err.cause().expect("top should contain a cause");
+	assert_eq!(cause1.message(), "middle cause");
+
+	let cause2 = cause1.cause().expect("middle should contain a cause");
+	assert_eq!(cause2.message(), "root cause");
+}
+
+#[test]
+fn test_chain_trait_result() {
+	let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file missing");
+	let result: Result<(), std::io::Error> = Err(io_err);
+	let err = result.chain("Failed to load config").unwrap_err();
+	assert!(err.is_context());
+	assert_eq!(err.message(), "Failed to load config");
+	let cause = err.cause().expect("chained error should have cause");
+	assert!(cause.is_not_found());
+}
+
+#[test]
+fn test_chain_trait_result_with_lazy_context() {
+	let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "connection refused");
+	let result: Result<(), std::io::Error> = Err(io_err);
+	let err = result.chain_with(|| format!("connecting to host {}", "localhost:8080")).unwrap_err();
+	assert!(err.is_context());
+	assert_eq!(err.message(), "connecting to host localhost:8080");
+	let cause = err.cause().expect("chained error should have cause");
+	assert!(cause.is_connection());
+}
+
+#[test]
+fn test_chain_trait_option() {
+	let opt: Option<u32> = None;
+	let err = opt.chain("missing user id").unwrap_err();
+	assert!(err.is_context());
+	assert_eq!(err.message(), "missing user id");
+	assert!(err.cause().is_none());
+}
+
+#[test]
+fn test_chain_trait_option_with_lazy_context() {
+	let opt: Option<u32> = None;
+	let err = opt.chain_with(|| format!("user {} not found", 42)).unwrap_err();
+	assert!(err.is_context());
+	assert_eq!(err.message(), "user 42 not found");
+	assert!(err.cause().is_none());
+}
+
+#[test]
+fn test_chain_trait_ok_passthrough() {
+	let result: Result<u32, std::io::Error> = Ok(42);
+	let val = result.chain("should not trigger").unwrap();
+	assert_eq!(val, 42);
+}
+
+#[test]
+fn test_chain_trait_some_passthrough() {
+	let opt: Option<u32> = Some(42);
+	let val = opt.chain("should not trigger").unwrap();
+	assert_eq!(val, 42);
+}
+
+#[test]
+fn test_error_query_none_round_trip() {
+	use surrealdb_types::SurrealValue;
+
+	let err = Error::query("The record access signup query failed".into(), None);
+	assert!(err.is_query(), "before round-trip: expected Query, got {}", err.kind_str());
+	let value = err.clone().into_value();
+	let parsed = Error::from_value(value).unwrap();
+	assert!(parsed.is_query(), "after round-trip: expected Query, got {}", parsed.kind_str());
+	assert_eq!(parsed.message(), "The record access signup query failed");
+
+	let encoded = surrealdb_types::encode(&err.into_value()).expect("encode should succeed");
+	let decoded: surrealdb_types::Value =
+		surrealdb_types::decode(&encoded).expect("decode should succeed");
+	let parsed = Error::from_value(decoded).unwrap();
+	assert!(
+		parsed.is_query(),
+		"after flatbuffers round-trip: expected Query, got {}",
+		parsed.kind_str()
+	);
 }

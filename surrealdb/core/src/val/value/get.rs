@@ -6,6 +6,7 @@ use futures::future::try_join_all;
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
+use crate::catalog::providers::TableProvider;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
@@ -350,7 +351,7 @@ impl Value {
 						// in a graph [WHERE] refers to the current SELECT's row.
 						let parent_ctx = match doc {
 							Some(d) if expr_references_parent(w) => {
-								let mut child = Context::new(ctx);
+								let mut child = Context::new_child(ctx);
 								child.add_value("parent", Arc::new(d.doc.as_ref().clone()));
 								Some(child.freeze())
 							}
@@ -559,6 +560,27 @@ impl Value {
 								// path
 								_ => path,
 							};
+
+							// Self-reference cycle guard: if the record id being dereferenced
+							// is the same record currently being computed (e.g. a COMPUTED
+							// field like `$this.id.prop`), re-running `select_document` would
+							// re-enter `computed_fields_inner` for the same record and
+							// infinitely.
+							if let Some(cur) = doc
+								&& cur.rid.as_deref() == Some(&val)
+							{
+								let (ns_id, db_id) = ctx.expect_ns_db_ids(opt).await?;
+								let record = ctx
+									.tx()
+									.get_record(ns_id, db_id, &val.table, &val.key, None)
+									.await?;
+								let raw = if record.data.is_none() {
+									Value::None
+								} else {
+									record.data.clone()
+								};
+								return stk.run(|stk| raw.get(stk, ctx, opt, None, next)).await;
+							}
 
 							// Fetch the record id's contents
 							let v = val

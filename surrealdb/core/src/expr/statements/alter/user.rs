@@ -67,7 +67,7 @@ impl AlterUserStatement {
 
 	async fn compute_root(&self, ctx: &FrozenContext) -> Result<Value> {
 		let txn = ctx.tx();
-		let mut user = match txn.get_root_user(&self.name).await? {
+		let mut user = match txn.get_root_user(&self.name, None).await? {
 			Some(v) => v.deref().clone(),
 			None => {
 				if self.if_exists {
@@ -89,7 +89,7 @@ impl AlterUserStatement {
 		let txn = ctx.tx();
 		let ns = ctx.get_ns_id(opt).await?;
 		let ns_name = opt.ns()?;
-		let mut user = match txn.get_ns_user(ns, &self.name).await? {
+		let mut user = match txn.get_ns_user(ns, &self.name, None).await? {
 			Some(v) => v.deref().clone(),
 			None => {
 				if self.if_exists {
@@ -112,7 +112,7 @@ impl AlterUserStatement {
 		let txn = ctx.tx();
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let (ns_name, db_name) = opt.ns_db()?;
-		let mut user = match txn.get_db_user(ns, db, &self.name).await? {
+		let mut user = match txn.get_db_user(ns, db, &self.name, None).await? {
 			Some(v) => v.deref().clone(),
 			None => {
 				if self.if_exists {

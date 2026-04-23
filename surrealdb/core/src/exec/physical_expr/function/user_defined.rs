@@ -57,7 +57,7 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 		let db_id = db_ctx.db.database_id;
 		let func_def = ctx
 			.txn()
-			.get_db_function(ns_id, db_id, &self.name)
+			.get_db_function(ns_id, db_id, &self.name, ctx.exec_ctx.version_stamp())
 			.await
 			.map_err(|e| anyhow::anyhow!("Function '{}' not found: {}", func_name, e))?;
 
@@ -78,7 +78,9 @@ impl PhysicalExpr for UserDefinedFunctionExec {
 		};
 
 		// 5. Check permissions (with limited auth)
-		check_permission(&func_def.permissions, &func_name, &ctx).await?;
+		if ctx.exec_ctx.should_check_perms(crate::iam::Action::View)? {
+			check_permission(&func_def.permissions, &func_name, &ctx).await?;
+		}
 
 		// 6. Evaluate all arguments
 		let evaluated_args = evaluate_args(&self.arguments, ctx.clone()).await?;

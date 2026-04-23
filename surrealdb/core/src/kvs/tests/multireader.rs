@@ -10,7 +10,7 @@ pub async fn multireader(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Insert an initial key
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(&"test", &"some text".as_bytes().to_vec(), None).await.unwrap();
+	tx.set(&"test", &"some text".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx1 = ds.transaction(Read, Optimistic).await.unwrap();

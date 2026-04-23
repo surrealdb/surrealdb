@@ -53,7 +53,7 @@ impl RelateStatement {
 			.cast_to::<Option<Duration>>()?
 		{
 			Some(timeout) => {
-				let mut new_ctx = Context::new(ctx);
+				let mut new_ctx = Context::new_child(ctx);
 				new_ctx.add_timeout(timeout.0)?;
 				ctx_store = new_ctx.freeze();
 				&ctx_store
@@ -162,7 +162,8 @@ impl RelateStatement {
 				};
 
 				// Auto-create the through table if it doesn't exist
-				let tb = txn.get_or_add_tb(Some(ctx), opt.ns()?, opt.db()?, through_table).await?;
+				let tb =
+					txn.get_or_add_tb(Some(ctx), opt.ns()?, opt.db()?, through_table, None).await?;
 				let fields = txn
 					.all_tb_fields(ns.namespace_id, db.database_id, through_table, opt.version)
 					.await?;

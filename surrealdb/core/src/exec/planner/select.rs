@@ -44,7 +44,7 @@ use crate::exec::operators::{
 	Aggregate, AnalyzePlan, Compute, DynamicScan, ExplainPlan, Fetch, FieldSelection, Filter,
 	KnnTopK, Limit, Project, ProjectValue, Projection, RandomShuffle, RecordIdScan, SelectProject,
 	Sort, SortByKey, SortDirection, SortKey, SortTopK, SortTopKByKey, SourceExpr, Split, TableScan,
-	Timeout, Union, UnionIndexScan, UnwrapExactlyOne,
+	Timeout, Union, UnionIndexScan, UnwrapExactlyOne, VersionScope,
 };
 use crate::exec::{ExecOperator, OperatorMetrics};
 use crate::expr::field::{Field, Fields};
@@ -133,7 +133,7 @@ impl<'ctx> Planner<'ctx> {
 			(Some(txn), Some(ns), Some(db)) => (txn, ns, db),
 			_ => return None,
 		};
-		let db_def = txn.get_db_by_name(ns, db).await.ok()??;
+		let db_def = txn.get_db_by_name(ns, db, None).await.ok()??;
 		Some((db_def.namespace_id, db_def.database_id))
 	}
 
@@ -383,8 +383,13 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		match fields {
 			Fields::Value(selector) => {
+				let omit_fields = if !omit.is_empty() {
+					self.plan_omit(omit).await?
+				} else {
+					vec![]
+				};
 				let expr = self.physical_expr(selector.expr).await?;
-				Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(ProjectValue::new(input, expr, omit_fields)) as Arc<dyn ExecOperator>)
 			}
 
 			Fields::Select(field_list) => {
@@ -456,8 +461,33 @@ impl<'ctx> Planner<'ctx> {
 	) -> Result<Arc<dyn ExecOperator>, Error> {
 		match fields {
 			Fields::Value(selector) => {
+				let omit_fields = if !omit.is_empty() {
+					self.plan_omit(omit).await?
+				} else {
+					vec![]
+				};
+				// If the alias was registered for sort (Compute pre-evaluated
+				// it), read the pre-computed field to avoid re-evaluating
+				// non-deterministic expressions like rand() or time::now().
+				// Skip when the alias is being OMITted — OMIT deletes the
+				// pre-computed field before evaluation, so we must fall
+				// through to re-evaluate the expression directly.
+				// SELECT VALUE aliases are guaranteed single-part by the parser.
+				if let Some(ref alias) = selector.alias
+					&& alias.len() == 1
+					&& let Some(crate::expr::part::Part::Field(name)) = alias.first()
+					&& registry.contains_name(name)
+					&& !omit_fields.iter().any(|f| {
+						f.len() == 1
+							&& matches!(f.first(), Some(crate::expr::part::Part::Field(n)) if n == name)
+					}) {
+					let idiom = Idiom(vec![crate::expr::part::Part::Field(name.clone())]);
+					let expr = self.physical_expr(Expr::Idiom(idiom)).await?;
+					return Ok(Arc::new(ProjectValue::new(input, expr, omit_fields))
+						as Arc<dyn ExecOperator>);
+				}
 				let expr = self.physical_expr(selector.expr).await?;
-				Ok(Arc::new(ProjectValue::new(input, expr)) as Arc<dyn ExecOperator>)
+				Ok(Arc::new(ProjectValue::new(input, expr, omit_fields)) as Arc<dyn ExecOperator>)
 			}
 
 			Fields::Select(ref field_list) => {
@@ -1041,8 +1071,8 @@ impl<'ctx> Planner<'ctx> {
 		group: Option<&crate::expr::group::Groups>,
 		split: Option<&crate::expr::split::Splits>,
 	) -> Option<std::collections::HashSet<String>> {
-		use crate::expr::Part;
 		use crate::expr::visit::{Visit, Visitor};
+		use crate::expr::{Expr, Part};
 
 		// Check for SELECT * (wildcard) -- need all fields
 		match fields {
@@ -1066,11 +1096,28 @@ impl<'ctx> Planner<'ctx> {
 			type Error = std::convert::Infallible;
 
 			fn visit_idiom(&mut self, idiom: &crate::expr::Idiom) -> Result<(), Self::Error> {
-				if let Some(Part::Field(name)) = idiom.0.first() {
+				// `$parent.field` / `$this.field` use `Part::Start(Expr::Param(...))`; the
+				// first segment is a correlation anchor, not a table column. Counting those
+				// as ordinary field names breaks selective scans (e.g. `$parent.refs` would
+				// omit `refs`) — issue #7154. Bare identifiers `parent` / `this` are **not**
+				// correlation anchors: they can be real column names (`parent.sub`).
+				let parts = idiom.0.as_slice();
+				if let Some(Part::Start(Expr::Param(p))) = parts.first()
+					&& matches!(p.as_str(), "parent" | "this")
+				{
+					for p in parts.iter().skip(1) {
+						if let Part::Field(name) = p {
+							self.fields.insert(name.clone());
+						}
+						self.visit_part(p)?;
+					}
+					return Ok(());
+				}
+
+				if let Some(Part::Field(name)) = parts.first() {
 					self.fields.insert(name.clone());
 				}
-				// Walk nested parts for embedded expressions
-				for p in idiom.0.iter() {
+				for p in parts.iter() {
 					self.visit_part(p)?;
 				}
 				Ok(())
@@ -1226,7 +1273,7 @@ impl<'ctx> Planner<'ctx> {
 				.await?;
 			let field_names = extract_count_field_names(&fields);
 			let count_scan: Arc<dyn ExecOperator> =
-				Arc::new(CountScan::new(table_expr, version, field_names));
+				Arc::new(CountScan::new(table_expr, version.clone(), field_names));
 			let timed = match timeout {
 				Expr::Literal(Literal::None) => count_scan,
 				te => {
@@ -1234,10 +1281,14 @@ impl<'ctx> Planner<'ctx> {
 					Arc::new(Timeout::new(count_scan, Some(tp))) as Arc<dyn ExecOperator>
 				}
 			};
+			let versioned: Arc<dyn ExecOperator> = match &version {
+				Some(v) => Arc::new(VersionScope::new(timed, v.clone())),
+				None => timed,
+			};
 			return if only {
-				Ok(Arc::new(UnwrapExactlyOne::new(timed, true)))
+				Ok(Arc::new(UnwrapExactlyOne::new(versioned, true)))
 			} else {
-				Ok(timed)
+				Ok(versioned)
 			};
 		}
 
@@ -1264,8 +1315,14 @@ impl<'ctx> Planner<'ctx> {
 				let predicate = self.physical_expr(condition.0.clone()).await?;
 				let field_names = extract_count_field_names(&fields);
 				let index_count_scan: Arc<dyn ExecOperator> = Arc::new(
-					IndexCountScan::new(table_expr, predicate, condition, version, field_names)
-						.with_btree_access(btree_access),
+					IndexCountScan::new(
+						table_expr,
+						predicate,
+						condition,
+						version.clone(),
+						field_names,
+					)
+					.with_btree_access(btree_access),
 				);
 				let timed = match timeout {
 					Expr::Literal(Literal::None) => index_count_scan,
@@ -1274,10 +1331,14 @@ impl<'ctx> Planner<'ctx> {
 						Arc::new(Timeout::new(index_count_scan, Some(tp))) as Arc<dyn ExecOperator>
 					}
 				};
+				let versioned: Arc<dyn ExecOperator> = match &version {
+					Some(v) => Arc::new(VersionScope::new(timed, v.clone())),
+					None => timed,
+				};
 				return if only {
-					Ok(Arc::new(UnwrapExactlyOne::new(timed, true)))
+					Ok(Arc::new(UnwrapExactlyOne::new(versioned, true)))
 				} else {
-					Ok(timed)
+					Ok(versioned)
 				};
 			}
 		}
@@ -1310,7 +1371,7 @@ impl<'ctx> Planner<'ctx> {
 				Some(e @ Expr::Literal(Literal::RecordId(_))) => self.physical_expr(e).await?,
 				_ => unreachable!("verified above"),
 			};
-			let mut scan = RecordIdScan::new(rid_expr, version, needed_fields, None);
+			let mut scan = RecordIdScan::new(rid_expr, version.clone(), needed_fields, None);
 			// Resolve table context at plan time
 			if let Some(ref tb) = table_name_for_resolve
 				&& let (Some(txn), Some(ns), Some(db)) = (&self.txn, &self.ns, &self.db)
@@ -1340,10 +1401,14 @@ impl<'ctx> Planner<'ctx> {
 					Arc::new(Timeout::new(projected, Some(tp))) as Arc<dyn ExecOperator>
 				}
 			};
+			let versioned: Arc<dyn ExecOperator> = match &version {
+				Some(v) => Arc::new(VersionScope::new(timed, v.clone())),
+				None => timed,
+			};
 			return if only {
-				Ok(Arc::new(UnwrapExactlyOne::new(timed, true)))
+				Ok(Arc::new(UnwrapExactlyOne::new(versioned, true)))
 			} else {
-				Ok(timed)
+				Ok(versioned)
 			};
 		}
 
@@ -1374,7 +1439,7 @@ impl<'ctx> Planner<'ctx> {
 				let mc = extract_matches_context(c, Some(self.ctx));
 				let hm = !mc.is_empty();
 				if hm || has_knn_early {
-					let mut child = crate::ctx::Context::new(self.ctx);
+					let mut child = crate::ctx::Context::new_child(self.ctx);
 					if hm {
 						let mut mc = mc;
 						if let Some(ref t) = primary_table {
@@ -1395,12 +1460,13 @@ impl<'ctx> Planner<'ctx> {
 				std::borrow::Cow::Borrowed(self.ctx)
 			};
 
-		// Propagate txn to the inner planner
+		// Propagate txn and version to the inner planner
 		let pp = if let Some(ref txn) = self.txn {
 			Planner::with_txn(&planning_ctx, txn.clone(), self.ns.clone(), self.db.clone())
 		} else {
 			Planner::new(&planning_ctx)
-		};
+		}
+		.with_version(version.clone());
 
 		let needed_fields = Self::extract_needed_fields(
 			&fields,
@@ -1534,7 +1600,7 @@ impl<'ctx> Planner<'ctx> {
 		let mut planned = pp
 			.plan_sources(
 				what,
-				version,
+				version.clone(),
 				cond_for_index.as_ref(),
 				order.as_ref(),
 				with.as_ref(),
@@ -1638,10 +1704,14 @@ impl<'ctx> Planner<'ctx> {
 				Arc::new(Timeout::new(fetched, Some(tp))) as Arc<dyn ExecOperator>
 			}
 		};
+		let versioned: Arc<dyn ExecOperator> = match version {
+			Some(v) => Arc::new(VersionScope::new(timed, v)),
+			None => timed,
+		};
 		if only {
-			Ok(Arc::new(UnwrapExactlyOne::new(timed, !is_value_source)))
+			Ok(Arc::new(UnwrapExactlyOne::new(versioned, !is_value_source)))
 		} else {
-			Ok(timed)
+			Ok(versioned)
 		}
 	}
 
@@ -2210,8 +2280,8 @@ impl<'ctx> Planner<'ctx> {
 		db: &str,
 		table_name: &crate::val::TableName,
 	) -> Option<crate::exec::operators::scan::resolved::ResolvedTableContext> {
-		let ns_def = txn.get_ns_by_name(ns).await.ok()??;
-		let db_def = txn.get_db_by_name(ns, db).await.ok()??;
+		let ns_def = txn.get_ns_by_name(ns, None).await.ok()??;
+		let db_def = txn.get_db_by_name(ns, db, None).await.ok()??;
 		resolve_table_context(txn, ctx, ns, db, ns_def.namespace_id, db_def.database_id, table_name)
 			.await
 			.ok()?
@@ -2243,14 +2313,14 @@ impl<'ctx> Planner<'ctx> {
 			None => return false,
 		};
 
-		let Ok(Some(ns_def)) = txn.get_ns_by_name(ns_name).await else {
+		let Ok(Some(ns_def)) = txn.get_ns_by_name(ns_name, None).await else {
 			return false;
 		};
-		let Ok(Some(db_def)) = txn.get_db_by_name(ns_name, db_name).await else {
+		let Ok(Some(db_def)) = txn.get_db_by_name(ns_name, db_name, None).await else {
 			return false;
 		};
 		let Ok(indexes) =
-			txn.all_tb_indexes(ns_def.namespace_id, db_def.database_id, table_name).await
+			txn.all_tb_indexes(ns_def.namespace_id, db_def.database_id, table_name, None).await
 		else {
 			return false;
 		};
@@ -2286,10 +2356,12 @@ impl<'ctx> Planner<'ctx> {
 		};
 		let cond = cond.as_ref()?;
 
-		let ns_def = txn.get_ns_by_name(ns_name).await.ok()??;
-		let db_def = txn.get_db_by_name(ns_name, db_name).await.ok()??;
-		let indexes =
-			txn.all_tb_indexes(ns_def.namespace_id, db_def.database_id, table_name).await.ok()?;
+		let ns_def = txn.get_ns_by_name(ns_name, None).await.ok()??;
+		let db_def = txn.get_db_by_name(ns_name, db_name, None).await.ok()??;
+		let indexes = txn
+			.all_tb_indexes(ns_def.namespace_id, db_def.database_id, table_name, None)
+			.await
+			.ok()?;
 
 		if indexes.is_empty() {
 			return None;
@@ -2340,21 +2412,23 @@ impl<'ctx> Planner<'ctx> {
 		}
 
 		// Look up namespace and database to get IDs
-		let ns_def = match txn.get_ns_by_name(ns_name).await {
+		let ns_def = match txn.get_ns_by_name(ns_name, None).await {
 			Ok(Some(ns)) => ns,
 			_ => return Ok(None),
 		};
-		let db_def = match txn.get_db_by_name(ns_name, db_name).await {
+		let db_def = match txn.get_db_by_name(ns_name, db_name, None).await {
 			Ok(Some(db)) => db,
 			_ => return Ok(None),
 		};
 
 		// Fetch indexes for the table
-		let indexes =
-			match txn.all_tb_indexes(ns_def.namespace_id, db_def.database_id, table_name).await {
-				Ok(idx) => idx,
-				Err(_) => return Ok(None),
-			};
+		let indexes = match txn
+			.all_tb_indexes(ns_def.namespace_id, db_def.database_id, table_name, None)
+			.await
+		{
+			Ok(idx) => idx,
+			Err(_) => return Ok(None),
+		};
 
 		if indexes.is_empty() {
 			return Ok(Some((AccessPath::TableScan, direction)));

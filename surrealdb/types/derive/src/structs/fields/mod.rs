@@ -44,6 +44,8 @@ impl Fields {
 
 				Fields::Named(NamedFields {
 					fields,
+					rename: container_attrs.rename,
+					rename_all: container_attrs.rename_all,
 					default: container_attrs.default,
 					skip_content: container_attrs.skip_content,
 				})
@@ -76,6 +78,7 @@ impl Fields {
 					wrap,
 					unnamed_field_attrs.tuple,
 					unnamed_field_attrs.skip_content,
+					unnamed_field_attrs.rename,
 				))
 			}
 			syn::Fields::Unit => Fields::Unit(UnitAttributes::parse(attrs)),
@@ -97,6 +100,14 @@ impl Fields {
 			Fields::Unnamed(f) => f.skip_content.as_ref(),
 			Fields::Unit(a) if a.skip_content => Some(&SkipContent::Always),
 			Fields::Unit(_) => None,
+		}
+	}
+
+	pub fn rename(&self) -> Option<&str> {
+		match self {
+			Fields::Named(f) => f.rename.as_deref(),
+			Fields::Unnamed(f) => f.rename.as_deref(),
+			Fields::Unit(a) => a.rename.as_deref(),
 		}
 	}
 
@@ -994,12 +1005,17 @@ impl Fields {
 		}
 	}
 
-	pub fn kind_of(&self, strategy: &Strategy, crate_path: &CratePath) -> TokenStream2 {
+	pub fn kind_of(
+		&self,
+		type_name: &syn::Ident,
+		strategy: &Strategy,
+		crate_path: &CratePath,
+	) -> TokenStream2 {
 		let kind_ty = crate_path.kind();
 		let kind_literal_ty = crate_path.kind_literal();
 		match self {
 			Fields::Named(fields) => {
-				let map_types = fields.map_types(crate_path);
+				let map_types = fields.map_types(type_name, crate_path);
 
 				match strategy {
 					Strategy::VariantKey {
@@ -1057,14 +1073,16 @@ impl Fields {
 			Fields::Unnamed(fields) => {
 				let kind_of = if !fields.tuple && fields.fields.len() == 1 {
 					let ty = &fields.fields[0];
-					if fields.wrap[0] {
+					if crate::type_contains_ident(ty, type_name) {
+						quote!( #kind_ty::Any )
+					} else if fields.wrap[0] {
 						let wrapper = crate_path.wrapper();
 						quote!( <#wrapper::<#ty> as SurrealValue>::kind_of() )
 					} else {
 						quote!( <#ty as SurrealValue>::kind_of() )
 					}
 				} else {
-					let arr_types = fields.arr_types(crate_path);
+					let arr_types = fields.arr_types(type_name, crate_path);
 
 					quote! {{
 						let mut arr = Vec::new();

@@ -24,6 +24,7 @@ mod split;
 mod timeout;
 mod union;
 mod unwrap_exactly_one;
+mod version_scope;
 
 pub use aggregate::{
 	Aggregate, AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
@@ -64,3 +65,4 @@ pub use split::Split;
 pub use timeout::Timeout;
 pub use union::Union;
 pub use unwrap_exactly_one::UnwrapExactlyOne;
+pub use version_scope::VersionScope;

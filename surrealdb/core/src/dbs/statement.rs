@@ -546,7 +546,7 @@ impl Statement<'_> {
 			else {
 				return Ok(Cow::Borrowed(ctx));
 			};
-			let mut ctx = Context::new(ctx);
+			let mut ctx = Context::new_child(ctx);
 			ctx.add_timeout(x.0)?;
 			Ok(Cow::Owned(ctx.freeze()))
 		} else {
@@ -562,7 +562,7 @@ impl Statement<'_> {
 		// Add query executors if any
 		if planner.has_executors() {
 			// Create a new context
-			let mut ctx = Context::new(&ctx);
+			let mut ctx = Context::new_child(&ctx);
 			ctx.set_query_planner(planner);
 			Cow::Owned(ctx.freeze())
 		} else {

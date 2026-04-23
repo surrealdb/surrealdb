@@ -45,7 +45,7 @@ impl RemoveSequenceStatement {
 		let txn = ctx.tx();
 
 		// Get the definition
-		let sq = match txn.get_db_sequence(ns, db, &name).await {
+		let sq = match txn.get_db_sequence(ns, db, &name, None).await {
 			Ok(x) => x,
 			Err(e) => {
 				if self.if_exists && matches!(e.downcast_ref(), Some(Error::SeqNotFound { .. })) {

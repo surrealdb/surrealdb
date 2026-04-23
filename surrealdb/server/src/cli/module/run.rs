@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use surrealdb_types::ToSql;
-use surrealism_runtime::controller::Runtime;
+use surrealism_runtime::PrefixErr;
 use surrealism_runtime::package::SurrealismPackage;
-use surrealism_types::err::PrefixError;
+use surrealism_runtime::runtime::Runtime;
 
 use crate::cli::module::host::DemoHost;
 
@@ -16,7 +16,7 @@ pub async fn init(
 	let package = SurrealismPackage::from_file(file)?;
 
 	// Load the WASM module
-	let runtime = Runtime::new(package)?;
+	let runtime = Runtime::new(package, 8, None, None, None, None)?;
 	let host = Box::new(DemoHost::new());
 	let mut controller =
 		runtime.new_controller(host).await.prefix_err(|| "Failed to load WASM module")?;
@@ -33,7 +33,7 @@ pub async fn init(
 		}
 		Err(e) => {
 			eprintln!("❌ {}", e);
-			Err(e)
+			Err(e.into())
 		}
 	}
 }

@@ -63,7 +63,7 @@ impl Block {
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
 		// Duplicate context
-		let mut ctx = Some(Context::new(ctx).freeze());
+		let mut ctx = Some(Context::new_child(ctx).freeze());
 		// Loop over the statements
 		let mut res = Value::None;
 		for v in self.iter() {

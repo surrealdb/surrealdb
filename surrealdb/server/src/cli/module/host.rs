@@ -19,10 +19,7 @@ impl DemoHost {
 	}
 }
 
-/// Custom parser for `surrealdb_types::Value`
-fn parse_value(s: &str) -> Result<surrealdb_types::Value, String> {
-	crate::core::syn::value(s).map_err(|e| format!("Invalid value: {e}"))
-}
+use super::parse_value;
 
 #[async_trait]
 impl InvocationContext for DemoHost {
@@ -114,5 +111,13 @@ impl InvocationContext for DemoHost {
 	fn stderr(&mut self, output: &str) -> Result<()> {
 		eprintln!("[surli::err] {}", output);
 		Ok(())
+	}
+
+	fn stdout_callback(&self) -> std::sync::Arc<dyn Fn(&str) + Send + Sync> {
+		std::sync::Arc::new(|output| println!("[surli::out] {}", output))
+	}
+
+	fn stderr_callback(&self) -> std::sync::Arc<dyn Fn(&str) + Send + Sync> {
+		std::sync::Arc::new(|output| eprintln!("[surli::err] {}", output))
 	}
 }

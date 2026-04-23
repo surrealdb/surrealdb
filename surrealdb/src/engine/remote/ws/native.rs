@@ -4,6 +4,7 @@ use std::sync::Arc;
 use async_channel::Receiver;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
+use surrealdb_types::{ConnectionError, ValidationError};
 use tokio::net::TcpStream;
 use tokio::sync::{RwLock, watch};
 use tokio::time;
@@ -87,9 +88,9 @@ pub(crate) async fn connect(
 	#[cfg_attr(not(any(feature = "native-tls", feature = "rustls")), expect(unused_variables))]
 	maybe_connector: Option<Connector>,
 ) -> crate::Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-	let mut request = (&endpoint.url)
-		.into_client_request()
-		.map_err(|err| Error::internal(format!("Invalid URL: {}", err)))?;
+	let mut request = (&endpoint.url).into_client_request().map_err(|err| {
+		Error::validation(format!("Invalid URL: {}", err), ValidationError::InvalidRequest)
+	})?;
 
 	request.headers_mut().insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("flatbuffers"));
 
@@ -101,12 +102,16 @@ pub(crate) async fn connect(
 		maybe_connector,
 	)
 	.await
-	.map_err(|err| Error::internal(format!("WebSocket error: {}", err)))?;
+	.map_err(|err| {
+		Error::connection(format!("WebSocket error: {}", err), ConnectionError::ConnectionFailed)
+	})?;
 
 	#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 	let (socket, _) = tokio_tungstenite::connect_async_with_config(request, config, NAGLE_ALG)
 		.await
-		.map_err(|err| Error::internal(format!("WebSocket error: {}", err)))?;
+		.map_err(|err| {
+		Error::connection(format!("WebSocket error: {}", err), ConnectionError::ConnectionFailed)
+	})?;
 
 	Ok(socket)
 }
@@ -120,7 +125,10 @@ impl conn::Sealed for super::Client {
 		session_clone: Option<crate::SessionClone>,
 	) -> BoxFuture<'static, crate::Result<Surreal<Self>>> {
 		Box::pin(async move {
-			address.url = address.url.join(PATH).map_err(|e| Error::internal(e.to_string()))?;
+			address.url = address
+				.url
+				.join(PATH)
+				.map_err(|e| Error::validation(e.to_string(), ValidationError::InvalidRequest))?;
 			#[cfg(any(feature = "native-tls", feature = "rustls"))]
 			let maybe_connector = address.config.tls_config.clone().map(Connector::from);
 			#[cfg(not(any(feature = "native-tls", feature = "rustls")))]

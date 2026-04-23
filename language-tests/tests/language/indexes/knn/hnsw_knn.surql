@@ -33,7 +33,7 @@ value = "[{ detail: { plan: { index: 'hnsw_pts', operator: '<|2,100|>', value: [
 value = "[{ dist: 2f, id: pts:1 }, { dist: 4f, id: pts:2 }]"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'pts' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { index: 'hnsw_pts', operator: '<|2,500|>', value: [2, 3, 4, 5] }, table: 'pts' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[]"
@@ -47,7 +47,7 @@ UPDATE pts:3 SET point = [8,9,10,11];
 LET $pt = [2,3,4,5];
 SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,100|> $pt;
 SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,100|> $pt EXPLAIN;
--- Brute force for comparison (EUCLIDEAN distance type instead of threshold)
+-- KNN with explicit EUCLIDEAN (routes to HNSW when DIST matches the index)
 SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt;
 SELECT id, vector::distance::knn() AS dist FROM pts WHERE point <|2,EUCLIDEAN|> $pt EXPLAIN;
 DELETE pts:3;

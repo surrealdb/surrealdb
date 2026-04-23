@@ -20,6 +20,9 @@ error = "The query was not executed due to a failed transaction"
 error = "Database index `item_name_idx` already contains 'ItemA', with record `item:`item:1``"
 
 [[test.results]]
+error = "Cannot COMMIT: the transaction was aborted due to a prior error"
+
+[[test.results]]
 value = "[]"
 */
 

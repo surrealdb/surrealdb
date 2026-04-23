@@ -7,7 +7,9 @@ use clap::Args;
 use rand::Rng;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 use surrealdb_core::buc::BucketStoreProvider;
+use surrealdb_core::channel::Receiver;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
+use surrealdb_types::Notification;
 use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 
@@ -77,6 +79,10 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_NO_DEFAULTS", long = "no-defaults", conflicts_with_all = ["default_namespace", "default_database"])]
 	#[arg(default_value_t = false)]
 	no_defaults: bool,
+	#[arg(help = "Load Surrealism modules lazily on first use instead of eagerly at startup")]
+	#[arg(env = "SURREAL_LAZY_SURREALISM", long = "lazy-surrealism")]
+	#[arg(default_value_t = false)]
+	lazy_surrealism: bool,
 }
 
 #[derive(Args, Debug)]
@@ -735,8 +741,9 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		default_namespace,
 		default_database,
 		no_defaults,
+		lazy_surrealism,
 	}: StartCommandDbsOptions,
-) -> Result<Datastore> {
+) -> Result<(Datastore, Receiver<Notification>)> {
 	// Warn about the strict mode flag being unused.
 	if let Some(true) = strict_mode {
 		warn!(
@@ -776,17 +783,31 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	let capabilities = capabilities.into();
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
+
+	let (send, recv) = surrealdb_core::channel::bounded(15_000);
+
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new_with_factory::<C>(composer, &opt.path, canceller)
-		.await?
-		.with_notifications()
+	let builder = Datastore::builder()
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
-		.with_auth_enabled(!unauthenticated)
+		.with_auth(!unauthenticated)
 		.with_capabilities(capabilities)
-		.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny);
+		.with_notify(send)
+		.with_shutdown_cancel(canceller);
+
 	#[cfg(storage)]
-	let dbs = dbs.with_temporary_directory(temporary_directory);
+	let builder = builder.with_temporary_directory(temporary_directory);
+
+	let builder = if let Some(slow_log_threshold) = slow_log_threshold {
+		builder.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny)
+	} else {
+		builder
+	};
+
+	#[cfg(feature = "surrealism")]
+	let builder = builder.with_lazy_surrealism(lazy_surrealism);
+
+	let dbs = builder.build_with_factory_path::<C>(&opt.path, composer).await?;
 	// Ensure the storage version is up to date to prevent corruption.
 	// OutdatedStorageVersion is a permanent condition (the data on disk is from
 	// an older version), so retrying it would waste time and delay pod restarts
@@ -832,7 +853,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	retry_with_timeout("Expire nodes", || async { dbs.expire_nodes().await }).await?;
 	retry_with_timeout("Remove nodes", || async { dbs.remove_nodes().await }).await?;
 	// All ok
-	Ok(dbs)
+	Ok((dbs, recv))
 }
 
 #[cfg(test)]
@@ -897,11 +918,15 @@ mod tests {
 			//
 			// 0 - Functions and Networking are allowed
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::All),
-				),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::All),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				format!("RETURN http::get('{}')", server1.uri()),
 				true,
@@ -910,10 +935,11 @@ mod tests {
 			//
 			// 1 - Scripting is allowed
 			(
-				Datastore::new("memory")
+				Datastore::builder()
+					.with_capabilities(Capabilities::default().with_scripting(true))
+					.build_with_path("memory")
 					.await
-					.unwrap()
-					.with_capabilities(Capabilities::default().with_scripting(true)),
+					.unwrap(),
 				Session::owner(),
 				"RETURN function() { return '1' }".to_string(),
 				true,
@@ -922,10 +948,11 @@ mod tests {
 			//
 			// 2 - Scripting is not allowed
 			(
-				Datastore::new("memory")
+				Datastore::builder()
+					.with_capabilities(Capabilities::default().with_scripting(false))
+					.build_with_path("memory")
 					.await
-					.unwrap()
-					.with_capabilities(Capabilities::default().with_scripting(false)),
+					.unwrap(),
 				Session::owner(),
 				"RETURN function() { return '1' }".to_string(),
 				false,
@@ -934,11 +961,12 @@ mod tests {
 			//
 			// 3 - Anonymous actor when guest access is allowed and auth is enabled, succeeds
 			(
-				Datastore::new("memory")
+				Datastore::builder()
+					.with_capabilities(Capabilities::default().with_guest_access(true))
+					.with_auth(true)
+					.build_with_path("memory")
 					.await
-					.unwrap()
-					.with_auth_enabled(true)
-					.with_capabilities(Capabilities::default().with_guest_access(true)),
+					.unwrap(),
 				Session::default(),
 				"RETURN 1".to_string(),
 				true,
@@ -948,11 +976,12 @@ mod tests {
 			// 4 - Anonymous actor when guest access is not allowed and auth is enabled, throws
 			// error
 			(
-				Datastore::new("memory")
+				Datastore::builder()
+					.with_capabilities(Capabilities::default().with_guest_access(false))
+					.with_auth(true)
+					.build_with_path("memory")
 					.await
-					.unwrap()
-					.with_auth_enabled(true)
-					.with_capabilities(Capabilities::default().with_guest_access(false)),
+					.unwrap(),
 				Session::default(),
 				"RETURN 1".to_string(),
 				false,
@@ -961,11 +990,12 @@ mod tests {
 			//
 			// 5 - Anonymous actor when guest access is not allowed and auth is disabled, succeeds
 			(
-				Datastore::new("memory")
+				Datastore::builder()
+					.with_auth(false)
+					.with_capabilities(Capabilities::default().with_guest_access(false))
+					.build_with_path("memory")
 					.await
-					.unwrap()
-					.with_auth_enabled(false)
-					.with_capabilities(Capabilities::default().with_guest_access(false)),
+					.unwrap(),
 				Session::default(),
 				"RETURN 1".to_string(),
 				true,
@@ -975,11 +1005,12 @@ mod tests {
 			// 6 - Authenticated user when guest access is not allowed and auth is enabled,
 			// succeeds
 			(
-				Datastore::new("memory")
+				Datastore::builder()
+					.with_auth(true)
+					.with_capabilities(Capabilities::default().with_guest_access(false))
+					.build_with_path("memory")
 					.await
-					.unwrap()
-					.with_auth_enabled(true)
-					.with_capabilities(Capabilities::default().with_guest_access(false)),
+					.unwrap(),
 				Session::viewer(),
 				"RETURN 1".to_string(),
 				true,
@@ -987,9 +1018,13 @@ mod tests {
 			),
 			// 7 - Specific experimental feature enabled
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default().with_experimental(ExperimentalTarget::Files.into()),
-				),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default().with_experimental(ExperimentalTarget::Files.into()),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner().with_ns("test").with_db("test"),
 				"DEFINE BUCKET test BACKEND \"memory\";".to_string(),
 				true,
@@ -997,9 +1032,14 @@ mod tests {
 			),
 			// 8 - Specific experimental feature disabled
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default().without_experimental(ExperimentalTarget::Files.into()),
-				),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.without_experimental(ExperimentalTarget::Files.into()),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner().with_ns("test").with_db("test"),
 				"DEFINE BUCKET test BACKEND \"memory\";".to_string(),
 				false,
@@ -1008,15 +1048,19 @@ mod tests {
 			//
 			// 9 - Some functions are not allowed
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::*").unwrap()].into(),
-						))
-						.without_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::len").unwrap()].into(),
-						)),
-				),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::*").unwrap()].into(),
+							))
+							.without_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::len").unwrap()].into(),
+							)),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				"RETURN string::len('a')".to_string(),
 				false,
@@ -1024,15 +1068,19 @@ mod tests {
 			),
 			// 10 -
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::*").unwrap()].into(),
-						))
-						.without_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::len").unwrap()].into(),
-						)),
-				),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::*").unwrap()].into(),
+							))
+							.without_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::len").unwrap()].into(),
+							)),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				"RETURN string::lowercase('A')".to_string(),
 				true,
@@ -1040,15 +1088,19 @@ mod tests {
 			),
 			// 11 -
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::*").unwrap()].into(),
-						))
-						.without_functions(Targets::<FuncTarget>::Some(
-							[FuncTarget::from_str("string::len").unwrap()].into(),
-						)),
-				),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::*").unwrap()].into(),
+							))
+							.without_functions(Targets::<FuncTarget>::Some(
+								[FuncTarget::from_str("string::len").unwrap()].into(),
+							)),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				"RETURN time::now()".to_string(),
 				false,
@@ -1057,20 +1109,25 @@ mod tests {
 			//
 			// 12 - Some net targets are not allowed
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::Some(
-							[
-								NetTarget::from_str(&server1.address().to_string()).unwrap(),
-								NetTarget::from_str(&server2.address().to_string()).unwrap(),
-							]
-							.into(),
-						))
-						.without_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
-						)),
-				),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::Some(
+								[
+									NetTarget::from_str(&server1.address().to_string()).unwrap(),
+									NetTarget::from_str(&server2.address().to_string()).unwrap(),
+								]
+								.into(),
+							))
+							.without_network_targets(Targets::<NetTarget>::Some(
+								[NetTarget::from_str(&server1.address().to_string()).unwrap()]
+									.into(),
+							)),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				format!("RETURN http::get('{}')", server1.uri()),
 				false,
@@ -1078,20 +1135,25 @@ mod tests {
 			),
 			// 13 -
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::Some(
-							[
-								NetTarget::from_str(&server1.address().to_string()).unwrap(),
-								NetTarget::from_str(&server2.address().to_string()).unwrap(),
-							]
-							.into(),
-						))
-						.without_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
-						)),
-				),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::Some(
+								[
+									NetTarget::from_str(&server1.address().to_string()).unwrap(),
+									NetTarget::from_str(&server2.address().to_string()).unwrap(),
+								]
+								.into(),
+							))
+							.without_network_targets(Targets::<NetTarget>::Some(
+								[NetTarget::from_str(&server1.address().to_string()).unwrap()]
+									.into(),
+							)),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				"RETURN http::get('http://1.1.1.1')".to_string(),
 				false,
@@ -1099,20 +1161,25 @@ mod tests {
 			),
 			// 14 -
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::Some(
-							[
-								NetTarget::from_str(&server1.address().to_string()).unwrap(),
-								NetTarget::from_str(&server2.address().to_string()).unwrap(),
-							]
-							.into(),
-						))
-						.without_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
-						)),
-				),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::Some(
+								[
+									NetTarget::from_str(&server1.address().to_string()).unwrap(),
+									NetTarget::from_str(&server2.address().to_string()).unwrap(),
+								]
+								.into(),
+							))
+							.without_network_targets(Targets::<NetTarget>::Some(
+								[NetTarget::from_str(&server1.address().to_string()).unwrap()]
+									.into(),
+							)),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				format!("RETURN http::get('{}')", server2.uri()),
 				true,
@@ -1120,16 +1187,22 @@ mod tests {
 			),
 			(
 				// 15 - Ensure redirect fails
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str(&server3.address().to_string()).unwrap()].into(),
-						))
-						.without_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str(&server1.address().to_string()).unwrap()].into(),
-						)),
-				),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::Some(
+								[NetTarget::from_str(&server3.address().to_string()).unwrap()]
+									.into(),
+							))
+							.without_network_targets(Targets::<NetTarget>::Some(
+								[NetTarget::from_str(&server1.address().to_string()).unwrap()]
+									.into(),
+							)),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				format!("RETURN http::get('{}/redirect')", server3.uri()),
 				false,
@@ -1140,11 +1213,15 @@ mod tests {
 			),
 			(
 				// 16 - Ensure connecting via localhost succeed
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::All),
-				),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::All),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				format!("RETURN http::get('http://localhost:{}/test')", server1.address().port()),
 				true,
@@ -1153,18 +1230,22 @@ mod tests {
 			// - 17
 			(
 				// Ensure connecting via localhost is denied when all IPs are blocked
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::All)
-						.without_network_targets(Targets::<NetTarget>::Some(
-							[
-								NetTarget::from_str("127.0.0.1/0").unwrap(),
-								NetTarget::from_str("::/0").unwrap(),
-							]
-							.into(),
-						)),
-				),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::All)
+							.without_network_targets(Targets::<NetTarget>::Some(
+								[
+									NetTarget::from_str("127.0.0.1/0").unwrap(),
+									NetTarget::from_str("::/0").unwrap(),
+								]
+								.into(),
+							)),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				format!("RETURN http::get('http://localhost:{}')", server1.address().port()),
 				false,
@@ -1172,34 +1253,38 @@ mod tests {
 			),
 			// 18 - Ensure redirect succeed
 			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_functions(Targets::<FuncTarget>::All)
-						.with_network_targets(Targets::<NetTarget>::Some(
-							[NetTarget::from_str("github.com").unwrap()].into(),
-						))
-						.without_network_targets(Targets::<NetTarget>::Some(
-							[
-								NetTarget::from_str("0.0.0.0/8").unwrap(),
-								NetTarget::from_str("10.0.0.0/8").unwrap(),
-								NetTarget::from_str("10.18.0.0/16").unwrap(),
-								NetTarget::from_str("10.2.0.0/16").unwrap(),
-								NetTarget::from_str("100.64.0.0/10").unwrap(),
-								NetTarget::from_str("127.0.0.0/8").unwrap(),
-								NetTarget::from_str("169.254.0.0/16").unwrap(),
-								NetTarget::from_str("172.16.0.0/12").unwrap(),
-								NetTarget::from_str("172.20.0.0/16").unwrap(),
-								NetTarget::from_str("192.0.0.0/24").unwrap(),
-								NetTarget::from_str("192.168.0.0/16").unwrap(),
-								NetTarget::from_str("192.88.99.0/24").unwrap(),
-								NetTarget::from_str("198.18.0.0/15").unwrap(),
-								NetTarget::from_str("::1/128").unwrap(),
-								NetTarget::from_str("fc00::/7").unwrap(),
-								NetTarget::from_str("fc00::/8").unwrap(),
-							]
-							.into(),
-						)),
-				),
+				Datastore::builder()
+					.with_capabilities(
+						Capabilities::default()
+							.with_functions(Targets::<FuncTarget>::All)
+							.with_network_targets(Targets::<NetTarget>::Some(
+								[NetTarget::from_str("github.com").unwrap()].into(),
+							))
+							.without_network_targets(Targets::<NetTarget>::Some(
+								[
+									NetTarget::from_str("0.0.0.0/8").unwrap(),
+									NetTarget::from_str("10.0.0.0/8").unwrap(),
+									NetTarget::from_str("10.18.0.0/16").unwrap(),
+									NetTarget::from_str("10.2.0.0/16").unwrap(),
+									NetTarget::from_str("100.64.0.0/10").unwrap(),
+									NetTarget::from_str("127.0.0.0/8").unwrap(),
+									NetTarget::from_str("169.254.0.0/16").unwrap(),
+									NetTarget::from_str("172.16.0.0/12").unwrap(),
+									NetTarget::from_str("172.20.0.0/16").unwrap(),
+									NetTarget::from_str("192.0.0.0/24").unwrap(),
+									NetTarget::from_str("192.168.0.0/16").unwrap(),
+									NetTarget::from_str("192.88.99.0/24").unwrap(),
+									NetTarget::from_str("198.18.0.0/15").unwrap(),
+									NetTarget::from_str("::1/128").unwrap(),
+									NetTarget::from_str("fc00::/7").unwrap(),
+									NetTarget::from_str("fc00::/8").unwrap(),
+								]
+								.into(),
+							)),
+					)
+					.build_with_path("memory")
+					.await
+					.unwrap(),
 				Session::owner(),
 				// This will be redirected to: https://github.com/surrealdb/surrealdb/pull/6293
 				"RETURN http::get('https://github.com/surrealdb/surrealdb/issues/6293')"

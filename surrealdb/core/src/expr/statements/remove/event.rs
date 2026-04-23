@@ -55,7 +55,7 @@ impl RemoveEventStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the definition
-		let ev = match txn.get_tb_event(ns, db, &table_name, &name).await {
+		let ev = match txn.get_tb_event(ns, db, &table_name, &name, None).await {
 			Ok(x) => x,
 			Err(e) => {
 				if self.if_exists && matches!(e.downcast_ref(), Some(Error::EvNotFound { .. })) {
@@ -69,7 +69,7 @@ impl RemoveEventStatement {
 		let key = crate::key::table::ev::new(ns, db, &ev.target_table, &ev.name);
 		txn.del(&key).await?;
 
-		let Some(tb) = txn.get_tb(ns, db, &table_name).await? else {
+		let Some(tb) = txn.get_tb(ns, db, &table_name, None).await? else {
 			return Err(Error::TbNotFound {
 				name: table_name,
 			}

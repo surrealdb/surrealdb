@@ -14,6 +14,9 @@ error = "The query was not executed due to a failed transaction"
 [[test.results]]
 error = "Database record `person:tobie` already exists"
 
+[[test.results]]
+error = "Cannot COMMIT: the transaction was aborted due to a prior error"
+
 [env]
 namespace = "test"
 database = "test"

@@ -10,6 +10,12 @@ pub fn impl_struct(
 	fields: Fields,
 	crate_path: &CratePath,
 ) -> TokenStream {
+	if fields.rename().is_some() {
+		panic!(
+			"#[surreal(rename = \"...\")] has no effect on a struct container; remove it or apply it at the field or enum-variant level"
+		);
+	}
+
 	let strategy = Strategy::for_struct();
 	let match_fields = fields.match_fields();
 	let from_ok = quote!(Ok(Self #match_fields));
@@ -80,7 +86,7 @@ pub fn impl_struct(
 		},
 		With::Value(x) => x,
 	};
-	let kind_of = fields.kind_of(&strategy, crate_path);
+	let kind_of = fields.kind_of(name, &strategy, crate_path);
 
 	let let_fields = if fields.has_fields() {
 		quote!( let Self #match_fields = self; )

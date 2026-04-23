@@ -1,10 +1,19 @@
-pub mod controller;
-pub mod err;
+//! Guest SDK for Surrealism WASM plugins.
+//!
+//! Compiled into modules that run inside SurrealDB. Provides WIT bindings,
+//! host imports (`sql`, `run`, `kv`), and the `#[surrealism]` macro for
+//! registering exported functions via inventory.
+
+#[allow(clippy::all, unused)]
+pub mod bindings;
+mod dispatch;
 pub mod imports;
-pub mod memory;
 pub mod registry;
-pub use controller::Controller;
-pub use imports::{kv, run, sql};
-pub use registry::SurrealismFunction;
+
+pub use imports::{kv, run, sql, sql_with_vars};
+pub use registry::{SurrealismEntry, SurrealismInit};
 pub use surrealism_macros::surrealism;
-pub use surrealism_types as types;
+pub use {inventory, surrealism_types as types};
+
+inventory::collect!(SurrealismEntry);
+inventory::collect!(SurrealismInit);

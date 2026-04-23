@@ -998,10 +998,10 @@ impl<'a> IndexAnalyzer<'a> {
 		nn: &NearestNeighbor,
 		candidates: &mut Vec<IndexCandidate>,
 	) {
-		// Only HNSW-backed (Approximate) KNN uses index scan
-		let (k, ef) = match nn {
-			NearestNeighbor::Approximate(k, ef) => (*k, *ef),
-			// K (brute-force) and KTree don't use index analysis
+		// Approximate always uses HNSW; K(k,d) uses HNSW when distance matches
+		let (k, user_ef, required_distance) = match nn {
+			NearestNeighbor::Approximate(k, ef) => (*k, Some(*ef), None),
+			NearestNeighbor::K(k, d) => (*k, None, Some(d)),
 			_ => return,
 		};
 
@@ -1040,14 +1040,20 @@ impl<'a> IndexAnalyzer<'a> {
 				continue;
 			}
 
-			// Only HNSW indexes support KNN
-			if !matches!(ix_def.index, Index::Hnsw(_)) {
+			let Index::Hnsw(ref hnsw) = ix_def.index else {
+				continue;
+			};
+
+			if let Some(d) = required_distance
+				&& *d != hnsw.distance
+			{
 				continue;
 			}
 
 			if let Some(first_col) = ix_def.cols.first()
 				&& idiom_matches(idiom, first_col)
 			{
+				let ef = user_ef.unwrap_or_else(|| k.max(hnsw.ef_construction as u32));
 				let index_ref = IndexRef::new(self.indexes.clone(), idx);
 				let candidate = IndexCandidate {
 					index_ref,

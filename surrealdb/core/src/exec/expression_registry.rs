@@ -147,18 +147,24 @@ impl ExpressionRegistry {
 		alias: Option<String>,
 		ctx: &FrozenContext,
 	) -> Result<String, Error> {
-		// Generate SQL representation for deduplication
+		// Generate SQL representation for deduplication.
+		// When an alias is present, include it in the key so that
+		// `false AS isLiked` and `false AS isLocked` are distinct entries.
 		let expr_sql = expr.to_sql();
+		let dedup_key = match &alias {
+			Some(a) => format!("{expr_sql}\0{a}"),
+			None => expr_sql,
+		};
 
 		// Check if already registered
-		if let Some(info) = self.expressions.get(&expr_sql) {
+		if let Some(info) = self.expressions.get(&dedup_key) {
 			// If registered at a later point, update to earlier (we need it sooner)
 			if compute_point < info.compute_point {
 				let mut updated = info.clone();
 				updated.compute_point = compute_point;
-				self.expressions.insert(expr_sql.clone(), updated);
+				self.expressions.insert(dedup_key.clone(), updated);
 			}
-			return Ok(self.expressions[&expr_sql].internal_name.clone());
+			return Ok(self.expressions[&dedup_key].internal_name.clone());
 		}
 
 		// Convert to physical expression
@@ -173,7 +179,7 @@ impl ExpressionRegistry {
 			compute_point,
 		};
 
-		self.expressions.insert(expr_sql, info);
+		self.expressions.insert(dedup_key, info);
 
 		Ok(internal_name)
 	}
@@ -189,15 +195,21 @@ impl ExpressionRegistry {
 		compute_point: ComputePoint,
 		alias: Option<String>,
 	) -> String {
+		// Include alias in the dedup key (same logic as `register`)
+		let dedup_key = match &alias {
+			Some(a) => format!("{expr_key}\0{a}"),
+			None => expr_key,
+		};
+
 		// Check if already registered
-		if let Some(info) = self.expressions.get(&expr_key) {
+		if let Some(info) = self.expressions.get(&dedup_key) {
 			// Promote to earlier compute point if needed (same logic as `register`)
 			if compute_point < info.compute_point {
 				let mut updated = info.clone();
 				updated.compute_point = compute_point;
-				self.expressions.insert(expr_key.clone(), updated);
+				self.expressions.insert(dedup_key.clone(), updated);
 			}
-			return self.expressions[&expr_key].internal_name.clone();
+			return self.expressions[&dedup_key].internal_name.clone();
 		}
 
 		let internal_name = self.choose_internal_name(&alias);
@@ -208,7 +220,7 @@ impl ExpressionRegistry {
 			compute_point,
 		};
 
-		self.expressions.insert(expr_key, info);
+		self.expressions.insert(dedup_key, info);
 
 		internal_name
 	}
@@ -265,6 +277,11 @@ impl ExpressionRegistry {
 	pub fn has_expressions_for_point(&self, point: ComputePoint) -> bool {
 		self.expressions.values().any(|info| info.compute_point == point)
 	}
+
+	/// Check if a name has been registered as an expression output field.
+	pub fn contains_name(&self, name: &str) -> bool {
+		self.expressions.values().any(|info| info.internal_name == name)
+	}
 }
 
 // ============================================================================
@@ -275,44 +292,54 @@ use crate::expr::field::{Field, Fields};
 
 /// Resolve an idiom reference in ORDER BY to the underlying SELECT expression.
 ///
-/// When ORDER BY references an alias like `city_population`, we need to find
-/// the corresponding SELECT expression and use that for computation.
+/// Supports both single-part aliases (`ORDER BY x` matching `AS x`) and
+/// nested aliases (`ORDER BY b.c` matching `AS b.c`).
 ///
-/// Returns the resolved expression and the alias name.
+/// Returns the resolved expression and a flat string name for registry use.
 pub fn resolve_order_by_alias(order_idiom: &Idiom, fields: &Fields) -> Option<(Expr, String)> {
-	// Only resolve single-part field references (aliases)
-	if order_idiom.len() != 1 {
-		return None;
-	}
-
-	let alias_name = match order_idiom.first() {
-		Some(Part::Field(name)) => name.as_str(),
-		_ => return None,
-	};
-
-	// Search through SELECT fields for a matching alias
 	match fields {
-		Fields::Value(_) => None, // SELECT VALUE doesn't have aliases
+		Fields::Value(selector) => {
+			// SELECT VALUE aliases are guaranteed single-part by the parser.
+			if let Some(ref alias) = selector.alias
+				&& alias.len() == 1
+				&& let Some(Part::Field(alias_name)) = alias.first()
+				&& order_idiom.len() == 1
+				&& let Some(Part::Field(order_name)) = order_idiom.first()
+				&& alias_name == order_name
+			{
+				return Some((selector.expr.clone(), alias_name.clone()));
+			}
+			// Unaliased single-part field match
+			if order_idiom.len() == 1
+				&& let Some(Part::Field(name)) = order_idiom.first()
+				&& let Expr::Idiom(ref expr_idiom) = selector.expr
+				&& expr_idiom.len() == 1
+				&& let Some(Part::Field(expr_name)) = expr_idiom.first()
+				&& name == expr_name
+			{
+				return Some((selector.expr.clone(), name.clone()));
+			}
+			None
+		}
 		Fields::Select(field_list) => {
 			for field in field_list {
 				if let Field::Single(selector) = field {
-					// Check if this field has the matching alias
-					let field_alias = selector.alias.as_ref().map(idiom_to_string);
-
-					if let Some(ref alias) = field_alias
-						&& alias == alias_name
+					// Alias match (any depth)
+					if let Some(ref alias) = selector.alias
+						&& *order_idiom == *alias
 					{
-						return Some((selector.expr.clone(), alias.clone()));
+						return Some((selector.expr.clone(), idiom_to_flat_name(alias)));
 					}
-
-					// Also check if the expression itself is a simple field with this name
-					if field_alias.is_none()
+					// Unaliased single-part field match
+					if order_idiom.len() == 1
+						&& let Some(Part::Field(order_name)) = order_idiom.first()
+						&& selector.alias.is_none()
 						&& let Expr::Idiom(ref expr_idiom) = selector.expr
 						&& expr_idiom.len() == 1
 						&& let Some(Part::Field(name)) = expr_idiom.first()
-						&& name.as_str() == alias_name
+						&& name.as_str() == order_name.as_str()
 					{
-						return Some((selector.expr.clone(), alias_name.to_string()));
+						return Some((selector.expr.clone(), order_name.clone()));
 					}
 				}
 			}
@@ -321,14 +348,13 @@ pub fn resolve_order_by_alias(order_idiom: &Idiom, fields: &Fields) -> Option<(E
 	}
 }
 
-/// Convert an idiom to a simple string (for single-part field idioms).
-fn idiom_to_string(idiom: &Idiom) -> String {
+/// Convert an alias idiom to a flat string for registry internal names.
+pub(crate) fn idiom_to_flat_name(idiom: &Idiom) -> String {
 	if idiom.len() == 1
 		&& let Some(Part::Field(name)) = idiom.first()
 	{
 		return name.clone();
 	}
-	// Fallback to SQL representation
 	idiom.to_sql()
 }
 

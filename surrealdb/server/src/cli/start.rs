@@ -245,13 +245,22 @@ pub async fn init<
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore
-	let datastore = Arc::new(dbs::init::<C>(composer, &config, canceller.clone(), dbs).await?);
+	let (datastore, recv) = dbs::init::<C>(composer, &config, canceller.clone(), dbs).await?;
+	let datastore = Arc::new(datastore);
+	// Eagerly load surrealism modules in the background unless opted out
+	#[cfg(feature = "surrealism")]
+	if !datastore.is_lazy_surrealism() {
+		let ds = datastore.clone();
+		tokio::spawn(async move {
+			ds.eager_load_surrealism_modules().await;
+		});
+	}
 	// Register datastore metrics
 	register_datastore_metrics(datastore.clone());
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &config.engine);
 	// Build and run the HTTP server using the provided RouterFactory implementation
-	ntw::init::<C>(&config, datastore.clone(), canceller.clone()).await?;
+	ntw::init::<C>(&config, datastore.clone(), recv, canceller.clone()).await?;
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish

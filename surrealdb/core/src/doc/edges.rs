@@ -41,14 +41,14 @@ impl Document {
 			) {
 				// Check that the `in` record exists
 				ensure!(
-					txn.record_exists(ns, db, &l.table, &l.key).await?,
+					txn.record_exists(ns, db, &l.table, &l.key, opt.version).await?,
 					Error::IdNotFound {
 						rid: l.to_sql(),
 					}
 				);
 				// Check that the `out` record exists
 				ensure!(
-					txn.record_exists(ns, db, &r.table, &r.key).await?,
+					txn.record_exists(ns, db, &r.table, &r.key, opt.version).await?,
 					Error::IdNotFound {
 						rid: r.to_sql(),
 					}
@@ -58,16 +58,16 @@ impl Document {
 			let (ref o, ref i) = (Dir::Out, Dir::In);
 			// Store the left pointer edge
 			let key = crate::key::graph::new(ns, db, &l.table, &l.key, o, &rid);
-			txn.set(&key, &(), opt.version).await?;
+			txn.set(&key, &()).await?;
 			// Store the left inner edge
 			let key = crate::key::graph::new(ns, db, &rid.table, &rid.key, i, l);
-			txn.set(&key, &(), opt.version).await?;
+			txn.set(&key, &()).await?;
 			// Store the right inner edge
 			let key = crate::key::graph::new(ns, db, &rid.table, &rid.key, o, r);
-			txn.set(&key, &(), opt.version).await?;
+			txn.set(&key, &()).await?;
 			// Store the right pointer edge
 			let key = crate::key::graph::new(ns, db, &r.table, &r.key, i, &rid);
-			txn.set(&key, &(), opt.version).await?;
+			txn.set(&key, &()).await?;
 			// Store the edges on the record
 			// Mark this record as an edge type in its metadata for efficient identification
 			self.current.doc.set_record_type(RecordType::Edge);
