@@ -1,7 +1,4 @@
 /**
-[env]
-database = true
-
 [test]
 reason = "Test that DEFINE ACCESS OVERWRITE with ES512 is rejected when the existing definition does not use ES512"
 
