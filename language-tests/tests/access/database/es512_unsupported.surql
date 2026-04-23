@@ -1,8 +1,4 @@
 /**
-[env]
-namespace = true
-database = true
-
 [test]
 reason = "Test that ES512 algorithm is rejected at definition time on database scope"
 

@@ -14,12 +14,8 @@ value = "NONE"
 [[test.results]]
 value = "NONE"
 
-[[test.results]]
-value = "NONE"
-
 */
 
-LET $name = "testac";
 LET $key = "foo";
 
 -- First, define an access method with a supported algorithm.

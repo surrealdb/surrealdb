@@ -1,8 +1,4 @@
 /**
-[env]
-namespace = true
-database = true
-
 [test]
 reason = "Test that DEFINE ACCESS IF NOT EXISTS with ES512 does not error when the access already exists on database"
 

@@ -1,7 +1,4 @@
 /**
-[env]
-namespace = true
-
 [test]
 reason = "Test that ES512 algorithm is rejected at definition time on namespace scope"
 
