@@ -13,8 +13,8 @@ use crate::key::thing;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
-use crate::sql::statements::DefineIndexStatement;
-use crate::sql::{Id, Object, Thing, Value};
+use crate::sql::statements::{DefineAnalyzerStatement, DefineIndexStatement};
+use crate::sql::{Id, Index, Object, Thing, Value};
 use ahash::{HashMap, HashMapExt};
 use futures::channel::oneshot::{channel, Receiver, Sender};
 use reblessive::TreeStack;
@@ -202,7 +202,9 @@ impl IndexBuilder {
 			let building = if initial_build_done {
 				self.start_deferred_index(ctx, opt.clone(), ix, key).await?
 			} else {
-				self.start_building(ctx, opt.clone(), ix, key, None, true).await?
+				// At server restart time the analyzer is already committed and
+				// visible; lazy lookup in FtIndex::new will succeed, so we pass None.
+				self.start_building(ctx, opt.clone(), ix, None, key, None, true).await?
 			};
 			e.insert(building);
 		}
@@ -210,16 +212,18 @@ impl IndexBuilder {
 	}
 
 	/// Start building an index in the background
+	#[allow(clippy::too_many_arguments)]
 	async fn start_building(
 		&self,
 		ctx: &Context,
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
+		az: Option<Arc<DefineAnalyzerStatement>>,
 		ix_key: SharedIndexKey,
 		sdr: Option<Sender<Result<(), Error>>>,
 		recover_queue: bool,
 	) -> Result<IndexBuilding, Error> {
-		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix, ix_key)?);
+		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix, az, ix_key)?);
 		if recover_queue {
 			building.recover_queue().await?;
 		};
@@ -267,7 +271,9 @@ impl IndexBuilder {
 		ix: Arc<DefineIndexStatement>,
 		ix_key: SharedIndexKey,
 	) -> Result<IndexBuilding, Error> {
-		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix, ix_key)?);
+		// At server restart time the analyzer is already committed and visible
+		// to any new transaction, so we don't need to pre-resolve it here.
+		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix, None, ix_key)?);
 		building.recover_queue().await?;
 		building.deferred_daemon_running.store(true, Ordering::Release);
 		building.initial_build_complete.store(true, Ordering::Release);
@@ -321,6 +327,16 @@ impl IndexBuilder {
 		} else {
 			(None, None)
 		};
+		// Pre-resolve the analyzer for SEARCH indexes from the user's transaction.
+		// The background build runs in independent transactions which cannot see
+		// the analyzer if it was defined in the same (still uncommitted)
+		// transaction as this index. Resolving here avoids the AzNotFound failure
+		// in the background task; for any other case it's just an early lookup.
+		let az = if let Index::Search(p) = &ix.index {
+			Some(ctx.tx().get_db_analyzer(ns, db, &p.az).await?)
+		} else {
+			None
+		};
 		match self.indexes.write().await.entry(key.clone()) {
 			Entry::Occupied(mut e) => {
 				// If the building is currently running, we need to wait for it to finish
@@ -330,12 +346,12 @@ impl IndexBuilder {
 				// Wait for the old builder to fully stop
 				old_builder.wait_for_completion().await;
 				// Start building the index
-				let ib = self.start_building(ctx, opt, ix, key, sdr, false).await?;
+				let ib = self.start_building(ctx, opt, ix, az, key, sdr, false).await?;
 				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let ib = self.start_building(ctx, opt, ix, key, sdr, false).await?;
+				let ib = self.start_building(ctx, opt, ix, az, key, sdr, false).await?;
 				e.insert(ib);
 			}
 		}
@@ -516,6 +532,12 @@ struct Building {
 	tf: TransactionFactory,
 	/// The statement that defines the index
 	ix: Arc<DefineIndexStatement>,
+	/// Pre-resolved analyzer for `Index::Search` indexes. Resolved from the
+	/// originating user transaction (which can see the analyzer even when it
+	/// was defined in the same uncommitted transaction as the index), and
+	/// passed through to `IndexOperation` so background-task transactions don't
+	/// have to look it up themselves.
+	az: Option<Arc<DefineAnalyzerStatement>>,
 	/// The table name
 	tb: String,
 	/// The index key
@@ -543,6 +565,7 @@ impl Building {
 		tf: TransactionFactory,
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
+		az: Option<Arc<DefineAnalyzerStatement>>,
 		ix_key: SharedIndexKey,
 	) -> Result<Self, Error> {
 		Ok(Self {
@@ -551,6 +574,7 @@ impl Building {
 			tf,
 			tb: ix.what.to_raw(),
 			ix,
+			az,
 			ix_key,
 			status: RwLock::new(BuildingStatus::Started),
 			queue: Default::default(),
@@ -962,7 +986,8 @@ impl Building {
 		let mut stack = TreeStack::new();
 		// For search indexes, create the FtIndex once for the entire batch
 		// instead of per-document, avoiding repeated BTree load/save overhead.
-		let mut ft_index = IndexOperation::create_ft_index(ctx, &self.opt, &self.ix).await?;
+		let mut ft_index =
+			IndexOperation::create_ft_index(ctx, &self.opt, &self.ix, self.az.clone()).await?;
 		// Index the records
 		for (k, v) in values.into_iter() {
 			if self.is_aborted().await {
@@ -994,8 +1019,15 @@ impl Building {
 			};
 
 			// Index the record
-			let mut io =
-				IndexOperation::new(ctx, &self.opt, &self.ix, None, opt_values.clone(), &rid);
+			let mut io = IndexOperation::new(
+				ctx,
+				&self.opt,
+				&self.ix,
+				self.az.clone(),
+				None,
+				opt_values.clone(),
+				&rid,
+			);
 			if let Some(ft) = &mut ft_index {
 				stack.enter(|stk| io.compute_search_with_ft(stk, ft)).finish().await?;
 			} else {
@@ -1062,7 +1094,8 @@ impl Building {
 		let mut stack = TreeStack::new();
 		let mut indexed = HashMap::new();
 		// For search indexes, create the FtIndex once for the entire batch
-		let mut ft_index = IndexOperation::create_ft_index(ctx, &self.opt, &self.ix).await?;
+		let mut ft_index =
+			IndexOperation::create_ft_index(ctx, &self.opt, &self.ix, self.az.clone()).await?;
 		trace!("{}: index_appending_range STARTS- len: {}", self.ix.name, keys.len());
 		for k in keys {
 			if self.is_aborted().await {
@@ -1079,8 +1112,15 @@ impl Building {
 			if let Some(v) = tx.get(ib.clone(), None).await? {
 				let a: Appending = revision::from_slice(&v)?;
 				let rid = Thing::from((self.tb.clone(), a.id));
-				let mut io =
-					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);
+				let mut io = IndexOperation::new(
+					ctx,
+					&self.opt,
+					&self.ix,
+					self.az.clone(),
+					a.old_values,
+					a.new_values,
+					&rid,
+				);
 				if let Some(ft) = &mut ft_index {
 					stack.enter(|stk| io.compute_search_with_ft(stk, ft)).finish().await?;
 				} else {
