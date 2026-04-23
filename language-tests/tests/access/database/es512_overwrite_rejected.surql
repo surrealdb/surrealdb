@@ -14,14 +14,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
 error = "The ES512 algorithm is not currently supported. Please use ES384 or another supported algorithm"
 
 */
 
-LET $name = "testac";
 LET $key = "foo";
 
 -- First, define an access method with a supported algorithm.

@@ -1,8 +1,6 @@
 /**
 [env]
 namespace = true
-database = true
-auth = { level = "owner" }
 
 [test]
 reason = "Test that DEFINE ACCESS IF NOT EXISTS with ES512 does not error when the access already exists on namespace"
@@ -16,12 +14,8 @@ value = "NONE"
 [[test.results]]
 value = "NONE"
 
-[[test.results]]
-value = "NONE"
-
 */
 
-LET $name = "testac";
 LET $key = "foo";
 
 -- First, define an access method with a supported algorithm.

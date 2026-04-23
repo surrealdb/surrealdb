@@ -357,9 +357,9 @@ impl DefineAccessStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if access method already exists
-			let mut existing_uses_es512 = false;
-			if let Some(access) = txn.get_root_access(&definition.name, None).await? {
-				existing_uses_es512 = Self::uses_es512(&access);
+				let mut existing_uses_es512 = false;
+				if let Some(access) = txn.get_root_access(&definition.name, None).await? {
+					existing_uses_es512 = Self::uses_es512(&access);
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -374,7 +374,7 @@ impl DefineAccessStatement {
 				}
 				// Reject ES512 for new definitions (allow during import/restore and
 				// overwrite of an existing ES512 definition)
-				if !(opt.import || existing_uses_es512 && self.kind == DefineKind::Overwrite) {
+				if !(opt.import || (existing_uses_es512 && self.kind == DefineKind::Overwrite)) {
 					Self::reject_es512(&definition)?;
 				}
 				// Process the statement
@@ -390,9 +390,9 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				let ns = ctx.get_ns_id(opt).await?;
-			let mut existing_uses_es512 = false;
-			if let Some(access) = txn.get_ns_access(ns, &definition.name, None).await? {
-				existing_uses_es512 = Self::uses_es512(&access);
+				let mut existing_uses_es512 = false;
+				if let Some(access) = txn.get_ns_access(ns, &definition.name, None).await? {
+					existing_uses_es512 = Self::uses_es512(&access);
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -408,7 +408,7 @@ impl DefineAccessStatement {
 				}
 				// Reject ES512 for new definitions (allow during import/restore and
 				// overwrite of an existing ES512 definition)
-				if !(opt.import || existing_uses_es512 && self.kind == DefineKind::Overwrite) {
+				if !(opt.import || (existing_uses_es512 && self.kind == DefineKind::Overwrite)) {
 					Self::reject_es512(&definition)?;
 				}
 				// Process the statement
@@ -425,9 +425,9 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-			let mut existing_uses_es512 = false;
-			if let Some(access) = txn.get_db_access(ns, db, &definition.name, None).await? {
-				existing_uses_es512 = Self::uses_es512(&access);
+				let mut existing_uses_es512 = false;
+				if let Some(access) = txn.get_db_access(ns, db, &definition.name, None).await? {
+					existing_uses_es512 = Self::uses_es512(&access);
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -444,7 +444,7 @@ impl DefineAccessStatement {
 				}
 				// Reject ES512 for new definitions (allow during import/restore and
 				// overwrite of an existing ES512 definition)
-				if !(opt.import || existing_uses_es512 && self.kind == DefineKind::Overwrite) {
+				if !(opt.import || (existing_uses_es512 && self.kind == DefineKind::Overwrite)) {
 					Self::reject_es512(&definition)?;
 				}
 				// Process the statement
