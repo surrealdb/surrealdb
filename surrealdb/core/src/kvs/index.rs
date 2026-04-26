@@ -770,9 +770,7 @@ impl Building {
 				let ctx = self.new_write_tx_ctx().await?;
 				let tx = ctx.tx();
 				let saved_updates_count = *updates_count;
-				let indexed = match self
-					.index_appending_range(&ctx, &tx, keys, initial_count, updates_count)
-					.await
+				let indexed = match self.index_appending_range(&ctx, &tx, keys, updates_count).await
 				{
 					Ok(indexed) => indexed,
 					Err(err) if is_retryable_transaction_conflict(&err) => {
@@ -791,7 +789,9 @@ impl Building {
 				match commit_result {
 					Ok(()) => {
 						// Clean up completed appendings and drop any stale rollback batch IDs.
-						if !indexed.is_empty() {
+						let pending = if indexed.is_empty() {
+							self.queue.read().await.pending() as usize
+						} else {
 							{
 								let mut clean_queue = self.clean_queue.lock().await;
 								for batch_id in indexed.keys() {
@@ -802,8 +802,16 @@ impl Building {
 									}
 								}
 							}
-							self.queue.write().await.clean(indexed);
-						}
+							let mut queue = self.queue.write().await;
+							queue.clean(indexed);
+							queue.pending() as usize
+						};
+						self.set_status(BuildingStatus::Indexing {
+							initial: Some(initial_count),
+							pending: Some(pending),
+							updated: Some(*updates_count),
+						})
+						.await;
 					}
 					Err(err) if is_retryable_transaction_conflict(&err) => {
 						let _ = tx.cancel().await;
@@ -977,7 +985,6 @@ impl Building {
 		ctx: &FrozenContext,
 		tx: &Transaction,
 		keys: Vec<Key>,
-		initial: usize,
 		count: &mut usize,
 	) -> Result<HashMap<BatchId, Vec<AppendingId>>> {
 		let mut rc = false;
@@ -1026,12 +1033,6 @@ impl Building {
 			*count += 1;
 			indexed.entry(ig.batch_id).or_insert(vec![]).push(ig.appending_id);
 		}
-		self.set_status(BuildingStatus::Indexing {
-			initial: Some(initial),
-			pending: Some(self.queue.read().await.pending() as usize),
-			updated: Some(*count),
-		})
-		.await;
 		// Trigger compaction if needed.
 		self.check_index_compaction(tx, &mut rc).await?;
 		// We're done.
