@@ -87,6 +87,19 @@ impl<'a> IndexOperation<'a> {
 		self
 	}
 
+	pub(crate) async fn create_fulltext_index(
+		ctx: &FrozenContext,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &IndexDefinition,
+	) -> Result<Option<FullTextIndex>> {
+		let Index::FullText(p) = &ix.index else {
+			return Ok(None);
+		};
+		let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
+		Ok(Some(FullTextIndex::new(ctx.get_index_stores(), &ctx.tx(), ikb, p).await?))
+	}
+
 	pub(crate) async fn compute(
 		&mut self,
 		stk: &mut Stk,
@@ -307,11 +320,20 @@ impl<'a> IndexOperation<'a> {
 		p: &FullTextParams,
 		require_compaction: &mut bool,
 	) -> Result<()> {
-		let mut rc = false;
 		// Build a FullText instance
 		let fti =
 			FullTextIndex::new(self.ctx.get_index_stores(), &self.ctx.tx(), self.ikb.clone(), p)
 				.await?;
+		self.compute_fulltext_with_index(stk, &fti, require_compaction).await
+	}
+
+	pub(crate) async fn compute_fulltext_with_index(
+		&mut self,
+		stk: &mut Stk,
+		fti: &FullTextIndex,
+		require_compaction: &mut bool,
+	) -> Result<()> {
+		let mut rc = false;
 		// Delete the old index data
 		let doc_id = if let Some(o) = self.o.take() {
 			fti.remove_content(stk, self.ctx, self.opt, self.rid, o, &mut rc).await?

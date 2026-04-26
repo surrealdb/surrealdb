@@ -81,6 +81,16 @@ impl BuildingStatus {
 	}
 }
 
+fn is_retryable_transaction_conflict(err: &anyhow::Error) -> bool {
+	if let Some(kvs_err) = err.downcast_ref::<crate::kvs::Error>() {
+		return kvs_err.is_retryable();
+	}
+	matches!(
+		err.downcast_ref::<Error>(),
+		Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable()
+	)
+}
+
 impl From<BuildingStatus> for Value {
 	fn from(st: BuildingStatus) -> Self {
 		let mut o = Object::default();
@@ -473,6 +483,13 @@ impl Building {
 		}
 	}
 
+	async fn mark_initial_build_complete(&self) {
+		// Hold the queue lock while flipping the phase flag so any subsequent
+		// consumer observes appending mode before it can enqueue more work.
+		let _queue = self.queue.write().await;
+		self.initial_build_complete.store(true, Ordering::Release);
+	}
+
 	async fn maybe_consume(
 		&self,
 		ctx: &FrozenContext,
@@ -514,8 +531,8 @@ impl Building {
 		// where `check_existing_primary_appending` uses it to find the latest appending
 		// for a record being initially indexed. Once the initial build is complete
 		// (appending phase), we skip setting ip to avoid write-write conflicts with the
-		// appending daemon which deletes ip keys.
-		if !self.initial_build_complete.load(Ordering::Relaxed) {
+		// appending phase which deletes ip keys.
+		if !self.initial_build_complete.load(Ordering::Acquire) {
 			let ip = self.ikb.new_ip_key(rid.key.clone());
 			let pa = tx.get(&ip, None).await?;
 			// We ignore legacy primary indexing.
@@ -660,7 +677,7 @@ impl Building {
 			}
 		}
 		// Mark initial build as complete before entering the appending phase.
-		self.initial_build_complete.store(true, Ordering::Relaxed);
+		self.mark_initial_build_complete().await;
 		// Second pass: index/remove records that changed during the initial pass.
 		self.set_status(BuildingStatus::Indexing {
 			initial: Some(initial_count),
@@ -669,6 +686,21 @@ impl Building {
 		})
 		.await;
 		let mut updates_count = 0;
+		self.index_appending_loop(
+			initial_count,
+			&mut updates_count,
+			&mut last_prepare_remove_check,
+		)
+		.await?;
+		Ok(())
+	}
+
+	async fn index_appending_loop(
+		&self,
+		initial_count: usize,
+		updates_count: &mut usize,
+		last_prepare_remove_check: &mut Instant,
+	) -> Result<()> {
 		let rng = self.ikb.new_ig_range()?;
 		loop {
 			if self.is_aborted().await {
@@ -676,7 +708,7 @@ impl Building {
 			}
 			self.is_beyond_threshold(None)?;
 			// Check the index still exists and has not been marked for removal
-			self.check_prepare_remove(&mut last_prepare_remove_check).await?;
+			self.check_prepare_remove(last_prepare_remove_check).await?;
 
 			let keys = {
 				let mut queue = self.queue.write().await;
@@ -702,7 +734,7 @@ impl Building {
 					self.set_status(BuildingStatus::Ready {
 						initial: Some(initial_count),
 						pending: Some(pending),
-						updated: Some(updates_count),
+						updated: Some(*updates_count),
 					})
 					.await;
 					break;
@@ -711,7 +743,7 @@ impl Building {
 				self.set_status(BuildingStatus::Indexing {
 					initial: Some(initial_count),
 					pending: Some(pending),
-					updated: Some(updates_count),
+					updated: Some(*updates_count),
 				})
 				.await;
 				drop(queue);
@@ -722,23 +754,53 @@ impl Building {
 				// Create a new context with a write transaction.
 				let ctx = self.new_write_tx_ctx().await?;
 				let tx = ctx.tx();
-				let indexed = catch!(
-					tx,
-					self.index_appending_range(&ctx, &tx, keys, initial_count, &mut updates_count)
-						.await
-				);
-				catch!(tx, tx.commit().await);
-				// Clean up completed appendings and drop any stale rollback batch IDs.
-				if !indexed.is_empty() {
-					{
-						let mut clean_queue = self.clean_queue.lock().await;
-						for batch_id in indexed.keys() {
-							if let Some(idx) = clean_queue.iter().position(|&id| id == *batch_id) {
-								clean_queue.remove(idx);
+				let saved_updates_count = *updates_count;
+				let indexed = match self
+					.index_appending_range(&ctx, &tx, keys, initial_count, updates_count)
+					.await
+				{
+					Ok(indexed) => indexed,
+					Err(err) if is_retryable_transaction_conflict(&err) => {
+						let _ = tx.cancel().await;
+						*updates_count = saved_updates_count;
+						warn!("{}: transient conflict in appending range, retrying", self.ix.name);
+						sleep(Duration::from_millis(100)).await;
+						continue;
+					}
+					Err(err) => {
+						let _ = tx.cancel().await;
+						return Err(err);
+					}
+				};
+				let commit_result = tx.commit().await;
+				match commit_result {
+					Ok(()) => {
+						// Clean up completed appendings and drop any stale rollback batch IDs.
+						if !indexed.is_empty() {
+							{
+								let mut clean_queue = self.clean_queue.lock().await;
+								for batch_id in indexed.keys() {
+									if let Some(idx) =
+										clean_queue.iter().position(|&id| id == *batch_id)
+									{
+										clean_queue.remove(idx);
+									}
+								}
 							}
+							self.queue.write().await.clean(indexed);
 						}
 					}
-					self.queue.write().await.clean(indexed);
+					Err(err) if is_retryable_transaction_conflict(&err) => {
+						let _ = tx.cancel().await;
+						*updates_count = saved_updates_count;
+						warn!("{}: transient conflict on commit, retrying", self.ix.name);
+						sleep(Duration::from_millis(100)).await;
+						continue;
+					}
+					Err(err) => {
+						let _ = tx.cancel().await;
+						return Err(err);
+					}
 				}
 			} else {
 				// No committed appends yet, but updates are in-flight; wait.
@@ -758,6 +820,9 @@ impl Building {
 	) -> Result<()> {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
+		let fulltext_index =
+			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
+				.await?;
 		// Index the records.
 		for (k, v) in values {
 			if self.is_aborted().await {
@@ -798,17 +863,24 @@ impl Building {
 				opt_values.clone(),
 				&rid,
 			);
-			stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+			if let Some(fulltext_index) = &fulltext_index {
+				stack
+					.enter(|stk| io.compute_fulltext_with_index(stk, fulltext_index, &mut rc))
+					.finish()
+					.await?;
+			} else {
+				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+			}
 
-			// Increment the count and update the status.
+			// Increment the count.
 			*count += 1;
-			self.set_status(BuildingStatus::Indexing {
-				initial: Some(*count),
-				pending: Some(self.queue.read().await.pending() as usize),
-				updated: None,
-			})
-			.await;
 		}
+		self.set_status(BuildingStatus::Indexing {
+			initial: Some(*count),
+			pending: Some(self.queue.read().await.pending() as usize),
+			updated: None,
+		})
+		.await;
 		// Trigger compaction if needed.
 		self.check_index_compaction(tx, &mut rc).await?;
 		// We're done.
@@ -859,6 +931,9 @@ impl Building {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
 		let mut indexed = HashMap::new();
+		let fulltext_index =
+			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
+				.await?;
 		for k in keys {
 			if self.is_aborted().await {
 				return Ok(indexed);
@@ -881,7 +956,14 @@ impl Building {
 					appending.new_values,
 					&rid,
 				);
-				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+				if let Some(fulltext_index) = &fulltext_index {
+					stack
+						.enter(|stk| io.compute_fulltext_with_index(stk, fulltext_index, &mut rc))
+						.finish()
+						.await?;
+				} else {
+					stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+				}
 				tx.del(&ig).await?;
 
 				// We can delete the ip record if any
@@ -890,14 +972,14 @@ impl Building {
 			}
 
 			*count += 1;
-			self.set_status(BuildingStatus::Indexing {
-				initial: Some(initial),
-				pending: Some(self.queue.read().await.pending() as usize),
-				updated: Some(*count),
-			})
-			.await;
 			indexed.entry(ig.batch_id).or_insert(vec![]).push(ig.appending_id);
 		}
+		self.set_status(BuildingStatus::Indexing {
+			initial: Some(initial),
+			pending: Some(self.queue.read().await.pending() as usize),
+			updated: Some(*count),
+		})
+		.await;
 		// Trigger compaction if needed.
 		self.check_index_compaction(tx, &mut rc).await?;
 		// We're done.
