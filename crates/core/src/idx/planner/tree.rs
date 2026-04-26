@@ -634,15 +634,15 @@ impl<'a> TreeBuilder<'a> {
 						return Some(iop);
 					}
 				}
-				(Operator::Contain, v, IdiomPosition::Left) => {
-					if col == 0 && ixr.cols[0].contains(&Part::All) {
-						return Some(IndexOperator::Equality(v));
-					}
+				(Operator::Contain, v, IdiomPosition::Left)
+					if col == 0 && ixr.cols[0].contains(&Part::All) =>
+				{
+					return Some(IndexOperator::Equality(v));
 				}
-				(Operator::Inside, v, IdiomPosition::Right) => {
-					if col == 0 && ixr.cols[0].contains(&Part::All) {
-						return Some(IndexOperator::Equality(v));
-					}
+				(Operator::Inside, v, IdiomPosition::Right)
+					if col == 0 && ixr.cols[0].contains(&Part::All) =>
+				{
+					return Some(IndexOperator::Equality(v));
 				}
 				(Operator::Inside, v, IdiomPosition::Left) => {
 					if let Value::Array(a) = v.as_ref() {
@@ -653,10 +653,10 @@ impl<'a> TreeBuilder<'a> {
 					}
 				}
 				(Operator::ContainAny | Operator::ContainAll, v, IdiomPosition::Left)
-				| (Operator::AnyInside | Operator::AllInside, v, IdiomPosition::Right) => {
-					if v.is_array() && col == 0 {
-						return Some(IndexOperator::Union(v));
-					}
+				| (Operator::AnyInside | Operator::AllInside, v, IdiomPosition::Right)
+					if v.is_array() && col == 0 =>
+				{
+					return Some(IndexOperator::Union(v));
 				}
 				(
 					Operator::LessThan

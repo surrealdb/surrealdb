@@ -277,46 +277,34 @@ impl Parser<'_> {
 		let ate_comma = self.eat(t!(","));
 		// match the type and then match the coordinates field to a value of that type.
 		match type_value.as_str() {
-			"Point" => {
-				if self.eat(t!("}")) {
-					if let Some(point) = Geometry::array_to_point(&value) {
-						return Ok(Value::Geometry(Geometry::Point(point)));
-					}
+			"Point" if self.eat(t!("}")) => {
+				if let Some(point) = Geometry::array_to_point(&value) {
+					return Ok(Value::Geometry(Geometry::Point(point)));
 				}
 			}
-			"LineString" => {
-				if self.eat(t!("}")) {
-					if let Some(point) = Geometry::array_to_line(&value) {
-						return Ok(Value::Geometry(Geometry::Line(point)));
-					}
+			"LineString" if self.eat(t!("}")) => {
+				if let Some(point) = Geometry::array_to_line(&value) {
+					return Ok(Value::Geometry(Geometry::Line(point)));
 				}
 			}
-			"Polygon" => {
-				if self.eat(t!("}")) {
-					if let Some(point) = Geometry::array_to_polygon(&value) {
-						return Ok(Value::Geometry(Geometry::Polygon(point)));
-					}
+			"Polygon" if self.eat(t!("}")) => {
+				if let Some(point) = Geometry::array_to_polygon(&value) {
+					return Ok(Value::Geometry(Geometry::Polygon(point)));
 				}
 			}
-			"MultiPoint" => {
-				if self.eat(t!("}")) {
-					if let Some(point) = Geometry::array_to_multipolygon(&value) {
-						return Ok(Value::Geometry(Geometry::MultiPolygon(point)));
-					}
+			"MultiPoint" if self.eat(t!("}")) => {
+				if let Some(point) = Geometry::array_to_multipolygon(&value) {
+					return Ok(Value::Geometry(Geometry::MultiPolygon(point)));
 				}
 			}
-			"MultiLineString" => {
-				if self.eat(t!("}")) {
-					if let Some(point) = Geometry::array_to_multiline(&value) {
-						return Ok(Value::Geometry(Geometry::MultiLine(point)));
-					}
+			"MultiLineString" if self.eat(t!("}")) => {
+				if let Some(point) = Geometry::array_to_multiline(&value) {
+					return Ok(Value::Geometry(Geometry::MultiLine(point)));
 				}
 			}
-			"MultiPolygon" => {
-				if self.eat(t!("}")) {
-					if let Some(point) = Geometry::array_to_multipolygon(&value) {
-						return Ok(Value::Geometry(Geometry::MultiPolygon(point)));
-					}
+			"MultiPolygon" if self.eat(t!("}")) => {
+				if let Some(point) = Geometry::array_to_multipolygon(&value) {
+					return Ok(Value::Geometry(Geometry::MultiPolygon(point)));
 				}
 			}
 			_ => {}

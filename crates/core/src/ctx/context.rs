@@ -394,12 +394,10 @@ impl MutableContext {
 				return Err(Error::QueryBeyondMemoryThreshold);
 			}
 			match self.deadline {
-				None => {}
-				Some(deadline) => {
-					if deadline <= Instant::now() {
-						return Ok(Some(Reason::Timedout));
-					}
+				Some(deadline) if deadline <= Instant::now() => {
+					return Ok(Some(Reason::Timedout));
 				}
+				_ => {}
 			}
 		}
 		if let Some(ctx) = &self.parent {
