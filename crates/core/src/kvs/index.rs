@@ -756,24 +756,12 @@ impl Building {
 				// If not, we are done with the initial indexing
 				break;
 			}
-			// Create a new context with a write transaction
-			{
-				let ctx = self.new_write_tx_ctx().await?;
-				let tx = ctx.tx();
-				// Index the batch
-				catch!(
-					tx,
-					self.index_initial_batch(
-						&ctx,
-						&tx,
-						batch.result,
-						&mut initial_count,
-						&mut v1_appending_sentinel
-					)
-					.await
-				);
-				catch!(tx, tx.commit().await);
-			}
+			self.index_initial_batch_once(
+				batch.result,
+				&mut initial_count,
+				&mut v1_appending_sentinel,
+			)
+			.await?;
 		}
 		self.set_status(BuildingStatus::Indexing {
 			initial: Some(initial_count),
@@ -912,11 +900,47 @@ impl Building {
 		Ok(())
 	}
 
+	/// Index one initial-build batch.
+	///
+	/// Initial build is expected to be conflict-free. Queue handoff records are read through a
+	/// separate read-only transaction, so commit conflicts here should surface as index build errors
+	/// rather than being hidden by a retry loop.
+	async fn index_initial_batch_once(
+		&self,
+		values: Vec<(Key, Val)>,
+		count: &mut usize,
+		v1_appending_sentinel: &mut bool,
+	) -> Result<(), Error> {
+		let read_tx = self.new_read_tx().await?;
+		let ctx = self.new_write_tx_ctx().await?;
+		let tx = ctx.tx();
+		let indexed = self
+			.index_initial_batch(&ctx, &read_tx, &tx, values, count, v1_appending_sentinel)
+			.await;
+		let _ = read_tx.cancel().await;
+		if let Err(e) = indexed {
+			let _ = tx.cancel().await;
+			return Err(e);
+		}
+		if let Err(e) = tx.commit().await {
+			let _ = tx.cancel().await;
+			return Err(e);
+		}
+		self.set_status(BuildingStatus::Indexing {
+			initial: Some(*count),
+			pending: Some(self.queue.read().await.pending() as usize),
+			updated: None,
+		})
+		.await;
+		Ok(())
+	}
+
 	/// Index a batch of records from the table
 	async fn index_initial_batch(
 		&self,
 		ctx: &Context,
-		tx: &Transaction,
+		read_tx: &Transaction,
+		write_tx: &Transaction,
 		values: Vec<(Key, Val)>,
 		count: &mut usize,
 		v1_appending_sentinel: &mut bool,
@@ -941,8 +965,9 @@ impl Building {
 			let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();
 
 			// Do we already have an appended value?
-			let opt_values = if let Some(a) =
-				self.check_existing_primary_appending(tx, &rid.id, v1_appending_sentinel).await?
+			let opt_values = if let Some(a) = self
+				.check_existing_primary_appending(read_tx, write_tx, &rid.id, v1_appending_sentinel)
+				.await?
 			{
 				a.old_values
 			} else {
@@ -970,27 +995,24 @@ impl Building {
 		if let Some(ref ft) = ft_index {
 			ft.finish(ctx).await?;
 		}
-		// Update status once per batch instead of per record
-		self.set_status(BuildingStatus::Indexing {
-			initial: Some(*count),
-			pending: Some(self.queue.read().await.pending() as usize),
-			updated: None,
-		})
-		.await;
 		// Check if we trigger the compaction
-		self.check_index_compaction(tx, &mut rc).await?;
+		self.check_index_compaction(write_tx, &mut rc).await?;
 		// We're done
 		Ok(())
 	}
 
 	async fn check_existing_primary_appending(
 		&self,
-		tx: &Transaction,
+		read_tx: &Transaction,
+		write_tx: &Transaction,
 		id: &Id,
 		v1_appending_sentinel: &mut bool,
 	) -> Result<Option<Appending>, Error> {
+		// Read queue markers outside the index write transaction. They are a
+		// handoff signal from user transactions, and reading them in the write
+		// transaction can create avoidable optimistic conflicts during commit.
 		let ip = self.new_ip_key(id.clone())?;
-		let Some(v) = tx.get(&ip, None).await? else {
+		let Some(v) = read_tx.get(&ip, None).await? else {
 			return Ok(None);
 		};
 		// Then we take the old value of the appending value as the initial indexing value
@@ -998,7 +1020,7 @@ impl Building {
 		if pa.1 == QueueSequences::LEGACY_BATCH_ID {
 			// Legacy v1 primary appending entry (no batch id; queue stored under !ia).
 			// We can't resolve it to a v2 !ib record, so drop the marker and ignore the legacy queue.
-			tx.del(ip).await?;
+			write_tx.del(ip).await?;
 			if !*v1_appending_sentinel {
 				*v1_appending_sentinel = true;
 				warn!("Found legacy v1 primary appending entry from an older version; legacy queued updates will be ignored. Consider rebuilding index {} on table {}.", self.ix.name, self.ix.what);
@@ -1006,7 +1028,7 @@ impl Building {
 			return Ok(None);
 		}
 		let ib = self.new_ib_key(pa.0, pa.1)?;
-		let v = tx
+		let v = read_tx
 			.get(ib, None)
 			.await?
 			.ok_or_else(|| Error::CorruptedIndex("Appending record is missing"))?;
