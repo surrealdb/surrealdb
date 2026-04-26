@@ -836,6 +836,12 @@ impl Building {
 					drop(queue);
 					break;
 				}
+				self.set_status(BuildingStatus::Indexing {
+					initial: initial_count,
+					pending: Some(pending),
+					updated: updates_count,
+				})
+				.await;
 				keys
 			};
 			if !keys.is_empty() {
@@ -847,13 +853,12 @@ impl Building {
 				// and re-processed on the next iteration since their deletions were
 				// rolled back with the transaction.
 				let saved_updates_count = updates_count;
-				match self
-					.index_appending_range(&ctx, &tx, keys, initial_count, &mut updates_count)
-					.await
-				{
+				match self.index_appending_range(&ctx, &tx, keys, &mut updates_count).await {
 					Ok(indexed) => match tx.commit().await {
 						Ok(()) => {
-							if !indexed.is_empty() {
+							let pending = if indexed.is_empty() {
+								self.queue.read().await.pending() as usize
+							} else {
 								{
 									let mut clean_queue = self.clean_queue.lock().await;
 									for batch_id in indexed.keys() {
@@ -864,8 +869,16 @@ impl Building {
 										}
 									}
 								}
-								self.queue.write().await.clean(indexed);
-							}
+								let mut queue = self.queue.write().await;
+								queue.clean(indexed);
+								queue.pending() as usize
+							};
+							self.set_status(BuildingStatus::Indexing {
+								initial: initial_count,
+								pending: Some(pending),
+								updated: updates_count,
+							})
+							.await;
 						}
 						Err(Error::TxRetryable) => {
 							let _ = tx.cancel().await;
@@ -1043,7 +1056,6 @@ impl Building {
 		ctx: &Context,
 		tx: &Transaction,
 		keys: Vec<Key>,
-		initial: Option<usize>,
 		count: &mut Option<usize>,
 	) -> Result<HashMap<u32, Vec<u32>>, Error> {
 		let mut rc = false;
@@ -1089,13 +1101,6 @@ impl Building {
 		if let Some(ref ft) = ft_index {
 			ft.finish(ctx).await?;
 		}
-		// Update status once per batch instead of per record
-		self.set_status(BuildingStatus::Indexing {
-			initial,
-			pending: Some(self.queue.read().await.pending() as usize),
-			updated: *count,
-		})
-		.await;
 		trace!("{}: index_appending_range EXIT: {:?}", self.ix.name, indexed);
 		// Check if we trigger the compaction
 		self.check_index_compaction(tx, &mut rc).await?;
