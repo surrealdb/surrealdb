@@ -847,70 +847,89 @@ impl Building {
 		let fulltext_index =
 			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
 				.await?;
-		// Index the records.
-		for (k, v) in values {
-			if self.is_aborted().await {
-				return Ok(count);
-			}
-			self.is_beyond_threshold(Some(initial_count + count))?;
-			let key = record::RecordKey::decode_key(&k)?;
-			// Parse the value.
-			let val = Record::kv_decode_value(v)?;
-			let rid: Arc<RecordId> = RecordId {
-				table: key.tb.into_owned(),
-				key: key.id,
-			}
-			.into();
+		let lookup_tx = self.new_read_tx().await?;
+		let result = async {
+			// Index the records.
+			for (k, v) in values {
+				if self.is_aborted().await {
+					return Ok(count);
+				}
+				self.is_beyond_threshold(Some(initial_count + count))?;
+				let key = record::RecordKey::decode_key(&k)?;
+				// Parse the value.
+				let val = Record::kv_decode_value(v)?;
+				let rid: Arc<RecordId> = RecordId {
+					table: key.tb.into_owned(),
+					key: key.id,
+				}
+				.into();
 
-			// Is there already a queued update for this record?
-			let opt_values = if let Some(a) =
-				self.check_existing_primary_appending(&rid.key, v1_appending_sentinel).await?
-			{
-				a.old_values
-			} else {
-				// Otherwise, proceed with normal indexing.
-				let doc = CursorDoc::new(Some(rid.clone()), None, val);
-				stack
-					.enter(|stk| Document::build_opt_values(stk, ctx, &self.opt, &self.ix, &doc))
-					.finish()
+				// Is there already a queued update for this record?
+				let opt_values = if let Some(a) = self
+					.check_existing_primary_appending(&lookup_tx, &rid.key, v1_appending_sentinel)
 					.await?
-			};
-			// Index the record.
-			let mut io = IndexOperation::new(
-				ctx,
-				&self.opt,
-				self.ix_key.ns,
-				self.ix_key.db,
-				self.tb,
-				&self.ix,
-				None,
-				opt_values.clone(),
-				&rid,
-			);
-			if let Some(fulltext_index) = &fulltext_index {
-				stack
-					.enter(|stk| io.compute_fulltext_with_index(stk, fulltext_index, &mut rc))
-					.finish()
-					.await?;
-			} else {
-				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
-			}
+				{
+					a.old_values
+				} else {
+					// Otherwise, proceed with normal indexing.
+					let doc = CursorDoc::new(Some(rid.clone()), None, val);
+					stack
+						.enter(|stk| {
+							Document::build_opt_values(stk, ctx, &self.opt, &self.ix, &doc)
+						})
+						.finish()
+						.await?
+				};
+				// Index the record.
+				let mut io = IndexOperation::new(
+					ctx,
+					&self.opt,
+					self.ix_key.ns,
+					self.ix_key.db,
+					self.tb,
+					&self.ix,
+					None,
+					opt_values.clone(),
+					&rid,
+				);
+				if let Some(fulltext_index) = &fulltext_index {
+					stack
+						.enter(|stk| io.compute_fulltext_with_index(stk, fulltext_index, &mut rc))
+						.finish()
+						.await?;
+				} else {
+					stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+				}
 
-			// Increment the count.
-			count += 1;
+				// Increment the count.
+				count += 1;
+			}
+			// Trigger compaction if needed.
+			self.check_index_compaction(tx, &mut rc).await?;
+			// We're done.
+			Ok(count)
 		}
-		// Trigger compaction if needed.
-		self.check_index_compaction(tx, &mut rc).await?;
-		// We're done.
-		Ok(count)
+		.await;
+		let cancel_result = lookup_tx.cancel().await;
+		match result {
+			Ok(count) => {
+				cancel_result?;
+				Ok(count)
+			}
+			Err(err) => {
+				let _ = cancel_result;
+				Err(err)
+			}
+		}
 	}
 
 	async fn check_existing_primary_appending(
 		&self,
+		lookup_tx: &Transaction,
 		id_key: &RecordIdKey,
 		v1_appending_sentinel: &mut bool,
 	) -> Result<Option<Appending>> {
-		match self.load_existing_primary_appending(id_key).await? {
+		match self.load_existing_primary_appending(lookup_tx, id_key).await? {
 			ExistingPrimaryAppending::None => Ok(None),
 			ExistingPrimaryAppending::Appending(appending) => Ok(Some(appending)),
 			ExistingPrimaryAppending::Legacy => {
@@ -929,25 +948,21 @@ impl Building {
 
 	async fn load_existing_primary_appending(
 		&self,
+		tx: &Transaction,
 		id_key: &RecordIdKey,
 	) -> Result<ExistingPrimaryAppending> {
-		let tx = self.new_read_tx().await?;
 		let ip = self.ikb.new_ip_key(id_key.clone());
-		let Some(pa) = catch!(tx, tx.get(&ip, None).await) else {
-			tx.cancel().await?;
+		let Some(pa) = tx.get(&ip, None).await? else {
 			return Ok(ExistingPrimaryAppending::None);
 		};
 		// Use the old values from the queued update as the initial indexing input.
 		if pa.1 == QueueSequences::LEGACY_BATCH_ID {
-			tx.cancel().await?;
 			return Ok(ExistingPrimaryAppending::Legacy);
 		}
 		let ig = self.ikb.new_ig_key(pa.0, pa.1);
-		let Some(appending) = catch!(tx, tx.get(&ig, None).await) else {
-			tx.cancel().await?;
+		let Some(appending) = tx.get(&ig, None).await? else {
 			return Err(Error::CorruptedIndex("Appending record is missing").into());
 		};
-		tx.cancel().await?;
 		Ok(ExistingPrimaryAppending::Appending(appending))
 	}
 
