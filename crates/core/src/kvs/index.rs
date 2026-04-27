@@ -218,12 +218,13 @@ impl IndexBuilder {
 		ctx: &Context,
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
-		az: Option<Arc<DefineAnalyzerStatement>>,
+		bootstrap_az: Option<Arc<DefineAnalyzerStatement>>,
 		ix_key: SharedIndexKey,
 		sdr: Option<Sender<Result<(), Error>>>,
 		recover_queue: bool,
 	) -> Result<IndexBuilding, Error> {
-		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix, az, ix_key)?);
+		let building =
+			Arc::new(Building::new(ctx, self.tf.clone(), opt, ix, bootstrap_az, ix_key)?);
 		if recover_queue {
 			building.recover_queue().await?;
 		};
@@ -532,11 +533,10 @@ struct Building {
 	tf: TransactionFactory,
 	/// The statement that defines the index
 	ix: Arc<DefineIndexStatement>,
-	/// Pre-resolved analyzer for the initial build of `Index::Search` indexes.
-	/// Resolved from the originating user transaction, which can see the analyzer
-	/// even when it was defined in the same uncommitted transaction as the index.
-	/// Long-running deferred appends intentionally re-resolve schema instead.
-	az: Option<Arc<DefineAnalyzerStatement>>,
+	/// Bootstrap analyzer for the initial build of `Index::Search` indexes.
+	/// This is only used until the background transaction can see the same
+	/// analyzer definition as the originating user transaction.
+	bootstrap_az: RwLock<Option<Arc<DefineAnalyzerStatement>>>,
 	/// The table name
 	tb: String,
 	/// The index key
@@ -564,7 +564,7 @@ impl Building {
 		tf: TransactionFactory,
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
-		az: Option<Arc<DefineAnalyzerStatement>>,
+		bootstrap_az: Option<Arc<DefineAnalyzerStatement>>,
 		ix_key: SharedIndexKey,
 	) -> Result<Self, Error> {
 		Ok(Self {
@@ -573,7 +573,7 @@ impl Building {
 			tf,
 			tb: ix.what.to_raw(),
 			ix,
-			az,
+			bootstrap_az: RwLock::new(bootstrap_az),
 			ix_key,
 			status: RwLock::new(BuildingStatus::Started),
 			queue: Default::default(),
@@ -971,6 +971,38 @@ impl Building {
 		Ok(())
 	}
 
+	async fn initial_build_analyzer(
+		&self,
+		ctx: &Context,
+	) -> Result<Option<Arc<DefineAnalyzerStatement>>, Error> {
+		// Prefer normal schema resolution once the background transaction sees
+		// the same analyzer as the originating user transaction. Until then, the
+		// bootstrap analyzer is needed for same-transaction definitions.
+		let Index::Search(p) = &self.ix.index else {
+			return Ok(None);
+		};
+		let Some(bootstrap_az) = self.bootstrap_az.read().await.clone() else {
+			return Ok(None);
+		};
+		let (ns, db) = self.opt.ns_db()?;
+		match ctx.tx().get_db_analyzer(ns, db, &p.az).await {
+			Ok(current_az) if current_az.as_ref() == bootstrap_az.as_ref() => {
+				let mut stored_az = self.bootstrap_az.write().await;
+				if let Some(current_stored_az) = stored_az.as_ref() {
+					if current_stored_az.as_ref() == bootstrap_az.as_ref() {
+						*stored_az = None;
+					}
+				}
+				Ok(None)
+			}
+			Ok(_)
+			| Err(Error::AzNotFound {
+				..
+			}) => Ok(Some(bootstrap_az)),
+			Err(e) => Err(e),
+		}
+	}
+
 	/// Index a batch of records from the table
 	async fn index_initial_batch(
 		&self,
@@ -983,10 +1015,11 @@ impl Building {
 	) -> Result<(), Error> {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
+		let az = self.initial_build_analyzer(ctx).await?;
 		// For search indexes, create the FtIndex once for the entire batch
 		// instead of per-document, avoiding repeated BTree load/save overhead.
 		let mut ft_index =
-			IndexOperation::create_ft_index(ctx, &self.opt, &self.ix, self.az.clone()).await?;
+			IndexOperation::create_ft_index(ctx, &self.opt, &self.ix, az.clone()).await?;
 		// Index the records
 		for (k, v) in values.into_iter() {
 			if self.is_aborted().await {
@@ -1022,7 +1055,7 @@ impl Building {
 				ctx,
 				&self.opt,
 				&self.ix,
-				self.az.clone(),
+				az.clone(),
 				None,
 				opt_values.clone(),
 				&rid,
