@@ -532,11 +532,10 @@ struct Building {
 	tf: TransactionFactory,
 	/// The statement that defines the index
 	ix: Arc<DefineIndexStatement>,
-	/// Pre-resolved analyzer for `Index::Search` indexes. Resolved from the
-	/// originating user transaction (which can see the analyzer even when it
-	/// was defined in the same uncommitted transaction as the index), and
-	/// passed through to `IndexOperation` so background-task transactions don't
-	/// have to look it up themselves.
+	/// Pre-resolved analyzer for the initial build of `Index::Search` indexes.
+	/// Resolved from the originating user transaction, which can see the analyzer
+	/// even when it was defined in the same uncommitted transaction as the index.
+	/// Long-running deferred appends intentionally re-resolve schema instead.
 	az: Option<Arc<DefineAnalyzerStatement>>,
 	/// The table name
 	tb: String,
@@ -1093,9 +1092,11 @@ impl Building {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
 		let mut indexed = HashMap::new();
-		// For search indexes, create the FtIndex once for the entire batch
-		let mut ft_index =
-			IndexOperation::create_ft_index(ctx, &self.opt, &self.ix, self.az.clone()).await?;
+		// For search indexes, create the FtIndex once for the entire batch.
+		// Deferred appends must observe analyzer schema changes made after the
+		// initial build, so do not use the analyzer cached for the originating
+		// transaction here.
+		let mut ft_index = IndexOperation::create_ft_index(ctx, &self.opt, &self.ix, None).await?;
 		trace!("{}: index_appending_range STARTS- len: {}", self.ix.name, keys.len());
 		for k in keys {
 			if self.is_aborted().await {
@@ -1116,7 +1117,7 @@ impl Building {
 					ctx,
 					&self.opt,
 					&self.ix,
-					self.az.clone(),
+					None,
 					a.old_values,
 					a.new_values,
 					&rid,
