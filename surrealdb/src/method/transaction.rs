@@ -6,7 +6,9 @@ use crate::method::{Cancel, Commit, Create, Delete, Insert, Query, Select, Updat
 use crate::opt::{CreateResource, IntoResource};
 use crate::{Connection, Surreal};
 
-/// An ongoing transaction
+/// Transaction handle produced when [`Begin`](crate::method::Begin) completes after [`Surreal::begin`](crate::Surreal::begin).
+///
+/// Use [`Transaction::query`](Transaction::query) and related methods on this handle, then [`Transaction::commit`](Transaction::commit) or [`Transaction::cancel`](Transaction::cancel).
 #[derive(Debug)]
 #[must_use = "transactions must be committed or cancelled to complete them"]
 pub struct Transaction<C: Connection> {
@@ -18,12 +20,16 @@ impl<C> Transaction<C>
 where
 	C: Connection,
 {
-	/// Creates a commit future
+	/// Commits this transaction, persisting the changes, and returns a
+	/// [`Commit`] future that yields the original [`Surreal`] client on
+	/// success.
 	pub fn commit(self) -> Commit<C> {
 		Commit::from_transaction(self)
 	}
 
-	/// Creates a cancel future
+	/// Rolls this transaction back and returns a [`Cancel`] future that yields
+	/// the original [`Surreal`] client on success, without persisting the
+	/// changes from this transaction.
 	pub fn cancel(self) -> Cancel<C> {
 		Cancel::from_transaction(self)
 	}

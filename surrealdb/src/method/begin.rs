@@ -4,7 +4,7 @@ use crate::conn::Command;
 use crate::method::{BoxFuture, Transaction};
 use crate::{Connection, OnceLockExt, Result, Surreal};
 
-/// A beginning of a transaction
+/// From [`Surreal::begin`](crate::Surreal::begin). Yields a [`Transaction`](crate::method::Transaction) that can then take [queries](crate::method::Transaction::query), then be [committed](crate::method::Transaction::commit) or [cancelled](crate::method::Transaction::cancel).
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Begin<C: Connection> {

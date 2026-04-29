@@ -12,7 +12,7 @@ use crate::opt::{PatchOps, Resource};
 use crate::types::{RecordIdKeyRange, SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
-/// An upsert future
+/// Returned by [`Surreal::upsert`](crate::Surreal::upsert). Uses same content/merge/patch chaining as [`Update`](crate::method::Update).
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Upsert<'r, C: Connection, R> {

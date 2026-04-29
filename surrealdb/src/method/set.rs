@@ -6,7 +6,7 @@ use crate::method::{BoxFuture, OnceLockExt};
 use crate::types::Value;
 use crate::{Connection, Result, Surreal};
 
-/// A set future
+/// Returned by [`Surreal::set`](crate::Surreal::set) to bind a session variable for subsequent [`Surreal::query`](crate::Surreal::query) calls.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Set<'r, C: Connection> {

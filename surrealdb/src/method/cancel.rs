@@ -4,7 +4,7 @@ use crate::conn::Command;
 use crate::method::{BoxFuture, Transaction};
 use crate::{Connection, OnceLockExt, Result, Surreal};
 
-/// A transaction cancellation future
+/// From [`Transaction::cancel`](crate::method::Transaction::cancel); rolls back the open transaction and yields the [`Surreal`](crate::Surreal) client again.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Cancel<C: Connection> {

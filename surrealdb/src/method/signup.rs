@@ -7,7 +7,7 @@ use crate::opt::auth::Token;
 use crate::types::Value;
 use crate::{Connection, Result, Surreal};
 
-/// A signup future
+/// Returned by [`Surreal::signup`](crate::Surreal::signup) for `DEFINE ACCESS … SIGNUP` flows.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Signup<'r, C: Connection> {

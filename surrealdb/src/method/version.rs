@@ -5,7 +5,7 @@ use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::{Connection, Error, Result, Surreal};
 
-/// A version future
+/// Returned by [`Surreal::version`](crate::Surreal::version), yields the server version string.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Version<'r, C: Connection> {

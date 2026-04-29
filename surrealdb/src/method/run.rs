@@ -7,7 +7,7 @@ use crate::method::{BoxFuture, OnceLockExt};
 use crate::types::{Array, SurrealValue, Value};
 use crate::{Connection, Result, Surreal};
 
-/// A run future
+/// Returned by [`Surreal::run`](crate::Surreal::run) to invoke a defined function (`fn::…`).
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Run<'r, C: Connection, R> {

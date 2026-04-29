@@ -11,7 +11,7 @@ use crate::opt::Resource;
 use crate::types::{RecordIdKeyRange, SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
-/// A select future
+/// Returned by [`Surreal::select`](crate::Surreal::select) for `SELECT` (including [`Select::live`](Self::live) when using [`Live`](crate::method::Live)).
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Select<'r, C: Connection, R, T = ()> {
@@ -154,7 +154,7 @@ where
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
 	/// #
 	/// // Select the namespace/database to use
-	/// db.use_ns("namespace").use_db("database").await?;
+	/// db.use_ns("main").use_db("main").await?;
 	///
 	/// // Listen to all updates on a table
 	/// let mut stream = db.select("person").live().await?;

@@ -7,7 +7,7 @@ use crate::conn::Command;
 use crate::method::{BoxFuture, Model, OnceLockExt};
 use crate::{Connection, Error, ExtraFeatures, Result, Surreal};
 
-/// An database import future
+/// Returned by [`Surreal::import`](crate::Surreal::import) to restore from a `.surql` backup file.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Import<'r, C: Connection, T = ()> {

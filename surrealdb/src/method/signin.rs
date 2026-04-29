@@ -7,7 +7,7 @@ use crate::opt::auth::Token;
 use crate::types::Value;
 use crate::{Connection, Result, Surreal};
 
-/// A signin future
+/// Returned by [`Surreal::signin`](crate::Surreal::signin) for root, namespace, database, or record credentials.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Signin<'r, C: Connection> {

@@ -5,7 +5,7 @@ use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::{Connection, Result, Surreal};
 
-/// A health check future
+/// Returned by [`Surreal::health`](crate::Surreal::health), completing successfully when the server reports healthy.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Health<'r, C: Connection> {

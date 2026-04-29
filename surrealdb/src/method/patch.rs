@@ -10,7 +10,7 @@ use crate::opt::{PatchOp, PatchOps, Resource};
 use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
-/// A patch future
+/// JSON-patch payload from [`Update::patch`](crate::method::Update::patch) or [`Upsert::patch`](crate::method::Upsert::patch).
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Patch<'r, C: Connection, R> {

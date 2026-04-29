@@ -13,7 +13,7 @@ use crate::opt::Resource;
 use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Error, Result, Surreal};
 
-/// An insert future
+/// Returned by [`Surreal::insert`](crate::Surreal::insert) for `INSERT` batches; use [`Insert::relation`](Insert::relation) for graph edges.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Insert<'r, C: Connection, R> {

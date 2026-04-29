@@ -8,6 +8,7 @@ use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::WaitFor;
 use crate::{Connection, Result, Surreal};
 
+/// Returned by [`UseNs::use_db`](crate::method::UseNs::use_db), used to set the current database.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct UseDb<'r, C: Connection> {

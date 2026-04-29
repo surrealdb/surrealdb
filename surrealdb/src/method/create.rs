@@ -12,7 +12,7 @@ use crate::opt::Resource;
 use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
-/// A record create future
+/// Returned by [`Surreal::create`](crate::Surreal::create) for `CREATE`-style inserts.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Create<'r, C: Connection, R> {

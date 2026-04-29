@@ -21,7 +21,7 @@ use crate::notification::Notification;
 use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Error, Result, Surreal, opt};
 
-/// A query future
+/// Returned by [`Surreal::query`](crate::Surreal::query), resolving to [`IndexedResults`] (optionally via [`Query::with_stats`](Self::with_stats)).
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Query<'r, C: Connection> {
@@ -269,7 +269,7 @@ where
 	}
 }
 
-/// The response type of a `Surreal::query` request
+/// Map of per-statement results from [`Surreal::query`](crate::Surreal::query); read rows with [`IndexedResults::take`](IndexedResults::take).
 #[derive(Debug)]
 pub struct IndexedResults {
 	pub(crate) results: IndexMap<usize, (DbResultStats, std::result::Result<Value, TypesError>)>,

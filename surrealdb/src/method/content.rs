@@ -9,9 +9,7 @@ use crate::method::{BoxFuture, OnceLockExt};
 use crate::types::{SurrealValue, Value};
 use crate::{Connection, Result, Surreal};
 
-/// A content future
-///
-/// Content inserts or replaces the contents of a record entirely
+/// Payload from [`Update::content`](crate::method::Update::content), [`Upsert::content`](crate::method::Upsert::content), or [`Create::content`](crate::method::Create::content) (replaces the record body).
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Content<'r, C: Connection, R> {

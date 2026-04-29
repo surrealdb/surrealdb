@@ -8,7 +8,7 @@ use crate::opt::auth::{RefreshToken, Token};
 use crate::types::SurrealValue;
 use crate::{Connection, Error, Result, Surreal};
 
-/// An authentication future
+/// Returned by [`Surreal::authenticate`](crate::Surreal::authenticate) to attach a JWT (or refresh-token variant) to this connection.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Authenticate<'r, C: Connection, T = ()> {

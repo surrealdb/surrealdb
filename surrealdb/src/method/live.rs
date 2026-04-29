@@ -224,7 +224,7 @@ where
 	}
 }
 
-/// A stream of live query notifications
+/// Notifications from [`Select::live`](crate::method::Select::live) (built via [`Surreal::select`](crate::Surreal::select)) or from live handles inside [`Surreal::query`](crate::Surreal::query).
 #[derive(Debug)]
 #[must_use = "streams do nothing unless you poll them"]
 pub struct Stream<R> {

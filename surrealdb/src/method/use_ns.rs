@@ -7,7 +7,7 @@ use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt, UseDb};
 use crate::{Connection, Result, Surreal};
 
-/// Stores the namespace to use
+/// Returned by [`Surreal::use_ns`](crate::Surreal::use_ns), used to set the current namespace.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct UseNs<'r, C: Connection> {

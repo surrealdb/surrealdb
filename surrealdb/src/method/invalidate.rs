@@ -8,7 +8,7 @@ use crate::opt::auth::Token;
 use crate::types::{SurrealValue, Value};
 use crate::{Connection, Result, Surreal};
 
-/// A session invalidate future
+/// Returned by [`Surreal::invalidate`](crate::Surreal::invalidate) to clear auth on a connection.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Invalidate<'r, C: Connection, T = ()> {
