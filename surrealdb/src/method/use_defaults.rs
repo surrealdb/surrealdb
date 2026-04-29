@@ -7,7 +7,8 @@ use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::{Connection, Result, Surreal};
 
-/// Returned by [`Surreal::use_defaults`](crate::Surreal::use_defaults), used to apply the server's default namespace/database.
+/// Returned by [`Surreal::use_defaults`](crate::Surreal::use_defaults), used to apply the server's
+/// default namespace/database.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct UseDefaults<'r, C: Connection> {

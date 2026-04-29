@@ -13,7 +13,9 @@ use crate::opt::{PatchOps, Resource};
 use crate::types::{RecordId, RecordIdKeyRange, SurrealValue, Value, Variables};
 use crate::{Connection, Error, Result, Surreal};
 
-/// Returned by [`Surreal::update`](crate::Surreal::update), followed by [`Update::content`](Update::content), [`Update::merge`](Update::merge), or [`Update::patch`](Update::patch) before running.
+/// Returned by [`Surreal::update`](crate::Surreal::update), followed by
+/// [`Update::content`](Update::content), [`Update::merge`](Update::merge), or
+/// [`Update::patch`](Update::patch) before running.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Update<'r, C: Connection, R> {

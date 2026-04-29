@@ -21,7 +21,8 @@ use crate::notification::Notification;
 use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Error, Result, Surreal, opt};
 
-/// Returned by [`Surreal::query`](crate::Surreal::query), resolving to [`IndexedResults`] (optionally via [`Query::with_stats`](Self::with_stats)).
+/// Returned by [`Surreal::query`](crate::Surreal::query), resolving to [`IndexedResults`]
+/// (optionally via [`Query::with_stats`](Self::with_stats)).
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Query<'r, C: Connection> {
@@ -269,7 +270,8 @@ where
 	}
 }
 
-/// Map of per-statement results from [`Surreal::query`](crate::Surreal::query); read rows with [`IndexedResults::take`](IndexedResults::take).
+/// Map of per-statement results from [`Surreal::query`](crate::Surreal::query); read rows with
+/// [`IndexedResults::take`](IndexedResults::take).
 #[derive(Debug)]
 pub struct IndexedResults {
 	pub(crate) results: IndexMap<usize, (DbResultStats, std::result::Result<Value, TypesError>)>,
@@ -446,7 +448,7 @@ impl IndexedResults {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -477,7 +479,7 @@ impl IndexedResults {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -507,7 +509,7 @@ impl IndexedResults {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -603,7 +605,7 @@ impl WithStats<IndexedResults> {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -637,7 +639,7 @@ impl WithStats<IndexedResults> {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -656,7 +658,7 @@ impl WithStats<IndexedResults> {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;

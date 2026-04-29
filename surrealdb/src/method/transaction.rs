@@ -6,9 +6,11 @@ use crate::method::{Cancel, Commit, Create, Delete, Insert, Query, Select, Updat
 use crate::opt::{CreateResource, IntoResource};
 use crate::{Connection, Surreal};
 
-/// Transaction handle produced when [`Begin`](crate::method::Begin) completes after [`Surreal::begin`](crate::Surreal::begin).
+/// Transaction handle produced when [`Begin`](crate::method::Begin) completes after
+/// [`Surreal::begin`](crate::Surreal::begin).
 ///
-/// Use [`Transaction::query`](Transaction::query) and related methods on this handle, then [`Transaction::commit`](Transaction::commit) or [`Transaction::cancel`](Transaction::cancel).
+/// Use [`Transaction::query`](Transaction::query) and related methods on this handle, then
+/// [`Transaction::commit`](Transaction::commit) or [`Transaction::cancel`](Transaction::cancel).
 #[derive(Debug)]
 #[must_use = "transactions must be committed or cancelled to complete them"]
 pub struct Transaction<C: Connection> {

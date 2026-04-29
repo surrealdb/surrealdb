@@ -14,7 +14,8 @@ use crate::conn::{Command, MlExportConfig};
 use crate::method::{BoxFuture, ExportConfig as Config, Model, OnceLockExt};
 use crate::{Connection, Error, ExtraFeatures, Result, Surreal};
 
-/// Returned by [`Surreal::export`](crate::Surreal::export). File targets complete in place, while `()` targets resolve to [`Backup`] for streaming chunks.
+/// Returned by [`Surreal::export`](crate::Surreal::export). File targets complete in place, while
+/// `()` targets resolve to [`Backup`] for streaming chunks.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Export<'r, C: Connection, R, T = ()> {
@@ -285,7 +286,8 @@ where
 	}
 }
 
-/// Byte chunks from [`Export`] when the destination is `()` (see [`Surreal::export`](crate::Surreal::export)).
+/// Byte chunks from [`Export`] when the destination is `()` (see
+/// [`Surreal::export`](crate::Surreal::export)).
 #[derive(Debug, Clone)]
 #[must_use = "streams do nothing unless you poll them"]
 pub struct Backup {

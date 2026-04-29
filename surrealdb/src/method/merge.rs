@@ -11,7 +11,8 @@ use crate::opt::Resource;
 use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
-/// Patch-style payload from [`Update::merge`](crate::method::Update::merge) or [`Upsert::merge`](crate::method::Upsert::merge).
+/// Patch-style payload from [`Update::merge`](crate::method::Update::merge) or
+/// [`Upsert::merge`](crate::method::Upsert::merge).
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Merge<'r, C: Connection, D, R> {

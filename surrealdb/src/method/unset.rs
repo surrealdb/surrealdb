@@ -5,7 +5,8 @@ use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::{Connection, Result, Surreal};
 
-/// Returned by [`Surreal::unset`](crate::Surreal::unset); removes a session variable set on the connection via [`Surreal::set`](crate::Surreal::set).
+/// Returned by [`Surreal::unset`](crate::Surreal::unset); removes a session variable set on the
+/// connection via [`Surreal::set`](crate::Surreal::set).
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Unset<'r, C: Connection> {

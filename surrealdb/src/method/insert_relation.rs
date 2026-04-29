@@ -8,7 +8,8 @@ use crate::method::OnceLockExt;
 use crate::types::{SurrealValue, Value};
 use crate::{Connection, Result, Surreal};
 
-/// Returned by [`Insert::relation`](crate::method::Insert::relation) after [`Surreal::insert`](crate::Surreal::insert) for `RELATE`-style inserts.
+/// Returned by [`Insert::relation`](crate::method::Insert::relation) after
+/// [`Surreal::insert`](crate::Surreal::insert) for `RELATE`-style inserts.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct InsertRelation<'r, C: Connection, R> {

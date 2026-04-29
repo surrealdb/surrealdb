@@ -11,7 +11,8 @@ use crate::opt::Resource;
 use crate::types::{RecordIdKeyRange, SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
-/// Returned by [`Surreal::select`](crate::Surreal::select) for `SELECT` (including [`Select::live`](Self::live) when using [`Live`](crate::method::Live)).
+/// Returned by [`Surreal::select`](crate::Surreal::select) for `SELECT` (including
+/// [`Select::live`](Self::live) when using [`Live`](crate::method::Live)).
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Select<'r, C: Connection, R, T = ()> {

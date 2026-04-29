@@ -11,7 +11,8 @@ use crate::opt::Resource;
 use crate::types::{RecordIdKeyRange, SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
-/// Returned by [`Surreal::delete`](crate::Surreal::delete) for `DELETE` on a table, range, or record.
+/// Returned by [`Surreal::delete`](crate::Surreal::delete) for `DELETE` on a table, range, or
+/// record.
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Delete<'r, C: Connection, R> {

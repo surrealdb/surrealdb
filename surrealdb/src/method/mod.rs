@@ -84,19 +84,23 @@ use super::opt::{CreateResource, IntoResource};
 /// library
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
 
-/// Type-state marker for [`Export::ml`](Export::ml) on an [`Export`](Export) from [`Surreal::export`](crate::Surreal::export).
+/// Type-state marker for [`Export::ml`](Export::ml) on an [`Export`](Export) from
+/// [`Surreal::export`](crate::Surreal::export).
 pub struct Model;
 
-/// Type-state marker for [`Export::with_config`](Export::with_config) on an [`Export`](Export) from [`Surreal::export`](crate::Surreal::export).
+/// Type-state marker for [`Export::with_config`](Export::with_config) on an [`Export`](Export) from
+/// [`Surreal::export`](crate::Surreal::export).
 pub struct ExportConfig;
 
-/// Type-state marker for [`Select::live`](Select::live) on a [`Select`] from [`Surreal::select`](crate::Surreal::select).
+/// Type-state marker for [`Select::live`](Select::live) on a [`Select`] from
+/// [`Surreal::select`](crate::Surreal::select).
 pub struct Live;
 
 /// Relation marker type
 pub struct Relation;
 
-/// Time elapsed for a single statement, paired by [`WithStats::take`](WithStats::take) after [`Query::with_stats`](crate::method::Query::with_stats).
+/// Time elapsed for a single statement, paired by [`WithStats::take`](WithStats::take) after
+/// [`Query::with_stats`](crate::method::Query::with_stats).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub struct Stats {
@@ -104,7 +108,8 @@ pub struct Stats {
 	pub execution_time: Option<Duration>,
 }
 
-/// Wraps the [`Query`] output from [`Query::with_stats`](crate::method::Query::with_stats) so each [`WithStats::take`](WithStats::take) includes [`Stats`].
+/// Wraps the [`Query`] output from [`Query::with_stats`](crate::method::Query::with_stats) so each
+/// [`WithStats::take`](WithStats::take) includes [`Stats`].
 #[derive(Debug)]
 pub struct WithStats<T>(pub T);
 
