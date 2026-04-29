@@ -652,7 +652,7 @@ where
 		Query {
 			txn: None,
 			client: Cow::Borrowed(self),
-			query: query.into(),
+			queries: vec![query.into()],
 			variables: Ok(Variables::new()),
 		}
 	}

@@ -81,6 +81,16 @@ impl BuildingStatus {
 	}
 }
 
+fn is_retryable_transaction_conflict(err: &anyhow::Error) -> bool {
+	if let Some(kvs_err) = err.downcast_ref::<crate::kvs::Error>() {
+		return kvs_err.is_retryable();
+	}
+	matches!(
+		err.downcast_ref::<Error>(),
+		Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable()
+	)
+}
+
 impl From<BuildingStatus> for Value {
 	fn from(st: BuildingStatus) -> Self {
 		let mut o = Object::default();
@@ -325,6 +335,12 @@ impl PrimaryAppending {
 	}
 }
 
+enum ExistingPrimaryAppending {
+	None,
+	Legacy,
+	Appending(Appending),
+}
+
 /// Tracks sequence numbers and batches for the background indexing queue.
 struct QueueSequences {
 	/// Number of queued appends awaiting indexing.
@@ -428,6 +444,11 @@ struct Building {
 	queue: Arc<RwLock<QueueSequences>>,
 	/// Batch IDs scheduled for deferred cleanup after rollback (cancel or failed commit).
 	clean_queue: BatchIdsCleanQueue,
+	/// Set to `true` once the initial build (first pass) is complete.
+	/// Used to skip writing `ip` (primary appending) keys during the appending
+	/// phase, avoiding write-write conflicts with `index_appending_range` which
+	/// deletes those same keys.
+	initial_build_complete: AtomicBool,
 	/// Abort flag for the build process.
 	aborted: AtomicBool,
 	finished: AtomicBool,
@@ -454,6 +475,7 @@ impl Building {
 			status: Arc::new(RwLock::new(BuildingStatus::Started)),
 			queue: Default::default(),
 			clean_queue: Default::default(),
+			initial_build_complete: AtomicBool::new(false),
 			aborted: AtomicBool::new(false),
 			finished: AtomicBool::new(false),
 		})
@@ -465,6 +487,13 @@ impl Building {
 		if !s.is_error() {
 			*s = status;
 		}
+	}
+
+	async fn mark_initial_build_complete(&self) {
+		// Hold the queue lock while flipping the phase flag so any subsequent
+		// consumer observes appending mode before it can enqueue more work.
+		let _queue = self.queue.write().await;
+		self.initial_build_complete.store(true, Ordering::Release);
 	}
 
 	async fn maybe_consume(
@@ -503,22 +532,27 @@ impl Building {
 		let appending_id = queue.add_update(batch_id)?;
 		// Store the appending
 		let ig = self.ikb.new_ig_key(appending_id, batch_id);
-		tx.set(&ig, &appending, None).await?;
-		// Do we already have a primary appending?
-		let ip = self.ikb.new_ip_key(rid.key.clone());
-		let pa = tx.get(&ip, None).await?;
-		// Do we have a primary indexing?
-		// We ignore legacy primary indexing.
-		// The initial batch is responsible for removing them, if any,
-		// and reporting their presence in the logs.
-		let is_pa = if let Some(pa) = pa {
-			pa.1 != QueueSequences::LEGACY_BATCH_ID
-		} else {
-			false
-		};
-		if !is_pa {
-			// If not, set it.
-			tx.set(&ip, &PrimaryAppending(appending_id, batch_id), None).await?;
+		tx.set(&ig, &appending).await?;
+		// The ip (primary appending) key is only needed during the initial build phase,
+		// where `check_existing_primary_appending` uses it to find the latest appending
+		// for a record being initially indexed. Once the initial build is complete
+		// (appending phase), we skip setting ip to avoid write-write conflicts with the
+		// appending phase which deletes ip keys.
+		if !self.initial_build_complete.load(Ordering::Acquire) {
+			let ip = self.ikb.new_ip_key(rid.key.clone());
+			let pa = tx.get(&ip, None).await?;
+			// We ignore legacy primary indexing.
+			// The initial batch is responsible for removing them, if any,
+			// and reporting their presence in the logs.
+			let is_pa = if let Some(pa) = pa {
+				pa.1 != QueueSequences::LEGACY_BATCH_ID
+			} else {
+				false
+			};
+			if !is_pa {
+				// If not, set it.
+				tx.set(&ip, &PrimaryAppending(appending_id, batch_id)).await?;
+			}
 		}
 		drop(queue);
 		Ok(ConsumeResult::Enqueued)
@@ -536,7 +570,7 @@ impl Building {
 			.transaction(TransactionType::Write, Optimistic, self.ctx.try_get_sequences()?.clone())
 			.await?
 			.into();
-		let mut ctx = Context::new(&self.ctx);
+		let mut ctx = Context::new_child(&self.ctx);
 		ctx.set_transaction(tx);
 		Ok(ctx.freeze())
 	}
@@ -557,7 +591,7 @@ impl Building {
 		// If the index is not found, we continue — the prepare_remove flag can only
 		// be set by REMOVE INDEX, which runs in a separate transaction.
 		if let Some(ix) = tx
-			.get_tb_index(self.ix_key.ns, self.ix_key.db, &self.ix.table_name, &self.ix.name)
+			.get_tb_index(self.ix_key.ns, self.ix_key.db, &self.ix.table_name, &self.ix.name, None)
 			.await?
 		{
 			ix.expect_not_prepare_remove()?;
@@ -634,20 +668,31 @@ impl Building {
 				let ctx = self.new_write_tx_ctx().await?;
 				let tx = ctx.tx();
 				// Index the batch.
-				catch!(
+				let indexed = catch!(
 					tx,
 					self.index_initial_batch(
 						&ctx,
 						&tx,
 						batch.result,
-						&mut initial_count,
+						initial_count,
 						&mut v1_appending_sentinel
 					)
 					.await
 				);
 				catch!(tx, tx.commit().await);
+				initial_count += indexed;
+				if !self.is_aborted().await {
+					self.set_status(BuildingStatus::Indexing {
+						initial: Some(initial_count),
+						pending: Some(self.queue.read().await.pending() as usize),
+						updated: None,
+					})
+					.await;
+				}
 			}
 		}
+		// Mark initial build as complete before entering the appending phase.
+		self.mark_initial_build_complete().await;
 		// Second pass: index/remove records that changed during the initial pass.
 		self.set_status(BuildingStatus::Indexing {
 			initial: Some(initial_count),
@@ -656,6 +701,21 @@ impl Building {
 		})
 		.await;
 		let mut updates_count = 0;
+		self.index_appending_loop(
+			initial_count,
+			&mut updates_count,
+			&mut last_prepare_remove_check,
+		)
+		.await?;
+		Ok(())
+	}
+
+	async fn index_appending_loop(
+		&self,
+		initial_count: usize,
+		updates_count: &mut usize,
+		last_prepare_remove_check: &mut Instant,
+	) -> Result<()> {
 		let rng = self.ikb.new_ig_range()?;
 		loop {
 			if self.is_aborted().await {
@@ -663,7 +723,7 @@ impl Building {
 			}
 			self.is_beyond_threshold(None)?;
 			// Check the index still exists and has not been marked for removal
-			self.check_prepare_remove(&mut last_prepare_remove_check).await?;
+			self.check_prepare_remove(last_prepare_remove_check).await?;
 
 			let keys = {
 				let mut queue = self.queue.write().await;
@@ -689,7 +749,7 @@ impl Building {
 					self.set_status(BuildingStatus::Ready {
 						initial: Some(initial_count),
 						pending: Some(pending),
-						updated: Some(updates_count),
+						updated: Some(*updates_count),
 					})
 					.await;
 					break;
@@ -698,7 +758,7 @@ impl Building {
 				self.set_status(BuildingStatus::Indexing {
 					initial: Some(initial_count),
 					pending: Some(pending),
-					updated: Some(updates_count),
+					updated: Some(*updates_count),
 				})
 				.await;
 				drop(queue);
@@ -709,23 +769,61 @@ impl Building {
 				// Create a new context with a write transaction.
 				let ctx = self.new_write_tx_ctx().await?;
 				let tx = ctx.tx();
-				let indexed = catch!(
-					tx,
-					self.index_appending_range(&ctx, &tx, keys, initial_count, &mut updates_count)
-						.await
-				);
-				catch!(tx, tx.commit().await);
-				// Clean up completed appendings and drop any stale rollback batch IDs.
-				if !indexed.is_empty() {
-					{
-						let mut clean_queue = self.clean_queue.lock().await;
-						for batch_id in indexed.keys() {
-							if let Some(idx) = clean_queue.iter().position(|&id| id == *batch_id) {
-								clean_queue.remove(idx);
-							}
-						}
+				let saved_updates_count = *updates_count;
+				let indexed = match self.index_appending_range(&ctx, &tx, keys, updates_count).await
+				{
+					Ok(indexed) => indexed,
+					Err(err) if is_retryable_transaction_conflict(&err) => {
+						let _ = tx.cancel().await;
+						*updates_count = saved_updates_count;
+						warn!("{}: transient conflict in appending range, retrying", self.ix.name);
+						sleep(Duration::from_millis(100)).await;
+						continue;
 					}
-					self.queue.write().await.clean(indexed);
+					Err(err) => {
+						let _ = tx.cancel().await;
+						return Err(err);
+					}
+				};
+				let commit_result = tx.commit().await;
+				match commit_result {
+					Ok(()) => {
+						// Clean up completed appendings and drop any stale rollback batch IDs.
+						let pending = if indexed.is_empty() {
+							self.queue.read().await.pending() as usize
+						} else {
+							{
+								let mut clean_queue = self.clean_queue.lock().await;
+								for batch_id in indexed.keys() {
+									if let Some(idx) =
+										clean_queue.iter().position(|&id| id == *batch_id)
+									{
+										clean_queue.remove(idx);
+									}
+								}
+							}
+							let mut queue = self.queue.write().await;
+							queue.clean(indexed);
+							queue.pending() as usize
+						};
+						self.set_status(BuildingStatus::Indexing {
+							initial: Some(initial_count),
+							pending: Some(pending),
+							updated: Some(*updates_count),
+						})
+						.await;
+					}
+					Err(err) if is_retryable_transaction_conflict(&err) => {
+						let _ = tx.cancel().await;
+						*updates_count = saved_updates_count;
+						warn!("{}: transient conflict on commit, retrying", self.ix.name);
+						sleep(Duration::from_millis(100)).await;
+						continue;
+					}
+					Err(err) => {
+						let _ = tx.cancel().await;
+						return Err(err);
+					}
 				}
 			} else {
 				// No committed appends yet, but updates are in-flight; wait.
@@ -740,99 +838,161 @@ impl Building {
 		ctx: &FrozenContext,
 		tx: &Transaction,
 		values: Vec<(Key, Val)>,
-		count: &mut usize,
+		initial_count: usize,
 		v1_appending_sentinel: &mut bool,
-	) -> Result<()> {
+	) -> Result<usize> {
 		let mut rc = false;
+		let mut count = 0;
 		let mut stack = TreeStack::new();
-		// Index the records.
-		for (k, v) in values {
-			if self.is_aborted().await {
-				return Ok(());
-			}
-			self.is_beyond_threshold(Some(*count))?;
-			let key = record::RecordKey::decode_key(&k)?;
-			// Parse the value.
-			let val = Record::kv_decode_value(v)?;
-			let rid: Arc<RecordId> = RecordId {
-				table: key.tb.into_owned(),
-				key: key.id,
-			}
-			.into();
+		let fulltext_index =
+			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
+				.await?;
+		let lookup_tx = self.new_read_tx().await?;
+		let result = async {
+			// Index the records.
+			for (k, v) in values {
+				if self.is_aborted().await {
+					return Ok(count);
+				}
+				self.is_beyond_threshold(Some(initial_count + count))?;
+				let key = record::RecordKey::decode_key(&k)?;
+				// Parse the value.
+				let val = Record::kv_decode_value(v)?;
+				let rid: Arc<RecordId> = RecordId {
+					table: key.tb.into_owned(),
+					key: key.id,
+				}
+				.into();
 
-			// Is there already a queued update for this record?
-			let opt_values = if let Some(a) =
-				self.check_existing_primary_appending(tx, &rid.key, v1_appending_sentinel).await?
-			{
-				a.old_values
-			} else {
-				// Otherwise, proceed with normal indexing.
-				let doc = CursorDoc::new(Some(rid.clone()), None, val);
-				stack
-					.enter(|stk| Document::build_opt_values(stk, ctx, &self.opt, &self.ix, &doc))
-					.finish()
+				// Is there already a queued update for this record?
+				let opt_values = if let Some(a) = self
+					.check_existing_primary_appending(&lookup_tx, &rid.key, v1_appending_sentinel)
 					.await?
-			};
-			// Index the record.
-			let mut io = IndexOperation::new(
-				ctx,
-				&self.opt,
-				self.ix_key.ns,
-				self.ix_key.db,
-				self.tb,
-				&self.ix,
-				None,
-				opt_values.clone(),
-				&rid,
-			);
-			stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+				{
+					a.old_values
+				} else {
+					// Otherwise, proceed with normal indexing.
+					let doc = CursorDoc::new(Some(rid.clone()), None, val);
+					stack
+						.enter(|stk| {
+							Document::build_opt_values(stk, ctx, &self.opt, &self.ix, &doc)
+						})
+						.finish()
+						.await?
+				};
+				// Index the record.
+				let mut io = IndexOperation::new(
+					ctx,
+					&self.opt,
+					self.ix_key.ns,
+					self.ix_key.db,
+					self.tb,
+					&self.ix,
+					None,
+					opt_values.clone(),
+					&rid,
+				);
+				if let Some(fulltext_index) = &fulltext_index {
+					stack
+						.enter(|stk| io.compute_fulltext_with_index(stk, fulltext_index, &mut rc))
+						.finish()
+						.await?;
+				} else {
+					stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+				}
 
-			// Increment the count and update the status.
-			*count += 1;
-			self.set_status(BuildingStatus::Indexing {
-				initial: Some(*count),
-				pending: Some(self.queue.read().await.pending() as usize),
-				updated: None,
-			})
-			.await;
+				// Increment the count.
+				count += 1;
+			}
+			// Trigger compaction if needed.
+			self.check_index_compaction(tx, &mut rc).await?;
+			// We're done.
+			Ok(count)
 		}
-		// Trigger compaction if needed.
-		self.check_index_compaction(tx, &mut rc).await?;
-		// We're done.
-		Ok(())
+		.await;
+		let cancel_result = lookup_tx.cancel().await;
+		match result {
+			Ok(count) => {
+				cancel_result?;
+				Ok(count)
+			}
+			Err(err) => {
+				let _ = cancel_result;
+				Err(err)
+			}
+		}
 	}
 
 	async fn check_existing_primary_appending(
 		&self,
-		tx: &Transaction,
+		lookup_tx: &Transaction,
 		id_key: &RecordIdKey,
 		v1_appending_sentinel: &mut bool,
 	) -> Result<Option<Appending>> {
+		match self.load_existing_primary_appending(lookup_tx, id_key).await? {
+			ExistingPrimaryAppending::None => Ok(None),
+			ExistingPrimaryAppending::Appending(appending) => Ok(Some(appending)),
+			ExistingPrimaryAppending::Legacy => {
+				self.cleanup_legacy_primary_appending(id_key).await?;
+				if !*v1_appending_sentinel {
+					*v1_appending_sentinel = true;
+					warn!(
+						"Found legacy v1 primary appending entry from an older version; legacy queued updates will be ignored. Consider rebuilding index {} on table {}.",
+						self.ix.name, self.ix.table_name
+					);
+				}
+				Ok(None)
+			}
+		}
+	}
+
+	async fn load_existing_primary_appending(
+		&self,
+		tx: &Transaction,
+		id_key: &RecordIdKey,
+	) -> Result<ExistingPrimaryAppending> {
 		let ip = self.ikb.new_ip_key(id_key.clone());
 		let Some(pa) = tx.get(&ip, None).await? else {
-			return Ok(None);
+			return Ok(ExistingPrimaryAppending::None);
 		};
 		// Use the old values from the queued update as the initial indexing input.
 		if pa.1 == QueueSequences::LEGACY_BATCH_ID {
-			// Legacy v1 primary appending entry (no batch id; queue stored under !ia).
-			// We can't resolve it to a v2 !ig record, so drop the marker and ignore the legacy
-			// queue.
-			tx.del(&ip).await?;
-			if !*v1_appending_sentinel {
-				*v1_appending_sentinel = true;
-				warn!(
-					"Found legacy v1 primary appending entry from an older version; legacy queued updates will be ignored. Consider rebuilding index {} on table {}.",
-					self.ix.name, self.ix.table_name
-				);
-			}
-			return Ok(None);
+			return Ok(ExistingPrimaryAppending::Legacy);
 		}
-		let ib = self.ikb.new_ig_key(pa.0, pa.1);
-		let appending = tx
-			.get(&ib, None)
-			.await?
-			.ok_or_else(|| Error::CorruptedIndex("Appending record is missing"))?;
-		Ok(Some(appending))
+		let ig = self.ikb.new_ig_key(pa.0, pa.1);
+		let Some(appending) = tx.get(&ig, None).await? else {
+			return Err(Error::CorruptedIndex("Appending record is missing").into());
+		};
+		Ok(ExistingPrimaryAppending::Appending(appending))
+	}
+
+	async fn cleanup_legacy_primary_appending(&self, id_key: &RecordIdKey) -> Result<()> {
+		// Legacy v1 primary appending entries have no batch id and cannot be resolved to a
+		// current !ig record. Clean them outside the initial-build write transaction so
+		// normal concurrent appends cannot make that transaction conflict.
+		let ctx = self.new_write_tx_ctx().await?;
+		let tx = ctx.tx();
+		let ip = self.ikb.new_ip_key(id_key.clone());
+		let pa = catch!(tx, tx.get(&ip, None).await);
+		if matches!(pa, Some(pa) if pa.1 == QueueSequences::LEGACY_BATCH_ID) {
+			catch!(tx, tx.del(&ip).await);
+		}
+		let res = tx.commit().await;
+		match res {
+			Ok(()) => Ok(()),
+			Err(err) if is_retryable_transaction_conflict(&err) => {
+				let _ = tx.cancel().await;
+				warn!(
+					"{}: transient conflict while cleaning legacy primary appending entry; continuing",
+					self.ix.name
+				);
+				Ok(())
+			}
+			Err(err) => {
+				let _ = tx.cancel().await;
+				Err(err)
+			}
+		}
 	}
 
 	async fn index_appending_range(
@@ -840,12 +1000,14 @@ impl Building {
 		ctx: &FrozenContext,
 		tx: &Transaction,
 		keys: Vec<Key>,
-		initial: usize,
 		count: &mut usize,
 	) -> Result<HashMap<BatchId, Vec<AppendingId>>> {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
 		let mut indexed = HashMap::new();
+		let fulltext_index =
+			IndexOperation::create_fulltext_index(ctx, self.ix_key.ns, self.ix_key.db, &self.ix)
+				.await?;
 		for k in keys {
 			if self.is_aborted().await {
 				return Ok(indexed);
@@ -868,7 +1030,14 @@ impl Building {
 					appending.new_values,
 					&rid,
 				);
-				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+				if let Some(fulltext_index) = &fulltext_index {
+					stack
+						.enter(|stk| io.compute_fulltext_with_index(stk, fulltext_index, &mut rc))
+						.finish()
+						.await?;
+				} else {
+					stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+				}
 				tx.del(&ig).await?;
 
 				// We can delete the ip record if any
@@ -877,12 +1046,6 @@ impl Building {
 			}
 
 			*count += 1;
-			self.set_status(BuildingStatus::Indexing {
-				initial: Some(initial),
-				pending: Some(self.queue.read().await.pending() as usize),
-				updated: Some(*count),
-			})
-			.await;
 			indexed.entry(ig.batch_id).or_insert(vec![]).push(ig.appending_id);
 		}
 		// Trigger compaction if needed.

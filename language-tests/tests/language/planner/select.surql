@@ -1,4 +1,6 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test SELECT with ORDER BY and LIMIT"

@@ -72,25 +72,25 @@ impl From<i64> for ProxyValue {
 
 impl ProxyValue {
 	/// Convert this ProxyValue to a surrealdb_types::Value
-	pub fn to_value(self) -> Value {
+	pub fn into_value(self) -> Value {
 		match self {
 			ProxyValue::Number(ProxyNumber::Int(i)) => Value::Number(Number::Int(i)),
-			ProxyValue::Strand(s) => Value::String(s.into()),
+			ProxyValue::Strand(s) => Value::String(s),
 			ProxyValue::Array(arr) => {
-				let values: Vec<Value> = arr.0.into_iter().map(|v| v.to_value()).collect();
+				let values: Vec<Value> = arr.0.into_iter().map(|v| v.into_value()).collect();
 				Value::Array(Array::from(values))
 			}
-			ProxyValue::Object(obj) => obj.to_value(),
+			ProxyValue::Object(obj) => obj.into_value(),
 		}
 	}
 }
 
 impl ProxyObject {
 	/// Convert this ProxyObject to a surrealdb_types::Value
-	pub fn to_value(self) -> Value {
+	pub fn into_value(self) -> Value {
 		let mut object = Object::default();
 		for (k, v) in self.0 {
-			object.insert(k, v.to_value());
+			object.insert(k, v.into_value());
 		}
 		Value::Object(object)
 	}

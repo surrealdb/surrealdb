@@ -64,11 +64,11 @@ impl DefineIndexStatement {
 
 		// Ensure the table exists
 		let (ns, db) = opt.ns_db()?;
-		let tb = txn.get_or_add_tb(Some(ctx), ns, db, &table_name).await?;
+		let tb = txn.get_or_add_tb(Some(ctx), ns, db, &table_name, None).await?;
 
 		// Check if the definition exists
 		let index_id = if let Some(ix) =
-			txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &name).await?
+			txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &name, None).await?
 		{
 			match self.kind {
 				DefineKind::Default => {
@@ -108,7 +108,7 @@ impl DefineIndexStatement {
 			let fd = idiom.to_raw_string();
 			// Check if the exact field path (e.g. `document.visible`) is defined
 			if let Some(f) =
-				txn.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &fd).await?
+				txn.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &fd, None).await?
 			{
 				// Computed fields cannot be indexed
 				if f.computed.is_some() {
@@ -125,7 +125,7 @@ impl DefineIndexStatement {
 						// permits sub-field access. If no type is set (field_kind is
 						// None), the field is unconstrained and sub-fields are allowed.
 						let Some(f) =
-							txn.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, first).await?
+							txn.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, first, None).await?
 						&& f.field_kind.as_ref().is_none_or(|k| k.allows_sub_fields())
 			{
 				// Sub-fields of computed fields cannot be indexed

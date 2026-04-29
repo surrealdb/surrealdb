@@ -10,17 +10,17 @@ pub async fn multiwriter_different_keys(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Insert an initial key
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(&"test", &"some text".as_bytes().to_vec(), None).await.unwrap();
+	tx.set(&"test", &"some text".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a writeable transaction
 	let tx1 = ds.transaction(Write, Optimistic).await.unwrap();
-	tx1.set(&"test1", &"other text 1".as_bytes().to_vec(), None).await.unwrap();
+	tx1.set(&"test1", &"other text 1".as_bytes().to_vec()).await.unwrap();
 	// Create a writeable transaction
 	let tx2 = ds.transaction(Write, Optimistic).await.unwrap();
-	tx2.set(&"test2", &"other text 2".as_bytes().to_vec(), None).await.unwrap();
+	tx2.set(&"test2", &"other text 2".as_bytes().to_vec()).await.unwrap();
 	// Create a writeable transaction
 	let tx3 = ds.transaction(Write, Optimistic).await.unwrap();
-	tx3.set(&"test3", &"other text 3".as_bytes().to_vec(), None).await.unwrap();
+	tx3.set(&"test3", &"other text 3".as_bytes().to_vec()).await.unwrap();
 	// Cancel both writeable transactions
 	tx1.commit().await.unwrap();
 	tx2.commit().await.unwrap();

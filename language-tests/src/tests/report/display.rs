@@ -11,12 +11,11 @@ use super::{
 };
 use crate::cli::ColorMode;
 use crate::format::{IndentFormatter, ansi};
-use crate::tests::TestSet;
 
 type Fmt<'a> = IndentFormatter<&'a mut String>;
 
 impl TestReport {
-	pub fn display(&self, tests: &TestSet, color: ColorMode) {
+	pub fn display(&self, color: ColorMode) {
 		if self.grade() == TestGrade::Success && !self.is_wip() {
 			// nothing to report
 			return;
@@ -28,20 +27,28 @@ impl TestReport {
 		};
 		let mut buffer = String::new();
 		let mut f = Fmt::new(&mut buffer, 2);
-		f.indent(|f| self.display_grade(tests, use_color, f)).unwrap();
+		f.indent(|f| self.display_grade(use_color, f)).unwrap();
 
 		println!("{buffer}");
 	}
 
-	fn display_grade(&self, tests: &TestSet, use_color: bool, f: &mut Fmt) -> fmt::Result {
-		self.display_grade_header(tests, use_color, f)?;
+	fn display_grade(&self, use_color: bool, f: &mut Fmt) -> fmt::Result {
+		self.display_grade_header(use_color, f)?;
 
 		f.indent(|f| match self.kind {
 			super::TestReportKind::Error(ref e) => self.display_run_error(e, f),
 			super::TestReportKind::NoExpectation {
 				ref output,
 			} => Self::display_unspecified(output, f),
-			super::TestReportKind::Valid => Ok(()),
+			super::TestReportKind::Valid => {
+				if self.timeout {
+					writeln!(
+						f,
+						"> Test ran longer then the allowed timeout, maybe shrink test or increase allowed timeout"
+					)?;
+				}
+				Ok(())
+			}
 			super::TestReportKind::MismatchedType(ref mismatch) => {
 				Self::display_type_mismatch(mismatch, f)
 			}
@@ -87,16 +94,10 @@ impl TestReport {
 		})
 	}
 
-	fn display_grade_header(&self, tests: &TestSet, use_color: bool, f: &mut Fmt) -> fmt::Result {
-		let name = if let Some(x) = self.extra_name.as_ref() {
-			format!("{} {}", tests[self.id].path, x)
-		} else {
-			tests[self.id].path.clone()
-		};
-
+	fn display_grade_header(&self, use_color: bool, f: &mut Fmt) -> fmt::Result {
 		match self.grade() {
 			TestGrade::Success => {
-				if tests[self.id].config.is_wip() {
+				if self.is_wip() {
 					if use_color {
 						writeln!(
 							f,
@@ -111,16 +112,16 @@ impl TestReport {
 								reset_format,
 								":"
 							),
-							name
+							self.name
 						)?;
 					} else {
-						writeln!(f, " ==> Success for {name}:")?;
+						writeln!(f, " ==> Success for {}:", self.name)?;
 					}
 					f.indent(|f| {
 						writeln!(f, "> Tests succeeded even though it is marked Work in Progress")
 					})?;
 
-					if let Some(issue) = tests[self.id].config.issue() {
+					if let Some(issue) = self.case.test.config.parsed.test.issue {
 						f.indent(|f| {
 							writeln!(f, "> Issue {issue} could maybe be closed.")?;
 							f.indent(|f| {
@@ -150,10 +151,10 @@ impl TestReport {
 							reset_format,
 							":"
 						),
-						name
+						self.name
 					)?;
 				} else {
-					writeln!(f, " ==> Error for {name}:")?;
+					writeln!(f, " ==> Error for {}:", self.name)?;
 				}
 				f.increase_depth();
 			}
@@ -172,13 +173,13 @@ impl TestReport {
 							reset_format,
 							":"
 						),
-						name
+						self.name
 					)?;
 				} else {
-					writeln!(f, " ==> Warning for {name}")?;
+					writeln!(f, " ==> Warning for {}", self.name)?;
 				}
 				f.increase_depth();
-				if self.is_wip {
+				if self.is_wip() {
 					writeln!(
 						f,
 						"! Test produces warnings because the test is marked as work in progress."
@@ -191,9 +192,6 @@ impl TestReport {
 
 	fn display_run_error(&self, err: &TestError, f: &mut Fmt) -> fmt::Result {
 		match err {
-			TestError::Timeout => {
-				writeln!(f, "> Test exceeded the set time limit")
-			}
 			TestError::Running(e) => {
 				writeln!(f, "> Test failed to run, returning an error before the test could run.")?;
 				f.indent(|f| writeln!(f, "- Error: {e}"))
@@ -206,6 +204,25 @@ impl TestReport {
 				writeln!(f, "> Test failed, running import `{import}` caused an error:")?;
 				f.indent(|f| writeln!(f, "- {error}"))
 			}
+			TestError::BadCleanup(x) => {
+				writeln!(
+					f,
+					"> Test failed, test was not specified as clean yet it retained database keys:"
+				)?;
+				f.indent(|f| {
+					for x in x.iter() {
+						write!(f, "- [")?;
+						for (idx, &b) in x.iter().enumerate() {
+							if idx != 0 {
+								write!(f, ",")?;
+							}
+							write!(f, "{}", (b as char).escape_debug())?;
+						}
+						writeln!(f, "]")?;
+					}
+					Ok(())
+				})
+			}
 		}
 	}
 
@@ -214,7 +231,7 @@ impl TestReport {
 		f.indent(|f| {
 			writeln!(f, "= Got:")?;
 			f.indent(|f| match outputs {
-				TestOutputs::Values(res) => Self::display_value_list(&res, f),
+				TestOutputs::Values(res) => Self::display_value_list(res, f),
 				TestOutputs::ParsingError(res) => {
 					writeln!(f, "- Parsing error: {res}")
 				}
@@ -238,7 +255,7 @@ impl TestReport {
 					None => writeln!(f, "- Any parsing error"),
 				},
 				super::TestExpectation::Values(e) => match e {
-					Some(e) => Self::display_expectation_list(&e, f),
+					Some(e) => Self::display_expectation_list(e, f),
 					None => writeln!(f, "- Any list of query result values"),
 				},
 				super::TestExpectation::Signin(e) => match e {

@@ -199,85 +199,20 @@ async fn http_request(
 	body: Option<Value>,
 	opts: Object,
 ) -> Result<Value> {
-	#[cfg(not(target_family = "wasm"))]
-	use std::sync::Arc;
-	#[cfg(not(target_family = "wasm"))]
-	use std::time::Duration;
+	use http::header::CONTENT_TYPE;
 
-	use reqwest::header::CONTENT_TYPE;
-
-	use crate::cnf::SURREALDB_USER_AGENT;
 	use crate::err::Error;
 	use crate::sql::expression::convert_public_value_to_internal;
-	use crate::syn;
 	use crate::types::{PublicBytes, PublicValue};
 
 	let url = url::Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.clone()))?;
 
-	// Build the HTTP client
-	#[cfg(not(target_family = "wasm"))]
-	let cli = {
-		let capabilities = ctx.capabilities();
-		let capabilities_clone: Arc<crate::dbs::Capabilities> = Arc::clone(&capabilities);
-
-		let redirect_checker = move |rurl: &url::Url| -> Result<(), Error> {
-			use std::str::FromStr;
-
-			use crate::dbs::capabilities::NetTarget;
-
-			let host = rurl.host_str().unwrap_or("");
-			let target = NetTarget::from_str(host)
-				.map_err(|e| Error::InvalidUrl(format!("Invalid host: {}", e)))?;
-
-			if !capabilities_clone.matches_any_allow_net(&target)
-				|| capabilities_clone.matches_any_deny_net(&target)
-			{
-				return Err(Error::NetTargetNotAllowed(rurl.to_string()));
-			}
-			Ok(())
-		};
-
-		let count = *crate::cnf::MAX_HTTP_REDIRECTS;
-		let policy =
-			reqwest::redirect::Policy::custom(move |attempt: reqwest::redirect::Attempt| {
-				match redirect_checker(attempt.url()) {
-					Ok(()) => {
-						if attempt.previous().len() >= count {
-							attempt.stop()
-						} else {
-							attempt.follow()
-						}
-					}
-					Err(e) => attempt.error(e),
-				}
-			});
-
-		reqwest::Client::builder()
-			.pool_idle_timeout(Duration::from_secs(*crate::cnf::HTTP_IDLE_TIMEOUT_SECS))
-			.pool_max_idle_per_host(*crate::cnf::MAX_HTTP_IDLE_CONNECTIONS_PER_HOST)
-			.connect_timeout(Duration::from_secs(*crate::cnf::HTTP_CONNECT_TIMEOUT_SECS))
-			.tcp_keepalive(Some(Duration::from_secs(60)))
-			.http2_keep_alive_interval(Some(Duration::from_secs(30)))
-			.http2_keep_alive_timeout(Duration::from_secs(10))
-			.redirect(policy)
-			.dns_resolver(Arc::new(
-				crate::fnc::http::resolver::FilteringResolver::from_capabilities(capabilities),
-			))
-			.build()?
-	};
-
-	#[cfg(target_family = "wasm")]
-	let cli = reqwest::Client::builder().build()?;
+	let client = ctx.exec_ctx.root().ctx.http_client();
 
 	let is_head = matches!(method, reqwest::Method::HEAD);
 
 	// Start the request
-	let mut req = cli.request(method, url);
-
-	// Add User-Agent header
-	if cfg!(not(target_family = "wasm")) {
-		req = req.header(reqwest::header::USER_AGENT, &*SURREALDB_USER_AGENT);
-	}
+	let mut req = client.request(method, url);
 
 	// Add custom headers from opts
 	for (k, v) in opts.iter() {
@@ -313,13 +248,15 @@ async fn http_request(
 		}
 	} else {
 		// Decode response
+
 		match res.error_for_status() {
 			Ok(res) => match res.headers().get(CONTENT_TYPE) {
 				Some(mime) => match mime.to_str() {
 					Ok(v) if v.starts_with("application/json") => {
 						let txt = res.text().await.map_err(Error::from)?;
-						let val = syn::json(&txt)
+						let json: serde_json::Value = serde_json::from_str(&txt)
 							.map_err(|e| Error::Http(format!("Failed to parse JSON: {}", e)))?;
+						let val = crate::rpc::format::json::json_to_value(json);
 						Ok(convert_public_value_to_internal(val))
 					}
 					Ok(v) if v.starts_with("application/octet-stream") => {

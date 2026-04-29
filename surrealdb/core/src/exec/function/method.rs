@@ -535,6 +535,8 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	// Set methods
 	// =====================================================================
 	m.register_typed("add", ValueKind::Set, get(funcs, "set::add"));
+	m.register_typed("all", ValueKind::Set, get(funcs, "set::all"));
+	m.register_typed("any", ValueKind::Set, get(funcs, "set::any"));
 	m.register_typed("at", ValueKind::Set, get(funcs, "set::at"));
 	m.register_typed("complement", ValueKind::Set, get(funcs, "set::complement"));
 	m.register_typed("contains", ValueKind::Set, get(funcs, "set::contains"));

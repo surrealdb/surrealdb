@@ -40,6 +40,10 @@ const SERVER_OVERLOADED: &str = "The server is unable to handle the request";
 /// An error string sent when the server is gracefully shutting down
 const SERVER_SHUTTING_DOWN: &str = "The server is gracefully shutting down";
 
+/// An error string sent when an in-flight RPC is dropped because the
+/// connection-level `canceller` fires (e.g. the WebSocket has been torn down).
+const REQUEST_CANCELLED: &str = "The request was cancelled because the WebSocket is closing";
+
 pub struct Websocket {
 	/// The unique id of this WebSocket connection
 	pub(crate) id: Uuid,
@@ -349,12 +353,35 @@ impl Websocket {
 					let otel_cx = Arc::new(TelemetryContext::current_with_value(
 						req_cx.with_method(req.method.to_str()).with_size(len),
 					));
+					// Capture the request id, session id and a cloned channel handle up-front so we
+					// can still build a `DbResponse::failure` if the cancel branch wins the
+					// select below — by the time it fires, `req` and `chn` will have been moved
+					// into the inner `async move`.
+					let req_id = req.id.clone();
+					let req_session_id = req.session_id;
+					let cancel_chn = chn.clone();
+					let cancel_otel_cx = otel_cx.clone();
+					let cancel_format = rpc.format;
 					// Process the message
 					tokio::select! {
-						//
 						biased;
-						// Check if we should teardown
-						_ = canceller.cancelled() => (),
+						// The connection-level `canceller` has fired: the in-flight handler
+						// future is about to be dropped (along with any transaction it owns).
+						// Resource cleanup is handled by each `Transactable::Drop` impl
+						// (notably `DSTransaction::Drop`, which spawns a recovery abort), so
+						// the only thing left to do here is to make sure the client receives a
+						// terminating response — without it the SDK keeps awaiting a reply
+						// that will never come and the connection deadlocks.
+						_ = canceller.cancelled() => {
+							crate::rpc::response::send(
+								DbResponse::failure(req_id, req_session_id.map(Into::into), TypesError::internal(REQUEST_CANCELLED.to_string())),
+								cancel_otel_cx.clone(),
+								cancel_format,
+								cancel_chn
+							)
+								.with_context(cancel_otel_cx.as_ref().clone())
+								.await;
+						},
 						// Wait for the message to be processed
 						_ = async move {
 							// Don't start processing if we are gracefully shutting down

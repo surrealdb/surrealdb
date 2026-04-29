@@ -2,6 +2,7 @@ use anyhow::Result;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
+use crate::err::Error;
 use crate::expr::statements::show::ShowSince;
 use crate::key::change;
 #[cfg(debug_assertions)]
@@ -28,11 +29,27 @@ pub async fn read(
 	let ts_impl = tx.timestamp_impl();
 
 	// Calculate the start of the changefeed range
-	let ts_bytes = match start {
-		ShowSince::Versionstamp(x) => ts_impl.from_versionstamp(x as u128)?.as_ts_bytes(),
-		ShowSince::Timestamp(x) => ts_impl.from_datetime(x.0)?.as_ts_bytes(),
+	let ts = match start {
+		ShowSince::Versionstamp(x) => {
+			ts_impl.create_from_versionstamp(x as u128).ok_or_else(|| Error::Query {
+				message: format!(
+					"Invalid versionstamp `{x}`, outside of range for kv-store timestamps"
+				),
+			})?
+		}
+		ShowSince::Timestamp(x) => {
+			ts_impl.create_from_datetime(x.0).ok_or_else(|| Error::Query {
+				message: format!(
+					"Invalid versionstamp `{x}`, outside of range for kv-store timestamps"
+				),
+			})?
+		}
 	};
-	let beg = change::prefix_ts(ns, db, &ts_bytes).encode_key()?;
+
+	let buf = &mut [0u8; _];
+	let ts_bytes = ts.encode(buf);
+
+	let beg = change::prefix_ts(ns, db, ts_bytes).encode_key()?;
 	// Calculate the end of the changefeed range
 	let end = change::suffix(ns, db).encode_key()?;
 	// Limit the changefeed results with a default
@@ -64,7 +81,7 @@ pub async fn read(
 				if key.ts != x.as_slice() {
 					let db_mut = DatabaseMutation(buf);
 					// Convert timestamp bytes to version number
-					let version = ts_impl.from_ts_bytes(x)?.as_versionstamp();
+					let version = ts_impl.decode(x)?.as_versionstamp();
 					res.push(ChangeSet(version, db_mut));
 					buf = Vec::new();
 					current_ts = Some(key.ts.into_owned())
@@ -81,7 +98,7 @@ pub async fn read(
 		let db_mut = DatabaseMutation(buf);
 		// Convert timestamp bytes to version number
 		let ts_bytes = current_ts.expect("timestamp should be set when mutations exist");
-		let version = ts_impl.from_ts_bytes(ts_bytes.as_slice())?.as_versionstamp();
+		let version = ts_impl.decode(ts_bytes.as_slice())?.as_versionstamp();
 		res.push(ChangeSet(version, db_mut));
 	}
 	// Return the results

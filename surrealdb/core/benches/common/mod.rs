@@ -12,6 +12,7 @@ pub fn create_runtime() -> Runtime {
 }
 
 /// Helper to run async code synchronously (for setup only)
+#[allow(dead_code)]
 pub fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
 	create_runtime().block_on(future)
 }
@@ -111,9 +112,11 @@ macro_rules! bench {
 #[allow(dead_code)]
 pub async fn setup_datastore() -> (Datastore, Session) {
 	// Setup the in-memory datastore
-	let dbs = Datastore::new("memory").await.unwrap();
-	// Enable all datastore capabilities
-	let dbs = dbs.with_capabilities(Capabilities::all());
+	let dbs = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory")
+		.await
+		.unwrap();
 	// Setup a root-level datastore session
 	let ses = Session::owner().with_ns("test").with_db("test");
 	// Specify the test namespace and database
@@ -131,9 +134,11 @@ pub async fn setup_datastore() -> (Datastore, Session) {
 #[allow(dead_code)]
 pub async fn setup_datastore_with_query(query: &str) -> (Datastore, Session) {
 	// Setup the in-memory datastore
-	let dbs = Datastore::new("memory").await.unwrap();
-	// Enable all datastore capabilities
-	let dbs = dbs.with_capabilities(Capabilities::all());
+	let dbs = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory")
+		.await
+		.unwrap();
 	// Setup a root-level datastore session
 	let ses = Session::owner().with_ns("test").with_db("test");
 	// Specify the test namespace and database
@@ -153,9 +158,12 @@ pub async fn setup_datastore_with_query(query: &str) -> (Datastore, Session) {
 #[allow(dead_code)]
 pub async fn setup_datastore_with_records(count: u64) -> (Datastore, Session) {
 	// Setup the in-memory datastore
-	let dbs = Datastore::new("memory").await.unwrap();
+	let dbs = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.build_with_path("memory")
+		.await
+		.unwrap();
 	// Enable all datastore capabilities
-	let dbs = dbs.with_capabilities(Capabilities::all());
 	// Setup a root-level datastore session
 	let ses = Session::owner().with_ns("test").with_db("test");
 	// Specify the test namespace and database

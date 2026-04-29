@@ -144,6 +144,13 @@ pub struct RootContext {
 	/// so that permission predicate evaluation does not re-enter table permissions
 	/// and recurse infinitely on cyclic record links.
 	pub(crate) skip_fetch_perms: bool,
+	/// Evaluated VERSION timestamp for time-travel queries.
+	///
+	/// Set by the `VersionScope` operator when a SELECT has a VERSION clause.
+	/// Read by `fetch_record`, `fetch_record_no_perms`, and `FieldPart` so
+	/// that record dereferences and FETCH resolution honour the same version
+	/// as the source scan.
+	pub(crate) version_stamp: Option<u64>,
 }
 
 impl std::fmt::Debug for RootContext {
@@ -156,6 +163,7 @@ impl std::fmt::Debug for RootContext {
 			.field("session", &self.session)
 			.field("current_value", &self.current_value.as_ref().map(|_| "<Value>"))
 			.field("skip_fetch_perms", &self.skip_fetch_perms)
+			.field("version_stamp", &self.version_stamp)
 			.field("ctx", &"<FrozenContext>")
 			.finish()
 	}
@@ -272,25 +280,33 @@ impl DatabaseContext {
 	/// This avoids repeated `get_tb_by_name` KV roundtrips for the same table
 	/// across multiple scan operators within the same query execution (e.g.,
 	/// repeated record lookups).
+	///
+	/// When `version` is `Some`, the cache is bypassed and the lookup goes
+	/// directly to versioned storage so that the schema matches the point
+	/// in time being queried.
 	pub(crate) async fn get_table_def(
 		&self,
 		table: &crate::val::TableName,
+		version: Option<u64>,
 	) -> anyhow::Result<Option<Arc<crate::catalog::TableDefinition>>> {
 		use crate::catalog::providers::TableProvider;
-		// Check execution-level cache (read lock — concurrent reads allowed)
-		{
+		if version.is_none() {
+			// Check execution-level cache (read lock — concurrent reads allowed)
 			let cache = self.table_def_cache.read().await;
 			if let Some(cached) = cache.get(table) {
 				return Ok(cached.clone());
 			}
 		}
 
-		// Cache miss — look up via the transaction
+		// Cache miss or versioned lookup — go to the transaction
 		let txn = self.txn();
-		let result = txn.get_tb_by_name(&self.ns_ctx.ns.name, &self.db.name, table).await?;
+		let result =
+			txn.get_tb_by_name(&self.ns_ctx.ns.name, &self.db.name, table, version).await?;
 
-		// Populate cache (write lock — brief exclusive access)
-		self.table_def_cache.write().await.insert(table.clone(), result.clone());
+		if version.is_none() {
+			// Populate cache (write lock — brief exclusive access)
+			self.table_def_cache.write().await.insert(table.clone(), result.clone());
+		}
 
 		Ok(result)
 	}
@@ -299,26 +315,33 @@ impl DatabaseContext {
 	///
 	/// This avoids repeated `all_tb_indexes` KV roundtrips for the same table
 	/// across multiple DynamicScan operations within the same query execution.
+	///
+	/// When `version` is `Some`, the cache is bypassed for the same reason
+	/// as `get_table_def`.
 	pub(crate) async fn get_table_indexes(
 		&self,
 		table: &crate::val::TableName,
+		version: Option<u64>,
 	) -> anyhow::Result<Arc<[crate::catalog::IndexDefinition]>> {
 		use crate::catalog::providers::TableProvider;
-		// Check execution-level cache (read lock — concurrent reads allowed)
-		{
+		if version.is_none() {
+			// Check execution-level cache (read lock — concurrent reads allowed)
 			let cache = self.index_def_cache.read().await;
 			if let Some(cached) = cache.get(table) {
 				return Ok(Arc::clone(cached));
 			}
 		}
 
-		// Cache miss — look up via the transaction
+		// Cache miss or versioned lookup — go to the transaction
 		let txn = self.txn();
-		let result =
-			txn.all_tb_indexes(self.ns_ctx.ns.namespace_id, self.db.database_id, table).await?;
+		let result = txn
+			.all_tb_indexes(self.ns_ctx.ns.namespace_id, self.db.database_id, table, version)
+			.await?;
 
-		// Populate cache (write lock — brief exclusive access)
-		self.index_def_cache.write().await.insert(table.clone(), Arc::clone(&result));
+		if version.is_none() {
+			// Populate cache (write lock — brief exclusive access)
+			self.index_def_cache.write().await.insert(table.clone(), Arc::clone(&result));
+		}
 
 		Ok(result)
 	}
@@ -497,6 +520,7 @@ impl ExecutionContext {
 				session: r.session.clone(),
 				current_value: r.current_value.clone(),
 				skip_fetch_perms: r.skip_fetch_perms,
+				version_stamp: r.version_stamp,
 			}),
 			Self::Namespace(n) => Self::Namespace(NamespaceContext {
 				root: RootContext {
@@ -509,6 +533,7 @@ impl ExecutionContext {
 					session: n.root.session.clone(),
 					current_value: n.root.current_value.clone(),
 					skip_fetch_perms: n.root.skip_fetch_perms,
+					version_stamp: n.root.version_stamp,
 				},
 				ns: n.ns.clone(),
 			}),
@@ -524,6 +549,7 @@ impl ExecutionContext {
 						session: d.ns_ctx.root.session.clone(),
 						current_value: d.ns_ctx.root.current_value.clone(),
 						skip_fetch_perms: d.ns_ctx.root.skip_fetch_perms,
+						version_stamp: d.ns_ctx.root.version_stamp,
 					},
 					ns: d.ns_ctx.ns.clone(),
 				},
@@ -578,13 +604,41 @@ impl ExecutionContext {
 		new
 	}
 
+	/// Set the evaluated VERSION timestamp for time-travel queries.
+	///
+	/// Used by `VersionScope` to propagate the version to downstream
+	/// operators so that record dereferences and FETCH resolution honour
+	/// the same timestamp as the source scan.
+	pub fn with_version_stamp(self, version: Option<u64>) -> Self {
+		if version == self.root().version_stamp {
+			return self;
+		}
+		let mut new = self;
+		let root = match &mut new {
+			Self::Root(r) => r,
+			Self::Namespace(n) => &mut n.root,
+			Self::Database(d) => &mut d.ns_ctx.root,
+		};
+		root.version_stamp = version;
+		new
+	}
+
+	/// Get the evaluated VERSION timestamp (if set).
+	///
+	/// Returns the version stamp set by `VersionScope`. Used by
+	/// `fetch_record`, `fetch_record_no_perms`, and `FieldPart` to
+	/// read records at the correct point in time.
+	pub fn version_stamp(&self) -> Option<u64> {
+		self.root().version_stamp
+	}
+
 	/// Create a new context with an additional parameter.
 	///
 	/// This is used by LET statements to add variables to the execution context.
 	/// Creates a proper child FrozenContext, preserving the parent chain for
 	/// correct scoped parameter lookup and shadowing.
 	pub fn with_param(&self, name: impl Into<Cow<'static, str>>, value: Value) -> Self {
-		let mut child = Context::new(self.ctx());
+		let mut child = Context::new_child(self.ctx());
 		child.add_value(name.into(), Arc::new(value));
 		self.with_new_ctx(child.freeze())
 	}
@@ -641,7 +695,7 @@ impl ExecutionContext {
 	/// The new transaction replaces the existing one in the context by
 	/// creating a child FrozenContext with the new transaction set.
 	pub fn with_transaction(&self, txn: Arc<Transaction>) -> Result<Self, Error> {
-		let mut child = Context::new(self.ctx());
+		let mut child = Context::new_child(self.ctx());
 		child.set_transaction(txn);
 		Ok(self.with_new_ctx(child.freeze()))
 	}

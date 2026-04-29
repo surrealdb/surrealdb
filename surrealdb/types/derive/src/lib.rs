@@ -22,6 +22,13 @@ mod kind;
 mod write_sql;
 use crate_path::CratePath;
 
+/// Returns the string representation of an identifier with any raw prefix (`r#`) stripped.
+/// Rust raw identifiers like `r#type` should serialize as `"type"`, not `"r#type"`.
+pub(crate) fn unraw(ident: &syn::Ident) -> String {
+	let s = ident.to_string();
+	s.strip_prefix("r#").unwrap_or(&s).to_string()
+}
+
 /// Derives the `SurrealValue` trait for a struct or enum.
 ///
 /// This macro automatically implements the `SurrealValue` trait, which provides conversion
@@ -34,10 +41,23 @@ use crate_path::CratePath;
 /// - `#[surreal(crate = "path")]` - Specify a custom path to the types crate (e.g.,
 ///   `surrealdb::types`, `::surrealdb_types`, `crate`). If omitted, the default is chosen by
 ///   feature: `sdk-path` → `::surrealdb::types`, else `::surrealdb_types`.
+/// - `#[surreal(untagged)]` - Use untagged enum representation
 /// - `#[surreal(tag = "type")]` - Specify a custom tag field for enum variants
 /// - `#[surreal(content = "data")]` - Specify a custom content field for enum variants
-/// - `#[surreal(rename = "name")]` - Rename a field or variant
+/// - `#[surreal(rename = "name")]` - Rename a field or enum variant. Applying this at the struct
+///   container level is a compile error (it has no defined semantic).
+/// - `#[surreal(rename_all = "...")]` - Apply a case transform to struct fields or enum variants.
+///   Supported values: `lowercase`, `UPPERCASE`, `PascalCase`, `camelCase`, `snake_case`,
+///   `SCREAMING_SNAKE_CASE`, `kebab-case`, `SCREAMING-KEBAB-CASE`. An explicit per-field or
+///   per-variant `rename` takes precedence over the container transform. Combining `rename_all`
+///   with the legacy `uppercase`/`lowercase` attributes on the same enum is a compile error.
+/// - `#[surreal(uppercase)]` - Uppercase enum variant names. Legacy alias of `rename_all =
+///   "UPPERCASE"`; prefer `rename_all` in new code.
+/// - `#[surreal(lowercase)]` - Lowercase enum variant names. Legacy alias of `rename_all =
+///   "lowercase"`; prefer `rename_all` in new code.
 /// - `#[surreal(skip)]` - Skip a field during serialization
+/// - `#[surreal(wrap)]` - Wrap a type that doesn't implement `SurrealValue` but does implement
+///   `Serialize + Deserialize` with `SerdeWrapper`
 ///
 /// # Examples
 ///
@@ -78,6 +98,37 @@ use crate_path::CratePath;
 ///     age: i64,
 /// }
 /// ```
+///
+/// # Recursive types
+///
+/// Recursive types (types that reference themselves) are supported. Fields that
+/// contain the type being derived will have their [`kind_of()`] output set to
+/// [`Kind::Any`], while all other fields are computed normally. Serialization
+/// and deserialization (`into_value` / `from_value`) are unaffected.
+///
+/// ```ignore
+/// #[derive(SurrealValue)]
+/// enum Expr {
+///     Literal(i64),
+///     Add(Box<Expr>, Box<Expr>),
+/// }
+/// ```
+///
+/// Detection is syntactic: the macro checks whether a field's type contains the
+/// same identifier as the type being derived. This handles direct self-reference
+/// through any wrapper (`Box<Self>`, `Vec<Self>`, `Option<Box<Self>>`, etc.) but
+/// does **not** detect indirect mutual recursion between separately-defined
+/// types. For example, if type `A` contains `B` and `B` contains `A`, each
+/// macro expansion only sees its own definition and cannot detect the cycle.
+///
+/// Qualified paths like `crate::MyType` or `super::MyType` are also not treated
+/// as self-referential, because the macro cannot determine the module path of
+/// the type being derived and these paths may refer to a different type with the
+/// same name. Similarly, qualified self paths like `<Self as Trait>::Output` are
+/// not detected since associated types are distinct from `Self`.
+///
+/// Such types will cause a stack overflow in `kind_of()` and require a manual
+/// [`SurrealValue`] implementation for at least one of the types involved.
 #[proc_macro_derive(SurrealValue, attributes(surreal))]
 pub fn surreal_value(input: TokenStream) -> TokenStream {
 	let input = parse_macro_input!(input as DeriveInput);

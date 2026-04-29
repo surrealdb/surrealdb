@@ -1,6 +1,7 @@
 /**
 [env]
 imports = ["datasets/graph.surql"]
+planner-strategy = ["all-ro"]
 
 [test]
 reason = "Test +collect modifier respects min_depth bounds"

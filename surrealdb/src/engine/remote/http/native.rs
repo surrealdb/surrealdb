@@ -4,6 +4,7 @@ use std::sync::Arc;
 use async_channel::Receiver;
 use reqwest::ClientBuilder;
 use surrealdb_core::cnf::SURREALDB_USER_AGENT;
+use surrealdb_types::ConnectionError;
 use tokio::sync::watch;
 use url::Url;
 
@@ -43,7 +44,10 @@ pub(crate) async fn create_client(
 
 	// Resolve hostname to get list of addresses
 	let addrs = tokio::net::lookup_host((hostname, port)).await.map_err(|error| {
-		Error::internal(format!("DNS resolution failed for {hostname}:{port}; {error}"))
+		Error::connection(
+			format!("DNS resolution failed for {hostname}:{port}; {error}"),
+			ConnectionError::ConnectionFailed,
+		)
 	})?;
 
 	// Try each address until one works
@@ -66,7 +70,8 @@ pub(crate) async fn create_client(
 		let client = match builder.build() {
 			Ok(client) => client,
 			Err(error) => {
-				last_error = Some(Error::internal(error.to_string()));
+				last_error =
+					Some(Error::connection(error.to_string(), ConnectionError::ConnectionFailed));
 				continue;
 			}
 		};
@@ -85,7 +90,9 @@ pub(crate) async fn create_client(
 		}
 	}
 
-	Err(last_error.unwrap_or_else(|| Error::internal("No addresses available".to_string())))
+	Err(last_error.unwrap_or_else(|| {
+		Error::connection("No addresses available".to_string(), ConnectionError::ConnectionFailed)
+	}))
 }
 
 impl crate::Connection for Client {}

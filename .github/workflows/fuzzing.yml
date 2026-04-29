@@ -20,6 +20,11 @@ jobs:
     name: Check fuzzing
     runs-on: ubuntu-latest
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
 
@@ -27,7 +32,7 @@ jobs:
         uses: ./.github/actions/setup-environment
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # (Actions must be pinned by commit hash) v2.8.2
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # (Actions must be pinned by commit hash) v2.9.1
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           workspaces: fuzz

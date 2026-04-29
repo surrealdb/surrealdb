@@ -236,6 +236,7 @@ impl Executor {
 			session: self.get_session_info(),
 			current_value: None,
 			skip_fetch_perms: false,
+			version_stamp: None,
 		};
 
 		// Check what level of context we need
@@ -783,27 +784,55 @@ impl Executor {
 				while let Some(stmt) = stream.next().await {
 					yield_now!();
 					let stmt = stmt?;
-					if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
-						return Ok(());
-					}
-
-					self.results.push(QueryResult {
-						time: Duration::ZERO,
-						result: Err(match done {
-							Reason::Timedout(d) => TypesError::query(
-								format!("Timed out: {d}"),
-								Some(QueryError::TimedOut {
-									duration: d.0,
+					match stmt {
+						TopLevelExpr::Commit => {
+							// After timeout/cancel the txn is already gone: COMMIT cannot succeed.
+							// Still emit one `QueryResult` for this COMMIT statement so the batch
+							// has one row per statement (mirrors successful COMMIT, which
+							// pushes Ok(NONE) in the main `TopLevelExpr::Commit` branch
+							// below) (#7207).
+							self.results.push(QueryResult {
+								time: Duration::ZERO,
+								result: Err(match done {
+									Reason::Timedout(d) => TypesError::query(
+										format!("Cannot COMMIT: timed out ({d})"),
+										Some(QueryError::TimedOut {
+											duration: d.0,
+										}),
+									),
+									Reason::Canceled => TypesError::query(
+										"Cannot COMMIT: the transaction was cancelled".to_string(),
+										Some(QueryError::Cancelled),
+									),
 								}),
-							),
-							Reason::Canceled => TypesError::query(
-								"The query was not executed due to a cancelled transaction"
-									.to_string(),
-								Some(QueryError::Cancelled),
-							),
-						}),
-						query_type: QueryType::Other,
-					});
+								query_type: QueryType::Other,
+							});
+							return Ok(());
+						}
+						ref stmt => {
+							let result = Err(match done {
+								Reason::Timedout(d) => TypesError::query(
+									format!("Timed out: {d}"),
+									Some(QueryError::TimedOut {
+										duration: d.0,
+									}),
+								),
+								Reason::Canceled => TypesError::query(
+									"The query was not executed due to a cancelled transaction"
+										.to_string(),
+									Some(QueryError::Cancelled),
+								),
+							});
+							self.results.push(QueryResult {
+								time: Duration::ZERO,
+								result,
+								query_type: QueryType::Other,
+							});
+							if matches!(stmt, TopLevelExpr::Cancel) {
+								return Ok(());
+							}
+						}
+					}
 				}
 
 				// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
@@ -853,21 +882,36 @@ impl Executor {
 					while let Some(stmt) = stream.next().await {
 						yield_now!();
 						let stmt = stmt?;
-						if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
-							return Ok(());
+						match stmt {
+							TopLevelExpr::Commit => {
+								self.results.push(QueryResult {
+									time: Duration::ZERO,
+									result: Err(TypesError::query(
+										"Cannot COMMIT: the transaction was aborted due to a nested BEGIN"
+											.to_string(),
+										Some(QueryError::NotExecuted),
+									)),
+									query_type: QueryType::Other,
+								});
+								return Ok(());
+							}
+							ref stmt => {
+								self.results.push(QueryResult {
+									time: Duration::ZERO,
+									result: Err(TypesError::query(
+										format!(
+											"The query was not executed due to a failed transaction: {}",
+											stmt.to_sql()
+										),
+										Some(QueryError::NotExecuted),
+									)),
+									query_type: QueryType::Other,
+								});
+								if matches!(stmt, TopLevelExpr::Cancel) {
+									return Ok(());
+								}
+							}
 						}
-
-						self.results.push(QueryResult {
-							time: Duration::ZERO,
-							result: Err(TypesError::query(
-								format!(
-									"The query was not executed due to a failed transaction: {}",
-									stmt.to_sql()
-								),
-								Some(QueryError::NotExecuted),
-							)),
-							query_type: QueryType::Other,
-						});
 					}
 
 					// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
@@ -928,13 +972,27 @@ impl Executor {
 						return Ok(());
 					};
 
-					// failed to commit
+					// `txn.commit()` failed (e.g. constraint on commit, or txn already finished).
+					// Surface the failure on a dedicated COMMIT result row; mark prior statement
+					// slots as not executed so nothing implies a successful commit (#7207).
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(TypesError::internal(format!("Query not executed: {e}")));
+						res.result = Err(TypesError::query(
+							"The query was not executed due to a failed transaction".to_string(),
+							Some(QueryError::NotExecuted),
+						));
 					}
 
 					self.opt.broker = None;
+
+					self.results.push(QueryResult {
+						time: before.elapsed(),
+						result: Err(TypesError::query(
+							format!("Cannot COMMIT: {e}"),
+							Some(QueryError::NotExecuted),
+						)),
+						query_type: QueryType::Other,
+					});
 
 					return Ok(());
 				}
@@ -954,60 +1012,79 @@ impl Executor {
 					// reintroduce planner later.
 					let plan = stmt;
 
-					let r =
-						match self.execute_plan_in_transaction(txn.clone(), &before, plan).await {
-							Ok(x) => Ok(x),
-							Err(ControlFlow::Return(value)) => {
-								skip_remaining = true;
-								Ok(value)
+					let r = match self.execute_plan_in_transaction(txn.clone(), &before, plan).await
+					{
+						Ok(x) => Ok(x),
+						Err(ControlFlow::Return(value)) => {
+							skip_remaining = true;
+							Ok(value)
+						}
+						Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
+							Err(anyhow!(Error::InvalidControlFlow))
+						}
+						Err(ControlFlow::Err(e)) => {
+							for res in &mut self.results[start_results..] {
+								res.query_type = QueryType::Other;
+								res.result = Err(TypesError::query(
+									"The query was not executed due to a failed transaction"
+										.to_string(),
+									Some(QueryError::NotExecuted),
+								));
 							}
-							Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
-								Err(anyhow!(Error::InvalidControlFlow))
-							}
-							Err(ControlFlow::Err(e)) => {
-								for res in &mut self.results[start_results..] {
-									res.query_type = QueryType::Other;
-									res.result = Err(TypesError::query(
-										"The query was not executed due to a failed transaction"
-											.to_string(),
-										Some(QueryError::NotExecuted),
-									));
-								}
 
-								// statement return an error. Consume all the other statement until
-								// we hit a cancel or commit.
-								self.results.push(QueryResult {
-									time: before.elapsed(),
-									result: Err(types_error_from_anyhow(e)),
-									query_type,
-								});
+							// statement return an error. Consume all the other statement until
+							// we hit a cancel or commit.
+							self.results.push(QueryResult {
+								time: before.elapsed(),
+								result: Err(types_error_from_anyhow(e)),
+								query_type,
+							});
 
-								let _ = txn.cancel().await;
+							let _ = txn.cancel().await;
 
-								self.opt.broker = None;
+							self.opt.broker = None;
 
-								while let Some(stmt) = stream.next().await {
-									yield_now!();
-									let stmt = stmt?;
-									if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
+							while let Some(stmt) = stream.next().await {
+								yield_now!();
+								let stmt = stmt?;
+								match stmt {
+									TopLevelExpr::Commit => {
+										// Aborted txn: COMMIT must error (same intent as
+										// `txn.commit()` failure above — descriptive
+										// `Cannot COMMIT:` prefix) (#7207).
+										self.results.push(QueryResult {
+												time: Duration::ZERO,
+												result: Err(TypesError::query(
+													"Cannot COMMIT: the transaction was aborted due to a prior error"
+														.to_string(),
+													Some(QueryError::NotExecuted),
+												)),
+												query_type: QueryType::Other,
+											});
 										return Ok(());
 									}
-
-									self.results.push(QueryResult {
-										time: Duration::ZERO,
-										result: Err(TypesError::query(
-											"The query was not executed due to a cancelled transaction".to_string(),
-											Some(QueryError::Cancelled),
-										)),
-										query_type: QueryType::Other,
-									});
+									TopLevelExpr::Cancel => {
+										return Ok(());
+									}
+									_ => {
+										self.results.push(QueryResult {
+												time: Duration::ZERO,
+												result: Err(TypesError::query(
+													"The query was not executed due to a cancelled transaction"
+														.to_string(),
+													Some(QueryError::Cancelled),
+												)),
+												query_type: QueryType::Other,
+											});
+									}
 								}
-
-								// ran out of statements before the transaction ended.
-								// Just break as we have nothing else we can do.
-								return Ok(());
 							}
-						};
+
+							// ran out of statements before the transaction ended.
+							// Just break as we have nothing else we can do.
+							return Ok(());
+						}
+					};
 
 					match r {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
@@ -1202,6 +1279,31 @@ impl Executor {
 		let mut this = Executor::new(ctx, opt);
 		let mut stream = pin!(stream);
 
+		if skip_success_results {
+			// The import path requires OPTION IMPORT as the first statement.
+			// This sets opt.import which skips events, live queries, field
+			// processing, table views, and result output for performance.
+			match stream.as_mut().next().await {
+				Some(Ok(TopLevelExpr::Option(ref stmt)))
+					if stmt.name.eq_ignore_ascii_case("IMPORT") && stmt.what =>
+				{
+					this.execute_option_statement(stmt.clone())?;
+				}
+				Some(Err(e)) => {
+					bail!(Error::InvalidStatement(e.to_string()));
+				}
+				_ => {
+					bail!(Error::InvalidStatement(
+						"Import requires `OPTION IMPORT;` as the first statement. \
+						 This disables events, live queries, field processing, and result \
+						 output for optimal import performance. To execute queries with \
+						 full side effects, use the /sql endpoint instead."
+							.to_string()
+					));
+				}
+			}
+		}
+
 		while let Some(stmt) = stream.next().await {
 			let stmt = match stmt {
 				Ok(x) => x,
@@ -1218,21 +1320,30 @@ impl Executor {
 
 			match stmt {
 				TopLevelExpr::Option(stmt) => {
+					if skip_success_results && stmt.name.eq_ignore_ascii_case("IMPORT") {
+						bail!(Error::InvalidStatement(
+							"Cannot change OPTION IMPORT during an import stream. \
+						 Import mode is locked for the duration of the /import request."
+								.to_string()
+						));
+					}
 					this.execute_option_statement(stmt)?;
-					// OPTION returns NONE
-					this.results.push(QueryResult {
-						time: Duration::ZERO,
-						result: Ok(convert_value_to_public_value(Value::None)?),
-						query_type: QueryType::Other,
-					});
+					if !skip_success_results {
+						this.results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+					}
 				}
 				TopLevelExpr::Begin => {
-					// BEGIN returns NONE
-					this.results.push(QueryResult {
-						time: Duration::ZERO,
-						result: Ok(convert_value_to_public_value(Value::None)?),
-						query_type: QueryType::Other,
-					});
+					if !skip_success_results {
+						this.results.push(QueryResult {
+							time: Duration::ZERO,
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+					}
 
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
 						this.results.push(QueryResult {
@@ -1249,11 +1360,19 @@ impl Executor {
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, &now, stmt).await;
-					let result = match result {
-						Ok(value) => Ok(convert_value_to_public_value(value)?),
-						Err(err) => Err(types_error_from_anyhow(err)),
-					};
-					if !skip_success_results || result.is_err() {
+					if skip_success_results {
+						if let Err(err) = result {
+							this.results.push(QueryResult {
+								time: now.elapsed(),
+								result: Err(types_error_from_anyhow(err)),
+								query_type,
+							});
+						}
+					} else {
+						let result = match result {
+							Ok(value) => Ok(convert_value_to_public_value(value)?),
+							Err(err) => Err(types_error_from_anyhow(err)),
+						};
 						this.results.push(QueryResult {
 							time: now.elapsed(),
 							result,
@@ -1407,34 +1526,30 @@ mod tests {
 			let (session, should_succeed, msg) = test;
 
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
+				let ds =
+					Datastore::builder().with_auth(true).build_with_path("memory").await.unwrap();
 
 				let res = ds.execute(statement, session, None).await;
 
 				if *should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
 				} else {
-					let err = res.unwrap_err().to_string();
-					assert!(
-						err.contains("Not enough permissions to perform this action"),
-						"{}: {}",
-						msg,
-						err
-					)
+					let err = res.unwrap_err();
+					assert!(err.is_not_allowed(), "{msg}: expected NotAllowed error, got {err}")
 				}
 			}
 		}
 
 		// Anonymous with auth enabled
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
+			let ds = Datastore::builder().with_auth(true).build_with_path("memory").await.unwrap();
 
 			let res =
 				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;
 
-			let err = res.unwrap_err().to_string();
+			let err = res.unwrap_err();
 			assert!(
-				err.contains("Not enough permissions to perform this action"),
+				err.is_not_allowed(),
 				"anonymous user should not be able to set options: {}",
 				err
 			)
@@ -1442,7 +1557,7 @@ mod tests {
 
 		// Anonymous with auth disabled
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(false);
+			let ds = Datastore::builder().with_auth(false).build_with_path("memory").await.unwrap();
 
 			let res =
 				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;
@@ -1477,12 +1592,113 @@ mod tests {
 			let stmt = "UPDATE test TIMEOUT 9460800000000000000s"; // 300 billion years
 			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
 			assert!(res.is_ok(), "Failed to execute statement with very large timeout: {:?}", res);
-			let err = res.unwrap()[0].result.as_ref().unwrap_err().to_string();
+			let results = res.unwrap();
+			let err = results[0].result.as_ref().unwrap_err();
 			assert!(
-				err.contains("Invalid timeout"),
+				err.is_validation()
+					|| (err.is_internal() && err.message().contains("Invalid timeout")),
 				"Expected to find invalid timeout error: {:?}",
 				err
 			);
 		}
+	}
+
+	#[tokio::test]
+	async fn import_stream_suppresses_results_but_persists_data() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql =
+			"OPTION IMPORT; INSERT INTO person [{ name: 'a' }, { name: 'b' }, { name: 'c' }];";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let results = ds.import_stream(&sess, body).await.unwrap();
+
+		assert!(
+			results.is_empty(),
+			"import_stream should suppress successful results, got {} results",
+			results.len()
+		);
+
+		let verify = ds.execute("SELECT * FROM person ORDER BY name", &sess, None).await.unwrap();
+		let rows = verify[0].result.as_ref().unwrap();
+		assert!(rows.is_array(), "Expected an array of results");
+		let arr = rows.as_array().unwrap();
+		assert_eq!(arr.len(), 3, "Expected 3 inserted records, got {}", arr.len());
+	}
+
+	#[tokio::test]
+	async fn import_stream_still_reports_errors() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "OPTION IMPORT; INSERT INTO person { name: 'ok' }; BREAK;";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let results = ds.import_stream(&sess, body).await.unwrap();
+
+		assert!(!results.is_empty(), "import_stream should report errors");
+		assert!(
+			results.iter().any(|r| r.result.is_err()),
+			"Expected at least one error result from invalid BREAK statement"
+		);
+
+		let verify = ds.execute("SELECT * FROM person", &sess, None).await.unwrap();
+		let rows = verify[0].result.as_ref().unwrap();
+		let arr = rows.as_array().unwrap();
+		assert_eq!(arr.len(), 1, "The successful INSERT before the error should have persisted");
+	}
+
+	#[tokio::test]
+	async fn import_stream_rejects_without_option_import() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "INSERT INTO person { name: 'a' };";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let result = ds.import_stream(&sess, body).await;
+
+		assert!(result.is_err(), "import_stream should reject input without OPTION IMPORT");
+		let err = result.unwrap_err().to_string();
+		assert!(err.contains("OPTION IMPORT"), "Error should mention OPTION IMPORT, got: {err}");
+	}
+
+	#[tokio::test]
+	async fn import_stream_rejects_option_import_change_midstream() {
+		use bytes::Bytes;
+
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::default().with_ns("NS").with_db("DB");
+
+		ds.execute("DEFINE NAMESPACE NS; USE NS NS; DEFINE DATABASE DB", &sess, None)
+			.await
+			.unwrap();
+
+		let sql = "OPTION IMPORT; OPTION IMPORT = false; INSERT INTO person { name: 'a' };";
+		let body = futures::stream::once(async { Ok(Bytes::from(sql)) });
+		let result = ds.import_stream(&sess, body).await;
+
+		assert!(result.is_err(), "import_stream should reject OPTION IMPORT changes mid-stream");
+		let err = result.unwrap_err().to_string();
+		assert!(
+			err.contains("Cannot change OPTION IMPORT"),
+			"Error should explain that import mode is locked, got: {err}"
+		);
 	}
 }

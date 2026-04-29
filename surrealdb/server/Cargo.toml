@@ -35,10 +35,11 @@ performance-profiler = ["dep:pprof"]
 scripting = ["surrealdb-core/scripting"]
 surrealism = [
     "surrealdb-core/surrealism",
+    "dep:dialoguer",
     "dep:surrealism-runtime",
-    "dep:surrealism-types",
-    "dep:walrus",
+    "dep:wasm-encoder",
     "dep:wasm-opt",
+    "dep:wasmparser",
 ]
 storage-mem = ["surrealdb/kv-mem", "surrealdb-core/kv-mem"]
 storage-indxdb = ["surrealdb/kv-indxdb", "surrealdb-core/kv-indxdb"]
@@ -107,6 +108,7 @@ tower-service = "0.3.3"
 tracing-appender = "0.2.4"
 tracing-opentelemetry = "0.32.1"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
+dirs = "6.0.0"
 
 # Other crates
 async-graphql = { workspace = true, default-features = false, optional = true }
@@ -129,7 +131,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "signal", "tracing"] }
+tokio = { workspace = true, features = ["macros", "signal", "tracing","process"] }
 tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["io"] }
 tracing.workspace = true
@@ -137,14 +139,15 @@ uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 web-time.workspace = true
 
 # Optional crates
+dialoguer = { workspace = true, optional = true }
 pprof = { workspace = true, features = [
     "flamegraph",
     "prost-codec",
 ], optional = true }
 surrealism-runtime = { workspace = true, optional = true }
-surrealism-types = { workspace = true, features = ["host"], optional = true }
-walrus = { workspace = true, optional = true }
+wasm-encoder = { workspace = true, optional = true }
 wasm-opt = { workspace = true, optional = true }
+wasmparser = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
 nu-ansi-term = "0.50.3"

@@ -45,7 +45,7 @@ jobs:
   #       uses: ./.github/actions/setup-environment
 
   #     - name: Configure AWS credentials
-  #       uses: aws-actions/configure-aws-credentials@97834a484a5ab3c40fa9e2eb40fcf8041105a573
+  #       uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37
   #       with:
   #         aws-region: us-east-1
 
@@ -80,7 +80,7 @@ jobs:
   #         echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
   #     - name: Save results as artifact
-  #       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+  #       uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
   #       with:
   #         name: ${{ github.job }}-comparison.txt
   #         path: bench-results/${{ github.job }}-comparison.txt
@@ -122,6 +122,11 @@ jobs:
           # - target: "sdk-ws"
           #   features: "protocol-ws"
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2 (Actions must be pinned by commit hash)
 
@@ -131,12 +136,12 @@ jobs:
           components: rustfmt
 
       - name: Setup cache
-        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2 (Actions must be pinned by commit hash)
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1 (Actions must be pinned by commit hash)
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@97834a484a5ab3c40fa9e2eb40fcf8041105a573
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
         with:
           aws-region: us-east-1
 
@@ -199,7 +204,7 @@ jobs:
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Save results as artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2 (Actions must be pinned by commit hash)
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0 (Actions must be pinned by commit hash)
         with:
           name: ${{ matrix.target }}-comparison.txt
           path: bench-results/${{ matrix.target }}-comparison.txt

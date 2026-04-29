@@ -302,6 +302,42 @@ impl DefineAccessStatement {
 }
 
 impl DefineAccessStatement {
+	/// Returns true if the access definition uses ES512 in any JWT component.
+	fn uses_es512(definition: &AccessDefinition) -> bool {
+		fn jwt_uses_es512(jwt: &catalog::JwtAccess) -> bool {
+			if let catalog::JwtAccessVerify::Key(ref ver) = jwt.verify
+				&& matches!(ver.alg, catalog::Algorithm::Es512)
+			{
+				return true;
+			}
+			if let Some(ref iss) = jwt.issue
+				&& matches!(iss.alg, catalog::Algorithm::Es512)
+			{
+				return true;
+			}
+			false
+		}
+
+		match &definition.access_type {
+			catalog::AccessType::Jwt(jwt) => jwt_uses_es512(jwt),
+			catalog::AccessType::Record(rec) => {
+				jwt_uses_es512(&rec.jwt)
+					|| rec.bearer.as_ref().is_some_and(|b| jwt_uses_es512(&b.jwt))
+			}
+			catalog::AccessType::Bearer(bearer) => jwt_uses_es512(&bearer.jwt),
+		}
+	}
+
+	/// Check if the access definition uses ES512, which is not currently supported.
+	/// This should only be called for new definitions (not during import/restore or
+	/// overwrite of an existing ES512 definition).
+	fn reject_es512(definition: &AccessDefinition) -> Result<()> {
+		if Self::uses_es512(definition) {
+			bail!(Error::AccessUnsupportedAlgorithm);
+		}
+		Ok(())
+	}
+
 	/// Process this type returning a computed simple Value
 	#[instrument(level = "trace", name = "DefineAccessStatement::compute", skip_all)]
 	pub(crate) async fn compute(
@@ -321,7 +357,9 @@ impl DefineAccessStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if access method already exists
-				if let Some(access) = txn.get_root_access(&definition.name).await? {
+				let mut existing_uses_es512 = false;
+				if let Some(access) = txn.get_root_access(&definition.name, None).await? {
+					existing_uses_es512 = Self::uses_es512(&access);
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -334,9 +372,14 @@ impl DefineAccessStatement {
 						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
+				// Reject ES512 for new definitions (allow during import/restore and
+				// overwrite of an existing ES512 definition)
+				if !(opt.import || (existing_uses_es512 && self.kind == DefineKind::Overwrite)) {
+					Self::reject_es512(&definition)?;
+				}
 				// Process the statement
 				let key = crate::key::root::ac::new(&definition.name);
-				txn.set(&key, &definition, None).await?;
+				txn.set(&key, &definition).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -347,7 +390,9 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				let ns = ctx.get_ns_id(opt).await?;
-				if let Some(access) = txn.get_ns_access(ns, &definition.name).await? {
+				let mut existing_uses_es512 = false;
+				if let Some(access) = txn.get_ns_access(ns, &definition.name, None).await? {
+					existing_uses_es512 = Self::uses_es512(&access);
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -361,10 +406,15 @@ impl DefineAccessStatement {
 						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
+				// Reject ES512 for new definitions (allow during import/restore and
+				// overwrite of an existing ES512 definition)
+				if !(opt.import || (existing_uses_es512 && self.kind == DefineKind::Overwrite)) {
+					Self::reject_es512(&definition)?;
+				}
 				// Process the statement
 				let key = crate::key::namespace::ac::new(ns, &definition.name);
 				txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
-				txn.set(&key, &definition, None).await?;
+				txn.set(&key, &definition).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -375,7 +425,9 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-				if let Some(access) = txn.get_db_access(ns, db, &definition.name).await? {
+				let mut existing_uses_es512 = false;
+				if let Some(access) = txn.get_db_access(ns, db, &definition.name, None).await? {
+					existing_uses_es512 = Self::uses_es512(&access);
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -390,9 +442,14 @@ impl DefineAccessStatement {
 						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
+				// Reject ES512 for new definitions (allow during import/restore and
+				// overwrite of an existing ES512 definition)
+				if !(opt.import || (existing_uses_es512 && self.kind == DefineKind::Overwrite)) {
+					Self::reject_es512(&definition)?;
+				}
 				// Process the statement
 				let key = crate::key::database::ac::new(ns, db, &definition.name);
-				txn.set(&key, &definition, None).await?;
+				txn.set(&key, &definition).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good

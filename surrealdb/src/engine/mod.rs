@@ -84,10 +84,14 @@ pub(crate) enum SessionError {
 	feature = "protocol-ws",
 ))]
 pub(crate) fn session_error_to_error(e: SessionError) -> surrealdb_types::Error {
+	use surrealdb_types::{Error as TypesError, NotFoundError};
 	match e {
-		SessionError::NotFound(id) => {
-			surrealdb_types::Error::internal(format!("Session not found: {id}"))
-		}
-		SessionError::Remote(msg) => surrealdb_types::Error::internal(msg),
+		SessionError::NotFound(id) => TypesError::not_found(
+			format!("Session not found: {id}"),
+			NotFoundError::Session {
+				id: Some(id.to_string()),
+			},
+		),
+		SessionError::Remote(msg) => TypesError::internal(msg),
 	}
 }

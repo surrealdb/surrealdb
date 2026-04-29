@@ -4,6 +4,7 @@ use crate::SkipContent;
 
 #[derive(Debug, Default)]
 pub struct UnnamedFieldsAttributes {
+	pub rename: Option<String>,
 	pub tuple: bool,
 	/// Per-variant content skipping. `Always` for `#[surreal(skip_content)]`,
 	/// `If(path)` for `#[surreal(skip_content_if = "predicate")]`.
@@ -17,8 +18,20 @@ impl UnnamedFieldsAttributes {
 		for attr in attrs {
 			if attr.path().is_ident("surreal") {
 				attr.parse_nested_meta(|meta| {
-					if meta.path.is_ident("tuple") {
+					if meta.path.is_ident("rename") {
+						let Ok(value) = meta.value() else {
+							panic!("Failed to parse rename attribute");
+						};
+						let Ok(lit_str) = value.parse::<LitStr>() else {
+							panic!("Failed to parse rename attribute");
+						};
+						unnamed_field_attrs.rename = Some(lit_str.value());
+					} else if meta.path.is_ident("tuple") {
 						unnamed_field_attrs.tuple = true;
+					} else if meta.path.is_ident("rename_all") {
+						panic!(
+							"#[surreal(rename_all)] has no effect on unnamed (tuple) fields; unnamed fields have no keys to transform"
+						);
 					} else if meta.path.is_ident("skip_content") {
 						if unnamed_field_attrs.skip_content.is_some() {
 							panic!(

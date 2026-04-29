@@ -15,7 +15,7 @@ pub async fn mock() -> (FrozenContext, Options) {
 		.with_auth(Arc::new(Auth::for_root(Role::Owner)));
 	let kvs = Datastore::new("memory").await.unwrap();
 	let txn = kvs.transaction(Write, Optimistic).await.unwrap().enclose();
-	let mut ctx = Context::default();
+	let mut ctx = Context::new_test();
 	ctx.set_transaction(txn);
 	(ctx.freeze(), opt)
 }

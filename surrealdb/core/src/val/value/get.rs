@@ -1,12 +1,14 @@
 use std::collections::BTreeMap;
 use std::ops::Deref;
+use std::sync::Arc;
 
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
+use crate::catalog::providers::TableProvider;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
-use crate::ctx::FrozenContext;
+use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -29,6 +31,34 @@ macro_rules! fallback_function {
 			x => x,
 		}
 	};
+}
+
+/// Returns true if the expression references the `$parent` parameter.
+/// Used to avoid allocating a child context in Part::Where when the
+/// predicate does not need `$parent`.
+fn expr_references_parent(expr: &Expr) -> bool {
+	use crate::expr::visit::{Visit, Visitor};
+	struct Check(bool);
+	impl Visitor for Check {
+		type Error = std::convert::Infallible;
+		fn visit_expr(&mut self, e: &Expr) -> Result<(), Self::Error> {
+			if let Expr::Param(p) = e
+				&& p.as_str() == "parent"
+			{
+				self.0 = true;
+			}
+			if self.0 {
+				return Ok(());
+			}
+			e.visit(self)
+		}
+		fn visit_select(&mut self, _: &crate::expr::SelectStatement) -> Result<(), Self::Error> {
+			Ok(())
+		}
+	}
+	let mut c = Check(false);
+	let _ = c.visit_expr(expr);
+	c.0
 }
 
 impl Value {
@@ -315,6 +345,19 @@ impl Value {
 						}
 					},
 					Part::Where(w) => {
+						// Bind $parent to the enclosing document when the
+						// predicate references it. Always overrides any existing
+						// binding (e.g. from an outer subquery) so that $parent
+						// in a graph [WHERE] refers to the current SELECT's row.
+						let parent_ctx = match doc {
+							Some(d) if expr_references_parent(w) => {
+								let mut child = Context::new_child(ctx);
+								child.add_value("parent", Arc::new(d.doc.as_ref().clone()));
+								Some(child.freeze())
+							}
+							_ => None,
+						};
+						let ctx = parent_ctx.as_ref().unwrap_or(ctx);
 						let mut a = Vec::new();
 						for v in v.iter() {
 							let cur = v.clone().into();
@@ -427,14 +470,30 @@ impl Value {
 								tempfiles: false,
 							};
 
-							let res = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.all();
+							let res = stk.run(|stk| stm.compute(stk, ctx, opt, doc)).await?.all();
+
+							let res = if g.only {
+								match res {
+									Value::Array(arr) if arr.is_empty() => Value::None,
+									Value::Array(mut arr) if arr.len() == 1 => {
+										arr.0.pop().expect("Exactly one item in this array")
+									}
+									Value::Array(_) => {
+										return Err(crate::expr::ControlFlow::Err(
+											anyhow::anyhow!(crate::err::Error::SingleOnlyOutput),
+										));
+									}
+									other => other,
+								}
+							} else {
+								res
+							};
 
 							if last_part {
 								Ok(res)
 							} else {
-								let res = stk
-									.run(|stk| res.get(stk, ctx, opt, None, path.next()))
-									.await?;
+								let res =
+									stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await?;
 
 								match path.get(1) {
 									Some(Part::Lookup(_)) => Ok(res.flatten()),
@@ -501,6 +560,27 @@ impl Value {
 								// path
 								_ => path,
 							};
+
+							// Self-reference cycle guard: if the record id being dereferenced
+							// is the same record currently being computed (e.g. a COMPUTED
+							// field like `$this.id.prop`), re-running `select_document` would
+							// re-enter `computed_fields_inner` for the same record and
+							// infinitely.
+							if let Some(cur) = doc
+								&& cur.rid.as_deref() == Some(&val)
+							{
+								let (ns_id, db_id) = ctx.expect_ns_db_ids(opt).await?;
+								let record = ctx
+									.tx()
+									.get_record(ns_id, db_id, &val.table, &val.key, None)
+									.await?;
+								let raw = if record.data.is_none() {
+									Value::None
+								} else {
+									record.data.clone()
+								};
+								return stk.run(|stk| raw.get(stk, ctx, opt, None, next)).await;
+							}
 
 							// Fetch the record id's contents
 							let v = val

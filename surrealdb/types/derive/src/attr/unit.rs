@@ -1,10 +1,11 @@
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{ToTokens, quote};
 use syn::parse::ParseBuffer;
-use syn::{Attribute, Lit};
+use syn::{Attribute, Lit, LitStr};
 
 #[derive(Debug, Default)]
 pub struct UnitAttributes {
+	pub rename: Option<String>,
 	pub value: Option<UnitValue>,
 	/// When true, this variant acts as a catch-all fallback during deserialization.
 	/// If no other variant matches, this variant is returned instead of an error.
@@ -22,24 +23,50 @@ impl UnitAttributes {
 		for attr in attrs {
 			if attr.path().is_ident("surreal") {
 				attr.parse_nested_meta(|meta| {
-				if meta.path.is_ident("value") {
-					let Ok(value) = meta.value() else {
-						panic!("Failed to parse value attribute");
-					};
+					if meta.path.is_ident("rename") {
+						let Ok(value) = meta.value() else {
+							panic!("Failed to parse rename attribute");
+						};
+						let Ok(lit_str) = value.parse::<LitStr>() else {
+							panic!("Failed to parse rename attribute");
+						};
+						variant_attrs.rename = Some(lit_str.value());
+					} else if meta.path.is_ident("value") {
+						let Ok(value) = meta.value() else {
+							panic!("Failed to parse value attribute");
+						};
 
-					variant_attrs.value = Some(UnitValue::parse(value));
-				} else if meta.path.is_ident("other") {
-					variant_attrs.other = true;
-				} else if meta.path.is_ident("skip_content") {
-					variant_attrs.skip_content = true;
-				} else if meta.path.is_ident("skip_content_if") {
-					panic!("skip_content_if is not valid on unit variants (there is no content to check); use skip_content instead");
-				}
+						variant_attrs.value = Some(UnitValue::parse(value));
+					} else if meta.path.is_ident("other") {
+						variant_attrs.other = true;
+					} else if meta.path.is_ident("skip_content") {
+						variant_attrs.skip_content = true;
+					} else if meta.path.is_ident("skip_content_if") {
+						panic!("skip_content_if is not valid on unit variants (there is no content to check); use skip_content instead");
+					}
 
-				Ok(())
-			})
+					Ok(())
+				})
 				.ok();
 			}
+		}
+
+		if variant_attrs.rename.is_some() && variant_attrs.value.is_some() {
+			panic!(
+				"Cannot combine #[surreal(rename)] with #[surreal(value)] on the same unit variant; `value` replaces the serialized representation entirely, so `rename` would be unreachable"
+			);
+		}
+
+		if variant_attrs.other && variant_attrs.value.is_some() {
+			panic!(
+				"Cannot combine #[surreal(other)] with #[surreal(value)] on the same unit variant; `other` is the deserialization fallback that matches anything, so a specific `value` would never be consulted"
+			);
+		}
+
+		if variant_attrs.other && variant_attrs.rename.is_some() {
+			panic!(
+				"Cannot combine #[surreal(other)] with #[surreal(rename)] on the same unit variant; `other` is the deserialization fallback and does not match on a specific variant name"
+			);
 		}
 
 		variant_attrs

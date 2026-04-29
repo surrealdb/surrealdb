@@ -19,6 +19,15 @@ threads-required = 2
 [[profile.default.overrides]]
 filter = 'test(syn::test::test_excessive_size)'
 threads-required = 4
+slow-timeout = "60s"
+
+[[profile.default.overrides]]
+filter = 'test(surrealism_integration::)'
+slow-timeout = "120s"
+
+[[profile.default.overrides]]
+filter = 'test(access_bearer_purge)'
+slow-timeout = "60s"
 
 [test-groups]
 # Ensure all KVS tests run serially

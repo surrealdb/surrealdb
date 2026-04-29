@@ -188,7 +188,7 @@ mod tests {
 	async fn get_analyzer_tokens(def: &str, input: &str) -> Tokens {
 		let ds = Datastore::new("memory").await.unwrap();
 		let txn = ds.transaction(TransactionType::Read, LockType::Optimistic).await.unwrap();
-		let mut ctx = Context::default();
+		let mut ctx = Context::new_test();
 		ctx.set_transaction(Arc::new(txn));
 		let ctx = ctx.freeze();
 

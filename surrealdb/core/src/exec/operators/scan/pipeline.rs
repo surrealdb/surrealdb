@@ -65,10 +65,8 @@ impl ScanPipeline {
 	/// computed fields, field-level permissions, or WHERE predicate) is
 	/// needed.
 	///
-	/// Callers use this *before* constructing a `ScanPipeline` to decide
-	/// whether `pre_skip` / `effective_storage_limit` can be pushed to
-	/// the KV layer. The same check is cached internally so that
-	/// [`process_batch`] can skip work when nothing is needed.
+	/// This is cached internally so that [`process_batch`] can skip work
+	/// when nothing is needed.
 	pub(crate) fn compute_needs_processing(
 		permission: &PhysicalPermission,
 		field_state: &FieldState,
@@ -79,6 +77,21 @@ impl ScanPipeline {
 			|| !field_state.computed_fields.is_empty()
 			|| (check_perms && !field_state.field_permissions.is_empty())
 			|| predicate.is_some()
+	}
+
+	/// Check whether any operation that **removes rows** is active.
+	///
+	/// Row-modifying operations (computed fields, field-level permissions)
+	/// preserve row count and positional ordering, so `pre_skip` and
+	/// `effective_storage_limit` can safely be pushed to the KV layer
+	/// even when they are present. Only table-level permission filtering
+	/// and WHERE predicates can change which rows survive, preventing
+	/// positional pushdown.
+	pub(crate) fn compute_needs_row_filtering(
+		permission: &PhysicalPermission,
+		predicate: Option<&Arc<dyn PhysicalExpr>>,
+	) -> bool {
+		!matches!(permission, PhysicalPermission::Allow) || predicate.is_some()
 	}
 
 	pub(crate) fn new(
@@ -170,7 +183,7 @@ impl ScanPipeline {
 /// Determine scan direction from ORDER BY clause.
 /// Returns Backward if the first ORDER BY is `id DESC`, otherwise Forward.
 pub(crate) fn determine_scan_direction(
-	order: &Option<crate::expr::order::Ordering>,
+	order: Option<&crate::expr::order::Ordering>,
 ) -> ScanDirection {
 	use crate::expr::order::Ordering as OrderingType;
 	if let Some(OrderingType::Order(order_list)) = order
@@ -484,9 +497,10 @@ pub(crate) async fn build_field_state_raw(
 	db_id: crate::catalog::DatabaseId,
 	table_name: &TableName,
 	check_perms: bool,
+	version: Option<u64>,
 ) -> Result<FieldState, ControlFlow> {
 	let field_defs = txn
-		.all_tb_fields(ns_id, db_id, table_name, None)
+		.all_tb_fields(ns_id, db_id, table_name, version)
 		.await
 		.context("Failed to get field definitions")?;
 
@@ -578,10 +592,12 @@ pub(crate) async fn build_field_state(
 	needed_fields: Option<&std::collections::HashSet<String>>,
 ) -> Result<FieldState, ControlFlow> {
 	let db_ctx = ctx.database().context("build_field_state requires database context")?;
+	let version = ctx.version_stamp();
 	let cache_key = (table_name.clone(), check_perms);
 
 	// Check the cache first (keyed by table name + check_perms flag).
-	{
+	// Versioned reads bypass the cache to get field defs at the correct point in time.
+	if version.is_none() {
 		let cache = db_ctx.field_state_cache.read().await;
 		if let Some(cached) = cache.get(&cache_key) {
 			return Ok(filter_field_state_for_projection(cached, needed_fields));
@@ -596,12 +612,15 @@ pub(crate) async fn build_field_state(
 		db_ctx.db.database_id,
 		table_name,
 		check_perms,
+		version,
 	)
 	.await?;
 
-	// Cache the full (unfiltered) state
+	// Cache the full (unfiltered) state (skip for versioned reads)
 	let cached = Arc::new(full_state);
-	db_ctx.field_state_cache.write().await.insert(cache_key, Arc::clone(&cached));
+	if version.is_none() {
+		db_ctx.field_state_cache.write().await.insert(cache_key, Arc::clone(&cached));
+	}
 
 	// Return filtered if needed_fields is specified
 	Ok(filter_field_state_for_projection(&cached, needed_fields))
@@ -661,9 +680,21 @@ pub(crate) async fn compute_fields_for_value(
 	let mut eval_ctx = EvalContext::from_exec_ctx(ctx);
 	eval_ctx.skip_fetch_perms = skip_fetch_perms;
 
+	// Extract the record ID before entering the loop so that field
+	// dereferences that target this same record can return raw data
+	// instead of re-computing fields (which would loop forever).
+	eval_ctx.computing_record = match &*value {
+		Value::Object(obj) => match obj.get("id") {
+			Some(Value::RecordId(rid)) => Some(rid.clone()),
+			_ => None,
+		},
+		_ => None,
+	};
+
 	for cf in &state.computed_fields {
-		// Evaluate with the current value as context
-		let row_ctx = eval_ctx.with_value(value);
+		// Evaluate with the row as both current value and document root so
+		// nested subqueries see the same `$parent` as top-level projections (#7154).
+		let row_ctx = eval_ctx.with_value_and_doc(value);
 		let computed_value = match cf.expr.evaluate(row_ctx).await {
 			Ok(v) => v,
 			Err(ControlFlow::Return(v)) => v,

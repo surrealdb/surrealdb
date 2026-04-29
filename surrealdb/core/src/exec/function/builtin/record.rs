@@ -48,15 +48,18 @@ impl ScalarFunction for RecordExists {
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
+			use crate::doc::CursorDoc;
 			let args = FromArgs::from_args("record::exists", args)?;
 			let frozen = ctx.exec_ctx.ctx();
 			let opt = ctx.exec_ctx.options();
-			// Note: CursorDoc is not available in the streaming executor context
-			let doc = None;
+			let doc = ctx
+				.document_root
+				.or(ctx.current_value)
+				.map(|v| CursorDoc::new(None, None, v.clone()));
 			let mut stack = TreeStack::new();
 			stack
 				.enter(|stk| async move {
-					crate::fnc::record::exists((stk, frozen, opt, doc), args).await
+					crate::fnc::record::exists((stk, frozen, opt, doc.as_ref()), args).await
 				})
 				.finish()
 				.await
@@ -98,15 +101,18 @@ impl ScalarFunction for RecordIsEdge {
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Value>> {
 		Box::pin(async move {
+			use crate::doc::CursorDoc;
 			let args = FromArgs::from_args("record::is_edge", args)?;
 			let frozen = ctx.exec_ctx.ctx();
 			let opt = ctx.exec_ctx.options();
-			// Note: CursorDoc is not available in the streaming executor context
-			let doc = None;
+			let doc = ctx
+				.document_root
+				.or(ctx.current_value)
+				.map(|v| CursorDoc::new(None, None, v.clone()));
 			let mut stack = TreeStack::new();
 			stack
 				.enter(|stk| async move {
-					crate::fnc::record::is::edge((stk, frozen, opt, doc), args).await
+					crate::fnc::record::is::edge((stk, frozen, opt, doc.as_ref()), args).await
 				})
 				.finish()
 				.await

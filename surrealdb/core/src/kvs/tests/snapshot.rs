@@ -10,7 +10,7 @@ pub async fn snapshot(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id).await;
 	// Insert an initial key
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	tx.set(&"test", &"some text".as_bytes().to_vec(), None).await.unwrap();
+	tx.set(&"test", &"some text".as_bytes().to_vec()).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
 	let tx1 = ds.transaction(Read, Optimistic).await.unwrap();
@@ -20,7 +20,7 @@ pub async fn snapshot(new_ds: impl CreateDs) {
 	// Create a new writeable transaction
 	let txw = ds.transaction(Write, Optimistic).await.unwrap();
 	// Update the test key content
-	txw.set(&"test", &"other text".as_bytes().to_vec(), None).await.unwrap();
+	txw.set(&"test", &"other text".as_bytes().to_vec()).await.unwrap();
 	// Create a readonly transaction
 	let tx2 = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx2.get(&"test", None).await.unwrap().unwrap();
@@ -30,7 +30,7 @@ pub async fn snapshot(new_ds: impl CreateDs) {
 	let val = tx3.get(&"test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Update the test key content
-	txw.set(&"test", &"extra text".as_bytes().to_vec(), None).await.unwrap();
+	txw.set(&"test", &"extra text".as_bytes().to_vec()).await.unwrap();
 	// Check the key from the original transaction
 	let val = tx1.get(&"test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");

@@ -1,5 +1,5 @@
 use std::str::{self, FromStr};
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 
 use anyhow::{Result, bail};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
@@ -45,6 +45,10 @@ fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Valid
 			(DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES384))
 		}
 		catalog::Algorithm::Es512 => {
+			static ES512_WARN: Once = Once::new();
+			ES512_WARN.call_once(|| {
+				warn!("ES512 is not currently supported by the underlying cryptography library and will fall back to ES384. Please update your access definition to use ES384 or another supported algorithm.");
+			});
 			(DecodingKey::from_ec_pem(key)?, Validation::new(jsonwebtoken::Algorithm::ES384))
 		}
 		catalog::Algorithm::Ps256 => {
@@ -187,7 +191,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating with record access method `{}`", ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let db_def = match catch!(tx, tx.get_db_by_name(ns, db).await) {
+			let db_def = match catch!(tx, tx.get_db_by_name(ns, db, None).await) {
 				Some(db) => db,
 				None => {
 					let _ = tx.cancel().await;
@@ -206,9 +210,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				}
 			};
 			// Get the database access method
-			let Some(de) =
-				catch!(tx, tx.get_db_access(db_def.namespace_id, db_def.database_id, ac).await)
-			else {
+			let Some(de) = catch!(
+				tx,
+				tx.get_db_access(db_def.namespace_id, db_def.database_id, ac, None).await
+			) else {
 				let _ = tx.cancel().await;
 				return Err(Error::AccessDbNotFound {
 					ac: ac.clone(),
@@ -299,7 +304,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to database `{}` with access method `{}`", db, ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let db_def = match catch!(tx, tx.get_db_by_name(ns, db).await) {
+			let db_def = match catch!(tx, tx.get_db_by_name(ns, db, None).await) {
 				Some(db) => db,
 				None => {
 					let _ = tx.cancel().await;
@@ -311,8 +316,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 
 			// Get the database access method
-			let de =
-				catch!(tx, tx.get_db_access(db_def.namespace_id, db_def.database_id, ac).await);
+			let de = catch!(
+				tx,
+				tx.get_db_access(db_def.namespace_id, db_def.database_id, ac, None).await
+			);
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 
@@ -477,7 +484,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to database `{}` with user `{}`", db, id);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let db_def = match catch!(tx, tx.get_db_by_name(ns, db).await) {
+			let db_def = match catch!(tx, tx.get_db_by_name(ns, db, None).await) {
 				Some(db) => db,
 				None => {
 					let _ = tx.cancel().await;
@@ -491,10 +498,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Get the database user
 			let de = match catch!(
 				tx,
-				tx.get_db_user(db_def.namespace_id, db_def.database_id, id).await.map_err(|e| {
-					debug!("Error while authenticating to database `{db}`: {e}");
-					anyhow::Error::new(Error::InvalidAuth)
-				})
+				tx.get_db_user(db_def.namespace_id, db_def.database_id, id, None).await.map_err(
+					|e| {
+						debug!("Error while authenticating to database `{db}`: {e}");
+						anyhow::Error::new(Error::InvalidAuth)
+					}
+				)
 			) {
 				Some(de) => de,
 				None => {
@@ -538,7 +547,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to namespace `{}` with access method `{}`", ns, ac);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let ns_def = match catch!(tx, tx.get_ns_by_name(ns).await) {
+			let ns_def = match catch!(tx, tx.get_ns_by_name(ns, None).await) {
 				Some(ns) => ns,
 				None => {
 					let _ = tx.cancel().await;
@@ -550,7 +559,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			};
 
 			// Get the namespace access method
-			let de = catch!(tx, tx.get_ns_access(ns_def.namespace_id, ac).await);
+			let de = catch!(tx, tx.get_ns_access(ns_def.namespace_id, ac, None).await);
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
 
@@ -643,7 +652,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			trace!("Authenticating to namespace `{}` with user `{}`", ns, id);
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
-			let ns_def = match catch!(tx, tx.get_ns_by_name(ns).await) {
+			let ns_def = match catch!(tx, tx.get_ns_by_name(ns, None).await) {
 				Some(ns) => ns,
 				None => {
 					let _ = tx.cancel().await;
@@ -656,7 +665,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Get the namespace user
 			let de = match catch!(
 				tx,
-				tx.get_ns_user(ns_def.namespace_id, id).await.map_err(|e| {
+				tx.get_ns_user(ns_def.namespace_id, id, None).await.map_err(|e| {
 					debug!("Error while authenticating to namespace `{ns}`: {e}");
 					anyhow::Error::new(Error::InvalidAuth)
 				})
@@ -702,7 +711,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Create a new readonly transaction
 			let tx = kvs.transaction(Read, Optimistic).await?;
 			// Get the root access method
-			let de = catch!(tx, tx.get_root_access(ac).await);
+			let de = catch!(tx, tx.get_root_access(ac, None).await);
 
 			// Ensure that the transaction is cancelled
 			tx.cancel().await?;
@@ -859,7 +868,7 @@ pub async fn verify_ns_creds(
 ) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
-	let ns_def = match catch!(tx, tx.get_ns_by_name(ns).await) {
+	let ns_def = match catch!(tx, tx.get_ns_by_name(ns, None).await) {
 		Some(ns) => ns,
 		None => {
 			let _ = tx.cancel().await;
@@ -873,7 +882,7 @@ pub async fn verify_ns_creds(
 	// Fetch the specified user from storage
 	let user = catch!(
 		tx,
-		tx.get_ns_user(ns_def.namespace_id, user).await.map_err(|e| {
+		tx.get_ns_user(ns_def.namespace_id, user, None).await.map_err(|e| {
 			debug!("Error retrieving user for authentication to namespace `{ns}`: {e}");
 			anyhow::Error::new(Error::InvalidAuth)
 		})
@@ -905,7 +914,7 @@ pub async fn verify_db_creds(
 ) -> Result<catalog::UserDefinition> {
 	// Create a new readonly transaction
 	let tx = ds.transaction(Read, Optimistic).await?;
-	let db_def = match catch!(tx, tx.get_db_by_name(ns, db).await) {
+	let db_def = match catch!(tx, tx.get_db_by_name(ns, db, None).await) {
 		Some(db) => db,
 		None => {
 			let _ = tx.cancel().await;
@@ -919,7 +928,7 @@ pub async fn verify_db_creds(
 	// Fetch the specified user from storage
 	let user = catch!(
 		tx,
-		tx.get_db_user(db_def.namespace_id, db_def.database_id, user).await.map_err(|e| {
+		tx.get_db_user(db_def.namespace_id, db_def.database_id, user, None).await.map_err(|e| {
 			debug!("Error retrieving user for authentication to database `{ns}/{db}`: {e}");
 			anyhow::Error::new(Error::InvalidAuth)
 		})
@@ -1550,11 +1559,13 @@ mod tests {
 		let server_url = mock_server.uri();
 
 		// We allow requests to the local server serving the JWKS object
-		let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-			Capabilities::default().with_network_targets(Targets::<NetTarget>::Some(
-				[NetTarget::from_str("127.0.0.1").unwrap()].into(),
-			)),
-		);
+		let ds = Datastore::builder()
+			.with_capabilities(Capabilities::default().with_network_targets(
+				Targets::<NetTarget>::Some([NetTarget::from_str("127.0.0.1").unwrap()].into()),
+			))
+			.build_with_path("memory")
+			.await
+			.unwrap();
 
 		let sess = Session::owner().with_ns("test").with_db("test");
 		ds.execute(

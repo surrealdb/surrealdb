@@ -18,7 +18,7 @@
 //! - **Custom scalars** -- registers scalars like `uuid`, `decimal`, `datetime`, `duration`,
 //!   `bytes`, `object`, `any`, `JSON`, and `null`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use async_graphql::dynamic::indexmap::IndexMap;
@@ -48,6 +48,7 @@ use crate::gql::error::{internal_error, schema_error, type_error};
 use crate::gql::functions::process_fns;
 use crate::gql::mutations::process_mutations;
 use crate::gql::relations::collect_relations;
+use crate::gql::subscriptions::process_subscriptions;
 use crate::gql::tables::process_tbs;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::val::{
@@ -92,7 +93,7 @@ pub async fn generate_schema(
 	let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
 	let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
 
-	let db_def = match tx.get_db_by_name(ns, db).await? {
+	let db_def = match tx.get_db_by_name(ns, db, None).await? {
 		Some(db) => db,
 		None => return Err(GqlError::NotConfigured),
 	};
@@ -120,7 +121,7 @@ pub async fn generate_schema(
 	let fns = match gql_config.functions {
 		GraphQLFunctionsConfig::None => None,
 		_ => {
-			let fns = tx.all_db_functions(db_def.namespace_id, db_def.database_id).await?;
+			let fns = tx.all_db_functions(db_def.namespace_id, db_def.database_id, None).await?;
 			match gql_config.functions {
 				GraphQLFunctionsConfig::None => None,
 				GraphQLFunctionsConfig::Auto => Some(fns),
@@ -163,20 +164,31 @@ pub async fn generate_schema(
 	};
 
 	let mut mutation_obj: Option<Object> = None;
+	let mut subscription_obj = None;
 
 	match tbs {
 		Some(ref tbs) if !tbs.is_empty() => {
-			query = process_tbs(tbs.clone(), query, &mut types, &schema_ctx, &relations).await?;
+			let mut table_fields = HashMap::new();
+			query = process_tbs(
+				tbs.clone(),
+				query,
+				&mut types,
+				&schema_ctx,
+				&relations,
+				&mut table_fields,
+			)
+			.await?;
 
 			// Generate mutations for all tables
 			mutation_obj = Some(process_mutations(tbs.clone(), &mut types, &schema_ctx).await?);
+			subscription_obj = process_subscriptions(&tbs[..], &table_fields);
 		}
 		_ => {}
 	}
 
 	// Generate auth mutations (signIn/signUp) from access definitions
 	{
-		let accesses = tx.all_db_accesses(db_def.namespace_id, db_def.database_id).await?;
+		let accesses = tx.all_db_accesses(db_def.namespace_id, db_def.database_id, None).await?;
 		if !accesses.is_empty() {
 			let mut auth_mutation = mutation_obj.take().unwrap_or_else(|| Object::new("Mutation"));
 			auth_mutation = add_auth_mutations(auth_mutation, &accesses, ns, db, datastore);
@@ -199,8 +211,13 @@ pub async fn generate_schema(
 	} else {
 		None
 	};
+	let subscription_name = if subscription_obj.is_some() {
+		Some("Subscription")
+	} else {
+		None
+	};
 
-	let mut schema = Schema::build("Query", mutation_name, None).register(query);
+	let mut schema = Schema::build("Query", mutation_name, subscription_name).register(query);
 
 	// Apply depth and complexity limits from the GraphQL config
 	if let Some(depth) = gql_config.depth_limit {
@@ -216,6 +233,9 @@ pub async fn generate_schema(
 
 	if let Some(mutation) = mutation_obj {
 		schema = schema.register(mutation);
+	}
+	if let Some(subscription) = subscription_obj {
+		schema = schema.register(subscription);
 	}
 	for ty in types {
 		trace!("adding type: {ty:?}");
@@ -445,6 +465,30 @@ fn enum_token_to_literal(ks: &[Kind], token: &str, enum_scope: Option<&str>) -> 
 	None
 }
 
+fn literal_to_base_kind(literal: &KindLiteral) -> Kind {
+	match literal {
+		KindLiteral::String(_) => Kind::String,
+		KindLiteral::Integer(_) => Kind::Int,
+		KindLiteral::Float(_) => Kind::Float,
+		KindLiteral::Decimal(_) => Kind::Decimal,
+		KindLiteral::Duration(_) => Kind::Duration,
+		KindLiteral::Bool(_) => Kind::Bool,
+		KindLiteral::Object(_) => Kind::Object,
+		KindLiteral::Array(kinds) => {
+			let len = Some(kinds.len() as u64);
+			if let Some(first) = kinds.first()
+				&& kinds.iter().all(|k| k == first)
+			{
+				Kind::Array(Box::new(first.clone()), len)
+			} else {
+				// tuple-like literal arrays are represented as array<any> for GraphQL then
+				// validated
+				Kind::Array(Box::new(Kind::Any), len)
+			}
+		}
+	}
+}
+
 /// Map a SurrealDB [`Kind`] to a GraphQL [`TypeRef`].
 ///
 /// This is the central type-mapping function: it translates SurrealDB's type
@@ -630,9 +674,14 @@ pub fn kind_to_type_with_enum_prefix(
 		}
 		Kind::Function(_, _) => return Err(schema_error("Kind::Function is not yet supported")),
 		Kind::Range => return Err(schema_error("Kind::Range is not yet supported")),
-		// TODO(raphaeldarley): check if union is of literals and generate enum
-		// generate custom scalar from other literals?
-		Kind::Literal(_) => return Err(schema_error("Kind::Literal is not yet supported")),
+		Kind::Literal(literal) => {
+			return kind_to_type_with_enum_prefix(
+				literal_to_base_kind(&literal),
+				types,
+				is_input,
+				enum_scope,
+			);
+		}
 		Kind::File(_) => return Err(schema_error("Kind::File is not yet supported")),
 	};
 
@@ -830,8 +879,12 @@ pub(crate) fn gql_to_sql_kind_with_scope(
 			GqlValue::String(s) => {
 				use Kind::*;
 				any_try_kinds!(val, Datetime, Duration, Uuid);
-				let expr = syn::expr_legacy_strand(s.as_str())?;
-				convert_static_expr(expr.into())
+				if let Ok(expr) = syn::expr_legacy_strand(s.as_str())
+					&& let Ok(out) = convert_static_expr(expr.into())
+				{
+					return Ok(out);
+				}
+				Ok(SurValue::String(s.to_owned()))
 			}
 			GqlValue::Null => Ok(SurValue::Null),
 			obj @ GqlValue::Object(_) => gql_to_sql_kind(obj, Kind::Object),
@@ -1118,7 +1171,15 @@ pub(crate) fn gql_to_sql_kind_with_scope(
 		},
 		Kind::Function(_, _) => Err(resolver_error("Functions are not yet supported")),
 		Kind::Range => Err(resolver_error("Ranges are not yet supported")),
-		Kind::Literal(_) => Err(resolver_error("Literals are not yet supported")),
+		Kind::Literal(literal) => {
+			let base_kind = literal_to_base_kind(&literal);
+			let converted = gql_to_sql_kind_with_scope(val, base_kind, enum_scope)?;
+			if literal.validate_value(&converted) {
+				Ok(converted)
+			} else {
+				Err(type_error(Kind::Literal(literal), val))
+			}
+		}
 		Kind::Regex => Err(resolver_error("Regexes are not yet supported")),
 		Kind::File(_) => Err(resolver_error("Files are not yet supported")),
 	}

@@ -164,17 +164,22 @@ impl<'a> IndexAnalyzer<'a> {
 				continue; // Single-element handled by match_operator_to_access; too-large skipped
 			}
 
+			// Track best candidate: prefer single-column indexes (fewer
+			// columns) because they produce BTreeAccess::Equality sub-paths
+			// which enable merge-by-id on UnionIndexScan for ORDER BY id
+			// sort elimination.  Multi-column indexes create Compound
+			// sub-paths that are sorted by remaining columns, not by id,
+			// so they cannot participate in the merge optimisation.  When
+			// no single-column index exists, we fall back to the narrowest
+			// compound index available.
+			let mut best: Option<(usize, usize)> = None; // (index idx, num cols)
+
 			for (idx, ix_def) in self.indexes.iter().enumerate() {
 				if ix_def.prepare_remove {
 					continue;
 				}
 				if !matches!(ix_def.index, crate::catalog::Index::Idx | crate::catalog::Index::Uniq)
 				{
-					continue;
-				}
-				// Only handle single-column indexes for IN expansion.
-				// Compound indexes would need prefix handling.
-				if ix_def.cols.len() != 1 {
 					continue;
 				}
 
@@ -184,20 +189,46 @@ impl<'a> IndexAnalyzer<'a> {
 					continue;
 				}
 
+				// The IN column must be the FIRST column of the index.
 				if let Some(first_col) = ix_def.cols.first()
 					&& idiom_matches(idiom, first_col)
 				{
-					let index_ref = IndexRef::new(self.indexes.clone(), idx);
-					let paths: Vec<AccessPath> = values
+					let ncols = ix_def.cols.len();
+					if best.is_none_or(|(_, best_ncols)| ncols < best_ncols) {
+						best = Some((idx, ncols));
+					}
+				}
+			}
+
+			if let Some((idx, ncols)) = best {
+				let index_ref = IndexRef::new(self.indexes.clone(), idx);
+				let paths: Vec<AccessPath> = if ncols == 1 {
+					// Single-column index: equality scans
+					values
 						.iter()
 						.map(|v| AccessPath::BTreeScan {
 							index_ref: index_ref.clone(),
 							access: BTreeAccess::Equality(v.clone()),
 							direction,
 						})
-						.collect();
-					return Some(AccessPath::Union(paths));
-				}
+						.collect()
+				} else {
+					// Compound index: prefix scans with IN value as first
+					// column.  The remaining columns provide ordering and
+					// selectivity for other WHERE conditions.
+					values
+						.iter()
+						.map(|v| AccessPath::BTreeScan {
+							index_ref: index_ref.clone(),
+							access: BTreeAccess::Compound {
+								prefix: vec![v.clone()],
+								range: None,
+							},
+							direction,
+						})
+						.collect()
+				};
+				return Some(AccessPath::Union(paths));
 			}
 		}
 
@@ -497,6 +528,16 @@ impl<'a> IndexAnalyzer<'a> {
 							// beyond the equality prefix.
 							if let Some(op) = normalize_range_op(&cond.op, cond.position) {
 								range_condition = Some((op, cond.value.clone()));
+							} else if matches!(cond.op, BinaryOperator::NotEqual)
+								&& matches!(cond.value, Value::Null | Value::None)
+							{
+								// `field IS NOT NULL` / `field != NULL` / `field != NONE`.
+								// NULL and NONE sort first in the BTree key ordering, so
+								// "not null/none" is equivalent to `field > NULL` for
+								// compound range purposes. This narrows the scan to
+								// exclude entries where this column is NULL/NONE.
+								range_condition =
+									Some((BinaryOperator::MoreThan, cond.value.clone()));
 							}
 							break;
 						}
@@ -957,10 +998,10 @@ impl<'a> IndexAnalyzer<'a> {
 		nn: &NearestNeighbor,
 		candidates: &mut Vec<IndexCandidate>,
 	) {
-		// Only HNSW-backed (Approximate) KNN uses index scan
-		let (k, ef) = match nn {
-			NearestNeighbor::Approximate(k, ef) => (*k, *ef),
-			// K (brute-force) and KTree don't use index analysis
+		// Approximate always uses HNSW; K(k,d) uses HNSW when distance matches
+		let (k, user_ef, required_distance) = match nn {
+			NearestNeighbor::Approximate(k, ef) => (*k, Some(*ef), None),
+			NearestNeighbor::K(k, d) => (*k, None, Some(d)),
 			_ => return,
 		};
 
@@ -999,14 +1040,20 @@ impl<'a> IndexAnalyzer<'a> {
 				continue;
 			}
 
-			// Only HNSW indexes support KNN
-			if !matches!(ix_def.index, Index::Hnsw(_)) {
+			let Index::Hnsw(ref hnsw) = ix_def.index else {
+				continue;
+			};
+
+			if let Some(d) = required_distance
+				&& *d != hnsw.distance
+			{
 				continue;
 			}
 
 			if let Some(first_col) = ix_def.cols.first()
 				&& idiom_matches(idiom, first_col)
 			{
+				let ef = user_ef.unwrap_or_else(|| k.max(hnsw.ef_construction as u32));
 				let index_ref = IndexRef::new(self.indexes.clone(), idx);
 				let candidate = IndexCandidate {
 					index_ref,
@@ -1036,6 +1083,86 @@ impl<'a> IndexAnalyzer<'a> {
 		// The order value is already an Idiom
 		let idiom = &first_order.value;
 
+		// Check existing compound candidates: if a compound candidate has an
+		// equality prefix covering columns 0..N, and the ORDER BY field
+		// matches column N (the column right after the prefix), the compound
+		// scan naturally produces records in ORDER BY order. Mark it as
+		// covering ORDER BY so that the planner can push LIMIT down and
+		// eliminate the Sort operator.
+		//
+		// We also handle the case where leading ORDER BY fields match
+		// equality-prefix columns and can be skipped (they are constant).
+		for candidate in candidates.iter_mut() {
+			match &candidate.access {
+				BTreeAccess::Compound {
+					prefix,
+					..
+				} => {
+					let ix_def = candidate.index_ref.definition();
+
+					// Collect equality-prefix column idioms
+					let prefix_cols: Vec<&Idiom> = ix_def.cols.iter().take(prefix.len()).collect();
+
+					// Skip leading ORDER BY fields that match prefix columns
+					let mut order_idx = 0;
+					for field in order_list.0.iter() {
+						if prefix_cols.iter().any(|col| idiom_matches(&field.value, col)) {
+							order_idx += 1;
+						} else {
+							break;
+						}
+					}
+
+					// Check if the next ORDER BY field matches the column
+					// after the prefix (or if it's `id` when all index
+					// columns are exhausted by the prefix)
+					if let Some(next_order) = order_list.0.get(order_idx) {
+						if let Some(next_col) = ix_def.cols.get(prefix.len()) {
+							if idiom_matches(&next_order.value, next_col) {
+								candidate.covers_order = true;
+							}
+						} else {
+							// All index columns are in the prefix — check for ORDER BY id
+							if next_order.value.is_id() {
+								candidate.covers_order = true;
+							}
+						}
+					} else {
+						// All ORDER BY fields matched prefix columns (all constant) —
+						// ordering is trivially satisfied
+						candidate.covers_order = true;
+					}
+				}
+				BTreeAccess::Equality(_) => {
+					// For single-column equality, the index column is constant.
+					// Skip ORDER BY fields matching the equality column, then
+					// check if the next field is `id` (the non-unique BTree
+					// tail key).
+					let ix_def = candidate.index_ref.definition();
+					let eq_cols: Vec<&Idiom> = ix_def.cols.iter().collect();
+
+					let mut order_idx = 0;
+					for field in order_list.0.iter() {
+						if eq_cols.iter().any(|col| idiom_matches(&field.value, col)) {
+							order_idx += 1;
+						} else {
+							break;
+						}
+					}
+
+					if let Some(next_order) = order_list.0.get(order_idx) {
+						if next_order.value.is_id() {
+							candidate.covers_order = true;
+						}
+					} else {
+						// All ORDER BY fields matched equality columns
+						candidate.covers_order = true;
+					}
+				}
+				_ => {}
+			}
+		}
+
 		// Find indexes that match this idiom as first column
 		for (idx, ix_def) in self.indexes.iter().enumerate() {
 			if ix_def.prepare_remove {
@@ -1055,7 +1182,24 @@ impl<'a> IndexAnalyzer<'a> {
 				// Mark existing candidate as covering order, or add new one
 				let existing = candidates.iter_mut().find(|c| c.index_ref == index_ref);
 				if let Some(candidate) = existing {
-					candidate.covers_order = true;
+					// Only set covers_order here for candidates that were NOT
+					// already analyzed in the first loop (Compound/Equality).
+					// Those candidates have precise covers_order logic that
+					// accounts for multi-field ORDER BY; blindly overriding
+					// would incorrectly mark e.g. a single-column equality
+					// index as covering ORDER BY when it only matches the
+					// first ORDER BY field but not subsequent ones.
+					match &candidate.access {
+						BTreeAccess::Compound {
+							..
+						}
+						| BTreeAccess::Equality(_) => {
+							// Already analyzed above — don't override
+						}
+						_ => {
+							candidate.covers_order = true;
+						}
+					}
 				} else {
 					// Create a full-range scan candidate that covers order
 					let candidate = IndexCandidate {

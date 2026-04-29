@@ -89,6 +89,20 @@ pub(crate) async fn evaluate_field(
 		Value::Object(obj) => Ok(obj.get(name).cloned().unwrap_or(Value::None)),
 
 		Value::RecordId(rid) => {
+			// When we are already computing fields for this record, fetch the
+			// raw stored data without re-evaluating computed fields. Otherwise
+			// a computed field like `{ return $this.id.prop }` would re-enter
+			// compute_fields_for_value for the same record and stack-overflow.
+			if ctx.computing_record.as_ref() == Some(rid) {
+				let version = ctx.exec_ctx.version_stamp();
+				let raw =
+					crate::exec::operators::fetch::fetch_raw_record(ctx.exec_ctx, rid, version)
+						.await?;
+				return match raw {
+					Some(Value::Object(obj)) => Ok(obj.get(name).cloned().unwrap_or(Value::None)),
+					_ => Ok(Value::None),
+				};
+			}
 			let fetched = if ctx.skip_fetch_perms {
 				crate::exec::operators::fetch::fetch_record_no_perms(ctx.exec_ctx, rid).await?
 			} else {

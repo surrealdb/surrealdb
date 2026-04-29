@@ -19,7 +19,10 @@ use futures::{Sink, SinkExt};
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
 use surrealdb_core::iam::token::Token;
 use surrealdb_core::rpc::{DbResponse, DbResult};
-use surrealdb_types::{AuthError, Error as TypesError, NotAllowedError};
+use surrealdb_types::{
+	AuthError, ConnectionError, Error as TypesError, NotAllowedError, SerializationError,
+	ValidationError,
+};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -200,7 +203,10 @@ where
 
 	// Check for duplicate request IDs
 	if session_state.pending_requests.contains_key(&id) {
-		let error = Error::internal(format!("Duplicate request ID: {id}"));
+		let error = Error::validation(
+			format!("Duplicate request ID: {id}"),
+			ValidationError::InvalidParams,
+		);
 		if response.send(Err(error)).await.is_err() {
 			trace!("Receiver dropped");
 		}
@@ -248,7 +254,10 @@ where
 		&& binary.len() > max_size
 	{
 		if response
-			.send(Err(Error::internal(format!("Message too long: {}", binary.len()))))
+			.send(Err(Error::validation(
+				format!("Message too long: {}", binary.len()),
+				ValidationError::InvalidParams,
+			)))
 			.await
 			.is_err()
 		{
@@ -273,7 +282,10 @@ where
 			);
 		}
 		Err(error) => {
-			let err = Error::internal(format!("WebSocket error: {:?}", error));
+			let err = Error::connection(
+				format!("WebSocket error: {:?}", error),
+				ConnectionError::ConnectionFailed,
+			);
 			if response.send(Err(err)).await.is_err() {
 				trace!("Receiver dropped");
 			}
@@ -317,7 +329,12 @@ where
 	match DbResponse::from_bytes(binary) {
 		Ok(response) => handle_db_response::<M, S, E>(response, sessions, sink).await,
 		Err(error) => {
-			handle_parse_error(Error::internal(error.to_string()), binary, sessions).await
+			handle_parse_error(
+				Error::serialization(error.to_string(), SerializationError::Deserialization),
+				binary,
+				sessions,
+			)
+			.await
 		}
 	}
 }
@@ -646,8 +663,10 @@ async fn handle_session_drop<M, S, E>(
 async fn clear_pending_requests(sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>) {
 	for state in sessions.values().into_iter().flatten() {
 		for request in state.pending_requests.values() {
-			let error = std::io::Error::from(std::io::ErrorKind::ConnectionReset);
-			let err = crate::Error::internal(format!("{error}"));
+			let err = crate::Error::connection(
+				"Connection reset".to_string(),
+				surrealdb_types::ConnectionError::ConnectionFailed,
+			);
 			request.response_channel.send(Err(err)).await.ok();
 			request.response_channel.close();
 		}
@@ -659,8 +678,11 @@ async fn clear_pending_requests(sessions: &HashMap<Uuid, Result<Arc<SessionState
 async fn clear_live_queries(sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>) {
 	for state in sessions.values().into_iter().flatten() {
 		for sender in state.live_queries.values() {
-			let error = std::io::Error::from(std::io::ErrorKind::ConnectionReset);
-			sender.send(Err(crate::Error::internal(error.to_string()))).await.ok();
+			let err = crate::Error::connection(
+				"Connection reset".to_string(),
+				surrealdb_types::ConnectionError::ConnectionFailed,
+			);
+			sender.send(Err(err)).await.ok();
 			sender.close();
 		}
 		state.live_queries.clear();

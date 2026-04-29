@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 reason = "WHERE id = record_id should use RecordIdScan instead of a full table scan"
 

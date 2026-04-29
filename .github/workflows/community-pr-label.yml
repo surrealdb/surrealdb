@@ -26,6 +26,11 @@ jobs:
       pull-requests: write
     runs-on: ubuntu-latest
     steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
       - name: Label community PRs
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8 (Actions must be pinned by commit hash)
         with:
@@ -36,6 +41,7 @@ jobs:
               'delskayn',
               'dhghomon',
               'emmanuel-keller',
+              'itsezc',
               'kearfy',
               'mumoshu',
               'rushmorem',

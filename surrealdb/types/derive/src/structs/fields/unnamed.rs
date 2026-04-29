@@ -2,10 +2,16 @@ use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
 use syn::Ident;
 
+use crate::CratePath;
+
 #[derive(Debug)]
 pub struct UnnamedFields {
+	pub rename: Option<String>,
 	pub fields: Vec<syn::Type>,
 	pub field_names: Vec<Ident>,
+	/// When true, the type will be wrapped in the SerdeWrapper type to provide interop with
+	/// serde-only types
+	pub wrap: Vec<bool>,
 	pub tuple: bool,
 	pub skip_content: Option<crate::SkipContent>,
 }
@@ -13,8 +19,10 @@ pub struct UnnamedFields {
 impl UnnamedFields {
 	pub fn new(
 		fields: Vec<syn::Type>,
+		wrap: Vec<bool>,
 		tuple: bool,
 		skip_content: Option<crate::SkipContent>,
+		rename: Option<String>,
 	) -> Self {
 		let field_names = fields
 			.iter()
@@ -23,34 +31,48 @@ impl UnnamedFields {
 			.collect();
 
 		Self {
+			rename,
 			fields,
 			field_names,
 			tuple,
 			skip_content,
+			wrap,
 		}
 	}
 
-	pub fn arr_assignments(&self) -> Vec<TokenStream2> {
+	pub fn arr_assignments(&self, crate_path: &CratePath) -> Vec<TokenStream2> {
 		self.fields
 			.iter()
 			.enumerate()
 			.map(|(i, _)| {
 				let field_name = &self.field_names[i];
+				let potentially_wrapped = if self.wrap[i] {
+					let crate_path = crate_path.wrapper();
+					quote! {#crate_path(#field_name)}
+				} else {
+					quote! {#field_name}
+				};
 				quote! {
-					arr.push(#field_name.into_value());
+					arr.push(#potentially_wrapped.into_value());
 				}
 			})
 			.collect()
 	}
 
-	pub fn arr_retrievals(&self) -> Vec<TokenStream2> {
+	pub fn arr_retrievals(&self, crate_path: &CratePath) -> Vec<TokenStream2> {
 		self.fields
 			.iter()
 			.enumerate()
 			.map(|(i, ty)| {
 				let ident = Ident::new(&format!("field_{}", i), Span::call_site());
+				let (potentially_wrapped, val_access) = if self.wrap[i] {
+					let crate_path = crate_path.wrapper();
+					(quote! {#crate_path::<#ty>}, quote! {.0})
+				} else {
+					(quote! {#ty}, quote! {})
+				};
 				quote! {
-					let #ident = <#ty as SurrealValue>::from_value(arr.remove(0))?;
+					let #ident = <#potentially_wrapped as SurrealValue>::from_value(arr.remove(0))?#val_access;
 				}
 			})
 			.collect()
@@ -71,15 +93,21 @@ impl UnnamedFields {
 			.collect()
 	}
 
-	pub fn field_checks(&self) -> Vec<TokenStream2> {
+	pub fn field_checks(&self, crate_path: &CratePath) -> Vec<TokenStream2> {
 		self.fields
 			.iter()
 			.enumerate()
 			.map(|(i, ty)| {
+				let potentially_wrapped = if self.wrap[i] {
+					let crate_path = crate_path.wrapper();
+					quote! {#crate_path::<#ty>}
+				} else {
+					quote! {#ty}
+				};
 				quote! {
 					if valid {
 						if let Some(v) = arr.get(#i) {
-							if !<#ty as SurrealValue>::is_value(v) {
+							if !<#potentially_wrapped as SurrealValue>::is_value(v) {
 								valid = false;
 							}
 						} else {
@@ -91,11 +119,23 @@ impl UnnamedFields {
 			.collect()
 	}
 
-	pub fn arr_types(&self) -> Vec<TokenStream2> {
+	pub fn arr_types(&self, type_name: &syn::Ident, crate_path: &CratePath) -> Vec<TokenStream2> {
+		let kind_ty = crate_path.kind();
 		self.fields
 			.iter()
-			.map(|ty| {
-				quote! { arr.push(<#ty as SurrealValue>::kind_of()); }
+			.enumerate()
+			.map(|(i, ty)| {
+				if crate::type_contains_ident(ty, type_name) {
+					return quote! { arr.push(#kind_ty::Any); };
+				}
+
+				let potentially_wrapped = if self.wrap[i] {
+					let crate_path = crate_path.wrapper();
+					quote! {#crate_path::<#ty>}
+				} else {
+					quote! {#ty}
+				};
+				quote! { arr.push(<#potentially_wrapped as SurrealValue>::kind_of()); }
 			})
 			.collect()
 	}

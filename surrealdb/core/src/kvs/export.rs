@@ -6,7 +6,8 @@ use surrealdb_types::{SurrealValue, ToSql};
 
 use super::Transaction;
 use crate::catalog::providers::{
-	AuthorisationProvider, DatabaseProvider, TableProvider, UserProvider,
+	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, TableProvider,
+	UserProvider,
 };
 use crate::catalog::{DatabaseId, NamespaceId, Record, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
@@ -27,6 +28,10 @@ pub struct Config {
 	pub params: bool,
 	pub functions: bool,
 	pub analyzers: bool,
+	pub apis: bool,
+	pub buckets: bool,
+	pub modules: bool,
+	pub configs: bool,
 	pub tables: TableConfig,
 	pub versions: bool,
 	pub records: bool,
@@ -41,12 +46,24 @@ impl Default for Config {
 			params: true,
 			functions: true,
 			analyzers: true,
+			apis: true,
+			buckets: true,
+			modules: true,
+			configs: true,
 			tables: TableConfig::default(),
 			versions: false,
 			records: true,
 			sequences: true,
 		}
 	}
+}
+
+/// Named-field wrapper so that the untagged `SurrealValue` serialization
+/// can differentiate `Exclude` from `Some` (include).
+#[derive(Clone, Debug, SurrealValue)]
+#[surreal(crate = "surrealdb_types")]
+pub struct ExcludedTables {
+	pub exclude: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, SurrealValue)]
@@ -59,6 +76,7 @@ pub enum TableConfig {
 	#[surreal(value = false)]
 	None,
 	Some(Vec<String>),
+	Exclude(ExcludedTables),
 }
 
 // TODO: This should probably be removed
@@ -88,7 +106,7 @@ impl From<Vec<&str>> for TableConfig {
 impl TableConfig {
 	/// Check if we should export tables
 	pub(crate) fn is_any(&self) -> bool {
-		matches!(self, Self::All | Self::Some(_))
+		matches!(self, Self::All | Self::Some(_) | Self::Exclude(_))
 	}
 	// Check if we should export a specific table
 	pub(crate) fn includes(&self, table: &str) -> bool {
@@ -96,6 +114,15 @@ impl TableConfig {
 			Self::All => true,
 			Self::None => false,
 			Self::Some(v) => v.iter().any(|v| v.eq(table)),
+			Self::Exclude(v) => !v.exclude.iter().any(|v| v.eq(table)),
+		}
+	}
+	/// Returns the explicitly listed table names, if any.
+	pub(crate) fn names(&self) -> Option<&[String]> {
+		match self {
+			Self::Some(v) => Some(v.as_slice()),
+			Self::Exclude(v) => Some(v.exclude.as_slice()),
+			_ => None,
 		}
 	}
 }
@@ -140,7 +167,7 @@ impl Transaction {
 		cfg: Config,
 		chn: Sender<Vec<u8>>,
 	) -> Result<()> {
-		let db = self.get_db_by_name(ns, db).await?.ok_or_else(|| {
+		let db = self.get_db_by_name(ns, db, None).await?.ok_or_else(|| {
 			anyhow::Error::new(Error::DbNotFound {
 				name: db.to_owned(),
 			})
@@ -165,7 +192,7 @@ impl Transaction {
 
 		// Output USERS
 		if cfg.users {
-			let users = self.all_db_users(ns, db).await?;
+			let users = self.all_db_users(ns, db, None).await?;
 			self.export_section(
 				"USERS",
 				users.iter().map(|x| DefineUserStatement::from_definition(Base::Db, x)),
@@ -176,7 +203,7 @@ impl Transaction {
 
 		// Output ACCESSES
 		if cfg.accesses {
-			let accesses = self.all_db_accesses(ns, db).await?;
+			let accesses = self.all_db_accesses(ns, db, None).await?;
 			self.export_section(
 				"ACCESSES",
 				accesses
@@ -189,19 +216,19 @@ impl Transaction {
 
 		// Output PARAMS
 		if cfg.params {
-			let params = self.all_db_params(ns, db).await?;
+			let params = self.all_db_params(ns, db, None).await?;
 			self.export_section("PARAMS", params.iter(), chn).await?;
 		}
 
 		// Output FUNCTIONS
 		if cfg.functions {
-			let functions = self.all_db_functions(ns, db).await?;
+			let functions = self.all_db_functions(ns, db, None).await?;
 			self.export_section("FUNCTIONS", functions.iter(), chn).await?;
 		}
 
 		// Output ANALYZERS
 		if cfg.analyzers {
-			let analyzers = self.all_db_analyzers(ns, db).await?;
+			let analyzers = self.all_db_analyzers(ns, db, None).await?;
 			self.export_section(
 				"ANALYZERS",
 				analyzers.iter().map(DefineAnalyzerStatement::from_definition),
@@ -210,9 +237,33 @@ impl Transaction {
 			.await?;
 		}
 
+		// Output APIS
+		if cfg.apis {
+			let apis = self.all_db_apis(ns, db, None).await?;
+			self.export_section("APIS", apis.iter(), chn).await?;
+		}
+
+		// Output BUCKETS
+		if cfg.buckets {
+			let buckets = self.all_db_buckets(ns, db, None).await?;
+			self.export_section("BUCKETS", buckets.iter(), chn).await?;
+		}
+
+		// Output MODULES
+		if cfg.modules {
+			let modules = self.all_db_modules(ns, db, None).await?;
+			self.export_section("MODULES", modules.iter(), chn).await?;
+		}
+
+		// Output CONFIGS
+		if cfg.configs {
+			let configs = self.all_db_configs(ns, db, None).await?;
+			self.export_section("CONFIGS", configs.iter(), chn).await?;
+		}
+
 		// Output SEQUENCES
 		if cfg.sequences {
-			let sequences = self.all_db_sequences(ns, db).await?;
+			let sequences = self.all_db_sequences(ns, db, None).await?;
 			self.export_section("SEQUENCES", sequences.iter(), chn).await?;
 		}
 
@@ -258,6 +309,15 @@ impl Transaction {
 		}
 		// Fetch all of the tables for this NS / DB
 		let tables = self.all_tb(ns, db, None).await?;
+		// Warn if any specified table names don't match existing tables
+		if let Some(names) = cfg.tables.names() {
+			let existing: Vec<&str> = tables.iter().map(|t| t.name.as_str()).collect();
+			for name in names {
+				if !existing.contains(&name.as_str()) {
+					warn!("Table '{name}' does not exist in the database");
+				}
+			}
+		}
 		// Loop over all of the tables in order
 		for table in tables.iter() {
 			// Check if this table is included in the export config
@@ -288,20 +348,24 @@ impl Transaction {
 		chn.send(bytes!("")).await?;
 		chn.send(bytes!(format!("{};", table.to_sql()))).await?;
 		chn.send(bytes!("")).await?;
-		// Export all table field definitions for this table
+		// Export all table field definitions with OVERWRITE to ensure
+		// idempotent re-import (relation tables auto-generate in/out fields,
+		// and array types generate sub-field definitions that would conflict).
 		let fields = self.all_tb_fields(ns, db, &table.name, None).await?;
 		for field in fields.iter() {
-			chn.send(bytes!(format!("{};", field.to_sql()))).await?;
+			let mut stmt = field.to_sql_definition();
+			stmt.kind = crate::sql::statements::define::DefineKind::Overwrite;
+			chn.send(bytes!(format!("{};", stmt.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table index definitions for this table
-		let indexes = self.all_tb_indexes(ns, db, &table.name).await?;
+		let indexes = self.all_tb_indexes(ns, db, &table.name, None).await?;
 		for index in indexes.iter() {
 			chn.send(bytes!(format!("{};", index.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table event definitions for this table
-		let events = self.all_tb_events(ns, db, &table.name).await?;
+		let events = self.all_tb_events(ns, db, &table.name, None).await?;
 		for event in events.iter() {
 			chn.send(bytes!(format!("{};", event.to_sql()))).await?;
 		}

@@ -8,7 +8,7 @@ use super::api::{ScanLimit, Transactable};
 use super::batch::Batch;
 use super::scanner::{Direction, Scanner};
 use super::{IntoBytes, Key, Result, Val};
-use crate::kvs::timestamp::{TimeStamp, TimeStampImpl};
+use crate::kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 
 /// Specifies whether the transaction is read-only or writeable.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -139,12 +139,12 @@ impl Transactor {
 	/// This function fetches all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getp<K>(&self, key: K) -> Result<Vec<(Key, Val)>>
+	pub async fn getp<K>(&self, key: K, version: Option<u64>) -> Result<Vec<(Key, Val)>>
 	where
 		K: IntoBytes + Debug,
 	{
 		let key = key.into_vec();
-		self.inner.getp(key).await
+		self.inner.getp(key, version).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -163,14 +163,14 @@ impl Transactor {
 
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn set<K, V>(&self, key: K, val: V, version: Option<u64>) -> Result<()>
+	pub async fn set<K, V>(&self, key: K, val: V) -> Result<()>
 	where
 		K: IntoBytes + Debug,
 		V: IntoBytes + Debug,
 	{
 		let key = key.into_vec();
 		let val = val.into_vec();
-		self.inner.set(key, val, version).await
+		self.inner.set(key, val).await
 	}
 
 	/// Insert or replace a key in the datastore.
@@ -187,14 +187,14 @@ impl Transactor {
 
 	/// Insert a key if it doesn't exist in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn put<K, V>(&self, key: K, val: V, version: Option<u64>) -> Result<()>
+	pub async fn put<K, V>(&self, key: K, val: V) -> Result<()>
 	where
 		K: IntoBytes + Debug,
 		V: IntoBytes + Debug,
 	{
 		let key = key.into_vec();
 		let val = val.into_vec();
-		self.inner.put(key, val, version).await
+		self.inner.put(key, val).await
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -566,12 +566,12 @@ impl Transactor {
 	// --------------------------------------------------
 
 	/// Get the current monotonic timestamp
-	pub async fn timestamp(&self) -> Result<TimeStamp> {
+	pub async fn timestamp(&self) -> Result<BoxTimeStamp> {
 		self.inner.timestamp().await
 	}
 
 	/// Returns the implementation of timestamp that this transaction uses.
-	pub fn timestamp_impl(&self) -> TimeStampImpl {
+	pub fn timestamp_impl(&self) -> BoxTimeStampImpl {
 		self.inner.timestamp_impl()
 	}
 }

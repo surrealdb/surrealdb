@@ -1,16 +1,20 @@
 #![cfg(feature = "kv-surrealkv")]
 
+mod background_flusher;
 mod cnf;
-mod sync;
+mod commit_coordinator;
 
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
+use background_flusher::BackgroundFlusher;
+use chrono::{DateTime, Utc};
+use commit_coordinator::CommitCoordinator;
 use surrealkv::{
 	Durability, HistoryOptions, LSMIterator, Mode, Transaction as Tx, Tree, TreeBuilder,
 };
-use sync::{BackgroundFlusher, CommitCoordinator};
 use tokio::sync::RwLock;
 
 use super::Direction;
@@ -19,13 +23,17 @@ use super::config::{SurrealKvConfig, SyncMode};
 use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
+use crate::kvs::timestamp::{
+	BoxTimeStamp, BoxTimeStampImpl, MAX_TIMESTAMP_BYTES, TimeStamp, TimeStampImpl,
+};
 use crate::kvs::{Key, Val};
 
 const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 
 pub struct Datastore {
 	db: Tree,
-	enable_versions: bool,
+	/// Whether the datastore supports transaction versioning
+	versioned: bool,
 	/// Commit coordinator for batching transaction commits when sync=every
 	commit_coordinator: Option<Arc<CommitCoordinator>>,
 	/// Background flusher for periodically flushing WAL when sync=<interval>
@@ -37,8 +45,8 @@ pub struct Transaction {
 	done: AtomicBool,
 	/// Is the transaction writeable?
 	write: bool,
-	/// Is versioning enabled?
-	enable_versions: bool,
+	/// Whether the datastore supports transaction versioning
+	versioned: bool,
 	/// The underlying datastore transaction
 	inner: RwLock<Tx>,
 	/// Commit coordinator for grouped fsync (when sync=every)
@@ -76,6 +84,9 @@ impl Datastore {
 		info!(target: TARGET, "Versioning with versioned_index: {}", versioned_index);
 		let builder = builder.with_versioned_index(versioned_index);
 
+		// Configure the maximum memtable size
+		info!(target: TARGET, "Setting max memtable size: {}", *cnf::SURREALKV_MAX_MEMTABLE_SIZE);
+		let builder = builder.with_max_memtable_size(*cnf::SURREALKV_MAX_MEMTABLE_SIZE);
 		// Enable the block cache capacity
 		info!(target: TARGET, "Setting block cache capacity: {}", *cnf::SURREALKV_BLOCK_CACHE_CAPACITY);
 		let builder = builder.with_block_cache_capacity(*cnf::SURREALKV_BLOCK_CACHE_CAPACITY);
@@ -108,7 +119,7 @@ impl Datastore {
 		// Create and return the datastore
 		Ok(Datastore {
 			db,
-			enable_versions: config.versioned,
+			versioned: config.versioned,
 			commit_coordinator,
 			background_flusher,
 		})
@@ -150,7 +161,7 @@ impl Datastore {
 		Ok(Box::new(Transaction {
 			done: AtomicBool::new(false),
 			write,
-			enable_versions: self.enable_versions,
+			versioned: self.versioned,
 			inner: RwLock::new(txn),
 			commit_coordinator: self.commit_coordinator.clone(),
 		}))
@@ -215,6 +226,10 @@ impl Transactable for Transaction {
 	/// Checks if a key exists in the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn exists(&self, key: Key, version: Option<u64>) -> Result<bool> {
+		// Versioned queries require a versioned datastore
+		if !self.versioned && version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -233,6 +248,10 @@ impl Transactable for Transaction {
 	/// Fetch a key from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn get(&self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
+		// Versioned queries require a versioned datastore
+		if !self.versioned && version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -250,7 +269,7 @@ impl Transactable for Transaction {
 
 	/// Insert or update a key in the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set(&self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
+	async fn set(&self, key: Key, val: Val) -> Result<()> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -262,10 +281,7 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Set the key
-		match version {
-			Some(ts) => inner.set_at(&key, &val, ts)?,
-			None => inner.set(&key, &val)?,
-		}
+		inner.set(&key, &val)?;
 		// Return result
 		Ok(())
 	}
@@ -291,7 +307,7 @@ impl Transactable for Transaction {
 
 	/// Insert a key if it doesn't exist in the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put(&self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
+	async fn put(&self, key: Key, val: Val) -> Result<()> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -303,13 +319,9 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Set the key if empty
-		if let Some(ts) = version {
-			inner.set_at(&key, &val, ts)?;
-		} else {
-			match inner.get(&key)? {
-				None => inner.set(&key, &val)?,
-				_ => return Err(Error::TransactionKeyAlreadyExists),
-			}
+		match inner.get(&key)? {
+			None => inner.set(&key, &val)?,
+			_ => return Err(Error::TransactionKeyAlreadyExists),
 		}
 		// Return result
 		Ok(())
@@ -352,7 +364,7 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Delete the key
-		if self.enable_versions {
+		if self.versioned {
 			inner.soft_delete(&key)?;
 		} else {
 			inner.delete(&key)?;
@@ -375,7 +387,7 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Delete the key if valid
-		if self.enable_versions {
+		if self.versioned {
 			match (inner.get(&key)?, chk) {
 				(Some(v), Some(w)) if v == w => inner.soft_delete(&key)?,
 				(None, None) => inner.soft_delete(&key)?,
@@ -437,6 +449,10 @@ impl Transactable for Transaction {
 	/// Count the total number of keys within a range.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn count(&self, rng: Range<Key>, version: Option<u64>) -> Result<usize> {
+		// Versioned queries require a versioned datastore
+		if !self.versioned && version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -517,6 +533,10 @@ impl Transactable for Transaction {
 		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
+		// Versioned queries require a versioned datastore
+		if !self.versioned && version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -567,6 +587,10 @@ impl Transactable for Transaction {
 		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
+		// Versioned queries require a versioned datastore
+		if !self.versioned && version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -617,6 +641,10 @@ impl Transactable for Transaction {
 		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
+		// Versioned queries require a versioned datastore
+		if !self.versioned && version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -667,6 +695,10 @@ impl Transactable for Transaction {
 		skip: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
+		// Versioned queries require a versioned datastore
+		if !self.versioned && version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -723,6 +755,59 @@ impl Transactable for Transaction {
 	/// Release the last save point.
 	async fn release_last_save_point(&self) -> Result<()> {
 		Ok(())
+	}
+
+	fn timestamp_impl(&self) -> BoxTimeStampImpl {
+		Box::new(SurrealKvTimeStampImpl)
+	}
+}
+
+struct SurrealKvTimeStamp(u64);
+
+impl TimeStamp for SurrealKvTimeStamp {
+	fn as_versionstamp(&self) -> u128 {
+		self.0 as u128
+	}
+
+	fn as_datetime(&self) -> Option<DateTime<Utc>> {
+		Some(DateTime::from_timestamp_nanos(self.0 as i64))
+	}
+
+	fn sub_checked(&self, duration: Duration) -> Option<BoxTimeStamp> {
+		let nanos: u64 = duration.as_nanos().try_into().ok()?;
+		Some(BoxTimeStamp::new(SurrealKvTimeStamp(self.0.checked_sub(nanos)?)))
+	}
+
+	fn encode<'a>(&self, bytes: &'a mut [u8; MAX_TIMESTAMP_BYTES]) -> &'a [u8] {
+		bytes[..8].copy_from_slice(&self.0.to_be_bytes());
+		&bytes[..8]
+	}
+}
+
+struct SurrealKvTimeStampImpl;
+
+impl TimeStampImpl for SurrealKvTimeStampImpl {
+	fn earliest(&self) -> BoxTimeStamp {
+		BoxTimeStamp::new(SurrealKvTimeStamp(0))
+	}
+
+	fn create_from_versionstamp(&self, version: u128) -> Option<BoxTimeStamp> {
+		Some(BoxTimeStamp::new(SurrealKvTimeStamp(version.try_into().ok()?)))
+	}
+
+	fn create_from_datetime(&self, dt: DateTime<Utc>) -> Option<BoxTimeStamp> {
+		let nanos = dt.timestamp_nanos_opt()?;
+		if nanos < 0 {
+			return None;
+		}
+		Some(BoxTimeStamp::new(SurrealKvTimeStamp(nanos as u64)))
+	}
+
+	fn decode(&self, bytes: &[u8]) -> Result<BoxTimeStamp> {
+		let bytes = <[u8; 8]>::try_from(bytes).map_err(|_| {
+			Error::TimestampInvalid("encoded timestamp not a valid length".to_string())
+		})?;
+		Ok(BoxTimeStamp::new(SurrealKvTimeStamp(u64::from_be_bytes(bytes))))
 	}
 }
 

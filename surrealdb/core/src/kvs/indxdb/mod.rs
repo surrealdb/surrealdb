@@ -149,11 +149,7 @@ impl Transactable for Transaction {
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set(&self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
-		// IndxDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+	async fn set(&self, key: Key, val: Val) -> Result<()> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -172,11 +168,7 @@ impl Transactable for Transaction {
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put(&self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
-		// IndxDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
+	async fn put(&self, key: Key, val: Val) -> Result<()> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);

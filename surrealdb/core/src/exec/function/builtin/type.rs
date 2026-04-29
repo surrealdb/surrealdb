@@ -4,9 +4,12 @@ use anyhow::Result;
 
 use crate::exec::ContextLevel;
 use crate::exec::function::{FunctionRegistry, ProjectionFunction, Signature};
+use crate::exec::parts::array_ops::evaluate_all;
+use crate::exec::parts::field::evaluate_field;
 use crate::exec::physical_expr::EvalContext;
 use crate::expr::Kind;
 use crate::expr::idiom::Idiom;
+use crate::expr::part::Part;
 use crate::fnc::args::FromArgs;
 use crate::val::Value;
 use crate::{define_pure_function, register_functions, syn};
@@ -61,6 +64,43 @@ define_pure_function!(TypeIsString, "type::is_string", (value: Any) -> Bool, cra
 define_pure_function!(TypeIsUuid, "type::is_uuid", (value: Any) -> Bool, crate::fnc::r#type::is::uuid);
 
 // =========================================================================
+// type::field / type::fields -- shared idiom evaluation helper
+// =========================================================================
+
+/// Walk an idiom path on a value with record-link-aware evaluation.
+///
+/// Unlike `Value::pick()` (which only handles Object and Array), this
+/// uses `evaluate_field` for `Part::Field` access, so `RecordId` values
+/// are automatically fetched from the database before continuing the path.
+async fn evaluate_idiom_on_value(
+	value: &Value,
+	parts: &[Part],
+	ctx: EvalContext<'_>,
+) -> Result<Value> {
+	let mut current = value.clone();
+	for part in parts {
+		current = match part {
+			Part::Field(f) => evaluate_field(&current, f.as_str(), ctx.clone())
+				.await
+				.map_err(|cf| anyhow::anyhow!("{cf}"))?,
+			Part::All => {
+				evaluate_all(&current, ctx.clone()).await.map_err(|cf| anyhow::anyhow!("{cf}"))?
+			}
+			Part::First => match &current {
+				Value::Array(arr) => arr.first().cloned().unwrap_or(Value::None),
+				_ => Value::None,
+			},
+			Part::Last => match &current {
+				Value::Array(arr) => arr.last().cloned().unwrap_or(Value::None),
+				_ => Value::None,
+			},
+			_ => current.pick(std::slice::from_ref(part)),
+		};
+	}
+	Ok(current)
+}
+
+// =========================================================================
 // type::field - Get a field value by string path (Projection Function)
 // =========================================================================
 
@@ -86,17 +126,14 @@ impl ProjectionFunction for TypeField {
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Vec<(Idiom, Value)>>> {
 		Box::pin(async move {
-			// Extract the string path argument
 			let (path,): (String,) = FromArgs::from_args("type::field", args)?;
 
-			// Parse the string as an Idiom
 			let idiom: Idiom = syn::idiom(&path)
 				.map_err(|e| anyhow::anyhow!("Invalid field path '{}': {}", path, e))?
 				.into();
 
-			// Get the field value from the current document
 			let value = if let Some(current) = ctx.current_value {
-				current.pick(&idiom.0)
+				evaluate_idiom_on_value(current, &idiom.0, ctx.clone()).await?
 			} else {
 				Value::None
 			};
@@ -132,20 +169,17 @@ impl ProjectionFunction for TypeFields {
 		args: Vec<Value>,
 	) -> crate::exec::BoxFut<'a, Result<Vec<(Idiom, Value)>>> {
 		Box::pin(async move {
-			// Extract the array of string paths
 			let (paths,): (Vec<String>,) = FromArgs::from_args("type::fields", args)?;
 
 			let mut results = Vec::with_capacity(paths.len());
 
 			for path in paths {
-				// Parse each string as an Idiom
 				let idiom: Idiom = syn::idiom(&path)
 					.map_err(|e| anyhow::anyhow!("Invalid field path '{}': {}", path, e))?
 					.into();
 
-				// Get the field value from the current document
 				let value = if let Some(current) = ctx.current_value {
-					current.pick(&idiom.0)
+					evaluate_idiom_on_value(current, &idiom.0, ctx.clone()).await?
 				} else {
 					Value::None
 				};

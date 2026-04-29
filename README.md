@@ -72,6 +72,7 @@ SurrealDB is used for data-intensive systems such as applications requiring mult
 **Key features of SurrealDB include:**
 
 - **Reduces development time**: SurrealDB simplifies your database and API stack by removing the need for most server-side components, allowing you to build secure, performant apps faster and cheaper.
+- **Multi-model**: native multi-model support for document, graph, relational (enforcing schema and schemaless), time-series, geospatial and retrieval (full-text, vector, hybrid). This is offered natively through SurrealQL, SurrealDB's SQL-like intuitive query language.
 - **Real-time collaborative API backend service:** SurrealDB functions as both a database and an API backend service, enabling real-time collaboration.
 - **Support for multiple querying languages:** SurrealDB supports SQL querying from client devices, GraphQL, ACID transactions, WebSocket connections, structured and unstructured data, graph querying, full-text and vector indexing, and geospatial querying.
 - **Granular access control**: SurrealDB provides row-level permissions-based access control, giving you the ability to manage data access with precision.

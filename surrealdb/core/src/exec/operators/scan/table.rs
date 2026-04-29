@@ -180,10 +180,10 @@ impl ExecOperator for TableScan {
 					Some(
 						v.cast_to::<crate::val::Datetime>()
 							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp()?,
+							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			if limit_val == Some(0) {
@@ -200,7 +200,7 @@ impl ExecOperator for TableScan {
 			} else {
 				// Runtime fallback (DynamicScan path or no txn at plan time)
 				let table_def = db_ctx
-					.get_table_def(&table_name)
+					.get_table_def(&table_name, version)
 					.await
 					.context("Failed to get table")?;
 
@@ -232,13 +232,14 @@ impl ExecOperator for TableScan {
 				return;
 			}
 
-			// Pre-compute whether any post-decode processing is needed
-			let needs_processing = ScanPipeline::compute_needs_processing(
-				&select_permission, &field_state, check_perms, predicate.as_ref(),
+			// Row-filtering (permissions, WHERE) prevents positional pushdown;
+			// row-modifying ops (computed fields, field perms) do not.
+			let needs_row_filtering = ScanPipeline::compute_needs_row_filtering(
+				&select_permission, predicate.as_ref(),
 			);
 
-			let pre_skip = if !needs_processing { start_val } else { 0 };
-			let effective_storage_limit = if !needs_processing { limit_val } else { None };
+			let pre_skip = if !needs_row_filtering { start_val } else { 0 };
+			let effective_storage_limit = if !needs_row_filtering { limit_val } else { None };
 
 			let beg = record::prefix(ns.namespace_id, db.database_id, &table_name)?;
 			let end = record::suffix(ns.namespace_id, db.database_id, &table_name)?;

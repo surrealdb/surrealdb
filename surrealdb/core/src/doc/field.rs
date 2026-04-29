@@ -327,8 +327,6 @@ impl Document {
 						}
 						// Process any ASSERT clause
 						val = field.process_assert_clause(val).await?;
-						// Process any REFERENCE clause
-						field.process_reference_clause(&val).await?;
 					}
 				}
 				// Process any PERMISSIONS clause
@@ -347,6 +345,55 @@ impl Document {
 		// Carry on
 		Ok(())
 	}
+	/// Processes reference clauses for all REFERENCE fields on this table.
+	/// Called after permission checks succeed so that reference keys are
+	/// only written for operations that are actually permitted.
+	pub(super) async fn process_table_references(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+	) -> Result<()> {
+		// Check import
+		if opt.import {
+			return Ok(());
+		}
+		// Get the record id
+		let rid = self.id()?;
+		// Loop through all field statements
+		for fd in self.fd(ctx, opt).await?.iter() {
+			// Only process reference fields
+			if fd.reference.is_none() {
+				continue;
+			}
+
+			// Limit auth
+			let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
+
+			// Loop over each field in the current document
+			for (k, val) in self.current.doc.as_ref().walk(&fd.name) {
+				// Get the initial value for diff comparison
+				let old = Arc::new(self.initial.doc.as_ref().pick(&k));
+
+				let mut field = FieldEditContext {
+					context: None,
+					doc: self,
+					rid: rid.clone(),
+					def: fd,
+					stk,
+					ctx,
+					opt: &opt,
+					old,
+					user_input: Value::None.into(),
+				};
+
+				field.process_reference_clause(&val).await?;
+			}
+		}
+
+		Ok(())
+	}
+
 	/// Processes `DEFINE FIELD` statements which
 	/// have been defined on the table for this
 	/// record, with a `REFERENCE` clause, and remove
@@ -511,7 +558,7 @@ impl FieldEditContext<'_> {
 					ctx
 				}
 				None => {
-					let mut ctx = Context::new(self.ctx);
+					let mut ctx = Context::new_child(self.ctx);
 					ctx.add_value("before", self.old.clone());
 					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
@@ -548,7 +595,7 @@ impl FieldEditContext<'_> {
 					ctx
 				}
 				None => {
-					let mut ctx = Context::new(self.ctx);
+					let mut ctx = Context::new_child(self.ctx);
 					ctx.add_value("before", self.old.clone());
 					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
@@ -591,7 +638,7 @@ impl FieldEditContext<'_> {
 					ctx
 				}
 				None => {
-					let mut ctx = Context::new(self.ctx);
+					let mut ctx = Context::new_child(self.ctx);
 					ctx.add_value("before", self.old.clone());
 					ctx.add_value("input", self.user_input.clone());
 					ctx.add_value("after", now.clone());
@@ -666,7 +713,7 @@ impl FieldEditContext<'_> {
 							ctx
 						}
 						None => {
-							let mut ctx = Context::new(self.ctx);
+							let mut ctx = Context::new_child(self.ctx);
 							ctx.add_value("before", self.old.clone());
 							ctx.add_value("input", self.user_input.clone());
 							ctx.add_value("after", now.clone());
@@ -756,7 +803,7 @@ impl FieldEditContext<'_> {
 							&self.rid.key,
 						);
 
-						self.ctx.tx().set(&key, &(), None).await?;
+						self.ctx.tx().set(&key, &()).await?;
 					}
 					RefAction::Delete(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;

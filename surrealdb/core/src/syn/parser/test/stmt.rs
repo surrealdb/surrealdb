@@ -27,7 +27,9 @@ use crate::sql::statements::define::{
 	DefineTableStatement,
 };
 use crate::sql::statements::live::LiveFields;
-use crate::sql::statements::remove::RemoveAnalyzerStatement;
+use crate::sql::statements::remove::{
+	RemoveAnalyzerStatement, RemoveConfigKind, RemoveConfigStatement,
+};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
@@ -1913,25 +1915,43 @@ fn parse_info() {
 		parser.parse_expr_inherit(stk).await
 	})
 	.unwrap();
-	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Root(false))));
+	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Root(false, None))));
 
 	let res = syn::parse_with("INFO FOR KV".as_bytes(), async |parser, stk| {
 		parser.parse_expr_inherit(stk).await
 	})
 	.unwrap();
-	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Root(false))));
+	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Root(false, None))));
+
+	let res = syn::parse_with(
+		"INFO FOR ROOT VERSION d'2025-01-01T00:00:00Z'".as_bytes(),
+		async |parser, stk| parser.parse_expr_inherit(stk).await,
+	)
+	.unwrap();
+	assert!(
+		matches!(res, Expr::Info(ref i) if matches!(i.as_ref(), InfoStatement::Root(false, Some(_))))
+	);
 
 	let res = syn::parse_with("INFO FOR NAMESPACE".as_bytes(), async |parser, stk| {
 		parser.parse_expr_inherit(stk).await
 	})
 	.unwrap();
-	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Ns(false))));
+	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Ns(false, None))));
 
 	let res = syn::parse_with("INFO FOR NS".as_bytes(), async |parser, stk| {
 		parser.parse_expr_inherit(stk).await
 	})
 	.unwrap();
-	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Ns(false))));
+	assert_eq!(res, Expr::Info(Box::new(InfoStatement::Ns(false, None))));
+
+	let res = syn::parse_with(
+		"INFO FOR NS VERSION d'2025-01-01T00:00:00Z'".as_bytes(),
+		async |parser, stk| parser.parse_expr_inherit(stk).await,
+	)
+	.unwrap();
+	assert!(
+		matches!(res, Expr::Info(ref i) if matches!(i.as_ref(), InfoStatement::Ns(false, Some(_))))
+	);
 
 	let res = syn::parse_with("INFO FOR TABLE table".as_bytes(), async |parser, stk| {
 		parser.parse_expr_inherit(stk).await
@@ -2508,6 +2528,55 @@ fn parse_remove() {
 			name: Expr::Idiom(Idiom(vec![Part::Field("foo".to_string())])),
 			base: Base::Db,
 			if_exists: false,
+		})))
+	);
+
+	let res = syn::parse_with(r#"REMOVE CONFIG GRAPHQL"#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_inherit(stk).await
+	})
+	.unwrap();
+	assert_eq!(
+		res,
+		Expr::Remove(Box::new(RemoveStatement::Config(RemoveConfigStatement {
+			kind: RemoveConfigKind::GraphQL,
+			if_exists: false,
+		})))
+	);
+
+	let res = syn::parse_with(r#"REMOVE CONFIG API"#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_inherit(stk).await
+	})
+	.unwrap();
+	assert_eq!(
+		res,
+		Expr::Remove(Box::new(RemoveStatement::Config(RemoveConfigStatement {
+			kind: RemoveConfigKind::Api,
+			if_exists: false,
+		})))
+	);
+
+	let res = syn::parse_with(r#"REMOVE CONFIG DEFAULT"#.as_bytes(), async |parser, stk| {
+		parser.parse_expr_inherit(stk).await
+	})
+	.unwrap();
+	assert_eq!(
+		res,
+		Expr::Remove(Box::new(RemoveStatement::Config(RemoveConfigStatement {
+			kind: RemoveConfigKind::Default,
+			if_exists: false,
+		})))
+	);
+
+	let res =
+		syn::parse_with(r#"REMOVE CONFIG IF EXISTS DEFAULT"#.as_bytes(), async |parser, stk| {
+			parser.parse_expr_inherit(stk).await
+		})
+		.unwrap();
+	assert_eq!(
+		res,
+		Expr::Remove(Box::new(RemoveStatement::Config(RemoveConfigStatement {
+			kind: RemoveConfigKind::Default,
+			if_exists: true,
 		})))
 	);
 }

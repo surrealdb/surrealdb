@@ -25,6 +25,6 @@ LET $database = "test_db";
 LET $user_role = "admin";
 
 -- Test DEFINE CONFIG DEFAULT with parameterized NAMESPACE and DATABASE values
-DEFINE CONFIG DEFAULT NAMESPACE $namespace DATABASE $database;
+DEFINE CONFIG OVERWRITE DEFAULT NAMESPACE $namespace DATABASE $database;
 
 (INFO FOR KV).defaults;

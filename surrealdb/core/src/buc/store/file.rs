@@ -62,14 +62,12 @@ impl FileStore {
 			})?
 			.unwrap_or(true);
 
-		// Get the path from the URL
-		// The mutability is needed to remove the leading slash on Windows
+		// Get the path from the URL.
+		// The root is a host filesystem path and must preserve its original case;
+		// `lowercase_paths` only affects object keys (handled by `to_os_path`).
+		// The mutability is needed to remove the leading slash on Windows.
 		#[allow(unused_mut)]
-		let mut path_from_url = if lowercase_paths {
-			url.path().to_lowercase()
-		} else {
-			url.path().to_string()
-		};
+		let mut path_from_url = url.path().to_string();
 
 		// Handle Windows-specific path formatting
 		#[cfg(windows)]

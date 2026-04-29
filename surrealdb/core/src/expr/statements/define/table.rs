@@ -21,7 +21,7 @@ use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
 use crate::expr::field::Selector;
 use crate::expr::parameterize::expr_to_ident;
-use crate::expr::paths::{IN, OUT};
+use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::{
 	Base, BinaryOperator, Cond, Expr, Field, Fields, FlowResultExt, Function, FunctionCall, Group,
 	Groups, Idiom, Kind, Literal, SelectStatement, View,
@@ -88,23 +88,24 @@ impl DefineTableStatement {
 		let db = txn.expect_db_by_name(ns_name, db_name).await?;
 
 		// Check if the definition exists
-		let table_id = if let Some(tb) = txn.get_tb(ns.namespace_id, db.database_id, &name).await? {
-			match self.kind {
-				DefineKind::Default => {
-					if !opt.import {
-						bail!(Error::TbAlreadyExists {
-							name: name.clone().into_string(),
-						});
+		let table_id =
+			if let Some(tb) = txn.get_tb(ns.namespace_id, db.database_id, &name, None).await? {
+				match self.kind {
+					DefineKind::Default => {
+						if !opt.import {
+							bail!(Error::TbAlreadyExists {
+								name: name.clone().into_string(),
+							});
+						}
 					}
+					DefineKind::Overwrite => {}
+					DefineKind::IfNotExists => return Ok(Value::None),
 				}
-				DefineKind::Overwrite => {}
-				DefineKind::IfNotExists => return Ok(Value::None),
-			}
 
-			tb.table_id
-		} else {
-			txn.get_next_tb_id(Some(ctx), ns.namespace_id, db.database_id).await?
-		};
+				tb.table_id
+			} else {
+				txn.get_next_tb_id(Some(ctx), ns.namespace_id, db.database_id).await?
+			};
 
 		let comment = stk
 			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
@@ -182,9 +183,10 @@ impl DefineTableStatement {
 			for ft in tables.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(ns.namespace_id, db.database_id, ft, &name);
-				txn.set(&key, &tb_def, None).await?;
+				txn.set(&key, &tb_def).await?;
 				// Refresh the table cache
-				let Some(foreign_tb) = txn.get_tb(ns.namespace_id, db.database_id, ft).await?
+				let Some(foreign_tb) =
+					txn.get_tb(ns.namespace_id, db.database_id, ft, None).await?
 				else {
 					bail!(Error::TbNotFound {
 						name: ft.clone(),
@@ -283,8 +285,23 @@ impl DefineTableStatement {
 		tables: &[TableName],
 		condition: Option<&Expr>,
 	) -> Result<()> {
+		// Build the initialization SELECT with `id` always included so we can
+		// extract the source record's key regardless of the user's field list.
+		let init_fields = match fields {
+			Fields::Select(user_fields) => {
+				let id_field = Field::Single(Selector {
+					expr: Expr::Idiom(Idiom::from(ID.to_vec())),
+					alias: None,
+				});
+				let mut all = vec![id_field];
+				all.extend(user_fields.iter().cloned());
+				Fields::Select(all)
+			}
+			other => other.clone(),
+		};
+
 		let select = SelectStatement {
-			fields: fields.clone(),
+			fields: init_fields,
 			what: tables.iter().map(|x| Expr::Table(x.clone())).collect(),
 			cond: condition.cloned().map(Cond),
 			omit: vec![],
@@ -320,11 +337,14 @@ impl DefineTableStatement {
 
 			let key = key::record::new(ns, db, view_table_name, &id.key);
 			let record = Arc::new(Record::new(Value::Object(o)));
-			tx.put(&key, &record, None).await?;
+			tx.put(&key, &record).await?;
 
 			let ns = doc_ctx.ns();
 			let db = doc_ctx.db();
-			let tb = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name).await?;
+			let tb = ctx
+				.tx()
+				.get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name, None)
+				.await?;
 			let fields = ctx
 				.tx()
 				.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
@@ -743,7 +763,7 @@ impl DefineTableStatement {
 			});
 
 			let key = RecordIdKey::Array(Array(group));
-			tx.put_record(ns, db, view_table_name, &key, record.clone(), None).await?;
+			tx.put_record(ns, db, view_table_name, &key, record.clone()).await?;
 
 			let id = Arc::new(RecordId {
 				table: view_table_name.clone(),
@@ -791,7 +811,6 @@ impl DefineTableStatement {
 						field_kind: val,
 						..Default::default()
 					},
-					None,
 				)
 				.await?;
 			}
@@ -807,7 +826,6 @@ impl DefineTableStatement {
 						field_kind: val,
 						..Default::default()
 					},
-					None,
 				)
 				.await?;
 			}

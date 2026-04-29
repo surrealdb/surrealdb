@@ -87,6 +87,19 @@ impl<'a> IndexOperation<'a> {
 		self
 	}
 
+	pub(crate) async fn create_fulltext_index(
+		ctx: &FrozenContext,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &IndexDefinition,
+	) -> Result<Option<FullTextIndex>> {
+		let Index::FullText(p) = &ix.index else {
+			return Ok(None);
+		};
+		let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
+		Ok(Some(FullTextIndex::new(ctx.get_index_stores(), &ctx.tx(), ikb, p).await?))
+	}
+
 	pub(crate) async fn compute(
 		&mut self,
 		stk: &mut Stk,
@@ -125,33 +138,49 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_unique(&mut self) -> Result<()> {
-		// Get the transaction
 		let txn = self.ctx.tx();
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
 			for o in i {
-				let key = self.get_unique_index_key(&o)?;
-				match txn.delc(&key, Some(self.rid)).await {
-					Err(e) => {
-						if matches!(
-							e.downcast_ref::<Error>(),
-							Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
-						) {
-							Ok(())
-						} else {
-							Err(e)
-						}
+				if o.is_any_none_or_null() {
+					// NONE/NULL tuples use the non-unique key format (with
+					// record ID suffix) so multiple such entries can coexist.
+					let key = self.get_non_unique_index_key(&o)?;
+					match txn.delc(&key, Some(self.rid)).await {
+						Err(e)
+							if matches!(
+								e.downcast_ref::<Error>(),
+								Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
+							) => {}
+						Err(e) => return Err(e),
+						Ok(()) => {}
 					}
-					Ok(v) => Ok(v),
-				}?
+				} else {
+					let key = self.get_unique_index_key(&o)?;
+					match txn.delc(&key, Some(self.rid)).await {
+						Err(e)
+							if matches!(
+								e.downcast_ref::<Error>(),
+								Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
+							) => {}
+						Err(e) => return Err(e),
+						Ok(()) => {}
+					}
+				}
 			}
 		}
 		// Create the new index data
 		if let Some(n) = self.n.take() {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
-				if !n.is_any_none_or_null() {
+				if n.is_any_none_or_null() {
+					// NONE/NULL tuples are stored with the non-unique key
+					// format so they remain visible to index scans. No
+					// uniqueness check — NULL != NULL per SQL convention.
+					let key = self.get_non_unique_index_key(&n)?;
+					txn.set(&key, self.rid).await?;
+				} else {
 					let key = self.get_unique_index_key(&n)?;
 					if txn.putc(&key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
@@ -193,7 +222,7 @@ impl<'a> IndexOperation<'a> {
 			let i = Indexable::new(n, self.ix);
 			for n in i {
 				let key = self.get_non_unique_index_key(&n)?;
-				txn.set(&key, self.rid, None).await?;
+				txn.set(&key, self.rid).await?;
 			}
 		}
 		Ok(())
@@ -234,7 +263,7 @@ impl<'a> IndexOperation<'a> {
 			relative_count > 0,
 			relative_count.unsigned_abs() as u64,
 		);
-		self.ctx.tx().put(&key, &(), None).await?;
+		self.ctx.tx().put(&key, &()).await?;
 		*require_compaction = true;
 		Ok(())
 	}
@@ -258,7 +287,7 @@ impl<'a> IndexOperation<'a> {
 		p: &HnswParams,
 	) -> Result<()> {
 		let tx = ctx.tx();
-		if let Some(tb) = tx.get_tb(ikb.ns(), ikb.db(), ikb.table()).await? {
+		if let Some(tb) = tx.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? {
 			let hnsw = ixs.get_index_hnsw(ikb.ns(), ikb.db(), ctx, tb.table_id, ix, p).await?;
 			hnsw.index_pendings(ctx).await?;
 		}
@@ -291,11 +320,20 @@ impl<'a> IndexOperation<'a> {
 		p: &FullTextParams,
 		require_compaction: &mut bool,
 	) -> Result<()> {
-		let mut rc = false;
 		// Build a FullText instance
 		let fti =
 			FullTextIndex::new(self.ctx.get_index_stores(), &self.ctx.tx(), self.ikb.clone(), p)
 				.await?;
+		self.compute_fulltext_with_index(stk, &fti, require_compaction).await
+	}
+
+	pub(crate) async fn compute_fulltext_with_index(
+		&mut self,
+		stk: &mut Stk,
+		fti: &FullTextIndex,
+		require_compaction: &mut bool,
+	) -> Result<()> {
+		let mut rc = false;
 		// Delete the old index data
 		let doc_id = if let Some(o) = self.o.take() {
 			fti.remove_content(stk, self.ctx, self.opt, self.rid, o, &mut rc).await?
@@ -339,7 +377,7 @@ impl<'a> IndexOperation<'a> {
 		nid: Uuid,
 	) -> Result<()> {
 		let ic = ikb.new_ic_key(nid);
-		tx.put(&ic, &(), None).await?;
+		tx.put(&ic, &()).await?;
 		Ok(())
 	}
 

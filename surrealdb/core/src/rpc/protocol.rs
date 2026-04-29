@@ -1448,7 +1448,11 @@ pub trait RpcProtocol {
 					return Err(invalid_params("Expected module name".to_string()));
 				};
 
-				let sub = segments.get(2).map(|x| (*x).to_string());
+				let sub = if segments.len() > 2 {
+					Some(segments[2..].join("::"))
+				} else {
+					None
+				};
 
 				Function::Module(name, sub)
 			}
@@ -1485,7 +1489,11 @@ pub trait RpcProtocol {
 					invalid_params("Expected patch version (u32) in version string".to_string())
 				})?;
 
-				let sub = segments.get(3).map(|x| (*x).to_string());
+				let sub = if segments.len() > 3 {
+					Some(segments[3..].join("::"))
+				} else {
+					None
+				};
 
 				Function::Silo {
 					org,

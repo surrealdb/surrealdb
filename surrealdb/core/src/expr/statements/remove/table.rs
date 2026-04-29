@@ -51,7 +51,7 @@ impl RemoveTableStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the defined table
-		let Some(tb) = txn.get_tb(ns, db, &name).await? else {
+		let Some(tb) = txn.get_tb(ns, db, &name, None).await? else {
 			if self.if_exists {
 				return Ok(Value::None);
 			}
@@ -65,7 +65,7 @@ impl RemoveTableStatement {
 		ctx.get_index_stores().table_removed(ctx.get_index_builder(), &txn, ns, db, &tb).await?;
 
 		// Get the foreign tables
-		let fts = txn.all_tb_views(ns, db, &name).await?;
+		let fts = txn.all_tb_views(ns, db, &name, None).await?;
 
 		if !fts.is_empty() {
 			let mut message =
@@ -85,7 +85,7 @@ impl RemoveTableStatement {
 		}
 
 		// Get the live queries
-		let lvs = txn.all_tb_lives(ns, db, &name).await?;
+		let lvs = txn.all_tb_lives(ns, db, &name, None).await?;
 
 		// Delete the definition
 		if self.expunge {

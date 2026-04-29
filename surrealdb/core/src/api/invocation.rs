@@ -91,7 +91,7 @@ pub async fn process_api_request_with_stack(
 	};
 
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-	let global_entry = ctx.tx().get_db_config(ns, db, "api").await?;
+	let global_entry = ctx.tx().get_db_config(ns, db, "api", None).await?;
 	let global = global_entry.as_ref().map(|v| v.try_as_api()).transpose()?;
 
 	// Check permissions

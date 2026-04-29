@@ -24,7 +24,7 @@ use crate::kvs::TransactionType::Write;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::tasklease::LeaseHandler;
 use crate::kvs::{
-	Datastore, HlcTimestamp, KVValue, Key, LockType, Transaction, TransactionFactory,
+	Datastore, HlcTimeStamp, KVValue, Key, LockType, Transaction, TransactionFactory,
 	TransactionType, Val, impl_kv_value_revisioned,
 };
 use crate::val::{RecordId, Value};
@@ -107,7 +107,7 @@ impl Document {
 				&mut self.current
 			};
 			// Configure the context
-			let mut ctx = Context::new(ctx);
+			let mut ctx = Context::new_child(ctx);
 			ctx.add_value("event", evt.into());
 			ctx.add_value("value", doc.doc.as_arc());
 			ctx.add_value("after", after);
@@ -144,7 +144,7 @@ impl Document {
 		cursor_doc: &mut CursorDoc,
 	) -> Result<()> {
 		let node_id = opt.id();
-		let ts = HlcTimestamp::next();
+		let ts = HlcTimeStamp::next();
 		let db = doc_ctx.db();
 		let tx = ctx.tx();
 		// Persist the event payload so it can be processed out-of-band.
@@ -159,7 +159,7 @@ impl Document {
 			node_id,
 		);
 		let event_record = AsyncEventRecord::new(&opt, &ctx, ev, cursor_doc)?;
-		tx.put(&key, &event_record, None).await?;
+		tx.put(&key, &event_record).await?;
 		tx.trigger_async_event();
 		Ok(())
 	}
@@ -255,7 +255,7 @@ impl AsyncEventRecord {
 
 	/// Rebuild the event context when processing a queued event.
 	fn build_event_context(&self, ctx: &FrozenContext) -> FrozenContext {
-		let mut ctx = Context::new(ctx);
+		let mut ctx = Context::new_child(ctx);
 		ctx.add_values(self.values.clone());
 		ctx.freeze()
 	}
@@ -368,7 +368,7 @@ impl AsyncEventRecord {
 				}
 			};
 			if let Some(lh) = lh {
-				lh.try_maintain_lease().await?
+				lh.try_maintain_lease().await?;
 			}
 		}
 		sender.close();
@@ -391,7 +391,7 @@ impl AsyncEventRecord {
 		let mut stack = TreeStack::new();
 		for (k, v) in res {
 			if let Some(lh) = lh {
-				lh.try_maintain_lease().await?
+				lh.try_maintain_lease().await?;
 			}
 			let event_context = AsyncEventContext::new(ds, lh.cloned(), k, v)?;
 			stack.enter(|stk| stk.run(|stk| event_context.run_event_checked(stk))).finish().await;
@@ -482,7 +482,7 @@ impl AsyncEventContext {
 		if ev.attempt <= ev.event_definition.retry() {
 			// Requeue with the same key so the event keeps its original queue position; retries are
 			// bounded here and no backoff is applied.
-			catch!(tx, tx.set(eq, ev, None).await);
+			catch!(tx, tx.set(eq, ev).await);
 		} else {
 			warn!(
 				"Final error after processing the event `{}` on table {} {} times: {e}",

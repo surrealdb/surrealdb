@@ -2,7 +2,7 @@
 [env]
 namespace = "test"
 database = "test"
-new-planner-strategy = "compute-only"
+planner-strategy = ["compute-only"]
 
 [test]
 reason = "Test that OPTION IMPORT populates indexes correctly"
@@ -14,7 +14,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "{ id: test:1, num: 123 }"
+value = "NONE"
 
 [[test.results]]
 value = "[{ id: test:1, num: 123 }]"

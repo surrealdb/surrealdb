@@ -125,7 +125,7 @@ impl Document {
 					let record = Arc::new(Record::new(data));
 
 					ctx.tx()
-						.set_record(db.namespace_id, db.database_id, table_name, id, record, None)
+						.set_record(db.namespace_id, db.database_id, table_name, id, record)
 						.await?;
 				} else {
 					ctx.tx().del_record(db.namespace_id, db.database_id, table_name, id).await?;
@@ -373,7 +373,7 @@ impl Document {
 		record.data = data;
 		let record = Arc::new(record);
 
-		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None)
+		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone())
 			.await?;
 
 		let id = Arc::new(RecordId {
@@ -384,7 +384,10 @@ impl Document {
 		let ns = self.doc_ctx.ns();
 		let db = self.doc_ctx.db();
 
-		let tb = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name).await?;
+		let tb = ctx
+			.tx()
+			.get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name, opt.version)
+			.await?;
 		let fields = ctx
 			.tx()
 			.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
@@ -451,7 +454,10 @@ impl Document {
 			let ns = self.doc_ctx.ns();
 			let db = self.doc_ctx.db();
 
-			let tb = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name).await?;
+			let tb = ctx
+				.tx()
+				.get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name, opt.version)
+				.await?;
 			let fields = ctx
 				.tx()
 				.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
@@ -744,7 +750,7 @@ impl Document {
 		record.data = data;
 		let record = Arc::new(record);
 
-		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None)
+		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone())
 			.await?;
 
 		let id = RecordId {
@@ -755,7 +761,10 @@ impl Document {
 		let ns = self.doc_ctx.ns();
 		let db = self.doc_ctx.db();
 
-		let tb = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name).await?;
+		let tb = ctx
+			.tx()
+			.get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name, opt.version)
+			.await?;
 		let fields = ctx
 			.tx()
 			.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
@@ -1151,7 +1160,7 @@ impl Document {
 		record.data = data;
 		let record = Arc::new(record);
 
-		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone(), None)
+		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone())
 			.await?;
 
 		let id = RecordId {
@@ -1162,7 +1171,10 @@ impl Document {
 		let ns = self.doc_ctx.ns();
 		let db = self.doc_ctx.db();
 
-		let tb = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name).await?;
+		let tb = ctx
+			.tx()
+			.get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name, opt.version)
+			.await?;
 		let fields = ctx
 			.tx()
 			.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)

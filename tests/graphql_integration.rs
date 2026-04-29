@@ -3,6 +3,7 @@ mod common;
 mod graphql_integration {
 	use std::time::Duration;
 
+	use futures_util::{SinkExt, StreamExt};
 	macro_rules! assert_equal_arrs {
 		($lhs: expr_2021, $rhs: expr_2021) => {
 			let lhs = $lhs.as_array().unwrap().iter().collect::<std::collections::HashSet<_>>();
@@ -15,6 +16,9 @@ mod graphql_integration {
 	use reqwest::Client;
 	use serde_json::json;
 	use test_log::test;
+	use tokio_tungstenite::connect_async;
+	use tokio_tungstenite::tungstenite::Message;
+	use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 	use ulid::Ulid;
 
 	use super::common;
@@ -3499,6 +3503,80 @@ mod graphql_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn schema_uses_surreal_comments_for_descriptions()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE person SCHEMAFUL COMMENT "Person records";
+					DEFINE FIELD name ON person TYPE string COMMENT "Person display name";
+					DEFINE FIELD age ON person TYPE int COMMENT "Person age";
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		}
+
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"{
+					queryType: __type(name: "Query") {
+						fields {
+							name
+							description
+						}
+					}
+					personType: __type(name: "person") {
+						fields {
+							name
+							description
+						}
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+
+		let query_fields = body["data"]["queryType"]["fields"].as_array().unwrap();
+		let person_query_field = query_fields.iter().find(|f| f["name"] == "person").unwrap();
+		assert_eq!(person_query_field["description"], "Person records");
+
+		let person_fields = body["data"]["personType"]["fields"].as_array().unwrap();
+		let name_field = person_fields.iter().find(|f| f["name"] == "name").unwrap();
+		let age_field = person_fields.iter().find(|f| f["name"] == "age").unwrap();
+
+		assert_eq!(name_field["description"], "Person display name");
+		assert_eq!(age_field["description"], "Person age");
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
 	async fn auth_mutations() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let gql_url = &format!("http://{addr}/graphql");
@@ -5434,6 +5512,685 @@ mod graphql_integration {
 			assert_eq!(body["data"]["test"][0]["type"], "TEST_TYPE_ENUM_1");
 		}
 
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn literal_kind_field_schema_and_mutation() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE sample SCHEMAFULL;
+					DEFINE FIELD OVERWRITE status ON sample TYPE "active";
+					CREATE sample:one SET status = "active";
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Kind::Literal field should no longer fail schema generation.
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"query { sample { id status } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected query to succeed for Kind::Literal field, got: {:?}",
+				body["errors"]
+			);
+			assert_eq!(body["data"]["sample"][0]["id"], "sample:one");
+			assert_eq!(body["data"]["sample"][0]["status"], "active");
+		}
+
+		// Mutation input should accept matching literal values.
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createSample(data: { status: "active" }) {
+							id
+							status
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected matching literal mutation to succeed, got: {:?}",
+				body["errors"]
+			);
+			assert_eq!(body["data"]["createSample"]["status"], "active");
+		}
+
+		// Mutation input should reject non-matching literal values.
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createSample(data: { status: "inactive" }) {
+							id
+							status
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_array(),
+				"Expected non-matching literal mutation to fail, got: {:?}",
+				body
+			);
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn literal_object_kind_field_schema_and_mutation()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE sampleobj SCHEMAFULL;
+					DEFINE FIELD OVERWRITE meta ON sampleobj TYPE { status: "active", score: int };
+					CREATE sampleobj:one SET meta = { status: "active", score: 10 };
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		{
+			let res = client
+				.post(gql_url)
+				.body(json!({"query": r#"query { sampleobj { id meta } }"#}).to_string())
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected query to succeed for Kind::Literal(Object), got: {:?}",
+				body["errors"]
+			);
+			assert_eq!(body["data"]["sampleobj"][0]["id"], "sampleobj:one");
+			assert_eq!(body["data"]["sampleobj"][0]["meta"]["status"], "active");
+			assert_eq!(body["data"]["sampleobj"][0]["meta"]["score"], 10);
+		}
+
+		// Mutation input should accept matching literal object values.
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createSampleobj(data: { meta: { status: "active", score: 11 } }) {
+							id
+							meta
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected matching literal object mutation to succeed, got: {:?}",
+				body["errors"]
+			);
+			assert_eq!(body["data"]["createSampleobj"]["meta"]["status"], "active");
+			assert_eq!(body["data"]["createSampleobj"]["meta"]["score"], 11);
+		}
+
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createSampleobj(data: { meta: { status: "inactive", score: 12 } }) {
+							id
+							meta
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_array(),
+				"Expected non-matching literal object mutation to fail, got: {:?}",
+				body
+			);
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn literal_numeric_bool_array_kinds_schema_and_mutation()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE litnum SCHEMAFULL;
+					DEFINE FIELD OVERWRITE intLit ON litnum TYPE 42;
+					DEFINE FIELD OVERWRITE floatLit ON litnum TYPE 3.5f;
+					DEFINE FIELD OVERWRITE decLit ON litnum TYPE 2.5dec;
+					DEFINE FIELD OVERWRITE boolLit ON litnum TYPE true;
+					DEFINE FIELD OVERWRITE arrLit ON litnum TYPE [1, "ok", true];
+					CREATE litnum:one SET
+						intLit = 42,
+						floatLit = 3.5f,
+						decLit = 2.5dec,
+						boolLit = true,
+						arrLit = [1, "ok", true];
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"query {
+						litnum {
+							id
+							intLit
+							floatLit
+							boolLit
+							arrLit
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected query to succeed for numeric/bool/array literal kinds, got: {:?}",
+				body["errors"]
+			);
+			assert_eq!(body["data"]["litnum"][0]["id"], "litnum:one");
+			assert_eq!(body["data"]["litnum"][0]["intLit"], 42);
+			assert_eq!(body["data"]["litnum"][0]["floatLit"], 3.5);
+			assert_eq!(body["data"]["litnum"][0]["boolLit"], true);
+			assert_eq!(body["data"]["litnum"][0]["arrLit"][0], 1);
+			assert_eq!(body["data"]["litnum"][0]["arrLit"][1], "ok");
+			assert_eq!(body["data"]["litnum"][0]["arrLit"][2], true);
+		}
+
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createLitnum(data: {
+							intLit: 42,
+							floatLit: 3.5,
+							decLit: 2.5,
+							boolLit: true,
+							arrLit: [1, "ok", true]
+						}) {
+							id
+							intLit
+							floatLit
+							boolLit
+							arrLit
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_null(),
+				"Expected matching numeric/bool/array literal mutation to succeed, got: {:?}",
+				body["errors"]
+			);
+			assert_eq!(body["data"]["createLitnum"]["intLit"], 42);
+			assert_eq!(body["data"]["createLitnum"]["floatLit"], 3.5);
+			assert_eq!(body["data"]["createLitnum"]["boolLit"], true);
+			assert_eq!(body["data"]["createLitnum"]["arrLit"][0], 1);
+			assert_eq!(body["data"]["createLitnum"]["arrLit"][1], "ok");
+			assert_eq!(body["data"]["createLitnum"]["arrLit"][2], true);
+		}
+
+		{
+			let res = client
+				.post(gql_url)
+				.body(
+					json!({"query": r#"mutation {
+						createLitnum(data: {
+							intLit: 43,
+							floatLit: 3.5,
+							decLit: 2.5,
+							boolLit: true,
+							arrLit: [1, "ok", true]
+						}) {
+							id
+							intLit
+						}
+					}"#})
+					.to_string(),
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+			let body = res.json::<serde_json::Value>().await?;
+			assert!(
+				body["errors"].is_array(),
+				"Expected non-matching numeric literal mutation to fail, got: {:?}",
+				body
+			);
+		}
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn subscriptions_live_query_stream() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_ws_url = &format!("ws://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE foo SCHEMAFUL;
+					DEFINE FIELD val ON foo TYPE int;
+					CREATE foo:1 SET val = 1;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		let mut req = gql_ws_url.into_client_request()?;
+		req.headers_mut().insert("surreal-ns", ns.parse()?);
+		req.headers_mut().insert("surreal-db", db.parse()?);
+		req.headers_mut().insert("Sec-WebSocket-Protocol", "graphql-transport-ws".parse()?);
+		let (mut ws, _) = connect_async(req).await?;
+
+		ws.send(Message::Text(json!({"type":"connection_init"}).to_string().into())).await?;
+		let Some(Ok(Message::Text(ack_msg))) = ws.next().await else {
+			return Err(std::io::Error::other("expected websocket connection ack").into());
+		};
+		let ack_json: serde_json::Value = serde_json::from_str(&ack_msg)?;
+		assert_eq!(ack_json["type"], "connection_ack");
+
+		ws.send(Message::Text(
+			json!({
+				"id": "sub-1",
+				"type": "subscribe",
+				"payload": {
+					"query": "subscription { foo { id val } }"
+				}
+			})
+			.to_string()
+			.into(),
+		))
+		.await?;
+
+		// Allow the server to fully register the live query before mutating data
+		tokio::time::sleep(Duration::from_secs(1)).await;
+
+		{
+			let res = client.post(sql_url).body(r#"CREATE foo:3 SET val = 99;"#).send().await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		let received = tokio::time::timeout(Duration::from_secs(10), async {
+			while let Some(frame) = ws.next().await {
+				let Ok(frame) = frame else {
+					continue;
+				};
+				let Message::Text(text) = frame else {
+					continue;
+				};
+				let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+					continue;
+				};
+				if value["type"] == "next" && value["payload"]["data"]["foo"]["id"] == "foo:3" {
+					return Some(value);
+				}
+			}
+			None
+		})
+		.await?
+		.ok_or_else(|| std::io::Error::other("subscription stream ended before event"))?;
+
+		assert_eq!(received["payload"]["data"]["foo"]["val"], 99);
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn subscriptions_live_query_shape_filter_and_id() -> Result<(), Box<dyn std::error::Error>>
+	{
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_ws_url = &format!("ws://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE foo SCHEMAFUL;
+					DEFINE FIELD val ON foo TYPE int;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		let mut req = gql_ws_url.into_client_request()?;
+		req.headers_mut().insert("surreal-ns", ns.parse()?);
+		req.headers_mut().insert("surreal-db", db.parse()?);
+		req.headers_mut().insert("Sec-WebSocket-Protocol", "graphql-transport-ws".parse()?);
+		let (mut ws, _) = connect_async(req).await?;
+
+		ws.send(Message::Text(json!({"type":"connection_init"}).to_string().into())).await?;
+		let Some(Ok(Message::Text(ack_msg))) = ws.next().await else {
+			return Err(std::io::Error::other("expected websocket connection ack").into());
+		};
+		let ack_json: serde_json::Value = serde_json::from_str(&ack_msg)?;
+		assert_eq!(ack_json["type"], "connection_ack");
+
+		ws.send(Message::Text(
+			json!({
+				"id": "sub-filter",
+				"type": "subscribe",
+				"payload": {
+					"query": "subscription { foo(where: { val: { eq: 99 } }, fetch: [\"val\"]) { id val } }"
+				}
+			})
+			.to_string()
+			.into(),
+		))
+		.await?;
+
+		ws.send(Message::Text(
+			json!({
+				"id": "sub-id",
+				"type": "subscribe",
+				"payload": {
+					"query": "subscription { foo(id: \"foo:target\") { val } }"
+				}
+			})
+			.to_string()
+			.into(),
+		))
+		.await?;
+
+		// Allow the server to fully register the live queries before mutating data
+		tokio::time::sleep(Duration::from_secs(1)).await;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					CREATE foo:other SET val = 1;
+					CREATE foo:filter_match SET val = 99;
+					CREATE foo:target SET val = 42;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		let mut got_filter = false;
+		let mut got_id = false;
+		tokio::time::timeout(Duration::from_secs(10), async {
+			while let Some(frame) = ws.next().await {
+				let Ok(frame) = frame else {
+					continue;
+				};
+				let Message::Text(text) = frame else {
+					continue;
+				};
+				let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+					continue;
+				};
+				if value["type"] != "next" {
+					continue;
+				}
+				match value["id"].as_str() {
+					Some("sub-filter") => {
+						assert_eq!(value["payload"]["data"]["foo"]["id"], "foo:filter_match");
+						assert_eq!(value["payload"]["data"]["foo"]["val"], 99);
+						got_filter = true;
+					}
+					Some("sub-id") => {
+						assert_eq!(value["payload"]["data"]["foo"]["val"], 42);
+						got_id = true;
+					}
+					_ => {}
+				}
+				if got_filter && got_id {
+					return;
+				}
+			}
+		})
+		.await?;
+
+		assert!(got_filter, "did not receive filtered subscription event");
+		assert!(got_id, "did not receive id-targeted subscription event");
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn subscriptions_live_query_shape_with_variables()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_ws_url = &format!("ws://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE foo SCHEMAFUL;
+					DEFINE FIELD val ON foo TYPE int;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		let mut req = gql_ws_url.into_client_request()?;
+		req.headers_mut().insert("surreal-ns", ns.parse()?);
+		req.headers_mut().insert("surreal-db", db.parse()?);
+		req.headers_mut().insert("Sec-WebSocket-Protocol", "graphql-transport-ws".parse()?);
+		let (mut ws, _) = connect_async(req).await?;
+
+		ws.send(Message::Text(json!({"type":"connection_init"}).to_string().into())).await?;
+		let Some(Ok(Message::Text(ack_msg))) = ws.next().await else {
+			return Err(std::io::Error::other("expected websocket connection ack").into());
+		};
+		let ack_json: serde_json::Value = serde_json::from_str(&ack_msg)?;
+		assert_eq!(ack_json["type"], "connection_ack");
+
+		ws.send(Message::Text(
+			json!({
+				"id": "sub-vars",
+				"type": "subscribe",
+				"payload": {
+					"query": "subscription($id: ID, $where: _filter_foo, $fetch: [String!]) { foo(id: $id, where: $where, fetch: $fetch) { val } }",
+					"variables": {
+						"id": "foo:target",
+						"where": { "val": { "eq": 42 } },
+						"fetch": ["val"]
+					}
+				}
+			})
+			.to_string()
+			.into(),
+		))
+		.await?;
+
+		// Allow the server to fully register the live query before mutating data
+		tokio::time::sleep(Duration::from_secs(1)).await;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					CREATE foo:other SET val = 1;
+					CREATE foo:target SET val = 42;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		let received = tokio::time::timeout(Duration::from_secs(10), async {
+			while let Some(frame) = ws.next().await {
+				let Ok(frame) = frame else {
+					continue;
+				};
+				let Message::Text(text) = frame else {
+					continue;
+				};
+				let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+					continue;
+				};
+				if value["type"] == "next" && value["id"] == "sub-vars" {
+					return Some(value);
+				}
+			}
+			None
+		})
+		.await?
+		.ok_or_else(|| std::io::Error::other("subscription stream ended before event"))?;
+
+		assert_eq!(received["payload"]["data"]["foo"]["val"], 42);
 		Ok(())
 	}
 }

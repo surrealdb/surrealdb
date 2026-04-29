@@ -534,6 +534,7 @@ impl ToSql for AssignOperator {
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub enum BindingPower {
 	Base,
+	Nullish,
 	Or,
 	And,
 	Equality,
@@ -541,7 +542,6 @@ pub enum BindingPower {
 	AddSub,
 	MulDiv,
 	Power,
-	Nullish,
 	Prefix,
 	Range,
 	Call,
@@ -643,13 +643,7 @@ impl BindingPower {
 			Expr::Postfix {
 				op,
 				..
-			} => {
-				if let PostfixOperator::Range | PostfixOperator::RangeSkip = *op {
-					BindingPower::Range
-				} else {
-					BindingPower::Prefix
-				}
-			}
+			} => BindingPower::for_postfix_operator(op),
 			Expr::Binary {
 				op,
 				..

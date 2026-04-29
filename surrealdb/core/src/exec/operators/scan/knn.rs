@@ -4,12 +4,14 @@
 //! index. It retrieves the top-K records closest to a query vector, ordered
 //! by distance (nearest first).
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use reblessive::TreeStack;
 
 use super::common::fetch_and_filter_records_batch;
+use super::pipeline::{ScanPipeline, build_field_state};
 use super::resolved::ResolvedTableContext;
 use crate::catalog::Index;
 use crate::err::Error;
@@ -57,6 +59,10 @@ pub struct KnnScan {
 	/// that satisfy this condition, preventing non-matching rows from
 	/// consuming top-K slots.
 	pub(crate) residual_cond: Option<Cond>,
+	/// Projection-aware field set for computed-field materialization.
+	/// Outer `None` = sub-operator mode (parent handles fields).
+	/// `Some(None)` = all fields, `Some(Some(set))` = specific fields.
+	pub(crate) needed_fields: Option<Option<HashSet<String>>>,
 }
 
 impl KnnScan {
@@ -70,6 +76,7 @@ impl KnnScan {
 		version: Option<Arc<dyn PhysicalExpr>>,
 		knn_context: Option<Arc<crate::exec::function::KnnContext>>,
 		residual_cond: Option<Cond>,
+		needed_fields: Option<Option<HashSet<String>>>,
 	) -> Self {
 		Self {
 			index_ref,
@@ -82,6 +89,7 @@ impl KnnScan {
 			metrics: Arc::new(OperatorMetrics::new()),
 			knn_context,
 			residual_cond,
+			needed_fields,
 		}
 	}
 
@@ -143,6 +151,7 @@ impl ExecOperator for KnnScan {
 		let knn_context = self.knn_context.clone();
 		let residual_cond = self.residual_cond.clone();
 		let resolved = self.resolved.clone();
+		let needed_fields = self.needed_fields.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -160,10 +169,10 @@ impl ExecOperator for KnnScan {
 					Some(
 						v.cast_to::<crate::val::Datetime>()
 							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp()?,
+							.to_version_stamp(txn.timestamp_impl().as_ref())?,
 					)
 				}
-				None => None,
+				None => ctx.version_stamp(),
 			};
 
 			// Get the FrozenContext from the root context
@@ -176,7 +185,7 @@ impl ExecOperator for KnnScan {
 				(perm, res.table_def.table_id)
 			} else {
 				let table_def = db_ctx
-					.get_table_def(&table_name)
+					.get_table_def(&table_name, version)
 					.await
 					.context("Failed to get table")?;
 
@@ -203,6 +212,22 @@ impl ExecOperator for KnnScan {
 			if matches!(select_permission, PhysicalPermission::Deny) {
 				return;
 			}
+
+			// Resolve field state for computed fields and field-level
+			// permissions. When needed_fields is None (sub-operator mode),
+			// the parent operator handles field processing.
+			let field_state = match &needed_fields {
+				Some(nf) => {
+					if let Some(ref res) = resolved {
+						res.field_state_for_projection(nf.as_ref())
+					} else {
+						build_field_state(
+							&ctx, &table_name, check_perms, nf.as_ref(),
+						).await?
+					}
+				}
+				None => super::pipeline::FieldState::empty(),
+			};
 
 			// Get the HNSW parameters from the index definition
 			let index_def = index_ref.definition();
@@ -287,8 +312,19 @@ impl ExecOperator for KnnScan {
 				}
 			}
 
+			// Table-level permissions are handled by fetch_and_filter_records_batch.
+			// The pipeline handles computed fields and field-level permissions.
+			let mut pipeline = ScanPipeline::new(
+				PhysicalPermission::Allow,
+				None,
+				field_state,
+				check_perms,
+				None,
+				0,
+			);
+
 			// Batch-fetch all records and apply permission filtering
-			let values = fetch_and_filter_records_batch(
+			let mut values = fetch_and_filter_records_batch(
 				&ctx,
 				&txn,
 				ns.namespace_id,
@@ -299,6 +335,8 @@ impl ExecOperator for KnnScan {
 				version,
 				CachePolicy::ReadWrite,
 			).await?;
+
+			pipeline.process_batch(&mut values, &ctx).await?;
 
 			if !values.is_empty() {
 				yield ValueBatch { values };

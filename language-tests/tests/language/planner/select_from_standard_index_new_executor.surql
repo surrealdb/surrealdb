@@ -1,4 +1,7 @@
 /**
+[env]
+planner-strategy = ["all-ro"]
+
 [test]
 
 [[test.results]]
@@ -42,9 +45,7 @@ value = "[{ id: session:3, other: 'test' }, { id: session:4, time: NULL }, { id:
 
 [[test.results]]
 value = ''''SelectProject [ctx: Db] [projections: *] {rows: 4}
-    Limit [ctx: Db] [limit: 4] {rows: 4}
-        SortTopKByKey [ctx: Db] [sort_keys: time DESC, limit: 4] {rows: 4}
-            IndexScan [ctx: Db] [index: time, access: , direction: Forward] {rows: 6}
+    IndexScan [ctx: Db] [index: time, access: , direction: Backward, limit: 4] {rows: 4}
 
 Total rows: 4''''
 
@@ -53,8 +54,7 @@ value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, tim
 
 [[test.results]]
 value = ''''SelectProject [ctx: Db] [projections: *] {rows: 6}
-    SortByKey [ctx: Db] [sort_keys: time DESC] {rows: 6}
-        IndexScan [ctx: Db] [index: time, access: , direction: Forward] {rows: 6}
+    IndexScan [ctx: Db] [index: time, access: , direction: Backward] {rows: 6}
 
 Total rows: 6''''
 
