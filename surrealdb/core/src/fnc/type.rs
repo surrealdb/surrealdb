@@ -192,6 +192,149 @@ pub fn uuid((val,): (Value,)) -> Result<Value> {
 	val.cast_to::<Uuid>().map(Value::from).map_err(Error::from).map_err(anyhow::Error::new)
 }
 
+pub mod r#try {
+	use anyhow::Result;
+	use geo::Point;
+	use rust_decimal::Decimal;
+
+	use crate::fnc::args::Optional;
+	use crate::val::{
+		Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
+		RecordIdKeyRange, Set, TableName, Uuid, Value,
+	};
+
+	pub fn array((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.cast_to::<Array>().map(Into::<Value>::into).unwrap_or(Value::None))
+	}
+
+	pub fn set((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.cast_to::<Set>().map(Into::<Value>::into).unwrap_or(Value::None))
+	}
+
+	pub fn bool((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.cast_to::<bool>().map(Into::<Value>::into).unwrap_or(Value::None))
+	}
+
+	pub fn file((bucket, key): (Value, Value)) -> Result<Value> {
+		let bucket = match bucket {
+			Value::String(x) => x,
+			_ => return Ok(Value::None),
+		};
+		let key = match key {
+			Value::String(x) => x,
+			_ => return Ok(Value::None),
+		};
+		Ok(Value::File(File::new(bucket, key)))
+	}
+
+	pub fn bytes((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.cast_to::<Bytes>().map(Into::<Value>::into).unwrap_or(Value::None))
+	}
+
+	pub fn datetime((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.cast_to::<Datetime>().map(Into::<Value>::into).unwrap_or(Value::None))
+	}
+
+	pub fn decimal((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.cast_to::<Decimal>().map(Into::<Value>::into).unwrap_or(Value::None))
+	}
+
+	pub fn duration((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.cast_to::<Duration>().map(Into::<Value>::into).unwrap_or(Value::None))
+	}
+
+	pub fn float((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.cast_to::<f64>().map(Into::<Value>::into).unwrap_or(Value::None))
+	}
+
+	pub fn geometry((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.cast_to::<Geometry>().map(Into::<Value>::into).unwrap_or(Value::None))
+	}
+
+	pub fn int((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.cast_to::<i64>().map(Into::<Value>::into).unwrap_or(Value::None))
+	}
+
+	pub fn number((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.cast_to::<Number>().map(Into::<Value>::into).unwrap_or(Value::None))
+	}
+
+	pub fn point((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.cast_to::<Point<f64>>().map(Into::<Value>::into).unwrap_or(Value::None))
+	}
+
+	pub fn range((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.cast_to::<Box<Range>>().map(Into::<Value>::into).unwrap_or(Value::None))
+	}
+
+	pub fn string((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.cast_to::<String>().map(Into::<Value>::into).unwrap_or(Value::None))
+	}
+
+	pub fn string_lossy((val,): (Value,)) -> Result<Value> {
+		Ok(match val {
+			//TODO: Replace with from_utf8_lossy_owned once stablized.
+			Value::Bytes(x) => String::from_utf8_lossy(&x).into_owned().into(),
+			x => x.cast_to::<String>().map(Value::from).unwrap_or(Value::None),
+		})
+	}
+
+	pub fn table((val,): (Value,)) -> Result<Value> {
+		let table_name = match val {
+			Value::Table(t) => t,
+			Value::RecordId(t) => t.table,
+			Value::String(t) => TableName::new(t),
+			_ => return Ok(Value::None),
+		};
+		Ok(Value::Table(table_name))
+	}
+
+	pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
+		match (arg1, arg2) {
+			// Empty table name
+			(Value::String(arg1), _) if arg1.is_empty() => Ok(Value::None),
+
+			// Handle second argument
+			(arg1, Some(arg2)) => Ok(Value::RecordId(RecordId {
+				key: match arg2 {
+					Value::RecordId(v) => v.key,
+					Value::Array(v) => v.into(),
+					Value::Object(v) => v.into(),
+					Value::Number(v) => match v {
+						Number::Int(x) => x.into(),
+						// Safety: float -> string conversion cannot contain a null byte.
+						Number::Float(x) => x.to_string().into(),
+						// Safety: decimal -> string conversion cannot contain a null byte.
+						Number::Decimal(x) => x.to_string().into(),
+					},
+					Value::Range(v) => {
+						let res = match RecordIdKeyRange::from_value_range((*v).clone()) {
+							Some(x) => x,
+							None => return Ok(Value::None),
+						};
+						RecordIdKey::Range(Box::new(res))
+					}
+					Value::Uuid(u) => u.into(),
+					ref v => {
+						let s = v.to_raw_string();
+						if s.is_empty() {
+							return Ok(Value::None);
+						}
+						RecordIdKey::String(s)
+					}
+				},
+				table: TableName::new(arg1.into_raw_string()),
+			})),
+
+			(arg1, None) => Ok(arg1.cast_to::<RecordId>().map(Value::from).unwrap_or(Value::None)),
+		}
+	}
+
+	pub fn uuid((val,): (Value,)) -> Result<Value> {
+		Ok(val.cast_to::<Uuid>().map(Value::from).unwrap_or(Value::None))
+	}
+}
+
 pub mod is {
 	use anyhow::Result;
 

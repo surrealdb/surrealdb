@@ -233,6 +233,28 @@ pub fn build_method_registry(funcs: &FunctionRegistry) -> MethodRegistry {
 	m.register_generic("to_uuid", get(funcs, "type::uuid"));
 
 	// =====================================================================
+	// Generic methods - attempt type conversion (available on all value types)
+	// These map to type::try_*
+	// =====================================================================
+	m.register_generic("try_array", get(funcs, "type::try_array"));
+	m.register_generic("try_bool", get(funcs, "type::try_bool"));
+	m.register_generic("try_bytes", get(funcs, "type::try_bytes"));
+	m.register_generic("try_datetime", get(funcs, "type::try_datetime"));
+	m.register_generic("try_decimal", get(funcs, "type::try_decimal"));
+	m.register_generic("try_duration", get(funcs, "type::try_duration"));
+	m.register_generic("try_float", get(funcs, "type::try_float"));
+	m.register_generic("try_geometry", get(funcs, "type::try_geometry"));
+	m.register_generic("try_int", get(funcs, "type::try_int"));
+	m.register_generic("try_number", get(funcs, "type::try_number"));
+	m.register_generic("try_point", get(funcs, "type::try_point"));
+	m.register_generic("try_range", get(funcs, "type::try_range"));
+	m.register_generic("try_record", get(funcs, "type::try_record"));
+	m.register_generic("try_set", get(funcs, "type::try_set"));
+	m.register_generic("try_string", get(funcs, "type::try_string"));
+	m.register_generic("try_string_lossy", get(funcs, "type::try_string_lossy"));
+	m.register_generic("try_uuid", get(funcs, "type::try_uuid"));
+
+	// =====================================================================
 	// Generic methods - type checking (available on all value types)
 	// These map to type::is_* functions.
 	// =====================================================================
