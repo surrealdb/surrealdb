@@ -162,6 +162,14 @@ impl IndexKey {
 	}
 }
 
+fn is_retryable_transaction_error(err: &Error) -> bool {
+	matches!(err, Error::TxRetryable | Error::TxRetryableConflictCheck)
+}
+
+fn is_initial_build_batch_retryable(err: &Error) -> bool {
+	matches!(err, Error::TxRetryableConflictCheck)
+}
+
 /// The builder for background index creation
 #[derive(Clone)]
 pub(crate) struct IndexBuilder {
@@ -288,7 +296,7 @@ impl IndexBuilder {
 					break;
 				}
 				if let Err(e) = building.index_appending_loop(None).await {
-					if matches!(e, Error::TxRetryable) {
+					if is_retryable_transaction_error(&e) {
 						// Transient conflicts are retried within index_appending_loop,
 						// but handle any that still propagate as a safety net.
 						warn!("{}: deferred daemon transient conflict, retrying", building.ix.name);
@@ -757,7 +765,7 @@ impl Building {
 				break;
 			}
 			self.index_initial_batch_once(
-				batch.result,
+				&batch.result,
 				&mut initial_count,
 				&mut v1_appending_sentinel,
 			)
@@ -880,7 +888,7 @@ impl Building {
 							})
 							.await;
 						}
-						Err(Error::TxRetryable) => {
+						Err(e) if is_retryable_transaction_error(&e) => {
 							let _ = tx.cancel().await;
 							updates_count = saved_updates_count;
 							warn!("{}: transient conflict on commit, retrying batch", self.ix.name);
@@ -891,7 +899,7 @@ impl Building {
 							return Err(e);
 						}
 					},
-					Err(Error::TxRetryable) => {
+					Err(e) if is_retryable_transaction_error(&e) => {
 						let _ = tx.cancel().await;
 						updates_count = saved_updates_count;
 						warn!(
@@ -916,36 +924,76 @@ impl Building {
 	/// Index one initial-build batch.
 	///
 	/// Initial build is expected to be conflict-free. Queue handoff records are read through a
-	/// separate read-only transaction, so commit conflicts here should surface as index build errors
-	/// rather than being hidden by a retry loop.
+	/// separate read-only transaction, so real commit conflicts here should surface as index build
+	/// errors. RocksDB can also return TryAgain when conflict-checking history is unavailable; that
+	/// is not a proven conflict, so retry the same fetched batch with fresh transactions.
 	async fn index_initial_batch_once(
 		&self,
-		values: Vec<(Key, Val)>,
+		values: &[(Key, Val)],
 		count: &mut usize,
 		v1_appending_sentinel: &mut bool,
 	) -> Result<(), Error> {
-		let read_tx = self.new_read_tx().await?;
-		let ctx = self.new_write_tx_ctx().await?;
-		let tx = ctx.tx();
-		let indexed = self
-			.index_initial_batch(&ctx, &read_tx, &tx, values, count, v1_appending_sentinel)
+		loop {
+			let read_tx = self.new_read_tx().await?;
+			let ctx = self.new_write_tx_ctx().await?;
+			let tx = ctx.tx();
+			let mut batch_count = 0;
+			let indexed = self
+				.index_initial_batch(
+					&ctx,
+					&read_tx,
+					&tx,
+					values,
+					&mut batch_count,
+					v1_appending_sentinel,
+				)
+				.await;
+			let cancel_read = read_tx.cancel().await;
+			if let Err(e) = indexed {
+				let _ = tx.cancel().await;
+				if is_initial_build_batch_retryable(&e) {
+					warn!(
+						"{}: conflict checking history unavailable during initial batch at initial={}, retrying",
+						self.ix.name, *count
+					);
+					sleep(Duration::from_millis(100)).await;
+					continue;
+				}
+				return Err(e);
+			}
+			if let Err(e) = cancel_read {
+				let _ = tx.cancel().await;
+				if is_initial_build_batch_retryable(&e) {
+					warn!(
+						"{}: conflict checking history unavailable while cancelling initial batch read at initial={}, retrying",
+						self.ix.name, *count
+					);
+					sleep(Duration::from_millis(100)).await;
+					continue;
+				}
+				return Err(e);
+			}
+			if let Err(e) = tx.commit().await {
+				let _ = tx.cancel().await;
+				if is_initial_build_batch_retryable(&e) {
+					warn!(
+						"{}: conflict checking history unavailable while committing initial batch at initial={}, retrying",
+						self.ix.name, *count
+					);
+					sleep(Duration::from_millis(100)).await;
+					continue;
+				}
+				return Err(e);
+			}
+			*count += batch_count;
+			self.set_status(BuildingStatus::Indexing {
+				initial: Some(*count),
+				pending: Some(self.queue.read().await.pending() as usize),
+				updated: None,
+			})
 			.await;
-		let _ = read_tx.cancel().await;
-		if let Err(e) = indexed {
-			let _ = tx.cancel().await;
-			return Err(e);
+			return Ok(());
 		}
-		if let Err(e) = tx.commit().await {
-			let _ = tx.cancel().await;
-			return Err(e);
-		}
-		self.set_status(BuildingStatus::Indexing {
-			initial: Some(*count),
-			pending: Some(self.queue.read().await.pending() as usize),
-			updated: None,
-		})
-		.await;
-		Ok(())
 	}
 
 	/// Index a batch of records from the table
@@ -954,7 +1002,7 @@ impl Building {
 		ctx: &Context,
 		read_tx: &Transaction,
 		write_tx: &Transaction,
-		values: Vec<(Key, Val)>,
+		values: &[(Key, Val)],
 		count: &mut usize,
 		v1_appending_sentinel: &mut bool,
 	) -> Result<(), Error> {
@@ -964,7 +1012,7 @@ impl Building {
 		// instead of per-document, avoiding repeated BTree load/save overhead.
 		let mut ft_index = IndexOperation::create_ft_index(ctx, &self.opt, &self.ix).await?;
 		// Index the records
-		for (k, v) in values.into_iter() {
+		for (k, v) in values {
 			if self.is_aborted().await {
 				// Finish FtIndex to persist progress made so far in this batch
 				if let Some(ref ft) = ft_index {
@@ -972,9 +1020,9 @@ impl Building {
 				}
 				return Ok(());
 			}
-			let key = thing::Thing::decode(&k)?;
+			let key = thing::Thing::decode(k)?;
 			// Parse the value
-			let val: Value = revision::from_slice(&v)?;
+			let val: Value = revision::from_slice(v)?;
 			let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();
 
 			// Do we already have an appended value?
@@ -1197,5 +1245,16 @@ impl Drop for DeferredDaemonGuard {
 	fn drop(&mut self) {
 		self.0.deferred_daemon_running.store(false, Ordering::Release);
 		self.0.completion_notify.notify_waiters();
+	}
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn initial_build_batch_retry_predicate_only_matches_conflict_check_gaps() {
+		assert!(is_initial_build_batch_retryable(&Error::TxRetryableConflictCheck));
+		assert!(!is_initial_build_batch_retryable(&Error::TxRetryable));
 	}
 }

@@ -108,6 +108,12 @@ pub enum Error {
 	#[error("Failed to commit transaction due to a read or write conflict. This transaction can be retried")]
 	TxRetryable,
 
+	/// There was a transaction error that can be retried because conflict checking history is unavailable
+	#[error(
+		"Failed to commit transaction because conflict checking history is unavailable. This transaction can be retried"
+	)]
+	TxRetryableConflictCheck,
+
 	/// The transaction writes too much data for the KV store
 	#[error("Transaction is too large")]
 	TxTooLarge,
@@ -1381,11 +1387,16 @@ impl From<surrealkv::Error> for Error {
 #[cfg(feature = "kv-rocksdb")]
 impl From<rocksdb::Error> for Error {
 	fn from(e: rocksdb::Error) -> Error {
-		match e.kind() {
-			rocksdb::ErrorKind::Busy => Error::TxRetryable,
-			rocksdb::ErrorKind::TryAgain => Error::TxRetryable,
-			_ => Error::Tx(e.to_string()),
-		}
+		rocksdb_error_kind_to_error(e.kind(), e.to_string())
+	}
+}
+
+#[cfg(feature = "kv-rocksdb")]
+fn rocksdb_error_kind_to_error(kind: rocksdb::ErrorKind, message: String) -> Error {
+	match kind {
+		rocksdb::ErrorKind::Busy => Error::TxRetryable,
+		rocksdb::ErrorKind::TryAgain => Error::TxRetryableConflictCheck,
+		_ => Error::Tx(message),
 	}
 }
 
@@ -1525,5 +1536,22 @@ impl Error {
 			},
 			e => e,
 		}
+	}
+}
+
+#[cfg(all(test, feature = "kv-rocksdb"))]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn rocksdb_conflict_error_kinds_are_classified_separately() {
+		assert!(matches!(
+			rocksdb_error_kind_to_error(rocksdb::ErrorKind::Busy, "busy".to_string()),
+			Error::TxRetryable
+		));
+		assert!(matches!(
+			rocksdb_error_kind_to_error(rocksdb::ErrorKind::TryAgain, "try again".to_string()),
+			Error::TxRetryableConflictCheck
+		));
 	}
 }
