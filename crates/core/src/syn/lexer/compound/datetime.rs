@@ -71,10 +71,7 @@ pub fn datetime_inner(lexer: &mut Lexer) -> Result<DateTime<Utc>, SyntaxError> {
 		let mut number = 0u32;
 		let mut count = 0;
 
-		loop {
-			let Some(d) = lexer.reader.peek() else {
-				break;
-			};
+		while let Some(d) = lexer.reader.peek() {
 			if !d.is_ascii_digit() {
 				break;
 			}

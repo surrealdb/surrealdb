@@ -123,25 +123,14 @@ impl Expression {
 			} => {
 				let l = l.compute(stk, ctx, opt, doc).await?;
 				match o {
-					Operator::Or => {
-						if l.is_truthy() {
-							return Ok(l);
-						}
+					Operator::Or | Operator::Tco if l.is_truthy() => {
+						return Ok(l);
 					}
-					Operator::And => {
-						if !l.is_truthy() {
-							return Ok(l);
-						}
+					Operator::And if !l.is_truthy() => {
+						return Ok(l);
 					}
-					Operator::Tco => {
-						if l.is_truthy() {
-							return Ok(l);
-						}
-					}
-					Operator::Nco => {
-						if l.is_some() {
-							return Ok(l);
-						}
+					Operator::Nco if l.is_some() => {
+						return Ok(l);
 					}
 					_ => {} // Continue
 				}

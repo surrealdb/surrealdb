@@ -30,32 +30,19 @@ impl Document {
 		let tb = self.tb(ctx, opt).await?;
 		// Determine the type of statement
 		match stm {
-			Statement::Create(_) => {
-				if !tb.allows_normal() {
-					return Err(Error::TableCheck {
-						thing: self.id()?.to_string(),
-						relation: false,
-						target_type: tb.kind.to_string(),
-					});
-				}
+			Statement::Create(_) | Statement::Upsert(_) if !tb.allows_normal() => {
+				return Err(Error::TableCheck {
+					thing: self.id()?.to_string(),
+					relation: false,
+					target_type: tb.kind.to_string(),
+				});
 			}
-			Statement::Upsert(_) => {
-				if !tb.allows_normal() {
-					return Err(Error::TableCheck {
-						thing: self.id()?.to_string(),
-						relation: false,
-						target_type: tb.kind.to_string(),
-					});
-				}
-			}
-			Statement::Relate(_) => {
-				if !tb.allows_relation() {
-					return Err(Error::TableCheck {
-						thing: self.id()?.to_string(),
-						relation: true,
-						target_type: tb.kind.to_string(),
-					});
-				}
+			Statement::Relate(_) if !tb.allows_relation() => {
+				return Err(Error::TableCheck {
+					thing: self.id()?.to_string(),
+					relation: true,
+					target_type: tb.kind.to_string(),
+				});
 			}
 			Statement::Insert(_) => match self.extras {
 				Workable::Relate(_, _, _) => {

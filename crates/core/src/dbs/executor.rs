@@ -218,25 +218,26 @@ impl Executor {
 					| Err(Error::Return {
 						value,
 					}) => {
-						let mut lock = txn.lock().await;
-
 						// non-writable transactions might return an error on commit.
 						// So cancel them instead. This is fine since a non-writable transaction
 						// has nothing to commit anyway.
 						if !writeable {
-							let _ = lock.cancel().await;
+							let _ = txn.cancel().await;
 							return Ok(value);
 						}
 
-						if let Err(e) = lock.complete_changes(false).await {
-							let _ = lock.cancel().await;
-
+						let complete = {
+							let mut lock = txn.lock().await;
+							lock.complete_changes(false).await
+						};
+						if let Err(e) = complete {
+							let _ = txn.cancel().await;
 							return Err(Error::QueryNotExecutedDetail {
 								message: e.to_string(),
 							});
 						}
 
-						if let Err(e) = lock.commit().await {
+						if let Err(e) = txn.commit().await {
 							return Err(Error::QueryNotExecutedDetail {
 								message: e.to_string(),
 							});
@@ -416,14 +417,16 @@ impl Executor {
 					return Ok(());
 				}
 				Statement::Commit(_) => {
-					let mut lock = txn.lock().await;
-
 					// complete_changes and then commit.
 					// If either error undo results.
-					let e = if let Err(e) = lock.complete_changes(false).await {
-						let _ = lock.cancel().await;
+					let complete = {
+						let mut lock = txn.lock().await;
+						lock.complete_changes(false).await
+					};
+					let e = if let Err(e) = complete {
+						let _ = txn.cancel().await;
 						e
-					} else if let Err(e) = lock.commit().await {
+					} else if let Err(e) = txn.commit().await {
 						e
 					} else {
 						// Successfully commited. everything is fine.

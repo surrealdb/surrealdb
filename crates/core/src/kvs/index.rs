@@ -162,6 +162,14 @@ impl IndexKey {
 	}
 }
 
+fn is_retryable_transaction_error(err: &Error) -> bool {
+	matches!(err, Error::TxRetryable | Error::TxRetryableConflictCheck)
+}
+
+fn is_initial_build_batch_retryable(err: &Error) -> bool {
+	matches!(err, Error::TxRetryableConflictCheck)
+}
+
 /// The builder for background index creation
 #[derive(Clone)]
 pub(crate) struct IndexBuilder {
@@ -241,8 +249,16 @@ impl IndexBuilder {
 				return;
 			}
 			if b.ix.defer {
-				// If it is a deferred indexing, start the daemon and return
+				// Set deferred_daemon_running BEFORE marking the initial build complete,
+				// so that is_finished() does not momentarily return true.
+				b.deferred_daemon_running.store(true, Ordering::Release);
+				// Mark the initial build as complete BEFORE spawning the daemon.
+				// This prevents write-write conflicts on !ip keys between the daemon
+				// (which deletes them) and maybe_consume (which writes them while
+				// initial_build_complete is false).
+				drop(initial_guard);
 				Self::spawn_deferred_daemon(b.clone());
+				return;
 			}
 			drop(initial_guard);
 		});
@@ -261,7 +277,8 @@ impl IndexBuilder {
 	) -> Result<IndexBuilding, Error> {
 		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix, ix_key)?);
 		building.recover_queue().await?;
-		building.initial_build_complete.store(true, Ordering::Relaxed);
+		building.deferred_daemon_running.store(true, Ordering::Release);
+		building.initial_build_complete.store(true, Ordering::Release);
 		Self::spawn_deferred_daemon(building.clone());
 		Ok(building)
 	}
@@ -273,13 +290,19 @@ impl IndexBuilder {
 		spawn(async move {
 			// Ensure that the daemon running flag is properly managed
 			let daemon_guard = DeferredDaemonGuard(building.clone());
-			building.deferred_daemon_running.store(true, Ordering::Relaxed);
 			loop {
 				if building.is_aborted().await {
 					building.set_status(BuildingStatus::Aborted).await;
 					break;
 				}
 				if let Err(e) = building.index_appending_loop(None).await {
+					if is_retryable_transaction_error(&e) {
+						// Transient conflicts are retried within index_appending_loop,
+						// but handle any that still propagate as a safety net.
+						warn!("{}: deferred daemon transient conflict, retrying", building.ix.name);
+						sleep(Duration::from_millis(100)).await;
+						continue;
+					}
 					error!("Index appending loop error: {}", e);
 					building.set_status(BuildingStatus::Error(e.to_string())).await;
 					break;
@@ -639,7 +662,8 @@ impl Building {
 		// for a record being initially indexed. Once the initial build is complete
 		// (appending phase), we skip setting ip to avoid write-write conflicts with the
 		// deferred daemon which deletes ip keys.
-		if !self.initial_build_complete.load(Ordering::Relaxed) {
+		// Acquire pairs with the Release in InitialBuildGuard::drop / start_deferred_index.
+		if !self.initial_build_complete.load(Ordering::Acquire) {
 			let ip = self.new_ip_key(rid.id.clone())?;
 			let v = tx.get(ip.clone(), None).await?;
 			let pa: Option<PrimaryAppending> = if let Some(v) = v {
@@ -740,24 +764,12 @@ impl Building {
 				// If not, we are done with the initial indexing
 				break;
 			}
-			// Create a new context with a write transaction
-			{
-				let ctx = self.new_write_tx_ctx().await?;
-				let tx = ctx.tx();
-				// Index the batch
-				catch!(
-					tx,
-					self.index_initial_batch(
-						&ctx,
-						&tx,
-						batch.result,
-						&mut initial_count,
-						&mut v1_appending_sentinel
-					)
-					.await
-				);
-				catch!(tx, tx.commit().await);
-			}
+			self.index_initial_batch_once(
+				&batch.result,
+				&mut initial_count,
+				&mut v1_appending_sentinel,
+			)
+			.await?;
 		}
 		self.set_status(BuildingStatus::Indexing {
 			initial: Some(initial_count),
@@ -832,37 +844,73 @@ impl Building {
 					drop(queue);
 					break;
 				}
+				self.set_status(BuildingStatus::Indexing {
+					initial: initial_count,
+					pending: Some(pending),
+					updated: updates_count,
+				})
+				.await;
 				keys
 			};
 			if !keys.is_empty() {
-				// Create a new context with a write transaction
-				{
-					let ctx = self.new_write_tx_ctx().await?;
-					let tx = ctx.tx();
-					let indexed = catch!(
-						tx,
-						self.index_appending_range(
-							&ctx,
-							&tx,
-							keys,
-							initial_count,
-							&mut updates_count
-						)
-						.await
-					);
-					catch!(tx, tx.commit().await);
-					if !indexed.is_empty() {
-						{
-							let mut clean_queue = self.clean_queue.lock().await;
-							for batch_id in indexed.keys() {
-								if let Some(idx) =
-									clean_queue.iter().position(|&id| id == *batch_id)
+				let ctx = self.new_write_tx_ctx().await?;
+				let tx = ctx.tx();
+				// Snapshot so we can roll back counter-side effects on retry:
+				// tx.cancel() does not undo increments already applied to updates_count
+				// inside index_appending_range, and the same !ib keys will be re-read
+				// and re-processed on the next iteration since their deletions were
+				// rolled back with the transaction.
+				let saved_updates_count = updates_count;
+				match self.index_appending_range(&ctx, &tx, keys, &mut updates_count).await {
+					Ok(indexed) => match tx.commit().await {
+						Ok(()) => {
+							let pending = if indexed.is_empty() {
+								self.queue.read().await.pending() as usize
+							} else {
 								{
-									clean_queue.remove(idx);
+									let mut clean_queue = self.clean_queue.lock().await;
+									for batch_id in indexed.keys() {
+										if let Some(idx) =
+											clean_queue.iter().position(|&id| id == *batch_id)
+										{
+											clean_queue.remove(idx);
+										}
+									}
 								}
-							}
+								let mut queue = self.queue.write().await;
+								queue.clean(indexed);
+								queue.pending() as usize
+							};
+							self.set_status(BuildingStatus::Indexing {
+								initial: initial_count,
+								pending: Some(pending),
+								updated: updates_count,
+							})
+							.await;
 						}
-						self.queue.write().await.clean(indexed);
+						Err(e) if is_retryable_transaction_error(&e) => {
+							let _ = tx.cancel().await;
+							updates_count = saved_updates_count;
+							warn!("{}: transient conflict on commit, retrying batch", self.ix.name);
+							sleep(Duration::from_millis(100)).await;
+						}
+						Err(e) => {
+							let _ = tx.cancel().await;
+							return Err(e);
+						}
+					},
+					Err(e) if is_retryable_transaction_error(&e) => {
+						let _ = tx.cancel().await;
+						updates_count = saved_updates_count;
+						warn!(
+							"{}: transient conflict in appending range, retrying batch",
+							self.ix.name
+						);
+						sleep(Duration::from_millis(100)).await;
+					}
+					Err(e) => {
+						let _ = tx.cancel().await;
+						return Err(e);
 					}
 				}
 			} else {
@@ -873,30 +921,114 @@ impl Building {
 		Ok(())
 	}
 
+	/// Index one initial-build batch.
+	///
+	/// Initial build is expected to be conflict-free. Queue handoff records are read through a
+	/// separate read-only transaction, so real commit conflicts here should surface as index build
+	/// errors. RocksDB can also return TryAgain when conflict-checking history is unavailable; that
+	/// is not a proven conflict, so retry the same fetched batch with fresh transactions.
+	async fn index_initial_batch_once(
+		&self,
+		values: &[(Key, Val)],
+		count: &mut usize,
+		v1_appending_sentinel: &mut bool,
+	) -> Result<(), Error> {
+		loop {
+			let read_tx = self.new_read_tx().await?;
+			let ctx = self.new_write_tx_ctx().await?;
+			let tx = ctx.tx();
+			let mut batch_count = 0;
+			let indexed = self
+				.index_initial_batch(
+					&ctx,
+					&read_tx,
+					&tx,
+					values,
+					&mut batch_count,
+					v1_appending_sentinel,
+				)
+				.await;
+			let cancel_read = read_tx.cancel().await;
+			if let Err(e) = indexed {
+				let _ = tx.cancel().await;
+				if is_initial_build_batch_retryable(&e) {
+					warn!(
+						"{}: conflict checking history unavailable during initial batch at initial={}, retrying",
+						self.ix.name, *count
+					);
+					sleep(Duration::from_millis(100)).await;
+					continue;
+				}
+				return Err(e);
+			}
+			if let Err(e) = cancel_read {
+				let _ = tx.cancel().await;
+				if is_initial_build_batch_retryable(&e) {
+					warn!(
+						"{}: conflict checking history unavailable while cancelling initial batch read at initial={}, retrying",
+						self.ix.name, *count
+					);
+					sleep(Duration::from_millis(100)).await;
+					continue;
+				}
+				return Err(e);
+			}
+			if let Err(e) = tx.commit().await {
+				let _ = tx.cancel().await;
+				if is_initial_build_batch_retryable(&e) {
+					warn!(
+						"{}: conflict checking history unavailable while committing initial batch at initial={}, retrying",
+						self.ix.name, *count
+					);
+					sleep(Duration::from_millis(100)).await;
+					continue;
+				}
+				return Err(e);
+			}
+			*count += batch_count;
+			self.set_status(BuildingStatus::Indexing {
+				initial: Some(*count),
+				pending: Some(self.queue.read().await.pending() as usize),
+				updated: None,
+			})
+			.await;
+			return Ok(());
+		}
+	}
+
 	/// Index a batch of records from the table
 	async fn index_initial_batch(
 		&self,
 		ctx: &Context,
-		tx: &Transaction,
-		values: Vec<(Key, Val)>,
+		read_tx: &Transaction,
+		write_tx: &Transaction,
+		values: &[(Key, Val)],
 		count: &mut usize,
 		v1_appending_sentinel: &mut bool,
 	) -> Result<(), Error> {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
+		// For search indexes, create the FtIndex once for the entire batch
+		// instead of per-document, avoiding repeated BTree load/save overhead.
+		let mut ft_index = IndexOperation::create_ft_index(ctx, &self.opt, &self.ix).await?;
 		// Index the records
-		for (k, v) in values.into_iter() {
+		for (k, v) in values {
 			if self.is_aborted().await {
+				// Finish FtIndex to persist progress made so far in this batch
+				if let Some(ref ft) = ft_index {
+					ft.finish(ctx).await?;
+				}
 				return Ok(());
 			}
-			let key = thing::Thing::decode(&k)?;
+			let key = thing::Thing::decode(k)?;
 			// Parse the value
-			let val: Value = revision::from_slice(&v)?;
+			let val: Value = revision::from_slice(v)?;
 			let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();
 
 			// Do we already have an appended value?
-			let opt_values = if let Some(a) =
-				self.check_existing_primary_appending(tx, &rid.id, v1_appending_sentinel).await?
+			let opt_values = if let Some(a) = self
+				.check_existing_primary_appending(read_tx, write_tx, &rid.id, v1_appending_sentinel)
+				.await?
 			{
 				a.old_values
 			} else {
@@ -912,31 +1044,36 @@ impl Building {
 			// Index the record
 			let mut io =
 				IndexOperation::new(ctx, &self.opt, &self.ix, None, opt_values.clone(), &rid);
-			stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+			if let Some(ft) = &mut ft_index {
+				stack.enter(|stk| io.compute_search_with_ft(stk, ft)).finish().await?;
+			} else {
+				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+			}
 
-			// Increment the count and update the status
 			*count += 1;
-			self.set_status(BuildingStatus::Indexing {
-				initial: Some(*count),
-				pending: Some(self.queue.read().await.pending() as usize),
-				updated: None,
-			})
-			.await;
+		}
+		// Finish the FtIndex once for the entire batch
+		if let Some(ref ft) = ft_index {
+			ft.finish(ctx).await?;
 		}
 		// Check if we trigger the compaction
-		self.check_index_compaction(tx, &mut rc).await?;
+		self.check_index_compaction(write_tx, &mut rc).await?;
 		// We're done
 		Ok(())
 	}
 
 	async fn check_existing_primary_appending(
 		&self,
-		tx: &Transaction,
+		read_tx: &Transaction,
+		write_tx: &Transaction,
 		id: &Id,
 		v1_appending_sentinel: &mut bool,
 	) -> Result<Option<Appending>, Error> {
+		// Read queue markers outside the index write transaction. They are a
+		// handoff signal from user transactions, and reading them in the write
+		// transaction can create avoidable optimistic conflicts during commit.
 		let ip = self.new_ip_key(id.clone())?;
-		let Some(v) = tx.get(&ip, None).await? else {
+		let Some(v) = read_tx.get(&ip, None).await? else {
 			return Ok(None);
 		};
 		// Then we take the old value of the appending value as the initial indexing value
@@ -944,7 +1081,7 @@ impl Building {
 		if pa.1 == QueueSequences::LEGACY_BATCH_ID {
 			// Legacy v1 primary appending entry (no batch id; queue stored under !ia).
 			// We can't resolve it to a v2 !ib record, so drop the marker and ignore the legacy queue.
-			tx.del(ip).await?;
+			write_tx.del(ip).await?;
 			if !*v1_appending_sentinel {
 				*v1_appending_sentinel = true;
 				warn!("Found legacy v1 primary appending entry from an older version; legacy queued updates will be ignored. Consider rebuilding index {} on table {}.", self.ix.name, self.ix.what);
@@ -952,7 +1089,7 @@ impl Building {
 			return Ok(None);
 		}
 		let ib = self.new_ib_key(pa.0, pa.1)?;
-		let v = tx
+		let v = read_tx
 			.get(ib, None)
 			.await?
 			.ok_or_else(|| Error::CorruptedIndex("Appending record is missing"))?;
@@ -967,15 +1104,23 @@ impl Building {
 		ctx: &Context,
 		tx: &Transaction,
 		keys: Vec<Key>,
-		initial: Option<usize>,
 		count: &mut Option<usize>,
 	) -> Result<HashMap<u32, Vec<u32>>, Error> {
 		let mut rc = false;
 		let mut stack = TreeStack::new();
 		let mut indexed = HashMap::new();
+		// For search indexes, create the FtIndex once for the entire batch
+		let mut ft_index = IndexOperation::create_ft_index(ctx, &self.opt, &self.ix).await?;
 		trace!("{}: index_appending_range STARTS- len: {}", self.ix.name, keys.len());
 		for k in keys {
 			if self.is_aborted().await {
+				// Persist FtIndex progress made so far in this batch.
+				// Propagate errors so the caller cancels the transaction and we
+				// avoid committing !ip/!ib deletions without the corresponding
+				// FtIndex state (symmetric with index_initial_batch).
+				if let Some(ref ft) = ft_index {
+					ft.finish(ctx).await?;
+				}
 				return Ok(indexed);
 			}
 			let ib = Ib::decode(&k)?;
@@ -984,7 +1129,11 @@ impl Building {
 				let rid = Thing::from((self.tb.clone(), a.id));
 				let mut io =
 					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);
-				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+				if let Some(ft) = &mut ft_index {
+					stack.enter(|stk| io.compute_search_with_ft(stk, ft)).finish().await?;
+				} else {
+					stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
+				}
 
 				// Delete the ip (primary appending) key if any
 				let ip = self.new_ip_key(rid.id)?;
@@ -993,14 +1142,12 @@ impl Building {
 			if let Some(c) = count {
 				*c += 1;
 			}
-			self.set_status(BuildingStatus::Indexing {
-				initial,
-				pending: Some(self.queue.read().await.pending() as usize),
-				updated: *count,
-			})
-			.await;
 			indexed.entry(ib.batch_id).or_insert(vec![]).push(ib.appending_id);
 			tx.del(ib).await?;
+		}
+		// Finish the FtIndex once for the entire batch
+		if let Some(ref ft) = ft_index {
+			ft.finish(ctx).await?;
 		}
 		trace!("{}: index_appending_range EXIT: {:?}", self.ix.name, indexed);
 		// Check if we trigger the compaction
@@ -1098,5 +1245,16 @@ impl Drop for DeferredDaemonGuard {
 	fn drop(&mut self) {
 		self.0.deferred_daemon_running.store(false, Ordering::Release);
 		self.0.completion_notify.notify_waiters();
+	}
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn initial_build_batch_retry_predicate_only_matches_conflict_check_gaps() {
+		assert!(is_initial_build_batch_retryable(&Error::TxRetryableConflictCheck));
+		assert!(!is_initial_build_batch_retryable(&Error::TxRetryable));
 	}
 }
