@@ -4,10 +4,10 @@ use crate::val::Value;
 impl Value {
 	pub(crate) fn diff(&self, val: &Value) -> Vec<Operation> {
 		let mut res = Vec::new();
+		// Root-level scalar diffs use `path == []`, which serializes to `""` (JSON Pointer root).
+		// A path of `[""]` is reserved for the empty-string object key (`"/"`).
 		let mut path = Vec::new();
-
 		self.diff_rec(val, &mut path, &mut res);
-
 		res
 	}
 
@@ -87,7 +87,7 @@ impl Value {
 #[cfg(test)]
 mod tests {
 
-	use super::*;
+	use crate::expr::operation::Operation;
 	use crate::syn;
 
 	macro_rules! parse_val {
@@ -150,5 +150,21 @@ mod tests {
 		);
 		let res = Operation::value_to_operations(res).unwrap();
 		assert_eq!(res, old.diff(&now));
+	}
+
+	#[test]
+	fn diff_root_scalar_uses_empty_path() {
+		let old = parse_val!("42");
+		let now = parse_val!("99");
+		assert_eq!(
+			old.diff(&now),
+			vec![Operation::Replace {
+				path: Vec::new(),
+				value: now.clone(),
+			}]
+		);
+		let round =
+			Operation::value_to_operations(Operation::operations_to_value(old.diff(&now))).unwrap();
+		assert_eq!(round, old.diff(&now));
 	}
 }

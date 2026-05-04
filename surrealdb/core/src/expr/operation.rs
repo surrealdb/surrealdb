@@ -52,11 +52,17 @@ pub(crate) enum Operation {
 
 impl Operation {
 	fn value_to_jsonpath(val: &Value) -> Vec<String> {
-		val.to_raw_string()
-			.trim_start_matches('/')
-			.split(&['.', '/'])
-			.map(|x| x.to_owned())
-			.collect()
+		let s = val.to_raw_string();
+		// RFC 6901: `""` is the root pointer; `"/"` is a pointer with one segment (the empty
+		// string key). The previous implementation stripped leading `/` first, so both became
+		// indistinguishable after parsing.
+		if s.is_empty() {
+			return Vec::new();
+		}
+		if s == "/" {
+			return vec![String::new()];
+		}
+		s.trim_start_matches('/').split(&['.', '/']).map(|x| x.to_owned()).collect()
 	}
 
 	pub fn into_object(self) -> Object {
@@ -128,7 +134,7 @@ impl Operation {
 			} => {
 				map! {
 					// safety: does not contain null bytes.
-					"op".to_owned() => Value::String("map".to_owned()),
+					"op".to_owned() => Value::String("move".to_owned()),
 					"path".to_owned() => path_to_strand(&path),
 					"from".to_owned() => path_to_strand(&from),
 				}

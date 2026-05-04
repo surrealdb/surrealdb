@@ -7,6 +7,19 @@ use crate::expr::operation::PatchError;
 use crate::expr::part::Part;
 use crate::val::Value;
 
+/// True when a patch path addresses the whole document. A lone empty segment (`[""]`, JSON
+/// Pointer `/`) is ambiguous: it can mean root or a field named `""`. When the current value is
+/// an object or array, `[""]` must navigate into the `""` key; only scalars treat it as root.
+fn patch_path_is_root(path: &[String], this: &Value) -> bool {
+	if path.is_empty() {
+		return true;
+	}
+	if path.len() == 1 && path[0].is_empty() {
+		return !matches!(this, Value::Object(_) | Value::Array(_));
+	}
+	false
+}
+
 impl Value {
 	pub(crate) fn patch(&mut self, ops: Value) -> Result<()> {
 		let mut this = self.clone();
@@ -90,31 +103,56 @@ impl Value {
 					path,
 					value,
 				} => {
-					let path = path.into_iter().map(Part::Field).collect::<Vec<_>>();
-					this.put(&path, value)
+					let is_root = patch_path_is_root(&path, &this);
+					if is_root {
+						this = value;
+					} else {
+						let path = path.into_iter().map(Part::Field).collect::<Vec<_>>();
+						this.put(&path, value);
+					}
 				}
 				// Modify a string at the specified path
 				Operation::Change {
 					path,
 					value,
 				} => {
-					let path = path.into_iter().map(Part::Field).collect::<Vec<_>>();
-					if let Value::String(p) = value
-						&& let Value::String(v) = this.pick(&path)
-					{
-						let dmp = dmp::new();
-						let pch = dmp.patch_from_text(p).map_err(|e| {
-							Error::InvalidPatch(PatchError {
-								message: format!("{e:?}"),
-							})
-						})?;
-						let (txt, _) = dmp.patch_apply(&pch, v.as_str()).map_err(|e| {
-							Error::InvalidPatch(PatchError {
-								message: format!("{e:?}"),
-							})
-						})?;
-						let txt = txt.into_iter().collect::<String>();
-						this.put(&path, Value::from(txt));
+					// "/" parses to [""] — one empty string segment meaning root
+					let is_root = patch_path_is_root(&path, &this);
+					// Only root skips segments; preserve empty-string keys elsewhere (do not
+					// filter).
+					let path: Vec<Part> = if is_root {
+						vec![]
+					} else {
+						path.into_iter().map(Part::Field).collect()
+					};
+
+					if let Value::String(p) = value {
+						let current = if is_root {
+							this.clone()
+						} else {
+							this.pick(&path)
+						};
+
+						if let Value::String(v) = current {
+							let dmp = dmp::new();
+							let pch = dmp.patch_from_text(p).map_err(|e| {
+								Error::InvalidPatch(PatchError {
+									message: format!("{e:?}"),
+								})
+							})?;
+							let (txt, _) = dmp.patch_apply(&pch, v.as_str()).map_err(|e| {
+								Error::InvalidPatch(PatchError {
+									message: format!("{e:?}"),
+								})
+							})?;
+							let txt = txt.into_iter().collect::<String>();
+
+							if is_root {
+								this = Value::from(txt);
+							} else {
+								this.put(&path, Value::from(txt));
+							}
+						}
 					}
 				}
 				// Copy a value from one field to another
@@ -165,6 +203,7 @@ impl Value {
 
 #[cfg(test)]
 mod tests {
+	use crate::expr::Operation;
 	use crate::syn;
 
 	macro_rules! parse_val {
@@ -316,6 +355,62 @@ mod tests {
 		let res = parse_val!("{ test: { something: 123 }, temp: true }");
 		val.patch(ops).unwrap();
 		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_replace_root_scalar() {
+		let mut val = parse_val!("42");
+		let ops = parse_val!("[{ op: 'replace', path: '/', value: 99 }]");
+		val.patch(ops).unwrap();
+		assert_eq!(parse_val!("99"), val);
+	}
+
+	#[tokio::test]
+	async fn patch_replace_root_scalar_path_empty_string() {
+		let mut val = parse_val!("42");
+		let ops = parse_val!("[{ op: 'replace', path: '', value: 99 }]");
+		val.patch(ops).unwrap();
+		assert_eq!(parse_val!("99"), val);
+	}
+
+	#[tokio::test]
+	async fn patch_replace_root_round_trip_diff() {
+		let old = parse_val!("42");
+		let now = parse_val!("99");
+		let mut val = old.clone();
+		let ops = Operation::operations_to_value(old.diff(&now));
+		val.patch(ops).unwrap();
+		assert_eq!(now, val);
+	}
+
+	#[tokio::test]
+	async fn patch_change_root_round_trip_diff() {
+		let old = parse_val!("'Hello'");
+		let now = parse_val!("'Hello there!'");
+		let mut val = old.clone();
+		let ops = Operation::operations_to_value(old.diff(&now));
+		val.patch(ops).unwrap();
+		assert_eq!(now, val);
+	}
+
+	#[tokio::test]
+	async fn patch_change_empty_string_key_round_trip_diff() {
+		let old = parse_val!("{ '': 'hello', x: 1 }");
+		let now = parse_val!("{ '': 'world', x: 1 }");
+		let mut val = old.clone();
+		let ops = Operation::operations_to_value(old.diff(&now));
+		val.patch(ops).unwrap();
+		assert_eq!(now, val);
+	}
+
+	#[tokio::test]
+	async fn patch_replace_empty_string_key_round_trip_diff() {
+		let old = parse_val!("{ '': 'hello', x: 1 }");
+		let now = parse_val!("{ '': 42, x: 1 }");
+		let mut val = old.clone();
+		let ops = Operation::operations_to_value(old.diff(&now));
+		val.patch(ops).unwrap();
+		assert_eq!(now, val);
 	}
 
 	#[tokio::test]
