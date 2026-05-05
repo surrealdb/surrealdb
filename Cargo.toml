@@ -185,7 +185,7 @@ tokio-stream = "0.1"
 tokio-tungstenite = "0.28.0"
 tokio-tungstenite-wasm = "0.8.1"
 tokio-util = "0.7.18"
-tracing = { version = "0.1.44", features = ["release_max_level_debug"] }
+tracing = { version = "0.1.44", features = ["release_max_level_trace"] }
 ulid = "1.2.1"
 unicase = "2.9.0"
 url = "2.5.8"
