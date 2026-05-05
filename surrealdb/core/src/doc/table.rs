@@ -620,6 +620,12 @@ impl Document {
 				AggregationStat::Accumulate {
 					..
 				} => fail!("Accumulate aggregation is not supported in materialized views"),
+				AggregationStat::Storage {
+					..
+				}
+				| AggregationStat::StorageValue {
+					..
+				} => fail!("Storage aggregation is not supported in materialized views"),
 			}
 		}
 
@@ -1030,6 +1036,12 @@ impl Document {
 				AggregationStat::Accumulate {
 					..
 				} => fail!("Accumulate aggregation is not supported in materialized views"),
+				AggregationStat::Storage {
+					..
+				}
+				| AggregationStat::StorageValue {
+					..
+				} => fail!("Storage aggregation is not supported in materialized views"),
 			}
 		}
 

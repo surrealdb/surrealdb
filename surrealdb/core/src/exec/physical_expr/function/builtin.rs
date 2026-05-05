@@ -47,7 +47,14 @@ impl PhysicalExpr for BuiltinFunctionExec {
 		})?;
 
 		// Evaluate all arguments
-		let args = evaluate_args(&self.arguments, ctx.clone()).await?;
+		let mut args = evaluate_args(&self.arguments, ctx.clone()).await?;
+
+		// storage() with no args operates on the current record
+		if self.name == "storage" && args.is_empty() {
+			if let Some(v) = ctx.current_value {
+				args.push(v.clone());
+			}
+		}
 
 		// Invoke the function based on whether it's pure or needs context
 		if func.is_pure() && !func.is_async() {

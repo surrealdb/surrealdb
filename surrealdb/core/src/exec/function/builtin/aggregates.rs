@@ -12,12 +12,14 @@
 mod array;
 mod count;
 mod math;
+mod storage;
 mod time;
 
 // Re-export all aggregate functions
 pub use array::{ArrayDistinct, ArrayGroup, ArrayJoin};
 pub use count::{Count, CountField};
 pub use math::{MathMax, MathMean, MathMedian, MathMin, MathStddev, MathSum, MathVariance};
+pub use storage::{Storage, StorageField};
 pub use time::{TimeMax, TimeMin};
 
 use crate::exec::function::FunctionRegistry;
@@ -27,6 +29,9 @@ pub fn register(registry: &mut FunctionRegistry) {
 	// Count aggregates
 	registry.register_aggregate(Count);
 	// Note: CountField is handled specially - "count" with args becomes CountField
+
+	// Storage aggregates
+	registry.register_aggregate(Storage);
 
 	// Math aggregates
 	registry.register_aggregate(MathSum);

@@ -458,6 +458,9 @@ impl DefineTableStatement {
 				Aggregation::Accumulate(_) => {
 					fail!("Accumulate aggregation is not supported in materialized views")
 				}
+				Aggregation::Storage | Aggregation::StorageValue(_) => {
+					fail!("Storage aggregation is not supported in materialized views")
+				}
 			}
 		}
 
@@ -514,6 +517,9 @@ impl DefineTableStatement {
 					}
 					Aggregation::Accumulate(_) => {
 						fail!("Accumulate aggregation is not supported in materialized views")
+					}
+					Aggregation::Storage | Aggregation::StorageValue(_) => {
+						fail!("Storage aggregation is not supported in materialized views")
 					}
 				},
 			}));
@@ -729,6 +735,9 @@ impl DefineTableStatement {
 					Aggregation::Accumulate {
 						..
 					} => fail!("Accumulate aggregation is not supported in materialized views"),
+					Aggregation::Storage | Aggregation::StorageValue(_) => {
+						fail!("Storage aggregation is not supported in materialized views")
+					}
 				}
 			}
 
