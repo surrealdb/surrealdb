@@ -144,23 +144,53 @@ impl From<tikv::Error> for Error {
 		match e {
 			tikv::Error::DuplicateKeyInsertion => Error::TransactionKeyAlreadyExists,
 			tikv::Error::Grpc(_) => Error::ConnectionFailed(e.to_string()),
-			tikv::Error::KeyError(ref ke) => {
-				if let Some(conflict) = &ke.conflict {
-					use crate::key::debug::Sprintable;
-					Error::TransactionConflict(conflict.key.sprint())
-				} else if ke.already_exist.is_some() {
-					Error::TransactionKeyAlreadyExists
-				} else if ke.abort.contains("KeyTooLarge") {
-					Error::TransactionKeyTooLarge
-				} else {
-					Error::Transaction(e.to_string())
-				}
-			}
+			tikv::Error::KeyError(_) => Self::classify_tikv_key_error(&e),
+			tikv::Error::MultipleKeyErrors(ref errors)
+			| tikv::Error::ExtractedErrors(ref errors) => Self::classify_tikv_multi_key_errors(errors, &e),
 			tikv::Error::RegionError(ref re) if re.raft_entry_too_large.is_some() => {
 				Error::TransactionTooLarge
 			}
 			_ => Error::Transaction(e.to_string()),
 		}
+	}
+}
+
+#[cfg(feature = "kv-tikv")]
+impl Error {
+	fn classify_tikv_key_error(e: &tikv::Error) -> Self {
+		if let tikv::Error::KeyError(ke) = e {
+			if let Some(conflict) = &ke.conflict {
+				use crate::key::debug::Sprintable;
+				Error::TransactionConflict(conflict.key.sprint())
+			} else if ke.already_exist.is_some() {
+				Error::TransactionKeyAlreadyExists
+			} else if ke.abort.contains("KeyTooLarge") {
+				Error::TransactionKeyTooLarge
+			} else {
+				Error::Transaction(e.to_string())
+			}
+		} else {
+			Error::Transaction(e.to_string())
+		}
+	}
+
+	fn classify_tikv_multi_key_errors(errors: &[tikv::Error], original: &tikv::Error) -> Self {
+		for err in errors {
+			if let tikv::Error::KeyError(ke) = err
+				&& let Some(conflict) = &ke.conflict
+			{
+				use crate::key::debug::Sprintable;
+				return Error::TransactionConflict(conflict.key.sprint());
+			}
+		}
+		for err in errors {
+			if let tikv::Error::KeyError(ke) = err
+				&& ke.already_exist.is_some()
+			{
+				return Error::TransactionKeyAlreadyExists;
+			}
+		}
+		Error::Transaction(original.to_string())
 	}
 }
 

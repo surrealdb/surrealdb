@@ -245,20 +245,18 @@ impl Executor {
 		let exec_ctx = match required_level {
 			crate::exec::context::ContextLevel::Root => ExecutionContext::Root(root_ctx),
 			crate::exec::context::ContextLevel::Namespace => {
-				// Get namespace definition
 				let ns_name = self.opt.ns()?;
-				let ns_def = txn.get_or_add_ns(None, ns_name).await?;
+				let ns_def = txn.expect_ns_by_name(ns_name).await?;
 				ExecutionContext::Namespace(NamespaceContext {
 					root: root_ctx,
 					ns: ns_def,
 				})
 			}
 			crate::exec::context::ContextLevel::Database => {
-				// Get namespace and database definitions
 				let ns_name = self.opt.ns()?;
 				let db_name = self.opt.db()?;
-				let ns_def = txn.get_or_add_ns(None, ns_name).await?;
-				let db_def = txn.get_or_add_db_upwards(None, ns_name, db_name, true).await?;
+				let ns_def = txn.expect_ns_by_name(ns_name).await?;
+				let db_def = txn.expect_db_by_name(ns_name, db_name).await?;
 				ExecutionContext::Database(DatabaseContext {
 					ns_ctx: NamespaceContext {
 						root: root_ctx,
@@ -530,8 +528,18 @@ impl Executor {
 			}
 			// Process all other normal statements
 			TopLevelExpr::Expr(e) => {
+				// Pass the transaction to the planner only for read-only transactions.
+				// For write transactions, plan-time catalog reads add MVCC version
+				// dependencies on metadata keys, widening the conflict surface on
+				// backends like TiKV. The scan operators fall back to runtime
+				// resolution when no plan-time context is available.
+				let planner_txn = if txn.writeable() {
+					None
+				} else {
+					Some(txn.clone())
+				};
 				// Try the new streaming execution path first
-				match try_plan_expr!(&e, &self.ctx, txn.clone()) {
+				match try_plan_expr!(&e, &self.ctx, planner_txn) {
 					Ok(plan) => {
 						// Set the transaction on the context
 						ctx_mut!().set_transaction(txn.clone());

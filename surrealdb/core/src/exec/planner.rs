@@ -1231,7 +1231,8 @@ macro_rules! try_plan_expr {
 		} else if *$ctx.new_planner_strategy() == $crate::dbs::NewPlannerStrategy::ComputeOnly {
 			Err($crate::err::Error::PlannerUnsupported(String::new()))
 		} else {
-			$crate::exec::planner::plan_expr_inner(__expr, $ctx, $txn).await
+			$crate::exec::planner::plan_expr_inner(__expr, $ctx, ::std::convert::Into::into($txn))
+				.await
 		}
 	}};
 }
@@ -1245,10 +1246,12 @@ pub(crate) use try_plan_expr;
 ///
 /// When a transaction is provided, the planner resolves table definitions
 /// and indexes at plan time, enabling sort elimination and concrete scan operators.
+/// Pass `None` for write transactions to avoid adding read dependencies that
+/// widen the TiKV MVCC conflict surface.
 pub(crate) async fn plan_expr_inner(
 	expr: &Expr,
 	ctx: &FrozenContext,
-	txn: Arc<crate::kvs::Transaction>,
+	txn: Option<Arc<crate::kvs::Transaction>>,
 ) -> Result<Arc<dyn ExecOperator>, Error> {
 	// Extract ns/db from the context session parameters if available
 	let ns =
@@ -1265,7 +1268,10 @@ pub(crate) async fn plan_expr_inner(
 				_ => None,
 			}
 		});
-	Planner::with_txn(ctx, txn, ns, db).plan(expr).await
+	match txn {
+		Some(txn) => Planner::with_txn(ctx, txn, ns, db).plan(expr).await,
+		None => Planner::new(ctx).plan(expr).await,
+	}
 }
 
 /// Convert an expression to a physical expression.
