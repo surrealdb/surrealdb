@@ -7,8 +7,11 @@ use std::net::ToSocketAddrs;
 use std::sync::LazyLock;
 
 use anyhow::{Result, anyhow};
-use opentelemetry::global;
+use opentelemetry::{Key, global};
 use opentelemetry_sdk::Resource;
+use opentelemetry_sdk::resource::{
+	EnvResourceDetector, SdkProvidedResourceDetector, TelemetryResourceDetector,
+};
 use tracing::{Level, Subscriber};
 use tracing_appender::non_blocking::{NonBlockingBuilder, WorkerGuard};
 use tracing_subscriber::EnvFilter;
@@ -22,7 +25,33 @@ use crate::cnf::ENABLE_TOKIO_CONSOLE;
 pub static OTEL_DEFAULT_RESOURCE: LazyLock<Resource> = LazyLock::new(|| {
 	// Build resource from environment variables and default attributes
 	// The Resource will automatically merge SDK, environment, and telemetry metadata
-	Resource::builder().with_service_name("surrealdb").build()
+	let res = Resource::builder()
+		.with_detectors(&[
+			// set service.name from env OTEL_SERVICE_NAME > env OTEL_RESOURCE_ATTRIBUTES >
+			// option_env! CARGO_BIN_NAME > unknown_service
+			Box::new(SdkProvidedResourceDetector),
+			// detect res from env OTEL_RESOURCE_ATTRIBUTES (resources string like
+			// key1=value1,key2=value2,...)
+			Box::new(EnvResourceDetector::new()),
+			// set telemetry.sdk.{name, language, version}
+			Box::new(TelemetryResourceDetector),
+		])
+		.build();
+
+	// If no external service.name is set, set it to surrealdb
+	let name_key = res.get(&Key::from_static_str("service.name"));
+	if name_key.is_none_or(|v| v.as_str() == "unknown_service") {
+		Resource::builder()
+			.with_detectors(&[
+				Box::new(SdkProvidedResourceDetector),
+				Box::new(EnvResourceDetector::new()),
+				Box::new(TelemetryResourceDetector),
+			])
+			.with_service_name("surrealdb")
+			.build()
+	} else {
+		res
+	}
 });
 
 #[derive(Debug, Clone)]
