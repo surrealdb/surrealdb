@@ -40,10 +40,10 @@ jobs:
       matrix:
         include:
           - name: amd64
-            runner: runner-amd64-large
+            runner: depot-ubuntu-24.04-8
             target: x86_64-unknown-linux-gnu
           - name: arm64
-            runner: runner-arm64-large
+            runner: depot-ubuntu-24.04-arm-8
             target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
     steps:
@@ -75,7 +75,7 @@ jobs:
 
   format:
     name: Check format
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -97,6 +97,7 @@ jobs:
           toolchain: ${{ steps.info.outputs.toolchain }}
           components: rustfmt
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          enable-sccache: 'false'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -106,7 +107,7 @@ jobs:
 
   clippy:
     name: Check clippy
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -130,7 +131,7 @@ jobs:
 
   clippy-release:
     name: Check clippy (release)
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -154,7 +155,7 @@ jobs:
 
   check:
     name: Check workspace
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -200,7 +201,7 @@ jobs:
 
   check-msrv:
     name: Check workspace (MSRV)
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     env:
       msrv: "1.91" # This should be updated if the MSRV is updated.
     steps:
@@ -226,7 +227,7 @@ jobs:
 
   check-wasm:
     name: Check Wasm
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -250,7 +251,7 @@ jobs:
 
   check-revision:
     name: Check revision
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -273,7 +274,7 @@ jobs:
 
   check-docs:
     name: Check docs
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -296,7 +297,7 @@ jobs:
 
   feature-check:
     name: Check feature combinations
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     # Only run on main branch to avoid slowing down PR CI
     if: github.ref == 'refs/heads/main'
     steps:
@@ -324,7 +325,7 @@ jobs:
 
   unused-deps:
     name: Check unused dependencies
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -354,7 +355,7 @@ jobs:
 
   cli-integration:
     name: CLI integration tests
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -377,7 +378,7 @@ jobs:
 
   http-integration:
     name: HTTP integration tests
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -400,7 +401,7 @@ jobs:
 
   ws-integration:
     name: WebSocket integration tests
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -423,7 +424,7 @@ jobs:
 
   ml-integration:
     name: ML integration tests
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -446,7 +447,7 @@ jobs:
 
   graphql-integration:
     name: GraphQL integration
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -473,7 +474,7 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [runner-amd64-2xlarge]
+    runs-on: depot-ubuntu-24.04-16
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -494,7 +495,7 @@ jobs:
 
   kvs-engines:
     name: KVS - ${{ matrix.engine }} engine
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -533,7 +534,7 @@ jobs:
 
   sdk-build:
     name: Test SDK build
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -558,7 +559,7 @@ jobs:
 
   sdk-engines:
     name: Rust SDK - ${{ matrix.engine }} engine
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -597,7 +598,7 @@ jobs:
 
   db-upgrade:
     name: Database upgrade from previous versions
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -621,7 +622,7 @@ jobs:
 
   lang-tests:
     name: SurrealQL tests - ${{ matrix.engine }}
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -674,7 +675,7 @@ jobs:
 
   upgrade-tests:
     name: SurrealQL upgrade tests
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0

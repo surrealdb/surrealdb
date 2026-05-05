@@ -34,6 +34,10 @@ inputs:
     description: 'Whether to free disk space by removing pre-installed software'
     required: false
     default: 'true'
+  enable-sccache:
+    description: 'Whether to enable sccache for compilation caching'
+    required: false
+    default: 'true'
 
 runs:
   using: 'composite'
@@ -88,6 +92,17 @@ runs:
         toolchain: ${{ inputs.toolchain }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
+
+    - name: Setup sccache
+      if: inputs.enable-sccache == 'true'
+      uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+    - name: Configure sccache environment
+      if: inputs.enable-sccache == 'true'
+      shell: bash
+      run: |
+        echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+        echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
 
     - name: Setup cache
       uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
