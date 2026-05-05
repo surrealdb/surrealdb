@@ -63,6 +63,7 @@ rand.workspace = true
 # WASM DEPENDENCY CONFIGURATION
 [target.'cfg(target_family = "wasm")'.dependencies]
 uuid = { workspace = true, features = ["serde", "v4", "v7", "js"] }
+getrandom = { workspace = true, features = ["wasm_js"] }
 
 # NON-WASM DEPENDENCY CONFIGURATION
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
