@@ -153,7 +153,18 @@ async fn check_auth(parts: &mut Parts) -> Result<Session> {
 
 	// If Token authentication data was supplied
 	if let Ok(au) = parts.extract::<TypedHeader<Authorization<Bearer>>>().await {
-		token(kvs, &mut session, au.token()).await?;
+		match token(kvs, &mut session, au.token()).await {
+			Ok(()) => {}
+			Err(err) if surrealdb_core::iam::is_expired_token_error(&err) => {
+				// Treat an expired token as equivalent to no token. This allows
+				// recovery operations (signin, invalidate) to proceed instead of
+				// being blocked at the middleware layer — avoiding a deadlock where
+				// the client cannot obtain a fresh JWT because the expired Bearer
+				// is rejected before the request reaches the endpoint handler.
+				warn!("Ignoring expired bearer token, proceeding with unauthenticated session");
+			}
+			Err(err) => return Err(err),
+		}
 	};
 
 	Ok(session)
