@@ -161,6 +161,9 @@ impl Lexer<'_> {
 			b'`' => {
 				buffer.push(b'`');
 			}
+			b'/' => {
+				buffer.push(b'/');
+			}
 			b'u' => {
 				let char = Self::lex_unicode_escape(reader, before, span, json_escapes)?;
 				let mut char_buffer = [0u8; 4];
