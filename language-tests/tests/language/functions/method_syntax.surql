@@ -62,6 +62,8 @@ value = "NONE"
 	-- Universal methods
 	-- =====================================================================
 	123.chain(|$x| $x);
+	9.expect(|$n| $n = 9);
+	9.expect(|$n| $n = 9, "Should equal nine");
 	{ one: "object" }.diff({ another: "object" });
 	{ one: "object" }.patch([
 		{ op: "remove", path: "/one" },
