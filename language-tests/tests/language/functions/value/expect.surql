@@ -11,13 +11,13 @@ value = "9"
 error = "An error occurred: value::expect assertion failed"
 
 [[test.results]]
-error = "An error occurred: value::expect assertion failed with message: Should equal nine"
+error = "An error occurred: value::expect assertion failed with message: 'Should equal nine'"
 
 [[test.results]]
 error = "An error occurred: value::expect assertion failed"
 
 [[test.results]]
-error = "Incorrect arguments for function value::expect(). Expected 2 to 3 arguments"
+error = "Incorrect arguments for method expect(). Expected 2 to 3 arguments"
 
 [[test.results]]
 value = "[{ num: 2 }, { num: 4 }, { num: 6 }]"
@@ -32,7 +32,7 @@ error = "An error occurred: value::expect assertion failed with message: 'All nu
 10.expect(|$n| $n = 9);
 10.expect(|$n| $n = 9, "Should equal nine");
 10.expect(|$n| $n = 9, 1);
-value::expect(9, |$n| $n = 9, "a", "b");
+9.expect(|$n| $n = 9, "a", "b");
 
 // .expect to assert inside of method chains
 [1,2,3]

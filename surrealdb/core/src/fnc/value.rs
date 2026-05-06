@@ -31,7 +31,7 @@ pub async fn expect(
 			Value::Bool(false) => {
 				if let Some(Value::String(user_message)) = message {
 					bail!(Error::Thrown(format!(
-						"value::expect assertion failed with message: {user_message}"
+						"value::expect assertion failed with message: '{user_message}'"
 					)))
 				} else {
 					bail!(Error::Thrown("value::expect assertion failed".to_owned()))

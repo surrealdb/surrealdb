@@ -487,6 +487,8 @@
 "type::record("
 "type::uuid("
 "type::geometry("
+"value::chain("
+"value::expect("
 "vector::add("
 "vector::angle("
 "vector::cross("
