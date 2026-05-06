@@ -20,7 +20,7 @@ error = "An error occurred: value::expect assertion failed"
 error = "Incorrect arguments for function value::expect(). Expected 2 to 3 arguments"
 
 [[test.results]]
-value = "[[{ num: 2 }, { num: 4 }, { num: 6 }]]"
+value = "[{ num: 2 }, { num: 4 }, { num: 6 }]"
 
 [[test.results]]
 error = "An error occurred: value::expect assertion failed with message: 'All numbers should be positive'"
