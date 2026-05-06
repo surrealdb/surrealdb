@@ -9,5 +9,6 @@ impl_module_def!(
 	Package,
 	"value",
 	"diff" => fut Async,
+	"expect" => fut Async,
 	"patch" => fut Async
 );
