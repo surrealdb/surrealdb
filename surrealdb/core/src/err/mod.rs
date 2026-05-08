@@ -158,7 +158,7 @@ pub(crate) enum Error {
 	},
 
 	/// The wrong quantity or magnitude of arguments was given for the specified
-	/// function
+	/// method
 	#[error("Incorrect arguments for method {name}(). {message}")]
 	InvalidMethodArguments {
 		name: String,
