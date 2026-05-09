@@ -951,6 +951,7 @@ pub enum VectorType {
 	I64,
 	I32,
 	I16,
+	I8,
 }
 impl_vis_debug!(VectorType);
 

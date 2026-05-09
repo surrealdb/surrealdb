@@ -188,6 +188,7 @@ pub enum VectorType {
 	I64,
 	I32,
 	I16,
+	I8,
 }
 
 impl ToSql for VectorType {
@@ -198,6 +199,7 @@ impl ToSql for VectorType {
 			Self::I64 => f.push_str("I64"),
 			Self::I32 => f.push_str("I32"),
 			Self::I16 => f.push_str("I16"),
+			Self::I8 => f.push_str("I8"),
 		}
 	}
 }
@@ -254,6 +256,7 @@ impl From<VectorType> for crate::catalog::VectorType {
 			VectorType::I64 => Self::I64,
 			VectorType::I32 => Self::I32,
 			VectorType::I16 => Self::I16,
+			VectorType::I8 => Self::I8,
 		}
 	}
 }
@@ -266,6 +269,7 @@ impl From<crate::catalog::VectorType> for VectorType {
 			crate::catalog::VectorType::I64 => Self::I64,
 			crate::catalog::VectorType::I32 => Self::I32,
 			crate::catalog::VectorType::I16 => Self::I16,
+			crate::catalog::VectorType::I8 => Self::I8,
 		}
 	}
 }

@@ -562,6 +562,7 @@ impl Parser<'_> {
 				VectorTypeKind::I64 => VectorType::I64,
 				VectorTypeKind::I32 => VectorType::I32,
 				VectorTypeKind::I16 => VectorType::I16,
+				VectorTypeKind::I8 => VectorType::I8,
 			}),
 			_ => unexpected!(self, next, "a vector type"),
 		}

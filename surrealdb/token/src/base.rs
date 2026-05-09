@@ -808,6 +808,8 @@ pub enum BaseTokenKind {
 	KwI32,
 	#[regex(r"(?i)I16")]
 	KwI16,
+	#[regex(r"(?i)I8")]
+	KwI8,
 
 	// HTTP methods
 	#[regex(r"(?i)GET")]
@@ -1174,6 +1176,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwI64 => "keyword `I64`",
 			BaseTokenKind::KwI32 => "keyword `I32`",
 			BaseTokenKind::KwI16 => "keyword `I16`",
+			BaseTokenKind::KwI8 => "keyword `I8`",
 			BaseTokenKind::KwGet => "keyword `GET`",
 			BaseTokenKind::KwPost => "keyword `POST`",
 			BaseTokenKind::KwPut => "keyword `PUT`",

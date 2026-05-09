@@ -1070,6 +1070,9 @@ macro_rules! T {
 	(I16) => {
 		$crate::BaseTokenKind::KwI16
 	};
+	(I8) => {
+		$crate::BaseTokenKind::KwI8
+	};
 
 	// HTTP methods
 	(GET) => {

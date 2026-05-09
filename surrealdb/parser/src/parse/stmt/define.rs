@@ -1238,6 +1238,10 @@ impl ParseSync for ast::VectorType {
 				let _ = parser.next();
 				Ok(ast::VectorType::I16)
 			}
+			T![I8] => {
+				let _ = parser.next();
+				Ok(ast::VectorType::I8)
+			}
 			_ => Err(parser.unexpected("a vector type")),
 		}
 	}
