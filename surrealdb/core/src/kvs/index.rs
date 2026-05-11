@@ -169,11 +169,34 @@ pub(crate) struct IndexBuilder {
 	indexes: Arc<RwLock<HashMap<SharedIndexKey, IndexBuilding>>>,
 }
 
+/// Weak counterpart to [`IndexBuilder`].
+#[derive(Clone)]
+pub(crate) struct WeakIndexBuilder {
+	tf: TransactionFactory,
+	indexes: std::sync::Weak<RwLock<HashMap<SharedIndexKey, IndexBuilding>>>,
+}
+
+impl WeakIndexBuilder {
+	pub(crate) fn upgrade(&self) -> Option<IndexBuilder> {
+		self.indexes.upgrade().map(|indexes| IndexBuilder {
+			tf: self.tf.clone(),
+			indexes,
+		})
+	}
+}
+
 impl IndexBuilder {
 	pub(super) fn new(tf: TransactionFactory) -> Self {
 		Self {
 			tf,
 			indexes: Default::default(),
+		}
+	}
+
+	pub(crate) fn downgrade(&self) -> WeakIndexBuilder {
+		WeakIndexBuilder {
+			tf: self.tf.clone(),
+			indexes: Arc::downgrade(&self.indexes),
 		}
 	}
 
@@ -1105,5 +1128,45 @@ struct BuildingFinishGuard(IndexBuilding);
 impl Drop for BuildingFinishGuard {
 	fn drop(&mut self) {
 		self.0.finished.store(true, Ordering::Relaxed);
+	}
+}
+
+#[cfg(test)]
+#[cfg(feature = "kv-mem")]
+mod tests {
+	use std::sync::Arc;
+
+	use crate::dbs::Session;
+	use crate::kvs::Datastore;
+
+	/// Asserts that DEFINE INDEX doesn't leak the Datastore via the
+	/// IndexBuilder back-reference cycle.
+	#[tokio::test]
+	async fn define_index_does_not_leak_datastore_via_arc_cycle() {
+		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let weak_indexes = Arc::downgrade(&ds.index_builder.indexes);
+
+		let session = Session::owner().with_ns("ns").with_db("db");
+		ds.execute(
+			"DEFINE TABLE t SCHEMAFULL; \
+			 DEFINE FIELD x ON t TYPE string; \
+			 DEFINE INDEX i ON t FIELDS x;",
+			&session,
+			None,
+		)
+		.await
+		.unwrap();
+
+		drop(ds);
+		for _ in 0..50 {
+			if weak_indexes.strong_count() == 0 {
+				return;
+			}
+			tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+		}
+		panic!(
+			"IndexBuilder.indexes still has {} strong refs after dropping the Datastore",
+			weak_indexes.strong_count(),
+		);
 	}
 }

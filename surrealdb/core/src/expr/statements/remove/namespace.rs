@@ -58,7 +58,7 @@ impl RemoveNamespaceStatement {
 
 		// Remove the index stores
 		ctx.get_index_stores()
-			.namespace_removed(ctx.get_index_builder(), &txn, ns.namespace_id)
+			.namespace_removed(ctx.get_index_builder().as_ref(), &txn, ns.namespace_id)
 			.await?;
 		// Remove the sequences
 		if let Some(seq) = ctx.get_sequences() {
