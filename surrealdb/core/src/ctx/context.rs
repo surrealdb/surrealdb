@@ -44,7 +44,7 @@ use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
-use crate::kvs::index::IndexBuilder;
+use crate::kvs::index::{IndexBuilder, WeakIndexBuilder};
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
@@ -83,8 +83,8 @@ pub struct Context {
 	cache: Option<Arc<DatastoreCache>>,
 	// The index store
 	index_stores: IndexStores,
-	// The index concurrent builders
-	index_builder: Option<IndexBuilder>,
+	// Weak handle to the datastore's index_builder
+	index_builder: Option<WeakIndexBuilder>,
 	// The sequences
 	sequences: Option<Sequences>,
 	// Capabilities
@@ -356,7 +356,7 @@ impl Context {
 			capabilities,
 			index_stores,
 			cache: Some(cache),
-			index_builder: Some(index_builder),
+			index_builder: Some(index_builder.downgrade()),
 			sequences: Some(sequences),
 			#[cfg(storage)]
 			temporary_directory,
@@ -627,9 +627,9 @@ impl Context {
 		&self.index_stores
 	}
 
-	/// Get the index_builder for this context/ds
-	pub(crate) fn get_index_builder(&self) -> Option<&IndexBuilder> {
-		self.index_builder.as_ref()
+	/// Get the index_builder for this context/ds.
+	pub(crate) fn get_index_builder(&self) -> Option<IndexBuilder> {
+		self.index_builder.as_ref().and_then(|w| w.upgrade())
 	}
 
 	/// Return the sequences manager

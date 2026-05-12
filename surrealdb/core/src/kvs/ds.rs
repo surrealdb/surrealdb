@@ -122,7 +122,7 @@ pub struct Datastore {
 	// The cross transaction cache
 	cache: Arc<DatastoreCache>,
 	// The index asynchronous builder
-	index_builder: IndexBuilder,
+	pub(crate) index_builder: IndexBuilder,
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
 	jwks_cache: Arc<RwLock<JwksCache>>,

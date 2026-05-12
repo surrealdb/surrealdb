@@ -83,7 +83,13 @@ impl DefineIndexStatement {
 			}
 			// Clear the index store cache
 			ctx.get_index_stores()
-				.index_removed(ctx.get_index_builder(), tb.namespace_id, tb.database_id, &tb, &ix)
+				.index_removed(
+					ctx.get_index_builder().as_ref(),
+					tb.namespace_id,
+					tb.database_id,
+					&tb,
+					&ix,
+				)
 				.await?;
 			ix.index_id
 		} else {
