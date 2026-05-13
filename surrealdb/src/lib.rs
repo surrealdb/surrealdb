@@ -197,6 +197,14 @@ where
 					Some(crate::types::ConnectionError::AlreadyConnected),
 				)
 			})?;
+			// The engine spawned the router task into `client`; move the
+			// JoinHandle onto the user-facing handle before `client` drops,
+			// otherwise `self.surreal.shutdown()` has nothing to await.
+			if let Some(handle) =
+				client.inner.router_join.lock().expect("router_join poisoned").take()
+			{
+				self.surreal.set_router_join(handle);
+			}
 			// Both ends of the channel are still alive at this point
 			self.surreal.inner.waiter.0.send(Some(WaitFor::Connection)).ok();
 			Ok(())
@@ -243,6 +251,9 @@ struct Inner {
 	router: OnceLock<Router>,
 	waiter: Waiter,
 	session_clone: SessionClone,
+	/// JoinHandle of the spawned router task, awaited by [`Surreal::shutdown`].
+	/// `None` on engines that don't expose a single router task.
+	router_join: std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl Inner {
@@ -294,6 +305,7 @@ where
 			router,
 			waiter,
 			session_clone,
+			router_join: std::sync::Mutex::new(None),
 		})
 		.into()
 	}
@@ -314,6 +326,51 @@ impl<C> Surreal<C>
 where
 	C: Connection,
 {
+	/// Attach the router task's `JoinHandle` so [`shutdown`](Self::shutdown)
+	/// can await it. Called by engines after construction; no-op once set.
+	#[doc(hidden)]
+	pub fn set_router_join(&self, handle: tokio::task::JoinHandle<()>) {
+		let mut slot = self.inner.router_join.lock().expect("router_join poisoned");
+		if slot.is_none() {
+			*slot = Some(handle);
+		}
+	}
+
+	/// Close the router's command channels and await the router task to
+	/// completion, releasing the underlying `Datastore` (and, for embedded
+	/// backends, its RocksDB / SurrealKV file lock) before this future
+	/// resolves.
+	///
+	/// Dropping a `Surreal` only signals the router to wind down; the actual
+	/// teardown runs on a detached task. Use `shutdown().await` when you
+	/// need to observe completion: graceful service exit, or per-test
+	/// teardown that must release a RocksDB directory before the next test
+	/// opens it.
+	///
+	/// Idempotent across clones. Subsequent operations on any clone fail
+	/// with channel-closed errors since the router task is gone.
+	///
+	/// Engines without a router JoinHandle (remote, wasm) close their
+	/// channels and return immediately.
+	pub async fn shutdown(&self) {
+		// Close both channels: route_rx and session_rx are independent arms
+		// of router_loop's biased select!, either can keep the loop alive.
+		if let Some(router) = self.inner.router.get() {
+			router.sender.close();
+		}
+		self.inner.session_clone.sender.close();
+
+		let handle = self
+			.inner
+			.router_join
+			.lock()
+			.expect("router_join poisoned")
+			.take();
+		if let Some(h) = handle {
+			let _ = h.await;
+		}
+	}
+
 	async fn check_server_version(&self, version: &Version) -> Result<()> {
 		// invalid version requirements should be caught during development
 		let req = VersionReq::parse(SUPPORTED_VERSIONS).expect("valid supported versions");

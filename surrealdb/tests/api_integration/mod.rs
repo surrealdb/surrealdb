@@ -549,6 +549,20 @@ mod rocksdb {
 		}
 	}
 
+	// Re-opening the same RocksDB path immediately after `shutdown().await`
+	// must succeed. Without an awaitable shutdown, the file lock outlives the
+	// dropped handle and the second open fails with "No locks available".
+	#[test_log::test(tokio::test)]
+	async fn shutdown_releases_rocksdb_lock() {
+		let path =
+			format!("rocksdb://{}", TEMP_DIR.join("shutdown").join(Ulid::new().to_string()).display());
+		for _ in 0..3 {
+			let db = surrealdb::engine::any::connect(&path).await.unwrap();
+			db.use_ns("ns").use_db("db").await.unwrap();
+			db.shutdown().await;
+		}
+	}
+
 	include_tests!(new_db => basic, serialisation, live, backup, session_isolation, run);
 }
 
