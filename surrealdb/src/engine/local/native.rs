@@ -40,7 +40,12 @@ impl conn::Sealed for Db {
 			let config = address.config.clone();
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
-			tokio::spawn(run_router(address, conn_tx, route_rx, session_clone.receiver.clone()));
+			let join_handle = tokio::spawn(run_router(
+				address,
+				conn_tx,
+				route_rx,
+				session_clone.receiver.clone(),
+			));
 
 			conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
 
@@ -55,7 +60,9 @@ impl conn::Sealed for Db {
 				sender: route_tx,
 			};
 
-			Ok((router, waiter, session_clone).into())
+			let surreal: Surreal<Self> = (router, waiter, session_clone).into();
+			surreal.set_router_join(join_handle);
+			Ok(surreal)
 		})
 	}
 }
@@ -77,7 +84,7 @@ impl Surreal<Db> {
 		let session_clone = SessionClone::new();
 		let recv = session_clone.receiver.clone();
 
-		tokio::spawn(async move {
+		let join_handle = tokio::spawn(async move {
 			conn_tx.send(Ok(())).await.ok();
 
 			let router_state = super::RouterState {
@@ -89,7 +96,9 @@ impl Surreal<Db> {
 
 			router_loop(&router_state, canceller, tasks, route_rx, recv, notifications).await;
 
-			router_state.kvs.shutdown().await
+			if let Err(e) = router_state.kvs.shutdown().await {
+				tracing::warn!("Datastore shutdown failed: {e}");
+			}
 		});
 
 		conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
@@ -105,7 +114,9 @@ impl Surreal<Db> {
 			sender: route_tx,
 		};
 
-		Ok((router, waiter, session_clone).into())
+		let surreal: Surreal<Db> = (router, waiter, session_clone).into();
+		surreal.set_router_join(join_handle);
+		Ok(surreal)
 	}
 }
 

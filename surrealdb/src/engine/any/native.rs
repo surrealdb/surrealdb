@@ -43,19 +43,22 @@ impl conn::Sealed for Any {
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 			let mut features = HashSet::new();
 
-			match EndpointKind::from(address.url.scheme()) {
+			// Each arm yields the router task's JoinHandle or returns Err.
+			// Threaded into the Surreal below so `shutdown()` can await it.
+			let router_join: tokio::task::JoinHandle<()> = match EndpointKind::from(address.url.scheme()) {
 				EndpointKind::Memory => {
 					#[cfg(feature = "kv-mem")]
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(
+						let handle = tokio::spawn(engine::local::native::run_router(
 							address,
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						handle
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
@@ -70,20 +73,21 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(
+						let handle = tokio::spawn(engine::local::native::run_router(
 							address,
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						handle
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
-				return Err(Error::configuration(
-					"Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_string(),
-					None,
-				));
+					return Err(Error::configuration(
+						"Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_string(),
+						None,
+					));
 				}
 
 				EndpointKind::TiKv => {
@@ -91,19 +95,20 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(
+						let handle = tokio::spawn(engine::local::native::run_router(
 							address,
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						handle
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
-				return Err(
-					Error::configuration("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_string(), None)
-				);
+					return Err(
+						Error::configuration("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_string(), None)
+					);
 				}
 
 				EndpointKind::SurrealKv => {
@@ -111,20 +116,21 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(
+						let handle = tokio::spawn(engine::local::native::run_router(
 							address,
 							conn_tx,
 							route_rx,
 							session_clone.receiver.clone(),
 						));
-						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??
+						conn_rx.recv().await.map_err(crate::std_error_to_types_error)??;
+						handle
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
-				return Err(Error::configuration(
-					"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_string(),
-					None,
-				));
+					return Err(Error::configuration(
+						"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_string(),
+						None,
+					));
 				}
 
 				EndpointKind::Http | EndpointKind::Https => {
@@ -144,14 +150,14 @@ impl conn::Sealed for Any {
 							base_url,
 							route_rx,
 							session_clone.receiver.clone(),
-						));
+						))
 					}
 
 					#[cfg(not(feature = "protocol-http"))]
-				return Err(Error::configuration(
-					"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_string(),
-					None,
-				));
+					return Err(Error::configuration(
+						"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_string(),
+						None,
+					));
 				}
 
 				EndpointKind::Ws | EndpointKind::Wss => {
@@ -194,19 +200,19 @@ impl conn::Sealed for Any {
 							socket,
 							route_rx,
 							session_clone.receiver.clone(),
-						));
+						))
 					}
 
 					#[cfg(not(feature = "protocol-ws"))]
-				return Err(Error::configuration(
-					"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_string(),
-					None,
-				));
+					return Err(Error::configuration(
+						"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_string(),
+						None,
+					));
 				}
 				EndpointKind::Unsupported(v) => {
 					return Err(Error::configuration(format!("Unsupported scheme: {v}"), None));
 				}
-			}
+			};
 
 			let waiter = watch::channel(Some(WaitFor::Connection));
 			let router = Router {
@@ -215,7 +221,9 @@ impl conn::Sealed for Any {
 				sender: route_tx,
 			};
 
-			Ok((router, waiter, session_clone).into())
+			let surreal: Surreal<Self> = (router, waiter, session_clone).into();
+			surreal.set_router_join(router_join);
+			Ok(surreal)
 		})
 	}
 }

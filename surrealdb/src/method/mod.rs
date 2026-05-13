@@ -215,6 +215,7 @@ where
 			router: OnceLock::new(),
 			waiter: watch::channel(None),
 			session_clone: SessionClone::new(),
+			router_join: std::sync::Mutex::new(None),
 		})
 		.into()
 	}
