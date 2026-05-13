@@ -1170,5 +1170,12 @@ async fn router(
 			let query_result = QueryResultBuilder::started_now();
 			Ok(vec![query_result.finish()])
 		}
+		Command::Shutdown => {
+			// Shutdown is intercepted in the run_router loop before
+			// dispatch reaches this function; if we land here, treat as
+			// a no-op for safety.
+			let query_result = QueryResultBuilder::started_now();
+			Ok(vec![query_result.finish()])
+		}
 	}
 }

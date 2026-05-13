@@ -224,6 +224,14 @@ where
 		} => {
 			session_state.live_queries.remove(uuid);
 		}
+		Command::Shutdown => {
+			// Remote engines have no embedded datastore to close;
+			// callers can drop the connection. ACK immediately.
+			if response.send(Ok(vec![QueryResultBuilder::instant_none()])).await.is_err() {
+				trace!("Receiver dropped");
+			}
+			return HandleResult::Ok;
+		}
 		_ => {}
 	}
 

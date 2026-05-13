@@ -170,6 +170,19 @@ pub(crate) async fn run_router(
 				let Ok(route) = route else {
 					break
 				};
+				// Graceful shutdown: do not dispatch to the session router;
+				// instead, run the same cleanup that the loop-exit path runs
+				// (cancel background tasks, await their resolution, shut down
+				// the datastore), then ACK and return. This makes the
+				// release of file locks observable to the caller via
+				// `Surreal::shutdown().await`.
+				if matches!(route.request.command, crate::conn::Command::Shutdown) {
+					canceller.cancel();
+					tasks.resolve().await.ok();
+					router_state.kvs.shutdown().await.ok();
+					route.response.send(Ok(Vec::new())).await.ok();
+					return;
+				}
 				match router_state.sessions.get(&route.request.session_id) {
 					Some(Ok(state)) => {
 						let kvs = router_state.kvs.clone();

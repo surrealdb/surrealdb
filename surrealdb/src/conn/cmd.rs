@@ -93,4 +93,11 @@ pub(crate) enum Command {
 		version: Option<String>,
 		args: Array,
 	},
+	/// Gracefully shut down the underlying datastore.
+	///
+	/// For embedded engines (e.g. SurrealKV, RocksDB, in-memory), this
+	/// awaits the datastore's `shutdown()` so that all file handles and
+	/// locks are released before the call returns. For remote engines,
+	/// this is a no-op acknowledgement.
+	Shutdown,
 }

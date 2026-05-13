@@ -348,6 +348,10 @@ impl Command {
 					session_id,
 				}
 			}
+			// Shutdown is handled locally in each engine's run_router and
+			// never travels over the wire. Return None so any caller that
+			// reaches this path treats it as "no router request emitted."
+			Command::Shutdown => return None,
 		};
 		Some(res)
 	}

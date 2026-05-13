@@ -32,6 +32,7 @@ mod patch;
 mod run;
 mod select;
 mod set;
+mod shutdown;
 mod signin;
 mod signup;
 mod transaction;
@@ -66,6 +67,7 @@ pub use query::{IntoVariables, Query, QueryStream};
 pub use run::{IntoFn, Run};
 pub use select::Select;
 pub use set::Set;
+pub use shutdown::Shutdown;
 pub use signin::Signin;
 pub use signup::Signup;
 use tokio::sync::watch;
@@ -1319,6 +1321,32 @@ where
 	/// ```
 	pub fn health(&'_ self) -> Health<'_, C> {
 		Health {
+			client: Cow::Borrowed(self),
+		}
+	}
+
+	/// Gracefully shut down the underlying engine.
+	///
+	/// For embedded engines this awaits the datastore's shutdown so
+	/// that file handles and OS-level locks are released before the
+	/// future resolves. On Windows, where file locks are per-handle,
+	/// this is required before re-opening the same database directory
+	/// in the same process — without it, the next open fails with
+	/// `ERROR_LOCK_VIOLATION`. For remote engines (WS / HTTP) this is
+	/// a no-op acknowledgement; callers can simply drop the connection.
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// db.shutdown().await?;
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn shutdown(&'_ self) -> Shutdown<'_, C> {
+		Shutdown {
 			client: Cow::Borrowed(self),
 		}
 	}

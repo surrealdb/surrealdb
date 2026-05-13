@@ -1013,6 +1013,11 @@ async fn router(
 			"The protocol or storage engine does not support live queries on this architecture"
 				.to_string(),
 		)),
+		Command::Shutdown => {
+			// Remote HTTP engines have no embedded datastore; ACK so
+			// `Surreal::shutdown()` is uniformly callable across engines.
+			Ok(vec![QueryResultBuilder::instant_none()])
+		}
 		Command::Query {
 			txn,
 			query,
