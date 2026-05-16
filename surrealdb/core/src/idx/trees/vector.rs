@@ -1,7 +1,7 @@
 use std::cmp::PartialEq;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use std::ops::{Add, Deref, Div, Sub};
+use std::ops::{Add, Deref, Div};
 use std::sync::Arc;
 
 use ahash::{AHasher, HashSet};
@@ -402,14 +402,6 @@ impl Vector {
 			(Self::I8(a), Self::I8(b)) => Self::jaccard_integers(a, b),
 			_ => f64::NAN,
 		}
-	}
-
-	#[inline]
-	fn manhattan<T>(a: &Array1<T>, b: &Array1<T>) -> f64
-	where
-		T: Sub<Output = T> + ToFloat + Copy,
-	{
-		a.iter().zip(b.iter()).map(|(&a, &b)| (a - b).to_float().abs()).sum()
 	}
 
 	/// Promoted Manhattan distance for narrow integer types (I8/I16) where the
