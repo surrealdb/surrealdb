@@ -318,7 +318,7 @@ impl ToSql for Distance {
 }
 
 /// Vector type for storing vectors.
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash)]
 pub enum VectorType {
 	/// 64-bit floating point.
@@ -332,6 +332,9 @@ pub enum VectorType {
 	I32,
 	/// 16-bit signed integer.
 	I16,
+	/// 8-bit signed integer (added in revision 2).
+	#[revision(start = 2)]
+	I8,
 }
 
 impl Display for VectorType {
@@ -342,6 +345,7 @@ impl Display for VectorType {
 			Self::I64 => f.write_str("I64"),
 			Self::I32 => f.write_str("I32"),
 			Self::I16 => f.write_str("I16"),
+			Self::I8 => f.write_str("I8"),
 		}
 	}
 }

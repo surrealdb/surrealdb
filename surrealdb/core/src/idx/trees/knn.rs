@@ -550,6 +550,7 @@ pub(super) mod tests {
 				Self::I64(a) => !a.iter().any(|a| !a.is_zero()),
 				Self::I32(a) => !a.iter().any(|a| !a.is_zero()),
 				Self::I16(a) => !a.iter().any(|a| !a.is_zero()),
+				Self::I8(a) => !a.iter().any(|a| !a.is_zero()),
 			}
 		}
 	}
@@ -563,7 +564,7 @@ pub(super) mod tests {
 			distance: &Distance,
 		) -> Self {
 			let mut rng = get_seed_rnd();
-			let r#gen = RandomItemGenerator::new(distance, dimension);
+			let r#gen = RandomItemGenerator::new(distance, dimension, vt);
 			if unique {
 				TestCollection::new_unique(collection_size, vt, dimension, &r#gen, &mut rng)
 			} else {
@@ -628,9 +629,18 @@ pub(super) mod tests {
 	}
 
 	impl RandomItemGenerator {
-		pub(in crate::idx::trees) fn new(dist: &Distance, dim: usize) -> Self {
+		pub(in crate::idx::trees) fn new(dist: &Distance, dim: usize, vt: VectorType) -> Self {
 			match dist {
-				Distance::Jaccard => Self::Int(0, (dim / 2) as i64),
+				Distance::Jaccard => {
+					// Clamp the upper bound so generated values fit in the element type.
+					// For I8 max is 127, for I16 max is 32767, for others use dim/2.
+					let upper = match vt {
+						VectorType::I8 => (dim / 2).min(i8::MAX as usize) as i64,
+						VectorType::I16 => (dim / 2).min(i16::MAX as usize) as i64,
+						_ => (dim / 2) as i64,
+					};
+					Self::Int(0, upper.max(1))
+				}
 				Distance::Hamming => Self::Int(0, 2),
 				_ => Self::Float(-20.0, 20.0),
 			}

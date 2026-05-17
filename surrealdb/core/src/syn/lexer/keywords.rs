@@ -409,6 +409,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	// VectorTypes
 	UniCase::ascii("F32") => TokenKind::VectorType(VectorTypeKind::F32),
 	UniCase::ascii("F64") => TokenKind::VectorType(VectorTypeKind::F64),
+	UniCase::ascii("I8") => TokenKind::VectorType(VectorTypeKind::I8),
 	UniCase::ascii("I16") => TokenKind::VectorType(VectorTypeKind::I16),
 	UniCase::ascii("I32") => TokenKind::VectorType(VectorTypeKind::I32),
 	UniCase::ascii("I64") => TokenKind::VectorType(VectorTypeKind::I64),

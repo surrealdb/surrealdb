@@ -1,7 +1,7 @@
 use std::cmp::PartialEq;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use std::ops::{Add, Deref, Div, Sub};
+use std::ops::{Add, Deref, Div};
 use std::sync::Arc;
 
 use ahash::{AHasher, HashSet};
@@ -27,9 +27,13 @@ pub enum Vector {
 	I64(Array1<i64>),
 	I32(Array1<i32>),
 	I16(Array1<i16>),
+	I8(Array1<i8>),
 }
 
-#[revisioned(revision = 1)]
+// Wire-format note: bumping SerializedVector to revision 2. The new I8 variant
+// is tagged #[revision(start = 2)] so existing F64/F32/I64/I32/I16 encoded bytes
+// remain byte-identical when decoded by a revision-1 reader.
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, PartialEq)]
 pub enum SerializedVector {
 	F64(Vec<f64>),
@@ -37,6 +41,8 @@ pub enum SerializedVector {
 	I64(Vec<i64>),
 	I32(Vec<i32>),
 	I16(Vec<i16>),
+	#[revision(start = 2)]
+	I8(Vec<i8>),
 }
 
 impl KVValue for SerializedVector {
@@ -63,6 +69,7 @@ impl<F> Encode<F> for SerializedVector {
 			SerializedVector::I64(v) => v.len() * 8 + 16,
 			SerializedVector::I32(v) => v.len() * 4 + 16,
 			SerializedVector::I16(v) => v.len() * 2 + 16,
+			SerializedVector::I8(v) => v.len() + 16,
 		};
 		let mut buf = Vec::with_capacity(cap);
 		SerializeRevisioned::serialize_revisioned(self, &mut buf).map_err(EncodeError::custom)?;
@@ -88,6 +95,7 @@ impl From<&Vector> for SerializedVector {
 			Vector::I64(v) => Self::I64(v.to_vec()),
 			Vector::I32(v) => Self::I32(v.to_vec()),
 			Vector::I16(v) => Self::I16(v.to_vec()),
+			Vector::I8(v) => Self::I8(v.to_vec()),
 		}
 	}
 }
@@ -100,6 +108,7 @@ impl From<SerializedVector> for Vector {
 			SerializedVector::I64(v) => Self::I64(Array1::from_vec(v)),
 			SerializedVector::I32(v) => Self::I32(Array1::from_vec(v)),
 			SerializedVector::I16(v) => Self::I16(Array1::from_vec(v)),
+			SerializedVector::I8(v) => Self::I8(Array1::from_vec(v)),
 		}
 	}
 }
@@ -132,6 +141,11 @@ impl SerializedVector {
 				Self::check_vector_value(v, &mut vec)?;
 				Self::I16(vec)
 			}
+			VectorType::I8 => {
+				let mut vec = Vec::with_capacity(d);
+				Self::check_vector_value(v, &mut vec)?;
+				Self::I8(vec)
+			}
 		};
 		Ok(res)
 	}
@@ -162,6 +176,7 @@ impl SerializedVector {
 			Self::I64(v) => v.len(),
 			Self::I32(v) => v.len(),
 			Self::I16(v) => v.len(),
+			Self::I8(v) => v.len(),
 		}
 	}
 
@@ -198,6 +213,11 @@ impl SerializedVector {
 					hasher.update(&val.to_le_bytes());
 				}
 			}
+			Self::I8(v) => {
+				for &val in v {
+					hasher.update(&val.to_le_bytes());
+				}
+			}
 		}
 		*hasher.finalize().as_bytes()
 	}
@@ -228,6 +248,7 @@ impl Vector {
 				a.linf_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY)
 			}
 			(Self::I16(a), Self::I16(b)) => Self::chebyshev(a, b),
+			(Self::I8(a), Self::I8(b)) => Self::chebyshev(a, b),
 			_ => f64::NAN,
 		}
 	}
@@ -259,13 +280,27 @@ impl Vector {
 		1.0 - dot_product / (norm_a * norm_b)
 	}
 
+	/// Promoted cosine distance for narrow integer types (I8/I16) where element-wise
+	/// dot product accumulation in i8/i16 would overflow at typical embedding dims (≈1536).
+	/// Promotes each element to f64 before accumulating.
+	#[inline]
+	fn cosine_dist_promoted<T: ToFloat>(a: &Array1<T>, b: &Array1<T>) -> f64 {
+		let dot: f64 =
+			a.iter().zip(b.iter()).map(|(x, y)| x.to_float() * y.to_float()).sum();
+		let na: f64 = a.iter().map(|x| { let f = x.to_float(); f * f }).sum::<f64>().sqrt();
+		let nb: f64 = b.iter().map(|x| { let f = x.to_float(); f * f }).sum::<f64>().sqrt();
+		1.0 - dot / (na * nb)
+	}
+
 	fn cosine_distance(&self, other: &Self) -> f64 {
 		match (self, other) {
 			(Self::F64(a), Self::F64(b)) => Self::cosine_distance_f64(a, b),
 			(Self::F32(a), Self::F32(b)) => Self::cosine_distance_f32(a, b),
 			(Self::I64(a), Self::I64(b)) => Self::cosine_dist(a, b),
 			(Self::I32(a), Self::I32(b)) => Self::cosine_dist(a, b),
-			(Self::I16(a), Self::I16(b)) => Self::cosine_dist(a, b),
+			// I16 and I8: promoted to f64 to avoid integer overflow at dim≈1536
+			(Self::I16(a), Self::I16(b)) => Self::cosine_dist_promoted(a, b),
+			(Self::I8(a), Self::I8(b)) => Self::cosine_dist_promoted(a, b),
 			_ => f64::INFINITY,
 		}
 	}
@@ -284,6 +319,7 @@ impl Vector {
 			(Self::I64(a), Self::I64(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
 			(Self::I32(a), Self::I32(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
 			(Self::I16(a), Self::I16(b)) => Self::euclidean(a, b),
+			(Self::I8(a), Self::I8(b)) => Self::euclidean(a, b),
 			_ => f64::INFINITY,
 		}
 	}
@@ -309,6 +345,7 @@ impl Vector {
 			(Self::I64(a), Self::I64(b)) => Self::hamming(a, b),
 			(Self::I32(a), Self::I32(b)) => Self::hamming(a, b),
 			(Self::I16(a), Self::I16(b)) => Self::hamming(a, b),
+			(Self::I8(a), Self::I8(b)) => Self::hamming(a, b),
 			_ => f64::INFINITY,
 		}
 	}
@@ -362,16 +399,18 @@ impl Vector {
 			(Self::I64(a), Self::I64(b)) => Self::jaccard_integers(a, b),
 			(Self::I32(a), Self::I32(b)) => Self::jaccard_integers(a, b),
 			(Self::I16(a), Self::I16(b)) => Self::jaccard_integers(a, b),
+			(Self::I8(a), Self::I8(b)) => Self::jaccard_integers(a, b),
 			_ => f64::NAN,
 		}
 	}
 
+	/// Promoted Manhattan distance for narrow integer types (I8/I16) where the
+	/// element-wise subtraction `(a - b)` performed in the element type can
+	/// overflow at full-range inputs (e.g. `127 - (-127) = 254` does not fit in
+	/// `i8`). Promotes each element to `f64` BEFORE subtracting, then sums.
 	#[inline]
-	fn manhattan<T>(a: &Array1<T>, b: &Array1<T>) -> f64
-	where
-		T: Sub<Output = T> + ToFloat + Copy,
-	{
-		a.iter().zip(b.iter()).map(|(&a, &b)| (a - b).to_float().abs()).sum()
+	fn manhattan_promoted<T: ToFloat>(a: &Array1<T>, b: &Array1<T>) -> f64 {
+		a.iter().zip(b.iter()).map(|(x, y)| (x.to_float() - y.to_float()).abs()).sum()
 	}
 
 	pub(super) fn manhattan_distance(&self, other: &Self) -> f64 {
@@ -380,7 +419,11 @@ impl Vector {
 			(Self::F32(a), Self::F32(b)) => a.l1_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY),
 			(Self::I64(a), Self::I64(b)) => a.l1_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY),
 			(Self::I32(a), Self::I32(b)) => a.l1_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY),
-			(Self::I16(a), Self::I16(b)) => Self::manhattan(a, b),
+			// I16 and I8: promoted to f64 BEFORE subtraction to avoid integer
+			// overflow at full-range inputs (e.g. `127 - (-127) = 254` does not
+			// fit in `i8`; `32767 - (-32768) = 65535` does not fit in `i16`).
+			(Self::I16(a), Self::I16(b)) => Self::manhattan_promoted(a, b),
+			(Self::I8(a), Self::I8(b)) => Self::manhattan_promoted(a, b),
 			_ => f64::NAN,
 		}
 	}
@@ -405,6 +448,7 @@ impl Vector {
 			(Self::I64(a), Self::I64(b)) => Self::minkowski(a, b, order),
 			(Self::I32(a), Self::I32(b)) => Self::minkowski(a, b, order),
 			(Self::I16(a), Self::I16(b)) => Self::minkowski(a, b, order),
+			(Self::I8(a), Self::I8(b)) => Self::minkowski(a, b, order),
 			_ => f64::NAN,
 		}
 	}
@@ -439,13 +483,46 @@ impl Vector {
 		numerator / denominator
 	}
 
+	/// Promoted Pearson correlation for narrow integer types (I8/I16) where accumulating
+	/// squared differences in i8/i16 would overflow at typical embedding dims (≈1536).
+	/// Promotes each element to f64 before accumulating.
+	#[inline]
+	fn pearson_promoted<T: ToFloat>(x: &Array1<T>, y: &Array1<T>) -> f64 {
+		let n = x.len() as f64;
+		if n == 0.0 {
+			return 0.0;
+		}
+		let mean_x: f64 = x.iter().map(|v| v.to_float()).sum::<f64>() / n;
+		let mean_y: f64 = y.iter().map(|v| v.to_float()).sum::<f64>() / n;
+
+		let mut sum_xy = 0.0_f64;
+		let mut sum_x2 = 0.0_f64;
+		let mut sum_y2 = 0.0_f64;
+
+		for (xi, yi) in x.iter().zip(y.iter()) {
+			let dx = xi.to_float() - mean_x;
+			let dy = yi.to_float() - mean_y;
+			sum_xy += dx * dy;
+			sum_x2 += dx * dx;
+			sum_y2 += dy * dy;
+		}
+
+		let denominator = (sum_x2 * sum_y2).sqrt();
+		if denominator == 0.0 {
+			return 0.0;
+		}
+		sum_xy / denominator
+	}
+
 	fn pearson_similarity(&self, other: &Self) -> f64 {
 		match (self, other) {
 			(Self::F64(a), Self::F64(b)) => Self::pearson(a, b),
 			(Self::F32(a), Self::F32(b)) => Self::pearson(a, b),
 			(Self::I64(a), Self::I64(b)) => Self::pearson(a, b),
 			(Self::I32(a), Self::I32(b)) => Self::pearson(a, b),
-			(Self::I16(a), Self::I16(b)) => Self::pearson(a, b),
+			// I16 and I8: promoted to f64 to avoid integer overflow at dim≈1536
+			(Self::I16(a), Self::I16(b)) => Self::pearson_promoted(a, b),
+			(Self::I8(a), Self::I8(b)) => Self::pearson_promoted(a, b),
 			_ => f64::NAN,
 		}
 	}
@@ -457,6 +534,7 @@ impl Vector {
 			Self::I64(arr) => arr.len() * std::mem::size_of::<i64>(),
 			Self::I32(arr) => arr.len() * std::mem::size_of::<i32>(),
 			Self::I16(arr) => arr.len() * std::mem::size_of::<i16>(),
+			Self::I8(arr) => arr.len() * std::mem::size_of::<i8>(),
 		};
 		// Array1 overhead (approximately 24 bytes for ndarray metadata)
 		s + 24
@@ -531,6 +609,10 @@ impl Hash for Vector {
 				let h = v.iter().fold(0, |acc, &x| acc ^ x);
 				state.write_i16(h);
 			}
+			Vector::I8(v) => {
+				let h = v.iter().fold(0, |acc, &x| acc ^ x);
+				state.write_i8(h);
+			}
 		}
 	}
 }
@@ -551,6 +633,7 @@ impl From<&Vector> for Value {
 			Vector::I64(a) => a.iter().map(|i| Number::Int(*i)).map(Value::from).collect(),
 			Vector::I32(a) => a.iter().map(|i| Number::Int(*i as i64)).map(Value::from).collect(),
 			Vector::I16(a) => a.iter().map(|i| Number::Int(*i as i64)).map(Value::from).collect(),
+			Vector::I8(a) => a.iter().map(|i| Number::Int(*i as i64)).map(Value::from).collect(),
 		};
 		Value::from(vec)
 	}
@@ -585,6 +668,11 @@ impl Vector {
 				SerializedVector::check_vector_value(v, &mut vec)?;
 				Vector::I16(Array1::from_vec(vec))
 			}
+			VectorType::I8 => {
+				let mut vec = Vec::with_capacity(d);
+				SerializedVector::check_vector_value(v, &mut vec)?;
+				Vector::I8(Array1::from_vec(vec))
+			}
 		};
 		Ok(res)
 	}
@@ -616,6 +704,11 @@ impl Vector {
 				Self::check_vector_number(v, &mut vec)?;
 				Vector::I16(Array1::from_vec(vec))
 			}
+			VectorType::I8 => {
+				let mut vec = Vec::with_capacity(v.len());
+				Self::check_vector_number(v, &mut vec)?;
+				Vector::I8(Array1::from_vec(vec))
+			}
 		};
 		Ok(res)
 	}
@@ -637,6 +730,7 @@ impl Vector {
 			Self::I64(v) => v.len(),
 			Self::I32(v) => v.len(),
 			Self::I16(v) => v.len(),
+			Self::I8(v) => v.len(),
 		}
 	}
 
@@ -676,6 +770,7 @@ mod tests {
 	use crate::catalog::{Distance, VectorType};
 	use crate::idx::trees::knn::tests::{RandomItemGenerator, get_seed_rnd, new_random_vec};
 	use crate::idx::trees::vector::{SharedVector, Vector};
+	use crate::val::Number;
 
 	fn test_distance(dist: Distance, a1: &[f64], a2: &[f64], res: f64) {
 		// Convert the arrays to Vec<Number>
@@ -697,9 +792,9 @@ mod tests {
 	fn test_distance_collection(dist: Distance, size: usize, dim: usize) {
 		let mut rng = get_seed_rnd();
 		for vt in
-			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16]
+			[VectorType::F64, VectorType::F32, VectorType::I64, VectorType::I32, VectorType::I16, VectorType::I8]
 		{
-			let r#gen = RandomItemGenerator::new(&dist, dim);
+			let r#gen = RandomItemGenerator::new(&dist, dim, vt);
 			let mut num_zero = 0;
 			for i in 0..size {
 				let v1 = new_random_vec(&mut rng, vt, dim, &r#gen);
@@ -753,6 +848,53 @@ mod tests {
 	fn test_distance_manhattan() {
 		test_distance_collection(Distance::Manhattan, 100, 1536);
 		test_distance(Distance::Manhattan, &[1.0, 2.0, 3.0], &[2.0, 3.0, 4.0], 3.0);
+	}
+
+	/// Regression test: full-range narrow-integer inputs must not overflow during
+	/// Manhattan distance. `127 - (-127) = 254` does not fit in `i8`; the I8/I16
+	/// distance kernel must promote to `f64` BEFORE subtraction.
+	///
+	/// Without `manhattan_promoted`, this test panics in debug builds and silently
+	/// wraps in release builds (`254` as `i8` wraps to `-2`, then `(-2).abs() = 2`,
+	/// summed across 1536 dims => 3072 instead of the correct 390 144).
+	#[test]
+	fn manhattan_i8_full_range_does_not_overflow() {
+		let dim = 1536;
+		let v_pos: Vec<Number> = (0..dim).map(|_| Number::Int(127)).collect();
+		let v_neg: Vec<Number> = (0..dim).map(|_| Number::Int(-127)).collect();
+		let v1: SharedVector =
+			Vector::try_from_vector(VectorType::I8, &v_pos).unwrap().into();
+		let v2: SharedVector =
+			Vector::try_from_vector(VectorType::I8, &v_neg).unwrap().into();
+		let d = Distance::Manhattan.calculate(&v1, &v2);
+		// 1536 dims * |127 - (-127)| = 1536 * 254 = 390 144
+		assert_eq!(
+			d, 390_144.0,
+			"I8 manhattan must promote to f64 before subtraction to avoid \
+			 element-type overflow (127 - (-127) = 254 does not fit in i8)"
+		);
+	}
+
+	/// Companion regression test for I16 full-range inputs. `32767 - (-32767) =
+	/// 65534` does not fit in `i16`. The original `manhattan` kernel (pre-PR)
+	/// silently wrapped for I16 too; promoting both narrow integer kernels
+	/// closes the regression for both.
+	#[test]
+	fn manhattan_i16_full_range_does_not_overflow() {
+		let dim = 1536;
+		let v_pos: Vec<Number> = (0..dim).map(|_| Number::Int(32_767)).collect();
+		let v_neg: Vec<Number> = (0..dim).map(|_| Number::Int(-32_767)).collect();
+		let v1: SharedVector =
+			Vector::try_from_vector(VectorType::I16, &v_pos).unwrap().into();
+		let v2: SharedVector =
+			Vector::try_from_vector(VectorType::I16, &v_neg).unwrap().into();
+		let d = Distance::Manhattan.calculate(&v1, &v2);
+		// 1536 dims * |32 767 - (-32 767)| = 1536 * 65 534 = 100 660 224
+		assert_eq!(
+			d, 100_660_224.0,
+			"I16 manhattan must promote to f64 before subtraction to avoid \
+			 element-type overflow (32 767 - (-32 767) = 65 534 does not fit in i16)"
+		);
 	}
 	#[test]
 	fn test_distance_minkowski() {

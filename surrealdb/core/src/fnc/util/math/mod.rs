@@ -51,6 +51,12 @@ impl ToFloat for i16 {
 	}
 }
 
+impl ToFloat for i8 {
+	fn to_float(&self) -> f64 {
+		*self as f64
+	}
+}
+
 pub(crate) fn mean(array: &[Number]) -> Result<Number> {
 	if array.is_empty() {
 		return Ok(f64::NAN.into());

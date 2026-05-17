@@ -340,6 +340,9 @@ macro_rules! t {
 	("I16") => {
 		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::I16)
 	};
+	("I8") => {
+		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::I8)
+	};
 
 	($t:tt) => {
 		$crate::syn::token::TokenKind::Keyword($crate::syn::token::keyword_t!($t))

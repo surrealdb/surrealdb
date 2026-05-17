@@ -262,6 +262,7 @@ pub enum VectorTypeKind {
 	I64,
 	I32,
 	I16,
+	I8,
 }
 
 impl VectorTypeKind {
@@ -272,6 +273,7 @@ impl VectorTypeKind {
 			Self::I64 => "I64",
 			Self::I32 => "I32",
 			Self::I16 => "I16",
+			Self::I8 => "I8",
 		}
 	}
 }
