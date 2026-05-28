@@ -1081,7 +1081,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8144c22e24bbcf26ade86cb6501a0916c46b7e4787abdb0045a467eb1645a1d"
 dependencies = [
  "ambient-authority",
- "rand 0.8.5",
+ "rand 0.8.6",
 ]
 
 [[package]]
@@ -2779,7 +2779,7 @@ dependencies = [
  "i_overlay",
  "log",
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
  "robust",
  "rstar 0.12.2",
  "serde",
@@ -3843,7 +3843,7 @@ dependencies = [
  "p256",
  "p384",
  "pem",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rsa",
  "serde",
  "serde_json",
@@ -4283,7 +4283,7 @@ dependencies = [
  "noisy_float",
  "num-integer",
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
 ]
 
 [[package]]
@@ -4382,7 +4382,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
  "smallvec",
  "zeroize",
 ]
@@ -4545,15 +4545,14 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "openssl"
-version = "0.10.75"
+version = "0.10.80"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08838db121398ad17ab8531ce9de97b244589089e290a384c900cb9ff7434328"
+checksum = "a45fa2aa886c42762255da344f0a0d313e254066c46aad76f300c3d3da62d967"
 dependencies = [
  "bitflags 2.10.0",
  "cfg-if",
  "foreign-types",
  "libc",
- "once_cell",
  "openssl-macros",
  "openssl-sys",
 ]
@@ -4583,9 +4582,9 @@ checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.111"
+version = "0.9.116"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82cab2d520aa75e3c58898289429321eb788c3106963d0dc886ec7a5f4adc321"
+checksum = "f28a22dc7140cda5f096e5e7724a6962ca81a7f8bfd2979f9b18c11af56318c4"
 dependencies = [
  "cc",
  "libc",
@@ -4900,7 +4899,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c80231409c20246a13fddb31776fb942c38553c51e871f8cbd687a4cfb5843d"
 dependencies = [
  "phf_shared 0.11.3",
- "rand 0.8.5",
+ "rand 0.8.6",
 ]
 
 [[package]]
@@ -5505,9 +5504,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
 dependencies = [
  "libc",
  "rand_chacha 0.3.1",
@@ -6140,7 +6139,7 @@ dependencies = [
  "borsh",
  "bytes",
  "num-traits",
- "rand 0.8.5",
+ "rand 0.8.6",
  "rkyv",
  "serde",
  "serde_json",
@@ -6952,7 +6951,7 @@ dependencies = [
  "http 1.4.0",
  "jsonwebtoken",
  "nix 0.30.1",
- "rand 0.8.5",
+ "rand 0.9.3",
  "rcgen",
  "reqwest 0.13.1",
  "semver",
@@ -6995,7 +6994,7 @@ dependencies = [
  "path-clean",
  "pprof",
  "radix_trie 0.3.0",
- "rand 0.8.5",
+ "rand 0.9.3",
  "rayon",
  "regex",
  "reqwest 0.13.1",
@@ -7107,7 +7106,7 @@ dependencies = [
  "pprof",
  "quick_cache",
  "radix_trie 0.3.0",
- "rand 0.8.5",
+ "rand 0.9.3",
  "rayon",
  "reblessive",
  "regex",
@@ -7276,7 +7275,7 @@ dependencies = [
  "opentelemetry_sdk",
  "pin-project-lite",
  "pprof",
- "rand 0.8.5",
+ "rand 0.9.3",
  "rcgen",
  "reqwest 0.13.1",
  "rstest",
@@ -7330,7 +7329,7 @@ dependencies = [
  "pin-project",
  "prometheus",
  "prost 0.12.6",
- "rand 0.8.5",
+ "rand 0.8.6",
  "regex",
  "semver",
  "serde",
@@ -7366,7 +7365,7 @@ dependencies = [
  "hex",
  "http 1.4.0",
  "papaya",
- "rand 0.8.5",
+ "rand 0.9.3",
  "regex",
  "regex-syntax",
  "reqwest 0.13.1",
@@ -8130,7 +8129,7 @@ dependencies = [
  "indexmap 1.9.3",
  "pin-project",
  "pin-project-lite",
- "rand 0.8.5",
+ "rand 0.8.6",
  "slab",
  "tokio",
  "tokio-util",
@@ -8279,7 +8278,7 @@ dependencies = [
  "bytes",
  "chrono",
  "prost 0.12.6",
- "rand 0.8.5",
+ "rand 0.8.6",
  "thread-id",
  "tracing",
  "tracing-subscriber",
