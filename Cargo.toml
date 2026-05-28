@@ -157,7 +157,7 @@ pin-project-lite = "0.2.16"
 pprof = "0.15.0"
 quick_cache = "0.6.18"
 radix_trie = "0.3.0" # TODO: Look at the use of this dependency. Last update 4 years ago, unmaintained.
-rand = { version = "0.8.5", features = ["small_rng"] }
+rand = { version = "0.9.3", features = ["small_rng"] }
 rayon = "1.11.0"
 regex = "1.12.2"
 regex-syntax = "0.8.8"
