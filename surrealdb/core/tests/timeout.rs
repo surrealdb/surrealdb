@@ -6,6 +6,7 @@ use helpers::Test;
 use surrealdb_core::dbs::{Capabilities, Session};
 #[allow(unused_imports)]
 use surrealdb_core::kvs::Datastore;
+use surrealdb_types::Value;
 
 #[tokio::test]
 async fn statement_timeouts() -> Result<()> {
@@ -88,6 +89,23 @@ async fn transaction_timeout() -> Result<()> {
 	let result = res.pop().unwrap().result;
 	let err = result.unwrap_err().to_string();
 	assert!(err.contains("exceeded the timeout"), "Expected transaction timeout error, got: {err}");
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn transaction_timeout_does_not_poison_next_query() -> Result<()> {
+	let ds = new_ds_with_timeout(None, Some(Duration::from_millis(500))).await;
+	let session = Session::owner().with_ns("test").with_db("test");
+
+	let mut res =
+		ds.execute("LET $value = sleep(10s); LET $next = 1;", &session, None).await.unwrap();
+	assert_eq!(res.len(), 2);
+
+	let err = res.remove(0).result.unwrap_err().to_string();
+	assert!(err.contains("exceeded the timeout"), "Expected transaction timeout error, got: {err}");
+	let value = res.remove(0).result?;
+	assert_eq!(value, Value::None);
 
 	Ok(())
 }
