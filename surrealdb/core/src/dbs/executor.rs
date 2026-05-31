@@ -73,6 +73,11 @@ impl Executor {
 		}
 	}
 
+	fn reset_stack_after_dropped_runner(&mut self) {
+		// Dropping a reblessive FinishFuture before completion leaves its stack dirty.
+		self.stack = TreeStack::new();
+	}
+
 	fn execute_option_statement(&mut self, stmt: OptionStatement) -> Result<()> {
 		// Allowed to run?
 		self.opt.is_allowed(Action::Edit, ResourceKind::Option, &Base::Db)?;
@@ -620,6 +625,7 @@ impl Executor {
 				{
 					Ok(res) => res,
 					Err(_) => {
+						self.reset_stack_after_dropped_runner();
 						let _ = txn.cancel().await;
 						bail!(Error::TransactionTimedout(timeout.into()))
 					}
@@ -720,6 +726,7 @@ impl Executor {
 				{
 					Ok(result) => result,
 					Err(_) => {
+						self.reset_stack_after_dropped_runner();
 						let _ = txn.cancel().await;
 						for res in &mut self.results[start_results..] {
 							res.query_type = QueryType::Other;
