@@ -52,7 +52,7 @@ const TAG_GEOMETRY_MULTILINE: u64 = 92;
 const TAG_GEOMETRY_MULTIPOLYGON: u64 = 93;
 const TAG_GEOMETRY_COLLECTION: u64 = 94;
 
-pub fn to_value(val: CborValue) -> Result<PublicValue> {
+pub fn to_value(val: CborValue, take: Option<BTreeSet<&str>>) -> Result<PublicValue> {
 	match val {
 		CborValue::Null => Ok(PublicValue::Null),
 		CborValue::Bool(v) => Ok(PublicValue::Bool(v)),
@@ -61,7 +61,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 		CborValue::Bytes(v) => Ok(PublicValue::Bytes(v.into())),
 		CborValue::Text(v) => Ok(PublicValue::String(v)),
 		CborValue::Array(v) => Ok(PublicValue::Array(to_array(v)?)),
-		CborValue::Map(v) => Ok(PublicValue::Object(to_object(v)?)),
+		CborValue::Map(v) => Ok(PublicValue::Object(to_object(v, take)?)),
 		CborValue::Tag(t, v) => {
 			match t {
 				// A literal datetime
@@ -171,7 +171,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 							));
 						}
 
-						let table = to_value(table)?.into_string()?;
+						let table = to_value(table, None)?.into_string()?;
 
 						let key = to_record_id_key(key)?;
 
@@ -201,8 +201,8 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 							return Err(anyhow!(err_msg));
 						};
 
-						let x = to_value(x)?;
-						let y = to_value(y)?;
+						let x = to_value(x, None)?;
+						let y = to_value(y, None)?;
 
 						match (x, y) {
 							(PublicValue::Number(x), PublicValue::Number(y)) => {
@@ -223,7 +223,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 					CborValue::Array(v) => {
 						let points = v
 							.into_iter()
-							.map(|v| match to_value(v)? {
+							.map(|v| match to_value(v, None)? {
 								PublicValue::Geometry(PublicGeometry::Point(v)) => Ok(v),
 								_ => {
 									Err(anyhow!("Expected a CBOR array with Geometry Point values"))
@@ -239,7 +239,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 					CborValue::Array(v) if !v.is_empty() => {
 						let lines = v
 							.into_iter()
-							.map(|v| match to_value(v)? {
+							.map(|v| match to_value(v, None)? {
 								PublicValue::Geometry(PublicGeometry::Line(v)) => Ok(v),
 								_ => {
 									Err(anyhow!("Expected a CBOR array with Geometry Line values"))
@@ -270,7 +270,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 					CborValue::Array(v) => {
 						let points = v
 							.into_iter()
-							.map(|v| match to_value(v)? {
+							.map(|v| match to_value(v, None)? {
 								PublicValue::Geometry(PublicGeometry::Point(v)) => Ok(v),
 								_ => {
 									Err(anyhow!("Expected a CBOR array with Geometry Point values"))
@@ -288,7 +288,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 					CborValue::Array(v) => {
 						let lines = v
 							.into_iter()
-							.map(|v| match to_value(v)? {
+							.map(|v| match to_value(v, None)? {
 								PublicValue::Geometry(PublicGeometry::Line(v)) => Ok(v),
 								_ => {
 									Err(anyhow!("Expected a CBOR array with Geometry Line values"))
@@ -306,7 +306,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 					CborValue::Array(v) => {
 						let polygons = v
 							.into_iter()
-							.map(|v| match to_value(v)? {
+							.map(|v| match to_value(v, None)? {
 								PublicValue::Geometry(PublicGeometry::Polygon(v)) => Ok(v),
 								_ => Err(anyhow!(
 									"Expected a CBOR array with Geometry Polygon values"
@@ -324,7 +324,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 					CborValue::Array(v) => {
 						let geometries = v
 							.into_iter()
-							.map(|v| match to_value(v)? {
+							.map(|v| match to_value(v, None)? {
 								PublicValue::Geometry(v) => Ok(v),
 								_ => Err(anyhow!("Expected a CBOR array with Geometry values")),
 							})
@@ -352,7 +352,9 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 				},
 				TAG_SET => match *v {
 					CborValue::Array(v) => Ok(PublicValue::Set(PublicSet::from(
-						v.into_iter().map(to_value).collect::<Result<BTreeSet<PublicValue>>>()?,
+						v.into_iter()
+							.map(|x| to_value(x, None))
+							.collect::<Result<BTreeSet<PublicValue>>>()?,
 					))),
 					_ => Err(anyhow!("Expected a CBOR array with Set values")),
 				},
@@ -511,8 +513,8 @@ fn from_geometry(v: PublicGeometry) -> Result<CborValue> {
 fn to_range(val: CborValue) -> Result<PublicRange> {
 	fn decode_bound(v: CborValue) -> Result<Bound<PublicValue>> {
 		match v {
-			CborValue::Tag(TAG_BOUND_INCLUDED, v) => Ok(Bound::Included(to_value(*v)?)),
-			CborValue::Tag(TAG_BOUND_EXCLUDED, v) => Ok(Bound::Excluded(to_value(*v)?)),
+			CborValue::Tag(TAG_BOUND_INCLUDED, v) => Ok(Bound::Included(to_value(*v, None)?)),
+			CborValue::Tag(TAG_BOUND_EXCLUDED, v) => Ok(Bound::Excluded(to_value(*v, None)?)),
 			CborValue::Null => Ok(Bound::Unbounded),
 			_ => Err(anyhow!("Expected a bound tag")),
 		}
@@ -603,7 +605,7 @@ fn to_record_id_key(val: CborValue) -> Result<PublicRecordIdKey> {
 		CborValue::Integer(v) => Ok(PublicRecordIdKey::Number(i128::from(v) as i64)),
 		CborValue::Text(v) => Ok(PublicRecordIdKey::String(v)),
 		CborValue::Array(v) => Ok(PublicRecordIdKey::Array(to_array(v)?)),
-		CborValue::Map(v) => Ok(PublicRecordIdKey::Object(to_object(v)?)),
+		CborValue::Map(v) => Ok(PublicRecordIdKey::Object(to_object(v, None)?)),
 		CborValue::Tag(TAG_RANGE, v) => {
 			Ok(PublicRecordIdKey::Range(Box::new(to_record_id_key_range(*v)?)))
 		}
@@ -645,7 +647,11 @@ fn from_array(array: PublicArray) -> Result<CborValue> {
 }
 
 fn to_array(array: Vec<CborValue>) -> Result<PublicArray> {
-	Ok(array.into_iter().map(to_value).collect::<Result<Vec<PublicValue>, _>>()?.into())
+	Ok(array
+		.into_iter()
+		.map(|x| to_value(x, None))
+		.collect::<Result<Vec<PublicValue>, _>>()?
+		.into())
 }
 
 fn from_object(obj: PublicObject) -> Result<CborValue> {
@@ -659,14 +665,27 @@ fn from_object(obj: PublicObject) -> Result<CborValue> {
 		.map(CborValue::Map)
 }
 
-fn to_object(obj: Vec<(CborValue, CborValue)>) -> Result<PublicObject> {
+fn to_object(
+	obj: Vec<(CborValue, CborValue)>,
+	take: Option<BTreeSet<&str>>,
+) -> Result<PublicObject> {
 	let res = obj
 		.into_iter()
+		.filter(|(k, _)| {
+			if let Some(take) = &take {
+				let CborValue::Text(k) = k else {
+					return false;
+				};
+				take.contains(k.as_str())
+			} else {
+				true
+			}
+		})
 		.map(|(k, v)| {
 			let CborValue::Text(k) = k else {
 				return Err(anyhow!("Expected object key to be a string"));
 			};
-			let v = to_value(v)?;
+			let v = to_value(v, None)?;
 			Ok((k, v))
 		})
 		.collect::<Result<BTreeMap<_, _>>>()?;

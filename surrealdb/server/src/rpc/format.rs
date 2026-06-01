@@ -60,7 +60,7 @@ impl WsFormat for Format {
 				let val =
 					surrealdb_core::rpc::format::json::decode(&val).map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
-					Ok(Request::from_object(obj)?)
+					Request::from_object(obj)
 				} else {
 					Err(parse_error())
 				}
@@ -69,7 +69,7 @@ impl WsFormat for Format {
 				let val =
 					surrealdb_core::rpc::format::cbor::decode(&val).map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
-					Ok(Request::from_object(obj)?)
+					Request::from_object(obj)
 				} else {
 					Err(parse_error())
 				}
@@ -78,7 +78,7 @@ impl WsFormat for Format {
 				let val = surrealdb_core::rpc::format::flatbuffers::decode(&val)
 					.map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
-					Ok(Request::from_object(obj)?)
+					Request::from_object(obj)
 				} else {
 					Err(parse_error())
 				}
