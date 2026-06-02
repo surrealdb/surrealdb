@@ -26,21 +26,6 @@ impl Request {
 	/// Create a request by extracting the request fields from an surealql
 	/// object.
 	pub fn from_object(mut obj: PublicObject) -> Result<Self, TypesError> {
-		// Fetch the 'id' argument
-
-		let id = obj.remove("id");
-		let id = match id {
-			None | Some(PublicValue::None) => None,
-			Some(
-				PublicValue::Null
-				| PublicValue::Uuid(_)
-				| PublicValue::Number(_)
-				| PublicValue::String(_)
-				| PublicValue::Datetime(_),
-			) => id,
-			_ => return Err(invalid_request()),
-		};
-
 		// Fetch the 'version' argument
 		let version = match obj.remove(VERSION) {
 			None | Some(PublicValue::None | PublicValue::Null) => None,
@@ -49,16 +34,6 @@ impl Request {
 				PublicNumber::Int(2) => Some(2),
 				_ => return Err(invalid_request()),
 			},
-			_ => return Err(invalid_request()),
-		};
-
-		// Fetch the 'txn' argument
-		let session_id = match obj.remove(SESSION_ID) {
-			None | Some(PublicValue::None | PublicValue::Null) => None,
-			Some(PublicValue::Uuid(x)) => Some(x),
-			Some(PublicValue::String(x)) => {
-				Some(PublicUuid::from_str(x.as_str()).map_err(|_| invalid_request())?)
-			}
 			_ => return Err(invalid_request()),
 		};
 
@@ -84,6 +59,10 @@ impl Request {
 		};
 		// Parse the specified method
 		let method = Method::parse_case_sensitive(method);
+
+		let id = Request::extract_id(&mut obj)?;
+		let session_id = Request::extract_session(&mut obj)?;
+
 		// Return the parsed request
 		Ok(Request {
 			id,
@@ -93,5 +72,31 @@ impl Request {
 			txn,
 			session_id,
 		})
+	}
+
+	pub fn extract_id(obj: &mut PublicObject) -> Result<Option<PublicValue>, TypesError> {
+		let id = obj.remove(ID);
+		match id {
+			None | Some(PublicValue::None) => Ok(None),
+			Some(
+				PublicValue::Null
+				| PublicValue::Uuid(_)
+				| PublicValue::Number(_)
+				| PublicValue::String(_)
+				| PublicValue::Datetime(_),
+			) => Ok(id),
+			_ => Err(invalid_request()),
+		}
+	}
+
+	pub fn extract_session(obj: &mut PublicObject) -> Result<Option<PublicUuid>, TypesError> {
+		match obj.remove(SESSION_ID) {
+			None | Some(PublicValue::None | PublicValue::Null) => Ok(None),
+			Some(PublicValue::Uuid(x)) => Ok(Some(x)),
+			Some(PublicValue::String(x)) => {
+				Ok(Some(PublicUuid::from_str(x.as_str()).map_err(|_| invalid_request())?))
+			}
+			_ => Err(invalid_request()),
+		}
 	}
 }

@@ -335,6 +335,17 @@ impl Websocket {
 		};
 		// Prepare span and otel context
 		let span = span_for_request(&rpc.id);
+		// For CBOR format, keep a copy of the raw bytes so we can attempt to
+		// extract the request `id` and `session_id` even when parsing fails,
+		// enabling the error response to include them.
+		let cbor_raw = if rpc.format == Format::Cbor {
+			match &msg {
+				Message::Binary(b) => Some(b.to_vec()),
+				_ => None,
+			}
+		} else {
+			None
+		};
 		// Parse the request
 		async move {
 			let span = Span::current();
@@ -435,10 +446,17 @@ impl Websocket {
 						} => (),
 					}
 				}
-				Err(err) => {
-					// Process the response
-					crate::rpc::response::send(
-						DbResponse::failure(None, None, err),
+			Err(err) => {
+				// For CBOR requests, try to recover the `id` and `session_id`
+				// from the raw bytes so the error response is meaningful to the
+				// client even when the request could not be fully parsed.
+				let (err_id, err_session_id) = cbor_raw
+					.as_deref()
+					.map(surrealdb_core::rpc::format::cbor::extract_context)
+					.unwrap_or((None, None));
+				// Process the response
+				crate::rpc::response::send(
+					DbResponse::failure(err_id, err_session_id.map(|x| x.into_inner()), err),
 						otel_cx.clone(),
 						rpc.format,
 						chn
