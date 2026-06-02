@@ -61,6 +61,35 @@ fn legacy_uuid() {
 }
 
 #[test]
+fn legacy_uuid_prefixed_composite_stays_string() {
+	let composite = "3bb7beb4-128e-488f-aeab-974dd3a2df39__8b0e61e5-02fb-48f7-9e07-89f3cb7c4966__18";
+	let input = format!(r#""{composite}""#);
+	let v = syn::parse_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			legacy_strands: true,
+			..Default::default()
+		},
+		async |parser, stk| parser.parse_json(stk).await,
+	)
+	.unwrap();
+
+	assert_eq!(v, PublicValue::String(composite.to_owned()));
+}
+
+#[test]
+fn rpc_json_decode_uuid_prefixed_composite_stays_string() {
+	use crate::rpc::format::json;
+
+	let composite = "3bb7beb4-128e-488f-aeab-974dd3a2df39__8b0e61e5-02fb-48f7-9e07-89f3cb7c4966__18";
+	let input = format!(r#"{{"floorId": "{composite}"}}"#);
+	let v = json::decode(input.as_bytes()).unwrap();
+	let object = v.into_object().unwrap();
+	let floor_id = object.get("floorId").unwrap();
+	assert_eq!(*floor_id, PublicValue::String(composite.to_owned()));
+}
+
+#[test]
 fn legacy_datetime() {
 	let v = syn::parse_with_settings(
 		r#" "2024-01-01T00:00:00Z" "#.as_bytes(),

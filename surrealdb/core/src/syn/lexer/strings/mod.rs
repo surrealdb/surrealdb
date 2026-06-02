@@ -483,6 +483,14 @@ impl Lexer<'_> {
 
 		eat_uuid_hex(&mut reader, &mut uuid_buffer[10..16])?;
 
+		// A UUID token must consume the entire string; otherwise legacy-strand
+		// reparsing would coerce composite keys (e.g. `<uuid>__<suffix>`) to UUID.
+		if reader.peek().is_some() {
+			let offset = reader.offset();
+			let span = reader.span_since(offset);
+			bail!("Unexpected character after UUID, expected end of string", @span);
+		}
+
 		Ok(PublicUuid::from(uuid::Uuid::from_bytes(uuid_buffer)))
 	}
 
