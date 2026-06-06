@@ -128,7 +128,10 @@ pub(crate) async fn run_router(
 		_ => &address.path,
 	};
 
-	let builder = Datastore::builder()
+	let builder = Datastore::builder();
+	#[cfg(storage)]
+	let builder = builder.with_config(address.config.datastore_config.clone());
+	let builder = builder
 		.with_query_timeout(address.config.query_timeout)
 		.with_transaction_timeout(address.config.transaction_timeout)
 		.with_auth(configured_root.is_some());
