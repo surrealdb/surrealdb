@@ -14,7 +14,7 @@ use crate::val::{TableName, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum SubscriptionFields {
+pub(crate) enum SubscriptionFields {
 	Diff,
 	Select(Fields),
 }
@@ -75,12 +75,12 @@ impl SubscriptionDefinition {
 impl InfoStructure for SubscriptionDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"id".to_string() => crate::val::Uuid(self.id).into(),
-			"node".to_string() => crate::val::Uuid(self.node).into(),
-			"fields".to_string() => self.fields.structure(),
-			"what".to_string() => self.what.structure(),
-			"cond".to_string(), if let Some(v) = self.cond => v.structure(),
-			"fetch".to_string(), if let Some(v) = self.fetch => v.structure(),
+			"id" => crate::val::Uuid(self.id).into(),
+			"node" => crate::val::Uuid(self.node).into(),
+			"fields" => self.fields.structure(),
+			"what" => self.what.structure(),
+			"cond", if let Some(v) = self.cond => v.structure(),
+			"fetch", if let Some(v) = self.fetch => v.structure(),
 		})
 	}
 }

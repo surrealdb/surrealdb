@@ -6,7 +6,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use reblessive::TreeStack;
 
 use super::common::fetch_and_filter_records_batch;
@@ -16,7 +15,7 @@ use crate::catalog::Index;
 use crate::err::Error;
 use crate::exec::index::access_path::IndexRef;
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical, should_check_perms,
+	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
 	validate_record_user_access,
 };
 use crate::exec::{
@@ -33,7 +32,7 @@ use crate::kvs::CachePolicy;
 
 /// Batch size for full-text result batching.
 ///
-/// Smaller than the default [`super::common::BATCH_SIZE`] because full-text
+/// Smaller than the default [`super::common::DEFAULT_SCAN_BATCH_SIZE`] because full-text
 /// results are ordered by relevance score, so smaller batches let downstream
 /// operators begin processing sooner.
 const BATCH_SIZE: usize = 100;
@@ -92,9 +91,6 @@ impl FullTextScan {
 		self
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for FullTextScan {
 	fn name(&self) -> &'static str {
 		"FullTextScan"
@@ -102,7 +98,7 @@ impl ExecOperator for FullTextScan {
 
 	fn attrs(&self) -> Vec<(String, String)> {
 		vec![
-			("index".to_string(), self.index_ref.name.clone()),
+			("index".to_string(), self.index_ref.name.to_string()),
 			("query".to_string(), self.query.clone()),
 		]
 	}
@@ -174,7 +170,8 @@ impl ExecOperator for FullTextScan {
 					.context("Failed to get table")?;
 
 				if let Some(def) = &table_def {
-					convert_permission_to_physical(&def.permissions.select, ctx.ctx()).await
+					convert_permission_to_physical_runtime(&def.permissions.select, ctx.ctx())
+						.await
 						.context("Failed to convert permission")?
 				} else {
 					Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
@@ -238,6 +235,7 @@ impl ExecOperator for FullTextScan {
 				txn.as_ref(),
 				ikb,
 				ft_params,
+				&frozen_ctx.config.file_allowlist
 			)
 			.await
 			.context("Failed to open full-text index")?;
@@ -270,7 +268,7 @@ impl ExecOperator for FullTextScan {
 			};
 
 			// Iterate over hits, collecting record IDs into batches for
-			// batch-fetching via getm_records.
+			// batch-fetching via get_records.
 			let mut hits_iter = hits_iter;
 			let mut rid_batch = Vec::with_capacity(BATCH_SIZE);
 

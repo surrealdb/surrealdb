@@ -1,6 +1,7 @@
 //use async_graphql::dynamic::Object;
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use rust_decimal::Decimal;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{CoverStmts, EscapeObjectKey, Float, QuoteStr};
@@ -27,7 +28,7 @@ pub enum Literal {
 	),
 	Duration(PublicDuration),
 
-	String(String),
+	String(Strand),
 	RecordId(RecordIdLit),
 	Datetime(PublicDatetime),
 	Uuid(PublicUuid),
@@ -437,7 +438,7 @@ fn collect_array<R, F: Fn(&Expr) -> Option<R>>(expr: &Expr, f: F) -> Option<Vec<
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct ObjectEntry {
-	pub key: String,
+	pub key: Strand,
 	pub value: Expr,
 }
 
@@ -461,6 +462,6 @@ impl From<crate::expr::literal::ObjectEntry> for ObjectEntry {
 
 impl ToSql for ObjectEntry {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, fmt, "{}: {}", EscapeObjectKey(&self.key), self.value);
+		write_sql!(f, fmt, "{}: {}", EscapeObjectKey(self.key.as_str()), self.value);
 	}
 }

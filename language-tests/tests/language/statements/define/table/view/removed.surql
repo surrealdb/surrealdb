@@ -38,7 +38,8 @@ error = "Invalid query: Cannot delete table `test` on which a view is defined, t
 value = "[{ a: 1, id: test:1 }, { a: 2, id: test:2 }]"
 
 [[test.results]]
-# TODO: Shouldn't this be 0?
+# REMOVE TABLE above is rejected because `view` depends on `test`, so `test`
+# is still present and the materialised view still counts its two rows.
 value = "[{ count: 2, id: view:[] }]"
 
 */

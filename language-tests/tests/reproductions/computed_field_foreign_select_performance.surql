@@ -31,7 +31,10 @@ value = "[{ id: finding:1, name: 'f1' }]"
 value = "NONE"
 
 [[test.results]]
-value = '''[{ id: finding:1, name: 'f1', test: 'SelectProject [ctx: Db] [projections: *]\n    DynamicScan [ctx: Db] [source: finding_annotation, predicate: finding = $value, limit: 1]\n' }]'''
+value = """
+[{ id: finding:1, name: 'f1', test: 'SelectProject [ctx: Db] [projections: *]
+    DynamicScan [ctx: Db] [source: finding_annotation, predicate: finding = $value, limit: 1, pre_decode_filter: no (unsupported predicate)]
+' }]"""
 
 [[test.results]]
 value = "NONE"
@@ -43,7 +46,10 @@ value = "[{ id: finding:1, name: 'f1', test: [] }]"
 value = "NONE"
 
 [[test.results]]
-value = '''[{ id: finding:1, name: 'f1', test: 'SelectProject [ctx: Db] [projections: *]\n    DynamicScan [ctx: Db] [source: finding_annotation, limit: 1]\n' }]'''
+value = """
+[{ id: finding:1, name: 'f1', test: 'SelectProject [ctx: Db] [projections: *]
+    DynamicScan [ctx: Db] [source: finding_annotation, limit: 1]
+' }]"""
 
 [[test.results]]
 value = "NONE"

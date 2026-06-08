@@ -207,7 +207,7 @@ impl Capabilities {
 		}
 	}
 
-	/// Set wether to enable live query notifications.
+	/// Set whether to enable live query notifications.
 	pub fn with_live_query_notifications(self, enabled: bool) -> Self {
 		Self {
 			cap: self.cap.with_live_query_notifications(enabled),

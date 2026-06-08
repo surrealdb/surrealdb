@@ -36,10 +36,14 @@ pub(crate) use sequence::RemoveSequenceStatement;
 pub(crate) use table::RemoveTableStatement;
 pub(crate) use user::RemoveUserStatement;
 
+use crate::catalog::providers::{DatabaseProvider, TableProvider};
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::Value;
+use crate::kvs::Transaction;
+use crate::kvs::index::retire_durable_index;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum RemoveStatement {
@@ -91,4 +95,54 @@ impl RemoveStatement {
 			Self::Config(v) => v.compute(ctx, opt).await,
 		}
 	}
+}
+
+async fn retire_namespace_indexes(
+	ctx: &FrozenContext,
+	txn: &Transaction,
+	ns: NamespaceId,
+) -> Result<()> {
+	for db in txn.all_db(ns, None).await?.iter() {
+		retire_database_indexes(ctx, txn, ns, db.database_id).await?;
+	}
+	Ok(())
+}
+
+async fn retire_database_indexes(
+	ctx: &FrozenContext,
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+) -> Result<()> {
+	for tb in txn.all_tb(ns, db, None).await?.iter() {
+		retire_table_indexes(ctx, txn, ns, db, tb).await?;
+	}
+	Ok(())
+}
+
+async fn retire_table_indexes(
+	ctx: &FrozenContext,
+	txn: &Transaction,
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &TableDefinition,
+) -> Result<()> {
+	let index_builder = ctx.get_index_builder().cloned();
+	for ix in txn.all_tb_indexes(ns, db, &tb.name, None).await?.iter() {
+		// Local index wrappers can be evicted immediately, but the builder task
+		// is process memory and must only be aborted after this transaction commits.
+		ctx.get_index_stores().index_removed(ns, db, tb, ix).await?;
+		if let Some(index_builder) = &index_builder {
+			txn.register_index_builder_abort_after_commit(
+				index_builder.clone(),
+				ns,
+				db,
+				tb.name.clone(),
+				ix.index_id,
+			)
+			.await;
+		}
+		retire_durable_index(txn, ns, db, &tb.name, ix.index_id).await?;
+	}
+	Ok(())
 }

@@ -147,6 +147,8 @@ impl Accumulator for CountFieldAccumulator {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::Strand;
+
 	use super::*;
 
 	// Helper to extract i64 from Value
@@ -254,7 +256,7 @@ mod tests {
 		let mut acc = func.create_accumulator();
 		acc.update(Value::Number(Number::Int(1))).unwrap(); // truthy
 		acc.update(Value::None).unwrap(); // falsy
-		acc.update(Value::String("hello".into())).unwrap(); // truthy
+		acc.update(Value::String(Strand::new_static("hello"))).unwrap(); // truthy
 		acc.update(Value::Bool(false)).unwrap(); // falsy
 		acc.update(Value::Bool(true)).unwrap(); // truthy
 		let result = acc.finalize().unwrap();
@@ -269,7 +271,7 @@ mod tests {
 		acc1.update(Value::None).unwrap();
 
 		let mut acc2 = func.create_accumulator();
-		acc2.update(Value::String("test".into())).unwrap();
+		acc2.update(Value::String(Strand::new_static("test"))).unwrap();
 
 		acc1.merge(acc2).unwrap();
 		let result = acc1.finalize().unwrap();
@@ -293,7 +295,11 @@ mod tests {
 	fn count_batch_multiple() {
 		let func = Count;
 		let mut acc = func.create_accumulator();
-		let values = vec![Value::Number(Number::Int(1)), Value::None, Value::String("test".into())];
+		let values = vec![
+			Value::Number(Number::Int(1)),
+			Value::None,
+			Value::String(Strand::new_static("test")),
+		];
 		acc.update_batch(&values).unwrap();
 		let result = acc.finalize().unwrap();
 		assert_eq!(as_int(&result), 3);
@@ -328,11 +334,11 @@ mod tests {
 		let func = CountField;
 		let mut acc = func.create_accumulator();
 		let values = vec![
-			Value::Number(Number::Int(1)), // truthy
-			Value::None,                   // falsy
-			Value::String("hello".into()), // truthy
-			Value::Bool(false),            // falsy
-			Value::Bool(true),             // truthy
+			Value::Number(Number::Int(1)),              // truthy
+			Value::None,                                // falsy
+			Value::String(Strand::new_static("hello")), // truthy
+			Value::Bool(false),                         // falsy
+			Value::Bool(true),                          // truthy
 		];
 		acc.update_batch(&values).unwrap();
 		let result = acc.finalize().unwrap();

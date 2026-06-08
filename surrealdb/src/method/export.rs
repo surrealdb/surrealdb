@@ -32,6 +32,7 @@ where
 	C: Connection,
 {
 	/// Export machine learning model
+	#[allow(clippy::needless_pass_by_value)] // Public SDK builder: ergonomic for callers passing an owned `Version`.
 	pub fn ml(self, name: &str, version: Version) -> Export<'r, C, R, Model> {
 		Export {
 			client: self.client,

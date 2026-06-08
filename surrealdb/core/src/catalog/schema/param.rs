@@ -1,4 +1,5 @@
 use revision::revisioned;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::Permission;
@@ -12,7 +13,7 @@ use crate::val::Value;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct ParamDefinition {
-	pub(crate) name: String,
+	pub(crate) name: Strand,
 	pub(crate) value: Value,
 	pub(crate) comment: Option<String>,
 	pub(crate) permissions: Permission,
@@ -32,7 +33,7 @@ impl ParamDefinition {
 			comment: self
 				.comment
 				.clone()
-				.map(|x| sql::Expr::Literal(sql::Literal::String(x)))
+				.map(|x| sql::Expr::Literal(sql::Literal::String(x.into())))
 				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 
 			permissions: self.permissions.clone().into(),
@@ -49,10 +50,10 @@ impl ToSql for &ParamDefinition {
 impl InfoStructure for ParamDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.into(),
-			"value".to_string() => self.value.structure(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"name" => self.name.into(),
+			"value" => self.value.structure(),
+			"permissions" => self.permissions.structure(),
+			"comment", if let Some(v) = self.comment => v.into(),
 		})
 	}
 }

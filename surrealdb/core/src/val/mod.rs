@@ -11,6 +11,8 @@ use geo::Point;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use storekey::{BorrowDecode, Encode};
+use surrealdb_collections::VecMap;
+pub(crate) use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
@@ -29,6 +31,7 @@ pub(crate) mod file;
 pub(crate) mod geometry;
 pub(crate) mod number;
 pub(crate) mod object;
+pub(crate) mod object_extract;
 pub(crate) mod range;
 pub(crate) mod record_id;
 pub(crate) mod regex;
@@ -66,30 +69,74 @@ pub struct SqlNone;
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd)]
 pub struct Null;
 
-#[revisioned(revision = 1)]
+// `revision(1)` is the legacy on-disk format (varint discriminant +
+// payload). `revision(2, optimised)` wraps each value in a
+// 1-byte tag (variant id + size class) so walkers can skip any value in
+// O(1) via the `u32_le` length prefix on varlen variants.
+//
+// Optimised enum walkers are "materialised" — they don't expose
+// `into_<variant>()` for streaming descent. Instead the macro emits
+// `<variant>_view()` accessors that return `OwnedVariantView<T>` carrying
+// a `Cow<'r, [u8]>` over the variant body. With the `WalkRevisioned:
+// BorrowedReader` bound the source is slice-backed, so the Cow is
+// borrowed — no `Vec<u8>` allocation per descent. The caller then
+// constructs a fresh walker on the borrowed bytes:
+//
+//     let view = walker.object_view()?;          // zero-alloc borrow
+//     let mut r: &[u8] = view.as_bytes();
+//     let inner = Object::walk_revisioned(&mut r)?; // streaming Object walker
+//
+// This recovers fully streaming descent at the Value level while picking
+// up the rev-2 wire compactness. Combined with rev-2 `Object`/`Array`/
+// `Set` indexed prologues, the planner hot path gets O(log n) Map
+// binary search, O(1) Array random access, and O(1) skip past any Value
+// — all zero-alloc through the descent chain.
+#[revisioned(revision(1), revision(2, optimised))]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
 pub(crate) enum Value {
 	#[default]
+	#[revision(size = "inline")]
 	None,
+	#[revision(size = "inline")]
 	Null,
+	#[revision(size = "fixed(1)")]
 	Bool(bool),
+	#[revision(size = "varlen")]
 	Number(Number),
-	String(String),
+	#[revision(size = "varlen")]
+	String(Strand),
+	#[revision(size = "varlen")]
 	Duration(Duration),
+	#[revision(size = "varlen")]
 	Datetime(Datetime),
+	#[revision(size = "varlen")]
 	Uuid(Uuid),
+	#[revision(size = "varlen")]
 	Array(Array),
+	#[revision(size = "varlen")]
 	Set(Set),
+	#[revision(size = "varlen")]
 	Object(Object),
+	#[revision(size = "varlen")]
 	Geometry(Geometry),
+	#[revision(size = "varlen")]
 	Bytes(Bytes),
+	#[revision(size = "varlen")]
 	Table(TableName),
+	#[revision(size = "varlen")]
 	RecordId(RecordId),
+	#[revision(size = "varlen")]
 	File(File),
+	#[revision(size = "varlen")]
 	Regex(Regex),
+	#[revision(size = "varlen")]
 	Range(Box<Range>),
+	// Closure's manual `SerializeRevisioned` impl errors regardless of the
+	// envelope. Mark `varlen` for completeness; the macro requires every
+	// variant to declare a size class under `optimised`.
+	#[revision(size = "varlen")]
 	Closure(Box<Closure>),
 	// Add new variants here
 }
@@ -214,7 +261,7 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn into_raw_string(self) -> String {
 		match self {
-			Value::String(v) => v,
+			Value::String(v) => v.into_string(),
 			Value::Uuid(v) => v.to_string(),
 			Value::Datetime(v) => v.to_string(),
 			_ => self.to_sql(),
@@ -224,7 +271,7 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn to_raw_string(&self) -> String {
 		match self {
-			Value::String(v) => v.clone(),
+			Value::String(v) => v.as_str().to_owned(),
 			Value::Uuid(v) => v.to_string(),
 			Value::Datetime(v) => v.to_string(),
 			_ => self.to_sql(),
@@ -367,7 +414,7 @@ impl Value {
 				_ => false,
 			},
 			Value::Object(v) => match other {
-				Value::String(w) => v.0.contains_key(&**w),
+				Value::String(w) => v.contains_key(w.as_str()),
 				_ => false,
 			},
 			Value::Range(r) => {
@@ -564,7 +611,7 @@ impl ToSql for Value {
 			Value::Null => f.push_str("NULL"),
 			Value::Bool(v) => v.fmt_sql(f, sql_fmt),
 			Value::Number(v) => v.fmt_sql(f, sql_fmt),
-			Value::String(v) => write_sql!(f, sql_fmt, "{}", QuoteStr(v)),
+			Value::String(v) => write_sql!(f, sql_fmt, "{}", QuoteStr(v.as_str())),
 			Value::Duration(v) => v.fmt_sql(f, sql_fmt),
 			Value::Datetime(v) => v.fmt_sql(f, sql_fmt),
 			Value::Uuid(v) => v.fmt_sql(f, sql_fmt),
@@ -603,9 +650,11 @@ impl TryAdd for Value {
 	fn try_add(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
-			(Self::String(mut v), Self::String(w)) => {
-				v.push_str(&w);
-				Value::String(v)
+			(Self::String(v), Self::String(w)) => {
+				let mut s = String::with_capacity(v.len() + w.len());
+				s.push_str(v.as_str());
+				s.push_str(w.as_str());
+				Value::String(s.into())
 			}
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
@@ -622,7 +671,7 @@ impl TryAdd for Value {
 				Self::Set(v)
 			}
 			(Self::Object(v), Self::Object(w)) => Self::Object(v.add(w)),
-			(v, w) => bail!(Error::TryAdd(v.to_raw_string(), w.to_raw_string())),
+			(v, w) => bail!(Error::TryAdd(v.kind_of().to_owned(), w.kind_of().to_owned())),
 		})
 	}
 }
@@ -644,7 +693,7 @@ impl TrySub for Value {
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_sub(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_sub(w)?),
 			(Self::Array(v), Self::Array(x)) => Self::from(v.remove_all(&x.0)),
-			(Self::Array(v), Self::Set(x)) => Self::from(v.remove_all_set(&x.0)),
+			(Self::Array(v), Self::Set(x)) => Self::from(v.remove_all_set(&x)),
 			(Self::Set(mut v), Self::Array(x)) => {
 				for item in x.0 {
 					v.remove(&item);
@@ -652,12 +701,12 @@ impl TrySub for Value {
 				Self::from(v)
 			}
 			(Self::Set(mut v), Self::Set(x)) => {
-				for item in x.0 {
+				for item in x {
 					v.remove(&item);
 				}
 				Self::from(v)
 			}
-			(v, w) => bail!(Error::TrySub(v.to_raw_string(), w.to_raw_string())),
+			(v, w) => bail!(Error::TrySub(v.kind_of().to_owned(), w.kind_of().to_owned())),
 		})
 	}
 }
@@ -718,7 +767,7 @@ impl TryMul for Value {
 
 				Ok(Value::Duration(Duration(StdDuration::new(secs, subsec_nanos))))
 			}
-			(v, w) => bail!(Error::TryMul(v.to_raw_string(), w.to_raw_string())),
+			(v, w) => bail!(Error::TryMul(v.kind_of().to_owned(), w.kind_of().to_owned())),
 		}
 	}
 }
@@ -775,7 +824,7 @@ impl TryDiv for Value {
 				Ok(Value::Duration(Duration(StdDuration::new(secs, subsec_nanos))))
 			}
 
-			(v, w) => bail!(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
+			(v, w) => bail!(Error::TryDiv(v.kind_of().to_owned(), w.kind_of().to_owned())),
 		}
 	}
 }
@@ -792,7 +841,7 @@ impl TryFloatDiv for Value {
 	fn try_float_div(self, other: Self) -> Result<Self::Output> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_float_div(w)?),
-			(v, w) => bail!(Error::TryDiv(v.to_raw_string(), w.to_raw_string())),
+			(v, w) => bail!(Error::TryDiv(v.kind_of().to_owned(), w.kind_of().to_owned())),
 		})
 	}
 }
@@ -809,7 +858,7 @@ impl TryRem for Value {
 	fn try_rem(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_rem(w)?),
-			(v, w) => bail!(Error::TryRem(v.to_raw_string(), w.to_raw_string())),
+			(v, w) => bail!(Error::TryRem(v.kind_of().to_owned(), w.kind_of().to_owned())),
 		})
 	}
 }
@@ -826,7 +875,7 @@ impl TryPow for Value {
 	fn try_pow(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Value::Number(v), Value::Number(w)) => Self::Number(v.try_pow(w)?),
-			(v, w) => bail!(Error::TryPow(v.to_raw_string(), w.to_raw_string())),
+			(v, w) => bail!(Error::TryPow(v.kind_of().to_owned(), w.kind_of().to_owned())),
 		})
 	}
 }
@@ -843,7 +892,7 @@ impl TryNeg for Value {
 	fn try_neg(self) -> Result<Self> {
 		Ok(match self {
 			Self::Number(n) => Self::Number(n.try_neg()?),
-			v => bail!(Error::TryNeg(v.to_sql())),
+			v => bail!(Error::TryNeg(v.kind_of().to_owned())),
 		})
 	}
 }
@@ -943,7 +992,7 @@ subtypes! {
 	Null => (is_null,_unused,_unused),
 	Bool(bool) => (is_bool,as_bool,into_bool),
 	Number(Number) => (is_number,as_number,into_number),
-	String(String) => (is_strand,as_strand,into_strand),
+	String(Strand) => (is_strand,as_strand,into_strand),
 	Table(TableName) => (is_table,as_table,into_table),
 	Duration(Duration) => (is_duration,as_duration,into_duration),
 	Datetime(Datetime) => (is_datetime,as_datetime,into_datetime),
@@ -1013,7 +1062,19 @@ impl From<usize> for Value {
 
 impl From<&str> for Value {
 	fn from(v: &str) -> Self {
-		Self::String(v.to_owned())
+		Self::String(Strand::from(v))
+	}
+}
+
+impl From<String> for Value {
+	fn from(v: String) -> Self {
+		Self::String(Strand::from(v))
+	}
+}
+
+impl From<::uuid::Uuid> for Value {
+	fn from(v: ::uuid::Uuid) -> Self {
+		Value::Uuid(Uuid::from(v))
 	}
 }
 
@@ -1047,6 +1108,24 @@ impl From<BTreeMap<String, Value>> for Value {
 	}
 }
 
+impl From<VecMap<String, Value>> for Value {
+	fn from(v: VecMap<String, Value>) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
+impl From<VecMap<Strand, Value>> for Value {
+	fn from(v: VecMap<Strand, Value>) -> Self {
+		Value::Object(Object(v))
+	}
+}
+
+impl From<VecMap<&str, Value>> for Value {
+	fn from(v: VecMap<&str, Value>) -> Self {
+		Value::Object(Object::from(v))
+	}
+}
+
 impl From<BTreeMap<&str, Value>> for Value {
 	fn from(v: BTreeMap<&str, Value>) -> Self {
 		Value::Object(Object::from(v))
@@ -1075,7 +1154,7 @@ impl FromIterator<Value> for Value {
 
 impl FromIterator<(String, Value)> for Value {
 	fn from_iter<I: IntoIterator<Item = (String, Value)>>(iter: I) -> Self {
-		Value::Object(Object(iter.into_iter().collect()))
+		Value::Object(Object::from_iter(iter))
 	}
 }
 
@@ -1091,7 +1170,7 @@ pub(crate) fn convert_value_to_public_value(
 		crate::val::Value::Null => Ok(surrealdb_types::Value::Null),
 		crate::val::Value::Bool(value) => Ok(surrealdb_types::Value::Bool(value)),
 		crate::val::Value::Number(value) => convert_number_to_public(value),
-		crate::val::Value::String(value) => Ok(surrealdb_types::Value::String(value)),
+		crate::val::Value::String(value) => Ok(surrealdb_types::Value::String(value.into())),
 		crate::val::Value::Datetime(value) => convert_datetime_to_public(value),
 		crate::val::Value::Duration(value) => convert_duration_to_public(value),
 		crate::val::Value::Uuid(value) => convert_uuid_to_public(value),
@@ -1191,7 +1270,11 @@ fn convert_object_to_public(value: crate::val::Object) -> Result<surrealdb_types
 pub(crate) fn convert_object_to_public_map(
 	value: crate::val::Object,
 ) -> Result<BTreeMap<String, surrealdb_types::Value>> {
-	value.0.into_iter().map(|(k, v)| convert_value_to_public_value(v).map(|v| (k, v))).collect()
+	value
+		.0
+		.into_iter()
+		.map(|(k, v)| convert_value_to_public_value(v).map(|v| (k.into_string(), v)))
+		.collect()
 }
 
 fn convert_record_id_to_public(value: crate::val::RecordId) -> Result<surrealdb_types::Value> {
@@ -1207,7 +1290,7 @@ fn convert_record_id_key_to_public(
 ) -> Result<surrealdb_types::RecordIdKey> {
 	match key {
 		crate::val::RecordIdKey::Number(n) => Ok(surrealdb_types::RecordIdKey::Number(n)),
-		crate::val::RecordIdKey::String(s) => Ok(surrealdb_types::RecordIdKey::String(s)),
+		crate::val::RecordIdKey::String(s) => Ok(surrealdb_types::RecordIdKey::String(s.into())),
 		crate::val::RecordIdKey::Uuid(u) => {
 			Ok(surrealdb_types::RecordIdKey::Uuid(surrealdb_types::Uuid::from(u.0)))
 		}
@@ -1337,13 +1420,28 @@ mod tests {
 	}
 
 	#[rstest]
+	// Rev-2 Value envelope overhead: every varlen variant pays 1 tag byte
+	// + 4 bytes `u32_le` payload length on top of the legacy `u16 rev` +
+	// `u32 disc`. Inline variants (`None`, `Null`) are the entire encoding
+	// in a single tag byte. `Bool` is `fixed(1)` -> tag + 1 byte.
 	#[case::none(Value::None, 2)]
 	#[case::null(Value::Null, 2)]
 	#[case::bool(Value::Bool(true), 3)]
 	#[case::bool(Value::Bool(false), 3)]
-	#[case::string(Value::from("test"), 7)]
-	#[case::object(Value::from(syn::value("{ hello: 'world' }").unwrap()), 18)]
-	#[case::object(Value::from(syn::value("{ compact: true, schema: 0 }").unwrap()), 27)]
+	// String wire shape under rev-2 varlen: rev (1) + tag (1) + u32_le
+	// payload_length (4) + Strand wire (`usize len || utf8`) = 6 + Strand.
+	// "test" is 4 utf8 bytes + 1 length varint = 5 bytes, so 11 total.
+	#[case::string(Value::from("test"), 11)]
+	// Objects under rev-2 Value + rev-2 Object `indexed_map`:
+	//   Value envelope:  rev=2 (1) + tag (1) + u32_le payload_length (4) = 6
+	//   Object envelope: rev=2 (1) + u32_le payload_length (4) = 5
+	//   indexed_map body (sub-threshold): flag (1) + varint len + (K, V)*
+	// Total delta vs rev-1 Value + rev-1 Object: +13 bytes per Object Value
+	// (Value envelope +6, Object envelope +5, indexed_map flag +1, minus
+	// 4 bytes the rev-1 framing was paying). The Wire-repr zero-copy
+	// `walk_field_0` removed the need for a single-field offset table.
+	#[case::object(Value::from(syn::value("{ hello: 'world' }").unwrap()), 31)]
+	#[case::object(Value::from(syn::value("{ compact: true, schema: 0 }").unwrap()), 40)]
 	fn check_serialize(#[case] value: Value, #[case] expected: usize) {
 		let enc: Vec<u8> = revision::to_vec(&value).unwrap();
 		assert_eq!(expected, enc.len());
@@ -1415,27 +1513,27 @@ mod tests {
 	#[case::number(
 		PublicValue::Number(PublicNumber::Decimal(Decimal::new(123, 2))),
 		json!("1.23"),
-		PublicValue::String("1.23".into()),
+		PublicValue::String("1.23".to_string()),
 	)]
 	#[case::strand(
-		PublicValue::String("".into()),
+		PublicValue::String("".to_string()),
 		json!(""),
-		PublicValue::String("".into()),
+		PublicValue::String("".to_string()),
 	)]
 	#[case::strand(
-		PublicValue::String("foo".into()),
+		PublicValue::String("foo".to_string()),
 		json!("foo"),
-		PublicValue::String("foo".into()),
+		PublicValue::String("foo".to_string()),
 	)]
 	#[case::duration(
 		PublicValue::Duration(PublicDuration::ZERO),
 		json!("0ns"),
-		PublicValue::String("0ns".into()),
+		PublicValue::String("0ns".to_string()),
 	)]
 	#[case::duration(
 		PublicValue::Duration(PublicDuration::MAX),
 		json!("584942417355y3w5d7h15s999ms999µs999ns"),
-		PublicValue::String("584942417355y3w5d7h15s999ms999µs999ns".into()),
+		PublicValue::String("584942417355y3w5d7h15s999ms999µs999ns".to_string()),
 	)]
 	#[case::datetime(
 		PublicValue::Datetime(PublicDatetime::MIN_UTC),
@@ -1472,9 +1570,9 @@ mod tests {
 		])),
 	)]
 	#[case::record_id(
-		PublicValue::RecordId(PublicRecordId::new("foo", PublicRecordIdKey::String("bar".into()))) ,
+		PublicValue::RecordId(PublicRecordId::new("foo", PublicRecordIdKey::String("bar".to_string()))) ,
 		json!("foo:bar"),
-		PublicValue::RecordId(PublicRecordId::new("foo", PublicRecordIdKey::String("bar".into()))) ,
+		PublicValue::RecordId(PublicRecordId::new("foo", PublicRecordIdKey::String("bar".to_string()))) ,
 	)]
 	#[case::array(
 		PublicValue::Array(PublicArray::new()),
@@ -1622,11 +1720,14 @@ mod tests {
 		#[case] expected: Json,
 		#[case] expected_deserialized: PublicValue,
 	) {
+		use crate::cnf::CommonConfig;
+
 		let json_value = value.into_json_value();
 		assert_eq!(json_value, expected);
 
 		let json_str = serde_json::to_string(&json_value).expect("Failed to serialize to JSON");
-		let deserialized_sql_value = crate::syn::value_legacy_strand(&json_str).unwrap();
+		let deserialized_sql_value =
+			crate::syn::value_legacy_strand(&json_str, &CommonConfig::default()).unwrap();
 		assert_eq!(deserialized_sql_value, expected_deserialized);
 	}
 }

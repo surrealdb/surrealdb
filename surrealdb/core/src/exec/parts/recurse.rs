@@ -2,7 +2,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -10,7 +9,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 // RepeatRecursePart (and any other callers) can still reach them.
 pub(crate) use crate::exec::operators::recursion::evaluate_repeat_recurse;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, ContextLevel, ExecOperator};
+use crate::exec::{AccessMode, BoxFut, ContextLevel, ExecOperator};
 use crate::expr::FlowResult;
 use crate::val::Value;
 
@@ -51,48 +50,51 @@ pub struct RecursePart {
 	/// The pre-planned recursion operator tree.
 	pub op: Arc<dyn ExecOperator>,
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for RecursePart {
 	fn name(&self) -> &'static str {
 		"Recurse"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> ContextLevel {
 		self.op.required_context()
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.cloned().unwrap_or(Value::None);
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			let value = ctx.current_value.cloned().unwrap_or(Value::None);
 
-		// Create a new execution context with the current value set.
-		// The RecursionOp reads this to seed the recursion.
-		let bound_ctx = ctx.exec_ctx.with_current_value(value);
-		let bound_ctx = if ctx.skip_fetch_perms {
-			bound_ctx.with_skip_fetch_perms(true)
-		} else {
-			bound_ctx
-		};
+			// Create a new execution context with the current value set.
+			// The RecursionOp reads this to seed the recursion.
+			let bound_ctx = ctx.exec_ctx.with_current_value(value);
+			let bound_ctx = if ctx.skip_fetch_perms {
+				bound_ctx.with_skip_fetch_perms(true)
+			} else {
+				bound_ctx
+			};
 
-		// Execute the recursion operator
-		let stream = self.op.execute(&bound_ctx).map_err(|e| match e {
-			crate::expr::ControlFlow::Err(e) => crate::expr::ControlFlow::Err(e),
-			other => other,
-		})?;
+			// Execute the recursion operator
+			let stream = self.op.execute(&bound_ctx).map_err(|e| match e {
+				crate::expr::ControlFlow::Err(e) => crate::expr::ControlFlow::Err(e),
+				other => other,
+			})?;
 
-		// Collect results from the stream
-		futures::pin_mut!(stream);
-		let mut result = Value::None;
-		while let Some(batch_result) = stream.next().await {
-			let batch = batch_result?;
-			// RecursionOp yields a single batch with the recursion result
-			if let Some(v) = batch.values.into_iter().next() {
-				result = v;
+			// Collect results from the stream
+			futures::pin_mut!(stream);
+			let mut result = Value::None;
+			while let Some(batch_result) = stream.next().await {
+				let batch = batch_result?;
+				// RecursionOp yields a single batch with the recursion result
+				if let Some(v) = batch.values.into_iter().next() {
+					result = v;
+				}
 			}
-		}
 
-		Ok(result)
+			Ok(result)
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -161,21 +163,24 @@ impl ToSql for RecursePart {
 /// with incremented depth.
 #[derive(Debug, Clone)]
 pub struct RepeatRecursePart;
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for RepeatRecursePart {
 	fn name(&self) -> &'static str {
 		"RepeatRecurse"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Root
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.unwrap_or(&Value::NONE);
-		evaluate_repeat_recurse(value, ctx).await
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			let value = ctx.current_value.unwrap_or(&Value::NONE);
+			evaluate_repeat_recurse(value, ctx).await
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {

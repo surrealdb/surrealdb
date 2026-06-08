@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::ops::{Index, Range};
 use std::path::{Component, Path};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 use tokio::fs;
@@ -21,6 +22,8 @@ pub struct CaseId(usize);
 pub struct Origin {
 	/// The path of the test relative to the root from which the test was parsed.
 	pub path: String,
+	/// Last time the test was changed, used for caching datasets.
+	pub modified: SystemTime,
 	/// A subset of the file at the above path
 	/// Used when a testcase can only be a part of a file like when testing the docs.
 	pub subset: Option<Range<usize>>,
@@ -72,6 +75,8 @@ impl Index<CaseId> for CaseSet {
 }
 
 impl CaseSet {
+	// Used when upgrade feature is enabled.
+	#[allow(unused)]
 	pub fn len(&self) -> usize {
 		self.cases.len()
 	}
@@ -127,6 +132,10 @@ impl CaseSet {
 				return Ok(());
 			}
 
+			let metadata = fs::metadata(path).await.context("Could not read file metadata")?;
+
+			let modified = metadata.modified().context("Could not read file modification time")?;
+
 			let source = fs::read_to_string(path)
 				.await
 				.with_context(|| format!("Could not read test file: {path}"))?;
@@ -136,6 +145,7 @@ impl CaseSet {
 
 			let origin = Arc::new(Origin {
 				path: path.to_owned(),
+				modified,
 				subset: None,
 				line_offset: None,
 			});

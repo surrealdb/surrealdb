@@ -26,14 +26,13 @@ fn limit(name: &str, n: usize) -> Result<()> {
 /// similarity/distance functions. These functions have O(n*m) complexity, so
 /// unbounded input could cause denial of service.
 fn check_similarity_input_length(name: &str, a: &str, b: &str) -> Result<()> {
-	let max = *STRING_SIMILARITY_LIMIT;
 	ensure!(
-		a.len() <= max && b.len() <= max,
+		a.len() <= *STRING_SIMILARITY_LIMIT && b.len() <= *STRING_SIMILARITY_LIMIT,
 		Error::InvalidFunctionArguments {
 			name: name.to_owned(),
 			message: format!(
 				"Input strings must not exceed {} bytes (got {} and {}).",
-				max,
+				*STRING_SIMILARITY_LIMIT,
 				a.len(),
 				b.len()
 			),
@@ -109,10 +108,11 @@ pub fn lowercase((string,): (String,)) -> Result<Value> {
 }
 
 pub fn repeat((val, num): (String, i64)) -> Result<Value> {
-	//TODO: Deal with truncation of neg:
-	let num = num as usize;
-	limit("string::repeat", val.len().saturating_mul(num))?;
-	Ok(val.repeat(num).into())
+	let count = usize::try_from(num).map_err(|_| {
+		anyhow::Error::new(Error::ArithmeticNegativeOverflow(format!("string::repeat({num})")))
+	})?;
+	limit("string::repeat", val.len().saturating_mul(count))?;
+	Ok(val.repeat(count).into())
 }
 
 pub fn matches((val, Cast(regex)): (String, Cast<Regex>)) -> Result<Value> {
@@ -687,12 +687,18 @@ pub mod semver {
 	pub mod set {
 		use anyhow::Result;
 
+		use crate::err::Error;
 		use crate::fnc::string::semver::parse_version;
 		use crate::val::Value;
 
+		fn to_unsigned(name: &str, val: i64) -> Result<u64> {
+			u64::try_from(val).map_err(|_| {
+				anyhow::Error::new(Error::ArithmeticNegativeOverflow(format!("{name}({val})")))
+			})
+		}
+
 		pub fn major((version, value): (String, i64)) -> Result<Value> {
-			// TODO: Deal with negative trunc:
-			let value = value as u64;
+			let value = to_unsigned("string::semver::set::major", value)?;
 			parse_version(&version, "string::semver::set::major", "Invalid semantic version").map(
 				|mut version| {
 					version.major = value;
@@ -702,8 +708,7 @@ pub mod semver {
 		}
 
 		pub fn minor((version, value): (String, i64)) -> Result<Value> {
-			// TODO: Deal with negative trunc:
-			let value = value as u64;
+			let value = to_unsigned("string::semver::set::minor", value)?;
 			parse_version(&version, "string::semver::set::minor", "Invalid semantic version").map(
 				|mut version| {
 					version.minor = value;
@@ -713,9 +718,7 @@ pub mod semver {
 		}
 
 		pub fn patch((version, value): (String, i64)) -> Result<Value> {
-			// TODO: Deal with negative trunc:
-			let value = value as u64;
-
+			let value = to_unsigned("string::semver::set::patch", value)?;
 			parse_version(&version, "string::semver::set::patch", "Invalid semantic version").map(
 				|mut version| {
 					version.patch = value;
@@ -728,6 +731,7 @@ pub mod semver {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::Strand;
 	use surrealdb_types::ToSql;
 
 	use super::{matches, replace, slice};
@@ -764,7 +768,7 @@ mod tests {
 	#[test]
 	fn string_replace() {
 		#[track_caller]
-		fn test(base: &str, pattern: Value, replacement: &str, expected: &str) {
+		fn test(base: &str, pattern: &Value, replacement: &str, expected: &str) {
 			assert_eq!(
 				replace((base.to_string(), pattern.clone(), replacement.to_string())).unwrap(),
 				Value::from(expected),
@@ -775,8 +779,8 @@ mod tests {
 			);
 		}
 
-		test("foo bar", Value::Regex("foo".parse().unwrap()), "bar", "bar bar");
-		test("foo bar", "bar".into(), "foo", "foo foo");
+		test("foo bar", &Value::Regex("foo".parse().unwrap()), "bar", "bar bar");
+		test("foo bar", &"bar".into(), "foo", "foo foo");
 	}
 
 	#[test]
@@ -801,19 +805,22 @@ mod tests {
 	#[test]
 	fn html_encode() {
 		let value = super::html::encode((String::from("<div>Hello world!</div>"),)).unwrap();
-		assert_eq!(value, Value::String("&lt;div&gt;Hello&#32;world!&lt;&#47;div&gt;".into()));
+		assert_eq!(
+			value,
+			Value::String(Strand::new_static("&lt;div&gt;Hello&#32;world!&lt;&#47;div&gt;"))
+		);
 
 		let value = super::html::encode((String::from("SurrealDB"),)).unwrap();
-		assert_eq!(value, Value::String("SurrealDB".into()));
+		assert_eq!(value, Value::String(Strand::new_static("SurrealDB")));
 	}
 
 	#[test]
 	fn html_sanitize() {
 		let value = super::html::sanitize((String::from("<div>Hello world!</div>"),)).unwrap();
-		assert_eq!(value, Value::String("<div>Hello world!</div>".into()));
+		assert_eq!(value, Value::String(Strand::new_static("<div>Hello world!</div>")));
 
 		let value = super::html::sanitize((String::from("XSS<script>attack</script>"),)).unwrap();
-		assert_eq!(value, Value::String("XSS".into()));
+		assert_eq!(value, Value::String(Strand::new_static("XSS")));
 	}
 
 	#[test]
@@ -866,8 +873,6 @@ mod tests {
 
 	#[test]
 	fn similarity_distance_length_limit() {
-		use crate::cnf::STRING_SIMILARITY_LIMIT;
-
 		// Normal strings under limit should work
 		let a = "hello".to_string();
 		let b = "world".to_string();
@@ -877,7 +882,7 @@ mod tests {
 		assert!(super::similarity::fuzzy((a, b)).is_ok());
 
 		// Strings exceeding limit should error
-		let limit = *STRING_SIMILARITY_LIMIT;
+		let limit = 16384;
 		let long_a = "a".repeat(limit + 1);
 		let long_b = "b".repeat(limit + 1);
 		let short = "x".to_string();

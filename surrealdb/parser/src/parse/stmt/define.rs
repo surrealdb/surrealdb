@@ -10,7 +10,7 @@ use crate::parse::utils::{
 	parse_delimited_list, parse_seperated_list, parse_seperated_list_sync, parse_unordered_clause,
 	parse_unordered_clause_sync, redefined_error,
 };
-use crate::parse::{ParseError, ParseResult};
+use crate::parse::{ParseError, ParseResult, ParserSettings};
 use crate::{Parse, ParseSync, Parser};
 
 impl ParseSync for ast::DefineKind {
@@ -639,40 +639,40 @@ impl Parse for ast::ApiAction {
 }
 
 macro_rules! impl_method_matching {
-		(($parser:expr) => {$($pat:pat => ($store:ident, $new_span:ident)),*}) => {
-			$(let mut $new_span = None;)*
-				loop{
-					let peek = $parser
-						.peek_expect("`DELETE`, `GET`, `PATCH`, `POST`, `PUT`, or `TRACE`")?;
-					match peek.token {
-						$($pat => {
-							let _ = $parser.next();
-							if let Some(span) = $store.map(|x: (_, Span)| x.1).or($new_span) {
-								return Err(redefined_error($parser, peek.span, span));
-							}
-							$new_span = Some(peek.span)
-						})*
-						_ => {
-							return Err($parser.unexpected(
-									"`DELETE`, `GET`, `PATCH`, `POST`, `PUT`, or `TRACE`",
-							));
-						}
+	(($parser:expr) => {$($pat:pat => ($store:ident, $new_span:ident)),*}) => {
+		$(let mut $new_span = None;)*
+		loop{
+			let peek = $parser
+				.peek_expect("`DELETE`, `GET`, `PATCH`, `POST`, `PUT`, or `TRACE`")?;
+			match peek.token {
+				$($pat => {
+					let _ = $parser.next();
+					if let Some(span) = $store.map(|x: (_, Span)| x.1).or($new_span) && !$parser.settings.contains(ParserSettings::QUIRK_REDEFINE) {
+						return Err(redefined_error($parser, peek.span, span));
 					}
-
-					if $parser.eat(T![,])?.is_none(){
-						break
-					}
+					$new_span = Some(peek.span)
+				})*
+				_ => {
+					return Err($parser.unexpected(
+							"`DELETE`, `GET`, `PATCH`, `POST`, `PUT`, or `TRACE`",
+					));
 				}
+			}
 
-			let action = $parser.parse::<ast::NodeId<ast::ApiAction>>().await?;
+			if $parser.eat(T![,])?.is_none(){
+				break
+			}
+		}
 
-			$(
-				if let Some($new_span) = $new_span{
-					$store = Some((action, $new_span));
-				}
-			)*
-		};
-	}
+		let action = $parser.parse::<ast::NodeId<ast::ApiAction>>().await?;
+
+		$(
+			if let Some($new_span) = $new_span{
+				$store = Some((action, $new_span));
+			}
+		)*
+	};
+}
 
 impl Parse for ast::DefineApi {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
@@ -811,6 +811,43 @@ impl Parse for ast::DefineApi {
 	}
 }
 
+impl ParseSync for ast::DefineEventAsync {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let async_ = parser.expect(T![ASYNC])?;
+		let mut retry = None;
+		let mut max_depth = None;
+		loop {
+			let Some(peek) = parser.peek()? else {
+				break;
+			};
+
+			match peek.token {
+				T![RETRY] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut retry, peek.span, Parser::parse_sync)?;
+				}
+				T![MAXDEPTH] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(
+						parser,
+						&mut max_depth,
+						peek.span,
+						Parser::parse_sync,
+					)?;
+				}
+				_ => break,
+			}
+		}
+
+		let span = parser.span_since(async_.span);
+		Ok(ast::DefineEventAsync {
+			retry: retry.map(|x| x.0),
+			max_depth: max_depth.map(|x| x.0),
+			span,
+		})
+	}
+}
+
 impl Parse for ast::DefineEvent {
 	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
 		let define = parser.expect(T![DEFINE])?;
@@ -853,46 +890,12 @@ impl Parse for ast::DefineEvent {
 						.await?
 				}
 				T![ASYNC] => {
-					let _ = parser.next();
-
-					parse_unordered_clause_sync(parser, &mut async_, peek.span, |parser| {
-						let mut retry = None;
-						let mut max_depth = None;
-						loop {
-							let Some(peek) = parser.peek()? else {
-								break;
-							};
-
-							match peek.token {
-								T![RETRY] => {
-									let _ = parser.next();
-									parse_unordered_clause_sync(
-										parser,
-										&mut retry,
-										peek.span,
-										Parser::parse_sync,
-									)?;
-								}
-								T![MAXDEPTH] => {
-									let _ = parser.next();
-									parse_unordered_clause_sync(
-										parser,
-										&mut max_depth,
-										peek.span,
-										Parser::parse_sync,
-									)?;
-								}
-								_ => break,
-							}
-						}
-
-						let span = parser.span_since(peek.span);
-						Ok(ast::DefineEventAsync {
-							retry: retry.map(|x| x.0),
-							max_depth: max_depth.map(|x| x.0),
-							span,
-						})
-					})?
+					parse_unordered_clause_sync(
+						parser,
+						&mut async_,
+						peek.span,
+						Parser::parse_sync,
+					)?;
 				}
 				_ => break,
 			}
@@ -961,8 +964,7 @@ impl Parse for ast::FieldPermissions {
 					let _ = parser.expect(T![FOR])?;
 
 					loop {
-						let peek =
-							parser.peek_expect("`SELECT`, `UPDATE`, `CREATE`, or `DELETE`")?;
+						let peek = parser.peek_expect("`SELECT`, `UPDATE`, or `CREATE`")?;
 						match peek.token {
 							T![SELECT] => {
 								let _ = parser.next();
@@ -991,10 +993,22 @@ impl Parse for ast::FieldPermissions {
 									|_| Ok(true),
 								)?;
 							}
+							T![DELETE] => {
+								if !parser
+									.settings
+									.contains(ParserSettings::QUIRK_DELETE_PERMISSION_FIELD)
+								{
+									return Err(
+										parser.unexpected("`SELECT`, `UPDATE`, or `CREATE`")
+									);
+								}
+								// With the quirk enabled, just ignore the delete.
+								// The executor will also ignore it since you cannot delete a field
+								// anyway.
+								let _ = parser.next();
+							}
 							_ => {
-								return Err(
-									parser.unexpected("`SELECT`, `UPDATE`, `CREATE`, or `DELETE`")
-								);
+								return Err(parser.unexpected("`SELECT`, `UPDATE`, or `CREATE`"));
 							}
 						}
 
@@ -1189,9 +1203,17 @@ impl ParseSync for ast::Distance {
 				let _ = parser.next();
 				Ok(ast::Distance::Cosine)
 			}
+			T![COSINE_NORMALIZED] => {
+				let _ = parser.next();
+				Ok(ast::Distance::CosineNormalized)
+			}
 			T![HAMMING] => {
 				let _ = parser.next();
 				Ok(ast::Distance::Hamming)
+			}
+			T![INNER_PRODUCT] => {
+				let _ = parser.next();
+				Ok(ast::Distance::InnerProduct)
 			}
 			T![JACCARD] => {
 				let _ = parser.next();
@@ -1222,6 +1244,10 @@ impl ParseSync for ast::VectorType {
 				let _ = parser.next();
 				Ok(ast::VectorType::F64)
 			}
+			T![F16] => {
+				let _ = parser.next();
+				Ok(ast::VectorType::F16)
+			}
 			T![F32] => {
 				let _ = parser.next();
 				Ok(ast::VectorType::F32)
@@ -1237,6 +1263,14 @@ impl ParseSync for ast::VectorType {
 			T![I16] => {
 				let _ = parser.next();
 				Ok(ast::VectorType::I16)
+			}
+			T![I8] => {
+				let _ = parser.next();
+				Ok(ast::VectorType::I8)
+			}
+			T![U8] => {
+				let _ = parser.next();
+				Ok(ast::VectorType::U8)
 			}
 			_ => Err(parser.unexpected("a vector type")),
 		}
@@ -1334,6 +1368,84 @@ impl ParseSync for ast::HnswIndex {
 			ef_construction: ef_construction.map(|x| x.0),
 			extend_candidates: extend_candidates.is_some(),
 			keep_pruned_connections: keep_pruned_connections.is_some(),
+			use_hashed_vector: use_hashed_vector.is_some(),
+			span,
+		})
+	}
+}
+
+// Parses the optional DiskANN clauses in any order after the required `DIMENSION` clause.
+impl ParseSync for ast::DiskAnnIndex {
+	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
+		let start = parser.expect(T![DISKANN])?;
+
+		let _ = parser.expect(T![DIMENSION])?;
+		let dimension = parser.parse_sync()?;
+
+		let mut distance = None;
+		let mut ty = None;
+		let mut degree = None;
+		let mut l_build = None;
+		let mut alpha = None;
+		let mut use_hashed_vector = None;
+		loop {
+			let Some(peek) = parser.peek()? else {
+				break;
+			};
+			match peek.token {
+				T![DISTANCE] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(
+						parser,
+						&mut distance,
+						peek.span,
+						Parser::parse_sync,
+					)?;
+				}
+				T![TYPE] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut ty, peek.span, Parser::parse_sync)?;
+				}
+				T![DEGREE] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(
+						parser,
+						&mut degree,
+						peek.span,
+						Parser::parse_sync,
+					)?;
+				}
+				T![L_BUILD] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(
+						parser,
+						&mut l_build,
+						peek.span,
+						Parser::parse_sync,
+					)?;
+				}
+				T![ALPHA] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut alpha, peek.span, Parser::parse_sync)?;
+				}
+				T![HASHED_VECTOR] => {
+					let _ = parser.next();
+					parse_unordered_clause_sync(parser, &mut use_hashed_vector, peek.span, |_| {
+						Ok(())
+					})?;
+				}
+				_ => break,
+			}
+		}
+
+		let span = parser.span_since(start.span);
+		Ok(ast::DiskAnnIndex {
+			dimension,
+			distance: distance.map(|x| x.0),
+			ty: ty.map(|x| x.0),
+			degree: degree.map(|x| x.0),
+			l_build: l_build.map(|x| x.0),
+			alpha: alpha.map(|x| x.0),
 			use_hashed_vector: use_hashed_vector.is_some(),
 			span,
 		})
@@ -1484,6 +1596,16 @@ impl Parse for ast::DefineIndex {
 
 					let span = parser.span_since(peek.span);
 					index = Some((ast::Index::Hnsw(idx), span));
+				}
+				T![DISKANN] => {
+					if let Some((_, old_span)) = index {
+						return Err(index_type_redefined(parser, peek.span, old_span));
+					}
+
+					let idx = parser.parse_sync()?;
+
+					let span = parser.span_since(peek.span);
+					index = Some((ast::Index::DiskAnn(idx), span));
 				}
 				T![FULLTEXT] => {
 					if let Some((_, old_span)) = index {

@@ -41,7 +41,7 @@ value = "2f"
 value = "1.333333333333333f"
 
 [[test.results]]
-error = "Cannot perform remainder with '8' and '3'"
+error = "Cannot perform remainder with 'string' and 'string'"
 
 */
 8 % 3;

@@ -16,7 +16,7 @@ value = "[{ id: software:surreal, name: 'SurrealDB' }]"
 
 [[test.results]]
 value = ''''SelectProject [ctx: Db] [projections: *] {rows: 3}
-    Union [ctx: Db] {rows: 3}
+    Union [ctx: Db] [inputs: 2] {rows: 3}
         TableScan [ctx: Db] [table: person, direction: Forward] {rows: 2}
         TableScan [ctx: Db] [table: software, direction: Forward] {rows: 1}
 

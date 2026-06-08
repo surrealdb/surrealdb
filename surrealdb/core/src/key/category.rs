@@ -175,6 +175,14 @@ pub enum Category {
 	IndexFullTextDocIdsSequenceState,
 	/// crate::key::index::iu                /*{ns}*{db}*{tb}+{ix}*iu{uuid}{uuid}{count}
 	IndexCountState,
+	/// crate::key::table::bs                /*{ns}*{db}*{tb}!bs{ix}
+	IndexBuildState,
+	/// crate::key::table::br                /*{ns}*{db}*{tb}!br{ix}{generation}{ticket}
+	IndexBuildReservation,
+	/// crate::key::table::bg                /*{ns}*{db}*{tb}!bg{ix}{generation}{ticket}
+	IndexBuildAppending,
+	/// crate::key::table::bp                /*{ns}*{db}*{tb}!bp{ix}{generation}{id}
+	IndexBuildPrimaryAppending,
 	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
 	///
@@ -286,6 +294,10 @@ impl Display for Category {
 			Self::IndexTermDocuments => "IndexTermDocuments",
 			Self::IndexCompaction => "IndexCompaction",
 			Self::IndexCountState => "IndexCountState",
+			Self::IndexBuildState => "IndexBuildState",
+			Self::IndexBuildReservation => "IndexBuildReservation",
+			Self::IndexBuildAppending => "IndexBuildAppending",
+			Self::IndexBuildPrimaryAppending => "IndexBuildPrimaryAppending",
 			Self::EventQueue => "EventQueue",
 			Self::TableIndexIdentifierBatch => "TableIndexIdentifierBatch",
 			Self::TableIndexIdentifierState => "TableIndexIdentifierState",

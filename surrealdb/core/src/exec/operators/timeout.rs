@@ -6,7 +6,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::err::Error;
@@ -41,9 +40,6 @@ impl Timeout {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Timeout {
 	fn name(&self) -> &'static str {
 		"Timeout"
@@ -98,6 +94,7 @@ impl ExecOperator for Timeout {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.root().ctx.config.operator_buffer_size,
 		);
 
 		// If no timeout is specified, just pass through the input stream
@@ -106,7 +103,7 @@ impl ExecOperator for Timeout {
 		};
 
 		// Evaluate the timeout expression to get the duration
-		let timeout_expr = timeout_expr.clone();
+		let timeout_expr = Arc::clone(timeout_expr);
 		let ctx = ctx.clone();
 
 		let timeout_stream = async_stream::try_stream! {

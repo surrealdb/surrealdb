@@ -1,4 +1,5 @@
 use revision::revisioned;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::Permission;
@@ -11,9 +12,9 @@ use crate::val::Value;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct MlModelDefinition {
-	pub hash: String,
-	pub name: String,
-	pub version: String,
+	pub hash: Strand,
+	pub name: Strand,
+	pub version: Strand,
 	pub comment: Option<String>,
 	pub(crate) permissions: Permission,
 }
@@ -31,7 +32,7 @@ impl MlModelDefinition {
 			comment: self
 				.comment
 				.clone()
-				.map(|x| sql::Expr::Literal(sql::Literal::String(x)))
+				.map(|x| sql::Expr::Literal(sql::Literal::String(x.into())))
 				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 		}
 	}
@@ -40,10 +41,10 @@ impl MlModelDefinition {
 impl InfoStructure for MlModelDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.into(),
-			"version".to_string() => self.version.into(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"name" => self.name.into(),
+			"version" => self.version.into(),
+			"permissions" => self.permissions.structure(),
+			"comment", if let Some(v) = self.comment => v.into(),
 		})
 	}
 }

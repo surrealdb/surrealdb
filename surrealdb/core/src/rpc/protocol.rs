@@ -6,10 +6,15 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, RootProvider};
+use crate::ctx::CancelHandle;
 use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget};
 use crate::dbs::{QueryResult, QueryType, Session};
 use crate::iam::token::Token;
 use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::observe::{
+	AuthAction, AuthEvent, AuthEventSafe, AuthScope, Outcome, RpcEvent, RpcEventSafe,
+	TenantIdentity,
+};
 use crate::rpc::args::extract_args;
 use crate::rpc::{
 	DbResult, Method, bad_lq_config, invalid_params, method_not_allowed, method_not_found,
@@ -28,7 +33,7 @@ use crate::types::{
 /// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: PublicValue) -> Expr {
 	match value {
-		PublicValue::String(s) => Expr::Table(s),
+		PublicValue::String(s) => Expr::Table(crate::val::TableName::new(s)),
 		x => Expr::from_public_value(x),
 	}
 }
@@ -45,6 +50,47 @@ fn singular(value: &PublicValue) -> bool {
 	}
 }
 
+// SECURITY: LIVE queries capture the session's auth principal at registration
+// time (see `surrealdb/core/src/dbs/session.rs`). When an auth-lifecycle RPC
+// changes the principal on the same WebSocket, those captured snapshots would
+// continue to dispatch notifications under the prior context, bypassing the
+// access controls that should now apply (GHSA-2xrp-m9c6-75rj). Callers
+// snapshot the principal before the operation and tear LIVE subscriptions
+// down when it changes. Token refresh against the same identity leaves the
+// principal unchanged and preserves the subscriptions.
+struct AuthPrincipalSnapshot {
+	id: String,
+	level: crate::iam::Level,
+}
+
+impl AuthPrincipalSnapshot {
+	fn capture(session: &Session) -> Self {
+		Self {
+			id: session.au.id().to_string(),
+			level: session.au.level().clone(),
+		}
+	}
+
+	fn differs_from(&self, session: &Session) -> bool {
+		session.au.id() != self.id || session.au.level() != &self.level
+	}
+}
+
+/// Map an RPC [`Method`] to an [`AuthAction`] when it represents an auth
+/// lifecycle operation. Returns `None` for non-auth methods so the caller can
+/// skip emitting an [`AuthEvent`] without branching on every variant.
+const fn method_to_auth_action(method: Method) -> Option<AuthAction> {
+	match method {
+		Method::Signup => Some(AuthAction::Signup),
+		Method::Signin => Some(AuthAction::Signin),
+		Method::Authenticate => Some(AuthAction::Authenticate),
+		Method::Refresh => Some(AuthAction::Refresh),
+		Method::Invalidate => Some(AuthAction::Invalidate),
+		Method::Revoke => Some(AuthAction::Revoke),
+		_ => None,
+	}
+}
+
 #[expect(async_fn_in_trait)]
 pub trait RpcProtocol {
 	/// The datastore for this RPC interface
@@ -52,71 +98,73 @@ pub trait RpcProtocol {
 	/// The version information for this RPC context
 	fn version_data(&self) -> DbResult;
 
+	/// Optional connection-level cancellation handle plumbed into the
+	/// executor's [`crate::ctx::Context`]. When the handle is tripped the
+	/// executor's `done`-walks short-circuit with `Reason::Canceled` at
+	/// the next yield point (statement boundary, iterator hot loop check,
+	/// HNSW/DiskANN search) and the transaction is finalised on the
+	/// executor's normal error path. Bare-await sites (e.g. `SLEEP`)
+	/// `select!` against the handle's awaitable view, so they are
+	/// interrupted instead of running to completion.
+	///
+	/// The WebSocket implementation returns its connection cancel handle
+	/// so a client disconnect cancels in-flight queries cleanly. Stateless
+	/// implementations (HTTP RPC) return `None` and inherit the
+	/// pre-cancellation behaviour.
+	fn cancel_handle(&self) -> Option<CancelHandle> {
+		None
+	}
+
 	// ------------------------------
 	// Sessions
 	// ------------------------------
 
 	/// A pointer to all active sessions
-	fn session_map(&self) -> &HashMap<Option<Uuid>, Arc<RwLock<Session>>>;
+	fn session_map(&self) -> &HashMap<Uuid, Arc<RwLock<Session>>>;
 
 	/// Registers a new session with the given ID
-	async fn attach(&self, session_id: Option<Uuid>) -> Result<DbResult, surrealdb_types::Error> {
-		let mut session = Session::default().with_rt(Self::LQ_SUPPORT);
-		session.id = session_id;
-		match session_id {
-			Some(id) => {
-				if self.session_map().contains_key(&Some(id)) {
-					return Err(session_exists(id));
-				}
-				self.session_map().insert(Some(id), Arc::new(RwLock::new(session)));
-				Ok(DbResult::Other(PublicValue::None))
-			}
-			None => Err(invalid_params("Expected a session ID")),
+	async fn attach(&self, session_id: Uuid) -> Result<DbResult, surrealdb_types::Error> {
+		if self.session_map().contains_key(&session_id) {
+			return Err(session_exists(session_id));
 		}
+		let mut session = Session::default().with_rt(Self::LQ_SUPPORT);
+		session.id = Some(session_id);
+		self.session_map().insert(session_id, Arc::new(RwLock::new(session)));
+		Ok(DbResult::Other(PublicValue::None))
 	}
 
 	/// Detaches a session from the given ID
-	async fn detach(&self, session_id: Option<Uuid>) -> Result<DbResult, surrealdb_types::Error> {
-		match session_id {
-			Some(id) => {
-				self.del_session(&id).await;
-				Ok(DbResult::Other(PublicValue::None))
-			}
-			None => Err(invalid_params("Expected a session ID")),
-		}
+	async fn detach(&self, session_id: Uuid) -> Result<DbResult, surrealdb_types::Error> {
+		self.del_session(&session_id).await;
+		Ok(DbResult::Other(PublicValue::None))
 	}
 
 	/// The current session for this RPC context
-	fn get_session(
-		&self,
-		id: &Option<Uuid>,
-	) -> Result<Arc<RwLock<Session>>, surrealdb_types::Error> {
+	fn get_session(&self, id: &Uuid) -> Result<Arc<RwLock<Session>>, surrealdb_types::Error> {
 		match self.session_map().get(id) {
 			Some(session) => Ok(session),
 			None => Err(session_not_found(*id)),
 		}
 	}
 
-	/// Mutable access to the current session for this RPC context
-	fn set_session(&self, id: Option<Uuid>, session: Arc<RwLock<Session>>) {
+	/// Stores a session for the given ID
+	fn set_session(&self, id: Uuid, session: Arc<RwLock<Session>>) {
 		self.session_map().insert(id, session);
 	}
 
 	/// Deletes a session
 	async fn del_session(&self, id: &Uuid) {
-		self.session_map().remove(&Some(*id));
-		// Cleanup live queries
-		self.cleanup_lqs(Some(id)).await;
+		self.session_map().remove(id);
+		self.cleanup_lqs(id).await;
 	}
 
-	/// Lists all non-default sessions
+	/// Lists all sessions
 	async fn sessions(&self) -> Result<DbResult, surrealdb_types::Error> {
 		let array = self
 			.session_map()
 			.to_vec()
 			.into_iter()
-			.filter_map(|(key, _)| key)
-			.map(|x| PublicValue::Uuid(PublicUuid::from(x)))
+			.map(|(key, _)| PublicValue::Uuid(PublicUuid::from(key)))
 			.collect();
 		Ok(DbResult::Other(PublicValue::Array(array)))
 	}
@@ -149,11 +197,22 @@ pub trait RpcProtocol {
 	/// Live queries are disabled by default
 	const LQ_SUPPORT: bool = false;
 
-	/// Handles the execution of a LIVE statement
+	/// Handles the execution of a LIVE statement.
+	///
+	/// `namespace` and `database` are snapshotted from the registering
+	/// session by the caller (`run_query`) using the read guard it
+	/// already holds, and threaded down here so the implementation does
+	/// NOT re-lock the same `RwLock<Session>` -- that would be a
+	/// recursive read on a write-preferring lock and can deadlock against
+	/// any concurrent session-mutating RPC on the same WebSocket
+	/// (signin / signup / authenticate / set / unset / yuse / refresh /
+	/// invalidate / revoke / reset).
 	fn handle_live(
 		&self,
 		_lqid: &Uuid,
-		_session_id: Option<Uuid>,
+		_session_id: Uuid,
+		_namespace: Option<String>,
+		_database: Option<String>,
 	) -> impl std::future::Future<Output = ()> + Send {
 		async { unimplemented!("handle_live function must be implemented if LQ_SUPPORT = true") }
 	}
@@ -163,10 +222,7 @@ pub trait RpcProtocol {
 	}
 
 	/// Handles the cleanup of live queries
-	fn cleanup_lqs(
-		&self,
-		session_id: Option<&Uuid>,
-	) -> impl std::future::Future<Output = ()> + Send;
+	fn cleanup_lqs(&self, session_id: &Uuid) -> impl std::future::Future<Output = ()> + Send;
 
 	/// Handles the cleanup of all live queries
 	fn cleanup_all_lqs(&self) -> impl std::future::Future<Output = ()> + Send;
@@ -175,59 +231,141 @@ pub trait RpcProtocol {
 	// Method execution
 	// ------------------------------
 
-	/// Executes a method on this RPC implementation
+	/// Executes a method on this RPC implementation.
+	///
+	/// `session` is the resolved session ID (always valid). `client_session`
+	/// is the raw value from the client request (`None` when the client did
+	/// not specify one). Session-management methods (`attach`, `detach`) use
+	/// `client_session` to reject calls with no explicit session ID.
+	///
+	/// Wraps the dispatch in a timer and fires an
+	/// [`crate::observe::RpcEvent`] on completion regardless of outcome. The
+	/// safe half of the event carries only the bounded [`Method`] and the
+	/// outcome label; the context half carries the current session's
+	/// namespace/database/user (ignored by the community metrics observer
+	/// but consumed by enterprise audit sinks). Auth-related methods
+	/// additionally fan out an [`AuthEvent`] so auth attempt counters can
+	/// be broken out by action/scope/outcome.
+	#[tracing::instrument(
+		level = "debug",
+		target = "surrealdb::core::rpc",
+		name = "rpc.execute",
+		skip_all,
+		fields(rpc.method = method.to_str(), rpc.session = %session)
+	)]
 	async fn execute(
 		&self,
 		txn: Option<Uuid>,
-		session: Option<Uuid>,
+		session: Uuid,
+		client_session: Option<Uuid>,
 		method: Method,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
-		// Check if capabilities allow executing the requested RPC method
-		if !self.kvs().allows_rpc_method(&MethodTarget {
-			method,
-		}) {
-			warn!("Capabilities denied RPC method call attempt, target: '{method}'");
-			return Err(method_not_allowed(method.to_string()));
+		let start = web_time::Instant::now();
+		let result: Result<DbResult, surrealdb_types::Error> = async {
+			// Check if capabilities allow executing the requested RPC method
+			if !self.kvs().allows_rpc_method(&MethodTarget {
+				method,
+			}) {
+				warn!("Capabilities denied RPC method call attempt, target: '{method}'");
+				return Err(method_not_allowed(method.to_string()));
+			}
+			// Execute the desired method
+			match method {
+				Method::Ping => Ok(DbResult::Other(PublicValue::None)),
+				Method::Info => self.info(txn, session).await,
+				Method::Use => self.yuse(session, params).await,
+				Method::Signup => self.signup(session, params).await,
+				Method::Signin => self.signin(session, params).await,
+				Method::Authenticate => self.authenticate(session, params).await,
+				Method::Refresh => self.refresh(session, params).await,
+				Method::Invalidate => self.invalidate(session).await,
+				Method::Revoke => self.revoke(params).await,
+				Method::Reset => self.reset(session).await,
+				Method::Kill => self.kill(txn, session, params).await,
+				Method::Live => self.live(txn, session, params).await,
+				Method::Set => self.set(session, params).await,
+				Method::Unset => self.unset(session, params).await,
+				Method::Query => self.query(txn, session, params).await,
+				Method::Version => self.version(txn, params).await,
+				Method::Begin => self.begin(txn, session).await,
+				Method::Commit => self.commit(txn, session, params).await,
+				Method::Cancel => self.cancel(txn, session, params).await,
+				Method::Sessions => self.sessions().await,
+				Method::Attach => match client_session {
+					Some(id) => self.attach(id).await,
+					None => Err(invalid_params("Expected a session ID")),
+				},
+				Method::Detach => match client_session {
+					Some(id) => self.detach(id).await,
+					None => Err(invalid_params("Expected a session ID")),
+				},
+				// Deprecated methods
+				Method::Select => self.select(txn, session, params).await,
+				Method::Insert => self.insert(txn, session, params).await,
+				Method::Create => self.create(txn, session, params).await,
+				Method::Upsert => self.upsert(txn, session, params).await,
+				Method::Update => self.update(txn, session, params).await,
+				Method::Merge => self.merge(txn, session, params).await,
+				Method::Patch => self.patch(txn, session, params).await,
+				Method::Delete => self.delete(txn, session, params).await,
+				Method::Relate => self.relate(txn, session, params).await,
+				Method::Run => self.run(txn, session, params).await,
+				Method::InsertRelation => self.insert_relation(txn, session, params).await,
+				_ => Err(method_not_found(method.to_string())),
+			}
 		}
-		// Execute the desired method
-		match method {
-			Method::Ping => Ok(DbResult::Other(PublicValue::None)),
-			Method::Info => self.info(txn, session).await,
-			Method::Use => self.yuse(session, params).await,
-			Method::Signup => self.signup(session, params).await,
-			Method::Signin => self.signin(session, params).await,
-			Method::Authenticate => self.authenticate(session, params).await,
-			Method::Refresh => self.refresh(session, params).await,
-			Method::Invalidate => self.invalidate(session).await,
-			Method::Revoke => self.revoke(params).await,
-			Method::Reset => self.reset(session).await,
-			Method::Kill => self.kill(txn, session, params).await,
-			Method::Live => self.live(txn, session, params).await,
-			Method::Set => self.set(session, params).await,
-			Method::Unset => self.unset(session, params).await,
-			Method::Query => self.query(txn, session, params).await,
-			Method::Version => self.version(txn, params).await,
-			Method::Begin => self.begin(txn, session).await,
-			Method::Commit => self.commit(txn, session, params).await,
-			Method::Cancel => self.cancel(txn, session, params).await,
-			Method::Sessions => self.sessions().await,
-			Method::Attach => self.attach(session).await,
-			Method::Detach => self.detach(session).await,
-			// Deprecated methods
-			Method::Select => self.select(txn, session, params).await,
-			Method::Insert => self.insert(txn, session, params).await,
-			Method::Create => self.create(txn, session, params).await,
-			Method::Upsert => self.upsert(txn, session, params).await,
-			Method::Update => self.update(txn, session, params).await,
-			Method::Merge => self.merge(txn, session, params).await,
-			Method::Patch => self.patch(txn, session, params).await,
-			Method::Delete => self.delete(txn, session, params).await,
-			Method::Relate => self.relate(txn, session, params).await,
-			Method::Run => self.run(txn, session, params).await,
-			Method::InsertRelation => self.insert_relation(txn, session, params).await,
-			_ => Err(method_not_found(method.to_string())),
+		.await;
+		let outcome = Outcome::from(&result);
+		// Resolve session context for the observer event. An unknown
+		// session ID yields an empty `TenantIdentity` rather than an
+		// error, keeping the metrics path infallible. We capture the
+		// scope inside the same lock acquisition to avoid a second
+		// lookup for auth events. Routing through
+		// `TenantIdentity::from_session` applies the documented
+		// record/anonymous collapsing rule (anon -> `None`,
+		// record-access -> `<record>` sentinel) so per-tenant /
+		// dimensional dashboards stay bounded and audit destinations
+		// never receive raw record-access principal ids.
+		let (identity, scope) = match self.get_session(&session) {
+			Ok(session_lock) => {
+				let s = session_lock.read().await;
+				let scope = AuthScope::from(s.au.level());
+				(TenantIdentity::from_session(&s), scope)
+			}
+			Err(_) => (TenantIdentity::default(), AuthScope::None),
+		};
+		// Classify error-outcome events using the structured
+		// [`surrealdb_types::ErrorDetails`] taxonomy so the
+		// `error_class` attribute on `surrealdb.rpc.*` and
+		// `surrealdb.auth.*` carries a real label
+		// (`auth` / `permission` / `parse` / `client` / `txn_conflict` /
+		// `ctx_cancelled` / `timeout` / `internal`) rather than the
+		// `-` sentinel.
+		let error_class =
+			result.as_ref().err().map(crate::observe::error_class::classify_types_error);
+		let observer = self.kvs().observer();
+		observer.on_rpc_complete(&RpcEvent {
+			safe: RpcEventSafe {
+				method,
+				outcome,
+				duration: start.elapsed(),
+				error_class,
+			},
+			ctx: identity.to_rpc_ctx(),
+		});
+		if let Some(action) = method_to_auth_action(method) {
+			observer.on_auth_event(&AuthEvent {
+				safe: AuthEventSafe {
+					action,
+					scope,
+					outcome,
+					error_class,
+				},
+				ctx: identity.to_auth_ctx(),
+			});
 		}
+		result
 	}
 
 	// ------------------------------
@@ -250,7 +388,7 @@ pub trait RpcProtocol {
 	/// clients (especially HTTP) to sync their local state with the server session.
 	async fn yuse(
 		&self,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -323,6 +461,16 @@ pub trait RpcProtocol {
 				}
 			}
 		} else {
+			// SECURITY: SDKs commonly call `use` before `signin`, so we
+			// set the session context even when the caller cannot
+			// authorize the implicit `DEFINE NAMESPACE` /
+			// `DEFINE DATABASE`-equivalent creation. The auto-creation
+			// itself is gated on that authorization; downstream
+			// operations against a non-existent namespace surface a
+			// clean `NsNotFound` rather than a silently auto-created
+			// resource that the session was never allowed to create.
+			// See `SECURITY_GUIDE.md` section 3.
+			//
 			// Update the selected namespace
 			match ns {
 				PublicValue::None => (),
@@ -333,7 +481,16 @@ pub trait RpcProtocol {
 						.transaction(TransactionType::Write, LockType::Optimistic)
 						.await
 						.map_err(types_error_from_anyhow)?;
-					run!(tx, tx.get_or_add_ns(None, &ns).await).map_err(types_error_from_anyhow)?;
+					let create = kvs
+						.should_materialize_ns_on_use(&tx, session.au.as_ref(), &ns)
+						.await
+						.map_err(types_error_from_anyhow)?;
+					if create {
+						run!(tx, tx.get_or_add_ns(None, &ns).await)
+							.map_err(types_error_from_anyhow)?;
+					} else {
+						let _ = tx.cancel().await;
+					}
 					session.ns = Some(ns)
 				}
 				unexpected => {
@@ -347,14 +504,31 @@ pub trait RpcProtocol {
 				PublicValue::None => (),
 				PublicValue::Null => session.db = None,
 				PublicValue::String(db) => {
-					let ns = session.ns.clone().expect("namespace should be set");
-					let tx = self
-						.kvs()
+					// SECURITY: a `use` call that sets `db` without a namespace
+					// previously hit `.expect("namespace should be set")`, and the
+					// crate's `panic = 'abort'` setting would have aborted the
+					// whole server process — a one-RPC remote DoS. Return a clean
+					// error instead.
+					let Some(ns) = session.ns.clone() else {
+						return Err(invalid_params(
+							"Cannot set database without first selecting a namespace".to_string(),
+						));
+					};
+					let kvs = self.kvs();
+					let tx = kvs
 						.transaction(TransactionType::Write, LockType::Optimistic)
 						.await
 						.map_err(types_error_from_anyhow)?;
-					run!(tx, tx.ensure_ns_db(None, &ns, &db).await)
+					let create = kvs
+						.should_materialize_db_on_use(&tx, session.au.as_ref(), &ns, &db)
+						.await
 						.map_err(types_error_from_anyhow)?;
+					if create {
+						run!(tx, tx.ensure_ns_db(None, &ns, &db).await)
+							.map_err(types_error_from_anyhow)?;
+					} else {
+						let _ = tx.cancel().await;
+					}
 					session.db = Some(db)
 				}
 				unexpected => {
@@ -382,9 +556,16 @@ pub trait RpcProtocol {
 		Ok(DbResult::Other(value))
 	}
 
+	#[tracing::instrument(
+		level = "debug",
+		target = "surrealdb::core::rpc",
+		name = "rpc.signup",
+		skip_all,
+		fields(rpc.session = %session_id)
+	)]
 	async fn signup(
 		&self,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		// Process the method arguments
@@ -394,18 +575,31 @@ pub trait RpcProtocol {
 		// Get a write lock on the session
 		let session_lock = self.get_session(&session_id)?;
 		let mut session = session_lock.write().await;
+		let snapshot = AuthPrincipalSnapshot::capture(&session);
 		// Attempt signup, mutating the session
 		let out: Result<PublicValue> =
 			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
 				.await
 				.map(SurrealValue::into_value);
+		let principal_changed = snapshot.differs_from(&session);
+		drop(session);
+		if principal_changed {
+			self.cleanup_lqs(&session_id).await;
+		}
 		// Return the signup result
 		out.map(DbResult::Other).map_err(types_error_from_anyhow)
 	}
 
+	#[tracing::instrument(
+		level = "debug",
+		target = "surrealdb::core::rpc",
+		name = "rpc.signin",
+		skip_all,
+		fields(rpc.session = %session_id)
+	)]
 	async fn signin(
 		&self,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		// Process the method arguments
@@ -415,18 +609,31 @@ pub trait RpcProtocol {
 		// Get a write lock on the session
 		let session_lock = self.get_session(&session_id)?;
 		let mut session = session_lock.write().await;
+		let snapshot = AuthPrincipalSnapshot::capture(&session);
 		// Attempt signin, mutating the session
 		let out: Result<PublicValue> =
 			crate::iam::signin::signin(self.kvs(), &mut session, params.into())
 				.await
 				.map(SurrealValue::into_value);
+		let principal_changed = snapshot.differs_from(&session);
+		drop(session);
+		if principal_changed {
+			self.cleanup_lqs(&session_id).await;
+		}
 		// Return the signin result
 		out.map(DbResult::Other).map_err(types_error_from_anyhow)
 	}
 
+	#[tracing::instrument(
+		level = "debug",
+		target = "surrealdb::core::rpc",
+		name = "rpc.authenticate",
+		skip_all,
+		fields(rpc.session = %session_id)
+	)]
 	async fn authenticate(
 		&self,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		// Process the method arguments
@@ -436,6 +643,7 @@ pub trait RpcProtocol {
 		// Get a write lock on the session
 		let session_lock = self.get_session(&session_id)?;
 		let mut session = session_lock.write().await;
+		let snapshot = AuthPrincipalSnapshot::capture(&session);
 		// Log before authentication
 		trace!(
 			"Authenticate RPC: session_id={:?}, before: ns={:?}, db={:?}",
@@ -451,6 +659,11 @@ pub trait RpcProtocol {
 			"Authenticate RPC: session_id={:?}, after: ns={:?}, db={:?}",
 			session_id, session.ns, session.db
 		);
+		let principal_changed = snapshot.differs_from(&session);
+		drop(session);
+		if principal_changed {
+			self.cleanup_lqs(&session_id).await;
+		}
 		// Return nothing on success
 		out.map(DbResult::Other).map_err(types_error_from_anyhow)
 	}
@@ -483,7 +696,7 @@ pub trait RpcProtocol {
 	/// - The refresh token is invalid, expired, or already revoked
 	async fn refresh(
 		&self,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		// Process the method arguments
@@ -497,6 +710,7 @@ pub trait RpcProtocol {
 		// Get a write lock on the session
 		let session_lock = self.get_session(&session_id)?;
 		let mut session = session_lock.write().await;
+		let snapshot = AuthPrincipalSnapshot::capture(&session);
 		// Attempt token refresh, which will:
 		// - Validate the refresh token
 		// - Revoke the old refresh token
@@ -504,19 +718,24 @@ pub trait RpcProtocol {
 		// - Update the session with the new authentication state
 		let out: Result<PublicValue> =
 			token.refresh(self.kvs(), &mut session).await.map(Token::into_value);
+		let principal_changed = snapshot.differs_from(&session);
+		drop(session);
+		if principal_changed {
+			self.cleanup_lqs(&session_id).await;
+		}
 		// Return the new token pair
 		out.map(DbResult::Other).map_err(types_error_from_anyhow)
 	}
 
-	async fn invalidate(
-		&self,
-		session_id: Option<Uuid>,
-	) -> Result<DbResult, surrealdb_types::Error> {
+	async fn invalidate(&self, session_id: Uuid) -> Result<DbResult, surrealdb_types::Error> {
 		// Get a write lock on the session
 		let session_lock = self.get_session(&session_id)?;
 		let mut session = session_lock.write().await;
 		// Clear the current session
 		crate::iam::clear::clear(&mut session).map_err(types_error_from_anyhow)?;
+		// Cleanup live queries so that the now-invalidated session no longer receives
+		// notifications.
+		self.cleanup_lqs(&session_id).await;
 		// Return nothing on success
 		Ok(DbResult::Other(PublicValue::None))
 	}
@@ -564,14 +783,14 @@ pub trait RpcProtocol {
 		Ok(DbResult::Other(PublicValue::None))
 	}
 
-	async fn reset(&self, session_id: Option<Uuid>) -> Result<DbResult, surrealdb_types::Error> {
+	async fn reset(&self, session_id: Uuid) -> Result<DbResult, surrealdb_types::Error> {
 		// Get a write lock on the session
 		let session_lock = self.get_session(&session_id)?;
 		let mut session = session_lock.write().await;
 		// Reset the current session
 		crate::iam::reset::reset(&mut session);
 		// Cleanup live queries
-		self.cleanup_lqs(session_id.as_ref()).await;
+		self.cleanup_lqs(&session_id).await;
 		// Return nothing on success
 		Ok(DbResult::Other(PublicValue::None))
 	}
@@ -583,7 +802,7 @@ pub trait RpcProtocol {
 	async fn info(
 		&self,
 		_txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
 		let session = session_lock.read().await;
@@ -602,7 +821,7 @@ pub trait RpcProtocol {
 
 	async fn set(
 		&self,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -644,7 +863,7 @@ pub trait RpcProtocol {
 
 	async fn unset(
 		&self,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -677,7 +896,7 @@ pub trait RpcProtocol {
 	async fn kill(
 		&self,
 		txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -709,7 +928,7 @@ pub trait RpcProtocol {
 	async fn live(
 		&self,
 		txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -724,7 +943,7 @@ pub trait RpcProtocol {
 
 		// If value is a strand, handle it as if it was a table.
 		let what = match what {
-			PublicValue::String(x) => Expr::Table(x),
+			PublicValue::String(x) => Expr::Table(crate::val::TableName::new(x)),
 			x => Expr::from_public_value(x),
 		};
 
@@ -763,7 +982,7 @@ pub trait RpcProtocol {
 	async fn select(
 		&self,
 		txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -785,7 +1004,7 @@ pub trait RpcProtocol {
 
 		// If value is a string, handle it as if it was a table.
 		let what = match what {
-			PublicValue::String(x) => Expr::Table(x),
+			PublicValue::String(x) => Expr::Table(crate::val::TableName::new(x)),
 			x => Expr::from_public_value(x),
 		};
 
@@ -828,7 +1047,7 @@ pub trait RpcProtocol {
 	async fn insert(
 		&self,
 		txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -843,8 +1062,8 @@ pub trait RpcProtocol {
 
 		let into = match what {
 			PublicValue::Null | PublicValue::None => None,
-			PublicValue::Table(x) => Some(Expr::Table(x.into_string())),
-			PublicValue::String(x) => Some(Expr::Table(x)),
+			PublicValue::Table(x) => Some(Expr::Table(crate::val::TableName::new(x.into_string()))),
+			PublicValue::String(x) => Some(Expr::Table(crate::val::TableName::new(x))),
 			x => Some(Expr::from_public_value(x)),
 		};
 
@@ -873,7 +1092,7 @@ pub trait RpcProtocol {
 	async fn insert_relation(
 		&self,
 		txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -888,8 +1107,8 @@ pub trait RpcProtocol {
 
 		let table_name = match what {
 			PublicValue::Null | PublicValue::None => None,
-			PublicValue::Table(x) => Some(Expr::Table(x.into_string())),
-			PublicValue::String(x) => Some(Expr::Table(x)),
+			PublicValue::Table(x) => Some(Expr::Table(crate::val::TableName::new(x.into_string()))),
+			PublicValue::String(x) => Some(Expr::Table(crate::val::TableName::new(x))),
 			x => Some(Expr::from_public_value(x)),
 		};
 
@@ -924,7 +1143,7 @@ pub trait RpcProtocol {
 	async fn create(
 		&self,
 		txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -978,7 +1197,7 @@ pub trait RpcProtocol {
 	async fn upsert(
 		&self,
 		txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -1036,7 +1255,7 @@ pub trait RpcProtocol {
 	async fn update(
 		&self,
 		_txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -1091,7 +1310,7 @@ pub trait RpcProtocol {
 	async fn merge(
 		&self,
 		txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -1145,7 +1364,7 @@ pub trait RpcProtocol {
 	async fn patch(
 		&self,
 		_txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -1210,7 +1429,7 @@ pub trait RpcProtocol {
 	async fn relate(
 		&self,
 		_txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -1267,7 +1486,7 @@ pub trait RpcProtocol {
 	async fn delete(
 		&self,
 		txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -1323,7 +1542,7 @@ pub trait RpcProtocol {
 	async fn query(
 		&self,
 		txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -1370,7 +1589,7 @@ pub trait RpcProtocol {
 	async fn run(
 		&self,
 		_txn: Option<Uuid>,
-		session_id: Option<Uuid>,
+		session_id: Uuid,
 		params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		let session_lock = self.get_session(&session_id)?;
@@ -1495,10 +1714,12 @@ pub trait RpcProtocol {
 			Some(&"ml") => {
 				let name = segments[1..].join("::");
 				Function::Model(Model {
-					name,
-					version: version.ok_or(invalid_params(
-						"Expected version to be set for model function".to_string(),
-					))?,
+					name: name.into(),
+					version: version
+						.ok_or(invalid_params(
+							"Expected version to be set for model function".to_string(),
+						))?
+						.into(),
 				})
 			}
 			_ => Function::Normal(name),
@@ -1529,7 +1750,7 @@ pub trait RpcProtocol {
 	async fn begin(
 		&self,
 		_txn: Option<Uuid>,
-		_session_id: Option<Uuid>,
+		_session_id: Uuid,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		Err(method_not_allowed(Method::Begin.to_string()))
 	}
@@ -1538,7 +1759,7 @@ pub trait RpcProtocol {
 	async fn commit(
 		&self,
 		_txn: Option<Uuid>,
-		_session_id: Option<Uuid>,
+		_session_id: Uuid,
 		_params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		Err(method_not_allowed(Method::Commit.to_string()))
@@ -1548,7 +1769,7 @@ pub trait RpcProtocol {
 	async fn cancel(
 		&self,
 		_txn: Option<Uuid>,
-		_session_id: Option<Uuid>,
+		_session_id: Uuid,
 		_params: PublicArray,
 	) -> Result<DbResult, surrealdb_types::Error> {
 		Err(method_not_allowed(Method::Cancel.to_string()))
@@ -1563,7 +1784,7 @@ enum QueryForm<'a> {
 async fn run_query<T>(
 	this: &T,
 	txn: Option<Uuid>,
-	session_id: Option<Uuid>,
+	session_id: Uuid,
 	query: QueryForm<'_>,
 	vars: Option<PublicVariables>,
 ) -> Result<Vec<QueryResult>>
@@ -1577,32 +1798,65 @@ where
 	}
 
 	// If a transaction UUID is provided, retrieve it and execute with it
+	let cancel = this.cancel_handle();
 	let res = if let Some(txn_id) = txn {
 		// Retrieve the transaction - fail if not found
 		let tx = this.get_tx(txn_id).await.map_err(anyhow::Error::from)?;
 		// Execute with the existing transaction by passing it through context
-		match query {
-			QueryForm::Text(query) => {
+		match (query, cancel) {
+			(QueryForm::Text(query), Some(cancel)) => {
+				this.kvs()
+					.execute_with_transaction_and_cancel(query, &session, vars, tx, cancel)
+					.await?
+			}
+			(QueryForm::Text(query), None) => {
 				this.kvs().execute_with_transaction(query, &session, vars, tx).await?
 			}
-			QueryForm::Parsed(ast) => {
+			(QueryForm::Parsed(ast), Some(cancel)) => {
+				this.kvs()
+					.process_with_transaction_and_cancel(ast, &session, vars, tx, cancel)
+					.await?
+			}
+			(QueryForm::Parsed(ast), None) => {
 				this.kvs().process_with_transaction(ast, &session, vars, tx).await?
 			}
 		}
 	} else {
 		// No transaction - execute normally
-		match query {
-			QueryForm::Text(query) => this.kvs().execute(query, &session, vars).await?,
-			QueryForm::Parsed(ast) => this.kvs().process(ast, &session, vars).await?,
+		match (query, cancel) {
+			(QueryForm::Text(query), Some(cancel)) => {
+				this.kvs().execute_with_cancel(query, &session, vars, cancel).await?
+			}
+			(QueryForm::Text(query), None) => this.kvs().execute(query, &session, vars).await?,
+			(QueryForm::Parsed(ast), Some(cancel)) => {
+				this.kvs().process_with_cancel(ast, &session, vars, cancel).await?
+			}
+			(QueryForm::Parsed(ast), None) => this.kvs().process(ast, &session, vars).await?,
 		}
 	};
 
-	// Post-process hooks for web layer
+	// Post-process hooks for web layer.
+	//
+	// `handle_live` needs the registering session's namespace / database
+	// for the `surrealdb.live_query.active` gauge labelling. We snapshot
+	// those off the read guard we already hold here rather than letting
+	// `handle_live` re-lock the same `RwLock<Session>`: that would be a
+	// recursive read on a write-preferring lock, and any concurrent
+	// session-mutating RPC on the same WebSocket would queue a writer
+	// between the two reads and deadlock both futures.
+	let live_namespace = session.ns.clone();
+	let live_database = session.db.clone();
 	for response in &res {
 		match &response.query_type {
 			QueryType::Live => {
 				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
-					this.handle_live(lqid, session_id).await;
+					this.handle_live(
+						lqid,
+						session_id,
+						live_namespace.clone(),
+						live_database.clone(),
+					)
+					.await;
 				}
 			}
 			QueryType::Kill => {

@@ -1,8 +1,9 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use reblessive;
 
 use crate::catalog;
-use crate::cnf::INSECURE_FORWARD_ACCESS_ERRORS;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::expr::statements::access;
@@ -46,7 +47,7 @@ pub(crate) async fn authenticate_record(
 					debug!(
 						"Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}"
 					);
-					if *INSECURE_FORWARD_ACCESS_ERRORS {
+					if kvs.config().insecure_forward_access_errors {
 						Err(e)
 					} else {
 						Err(anyhow::Error::new(Error::InvalidAuth))
@@ -92,7 +93,7 @@ pub(crate) async fn authenticate_generic(
 					debug!(
 						"Authentication attempt failed due to an error in the AUTHENTICATE clause: {e}"
 					);
-					if *INSECURE_FORWARD_ACCESS_ERRORS {
+					if kvs.config().insecure_forward_access_errors {
 						Err(e)
 					} else {
 						Err(anyhow::Error::new(Error::InvalidAuth))
@@ -116,7 +117,7 @@ pub(crate) async fn create_refresh_token_record(
 	// Create a new context with a writeable transaction
 	let mut ctx = kvs.setup_ctx()?;
 	let tx = kvs.transaction(Write, Optimistic).await?.enclose();
-	ctx.set_transaction(tx.clone());
+	ctx.set_transaction(Arc::clone(&tx));
 	let ctx = ctx.freeze();
 	// Create a bearer grant to act as the refresh token
 	let grant = run!(
@@ -144,9 +145,9 @@ pub async fn revoke_refresh_token_record(
 	db: &str,
 ) -> Result<()> {
 	let stmt = access::AccessStatementRevoke {
-		ac,
+		ac: ac.into(),
 		base: Some(Base::Db),
-		gr: Some(gr),
+		gr: Some(gr.into()),
 		cond: None,
 	};
 	let sess = Session::owner().with_ns(ns).with_db(db);
@@ -154,7 +155,7 @@ pub async fn revoke_refresh_token_record(
 	// Create a new context with a writeable transaction
 	let mut ctx = kvs.setup_ctx()?;
 	let tx = kvs.transaction(Write, Optimistic).await?.enclose();
-	ctx.set_transaction(tx.clone());
+	ctx.set_transaction(Arc::clone(&tx));
 	let ctx = ctx.freeze();
 	// Create a bearer grant to act as the refresh token
 	let mut stack = reblessive::tree::TreeStack::new();

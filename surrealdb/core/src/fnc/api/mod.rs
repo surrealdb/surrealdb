@@ -90,12 +90,12 @@ pub async fn invoke(
 	}
 
 	let mut value: Value =
-		if let Some((api, params)) = ApiDefinition::find_definition(&apis, segments, req.method) {
+		if let Some((api, params)) = ApiDefinition::find_definition(&apis, &segments, req.method) {
 			req.params = params.try_into()?;
 			process_api_request_with_stack(stk, ctx, opt, api, req).await?.into()
 		} else {
 			trace!(request_id = %request_id, path = %path, "No API definition found for path");
-			ApiResponse::from_error(ApiError::NotFound.into(), request_id).into()
+			ApiResponse::from_error(ApiError::NotFound, request_id).into()
 		};
 
 	let Value::Object(ref mut obj) = value else {

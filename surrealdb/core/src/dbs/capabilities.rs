@@ -378,6 +378,7 @@ pub enum RouteTarget {
 	Ml,
 	GraphQL,
 	Api,
+	Mcp,
 }
 
 // impl display
@@ -397,6 +398,7 @@ impl fmt::Display for RouteTarget {
 			RouteTarget::Ml => write!(f, "ml"),
 			RouteTarget::GraphQL => write!(f, "graphql"),
 			RouteTarget::Api => write!(f, "api"),
+			RouteTarget::Mcp => write!(f, "mcp"),
 		}
 	}
 }
@@ -435,6 +437,7 @@ impl std::str::FromStr for RouteTarget {
 			"ml" => Ok(RouteTarget::Ml),
 			"graphql" => Ok(RouteTarget::GraphQL),
 			"api" => Ok(RouteTarget::Api),
+			"mcp" => Ok(RouteTarget::Mcp),
 			_ => Err(ParseRouteTargetError),
 		}
 	}
@@ -872,7 +875,7 @@ impl Capabilities {
 	#[cfg(feature = "surrealism")]
 	pub fn validate_surrealism_capabilities(
 		&self,
-		capabilities: SurrealismCapabilities,
+		capabilities: &SurrealismCapabilities,
 	) -> anyhow::Result<()> {
 		use surrealism_runtime::capabilities::FunctionTargets;
 

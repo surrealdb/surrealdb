@@ -3,11 +3,11 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use rstest::rstest;
+use surrealdb_strand::Strand;
 use uuid::Uuid;
 
 use super::*;
 use crate::catalog::auth::AuthLimit;
-use crate::catalog::record::Record;
 use crate::catalog::schema::base::Base;
 use crate::expr::field::Selector;
 use crate::expr::{
@@ -23,13 +23,13 @@ use crate::val::{Datetime, TableName, Value};
 #[rstest]
 #[case::namespace(NamespaceDefinition {
 	namespace_id: NamespaceId(123),
-	name: "test".to_string(),
+	name: "test".into(),
 	comment: Some("comment".to_string()),
 }, 16)]
 #[case::database(DatabaseDefinition {
 	namespace_id: NamespaceId(123),
 	database_id: DatabaseId(456),
-	name: "test".to_string(),
+	name: "test".into(),
 	strict: false,
 	comment: Some("comment".to_string()),
 	changefeed: Some(ChangeFeed {
@@ -46,11 +46,11 @@ use crate::val::{Datetime, TableName, Value};
 	schemafull: false,
 	view: Some(ViewDefinition::Select {
 		fields: Fields::Select(vec![Field::All, Field::Single (crate::expr::field::Selector{
-			expr: Expr::Literal(Literal::String("expr".to_string())),
+			expr: Expr::Literal(Literal::String(Strand::new_static("expr"))),
 			alias: Some(Idiom::from_str("field[0]").unwrap()),
 		})]),
 		tables: vec![TableName::from("what")],
-		condition: Some(Expr::Literal(Literal::String("cond".to_string()))),
+		condition: Some(Expr::Literal(Literal::String(Strand::new_static("cond")))),
 		groups: Some(Groups::default()),
 	}),
 	permissions: Permissions::default(),
@@ -64,23 +64,25 @@ use crate::val::{Datetime, TableName, Value};
 	cache_events_ts: Uuid::default(),
 	cache_tables_ts: Uuid::default(),
 	cache_indexes_ts: Uuid::default(),
-}, 149)]
+	graphql_alias: None,
+	graphql_deprecated: None,
+}, 151)]
 #[case::subscription(SubscriptionDefinition {
 	id: Uuid::default(),
 	node: Uuid::default(),
 	fields: SubscriptionFields::Select(Fields::Select(vec![Field::All, Field::Single(Selector{
-		expr: Expr::Literal(Literal::String("expr".to_string())),
+		expr: Expr::Literal(Literal::String(Strand::new_static("expr"))),
 		alias: Some(Idiom::from_str("field[0]").unwrap()),
 	})])),
-	what: Expr::Literal(Literal::String("what".to_string())),
-	cond: Some(Expr::Literal(Literal::String("cond".to_string()))),
-	fetch: Some(Fetchs::new(vec![Fetch(Expr::Literal(Literal::String("fetch".to_string())))])),
+	what: Expr::Literal(Literal::String(Strand::new_static("what"))),
+	cond: Some(Expr::Literal(Literal::String(Strand::new_static("cond")))),
+	fetch: Some(Fetchs::new(vec![Fetch(Expr::Literal(Literal::String(Strand::new_static("fetch"))))])),
 	auth: Some(Auth::default()),
 	session: Some(Value::default()),
 	vars: BTreeMap::new(),
 }, 101)]
 #[case::access(AccessDefinition {
-	name: "access".to_string(),
+	name: "access".into(),
 	access_type: AccessType::Bearer(BearerAccess {
 		kind: BearerAccessType::Bearer,
 		subject: BearerAccessSubject::Record,
@@ -96,7 +98,7 @@ use crate::val::{Datetime, TableName, Value};
 		},
 	}),
 	base: Base::Root,
-	authenticate: Some(Expr::Literal(Literal::String("expr".to_string()))),
+	authenticate: Some(Expr::Literal(Literal::String(Strand::new_static("expr")))),
 	grant_duration: Some(Duration::from_secs(123)),
 	token_duration: Some(Duration::from_secs(123)),
 	session_duration: Some(Duration::from_secs(123)),
@@ -115,8 +117,8 @@ use crate::val::{Datetime, TableName, Value};
 	}),
 }, 95)]
 #[case::analyzer(AnalyzerDefinition {
-	name: "analyzer".to_string(),
-	function: Some("function".to_string()),
+	name: "analyzer".into(),
+	function: Some("function".into()),
 	tokenizers: Some(vec![Tokenizer::Camel]),
 	filters: Some(vec![Filter::Ascii]),
 	comment: Some("comment".to_string()),
@@ -126,7 +128,7 @@ use crate::val::{Datetime, TableName, Value};
 	actions: vec![
 		ApiActionDefinition {
 			methods: vec![ApiMethod::Get],
-			action: Expr::Literal(Literal::String("action".to_string())),
+			action: Expr::Literal(Literal::String(Strand::new_static("action"))),
 			config: ApiConfigDefinition::default(),
 		},
 	],
@@ -134,7 +136,7 @@ use crate::val::{Datetime, TableName, Value};
 	config: ApiConfigDefinition {
 		middleware: vec![
 			MiddlewareDefinition {
-				name: "middleware".to_string(),
+				name: "middleware".into(),
 				args: vec![],
 			},
 		],
@@ -146,8 +148,8 @@ use crate::val::{Datetime, TableName, Value};
 #[case::bucket(BucketDefinition {
 	id: Some(BucketId(123)),
 	readonly: false,
-	name: "bucket".to_string(),
-	backend: Some("backend".to_string()),
+	name: "bucket".into(),
+	backend: Some("backend".into()),
 	comment: Some("comment".to_string()),
 	permissions: Permission::Full,
 }, 32)]
@@ -159,10 +161,10 @@ use crate::val::{Datetime, TableName, Value};
 	introspection: GraphQLIntrospectionConfig::default(),
 }), 11)]
 #[case::event(EventDefinition {
-	name: "test".to_string(),
+	name: "test".into(),
 	target_table: TableName::from("test"),
-	when: Expr::Literal(Literal::String("when".to_string())),
-	then: vec![Expr::Literal(Literal::String("then".to_string()))],
+	when: Expr::Literal(Literal::String(Strand::new_static("when"))),
+	then: vec![Expr::Literal(Literal::String(Strand::new_static("then")))],
 	comment: Some("comment".to_string()),
 	auth_limit: AuthLimit::default(),
     kind: EventKind::Async {
@@ -187,21 +189,25 @@ use crate::val::{Datetime, TableName, Value};
 	reference: None,
 	auth_limit: AuthLimit::default(),
 	computed_deps: None,
-}, 44)]
+	graphql_alias: None,
+	graphql_deprecated: None,
+}, 46)]
 #[case::function(FunctionDefinition {
-	name: "function".to_string(),
+	name: "function".into(),
 	args: vec![],
 	block: Block(vec![
-		Expr::Literal(Literal::String("expr".to_string())),
+		Expr::Literal(Literal::String(Strand::new_static("expr"))),
 	]),
 	comment: Some("comment".to_string()),
 	permissions: Permission::Full,
 	returns: Some(Kind::Any),
 	auth_limit: AuthLimit::default(),
-}, 40)]
+	graphql_alias: None,
+	graphql_deprecated: None,
+}, 42)]
 #[case::index(IndexDefinition {
 	index_id: IndexId(123),
-	name: "test".to_string(),
+	name: "test".into(),
 	table_name: TableName::from("what"),
 	cols: vec![Idiom::from_str("field[0]").unwrap()],
 	index: Index::Idx,
@@ -209,28 +215,28 @@ use crate::val::{Datetime, TableName, Value};
 	prepare_remove: false,
 }, 34)]
 #[case::model(MlModelDefinition {
-	name: "model".to_string(),
-	hash: "hash".to_string(),
-	version: "1.0.0".to_string(),
+	name: "model".into(),
+	hash: "hash".into(),
+	version: "1.0.0".into(),
 	comment: Some("comment".to_string()),
 	permissions: Permission::Full,
 }, 29)]
 #[case::param(ParamDefinition {
-	name: "param".to_string(),
+	name: "param".into(),
 	value: Value::Bool(true),
 	comment: Some("comment".to_string()),
 	permissions: Permission::Full,
 }, 21)]
 #[case::sequence(SequenceDefinition {
-	name: "sequence".to_string(),
+	name: "sequence".into(),
 	batch: 123,
 	start: 123,
 	timeout: Some(Duration::from_secs(123)),
 }, 15)]
 #[case::version(MajorVersion::from(1), 2)]
 #[case::user(UserDefinition {
-	name: "tobie".to_string(),
-	hash: "hash".to_string(),
+	name: "tobie".into(),
+	hash: "hash".into(),
 	code: "code".to_string(),
 	roles: vec!["role".to_string()],
 	token_duration: Some(Duration::from_secs(123)),
@@ -238,14 +244,13 @@ use crate::val::{Datetime, TableName, Value};
 	comment: Some("comment".to_string()),
 	base: crate::catalog::schema::base::Base::Root,
 }, 40)]
-#[case::record(Record::new(Value::Bool(true)), 5)]
 fn test_serialize_deserialize<T>(#[case] original: T, #[case] expected_encoded_size: usize)
 where
-	T: KVValue + std::fmt::Debug + PartialEq,
+	T: KVValue<KeyContext = ()> + std::fmt::Debug + PartialEq,
 {
 	let encoded = original.kv_encode_value().unwrap();
 	assert_eq!(encoded.len(), expected_encoded_size);
 
-	let decoded = T::kv_decode_value(encoded).unwrap();
+	let decoded = T::kv_decode_value(&encoded, ()).unwrap();
 	assert_eq!(decoded, original);
 }

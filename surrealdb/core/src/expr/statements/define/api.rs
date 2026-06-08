@@ -34,7 +34,7 @@ impl DefineApiStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Api, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Api, Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;

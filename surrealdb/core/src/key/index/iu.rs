@@ -20,9 +20,9 @@
 //!   - `pos`: Whether the delta is positive (`true`) or negative (`false`).
 //!   - `count`: Magnitude of the delta (unsigned 64-bit integer).
 //!
-//! When compacted, all per-event delta entries within the index range are
-//! removed and a single entry with `uid = None` is written carrying the net
-//! count with the appropriate `pos` value.
+//! When compacted, snapshot-seen per-event delta entries are removed and a
+//! single entry with `uid = None` is written carrying the net count with the
+//! appropriate `pos` value.
 
 use std::borrow::Cow;
 use std::ops::Range;

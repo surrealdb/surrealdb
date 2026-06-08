@@ -5,7 +5,8 @@
 -Infinity;
 Infinity;
 NaN;
-1f
+1f;
+1_2.3_4e1_2
 /* ===== result =====
 Query
     .exprs: Some
@@ -33,4 +34,7 @@ Query
         -TopLevelExpr::Expr
             Expr::Float
                 1.0
+        -TopLevelExpr::Expr
+            Expr::Float
+                12340000000000.0
 */

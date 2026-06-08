@@ -1,14 +1,14 @@
 macro_rules! keyword {
 	($($name:ident => $value:tt),* $(,)?) => {
 
-		#[repr(u8)]
+		#[repr(u16)]
 		#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 		pub enum Keyword{
 			$($name,)*
 		}
 
 		impl Keyword{
-			pub fn as_str(&self) -> &'static str{
+			pub fn as_str(self) -> &'static str{
 				match self{
 					$(Keyword::$name => $value,)*
 				}
@@ -104,6 +104,8 @@ keyword! {
 	Functions => "FUNCTIONS",
 	Grant => "GRANT",
 	Graphql => "GRAPHQL",
+	GraphqlAlias => "GRAPHQL_ALIAS",
+	GraphqlDeprecated => "GRAPHQL_DEPRECATED",
 	Group => "GROUP",
 	Headers => "HEADERS",
 	Highlights => "HIGHLIGHTS",

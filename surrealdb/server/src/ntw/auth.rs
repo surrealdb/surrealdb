@@ -1,3 +1,5 @@
+use std::task::{Context, Poll};
+
 use anyhow::{Result, bail};
 use axum::body::Body;
 use axum::{Extension, RequestPartsExt};
@@ -10,7 +12,8 @@ use http::request::Parts;
 use hyper::{Request, Response};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::verify::{basic, token};
-use tower_http::auth::AsyncAuthorizeRequest;
+use surrealdb_core::observe::HttpRequestEventCtx;
+use tower::{Layer, Service};
 use uuid::Uuid;
 
 use super::AppState;
@@ -21,43 +24,80 @@ use super::headers::{
 };
 use crate::ntw::error::Error as NetError;
 
+/// Tower layer applying [`SurrealAuthService`] to a wrapped service.
 ///
-/// SurrealAuth is a tower layer that implements the AsyncAuthorizeRequest
-/// trait. It is used to authorize requests to SurrealDB using Basic or Token
-/// authentication.
-///
-/// It has to be used in conjunction with the
-/// tower_http::auth::RequireAuthorizationLayer layer:
-///
-/// ```rust
-/// use tower_http::auth::RequireAuthorizationLayer;
-/// use surrealdb::net::SurrealAuth;
-/// use axum::Router;
-///
-/// let auth = RequireAuthorizationLayer::new(SurrealAuth);
-///
-/// let app = Router::new()
-///   .route("/version", get(|| async { "0.1.0" }))
-///   .layer(auth);
-/// ```
+/// Mounted between the outer HTTP metrics layer and the route handlers in
+/// [`crate::ntw::SurrealRouter`]. Replaces `tower_http`'s
+/// `AsyncRequireAuthorizationLayer<SurrealAuth>` so the service can both
+/// authenticate the request and stamp the resulting [`HttpRequestEventCtx`]
+/// onto the response before it propagates back through the metrics layer.
 #[derive(Clone, Copy)]
-pub(super) struct SurrealAuth;
+pub(super) struct SurrealAuthLayer;
 
-impl AsyncAuthorizeRequest<Body> for SurrealAuth {
-	type RequestBody = Body;
-	type ResponseBody = Body;
-	type Future = BoxFuture<'static, Result<Request<Body>, Response<Self::ResponseBody>>>;
+impl<S> Layer<S> for SurrealAuthLayer {
+	type Service = SurrealAuthService<S>;
 
-	fn authorize(&mut self, request: Request<Body>) -> Self::Future {
-		Box::pin(async {
+	fn layer(&self, inner: S) -> Self::Service {
+		SurrealAuthService {
+			inner,
+		}
+	}
+}
+
+/// Authentication middleware running [`check_auth`] on every request and
+/// short-circuiting failures with a 401 response.
+///
+/// On success, the authenticated [`Session`] is inserted into the request
+/// extensions for downstream handlers and the derived
+/// [`HttpRequestEventCtx`] is inserted into the response extensions on the
+/// way out so the outer HTTP metrics tower layer can attribute the
+/// [`HttpRequestEvent`] and any [`NetworkBytesEvent`]s per
+/// `(namespace, database, user, session_id, client_ip)`. Auth-failed and
+/// anonymous requests carry no ctx; the metrics layer falls back to
+/// [`HttpRequestEventCtx::default`] in that case.
+#[derive(Clone)]
+pub(super) struct SurrealAuthService<S> {
+	inner: S,
+}
+
+impl<S> Service<Request<Body>> for SurrealAuthService<S>
+where
+	S: Service<Request<Body>, Response = Response<Body>> + Clone + Send + 'static,
+	S::Future: Send + 'static,
+	S::Error: Send + 'static,
+{
+	type Response = Response<Body>;
+	type Error = S::Error;
+	type Future = BoxFuture<'static, Result<Response<Body>, S::Error>>;
+
+	fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+		self.inner.poll_ready(cx)
+	}
+
+	fn call(&mut self, request: Request<Body>) -> Self::Future {
+		// Standard tower idiom: the service captured by the future must be
+		// the one that has been `poll_ready`'d, not the placeholder we
+		// leave behind in `self`.
+		let clone = self.inner.clone();
+		let mut inner = std::mem::replace(&mut self.inner, clone);
+		Box::pin(async move {
 			let (mut parts, body) = request.into_parts();
 			match check_auth(&mut parts).await {
 				Ok(sess) => {
+					// Build the per-tenant ctx from the authenticated
+					// session before we hand the request down. We stash
+					// it on the response on the way out so the outer
+					// metrics layer can attribute the per-request
+					// telemetry (HttpRequestEvent + NetworkBytesEvent)
+					// without reaching back into request state.
+					let ctx = HttpRequestEventCtx::from_session(&sess);
 					parts.extensions.insert(sess);
-					Ok(Request::from_parts(parts, body))
+					let mut response = inner.call(Request::from_parts(parts, body)).await?;
+					response.extensions_mut().insert(ctx);
+					Ok(response)
 				}
 				Err(err) => {
-					let unauthorized_response = Response::builder()
+					let unauthorized = Response::builder()
 						.status(StatusCode::UNAUTHORIZED)
 						.body(Body::new(err.to_string()))
 						.unwrap_or_else(|_| {
@@ -65,7 +105,7 @@ impl AsyncAuthorizeRequest<Body> for SurrealAuth {
 							*resp.status_mut() = StatusCode::UNAUTHORIZED;
 							resp
 						});
-					Err(unauthorized_response)
+					Ok(unauthorized)
 				}
 			}
 		})

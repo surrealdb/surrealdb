@@ -87,7 +87,7 @@ impl NotificationRouter {
 
 pub(crate) fn process_subscriptions(
 	tbs: &[TableDefinition],
-	table_fields: &HashMap<String, Arc<[FieldDefinition]>>,
+	table_fields: &HashMap<TableName, Arc<[FieldDefinition]>>,
 ) -> Option<Subscription> {
 	if tbs.is_empty() {
 		return None;
@@ -110,13 +110,13 @@ fn make_table_subscription_field(
 	fds: Arc<[FieldDefinition]>,
 ) -> SubscriptionField {
 	let tb_name = tb.name.clone();
-	let tb_name_str = tb_name.clone().into_string();
+	let tb_name_str = tb_name.as_str().to_string();
 	let table_filter_name = filter_name_from_table(&tb_name);
 	let selectable_fields = selectable_top_level_fields(&fds);
 
 	SubscriptionField::new(tb_name_str.clone(), TypeRef::named(&tb_name_str), move |ctx| {
 		let tb_name = tb_name.clone();
-		let fds = fds.clone();
+		let fds = Arc::clone(&fds);
 		let selectable_fields = selectable_fields.clone();
 		SubscriptionFieldFuture::new(async move {
 			let ds = ctx.data::<Arc<Datastore>>()?;
@@ -135,7 +135,8 @@ fn make_table_subscription_field(
 			let live_id =
 				start_table_live_query(ds, &live_sess, &tb_name, fields, cond, fetch).await?;
 			let mut receiver = router.subscribe(live_id);
-			let cleanup = LiveQueryCleanup::new(ds.clone(), live_sess, live_id, router.clone());
+			let cleanup =
+				LiveQueryCleanup::new(Arc::clone(ds), live_sess, live_id, Arc::clone(router));
 
 			Ok(try_stream! {
 				let _cleanup = cleanup;
@@ -168,7 +169,7 @@ fn selectable_top_level_fields(fds: &[FieldDefinition]) -> HashSet<String> {
 			continue;
 		}
 		if let Some(Part::Field(name)) = fd.name.0.first() {
-			out.insert(name.clone());
+			out.insert(name.as_str().to_owned());
 		}
 	}
 	out
@@ -211,7 +212,7 @@ fn parse_subscription_cond(
 	tb_name: &TableName,
 ) -> Result<Option<Cond>, async_graphql::Error> {
 	let id_cond = parse_id_cond(args, tb_name)?;
-	let where_cond = parse_filter_arg(args, fds, tb_name.as_str())
+	let where_cond = parse_filter_arg(args, fds, tb_name.as_str(), &[])
 		.map_err(|e| async_graphql::Error::new(e.to_string()))?;
 	Ok(combine_cond(id_cond, where_cond))
 }
@@ -393,7 +394,7 @@ impl Drop for LiveQueryCleanup {
 		let Ok(handle) = tokio::runtime::Handle::try_current() else {
 			return;
 		};
-		let ds = self.ds.clone();
+		let ds = Arc::clone(&self.ds);
 		let sess = self.sess.clone();
 		let live_id = self.live_id;
 		handle.spawn(async move {

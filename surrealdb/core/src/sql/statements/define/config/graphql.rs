@@ -1,6 +1,8 @@
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::fmt::EscapeKwFreeIdent;
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -57,12 +59,8 @@ impl From<TablesConfig> for crate::catalog::GraphQLTablesConfig {
 		match v {
 			TablesConfig::None => Self::None,
 			TablesConfig::Auto => Self::Auto,
-			TablesConfig::Include(cs) => {
-				Self::Include(cs.into_iter().map(|t| t.name.into()).collect())
-			}
-			TablesConfig::Exclude(cs) => {
-				Self::Exclude(cs.into_iter().map(|t| t.name.into()).collect())
-			}
+			TablesConfig::Include(cs) => Self::Include(cs.into_iter().map(|t| t.name).collect()),
+			TablesConfig::Exclude(cs) => Self::Exclude(cs.into_iter().map(|t| t.name).collect()),
 		}
 	}
 }
@@ -75,14 +73,14 @@ impl From<crate::catalog::GraphQLTablesConfig> for TablesConfig {
 			crate::catalog::GraphQLTablesConfig::Include(cs) => Self::Include(
 				cs.into_iter()
 					.map(|t| TableConfig {
-						name: t.into_string(),
+						name: t,
 					})
 					.collect(),
 			),
 			crate::catalog::GraphQLTablesConfig::Exclude(cs) => Self::Exclude(
 				cs.into_iter()
 					.map(|t| TableConfig {
-						name: t.into_string(),
+						name: t,
 					})
 					.collect(),
 			),
@@ -93,7 +91,7 @@ impl From<crate::catalog::GraphQLTablesConfig> for TablesConfig {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct TableConfig {
-	pub name: String,
+	pub name: TableName,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
@@ -102,11 +100,14 @@ pub enum FunctionsConfig {
 	#[default]
 	None,
 	Auto,
-	// These variants are not actually implemented yet
+	// Arbitrary generation is skipped: function names stored here are bare
+	// `name(::name)*` identifiers (no `fn::` prefix), but `Strand`'s `Arbitrary`
+	// impl yields any UTF-8 string, which the `INCLUDE`/`EXCLUDE` syntax
+	// can't round-trip.
 	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
-	Include(Vec<String>),
+	Include(Vec<Strand>),
 	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
-	Exclude(Vec<String>),
+	Exclude(Vec<Strand>),
 }
 
 /// Controls whether GraphQL schema introspection is enabled.
@@ -223,7 +224,7 @@ impl ToSql for TablesConfig {
 
 impl ToSql for TableConfig {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		EscapeKwFreeIdent(&self.name).fmt_sql(f, fmt);
+		EscapeKwFreeIdent(self.name.as_str()).fmt_sql(f, fmt);
 	}
 }
 
@@ -233,25 +234,35 @@ impl ToSql for FunctionsConfig {
 			FunctionsConfig::Auto => f.push_str("AUTO"),
 			FunctionsConfig::None => f.push_str("NONE"),
 			FunctionsConfig::Include(cs) => {
-				f.push_str("INCLUDE [");
-				for (i, func) in cs.iter().enumerate() {
-					if i > 0 {
-						f.push_str(", ");
-					}
-					func.fmt_sql(f, fmt);
-				}
-				f.push(']');
+				f.push_str("INCLUDE ");
+				fmt_function_name_list(f, fmt, cs);
 			}
 			FunctionsConfig::Exclude(cs) => {
-				f.push_str("EXCLUDE [");
-				for (i, func) in cs.iter().enumerate() {
-					if i > 0 {
-						f.push_str(", ");
-					}
-					func.fmt_sql(f, fmt);
-				}
-				f.push(']');
+				f.push_str("EXCLUDE ");
+				fmt_function_name_list(f, fmt, cs);
 			}
+		}
+	}
+}
+
+/// Render a list of custom function names as a comma-separated sequence of
+/// `fn::<name>` references — the same form the parser accepts, so the output
+/// round-trips through `DEFINE CONFIG GRAPHQL FUNCTIONS INCLUDE/EXCLUDE`. Each
+/// `::`-separated segment is escaped independently to keep the syntax legal
+/// even when a segment is a SurrealQL keyword.
+fn fmt_function_name_list(f: &mut String, fmt: SqlFormat, names: &[Strand]) {
+	for (i, name) in names.iter().enumerate() {
+		if i > 0 {
+			f.push_str(", ");
+		}
+		f.push_str("fn::");
+		let mut first = true;
+		for segment in name.as_str().split("::") {
+			if !first {
+				f.push_str("::");
+			}
+			first = false;
+			EscapeKwFreeIdent(segment).fmt_sql(f, fmt);
 		}
 	}
 }

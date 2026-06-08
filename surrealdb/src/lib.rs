@@ -69,6 +69,7 @@ use method::BoxFuture;
 use semver::{Version, VersionReq};
 #[doc(inline)]
 pub use surrealdb_types::Error;
+use surrealdb_types::NotAllowedError;
 use tokio::sync::watch;
 use uuid::Uuid;
 
@@ -142,15 +143,7 @@ where
 			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
 			let client = Client::connect(endpoint, self.capacity, None).await?;
 			if endpoint_kind.is_remote() {
-				match client.version().await {
-					Ok(mut version) => {
-						// we would like to be able to connect to pre-releases too
-						version.pre = Default::default();
-						client.check_server_version(&version).await?;
-					}
-					// TODO(raphaeldarley) don't error if Method Not allowed
-					Err(e) => return Err(e),
-				}
+				client.verify_server_version().await?;
 			}
 			// Both ends of the channel are still alive at this point
 			client.inner.waiter.0.send(Some(WaitFor::Connection)).ok();
@@ -180,15 +173,7 @@ where
 			let session_clone = self.surreal.inner.session_clone.clone();
 			let client = Client::connect(endpoint, self.capacity, Some(session_clone)).await?;
 			if endpoint_kind.is_remote() {
-				match client.version().await {
-					Ok(mut version) => {
-						// we would like to be able to connect to pre-releases too
-						version.pre = Default::default();
-						client.check_server_version(&version).await?;
-					}
-					// TODO(raphaeldarley) don't error if Method Not allowed
-					Err(e) => return Err(e),
-				}
+				client.verify_server_version().await?;
 			}
 			let router = client.inner.router.wait().clone();
 			self.surreal.inner.router.set(router).map_err(|_| {
@@ -325,6 +310,27 @@ where
 
 		Ok(())
 	}
+
+	// If the server denies the `version` RPC method via its capabilities, skip
+	// the version check rather than failing to connect — the operator has
+	// explicitly opted out of exposing the version, and the rest of the
+	// connection is still usable.
+	async fn verify_server_version(&self) -> Result<()> {
+		match self.version().await {
+			Ok(mut version) => {
+				// we would like to be able to connect to pre-releases too
+				version.pre = Default::default();
+				self.check_server_version(&version).await
+			}
+			Err(e) if matches!(e.not_allowed_details(), Some(NotAllowedError::Method { .. })) => {
+				debug!(
+					"Skipping server version check; the `version` RPC method is denied by server capabilities"
+				);
+				Ok(())
+			}
+			Err(e) => Err(e),
+		}
+	}
 }
 
 impl<C> Clone for Surreal<C>
@@ -335,7 +341,7 @@ where
 		let session_id = Uuid::new_v4();
 		self.inner.clone_session(self.session_id, session_id);
 		Self {
-			inner: self.inner.clone(),
+			inner: Arc::clone(&self.inner),
 			session_id,
 			engine: self.engine,
 		}

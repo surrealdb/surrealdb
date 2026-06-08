@@ -30,6 +30,9 @@ default = [
 ]
 http = ["surrealdb-core/http"]
 jwks = ["surrealdb-core/jwks"]
+# Build against AWS-LC FIPS 3.0.x (NIST CMVP cert #4816).
+# Restricts TLS to FIPS-approved cipher suites at runtime.
+fips = ["rustls/fips"]
 ml = ["surrealdb/ml"]
 performance-profiler = ["dep:pprof"]
 scripting = ["surrealdb-core/scripting"]
@@ -52,6 +55,8 @@ graphql = [
     "dep:async-graphql",
     "dep:async-graphql-axum",
 ]
+# MCP (Model Context Protocol) server support
+mcp = ["dep:surrealdb-mcp", "surrealdb-mcp/server-http", "surrealdb-mcp/transport-io"]
 # Interactive CLI support (SQL shell)
 cli = ["dep:rustyline"]
 
@@ -68,8 +73,8 @@ surrealdb-types.workspace = true
 # Crates only used by the root surrealdb crate
 anyhow.workspace = true
 async-trait.workspace = true
-axum = { version = "0.8.8", features = ["tracing", "ws"] }
-axum-extra = { version = "0.12.5", features = [
+axum = { version = "0.8.9", features = ["tracing", "ws"] }
+axum-extra = { version = "0.12.6", features = [
     "query",
     "typed-routing",
     "typed-header",
@@ -87,8 +92,10 @@ glob = "0.3.3"
 http-body = "1.0.1"
 hyper.workspace = true
 opentelemetry = { version = "0.31.0" }
-opentelemetry-otlp = { version = "0.31.0", features = ["metrics", "grpc-tonic"] }
-opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "spec_unstable_metrics_views", "experimental_metrics_custom_reader"] }
+opentelemetry-http = { version = "0.31.0" }
+opentelemetry-otlp = { version = "0.31.1", features = ["metrics", "grpc-tonic", "tls", "tls-roots", "logs"] }
+opentelemetry-prometheus-text-exporter.workspace = true
+opentelemetry_sdk = { version = "0.31.0", features = ["rt-tokio", "spec_unstable_metrics_views", "experimental_metrics_custom_reader", "experimental_metrics_periodicreader_with_async_runtime", "logs"] }
 rustyline = { version = "17.0.2", features = ["derive"], optional = true }
 tower = { version = "0.5.3", features = ["limit", "load-shed"] }
 tower-http = { version = "0.6.8", features = [
@@ -104,10 +111,11 @@ tower-http = { version = "0.6.8", features = [
     "add-extension",
     "compression-full",
 ] }
+tonic = { version = "0.14.5", features = ["tls-native-roots"] }
 tower-service = "0.3.3"
-tracing-appender = "0.2.4"
+tracing-appender = "0.2.5"
 tracing-opentelemetry = "0.32.1"
-tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 dirs = "6.0.0"
 
 # Other crates
@@ -144,6 +152,7 @@ pprof = { workspace = true, features = [
     "flamegraph",
     "prost-codec",
 ], optional = true }
+surrealdb-mcp = { workspace = true, optional = true }
 surrealism-runtime = { workspace = true, optional = true }
 wasm-encoder = { workspace = true, optional = true }
 wasm-opt = { workspace = true, optional = true }
@@ -166,8 +175,7 @@ opentelemetry-proto = { version = "0.31.0", features = [
     "metrics",
     "logs",
 ] }
-rcgen = "0.14.6"
-tonic = "0.14.2"
+rcgen = "0.14.7"
 
 # Other crates
 chrono.workspace = true

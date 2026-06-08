@@ -1,9 +1,8 @@
 use anyhow::{Result, bail, ensure};
 use chrono::{TimeZone, Utc};
 use rand::Rng;
-use rand::distributions::{Alphanumeric, DistString};
-use rand::prelude::IteratorRandom;
-use rand::seq::SliceRandom;
+use rand::distr::{Alphanumeric, SampleString};
+use rand::seq::{IndexedRandom, IteratorRandom};
 use ulid::Ulid;
 
 use super::args::{Any, Args, Arity, FromArg, Optional};
@@ -23,10 +22,10 @@ pub fn r#enum(Any(mut args): Any) -> Result<Value> {
 	Ok(match args.len() {
 		0 => Value::None,
 		1 => match args.remove(0) {
-			Value::Array(v) => v.into_iter().choose(&mut rand::thread_rng()).unwrap_or(Value::None),
+			Value::Array(v) => v.into_iter().choose(&mut rand::rng()).unwrap_or(Value::None),
 			v => v,
 		},
-		_ => args.into_iter().choose(&mut rand::thread_rng()).expect("non-empty args"),
+		_ => args.into_iter().choose(&mut rand::rng()).expect("non-empty args"),
 	})
 }
 
@@ -64,22 +63,30 @@ impl<T: FromArg> FromArg for NoneOrRange<T> {
 // TODO (Delskayn): Don't agree with the inclusive ranges in the functions here,
 // seems inconsistent with general use of ranges not including the upperbound.
 // These should probably all be exclusive.
-//
-// TODO (Delskayn): Switching of min and max if min > max is also inconsistent
-// with rest of functions and the range type. The functions should either return
-// NONE or an error if the lowerbound of the ranges here are larger then the
-// upperbound.
 pub fn float((NoneOrRange(range),): (NoneOrRange<f64>,)) -> Result<Value> {
 	let v = if let Some((min, max)) = range {
-		if max < min {
-			rand::thread_rng().gen_range(max..=min)
-		} else {
-			rand::thread_rng().gen_range(min..=max)
-		}
+		ensure!(
+			min <= max,
+			Error::InvalidFunctionArguments {
+				name: String::from("rand::float"),
+				message: "Lowerbound of the range must be less than or equal to the upperbound."
+					.to_string(),
+			}
+		);
+		rand::rng().random_range(min..=max)
 	} else {
 		rand::random::<f64>()
 	};
 	Ok(Value::from(v))
+}
+
+// Without this check, a negative length wraps to a huge `usize` and either
+// panics `random_range` ("cannot sample empty range") or OOMs the allocator
+// when used as a string length.
+fn to_random_len(name: &str, val: i64) -> Result<usize> {
+	usize::try_from(val).map_err(|_| {
+		anyhow::Error::new(Error::ArithmeticNegativeOverflow(format!("{name}({val})")))
+	})
 }
 
 pub fn id((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) -> Result<Value> {
@@ -106,8 +113,9 @@ pub fn id((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) -> R
 				),
 			}
 		);
-
-		rand::thread_rng().gen_range((lower as usize)..=(upper as usize))
+		let lower = to_random_len("rand::id", lower)?;
+		let upper = to_random_len("rand::id", upper)?;
+		rand::rng().random_range(lower..=upper)
 	} else {
 		ensure!(
 			lower <= LIMIT,
@@ -118,22 +126,26 @@ pub fn id((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) -> R
 				),
 			}
 		);
-		lower as usize
+		to_random_len("rand::id", lower)?
 	};
 
 	// Generate the random id
-	let mut rng = rand::thread_rng();
-	let id: String = (0..len).map(|_| *ID_CHARS.choose(&mut rng).unwrap_or(&'0')).collect();
+	let mut rng = rand::rng();
+	let id: String = (0..len).map(|_| *ID_CHARS[..].choose(&mut rng).unwrap_or(&'0')).collect();
 	Ok(Value::from(id))
 }
 
 pub fn int((NoneOrRange(range),): (NoneOrRange<i64>,)) -> Result<Value> {
 	Ok(if let Some((min, max)) = range {
-		if max < min {
-			rand::thread_rng().gen_range(max..=min)
-		} else {
-			rand::thread_rng().gen_range(min..=max)
-		}
+		ensure!(
+			min <= max,
+			Error::InvalidFunctionArguments {
+				name: String::from("rand::int"),
+				message: "Lowerbound of the range must be less than or equal to the upperbound."
+					.to_string(),
+			}
+		);
+		rand::rng().random_range(min..=max)
 	} else {
 		rand::random::<i64>()
 	}
@@ -143,7 +155,7 @@ pub fn int((NoneOrRange(range),): (NoneOrRange<i64>,)) -> Result<Value> {
 pub fn string((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) -> Result<Value> {
 	// Set a reasonable maximum length
 	const LIMIT: i64 = 65536;
-	// rand::id(NULL,10) is not allowed by the calling infrastructure.
+	// rand::string(NULL,10) is not allowed by the calling infrastructure.
 	let lower = arg1.unwrap_or(32);
 	let len = if let Some(upper) = arg2 {
 		ensure!(
@@ -163,8 +175,9 @@ pub fn string((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) 
 				),
 			}
 		);
-
-		rand::thread_rng().gen_range((lower as usize)..=(upper as usize))
+		let lower = to_random_len("rand::string", lower)?;
+		let upper = to_random_len("rand::string", upper)?;
+		rand::rng().random_range(lower..=upper)
 	} else {
 		ensure!(
 			lower <= LIMIT,
@@ -175,21 +188,23 @@ pub fn string((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) 
 				),
 			}
 		);
-		lower as usize
+		to_random_len("rand::string", lower)?
 	};
 	// Generate the random string
-	Ok(Alphanumeric.sample_string(&mut rand::thread_rng(), len).into())
+	Ok(Alphanumeric.sample_string(&mut rand::rng(), len).into())
 }
 
 pub fn duration((dur1, dur2): (Duration, Duration)) -> Result<Value> {
-	// Sort from low to high
-	let (from, to) = if dur2 > dur1 {
-		(dur1, dur2)
-	} else {
-		(dur2, dur1)
-	};
+	ensure!(
+		dur1 <= dur2,
+		Error::InvalidFunctionArguments {
+			name: String::from("rand::duration"),
+			message: "Lowerbound of the range must be less than or equal to the upperbound."
+				.to_string(),
+		}
+	);
 
-	let rand = rand::thread_rng().gen_range(from.as_nanos()..=to.as_nanos());
+	let rand = rand::rng().random_range(dur1.as_nanos()..=dur2.as_nanos());
 
 	let nanos = (rand % 1_000_000_000) as u32;
 
@@ -226,31 +241,31 @@ pub fn time((NoneOrRange(range),): (NoneOrRange<Value>,)) -> Result<Value> {
 
 	// Check the function input arguments
 	let (min, max) = if let Some((min, max)) = range {
-		match min {
-			min if (MINIMUM..=LIMIT).contains(&min) => match max {
-				max if min <= max && max <= LIMIT => (min, max),
-				max if max >= MINIMUM && max <= min => (max, min),
-				_ => bail!(Error::InvalidFunctionArguments {
-					name: String::from("rand::time"),
-					message: format!(
-						"To generate a random time, the 2 arguments must be numbers between {MINIMUM} and {LIMIT} seconds from the UNIX epoch or a 'datetime' within the range d'-262143-01-01T00:00:00Z' and +262142-12-31T23:59:59Z'."
-					),
-				}),
-			},
-			_ => bail!(Error::InvalidFunctionArguments {
+		ensure!(
+			(MINIMUM..=LIMIT).contains(&min) && (MINIMUM..=LIMIT).contains(&max),
+			Error::InvalidFunctionArguments {
 				name: String::from("rand::time"),
 				message: format!(
 					"To generate a random time, the 2 arguments must be numbers between {MINIMUM} and {LIMIT} seconds from the UNIX epoch or a 'datetime' within the range d'-262143-01-01T00:00:00Z' and +262142-12-31T23:59:59Z'."
 				),
-			}),
-		}
+			}
+		);
+		ensure!(
+			min <= max,
+			Error::InvalidFunctionArguments {
+				name: String::from("rand::time"),
+				message: "Lowerbound of the range must be less than or equal to the upperbound."
+					.to_string(),
+			}
+		);
+		(min, max)
 	} else {
 		// Datetime between d'0000-01-01T00:00:00Z' and d'9999-12-31T23:59:59Z'
 		(-62167219200, 253402300799)
 	};
 	// Generate the random time, try up to 5 times
 	for _ in 0..5 {
-		let val = rand::thread_rng().gen_range(min..=max);
+		let val = rand::rng().random_range(min..=max);
 		if let Some(v) = Utc.timestamp_opt(val, 0).earliest() {
 			return Ok(v.into());
 		}

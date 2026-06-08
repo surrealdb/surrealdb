@@ -458,6 +458,8 @@ pub(crate) static PATHS: phf::Map<
 		//
 		UniCase::ascii("value::diff") => (PathKind::Function, None),
 		UniCase::ascii("value::patch") => (PathKind::Function, None),
+		UniCase::ascii("value::chain") => (PathKind::Function, None),
+		UniCase::ascii("value::expect") => (PathKind::Function, None),
 		//
 		UniCase::ascii("vector::add") => (PathKind::Function, None),
 		UniCase::ascii("vector::angle") => (PathKind::Function, None),

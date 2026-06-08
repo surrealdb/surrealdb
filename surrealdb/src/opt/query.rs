@@ -92,7 +92,7 @@ impl QueryResult<Value> for (usize, &str) {}
 impl query_result::Sealed<Value> for (usize, &str) {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
 		let (index, key) = self;
-		let Some(value) = response.try_get_value_mut(&index)? else {
+		let Some(value) = response.try_get_value_mut(index)? else {
 			return Ok(Value::None);
 		};
 
@@ -116,7 +116,7 @@ where
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Option<T>> {
 		let (index, key) = self;
-		let Some(value) = response.try_get_value_mut(&index)? else {
+		let Some(value) = response.try_get_value_mut(index)? else {
 			return Ok(None);
 		};
 		let value = match value {
@@ -192,7 +192,7 @@ where
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Vec<T>> {
 		let (index, key) = self;
-		match response.try_get_value_mut(&index)? {
+		match response.try_get_value_mut(index)? {
 			Some(val) => match val {
 				Value::Array(vec) => {
 					let mut responses = Vec::with_capacity(vec.len());
@@ -261,7 +261,7 @@ where
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<LinkedList<T>> {
 		let (index, key) = self;
-		match response.try_get_value_mut(&index)? {
+		match response.try_get_value_mut(index)? {
 			Some(val) => match val {
 				Value::Array(vec) => {
 					let mut responses = Vec::with_capacity(vec.len());
@@ -330,7 +330,7 @@ where
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<HashSet<T>> {
 		let (index, key) = self;
-		match response.try_get_value_mut(&index)? {
+		match response.try_get_value_mut(index)? {
 			Some(val) => match val {
 				Value::Array(vec) => {
 					let mut responses = Vec::with_capacity(vec.len());

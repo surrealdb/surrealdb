@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::catalog::providers::TableProvider;
 use crate::exec::permission::{
-	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
+	PhysicalPermission, check_permission_for_value, convert_permission_to_physical_runtime,
 	resolve_select_permission, should_check_perms,
 };
 use crate::exec::{
@@ -41,9 +40,6 @@ impl Fetch {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Fetch {
 	fn name(&self) -> &'static str {
 		"Fetch"
@@ -92,6 +88,7 @@ impl ExecOperator for Fetch {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.root().ctx.config.operator_buffer_size,
 		);
 		let fields = self.fields.clone();
 		let ctx = ctx.clone();
@@ -298,7 +295,7 @@ pub(crate) async fn process_fetched_record(
 			.await
 			.context("Failed to get table definition")?;
 		let catalog_perm = resolve_select_permission(table_def.as_deref());
-		let select_perm = convert_permission_to_physical(catalog_perm, ctx.ctx())
+		let select_perm = convert_permission_to_physical_runtime(catalog_perm, ctx.ctx())
 			.await
 			.context("Failed to convert permission")?;
 
@@ -306,7 +303,7 @@ pub(crate) async fn process_fetched_record(
 			PhysicalPermission::Deny => return Ok(false),
 			PhysicalPermission::Allow => {}
 			PhysicalPermission::Conditional(_) => {
-				let allowed = check_permission_for_value(&select_perm, val, ctx)
+				let allowed = check_permission_for_value(&select_perm, val, None, ctx)
 					.await
 					.context("Permission check failed")?;
 				if !allowed {
@@ -463,6 +460,8 @@ pub(crate) async fn batch_fetch_in_place(
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::Strand;
+
 	use super::*;
 	use crate::exec::physical_expr::Literal;
 
@@ -471,7 +470,7 @@ mod tests {
 		use crate::exec::operators::scan::DynamicScan;
 		use crate::expr::part::Part;
 
-		let fields = vec![Idiom(vec![Part::Field("author".into())])];
+		let fields = vec![Idiom(vec![Part::Field(Strand::new_static("author"))])];
 
 		// Create a minimal scan for testing
 		let scan = Arc::new(DynamicScan::new(

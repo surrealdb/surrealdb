@@ -34,19 +34,23 @@
 //!
 //! # Reserved Names
 //!
-//! The `with_reserved_names` constructor accepts field names that synthetic `_eN`
-//! generation must avoid. This prevents auto-generated names from colliding with
-//! fields the user explicitly selected. Importantly, `reserved_names` does NOT
-//! block alias-based names — those are user-chosen and always accepted. Only
-//! synthetic fallback names are guarded.
+//! The registry can reserve field names that synthetic `_eN` generation must
+//! avoid, and can protect source-field names from all Compute internal names.
+//! Reserved names do not block alias-based names by themselves; protected names
+//! do, because overwriting them before projection would change later field reads.
+//!
+//! # Relation to `pre_decode_filter`
+//!
+//! Pre-decode WHERE rejection using raw KV bytes lives in [`crate::exec::pre_decode_filter`] and
+//! runs *before* any `PhysicalExpr` evaluation. This registry is **post-decode only**: it names
+//! expressions computed on decoded `Value`s for `Sort` / `SelectProject` via `Compute`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use surrealdb_types::ToSql;
 
-use super::planner::expr_to_physical_expr;
-use crate::ctx::FrozenContext;
+use super::planner::Planner;
 use crate::err::Error;
 use crate::exec::PhysicalExpr;
 use crate::expr::part::Part;
@@ -91,7 +95,7 @@ pub struct ExpressionInfo {
 /// This follows the pattern established by aggregate handling, where expressions
 /// are replaced with synthetic field references and evaluated once by a dedicated
 /// operator.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ExpressionRegistry {
 	/// Map from expression SQL representation to its info.
 	/// Using SQL string as key for deduplication (same expression = same SQL).
@@ -99,7 +103,8 @@ pub struct ExpressionRegistry {
 	/// Counter for generating synthetic field names.
 	counter: usize,
 	/// Field names that synthetic `_eN` generation must avoid. This does NOT
-	/// affect alias-based names — those are user-chosen and always accepted.
+	/// affect alias-based names — those are user-chosen and accepted unless the
+	/// name is also present in `used_internal_names` as a protected source field.
 	/// Populated from SELECT field names at plan time.
 	reserved_names: HashSet<String>,
 	/// Internal names already assigned to expressions — enables O(1) conflict checks
@@ -108,9 +113,14 @@ pub struct ExpressionRegistry {
 }
 
 impl ExpressionRegistry {
-	/// Create a new empty registry (no reserved names).
-	#[allow(dead_code)] // used in tests; production code uses `with_reserved_names`
-	pub fn new() -> Self {
+	/// Create a new empty registry (no reserved names, no protected names).
+	///
+	/// Test-only convenience. Production code uses
+	/// [`Self::with_reserved_and_protected_names`] populated from the
+	/// SELECT's field set so that synthetic `_eN` names cannot collide
+	/// with user fields and Compute outputs cannot shadow source fields.
+	#[cfg(test)]
+	pub(crate) fn new() -> Self {
 		Self {
 			expressions: HashMap::new(),
 			counter: 0,
@@ -119,16 +129,34 @@ impl ExpressionRegistry {
 		}
 	}
 
-	/// Create a registry with reserved field names that cannot be used as internal names.
+	/// Create a registry with reserved field names but no protected names.
 	///
-	/// The planner populates this with SELECT field names so that synthetic
-	/// `_eN` names never shadow fields the user explicitly selected.
-	pub fn with_reserved_names(names: Vec<String>) -> Self {
+	/// Test-only convenience for asserting synthetic-name avoidance in
+	/// isolation. Production code always uses
+	/// [`Self::with_reserved_and_protected_names`] so source fields read
+	/// by simple Include/Rename projections are also protected from
+	/// being clobbered by Compute internal names.
+	#[cfg(test)]
+	pub(crate) fn with_reserved_names(names: Vec<String>) -> Self {
+		Self::with_reserved_and_protected_names(names, Vec::new())
+	}
+
+	/// Create a registry with names reserved from synthetic generation and
+	/// source-field names protected from all Compute internal names.
+	///
+	/// Protected names are inserted into `used_internal_names` up front. This
+	/// makes `choose_internal_name` skip them for both aliases and synthetic
+	/// fallbacks, preserving source fields that later projections still need
+	/// to read after Sort/Project Compute operators have run.
+	pub fn with_reserved_and_protected_names(
+		reserved_names: Vec<String>,
+		protected_names: Vec<String>,
+	) -> Self {
 		Self {
 			expressions: HashMap::new(),
 			counter: 0,
-			reserved_names: names.into_iter().collect(),
-			used_internal_names: HashSet::new(),
+			reserved_names: reserved_names.into_iter().collect(),
+			used_internal_names: protected_names.into_iter().collect(),
 		}
 	}
 
@@ -140,12 +168,19 @@ impl ExpressionRegistry {
 	///
 	/// When an expression is re-registered at an earlier compute point, the
 	/// existing entry is promoted so the expression is evaluated sooner.
+	///
+	/// Compilation goes through the supplied [`Planner`] so that the
+	/// transaction (and ns/db context) attached to it propagate into nested
+	/// expressions — most importantly into scalar subqueries used in
+	/// ORDER BY / projection. Without this, those subqueries would compile
+	/// via a fresh `Planner::new` (no transaction), losing plan-time index
+	/// resolution and sort elimination.
 	pub async fn register(
 		&mut self,
 		expr: &Expr,
 		compute_point: ComputePoint,
 		alias: Option<String>,
-		ctx: &FrozenContext,
+		planner: &Planner<'_>,
 	) -> Result<String, Error> {
 		// Generate SQL representation for deduplication.
 		// When an alias is present, include it in the key so that
@@ -167,8 +202,9 @@ impl ExpressionRegistry {
 			return Ok(self.expressions[&dedup_key].internal_name.clone());
 		}
 
-		// Convert to physical expression
-		let physical_expr = expr_to_physical_expr(expr.clone(), ctx).await?;
+		// Convert to physical expression via the live planner so the
+		// transaction and ns/db propagate into nested subqueries.
+		let physical_expr = planner.physical_expr(expr.clone()).await?;
 
 		// Determine internal name
 		let internal_name = self.choose_internal_name(&alias);
@@ -188,6 +224,7 @@ impl ExpressionRegistry {
 	///
 	/// If the same expression key is already registered at a later compute point,
 	/// promotes it to the earlier point (matching `register` behaviour).
+	#[allow(clippy::needless_pass_by_value)] // `expr_key` is moved into `dedup_key` in the no-alias path; borrowing forces an extra allocation in the planner hot path.
 	pub fn register_physical(
 		&mut self,
 		expr_key: String,
@@ -228,9 +265,11 @@ impl ExpressionRegistry {
 	/// Choose an internal name, preferring the alias if available and not conflicting.
 	///
 	/// Aliases are user-chosen names (e.g. `AS doubled`) and are only rejected
-	/// if another expression already claimed the same name. `reserved_names`
-	/// is intentionally NOT checked for aliases because the user explicitly
-	/// chose them.
+	/// if `used_internal_names` already contains the name, either because
+	/// another expression claimed it or because the planner protected a source
+	/// field that later projections still need to read. `reserved_names` is
+	/// intentionally NOT checked for aliases because those only guard
+	/// synthetic fallback names.
 	///
 	/// Synthetic `_eN` names, on the other hand, are system-generated and must
 	/// avoid both `reserved_names` (to protect document fields) and
@@ -307,7 +346,7 @@ pub fn resolve_order_by_alias(order_idiom: &Idiom, fields: &Fields) -> Option<(E
 				&& let Some(Part::Field(order_name)) = order_idiom.first()
 				&& alias_name == order_name
 			{
-				return Some((selector.expr.clone(), alias_name.clone()));
+				return Some((selector.expr.clone(), alias_name.as_str().to_owned()));
 			}
 			// Unaliased single-part field match
 			if order_idiom.len() == 1
@@ -317,7 +356,7 @@ pub fn resolve_order_by_alias(order_idiom: &Idiom, fields: &Fields) -> Option<(E
 				&& let Some(Part::Field(expr_name)) = expr_idiom.first()
 				&& name == expr_name
 			{
-				return Some((selector.expr.clone(), name.clone()));
+				return Some((selector.expr.clone(), name.as_str().to_owned()));
 			}
 			None
 		}
@@ -339,7 +378,7 @@ pub fn resolve_order_by_alias(order_idiom: &Idiom, fields: &Fields) -> Option<(E
 						&& let Some(Part::Field(name)) = expr_idiom.first()
 						&& name.as_str() == order_name.as_str()
 					{
-						return Some((selector.expr.clone(), order_name.clone()));
+						return Some((selector.expr.clone(), order_name.as_str().to_owned()));
 					}
 				}
 			}
@@ -353,7 +392,7 @@ pub(crate) fn idiom_to_flat_name(idiom: &Idiom) -> String {
 	if idiom.len() == 1
 		&& let Some(Part::Field(name)) = idiom.first()
 	{
-		return name.clone();
+		return name.as_str().to_owned();
 	}
 	idiom.to_sql()
 }

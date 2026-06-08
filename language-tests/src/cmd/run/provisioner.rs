@@ -11,7 +11,8 @@ use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::cli::Backend;
-use crate::tests::schema::{BoolOr, Capabilities as TestCapabilities, SchemaTarget, TestEnv};
+use crate::cmd::util;
+use crate::tests::schema::{BoolOr, TestEnv};
 use crate::util::{get_timestamp, xorshift};
 
 struct CreateInfo {
@@ -56,7 +57,20 @@ impl CreateInfo {
 
 		let allows_live = cap.allows_live_query_notifications();
 
-		let builder = Datastore::builder().with_capabilities(cap).with_auth(true);
+		// Enable a temporary directory so TEMPFILES queries route to the
+		// ExternalSort operator. For backends that already provision a
+		// per-run scratch dir we reuse it (cleaned up in `shutdown`); the
+		// Memory backend has none, so fall back to the system temp dir —
+		// `ext_sort` namespaces each invocation under its own `TempDir`
+		// which cleans up on drop, so no leak there either.
+		let sort_temp_dir = match self.dir.as_deref() {
+			Some(d) => std::path::PathBuf::from(d),
+			None => std::env::temp_dir(),
+		};
+		let builder = Datastore::builder()
+			.with_capabilities(cap)
+			.with_auth(true)
+			.with_temporary_directory(Some(sort_temp_dir));
 
 		let builder = if allows_live {
 			let (send, _) = channel::bounded(15_000);
@@ -76,8 +90,10 @@ impl CreateInfo {
 			Backend::RocksDb => {
 				let p = self.produce_path();
 				let ds = if versioned {
-					builder.build_with_path(&format!("rocksdb://{p}?versioned=true&retention=1h")).await?
-				}else{
+					builder
+						.build_with_path(&format!("rocksdb://{p}?versioned=true&retention=1h"))
+						.await?
+				} else {
 					builder.build_with_path(&format!("rocksdb://{p}")).await?
 				};
 				path = Some(p);
@@ -86,7 +102,9 @@ impl CreateInfo {
 			Backend::SurrealKv => {
 				let p = self.produce_path();
 				let ds = if versioned {
-					builder.build_with_path(&format!("surrealkv://{p}?versioned=true&retention=1h")).await?
+					builder
+						.build_with_path(&format!("surrealkv://{p}?versioned=true&retention=1h"))
+						.await?
 				} else {
 					builder.build_with_path(&format!("surrealkv://{p}")).await?
 				};
@@ -304,7 +322,7 @@ impl Provisioner {
 			let capabilities = match &env.capabilities {
 				BoolOr::Bool(true) => Capabilities::all().with_experimental(Targets::All),
 				BoolOr::Bool(false) => Capabilities::none(),
-				BoolOr::Value(x) => core_capabilities_from_test_config(x),
+				BoolOr::Value(x) => util::core_capabilities_from_test_config(x),
 			};
 			Permit {
 				info: self.create_info.clone(),
@@ -351,39 +369,4 @@ impl Provisioner {
 
 fn is_base_environment(env: &TestEnv) -> bool {
 	!env.clean && !env.versioned && matches!(env.capabilities, BoolOr::Bool(true))
-}
-
-/// Creates the right core capabilities from a test config.
-pub fn core_capabilities_from_test_config(cap: &TestCapabilities) -> Capabilities {
-	/// Returns Targets::All if there is no value and none_on_missing is false,
-	/// Returns Targets::None if there is no value and none_on_missing is true ensuring the default
-	/// behaviour is to allow everything.
-	///
-	/// If there is a value it will return Targets::All on the value true, Targets::None on the
-	/// value false, and otherwise the returns the specified values.
-	fn extract_targets<T>(v: &BoolOr<Vec<SchemaTarget<T>>>) -> Targets<T>
-	where
-		T: Eq + std::hash::Hash + Ord + Clone,
-	{
-		match v {
-			BoolOr::Bool(true) => Targets::All,
-			BoolOr::Bool(false) => Targets::None,
-			BoolOr::Value(x) => Targets::Some(x.iter().map(|x| x.0.clone()).collect()),
-		}
-	}
-
-	Capabilities::none()
-		.with_scripting(cap.scripting)
-		.with_guest_access(cap.quest_access)
-		.with_live_query_notifications(cap.live_query_notifications)
-		.with_functions(extract_targets(&cap.allow_functions))
-		.without_functions(extract_targets(&cap.deny_functions))
-		.with_network_targets(extract_targets(&cap.allow_net))
-		.without_network_targets(extract_targets(&cap.deny_net))
-		.with_rpc_methods(extract_targets(&cap.allow_rpc))
-		.without_rpc_methods(extract_targets(&cap.deny_rpc))
-		.with_http_routes(extract_targets(&cap.allow_http))
-		.without_http_routes(extract_targets(&cap.deny_http))
-		.with_experimental(extract_targets(&cap.allow_experimental))
-		.without_experimental(extract_targets(&cap.deny_experimental))
 }

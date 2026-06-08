@@ -142,6 +142,9 @@ macro_rules! T {
 	(ALTER) => {
 		$crate::BaseTokenKind::KwAlter
 	};
+	(ALPHA) => {
+		$crate::BaseTokenKind::KwAlpha
+	};
 	(ALWAYS) => {
 		$crate::BaseTokenKind::KwAlways
 	};
@@ -265,6 +268,9 @@ macro_rules! T {
 	(DATABASE) => {
 		$crate::BaseTokenKind::KwDatabase
 	};
+	(DEGREE) => {
+		$crate::BaseTokenKind::KwDegree
+	};
 	(DEFAULT) => {
 		$crate::BaseTokenKind::KwDefault
 	};
@@ -285,6 +291,9 @@ macro_rules! T {
 	};
 	(DIMENSION) => {
 		$crate::BaseTokenKind::KwDimension
+	};
+	(DISKANN) => {
+		$crate::BaseTokenKind::KwDiskann
 	};
 	(DISTANCE) => {
 		$crate::BaseTokenKind::KwDistance
@@ -450,6 +459,9 @@ macro_rules! T {
 	};
 	(KILL) => {
 		$crate::BaseTokenKind::KwKill
+	};
+	(L_BUILD) => {
+		$crate::BaseTokenKind::KwLBuild
 	};
 	(LET) => {
 		$crate::BaseTokenKind::KwLet
@@ -1035,6 +1047,9 @@ macro_rules! T {
 	(COSINE) => {
 		$crate::BaseTokenKind::KwCosine
 	};
+	(COSINE_NORMALIZED) => {
+		$crate::BaseTokenKind::KwCosineNormalized
+	};
 	(EUCLIDEAN) => {
 		$crate::BaseTokenKind::KwEuclidean
 	};
@@ -1043,6 +1058,9 @@ macro_rules! T {
 	};
 	(HAMMING) => {
 		$crate::BaseTokenKind::KwHamming
+	};
+	(INNER_PRODUCT) => {
+		$crate::BaseTokenKind::KwInnerProduct
 	};
 	(MANHATTAN) => {
 		$crate::BaseTokenKind::KwManhattan
@@ -1058,6 +1076,9 @@ macro_rules! T {
 	(F64) => {
 		$crate::BaseTokenKind::KwF64
 	};
+	(F16) => {
+		$crate::BaseTokenKind::KwF16
+	};
 	(F32) => {
 		$crate::BaseTokenKind::KwF32
 	};
@@ -1069,6 +1090,12 @@ macro_rules! T {
 	};
 	(I16) => {
 		$crate::BaseTokenKind::KwI16
+	};
+	(I8) => {
+		$crate::BaseTokenKind::KwI8
+	};
+	(U8) => {
+		$crate::BaseTokenKind::KwU8
 	};
 
 	// HTTP methods

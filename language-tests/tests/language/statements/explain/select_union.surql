@@ -10,7 +10,7 @@ value = "'OK'"
 
 [[test.results]]
 value = ''''SelectProject [ctx: Db] [projections: *]
-    Union [ctx: Db]
+    Union [ctx: Db] [inputs: 2]
         TableScan [ctx: Db] [table: cat, direction: Forward]
         TableScan [ctx: Db] [table: dog, direction: Forward]
 ''''

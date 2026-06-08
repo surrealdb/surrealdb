@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 #![allow(clippy::unwrap_used)]
 
 mod helpers;
@@ -43,12 +44,12 @@ async fn concurrent_sequence_next_val() -> Result<()> {
 	let count = 1000;
 
 	// Run 3 tasks collecting the next value of the sequence
-	let task11 = tokio::spawn(concurrent_task_asc(ds.clone(), "sq1", count));
-	let task12 = tokio::spawn(concurrent_task_asc(ds.clone(), "sq1", count));
-	let task13 = tokio::spawn(concurrent_task_asc(ds.clone(), "sq1", count));
-	let task21 = tokio::spawn(concurrent_task_asc(ds.clone(), "sq2", count));
-	let task22 = tokio::spawn(concurrent_task_asc(ds.clone(), "sq2", count));
-	let task31 = tokio::spawn(concurrent_task_asc(ds.clone(), "sq3", count));
+	let task11 = tokio::spawn(concurrent_task_asc(Arc::clone(&ds), "sq1", count));
+	let task12 = tokio::spawn(concurrent_task_asc(Arc::clone(&ds), "sq1", count));
+	let task13 = tokio::spawn(concurrent_task_asc(Arc::clone(&ds), "sq1", count));
+	let task21 = tokio::spawn(concurrent_task_asc(Arc::clone(&ds), "sq2", count));
+	let task22 = tokio::spawn(concurrent_task_asc(Arc::clone(&ds), "sq2", count));
+	let task31 = tokio::spawn(concurrent_task_asc(Arc::clone(&ds), "sq3", count));
 	let (set11, set12, set13, set21, set22, set31) =
 		tokio::try_join!(task11, task12, task13, task21, task22, task31).expect("Tasks failed");
 

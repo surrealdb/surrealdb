@@ -49,7 +49,7 @@ impl DefineDatabaseStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Database, Base::Ns)?;
 
 		// Get the NS
 		let ns = opt.ns()?;
@@ -92,12 +92,12 @@ impl DefineDatabaseStatement {
 		let db_def = DatabaseDefinition {
 			namespace_id: nsv.namespace_id,
 			database_id,
-			name: name.clone(),
+			name: name.clone().into(),
 			comment,
 			changefeed: self.changefeed,
 			strict: self.strict,
 		};
-		txn.put_db(&nsv.name, db_def).await?;
+		txn.put_db(nsv.name.as_str(), db_def).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
@@ -113,8 +113,8 @@ impl DefineDatabaseStatement {
 impl InfoStructure for DefineDatabaseStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"comment".to_string() => self.comment.structure(),
+			"name" => self.name.structure(),
+			"comment" => self.comment.structure(),
 		})
 	}
 }

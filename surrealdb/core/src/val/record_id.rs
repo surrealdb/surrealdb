@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::ops::Bound;
 
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use storekey::{BorrowDecode, Encode};
@@ -15,7 +15,7 @@ use crate::doc::CursorDoc;
 use crate::expr::{self, Expr, Field, Fields, Literal, SelectStatement};
 use crate::fmt::EscapeRidKey;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::val::{Array, IndexFormat, Number, Object, Range, TableName, Uuid, Value};
+use crate::val::{Array, IndexFormat, Number, Object, Range, Strand, TableName, Uuid, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Encode, BorrowDecode)]
@@ -184,7 +184,7 @@ impl PartialEq<Range> for RecordIdKeyRange {
 #[storekey(format = "IndexFormat")]
 pub(crate) enum RecordIdKey {
 	Number(i64),
-	String(String),
+	String(Strand),
 	Uuid(Uuid),
 	Array(Array),
 	Object(Object),
@@ -196,13 +196,13 @@ impl_kv_value_revisioned!(RecordIdKey);
 impl RecordIdKey {
 	/// Generate a new random ID
 	pub fn rand() -> Self {
-		let mut rng = rand::thread_rng();
-		let id: String = (0..20).map(|_| *ID_CHARS.choose(&mut rng).unwrap_or(&'0')).collect();
-		Self::String(id)
+		let mut rng = rand::rng();
+		let id: String = (0..20).map(|_| *ID_CHARS[..].choose(&mut rng).unwrap_or(&'0')).collect();
+		Self::String(id.into())
 	}
 	/// Generate a new random ULID
 	pub fn ulid() -> Self {
-		Self::String(Ulid::new().to_string())
+		Self::String(Ulid::new().to_string().into())
 	}
 	/// Generate a new random UUID
 	pub fn uuid() -> Self {
@@ -276,6 +276,12 @@ impl From<i64> for RecordIdKey {
 
 impl From<String> for RecordIdKey {
 	fn from(value: String) -> Self {
+		RecordIdKey::String(value.into())
+	}
+}
+
+impl From<Strand> for RecordIdKey {
+	fn from(value: Strand) -> Self {
 		RecordIdKey::String(value)
 	}
 }
@@ -305,7 +311,7 @@ impl From<crate::types::PublicRecordIdKey> for RecordIdKey {
 	fn from(value: crate::types::PublicRecordIdKey) -> Self {
 		match value {
 			crate::types::PublicRecordIdKey::Number(x) => Self::Number(x),
-			crate::types::PublicRecordIdKey::String(x) => Self::String(x),
+			crate::types::PublicRecordIdKey::String(x) => Self::String(x.into()),
 			crate::types::PublicRecordIdKey::Uuid(x) => Self::Uuid(x.into()),
 			crate::types::PublicRecordIdKey::Array(x) => Self::Array(x.into()),
 			crate::types::PublicRecordIdKey::Object(x) => Self::Object(x.into()),
@@ -320,7 +326,7 @@ impl TryFrom<RecordIdKey> for crate::types::PublicRecordIdKey {
 	fn try_from(value: RecordIdKey) -> Result<Self, Self::Error> {
 		Ok(match value {
 			RecordIdKey::Number(x) => Self::Number(x),
-			RecordIdKey::String(x) => Self::String(x),
+			RecordIdKey::String(x) => Self::String(x.into()),
 			RecordIdKey::Uuid(x) => Self::Uuid(x.into()),
 			RecordIdKey::Array(x) => Self::Array(x.try_into()?),
 			RecordIdKey::Object(x) => Self::Object(x.try_into()?),
@@ -376,7 +382,7 @@ impl ToSql for RecordIdKey {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
 			RecordIdKey::Number(n) => write_sql!(f, sql_fmt, "{n}"),
-			RecordIdKey::String(v) => write_sql!(f, sql_fmt, "{}", EscapeRidKey(v)),
+			RecordIdKey::String(v) => write_sql!(f, sql_fmt, "{}", EscapeRidKey(v.as_str())),
 			RecordIdKey::Uuid(uuid) => write_sql!(f, sql_fmt, "{}", uuid),
 			RecordIdKey::Object(object) => write_sql!(f, sql_fmt, "{}", object),
 			RecordIdKey::Array(array) => write_sql!(f, sql_fmt, "{}", array),

@@ -10,7 +10,7 @@ use url::Url;
 use web_time::SystemTime;
 
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
-use crate::cnf::BUCKET_FOLDER_ALLOWLIST;
+use crate::buc::Config;
 use crate::err::Error;
 
 /// Options for configuring the FileStore
@@ -24,18 +24,23 @@ pub struct FileStoreOptions {
 #[derive(Clone, Debug)]
 pub struct FileStore {
 	options: FileStoreOptions,
+	config: Config,
 }
 
 impl FileStore {
 	/// Create a new FileStore with the given options
-	pub fn new(options: FileStoreOptions) -> Self {
+	pub fn new(options: FileStoreOptions, config: Config) -> Self {
 		FileStore {
 			options,
+			config,
 		}
 	}
 
 	/// Parse a URL into FileStoreOption
-	pub async fn parse_url(url_str: &str) -> Result<Option<FileStoreOptions>, Error> {
+	pub async fn parse_url(
+		url_str: &str,
+		config: &Config,
+	) -> Result<Option<FileStoreOptions>, Error> {
 		let Ok(url) = Url::parse(url_str) else {
 			return Ok(None);
 		};
@@ -44,6 +49,14 @@ impl FileStore {
 			return Ok(None);
 		}
 
+		// Whether to fold object keys to lowercase when mapping them onto the
+		// host filesystem. Defaults to `false` so keys round-trip with their
+		// original case: `file::put(type::file($b, "MixedCase.txt"), …)` lands
+		// at `<root>/MixedCase.txt` on disk, matching the key the handle and
+		// `file::list` / `file::get` report back. Opt in with
+		// `?lowercase_paths=true` (or bare `?lowercase_paths`) when storing on
+		// case-insensitive filesystems where folding before persistence avoids
+		// collisions between keys that only differ by case.
 		let lowercase_paths: bool = url
 			.query_pairs()
 			.find(|(key, _)| key == "lowercase_paths")
@@ -60,7 +73,7 @@ impl FileStore {
 					"Expected to find a bool for query option `lowercase_paths`".to_string(),
 				)
 			})?
-			.unwrap_or(true);
+			.unwrap_or(false);
 
 		// Get the path from the URL.
 		// The root is a host filesystem path and must preserve its original case;
@@ -95,7 +108,7 @@ impl FileStore {
 		}
 
 		// Check if the path is allowed
-		if !is_path_allowed(&path_buf, lowercase_paths) {
+		if !is_path_allowed(&path_buf, lowercase_paths, &config.bucket_list) {
 			return Err(Error::FileAccessDenied(path_from_url.clone()));
 		}
 
@@ -172,8 +185,18 @@ impl FileStore {
 		// Combine the canonical root with the relative path
 		let full_path = canonical_root.join(&relative_path).clean();
 
+		// SECURITY: First ensure the resolved path stays inside *this* bucket's
+		// canonical root. `path_clean::clean` collapses `..` segments, so a key
+		// like `/../other.txt` (direct bucket) or `/../../../other_ns/...`
+		// (global PrefixedStore bucket) would otherwise escape upward and only
+		// the global allowlist check below would gate it — letting one bucket
+		// read or write another bucket's files under the same allowlisted root.
+		if !full_path.starts_with(&canonical_root) {
+			return Err(format!("Path escapes the bucket root: {}", full_path.display()));
+		}
+
 		// Verify the path is within the allowlist
-		if !is_path_allowed(&full_path, self.options.lowercase_paths) {
+		if !is_path_allowed(&full_path, self.options.lowercase_paths, &self.config.bucket_list) {
 			return Err(format!(
 				"Path is not inside the allowed bucket directories: {}",
 				full_path.display()
@@ -195,36 +218,46 @@ impl FileStore {
 }
 
 /// Check if a path is allowed according to the allowlist
-fn is_path_allowed(path_to_check: &std::path::Path, lowercase_paths: bool) -> bool {
-	// If the allowlist is empty, nothing is allowed
-	if BUCKET_FOLDER_ALLOWLIST.is_empty() {
-		return false;
+fn is_path_allowed(
+	path_to_check: &std::path::Path,
+	lowercase_paths: bool,
+	allowed: &[PathBuf],
+) -> bool {
+	if !lowercase_paths {
+		// Case-sensitive comparison goes component-wise, which already handles
+		// non-UTF-8 bytes correctly (each component is compared as an `OsStr`).
+		return allowed.iter().any(|allowed_path| path_to_check.starts_with(allowed_path));
 	}
 
-	// Check if the path is within any of the allowed paths
-	BUCKET_FOLDER_ALLOWLIST.iter().any(|allowed_path| {
-		if lowercase_paths {
-			// Windows canonical paths often have "\\?\" prefix that needs special handling
-			// Convert to lowercase and normalize path separators for consistent comparison
-			let mut path_str = path_to_check.to_string_lossy().to_lowercase().replace("\\", "/");
+	// Reject paths that aren't valid UTF-8: `to_string_lossy` would collapse
+	// every invalid byte onto the same `U+FFFD` replacement character, so two
+	// distinct paths that differ only in their invalid bytes would compare
+	// equal and slip past the prefix check.
+	let Some(raw_path) = path_to_check.to_str() else {
+		return false;
+	};
 
-			// Strip Windows canonical path prefix if present (becomes "//?/" after normalization)
-			const WINDOWS_CANONICAL_PATH_PREFIX: &str = "//?/";
-			if path_str.starts_with(WINDOWS_CANONICAL_PATH_PREFIX) {
-				path_str = path_str
-					.strip_prefix(WINDOWS_CANONICAL_PATH_PREFIX)
-					.unwrap_or(&path_str)
-					.to_string();
-			}
+	// Windows canonical paths often carry a `\\?\` prefix; after lowercasing
+	// and normalising separators it becomes `//?/`. Strip it so callers can
+	// pass either form interchangeably.
+	const WINDOWS_CANONICAL_PATH_PREFIX: &str = "//?/";
+	let normalized = raw_path.to_lowercase().replace('\\', "/");
+	let path_str = normalized.strip_prefix(WINDOWS_CANONICAL_PATH_PREFIX).unwrap_or(&normalized);
 
-			// Normalize allowed path for comparison
-			let allowed_str = allowed_path.to_string_lossy().to_lowercase().replace("\\", "/");
-
-			path_str.starts_with(&allowed_str)
-		} else {
-			// Case-sensitive comparison (original behavior)
-			path_to_check.starts_with(allowed_path)
-		}
+	allowed.iter().any(|allowed_path| {
+		let Some(raw_allowed) = allowed_path.to_str() else {
+			return false;
+		};
+		let allowed_str = raw_allowed.to_lowercase().replace('\\', "/");
+		// Strip a trailing separator so an entry like `/srv/data/` accepts
+		// `/srv/data` itself, not just children.
+		let allowed_str = allowed_str.trim_end_matches('/');
+		// Require the prefix to land on a component boundary: bare
+		// `str::starts_with` would let `/srv/data-evil` match `/srv/data`.
+		let Some(rest) = path_str.strip_prefix(allowed_str) else {
+			return false;
+		};
+		rest.is_empty() || rest.starts_with('/')
 	})
 }
 
@@ -537,7 +570,7 @@ impl ObjectStore for FileStore {
 			}
 
 			// Sort entries by key to ensure consistent ordering
-			all_entries.sort_by(|(key_a, _), (key_b, _)| key_a.to_string().cmp(&key_b.to_string()));
+			all_entries.sort_by_key(|(key, _)| key.to_string());
 
 			// Filter by start key if provided
 			let filtered_entries = if let Some(ref start_key) = opts.start {
@@ -572,5 +605,185 @@ impl ObjectStore for FileStore {
 
 			Ok(objects)
 		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use temp_dir::TempDir;
+
+	use super::*;
+	use crate::buc::Config;
+
+	/// macOS canonicalises `/var/folders/...` to `/private/var/folders/...`,
+	/// so `to_os_path` and the allowlist disagree about the bucket root when
+	/// the URL path is the non-canonical form. Push the canonical path through
+	/// the URL and the allowlist so both checks see the same string.
+	async fn canonical(dir: &OsPath) -> PathBuf {
+		tokio::fs::canonicalize(dir).await.unwrap()
+	}
+
+	fn build_url(dir: &OsPath, query: &str) -> String {
+		let path = dir.to_string_lossy();
+		if query.is_empty() {
+			format!("file://{path}")
+		} else {
+			format!("file://{path}?{query}")
+		}
+	}
+
+	async fn open_store(dir: &OsPath, query: &str) -> (FileStore, PathBuf) {
+		let root = canonical(dir).await;
+		let cfg = Config::for_test(vec![root.clone()]);
+		let opts = FileStore::parse_url(&build_url(&root, query), &cfg)
+			.await
+			.expect("parse_url should succeed for an allowlisted path")
+			.expect("file:// URL should resolve to a FileStore");
+		(FileStore::new(opts, cfg), root)
+	}
+
+	/// Read the raw filenames the filesystem reports inside `dir`. Going through
+	/// `read_dir` rather than `Path::exists` is what lets these tests assert on
+	/// the *actual case-preserved name on disk* even on case-insensitive
+	/// filesystems like macOS APFS, where `MixedCase.txt` and `mixedcase.txt`
+	/// would otherwise both report as existing.
+	fn on_disk_names(dir: &OsPath) -> Vec<String> {
+		let mut names: Vec<String> = std::fs::read_dir(dir)
+			.unwrap()
+			.filter_map(|entry| entry.ok())
+			.filter_map(|entry| entry.file_name().into_string().ok())
+			.collect();
+		names.sort();
+		names
+	}
+
+	/// Regression for surrealdb/surrealdb#7309: by default the filesystem
+	/// bucket backend must persist objects under the key the caller supplied
+	/// — without silently lowercasing — so writes round-trip through `list`,
+	/// `get`, `exists`, and `delete`.
+	#[tokio::test]
+	async fn default_preserves_case_end_to_end() {
+		let dir = TempDir::new().unwrap();
+		let (store, root) = open_store(dir.path(), "").await;
+
+		let key = ObjectKey::new("/CaseProbe_XYZ.tmp".to_string());
+		store.put(&key, Bytes::from_static(b"hello")).await.unwrap();
+
+		// The directory entry on disk preserves the original case, so direct
+		// disk tooling (cp/rsync/ls) and SurrealQL agree on the filename. On
+		// case-insensitive filesystems `Path::exists` would happily report
+		// both casings as present, so we go through `read_dir` to assert on
+		// the actual stored name.
+		assert_eq!(on_disk_names(&root), vec!["CaseProbe_XYZ.tmp"]);
+
+		// Round-trip via the public ObjectStore API using the same casing.
+		assert!(store.exists(&key).await.unwrap());
+		assert_eq!(store.get(&key).await.unwrap().as_deref(), Some(&b"hello"[..]));
+
+		// `list` reports the case that was written, not a folded variant.
+		let listed = store.list(&ListOptions::default()).await.unwrap();
+		let keys: Vec<_> = listed.into_iter().map(|m| m.key.to_string()).collect();
+		assert_eq!(keys, vec!["/CaseProbe_XYZ.tmp"]);
+
+		// And the same casing successfully removes the file.
+		store.delete(&key).await.unwrap();
+		assert!(!store.exists(&key).await.unwrap());
+		assert!(on_disk_names(&root).is_empty());
+	}
+
+	/// `?lowercase_paths=true` remains available for callers that need the
+	/// old folding behaviour (e.g. case-insensitive filesystems where two
+	/// keys differing only by case should converge on one object).
+	#[tokio::test]
+	async fn opt_in_lowercase_paths_still_folds() {
+		let dir = TempDir::new().unwrap();
+		let (store, root) = open_store(dir.path(), "lowercase_paths=true").await;
+
+		let key = ObjectKey::new("/MixedCase.txt".to_string());
+		store.put(&key, Bytes::from_static(b"hello")).await.unwrap();
+
+		// On disk the file is folded to lowercase, regardless of how the key
+		// was casing-supplied.
+		assert_eq!(on_disk_names(&root), vec!["mixedcase.txt"]);
+
+		// Both casings resolve to the same folded path under opt-in.
+		let lower = ObjectKey::new("/mixedcase.txt".to_string());
+		assert!(store.exists(&key).await.unwrap());
+		assert!(store.exists(&lower).await.unwrap());
+	}
+
+	/// Bare `?lowercase_paths` (no value) keeps the documented shorthand for
+	/// "enable folding" so the option stays usable for callers who relied on
+	/// the old default.
+	#[tokio::test]
+	async fn bare_lowercase_paths_query_enables_folding() {
+		let dir = TempDir::new().unwrap();
+		let (store, root) = open_store(dir.path(), "lowercase_paths").await;
+
+		let key = ObjectKey::new("/MixedCase.txt".to_string());
+		store.put(&key, Bytes::from_static(b"hello")).await.unwrap();
+
+		assert_eq!(on_disk_names(&root), vec!["mixedcase.txt"]);
+	}
+
+	#[test]
+	fn case_sensitive_allowlist_matches_prefix_components() {
+		let allowed = vec![PathBuf::from("/srv/data")];
+		assert!(is_path_allowed(OsPath::new("/srv/data/file.txt"), false, &allowed));
+		assert!(!is_path_allowed(OsPath::new("/srv/other/file.txt"), false, &allowed));
+	}
+
+	#[test]
+	fn lowercase_allowlist_matches_case_insensitively() {
+		let allowed = vec![PathBuf::from("/srv/Data")];
+		assert!(is_path_allowed(OsPath::new("/SRV/data/file.txt"), true, &allowed));
+	}
+
+	/// Regression: bare `str::starts_with` would let a sibling directory
+	/// whose name extends the allowlisted prefix (`/srv/data-evil`) match
+	/// `/srv/data`. The component-boundary check rejects that case while
+	/// still accepting the exact entry and any path nested below it.
+	#[test]
+	fn lowercase_allowlist_requires_component_boundary() {
+		let allowed = vec![PathBuf::from("/srv/data")];
+		assert!(!is_path_allowed(OsPath::new("/srv/data-evil/secret"), true, &allowed));
+		assert!(is_path_allowed(OsPath::new("/srv/data"), true, &allowed));
+		assert!(is_path_allowed(OsPath::new("/srv/data/file.txt"), true, &allowed));
+	}
+
+	/// A trailing separator on the allowlist entry should still accept the
+	/// entry itself, not just children, so `/srv/data/` is equivalent to
+	/// `/srv/data`.
+	#[test]
+	fn lowercase_allowlist_accepts_trailing_separator() {
+		let allowed = vec![PathBuf::from("/srv/data/")];
+		assert!(is_path_allowed(OsPath::new("/srv/data"), true, &allowed));
+		assert!(is_path_allowed(OsPath::new("/srv/data/file.txt"), true, &allowed));
+		assert!(!is_path_allowed(OsPath::new("/srv/data-evil"), true, &allowed));
+	}
+
+	/// Regression: `to_string_lossy` previously collapsed every invalid UTF-8
+	/// byte onto `U+FFFD`, so two distinct non-UTF-8 paths could compare equal
+	/// and bypass the allowlist. With the lossless `Path::to_str` check, any
+	/// non-UTF-8 candidate is rejected outright when `lowercase_paths` is on.
+	#[cfg(unix)]
+	#[test]
+	fn lowercase_mode_rejects_non_utf8_paths() {
+		use std::ffi::OsStr;
+		use std::os::unix::ffi::OsStrExt;
+
+		let allowed = vec![PathBuf::from("/srv/data")];
+		let bad_path = OsPath::new(OsStr::from_bytes(b"/srv/data/\xFFsecret"));
+		assert!(!is_path_allowed(bad_path, true, &allowed));
+	}
+
+	#[cfg(unix)]
+	#[test]
+	fn lowercase_mode_rejects_non_utf8_allowed_entry() {
+		use std::ffi::OsStr;
+		use std::os::unix::ffi::OsStrExt;
+
+		let allowed = vec![PathBuf::from(OsStr::from_bytes(b"/srv/data/\xFF"))];
+		assert!(!is_path_allowed(OsPath::new("/srv/data/file.txt"), true, &allowed));
 	}
 }

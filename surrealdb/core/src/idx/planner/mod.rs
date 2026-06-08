@@ -16,7 +16,7 @@ use reblessive::tree::Stk;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
-use crate::doc::NsDbTbCtx;
+use crate::doc::DocumentContext;
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
 use crate::expr::{Cond, Fields, Groups};
@@ -49,7 +49,7 @@ pub(crate) enum RecordStrategy {
 	KeysAndValues,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScanDirection {
 	Forward,
 	Backward,
@@ -77,7 +77,7 @@ impl<'a> StatementContext<'a> {
 		opt: &'a Options,
 		stm: &'a Statement<'a>,
 	) -> Result<Self> {
-		let is_perm = opt.check_perms(stm.into())?;
+		let is_perm = ctx.check_perms(opt, stm.into())?;
 		Ok(Self {
 			ctx,
 			opt,
@@ -91,33 +91,34 @@ impl<'a> StatementContext<'a> {
 		})
 	}
 
+	/// Classify the statement-specific permission granted on `tb`.
+	///
+	/// Returns one of:
+	/// - `Full` — no permission check applies (root/owner session) or the table grants the action
+	///   unconditionally; also returned when the table is absent here, since callers verify table
+	///   existence before invoking this method.
+	/// - `Specific` — the table defines a per-record permission expression for this statement type;
+	///   callers must fetch record values so the expression can be evaluated.
+	/// - `None` — the statement is denied on this table; iterator preparation in
+	///   [`crate::dbs::iterator`] short-circuits on this result and skips ingesting any iterable
+	///   for the table.
 	pub(crate) async fn check_table_permission(&self, tb: &TableName) -> Result<GrantedPermission> {
 		if !self.is_perm {
 			return Ok(GrantedPermission::Full);
 		}
 		let (ns, db) = self.ctx.get_ns_db_ids(self.opt).await?;
-		// Get the table for this planner
 		match self.ctx.tx().get_tb(ns, db, tb, None).await? {
 			Some(table) => {
-				// TODO(tobiemh): we should really
-				// not even get here if the table
-				// permissions are NONE, because
-				// there is no point in processing
-				// a table which we can't access.
 				let perms = self.stm.permissions(&table, self.stm.is_create());
-				// If permissions are specific, we
-				// need to fetch the record content.
 				if perms.is_specific() {
 					return Ok(GrantedPermission::Specific);
 				}
-				// If permissions are NONE, we also
-				// need to fetch the record content.
 				if perms.is_none() {
 					return Ok(GrantedPermission::None);
 				}
 			}
 			None => {
-				// Fall through to full permissions.
+				// Table not visible at this point; fall through to Full.
 			}
 		}
 		Ok(GrantedPermission::Full)
@@ -276,7 +277,7 @@ impl QueryPlanner {
 		&mut self,
 		stk: &mut Stk,
 		stm_ctx: &StatementContext<'_>,
-		doc_ctx: NsDbTbCtx,
+		doc_ctx: DocumentContext,
 		t: &TableName,
 		gp: GrantedPermission,
 		it: &mut Iterator,
@@ -361,7 +362,7 @@ impl QueryPlanner {
 
 	fn add(
 		&mut self,
-		doc_ctx: NsDbTbCtx,
+		doc_ctx: DocumentContext,
 		tb: TableName,
 		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
@@ -389,8 +390,8 @@ impl QueryPlanner {
 		&self.fallbacks
 	}
 
-	pub(crate) fn is_order(&self, irf: &IteratorRef) -> bool {
-		self.ordering_indexes.contains(irf)
+	pub(crate) fn is_order(&self, irf: IteratorRef) -> bool {
+		self.ordering_indexes.contains(&irf)
 	}
 
 	pub(crate) fn is_any_specific_permission(&self) -> bool {

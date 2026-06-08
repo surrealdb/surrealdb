@@ -152,6 +152,7 @@
 //! external server via WebSockets, embedding the database using RocksDB or
 //! using a distributed TiKV cluster.
 
+use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 mod native;
 #[cfg(target_family = "wasm")]
@@ -281,7 +282,7 @@ impl Surreal<Any> {
 	/// ```
 	pub fn connect(&self, address: impl IntoEndpoint) -> Connect<Any, ()> {
 		Connect {
-			surreal: self.inner.clone().into(),
+			surreal: Arc::clone(&self.inner).into(),
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
@@ -392,6 +393,10 @@ mod tests {
 		))
 		.await
 		.unwrap();
+		// `use_ns`/`use_db` set the session context but no longer
+		// implicitly create the namespace/database for an unauthenticated
+		// session — that auto-creation now requires the same authorization
+		// as `DEFINE NAMESPACE` / `DEFINE DATABASE` (SECURITY_GUIDE §3).
 		db.use_ns("N").use_db("D").await.unwrap();
 
 		// The client needs to sign in before it can access anything
@@ -414,7 +419,12 @@ mod tests {
 		// It can sign in
 		db.signin(creds).await.expect("client should be able to sign in");
 
-		// After the sign in, the client has access to everything
+		// Re-issue `use_ns`/`use_db` now that the session has the
+		// authority to create the namespace/database it targets.
+		db.use_ns("N").use_db("D").await.unwrap();
+
+		// After the sign in and re-issued `use`, the client has access to
+		// everything.
 		db.query("INFO FOR ROOT").await.unwrap().check().expect("client should have access to KV");
 		db.query("INFO FOR NS").await.unwrap().check().expect("client should have access to NS");
 		db.query("INFO FOR DB").await.unwrap().check().expect("client should have access to DB");

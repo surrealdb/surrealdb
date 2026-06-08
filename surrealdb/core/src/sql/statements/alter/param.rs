@@ -1,3 +1,4 @@
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
@@ -8,7 +9,7 @@ use crate::sql::{Expr, Permission};
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 /// AST node for `ALTER PARAM`.
 pub struct AlterParamStatement {
-	pub name: String,
+	pub name: Strand,
 	pub if_exists: bool,
 	pub value: Option<Expr>,
 	pub comment: AlterKind<String>,
@@ -21,7 +22,7 @@ impl ToSql for AlterParamStatement {
 		if self.if_exists {
 			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write_sql!(f, fmt, " ${}", EscapeKwFreeIdent(&self.name));
+		write_sql!(f, fmt, " ${}", EscapeKwFreeIdent(self.name.as_str()));
 
 		if let Some(ref v) = self.value {
 			write_sql!(f, fmt, " VALUE {}", CoverStmts(v));

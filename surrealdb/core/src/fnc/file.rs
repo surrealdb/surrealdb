@@ -225,7 +225,7 @@ fn value_to_file(value: Value) -> Result<DestinationFile> {
 		}),
 		Value::String(s) => Ok(DestinationFile {
 			bucket: None,
-			key: s,
+			key: s.into_string(),
 		}),
 		_ => Err(anyhow::anyhow!("Invalid destination file value")),
 	}

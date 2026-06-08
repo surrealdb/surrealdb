@@ -7,6 +7,7 @@ use std::str::FromStr;
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
 use rust_decimal::Decimal;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::statements::info::InfoStructure;
@@ -574,13 +575,13 @@ impl From<Kind> for crate::types::PublicKind {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug)]
 pub enum KindLiteral {
-	String(String),
+	String(Strand),
 	Integer(i64),
 	Float(f64),
 	Decimal(Decimal),
 	Duration(Duration),
 	Array(Vec<Kind>),
-	Object(BTreeMap<String, Kind>),
+	Object(BTreeMap<Strand, Kind>),
 	// This variant is just for a performance optimization.
 	// Should probably be removed when we have a planner.
 	//DiscriminatedObject(String, Vec<BTreeMap<String, Kind>>),
@@ -590,7 +591,7 @@ pub enum KindLiteral {
 impl From<crate::types::PublicKindLiteral> for KindLiteral {
 	fn from(v: crate::types::PublicKindLiteral) -> Self {
 		match v {
-			crate::types::PublicKindLiteral::String(s) => KindLiteral::String(s),
+			crate::types::PublicKindLiteral::String(s) => KindLiteral::String(s.into()),
 			crate::types::PublicKindLiteral::Integer(i) => KindLiteral::Integer(i),
 			crate::types::PublicKindLiteral::Float(f) => KindLiteral::Float(f),
 			crate::types::PublicKindLiteral::Decimal(d) => KindLiteral::Decimal(d),
@@ -600,9 +601,9 @@ impl From<crate::types::PublicKindLiteral> for KindLiteral {
 			crate::types::PublicKindLiteral::Array(kinds) => {
 				KindLiteral::Array(kinds.into_iter().map(Kind::from).collect())
 			}
-			crate::types::PublicKindLiteral::Object(obj) => {
-				KindLiteral::Object(obj.into_iter().map(|(k, v)| (k, Kind::from(v))).collect())
-			}
+			crate::types::PublicKindLiteral::Object(obj) => KindLiteral::Object(
+				obj.into_iter().map(|(k, v)| (k.into(), Kind::from(v))).collect(),
+			),
 			crate::types::PublicKindLiteral::Bool(b) => KindLiteral::Bool(b),
 		}
 	}
@@ -611,7 +612,7 @@ impl From<crate::types::PublicKindLiteral> for KindLiteral {
 impl From<KindLiteral> for crate::types::PublicKindLiteral {
 	fn from(v: KindLiteral) -> Self {
 		match v {
-			KindLiteral::String(s) => crate::types::PublicKindLiteral::String(s),
+			KindLiteral::String(s) => crate::types::PublicKindLiteral::String(s.into_string()),
 			KindLiteral::Integer(i) => crate::types::PublicKindLiteral::Integer(i),
 			KindLiteral::Float(f) => crate::types::PublicKindLiteral::Float(f),
 			KindLiteral::Decimal(d) => crate::types::PublicKindLiteral::Decimal(d),
@@ -622,7 +623,7 @@ impl From<KindLiteral> for crate::types::PublicKindLiteral {
 				crate::types::PublicKindLiteral::Array(kinds.into_iter().map(Into::into).collect())
 			}
 			KindLiteral::Object(obj) => crate::types::PublicKindLiteral::Object(
-				obj.into_iter().map(|(k, v)| (k, v.into())).collect(),
+				obj.into_iter().map(|(k, v)| (k.into_string(), v.into())).collect(),
 			),
 			KindLiteral::Bool(b) => crate::types::PublicKindLiteral::Bool(b),
 		}
@@ -801,7 +802,7 @@ impl KindLiteral {
 					while lit_next.is_some() || val_next.is_some() {
 						match (lit_next, val_next) {
 							(Some((lit_k, lit_kind)), Some((val_k, val_v))) => {
-								match lit_k.cmp(val_k) {
+								match lit_k.as_str().cmp(val_k.as_str()) {
 									Ordering::Less => {
 										// Key in type but not in value - check if optional
 										if !lit_kind.can_be_none() {
@@ -904,7 +905,7 @@ impl KindLiteral {
 			KindLiteral::Object(x) => match path.first() {
 				Some(Part::All) => x.iter().all(|(_, y)| y.allows_nested_kind(&path[1..], kind)),
 				Some(Part::Field(k)) => {
-					if let Some(y) = x.get(&**k) {
+					if let Some(y) = x.get(k.as_str()) {
 						y.allows_nested_kind(&path[1..], kind)
 					} else {
 						false

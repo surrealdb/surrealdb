@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use crate::cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH};
+use crate::cnf::CommonConfig;
 use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
@@ -43,7 +43,7 @@ pub fn parse_with<F, R>(input: &[u8], f: F) -> Result<R>
 where
 	F: AsyncFnOnce(&mut Parser<'_>, &mut Stk) -> ParseResult<R>,
 {
-	parse_with_settings(input, settings_from_capabilities(&Capabilities::all()), f)
+	parse_with_settings(input, ParserSettings::default(), f)
 }
 
 pub fn parse_with_settings<F, R>(input: &[u8], settings: ParserSettings, f: F) -> Result<R>
@@ -63,10 +63,13 @@ where
 
 /// Creates the parser settings struct from the global configuration values as
 /// wel as the capabilities  struct.
-pub fn settings_from_capabilities(cap: &Capabilities) -> ParserSettings {
+pub fn settings_from_capabilities_config(
+	cap: &Capabilities,
+	config: &CommonConfig,
+) -> ParserSettings {
 	ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		object_recursion_limit: config.max_object_parsing_depth as usize,
+		query_recursion_limit: config.max_query_parsing_depth as usize,
 		files_enabled: cap.allows_experimental(&ExperimentalTarget::Files),
 		surrealism_enabled: cap.allows_experimental(&ExperimentalTarget::Surrealism),
 		..Default::default()
@@ -86,7 +89,7 @@ pub fn settings_from_capabilities(cap: &Capabilities) -> ParserSettings {
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn parse(input: &str) -> Result<Ast> {
 	let capabilities = Capabilities::all();
-	parse_with_capabilities(input, &capabilities)
+	parse_with_capabilities(input, &capabilities, &CommonConfig::default())
 }
 
 /// Parses a SurrealQL query.
@@ -100,12 +103,16 @@ pub fn parse(input: &str) -> Result<Ast> {
 /// If you encounter this limit and believe that it should be increased,
 /// please [open an issue](https://github.com/surrealdb/surrealdb/issues)!
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Ast> {
+pub fn parse_with_capabilities(
+	input: &str,
+	capabilities: &Capabilities,
+	config: &CommonConfig,
+) -> Result<Ast> {
 	trace!(target: TARGET, "Parsing SurrealQL query");
 
 	parse_with_settings(
 		input.as_bytes(),
-		settings_from_capabilities(capabilities),
+		settings_from_capabilities_config(capabilities, config),
 		async |parser, stk| parser.parse_query(stk).await,
 	)
 }
@@ -115,37 +122,38 @@ pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 #[allow(dead_code)]
 pub(crate) fn expr(input: &str) -> Result<Expr> {
 	let capabilities = Capabilities::all();
-	expr_with_capabilities(input, &capabilities)
+	expr_with_capabilities(input, &capabilities, &CommonConfig::default())
 }
 
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 #[allow(dead_code)]
-pub(crate) fn expr_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Expr> {
+pub(crate) fn expr_with_capabilities(
+	input: &str,
+	capabilities: &Capabilities,
+	config: &CommonConfig,
+) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
 	parse_with_settings(
 		input.as_bytes(),
-		settings_from_capabilities(capabilities),
+		settings_from_capabilities_config(capabilities, config),
 		async |parser, stk| parser.parse_expr_field(stk).await,
 	)
 }
 
 /// Parses a SurrealQL function name.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn function(input: &str) -> Result<Function> {
-	let capabilities = Capabilities::all();
-	function_with_capabilities(input, &capabilities)
-}
-
-/// Parses a SurrealQL function name.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn function_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Function> {
+pub fn function_with_capabilities(
+	input: &str,
+	capabilities: &Capabilities,
+	config: &CommonConfig,
+) -> Result<Function> {
 	trace!(target: TARGET, "Parsing SurrealQL function name");
 
 	parse_with_settings(
 		input.as_bytes(),
-		settings_from_capabilities(capabilities),
+		settings_from_capabilities_config(capabilities, config),
 		async |parser, _stk| parser.parse_function_name().await,
 	)
 }
@@ -157,7 +165,7 @@ pub fn json(input: &str) -> Result<PublicValue> {
 
 	let settings = ParserSettings {
 		json_string_escapes: true,
-		..settings_from_capabilities(&Capabilities::all())
+		..Default::default()
 	};
 
 	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
@@ -260,8 +268,8 @@ pub(crate) fn expr_legacy_strand(input: &str) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		object_recursion_limit: usize::MAX,
+		query_recursion_limit: usize::MAX,
 		legacy_strands: true,
 		..Default::default()
 	};
@@ -272,15 +280,13 @@ pub(crate) fn expr_legacy_strand(input: &str) -> Result<Expr> {
 }
 
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
+///
+/// This function is for testing only, don't use it outside of tests!
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn value(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
-	let settings = ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-		..Default::default()
-	};
+	let settings = ParserSettings::default();
 
 	parse_with_settings(input.as_bytes(), settings, async |parser, stk| {
 		parser.parse_value(stk).await
@@ -289,12 +295,12 @@ pub fn value(input: &str) -> Result<PublicValue> {
 
 /// Parses a SurrealQL [`PublicValue`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value_legacy_strand(input: &str) -> Result<PublicValue> {
+pub fn value_legacy_strand(input: &str, config: &CommonConfig) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		object_recursion_limit: config.max_object_parsing_depth as usize,
+		query_recursion_limit: config.max_query_parsing_depth as usize,
 		legacy_strands: true,
 		..Default::default()
 	};
@@ -307,12 +313,13 @@ pub fn value_legacy_strand(input: &str) -> Result<PublicValue> {
 /// Parses JSON into an inert SurrealQL [`PublicValue`] and parses values within
 /// strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json_legacy_strand(input: &str) -> Result<PublicValue> {
+pub fn json_legacy_strand(input: &str, config: &CommonConfig) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 
 	let settings = ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		// Values are unused on the value parsing path.
+		object_recursion_limit: 0,
+		query_recursion_limit: 0,
 		legacy_strands: true,
 		json_string_escapes: true,
 		..Default::default()
@@ -373,12 +380,12 @@ fn extract_tables_from_kind_impl(kind: &Kind, tables: &mut HashSet<String>) {
 		| Kind::Geometry(_) => {}
 		Kind::Table(ts) => {
 			for table in ts {
-				tables.insert(table.clone());
+				tables.insert(table.as_str().to_owned());
 			}
 		}
 		Kind::Record(ts) => {
 			for table in ts {
-				tables.insert(table.clone());
+				tables.insert(table.as_str().to_owned());
 			}
 		}
 		Kind::Either(kinds) => {

@@ -7,6 +7,7 @@ use quick_cache::{Equivalent, Weighter};
 use surrealism_runtime::runtime::Runtime;
 
 use crate::catalog::{DatabaseId, NamespaceId};
+#[cfg(feature = "http")]
 use crate::http::HttpClient;
 
 pub struct SurrealismCache {
@@ -14,10 +15,9 @@ pub struct SurrealismCache {
 }
 
 impl SurrealismCache {
-	pub fn new() -> Self {
-		let count = *crate::cnf::SURREALISM_CACHE_SIZE;
+	pub fn new(size: usize) -> Self {
 		Self {
-			cache: quick_cache::sync::Cache::with_weighter(count, count as u64, Weight),
+			cache: quick_cache::sync::Cache::with_weighter(size, size as u64, Weight),
 		}
 	}
 

@@ -99,7 +99,10 @@ impl Method {
 }
 
 impl Method {
-	pub fn to_str(&self) -> &str {
+	/// Stable lower-case label for this method. Always a `'static`
+	/// literal so it is safe to use as a Prometheus label value or to
+	/// stash on a `&'static str` field.
+	pub fn to_str(&self) -> &'static str {
 		match self {
 			Self::Unknown => "unknown",
 			Self::Ping => "ping",

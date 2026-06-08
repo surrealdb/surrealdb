@@ -1,0 +1,221 @@
+# Rolling build
+#
+# Builds and publishes release artifacts on every push to main and to release
+# branches, so a promotable build is always ready. Binaries go to S3 under
+# rolling/<sha>/ and Docker images are pushed as :rolling-<sha> (+ moving
+# :<branch-slug>). The eventual tag-triggered release promotes these in place.
+#
+# Correctness is gated by ci.yml on the same commit, so this workflow does not
+# re-run the quality/test matrix. It does NOT publish crates (crates.io versions
+# are write-once; that happens only at release time).
+#
+# Guarded against the public mirror via `github.repository`, so it never runs in
+# (or leaks intent to) surrealdb/surrealdb.
+
+name: Rolling build
+
+run-name: "Rolling build (${{ github.ref_name }} @ ${{ github.sha }})"
+
+on:
+  push:
+    branches:
+      - main
+      - 'releases/*'
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rolling-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    name: Prepare
+    if: ${{ github.repository != 'surrealdb/surrealdb' }}
+    runs-on: ubuntu-latest
+    outputs:
+      build-metadata: ${{ steps.vars.outputs.build-metadata }}
+      rolling-name: ${{ steps.vars.outputs.rolling-name }}
+      branch-slug: ${{ steps.vars.outputs.branch-slug }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Derive vars
+        id: vars
+        run: |
+          set -euo pipefail
+          date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
+          rev=$(git rev-parse --short HEAD)
+          branch_slug=$(echo "${GITHUB_REF_NAME}" | sed -e 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+          {
+            echo "build-metadata=${date}.${rev}"
+            echo "rolling-name=rolling-${GITHUB_SHA}"
+            echo "branch-slug=${branch_slug}"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.arch }} binary
+    if: ${{ github.repository != 'surrealdb/surrealdb' }}
+    needs: [prepare]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64-unknown-linux-gnu
+            platform: amd64
+            os: linux
+            runner: [runner-amd64-2xlarge]
+          - arch: aarch64-unknown-linux-gnu
+            platform: arm64
+            os: linux
+            runner: [runner-arm64-2xlarge]
+          - arch: x86_64-apple-darwin
+            platform: amd64
+            os: macos
+            runner: macos-15-xlarge
+          - arch: aarch64-apple-darwin
+            platform: arm64
+            os: macos
+            runner: macos-15-xlarge
+          - arch: x86_64-pc-windows-msvc
+            platform: amd64
+            os: windows
+            runner: windows-latest-32-cores
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Build Linux binary
+        if: matrix.os == 'linux'
+        uses: ./.github/actions/build-linux
+        with:
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
+          name: ${{ needs.prepare.outputs.rolling-name }}
+          build-metadata: ${{ needs.prepare.outputs.build-metadata }}
+          upload: true
+          release: true
+
+      - name: Build macOS binary
+        if: matrix.os == 'macos'
+        uses: ./.github/actions/build-macos
+        with:
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
+          name: ${{ needs.prepare.outputs.rolling-name }}
+          build-metadata: ${{ needs.prepare.outputs.build-metadata }}
+          upload: true
+          release: true
+
+      - name: Build Windows binary
+        if: matrix.os == 'windows'
+        uses: ./.github/actions/build-windows
+        with:
+          arch: ${{ matrix.arch }}
+          platform: ${{ matrix.platform }}
+          name: ${{ needs.prepare.outputs.rolling-name }}
+          build-metadata: ${{ needs.prepare.outputs.build-metadata }}
+          upload: true
+          release: true
+
+  publish-s3:
+    name: Publish binaries to S3 (rolling)
+    if: ${{ github.repository != 'surrealdb/surrealdb' }}
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          aws-region: us-east-2
+          aws-access-key-id: ${{ secrets.AMAZON_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
+
+      - name: Upload to rolling/<sha>/
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          shopt -s globstar nullglob
+          for file in artifacts/**/*.tgz artifacts/**/*.txt artifacts/**/*.exe; do
+            aws s3 cp --cache-control 'no-store' "$file" "s3://download.surrealdb.com/rolling/${SHA}/"
+          done
+
+  docker:
+    name: Docker ${{ matrix.name }} (rolling)
+    if: ${{ github.repository != 'surrealdb/surrealdb' }}
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Prod image
+            build-target: prod-ci
+            tag-suffix: ''
+          - name: Dev image
+            build-target: dev-ci
+            tag-suffix: -dev
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Login to DockerHub
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_PASS }}
+
+      - name: Build and push rolling image
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        with:
+          context: artifacts
+          push: true
+          platforms: linux/amd64,linux/arm64
+          file: docker/Dockerfile
+          target: ${{ matrix.build-target }}
+          tags: |
+            surrealdb/surrealdb:${{ needs.prepare.outputs.rolling-name }}${{ matrix.tag-suffix }}
+            surrealdb/surrealdb:${{ needs.prepare.outputs.branch-slug }}${{ matrix.tag-suffix }}
+          build-args: |
+            ARTIFACT_PREFIX=surreal-${{ needs.prepare.outputs.rolling-name }}

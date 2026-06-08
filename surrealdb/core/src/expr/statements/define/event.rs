@@ -41,7 +41,7 @@ impl DefineEventStatement {
 		);
 
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Event, Base::Db)?;
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
@@ -76,7 +76,7 @@ impl DefineEventStatement {
 		txn.set(
 			&key,
 			&EventDefinition {
-				name: name.clone(),
+				name: name.clone().into(),
 				target_table: target_table.clone(),
 				when: self.when.clone(),
 				then: self.then.clone(),
@@ -92,13 +92,7 @@ impl DefineEventStatement {
 			cache_events_ts: Uuid::now_v7(),
 			..tb.as_ref().clone()
 		};
-
 		txn.put_tb(ns_name, db_name, &tb).await?;
-
-		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &target_table);
-		}
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

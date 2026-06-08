@@ -3,6 +3,31 @@ use std::sync::LazyLock;
 use futures::lock::Mutex;
 use sysinfo::{Pid, System};
 
+/// Detected total system memory in bytes, cached at first access.
+/// Falls back to cgroup limits when running inside a container, and
+/// uses a conservative 1 GiB default when `/proc` is inaccessible
+/// (e.g. systemd `ProcSubset=pid` hardening).
+#[cfg_attr(not(any(feature = "kv-rocksdb", feature = "kv-surrealkv")), allow(dead_code))]
+pub(crate) static TOTAL_SYSTEM_MEMORY: LazyLock<u64> = LazyLock::new(|| {
+	// Load the system attributes
+	let mut system = System::new();
+	// Refresh the system memory
+	system.refresh_memory();
+	// Get the total system memory
+	let host_memory = system.total_memory();
+	// If the total system memory is 0, use a safe default
+	if host_memory == 0 {
+		return 1024 * 1024 * 1024;
+	}
+	// Prefer cgroup limits when available (container environments)
+	match system.cgroup_limits() {
+		// If the limit has been configured, use it
+		Some(l) if l.total_memory > 0 => l.total_memory,
+		// Otherwise use the host memory
+		_ => host_memory,
+	}
+});
+
 /// The current system environment which is used to
 /// periodically fetch and compute the system metrics.
 pub static ENVIRONMENT: LazyLock<Mutex<Environment>> =
@@ -73,7 +98,7 @@ impl Environment {
 	/// corresponds to the amount of CPUs, but
 	/// it may diverge in various cases.
 	pub fn physical_cores(&self) -> usize {
-		System::physical_core_count().unwrap_or_default()
+		num_cpus::get_physical()
 	}
 
 	/// Fetches the estimate of the available

@@ -3,6 +3,7 @@ use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{SqlFormat, ToSql};
 
 #[derive(
+	Copy,
 	Clone,
 	Debug,
 	Default,
@@ -27,7 +28,7 @@ pub enum Dir {
 
 impl ToSql for Dir {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let dir: crate::sql::Dir = self.clone().into();
+		let dir: crate::sql::Dir = (*self).into();
 		dir.fmt_sql(f, sql_fmt);
 	}
 }

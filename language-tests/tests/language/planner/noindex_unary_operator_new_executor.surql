@@ -9,16 +9,18 @@ reason = "Test NOINDEX hint and unsupported unary operator fallback (new executo
 value = "NONE"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 0}
-    TableScan [ctx: Db] [table: table, direction: Forward, predicate: ! param.subparam] {rows: 0}
+value = """
+'SelectProject [ctx: Db] [projections: *] {rows: 0}
+    TableScan [ctx: Db] [table: table, direction: Forward, predicate: ! param.subparam, pre_decode_filter: no (unsupported predicate)] {rows: 0}
 
-Total rows: 0''''
+Total rows: 0'"""
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 0}
-    TableScan [ctx: Db] [table: table, direction: Forward, predicate: ! param.subparam] {rows: 0}
+value = """
+'SelectProject [ctx: Db] [projections: *] {rows: 0}
+    TableScan [ctx: Db] [table: table, direction: Forward, predicate: ! param.subparam, pre_decode_filter: no (unsupported predicate)] {rows: 0}
 
-Total rows: 0''''
+Total rows: 0'"""
 */
 
 DEFINE TABLE table;

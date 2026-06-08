@@ -20,6 +20,7 @@ serde_json.workspace = true
 surrealdb = { workspace = true, default-features = false }
 surrealdb-types.workspace = true
 surrealism.workspace = true
+reqwest = { workspace = true, default-features = false, features = ["json"] }
 
 [package.metadata.cargo-machete]
 # Only referenced in macro-expanded code; omit surrealdb when outside this repo.

@@ -64,7 +64,7 @@ impl TryFrom<&Idiom> for FieldPath {
 		let mut parts = Vec::with_capacity(idiom.len());
 		for part in idiom.iter() {
 			match part {
-				Part::Field(name) => parts.push(FieldPathPart::Field(name.clone())),
+				Part::Field(name) => parts.push(FieldPathPart::Field(name.as_str().to_owned())),
 				Part::First => parts.push(FieldPathPart::First),
 				Part::Last => parts.push(FieldPathPart::Last),
 				Part::Value(Expr::Literal(Literal::Integer(i))) if *i >= 0 => {
@@ -225,9 +225,9 @@ mod tests {
 	fn test_field_path_extract_nested() {
 		// Create path: user.address.city
 		let path = FieldPath(vec![
-			FieldPathPart::Field("user".to_string()),
-			FieldPathPart::Field("address".to_string()),
-			FieldPathPart::Field("city".to_string()),
+			FieldPathPart::Field("user".into()),
+			FieldPathPart::Field("address".into()),
+			FieldPathPart::Field("city".into()),
 		]);
 
 		// Create nested object: { user: { address: { city: "Austin" } } }
@@ -243,8 +243,7 @@ mod tests {
 	#[test]
 	fn test_field_path_extract_array_index() {
 		// Create path: items[0]
-		let path =
-			FieldPath(vec![FieldPathPart::Field("items".to_string()), FieldPathPart::Index(0)]);
+		let path = FieldPath(vec![FieldPathPart::Field("items".into()), FieldPathPart::Index(0)]);
 
 		let items = Value::Array(vec![Value::from("first"), Value::from("second")].into());
 		let obj = make_obj(vec![("items", items)]);
@@ -257,7 +256,7 @@ mod tests {
 	#[test]
 	fn test_field_path_extract_array_last() {
 		// Create path: items[$]
-		let path = FieldPath(vec![FieldPathPart::Field("items".to_string()), FieldPathPart::Last]);
+		let path = FieldPath(vec![FieldPathPart::Field("items".into()), FieldPathPart::Last]);
 
 		let items = Value::Array(vec![Value::from("first"), Value::from("second")].into());
 		let obj = make_obj(vec![("items", items)]);
@@ -281,8 +280,8 @@ mod tests {
 	fn test_field_path_extract_field_on_array() {
 		// Create path: users.name (should extract name from each user)
 		let path = FieldPath(vec![
-			FieldPathPart::Field("users".to_string()),
-			FieldPathPart::Field("name".to_string()),
+			FieldPathPart::Field("users".into()),
+			FieldPathPart::Field("name".into()),
 		]);
 
 		let user1 = Value::Object(make_obj(vec![("name", Value::from("Alice"))]));
@@ -304,10 +303,10 @@ mod tests {
 	#[test]
 	fn test_field_path_display() {
 		let path = FieldPath(vec![
-			FieldPathPart::Field("user".to_string()),
-			FieldPathPart::Field("address".to_string()),
+			FieldPathPart::Field("user".into()),
+			FieldPathPart::Field("address".into()),
 			FieldPathPart::Index(0),
-			FieldPathPart::Field("city".to_string()),
+			FieldPathPart::Field("city".into()),
 		]);
 		assert_eq!(path.to_string(), "user.address[0].city");
 	}

@@ -8,8 +8,12 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::expr::function::{Function, FunctionCall};
 use crate::expr::visit::{Visit, Visitor};
 use crate::expr::{Expr, Idiom, Literal, Part};
+
+/// Tracing target for permission-analysis warnings emitted from this module.
+const TARGET: &str = "surrealdb::core::perms";
 
 /// Dependency metadata for a computed field.
 ///
@@ -55,8 +59,8 @@ pub(crate) fn extract_computed_deps(expr: &Expr) -> ComputedDeps {
 /// the latter covers bracket access like `["name"]`.
 fn field_name_from_part(part: &Part) -> Option<String> {
 	match part {
-		Part::Field(name) => Some(name.clone()),
-		Part::Value(Expr::Literal(Literal::String(name))) => Some(name.clone()),
+		Part::Field(name) => Some(name.as_str().to_owned()),
+		Part::Value(Expr::Literal(Literal::String(name))) => Some(name.as_str().to_owned()),
 		_ => None,
 	}
 }
@@ -79,7 +83,7 @@ impl Visitor for FieldDependencyExtractor {
 		let consumed = match idiom.0.as_slice() {
 			// Direct field access: `field_name` or `field.nested.path`
 			[Part::Field(name), ..] => {
-				self.deps.insert(name.clone());
+				self.deps.insert(name.as_str().to_owned());
 				1
 			}
 			// `$this.field` / `$self["field"]` — equivalent to bare field.
@@ -104,58 +108,225 @@ impl Visitor for FieldDependencyExtractor {
 		Ok(())
 	}
 
+	/// Walk an `Expr`.
+	///
+	/// The match is **exhaustive (no `_` arm) on purpose**: this analysis is
+	/// security-relevant (computed-field permissions rely on its result), and
+	/// the default in a security-relevant visitor must be fail-closed. Adding a
+	/// new `Expr` variant should be a build error here so a human triages it
+	/// into "transparent" or "opaque" rather than silently defaulting to
+	/// transparent (the old fail-open behaviour).
 	fn visit_expr(&mut self, expr: &Expr) -> Result<(), Self::Error> {
 		match expr {
-			// Subqueries can access arbitrary fields at runtime.
+			// === Transparent: walk children, no flag flip ===
+			// These constructs do not read fields beyond what their children
+			// read. Default traversal is sufficient; any opaque construct
+			// inside (Select, Param, Closure, …) will flip the flag itself.
+			Expr::Literal(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Constant(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Prefix { .. }
+			| Expr::Postfix { .. }
+			| Expr::Binary { .. }
+			| Expr::Block(_)
+			| Expr::IfElse(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Return(_)
+			| Expr::Throw(_)
+			| Expr::Explain { .. }
+			| Expr::Sleep(_)
+			| Expr::Info(_) => {
+				expr.visit(self)?;
+			}
+
+			// === Opaque (flip + walk) ===
+			// Subqueries can access arbitrary fields/tables at runtime.
 			Expr::Select(_)
 			| Expr::Create(_)
 			| Expr::Update(_)
 			| Expr::Upsert(_)
 			| Expr::Delete(_)
 			| Expr::Relate(_)
-			| Expr::Insert(_) => {
+			| Expr::Insert(_)
+			// Closures capture variables and can read fields via captured
+			// `$this` indirectly. Walk body for any obvious deps but assume
+			// incompleteness.
+			| Expr::Closure(_)
+			// DDL inside an expression should never appear in a permission
+			// clause, but if it does it is by definition opaque to static
+			// dependency analysis.
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Alter(_) => {
 				self.is_complete = false;
-				// Still walk the expression to extract any known deps.
 				expr.visit(self)?;
 			}
-			// Parameters are resolved at runtime -- could reference anything.
+
+			// === Opaque (flip, do not walk) ===
+			// Parameters are resolved at runtime and may bind to anything.
 			Expr::Param(_) => {
 				self.is_complete = false;
 			}
-			// Closures can capture external state.
-			Expr::Closure(_) => {
-				self.is_complete = false;
-				// Walk the body to extract known deps.
-				expr.visit(self)?;
-			}
-			// All other expressions: use default visitor traversal.
-			_ => {
-				expr.visit(self)?;
+
+			// === Projection-aware function calls ===
+			Expr::FunctionCall(call) => {
+				self.visit_function_call_with_projection(call)?;
 			}
 		}
 		Ok(())
 	}
 
+	/// Walk a `Part`. Exhaustive match, same fail-closed reasoning as `visit_expr`.
 	fn visit_part(&mut self, part: &Part) -> Result<(), Self::Error> {
 		match part {
-			// Graph traversals can access other tables.
-			Part::Lookup(_) => {
-				self.is_complete = false;
-				// Walk the lookup for any embedded expressions.
+			// Transparent — no field reads outside what walking yields.
+			Part::All
+			| Part::Flatten
+			| Part::Last
+			| Part::First
+			| Part::Field(_)
+			| Part::Optional
+			| Part::Doc
+			| Part::RepeatRecurse => {}
+
+			// Walk children — any embedded expression contributes deps.
+			Part::Where(_) | Part::Value(_) | Part::Destructure(_) | Part::Recurse(_, _, _) => {
 				part.visit(self)?;
 			}
-			// Start expressions (e.g., `(subexpr).field`) are opaque.
-			Part::Start(_) => {
+
+			// Opaque (flip + walk).
+			// Lookup: graph traversals can access other tables.
+			// Start: `(subexpr).field` — the start expr is itself opaque to
+			//   idiom-root extraction.
+			// Method: method dispatch is dynamic on the receiver's runtime
+			//   type; the method body is not in the AST.
+			Part::Lookup(_) | Part::Start(_) | Part::Method(_, _) => {
 				self.is_complete = false;
-				part.visit(self)?;
-			}
-			// All other parts: use default visitor traversal.
-			_ => {
 				part.visit(self)?;
 			}
 		}
 		Ok(())
 	}
+}
+
+impl FieldDependencyExtractor {
+	/// Handle a function call, applying projection-function-aware analysis
+	/// before falling through to default argument traversal.
+	///
+	/// Projection functions (`type::field("x")`, `type::fields(["x", "y"])`)
+	/// read fields of the current document by name, bypassing the idiom-walk
+	/// path. The match below mirrors the runtime classification in
+	/// `exec::function::builtin::type` — kept inline here (rather than
+	/// dispatched through the executor's `FunctionRegistry`) so this module
+	/// stays on the AST layer with no dependency on `exec`. The runtime
+	/// registry asserts these are the only projection functions; adding a new
+	/// one requires updating both sites.
+	///
+	/// Arguments are always walked after the projection analysis, so that
+	/// nested subqueries / params / etc. inside arg expressions still
+	/// contribute their own deps and may flip the flag.
+	fn visit_function_call_with_projection(
+		&mut self,
+		call: &FunctionCall,
+	) -> Result<(), std::convert::Infallible> {
+		if let Function::Normal(name) = &call.receiver {
+			match name.as_str() {
+				"type::field" => self.analyse_type_field(&call.arguments),
+				"type::fields" => self.analyse_type_fields(&call.arguments),
+				_ => {}
+			}
+		}
+		call.visit(self)?;
+		Ok(())
+	}
+
+	/// `type::field("static_name")` — single literal-string arg whose parsed
+	/// idiom starts with a static `Part::Field` adds the root to deps. Any
+	/// dynamic shape flips `is_complete = false`.
+	fn analyse_type_field(&mut self, args: &[Expr]) {
+		match args {
+			[Expr::Literal(Literal::String(s))] => match parse_idiom_root(s.as_str()) {
+				Some(root) => {
+					self.deps.insert(root);
+				}
+				None => {
+					self.is_complete = false;
+				}
+			},
+			_ => {
+				self.is_complete = false;
+			}
+		}
+	}
+
+	/// `type::fields(["a", "b.c"])` — single literal-array arg with all
+	/// literal-string elements adds each root to deps. Any dynamic element or
+	/// non-array arg flips `is_complete = false`.
+	fn analyse_type_fields(&mut self, args: &[Expr]) {
+		let [Expr::Literal(Literal::Array(items))] = args else {
+			self.is_complete = false;
+			return;
+		};
+		let mut pending = Vec::with_capacity(items.len());
+		for item in items {
+			let Expr::Literal(Literal::String(s)) = item else {
+				self.is_complete = false;
+				return;
+			};
+			let Some(root) = parse_idiom_root(s.as_str()) else {
+				self.is_complete = false;
+				return;
+			};
+			pending.push(root);
+		}
+		self.deps.extend(pending);
+	}
+}
+
+/// Parse a string as a SurrealQL idiom and return the root field name if the
+/// parsed idiom starts with a `Part::Field`. Returns `None` for parse errors
+/// and for idioms whose first part is not a static field reference
+/// (e.g. `$this.x`, `[0]`, function-call roots).
+fn parse_idiom_root(s: &str) -> Option<String> {
+	let idi: Idiom = crate::syn::idiom(s).ok()?.into();
+	match idi.0.first()? {
+		Part::Field(name) => Some(name.as_str().to_owned()),
+		_ => None,
+	}
+}
+
+/// Emit a tracing warning that a field-permission expression's deps could not
+/// be statically determined, forcing the all-computed-fields fallback for every
+/// row of `table`.
+///
+/// Does NOT include the permission expression source — that may contain
+/// schema-author-supplied literal secrets (see `SECURITY_GUIDE.md` §4 and
+/// CLAUDE.md "Never log sensitive user data or credentials"). Operators can
+/// inspect the expression themselves via `INFO FOR TABLE <table>` under their
+/// own auth.
+///
+/// `table` and `field` must be schema-identifier strings — never strings built
+/// from user record data.
+///
+/// Routing: plain `tracing::warn!`. The OTLP audit-log pipeline at
+/// `server/src/telemetry/audit_logs.rs` is attached to the tracing subscriber,
+/// so this lands in the compliance trail when OTLP is configured (precedent:
+/// `core/src/kvs/slowlog.rs:151`).
+pub(crate) fn warn_incomplete_perm_deps(table: &str, field: &str) {
+	tracing::warn!(
+		target: TARGET,
+		table = %table,
+		field = %field,
+		"Field-permission expression has opaque dependencies; \
+		 all computed fields on the named table will be evaluated for every \
+		 row. Inspect with `INFO FOR TABLE`."
+	);
 }
 
 /// Topologically sort computed field indices by their dependencies.
@@ -263,13 +434,20 @@ pub fn resolve_required_computed_fields(
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::Strand;
+
 	use super::*;
 	use crate::expr::operator::BinaryOperator;
 	use crate::expr::{Literal, Part};
 
+	/// Wrapper to keep test bodies short.
+	fn extract(expr: &Expr) -> ComputedDeps {
+		extract_computed_deps(expr)
+	}
+
 	/// Helper: build `Expr::Idiom` for a simple field name.
 	fn field_expr(name: &str) -> Expr {
-		Expr::Idiom(Idiom(vec![Part::Field(name.to_string())]))
+		Expr::Idiom(Idiom(vec![Part::Field(name.into())]))
 	}
 
 	/// Helper: build a literal integer expression.
@@ -277,11 +455,24 @@ mod tests {
 		Expr::Literal(Literal::Integer(n))
 	}
 
+	/// Helper: build a literal string expression.
+	fn str_lit(s: &str) -> Expr {
+		Expr::Literal(Literal::String(Strand::new(s)))
+	}
+
+	/// Helper: build a function call expression.
+	fn fn_call(name: &str, args: Vec<Expr>) -> Expr {
+		Expr::FunctionCall(Box::new(crate::expr::function::FunctionCall {
+			receiver: crate::expr::function::Function::Normal(name.to_owned()),
+			arguments: args,
+		}))
+	}
+
 	#[test]
 	fn simple_field_reference() {
 		// Expression: `b`
 		let expr = field_expr("b");
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["b"]);
 		assert!(deps.is_complete);
 	}
@@ -294,7 +485,7 @@ mod tests {
 			op: BinaryOperator::Add,
 			right: Box::new(field_expr("c")),
 		};
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["b", "c"]);
 		assert!(deps.is_complete);
 	}
@@ -307,7 +498,7 @@ mod tests {
 			op: BinaryOperator::Add,
 			right: Box::new(int_expr(1)),
 		};
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["d"]);
 		assert!(deps.is_complete);
 	}
@@ -316,11 +507,11 @@ mod tests {
 	fn nested_field_access() {
 		// Expression: `user.name.first` -- root dep is `user`
 		let expr = Expr::Idiom(Idiom(vec![
-			Part::Field("user".to_string()),
-			Part::Field("name".to_string()),
-			Part::Field("first".to_string()),
+			Part::Field(Strand::new_static("user")),
+			Part::Field(Strand::new_static("name")),
+			Part::Field(Strand::new_static("first")),
 		]));
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["user"]);
 		assert!(deps.is_complete);
 	}
@@ -329,7 +520,7 @@ mod tests {
 	fn param_marks_incomplete() {
 		// Expression: `$param`
 		let expr = Expr::Param(crate::expr::Param::from("param".to_string()));
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert!(deps.fields.is_empty());
 		assert!(!deps.is_complete);
 	}
@@ -342,7 +533,7 @@ mod tests {
 			op: BinaryOperator::Multiply,
 			right: Box::new(int_expr(1000)),
 		};
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert!(deps.fields.is_empty());
 		assert!(deps.is_complete);
 	}
@@ -355,7 +546,7 @@ mod tests {
 			op: BinaryOperator::Add,
 			right: Box::new(field_expr("a")),
 		};
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["a"]);
 		assert!(deps.is_complete);
 	}
@@ -368,7 +559,7 @@ mod tests {
 			op: BinaryOperator::Multiply,
 			right: Box::new(int_expr(2)),
 		};
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["a"]);
 		assert!(deps.is_complete);
 	}
@@ -379,7 +570,7 @@ mod tests {
 	fn this_field_expr(name: &str) -> Expr {
 		Expr::Idiom(Idiom(vec![
 			Part::Start(Expr::Param(crate::expr::Param::from("this".to_string()))),
-			Part::Field(name.to_string()),
+			Part::Field(name.into()),
 		]))
 	}
 
@@ -387,20 +578,20 @@ mod tests {
 	fn self_field_expr(name: &str) -> Expr {
 		Expr::Idiom(Idiom(vec![
 			Part::Start(Expr::Param(crate::expr::Param::from("self".to_string()))),
-			Part::Field(name.to_string()),
+			Part::Field(name.into()),
 		]))
 	}
 
 	#[test]
 	fn this_dot_field() {
-		let deps = extract_computed_deps(&this_field_expr("a"));
+		let deps = extract(&this_field_expr("a"));
 		assert_eq!(deps.fields, vec!["a"]);
 		assert!(deps.is_complete);
 	}
 
 	#[test]
 	fn self_dot_field() {
-		let deps = extract_computed_deps(&self_field_expr("a"));
+		let deps = extract(&self_field_expr("a"));
 		assert_eq!(deps.fields, vec!["a"]);
 		assert!(deps.is_complete);
 	}
@@ -410,11 +601,11 @@ mod tests {
 		// $this.a.b.c -- root dep is `a`
 		let expr = Expr::Idiom(Idiom(vec![
 			Part::Start(Expr::Param(crate::expr::Param::from("this".to_string()))),
-			Part::Field("a".to_string()),
-			Part::Field("b".to_string()),
-			Part::Field("c".to_string()),
+			Part::Field(Strand::new_static("a")),
+			Part::Field(Strand::new_static("b")),
+			Part::Field(Strand::new_static("c")),
 		]));
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["a"]);
 		assert!(deps.is_complete);
 	}
@@ -427,7 +618,7 @@ mod tests {
 			op: BinaryOperator::Add,
 			right: Box::new(this_field_expr("b")),
 		};
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["a", "b"]);
 		assert!(deps.is_complete);
 	}
@@ -444,7 +635,7 @@ mod tests {
 			op: BinaryOperator::Add,
 			right: Box::new(self_field_expr("c")),
 		};
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["a", "b", "c"]);
 		assert!(deps.is_complete);
 	}
@@ -461,7 +652,7 @@ mod tests {
 				self_field_expr("c"),
 			]))],
 		}));
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["a", "b", "c"]);
 		assert!(deps.is_complete);
 	}
@@ -478,7 +669,7 @@ mod tests {
 				right: Box::new(self_field_expr("c")),
 			}),
 		};
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["a", "b", "c"]);
 		assert!(deps.is_complete);
 	}
@@ -487,7 +678,7 @@ mod tests {
 	fn this_alone_marks_incomplete() {
 		// $this (bare param, not an idiom)
 		let expr = Expr::Param(crate::expr::Param::from("this".to_string()));
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert!(deps.fields.is_empty());
 		assert!(!deps.is_complete);
 	}
@@ -499,7 +690,7 @@ mod tests {
 			Part::Start(Expr::Param(crate::expr::Param::from("this".to_string()))),
 			Part::All,
 		]));
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert!(deps.fields.is_empty());
 		assert!(!deps.is_complete);
 	}
@@ -509,9 +700,9 @@ mod tests {
 		// $this["a"] -- bracket string access, equivalent to $this.a
 		let expr = Expr::Idiom(Idiom(vec![
 			Part::Start(Expr::Param(crate::expr::Param::from("this".to_string()))),
-			Part::Value(Expr::Literal(Literal::String("a".to_string()))),
+			Part::Value(Expr::Literal(Literal::String(Strand::new_static("a")))),
 		]));
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["a"]);
 		assert!(deps.is_complete);
 	}
@@ -521,9 +712,9 @@ mod tests {
 		// $self["c"] -- bracket string access, equivalent to $self.c
 		let expr = Expr::Idiom(Idiom(vec![
 			Part::Start(Expr::Param(crate::expr::Param::from("self".to_string()))),
-			Part::Value(Expr::Literal(Literal::String("c".to_string()))),
+			Part::Value(Expr::Literal(Literal::String(Strand::new_static("c")))),
 		]));
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["c"]);
 		assert!(deps.is_complete);
 	}
@@ -539,11 +730,11 @@ mod tests {
 				op: BinaryOperator::Add,
 				right: Box::new(Expr::Idiom(Idiom(vec![
 					Part::Start(Expr::Param(crate::expr::Param::from("self".to_string()))),
-					Part::Value(Expr::Literal(Literal::String("c".to_string()))),
+					Part::Value(Expr::Literal(Literal::String(Strand::new_static("c")))),
 				]))),
 			}),
 		};
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert_eq!(deps.fields, vec!["a", "b", "c"]);
 		assert!(deps.is_complete);
 	}
@@ -553,10 +744,231 @@ mod tests {
 		// $foo.a -- unknown param, not $this/$self
 		let expr = Expr::Idiom(Idiom(vec![
 			Part::Start(Expr::Param(crate::expr::Param::from("foo".to_string()))),
-			Part::Field("a".to_string()),
+			Part::Field(Strand::new_static("a")),
 		]));
-		let deps = extract_computed_deps(&expr);
+		let deps = extract(&expr);
 		assert!(!deps.is_complete);
+	}
+
+	// ===== Opaque-marking tests (one per match arm) =====
+
+	/// Helper: parse a SurrealQL expression string into an `expr::Expr`.
+	/// Using the parser keeps the tests resilient to small AST struct
+	/// shape changes — they exercise the same surface a user would write.
+	fn parse(s: &str) -> Expr {
+		crate::syn::expr(s).expect("test expression must parse").into()
+	}
+
+	#[test]
+	fn select_subquery_marks_incomplete() {
+		// `(SELECT * FROM t) + b` -- known dep `b` extracted, but the subquery
+		// makes the analysis incomplete.
+		let expr = parse("(SELECT * FROM t) + b");
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+		assert!(deps.fields.contains(&"b".to_string()));
+	}
+
+	#[test]
+	fn create_subquery_marks_incomplete() {
+		let expr = parse("(CREATE t SET x = 1).y");
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+	}
+
+	#[test]
+	fn update_subquery_marks_incomplete() {
+		let expr = parse("(UPDATE t SET x = 1).y");
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+	}
+
+	#[test]
+	fn upsert_subquery_marks_incomplete() {
+		let expr = parse("(UPSERT t SET x = 1).y");
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+	}
+
+	#[test]
+	fn delete_subquery_marks_incomplete() {
+		let expr = parse("(DELETE t).y");
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+	}
+
+	#[test]
+	fn relate_subquery_marks_incomplete() {
+		let expr = parse("(RELATE a:1 -> rel -> b:1).y");
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+	}
+
+	#[test]
+	fn insert_subquery_marks_incomplete() {
+		let expr = parse("(INSERT INTO t { x: 1 }).y");
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+	}
+
+	#[test]
+	fn closure_marks_incomplete() {
+		// `|$x| $x + a` -- closure flips incompleteness.
+		let expr = parse("|$x: any| $x + a");
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+	}
+
+	#[test]
+	fn graph_lookup_marks_incomplete() {
+		// `->friends->person` graph traversal -- contains a Part::Lookup which
+		// is opaque to static analysis.
+		let expr = parse("->friends->person");
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+	}
+
+	#[test]
+	fn start_with_arbitrary_expr_marks_incomplete() {
+		// `(a + b).field` -- the idiom's first part is a `Part::Start` over
+		// an arbitrary expression, which is opaque to root-name extraction.
+		let expr = parse("(a + b).field");
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+	}
+
+	// ===== Composition: opaque inside other constructs =====
+
+	#[test]
+	fn subquery_inside_function_args() {
+		// Subquery inside fn args must still flip incomplete via
+		// default-traversal recursion. `a` is still recovered.
+		let expr = parse("array::len([a, (SELECT * FROM t)])");
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+		assert!(deps.fields.contains(&"a".to_string()));
+	}
+
+	#[test]
+	fn subquery_inside_ifelse() {
+		// Both branches walked. `a` and `b` extracted from cond/else;
+		// subquery in the then-branch flips incomplete.
+		let expr = parse("IF a > 0 { (SELECT * FROM t) } ELSE { b }");
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+		assert!(deps.fields.contains(&"a".to_string()));
+		assert!(deps.fields.contains(&"b".to_string()));
+	}
+
+	// ===== Control-flow happy path (must walk children) =====
+
+	#[test]
+	fn ifelse_extracts_branch_deps() {
+		let expr = parse("IF a { b } ELSE { c }");
+		let deps = extract(&expr);
+		assert!(deps.is_complete);
+		assert!(deps.fields.contains(&"a".to_string()));
+		assert!(deps.fields.contains(&"b".to_string()));
+		assert!(deps.fields.contains(&"c".to_string()));
+	}
+
+	// ===== type::field / type::fields projection tests =====
+
+	#[test]
+	fn type_field_literal_extracts_root() {
+		let expr = fn_call("type::field", vec![str_lit("admin_only")]);
+		let deps = extract(&expr);
+		assert!(deps.is_complete);
+		assert_eq!(deps.fields, vec!["admin_only"]);
+	}
+
+	#[test]
+	fn type_field_dotted_extracts_root() {
+		let expr = fn_call("type::field", vec![str_lit("user.name")]);
+		let deps = extract(&expr);
+		assert!(deps.is_complete);
+		assert_eq!(deps.fields, vec!["user"]);
+	}
+
+	#[test]
+	fn type_field_dollar_this_marks_incomplete() {
+		// `type::field("$this.x")` -- parsed idiom starts with Start, not Field.
+		let expr = fn_call("type::field", vec![str_lit("$this.x")]);
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+	}
+
+	#[test]
+	fn type_field_param_arg_marks_incomplete() {
+		// `type::field($name)` -- dynamic arg.
+		let expr =
+			fn_call("type::field", vec![Expr::Param(crate::expr::Param::from("name".to_string()))]);
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+	}
+
+	#[test]
+	fn type_field_concat_arg_marks_incomplete() {
+		// `type::field("a" + b)` -- the arg is a Binary, not a single string
+		// literal, so the projection analyser returns Incomplete.
+		let expr = fn_call(
+			"type::field",
+			vec![Expr::Binary {
+				left: Box::new(str_lit("a")),
+				op: BinaryOperator::Add,
+				right: Box::new(field_expr("b")),
+			}],
+		);
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+		// The Binary's inner field `b` is still discovered via arg-walking.
+		assert!(deps.fields.contains(&"b".to_string()));
+	}
+
+	#[test]
+	fn type_fields_array_of_literals_extracts_roots() {
+		let expr = fn_call(
+			"type::fields",
+			vec![Expr::Literal(Literal::Array(vec![str_lit("a"), str_lit("b.c")]))],
+		);
+		let deps = extract(&expr);
+		assert!(deps.is_complete);
+		assert_eq!(deps.fields, vec!["a", "b"]);
+	}
+
+	#[test]
+	fn type_fields_with_dynamic_element_marks_incomplete() {
+		// `type::fields([a])` -- the array contains an idiom, not a string
+		// literal.
+		let expr =
+			fn_call("type::fields", vec![Expr::Literal(Literal::Array(vec![field_expr("a")]))]);
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+	}
+
+	#[test]
+	fn type_fields_non_array_marks_incomplete() {
+		// `type::fields($names)`
+		let expr = fn_call(
+			"type::fields",
+			vec![Expr::Param(crate::expr::Param::from("names".to_string()))],
+		);
+		let deps = extract(&expr);
+		assert!(!deps.is_complete);
+	}
+
+	#[test]
+	fn type_field_combined_with_other_field() {
+		// `type::field("a") + b` -- both contribute to deps; analysis stays
+		// complete because both halves are statically resolvable.
+		let expr = Expr::Binary {
+			left: Box::new(fn_call("type::field", vec![str_lit("a")])),
+			op: BinaryOperator::Add,
+			right: Box::new(field_expr("b")),
+		};
+		let deps = extract(&expr);
+		assert!(deps.is_complete);
+		assert_eq!(deps.fields, vec!["a", "b"]);
 	}
 
 	// ===== Topological sort tests =====

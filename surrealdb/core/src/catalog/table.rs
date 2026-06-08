@@ -1,4 +1,6 @@
-use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
+use revision::{
+	DeserializeRevisioned, Revisioned, SerializeRevisioned, SkipRevisioned, revisioned,
+};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
@@ -40,7 +42,25 @@ impl DeserializeRevisioned for TableId {
 	}
 }
 
-#[revisioned(revision = 1)]
+impl SkipRevisioned for TableId {
+	#[inline]
+	fn skip_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), revision::Error> {
+		<u32 as SkipRevisioned>::skip_revisioned(reader)
+	}
+}
+
+impl revision::WalkRevisioned for TableId {
+	type Walker<'r, R: revision::BorrowedReader + 'r> = revision::LeafWalker<'r, TableId, R>;
+
+	#[inline]
+	fn walk_revisioned<'r, R: revision::BorrowedReader>(
+		reader: &'r mut R,
+	) -> Result<Self::Walker<'r, R>, revision::Error> {
+		Ok(revision::LeafWalker::new(reader))
+	}
+}
+
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TableDefinition {
 	pub(crate) namespace_id: NamespaceId,
@@ -63,6 +83,17 @@ pub struct TableDefinition {
 	pub(crate) cache_tables_ts: Uuid,
 	/// The last time that a DEFINE INDEX was added to this table
 	pub(crate) cache_indexes_ts: Uuid,
+
+	/// Optional alias used as the GraphQL type / query / mutation prefix for
+	/// this table. See GitHub issue #4537. `Option<String>::default()` is
+	/// `None`, so the standard `#[revision]` default is sufficient.
+	#[revision(start = 2)]
+	pub(crate) graphql_alias: Option<String>,
+
+	/// Reason emitted on the GraphQL `@deprecated` directive for every
+	/// auto-generated Query/Mutation field that targets this table.
+	#[revision(start = 2)]
+	pub(crate) graphql_deprecated: Option<String>,
 }
 
 impl_kv_value_revisioned!(TableDefinition);
@@ -91,6 +122,8 @@ impl TableDefinition {
 			cache_events_ts: now,
 			cache_tables_ts: now,
 			cache_indexes_ts: now,
+			graphql_alias: None,
+			graphql_deprecated: None,
 		}
 	}
 
@@ -106,7 +139,7 @@ impl TableDefinition {
 	fn to_sql_definition(&self) -> DefineTableStatement {
 		DefineTableStatement {
 			id: Some(self.table_id.0),
-			name: sql::Expr::Table(self.name.clone().into_string()),
+			name: sql::Expr::Table(self.name.clone()),
 			drop: self.drop,
 			full: self.schemafull,
 			view: self.view.clone().map(|v| v.to_sql_definition()),
@@ -115,9 +148,11 @@ impl TableDefinition {
 			comment: self
 				.comment
 				.clone()
-				.map(|v| sql::Expr::Literal(sql::Literal::String(v)))
+				.map(|v| sql::Expr::Literal(sql::Literal::String(v.into())))
 				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 			table_type: self.table_type.clone().into(),
+			graphql_alias: self.graphql_alias.clone(),
+			graphql_deprecated: self.graphql_deprecated.clone(),
 			..Default::default()
 		}
 	}
@@ -132,15 +167,17 @@ impl ToSql for TableDefinition {
 impl InfoStructure for TableDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.into_string().into(),
-			"drop".to_string() => self.drop.into(),
-			"schemafull".to_string() => self.schemafull.into(),
-			"kind".to_string() => self.table_type.structure(),
-			"view".to_string(), if let Some(v) = self.view => v.structure(),
-			"changefeed".to_string(), if let Some(v) = self.changefeed => v.structure(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-			"id".to_string() => self.table_id.0.into(),
+			"name" => Value::String(self.name.into()),
+			"drop" => self.drop.into(),
+			"schemafull" => self.schemafull.into(),
+			"kind" => self.table_type.structure(),
+			"view", if let Some(v) = self.view => v.structure(),
+			"changefeed", if let Some(v) = self.changefeed => v.structure(),
+			"permissions" => self.permissions.structure(),
+			"comment", if let Some(v) = self.comment => v.into(),
+			"graphql_alias", if let Some(v) = self.graphql_alias => v.into(),
+			"graphql_deprecated", if let Some(v) = self.graphql_deprecated => v.into(),
+			"id" => self.table_id.0.into(),
 		})
 	}
 }
@@ -168,7 +205,7 @@ impl ToSql for TableType {
 						if idx != 0 {
 							f.push_str(" | ");
 						}
-						write_sql!(f, sql_fmt, "{}", EscapeKwFreeIdent(k));
+						write_sql!(f, sql_fmt, "{}", EscapeKwFreeIdent(k.as_str()));
 					}
 				}
 				if !rel.to.is_empty() {
@@ -177,7 +214,7 @@ impl ToSql for TableType {
 						if idx != 0 {
 							f.push_str(" | ");
 						}
-						write_sql!(f, sql_fmt, "{}", EscapeKwFreeIdent(k));
+						write_sql!(f, sql_fmt, "{}", EscapeKwFreeIdent(k.as_str()));
 					}
 				}
 				if rel.enforced {
@@ -192,18 +229,18 @@ impl InfoStructure for TableType {
 	fn structure(self) -> Value {
 		match self {
 			Self::Any => Value::from(map! {
-				"kind".to_string() => "ANY".into(),
+				"kind" => "ANY".into(),
 			}),
 			Self::Normal => Value::from(map! {
-				"kind".to_string() => "NORMAL".into(),
+				"kind" => "NORMAL".into(),
 			}),
 			Self::Relation(rel) => Value::from(map! {
-				"kind".to_string() => "RELATION".into(),
-				"in".to_string(), if !rel.from.is_empty() =>
-					rel.from.into_iter().map(Value::from).collect::<Vec<_>>().into(),
-				"out".to_string(), if !rel.to.is_empty() =>
-					rel.to.into_iter().map(Value::from).collect::<Vec<_>>().into(),
-				"enforced".to_string() => rel.enforced.into()
+				"kind" => "RELATION".into(),
+				"in", if !rel.from.is_empty() =>
+					rel.from.into_iter().map(Value::Table).collect::<Vec<_>>().into(),
+				"out", if !rel.to.is_empty() =>
+					rel.to.into_iter().map(Value::Table).collect::<Vec<_>>().into(),
+				"enforced" => rel.enforced.into()
 			}),
 		}
 	}
@@ -217,13 +254,13 @@ pub struct Relation {
 	/// Contains the tables the relation originates from,
 	/// if empty then there was no `IN` clause
 	#[revision(start = 2)]
-	pub from: Vec<String>,
+	pub from: Vec<TableName>,
 	#[revision(end = 2, convert_fn = "rev_convert_to")]
 	pub old_to: Option<Kind>,
 	/// Contains the tables the relation goes to,
 	/// if empty then there was no `OUT` clause
 	#[revision(start = 2)]
-	pub to: Vec<String>,
+	pub to: Vec<TableName>,
 	pub enforced: bool,
 }
 
@@ -236,7 +273,7 @@ impl Relation {
 					x,
 				)));
 			};
-			self.from = x.into_iter().map(|x| x.into_string()).collect()
+			self.from = x
 		}
 		Ok(())
 	}
@@ -248,7 +285,7 @@ impl Relation {
 					x,
 				)));
 			};
-			self.to = x.into_iter().map(|x| x.into_string()).collect()
+			self.to = x
 		}
 		Ok(())
 	}

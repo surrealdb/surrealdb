@@ -12,6 +12,10 @@
 mod common;
 #[cfg(all(storage, not(target_family = "wasm")))]
 mod external;
+#[cfg(all(storage, not(target_family = "wasm")))]
+mod external_by_key;
+#[cfg(all(storage, not(target_family = "wasm")))]
+mod external_common;
 mod full_sort;
 mod shuffle;
 mod topk;
@@ -19,6 +23,8 @@ mod topk;
 pub use common::{OrderByField, SortDirection, SortKey};
 #[cfg(all(storage, not(target_family = "wasm")))]
 pub use external::ExternalSort;
+#[cfg(all(storage, not(target_family = "wasm")))]
+pub use external_by_key::ExternalSortByKey;
 pub use full_sort::{Sort, SortByKey};
 pub use shuffle::RandomShuffle;
 pub use topk::{SortTopK, SortTopKByKey};

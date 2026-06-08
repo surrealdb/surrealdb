@@ -1,3 +1,4 @@
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
@@ -19,7 +20,7 @@ impl ToSql for ApiConfig {
 				if idx != 0 {
 					f.push_str(", ");
 				}
-				for (idx, s) in m.name.split("::").enumerate() {
+				for (idx, s) in m.name.as_str().split("::").enumerate() {
 					if idx != 0 {
 						f.push_str("::");
 					}
@@ -57,7 +58,7 @@ impl From<crate::expr::statements::define::config::api::ApiConfig> for ApiConfig
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct Middleware {
-	pub name: String,
+	pub name: Strand,
 	pub args: Vec<Expr>,
 }
 

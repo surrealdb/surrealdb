@@ -1,7 +1,6 @@
-use std::collections::btree_map::Entry;
-
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_collections::Entry;
 use surrealdb_types::ToSql;
 
 use crate::ctx::FrozenContext;
@@ -10,12 +9,10 @@ use crate::exe::try_join_all_buffered;
 use crate::exec::field_path::{FieldPath, FieldPathPart};
 use crate::expr::part::Part;
 use crate::expr::{Expr, FlowResultExt as _, Literal};
-use crate::val::{Object, Value};
+use crate::val::{Object, Strand, Value};
 
 impl Value {
 	/// Asynchronous method for setting a field on a `Value`
-	///
-	/// Was marked recursive
 	pub(crate) async fn set(
 		&mut self,
 		stk: &mut Stk,
@@ -64,7 +61,7 @@ impl Value {
 								let futs = arr.iter_mut().map(|v| {
 									scope.run(|stk| v.set(stk, ctx, opt, prev, val.clone()))
 								});
-								try_join_all_buffered(futs)
+								try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
 							})
 							.await?;
 							return Ok(());
@@ -89,7 +86,7 @@ impl Value {
 								let futs = arr.iter_mut().map(|v| {
 									scope.run(|stk| v.set(stk, ctx, opt, prev, val.clone()))
 								});
-								try_join_all_buffered(futs)
+								try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
 							})
 							.await?;
 							return Ok(());
@@ -126,7 +123,7 @@ impl Value {
 										let futs = v.iter_mut().map(|v| {
 											scope.run(|stk| v.set(stk, ctx, opt, path, val.clone()))
 										});
-										try_join_all_buffered(futs)
+										try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
 									})
 									.await?;
 									return Ok(());
@@ -135,7 +132,10 @@ impl Value {
 								}
 							}
 							Value::Number(i) => {
-								if let Some(v) = arr.get_mut(i.to_usize()) {
+								let Some(idx) = i.as_array_index() else {
+									return Ok(());
+								};
+								if let Some(v) = arr.get_mut(idx) {
 									place = v;
 								} else {
 									return Ok(());
@@ -172,7 +172,7 @@ impl Value {
 								let futs = v.iter_mut().map(|v| {
 									scope.run(|stk| v.set(stk, ctx, opt, path, val.clone()))
 								});
-								try_join_all_buffered(futs)
+								try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
 							})
 							.await?;
 						}
@@ -181,7 +181,7 @@ impl Value {
 								let futs = v.iter_mut().map(|(_, v)| {
 									scope.run(|stk| v.set(stk, ctx, opt, path, val.clone()))
 								});
-								try_join_all_buffered(futs)
+								try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
 							})
 							.await?;
 						}
@@ -245,18 +245,21 @@ impl Value {
 		Ok(())
 	}
 
-	/// Synchronous method for setting a value at a FieldPath.
+	/// Synchronous method for setting a value at a FieldPath, consuming `val`.
 	///
 	/// Unlike `set()`, this doesn't require async/computation - just navigation.
-	/// When encountering an array, applies the remaining path to all elements.
-	/// This is used for output path navigation in the projection operator.
-	pub fn set_at_field_path(&mut self, path: &FieldPath, val: Value) {
-		self.set_at_field_path_depth(path, &val, 0);
+	/// When encountering an array, applies the remaining path to all elements
+	/// (cloning `val` for all-but-last and moving into the last). Otherwise
+	/// `val` is moved straight to the leaf assignment. This is used for output
+	/// path navigation in the projection operator, where each computed field
+	/// value is produced fresh and would otherwise be cloned into the output.
+	pub fn set_at_field_path_owned(&mut self, path: &FieldPath, val: Value) {
+		self.set_at_field_path_owned_depth(path, val, 0);
 	}
 
-	fn set_at_field_path_depth(&mut self, path: &FieldPath, val: &Value, depth: usize) {
+	fn set_at_field_path_owned_depth(&mut self, path: &FieldPath, val: Value, depth: usize) {
 		if depth >= path.len() {
-			*self = val.clone();
+			*self = val;
 			return;
 		}
 
@@ -267,57 +270,61 @@ impl Value {
 			// Object with Field/Lookup key
 			(Value::Object(obj), FieldPathPart::Field(key) | FieldPathPart::Lookup(key)) => {
 				if is_last {
-					obj.insert(key.clone(), val.clone());
+					obj.insert(key.clone(), val);
 				} else {
 					let nested =
 						obj.entry(key.clone()).or_insert_with(|| Value::Object(Object::default()));
-					nested.set_at_field_path_depth(path, val, depth + 1);
+					nested.set_at_field_path_owned_depth(path, val, depth + 1);
 				}
 			}
 			// Index on array - must come before the catch-all array pattern
 			(Value::Array(arr), FieldPathPart::Index(i)) if *i < arr.len() => {
 				if is_last {
-					arr[*i] = val.clone();
+					arr[*i] = val;
 				} else {
-					arr[*i].set_at_field_path_depth(path, val, depth + 1);
+					arr[*i].set_at_field_path_owned_depth(path, val, depth + 1);
 				}
 			}
-			// First element - must come before the catch-all array pattern
+			// First element
 			(Value::Array(arr), FieldPathPart::First) if !arr.is_empty() => {
 				if is_last {
-					arr[0] = val.clone();
+					arr[0] = val;
 				} else {
-					arr[0].set_at_field_path_depth(path, val, depth + 1);
+					arr[0].set_at_field_path_owned_depth(path, val, depth + 1);
 				}
 			}
-			// Last element - must come before the catch-all array pattern
+			// Last element
 			(Value::Array(arr), FieldPathPart::Last) if !arr.is_empty() => {
 				let last_idx = arr.len() - 1;
 				if is_last {
-					arr[last_idx] = val.clone();
+					arr[last_idx] = val;
 				} else {
-					arr[last_idx].set_at_field_path_depth(path, val, depth + 1);
+					arr[last_idx].set_at_field_path_owned_depth(path, val, depth + 1);
 				}
 			}
-			// Array with Field/Lookup key: apply remaining path to all elements
+			// Array with Field/Lookup key: apply remaining path to all elements.
+			// Clone `val` for all-but-last, move into the last element.
 			(Value::Array(arr), FieldPathPart::Field(_) | FieldPathPart::Lookup(_)) => {
-				for elem in arr.iter_mut() {
-					elem.set_at_field_path_depth(path, val, depth);
+				if let Some((last, rest)) = arr.split_last_mut() {
+					for elem in rest {
+						elem.set_at_field_path_owned_depth(path, val.clone(), depth);
+					}
+					last.set_at_field_path_owned_depth(path, val, depth);
 				}
 			}
 			// Non-object with Field/Lookup: replace with object containing the path
 			(target, FieldPathPart::Field(key) | FieldPathPart::Lookup(key)) => {
 				let mut obj = Object::default();
 				if is_last {
-					obj.insert(key.clone(), val.clone());
+					obj.insert(key.clone(), val);
 				} else {
 					let mut nested = Value::Object(Object::default());
-					nested.set_at_field_path_depth(path, val, depth + 1);
+					nested.set_at_field_path_owned_depth(path, val, depth + 1);
 					obj.insert(key.clone(), nested);
 				}
 				*target = Value::Object(obj);
 			}
-			_ => {} // Other cases: no-op
+			_ => {} // Other cases: no-op (val is dropped)
 		}
 	}
 
@@ -330,22 +337,22 @@ impl Value {
 		path: &[Part],
 	) -> Result<()> {
 		for p in path.iter().rev() {
-			let name = match p {
-				Part::Lookup(x) => x.to_sql(),
-				Part::Field(f) => f.as_str().to_owned(),
+			let name: Strand = match p {
+				Part::Lookup(x) => x.to_sql().into(),
+				Part::Field(f) => f.as_str().into(),
 				Part::Value(x) => {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 					match v {
 						Value::String(x) => x,
-						Value::RecordId(x) => x.to_sql(),
-						Value::Number(x) => x.to_sql(),
-						Value::Range(x) => x.to_sql(),
+						Value::RecordId(x) => x.to_sql().into(),
+						Value::Number(x) => x.to_sql().into(),
+						Value::Range(x) => x.to_sql().into(),
 						_ => return Ok(()),
 					}
 				}
 				x => {
 					if let Some(idx) = x.as_old_index() {
-						idx.to_string()
+						idx.to_string().into()
 					} else {
 						return Ok(());
 					}

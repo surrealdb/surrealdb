@@ -8,7 +8,7 @@ use surrealdb_types::{Array, Number, Value};
 
 // Current implementation as of https://github.com/surrealdb/surrealdb/pull/6047
 // surrealdb/core/src/expr/array.rs
-#[allow(clippy::mutable_key_type)]
+#[allow(clippy::mutable_key_type, clippy::needless_pass_by_value)]
 fn array_complement(first: Array, other: Array) -> Array {
 	let mut out = Array::with_capacity(first.len());
 	let mut set = BTreeSet::new();

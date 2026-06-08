@@ -1,22 +1,36 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
-use crate::fmt::{CoverStmts, EscapeKwFreeIdent, QuoteStr};
-use crate::sql::{Base, Expr};
-use crate::types::PublicDuration;
+use crate::fmt::{CoverStmts, QuoteStr};
+use crate::sql::{Base, Expr, Literal};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 /// AST node for `ALTER ACCESS`.
 pub struct AlterAccessStatement {
-	pub name: String,
+	pub name: Expr,
 	pub base: Base,
 	pub if_exists: bool,
 	pub authenticate: AlterKind<Expr>,
-	pub grant_duration: AlterKind<PublicDuration>,
-	pub token_duration: AlterKind<PublicDuration>,
-	pub session_duration: AlterKind<PublicDuration>,
+	pub grant_duration: AlterKind<crate::types::PublicDuration>,
+	pub token_duration: AlterKind<crate::types::PublicDuration>,
+	pub session_duration: AlterKind<crate::types::PublicDuration>,
 	pub comment: AlterKind<String>,
+}
+
+impl Default for AlterAccessStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			base: Base::Root,
+			if_exists: false,
+			authenticate: AlterKind::None,
+			grant_duration: AlterKind::None,
+			token_duration: AlterKind::None,
+			session_duration: AlterKind::None,
+			comment: AlterKind::None,
+		}
+	}
 }
 
 impl ToSql for AlterAccessStatement {
@@ -25,7 +39,7 @@ impl ToSql for AlterAccessStatement {
 		if self.if_exists {
 			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write_sql!(f, fmt, " {} ON {}", EscapeKwFreeIdent(&self.name), &self.base);
+		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), &self.base);
 
 		match self.authenticate {
 			AlterKind::Set(ref v) => write_sql!(f, fmt, " AUTHENTICATE {}", CoverStmts(v)),
@@ -67,7 +81,7 @@ impl ToSql for AlterAccessStatement {
 impl From<AlterAccessStatement> for crate::expr::statements::alter::AlterAccessStatement {
 	fn from(v: AlterAccessStatement) -> Self {
 		crate::expr::statements::alter::AlterAccessStatement {
-			name: v.name,
+			name: v.name.into(),
 			base: v.base.into(),
 			if_exists: v.if_exists,
 			authenticate: v.authenticate.into(),
@@ -95,7 +109,7 @@ impl From<crate::expr::statements::alter::AlterAccessStatement> for AlterAccessS
 	fn from(v: crate::expr::statements::alter::AlterAccessStatement) -> Self {
 		use crate::types::PublicDuration;
 		AlterAccessStatement {
-			name: v.name,
+			name: v.name.into(),
 			base: v.base.into(),
 			if_exists: v.if_exists,
 			authenticate: v.authenticate.into(),

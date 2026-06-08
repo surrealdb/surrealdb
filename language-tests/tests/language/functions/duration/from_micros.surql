@@ -14,7 +14,7 @@ value = "50µs"
 value = "292471y10w6d4h54s775ms807µs"
 
 [[test.results]]
-value = "584942y21w5d8h1m49s551ms615µs"
+error = 'Failed to compute: "duration::from_micros(-1)", as the operation results in a negative value.'
 
 */
 duration::from_micros(3);

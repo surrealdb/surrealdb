@@ -1,7 +1,8 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::Index;
+use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -35,7 +36,7 @@ impl RemoveAnalyzerStatement {
 	) -> Result<Value> {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Analyzer, Base::Db)?;
 		// Compute the name
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "analyzer name").await?;
 		// Get the transaction
@@ -52,6 +53,22 @@ impl RemoveAnalyzerStatement {
 				}
 			}
 		};
+		// Full-text indexes load their analyzer via `FullTextIndex::new`, which
+		// fails with AzNotFound if the analyzer is gone — refuse removal while
+		// any index still references it.
+		for tb in txn.all_tb(ns, db, None).await?.iter() {
+			for ix in txn.all_tb_indexes(ns, db, &tb.name, None).await?.iter() {
+				if let Index::FullText(p) = &ix.index
+					&& p.analyzer.as_str() == az.name.as_str()
+				{
+					return Err(anyhow::Error::new(Error::AzInUse {
+						name: az.name.to_string(),
+						table: tb.name.to_string(),
+						index: ix.name.to_string(),
+					}));
+				}
+			}
+		}
 		// Delete the definition
 		let key = crate::key::database::az::new(ns, db, &az.name);
 		txn.del(&key).await?;
@@ -60,7 +77,6 @@ impl RemoveAnalyzerStatement {
 		// Cleanup in-memory mappers if not used anymore
 		let azs = txn.all_db_analyzers(ns, db, None).await?;
 		ctx.get_index_stores().mappers().cleanup(&azs);
-		// TODO Check that the analyzer is not used in any schema
 		// Ok all good
 		Ok(Value::None)
 	}

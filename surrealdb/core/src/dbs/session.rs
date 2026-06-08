@@ -10,7 +10,14 @@ use crate::iam::{Auth, Level, Role};
 use crate::types::{PublicValue, PublicVariables};
 use crate::val::Value;
 
-/// Specifies the current session information when processing a query.
+/// Caller-supplied session input for one WebSocket connection or one HTTP/RPC request.
+///
+/// **Lifetime:** shared by many queries on that connection or request.
+/// **Source of truth:** JWT/basic auth, RPC headers, `USE` namespace/database, variables.
+///
+/// At the start of work, [`crate::kvs::Datastore::setup_options`] derives the stack-local
+/// [`crate::dbs::Options`] frame; [`crate::ctx::Context::attach_session`] copies tenant identity
+/// and realtime capability into ambient [`crate::ctx::Context`].
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Session {
 	/// The current session [`Auth`] information
@@ -44,7 +51,7 @@ pub struct Session {
 	pub redact_volatile_explain_attrs: bool,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub enum NewPlannerStrategy {
 	/// Try the new planner for read-only statements, fall back to compute on Unimplemented.
 	#[default]
@@ -139,19 +146,19 @@ impl Session {
 	pub(crate) fn values(&self) -> Vec<(&'static str, Value)> {
 		use crate::sql::expression::convert_public_value_to_internal;
 
-		let access = self.ac.clone().map(|x| x.into()).unwrap_or(Value::None);
+		let access = self.ac.as_deref().map(Value::from).unwrap_or(Value::None);
 		let auth = self.rd.clone().map(convert_public_value_to_internal).unwrap_or(Value::None);
 		let token = self.tk.clone().map(convert_public_value_to_internal).unwrap_or(Value::None);
 		let session = Value::from(map! {
-			"ac".to_string() => access.clone(),
-			"exp".to_string() => self.exp.map(Value::from).unwrap_or(Value::None),
-			"db".to_string() => self.db.clone().map(|x| x.into()).unwrap_or(Value::None),
-			"id".to_string() => self.id.map(|x| Value::Uuid(x.into())).unwrap_or(Value::None),
-			"ip".to_string() => self.ip.clone().map(|x| x.into()).unwrap_or(Value::None),
-			"ns".to_string() => self.ns.clone().map(|x| x.into()).unwrap_or(Value::None),
-			"or".to_string() => self.or.clone().map(|x| x.into()).unwrap_or(Value::None),
-			"rd".to_string() => auth.clone(),
-			"tk".to_string() => token.clone(),
+			"ac" => access.clone(),
+			"exp" => self.exp.map(Value::from).unwrap_or(Value::None),
+			"db" => self.db.as_deref().map(Value::from).unwrap_or(Value::None),
+			"id" => self.id.map(Value::from).unwrap_or(Value::None),
+			"ip" => self.ip.as_deref().map(Value::from).unwrap_or(Value::None),
+			"ns" => self.ns.as_deref().map(Value::from).unwrap_or(Value::None),
+			"or" => self.or.as_deref().map(Value::from).unwrap_or(Value::None),
+			"rd" => auth.clone(),
+			"tk" => token.clone(),
 		});
 
 		vec![("access", access), ("auth", auth), ("token", token), ("session", session)]

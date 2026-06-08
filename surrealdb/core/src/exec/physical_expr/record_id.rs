@@ -1,11 +1,11 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
-use async_trait::async_trait;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, CombineAccessModes, ContextLevel};
+use crate::exec::{AccessMode, BoxFut, CombineAccessModes, ContextLevel};
 use crate::expr::FlowResult;
 use crate::expr::record_id::RecordIdKeyGen;
 use crate::fmt::EscapeRidKey;
@@ -22,11 +22,11 @@ use crate::val::{Array, Object, RecordId, RecordIdKey, RecordIdKeyRange, TableNa
 #[derive(Debug)]
 pub enum PhysicalRecordIdKey {
 	Number(i64),
-	String(String),
+	String(Strand),
 	Uuid(Uuid),
 	Generate(RecordIdKeyGen),
 	Array(Vec<Arc<dyn PhysicalExpr>>),
-	Object(Vec<(String, Arc<dyn PhysicalExpr>)>),
+	Object(Vec<(Strand, Arc<dyn PhysicalExpr>)>),
 	Range {
 		start: Bound<Box<PhysicalRecordIdKey>>,
 		end: Bound<Box<PhysicalRecordIdKey>>,
@@ -171,24 +171,27 @@ pub struct RecordIdExpr {
 	pub(crate) table: TableName,
 	pub(crate) key: PhysicalRecordIdKey,
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for RecordIdExpr {
 	fn name(&self) -> &'static str {
 		"RecordIdExpr"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> ContextLevel {
 		self.key.required_context()
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let key = self.key.evaluate(ctx).await?;
-		Ok(Value::RecordId(RecordId {
-			table: self.table.clone(),
-			key,
-		}))
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			let key = self.key.evaluate(ctx).await?;
+			Ok(Value::RecordId(RecordId {
+				table: self.table.clone(),
+				key,
+			}))
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -209,7 +212,7 @@ impl ToSql for PhysicalRecordIdKey {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			PhysicalRecordIdKey::Number(v) => write_sql!(f, fmt, "{v}"),
-			PhysicalRecordIdKey::String(v) => EscapeRidKey(v).fmt_sql(f, fmt),
+			PhysicalRecordIdKey::String(v) => EscapeRidKey(v.as_str()).fmt_sql(f, fmt),
 			PhysicalRecordIdKey::Uuid(v) => v.fmt_sql(f, fmt),
 			PhysicalRecordIdKey::Generate(v) => match v {
 				RecordIdKeyGen::Rand => f.push_str("rand()"),
@@ -232,7 +235,7 @@ impl ToSql for PhysicalRecordIdKey {
 					if i > 0 {
 						f.push_str(", ");
 					}
-					write_sql!(f, fmt, "{}: {}", key, expr);
+					write_sql!(f, fmt, "{}: {}", key.as_str(), expr);
 				}
 				f.push_str(" }");
 			}

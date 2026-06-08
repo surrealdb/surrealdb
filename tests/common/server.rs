@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::{env, fs};
 
-use rand::{Rng, thread_rng};
+use rand::Rng;
 use rcgen::CertifiedKey;
 use tempfile::TempDir;
 use tokio::time;
@@ -249,7 +249,7 @@ pub async fn start_server(
 		vars,
 	}: StartServerArguments,
 ) -> Result<(String, Child), Box<dyn Error>> {
-	let mut rng = thread_rng();
+	let mut rng = rand::rng();
 
 	let path = path.unwrap_or("memory".to_string());
 
@@ -282,7 +282,7 @@ pub async fn start_server(
 	}
 
 	'retry: for _ in 0..3 {
-		let port: u16 = rng.gen_range(13000..24000);
+		let port: u16 = rng.random_range(13000..24000);
 		let addr = format!("127.0.0.1:{port}");
 
 		let start_args = format!(

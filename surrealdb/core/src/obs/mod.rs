@@ -105,9 +105,23 @@ pub async fn put(file: &str, data: Vec<u8>) -> Result<()> {
 	Ok(())
 }
 
-/// Deletes the file from the local file system or memory object storage.
+/// Deletes the file from the backing object store and invalidates any cached
+/// copy. Treats a missing file as success so callers can use it to ensure a
+/// path is gone without racing against concurrent deletes.
 pub async fn del(file: &str) -> Result<()> {
-	Ok(STORE.delete(&Path::from(file)).await?)
+	let path = Path::from(file);
+	swallow_not_found(STORE.delete(&path).await)?;
+	swallow_not_found(CACHE.delete(&path).await)
+}
+
+fn swallow_not_found(r: std::result::Result<(), object_store::Error>) -> Result<()> {
+	match r {
+		Ok(())
+		| Err(object_store::Error::NotFound {
+			..
+		}) => Ok(()),
+		Err(e) => Err(e.into()),
+	}
 }
 
 /// Hashes the bytes of a file to a string for the storage of a file.

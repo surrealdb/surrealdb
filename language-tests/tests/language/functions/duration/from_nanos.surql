@@ -11,7 +11,7 @@ value = "5ms5µs"
 value = "292y24w3d23h47m16s854ms775µs807ns"
 
 [[test.results]]
-value = "584y49w23h34m33s709ms551µs615ns"
+error = 'Failed to compute: "duration::from_nanos(-1)", as the operation results in a negative value.'
 
 */
 duration::from_nanos(30);

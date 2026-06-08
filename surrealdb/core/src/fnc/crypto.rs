@@ -89,7 +89,7 @@ pub mod argon2 {
 	use anyhow::Result;
 	use argon2::Argon2;
 	use argon2::password_hash::{PasswordHash, PasswordHasher, SaltString};
-	use rand::rngs::OsRng;
+	use rand_core::OsRng;
 
 	use super::COST_ALLOWANCE;
 	use crate::val::Value;
@@ -122,35 +122,116 @@ pub mod argon2 {
 
 pub mod bcrypt {
 
-	use std::str::FromStr;
-
 	use anyhow::Result;
-	use bcrypt::HashParts;
 
 	use crate::fnc::crypto::COST_ALLOWANCE;
 	use crate::val::Value;
 
+	/// Pulls the bcrypt cost out of a `$2X$NN$<salt><hash>` prefix without
+	/// allocating. Requires the canonical two-digit `NN` form; `bcrypt::verify`
+	/// validates the rest. Returns `None` on any non-canonical input.
+	fn extract_cost(hash: &str) -> Option<u32> {
+		let bytes = hash.as_bytes();
+		if bytes.len() < 7
+			|| bytes[0] != b'$'
+			|| bytes[1] != b'2'
+			|| !matches!(bytes[2], b'a' | b'b' | b'x' | b'y')
+			|| bytes[3] != b'$'
+			|| bytes[6] != b'$'
+		{
+			return None;
+		}
+		let tens = (bytes[4] as char).to_digit(10)?;
+		let ones = (bytes[5] as char).to_digit(10)?;
+		Some(tens * 10 + ones)
+	}
+
 	pub fn cmp((hash, pass): (String, String)) -> Result<Value> {
-		let parts = match HashParts::from_str(&hash) {
-			Ok(parts) => parts,
-			Err(_) => return Ok(Value::Bool(false)),
+		let Some(cost) = extract_cost(&hash) else {
+			return Ok(Value::Bool(false));
 		};
-		// Note: Bcrypt cost is exponential, so add the cost allowance as opposed to
-		// multiplying.
-		Ok(if parts.get_cost() > bcrypt::DEFAULT_COST.saturating_add(COST_ALLOWANCE) {
-			// Too expensive to compute.
-			Value::Bool(false)
-		} else {
-			// FIXME: If base64 dependency is added, can avoid parsing the HashParts twice,
-			// once above and once in verity, by using bcrypt::bcrypt.
-			bcrypt::verify(pass, &hash).unwrap_or(false).into()
-		})
+		// Bcrypt cost is exponential, so add the cost allowance instead of
+		// multiplying (cf. the Argon2 path above which multiplies).
+		if cost > bcrypt::DEFAULT_COST.saturating_add(COST_ALLOWANCE) {
+			return Ok(Value::Bool(false));
+		}
+		Ok(bcrypt::verify(pass, &hash).unwrap_or(false).into())
 	}
 
 	pub fn r#gen((pass,): (String,)) -> Result<Value> {
 		let hash = bcrypt::hash(pass, bcrypt::DEFAULT_COST)
 			.map_err(|e| anyhow::anyhow!("Failed to hash password: {}", e))?;
 		Ok(hash.into())
+	}
+
+	#[cfg(test)]
+	mod tests {
+		use super::{cmp, extract_cost};
+		use crate::val::Value;
+
+		#[test]
+		fn extract_cost_parses_canonical_hashes() {
+			// (version letter, cost field) covering each version the bcrypt
+			// crate recognises plus the cost range we care about.
+			let suffix = "$ssssssssssssssssssssssHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH";
+			for (version, cost) in [('a', 12), ('b', 12), ('x', 12), ('y', 12), ('b', 4), ('b', 31)]
+			{
+				let hash = format!("$2{version}${cost:02}{suffix}");
+				assert_eq!(extract_cost(&hash), Some(cost), "input: {hash}");
+			}
+		}
+
+		#[test]
+		fn extract_cost_rejects_malformed_input() {
+			// Wrong version letter.
+			assert_eq!(extract_cost("$2c$12$xxx"), None);
+			// Missing separators.
+			assert_eq!(extract_cost("$2b12$xx"), None);
+			// Non-digit cost.
+			assert_eq!(extract_cost("$2b$ab$xx"), None);
+			// Too short.
+			assert_eq!(extract_cost("$2b$12"), None);
+			// Empty.
+			assert_eq!(extract_cost(""), None);
+			// Argon2 hash.
+			assert_eq!(extract_cost("$argon2id$v=19$m=65536,t=2,p=1$xx$yy"), None);
+		}
+
+		#[test]
+		fn extract_cost_requires_canonical_two_digit_cost() {
+			// `bcrypt::HashParts::from_str` would accept the single-digit form
+			// (it parses with `u32::from_str` after splitting on `$`); we
+			// intentionally require canonical `{:02}` to keep the prefix
+			// parser branchless. Non-canonical hashes fail closed.
+			assert_eq!(
+				extract_cost("$2b$4$ssssssssssssssssssssssHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH"),
+				None
+			);
+		}
+
+		#[test]
+		fn cmp_roundtrips_a_freshly_generated_hash() {
+			// Cost 4 keeps the test fast (~10ms instead of seconds at the default cost).
+			let hash = bcrypt::hash("p4ssw0rd", 4).expect("hash generated");
+			assert_eq!(cmp((hash.clone(), "p4ssw0rd".into())).unwrap(), Value::Bool(true));
+			assert_eq!(cmp((hash, "wrong".into())).unwrap(), Value::Bool(false));
+		}
+
+		#[test]
+		fn cmp_rejects_a_hash_with_excessive_cost() {
+			// Cost 30 would take minutes to verify, so the cap must reject
+			// it before bcrypt::verify is reached. The cost-extraction unit
+			// tests pin the short-circuit logic; this test pins the
+			// observable behaviour.
+			let inflated = "$2b$30$ssssssssssssssssssssssHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH";
+			assert_eq!(cmp((inflated.into(), "anything".into())).unwrap(), Value::Bool(false));
+		}
+
+		#[test]
+		fn cmp_rejects_a_malformed_hash() {
+			assert_eq!(cmp(("not-a-hash".into(), "x".into())).unwrap(), Value::Bool(false));
+			assert_eq!(cmp(("".into(), "x".into())).unwrap(), Value::Bool(false));
+		}
 	}
 }
 
@@ -159,7 +240,7 @@ pub mod pbkdf2 {
 	use anyhow::Result;
 	use pbkdf2::Pbkdf2;
 	use pbkdf2::password_hash::{PasswordHash, PasswordHasher, SaltString};
-	use rand::rngs::OsRng;
+	use rand_core::OsRng;
 
 	use super::COST_ALLOWANCE;
 	use crate::val::Value;
@@ -194,7 +275,7 @@ pub mod pbkdf2 {
 pub mod scrypt {
 
 	use anyhow::Result;
-	use rand::rngs::OsRng;
+	use rand_core::OsRng;
 	use scrypt::Scrypt;
 	use scrypt::password_hash::{PasswordHash, PasswordHasher, SaltString};
 

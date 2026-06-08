@@ -4,9 +4,11 @@ use std::time::Duration;
 use axum::extract::MatchedPath;
 use http::header;
 use hyper::{Request, Response};
+use opentelemetry_http::HeaderExtractor;
 use tower_http::request_id::RequestId;
 use tower_http::trace::{MakeSpan, OnFailure, OnRequest, OnResponse};
 use tracing::{Level, Span, field};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use super::client_ip::ExtractClientIP;
 
@@ -95,6 +97,22 @@ impl<B> MakeSpan<B> for HttpTraceLayerHooks {
 		{
 			span.record("client.address", client_ip);
 		}
+		// Extract the W3C trace-context propagation headers (`traceparent`
+		// / `tracestate`) from the inbound request via the globally
+		// registered `TextMapPropagator`, and attach the resulting OTel
+		// `Context` as the parent of this span. With no propagator
+		// installed (e.g. when OTLP export is disabled) the no-op default
+		// produces an empty context and `set_parent` is harmless, so the
+		// call is unconditional. SDK callers that didn't send a
+		// `traceparent` simply get a fresh root span — today's behavior.
+		let parent_cx = opentelemetry::global::get_text_map_propagator(|propagator| {
+			propagator.extract(&HeaderExtractor(req.headers()))
+		});
+		// `set_parent` returns `Err(SetParentError::LayerNotFound)` when
+		// the OTel bridge layer isn't registered (i.e. OTLP export is
+		// disabled). That's a non-actionable, expected state — discard
+		// the result rather than logging on every request.
+		let _ = span.set_parent(parent_cx);
 		// Return the span
 		span
 	}

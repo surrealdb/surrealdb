@@ -40,6 +40,23 @@ pub(crate) fn generate_arg_sentinels(
 	quote! { #(#sentinels)* }
 }
 
+/// Wrap `body` in a tokio block_on via the module-level shared runtime.
+///
+/// We use tokio rather than `futures::executor::block_on` because the dominant
+/// async ecosystem (reqwest, sqlx, etc.) internally uses `tokio::spawn`, which
+/// requires an active tokio runtime context.
+///
+/// The runtime is created once per module instance (WASM linear memory persists
+/// across invocations on pooled controllers) rather than on every call.
+///
+/// This is a stopgap until WASM P3 makes the component model boundary itself
+/// async, removing the need for an embedded executor entirely.
+fn tokio_block_on(body: &proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+	quote! {
+		::surrealism::async_runtime().block_on(async { #body })
+	}
+}
+
 /// Generate the registration body (invoke/args/returns fns + inventory submit).
 /// For init functions, generates the init wrapper + submit.
 #[allow(clippy::too_many_arguments)]
@@ -51,13 +68,19 @@ pub(crate) fn generate_registration_body(
 	tuple_pattern: &proc_macro2::TokenStream,
 	result_type: &proc_macro2::TokenStream,
 	is_result: bool,
+	is_async: bool,
 	is_init: bool,
 	export_name: Option<&str>,
 	writeable: bool,
 	comment: Option<&str>,
 ) -> proc_macro2::TokenStream {
 	if is_init {
-		let init_call = if is_result {
+		let init_call = if is_async && is_result {
+			tokio_block_on(&quote! { #fn_name().await.map_err(|e| e.to_string()) })
+		} else if is_async {
+			let block = tokio_block_on(&quote! { #fn_name().await });
+			quote! { #block; Ok(()) }
+		} else if is_result {
 			quote! { #fn_name().map_err(|e| e.to_string()) }
 		} else {
 			quote! { #fn_name(); Ok(()) }
@@ -77,7 +100,13 @@ pub(crate) fn generate_registration_body(
 		let args_ident = format_ident!("__sr_args_{}", fn_name);
 		let returns_ident = format_ident!("__sr_returns_{}", fn_name);
 
-		let function_call = if is_result {
+		let function_call = if is_async && is_result {
+			tokio_block_on(
+				&quote! { #fn_name(#(#arg_patterns),*).await.map_err(|e| e.to_string()) },
+			)
+		} else if is_async {
+			tokio_block_on(&quote! { Ok(#fn_name(#(#arg_patterns),*).await) })
+		} else if is_result {
 			quote! { #fn_name(#(#arg_patterns),*).map_err(|e| e.to_string()) }
 		} else {
 			quote! { Ok(#fn_name(#(#arg_patterns),*)) }

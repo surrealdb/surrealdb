@@ -286,7 +286,7 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 		info!("Creating record");
 		let created: Option<ApiRecordId> = db.create(table).await.unwrap();
 		// Pull the notification
-		let notifications = receive_all_pending_notifications(users.clone(), LQ_TIMEOUT).await;
+		let notifications = receive_all_pending_notifications(Arc::clone(&users), LQ_TIMEOUT).await;
 		// It should be newly created
 		assert_eq!(
 			notifications.iter().map(|n| n.action).collect::<Vec<_>>(),
@@ -306,7 +306,7 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 			})
 			.await
 			.unwrap();
-		let notifications = receive_all_pending_notifications(users.clone(), LQ_TIMEOUT).await;
+		let notifications = receive_all_pending_notifications(Arc::clone(&users), LQ_TIMEOUT).await;
 
 		// It should be updated
 		assert_eq!(
@@ -320,7 +320,7 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 		info!("Deleting record");
 		let _: Option<ApiRecordId> = db.delete(&notifications[0].data.id).await.unwrap();
 		// Pull the notification
-		let notifications = receive_all_pending_notifications(users.clone(), LQ_TIMEOUT).await;
+		let notifications = receive_all_pending_notifications(Arc::clone(&users), LQ_TIMEOUT).await;
 		// It should be deleted
 		assert_eq!(
 			notifications.iter().map(|n| n.action).collect::<Vec<_>>(),

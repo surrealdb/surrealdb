@@ -9,7 +9,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 
 use super::project::omit_field_sync;
@@ -53,9 +52,6 @@ impl ProjectValue {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for ProjectValue {
 	fn name(&self) -> &'static str {
 		"ProjectValue"
@@ -98,13 +94,14 @@ impl ExecOperator for ProjectValue {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.root().ctx.config.operator_buffer_size,
 		);
-		let expr = self.expr.clone();
+		let expr = Arc::clone(&self.expr);
 		let omit = Arc::clone(&self.omit);
 		let ctx = ctx.clone();
 
 		let projected = input_stream.then(move |batch_result| {
-			let expr = expr.clone();
+			let expr = Arc::clone(&expr);
 			let omit = Arc::clone(&omit);
 			let ctx = ctx.clone();
 

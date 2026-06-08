@@ -2469,6 +2469,202 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 	}
 }
 
+// ============================================================================
+// LIVE queries owned by a session must be torn down when the session's auth principal changes
+// (signin/signup/ authenticate/refresh that alters `Auth::id()` or `Auth::level()`). Token
+// refresh against the same identity must NOT tear LIVE queries down.
+// ============================================================================
+
+/// Registering a LIVE query as root and then signing up as a record user on
+/// the same connection must tear the LIVE down: subsequent writes from a
+/// different connection must not produce a notification on the (now
+/// re-authenticated) socket.
+pub async fn live_query_cleared_on_principal_change(
+	cfg_server: Option<Format>,
+	cfg_format: Format,
+) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+
+	// Permanent writer socket — stays authenticated as root for the duration
+	let mut writer = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	writer.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	ensure_namespace_and_database(&mut writer, NS, DB).await.unwrap();
+	writer.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	writer.send_message_query("DEFINE TABLE tester").await.unwrap();
+	// Define a record access method so we have a non-root identity to sign in as.
+	writer
+		.send_message_query(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+				DURATION FOR SESSION 1d, FOR TOKEN 1d
+			;"#,
+		)
+		.await
+		.unwrap();
+
+	// Reader socket — signs in as root, registers LIVE, then signs in as a
+	// record user (principal change).
+	let mut reader = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	reader.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	reader.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	let res = reader.send_request("query", json!(["LIVE SELECT * FROM tester"])).await.unwrap();
+	assert!(res["result"].is_array(), "result: {res:?}");
+	let live_id =
+		res["result"][0]["result"].as_str().expect("LIVE id should be a string").to_string();
+
+	// Sign up as a record user on the SAME reader socket. This changes the
+	// auth principal from Level::Root to Level::Record, which must trigger
+	// cleanup_lqs for the reader's session.
+	let res = reader
+		.send_request(
+			"signup",
+			json!([{
+				"ns": NS,
+				"db": DB,
+				"ac": "user",
+				"email": "victim@example.com",
+				"pass": "pass",
+			}]),
+		)
+		.await
+		.unwrap();
+	assert!(res.get("error").is_none(), "signup error: {res:?}");
+
+	// Write a record on the permanent writer (still root).
+	let res =
+		writer.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await.unwrap();
+	assert!(res["result"].is_array(), "result: {res:?}");
+
+	// Verify the reader receives NO notification for the LIVE id registered
+	// prior to the signup. The LIVE was registered under the root principal
+	// and must have been torn down when the reader's session principal
+	// changed to Level::Record.
+	let got_notif =
+		reader.wait_for_notification_from_lq(&live_id, Duration::from_millis(500)).await;
+	assert!(!got_notif, "LIVE registered before signup must be torn down on principal change",);
+
+	server.finish().unwrap();
+}
+
+/// Re-signing in with the same root credentials on a connection that has a
+/// registered LIVE query must preserve the LIVE: a subsequent write must
+/// still produce a notification.
+pub async fn live_query_preserved_on_same_identity_resignin(
+	cfg_server: Option<Format>,
+	cfg_format: Format,
+) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Single socket — signin twice as the same root identity.
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	ensure_namespace_and_database(&mut socket, NS, DB).await.unwrap();
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	socket.send_message_query("DEFINE TABLE tester").await.unwrap();
+	let res = socket.send_request("query", json!(["LIVE SELECT * FROM tester"])).await.unwrap();
+	let live_id =
+		res["result"][0]["result"].as_str().expect("LIVE id should be a string").to_string();
+
+	// Re-signin with the SAME credentials. Auth principal stays Level::Root
+	// with the same actor id, so cleanup_lqs must NOT fire.
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+
+	// Create a record — the LIVE registered before the re-signin must still
+	// deliver a notification.
+	let res =
+		socket.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await.unwrap();
+	assert!(res["result"].is_array(), "result: {res:?}");
+
+	let got_notif = socket.wait_for_notification_from_lq(&live_id, Duration::from_secs(2)).await;
+	assert!(got_notif, "LIVE registered before same-identity resignin must be preserved",);
+
+	server.finish().unwrap();
+}
+
+/// A LIVE query registered as one record user must be torn down when the
+/// connection signs in as a different record user (principal change at
+/// Level::Record). This covers the typical multi-tenant record-user re-auth
+/// scenario.
+pub async fn live_query_cleared_on_record_identity_change(
+	cfg_server: Option<Format>,
+	cfg_format: Format,
+) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+
+	// Permanent writer
+	let mut writer = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	writer.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	ensure_namespace_and_database(&mut writer, NS, DB).await.unwrap();
+	writer.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	writer
+		.send_message_query(
+			"DEFINE TABLE tester PERMISSIONS FOR select, create, update, delete FULL",
+		)
+		.await
+		.unwrap();
+	writer
+		.send_message_query(
+			r#"
+			DEFINE ACCESS user ON DATABASE TYPE RECORD
+				SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+				SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+				DURATION FOR SESSION 1d, FOR TOKEN 1d
+			;"#,
+		)
+		.await
+		.unwrap();
+
+	// Reader signs up as user A, registers LIVE, then signs up as user B
+	// (different record identity at the same Level::Record).
+	let mut reader = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	reader
+		.send_request(
+			"signup",
+			json!([{
+				"ns": NS,
+				"db": DB,
+				"ac": "user",
+				"email": "alice@example.com",
+				"pass": "pass",
+			}]),
+		)
+		.await
+		.unwrap();
+	let res = reader.send_request("query", json!(["LIVE SELECT * FROM tester"])).await.unwrap();
+	let live_id =
+		res["result"][0]["result"].as_str().expect("LIVE id should be a string").to_string();
+
+	// Sign up as user B on the same socket — principal changes (different
+	// record id at Level::Record).
+	reader
+		.send_request(
+			"signup",
+			json!([{
+				"ns": NS,
+				"db": DB,
+				"ac": "user",
+				"email": "bob@example.com",
+				"pass": "pass",
+			}]),
+		)
+		.await
+		.unwrap();
+
+	// Write a record.
+	writer.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await.unwrap();
+
+	// Reader must not see a notification for Alice's LIVE.
+	let got_notif =
+		reader.wait_for_notification_from_lq(&live_id, Duration::from_millis(500)).await;
+	assert!(!got_notif, "LIVE registered as Alice must be torn down after signup as Bob",);
+
+	server.finish().unwrap();
+}
+
 /// A macro which defines a macro which can be used to define tests running the
 /// above functions with a set of given paramenters.
 macro_rules! define_include_tests {
@@ -2756,6 +2952,70 @@ pub async fn multi_session_management(cfg_server: Option<Format>, cfg_format: Fo
 	server.finish().unwrap();
 }
 
+/// LIVE query notifications emitted for the connection's default session
+/// must not leak the internal connection UUID on the wire. Clients that send
+/// no explicit `session_id` historically received `session_id: null` and raw
+/// WebSocket consumers rely on that invariant.
+pub async fn live_notification_default_session_is_null(
+	cfg_server: Option<Format>,
+	cfg_format: Format,
+) {
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	ensure_namespace_and_database(&mut socket, NS, DB).await.unwrap();
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	socket.send_message_query("DEFINE TABLE tester").await.unwrap();
+	// Register a LIVE query using the connection's default session
+	// (no explicit session_id supplied).
+	let res = socket.send_request("live", json!(["tester"])).await.unwrap();
+	let live_id = res["result"].as_str().unwrap().to_string();
+	// Trigger a notification
+	socket.send_request("query", json!(["CREATE tester:id SET name = 'foo'"])).await.unwrap();
+	// Collect all messages and find the notification
+	let msgs =
+		socket.receive_all_other_messages(1, Duration::from_secs(2)).await.unwrap_or_default();
+	let msg = msgs
+		.iter()
+		.find(|v| common::is_notification_from_lq(v, &live_id))
+		.unwrap_or_else(|| panic!("No notification for live id {live_id}: {msgs:?}"));
+	// The outer wire message must NOT contain a `session` field because
+	// the LIVE query was not associated with an explicit client session.
+	let obj = msg.as_object().unwrap();
+	assert!(
+		!obj.contains_key("session") || obj.get("session").is_some_and(|v| v.is_null()),
+		"default-session LIVE notification must not leak a session id: {msg:?}"
+	);
+	server.finish().unwrap();
+}
+
+/// The connection's implicit session UUID must not be detachable. Tearing it
+/// down would leave the WebSocket in an inconsistent state, so the server
+/// explicitly rejects the request.
+pub async fn detach_connection_session_rejected(cfg_server: Option<Format>, cfg_format: Format) {
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Pin the connection id so we know the implicit session UUID
+	let conn_id = "00000000-0000-0000-0000-000000000000";
+	let mut headers = HeaderMap::new();
+	headers.insert(HDR_SURREAL, HeaderValue::from_static(conn_id));
+	let mut socket =
+		Socket::connect_with_headers(&addr, cfg_server, cfg_format, headers).await.unwrap();
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Attempting to detach the connection's implicit session must fail
+	let res = socket.send_request_with_session("detach", json!([]), conn_id).await.unwrap();
+	assert!(res.get("error").is_some(), "expected detach({conn_id}) to be rejected, got: {res:?}");
+	// The connection must still be functional after a rejected detach
+	let res = socket.send_request("query", json!(["RETURN 1"])).await.unwrap();
+	assert_eq!(res["result"][0]["result"], 1);
+	// And the implicit session must never appear in sessions()
+	let res = socket.send_request("sessions", json!([])).await.unwrap();
+	let ids: Vec<&str> =
+		res["result"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+	assert!(!ids.contains(&conn_id), "implicit connection session leaked via sessions(): {ids:?}");
+	server.finish().unwrap();
+}
+
 define_include_tests! {
 	#[test_log::test(tokio::test)]
 	ping,
@@ -2808,6 +3068,12 @@ define_include_tests! {
 	#[test_log::test(tokio::test)]
 	variable_auth_live_query,
 	#[test_log::test(tokio::test)]
+	live_query_cleared_on_principal_change,
+	#[test_log::test(tokio::test)]
+	live_query_preserved_on_same_identity_resignin,
+	#[test_log::test(tokio::test)]
+	live_query_cleared_on_record_identity_change,
+	#[test_log::test(tokio::test)]
 	session_expiration,
 	#[test_log::test(tokio::test)]
 	session_expiration_operations,
@@ -2845,4 +3111,51 @@ define_include_tests! {
 	multi_session_authentication,
 	#[test_log::test(tokio::test)]
 	multi_session_management,
+	#[test_log::test(tokio::test)]
+	live_notification_default_session_is_null,
+	#[test_log::test(tokio::test)]
+	detach_connection_session_rejected,
+}
+
+/// Defense-in-depth: the WebSocket `attach` method must enforce
+/// `SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS` so a single connection
+/// cannot create an unbounded number of per-connection sessions.
+///
+/// We run the server with a deliberately tiny cap, then attach
+/// `cap + 1` sessions over a single WebSocket. The first `cap`
+/// attaches must succeed; the last one must be refused.
+#[test_log::test(tokio::test)]
+async fn websocket_attach_session_cap() {
+	use std::collections::HashMap;
+
+	let mut vars = HashMap::new();
+	vars.insert("SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS".to_string(), "3".to_string());
+	let (addr, mut server) = common::start_server(StartServerArguments {
+		vars: Some(vars),
+		..Default::default()
+	})
+	.await
+	.unwrap();
+
+	let socket = Socket::connect(&addr, Some(Format::Json), Format::Json).await.unwrap();
+
+	// The cap (3) already includes the implicit connection session
+	// keyed by `self.id`, so the first two explicit attaches should
+	// succeed (bringing the count to 3) and the third must be refused.
+	let session_ids =
+		["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"];
+
+	for sid in &session_ids {
+		let res = socket.send_request_with_session("attach", json!([]), sid).await.unwrap();
+		assert!(res.get("error").is_none(), "attach within cap must succeed for {sid}: {res:?}");
+	}
+
+	// One past the cap must be refused.
+	let res = socket
+		.send_request_with_session("attach", json!([]), "33333333-3333-3333-3333-333333333333")
+		.await
+		.unwrap();
+	assert!(res.get("error").is_some(), "attach past cap must be refused: {res:?}");
+
+	server.finish().unwrap();
 }

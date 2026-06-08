@@ -29,33 +29,37 @@ value = "NONE"
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: links CONTAINSANY [a:2]]
-''''
+value = """
+'SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: links CONTAINSANY [a:2], pre_decode_filter: yes]
+'"""
 
 [[test.results]]
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: links CONTAINS a:2]
-''''
+value = """
+'SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: links CONTAINS a:2, pre_decode_filter: yes]
+'"""
 
 [[test.results]]
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: a:2 INSIDE links]
-''''
+value = """
+'SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: a:2 INSIDE links, pre_decode_filter: yes]
+'"""
 
 [[test.results]]
 value = "[{ id: t:1, links: [a:2, a:1] }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: t, direction: Forward, predicate: [a:2] ANYINSIDE links]
-''''
+value = """
+'SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: t, direction: Forward, predicate: [a:2] ANYINSIDE links, pre_decode_filter: yes]
+'"""
 
 */
 

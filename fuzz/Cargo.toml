@@ -8,8 +8,8 @@ edition = "2024"
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = { version= "0.4.7", features = ["arbitrary-derive"] }
-tokio = "1.44.2"
+libfuzzer-sys = { version= "0.4.12", features = ["arbitrary-derive"] }
+tokio = "1.52.1"
 
 [dependencies.surrealdb-core]
 path = "../surrealdb/core"

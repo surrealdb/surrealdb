@@ -7,7 +7,6 @@
 use std::fmt::Write;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::{StreamExt, stream};
 use surrealdb_types::ToSql;
 
@@ -33,9 +32,6 @@ pub struct ExplainPlan {
 	/// The output format (currently only Text is supported)
 	pub format: ExplainFormat,
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for ExplainPlan {
 	fn name(&self) -> &'static str {
 		"Explain"
@@ -67,7 +63,7 @@ impl ExecOperator for ExplainPlan {
 			ExplainFormat::Text => {
 				let mut plan_text = String::new();
 				format_execution_plan(self.plan.as_ref(), &mut plan_text, "");
-				Value::String(plan_text)
+				Value::String(plan_text.into())
 			}
 			ExplainFormat::Json => {
 				let plan_json = format_execution_plan_json(self.plan.as_ref());
@@ -109,9 +105,6 @@ pub struct AnalyzePlan {
 	/// it deterministic for test assertions.
 	pub redact_volatile_explain_attrs: bool,
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for AnalyzePlan {
 	fn name(&self) -> &'static str {
 		"ExplainAnalyze"
@@ -152,6 +145,7 @@ impl ExecOperator for AnalyzePlan {
 			self.plan.execute(ctx)?,
 			self.plan.access_mode(),
 			self.plan.cardinality_hint(),
+			ctx.root().ctx.config.operator_buffer_size,
 		);
 		let plan = Arc::clone(&self.plan);
 		let format = self.format;
@@ -183,11 +177,11 @@ impl ExecOperator for AnalyzePlan {
 					format_analyze_plan(plan.as_ref(), &mut plan_text, "", redact_volatile_explain_attrs);
 					let _ = writeln!(plan_text);
 					let _ = write!(plan_text, "Total rows: {}", total_rows);
-					Value::String(plan_text)
+					Value::String(plan_text.into())
 				}
 				ExplainFormat::Json => {
 					let mut plan_json = format_analyze_plan_json(plan.as_ref(), redact_volatile_explain_attrs);
-					plan_json.insert("total_rows".to_string(), Value::from(total_rows as i64));
+					plan_json.insert("total_rows", Value::from(total_rows as i64));
 					Value::Object(plan_json)
 				}
 			};
@@ -264,34 +258,27 @@ fn format_execution_plan(plan: &dyn ExecOperator, output: &mut String, prefix: &
 fn format_execution_plan_json(plan: &dyn ExecOperator) -> Object {
 	let mut obj = Object::default();
 
-	// Add operator name
-	obj.insert("operator".to_string(), Value::String(plan.name().to_string()));
+	obj.insert("operator", Value::String(plan.name().into()));
 
-	// Add context level
-	obj.insert(
-		"context".to_string(),
-		Value::String(plan.required_context().short_name().to_string()),
-	);
+	obj.insert("context", Value::String(plan.required_context().short_name().into()));
 
-	// Add attributes if any
 	let attrs = plan.attrs();
 	if !attrs.is_empty() {
 		let mut attrs_obj = Object::default();
 		for (key, value) in attrs {
-			attrs_obj.insert(key, Value::String(value));
+			attrs_obj.insert(key, Value::String(value.into()));
 		}
-		obj.insert("attributes".to_string(), Value::Object(attrs_obj));
+		obj.insert("attributes", Value::Object(attrs_obj));
 	}
 
-	// Add expressions with embedded operators
 	let expressions = plan.expressions();
 	if !expressions.is_empty() {
 		let exprs_arr: Vec<Value> = expressions
 			.iter()
 			.map(|(role, expr)| {
 				let mut expr_obj = Object::default();
-				expr_obj.insert("role".to_string(), Value::String((*role).to_string()));
-				expr_obj.insert("sql".to_string(), Value::String(expr.to_sql()));
+				expr_obj.insert("role", Value::String((*role).into()));
+				expr_obj.insert("sql", Value::String(expr.to_sql().into()));
 
 				let embedded = expr.embedded_operators();
 				if !embedded.is_empty() {
@@ -299,34 +286,30 @@ fn format_execution_plan_json(plan: &dyn ExecOperator) -> Object {
 						.iter()
 						.map(|(embed_role, embed_plan)| {
 							let mut e = Object::default();
-							e.insert("role".to_string(), Value::String((*embed_role).to_string()));
+							e.insert("role", Value::String((*embed_role).into()));
 							e.insert(
-								"plan".to_string(),
+								"plan",
 								Value::Object(format_execution_plan_json(embed_plan.as_ref())),
 							);
 							Value::Object(e)
 						})
 						.collect();
-					expr_obj.insert(
-						"embedded_operators".to_string(),
-						Value::Array(Array::from(embedded_arr)),
-					);
+					expr_obj.insert("embedded_operators", Value::Array(Array::from(embedded_arr)));
 				}
 
 				Value::Object(expr_obj)
 			})
 			.collect();
-		obj.insert("expressions".to_string(), Value::Array(Array::from(exprs_arr)));
+		obj.insert("expressions", Value::Array(Array::from(exprs_arr)));
 	}
 
-	// Add children if any
 	let children = plan.children();
 	if !children.is_empty() {
 		let children_array: Vec<Value> = children
 			.iter()
 			.map(|child| Value::Object(format_execution_plan_json(child.as_ref())))
 			.collect();
-		obj.insert("children".to_string(), Value::Array(Array::from(children_array)));
+		obj.insert("children", Value::Array(Array::from(children_array)));
 	}
 
 	obj
@@ -438,44 +421,37 @@ fn format_analyze_plan_json(
 ) -> Object {
 	let mut obj = Object::default();
 
-	obj.insert("operator".to_string(), Value::String(plan.name().to_string()));
+	obj.insert("operator", Value::String(plan.name().into()));
 
-	obj.insert(
-		"context".to_string(),
-		Value::String(plan.required_context().short_name().to_string()),
-	);
+	obj.insert("context", Value::String(plan.required_context().short_name().into()));
 
-	// Add attributes if any
 	let attrs = plan.attrs();
 	if !attrs.is_empty() {
 		let mut attrs_obj = Object::default();
 		for (key, value) in attrs {
-			attrs_obj.insert(key, Value::String(value));
+			attrs_obj.insert(key, Value::String(value.into()));
 		}
-		obj.insert("attributes".to_string(), Value::Object(attrs_obj));
+		obj.insert("attributes", Value::Object(attrs_obj));
 	}
 
-	// Add metrics if available
 	if let Some(metrics) = plan.metrics() {
 		let mut metrics_obj = Object::default();
-		metrics_obj.insert("output_rows".to_string(), Value::from(metrics.output_rows() as i64));
+		metrics_obj.insert("output_rows", Value::from(metrics.output_rows() as i64));
 		if !redact_volatile_explain_attrs {
-			metrics_obj
-				.insert("output_batches".to_string(), Value::from(metrics.output_batches() as i64));
-			metrics_obj.insert("elapsed_ns".to_string(), Value::from(metrics.elapsed_ns() as i64));
+			metrics_obj.insert("output_batches", Value::from(metrics.output_batches() as i64));
+			metrics_obj.insert("elapsed_ns", Value::from(metrics.elapsed_ns() as i64));
 		}
-		obj.insert("metrics".to_string(), Value::Object(metrics_obj));
+		obj.insert("metrics", Value::Object(metrics_obj));
 	}
 
-	// Add expressions with embedded operators (with metrics)
 	let expressions = plan.expressions();
 	if !expressions.is_empty() {
 		let exprs_arr: Vec<Value> = expressions
 			.iter()
 			.map(|(role, expr)| {
 				let mut expr_obj = Object::default();
-				expr_obj.insert("role".to_string(), Value::String((*role).to_string()));
-				expr_obj.insert("sql".to_string(), Value::String(expr.to_sql()));
+				expr_obj.insert("role", Value::String((*role).into()));
+				expr_obj.insert("sql", Value::String(expr.to_sql().into()));
 
 				let embedded = expr.embedded_operators();
 				if !embedded.is_empty() {
@@ -483,9 +459,9 @@ fn format_analyze_plan_json(
 						.iter()
 						.map(|(embed_role, embed_plan)| {
 							let mut e = Object::default();
-							e.insert("role".to_string(), Value::String((*embed_role).to_string()));
+							e.insert("role", Value::String((*embed_role).into()));
 							e.insert(
-								"plan".to_string(),
+								"plan",
 								Value::Object(format_analyze_plan_json(
 									embed_plan.as_ref(),
 									redact_volatile_explain_attrs,
@@ -494,16 +470,13 @@ fn format_analyze_plan_json(
 							Value::Object(e)
 						})
 						.collect();
-					expr_obj.insert(
-						"embedded_operators".to_string(),
-						Value::Array(Array::from(embedded_arr)),
-					);
+					expr_obj.insert("embedded_operators", Value::Array(Array::from(embedded_arr)));
 				}
 
 				Value::Object(expr_obj)
 			})
 			.collect();
-		obj.insert("expressions".to_string(), Value::Array(Array::from(exprs_arr)));
+		obj.insert("expressions", Value::Array(Array::from(exprs_arr)));
 	}
 
 	// Add children if any
@@ -518,7 +491,7 @@ fn format_analyze_plan_json(
 				))
 			})
 			.collect();
-		obj.insert("children".to_string(), Value::Array(Array::from(children_array)));
+		obj.insert("children", Value::Array(Array::from(children_array)));
 	}
 
 	obj

@@ -13,10 +13,11 @@ use http::HeaderMap;
 use http::header::SEC_WEBSOCKET_PROTOCOL;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_core::iam::Auth;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::mem::ALLOC;
 use surrealdb_core::rpc::format::{Format, PROTOCOLS};
-use surrealdb_core::rpc::{DbResponse, RpcProtocol};
+use surrealdb_core::rpc::{DbResponse, Method, RpcProtocol};
 use tokio::sync::RwLock;
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::RequestId;
@@ -125,7 +126,7 @@ async fn get_handler(
 		})
 		// Handle the WebSocket upgrade and process messages
 		.on_upgrade(move |socket| {
-			handle_socket(state.datastore.clone(), rpc_state, socket, session, id)
+			handle_socket(Arc::clone(&state.datastore), rpc_state, socket, session, id)
 		}))
 }
 
@@ -162,6 +163,8 @@ async fn post_handler(
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Rpc);
 		return Err(NetError::ForbiddenRoute(RouteTarget::Rpc.to_string()).into());
 	}
+
+	let rec_limit = db.config().max_object_parsing_depth as usize;
 	// Get the input format from the Content-Type header
 	let fmt: Format = (&content_type).into();
 	// Check that the input format is a valid format
@@ -176,33 +179,82 @@ async fn post_handler(
 	{
 		return Err(NetError::InvalidType.into());
 	}
-	// Use the shared HTTP instance with persistent sessions
 	let rpc = &*rpc_state.http;
-	// Update the default session (None key) with the session from middleware
-	// This is used for requests that don't specify a session_id
-	rpc.set_session(None, Arc::new(RwLock::new(session)));
+	// Snapshot the caller's request-level auth principal BEFORE moving the
+	// session into the ephemeral slot. This principal (derived by the
+	// `SurrealAuth` middleware from Basic/Bearer headers on THIS request)
+	// is compared to the target session's stored principal to prevent
+	// session hijack across callers - see `Http::verify_caller_for_session`.
+	let caller_au: Arc<Auth> = Arc::clone(&session.au);
+	// Isolate this request's session under a unique key to prevent
+	// concurrent requests from racing on a shared session slot.
+	let request_session_id = Uuid::new_v4();
+	rpc.register_ephemeral_session(request_session_id, Arc::new(RwLock::new(session)));
 	// Check to see available memory
 	if ALLOC.is_beyond_threshold() {
+		rpc.remove_ephemeral_session(&request_session_id);
 		return Err(NetError::ServerOverloaded.into());
 	}
 	// Parse the HTTP request body
-	match fmt.req_http(body) {
+	let result = match fmt.req_http(body, rec_limit) {
 		Ok(req) => {
-			// Execute the specified method
-			let res = RpcProtocol::execute(
-				rpc,
-				req.txn.map(Into::into),
-				req.session_id.map(Into::into),
-				req.method,
-				req.params,
-			)
-			.await;
-			// Return the HTTP response
-			Ok(fmt.res_http(match res {
-				Ok(result) => DbResponse::success(None, None, result),
-				Err(err) => DbResponse::failure(None, None, err),
-			})?)
+			// Preserve the raw client-provided session_id for methods that
+			// require an explicit ID (attach/detach).
+			let client_session: Option<Uuid> = req.session_id.map(Into::into);
+			let session_id = client_session.unwrap_or(request_session_id);
+			// Echo back the request id and client-supplied session id
+			// (if any) so HTTP responses match the WebSocket convention.
+			let req_id = req.id;
+			let method = req.method;
+			// Ownership gate: if the client supplied a session id that targets an existing attached
+			// session, the caller's request-level auth principal must match the
+			// session's stored principal. `Method::Attach` is the only
+			// exception - it creates a new session and has no prior
+			// principal to match against (the trait-level `attach` then
+			// enforces the global cap and UUID uniqueness). All other
+			// methods, including `Method::Detach`, go through the gate.
+			//
+			// When `client_session == Some(request_session_id)` we
+			// deliberately skip verification: the client happened to
+			// specify the ephemeral id, which matches the caller's own
+			// auth by construction. This also avoids a collision oracle.
+			let gate_result: Result<(), surrealdb_types::Error> = if method == Method::Attach {
+				Ok(())
+			} else if let Some(cid) = client_session
+				&& cid != request_session_id
+			{
+				rpc.verify_caller_for_session(&cid, caller_au.as_ref()).await
+			} else {
+				Ok(())
+			};
+			// Execute the specified method only if the gate allows.
+			let res = match gate_result {
+				Ok(()) => {
+					RpcProtocol::execute(
+						rpc,
+						req.txn.map(Into::into),
+						session_id,
+						client_session,
+						method,
+						req.params,
+					)
+					.await
+				}
+				Err(err) => Err(err),
+			};
+			// Build the HTTP response. Do not use `?` here: a failure from
+			// `res_http` would short-circuit the function and bypass the
+			// ephemeral-session cleanup below, leaking an entry per failed
+			// serialization for the server lifetime.
+			let db_response = match res {
+				Ok(result) => DbResponse::success(req_id, client_session, result),
+				Err(err) => DbResponse::failure(req_id, client_session, err),
+			};
+			fmt.res_http(db_response).map_err(Into::into)
 		}
 		Err(err) => Err(err.into()),
-	}
+	};
+	// Clean up the per-request session
+	rpc.remove_ephemeral_session(&request_session_id);
+	result
 }

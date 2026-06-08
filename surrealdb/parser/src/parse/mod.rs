@@ -102,6 +102,17 @@ pub struct Config {
 
 	pub feature_bearer_access: bool,
 	pub feature_surrealism: bool,
+
+	/// Quirk settings specify whether to allow behavior that was in v2 but should probably be
+	/// removed eventually.
+	///
+	/// Whether to allow overwriting a clause by specifying it multiple times in alter and define
+	/// statements.
+	pub quirk_redefine: bool,
+	/// Whether to allow the first statement in a block to omit it's semi colon.
+	pub quirk_block_first_no_semi: bool,
+	/// Does the parser allow specifying delete permissions of fields.
+	pub quirk_delete_permission_field: bool,
 }
 
 impl Config {
@@ -121,6 +132,9 @@ impl Default for Config {
 			generate_warnings: false,
 			feature_bearer_access: false,
 			feature_surrealism: false,
+			quirk_redefine: false,
+			quirk_block_first_no_semi: false,
+			quirk_delete_permission_field: false,
 		}
 	}
 }
@@ -129,13 +143,46 @@ bitflags! {
 	#[derive(Clone,Copy)]
 	struct ParserSettings: u8 {
 		/// Is the emmiting of warnings enabled.
-		const WARNINGS           = 1 << 1;
+		const WARNINGS           = 1 << 0;
 		/// Is the parser parsing a partially available query.
-		const PARTIAL            = 1 << 2;
+		const PARTIAL            = 1 << 1;
 		/// Is Bearer access feature enabled
-		const FEAT_BEARER_ACCESS = 1 << 3;
+		const FEAT_BEARER_ACCESS = 1 << 2;
 		/// Is surrealism enabled
-		const FEAT_SURREALISM = 1 << 4;
+		const FEAT_SURREALISM = 1 << 3;
+		/// Does the parser allow repeating clauses in statements.
+		const QUIRK_REDEFINE = 1 << 4;
+		/// Does the parser allow to omit semicolon on the first statement.
+		const QUIRK_FIRST_SEMICOLON_BLOCK = 1 << 5;
+		/// Does the parser allow specifying delete permissions of fields.
+		const QUIRK_DELETE_PERMISSION_FIELD = 1 << 6;
+	}
+}
+
+impl ParserSettings {
+	fn from_config(cfg: &Config) -> Self {
+		let mut settings = ParserSettings::empty();
+
+		if cfg.generate_warnings {
+			settings |= ParserSettings::WARNINGS;
+		}
+		if cfg.feature_surrealism {
+			settings |= ParserSettings::FEAT_SURREALISM;
+		}
+		if cfg.feature_bearer_access {
+			settings |= ParserSettings::FEAT_BEARER_ACCESS;
+		}
+		if cfg.quirk_redefine {
+			settings |= ParserSettings::QUIRK_REDEFINE;
+		}
+		if cfg.quirk_delete_permission_field {
+			settings |= ParserSettings::QUIRK_DELETE_PERMISSION_FIELD;
+		}
+		if cfg.quirk_block_first_no_semi {
+			settings |= ParserSettings::QUIRK_FIRST_SEMICOLON_BLOCK;
+		}
+
+		settings
 	}
 }
 
@@ -196,17 +243,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		let lex = BaseTokenKind::lexer(source);
 		let lex = PeekableLexer::new(lex);
 
-		let mut settings = ParserSettings::empty();
-
-		if config.generate_warnings {
-			settings |= ParserSettings::WARNINGS;
-		}
-		if config.feature_surrealism {
-			settings |= ParserSettings::FEAT_SURREALISM;
-		}
-		if config.feature_bearer_access {
-			settings |= ParserSettings::FEAT_BEARER_ACCESS;
-		}
+		let settings = ParserSettings::from_config(&config);
 
 		let mut parser = Parser {
 			lex,
@@ -250,9 +287,9 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 
 	/// Parse a parsable type in partial mode.
 	///
-	/// In partial mode if the parser encounters an error which happend due to a sudden end of the
-	/// source it will return `Ok(None)` instead of an error assuming the error can fixed by adding
-	/// more data to the source.
+	/// In partial mode if the parser encounters an error which happened due to a sudden end of the
+	/// source it will return `Ok(None)` instead of an error assuming the error can be fixed by
+	/// adding more data to the source.
 	pub fn enter_partial_parse<P: Parse + Node>(
 		source: &str,
 		stack: &mut Stack,
@@ -262,17 +299,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		let lex = BaseTokenKind::lexer(source);
 		let lex = PeekableLexer::new(lex);
 
-		let mut settings = ParserSettings::PARTIAL;
-
-		if config.generate_warnings {
-			settings |= ParserSettings::WARNINGS;
-		}
-		if config.feature_surrealism {
-			settings |= ParserSettings::FEAT_SURREALISM;
-		}
-		if config.feature_bearer_access {
-			settings |= ParserSettings::FEAT_BEARER_ACCESS;
-		}
+		let settings = ParserSettings::from_config(&config) | ParserSettings::PARTIAL;
 
 		let mut parser = Parser {
 			lex,

@@ -23,7 +23,7 @@ value = "[test:123, 123, true, true, NONE, NONE, NONE, NONE]"
 value = "[test:abc, 'abc', true, true, NONE, NONE, NONE, NONE]"
 
 [[test.results]]
-value = "[test:{ val: 456 }, { val: 456 }, true, true, 456, NONE, NONE, NONE]"
+value = "[test:{ val: 456 }, { val: 456 }, 456, 456, 456, NONE, NONE, NONE]"
 
 [[test.results]]
 value = "[test:[1, 2, 3], [1, 2, 3], true, true, [NONE, NONE, NONE], 1, 1, 1]"

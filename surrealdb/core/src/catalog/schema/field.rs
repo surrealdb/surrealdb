@@ -36,14 +36,14 @@ pub struct ComputedDeps {
 	pub is_complete: bool,
 }
 
-#[revisioned(revision = 3)]
+#[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct FieldDefinition {
 	// TODO: Needs to be it's own type.
 	// Idiom::Value/Idiom::Start are for example not allowed.
 	pub(crate) name: Idiom,
 	pub(crate) table: TableName,
-	// TODO: Optionally also be a seperate type from expr::Kind
+	// TODO: Optionally also be a separate type from expr::Kind
 	pub(crate) field_kind: Option<Kind>,
 	pub(crate) flexible: bool,
 	pub(crate) readonly: bool,
@@ -68,6 +68,21 @@ pub struct FieldDefinition {
 	/// When `None` on a computed field, deps are extracted on-the-fly at query time.
 	#[revision(start = 3, default_fn = "default_computed_deps")]
 	pub(crate) computed_deps: Option<ComputedDeps>,
+
+	/// Optional alias used as the GraphQL field name. When set, GraphQL
+	/// schema generation prefers this over the raw SurrealQL field name,
+	/// allowing snake_case columns to be exposed as camelCase. See
+	/// GitHub issue #4537. `Option<String>::default()` already returns
+	/// `None` so no explicit `default_fn` is needed.
+	#[revision(start = 4)]
+	pub(crate) graphql_alias: Option<String>,
+
+	/// Reason emitted on the GraphQL `@deprecated` directive. When set, the
+	/// corresponding GraphQL field is marked deprecated in introspection
+	/// (and in input objects), surfacing the reason to schema consumers
+	/// while remaining usable for backwards compatibility.
+	#[revision(start = 4)]
+	pub(crate) graphql_deprecated: Option<String>,
 }
 
 impl FieldDefinition {
@@ -88,7 +103,7 @@ impl FieldDefinition {
 		DefineFieldStatement {
 			kind: sql::statements::define::DefineKind::Default,
 			name: Expr::Idiom(self.name.clone()).into(),
-			what: sql::Expr::Table(self.table.clone().into_string()),
+			what: sql::Expr::Table(self.table.clone()),
 			field_kind: self.field_kind.clone().map(|x| x.into()),
 			flexible: self.flexible,
 			readonly: self.readonly,
@@ -113,9 +128,11 @@ impl FieldDefinition {
 			comment: self
 				.comment
 				.clone()
-				.map(|x| sql::Expr::Literal(sql::Literal::String(x)))
+				.map(|x| sql::Expr::Literal(sql::Literal::String(x.into())))
 				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 			reference: self.reference.clone().map(|x| x.into()),
+			graphql_alias: self.graphql_alias.clone(),
+			graphql_deprecated: self.graphql_deprecated.clone(),
 		}
 	}
 }
@@ -123,23 +140,25 @@ impl FieldDefinition {
 impl InfoStructure for FieldDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"table".to_string() => Value::String(self.table.into_string()),
-			"kind".to_string(), if let Some(v) = self.field_kind => v.structure(),
-			"flexible".to_string(), if self.flexible => true.into(),
-			"value".to_string(), if let Some(v) = self.value => v.structure(),
-			"assert".to_string(), if let Some(v) = self.assert => v.structure(),
-			"computed".to_string(), if let Some(v) = self.computed => v.structure(),
-			"default_always".to_string(), if matches!(&self.default, DefineDefault::Always(_) | DefineDefault::Set(_)) => Value::Bool(matches!(self.default,DefineDefault::Always(_))), // Only reported if DEFAULT is also enabled for this field
-			"default".to_string(), if let DefineDefault::Always(v) | DefineDefault::Set(v) = self.default => v.structure(),
-			"reference".to_string(), if let Some(v) = self.reference => v.structure(),
-			"readonly".to_string() => self.readonly.into(),
-			"permissions".to_string() => Value::from(map!{
-				"select".to_string() => self.select_permission.structure(),
-				"create".to_string() => self.create_permission.structure(),
-				"update".to_string() => self.update_permission.structure(),
+			"name" => self.name.structure(),
+			"table" => Value::String(self.table.into()),
+			"kind", if let Some(v) = self.field_kind => v.structure(),
+			"flexible", if self.flexible => true.into(),
+			"value", if let Some(v) = self.value => v.structure(),
+			"assert", if let Some(v) = self.assert => v.structure(),
+			"computed", if let Some(v) = self.computed => v.structure(),
+			"default_always", if matches!(&self.default, DefineDefault::Always(_) | DefineDefault::Set(_)) => Value::Bool(matches!(self.default,DefineDefault::Always(_))), // Only reported if DEFAULT is also enabled for this field
+			"default", if let DefineDefault::Always(v) | DefineDefault::Set(v) = self.default => v.structure(),
+			"reference", if let Some(v) = self.reference => v.structure(),
+			"readonly" => self.readonly.into(),
+			"permissions" => Value::from(map!{
+				"select" => self.select_permission.structure(),
+				"create" => self.create_permission.structure(),
+				"update" => self.update_permission.structure(),
 			}),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"comment", if let Some(v) = self.comment => v.into(),
+			"graphql_alias", if let Some(v) = self.graphql_alias => v.into(),
+			"graphql_deprecated", if let Some(v) = self.graphql_deprecated => v.into(),
 		})
 	}
 }

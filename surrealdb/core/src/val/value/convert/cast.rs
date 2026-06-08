@@ -6,6 +6,7 @@ use geo::Point;
 use rust_decimal::Decimal;
 use surrealdb_types::ToSql;
 
+use super::coerce::ElementPosition;
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
@@ -26,10 +27,11 @@ pub enum CastError {
 		len: usize,
 		into: String,
 	},
-	/// Coerce failed because element of type didn't match.
+	/// Cast failed because element of type didn't match.
 	ElementOf {
 		inner: Box<CastError>,
 		into: String,
+		position: Option<ElementPosition>,
 	},
 	// Annoying error which doesn't fit in with the rest of the errors and breaks the trait
 	// pattern.
@@ -52,9 +54,18 @@ impl fmt::Display for CastError {
 			CastError::ElementOf {
 				inner,
 				into,
+				position,
 			} => {
 				inner.fmt(f)?;
-				write!(f, " when coercing an element of `{into}`")
+				match position {
+					Some(ElementPosition::Index(i)) => {
+						write!(f, " when casting element at index {i} of `{into}`")
+					}
+					Some(ElementPosition::Key(k)) => {
+						write!(f, " when casting value for key '{k}' of `{into}`")
+					}
+					None => write!(f, " when casting an element of `{into}`"),
+				}
 			}
 			CastError::InvalidLength {
 				len,
@@ -76,13 +87,13 @@ impl fmt::Display for CastError {
 }
 
 pub trait CastErrorExt {
-	fn with_element_of<F>(self, f: F) -> Self
+	fn with_element_of_at_index<F>(self, index: usize, f: F) -> Self
 	where
 		F: Fn() -> String;
 }
 
 impl<T> CastErrorExt for Result<T, CastError> {
-	fn with_element_of<F>(self, f: F) -> Self
+	fn with_element_of_at_index<F>(self, index: usize, f: F) -> Self
 	where
 		F: Fn() -> String,
 	{
@@ -91,6 +102,7 @@ impl<T> CastErrorExt for Result<T, CastError> {
 			Err(e) => Err(CastError::ElementOf {
 				inner: Box::new(e),
 				into: f(),
+				position: Some(ElementPosition::Index(index)),
 			}),
 		}
 	}
@@ -354,7 +366,7 @@ impl Cast for String {
 
 			Value::Null => Ok("NULL".into()),
 			Value::None => Ok("NONE".into()),
-			Value::String(x) => Ok(x),
+			Value::String(x) => Ok(x.into_string()),
 			Value::Uuid(x) => Ok(x.to_string()),
 			Value::Datetime(x) => Ok(x.to_string()),
 			Value::Number(Number::Decimal(x)) => Ok(x.to_string()),
@@ -445,7 +457,7 @@ impl Cast for Bytes {
 	fn can_cast(v: &Value) -> bool {
 		match v {
 			Value::Bytes(_) | Value::String(_) => true,
-			Value::Array(x) => x.iter().all(|x| x.can_cast_to::<i64>()),
+			Value::Array(x) => x.iter().all(|v| value_to_byte(v).is_some()),
 			_ => false,
 		}
 	}
@@ -453,33 +465,34 @@ impl Cast for Bytes {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Bytes(b) => Ok(b),
-			Value::String(s) => Ok(Bytes::from(s.into_bytes())),
-			Value::Array(x) => {
-				// Optimization to check first if the conversion can succeed to avoid possibly
-				// cloning large values.
-				if !x.0.iter().all(|x| x.can_cast_to::<i64>()) {
-					return Err(CastError::InvalidKind {
-						from: x.into(),
-						into: "bytes".to_owned(),
-					});
-				}
-
-				let mut res = Vec::new();
-
-				for v in x.0 {
-					// Condition checked above
-					let x = v.clone().cast_to::<i64>().expect("value checked to be castable above");
-					// TODO: Fix truncation.
-					res.push(x as u8);
-				}
-
-				Ok(Bytes::from(res))
-			}
+			Value::String(s) => Ok(Bytes::from(s.into_string().into_bytes())),
+			Value::Array(x) => match x.0.iter().map(value_to_byte).collect::<Option<Vec<u8>>>() {
+				Some(bytes) => Ok(Bytes::from(bytes)),
+				None => Err(CastError::InvalidKind {
+					from: Value::Array(x),
+					into: "bytes".to_owned(),
+				}),
+			},
 			_ => Err(CastError::InvalidKind {
 				from: v,
 				into: "bytes".into(),
 			}),
 		}
+	}
+}
+
+// `TryFrom<Number> for u8` is intentionally not reused: it truncates fractional
+// floats (via `num_traits::ToPrimitive::to_u8`) instead of rejecting them, which
+// would reintroduce the truncation bug this helper is here to prevent.
+fn value_to_byte(v: &Value) -> Option<u8> {
+	match v {
+		Value::Number(Number::Int(x)) => u8::try_from(*x).ok(),
+		Value::Number(Number::Float(f)) if f.fract() == 0.0 => u8::try_from(*f as i64).ok(),
+		Value::Number(Number::Decimal(d)) if d.is_integer() => {
+			u8::try_from(i64::try_from(*d).ok()?).ok()
+		}
+		Value::String(s) => s.parse::<u8>().ok(),
+		_ => None,
 	}
 }
 
@@ -505,7 +518,7 @@ impl Cast for Array {
 				}
 				// checked above
 				let range = range.coerce_to_typed::<i64>().expect("range type checked above");
-				if range.len() > *GENERATION_ALLOCATION_LIMIT {
+				if range.len().is_none_or(|n| n > *GENERATION_ALLOCATION_LIMIT) {
 					return Err(CastError::RangeSizeLimit {
 						value: Box::new(Range::from(range)),
 					});
@@ -1078,9 +1091,13 @@ impl Value {
 	fn cast_to_array(self, kind: &Kind) -> Result<Array, CastError> {
 		self.cast_to::<Array>()?
 			.into_iter()
-			.map(|value| value.cast_to_kind(kind))
+			.enumerate()
+			.map(|(i, value)| {
+				value
+					.cast_to_kind(kind)
+					.with_element_of_at_index(i, || format!("array<{}>", kind.to_sql()))
+			})
 			.collect::<Result<Array, CastError>>()
-			.with_element_of(|| format!("array<{}>", kind.to_sql()))
 	}
 
 	/// Try to convert this value to ab `Array` of a certain type and length
@@ -1096,33 +1113,40 @@ impl Value {
 
 		array
 			.into_iter()
-			.map(|value| value.cast_to_kind(kind))
+			.enumerate()
+			.map(|(i, value)| {
+				value
+					.cast_to_kind(kind)
+					.with_element_of_at_index(i, || format!("array<{}>", kind.to_sql()))
+			})
 			.collect::<Result<Array, CastError>>()
-			.with_element_of(|| format!("array<{}>", kind.to_sql()))
 	}
 
 	/// Try to convert this value to a `Set` of a certain type
 	pub(crate) fn cast_to_set_type(self, kind: &Kind) -> Result<Set, CastError> {
-		let array = self.cast_to::<Array>()?;
-
-		let set = array
+		self.cast_to::<Array>()?
 			.into_iter()
-			.map(|value| value.cast_to_kind(kind))
+			.enumerate()
+			.map(|(i, value)| {
+				value
+					.cast_to_kind(kind)
+					.with_element_of_at_index(i, || format!("set<{}>", kind.to_sql()))
+			})
 			.collect::<Result<Set, CastError>>()
-			.with_element_of(|| format!("set<{}>", kind.to_sql()))?;
-
-		Ok(set)
 	}
 
 	/// Try to convert this value to a `Set` of a certain type and length
 	pub(crate) fn cast_to_set_type_len(self, kind: &Kind, len: u64) -> Result<Set, CastError> {
-		let array = self.cast_to::<Array>()?;
-
-		let set = array
+		let set = self
+			.cast_to::<Array>()?
 			.into_iter()
-			.map(|value| value.cast_to_kind(kind))
-			.collect::<Result<Set, CastError>>()
-			.with_element_of(|| format!("set<{}>", kind.to_sql()))?;
+			.enumerate()
+			.map(|(i, value)| {
+				value
+					.cast_to_kind(kind)
+					.with_element_of_at_index(i, || format!("set<{}>", kind.to_sql()))
+			})
+			.collect::<Result<Set, CastError>>()?;
 
 		if (set.len() as u64) != len {
 			return Err(CastError::InvalidLength {
@@ -1158,12 +1182,14 @@ impl Value {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::Strand;
+
 	use super::*;
 
 	#[test]
 	fn test_cast_to_table_generic() {
 		// Test casting string to generic table type
-		let value = Value::String("users".to_string());
+		let value = Value::String(Strand::new_static("users"));
 		let kind = Kind::Table(vec![]);
 		let result = value.cast_to_kind(&kind);
 		assert!(result.is_ok());
@@ -1177,7 +1203,7 @@ mod tests {
 	#[test]
 	fn test_cast_to_table_specific() {
 		// Test casting string to specific table type (matching)
-		let value = Value::String("users".to_string());
+		let value = Value::String(Strand::new_static("users"));
 		let kind = Kind::Table(vec!["users".into()]);
 		let result = value.cast_to_kind(&kind);
 		assert!(result.is_ok());
@@ -1186,7 +1212,7 @@ mod tests {
 		}
 
 		// Test casting string to specific table type (not matching)
-		let value = Value::String("posts".to_string());
+		let value = Value::String(Strand::new_static("posts"));
 		let kind = Kind::Table(vec!["users".into()]);
 		let result = value.cast_to_kind(&kind);
 		assert!(result.is_err());
@@ -1195,7 +1221,7 @@ mod tests {
 	#[test]
 	fn test_cast_to_table_union() {
 		// Test casting string to union of table types
-		let value = Value::String("posts".to_string());
+		let value = Value::String(Strand::new_static("posts"));
 		let kind = Kind::Table(vec!["users".into(), "posts".into()]);
 		let result = value.cast_to_kind(&kind);
 		assert!(result.is_ok());
@@ -1204,7 +1230,7 @@ mod tests {
 		}
 
 		// Test casting string that doesn't match any in the union
-		let value = Value::String("comments".to_string());
+		let value = Value::String(Strand::new_static("comments"));
 		let kind = Kind::Table(vec!["users".into(), "posts".into()]);
 		let result = value.cast_to_kind(&kind);
 		assert!(result.is_err());
@@ -1222,7 +1248,7 @@ mod tests {
 	#[test]
 	fn test_can_cast_to_table() {
 		// Test can_cast_to_kind for tables - String can always cast to generic table
-		let value = Value::String("users".to_string());
+		let value = Value::String(Strand::new_static("users"));
 		let kind = Kind::Table(vec![]);
 		assert!(value.can_cast_to_kind(&kind));
 

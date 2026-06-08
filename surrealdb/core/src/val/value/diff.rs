@@ -1,5 +1,5 @@
 use crate::expr::operation::Operation;
-use crate::val::Value;
+use crate::val::{Strand, Value};
 
 impl Value {
 	pub(crate) fn diff(&self, val: &Value) -> Vec<Operation> {
@@ -11,7 +11,7 @@ impl Value {
 		res
 	}
 
-	fn diff_rec(&self, val: &Value, path: &mut Vec<String>, ops: &mut Vec<Operation>) {
+	fn diff_rec(&self, val: &Value, path: &mut Vec<Strand>, ops: &mut Vec<Operation>) {
 		match (self, val) {
 			(Value::Object(a), Value::Object(b)) if a != b => {
 				// Loop over old keys
@@ -46,13 +46,13 @@ impl Value {
 			(Value::Array(a), Value::Array(b)) if a != b => {
 				let min_len = a.len().min(b.len());
 				for n in 0..min_len {
-					path.push(n.to_string());
+					path.push(n.to_string().into());
 					a[n].diff_rec(&b[n], path, ops);
 					path.pop();
 				}
 				for n in min_len..b.len() {
 					let mut path = path.clone();
-					path.push(n.to_string());
+					path.push(n.to_string().into());
 					ops.push(Operation::Add {
 						path,
 						value: b[n].clone(),
@@ -60,7 +60,7 @@ impl Value {
 				}
 				for n in min_len..a.len() {
 					let mut path = path.clone();
-					path.push(n.to_string());
+					path.push(n.to_string().into());
 					ops.push(Operation::Remove {
 						path,
 					})
@@ -150,5 +150,51 @@ mod tests {
 		);
 		let res = Operation::value_to_operations(res).unwrap();
 		assert_eq!(res, old.diff(&now));
+	}
+
+	#[test]
+	fn diff_change_text_root() {
+		// Issue 7239: diffing two strings at the root must emit an empty path,
+		// which serializes to "" (RFC 6901 root pointer).
+		let old = parse_val!("'test'");
+		let now = parse_val!("'text'");
+		let ops = old.diff(&now);
+		assert_eq!(ops.len(), 1);
+		match &ops[0] {
+			Operation::Change {
+				path,
+				value: _,
+			} => {
+				assert!(path.is_empty(), "expected empty path, got {path:?}");
+			}
+			other => panic!("expected Operation::Change, got {other:?}"),
+		}
+		// Verify the JSON Patch serialization produces path "".
+		let patch = Operation::operations_to_value(ops);
+		let expected =
+			parse_val!("[{ op: 'change', path: '', value: '@@ -1,4 +1,4 @@\n te\n-s\n+x\n t\n' }]");
+		assert_eq!(patch, expected);
+	}
+
+	#[test]
+	fn diff_replace_root() {
+		// Issue 7239: diffing two non-string scalars at the root must emit
+		// an Operation::Replace with an empty path.
+		let old = parse_val!("1");
+		let now = parse_val!("2");
+		let ops = old.diff(&now);
+		assert_eq!(ops.len(), 1);
+		match &ops[0] {
+			Operation::Replace {
+				path,
+				value: _,
+			} => {
+				assert!(path.is_empty(), "expected empty path, got {path:?}");
+			}
+			other => panic!("expected Operation::Replace, got {other:?}"),
+		}
+		let patch = Operation::operations_to_value(ops);
+		let expected = parse_val!("[{ op: 'replace', path: '', value: 2 }]");
+		assert_eq!(patch, expected);
 	}
 }

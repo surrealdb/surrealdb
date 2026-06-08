@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::str::FromStr;
+use std::time::Duration;
 
 use semver::VersionReq;
 use serde::{Deserialize, Serialize, de};
@@ -26,7 +27,19 @@ fn default_planner_strategy() -> Vec<NewPlannerStrategyConfig> {
 	]
 }
 
-pub const ENV_DEFAULT_TIMEOUT: u64 = 1000;
+fn t() -> bool {
+	true
+}
+
+fn default_duration<const V: u64>() -> TestDuration {
+	TestDuration(Duration::from_millis(V))
+}
+
+fn default_usize<const V: usize>() -> usize {
+	V
+}
+
+pub const ENV_DEFAULT_TIMEOUT: Duration = Duration::from_secs(1);
 pub const ENV_DEFAULT_NAMESPACE: &str = "test";
 pub const ENV_DEFAULT_DATABASE: &str = "test";
 
@@ -38,6 +51,8 @@ pub struct TestConfig {
 	pub env: TestEnv,
 	#[serde(default)]
 	pub test: TestDetails,
+	#[serde(default)]
+	pub bench: BenchDetails,
 	#[serde(skip_serializing)]
 	#[serde(flatten)]
 	_unused_keys: BTreeMap<String, toml::Value>,
@@ -49,6 +64,7 @@ impl TestConfig {
 		let mut res: Vec<_> = self._unused_keys.keys().cloned().collect();
 		res.append(&mut self.env.unused_keys());
 		res.append(&mut self.test.unused_keys());
+		res.extend(self.bench._unused_keys.keys().cloned());
 		res
 	}
 }
@@ -59,8 +75,12 @@ pub struct TestEnv {
 	/// Should the test be run sequentially
 	#[serde(default)]
 	pub sequential: bool,
+	/// Does the test keep values around in the datastore which can't be removed with a REMOVE NS
 	#[serde(default)]
 	pub clean: bool,
+	/// Does the test make no modification to the datastore itself.
+	#[serde(default)]
+	pub readonly: bool,
 
 	#[serde(default)]
 	pub namespace: BoolOr<String>,
@@ -74,7 +94,7 @@ pub struct TestEnv {
 	#[serde(default)]
 	pub imports: Vec<String>,
 	#[serde(default)]
-	pub timeout: BoolOr<u64>,
+	pub timeout: BoolOr<TestDuration>,
 	#[serde(default)]
 	pub capabilities: BoolOr<Capabilities>,
 
@@ -111,6 +131,7 @@ impl Default for TestEnv {
 		Self {
 			sequential: Default::default(),
 			clean: Default::default(),
+			readonly: Default::default(),
 			namespace: Default::default(),
 			database: Default::default(),
 			auth: Default::default(),
@@ -286,6 +307,57 @@ pub struct MatchTestResult {
 	pub error: Option<bool>,
 }
 
+/// Duration which deserializes from both a string as well as a number.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TestDuration(pub Duration);
+
+impl<'de> Deserialize<'de> for TestDuration {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		#[derive(Deserialize)]
+		#[serde(untagged)]
+		enum NumberOrString {
+			String(String),
+			Number(u64),
+		}
+
+		match NumberOrString::deserialize(deserializer)? {
+			NumberOrString::Number(x) => Ok(Self(Duration::from_millis(x))),
+			NumberOrString::String(x) => {
+				let settings = ParserSettings {
+					object_recursion_limit: 100,
+					query_recursion_limit: 100,
+					legacy_strands: false,
+					flexible_record_id: true,
+					files_enabled: true,
+					surrealism_enabled: true,
+					json_string_escapes: false,
+				};
+
+				let v = syn::parse_with_settings(x.as_bytes(), settings, async |parser, stk| {
+					parser.parse_value(stk).await
+				})
+				.map_err(<D::Error as serde::de::Error>::custom)?;
+				let Value::Duration(x) = v else {
+					return Err(<D::Error as serde::de::Error>::custom("Invalid duration"));
+				};
+				Ok(Self(x.into_inner()))
+			}
+		}
+	}
+}
+
+impl Serialize for TestDuration {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		format!("{:?}", self.0).serialize(serializer)
+	}
+}
+
 /// A enum for when configuration which can be disabled, enabled or configured to have a specific
 /// value.
 ///
@@ -350,10 +422,6 @@ impl<T> BoolOr<T> {
 			BoolOr::Value(x) => Some(x),
 		}
 	}
-}
-
-fn t() -> bool {
-	true
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -765,4 +833,21 @@ impl Capabilities {
 	pub fn unused_keys(&self) -> Vec<String> {
 		self._unused_keys.keys().map(|x| format!("env.capabilities.{x}")).collect()
 	}
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub struct BenchDetails {
+	#[serde(default = "t")]
+	pub run: bool,
+	#[serde(default = "default_duration::<3000>")]
+	pub warmup: TestDuration,
+	#[serde(default = "default_usize::<100>")]
+	pub sample_size: usize,
+	#[serde(default = "default_duration::<100000>")]
+	pub measurement_time: TestDuration,
+
+	#[serde(skip_serializing)]
+	#[serde(flatten)]
+	_unused_keys: BTreeMap<String, toml::Value>,
 }

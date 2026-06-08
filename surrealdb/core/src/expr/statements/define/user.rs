@@ -1,9 +1,8 @@
 use anyhow::{Result, bail};
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, SaltString};
-use rand::Rng as _;
-use rand::distributions::Alphanumeric;
-use rand::rngs::OsRng;
+use rand::distr::{Alphanumeric, SampleString};
+use rand_core::OsRng;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -57,11 +56,7 @@ impl DefineUserStatement {
 				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
 				.expect("password hashing should not fail")
 				.to_string(),
-			code: rand::thread_rng()
-				.sample_iter(&Alphanumeric)
-				.take(128)
-				.map(char::from)
-				.collect::<String>(),
+			code: Alphanumeric.sample_string(&mut rand::rng(), 128),
 			roles: vec![role],
 			duration: UserDuration::default(),
 			comment: Expr::Literal(Literal::None),
@@ -95,7 +90,7 @@ impl DefineUserStatement {
 			.cast_to()?;
 
 		Ok(UserDefinition {
-			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "user name").await?,
+			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "user name").await?.into(),
 			hash: self.hash.clone(),
 			code: self.code.clone(),
 			roles: self.roles.clone(),
@@ -142,7 +137,7 @@ impl DefineUserStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Actor, self.base)?;
 		// Compute definition
 		let definition = self.to_definition(stk, ctx, opt, doc).await?;
 		// Check the statement type
@@ -151,12 +146,12 @@ impl DefineUserStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if the definition exists
-				if let Some(user) = txn.get_root_user(&definition.name, None).await? {
+				if let Some(user) = txn.get_root_user(definition.name.as_str(), None).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserRootAlreadyExists {
-									name: user.name.clone(),
+									name: user.name.to_string(),
 								});
 							}
 						}
@@ -176,12 +171,12 @@ impl DefineUserStatement {
 				let txn = ctx.tx();
 				let ns = ctx.get_ns_id(opt).await?;
 				// Check if the definition exists
-				if let Some(user) = txn.get_ns_user(ns, &definition.name, None).await? {
+				if let Some(user) = txn.get_ns_user(ns, definition.name.as_str(), None).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserNsAlreadyExists {
-									name: user.name.clone(),
+									name: user.name.to_string(),
 									ns: opt.ns()?.into(),
 								});
 							}
@@ -208,12 +203,12 @@ impl DefineUserStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-				if let Some(user) = txn.get_db_user(ns, db, &definition.name, None).await? {
+				if let Some(user) = txn.get_db_user(ns, db, definition.name.as_str(), None).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserDbAlreadyExists {
-									name: user.name.clone(),
+									name: user.name.to_string(),
 									ns: opt.ns()?.to_string(),
 									db: opt.db()?.to_string(),
 								});

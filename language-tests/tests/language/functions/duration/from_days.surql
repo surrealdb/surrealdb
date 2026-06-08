@@ -14,7 +14,7 @@ value = "7w1d"
 error = 'Failed to compute: "duration::from_days(9223372036854775807)", as the operation results in an arithmetic overflow.'
 
 [[test.results]]
-error = 'Failed to compute: "duration::from_days(18446744073709551615)", as the operation results in an arithmetic overflow.'
+error = 'Failed to compute: "duration::from_days(-1)", as the operation results in a negative value.'
 
 */
 duration::from_days(3);

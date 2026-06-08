@@ -18,6 +18,7 @@ use tokio::sync::mpsc::{self, UnboundedSender};
 
 use crate::cli::{Backend, ColorMode, ResultsMode};
 use crate::cmd::run::provisioner::CanReuse;
+use crate::cmd::util;
 use crate::format::{IndentFormatter, Progress, ansi};
 use crate::runner::Schedular;
 use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
@@ -26,7 +27,6 @@ use crate::tests::schema::{ENV_DEFAULT_TIMEOUT, NewPlannerStrategyConfig};
 use crate::tests::{CaseSet, RunSetBuilder, TestRun};
 
 mod provisioner;
-mod util;
 
 #[derive(Debug)]
 pub struct TestRunConfig {
@@ -365,46 +365,12 @@ async fn run_test_with_dbs(
 
 	let mut session = util::session_from_test_config(config, run.config.planner_config.into());
 
-	if let Some(ref x) = session.ns {
-		let db = session.db.take();
-		dbs.execute(&format!("DEFINE NAMESPACE `{x}`"), &session, None).await?;
-		session.db = db;
+	if let Some(x) = util::run_imports(run, session.clone(), dbs).await? {
+		return Ok(TestTaskResult::Import(x.path, x.message));
 	}
 
-	if let Some(ref x) = session.db {
-		dbs.execute(&format!("DEFINE DATABASE `{x}`"), &session, None).await?;
-	}
-
-	let timeout_duration = config.env.timeout.into_value(ENV_DEFAULT_TIMEOUT).unwrap_or(u64::MAX);
-	let timeout_duration = Duration::from_millis(timeout_duration);
-
-	let mut import_session = Session::owner();
-	dbs.process_use(None, &mut import_session, session.ns.clone(), session.db.clone()).await?;
-
-	for import in run.case.imports.iter() {
-		match dbs.execute(&import.source, &import_session, None).await {
-			Err(e) => {
-				return Ok(TestTaskResult::Import(
-					import.origin.path.clone(),
-					format!("Failed to run import: `{e}`"),
-				));
-			}
-			Ok(results) => {
-				// Check if any import result contains an error.
-				// Without this, errors within transaction blocks (e.g. constraint
-				// violations, write conflicts) are silently ignored, causing
-				// subsequent test queries to see empty data.
-				for result in &results {
-					if let Err(ref e) = result.result {
-						return Ok(TestTaskResult::Import(
-							import.origin.path.clone(),
-							format!("Import produced an error: `{e}`"),
-						));
-					}
-				}
-			}
-		}
-	}
+	let timeout_duration =
+		config.env.timeout.map(|x| x.0).into_value(ENV_DEFAULT_TIMEOUT).unwrap_or(Duration::MAX);
 
 	if let Some(signup_vars) = config.env.signup.as_ref()
 		&& let Err(e) =

@@ -239,7 +239,7 @@ impl Runtime {
 
 	/// Resolved `allow_net` from module load (same snapshot used for WASI socket filtering).
 	pub fn resolved_allow_net(&self) -> Arc<Vec<ResolvedNetAllow>> {
-		self.resolved_allow_net.clone()
+		Arc::clone(&self.resolved_allow_net)
 	}
 
 	/// Compute the maximum epoch delta that won't overflow when wasmtime adds
@@ -383,7 +383,7 @@ impl Runtime {
 	}
 
 	async fn acquire_slot(&self) -> SurrealismResult<tokio::sync::OwnedSemaphorePermit> {
-		self.controller_slots.clone().acquire_owned().await.map_err(|_| {
+		Arc::clone(&self.controller_slots).acquire_owned().await.map_err(|_| {
 			SurrealismError::Other(anyhow::anyhow!(
 				"Surrealism controller semaphore closed (runtime shutdown?)"
 			))
@@ -406,9 +406,9 @@ impl Runtime {
 		*stderr_cb.lock() = context.stderr_callback();
 		let (wasi_ctx, table) = crate::wasi_context::build(
 			fs_root,
-			self.resolved_allow_net.clone(),
-			stdout_cb.clone(),
-			stderr_cb.clone(),
+			Arc::clone(&self.resolved_allow_net),
+			Arc::clone(&stdout_cb),
+			Arc::clone(&stderr_cb),
 		)?;
 		tracing::debug!(elapsed = ?t0.elapsed(), "new_controller: wasi_context::build");
 
@@ -421,7 +421,7 @@ impl Runtime {
 		let store_data = StoreData {
 			wasi: wasi_ctx,
 			table,
-			config: self.config.clone(),
+			config: Arc::clone(&self.config),
 			context,
 			limiter,
 			stdout_cb,
@@ -478,7 +478,7 @@ impl Runtime {
 			comment_fn,
 			init_fn,
 			self.module_execution_time,
-			self.engine_handle.epoch_counter().clone(),
+			Arc::clone(self.engine_handle.epoch_counter()),
 			controller_slot,
 		))
 	}

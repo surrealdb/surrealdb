@@ -118,8 +118,10 @@ impl Headers {
 
 	// Returns all header keys contained in the header set
 	pub fn keys(&self) -> Vec<String> {
-		// TODO: Incorrect, should return an iterator but iterators are not supported
-		// yet by quickjs
+		// Spec returns a Headers Iterator; we eagerly collect into a Vec because
+		// exposing a true JS iterator from `#[qjs]` would need a hand-rolled
+		// iterator class. JS array iteration still covers the common
+		// `for (const k of headers.keys())` usage.
 		self.inner.keys().map(|v| v.as_str().to_owned()).collect::<Vec<String>>()
 	}
 

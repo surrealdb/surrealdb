@@ -16,7 +16,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::ToSql;
 
@@ -56,9 +55,6 @@ impl DatabaseInfoPlan {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for DatabaseInfoPlan {
 	fn name(&self) -> &'static str {
 		"InfoDatabase"
@@ -124,15 +120,8 @@ async fn execute_database_info(
 	structured: bool,
 	version: Option<&dyn PhysicalExpr>,
 ) -> crate::expr::FlowResult<Value> {
-	// Check permissions
-	let root = ctx.root();
-	let opt = root
-		.options
-		.as_ref()
-		.ok_or_else(|| anyhow::anyhow!("Options not available in execution context"))?;
-
 	// Allowed to run?
-	opt.is_allowed(Action::View, ResourceKind::Any, &crate::expr::Base::Db)?;
+	ctx.is_allowed(Action::View, ResourceKind::Any, crate::expr::Base::Db)?;
 
 	// Get database context
 	let db_ctx = ctx.database()?;
@@ -160,100 +149,100 @@ async fn execute_database_info(
 	// Create the result set
 	if structured {
 		let object = map! {
-			"accesses".to_string() => process(txn.all_db_accesses(ns, db, version).await?),
-			"apis".to_string() => process(txn.all_db_apis(ns, db, version).await?),
-			"analyzers".to_string() => process(txn.all_db_analyzers(ns, db, version).await?),
-			"buckets".to_string() => process(txn.all_db_buckets(ns, db, version).await?),
-			"functions".to_string() => process(txn.all_db_functions(ns, db, version).await?),
-			"modules".to_string() => crate::expr::statements::info::process_modules(ctx.ctx(), ns, db, txn.all_db_modules(ns, db, version).await?).await,
-			"models".to_string() => process(txn.all_db_models(ns, db, version).await?),
-			"params".to_string() => process(txn.all_db_params(ns, db, version).await?),
-			"tables".to_string() => process(txn.all_tb(ns, db, version).await?),
-			"users".to_string() => process(txn.all_db_users(ns, db, version).await?),
-			"configs".to_string() => process(txn.all_db_configs(ns, db, version).await?),
-			"sequences".to_string() => process(txn.all_db_sequences(ns, db, version).await?),
+			"accesses" => process(&txn.all_db_accesses(ns, db, version).await?),
+			"apis" => process(&txn.all_db_apis(ns, db, version).await?),
+			"analyzers" => process(&txn.all_db_analyzers(ns, db, version).await?),
+			"buckets" => process(&txn.all_db_buckets(ns, db, version).await?),
+			"functions" => process(&txn.all_db_functions(ns, db, version).await?),
+			"modules" => crate::expr::statements::info::process_modules(ctx.ctx(), ns, db, txn.all_db_modules(ns, db, version).await?).await,
+			"models" => process(&txn.all_db_models(ns, db, version).await?),
+			"params" => process(&txn.all_db_params(ns, db, version).await?),
+			"tables" => process(&txn.all_tb(ns, db, version).await?),
+			"users" => process(&txn.all_db_users(ns, db, version).await?),
+			"configs" => process(&txn.all_db_configs(ns, db, version).await?),
+			"sequences" => process(&txn.all_db_sequences(ns, db, version).await?),
 		};
-		Ok(Value::Object(Object(object)))
+		Ok(Value::Object(Object::from(object)))
 	} else {
 		let object = map! {
-			"accesses".to_string() => {
+			"accesses" => {
 				let mut out = Object::default();
 				for v in txn.all_db_accesses(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"apis".to_string() => {
+			"apis" => {
 				let mut out = Object::default();
 				for v in txn.all_db_apis(ns, db, version).await?.iter() {
 					out.insert(v.path.to_string(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"analyzers".to_string() => {
+			"analyzers" => {
 				let mut out = Object::default();
 				for v in txn.all_db_analyzers(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"buckets".to_string() => {
+			"buckets" => {
 				let mut out = Object::default();
 				for v in txn.all_db_buckets(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"functions".to_string() => {
+			"functions" => {
 				let mut out = Object::default();
 				for v in txn.all_db_functions(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"modules".to_string() => {
+			"modules" => {
 				let mut out = Object::default();
 				for v in txn.all_db_modules(ns, db, version).await?.iter() {
 					out.insert(v.get_storage_name()?, v.to_sql().into());
 				}
 				out.into()
 			},
-			"models".to_string() => {
+			"models" => {
 				let mut out = Object::default();
 				for v in txn.all_db_models(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"params".to_string() => {
+			"params" => {
 				let mut out = Object::default();
 				for v in txn.all_db_params(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"tables".to_string() => {
+			"tables" => {
 				let mut out = Object::default();
 				for v in txn.all_tb(ns, db, version).await?.iter() {
-					out.insert(v.name.clone().into_string(), v.to_sql().into());
+					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"users".to_string() => {
+			"users" => {
 				let mut out = Object::default();
 				for v in txn.all_db_users(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"configs".to_string() => {
+			"configs" => {
 				let mut out = Object::default();
 				for v in txn.all_db_configs(ns, db, version).await?.iter() {
 					out.insert(v.name(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"sequences".to_string() => {
+			"sequences" => {
 				let mut out = Object::default();
 				for v in txn.all_db_sequences(ns, db, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
@@ -261,11 +250,11 @@ async fn execute_database_info(
 				out.into()
 			},
 		};
-		Ok(Value::Object(Object(object)))
+		Ok(Value::Object(Object::from(object)))
 	}
 }
 
-fn process<T>(a: Arc<[T]>) -> Value
+fn process<T>(a: &Arc<[T]>) -> Value
 where
 	T: InfoStructure + Clone,
 {

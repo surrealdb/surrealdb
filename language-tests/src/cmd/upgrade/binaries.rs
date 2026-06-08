@@ -28,11 +28,11 @@ pub async fn prepare_version(version: Version, download_permission: bool) -> any
 		return Ok(());
 	}
 
-	if !Path::new(".binary_cache").exists() {
-		tokio::fs::create_dir(".binary_cache")
-			.await
-			.context("Failed to create binary cache directory")?;
-	}
+	// `create_dir_all` (vs check-then-create) avoids a race when prepare()
+	// runs concurrently across versions.
+	tokio::fs::create_dir_all(".binary_cache")
+		.await
+		.context("Failed to create binary cache directory")?;
 
 	#[cfg(not(target_os = "windows"))]
 	if Command::new("tar")
@@ -114,8 +114,13 @@ cfg_if::cfg_if! {
 }
 
 fn binary_url(version: &Version) -> String {
+	// Pull binaries from the SurrealDB CDN rather than GitHub releases.
+	// download.surrealdb.com is populated by the official release pipeline
+	// for every published version (stable + alpha/beta) and reliably hosts
+	// tags that have not been mirrored to github.com/surrealdb/surrealdb's
+	// public Releases page.
 	format!(
-		"https://github.com/surrealdb/surrealdb/releases/download/v{version}/surreal-v{version}.{}",
+		"https://download.surrealdb.com/v{version}/surreal-v{version}.{}",
 		platform_name()
 	)
 }
@@ -194,9 +199,20 @@ pub async fn prepare_wget(version: Version, permission: bool) -> anyhow::Result<
 
 #[cfg(not(target_os = "windows"))]
 async fn unzip(version: Version) -> anyhow::Result<()> {
+	// Avoid GNU-tar's `--transform`; extract into a per-version subdir and
+	// rename, so concurrent unzip calls for different versions don't race
+	// over a shared intermediate path (and so this works on BSD tar too).
+	let cache_dir = Path::new(".binary_cache");
+	let extract_dir = cache_dir.join(format!(".extract-v{version}"));
+	let final_path = cache_dir.join(format!("surreal-v{version}"));
+
+	tokio::fs::create_dir_all(&extract_dir)
+		.await
+		.context("Failed to create per-version extract directory")?;
+
 	let mut command = Command::new("tar")
-		.args(["--directory", ".binary_cache"])
-		.args(["--transform", &format!("s/surreal/surreal-v{version}/g")])
+		.arg("--directory")
+		.arg(&extract_dir)
 		.arg("-xvf")
 		.arg(download_path(&version))
 		.arg("surreal")
@@ -207,8 +223,16 @@ async fn unzip(version: Version) -> anyhow::Result<()> {
 
 	let out = command.wait().await.context("Failed to wait on unzip command")?;
 	if !out.success() {
+		let _ = tokio::fs::remove_dir_all(&extract_dir).await;
 		bail!("Unzip command was not successfull");
 	}
+
+	tokio::fs::rename(extract_dir.join("surreal"), &final_path)
+		.await
+		.context("Failed to rename extracted binary to versioned name")?;
+	tokio::fs::remove_dir(&extract_dir)
+		.await
+		.context("Failed to clean up extract directory")?;
 	tokio::fs::remove_file(download_path(&version))
 		.await
 		.context("Failed to remove downloaded archive after unzipping")?;

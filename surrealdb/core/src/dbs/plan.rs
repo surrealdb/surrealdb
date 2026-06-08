@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use surrealdb_strand::Strand;
+
 use crate::ctx::FrozenContext;
 use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
@@ -90,14 +92,14 @@ struct ExplainItem {
 impl ExplainItem {
 	fn new_fetch(count: usize) -> Self {
 		Self {
-			name: "Fetch".into(),
+			name: Value::String(Strand::new_static("Fetch")),
 			details: vec![("count", count.into())],
 		}
 	}
 
 	fn new_fallback(reason: String) -> Self {
 		Self {
-			name: "Fallback".into(),
+			name: Value::String(Strand::new_static("Fallback")),
 			details: vec![("reason", reason.into())],
 		}
 	}
@@ -105,19 +107,19 @@ impl ExplainItem {
 	fn new_iter(ctx: &FrozenContext, iter: &Iterable) -> Self {
 		match iter {
 			Iterable::Value(_doc_ctx, v) => Self {
-				name: "Iterate Value".into(),
+				name: Value::String(Strand::new_static("Iterate Value")),
 				details: vec![("value", v.to_owned())],
 			},
 			Iterable::GenerateRecordId(_doc_ctx, t) => Self {
-				name: "Iterate Yield".into(),
-				details: vec![("table", Value::String(t.clone().into_string()))],
+				name: Value::String(Strand::new_static("Iterate Yield")),
+				details: vec![("table", Value::String(t.clone().into()))],
 			},
 			Iterable::RecordId(_doc_ctx, t) => Self {
-				name: "Iterate Record".into(),
+				name: Value::String(Strand::new_static("Iterate Record")),
 				details: vec![("record", Value::RecordId(t.clone()))],
 			},
 			Iterable::Defer(_doc_ctx, t) => Self {
-				name: "Iterate Defer".into(),
+				name: Value::String(Strand::new_static("Iterate Defer")),
 				details: vec![("record", Value::RecordId(t.clone()))],
 			},
 			Iterable::Lookup {
@@ -126,55 +128,50 @@ impl ExplainItem {
 				..
 			} => match kind {
 				LookupKind::Graph(_) => Self {
-					name: "Iterate Edges".into(),
+					name: Value::String(Strand::new_static("Iterate Edges")),
 					details: vec![("from", Value::RecordId(from.clone()))],
 				},
 				LookupKind::Reference => Self {
-					name: "Iterate References".into(),
+					name: Value::String(Strand::new_static("Iterate References")),
 					details: vec![("from", Value::RecordId(from.clone()))],
 				},
 			},
 			Iterable::Table(_doc_ctx, t, rs, sc) => Self {
-				name: match rs {
+				name: Value::String(Strand::new_static(match rs {
 					RecordStrategy::Count => "Iterate Table Count",
 					RecordStrategy::KeysOnly => "Iterate Table Keys",
 					RecordStrategy::KeysAndValues => "Iterate Table",
-				}
-				.into(),
+				})),
 				details: vec![
-					("table", Value::String(t.clone().into_string())),
+					("table", Value::String(t.clone().into())),
 					("direction", sc.to_string().into()),
 				],
 			},
 			Iterable::Range(_doc_ctx, tb, r, rs, sc) => Self {
-				name: match rs {
+				name: Value::String(Strand::new_static(match rs {
 					RecordStrategy::Count => "Iterate Range Count",
 					RecordStrategy::KeysOnly => "Iterate Range Keys",
 					RecordStrategy::KeysAndValues => "Iterate Range",
-				}
-				.into(),
+				})),
 				details: vec![
-					("table", Value::String(tb.clone().into_string())),
+					("table", Value::String(tb.clone().into())),
 					("range", Value::Range(Box::new(r.clone().into_value_range()))),
 					("direction", sc.to_string().into()),
 				],
 			},
 			Iterable::Mergeable(_doc_ctx, tb, None, v) => Self {
-				name: "Iterate Mergeable".into(),
-				details: vec![
-					("table", Value::String(tb.clone().into_string())),
-					("value", v.to_owned()),
-				],
+				name: Value::String(Strand::new_static("Iterate Mergeable")),
+				details: vec![("table", Value::String(tb.clone().into())), ("value", v.to_owned())],
 			},
 			Iterable::Mergeable(_doc_ctx, tb, Some(id), v) => Self {
-				name: "Iterate Mergeable".into(),
+				name: Value::String(Strand::new_static("Iterate Mergeable")),
 				details: vec![
 					("record", Value::RecordId(RecordId::new(tb.to_owned(), id.to_owned()))),
 					("value", v.to_owned()),
 				],
 			},
 			Iterable::Relatable(_doc_ctx, t1, t2, t3, None) => Self {
-				name: "Iterate Relatable".into(),
+				name: Value::String(Strand::new_static("Iterate Relatable")),
 				details: vec![
 					("record-1", Value::RecordId(t1.to_owned())),
 					("record-2", t2.clone().into()),
@@ -182,7 +179,7 @@ impl ExplainItem {
 				],
 			},
 			Iterable::Relatable(_doc_ctx, t1, t2, t3, Some(v)) => Self {
-				name: "Iterate Relatable".into(),
+				name: Value::String(Strand::new_static("Iterate Relatable")),
 				details: vec![
 					("record-1", Value::RecordId(t1.to_owned())),
 					("record-2", t2.clone().into()),
@@ -191,19 +188,18 @@ impl ExplainItem {
 				],
 			},
 			Iterable::Index(_doc_ctx, t, ir, rs) => {
-				let mut details = vec![("table", Value::String(t.clone().into_string()))];
+				let mut details = vec![("table", Value::String(t.clone().into()))];
 				if let Some(qp) = ctx.get_query_planner()
 					&& let Some(exe) = qp.get_query_executor(t)
 				{
 					details.push(("plan", exe.explain(*ir)));
 				}
 				Self {
-					name: match rs {
+					name: Value::String(Strand::new_static(match rs {
 						RecordStrategy::Count => "Iterate Index Count",
 						RecordStrategy::KeysOnly => "Iterate Index Keys",
 						RecordStrategy::KeysAndValues => "Iterate Index",
-					}
-					.into(),
+					})),
 					details,
 				}
 			}
@@ -216,21 +212,22 @@ impl ExplainItem {
 	) -> Self {
 		details.insert(0, ("type", collector_type.into()));
 		Self {
-			name: "Collector".into(),
+			name: Value::String(Strand::new_static("Collector")),
 			details,
 		}
 	}
 	pub(super) fn new_record_strategy(rs: RecordStrategy) -> Self {
 		Self {
-			name: "RecordStrategy".into(),
+			name: Value::String(Strand::new_static("RecordStrategy")),
 			details: vec![(
 				"type",
 				match rs {
-					RecordStrategy::Count => "Count",
-					RecordStrategy::KeysOnly => "KeysOnly",
-					RecordStrategy::KeysAndValues => "KeysAndValues",
-				}
-				.into(),
+					RecordStrategy::Count => Value::String(Strand::new_static("Count")),
+					RecordStrategy::KeysOnly => Value::String(Strand::new_static("KeysOnly")),
+					RecordStrategy::KeysAndValues => {
+						Value::String(Strand::new_static("KeysAndValues"))
+					}
+				},
 			)],
 		}
 	}
@@ -244,7 +241,7 @@ impl ExplainItem {
 			details.push(("CancelOnLimit", l.into()));
 		}
 		Self {
-			name: "StartLimitStrategy".into(),
+			name: Value::String(Strand::new_static("StartLimitStrategy")),
 			details,
 		}
 	}

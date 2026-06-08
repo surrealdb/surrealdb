@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -6,8 +5,6 @@ use futures::future::try_join_all;
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
-use crate::catalog::providers::TableProvider;
-use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -15,11 +12,11 @@ use crate::err::Error;
 use crate::exe::try_join_all_buffered;
 use crate::expr::field::Fields;
 use crate::expr::idiom::recursion::{Recursion, compute_idiom_recursion};
-use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, SplitByRepeatRecurse};
+use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, Recurse, SplitByRepeatRecurse};
 use crate::expr::statements::select::SelectStatement;
 use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Idiom, Literal, Lookup};
 use crate::fnc::idiom;
-use crate::val::{RecordIdKey, Value};
+use crate::val::{Object, RecordIdKey, Value};
 
 macro_rules! fallback_function {
 	(if $first:expr => InvalidFunction($e:ident) then $second:expr) => {
@@ -63,8 +60,6 @@ fn expr_references_parent(expr: &Expr) -> bool {
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
-	///
-	/// Was marked recursive
 	pub(crate) async fn get(
 		&self,
 		stk: &mut Stk,
@@ -74,7 +69,7 @@ impl Value {
 		path: &[Part],
 	) -> FlowResult<Self> {
 		// Limit recursion depth.
-		if path.len() > (*MAX_COMPUTATION_DEPTH).try_into().unwrap_or(usize::MAX) {
+		if path.len() > ctx.config.max_computation_depth as usize {
 			return Err(ControlFlow::from(anyhow::Error::new(Error::ComputationDepthExceeded)));
 		}
 
@@ -125,7 +120,27 @@ impl Value {
 				};
 
 				// Collect the min & max for the recursion context
-				let (min, max) = recurse.to_owned().try_into()?;
+				let (min, max) = match recurse {
+					Recurse::Fixed(n) => (*n, Some(*n)),
+					Recurse::Range(min, max) => (min.unwrap_or(1), *max),
+				};
+
+				if min < 1 {
+					return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidBound {
+						found: min.to_string(),
+						expected: "at least 1".into(),
+					})));
+				}
+
+				if let Some(max) = max
+					&& max > ctx.config.idiom_recursion_limit
+				{
+					return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidBound {
+						found: max.to_string(),
+						expected: format!("{} at most", ctx.config.idiom_recursion_limit),
+					})));
+				}
+
 				// Construct the recursion context
 				let rec = Recursion {
 					min,
@@ -251,16 +266,16 @@ impl Value {
 					Part::All => stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await,
 					Part::Destructure(p) => {
 						let cur_doc = CursorDoc::from(self.clone());
-						let mut obj = BTreeMap::<String, Value>::new();
+						let mut obj = Object::default();
 						for p in p.iter() {
 							let idiom = p.idiom();
 							obj.insert(
-								p.field().to_owned(),
+								p.field(),
 								stk.run(|stk| idiom.compute(stk, ctx, opt, Some(&cur_doc))).await?,
 							);
 						}
 
-						let obj = Value::from(obj);
+						let obj = Value::Object(obj);
 						stk.run(|stk| obj.get(stk, ctx, opt, doc, path.next())).await
 					}
 					Part::Method(name, args) => {
@@ -317,7 +332,7 @@ impl Value {
 									v.get(stk, ctx, opt, doc, path)
 								})
 							});
-							try_join_all_buffered(futs)
+							try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
 						})
 						.await
 						.map(Into::into)
@@ -327,7 +342,7 @@ impl Value {
 						stk.scope(|scope| {
 							let futs =
 								v.iter().map(|v| scope.run(|stk| v.get(stk, ctx, opt, doc, path)));
-							try_join_all_buffered(futs)
+							try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
 						})
 						.await
 						.map(Into::into)
@@ -378,8 +393,7 @@ impl Value {
 						.await
 						.catch_return()?
 					{
-						// TODO: Remove to_usize()
-						Value::Number(i) => match v.get(i.to_usize()) {
+						Value::Number(i) => match i.as_array_index().and_then(|i| v.get(i)) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
@@ -420,7 +434,7 @@ impl Value {
 								let futs = v
 									.iter()
 									.map(|v| scope.run(|stk| v.get(stk, ctx, opt, doc, path)));
-								try_join_all_buffered(futs)
+								try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
 							})
 							.await
 							.map(Value::from)?;
@@ -444,11 +458,11 @@ impl Value {
 							let fields = g.expr.clone().unwrap_or(Fields::value_id());
 							let what = Expr::Idiom(Idiom(vec![
 								Part::Start(Expr::Literal(Literal::RecordId(val.into_literal()))),
-								Part::Lookup(Lookup {
+								Part::Lookup(Box::new(Lookup {
 									what: g.what.clone(),
 									kind: g.kind.clone(),
 									..Default::default()
-								}),
+								})),
 							]));
 
 							let stm = SelectStatement {
@@ -524,12 +538,60 @@ impl Value {
 						Part::Optional => {
 							stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
 						}
-						// This is a remote field expression with one exception
-						// If the RecordId is array-based, and we try to access an index,
-						// then we return that index of the RecordId's array.
+						// This is a remote field expression with two exceptions
+						// covering composite RecordId keys. SECURITY: without these
+						// special cases, `id.<field>` on a complex record id falls
+						// through to `select_document`, which:
+						//   - runs `SELECT *` with permissions disabled, exposing mutable document
+						//     fields where an immutable id component was intended (Codex finding
+						//     c67c7232 — `PERMISSIONS WHERE id.tenant = $token.tenant`); and
+						//   - during UPDATE returns the same already-stored value for both
+						//     `self.initial` and `self.current`, so `store_index_data`'s `o != n`
+						//     guard suppresses index maintenance and leaves stale entries (Codex
+						//     finding 9c442c96).
+						// Resolve the path against the RecordId key directly when it
+						// is an Object/Array so the semantics match the immutable
+						// key component the user actually wrote.
 						p => {
 							// Discover what the path is that we need to continue with
 							let next = match (p, &val.key) {
+								// `id.field` on an Object-keyed record id reads
+								// the key component directly when that name is
+								// present in the key, without going through a
+								// `SELECT *`. Names that aren't key components
+								// (e.g. `record:foo.id`) keep the remote-fetch
+								// semantics below.
+								(Part::Field(name), RecordIdKey::Object(obj))
+									if obj.contains_key(name.as_str()) =>
+								{
+									let v = obj.get(name.as_str()).cloned().unwrap_or(Value::None);
+									return stk
+										.run(|stk| v.get(stk, ctx, opt, doc, path.next()))
+										.await;
+								}
+								// `id["name"]` on an Object-keyed record id is the
+								// same thing — `Part::Value` of a string literal
+								// is the bracket-access form of a field.
+								(Part::Value(x), RecordIdKey::Object(obj)) => {
+									match stk
+										.run(|stk| x.compute(stk, ctx, opt, doc))
+										.await
+										.catch_return()?
+									{
+										Value::String(s) if obj.contains_key(s.as_str()) => {
+											let v =
+												obj.get(s.as_str()).cloned().unwrap_or(Value::None);
+											return stk
+												.run(|stk| v.get(stk, ctx, opt, doc, path.next()))
+												.await;
+										}
+										// Other key types fall through to the
+										// remote-fetch path with the computed
+										// value re-substituted into the path.
+										x => &[&[Part::Value(x.into_literal())], path.next()]
+											.concat(),
+									}
+								}
 								// If the computed value is a number, and the RecordIdKey is an
 								// array, then we return the value at the index of the
 								// array. Otherwise, we return the computed value and the
@@ -541,7 +603,8 @@ impl Value {
 										.catch_return()?
 									{
 										Value::Number(n) => {
-											return match arr.get(n.to_usize()) {
+											return match n.as_array_index().and_then(|i| arr.get(i))
+											{
 												Some(v) => {
 													stk.run(|stk| {
 														v.get(stk, ctx, opt, doc, path.next())
@@ -569,17 +632,8 @@ impl Value {
 							if let Some(cur) = doc
 								&& cur.rid.as_deref() == Some(&val)
 							{
-								let (ns_id, db_id) = ctx.expect_ns_db_ids(opt).await?;
-								let record = ctx
-									.tx()
-									.get_record(ns_id, db_id, &val.table, &val.key, None)
-									.await?;
-								let raw = if record.data.is_none() {
-									Value::None
-								} else {
-									record.data.clone()
-								};
-								return stk.run(|stk| raw.get(stk, ctx, opt, None, next)).await;
+								let current = cur.doc.as_ref().clone();
+								return stk.run(|stk| current.get(stk, ctx, opt, None, next)).await;
 							}
 
 							// Fetch the record id's contents
@@ -633,6 +687,8 @@ impl Value {
 
 #[cfg(test)]
 mod tests {
+
+	use surrealdb_strand::Strand;
 
 	use super::*;
 	use crate::dbs::test::mock;
@@ -714,7 +770,7 @@ mod tests {
 			res,
 			Value::from(RecordId {
 				table: "test".into(),
-				key: RecordIdKey::String("tobie".to_owned())
+				key: RecordIdKey::String(Strand::new_static("tobie"))
 			})
 		);
 	}
@@ -740,7 +796,7 @@ mod tests {
 			res,
 			Value::from(RecordId {
 				table: "test".into(),
-				key: RecordIdKey::String("jaime".to_owned())
+				key: RecordIdKey::String(Strand::new_static("jaime"))
 			})
 		);
 	}
@@ -795,7 +851,7 @@ mod tests {
 		assert_eq!(
 			res,
 			Value::from(vec![Value::from(map! {
-				"age".to_string() => Value::from(36),
+				"age" => Value::from(36),
 			})])
 		);
 	}
@@ -810,7 +866,7 @@ mod tests {
 		assert_eq!(
 			res,
 			Value::from(map! {
-				"age".to_string() => Value::from(34),
+				"age" => Value::from(34),
 			})
 		);
 	}

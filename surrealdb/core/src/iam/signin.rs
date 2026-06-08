@@ -21,7 +21,7 @@ use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, NamespaceProvider, UserProvider,
 };
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
-use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
+use crate::cnf::SERVER_NAME;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::expr::access_type;
@@ -289,7 +289,7 @@ pub async fn db_access(
 						Some(&db_def),
 						av,
 						bearer,
-						key.clone().into_string()?,
+						key.as_string().ok_or_else(|| Error::InvalidAuth)?.clone(),
 					)
 					.await;
 				}
@@ -354,7 +354,7 @@ pub async fn db_access(
 										Some(_) => Some(
 											create_refresh_token_record(
 												kvs,
-												av.name.clone(),
+												av.name.to_string(),
 												&ns,
 												&db,
 												rid.clone().into(),
@@ -426,7 +426,7 @@ pub async fn db_access(
 							// forwarded
 							_ => {
 								debug!("Record user signin query failed: {e}");
-								if *INSECURE_FORWARD_ACCESS_ERRORS {
+								if kvs.config().insecure_forward_access_errors {
 									Err(e)
 								} else {
 									Err(anyhow::Error::new(Error::AccessRecordSigninQueryFailed))
@@ -441,7 +441,7 @@ pub async fn db_access(
 		catalog::AccessType::Bearer(at) => {
 			// Extract key identifier and key from the provided variables.
 			let key = match vars.get("key") {
-				Some(key) => key.clone().into_string()?,
+				Some(key) => key.as_string().ok_or_else(|| Error::InvalidAuth)?.clone(),
 				None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
 			};
 
@@ -458,7 +458,7 @@ fn auth_from_level_user(level: Level, user: &catalog::UserDefinition) -> Result<
 		.map(|x| Role::from_str(x))
 		.collect::<Result<Vec<_>, _>>()
 		.map_err(Error::from)?;
-	let actor = Actor::new(user.name.clone(), roles, level);
+	let actor = Actor::new(user.name.to_string(), roles, level);
 	Ok(Auth::new(actor))
 }
 
@@ -542,7 +542,7 @@ pub async fn ns_access(
 		catalog::AccessType::Bearer(at) => {
 			// Extract key identifier and key from the provided variables.
 			let key = match vars.get("key") {
-				Some(key) => key.clone().into_string()?,
+				Some(key) => key.as_string().ok_or_else(|| Error::InvalidAuth)?.clone(),
 				None => bail!(Error::AccessBearerMissingKey),
 			};
 
@@ -861,9 +861,9 @@ pub async fn signin_bearer(
 		nbf: Some(Utc::now().timestamp()),
 		exp: expiration(av.token_duration)?,
 		jti: Some(Uuid::new_v4().to_string()),
-		ns: ns.map(|ns| ns.name.clone()),
-		db: db.map(|db| db.name.clone()),
-		ac: Some(av.name.clone()),
+		ns: ns.map(|ns| ns.name.to_string()),
+		db: db.map(|db| db.name.to_string()),
+		ac: Some(av.name.to_string()),
 		id: match &gr.subject {
 			catalog::Subject::User(user) => Some(user.clone()),
 			catalog::Subject::Record(rid) => Some(rid.to_sql()),
@@ -878,10 +878,13 @@ pub async fn signin_bearer(
 	if let Some(au) = &av.authenticate {
 		// Setup the system session for executing the clause.
 		let mut sess = match (&ns, &db) {
-			(Some(ns), Some(db)) => {
-				Session::for_level(Level::Database(ns.name.clone(), db.name.clone()), Role::Editor)
+			(Some(ns), Some(db)) => Session::for_level(
+				Level::Database(ns.name.to_string(), db.name.to_string()),
+				Role::Editor,
+			),
+			(Some(ns), None) => {
+				Session::for_level(Level::Namespace(ns.name.to_string()), Role::Editor)
 			}
-			(Some(ns), None) => Session::for_level(Level::Namespace(ns.name.clone()), Role::Editor),
 			(None, None) => Session::editor(),
 			(None, Some(_)) => bail!(Error::NsEmpty),
 		};
@@ -951,9 +954,9 @@ pub async fn signin_bearer(
 		crate::val::convert_value_to_public_value(claims.into_claims_object().into())
 			.expect("claims conversion should succeed"),
 	);
-	session.ns.clone_from(&ns.map(|ns| ns.name.clone()));
-	session.db.clone_from(&db.map(|db| db.name.clone()));
-	session.ac = Some(av.name.clone());
+	session.ns.clone_from(&ns.map(|ns| ns.name.to_string()));
+	session.db.clone_from(&db.map(|db| db.name.to_string()));
+	session.ac = Some(av.name.to_string());
 	session.exp = expiration(av.session_duration)?;
 	match &gr.subject {
 		catalog::Subject::User(user) => {
@@ -965,8 +968,10 @@ pub async fn signin_bearer(
 					.collect::<Result<_, _>>()
 					.map_err(Error::from)?,
 				match (ns, db) {
-					(Some(ns), Some(db)) => Level::Database(ns.name.clone(), db.name.clone()),
-					(Some(ns), None) => Level::Namespace(ns.name.clone()),
+					(Some(ns), Some(db)) => {
+						Level::Database(ns.name.to_string(), db.name.to_string())
+					}
+					(Some(ns), None) => Level::Namespace(ns.name.to_string()),
 					(None, None) => Level::Root,
 					(None, Some(_)) => bail!(Error::NsEmpty),
 				},
@@ -977,7 +982,7 @@ pub async fn signin_bearer(
 				rid.to_sql(),
 				Default::default(),
 				if let (Some(ns), Some(db)) = (ns, db) {
-					Level::Record(ns.name.clone(), db.name.clone(), rid.to_sql())
+					Level::Record(ns.name.to_string(), db.name.to_string(), rid.to_sql())
 				} else {
 					debug!(
 						"Invalid attempt to authenticate as a record without a namespace and database"
@@ -2478,7 +2483,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result.get("grant").clone().into_object().unwrap();
-				let key = grant.get("key").unwrap().clone().into_string().unwrap();
+				let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2585,7 +2590,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result.get("grant").clone().into_object().unwrap();
-				let key = grant.get("key").unwrap().clone().into_string().unwrap();
+				let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2692,7 +2697,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result.get("grant").clone().into_object().unwrap();
-				let key = grant.get("key").unwrap().clone().into_string().unwrap();
+				let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2764,7 +2769,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result.get("grant").clone().into_object().unwrap();
-				let key = grant.get("key").unwrap().clone().into_string().unwrap();
+				let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 				// Wait for the grant to expire
 				std::thread::sleep(Duration::seconds(2).to_std().unwrap());
@@ -2839,7 +2844,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result.get("grant").clone().into_object().unwrap();
-				let key = grant.get("key").unwrap().clone().into_string().unwrap();
+				let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 				// Get grant identifier from key
 				let kid = key.split("-").collect::<Vec<&str>>()[2];
@@ -2923,7 +2928,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result.get("grant").clone().into_object().unwrap();
-				let key = grant.get("key").unwrap().clone().into_string().unwrap();
+				let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 				// Remove bearer access method
 				ds.execute(format!("REMOVE ACCESS api ON {}", level.level).as_str(), &sess, None)
@@ -3000,7 +3005,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result.get("grant").clone().into_object().unwrap();
-				let _key = grant.get("key").unwrap().clone().into_string().unwrap();
+				let _key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -3074,7 +3079,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result.get("grant").clone().into_object().unwrap();
-				let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
+				let valid_key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 				// Replace a character from the key prefix
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3151,7 +3156,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result.get("grant").clone().into_object().unwrap();
-				let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
+				let valid_key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 				// Remove a character from the bearer key
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3228,7 +3233,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result.get("grant").clone().into_object().unwrap();
-				let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
+				let valid_key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 				// Replace a character from the key identifier
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3305,7 +3310,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result.get("grant").clone().into_object().unwrap();
-				let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
+				let valid_key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 				// Replace a character from the key value
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3382,8 +3387,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					panic!("Unable to retrieve bearer key grant");
 				};
 				let grant = result.get("grant").clone().into_object().unwrap();
-				let id = grant.get("id").unwrap().clone().into_string().unwrap();
-				let key = grant.get("key").unwrap().clone().into_string().unwrap();
+				let id = grant.get("id").unwrap().as_string().unwrap().clone();
+				let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 				// Test that returned key is in plain text
 				assert!(
@@ -3458,7 +3463,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result.get("grant").clone().into_object().unwrap();
-			let key = grant.get("key").unwrap().clone().into_string().unwrap();
+			let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3524,7 +3529,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result.get("grant").clone().into_object().unwrap();
-			let key = grant.get("key").unwrap().clone().into_string().unwrap();
+			let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3594,7 +3599,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result.get("grant").clone().into_object().unwrap();
-			let key = grant.get("key").unwrap().clone().into_string().unwrap();
+			let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3665,7 +3670,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result.get("grant").clone().into_object().unwrap();
-			let key = grant.get("key").unwrap().clone().into_string().unwrap();
+			let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3717,7 +3722,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result.get("grant").clone().into_object().unwrap();
-			let key = grant.get("key").unwrap().clone().into_string().unwrap();
+			let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 			// Wait for the grant to expire
 			std::thread::sleep(Duration::seconds(2).to_std().unwrap());
@@ -3772,7 +3777,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result.get("grant").clone().into_object().unwrap();
-			let key = grant.get("key").unwrap().clone().into_string().unwrap();
+			let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 			// Get grant identifier from key
 			let kid = key.split("-").collect::<Vec<&str>>()[2];
@@ -3832,7 +3837,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result.get("grant").clone().into_object().unwrap();
-			let key = grant.get("key").unwrap().clone().into_string().unwrap();
+			let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 			// Remove bearer access method
 			ds.execute("REMOVE ACCESS api ON DATABASE", &sess, None).await.unwrap();
@@ -3887,7 +3892,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result.get("grant").clone().into_object().unwrap();
-			let _key = grant.get("key").unwrap().clone().into_string().unwrap();
+			let _key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3940,7 +3945,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result.get("grant").clone().into_object().unwrap();
-			let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
+			let valid_key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 			// Replace a character from the key prefix
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3997,7 +4002,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result.get("grant").clone().into_object().unwrap();
-			let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
+			let valid_key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 			// Remove a character from the bearer key
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -4054,7 +4059,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result.get("grant").clone().into_object().unwrap();
-			let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
+			let valid_key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 			// Replace a character from the key identifier
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -4111,7 +4116,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result.get("grant").clone().into_object().unwrap();
-			let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
+			let valid_key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 			// Replace a character from the key value
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -4168,8 +4173,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				panic!("Unable to retrieve bearer key grant");
 			};
 			let grant = result.get("grant").clone().into_object().unwrap();
-			let id = grant.get("id").unwrap().clone().into_string().unwrap();
-			let key = grant.get("key").unwrap().clone().into_string().unwrap();
+			let id = grant.get("id").unwrap().as_string().unwrap().clone();
+			let key = grant.get("key").unwrap().as_string().unwrap().clone();
 
 			// Test that returned key is in plain text
 			let ok = Regex::new(r"surreal-bearer-[a-zA-Z0-9]{12}-[a-zA-Z0-9]{24}").unwrap();

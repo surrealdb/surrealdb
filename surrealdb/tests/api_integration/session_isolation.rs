@@ -72,6 +72,39 @@ pub async fn clone_creates_new_session(new_db: impl CreateDb) {
 	drop(permit);
 }
 
+/// Regression: cloning a client and immediately issuing a command must never
+/// fail with "Session not found". A freshly cloned handle gets a new session
+/// registered asynchronously on a channel separate from the one queries travel
+/// on; the engine must apply that registration before routing the query.
+///
+/// This is an end-to-end guard across every engine backend, not a deterministic
+/// reproducer: the router's `biased` select usually processes the session event
+/// first, so the race rarely fires here. The deterministic regression test for
+/// the fix is `engine::local::tests::resolve_route_session_drains_pending_events`,
+/// which drives the router's actual route-resolution path.
+/// See https://github.com/surrealdb/spectron/pull/70.
+pub async fn clone_then_immediate_query(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+
+	let ns = Ulid::new().to_string();
+	let dbn = Ulid::new().to_string();
+	db.use_ns(&ns).use_db(&dbn).await.unwrap();
+
+	// Repeat to exercise the cold-start registration path many times. The race is
+	// timing-dependent and won't reproduce deterministically here; this guards the
+	// end-to-end invariant across every engine backend the suite runs against.
+	for _ in 0..50 {
+		let db2 = db.clone();
+		// `use` and the query are the first commands on the brand-new session and
+		// must not race its registration.
+		db2.use_ns(&ns).use_db(&dbn).await.unwrap();
+		db2.query("RETURN 1").await.unwrap().check().unwrap();
+	}
+
+	drop(permit);
+}
+
 /// Test that multiple clients can use different namespaces/databases simultaneously
 pub async fn multiple_namespaces_databases(new_db: impl CreateDb) {
 	let config = Config::new();
@@ -617,6 +650,8 @@ define_include_tests!(
 	session_isolation => {
 		#[test_log::test(tokio::test)]
 		clone_creates_new_session,
+		#[test_log::test(tokio::test)]
+		clone_then_immediate_query,
 		#[test_log::test(tokio::test)]
 		multiple_namespaces_databases,
 		#[test_log::test(tokio::test)]

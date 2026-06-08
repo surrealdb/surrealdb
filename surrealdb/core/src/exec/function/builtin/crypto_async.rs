@@ -40,7 +40,7 @@ where
 async fn argon2_compare_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 	let mut args = args.into_iter();
 	let hash = match args.next() {
-		Some(Value::String(s)) => s,
+		Some(Value::String(s)) => s.into_string(),
 		Some(v) => {
 			return Err(anyhow::anyhow!(
 				"Function 'crypto::argon2::compare' expects a string hash, got: {}",
@@ -54,7 +54,7 @@ async fn argon2_compare_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result
 		}
 	};
 	let pass = match args.next() {
-		Some(Value::String(s)) => s,
+		Some(Value::String(s)) => s.into_string(),
 		Some(v) => {
 			return Err(anyhow::anyhow!(
 				"Function 'crypto::argon2::compare' expects a string password, got: {}",
@@ -73,7 +73,7 @@ async fn argon2_compare_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result
 
 async fn argon2_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 	let pass = match args.into_iter().next() {
-		Some(Value::String(s)) => s,
+		Some(Value::String(s)) => s.into_string(),
 		Some(v) => {
 			return Err(anyhow::anyhow!(
 				"Function 'crypto::argon2::generate' expects a string password, got: {}",
@@ -97,7 +97,7 @@ async fn argon2_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Resul
 async fn bcrypt_compare_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 	let mut args = args.into_iter();
 	let hash = match args.next() {
-		Some(Value::String(s)) => s,
+		Some(Value::String(s)) => s.into_string(),
 		Some(v) => {
 			return Err(anyhow::anyhow!(
 				"Function 'crypto::bcrypt::compare' expects a string hash, got: {}",
@@ -111,7 +111,7 @@ async fn bcrypt_compare_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result
 		}
 	};
 	let pass = match args.next() {
-		Some(Value::String(s)) => s,
+		Some(Value::String(s)) => s.into_string(),
 		Some(v) => {
 			return Err(anyhow::anyhow!(
 				"Function 'crypto::bcrypt::compare' expects a string password, got: {}",
@@ -130,7 +130,7 @@ async fn bcrypt_compare_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result
 
 async fn bcrypt_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 	let pass = match args.into_iter().next() {
-		Some(Value::String(s)) => s,
+		Some(Value::String(s)) => s.into_string(),
 		Some(v) => {
 			return Err(anyhow::anyhow!(
 				"Function 'crypto::bcrypt::generate' expects a string password, got: {}",
@@ -154,7 +154,7 @@ async fn bcrypt_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Resul
 async fn pbkdf2_compare_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 	let mut args = args.into_iter();
 	let hash = match args.next() {
-		Some(Value::String(s)) => s,
+		Some(Value::String(s)) => s.into_string(),
 		Some(v) => {
 			return Err(anyhow::anyhow!(
 				"Function 'crypto::pbkdf2::compare' expects a string hash, got: {}",
@@ -168,7 +168,7 @@ async fn pbkdf2_compare_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result
 		}
 	};
 	let pass = match args.next() {
-		Some(Value::String(s)) => s,
+		Some(Value::String(s)) => s.into_string(),
 		Some(v) => {
 			return Err(anyhow::anyhow!(
 				"Function 'crypto::pbkdf2::compare' expects a string password, got: {}",
@@ -187,7 +187,7 @@ async fn pbkdf2_compare_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result
 
 async fn pbkdf2_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 	let pass = match args.into_iter().next() {
-		Some(Value::String(s)) => s,
+		Some(Value::String(s)) => s.into_string(),
 		Some(v) => {
 			return Err(anyhow::anyhow!(
 				"Function 'crypto::pbkdf2::generate' expects a string password, got: {}",
@@ -211,7 +211,7 @@ async fn pbkdf2_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Resul
 async fn scrypt_compare_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 	let mut args = args.into_iter();
 	let hash = match args.next() {
-		Some(Value::String(s)) => s,
+		Some(Value::String(s)) => s.into_string(),
 		Some(v) => {
 			return Err(anyhow::anyhow!(
 				"Function 'crypto::scrypt::compare' expects a string hash, got: {}",
@@ -225,7 +225,7 @@ async fn scrypt_compare_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result
 		}
 	};
 	let pass = match args.next() {
-		Some(Value::String(s)) => s,
+		Some(Value::String(s)) => s.into_string(),
 		Some(v) => {
 			return Err(anyhow::anyhow!(
 				"Function 'crypto::scrypt::compare' expects a string password, got: {}",
@@ -244,7 +244,7 @@ async fn scrypt_compare_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result
 
 async fn scrypt_generate_impl(_ctx: &EvalContext<'_>, args: Vec<Value>) -> Result<Value> {
 	let pass = match args.into_iter().next() {
-		Some(Value::String(s)) => s,
+		Some(Value::String(s)) => s.into_string(),
 		Some(v) => {
 			return Err(anyhow::anyhow!(
 				"Function 'crypto::scrypt::generate' expects a string password, got: {}",

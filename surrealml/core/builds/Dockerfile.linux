@@ -1,20 +1,29 @@
-# Start from a base image, e.g., Ubuntu
 FROM ubuntu:latest@sha256:84e77dee7d1bc93fb029a45e3c6cb9d8aa4831ccfcc7103d36e876938d28895b
 
 ARG RUSTUP_SHA256=6c30b75a75b28a96fd913a037c8581b580080b6ee9b8169a3c0feb1af7fe8caf
-RUN apt-get update && apt-get install -y curl build-essential
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo
+ENV PATH="/usr/local/cargo/bin:${PATH}"
+
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup.sh \
     && echo "${RUSTUP_SHA256}  /tmp/rustup.sh" | sha256sum -c - \
-    && sh /tmp/rustup.sh -s -- -y
+    && sh /tmp/rustup.sh -y --default-toolchain stable --no-modify-path \
+    && rm /tmp/rustup.sh \
+    && chmod -R a+rX /usr/local/rustup /usr/local/cargo
 
-ENV PATH="/root/.cargo/bin:${PATH}"
+RUN useradd -r -u 65532 -m appuser \
+    && chown -R appuser:appuser /usr/local/rustup /usr/local/cargo
 
 WORKDIR /app
 
-COPY . .
+COPY --chown=appuser:appuser . .
 
-# RUN cargo build --release
+RUN mkdir -p /app/output && chown appuser:appuser /app/output
 
-# CMD ["cargo", "test"]
-# run in infinite loop
+USER appuser
+
 CMD ["tail", "-f", "/dev/null"]

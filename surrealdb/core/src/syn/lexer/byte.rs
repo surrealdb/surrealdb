@@ -6,10 +6,7 @@ use crate::syn::token::{Token, TokenKind, t};
 impl Lexer<'_> {
 	/// Eats a single line comment.
 	pub(super) fn eat_single_line_comment(&mut self) {
-		loop {
-			let Some(byte) = self.reader.next() else {
-				break;
-			};
+		while let Some(byte) = self.reader.next() {
 			match byte {
 				byte::CR => {
 					self.eat(byte::LF);

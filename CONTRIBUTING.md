@@ -216,7 +216,7 @@ We take the security of SurrealDB code, software, and cloud platform very seriou
 
 Please report any issues or vulnerabilities to security@surrealdb.com, instead of posting a public issue in GitHub. Please include the SurrealDB version identifier, by running `surreal version` on the command-line, and details on how the vulnerability can be exploited.
 
-When developing, make sure to follow the best industry standards and practices.
+When developing, make sure to follow the best industry standards and practices. Contributors making changes to security-sensitive subsystems (authentication, permissions, transport, parser, function execution, storage) should consult [SECURITY_GUIDE.md](SECURITY_GUIDE.md) for the invariants we expect every PR in those areas to preserve.
 
 ## External dependencies
 

@@ -12,25 +12,27 @@ value = "'OK'"
 value = "[{ active: true, distance: 2f, id: pts:3, point: [3, 0] }, { active: true, distance: 9f, id: pts:1, point: [10, 0] }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *, distance] {rows: 2}
+value = """
+'SelectProject [ctx: Db] [projections: *, distance] {rows: 2}
     SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2}
         Compute [ctx: Db] [fields: distance = vector::distance::euclidean(...)] {rows: 2}
             KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 2] {rows: 2}
-                TableScan [ctx: Db] [table: pts, direction: Forward, predicate: active = true] {rows: 3}
+                TableScan [ctx: Db] [table: pts, direction: Forward, predicate: active = true, pre_decode_filter: yes] {rows: 3}
 
-Total rows: 2''''
+Total rows: 2'"""
 
 [[test.results]]
 value = "[{ active: true, distance: 2f, id: pts:3, point: [3, 0] }, { active: true, distance: 9f, id: pts:1, point: [10, 0] }]"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *, distance] {rows: 2}
+value = """
+'SelectProject [ctx: Db] [projections: *, distance] {rows: 2}
     SortByKey [ctx: Db] [sort_keys: distance ASC] {rows: 2}
         Compute [ctx: Db] [fields: distance = vector::distance::euclidean(...)] {rows: 2}
             KnnTopK [ctx: Db] [field: point, k: 2, distance: Euclidean, dimension: 2] {rows: 2}
-                TableScan [ctx: Db] [table: pts, direction: Forward, predicate: active = true] {rows: 3}
+                TableScan [ctx: Db] [table: pts, direction: Forward, predicate: active = true, pre_decode_filter: yes] {rows: 3}
 
-Total rows: 2''''
+Total rows: 2'"""
 */
 {
 	CREATE pts:1 SET point = [10, 0], active = true;

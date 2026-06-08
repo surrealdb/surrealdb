@@ -17,7 +17,7 @@ fn session_ac_impl(ctx: &EvalContext<'_>) -> Result<Value> {
 	Ok(ctx
 		.session()
 		.and_then(|s| s.ac.as_ref())
-		.map(|ac| Value::from(ac.clone()))
+		.map(|ac| Value::String(ac.clone()))
 		.unwrap_or(Value::None))
 }
 
@@ -25,7 +25,7 @@ fn session_db_impl(ctx: &EvalContext<'_>) -> Result<Value> {
 	Ok(ctx
 		.session()
 		.and_then(|s| s.db.as_ref())
-		.map(|db| Value::from(db.clone()))
+		.map(|db| Value::String(db.clone()))
 		.unwrap_or(Value::None))
 }
 
@@ -41,7 +41,7 @@ fn session_ip_impl(ctx: &EvalContext<'_>) -> Result<Value> {
 	Ok(ctx
 		.session()
 		.and_then(|s| s.ip.as_ref())
-		.map(|ip| Value::from(ip.clone()))
+		.map(|ip| Value::String(ip.clone()))
 		.unwrap_or(Value::None))
 }
 
@@ -49,7 +49,7 @@ fn session_ns_impl(ctx: &EvalContext<'_>) -> Result<Value> {
 	Ok(ctx
 		.session()
 		.and_then(|s| s.ns.as_ref())
-		.map(|ns| Value::from(ns.clone()))
+		.map(|ns| Value::String(ns.clone()))
 		.unwrap_or(Value::None))
 }
 
@@ -57,7 +57,7 @@ fn session_origin_impl(ctx: &EvalContext<'_>) -> Result<Value> {
 	Ok(ctx
 		.session()
 		.and_then(|s| s.origin.as_ref())
-		.map(|origin| Value::from(origin.clone()))
+		.map(|origin| Value::String(origin.clone()))
 		.unwrap_or(Value::None))
 }
 

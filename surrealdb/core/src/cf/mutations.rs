@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use revision::revisioned;
 
@@ -17,7 +17,7 @@ pub enum TableMutation {
 	// we do include it in the first field for convenience.
 	Set(RecordId, Value),
 	Del(RecordId),
-	Def(TableDefinition),
+	Def(Box<TableDefinition>),
 	/// Includes the ID, current value (after change), changes that can be
 	/// applied to get the original value
 	/// Example, ("mytb:tobie", {{"note": "surreal"}}, [{"op": "add", "path":
@@ -33,7 +33,7 @@ impl From<TableDefinition> for Value {
 	fn from(v: TableDefinition) -> Self {
 		let mut h = HashMap::<&str, Value>::new();
 		h.insert("id", Value::Number(Number::Int(v.table_id.0 as i64)));
-		h.insert("name", Value::String(v.name.into_string()));
+		h.insert("name", Value::String(v.name.into()));
 		Value::Object(Object::from(h))
 	}
 }
@@ -52,7 +52,7 @@ impl TableMutations {
 	/// Push a table change to the table mutations
 	pub fn push_table_change(&mut self, dt: TableDefinition) {
 		// Push the table change to the entry
-		self.1.push(TableMutation::Def(dt));
+		self.1.push(TableMutation::Def(Box::new(dt)));
 	}
 
 	/// Push a mutation to the table mutations (record change)
@@ -121,16 +121,16 @@ impl TableMutation {
 	/// Value that can be used in the storage of change feeds and their
 	/// transmission to consumers
 	pub fn into_value(self) -> Value {
-		let mut h = BTreeMap::<String, Value>::new();
+		let mut h = Object::default();
 		let h = match self {
 			TableMutation::Set(_thing, v) => {
-				h.insert("update".to_string(), v);
+				h.insert("update", v);
 				h
 			}
 			TableMutation::SetWithDiff(_thing, current, operations) => {
-				h.insert("current".to_string(), current);
+				h.insert("current", current);
 				h.insert(
-					"update".to_string(),
+					"update",
 					Value::Array(Array(
 						operations.into_iter().map(|x| Value::Object(x.into_object())).collect(),
 					)),
@@ -138,30 +138,23 @@ impl TableMutation {
 				h
 			}
 			TableMutation::Del(t) => {
-				h.insert(
-					"delete".to_string(),
-					Value::Object(Object::from(map! {
-						"id".to_string() => Value::RecordId(t)
-					})),
-				);
+				let mut inner = Object::default();
+				inner.insert("id", Value::RecordId(t));
+				h.insert("delete", Value::Object(inner));
 				h
 			}
 			TableMutation::Def(t) => {
-				h.insert("define_table".to_string(), t.structure());
+				h.insert("define_table", t.structure());
 				h
 			}
 			TableMutation::DelWithOriginal(id, _val) => {
-				h.insert(
-					"delete".to_string(),
-					Value::Object(Object::from(map! {
-						"id".to_string() => Value::RecordId(id),
-					})),
-				);
+				let mut inner = Object::default();
+				inner.insert("id", Value::RecordId(id));
+				h.insert("delete", Value::Object(inner));
 				h
 			}
 		};
-		let o = crate::val::Object::from(h);
-		Value::Object(o)
+		Value::Object(h)
 	}
 }
 
@@ -179,11 +172,10 @@ impl DatabaseMutation {
 
 impl ChangeSet {
 	pub fn into_value(self) -> Value {
-		let mut m = BTreeMap::<String, Value>::new();
-		m.insert("versionstamp".to_string(), Value::from(self.0));
-		m.insert("changes".to_string(), self.1.into_value());
-		let so: Object = m.into();
-		Value::Object(so)
+		let mut m = Object::default();
+		m.insert("versionstamp", Value::from(self.0));
+		m.insert("changes", self.1.into_value());
+		Value::Object(m)
 	}
 }
 
@@ -216,12 +208,12 @@ mod tests {
 						]))),
 					),
 					TableMutation::Del(RecordId::new("mytb".into(), "tobie".to_owned())),
-					TableMutation::Def(TableDefinition::new(
+					TableMutation::Def(Box::new(TableDefinition::new(
 						NamespaceId(1),
 						DatabaseId(2),
 						TableId(3),
 						"mytb".into(),
-					)),
+					))),
 				],
 			)]),
 		);
@@ -247,7 +239,7 @@ mod tests {
 							("note", Value::from("surreal")),
 						]))),
 						vec![Operation::Add {
-							path: vec!["note".to_owned()],
+							path: vec!["note".into()],
 							value: Value::from("surreal"),
 						}],
 					),
@@ -258,7 +250,7 @@ mod tests {
 							("note", Value::from("surreal")),
 						]))),
 						vec![Operation::Remove {
-							path: vec!["temp".to_owned()],
+							path: vec!["temp".into()],
 						}],
 					),
 					TableMutation::Del(RecordId::new("mytb".into(), "tobie".to_owned())),
@@ -269,12 +261,12 @@ mod tests {
 								"note" => Value::from("surreal"),
 						})),
 					),
-					TableMutation::Def(TableDefinition::new(
+					TableMutation::Def(Box::new(TableDefinition::new(
 						NamespaceId(1),
 						DatabaseId(2),
 						TableId(3),
 						"mytb".into(),
-					)),
+					))),
 				],
 			)]),
 		);

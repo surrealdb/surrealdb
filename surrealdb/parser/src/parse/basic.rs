@@ -47,6 +47,7 @@ pub fn ununderscore_slice<'a>(slice: &'a str, buffer: &'a mut String) -> &'a str
 		buffer.push_str(head);
 		rest = tail
 	}
+	buffer.push_str(rest);
 	buffer
 }
 
@@ -80,9 +81,33 @@ impl ParseSync for Decimal {
 			parser.slice(token.span).strip_suffix("dec").expect("decimal tokens should end in dec");
 		let slice = ununderscore_slice(slice, &mut parser.unescape_buffer);
 		let decimal = if slice.contains(['e', 'E']) {
-			Decimal::from_scientific(slice).expect("lexer should ensure valid decimals").normalize()
+			match Decimal::from_scientific(slice) {
+				Ok(x) => x,
+				Err(_) => {
+					return Err(parser.with_error(|parser| {
+						Level::Error
+							.title("Decimal literal outside of supported value range")
+							.snippet(
+								parser.snippet().annotate(AnnotationKind::Primary.span(token.span)),
+							)
+							.to_diagnostic()
+					}));
+				}
+			}
 		} else {
-			Decimal::from_str(slice).expect("lexer should ensure valid decimals").normalize()
+			match Decimal::from_str(slice) {
+				Ok(x) => x,
+				Err(_) => {
+					return Err(parser.with_error(|parser| {
+						Level::Error
+							.title("Decimal literal outside of supported value range")
+							.snippet(
+								parser.snippet().annotate(AnnotationKind::Primary.span(token.span)),
+							)
+							.to_diagnostic()
+					}));
+				}
+			}
 		};
 		Ok(decimal)
 	}

@@ -448,7 +448,7 @@ impl Lexer<'_> {
 			Ok(res)
 		}
 
-		fn expect_seperator(reader: &mut BytesReader<'_>) -> Result<(), SyntaxError> {
+		fn expect_separator(reader: &mut BytesReader<'_>) -> Result<(), SyntaxError> {
 			let before = reader.offset();
 			match reader.next() {
 				Some(b'-') => Ok(()),
@@ -456,7 +456,7 @@ impl Lexer<'_> {
 					// This function operates on a valid string so this function can never error.
 					let span = reader.span_since(before);
 					let c = reader.convert_to_char(x).expect("lexer validated input");
-					bail!("Unexpected character `{c}`, expected byte seperator `-`", @span);
+					bail!("Unexpected character `{c}`, expected byte separator `-`", @span);
 				}
 				None => {
 					let span = reader.span_since(before);
@@ -467,19 +467,19 @@ impl Lexer<'_> {
 
 		eat_uuid_hex(&mut reader, &mut uuid_buffer[0..4])?;
 
-		expect_seperator(&mut reader)?;
+		expect_separator(&mut reader)?;
 
 		eat_uuid_hex(&mut reader, &mut uuid_buffer[4..6])?;
 
-		expect_seperator(&mut reader)?;
+		expect_separator(&mut reader)?;
 
 		eat_uuid_hex(&mut reader, &mut uuid_buffer[6..8])?;
 
-		expect_seperator(&mut reader)?;
+		expect_separator(&mut reader)?;
 
 		eat_uuid_hex(&mut reader, &mut uuid_buffer[8..10])?;
 
-		expect_seperator(&mut reader)?;
+		expect_separator(&mut reader)?;
 
 		eat_uuid_hex(&mut reader, &mut uuid_buffer[10..16])?;
 
@@ -540,7 +540,7 @@ impl Lexer<'_> {
 			let before = reader.offset();
 			let Some(x) = reader.next() else {
 				let span = reader.span_since(reader.offset());
-				bail!("Unexpected end of file string, missing bucket seperator `:/`", @span);
+				bail!("Unexpected end of file string, missing bucket separator `:/`", @span);
 			};
 
 			match x {

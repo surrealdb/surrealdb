@@ -1,12 +1,117 @@
+#![recursion_limit = "256"]
 #![allow(clippy::unwrap_used)]
+#![allow(clippy::clone_on_ref_ptr)] // Concrete observer `Arc` clones coerce to `Arc<dyn ExecutionObserver>`
 
 mod helpers;
+use std::sync::{Arc, Mutex};
+
 use anyhow::Result;
-use helpers::new_ds;
+use helpers::{new_ds, new_ns_db};
 use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::Capabilities;
 use surrealdb_core::iam::{Level, Role};
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::observe::{
+	ExecutionObserver, Outcome, TransactionEvent, TransactionMetricsSnapshot,
+};
 use surrealdb_core::syn;
 use surrealdb_types::{Action, Array, Notification, RecordId, Value};
+
+// Capture transaction delete counts so tests can distinguish point deletes
+// from staged range deletes without reaching into document internals.
+#[derive(Default)]
+struct CapturingTransactionObserver {
+	metrics: Mutex<Vec<TransactionMetricsSnapshot>>,
+}
+
+impl CapturingTransactionObserver {
+	fn clear(&self) {
+		self.metrics.lock().unwrap().clear();
+	}
+
+	fn snapshot(&self) -> Vec<TransactionMetricsSnapshot> {
+		self.metrics.lock().unwrap().clone()
+	}
+}
+
+impl ExecutionObserver for CapturingTransactionObserver {
+	fn on_transaction_complete(&self, event: &TransactionEvent) {
+		if event.safe.write && event.safe.outcome == Outcome::Success {
+			self.metrics.lock().unwrap().push(event.safe.metrics);
+		}
+	}
+}
+
+async fn new_observed_ds() -> Result<(Datastore, Arc<CapturingTransactionObserver>)> {
+	let observer = Arc::new(CapturingTransactionObserver::default());
+	let ds = Datastore::builder()
+		.with_capabilities(Capabilities::all())
+		.with_observer(observer.clone())
+		.build_with_path("memory")
+		.await?;
+	new_ns_db(&ds, "test", "test").await?;
+	observer.clear();
+	Ok((ds, observer))
+}
+
+#[tokio::test]
+async fn delete_without_references_skips_reference_range_delete() -> Result<()> {
+	let (ds, observer) = new_observed_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let mut res = ds.execute("CREATE ordinary:one", &ses, None).await?;
+	res.remove(0).output()?;
+	observer.clear();
+
+	let mut res = ds.execute("DELETE ordinary:one", &ses, None).await?;
+	res.remove(0).output()?;
+
+	let metrics = observer.snapshot();
+	assert_eq!(metrics.len(), 1, "expected one successful write transaction: {metrics:?}");
+	assert_eq!(metrics[0].ops_del, 1, "plain record delete should only record the point delete");
+
+	Ok(())
+}
+
+#[tokio::test]
+async fn delete_with_reference_keys_still_deletes_reference_range() -> Result<()> {
+	let (ds, observer) = new_observed_ds().await?;
+	let ses = Session::owner().with_ns("test").with_db("test");
+
+	let mut res = ds
+		.execute(
+			"
+			DEFINE TABLE user;
+			DEFINE TABLE message;
+			DEFINE FIELD author ON message TYPE record<user> REFERENCE ON DELETE IGNORE;
+			CREATE user:alice;
+			CREATE message:one SET author = user:alice;
+			",
+			&ses,
+			None,
+		)
+		.await?;
+	for response in res.drain(..) {
+		response.output()?;
+	}
+	observer.clear();
+
+	let mut res = ds.execute("DELETE user:alice", &ses, None).await?;
+	res.remove(0).output()?;
+
+	let metrics = observer.snapshot();
+	assert_eq!(metrics.len(), 1, "expected one successful write transaction: {metrics:?}");
+	assert_eq!(
+		metrics[0].ops_del, 2,
+		"referenced record delete should record the point delete and reference range delete"
+	);
+
+	let mut res = ds.execute("RETURN user:alice<~(message FIELD author)", &ses, None).await?;
+	let reverse_references = res.remove(0).output()?;
+	assert_eq!(reverse_references, syn::value("[]")?);
+
+	Ok(())
+}
 
 //
 // Permissions

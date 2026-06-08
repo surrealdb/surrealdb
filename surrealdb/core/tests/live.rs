@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod helpers;
 use std::time::Duration;
 
@@ -295,6 +297,61 @@ async fn test_live_with_variables() -> Result<()> {
 	assert_eq!(tmp.result, syn::value("{ id: test:1, num: 123 }")?);
 	let tmp = channel.recv().await?;
 	assert_eq!(tmp.action, Action::Killed);
+
+	Ok(())
+}
+
+// REMOVE TABLE must invalidate the datastore-wide live-query cache, otherwise
+// a write to a same-name recreated table will be processed against the killed
+// subscription's cached entry and deliver a notification to a client whose
+// LIVE query the server has already declared Killed.
+#[tokio::test]
+async fn test_remove_table_invalidates_live_cache() -> Result<()> {
+	let (channel, dbs) = new_ds("test", "test", true).await?;
+
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+
+	// Define the table and start a live query against it.
+	let sql = "
+		DEFINE TABLE tb;
+		LIVE SELECT * FROM tb;
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	skip_ok(res, 1)?;
+	let lqid = res.remove(0).result?;
+	assert_eq!(lqid.kind(), Kind::Uuid);
+
+	// First write warms the datastore live-queries cache via `Document::lv()`.
+	let sql = "CREATE tb:1;";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Create);
+
+	// REMOVE TABLE sends a Killed notification...
+	let sql = "REMOVE TABLE tb;";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Killed);
+
+	// ...and must also bump the datastore live-query cache version, so a write
+	// to a recreated same-name table does not see the stale subscription.
+	let sql = "
+		DEFINE TABLE tb;
+		CREATE tb:2;
+	";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	skip_ok(res, 2)?;
+
+	// No further notification must be delivered: the live query was killed,
+	// and the recreated table has no live queries registered against it.
+	tokio::time::sleep(Duration::from_millis(500)).await;
+	assert!(channel.try_recv().is_err());
 
 	Ok(())
 }

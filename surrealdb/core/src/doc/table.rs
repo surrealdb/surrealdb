@@ -8,8 +8,8 @@ use crate::catalog::aggregation::{self, AggregateFields, AggregationAnalysis, Ag
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{Metadata, Record, RecordType, ViewDefinition};
 use crate::ctx::FrozenContext;
-use crate::dbs::{Options, Statement, Workable};
-use crate::doc::{Action, CursorDoc, Document, DocumentContext, NsDbTbCtx};
+use crate::dbs::Options;
+use crate::doc::{Action, CursorDoc, Document, DocumentContext, Extras, NsDbCtx};
 use crate::err::Error;
 use crate::expr::field::Selector;
 use crate::expr::statements::SelectStatement;
@@ -36,29 +36,19 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		stm: &Statement<'_>,
+		action: Action,
 	) -> Result<()> {
 		// Check import
 		if opt.import {
 			return Ok(());
 		}
-		if !self.changed() {
+		if !self.is_modified() {
 			return Ok(());
 		}
 
-		// Get the query action
-		let act = if stm.is_delete() {
-			Action::Delete
-		} else if self.is_new() {
-			Action::Create
-		} else {
-			Action::Update
-		};
-
-		self.process_views(stk, ctx, opt, act).await
+		self.process_views(stk, ctx, opt, action).await
 	}
 
-	// process views but without needing the `Statement<'_>` type.
 	async fn process_views(
 		&self,
 		stk: &mut Stk,
@@ -66,11 +56,10 @@ impl Document {
 		opt: &Options,
 		act: Action,
 	) -> Result<()> {
-		let fts = self.ft(ctx, opt).await?;
+		// Get the foreign tables
+		let fts = self.doc_ctx.ft()?;
 		// Don't run permissions
 		let opt = &opt.new_with_perms(false);
-		// Get the query action
-
 		// Loop through all foreign table statements
 		for ft in fts.iter() {
 			// Get the table definition
@@ -323,8 +312,15 @@ impl Document {
 
 		let k = key::record::new(db.namespace_id, db.database_id, view_table_name, &key);
 		let mut action = Action::Update;
-		let mut record = if let Some(record) = tx.get(&k, None).await? {
-			record
+		let mut record = if let Some(bytes) = tx.get_raw(&k, None).await? {
+			// View-table aggregation rows store their `data` as an `Object`
+			// without an `id` field (the group key is the row's identity
+			// but is not duplicated into the body). Decoding via
+			// `Record::kv_decode_value` would splice the id back from the
+			// key, which is visible in event-trigger `$before`/`$after`
+			// payloads and changes pre-existing language-test semantics.
+			// Decode raw to preserve the on-disk shape exactly.
+			revision::from_slice::<Record>(&bytes)?
 		} else {
 			action = Action::Create;
 			Record {
@@ -373,11 +369,11 @@ impl Document {
 		record.data = data;
 		let record = Arc::new(record);
 
-		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone())
+		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, Arc::clone(&record))
 			.await?;
 
 		let id = Arc::new(RecordId {
-			table: view_table_name.to_string().into(),
+			table: view_table_name.clone(),
 			key,
 		});
 
@@ -388,16 +384,13 @@ impl Document {
 			.tx()
 			.get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name, opt.version)
 			.await?;
-		let fields = ctx
-			.tx()
-			.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
-			.await?;
-		let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+		let parent = NsDbCtx {
 			ns: Arc::clone(ns),
 			db: Arc::clone(db),
-			tb,
-			fields,
-		});
+		};
+		let doc_ctx =
+			DocumentContext::initialise(ctx, &parent, tb, view_table_name, opt.version, true)
+				.await?;
 
 		Self::run_triggers(
 			stk,
@@ -431,8 +424,11 @@ impl Document {
 		let tx = ctx.tx();
 
 		let k = key::record::new(db.namespace_id, db.database_id, view_table_name, &key);
-		let mut record = if let Some(record) = tx.get(&k, None).await? {
-			record
+		// View-table aggregation rows store `data` without an `id`; see the
+		// note on the matching read in the `Update` path above. Use raw
+		// decode so we don't splice the group key back into `data`.
+		let mut record = if let Some(bytes) = tx.get_raw(&k, None).await? {
+			revision::from_slice::<Record>(&bytes)?
 		} else {
 			fail!("Deletion for a view but no record exists for that view")
 		};
@@ -458,19 +454,16 @@ impl Document {
 				.tx()
 				.get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name, opt.version)
 				.await?;
-			let fields = ctx
-				.tx()
-				.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
-				.await?;
-			let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+			let parent = NsDbCtx {
 				ns: Arc::clone(ns),
 				db: Arc::clone(db),
-				tb,
-				fields,
-			});
+			};
+			let doc_ctx =
+				DocumentContext::initialise(ctx, &parent, tb, view_table_name, opt.version, true)
+					.await?;
 
 			let id = RecordId {
-				table: view_table_name.to_string().into(),
+				table: view_table_name.clone(),
 				key,
 			};
 
@@ -682,7 +675,7 @@ impl Document {
 				tempfiles: false,
 			};
 
-			let value = recalc_stmt.compute(stk, ctx, opt, None).await?;
+			let value = stk.run(|stk| recalc_stmt.compute(stk, ctx, opt, None)).await?;
 
 			let Value::Array(Array(values)) = value else {
 				fail!("Aggregate recalculation select statement return an invalid result");
@@ -750,11 +743,11 @@ impl Document {
 		record.data = data;
 		let record = Arc::new(record);
 
-		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone())
+		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, Arc::clone(&record))
 			.await?;
 
 		let id = RecordId {
-			table: view_table_name.to_string().into(),
+			table: view_table_name.clone(),
 			key,
 		};
 
@@ -765,16 +758,13 @@ impl Document {
 			.tx()
 			.get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name, opt.version)
 			.await?;
-		let fields = ctx
-			.tx()
-			.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
-			.await?;
-		let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+		let parent = NsDbCtx {
 			ns: Arc::clone(ns),
 			db: Arc::clone(db),
-			tb,
-			fields,
-		});
+		};
+		let doc_ctx =
+			DocumentContext::initialise(ctx, &parent, tb, view_table_name, opt.version, true)
+				.await?;
 
 		Self::run_triggers(
 			stk,
@@ -807,8 +797,11 @@ impl Document {
 		let tx = ctx.tx();
 
 		let k = key::record::new(db.namespace_id, db.database_id, view_table_name, &key);
-		let mut record = if let Some(record) = tx.get(&k, None).await? {
-			record
+		// View-table aggregation rows store `data` without an `id`; see the
+		// note on the matching read in the `Update` path above. Use raw
+		// decode so we don't splice the group key back into `data`.
+		let mut record = if let Some(bytes) = tx.get_raw(&k, None).await? {
+			revision::from_slice::<Record>(&bytes)?
 		} else {
 			fail!("Deletion for a view but no record exists for that view")
 		};
@@ -965,7 +958,7 @@ impl Document {
 					};
 
 					if *after >= *max {
-						*max = after.clone();
+						*max = *after;
 					} else if *before == *max {
 						recalculations.push(Recalculation {
 							function: "time::max".to_string(),
@@ -993,7 +986,7 @@ impl Document {
 					};
 
 					if *after <= *min {
-						*min = after.clone();
+						*min = *after;
 					} else if *before == *min && *after != *min {
 						recalculations.push(Recalculation {
 							function: "time::min".to_string(),
@@ -1092,7 +1085,7 @@ impl Document {
 				tempfiles: false,
 			};
 
-			let value = recalc_stmt.compute(stk, ctx, opt, None).await?;
+			let value = stk.run(|stk| recalc_stmt.compute(stk, ctx, opt, None)).await?;
 
 			let Value::Array(Array(values)) = value else {
 				fail!("Aggregate recalculation select statement return an invalid result");
@@ -1160,7 +1153,7 @@ impl Document {
 		record.data = data;
 		let record = Arc::new(record);
 
-		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, record.clone())
+		tx.set_record(db.namespace_id, db.database_id, view_table_name, &key, Arc::clone(&record))
 			.await?;
 
 		let id = RecordId {
@@ -1175,16 +1168,13 @@ impl Document {
 			.tx()
 			.get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name, opt.version)
 			.await?;
-		let fields = ctx
-			.tx()
-			.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
-			.await?;
-		let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+		let parent = NsDbCtx {
 			ns: Arc::clone(ns),
 			db: Arc::clone(db),
-			tb,
-			fields,
-		});
+		};
+		let doc_ctx =
+			DocumentContext::initialise(ctx, &parent, tb, view_table_name, opt.version, true)
+				.await?;
 
 		Self::run_triggers(
 			stk,
@@ -1212,36 +1202,44 @@ impl Document {
 		initial: Option<Arc<Record>>,
 		current: Option<Arc<Record>>,
 	) -> Result<()> {
-		// HACK: We can't insert data the normal way as we have to set the metadata which we can't
-		// do via statements. So instead we create a document and pretend to run be the right
-		// statement query and just run events immediatly.
-		// Updating views prevents premissions from being run anyway so there shouldn't be a
-		// problem.
-		//
-		// Generate a document so that we can run the events.
+		// We can't insert view data via UpsertStatement/DeleteStatement
+		// directly because the view record's metadata (aggregation stats)
+		// can't be expressed in those statements — `tx.set_record` is
+		// called separately at the call site. After the raw KV write
+		// lands, run the same document-lifecycle hooks that the regular
+		// pipeline would so secondary indexes, dependent views, change
+		// feeds, live-query notifications, and events stay consistent
+		// with the stored view record. Field / table validation is intentionally skipped: the data
+		// was computed by the planner from the aggregation, so there is no
+		// user-supplied content to validate, and re-running validation
+		// would force every aggregation expression through the field
+		// pipeline a second time.
 
 		let mut document = Document {
 			doc_ctx,
 			r#gen: None,
 			retry: false,
-			extras: Workable::Normal,
+			extras: Extras::Normal,
 			current: current
-				.map(|x| CursorDoc::new(Some(id.clone()), None, x))
+				.map(|x| CursorDoc::new(Some(Arc::clone(&id)), None, x))
 				.unwrap_or_else(|| CursorDoc::new(None, None, Value::None)),
 			initial: initial
-				.map(|x| CursorDoc::new(Some(id.clone()), None, x))
+				.map(|x| CursorDoc::new(Some(Arc::clone(&id)), None, x))
 				.unwrap_or_else(|| CursorDoc::new(None, None, Value::None)),
-			// unused
-			current_reduced: CursorDoc::new(None, None, Value::None),
-			initial_reduced: CursorDoc::new(None, None, Value::None),
+			current_reduced: None,
+			initial_reduced: None,
 			record_strategy: RecordStrategy::KeysAndValues,
 			input_data: None,
+			mutated: false,
+			modified: tokio::sync::OnceCell::new(),
 			id: Some(id),
 		};
 
 		stk.run(|stk| document.store_index_data(stk, ctx, opt)).await?;
 		stk.run(|stk| document.process_views(stk, ctx, opt, action)).await?;
+		stk.run(|stk| document.process_table_lives(stk, ctx, opt, action)).await?;
 		stk.run(|stk| document.process_events(stk, ctx, opt, action, None)).await?;
+		document.process_changefeeds(ctx, opt).await?;
 
 		Ok(())
 	}

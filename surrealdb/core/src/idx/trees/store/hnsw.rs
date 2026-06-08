@@ -49,7 +49,7 @@ impl HnswIndexes {
 		}
 		let mut w = self.0.write().await;
 		let ix = match w.entry(key) {
-			Entry::Occupied(e) => e.get().clone(),
+			Entry::Occupied(e) => Arc::clone(e.get()),
 			Entry::Vacant(e) => {
 				let h = Arc::new(
 					HnswIndex::new(
@@ -61,7 +61,7 @@ impl HnswIndexes {
 					)
 					.await?,
 				);
-				e.insert(h.clone());
+				e.insert(Arc::clone(&h));
 				h
 			}
 		};

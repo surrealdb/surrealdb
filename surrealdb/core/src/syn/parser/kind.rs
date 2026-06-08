@@ -7,6 +7,7 @@ use super::{ParseResult, Parser};
 use crate::sql::Kind;
 use crate::sql::kind::{GeometryKind, KindLiteral};
 use crate::syn::lexer::compound;
+use crate::syn::parser::enter_object_recursion;
 use crate::syn::parser::mac::expected;
 use crate::syn::token::{Keyword, Span, TokenKind, t};
 use crate::types::PublicDuration;
@@ -50,17 +51,18 @@ impl Parser<'_> {
 			}
 			t!("OPTION") => {
 				self.pop_peek();
-
-				let delim = expected!(self, t!("<")).span;
-				let mut kinds =
-					vec![Kind::None, stk.run(|ctx| self.parse_concrete_kind(ctx)).await?];
-				if self.peek_kind() == t!("|") {
-					while self.eat(t!("|")) {
-						kinds.push(stk.run(|ctx| self.parse_concrete_kind(ctx)).await?);
+				enter_object_recursion!(this = self => {
+					let delim = expected!(this, t!("<")).span;
+					let mut kinds =
+						vec![Kind::None, stk.run(|ctx| this.parse_concrete_kind(ctx)).await?];
+					if this.peek_kind() == t!("|") {
+						while this.eat(t!("|")) {
+							kinds.push(stk.run(|ctx| this.parse_concrete_kind(ctx)).await?);
+						}
 					}
-				}
-				self.expect_closing_delimiter(t!(">"), delim)?;
-				Ok(Kind::either(kinds))
+					this.expect_closing_delimiter(t!(">"), delim)?;
+					Ok(Kind::either(kinds))
+				})
 			}
 			_ => stk.run(|ctx| self.parse_concrete_kind(ctx)).await,
 		}
@@ -68,18 +70,19 @@ impl Parser<'_> {
 
 	/// Parse a single kind which is not any, option, or either.
 	async fn parse_concrete_kind(&mut self, stk: &mut Stk) -> ParseResult<Kind> {
-		let next = self.next();
+		enter_object_recursion!(this = self => {
+		let next = this.next();
 		match next.kind {
 			t!("true") => Ok(Kind::Literal(KindLiteral::Bool(true))),
 			t!("false") => Ok(Kind::Literal(KindLiteral::Bool(false))),
 			t!("'") | t!("\"") => {
-				let str = self.unescape_string_span(next.span)?;
-				Ok(Kind::Literal(KindLiteral::String(str.to_owned())))
+				let str = this.unescape_string_span(next.span)?;
+				Ok(Kind::Literal(KindLiteral::String(str.into())))
 			}
 			TokenKind::NaN => Ok(Kind::Literal(KindLiteral::Float(f64::NAN))),
 			TokenKind::Infinity => Ok(Kind::Literal(KindLiteral::Float(f64::INFINITY))),
 			t!("+") | t!("-") => {
-				let compound = self.lex_compound(next, compound::number)?;
+				let compound = this.lex_compound(next, compound::number)?;
 				let kind = match compound.value {
 					compound::Numeric::Float(f) => KindLiteral::Float(f),
 					compound::Numeric::Integer(int) => {
@@ -91,7 +94,7 @@ impl Parser<'_> {
 				Ok(Kind::Literal(kind))
 			}
 			TokenKind::Digits => {
-				let compound = self.lex_compound(next, compound::numeric)?;
+				let compound = this.lex_compound(next, compound::numeric)?;
 				let v = match compound.value {
 					compound::Numeric::Integer(x) => {
 						KindLiteral::Integer(x.into_int(compound.span)?)
@@ -106,21 +109,21 @@ impl Parser<'_> {
 			}
 			t!("{") => {
 				let mut obj = BTreeMap::new();
-				while !self.eat(t!("}")) {
-					let key = self.parse_object_key()?;
-					expected!(self, t!(":"));
-					let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
-					obj.insert(key, kind);
-					self.eat(t!(","));
+				while !this.eat(t!("}")) {
+					let key = this.parse_object_key()?;
+					expected!(this, t!(":"));
+					let kind = stk.run(|ctx| this.parse_inner_kind(ctx)).await?;
+					obj.insert(key.into(), kind);
+					this.eat(t!(","));
 				}
 				Ok(Kind::Literal(KindLiteral::Object(obj)))
 			}
 			t!("[") => {
 				let mut arr = Vec::new();
-				while !self.eat(t!("]")) {
-					let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
+				while !this.eat(t!("]")) {
+					let kind = stk.run(|ctx| this.parse_inner_kind(ctx)).await?;
 					arr.push(kind);
-					self.eat(t!(","));
+					this.eat(t!(","));
 				}
 				Ok(Kind::Literal(KindLiteral::Array(arr)))
 			}
@@ -142,81 +145,82 @@ impl Parser<'_> {
 			t!("REGEX") => Ok(Kind::Regex),
 			t!("FUNCTION") => Ok(Kind::Function(Default::default(), Default::default())),
 			t!("RECORD") => {
-				let span = self.peek().span;
-				if self.eat(t!("<")) {
-					let mut tables = vec![self.parse_ident()?];
-					while self.eat(t!("|")) {
-						tables.push(self.parse_ident()?);
+				let span = this.peek().span;
+				if this.eat(t!("<")) {
+					let mut tables = vec![this.parse_ident_str()?.into()];
+					while this.eat(t!("|")) {
+						tables.push(this.parse_ident_str()?.into());
 					}
-					self.expect_closing_delimiter(t!(">"), span)?;
+					this.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Record(tables))
 				} else {
 					Ok(Kind::Record(Vec::new()))
 				}
 			}
 			t!("TABLE") => {
-				let span = self.peek().span;
-				if self.eat(t!("<")) {
-					let mut tables = vec![self.parse_ident()?];
-					while self.eat(t!("|")) {
-						tables.push(self.parse_ident()?);
+				let span = this.peek().span;
+				if this.eat(t!("<")) {
+					let mut tables = vec![this.parse_ident_str()?.into()];
+					while this.eat(t!("|")) {
+						tables.push(this.parse_ident_str()?.into());
 					}
-					self.expect_closing_delimiter(t!(">"), span)?;
+					this.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Table(tables))
 				} else {
 					Ok(Kind::Table(Vec::new()))
 				}
 			}
 			t!("GEOMETRY") => {
-				let span = self.peek().span;
-				if self.eat(t!("<")) {
-					let mut kind = vec![self.parse_geometry_kind()?];
-					while self.eat(t!("|")) {
-						kind.push(self.parse_geometry_kind()?);
+				let span = this.peek().span;
+				if this.eat(t!("<")) {
+					let mut kind = vec![this.parse_geometry_kind()?];
+					while this.eat(t!("|")) {
+						kind.push(this.parse_geometry_kind()?);
 					}
-					self.expect_closing_delimiter(t!(">"), span)?;
+					this.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Geometry(kind))
 				} else {
 					Ok(Kind::Geometry(Vec::new()))
 				}
 			}
 			t!("ARRAY") => {
-				let span = self.peek().span;
-				if self.eat(t!("<")) {
-					let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
-					let size = self.eat(t!(",")).then(|| self.next_token_value()).transpose()?;
-					self.expect_closing_delimiter(t!(">"), span)?;
+				let span = this.peek().span;
+				if this.eat(t!("<")) {
+					let kind = stk.run(|ctx| this.parse_inner_kind(ctx)).await?;
+					let size = this.eat(t!(",")).then(|| this.next_token_value()).transpose()?;
+					this.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Array(Box::new(kind), size))
 				} else {
 					Ok(Kind::Array(Box::new(Kind::Any), None))
 				}
 			}
 			t!("SET") => {
-				let span = self.peek().span;
-				if self.eat(t!("<")) {
-					let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
-					let size = self.eat(t!(",")).then(|| self.next_token_value()).transpose()?;
-					self.expect_closing_delimiter(t!(">"), span)?;
+				let span = this.peek().span;
+				if this.eat(t!("<")) {
+					let kind = stk.run(|ctx| this.parse_inner_kind(ctx)).await?;
+					let size = this.eat(t!(",")).then(|| this.next_token_value()).transpose()?;
+					this.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Set(Box::new(kind), size))
 				} else {
 					Ok(Kind::Set(Box::new(Kind::Any), None))
 				}
 			}
 			t!("FILE") => {
-				let span = self.peek().span;
-				if self.eat(t!("<")) {
-					let mut buckets = vec![self.parse_ident()?];
-					while self.eat(t!("|")) {
-						buckets.push(self.parse_ident()?);
+				let span = this.peek().span;
+				if this.eat(t!("<")) {
+					let mut buckets = vec![this.parse_ident()?.into_string()];
+					while this.eat(t!("|")) {
+						buckets.push(this.parse_ident()?.into_string());
 					}
-					self.expect_closing_delimiter(t!(">"), span)?;
+					this.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::File(buckets))
 				} else {
 					Ok(Kind::File(Vec::new()))
 				}
 			}
-			_ => unexpected!(self, next, "a kind name"),
+			_ => unexpected!(this, next, "a kind name"),
 		}
+		})
 	}
 
 	/// Parse the kind of gemoetry
@@ -269,11 +273,11 @@ mod tests {
 	#[case::uuid("uuid", "uuid", Kind::Uuid)]
 	#[case::either("int | float", "int | float", Kind::Either(vec![Kind::Int, Kind::Float]))]
 	#[case::record("record", "record", Kind::Record(vec![]))]
-	#[case::record_one("record<person>", "record<person>", Kind::Record(vec!["person".to_owned()]))]
-	#[case::record_many("record<person | animal>", "record<person | animal>", Kind::Record(vec!["person".to_owned(), "animal".to_owned()]))]
+	#[case::record_one("record<person>", "record<person>", Kind::Record(vec!["person".into()]))]
+	#[case::record_many("record<person | animal>", "record<person | animal>", Kind::Record(vec!["person".into(), "animal".into()]))]
 	#[case::table("table", "table", Kind::Table(vec![]))]
-	#[case::table_one("table<person>", "table<person>", Kind::Table(vec!["person".to_owned()]))]
-	#[case::table_many("table<person | animal>", "table<person | animal>", Kind::Table(vec!["person".to_owned(), "animal".to_owned()]))]
+	#[case::table_one("table<person>", "table<person>", Kind::Table(vec!["person".into()]))]
+	#[case::table_many("table<person | animal>", "table<person | animal>", Kind::Table(vec!["person".into(), "animal".into()]))]
 	#[case::geometry("geometry", "geometry", Kind::Geometry(vec![]))]
 	#[case::geometry_one("geometry<point>", "geometry<point>", Kind::Geometry(vec![GeometryKind::Point]))]
 	#[case::geometry_many("geometry<point | multipoint>", "geometry<point | multipoint>", Kind::Geometry(vec![GeometryKind::Point, GeometryKind::MultiPoint]))]

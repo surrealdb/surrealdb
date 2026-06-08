@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod helpers;
 use std::time::Duration;
 
@@ -60,9 +62,13 @@ async fn alter_statement_index_prepare_remove(def_index: &str, skip_def: usize) 
 				}
 				"error" => {
 					// We expect "prepare remove" to be reported
-					assert_eq!(
-						tmp.into_json_value().to_string(),
-						"{\"building\":{\"error\":\"Index building has been cancelled: Prepare remove.\",\"status\":\"error\"}}"
+					assert!(
+						matches!(
+							o.get("error"),
+							Some(Value::String(error))
+								if error == "Index building has been cancelled: Prepare remove."
+						),
+						"unexpected error status: {tmp:#?}"
 					);
 					break;
 				}

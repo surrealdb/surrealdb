@@ -66,10 +66,13 @@ pub(crate) struct Id<'a> {
 
 impl crate::kvs::KVKey for Id<'_> {
 	type ValueType = DocId;
+
 	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
 		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
 			.map_err(|_| crate::err::Error::Unencodable)?)
 	}
+
+	fn value_context(&self) {}
 }
 
 impl Categorise for Id<'_> {

@@ -3,7 +3,6 @@ RUSTFLAGS = { value = "-D warnings --cfg tokio_unstable", condition = { env_not_
     "RUSTFLAGS",
 ] } }
 
-# Default
 [tasks.default]
 category = "LOCAL USAGE"
 description = "List all available tasks"
@@ -11,7 +10,6 @@ clear = true
 command = "cargo"
 args = ["make", "--list-all-steps"]
 
-# Docs
 [tasks.docs]
 category = "LOCAL USAGE"
 description = "Generate and open the SurrealDB documentation"
@@ -26,7 +24,6 @@ args = [
     "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks",
 ]
 
-# Format
 [tasks.fmt]
 category = "LOCAL USAGE"
 description = "Format the SurrealDB source code according to the project rules"
@@ -34,13 +31,13 @@ toolchain = "${SURREAL_NIGHTLY_RUST_TOOLCHAIN}"
 command = "cargo"
 args = ["fmt", "--all"]
 
-# Check
 [tasks.check]
 category = "LOCAL USAGE"
 description = "Run the SurrealDB code quality checks"
-dependencies = ["ci-fmt", "ci-check", "ci-clippy"]
+env = { ALL_FEATURES = "${FAST_FEATURES}" }
+script_runner = "@shell"
+script = "cargo make fmt && cargo make ci-clippy"
 
-# Serve
 [tasks.serve]
 category = "LOCAL USAGE"
 description = "Start the SurrealDB database server in debug mode"
@@ -59,7 +56,6 @@ args = [
     "${@}",
 ]
 
-# SQL
 [tasks.sql]
 category = "LOCAL USAGE"
 description = "Run the SurrealDB SQL shell with pretty printing"
@@ -78,7 +74,6 @@ args = [
     "${@}",
 ]
 
-# REPL
 [tasks.repl]
 category = "LOCAL USAGE"
 description = "Run the SurrealDB SQL REPL with a default namespace and database"
@@ -103,7 +98,6 @@ args = [
     "${@}",
 ]
 
-# Build
 [tasks.build]
 category = "LOCAL USAGE"
 description = "Build the SurrealDB database server in debug mode"
@@ -115,7 +109,6 @@ args = [
     "${@}",
 ]
 
-# Release
 [tasks.release]
 category = "LOCAL USAGE"
 description = "Build the SurrealDB database server in release mode"
@@ -123,5 +116,16 @@ command = "cargo"
 args = [
     "build",
     "--release",
+    "${@}",
+]
+
+[tasks.profile]
+category = "LOCAL USAGE"
+description = "Build the SurrealDB database server with the `profiling` profile (release optimisations + symbols, no strip). Same default features as `cargo make release` — both inherit the root crate's `default` from Cargo.toml. Binary lands at target/profiling/surreal; use for `sample`, `perf`, flamegraphs, etc."
+command = "cargo"
+args = [
+    "build",
+    "--profile",
+    "profiling",
     "${@}",
 ]

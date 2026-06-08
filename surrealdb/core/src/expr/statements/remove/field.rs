@@ -40,7 +40,7 @@ impl RemoveFieldStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Field, Base::Db)?;
 		// Compute the table name
 		let table_name = TableName::new(
 			expr_to_ident(stk, ctx, opt, doc, &self.table_name, "table name").await?,
@@ -78,7 +78,7 @@ impl RemoveFieldStatement {
 			}
 			.into());
 		};
-
+		// Refresh the table cache
 		txn.put_tb(
 			ns_name,
 			db_name,
@@ -88,10 +88,6 @@ impl RemoveFieldStatement {
 			},
 		)
 		.await?;
-		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &table_name);
-		}
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

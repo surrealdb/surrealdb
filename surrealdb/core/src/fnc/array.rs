@@ -2,8 +2,8 @@ use std::cmp::Ordering;
 use std::mem::{self};
 use std::ops::Bound;
 
-use anyhow::{Result, ensure};
-use rand::prelude::SliceRandom;
+use anyhow::Result;
+use rand::seq::SliceRandom;
 use reblessive::tree::Stk;
 
 use super::args::{Optional, Rest};
@@ -645,7 +645,10 @@ pub fn range((start_range, Optional(end)): (Value, Optional<i64>)) -> Result<Val
 		}
 	};
 
-	limit("array::range", mem::size_of::<Value>().saturating_mul(range.len()))?;
+	limit(
+		"array::range",
+		mem::size_of::<Value>().saturating_mul(range.len().unwrap_or(usize::MAX)),
+	)?;
 
 	Ok(range.iter().map(Value::from).collect())
 }
@@ -664,7 +667,10 @@ pub fn sequence((offset_len, Optional(len)): (i64, Optional<i64>)) -> Result<Val
 	let end = offset.saturating_add(len - 1);
 	let range = TypedRange::from_range(offset..=end);
 
-	limit("array::sequence", mem::size_of::<Value>().saturating_mul(range.len()))?;
+	limit(
+		"array::sequence",
+		mem::size_of::<Value>().saturating_mul(range.len().unwrap_or(usize::MAX)),
+	)?;
 	Ok(range.iter().map(Value::from).collect())
 }
 
@@ -714,16 +720,9 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value> {
 }
 
 pub fn repeat((value, count): (Value, i64)) -> Result<Value> {
-	ensure!(
-		count >= 0,
-		Error::InvalidFunctionArguments {
-			name: "array::repeat".to_owned(),
-			message: "Expected argument 2 to be a positive number".to_owned()
-		}
-	);
-
-	// FIXME: Fix signed to unsigned casting here.
-	let count = count as usize;
+	let count = usize::try_from(count).map_err(|_| {
+		anyhow::Error::new(Error::ArithmeticNegativeOverflow(format!("array::repeat({count})")))
+	})?;
 	limit("array::repeat", mem::size_of::<Value>().saturating_mul(count))?;
 	Ok(Array(std::iter::repeat_n(value, count).collect()).into())
 }
@@ -734,7 +733,7 @@ pub fn reverse((mut array,): (Array,)) -> Result<Value> {
 }
 
 pub fn shuffle((mut array,): (Array,)) -> Result<Value> {
-	let mut rng = rand::thread_rng();
+	let mut rng = rand::rng();
 	array.shuffle(&mut rng);
 	Ok(array.into())
 }
@@ -1011,6 +1010,7 @@ mod tests {
 
 	#[test]
 	fn array_first() {
+		#[allow(clippy::needless_pass_by_value)]
 		fn test(arr: Array, expected: Value) {
 			assert_eq!(first((arr,)).unwrap(), expected);
 		}
@@ -1021,6 +1021,7 @@ mod tests {
 
 	#[test]
 	fn array_last() {
+		#[allow(clippy::needless_pass_by_value)]
 		fn test(arr: Array, expected: Value) {
 			assert_eq!(last((arr,)).unwrap(), expected);
 		}
@@ -1031,6 +1032,7 @@ mod tests {
 
 	#[test]
 	fn array_at() {
+		#[allow(clippy::needless_pass_by_value)]
 		fn test(arr: Array, i: i64, expected: Value) {
 			assert_eq!(at((arr, i)).unwrap(), expected);
 		}

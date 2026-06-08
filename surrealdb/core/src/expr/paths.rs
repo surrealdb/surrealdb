@@ -1,27 +1,41 @@
-use std::sync::LazyLock;
+use surrealdb_strand::Strand;
 
 use crate::expr::Part;
 
-pub const OBJ_PATH_ACCESS: &str = "ac";
-pub const OBJ_PATH_AUTH: &str = "rd";
-pub const OBJ_PATH_TOKEN: &str = "tk";
+/// Single-field path for `"id"`: record primary key when picking from a value, and the
+/// authenticated session user id (UUID) on the frozen-context `session` object.
+pub static ID: [Part; 1] = [Part::Field(Strand::new_static("id"))];
 
-pub static ID: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::Field("id".to_owned())]);
+/// Client IP address stored on the frozen-context `session` object (`session()` / batch metadata).
+/// Accessible via the `session::ip()` function or the `$session.ip` parameter.
+pub static IP: [Part; 1] = [Part::Field(Strand::new_static("ip"))];
 
-pub static IP: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::Field("ip".to_owned())]);
+/// Active namespace name on the frozen-context `session` object.
+/// Accessible via the `session::ns()` function or the `$session.ns` parameter.
+pub static NS: [Part; 1] = [Part::Field(Strand::new_static("ns"))];
 
-pub static NS: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::Field("ns".to_owned())]);
+/// Active database name on the frozen-context `session` object.
+/// Accessible via the `session::db()` function or the `$session.db` parameter.
+pub static DB: [Part; 1] = [Part::Field(Strand::new_static("db"))];
 
-pub static DB: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::Field("db".to_owned())]);
+/// Access level string on the frozen-context `session` object.
+/// Accessible via the `session::ac()` function or the `$session.ac` parameter.
+pub static AC: [Part; 1] = [Part::Field(Strand::new_static("ac"))];
 
-pub static AC: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::Field(OBJ_PATH_ACCESS.to_owned())]);
+/// Auth-related payload on the frozen-context `session` object.
+/// Accessible via the `session::rd()` function or the `$session.rd` parameter.
+pub static RD: [Part; 1] = [Part::Field(Strand::new_static("rd"))];
 
-pub static RD: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::Field(OBJ_PATH_AUTH.to_owned())]);
+/// Request origin string on the frozen-context `session` object.
+/// Accessible via the `session::origin()` function or the `$session.or` parameter.
+pub static OR: [Part; 1] = [Part::Field(Strand::new_static("or"))];
 
-pub static OR: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::Field("or".to_owned())]);
+/// Auth token material on the frozen-context `session` object.
+/// Accessible via the `session::token()` function or the `$session.tk` parameter.
+pub static TK: [Part; 1] = [Part::Field(Strand::new_static("tk"))];
 
-pub static TK: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::Field(OBJ_PATH_TOKEN.to_owned())]);
+/// Incoming endpoint `in` field on graph edges (`->` / `RELATE` semantics).
+pub static IN: [Part; 1] = [Part::Field(Strand::new_static("in"))];
 
-pub static IN: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::Field("in".to_owned())]);
-
-pub static OUT: LazyLock<[Part; 1]> = LazyLock::new(|| [Part::Field("out".to_owned())]);
+/// Outgoing endpoint `out` field on graph edges (`->` / `RELATE` semantics).
+pub static OUT: [Part; 1] = [Part::Field(Strand::new_static("out"))];

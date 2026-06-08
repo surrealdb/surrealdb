@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
@@ -19,7 +20,7 @@ use crate::iam::{Action, ResourceKind};
 pub(crate) struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
-	pub function: Option<String>,
+	pub function: Option<Strand>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Expr,
@@ -53,7 +54,7 @@ impl DefineAnalyzerStatement {
 			.cast_to()?;
 
 		Ok(catalog::AnalyzerDefinition {
-			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "analyzer name").await?,
+			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "analyzer name").await?.into(),
 			function: self.function.clone(),
 			tokenizers: self.tokenizers.clone(),
 			filters: self.filters.clone(),
@@ -71,7 +72,7 @@ impl DefineAnalyzerStatement {
 			comment: def
 				.comment
 				.as_ref()
-				.map(|x| Expr::Literal(Literal::String(x.clone())))
+				.map(|x| Expr::Literal(Literal::String(x.as_str().into())))
 				.unwrap_or(Expr::Literal(Literal::None)),
 		}
 	}
@@ -85,19 +86,19 @@ impl DefineAnalyzerStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Analyzer, Base::Db)?;
 		// Compute the definition
 		let definition = self.to_definition(stk, ctx, opt, doc).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
-		if txn.get_db_analyzer(ns, db, &definition.name, None).await.is_ok() {
+		if txn.get_db_analyzer(ns, db, definition.name.as_str(), None).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::AzAlreadyExists {
-							name: definition.name.clone(),
+							name: definition.name.to_string(),
 						});
 					}
 				}
@@ -106,8 +107,8 @@ impl DefineAnalyzerStatement {
 			}
 		}
 		// Process the statement
-		let key = crate::key::database::az::new(ns, db, &definition.name);
-		ctx.get_index_stores().mappers().load(&definition).await?;
+		let key = crate::key::database::az::new(ns, db, definition.name.as_str());
+		ctx.get_index_stores().mappers().load(&definition, &ctx.config.file_allowlist).await?;
 		txn.set(&key, &definition).await?;
 		// Clear the cache
 		txn.clear_cache();

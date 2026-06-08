@@ -7,11 +7,21 @@ use crate::val::{RecordId, RecordIdKey, TableName, Value};
 impl Value {
 	pub(crate) fn generate(self, tb: TableName, retable: bool) -> Result<RecordId> {
 		match self {
-			// There is a floating point number for the id field
-			Value::Number(id) if id.is_float() => Ok(RecordId {
-				table: tb,
-				key: RecordIdKey::Number(id.as_int()),
-			}),
+			// There is a floating point number for the id field. Only accept
+			// floats that round-trip exactly to an i64 (finite, whole, in
+			// range). Lossy conversions are rejected — see
+			// `Number::as_int_lossless`.
+			Value::Number(id) if id.is_float() => {
+				let key = id.as_int_lossless().map(RecordIdKey::Number).ok_or_else(|| {
+					anyhow::Error::new(Error::IdInvalid {
+						value: Value::Number(id).to_sql(),
+					})
+				})?;
+				Ok(RecordId {
+					table: tb,
+					key,
+				})
+			}
 			// There is an integer number for the id field
 			Value::Number(id) if id.is_int() => Ok(RecordId {
 				table: tb,

@@ -302,11 +302,17 @@ macro_rules! t {
 	("COSINE") => {
 		$crate::syn::token::TokenKind::Distance($crate::syn::token::DistanceKind::Cosine)
 	};
+	("COSINE_NORMALIZED") => {
+		$crate::syn::token::TokenKind::Distance($crate::syn::token::DistanceKind::CosineNormalized)
+	};
 	("EUCLIDEAN") => {
 		$crate::syn::token::TokenKind::Distance($crate::syn::token::DistanceKind::Euclidean)
 	};
 	("HAMMING") => {
 		$crate::syn::token::TokenKind::Distance($crate::syn::token::DistanceKind::Hamming)
+	};
+	("INNER_PRODUCT") => {
+		$crate::syn::token::TokenKind::Distance($crate::syn::token::DistanceKind::InnerProduct)
 	};
 	("JACCARD") => {
 		$crate::syn::token::TokenKind::Distance($crate::syn::token::DistanceKind::Jaccard)
@@ -328,6 +334,9 @@ macro_rules! t {
 	("F64") => {
 		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::F64)
 	};
+	("F16") => {
+		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::F16)
+	};
 	("F32") => {
 		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::F32)
 	};
@@ -339,6 +348,12 @@ macro_rules! t {
 	};
 	("I16") => {
 		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::I16)
+	};
+	("I8") => {
+		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::I8)
+	};
+	("U8") => {
+		$crate::syn::token::TokenKind::VectorType($crate::syn::token::VectorTypeKind::U8)
 	};
 
 	($t:tt) => {

@@ -84,11 +84,11 @@ use super::opt::{CreateResource, IntoResource};
 /// library
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
 
-/// Type-state marker for [`Export::ml`](Export::ml) on an [`Export`](Export) from
+/// Type-state marker for [`Export::ml`](Export::ml) on an [`Export`] from
 /// [`Surreal::export`](crate::Surreal::export).
 pub struct Model;
 
-/// Type-state marker for [`Export::with_config`](Export::with_config) on an [`Export`](Export) from
+/// Type-state marker for [`Export::with_config`](Export::with_config) on an [`Export`] from
 /// [`Surreal::export`](crate::Surreal::export).
 pub struct ExportConfig;
 

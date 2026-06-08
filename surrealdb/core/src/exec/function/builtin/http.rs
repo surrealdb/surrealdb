@@ -24,7 +24,7 @@ async fn http_disabled() -> Result<Value> {
 #[cfg(feature = "http")]
 fn extract_uri(args: &[Value], fn_name: &str) -> Result<String> {
 	match args.first() {
-		Some(Value::String(s)) => Ok(s.clone()),
+		Some(Value::String(s)) => Ok(s.as_str().to_owned()),
 		Some(v) => Err(anyhow::anyhow!(crate::err::Error::InvalidFunctionArguments {
 			name: fn_name.to_owned(),
 			message: format!(

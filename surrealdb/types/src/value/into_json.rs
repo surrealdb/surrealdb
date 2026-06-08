@@ -6,8 +6,12 @@ use crate::sql::ToSql;
 use crate::{Geometry, Number, Value};
 
 impl Value {
-	/// Converts the value into a json representation of the value.
-	/// Returns None if there are non serializable values present in the value.
+	/// Converts the value into its JSON representation.
+	///
+	/// This is a total conversion: every value variant maps to a `JsonValue`, so
+	/// it never fails. Types without a native JSON counterpart are encoded on a
+	/// best-effort basis (for example record ids, ranges, durations and datetimes
+	/// become strings, and a non-finite float becomes `null`).
 	// TODO: Remove the JsonValue intermediate and implement a json formatter for
 	// Value.
 	pub fn into_json_value(self) -> JsonValue {
@@ -83,13 +87,13 @@ fn geometry_into_json_value(geo: Geometry) -> JsonValue {
 		Geometry::Line(line_string) => {
 			json!({
 				"type": "LineString",
-				"coordinates": line_into_json_value(line_string)
+				"coordinates": line_into_json_value(&line_string)
 			})
 		}
 		Geometry::Polygon(polygon) => {
 			json!({
 				"type": "Polygon",
-				"coordinates": polygon_into_json_value(polygon)
+				"coordinates": polygon_into_json_value(&polygon)
 			})
 		}
 		Geometry::MultiPoint(multi_point) => {
@@ -101,13 +105,13 @@ fn geometry_into_json_value(geo: Geometry) -> JsonValue {
 		Geometry::MultiLine(multi_line_string) => {
 			json!({
 				"type": "MultiLineString",
-				"coordinates": multi_line_string.into_iter().map(line_into_json_value).collect::<Vec<_>>(),
+				"coordinates": multi_line_string.into_iter().map(|line| line_into_json_value(&line)).collect::<Vec<_>>(),
 			})
 		}
 		Geometry::MultiPolygon(multi_polygon) => {
 			json!({
 				"type": "MultiPolygon",
-				"coordinates": multi_polygon.into_iter().map(polygon_into_json_value).collect::<Vec<_>>(),
+				"coordinates": multi_polygon.into_iter().map(|polygon| polygon_into_json_value(&polygon)).collect::<Vec<_>>(),
 			})
 		}
 		Geometry::Collection(items) => {
@@ -123,11 +127,11 @@ fn point_into_json_value(point: Point) -> JsonValue {
 	vec![JsonValue::from(point.x()), JsonValue::from(point.y())].into()
 }
 
-fn line_into_json_value(line_string: LineString) -> JsonValue {
+fn line_into_json_value(line_string: &LineString) -> JsonValue {
 	line_string.points().map(point_into_json_value).collect::<Vec<_>>().into()
 }
 
-fn polygon_into_json_value(polygon: Polygon) -> JsonValue {
+fn polygon_into_json_value(polygon: &Polygon) -> JsonValue {
 	let mut coords =
 		vec![polygon.exterior().points().map(point_into_json_value).collect::<Vec<_>>()];
 

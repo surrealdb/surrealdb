@@ -43,7 +43,7 @@ impl AlterConfigStatement {
 			ConfigInner::Api(_) => ConfigKind::Api,
 			ConfigInner::Default(_) => ConfigKind::Default,
 		};
-		opt.is_allowed(Action::Edit, ResourceKind::Config(config_kind), &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Config(config_kind), Base::Db)?;
 		let (_, _) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let txn = ctx.tx();

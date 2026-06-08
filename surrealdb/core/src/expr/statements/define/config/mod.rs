@@ -70,7 +70,7 @@ impl DefineConfigStatement {
 		let kind = self.inner.kind();
 		let base = kind.base();
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Config(kind), &base.clone().into())?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Config(kind), base.clone().into())?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the config kind

@@ -34,7 +34,6 @@ pub async fn process_fns(
 	fns: Arc<[FunctionDefinition]>,
 	mut query: Object,
 	types: &mut Vec<Type>,
-	session: &Session,
 	datastore: &Arc<Datastore>,
 ) -> Result<Object, GqlError> {
 	for fnd in fns.iter() {
@@ -43,13 +42,23 @@ pub async fn process_fns(
 			continue;
 		};
 
-		// Clone values that will be moved into the resolver closure
-		let sess1 = session.clone();
-		let kvs1 = datastore.clone();
+		// SECURITY: do NOT close over the schema-generation-time session. The
+		// schema is cached per (ns, db, gql-config), so a session captured here
+		// would be reused for every later caller's fn_* invocation — running
+		// their queries under the first caller's auth. Read the per-request
+		// session from the GraphQL context instead, matching the other
+		// resolvers in this crate.
+		let kvs1 = Arc::clone(datastore);
 		let fnd1 = fnd.clone();
 
+		// Honour an explicit `GRAPHQL <ident>` alias when valid; otherwise fall
+		// back to the auto-derived `fn_<name>` form. See GitHub issue #4537.
+		let field_name = match fnd.graphql_alias.as_deref() {
+			Some(alias) if super::tables::is_valid_gql_identifier_pub(alias) => alias.to_string(),
+			_ => format!("fn_{}", fnd.name),
+		};
 		let mut field = Field::new(
-			format!("fn_{}", fnd.name),
+			field_name,
 			kind_to_type_with_enum_prefix(
 				kind.clone(),
 				types,
@@ -57,10 +66,10 @@ pub async fn process_fns(
 				Some(&format!("fn_{}_return", fnd.name)),
 			)?,
 			move |ctx| {
-				let sess1 = sess1.clone();
-				let kvs1 = kvs1.clone();
+				let kvs1 = Arc::clone(&kvs1);
 				let fnd1 = fnd1.clone();
 				FieldFuture::new(async move {
+					let sess1 = ctx.data::<Arc<Session>>()?;
 					let gql_args = ctx.args.as_index_map();
 					let mut args = Vec::new();
 
@@ -82,13 +91,13 @@ pub async fn process_fns(
 
 					// Execute the function call via a LogicalPlan
 					let func_call = Expr::FunctionCall(Box::new(FunctionCall {
-						receiver: crate::expr::Function::Custom(fnd1.name.clone()),
+						receiver: crate::expr::Function::Custom(fnd1.name.to_string()),
 						arguments: args,
 					}));
 					let plan = LogicalPlan {
 						expressions: vec![TopLevelExpr::Expr(func_call)],
 					};
-					let res = execute_plan(&kvs1, &sess1, plan).await?;
+					let res = execute_plan(&kvs1, sess1.as_ref(), plan).await?;
 
 					// Convert the SurrealQL result to a GraphQL value
 					let gql_res = match res {
@@ -116,6 +125,16 @@ pub async fn process_fns(
 				})
 			},
 		);
+
+		// Attach a description that surfaces the SurrealQL `COMMENT` and any
+		// `GRAPHQL_DEPRECATED "reason"` to schema consumers (async-graphql
+		// 7.2.1 doesn't yet expose the `@deprecated` directive setter).
+		if let Some(desc) = super::naming::description_with_deprecation(
+			fnd.comment.as_deref(),
+			fnd.graphql_deprecated.as_deref(),
+		) {
+			field = field.description(desc);
+		}
 
 		// Register each function argument as a GraphQL input value
 		for (arg_name, arg_kind) in fnd.args.iter() {

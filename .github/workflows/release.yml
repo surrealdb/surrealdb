@@ -26,10 +26,6 @@ on:
         options:
           - nightly
           - versioned
-      release-version:
-        required: false
-        type: string
-        description: "Semantic version (e.g., 3.0.0-beta.1)"
       git-ref:
         required: true
         type: string
@@ -89,23 +85,7 @@ jobs:
         env:
           SEMVER_REGEX: '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'
         run: |
-          if [[ "${{ inputs.release-type }}" == "versioned" ]]; then
-            if [[ -z "${{ inputs.release-version }}" ]]; then
-              echo "Error: 'release-version' is required when release-type is 'versioned'"
-              echo "Please provide a version number (e.g., 3.0.0-beta.1)"
-              exit 1
-            fi
-            # Validate release-version format
-            if [[ ! "${{ inputs.release-version }}" =~ $SEMVER_REGEX ]]; then
-              echo "Error: 'release-version' must be a valid semver (e.g., 3.0.0-beta.1, 3.0.0)"
-              exit 1
-            fi
-          fi
-
           if [[ "${{ inputs.release-type }}" == "nightly" ]]; then
-            if [[ -n "${{ inputs.release-version }}" ]]; then
-              echo "Warning: 'release-version' is ignored for nightly releases"
-            fi
             if [[ "${{ inputs.update-main }}" == "true" ]]; then
               echo "Warning: 'update-main' is ignored for nightly releases"
             fi
@@ -124,30 +104,26 @@ jobs:
             fi
             # Basic format validation - should look like a semver
             if [[ ! "${{ inputs.main-version }}" =~ $SEMVER_REGEX ]]; then
-              echo "Error: 'main-version' must be a valid semver (e.g., 4.0.0-alpha, 3.1.0-beta)"
+              echo "Error: 'main-version' must be a valid semver (e.g., 4.0.0-nightly, 3.1.0-beta)"
               exit 1
             fi
           fi
 
   # ----------------------------------------
-  # Bump version (optional)
+  # Update main branch version (optional)
   # ----------------------------------------
-  # Release branch strategy:
-  # - Temporary branch: releases/v{version} (e.g., releases/v3.0.0-beta.1)
-  #   * Created during version bump, deleted after successful release
-  #   * For patch releases (X.Y.Z), manually create a branch from the previous tag
-  # - Main branch version (when update-main is true):
+  # The release version is taken directly from the code on the checked-out
+  # git-ref (no version bump happens here). When update-main is true, this job
+  # opens a PR to move the main branch to its next development version:
   #   * If main-version specified: uses that exact version
-  #   * Pre-releases: auto-strips patch (3.0.0-beta.1 -> 3.0.0-beta)
-  #   * Stable x.y.0: auto-bumps to next minor alpha (3.0.0 -> 3.1.0-alpha)
-  #   * For major transitions, specify main-version explicitly (e.g., 4.0.0-alpha)
+  #   * Stable x.y.0: auto-bumps to next minor nightly (3.0.0 -> 3.1.0-nightly)
+  #   * Pre-releases / patches: main is left unchanged (always stays on -nightly)
+  #   * For major transitions, specify main-version explicitly (e.g., 4.0.0-nightly)
 
-  bump-version:
+  update-main:
     needs: [validate-inputs]
-    name: Bump version
+    name: Update main version
     runs-on: ubuntu-latest
-    outputs:
-      release-branch: ${{ steps.bump.outputs.release-branch }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
@@ -155,7 +131,7 @@ jobs:
           egress-policy: audit
 
       - name: Checkout sources
-        if: ${{ inputs.release-type == 'versioned' }}
+        if: ${{ inputs.update-main == true && inputs.release-type == 'versioned' }}
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.git-ref }}
@@ -163,23 +139,18 @@ jobs:
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
       - name: Setup environment
-        if: ${{ inputs.release-type == 'versioned' }}
+        if: ${{ inputs.update-main == true && inputs.release-type == 'versioned' }}
         uses: ./.github/actions/setup-environment
 
       - name: Install cargo-edit
-        if: ${{ inputs.release-type == 'versioned' }}
+        if: ${{ inputs.update-main == true && inputs.release-type == 'versioned' }}
         run: cargo install cargo-edit
-
-      - name: Bump version and commit
-        if: ${{ inputs.release-type == 'versioned' }}
-        id: bump
-        run: .github/scripts/bump-version.sh "${{ inputs.release-version }}" "$GITHUB_OUTPUT"
 
       - name: Create PR to update main
         if: ${{ inputs.update-main == true && inputs.release-type == 'versioned' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: .github/scripts/update-main-version.sh "${{ inputs.release-version }}" "${{ inputs.publish }}" "${{ inputs.main-version }}"
+        run: .github/scripts/bump-nightly-version.sh "${{ inputs.publish }}" "${{ inputs.main-version }}"
 
   # ----------------------------------------
   # Prepare release variables
@@ -187,7 +158,7 @@ jobs:
 
   prepare-vars:
     name: Prepare vars
-    needs: [validate-inputs, bump-version]
+    needs: [validate-inputs]
     runs-on: ubuntu-latest
     outputs:
       name: ${{ steps.vars.outputs.name }}
@@ -218,9 +189,9 @@ jobs:
             echo "publish=true" >> $GITHUB_OUTPUT
           else
             # Manual workflow dispatch
-            # If version was bumped (versioned release), use the release branch
+            # The version is taken from the code on the provided git-ref
             if [[ "${{ inputs.release-type }}" == "versioned" ]]; then
-              echo "git-ref=${{ needs.bump-version.outputs.release-branch }}" >> $GITHUB_OUTPUT
+              echo "git-ref=${{ inputs.git-ref }}" >> $GITHUB_OUTPUT
               echo "nightly-release=false" >> $GITHUB_OUTPUT
               # Respect latest input for versioned releases
               echo "latest=${{ inputs.latest }}" >> $GITHUB_OUTPUT
@@ -616,16 +587,25 @@ jobs:
           aws-secret-access-key: ${{ secrets.AMAZON_SECRET_KEY }}
 
   # ----------------------------------------
-  # Cleanup release branch (only on success)
+  # Bump release branch version
   # ----------------------------------------
-  # Delete the temporary release branch only when the full release succeeded.
-  # On failure (e.g. crate publish network error), the branch is kept so the
-  # release can be retried from the same branch without starting from scratch.
+  # After a versioned release cut from a permanent release branch (e.g.
+  # releases/3.1), open a PR that bumps the surrealdb crates on that branch to
+  # the next patch version (e.g. 3.1.3 -> 3.1.4), readying it as the release
+  # candidate for the next patch. This fires automatically whenever the release
+  # git-ref is a release branch - every release needs a follow-up version bump.
+  # Runs only after the release has propagated successfully (or in a dry-run,
+  # where it just reports what it would do).
 
-  cleanup-release-branch:
-    name: Delete release branch
-    needs: [ bump-version, propagate ]
-    if: ${{ always() && needs.bump-version.outputs.release-branch != '' && needs.propagate.result == 'success' }}
+  bump-release-version:
+    name: Bump release branch version
+    needs: [ prepare-vars, propagate ]
+    # Gate on the actual release outcome:
+    #   * publish run  -> require propagate to have succeeded
+    #   * dry-run      -> propagate is skipped (its `if` is false), so allow skipped
+    # A publish run whose upstream jobs failed leaves propagate `skipped`, which
+    # must NOT be treated as success - hence the explicit publish/skipped split.
+    if: ${{ always() && inputs.release-type == 'versioned' && startsWith(inputs.git-ref, 'releases/') && needs.prepare-vars.result == 'success' && ((needs.prepare-vars.outputs.publish == 'true' && needs.propagate.result == 'success') || (needs.prepare-vars.outputs.publish != 'true' && needs.propagate.result == 'skipped')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -636,9 +616,17 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: ${{ inputs.git-ref }}
+          fetch-depth: 0
           ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
 
-      - name: Delete release branch
-        run: |
-          # Idempotent: ignore if branch doesn't exist
-          git push origin --delete "${{ needs.bump-version.outputs.release-branch }}" || true
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+
+      - name: Install cargo-edit
+        run: cargo install cargo-edit
+
+      - name: Create PR to bump release branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/bump-release-version.sh "${{ inputs.git-ref }}" "${{ inputs.publish }}"

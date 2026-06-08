@@ -4,6 +4,43 @@
 //! traditionally a stateless protocol, this implementation supports stateful sessions
 //! by maintaining server-side session state and using session IDs in requests.
 //!
+//! # Security
+//!
+//! Every HTTP request carries its own authentication material (Basic or
+//! Bearer). Server-side, an attached HTTP session is bound to the
+//! authenticating principal the first time an authentication command
+//! (`signin`, `signup`, or `authenticate`) runs against it. Before that
+//! point the session is anonymous and holds no elevated privileges, so
+//! it is reachable by any caller - this preserves the `attach` then
+//! `signin` replay sequence emitted by this SDK. Once the session is
+//! bound to a principal, every subsequent request that targets that
+//! session UUID must present a request-level principal that matches on
+//! actor id and [`Level`]; mismatches return `session_not_found`.
+//! This ensures an attacker who observes or guesses a victim's session UUID
+//! *after* the victim authenticates cannot use it to impersonate them, and
+//! an attacker cannot enumerate UUIDs in the first place - see the `sessions`
+//! bullet below.
+//!
+//! Concretely, this has two SDK-visible consequences:
+//!
+//! - `Command::Attach` on a freshly created session is always accepted: it creates a fresh,
+//!   anonymous session keyed by a new 128-bit UUID. The caller is bound to it later by the first
+//!   `signin` / `signup` / `authenticate` call, so the standard SDK replay ordering (`Attach`, then
+//!   `Use`/`Signin`/etc.) continues to work as before.
+//! - If credentials on a `Surreal::<Http>` handle change (for example via a new `signin` with
+//!   different credentials) the next HTTP call continues to use the same session UUID. The server
+//!   accepts it because the `signin` command itself mutates the session's stored principal to match
+//!   the new credentials before any subsequent request is gated against it.
+//!
+//! Enumeration of attached HTTP sessions via the `sessions` RPC method
+//! is not permitted and always returns `method_not_allowed`. Session
+//! UUIDs are 128-bit random and cannot be guessed, so a session that
+//! has not yet been authenticated is effectively unreachable to anyone
+//! but its creator even though the server does not enforce ownership
+//! on it.
+//!
+//! [`Level`]: surrealdb_core::iam::Level
+//!
 //! # Multi-Node Deployments and Sticky Sessions
 //!
 //! **Important:** When deploying SurrealDB in a multi-node cluster behind a load balancer,
@@ -179,7 +216,7 @@ impl RouterState {
 			session_id,
 		});
 		let session_state = Arc::new(session_state);
-		self.sessions.insert(session_id, Ok(session_state.clone()));
+		self.sessions.insert(session_id, Ok(Arc::clone(&session_state)));
 
 		if let Err(error) = self.replay_session(session_id, &session_state).await {
 			self.sessions.insert(session_id, Err(SessionError::Remote(error.to_string())));
@@ -198,7 +235,7 @@ impl RouterState {
 					};
 				}
 				let new_state = Arc::new(new_state);
-				self.sessions.insert(new, Ok(new_state.clone()));
+				self.sessions.insert(new, Ok(Arc::clone(&new_state)));
 
 				if let Err(error) = self.replay_session(new, &new_state).await {
 					self.sessions.insert(new, Err(SessionError::Remote(error.to_string())));
@@ -223,6 +260,18 @@ impl RouterState {
 			self.replay_session(session_id, &session_state).await.ok();
 		}
 		self.sessions.remove(&session_id);
+	}
+
+	/// Dispatch a session-lifecycle event to the appropriate handler.
+	async fn handle_session(&self, session_id: crate::SessionId) {
+		match session_id {
+			crate::SessionId::Initial(id) => self.handle_session_initial(id).await,
+			crate::SessionId::Clone {
+				old,
+				new,
+			} => self.handle_session_clone(old, new).await,
+			crate::SessionId::Drop(id) => self.handle_session_drop(id).await,
+		}
 	}
 }
 
@@ -330,7 +379,7 @@ impl Surreal<Client> {
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
-			surreal: self.inner.clone().into(),
+			surreal: Arc::clone(&self.inner).into(),
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
@@ -688,6 +737,45 @@ async fn router(
 
 			Ok(out)
 		}
+		Command::Signup {
+			credentials,
+		} => {
+			let req = Command::Signup {
+				credentials: credentials.clone(),
+			}
+			.into_router_request(None, Some(session_id))
+			.expect("signup should be a valid router request");
+
+			let results = send_request(
+				req,
+				base_url,
+				client,
+				&*session_state.headers.read().await,
+				&*session_state.auth.read().await,
+			)
+			.await?;
+
+			// Stash the signup-issued bearer token so subsequent HTTP
+			// requests carry the new credentials and pass the
+			// per-session ownership gate added in
+			// `Http::verify_caller_for_session`. Without this the next
+			// auth call would arrive anonymous against a session that
+			// the server has already bound to the new record principal.
+			let value = match results.first() {
+				Some(result) => result.clone().result?,
+				None => {
+					error!("received invalid result from server");
+					return Err(Error::internal("Received invalid result from server".to_string()));
+				}
+			};
+
+			let token = Token::from_value(value).map_err(|e| Error::internal(e.to_string()))?;
+			*session_state.auth.write().await = Some(Auth::Bearer {
+				token: token.access,
+			});
+
+			Ok(results)
+		}
 		Command::Signin {
 			credentials,
 		} => {
@@ -884,13 +972,11 @@ async fn router(
 		}
 		| Command::ImportMl {
 			..
-		} => {
-			// TODO: Better error message here, some backups are supported
-			Err(Error::internal(
-				"The protocol or storage engine does not support backups on this architecture"
-					.to_string(),
-			))
-		}
+		} => Err(Error::internal(
+			"File-based export/import is not supported on this architecture. \
+				 Use the byte-stream variants (e.g. `db.export().await?`) instead."
+				.to_string(),
+		)),
 
 		#[cfg(not(target_family = "wasm"))]
 		Command::ExportFile {

@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_strand::Strand;
 
 use super::DefineKind;
 use crate::catalog::NamespaceDefinition;
@@ -26,7 +27,7 @@ impl Default for DefineNamespaceStatement {
 		Self {
 			kind: DefineKind::Default,
 			id: None,
-			name: Expr::Literal(Literal::String(String::new())),
+			name: Expr::Literal(Literal::String(Strand::default())),
 			comment: Expr::Literal(Literal::None),
 		}
 	}
@@ -43,19 +44,20 @@ impl DefineNamespaceStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Namespace, Base::Root)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Process the name
-		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "namespace name").await?;
+		let name: Strand =
+			expr_to_ident(stk, ctx, opt, doc, &self.name, "namespace name").await?.into();
 
 		// Check if the definition exists
-		let namespace_id = if let Some(ns) = txn.get_ns_by_name(&name, None).await? {
+		let namespace_id = if let Some(ns) = txn.get_ns_by_name(name.as_str(), None).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::NsAlreadyExists {
-							name: name.clone(),
+							name: name.to_string(),
 						});
 					}
 				}

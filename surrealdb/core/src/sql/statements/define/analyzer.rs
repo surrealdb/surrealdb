@@ -1,16 +1,17 @@
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 use crate::sql::filter::Filter;
-use crate::sql::tokenizer::Tokenizer;
+use crate::sql::tokenizer::{Tokenizer, write_tokenizers_sql};
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
-	pub function: Option<String>,
+	pub function: Option<Strand>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Expr,
@@ -40,14 +41,14 @@ impl ToSql for DefineAnalyzerStatement {
 		write_sql!(f, sql_fmt, " {}", CoverStmts(&self.name));
 		if let Some(ref i) = self.function {
 			f.push_str(" FUNCTION fn");
-			for x in i.split("::") {
+			for x in i.as_str().split("::") {
 				f.push_str("::");
 				EscapeKwFreeIdent(x).fmt_sql(f, sql_fmt);
 			}
 		}
 		if let Some(v) = &self.tokenizers {
-			let tokens: Vec<String> = v.iter().map(|f| f.to_sql()).collect();
-			write_sql!(f, sql_fmt, " TOKENIZERS {}", tokens.join(","));
+			write_sql!(f, sql_fmt, " TOKENIZERS ");
+			write_tokenizers_sql(f, sql_fmt, v.iter().copied());
 		}
 		if let Some(v) = &self.filters {
 			write_sql!(f, sql_fmt, " FILTERS {}", Fmt::comma_separated(v.iter()));

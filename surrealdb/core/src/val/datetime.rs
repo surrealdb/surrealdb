@@ -17,7 +17,7 @@ use crate::syn;
 use crate::val::{Duration, TrySub};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Datetime(pub DateTime<Utc>);
 
@@ -85,7 +85,7 @@ impl Deref for Datetime {
 
 impl Datetime {
 	/// Convert the datetime to a version stamp using the datastore's timestamp implementation.
-	pub fn to_version_stamp(&self, ts_impl: &dyn TimeStampImpl) -> Result<u64> {
+	pub fn to_version_stamp(self, ts_impl: &dyn TimeStampImpl) -> Result<u64> {
 		let ts = ts_impl
 			.create_from_datetime(self.0)
 			.ok_or_else(|| anyhow!(Error::TimestampOverflow(self.to_string())))?;
@@ -93,12 +93,12 @@ impl Datetime {
 	}
 
 	/// Convert to nanosecond timestamp.
-	pub fn to_i64(&self) -> Option<i64> {
+	pub fn to_i64(self) -> Option<i64> {
 		self.0.timestamp_nanos_opt()
 	}
 
 	/// Convert to second timestamp.
-	pub fn to_secs(&self) -> i64 {
+	pub fn to_secs(self) -> i64 {
 		self.0.timestamp()
 	}
 }

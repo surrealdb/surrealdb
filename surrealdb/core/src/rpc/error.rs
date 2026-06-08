@@ -50,6 +50,7 @@ pub fn invalid_params(msg: impl Into<String>) -> TypesError {
 }
 
 /// Internal error (wraps anyhow).
+#[allow(clippy::needless_pass_by_value)] // Public API: callers pass owned `anyhow::Error`.
 pub fn internal_error(err: anyhow::Error) -> TypesError {
 	TypesError::from_anyhow_with_chain(err)
 }
@@ -94,15 +95,11 @@ pub fn deserialize(msg: impl Into<String>) -> TypesError {
 }
 
 /// Session not found.
-pub fn session_not_found(id: Option<Uuid>) -> TypesError {
-	let (message, id_str) = match id {
-		Some(id) => (format!("Session not found: {id:?}"), Some(id.to_string())),
-		None => ("Default session not found".to_string(), None),
-	};
+pub fn session_not_found(id: Uuid) -> TypesError {
 	TypesError::not_found(
-		message,
+		format!("Session not found: {id:?}"),
 		NotFoundError::Session {
-			id: id_str,
+			id: Some(id.to_string()),
 		},
 	)
 }

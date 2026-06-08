@@ -75,6 +75,15 @@ pub enum AccessPath {
 	/// Full table scan - iterate all records in storage order.
 	TableScan,
 
+	/// Produces no rows.
+	///
+	/// Selected when the analyzer can statically prove the WHERE cannot
+	/// match — for example a contradictory range (`a > 10 AND a < 5`),
+	/// an empty `IN []`, or a fully false-folded predicate. Surfaces as
+	/// the [`crate::exec::operators::EmptyScan`] operator and short-circuits
+	/// the rest of the SELECT pipeline.
+	EmptyScan,
+
 	/// B-tree index scan (Idx or Uniq).
 	///
 	/// Supports equality lookups, range scans, and compound key access.
@@ -91,22 +100,39 @@ pub enum AccessPath {
 		operator: MatchesOperator,
 	},
 
-	/// KNN vector search using an HNSW index.
+	/// KNN vector search using an ANN index.
 	KnnSearch {
 		index_ref: IndexRef,
 		/// The query vector to search for nearest neighbors of
 		vector: Vec<Number>,
 		/// Number of nearest neighbors to return
 		k: u32,
-		/// HNSW search expansion factor
+		/// ANN search expansion factor
 		ef: u32,
 	},
 
-	/// Union of multiple index scans for OR conditions.
+	/// Union of multiple index scans (OR-union, scalar IN-expansion,
+	/// or array-containment expansion).
 	///
-	/// Each sub-path handles one branch of the OR; results are
-	/// deduplicated by record ID at execution time.
-	Union(Vec<AccessPath>),
+	/// `dedupe` records whether the analyser's construction can emit
+	/// the same record from more than one branch:
+	///
+	/// - **`true`** — OR-union (independent predicates may both hold on the same row) and
+	///   CONTAINSANY/ANYINSIDE on an array-element index (a row whose indexed array contains
+	///   multiple branch values is in multiple branches' prefix ranges).
+	/// - **`false`** — scalar `IN`-expansion. Each row's field value matches at most one literal,
+	///   so branches are record-disjoint by construction.
+	///
+	/// `plan_union_index_source` reads this flag to choose between
+	/// `MergeMode::ByIndexKey` (no dedupe; cheaper) and
+	/// `MergeMode::ByIndexKeyDedup` (HashSet of record ids) when an
+	/// ordered k-way merge is active.  Sequential and `ById` merge
+	/// modes dedupe unconditionally; the flag is purely the explicit
+	/// contract between the analyser and the union operator.
+	Union {
+		paths: Vec<AccessPath>,
+		dedupe: bool,
+	},
 }
 
 impl AccessPath {
@@ -158,13 +184,13 @@ pub enum BTreeAccess {
 		operator: crate::expr::operator::MatchesOperator,
 	},
 
-	/// KNN vector search access via HNSW index.
+	/// KNN vector search access via ANN index.
 	Knn {
 		/// The query vector
 		vector: Vec<Number>,
 		/// Number of nearest neighbors
 		k: u32,
-		/// HNSW search expansion factor
+		/// ANN search expansion factor
 		ef: u32,
 	},
 }
@@ -217,13 +243,22 @@ pub fn select_access_path(
 	}
 
 	// WITH INDEX names - find the hinted index
-	if let Some(With::Index(names)) = with_hints
-		&& let Some(candidate) = find_hinted_index(&candidates, names)
-	{
-		return candidate.to_access_path(direction);
+	if let Some(With::Index(names)) = with_hints {
+		if let Some(candidate) = find_hinted_index(&candidates, names) {
+			return candidate.to_access_path(direction);
+		}
+		// Hint did not match any candidate. The most common cause is that
+		// the user named an index but no WHERE conjunct refers to its
+		// leading column. We log a warning so debugging "why isn't my
+		// index being used" tickets has a signal, then fall through to
+		// best-effort selection / table scan.
+		tracing::warn!(
+			target: "surreal::index",
+			hinted = ?names,
+			candidates = ?candidates.iter().map(|c| c.index_ref.name.as_str()).collect::<Vec<_>>(),
+			"WITH INDEX hint did not match any analyzed candidate; falling back to best-effort plan",
+		);
 	}
-	// If hinted index not found, fall through to best effort
-	// (could also error here, but being lenient)
 
 	// No candidates - table scan
 	if candidates.is_empty() {

@@ -28,9 +28,14 @@ jobs:
       security-events: write
       # Needed to publish results and get a badge (see publish_results below).
       id-token: write
-      # Uncomment the permissions below if installing in a private repository.
-      # contents: read
-      # actions: read
+      # Required for private repository access (checkout + GraphQL commit queries).
+      contents: read
+      actions: read
+      # Recommended reads for private repos to avoid GraphQL/SAST gaps.
+      # See https://github.com/ossf/scorecard-action?tab=readme-ov-file#additional-permissions-for-private-repositories
+      issues: read
+      pull-requests: read
+      checks: read
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -48,10 +53,9 @@ jobs:
         with:
           results_file: results.sarif
           results_format: sarif
-          # (Optional) "write" PAT token. Uncomment the `repo_token` line below if:
-          # - you want to enable the Branch-Protection check on a *public* repository, or
-          # - you are installing Scorecard on a *private* repository
-          # To create the PAT, follow the steps in https://github.com/ossf/scorecard-action?tab=readme-ov-file#authentication-with-fine-grained-pat-optional.
+          # (Optional) PAT token for classic Branch Protection checks on private repos.
+          # Not needed if the repository uses Repository Rules (recommended).
+          # See https://github.com/ossf/scorecard-action?tab=readme-ov-file#authentication-with-fine-grained-pat-optional
           # repo_token: ${{ secrets.SCORECARD_TOKEN }}
 
           # Public repositories:
@@ -77,7 +81,8 @@ jobs:
 
       # Upload the results to GitHub's code scanning dashboard (optional).
       # Commenting out will disable upload of results to your repo's Code Scanning dashboard
-      - name: "Upload to code-scanning"
-        uses: github/codeql-action/upload-sarif@5c8a8a642e79153f5d047b10ec1cba1d1cc65699 # v3.35.1
-        with:
-          sarif_file: results.sarif
+      # NOTE: Disabled until GitHub Advanced Security (Code Security) is enabled on this repository.
+      # - name: "Upload to code-scanning"
+      #   uses: github/codeql-action/upload-sarif@5c8a8a642e79153f5d047b10ec1cba1d1cc65699 # v3.35.1
+      #   with:
+      #     sarif_file: results.sarif

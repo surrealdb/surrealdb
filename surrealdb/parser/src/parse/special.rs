@@ -846,12 +846,28 @@ impl ParseSync for ast::JsFunctionBody {
 			loop {
 				match templ_lexer.next() {
 					// lexer should have no invalid characters so it should never error.
-					Some(Err(_)) => unreachable!("invalid token {:?}", lexer.slice()),
 					Some(Ok(JsFunctionTemplateToken::End)) => break,
 					Some(Ok(JsFunctionTemplateToken::Dollar)) => {}
 					Some(Ok(JsFunctionTemplateToken::TemplateOpen)) => {
 						delim_stack.push(Delimiter::Template);
 						break;
+					}
+					Some(Err(_)) => {
+						if partial {
+							return Err(ParseError::missing_data());
+						}
+						let span = Span::from_usize_range(templ_lexer.span())
+							.expect("span to be in range");
+						return Err(ParseError::diagnostic(
+							Level::Error
+								.title("Invalid token, expected javascript template string to end")
+								.snippet(
+									Snippet::source(templ_lexer.source())
+										.annotate(AnnotationKind::Primary.span(span)),
+								)
+								.to_diagnostic()
+								.to_owned(),
+						));
 					}
 					None => {
 						if partial {

@@ -57,6 +57,11 @@ pub(crate) struct DefineFieldStatement {
 	pub permissions: Permissions,
 	pub comment: Expr,
 	pub reference: Option<Reference>,
+	/// Optional GraphQL alias declared via `GRAPHQL_ALIAS "..."`.
+	pub graphql_alias: Option<String>,
+	/// Optional GraphQL deprecation reason declared via
+	/// `GRAPHQL_DEPRECATED "..."`.
+	pub graphql_deprecated: Option<String>,
 }
 
 impl Default for DefineFieldStatement {
@@ -75,6 +80,8 @@ impl Default for DefineFieldStatement {
 			permissions: Permissions::default(),
 			comment: Expr::Literal(Literal::None),
 			reference: None,
+			graphql_alias: None,
+			graphql_deprecated: None,
 		}
 	}
 }
@@ -121,6 +128,12 @@ impl ToSql for DefineFieldStatement {
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
 			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
+		if let Some(ref alias) = self.graphql_alias {
+			write_sql!(f, sql_fmt, " GRAPHQL_ALIAS {}", crate::fmt::QuoteStr(alias));
+		}
+		if let Some(ref reason) = self.graphql_deprecated {
+			write_sql!(f, sql_fmt, " GRAPHQL_DEPRECATED {}", crate::fmt::QuoteStr(reason));
+		}
 		if sql_fmt.is_pretty() {
 			f.push('\n');
 			sql_fmt.write_indent(f);
@@ -147,6 +160,8 @@ impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatemen
 			permissions: v.permissions.into(),
 			comment: v.comment.into(),
 			reference: v.reference.map(Into::into),
+			graphql_alias: v.graphql_alias,
+			graphql_deprecated: v.graphql_deprecated,
 		}
 	}
 }
@@ -168,6 +183,8 @@ impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatemen
 			permissions: v.permissions.into(),
 			comment: v.comment.into(),
 			reference: v.reference.map(Into::into),
+			graphql_alias: v.graphql_alias,
+			graphql_deprecated: v.graphql_deprecated,
 		}
 	}
 }

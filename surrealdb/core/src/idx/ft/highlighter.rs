@@ -3,6 +3,7 @@ use std::collections::hash_map::Entry as HEntry;
 use std::collections::{BTreeMap, HashMap};
 
 use anyhow::{Result, ensure};
+use surrealdb_strand::Strand;
 
 use crate::err::Error;
 use crate::expr::Idiom;
@@ -31,7 +32,7 @@ pub(super) struct Highlighter {
 }
 
 impl Highlighter {
-	pub(super) fn new(hlp: HighlightParams, idiom: &Idiom, doc: &Value) -> Self {
+	pub(super) fn new(hlp: &HighlightParams, idiom: &Idiom, doc: &Value) -> Self {
 		let prefix = hlp.prefix.to_raw_string().chars().collect();
 		let suffix = hlp.suffix.to_raw_string().chars().collect();
 		// Extract the fields we want to highlight
@@ -48,11 +49,11 @@ impl Highlighter {
 		self.offseter.highlight(term_len, os);
 	}
 
-	fn extract(val: Value, vals: &mut Vec<String>) {
+	fn extract(val: Value, vals: &mut Vec<Strand>) {
 		match val {
 			Value::String(s) => vals.push(s),
-			Value::Number(n) => vals.push(n.to_string()),
-			Value::Bool(b) => vals.push(b.to_string()),
+			Value::Number(n) => vals.push(n.to_string().into()),
+			Value::Bool(b) => vals.push(b.to_string().into()),
 			Value::Array(a) => {
 				for v in a.0 {
 					Self::extract(v, vals);
@@ -75,7 +76,7 @@ impl TryFrom<Highlighter> for Value {
 		if hl.fields.is_empty() {
 			return Ok(Self::None);
 		}
-		let mut vals = vec![];
+		let mut vals: Vec<Strand> = vec![];
 		for (_, f) in hl.fields {
 			Highlighter::extract(f, &mut vals);
 		}
@@ -162,22 +163,27 @@ impl Offseter {
 
 impl From<Offseter> for Value {
 	fn from(or: Offseter) -> Self {
+		// If there are no offsets, return None
 		if or.offsets.is_empty() {
 			return Self::None;
 		}
-		let mut res = BTreeMap::default();
+		// Create a new highlights object
+		let mut highlights = Object::default();
+		// Loop through the offsets and convert to highlights
 		for (idx, offsets) in or.offsets {
-			let mut r = Vec::with_capacity(offsets.len());
+			// For each highlight, output the start and end positions
+			let mut spans = Vec::with_capacity(offsets.len());
+			// Loop through the offsets and create a new range span
 			for (s, e) in offsets {
-				let o = BTreeMap::from([("s", Value::from(s)), ("e", Value::from(e))]);
-				r.push(Value::Object(Object::from(o)));
+				let mut span = Object::default();
+				span.insert("s", Value::from(s));
+				span.insert("e", Value::from(e));
+				spans.push(Value::from(span));
 			}
-			res.insert(idx.to_string(), Value::Array(Array::from(r)));
+			// Add the highlight spans to the set of highlights
+			highlights.insert(idx.to_string(), Value::Array(Array::from(spans)));
 		}
-		if res.is_empty() {
-			Value::None
-		} else {
-			Value::from(Object::from(res))
-		}
+		// Return the highlights object
+		Value::Object(highlights)
 	}
 }

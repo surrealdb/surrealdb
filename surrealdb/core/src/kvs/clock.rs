@@ -11,7 +11,7 @@ impl SystemClock {
 	pub fn new() -> Self {
 		SystemClock
 	}
-	pub fn now(&self) -> Timestamp {
+	pub fn now(self) -> Timestamp {
 		// Use a timestamp oracle if available
 		let now: u128 = match SystemTime::now().duration_since(UNIX_EPOCH) {
 			Ok(duration) => duration.as_millis(),

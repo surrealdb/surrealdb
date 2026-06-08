@@ -1916,19 +1916,18 @@ fn test_error_without_cause_omitted_on_wire() {
 }
 
 #[test]
-fn test_error_from_anyhow_with_chain_preserves_order() {
-	let root = anyhow::anyhow!("root cause");
-	let middle = root.context("middle cause");
-	let top = middle.context("top cause");
+fn test_error_from_anyhow_does_not_leak_chain() {
+	// SECURITY: anyhow source-chain messages can contain raw field/computed
+	// values and other unredacted internals. `from_anyhow_with_chain` must
+	// surface only the outermost message and must NOT attach inner sources
+	// as a serialised cause that would reach clients.
+	let root = anyhow::anyhow!("raw internal value: secret=hunter2");
+	let middle = root.context("Failed to coerce computed field 'x'");
+	let top = middle.context("Operation failed");
 
 	let err = Error::from_anyhow_with_chain(top);
-	assert_eq!(err.message(), "top cause");
-
-	let cause1 = err.cause().expect("top should contain a cause");
-	assert_eq!(cause1.message(), "middle cause");
-
-	let cause2 = cause1.cause().expect("middle should contain a cause");
-	assert_eq!(cause2.message(), "root cause");
+	assert_eq!(err.message(), "Operation failed");
+	assert!(err.cause().is_none(), "anyhow source chain must not leak as cause");
 }
 
 #[test]

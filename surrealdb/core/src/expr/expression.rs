@@ -5,7 +5,6 @@ use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use surrealdb_types::{RecordId, SqlFormat, ToSql};
 
 use super::SleepStatement;
-use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -154,7 +153,7 @@ impl Expr {
 				surrealdb_types::Number::Float(f) => Expr::Literal(Literal::Float(f)),
 				surrealdb_types::Number::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
 			},
-			surrealdb_types::Value::String(s) => Expr::Literal(Literal::String(s)),
+			surrealdb_types::Value::String(s) => Expr::Literal(Literal::String(s.into())),
 			surrealdb_types::Value::Bytes(b) => {
 				Expr::Literal(Literal::Bytes(crate::val::Bytes(b.into_inner())))
 			}
@@ -176,7 +175,7 @@ impl Expr {
 			surrealdb_types::Value::Object(o) => Expr::Literal(Literal::Object(
 				o.into_iter()
 					.map(|(k, v)| ObjectEntry {
-						key: k,
+						key: k.into(),
 						value: Expr::from_public_value(v),
 					})
 					.collect(),
@@ -188,7 +187,7 @@ impl Expr {
 			}) => {
 				let key_lit = match key {
 					surrealdb_types::RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
-					surrealdb_types::RecordIdKey::String(s) => RecordIdKeyLit::String(s),
+					surrealdb_types::RecordIdKey::String(s) => RecordIdKeyLit::String(s.into()),
 					surrealdb_types::RecordIdKey::Uuid(u) => {
 						RecordIdKeyLit::Uuid(crate::val::Uuid(u.into_inner()))
 					}
@@ -198,7 +197,7 @@ impl Expr {
 					surrealdb_types::RecordIdKey::Object(o) => RecordIdKeyLit::Object(
 						o.into_iter()
 							.map(|(k, v)| ObjectEntry {
-								key: k,
+								key: k.into(),
 								value: Expr::from_public_value(v),
 							})
 							.collect(),
@@ -329,7 +328,7 @@ impl Expr {
 	pub(crate) fn to_idiom(&self) -> Idiom {
 		match self {
 			Expr::Idiom(i) => i.simplify(),
-			Expr::Param(i) => Idiom::field(i.as_str().to_owned()),
+			Expr::Param(i) => Idiom::field(i.clone().into_strand()),
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
 				Literal::String(s) => Idiom::field(s.clone()),
@@ -341,10 +340,6 @@ impl Expr {
 	}
 
 	/// Process this type returning a computed simple Value
-	#[cfg_attr(
-		feature = "trace-doc-ops",
-		instrument(level = "trace", name = "Expr::compute", skip_all)
-	)]
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,
@@ -376,7 +371,7 @@ impl Expr {
 					.1
 					.map(|x| {
 						x.saturating_mul(std::mem::size_of::<Value>())
-							> *GENERATION_ALLOCATION_LIMIT
+							> ctx.config.generation_allocation_limit
 					})
 					.unwrap_or(true)
 				{
@@ -449,13 +444,11 @@ impl Expr {
 			Expr::Foreach(foreach_statement) => {
 				foreach_statement.compute(stk, ctx, &opt, doc).await
 			}
-			Expr::Let(_) => {
-				//TODO: This error needs to be improved or it needs to be rejected in the
-				// parser.
-				Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
-					"Set statement outside of block",
-				))))
-			}
+			Expr::Let(_) => Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+				"LET statements can only appear at the top level of a query or inside a block \
+				 expression"
+					.to_string(),
+			)))),
 			Expr::Sleep(sleep_statement) => {
 				sleep_statement.compute(ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
@@ -735,7 +728,7 @@ impl Expr {
 	pub(crate) fn to_raw_string(&self) -> String {
 		match self {
 			Expr::Idiom(idiom) => idiom.to_raw_string(),
-			Expr::Table(ident) => ident.clone().into_string(),
+			Expr::Table(ident) => ident.as_str().to_string(),
 			_ => self.to_sql(),
 		}
 	}
@@ -830,11 +823,57 @@ impl DeserializeRevisioned for Expr {
 			crate::syn::parser::ParserSettings {
 				files_enabled: true,
 				surrealism_enabled: true,
+				// At some point we parsed this query, so it fit in some kind of defined limit.
+				// So it should be relatively safe to parse this without a limit.
+				object_recursion_limit: usize::MAX,
+				query_recursion_limit: usize::MAX,
 				..Default::default()
 			},
 			async |p, stk| p.parse_expr(stk).await,
 		)
 		.map_err(|err| revision::Error::Conversion(err.to_string()))?;
 		Ok(expr.into())
+	}
+}
+
+impl revision::SkipRevisioned for Expr {
+	fn skip_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), revision::Error> {
+		// Wire format is the SurrealQL source string. Skip its bytes without
+		// re-parsing into an `Expr`.
+		<String as revision::SkipRevisioned>::skip_revisioned(reader)
+	}
+}
+
+impl revision::WalkRevisioned for Expr {
+	type Walker<'r, R: revision::BorrowedReader + 'r> = revision::LeafWalker<'r, Expr, R>;
+
+	fn walk_revisioned<'r, R: revision::BorrowedReader>(
+		reader: &'r mut R,
+	) -> Result<Self::Walker<'r, R>, revision::Error> {
+		Ok(revision::LeafWalker::new(reader))
+	}
+}
+
+impl revision::LengthPrefixedBytes for Expr {}
+
+#[cfg(test)]
+mod length_prefixed_bytes_tests {
+	use revision::{SerializeRevisioned, WalkRevisioned};
+	use surrealdb_types::ToSql;
+
+	use crate::expr::Expr;
+	use crate::expr::literal::Literal;
+
+	#[test]
+	fn expr_with_bytes_matches_serialize() {
+		let expr = Expr::Literal(Literal::Integer(42));
+		let mut bytes = Vec::new();
+		expr.serialize_revisioned(&mut bytes).unwrap();
+		let wire_text = expr.to_sql();
+		let mut r = bytes.as_slice();
+		let walker = Expr::walk_revisioned(&mut r).unwrap();
+		let observed = walker.with_bytes(|raw| raw.to_vec()).unwrap();
+		assert_eq!(observed.as_slice(), wire_text.as_bytes());
+		assert!(r.is_empty());
 	}
 }

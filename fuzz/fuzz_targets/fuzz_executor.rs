@@ -1,6 +1,12 @@
 #![no_main]
 
+use std::time::Duration;
+
 use libfuzzer_sys::fuzz_target;
+
+/// Per-command wall-clock bound, so a pathological input that bypasses the
+/// engine's own deadline still can't stall the fuzzer.
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 
 fuzz_target!(|commands: &str| {
 	let commands: Vec<&str> = commands.split_inclusive(";").collect();
@@ -21,10 +27,7 @@ fuzz_target!(|commands: &str| {
 					return;
 				}
 			}
-			let _ignore_the_result = dbs.execute(command, &ses, None).await;
-
-			// TODO: Add some async timeout and `tokio::select!` between it and the query
-			// Alternatively, wrap future in `tokio::time::Timeout`.
+			let _ = tokio::time::timeout(COMMAND_TIMEOUT, dbs.execute(command, &ses, None)).await;
 		}
 	})
 });

@@ -35,7 +35,7 @@ impl From<crate::expr::statements::show::ShowSince> for ShowSince {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ShowStatement {
-	pub table: Option<String>,
+	pub table: Option<TableName>,
 	pub since: ShowSince,
 	pub limit: Option<u32>,
 }
@@ -44,7 +44,7 @@ impl ToSql for ShowStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		write_sql!(f, fmt, "SHOW CHANGES FOR");
 		match self.table {
-			Some(ref v) => write_sql!(f, fmt, " TABLE {}", EscapeKwFreeIdent(v)),
+			Some(ref v) => write_sql!(f, fmt, " TABLE {}", EscapeKwFreeIdent(v.as_str())),
 			None => write_sql!(f, fmt, " DATABASE"),
 		}
 		match self.since {
@@ -60,7 +60,7 @@ impl ToSql for ShowStatement {
 impl From<ShowStatement> for crate::expr::statements::ShowStatement {
 	fn from(v: ShowStatement) -> Self {
 		crate::expr::statements::ShowStatement {
-			table: v.table.map(TableName::new),
+			table: v.table,
 			since: v.since.into(),
 			limit: v.limit,
 		}
@@ -70,7 +70,7 @@ impl From<ShowStatement> for crate::expr::statements::ShowStatement {
 impl From<crate::expr::statements::ShowStatement> for ShowStatement {
 	fn from(v: crate::expr::statements::ShowStatement) -> Self {
 		ShowStatement {
-			table: v.table.map(TableName::into_string),
+			table: v.table,
 			since: v.since.into(),
 			limit: v.limit,
 		}

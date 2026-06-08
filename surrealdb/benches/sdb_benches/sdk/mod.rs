@@ -70,10 +70,12 @@ pub(super) fn benchmark_group(c: &mut Criterion, target: String) {
 	group.throughput(Throughput::Elements(1));
 
 	group.bench_function("reads", |b| {
-		routines::bench_routine(b, &DB, routines::Read::new(super::rt()), num_ops)
+		let read = routines::Read::new(super::rt());
+		routines::bench_routine(b, &DB, &read, num_ops)
 	});
 	group.bench_function("creates", |b| {
-		routines::bench_routine(b, &DB, routines::Create::new(super::rt()), num_ops)
+		let create = routines::Create::new(super::rt());
+		routines::bench_routine(b, &DB, &create, num_ops)
 	});
 	group.finish();
 }

@@ -46,19 +46,19 @@ impl From<&Format> for ContentType {
 
 pub trait WsFormat {
 	/// Process a WebSocket RPC request
-	fn req_ws(&self, msg: Message) -> Result<Request, TypesError>;
+	fn req_ws(&self, msg: Message, recursion_limit: usize) -> Result<Request, TypesError>;
 	/// Process a WebSocket RPC response
 	fn res_ws(&self, res: DbResponse) -> Result<(usize, Message), TypesError>;
 }
 
 impl WsFormat for Format {
 	/// Process a WebSocket RPC request
-	fn req_ws(&self, msg: Message) -> Result<Request, TypesError> {
+	fn req_ws(&self, msg: Message, recursion_limit: usize) -> Result<Request, TypesError> {
 		let val = msg.into_data();
 		match self {
 			Format::Json => {
-				let val =
-					surrealdb_core::rpc::format::json::decode(&val).map_err(|_| parse_error())?;
+				let val = surrealdb_core::rpc::format::json::decode(&val, recursion_limit)
+					.map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
@@ -66,8 +66,8 @@ impl WsFormat for Format {
 				}
 			}
 			Format::Cbor => {
-				let val =
-					surrealdb_core::rpc::format::cbor::decode(&val).map_err(|_| parse_error())?;
+				let val = surrealdb_core::rpc::format::cbor::decode(&val, recursion_limit)
+					.map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
@@ -75,6 +75,7 @@ impl WsFormat for Format {
 				}
 			}
 			Format::Flatbuffers => {
+				//FIXME: Flatbuffers should probably also implement a recursion_limit.
 				let val = surrealdb_core::rpc::format::flatbuffers::decode(&val)
 					.map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
@@ -113,18 +114,18 @@ impl WsFormat for Format {
 
 pub trait HttpFormat {
 	/// Process a HTTP RPC request
-	fn req_http(&self, body: Bytes) -> Result<Request, TypesError>;
+	fn req_http(&self, body: Bytes, recursion_limit: usize) -> Result<Request, TypesError>;
 	/// Process a HTTP RPC response
 	fn res_http(&self, res: DbResponse) -> Result<AxumResponse, TypesError>;
 }
 
 impl HttpFormat for Format {
 	/// Process a HTTP RPC request
-	fn req_http(&self, body: Bytes) -> Result<Request, TypesError> {
+	fn req_http(&self, body: Bytes, recursion_limit: usize) -> Result<Request, TypesError> {
 		match self {
 			Format::Json => {
-				let val =
-					surrealdb_core::rpc::format::json::decode(&body).map_err(|_| parse_error())?;
+				let val = surrealdb_core::rpc::format::json::decode(&body, recursion_limit)
+					.map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {
@@ -132,8 +133,8 @@ impl HttpFormat for Format {
 				}
 			}
 			Format::Cbor => {
-				let val =
-					surrealdb_core::rpc::format::cbor::decode(&body).map_err(|_| parse_error())?;
+				let val = surrealdb_core::rpc::format::cbor::decode(&body, recursion_limit)
+					.map_err(|_| parse_error())?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
 				} else {

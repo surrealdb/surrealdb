@@ -3,12 +3,11 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::helpers::{args_access_mode, args_required_context, evaluate_args};
-use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+use crate::exec::{AccessMode, BoxFut};
 use crate::expr::FlowResult;
 use crate::val::Value;
 
@@ -30,12 +29,13 @@ pub struct IndexFunctionExec {
 	/// The required context level for this function.
 	pub(crate) func_required_context: crate::exec::ContextLevel,
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for IndexFunctionExec {
 	fn name(&self) -> &'static str {
 		"IndexFunction"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
@@ -47,21 +47,23 @@ impl PhysicalExpr for IndexFunctionExec {
 		args_access_mode(&self.arguments)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		// Look up the index function in the registry
-		let registry = ctx.exec_ctx.function_registry();
-		let func = registry.get_index_function(&self.name).ok_or_else(|| {
-			anyhow::anyhow!(
-				"Unknown index function '{}' - not found in function registry",
-				self.name
-			)
-		})?;
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			// Look up the index function in the registry
+			let registry = ctx.exec_ctx.function_registry();
+			let func = registry.get_index_function(&self.name).ok_or_else(|| {
+				anyhow::anyhow!(
+					"Unknown index function '{}' - not found in function registry",
+					self.name
+				)
+			})?;
 
-		// Evaluate all arguments (any plan-time ref args were already extracted)
-		let args = evaluate_args(&self.arguments, ctx.clone()).await?;
+			// Evaluate all arguments (any plan-time ref args were already extracted)
+			let args = evaluate_args(&self.arguments, ctx.clone()).await?;
 
-		// Invoke the index function with the resolved index context
-		Ok(func.invoke_async(&ctx, &self.index_ctx, args).await?)
+			// Invoke the index function with the resolved index context
+			Ok(func.invoke_async(&ctx, &self.index_ctx, args).await?)
+		})
 	}
 }
 

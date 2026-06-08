@@ -10,7 +10,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 #[cfg(not(target_family = "wasm"))]
 use rayon::prelude::ParallelSliceMut;
@@ -55,9 +54,6 @@ impl Sort {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Sort {
 	fn name(&self) -> &'static str {
 		"Sort"
@@ -138,6 +134,7 @@ impl ExecOperator for Sort {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.root().ctx.config.operator_buffer_size,
 		);
 		let order_by = self.order_by.clone();
 		let ctx = ctx.clone();
@@ -268,9 +265,6 @@ impl SortByKey {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for SortByKey {
 	fn name(&self) -> &'static str {
 		"SortByKey"
@@ -335,6 +329,7 @@ impl ExecOperator for SortByKey {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.root().ctx.config.operator_buffer_size,
 		);
 		let sort_keys = self.sort_keys.clone();
 		let cancellation = ctx.cancellation().clone();

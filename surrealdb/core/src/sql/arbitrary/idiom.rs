@@ -68,56 +68,6 @@ pub fn plain_idiom<'a>(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result
 	Ok(Idiom(res))
 }
 
-pub fn local_idiom<'a>(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Idiom> {
-	let mut res = vec![Part::Field(u.arbitrary()?)];
-
-	for _ in 0..u.arbitrary_len::<Part>()? {
-		match u.int_in_range(0u8..=2)? {
-			0 => res.push(Part::Field(u.arbitrary()?)),
-			1 => res.push(Part::All),
-			2 => {
-				let number = match u.int_in_range(0u8..=2)? {
-					0 => {
-						let n = u.arbitrary::<i64>()?;
-						let n = if n < 0 {
-							n.saturating_neg()
-						} else {
-							n
-						};
-						Literal::Integer(n)
-					}
-					1 => {
-						let n = u.arbitrary::<f64>()?;
-
-						let n = if !n.is_finite() {
-							0.0
-						} else if n.is_sign_negative() {
-							-n
-						} else {
-							n
-						};
-						Literal::Float(n)
-					}
-					2 => {
-						let mut n = u.arbitrary::<Decimal>()?;
-						n.set_sign_positive(true);
-						Literal::Decimal(n)
-					}
-					_ => unreachable!(),
-				};
-
-				res.push(Part::Value(Expr::Literal(number)));
-			}
-			_ => unreachable!(),
-		}
-	}
-
-	if u.arbitrary()? {
-		res.push(Part::Flatten);
-	};
-	Ok(Idiom(res))
-}
-
 pub fn basic_idiom<'a>(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Idiom> {
 	let mut res = vec![Part::Field(u.arbitrary()?)];
 

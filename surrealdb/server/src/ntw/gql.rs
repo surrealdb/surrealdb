@@ -64,9 +64,9 @@ async fn ws_handler(
 	};
 
 	let mut data = Data::default();
-	data.insert(datastore.clone());
+	data.insert(Arc::clone(datastore));
 	data.insert(Arc::new(session));
-	data.insert(rpc_state.notification_router.clone());
+	data.insert(Arc::clone(&rpc_state.notification_router));
 
 	let protocol = select_ws_protocol(&headers);
 

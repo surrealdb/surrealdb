@@ -83,7 +83,6 @@ impl Actor {
 			return self.clone();
 		}
 
-		// TODO check sublevel_of
 		let level = if limit.level.sublevel_of(self.res.level()) {
 			limit.level.clone()
 		} else {

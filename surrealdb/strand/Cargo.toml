@@ -1,0 +1,33 @@
+[package]
+name = "surrealdb-strand"
+publish = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-strand/"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+revision.workspace = true
+serde.workspace = true
+storekey.workspace = true
+arbitrary = { workspace = true, optional = true }
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["html_reports"] }
+
+[[bench]]
+name = "strand"
+harness = false
+
+[features]
+arbitrary = ["dep:arbitrary"]
+
+[lints]
+workspace = true

@@ -61,7 +61,7 @@ pub mod cbor {
 
 	pub fn decode((arg,): (Bytes,)) -> Result<Value> {
 		let public_val =
-			cbor::decode(arg.as_ref()).map_err(|_| Error::InvalidFunctionArguments {
+			cbor::decode(arg.as_ref(), 100).map_err(|_| Error::InvalidFunctionArguments {
 				name: "encoding::cbor::decode".to_owned(),
 				message: "invalid cbor".to_owned(),
 			})?;

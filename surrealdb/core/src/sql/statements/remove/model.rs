@@ -1,3 +1,4 @@
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeIdent;
@@ -5,8 +6,8 @@ use crate::fmt::EscapeIdent;
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveModelStatement {
-	pub name: String,
-	pub version: String,
+	pub name: Strand,
+	pub version: Strand,
 	pub if_exists: bool,
 }
 
@@ -16,7 +17,13 @@ impl ToSql for RemoveModelStatement {
 		if self.if_exists {
 			write_sql!(f, sql_fmt, " IF EXISTS");
 		}
-		write_sql!(f, sql_fmt, " ml::{}<{}>", EscapeIdent(&self.name), self.version);
+		write_sql!(
+			f,
+			sql_fmt,
+			" ml::{}<{}>",
+			EscapeIdent(self.name.as_str()),
+			self.version.as_str()
+		);
 	}
 }
 

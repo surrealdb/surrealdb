@@ -1,3 +1,5 @@
+use surrealdb_strand::Strand;
+
 use super::Parser;
 use crate::{sql, syn};
 
@@ -36,7 +38,7 @@ fn ident_is_field() {
 	assert_eq!(
 		exprs,
 		sql::TopLevelExpr::Expr(sql::Expr::Idiom(sql::Idiom(vec![sql::Part::Field(
-			"foo".to_string()
+			Strand::new_static("foo")
 		)])))
 	);
 }

@@ -93,14 +93,24 @@ library! {
 		remove_access: Vec<RemoveAccess>,
 		remove_analyzer: Vec<RemoveAnalyzer>,
 		remove_api: Vec<RemoveApi>,
+		remove_config: Vec<RemoveConfig>,
 
 		alter_system: Vec<AlterSystem>,
 		alter_ns_stmt: Vec<AlterNamespace>,
 		alter_db_stmt: Vec<AlterDatabase>,
 		alter_table_stmt: Vec<AlterTable>,
+		alter_event_stmt: Vec<AlterEvent>,
+		alter_param_stmt: Vec<AlterParam>,
 		alter_field_stmt: Vec<AlterField>,
 		alter_index_stmt: Vec<AlterIndex>,
 		alter_sequence_stmt: Vec<AlterSequence>,
+		alter_bucket_stmt: Vec<AlterBucket>,
+		alter_analyzer_stmt: Vec<AlterAnalyzer>,
+		alter_function_stmt: Vec<AlterFunction>,
+		alter_user_stmt: Vec<AlterUser>,
+		alter_access_stmt: Vec<AlterAccess>,
+		alter_api_stmt: Vec<AlterApi>,
+		alter_config_stmt: Vec<AlterConfig>,
 
 		explain_stmt: Vec<Explain>,
 
@@ -947,10 +957,13 @@ ast_type! {
 #[derive(Debug)]
 pub enum VectorType {
 	F64,
+	F16,
 	F32,
 	I64,
 	I32,
 	I16,
+	I8,
+	U8,
 }
 impl_vis_debug!(VectorType);
 
@@ -970,11 +983,32 @@ ast_type! {
 }
 
 ast_type! {
+	/// Parsed `DISKANN` index options from a `DEFINE INDEX` statement.
+	pub struct DiskAnnIndex{
+		/// Required vector dimension.
+		pub dimension: NodeId<Integer>,
+		/// Optional distance metric; defaults are applied by the SQL/catalog conversion layer.
+		pub distance: Option<Distance>,
+		/// Optional vector type; defaults are applied by the SQL/catalog conversion layer.
+		pub ty: Option<VectorType>,
+		/// Optional target graph degree.
+		pub degree: Option<NodeId<Integer>>,
+		/// Optional construction search list size.
+		pub l_build: Option<NodeId<Integer>>,
+		/// Optional DiskANN pruning alpha.
+		pub alpha: Option<NodeId<Spanned<f64>>>,
+		/// Whether the index uses hashed vector-document mapping keys.
+		pub use_hashed_vector: bool,
+	}
+}
+
+ast_type! {
 	pub enum Index{
 		Unique(Span),
 		Count(CountIndex),
 		FullText(FullTextIndex),
-		Hnsw(HnswIndex)
+		Hnsw(HnswIndex),
+		DiskAnn(DiskAnnIndex)
 	}
 }
 
@@ -1337,7 +1371,23 @@ ast_type! {
 	}
 }
 
-#[derive(Debug)]
+impl_vis_type! {
+	#[derive(Debug)]
+	pub enum RemoveConfigKind{
+		Graphql,
+		Api,
+		Default,
+	}
+}
+
+ast_type! {
+	pub struct RemoveConfig{
+		pub if_exists: bool,
+		pub kind: RemoveConfigKind,
+	}
+}
+
+#[derive(Debug, Clone, Copy)]
 pub enum AlterKind<T> {
 	Drop(Span),
 	Set(T),
@@ -1380,6 +1430,28 @@ ast_type! {
 }
 
 ast_type! {
+	pub struct AlterEvent{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub table: NodeId<Expr>,
+		pub condition: Option<AlterKind<NodeId<Expr>>>,
+		pub then: Option<AlterKind<NodeListId<Expr>>>,
+		pub comment: Option<AlterKind<NodeId<Expr>>>,
+		pub async_: Option<AlterKind<DefineEventAsync>>,
+	}
+}
+
+ast_type! {
+	pub struct AlterParam{
+		pub if_exists: bool,
+		pub param: NodeId<Param>,
+		pub value: Option<NodeId<Expr>>,
+		pub comment: Option<AlterKind<NodeId<Expr>>>,
+		pub permissions: Option<Permission>,
+	}
+}
+
+ast_type! {
 	pub struct AlterField{
 		pub if_exists: bool,
 		pub name: NodeId<Expr>,
@@ -1399,6 +1471,28 @@ ast_type! {
 }
 
 ast_type! {
+	pub struct AlterBucket{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub backend: Option<AlterKind<NodeId<StringLit>>>,
+		pub readonly: Option<AlterKind<()>>,
+		pub permissions: Option<Permission>,
+		pub comment: Option<AlterKind<NodeId<Expr>>>,
+	}
+}
+
+ast_type! {
+	pub struct AlterAnalyzer{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub function: Option<AlterKind<NodeId<Path>>>,
+		pub tokenizer: Option<AlterKind<NodeListId<Ident>>>,
+		pub filter: Option<AlterKind<NodeListId<Filter>>>,
+		pub comment: Option<AlterKind<NodeId<Expr>>>,
+	}
+}
+
+ast_type! {
 	pub struct AlterIndex{
 		pub if_exists: bool,
 		pub name: NodeId<Expr>,
@@ -1413,6 +1507,73 @@ ast_type! {
 		pub if_exists: bool,
 		pub name: NodeId<Expr>,
 		pub timeout: Option<AlterKind<NodeId<Expr>>>,
+	}
+}
+
+ast_type! {
+	pub struct AlterFunction{
+		pub if_exists: bool,
+		pub name: NodeId<Path>,
+		pub parameters: Option<Option<NodeListId<Parameter>>>,
+		pub return_ty: Option<NodeId<Type>>,
+		pub body: Option<NodeId<Block>>,
+		pub comment: Option<AlterKind<NodeId<Expr>>>,
+		pub permission: Option<Permission>,
+	}
+}
+
+ast_type! {
+	pub struct AlterUser{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub base: Base,
+		pub secret: Option<UserSecret>,
+		pub roles: Option<NodeListId<Ident>>,
+		pub session_duration: Option<AlterKind<Spanned<Duration>>>,
+		pub token_duration: Option<AlterKind<Spanned<Duration>>>,
+		pub comment: Option<AlterKind<NodeId<Expr>>>,
+	}
+}
+
+ast_type! {
+	pub struct AlterAccess{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub base: Base,
+		pub authenticate: Option<AlterKind<NodeId<Expr>>>,
+		pub grant_duration: Option<AlterKind<NodeId<Spanned<Duration>>>>,
+		pub token_duration: Option<AlterKind<NodeId<Spanned<Duration>>>>,
+		pub session_duration: Option<AlterKind<NodeId<Spanned<Duration>>>>,
+		pub comment: Option<AlterKind<NodeId<Expr>>>,
+	}
+}
+
+impl_vis_type! {
+	#[derive(Debug)]
+	pub struct AlterMethodApiActions {
+		pub get: Option<AlterKind<NodeId<ApiAction>>>,
+		pub delete: Option<AlterKind<NodeId<ApiAction>>>,
+		pub patch: Option<AlterKind<NodeId<ApiAction>>>,
+		pub post: Option<AlterKind<NodeId<ApiAction>>>,
+		pub put: Option<AlterKind<NodeId<ApiAction>>>,
+		pub trace: Option<AlterKind<NodeId<ApiAction>>>,
+	}
+}
+
+ast_type! {
+	pub struct AlterApi{
+		pub if_exists: bool,
+		pub name: NodeId<Expr>,
+		pub fallback: Option<AlterKind<NodeId<Expr>>>,
+		pub methods: AlterMethodApiActions,
+		pub comment: Option<AlterKind<NodeId<Expr>>>,
+	}
+}
+
+ast_type! {
+	pub struct AlterConfig{
+		pub if_exists: bool,
+		pub kind: DefineConfigKind,
 	}
 }
 
@@ -1531,14 +1692,24 @@ ast_type! {
 		RemoveSequence(NodeId<RemoveSequence>),
 		RemoveUser(NodeId<RemoveUser>),
 		RemoveAccess(NodeId<RemoveAccess>),
+		RemoveConfig(NodeId<RemoveConfig>),
 
 		AlterSystem(NodeId<AlterSystem>),
 		AlterNamespace(NodeId<AlterNamespace>),
 		AlterDatabase(NodeId<AlterDatabase>),
 		AlterTable(NodeId<AlterTable>),
+		AlterEvent(NodeId<AlterEvent>),
+		AlterParam(NodeId<AlterParam>),
 		AlterField(NodeId<AlterField>),
 		AlterIndex(NodeId<AlterIndex>),
 		AlterSequence(NodeId<AlterSequence>),
+		AlterBucket(NodeId<AlterBucket>),
+		AlterAnalyzer(NodeId<AlterAnalyzer>),
+		AlterFunction(NodeId<AlterFunction>),
+		AlterUser(NodeId<AlterUser>),
+		AlterAccess(NodeId<AlterAccess>),
+		AlterApi(NodeId<AlterApi>),
+		AlterConfig(NodeId<AlterConfig>),
 
 		Explain(NodeId<Explain>)
 	}
@@ -1758,8 +1929,10 @@ impl_vis_type! {
 	pub enum Distance {
 		Chebyshev,
 		Cosine,
+		CosineNormalized,
 		Euclidean,
 		Hamming,
+		InnerProduct,
 		Jaccard,
 		Manhattan,
 		Minkowski(f64),

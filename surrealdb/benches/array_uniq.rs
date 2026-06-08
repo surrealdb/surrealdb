@@ -8,7 +8,7 @@ use surrealdb_types::{Array, Number, Value};
 
 // Current implementation as of https://github.com/surrealdb/surrealdb/pull/6047
 // surrealdb/core/src/expr/array.rs#L439
-#[allow(clippy::mutable_key_type)]
+#[allow(clippy::mutable_key_type, clippy::needless_pass_by_value)]
 fn array_uniq(array: Array) -> Array {
 	let mut set = HashSet::with_capacity(array.len());
 	let mut to_return = Array::with_capacity(array.len());

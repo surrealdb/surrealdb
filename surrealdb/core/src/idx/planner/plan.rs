@@ -96,7 +96,7 @@ impl PlanBuilder {
 			// operations
 			let mut compound_index = None;
 			for (ixr, vals) in p.compound_indexes {
-				if let Some((cols, io)) = b.check_compound_index_all_and(&ixr, vals) {
+				if let Some((cols, io)) = b.check_compound_index_all_and(&ixr, &vals) {
 					// Prefer indexes that cover more columns (higher selectivity)
 					if let Some((c, _)) = &compound_index
 						&& cols <= *c
@@ -205,7 +205,7 @@ impl PlanBuilder {
 	fn check_compound_index_all_and(
 		&self,
 		index_reference: &IndexReference,
-		columns: Vec<Vec<IndexOperator>>,
+		columns: &[Vec<IndexOperator>],
 	) -> Option<(IdiomCol, IndexOption)> {
 		// Check the index can be used
 		if !self.with_indexes.allowed_index(index_reference.index_id) {
@@ -215,7 +215,7 @@ impl PlanBuilder {
 		let mut continues_equals_values = 0;
 		// Collect the range parts for any column
 		let mut range_parts = vec![];
-		for vals in &columns {
+		for vals in columns {
 			// If the column is empty, we can stop here.
 			if vals.is_empty() {
 				break;
@@ -230,7 +230,7 @@ impl PlanBuilder {
 					}
 					IndexOperator::RangePart(bo, val) => {
 						if !val.is_nullish() {
-							range_parts.push((bo.clone(), val.clone()));
+							range_parts.push((bo.clone(), Arc::clone(val)));
 						}
 					}
 					_ => {
@@ -259,7 +259,7 @@ impl PlanBuilder {
 			return None;
 		}
 
-		let equal_combinations = Self::cartesian_equals_product(&columns, continues_equals_values);
+		let equal_combinations = Self::cartesian_equals_product(columns, continues_equals_values);
 		if equal_combinations.len() == 1 {
 			let equals: Vec<Value> =
 				equal_combinations[0].iter().map(|v| v.as_ref().clone()).collect();
@@ -312,7 +312,7 @@ impl PlanBuilder {
 					v.iter().map(move |iop| {
 						let mut new_vec = prev.clone();
 						let val = if let IndexOperator::Equality(val) = iop {
-							val.clone()
+							Arc::clone(val)
 						} else {
 							Arc::new(Value::None)
 						};
@@ -336,7 +336,7 @@ impl PlanBuilder {
 				if let Some(io) = io
 					&& self.with_indexes.allowed_index(io.index_reference.index_id)
 				{
-					self.add_index_option(*group, exp.clone(), io.clone());
+					self.add_index_option(*group, Arc::clone(exp), io.clone());
 				}
 				self.eval_node(left)?;
 				self.eval_node(right)?;
@@ -549,11 +549,11 @@ impl RangeValue {
 	fn set_to(&mut self, v: &Arc<Value>) {
 		// Merge an exclusive upper bound (e.g., < v). We choose the maximum 'to' value.
 		let Some(current) = &self.value else {
-			self.value = Some(v.clone());
+			self.value = Some(Arc::clone(v));
 			return;
 		};
 		if current.lt(v) {
-			self.value = Some(v.clone());
+			self.value = Some(Arc::clone(v));
 			// A stricter (exclusive) bound dominates when we move the upper limit up.
 			self.inclusive = false;
 		}
@@ -563,16 +563,16 @@ impl RangeValue {
 		// Merge an inclusive upper bound (e.g., <= v). Prefer the highest value; if
 		// values are equal, inclusive wins over exclusive.
 		let Some(current) = &self.value else {
-			self.value = Some(v.clone());
+			self.value = Some(Arc::clone(v));
 			self.inclusive = true;
 			return;
 		};
 		if self.inclusive {
 			if current.lt(v) {
-				self.value = Some(v.clone());
+				self.value = Some(Arc::clone(v));
 			}
 		} else if current.le(v) {
-			self.value = Some(v.clone());
+			self.value = Some(Arc::clone(v));
 			self.inclusive = true;
 		}
 	}
@@ -581,11 +581,11 @@ impl RangeValue {
 		// Merge an exclusive lower bound (e.g., > v). We choose the minimum 'from' value
 		// that is still >= all constraints; moving the bound down uses exclusive.
 		let Some(current) = &self.value else {
-			self.value = Some(v.clone());
+			self.value = Some(Arc::clone(v));
 			return;
 		};
 		if current.as_ref().gt(v.as_ref()) {
-			self.value = Some(v.clone());
+			self.value = Some(Arc::clone(v));
 			self.inclusive = false;
 		}
 	}
@@ -594,16 +594,16 @@ impl RangeValue {
 		// Merge an inclusive lower bound (e.g., >= v). If multiple constraints target
 		// the same value, inclusive should override exclusive.
 		let Some(current) = &self.value else {
-			self.value = Some(v.clone());
+			self.value = Some(Arc::clone(v));
 			self.inclusive = true;
 			return;
 		};
 		if self.inclusive {
 			if current.as_ref().gt(v.as_ref()) {
-				self.value = Some(v.clone());
+				self.value = Some(Arc::clone(v));
 			}
 		} else if current.as_ref().ge(v.as_ref()) {
-			self.value = Some(v.clone());
+			self.value = Some(Arc::clone(v));
 			self.inclusive = true;
 		}
 	}
@@ -647,7 +647,7 @@ impl Group {
 	fn take_intersect_ranges(self, r: &mut Vec<(IndexReference, UnionRangeQueryBuilder)>) {
 		for (index_reference, ri) in self.ranges {
 			for (exp, io) in ri {
-				if let Some(rb) = UnionRangeQueryBuilder::new(exp, io) {
+				if let Some(rb) = UnionRangeQueryBuilder::new(exp, &io) {
 					r.push((index_reference.clone(), rb));
 				}
 			}
@@ -669,12 +669,12 @@ impl UnionRangeQueryBuilder {
 		}
 		let mut b = Self::default();
 		for (exp, io) in exp_ios {
-			b.add(exp, io);
+			b.add(exp, &io);
 		}
 		Some(b)
 	}
 
-	fn new(exp: Arc<Expr>, io: IndexOption) -> Option<Self> {
+	fn new(exp: Arc<Expr>, io: &IndexOption) -> Option<Self> {
 		let mut b = Self::default();
 		if b.add(exp, io) {
 			Some(b)
@@ -683,7 +683,7 @@ impl UnionRangeQueryBuilder {
 		}
 	}
 
-	fn add(&mut self, exp: Arc<Expr>, io: IndexOption) -> bool {
+	fn add(&mut self, exp: Arc<Expr>, io: &IndexOption) -> bool {
 		if let IndexOperator::RangePart(op, val) = io.op() {
 			match op {
 				BinaryOperator::LessThan => self.to.set_to(val),

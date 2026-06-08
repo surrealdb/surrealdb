@@ -5,6 +5,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::sql::order::Ordering;
 use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits, Start};
+use crate::val::TableName;
 
 /// A lookup is a unified way of looking up graph edges and record references.
 /// Since they both work very similarly, they also both support the same operations
@@ -172,11 +173,11 @@ impl From<crate::expr::lookup::LookupKind> for LookupKind {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum LookupSubject {
 	Table {
-		table: String,
+		table: TableName,
 		referencing_field: Option<String>,
 	},
 	Range {
-		table: String,
+		table: TableName,
 		range: RecordIdKeyRangeLit,
 		referencing_field: Option<String>,
 	},
@@ -204,7 +205,7 @@ impl ToSql for LookupSubject {
 				table,
 				referencing_field,
 			} => {
-				write_sql!(f, fmt, "{}", EscapeKwFreeIdent(table));
+				write_sql!(f, fmt, "{}", EscapeKwFreeIdent(table.as_str()));
 				if let Some(referencing_field) = referencing_field {
 					write_sql!(f, fmt, " FIELD {}", EscapeKwFreeIdent(referencing_field));
 				}
@@ -214,7 +215,7 @@ impl ToSql for LookupSubject {
 				range,
 				referencing_field,
 			} => {
-				write_sql!(f, fmt, "{}:{range}", EscapeKwFreeIdent(table));
+				write_sql!(f, fmt, "{}:{range}", EscapeKwFreeIdent(table.as_str()));
 				if let Some(referencing_field) = referencing_field {
 					write_sql!(f, fmt, " FIELD {}", EscapeKwFreeIdent(referencing_field));
 				}
@@ -230,7 +231,7 @@ impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
 				table,
 				referencing_field,
 			} => Self::Table {
-				table: table.into(),
+				table,
 				referencing_field,
 			},
 			LookupSubject::Range {
@@ -238,7 +239,7 @@ impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
 				range,
 				referencing_field,
 			} => Self::Range {
-				table: table.into(),
+				table,
 				range: range.into(),
 				referencing_field,
 			},
@@ -253,7 +254,7 @@ impl From<crate::expr::lookup::LookupSubject> for LookupSubject {
 				table,
 				referencing_field,
 			} => Self::Table {
-				table: table.into_string(),
+				table,
 				referencing_field,
 			},
 			crate::expr::lookup::LookupSubject::Range {
@@ -261,7 +262,7 @@ impl From<crate::expr::lookup::LookupSubject> for LookupSubject {
 				range,
 				referencing_field,
 			} => Self::Range {
-				table: table.into_string(),
+				table,
 				range: range.into(),
 				referencing_field,
 			},

@@ -32,9 +32,9 @@ pub(crate) struct SurrealismExecutable {
 impl InfoStructure for SurrealismExecutable {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"type".to_string() => Value::from("surrealism"),
-			"bucket".to_string() => self.bucket.into(),
-			"key".to_string() => self.key.into(),
+			"type" => Value::from("surrealism"),
+			"bucket" => self.bucket.into(),
+			"key" => self.key.into(),
 		})
 	}
 }
@@ -52,12 +52,12 @@ pub(crate) struct SiloExecutable {
 impl InfoStructure for SiloExecutable {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"type".to_string() => Value::from("silo"),
-			"organisation".to_string() => self.organisation.into(),
-			"package".to_string() => self.package.into(),
-			"major".to_string() => self.major.into(),
-			"minor".to_string() => self.minor.into(),
-			"patch".to_string() => self.patch.into(),
+			"type" => Value::from("silo"),
+			"organisation" => self.organisation.into(),
+			"package" => self.package.into(),
+			"major" => self.major.into(),
+			"minor" => self.minor.into(),
+			"patch" => self.patch.into(),
 		})
 	}
 }

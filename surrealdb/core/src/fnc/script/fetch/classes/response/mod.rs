@@ -169,18 +169,7 @@ impl<'js> Response<'js> {
 	// Returns a promise with the response body as a Blob
 	pub async fn blob(&self, ctx: Ctx<'js>) -> Result<Blob> {
 		let headers = self.init.headers.clone();
-		let mime = {
-			let headers = headers.borrow();
-			let headers = &headers.inner;
-			let types = headers.get_all(reqwest::header::CONTENT_TYPE);
-			// TODO: This is not according to spec.
-			types
-				.iter()
-				.next()
-				.map(|x| x.to_str().unwrap_or("text/html"))
-				.unwrap_or("text/html")
-				.to_owned()
-		};
+		let mime = super::blob::content_type_from_headers(&headers.borrow().inner);
 
 		let data = self.take_buffer(&ctx).await?;
 		Ok(Blob {
@@ -364,6 +353,14 @@ mod test {
 					assert.seq(await resp.text(),"some text");
 					assert.seq(await resp_2.text(),"some text");
 
+					// The Blob's type is derived from the `Content-Type` header,
+					// normalized to lowercase as in the Blob constructor.
+					resp = new Response("some text",{ headers: { "content-type": "Text/Plain;Charset=UTF-8" }});
+					assert.seq((await resp.blob()).type,"text/plain;charset=utf-8");
+
+					// A missing `Content-Type` yields an empty type, not a default.
+					resp = new Response("some text");
+					assert.seq((await resp.blob()).type,"");
 
 				})()
 			"#).catch(&ctx).unwrap().into_future::<()>().await.catch(&ctx).unwrap();

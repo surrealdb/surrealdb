@@ -1,5 +1,6 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_strand::Strand;
 
 use crate::catalog::{ApiConfigDefinition, MiddlewareDefinition, Permission};
 use crate::ctx::FrozenContext;
@@ -19,7 +20,7 @@ pub(crate) struct ApiConfig {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Middleware {
-	pub name: String,
+	pub name: Strand,
 	pub args: Vec<Expr>,
 }
 

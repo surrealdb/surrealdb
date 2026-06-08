@@ -7,6 +7,8 @@
 //!
 //! This module centralises that logic so each operator does not need its own copy.
 
+use std::sync::Arc;
+
 use futures::StreamExt;
 use reblessive::tree::TreeStack;
 
@@ -34,7 +36,7 @@ pub(crate) fn get_legacy_context(
 	let options = exec_ctx
 		.options()
 		.ok_or_else(|| Error::Thrown("Options not available for legacy compute fallback".into()))?;
-	Ok((options, exec_ctx.ctx().clone()))
+	Ok((options, Arc::clone(exec_ctx.ctx())))
 }
 
 /// Extract the `Options` and `FrozenContext` for legacy fallback, adding a loop
@@ -88,14 +90,21 @@ pub(crate) async fn evaluate_expr(
 	expr: &Expr,
 	ctx: &ExecutionContext,
 ) -> crate::expr::FlowResult<Value> {
-	match try_plan_expr!(expr, ctx.ctx(), ctx.txn()) {
+	let auth = ctx.options().map(|o| Arc::clone(&o.auth));
+	match try_plan_expr!(expr, ctx.ctx(), ctx.txn(), auth) {
 		Ok(plan) => {
 			let stream = plan.execute(ctx)?;
 			collect_single_value(stream).await
 		}
 		Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
-			if let Error::PlannerUnimplemented(msg) = &e {
-				tracing::warn!("PlannerUnimplemented fallback in evaluate_expr: {msg}");
+			match &e {
+				Error::PlannerUnimplemented(msg) => {
+					tracing::warn!("PlannerUnimplemented fallback in evaluate_expr: {msg}");
+				}
+				Error::PlannerUnsupported(msg) => {
+					tracing::debug!("PlannerUnsupported fallback in evaluate_expr: {msg}",);
+				}
+				_ => {}
 			}
 			let (opt, frozen) =
 				get_legacy_context(ctx).context("Legacy compute fallback context unavailable")?;
@@ -117,9 +126,10 @@ pub(crate) async fn evaluate_body_expr(
 	param_name: &str,
 	param_value: &Value,
 ) -> crate::expr::FlowResult<Value> {
-	let frozen_ctx = ctx.ctx().clone();
+	let frozen_ctx = Arc::clone(ctx.ctx());
+	let auth = ctx.options().map(|o| Arc::clone(&o.auth));
 
-	match try_plan_expr!(expr, &frozen_ctx, ctx.txn()) {
+	match try_plan_expr!(expr, &frozen_ctx, ctx.txn(), auth) {
 		Ok(plan) => {
 			if plan.mutates_context() {
 				*ctx = plan.output_context(ctx).await.map_err(|e| ControlFlow::Err(e.into()))?;
@@ -130,8 +140,14 @@ pub(crate) async fn evaluate_body_expr(
 			}
 		}
 		Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
-			if let Error::PlannerUnimplemented(msg) = &e {
-				tracing::warn!("PlannerUnimplemented fallback in evaluate_body_expr: {msg}");
+			match &e {
+				Error::PlannerUnimplemented(msg) => {
+					tracing::warn!("PlannerUnimplemented fallback in evaluate_body_expr: {msg}");
+				}
+				Error::PlannerUnsupported(msg) => {
+					tracing::debug!("PlannerUnsupported fallback in evaluate_body_expr: {msg}",);
+				}
+				_ => {}
 			}
 			let (opt, frozen) = get_legacy_context_with_param(ctx, param_name, param_value)
 				.context("Legacy compute fallback context unavailable")?;
@@ -139,7 +155,7 @@ pub(crate) async fn evaluate_body_expr(
 			if let Expr::Let(set_stmt) = expr {
 				if set_stmt.is_protected_set() {
 					return Err(Error::InvalidParam {
-						name: set_stmt.name.clone(),
+						name: set_stmt.name.to_string(),
 					}
 					.into());
 				}
@@ -148,7 +164,7 @@ pub(crate) async fn evaluate_body_expr(
 
 				let value = if let Some(kind) = &set_stmt.kind {
 					value.coerce_to_kind(kind).map_err(|e| Error::SetCoerce {
-						name: set_stmt.name.clone(),
+						name: set_stmt.name.to_string(),
 						error: Box::new(e),
 					})?
 				} else {

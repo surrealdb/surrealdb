@@ -1,4 +1,5 @@
 use reblessive::tree::Stk;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
@@ -10,7 +11,7 @@ use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct SetStatement {
-	pub name: String,
+	pub name: Strand,
 	pub what: Expr,
 	pub kind: Option<Kind>,
 }
@@ -43,7 +44,7 @@ impl SetStatement {
 
 		if self.is_protected_set() {
 			return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidParam {
-				name: self.name.clone(),
+				name: self.name.to_string(),
 			})));
 		}
 
@@ -61,7 +62,7 @@ impl SetStatement {
 			Some(kind) => result
 				.coerce_to_kind(kind)
 				.map_err(|e| Error::SetCoerce {
-					name: self.name.clone(),
+					name: self.name.to_string(),
 					error: Box::new(e),
 				})
 				.map_err(anyhow::Error::new)?,

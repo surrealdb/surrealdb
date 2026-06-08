@@ -7,7 +7,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::ToSql;
 
@@ -43,9 +42,6 @@ impl NamespaceInfoPlan {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for NamespaceInfoPlan {
 	fn name(&self) -> &'static str {
 		"InfoNamespace"
@@ -108,13 +104,7 @@ async fn execute_namespace_info(
 	structured: bool,
 	version: Option<&dyn PhysicalExpr>,
 ) -> crate::expr::FlowResult<Value> {
-	let root = ctx.root();
-	let opt = root
-		.options
-		.as_ref()
-		.ok_or_else(|| anyhow::anyhow!("Options not available in execution context"))?;
-
-	opt.is_allowed(Action::View, ResourceKind::Any, &crate::expr::Base::Ns)?;
+	ctx.is_allowed(Action::View, ResourceKind::Any, crate::expr::Base::Ns)?;
 
 	let ns_ctx = ctx.namespace()?;
 	let ns = ns_ctx.ns.namespace_id;
@@ -137,28 +127,28 @@ async fn execute_namespace_info(
 
 	if structured {
 		let object = map! {
-			"accesses".to_string() => process(txn.all_ns_accesses(ns, version).await?),
-			"databases".to_string() => process(txn.all_db(ns, version).await?),
-			"users".to_string() => process(txn.all_ns_users(ns, version).await?),
+			"accesses" => process(&txn.all_ns_accesses(ns, version).await?),
+			"databases" => process(&txn.all_db(ns, version).await?),
+			"users" => process(&txn.all_ns_users(ns, version).await?),
 		};
-		Ok(Value::Object(Object(object)))
+		Ok(Value::Object(Object::from(object)))
 	} else {
 		let object = map! {
-			"accesses".to_string() => {
+			"accesses" => {
 				let mut out = Object::default();
 				for v in txn.all_ns_accesses(ns, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"databases".to_string() => {
+			"databases" => {
 				let mut out = Object::default();
 				for v in txn.all_db(ns, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"users".to_string() => {
+			"users" => {
 				let mut out = Object::default();
 				for v in txn.all_ns_users(ns, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
@@ -166,11 +156,11 @@ async fn execute_namespace_info(
 				out.into()
 			},
 		};
-		Ok(Value::Object(Object(object)))
+		Ok(Value::Object(Object::from(object)))
 	}
 }
 
-fn process<T>(a: Arc<[T]>) -> Value
+fn process<T>(a: &Arc<[T]>) -> Value
 where
 	T: InfoStructure + Clone,
 {

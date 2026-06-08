@@ -7,19 +7,20 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 use tracing::instrument;
 
+use super::common::resolve_version_stamp;
 use super::pipeline::{
 	ScanPipeline, build_field_state, filter_and_process_batch, kv_scan_stream, range_end_key,
 	range_start_key,
 };
 use super::resolved::ResolvedTableContext;
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical, should_check_perms,
+	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
 	validate_record_user_access,
 };
+use crate::exec::pre_decode_filter::{PreDecodeFilterStatus, pre_decode_filter_for_execute};
 use crate::exec::{
 	AccessMode, ContextLevel, EvalContext, ExecOperator, ExecutionContext, FlowResult,
 	OperatorMetrics, OutputOrdering, PhysicalExpr, ValueBatch, ValueBatchStream, monitor_stream,
@@ -56,6 +57,8 @@ pub struct RecordIdScan {
 	/// Plan-time resolved table context. When present, `execute_record_lookup`
 	/// skips runtime `get_table_def()` and `build_field_state()` entirely.
 	pub(crate) resolved: Option<ResolvedTableContext>,
+	/// Predicate pre-decode filter status (plan-time); see [`PreDecodeFilterStatus`].
+	pub(crate) pre_decode_filter_status: PreDecodeFilterStatus,
 	/// Per-operator runtime metrics for EXPLAIN ANALYZE.
 	pub(crate) metrics: Arc<OperatorMetrics>,
 }
@@ -73,6 +76,7 @@ impl RecordIdScan {
 			needed_fields,
 			predicate,
 			resolved: None,
+			pre_decode_filter_status: PreDecodeFilterStatus::NotApplicable,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
@@ -82,10 +86,13 @@ impl RecordIdScan {
 		self.resolved = Some(resolved);
 		self
 	}
-}
 
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
+	/// Set plan-time pre-decode filter status for EXPLAIN and execution.
+	pub(crate) fn with_pre_decode_filter(mut self, status: PreDecodeFilterStatus) -> Self {
+		self.pre_decode_filter_status = status;
+		self
+	}
+}
 impl ExecOperator for RecordIdScan {
 	fn name(&self) -> &'static str {
 		"RecordIdScan"
@@ -98,6 +105,9 @@ impl ExecOperator for RecordIdScan {
 		}
 		if let Some(ref pred) = self.predicate {
 			attrs.push(("predicate".to_string(), pred.to_sql()));
+		}
+		if let Some(s) = self.pre_decode_filter_status.explain_text() {
+			attrs.push(("pre_decode_filter".to_string(), s.to_string()));
 		}
 		attrs
 	}
@@ -169,6 +179,7 @@ impl ExecOperator for RecordIdScan {
 		let needed_fields = self.needed_fields.clone();
 		let predicate = self.predicate.clone();
 		let resolved = self.resolved.clone();
+		let pre_decode_filter_status = self.pre_decode_filter_status.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -186,24 +197,16 @@ impl ExecOperator for RecordIdScan {
 				}
 			};
 
-			// 2. Evaluate VERSION expression to a timestamp
-			let version: Option<u64> = match &version_expr {
-				Some(expr) => {
-					let eval_ctx = EvalContext::from_exec_ctx(&ctx);
-					let v = expr.evaluate(eval_ctx).await?;
-					Some(
-						v.cast_to::<crate::val::Datetime>()
-							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp(ctx.txn().timestamp_impl().as_ref())?,
-					)
-				}
-				None => ctx.version_stamp(),
-			};
+			// 2. Resolve VERSION timestamp; see [`resolve_version_stamp`]
+			//    for why we prefer the stamp already set by the enclosing
+			//    `VersionScope` over re-evaluating `version_expr` here.
+			let version: Option<u64> = resolve_version_stamp(&ctx, version_expr.as_ref()).await?;
 
 			// 3. Delegate to the shared lookup helper
 			let results = execute_record_lookup(
 				&rid, version, check_perms, needed_fields.as_ref(), &ctx,
 				predicate.as_ref(), None, 0, resolved.as_ref(),
+				&pre_decode_filter_status,
 			).await?;
 
 			if !results.is_empty() {
@@ -240,9 +243,12 @@ pub(crate) async fn execute_record_lookup(
 	needed_fields: Option<&std::collections::HashSet<String>>,
 	ctx: &ExecutionContext,
 	predicate: Option<&Arc<dyn PhysicalExpr>>,
+	// FIXME: We should be consistent on which integer type we use for limit.
+	// Our backend only support u32 so we should use u32 everywhere for limits.
 	limit: Option<usize>,
 	start: usize,
 	resolved: Option<&ResolvedTableContext>,
+	pre_decode_filter_status: &PreDecodeFilterStatus,
 ) -> Result<Vec<Value>, ControlFlow> {
 	let db_ctx = ctx.database().context("RecordLookup requires database context")?;
 	let txn = ctx.txn();
@@ -271,7 +277,7 @@ pub(crate) async fn execute_record_lookup(
 				Some(def) => def.permissions.select.clone(),
 				None => crate::catalog::Permission::None,
 			};
-			convert_permission_to_physical(&catalog_perm, ctx.ctx())
+			convert_permission_to_physical_runtime(&catalog_perm, ctx.ctx())
 				.await
 				.context("Failed to convert permission")?
 		} else {
@@ -317,7 +323,14 @@ pub(crate) async fn execute_record_lookup(
 			} else {
 				None
 			};
-			let prefetch = effective_storage_limit.is_none();
+			let limit_hint = limit.map(|l| (l + start).try_into().unwrap_or(u32::MAX));
+
+			let pre_decode_filter = pre_decode_filter_for_execute(
+				pre_decode_filter_status,
+				&field_state,
+				check_perms,
+				ctx.ctx().config.idiom_recursion_limit,
+			);
 
 			let mut source = kv_scan_stream(
 				Arc::clone(&txn),
@@ -327,7 +340,8 @@ pub(crate) async fn execute_record_lookup(
 				effective_storage_limit,
 				crate::idx::planner::ScanDirection::Forward,
 				pre_skip,
-				prefetch,
+				limit_hint,
+				pre_decode_filter,
 			);
 
 			let mut pipeline = ScanPipeline::new(

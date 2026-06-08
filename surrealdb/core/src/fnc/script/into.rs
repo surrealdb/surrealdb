@@ -96,7 +96,7 @@ impl<'js> IntoJs<'js> for &Value {
 			Value::Object(ref v) => {
 				let x = Object::new(ctx.clone())?;
 				for (k, v) in v.iter() {
-					x.set(k, v)?;
+					x.set(k.as_str(), v)?;
 				}
 				x.into_js(ctx)
 			}

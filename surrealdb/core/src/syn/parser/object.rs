@@ -56,7 +56,10 @@ impl Parser<'_> {
 						}
 
 						let value = stk.run(|stk| this.parse_expr_inherit(stk)).await?;
-						let res = vec![ObjectEntry{ key, value }];
+						let res = vec![ObjectEntry {
+							key: key.into(),
+							value,
+						}];
 
 						if this.eat(t!(",")){
 							this.parse_object_inner(stk, start, res).await.map(Some)
@@ -132,7 +135,7 @@ impl Parser<'_> {
 			let (key, value) = self.parse_object_entry(stk).await?;
 			// TODO: Error on duplicate key?
 			res.push(ObjectEntry {
-				key,
+				key: key.into(),
 				value,
 			});
 
@@ -238,7 +241,7 @@ impl Parser<'_> {
 				let str = self.span_str(token.span);
 				Ok(str.to_string())
 			}
-			TokenKind::Identifier => self.parse_ident(),
+			TokenKind::Identifier => self.parse_ident().map(|s| s.into_string()),
 			t!("\"") | t!("'") => Ok(self.parse_string_lit()?),
 			TokenKind::Digits => {
 				self.pop_peek();

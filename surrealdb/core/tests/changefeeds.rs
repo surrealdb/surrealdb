@@ -1,10 +1,12 @@
+#![recursion_limit = "256"]
+
+mod helpers;
+
 use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
 use surrealdb_types::{Array, Value};
-
-mod helpers;
 
 #[test_log::test(tokio::test)]
 async fn database_change_feeds() -> Result<()> {

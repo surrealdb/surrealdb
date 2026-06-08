@@ -255,6 +255,22 @@ error = false
 error = true
 ```
 
+For long string expectations (for example multi-line `EXPLAIN` output), use a TOML
+multiline basic string (`"""…"""`) so each logical line is a real newline in the
+file instead of `\n` escapes. The value is still SurrealQL parsed like any other
+`value` field; literal newlines inside quoted strings are valid SurrealQL. The
+`EXPLAIN` text helpers in the database end the string with a newline before the
+closing quote, so keep that final line break before `'` (often with the closing
+`'` alone on the last line) so the expected value matches.
+
+```toml
+[[test.results]]
+value = """
+'SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15, pre_decode_filter: yes]
+'"""
+```
+
 Above we specify that the test should return two results. The first should be a
 value as described by the value in the string. When specifying a value in TOML
 strings containing SurrealQL are used. The second result should be an error with

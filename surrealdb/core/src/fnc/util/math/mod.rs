@@ -33,6 +33,12 @@ impl ToFloat for f32 {
 	}
 }
 
+impl ToFloat for half::f16 {
+	fn to_float(&self) -> f64 {
+		self.to_f64()
+	}
+}
+
 impl ToFloat for i64 {
 	fn to_float(&self) -> f64 {
 		*self as f64
@@ -46,6 +52,18 @@ impl ToFloat for i32 {
 }
 
 impl ToFloat for i16 {
+	fn to_float(&self) -> f64 {
+		*self as f64
+	}
+}
+
+impl ToFloat for i8 {
+	fn to_float(&self) -> f64 {
+		*self as f64
+	}
+}
+
+impl ToFloat for u8 {
 	fn to_float(&self) -> f64 {
 		*self as f64
 	}

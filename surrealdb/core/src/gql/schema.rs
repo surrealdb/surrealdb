@@ -38,7 +38,7 @@ use super::error::{GqlError, resolver_error};
 use super::ext::ValidatorExt;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider, TableProvider};
 use crate::catalog::{
-	DatabaseId, GraphQLConfig, GraphQLFunctionsConfig, GraphQLIntrospectionConfig,
+	DatabaseId, FieldDefinition, GraphQLConfig, GraphQLFunctionsConfig, GraphQLIntrospectionConfig,
 	GraphQLTablesConfig, NamespaceId,
 };
 use crate::dbs::Session;
@@ -49,7 +49,7 @@ use crate::gql::functions::process_fns;
 use crate::gql::mutations::process_mutations;
 use crate::gql::relations::collect_relations;
 use crate::gql::subscriptions::process_subscriptions;
-use crate::gql::tables::process_tbs;
+use crate::gql::tables::{process_tbs, register_filter_helper_types};
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::val::{
 	Array as SurArray, Geometry as SurGeometry, Number as SurNumber, Object as SurObject,
@@ -125,12 +125,18 @@ pub async fn generate_schema(
 			match gql_config.functions {
 				GraphQLFunctionsConfig::None => None,
 				GraphQLFunctionsConfig::Auto => Some(fns),
-				GraphQLFunctionsConfig::Include(inc) => {
-					Some(fns.iter().filter(|f| inc.contains(&f.name)).cloned().collect())
-				}
-				GraphQLFunctionsConfig::Exclude(exc) => {
-					Some(fns.iter().filter(|f| !exc.contains(&f.name)).cloned().collect())
-				}
+				GraphQLFunctionsConfig::Include(inc) => Some(
+					fns.iter()
+						.filter(|f| inc.iter().any(|n| n.as_str() == f.name.as_str()))
+						.cloned()
+						.collect(),
+				),
+				GraphQLFunctionsConfig::Exclude(exc) => Some(
+					fns.iter()
+						.filter(|f| !exc.iter().any(|n| n.as_str() == f.name.as_str()))
+						.cloned()
+						.collect(),
+				),
 			}
 		}
 	};
@@ -168,9 +174,9 @@ pub async fn generate_schema(
 
 	match tbs {
 		Some(ref tbs) if !tbs.is_empty() => {
-			let mut table_fields = HashMap::new();
+			let mut table_fields: HashMap<TableName, Arc<[FieldDefinition]>> = HashMap::new();
 			query = process_tbs(
-				tbs.clone(),
+				Arc::clone(tbs),
 				query,
 				&mut types,
 				&schema_ctx,
@@ -180,7 +186,7 @@ pub async fn generate_schema(
 			.await?;
 
 			// Generate mutations for all tables
-			mutation_obj = Some(process_mutations(tbs.clone(), &mut types, &schema_ctx).await?);
+			mutation_obj = Some(process_mutations(Arc::clone(tbs), &mut types, &schema_ctx).await?);
 			subscription_obj = process_subscriptions(&tbs[..], &table_fields);
 		}
 		_ => {}
@@ -197,11 +203,15 @@ pub async fn generate_schema(
 	}
 
 	if let Some(fns) = fns {
-		query = process_fns(fns, query, &mut types, session, datastore).await?;
+		query = process_fns(fns, query, &mut types, datastore).await?;
 	}
 
 	// Register all geometry-related types (enum, object types, union, input types)
 	register_geometry_types(&mut types);
+
+	// Register shared helper types for the advanced filter operators
+	// (`nearest`, `similarity`, `matches`, `call`) — see #7312.
+	register_filter_helper_types(&mut types);
 
 	trace!("current Query object for schema: {:?}", query);
 
@@ -340,7 +350,7 @@ pub(crate) fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> 
 			),
 			num @ SurNumber::Decimal(_) => GqlValue::String(num.to_string()),
 		},
-		SurValue::String(s) => GqlValue::String(s),
+		SurValue::String(s) => GqlValue::String(s.into_string()),
 		SurValue::Duration(d) => GqlValue::String(d.to_string()),
 		SurValue::Datetime(d) => GqlValue::String(d.to_rfc3339()),
 		SurValue::Uuid(uuid) => GqlValue::String(uuid.to_string()),
@@ -383,7 +393,7 @@ pub(crate) fn sql_value_to_gql_value_with_kind(
 	{
 		for k in ks {
 			if let Kind::Literal(KindLiteral::String(lit)) = k
-				&& lit == s
+				&& lit.as_str() == s.as_str()
 			{
 				return Ok(GqlValue::Enum(Name::new(literal_enum_item_name(enum_scope, lit))));
 			}
@@ -400,7 +410,7 @@ pub(crate) fn sql_value_to_gql_value_with_kind(
 fn record_id_to_raw(t: &SurRecordId) -> String {
 	let key_str = match &t.key {
 		SurRecordIdKey::Number(n) => n.to_string(),
-		SurRecordIdKey::String(s) => s.clone(),
+		SurRecordIdKey::String(s) => s.to_string(),
 		SurRecordIdKey::Uuid(u) => u.to_string(),
 		// For complex keys (arrays, objects, ranges), fall back to SQL format
 		_ => t.key.to_sql(),
@@ -458,7 +468,7 @@ fn enum_token_to_literal(ks: &[Kind], token: &str, enum_scope: Option<&str>) -> 
 		if let Kind::Literal(KindLiteral::String(lit)) = kind {
 			let expected = literal_enum_item_name(enum_scope, lit);
 			if expected == token {
-				return Some(lit.clone());
+				return Some(lit.as_str().to_owned());
 			}
 		}
 	}
@@ -509,6 +519,16 @@ pub fn kind_to_type(
 	kind_to_type_with_enum_prefix(kind, types, is_input, None)
 }
 
+/// Maximum allowed depth of nested `array<...>` types in the generated GraphQL
+/// schema. Beyond this depth the inner type is replaced with the `JSON` scalar
+/// so that the resulting `ofType` chain stays within the 7-level limit enforced
+/// by the standard GraphQL introspection query.
+///
+/// Worst case for a single array layer is `NonNull(List(NonNull(T)))` which adds
+/// 2 `ofType` hops; depth 3 produces a 7-hop chain (`[[[T!]!]!]!`), which is the
+/// hard ceiling. Anything past depth 3 collapses to a single `JSON!` instead.
+const MAX_ARRAY_DEPTH: usize = 3;
+
 /// Map a SurrealDB [`Kind`] to a GraphQL [`TypeRef`], with optional enum naming scope.
 ///
 /// When `enum_scope` is provided, string-literal unions (`Kind::Either` with
@@ -518,6 +538,16 @@ pub fn kind_to_type_with_enum_prefix(
 	types: &mut Vec<Type>,
 	is_input: bool,
 	enum_scope: Option<&str>,
+) -> Result<TypeRef, GqlError> {
+	kind_to_type_inner(kind, types, is_input, enum_scope, 0)
+}
+
+fn kind_to_type_inner(
+	kind: Kind,
+	types: &mut Vec<Type>,
+	is_input: bool,
+	enum_scope: Option<&str>,
+	array_depth: usize,
 ) -> Result<TypeRef, GqlError> {
 	let optional = kind.can_be_none();
 	let out_ty = match kind {
@@ -606,7 +636,7 @@ pub fn kind_to_type_with_enum_prefix(
 			// to avoid creating a single-member union.
 			if ks.len() == 1 {
 				let inner = ks.into_iter().next().expect("checked len == 1");
-				let inner_ty = kind_to_type_with_enum_prefix(inner, types, is_input, enum_scope)?;
+				let inner_ty = kind_to_type_inner(inner, types, is_input, enum_scope, array_depth)?;
 				// Unwrap any NonNull wrapper — the outer optional flag will re-apply
 				// nullability as needed.
 				return Ok(match optional {
@@ -627,7 +657,7 @@ pub fn kind_to_type_with_enum_prefix(
 								"just checked that this is a Kind::Literal(Literal::String(_))"
 							);
 						};
-						out
+						out.into_string()
 					})
 					.collect();
 
@@ -651,7 +681,7 @@ pub fn kind_to_type_with_enum_prefix(
 
 			let pos_names: Result<Vec<TypeRef>, GqlError> = others
 				.into_iter()
-				.map(|k| kind_to_type_with_enum_prefix(k, types, is_input, enum_scope))
+				.map(|k| kind_to_type_inner(k, types, is_input, enum_scope, array_depth))
 				.collect();
 			let pos_names: Vec<String> = pos_names?.into_iter().map(|tr| tr.to_string()).collect();
 			let ty_name = pos_names.join("_or_");
@@ -670,16 +700,36 @@ pub fn kind_to_type_with_enum_prefix(
 		}
 		Kind::Set(_, _) => return Err(schema_error("Kind::Set is not yet supported")),
 		Kind::Array(k, _) => {
-			TypeRef::List(Box::new(kind_to_type_with_enum_prefix(*k, types, is_input, enum_scope)?))
+			// Cap nested-array depth so the resulting chain stays within the
+			// 7-level `ofType` limit of the standard GraphQL introspection
+			// query. Each `array<…>` layer adds two `ofType` hops
+			// (`NonNull(List(…))`), so `MAX_ARRAY_DEPTH = 3` permits up to
+			// `[[[T!]!]!]!` (7 hops to a named leaf). When the *current* layer
+			// would push us past that, the entire remaining sub-tree collapses
+			// to the `JSON` scalar — a single named type, contributing no
+			// extra hops. The wire format is unchanged: nested numeric arrays
+			// continue to be encoded as JSON arrays.
+			if array_depth >= MAX_ARRAY_DEPTH {
+				TypeRef::named("JSON")
+			} else {
+				TypeRef::List(Box::new(kind_to_type_inner(
+					*k,
+					types,
+					is_input,
+					enum_scope,
+					array_depth + 1,
+				)?))
+			}
 		}
 		Kind::Function(_, _) => return Err(schema_error("Kind::Function is not yet supported")),
 		Kind::Range => return Err(schema_error("Kind::Range is not yet supported")),
 		Kind::Literal(literal) => {
-			return kind_to_type_with_enum_prefix(
+			return kind_to_type_inner(
 				literal_to_base_kind(&literal),
 				types,
 				is_input,
 				enum_scope,
+				array_depth,
 			);
 		}
 		Kind::File(_) => return Err(schema_error("Kind::File is not yet supported")),
@@ -700,6 +750,21 @@ pub fn unwrap_type(ty: TypeRef) -> TypeRef {
 	match ty {
 		TypeRef::NonNull(t) => unwrap_type(*t),
 		_ => ty,
+	}
+}
+
+/// Render a [`TypeRef`] as a string suitable for use in a GraphQL identifier.
+///
+/// `TypeRef::Display` produces shapes like `[child!]!` that contain brackets
+/// and exclamation marks — invalid characters for a GraphQL Name. This helper
+/// flattens nullability and list nesting into underscore-joined alphabetic
+/// segments so callers can build derived type names like
+/// `_filter_list_child` from `array<record<child>>`.
+pub fn filter_type_name(ty: &TypeRef) -> String {
+	match ty {
+		TypeRef::Named(n) => n.to_string(),
+		TypeRef::NonNull(inner) => filter_type_name(inner),
+		TypeRef::List(inner) => format!("list_{}", filter_type_name(inner)),
 	}
 }
 
@@ -778,11 +843,18 @@ fn convert_static_record_id_key(
 			Ok(SurRecordIdKey::Array(SurArray(vals?)))
 		}
 		RecordIdKeyLit::Object(entries) => {
+			// Collect into `BTreeMap<Strand, _>` directly so the
+			// final `SurObject::from(map)` resolves to the zero-cost
+			// `From<BTreeMap<Strand, Value>> for Object` impl
+			// (a single field move). Going via
+			// `BTreeMap<String, _>` would force a `Strand::into_string`
+			// heap allocation per key and then re-convert every key
+			// back to `Strand` inside `From<BTreeMap<String, Value>>`.
 			let mut map = BTreeMap::new();
 			for entry in entries {
 				map.insert(entry.key, convert_static_expr(entry.value)?);
 			}
-			Ok(SurRecordIdKey::Object(SurObject(map)))
+			Ok(SurRecordIdKey::Object(SurObject::from(map)))
 		}
 		RecordIdKeyLit::Generate(_) => Err(resolver_error(
 			"Generated RecordId keys (rand(), ulid(), uuid()) are not supported in GraphQL inputs",
@@ -834,11 +906,14 @@ fn convert_static_literal(lit: Literal) -> Result<SurValue, GqlError> {
 			Ok(SurValue::Set(SurSet::from(vals?)))
 		}
 		Literal::Object(entries) => {
+			// See `convert_static_record_id_key` for why the
+			// accumulator is `BTreeMap<Strand, _>` rather than
+			// `BTreeMap<String, _>`.
 			let mut map = BTreeMap::new();
 			for entry in entries {
 				map.insert(entry.key, convert_static_expr(entry.value)?);
 			}
-			Ok(SurValue::Object(SurObject(map)))
+			Ok(SurValue::Object(SurObject::from(map)))
 		}
 		Literal::Duration(d) => Ok(SurValue::Duration(d)),
 		Literal::Datetime(dt) => Ok(SurValue::Datetime(dt)),
@@ -884,7 +959,7 @@ pub(crate) fn gql_to_sql_kind_with_scope(
 				{
 					return Ok(out);
 				}
-				Ok(SurValue::String(s.to_owned()))
+				Ok(SurValue::String(s.as_str().into()))
 			}
 			GqlValue::Null => Ok(SurValue::Null),
 			obj @ GqlValue::Object(_) => gql_to_sql_kind(obj, Kind::Object),
@@ -1035,11 +1110,14 @@ pub(crate) fn gql_to_sql_kind_with_scope(
 
 				match expr {
 					Expr::Literal(Literal::Object(o)) => {
+						// See `convert_static_record_id_key` for
+						// why the accumulator is
+						// `BTreeMap<Strand, _>`.
 						let mut map = BTreeMap::new();
 						for entry in o {
 							map.insert(entry.key, convert_static_expr(entry.value)?);
 						}
-						Ok(SurValue::Object(SurObject(map)))
+						Ok(SurValue::Object(SurObject::from(map)))
 					}
 					_ => Err(type_error(kind, val)),
 				}
@@ -1047,7 +1125,7 @@ pub(crate) fn gql_to_sql_kind_with_scope(
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::String => match val {
-			GqlValue::String(s) => Ok(SurValue::String(s.to_owned())),
+			GqlValue::String(s) => Ok(SurValue::String(s.as_str().into())),
 			GqlValue::Enum(s) => Ok(SurValue::String(s.as_str().into())),
 			_ => Err(type_error(kind, val)),
 		},
@@ -1071,16 +1149,19 @@ pub(crate) fn gql_to_sql_kind_with_scope(
 				let record_id_expr: Expr = record_id_expr.into();
 
 				match record_id_expr {
-					Expr::Literal(Literal::RecordId(t)) => match ts.contains(&t.table) {
-						true => {
+					Expr::Literal(Literal::RecordId(t)) => {
+						// Empty `ts` means "any record table" — accept all.
+						let table_allowed = ts.is_empty() || ts.contains(&t.table);
+						if table_allowed {
 							let key = convert_static_record_id_key(t.key)?;
 							Ok(SurValue::RecordId(SurRecordId {
 								table: t.table,
 								key,
 							}))
+						} else {
+							Err(type_error(kind, val))
 						}
-						false => Err(type_error(kind, val)),
-					},
+					}
 					_ => Err(type_error(kind, val)),
 				}
 			}
@@ -1093,8 +1174,20 @@ pub(crate) fn gql_to_sql_kind_with_scope(
 			}
 			_ => Err(type_error(kind, val)),
 		},
-		// TODO: handle nested eithers
-		Kind::Either(ref ks) => {
+		Kind::Either(ks) => {
+			// Parser-built unions are already flat, so only pay the
+			// `Kind::either` flatten + de-dupe cost when a nested variant is
+			// actually present. Flattening may collapse the union to a single
+			// variant; recurse in that case.
+			let ks = if ks.iter().any(|k| matches!(k, Kind::Either(_))) {
+				let flat = Kind::either(ks);
+				let Kind::Either(ks) = flat else {
+					return gql_to_sql_kind_with_scope(val, flat, enum_scope);
+				};
+				ks
+			} else {
+				ks
+			};
 			use Kind::*;
 
 			match val {
@@ -1104,12 +1197,12 @@ pub(crate) fn gql_to_sql_kind_with_scope(
 					} else if ks.contains(&Kind::Null) {
 						Ok(SurValue::Null)
 					} else {
-						Err(type_error(kind, val))
+						Err(type_error(Kind::Either(ks), val))
 					}
 				}
 				num @ GqlValue::Number(_) => {
 					either_try_kind!(ks, num, AllNumbers);
-					Err(type_error(kind, val))
+					Err(type_error(Kind::Either(ks), val))
 				}
 				string @ GqlValue::String(_) => {
 					either_try_kinds!(
@@ -1117,25 +1210,25 @@ pub(crate) fn gql_to_sql_kind_with_scope(
 						String
 					);
 					either_try_kind!(ks, string, Kind::Object);
-					Err(type_error(kind, val))
+					Err(type_error(Kind::Either(ks), val))
 				}
 				bool @ GqlValue::Boolean(_) => {
 					either_try_kind!(ks, bool, Kind::Bool);
-					Err(type_error(kind, val))
+					Err(type_error(Kind::Either(ks), val))
 				}
 				GqlValue::Binary(_) => {
 					Err(resolver_error("binary input for Either is not yet supported"))
 				}
 				GqlValue::Enum(n) => {
-					if let Some(literal) = enum_token_to_literal(ks, n.as_str(), enum_scope) {
-						return Ok(SurValue::String(literal));
+					if let Some(literal) = enum_token_to_literal(&ks, n.as_str(), enum_scope) {
+						return Ok(SurValue::String(literal.into()));
 					}
 					either_try_kind!(ks, &GqlValue::String(n.to_string()), Kind::String);
-					Err(type_error(kind, val))
+					Err(type_error(Kind::Either(ks), val))
 				}
 				list @ GqlValue::List(_) => {
 					either_try_kind!(ks, list, Kind::Array);
-					Err(type_error(kind, val))
+					Err(type_error(Kind::Either(ks), val))
 				}
 				obj @ GqlValue::Object(_) => {
 					// Try geometry kinds first (geometry inputs are objects)
@@ -1145,7 +1238,7 @@ pub(crate) fn gql_to_sql_kind_with_scope(
 						}
 					}
 					either_try_kind!(ks, obj, Kind::Object);
-					Err(type_error(kind, val))
+					Err(type_error(Kind::Either(ks), val))
 				}
 			}
 		}
@@ -1228,31 +1321,18 @@ pub(crate) fn geometry_gql_type_name(g: &SurGeometry) -> &'static str {
 	}
 }
 
-/// Build a `TypeRef` for nested Float arrays at a given depth.
-///
-/// - depth 1 → `[Float!]!`       (Point coordinates)
-/// - depth 2 → `[[Float!]!]!`    (LineString / MultiPoint coordinates)
-/// - depth 3 → `[[[Float!]!]!]!` (Polygon / MultiLineString coordinates)
-/// - depth 4 → `[[[[Float!]!]!]!]!` (MultiPolygon coordinates)
-fn nested_float_list(depth: usize) -> TypeRef {
-	let mut ty = TypeRef::named_nn(TypeRef::FLOAT); // Float!
-	for _ in 0..depth {
-		ty = TypeRef::NonNull(Box::new(TypeRef::List(Box::new(ty)))); // [...]!
-	}
-	ty
-}
-
 /// Build a geometry Object type for variants that have `coordinates`.
 ///
 /// Creates an Object type with:
 /// - `type: GeometryType!` (fixed enum value)
-/// - `coordinates: <nested_float_list>!`
-fn make_geometry_object_type(
-	obj_name: &str,
-	geojson_type: &'static str,
-	coord_depth: usize,
-) -> Object {
-	let coords_ty = nested_float_list(coord_depth);
+/// - `coordinates: JSON!` — exposed as the `JSON` scalar rather than a deeply nested
+///   `[[[[Float!]!]!]!]!` chain. The latter exceeds the standard 7-level introspection `ofType`
+///   chain (the spec's canonical introspection query stops at 7), which causes strict clients such
+///   as Postman to fail schema validation as soon as any field is typed `geometry`. Returning
+///   `JSON` keeps the value shape (nested arrays of numbers) intact at runtime while keeping the
+///   introspection chain at a single hop.
+fn make_geometry_object_type(obj_name: &str, geojson_type: &'static str) -> Object {
+	let coords_ty = TypeRef::named_nn("JSON");
 	Object::new(obj_name)
 		.field(Field::new("type", TypeRef::named_nn("GeometryType"), {
 			move |_ctx| {
@@ -1325,17 +1405,18 @@ pub(crate) fn register_geometry_types(types: &mut Vec<Type>) {
 			.item("GeometryCollection"),
 	));
 
-	// Per-variant output Object types
-	types.push(Type::Object(make_geometry_object_type("GeometryPoint", "Point", 1)));
-	types.push(Type::Object(make_geometry_object_type("GeometryLineString", "LineString", 2)));
-	types.push(Type::Object(make_geometry_object_type("GeometryPolygon", "Polygon", 3)));
-	types.push(Type::Object(make_geometry_object_type("GeometryMultiPoint", "MultiPoint", 2)));
+	// Per-variant output Object types. `coordinates` is exposed as a `JSON` scalar
+	// regardless of variant — see `make_geometry_object_type` for the rationale
+	// (avoiding the 7-level introspection `ofType` chain limit).
+	types.push(Type::Object(make_geometry_object_type("GeometryPoint", "Point")));
+	types.push(Type::Object(make_geometry_object_type("GeometryLineString", "LineString")));
+	types.push(Type::Object(make_geometry_object_type("GeometryPolygon", "Polygon")));
+	types.push(Type::Object(make_geometry_object_type("GeometryMultiPoint", "MultiPoint")));
 	types.push(Type::Object(make_geometry_object_type(
 		"GeometryMultiLineString",
 		"MultiLineString",
-		3,
 	)));
-	types.push(Type::Object(make_geometry_object_type("GeometryMultiPolygon", "MultiPolygon", 4)));
+	types.push(Type::Object(make_geometry_object_type("GeometryMultiPolygon", "MultiPolygon")));
 	types.push(Type::Object(make_geometry_collection_type()));
 
 	// Geometry union (covers all variants)
@@ -1351,36 +1432,40 @@ pub(crate) fn register_geometry_types(types: &mut Vec<Type>) {
 			.possible_type("GeometryCollection"),
 	));
 
-	// Per-variant InputObject types
+	// Per-variant InputObject types. `coordinates` is `JSON!` rather than a deeply
+	// nested float array to keep introspection within the standard 7-level chain
+	// limit. The runtime parser (`gql_coords_to_sur_value`) still walks nested
+	// arrays of numbers from the JSON value, so the wire format is unchanged.
+	let json_nn = || TypeRef::named_nn("JSON");
 	types.push(Type::InputObject(
 		InputObject::new("GeometryPointInput")
 			.description("GeoJSON Point input – coordinates is [lng, lat]")
-			.field(InputValue::new("coordinates", nested_float_list(1))),
+			.field(InputValue::new("coordinates", json_nn())),
 	));
 	types.push(Type::InputObject(
 		InputObject::new("GeometryLineStringInput")
 			.description("GeoJSON LineString input")
-			.field(InputValue::new("coordinates", nested_float_list(2))),
+			.field(InputValue::new("coordinates", json_nn())),
 	));
 	types.push(Type::InputObject(
 		InputObject::new("GeometryPolygonInput")
 			.description("GeoJSON Polygon input")
-			.field(InputValue::new("coordinates", nested_float_list(3))),
+			.field(InputValue::new("coordinates", json_nn())),
 	));
 	types.push(Type::InputObject(
 		InputObject::new("GeometryMultiPointInput")
 			.description("GeoJSON MultiPoint input")
-			.field(InputValue::new("coordinates", nested_float_list(2))),
+			.field(InputValue::new("coordinates", json_nn())),
 	));
 	types.push(Type::InputObject(
 		InputObject::new("GeometryMultiLineStringInput")
 			.description("GeoJSON MultiLineString input")
-			.field(InputValue::new("coordinates", nested_float_list(3))),
+			.field(InputValue::new("coordinates", json_nn())),
 	));
 	types.push(Type::InputObject(
 		InputObject::new("GeometryMultiPolygonInput")
 			.description("GeoJSON MultiPolygon input")
-			.field(InputValue::new("coordinates", nested_float_list(4))),
+			.field(InputValue::new("coordinates", json_nn())),
 	));
 	types.push(Type::InputObject(
 		InputObject::new("GeometryCollectionInput")
@@ -1396,7 +1481,7 @@ pub(crate) fn register_geometry_types(types: &mut Vec<Type>) {
 				 `coordinates` for coordinate-based types, `geometries` for GeometryCollection.",
 			)
 			.field(InputValue::new("type", TypeRef::named_nn("GeometryType")))
-			.field(InputValue::new("coordinates", TypeRef::named("any")))
+			.field(InputValue::new("coordinates", TypeRef::named("JSON")))
 			.field(InputValue::new("geometries", TypeRef::named_list("GeometryInput"))),
 	));
 }
@@ -1590,4 +1675,39 @@ pub(crate) fn geometry_to_gql_object(g: &SurGeometry) -> Result<GqlValue, GqlErr
 	}
 
 	Ok(GqlValue::Object(map))
+}
+
+#[cfg(test)]
+mod tests {
+	use async_graphql::Number;
+
+	use super::*;
+
+	#[test]
+	fn either_flattens_nested_variants() {
+		// `Kind::Either` nested inside another `Kind::Either` must still resolve
+		// correctly. The parser normally flattens these, but the runtime path
+		// must also handle them defensively for programmatically built kinds.
+		let kind = Kind::Either(vec![Kind::Either(vec![Kind::Int, Kind::String]), Kind::Bool]);
+
+		let int_val = GqlValue::Number(Number::from(7));
+		assert_eq!(gql_to_sql_kind(&int_val, kind.clone()).unwrap(), SurValue::from(7i64));
+
+		let str_val = GqlValue::String("hi".to_owned());
+		assert_eq!(gql_to_sql_kind(&str_val, kind.clone()).unwrap(), SurValue::from("hi"));
+
+		let bool_val = GqlValue::Boolean(true);
+		assert_eq!(gql_to_sql_kind(&bool_val, kind).unwrap(), SurValue::from(true));
+	}
+
+	#[test]
+	fn either_collapses_single_variant_after_dedup() {
+		// After flattening + de-duplication, an `Either` may collapse to a
+		// single variant. The runtime path should recurse and convert against
+		// that bare kind rather than failing.
+		let kind = Kind::Either(vec![Kind::Int, Kind::Either(vec![Kind::Int, Kind::Int])]);
+
+		let val = GqlValue::Number(Number::from(42));
+		assert_eq!(gql_to_sql_kind(&val, kind).unwrap(), SurValue::from(42i64));
+	}
 }

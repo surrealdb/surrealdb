@@ -1,16 +1,29 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use anyhow::Result;
+#[cfg(feature = "jwks")]
+use chrono::{DateTime, Utc};
+#[cfg(feature = "jwks")]
+use jsonwebtoken::jwk::JwkSet;
 use uuid::Uuid;
 
 use crate::catalog::{self};
-use crate::err::Error;
+
+/// A cached JWKS document together with the time it was stored.
+#[cfg(feature = "jwks")]
+#[derive(Debug)]
+pub(crate) struct CachedJwks {
+	pub(crate) jwks: JwkSet,
+	pub(crate) time: DateTime<Utc>,
+}
 
 #[derive(Clone, Debug)]
 pub(crate) enum Entry {
-	/// A cached entry of any type
-	Any(Arc<dyn Any + Send + Sync>),
+	/// A cached JWKS document and the time it was stored
+	#[cfg(feature = "jwks")]
+	Jwk(Arc<CachedJwks>),
+	/// A slice of FieldDefinition specified on a table.
+	Fds(Arc<[catalog::FieldDefinition]>),
 	/// A slice of DefineEventStatement specified on a table.
 	Evs(Arc<[catalog::EventDefinition]>),
 	/// A slice of TableDefinition specified on a table.
@@ -24,17 +37,24 @@ pub(crate) enum Entry {
 }
 
 impl Entry {
-	/// Converts this cache entry into a single entry of arbitrary type.
-	/// This panics if called on a cache entry that is not an [`Entry::Any`].
-	pub(crate) fn try_into_type<T: Send + Sync + 'static>(self: Entry) -> Result<Arc<T>> {
+	/// Converts this cache entry into a JWKS payload and timestamp.
+	/// This panics if called on a cache entry that is not an [`Entry::Jwk`].
+	#[cfg(feature = "jwks")]
+	pub(crate) fn try_into_jwk(self) -> Result<Arc<CachedJwks>> {
 		match self {
-			Entry::Any(v) => v
-				.downcast::<T>()
-				.map_err(|_| Error::unreachable("Unable to convert type into Entry::Any"))
-				.map_err(anyhow::Error::new),
-			_ => fail!("Unable to convert type into Entry::Any"),
+			Entry::Jwk(v) => Ok(v),
+			_ => fail!("Unable to convert type into Entry::Jwk"),
 		}
 	}
+	/// Converts this cache entry into a slice of [`catalog::FieldDefinition`].
+	/// This panics if called on a cache entry that is not an [`Entry::Fds`].
+	pub(crate) fn try_into_fds(self) -> Result<Arc<[catalog::FieldDefinition]>> {
+		match self {
+			Entry::Fds(v) => Ok(v),
+			_ => fail!("Unable to convert type into Entry::Fds"),
+		}
+	}
+
 	/// Converts this cache entry into a slice of [`catalog::EventDefinition`].
 	/// This panics if called on a cache entry that is not an [`Entry::Evs`].
 	pub(crate) fn try_into_evs(self) -> Result<Arc<[catalog::EventDefinition]>> {

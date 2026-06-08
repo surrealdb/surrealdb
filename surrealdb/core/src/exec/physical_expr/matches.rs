@@ -10,16 +10,18 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::catalog::Index;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, ContextLevel};
+use crate::exec::{AccessMode, BoxFut, ContextLevel};
 use crate::expr::FlowResult;
 use crate::expr::idiom::Idiom;
 use crate::expr::operator::MatchesOperator;
+use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms};
-use crate::val::Value;
+use crate::kvs::index::filter_online_indexes;
+use crate::val::{TableName, Value};
 
 /// Evaluates a MATCHES (`@@` / `@N@`) predicate by reading the full-text index.
 ///
@@ -124,8 +126,15 @@ impl MatchesOp {
 				let indexes = tx
 					.all_tb_indexes(ns_id, db_id, &table_name, ctx.exec_ctx.version_stamp())
 					.await?;
+				let indexes = if ctx.exec_ctx.version_stamp().is_none() {
+					// MATCHES must not read a full-text index until durable
+					// state has published it as queryable.
+					filter_online_indexes(tx.as_ref(), ns_id, db_id, indexes).await?
+				} else {
+					indexes
+				};
 				let index_def = indexes.iter().find(|idx| {
-					matches!(&idx.index, crate::catalog::Index::FullText(_))
+					matches!(&idx.index, Index::FullText(_))
 						&& idx.cols.iter().any(|col| col.0 == self.idiom.0)
 				});
 
@@ -136,17 +145,21 @@ impl MatchesOp {
 				};
 
 				let ft_params = match &index_def.index {
-					crate::catalog::Index::FullText(params) => params,
+					Index::FullText(params) => params,
 					_ => unreachable!("Already checked for FullText above"),
 				};
 
-				let ikb =
-					crate::idx::IndexKeyBase::new(ns_id, db_id, table_name, index_def.index_id);
+				let ikb = IndexKeyBase::new(ns_id, db_id, table_name, index_def.index_id);
 
 				// Open the full-text index
-				let fti =
-					FullTextIndex::new(frozen.get_index_stores(), tx.as_ref(), ikb, ft_params)
-						.await?;
+				let fti = FullTextIndex::new(
+					frozen.get_index_stores(),
+					tx.as_ref(),
+					ikb,
+					ft_params,
+					&frozen.config.file_allowlist,
+				)
+				.await?;
 
 				// Extract query terms
 				let query_terms = {
@@ -164,12 +177,13 @@ impl MatchesOp {
 			.await
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for MatchesOp {
 	fn name(&self) -> &'static str {
 		"MatchesOp"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -179,34 +193,36 @@ impl PhysicalExpr for MatchesOp {
 		children.max(ContextLevel::Root)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let ft = self.ft_resources(&ctx).await?;
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			let ft = self.ft_resources(&ctx).await?;
 
-		let (fti, qt) = match ft {
-			// No full-text index → always false (old executor ExecutorOption::None path)
-			None => return Ok(Value::Bool(false)),
-			Some(resources) => resources,
-		};
+			let (fti, qt) = match ft {
+				// No full-text index → always false (old executor ExecutorOption::None path)
+				None => return Ok(Value::Bool(false)),
+				Some(resources) => resources,
+			};
 
-		// Empty query terms → no possible matches
-		if qt.is_empty() {
-			return Ok(Value::Bool(false));
-		}
+			// Empty query terms → no possible matches
+			if qt.is_empty() {
+				return Ok(Value::Bool(false));
+			}
 
-		// Extract RecordId from the current value
-		let rid = extract_record_id(ctx.current_value)?;
+			// Extract RecordId from the current value
+			let rid = extract_record_id(ctx.current_value)?;
 
-		let tx = ctx.txn();
+			let tx = ctx.txn();
 
-		// Resolve RecordId → DocId via the full-text index, then bitmap check.
-		// This mirrors the old executor's `fulltext_matches_with_doc_id` path.
-		let matches = match fti.get_doc_id(&tx, &rid).await? {
-			Some(doc_id) => qt.contains_doc(doc_id),
-			// Record not in the index → doesn't match
-			None => false,
-		};
+			// Resolve RecordId → DocId via the full-text index, then bitmap check.
+			// This mirrors the old executor's `fulltext_matches_with_doc_id` path.
+			let matches = match fti.get_doc_id(&tx, &rid).await? {
+				Some(doc_id) => qt.contains_doc(doc_id),
+				// Record not in the index → doesn't match
+				None => false,
+			};
 
-		Ok(Value::Bool(matches))
+			Ok(Value::Bool(matches))
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -224,8 +240,8 @@ impl ToSql for MatchesOp {
 impl Clone for MatchesOp {
 	fn clone(&self) -> Self {
 		Self {
-			left: self.left.clone(),
-			right: self.right.clone(),
+			left: Arc::clone(&self.left),
+			right: Arc::clone(&self.right),
 			operator: self.operator.clone(),
 			idiom: self.idiom.clone(),
 			query: self.query.clone(),
@@ -267,7 +283,7 @@ fn extract_record_id(value: Option<&Value>) -> Result<crate::val::RecordId, anyh
 }
 
 /// Try to extract a table name from a Value's RecordId.
-fn extract_table_from_value(value: &Value) -> Option<crate::val::TableName> {
+fn extract_table_from_value(value: &Value) -> Option<TableName> {
 	match value {
 		Value::Object(obj) => match obj.get("id") {
 			Some(Value::RecordId(rid)) => Some(rid.table.clone()),

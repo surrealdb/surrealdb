@@ -12,18 +12,16 @@
 //! - [`eval_limit_expr`] — LIMIT/START expression evaluation
 //! - [`determine_scan_direction`] — ORDER BY → scan direction
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Bound;
 use std::sync::Arc;
-
-use futures::StreamExt;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::exec::permission::{
 	PhysicalPermission, check_permission_for_value, convert_permission_to_physical,
 };
-use crate::exec::planner::expr_to_physical_expr;
+use crate::exec::pre_decode_filter::{PreDecodeFilter, PreDecodeFilterOutcome};
 use crate::exec::{EvalContext, ExecutionContext, PhysicalExpr, ValueBatch, ValueBatchStream};
 use crate::expr::{ControlFlow, ControlFlowExt};
 use crate::idx::planner::ScanDirection;
@@ -207,6 +205,13 @@ pub(crate) fn determine_scan_direction(
 /// before any data is returned, avoiding I/O, allocation, and deserialization
 /// for rows that will be discarded anyway (the fast-path optimisation for
 /// `START` without a pushdown predicate).
+///
+/// When `limit_hint` is provided, the first batch is capped to that count so
+/// small-limit queries (e.g. `LIMIT 10`) don't fetch 500 records from
+/// storage. Subsequent batches use [`crate::kvs::NORMAL_BATCH_SIZE`].
+///
+/// Iterates the cursor's borrowed `&[u8]` slices directly — record decode
+/// happens inline, no intermediate owned `Vec<u8>` allocation per row.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn kv_scan_stream(
 	txn: Arc<Transaction>,
@@ -216,21 +221,69 @@ pub(crate) fn kv_scan_stream(
 	storage_limit: Option<usize>,
 	direction: ScanDirection,
 	pre_skip: usize,
-	prefetch: bool,
+	limit_hint: Option<u32>,
+	pre_decode_filter: Option<Arc<PreDecodeFilter>>,
 ) -> ValueBatchStream {
 	let skip = pre_skip.min(u32::MAX as usize) as u32;
 	let stream = async_stream::try_stream! {
-		let kv_stream = txn.stream_keys_vals(beg..end, version, storage_limit, skip, direction, prefetch);
-		futures::pin_mut!(kv_stream);
-
-		while let Some(result) = kv_stream.next().await {
-			let entries = result.context("Failed to scan record")?;
-			let mut batch = Vec::with_capacity(entries.len());
-			for (key, val) in entries {
-				batch.push(decode_record(&key, val)?);
+		let mut cursor = txn
+			.open_vals_cursor(beg..end, direction, skip, version)
+			.await
+			.context("Failed to open scan cursor")?;
+		let mut first = true;
+		let mut yielded: usize = 0;
+		loop {
+			// Each fetch is capped by NORMAL_BATCH_SIZE, by the remaining
+			// `storage_limit` (so a `LIMIT 600` query never asks storage for
+			// more than 600 records total), and on the first iteration by
+			// `limit_hint` (small-LIMIT fast path; subsequent batches may
+			// need to over-fetch when row filtering reduces the visible
+			// count downstream, so the hint applies only once).
+			let mut batch_size = crate::kvs::NORMAL_BATCH_SIZE;
+			if first
+				&& let Some(h) = limit_hint
+			{
+				batch_size = batch_size.min(h);
 			}
-			if !batch.is_empty() {
-				yield ValueBatch { values: batch };
+			if let Some(cap) = storage_limit {
+				let remaining = cap.saturating_sub(yielded);
+				let remaining_u32 = remaining.min(u32::MAX as usize) as u32;
+				batch_size = batch_size.min(remaining_u32);
+			}
+			if batch_size == 0 {
+				break;
+			}
+			let batch = cursor
+				.next_batch(crate::kvs::ScanLimit::Count(batch_size))
+				.await
+				.context("Failed to scan record")?;
+			if batch.is_empty() {
+				break;
+			}
+			let mut decoded = Vec::with_capacity(batch.len());
+			// Hoist the pre-decode-filter branch out of the per-item loop:
+			// `pre_decode_filter` is `Option<Arc<…>>` and doesn't change
+			// across iterations, so we pay the `Option`-check once per
+			// batch instead of per row.
+			match &pre_decode_filter {
+				Some(pdf) => {
+					for (key, val) in &batch {
+						if pdf.apply(key, val) == PreDecodeFilterOutcome::Reject {
+							continue;
+						}
+						decoded.push(decode_record(key, val)?);
+					}
+				}
+				None => {
+					for (key, val) in &batch {
+						decoded.push(decode_record(key, val)?);
+					}
+				}
+			}
+			first = false;
+			yielded += batch.len();
+			if !decoded.is_empty() {
+				yield ValueBatch { values: decoded };
 			}
 		}
 	};
@@ -239,7 +292,7 @@ pub(crate) fn kv_scan_stream(
 
 /// Decode a record from its key and value bytes.
 #[inline]
-pub(crate) fn decode_record(key: &[u8], val: Vec<u8>) -> Result<Value, ControlFlow> {
+pub(crate) fn decode_record(key: &[u8], val: &[u8]) -> Result<Value, ControlFlow> {
 	let decoded_key =
 		crate::key::record::RecordKey::decode_key(key).context("Failed to decode record key")?;
 
@@ -248,11 +301,8 @@ pub(crate) fn decode_record(key: &[u8], val: Vec<u8>) -> Result<Value, ControlFl
 		key: decoded_key.id,
 	};
 
-	let mut record =
-		crate::catalog::Record::kv_decode_value(val).context("Failed to deserialize record")?;
-
-	// Inject the id field into the document
-	record.data.def(rid);
+	let record = crate::catalog::Record::kv_decode_value(val, rid)
+		.context("Failed to deserialize record")?;
 
 	// Take ownership of the value (zero-cost move for freshly deserialized data)
 	Ok(record.data)
@@ -348,7 +398,7 @@ pub(crate) async fn filter_and_process_batch(
 		}
 		// WHERE predicate (evaluated on the permission-reduced document)
 		if let Some(pred) = predicate {
-			let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value(&batch[write_idx]);
+			let eval_ctx = EvalContext::from_exec_ctx(ctx).with_value_and_doc(&batch[write_idx]);
 			if !pred.evaluate(eval_ctx).await?.is_truthy() {
 				continue;
 			}
@@ -449,17 +499,36 @@ pub(crate) async fn eval_limit_expr(
 ///
 /// `field_permissions` and `dep_map` are wrapped in `Arc` so that
 /// [`filter_field_state_for_projection`] can share them across filtered
-/// copies without cloning the underlying `HashMap`.
+/// copies without cloning the underlying collection.
 #[derive(Debug, Clone)]
 pub(crate) struct FieldState {
 	/// Computed field definitions converted to physical expressions
 	pub(crate) computed_fields: Vec<ComputedFieldDef>,
-	/// Field-level permissions (field name -> permission)
-	pub(crate) field_permissions: Arc<HashMap<String, PhysicalPermission>>,
+	/// Field-level permissions, stored as `(idiom, perm)` pairs because the
+	/// idiom may contain wildcards (`outer.*`, `items[*]`) that must be
+	/// expanded against each value at evaluation time. Keyed lookup by
+	/// flat field-name string is the wrong question — nested paths cannot
+	/// be matched via top-level keys. See
+	/// [`filter_fields_by_permission`] for the expansion logic.
+	pub(crate) field_permissions: Arc<Vec<(crate::expr::Idiom, PhysicalPermission)>>,
 	/// Dependency map for computed fields, used for projection filtering.
 	/// Stored alongside the cached state so that projected queries can
 	/// cheaply determine the subset of computed fields they need.
 	dep_map: Arc<HashMap<String, crate::expr::computed_deps::ComputedDeps>>,
+	/// Fields referenced by any conditional `PERMISSIONS FOR select WHERE …`
+	/// expression on this table. These root field names must be added to the
+	/// projection-driven "needed" set before deciding which computed fields
+	/// to evaluate — otherwise a `SELECT a` could skip computing field `b`
+	/// while still applying a field permission whose expression references
+	/// `b`, producing a permission decision against an incomplete row.
+	/// `is_complete = false` (opaque expression) collapses into
+	/// `permission_deps_complete = false`, which forces evaluation of all
+	/// computed fields.
+	permission_field_deps: Arc<HashSet<String>>,
+	/// Whether `permission_field_deps` is exhaustive. False when any field
+	/// permission expression contains opaque constructs (subqueries, params,
+	/// etc.) that could reference fields outside of `permission_field_deps`.
+	permission_deps_complete: bool,
 }
 
 impl FieldState {
@@ -467,8 +536,10 @@ impl FieldState {
 	pub(crate) fn empty() -> Self {
 		Self {
 			computed_fields: Vec::new(),
-			field_permissions: Arc::new(HashMap::new()),
+			field_permissions: Arc::new(Vec::new()),
 			dep_map: Arc::new(HashMap::new()),
+			permission_field_deps: Arc::new(HashSet::new()),
+			permission_deps_complete: true,
 		}
 	}
 }
@@ -484,6 +555,13 @@ pub(crate) struct ComputedFieldDef {
 	kind: Option<crate::expr::Kind>,
 }
 
+impl ComputedFieldDef {
+	/// Root field name this computed-field definition is attached to.
+	pub(crate) fn field_name(&self) -> &str {
+		&self.field_name
+	}
+}
+
 /// Build field state from raw transaction and context parameters.
 ///
 /// This is the core implementation that does the actual work: KV lookup of
@@ -491,14 +569,15 @@ pub(crate) struct ComputedFieldDef {
 /// topological sorting. It takes explicit parameters instead of
 /// `ExecutionContext`, making it usable at both plan time and execution time.
 pub(crate) async fn build_field_state_raw(
-	txn: &Transaction,
-	ctx: &crate::ctx::FrozenContext,
+	planner: &crate::exec::planner::Planner<'_>,
 	ns_id: crate::catalog::NamespaceId,
 	db_id: crate::catalog::DatabaseId,
 	table_name: &TableName,
 	check_perms: bool,
 	version: Option<u64>,
 ) -> Result<FieldState, ControlFlow> {
+	let txn =
+		planner.txn().context("build_field_state_raw requires a planner with a transaction")?;
 	let field_defs = txn
 		.all_tb_fields(ns_id, db_id, table_name, version)
 		.await
@@ -515,6 +594,16 @@ pub(crate) async fn build_field_state_raw(
 	if !has_computed && !has_field_perms {
 		return Ok(FieldState::empty());
 	}
+
+	// Computed-field and permission expressions are compiled through the
+	// supplied planner. When the planner has a transaction (plan-time path),
+	// inner subqueries benefit from plan-time index resolution; the
+	// planner's `CycleGuard` prevents recursive table-resolution for
+	// self-referential permissions like
+	// `WHERE (SELECT FROM same_table) != NONE`. When the planner is txn-less
+	// (runtime fallback), inner subqueries compile to runtime-resolving
+	// scans — bit-for-bit identical to the legacy behaviour. See
+	// `language-tests/tests/reproductions/skip_fetch_perms_subquery_dereference.surql`.
 
 	// Collect ALL computed fields and their dependency metadata.
 	let mut raw_computed: Vec<RawComputedField> = Vec::new();
@@ -535,10 +624,9 @@ pub(crate) async fn build_field_state_raw(
 
 			dep_map.insert(field_name.clone(), deps.clone());
 
-			let physical_expr =
-				expr_to_physical_expr(expr.clone(), ctx).await.with_context(|| {
-					format!("Computed field '{field_name}' has unsupported expression")
-				})?;
+			let physical_expr = planner.physical_expr(expr.clone()).await.with_context(|| {
+				format!("Computed field '{field_name}' has unsupported expression")
+			})?;
 
 			raw_computed.push((field_name, physical_expr, fd.field_kind.clone(), deps.fields));
 		}
@@ -559,15 +647,46 @@ pub(crate) async fn build_field_state_raw(
 		});
 	}
 
-	// Build field permissions
-	let mut field_permissions = HashMap::new();
+	// Build field permissions, preserving each field's original Idiom so
+	// `filter_fields_by_permission` can expand wildcards via `Value::each`.
+	// `Permission::Full` entries are skipped — they're "always allow" and
+	// don't need a runtime check.
+	//
+	// While walking conditional permissions, accumulate the set of fields
+	// the expression references. `filter_field_state_for_projection` adds
+	// these to the projection-driven "needed" set so that any computed
+	// field referenced by a permission expression is evaluated even when
+	// the user's SELECT didn't list it — otherwise a permission decision
+	// would be made against an incomplete row.
+	let mut field_permissions: Vec<(crate::expr::Idiom, PhysicalPermission)> = Vec::new();
+	let mut permission_field_deps: HashSet<String> = HashSet::new();
+	let mut permission_deps_complete = true;
 	if check_perms {
 		for fd in field_defs.iter() {
-			let field_name = fd.name.to_raw_string();
-			let physical_perm = convert_permission_to_physical(&fd.select_permission, ctx)
+			if matches!(fd.select_permission, crate::catalog::Permission::Full) {
+				continue;
+			}
+			if let crate::catalog::Permission::Specific(ref expr) = fd.select_permission {
+				let deps = crate::expr::computed_deps::extract_computed_deps(expr);
+				if !deps.is_complete {
+					// Read the flag *before* flipping it below so we only emit
+					// on the first opaque field — one log line per table
+					// build. `FieldState` is cached per `(table, check_perms)`,
+					// so this fires once per distinct table per cache lifetime.
+					if permission_deps_complete {
+						crate::expr::computed_deps::warn_incomplete_perm_deps(
+							table_name.as_str(),
+							fd.name.to_raw_string().as_str(),
+						);
+					}
+					permission_deps_complete = false;
+				}
+				permission_field_deps.extend(deps.fields);
+			}
+			let physical_perm = convert_permission_to_physical(&fd.select_permission, planner)
 				.await
 				.context("Failed to convert field permission")?;
-			field_permissions.insert(field_name, physical_perm);
+			field_permissions.push((fd.name.clone(), physical_perm));
 		}
 	}
 
@@ -575,6 +694,8 @@ pub(crate) async fn build_field_state_raw(
 		computed_fields,
 		field_permissions: Arc::new(field_permissions),
 		dep_map: Arc::new(dep_map),
+		permission_field_deps: Arc::new(permission_field_deps),
+		permission_deps_complete,
 	})
 }
 
@@ -604,10 +725,13 @@ pub(crate) async fn build_field_state(
 		}
 	}
 
-	// Delegate to the raw implementation
+	// Fresh `Planner::with_txn` so subqueries inside computed-field /
+	// field-permission bodies get plan-time index resolution. The cycle
+	// guard starts empty; same-table recursion is broken by the inner
+	// `try_resolve_table_ctx` push.
+	let planner = crate::exec::planner::Planner::for_database(ctx.ctx(), ctx.txn(), db_ctx);
 	let full_state = build_field_state_raw(
-		&ctx.txn(),
-		ctx.ctx(),
+		&planner,
 		db_ctx.ns_ctx.ns.namespace_id,
 		db_ctx.db.database_id,
 		table_name,
@@ -630,6 +754,15 @@ pub(crate) async fn build_field_state(
 /// the given projection. When `needed_fields` is None (SELECT *), returns
 /// a clone of the full state. This is a cheap CPU-only operation with no
 /// KV lookups.
+///
+/// SECURITY: even when the projection is selective, computed fields
+/// referenced by any conditional `PERMISSIONS FOR select WHERE …`
+/// expression on this table are always evaluated. Otherwise a
+/// `SELECT a` could skip computing `b` while still applying a permission
+/// on field `c` whose expression references `b`, producing a permission
+/// decision against an incomplete row. If a permission expression had
+/// opaque dependencies (subqueries, params), all computed fields are
+/// evaluated.
 pub(crate) fn filter_field_state_for_projection(
 	full_state: &FieldState,
 	needed_fields: Option<&std::collections::HashSet<String>>,
@@ -638,9 +771,22 @@ pub(crate) fn filter_field_state_for_projection(
 		return full_state.clone();
 	};
 
-	// Determine which computed fields are required by the projection
-	let required =
-		crate::expr::computed_deps::resolve_required_computed_fields(needed, &full_state.dep_map);
+	if !full_state.permission_deps_complete {
+		// A permission expression contains opaque constructs, so we cannot
+		// statically determine which computed fields it might reference.
+		// Evaluate them all.
+		return full_state.clone();
+	}
+
+	// Union the projection's needed fields with the set of fields referenced
+	// by any conditional field-permission expression.
+	let mut needed_with_perms: std::collections::HashSet<String> = needed.clone();
+	needed_with_perms.extend(full_state.permission_field_deps.iter().cloned());
+
+	let required = crate::expr::computed_deps::resolve_required_computed_fields(
+		&needed_with_perms,
+		&full_state.dep_map,
+	);
 
 	let computed_fields = if let Some(ref required_set) = required {
 		full_state
@@ -657,6 +803,8 @@ pub(crate) fn filter_field_state_for_projection(
 		computed_fields,
 		field_permissions: Arc::clone(&full_state.field_permissions),
 		dep_map: Arc::clone(&full_state.dep_map),
+		permission_field_deps: Arc::clone(&full_state.permission_field_deps),
+		permission_deps_complete: full_state.permission_deps_complete,
 	}
 }
 
@@ -722,6 +870,12 @@ pub(crate) async fn compute_fields_for_value(
 }
 
 /// Filter fields from a value based on field-level permissions.
+///
+/// Each `(idiom, perm)` entry is expanded via [`Value::each`] to handle
+/// wildcards (`outer.*`, `items[*]`), then each concrete path is checked
+/// with `$value` bound to the picked field value — matching the legacy
+/// [`crate::doc::pluck::Document::pluck_select`] semantics that the
+/// streaming runtime previously skipped for nested paths (issue #83).
 pub(crate) async fn filter_fields_by_permission(
 	ctx: &ExecutionContext,
 	state: &FieldState,
@@ -730,24 +884,40 @@ pub(crate) async fn filter_fields_by_permission(
 	if state.field_permissions.is_empty() {
 		return Ok(());
 	}
+	if !matches!(value, Value::Object(_)) {
+		return Ok(());
+	}
 
-	// Collect fields to check
-	let field_names: Vec<String> = {
-		let Value::Object(obj) = &*value else {
-			return Ok(());
-		};
-		obj.keys().cloned().collect()
-	};
-
-	for field_name in field_names {
-		// Check if there's a permission for this field
-		if let Some(perm) = state.field_permissions.get(&field_name) {
-			let allowed = check_permission_for_value(perm, &*value, ctx)
-				.await
-				.context("Failed to check field permission")?;
-
-			if !allowed && let Value::Object(obj) = value {
-				obj.remove(&field_name);
+	// Snapshot the row only when we actually need to evaluate something
+	// against the unmutated document. Per-field denies cut from `value`;
+	// predicates and `each` read from the snapshot so earlier cuts don't
+	// affect later field expansion.
+	let mut snapshot: Option<Value> = None;
+	for (idiom, perm) in state.field_permissions.iter() {
+		match perm {
+			PhysicalPermission::Allow => continue,
+			PhysicalPermission::Deny => {
+				let original = snapshot.get_or_insert_with(|| value.clone());
+				for path in original.each(&idiom.0) {
+					value.cut(&path.0);
+				}
+			}
+			PhysicalPermission::Conditional(_) => {
+				let original = snapshot.get_or_insert_with(|| value.clone());
+				for path in original.each(&idiom.0) {
+					let field_value = original.pick(&path.0);
+					let allowed =
+						check_permission_for_value(perm, original, Some(&field_value), ctx)
+							.await
+							.map_err(|e| {
+							ControlFlow::Err(anyhow::anyhow!(
+								"Failed to check field permission: {e}"
+							))
+						})?;
+					if !allowed {
+						value.cut(&path.0);
+					}
+				}
 			}
 		}
 	}

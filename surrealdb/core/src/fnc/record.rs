@@ -25,7 +25,7 @@ pub fn id((arg,): (RecordId,)) -> Result<Value> {
 }
 
 pub fn tb((arg,): (RecordId,)) -> Result<Value> {
-	Ok(arg.table.into_string().into())
+	Ok(Value::String(arg.table.into()))
 }
 
 pub mod is {
@@ -80,7 +80,7 @@ pub mod is {
 				opt.valid_for_db()?;
 
 				// Check if the user has permission to view records at the database level
-				opt.is_allowed(Action::View, ResourceKind::Record, &Base::Db)?;
+				ctx.is_allowed(opt, Action::View, ResourceKind::Record, Base::Db)?;
 
 				// Get the namespace and database IDs
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;

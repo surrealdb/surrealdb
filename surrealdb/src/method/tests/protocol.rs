@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::marker::PhantomData;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use tokio::sync::watch;
 use url::Url;
@@ -33,7 +33,7 @@ impl Surreal<Client> {
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
-			surreal: self.inner.clone().into(),
+			surreal: Arc::clone(&self.inner).into(),
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,

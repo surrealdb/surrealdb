@@ -1,0 +1,50 @@
+[package]
+name = "surrealdb-mcp"
+publish = true
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+version.workspace = true
+description = "Built-in MCP (Model Context Protocol) server for SurrealDB"
+
+[features]
+default = ["server-http"]
+server-http = [
+    "rmcp/server-side-http",
+    "rmcp/transport-streamable-http-server",
+    "rmcp/transport-streamable-http-server-session",
+    "rmcp/transport-worker",
+]
+transport-io = ["rmcp/transport-io"]
+
+[dependencies]
+rmcp = { workspace = true, features = ["server", "macros"] }
+surrealdb-core = { workspace = true }
+surrealdb-types = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+http = { workspace = true }
+schemars = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
+tracing = { workspace = true }
+web-time = { workspace = true }
+
+[dev-dependencies]
+surrealdb-core = { workspace = true, features = ["kv-mem"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "io-util", "time"] }
+# Enable `client` so integration tests can drive the MCP server over an
+# in-process duplex transport (same code path as `serve_stdio`).
+rmcp = { workspace = true, features = ["client", "server", "macros"] }
+# Used by the HTTP transport integration tests to construct request bodies
+# and collect streamable responses.
+bytes = { workspace = true }
+http-body-util = { workspace = true }
+# Used by the audit-pipeline tests to capture `tracing::info!` events
+# emitted on the `surrealdb::mcp::audit` target so the spec-mandated
+# session-hijack detection event is regression-covered.
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

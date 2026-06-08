@@ -68,6 +68,8 @@ mod tests {
 			let val = Hv::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), &vec);
 			let enc = Hv::encode_key(&val).unwrap();
 			assert_eq!(enc, expected, "{info}: {}", String::from_utf8_lossy(&enc));
+			let dec: Hv<'_> = storekey::decode_borrow(&enc).unwrap();
+			assert_eq!(dec, val, "{info}");
 		};
 		test(
 			SerializedVector::I16(vec![1, 2, 3]),
@@ -97,6 +99,24 @@ mod tests {
 			SerializedVector::F64(vec![1.0, 2.0, 3.0]),
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x01\0\x03\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\xF0\x3F\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x40\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x08\x40\0",
 			"f64",
+		);
+
+		test(
+			SerializedVector::F16(vec![1, 2, 3]),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x05\x03\x01\x01\x01\0\x02\x01\0\x03\x01\0\0",
+			"f16",
+		);
+
+		test(
+			SerializedVector::I8(vec![1, 2, 3]),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x06\x03\x01\x01\x02\x03\0",
+			"i8",
+		);
+
+		test(
+			SerializedVector::U8(vec![1, 2, 3]),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x07\x03\x01\x01\x02\x03\0",
+			"u8",
 		);
 	}
 }

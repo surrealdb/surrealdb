@@ -364,6 +364,67 @@ impl Command {
 				| Command::Unset { .. }
 		)
 	}
+
+	/// Whether `self` would be a no-op (replay-wise) if appended directly after
+	/// `prev` at the tail of the replay log. Used to coalesce idempotent
+	/// command runs (e.g. a `useDb` loop) so the replay log doesn't grow O(N).
+	///
+	/// Load-bearing invariant for the `Use(None, None)` -> `true` branch:
+	/// `Command::Use` carries `Option<String>` for each field, and
+	/// [`Command::into_router_request`] encodes `None` as `Value::None` (never
+	/// `Value::Null`). The server-side `yuse` handler treats `(None, None)` as
+	/// a no-op when `session.ns` is already set — only the `Value::Null` form
+	/// (unreachable from the SDK) clears the session. If a future change adds
+	/// a clearing variant to `Command::Use` or maps `None` to `Value::Null` on
+	/// the wire, revisit this method and the corresponding tests.
+	#[cfg(feature = "protocol-ws")]
+	fn is_replay_noop_after(&self, prev: &Command) -> bool {
+		match (prev, self) {
+			(
+				Command::Use {
+					namespace: pn,
+					database: pd,
+				},
+				Command::Use {
+					namespace: nn,
+					database: nd,
+				},
+			) => {
+				// Use commands carry `None` for "leave unchanged" and `Some(_)`
+				// for "set to this". Replaying `prev` already left the session
+				// in some (ns', db') state; `self` is a no-op only if every
+				// field it sets matches what `prev` already set.
+				let ns_noop = nn.is_none() || nn == pn;
+				let db_noop = nd.is_none() || nd == pd;
+				ns_noop && db_noop
+			}
+			_ => false,
+		}
+	}
+}
+
+/// Append `command` to the replay log unless it's a no-op against the current
+/// tail entry. Caller has already verified the command is replayable.
+///
+/// Concurrency invariant: the tail read and the push are not atomic with each
+/// other. Only call this from contexts where replay recording is serialized
+/// for a given session (e.g. the WS engine's single-threaded response loop).
+/// The HTTP engine handles each request in a spawned task and must keep using
+/// a plain `replay.push(command)`.
+#[cfg(feature = "protocol-ws")]
+fn record_replayable(replay: &boxcar::Vec<Command>, command: Command) {
+	debug_assert!(
+		command.replayable(),
+		"record_replayable called with non-replayable command: {command:?}",
+	);
+	let n = replay.count();
+	if n > 0
+		&& let Some(prev) = replay.get(n - 1)
+		&& command.is_replay_noop_after(prev)
+	{
+		return;
+	}
+	replay.push(command);
 }
 
 #[cfg(test)]
@@ -373,7 +434,7 @@ mod test {
 	use super::RouterRequest;
 	use crate::types::{Array, Number, SurrealValue, Value};
 
-	fn assert_converts<S, D, I>(req: RouterRequest, s: S, d: D)
+	fn assert_converts<S, D, I>(req: &RouterRequest, s: S, d: D)
 	where
 		S: FnOnce(&Value) -> I,
 		D: FnOnce(I) -> Value,
@@ -414,9 +475,93 @@ mod test {
 		};
 
 		assert_converts(
-			request,
+			&request,
 			|i| surrealdb_core::rpc::format::flatbuffers::encode(i).unwrap(),
 			|b| surrealdb_core::rpc::format::flatbuffers::decode(&b).unwrap(),
 		);
+	}
+}
+
+// Replay coalescing is only used by the WS engine, so gate these tests on the
+// same feature that compiles `record_replayable` / `is_replay_noop_after`.
+#[cfg(all(test, feature = "protocol-ws"))]
+mod replay_test {
+	use super::{Command, record_replayable};
+
+	fn use_cmd(ns: Option<&str>, db: Option<&str>) -> Command {
+		Command::Use {
+			namespace: ns.map(String::from),
+			database: db.map(String::from),
+		}
+	}
+
+	#[test]
+	fn record_replayable_dedups_identical_consecutive_use() {
+		let replay = boxcar::Vec::new();
+		record_replayable(&replay, use_cmd(Some("ns1"), None));
+		for _ in 0..500 {
+			record_replayable(&replay, use_cmd(None, Some("db1")));
+		}
+		// Two Use entries: one for ns, one for db. The 499 repeats are coalesced.
+		assert_eq!(replay.count(), 2);
+	}
+
+	#[test]
+	fn record_replayable_keeps_distinct_use_entries() {
+		let replay = boxcar::Vec::new();
+		record_replayable(&replay, use_cmd(Some("ns1"), None));
+		record_replayable(&replay, use_cmd(None, Some("db1")));
+		record_replayable(&replay, use_cmd(Some("ns2"), None));
+		record_replayable(&replay, use_cmd(None, Some("db2")));
+		assert_eq!(replay.count(), 4);
+	}
+
+	#[test]
+	fn record_replayable_does_not_dedup_other_commands() {
+		let replay = boxcar::Vec::new();
+		record_replayable(&replay, Command::Invalidate);
+		record_replayable(&replay, Command::Invalidate);
+		assert_eq!(replay.count(), 2);
+	}
+
+	#[test]
+	fn record_replayable_does_not_skip_use_after_non_use_tail() {
+		let replay = boxcar::Vec::new();
+		record_replayable(&replay, use_cmd(Some("ns1"), Some("db1")));
+		record_replayable(&replay, Command::Invalidate);
+		// Even though this Use matches an earlier Use, the tail isn't Use,
+		// so we still record it.
+		record_replayable(&replay, use_cmd(Some("ns1"), Some("db1")));
+		assert_eq!(replay.count(), 3);
+	}
+
+	#[test]
+	fn is_replay_noop_after_partial_use_against_full_tail() {
+		// Tail already sets both ns and db. A follow-up that only sets db to
+		// the same value should be dropped; a follow-up that changes db should
+		// not.
+		let full = use_cmd(Some("ns1"), Some("db1"));
+		assert!(use_cmd(None, Some("db1")).is_replay_noop_after(&full));
+		assert!(!use_cmd(None, Some("db2")).is_replay_noop_after(&full));
+	}
+
+	#[test]
+	fn use_defaults_subsumed_by_prior_full_use_is_safe_to_drop() {
+		// `Surreal::use_defaults()` sends `Use { namespace: None, database: None }`.
+		// When the replay log tail already targets a specific (ns, db), replaying
+		// that Use sets `session.ns` first, so the server's `yuse` handler treats
+		// the subsequent `Use(None, None)` as a no-op (the defaults branch is
+		// gated on `session.ns.is_none()`). The SDK cannot send the wire-level
+		// `Value::Null` that would clear the session — `Command::Use` is typed
+		// as `Option<String>`, and `None` is encoded as `Value::None`. So
+		// dropping the trailing `Use(None, None)` preserves end-state under
+		// replay against any fresh session.
+		let full = use_cmd(Some("ns1"), Some("db1"));
+		assert!(use_cmd(None, None).is_replay_noop_after(&full));
+
+		let replay = boxcar::Vec::new();
+		record_replayable(&replay, full);
+		record_replayable(&replay, use_cmd(None, None));
+		assert_eq!(replay.count(), 1);
 	}
 }

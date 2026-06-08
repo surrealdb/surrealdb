@@ -7,7 +7,7 @@ use crate::fmt::Fmt;
 use crate::sql::statements::{
 	AccessStatement, KillStatement, LiveStatement, OptionStatement, ShowStatement, UseStatement,
 };
-use crate::sql::{Expr, Param};
+use crate::sql::{Expr, Literal, Param};
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -52,11 +52,32 @@ impl Ast {
 		self.expressions.len()
 	}
 
+	/// Returns `true` if this AST is exactly one top-level expression and that
+	/// expression describes inert data only: a literal (including objects,
+	/// arrays and sets of inert data), a `$param` reference, or a built-in
+	/// constant.
+	///
+	/// Use this to validate request payloads that are intended to supply
+	/// values rather than to execute SurrealQL (e.g. the body of a REST
+	/// `/key` request that is bound to `$data`). Function calls, idioms,
+	/// statements (CREATE/UPDATE/...), blocks, binary expressions and other
+	/// executable forms are all rejected, including when nested inside
+	/// object or array literals.
+	pub fn is_value_expression(&self) -> bool {
+		if self.expressions.len() != 1 {
+			return false;
+		}
+		let TopLevelExpr::Expr(expr) = &self.expressions[0] else {
+			return false;
+		};
+		is_value_expr(expr)
+	}
+
 	pub fn get_let_statements(&self) -> Vec<String> {
 		let mut let_var_names = Vec::new();
 		for expr in &self.expressions {
 			if let TopLevelExpr::Expr(Expr::Let(stmt)) = expr {
-				let_var_names.push(stmt.name.clone());
+				let_var_names.push(stmt.name.as_str().to_owned());
 			}
 		}
 		let_var_names
@@ -64,6 +85,37 @@ impl Ast {
 
 	pub fn add_param(&mut self, name: String) {
 		self.expressions.push(TopLevelExpr::Expr(Expr::Param(Param::new(name))));
+	}
+}
+
+fn is_value_expr(expr: &Expr) -> bool {
+	match expr {
+		Expr::Param(_) | Expr::Constant(_) => true,
+		Expr::Literal(lit) => is_value_literal(lit),
+		_ => false,
+	}
+}
+
+fn is_value_literal(lit: &Literal) -> bool {
+	match lit {
+		Literal::Array(items) | Literal::Set(items) => items.iter().all(is_value_expr),
+		Literal::Object(entries) => entries.iter().all(|e| is_value_expr(&e.value)),
+		Literal::None
+		| Literal::Null
+		| Literal::UnboundedRange
+		| Literal::Bool(_)
+		| Literal::Float(_)
+		| Literal::Integer(_)
+		| Literal::Decimal(_)
+		| Literal::Duration(_)
+		| Literal::String(_)
+		| Literal::RecordId(_)
+		| Literal::Datetime(_)
+		| Literal::Uuid(_)
+		| Literal::Regex(_)
+		| Literal::Geometry(_)
+		| Literal::File(_)
+		| Literal::Bytes(_) => true,
 	}
 }
 

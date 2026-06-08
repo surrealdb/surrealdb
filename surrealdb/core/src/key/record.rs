@@ -5,9 +5,10 @@ use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId, Record};
+use crate::err::Error;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{KVKey, impl_kv_key_storekey};
-use crate::val::{RecordIdKey, TableName};
+use crate::kvs::KVKey;
+use crate::val::{RecordId, RecordIdKey, TableName};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 #[storekey(format = "()")]
@@ -23,7 +24,20 @@ pub(crate) struct RecordKey<'a> {
 	pub id: RecordIdKey,
 }
 
-impl_kv_key_storekey!(RecordKey<'_> => Record);
+impl KVKey for RecordKey<'_> {
+	type ValueType = Record;
+
+	fn encode_key(&self) -> Result<Vec<u8>> {
+		Ok(storekey::encode_vec(self).map_err(|_| Error::Unencodable)?)
+	}
+
+	fn value_context(&self) -> RecordId {
+		RecordId {
+			table: self.tb.as_ref().clone(),
+			key: self.id.clone(),
+		}
+	}
+}
 
 pub fn new<'a>(
 	ns: NamespaceId,
@@ -75,6 +89,8 @@ impl<'a> RecordKey<'a> {
 #[cfg(test)]
 mod tests {
 
+	use surrealdb_strand::Strand;
+
 	use super::*;
 	use crate::syn;
 
@@ -85,7 +101,7 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			&tb,
-			RecordIdKey::String("testid".to_owned()),
+			RecordIdKey::String(Strand::new_static("testid")),
 		);
 		let enc = RecordKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0*\x03testid\0");

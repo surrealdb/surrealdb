@@ -4,7 +4,7 @@ use super::lookup::Lookup;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::val::RecordIdKey;
 
-#[derive(Clone, Hash, Eq, PartialEq)]
+#[derive(Hash, Eq, PartialEq)]
 pub(crate) enum Key {
 	/// A cache key for nodes
 	Nds,

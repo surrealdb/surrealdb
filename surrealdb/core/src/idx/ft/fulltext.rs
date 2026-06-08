@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -26,7 +27,6 @@ use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::expr::Idiom;
 use crate::expr::operator::BooleanOperator;
-use crate::idx::IndexKeyBase;
 use crate::idx::ft::analyzer::Analyzer;
 use crate::idx::ft::analyzer::filter::FilteringStage;
 use crate::idx::ft::analyzer::tokenizer::Tokens;
@@ -36,8 +36,9 @@ use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::seqdocids::{DocId, SeqDocIds};
 use crate::idx::trees::store::IndexStores;
+use crate::idx::{IndexKeyBase, bump_compaction_generation, read_compaction_generation};
 use crate::key::index::tt::Tt;
-use crate::kvs::{Transaction, impl_kv_value_revisioned};
+use crate::kvs::{COUNT_BATCH_SIZE, Key, Transaction, impl_kv_value_revisioned};
 use crate::val::{RecordId, Value};
 #[revisioned(revision = 1)]
 #[derive(Debug, Default, PartialEq)]
@@ -62,7 +63,7 @@ impl TermDocument {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 /// Tracks document length and count statistics for the index
 pub(crate) struct DocLengthAndCount {
 	/// The total length of all documents in the index
@@ -139,7 +140,7 @@ impl QueryTerms {
 	}
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub(crate) struct Bm25Params {
 	pub(in crate::idx) k1: f32,
 	pub(in crate::idx) b: f32,
@@ -160,6 +161,67 @@ pub(crate) struct FullTextIndex {
 	bm25: Option<Bm25Params>,
 }
 
+/// Snapshot gathered by the read phase of full-text compaction.
+///
+/// The plan contains only the exact `!dc`/`!tt` delta keys observed at the
+/// snapshot plus the generations that must still match before applying it. A
+/// continuation flag tells the datastore whether to prepare another bounded
+/// batch after this one commits.
+pub(crate) struct FullTextCompactionPlan {
+	doc_lengths: DocLengthAndCountCompactionPlan,
+	term_docs: TermDocsCompactionPlan,
+}
+
+impl FullTextCompactionPlan {
+	/// Returns true when the plan contains at least one delta key to compact.
+	pub(crate) fn has_work(&self) -> bool {
+		self.doc_lengths.has_logs() || self.term_docs.has_logs()
+	}
+
+	/// Returns true when at least one full-text delta range has more entries.
+	pub(crate) fn has_more(&self) -> bool {
+		self.doc_lengths.has_more() || self.term_docs.has_more()
+	}
+}
+
+/// Bounded read-phase snapshot for document count/length (`!dc`) compaction.
+struct DocLengthAndCountCompactionPlan {
+	generation: Option<u64>,
+	dlc: DocLengthAndCount,
+	delta_keys: Vec<Key>,
+	has_more: bool,
+}
+
+impl DocLengthAndCountCompactionPlan {
+	fn has_logs(&self) -> bool {
+		!self.delta_keys.is_empty()
+	}
+
+	/// Returns true when the `!dc` delta scan stopped before the range ended.
+	fn has_more(&self) -> bool {
+		self.has_more
+	}
+}
+
+/// Bounded read-phase snapshot for term-document (`!tt`) compaction.
+struct TermDocsCompactionPlan {
+	generation: Option<u64>,
+	deltas_by_term: HashMap<String, HashMap<DocId, i64>>,
+	delta_keys: Vec<Key>,
+	has_more: bool,
+}
+
+impl TermDocsCompactionPlan {
+	fn has_logs(&self) -> bool {
+		!self.delta_keys.is_empty()
+	}
+
+	/// Returns true when the `!tt` delta scan stopped before the range ended.
+	fn has_more(&self) -> bool {
+		self.has_more
+	}
+}
+
 impl FullTextIndex {
 	/// Creates a new full-text index with the specified parameters
 	///
@@ -170,9 +232,10 @@ impl FullTextIndex {
 		tx: &Transaction,
 		ikb: IndexKeyBase,
 		p: &FullTextParams,
+		allow_list: &[PathBuf],
 	) -> Result<Self> {
 		let az = tx.get_db_analyzer(ikb.0.ns, ikb.0.db, &p.analyzer, None).await?;
-		ixs.mappers().check(&az).await?;
+		ixs.mappers().check(&az, allow_list).await?;
 		Self::with_analyzer(ixs, az, ikb, p)
 	}
 
@@ -225,7 +288,7 @@ impl FullTextIndex {
 			self.analyzer.analyze_content(stk, ctx, opt, content, FilteringStage::Indexing).await?;
 		let mut set = HashSet::new();
 		let tx = ctx.tx();
-		let nid = opt.id();
+		let nid = ctx.node_id();
 		// Get the doc id (if it exists)
 		let doc_id = self.get_doc_id(&tx, rid).await?;
 		if let Some(doc_id) = doc_id {
@@ -254,7 +317,7 @@ impl FullTextIndex {
 						total_docs_length: -(dl as i128),
 						doc_count: -1,
 					};
-					let key = self.ikb.new_dc_with_id(doc_id, opt.id(), Uuid::now_v7());
+					let key = self.ikb.new_dc_with_id(doc_id, ctx.node_id(), Uuid::now_v7());
 					tx.put(&key, &dcl).await?;
 					*require_compaction = true;
 				}
@@ -287,7 +350,7 @@ impl FullTextIndex {
 		require_compaction: &mut bool,
 	) -> Result<()> {
 		let tx = ctx.tx();
-		let nid = opt.id();
+		let nid = ctx.node_id();
 		// Get the doc id (if it exists)
 		let id = self.doc_ids.resolve_doc_id(ctx, rid.key.clone()).await?;
 		// Collect the tokens.
@@ -305,7 +368,7 @@ impl FullTextIndex {
 		}
 		{
 			// Increase the doc count and total doc length
-			let key = self.ikb.new_dc_with_id(id.doc_id(), opt.id(), Uuid::now_v7());
+			let key = self.ikb.new_dc_with_id(id.doc_id(), ctx.node_id(), Uuid::now_v7());
 			let dcl = DocLengthAndCount {
 				total_docs_length: dl as i128,
 				doc_count: 1,
@@ -385,7 +448,7 @@ impl FullTextIndex {
 	) -> Result<QueryTerms> {
 		let tokens = self
 			.analyzer
-			.generate_tokens(stk, ctx, opt, FilteringStage::Querying, query_string)
+			.generate_tokens(stk, ctx, opt, FilteringStage::Querying, query_string.into())
 			.await?;
 
 		let mut unique_terms: Vec<&str> = Vec::new();
@@ -515,56 +578,100 @@ impl FullTextIndex {
 		Ok(())
 	}
 
-	/// Compacts term documents by consolidating deltas and removing logs
-	///
-	/// This method processes all term document deltas, applies them to the
-	/// consolidated term documents, and removes the delta logs. It returns
-	/// true if any compaction was performed.
-	async fn compact_term_docs(&self, tx: &Transaction) -> Result<bool> {
-		// Get the range of all term transaction logs
+	/// Read phase for `!tt`: capture the generation, fold visible deltas by
+	/// term/doc, and remember the exact delta keys seen in this snapshot.
+	async fn prepare_term_docs_compaction(
+		&self,
+		tx: &Transaction,
+	) -> Result<TermDocsCompactionPlan> {
+		self.prepare_term_docs_compaction_with_limit(tx, COUNT_BATCH_SIZE).await
+	}
+
+	async fn prepare_term_docs_compaction_with_limit(
+		&self,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<TermDocsCompactionPlan> {
+		let generation = read_compaction_generation(tx, &self.ikb.new_tv_key()).await?;
 		let (beg, end) = self.ikb.new_tt_terms_range()?;
-		let mut current_term = "".to_string();
-		let mut deltas: HashMap<DocId, i64> = HashMap::new();
 		let range = beg..end;
-		let mut has_log = false;
-
-		// Process all term transaction logs, grouped by term
-		for k in tx.keys(range.clone(), u32::MAX, 0, None).await? {
+		let mut delta_keys = Vec::new();
+		let mut deltas_by_term: HashMap<String, HashMap<DocId, i64>> = HashMap::new();
+		let batch = tx.batch_keys(range, limit.max(1), None).await?;
+		for k in batch.result {
 			let tt = Tt::decode_key(&k)?;
-			has_log = true;
-
-			// If we've moved to a new term, consolidate the previous term's deltas
-			if current_term != tt.term {
-				// Apply accumulated deltas for the previous term (if any)
-				if !current_term.is_empty() && !deltas.is_empty() {
-					self.set_term_docs_delta(tx, &current_term, &deltas).await?;
-					deltas.clear();
-				}
-				// Start tracking the new term
-				current_term = tt.term.to_string();
-			}
-
-			// Accumulate deltas for the current term
-			let entry = deltas.entry(tt.doc_id).or_default();
+			let entry = deltas_by_term
+				.entry(tt.term.to_string())
+				.or_default()
+				.entry(tt.doc_id)
+				.or_default();
 			if tt.add {
 				*entry += 1;
 			} else {
 				*entry -= 1;
 			}
+			delta_keys.push(k);
 		}
+		Ok(TermDocsCompactionPlan {
+			generation,
+			deltas_by_term,
+			delta_keys,
+			has_more: batch.next.is_some(),
+		})
+	}
 
-		// Don't forget to process the last term if there was one
-		if !current_term.is_empty() && !deltas.is_empty() {
-			self.set_term_docs_delta(tx, &current_term, &deltas).await?;
+	/// Write phase for `!tt`: CAS the generation, update compacted term
+	/// bitmaps, and delete only the snapshot-seen delta keys.
+	#[cfg(test)]
+	async fn apply_term_docs_compaction(
+		&self,
+		tx: &Transaction,
+		plan: TermDocsCompactionPlan,
+	) -> Result<bool> {
+		if !plan.has_logs() {
+			return Ok(false);
 		}
-
-		// After processing all logs, remove them from the database
-		if has_log {
-			tx.delr(range).await?;
+		if !self.reserve_term_docs_compaction_generation(tx, &plan).await? {
+			return Ok(false);
 		}
+		self.write_term_docs_compaction(tx, plan).await?;
+		Ok(true)
+	}
 
-		// Return whether any compaction was performed
-		Ok(has_log)
+	/// Advances the term-document compaction generation for a non-empty plan.
+	async fn reserve_term_docs_compaction_generation(
+		&self,
+		tx: &Transaction,
+		plan: &TermDocsCompactionPlan,
+	) -> Result<bool> {
+		if !plan.has_logs() {
+			return Ok(true);
+		}
+		bump_compaction_generation(tx, &self.ikb.new_tv_key(), plan.generation).await
+	}
+
+	/// Updates compacted term-document bitmaps and removes captured `!tt` deltas.
+	async fn write_term_docs_compaction(
+		&self,
+		tx: &Transaction,
+		plan: TermDocsCompactionPlan,
+	) -> Result<()> {
+		for (term, deltas) in plan.deltas_by_term {
+			if !deltas.is_empty() {
+				self.set_term_docs_delta(tx, &term, &deltas).await?;
+			}
+		}
+		for key in plan.delta_keys {
+			tx.del(&key).await?;
+		}
+		Ok(())
+	}
+
+	/// Compacts term documents by consolidating deltas and removing logs.
+	#[cfg(test)]
+	async fn compact_term_docs(&self, tx: &Transaction) -> Result<bool> {
+		let plan = self.prepare_term_docs_compaction(tx).await?;
+		self.apply_term_docs_compaction(tx, plan).await
 	}
 
 	/// Creates a new iterator for search hits
@@ -664,24 +771,20 @@ impl FullTextIndex {
 	pub(crate) async fn new_scorer(&self, ctx: &FrozenContext) -> Result<Option<Scorer>> {
 		if let Some(bm25) = &self.bm25 {
 			let dlc = self.compute_doc_length_and_count(&ctx.tx(), None).await?;
-			let sc = Scorer::new(dlc, bm25.clone());
+			let sc = Scorer::new(dlc, *bm25);
 			return Ok(Some(sc));
 		}
 		Ok(None)
 	}
 
-	/// Computes document length and count statistics for the index
+	/// Collects compacted root stats plus all visible `!dc` deltas.
 	///
-	/// This method calculates the total document length and count by scanning
-	/// both the compacted root key and any uncompacted delta entries in a
-	/// single range query (via `new_dc_range_with_root`). If `compact_log` is
-	/// provided, it will also remove the delta logs (but not the root key)
-	/// and set the flag to true if any delta logs were removed.
-	async fn compute_doc_length_and_count(
+	/// The root and deltas share a range, so this read is used for query-time
+	/// scoring where the complete statistic is needed.
+	async fn collect_doc_length_and_count(
 		&self,
 		tx: &Transaction,
-		compact_log: Option<&mut bool>,
-	) -> Result<DocLengthAndCount> {
+	) -> Result<(DocLengthAndCount, Vec<Key>)> {
 		let mut dlc = DocLengthAndCount::default();
 		let (beg, end) = self.ikb.new_dc_range_with_root()?;
 		let range = beg..end;
@@ -689,32 +792,135 @@ impl FullTextIndex {
 		// terms (DocLength) This key list is supposed to be small, subject to
 		// compaction. The root key is the compacted values, and the others are deltas
 		// from transaction not yet compacted.
-		let root_key = if compact_log.is_some() {
-			Some(self.ikb.new_dc_compacted()?)
-		} else {
-			None
-		};
-		let mut has_log = false;
+		let root_key = self.ikb.new_dc_compacted()?;
+		let mut delta_keys = Vec::new();
 		for (k, v) in tx.getr(range.clone(), None).await? {
 			let st: DocLengthAndCount = revision::from_slice(&v)?;
 			dlc.doc_count += st.doc_count;
 			dlc.total_docs_length += st.total_docs_length;
 
-			if !has_log
-				&& let Some(r) = &root_key
-				&& k.ne(r)
-			{
-				has_log = true;
+			if k != root_key {
+				delta_keys.push(k);
 			}
 		}
+		Ok((dlc, delta_keys))
+	}
+
+	/// Returns the `!dc` range that contains only delta entries.
+	fn dc_delta_range(&self) -> Result<std::ops::Range<Key>> {
+		let (mut beg, end) = self.ikb.new_dc_range_with_root()?;
+		beg.push(0);
+		Ok(beg..end)
+	}
+
+	/// Collects compacted root stats plus a bounded batch of visible `!dc`
+	/// deltas for compaction.
+	async fn collect_doc_length_and_count_compaction(
+		&self,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<(DocLengthAndCount, Vec<Key>, bool)> {
+		let root_key = self.ikb.new_dc_compacted()?;
+		let mut dlc = if let Some(v) = tx.get(&root_key, None).await? {
+			revision::from_slice(&v)?
+		} else {
+			DocLengthAndCount::default()
+		};
+		let batch = tx.batch_keys_vals(self.dc_delta_range()?, limit.max(1), None).await?;
+		let mut delta_keys = Vec::with_capacity(batch.result.len());
+		for (k, v) in batch.result {
+			let st: DocLengthAndCount = revision::from_slice(&v)?;
+			dlc.doc_count += st.doc_count;
+			dlc.total_docs_length += st.total_docs_length;
+			delta_keys.push(k);
+		}
+		Ok((dlc, delta_keys, batch.next.is_some()))
+	}
+
+	async fn compute_doc_length_and_count(
+		&self,
+		tx: &Transaction,
+		compact_log: Option<&mut bool>,
+	) -> Result<DocLengthAndCount> {
+		let (dlc, delta_keys) = self.collect_doc_length_and_count(tx).await?;
 		if let Some(compact_log) = compact_log
-			&& has_log
+			&& !delta_keys.is_empty()
 		{
-			let (beg, end) = self.ikb.new_dc_range()?;
-			tx.delr(beg..end).await?;
+			for key in delta_keys {
+				tx.del(&key).await?;
+			}
 			*compact_log = true;
 		}
 		Ok(dlc)
+	}
+
+	/// Read phase for `!dc`: capture the generation, compute aggregate doc
+	/// stats, and remember the exact delta keys seen in this snapshot.
+	async fn prepare_doc_length_and_count_compaction(
+		&self,
+		tx: &Transaction,
+	) -> Result<DocLengthAndCountCompactionPlan> {
+		self.prepare_doc_length_and_count_compaction_with_limit(tx, COUNT_BATCH_SIZE).await
+	}
+
+	async fn prepare_doc_length_and_count_compaction_with_limit(
+		&self,
+		tx: &Transaction,
+		limit: u32,
+	) -> Result<DocLengthAndCountCompactionPlan> {
+		let generation = read_compaction_generation(tx, &self.ikb.new_dv_key()).await?;
+		let (dlc, delta_keys, has_more) =
+			self.collect_doc_length_and_count_compaction(tx, limit).await?;
+		Ok(DocLengthAndCountCompactionPlan {
+			generation,
+			dlc,
+			delta_keys,
+			has_more,
+		})
+	}
+
+	/// Write phase for `!dc`: CAS the generation, write the compacted root,
+	/// and delete only the snapshot-seen delta keys.
+	#[cfg(test)]
+	async fn apply_doc_length_and_count_compaction(
+		&self,
+		tx: &Transaction,
+		plan: DocLengthAndCountCompactionPlan,
+	) -> Result<bool> {
+		if !plan.has_logs() {
+			return Ok(false);
+		}
+		if !self.reserve_doc_length_and_count_compaction_generation(tx, &plan).await? {
+			return Ok(false);
+		}
+		self.write_doc_length_and_count_compaction(tx, plan).await?;
+		Ok(true)
+	}
+
+	/// Advances the document-stat compaction generation for a non-empty plan.
+	async fn reserve_doc_length_and_count_compaction_generation(
+		&self,
+		tx: &Transaction,
+		plan: &DocLengthAndCountCompactionPlan,
+	) -> Result<bool> {
+		if !plan.has_logs() {
+			return Ok(true);
+		}
+		bump_compaction_generation(tx, &self.ikb.new_dv_key(), plan.generation).await
+	}
+
+	/// Writes compacted document stats and removes captured `!dc` deltas.
+	async fn write_doc_length_and_count_compaction(
+		&self,
+		tx: &Transaction,
+		plan: DocLengthAndCountCompactionPlan,
+	) -> Result<()> {
+		let key = self.ikb.new_dc_compacted()?;
+		tx.set(&key, &revision::to_vec(&plan.dlc)?).await?;
+		for key in plan.delta_keys {
+			tx.del(&key).await?;
+		}
+		Ok(())
 	}
 
 	/// Compacts document length and count statistics
@@ -722,18 +928,55 @@ impl FullTextIndex {
 	/// This method consolidates document length and count statistics and
 	/// removes the delta logs. It returns true if any compaction was
 	/// performed.
+	#[cfg(test)]
 	async fn compact_doc_length_and_count(&self, tx: &Transaction) -> Result<bool> {
-		let mut has_logs = false;
-		let dlc = self.compute_doc_length_and_count(tx, Some(&mut has_logs)).await?;
-		let key = self.ikb.new_dc_compacted()?;
-		tx.set(&key, &revision::to_vec(&dlc)?).await?;
-		Ok(has_logs)
+		let plan = self.prepare_doc_length_and_count_compaction(tx).await?;
+		self.apply_doc_length_and_count_compaction(tx, plan).await
+	}
+
+	/// Builds the full-text compaction plan in a read-only transaction.
+	pub(in crate::idx) async fn prepare_compaction(
+		&self,
+		tx: &Transaction,
+	) -> Result<FullTextCompactionPlan> {
+		Ok(FullTextCompactionPlan {
+			doc_lengths: self.prepare_doc_length_and_count_compaction(tx).await?,
+			term_docs: self.prepare_term_docs_compaction(tx).await?,
+		})
+	}
+
+	/// Applies a prepared full-text compaction plan in a short write
+	/// transaction. A generation mismatch leaves the plan unapplied.
+	pub(in crate::idx) async fn apply_compaction(
+		&self,
+		tx: &Transaction,
+		plan: FullTextCompactionPlan,
+	) -> Result<bool> {
+		if !plan.has_work() {
+			return Ok(false);
+		}
+		if !self.reserve_doc_length_and_count_compaction_generation(tx, &plan.doc_lengths).await? {
+			return Ok(false);
+		}
+		if !self.reserve_term_docs_compaction_generation(tx, &plan.term_docs).await? {
+			return Ok(false);
+		}
+		let has_doc_lengths = plan.doc_lengths.has_logs();
+		let has_term_docs = plan.term_docs.has_logs();
+		if has_doc_lengths {
+			self.write_doc_length_and_count_compaction(tx, plan.doc_lengths).await?;
+		}
+		if has_term_docs {
+			self.write_term_docs_compaction(tx, plan.term_docs).await?;
+		}
+		Ok(has_doc_lengths || has_term_docs)
 	}
 
 	/// Performs compaction on the full-text index
 	///
 	/// This method compacts both document length/count statistics and term
 	/// documents. It returns true if any compaction was performed.
+	#[cfg(test)]
 	pub(crate) async fn compaction(&self, tx: &Transaction) -> Result<bool> {
 		let r1 = self.compact_doc_length_and_count(tx).await?;
 		let r2 = self.compact_term_docs(tx).await?;
@@ -756,7 +999,7 @@ impl FullTextIndex {
 	) -> Result<Value> {
 		let doc_id = self.get_doc_id(tx, thg).await?;
 		if let Some(doc_id) = doc_id {
-			let mut hl = Highlighter::new(hlp, idiom, doc);
+			let mut hl = Highlighter::new(&hlp, idiom, doc);
 			for tk in qt.tokens.list() {
 				if let Some(td) =
 					self.get_term_document(tx, doc_id, qt.tokens.get_token_string(tk)?).await?
@@ -969,7 +1212,7 @@ mod tests {
 
 	use super::{FullTextIndex, TermDocument};
 	use crate::catalog::{DatabaseId, FullTextParams, IndexId, NamespaceId};
-	use crate::cnf::dynamic::DynamicConfiguration;
+	use crate::cnf::CommonConfig;
 	use crate::ctx::{Context, FrozenContext};
 	use crate::dbs::Options;
 	use crate::expr::statements::DefineAnalyzerStatement;
@@ -1008,8 +1251,8 @@ mod tests {
 			};
 			let mut stack = reblessive::TreeStack::new();
 
-			let opts = Options::new(ds.id(), DynamicConfiguration::default());
-			let stk_ctx = ctx.clone();
+			let opts = Options::new(&CommonConfig::default());
+			let stk_ctx = Arc::clone(&ctx);
 			let az = stack
 				.enter(|stk| async move {
 					Arc::new(
@@ -1055,7 +1298,7 @@ mod tests {
 			});
 			let nid = Uuid::new_v4();
 			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t".into(), IndexId(3));
-			let opt = Options::new(nid, DynamicConfiguration::default())
+			let opt = Options::new(&CommonConfig::default())
 				.with_ns(Some("testns".into()))
 				.with_db(Some("testdb".into()));
 			let fti = Arc::new(
@@ -1082,7 +1325,7 @@ mod tests {
 		async fn remove_insert_task(&self, stk: &mut Stk, rid: &RecordId) {
 			let mut ctx = Context::new_child(&self.ctx);
 			let tx = self.new_tx(TransactionType::Write).await;
-			ctx.set_transaction(tx.clone());
+			ctx.set_transaction(Arc::clone(&tx));
 			let ctx = ctx.freeze();
 
 			let mut require_compaction = false;
@@ -1114,6 +1357,22 @@ mod tests {
 			}
 
 			tx.commit().await.unwrap();
+		}
+
+		async fn dc_delta_count(&self, tx: &Transaction) -> usize {
+			let (beg, end) = self.ikb.new_dc_range_with_root().unwrap();
+			let root = self.ikb.new_dc_compacted().unwrap();
+			tx.keys(beg..end, u32::MAX, 0, None)
+				.await
+				.unwrap()
+				.into_iter()
+				.filter(|k| k != &root)
+				.count()
+		}
+
+		async fn tt_delta_count(&self, tx: &Transaction) -> usize {
+			let (beg, end) = self.ikb.new_tt_terms_range().unwrap();
+			tx.count(beg..end, None).await.unwrap()
 		}
 	}
 
@@ -1195,11 +1454,13 @@ mod tests {
 
 		let test = TestContext::new().await;
 		// Ensure the documents are pre-existing
-		concurrent_doc_update(test.clone(), doc1.clone(), 1).await;
-		concurrent_doc_update(test.clone(), doc2.clone(), 1).await;
+		concurrent_doc_update(test.clone(), Arc::clone(&doc1), 1).await;
+		concurrent_doc_update(test.clone(), Arc::clone(&doc2), 1).await;
 		// Prepare the concurrent tasks
-		let task1 = tokio::spawn(concurrent_doc_update(test.clone(), doc1.clone(), usize::MAX));
-		let task2 = tokio::spawn(concurrent_doc_update(test.clone(), doc2.clone(), usize::MAX));
+		let task1 =
+			tokio::spawn(concurrent_doc_update(test.clone(), Arc::clone(&doc1), usize::MAX));
+		let task2 =
+			tokio::spawn(concurrent_doc_update(test.clone(), Arc::clone(&doc2), usize::MAX));
 		let task3 = tokio::spawn(compaction(test.clone()));
 		let task4 = tokio::spawn(concurrent_search(test.clone(), vec![doc1, doc2]));
 		let _ = tokio::try_join!(task1, task2, task3, task4).expect("Tasks failed");
@@ -1208,21 +1469,15 @@ mod tests {
 		let tx = test.new_tx(TransactionType::Read).await;
 		let (beg, end) = test.ikb.new_tt_terms_range().unwrap();
 		assert_eq!(tx.count(beg..end, None).await.unwrap(), 0);
-		let (beg, end) = test.ikb.new_dc_range().unwrap();
-		assert_eq!(tx.count(beg..end, None).await.unwrap(), 0);
+		assert_eq!(test.dc_delta_count(&tx).await, 0);
 		let (beg, end) = test.ikb.new_dc_range_with_root().unwrap();
 		assert_eq!(tx.count(beg..end, None).await.unwrap(), 1);
 	}
 
-	/// Regression test: BM25 scores must remain non-zero after compaction.
+	/// BM25 scores must remain non-zero after compaction.
 	///
-	/// Before the fix, `compute_doc_length_and_count()` only scanned the dc
-	/// delta range (via `new_dc_range`), which excludes the root/compacted
-	/// key. Compaction deletes those deltas and writes the aggregated stats
-	/// to the root key. Since the root key was not included in the scan, the
-	/// scorer would get doc_count=0 / total_docs_length=0, producing
-	/// NaN → 0.0 scores. The fix uses `new_dc_range_with_root` to include
-	/// the root key in the scan.
+	/// Compaction deletes consumed dc deltas and writes the aggregate stats to
+	/// the root key, so scoring must read the root-inclusive range.
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn bm25_score_survives_compaction() {
 		let test = TestContext::new().await;
@@ -1241,7 +1496,7 @@ mod tests {
 			async move {
 				let mut ctx = Context::new_child(&test.ctx);
 				let tx = test.new_tx(TransactionType::Read).await;
-				ctx.set_transaction(tx.clone());
+				ctx.set_transaction(Arc::clone(&tx));
 				(ctx.freeze(), tx)
 			}
 		};
@@ -1283,9 +1538,8 @@ mod tests {
 
 		// Verify the dc delta range is now empty (deltas were consumed).
 		let tx = test.new_tx(TransactionType::Read).await;
-		let (beg, end) = test.ikb.new_dc_range().unwrap();
 		assert_eq!(
-			tx.count(beg..end, None).await.unwrap(),
+			test.dc_delta_count(&tx).await,
 			0,
 			"dc delta range should be empty after compaction"
 		);
@@ -1317,5 +1571,170 @@ mod tests {
 		let (read_ctx, _tx) = frozen_read_ctx(&test).await;
 		let scorer_after = test.fti.new_scorer(&read_ctx).await.unwrap();
 		assert!(scorer_after.is_some(), "scorer should still exist after compaction");
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn doc_stats_compaction_batches_deltas() {
+		let test = TestContext::new().await;
+		let doc1 = Arc::new(RecordId::new("t".into(), "doc1".to_owned()));
+		let doc2 = Arc::new(RecordId::new("t".into(), "doc2".to_owned()));
+		let doc3 = Arc::new(RecordId::new("t".into(), "doc3".to_owned()));
+
+		let mut stack = reblessive::TreeStack::new();
+		stack.enter(|stk| test.remove_insert_task(stk, &doc1)).finish().await;
+		stack.enter(|stk| test.remove_insert_task(stk, &doc2)).finish().await;
+		stack.enter(|stk| test.remove_insert_task(stk, &doc3)).finish().await;
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		let before = test.fti.compute_doc_length_and_count(&tx, None).await.unwrap();
+		assert_eq!(test.dc_delta_count(&tx).await, 3);
+		tx.cancel().await.unwrap();
+
+		let plan = {
+			let tx = test.new_tx(TransactionType::Read).await;
+			let plan =
+				test.fti.prepare_doc_length_and_count_compaction_with_limit(&tx, 2).await.unwrap();
+			tx.cancel().await.unwrap();
+			plan
+		};
+		assert!(plan.has_logs());
+		assert!(plan.has_more());
+		assert_eq!(plan.delta_keys.len(), 2);
+
+		let tx = test.new_tx(TransactionType::Write).await;
+		assert!(test.fti.apply_doc_length_and_count_compaction(&tx, plan).await.unwrap());
+		tx.commit().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		assert_eq!(test.dc_delta_count(&tx).await, 1);
+		let after_first = test.fti.compute_doc_length_and_count(&tx, None).await.unwrap();
+		assert_eq!(before, after_first);
+		tx.cancel().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Write).await;
+		let plan =
+			test.fti.prepare_doc_length_and_count_compaction_with_limit(&tx, 2).await.unwrap();
+		assert!(!plan.has_more());
+		assert!(test.fti.apply_doc_length_and_count_compaction(&tx, plan).await.unwrap());
+		tx.commit().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		assert_eq!(test.dc_delta_count(&tx).await, 0);
+		let after_second = test.fti.compute_doc_length_and_count(&tx, None).await.unwrap();
+		assert_eq!(before, after_second);
+		tx.cancel().await.unwrap();
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn term_docs_compaction_batches_deltas() {
+		let test = TestContext::new().await;
+		let doc = Arc::new(RecordId::new("t".into(), "doc1".to_owned()));
+
+		let mut stack = reblessive::TreeStack::new();
+		stack.enter(|stk| test.remove_insert_task(stk, &doc)).finish().await;
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		let before_terms = test.tt_delta_count(&tx).await;
+		assert!(before_terms > 2);
+		tx.cancel().await.unwrap();
+
+		let plan = {
+			let tx = test.new_tx(TransactionType::Read).await;
+			let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 2).await.unwrap();
+			tx.cancel().await.unwrap();
+			plan
+		};
+		assert!(plan.has_logs());
+		assert!(plan.has_more());
+		assert_eq!(plan.delta_keys.len(), 2);
+
+		let tx = test.new_tx(TransactionType::Write).await;
+		assert!(test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap());
+		tx.commit().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		assert_eq!(test.tt_delta_count(&tx).await, before_terms - 2);
+		tx.cancel().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		let mut ctx = Context::new_child(&test.ctx);
+		ctx.set_transaction(Arc::clone(&tx));
+		let ctx = ctx.freeze();
+		let mut stack = reblessive::TreeStack::new();
+		let qt = stack
+			.enter(|stk| test.fti.extract_querying_terms(stk, &ctx, &test.opt, "Welcome".into()))
+			.finish()
+			.await
+			.unwrap();
+		let doc_id = test.fti.get_doc_id(&tx, &doc).await.unwrap().unwrap();
+		assert!(
+			qt.docs.iter().flatten().any(|docs| docs.contains(doc_id)),
+			"query should see documents represented by compacted roots plus residual deltas"
+		);
+		tx.cancel().await.unwrap();
+
+		loop {
+			let tx = test.new_tx(TransactionType::Write).await;
+			let plan = test.fti.prepare_term_docs_compaction_with_limit(&tx, 2).await.unwrap();
+			let has_more = plan.has_more();
+			let applied = test.fti.apply_term_docs_compaction(&tx, plan).await.unwrap();
+			tx.commit().await.unwrap();
+			if !applied || !has_more {
+				break;
+			}
+		}
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		assert_eq!(test.tt_delta_count(&tx).await, 0);
+		let mut ctx = Context::new_child(&test.ctx);
+		ctx.set_transaction(Arc::clone(&tx));
+		let ctx = ctx.freeze();
+		let mut stack = reblessive::TreeStack::new();
+		let qt = stack
+			.enter(|stk| test.fti.extract_querying_terms(stk, &ctx, &test.opt, "Welcome".into()))
+			.finish()
+			.await
+			.unwrap();
+		assert!(
+			qt.docs.iter().flatten().any(|docs| docs.contains(doc_id)),
+			"query should still see documents after all term deltas are compacted"
+		);
+		tx.cancel().await.unwrap();
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn compaction_preserves_post_snapshot_deltas() {
+		let test = TestContext::new().await;
+		let doc1 = Arc::new(RecordId::new("t".into(), "doc1".to_owned()));
+		let doc2 = Arc::new(RecordId::new("t".into(), "doc2".to_owned()));
+
+		let mut stack = reblessive::TreeStack::new();
+		stack.enter(|stk| test.remove_insert_task(stk, &doc1)).finish().await;
+
+		let read_tx = test.new_tx(TransactionType::Read).await;
+		let plan = test.fti.prepare_compaction(&read_tx).await.unwrap();
+		read_tx.cancel().await.unwrap();
+
+		stack.enter(|stk| test.remove_insert_task(stk, &doc2)).finish().await;
+
+		let write_tx = test.new_tx(TransactionType::Write).await;
+		assert!(test.fti.apply_compaction(&write_tx, plan).await.unwrap());
+		write_tx.commit().await.unwrap();
+
+		let tx = test.new_tx(TransactionType::Read).await;
+		assert_eq!(tx.get(&test.ikb.new_dv_key(), None).await.unwrap(), Some(1));
+		assert_eq!(tx.get(&test.ikb.new_tv_key(), None).await.unwrap(), Some(1));
+		assert_eq!(
+			test.dc_delta_count(&tx).await,
+			1,
+			"post-snapshot doc-length delta must remain uncompacted"
+		);
+		let (beg, end) = test.ikb.new_tt_terms_range().unwrap();
+		assert!(
+			tx.count(beg..end, None).await.unwrap() > 0,
+			"post-snapshot term deltas must remain uncompacted"
+		);
+		let dlc = test.fti.compute_doc_length_and_count(&tx, None).await.unwrap();
+		assert_eq!(dlc.doc_count, 2);
 	}
 }

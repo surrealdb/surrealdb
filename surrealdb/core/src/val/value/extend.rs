@@ -28,7 +28,7 @@ impl Value {
 				Value::Array(x) => self.set(stk, ctx, opt, path, Value::from(x)).await,
 				x => self.set(stk, ctx, opt, path, Value::from(vec![x])).await,
 			},
-			v => bail!(crate::val::Error::TryExtend(v.to_raw_string())),
+			v => bail!(crate::val::Error::TryExtend(v.kind_of().to_owned())),
 		}
 	}
 }

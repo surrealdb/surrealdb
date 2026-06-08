@@ -88,9 +88,8 @@ impl Router {
 					let result = results.remove(0);
 					result.result
 				}
-				_ => Err(crate::Error::validation(
+				_ => Err(crate::Error::internal(
 					"expected the database to return one or no results".to_string(),
-					None,
 				)),
 			}
 		})
@@ -228,9 +227,8 @@ impl Router {
 			match self.recv_value(rx).await? {
 				Value::None | Value::Null => Ok(()),
 				Value::Array(array) if array.is_empty() => Ok(()),
-				_value => Err(crate::Error::validation(
+				_value => Err(crate::Error::internal(
 					"expected the database to return nothing".to_string(),
-					None,
 				)),
 			}
 		})

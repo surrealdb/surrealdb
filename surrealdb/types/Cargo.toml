@@ -50,7 +50,6 @@ js = { workspace = true, optional = true }
 regex.workspace = true
 # Used for generating random regexes for fuzzing with arbitrary
 regex-syntax = { workspace = true, optional = true }
-rstest.workspace = true
 rust_decimal.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
@@ -69,6 +68,7 @@ uuid = { workspace = true, features = ["serde", "v4", "v7", "js"] }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 [dev-dependencies]
+rstest.workspace = true
 serde_json = { workspace = true }
 
 [package.metadata.cargo-machete]

@@ -46,7 +46,17 @@ mod graphql_integration {
 			let res = client.post(gql_url).body("").send().await?;
 			assert_eq!(res.status(), 400);
 			let body = res.text().await?;
-			assert!(body.contains("NotConfigured"), "body: {body}")
+			// Body is now a spec-compliant GraphQL error envelope:
+			// `{"data": null, "errors": [{"message": "GraphQL has not been configured ..."}]}`.
+			// Plain-text bodies broke clients like Postman ("Received an invalid GraphQL
+			// response").
+			let parsed: serde_json::Value = serde_json::from_str(&body)
+				.unwrap_or_else(|e| panic!("non-JSON body: {body} ({e})"));
+			let msg = parsed["errors"][0]["message"].as_str().unwrap_or("");
+			assert!(
+				msg.to_lowercase().contains("configured"),
+				"unexpected error message in body: {body}"
+			);
 		}
 
 		// add schema and data
@@ -92,14 +102,14 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"query{ foo { id, val } }"#}).to_string())
+				.body(json!({"query": r#"query{ foos { id, val } }"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 				"data": {
-					"foo": [
+					"foos": [
 						{
 							"id": "foo:1",
 							"val": 42
@@ -118,14 +128,14 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"query{foo(limit: 1){id, val}}"#}).to_string())
+				.body(json!({"query": r#"query{foos(limit: 1){id, val}}"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 				"data": {
-					"foo": [
+					"foos": [
 						{
 							"id": "foo:1",
 							"val": 42
@@ -140,14 +150,14 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"query{foo(start: 1){id, val}}"#}).to_string())
+				.body(json!({"query": r#"query{foos(start: 1){id, val}}"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 				"data": {
-					"foo": [
+					"foos": [
 						{
 							"id": "foo:2",
 							"val": 43
@@ -162,14 +172,14 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"query{foo(order: {desc: val}){id}}"#}).to_string())
+				.body(json!({"query": r#"query{foos(order: {desc: val}){id}}"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 				"data": {
-					"foo": [
+					"foos": [
 						{
 							"id": "foo:2",
 						},
@@ -186,14 +196,14 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"query{foo(filter: {val: {eq: 42}}){id}}"#}).to_string())
+				.body(json!({"query": r#"query{foos(filter: {val: {eq: 42}}){id}}"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 				"data": {
-					"foo": [
+					"foos": [
 						{
 							"id": "foo:1",
 						}
@@ -263,13 +273,13 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.basic_auth(USER, Some(PASS))
-				.body(json!({"query": r#"query{foo{id, val}}"#}).to_string())
+				.body(json!({"query": r#"query{foos {id, val}}"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			let expected =
-				json!({"data":{"foo":[{"id":"foo:1","val":42},{"id":"foo:2","val":43}]}});
+				json!({"data":{"foos":[{"id":"foo:1","val":42},{"id":"foo:2","val":43}]}});
 			assert_eq!(body, expected);
 		}
 
@@ -296,12 +306,12 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.bearer_auth(token)
-				.body(json!({"query": r#"query{foo{id, val}}"#}).to_string())
+				.body(json!({"query": r#"query{foos {id, val}}"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let expected = json!({"data":{"foo":[{"id":"foo:1","val":42}]}});
+			let expected = json!({"data":{"foos":[{"id":"foo:1","val":42}]}});
 			assert_eq!(expected, body);
 		}
 		Ok(())
@@ -328,7 +338,13 @@ mod graphql_integration {
 			let res = client.post(gql_url).body("").send().await?;
 			assert_eq!(res.status(), 400);
 			let body = res.text().await?;
-			assert!(body.contains("NotConfigured"), "{body}");
+			let parsed: serde_json::Value = serde_json::from_str(&body)
+				.unwrap_or_else(|e| panic!("non-JSON body: {body} ({e})"));
+			let msg = parsed["errors"][0]["message"].as_str().unwrap_or("");
+			assert!(
+				msg.to_lowercase().contains("configured"),
+				"unexpected error message in body: {body}"
+			);
 		}
 
 		// add schema and data
@@ -361,21 +377,15 @@ mod graphql_integration {
 			let fields = &res_obj["data"]["__schema"]["queryType"]["fields"];
 			let expected_fields = json!(
 				[
-					{
-						"name": "foo"
-					},
-					{
-						"name": "bar"
-					},
-					{
-						"name": "_get_foo"
-					},
-					{
-						"name": "_get_bar"
-					},
-					{
-						"name": "_get"
-					}
+					{ "name": "foos" },
+					{ "name": "foo" },
+					{ "name": "foosConnection" },
+					{ "name": "bars" },
+					{ "name": "bar" },
+					{ "name": "barsConnection" },
+					{ "name": "_get" },
+					{ "name": "foos_aggregate" },
+					{ "name": "bars_aggregate" }
 				]
 			);
 			assert_equal_arrs!(fields, &expected_fields);
@@ -405,15 +415,11 @@ mod graphql_integration {
 			let fields = &res_obj["data"]["__schema"]["queryType"]["fields"];
 			let expected_fields = json!(
 				[
-					{
-						"name": "foo"
-					},
-					{
-						"name": "_get_foo"
-					},
-					{
-						"name": "_get"
-					}
+					{ "name": "foos" },
+					{ "name": "foo" },
+					{ "name": "foosConnection" },
+					{ "name": "_get" },
+					{ "name": "foos_aggregate" }
 				]
 			);
 			assert_equal_arrs!(fields, &expected_fields);
@@ -491,7 +497,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						place(order: {asc: name}) {
+						places(order: {asc: name}) {
 							id
 							name
 							location { type coordinates }
@@ -505,7 +511,7 @@ mod graphql_integration {
 			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 				"data": {
-					"place": [
+					"places": [
 						{
 							"id": "place:london",
 							"name": "London",
@@ -534,7 +540,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						area {
+						areas {
 							id
 							name
 							boundary { type coordinates }
@@ -548,7 +554,7 @@ mod graphql_integration {
 			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 				"data": {
-					"area": [
+					"areas": [
 						{
 							"id": "area:london",
 							"name": "London Bounds",
@@ -575,7 +581,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						feature(order: {asc: name}) {
+						features(order: {asc: name}) {
 							id
 							name
 							geom {
@@ -592,7 +598,7 @@ mod graphql_integration {
 			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 				"data": {
-					"feature": [
+					"features": [
 						{
 							"id": "feature:line",
 							"name": "A Line",
@@ -621,7 +627,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_place(id: "london") {
+						place(id: "london") {
 							id
 							name
 							location { type coordinates }
@@ -635,7 +641,7 @@ mod graphql_integration {
 			let body = res.json::<serde_json::Value>().await?;
 			let expected = json!({
 				"data": {
-					"_get_place": {
+					"place": {
 						"id": "place:london",
 						"name": "London",
 						"location": {
@@ -678,6 +684,986 @@ mod graphql_integration {
 			assert!(names.contains(&"MultiPolygon"));
 			assert!(names.contains(&"GeometryCollection"));
 		}
+
+		// Test 6: Every Geometry* output Object exposes `coordinates` as the
+		// `JSON` scalar. This guards against a regression that re-introduces
+		// the deeply nested `[[[[Float!]!]!]!]!` chain, which exceeds the
+		// 7-level `ofType` chain followed by the standard GraphQL
+		// introspection query and breaks strict clients such as Postman.
+		{
+			let geo_types = [
+				"GeometryPoint",
+				"GeometryLineString",
+				"GeometryPolygon",
+				"GeometryMultiPoint",
+				"GeometryMultiLineString",
+				"GeometryMultiPolygon",
+			];
+			for tname in geo_types {
+				let q = format!(
+					r#"{{ __type(name: "{tname}") {{ fields {{ name type {{ kind name ofType {{ kind name }} }} }} }} }}"#
+				);
+				let res =
+					client.post(gql_url).body(json!({ "query": q }).to_string()).send().await?;
+				assert_eq!(res.status(), 200);
+				let body = res.json::<serde_json::Value>().await?;
+				let fields = body["data"]["__type"]["fields"].as_array().unwrap();
+				let coords = fields
+					.iter()
+					.find(|f| f["name"] == "coordinates")
+					.unwrap_or_else(|| panic!("{tname}.coordinates missing"));
+				// coordinates: JSON! → NON_NULL(JSON)
+				assert_eq!(coords["type"]["kind"], "NON_NULL", "{tname} coords not NON_NULL");
+				assert_eq!(coords["type"]["ofType"]["kind"], "SCALAR", "{tname} coords not SCALAR");
+				assert_eq!(
+					coords["type"]["ofType"]["name"], "JSON",
+					"{tname} coords scalar not JSON"
+				);
+			}
+		}
+
+		Ok(())
+	}
+
+	// Regression test: every output type generated for a field typed `geometry<…>`
+	// or bare `geometry` must resolve to a leaf within the 7-level `ofType` chain
+	// limit imposed by the standard GraphQL introspection query.  Prior to the
+	// fix, `GeometryMultiPolygon.coordinates` was emitted as `[[[[Float!]!]!]!]!`
+	// (9 `ofType` hops) which caused Postman / strict clients to reject the
+	// schema as soon as any table had a `geometry` field.
+	#[test(tokio::test)]
+	async fn introspection_depth_geometry() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Define every geometry variant on a single table so all `Geometry*`
+		// Object types end up registered in the schema.
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE TABLE shape SCHEMAFUL;
+					DEFINE FIELD pt   ON shape TYPE geometry<point>;
+					DEFINE FIELD ln   ON shape TYPE geometry<line>;
+					DEFINE FIELD pg   ON shape TYPE geometry<polygon>;
+					DEFINE FIELD mpt  ON shape TYPE geometry<multipoint>;
+					DEFINE FIELD mln  ON shape TYPE geometry<multiline>;
+					DEFINE FIELD mpg  ON shape TYPE geometry<multipolygon>;
+					DEFINE FIELD col  ON shape TYPE geometry<collection>;
+					DEFINE FIELD any  ON shape TYPE geometry;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Standard introspection-style query: follow `ofType` 7 levels.  If any
+		// chain still has structure at the 7th hop, the schema would fail strict
+		// validation.
+		let q = r#"{
+			__schema {
+				types {
+					name
+					kind
+					fields {
+						name
+						type {
+							kind name
+							ofType { kind name
+							ofType { kind name
+							ofType { kind name
+							ofType { kind name
+							ofType { kind name
+							ofType { kind name
+							ofType { kind name }
+							}}}}}}
+						}
+					}
+				}
+			}
+		}"#;
+
+		let res = client.post(gql_url).body(json!({ "query": q }).to_string()).send().await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Introspection failed: {:?}", body["errors"]);
+
+		// Walk every Geometry* type's `coordinates` field and assert the leaf is
+		// reached strictly inside 7 hops (i.e. the deepest `ofType.kind` is null).
+		let types = body["data"]["__schema"]["types"].as_array().unwrap();
+		let geo_names = [
+			"GeometryPoint",
+			"GeometryLineString",
+			"GeometryPolygon",
+			"GeometryMultiPoint",
+			"GeometryMultiLineString",
+			"GeometryMultiPolygon",
+		];
+		for tname in geo_names {
+			let t = types
+				.iter()
+				.find(|t| t["name"] == tname)
+				.unwrap_or_else(|| panic!("missing type {tname}"));
+			let coords = t["fields"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.find(|f| f["name"] == "coordinates")
+				.unwrap_or_else(|| panic!("{tname}.coordinates missing"));
+
+			// Walk down the `ofType` chain and assert we resolve a named SCALAR
+			// (JSON) within the 7-hop window.
+			let mut cur = &coords["type"];
+			let mut depth = 0usize;
+			let mut leaf_name: Option<&str> = None;
+			while !cur.is_null() && depth <= 7 {
+				let kind = cur["kind"].as_str().unwrap_or("");
+				let name = cur["name"].as_str();
+				if kind == "SCALAR" {
+					leaf_name = name;
+					break;
+				}
+				cur = &cur["ofType"];
+				depth += 1;
+			}
+			assert_eq!(
+				leaf_name,
+				Some("JSON"),
+				"{tname}.coordinates did not resolve to JSON within 7 ofType hops"
+			);
+		}
+
+		Ok(())
+	}
+
+	// Regression test: deeply nested `array<...>` types are capped at depth 3
+	// (yielding a 7-hop `ofType` chain at worst) by substituting `JSON` past
+	// that depth, so user schemas with very deep arrays remain introspectable.
+	#[test(tokio::test)]
+	async fn introspection_depth_nested_array() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+
+					DEFINE TABLE vec SCHEMAFUL;
+					DEFINE FIELD v1 ON vec TYPE array<float>;
+					DEFINE FIELD v2 ON vec TYPE array<array<float>>;
+					DEFINE FIELD v3 ON vec TYPE array<array<array<float>>>;
+					DEFINE FIELD v4 ON vec TYPE array<array<array<array<float>>>>;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Read field-level type chain for each field and assert the leaf is
+		// reached within 7 hops.  v4 (depth 4) must collapse to `JSON` at the
+		// 4th nesting level rather than continuing as Float.
+		let q = r#"{
+			__type(name: "vec") {
+				fields {
+					name
+					type {
+						kind name
+						ofType { kind name
+						ofType { kind name
+						ofType { kind name
+						ofType { kind name
+						ofType { kind name
+						ofType { kind name
+						ofType { kind name }
+						}}}}}}
+					}
+				}
+			}
+		}"#;
+		let res = client.post(gql_url).body(json!({ "query": q }).to_string()).send().await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Introspection failed: {:?}", body["errors"]);
+
+		let fields = body["data"]["__type"]["fields"].as_array().unwrap();
+		let leaf_of = |fname: &str| -> (String, usize) {
+			let f = fields.iter().find(|f| f["name"] == fname).unwrap();
+			let mut cur = &f["type"];
+			let mut hops = 0usize;
+			while !cur.is_null() && hops <= 7 {
+				let kind = cur["kind"].as_str().unwrap_or("");
+				if kind == "SCALAR" {
+					return (cur["name"].as_str().unwrap_or("").to_string(), hops);
+				}
+				cur = &cur["ofType"];
+				hops += 1;
+			}
+			panic!("{fname} did not resolve a scalar within 7 hops");
+		};
+
+		let (v1_leaf, _) = leaf_of("v1");
+		assert_eq!(v1_leaf, "Float", "v1 should still bottom out at Float");
+		let (v2_leaf, _) = leaf_of("v2");
+		assert_eq!(v2_leaf, "Float");
+		let (v3_leaf, _) = leaf_of("v3");
+		assert_eq!(v3_leaf, "Float");
+		let (v4_leaf, _) = leaf_of("v4");
+		assert_eq!(v4_leaf, "JSON", "v4 (depth 4) must collapse to JSON scalar");
+
+		Ok(())
+	}
+
+	// Vector-similarity filter: cosine similarity threshold on an embedding-style
+	// `array<float>` field.  Regresses GitHub issue #7312.
+	#[test(tokio::test)]
+	async fn vector_similarity_filter() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE doc SCHEMAFUL;
+					DEFINE FIELD label ON doc TYPE string;
+					DEFINE FIELD embedding ON doc TYPE array<float>;
+
+					CREATE doc:a SET label = "near",   embedding = [1.0, 0.0, 0.0];
+					CREATE doc:b SET label = "near2",  embedding = [0.99, 0.01, 0.0];
+					CREATE doc:c SET label = "far",    embedding = [0.0, 1.0, 0.0];
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// cosine similarity >= 0.99 against [1, 0, 0] -> only doc:a and doc:b.
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"query {
+					docs(filter: { embedding: { similarity: {
+						to: [1.0, 0.0, 0.0],
+						distance: COSINE,
+						op: gte,
+						value: 0.99
+					} } }, order: { asc: label }) {
+						id
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+		let rows = body["data"]["docs"].as_array().unwrap();
+		let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
+		assert_eq!(ids, vec!["doc:a", "doc:b"], "unexpected hits: {ids:?}");
+
+		// Introspection: the field-level filter for `array<float>` (named
+		// `_filter_[Float!]`) exposes the new `similarity`, `nearest`, and
+		// `call` operators.
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"{
+					__type(name: "_filter_list_Float") {
+						inputFields { name type { kind name ofType { kind name } } }
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		let fields = body["data"]["__type"]["inputFields"].as_array().unwrap();
+		let names: Vec<&str> = fields.iter().map(|f| f["name"].as_str().unwrap()).collect();
+		for required in ["similarity", "nearest", "call", "eq", "ne"] {
+			assert!(
+				names.contains(&required),
+				"missing operator `{required}` on _filter_list_Float"
+			);
+		}
+
+		// Confirm `_SimilarityInput` is registered and shaped correctly.
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"{
+					__type(name: "_SimilarityInput") {
+						inputFields { name type { kind name ofType { kind name } } }
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		let fields = body["data"]["__type"]["inputFields"].as_array().unwrap();
+		let names: Vec<&str> = fields.iter().map(|f| f["name"].as_str().unwrap()).collect();
+		for required in ["to", "distance", "op", "value"] {
+			assert!(names.contains(&required), "missing {required} on _SimilarityInput");
+		}
+
+		Ok(())
+	}
+
+	// KNN (nearest-neighbour) filter: top-K closest vectors via the
+	// SurrealQL `<|K, DIST|>` operator.  Regresses GitHub issue #7312.
+	#[test(tokio::test)]
+	async fn vector_knn_filter() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE pt SCHEMAFUL;
+					DEFINE FIELD label ON pt TYPE string;
+					DEFINE FIELD v ON pt TYPE array<float>;
+
+					CREATE pt:a SET label = "0,0",  v = [0.0, 0.0];
+					CREATE pt:b SET label = "1,0",  v = [1.0, 0.0];
+					CREATE pt:c SET label = "2,0",  v = [2.0, 0.0];
+					CREATE pt:d SET label = "10,0", v = [10.0, 0.0];
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// 2 nearest neighbours of [0.5, 0.0] by Euclidean distance -> {pt:a, pt:b}.
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"query {
+					pts(filter: { v: { nearest: { to: [0.5, 0.0], k: 2, distance: EUCLIDEAN } } }) {
+						id
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+		let rows = body["data"]["pts"].as_array().unwrap();
+		let mut ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().unwrap()).collect();
+		ids.sort();
+		assert_eq!(ids, vec!["pt:a", "pt:b"], "KNN returned wrong rows: {ids:?}");
+
+		Ok(())
+	}
+
+	// Full-text-search filter via the `@@` operator.  Requires a `FULLTEXT`
+	// index on the field.  Regresses GitHub issue #7312.
+	#[test(tokio::test)]
+	async fn fulltext_matches_filter() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE ANALYZER simple TOKENIZERS class, punct FILTERS lowercase;
+					DEFINE TABLE article SCHEMAFUL;
+					DEFINE FIELD title ON article TYPE string;
+					DEFINE INDEX title_idx ON article FIELDS title FULLTEXT ANALYZER simple BM25;
+
+					CREATE article:a SET title = "The quick brown fox";
+					CREATE article:b SET title = "Lazy dog";
+					CREATE article:c SET title = "Foxes are not dogs";
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// `fox` matches "The quick brown fox" only — "Foxes" is a different
+		// token under the default analyzer.
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"query {
+					articles(filter: { title: { matches: { query: "fox" } } }) {
+						id title
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+		let rows = body["data"]["articles"].as_array().unwrap();
+		assert_eq!(rows.len(), 1);
+		assert_eq!(rows[0]["id"], "article:a");
+
+		Ok(())
+	}
+
+	// Regression test: a SurrealDB field whose name is a SurrealQL reserved
+	// word (e.g. `value`, `type`, `in`) is exposed as a valid GraphQL Name —
+	// without the backtick quoting that `Idiom::to_sql` adds.  Strict
+	// introspection clients (Postman) reject the entire schema otherwise
+	// because backticks are not allowed in GraphQL identifiers, and the
+	// CachedRecord field-resolution lookup also breaks at runtime.
+	#[test(tokio::test)]
+	async fn reserved_word_field_names() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE setting SCHEMAFUL;
+					DEFINE FIELD label ON setting TYPE string;
+					DEFINE FIELD value ON setting TYPE int;
+
+					CREATE setting:a SET label = "answer", value = 42;
+					CREATE setting:b SET label = "other",  value = 7;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// `value` field is exposed as a valid GraphQL Name (no backticks).
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"{ __type(name: "setting") { fields { name } } }"#}).to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		let names: Vec<String> = body["data"]["__type"]["fields"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|f| f["name"].as_str().unwrap().to_string())
+			.collect();
+		assert!(names.contains(&"value".to_string()), "fields: {names:?}");
+		for n in &names {
+			assert!(!n.contains('`'), "field name `{n}` still contains backticks");
+		}
+
+		// Schema-wide name-validity invariant: every type / field / inputField
+		// / enum value matches /^[_A-Za-z][_0-9A-Za-z]*$/.
+		let valid = |s: &str| -> bool {
+			let mut it = s.chars();
+			match it.next() {
+				Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+				_ => return false,
+			}
+			it.all(|c| c.is_ascii_alphanumeric() || c == '_')
+		};
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"{
+					__schema { types {
+						name kind
+						fields { name }
+						inputFields { name }
+						enumValues { name }
+					} }
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		let mut violations: Vec<String> = Vec::new();
+		for ty in body["data"]["__schema"]["types"].as_array().unwrap() {
+			let tname = ty["name"].as_str().unwrap_or("");
+			if !tname.is_empty() && !valid(tname) {
+				violations.push(format!("type `{tname}`"));
+			}
+			for arr_key in ["fields", "inputFields", "enumValues"] {
+				if let Some(arr) = ty[arr_key].as_array() {
+					for f in arr {
+						let fname = f["name"].as_str().unwrap_or("");
+						if !valid(fname) {
+							violations.push(format!("{arr_key} `{tname}`.`{fname}`"));
+						}
+					}
+				}
+			}
+		}
+		assert!(violations.is_empty(), "spec violations: {violations:?}");
+
+		// Reading the reserved-word field via `_get_<table>` works (the
+		// CachedRecord lookup uses the raw field name, which would fail if
+		// the resolver were keyed on the backtick-quoted form).
+		let res = client
+			.post(gql_url)
+			.body(json!({"query": r#"query { setting(id: "a") { id label value } }"#}).to_string())
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+		assert_eq!(body["data"]["setting"]["value"], 42);
+
+		// Filtering by the reserved-word field.
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"query {
+					settings(filter: { value: { gt: 10 } }) { id value }
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+		let rows = body["data"]["settings"].as_array().unwrap();
+		assert_eq!(rows.len(), 1);
+		assert_eq!(rows[0]["id"], "setting:a");
+
+		// Aggregate over the reserved-word field — `value_sum` etc. must be
+		// valid GraphQL names too.
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"query {
+					settings_aggregate { count value_sum value_min value_max value_avg }
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+		let row = &body["data"]["settings_aggregate"][0];
+		assert_eq!(row["count"], 2);
+		assert_eq!(row["value_sum"], 49);
+		assert_eq!(row["value_min"], 7);
+		assert_eq!(row["value_max"], 42);
+
+		Ok(())
+	}
+
+	// Pre-execution errors (missing `surreal-ns` / `surreal-db`, GraphQL not
+	// configured for the database) must surface as a spec-compliant GraphQL
+	// error envelope `{"data": null, "errors": [...]}`, not a plain-text 400
+	// body.  Plain text breaks Postman ("Received an invalid GraphQL
+	// response") and other clients that JSON-decode every response.
+	#[test(tokio::test)]
+	async fn graphql_error_envelope_is_json() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let client = Client::builder().connect_timeout(Duration::from_secs(10)).build()?;
+
+		// Case 1: no `surreal-ns` / `surreal-db` headers at all.
+		{
+			let res = client
+				.post(gql_url)
+				.header(header::CONTENT_TYPE, "application/json")
+				.body(r#"{"query":"{__typename}"}"#)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 400);
+			assert_eq!(
+				res.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()),
+				Some("application/json")
+			);
+			let body: serde_json::Value = res.json().await?;
+			assert!(body["data"].is_null());
+			let msg = body["errors"][0]["message"].as_str().unwrap_or("");
+			assert!(msg.contains("namespace"), "expected ns error, got: {body}");
+		}
+
+		// Case 2: `surreal-ns` set but no `surreal-db`.
+		{
+			let res = client
+				.post(gql_url)
+				.header("surreal-ns", "t")
+				.header(header::CONTENT_TYPE, "application/json")
+				.body(r#"{"query":"{__typename}"}"#)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 400);
+			assert_eq!(
+				res.headers().get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()),
+				Some("application/json")
+			);
+			let body: serde_json::Value = res.json().await?;
+			assert!(body["data"].is_null());
+			let msg = body["errors"][0]["message"].as_str().unwrap_or("");
+			assert!(msg.contains("database"), "expected db error, got: {body}");
+		}
+
+		// Case 3: ns + db set but GraphQL not configured for that database.
+		{
+			let res = client
+				.post(gql_url)
+				.header("surreal-ns", Ulid::new().to_string())
+				.header("surreal-db", Ulid::new().to_string())
+				.header(header::CONTENT_TYPE, "application/json")
+				.body(r#"{"query":"{__typename}"}"#)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 400);
+			let body: serde_json::Value = res.json().await?;
+			assert!(body["data"].is_null());
+			let msg = body["errors"][0]["message"].as_str().unwrap_or("");
+			assert!(
+				msg.to_lowercase().contains("configured"),
+				"expected config error, got: {body}"
+			);
+		}
+
+		Ok(())
+	}
+
+	// Aggregations: `{table}_aggregate` exposes count + per-numeric-field
+	// min/max/sum/avg with optional groupBy.  Regresses GitHub issue #7312.
+	#[test(tokio::test)]
+	async fn aggregate_basic_and_groupby() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE product SCHEMAFUL;
+					DEFINE FIELD name     ON product TYPE string;
+					DEFINE FIELD category ON product TYPE string;
+					DEFINE FIELD price    ON product TYPE float;
+					DEFINE FIELD qty      ON product TYPE int;
+
+					CREATE product:a SET name = "Apple",  category = "fruit",   price = 1.0, qty = 10;
+					CREATE product:b SET name = "Banana", category = "fruit",   price = 0.5, qty = 20;
+					CREATE product:c SET name = "Carrot", category = "veggie",  price = 0.8, qty = 30;
+					CREATE product:d SET name = "Daikon", category = "veggie",  price = 1.2, qty = 5;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// 1. No groupBy → single aggregate row with overall stats.
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"query {
+					products_aggregate {
+						count
+						price_min price_max price_sum price_avg
+						qty_min qty_max qty_sum qty_avg
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+		let rows = body["data"]["products_aggregate"].as_array().unwrap();
+		assert_eq!(rows.len(), 1);
+		let row = &rows[0];
+		assert_eq!(row["count"], 4);
+		assert_eq!(row["price_min"], 0.5);
+		assert_eq!(row["price_max"], 1.2);
+		assert_eq!(row["qty_sum"], 65);
+		// avg may come back as Number/Decimal — coerce via as_f64 with tolerance
+		let qty_avg = row["qty_avg"].as_f64().unwrap();
+		assert!((qty_avg - 16.25).abs() < 1e-6, "qty_avg {qty_avg}");
+
+		// 2. groupBy = [category] → one row per category.
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"query {
+					products_aggregate(groupBy: [category]) {
+						category count price_avg
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+		let rows = body["data"]["products_aggregate"].as_array().unwrap();
+		assert_eq!(rows.len(), 2);
+		let mut by_cat: std::collections::HashMap<String, &serde_json::Value> =
+			std::collections::HashMap::new();
+		for r in rows {
+			by_cat.insert(r["category"].as_str().unwrap().to_string(), r);
+		}
+		let fruit = by_cat.get("fruit").unwrap();
+		assert_eq!(fruit["count"], 2);
+		assert!((fruit["price_avg"].as_f64().unwrap() - 0.75).abs() < 1e-6);
+		let veggie = by_cat.get("veggie").unwrap();
+		assert_eq!(veggie["count"], 2);
+		assert!((veggie["price_avg"].as_f64().unwrap() - 1.0).abs() < 1e-6);
+
+		// 3. groupBy + filter → only matching rows are aggregated.
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"query {
+					products_aggregate(
+						filter: { price: { gt: 0.6 } },
+						groupBy: [category]
+					) {
+						category count
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+		let rows = body["data"]["products_aggregate"].as_array().unwrap();
+		// expected: fruit=1 (Apple), veggie=2 (Carrot + Daikon)
+		let total_count: i64 = rows.iter().map(|r| r["count"].as_i64().unwrap()).sum();
+		assert_eq!(total_count, 3);
+
+		// 4. Introspection: `products_aggregate` field exists and `product_aggregate_row`
+		// type has the expected scalar fields.
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"{
+					__type(name: "product_aggregate_row") {
+						fields { name type { kind name ofType { kind name } } }
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		let fields = body["data"]["__type"]["fields"].as_array().unwrap();
+		let names: Vec<&str> = fields.iter().map(|f| f["name"].as_str().unwrap()).collect();
+		for required in
+			["count", "price_min", "price_max", "price_sum", "price_avg", "qty_avg", "category"]
+		{
+			assert!(names.contains(&required), "missing aggregate field `{required}`");
+		}
+
+		Ok(())
+	}
+
+	// Function-call predicate: filter rows by an arbitrary built-in or
+	// user-defined function.  Regresses GitHub issue #7312.
+	#[test(tokio::test)]
+	async fn fn_call_filter() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = &format!("http://{addr}/graphql");
+		let sql_url = &format!("http://{addr}/sql");
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+
+		{
+			let res = client
+				.post(sql_url)
+				.body(
+					r#"
+					DEFINE CONFIG GRAPHQL AUTO;
+					DEFINE TABLE post SCHEMAFUL;
+					DEFINE FIELD title ON post TYPE string;
+					DEFINE FIELD score ON post TYPE int;
+
+					DEFINE FUNCTION fn::high($n: int) -> bool { RETURN $n >= 10; };
+
+					CREATE post:a SET title = "Hi",        score = 5;
+					CREATE post:b SET title = "Hello",     score = 12;
+					CREATE post:c SET title = "Greetings", score = 20;
+				"#,
+				)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200);
+		}
+
+		// Builtin function: filter posts whose title length is at least 5.
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"query {
+					posts(filter: { title: { call: { fn: "string::len", op: gte, value: 5 } } }, order: { asc: title }) {
+						id
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+		let ids: Vec<&str> = body["data"]["posts"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|r| r["id"].as_str().unwrap())
+			.collect();
+		assert_eq!(ids, vec!["post:c", "post:b"], "string::len filter wrong: {ids:?}");
+
+		// User-defined function: fn::high($score)
+		let res = client
+			.post(gql_url)
+			.body(
+				json!({"query": r#"query {
+					posts(filter: { score: { call: { fn: "fn::high", op: eq, value: true } } }, order: { asc: title }) {
+						id
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
+		let ids: Vec<&str> = body["data"]["posts"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.map(|r| r["id"].as_str().unwrap())
+			.collect();
+		assert_eq!(ids, vec!["post:c", "post:b"], "fn::high filter wrong: {ids:?}");
 
 		Ok(())
 	}
@@ -824,7 +1810,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_person(id: "alice") {
+						person(id: "alice") {
 							id
 							name
 							likes(order: {asc: rating}) {
@@ -839,7 +1825,7 @@ mod graphql_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let person = &body["data"]["_get_person"];
+			let person = &body["data"]["person"];
 			assert_eq!(person["id"], "person:alice");
 			assert_eq!(person["name"], "Alice");
 			let likes = person["likes"].as_array().unwrap();
@@ -855,7 +1841,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_post(id: "p1") {
+						post(id: "p1") {
 							id
 							title
 							likes_in {
@@ -870,7 +1856,7 @@ mod graphql_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let post = &body["data"]["_get_post"];
+			let post = &body["data"]["post"];
 			assert_eq!(post["id"], "post:p1");
 			assert_eq!(post["title"], "First Post");
 			let likes_in = post["likes_in"].as_array().unwrap();
@@ -888,7 +1874,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_person(id: "alice") {
+						person(id: "alice") {
 							likes(limit: 1, order: {desc: rating}) {
 								rating
 							}
@@ -900,7 +1886,7 @@ mod graphql_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let likes = body["data"]["_get_person"]["likes"].as_array().unwrap();
+			let likes = body["data"]["person"]["likes"].as_array().unwrap();
 			assert_eq!(likes.len(), 1);
 			assert_eq!(likes[0]["rating"], 5);
 		}
@@ -911,7 +1897,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_post(id: "p2") {
+						post(id: "p2") {
 							title
 							likes_in {
 								rating
@@ -924,7 +1910,7 @@ mod graphql_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let post = &body["data"]["_get_post"];
+			let post = &body["data"]["post"];
 			assert_eq!(post["title"], "Second Post");
 			let likes_in = post["likes_in"].as_array().unwrap();
 			// Only alice liked p2
@@ -938,7 +1924,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						person(order: {asc: name}) {
+						persons(order: {asc: name}) {
 							name
 							likes {
 								rating
@@ -951,7 +1937,7 @@ mod graphql_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let people = body["data"]["person"].as_array().unwrap();
+			let people = body["data"]["persons"].as_array().unwrap();
 			assert_eq!(people.len(), 2);
 			// Alice has 2 likes, Bob has 1
 			assert_eq!(people[0]["name"], "Alice");
@@ -1069,7 +2055,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						employee(order: {asc: name}) {
+						employees(order: {asc: name}) {
 							name
 							dept {
 								id
@@ -1084,7 +2070,7 @@ mod graphql_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let employees = body["data"]["employee"].as_array().unwrap();
+			let employees = body["data"]["employees"].as_array().unwrap();
 			assert_eq!(employees.len(), 3);
 
 			// Alice -> Engineering
@@ -1108,7 +2094,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_employee(id: "e2") {
+						employee(id: "e2") {
 							name
 							dept {
 								name
@@ -1122,7 +2108,7 @@ mod graphql_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let emp = &body["data"]["_get_employee"];
+			let emp = &body["data"]["employee"];
 			assert_eq!(emp["name"], "Bob");
 			assert_eq!(emp["dept"]["name"], "Marketing");
 			assert_eq!(emp["dept"]["location"], "Building B");
@@ -1239,7 +2225,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_user(id: "alice") {
+						user(id: "alice") {
 							name
 							follows {
 								id
@@ -1252,7 +2238,7 @@ mod graphql_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let user = &body["data"]["_get_user"];
+			let user = &body["data"]["user"];
 			assert_eq!(user["name"], "Alice");
 			let follows = user["follows"].as_array().unwrap();
 			assert_eq!(follows.len(), 2, "Alice follows 2 users");
@@ -1264,7 +2250,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_user(id: "alice") {
+						user(id: "alice") {
 							name
 							follows_in {
 								id
@@ -1277,7 +2263,7 @@ mod graphql_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let user = &body["data"]["_get_user"];
+			let user = &body["data"]["user"];
 			assert_eq!(user["name"], "Alice");
 			let followers = user["follows_in"].as_array().unwrap();
 			assert_eq!(followers.len(), 1, "Only Bob follows Alice");
@@ -1342,7 +2328,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_author(id: "a1") {
+						author(id: "a1") {
 							name
 							wrote(order: {asc: year}) {
 								year
@@ -1358,7 +2344,7 @@ mod graphql_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let author = &body["data"]["_get_author"];
+			let author = &body["data"]["author"];
 			assert_eq!(author["name"], "Jane Doe");
 			let wrote = author["wrote"].as_array().unwrap();
 			assert_eq!(wrote.len(), 2);
@@ -1377,7 +2363,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_article(id: "art1") {
+						article(id: "art1") {
 							title
 							wrote_in {
 								year
@@ -1393,7 +2379,7 @@ mod graphql_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let article = &body["data"]["_get_article"];
+			let article = &body["data"]["article"];
 			assert_eq!(article["title"], "GraphQL in Practice");
 			let wrote_in = article["wrote_in"].as_array().unwrap();
 			assert_eq!(wrote_in.len(), 1);
@@ -1477,14 +2463,14 @@ mod graphql_integration {
 				let res = client
 					.post(gql_url)
 					.body(
-						json!({"query": r#"query { item(order: {asc: id}) { id name price } }"#})
+						json!({"query": r#"query { items(order: {asc: id}) { id name price } }"#})
 							.to_string(),
 					)
 					.send()
 					.await?;
 				assert_eq!(res.status(), 200);
 				let body = res.json::<serde_json::Value>().await?;
-				let items = body["data"]["item"].as_array().unwrap();
+				let items = body["data"]["items"].as_array().unwrap();
 				assert_eq!(items.len(), 3, "Current data should have 3 items: {body}");
 				// item:1 should be updated
 				assert_eq!(items[0]["name"], "Alpha Updated");
@@ -1495,13 +2481,13 @@ mod graphql_integration {
 			// the captured timestamp (2 items, with original values)
 			{
 				let query = format!(
-					r#"query {{ item(version: "{ts}", order: {{asc: id}}) {{ id name price }} }}"#
+					r#"query {{ items(version: "{ts}", order: {{asc: id}}) {{ id name price }} }}"#
 				);
 				let res =
 					client.post(gql_url).body(json!({"query": query}).to_string()).send().await?;
 				assert_eq!(res.status(), 200);
 				let body = res.json::<serde_json::Value>().await?;
-				let items = body["data"]["item"].as_array().unwrap();
+				let items = body["data"]["items"].as_array().unwrap();
 				assert_eq!(items.len(), 2, "Versioned query should have 2 items: {body}");
 				// item:1 should still have original values
 				assert_eq!(items[0]["name"], "Alpha");
@@ -1511,14 +2497,13 @@ mod graphql_integration {
 
 			// Test 3: _get_ with version — single record fetch at historical time
 			{
-				let query = format!(
-					r#"query {{ _get_item(id: "1", version: "{ts}") {{ id name price }} }}"#
-				);
+				let query =
+					format!(r#"query {{ item(id: "1", version: "{ts}") {{ id name price }} }}"#);
 				let res =
 					client.post(gql_url).body(json!({"query": query}).to_string()).send().await?;
 				assert_eq!(res.status(), 200);
 				let body = res.json::<serde_json::Value>().await?;
-				let item = &body["data"]["_get_item"];
+				let item = &body["data"]["item"];
 				assert_eq!(
 					item["name"], "Alpha",
 					"Versioned _get_ should see original name: {body}"
@@ -1531,14 +2516,14 @@ mod graphql_integration {
 				let res = client
 					.post(gql_url)
 					.body(
-						json!({"query": r#"query { _get_item(id: "1") { id name price } }"#})
+						json!({"query": r#"query { item(id: "1") { id name price } }"#})
 							.to_string(),
 					)
 					.send()
 					.await?;
 				assert_eq!(res.status(), 200);
 				let body = res.json::<serde_json::Value>().await?;
-				let item = &body["data"]["_get_item"];
+				let item = &body["data"]["item"];
 				assert_eq!(item["name"], "Alpha Updated");
 				assert_eq!(item["price"], 15.0);
 			}
@@ -1548,7 +2533,7 @@ mod graphql_integration {
 				let res = client
 					.post(gql_url)
 					.body(
-						json!({"query": r#"query { item(version: "not-a-date") { id } }"#})
+						json!({"query": r#"query { items(version: "not-a-date") { id } }"#})
 							.to_string(),
 					)
 					.send()
@@ -1596,8 +2581,8 @@ mod graphql_integration {
 					"version argument should be of type String"
 				);
 
-				// Check the '_get_item' query has a 'version' argument
-				let get_item_field = fields.iter().find(|f| f["name"] == "_get_item").unwrap();
+				// Check the 'item' query has a 'version' argument
+				let get_item_field = fields.iter().find(|f| f["name"] == "item").unwrap();
 				let version_arg = get_item_field["args"]
 					.as_array()
 					.unwrap()
@@ -1669,14 +2654,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(where: { name: { eq: "Alpha Widget" } }) { id } }"#})
+					json!({"query": r#"query { products(where: { name: { eq: "Alpha Widget" } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			assert_eq!(products.len(), 1);
 			assert_eq!(products[0]["id"], "product:1");
 		}
@@ -1686,14 +2671,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { name: { ne: "Alpha Widget" } }) { id } }"#})
+					json!({"query": r#"query { products(filter: { name: { ne: "Alpha Widget" } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			assert_eq!(products.len(), 4);
 		}
 
@@ -1702,14 +2687,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { quantity: { gt: 50 } }) { id } }"#})
+					json!({"query": r#"query { products(filter: { quantity: { gt: 50 } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			// quantity > 50: product:1 (100), product:3 (200)
 			assert_eq!(products.len(), 2);
 		}
@@ -1719,14 +2704,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { price: { gte: 19.99 } }) { id } }"#})
+					json!({"query": r#"query { products(filter: { price: { gte: 19.99 } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			// price >= 19.99: product:2 (19.99), product:3 (29.99), product:5 (49.99)
 			assert_eq!(products.len(), 3);
 		}
@@ -1735,14 +2720,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { price: { lte: 9.99 } }) { id } }"#})
+					json!({"query": r#"query { products(filter: { price: { lte: 9.99 } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			// price <= 9.99: product:1 (9.99), product:4 (4.99)
 			assert_eq!(products.len(), 2);
 		}
@@ -1752,14 +2737,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { name: { contains: "Widget" } }) { id } }"#})
+					json!({"query": r#"query { products(filter: { name: { contains: "Widget" } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			// Widget: product:1, product:2, product:5
 			assert_eq!(products.len(), 3);
 		}
@@ -1769,14 +2754,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { name: { startsWith: "Delta" } }) { id } }"#})
+					json!({"query": r#"query { products(filter: { name: { startsWith: "Delta" } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			assert_eq!(products.len(), 1);
 			assert_eq!(products[0]["id"], "product:4");
 		}
@@ -1786,14 +2771,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { name: { endsWith: "Tool" } }) { id } }"#})
+					json!({"query": r#"query { products(filter: { name: { endsWith: "Tool" } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			// "Gamma Tool", "Delta Tool"
 			assert_eq!(products.len(), 2);
 		}
@@ -1803,14 +2788,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { name: { regex: "^(Alpha|Gamma)" } }) { id } }"#})
+					json!({"query": r#"query { products(filter: { name: { regex: "^(Alpha|Gamma)" } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			// Alpha Widget, Gamma Tool
 			assert_eq!(products.len(), 2);
 		}
@@ -1820,14 +2805,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { name: { in: ["Alpha Widget", "Delta Tool"] } }) { id } }"#})
+					json!({"query": r#"query { products(filter: { name: { in: ["Alpha Widget", "Delta Tool"] } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			assert_eq!(products.len(), 2);
 		}
 
@@ -1836,14 +2821,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { quantity: { in: [100, 200] } }) { id } }"#})
+					json!({"query": r#"query { products(filter: { quantity: { in: [100, 200] } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			// product:1 (100), product:3 (200)
 			assert_eq!(products.len(), 2);
 		}
@@ -1853,14 +2838,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { name: { contains: "Widget" }, price: { lt: 10 } }) { id } }"#})
+					json!({"query": r#"query { products(filter: { name: { contains: "Widget" }, price: { lt: 10 } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			// Widget AND price < 10: product:1 (Alpha Widget, 9.99)
 			assert_eq!(products.len(), 1);
 			assert_eq!(products[0]["id"], "product:1");
@@ -1871,14 +2856,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { price: { gte: 10, lte: 30 } }) { id } }"#})
+					json!({"query": r#"query { products(filter: { price: { gte: 10, lte: 30 } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			// 10 <= price <= 30: product:2 (19.99), product:3 (29.99)
 			assert_eq!(products.len(), 2);
 		}
@@ -1888,14 +2873,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { not: { name: { contains: "Widget" } } }) { id } }"#})
+					json!({"query": r#"query { products(filter: { not: { name: { contains: "Widget" } } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			// NOT Widget: product:3, product:4
 			assert_eq!(products.len(), 2);
 		}
@@ -1905,14 +2890,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { or: [{ price: { lt: 5 } }, { price: { gt: 40 } }] }) { id } }"#})
+					json!({"query": r#"query { products(filter: { or: [{ price: { lt: 5 } }, { price: { gt: 40 } }] }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			// price < 5 OR price > 40: product:4 (4.99), product:5 (49.99)
 			assert_eq!(products.len(), 2);
 		}
@@ -1922,14 +2907,14 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"query { product(filter: { created: { gt: "2024-06-01T00:00:00Z" } }) { id } }"#})
+					json!({"query": r#"query { products(filter: { created: { gt: "2024-06-01T00:00:00Z" } }) { id } }"#})
 						.to_string(),
 				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let products = body["data"]["product"].as_array().unwrap();
+			let products = body["data"]["products"].as_array().unwrap();
 			// after 2024-06-01: product:4, product:5
 			assert_eq!(products.len(), 2);
 		}
@@ -2017,7 +3002,7 @@ mod graphql_integration {
 				.body(
 					json!({
 						"query": r#"query {
-							item(order: { asc: id }) {
+							items(order: { asc: id }) {
 								id
 								name
 								time {
@@ -2034,7 +3019,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Expected no errors, got: {:?}", body["errors"]);
-			let items = body["data"]["item"].as_array().unwrap();
+			let items = body["data"]["items"].as_array().unwrap();
 			assert_eq!(items.len(), 2);
 
 			// First item
@@ -2064,7 +3049,7 @@ mod graphql_integration {
 				.body(
 					json!({
 						"query": r#"query {
-							item(order: { asc: id }) {
+							items(order: { asc: id }) {
 								id
 								tags {
 									label
@@ -2080,7 +3065,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Expected no errors, got: {:?}", body["errors"]);
-			let items = body["data"]["item"].as_array().unwrap();
+			let items = body["data"]["items"].as_array().unwrap();
 			assert_eq!(items.len(), 2);
 
 			// First item has two tags
@@ -2105,7 +3090,7 @@ mod graphql_integration {
 				.body(
 					json!({
 						"query": r#"query {
-							item(order: { asc: id }) {
+							items(order: { asc: id }) {
 								name
 								time {
 									createdAt
@@ -2123,7 +3108,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Expected no errors, got: {:?}", body["errors"]);
-			let items = body["data"]["item"].as_array().unwrap();
+			let items = body["data"]["items"].as_array().unwrap();
 			assert_eq!(items.len(), 2);
 
 			// time should only have createdAt (not updatedAt)
@@ -2143,7 +3128,7 @@ mod graphql_integration {
 				.body(
 					json!({
 						"query": r#"query {
-							_get_item(id: "alpha") {
+							item(id: "alpha") {
 								id
 								name
 								time {
@@ -2164,7 +3149,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Expected no errors, got: {:?}", body["errors"]);
-			let item = &body["data"]["_get_item"];
+			let item = &body["data"]["item"];
 			assert_eq!(item["id"], "item:alpha");
 			assert_eq!(item["name"], "Alpha");
 			assert!(item["time"]["createdAt"].as_str().unwrap().contains("2024-01-15"));
@@ -2267,7 +3252,7 @@ mod graphql_integration {
 				.body(
 					json!({
 						"query": r#"query {
-							_get_article(id: "with_meta") {
+							article(id: "with_meta") {
 								title
 								meta {
 									author
@@ -2283,7 +3268,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Expected no errors, got: {:?}", body["errors"]);
-			let article = &body["data"]["_get_article"];
+			let article = &body["data"]["article"];
 			assert_eq!(article["title"], "Article One");
 			assert_eq!(article["meta"]["author"], "Alice");
 			assert_eq!(article["meta"]["source"], "Blog");
@@ -2294,7 +3279,7 @@ mod graphql_integration {
 				.body(
 					json!({
 						"query": r#"query {
-							_get_article(id: "no_meta") {
+							article(id: "no_meta") {
 								title
 								meta {
 									author
@@ -2310,7 +3295,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Expected no errors, got: {:?}", body["errors"]);
-			let article = &body["data"]["_get_article"];
+			let article = &body["data"]["article"];
 			assert_eq!(article["title"], "Article Two");
 			assert!(
 				article["meta"].is_null(),
@@ -2395,7 +3380,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_widget(id: "alpha") { created }
+						widget(id: "alpha") { created }
 					}"#})
 					.to_string(),
 				)
@@ -2405,7 +3390,7 @@ mod graphql_integration {
 			let body = res.json::<serde_json::Value>().await?;
 			assert_eq!(status, 200, "Expected 200, body: {body}");
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
-			let created = body["data"]["_get_widget"]["created"]
+			let created = body["data"]["widget"]["created"]
 				.as_str()
 				.unwrap_or_else(|| panic!("created should be a string, body: {body}"));
 			assert!(
@@ -2425,7 +3410,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_widget(id: "alpha") { lifespan }
+						widget(id: "alpha") { lifespan }
 					}"#})
 					.to_string(),
 				)
@@ -2434,7 +3419,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
-			let lifespan = body["data"]["_get_widget"]["lifespan"].as_str().unwrap();
+			let lifespan = body["data"]["widget"]["lifespan"].as_str().unwrap();
 			// Duration should be a clean string like "1h30m" without quotes/wrapping
 			assert!(!lifespan.is_empty(), "Duration should not be empty");
 			assert!(
@@ -2449,7 +3434,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_widget(id: "alpha") { tracking }
+						widget(id: "alpha") { tracking }
 					}"#})
 					.to_string(),
 				)
@@ -2458,7 +3443,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
-			let tracking = body["data"]["_get_widget"]["tracking"].as_str().unwrap();
+			let tracking = body["data"]["widget"]["tracking"].as_str().unwrap();
 			assert_eq!(
 				tracking, "550e8400-e29b-41d4-a716-446655440000",
 				"UUID should be in standard format"
@@ -2476,7 +3461,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_widget(id: "alpha") { payload }
+						widget(id: "alpha") { payload }
 					}"#})
 					.to_string(),
 				)
@@ -2485,7 +3470,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
-			let payload = body["data"]["_get_widget"]["payload"].as_str().unwrap();
+			let payload = body["data"]["widget"]["payload"].as_str().unwrap();
 			// "Hello" → base64 = "SGVsbG8="
 			assert_eq!(payload, "SGVsbG8=", "Bytes should be base64 encoded, got: {payload}");
 		}
@@ -2496,7 +3481,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						widget(order: {asc: id}) { id }
+						widgets(order: {asc: id}) { id }
 					}"#})
 					.to_string(),
 				)
@@ -2505,7 +3490,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
-			let widgets = body["data"]["widget"].as_array().unwrap();
+			let widgets = body["data"]["widgets"].as_array().unwrap();
 			assert_eq!(widgets[0]["id"], "widget:alpha");
 			assert_eq!(widgets[1]["id"], "widget:beta");
 		}
@@ -2516,7 +3501,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_widget(id: "alpha") { tags }
+						widget(id: "alpha") { tags }
 					}"#})
 					.to_string(),
 				)
@@ -2525,7 +3510,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
-			let tags = body["data"]["_get_widget"]["tags"].as_array().unwrap();
+			let tags = body["data"]["widget"]["tags"].as_array().unwrap();
 			assert_eq!(tags.len(), 2);
 			assert_eq!(tags[0], "urgent");
 			assert_eq!(tags[1], "review");
@@ -2537,7 +3522,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_widget(id: "beta") { tags }
+						widget(id: "beta") { tags }
 					}"#})
 					.to_string(),
 				)
@@ -2546,7 +3531,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
-			let tags = body["data"]["_get_widget"]["tags"].as_array().unwrap();
+			let tags = body["data"]["widget"]["tags"].as_array().unwrap();
 			assert_eq!(tags.len(), 0);
 		}
 
@@ -2556,7 +3541,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_widget(id: "alpha") {
+						widget(id: "alpha") {
 							name
 							dept {
 								id
@@ -2571,7 +3556,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
-			let widget = &body["data"]["_get_widget"];
+			let widget = &body["data"]["widget"];
 			assert_eq!(widget["name"], "Alpha");
 			assert_eq!(widget["dept"]["id"], "department:eng");
 			assert_eq!(widget["dept"]["name"], "Engineering");
@@ -2583,7 +3568,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_widget(id: "beta") {
+						widget(id: "beta") {
 							name
 							dept {
 								id
@@ -2598,7 +3583,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
-			let widget = &body["data"]["_get_widget"];
+			let widget = &body["data"]["widget"];
 			assert_eq!(widget["name"], "Beta");
 			assert!(
 				widget["dept"].is_null(),
@@ -2842,7 +3827,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						_get_item(id: "99") { id }
+						item(id: "99") { id }
 					}"#})
 					.to_string(),
 				)
@@ -2851,16 +3836,16 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
-			assert!(body["data"]["_get_item"].is_null());
+			assert!(body["data"]["item"].is_null());
 		}
 
-		// --- Test 7: createManyItem (bulk create) ---
+		// --- Test 7: createItems (bulk create) ---
 		{
 			let res = client
 				.post(gql_url)
 				.body(
 					json!({"query": r#"mutation {
-						createManyItem(data: [
+						createItems(data: [
 							{ id: "a", name: "Alpha", price: 10 },
 							{ id: "b", name: "Beta", price: 20 },
 							{ id: "c", name: "Gamma", price: 30 }
@@ -2877,20 +3862,20 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
-			let items = body["data"]["createManyItem"].as_array().unwrap();
+			let items = body["data"]["createItems"].as_array().unwrap();
 			assert_eq!(items.len(), 3);
 			assert_eq!(items[0]["id"], "item:a");
 			assert_eq!(items[1]["id"], "item:b");
 			assert_eq!(items[2]["id"], "item:c");
 		}
 
-		// --- Test 8: updateManyItem (bulk update with where) ---
+		// --- Test 8: updateItems (bulk update with where) ---
 		{
 			let res = client
 				.post(gql_url)
 				.body(
 					json!({"query": r#"mutation {
-						updateManyItem(
+						updateItems(
 							where: { price: { lt: 25 } },
 							data: { price: 25 }
 						) {
@@ -2906,7 +3891,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
-			let items = body["data"]["updateManyItem"].as_array().unwrap();
+			let items = body["data"]["updateItems"].as_array().unwrap();
 			// items a (10) and b (20) should be updated, c (30) should not
 			assert_eq!(items.len(), 2);
 			for item in items {
@@ -2914,13 +3899,13 @@ mod graphql_integration {
 			}
 		}
 
-		// --- Test 9: deleteManyItem (bulk delete with where, returns count) ---
+		// --- Test 9: deleteItems (bulk delete with where, returns count) ---
 		{
 			let res = client
 				.post(gql_url)
 				.body(
 					json!({"query": r#"mutation {
-						deleteManyItem(where: { price: { eq: 25 } })
+						deleteItems(where: { price: { eq: 25 } })
 					}"#})
 					.to_string(),
 				)
@@ -2929,7 +3914,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
-			assert_eq!(body["data"]["deleteManyItem"], 2);
+			assert_eq!(body["data"]["deleteItems"], 2);
 		}
 
 		// --- Test 10: Relation table mutation (createLikes via RELATE) ---
@@ -3003,10 +3988,10 @@ mod graphql_integration {
 			assert!(field_names.contains(&"updateItem"), "Missing updateItem");
 			assert!(field_names.contains(&"upsertItem"), "Missing upsertItem");
 			assert!(field_names.contains(&"deleteItem"), "Missing deleteItem");
-			assert!(field_names.contains(&"createManyItem"), "Missing createManyItem");
-			assert!(field_names.contains(&"updateManyItem"), "Missing updateManyItem");
-			assert!(field_names.contains(&"upsertManyItem"), "Missing upsertManyItem");
-			assert!(field_names.contains(&"deleteManyItem"), "Missing deleteManyItem");
+			assert!(field_names.contains(&"createItems"), "Missing createItems");
+			assert!(field_names.contains(&"updateItems"), "Missing updateItems");
+			assert!(field_names.contains(&"upsertItems"), "Missing upsertItems");
+			assert!(field_names.contains(&"deleteItems"), "Missing deleteItems");
 		}
 
 		// --- Test 12: Input type introspection ---
@@ -3106,13 +4091,13 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"{ person { id, name } }"#}).to_string())
+				.body(json!({"query": r#"{ persons { id, name } }"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors for shallow query: {:?}", body);
-			assert!(body["data"]["person"].is_array(), "Expected person data");
+			assert!(body["data"]["persons"].is_array(), "Expected person data");
 		}
 
 		// A deeply nested query should fail with depth limit error (depth > 3)
@@ -3120,7 +4105,7 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"{ comment { text, post { title, author { name, age } } } }"#})
+					json!({"query": r#"{ comments { text, post { title, author { name, age } } } }"#})
 						.to_string(),
 				)
 				.send()
@@ -3142,10 +4127,10 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"{
-						person { id, name, age }
-						post { id, title }
-						comment { id, text }
-						p2: person { id, name, age }
+						persons { id, name, age }
+						posts { id, title }
+						comments { id, text }
+						p2: persons { id, name, age }
 					}"#})
 					.to_string(),
 				)
@@ -3181,7 +4166,7 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"{ comment { text, post { title, author { name } } } }"#})
+					json!({"query": r#"{ comments { text, post { title, author { name } } } }"#})
 						.to_string(),
 				)
 				.send()
@@ -3201,10 +4186,10 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"{
-						person { id, name, age }
-						post { id, title }
-						comment { id, text }
-						p2: person { id, name, age }
+						persons { id, name, age }
+						posts { id, title }
+						comments { id, text }
+						p2: persons { id, name, age }
 					}"#})
 					.to_string(),
 				)
@@ -3238,7 +4223,7 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.body(
-					json!({"query": r#"{ comment { text, post { title, author { name, age } } } }"#})
+					json!({"query": r#"{ comments { text, post { title, author { name, age } } } }"#})
 						.to_string(),
 				)
 				.send()
@@ -3361,13 +4346,13 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"{ person { id, name, age } }"#}).to_string())
+				.body(json!({"query": r#"{ persons { id, name, age } }"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Expected no errors for data query, got: {:?}", body);
-			assert!(body["data"]["person"].is_array(), "Expected person data");
+			assert!(body["data"]["persons"].is_array(), "Expected person data");
 		}
 
 		// Disable introspection
@@ -3429,7 +4414,7 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"{ person { id, name, age } }"#}).to_string())
+				.body(json!({"query": r#"{ persons { id, name, age } }"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
@@ -3439,7 +4424,7 @@ mod graphql_integration {
 				"Normal queries should still work with introspection disabled, got: {:?}",
 				body["errors"]
 			);
-			assert!(body["data"]["person"].is_array(), "Expected person data");
+			assert!(body["data"]["persons"].is_array(), "Expected person data");
 		}
 
 		// Re-enable introspection
@@ -3684,7 +4669,7 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.bearer_auth(&signup_token)
-				.body(json!({"query": r#"{ post { id } }"#}).to_string())
+				.body(json!({"query": r#"{ posts { id } }"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
@@ -3734,7 +4719,7 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.bearer_auth(&signin_token)
-				.body(json!({"query": r#"{ post { id title content } }"#}).to_string())
+				.body(json!({"query": r#"{ posts { id title content } }"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
@@ -3744,7 +4729,7 @@ mod graphql_integration {
 				"Query with signin token should succeed, got errors: {:?}",
 				body["errors"]
 			);
-			let posts = &body["data"]["post"];
+			let posts = &body["data"]["posts"];
 			assert!(posts.is_array(), "Expected array of posts");
 			assert_eq!(posts.as_array().unwrap().len(), 1);
 			assert_eq!(posts[0]["title"], "Hello");
@@ -4029,7 +5014,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"{
-						employee(order: { asc: name }) {
+						employees(order: { asc: name }) {
 							id
 							name
 							age
@@ -4044,7 +5029,7 @@ mod graphql_integration {
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
 
-			let employees = &body["data"]["employee"];
+			let employees = &body["data"]["employees"];
 			assert_eq!(employees.as_array().unwrap().len(), 3);
 
 			assert_eq!(employees[0]["id"], "employee:alice");
@@ -4070,7 +5055,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"{
-						_get_employee(id: "alice") {
+						employee(id: "alice") {
 							id
 							name
 							age
@@ -4085,7 +5070,7 @@ mod graphql_integration {
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
 
-			let emp = &body["data"]["_get_employee"];
+			let emp = &body["data"]["employee"];
 			assert_eq!(emp["id"], "employee:alice");
 			assert_eq!(emp["name"], "Alice");
 			assert_eq!(emp["age"], 30);
@@ -4101,7 +5086,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"{
-						employee(order: { asc: name }) {
+						employees(order: { asc: name }) {
 							name
 							dept {
 								id
@@ -4118,7 +5103,7 @@ mod graphql_integration {
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
 
-			let employees = &body["data"]["employee"];
+			let employees = &body["data"]["employees"];
 
 			// Alice -> Engineering
 			assert_eq!(employees[0]["name"], "Alice");
@@ -4209,7 +5194,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"mutation {
-						createManyDepartment(data: [
+						createDepartments(data: [
 							{ id: "hr", name: "HR", budget: 100000 },
 							{ id: "legal", name: "Legal", budget: 150000 }
 						]) {
@@ -4226,7 +5211,7 @@ mod graphql_integration {
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
 
-			let depts = &body["data"]["createManyDepartment"];
+			let depts = &body["data"]["createDepartments"];
 			assert_eq!(depts.as_array().unwrap().len(), 2);
 			// The results should have all fields from cache
 			assert_eq!(depts[0]["id"], "department:hr");
@@ -4245,7 +5230,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"{
-						_get_employee(id: "alice") {
+						employee(id: "alice") {
 							name
 							works_on(order: { asc: id }) {
 								id
@@ -4266,7 +5251,7 @@ mod graphql_integration {
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
 
-			let emp = &body["data"]["_get_employee"];
+			let emp = &body["data"]["employee"];
 			assert_eq!(emp["name"], "Alice");
 			let relations = &emp["works_on"];
 			assert_eq!(relations.as_array().unwrap().len(), 1);
@@ -4282,7 +5267,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"{
-						_get_widget(id: "w1") {
+						widget(id: "w1") {
 							id
 							name
 							price
@@ -4303,7 +5288,7 @@ mod graphql_integration {
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
 
-			let widget = &body["data"]["_get_widget"];
+			let widget = &body["data"]["widget"];
 			assert_eq!(widget["id"], "widget:w1");
 			assert_eq!(widget["name"], "Gadget");
 			// Float comparison
@@ -4353,7 +5338,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"{
-						employee(filter: { active: { eq: true } }, order: { asc: name }) {
+						employees(filter: { active: { eq: true } }, order: { asc: name }) {
 							name
 							dept {
 								name
@@ -4368,7 +5353,7 @@ mod graphql_integration {
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Unexpected errors: {:?}", body["errors"]);
 
-			let employees = &body["data"]["employee"];
+			let employees = &body["data"]["employees"];
 			// Alice, Carol, Dave are active
 			assert!(employees.as_array().unwrap().len() >= 2);
 			// All active employees with dept should have correct dept name
@@ -4478,13 +5463,13 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.bearer_auth(&user_token)
-				.body(json!({"query": r#"{ user { id } }"#}).to_string())
+				.body(json!({"query": r#"{ users { id } }"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "errors: {:?}", body["errors"]);
-			user_id = body["data"]["user"][0]["id"].as_str().unwrap().to_string();
+			user_id = body["data"]["users"][0]["id"].as_str().unwrap().to_string();
 		}
 
 		// ---------------------------------------------------------------
@@ -4744,7 +5729,7 @@ mod graphql_integration {
 				.bearer_auth(&user_token)
 				.body(
 					json!({"query": r#"mutation {
-						updateManyArticle(data: { title: "Bulk Updated" }) {
+						updateArticles(data: { title: "Bulk Updated" }) {
 							id title
 						}
 					}"#})
@@ -4755,7 +5740,7 @@ mod graphql_integration {
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "Bulk update errors: {:?}", body["errors"]);
-			let updated = &body["data"]["updateManyArticle"];
+			let updated = &body["data"]["updateArticles"];
 			assert!(updated.is_array(), "Bulk update should return an array");
 			// Alice should only have updated her own articles (bulk1, bulk2),
 			// not bulk3 which belongs to user:fake
@@ -4806,7 +5791,7 @@ mod graphql_integration {
 				.bearer_auth(&user_token)
 				.body(
 					json!({"query": r#"mutation {
-						deleteManySecret
+						deleteSecrets
 					}"#})
 					.to_string(),
 				)
@@ -4814,7 +5799,7 @@ mod graphql_integration {
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
-			let count = &body["data"]["deleteManySecret"];
+			let count = &body["data"]["deleteSecrets"];
 			assert_eq!(
 				count,
 				&json!(0),
@@ -4940,21 +5925,21 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.bearer_auth(&token_alice)
-				.body(json!({"query": r#"{ user { id } }"#}).to_string())
+				.body(json!({"query": r#"{ users { id } }"#}).to_string())
 				.send()
 				.await?;
 			let body = res.json::<serde_json::Value>().await?;
-			alice_id = body["data"]["user"][0]["id"].as_str().unwrap().to_string();
+			alice_id = body["data"]["users"][0]["id"].as_str().unwrap().to_string();
 		}
 		{
 			let res = client
 				.post(gql_url)
 				.bearer_auth(&token_bob)
-				.body(json!({"query": r#"{ user { id } }"#}).to_string())
+				.body(json!({"query": r#"{ users { id } }"#}).to_string())
 				.send()
 				.await?;
 			let body = res.json::<serde_json::Value>().await?;
-			bob_id = body["data"]["user"][0]["id"].as_str().unwrap().to_string();
+			bob_id = body["data"]["users"][0]["id"].as_str().unwrap().to_string();
 		}
 
 		// Create likes as root: Alice likes p1 (rating 5), Bob likes p2 (rating 3)
@@ -4978,13 +5963,13 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.bearer_auth(&token_alice)
-				.body(json!({"query": r#"{ user { id likes { rating } } }"#}).to_string())
+				.body(json!({"query": r#"{ users { id likes { rating } } }"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "errors: {:?}", body["errors"]);
-			let user = &body["data"]["user"][0];
+			let user = &body["data"]["users"][0];
 			let likes = user["likes"].as_array().unwrap();
 			assert_eq!(likes.len(), 1, "Alice should see only her own like");
 			assert_eq!(likes[0]["rating"], 5);
@@ -4995,13 +5980,13 @@ mod graphql_integration {
 			let res = client
 				.post(gql_url)
 				.bearer_auth(&token_bob)
-				.body(json!({"query": r#"{ user { id likes { rating } } }"#}).to_string())
+				.body(json!({"query": r#"{ users { id likes { rating } } }"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
 			let body = res.json::<serde_json::Value>().await?;
 			assert!(body["errors"].is_null(), "errors: {:?}", body["errors"]);
-			let user = &body["data"]["user"][0];
+			let user = &body["data"]["users"][0];
 			let likes = user["likes"].as_array().unwrap();
 			assert_eq!(likes.len(), 1, "Bob should see only his own like");
 			assert_eq!(likes[0]["rating"], 3);
@@ -5498,7 +6483,7 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"query { test { id type } }"#}).to_string())
+				.body(json!({"query": r#"query { tests { id type } }"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
@@ -5508,8 +6493,8 @@ mod graphql_integration {
 				"Expected schema generation and query execution to succeed, got errors: {:?}",
 				body["errors"]
 			);
-			assert_eq!(body["data"]["test"][0]["id"], "test:one");
-			assert_eq!(body["data"]["test"][0]["type"], "TEST_TYPE_ENUM_1");
+			assert_eq!(body["data"]["tests"][0]["id"], "test:one");
+			assert_eq!(body["data"]["tests"][0]["type"], "TEST_TYPE_ENUM_1");
 		}
 
 		Ok(())
@@ -5552,7 +6537,7 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"query { sample { id status } }"#}).to_string())
+				.body(json!({"query": r#"query { samples { id status } }"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
@@ -5562,8 +6547,8 @@ mod graphql_integration {
 				"Expected query to succeed for Kind::Literal field, got: {:?}",
 				body["errors"]
 			);
-			assert_eq!(body["data"]["sample"][0]["id"], "sample:one");
-			assert_eq!(body["data"]["sample"][0]["status"], "active");
+			assert_eq!(body["data"]["samples"][0]["id"], "sample:one");
+			assert_eq!(body["data"]["samples"][0]["status"], "active");
 		}
 
 		// Mutation input should accept matching literal values.
@@ -5653,9 +6638,15 @@ mod graphql_integration {
 		}
 
 		{
+			// `meta` is now a generated nested Object type (`sampleobj_meta`)
+			// with `status` and `score` sub-fields, not the opaque `object`
+			// scalar. See GitHub issue #7034.
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"query { sampleobj { id meta } }"#}).to_string())
+				.body(
+					json!({"query": r#"query { sampleobjs { id meta { status score } } }"#})
+						.to_string(),
+				)
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
@@ -5665,9 +6656,9 @@ mod graphql_integration {
 				"Expected query to succeed for Kind::Literal(Object), got: {:?}",
 				body["errors"]
 			);
-			assert_eq!(body["data"]["sampleobj"][0]["id"], "sampleobj:one");
-			assert_eq!(body["data"]["sampleobj"][0]["meta"]["status"], "active");
-			assert_eq!(body["data"]["sampleobj"][0]["meta"]["score"], 10);
+			assert_eq!(body["data"]["sampleobjs"][0]["id"], "sampleobj:one");
+			assert_eq!(body["data"]["sampleobjs"][0]["meta"]["status"], "active");
+			assert_eq!(body["data"]["sampleobjs"][0]["meta"]["score"], 10);
 		}
 
 		// Mutation input should accept matching literal object values.
@@ -5678,7 +6669,7 @@ mod graphql_integration {
 					json!({"query": r#"mutation {
 						createSampleobj(data: { meta: { status: "active", score: 11 } }) {
 							id
-							meta
+							meta { status score }
 						}
 					}"#})
 					.to_string(),
@@ -5703,7 +6694,7 @@ mod graphql_integration {
 					json!({"query": r#"mutation {
 						createSampleobj(data: { meta: { status: "inactive", score: 12 } }) {
 							id
-							meta
+							meta { status score }
 						}
 					}"#})
 					.to_string(),
@@ -5770,7 +6761,7 @@ mod graphql_integration {
 				.post(gql_url)
 				.body(
 					json!({"query": r#"query {
-						litnum {
+						litnums {
 							id
 							intLit
 							floatLit
@@ -5789,13 +6780,13 @@ mod graphql_integration {
 				"Expected query to succeed for numeric/bool/array literal kinds, got: {:?}",
 				body["errors"]
 			);
-			assert_eq!(body["data"]["litnum"][0]["id"], "litnum:one");
-			assert_eq!(body["data"]["litnum"][0]["intLit"], 42);
-			assert_eq!(body["data"]["litnum"][0]["floatLit"], 3.5);
-			assert_eq!(body["data"]["litnum"][0]["boolLit"], true);
-			assert_eq!(body["data"]["litnum"][0]["arrLit"][0], 1);
-			assert_eq!(body["data"]["litnum"][0]["arrLit"][1], "ok");
-			assert_eq!(body["data"]["litnum"][0]["arrLit"][2], true);
+			assert_eq!(body["data"]["litnums"][0]["id"], "litnum:one");
+			assert_eq!(body["data"]["litnums"][0]["intLit"], 42);
+			assert_eq!(body["data"]["litnums"][0]["floatLit"], 3.5);
+			assert_eq!(body["data"]["litnums"][0]["boolLit"], true);
+			assert_eq!(body["data"]["litnums"][0]["arrLit"][0], 1);
+			assert_eq!(body["data"]["litnums"][0]["arrLit"][1], "ok");
+			assert_eq!(body["data"]["litnums"][0]["arrLit"][2], true);
 		}
 
 		{
@@ -6191,6 +7182,1381 @@ mod graphql_integration {
 		.ok_or_else(|| std::io::Error::other("subscription stream ended before event"))?;
 
 		assert_eq!(received["payload"]["data"]["foo"]["val"], 42);
+		Ok(())
+	}
+
+	/// Helper to spin up an authless server with a fresh namespace/database and
+	/// return a GraphQL/SQL client pair.
+	async fn fresh_client() -> Result<
+		(String, String, Client, std::sync::Arc<dyn std::any::Any + Send + Sync>),
+		Box<dyn std::error::Error>,
+	> {
+		let (addr, server) = common::start_server_without_auth().await.unwrap();
+		let gql_url = format!("http://{addr}/graphql");
+		let sql_url = format!("http://{addr}/sql");
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = Client::builder()
+			.connect_timeout(Duration::from_secs(10))
+			.default_headers(headers)
+			.build()?;
+		let keep: std::sync::Arc<dyn std::any::Any + Send + Sync> = std::sync::Arc::new(server);
+		Ok((gql_url, sql_url, client, keep))
+	}
+
+	/// #7034 — record-typed fields inside an object literal must not break
+	/// schema generation.
+	#[test(tokio::test)]
+	async fn issue_7034_record_in_object_literal() -> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		let res = client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE bar SCHEMAFULL;
+				DEFINE TABLE foo SCHEMAFULL;
+				DEFINE FIELD bar ON foo TYPE { bar: record<foo> };
+				"#,
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+
+		// Introspect: `foo` should exist and have a `bar` field whose type is a
+		// generated nested Object (`foo_bar`) with a `bar` field of type `foo`.
+		let q = r#"{
+			__type(name: "foo") {
+				name
+				fields { name type { kind name ofType { kind name } } }
+			}
+			nested: __type(name: "foo_bar") {
+				name
+				fields { name type { kind name ofType { kind name } } }
+			}
+		}"#;
+		let res = client.post(&gql_url).body(json!({"query": q}).to_string()).send().await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "introspection errored: {body}");
+		let foo_fields = body["data"]["__type"]["fields"].as_array().expect("foo has fields");
+		let bar = foo_fields.iter().find(|f| f["name"] == "bar").expect("foo.bar field exists");
+		// Either `Object` or `NonNull(Object)` referencing `foo_bar`.
+		let referenced = if bar["type"]["kind"] == "NON_NULL" {
+			bar["type"]["ofType"]["name"].as_str().unwrap_or("")
+		} else {
+			bar["type"]["name"].as_str().unwrap_or("")
+		};
+		assert_eq!(referenced, "foo_bar", "expected foo.bar -> foo_bar, got: {bar}");
+
+		let nested_fields =
+			body["data"]["nested"]["fields"].as_array().expect("foo_bar has fields");
+		let inner =
+			nested_fields.iter().find(|f| f["name"] == "bar").expect("foo_bar.bar field exists");
+		let target = if inner["type"]["kind"] == "NON_NULL" {
+			inner["type"]["ofType"]["name"].as_str().unwrap_or("")
+		} else {
+			inner["type"]["name"].as_str().unwrap_or("")
+		};
+		assert_eq!(target, "foo", "expected foo_bar.bar -> foo, got: {inner}");
+
+		Ok(())
+	}
+
+	/// #4999 — schema generation must produce valid GraphQL identifiers for
+	/// nested-object fields and for filters of `array<record<…>>` columns.
+	#[test(tokio::test)]
+	async fn issue_4999_nested_and_array_record_filter_names()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		let res = client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				REMOVE TABLE IF EXISTS parent;
+				REMOVE TABLE IF EXISTS child;
+				DEFINE TABLE parent;
+				DEFINE TABLE child;
+				DEFINE FIELD children ON parent TYPE option<array<record<child>>>;
+				DEFINE FIELD nested ON parent TYPE object;
+				DEFINE FIELD nested.field1 ON parent TYPE bool;
+				DEFINE FIELD nested.field2 ON parent TYPE int;
+				"#,
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+
+		// Use the standard introspection — if any field/type name is invalid,
+		// async-graphql refuses the schema and the GraphQL endpoint returns an
+		// error envelope rather than a populated `__schema`.
+		let res = client
+			.post(&gql_url)
+			.body(json!({"query": "{ __schema { types { name } } }"}).to_string())
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "introspection errored: {body}");
+		let names: Vec<&str> = body["data"]["__schema"]["types"]
+			.as_array()
+			.expect("type list")
+			.iter()
+			.filter_map(|t| t["name"].as_str())
+			.collect();
+		assert!(
+			names.iter().any(|n| n == &"parent_nested"),
+			"expected generated nested-object type `parent_nested`"
+		);
+		assert!(
+			names.iter().any(|n| n.starts_with("_filter_list_")),
+			"expected `_filter_list_*` (array<record<>> filter); got types: {names:?}"
+		);
+		for n in &names {
+			assert!(
+				!n.contains('[') && !n.contains(']') && !n.contains('.'),
+				"invalid character in generated type name: {n}"
+			);
+		}
+
+		Ok(())
+	}
+
+	/// #6942 — DDL changes must invalidate the cached GraphQL schema.
+	#[test(tokio::test)]
+	async fn issue_6942_schema_cache_invalidates_on_ddl() -> Result<(), Box<dyn std::error::Error>>
+	{
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE test;
+				DEFINE FIELD test_field ON test TYPE string;
+				"#,
+			)
+			.send()
+			.await?;
+
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": "{ __type(name: \"test\") { fields { name type { kind ofType { name } name } } } }"})
+					.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let fields = body["data"]["__type"]["fields"].as_array().expect("fields");
+		let f = fields.iter().find(|f| f["name"] == "test_field").expect("test_field present");
+		let kind_before = if f["type"]["kind"] == "NON_NULL" {
+			f["type"]["ofType"]["name"].as_str().unwrap_or("")
+		} else {
+			f["type"]["name"].as_str().unwrap_or("")
+		};
+		assert_eq!(kind_before, "String");
+
+		// Change the field type — should be reflected on the very next request.
+		client
+			.post(&sql_url)
+			.body("DEFINE FIELD OVERWRITE test_field ON test TYPE int;")
+			.send()
+			.await?;
+
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": "{ __type(name: \"test\") { fields { name type { kind ofType { name } name } } } }"})
+					.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let fields = body["data"]["__type"]["fields"].as_array().expect("fields");
+		let f = fields.iter().find(|f| f["name"] == "test_field").expect("test_field present");
+		let kind_after = if f["type"]["kind"] == "NON_NULL" {
+			f["type"]["ofType"]["name"].as_str().unwrap_or("")
+		} else {
+			f["type"]["name"].as_str().unwrap_or("")
+		};
+		assert_eq!(kind_after, "Int", "schema cache should reflect the new type immediately");
+
+		Ok(())
+	}
+
+	/// #4555 — ID `range` and `in` filters on the auto-generated list query.
+	#[test(tokio::test)]
+	async fn issue_4555_id_range_and_in_filter() -> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE thing;
+				CREATE thing:1; CREATE thing:2; CREATE thing:3; CREATE thing:4; CREATE thing:5;
+				"#,
+			)
+			.send()
+			.await?;
+
+		// `in` — array of IDs.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{ things(filter: { id: { in: ["thing:1","thing:3"] } }) { id } }"#})
+					.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "in-filter errored: {body}");
+		let things = body["data"]["things"].as_array().expect("thing list");
+		assert_eq!(things.len(), 2);
+
+		// `range` — inclusive end.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{ things(filter: { id: { range: { from: "thing:2", to: "thing:4", inclusive: true } } }) { id } }"#})
+					.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "range-filter errored: {body}");
+		let things = body["data"]["things"].as_array().expect("thing list");
+		assert_eq!(things.len(), 3, "expected thing:2..=thing:4, got: {things:?}");
+
+		// `range` — exclusive end (default).
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{ things(filter: { id: { range: { from: "thing:2", to: "thing:4" } } }) { id } }"#})
+					.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let things = body["data"]["things"].as_array().expect("thing list");
+		assert_eq!(things.len(), 2, "expected thing:2..thing:4, got: {things:?}");
+
+		Ok(())
+	}
+
+	/// #4554 — `count(<rel>)` predicates inside the table filter (single-hop,
+	/// both directions). Plus a smoke test on the existing `_aggregate` field.
+	#[test(tokio::test)]
+	async fn issue_4554_relation_count_filter_in_where() -> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE person;
+				DEFINE TABLE email;
+				DEFINE TABLE sent TYPE RELATION IN person OUT email;
+
+				CREATE person:alice; CREATE person:bob; CREATE person:carol;
+				CREATE email:e1; CREATE email:e2; CREATE email:e3; CREATE email:e4;
+
+				RELATE person:alice->sent->email:e1;
+				RELATE person:alice->sent->email:e2;
+				RELATE person:alice->sent->email:e3;
+				RELATE person:bob->sent->email:e4;
+				"#,
+			)
+			.send()
+			.await?;
+
+		// Alice has 3 outgoing `sent` edges; Bob has 1; Carol has 0.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{ persons(filter: { sent: { count: { gt: 2 } } }) { id } }"#})
+					.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "count filter errored: {body}");
+		let people = body["data"]["persons"].as_array().expect("person list");
+		assert_eq!(people.len(), 1, "expected only alice: {people:?}");
+		assert_eq!(people[0]["id"], "person:alice");
+
+		// Incoming direction on `email` via the auto-generated `sent_in`.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{ emails(filter: { sent_in: { count: { gte: 1 } } }) { id } }"#})
+					.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "incoming count filter errored: {body}");
+		let emails = body["data"]["emails"].as_array().expect("email list");
+		assert_eq!(emails.len(), 4, "expected all 4 emails: {emails:?}");
+
+		// Existing `_aggregate` should still work as a separate query field.
+		let res = client
+			.post(&gql_url)
+			.body(json!({"query": r#"{ persons_aggregate { count } }"#}).to_string())
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "aggregate errored: {body}");
+		let rows = body["data"]["persons_aggregate"].as_array().expect("agg rows");
+		assert_eq!(rows.len(), 1);
+		assert_eq!(rows[0]["count"], 3);
+
+		Ok(())
+	}
+
+	/// #4537 — `GRAPHQL <ident>` clauses on `DEFINE FIELD`, `DEFINE TABLE` and
+	/// `DEFINE FUNCTION` rename the corresponding GraphQL surface.
+	#[test(tokio::test)]
+	async fn issue_4537_graphql_alias_clause() -> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		let res = client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE customer_account GRAPHQL_ALIAS "Customer";
+				DEFINE FIELD first_name ON customer_account TYPE string GRAPHQL_ALIAS "firstName";
+				DEFINE FIELD last_name ON customer_account TYPE string GRAPHQL_ALIAS "lastName";
+
+				DEFINE FUNCTION fn::ping() -> string { RETURN "pong"; } GRAPHQL_ALIAS "ping";
+
+				CREATE customer_account:alice SET first_name = "Alice", last_name = "Smith";
+				"#,
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+
+		// 1) Table alias produces a Customer/customers pair (singular/plural).
+		let res = client
+			.post(&gql_url)
+			.body(json!({"query": r#"{ customers { id firstName lastName } }"#}).to_string())
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "alias list query errored: {body}");
+		let rows = body["data"]["customers"].as_array().expect("rows");
+		assert_eq!(rows.len(), 1);
+		assert_eq!(rows[0]["firstName"], "Alice");
+		assert_eq!(rows[0]["lastName"], "Smith");
+
+		// 2) Field alias works inside filters on the plural query.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{ customers(filter: { firstName: { eq: "Alice" } }) { id } }"#})
+					.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "filter errored: {body}");
+		assert_eq!(body["data"]["customers"].as_array().unwrap().len(), 1);
+
+		// 3) Singular fetch-by-id uses the aliased `Customer`.
+		let res = client
+			.post(&gql_url)
+			.body(json!({"query": r#"{ Customer(id: "alice") { id firstName } }"#}).to_string())
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "Customer fetch errored: {body}");
+		assert_eq!(body["data"]["Customer"]["firstName"], "Alice");
+
+		// 4) Mutation field uses the aliased capitalisation: `createCustomer`.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"mutation { createCustomer(data: { firstName: "Bob", lastName: "Jones" }) { id firstName } }"#})
+					.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "mutation errored: {body}");
+		assert_eq!(body["data"]["createCustomer"]["firstName"], "Bob");
+
+		// 5) Function alias.
+		let res =
+			client.post(&gql_url).body(json!({"query": r#"{ ping }"#}).to_string()).send().await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "function alias errored: {body}");
+		assert_eq!(body["data"]["ping"], "pong");
+
+		Ok(())
+	}
+
+	/// #4552 — Apollo naming is the only schema style: singular `<table>` for
+	/// fetch-by-id, plural `<tables>` for the list query, camelCased fields,
+	/// and pluralised bulk mutations (`createStores`).
+	#[test(tokio::test)]
+	async fn issue_4552_apollo_naming_convention() -> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		let res = client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE store SCHEMAFULL;
+				DEFINE FIELD store_name ON store TYPE string;
+				CREATE store:s1 SET store_name = "First";
+				CREATE store:s2 SET store_name = "Second";
+				"#,
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+
+		// `stores` (plural) is the list query; `store` (singular) is the
+		// fetch-by-id; field names mirror the SurrealQL idiom.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{ stores(order: { asc: store_name }) { id store_name } }"#})
+					.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "stores query errored: {body}");
+		let rows = body["data"]["stores"].as_array().expect("rows");
+		assert_eq!(rows.len(), 2);
+		assert_eq!(rows[0]["store_name"], "First");
+
+		let res = client
+			.post(&gql_url)
+			.body(json!({"query": r#"{ store(id: "s1") { id store_name } }"#}).to_string())
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "store query errored: {body}");
+		assert_eq!(body["data"]["store"]["store_name"], "First");
+
+		// Bulk mutation uses the pluralised form `createStores`.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"mutation { createStores(data: [{ store_name: "Third" }, { store_name: "Fourth" }]) { id store_name } }"#})
+					.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "createStores errored: {body}");
+		assert_eq!(body["data"]["createStores"].as_array().unwrap().len(), 2);
+
+		// `__schema` should expose `store` and `stores`, no legacy `store`.
+		let res = client
+			.post(&gql_url)
+			.body(json!({"query": r#"{ __schema { queryType { fields { name } } } }"#}).to_string())
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let names: Vec<&str> = body["data"]["__schema"]["queryType"]["fields"]
+			.as_array()
+			.expect("fields")
+			.iter()
+			.filter_map(|f| f["name"].as_str())
+			.collect();
+		assert!(names.contains(&"store"), "missing singular `store`: {names:?}");
+		assert!(names.contains(&"stores"), "missing plural `stores`: {names:?}");
+		assert!(!names.contains(&"_get_store"), "_get_store should be replaced: {names:?}");
+
+		Ok(())
+	}
+
+	/// #4552 — schema generation refuses to build when two tables collapse to
+	/// the same query name (handles SurrealDB's case-sensitive table names).
+	#[test(tokio::test)]
+	async fn issue_4552_apollo_collision_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		// `store` and `stores` both produce a list field named `stores` —
+		// schema generation should fail with a helpful error.
+		let res = client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE store;
+				DEFINE TABLE stores;
+				"#,
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+
+		let res = client
+			.post(&gql_url)
+			.body(json!({"query": "{ __typename }"}).to_string())
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let msg = body["errors"][0]["message"].as_str().unwrap_or("");
+		assert!(
+			msg.contains("naming collision") || msg.to_lowercase().contains("collision"),
+			"expected collision error, got: {body}"
+		);
+
+		Ok(())
+	}
+
+	/// `COMPUTED` and `READONLY` fields must not appear in mutation input
+	/// types. SurrealQL re-evaluates `COMPUTED` and rejects writes to
+	/// `READONLY` at execution time, so advertising them as settable in
+	/// `Create*Input` / `Update*Input` / `Upsert*Input` would mislead schema
+	/// consumers.
+	#[test(tokio::test)]
+	async fn computed_and_readonly_fields_excluded_from_mutation_inputs()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE product SCHEMAFULL;
+				DEFINE FIELD price ON product TYPE int;
+				DEFINE FIELD tax ON product TYPE int COMPUTED math::floor(price * 0.20);
+				DEFINE FIELD sku ON product TYPE string READONLY VALUE "fixed-sku";
+				"#,
+			)
+			.send()
+			.await?;
+
+		// Pull the input field lists for each mutation shape.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{
+					create: __type(name: "CreateProductInput") { inputFields { name } }
+					update: __type(name: "UpdateProductInput") { inputFields { name } }
+					upsert: __type(name: "UpsertProductInput") { inputFields { name } }
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "introspection errored: {body}");
+
+		for which in ["create", "update", "upsert"] {
+			let names: Vec<&str> = body["data"][which]["inputFields"]
+				.as_array()
+				.unwrap_or_else(|| panic!("{which} input fields missing: {body}"))
+				.iter()
+				.filter_map(|f| f["name"].as_str())
+				.collect();
+			assert!(
+				!names.contains(&"tax"),
+				"`tax` (COMPUTED) leaked into {which} input: {names:?}",
+			);
+			assert!(
+				!names.contains(&"sku"),
+				"`sku` (READONLY) leaked into {which} input: {names:?}",
+			);
+			assert!(names.contains(&"price"), "regular field missing in {which}: {names:?}");
+		}
+
+		// Reads still expose the computed field with its evaluated value.
+		client.post(&sql_url).body("CREATE product:p1 SET price = 100;").send().await?;
+		let res = client
+			.post(&gql_url)
+			.body(json!({"query": r#"{ product(id: "p1") { id price tax sku } }"#}).to_string())
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "read errored: {body}");
+		assert_eq!(body["data"]["product"]["price"], 100);
+		assert_eq!(body["data"]["product"]["tax"], 20);
+		assert_eq!(body["data"]["product"]["sku"], "fixed-sku");
+
+		Ok(())
+	}
+
+	/// Pre-computed table views (`DEFINE TABLE x AS SELECT ... FROM y`) must
+	/// not get mutation fields — direct writes are rejected by the SurrealQL
+	/// engine. The view's Query fields should still work.
+	#[test(tokio::test)]
+	async fn views_have_no_mutation_fields() -> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE temperature SCHEMAFULL;
+				DEFINE FIELD city ON temperature TYPE string;
+				DEFINE FIELD value ON temperature TYPE int;
+
+				DEFINE TABLE city_avg AS
+					SELECT city, math::mean(value) AS avg
+					FROM temperature
+					GROUP BY city;
+
+				CREATE temperature SET city = "London", value = 10;
+				CREATE temperature SET city = "London", value = 20;
+				CREATE temperature SET city = "Paris", value = 30;
+				"#,
+			)
+			.send()
+			.await?;
+
+		// Query the view — reads should work.
+		let res = client
+			.post(&gql_url)
+			.body(json!({"query": r#"{ cityAvgs { id } }"#}).to_string())
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "view list errored: {body}");
+		assert!(body["data"]["cityAvgs"].as_array().unwrap().len() >= 2);
+
+		// Confirm mutations for the view are absent from the schema.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{ __schema { mutationType { fields { name } } } }"#})
+					.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let mutation_names: Vec<&str> = body["data"]["__schema"]["mutationType"]["fields"]
+			.as_array()
+			.expect("mutation fields")
+			.iter()
+			.filter_map(|f| f["name"].as_str())
+			.collect();
+		for muty in ["createCity_avg", "updateCity_avg", "deleteCity_avg", "upsertCity_avg"] {
+			assert!(
+				!mutation_names.contains(&muty),
+				"view should not expose `{muty}`: {mutation_names:?}",
+			);
+		}
+		// Base table mutations are still present.
+		assert!(
+			mutation_names.contains(&"createTemperature"),
+			"base-table mutation missing: {mutation_names:?}",
+		);
+
+		Ok(())
+	}
+
+	/// `GRAPHQL_DEPRECATED "reason"` should surface on the description for
+	/// fields, tables and functions until async-graphql exposes a public
+	/// setter for the `@deprecated` directive.
+	#[test(tokio::test)]
+	async fn graphql_deprecated_surfaces_in_descriptions() -> Result<(), Box<dyn std::error::Error>>
+	{
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE legacy SCHEMAFULL GRAPHQL_DEPRECATED "table-gone";
+				DEFINE FIELD old_name ON legacy TYPE string
+					GRAPHQL_DEPRECATED "field-gone";
+				DEFINE FUNCTION fn::old_fn() -> bool { RETURN true; }
+					GRAPHQL_DEPRECATED "function-gone";
+				"#,
+			)
+			.send()
+			.await?;
+
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{
+					f: __type(name: "legacy") { fields { name description } }
+					q: __schema { queryType { fields { name description } } }
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "introspection errored: {body}");
+
+		// Field description carries the field-level deprecation reason.
+		let old_field = body["data"]["f"]["fields"]
+			.as_array()
+			.expect("legacy fields")
+			.iter()
+			.find(|f| f["name"] == "old_name")
+			.expect("old_name field");
+		assert!(
+			old_field["description"].as_str().unwrap_or("").contains("[Deprecated: field-gone]"),
+			"field deprecation missing: {old_field}",
+		);
+
+		// Table-level deprecation surfaces on the list query description.
+		let query_fields = body["data"]["q"]["queryType"]["fields"].as_array().unwrap();
+		let legacies = query_fields.iter().find(|f| f["name"] == "legacies").expect("legacies");
+		assert!(
+			legacies["description"].as_str().unwrap_or("").contains("[Deprecated: table-gone]"),
+			"table deprecation missing: {legacies}",
+		);
+
+		// Function-level deprecation surfaces on the function Query field.
+		let old_fn = query_fields.iter().find(|f| f["name"] == "fn_old_fn").expect("fn_old_fn");
+		assert!(
+			old_fn["description"].as_str().unwrap_or("").contains("[Deprecated: function-gone]"),
+			"function deprecation missing: {old_fn}",
+		);
+
+		Ok(())
+	}
+
+	/// Cursor pagination — backward direction via `last` / `before` plus
+	/// `pageInfo.hasPreviousPage` / `startCursor`, and lazy `totalCount`.
+	#[test(tokio::test)]
+	async fn cursor_pagination_backward_and_total_count() -> Result<(), Box<dyn std::error::Error>>
+	{
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE crate SCHEMAFULL;
+				DEFINE FIELD label ON crate TYPE string;
+				CREATE crate:c1 SET label = "one";
+				CREATE crate:c2 SET label = "two";
+				CREATE crate:c3 SET label = "three";
+				CREATE crate:c4 SET label = "four";
+				CREATE crate:c5 SET label = "five";
+				"#,
+			)
+			.send()
+			.await?;
+
+		// 1) `last: 2` from the tail — returns the last two records in ascending order with
+		//    hasPreviousPage=true.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{
+					cratesConnection(last: 2) {
+						edges { node { id } }
+						pageInfo { hasNextPage hasPreviousPage startCursor endCursor }
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "tail page errored: {body}");
+		let tail = &body["data"]["cratesConnection"];
+		assert_eq!(tail["edges"].as_array().unwrap().len(), 2);
+		assert_eq!(tail["edges"][0]["node"]["id"], "crate:c4");
+		assert_eq!(tail["edges"][1]["node"]["id"], "crate:c5");
+		assert_eq!(tail["pageInfo"]["hasPreviousPage"], true);
+		assert_eq!(tail["pageInfo"]["hasNextPage"], false);
+		let start_cursor = tail["pageInfo"]["startCursor"].as_str().unwrap().to_string();
+
+		// 2) `last: 2, before: <startCursor>` walks one more page backwards.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": format!(
+					r#"{{
+						cratesConnection(last: 2, before: "{start_cursor}") {{
+							edges {{ node {{ id }} }}
+							pageInfo {{ hasNextPage hasPreviousPage }}
+						}}
+					}}"#
+				)})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "back-second errored: {body}");
+		let back = &body["data"]["cratesConnection"];
+		assert_eq!(back["edges"].as_array().unwrap().len(), 2);
+		assert_eq!(back["edges"][0]["node"]["id"], "crate:c2");
+		assert_eq!(back["edges"][1]["node"]["id"], "crate:c3");
+		assert_eq!(back["pageInfo"]["hasPreviousPage"], true);
+		assert_eq!(back["pageInfo"]["hasNextPage"], true);
+
+		// 3) `totalCount` runs an independent `count()` query.
+		let res = client
+			.post(&gql_url)
+			.body(json!({"query": r#"{ cratesConnection(first: 2) { totalCount } }"#}).to_string())
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "totalCount errored: {body}");
+		assert_eq!(body["data"]["cratesConnection"]["totalCount"], 5);
+
+		// 4) `totalCount` respects the same `filter` argument.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{
+					cratesConnection(first: 10, filter: { label: { in: ["one", "two", "three"] } }) {
+						totalCount
+						edges { node { id } }
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "filtered totalCount errored: {body}");
+		assert_eq!(body["data"]["cratesConnection"]["totalCount"], 3);
+		assert_eq!(body["data"]["cratesConnection"]["edges"].as_array().unwrap().len(), 3);
+
+		// 5) Mutual exclusion: mixing `first` and `last` is rejected.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{ cratesConnection(first: 2, last: 2) { edges { node { id } } } }"#})
+					.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let msg = body["errors"][0]["message"].as_str().unwrap_or("");
+		assert!(
+			msg.to_lowercase().contains("first") && msg.to_lowercase().contains("last"),
+			"expected first/last mutual-exclusion error, got: {body}",
+		);
+
+		Ok(())
+	}
+
+	/// Cursor pagination — `<plural>Connection(first, after)` returns a
+	/// Relay-style connection with `edges { cursor, node }`, `pageInfo`, and
+	/// `hasNextPage` tracking.
+	#[test(tokio::test)]
+	async fn cursor_pagination_connection_field() -> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE box SCHEMAFULL;
+				DEFINE FIELD label ON box TYPE string;
+				CREATE box:b1 SET label = "one";
+				CREATE box:b2 SET label = "two";
+				CREATE box:b3 SET label = "three";
+				CREATE box:b4 SET label = "four";
+				CREATE box:b5 SET label = "five";
+				"#,
+			)
+			.send()
+			.await?;
+
+		// First page (size 2).
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{
+					boxesConnection(first: 2) {
+						edges { cursor node { id label } }
+						pageInfo { hasNextPage endCursor }
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "page 1 errored: {body}");
+		let page1 = &body["data"]["boxesConnection"];
+		assert_eq!(page1["edges"].as_array().unwrap().len(), 2);
+		assert_eq!(page1["edges"][0]["node"]["id"], "box:b1");
+		assert_eq!(page1["edges"][1]["node"]["id"], "box:b2");
+		assert_eq!(page1["pageInfo"]["hasNextPage"], true);
+		let end_cursor = page1["pageInfo"]["endCursor"].as_str().unwrap().to_string();
+		assert!(!end_cursor.is_empty());
+
+		// Next page using the cursor.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": format!(
+					r#"{{
+						boxesConnection(first: 2, after: "{end_cursor}") {{
+							edges {{ cursor node {{ id }} }}
+							pageInfo {{ hasNextPage endCursor }}
+						}}
+					}}"#
+				)})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		assert!(body.get("errors").is_none(), "page 2 errored: {body}");
+		let page2 = &body["data"]["boxesConnection"];
+		assert_eq!(page2["edges"].as_array().unwrap().len(), 2);
+		assert_eq!(page2["edges"][0]["node"]["id"], "box:b3");
+		assert_eq!(page2["edges"][1]["node"]["id"], "box:b4");
+		assert_eq!(page2["pageInfo"]["hasNextPage"], true);
+
+		// Final page exhausts the table.
+		let end_cursor2 = page2["pageInfo"]["endCursor"].as_str().unwrap().to_string();
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": format!(
+					r#"{{
+						boxesConnection(first: 2, after: "{end_cursor2}") {{
+							edges {{ node {{ id }} }}
+							pageInfo {{ hasNextPage }}
+						}}
+					}}"#
+				)})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let page3 = &body["data"]["boxesConnection"];
+		assert_eq!(page3["edges"].as_array().unwrap().len(), 1);
+		assert_eq!(page3["edges"][0]["node"]["id"], "box:b5");
+		assert_eq!(page3["pageInfo"]["hasNextPage"], false);
+
+		Ok(())
+	}
+
+	/// Batched HTTP — POSTing an array of operations runs each query and
+	/// returns a parallel array of responses (standard GraphQL-over-HTTP).
+	#[test(tokio::test)]
+	async fn batched_http_returns_array() -> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE coin SCHEMAFULL;
+				DEFINE FIELD value ON coin TYPE int;
+				CREATE coin:c1 SET value = 1;
+				CREATE coin:c2 SET value = 2;
+				"#,
+			)
+			.send()
+			.await?;
+
+		// Send two operations in one POST.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!([
+					{"query": "{ coins { id value } }"},
+					{"query": "{ coin(id: \"c1\") { id value } }"},
+				])
+				.to_string(),
+			)
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200);
+		let body: serde_json::Value = res.json().await?;
+		let arr = body.as_array().expect("expected array response, got: {body}");
+		assert_eq!(arr.len(), 2);
+		assert_eq!(arr[0]["data"]["coins"].as_array().unwrap().len(), 2);
+		assert_eq!(arr[1]["data"]["coin"]["id"], "coin:c1");
+
+		Ok(())
+	}
+
+	/// A malformed cursor (not base64 / not a record id) must surface as a
+	/// GraphQL error rather than silently falling back to page 1 — Relay
+	/// clients can't recover from a silent "wrong page" result.
+	#[test(tokio::test)]
+	async fn cursor_pagination_invalid_cursor_errors() -> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE box SCHEMAFULL;
+				DEFINE FIELD label ON box TYPE string;
+				CREATE box:b1 SET label = "one";
+				CREATE box:b2 SET label = "two";
+				"#,
+			)
+			.send()
+			.await?;
+
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{
+					boxesConnection(first: 2, after: "not-a-real-cursor") {
+						edges { node { id } }
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let msg = body["errors"][0]["message"].as_str().unwrap_or("");
+		assert!(
+			msg.to_lowercase().contains("invalid cursor"),
+			"expected invalid-cursor error, got: {body}"
+		);
+
+		Ok(())
+	}
+
+	/// A cursor encoded for table A must not be accepted by table B's
+	/// connection field — otherwise the user silently gets an empty page
+	/// (the `id > <record<other_tbl>>` predicate is structurally false).
+	#[test(tokio::test)]
+	async fn cursor_pagination_cross_table_cursor_rejected()
+	-> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE box SCHEMAFULL;
+				DEFINE FIELD label ON box TYPE string;
+				DEFINE TABLE coin SCHEMAFULL;
+				DEFINE FIELD value ON coin TYPE int;
+				CREATE box:b1 SET label = "one";
+				CREATE box:b2 SET label = "two";
+				CREATE coin:c1 SET value = 1;
+				CREATE coin:c2 SET value = 2;
+				"#,
+			)
+			.send()
+			.await?;
+
+		// Grab a real cursor from the `box` connection.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{
+					boxesConnection(first: 1) {
+						pageInfo { endCursor }
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let box_cursor = body["data"]["boxesConnection"]["pageInfo"]["endCursor"]
+			.as_str()
+			.expect("box cursor present")
+			.to_string();
+
+		// Pass it to the `coin` connection — must reject.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": format!(
+					r#"{{
+						coinsConnection(first: 1, after: "{box_cursor}") {{
+							edges {{ node {{ id }} }}
+						}}
+					}}"#
+				)})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let msg = body["errors"][0]["message"].as_str().unwrap_or("");
+		assert!(
+			msg.contains("cursor table mismatch"),
+			"expected cursor-table-mismatch error, got: {body}"
+		);
+
+		Ok(())
+	}
+
+	/// `hasNextPage` / `hasPreviousPage` must be true booleans driven by
+	/// whether records exist past the cursor — not "best-effort = is the
+	/// cursor argument set?". Apollo's `relayStylePagination` will loop on
+	/// the wrong answer.
+	#[test(tokio::test)]
+	async fn cursor_pagination_page_info_is_relay_correct() -> Result<(), Box<dyn std::error::Error>>
+	{
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE box SCHEMAFULL;
+				DEFINE FIELD label ON box TYPE string;
+				CREATE box:b1 SET label = "one";
+				CREATE box:b2 SET label = "two";
+				CREATE box:b3 SET label = "three";
+				CREATE box:b4 SET label = "four";
+				CREATE box:b5 SET label = "five";
+				"#,
+			)
+			.send()
+			.await?;
+
+		// Forward, page 1: no `after`, so hasPreviousPage MUST be false.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{
+					boxesConnection(first: 2) {
+						pageInfo { hasNextPage hasPreviousPage endCursor }
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let p = &body["data"]["boxesConnection"]["pageInfo"];
+		assert_eq!(p["hasNextPage"], true, "forward page1: {body}");
+		assert_eq!(p["hasPreviousPage"], false, "forward page1: {body}");
+		let after_cursor = p["endCursor"].as_str().unwrap().to_string();
+
+		// Forward page 2 with `after`: hasPreviousPage MUST be true (records
+		// b1/b2 exist before the cursor), driven by the probe — not by
+		// `after.is_some()`.
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": format!(
+					r#"{{
+						boxesConnection(first: 2, after: "{after_cursor}") {{
+							pageInfo {{ hasNextPage hasPreviousPage }}
+						}}
+					}}"#
+				)})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let p = &body["data"]["boxesConnection"]["pageInfo"];
+		assert_eq!(p["hasPreviousPage"], true, "forward page2: {body}");
+
+		// Backward from the tail: `last: 2` with no `before`, hasNextPage
+		// MUST be false (we're at the end).
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{
+					boxesConnection(last: 2) {
+						edges { node { id } }
+						pageInfo { hasNextPage hasPreviousPage startCursor }
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let conn = &body["data"]["boxesConnection"];
+		let p = &conn["pageInfo"];
+		assert_eq!(p["hasNextPage"], false, "backward tail: {body}");
+		assert_eq!(p["hasPreviousPage"], true, "backward tail: {body}");
+		let start_cursor = p["startCursor"].as_str().unwrap().to_string();
+
+		// Backward with `before` pointing at b4 (one in from the tail):
+		// hasNextPage MUST be true (b4 and b5 exist forward of the cursor),
+		// driven by the probe — not by `before.is_some()` alone (which
+		// previously would have reported true even on the genuine last page).
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": format!(
+					r#"{{
+						boxesConnection(last: 2, before: "{start_cursor}") {{
+							edges {{ node {{ id }} }}
+							pageInfo {{ hasNextPage hasPreviousPage }}
+						}}
+					}}"#
+				)})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let p = &body["data"]["boxesConnection"]["pageInfo"];
+		assert_eq!(p["hasNextPage"], true, "backward step: {body}");
+
+		Ok(())
+	}
+
+	/// `id: { in: [...] }` cannot be used to synthesise an unbounded `OR` chain.
+	/// Lists exceeding the cap are rejected with a clear error.
+	#[test(tokio::test)]
+	async fn id_in_filter_oversize_list_is_rejected() -> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(r#"DEFINE CONFIG GRAPHQL AUTO; DEFINE TABLE thing; CREATE thing:1;"#)
+			.send()
+			.await?;
+
+		// 1001 ids — one over the 1000 cap.
+		let ids: Vec<String> = (1..=1001).map(|n| format!("\"thing:{n}\"")).collect();
+		let arr = ids.join(",");
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": format!(
+					"{{ things(filter: {{ id: {{ in: [{arr}] }} }}) {{ id }} }}"
+				)})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let msg = body["errors"][0]["message"].as_str().unwrap_or("");
+		assert!(msg.contains("`id.in` accepts at most"), "expected cap error, got: {body}");
+
+		Ok(())
+	}
+
+	/// `GRAPHQL_ALIAS` is validated at DEFINE-time. A typo like
+	/// `"first name"` produces a clear DDL error instead of silently falling
+	/// back to the un-aliased name when the schema is later built.
+	#[test(tokio::test)]
+	async fn graphql_alias_invalid_rejected_at_define() -> Result<(), Box<dyn std::error::Error>> {
+		let (_gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		let res = client
+			.post(&sql_url)
+			.body(
+				r#"DEFINE TABLE person SCHEMAFULL;
+				   DEFINE FIELD first_name ON person TYPE string GRAPHQL_ALIAS "first name";"#,
+			)
+			.send()
+			.await?;
+		let body = res.text().await?;
+		assert!(
+			body.contains("GRAPHQL_ALIAS"),
+			"expected GRAPHQL_ALIAS validation error, got: {body}"
+		);
+
+		Ok(())
+	}
+
+	/// `<plural>Connection` does not accept an `order:` argument: cursors are
+	/// id-keyed, and mixing a custom sort would produce silently-wrong pages
+	/// on the next cursor walk. The schema must not advertise the field.
+	#[test(tokio::test)]
+	async fn connection_field_rejects_order_argument() -> Result<(), Box<dyn std::error::Error>> {
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(
+				r#"DEFINE CONFIG GRAPHQL AUTO;
+				   DEFINE TABLE box SCHEMAFULL;
+				   DEFINE FIELD label ON box TYPE string;
+				   CREATE box:b1 SET label = "one";"#,
+			)
+			.send()
+			.await?;
+
+		let res = client
+			.post(&gql_url)
+			.body(
+				json!({"query": r#"{
+					boxesConnection(first: 1, order: { asc: label }) {
+						edges { node { id } }
+					}
+				}"#})
+				.to_string(),
+			)
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		// async-graphql rejects unknown arguments with an "Unknown argument"
+		// message — pin to that so a future regression where the field
+		// errors for an unrelated reason (parse failure, type mismatch)
+		// would still trip this test.
+		let msg = body["errors"][0]["message"].as_str().unwrap_or("");
+		assert!(
+			msg.to_lowercase().contains("unknown argument") && msg.contains("order"),
+			"expected schema-level rejection of `order:` on Connection, got: {body}"
+		);
+
+		Ok(())
+	}
+
+	/// A table whose name collides with a built-in GraphQL type (`PageInfo`)
+	/// must be rejected by schema generation with our helpful error, not
+	/// surface as an opaque async-graphql build failure. The table's GraphQL
+	/// Object type uses the raw table name, so `DEFINE TABLE PageInfo` clashes
+	/// directly with the connection helper type.
+	#[test(tokio::test)]
+	async fn issue_4552_collision_with_builtin_rejected() -> Result<(), Box<dyn std::error::Error>>
+	{
+		let (gql_url, sql_url, client, _keep) = fresh_client().await?;
+
+		client
+			.post(&sql_url)
+			.body(
+				r#"
+				DEFINE CONFIG GRAPHQL AUTO;
+				DEFINE TABLE PageInfo;
+				"#,
+			)
+			.send()
+			.await?;
+
+		let res = client
+			.post(&gql_url)
+			.body(json!({"query": "{ __typename }"}).to_string())
+			.send()
+			.await?;
+		let body = res.json::<serde_json::Value>().await?;
+		let msg = body["errors"][0]["message"].as_str().unwrap_or("");
+		assert!(
+			msg.contains("PageInfo") && msg.contains("built-in"),
+			"expected built-in collision error mentioning PageInfo, got: {body}"
+		);
+
 		Ok(())
 	}
 }

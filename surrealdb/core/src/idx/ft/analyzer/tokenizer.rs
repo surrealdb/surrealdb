@@ -1,4 +1,5 @@
 use anyhow::{Result, bail};
+use surrealdb_strand::Strand;
 
 use crate::err::Error;
 use crate::expr::tokenizer::Tokenizer as SqlTokenizer;
@@ -8,14 +9,16 @@ use crate::idx::ft::offset::Offset;
 use crate::val::Value;
 
 pub(in crate::idx::ft) struct Tokens {
-	/// The input string
-	i: String,
+	/// The input string. Held as a `Strand` so that inline (short) inputs do
+	/// not force a heap allocation during FT indexing, and heap (long) inputs
+	/// are shared via `Arc<str>` rather than copied.
+	i: Strand,
 	/// The final list of tokens
 	t: Vec<Token>,
 }
 
 impl Tokens {
-	pub(in crate::idx::ft) fn new(i: String) -> Self {
+	pub(in crate::idx::ft) fn new(i: Strand) -> Self {
 		Self {
 			i,
 			t: Vec::new(),
@@ -229,7 +232,7 @@ impl Tokenizer {
 		r
 	}
 
-	pub(super) fn tokenize(t: &[SqlTokenizer], i: String) -> Tokens {
+	pub(super) fn tokenize(t: &[SqlTokenizer], i: Strand) -> Tokens {
 		let mut w = Tokenizer::new(t);
 		let mut last_char_pos = 0;
 		let mut last_byte_pos = 0;
@@ -316,7 +319,7 @@ impl From<char> for CharacterClass {
 impl CharacterClass {
 	/// Te be valid a character is either alphanumeric, punctuation or
 	/// whitespace
-	fn is_valid(&self) -> bool {
+	fn is_valid(self) -> bool {
 		matches!(self, Self::Alphabetic(_) | Self::Numeric | Self::Punctuation | Self::Whitespace)
 	}
 }
@@ -336,7 +339,7 @@ enum CharacterRole {
 impl From<&SqlTokenizer> for Splitter {
 	fn from(t: &SqlTokenizer) -> Self {
 		Self {
-			t: t.clone(),
+			t: *t,
 			state: CharacterClass::Unknown,
 		}
 	}

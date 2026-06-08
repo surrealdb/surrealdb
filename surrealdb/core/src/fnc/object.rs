@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Result, bail};
+use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
 
 use crate::err::Error;
@@ -20,15 +21,15 @@ pub fn entries((object,): (Object,)) -> Result<Value> {
 }
 
 pub fn from_entries((array,): (Array,)) -> Result<Value> {
-	let mut obj: BTreeMap<String, Value> = BTreeMap::default();
+	let mut obj: BTreeMap<Strand, Value> = BTreeMap::default();
 
 	for v in array.iter() {
 		match v {
 			Value::Array(Array(entry)) if entry.len() == 2 => {
-				let key = match entry.first() {
+				let key: Strand = match entry.first() {
 					Some(v) => match v {
 						Value::String(v) => v.clone(),
-						v => v.to_sql(),
+						v => v.to_sql().into(),
 					},
 					_ => {
 						bail!(Error::InvalidFunctionArguments {
@@ -59,7 +60,7 @@ pub fn from_entries((array,): (Array,)) -> Result<Value> {
 		}
 	}
 
-	Ok(Value::Object(Object(obj)))
+	Ok(Value::Object(Object::from(obj)))
 }
 
 pub fn extend((mut object, other): (Object, Object)) -> Result<Value> {

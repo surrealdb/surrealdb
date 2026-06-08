@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
-use rand::Rng;
-use rand::distributions::Alphanumeric;
+use rand::distr::{Alphanumeric, SampleString};
 use reblessive::tree::Stk;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
@@ -53,12 +53,12 @@ impl DefineAccessStatement {
 	/// This key will be used to sign tokens issued with this access method
 	/// This value is used by default in every access method other than JWT
 	pub(crate) fn random_key() -> String {
-		rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
+		Alphanumeric.sample_string(&mut rand::rng(), 128)
 	}
 
 	pub fn from_definition(base: Base, def: &AccessDefinition) -> Self {
-		fn convert_algorithm(access: &catalog::Algorithm) -> Algorithm {
-			match access {
+		fn convert_algorithm(access: catalog::Algorithm) -> Algorithm {
+			match &access {
 				catalog::Algorithm::EdDSA => Algorithm::EdDSA,
 				catalog::Algorithm::Es256 => Algorithm::Es256,
 				catalog::Algorithm::Es384 => Algorithm::Es384,
@@ -79,18 +79,18 @@ impl DefineAccessStatement {
 			JwtAccess {
 				verify: match &access.verify {
 					catalog::JwtAccessVerify::Key(k) => JwtAccessVerify::Key(JwtAccessVerifyKey {
-						alg: convert_algorithm(&k.alg),
-						key: Expr::Literal(Literal::String(k.key.clone())),
+						alg: convert_algorithm(k.alg),
+						key: Expr::Literal(Literal::String(k.key.as_str().into())),
 					}),
 					catalog::JwtAccessVerify::Jwks(j) => {
 						JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
-							url: Expr::Literal(Literal::String(j.url.clone())),
+							url: Expr::Literal(Literal::String(j.url.as_str().into())),
 						})
 					}
 				},
 				issue: access.issue.as_ref().map(|x| JwtAccessIssue {
-					alg: convert_algorithm(&x.alg),
-					key: Expr::Literal(Literal::String(x.key.clone())),
+					alg: convert_algorithm(x.alg),
+					key: Expr::Literal(Literal::String(x.key.as_str().into())),
 				}),
 			}
 		}
@@ -130,16 +130,18 @@ impl DefineAccessStatement {
 			comment: def
 				.comment
 				.clone()
-				.map(|x| Expr::Literal(Literal::String(x)))
+				.map(|x| Expr::Literal(Literal::String(x.into())))
 				.unwrap_or(Expr::Literal(Literal::None)),
 			authenticate: def.authenticate.clone(),
 			access_type: match &def.access_type {
-				catalog::AccessType::Record(record_access) => AccessType::Record(RecordAccess {
-					signup: record_access.signup.clone(),
-					signin: record_access.signin.clone(),
-					jwt: convert_jwt_access(&record_access.jwt),
-					bearer: record_access.bearer.as_ref().map(convert_bearer_access),
-				}),
+				catalog::AccessType::Record(record_access) => {
+					AccessType::Record(Box::new(RecordAccess {
+						signup: record_access.signup.clone(),
+						signin: record_access.signin.clone(),
+						jwt: convert_jwt_access(&record_access.jwt),
+						bearer: record_access.bearer.as_ref().map(convert_bearer_access),
+					}))
+				}
 				catalog::AccessType::Jwt(jwt_access) => {
 					AccessType::Jwt(convert_jwt_access(jwt_access))
 				}
@@ -157,8 +159,8 @@ impl DefineAccessStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<AccessDefinition> {
-		fn convert_algorithm(access: &Algorithm) -> catalog::Algorithm {
-			match access {
+		fn convert_algorithm(access: Algorithm) -> catalog::Algorithm {
+			match &access {
 				Algorithm::EdDSA => catalog::Algorithm::EdDSA,
 				Algorithm::Es256 => catalog::Algorithm::Es256,
 				Algorithm::Es384 => catalog::Algorithm::Es384,
@@ -185,7 +187,7 @@ impl DefineAccessStatement {
 			let verify = match &access.verify {
 				JwtAccessVerify::Key(k) => {
 					catalog::JwtAccessVerify::Key(catalog::JwtAccessVerifyKey {
-						alg: convert_algorithm(&k.alg),
+						alg: convert_algorithm(k.alg),
 						key: stk
 							.run(|stk| k.key.compute(stk, ctx, opt, doc))
 							.await
@@ -205,7 +207,7 @@ impl DefineAccessStatement {
 			};
 
 			let issue = map_opt!(x as &access.issue => catalog::JwtAccessIssue {
-				alg: convert_algorithm(&x.alg),
+				alg: convert_algorithm(x.alg),
 				key: stk.run(|stk| x.key.compute(stk, ctx, opt, doc)).await.catch_return()?.cast_to()?,
 			});
 
@@ -274,7 +276,7 @@ impl DefineAccessStatement {
 			.cast_to()?;
 
 		Ok(AccessDefinition {
-			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "access name").await?,
+			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "access name").await?.into(),
 			base: self.base.into(),
 			grant_duration,
 			token_duration,
@@ -348,7 +350,7 @@ impl DefineAccessStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Actor, self.base)?;
 		// Compute the definition
 		let definition = self.to_definition(stk, ctx, opt, doc).await?;
 		// Check the statement type
@@ -358,13 +360,13 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if access method already exists
 				let mut existing_uses_es512 = false;
-				if let Some(access) = txn.get_root_access(&definition.name, None).await? {
+				if let Some(access) = txn.get_root_access(definition.name.as_str(), None).await? {
 					existing_uses_es512 = Self::uses_es512(&access);
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::AccessRootAlreadyExists {
-									ac: access.name.clone(),
+									ac: access.name.to_string(),
 								});
 							}
 						}
@@ -378,7 +380,7 @@ impl DefineAccessStatement {
 					Self::reject_es512(&definition)?;
 				}
 				// Process the statement
-				let key = crate::key::root::ac::new(&definition.name);
+				let key = crate::key::root::ac::new(definition.name.as_str());
 				txn.set(&key, &definition).await?;
 				// Clear the cache
 				txn.clear_cache();
@@ -391,14 +393,14 @@ impl DefineAccessStatement {
 				// Check if the definition exists
 				let ns = ctx.get_ns_id(opt).await?;
 				let mut existing_uses_es512 = false;
-				if let Some(access) = txn.get_ns_access(ns, &definition.name, None).await? {
+				if let Some(access) = txn.get_ns_access(ns, definition.name.as_str(), None).await? {
 					existing_uses_es512 = Self::uses_es512(&access);
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::AccessNsAlreadyExists {
 									ns: opt.ns()?.to_string(),
-									ac: access.name.clone(),
+									ac: access.name.to_string(),
 								});
 							}
 						}
@@ -412,7 +414,7 @@ impl DefineAccessStatement {
 					Self::reject_es512(&definition)?;
 				}
 				// Process the statement
-				let key = crate::key::namespace::ac::new(ns, &definition.name);
+				let key = crate::key::namespace::ac::new(ns, definition.name.as_str());
 				txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
 				txn.set(&key, &definition).await?;
 				// Clear the cache
@@ -426,7 +428,9 @@ impl DefineAccessStatement {
 				// Check if the definition exists
 				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 				let mut existing_uses_es512 = false;
-				if let Some(access) = txn.get_db_access(ns, db, &definition.name, None).await? {
+				if let Some(access) =
+					txn.get_db_access(ns, db, definition.name.as_str(), None).await?
+				{
 					existing_uses_es512 = Self::uses_es512(&access);
 					match self.kind {
 						DefineKind::Default => {
@@ -434,7 +438,7 @@ impl DefineAccessStatement {
 								bail!(Error::AccessDbAlreadyExists {
 									ns: opt.ns()?.to_string(),
 									db: opt.db()?.to_string(),
-									ac: access.name.clone(),
+									ac: access.name.to_string(),
 								});
 							}
 						}
@@ -448,7 +452,7 @@ impl DefineAccessStatement {
 					Self::reject_es512(&definition)?;
 				}
 				// Process the statement
-				let key = crate::key::database::ac::new(ns, db, &definition.name);
+				let key = crate::key::database::ac::new(ns, db, definition.name.as_str());
 				txn.set(&key, &definition).await?;
 				// Clear the cache
 				txn.clear_cache();
@@ -464,10 +468,10 @@ impl DefineAccessStatement {
 			if let JwtAccessVerify::Key(ref mut v) = acc.verify
 				&& v.alg.is_symmetric()
 			{
-				v.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
+				v.key = Expr::Literal(Literal::String(Strand::new_static("[REDACTED]")));
 			}
 			if let Some(ref mut s) = acc.issue {
-				s.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
+				s.key = Expr::Literal(Literal::String(Strand::new_static("[REDACTED]")));
 			}
 		}
 

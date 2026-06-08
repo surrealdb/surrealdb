@@ -94,7 +94,9 @@ impl RawError {
 	}
 
 	pub unsafe fn unchecked_cast<T: ErrorTrait>(self) -> RawTypedError<T> {
-		RawTypedError(self.0.cast())
+		let ptr = self.0;
+		std::mem::forget(self);
+		RawTypedError(ptr.cast())
 	}
 
 	pub unsafe fn unchecked_ref<T: ErrorTrait>(&self) -> &T {
@@ -157,7 +159,9 @@ impl<E: ErrorTrait> RawTypedError<E> {
 	}
 
 	pub fn erase(self) -> RawError {
-		RawError(self.0.cast())
+		let ptr = self.0;
+		std::mem::forget(self);
+		RawError(ptr.cast())
 	}
 
 	pub fn into_raw(self) -> NonNull<()> {

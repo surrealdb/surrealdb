@@ -26,16 +26,16 @@ value = "{3,}"
 value = "{3,}"
 
 [[test.results]]
-error = "Cannot perform addition with '[1]' and '1'"
+error = "Cannot perform addition with 'array' and 'int'"
 
 [[test.results]]
-error = "Cannot perform addition with '{1,}' and '1'"
+error = "Cannot perform addition with 'set' and 'int'"
 
 [[test.results]]
-error = "Cannot perform subtraction with '[1]' and '1'"
+error = "Cannot perform subtraction with 'array' and 'int'"
 
 [[test.results]]
-error = "Cannot perform subtraction with '{1,}' and '1'"
+error = "Cannot perform subtraction with 'set' and 'int'"
 
 # inc_array
 [[test.results]]

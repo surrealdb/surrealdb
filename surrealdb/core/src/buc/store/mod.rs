@@ -14,7 +14,7 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
 use crate::err::Error;
-use crate::val::{Datetime, File, Object, Value};
+use crate::val::{CoerceError, Datetime, File, Number, Object, Value};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod file;
@@ -80,8 +80,11 @@ impl TryFrom<Object> for ListOptions {
 		}
 
 		if let Some(limit) = obj.remove("limit") {
-			// TODO: Fix negative truncation.
-			opts.limit = Some(limit.coerce_to::<i64>()? as usize);
+			let n = limit.coerce_to::<i64>()?;
+			opts.limit = Some(usize::try_from(n).map_err(|_| CoerceError::InvalidKind {
+				from: Value::Number(Number::Int(n)),
+				into: "non-negative int".into(),
+			})?);
 		}
 
 		Ok(opts)
@@ -259,5 +262,39 @@ impl ObjectStore for Arc<dyn ObjectStore> {
 		opts: &'a ListOptions,
 	) -> Pin<Box<dyn Future<Output = Result<Vec<ObjectMeta>, String>> + Send + 'a>> {
 		(**self).list(opts)
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use std::collections::BTreeMap;
+
+	use super::{ListOptions, Object, Value};
+
+	fn obj(entries: &[(&'static str, Value)]) -> Object {
+		let map: BTreeMap<&str, Value> = entries.iter().cloned().collect();
+		Object::from(map)
+	}
+
+	#[test]
+	fn limit_accepts_zero() {
+		let opts = ListOptions::try_from(obj(&[("limit", Value::from(0i64))]))
+			.expect("limit=0 should be accepted");
+		assert_eq!(opts.limit, Some(0));
+	}
+
+	#[test]
+	fn limit_accepts_positive() {
+		let opts = ListOptions::try_from(obj(&[("limit", Value::from(42i64))]))
+			.expect("limit=42 should be accepted");
+		assert_eq!(opts.limit, Some(42));
+	}
+
+	#[test]
+	fn limit_rejects_negative() {
+		let err = ListOptions::try_from(obj(&[("limit", Value::from(-1i64))]))
+			.err()
+			.expect("negative limit should be rejected");
+		assert!(err.to_string().contains("non-negative int"), "unexpected error message: {err}");
 	}
 }

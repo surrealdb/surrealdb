@@ -2,12 +2,11 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::helpers::{args_access_mode, args_required_context, evaluate_args};
-use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
+use crate::exec::{AccessMode, BoxFut};
 use crate::expr::FlowResult;
 use crate::val::Value;
 
@@ -21,12 +20,13 @@ pub struct BuiltinFunctionExec {
 	/// The required context level for this function (looked up at planning time).
 	pub(crate) func_required_context: crate::exec::ContextLevel,
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for BuiltinFunctionExec {
 	fn name(&self) -> &'static str {
 		"BuiltinFunction"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
@@ -36,25 +36,27 @@ impl PhysicalExpr for BuiltinFunctionExec {
 		args_ctx.max(self.func_required_context)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		// Check if function is allowed by capabilities
-		ctx.check_allowed_function(&self.name)?;
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			// Check if function is allowed by capabilities
+			ctx.check_allowed_function(&self.name)?;
 
-		// Look up the function in the registry
-		let registry = ctx.exec_ctx.function_registry();
-		let func = registry.get(&self.name).ok_or_else(|| {
-			anyhow::anyhow!("Unknown function '{}' - not found in function registry", self.name)
-		})?;
+			// Look up the function in the registry
+			let registry = ctx.exec_ctx.function_registry();
+			let func = registry.get(&self.name).ok_or_else(|| {
+				anyhow::anyhow!("Unknown function '{}' - not found in function registry", self.name)
+			})?;
 
-		// Evaluate all arguments
-		let args = evaluate_args(&self.arguments, ctx.clone()).await?;
+			// Evaluate all arguments
+			let args = evaluate_args(&self.arguments, ctx.clone()).await?;
 
-		// Invoke the function based on whether it's pure or needs context
-		if func.is_pure() && !func.is_async() {
-			Ok(func.invoke(args)?)
-		} else {
-			Ok(func.invoke_async(&ctx, args).await?)
-		}
+			// Invoke the function based on whether it's pure or needs context
+			if func.is_pure() && !func.is_async() {
+				Ok(func.invoke(args)?)
+			} else {
+				Ok(func.invoke_async(&ctx, args).await?)
+			}
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {

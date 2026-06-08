@@ -9,30 +9,35 @@ reason = "Test EXPLAIN with basic SELECT queries: table scan, predicates, specif
 value = "'OK'"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
+value = """
+'SelectProject [ctx: Db] [projections: *]
     TableScan [ctx: Db] [table: item, direction: Forward]
-''''
+'"""
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15]
-''''
+value = """
+'SelectProject [ctx: Db] [projections: *]
+    TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15, pre_decode_filter: yes]
+'"""
 
 [[test.results]]
-value = ''''Project [ctx: Db]
+value = """
+'Project [ctx: Db]
     RecordIdScan [ctx: Db] [record_id: item:1]
-''''
+'"""
 
 [[test.results]]
-value = ''''ProjectValue [ctx: Db] [expr: name]
+value = """
+'ProjectValue [ctx: Db] [expr: name]
     TableScan [ctx: Db] [table: item, direction: Forward]
-''''
+'"""
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: name, doubled]
+value = """
+'SelectProject [ctx: Db] [projections: name, doubled]
     Compute [ctx: Db] [fields: doubled = score * 2]
         TableScan [ctx: Db] [table: item, direction: Forward]
-''''
+'"""
 */
 
 -- Setup test data

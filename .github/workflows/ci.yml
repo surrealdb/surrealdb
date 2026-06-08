@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - main
+      - 'releases/*'
   pull_request:
     types:
       - opened
@@ -27,7 +28,6 @@ defaults:
 
 permissions:
   contents: read
-  checks: write
 
 jobs:
   # ----------------------------------------
@@ -40,17 +40,13 @@ jobs:
       matrix:
         include:
           - name: amd64
-            runner: runner-amd64-large
+            runner: depot-ubuntu-24.04-8
             target: x86_64-unknown-linux-gnu
           - name: arm64
-            runner: runner-arm64-large
+            runner: depot-ubuntu-24.04-arm-8
             target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -59,6 +55,8 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Build binary
         run: cargo build --target ${{ matrix.target }}
@@ -75,12 +73,8 @@ jobs:
 
   format:
     name: Check format
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -97,6 +91,9 @@ jobs:
           toolchain: ${{ steps.info.outputs.toolchain }}
           components: rustfmt
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          enable-sccache: 'false'
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -106,12 +103,8 @@ jobs:
 
   clippy:
     name: Check clippy
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-8
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -121,6 +114,8 @@ jobs:
         with:
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -130,12 +125,9 @@ jobs:
 
   clippy-release:
     name: Check clippy (release)
-    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    runs-on: depot-ubuntu-24.04-16
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -145,6 +137,8 @@ jobs:
         with:
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -152,37 +146,11 @@ jobs:
       - name: Run clippy release
         run: cargo make ci-clippy-release
 
-  check:
-    name: Check workspace
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-        with:
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-
-      - name: Check workspace
-        run: cargo make ci-check
-
   check-release:
     name: Check workspace (release)
-    runs-on: [self-hosted, benchmarking]
+    if: github.ref == 'refs/heads/main'
+    runs-on: depot-ubuntu-24.04-16
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -191,6 +159,8 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -200,14 +170,11 @@ jobs:
 
   check-msrv:
     name: Check workspace (MSRV)
-    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    runs-on: depot-ubuntu-24.04-8
     env:
-      msrv: "1.91" # This should be updated if the MSRV is updated.
+      msrv: "1.95" # This should be updated if the MSRV is updated.
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -217,6 +184,9 @@ jobs:
         with:
           toolchain: ${{ env.msrv }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          enable-sccache: 'false'
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Install cargo-make
         run: cargo +${{ env.msrv }} install --debug --locked cargo-make
@@ -226,12 +196,8 @@ jobs:
 
   check-wasm:
     name: Check Wasm
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-8
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -241,6 +207,8 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -250,12 +218,8 @@ jobs:
 
   check-revision:
     name: Check revision
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -264,21 +228,20 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          enable-sccache: 'false'
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Install revision-lock
-        run: cargo install revision-lock
+        run: cargo install revision-lock --version 0.2.0 --locked
 
       - name: Check revision.lock
         run: revision-lock --check
 
   check-docs:
     name: Check docs
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-8
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -287,6 +250,8 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -296,14 +261,10 @@ jobs:
 
   feature-check:
     name: Check feature combinations
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-8
     # Only run on main branch to avoid slowing down PR CI
     if: github.ref == 'refs/heads/main'
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -312,6 +273,9 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          enable-sccache: 'false'
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -324,12 +288,8 @@ jobs:
 
   unused-deps:
     name: Check unused dependencies
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -338,6 +298,9 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          enable-sccache: 'false'
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -352,14 +315,10 @@ jobs:
   # Integration tests
   # ----------------------------------------
 
-  cli-integration:
-    name: CLI integration tests
-    runs-on: ubuntu-latest
+  integration-tests:
+    name: Integration tests
+    runs-on: depot-ubuntu-24.04-16
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -368,104 +327,20 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
-
-      - name: Run CLI integration tests
-        run: cargo make ci-cli-integration
-
-  http-integration:
-    name: HTTP integration tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
         with:
-          egress-policy: audit
+          preset: test
 
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Run integration tests
+        run: cargo make ci-integration-all
 
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-        with:
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-
-      - name: Run HTTP integration tests
-        run: cargo make ci-http-integration
-
-  ws-integration:
-    name: WebSocket integration tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-        with:
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-
-      - name: Run WebSocket integration tests
-        run: cargo make ci-ws-integration
-
-  ml-integration:
-    name: ML integration tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-        with:
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-
-      - name: Run ML integration tests
-        run: cargo make ci-ml-integration
-
-  graphql-integration:
-    name: GraphQL integration
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-        with:
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-
-      - name: Run GraphQL integration tests
-        run: cargo make ci-graphql-integration
+      - name: sccache stats
+        if: success() || failure()
+        run: sccache -s || true
 
   # ----------------------------------------
   # Workspace tests
@@ -473,12 +348,8 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [runner-amd64-2xlarge]
+    runs-on: depot-ubuntu-24.04-16
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -487,6 +358,7 @@ jobs:
         uses: ./.github/actions/test-workspace
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          depot-runner: 'true'
 
   # ----------------------------------------
   # Storage engine tests
@@ -494,16 +366,12 @@ jobs:
 
   kvs-engines:
     name: KVS - ${{ matrix.engine }} engine
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-8
     strategy:
       fail-fast: false
       matrix:
         engine: [mem, rocksdb, surrealkv, tikv]
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -513,6 +381,8 @@ jobs:
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           cache-key: kvs-${{ matrix.engine }}
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -533,12 +403,8 @@ jobs:
 
   sdk-build:
     name: Test SDK build
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-8
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -547,6 +413,8 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Build local
         working-directory: tests/sdk/local
@@ -558,16 +426,12 @@ jobs:
 
   sdk-engines:
     name: Rust SDK - ${{ matrix.engine }} engine
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-8
     strategy:
       fail-fast: false
       matrix:
         engine: [any, ws, http, mem, rocksdb, surrealkv, tikv]
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -577,6 +441,8 @@ jobs:
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           cache-key: sdk-${{ matrix.engine }}
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -592,45 +458,17 @@ jobs:
         run: cargo make ci-api-integration-${{ matrix.engine }}
 
   # ----------------------------------------
-  # Database upgrade tests
-  # ----------------------------------------
-
-  db-upgrade:
-    name: Database upgrade from previous versions
-    runs-on: ubuntu-latest
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-        with:
-          save-cache: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install tools
-        uses: ./.github/actions/install-tools
-
-  # ----------------------------------------
   # SurrealQL language tests
   # ----------------------------------------
 
   lang-tests:
     name: SurrealQL tests - ${{ matrix.engine }}
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04-8
     strategy:
       fail-fast: false
       matrix:
         engine: [mem, surrealkv, rocksdb, tikv]
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -641,6 +479,8 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: language-tests
           cache-key: lang-${{ matrix.engine }}
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -672,14 +512,18 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
-  upgrade-tests:
-    name: SurrealQL upgrade tests
-    runs-on: ubuntu-latest
+  # ----------------------------------------
+  # SurrealQL language upgrade tests
+  # ----------------------------------------
+
+  lang-upgrade-tests:
+    name: SurrealQL upgrade tests - ${{ matrix.engine }}
+    runs-on: depot-ubuntu-24.04-8
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [surrealkv, rocksdb]
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -688,415 +532,44 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          # Both workspaces are cached: `language-tests` for the test harness,
+          # and the root workspace because the final `..` hop builds the
+          # current checkout's surreal binary via cargo.
           workspaces: |
             language-tests
-            ./
-          cache-directories: language-tests/.binary-cache
+            .
+          cache-key: lang-upgrade-${{ matrix.engine }}
+          free-disk-space: 'false'
+          depot-runner: 'true'
 
-      - name: Build SurrealQL test tool
+      - name: Resolve upgrade version chain
+        id: vers
         run: |
-          cd language-tests
-          cargo build --features upgrade
+          # Extract the comma-separated chain, then translate commas to '_' so
+          # the value is usable inside an `actions/cache` key (which forbids
+          # commas).
+          chain=$(grep -E '^LANG_UPGRADE_VERSIONS = ' Makefile.ci.toml \
+            | sed -E 's/.*value = "([^"]+)".*/\1/' \
+            | tr ',' '_')
+          echo "chain=$chain" >> "$GITHUB_OUTPUT"
 
-  #    - name: Run SurrealQL test suite
-  #run: |
-  #  cd language-tests
-  #  ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
-
-  # ----------------------------------------
-  # Other SDK tests
-  # ----------------------------------------
-
-  sdk-javascript:
-    name: SDK - JavaScript (${{ matrix.version }}, ${{ matrix.protocol }})
-    runs-on: ubuntu-latest
-    needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        version:
-          - latest
-        protocol:
-          - http
-          - ws
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+      - name: Cache upgrade binaries
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # (Actions must be pinned by commit hash) v4.2.3
         with:
-          egress-policy: audit
+          # Pre-built surreal-vX.Y.Z tarballs from download.surrealdb.com.
+          # Release tarballs are immutable, so stale-key restores are safe.
+          path: language-tests/.binary_cache
+          key: lang-upgrade-binaries-v1-${{ runner.os }}-${{ steps.vers.outputs.chain }}
+          restore-keys: |
+            lang-upgrade-binaries-v1-${{ runner.os }}-
 
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
+      - name: Install tools
+        uses: ./.github/actions/install-tools
         with:
-          repository: "surrealdb/surrealdb.js"
+          tools: cargo-make
 
-      - name: Download artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
-        with:
-          name: surreal-amd64
-          path: ${{ github.workspace }}/artifacts
-
-      - name: Set file permissions
-        run: chmod +x ${{ github.workspace }}/artifacts/surreal
-
-      - name: Setup JavaScript
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: ${{ matrix.version }}
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Run JavaScript tests (${{ matrix.protocol }})
-        run: bun test --timeout 10000 --reporter=junit --reporter-outfile=junit.xml
-        env:
-          SURREAL_PROTOCOL: ${{ matrix.protocol }}
-          SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
-
-      - name: Publish Test Report
-        uses: mikepenz/action-junit-report@bccf2e31636835cf0874589931c4116687171386 # v6.4.0
-        if: success() || failure()
-        with:
-          report_paths: junit.xml
-          check_name: JS SDK Test Report (${{ matrix.version }} / ${{ matrix.protocol }})
-          detailed_summary: true
-          include_passed: false
-          include_skipped: false
-          group_suite: true
-          skip_success_summary: true
-
-  sdk-golang:
-    name: SDK - Golang (${{ matrix.version }}, ${{ matrix.protocol }})
-    runs-on: ubuntu-latest
-    needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        version:
-          - 1.23
-        protocol:
-          - http
-          - ws
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
-        with:
-          repository: "surrealdb/surrealdb.go"
-
-      - name: Download artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
-        with:
-          name: surreal-amd64
-          path: ${{ github.workspace }}/artifacts
-
-      - name: Set file permissions
-        run: chmod +x ${{ github.workspace }}/artifacts/surreal
-
-      - name: Setup Golang
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-        with:
-          go-version: ${{ matrix.version }}
-          check-latest: true
-          cache-dependency-path: go.sum
-
-      - name: Start SurrealDB
-        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
-
-      - name: Wait for startup
-        timeout-minutes: 1
-        run: |
-          # Wait for SurrealDB to be ready
-          for i in {1..30}; do
-            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-              echo "SurrealDB is ready"
-              break
-            fi
-            echo "Waiting for SurrealDB to start... (attempt $i/30)"
-            sleep 2
-          done
-
-          # Final check
-          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
-            echo "SurrealDB failed to start"
-            exit 1
-          fi
-
-      - name: Run Golang tests (${{ matrix.protocol }})
-        timeout-minutes: 5
-        run: go test -v -cover ./...
-        env:
-          SURREALDB_URL: ${{ matrix.protocol }}://localhost:8000/rpc
-
-  sdk-python:
-    name: SDK - Python (${{ matrix.version }}, ${{ matrix.protocol }})
-    runs-on: ubuntu-latest
-    needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        version:
-          - 3.13
-        protocol:
-          - http
-          - ws
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
-        with:
-          repository: "surrealdb/surrealdb.py"
-
-      - name: Download artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
-        with:
-          name: surreal-amd64
-          path: ${{ github.workspace }}/artifacts
-
-      - name: Set file permissions
-        run: chmod +x ${{ github.workspace }}/artifacts/surreal
-
-      - name: Setup Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: ${{ matrix.version }}
-
-      - name: Setup uv
-        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
-        with:
-          version: "latest"
-          enable-cache: true
-
-      - name: Start SurrealDB
-        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
-
-      - name: Wait for startup
-        timeout-minutes: 1
-        run: |
-          # Wait for SurrealDB to be ready
-          for i in {1..30}; do
-            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-              echo "SurrealDB is ready"
-              break
-            fi
-            echo "Waiting for SurrealDB to start... (attempt $i/30)"
-            sleep 2
-          done
-
-          # Final check
-          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
-            echo "SurrealDB failed to start"
-            exit 1
-          fi
-
-      - name: Install dependencies
-        run: uv sync --group dev
-
-      - name: Run Python tests (${{ matrix.protocol }})
-        timeout-minutes: 5
-        run: uv run pytest
-        env:
-          PYTHONPATH: ./src
-          SURREALDB_URL: ${{ matrix.protocol }}://localhost:8000
-          SURREALDB_VERSION: ${{ matrix.version }}
-          PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
-
-  sdk-php:
-    name: SDK - PHP (${{ matrix.version }})
-    runs-on: ubuntu-latest
-    needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        version:
-          - 8.2
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
-        with:
-          repository: "surrealdb/surrealdb.php"
-
-      - name: Download artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
-        with:
-          name: surreal-amd64
-          path: ${{ github.workspace }}/artifacts
-
-      - name: Set file permissions
-        run: chmod +x ${{ github.workspace }}/artifacts/surreal
-
-      - name: Setup PHP
-        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f # (Actions must be pinned by commit hash) v2.37.0
-        with:
-          php-version: ${{ matrix.version }}
-
-      - name: Setup Composer
-        uses: php-actions/composer@8a65f0d3c6a1d17ca4800491a40b5756a4c164f3 # (Actions must be pinned by commit hash) v6.1.2
-        with:
-          php_version: ${{ matrix.version }}
-
-      - name: Start SurrealDB
-        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
-
-      - name: Wait for startup
-        timeout-minutes: 1
-        run: |
-          # Wait for SurrealDB to be ready
-          for i in {1..30}; do
-            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-              echo "SurrealDB is ready"
-              break
-            fi
-            echo "Waiting for SurrealDB to start... (attempt $i/30)"
-            sleep 2
-          done
-
-          # Final check
-          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
-            echo "SurrealDB failed to start"
-            exit 1
-          fi
-
-      - name: Run PHP tests
-        timeout-minutes: 5
-        continue-on-error: true
-        run: composer test-coverage-v2
-
-  sdk-dotnet:
-    name: SDK - .NET (${{ matrix.version }})
-    runs-on: ubuntu-latest
-    needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        version:
-          - 10.0.x
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout sources
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
-        with:
-          repository: "surrealdb/surrealdb.net"
-
-      - name: Download artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
-        with:
-          name: surreal-amd64
-          path: ${{ github.workspace }}/artifacts
-
-      - name: Set file permissions
-        run: chmod +x ${{ github.workspace }}/artifacts/surreal
-
-      - name: Setup dotnet
-        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # (Actions must be pinned by commit hash) v5.2.0
-        with:
-          dotnet-version: ${{ matrix.version }}
-
-      - name: Install dependencies
-        run: dotnet restore
-
-      - name: Disable embedded mode
-        run: sudo bash disable_embedded_mode.sh
-
-      - name: Build
-        run: dotnet build --no-restore
-
-      - name: Start SurrealDB
-        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
-
-      - name: Wait for startup
-        timeout-minutes: 1
-        run: |
-          # Wait for SurrealDB to be ready
-          for i in {1..30}; do
-            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
-              echo "SurrealDB is ready"
-              break
-            fi
-            echo "Waiting for SurrealDB to start... (attempt $i/30)"
-            sleep 2
-          done
-
-          # Final check
-          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
-            echo "SurrealDB failed to start"
-            exit 1
-          fi
-
-      - name: Run .NET tests
-        timeout-minutes: 5
-        continue-on-error: true
-        run: >
-          dotnet run
-          --project ./SurrealDb.Net.Tests/SurrealDb.Net.Tests.csproj
-          --no-restore
-          --no-build
-
-      - name: Run .NET tests (Live Query)
-        timeout-minutes: 5
-        continue-on-error: true
-        run: >
-          dotnet run
-          --project ./SurrealDb.Net.LiveQuery.Tests/SurrealDb.Net.LiveQuery.Tests.csproj
-          --no-restore
-          --no-build
-
-  # ----------------------------------------
-  # SDK summary (fails if any SDK test job failed; not in required-checks yet)
-  # ----------------------------------------
-
-  sdk-output:
-    name: SDK test summary
-    runs-on: ubuntu-latest
-    if: always()
-    needs:
-      - sdk-javascript
-      - sdk-golang
-      - sdk-python
-      - sdk-php
-      - sdk-dotnet
-    steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
-
-      - name: SDK test results
-        run: |
-          echo "JavaScript: ${{ needs.sdk-javascript.result == 'success' && '✅ Passed' || '❌ Failed' }}"
-          echo "Golang: ${{ needs.sdk-golang.result == 'success' && '✅ Passed' || '❌ Failed' }}"
-          echo "Python: ${{ needs.sdk-python.result == 'success' && '✅ Passed' || '❌ Failed' }}"
-          echo "PHP: ${{ needs.sdk-php.result == 'success' && '✅ Passed' || '❌ Failed' }}"
-          echo ".NET: ${{ needs.sdk-dotnet.result == 'success' && '✅ Passed' || '❌ Failed' }}"
-
-      - name: Fail if any SDK tests failed
-        run: |
-          if [[ "${{ needs.sdk-javascript.result }}" == "failure" ]] || \
-             [[ "${{ needs.sdk-golang.result }}" == "failure" ]] || \
-             [[ "${{ needs.sdk-python.result }}" == "failure" ]] || \
-             [[ "${{ needs.sdk-php.result }}" == "failure" ]] || \
-             [[ "${{ needs.sdk-dotnet.result }}" == "failure" ]]; then
-            echo "❌ One or more SDK test jobs failed"
-            exit 1
-          fi
-          echo "✅ All SDK tests passed"
+      - name: Run language upgrade tests
+        run: cargo make ci-lang-upgrade-test-${{ matrix.engine }}
 
   # ----------------------------------------
   # Required checks
@@ -1104,7 +577,7 @@ jobs:
 
   required-checks:
     name: Required checks
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-24.04
     if: success() || failure()
     needs:
       # Server build
@@ -1113,19 +586,15 @@ jobs:
       - format
       - clippy
       - clippy-release
-      - check
       - check-release
       - check-msrv
       - check-wasm
       - check-revision
       - check-docs
+      - feature-check
       - unused-deps
       # Integration tests
-      - cli-integration
-      - http-integration
-      - ws-integration
-      - ml-integration
-      - graphql-integration
+      - integration-tests
       # Workspace tests
       - test
       # SDK tests
@@ -1133,16 +602,10 @@ jobs:
       - sdk-engines
       # KVS tests
       - kvs-engines
-      # Database upgrade tests
-      - db-upgrade
       # SurrealQL language tests
       - lang-tests
-      - upgrade-tests
+      - lang-upgrade-tests
     steps:
-      - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
-        with:
-          egress-policy: audit
 
       - name: Check for failures
         run: |
@@ -1154,25 +617,20 @@ jobs:
             "${{ needs.format.result }}"
             "${{ needs.clippy.result }}"
             "${{ needs.clippy-release.result }}"
-            "${{ needs.check.result }}"
             "${{ needs.check-release.result }}"
             "${{ needs.check-msrv.result }}"
             "${{ needs.check-wasm.result }}"
             "${{ needs.check-revision.result }}"
             "${{ needs.check-docs.result }}"
+            "${{ needs.feature-check.result }}"
             "${{ needs.unused-deps.result }}"
-            "${{ needs.cli-integration.result }}"
-            "${{ needs.http-integration.result }}"
-            "${{ needs.ws-integration.result }}"
-            "${{ needs.ml-integration.result }}"
-            "${{ needs.graphql-integration.result }}"
+            "${{ needs.integration-tests.result }}"
             "${{ needs.test.result }}"
             "${{ needs.sdk-build.result }}"
             "${{ needs.sdk-engines.result }}"
             "${{ needs.kvs-engines.result }}"
-            "${{ needs.db-upgrade.result }}"
             "${{ needs.lang-tests.result }}"
-            "${{ needs.upgrade-tests.result }}"
+            "${{ needs.lang-upgrade-tests.result }}"
           )
 
           # Check if any job failed (skipped is ok for conditional jobs)

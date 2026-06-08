@@ -60,7 +60,7 @@ impl SharedEngines {
 
 		let epoch_counter = Arc::new(AtomicU64::new(0));
 
-		let counter = epoch_counter.clone();
+		let counter = Arc::clone(&epoch_counter);
 		let engine_clone = guarded.clone();
 		std::thread::Builder::new()
 			.name("surrealism-epoch-ticker".into())
@@ -120,7 +120,7 @@ pub fn shared_engine(guarded: bool) -> EngineHandle {
 	};
 	EngineHandle {
 		engine,
-		epoch_counter: shared.epoch_counter.clone(),
+		epoch_counter: Arc::clone(&shared.epoch_counter),
 		guarded,
 	}
 }

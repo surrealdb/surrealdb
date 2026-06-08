@@ -25,7 +25,7 @@ impl AlterNamespaceStatement {
 	/// - If `compact` is true, compacts the underlying storage for the current namespace.
 	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> anyhow::Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Namespace, Base::Root)?;
 		// Extract ids
 		let namespace_id = ctx.expect_ns_id(opt).await?;
 		// Do we request compacting?

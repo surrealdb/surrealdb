@@ -4,19 +4,17 @@ use anyhow::Result;
 use async_channel::Sender;
 use surrealdb_types::{SurrealValue, ToSql};
 
-use super::Transaction;
+use super::{KVValue, Transaction};
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, TableProvider,
 	UserProvider,
 };
 use crate::catalog::{DatabaseId, NamespaceId, Record, TableDefinition};
-use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement};
 use crate::expr::{Base, DefineAnalyzerStatement};
 use crate::key::record;
-use crate::kvs::KVValue;
 use crate::sql::statements::OptionStatement;
 
 #[derive(Clone, Debug, SurrealValue)]
@@ -79,9 +77,10 @@ pub enum TableConfig {
 	Exclude(ExcludedTables),
 }
 
-// TODO: This should probably be removed
-// This is not a good from implementation,
-// It is not direct: What true and false mean when converted to a table config?
+// `From<bool>` exists so the SDK's `ExportBuilder::tables(impl Into<TableConfig>)`
+// accepts `tables(true)` / `tables(false)` directly. The semantics are
+// documented at the call site (`surrealdb/src/method/export.rs::tables`):
+// `true` selects all tables, `false` selects none.
 impl From<bool> for TableConfig {
 	fn from(value: bool) -> Self {
 		match value {
@@ -142,9 +141,9 @@ impl<F: fmt::Write> fmt::Write for InlineCommentWriter<'_, F> {
 			'\r' => self.0.write_str("\\r"),
 			// NEL/Next Line
 			'\u{0085}' => self.0.write_str("\\u{0085}"),
-			// line seperator
+			// line separator
 			'\u{2028}' => self.0.write_str("\\u{2028}"),
-			// Paragraph seperator
+			// Paragraph separator
 			'\u{2029}' => self.0.write_str("\\u{2029}"),
 			_ => self.0.write_char(c),
 		}
@@ -165,6 +164,7 @@ impl Transaction {
 		ns: &str,
 		db: &str,
 		cfg: Config,
+		batch_size: u32,
 		chn: Sender<Vec<u8>>,
 	) -> Result<()> {
 		let db = self.get_db_by_name(ns, db, None).await?.ok_or_else(|| {
@@ -176,7 +176,7 @@ impl Transaction {
 		// Output USERS, ACCESSES, PARAMS, FUNCTIONS, ANALYZERS
 		self.export_metadata(&cfg, &chn, db.namespace_id, db.database_id).await?;
 		// Output TABLES
-		self.export_tables(&cfg, &chn, db.namespace_id, db.database_id).await?;
+		self.export_tables(&cfg, &chn, db.namespace_id, db.database_id, batch_size).await?;
 		Ok(())
 	}
 
@@ -302,6 +302,7 @@ impl Transaction {
 		chn: &Sender<Vec<u8>>,
 		ns: NamespaceId,
 		db: DatabaseId,
+		batch_size: u32,
 	) -> Result<()> {
 		// Check if tables are included in the export config
 		if !cfg.tables.is_any() {
@@ -328,7 +329,7 @@ impl Transaction {
 			self.export_table_structure(ns, db, table, chn).await?;
 			// Then export the table data if its desired
 			if cfg.records {
-				self.export_table_data(ns, db, table, chn).await?;
+				self.export_table_data(ns, db, table, chn, batch_size).await?;
 			}
 		}
 
@@ -380,6 +381,7 @@ impl Transaction {
 		db: DatabaseId,
 		table: &TableDefinition,
 		chn: &Sender<Vec<u8>>,
+		batch_size: u32,
 	) -> Result<()> {
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!(format!("-- TABLE DATA: {}", InlineCommentDisplay(&table.name)))).await?;
@@ -391,7 +393,7 @@ impl Transaction {
 		let mut next = Some(beg..end);
 
 		while let Some(rng) = next {
-			let batch = self.batch_keys_vals(rng, *EXPORT_BATCH_SIZE, None).await?;
+			let batch = self.batch_keys_vals(rng, batch_size, None).await?;
 			next = batch.next;
 			// If there are no values, return early.
 			if batch.result.is_empty() {
@@ -415,26 +417,15 @@ impl Transaction {
 	///
 	/// # Arguments
 	///
-	/// * `k` - The record key.
-	/// * `record` - The record to be processed.
+	/// * `record` - The record to be processed. The `id` field must already be present in `data`
+	///   (this is the case when the record was produced by [`Record::kv_decode_value_with_id`]).
 	/// * `records_relate` - A mutable reference to a string buffer for graph edge records.
 	/// * `records_normal` - A mutable reference to a string buffer for normal records.
-	fn process_record(
-		k: record::RecordKey,
-		mut record: Record,
-		records_relate: &mut String,
-		records_normal: &mut String,
-	) {
-		// Inject the id field into the document before processing.
-		let rid = crate::val::RecordId {
-			table: k.tb.into_owned(),
-			key: k.id,
-		};
-		record.data.def(rid);
+	fn process_record(record: &Record, records_relate: &mut String, records_normal: &mut String) {
 		// Match on the value to determine if it is a graph edge record or a normal record.
 		if record.is_edge()
-			&& let crate::val::Value::RecordId(_) = record.data.pick(&*IN)
-			&& let crate::val::Value::RecordId(_) = record.data.pick(&*OUT)
+			&& let crate::val::Value::RecordId(_) = record.data.pick(&IN)
+			&& let crate::val::Value::RecordId(_) = record.data.pick(&OUT)
 		{
 			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
 			// Write the value to the records_relate string.
@@ -481,9 +472,13 @@ impl Transaction {
 		// Process each regular value.
 		for (k, v) in regular_values {
 			let k = record::RecordKey::decode_key(&k)?;
-			let v = Record::kv_decode_value(v)?;
+			let rid = crate::val::RecordId {
+				table: k.tb.into_owned(),
+				key: k.id,
+			};
+			let v = Record::kv_decode_value(&v, rid)?;
 			// Process the value and categorize it into records_relate or records_normal.
-			Self::process_record(k, v, &mut records_relate, &mut records_normal);
+			Self::process_record(&v, &mut records_relate, &mut records_normal);
 		}
 
 		// If there are normal records, generate and send the INSERT SQL command.

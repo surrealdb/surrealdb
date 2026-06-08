@@ -1,0 +1,428 @@
+name: External SDK tests
+
+# Exercise external SDK repos against a freshly built surreal binary.
+# Most jobs use Depot runners; sdk-php uses ubuntu-latest because
+# shivammathur/setup-php expects a stock GitHub-hosted image. Not in PR required checks.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  # ----------------------------------------
+  # Server build (shared by SDK matrices)
+  # ----------------------------------------
+
+  build:
+    name: Build binary (${{ matrix.name }})
+    strategy:
+      matrix:
+        include:
+          - name: amd64
+            runner: depot-ubuntu-24.04-8
+            target: x86_64-unknown-linux-gnu
+          - name: arm64
+            runner: depot-ubuntu-24.04-arm-8
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    steps:
+
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          free-disk-space: 'false'
+          depot-runner: 'true'
+
+      - name: Build binary
+        run: cargo build --target ${{ matrix.target }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # (Actions must be pinned by commit hash) v7.0.0
+        with:
+          name: surreal-${{ matrix.name }}
+          path: target/${{ matrix.target }}/debug/surreal
+
+  sdk-javascript:
+    name: SDK - JavaScript (${{ matrix.version }}, ${{ matrix.protocol }})
+    runs-on: depot-ubuntu-24.04-8
+    needs: build
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - latest
+        protocol:
+          - http
+          - ws
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
+        with:
+          repository: "surrealdb/surrealdb.js"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup JavaScript
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ matrix.version }}
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run JavaScript tests (${{ matrix.protocol }})
+        run: bun test --timeout 10000 --reporter=junit --reporter-outfile=junit.xml
+        env:
+          SURREAL_PROTOCOL: ${{ matrix.protocol }}
+          SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
+
+      - name: Publish Test Report
+        uses: mikepenz/action-junit-report@bccf2e31636835cf0874589931c4116687171386 # v6.4.0
+        if: success() || failure()
+        with:
+          report_paths: junit.xml
+          check_name: JS SDK Test Report (${{ matrix.version }} / ${{ matrix.protocol }})
+          detailed_summary: true
+          include_passed: false
+          include_skipped: false
+          group_suite: true
+          skip_success_summary: true
+
+  sdk-golang:
+    name: SDK - Golang (${{ matrix.version }}, ${{ matrix.protocol }})
+    runs-on: depot-ubuntu-24.04-8
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 1.23
+        protocol:
+          - http
+          - ws
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
+        with:
+          repository: "surrealdb/surrealdb.go"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup Golang
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: ${{ matrix.version }}
+          check-latest: true
+          cache-dependency-path: go.sum
+
+      - name: Start SurrealDB
+        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
+
+      - name: Wait for startup
+        timeout-minutes: 1
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
+
+      - name: Run Golang tests (${{ matrix.protocol }})
+        timeout-minutes: 5
+        run: go test -v -cover ./...
+        env:
+          SURREALDB_URL: ${{ matrix.protocol }}://localhost:8000/rpc
+
+  sdk-python:
+    name: SDK - Python (${{ matrix.version }}, ${{ matrix.protocol }})
+    runs-on: depot-ubuntu-24.04-8
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 3.13
+        protocol:
+          - http
+          - ws
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
+        with:
+          repository: "surrealdb/surrealdb.py"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ matrix.version }}
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Start SurrealDB
+        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
+
+      - name: Wait for startup
+        timeout-minutes: 1
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run Python tests (${{ matrix.protocol }})
+        timeout-minutes: 5
+        run: uv run pytest --ignore=tests/unit_tests/connections/embedded
+        env:
+          PYTHONPATH: ./src
+          SURREALDB_URL: ${{ matrix.protocol }}://localhost:8000
+          SURREALDB_VERSION: ${{ matrix.version }}
+          PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
+
+  sdk-php:
+    name: SDK - PHP (${{ matrix.version }})
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 8.2
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
+        with:
+          repository: "surrealdb/surrealdb.php"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@accd6127cb78bee3e8082180cb391013d204ef9f # (Actions must be pinned by commit hash) v2.37.0
+        with:
+          php-version: ${{ matrix.version }}
+
+      - name: Setup Composer
+        uses: php-actions/composer@8a65f0d3c6a1d17ca4800491a40b5756a4c164f3 # (Actions must be pinned by commit hash) v6.1.2
+        with:
+          php_version: ${{ matrix.version }}
+
+      - name: Start SurrealDB
+        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
+
+      - name: Wait for startup
+        timeout-minutes: 1
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
+
+      - name: Run PHP tests
+        timeout-minutes: 5
+        continue-on-error: true
+        run: composer test-coverage-v2
+
+  sdk-dotnet:
+    name: SDK - .NET (${{ matrix.version }})
+    runs-on: depot-ubuntu-24.04-8
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 10.0.x
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # (Actions must be pinned by commit hash) v6.0.2
+        with:
+          repository: "surrealdb/surrealdb.net"
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # (Actions must be pinned by commit hash) v8.0.1
+        with:
+          name: surreal-amd64
+          path: ${{ github.workspace }}/artifacts
+
+      - name: Set file permissions
+        run: chmod +x ${{ github.workspace }}/artifacts/surreal
+
+      - name: Setup dotnet
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # (Actions must be pinned by commit hash) v5.2.0
+        with:
+          dotnet-version: ${{ matrix.version }}
+
+      - name: Install dependencies
+        run: dotnet restore
+
+      - name: Disable embedded mode
+        run: sudo bash disable_embedded_mode.sh
+
+      - name: Build
+        run: dotnet build --no-restore
+
+      - name: Start SurrealDB
+        run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
+
+      - name: Wait for startup
+        timeout-minutes: 1
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
+
+      - name: Run .NET tests
+        timeout-minutes: 5
+        continue-on-error: true
+        run: >
+          dotnet run
+          --project ./SurrealDb.Net.Tests/SurrealDb.Net.Tests.csproj
+          --no-restore
+          --no-build
+
+      - name: Run .NET tests (Live Query)
+        timeout-minutes: 5
+        continue-on-error: true
+        run: >
+          dotnet run
+          --project ./SurrealDb.Net.LiveQuery.Tests/SurrealDb.Net.LiveQuery.Tests.csproj
+          --no-restore
+          --no-build
+
+  # ----------------------------------------
+  # SDK summary (fails if any SDK test job failed; not in required-checks yet)
+  # ----------------------------------------
+
+  sdk-output:
+    name: SDK test summary
+    runs-on: depot-ubuntu-24.04-8
+    if: always()
+    needs:
+      - sdk-javascript
+      - sdk-golang
+      - sdk-python
+      - sdk-php
+      - sdk-dotnet
+    steps:
+      - name: SDK test results
+        run: |
+          echo "JavaScript: ${{ needs.sdk-javascript.result == 'success' && '✅ Passed' || '❌ Failed' }}"
+          echo "Golang: ${{ needs.sdk-golang.result == 'success' && '✅ Passed' || '❌ Failed' }}"
+          echo "Python: ${{ needs.sdk-python.result == 'success' && '✅ Passed' || '❌ Failed' }}"
+          echo "PHP: ${{ needs.sdk-php.result == 'success' && '✅ Passed' || '❌ Failed' }}"
+          echo ".NET: ${{ needs.sdk-dotnet.result == 'success' && '✅ Passed' || '❌ Failed' }}"
+
+      - name: Fail if any SDK tests failed
+        run: |
+          if [[ "${{ needs.sdk-javascript.result }}" == "failure" ]] || \
+             [[ "${{ needs.sdk-golang.result }}" == "failure" ]] || \
+             [[ "${{ needs.sdk-python.result }}" == "failure" ]] || \
+             [[ "${{ needs.sdk-php.result }}" == "failure" ]] || \
+             [[ "${{ needs.sdk-dotnet.result }}" == "failure" ]]; then
+            echo "❌ One or more SDK test jobs failed"
+            exit 1
+          fi
+          echo "✅ All SDK tests passed"

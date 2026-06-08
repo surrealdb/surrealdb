@@ -40,7 +40,32 @@ pub(crate) use user::DefineUserStatement;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::err::Error;
 use crate::val::Value;
+
+/// Validate a user-supplied `GRAPHQL_ALIAS "..."` value against the GraphQL
+/// `Name` production (`/[_A-Za-z][_0-9A-Za-z]*/`).
+///
+/// Returning a clear definition-time error here is preferable to silently
+/// falling back at schema-generation time — a typo like
+/// `GRAPHQL_ALIAS "first name"` would otherwise produce a working schema with
+/// the un-aliased name and no feedback to the user.
+pub(crate) fn validate_graphql_alias(alias: &Option<String>, kind: &str) -> Result<()> {
+	let Some(alias) = alias.as_deref() else {
+		return Ok(());
+	};
+	let mut chars = alias.chars();
+	let first_ok = chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+	let rest_ok = chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+	if !first_ok || !rest_ok {
+		return Err(Error::InvalidStatement(format!(
+			"GRAPHQL_ALIAS `{alias}` on {kind} is not a valid GraphQL Name; \
+			 expected /[_A-Za-z][_0-9A-Za-z]*/"
+		))
+		.into());
+	}
+	Ok(())
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 pub enum DefineKind {

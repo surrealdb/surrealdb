@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod helpers;
 use anyhow::Result;
 use helpers::{Test, new_ds, skip_ok};

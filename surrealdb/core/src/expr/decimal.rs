@@ -160,14 +160,14 @@ impl DecimalLexEncoder {
 			result.extend(encode_exponent(0xFFFF - biased_exponent));
 			// Complement all packed digit bytes to reverse their ordering for negative
 			// numbers
-			Self::pack_digits_negative(radix10, &mut result);
+			Self::pack_digits_negative(&radix10, &mut result);
 		} else {
 			// Sign marker: 0xFF ensures positive numbers sort after negative ones
 			result.push(Self::FINITE_POSITIVE_MARKER);
 			// Biased scale: larger scales (greater magnitude) sort later for positives
 			result.extend(encode_exponent(biased_exponent));
 			// Store packed digit bytes directly for positive numbers
-			Self::pack_digits_positive(radix10, &mut result);
+			Self::pack_digits_positive(&radix10, &mut result);
 		}
 		result.push(0x00);
 		//
@@ -249,7 +249,7 @@ impl DecimalLexEncoder {
 	/// (we avoid 0 so that 0 nibbles can be used as terminators).
 	/// For odd digit counts, the last byte has a zero low nibble; for even
 	/// counts, an extra 0xFF terminator byte is appended after bit inversion.
-	fn pack_digits_negative(radix10: String, buf: &mut Vec<u8>) {
+	fn pack_digits_negative(radix10: &str, buf: &mut Vec<u8>) {
 		let mut iter = radix10.as_bytes().chunks_exact(2);
 		for pair in &mut iter {
 			// pair is &[u8; 2]
@@ -278,7 +278,7 @@ impl DecimalLexEncoder {
 	/// byte has a zero low nibble; for even counts, an extra 0x00 terminator
 	/// byte is appended. This ensures decode will stop before any trailing
 	/// type marker appended by higher layers.
-	fn pack_digits_positive(radix10: String, buf: &mut Vec<u8>) {
+	fn pack_digits_positive(radix10: &str, buf: &mut Vec<u8>) {
 		let mut iter = radix10.as_bytes().chunks_exact(2);
 		for pair in &mut iter {
 			// pair is &[u8; 2]

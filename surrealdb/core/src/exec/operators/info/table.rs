@@ -9,7 +9,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::ToSql;
 
@@ -53,9 +52,6 @@ impl TableInfoPlan {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for TableInfoPlan {
 	fn name(&self) -> &'static str {
 		"InfoTable"
@@ -104,7 +100,7 @@ impl ExecOperator for TableInfoPlan {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let table = self.table.clone();
+		let table = Arc::clone(&self.table);
 		let structured = self.structured;
 		let version = self.version.clone();
 		let ctx = ctx.clone();
@@ -128,15 +124,8 @@ async fn execute_table_info(
 	structured: bool,
 	version: Option<&dyn PhysicalExpr>,
 ) -> crate::expr::FlowResult<Value> {
-	// Check permissions
-	let root = ctx.root();
-	let opt = root
-		.options
-		.as_ref()
-		.ok_or_else(|| anyhow::anyhow!("Options not available in execution context"))?;
-
 	// Allowed to run?
-	opt.is_allowed(Action::View, ResourceKind::Any, &crate::expr::Base::Db)?;
+	ctx.is_allowed(Action::View, ResourceKind::Any, crate::expr::Base::Db)?;
 
 	// Get database context
 	let db_ctx = ctx.database()?;
@@ -168,46 +157,46 @@ async fn execute_table_info(
 	// Create the result set
 	if structured {
 		Ok(Value::from(map! {
-			"events".to_string() => process(txn.all_tb_events(ns, db, &tb, version).await?),
-			"fields".to_string() => process(txn.all_tb_fields(ns, db, &tb, version).await?),
-			"indexes".to_string() => process(txn.all_tb_indexes(ns, db, &tb, version).await?),
-			"lives".to_string() => process(txn.all_tb_lives(ns, db, &tb, version).await?),
-			"tables".to_string() => process(txn.all_tb_views(ns, db, &tb, version).await?),
+			"events" => process(&txn.all_tb_events(ns, db, &tb, version).await?),
+			"fields" => process(&txn.all_tb_fields(ns, db, &tb, version).await?),
+			"indexes" => process(&txn.all_tb_indexes(ns, db, &tb, version).await?),
+			"lives" => process(&txn.all_tb_lives(ns, db, &tb, version).await?),
+			"tables" => process(&txn.all_tb_views(ns, db, &tb, version).await?),
 		}))
 	} else {
 		Ok(Value::from(map! {
-			"events".to_string() => {
+			"events" => {
 				let mut out = Object::default();
 				for v in txn.all_tb_events(ns, db, &tb, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"fields".to_string() => {
+			"fields" => {
 				let mut out = Object::default();
 				for v in txn.all_tb_fields(ns, db, &tb, version).await?.iter() {
 					out.insert(v.name.to_raw_string(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"indexes".to_string() => {
+			"indexes" => {
 				let mut out = Object::default();
 				for v in txn.all_tb_indexes(ns, db, &tb, version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"lives".to_string() => {
+			"lives" => {
 				let mut out = Object::default();
 				for v in txn.all_tb_lives(ns, db, &tb, version).await?.iter() {
 					out.insert(v.id.to_string(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"tables".to_string() => {
+			"tables" => {
 				let mut out = Object::default();
 				for v in txn.all_tb_views(ns, db, &tb, version).await?.iter() {
-					out.insert(v.name.clone().into_string(), v.to_sql().into());
+					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
@@ -215,7 +204,7 @@ async fn execute_table_info(
 	}
 }
 
-fn process<T>(a: Arc<[T]>) -> Value
+fn process<T>(a: &Arc<[T]>) -> Value
 where
 	T: InfoStructure + Clone,
 {

@@ -21,10 +21,11 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: name] {rows: 1}
-    TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = { name: 'Tobie' }.name] {rows: 1}
+value = """
+"SelectProject [ctx: Db] [projections: name] {rows: 1}
+    TableScan [ctx: Db] [table: person, direction: Forward, predicate: name = { name: 'Tobie' }.name, pre_decode_filter: no (unsupported predicate)] {rows: 1}
 
-Total rows: 1"'''
+Total rows: 1""""
 
 [[test.results]]
 value = "NONE"
@@ -39,16 +40,18 @@ value = "NONE"
 value = "[{ created_at: d'2023-12-25T17:13:01.940183014Z', id: test_user:1 }]"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *] {rows: 1}
+value = """
+"SelectProject [ctx: Db] [projections: *] {rows: 1}
     IndexScan [ctx: Db] [index: createdAt, access: = d'2023-12-25T17:13:01.940183014Z', direction: Forward] {rows: 1}
 
-Total rows: 1"'''
+Total rows: 1""""
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *] {rows: 1}
+value = """
+"SelectProject [ctx: Db] [projections: *] {rows: 1}
     IndexScan [ctx: Db] [index: createdAt, access: = d'2023-12-25T17:13:01.940183014Z', direction: Forward] {rows: 1}
 
-Total rows: 1"'''
+Total rows: 1""""
 
 [[test.results]]
 value = "[{ created_at: d'2023-12-25T17:13:01.940183014Z', id: test_user:1 }]"
@@ -66,16 +69,18 @@ value = "[{ id: sessions:1, sessionUid: u'00ad70db-f435-442e-9012-1cd853102084' 
 value = "NONE"
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *] {rows: 1}
+value = """
+"SelectProject [ctx: Db] [projections: *] {rows: 1}
     IndexScan [ctx: Db] [index: sessionUid, access: = u'00ad70db-f435-442e-9012-1cd853102084', direction: Forward] {rows: 1}
 
-Total rows: 1"'''
+Total rows: 1""""
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *] {rows: 1}
-    TableScan [ctx: Db] [table: sessions, direction: Forward, predicate: sessionUid = { uuid: u'00ad70db-f435-442e-9012-1cd853102084' }.uuid] {rows: 1}
+value = """
+"SelectProject [ctx: Db] [projections: *] {rows: 1}
+    TableScan [ctx: Db] [table: sessions, direction: Forward, predicate: sessionUid = { uuid: u'00ad70db-f435-442e-9012-1cd853102084' }.uuid, pre_decode_filter: no (unsupported predicate)] {rows: 1}
 
-Total rows: 1"'''
+Total rows: 1""""
 
 [[test.results]]
 value = "[{ id: sessions:1, sessionUid: u'00ad70db-f435-442e-9012-1cd853102084' }]"

@@ -52,16 +52,10 @@ async fn handler(
 			match accept.as_deref() {
 				// Simple serialization
 				None | Some(Accept::ApplicationJson) => {
-					// TODO(3.0): This code here is using the wrong serialization method which might
-					// result in some values of the code being serialized wrong.
-					//
-					// this will serialize structs differently then they should.
 					let res = res.into_value();
 					Ok(Output::json_value(&res))
 				}
 				Some(Accept::ApplicationCbor) => {
-					// TODO(3.0): This code here is using the wrong serialization method which might
-					// result in some values of the code being serialized wrong.
 					let res = res.into_value();
 					Ok(Output::cbor(res))
 				}

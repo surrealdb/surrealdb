@@ -37,7 +37,6 @@ use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::Stream;
 
 use crate::err::Error;
@@ -86,6 +85,7 @@ pub(crate) mod permission;
 pub(crate) mod physical_expr;
 pub(crate) mod plan_or_compute;
 pub(crate) mod planner;
+pub(crate) mod pre_decode_filter;
 
 // Re-export access mode types
 pub(crate) use access_mode::{AccessMode, CombineAccessModes};
@@ -127,8 +127,6 @@ pub(crate) type ValueBatchStream = Pin<Box<dyn Stream<Item = FlowResult<ValueBat
 /// Execution plans form a tree structure where each node declares its minimum required
 /// context level via `required_context()`. The executor validates that the current session
 /// meets these requirements before execution begins.
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 pub(crate) trait ExecOperator: Debug + SendSyncRequirement {
 	fn name(&self) -> &'static str;
 
@@ -182,8 +180,11 @@ pub(crate) trait ExecOperator: Debug + SendSyncRequirement {
 	/// Only called if `mutates_context()` returns true.
 	/// This method may perform async operations (like looking up namespace/database
 	/// definitions or creating transactions).
-	async fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
-		Ok(input.clone())
+	fn output_context<'a>(
+		&'a self,
+		input: &'a ExecutionContext,
+	) -> BoxFut<'a, Result<ExecutionContext, Error>> {
+		Box::pin(async move { Ok(input.clone()) })
 	}
 
 	/// Returns the access mode for this plan (and all its children).

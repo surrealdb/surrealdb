@@ -1,4 +1,8 @@
 #![cfg(feature = "scripting")]
+// rquickjs `#[js::methods]`, `#[qjs(constructor)]`, and `FromJs` glue require owned
+// `Ctx`/`Value`/`String` parameters in user-written signatures, so this lint fires
+// throughout the module by design.
+#![allow(clippy::needless_pass_by_value)]
 
 pub use main::run;
 

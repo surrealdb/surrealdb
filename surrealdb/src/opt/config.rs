@@ -63,10 +63,11 @@ impl Config {
 	}
 
 	/// Set the default user
+	#[allow(clippy::needless_pass_by_value)] // Public SDK builder: ergonomic for callers passing an owned `Root`.
 	pub fn user(mut self, user: crate::opt::auth::Root) -> Self {
 		self.auth = Level::Root;
-		user.username.clone_into(&mut self.username);
-		user.password.clone_into(&mut self.password);
+		self.username = user.username;
+		self.password = user.password;
 		self
 	}
 

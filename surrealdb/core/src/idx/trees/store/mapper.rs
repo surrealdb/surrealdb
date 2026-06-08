@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use ahash::HashSet;
 use anyhow::{Result, bail};
@@ -7,7 +7,7 @@ use dashmap::DashMap;
 use crate::catalog;
 use crate::err::Error;
 use crate::expr::Filter;
-use crate::iam::file::is_path_allowed;
+use crate::iam::file::check_is_path_allowed;
 use crate::idx::ft::analyzer::mapper::Mapper;
 
 #[derive(Default)]
@@ -15,11 +15,15 @@ pub(crate) struct Mappers(DashMap<String, Mapper>);
 
 impl Mappers {
 	/// If any mapper is defined, it will be loaded in memory.
-	pub(crate) async fn load(&self, az: &catalog::AnalyzerDefinition) -> Result<()> {
+	pub(crate) async fn load(
+		&self,
+		az: &catalog::AnalyzerDefinition,
+		allow_list: &[PathBuf],
+	) -> Result<()> {
 		if let Some(filters) = &az.filters {
 			for f in filters {
 				if let Filter::Mapper(path) = f {
-					self.insert(path).await?;
+					self.insert(path, allow_list).await?;
 				}
 			}
 		}
@@ -28,27 +32,31 @@ impl Mappers {
 
 	/// Ensure that if a mapper is defined, that it is also loaded in memory.
 	/// This method does not reload a mapper if it is already in memory.
-	pub(crate) async fn check(&self, az: &catalog::AnalyzerDefinition) -> Result<()> {
+	pub(crate) async fn check(
+		&self,
+		az: &catalog::AnalyzerDefinition,
+		allow_list: &[PathBuf],
+	) -> Result<()> {
 		if let Some(filters) = &az.filters {
 			for f in filters {
 				if let Filter::Mapper(path) = f
 					&& !self.0.contains_key(path)
 				{
-					self.insert(path).await?;
+					self.insert(path, allow_list).await?;
 				}
 			}
 		}
 		Ok(())
 	}
 
-	async fn insert(&self, path: &str) -> Result<()> {
+	async fn insert(&self, path: &str, allow_list: &[PathBuf]) -> Result<()> {
 		let p = Path::new(path);
 		// Check the path is allowed
-		is_path_allowed(p)?;
+		check_is_path_allowed(p, allow_list)?;
 		if !p.exists() || !p.is_file() {
 			bail!(Error::Internal(format!("Invalid mapper path: {p:?}")));
 		}
-		let mapper = Mapper::new(p).await?;
+		let mapper = Mapper::new(p, allow_list).await?;
 		self.0.insert(path.to_string(), mapper);
 		Ok(())
 	}

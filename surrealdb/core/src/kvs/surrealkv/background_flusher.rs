@@ -57,7 +57,7 @@ impl BackgroundFlusher {
 			mutex: Mutex::new(()),
 		});
 		// Clone the shutdown notifier
-		let signal = notify.clone();
+		let signal = Arc::clone(&notify);
 		// Spawn the background flusher thread
 		let handle = thread::Builder::new()
 			.name("surrealkv-background-flusher".to_string())

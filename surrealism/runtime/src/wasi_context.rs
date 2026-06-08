@@ -51,7 +51,7 @@ impl IsTerminal for CallbackStdoutStream {
 impl StdoutStream for CallbackStdoutStream {
 	fn async_stream(&self) -> Box<dyn AsyncWrite + Send + Sync> {
 		Box::new(CallbackWriter {
-			callback: self.callback.clone(),
+			callback: Arc::clone(&self.callback),
 			buffer: Vec::new(),
 		})
 	}

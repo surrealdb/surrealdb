@@ -5,6 +5,7 @@ This document describes the SurrealDB release workflow, including how to perform
 ## Table of Contents
 
 - [Overview](#overview)
+- [Rolling Builds](#rolling-builds)
 - [Release Types](#release-types)
 - [Workflow Inputs](#workflow-inputs)
 - [Branching Strategy](#branching-strategy)
@@ -25,15 +26,37 @@ The release workflow is designed to handle two types of releases:
 
 The workflow is **fully idempotent**, meaning you can safely retry any release without errors or duplicate resources.
 
+> For per-release operational notes that administrators should read before
+> deploying a new build (wire-format rotations, removed features, etc.),
+> see [`UPGRADING.md`](./UPGRADING.md).
+
+## Rolling Builds
+
+Separately from the versioned/nightly release workflow described below,
+`rolling-build.yml` runs on every push to `main` and to `releases/*` branches.
+It builds the full binary matrix and Docker images for that commit and publishes
+them by commit SHA — binaries to `s3://download.surrealdb.com/rolling/<sha>/`
+and images to `surrealdb/surrealdb:rolling-<sha>` plus a moving
+`surrealdb/surrealdb:<branch-slug>` tag (e.g. `:main`, `:releases-3-1`).
+
+Rolling builds do **not** publish crates (crates.io versions are write-once) and
+do **not** re-run the CI quality/test matrix — correctness is gated by `ci.yml`
+on the same commit. The baked binary version comes from `Cargo.toml` plus build
+metadata, so a `releases/*` commit already carries its intended release version.
+Every job is guarded by `github.repository`, so the workflow never runs in the
+public mirror.
+
+Official releases are still cut via the versioned workflow documented below; the
+tag-to-promote model that re-tags these rolling artifacts is being introduced
+incrementally.
+
 ## Release Types
 
 ### Nightly Releases
 
 - **Purpose**: Daily development builds for testing latest features
 - **Trigger**: Automatically at midnight UTC, or manually via workflow dispatch
-- **Version Format**:
-	- If main is pre-release (e.g., `3.0.0-beta`): `3.0.0-nightly`
-	- If main is stable (e.g., `3.0.0`): `3.1.0-nightly`
+- **Version Format**: Derived from main's version, which is always `X.Y.0-nightly` (e.g. `3.2.0-nightly`), plus build metadata
 - **Artifacts**: Binaries, Docker images (tagged with `nightly`)
 - **No**: Crate publishing, Git tags, GitHub releases, or main branch updates
 
@@ -46,22 +69,23 @@ Versioned releases come in several flavors:
 #### Pre-Release (Alpha/Beta/RC)
 
 - **Format**: `X.Y.Z-<prerelease>.<patch>` (e.g., `3.0.0-beta.1`, `3.1.0-alpha.2`)
-- **Main Branch**: Updated to `X.Y.Z-<prerelease>` (patch stripped)
-	- Example: Release `3.0.0-beta.2` → Main becomes `3.0.0-beta`
+- **Source**: Cut from the release branch for that line (e.g. `releases/3.0`)
+- **Main Branch**: Not updated (main always stays on its `-nightly` development version)
 - **Use Case**: Feature testing, early adopter releases
 
 #### Stable Release (X.Y.0)
 
 - **Format**: `X.Y.0` (e.g., `3.0.0`, `4.0.0`)
-- **Main Branch**: Bumped to next minor alpha: `X.(Y+1).0-alpha`
-	- Example: Release `3.0.0` → Main becomes `3.1.0-alpha`
+- **Source**: Cut from the release branch for that line (e.g. `releases/3.0`)
+- **Main Branch**: Bumped to next minor nightly: `X.(Y+1).0-nightly` (via `update-main`)
+	- Example: Release `3.0.0` → Main becomes `3.1.0-nightly`
 - **Use Case**: Major feature releases, production-ready versions
 
 #### Patch Release (X.Y.Z where Z > 0)
 
 - **Format**: `X.Y.Z` (e.g., `3.0.1`, `3.0.2`)
 - **Source**: Branch created from the previous version's tag when preparing the patch (e.g. create from `v3.0.0` for release `3.0.1`)
-- **Main Branch**: Not updated (remains on next minor alpha)
+- **Main Branch**: Not updated (remains on next minor nightly)
 - **Use Case**: Bug fixes, security patches
 
 ## Workflow Inputs
@@ -74,19 +98,13 @@ Versioned releases come in several flavors:
 - **Default**: `nightly`
 - **Note**: Determines which other inputs are relevant
 
-#### `release-version`
-- **Type**: String
-- **Description**: Semantic version for the release (e.g., `3.0.0-beta.1`)
-- **Required**: For versioned releases
-- **Validation**: Automatically validated by workflow
-
 #### `git-ref`
 - **Type**: String
-- **Description**: The git ref (branch/tag/commit) to build from
+- **Description**: The git ref (branch/tag/commit) to build from. The release version is taken directly from `Cargo.toml` on this ref - there is no separate version input.
 - **Default**: `main`
 - **Examples**:
-	- `main` - for pre-releases and new stable releases
-	- Branch created from tag (e.g. branch created from `v3.0.0`) - for patch releases
+	- `main` - for nightly builds (`main` always carries the `-nightly` version)
+	- `releases/3.1` - permanent release branch, for pre-releases, stable, and patch releases
 
 ### Optional Inputs
 
@@ -107,15 +125,15 @@ Versioned releases come in several flavors:
 - **Type**: Boolean
 - **Description**: Update main branch version after release
 - **Default**: `false`
-- **When to use**: For releases from main branch (pre-releases and stable releases)
-- **Note**: Not applicable for patch releases or nightly releases
+- **When to use**: For stable `X.Y.0` releases (bumps `main` to the next minor nightly)
+- **Note**: Not applicable for pre-releases, patch releases, or nightly releases (these never change `main`)
 
 #### `main-version`
 - **Type**: String
 - **Description**: Override auto-calculated main version
 - **Default**: Auto-calculated based on release type
-- **When to use**: Only when bumping to next major version (e.g., `4.0.0-alpha`)
-- **Example**: Release `3.5.0`, but set main to `4.0.0-alpha` instead of `3.6.0-alpha`
+- **When to use**: Only when bumping to next major version (e.g., `4.0.0-nightly`)
+- **Example**: Release `3.5.0`, but set main to `4.0.0-nightly` instead of `3.6.0-nightly`
 
 #### `extra-features`
 - **Type**: String
@@ -125,32 +143,31 @@ Versioned releases come in several flavors:
 
 ## Branching Strategy
 
-### Temporary Branches
+### Branches
 
 ```
-releases/vX.Y.Z            # Created during version bump, deleted after release
-chore/bump-main-to-vX.Y.Z  # Created for main version PR
+dev/ci/vX.Y.Z              # Created for the automated version bump PR
+                           # (main bump or release-branch patch bump)
 backport/<issue>-to-X.Y    # Created for backporting individual fixes (one per fix)
                            # Example: backport/56-to-3.0, backport/57-to-3.0
 ```
 
-For patch releases, create a branch from the previous version's tag when needed (e.g. `git checkout -b releases/3.0 v3.0.0`). Use that branch for backports and as the release git-ref; it can be deleted after the patch release.
+The release version is taken directly from `Cargo.toml` on the `git-ref` being released - the workflow no longer bumps the version or creates a temporary release branch. For patch releases, use the release branch (e.g. `releases/3.1`) for backports and as the release git-ref.
 
 ### Branch Lifecycle
 
 1. **For pre-releases and stable X.Y.0 releases**:
-	- Build from `main` branch
-	- Temporary `releases/vX.Y.Z` branch created for version bump
-	- After release, `releases/vX.Y.Z` is deleted
+	- Build directly from the `main` branch
+	- The version is read from `Cargo.toml` on `main`
 
 2. **For patch releases (X.Y.Z where Z > 0)**:
 	- All fixes must land on `main` first
-	- When preparing a patch, create a branch from the previous tag (e.g. `git checkout -b releases/3.0 v3.0.0`)
+	- Use the release branch for the series (e.g. `releases/3.1`)
 	- For each fix to backport, create individual backport PR (e.g., `backport/56-to-3.0`)
 	- Cherry-pick specific fix from main to backport branch
-	- Review and merge backport PR into your patch branch
+	- Review and merge backport PR into the release branch
 	- After all backport PRs are merged, run the release workflow with that branch as git-ref
-	- Temporary release branch `releases/vX.Y.Z` is created for the version bump and deleted after release
+	- After the release, a PR is automatically opened to bump the release branch to the next patch version (e.g. `3.1.3` → `3.1.4`)
 
 **Best Practice**: Always land fixes on main first, then backport individually. This ensures:
 - Main branch always has the latest fixes
@@ -208,8 +225,7 @@ Backport PR merged → releases/3.0 now has the fix
 # 5. Repeat for each fix needed in 3.0.1
 
 # 6. When ready, run release workflow
-# Git ref: releases/3.0, Release version: 3.0.1
-# After release, temporary branch releases/v3.0.1 is deleted
+# Git ref: releases/3.0 (version 3.0.1 is read from Cargo.toml on that branch)
 ```
 
 ## Version Management
@@ -219,7 +235,7 @@ Backport PR merged → releases/3.0 now has the fix
 **Important**: The `surrealism-*` crates follow independent versioning and are **not updated** during SurrealDB releases.
 
 - Surrealism version: `0.1.x` (independent)
-- SurrealDB version: `3.0.0-beta` (workspace-managed)
+- SurrealDB version: `3.2.0-nightly` (workspace-managed)
 
 The release scripts automatically detect and version only packages starting with `surrealdb-*`:
 - ✅ Automatically included: `surrealdb`, `surrealdb-core`, `surrealdb-server`, `surrealdb-types`, `surrealdb-types-derive`, `surrealdb-profiling`
@@ -233,31 +249,33 @@ The version on the `main` branch reflects the **next development target**, not t
 
 ```
 Timeline:
-┌─────────────┬─────────────┬─────────────┬─────────────┐
-│ Release     │ Main Before │ Release     │ Main After  │
-├─────────────┼─────────────┼─────────────┼─────────────┤
-│ 3.0.0-beta.1│ 3.0.0-alpha │ 3.0.0-beta.1│ 3.0.0-beta  │
-│ 3.0.0-beta.2│ 3.0.0-beta  │ 3.0.0-beta.2│ 3.0.0-beta  │
-│ 3.0.0       │ 3.0.0-beta  │ 3.0.0       │ 3.1.0-alpha │
-│ 3.0.1       │ 3.1.0-alpha │ 3.0.1       │ 3.1.0-alpha │ (no change)
-│ 3.1.0       │ 3.1.0-alpha │ 3.1.0       │ 3.2.0-alpha │
-└─────────────┴─────────────┴─────────────┴─────────────┘
+┌─────────────┬───────────────┬─────────────┬───────────────┐
+│ Release     │ Main Before   │ Release     │ Main After    │
+├─────────────┼───────────────┼─────────────┼───────────────┤
+│ 3.0.0-beta.1│ 3.0.0-nightly │ 3.0.0-beta.1│ 3.0.0-nightly │ (no change)
+│ 3.0.0-beta.2│ 3.0.0-nightly │ 3.0.0-beta.2│ 3.0.0-nightly │ (no change)
+│ 3.0.0       │ 3.0.0-nightly │ 3.0.0       │ 3.1.0-nightly │
+│ 3.0.1       │ 3.1.0-nightly │ 3.0.1       │ 3.1.0-nightly │ (no change)
+│ 3.1.0       │ 3.1.0-nightly │ 3.1.0       │ 3.2.0-nightly │
+└─────────────┴───────────────┴─────────────┴───────────────┘
 ```
+
+`main` always carries a `-nightly` version; it never holds a `-beta`/`-rc` or a
+stable version. Only a stable `X.Y.0` release moves `main` forward to the next
+minor nightly. Pre-releases and patches are cut from release branches and leave
+`main` untouched.
 
 ### Auto-Calculation Rules
 
-The workflow automatically determines the next main version:
+The workflow only ever moves `main` between `-nightly` versions:
 
-1. **Pre-release** (contains `-`): Strip patch number
-	- `3.0.0-beta.1` → Main: `3.0.0-beta`
-	- `3.0.0-rc.3` → Main: `3.0.0-rc`
+1. **Stable X.Y.0**: Bump to next minor nightly
+	- `3.0.0` → Main: `3.1.0-nightly`
+	- `3.5.0` → Main: `3.6.0-nightly`
 
-2. **Stable X.Y.0**: Bump to next minor alpha
-	- `3.0.0` → Main: `3.1.0-alpha`
-	- `3.5.0` → Main: `3.6.0-alpha`
-
-3. **Patch X.Y.Z** (Z > 0): No change to main
-	- `3.0.1` → Main: unchanged (`3.1.0-alpha`)
+2. **Pre-release or patch X.Y.Z** (Z > 0): No change to main
+	- `3.0.0-beta.1` → Main: unchanged (stays on `-nightly`)
+	- `3.0.1` → Main: unchanged (stays on `-nightly`)
 
 ### Manual Override
 
@@ -265,8 +283,8 @@ Use `main-version` input when transitioning to next major version:
 
 ```
 Release: 3.5.0
-Auto: 3.6.0-alpha
-Override: 4.0.0-alpha
+Auto: 3.6.0-nightly
+Override: 4.0.0-nightly
 ```
 
 ## Quick Start
@@ -278,8 +296,7 @@ Always test with a dry-run first:
 1. Go to **Actions** → **Release** → **Run workflow**
 2. Select inputs:
 	- Release type: `versioned`
-	- Git ref: `main`
-	- Release version: `3.0.0-beta.2`
+	- Git ref: `releases/3.1` (a release branch; the version is read from `Cargo.toml` on this ref)
 	- Update main: `false`
 	- Publish: `false` ← **Leave unchecked for dry-run**
 3. Click **Run workflow**
@@ -293,19 +310,18 @@ After successful dry-run:
 2. **Check "Publish"** checkbox
 3. Click **Run workflow**
 4. Monitor the release
-5. Merge the PR to update main branch
+5. Merge any version-bump PR opened by the workflow (the `main` bump for a stable `X.Y.0`, or the release-branch patch/pre-release bump)
 
 ## Step-by-Step Instructions
 
 ### Pre-Release (Alpha/Beta/RC)
 
-**Example**: Releasing `3.0.0-beta.2`
+**Example**: Releasing `3.0.0-beta.2` (version `3.0.0-beta.2` in the release branch's `Cargo.toml`)
 
 1. **Dry-Run**:
 	```
 	Release type: versioned
-	Git ref: main
-	Release version: 3.0.0-beta.2
+	Git ref: releases/3.0
 	Update main: ✗
 	Publish: ✗
 	```
@@ -314,26 +330,24 @@ After successful dry-run:
 2. **Publish**:
 	```
 	Release type: versioned
-	Git ref: main
-	Release version: 3.0.0-beta.2
+	Git ref: releases/3.0
 	Update main: ✗
 	Latest: ✗
 	Publish: ✓
 	```
 
 3. **Post-Release**:
-	- Merge PR "Bump version to 3.0.0-beta"
-	- Main branch now at `3.0.0-beta`
+	- No `main` branch update for pre-releases — `main` stays on its `-nightly` version
+	- A PR is automatically opened to bump the release branch to its next pre-release (e.g. `3.0.0-beta.2` → `3.0.0-beta.3`)
 
 ### Stable Release (X.Y.0)
 
-**Example**: Releasing `3.0.0`
+**Example**: Releasing `3.0.0` (version `3.0.0` in the release branch's `Cargo.toml`)
 
 1. **Dry-Run**:
 	```
 	Release type: versioned
-	Git ref: main
-	Release version: 3.0.0
+	Git ref: releases/3.0
 	Update main: ✓
 	Publish: ✗
 	```
@@ -341,16 +355,15 @@ After successful dry-run:
 2. **Publish**:
 	```
 	Release type: versioned
-	Git ref: main
-	Release version: 3.0.0
+	Git ref: releases/3.0
 	Update main: ✓
 	Latest: ✓  ← Mark as latest
 	Publish: ✓
 	```
 
 3. **Post-Release**:
-	- Merge PR "Bump version to 3.1.0-alpha"
-	- Main branch now at `3.1.0-alpha`
+	- Merge PR "Bump version to 3.1.0-nightly" (opened against `main` by `update-main`)
+	- Main branch now at `3.1.0-nightly`
 
 ### Patch Release (X.Y.Z)
 
@@ -404,8 +417,7 @@ After successful dry-run:
 6. **Dry-Run**:
 	```
 	Release type: versioned
-	Git ref: releases/3.0  ← Branch created from tag v3.0.0
-	Release version: 3.0.1
+	Git ref: releases/3.0  ← Permanent release branch (version 3.0.1 in its Cargo.toml)
 	Update main: ✗  ← Don't update main for patches
 	Publish: ✗
 	```
@@ -414,7 +426,6 @@ After successful dry-run:
 	```
 	Release type: versioned
 	Git ref: releases/3.0
-	Release version: 3.0.1
 	Update main: ✗
 	Latest: ✓  ← If this is now the latest stable
 	Publish: ✓
@@ -422,63 +433,61 @@ After successful dry-run:
 
 8. **Post-Release**:
 	- No main branch update (fixes already on main)
-	- Main remains at `3.1.0-alpha`
-	- Temporary branch `releases/v3.0.1` is deleted after release
+	- Main remains at `3.1.0-nightly`
+	- The `releases/3.0` branch is permanent and kept for future patches
+	- Because the release was cut from a `releases/*` branch, a PR is automatically opened bumping `releases/3.0` to the next patch (e.g. `3.0.1` → `3.0.2`)
 
 ### Major Version Bump
 
-**Example**: Releasing `3.5.0` but moving to `4.0.0-alpha` on main
+**Example**: Releasing `3.5.0` but moving to `4.0.0-nightly` on main
 
 1. **Dry-Run**:
 	```
 	Release type: versioned
-	Git ref: main
-	Release version: 3.5.0
+	Git ref: releases/3.5
 	Update main: ✓
-	Main version: 4.0.0-alpha  ← Override
+	Main version: 4.0.0-nightly  ← Override
 	Publish: ✗
 	```
 
 2. **Publish**:
 	```
 	Release type: versioned
-	Git ref: main
-	Release version: 3.5.0
+	Git ref: releases/3.5
 	Update main: ✓
-	Main version: 4.0.0-alpha
+	Main version: 4.0.0-nightly
 	Latest: ✓
 	Publish: ✓
 	```
 
 3. **Post-Release**:
-	- Merge PR "Bump version to 4.0.0-alpha"
-	- Main branch now at `4.0.0-alpha`
+	- Merge PR "Bump version to 4.0.0-nightly"
+	- Main branch now at `4.0.0-nightly`
 
 ## Examples
 
 ### Example 1: Beta Release Series
 
 ```bash
-# Initial state: main = 3.0.0-alpha
+# Initial state: main = 3.0.0-nightly; release work happens on releases/3.0
 
-# Release beta.1
-→ Release 3.0.0-beta.1 (from main, update main)
-→ Main becomes: 3.0.0-beta
+# Release beta.1 (releases/3.0 Cargo.toml = 3.0.0-beta.1)
+→ Release 3.0.0-beta.1 (from releases/3.0)
+→ Main unchanged (stays 3.0.0-nightly)
 
 # Release beta.2
-→ Release 3.0.0-beta.2 (from main, update main)
-→ Main stays: 3.0.0-beta (idempotent)
+→ Release 3.0.0-beta.2 (from releases/3.0)
+→ Main unchanged (stays 3.0.0-nightly)
 
-# Release stable
-→ Release 3.0.0 (from main, update main)
-→ Main becomes: 3.1.0-alpha
-→ Temporary branch releases/v3.0.0 is deleted after release
+# Release stable (releases/3.0 Cargo.toml = 3.0.0, update main)
+→ Release 3.0.0 (from releases/3.0, update main)
+→ Main becomes: 3.1.0-nightly
 ```
 
 ### Example 2: Patch Release Series
 
 ```bash
-# Initial state: main = 3.1.0-alpha, v3.0.0 tag exists
+# Initial state: main = 3.1.0-nightly, v3.0.0 tag exists
 
 # Create patch branch from tag (when preparing 3.0.1)
 git checkout -b releases/3.0 v3.0.0
@@ -505,7 +514,7 @@ git cherry-pick <commit-from-main>
 
 # After all needed backports are merged
 → Release 3.0.1 (from releases/3.0, no main update)
-→ Main stays: 3.1.0-alpha (already has fixes)
+→ Main stays: 3.1.0-nightly (already has fixes)
 
 # More fixes for 3.0.2 (same branch releases/3.0, or create new from v3.0.1)
 → Fix #60 lands on main
@@ -514,19 +523,19 @@ git cherry-pick <commit-from-main>
 → Backport #61 to releases/3.0 (one PR)
 
 → Release 3.0.2 (from releases/3.0, no main update)
-→ Main stays: 3.1.0-alpha
+→ Main stays: 3.1.0-nightly
 ```
 
 ### Example 3: Parallel Releases
 
 ```bash
-# Main: 3.1.0-alpha
+# Main: 3.1.0-nightly
 # Create branches from tags when needed: releases/3.0 from v3.0.0, releases/2.1 from v2.1.4
 
 # Can release patches for older versions simultaneously:
 → Release 2.1.5 (from releases/2.1, branch created from v2.1.4)
 → Release 3.0.2 (from releases/3.0, branch created from v3.0.0)
-→ Release 3.1.0-beta.1 (from main)
+→ Release 3.1.0-beta.1 (from releases/3.1)
 
 # All independent, no conflicts
 ```
@@ -540,8 +549,8 @@ git cherry-pick <commit-from-main>
 **Solution**: The workflow is idempotent and automatically deletes/recreates branches. If manual intervention is needed:
 
 ```bash
-# Delete the temporary release branch
-git push origin --delete releases/vX.Y.Z
+# Delete the automated version bump PR branch
+git push origin --delete dev/ci/vX.Y.Z
 
 # Re-run the workflow
 ```
@@ -606,8 +615,7 @@ git push origin --delete releases/vX.Y.Z
 
 ```
 validate-inputs
-	↓
-bump-version (versioned only)
+	├─→ update-main (if update-main=true, versioned only)
 	↓
 prepare-vars ←────────────────┐
 	↓                         │
@@ -621,16 +629,20 @@ prepare-vars ←────────────────┐
 	│    ↓                    │
 	└─→ propagate ────────────┘
 	     ↓
-	update-main (if update-main=true)
-	cleanup-release-branch
+	bump-release-version (auto: versioned release from a releases/* branch)
 ```
+
+The release version is read from `Cargo.toml` on the provided `git-ref`; no
+version bump happens during the release. When the release is cut from a
+`releases/*` branch, the post-release `bump-release-version` job automatically
+opens a PR moving that branch to its next patch version.
 
 ### Scripts
 
 All multi-line bash logic is extracted to `.github/scripts/`:
 
-- **`bump-version.sh`**: Creates temporary release branch (`releases/vX.Y.Z`) and bumps version
-- **`update-main-version.sh`**: Updates main branch version and creates PR
+- **`bump-nightly-version.sh`**: Updates main branch version and creates PR (reads the released version from the code)
+- **`bump-release-version.sh`**: Bumps the release branch to the next patch version and creates PR (reads the released version from the code)
 - **`compute-nightly-version.sh`**: Computes nightly version from main branch
 
 ### Key Features
@@ -638,8 +650,8 @@ All multi-line bash logic is extracted to `.github/scripts/`:
 1. **Idempotency**: All operations handle re-runs gracefully
 2. **Validation**: Comprehensive input validation before execution
 3. **Dry-Run**: Test entire workflow without publishing
-4. **Branching**: Temporary release branch created per release and deleted after success
-5. **Version Logic**: Smart auto-calculation with manual override
+4. **Version from code**: The release version is whatever is committed on the `git-ref`
+5. **Version Logic**: Smart auto-calculation with manual override for the main branch bump
 6. **Nightly Builds**: Version derived from main, no code changes needed
 
 ## Additional Resources

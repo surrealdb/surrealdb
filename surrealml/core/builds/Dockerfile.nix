@@ -1,21 +1,32 @@
-# Start from a base image, e.g., Ubuntu
 FROM nixos/nix:latest@sha256:4e211f6763c542b08e9cdba448381286a3638903359390b46eab5f43ce6a6ed1
 
-# Update Nix channel
 RUN nix-channel --update
 
-# Install Rust and build tools using Nix
-RUN nix-env -iA nixpkgs.rustup nixpkgs.gcc nixpkgs.pkg-config nixpkgs.cmake nixpkgs.coreutils
+RUN nix-env -p /nix/var/nix/profiles/container-dev -iA \
+    nixpkgs.rustup \
+    nixpkgs.gcc \
+    nixpkgs.pkg-config \
+    nixpkgs.cmake \
+    nixpkgs.coreutils \
+    nixpkgs.shadow \
+    && chmod -R a+rX /nix/var/nix/profiles/container-dev
 
-# Initialize Rust environment
-RUN rustup default stable
+ENV PATH="/nix/var/nix/profiles/container-dev/bin:/nix/var/nix/profiles/container-dev/sbin:${PATH}"
 
-ENV PATH="/root/.cargo/bin:${PATH}"
+RUN useradd -m -u 1000 appuser
 
 WORKDIR /app
 
-COPY . .
+COPY --chown=appuser:appuser . .
 
-# RUN cargo build --release
+RUN mkdir -p /app/output && chown appuser:appuser /app/output
+
+ENV HOME=/home/appuser
+
+USER appuser
+
+RUN rustup default stable
+
+ENV PATH="/home/appuser/.cargo/bin:${PATH}"
 
 CMD ["cargo", "run"]

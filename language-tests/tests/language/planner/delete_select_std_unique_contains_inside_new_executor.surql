@@ -12,7 +12,7 @@ value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
 value = '''"SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: test, direction: Forward, predicate: email CONTAINS 'domain.com']
+    TableScan [ctx: Db] [table: test, direction: Forward, predicate: email CONTAINS 'domain.com', pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -20,7 +20,7 @@ value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
 value = '''"SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: test, direction: Forward, predicate: 'domain.com' INSIDE email]
+    TableScan [ctx: Db] [table: test, direction: Forward, predicate: 'domain.com' INSIDE email, pre_decode_filter: yes]
 "'''
 
 [[test.results]]
@@ -28,7 +28,7 @@ value = "[{ email: 'email@domain.com', id: test:1 }]"
 
 [[test.results]]
 value = '''"SelectProject [ctx: Db] [projections: *]
-    TableScan [ctx: Db] [table: test, direction: Forward, predicate: email CONTAINS 'domain.com']
+    TableScan [ctx: Db] [table: test, direction: Forward, predicate: email CONTAINS 'domain.com', pre_decode_filter: yes]
 "'''
 
 [[test.results]]

@@ -2,13 +2,12 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, ContextLevel, ExecOperator};
+use crate::exec::{AccessMode, BoxFut, ContextLevel, ExecOperator};
 use crate::expr::FlowResult;
 use crate::val::Value;
 
@@ -70,12 +69,13 @@ pub struct LookupPart {
 	/// Empty results yield NONE; more than one result is an error.
 	pub only: bool,
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for LookupPart {
 	fn name(&self) -> &'static str {
 		"Lookup"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -83,9 +83,11 @@ impl PhysicalExpr for LookupPart {
 		self.plan.required_context().max(ContextLevel::Database)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.unwrap_or(&Value::NONE);
-		Ok(evaluate_lookup(value, self, ctx).await?)
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			let value = ctx.current_value.unwrap_or(&Value::NONE);
+			Ok(evaluate_lookup(value, self, ctx).await?)
+		})
 	}
 
 	/// Parallel batch evaluation for graph/reference lookups.
@@ -93,22 +95,24 @@ impl PhysicalExpr for LookupPart {
 	/// Each lookup executes a plan per RecordId, which involves I/O.
 	/// Parallelizing across rows lets multiple lookups proceed concurrently.
 	/// Falls back to sequential for ReadWrite plans to preserve mutation ordering.
-	async fn evaluate_batch(
-		&self,
-		ctx: EvalContext<'_>,
-		values: &[Value],
-	) -> FlowResult<Vec<Value>> {
-		if values.len() < 2 || self.access_mode() == AccessMode::ReadWrite {
-			// Sequential for small batches or mutation plans
-			let mut results = Vec::with_capacity(values.len());
-			for value in values {
-				results.push(self.evaluate(ctx.with_value(value)).await?);
+	fn evaluate_batch<'a>(
+		&'a self,
+		ctx: EvalContext<'a>,
+		values: &'a [Value],
+	) -> BoxFut<'a, FlowResult<Vec<Value>>> {
+		Box::pin(async move {
+			if values.len() < 2 || self.access_mode() == AccessMode::ReadWrite {
+				// Sequential for small batches or mutation plans
+				let mut results = Vec::with_capacity(values.len());
+				for value in values {
+					results.push(self.evaluate(ctx.with_value(value)).await?);
+				}
+				return Ok(results);
 			}
-			return Ok(results);
-		}
-		let futures: Vec<_> =
-			values.iter().map(|value| self.evaluate(ctx.with_value(value))).collect();
-		futures::future::try_join_all(futures).await
+			let futures: Vec<_> =
+				values.iter().map(|value| self.evaluate(ctx.with_value(value))).collect();
+			futures::future::try_join_all(futures).await
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -158,7 +162,7 @@ async fn evaluate_lookup(
 				let result = Box::pin(evaluate_lookup(item, lookup, ctx.clone())).await?;
 				// Flatten: extend results with array elements, or push single values
 				match result {
-					Value::Array(inner) => results.extend(inner.into_iter()),
+					Value::Array(inner) => results.extend(inner),
 					other => results.push(other),
 				}
 			}

@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use revision::revisioned;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, SurrealValue, ToSql, write_sql};
 
 use crate::api::path::Path;
@@ -48,13 +49,13 @@ impl ApiDefinition {
 	/// path.
 	pub(crate) fn find_definition<'a>(
 		definitions: &'a [ApiDefinition],
-		segments: Vec<&str>,
+		segments: &[&str],
 		method: ApiMethod,
 	) -> Option<(&'a ApiDefinition, Object)> {
 		let mut specificity = 0;
 		let mut res = None;
 		for api in definitions.iter() {
-			if let Some(params) = api.path.fit(segments.as_slice())
+			if let Some(params) = api.path.fit(segments)
 				&& (api.fallback.is_some()
 					|| api.actions.iter().any(|x| x.methods.contains(&method)))
 			{
@@ -72,14 +73,14 @@ impl ApiDefinition {
 	fn to_sql_definition(&self) -> sql::statements::DefineApiStatement {
 		sql::statements::DefineApiStatement {
 			kind: sql::statements::define::DefineKind::Default,
-			path: sql::Expr::Literal(sql::Literal::String(self.path.to_string())),
+			path: sql::Expr::Literal(sql::Literal::String(self.path.to_string().into())),
 			actions: self.actions.iter().map(|x| x.to_sql_action()).collect(),
 			fallback: self.fallback.clone().map(|x| x.into()),
 			config: self.config.to_sql_config(),
 			comment: self
 				.comment
 				.clone()
-				.map(|x| sql::Expr::Literal(sql::Literal::String(x)))
+				.map(|x| sql::Expr::Literal(sql::Literal::String(x.into())))
 				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 		}
 	}
@@ -93,13 +94,14 @@ impl ToSql for ApiDefinition {
 
 impl InfoStructure for ApiDefinition {
 	fn structure(self) -> Value {
-		Value::from(Object(map! {
-			"path".to_string() => self.path.to_string().into(),
-			"config".to_string() => self.config.structure(),
-			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
-			"actions".to_string() => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
-			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
-		}))
+		let object = map! {
+			"path" => self.path.to_string().into(),
+			"config" => self.config.structure(),
+			"fallback", if let Some(fallback) = self.fallback => fallback.structure(),
+			"actions" => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
+			"comment", if let Some(comment) = self.comment => comment.into(),
+		};
+		Value::from(Object::from(object))
 	}
 }
 
@@ -154,14 +156,14 @@ impl InfoStructure for ApiMethod {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ApiActionDefinition {
 	pub methods: Vec<ApiMethod>,
-	pub action: Expr,
+	pub(crate) action: Expr,
 	pub config: ApiConfigDefinition,
 }
 
 impl_kv_value_revisioned!(ApiActionDefinition);
 
 impl ApiActionDefinition {
-	pub fn to_sql_action(&self) -> sql::statements::define::ApiAction {
+	pub(crate) fn to_sql_action(&self) -> sql::statements::define::ApiAction {
 		sql::statements::define::ApiAction {
 			methods: self.methods.clone(),
 			action: self.action.clone().into(),
@@ -192,7 +194,7 @@ pub struct ApiConfigDefinition {
 
 impl ApiConfigDefinition {
 	/// Convert the API config definition into a SQL config.
-	pub fn to_sql_config(&self) -> sql::statements::define::config::api::ApiConfig {
+	pub(crate) fn to_sql_config(&self) -> sql::statements::define::config::api::ApiConfig {
 		sql::statements::define::config::api::ApiConfig {
 			middleware: self.middleware.iter().map(|mw| mw.to_sql_middleware()).collect(),
 			permissions: self.permissions.clone().into(),
@@ -205,19 +207,19 @@ impl InfoStructure for ApiConfigDefinition {
 		Value::from(map!(
 			"permissions" => self.permissions.structure(),
 			"middleware", if !self.middleware.is_empty() => {
-				Value::Object(Object(
-						self.middleware
+				Value::Object(
+					self.middleware
 						.into_iter()
 						.map(|m| {
 							let value = m.args
 								.iter()
-								.map(|x| Value::String(x.to_sql()))
+								.map(|x| Value::String(x.to_sql().into()))
 								.collect();
 
 							(m.name, Value::Array(Array(value)))
 						})
-						.collect(),
-				))
+						.collect::<Object>(),
+				)
 			}
 		))
 	}
@@ -234,7 +236,7 @@ impl ToSql for ApiConfigDefinition {
 				"{}",
 				Fmt::pretty_comma_separated(self.middleware.iter().map(|m| {
 					let args = Fmt::pretty_comma_separated(m.args.iter()).to_sql();
-					format!("{}({})", m.name, args)
+					format!("{}({})", m.name.as_str(), args)
 				}))
 			);
 		}
@@ -248,7 +250,7 @@ impl ToSql for ApiConfigDefinition {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct MiddlewareDefinition {
 	/// The name of function to invoke.
-	pub name: String,
+	pub name: Strand,
 	/// The arguments to pass to the function.
 	pub args: Vec<Value>,
 }

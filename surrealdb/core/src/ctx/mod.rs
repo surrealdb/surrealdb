@@ -24,9 +24,11 @@
 // or http://opensource.org/licenses/MIT>, at your option. This file may not be
 // used, copied, modified, or distributed except according to those terms.
 
+pub use self::cancel::CancelHandle;
 pub use self::canceller::Canceller;
 pub use self::context::{Context, FrozenContext};
 
+pub mod cancel;
 pub mod cancellation;
 pub mod canceller;
 pub mod context;

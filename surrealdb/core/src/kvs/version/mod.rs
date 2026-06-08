@@ -25,13 +25,15 @@ impl From<MajorVersion> for u16 {
 }
 
 impl KVValue for MajorVersion {
+	type KeyContext = ();
+
 	#[inline]
 	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		Ok(self.0.to_be_bytes().to_vec())
 	}
 
 	#[inline]
-	fn kv_decode_value(v: Vec<u8>) -> Result<Self> {
+	fn kv_decode_value(v: &[u8], _: ()) -> Result<Self> {
 		let bin = v.try_into().map_err(|_| Error::InvalidStorageVersion)?;
 		let val = u16::from_be_bytes(bin).into();
 		Ok(val)
@@ -54,7 +56,7 @@ impl MajorVersion {
 		Self(2)
 	}
 	/// Check if we are running the latest version
-	pub fn is_latest(&self) -> bool {
+	pub fn is_latest(self) -> bool {
 		self.0 == Self::LATEST
 	}
 }
@@ -68,7 +70,7 @@ mod tests {
 		let version = MajorVersion::v2();
 		let encoded = version.kv_encode_value().unwrap();
 		assert_eq!(encoded, vec![0, 2]);
-		let decoded = MajorVersion::kv_decode_value(encoded).unwrap();
+		let decoded = MajorVersion::kv_decode_value(&encoded, ()).unwrap();
 		assert_eq!(decoded, version);
 	}
 }

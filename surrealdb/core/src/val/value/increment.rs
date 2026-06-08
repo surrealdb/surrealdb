@@ -36,7 +36,7 @@ impl Value {
 
 			Value::Set(mut s) => match val {
 				Value::Set(x) => {
-					s.0.extend(x.0);
+					s.0.extend(x);
 					Value::Set(s)
 				}
 				Value::Array(x) => {

@@ -1,5 +1,6 @@
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::Permission;
@@ -18,8 +19,8 @@ pub struct BucketId(pub u32);
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct BucketDefinition {
 	pub(crate) id: Option<BucketId>,
-	pub(crate) name: String,
-	pub(crate) backend: Option<String>,
+	pub(crate) name: Strand,
+	pub(crate) backend: Option<Strand>,
 	pub(crate) permissions: Permission,
 	pub(crate) readonly: bool,
 	pub(crate) comment: Option<String>,
@@ -37,7 +38,7 @@ impl BucketDefinition {
 			comment: self
 				.comment
 				.clone()
-				.map(|v| sql::Expr::Literal(sql::Literal::String(v)))
+				.map(|v| sql::Expr::Literal(sql::Literal::String(v.into())))
 				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 		}
 	}
@@ -46,11 +47,11 @@ impl BucketDefinition {
 impl InfoStructure for BucketDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.into(),
-			"permissions".to_string() => self.permissions.structure(),
-			"backend".to_string(), if let Some(backend) = self.backend => Value::String(backend),
-			"readonly".to_string() => self.readonly.into(),
-			"comment".to_string(), if let Some(comment) = self.comment => comment.into(),
+			"name" => self.name.into(),
+			"permissions" => self.permissions.structure(),
+			"backend", if let Some(backend) = self.backend => backend.into(),
+			"readonly" => self.readonly.into(),
+			"comment", if let Some(comment) = self.comment => comment.into(),
 		})
 	}
 }

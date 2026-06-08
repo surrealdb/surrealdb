@@ -7,18 +7,17 @@ use radix_trie::Trie;
 use surrealdb_types::ToSql;
 
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId, Record};
-use crate::cnf::COUNT_BATCH_SIZE;
 use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::expr::BinaryOperator;
-use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextHitsIterator;
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
 use crate::idx::seqdocids::DocId;
+use crate::idx::{IndexKeyBase, bump_compaction_generation, read_compaction_generation};
 use crate::key::index::Index;
 use crate::key::index::iu::IndexCountKey;
-use crate::kvs::{KVKey, Key, Transaction, Val};
+use crate::kvs::{COUNT_BATCH_SIZE, KVKey, Key, Transaction, Val};
 use crate::val::{Array, RecordId, TableName, Value};
 
 pub(crate) type IteratorRef = usize;
@@ -129,7 +128,7 @@ pub(crate) enum RecordIterator {
 	UniqueRangeReverse(UniqueRangeReverseThingIterator),
 	UniqueUnion(UniqueUnionThingIterator),
 	UniqueJoin(Box<UniqueJoinThingIterator>),
-	FullTextMatches(MatchesThingIterator<FullTextHitsIterator>),
+	FullTextMatches(Box<MatchesThingIterator<FullTextHitsIterator>>),
 	Knn(KnnIterator),
 }
 
@@ -477,10 +476,10 @@ impl IndexRangeThingIterator {
 		for (op, v) in ranges {
 			let key = storekey::encode_vec(v.as_ref()).map_err(|_| Error::Unencodable)?;
 			match op {
-				BinaryOperator::LessThan => to.push((key, false, v.clone())),
-				BinaryOperator::LessThanEqual => to.push((key, true, v.clone())),
-				BinaryOperator::MoreThan => from.push((key, true, v.clone())),
-				BinaryOperator::MoreThanEqual => from.push((key, false, v.clone())),
+				BinaryOperator::LessThan => to.push((key, false, Arc::clone(v))),
+				BinaryOperator::LessThanEqual => to.push((key, true, Arc::clone(v))),
+				BinaryOperator::MoreThan => from.push((key, true, Arc::clone(v))),
+				BinaryOperator::MoreThanEqual => from.push((key, false, Arc::clone(v))),
 				_ => {
 					bail!(Error::Unreachable(format!(
 						"Invalid operator for range extraction {}",
@@ -1244,8 +1243,8 @@ impl UniqueRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: RangeValue,
-		to: RangeValue,
+		from: &RangeValue,
+		to: &RangeValue,
 	) -> Result<RangeScan> {
 		let from_bound = from.value.as_ref().map(|v| (v.as_ref(), from.inclusive));
 		let to_bound = to.value.as_ref().map(|v| (v.as_ref(), to.inclusive));
@@ -1259,8 +1258,8 @@ impl UniqueRangeThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: RangeValue,
-		to: RangeValue,
+		from: &RangeValue,
+		to: &RangeValue,
 	) -> Result<Self> {
 		let r = Self::range_scan(ns, db, ix, from, to)?;
 		Ok(Self {
@@ -1276,7 +1275,9 @@ impl UniqueRangeThingIterator {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> Result<Self> {
-		Self::new(irf, ns, db, ix, RangeValue::default(), RangeValue::default())
+		let from = RangeValue::default();
+		let to = RangeValue::default();
+		Self::new(irf, ns, db, ix, &from, &to)
 	}
 
 	pub(super) fn compound_range(
@@ -1420,8 +1421,8 @@ impl UniqueRangeReverseThingIterator {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: RangeValue,
-		to: RangeValue,
+		from: &RangeValue,
+		to: &RangeValue,
 	) -> Result<Self> {
 		let r = ReverseRangeScan::new(UniqueRangeThingIterator::range_scan(ns, db, ix, from, to)?);
 		Ok(Self {
@@ -1437,7 +1438,9 @@ impl UniqueRangeReverseThingIterator {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> Result<Self> {
-		Self::new(irf, ns, db, ix, RangeValue::default(), RangeValue::default())
+		let from = RangeValue::default();
+		let to = RangeValue::default();
+		Self::new(irf, ns, db, ix, &from, &to)
 	}
 
 	async fn next_batch<B: IteratorBatch>(
@@ -1850,6 +1853,32 @@ impl KnnIterator {
 
 pub(crate) struct IndexCountThingIterator(Option<Range<Key>>);
 
+/// Snapshot gathered by the read phase of count-index compaction.
+///
+/// It contains the total count at the snapshot, the generation that must
+/// still match, and the exact `!iu` keys that may be deleted if the CAS wins.
+/// The continuation flag records whether the bounded scan left more entries
+/// for another compaction batch.
+pub(crate) struct IndexCountCompactionPlan {
+	generation: Option<u64>,
+	count: i64,
+	has_delta: bool,
+	has_more: bool,
+	keys: Vec<Key>,
+}
+
+impl IndexCountCompactionPlan {
+	/// Returns true when the plan contains at least one count delta key.
+	pub(crate) fn has_work(&self) -> bool {
+		self.has_delta
+	}
+
+	/// Returns true when the `!iu` range has more entries beyond this batch.
+	pub(crate) fn has_more(&self) -> bool {
+		self.has_more
+	}
+}
+
 impl IndexCountThingIterator {
 	pub(in crate::idx) fn new(
 		ns: NamespaceId,
@@ -1870,7 +1899,7 @@ impl IndexCountThingIterator {
 			let mut loops = 0;
 			let mut current_range = Some(range);
 			while let Some(range) = current_range {
-				let batch = txn.batch_keys(range, *COUNT_BATCH_SIZE, None).await?;
+				let batch = txn.batch_keys(range, COUNT_BATCH_SIZE, None).await?;
 				for key in batch.result.iter() {
 					loops += 1;
 					ctx.is_done(Some(loops)).await?;
@@ -1890,39 +1919,112 @@ impl IndexCountThingIterator {
 		}
 	}
 
-	pub(in crate::idx) async fn compaction(
+	/// Read phase for count compaction: capture the generation, sum visible
+	/// `!iu` entries, and remember the exact keys seen in this snapshot.
+	pub(in crate::idx) async fn prepare_compaction(
 		&mut self,
 		ikb: &IndexKeyBase,
 		txn: &Transaction,
-	) -> Result<()> {
+	) -> Result<IndexCountCompactionPlan> {
+		self.prepare_compaction_with_limit(ikb, txn, COUNT_BATCH_SIZE).await
+	}
+
+	async fn prepare_compaction_with_limit(
+		&mut self,
+		ikb: &IndexKeyBase,
+		txn: &Transaction,
+		limit: u32,
+	) -> Result<IndexCountCompactionPlan> {
+		let generation = read_compaction_generation(txn, &ikb.new_iv_key()).await?;
 		let Some(range) = self.0.take() else {
-			return Ok(());
+			return Ok(IndexCountCompactionPlan {
+				generation,
+				count: 0,
+				has_delta: false,
+				has_more: false,
+				keys: Vec::new(),
+			});
 		};
 		let mut count: i64 = 0;
+		let mut has_delta = false;
+		let mut has_more = false;
+		let mut keys = Vec::new();
+		let mut delta_count = 0;
 		let mut loops = 0;
 		let mut current_range = Some(range.clone());
-		while let Some(r) = current_range {
-			let batch = txn.batch_keys(r, *COUNT_BATCH_SIZE, None).await?;
+		let limit = limit.max(1);
+		while let Some(r) = current_range.take() {
+			let batch = txn.batch_keys(r, limit.saturating_add(1), None).await?;
 			for key in batch.result.iter() {
 				loops += 1;
 				if loops % 1000 == 0 {
 					yield_now!()
 				}
 				let iu = IndexCountKey::decode_key(key)?;
+				if iu.uid.is_some() && delta_count >= limit {
+					has_more = true;
+					current_range = None;
+					break;
+				}
 				if iu.pos {
 					count += iu.count as i64;
 				} else {
 					count -= iu.count as i64;
 				}
+				if iu.uid.is_some() {
+					has_delta = true;
+					delta_count += 1;
+				}
+				keys.push(key.clone());
+			}
+			if has_more {
+				break;
 			}
 			current_range = batch.next;
 		}
-		txn.delr(range).await?;
+		has_more |= current_range.is_some();
+		Ok(IndexCountCompactionPlan {
+			generation,
+			count,
+			has_delta,
+			has_more,
+			keys,
+		})
+	}
+
+	/// Write phase for count compaction: CAS the generation, delete only
+	/// snapshot-seen keys, and write the compacted `uid = None` aggregate.
+	pub(in crate::idx) async fn apply_compaction(
+		ikb: &IndexKeyBase,
+		txn: &Transaction,
+		plan: IndexCountCompactionPlan,
+	) -> Result<bool> {
+		if !plan.has_work() {
+			return Ok(false);
+		}
+		if !bump_compaction_generation(txn, &ikb.new_iv_key(), plan.generation).await? {
+			return Ok(false);
+		}
+		for key in plan.keys {
+			txn.del(&key).await?;
+		}
+		let count = plan.count;
 		let pos = count.is_positive();
 		let count = count.unsigned_abs();
 		let compact_key =
 			IndexCountKey::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None, pos, count);
 		txn.set(&compact_key, &()).await?;
+		Ok(true)
+	}
+
+	#[cfg(test)]
+	pub(in crate::idx) async fn compaction(
+		&mut self,
+		ikb: &IndexKeyBase,
+		txn: &Transaction,
+	) -> Result<()> {
+		let plan = self.prepare_compaction(ikb, txn).await?;
+		Self::apply_compaction(ikb, txn, plan).await?;
 		Ok(())
 	}
 }
@@ -1937,7 +2039,19 @@ mod tests {
 	use crate::key::index::iu::IndexCountKey;
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
-	use crate::kvs::TransactionType::Write;
+	use crate::kvs::TransactionType::{Read, Write};
+
+	async fn count_value(ds: &Datastore, ikb: &IndexKeyBase) -> usize {
+		let mut count_iter =
+			IndexCountThingIterator::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index()).unwrap();
+		let tx = Arc::new(ds.transaction(Read, Optimistic).await.unwrap());
+		let mut ctx = ds.setup_ctx().unwrap();
+		ctx.set_transaction(Arc::clone(&tx));
+		let ctx = ctx.freeze();
+		let count = count_iter.next_count(&ctx, &ctx.tx(), u32::MAX).await.unwrap();
+		tx.cancel().await.unwrap();
+		count
+	}
 
 	/// Non-regression test: consecutive compactions using new iterator instances
 	/// must not fail.
@@ -1945,9 +2059,9 @@ mod tests {
 	/// In production, `index_count_compaction` creates a fresh
 	/// `IndexCountThingIterator` for every compaction run. The compacted key
 	/// (uid = None) written by the first compaction already exists when the
-	/// second run executes `delr` + write. If the write used `put` (which
-	/// errors on existing keys) instead of `set`, the second compaction would
-	/// fail. This test ensures that does not happen.
+	/// second run executes exact-key deletes + write. If the write used `put`
+	/// (which errors on existing keys) instead of `set`, the second compaction
+	/// would fail. This test ensures that does not happen.
 	#[tokio::test]
 	async fn test_consecutive_compactions_do_not_fail() {
 		let ns = NamespaceId(1);
@@ -1983,12 +2097,7 @@ mod tests {
 
 		// Verify the compacted count is 15
 		{
-			let mut count_iter = IndexCountThingIterator::new(ns, db, &tb, ix).unwrap();
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
-			let mut ctx = ds.setup_ctx().unwrap();
-			ctx.set_transaction(tx.into());
-			let ctx = ctx.freeze();
-			let count = count_iter.next_count(&ctx, &ctx.tx(), u32::MAX).await.unwrap();
+			let count = count_value(&ds, &ikb).await;
 			assert_eq!(count, 15, "first compaction should yield count 15");
 		}
 
@@ -2015,13 +2124,193 @@ mod tests {
 
 		// Verify the compacted count is now 22 (15 + 7)
 		{
-			let mut count_iter = IndexCountThingIterator::new(ns, db, &tb, ix).unwrap();
-			let tx = ds.transaction(Write, Optimistic).await.unwrap();
-			let mut ctx = ds.setup_ctx().unwrap();
-			ctx.set_transaction(tx.into());
-			let ctx = ctx.freeze();
-			let count = count_iter.next_count(&ctx, &ctx.tx(), u32::MAX).await.unwrap();
+			let count = count_value(&ds, &ikb).await;
 			assert_eq!(count, 22, "second compaction should yield count 22 (15 + 7)");
 		}
+	}
+
+	#[tokio::test]
+	async fn count_compaction_preserves_post_snapshot_deltas() {
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		let tb: TableName = "test_tb".into();
+		let ix = IndexId(3);
+		let ikb = IndexKeyBase::new(ns, db, tb.clone(), ix);
+		let ds = Datastore::new("memory").await.unwrap();
+
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let uid1 = (Uuid::new_v4(), Uuid::new_v4());
+			let k1 = IndexCountKey::new(ns, db, &tb, ix, Some(uid1), true, 10);
+			tx.set(&k1, &()).await.unwrap();
+			tx.commit().await.unwrap();
+		}
+
+		let plan = {
+			let tx = ds.transaction(Read, Optimistic).await.unwrap();
+			let plan = IndexCountThingIterator::new(ns, db, &tb, ix)
+				.unwrap()
+				.prepare_compaction(&ikb, &tx)
+				.await
+				.unwrap();
+			tx.cancel().await.unwrap();
+			plan
+		};
+
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let uid2 = (Uuid::new_v4(), Uuid::new_v4());
+			let k2 = IndexCountKey::new(ns, db, &tb, ix, Some(uid2), true, 7);
+			tx.set(&k2, &()).await.unwrap();
+			tx.commit().await.unwrap();
+		}
+
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			assert!(IndexCountThingIterator::apply_compaction(&ikb, &tx, plan).await.unwrap());
+			tx.commit().await.unwrap();
+		}
+
+		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		assert_eq!(tx.get(&ikb.new_iv_key(), None).await.unwrap(), Some(1));
+		let range = IndexCountKey::range(ns, db, &tb, ix).unwrap();
+		assert_eq!(
+			tx.count(range, None).await.unwrap(),
+			2,
+			"compacted root and post-snapshot delta should remain"
+		);
+		tx.cancel().await.unwrap();
+		assert_eq!(count_value(&ds, &ikb).await, 17);
+	}
+
+	#[tokio::test]
+	async fn count_compaction_batches_visible_deltas() {
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		let tb: TableName = "test_tb".into();
+		let ix = IndexId(3);
+		let ikb = IndexKeyBase::new(ns, db, tb.clone(), ix);
+		let ds = Datastore::new("memory").await.unwrap();
+
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			for count in [10, 5, 7] {
+				let uid = (Uuid::new_v4(), Uuid::new_v4());
+				let key = IndexCountKey::new(ns, db, &tb, ix, Some(uid), true, count);
+				tx.set(&key, &()).await.unwrap();
+			}
+			tx.commit().await.unwrap();
+		}
+
+		let plan = {
+			let tx = ds.transaction(Read, Optimistic).await.unwrap();
+			let plan = IndexCountThingIterator::new(ns, db, &tb, ix)
+				.unwrap()
+				.prepare_compaction_with_limit(&ikb, &tx, 2)
+				.await
+				.unwrap();
+			tx.cancel().await.unwrap();
+			plan
+		};
+		assert!(plan.has_work());
+		assert!(plan.has_more());
+
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			assert!(IndexCountThingIterator::apply_compaction(&ikb, &tx, plan).await.unwrap());
+			tx.commit().await.unwrap();
+		}
+
+		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		assert_eq!(
+			tx.count(IndexCountKey::range(ns, db, &tb, ix).unwrap(), None).await.unwrap(),
+			2,
+			"first batch should leave compacted root plus one residual delta"
+		);
+		tx.cancel().await.unwrap();
+		assert_eq!(count_value(&ds, &ikb).await, 22);
+
+		let plan = {
+			let tx = ds.transaction(Read, Optimistic).await.unwrap();
+			let plan = IndexCountThingIterator::new(ns, db, &tb, ix)
+				.unwrap()
+				.prepare_compaction_with_limit(&ikb, &tx, 2)
+				.await
+				.unwrap();
+			tx.cancel().await.unwrap();
+			plan
+		};
+		assert!(plan.has_work());
+		assert!(!plan.has_more());
+
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			assert!(IndexCountThingIterator::apply_compaction(&ikb, &tx, plan).await.unwrap());
+			tx.commit().await.unwrap();
+		}
+
+		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		assert_eq!(
+			tx.count(IndexCountKey::range(ns, db, &tb, ix).unwrap(), None).await.unwrap(),
+			1,
+			"second batch should collapse all deltas into one compacted root"
+		);
+		tx.cancel().await.unwrap();
+		assert_eq!(count_value(&ds, &ikb).await, 22);
+	}
+
+	#[tokio::test]
+	async fn count_compaction_generation_allows_only_one_winner() {
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		let tb: TableName = "test_tb".into();
+		let ix = IndexId(3);
+		let ikb = IndexKeyBase::new(ns, db, tb.clone(), ix);
+		let ds = Datastore::new("memory").await.unwrap();
+
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			let uid1 = (Uuid::new_v4(), Uuid::new_v4());
+			let k1 = IndexCountKey::new(ns, db, &tb, ix, Some(uid1), true, 10);
+			tx.set(&k1, &()).await.unwrap();
+			tx.commit().await.unwrap();
+		}
+
+		let plan1 = {
+			let tx = ds.transaction(Read, Optimistic).await.unwrap();
+			let plan = IndexCountThingIterator::new(ns, db, &tb, ix)
+				.unwrap()
+				.prepare_compaction(&ikb, &tx)
+				.await
+				.unwrap();
+			tx.cancel().await.unwrap();
+			plan
+		};
+		let plan2 = {
+			let tx = ds.transaction(Read, Optimistic).await.unwrap();
+			let plan = IndexCountThingIterator::new(ns, db, &tb, ix)
+				.unwrap()
+				.prepare_compaction(&ikb, &tx)
+				.await
+				.unwrap();
+			tx.cancel().await.unwrap();
+			plan
+		};
+
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			assert!(IndexCountThingIterator::apply_compaction(&ikb, &tx, plan1).await.unwrap());
+			tx.commit().await.unwrap();
+		}
+		{
+			let tx = ds.transaction(Write, Optimistic).await.unwrap();
+			assert!(!IndexCountThingIterator::apply_compaction(&ikb, &tx, plan2).await.unwrap());
+			tx.cancel().await.unwrap();
+		}
+
+		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		assert_eq!(tx.get(&ikb.new_iv_key(), None).await.unwrap(), Some(1));
+		tx.cancel().await.unwrap();
+		assert_eq!(count_value(&ds, &ikb).await, 10);
 	}
 }

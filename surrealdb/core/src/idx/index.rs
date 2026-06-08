@@ -13,6 +13,8 @@
 //! - Numeric predicates need a single probe/range in the index; per-variant fan-out is no longer
 //!   required.
 
+use std::path::PathBuf;
+
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
@@ -20,15 +22,19 @@ use uuid::Uuid;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
-	DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition, NamespaceId, TableId,
+	DatabaseId, DiskAnnParams, FullTextParams, HnswParams, Index, IndexDefinition, NamespaceId,
+	TableId,
 };
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Cond, Part};
 use crate::idx::IndexKeyBase;
-use crate::idx::ft::fulltext::FullTextIndex;
-use crate::idx::planner::iterators::IndexCountThingIterator;
+use crate::idx::ft::fulltext::{FullTextCompactionPlan, FullTextIndex};
+use crate::idx::planner::iterators::{IndexCountCompactionPlan, IndexCountThingIterator};
+#[cfg(diskann)]
+use crate::idx::trees::diskann::index::{DiskAnnCompactionPlan, DiskAnnIndex};
+use crate::idx::trees::hnsw::index::{HnswCompactionPlan, HnswIndex};
 use crate::idx::trees::store::IndexStores;
 use crate::key;
 use crate::key::index::iu::IndexCountKey;
@@ -97,7 +103,16 @@ impl<'a> IndexOperation<'a> {
 			return Ok(None);
 		};
 		let ikb = IndexKeyBase::new(ns, db, ix.table_name.clone(), ix.index_id);
-		Ok(Some(FullTextIndex::new(ctx.get_index_stores(), &ctx.tx(), ikb, p).await?))
+		Ok(Some(
+			FullTextIndex::new(
+				ctx.get_index_stores(),
+				&ctx.tx(),
+				ikb,
+				p,
+				&ctx.config.file_allowlist,
+			)
+			.await?,
+		))
 	}
 
 	pub(crate) async fn compute(
@@ -111,6 +126,7 @@ impl<'a> IndexOperation<'a> {
 			Index::Idx => self.index_non_unique().await,
 			Index::FullText(p) => self.index_fulltext(stk, p, require_compaction).await,
 			Index::Hnsw(p) => self.index_hnsw(p, require_compaction).await,
+			Index::DiskAnn(p) => self.index_diskann(p, require_compaction).await,
 			Index::Count(c) => self.index_count(stk, c.as_ref(), require_compaction).await,
 		}
 	}
@@ -259,7 +275,7 @@ impl<'a> IndexOperation<'a> {
 			self.db,
 			&self.ix.table_name,
 			self.ix.index_id,
-			Some((self.opt.id(), uuid::Uuid::now_v7())),
+			Some((self.ctx.node_id(), uuid::Uuid::now_v7())),
 			relative_count > 0,
 			relative_count.unsigned_abs() as u64,
 		);
@@ -268,36 +284,112 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	pub(crate) async fn index_fulltext_compaction(
+	/// Creates the read-phase plan for full-text compaction.
+	///
+	/// The caller owns the transaction split so this can run in a read-only
+	/// transaction and be applied later with a short write transaction.
+	pub(crate) async fn prepare_fulltext_compaction(
 		ixs: &IndexStores,
 		ikb: &IndexKeyBase,
 		tx: &Transaction,
 		p: &FullTextParams,
-	) -> Result<()> {
-		let ft = FullTextIndex::new(ixs, tx, ikb.clone(), p).await?;
-		ft.compaction(tx).await?;
-		Ok(())
+		allow_list: &[PathBuf],
+	) -> Result<FullTextCompactionPlan> {
+		let ft = FullTextIndex::new(ixs, tx, ikb.clone(), p, allow_list).await?;
+		ft.prepare_compaction(tx).await
 	}
 
-	pub(crate) async fn index_hnsw_compaction(
+	/// Applies a prepared full-text compaction plan.
+	///
+	/// Returns `false` when there is no work or another compactor advanced the
+	/// generation first.
+	pub(crate) async fn apply_fulltext_compaction(
+		ixs: &IndexStores,
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+		p: &FullTextParams,
+		allow_list: &[PathBuf],
+		plan: FullTextCompactionPlan,
+	) -> Result<bool> {
+		let ft = FullTextIndex::new(ixs, tx, ikb.clone(), p, allow_list).await?;
+		ft.apply_compaction(tx, plan).await
+	}
+
+	/// Creates the read-phase plan for HNSW pending compaction.
+	pub(crate) async fn prepare_hnsw_compaction(
+		ctx: &FrozenContext,
+		ikb: &IndexKeyBase,
+	) -> Result<HnswCompactionPlan> {
+		HnswIndex::prepare_compaction(ctx, ikb).await
+	}
+
+	/// Applies a prepared HNSW pending compaction plan.
+	///
+	/// Returns `false` when there is no work, another compactor advanced the
+	/// generation first, or a captured pending key changed before the write.
+	pub(crate) async fn apply_hnsw_compaction(
 		ctx: &FrozenContext,
 		ixs: &IndexStores,
 		ikb: &IndexKeyBase,
 		ix: &IndexDefinition,
 		p: &HnswParams,
-	) -> Result<()> {
+		plan: HnswCompactionPlan,
+	) -> Result<bool> {
 		let tx = ctx.tx();
 		if let Some(tb) = tx.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? {
 			let hnsw = ixs.get_index_hnsw(ikb.ns(), ikb.db(), ctx, tb.table_id, ix, p).await?;
-			hnsw.index_pendings(ctx).await?;
+			return hnsw.apply_compaction(ctx, plan).await;
 		}
-		Ok(())
+		Ok(false)
 	}
 
-	pub(crate) async fn index_count_compaction(ikb: &IndexKeyBase, tx: &Transaction) -> Result<()> {
+	#[cfg(diskann)]
+	/// Creates the read-phase plan for DiskANN pending compaction.
+	pub(crate) async fn prepare_diskann_compaction(
+		ctx: &FrozenContext,
+		ikb: &IndexKeyBase,
+	) -> Result<DiskAnnCompactionPlan> {
+		DiskAnnIndex::prepare_compaction(ctx, ikb).await
+	}
+
+	#[cfg(diskann)]
+	/// Applies a prepared DiskANN pending compaction plan.
+	pub(crate) async fn apply_diskann_compaction(
+		ctx: &FrozenContext,
+		ixs: &IndexStores,
+		ikb: &IndexKeyBase,
+		ix: &IndexDefinition,
+		p: &DiskAnnParams,
+		plan: DiskAnnCompactionPlan,
+	) -> Result<bool> {
+		let tx = ctx.tx();
+		if let Some(tb) = tx.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? {
+			let diskann = ixs.get_index_diskann(ikb.ns(), ikb.db(), tb.table_id, ix, p).await?;
+			return diskann.apply_compaction(ctx, plan).await;
+		}
+		Ok(false)
+	}
+
+	/// Creates the read-phase plan for count-index compaction.
+	pub(crate) async fn prepare_count_compaction(
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+	) -> Result<IndexCountCompactionPlan> {
 		IndexCountThingIterator::new(ikb.ns(), ikb.db(), ikb.table(), ikb.index())?
-			.compaction(ikb, tx)
+			.prepare_compaction(ikb, tx)
 			.await
+	}
+
+	/// Applies a prepared count-index compaction plan.
+	///
+	/// Returns `false` when there is no work or another compactor advanced the
+	/// generation first.
+	pub(crate) async fn apply_count_compaction(
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+		plan: IndexCountCompactionPlan,
+	) -> Result<bool> {
+		IndexCountThingIterator::apply_compaction(ikb, tx, plan).await
 	}
 
 	/// Construct a consistent uniqueness violation error message.
@@ -306,7 +398,7 @@ impl<'a> IndexOperation<'a> {
 	fn err_index_exists(&self, rid: RecordId, mut n: Array) -> Result<()> {
 		bail!(Error::IndexExists {
 			record: rid,
-			index: self.ix.name.clone(),
+			index: self.ix.name.to_string(),
 			value: match n.0.len() {
 				1 => n.0.remove(0).to_sql(),
 				_ => n.to_sql(),
@@ -321,9 +413,14 @@ impl<'a> IndexOperation<'a> {
 		require_compaction: &mut bool,
 	) -> Result<()> {
 		// Build a FullText instance
-		let fti =
-			FullTextIndex::new(self.ctx.get_index_stores(), &self.ctx.tx(), self.ikb.clone(), p)
-				.await?;
+		let fti = FullTextIndex::new(
+			self.ctx.get_index_stores(),
+			&self.ctx.tx(),
+			self.ikb.clone(),
+			p,
+			&self.ctx.config.file_allowlist,
+		)
+		.await?;
 		self.compute_fulltext_with_index(stk, &fti, require_compaction).await
 	}
 
@@ -357,7 +454,7 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	pub(crate) async fn trigger_compaction(&self) -> Result<()> {
-		IndexOperation::compaction_trigger(&self.ikb, &self.ctx.tx(), self.opt.id()).await
+		IndexOperation::compaction_trigger(&self.ikb, &self.ctx.tx(), self.ctx.node_id()).await
 	}
 
 	/// Triggers index compaction.
@@ -394,6 +491,33 @@ impl<'a> IndexOperation<'a> {
 			*require_compaction = true;
 		}
 		Ok(())
+	}
+
+	async fn index_diskann(
+		&mut self,
+		p: &DiskAnnParams,
+		require_compaction: &mut bool,
+	) -> Result<()> {
+		#[cfg(not(diskann))]
+		{
+			let _ = (p, require_compaction);
+			bail!("DISKANN indexes require a 64-bit, non-WASM platform")
+		}
+		#[cfg(diskann)]
+		{
+			let diskann = self
+				.ctx
+				.get_index_stores()
+				.get_index_diskann(self.ns, self.db, self.tb, self.ix, p)
+				.await?;
+			let old_values = self.o.take();
+			let new_values = self.n.take();
+			if old_values.is_some() || new_values.is_some() {
+				diskann.index(self.ctx, &self.rid.key, old_values, new_values).await?;
+				*require_compaction = true;
+			}
+			Ok(())
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use revision::revisioned;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::statements::info::InfoStructure;
@@ -13,7 +14,7 @@ use crate::val::Value;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct SequenceDefinition {
-	pub name: String,
+	pub name: Strand,
 	pub batch: u32,
 	pub start: i64,
 	pub timeout: Option<Duration>,
@@ -40,10 +41,10 @@ impl SequenceDefinition {
 impl InfoStructure for SequenceDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-				"name".to_string() => self.name.into(),
-				"batch".to_string() => Value::from(self.batch).structure(),
-				"start".to_string() => Value::from(self.start).structure(),
-				"timeout".to_string() => self.timeout.as_ref().map(|d| {
+				"name" => self.name.into(),
+				"batch" => Value::from(self.batch).structure(),
+				"start" => Value::from(self.start).structure(),
+				"timeout" => self.timeout.as_ref().map(|d| {
 					Value::Duration((*d).into())
 				}).unwrap_or(Value::None),
 		})

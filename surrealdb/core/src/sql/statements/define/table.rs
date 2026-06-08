@@ -18,6 +18,11 @@ pub(crate) struct DefineTableStatement {
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Expr,
 	pub table_type: TableType,
+	/// Optional GraphQL alias declared via `GRAPHQL_ALIAS "..."`.
+	pub graphql_alias: Option<String>,
+	/// Optional GraphQL deprecation reason declared via
+	/// `GRAPHQL_DEPRECATED "..."`.
+	pub graphql_deprecated: Option<String>,
 }
 
 impl Default for DefineTableStatement {
@@ -33,6 +38,8 @@ impl Default for DefineTableStatement {
 			changefeed: None,
 			comment: Expr::Literal(Literal::None),
 			table_type: TableType::default(),
+			graphql_alias: None,
+			graphql_deprecated: None,
 		}
 	}
 }
@@ -86,6 +93,12 @@ impl ToSql for DefineTableStatement {
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
 			write_sql!(f, sql_fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}
+		if let Some(ref alias) = self.graphql_alias {
+			write_sql!(f, sql_fmt, " GRAPHQL_ALIAS {}", crate::fmt::QuoteStr(alias));
+		}
+		if let Some(ref reason) = self.graphql_deprecated {
+			write_sql!(f, sql_fmt, " GRAPHQL_DEPRECATED {}", crate::fmt::QuoteStr(reason));
+		}
 		if let Some(ref v) = self.view {
 			write_sql!(f, sql_fmt, " {}", v);
 		}
@@ -116,6 +129,8 @@ impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatemen
 			changefeed: v.changefeed.map(Into::into),
 			comment: v.comment.into(),
 			table_type: v.table_type.into(),
+			graphql_alias: v.graphql_alias,
+			graphql_deprecated: v.graphql_deprecated,
 		}
 	}
 }
@@ -134,6 +149,8 @@ impl From<crate::expr::statements::DefineTableStatement> for DefineTableStatemen
 			changefeed: v.changefeed.map(Into::into),
 			comment: v.comment.into(),
 			table_type: v.table_type.into(),
+			graphql_alias: v.graphql_alias,
+			graphql_deprecated: v.graphql_deprecated,
 		}
 	}
 }

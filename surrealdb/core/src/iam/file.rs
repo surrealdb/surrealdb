@@ -4,15 +4,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use path_clean::PathClean;
 
-use crate::cnf::FILE_ALLOWLIST;
 use crate::err::Error;
 
-pub(crate) fn is_path_allowed(path: &Path) -> Result<PathBuf> {
-	check_is_path_allowed(path, &FILE_ALLOWLIST)
-}
-
 /// Checks if the requested file path is within any of the allowed directories.
-fn check_is_path_allowed(path: &Path, allowed_paths: &[PathBuf]) -> Result<PathBuf> {
+pub(crate) fn check_is_path_allowed(path: &Path, allowed_paths: &[PathBuf]) -> Result<PathBuf> {
 	// Convert the requested path to its canonical form.
 	let canonical_path = fs::canonicalize(path)?;
 

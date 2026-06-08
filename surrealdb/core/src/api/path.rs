@@ -259,6 +259,24 @@ impl DeserializeRevisioned for Path {
 	}
 }
 
+impl revision::SkipRevisioned for Path {
+	fn skip_revisioned<R: std::io::Read>(reader: &mut R) -> Result<(), revision::Error> {
+		<String as revision::SkipRevisioned>::skip_revisioned(reader)
+	}
+}
+
+impl revision::WalkRevisioned for Path {
+	type Walker<'r, R: revision::BorrowedReader + 'r> = revision::LeafWalker<'r, Path, R>;
+
+	fn walk_revisioned<'r, R: revision::BorrowedReader>(
+		reader: &'r mut R,
+	) -> Result<Self::Walker<'r, R>, revision::Error> {
+		Ok(revision::LeafWalker::new(reader))
+	}
+}
+
+impl revision::LengthPrefixedBytes for Path {}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Segment {
 	Fixed(String),
@@ -275,7 +293,7 @@ impl Segment {
 			match self {
 				Self::Fixed(x) if x == current => Some(None),
 				Self::Dynamic(x, k) => {
-					let val: Value = current.to_owned().into();
+					let val: Value = (*current).into();
 					let val: Option<Value> = match k {
 						None => Some(val),
 						Some(k) => val.cast_to_kind(k).ok(),
@@ -287,7 +305,7 @@ impl Segment {
 					let values = segments
 						.iter()
 						.copied()
-						.map(|x| Value::String(x.to_owned()))
+						.map(|x| Value::String((*x).into()))
 						.collect::<Vec<_>>();
 
 					Some(Some((x.to_owned(), Value::Array(Array(values)))))
@@ -320,5 +338,27 @@ impl ToSql for Segment {
 			}
 			Self::Rest(v) => write_sql!(f, fmt, "*{v}"),
 		}
+	}
+}
+
+#[cfg(test)]
+mod length_prefixed_bytes_tests {
+	use std::str::FromStr;
+
+	use revision::{SerializeRevisioned, WalkRevisioned};
+
+	use super::Path;
+
+	#[test]
+	fn path_with_bytes_matches_serialize() {
+		let path = Path::from_str("/hello/world").unwrap();
+		let mut bytes = Vec::new();
+		path.serialize_revisioned(&mut bytes).unwrap();
+		let wire_text = path.to_string();
+		let mut r = bytes.as_slice();
+		let walker = Path::walk_revisioned(&mut r).unwrap();
+		let observed = walker.with_bytes(|raw| raw.to_vec()).unwrap();
+		assert_eq!(observed.as_slice(), wire_text.as_bytes());
+		assert!(r.is_empty());
 	}
 }

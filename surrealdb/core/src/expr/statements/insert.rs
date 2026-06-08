@@ -7,7 +7,7 @@ use surrealdb_types::{SqlFormat, ToSql};
 use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::ctx::{Context, FrozenContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
-use crate::doc::{CursorDoc, NsDbTbCtx};
+use crate::doc::{CursorDoc, DocumentContext, NsDbCtx};
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::relate::RelateThrough;
@@ -75,32 +75,19 @@ impl InsertStatement {
 		};
 
 		let txn = ctx.tx();
-		// let ns = txn.expect_ns_by_name(opt.ns()?).await?;
-		// let db = txn.expect_db_by_name(opt.ns()?, opt.db()?).await?;
-		// let tb_def = txn.expect_tb_by_name(opt.ns()?, opt.db()?, &tb).await?;
-		// let fields = txn.all_tb_fields(ns.namespace_id, db.database_id, &tb, opt.version).await?;
-
-		// let doc_ctx = NsDbTbCtx {
-		// 	ns,
-		// 	db,
-		// 	tb: tb_def,
-		// 	fields,
-		// };
-
 		let ns = ctx.tx().expect_ns_by_name(opt.ns()?).await?;
 		let db = ctx.tx().expect_db_by_name(opt.ns()?, opt.db()?).await?;
+		let parent = NsDbCtx {
+			ns: Arc::clone(&ns),
+			db: Arc::clone(&db),
+		};
 
 		let mut doc_ctx = None;
 		if let Some(tb) = &tb {
 			let tb_def = ctx.tx().get_or_add_tb(Some(ctx), &ns.name, &db.name, tb, None).await?;
-			let fields =
-				ctx.tx().all_tb_fields(ns.namespace_id, db.database_id, tb, opt.version).await?;
-			doc_ctx = Some(NsDbTbCtx {
-				ns: Arc::clone(&ns),
-				db: Arc::clone(&db),
-				tb: tb_def,
-				fields,
-			});
+			doc_ctx = Some(
+				DocumentContext::initialise(ctx, &parent, tb_def, tb, opt.version, true).await?,
+			);
 		}
 
 		// Parse the data expression
@@ -120,19 +107,21 @@ impl InsertStatement {
 					let (tb, id) = extract_table_and_rid_key(&o, &tb)?;
 
 					doc_ctx = match doc_ctx {
-						Some(doc_ctx) if doc_ctx.tb.name == tb => Some(doc_ctx),
+						Some(ref dc) if dc.tb().is_ok_and(|t| t.name == tb) => doc_ctx,
 						Some(_) | None => {
 							let tb_def =
 								txn.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb, None).await?;
-							let fields = txn
-								.all_tb_fields(ns.namespace_id, db.database_id, &tb, opt.version)
-								.await?;
-							Some(NsDbTbCtx {
-								ns: Arc::clone(&ns),
-								db: Arc::clone(&db),
-								tb: tb_def,
-								fields,
-							})
+							Some(
+								DocumentContext::initialise(
+									ctx,
+									&parent,
+									tb_def,
+									&tb,
+									opt.version,
+									true,
+								)
+								.await?,
+							)
 						}
 					};
 
@@ -156,25 +145,22 @@ impl InsertStatement {
 							let (tb, id) = extract_table_and_rid_key(&v, &tb)?;
 
 							doc_ctx = match doc_ctx {
-								Some(doc_ctx) if doc_ctx.tb.name == tb => Some(doc_ctx),
+								Some(ref dc) if dc.tb().is_ok_and(|t| t.name == tb) => doc_ctx,
 								Some(_) | None => {
 									let tb_def = txn
 										.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb, None)
 										.await?;
-									let fields = txn
-										.all_tb_fields(
-											ns.namespace_id,
-											db.database_id,
+									Some(
+										DocumentContext::initialise(
+											ctx,
+											&parent,
+											tb_def,
 											&tb,
 											opt.version,
+											true,
 										)
-										.await?;
-									Some(NsDbTbCtx {
-										ns: Arc::clone(&ns),
-										db: Arc::clone(&db),
-										tb: tb_def,
-										fields,
-									})
+										.await?,
+									)
 								}
 							};
 
@@ -193,25 +179,22 @@ impl InsertStatement {
 						let (tb, id) = extract_table_and_rid_key(&v, &tb)?;
 
 						doc_ctx = match doc_ctx {
-							Some(doc_ctx) if doc_ctx.tb.name == tb => Some(doc_ctx),
+							Some(ref dc) if dc.tb().is_ok_and(|t| t.name == tb) => doc_ctx,
 							Some(_) | None => {
 								let tb_def = txn
 									.get_or_add_tb(Some(ctx), &ns.name, &db.name, &tb, None)
 									.await?;
-								let fields = txn
-									.all_tb_fields(
-										ns.namespace_id,
-										db.database_id,
+								Some(
+									DocumentContext::initialise(
+										ctx,
+										&parent,
+										tb_def,
 										&tb,
 										opt.version,
+										true,
 									)
-									.await?;
-								Some(NsDbTbCtx {
-									ns: Arc::clone(&ns),
-									db: Arc::clone(&db),
-									tb: tb_def,
-									fields,
-								})
+									.await?,
+								)
 							}
 						};
 
@@ -259,14 +242,14 @@ impl ToSql for InsertStatement {
 }
 
 fn iterable(
-	doc_ctx: NsDbTbCtx,
+	doc_ctx: DocumentContext,
 	tb: TableName,
 	id: Option<RecordIdKey>,
 	v: Value,
 	relation: bool,
 ) -> Result<Iterable> {
 	if relation {
-		let f = match v.pick(&*IN) {
+		let f = match v.pick(&IN) {
 			Value::RecordId(v) => v,
 			v => {
 				bail!(Error::InsertStatementIn {
@@ -274,7 +257,7 @@ fn iterable(
 				})
 			}
 		};
-		let w = match v.pick(&*OUT) {
+		let w = match v.pick(&OUT) {
 			Value::RecordId(v) => v,
 			v => {
 				bail!(Error::InsertStatementOut {
@@ -312,9 +295,16 @@ fn extract_table_and_rid_key(
 	};
 
 	let rid = match record.rid() {
-		// There is a floating point number for the id field
-		// TODO: Is this correct? Rounding to int seems like unexpected behavior.
-		Value::Number(id) if id.is_float() => Some(RecordIdKey::Number(id.as_int())),
+		// There is a floating point number for the id field. Only accept floats
+		// that round-trip exactly to an i64 (finite, no fractional part, within
+		// i64 range). Silent truncation, NaN, infinity and other lossy
+		// conversions are rejected — see `Number::as_int_lossless`.
+		Value::Number(id) if id.is_float() => match id.as_int_lossless() {
+			Some(i) => Some(RecordIdKey::Number(i)),
+			None => bail!(Error::InsertStatementId {
+				value: Value::Number(id).to_sql(),
+			}),
+		},
 		// There is an integer number for the id field
 		Value::Number(id) if id.is_int() => Some(RecordIdKey::Number(id.as_int())),
 		// There is a string for the id field
@@ -327,7 +317,9 @@ fn extract_table_and_rid_key(
 		Value::Uuid(id) => Some(id.into()),
 		// There is a record id defined
 		Value::RecordId(id) => {
-			// TODO: Perhaps check if the table in the RID matches the table we're inserting into.
+			// The RID's table is intentionally discarded in favour of the `INTO`
+			// clause: this is what lets `INSERT INTO other (SELECT * FROM test)`
+			// migrate records from `test:*` to `other:*` while preserving keys.
 			Some(id.key)
 		}
 		// There is no record id field

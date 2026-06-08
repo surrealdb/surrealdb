@@ -6,21 +6,17 @@
 //!
 //! This module is only available with the `storage` feature.
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{BufReader, BufWriter, Read, Take, Write};
-use std::mem;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
+use ext_sort::{ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
 use futures::StreamExt;
-use revision::{DeserializeRevisioned, SerializeRevisioned};
-use tempfile::{Builder, TempDir};
+use tempfile::Builder;
 use tokio::task::spawn_blocking;
 
 use super::common::{OrderByField, SortDirection, compare_keys};
-use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
+use super::external_common::{KeyedValue, KeyedValueExternalChunk, TempFileReader, TempFileWriter};
 use crate::err::Error;
 use crate::exec::{
 	AccessMode, CardinalityHint, CombineAccessModes, ContextLevel, EvalContext, ExecOperator,
@@ -60,9 +56,6 @@ impl ExternalSort {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for ExternalSort {
 	fn name(&self) -> &'static str {
 		"ExternalSort"
@@ -81,10 +74,11 @@ impl ExecOperator for ExternalSort {
 			})
 			.collect::<Vec<_>>()
 			.join(", ");
-		vec![
-			("order_by".to_string(), order_str),
-			("temp_dir".to_string(), self.temp_dir.display().to_string()),
-		]
+		// `temp_dir` is intentionally omitted from the rendered attrs: the
+		// concrete path is platform-dependent (`/tmp` on Linux,
+		// `/var/folders/...` on macOS) and adds no diagnostic value beyond
+		// "this sort spills to disk", which the operator name already says.
+		vec![("order_by".to_string(), order_str)]
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -145,6 +139,7 @@ impl ExecOperator for ExternalSort {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.root().ctx.config.operator_buffer_size,
 		);
 		let order_by = Arc::new(self.order_by.clone());
 		let temp_dir = self.temp_dir.clone();
@@ -204,7 +199,7 @@ impl ExecOperator for ExternalSort {
 					// Use spawn_blocking for file I/O
 					let mut w = writer;
 					w = spawn_blocking(move || {
-						w.push(keyed)?;
+						w.push(&keyed)?;
 						Ok::<TempFileWriter, Error>(w)
 					})
 					.await
@@ -232,7 +227,7 @@ impl ExecOperator for ExternalSort {
 			let sort_dir = dir.path().join("sort");
 
 			// Perform external sort
-			let order_by_clone = order_by.clone();
+			let order_by_clone = Arc::clone(&order_by);
 			let sorted = spawn_blocking(move || {
 				fs::create_dir(&sort_dir)?;
 
@@ -243,7 +238,10 @@ impl ExecOperator for ExternalSort {
 					KeyedValueExternalChunk,
 				> = ExternalSorterBuilder::new()
 					.with_tmp_dir(&sort_dir)
-					.with_buffer(LimitedBufferBuilder::new(*EXTERNAL_SORTING_BUFFER_LIMIT, true))
+					.with_buffer(LimitedBufferBuilder::new(
+						ctx.root().ctx.config.external_sorting_buffer_limit,
+						true,
+					))
 					.build()?;
 
 				let sorted = sorter
@@ -273,224 +271,5 @@ impl ExecOperator for ExternalSort {
 		});
 
 		Ok(monitor_stream(Box::pin(filtered), "ExternalSort", &self.metrics))
-	}
-}
-
-/// A value with pre-computed sort keys for external sorting.
-#[derive(Debug, Clone)]
-struct KeyedValue {
-	keys: Vec<Value>,
-	value: Value,
-}
-
-const USIZE_SIZE: usize = mem::size_of::<usize>();
-
-/// Writer for temporary files during external sort.
-struct TempFileWriter {
-	records: BufWriter<File>,
-}
-
-impl TempFileWriter {
-	const RECORDS_FILE_NAME: &'static str = "records";
-
-	fn new(dir: &TempDir) -> Result<Self, Error> {
-		let records = OpenOptions::new()
-			.create_new(true)
-			.append(true)
-			.open(dir.path().join(Self::RECORDS_FILE_NAME))?;
-		Ok(Self {
-			records: BufWriter::new(records),
-		})
-	}
-
-	fn write_usize<W: Write>(writer: &mut W, u: usize) -> Result<(), Error> {
-		let buf = u.to_be_bytes();
-		writer.write_all(&buf)?;
-		Ok(())
-	}
-
-	fn write_value<W: Write>(writer: &mut W, value: &Value) -> Result<usize, Error> {
-		let mut val = Vec::new();
-		SerializeRevisioned::serialize_revisioned(value, &mut val)?;
-		Self::write_usize(writer, val.len())?;
-		writer.write_all(&val)?;
-		Ok(val.len())
-	}
-
-	fn push(&mut self, keyed: KeyedValue) -> Result<(), Error> {
-		// Write number of keys
-		Self::write_usize(&mut self.records, keyed.keys.len())?;
-		// Write each key
-		for key in &keyed.keys {
-			Self::write_value(&mut self.records, key)?;
-		}
-		// Write the value
-		Self::write_value(&mut self.records, &keyed.value)?;
-		Ok(())
-	}
-
-	fn flush(mut self) -> Result<(), Error> {
-		self.records.flush()?;
-		Ok(())
-	}
-}
-
-/// Reader for temporary files during external sort.
-struct TempFileReader {
-	len: usize,
-	records_path: PathBuf,
-}
-
-impl TempFileReader {
-	fn new(len: usize, dir: &TempDir) -> Result<Self, Error> {
-		Ok(Self {
-			len,
-			records_path: dir.path().join(TempFileWriter::RECORDS_FILE_NAME),
-		})
-	}
-}
-
-impl IntoIterator for TempFileReader {
-	type Item = Result<KeyedValue, Error>;
-	type IntoIter = TempFileIterator;
-
-	fn into_iter(self) -> Self::IntoIter {
-		TempFileIterator::new(self.records_path, self.len)
-	}
-}
-
-/// Iterator over temporary file records.
-struct TempFileIterator {
-	path: PathBuf,
-	reader: Option<BufReader<File>>,
-	len: usize,
-	pos: usize,
-}
-
-impl TempFileIterator {
-	fn new(path: PathBuf, len: usize) -> Self {
-		Self {
-			path,
-			reader: None,
-			len,
-			pos: 0,
-		}
-	}
-
-	fn check_reader(&mut self) -> Result<(), Error> {
-		if self.reader.is_none() {
-			let f = OpenOptions::new().read(true).open(&self.path)?;
-			self.reader = Some(BufReader::new(f));
-		}
-		Ok(())
-	}
-
-	fn read_usize<R: Read>(reader: &mut R) -> Result<usize, std::io::Error> {
-		let mut buf = vec![0u8; USIZE_SIZE];
-		reader.read_exact(&mut buf)?;
-		Ok(usize::from_be_bytes(buf.try_into().expect("buffer size matches usize")))
-	}
-
-	fn read_value<R: Read>(reader: &mut R) -> Result<Value, Error> {
-		let len = Self::read_usize(reader)?;
-		let mut buf = vec![0u8; len];
-		reader.read_exact(&mut buf)?;
-		let val: Value = DeserializeRevisioned::deserialize_revisioned(&mut buf.as_slice())?;
-		Ok(val)
-	}
-
-	fn read_keyed_value<R: Read>(reader: &mut R) -> Result<KeyedValue, Error> {
-		let num_keys = Self::read_usize(reader)?;
-		let mut keys = Vec::with_capacity(num_keys);
-		for _ in 0..num_keys {
-			keys.push(Self::read_value(reader)?);
-		}
-		let value = Self::read_value(reader)?;
-		Ok(KeyedValue {
-			keys,
-			value,
-		})
-	}
-}
-
-impl Iterator for TempFileIterator {
-	type Item = Result<KeyedValue, Error>;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		if self.pos == self.len {
-			return None;
-		}
-		if let Err(e) = self.check_reader() {
-			return Some(Err(e));
-		}
-		if let Some(reader) = &mut self.reader {
-			match Self::read_keyed_value(reader) {
-				Ok(val) => {
-					self.pos += 1;
-					Some(Ok(val))
-				}
-				Err(e) => Some(Err(e)),
-			}
-		} else {
-			None
-		}
-	}
-
-	fn size_hint(&self) -> (usize, Option<usize>) {
-		(self.len - self.pos, Some(self.len - self.pos))
-	}
-}
-
-impl ExactSizeIterator for TempFileIterator {
-	fn len(&self) -> usize {
-		self.len - self.pos
-	}
-}
-
-/// External chunk implementation for KeyedValue.
-struct KeyedValueExternalChunk {
-	reader: Take<BufReader<File>>,
-}
-
-impl ExternalChunk<KeyedValue> for KeyedValueExternalChunk {
-	type SerializationError = Error;
-	type DeserializationError = Error;
-
-	fn new(reader: Take<BufReader<File>>) -> Self {
-		Self {
-			reader,
-		}
-	}
-
-	fn dump(
-		chunk_writer: &mut BufWriter<File>,
-		items: impl IntoIterator<Item = KeyedValue>,
-	) -> Result<(), Self::SerializationError> {
-		for item in items {
-			// Write number of keys
-			TempFileWriter::write_usize(chunk_writer, item.keys.len())?;
-			// Write each key
-			for key in &item.keys {
-				TempFileWriter::write_value(chunk_writer, key)?;
-			}
-			// Write the value
-			TempFileWriter::write_value(chunk_writer, &item.value)?;
-		}
-		Ok(())
-	}
-}
-
-impl Iterator for KeyedValueExternalChunk {
-	type Item = Result<KeyedValue, Error>;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		if self.reader.limit() == 0 {
-			None
-		} else {
-			match TempFileIterator::read_keyed_value(&mut self.reader) {
-				Ok(val) => Some(Ok(val)),
-				Err(err) => Some(Err(err)),
-			}
-		}
 	}
 }

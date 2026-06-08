@@ -9,7 +9,7 @@ use crate::syn::error::bail;
 use crate::syn::lexer::Lexer;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::parser::mac::{expected, expected_whitespace};
-use crate::syn::parser::unexpected;
+use crate::syn::parser::{enter_object_recursion, unexpected};
 use crate::syn::token::{Span, TokenKind, t};
 use crate::types::{
 	PublicArray, PublicDuration, PublicFile, PublicGeometry, PublicNumber, PublicObject,
@@ -78,50 +78,54 @@ impl Parser<'_> {
 					return Ok(PublicValue::Set(PublicSet::new()));
 				}
 
-				if let t!("\"")
-				| t!("'")
-				| TokenKind::Identifier
-				| TokenKind::Digits
-				| TokenKind::Keyword(_)
-				| TokenKind::Language(_)
-				| TokenKind::Algorithm(_)
-				| TokenKind::Distance(_)
-				| TokenKind::VectorType(_) = self.peek().kind
-					&& let Some(x) = self
-						.speculate(stk, async |stk, this| {
-							let key = this.parse_object_key()?;
-							if !this.eat(t!(":")) {
-								return Ok(None);
-							}
-							let value = stk.run(|stk| this.parse_value(stk)).await?;
-							let mut res = BTreeMap::new();
-							res.insert(key, value);
+				enter_object_recursion!(this = self => {
+					if let t!("\"")
+					| t!("'")
+					| TokenKind::Identifier
+					| TokenKind::Digits
+					| TokenKind::Keyword(_)
+					| TokenKind::Language(_)
+					| TokenKind::Algorithm(_)
+					| TokenKind::Distance(_)
+					| TokenKind::VectorType(_) = this.peek().kind
+						&& let Some(x) = this
+							.speculate(stk, async |stk, this| {
+								let key = this.parse_object_key()?;
+								if !this.eat(t!(":")) {
+									return Ok(None);
+								}
+								let value = stk.run(|stk| this.parse_value(stk)).await?;
+								let mut res = BTreeMap::new();
+								res.insert(key, value);
 
-							if this.eat(t!(",")) {
-								this.parse_value_object::<SurrealQL>(stk, open, res).await.map(Some)
-							} else {
-								this.expect_closing_delimiter(t!("}"), open)?;
-								Ok(Some(PublicObject::from(res)))
-							}
-						})
-						.await?
-				{
-					if let Some(x) = PublicGeometry::try_from_object(&x) {
-						return Ok(PublicValue::Geometry(x));
-					} else {
-						return Ok(PublicValue::Object(x));
+								if this.eat(t!(",")) {
+									this.parse_value_object::<SurrealQL>(stk, open, res).await.map(Some)
+								} else {
+									this.expect_closing_delimiter(t!("}"), open)?;
+									Ok(Some(PublicObject::from(res)))
+								}
+							})
+							.await?
+					{
+						if let Some(x) = PublicGeometry::try_from_object(&x) {
+							return Ok(PublicValue::Geometry(x));
+						} else {
+							return Ok(PublicValue::Object(x));
+						}
 					}
-				}
 
-				// It must be a set: `{1, 2, 3}` or `{value}`
-				let set = self.parse_value_set::<SurrealQL>(stk, token.span).await?;
-				PublicValue::Set(set)
+					// It must be a set: `{1, 2, 3}` or `{value}`
+					let set = this.parse_value_set::<SurrealQL>(stk, token.span).await?;
+					PublicValue::Set(set)
+				})
 			}
 			t!("[") => {
 				self.pop_peek();
-				self.parse_value_array::<SurrealQL>(stk, token.span)
-					.await
-					.map(PublicValue::Array)?
+				enter_object_recursion!(this = self => {
+					this.parse_value_array::<SurrealQL>(stk, token.span)
+						.await
+						.map(PublicValue::Array)?
+				})
 			}
 			t!("\"") | t!("'") => {
 				let strand = self.parse_string_lit()?;
@@ -191,9 +195,11 @@ impl Parser<'_> {
 						}
 					}
 					_ => {
-						let res = stk.run(|stk| self.parse_value(stk)).await?;
-						self.expect_closing_delimiter(t!(")"), open)?;
-						res
+						enter_object_recursion!(this = self => {
+							let res = stk.run(|stk| this.parse_value(stk)).await?;
+							this.expect_closing_delimiter(t!(")"), open)?;
+							res
+						})
 					}
 				}
 			}
@@ -202,18 +208,22 @@ impl Parser<'_> {
 				match self.peek_whitespace().map(|x| x.kind) {
 					Some(t!("=")) => {
 						self.pop_peek();
-						let v = stk.run(|stk| self.parse_value(stk)).await?;
-						PublicValue::Range(Box::new(PublicRange {
-							start: Bound::Unbounded,
-							end: Bound::Included(v),
-						}))
+						enter_object_recursion!(this = self => {
+							let v = stk.run(|stk| this.parse_value(stk)).await?;
+							PublicValue::Range(Box::new(PublicRange {
+								start: Bound::Unbounded,
+								end: Bound::Included(v),
+							}))
+						})
 					}
 					Some(x) if Self::kind_starts_expression(x) => {
-						let v = stk.run(|stk| self.parse_value(stk)).await?;
-						PublicValue::Range(Box::new(PublicRange {
-							start: Bound::Unbounded,
-							end: Bound::Excluded(v),
-						}))
+						enter_object_recursion!(this = self => {
+							let v = stk.run(|stk| this.parse_value(stk)).await?;
+							PublicValue::Range(Box::new(PublicRange {
+								start: Bound::Unbounded,
+								end: Bound::Excluded(v),
+							}))
+						})
 					}
 					_ => PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Unbounded,
@@ -246,18 +256,22 @@ impl Parser<'_> {
 				match self.peek_whitespace().map(|x| x.kind) {
 					Some(t!("=")) => {
 						self.pop_peek();
-						let v = stk.run(|stk| self.parse_value(stk)).await?;
-						Ok(PublicValue::Range(Box::new(PublicRange {
-							start: Bound::Excluded(res),
-							end: Bound::Included(v),
-						})))
+						enter_object_recursion!(this = self => {
+							let v = stk.run(|stk| this.parse_value(stk)).await?;
+							Ok(PublicValue::Range(Box::new(PublicRange {
+								start: Bound::Excluded(res),
+								end: Bound::Included(v),
+							})))
+						})
 					}
 					Some(x) if Self::kind_starts_expression(x) => {
-						let v = stk.run(|stk| self.parse_value(stk)).await?;
-						Ok(PublicValue::Range(Box::new(PublicRange {
-							start: Bound::Excluded(res),
-							end: Bound::Excluded(v),
-						})))
+						enter_object_recursion!(this = self => {
+							let v = stk.run(|stk| this.parse_value(stk)).await?;
+							Ok(PublicValue::Range(Box::new(PublicRange {
+								start: Bound::Excluded(res),
+								end: Bound::Excluded(v),
+							})))
+						})
 					}
 					_ => Ok(PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Excluded(res),
@@ -271,18 +285,22 @@ impl Parser<'_> {
 				match self.peek_whitespace().map(|x| x.kind) {
 					Some(t!("=")) => {
 						self.pop_peek();
-						let v = stk.run(|stk| self.parse_value(stk)).await?;
-						Ok(PublicValue::Range(Box::new(PublicRange {
-							start: Bound::Included(res),
-							end: Bound::Included(v),
-						})))
+						enter_object_recursion!(this = self => {
+							let v = stk.run(|stk| this.parse_value(stk)).await?;
+							Ok(PublicValue::Range(Box::new(PublicRange {
+								start: Bound::Included(res),
+								end: Bound::Included(v),
+							})))
+						})
 					}
 					Some(x) if Self::kind_starts_expression(x) => {
-						let v = stk.run(|stk| self.parse_value(stk)).await?;
-						Ok(PublicValue::Range(Box::new(PublicRange {
-							start: Bound::Included(res),
-							end: Bound::Excluded(v),
-						})))
+						enter_object_recursion!(this = self => {
+							let v = stk.run(|stk| this.parse_value(stk)).await?;
+							Ok(PublicValue::Range(Box::new(PublicRange {
+								start: Bound::Included(res),
+								end: Bound::Excluded(v),
+							})))
+						})
 					}
 					_ => Ok(PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Included(res),
@@ -310,14 +328,23 @@ impl Parser<'_> {
 				Ok(PublicValue::Bool(false))
 			}
 			t!("{") => {
-				self.pop_peek();
-				self.parse_value_object::<Json>(stk, token.span, BTreeMap::new())
-					.await
-					.map(PublicValue::Object)
+				let open = self.pop_peek().span;
+
+				if self.eat(t!("}")) {
+					return Ok(PublicValue::Object(PublicObject::new()));
+				}
+
+				enter_object_recursion!(this = self => {
+					this.parse_value_object::<Json>(stk, open, BTreeMap::new())
+						.await
+						.map(PublicValue::Object)
+				})
 			}
 			t!("[") => {
 				self.pop_peek();
-				self.parse_value_array::<Json>(stk, token.span).await.map(PublicValue::Array)
+				enter_object_recursion!(this = self => {
+					this.parse_value_array::<Json>(stk, token.span).await.map(PublicValue::Array)
+				})
 			}
 			t!("\"") | t!("'") => {
 				let strand = self.parse_string_lit()?;
@@ -451,7 +478,7 @@ impl Parser<'_> {
 	}
 
 	async fn parse_value_table(&mut self) -> ParseResult<PublicTable> {
-		let table = self.parse_ident()?;
+		let table = self.parse_ident()?.into_string();
 		Ok(PublicTable::new(table))
 	}
 
@@ -466,20 +493,24 @@ impl Parser<'_> {
 	where
 		VP: ValueParseFunc,
 	{
-		let table = self.parse_ident()?;
+		let table = self.parse_ident()?.into_string();
 		expected!(self, t!(":"));
 		let peek = self.peek();
 		let key = match peek.kind {
 			t!("u'") | t!("u\"") => PublicRecordIdKey::Uuid(self.next_token_value::<PublicUuid>()?),
 			t!("{") => {
 				let peek = self.pop_peek();
-				PublicRecordIdKey::Object(
-					self.parse_value_object::<VP>(stk, peek.span, BTreeMap::new()).await?,
-				)
+				enter_object_recursion!(this = self => {
+					PublicRecordIdKey::Object(
+						this.parse_value_object::<VP>(stk, peek.span, BTreeMap::new()).await?,
+					)
+				})
 			}
 			t!("[") => {
 				let peek = self.pop_peek();
-				PublicRecordIdKey::Array(self.parse_value_array::<VP>(stk, peek.span).await?)
+				enter_object_recursion!(this = self => {
+					PublicRecordIdKey::Array(this.parse_value_array::<VP>(stk, peek.span).await?)
+				})
 			}
 			t!("+") => {
 				self.pop_peek();
@@ -495,8 +526,9 @@ impl Parser<'_> {
 
 				match self.peek_whitespace().map(|x| x.kind) {
 					Some(t!(".")) => {
-						// TODO(delskayn) explain that record-id's cant have matissas,
-						// exponents or a number suffix
+						// Numeric record-id keys are stored as `i64`, so a fractional part
+						// (`.`), an exponent (`e`/`E`), or a numeric type suffix is not
+						// allowed here.
 						unexpected!(self, self.peek(), "an integer", => "Numeric Record-id keys can only be integers");
 					}
 					Some(x) if Self::kind_is_identifier(x) => {
@@ -554,7 +586,7 @@ impl Parser<'_> {
 				let ident = if self.settings.flexible_record_id {
 					self.parse_flexible_ident()?
 				} else {
-					self.parse_ident()?
+					self.parse_ident()?.into_string()
 				};
 				PublicRecordIdKey::String(ident)
 			}

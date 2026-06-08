@@ -3,7 +3,6 @@ use std::sync::Arc;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::ctx::FrozenContext;
 #[cfg(storage)]
 use crate::dbs::file::FileCollector;
@@ -33,7 +32,7 @@ pub(super) enum Results {
 impl Results {
 	pub(super) fn prepare(
 		&mut self,
-		#[cfg(storage)] ctx: &FrozenContext,
+		ctx: &FrozenContext,
 		stm: &Statement<'_>,
 		start: Option<u32>,
 		limit: Option<u32>,
@@ -45,7 +44,11 @@ impl Results {
 		if stm.tempfiles()
 			&& let Some(temp_dir) = ctx.temporary_directory()
 		{
-			return Ok(Self::File(Box::new(FileCollector::new(temp_dir, stm.order().cloned())?)));
+			return Ok(Self::File(Box::new(FileCollector::new(
+				temp_dir,
+				stm.order().cloned(),
+				ctx.config.external_sorting_buffer_limit,
+			)?)));
 		}
 		if let Some(ordering) = stm.order() {
 			return match ordering {
@@ -59,7 +62,9 @@ impl Results {
 						// - there is no SPLIT clause (SPLIT can change the number of produced
 						//   records)
 						// Otherwise, fall back to full in-memory ordering.
-						if stm.split().is_none() && limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE {
+						if stm.split().is_none()
+							&& limit <= ctx.config.max_order_limit_priority_queue_size
+						{
 							return Ok(Self::MemoryOrderedLimit(MemoryOrderedLimit::new(
 								limit as usize,
 								orders.clone(),

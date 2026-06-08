@@ -39,7 +39,7 @@ use crate::expr::decimal::DecimalLexEncoder;
 use crate::fnc::util::math::ToFloat;
 use crate::val::{TryAdd, TryDiv, TryFloatDiv, TryMul, TryNeg, TryPow, TryRem, TrySub};
 
-#[derive(Encode, BorrowDecode)]
+#[derive(Copy, Clone, Encode, BorrowDecode)]
 pub(crate) enum NumberKind {
 	Int,
 	Float,
@@ -288,11 +288,64 @@ impl Number {
 	// Complex conversion of number
 	// -----------------------------------
 
-	pub fn to_usize(self) -> usize {
+	/// Convert to an `i64` only when the value round-trips exactly.
+	///
+	/// Returns `None` for any value that does not represent an exact integer
+	/// within `i64` range — including NaN, infinities, fractional values, and
+	/// out-of-range magnitudes. Lossy `as` casts (which saturate or truncate
+	/// silently) are deliberately avoided so callers can reject the input
+	/// rather than write a wrong value.
+	pub fn as_int_lossless(self) -> Option<i64> {
 		match self {
-			Number::Int(v) => v as usize,
-			Number::Float(v) => v as usize,
-			Number::Decimal(v) => v.to_usize().unwrap_or_default(),
+			Number::Int(v) => Some(v),
+			Number::Float(v) => {
+				// `i64::MAX as f64` rounds up to 2^63 (the next representable
+				// f64), which is *not* in i64 range. `-(i64::MIN as f64)` is
+				// exactly 2^63 and is the right exclusive upper bound.
+				if !v.is_finite()
+					|| v.fract() != 0.0
+					|| v < i64::MIN as f64
+					|| v >= -(i64::MIN as f64)
+				{
+					return None;
+				}
+				Some(v as i64)
+			}
+			Number::Decimal(v) => {
+				if v.fract().is_zero() {
+					v.try_into().ok()
+				} else {
+					None
+				}
+			}
+		}
+	}
+
+	/// Convert to a `usize` suitable for array indexing.
+	///
+	/// Returns `None` for any value that does not represent an exact
+	/// non-negative integer within `usize` range — including negatives,
+	/// NaN, infinities, fractional values, and out-of-range magnitudes.
+	pub fn as_array_index(self) -> Option<usize> {
+		match self {
+			Number::Int(v) => usize::try_from(v).ok(),
+			Number::Float(v) => {
+				if !v.is_finite() || v < 0.0 || v.fract() != 0.0 {
+					return None;
+				}
+				// `f64 as usize` saturates above `usize::MAX`; round-trip back
+				// through f64 to reject any value that couldn't be represented
+				// exactly.
+				let idx = v as usize;
+				(idx as f64 == v).then_some(idx)
+			}
+			Number::Decimal(v) => {
+				if v.fract().is_zero() {
+					v.to_usize()
+				} else {
+					None
+				}
+			}
 		}
 	}
 
@@ -582,10 +635,14 @@ impl Number {
 
 	pub fn fixed(self, precision: usize) -> Number {
 		match self {
-			// FIXME: This is so cursed, there has to be a better way get a certain amount of
-			// precision then formatting to a string and then parsing it again.
-			Number::Int(v) => format!("{v:.precision$}").parse().unwrap_or_default(),
-			Number::Float(v) => format!("{v:.precision$}").parse().unwrap_or_default(),
+			Number::Int(v) => v.into(),
+			// Truncate via the formatter so subnormals and very large
+			// magnitudes (which would overflow a `10^precision` multiplier)
+			// stay representable; non-finite f64s round-trip too.
+			Number::Float(v) => format!("{v:.precision$}")
+				.parse::<f64>()
+				.expect("formatted f64 always parses back as f64")
+				.into(),
 			Number::Decimal(v) => v.round_dp(precision as u32).into(),
 		}
 	}
@@ -1179,8 +1236,8 @@ mod tests {
 	use std::cmp::Ordering;
 
 	use ahash::HashSet;
+	use rand::Rng;
 	use rand::seq::SliceRandom;
-	use rand::{Rng, thread_rng};
 	use rust_decimal::Decimal;
 	use rust_decimal::prelude::ToPrimitive;
 
@@ -1235,7 +1292,7 @@ mod tests {
 		let j = Number::Float(f64::NAN);
 		let original = vec![a, b, c, d, e, f, g, h, i, j];
 		let mut copy = original.clone();
-		let mut rng = thread_rng();
+		let mut rng = rand::rng();
 		copy.shuffle(&mut rng);
 		copy.sort();
 		assert_eq!(original, copy);
@@ -1244,44 +1301,23 @@ mod tests {
 	#[test]
 	fn ord_fuzz() {
 		fn random_number() -> Number {
-			let mut rng = thread_rng();
-			match rng.gen_range(0..3) {
-				0 => Number::Int(rng.r#gen()),
-				1 => Number::Float(f64::from_bits(rng.r#gen())),
-				_ => Number::Decimal(Number::Float(f64::from_bits(rng.r#gen())).as_decimal()),
+			let mut rng = rand::rng();
+			match rng.random_range(0..3) {
+				0 => Number::Int(rng.random()),
+				1 => Number::Float(f64::from_bits(rng.random())),
+				_ => Number::Decimal(Number::Float(f64::from_bits(rng.random())).as_decimal()),
 			}
-		}
-
-		// TODO: Use std library once stable https://doc.rust-lang.org/std/primitive.f64.html#method.next_down
-		fn next_down(n: f64) -> f64 {
-			const TINY_BITS: u64 = 0x1; // Smallest positive f64.
-			const CLEAR_SIGN_MASK: u64 = 0x7fff_ffff_ffff_ffff;
-
-			let bits = n.to_bits();
-			if n.is_nan() || bits == f64::INFINITY.to_bits() {
-				return n;
-			}
-
-			let abs = bits & CLEAR_SIGN_MASK;
-			let next_bits = if abs == 0 {
-				TINY_BITS
-			} else if bits == abs {
-				bits + 1
-			} else {
-				bits - 1
-			};
-			f64::from_bits(next_bits)
 		}
 
 		fn random_permutation(number: Number) -> Number {
-			let mut rng = thread_rng();
-			let value = match rng.gen_range(0..4) {
-				0 => number + Number::from(rng.r#gen::<f64>()),
+			let mut rng = rand::rng();
+			let value = match rng.random_range(0..4) {
+				0 => number + Number::from(rng.random::<f64>()),
 				1 if !matches!(number, Number::Int(i64::MIN)) => number * Number::from(-1),
-				2 => Number::Float(next_down(number.as_float())),
+				2 => Number::Float(number.as_float().next_down()),
 				_ => number,
 			};
-			match rng.gen_range(0..3) {
+			match rng.random_range(0..3) {
 				0 => Number::Int(value.as_int()),
 				1 => Number::Float(value.as_float()),
 				_ => Number::Decimal(value.as_decimal()),
@@ -1382,5 +1418,111 @@ mod tests {
 		check(&[Number::Int(1), Number::Float(1.0), Number::Decimal(Decimal::ONE)]);
 		check(&[Number::Int(-1), Number::Float(-1.0), Number::Decimal(Decimal::NEGATIVE_ONE)]);
 		check(&[Number::Float(1.5), Number::Decimal(Decimal::from_str_normalized("1.5").unwrap())]);
+	}
+
+	#[test]
+	fn as_int_lossless_accepts_valid() {
+		assert_eq!(Number::Int(0).as_int_lossless(), Some(0));
+		assert_eq!(Number::Int(i64::MIN).as_int_lossless(), Some(i64::MIN));
+		assert_eq!(Number::Int(i64::MAX).as_int_lossless(), Some(i64::MAX));
+		assert_eq!(Number::Float(0.0).as_int_lossless(), Some(0));
+		assert_eq!(Number::Float(-0.0).as_int_lossless(), Some(0));
+		assert_eq!(Number::Float(7.0).as_int_lossless(), Some(7));
+		// `i64::MIN` is exactly representable as `f64` and is the inclusive lower bound.
+		assert_eq!(Number::Float(i64::MIN as f64).as_int_lossless(), Some(i64::MIN));
+		assert_eq!(Number::Decimal(Decimal::ZERO).as_int_lossless(), Some(0));
+		assert_eq!(Number::Decimal(Decimal::ONE).as_int_lossless(), Some(1));
+		assert_eq!(Number::Decimal(Decimal::NEGATIVE_ONE).as_int_lossless(), Some(-1));
+	}
+
+	#[test]
+	fn as_int_lossless_rejects_invalid() {
+		assert_eq!(Number::Float(1.5).as_int_lossless(), None);
+		assert_eq!(Number::Float(-1.5).as_int_lossless(), None);
+		assert_eq!(Number::Float(f64::NAN).as_int_lossless(), None);
+		assert_eq!(Number::Float(f64::INFINITY).as_int_lossless(), None);
+		assert_eq!(Number::Float(f64::NEG_INFINITY).as_int_lossless(), None);
+		// `i64::MAX as f64` rounds up to 2^63, which is *not* in `i64` range —
+		// the exclusive upper bound is `-(i64::MIN as f64)`.
+		assert_eq!(Number::Float(i64::MAX as f64).as_int_lossless(), None);
+		assert_eq!(Number::Float(1e30).as_int_lossless(), None);
+		assert_eq!(Number::Float(-1e30).as_int_lossless(), None);
+		assert_eq!(
+			Number::Decimal(Decimal::from_str_normalized("1.5").unwrap()).as_int_lossless(),
+			None,
+		);
+	}
+
+	#[test]
+	fn as_array_index_accepts_valid() {
+		assert_eq!(Number::Int(0).as_array_index(), Some(0));
+		assert_eq!(Number::Int(7).as_array_index(), Some(7));
+		assert_eq!(Number::Float(0.0).as_array_index(), Some(0));
+		assert_eq!(Number::Float(-0.0).as_array_index(), Some(0));
+		assert_eq!(Number::Float(3.0).as_array_index(), Some(3));
+		assert_eq!(Number::Decimal(Decimal::ZERO).as_array_index(), Some(0));
+		assert_eq!(Number::Decimal(Decimal::ONE).as_array_index(), Some(1));
+	}
+
+	#[test]
+	fn as_array_index_rejects_invalid() {
+		assert_eq!(Number::Int(-1).as_array_index(), None);
+		assert_eq!(Number::Int(i64::MIN).as_array_index(), None);
+		assert_eq!(Number::Float(-1.0).as_array_index(), None);
+		assert_eq!(Number::Float(1.5).as_array_index(), None);
+		assert_eq!(Number::Float(f64::NAN).as_array_index(), None);
+		assert_eq!(Number::Float(f64::INFINITY).as_array_index(), None);
+		assert_eq!(Number::Float(f64::NEG_INFINITY).as_array_index(), None);
+		// 1e30 is far beyond usize::MAX and not exactly representable as usize.
+		assert_eq!(Number::Float(1e30).as_array_index(), None);
+		assert_eq!(Number::Decimal(Decimal::NEGATIVE_ONE).as_array_index(), None);
+		assert_eq!(
+			Number::Decimal(Decimal::from_str_normalized("1.5").unwrap()).as_array_index(),
+			None,
+		);
+	}
+
+	#[test]
+	fn fixed_int_is_unchanged_regardless_of_precision() {
+		assert_eq!(Number::Int(101).fixed(0), Number::Int(101));
+		assert_eq!(Number::Int(101).fixed(2), Number::Int(101));
+		assert_eq!(Number::Int(101).fixed(319), Number::Int(101));
+		assert_eq!(Number::Int(-7).fixed(5), Number::Int(-7));
+	}
+
+	#[test]
+	fn fixed_float_rounds_to_requested_precision() {
+		assert_eq!(Number::Float(101.5).fixed(2), Number::Float(101.5));
+		assert_eq!(Number::Float(101.1111111).fixed(2), Number::Float(101.11));
+		// Subnormal at precision past f64's significant-digit range: the
+		// trailing digits get truncated, producing a smaller-but-finite
+		// neighbour rather than 0, inf, or NaN.
+		assert_eq!(
+			Number::Float(2.2250738585072014e-308).fixed(319),
+			Number::Float(2.22507385851e-308),
+		);
+	}
+
+	#[test]
+	fn fixed_float_preserves_non_finite() {
+		// The Float arm relies on `format!`/`parse` round-tripping every
+		// f64 — including NaN and ±inf. Pin that invariant here so a future
+		// change to the formatter cannot silently break the `expect` in
+		// `Number::fixed`.
+		let Number::Float(nan) = Number::Float(f64::NAN).fixed(2) else {
+			panic!("expected Number::Float(NaN)");
+		};
+		assert!(nan.is_nan());
+		assert_eq!(Number::Float(f64::INFINITY).fixed(2), Number::Float(f64::INFINITY));
+		assert_eq!(Number::Float(f64::NEG_INFINITY).fixed(2), Number::Float(f64::NEG_INFINITY));
+	}
+
+	#[test]
+	fn fixed_decimal_uses_round_dp() {
+		let d = Decimal::from_str_normalized("1.2345").unwrap();
+		assert_eq!(
+			Number::Decimal(d).fixed(2),
+			Number::Decimal(Decimal::from_str_normalized("1.23").unwrap()),
+		);
 	}
 }

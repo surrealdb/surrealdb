@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_strand::Strand;
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -16,7 +17,7 @@ use crate::catalog::{
 };
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::doc::{self, CursorDoc, Document, DocumentContext, NsDbTbCtx};
+use crate::doc::{self, CursorDoc, Document, DocumentContext, NsDbCtx};
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
 use crate::expr::field::Selector;
@@ -43,6 +44,8 @@ pub(crate) struct DefineTableStatement {
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Expr,
 	pub table_type: TableType,
+	pub graphql_alias: Option<String>,
+	pub graphql_deprecated: Option<String>,
 }
 
 impl Default for DefineTableStatement {
@@ -50,7 +53,7 @@ impl Default for DefineTableStatement {
 		Self {
 			kind: DefineKind::Default,
 			id: None,
-			name: Expr::Literal(Literal::String(String::new())),
+			name: Expr::Literal(Literal::String(Strand::default())),
 			drop: false,
 			full: false,
 			view: None,
@@ -58,6 +61,8 @@ impl Default for DefineTableStatement {
 			changefeed: None,
 			comment: Expr::Literal(Literal::None),
 			table_type: TableType::default(),
+			graphql_alias: None,
+			graphql_deprecated: None,
 		}
 	}
 }
@@ -72,7 +77,11 @@ impl DefineTableStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Table, Base::Db)?;
+
+		// Validate any GRAPHQL_ALIAS at definition time so typos surface here
+		// rather than silently falling back at schema-generation time.
+		super::validate_graphql_alias(&self.graphql_alias, "table")?;
 
 		// Process the name
 		let name =
@@ -94,7 +103,7 @@ impl DefineTableStatement {
 					DefineKind::Default => {
 						if !opt.import {
 							bail!(Error::TbAlreadyExists {
-								name: name.clone().into_string(),
+								name: name.as_str().to_string(),
 							});
 						}
 					}
@@ -132,6 +141,8 @@ impl DefineTableStatement {
 			cache_events_ts: cache_ts,
 			cache_indexes_ts: cache_ts,
 			cache_tables_ts: cache_ts,
+			graphql_alias: self.graphql_alias.clone(),
+			graphql_deprecated: self.graphql_deprecated.clone(),
 		};
 
 		// Add table relational fields
@@ -144,21 +155,16 @@ impl DefineTableStatement {
 
 		// Update the catalog
 		let tb = txn.put_tb(ns_name, db_name, &tb_def).await?;
-		let fields = txn.all_tb_fields(ns.namespace_id, db.database_id, &name, opt.version).await?;
 
-		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns.namespace_id, db.database_id, &name);
-		}
 		// Clear the cache
 		txn.clear_cache();
 
-		let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+		let parent = NsDbCtx {
 			ns: Arc::clone(&ns),
 			db: Arc::clone(&db),
-			tb,
-			fields,
-		});
+		};
+		let doc_ctx =
+			DocumentContext::initialise(ctx, &parent, tb, &name, opt.version, true).await?;
 
 		// Check if table is a view
 		if let Some(view) = &tb_def.view {
@@ -204,18 +210,10 @@ impl DefineTableStatement {
 				.await?;
 
 				// Clear the cache
-				if let Some(cache) = ctx.get_cache() {
-					cache.clear_tb(ns.namespace_id, db.database_id, ft);
-				}
-				// Clear the cache
 				txn.clear_cache();
 			}
 
 			Self::initialize_view(stk, ctx, opt, &doc_ctx, &name, view).await?;
-		}
-		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns.namespace_id, db.database_id, &name);
 		}
 		// Clear the cache
 		txn.clear_cache();
@@ -345,16 +343,13 @@ impl DefineTableStatement {
 				.tx()
 				.get_or_add_tb(Some(ctx), &ns.name, &db.name, view_table_name, None)
 				.await?;
-			let fields = ctx
-				.tx()
-				.all_tb_fields(ns.namespace_id, db.database_id, view_table_name, opt.version)
-				.await?;
-			let doc_ctx = DocumentContext::NsDbTbCtx(NsDbTbCtx {
+			let parent = NsDbCtx {
 				ns: Arc::clone(ns),
 				db: Arc::clone(db),
-				tb,
-				fields,
-			});
+			};
+			let doc_ctx =
+				DocumentContext::initialise(ctx, &parent, tb, view_table_name, opt.version, true)
+					.await?;
 
 			Document::run_triggers(
 				stk,
@@ -471,7 +466,7 @@ impl DefineTableStatement {
 						right: Box::new(Expr::Literal(Literal::Integer(2))),
 					};
 					FunctionCall {
-						receiver: Function::Normal("count".to_string()),
+						receiver: Function::Normal("math::sum".to_string()),
 						arguments: vec![expr],
 					}
 				}
@@ -670,18 +665,18 @@ impl DefineTableStatement {
 
 						stats.push(AggregationStat::TimeMax {
 							arg,
-							max: d.clone(),
+							max: *d,
 						});
 					}
 					Aggregation::DatetimeMin(arg) => {
-						let idx = required_values[&SelectAggr::Base(Aggregation::DatetimeMax(arg))];
+						let idx = required_values[&SelectAggr::Base(Aggregation::DatetimeMin(arg))];
 						let Value::Datetime(d) = &aggregate_stats[idx] else {
 							fail!("initial select statement did not return the right value")
 						};
 
-						stats.push(AggregationStat::TimeMax {
+						stats.push(AggregationStat::TimeMin {
 							arg,
-							max: d.clone(),
+							min: *d,
 						});
 					}
 					Aggregation::StdDev(arg) => {
@@ -763,7 +758,7 @@ impl DefineTableStatement {
 			});
 
 			let key = RecordIdKey::Array(Array(group));
-			tx.put_record(ns, db, view_table_name, &key, record.clone()).await?;
+			tx.put_record(ns, db, view_table_name, &key, Arc::clone(&record)).await?;
 
 			let id = Arc::new(RecordId {
 				table: view_table_name.clone(),
@@ -801,8 +796,7 @@ impl DefineTableStatement {
 			// Set the `in` field as a DEFINE FIELD definition
 			{
 				let key = crate::key::table::fd::new(ns, db, &tb.name, "in");
-				let val =
-					Some(Kind::Record(rel.from.iter().cloned().map(TableName::new).collect()));
+				let val = Some(Kind::Record(rel.from.clone()));
 				txn.set(
 					&key,
 					&FieldDefinition {
@@ -817,7 +811,7 @@ impl DefineTableStatement {
 			// Set the `out` field as a DEFINE FIELD definition
 			{
 				let key = crate::key::table::fd::new(ns, db, &tb.name, "out");
-				let val = Some(Kind::Record(rel.to.iter().cloned().map(TableName::new).collect()));
+				let val = Some(Kind::Record(rel.to.clone()));
 				txn.set(
 					&key,
 					&FieldDefinition {

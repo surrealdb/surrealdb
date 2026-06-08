@@ -8,8 +8,9 @@ use parking_lot::{Condvar, Mutex};
 use rocksdb::{OptimisticTransactionDB, Options};
 
 use super::TARGET;
-use crate::kvs::config::{RocksDbConfig, SyncMode};
+use crate::kvs::config::SyncMode;
 use crate::kvs::err::{Error, Result};
+use crate::kvs::rocksdb::RocksDbConfig;
 
 /// Background flusher for periodically syncing the Write-Ahead Log (WAL) to disk.
 ///
@@ -77,7 +78,7 @@ impl BackgroundFlusher {
 			mutex: Mutex::new(()),
 		});
 		// Clone the shutdown notifier
-		let signal = notify.clone();
+		let signal = Arc::clone(&notify);
 		// Spawn the background flusher thread
 		let handle = thread::Builder::new()
 			.name("rocksdb-background-flusher".to_string())

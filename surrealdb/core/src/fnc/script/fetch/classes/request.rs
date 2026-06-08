@@ -5,7 +5,6 @@ use js::class::Trace;
 use js::function::Opt;
 use js::prelude::Coerced;
 use js::{Class, Ctx, Exception, FromJs, JsLifetime, Object, Result, Value};
-use reqwest::header::HeaderName;
 use reqwest::{Method, Url};
 
 use super::{Blob, Headers};
@@ -491,19 +490,7 @@ impl<'js> Request<'js> {
 	// Returns a promise with the request body as a Blob
 	pub async fn blob(&self, ctx: Ctx<'js>) -> Result<Blob> {
 		let headers = self.init.headers.clone();
-		let mime = {
-			let headers = headers.borrow();
-			let headers = &headers.inner;
-			let key = HeaderName::from_static("content-type");
-			let types = headers.get_all(key);
-			// TODO: This is not according to spec.
-			types
-				.iter()
-				.next()
-				.map(|x| x.to_str().unwrap_or("text/html"))
-				.unwrap_or("text/html")
-				.to_owned()
-		};
+		let mime = super::blob::content_type_from_headers(&headers.borrow().inner);
 
 		let data = self.take_buffer(&ctx).await?;
 		Ok(Blob {
@@ -615,6 +602,15 @@ mod test {
 					let req_2 = req.clone()
 					assert.seq(await req.text(),"some text");
 					assert.seq(await req_2.text(),"some text");
+
+					// The Blob's type is derived from the `Content-Type` header,
+					// normalized to lowercase as in the Blob constructor.
+					req = new Request("http://a",{ method: "PUT", body: "some text", headers: { "content-type": "Text/Plain;Charset=UTF-8" }});
+					assert.seq((await req.blob()).type,"text/plain;charset=utf-8");
+
+					// A missing `Content-Type` yields an empty type, not a default.
+					req = new Request("http://a",{ method: "PUT", body: "some text" });
+					assert.seq((await req.blob()).type,"");
 
 				})()
 			"#).catch(&ctx).unwrap().into_future::<()>().await.catch(&ctx).unwrap();

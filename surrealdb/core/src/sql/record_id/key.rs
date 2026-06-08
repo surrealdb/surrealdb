@@ -1,5 +1,6 @@
 use std::ops::Bound;
 
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{CoverStmts, EscapeObjectKey, EscapeRidKey, Fmt};
@@ -39,7 +40,7 @@ impl From<crate::expr::RecordIdKeyGen> for RecordIdKeyGen {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum RecordIdKeyLit {
 	Number(i64),
-	String(String),
+	String(Strand),
 	Uuid(PublicUuid),
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
@@ -51,7 +52,7 @@ impl RecordIdKeyLit {
 	pub fn from_record_id_key(key: PublicRecordIdKey) -> Self {
 		match key {
 			PublicRecordIdKey::Number(x) => RecordIdKeyLit::Number(x),
-			PublicRecordIdKey::String(x) => RecordIdKeyLit::String(x),
+			PublicRecordIdKey::String(x) => RecordIdKeyLit::String(x.into()),
 			PublicRecordIdKey::Uuid(x) => RecordIdKeyLit::Uuid(x),
 			PublicRecordIdKey::Array(x) => {
 				RecordIdKeyLit::Array(x.into_iter().map(Expr::from_public_value).collect())
@@ -59,7 +60,7 @@ impl RecordIdKeyLit {
 			PublicRecordIdKey::Object(x) => RecordIdKeyLit::Object(
 				x.into_iter()
 					.map(|(k, v)| ObjectEntry {
-						key: k,
+						key: k.into(),
 						value: Expr::from_public_value(v),
 					})
 					.collect(),

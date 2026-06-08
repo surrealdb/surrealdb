@@ -157,6 +157,8 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("FUNCTIONS") => TokenKind::Keyword(Keyword::Functions),
 	UniCase::ascii("GRANT") => TokenKind::Keyword(Keyword::Grant),
 	UniCase::ascii("GRAPHQL") => TokenKind::Keyword(Keyword::Graphql),
+	UniCase::ascii("GRAPHQL_ALIAS") => TokenKind::Keyword(Keyword::GraphqlAlias),
+	UniCase::ascii("GRAPHQL_DEPRECATED") => TokenKind::Keyword(Keyword::GraphqlDeprecated),
 	UniCase::ascii("GROUP") => TokenKind::Keyword(Keyword::Group),
 	UniCase::ascii("HASHED_VECTOR") => TokenKind::Keyword(Keyword::HashedVector),
 	UniCase::ascii("HEADERS") => TokenKind::Keyword(Keyword::Headers),
@@ -399,19 +401,24 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	// Distance
 	UniCase::ascii("CHEBYSHEV") => TokenKind::Distance(DistanceKind::Chebyshev),
 	UniCase::ascii("COSINE") => TokenKind::Distance(DistanceKind::Cosine),
+	UniCase::ascii("COSINE_NORMALIZED") => TokenKind::Distance(DistanceKind::CosineNormalized),
 	UniCase::ascii("EUCLIDEAN") => TokenKind::Distance(DistanceKind::Euclidean),
 	UniCase::ascii("HAMMING") => TokenKind::Distance(DistanceKind::Hamming),
+	UniCase::ascii("INNER_PRODUCT") => TokenKind::Distance(DistanceKind::InnerProduct),
 	UniCase::ascii("JACCARD") => TokenKind::Distance(DistanceKind::Jaccard),
 	UniCase::ascii("MANHATTAN") => TokenKind::Distance(DistanceKind::Manhattan),
 	UniCase::ascii("MINKOWSKI") => TokenKind::Distance(DistanceKind::Minkowski),
 	UniCase::ascii("PEARSON") => TokenKind::Distance(DistanceKind::Pearson),
 
 	// VectorTypes
+	UniCase::ascii("F16") => TokenKind::VectorType(VectorTypeKind::F16),
 	UniCase::ascii("F32") => TokenKind::VectorType(VectorTypeKind::F32),
 	UniCase::ascii("F64") => TokenKind::VectorType(VectorTypeKind::F64),
 	UniCase::ascii("I16") => TokenKind::VectorType(VectorTypeKind::I16),
 	UniCase::ascii("I32") => TokenKind::VectorType(VectorTypeKind::I32),
 	UniCase::ascii("I64") => TokenKind::VectorType(VectorTypeKind::I64),
+	UniCase::ascii("I8") => TokenKind::VectorType(VectorTypeKind::I8),
+	UniCase::ascii("U8") => TokenKind::VectorType(VectorTypeKind::U8),
 
 	// HTTP methods
 	UniCase::ascii("GET") => TokenKind::Keyword(Keyword::Get),

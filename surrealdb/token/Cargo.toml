@@ -12,6 +12,9 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+debug = ["logos/debug"]
+
 [dependencies]
 logos.workspace = true
 common.workspace = true

@@ -1,3 +1,4 @@
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeKwFreeIdent;
@@ -5,7 +6,7 @@ use crate::fmt::EscapeKwFreeIdent;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveParamStatement {
-	pub name: String,
+	pub name: Strand,
 	pub if_exists: bool,
 }
 
@@ -15,7 +16,7 @@ impl ToSql for RemoveParamStatement {
 		if self.if_exists {
 			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write_sql!(f, fmt, " ${}", EscapeKwFreeIdent(&self.name));
+		write_sql!(f, fmt, " ${}", EscapeKwFreeIdent(self.name.as_str()));
 	}
 }
 

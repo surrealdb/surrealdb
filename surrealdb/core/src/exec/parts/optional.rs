@@ -6,11 +6,10 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, CombineAccessModes, ContextLevel};
+use crate::exec::{AccessMode, BoxFut, CombineAccessModes, ContextLevel};
 use crate::expr::FlowResult;
 use crate::val::Value;
 
@@ -28,32 +27,35 @@ pub struct OptionalChainPart {
 	/// If the input is None/Null, these are skipped entirely.
 	pub tail: Vec<Arc<dyn PhysicalExpr>>,
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for OptionalChainPart {
 	fn name(&self) -> &'static str {
 		"OptionalChain"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> ContextLevel {
 		self.tail.iter().map(|p| p.required_context()).max().unwrap_or(ContextLevel::Root)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.cloned().unwrap_or(Value::None);
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			let value = ctx.current_value.cloned().unwrap_or(Value::None);
 
-		// Short-circuit on None/Null, preserving the original kind
-		if matches!(value, Value::None | Value::Null) {
-			return Ok(value);
-		}
+			// Short-circuit on None/Null, preserving the original kind
+			if matches!(value, Value::None | Value::Null) {
+				return Ok(value);
+			}
 
-		// Evaluate the tail chain on the value
-		let mut current = value;
-		for part in &self.tail {
-			current = part.evaluate(ctx.with_value(&current)).await?;
-		}
-		Ok(current)
+			// Evaluate the tail chain on the value
+			let mut current = value;
+			for part in &self.tail {
+				current = part.evaluate(ctx.with_value(&current)).await?;
+			}
+			Ok(current)
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {

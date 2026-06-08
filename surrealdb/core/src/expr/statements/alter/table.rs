@@ -1,20 +1,24 @@
 use std::ops::Deref;
 
 use anyhow::Result;
+use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
+use tracing::instrument;
 
 use super::AlterKind;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{Permissions, TableType};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, ChangeFeed};
+use crate::expr::{Base, ChangeFeed, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{TableName, Value};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 /// Executes `ALTER TABLE` operations against an existing table.
 ///
 /// Supported operations include:
@@ -31,7 +35,7 @@ use crate::val::{TableName, Value};
 /// - When `compact` is true, underlying storage for this table is compacted.
 pub(crate) struct AlterTableStatement {
 	/// Table name.
-	pub name: TableName,
+	pub name: Expr,
 	/// If true, do nothing (and succeed) when the table does not exist.
 	pub if_exists: bool,
 	/// Switch `SCHEMAFULL` on (`Set`) or switch to `SCHEMALESS` (`Drop`).
@@ -48,6 +52,21 @@ pub(crate) struct AlterTableStatement {
 	pub kind: Option<TableType>,
 }
 
+impl Default for AlterTableStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			if_exists: false,
+			schemafull: AlterKind::None,
+			permissions: None,
+			changefeed: AlterKind::None,
+			comment: AlterKind::None,
+			compact: false,
+			kind: None,
+		}
+	}
+}
+
 impl AlterTableStatement {
 	/// Computes the effect of the `ALTER TABLE` statement.
 	///
@@ -58,9 +77,17 @@ impl AlterTableStatement {
 	/// - May compact the underlying storage if `compact` is true
 	/// - May create relation helper fields when switching to `RELATION`
 	#[instrument(level = "trace", name = "AlterTableStatement::compute", skip_all)]
-	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Table, Base::Db)?;
+		let name =
+			TableName::new(expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?);
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
@@ -68,14 +95,14 @@ impl AlterTableStatement {
 		let txn = ctx.tx();
 
 		// Get the table definition
-		let mut dt = match txn.get_tb(ns, db, &self.name, None).await? {
+		let mut dt = match txn.get_tb(ns, db, &name, None).await? {
 			Some(tb) => tb.deref().clone(),
 			None => {
 				if self.if_exists {
 					return Ok(Value::None);
 				} else {
 					return Err(Error::TbNotFound {
-						name: self.name.clone(),
+						name: name.clone(),
 					}
 					.into());
 				}
@@ -120,11 +147,11 @@ impl AlterTableStatement {
 
 		// Record definition change
 		if changefeed_replaced {
-			txn.changefeed_buffer_table_change(ns, db, &self.name, &dt);
+			txn.changefeed_buffer_table_change(ns, db, &name, &dt);
 		}
 
 		if self.compact {
-			let key = crate::key::table::all::new(ns, db, &self.name);
+			let key = crate::key::table::all::new(ns, db, &name);
 			txn.compact(Some(key)).await?;
 		}
 

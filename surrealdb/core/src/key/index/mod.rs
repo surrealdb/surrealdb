@@ -14,14 +14,37 @@
 //! the correct boundaries when decoding.
 pub mod all;
 pub mod dc;
+#[cfg(diskann)]
+pub mod dd;
+#[cfg(diskann)]
+pub mod de;
+#[cfg(diskann)]
+pub mod dg;
+#[cfg(diskann)]
+pub mod dh;
+#[cfg(diskann)]
+pub mod di;
 pub mod dl;
+#[cfg(diskann)]
+pub mod dn;
+#[cfg(diskann)]
+pub mod dp;
+#[cfg(diskann)]
+pub mod dq;
+#[cfg(diskann)]
+pub mod dr;
+#[cfg(diskann)]
+pub mod ds;
+pub mod dv;
 pub mod hd;
 pub mod he;
+pub mod hg;
 pub mod hh;
 pub mod hi;
 pub mod hl;
 pub mod hn;
 pub mod hp;
+pub mod hr;
 pub mod hs;
 pub mod hv;
 pub mod ib;
@@ -31,8 +54,10 @@ pub mod ii;
 pub mod ip;
 pub mod is;
 pub mod iu;
+pub mod iv;
 pub mod td;
 pub mod tt;
+pub mod tv;
 
 use std::borrow::Cow;
 
@@ -99,10 +124,13 @@ struct PrefixIds<'a> {
 
 impl crate::kvs::KVKey for PrefixIds<'_> {
 	type ValueType = Vec<u8>;
+
 	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
 		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
 			.map_err(|_| crate::err::Error::Unencodable)?)
 	}
+
+	fn value_context(&self) {}
 }
 
 impl<'a> PrefixIds<'a> {
@@ -145,10 +173,13 @@ pub(crate) struct Index<'a> {
 
 impl crate::kvs::KVKey for Index<'_> {
 	type ValueType = RecordId;
+
 	fn encode_key(&self) -> ::anyhow::Result<Vec<u8>> {
 		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
 			.map_err(|_| crate::err::Error::Unencodable)?)
 	}
+
+	fn value_context(&self) {}
 }
 
 impl Categorise for Index<'_> {
@@ -294,13 +325,15 @@ impl<'a> Index<'a> {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::Strand;
+
 	use super::*;
 	use crate::val::Array;
 
 	#[test]
 	fn key() {
 		let fd: Array = vec!["testfd1", "testfd2"].into();
-		let id = RecordIdKey::String("testid".into());
+		let id = RecordIdKey::String(Strand::new_static("testid"));
 		let tb = TableName::from("testtb");
 		let val = Index::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), &fd, Some(&id));
 		let enc = Index::encode_key(&val).unwrap();

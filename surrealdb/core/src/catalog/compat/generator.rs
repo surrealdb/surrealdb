@@ -12,10 +12,14 @@ use super::fixtures as fix;
 use crate::kvs::KVValue;
 
 /// A fixture definition with its name, description, and serialized bytes.
+///
+/// Bytes are captured eagerly because `KVValue` is no longer object-safe
+/// (associated `KeyContext`), so `Box<dyn KVValue>` doesn't work for the
+/// heterogeneous fixture list.
 struct Fixture {
 	name: &'static str,
 	description: &'static str,
-	value: Box<dyn KVValue>,
+	bytes: Vec<u8>,
 }
 
 /// A collection of fixtures for a single type.
@@ -25,9 +29,8 @@ struct TypeFixtures {
 }
 
 /// Format bytes as a Rust const array.
-fn format_bytes(value: &dyn KVValue) -> String {
-	let hex_bytes: Vec<String> =
-		value.kv_encode_value().unwrap().iter().map(|b| format!("0x{:02x}", b)).collect();
+fn format_bytes(bytes: &[u8]) -> String {
+	let hex_bytes: Vec<String> = bytes.iter().map(|b| format!("0x{:02x}", b)).collect();
 
 	// Format with 12 bytes per line for readability
 	let lines: Vec<String> = hex_bytes.chunks(12).map(|chunk| chunk.join(", ")).collect();
@@ -45,7 +48,7 @@ pub const {name}: &[u8] = &[
 		type_name = type_name,
 		description = fixture.description,
 		name = fixture.name,
-		bytes = format_bytes(&*fixture.value)
+		bytes = format_bytes(&fixture.bytes)
 	)
 }
 
@@ -57,12 +60,12 @@ fn namespace_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "NAMESPACE_BASIC",
 				description: "minimal namespace without comment",
-				value: Box::new(fix::namespace_basic()),
+				bytes: fix::namespace_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "NAMESPACE_WITH_COMMENT",
 				description: "namespace with optional comment",
-				value: Box::new(fix::namespace_with_comment()),
+				bytes: fix::namespace_with_comment().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -76,17 +79,17 @@ fn database_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "DATABASE_BASIC",
 				description: "minimal database without changefeed",
-				value: Box::new(fix::database_basic()),
+				bytes: fix::database_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "DATABASE_WITH_CHANGEFEED",
 				description: "database with changefeed enabled",
-				value: Box::new(fix::database_with_changefeed()),
+				bytes: fix::database_with_changefeed().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "DATABASE_STRICT",
 				description: "database with strict mode enabled",
-				value: Box::new(fix::database_strict()),
+				bytes: fix::database_strict().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -100,32 +103,32 @@ fn table_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "TABLE_BASIC",
 				description: "minimal table definition",
-				value: Box::new(fix::table_basic()),
+				bytes: fix::table_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "TABLE_WITH_VIEW",
 				description: "table with view definition",
-				value: Box::new(fix::table_with_view()),
+				bytes: fix::table_with_view().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "TABLE_SCHEMAFULL",
 				description: "schemafull table with changefeed",
-				value: Box::new(fix::table_schemafull()),
+				bytes: fix::table_schemafull().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "TABLE_RELATION",
 				description: "relation table with drop and non-default permissions",
-				value: Box::new(fix::table_relation()),
+				bytes: fix::table_relation().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "TABLE_WITH_MATERIALIZED_VIEW",
 				description: "table with materialized view",
-				value: Box::new(fix::table_with_materialized_view()),
+				bytes: fix::table_with_materialized_view().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "TABLE_ANY_TYPE",
 				description: "table with TableType::Any",
-				value: Box::new(fix::table_any_type()),
+				bytes: fix::table_any_type().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -139,17 +142,17 @@ fn subscription_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "SUBSCRIPTION_BASIC",
 				description: "minimal subscription with diff fields",
-				value: Box::new(fix::subscription_basic()),
+				bytes: fix::subscription_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "SUBSCRIPTION_WITH_FILTERS",
 				description: "subscription with condition and fetch",
-				value: Box::new(fix::subscription_with_filters()),
+				bytes: fix::subscription_with_filters().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "SUBSCRIPTION_WITH_VARS",
 				description: "subscription with non-empty vars",
-				value: Box::new(fix::subscription_with_vars()),
+				bytes: fix::subscription_with_vars().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -163,27 +166,27 @@ fn access_definition_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "ACCESS_BEARER",
 				description: "bearer access with JWT",
-				value: Box::new(fix::access_bearer()),
+				bytes: fix::access_bearer().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "ACCESS_WITH_AUTHENTICATE",
 				description: "access with custom authenticate expression",
-				value: Box::new(fix::access_with_authenticate()),
+				bytes: fix::access_with_authenticate().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "ACCESS_RECORD",
 				description: "record-based access with signup/signin",
-				value: Box::new(fix::access_record()),
+				bytes: fix::access_record().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "ACCESS_JWT_JWKS",
 				description: "JWT access with JWKS verification",
-				value: Box::new(fix::access_jwt_jwks()),
+				bytes: fix::access_jwt_jwks().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "ACCESS_BEARER_REFRESH",
 				description: "bearer access with refresh type",
-				value: Box::new(fix::access_bearer_refresh()),
+				bytes: fix::access_bearer_refresh().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -197,22 +200,22 @@ fn access_grant_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "GRANT_JWT",
 				description: "JWT access grant",
-				value: Box::new(fix::grant_jwt()),
+				bytes: fix::grant_jwt().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "GRANT_REVOKED",
 				description: "revoked access grant",
-				value: Box::new(fix::grant_revoked()),
+				bytes: fix::grant_revoked().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "GRANT_RECORD",
 				description: "record-type access grant with record subject",
-				value: Box::new(fix::grant_record()),
+				bytes: fix::grant_record().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "GRANT_BEARER",
 				description: "bearer-type access grant",
-				value: Box::new(fix::grant_bearer()),
+				bytes: fix::grant_bearer().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -226,12 +229,12 @@ fn analyzer_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "ANALYZER_BASIC",
 				description: "minimal analyzer",
-				value: Box::new(fix::analyzer_basic()),
+				bytes: fix::analyzer_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "ANALYZER_WITH_TOKENIZERS",
 				description: "analyzer with tokenizers and filters",
-				value: Box::new(fix::analyzer_with_tokenizers()),
+				bytes: fix::analyzer_with_tokenizers().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -245,17 +248,17 @@ fn api_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "API_BASIC",
 				description: "minimal API endpoint",
-				value: Box::new(fix::api_basic()),
+				bytes: fix::api_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "API_WITH_MIDDLEWARE",
 				description: "API with middleware and multiple methods",
-				value: Box::new(fix::api_with_middleware()),
+				bytes: fix::api_with_middleware().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "API_WITH_AUTH_LIMIT",
 				description: "API with specific permissions and database-level auth limit",
-				value: Box::new(fix::api_with_auth_limit()),
+				bytes: fix::api_with_auth_limit().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -269,12 +272,12 @@ fn bucket_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "BUCKET_BASIC",
 				description: "minimal bucket",
-				value: Box::new(fix::bucket_basic()),
+				bytes: fix::bucket_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "BUCKET_READONLY",
 				description: "readonly bucket with backend",
-				value: Box::new(fix::bucket_readonly()),
+				bytes: fix::bucket_readonly().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -288,22 +291,22 @@ fn config_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "CONFIG_GRAPHQL",
 				description: "GraphQL configuration (default)",
-				value: Box::new(fix::config_graphql()),
+				bytes: fix::config_graphql().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "CONFIG_DEFAULT",
 				description: "default config with namespace and database",
-				value: Box::new(fix::config_default()),
+				bytes: fix::config_default().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "CONFIG_API",
 				description: "API config definition",
-				value: Box::new(fix::config_api()),
+				bytes: fix::config_api().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "CONFIG_GRAPHQL_FULL",
 				description: "GraphQL config with all non-default fields",
-				value: Box::new(fix::config_graphql_full()),
+				bytes: fix::config_graphql_full().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -317,12 +320,12 @@ fn event_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "EVENT_BASIC",
 				description: "table event trigger",
-				value: Box::new(fix::event_basic()),
+				bytes: fix::event_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "EVENT_ASYNC",
 				description: "async event with retry and max_depth",
-				value: Box::new(fix::event_async()),
+				bytes: fix::event_async().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -336,32 +339,32 @@ fn field_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "FIELD_BASIC",
 				description: "minimal field",
-				value: Box::new(fix::field_basic()),
+				bytes: fix::field_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "FIELD_WITH_TYPE",
 				description: "field with type constraint and default",
-				value: Box::new(fix::field_with_type()),
+				bytes: fix::field_with_type().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "FIELD_READONLY",
 				description: "readonly computed field",
-				value: Box::new(fix::field_readonly()),
+				bytes: fix::field_readonly().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "FIELD_FLEXIBLE_WITH_REFERENCE",
 				description: "flexible field with reference and computed deps",
-				value: Box::new(fix::field_flexible_with_reference()),
+				bytes: fix::field_flexible_with_reference().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "FIELD_WITH_DEFAULT_SET",
 				description: "field with DefineDefault::Set and incomplete computed deps",
-				value: Box::new(fix::field_with_default_set()),
+				bytes: fix::field_with_default_set().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "FIELD_RECORD_TYPE",
 				description: "field with record type kind and custom reference delete",
-				value: Box::new(fix::field_record_type()),
+				bytes: fix::field_record_type().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -375,12 +378,12 @@ fn function_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "FUNCTION_BASIC",
 				description: "simple function",
-				value: Box::new(fix::function_basic()),
+				bytes: fix::function_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "FUNCTION_WITH_ARGS",
 				description: "function with arguments and return type",
-				value: Box::new(fix::function_with_args()),
+				bytes: fix::function_with_args().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -394,27 +397,27 @@ fn index_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "INDEX_BASIC",
 				description: "basic index",
-				value: Box::new(fix::index_basic()),
+				bytes: fix::index_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "INDEX_UNIQUE",
 				description: "unique index on multiple columns",
-				value: Box::new(fix::index_unique()),
+				bytes: fix::index_unique().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "INDEX_HNSW",
 				description: "HNSW vector index",
-				value: Box::new(fix::index_hnsw()),
+				bytes: fix::index_hnsw().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "INDEX_FULLTEXT",
 				description: "full-text search index with BM25 scoring",
-				value: Box::new(fix::index_fulltext()),
+				bytes: fix::index_fulltext().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "INDEX_COUNT",
 				description: "count index with prepare_remove flag",
-				value: Box::new(fix::index_count()),
+				bytes: fix::index_count().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -427,7 +430,7 @@ fn model_fixtures() -> TypeFixtures {
 		fixtures: vec![Fixture {
 			name: "MODEL_BASIC",
 			description: "ML model definition",
-			value: Box::new(fix::model_basic()),
+			bytes: fix::model_basic().kv_encode_value().unwrap(),
 		}],
 	}
 }
@@ -440,12 +443,12 @@ fn param_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "PARAM_BOOL",
 				description: "boolean parameter",
-				value: Box::new(fix::param_bool()),
+				bytes: fix::param_bool().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "PARAM_STRING",
 				description: "string parameter",
-				value: Box::new(fix::param_string()),
+				bytes: fix::param_string().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -459,12 +462,12 @@ fn sequence_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "SEQUENCE_BASIC",
 				description: "minimal sequence",
-				value: Box::new(fix::sequence_basic()),
+				bytes: fix::sequence_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "SEQUENCE_WITH_OPTIONS",
 				description: "sequence with custom options",
-				value: Box::new(fix::sequence_with_options()),
+				bytes: fix::sequence_with_options().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -478,17 +481,17 @@ fn user_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "USER_BASIC",
 				description: "minimal user",
-				value: Box::new(fix::user_basic()),
+				bytes: fix::user_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "USER_WITH_DURATIONS",
 				description: "user with custom token/session durations",
-				value: Box::new(fix::user_with_durations()),
+				bytes: fix::user_with_durations().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "USER_DB_BASE",
 				description: "user with database-level base",
-				value: Box::new(fix::user_db_base()),
+				bytes: fix::user_db_base().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -502,147 +505,147 @@ fn record_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "RECORD_NONE",
 				description: "record with None value",
-				value: Box::new(fix::record_none()),
+				bytes: fix::record_none().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_NULL",
 				description: "record with Null value",
-				value: Box::new(fix::record_null()),
+				bytes: fix::record_null().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_BOOL",
 				description: "record with boolean data",
-				value: Box::new(fix::record_bool()),
+				bytes: fix::record_bool().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_NUMBER_INT",
 				description: "record with int number data",
-				value: Box::new(fix::record_number_int()),
+				bytes: fix::record_number_int().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_NUMBER_FLOAT",
 				description: "record with float number data",
-				value: Box::new(fix::record_number_float()),
+				bytes: fix::record_number_float().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_NUMBER_DECIMAL",
 				description: "record with decimal number data",
-				value: Box::new(fix::record_number_decimal()),
+				bytes: fix::record_number_decimal().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_STRING",
 				description: "record with string data",
-				value: Box::new(fix::record_string()),
+				bytes: fix::record_string().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_BYTES",
 				description: "record with bytes data",
-				value: Box::new(fix::record_bytes()),
+				bytes: fix::record_bytes().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_DURATION",
 				description: "record with duration data",
-				value: Box::new(fix::record_duration()),
+				bytes: fix::record_duration().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_DATETIME",
 				description: "record with datetime data",
-				value: Box::new(fix::record_datetime()),
+				bytes: fix::record_datetime().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_UUID",
 				description: "record with UUID data",
-				value: Box::new(fix::record_uuid()),
+				bytes: fix::record_uuid().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_GEOMETRY_POINT",
 				description: "record with geometry data (point)",
-				value: Box::new(fix::record_geometry_point()),
+				bytes: fix::record_geometry_point().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_GEOMETRY_LINE",
 				description: "record with geometry data (line)",
-				value: Box::new(fix::record_geometry_line()),
+				bytes: fix::record_geometry_line().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_GEOMETRY_POLYGON",
 				description: "record with geometry data (polygon)",
-				value: Box::new(fix::record_geometry_polygon()),
+				bytes: fix::record_geometry_polygon().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_GEOMETRY_MULTI_POINT",
 				description: "record with geometry data (multi point)",
-				value: Box::new(fix::record_geometry_multi_point()),
+				bytes: fix::record_geometry_multi_point().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_GEOMETRY_MULTI_LINE",
 				description: "record with geometry data (multi line)",
-				value: Box::new(fix::record_geometry_multi_line()),
+				bytes: fix::record_geometry_multi_line().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_GEOMETRY_MULTI_POLYGON",
 				description: "record with geometry data (multi polygon)",
-				value: Box::new(fix::record_geometry_multi_polygon()),
+				bytes: fix::record_geometry_multi_polygon().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_GEOMETRY_COLLECTION",
 				description: "record with geometry data (collection)",
-				value: Box::new(fix::record_geometry_collection()),
+				bytes: fix::record_geometry_collection().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_TABLE",
 				description: "record with table data",
-				value: Box::new(fix::record_table()),
+				bytes: fix::record_table().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_RECORDID",
 				description: "record with record ID data",
-				value: Box::new(fix::record_recordid()),
+				bytes: fix::record_recordid().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_FILE",
 				description: "record with file data",
-				value: Box::new(fix::record_file()),
+				bytes: fix::record_file().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_RANGE_UNBOUNDED",
 				description: "record with range data",
-				value: Box::new(fix::record_range_unbounded()),
+				bytes: fix::record_range_unbounded().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_RANGE_BOUNDED",
 				description: "record with range data",
-				value: Box::new(fix::record_range_bounded()),
+				bytes: fix::record_range_bounded().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_REGEX",
 				description: "record with regex data",
-				value: Box::new(fix::record_regex()),
+				bytes: fix::record_regex().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_ARRAY",
 				description: "record with array data",
-				value: Box::new(fix::record_array()),
+				bytes: fix::record_array().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_OBJECT",
 				description: "record with object data",
-				value: Box::new(fix::record_object()),
+				bytes: fix::record_object().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_SET",
 				description: "record with set data",
-				value: Box::new(fix::record_set()),
+				bytes: fix::record_set().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_WITH_METADATA",
 				description: "record with metadata (Edge type)",
-				value: Box::new(fix::record_with_metadata()),
+				bytes: fix::record_with_metadata().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORD_WITH_TABLE_METADATA",
 				description: "record with explicit Table metadata type",
-				value: Box::new(fix::record_with_table_metadata()),
+				bytes: fix::record_with_table_metadata().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -656,12 +659,12 @@ fn version_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "VERSION_1",
 				description: "major version 1",
-				value: Box::new(fix::version_1()),
+				bytes: fix::version_1().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "VERSION_3",
 				description: "major version 3",
-				value: Box::new(fix::version_3()),
+				bytes: fix::version_3().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -675,12 +678,12 @@ fn api_action_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "API_ACTION_BASIC",
 				description: "minimal API action definition",
-				value: Box::new(fix::api_action_basic()),
+				bytes: fix::api_action_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "API_ACTION_MULTI_METHOD",
 				description: "API action with multiple methods",
-				value: Box::new(fix::api_action_multi_method()),
+				bytes: fix::api_action_multi_method().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -694,22 +697,22 @@ fn appending_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "APPENDING_NONE",
 				description: "appending with None values",
-				value: Box::new(fix::appending_none()),
+				bytes: fix::appending_none().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "APPENDING_OLD_VALUES",
 				description: "appending with old values",
-				value: Box::new(fix::appending_old_values()),
+				bytes: fix::appending_old_values().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "APPENDING_NEW_VALUES",
 				description: "appending with new values",
-				value: Box::new(fix::appending_new_values()),
+				bytes: fix::appending_new_values().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "APPENDING_BOTH",
 				description: "appending with both old and new values",
-				value: Box::new(fix::appending_both()),
+				bytes: fix::appending_both().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -722,7 +725,7 @@ fn primary_appending_fixtures() -> TypeFixtures {
 		fixtures: vec![Fixture {
 			name: "PRIMARY_APPENDING_BASIC",
 			description: "primary appending with number value",
-			value: Box::new(fix::primary_appending_basic()),
+			bytes: fix::primary_appending_basic().kv_encode_value().unwrap(),
 		}],
 	}
 }
@@ -734,7 +737,7 @@ fn batch_value_fixtures() -> TypeFixtures {
 		fixtures: vec![Fixture {
 			name: "BATCH_VALUE_BASIC",
 			description: "batch value with number value",
-			value: Box::new(fix::batch_value_basic()),
+			bytes: fix::batch_value_basic().kv_encode_value().unwrap(),
 		}],
 	}
 }
@@ -746,7 +749,7 @@ fn sequence_state_fixtures() -> TypeFixtures {
 		fixtures: vec![Fixture {
 			name: "SEQUENCE_STATE_BASIC",
 			description: "sequence state with number value",
-			value: Box::new(fix::sequence_state_basic()),
+			bytes: fix::sequence_state_basic().kv_encode_value().unwrap(),
 		}],
 	}
 }
@@ -758,7 +761,7 @@ fn task_lease_fixtures() -> TypeFixtures {
 		fixtures: vec![Fixture {
 			name: "TASK_LEASE_BASIC",
 			description: "task lease with UUID and datetime value",
-			value: Box::new(fix::task_lease_basic()),
+			bytes: fix::task_lease_basic().kv_encode_value().unwrap(),
 		}],
 	}
 }
@@ -770,22 +773,22 @@ fn id_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "INDEX_ID_BASIC",
 				description: "IndexId fixture",
-				value: Box::new(fix::index_id_basic()),
+				bytes: fix::index_id_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "DATABASE_ID_BASIC",
 				description: "DatabaseId fixture",
-				value: Box::new(fix::database_id_basic()),
+				bytes: fix::database_id_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "NAMESPACE_ID_BASIC",
 				description: "NamespaceId fixture",
-				value: Box::new(fix::namespace_id_basic()),
+				bytes: fix::namespace_id_basic().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "TABLE_ID_BASIC",
 				description: "TableId fixture",
-				value: Box::new(fix::table_id_basic()),
+				bytes: fix::table_id_basic().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -799,17 +802,17 @@ fn module_definition_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "MODULE_SURREALISM",
 				description: "module with Surrealism executable",
-				value: Box::new(fix::module_surrealism()),
+				bytes: fix::module_surrealism().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "MODULE_SILO",
 				description: "module with Silo executable",
-				value: Box::new(fix::module_silo()),
+				bytes: fix::module_silo().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "MODULE_NO_NAME",
 				description: "module with no name and Permission::None",
-				value: Box::new(fix::module_no_name()),
+				bytes: fix::module_no_name().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -822,7 +825,7 @@ fn node_live_query_fixtures() -> TypeFixtures {
 		fixtures: vec![Fixture {
 			name: "NODE_LIVE_QUERY_BASIC",
 			description: "minimal node live query",
-			value: Box::new(fix::node_live_query_basic()),
+			bytes: fix::node_live_query_basic().kv_encode_value().unwrap(),
 		}],
 	}
 }
@@ -835,27 +838,27 @@ fn table_mutations_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "TABLE_MUTATIONS_SET",
 				description: "table mutations with set operation",
-				value: Box::new(fix::table_mutations_set()),
+				bytes: fix::table_mutations_set().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "TABLE_MUTATIONS_DEL",
 				description: "table mutations with delete operation",
-				value: Box::new(fix::table_mutations_del()),
+				bytes: fix::table_mutations_del().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "TABLE_MUTATIONS_DEF",
 				description: "table mutations with Def operation",
-				value: Box::new(fix::table_mutations_def()),
+				bytes: fix::table_mutations_def().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "TABLE_MUTATIONS_SET_WITH_DIFF",
 				description: "table mutations with SetWithDiff operation",
-				value: Box::new(fix::table_mutations_set_with_diff()),
+				bytes: fix::table_mutations_set_with_diff().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "TABLE_MUTATIONS_DEL_WITH_ORIGINAL",
 				description: "table mutations with DelWithOriginal operation",
-				value: Box::new(fix::table_mutations_del_with_original()),
+				bytes: fix::table_mutations_del_with_original().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -869,12 +872,12 @@ fn node_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "NODE_ACTIVE",
 				description: "active node",
-				value: Box::new(fix::node_active()),
+				bytes: fix::node_active().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "NODE_ARCHIVED",
 				description: "archived node",
-				value: Box::new(fix::node_archived()),
+				bytes: fix::node_archived().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -887,7 +890,7 @@ fn term_document_fixtures() -> TypeFixtures {
 		fixtures: vec![Fixture {
 			name: "TERM_DOCUMENT_BASIC",
 			description: "term document with offsets",
-			value: Box::new(fix::term_document_basic()),
+			bytes: fix::term_document_basic().kv_encode_value().unwrap(),
 		}],
 	}
 }
@@ -899,7 +902,7 @@ fn doc_length_and_count_fixtures() -> TypeFixtures {
 		fixtures: vec![Fixture {
 			name: "DOC_LENGTH_AND_COUNT_BASIC",
 			description: "document length and count",
-			value: Box::new(fix::doc_length_and_count_basic()),
+			bytes: fix::doc_length_and_count_basic().kv_encode_value().unwrap(),
 		}],
 	}
 }
@@ -912,17 +915,17 @@ fn recordid_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "RECORDID_NUMBER",
 				description: "RecordId with number key",
-				value: Box::new(fix::recordid_number()),
+				bytes: fix::recordid_number().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORDID_STRING",
 				description: "RecordId with string key",
-				value: Box::new(fix::recordid_string()),
+				bytes: fix::recordid_string().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORDID_UUID",
 				description: "RecordId with UUID key",
-				value: Box::new(fix::recordid_uuid()),
+				bytes: fix::recordid_uuid().kv_encode_value().unwrap(),
 			},
 		],
 	}
@@ -936,39 +939,43 @@ fn recordid_key_fixtures() -> TypeFixtures {
 			Fixture {
 				name: "RECORDID_KEY_NUMBER",
 				description: "RecordIdKey with number",
-				value: Box::new(fix::recordid_key_number()),
+				bytes: fix::recordid_key_number().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORDID_KEY_STRING",
 				description: "RecordIdKey with string",
-				value: Box::new(fix::recordid_key_string()),
+				bytes: fix::recordid_key_string().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORDID_KEY_UUID",
 				description: "RecordIdKey with UUID",
-				value: Box::new(fix::recordid_key_uuid()),
+				bytes: fix::recordid_key_uuid().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORDID_KEY_ARRAY",
 				description: "RecordIdKey with array",
-				value: Box::new(fix::recordid_key_array()),
+				bytes: fix::recordid_key_array().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORDID_KEY_OBJECT",
 				description: "RecordIdKey with object",
-				value: Box::new(fix::recordid_key_object()),
+				bytes: fix::recordid_key_object().kv_encode_value().unwrap(),
 			},
 			Fixture {
 				name: "RECORDID_KEY_RANGE",
 				description: "RecordIdKey with range",
-				value: Box::new(fix::recordid_key_range()),
+				bytes: fix::recordid_key_range().kv_encode_value().unwrap(),
 			},
 		],
 	}
 }
 
-/// Generate all fixtures and output as Rust code
-fn generate_all_fixtures() -> String {
+/// Generate all fixtures and output as Rust code.
+///
+/// `file_stem` is the version-tag identifier used in the file name and
+/// header (e.g. `"v3_0_0"`, `"v3_1_0"`). `human_version` is the
+/// release-version string for the docstring (e.g. `"3.0.0"`, `"3.1.0"`).
+fn generate_all_fixtures(file_stem: &str, human_version: &str) -> String {
 	let all_fixtures = vec![
 		access_definition_fixtures(),
 		access_grant_fixtures(),
@@ -1008,11 +1015,13 @@ fn generate_all_fixtures() -> String {
 	];
 
 	let mut output = String::new();
-	output.push_str("//! v3_0_0.rs - Generated file, DO NOT EDIT\n");
-	output.push_str("//! Catalog compatibility fixtures for SurrealDB 3.0.0\n");
+	output.push_str(&format!("//! {file_stem}.rs - Generated file, DO NOT EDIT\n"));
+	output.push_str(&format!("//! Catalog compatibility fixtures for SurrealDB {human_version}\n"));
 	output.push_str("//!\n");
 	output.push_str("//! These fixtures represent the exact serialization format used in\n");
-	output.push_str("//! SurrealDB 3.0.0. They must NEVER be modified after being committed.\n");
+	output.push_str(&format!(
+		"//! SurrealDB {human_version}. They must NEVER be modified after being committed.\n"
+	));
 	output.push_str("//! If deserialization of any fixture fails, it indicates a backwards\n");
 	output.push_str("//! compatibility regression.\n");
 
@@ -1031,22 +1040,66 @@ fn generate_all_fixtures() -> String {
 	output
 }
 
-/// Test that generates fixture output - run with --ignored flag
-#[test]
-#[ignore]
-fn generator() {
+/// Shared body for the version-specific generator tests below.
+fn run_generator(file_stem: &str, human_version: &str) {
 	use sha2::{Digest, Sha256};
 
-	let output = generate_all_fixtures();
-	println!("Copy the following output to surrealdb/core/src/catalog/compat/v3_0_0.rs");
+	let output = generate_all_fixtures(file_stem, human_version);
+	println!("Copy the following output to surrealdb/core/src/catalog/compat/{file_stem}.rs");
 	println!("--- EVERYTHING BELOW ---");
 	println!("{}", output);
 	println!("--- EVERYTHING ABOVE ---");
-	println!("\n// Copy the above output to surrealdb/core/src/catalog/compat/v3_0_0.rs");
+	println!("\n// Copy the above output to surrealdb/core/src/catalog/compat/{file_stem}.rs");
 
 	let hash = Sha256::digest(output.as_bytes());
 	let hash_str = hex::encode(hash);
 	println!("The expected hash is: {}", hash_str);
+}
+
+/// Test that generates fixture output for 3.0.0 - run with --ignored flag.
+/// Kept for parity with the original generator; the v3_0_0.rs file is
+/// frozen at this point so re-running this should only be useful for
+/// regenerating against a fresh fixtures.rs (which would also break the
+/// hash check below).
+#[test]
+#[ignore]
+fn generator() {
+	run_generator("v3_0_0", "3.0.0");
+}
+
+/// Generate fixture bytes for the 3.1.0 wire format snapshot. Run with:
+///
+/// ```text
+/// cargo test -p surrealdb-core --lib \
+///     catalog::compat::generator::generator_v3_1_0 -- --ignored --nocapture
+/// ```
+///
+/// Copy the output into `v3_1_0.rs`, then paste the printed hash into
+/// the assertion in `test_v3_1_0_remains_unchanged` below.
+#[test]
+#[ignore]
+fn generator_v3_1_0() {
+	run_generator("v3_1_0", "3.1.0");
+}
+
+/// Generate fixture bytes for the 3.1.1 wire format snapshot. Run with:
+///
+/// ```text
+/// cargo test -p surrealdb-core --lib \
+///     catalog::compat::generator::generator_v3_1_1 -- --ignored --nocapture
+/// ```
+///
+/// Copy the output into `v3_1_1.rs`, then paste the printed hash into
+/// the assertion in `test_v3_1_1_remains_unchanged` below.
+///
+/// 3.1.1 stopped stripping the top-level `id` field from `Record` data,
+/// so the `RECORD_OBJECT` / `RECORD_WITH_METADATA` /
+/// `RECORD_WITH_TABLE_METADATA` fixtures now carry the id inline; every
+/// other fixture is byte-identical to 3.1.0.
+#[test]
+#[ignore]
+fn generator_v3_1_1() {
+	run_generator("v3_1_1", "3.1.1");
 }
 
 #[test]
@@ -1080,4 +1133,46 @@ fn test_v3_0_0_remains_unchanged() {
 	let hash = Sha256::digest(v3_0_0);
 	let hash_str = hex::encode(hash);
 	assert_eq!(hash_str, "042aa56204bff3007e371be6968e9c684430556f32654b5cee7107a5c1677f4d");
+}
+
+#[test]
+fn test_v3_1_0_remains_unchanged() {
+	use sha2::{Digest, Sha256};
+
+	// Read the v3_1_0.rs file, hash it and assert on the hash.
+	//
+	// v3_1_0 captures the rev-2 wire format (Value's rev-2 optimised
+	// walker — see `surrealdb/core/src/val/mod.rs`), regenerated when
+	// `Record` was bumped to `revision(2, optimised, indexed_struct)` so
+	// the data field's bytes can be sliced in O(1) by the pre-decode
+	// filter's descent path (via
+	// `Record::walk_revisioned(...)?.into_data_bytes()?`).
+	//
+	// NEVER modify v3_1_0.rs after commit; if a real format change ships,
+	// capture a new version snapshot rather than rotating this hash.
+	let v3_1_0 = include_bytes!("v3_1_0.rs");
+	let hash = Sha256::digest(v3_1_0);
+	let hash_str = hex::encode(hash);
+	assert_eq!(hash_str, "84897ab9a06cf136d1af5bb8ee0005462ebd56726de822724ff60c6dc3ba23a9");
+}
+
+#[test]
+fn test_v3_1_1_remains_unchanged() {
+	use sha2::{Digest, Sha256};
+
+	// Read the v3_1_1.rs file, hash it and assert on the hash.
+	//
+	// v3_1_1 captures the wire format after `Record` stopped stripping the
+	// top-level `id` field from its `data` (it is now stored inline; the
+	// decoder only synthesises it from the storage key for legacy 3.1.0
+	// data). Only the `RECORD_OBJECT` / `RECORD_WITH_METADATA` /
+	// `RECORD_WITH_TABLE_METADATA` fixtures differ from 3.1.0; everything
+	// else is byte-identical.
+	//
+	// NEVER modify v3_1_1.rs after commit; if a real format change ships,
+	// capture a new version snapshot rather than rotating this hash.
+	let v3_1_1 = include_bytes!("v3_1_1.rs");
+	let hash = Sha256::digest(v3_1_1);
+	let hash_str = hex::encode(hash);
+	assert_eq!(hash_str, "f7d260a6bbd3d9efba605f550b009c1c6ad3a82fab79578bf3611b1acc8802ae");
 }

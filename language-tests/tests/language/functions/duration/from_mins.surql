@@ -11,7 +11,7 @@ value = "1h40m"
 error = 'Failed to compute: "duration::from_mins(9223372036854775807)", as the operation results in an arithmetic overflow.'
 
 [[test.results]]
-error = 'Failed to compute: "duration::from_mins(18446744073709551615)", as the operation results in an arithmetic overflow.'
+error = 'Failed to compute: "duration::from_mins(-1)", as the operation results in a negative value.'
 
 */
 duration::from_mins(3);

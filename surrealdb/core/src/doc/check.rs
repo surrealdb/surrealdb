@@ -5,49 +5,105 @@ use surrealdb_types::ToSql;
 use super::IgnoreError;
 use crate::catalog::Permission;
 use crate::ctx::FrozenContext;
-use crate::dbs::{Options, Statement, Workable};
-use crate::doc::Document;
-use crate::doc::Permitted::*;
+use crate::dbs::Options;
 use crate::doc::compute::DocKind;
+use crate::doc::{CursorDoc, Document, Extras};
 use crate::err::Error;
 use crate::expr::paths::{ID, IN, OUT};
-use crate::expr::{FlowResultExt as _, Part, SelectStatement};
+use crate::expr::{Cond, FlowResultExt};
 use crate::iam::Action;
 use crate::val::{RecordId, Value};
 
 impl Document {
-	/// Checks whether this operation is allowed on
-	/// the table for this document. When inserting
-	/// an edge or relation, we check that the table
-	/// type is `ANY` or `RELATION`. When inserting
-	/// a node or normal record, we check that the
-	/// table type is `ANY` or `NORMAL`.
-	pub(super) async fn check_table_type(&mut self, stm: &Statement<'_>) -> Result<()> {
+	/// Checks that a specifically selected record
+	/// actually exists in the underlying datastore.
+	/// If the user specifies a record directly
+	/// using a Record ID, and that record does not
+	/// exist, then this function will exit early.
+	#[inline]
+	pub(super) fn check_record_exists(&self) -> Result<(), IgnoreError> {
+		// Check if this record exists
+		if self.id.is_some() && self.current.doc.as_ref().is_none() {
+			return Err(IgnoreError::Ignore);
+		}
+		// Carry on
+		Ok(())
+	}
+
+	/// Checks whether a CREATE statement is allowed on
+	/// the table for this document. When creating a
+	/// normal record, we check that the table type
+	/// is `ANY` or `NORMAL`.
+	#[inline]
+	pub(super) fn check_table_type_create(&self) -> Result<()> {
 		// Get the table for this document
-		let tb = self.tb().await?;
-		// Determine the type of statement
-		match stm {
-			Statement::Create(_) => {
-				ensure!(
-					tb.allows_normal(),
-					Error::TableCheck {
-						record: self.id()?.to_sql(),
-						relation: false,
-						target_type: tb.table_type.to_sql(),
-					}
-				);
+		let tb = self.doc_ctx.tb()?;
+		// Ensure the table allows normal records
+		ensure!(
+			tb.allows_normal(),
+			Error::TableCheck {
+				record: self.id()?.to_sql(),
+				relation: false,
+				target_type: tb.table_type.to_sql(),
 			}
-			Statement::Upsert(_) => {
-				ensure!(
-					tb.allows_normal(),
-					Error::TableCheck {
-						record: self.id()?.to_sql(),
-						relation: false,
-						target_type: tb.table_type.to_sql(),
-					}
-				);
+		);
+		// Carry on
+		Ok(())
+	}
+
+	/// Checks whether a UPSERT statement is allowed on
+	/// the table for this document. When creating a
+	/// normal record, we check that the table type
+	/// is `ANY` or `NORMAL`.
+	#[inline]
+	pub(super) fn check_table_type_upsert(&self) -> Result<()> {
+		// Get the table for this document
+		let tb = self.doc_ctx.tb()?;
+		// Ensure the table allows normal records
+		ensure!(
+			tb.allows_normal(),
+			Error::TableCheck {
+				record: self.id()?.to_sql(),
+				relation: false,
+				target_type: tb.table_type.to_sql(),
 			}
-			Statement::Relate(_) => {
+		);
+		// Carry on
+		Ok(())
+	}
+
+	/// Checks whether a RELATE statement is allowed on
+	/// the table for this document. When creating a
+	/// normal record, we check that the table type
+	/// is `ANY` or `NORMAL`.
+	#[inline]
+	pub(super) fn check_table_type_relate(&self) -> Result<()> {
+		// Get the table for this document
+		let tb = self.doc_ctx.tb()?;
+		// Ensure the table allows normal records
+		ensure!(
+			tb.allows_relation(),
+			Error::TableCheck {
+				record: self.id()?.to_sql(),
+				relation: true,
+				target_type: tb.table_type.to_sql(),
+			}
+		);
+		// Carry on
+		Ok(())
+	}
+
+	/// Checks whether an INSERT statement is allowed on
+	/// the table for this document. When inserting a
+	/// normal record, we check that the table type
+	/// is `ANY` or `NORMAL`.
+	#[inline]
+	pub(super) fn check_table_type_insert(&self) -> Result<()> {
+		// Get the table for this document
+		let tb = self.doc_ctx.tb()?;
+		// Ensure the table allows normal records
+		match self.extras {
+			Extras::Relate(_, _, _) => {
 				ensure!(
 					tb.allows_relation(),
 					Error::TableCheck {
@@ -57,50 +113,55 @@ impl Document {
 					}
 				);
 			}
-			Statement::Insert(_) => match self.extras {
-				Workable::Relate(_, _, _) => {
-					ensure!(
-						tb.allows_relation(),
-						Error::TableCheck {
-							record: self.id()?.to_sql(),
-							relation: true,
-							target_type: tb.table_type.to_sql(),
-						}
-					);
-				}
-				_ => {
-					ensure!(
-						tb.allows_normal(),
-						Error::TableCheck {
-							record: self.id()?.to_sql(),
-							relation: false,
-							target_type: tb.table_type.to_sql(),
-						}
-					);
-				}
-			},
-			_ => {}
-		}
+			_ => {
+				ensure!(
+					tb.allows_normal(),
+					Error::TableCheck {
+						record: self.id()?.to_sql(),
+						relation: false,
+						target_type: tb.table_type.to_sql(),
+					}
+				);
+			}
+		};
 		// Carry on
 		Ok(())
 	}
-	/// Checks that a specifically selected record
-	/// actually exists in the underlying datastore.
-	/// If the user specifies a record directly
-	/// using a Record ID, and that record does not
-	/// exist, then this function will exit early.
-	#[cfg_attr(
-		feature = "trace-doc-ops",
-		instrument(level = "trace", name = "Document::check_record_exists", skip_all)
-	)]
-	pub(super) async fn check_record_exists(&self) -> Result<(), IgnoreError> {
-		// Check if this record exists
-		if self.id.is_some() && self.current.doc.as_ref().is_none() {
-			return Err(IgnoreError::Ignore);
+
+	/// Quick `PERMISSIONS FOR create` preflight that only short-circuits
+	/// `Permission::None`. Used by the create-side of CREATE / UPSERT /
+	/// INSERT / RELATE to bail before computing the data clause when
+	/// the table forbids creates outright.
+	///
+	/// `Permission::Specific(predicate)` is **not** evaluated here:
+	/// CREATE-side predicates typically reference the new record's
+	/// fields (e.g. `PERMISSIONS FOR create WHERE published = false`)
+	/// and the data clause has not yet been applied to `self.current`,
+	/// so an early predicate evaluation would see an empty document
+	/// and reject valid creates. The full
+	/// [`Self::check_create_table_permission`] runs later in the
+	/// pipeline against the populated record.
+	#[inline]
+	pub(super) fn check_permissions_quick_create(
+		&self,
+		ctx: &FrozenContext,
+		opt: &Options,
+	) -> Result<(), IgnoreError> {
+		// Ensure this is not a temporary document
+		if self.id.is_some() {
+			// Should we run permissions checks?
+			if ctx.check_perms(opt, Action::Edit)? {
+				// Get the table for this document
+				let table = self.doc_ctx.tb()?;
+				// Exit early if table CREATE permissions are NONE
+				if table.permissions.create.is_none() {
+					return Err(IgnoreError::Ignore);
+				}
+			}
 		}
-		// Carry on
 		Ok(())
 	}
+
 	/// Checks that the fields of a document are
 	/// correct. If an `id` field is specified then
 	/// it will check that the `id` field does not
@@ -110,224 +171,255 @@ impl Document {
 	/// match the in and out values specified in the
 	/// statement, or present in any record which
 	/// is being updated.
-	#[cfg_attr(
-		feature = "trace-doc-ops",
-		instrument(level = "trace", name = "Document::check_data_fields", skip_all)
-	)]
-	pub(super) async fn check_data_fields(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &FrozenContext,
-		opt: &Options,
-		stm: &Statement<'_>,
-	) -> Result<()> {
-		fn check(v: &Value, p: &[Part], r: &RecordId) -> Result<()> {
-			match v.pick(p) {
+	pub(super) fn check_data_fields(&self) -> Result<()> {
+		// An inline helper function to check the value at the given path
+		fn check(found: Value, expected: &RecordId) -> Result<()> {
+			match found {
+				// We found a record id which is a range
 				Value::RecordId(v) if v.key.is_range() => {
 					bail!(Error::IdInvalid {
 						value: v.to_sql(),
 					})
 				}
-				Value::RecordId(v) if v.eq(r) => {}
-				Value::None => {}
+				// We found a record id which matches
+				Value::RecordId(v) if v.eq(expected) => Ok(()),
+				// We didn't find any value at the given path, which is allowed.
+				// This occurs when a specific record ID is already determined from the statement
+				// itself. Examples:
+				//   CREATE person:tobie SET name = 'Tobie';
+				//   CREATE person:jaime CONTENT { name: 'Jaime' };
+				//   RELATE user:tobie->likes->product:laptop SET when = time::now();
+				Value::None => Ok(()),
+				// We found a non RecordId value (e.g., string, number, array, object, uuid)
+				// which is the shorthand notation where users can specify just the key portion.
+				// We validate that the provided key matches the expected key from the statement.
+				// This can occur in CREATE, UPSERT, UPDATE, INSERT, and RELATE statements when:
+				// - A specific record ID is already determined (e.g., CREATE person:other or
+				//   RELATE's in/out)
+				// - That field uses shorthand notation instead of a full Record ID
+				// Examples:
+				//   CREATE user CONTENT { id: 123 };
+				//   CREATE city CONTENT { id: 'london' };
+				v if expected.key == v => Ok(()),
+				// Anything else is an error
 				v => {
-					ensure!(
-						r.key == v,
-						Error::IdMismatch {
-							value: v.to_sql()
-						}
-					)
+					bail!(Error::IdMismatch {
+						value: v.to_sql()
+					})
 				}
 			}
-			Ok(())
 		}
-
-		// Don't bother checking if we generated the document id
+		// Skip the check when the document id was generated from the
+		// statement's table rather than being explicitly specified
+		// (e.g. `CREATE foo CONTENT { id: bar:123 }` extracts the key
+		// from the content and reuses the statement's table).
 		if self.r#gen.is_some() {
 			return Ok(());
 		}
-		// Get the record id
+		// Get the specified record id
 		let rid = self.id()?;
-
-		// You cannot store a range id as the id field on a document
+		// Prevent ranges as record ids
 		ensure!(
 			!rid.key.is_range(),
 			Error::IdInvalid {
 				value: rid.to_sql(),
 			}
 		);
-
-		// Get the input data, needs to happen before the workable::relate borrow from self.extras
-		let data = self.compute_input_data(stk, ctx, opt, stm).await?;
+		// Get the computed input data
+		let data = self.input_data.as_ref();
+		// PATCH clauses cannot be statically checked
 		if data.is_some_and(|x| x.is_patch()) {
 			return Ok(());
 		}
-
-		// Get value from data
-		let value = data.map(|x| x.value());
-
 		// This is a CREATE, UPSERT, UPDATE statement
-		if let Workable::Normal = &self.extras {
-			// This is a CONTENT, MERGE or SET clause
-			if let Some(value) = value {
-				// Check if there is an id field specified
-				check(value.as_ref(), ID.as_ref(), rid.as_ref())?;
+		if let Extras::Normal = &self.extras {
+			if let Some(data) = data {
+				check(data.pick(ID.as_ref()), rid.as_ref())?;
 			}
 		}
-		// This is a RELATE statement
-		else if let Workable::Relate(l, r, v) = &self.extras {
-			if let Some(value) = value {
-				// Check if there is an id field specified
-				check(value.as_ref(), ID.as_ref(), rid.as_ref())?;
-				check(value.as_ref(), IN.as_ref(), l)?;
-				check(value.as_ref(), OUT.as_ref(), r)?;
-			}
-			// This is a INSERT RELATION statement
-			else if let Some(value) = v {
-				check(value.as_ref(), ID.as_ref(), rid.as_ref())?;
-				check(value.as_ref(), IN.as_ref(), l)?;
-				check(value.as_ref(), OUT.as_ref(), r)?;
+		// This is a RELATE / INSERT RELATION statement
+		else if let Extras::Relate(l, r, v) = &self.extras {
+			if let Some(data) = data {
+				check(data.pick(ID.as_ref()), rid.as_ref())?;
+				check(data.pick(IN.as_ref()), l)?;
+				check(data.pick(OUT.as_ref()), r)?;
+			} else if let Some(value) = v {
+				check(value.pick(ID.as_ref()), rid.as_ref())?;
+				check(value.pick(IN.as_ref()), l)?;
+				check(value.pick(OUT.as_ref()), r)?;
 			}
 		}
 		// Carry on
 		Ok(())
 	}
-	/// Checks that the `WHERE` condition on a query
-	/// matches before proceeding with processing
-	/// the document. This ensures that records from
-	/// a table, or from an index can be filtered out
-	/// before being included within the query output.
-	#[cfg_attr(
-		feature = "trace-doc-ops",
-		instrument(level = "trace", name = "Document::check_where_condition", skip_all)
-	)]
+
+	/// Evaluates a `WHERE` predicate against the row about to be
+	/// projected and signals `IgnoreError::Ignore` when the row does
+	/// not match. Short-circuits for key-only iteration and for a
+	/// missing `WHERE` clause. Computed fields are populated on the
+	/// relevant view first so predicates like `WHERE flag` see the
+	/// materialised value.
 	pub(super) async fn check_where_condition(
 		&mut self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		stm: &Statement<'_>,
+		cond: Option<&Cond>,
 	) -> Result<(), IgnoreError> {
-		// Check if we have already processed a condition
-		if self.is_condition_checked() {
+		// Exit early for key-only iteration
+		if self.is_key_only_iteration() {
 			return Ok(());
 		}
-
-		// Check if a WHERE condition is specified
-		let Some(cond) = stm.cond() else {
+		// Get the WHERE clause from the statement
+		let Some(cond) = cond else {
 			return Ok(());
 		};
-
-		// Process the permitted documents
-		let current = if self.reduced(stk, ctx, opt, Current).await? {
-			self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced, None).await?;
-			&self.current_reduced
+		// Check if we need to reduce the document
+		if self.reduction_required(ctx, opt)? {
+			// Materialise the reduced view via the cached helper. On
+			// UPDATE / UPSERT this is a cache hit because
+			// `compute_input_data` has already built it against the same
+			// pre-mutation `self.current` — saves one `reduce_document`
+			// call per row. On DELETE / SELECT this is the first reduce.
+			let _ = self.reduce_current(stk, ctx, opt).await?;
+			// Populate computed fields on the reduced view so predicates
+			// like `WHERE flag` see the materialised value.
+			self.compute_fields(stk, ctx, opt, DocKind::CurrentReduced, None).await?;
+			// Re-borrow the reduced view we just materialised
+			let doc: &CursorDoc = self.current_reduced.as_ref().unwrap_or(&self.current);
+			// Check the WHERE clause against the reduced view
+			if !stk
+				.run(|stk| cond.0.compute(stk, ctx, opt, Some(doc)))
+				.await
+				.catch_return()?
+				.is_truthy()
+			{
+				return Err(IgnoreError::Ignore);
+			}
 		} else {
-			self.computed_fields(stk, ctx, opt, DocKind::Current, None).await?;
-			&self.current
-		};
-		// Check if the expression is truthy
-		if !stk
-			.run(|stk| cond.0.compute(stk, ctx, opt, Some(current)))
-			.await
-			.catch_return()?
-			.is_truthy()
-		{
-			// Ignore this document
-			return Err(IgnoreError::Ignore);
+			// Compute the fields on the current document
+			self.compute_fields(stk, ctx, opt, DocKind::Current, None).await?;
+			// Check the WHERE clause against the computed document
+			if !stk
+				.run(|stk| cond.0.compute(stk, ctx, opt, Some(&self.current)))
+				.await
+				.catch_return()?
+				.is_truthy()
+			{
+				return Err(IgnoreError::Ignore);
+			}
 		}
 		// Carry on
 		Ok(())
 	}
 
-	/// Checks that the `WHERE` condition on a query
-	/// matches before proceeding with processing
-	/// the document. This ensures that records from
-	/// a table, or from an index can be filtered out
-	/// before being included within the query output.
-	#[cfg_attr(
-		feature = "trace-doc-ops",
-		instrument(level = "trace", name = "Document::check_select_where_condition", skip_all)
-	)]
-	pub(super) async fn check_select_where_condition(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &FrozenContext,
-		opt: &Options,
-		stm: &SelectStatement,
-	) -> Result<(), IgnoreError> {
-		// Check if we have already processed a condition
-		if self.is_condition_checked() {
-			return Ok(());
-		}
-
-		// Check if a WHERE condition is specified
-		let Some(cond) = &stm.cond else {
-			return Ok(());
-		};
-
-		// Process the permitted documents
-		let current = if self.reduced(stk, ctx, opt, Current).await? {
-			self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced, None).await?;
-			&self.current_reduced
-		} else {
-			self.computed_fields(stk, ctx, opt, DocKind::Current, None).await?;
-			&self.current
-		};
-		// Check if the expression is truthy
-		if !stk
-			.run(|stk| cond.0.compute(stk, ctx, opt, Some(current)))
-			.await
-			.catch_return()?
-			.is_truthy()
-		{
-			// Ignore this document
-			return Err(IgnoreError::Ignore);
-		}
-		// Carry on
-		Ok(())
-	}
-
-	/// Checks the `PERMISSIONS` clause for viewing a
-	/// record, based on the `select` permissions for
-	/// the table that this record belongs to. This
-	/// function checks and evaluates `FULL`, `NONE`,
-	/// and specific permissions clauses on the table.
-	/// This function is used when outputting a record,
-	/// ensuring that a user has the permission to view
-	/// the record after it has been updated or modified.
-	#[cfg_attr(
-		feature = "trace-doc-ops",
-		instrument(level = "trace", name = "Document::check_output_permissions", skip_all)
-	)]
-	pub(super) async fn check_output_permissions(
+	/// Check the `PERMISSIONS FOR select` clause on this table. Short-
+	/// circuits if the record being processed does not have an id,
+	/// so temporary documents never trip the permissions lookup.
+	pub(super) async fn check_select_permissions(
 		&self,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
-		stm: &Statement<'_>,
+		doc: &CursorDoc,
 	) -> Result<(), IgnoreError> {
-		// Check if this record exists
-		if self.id.is_none() {
-			return Ok(());
+		if self.id.is_some() && ctx.check_perms(opt, Action::View)? {
+			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.select)
+				.await?;
 		}
+		Ok(())
+	}
 
-		// Should we run permissions checks?
-		if !opt.check_perms(Action::View)? {
-			return Ok(());
+	/// Check the `PERMISSIONS FOR create` clause on this table. Short-
+	/// circuits if the record being processed does not have an id,
+	/// so temporary documents never trip the permissions lookup.
+	pub(super) async fn check_create_permissions(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		doc: &CursorDoc,
+	) -> Result<(), IgnoreError> {
+		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
+			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.create)
+				.await?;
 		}
+		Ok(())
+	}
 
-		// Get the table for this document
-		let table = self.tb().await?;
-		// Get the correct document to check
-		let doc = match stm.is_delete() {
-			true => &self.initial,
-			false => &self.current,
-		};
-		// Process the table permissions
-		match &table.permissions.select {
-			Permission::None => return Err(IgnoreError::Ignore),
-			Permission::Full => (),
+	/// Check the `PERMISSIONS FOR update` clause on this table. Short-
+	/// circuits if the record being processed does not have an id,
+	/// so temporary documents never trip the permissions lookup.
+	pub(super) async fn check_update_permissions(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		doc: &CursorDoc,
+	) -> Result<(), IgnoreError> {
+		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
+			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.update)
+				.await?;
+		}
+		Ok(())
+	}
+
+	/// Check the `PERMISSIONS FOR delete` clause on this table. Short-
+	/// circuits if the record being processed does not have an id,
+	/// so temporary documents never trip the permissions lookup.
+	pub(super) async fn check_delete_permissions(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		doc: &CursorDoc,
+	) -> Result<(), IgnoreError> {
+		if self.id.is_some() && ctx.check_perms(opt, Action::Edit)? {
+			self.process_permissions(stk, ctx, opt, doc, &self.doc_ctx.tb()?.permissions.delete)
+				.await?;
+		}
+		Ok(())
+	}
+
+	/// Recheck the `PERMISSIONS FOR update` clause on this table.
+	/// Short-circuits if the record being processed does not have
+	/// an id, so temporary documents never trip the permissions
+	/// lookup. This is used after editing a record, to check that
+	/// it still conforms to the table permissions requirements.
+	pub(super) async fn recheck_update_permissions(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		doc: &CursorDoc,
+	) -> Result<(), IgnoreError> {
+		if matches!(&self.doc_ctx.tb()?.permissions.update, Permission::Specific(_)) {
+			self.check_update_permissions(stk, ctx, opt, doc).await?;
+		}
+		Ok(())
+	}
+
+	/// Evaluate a `Permission` clause against the given document and
+	/// signal `IgnoreError::Ignore` when access is denied.
+	///
+	/// Shared by `check_select_permissions` / `check_create_permissions`
+	/// / `check_update_permissions` / `check_delete_permissions` so the
+	/// `Permission::None` / `Permission::Full` / `Permission::Specific`
+	/// dispatch lives in one place. For `Specific(expr)` the predicate
+	/// is computed against `doc` with permission checks disabled on the
+	/// nested `Options`, so the predicate itself cannot recursively trip
+	/// table-level permission gates.
+	async fn process_permissions(
+		&self,
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		doc: &CursorDoc,
+		perms: &Permission,
+	) -> Result<(), IgnoreError> {
+		match perms {
+			Permission::None => Err(IgnoreError::Ignore),
+			Permission::Full => Ok(()),
 			Permission::Specific(e) => {
 				// Disable permissions
 				let opt = &opt.new_with_perms(false);
@@ -340,121 +432,8 @@ impl Document {
 				{
 					return Err(IgnoreError::Ignore);
 				}
+				Ok(())
 			}
 		}
-
-		Ok(())
-	}
-
-	/// Checks the `PERMISSIONS` clause on the table
-	/// for this record, returning immediately if the
-	/// permissions are `NONE`. This function does not
-	/// check any custom advanced table permissions,
-	/// which should be checked at a later stage.
-	#[cfg_attr(
-		feature = "trace-doc-ops",
-		instrument(level = "trace", name = "Document::check_permissions_quick", skip_all)
-	)]
-	pub(super) async fn check_permissions_quick(
-		&self,
-		opt: &Options,
-		stm: &Statement<'_>,
-	) -> Result<(), IgnoreError> {
-		// Check if this record exists
-		if self.id.is_none() {
-			return Ok(());
-		}
-
-		// Should we run permissions checks?
-		if opt.check_perms(stm.into())? {
-			// Get the table for this document
-			let table = self.tb().await?;
-			// Get the permissions for this table
-			let perms = stm.permissions(table, self.is_new());
-			// Exit early if permissions are NONE
-			if perms.is_none() {
-				return Err(IgnoreError::Ignore);
-			}
-		}
-
-		// Carry on
-		Ok(())
-	}
-	/// Checks the `PERMISSIONS` clause on the table for
-	/// this record, processing all advanced permissions
-	/// clauses and evaluating the expression. This
-	/// function checks and evaluates `FULL`, `NONE`,
-	/// and specific permissions clauses on the table.
-	#[cfg_attr(
-		feature = "trace-doc-ops",
-		instrument(level = "trace", name = "Document::check_permissions_table", skip_all)
-	)]
-	pub(super) async fn check_permissions_table(
-		&self,
-		stk: &mut Stk,
-		ctx: &FrozenContext,
-		opt: &Options,
-		stm: &Statement<'_>,
-	) -> Result<(), IgnoreError> {
-		// Check if this record exists
-		if self.id.is_none() {
-			return Ok(());
-		}
-
-		// Should we run permissions checks?
-		if !opt.check_perms(stm.into())? {
-			return Ok(());
-		}
-
-		// Check that record authentication matches session
-		if opt.auth.is_record() {
-			let ns = opt.ns()?;
-			if opt.auth.level().ns() != Some(ns) {
-				return Err(IgnoreError::from(anyhow::Error::new(Error::NsNotAllowed {
-					ns: ns.into(),
-				})));
-			}
-			let db = opt.db()?;
-			if opt.auth.level().db() != Some(db) {
-				return Err(IgnoreError::from(anyhow::Error::new(Error::DbNotAllowed {
-					db: db.into(),
-				})));
-			}
-		}
-		// Get the table
-		let table = self.tb().await?;
-		// Get the permission clause
-		let perms = stm.permissions(table, self.is_new());
-		// Process the table permissions
-		match perms {
-			Permission::None => return Err(IgnoreError::Ignore),
-			Permission::Full => return Ok(()),
-			Permission::Specific(e) => {
-				// Disable permissions
-				let opt = &opt.new_with_perms(false);
-				// Process the PERMISSION clause
-				if !stk
-					.run(|stk| {
-						e.compute(
-							stk,
-							ctx,
-							opt,
-							Some(match stm.is_delete() {
-								true => &self.initial,
-								false => &self.current,
-							}),
-						)
-					})
-					.await
-					.catch_return()?
-					.is_truthy()
-				{
-					return Err(IgnoreError::Ignore);
-				}
-			}
-		}
-
-		// Carry on
-		Ok(())
 	}
 }

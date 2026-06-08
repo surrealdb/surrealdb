@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use async_channel::Receiver;
 use reqwest::ClientBuilder;
-use surrealdb_core::cnf::SURREALDB_USER_AGENT;
 use surrealdb_types::ConnectionError;
 use tokio::sync::watch;
 use url::Url;
@@ -77,9 +76,7 @@ pub(crate) async fn create_client(
 		};
 
 		// Try health check with this address
-		let req = client
-			.get(base_url.join("health").map_err(crate::std_error_to_types_error)?)
-			.header(reqwest::header::USER_AGENT, &*SURREALDB_USER_AGENT);
+		let req = client.get(base_url.join("health").map_err(crate::std_error_to_types_error)?);
 
 		match super::health(req).await {
 			Ok(()) => return Ok(client),
@@ -150,22 +147,21 @@ pub(crate) async fn run_router(
 				let Ok(session_id) = session else {
 					break
 				};
-				match session_id {
-					SessionId::Initial(session_id) => {
-						state.handle_session_initial(session_id).await;
-					}
-					SessionId::Clone { old, new } => {
-						state.handle_session_clone(old, new).await;
-					}
-					SessionId::Drop(session_id) => {
-						state.handle_session_drop(session_id).await;
-					}
-				}
+				state.handle_session(session_id).await;
 			}
 			route = route_rx.recv() => {
 				let Ok(route) = route else {
 					break
 				};
+
+				// Apply any session-lifecycle events that were enqueued before this
+				// query. The session channel is separate from the route channel, so a
+				// freshly registered or cloned session may not have been processed yet;
+				// receiving this route establishes a happens-before with the sender, so
+				// those earlier events are now observable and one drain pass suffices.
+				while let Ok(session_id) = session_rx.try_recv() {
+					state.handle_session(session_id).await;
+				}
 
 				let session_id = route.request.session_id;
 				let command = route.request.command.clone();
@@ -186,7 +182,7 @@ pub(crate) async fn run_router(
 
 				// Spawn the request handling in a background task
 				// SessionState uses RwLock internally, so we can share the Arc directly
-				let router_state = state.clone();
+				let router_state = Arc::clone(&state);
 				tokio::spawn(async move {
 					let result = super::router(
 						route.request,
@@ -196,8 +192,13 @@ pub(crate) async fn run_router(
 					)
 					.await;
 
-					// On success, add replayable commands to the replay list
-					// boxcar::Vec is lock-free, so this is safe to do concurrently
+					// On success, add replayable commands to the replay list.
+					// boxcar::Vec is lock-free, so this is safe to do concurrently.
+					// NOTE: unlike the WS engine we do not coalesce idempotent Use
+					// entries here. HTTP requests are processed in spawned tasks, so
+					// a tail-check + push isn't atomic — a concurrent task could
+					// drop a still-pending Use whose result hasn't been recorded
+					// yet. Append-only push is safe under that concurrency.
 					if result.is_ok() && command.replayable() {
 						session_state.replay.push(command);
 					}

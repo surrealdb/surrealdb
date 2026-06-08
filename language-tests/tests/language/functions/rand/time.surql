@@ -17,10 +17,10 @@ value = "true"
 value = "true"
 
 [[test.results]]
-value = "true"
+error = "Incorrect arguments for function rand::time(). Lowerbound of the range must be less than or equal to the upperbound."
 
 [[test.results]]
-value = "true"
+error = "Incorrect arguments for function rand::time(). Lowerbound of the range must be less than or equal to the upperbound."
 
 [[test.results]]
 value = "true"
@@ -35,6 +35,6 @@ rand::time(d'1970-01-01', d'1970-01-01');
 rand::time(d'1970-01-01', time::now()).is_datetime();
 rand::time(0, 100).is_datetime();
 rand::time(100, 0).is_datetime();
-rand::time(0, d'2025-01-01').is_datetime();
 rand::time(d'2025-01-01', 0).is_datetime();
+rand::time(0, d'2025-01-01').is_datetime();
 rand::time(d'2020-01-01', d'2025-01-01').is_datetime();

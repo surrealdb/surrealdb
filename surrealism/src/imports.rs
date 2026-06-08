@@ -5,7 +5,7 @@ use surrealism_types::args::Args;
 use crate::bindings::surrealism::plugin::host;
 
 /// Convert a WIT `result<T, string>` error into an `anyhow::Error` with context.
-fn host_err(op: &str, e: String) -> anyhow::Error {
+fn host_err(op: &str, e: &str) -> anyhow::Error {
 	anyhow::anyhow!("host {op}: {e}")
 }
 
@@ -32,12 +32,13 @@ where
 
 	let vars_vec: Vec<(String, surrealdb_types::Value)> = vars.into_iter().collect();
 	let vars_bytes = surrealdb_types::encode_string_key_values(&vars_vec)?;
-	let result_bytes = host::sql(&sql, &vars_bytes).map_err(|e| host_err("sql", e))?;
+	let result_bytes = host::sql(&sql, &vars_bytes).map_err(|e| host_err("sql", &e))?;
 	let value: surrealdb_types::Value = surrealdb_types::decode(&result_bytes)?;
 	Ok(R::from_value(value)?)
 }
 
 /// Call a SurrealDB function.
+#[allow(clippy::needless_pass_by_value)] // Public guest SDK: ergonomic for plugin authors who often pass owned `String`.
 pub fn run<F, A, R>(fnc: F, version: Option<String>, args: A) -> Result<R>
 where
 	F: Into<String>,
@@ -47,7 +48,7 @@ where
 	let fnc = fnc.into();
 	let args_bytes = surrealdb_types::encode_value_list(&args.to_values())?;
 	let result_bytes =
-		host::run(&fnc, version.as_deref(), &args_bytes).map_err(|e| host_err("run", e))?;
+		host::run(&fnc, version.as_deref(), &args_bytes).map_err(|e| host_err("run", &e))?;
 	let value: surrealdb_types::Value = surrealdb_types::decode(&result_bytes)?;
 	Ok(R::from_value(value)?)
 }
@@ -62,7 +63,7 @@ pub mod kv {
 
 	/// Get a value from the KV store.
 	pub fn get<K: Into<String>, R: SurrealValue>(key: K) -> Result<Option<R>> {
-		let result = host::kv_get(&key.into()).map_err(|e| host_err("kv::get", e))?;
+		let result = host::kv_get(&key.into()).map_err(|e| host_err("kv::get", &e))?;
 		match result {
 			Some(bytes) => {
 				let val: surrealdb_types::Value = surrealdb_types::decode(&bytes)?;
@@ -75,17 +76,17 @@ pub mod kv {
 	/// Set a value in the KV store.
 	pub fn set<K: Into<String>, V: SurrealValue>(key: K, value: V) -> Result<()> {
 		let value_bytes = surrealdb_types::encode(&value.into_value())?;
-		host::kv_set(&key.into(), &value_bytes).map_err(|e| host_err("kv::set", e))
+		host::kv_set(&key.into(), &value_bytes).map_err(|e| host_err("kv::set", &e))
 	}
 
 	/// Delete a key from the KV store.
 	pub fn del<K: Into<String>>(key: K) -> Result<()> {
-		host::kv_del(&key.into()).map_err(|e| host_err("kv::del", e))
+		host::kv_del(&key.into()).map_err(|e| host_err("kv::del", &e))
 	}
 
 	/// Check if a key exists in the KV store.
 	pub fn exists<K: Into<String>>(key: K) -> Result<bool> {
-		host::kv_exists(&key.into()).map_err(|e| host_err("kv::exists", e))
+		host::kv_exists(&key.into()).map_err(|e| host_err("kv::exists", &e))
 	}
 
 	fn encode_range<R: RangeBounds<String>>(range: R) -> Result<Vec<u8>> {
@@ -97,7 +98,7 @@ pub mod kv {
 	/// Delete a range of keys from the KV store.
 	pub fn del_rng<R: RangeBounds<String>>(range: R) -> Result<()> {
 		let range_bytes = encode_range(range)?;
-		host::kv_del_rng(&range_bytes).map_err(|e| host_err("kv::del_rng", e))
+		host::kv_del_rng(&range_bytes).map_err(|e| host_err("kv::del_rng", &e))
 	}
 
 	/// Get multiple values from the KV store.
@@ -108,7 +109,7 @@ pub mod kv {
 		R: SurrealValue,
 	{
 		let keys: Vec<String> = keys.into_iter().map(|k| k.into()).collect();
-		let result_bytes = host::kv_get_batch(&keys).map_err(|e| host_err("kv::get_batch", e))?;
+		let result_bytes = host::kv_get_batch(&keys).map_err(|e| host_err("kv::get_batch", &e))?;
 		let vals = surrealdb_types::decode_optional_values(&result_bytes)?;
 		vals.into_iter()
 			.map(|opt| match opt {
@@ -128,7 +129,7 @@ pub mod kv {
 		let entries: Vec<(String, surrealdb_types::Value)> =
 			entries.into_iter().map(|(k, v)| (k.into(), v.into_value())).collect();
 		let entries_bytes = surrealdb_types::encode_string_key_values(&entries)?;
-		host::kv_set_batch(&entries_bytes).map_err(|e| host_err("kv::set_batch", e))
+		host::kv_set_batch(&entries_bytes).map_err(|e| host_err("kv::set_batch", &e))
 	}
 
 	/// Delete multiple keys from the KV store.
@@ -138,19 +139,19 @@ pub mod kv {
 		K: Into<String>,
 	{
 		let keys: Vec<String> = keys.into_iter().map(|k| k.into()).collect();
-		host::kv_del_batch(&keys).map_err(|e| host_err("kv::del_batch", e))
+		host::kv_del_batch(&keys).map_err(|e| host_err("kv::del_batch", &e))
 	}
 
 	/// List keys in a range.
 	pub fn keys<R: RangeBounds<String>>(range: R) -> Result<Vec<String>> {
 		let range_bytes = encode_range(range)?;
-		host::kv_keys(&range_bytes).map_err(|e| host_err("kv::keys", e))
+		host::kv_keys(&range_bytes).map_err(|e| host_err("kv::keys", &e))
 	}
 
 	/// List values in a range.
 	pub fn values<R: RangeBounds<String>, T: SurrealValue>(range: R) -> Result<Vec<T>> {
 		let range_bytes = encode_range(range)?;
-		let result_bytes = host::kv_values(&range_bytes).map_err(|e| host_err("kv::values", e))?;
+		let result_bytes = host::kv_values(&range_bytes).map_err(|e| host_err("kv::values", &e))?;
 		let vals = surrealdb_types::decode_value_list(&result_bytes)?;
 		vals.into_iter().map(|v| Ok(T::from_value(v)?)).collect()
 	}
@@ -159,7 +160,7 @@ pub mod kv {
 	pub fn entries<R: RangeBounds<String>, T: SurrealValue>(range: R) -> Result<Vec<(String, T)>> {
 		let range_bytes = encode_range(range)?;
 		let result_bytes =
-			host::kv_entries(&range_bytes).map_err(|e| host_err("kv::entries", e))?;
+			host::kv_entries(&range_bytes).map_err(|e| host_err("kv::entries", &e))?;
 		let entries = surrealdb_types::decode_string_key_values(&result_bytes)?;
 		entries.into_iter().map(|(k, v)| Ok((k, T::from_value(v)?))).collect()
 	}
@@ -167,6 +168,6 @@ pub mod kv {
 	/// Count entries in a range.
 	pub fn count<R: RangeBounds<String>>(range: R) -> Result<u64> {
 		let range_bytes = encode_range(range)?;
-		host::kv_count(&range_bytes).map_err(|e| host_err("kv::count", e))
+		host::kv_count(&range_bytes).map_err(|e| host_err("kv::count", &e))
 	}
 }

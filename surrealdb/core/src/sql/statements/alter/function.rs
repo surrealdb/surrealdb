@@ -1,3 +1,4 @@
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
@@ -8,7 +9,7 @@ use crate::sql::{Block, Kind, Permission};
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 /// AST node for `ALTER FUNCTION`.
 pub struct AlterFunctionStatement {
-	pub name: String,
+	pub name: Strand,
 	pub if_exists: bool,
 	pub args: AlterKind<Vec<(String, Kind)>>,
 	pub block: AlterKind<Block>,
@@ -24,7 +25,7 @@ impl ToSql for AlterFunctionStatement {
 			write_sql!(f, fmt, " IF EXISTS");
 		}
 		write_sql!(f, fmt, " fn");
-		for s in self.name.split("::") {
+		for s in self.name.as_str().split("::") {
 			write_sql!(f, fmt, "::");
 			EscapeKwFreeIdent(s).fmt_sql(f, fmt);
 		}

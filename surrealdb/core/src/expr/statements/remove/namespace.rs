@@ -1,6 +1,7 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
+use super::retire_namespace_indexes;
 use crate::catalog::providers::NamespaceProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -37,7 +38,7 @@ impl RemoveNamespaceStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Namespace, Base::Root)?;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Compute the name
@@ -56,25 +57,33 @@ impl RemoveNamespaceStatement {
 			}
 		};
 
-		// Remove the index stores
-		ctx.get_index_stores()
-			.namespace_removed(ctx.get_index_builder(), &txn, ns.namespace_id)
-			.await?;
+		// Retire index state before deleting the namespace definition. Durable
+		// cleanup is transactional; local builder aborts are deferred until commit.
+		retire_namespace_indexes(ctx, &txn, ns.namespace_id).await?;
 		// Remove the sequences
 		if let Some(seq) = ctx.get_sequences() {
 			seq.namespace_removed(&txn, ns.namespace_id).await?;
 		}
 
-		// Delete the definition
-		let key = crate::key::root::ns::new(&ns.name);
-		let namespace_root = crate::key::namespace::all::new(ns.namespace_id);
-		if self.expunge {
-			txn.clr(&key).await?;
-			txn.clrp(&namespace_root).await?;
-		} else {
-			txn.del(&key).await?;
-			txn.delp(&namespace_root).await?;
-		};
+		// Delete the definition.
+		//
+		// The transactional `delp` / `clrp` path inside `del_ns` is
+		// bounded by `SURREAL_TIKV_DELR_MAX_KEYS` (default 1M) on TiKV.
+		// If the namespace is larger than that the call below returns
+		// `TransactionRangeTooLarge` and the outer transaction is
+		// rolled back — both the metadata clear and the partial
+		// prefix-delete are undone together, so the namespace is left
+		// intact (and reachable via the catalog) afterwards.
+		//
+		// Operators hitting that cap have two escape hatches:
+		//   1. Raise `SURREAL_TIKV_DELR_MAX_KEYS` for this datastore instance and re-issue the
+		//      `REMOVE NAMESPACE` statement.
+		//   2. Run [`crate::kvs::Datastore::unsafe_destroy_range`] against the namespace key prefix
+		//      *first*, shrinking the data side to something the bounded delete can swallow, then
+		//      re-issue `REMOVE NAMESPACE`. The catalog metadata still points at the (now-empty)
+		//      prefix during this window, so the unsafe destroy is consistent with what the
+		//      statement is about to do anyway.
+		txn.del_ns(&ns.name, self.expunge).await?;
 
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {

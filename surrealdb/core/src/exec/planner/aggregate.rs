@@ -5,14 +5,48 @@
 use std::sync::Arc;
 
 use super::Planner;
-use super::util::{derive_field_name, idiom_to_field_name};
+use super::util::{derive_field_name, idiom_to_field_path};
 use crate::err::Error;
+use crate::exec::field_path::FieldPathPart;
 use crate::exec::operators::{
 	AggregateExprInfo, AggregateField, ExtractedAggregate, aggregate_field_name,
 };
 use crate::expr::field::{Field, Fields};
 use crate::expr::visit::{MutVisitor, VisitMut};
 use crate::expr::{Expr, Function, FunctionCall, Idiom, Literal};
+
+/// Build a nested output path from an idiom for use as an [`AggregateField::output_path`].
+///
+/// Single source of truth: delegates to [`idiom_to_field_path`] so the
+/// projection pipeline and the aggregation pipeline always agree on output
+/// field names. The returned `Vec<String>` is the flattened form of the
+/// canonical [`FieldPath`]:
+///
+/// - Graph-traversal aliases (`` ->friends->person AS buddy ``) collapse to a single flat key (the
+///   alias identifier).
+/// - Multi-part idioms (`AS foo.bar`) nest as `["foo", "bar"]`.
+/// - Single-part idioms whose identifier contains a dot (`` AS `foo.bar` ``) stay a single flat
+///   `["foo.bar"]` key.
+/// - Execution-only parts (array filters, indices, method calls, etc.) are dropped via
+///   `Idiom::simplify`, matching projection behaviour.
+fn alias_output_path(idiom: &Idiom) -> Vec<String> {
+	idiom_to_field_path(idiom)
+		.0
+		.into_iter()
+		.map(|part| match part {
+			FieldPathPart::Field(s) | FieldPathPart::Lookup(s) => s,
+			// `idiom_to_field_path` walks `Idiom::simplify`, which strips
+			// indices and First/Last markers, so these variants should not
+			// appear here. If a future change to `idiom_to_field_path`
+			// emits them anyway, render them in their textual form rather
+			// than panicking — preserving the "produce a stable string
+			// key" invariant.
+			FieldPathPart::Index(i) => format!("[{i}]"),
+			FieldPathPart::First => "[0]".to_string(),
+			FieldPathPart::Last => "[$]".to_string(),
+		})
+		.collect()
+}
 
 // ============================================================================
 // impl Planner — Aggregation
@@ -99,10 +133,20 @@ impl<'ctx> Planner<'ctx> {
 							});
 						}
 						Field::Single(selector) => {
-							let output_name = if let Some(alias) = &selector.alias {
-								idiom_to_field_name(alias)
+							// For an explicit alias, walk the idiom parts
+							// so `AS foo.bar` nests as `[foo, bar]` while
+							// `` AS `foo.bar` `` stays a flat single key.
+							// For an unaliased idiom expression (e.g.
+							// `SELECT address.city ...`), walk the source
+							// idiom's parts to preserve the same nesting
+							// structure. Other unaliased expressions
+							// derive a flat name.
+							let output_path = if let Some(alias) = &selector.alias {
+								alias_output_path(alias)
+							} else if let Expr::Idiom(idiom) = &selector.expr {
+								alias_output_path(idiom)
 							} else {
-								derive_field_name(&selector.expr)
+								vec![derive_field_name(&selector.expr)]
 							};
 
 							let group_key_index = find_group_key_index(
@@ -118,8 +162,8 @@ impl<'ctx> Planner<'ctx> {
 								self.extract_aggregate_info(selector.expr.clone()).await?
 							};
 
-							aggregates.push(AggregateField::new(
-								output_name,
+							aggregates.push(AggregateField::with_output_path(
+								output_path,
 								is_group_key,
 								group_key_index,
 								aggregate_expr_info,
@@ -143,6 +187,7 @@ impl<'ctx> Planner<'ctx> {
 	/// leaves the expression unchanged, so we can use it directly for the
 	/// implicit `array::group` fallback without an extra clone.
 	#[allow(clippy::type_complexity)]
+	#[allow(clippy::clone_on_ref_ptr)] // Several paths clone `Arc<dyn AggregateFunction>` from concrete registry entries
 	pub(crate) async fn extract_aggregate_info(
 		&self,
 		mut expr: Expr,
@@ -181,7 +226,7 @@ impl<'ctx> Planner<'ctx> {
 			let func = if name.as_str() == "count" {
 				registry.get_count_aggregate(!call.arguments.is_empty())
 			} else {
-				registry.get_aggregate(&name).expect("aggregate function should exist").clone()
+				Arc::clone(registry.get_aggregate(&name).expect("aggregate function should exist"))
 			};
 
 			let mut args = call.arguments.into_iter();

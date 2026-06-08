@@ -1,4 +1,5 @@
 #![allow(clippy::unwrap_used)]
+#![recursion_limit = "256"]
 
 use std::hint::black_box;
 use std::time::Duration;

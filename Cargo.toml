@@ -5,12 +5,15 @@ members = [
     ".",
     # SurrealDB crates
     "surrealdb",
-    "surrealdb/common",
     "surrealdb/ast",
-    "surrealdb/token",
-    "surrealdb/parser",
+    "surrealdb/collections",
+    "surrealdb/common",
     "surrealdb/core",
+    "surrealdb/mcp",
+    "surrealdb/parser",
     "surrealdb/server",
+    "surrealdb/strand",
+    "surrealdb/token",
     "surrealdb/types",
     "surrealdb/types/derive",
     # SurrealML crates
@@ -30,7 +33,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2024"
 license-file = "LICENSE"
 publish = false
-version = "3.1.0-alpha"
+version = "3.2.0-nightly"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
@@ -45,29 +48,32 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # SurrealDB crates
-surrealdb = { version = "3.1.0-alpha", path = "surrealdb", default-features = false }
-surrealdb-core = { version = "3.1.0-alpha", path = "surrealdb/core", default-features = false }
-surrealdb-server = { version = "3.1.0-alpha", path = "surrealdb/server", default-features = false }
-surrealdb-types = { version = "3.1.0-alpha", path = "surrealdb/types" }
-surrealdb-types-derive = { version = "3.1.0-alpha", path = "surrealdb/types/derive" }
+surrealdb = { version = "3.2.0-nightly", path = "surrealdb", default-features = false }
+surrealdb-strand = { version = "3.2.0-nightly", path = "surrealdb/strand", default-features = false }
+surrealdb-core = { version = "3.2.0-nightly", path = "surrealdb/core", default-features = false }
+surrealdb-server = { version = "3.2.0-nightly", path = "surrealdb/server", default-features = false }
+surrealdb-mcp = { version = "3.2.0-nightly", path = "surrealdb/mcp", default-features = false }
+surrealdb-types = { version = "3.2.0-nightly", path = "surrealdb/types" }
+surrealdb-types-derive = { version = "3.2.0-nightly", path = "surrealdb/types/derive" }
 ast = { package = "surrealdb-ast", path = "surrealdb/ast" }
 token = { package = "surrealdb-token", path = "surrealdb/token" }
 parser = { package = "surrealdb-parser", path = "surrealdb/parser" }
 common = { package = "surrealdb-common", path = "surrealdb/common" }
+surrealdb-collections = { version = "3.2.0-nightly", path = "surrealdb/collections" }
 
 # SurrealML crates
 surrealml-core = { version = "0.1", path = "surrealml/core" }
 # Surrealism crates
-surrealism = { version = "0.2", path = "surrealism" }
-surrealism-macros = { version = "0.2", path = "surrealism/macros", default-features = false }
-surrealism-runtime = { version = "0.2", path = "surrealism/runtime" }
-surrealism-types = { version = "0.2", path = "surrealism/types", default-features = false }
+surrealism = { version = "0.4", path = "surrealism" }
+surrealism-macros = { version = "0.4", path = "surrealism/macros", default-features = false }
+surrealism-runtime = { version = "0.4", path = "surrealism/runtime" }
+surrealism-types = { version = "0.4", path = "surrealism/types", default-features = false }
 # External surreal crates
-affinitypool = "0.4.0"
+affinitypool = "0.7.0"
 dmp = "0.2.3"
 indxdb = "0.12.0"
 lexicmp = "0.2.0"
-revision = { version = "0.17.0", features = [
+revision = { version = "0.28.0", features = [
     "bytes",
     "chrono",
     "geo",
@@ -77,9 +83,10 @@ revision = { version = "0.17.0", features = [
     "specialised-vectors",
     "uuid",
 ] }
+
 storekey = { version = "0.11.0", features = ["bytes", "uuid"] }
-surrealkv = "0.21.0"
-surrealmx = "0.18.0"
+surrealkv = "0.21.2"
+surrealmx = "0.22.0"
 web-time = "1.1.0"
 vart = "0.9.3"
 ## Maintained by @Delskayn
@@ -87,88 +94,95 @@ js = { version = "0.11.0", package = "rquickjs", features = ["rust-alloc"] }
 reblessive = "0.4.3"
 
 # External KV stores
-rocksdb = { version = "0.24.0-surreal.3", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
-tikv = { version = "0.3.0-surreal.4", default-features = false, package = "surrealdb-tikv-client" }
+rocksdb = { version = "0.24.0-surreal.4", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
+tikv = { version = "0.5.0", default-features = false, package = "surrealdb-tikv-client" }
 
 # Other crates
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
 ahash = "0.8.12"
 ammonia = "4.1.2"
-anyhow = "1.0.100"
+anyhow = "1.0.102"
 arbitrary = "1.4.2"
-arc-swap = "1.8.0"
 argon2 = "0.5.3"
-arrayvec = "0.7.6"
 async-channel = "2.5.0"
-async-executor = "1.13.3"
 async-stream = "0.3.6"
-async-graphql = { version = "7.2.0", default-features = false, features = ["custom-error-conversion"] }
-async-graphql-axum = "7.2.0"
+async-graphql = { version = "7.2.1", default-features = false, features = ["custom-error-conversion"] }
+async-graphql-axum = "7.2.1"
 async-trait = "0.1.89"
 base64 = "0.22.1"
 bcrypt = "0.18.0"
-bitflags = "2.10.0"
-blake3 = "1.8.3"
+bitflags = "2.11.1"
+blake3 = "1.8.4"
 boxcar = "0.2.14"
 bytes = "1.11.1"
 castaway = "0.2.4"
-chrono = { version = "0.4.43", default-features = false }
+chrono = { version = "0.4.44", default-features = false }
 ciborium = "0.2.2"
-clap = "4.5.54"
+clap = "4.6.1"
 dashmap = "6.1.0"
 dialoguer = "0.11"
 deunicode = "1.6.2"
+diskann = { version = "=0.53.0", default-features = false }
+diskann-utils = "=0.53.0"
+diskann-vector = "=0.53.0"
 ext-sort = "^0.1.5"
 fastnum = "0.7.4"
 flatbuffers = { version = "25.12.19", features = ["serde"] }
 fst = "0.4.7"
-futures = "0.3.31"
-futures-util = "0.3.31"
+futures = "0.3.32"
+futures-util = "0.3.32"
 fuzzy-matcher = "0.3.7"
+half = "2.7.1"
 geo = { version = "0.32.0", default-features = false }
-geo-types = "0.7.18"
+geo-types = "0.7.19"
 getrandom = "0.3.4"
 hashbrown = "0.16.1"
 hex = "0.4.3"
 http = "1.4.0"
-hyper = "1.8"
+http-body-util = "0.1.3"
+hyper = "1.9"
 humantime = "2.3.0"
-indexmap = "2.13.0"
-ipnet = "2.11.0"
+indexmap = "2.14.0"
+ipnet = "2.12.0"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
 jsonwebtoken = { version = "10.3.0", default-features = false, features = ["use_pem"] }
 logos = "0.16.1" # TODO: pin version
 md-5 = "0.10.6"
-mimalloc = "0.1.48"
-native-tls = "0.2.14"
+memchr = "2.8.0"
+mimalloc = "0.1.49"
+native-tls = "0.2.18"
 ndarray = "0.17.2"
 ndarray-stats = "0.7.0"
 nix = { version = "0.30.1", default-features = false }
 num-traits = "0.2.19"
 num_cpus = "1.17.0"
-object_store = "0.13.0"
-papaya = "0.2.3"
+object_store = "0.13.2"
+papaya = "0.2.4"
 parking_lot = "0.12.5"
 paste = "1.0.15"
 path-clean = "1.0.1"
 pbkdf2 = "0.12.2"
 phf = "0.13.1"
-pin-project-lite = "0.2.16"
+pin-project-lite = "0.2.17"
 pprof = "0.15.0"
-quick_cache = "0.6.18"
+opentelemetry-prometheus-text-exporter = "0.2.1"
+quick_cache = "0.6.21"
 radix_trie = "0.3.0" # TODO: Look at the use of this dependency. Last update 4 years ago, unmaintained.
-rand = { version = "0.8.5", features = ["small_rng"] }
-rayon = "1.11.0"
-regex = "1.12.2"
-regex-syntax = "0.8.8"
-reqwest = { version = "0.13.1", default-features = false }
+rand = "0.9.4"
+rand_core = "0.6"
+rayon = "1.12.0"
+regex = "1.12.3"
+regex-syntax = "0.8.10"
+reqwest = { version = "0.13.2", default-features = false }
 ring = "0.17.14"
+rmcp = { version = "1.4.0", default-features = false }
 roaring = "0.11.3"
-rustls = { version = "0.23.36", default-features = false, features = ["logging", "std", "tls12"] }
-rust_decimal = "1.40.0"
+rustls = { version = "0.23.38", default-features = false, features = ["logging", "std", "tls12"] }
+rust_decimal = "1.41.0"
 rust-stemmers = "1.2.0" # TODO: Look at the use of this dependency. Last update 5 years ago, unmaintained.
+schemars = "1.2.1"
 scrypt = "0.11.0"
-semver = "1.0.27"
+semver = "1.0.28"
 serde = "1.0.228"
 serde_json = "1.0.149"
 sha1 = "0.10.6"
@@ -178,18 +192,18 @@ strsim = "0.11.1"
 subtle = "2.6"
 surrealdb-protocol = { version = "0.10.1", default-features = false }
 sysinfo = "0.37.2"
-tempfile = "3.24.0"
-thiserror = "2.0.17"
-tokio = { version = "1.49.0", default-features = false }
+tempfile = "3.27.0"
+thiserror = "2.0.18"
+tokio = { version = "1.52.1", default-features = false }
 tokio-stream = "0.1"
 tokio-tungstenite = "0.28.0"
-tokio-tungstenite-wasm = "0.8.1"
+tokio-tungstenite-wasm = "0.8.2"
 tokio-util = "0.7.18"
 tracing = { version = "0.1.44", features = ["release_max_level_debug"] }
 ulid = "1.2.1"
 unicase = "2.9.0"
 url = "2.5.8"
-uuid = "1.19.0"
+uuid = "1.23.1"
 wasm-bindgen-futures = "0.4.58"
 wasmtimer = { version = "0.4.3", default-features = false }
 
@@ -206,16 +220,16 @@ tracing-subscriber = "0.3"
 wiremock = "0.6"
 
 # SurrealML specific dependencies
-ort = { version = "2.0.0-rc.11", features = ["cuda", "ndarray"] }
+ort = { version = "2.0.0-rc.12", features = ["cuda", "ndarray"] }
 
 # Surrealism specific dependencies
-tar = "0.4.44"
-toml = "0.9.11"
+tar = "0.4.45"
+toml = "0.9.12"
 wasm-encoder = "0.245"
 wasm-opt = "0.116.1"
 wasmparser = "0.245"
-wasmtime = { version = "43.0.1", default-features = false, features = ["async", "cranelift", "winch", "runtime", "std", "wat", "component-model", "parallel-compilation"] }
-wasmtime-wasi = { version = "43.0.1", features = ["p1", "p2"] }
+wasmtime = { version = "44.0.2", default-features = false, features = ["async", "cranelift", "winch", "runtime", "std", "wat", "component-model", "parallel-compilation"] }
+wasmtime-wasi = { version = "44.0.2", features = ["p1", "p2"] }
 wit-bindgen = { version = "0.51", default-features = false, features = ["macros", "realloc"] }
 zstd = "0.13.3"
 
@@ -244,6 +258,7 @@ default = [
     "http",
     "surrealism",
     "graphql",
+    "mcp",
     "cli",
 ]
 
@@ -261,6 +276,8 @@ storage-tikv = ["surrealdb-server/storage-tikv"]
 storage-indxdb = ["surrealdb-server/storage-indxdb"]
 # GraphQL API support
 graphql = ["surrealdb-server/graphql"]
+# MCP (Model Context Protocol) server support
+mcp = ["surrealdb-server/mcp"]
 # Interactive SQL CLI support
 cli = ["surrealdb-server/cli"]
 
@@ -287,7 +304,7 @@ futures-util.workspace = true
 http.workspace = true
 jsonwebtoken.workspace = true
 rand.workspace = true
-rcgen = "0.14.6"
+rcgen = "0.14.7"
 reqwest = { workspace = true, default-features = false, features = [
     "blocking",
     "gzip",
@@ -306,6 +323,7 @@ tokio-stream.workspace = true
 tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
 tracing.workspace = true
 ulid.workspace = true
+uuid = { workspace = true, features = ["v4"] }
 
 [build-dependencies]
 semver.workspace = true
@@ -360,6 +378,11 @@ assigning_clones = "warn"
 # https://rust-lang.github.io/rust-clippy/master/#bool_assert_comparison
 bool_assert_comparison = "allow"
 
+# Checks for `.clone()` on ref-counted pointers (`Rc`, `Arc`, or `Weak`) where `Rc::clone` /
+# `Arc::clone` would make pointer duplication obvious.
+# https://rust-lang.github.io/rust-clippy/master/#clone_on_ref_ptr
+clone_on_ref_ptr = "warn"
+
 # Checks for the usage of `as _` conversion using inferred type.
 # https://rust-lang.github.io/rust-clippy/master/#cloned_instead_of_copied
 cloned_instead_of_copied = "warn"
@@ -412,6 +435,15 @@ large_types_passed_by_value = "warn"
 # https://rust-lang.github.io/rust-clippy/master/#lossy_float_literal
 lossy_float_literal = "warn"
 
+# Checks for usage of Mutex<X> where an atomic will do.
+# https://rust-lang.github.io/rust-clippy/master/#mutex_atomic
+mutex_atomic = "warn"
+
+# Checks for functions taking arguments by value where the argument could be
+# borrowed (i.e. the body only needs `&T`).
+# https://rust-lang.github.io/rust-clippy/master/#needless_pass_by_value
+needless_pass_by_value = "warn"
+
 # Checks for binding to underscore prefixed variable without side-effects.
 # https://rust-lang.github.io/rust-clippy/master/index.html#no_effect_underscore_binding
 no_effect_underscore_binding = "warn"
@@ -430,6 +462,10 @@ redundant_clone = "warn"
 # Using a single `.insert()` call and checking its return value is more efficient as it avoids double lookup.
 # https://rust-lang.github.io/rust-clippy/master/#set_contains_or_insert
 set_contains_or_insert = "warn"
+
+# Checks for functions that pass by value but are trivially copyable.
+# https://rust-lang.github.io/rust-clippy/master/#trivially_copy_pass_by_ref
+trivially_copy_pass_by_ref = "warn"
 
 # Checks for unnecessary calls to `to_owned()`, `to_string()` and other similar conversion methods
 # that result in unnecessary allocations when a reference would suffice.
@@ -453,6 +489,22 @@ unwrap_used = "warn"
 used_underscore_binding = "warn"
 
 # Profiles
+
+# Plain `cargo build`/`cargo test` (the default dev profile) emitted full
+# DWARF (`debug = 2`) for every workspace crate, including the ~300k-LOC
+# `surrealdb-core`. Full local-variable debuginfo is a sizable share of
+# codegen + final link cost and is rarely used in day-to-day iteration.
+# `line-tables-only` keeps backtraces with file:line resolution (panics,
+# `RUST_BACKTRACE`, profilers) while dropping local-variable DWARF, and
+# `unpacked` keeps debuginfo in the per-object files so no `dsymutil` pass
+# runs. This matches the debug settings already used by `[profile.make]`
+# and `[profile.profiling]`. Runtime behaviour is unchanged — only the
+# emitted DWARF differs. Use `cargo build --config 'profile.dev.debug=2'`
+# for a one-off full-debuginfo build under a debugger.
+[profile.dev]
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
+
 [profile.release]
 codegen-units = 1
 lto = true
@@ -460,14 +512,31 @@ opt-level = 3
 panic = 'abort'
 strip = true
 
+# Faster release-mode checks/lints in CI (no whole-crate LTO)
+[profile.clippy-release]
+inherits = "release"
+lto = false
+codegen-units = 16
+
 [profile.bench]
 strip = false
 
 [profile.make]
 inherits = "dev"
+debug = "line-tables-only"
+split-debuginfo = "unpacked"
 
 [profile.profiling]
-debug = true
 inherits = "release"
+# `line-tables-only` keeps frame symbolication for `sample` / `perf` /
+# flamegraphs while dropping local-variable info — ~half the debug-data
+# size and a noticeably faster final-binary LTO pass.
+debug = "line-tables-only"
 strip = false
 panic = 'unwind'
+# ThinLTO + multi-codegen-unit final binary. Still cross-crate inlines
+# (within 1-3% of full LTO on hot loops in practice), but the link step
+# parallelises across cores instead of running one 30+ minute single-threaded
+# rustc. Worth it for an iterative profiling loop.
+lto = "thin"
+codegen-units = 16

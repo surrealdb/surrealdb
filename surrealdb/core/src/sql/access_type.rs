@@ -1,8 +1,7 @@
 use std::str::FromStr;
 
 use anyhow::Result;
-use rand::Rng;
-use rand::distributions::Alphanumeric;
+use rand::distr::{Alphanumeric, SampleString};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::Expr;
@@ -11,14 +10,14 @@ use crate::fmt::CoverStmts;
 use crate::sql::{Algorithm, Literal};
 
 pub(crate) fn random_key() -> String {
-	rand::thread_rng().sample_iter(&Alphanumeric).take(128).map(char::from).collect::<String>()
+	Alphanumeric.sample_string(&mut rand::rng(), 128)
 }
 
 /// The type of access methods available
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum AccessType {
-	Record(RecordAccess),
+	Record(Box<RecordAccess>),
 	Jwt(JwtAccess),
 	Bearer(BearerAccess),
 }
@@ -26,16 +25,16 @@ pub(crate) enum AccessType {
 impl Default for AccessType {
 	fn default() -> Self {
 		// Access type defaults to the most specific
-		Self::Record(RecordAccess {
+		Self::Record(Box::new(RecordAccess {
 			..Default::default()
-		})
+		}))
 	}
 }
 
 impl From<AccessType> for crate::expr::AccessType {
 	fn from(v: AccessType) -> Self {
 		match v {
-			AccessType::Record(v) => Self::Record(v.into()),
+			AccessType::Record(v) => Self::Record(Box::new((*v).into())),
 			AccessType::Jwt(v) => Self::Jwt(v.into()),
 			AccessType::Bearer(v) => Self::Bearer(v.into()),
 		}
@@ -45,7 +44,7 @@ impl From<AccessType> for crate::expr::AccessType {
 impl From<crate::expr::AccessType> for AccessType {
 	fn from(v: crate::expr::AccessType) -> Self {
 		match v {
-			crate::expr::AccessType::Record(v) => AccessType::Record(v.into()),
+			crate::expr::AccessType::Record(v) => AccessType::Record(Box::new((*v).into())),
 			crate::expr::AccessType::Jwt(v) => AccessType::Jwt(v.into()),
 			crate::expr::AccessType::Bearer(v) => AccessType::Bearer(v.into()),
 		}
@@ -127,11 +126,11 @@ impl Default for JwtAccess {
 		Self {
 			verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 				alg,
-				key: Expr::Literal(Literal::String(key.clone())),
+				key: Expr::Literal(Literal::String(key.as_str().into())),
 			}),
 			issue: Some(JwtAccessIssue {
 				alg,
-				key: Expr::Literal(Literal::String(key)),
+				key: Expr::Literal(Literal::String(key.into())),
 			}),
 		}
 	}
@@ -185,7 +184,7 @@ impl Default for JwtAccessIssue {
 			// Defaults to HS512
 			alg: Algorithm::Hs512,
 			// Avoid defaulting to empty key
-			key: Expr::Literal(Literal::String(random_key())),
+			key: Expr::Literal(Literal::String(random_key().into())),
 		}
 	}
 }

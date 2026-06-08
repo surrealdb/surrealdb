@@ -11,7 +11,7 @@ value = "50ms"
 value = "292471208y35w2d7h12m55s807ms"
 
 [[test.results]]
-value = "584942417y18w3d14h25m51s615ms"
+error = 'Failed to compute: "duration::from_millis(-1)", as the operation results in a negative value.'
 
 */
 duration::from_millis(3);

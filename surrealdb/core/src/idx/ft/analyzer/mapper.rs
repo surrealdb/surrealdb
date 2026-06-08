@@ -2,7 +2,7 @@
 use std::fs::File;
 #[cfg(target_family = "wasm")]
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -15,7 +15,7 @@ use vart::VariableSizeKey;
 use vart::art::Tree;
 
 use crate::err::Error;
-use crate::iam::file::is_path_allowed;
+use crate::iam::file::check_is_path_allowed;
 use crate::idx::ft::analyzer::filter::{FilterResult, Term};
 
 #[derive(Clone, Default)]
@@ -24,9 +24,9 @@ pub(in crate::idx) struct Mapper {
 }
 
 impl Mapper {
-	pub(in crate::idx) async fn new(path: &Path) -> Result<Self> {
+	pub(in crate::idx) async fn new(path: &Path, allow_list: &[PathBuf]) -> Result<Self> {
 		let mut terms = Tree::new();
-		let path = is_path_allowed(path)?;
+		let path = check_is_path_allowed(path, allow_list)?;
 		Self::iterate_file(&mut terms, &path).await?;
 		Ok(Self {
 			terms: Arc::new(terms),
@@ -35,7 +35,7 @@ impl Mapper {
 
 	fn add_line_tree(
 		terms: &mut Tree<VariableSizeKey, String>,
-		line: String,
+		line: &str,
 		line_number: usize,
 	) -> Result<()> {
 		let Some((word, rest)) = line.split_once('\t') else {
@@ -70,7 +70,7 @@ impl Mapper {
 		let mut line_number = 0;
 		while let Some(line) = lines.next_line().await? {
 			yield_now!();
-			Self::add_line_tree(terms, line, line_number)?;
+			Self::add_line_tree(terms, &line, line_number)?;
 			line_number += 1;
 		}
 		Ok(())
@@ -83,7 +83,7 @@ impl Mapper {
 		let mut line_number = 0;
 		for line_result in reader.lines() {
 			let line = line_result?;
-			Self::add_line_tree(terms, line, line_number)?;
+			Self::add_line_tree(terms, &line, line_number)?;
 			line_number += 1;
 		}
 		Ok(())

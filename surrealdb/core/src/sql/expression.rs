@@ -18,6 +18,7 @@ use crate::sql::{
 	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
 use crate::types::{PublicFile, PublicNumber, PublicRecordId, PublicValue};
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -26,9 +27,8 @@ pub(crate) enum Expr {
 
 	Param(Param),
 	Idiom(Idiom),
-	Table(String),
+	Table(TableName),
 	Mock(Mock),
-	// TODO(3.0) maybe unbox? check size.
 	Block(Box<Block>),
 	Constant(Constant),
 	Prefix {
@@ -80,7 +80,7 @@ impl Expr {
 	pub(crate) fn to_idiom(&self) -> Idiom {
 		match self {
 			Expr::Idiom(i) => i.simplify(),
-			Expr::Param(i) => Idiom::field(i.clone().into_string()),
+			Expr::Param(i) => Idiom::field(i.clone().into_strand()),
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
 				Literal::String(s) => Idiom::field(s.clone()),
@@ -99,15 +99,15 @@ impl Expr {
 			PublicValue::Number(PublicNumber::Float(x)) => Expr::Literal(Literal::Float(x)),
 			PublicValue::Number(PublicNumber::Int(x)) => Expr::Literal(Literal::Integer(x)),
 			PublicValue::Number(PublicNumber::Decimal(x)) => Expr::Literal(Literal::Decimal(x)),
-			PublicValue::String(x) => Expr::Literal(Literal::String(x)),
+			PublicValue::String(x) => Expr::Literal(Literal::String(x.into())),
 			PublicValue::Bytes(x) => Expr::Literal(Literal::Bytes(x)),
 			PublicValue::Regex(x) => Expr::Literal(Literal::Regex(x)),
-			PublicValue::Table(x) => Expr::Table(x.into_string()),
+			PublicValue::Table(x) => Expr::Table(TableName::new(x.into_string())),
 			PublicValue::RecordId(PublicRecordId {
 				table,
 				key,
 			}) => Expr::Literal(Literal::RecordId(RecordIdLit {
-				table: table.into_string(),
+				table: TableName::new(table.into_string()),
 				key: RecordIdKeyLit::from_record_id_key(key),
 			})),
 			PublicValue::Array(x) => {
@@ -119,7 +119,7 @@ impl Expr {
 			PublicValue::Object(x) => Expr::Literal(Literal::Object(
 				x.into_iter()
 					.map(|(k, v)| ObjectEntry {
-						key: k,
+						key: k.into(),
 						value: Expr::from_public_value(v),
 					})
 					.collect(),
@@ -328,7 +328,7 @@ pub(crate) fn convert_public_value_to_internal(value: surrealdb_types::Value) ->
 				crate::val::Value::Number(crate::val::Number::Decimal(d))
 			}
 		},
-		surrealdb_types::Value::String(s) => crate::val::Value::String(s),
+		surrealdb_types::Value::String(s) => crate::val::Value::String(s.into()),
 		surrealdb_types::Value::Duration(d) => {
 			crate::val::Value::Duration(crate::val::Duration(d.into_inner()))
 		}
@@ -348,8 +348,8 @@ pub(crate) fn convert_public_value_to_internal(value: surrealdb_types::Value) ->
 		)),
 		surrealdb_types::Value::Object(o) => crate::val::Value::Object(crate::val::Object::from(
 			o.into_iter()
-				.map(|(k, v)| (k, convert_public_value_to_internal(v)))
-				.collect::<std::collections::BTreeMap<_, _>>(),
+				.map(|(k, v)| (k.into(), convert_public_value_to_internal(v)))
+				.collect::<std::collections::BTreeMap<surrealdb_strand::Strand, crate::val::Value>>(),
 		)),
 		surrealdb_types::Value::Geometry(g) => {
 			crate::val::Value::Geometry(convert_public_geometry_to_internal(g))
@@ -395,7 +395,7 @@ fn convert_public_record_id_key_to_internal(
 ) -> crate::val::RecordIdKey {
 	match key {
 		surrealdb_types::RecordIdKey::Number(n) => crate::val::RecordIdKey::Number(n),
-		surrealdb_types::RecordIdKey::String(s) => crate::val::RecordIdKey::String(s),
+		surrealdb_types::RecordIdKey::String(s) => crate::val::RecordIdKey::String(s.into()),
 		surrealdb_types::RecordIdKey::Uuid(u) => {
 			crate::val::RecordIdKey::Uuid(crate::val::Uuid(u.into_inner()))
 		}
@@ -403,8 +403,11 @@ fn convert_public_record_id_key_to_internal(
 			crate::val::Array(a.into_iter().map(convert_public_value_to_internal).collect()),
 		),
 		surrealdb_types::RecordIdKey::Object(o) => {
-			crate::val::RecordIdKey::Object(crate::val::Object(
-				o.into_iter().map(|(k, v)| (k, convert_public_value_to_internal(v))).collect(),
+			crate::val::RecordIdKey::Object(crate::val::Object::from(
+				o.into_iter()
+					.map(|(k, v)| (k.into(), convert_public_value_to_internal(v)))
+					.collect::<std::collections::BTreeMap<surrealdb_strand::Strand, crate::val::Value>>(
+				),
 			))
 		}
 		surrealdb_types::RecordIdKey::Range(r) => {
@@ -438,7 +441,7 @@ impl ToSql for Expr {
 			Expr::Literal(literal) => literal.fmt_sql(f, fmt),
 			Expr::Param(param) => param.fmt_sql(f, fmt),
 			Expr::Idiom(idiom) => idiom.fmt_sql(f, fmt),
-			Expr::Table(ident) => write_sql!(f, fmt, "{}", EscapeIdent(ident)),
+			Expr::Table(ident) => write_sql!(f, fmt, "{}", EscapeIdent(ident.as_str())),
 			Expr::Mock(mock) => mock.fmt_sql(f, fmt),
 			Expr::Block(block) => block.fmt_sql(f, fmt),
 			Expr::Constant(constant) => constant.fmt_sql(f, fmt),
@@ -571,7 +574,7 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Literal(l) => crate::expr::Expr::Literal(l.into()),
 			Expr::Param(p) => crate::expr::Expr::Param(p.into()),
 			Expr::Idiom(i) => crate::expr::Expr::Idiom(i.into()),
-			Expr::Table(t) => crate::expr::Expr::Table(t.into()),
+			Expr::Table(t) => crate::expr::Expr::Table(t),
 			Expr::Mock(m) => crate::expr::Expr::Mock(m.into()),
 			Expr::Block(b) => crate::expr::Expr::Block(Box::new((*b).into())),
 			Expr::Constant(c) => crate::expr::Expr::Constant(c.into()),
@@ -640,7 +643,7 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Literal(l) => Expr::Literal(l.into()),
 			crate::expr::Expr::Param(p) => Expr::Param(p.into()),
 			crate::expr::Expr::Idiom(i) => Expr::Idiom(i.into()),
-			crate::expr::Expr::Table(t) => Expr::Table(t.into_string()),
+			crate::expr::Expr::Table(t) => Expr::Table(t),
 			crate::expr::Expr::Mock(m) => Expr::Mock(m.into()),
 			crate::expr::Expr::Block(b) => Expr::Block(Box::new((*b).into())),
 			crate::expr::Expr::Constant(c) => Expr::Constant(c.into()),

@@ -34,12 +34,23 @@ inputs:
     description: 'Whether to free disk space by removing pre-installed software'
     required: false
     default: 'true'
+  enable-sccache:
+    description: 'Whether to compile via sccache (RUSTC_WRAPPER)'
+    required: false
+    default: 'true'
+  depot-runner:
+    description: 'If true, do not enable SCCACHE_GHA_ENABLED (Depot runners use Depot Cache for sccache)'
+    required: false
+    default: 'false'
 
 runs:
   using: 'composite'
   steps:
     - name: Free disk space
-      if: inputs.free-disk-space == 'true'
+      # The cleanup commands are Linux-specific (sudo + GNU paths). Running them
+      # on macOS/Windows runners only produces noise (read-only volume / missing
+      # sudo), so restrict the step to Linux where it actually frees space.
+      if: inputs.free-disk-space == 'true' && runner.os == 'Linux'
       shell: bash
       run: |
         echo "Disk space before cleanup:"
@@ -89,6 +100,20 @@ runs:
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
 
+    - name: Setup sccache
+      if: inputs.enable-sccache == 'true'
+      uses: mozilla-actions/sccache-action@1583d6b38d7be47f593cb472781bbb21cab4321e # v0.0.10
+
+    - name: Configure sccache environment
+      if: inputs.enable-sccache == 'true'
+      shell: bash
+      run: |
+        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
+        if [[ '${{ inputs.depot-runner }}' != 'true' ]]; then
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        fi
+
     - name: Setup cache
       uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       with:
@@ -96,3 +121,4 @@ runs:
         shared-key: ${{ inputs.cache-key }}
         workspaces: ${{ inputs.workspaces }}
         cache-directories: ${{ inputs.cache-directories }}
+        cache-targets: false

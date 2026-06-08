@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 
-use crate::cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH};
 use crate::syn;
 use crate::syn::parser::ParserSettings;
 use crate::types::{PublicArray, PublicNumber, PublicObject, PublicValue};
@@ -16,10 +15,12 @@ pub fn encode_str(value: PublicValue) -> anyhow::Result<String> {
 	Ok(serde_json::to_string(&v).expect("serialization to json string should not fail"))
 }
 
-pub fn decode(value: &[u8]) -> anyhow::Result<PublicValue> {
+pub fn decode(value: &[u8], limit: usize) -> anyhow::Result<PublicValue> {
 	let settings = ParserSettings {
-		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
-		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
+		// FIXME: Fix the recursion limit.
+		object_recursion_limit: limit,
+		// There shouldn't be any queries inside json.
+		query_recursion_limit: 0,
 		legacy_strands: true,
 		..Default::default()
 	};

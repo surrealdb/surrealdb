@@ -4,9 +4,12 @@ mod common;
 mod surrealism_integration {
 
 	use std::collections::HashMap;
+	use std::io::{Read, Write};
+	use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 	use std::path::{Path, PathBuf};
 	use std::process::Command;
-	use std::sync::LazyLock;
+	use std::sync::{LazyLock, mpsc};
+	use std::thread;
 	use std::time::Duration;
 
 	use serde::Deserialize;
@@ -33,8 +36,18 @@ mod surrealism_integration {
 			.unwrap_or(false)
 	}
 
-	/// Path to the `surreal` binary built by cargo for integration tests.
+	/// Path to the `surreal` CLI binary (built alongside integration tests).
+	///
+	/// Uses `CARGO_BIN_EXE_surreal` when present (set by `cargo test` / cargo-nextest) so the path
+	/// stays valid under nextest's per-test directory layout. Falls back to deriving
+	/// `target/debug/surreal` from `std::env::current_exe()` for runners that omit it.
 	fn surreal_bin() -> PathBuf {
+		if let Some(p) = std::env::var_os("CARGO_BIN_EXE_surreal")
+			.or_else(|| std::env::var_os("NEXTEST_BIN_EXE_surreal"))
+		{
+			return PathBuf::from(p);
+		}
+
 		let mut path = std::env::current_exe().expect("Failed to get current exe path");
 		assert!(path.pop());
 		if path.ends_with("deps") {
@@ -111,11 +124,88 @@ mod surrealism_integration {
 		);
 
 		common::start_server(common::StartServerArguments {
-			args: "--allow-experimental files,surrealism".to_string(),
+			args: "--allow-experimental files,surrealism --allow-net 127.0.0.1".to_string(),
 			vars: Some(vars),
 			..Default::default()
 		})
 		.await
+	}
+
+	struct LocalPokemonApi {
+		addr: SocketAddr,
+		shutdown: Option<mpsc::Sender<()>>,
+		handle: Option<thread::JoinHandle<()>>,
+	}
+
+	impl LocalPokemonApi {
+		fn start() -> Result<Self, Box<dyn std::error::Error>> {
+			let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
+			listener.set_nonblocking(true)?;
+			let addr = listener.local_addr()?;
+			let (shutdown_tx, shutdown_rx) = mpsc::channel();
+			let handle = thread::spawn(move || run_local_pokemon_api(listener, shutdown_rx));
+
+			Ok(Self {
+				addr,
+				shutdown: Some(shutdown_tx),
+				handle: Some(handle),
+			})
+		}
+
+		fn base_url(&self) -> String {
+			format!("http://{}", self.addr)
+		}
+	}
+
+	impl Drop for LocalPokemonApi {
+		fn drop(&mut self) {
+			if let Some(shutdown) = self.shutdown.take() {
+				let _ = shutdown.send(());
+			}
+			if let Some(handle) = self.handle.take() {
+				let _ = handle.join();
+			}
+		}
+	}
+
+	fn run_local_pokemon_api(listener: TcpListener, shutdown_rx: mpsc::Receiver<()>) {
+		loop {
+			if shutdown_rx.try_recv().is_ok() {
+				return;
+			}
+
+			match listener.accept() {
+				Ok((mut stream, _)) => {
+					let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+					let mut buf = [0; 1024];
+					let Ok(n) = stream.read(&mut buf) else {
+						continue;
+					};
+					let request = String::from_utf8_lossy(&buf[..n]);
+					let path = request
+						.lines()
+						.next()
+						.and_then(|line| line.split_whitespace().nth(1))
+						.unwrap_or("/");
+
+					let (status, reason, body) = match path {
+						"/pokemon/pikachu" => (200, "OK", serde_json::json!({ "name": "pikachu" })),
+						"/pokemon/1" => (200, "OK", serde_json::json!({ "name": "bulbasaur" })),
+						_ => (404, "Not Found", serde_json::json!({ "error": "not found" })),
+					};
+					let body = body.to_string();
+					let response = format!(
+						"HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+						body.len()
+					);
+					let _ = stream.write_all(response.as_bytes());
+				}
+				Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+					thread::sleep(Duration::from_millis(10));
+				}
+				Err(_) => return,
+			}
+		}
 	}
 
 	/// Execute one or more SurrealQL statements via the HTTP `/sql` endpoint and
@@ -881,6 +971,48 @@ mod surrealism_integration {
 	#[test(tokio::test)]
 	async fn module_info_db_structure_exports() -> Result<(), Box<dyn std::error::Error>> {
 		check_info_db_structure_exports(&DEMO_DIR.canonical).await
+	}
+
+	// -------------------------------------------------------------------
+	// Async networking test (local API)
+	// -------------------------------------------------------------------
+
+	async fn check_fetch_pokemon(bucket_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+		let api = LocalPokemonApi::start()?;
+		let api_base = api.base_url();
+		let (addr, _server) = start_surrealism_server(bucket_dir).await?;
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		setup_module(&addr, &ns, &db, bucket_dir).await;
+
+		let results = sql_query(
+			&addr,
+			&ns,
+			&db,
+			&format!("RETURN mod::demo::fetch_pokemon('{api_base}', 'pikachu');"),
+		)
+		.await;
+		assert_eq!(results[0].status, "OK", "fetch_pokemon failed: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!("pikachu"));
+
+		// Also works with numeric Pokédex ID
+		let results = sql_query(
+			&addr,
+			&ns,
+			&db,
+			&format!("RETURN mod::demo::fetch_pokemon('{api_base}', '1');"),
+		)
+		.await;
+		assert_eq!(results[0].status, "OK", "fetch_pokemon('1') failed: {:?}", results[0].result);
+		assert_eq!(results[0].result, serde_json::json!("bulbasaur"));
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn module_fetch_pokemon() -> Result<(), Box<dyn std::error::Error>> {
+		check_fetch_pokemon(&DEMO_DIR.canonical).await
 	}
 
 	// -------------------------------------------------------------------

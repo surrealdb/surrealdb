@@ -26,15 +26,15 @@ fn array_difference(first: Array, other: Array) -> Array {
 
 fn criterion_benchmark(c: &mut Criterion) {
 	let mut first = Array::new();
-	let mut rng = rand::thread_rng();
+	let mut rng = rand::rng();
 	for _ in 0..5000 {
-		first.push(Value::Number(Number::Int(rng.gen_range(0..=5000))));
-		first.push(Value::String(char::from_u32(rng.gen_range(0..=5000)).unwrap().to_string()));
+		first.push(Value::Number(Number::Int(rng.random_range(0..=5000))));
+		first.push(Value::String(char::from_u32(rng.random_range(0..=5000)).unwrap().to_string()));
 	}
 	let mut second = Array::new();
 	for _ in 0..5000 {
-		second.push(Value::Number(Number::Int(rng.gen_range(0..=5000))));
-		second.push(Value::String(char::from_u32(rng.gen_range(0..=5000)).unwrap().to_string()));
+		second.push(Value::Number(Number::Int(rng.random_range(0..=5000))));
+		second.push(Value::String(char::from_u32(rng.random_range(0..=5000)).unwrap().to_string()));
 	}
 	c.bench_function("array_difference", |b| {
 		b.iter(|| array_difference(black_box(first.clone()), black_box(second.clone())))

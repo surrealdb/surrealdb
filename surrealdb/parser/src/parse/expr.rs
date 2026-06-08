@@ -1404,6 +1404,13 @@ async fn try_parse_infix_postfix_op(
 							distance: ast::Distance::Cosine,
 						}
 					}
+					T![COSINE_NORMALIZED] => {
+						let _ = parser.next();
+						BinaryOperator::KNearestNeighbour {
+							k,
+							distance: ast::Distance::CosineNormalized,
+						}
+					}
 					T![EUCLIDEAN] => {
 						let _ = parser.next();
 						BinaryOperator::KNearestNeighbour {
@@ -1416,6 +1423,13 @@ async fn try_parse_infix_postfix_op(
 						BinaryOperator::KNearestNeighbour {
 							k,
 							distance: ast::Distance::Hamming,
+						}
+					}
+					T![INNER_PRODUCT] => {
+						let _ = parser.next();
+						BinaryOperator::KNearestNeighbour {
+							k,
+							distance: ast::Distance::InnerProduct,
 						}
 					}
 					T![JACCARD] => {

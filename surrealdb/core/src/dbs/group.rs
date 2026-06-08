@@ -19,11 +19,11 @@ use crate::val::{Number, TryFloatDiv, Value};
 ///
 /// This works by having the iterator return the full value of the record.
 /// The group collector has pulled out all the aggregate expressions from selectors and is updating
-/// those as it recieves values.
+/// those as it receives values.
 ///
 /// Once all the values are collected the collector then does the field calculation replacing the
 /// spaces in the expressions where the aggregate expressions used to be with the values it
-/// calcualted.
+/// calculated.
 #[derive(Debug)]
 pub struct GroupCollector {
 	analysis: AggregationAnalysis,
@@ -239,7 +239,12 @@ impl GroupCollector {
 						count,
 						..
 					} => {
-						let num = if count <= 1 {
+						// Match the scalar `math::stddev` and the streaming
+						// aggregator: NaN for an empty group, 0 for a single
+						// element.
+						let num = if count == 0 {
+							Number::from(f64::NAN)
+						} else if count == 1 {
 							Number::from(0.0)
 						} else {
 							let mean = sum / Number::from(count);
@@ -259,7 +264,12 @@ impl GroupCollector {
 						count,
 						..
 					} => {
-						let num = if count <= 1 {
+						// Match the scalar `math::variance` and the streaming
+						// aggregator: NaN for an empty group, 0 for a single
+						// element.
+						let num = if count == 0 {
+							Number::from(f64::NAN)
+						} else if count == 1 {
 							Number::from(0.0)
 						} else {
 							let mean = sum / Number::from(count);

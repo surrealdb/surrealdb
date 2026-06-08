@@ -13,14 +13,14 @@ pub use range::RecordIdKeyRangeLit;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct RecordIdLit {
 	/// Table name
-	pub table: String,
+	pub table: TableName,
 	pub key: RecordIdKeyLit,
 }
 
 impl From<RecordIdLit> for crate::expr::RecordIdLit {
 	fn from(v: RecordIdLit) -> Self {
 		crate::expr::RecordIdLit {
-			table: TableName::new(v.table),
+			table: v.table,
 			key: v.key.into(),
 		}
 	}
@@ -29,7 +29,7 @@ impl From<RecordIdLit> for crate::expr::RecordIdLit {
 impl From<crate::expr::RecordIdLit> for RecordIdLit {
 	fn from(v: crate::expr::RecordIdLit) -> Self {
 		RecordIdLit {
-			table: v.table.into_string(),
+			table: v.table,
 			key: v.key.into(),
 		}
 	}
@@ -37,6 +37,6 @@ impl From<crate::expr::RecordIdLit> for RecordIdLit {
 
 impl ToSql for RecordIdLit {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "{}:{}", EscapeIdent(&self.table), self.key);
+		write_sql!(f, sql_fmt, "{}:{}", EscapeIdent(self.table.as_str()), self.key);
 	}
 }

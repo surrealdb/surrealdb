@@ -14,7 +14,7 @@ value = "2d2h"
 error = 'Failed to compute: "duration::from_hours(9223372036854775807)", as the operation results in an arithmetic overflow.'
 
 [[test.results]]
-error = 'Failed to compute: "duration::from_hours(18446744073709551615)", as the operation results in an arithmetic overflow.'
+error = 'Failed to compute: "duration::from_hours(-1)", as the operation results in a negative value.'
 
 */
 duration::from_hours(3);

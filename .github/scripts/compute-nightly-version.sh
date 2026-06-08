@@ -17,7 +17,7 @@ patch_full=$(echo $CARGO_VERSION | tr "." "\n" | sed -n 3p)
 # If main has a pre-release version, use X.Y.Z-nightly
 # If main is stable, use next minor with -nightly
 if [[ "$CARGO_VERSION" =~ - ]]; then
-	# Pre-release on main (e.g., 3.0.0-beta) -> 3.0.0-nightly
+	# Pre-release version on main (always -nightly, e.g. 3.2.0-nightly) -> 3.2.0-nightly
 	# Extract just the numeric patch part (e.g., "0-beta" -> "0")
 	patch=$(echo $patch_full | tr "-" "\n" | sed -n 1p)
 	nightly_version="${major}.${minor}.${patch}-nightly"

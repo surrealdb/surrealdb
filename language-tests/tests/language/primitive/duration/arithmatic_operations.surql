@@ -41,19 +41,19 @@ error = 'Failed to compute: "584942417355y3w5d7h15s999ms999µs999ns + 1ns", as t
 value = "20s"
 
 [[test.results]]
-error = "Cannot perform multiplication with '1s' and '2s'"
+error = "Cannot perform multiplication with 'duration' and 'duration'"
 
 [[test.results]]
-error = "Cannot perform remainder with '1h1s' and '1s'"
+error = "Cannot perform remainder with 'duration' and 'duration'"
 
 [[test.results]]
-error = "Cannot raise the value '1s' with '2s'"
+error = "Cannot raise the value 'duration' with 'duration'"
 
 [[test.results]]
 value = "1s..2s"
 
 [[test.results]]
-error = "Cannot negate the value '1s'"
+error = "Cannot negate the value 'duration'"
 
 [[test.results]]
 value = "1s"

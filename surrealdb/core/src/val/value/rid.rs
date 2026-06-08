@@ -3,12 +3,14 @@ use crate::val::Value;
 
 impl Value {
 	pub fn rid(&self) -> Value {
-		self.pick(&*ID)
+		self.pick(&ID)
 	}
 }
 
 #[cfg(test)]
 mod tests {
+
+	use surrealdb_strand::Strand;
 
 	use super::*;
 	use crate::syn;
@@ -32,7 +34,7 @@ mod tests {
 		let val = parse_val!("{ id: test:id, test: { other: null, something: 123 } }");
 		let res = Value::RecordId(RecordId {
 			table: "test".into(),
-			key: RecordIdKey::String("id".to_owned()),
+			key: RecordIdKey::String(Strand::new_static("id")),
 		});
 		assert_eq!(res, val.rid());
 	}

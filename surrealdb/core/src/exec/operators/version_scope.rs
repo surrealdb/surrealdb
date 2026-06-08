@@ -4,7 +4,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::{
@@ -37,9 +36,6 @@ impl VersionScope {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for VersionScope {
 	fn name(&self) -> &'static str {
 		"VersionScope"
@@ -82,8 +78,8 @@ impl ExecOperator for VersionScope {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let version_expr = self.version.clone();
-		let inner = self.inner.clone();
+		let version_expr = Arc::clone(&self.version);
+		let inner = Arc::clone(&self.inner);
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {

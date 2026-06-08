@@ -300,6 +300,7 @@ impl SurrealismPackage {
 		})
 	}
 
+	#[allow(clippy::needless_pass_by_value)] // Public API: keeps caller ergonomics for `pack(out, …)`.
 	pub fn pack(&self, output: PathBuf, fs_dir: Option<&Path>) -> SurrealismResult<()> {
 		if output.extension().and_then(|s| s.to_str()) != Some("surli") {
 			return Err(SurrealismError::Other(anyhow::anyhow!(

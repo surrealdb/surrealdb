@@ -525,8 +525,8 @@ impl ScalarFunction for SearchRrf {
 				for mut o in doc.2 {
 					obj.append(&mut o.0);
 				}
-				obj.insert("id".to_string(), doc.1);
-				obj.insert("rrf_score".to_string(), Value::Number(Number::Float(doc.0)));
+				obj.insert("id", doc.1);
+				obj.insert("rrf_score", Value::Number(Number::Float(doc.0)));
 				result_array.push(Value::Object(obj));
 			}
 			// Min-heap pop yields ascending order; reverse for descending score order
@@ -777,8 +777,8 @@ impl ScalarFunction for SearchLinear {
 				for mut o in doc.2 {
 					obj.append(&mut o.0);
 				}
-				obj.insert("id".to_string(), doc.1);
-				obj.insert("linear_score".to_string(), Value::Number(Number::Float(doc.0)));
+				obj.insert("id", doc.1);
+				obj.insert("linear_score", Value::Number(Number::Float(doc.0)));
 				result_array.push(Value::Object(obj));
 			}
 			// Min-heap pop yields ascending order; reverse for descending score order

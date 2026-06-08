@@ -10,11 +10,18 @@ use crate::err::Error;
 use crate::expr::Expr;
 use crate::val::{IndexFormat, Set, Value};
 
-#[revisioned(revision = 1)]
+/// - **Rev 1** — `u16 revision || Vec<Value>` (length-prefixed). Byte-identical to the legacy
+///   on-disk encoding.
+/// - **Rev 2** — optimised envelope (`u16 revision || u32_le payload_length`), inner `Vec` written
+///   via the indexed-seq prologue past `OFFSET_TABLE_MIN_LEN = 8`. Walker descent stays
+///   zero-allocation through the Wire-repr fast path (skip + borrow). Walker exposes
+///   `element_bytes(i)` for O(1) random access on the indexed path; sub-threshold arrays fall back
+///   to a linear walk of the legacy body.
+#[revisioned(revision(1), revision(2, optimised))]
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub(crate) struct Array(pub(crate) Vec<Value>);
+pub(crate) struct Array(#[revision(indexed_seq)] pub(crate) Vec<Value>);
 
 impl<T> From<Vec<T>> for Array
 where
@@ -118,8 +125,8 @@ impl Array {
 		self
 	}
 
-	// Removes all values in the array from those in a BTreeSet which are equal to a value.
-	pub fn remove_all_set(mut self, other: &BTreeSet<Value>) -> Self {
+	/// Removes all values in the array that appear in `other`.
+	pub fn remove_all_set(mut self, other: &Set) -> Self {
 		self.retain(|x| !other.contains(x));
 		self
 	}

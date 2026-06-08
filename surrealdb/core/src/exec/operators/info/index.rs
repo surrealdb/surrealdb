@@ -1,14 +1,13 @@
-//! Index INFO operator - returns index building status.
+//! Index INFO operator - returns index build status.
 //!
 //! Implements INFO FOR INDEX name ON TABLE table [STRUCTURE] which returns
-//! information about whether an index is currently being built.
+//! cluster-visible index build status.
 //!
-//! Note: The index builder status is only available in certain execution contexts.
+//! Note: Index build status is only available in certain execution contexts.
 //! When not available, an empty object is returned.
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::ToSql;
 
@@ -20,11 +19,12 @@ use crate::exec::{
 	ValueBatchStream,
 };
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Object, TableName, Value};
+use crate::kvs::index::index_building_info;
+use crate::val::{TableName, Value};
 
 /// Index INFO operator.
 ///
-/// Returns information about whether an index is currently being built.
+/// Returns cluster-visible index build status.
 #[derive(Debug)]
 pub struct IndexInfoPlan {
 	/// Index name expression
@@ -50,9 +50,6 @@ impl IndexInfoPlan {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for IndexInfoPlan {
 	fn name(&self) -> &'static str {
 		"InfoIndex"
@@ -90,8 +87,8 @@ impl ExecOperator for IndexInfoPlan {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let index = self.index.clone();
-		let table = self.table.clone();
+		let index = Arc::clone(&self.index);
+		let table = Arc::clone(&self.table);
 		let ctx = ctx.clone();
 
 		Ok(Box::pin(stream::once(async move {
@@ -120,7 +117,7 @@ async fn execute_index_info(
 		.ok_or_else(|| anyhow::anyhow!("Options not available in execution context"))?;
 
 	// Allowed to run?
-	opt.is_allowed(Action::View, ResourceKind::Actor, &crate::expr::Base::Db)?;
+	ctx.is_allowed(Action::View, ResourceKind::Actor, crate::expr::Base::Db)?;
 
 	// Evaluate the index and table name expressions
 	let eval_ctx = EvalContext::from_exec_ctx(ctx);
@@ -131,22 +128,12 @@ async fn execute_index_info(
 	let table =
 		TableName::new(table_value.coerce_to::<String>().map_err(|e| anyhow::anyhow!("{e}"))?);
 
-	// Get the index builder from the frozen context
 	let frozen_ctx = ctx.ctx();
-	if let Some(ib) = frozen_ctx.get_index_builder() {
-		// Get namespace and database IDs
-		let (ns, db) = frozen_ctx.expect_ns_db_ids(opt).await?;
-		// Get the transaction
-		let txn = ctx.txn();
-		// Obtain the index definition
-		let ix = txn.expect_tb_index(ns, db, &table, &index).await?;
-		// Get the building status
-		let status = ib.get_status(ns, db, &ix).await;
-		let mut out = Object::default();
-		out.insert("building".to_string(), status.into());
-		return Ok(out.into());
-	}
-
-	// Fallback: return empty object if index builder not available
-	Ok(Object::default().into())
+	// Get namespace and database IDs
+	let (ns, db) = frozen_ctx.expect_ns_db_ids(opt).await?;
+	// Get the transaction
+	let txn = ctx.txn();
+	// Obtain the index definition
+	let ix = txn.expect_tb_index(ns, db, &table, &index).await?;
+	Ok(index_building_info(&txn, ns, db, &ix).await?)
 }

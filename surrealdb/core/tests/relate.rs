@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
@@ -328,6 +330,6 @@ async fn relate_enforced() -> Result<()> {
 	}",
 	)
 	.unwrap();
-	t.expect_value(info)?;
+	t.expect_value(&info)?;
 	Ok(())
 }

@@ -68,6 +68,19 @@ impl ObjectKey {
 	pub fn as_str(&self) -> &str {
 		&self.0
 	}
+
+	/// Reject any key that contains a path-traversal segment. Without this
+	/// check a key like `/../other.txt` (direct bucket) or
+	/// `/../../../other_ns/other_db/other_bucket/secret` (global PrefixedStore
+	/// bucket) would resolve outside the logical bucket prefix.
+	pub fn check_no_traversal(&self) -> Result<(), String> {
+		for segment in self.0.split('/') {
+			if segment == ".." || segment == "." {
+				return Err(format!("object key '{}' contains a path-traversal segment", self.0));
+			}
+		}
+		Ok(())
+	}
 }
 
 impl From<ObjectKey> for Value {

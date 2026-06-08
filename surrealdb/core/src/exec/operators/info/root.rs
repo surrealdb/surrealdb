@@ -11,7 +11,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::ToSql;
 
@@ -51,9 +50,6 @@ impl RootInfoPlan {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for RootInfoPlan {
 	fn name(&self) -> &'static str {
 		"InfoRoot"
@@ -116,13 +112,7 @@ async fn execute_root_info(
 	structured: bool,
 	version: Option<&dyn PhysicalExpr>,
 ) -> crate::expr::FlowResult<Value> {
-	let root = ctx.root();
-	let opt = root
-		.options
-		.as_ref()
-		.ok_or_else(|| anyhow::anyhow!("Options not available in execution context"))?;
-
-	opt.is_allowed(Action::View, ResourceKind::Any, &crate::expr::Base::Root)?;
+	ctx.is_allowed(Action::View, ResourceKind::Any, crate::expr::Base::Root)?;
 
 	let version = match version {
 		Some(v) => {
@@ -142,60 +132,60 @@ async fn execute_root_info(
 
 	if structured {
 		let object = map! {
-			"accesses".to_string() => process(txn.all_root_accesses(version).await?),
-			"defaults".to_string() => txn.get_default_config().await?
+			"accesses" => process(&txn.all_root_accesses(version).await?),
+			"defaults" => txn.get_default_config().await?
 				.map(|x| x.as_ref().clone().structure())
 				.unwrap_or_else(|| Value::Object(Default::default())),
-			"namespaces".to_string() => process(txn.all_ns(version).await?),
-			"nodes".to_string() => process(txn.all_nodes().await?),
-			"system".to_string() => system().await,
-			"users".to_string() => process(txn.all_root_users(version).await?),
-			"config".to_string() => opt.dynamic_configuration().clone().structure()
+			"namespaces" => process(&txn.all_ns(version).await?),
+			"nodes" => process(&txn.all_nodes().await?),
+			"system" => system().await,
+			"users" => process(&txn.all_root_users(version).await?),
+			"config" => ctx.ctx().dynamic_configuration().clone().structure()
 		};
-		Ok(Value::Object(Object(object)))
+		Ok(Value::Object(Object::from(object)))
 	} else {
 		let object = map! {
-			"accesses".to_string() => {
+			"accesses" => {
 				let mut out = Object::default();
 				for v in txn.all_root_accesses(version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"defaults".to_string() => txn.get_default_config().await?
+			"defaults" => txn.get_default_config().await?
 				.map(|x| x.as_ref().clone().structure())
 				.unwrap_or_else(|| Value::Object(Default::default())),
-			"namespaces".to_string() => {
+			"namespaces" => {
 				let mut out = Object::default();
 				for v in txn.all_ns(version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"nodes".to_string() => {
+			"nodes" => {
 				let mut out = Object::default();
 				for v in txn.all_nodes().await?.iter() {
 					out.insert(v.id.to_string(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"system".to_string() => system().await,
-			"users".to_string() => {
+			"system" => system().await,
+			"users" => {
 				let mut out = Object::default();
 				for v in txn.all_root_users(version).await?.iter() {
 					out.insert(v.name.clone(), v.to_sql().into());
 				}
 				out.into()
 			},
-			"config".to_string() => {
-				opt.dynamic_configuration().clone().structure()
+			"config" => {
+				ctx.ctx().dynamic_configuration().clone().structure()
 			}
 		};
-		Ok(Value::Object(Object(object)))
+		Ok(Value::Object(Object::from(object)))
 	}
 }
 
-fn process<T>(a: Arc<[T]>) -> Value
+fn process<T>(a: &Arc<[T]>) -> Value
 where
 	T: InfoStructure + Clone,
 {
@@ -205,11 +195,11 @@ where
 async fn system() -> Value {
 	let info = INFORMATION.lock().await;
 	Value::from(map! {
-		"available_parallelism".to_string() => info.available_parallelism.into(),
-		"cpu_usage".to_string() => info.cpu_usage.into(),
-		"load_average".to_string() => info.load_average.iter().map(|x| Value::from(*x)).collect::<Vec<_>>().into(),
-		"memory_usage".to_string() => info.memory_usage.into(),
-		"physical_cores".to_string() => info.physical_cores.into(),
-		"memory_allocated".to_string() => info.memory_allocated.into(),
+		"available_parallelism" => info.available_parallelism.into(),
+		"cpu_usage" => info.cpu_usage.into(),
+		"load_average" => info.load_average.iter().map(|x| Value::from(*x)).collect::<Vec<_>>().into(),
+		"memory_usage" => info.memory_usage.into(),
+		"physical_cores" => info.physical_cores.into(),
+		"memory_allocated" => info.memory_allocated.into(),
 	})
 }

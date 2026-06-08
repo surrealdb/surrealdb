@@ -8,6 +8,7 @@ use futures_util::{SinkExt, TryStreamExt};
 use http::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use surrealdb_core::cnf::CommonConfig;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::oneshot;
@@ -150,7 +151,8 @@ impl Socket {
 				// First of all we convert the JSON type to a string.
 				let json = message.to_string();
 				// Then we parse the JSON in to SurrealQL.
-				let surrealql = surrealdb_core::syn::value_legacy_strand(&json)?;
+				let surrealql =
+					surrealdb_core::syn::value_legacy_strand(&json, &CommonConfig::default())?;
 				// Then we convert the SurrealQL in to CBOR.
 				let cbor = surrealdb_core::rpc::format::cbor::encode(surrealql)?;
 				// THen output the message.
@@ -180,7 +182,7 @@ impl Socket {
 						// a serde_json::Value so that test assertions work.
 						// First of all we deserialize the CBOR data.
 						// Then we convert it to a SurrealQL Value.
-						let msg = surrealdb_core::rpc::format::cbor::decode(msg.as_ref())?;
+						let msg = surrealdb_core::rpc::format::cbor::decode(msg.as_ref(), 100)?;
 						// Then we convert the SurrealQL to JSON.
 						let msg = msg.into_json_value();
 						// Then output the response.
@@ -386,6 +388,33 @@ impl Socket {
 			Ok(res)
 		})
 		.await?
+	}
+
+	/// Wait up to `timeout` for a LIVE query notification matching `live_id`.
+	/// Returns `true` if such a notification arrived in the window, `false`
+	/// on timeout. Intervening non-matching messages are consumed and ignored.
+	///
+	/// Use this for both the positive case (LIVE preserved → expect `true`)
+	/// and the negative case (LIVE torn down → expect `false`). Calling
+	/// `receive_all_other_messages(0, _)` for a negative assertion is a no-op:
+	/// the helper returns `Ok(vec![])` synchronously without ever draining
+	/// the channel.
+	pub async fn wait_for_notification_from_lq(
+		&mut self,
+		live_id: &str,
+		timeout: Duration,
+	) -> bool {
+		let deadline = tokio::time::Instant::now() + timeout;
+		loop {
+			match tokio::time::timeout_at(deadline, self.receive_other_message()).await {
+				Ok(Ok(msg)) => {
+					if super::is_notification_from_lq(&msg, live_id) {
+						return true;
+					}
+				}
+				_ => return false,
+			}
+		}
 	}
 
 	/// Send a USE message to the server and check the response

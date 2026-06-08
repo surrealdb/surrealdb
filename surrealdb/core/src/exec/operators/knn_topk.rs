@@ -17,7 +17,6 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 use surrealdb_types::ToSql;
 
@@ -126,9 +125,6 @@ impl KnnTopK {
 		self
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for KnnTopK {
 	fn name(&self) -> &'static str {
 		"KnnTopK"
@@ -168,6 +164,7 @@ impl ExecOperator for KnnTopK {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.root().ctx.config.operator_buffer_size,
 		);
 		let field = self.field.clone();
 		let query_vector = self.query_vector.clone();

@@ -77,19 +77,19 @@ impl Parser<'_> {
 						self.pop_peek();
 						let lookup =
 							stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Reference)).await?;
-						Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
+						Expr::Idiom(Idiom(vec![Part::Graph(Box::new(lookup))]))
 					} else if peek.kind == t!("-") {
 						self.pop_peek();
 						let lookup = stk
 							.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::In)))
 							.await?;
-						Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
+						Expr::Idiom(Idiom(vec![Part::Graph(Box::new(lookup))]))
 					} else if peek.kind == t!("->") {
 						self.pop_peek();
 						let lookup = stk
 							.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Both)))
 							.await?;
-						Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
+						Expr::Idiom(Idiom(vec![Part::Graph(Box::new(lookup))]))
 					} else {
 						unexpected!(self, token, "`<-`, `<->` or `<~`")
 					}
@@ -137,7 +137,7 @@ impl Parser<'_> {
 					Expr::Literal(self.reparse_legacy_strand(stk).await?)
 				} else {
 					let s = self.parse_string_lit()?;
-					Expr::Literal(Literal::String(s))
+					Expr::Literal(Literal::String(s.into()))
 				}
 			}
 			t!("+") | t!("-") | TokenKind::Digits => self.parse_number_like_prime()?,
@@ -159,7 +159,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				let lookup =
 					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Out))).await?;
-				Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
+				Expr::Idiom(Idiom(vec![Part::Graph(Box::new(lookup))]))
 			}
 			t!("[") => {
 				self.pop_peek();
@@ -318,9 +318,9 @@ impl Parser<'_> {
 					}
 					_ => {
 						if self.table_as_field {
-							Expr::Idiom(Idiom(vec![Part::Field(self.parse_ident()?)]))
+							Expr::Idiom(Idiom(vec![Part::Field(self.parse_ident_str()?.into())]))
 						} else {
-							Expr::Table(self.parse_ident()?)
+							Expr::Table(self.parse_ident_str()?.into())
 						}
 					}
 				}
@@ -334,7 +334,9 @@ impl Parser<'_> {
 		if self.peek_continues_idiom() {
 			match value {
 				Expr::Idiom(Idiom(x)) => self.parse_remaining_value_idiom(stk, x).await,
-				Expr::Table(x) => self.parse_remaining_value_idiom(stk, vec![Part::Field(x)]).await,
+				Expr::Table(x) => {
+					self.parse_remaining_value_idiom(stk, vec![Part::Field(x.into())]).await
+				}
 				x => self.parse_remaining_value_idiom(stk, vec![Part::Start(x)]).await,
 			}
 		} else {
@@ -379,9 +381,8 @@ impl Parser<'_> {
 	/// Expects the starting `|` already be eaten and its span passed as an
 	/// argument.
 	pub(super) fn parse_mock(&mut self, start_span: Span) -> ParseResult<Mock> {
-		let name = self.parse_ident()?;
+		let name: crate::val::TableName = self.parse_ident_str()?.into();
 		expected!(self, t!(":"));
-		// TODO: limit these to i64 range, it is weird that these can exceed normal number range.
 		let start = match self.peek_kind() {
 			t!("..") => {
 				self.pop_peek();
@@ -542,7 +543,7 @@ impl Parser<'_> {
 		}
 		self.expect_closing_delimiter(t!(")"), start)?;
 
-		// Ensure that `((..).a).b` is broken up into seperate idioms.
+		// Ensure that `((..).a).b` is broken up into separate idioms.
 		if self.peek_continues_idiom() {
 			self.parse_remaining_value_idiom(stk, vec![Part::Start(res)]).await
 		} else {
@@ -575,7 +576,7 @@ impl Parser<'_> {
 			return Ok(Literal::RecordId(x));
 		}
 
-		Ok(Literal::String(str.to_owned()))
+		Ok(Literal::String(str.into()))
 	}
 
 	async fn parse_script(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
@@ -665,7 +666,7 @@ mod tests {
 		let sql = "|test:1000|";
 		let out = syn::expr(sql).unwrap();
 		assert_eq!("|test:1000|", out.to_sql());
-		assert_eq!(out, Expr::Mock(Mock::Count(String::from("test"), 1000)));
+		assert_eq!(out, Expr::Mock(Mock::Count("test".into(), 1000)));
 	}
 
 	#[test]
@@ -673,10 +674,7 @@ mod tests {
 		let sql = "|test:1..1000|";
 		let out = syn::expr(sql).unwrap();
 		assert_eq!("|test:1..1000|", out.to_sql());
-		assert_eq!(
-			out,
-			Expr::Mock(Mock::Range(String::from("test"), TypedRange::from_range(1..1000)))
-		);
+		assert_eq!(out, Expr::Mock(Mock::Range("test".into(), TypedRange::from_range(1..1000))));
 	}
 
 	#[test]

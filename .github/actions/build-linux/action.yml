@@ -137,13 +137,21 @@ runs:
 
         docker load -i ${folder}/surrealdb-builder-${tag}-${{ inputs.platform }}
 
+        # Do not pass `-e RUSTFLAGS=` when unset: an empty RUSTFLAGS in the container
+        # disables `[build] rustflags` from `.cargo/config.toml` (including tokio_unstable).
+        docker_env=(
+          -e "SURREAL_BUILD_VERSION=$SURREAL_BUILD_VERSION"
+          -e "SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA"
+          -e "ORT_DOWNLOAD_URL=$ORT_DOWNLOAD_URL"
+        )
+        if [[ -n "${RUSTFLAGS:-}" ]]; then
+          docker_env+=(-e "RUSTFLAGS=${RUSTFLAGS} --cfg tokio_unstable")
+        fi
+
         docker run \
           --rm -t \
           -v $(pwd):/surrealdb \
-          -e SURREAL_BUILD_VERSION=$SURREAL_BUILD_VERSION \
-          -e SURREAL_BUILD_METADATA=$SURREAL_BUILD_METADATA \
-          -e RUSTFLAGS="${RUSTFLAGS}" \
-          -e ORT_DOWNLOAD_URL="$ORT_DOWNLOAD_URL" \
+          "${docker_env[@]}" \
           surrealdb-builder:${tag}-${{ inputs.platform }} \
             --target ${{ inputs.arch }} --no-default-features ${extra_args} --locked
 

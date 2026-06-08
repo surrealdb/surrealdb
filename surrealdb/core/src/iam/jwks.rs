@@ -1,28 +1,19 @@
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::{Arc, LazyLock};
 
 use anyhow::{Result, bail};
-use chrono::{DateTime, Duration, Utc};
+use chrono::{Duration, Utc};
 use jsonwebtoken::Algorithm::*;
 use jsonwebtoken::jwk::AlgorithmParameters::*;
 use jsonwebtoken::jwk::{Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse};
 use jsonwebtoken::{DecodingKey, Validation};
 use reqwest::{Client, Url};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::sync::RwLock;
 
 use crate::dbs::capabilities::NetTarget;
 use crate::err::Error;
 use crate::kvs::Datastore;
-
-pub(crate) type JwksCache = HashMap<String, JwksCacheEntry>;
-#[derive(Clone, Serialize, Deserialize)]
-pub(crate) struct JwksCacheEntry {
-	jwks: JwkSet,
-	time: DateTime<Utc>,
-}
+use crate::kvs::cache::ds::{CachedJwks, DatastoreCache, Entry, Lookup};
 
 #[cfg(test)]
 static CACHE_EXPIRATION: LazyLock<chrono::Duration> = LazyLock::new(|| Duration::seconds(1));
@@ -81,24 +72,23 @@ pub(super) async fn config(
 	url: &str,
 	token_alg: jsonwebtoken::Algorithm,
 ) -> Result<(DecodingKey, Validation)> {
-	// Retrieve JWKS cache
-	let cache = kvs.jwks_cache();
+	let cache = kvs.cache();
 	// Attempt to fetch relevant JWK object either from local cache or remote
 	// location
-	let jwk = match fetch_jwks_from_cache(cache, url).await {
-		Some(jwks) => {
+	let jwk = match fetch_jwks_from_cache(cache.as_ref(), url) {
+		Some(cached) => {
 			trace!("Successfully fetched JWKS object from local cache");
 			// Check that the cached JWKS object has not expired yet
-			if Utc::now().signed_duration_since(jwks.time) < *CACHE_EXPIRATION {
+			if Utc::now().signed_duration_since(cached.time) < *CACHE_EXPIRATION {
 				// Attempt to find JWK in JWKS object from local cache
-				match jwks.jwks.find(kid) {
+				match cached.jwks.find(kid) {
 					Some(jwk) => jwk.to_owned(),
 					_ => {
 						trace!(
 							"Could not find valid JWK object with key identifier '{kid}' in cached JWKS object"
 						);
 						// Check that the cached JWKS object has not been recently updated
-						if Utc::now().signed_duration_since(jwks.time) < *CACHE_COOLDOWN {
+						if Utc::now().signed_duration_since(cached.time) < *CACHE_COOLDOWN {
 							debug!("Refused to refresh cache before cooldown period is over");
 							bail!(Error::InvalidAuth); // Return opaque error
 						}
@@ -239,10 +229,9 @@ async fn find_jwk_from_url(kvs: &Datastore, url: &str, kid: &str) -> Result<Jwk>
 		bail!(Error::InvalidAuth); // Return opaque error
 	}
 
-	// Retrieve JWKS cache
-	let cache = kvs.jwks_cache();
+	let cache = kvs.cache();
 	// Attempt to fetch JWKS object from remote location
-	match fetch_jwks_from_url(cache, url).await {
+	match fetch_jwks_from_url(cache.as_ref(), url, &kvs.config().surrealdb_user_agent).await {
 		Ok(jwks) => {
 			trace!("Successfully fetched JWKS object from remote location");
 			// Attempt to find JWK in JWKS by the key identifier
@@ -301,12 +290,18 @@ fn check_capabilities_url(kvs: &Datastore, url: &str) -> Result<()> {
 
 // Attempts to fetch a JWKS object from a remote location and stores it in the
 // cache if successful
-async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Result<JwkSet> {
+async fn fetch_jwks_from_url(
+	cache: &DatastoreCache,
+	url: &str,
+	user_agent: &str,
+) -> Result<JwkSet> {
+	#[cfg(target_family = "wasm")]
+	let _ = user_agent;
 	let client = Client::new();
 	let req = client.get(url);
 	// Add a User-Agent header so that WAF rules don't reject the request
 	#[cfg(not(target_family = "wasm"))]
-	let req = req.header(reqwest::header::USER_AGENT, &*crate::cnf::SURREALDB_USER_AGENT);
+	let req = req.header(reqwest::header::USER_AGENT, user_agent);
 	#[cfg(not(target_family = "wasm"))]
 	let res = req.timeout((*REMOTE_TIMEOUT).to_std().expect("valid duration")).send().await?;
 	#[cfg(target_family = "wasm")]
@@ -323,11 +318,7 @@ async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Resul
 	match serde_json::from_slice::<JwkSet>(&jwks) {
 		Ok(jwks) => {
 			// If successful, cache the JWKS object by its URL
-			match store_jwks_in_cache(cache, jwks.clone(), url).await {
-				None => trace!("Successfully added JWKS object to local cache"),
-				Some(_) => trace!("Successfully updated JWKS object in local cache"),
-			};
-
+			store_jwks_in_cache(cache, jwks.clone(), url);
 			Ok(jwks)
 		}
 		Err(err) => {
@@ -338,30 +329,21 @@ async fn fetch_jwks_from_url(cache: &Arc<RwLock<JwksCache>>, url: &str) -> Resul
 }
 
 // Attempts to fetch a JWKS object from the local cache
-async fn fetch_jwks_from_cache(
-	cache: &Arc<RwLock<JwksCache>>,
-	url: &str,
-) -> Option<JwksCacheEntry> {
+fn fetch_jwks_from_cache(cache: &DatastoreCache, url: &str) -> Option<Arc<CachedJwks>> {
 	let path = cache_key_from_url(url);
-	let cache = cache.read().await;
-
-	cache.get(&path).cloned()
+	let entry = cache.get(&Lookup::Jwk(path.as_str()))?;
+	entry.try_into_jwk().ok()
 }
 
 // Attempts to store a JWKS object in the local cache
-async fn store_jwks_in_cache(
-	cache: &Arc<RwLock<JwksCache>>,
-	jwks: JwkSet,
-	url: &str,
-) -> Option<JwksCacheEntry> {
-	let entry = JwksCacheEntry {
+fn store_jwks_in_cache(cache: &DatastoreCache, jwks: JwkSet, url: &str) {
+	let path = cache_key_from_url(url);
+	let entry = Entry::Jwk(Arc::new(CachedJwks {
 		jwks,
 		time: Utc::now(),
-	};
-	let path = cache_key_from_url(url);
-	let mut cache = cache.write().await;
-
-	cache.insert(path, entry)
+	}));
+	cache.insert(Lookup::Jwk(path.as_str()), entry);
+	trace!("Stored JWKS object in local cache");
 }
 
 // Generates a unique cache key for a given URL string
@@ -375,8 +357,7 @@ fn cache_key_from_url(url: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-	use rand::Rng;
-	use rand::distributions::Alphanumeric;
+	use rand::distr::{Alphanumeric, SampleString};
 	use wiremock::matchers::{header, method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -385,8 +366,7 @@ mod tests {
 
 	// Use unique path to prevent accidental cache reuse
 	fn random_path() -> String {
-		let rng = rand::thread_rng();
-		rng.sample_iter(&Alphanumeric).take(8).map(char::from).collect()
+		Alphanumeric.sample_string(&mut rand::rng(), 8)
 	}
 
 	static DEFAULT_JWKS: LazyLock<JwkSet> = LazyLock::new(|| {

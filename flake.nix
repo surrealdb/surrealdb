@@ -46,13 +46,18 @@
           flake = self;
         };
 
+        # Read the channel from rust-toolchain.toml so the Nix toolchain stays in
+        # sync automatically. Update rustManifestSha256 whenever the channel is
+        # bumped: set it to lib.fakeHash, run `nix build`, then copy the expected
+        # hash from the error message.
+        rustChannel = (builtins.fromTOML (builtins.readFile ./rust-toolchain.toml)).toolchain.channel;
+        rustManifestSha256 = "sha256-gh/xTkxKHL4eiRXzWv8KP7vfjSk61Iq48x47BEDFgfk=";
+
         mkRustToolchain = {target, extraComponents ? []}:
           with fenix.packages.${system};
           combine ([
-            stable.rustc
-            stable.cargo
-            targets.${target}.stable.rust-std
-            stable.clippy
+            (fromToolchainFile { file = ./rust-toolchain.toml; sha256 = rustManifestSha256; })
+            (targets.${target}.toolchainOf { channel = rustChannel; sha256 = rustManifestSha256; }).rust-std
           ] ++ extraComponents);
 
         buildPlatform = pkgs.stdenv.buildPlatform.config;
@@ -109,7 +114,11 @@
             spec = (import ./pkg/nix/spec/${target}.nix) {
               inherit pkgs target util;
             };
-            extraComponents = with fenix.packages.${system}; [ targets.${target}.stable.rust-src stable.rust-analyzer targets.${target}.stable.rustfmt ];
+            extraComponents = with fenix.packages.${system}; [
+              (toolchainOf { channel = rustChannel; sha256 = rustManifestSha256; }).rust-src
+              (toolchainOf { channel = rustChannel; sha256 = rustManifestSha256; }).rust-analyzer
+              (targets.${target}.toolchainOf { channel = rustChannel; sha256 = rustManifestSha256; }).rustfmt
+            ];
             rustToolchain = mkRustToolchain { inherit target extraComponents; };
             buildSpec = spec.buildSpec;
           in pkgs.mkShell (buildSpec // {

@@ -5,16 +5,17 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::{StreamExt, stream};
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::exec::context::{ContextLevel, ExecutionContext};
 use crate::exec::{
-	AccessMode, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics, ValueBatchStream,
-	buffer_stream,
+	AccessMode, BoxFut, CardinalityHint, ExecOperator, FlowResult, OperatorMetrics,
+	ValueBatchStream, buffer_stream,
 };
+use crate::expr::Kind;
 use crate::val::{Array, Value};
 
 /// LET operator - binds a value to a parameter.
@@ -29,7 +30,11 @@ use crate::val::{Array, Value};
 #[derive(Debug)]
 pub struct LetPlan {
 	/// Parameter name to bind (without $)
-	pub name: String,
+	pub name: Strand,
+	/// Optional declared type for the binding — when present, the computed
+	/// value is coerced to this kind before binding (mirrors
+	/// `SetStatement::compute`).
+	pub kind: Option<Kind>,
 	/// Metrics for EXPLAIN ANALYZE
 	pub(crate) metrics: Arc<OperatorMetrics>,
 	/// Value to bind - either an ExprPlan for scalars or a query plan
@@ -37,24 +42,32 @@ pub struct LetPlan {
 }
 
 impl LetPlan {
-	pub(crate) fn new(name: String, value: Arc<dyn ExecOperator>) -> Self {
+	pub(crate) fn new(name: Strand, kind: Option<Kind>, value: Arc<dyn ExecOperator>) -> Self {
 		Self {
 			name,
+			kind,
 			value,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
 	}
-}
 
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
+	fn coerce(&self, value: Value) -> Result<Value, Error> {
+		match &self.kind {
+			Some(kind) => value.coerce_to_kind(kind).map_err(|e| Error::SetCoerce {
+				name: self.name.to_string(),
+				error: Box::new(e),
+			}),
+			None => Ok(value),
+		}
+	}
+}
 impl ExecOperator for LetPlan {
 	fn name(&self) -> &'static str {
 		"Let"
 	}
 
 	fn attrs(&self) -> Vec<(String, String)> {
-		vec![("name".to_string(), format!("${}", self.name))]
+		vec![("name".to_string(), format!("${}", self.name.as_str()))]
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -82,36 +95,48 @@ impl ExecOperator for LetPlan {
 		true
 	}
 
-	async fn output_context(&self, input: &ExecutionContext) -> Result<ExecutionContext, Error> {
-		// Execute the value plan and collect results
-		// Handle control flow signals explicitly
-		let stream = match self.value.execute(input) {
-			Ok(s) => buffer_stream(s, self.value.access_mode(), self.value.cardinality_hint()),
-			Err(crate::expr::ControlFlow::Return(v)) => {
-				// If value expression returns early, use that value
-				return Ok(input.with_param(self.name.clone(), v));
-			}
-			Err(crate::expr::ControlFlow::Break | crate::expr::ControlFlow::Continue) => {
-				return Err(Error::InvalidControlFlow);
-			}
-			Err(crate::expr::ControlFlow::Err(e)) => {
-				return Err(Error::Thrown(e.to_string()));
-			}
-		};
-		let results = collect_stream(stream).await.map_err(|e| Error::Thrown(e.to_string()))?;
+	fn output_context<'a>(
+		&'a self,
+		input: &'a ExecutionContext,
+	) -> BoxFut<'a, Result<ExecutionContext, Error>> {
+		Box::pin(async move {
+			// Execute the value plan and collect results
+			// Handle control flow signals explicitly
+			let stream = match self.value.execute(input) {
+				Ok(s) => buffer_stream(
+					s,
+					self.value.access_mode(),
+					self.value.cardinality_hint(),
+					input.root().ctx.config.operator_buffer_size,
+				),
+				Err(crate::expr::ControlFlow::Return(v)) => {
+					// If value expression returns early, use that value
+					let coerced = self.coerce(v)?;
+					return Ok(input.with_param(self.name.clone(), coerced));
+				}
+				Err(crate::expr::ControlFlow::Break | crate::expr::ControlFlow::Continue) => {
+					return Err(Error::InvalidControlFlow);
+				}
+				Err(crate::expr::ControlFlow::Err(e)) => {
+					return Err(Error::Thrown(e.to_string()));
+				}
+			};
+			let results = collect_stream(stream).await.map_err(|e| Error::Thrown(e.to_string()))?;
 
-		// If the value is a scalar expression, use the single result directly
-		// Otherwise, wrap the results in an array
-		let computed_value = if self.value.is_scalar() {
-			// Scalar expressions return exactly one value
-			results.into_iter().next().unwrap_or(Value::None)
-		} else {
-			// Queries return results as an array
-			Value::Array(Array(results))
-		};
+			// If the value is a scalar expression, use the single result directly
+			// Otherwise, wrap the results in an array
+			let computed_value = if self.value.is_scalar() {
+				// Scalar expressions return exactly one value
+				results.into_iter().next().unwrap_or(Value::None)
+			} else {
+				// Queries return results as an array
+				Value::Array(Array(results))
+			};
 
-		// Add the parameter to the context
-		Ok(input.with_param(self.name.clone(), computed_value))
+			// Apply declared type coercion (mirrors `SetStatement::compute`).
+			let coerced = self.coerce(computed_value)?;
+			Ok(input.with_param(self.name.clone(), coerced))
+		})
 	}
 
 	fn children(&self) -> Vec<&Arc<dyn ExecOperator>> {
@@ -153,7 +178,7 @@ async fn collect_stream(stream: ValueBatchStream) -> anyhow::Result<Vec<Value>> 
 impl ToSql for LetPlan {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		f.push_str("LET $");
-		f.push_str(&self.name);
+		f.push_str(self.name.as_str());
 		f.push_str(" = ");
 		if self.value.is_scalar() {
 			f.push_str("<expr>");

@@ -292,60 +292,56 @@ impl Claims {
 		let mut out = Object::default();
 		// Add iss field if set
 		if let Some(iss) = self.iss {
-			out.insert("iss".to_string(), iss.into());
+			out.insert("iss", iss.into());
 		}
 		// Add sub field if set
 		if let Some(sub) = self.sub {
-			out.insert("sub".to_string(), sub.into());
+			out.insert("sub", sub.into());
 		}
 		// Add aud field if set
 		if let Some(aud) = self.aud {
 			match aud {
-				Audience::Single(v) => out.insert("aud".to_string(), Value::String(v)),
-				Audience::Multiple(v) => out.insert(
-					"aud".to_string(),
-					v.into_iter().map(Value::String).collect::<Vec<_>>().into(),
-				),
+				Audience::Single(v) => out.insert("aud", Value::String(v.into())),
+				Audience::Multiple(v) => {
+					out.insert("aud", v.into_iter().map(Value::from).collect::<Vec<_>>().into())
+				}
 			};
 		}
 		// Add iat field if set
 		if let Some(iat) = self.iat {
-			out.insert("iat".to_string(), iat.into());
+			out.insert("iat", iat.into());
 		}
 		// Add nbf field if set
 		if let Some(nbf) = self.nbf {
-			out.insert("nbf".to_string(), nbf.into());
+			out.insert("nbf", nbf.into());
 		}
 		// Add exp field if set
 		if let Some(exp) = self.exp {
-			out.insert("exp".to_string(), exp.into());
+			out.insert("exp", exp.into());
 		}
 		// Add jti field if set
 		if let Some(jti) = self.jti {
-			out.insert("jti".to_string(), jti.into());
+			out.insert("jti", jti.into());
 		}
 		// Add NS field if set
 		if let Some(ns) = self.ns {
-			out.insert("NS".to_string(), ns.into());
+			out.insert("NS", ns.into());
 		}
 		// Add DB field if set
 		if let Some(db) = self.db {
-			out.insert("DB".to_string(), db.into());
+			out.insert("DB", db.into());
 		}
 		// Add AC field if set
 		if let Some(ac) = self.ac {
-			out.insert("AC".to_string(), ac.into());
+			out.insert("AC", ac.into());
 		}
 		// Add ID field if set
 		if let Some(id) = self.id {
-			out.insert("ID".to_string(), id.into());
+			out.insert("ID", id.into());
 		}
 		// Add RL field if set
 		if let Some(role) = self.roles {
-			out.insert(
-				"RL".to_string(),
-				role.into_iter().map(Value::from).collect::<Vec<_>>().into(),
-			);
+			out.insert("RL", role.into_iter().map(Value::from).collect::<Vec<_>>().into());
 		}
 		// Add custom claims if set
 		if let Some(custom_claims) = self.custom_claims {

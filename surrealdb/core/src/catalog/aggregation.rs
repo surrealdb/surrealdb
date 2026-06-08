@@ -45,6 +45,7 @@ use std::mem;
 use ahash::HashMap;
 use anyhow::{Result, bail, ensure};
 use revision::revisioned;
+use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
 
 use crate::err::Error;
@@ -62,7 +63,7 @@ use crate::val::{Array, Datetime, Number, Object, TryAdd as _, TryFloatDiv, TryM
 /// An expression which will be aggregated over for each group.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Aggregation {
+pub(crate) enum Aggregation {
 	Count,
 	/// The usizes are index into the exprs field on the aggregate collector and represent the
 	/// expression which was fed as an argument to the aggregate expression
@@ -79,7 +80,7 @@ pub enum Aggregation {
 }
 
 impl Aggregation {
-	pub fn to_stat(&self) -> AggregationStat {
+	pub(crate) fn to_stat(&self) -> AggregationStat {
 		match *self {
 			Aggregation::Count => AggregationStat::Count {
 				count: 0,
@@ -136,7 +137,7 @@ impl Aggregation {
 /// A enum containing the data for an aggregation.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq)]
-pub enum AggregationStat {
+pub(crate) enum AggregationStat {
 	Count {
 		count: i64,
 	},
@@ -190,7 +191,7 @@ pub enum AggregationStat {
 
 impl AggregationStat {
 	/// Returns a per group record count this aggregation list keeps track of, if any.
-	pub fn get_count(aggregation_stats: &[AggregationStat]) -> Option<i64> {
+	pub(crate) fn get_count(aggregation_stats: &[AggregationStat]) -> Option<i64> {
 		aggregation_stats.iter().find_map(|x| match x {
 			AggregationStat::Count {
 				count,
@@ -222,27 +223,37 @@ pub fn write_group_field_name(s: &mut String, idx: usize) {
 	write!(s, "_g{}", idx).expect("writing into a string cannot fail");
 }
 
+/// Format `{prefix}{idx}` directly into an inline `Strand`, bypassing the intermediate heap
+/// `String` that `Strand::from(format!(...))` would otherwise produce.
+///
+/// The public `aggregate_field_name` / `group_field_name` helpers below produce keys of the form
+/// `_a{idx}` and `_g{idx}`. Even `usize::MAX` formats to 20 decimal digits on 64-bit, so the
+/// 2-byte prefix + digits always fit inside [`INLINE_CAP`]. The expectation below is therefore
+/// unreachable in practice; it exists purely as a safety net so the function stays total.
+fn format_indexed_strand(prefix: &str, idx: usize) -> Strand {
+	Strand::from_display(format_args!("{prefix}{idx}"))
+}
+
 /// Returns the name of aggregate n used within the fields expression to calculate the result for
-/// the aggregate analysis
-pub fn aggregate_field_name(idx: usize) -> String {
-	let mut res = String::new();
-	write_aggregate_field_name(&mut res, idx);
-	res
+/// the aggregate analysis.
+pub fn aggregate_field_name(idx: usize) -> Strand {
+	format_indexed_strand("_a", idx)
 }
 
 /// Returns the name of group expression n used within the fields expression to calculate the result
 /// for the aggregate analysis.
-pub fn group_field_name(idx: usize) -> String {
-	let mut res = String::new();
-	write_group_field_name(&mut res, idx);
-	res
+pub fn group_field_name(idx: usize) -> Strand {
+	format_indexed_strand("_g", idx)
 }
 
 /// Updates the aggregation states from the results in the arguments array.
 ///
 /// Assumes the correct number of arguments are in the arguments array as required by the
 /// aggregation stats.
-pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationStat]) -> Result<()> {
+pub(crate) fn add_to_aggregation_stats(
+	arguments: &[Value],
+	stats: &mut [AggregationStat],
+) -> Result<()> {
 	for stat in stats {
 		match stat {
 			AggregationStat::Count {
@@ -378,7 +389,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				};
 
 				if *max < *d {
-					*max = d.clone();
+					*max = *d;
 				}
 			}
 			AggregationStat::TimeMin {
@@ -396,7 +407,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				};
 
 				if *min > *d {
-					*min = d.clone();
+					*min = *d;
 				}
 			}
 			AggregationStat::Accumulate {
@@ -412,7 +423,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 
 /// Creates object that can act as a document to calculate the final value for an aggregated
 /// statement.
-pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Object {
+pub(crate) fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Object {
 	let mut res = Object::default();
 	//setup the document for final value calculation
 	for (idx, a) in stats.iter().enumerate() {
@@ -447,7 +458,11 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 				count,
 				..
 			} => {
-				let num = if *count <= 1 {
+				// Match the scalar `math::stddev` and the streaming aggregator:
+				// NaN for an empty group, 0 for a single element.
+				let num = if *count == 0 {
+					Number::from(f64::NAN)
+				} else if *count == 1 {
 					Number::from(0.0)
 				} else {
 					let mean = *sum / Number::from(*count);
@@ -466,7 +481,11 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 				count,
 				..
 			} => {
-				let num = if *count <= 1 {
+				// Match the scalar `math::variance` and the streaming aggregator:
+				// NaN for an empty group, 0 for a single element.
+				let num = if *count == 0 {
+					Number::from(f64::NAN)
+				} else if *count == 1 {
 					Number::from(0.0)
 				} else {
 					let mean = *sum / Number::from(*count);
@@ -477,11 +496,11 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 			AggregationStat::TimeMax {
 				max,
 				..
-			} => max.clone().into(),
+			} => (*max).into(),
 			AggregationStat::TimeMin {
 				min,
 				..
-			} => min.clone().into(),
+			} => (*min).into(),
 			AggregationStat::Accumulate {
 				values,
 				..
@@ -959,7 +978,7 @@ impl MutVisitor for ParentRewritor {
 /// Enum for the field expression of an aggregate.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum AggregateFields {
+pub(crate) enum AggregateFields {
 	/// the selector had a `VALUE` clause
 	Value(Expr),
 	/// Normal selector.
@@ -969,15 +988,15 @@ pub enum AggregateFields {
 /// A struct which contains an anaylzed aggregation and data on how to compute that aggregation.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct AggregationAnalysis {
+pub(crate) struct AggregationAnalysis {
 	/// The expressions which calculate the arguments to an aggregate.
-	pub aggregate_arguments: Vec<Expr>,
+	pub(crate) aggregate_arguments: Vec<Expr>,
 	/// The aggregated expressions that are calculated.
-	pub aggregations: Vec<Aggregation>,
+	pub(crate) aggregations: Vec<Aggregation>,
 	/// The expressions which identify the group.
-	pub group_expressions: Vec<Expr>,
+	pub(crate) group_expressions: Vec<Expr>,
 	/// The expression to compute the resulting object from the calculated aggregates.
-	pub fields: AggregateFields,
+	pub(crate) fields: AggregateFields,
 }
 
 impl AggregationAnalysis {
@@ -988,7 +1007,7 @@ impl AggregationAnalysis {
 	/// there is no aggregate which maintains a per group record count and will reject any
 	/// accumulate aggregations as we currently don't have a way to support them on
 	/// materialized views.
-	pub fn analyze_fields_groups(
+	pub(crate) fn analyze_fields_groups(
 		fields: &Fields,
 		groups: &Groups,
 		materialized_view: bool,

@@ -164,7 +164,8 @@ impl SurrealProcess {
 		self.assert_running_while(async {
 			let request = tokio_tungstenite::tungstenite::handshake::client::Request::builder()
 				.uri(format!("ws://127.0.0.1:{}/rpc", port))
-				.header(SEC_WEBSOCKET_PROTOCOL, surrealdb_core::api::format::FLATBUFFERS)
+				// Subprotocol short name (not the `api::format::FLATBUFFERS` MIME).
+				.header(SEC_WEBSOCKET_PROTOCOL, surrealdb_core::rpc::format::PROTOCOLS[2])
 				.header("Upgrade", "websocket")
 				.header(SEC_WEBSOCKET_VERSION, "13")
 				.header(SEC_WEBSOCKET_KEY, generate_key())

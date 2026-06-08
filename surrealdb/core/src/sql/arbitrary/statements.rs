@@ -126,7 +126,7 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineIndexStatement {
 				}
 				cols
 			}
-			Index::Hnsw(_) | Index::FullText(_) => vec![u.arbitrary()?],
+			Index::Hnsw(_) | Index::DiskAnn(_) | Index::FullText(_) => vec![u.arbitrary()?],
 			Index::Count(_) => Vec::new(),
 		};
 
@@ -284,6 +284,8 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineFieldStatement {
 			permissions,
 			comment: u.arbitrary()?,
 			reference: u.arbitrary()?,
+			graphql_alias: u.arbitrary()?,
+			graphql_deprecated: u.arbitrary()?,
 		})
 	}
 }
@@ -354,7 +356,7 @@ impl<'a> Arbitrary<'a> for Ast {
 			}) = e && let Expr::Param(ref left) = **left
 			{
 				*e = TopLevelExpr::Expr(Expr::Let(Box::new(SetStatement {
-					name: left.clone().into_string(),
+					name: left.clone().into_strand(),
 					kind: None,
 					what: (**right).clone(),
 				})))

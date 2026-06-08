@@ -12,7 +12,6 @@ use tempfile::{Builder, TempDir};
 #[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
 
-use crate::cnf::EXTERNAL_SORTING_BUFFER_LIMIT;
 use crate::dbs::plan::Explanation;
 use crate::err::Error;
 use crate::expr::order::Ordering;
@@ -25,6 +24,7 @@ pub(super) struct FileCollector {
 	reader: Option<FileReader>,
 	orders: Option<Ordering>,
 	paging: FilePaging,
+	buffer_limit: usize,
 }
 
 impl FileCollector {
@@ -35,7 +35,11 @@ impl FileCollector {
 
 	const USIZE_SIZE: usize = mem::size_of::<usize>();
 
-	pub(super) fn new(temp_dir: &Path, orders: Option<Ordering>) -> Result<Self, Error> {
+	pub(super) fn new(
+		temp_dir: &Path,
+		orders: Option<Ordering>,
+		buffer_limit: usize,
+	) -> Result<Self, Error> {
 		let dir = Builder::new().prefix("SURREAL").tempdir_in(temp_dir)?;
 		Ok(Self {
 			len: 0,
@@ -44,19 +48,20 @@ impl FileCollector {
 			orders,
 			paging: Default::default(),
 			dir,
+			buffer_limit,
 		})
 	}
 	pub(super) async fn push(&mut self, value: Value) -> Result<(), Error> {
 		if let Some(mut writer) = self.writer.take() {
 			#[cfg(not(target_family = "wasm"))]
 			let writer = spawn_blocking(move || {
-				writer.push(value)?;
+				writer.push(&value)?;
 				Ok::<FileWriter, Error>(writer)
 			})
 			.await
 			.map_err(|e| Error::Internal(format!("{e}")))??;
 			#[cfg(target_family = "wasm")]
-			writer.push(value)?;
+			writer.push(&value)?;
 			self.len += 1;
 			self.writer = Some(writer);
 			Ok(())
@@ -107,7 +112,7 @@ impl FileCollector {
 		match orders {
 			Ordering::Random => {
 				let f = move || {
-					let mut rng = rand::thread_rng();
+					let mut rng = rand::rng();
 					let mut iter = reader.into_iter();
 					// fill initial array
 					let mut res: Vec<Value> = Vec::with_capacity(num as usize);
@@ -116,16 +121,40 @@ impl FileCollector {
 					}
 
 					// Then handle the remaining values as they might need to be part of the random
-					// sampling.
-					// This implementation is taken from the IteratorRandom::choose_multiple. It is
-					// emperically tested to produce n values uniformly sampled from the iterator.
-					// TODO (DelSkayn): Figure exactly out why this is guarenteed to produce a
-					// uniform sampling.
+					// sampling. This is Vitter's Algorithm R for reservoir sampling — the same
+					// algorithm used by `IteratorRandom::choose_multiple`.
+					//
+					// Correctness: let `n = num` and let `N` be the total length of the
+					// stream. We use 1-based indexing for "the k-th item seen so far".
+					// The loop maintains the invariant that, immediately after seeing the
+					// k-th item, every item seen so far is in the reservoir with
+					// probability `n/k` (with probability `1` while `k <= n`). The fill
+					// loop above establishes the base case at `k = n` (probability `1`).
+					//
+					// In the loop below, `i` is the zero-based offset *into the remaining
+					// iterator*, so when we process this item we have just seen the
+					// `(i + n + 1)`-th item overall. Call that `k+1` where `k = i + n`.
+					// The inductive step is:
+					//
+					//   1. `idx` is drawn uniformly from `{0, 1, ..., k}` — i.e. one of `k + 1` (=
+					//      `i + 1 + n`) values — matching `rng.random_range(0..(i + 1 + num))`.
+					//   2. The new item enters the reservoir iff `idx < n` (i.e. `res.get_mut(idx)`
+					//      returns `Some`), with probability `n/(k+1)`. That is the target
+					//      inclusion probability after seeing `k + 1` items.
+					//   3. For each item already in the reservoir, the probability of being
+					//      replaced at this step is `1/(k+1)` (one specific slot among the `k+1`
+					//      equally-likely outcomes of `idx`), so the probability of survival is
+					//      `k/(k+1)`. Combined with the inductive hypothesis `n/k`, its post-step
+					//      inclusion probability is `n/k * k/(k+1) = n/(k+1)`, preserving the
+					//      invariant.
+					//
+					// At termination (after seeing all `N` items) every item is therefore
+					// in the reservoir with probability `n/N`, i.e. uniform.
 					for (i, v) in iter.enumerate() {
 						let v = v?;
-						// pick an index to insert the value in, swapping existing values if it is
-						// within the range.
-						let idx = rng.gen_range(0..(i + 1 + num as usize));
+						// Pick an index to insert the value in, swapping existing values
+						// if it is within the range.
+						let idx = rng.random_range(0..(i + 1 + num as usize));
 						if let Some(slot) = res.get_mut(idx as usize) {
 							*slot = v
 						}
@@ -146,6 +175,7 @@ impl FileCollector {
 			}
 			Ordering::Order(orders) => {
 				let sort_dir = self.dir.path().join(Self::SORT_DIRECTORY_NAME);
+				let buffer_limit = self.buffer_limit;
 
 				let f = move || {
 					fs::create_dir(&sort_dir)?;
@@ -157,10 +187,7 @@ impl FileCollector {
 						ValueExternalChunk,
 					> = ExternalSorterBuilder::new()
 						.with_tmp_dir(&sort_dir)
-						.with_buffer(LimitedBufferBuilder::new(
-							*EXTERNAL_SORTING_BUFFER_LIMIT,
-							true,
-						))
+						.with_buffer(LimitedBufferBuilder::new(buffer_limit, true))
 						.build()?;
 
 					let sorted = sorter.sort_by(reader, |a, b| orders.compare(a, b))?;
@@ -212,9 +239,9 @@ impl FileWriter {
 		Ok(())
 	}
 
-	fn write_value<W: Write>(writer: &mut W, value: Value) -> Result<usize, Error> {
+	fn write_value<W: Write>(writer: &mut W, value: &Value) -> Result<usize, Error> {
 		let mut val = Vec::new();
-		SerializeRevisioned::serialize_revisioned(&value, &mut val)?;
+		SerializeRevisioned::serialize_revisioned(value, &mut val)?;
 		// Write the size of the buffer in the index
 		Self::write_usize(writer, val.len())?;
 		// Write the buffer in the records
@@ -222,7 +249,7 @@ impl FileWriter {
 		Ok(val.len())
 	}
 
-	fn push(&mut self, value: Value) -> Result<(), Error> {
+	fn push(&mut self, value: &Value) -> Result<(), Error> {
 		// Serialize the value in a buffer
 		let len = Self::write_value(&mut self.records, value)?;
 		// Increment the offset of the next record
@@ -419,7 +446,7 @@ impl ExternalChunk<Value> for ValueExternalChunk {
 		items: impl IntoIterator<Item = Value>,
 	) -> Result<(), Self::SerializationError> {
 		for item in items {
-			FileWriter::write_value(chunk_writer, item)?;
+			FileWriter::write_value(chunk_writer, &item)?;
 		}
 		Ok(())
 	}

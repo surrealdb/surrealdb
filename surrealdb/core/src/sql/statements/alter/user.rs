@@ -1,19 +1,19 @@
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, SaltString};
-use rand::rngs::OsRng;
+use rand_core::OsRng;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
-use crate::fmt::{EscapeKwFreeIdent, QuoteStr};
-use crate::sql::Base;
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, QuoteStr};
 use crate::sql::statements::define::user::PassType;
+use crate::sql::{Base, Expr, Literal};
 use crate::types::PublicDuration;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 /// AST node for `ALTER USER`.
 pub struct AlterUserStatement {
-	pub name: String,
+	pub name: Expr,
 	pub base: Base,
 	pub if_exists: bool,
 	pub pass_type: Option<PassType>,
@@ -23,13 +23,28 @@ pub struct AlterUserStatement {
 	pub comment: AlterKind<String>,
 }
 
+impl Default for AlterUserStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			base: Base::Root,
+			if_exists: false,
+			pass_type: None,
+			roles: AlterKind::None,
+			token_duration: AlterKind::None,
+			session_duration: AlterKind::None,
+			comment: AlterKind::None,
+		}
+	}
+}
+
 impl ToSql for AlterUserStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		write_sql!(f, fmt, "ALTER USER");
 		if self.if_exists {
 			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write_sql!(f, fmt, " {} ON {}", EscapeKwFreeIdent(&self.name), &self.base);
+		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), &self.base);
 
 		if let Some(ref pt) = self.pass_type {
 			match pt {
@@ -83,7 +98,7 @@ impl From<AlterUserStatement> for crate::expr::statements::alter::AlterUserState
 		});
 
 		crate::expr::statements::alter::AlterUserStatement {
-			name: v.name,
+			name: v.name.into(),
 			base: v.base.into(),
 			if_exists: v.if_exists,
 			hash,
@@ -110,7 +125,7 @@ impl From<AlterUserStatement> for crate::expr::statements::alter::AlterUserState
 impl From<crate::expr::statements::alter::AlterUserStatement> for AlterUserStatement {
 	fn from(v: crate::expr::statements::alter::AlterUserStatement) -> Self {
 		AlterUserStatement {
-			name: v.name,
+			name: v.name.into(),
 			base: v.base.into(),
 			if_exists: v.if_exists,
 			pass_type: v.hash.map(PassType::Hash),

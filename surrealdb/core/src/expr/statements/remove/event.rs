@@ -41,7 +41,7 @@ impl RemoveEventStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Event, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Event, Base::Db)?;
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
 		// Compute the table name
@@ -86,11 +86,6 @@ impl RemoveEventStatement {
 			},
 		)
 		.await?;
-
-		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &table_name);
-		}
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

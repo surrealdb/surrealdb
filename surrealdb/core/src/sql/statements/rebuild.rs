@@ -1,6 +1,8 @@
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{EscapeKwFreeIdent, EscapeKwIdent};
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -35,8 +37,8 @@ impl From<crate::expr::statements::rebuild::RebuildStatement> for RebuildStateme
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RebuildIndexStatement {
-	pub name: String,
-	pub what: String,
+	pub name: Strand,
+	pub what: TableName,
 	pub if_exists: bool,
 	pub concurrently: bool,
 }
@@ -51,8 +53,8 @@ impl ToSql for RebuildIndexStatement {
 			f,
 			fmt,
 			" {} ON {}",
-			EscapeKwIdent(&self.name, &["IF"]),
-			EscapeKwFreeIdent(&self.what)
+			EscapeKwIdent(self.name.as_str(), &["IF"]),
+			EscapeKwFreeIdent(self.what.as_str())
 		);
 		if self.concurrently {
 			write_sql!(f, fmt, " CONCURRENTLY");
@@ -64,7 +66,7 @@ impl From<RebuildIndexStatement> for crate::expr::statements::rebuild::RebuildIn
 	fn from(v: RebuildIndexStatement) -> Self {
 		Self {
 			name: v.name,
-			table: v.what.into(),
+			table: v.what,
 			if_exists: v.if_exists,
 			concurrently: v.concurrently,
 		}
@@ -75,7 +77,7 @@ impl From<crate::expr::statements::rebuild::RebuildIndexStatement> for RebuildIn
 	fn from(v: crate::expr::statements::rebuild::RebuildIndexStatement) -> Self {
 		Self {
 			name: v.name,
-			what: v.table.into_string(),
+			what: v.table,
 			if_exists: v.if_exists,
 			concurrently: v.concurrently,
 		}

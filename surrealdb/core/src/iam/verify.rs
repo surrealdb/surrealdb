@@ -109,7 +109,7 @@ pub async fn basic(
 				debug!("Authenticated as database user '{}'", user);
 				session.exp = expiration(u.session_duration)?;
 				let au = Auth::new(Actor::from_role_names(
-					u.name.clone(),
+					u.name.to_string(),
 					&u.roles,
 					Level::Database(ns.to_owned(), db.to_owned()),
 				)?);
@@ -125,7 +125,7 @@ pub async fn basic(
 				debug!("Authenticated as namespace user '{}'", user);
 				session.exp = expiration(u.session_duration)?;
 				let au = Auth::new(Actor::from_role_names(
-					u.name.clone(),
+					u.name.to_string(),
 					&u.roles,
 					Level::Namespace(ns.to_owned()),
 				)?);
@@ -140,7 +140,8 @@ pub async fn basic(
 			Ok(u) => {
 				debug!("Authenticated as root user '{}'", user);
 				session.exp = expiration(u.session_duration)?;
-				let au = Auth::new(Actor::from_role_names(u.name.clone(), &u.roles, Level::Root)?);
+				let au =
+					Auth::new(Actor::from_role_names(u.name.to_string(), &u.roles, Level::Root)?);
 
 				session.au = Arc::new(au);
 				Ok(())
@@ -400,7 +401,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					session.ac = Some(ac.to_owned());
 					session.exp = expiration(de.session_duration)?;
 					session.au = Arc::new(Auth::new(Actor::new(
-						de.name.clone(),
+						de.name.to_string(),
 						roles,
 						Level::Database(ns.clone(), db.clone()),
 					)));
@@ -636,7 +637,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				de.name.clone(),
+				de.name.to_string(),
 				roles,
 				Level::Namespace(ns.clone()),
 			)));
@@ -786,7 +787,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			);
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.session_duration)?;
-			session.au = Arc::new(Auth::new(Actor::new(de.name.clone(), roles, Level::Root)));
+			session.au = Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Root)));
 			Ok(())
 		}
 		// Check if this is root authentication with user credentials
@@ -986,6 +987,7 @@ mod tests {
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
 	use jsonwebtoken::{EncodingKey, encode};
+	use rand_core::OsRng;
 	use rstest::rstest;
 
 	use super::*;
@@ -1468,7 +1470,7 @@ mod tests {
 				_ => panic!("Session token is not an object"),
 			};
 			let string_claim = tk.get("string_claim").unwrap();
-			assert_eq!(*string_claim, crate::types::PublicValue::String("test".into()));
+			assert_eq!(*string_claim, crate::types::PublicValue::String("test".to_string()));
 			let bool_claim = tk.get("bool_claim").unwrap();
 			assert_eq!(*bool_claim, crate::types::PublicValue::Bool(true));
 			let int_claim = tk.get("int_claim").unwrap();
@@ -1482,16 +1484,18 @@ mod tests {
 			);
 			let object_claim = tk.get("object_claim").unwrap();
 			let mut test_object: HashMap<String, crate::types::PublicValue> = HashMap::new();
-			test_object
-				.insert("test_1".to_string(), crate::types::PublicValue::String("value_1".into()));
+			test_object.insert(
+				"test_1".to_string(),
+				crate::types::PublicValue::String("value_1".to_string()),
+			);
 			let mut test_object_child = HashMap::new();
 			test_object_child.insert(
 				"test_2_1".to_string(),
-				crate::types::PublicValue::String("value_2_1".into()),
+				crate::types::PublicValue::String("value_2_1".to_string()),
 			);
 			test_object_child.insert(
 				"test_2_2".to_string(),
-				crate::types::PublicValue::String("value_2_2".into()),
+				crate::types::PublicValue::String("value_2_2".to_string()),
 			);
 			test_object.insert(
 				"test_2".to_string(),
@@ -1507,8 +1511,7 @@ mod tests {
 		use base64::Engine;
 		use base64::engine::general_purpose::STANDARD_NO_PAD;
 		use jsonwebtoken::jwk::{Jwk, JwkSet};
-		use rand::Rng;
-		use rand::distributions::Alphanumeric;
+		use rand::distr::{Alphanumeric, SampleString};
 		use wiremock::matchers::{method, path};
 		use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -1516,8 +1519,7 @@ mod tests {
 
 		// Use unique path to prevent accidental cache reuse
 		fn random_path() -> String {
-			let rng = rand::thread_rng();
-			rng.sample_iter(&Alphanumeric).take(8).map(char::from).collect()
+			Alphanumeric.sample_string(&mut rand::rng(), 8)
 		}
 
 		// Key identifier used in both JWT and JWT
@@ -1653,7 +1655,7 @@ mod tests {
 
 	#[test]
 	fn test_verify_pass() {
-		let salt = SaltString::generate(&mut rand::thread_rng());
+		let salt = SaltString::generate(&mut OsRng);
 		let hash = Argon2::default().hash_password("test".as_bytes(), &salt).unwrap().to_string();
 
 		// Verify with the matching password

@@ -7,6 +7,9 @@ use rust_decimal::serde::str;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "bench")]
+use surrealdb_types::SurrealValue;
+
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum ResultsMode {
 	Default,
@@ -40,6 +43,38 @@ pub enum Backend {
 	RocksDb,
 	SurrealKv,
 	TikV,
+}
+
+#[cfg(feature = "bench")]
+impl SurrealValue for Backend {
+	fn kind_of() -> surrealdb_types::Kind {
+		surrealdb_types::Kind::String
+	}
+
+	fn into_value(self) -> surrealdb_types::Value {
+		match self {
+			Backend::Memory => "Memory".into_value(),
+			Backend::RocksDb => "RocksDb".into_value(),
+			Backend::SurrealKv => "SurrealKv".into_value(),
+			Backend::TikV => "TikV".into_value(),
+		}
+	}
+
+	fn from_value(value: surrealdb_types::Value) -> Result<Self, surrealdb_types::Error>
+	where
+		Self: Sized,
+	{
+		let str = String::from_value(value)?;
+		match str.as_str() {
+			"Memory" => Ok(Backend::Memory),
+			"RocksDb" => Ok(Backend::RocksDb),
+			"SurrealKv" => Ok(Backend::SurrealKv),
+			"TikV" => Ok(Backend::TikV),
+			_ => {
+				Err(surrealdb_types::Error::serialization("Invalid backend type".to_string(), None))
+			}
+		}
+	}
 }
 
 impl ValueEnum for Backend {
@@ -165,28 +200,28 @@ impl ValueEnum for ColorMode {
 pub fn parse() -> ArgMatches {
 	let cmd = command!()
 		.arg(arg!(--color <COLOR> "Set if the output should be colored").value_parser(EnumValueParser::<ColorMode>::new()).default_value("auto"))
-        .subcommand(
-            Command::new("test").alias("run")
-                .about("Run surrealdb tests")
-                .arg(arg!([filter] "Filter the tests by their path"))
-                .arg(arg!(--path <PATH> "The path to tests directory").default_value("./tests"))
-                .arg(
-                    arg!(-j --jobs <JOBS> "The number of test running in parallel, defaults to available parallism")
-                        .value_parser(value_parser!(u32).range(1..))
-                ).arg(
-                    arg!(--results <RESULT_MODE> "How to handle results of tests").value_parser(EnumValueParser::<ResultsMode>::new()).default_value("default").alias("failure")
-                )
-				.arg(
-					arg!(--backend <BACKEND> "Specify the storage backend to use for the tests")
-						.value_parser(EnumValueParser::<Backend>::new()).default_value("mem")
-				)
-				.arg(
-					arg!(--"no-wip" "Skips tests marked work-in-progress")
-				)
-				.arg(
-					arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
-				),
-        )
+		.subcommand(
+			Command::new("test").alias("run")
+			.about("Run surrealdb tests")
+			.arg(arg!([filter] "Filter the tests by their path"))
+			.arg(arg!(--path <PATH> "The path to tests directory").default_value("./tests"))
+			.arg(
+				arg!(-j --jobs <JOBS> "The number of test running in parallel, defaults to available parallism")
+				.value_parser(value_parser!(u32).range(1..))
+			).arg(
+			arg!(--results <RESULT_MODE> "How to handle results of tests").value_parser(EnumValueParser::<ResultsMode>::new()).default_value("default").alias("failure")
+			)
+			.arg(
+				arg!(--backend <BACKEND> "Specify the storage backend to use for the tests")
+				.value_parser(EnumValueParser::<Backend>::new()).default_value("mem")
+			)
+			.arg(
+				arg!(--"no-wip" "Skips tests marked work-in-progress")
+			)
+			.arg(
+				arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
+			),
+	)
 		.subcommand(
 			Command::new("upgrade")
 			.about("Run surrealdb upgrade tests")
@@ -201,7 +236,7 @@ pub fn parse() -> ArgMatches {
 			)
 			.arg(
 				arg!(--backend <BACKEND> "Specify the storage backend to use for the upgrade test")
-					.value_parser(EnumValueParser::<UpgradeBackend>::new()).default_value("surrealkv")
+				.value_parser(EnumValueParser::<UpgradeBackend>::new()).default_value("surrealkv")
 			)
 			.arg(
 				arg!(-f --from <VERSIONS> "The version to upgrade from. This can be either a version number or a path to the surrealdb codebase.").required(true).value_delimiter(',').value_parser(DsVersion::from_str)
@@ -221,15 +256,18 @@ pub fn parse() -> ArgMatches {
 			.arg(
 				arg!(--"no-results" "Skips tests that have defined results, usefull when adding new tests.")
 			)
-		)
-		.subcommand(
-			Command::new("list")
-			.about("List surrealdb tests")
-			.arg(arg!([filter] "Filter the test by their path"))
-			.arg(
-				arg!(--path <PATH> "Set the path to tests directory").default_value("./tests"),
-			),
-		);
+			)
+			.subcommand(
+				Command::new("list")
+				.about("List surrealdb tests")
+				.arg(arg!([filter] "Filter the test by their path"))
+				.arg(
+					arg!(--path <PATH> "Set the path to tests directory").default_value("./tests"),
+				),
+			);
+
+	#[cfg(feature = "bench")]
+	let cmd = cmd.subcommand(crate::cmd::bench::cmd());
 
 	cmd.subcommand_required(true).get_matches()
 }

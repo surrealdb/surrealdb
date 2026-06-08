@@ -10,29 +10,24 @@ use crate::api::request::ApiRequest;
 use crate::kvs::IntoBytes;
 use crate::rpc::format;
 
-pub async fn body(req: &mut ApiRequest, strategy: BodyStrategy) -> Result<()> {
-	let mut parser = BodyParser::from((req, strategy));
-	parser.process().await
-}
-
 pub struct BodyParser<'a> {
 	mime: Option<Mime>,
 	req: &'a mut ApiRequest,
 	strategy: BodyStrategy,
+	parse_limit: usize,
 }
 
-impl<'a> From<(&'a mut ApiRequest, BodyStrategy)> for BodyParser<'a> {
-	fn from((req, strategy): (&'a mut ApiRequest, BodyStrategy)) -> Self {
+impl<'a> BodyParser<'a> {
+	pub fn new(req: &'a mut ApiRequest, strategy: BodyStrategy, parse_limit: usize) -> Self {
 		let mime = req.headers.typed_get::<ContentType>().map(Mime::from);
 		Self {
 			mime,
 			req,
 			strategy,
+			parse_limit,
 		}
 	}
-}
 
-impl<'a> BodyParser<'a> {
 	pub async fn process(&mut self) -> Result<()> {
 		match self.strategy {
 			BodyStrategy::Json => self.json(true),
@@ -96,8 +91,8 @@ impl<'a> BodyParser<'a> {
 			return Err(ApiError::RequestBodyNotBinary.into());
 		};
 
-		self.req.body =
-			format::json::decode(bytes.as_slice()).map_err(|_| ApiError::BodyDecodeFailure)?;
+		self.req.body = format::json::decode(bytes.as_slice(), self.parse_limit)
+			.map_err(|_| ApiError::BodyDecodeFailure)?;
 
 		Ok(())
 	}
@@ -111,8 +106,8 @@ impl<'a> BodyParser<'a> {
 			return Err(ApiError::RequestBodyNotBinary.into());
 		};
 
-		self.req.body =
-			format::cbor::decode(bytes.as_slice()).map_err(|_| ApiError::BodyDecodeFailure)?;
+		self.req.body = format::cbor::decode(bytes.as_slice(), self.parse_limit)
+			.map_err(|_| ApiError::BodyDecodeFailure)?;
 
 		Ok(())
 	}

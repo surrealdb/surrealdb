@@ -120,6 +120,27 @@ impl HnswFlavor {
 		Ok(res)
 	}
 
+	/// Returns `true` if [`check_state`](Self::check_state) would mutate the
+	/// in-memory graph. Safe to call under a shared (read) lock.
+	pub(super) async fn needs_state_reload(&self, ctx: &FrozenContext) -> Result<bool> {
+		match self {
+			HnswFlavor::H5_9(h) => h.needs_state_reload(ctx).await,
+			HnswFlavor::H5_17(h) => h.needs_state_reload(ctx).await,
+			HnswFlavor::H5_25(h) => h.needs_state_reload(ctx).await,
+			HnswFlavor::H5set(h) => h.needs_state_reload(ctx).await,
+			HnswFlavor::H9_17(h) => h.needs_state_reload(ctx).await,
+			HnswFlavor::H9_25(h) => h.needs_state_reload(ctx).await,
+			HnswFlavor::H9set(h) => h.needs_state_reload(ctx).await,
+			HnswFlavor::H13_25(h) => h.needs_state_reload(ctx).await,
+			HnswFlavor::H13set(h) => h.needs_state_reload(ctx).await,
+			HnswFlavor::H17set(h) => h.needs_state_reload(ctx).await,
+			HnswFlavor::H21set(h) => h.needs_state_reload(ctx).await,
+			HnswFlavor::H25set(h) => h.needs_state_reload(ctx).await,
+			HnswFlavor::H29set(h) => h.needs_state_reload(ctx).await,
+			HnswFlavor::Hset(h) => h.needs_state_reload(ctx).await,
+		}
+	}
+
 	/// Loads and synchronizes the in-memory graph state from the key-value store.
 	pub(super) async fn check_state(&mut self, ctx: &FrozenContext) -> Result<()> {
 		match self {

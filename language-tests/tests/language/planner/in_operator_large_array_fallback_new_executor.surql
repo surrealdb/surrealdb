@@ -9,10 +9,11 @@ reason = "Verify IN with arrays larger than the expansion limit (32) falls back 
 value = "'OK'"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 2}
-    TableScan [ctx: Db] [table: items, direction: Forward, predicate: val INSIDE [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33]] {rows: 2}
+value = """
+'SelectProject [ctx: Db] [projections: *] {rows: 2}
+    TableScan [ctx: Db] [table: items, direction: Forward, predicate: val INSIDE [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33], pre_decode_filter: yes] {rows: 2}
 
-Total rows: 2''''
+Total rows: 2'"""
 
 [[test.results]]
 value = "[{ id: items:1, val: 1 }, { id: items:2, val: 5 }]"

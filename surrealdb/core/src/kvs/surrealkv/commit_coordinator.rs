@@ -9,6 +9,7 @@ use tokio::sync::oneshot::{self, Sender};
 
 use super::TARGET;
 use crate::kvs::err::{Error, Result};
+use crate::kvs::surrealkv::SurrealKvConfig;
 
 /// Shared state for producer-consumer communication between transaction submitters and the batcher.
 ///
@@ -107,11 +108,11 @@ pub(super) struct CommitCoordinator {
 
 impl CommitCoordinator {
 	/// Create a new commit coordinator.
-	pub fn new(db: Tree) -> Result<Self> {
+	pub fn new(db: Tree, config: &SurrealKvConfig) -> Result<Self> {
 		// Get the batched commit configuration options
-		let timeout = *super::cnf::SURREALKV_GROUPED_COMMIT_TIMEOUT;
-		let wait_threshold = *super::cnf::SURREALKV_GROUPED_COMMIT_WAIT_THRESHOLD;
-		let max_batch_size = *super::cnf::SURREALKV_GROUPED_COMMIT_MAX_BATCH_SIZE;
+		let timeout = config.grouped_commit_timeout;
+		let wait_threshold = config.grouped_commit_wait_threshold;
+		let max_batch_size = config.grouped_commit_max_batch_size;
 		// Log the batched group commit configuration options
 		info!(target: TARGET, "Grouped commit: enabled (timeout={}ns, wait_threshold={}, max_batch_size={})",
 			timeout,
@@ -126,7 +127,7 @@ impl CommitCoordinator {
 		});
 		// Create a new commit batcher
 		let batcher = CommitBatcher {
-			shared: shared.clone(),
+			shared: Arc::clone(&shared),
 			db,
 			wait_threshold,
 			max_batch_size,
@@ -164,6 +165,11 @@ impl CommitCoordinator {
 		let should_notify = {
 			// Lock the buffer
 			let mut buffer = self.shared.buffer.lock();
+			// If shutdown completed while the batcher exited, do not enqueue: the
+			// request would never be flushed and `rx.await` would hang forever.
+			if self.shared.shutdown.load(Ordering::Acquire) {
+				return Err(Error::Transaction("commit coordinator is shut down".into()));
+			}
 			// Check if buffer is currently empty
 			let was_empty = buffer.is_empty();
 			// Add the request to the buffer
@@ -182,8 +188,16 @@ impl CommitCoordinator {
 
 	/// Shutdown the commit coordinator.
 	pub fn shutdown(&self) -> Result<()> {
-		// Signal shutdown
-		self.shared.shutdown.store(true, Ordering::Release);
+		// Signal shutdown while holding the buffer lock so the batcher
+		// cannot miss the notification. Without this, the batcher could
+		// be between its `buffer.is_empty()` check and `condvar.wait()`
+		// while shutdown sets the flag and calls `notify_all()` — with
+		// no waiter registered yet the notification is dropped and the
+		// batcher parks forever on the condvar.
+		{
+			let _guard = self.shared.buffer.lock();
+			self.shared.shutdown.store(true, Ordering::Release);
+		}
 		// Notify the batcher
 		self.shared.condvar.notify_all();
 		// Wait for thread to finish
@@ -263,10 +277,22 @@ impl CommitBatcher {
 					if !buffer.is_empty() {
 						break;
 					}
+					// Check shutdown flag *before* waiting: without this,
+					// a shutdown that races with the buffer-empty check
+					// above could `notify_all()` before the batcher has
+					// registered itself as a waiter, causing the notify
+					// to be dropped and the batcher to park forever.
+					if self.shared.shutdown.load(Ordering::Acquire) {
+						return;
+					}
 					// Wait for notification
 					self.shared.condvar.wait(&mut buffer);
-					// Check shutdown flag before continuing
-					if self.shared.shutdown.load(Ordering::Acquire) {
+					// After wakeup: exit only when shutdown is set *and* there is
+					// no pending work. If the buffer holds `SyncRequest`s they must
+					// be drained before returning, otherwise `wait_for_sync` hangs
+					// on `rx.await` (e.g. push completed before `shutdown()` set
+					// the flag, then both threads notified the batcher).
+					if self.shared.shutdown.load(Ordering::Acquire) && buffer.is_empty() {
 						return;
 					}
 				}
@@ -296,6 +322,11 @@ impl CommitBatcher {
 					}
 					// Wait for items or timeout
 					if self.shared.condvar.wait_for(&mut buffer, wait).timed_out() {
+						break;
+					}
+					// Shutdown may have been signalled while waiting; exit the inner
+					// loop promptly instead of sleeping out the remaining deadline.
+					if self.shared.shutdown.load(Ordering::Acquire) {
 						break;
 					}
 					// Take available items up to the maximum batch size

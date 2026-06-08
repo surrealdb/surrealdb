@@ -136,7 +136,7 @@ impl Accumulator for ArrayJoinAccumulator {
 			.map(|v| v.clone().into_raw_string())
 			.collect::<Vec<_>>()
 			.join(&self.separator);
-		Ok(Value::String(joined))
+		Ok(Value::String(joined.into()))
 	}
 
 	fn reset(&mut self) {
@@ -240,6 +240,8 @@ impl Accumulator for ArrayDistinctAccumulator {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::Strand;
+
 	use super::*;
 	use crate::val::{Array, Number};
 
@@ -287,13 +289,13 @@ mod tests {
 		let func = ArrayGroup;
 		let mut acc = func.create_accumulator();
 		acc.update(Value::Number(Number::Int(1))).unwrap();
-		acc.update(Value::String("hello".into())).unwrap();
+		acc.update(Value::String(Strand::new_static("hello"))).unwrap();
 		acc.update(Value::Bool(true)).unwrap();
 		let result = acc.finalize().unwrap();
 		let arr = as_array(&result);
 		assert_eq!(arr.len(), 3);
 		assert_eq!(arr[0], Value::Number(Number::Int(1)));
-		assert_eq!(arr[1], Value::String("hello".into()));
+		assert_eq!(arr[1], Value::String(Strand::new_static("hello")));
 		assert_eq!(arr[2], Value::Bool(true));
 	}
 
@@ -338,7 +340,7 @@ mod tests {
 	fn array_join_single_item() {
 		let func = ArrayJoin;
 		let mut acc = func.create_accumulator();
-		acc.update(Value::String("hello".into())).unwrap();
+		acc.update(Value::String(Strand::new_static("hello"))).unwrap();
 		let result = acc.finalize().unwrap();
 		assert_eq!(as_string(&result), "hello");
 	}
@@ -347,9 +349,9 @@ mod tests {
 	fn array_join_multiple_items_no_separator() {
 		let func = ArrayJoin;
 		let mut acc = func.create_accumulator();
-		acc.update(Value::String("a".into())).unwrap();
-		acc.update(Value::String("b".into())).unwrap();
-		acc.update(Value::String("c".into())).unwrap();
+		acc.update(Value::String(Strand::new_static("a"))).unwrap();
+		acc.update(Value::String(Strand::new_static("b"))).unwrap();
+		acc.update(Value::String(Strand::new_static("c"))).unwrap();
 		let result = acc.finalize().unwrap();
 		assert_eq!(as_string(&result), "abc");
 	}
@@ -357,10 +359,10 @@ mod tests {
 	#[test]
 	fn array_join_with_separator() {
 		let func = ArrayJoin;
-		let mut acc = func.create_accumulator_with_args(&[Value::String(", ".into())]);
-		acc.update(Value::String("a".into())).unwrap();
-		acc.update(Value::String("b".into())).unwrap();
-		acc.update(Value::String("c".into())).unwrap();
+		let mut acc = func.create_accumulator_with_args(&[Value::String(Strand::new_static(", "))]);
+		acc.update(Value::String(Strand::new_static("a"))).unwrap();
+		acc.update(Value::String(Strand::new_static("b"))).unwrap();
+		acc.update(Value::String(Strand::new_static("c"))).unwrap();
 		let result = acc.finalize().unwrap();
 		assert_eq!(as_string(&result), "a, b, c");
 	}
@@ -368,7 +370,7 @@ mod tests {
 	#[test]
 	fn array_join_with_numbers() {
 		let func = ArrayJoin;
-		let mut acc = func.create_accumulator_with_args(&[Value::String("-".into())]);
+		let mut acc = func.create_accumulator_with_args(&[Value::String(Strand::new_static("-"))]);
 		acc.update(Value::Number(Number::Int(1))).unwrap();
 		acc.update(Value::Number(Number::Int(2))).unwrap();
 		acc.update(Value::Number(Number::Int(3))).unwrap();
@@ -379,11 +381,11 @@ mod tests {
 	#[test]
 	fn array_join_merge() {
 		let func = ArrayJoin;
-		let mut acc1 = func.create_accumulator_with_args(&[Value::String(",".into())]);
-		acc1.update(Value::String("a".into())).unwrap();
+		let mut acc1 = func.create_accumulator_with_args(&[Value::String(Strand::new_static(","))]);
+		acc1.update(Value::String(Strand::new_static("a"))).unwrap();
 
-		let mut acc2 = func.create_accumulator_with_args(&[Value::String(",".into())]);
-		acc2.update(Value::String("b".into())).unwrap();
+		let mut acc2 = func.create_accumulator_with_args(&[Value::String(Strand::new_static(","))]);
+		acc2.update(Value::String(Strand::new_static("b"))).unwrap();
 
 		acc1.merge(acc2).unwrap();
 		let result = acc1.finalize().unwrap();
@@ -394,7 +396,7 @@ mod tests {
 	fn array_join_reset() {
 		let func = ArrayJoin;
 		let mut acc = func.create_accumulator();
-		acc.update(Value::String("hello".into())).unwrap();
+		acc.update(Value::String(Strand::new_static("hello"))).unwrap();
 		acc.reset();
 		let result = acc.finalize().unwrap();
 		assert_eq!(as_string(&result), "");
@@ -446,9 +448,9 @@ mod tests {
 		let func = ArrayDistinct;
 		let mut acc = func.create_accumulator();
 		acc.update(Value::Number(Number::Int(1))).unwrap();
-		acc.update(Value::String("hello".into())).unwrap();
+		acc.update(Value::String(Strand::new_static("hello"))).unwrap();
 		acc.update(Value::Number(Number::Int(1))).unwrap(); // duplicate
-		acc.update(Value::String("hello".into())).unwrap(); // duplicate
+		acc.update(Value::String(Strand::new_static("hello"))).unwrap(); // duplicate
 		let result = acc.finalize().unwrap();
 		let arr = as_array(&result);
 		assert_eq!(arr.len(), 2);

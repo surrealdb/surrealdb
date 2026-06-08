@@ -9,7 +9,7 @@ use uuid::Uuid;
 use super::access::{authenticate_record, create_refresh_token_record};
 use crate::catalog;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider};
-use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
+use crate::cnf::SERVER_NAME;
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
@@ -258,8 +258,14 @@ pub async fn db_access(
 			// Create refresh token if defined for the record access method
 			let refresh = match &at.bearer {
 				Some(_) => Some(
-					create_refresh_token_record(kvs, av.name.clone(), &ns, &db, rid.clone().into())
-						.await?,
+					create_refresh_token_record(
+						kvs,
+						av.name.to_string(),
+						&ns,
+						&db,
+						rid.clone().into(),
+					)
+					.await?,
 				),
 				None => None,
 			};
@@ -309,7 +315,7 @@ pub async fn db_access(
 			}
 			// Otherwise, return a generic error unless it should be forwarded
 			_ => {
-				if *INSECURE_FORWARD_ACCESS_ERRORS {
+				if kvs.config().insecure_forward_access_errors {
 					Err(e)
 				} else {
 					Err(anyhow::Error::new(Error::AccessRecordSignupQueryFailed))

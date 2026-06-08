@@ -17,13 +17,20 @@ BENCH_SAMPLE_SIZE = { value = "10", condition = { env_not_set = [
 BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-surrealkv", condition = { env_not_set = [
     "BENCH_FEATURES",
 ] } }
-# Used to speed up the scripting timeout test, otherwise the test takes 5 seconds.
-SURREAL_SCRIPTING_MAX_TIME_LIMIT = { value = "500", condition = { env_not_set = [
-    "SURREAL_SCRIPTING_MAX_TIME_LIMIT",
-] } }
 # Configure LLVM profiling output to go to target directory instead of repo root
 LLVM_PROFILE_FILE = { value = "target/llvm-cov-target/%p-%m.profraw", condition = { env_not_set = [
     "LLVM_PROFILE_FILE",
+] } }
+# Adjacent-pair upgrade chain for language upgrade tests. Each consecutive
+# pair (3.0.0 -> 3.0.1, 3.0.1 -> 3.0.2, ...) is exercised as a separate hop.
+# The trailing `..` token resolves to a path-based version, which the runner
+# cargo-builds against the current checkout — this is the "main" target.
+#
+# Every numeric entry must have a published binary at
+#   https://download.surrealdb.com/v{ver}/surreal-v{ver}.{platform}.{tgz|exe}
+# Override `LANG_UPGRADE_VERSIONS` to test alternative chains locally.
+LANG_UPGRADE_VERSIONS = { value = "3.0.0,3.0.1,3.0.2,3.0.3,3.0.4,3.0.5,3.1.0-beta.1,3.1.0-beta.2,..", condition = { env_not_set = [
+    "LANG_UPGRADE_VERSIONS",
 ] } }
 
 # --------------------------------------------------
@@ -74,7 +81,8 @@ description = "Run code quality checks (release)"
 command = "cargo"
 args = [
     "check",
-    "--release",
+    "--profile",
+    "clippy-release",
     "--locked",
     "--workspace",
     "--all-targets",
@@ -125,7 +133,8 @@ args = [
     "clippy",
     "--workspace",
     "--all-targets",
-    "--release",
+    "--profile",
+    "clippy-release",
     "--features",
     "${ALL_FEATURES}",
     "--tests",
@@ -362,6 +371,32 @@ args = [
     "--nocapture",
 ]
 
+[tasks.ci-integration-all]
+category = "CI - INTEGRATION TESTS"
+description = "Single compile: CLI, HTTP, WS, ML, and GraphQL integration suites"
+command = "cargo"
+env = { RUST_BACKTRACE = 1 }
+args = [
+    "nextest",
+    "run",
+    "--locked",
+    "--workspace",
+    "--no-default-features",
+    "--features",
+    "storage-mem,storage-surrealkv,http,scripting,jwks,cli,ml,graphql",
+    "--nocapture",
+    "--test",
+    "cli_integration",
+    "--test",
+    "http_integration",
+    "--test",
+    "ws_integration",
+    "--test",
+    "ml_integration",
+    "--test",
+    "graphql_integration",
+]
+
 # --------------------------------------------------
 # API tests
 # --------------------------------------------------
@@ -499,7 +534,7 @@ run_task = { name = [
 [tasks.ci-kvs-rocksdb]
 category = "CI - INTEGRATION TESTS"
 description = "Run KVS integration tests with the RocksDB engine"
-env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb", SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE = 10485760, SURREAL_ROCKSDB_WRITE_BUFFER_SIZE = 10240, SURREAL_ROCKSDB_WAL_SIZE_LIMIT = 1 }
+env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb" }
 run_task = { name = [
     "test-kvs",
 ], fork = true, parallel = true }
@@ -590,6 +625,60 @@ run_task = { name = [
 ], fork = true, parallel = false }
 
 # --------------------------------------------------
+# Language upgrade tests
+# --------------------------------------------------
+#
+# These tasks drive the language-tests `upgrade` subcommand through the
+# adjacent-pair chain defined in LANG_UPGRADE_VERSIONS. The runner spawns
+# the from-version surreal binary, replays each test's imports, stops it,
+# spawns the to-version binary against the same data directory, and runs
+# the test query — catching any regression in how on-disk state is read.
+#
+# Binaries for tagged versions are downloaded from download.surrealdb.com
+# into language-tests/.binary_cache/ (cached across CI runs). The trailing
+# `..` token in the version list cargo-builds the current checkout.
+
+[tasks.test-lang-upgrade]
+private = true
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language upgrade tests, hopping through adjacent version pairs"
+script = """
+#!/bin/bash -ex
+# Override _TEST_LANG_UPGRADE_JOBS to tune per-runner concurrency (default 4).
+cd language-tests
+cargo build --features "${_TEST_LANG_FEATURES}"
+IFS=',' read -ra V <<< "${LANG_UPGRADE_VERSIONS}"
+for ((i=0; i<${#V[@]}-1; i++)); do
+    echo "=== Upgrade hop: ${V[$i]} -> ${V[$((i+1))]} (backend=${_TEST_API_ENGINE}) ==="
+    ./target/debug/surrealql-test --color always upgrade \\
+        --from "${V[$i]}" --to "${V[$((i+1))]}" \\
+        --backend "${_TEST_API_ENGINE}" \\
+        --allow-download --no-wip \\
+        --jobs "${_TEST_LANG_UPGRADE_JOBS:-4}"
+done
+"""
+
+[tasks.ci-lang-upgrade-test-surrealkv]
+category = "CI - LANGUAGE TESTS"
+description = "Run language upgrade tests with the SurrealKV backend"
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_LANG_FEATURES = "upgrade" }
+run_task = "test-lang-upgrade"
+
+[tasks.ci-lang-upgrade-test-rocksdb]
+category = "CI - LANGUAGE TESTS"
+description = "Run language upgrade tests with the RocksDB backend"
+env = { _TEST_API_ENGINE = "rocksdb", _TEST_LANG_FEATURES = "upgrade,backend-rocksdb" }
+run_task = "test-lang-upgrade"
+
+[tasks.ci-lang-upgrade-test-all]
+category = "CI - LANGUAGE TESTS"
+description = "Run language upgrade tests on all supported backends"
+dependencies = [
+    "ci-lang-upgrade-test-surrealkv",
+    "ci-lang-upgrade-test-rocksdb",
+]
+
+# --------------------------------------------------
 # Workspace tests
 # --------------------------------------------------
 
@@ -597,7 +686,7 @@ run_task = { name = [
 category = "CI - WORKSPACE TESTS"
 description = "Run workspace library tests"
 command = "cargo"
-env = { CARGO_BUILD_JOBS = "8", SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE = 10485760, SURREAL_ROCKSDB_WRITE_BUFFER_SIZE = 10240, SURREAL_ROCKSDB_WAL_SIZE_LIMIT = 1 }
+env = { CARGO_BUILD_JOBS = "8" }
 args = [
     "nextest",
     "run",
@@ -690,19 +779,19 @@ description = "Run language tests with code coverage for core crates"
 script = """
     #!/bin/bash -ex
     cd language-tests
-    
+
     # Set up LLVM coverage instrumentation environment
     eval "$(cargo llvm-cov show-env --export-prefix)"
-    
+
     # Clean previous coverage artifacts
     cargo llvm-cov clean --workspace
-    
+
     # Build language-tests with instrumentation
     cargo build
-    
+
     # Run the language tests (this exercises surrealdb-core)
     ./target/debug/surrealql-test --color always run --no-wip --jobs 3 --backend memory
-    
+
     # Generate coverage report, excluding the harness code
     cargo llvm-cov report \
         --lcov \

@@ -84,7 +84,7 @@ impl IntoResponse for Error {
 				}.into_response(),
 			_ => ErrorMessage {
 				code: StatusCode::BAD_REQUEST,
-				details: Some("Request problems dectected".to_string()),
+				details: Some("Request problems detected".to_string()),
 				description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
 				information: Some(format!("{self}")),
 			}.into_response()
@@ -103,6 +103,8 @@ pub(super) struct ErrorMessage {
 	information: Option<String>,
 }
 
+/// Serde invokes `serialize_with` helpers with `&T` regardless of `Copy`.
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn serialize_status_code<S>(code: &StatusCode, s: S) -> Result<S::Ok, S::Error>
 where
 	S: Serializer,
@@ -146,19 +148,19 @@ impl IntoResponse for ResponseError {
 
 		// Check for surrealdb_types::Error
 		let err = match err.downcast::<surrealdb_types::Error>() {
-			Ok(e) => return types_error_into_response(e),
+			Ok(e) => return types_error_into_response(&e),
 			Err(e) => e,
 		};
 
 		// Convert via core downcast (handles core::err::Error internally)
 		// or fall back to anyhow chain preservation.
-		types_error_into_response(anyhow_to_types_error(err))
+		types_error_into_response(&anyhow_to_types_error(err))
 	}
 }
 
 /// Map a structured [`surrealdb_types::Error`] to an HTTP response with the appropriate status
 /// code based on the error kind and details.
-fn types_error_into_response(e: surrealdb_types::Error) -> Response {
+fn types_error_into_response(e: &surrealdb_types::Error) -> Response {
 	if e.is_not_allowed() {
 		let (code, details, description, information) = match e.not_allowed_details() {
 			Some(NotAllowedError::Auth(AuthError::InvalidAuth))
@@ -201,7 +203,7 @@ fn types_error_into_response(e: surrealdb_types::Error) -> Response {
 	}
 	ErrorMessage {
 		code: StatusCode::BAD_REQUEST,
-		details: Some("Request problems dectected".to_string()),
+		details: Some("Request problems detected".to_string()),
 		description: Some("There is a problem with your request. Refer to the documentation for further information.".to_string()),
 		information: Some(e.message().to_string()),
 	}

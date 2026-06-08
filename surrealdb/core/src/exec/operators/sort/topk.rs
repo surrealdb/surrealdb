@@ -13,7 +13,6 @@ use std::cmp::{Ordering, Reverse};
 use std::collections::BinaryHeap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 
 use super::common::{OrderByField, SortDirection, SortKey, compare_keys, compare_records_by_keys};
@@ -93,9 +92,6 @@ impl SortTopK {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for SortTopK {
 	fn name(&self) -> &'static str {
 		"SortTopK"
@@ -173,6 +169,7 @@ impl ExecOperator for SortTopK {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.root().ctx.config.operator_buffer_size,
 		);
 		let order_by = Arc::new(self.order_by.clone());
 		let limit = self.limit;
@@ -221,7 +218,7 @@ impl ExecOperator for SortTopK {
 					let keyed = KeyedValue {
 						keys,
 						value,
-						order_by: order_by.clone(),
+						order_by: Arc::clone(&order_by),
 						seq,
 					};
 					seq += 1;
@@ -346,9 +343,6 @@ impl SortTopKByKey {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for SortTopKByKey {
 	fn name(&self) -> &'static str {
 		"SortTopKByKey"
@@ -413,6 +407,7 @@ impl ExecOperator for SortTopKByKey {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.root().ctx.config.operator_buffer_size,
 		);
 		let sort_keys = Arc::new(self.sort_keys.clone());
 		let limit = self.limit;
@@ -443,7 +438,7 @@ impl ExecOperator for SortTopKByKey {
 							if cmp == Ordering::Less {
 								heap.push(Reverse(TopKByKeyEntry {
 									value,
-									sort_keys: sort_keys.clone(),
+									sort_keys: Arc::clone(&sort_keys),
 									seq,
 								}));
 								seq += 1;
@@ -456,7 +451,7 @@ impl ExecOperator for SortTopKByKey {
 						// Heap not full yet — always push.
 						heap.push(Reverse(TopKByKeyEntry {
 							value,
-							sort_keys: sort_keys.clone(),
+							sort_keys: Arc::clone(&sort_keys),
 							seq,
 						}));
 						seq += 1;

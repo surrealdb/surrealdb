@@ -2,7 +2,7 @@
 
 use criterion::Bencher;
 use criterion::measurement::WallTime;
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
 
@@ -12,8 +12,8 @@ mod read;
 pub(super) use read::*;
 
 fn rand_id() -> String {
-	let mut rng = rand::thread_rng();
-	(0..20).map(|_| *surrealdb_core::cnf::ID_CHARS.choose(&mut rng).unwrap_or(&'0')).collect()
+	let mut rng = rand::rng();
+	(0..20).map(|_| *surrealdb_core::cnf::ID_CHARS[..].choose(&mut rng).unwrap_or(&'0')).collect()
 }
 
 /// Routine trait for the benchmark routines.
@@ -32,10 +32,10 @@ pub(super) trait Routine {
 pub(super) fn bench_routine<R>(
 	b: &mut Bencher<'_, WallTime>,
 	db: &'static Surreal<Any>,
-	routine: R,
+	routine: &R,
 	num_ops: usize,
 ) where
-	R: Routine,
+	R: Routine + ?Sized,
 {
 	// Run the runtime and return the duration, accounting for the number of
 	// operations on each run

@@ -47,6 +47,8 @@ pub(crate) struct DefineFieldStatement {
 	pub permissions: Permissions,
 	pub comment: Expr,
 	pub reference: Option<Reference>,
+	pub graphql_alias: Option<String>,
+	pub graphql_deprecated: Option<String>,
 }
 
 impl Default for DefineFieldStatement {
@@ -65,6 +67,8 @@ impl Default for DefineFieldStatement {
 			permissions: Permissions::default(),
 			comment: Expr::Literal(Literal::None),
 			reference: None,
+			graphql_alias: None,
+			graphql_deprecated: None,
 		}
 	}
 }
@@ -110,7 +114,7 @@ impl DefineFieldStatement {
 			for ix in ctx.tx().all_tb_indexes(ns, db, &table, None).await?.iter() {
 				if ix.cols.iter().any(|col| col.starts_with(&name)) {
 					bail!(Error::ComputedFieldCannotBeIndexed {
-						index: ix.name.clone(),
+						index: ix.name.to_string(),
 						field: name.to_raw_string(),
 					})
 				}
@@ -138,6 +142,8 @@ impl DefineFieldStatement {
 			reference: self.reference.clone(),
 			auth_limit: AuthLimit::new_from_auth(opt.auth.as_ref()).into(),
 			computed_deps,
+			graphql_alias: self.graphql_alias.clone(),
+			graphql_deprecated: self.graphql_deprecated.clone(),
 		})
 	}
 
@@ -153,7 +159,11 @@ impl DefineFieldStatement {
 		let definition = self.to_definition(stk, ctx, opt, doc).await?;
 
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Field, Base::Db)?;
+
+		// Validate any GRAPHQL_ALIAS at definition time so typos surface here
+		// rather than silently falling back at schema-generation time.
+		super::validate_graphql_alias(&self.graphql_alias, "field")?;
 
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
@@ -182,8 +192,11 @@ impl DefineFieldStatement {
 
 		let tb = txn.get_or_add_tb(Some(ctx), ns_name, db_name, &definition.table, None).await?;
 
-		// Get the name of the field
-		let fd = self.name.to_raw_string();
+		// Get the name of the field. Use the resolved name (with parameterized
+		// indices substituted) so duplicate detection matches what `put_tb_field`
+		// will store; otherwise a second DEFINE FIELD with the same resolved
+		// path silently overwrites the first.
+		let fd = definition.name.to_raw_string();
 		// Check if the definition exists
 		if let Some(fd) = txn.get_tb_field(ns, db, &tb.name, &fd, None).await? {
 			match self.kind {
@@ -222,18 +235,15 @@ impl DefineFieldStatement {
 
 					// Add the TYPE to the DEFINE TABLE statement
 					if *field_kind != relation.from {
+						// Refresh the table cache
 						tb.table_type = TableType::Relation(Relation {
-							from: field_kind.iter().map(|x| x.clone().into_string()).collect(),
+							from: field_kind.clone(),
 							..relation.clone()
 						});
-
 						txn.put_tb(ns_name, db_name, &tb).await?;
 						// Clear the cache
-						if let Some(cache) = ctx.get_cache() {
-							cache.clear_tb(ns, db, &definition.table);
-						}
-
 						txn.clear_cache();
+						// Ok all good
 						return Ok(Value::None);
 					}
 				}
@@ -252,18 +262,15 @@ impl DefineFieldStatement {
 					};
 					// Add the TYPE to the DEFINE TABLE statement
 					if *field_kind != relation.to {
+						// Refresh the table cache
 						tb.table_type = TableType::Relation(Relation {
-							to: field_kind.iter().map(|x| x.clone().into_string()).collect(),
+							to: field_kind.clone(),
 							..relation.clone()
 						});
-
 						txn.put_tb(ns_name, db_name, &tb).await?;
 						// Clear the cache
-						if let Some(cache) = ctx.get_cache() {
-							cache.clear_tb(ns, db, &definition.table);
-						}
-
 						txn.clear_cache();
+						// Ok all good
 						return Ok(Value::None);
 					}
 				}
@@ -273,12 +280,7 @@ impl DefineFieldStatement {
 		txn.put_tb(ns_name, db_name, &tb).await?;
 
 		// Process possible recursive defitions
-		self.process_recursive_definitions(ns, db, txn.clone(), &definition).await?;
-
-		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &definition.table);
-		}
+		self.process_recursive_definitions(ns, db, Arc::clone(&txn), &definition).await?;
 
 		// Clear the cache
 		txn.clear_cache();

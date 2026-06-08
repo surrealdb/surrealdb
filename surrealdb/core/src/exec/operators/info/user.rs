@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::ToSql;
 
@@ -58,9 +57,6 @@ impl UserInfoPlan {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for UserInfoPlan {
 	fn name(&self) -> &'static str {
 		"InfoUser"
@@ -99,7 +95,7 @@ impl ExecOperator for UserInfoPlan {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let user = self.user.clone();
+		let user = Arc::clone(&self.user);
 		let base = self.base;
 		let structured = self.structured;
 		let ctx = ctx.clone();
@@ -134,7 +130,7 @@ async fn execute_user_info(
 	let base = base.unwrap_or(opt.selected_base()?);
 
 	// Allowed to run?
-	opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
+	ctx.is_allowed(Action::View, ResourceKind::Actor, base)?;
 
 	// Evaluate the user name expression
 	let eval_ctx = EvalContext::from_exec_ctx(ctx);
@@ -155,7 +151,7 @@ async fn execute_user_info(
 				None => {
 					return Err(Error::UserNsNotFound {
 						name: user,
-						ns: ns.name.clone(),
+						ns: ns.name.to_string(),
 					}
 					.into());
 				}

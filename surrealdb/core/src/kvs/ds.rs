@@ -1,3 +1,4 @@
+use std::any::{Any, TypeId};
 #[cfg(not(target_family = "wasm"))]
 use std::collections::HashMap;
 #[cfg(target_family = "wasm")]
@@ -18,20 +19,18 @@ use anyhow::{Context as _, Result, ensure};
 use async_channel::Sender;
 use bytes::{Bytes, BytesMut};
 use futures::{Future, Stream};
-use rand::{Rng, thread_rng};
+use rand::Rng;
 use reblessive::TreeStack;
 use surrealdb_types::{AuthError, Error as TypesError, SurrealValue, object};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::Notify;
-#[cfg(feature = "jwks")]
-use tokio::sync::RwLock;
-use tokio::time::{Instant, sleep, timeout};
+use tokio::time::{Instant, sleep, timeout, timeout_at};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument, trace, warn};
 use uuid::Uuid;
 
-use super::api::Transactable;
+use super::api::{BoxFut, Transactable};
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
@@ -46,25 +45,26 @@ use crate::catalog::providers::{
 	UserProvider,
 };
 use crate::catalog::{ApiDefinition, Index, NodeLiveQuery, SubscriptionDefinition};
-use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::cnf::dynamic::DynamicConfiguration;
-use crate::ctx::Context;
+use crate::cnf::{CommonConfig, ConfigMap};
+use crate::ctx::{CancelHandle, Context};
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
 use crate::dbs::node::{Node, Timestamp};
-use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
+use crate::dbs::{
+	Capabilities, Executor, MessageBroker, Options, QueryResult, QueryResultBuilder, Session,
+};
 use crate::doc::AsyncEventRecord;
 use crate::err::Error;
+use crate::exec::function::FunctionRegistry;
 use crate::expr::model::get_model_path;
 use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
 use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
-#[cfg(feature = "jwks")]
-use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
 use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
@@ -81,7 +81,12 @@ use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
-use crate::kvs::{KVValue, LockType, TransactionType};
+#[cfg(test)]
+use crate::kvs::testing::{RetryableConflictSite, maybe_inject_retryable_conflict};
+use crate::kvs::{
+	KVValue, LockType, NORMAL_BATCH_SIZE, TransactionType, is_retryable_transaction_conflict,
+};
+use crate::observe::{ExecutionObserver, NoopObserver};
 use crate::sql::Ast;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCache;
@@ -94,10 +99,106 @@ mod builder;
 pub use builder::Builder;
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
+const NODE_DELETE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The role assigned to the initial user created when starting the server with
 /// credentials for the first time
 const INITIAL_USER_ROLE: &str = "owner";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ShutdownNodeDeleteOutcome {
+	Archived,
+	Failed,
+	TimedOut,
+}
+
+async fn await_node_step<T, Fut>(
+	deadline: Instant,
+	timeout_duration: Duration,
+	canceller: Option<&CancellationToken>,
+	step: Fut,
+) -> Result<T>
+where
+	Fut: Future<Output = Result<T>>,
+{
+	if let Some(canceller) = canceller {
+		tokio::select! {
+			biased;
+			_ = canceller.cancelled() => bail!(Error::QueryCancelled),
+			result = timeout_at(deadline, step) => match result {
+				Ok(result) => result,
+				Err(_) => bail!(Error::QueryTimedout(timeout_duration.into())),
+			},
+		}
+	} else {
+		match timeout_at(deadline, step).await {
+			Ok(result) => result,
+			Err(_) => bail!(Error::QueryTimedout(timeout_duration.into())),
+		}
+	}
+}
+
+async fn await_node_tx_step<T, Fut>(
+	txn: &Transaction,
+	deadline: Instant,
+	timeout_duration: Duration,
+	canceller: Option<&CancellationToken>,
+	step: Fut,
+) -> Result<T>
+where
+	Fut: Future<Output = Result<T>>,
+{
+	let result = if let Some(canceller) = canceller {
+		tokio::select! {
+			biased;
+			_ = canceller.cancelled() => {
+				let _ = txn.cancel().await;
+				bail!(Error::QueryCancelled);
+			}
+			result = timeout_at(deadline, step) => result,
+		}
+	} else {
+		timeout_at(deadline, step).await
+	};
+
+	match result {
+		Ok(Ok(value)) => Ok(value),
+		Ok(Err(e)) => {
+			let _ = txn.cancel().await;
+			Err(e)
+		}
+		Err(_) => {
+			let _ = txn.cancel().await;
+			bail!(Error::QueryTimedout(timeout_duration.into()))
+		}
+	}
+}
+
+fn archive_node_for_shutdown(
+	timeout_duration: Duration,
+	result: Result<()>,
+) -> ShutdownNodeDeleteOutcome {
+	match result {
+		Ok(()) => ShutdownNodeDeleteOutcome::Archived,
+		Err(e) => {
+			if matches!(e.downcast_ref::<Error>(), Some(Error::QueryTimedout(_))) {
+				warn!(
+					target: TARGET,
+					timeout = ?timeout_duration,
+					"Timed out archiving node during shutdown; continuing shutdown"
+				);
+				return ShutdownNodeDeleteOutcome::TimedOut;
+			}
+
+			warn!(
+				target: TARGET,
+				error = %e,
+				"Failed to archive node during shutdown; continuing shutdown"
+			);
+			ShutdownNodeDeleteOutcome::Failed
+		}
+	}
+}
 
 /// The underlying datastore instance which stores the dataset.
 pub struct Datastore {
@@ -115,17 +216,28 @@ pub struct Datastore {
 	transaction_timeout: Option<Duration>,
 	/// The security and feature capabilities for this datastore.
 	capabilities: Arc<Capabilities>,
-	// Whether this datastore enables live query notifications to subscribers.
-	notification_channel: Option<Sender<PublicNotification>>,
+	/// Broker used to deliver live-query notifications after their write commits.
+	///
+	/// `Some` iff live-query subscribers exist for this datastore (the broker owns the sender
+	/// half of the notification channel internally). `None` disables live-query work entirely
+	/// at the executor boundary.
+	live_query_broker: Option<Arc<dyn MessageBroker>>,
+	/// Public HTTP endpoint this datastore publishes on its `Node` catalog row so other
+	/// cluster members can route cross-node messages (e.g. live-query relay) to it.
+	/// `None` in deployments that don't expose such an endpoint.
+	http_endpoint: Option<String>,
 	// The index store cache
 	index_stores: IndexStores,
 	// The cross transaction cache
 	cache: Arc<DatastoreCache>,
+	/// Registry of built-in scalar, aggregate, projection and index
+	/// functions, along with the method-dispatch table. Built once when the
+	/// datastore is constructed and shared across all transactions via the
+	/// `Arc`. Every `Context` clones this `Arc` rather than rebuilding the
+	/// registry, which is otherwise the single biggest per-query cost.
+	function_registry: Arc<FunctionRegistry>,
 	// The index asynchronous builder
 	index_builder: IndexBuilder,
-	#[cfg(feature = "jwks")]
-	// The JWKS object cache
-	jwks_cache: Arc<RwLock<JwksCache>>,
 	#[cfg(storage)]
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
@@ -142,9 +254,13 @@ pub struct Datastore {
 	lazy_surrealism: bool,
 	// Async event processing trigger
 	async_event_trigger: Arc<Notify>,
+	/// Config
+	config: Arc<CommonConfig>,
 	// Http client used to make requests.
 	#[cfg(feature = "http")]
 	http_client: Arc<HttpClient>,
+	/// Observer invoked on significant events. Defaults to [`NoopObserver`].
+	observer: Arc<dyn ExecutionObserver>,
 }
 
 /// Represents a collection of metrics for a specific datastore flavor.
@@ -171,17 +287,39 @@ pub(crate) struct TransactionFactory {
 	builder: Arc<Box<dyn TransactionBuilder>>,
 	// Async event processing trigger
 	async_event_trigger: Arc<Notify>,
+	/// Observer invoked on transaction lifecycle events. Defaults to
+	/// [`NoopObserver`]; replaced by the datastore's observer when one is
+	/// configured.
+	observer: Arc<dyn ExecutionObserver>,
+	config: Arc<CommonConfig>,
 }
 
 impl TransactionFactory {
 	pub(super) fn new(
 		async_event_trigger: Arc<Notify>,
 		builder: Box<dyn TransactionBuilder>,
+		config: Arc<CommonConfig>,
 	) -> Self {
 		Self {
 			builder: Arc::new(builder),
 			async_event_trigger,
+			observer: Arc::new(NoopObserver),
+			config,
 		}
+	}
+
+	/// Replace the observer. Used by the datastore builder to propagate the
+	/// chosen observer to all transactions created after the swap.
+	pub(crate) fn with_observer(mut self, observer: Arc<dyn ExecutionObserver>) -> Self {
+		self.observer = observer;
+		self
+	}
+
+	/// Access the observer. Transaction instrumentation fires events through
+	/// this handle.
+	#[allow(dead_code)]
+	pub(crate) fn observer(&self) -> &Arc<dyn ExecutionObserver> {
+		&self.observer
 	}
 
 	#[allow(
@@ -211,10 +349,12 @@ impl TransactionFactory {
 		Ok(Transaction::new(
 			local,
 			sequences,
-			self.async_event_trigger.clone(),
+			Arc::clone(&self.async_event_trigger),
+			Arc::clone(&self.observer),
 			Transactor {
 				inner,
 			},
+			&self.config,
 		))
 	}
 
@@ -229,8 +369,6 @@ impl TransactionFactory {
 	}
 }
 
-#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 /// Abstraction over storage backends for creating and managing transactions.
 ///
 /// This trait allows decoupling `Datastore` from concrete KV engines (memory,
@@ -251,14 +389,14 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 	/// Returns the backend transaction object and a flag indicating if the
 	/// transaction is local to the process (true) or requires external resources
 	/// (false).
-	async fn new_transaction(
+	fn new_transaction(
 		&self,
 		write: bool,
 		lock: bool,
-	) -> Result<(Box<dyn Transactable>, bool)>;
+	) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>>;
 
 	/// Perform any backend-specific shutdown/cleanup.
-	async fn shutdown(&self) -> Result<()>;
+	fn shutdown(&self) -> BoxFut<'_, Result<()>>;
 
 	/// Registers metrics for the current datastore flavor if supported.
 	///
@@ -269,10 +407,53 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 	///
 	/// - `metric`: The name of the metric to collect.
 	fn collect_u64_metric(&self, metric: &str) -> Option<u64>;
+
+	/// Returns an immutable backend-specific extension handle.
+	///
+	/// Backends expose only stable, shareable handles through this hook. The
+	/// default implementation keeps community datastores free of extension
+	/// state.
+	///
+	/// This is the extension point for backend-specific operations that
+	/// don't fit the generic transaction interface: e.g. the TiKV backend
+	/// returns its [`crate::kvs::tikv::TikvOpsHandle`] (matched on
+	/// `TypeId`) so the engine can offer MVCC-GC / lock-cleanup /
+	/// `unsafe_destroy_range` to operators without polluting this trait
+	/// with TiKV-only signatures every other backend would have to no-op.
+	fn extension(&self, _: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
+		None
+	}
 }
 
-#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+/// Transaction-builder construction result with router startup state.
+///
+/// The datastore consumes `builder`; server startup threads `router_state` into
+/// the router factory so embedders can make immutable handles available to
+/// their HTTP routes without process globals.
+pub struct TransactionBuilderParts<S> {
+	/// Transaction builder consumed by the datastore.
+	pub builder: Box<dyn TransactionBuilder>,
+	/// Immutable router startup state produced by the composer.
+	pub router_state: S,
+}
+
+impl<S> TransactionBuilderParts<S> {
+	/// Construct transaction-builder parts with router startup state.
+	pub fn new(builder: Box<dyn TransactionBuilder>, router_state: S) -> Self {
+		Self {
+			builder,
+			router_state,
+		}
+	}
+}
+
+impl TransactionBuilderParts<()> {
+	/// Construct transaction-builder parts for composers without router state.
+	pub fn without_router_state(builder: Box<dyn TransactionBuilder>) -> Self {
+		Self::new(builder, ())
+	}
+}
+
 /// Factory that parses a datastore path and returns a concrete `TransactionBuilder`.
 ///
 /// Implementations can decide how to interpret connection strings (e.g. "memory",
@@ -282,19 +463,61 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 /// The `path_valid` helper is used by the CLI to validate the path early and
 /// provide better error messages before starting the runtime.
 pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
+	/// Immutable state threaded into router construction after datastore startup.
+	type RouterState: Clone + Send + Sync + 'static;
+
 	/// Create a new transaction builder for the datastore.
 	///
 	/// # Parameters
 	/// - `path`: Database connection path string
 	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
-	async fn new_transaction_builder(
+	#[cfg(not(target_family = "wasm"))]
+	fn new_transaction_builder(
 		&self,
 		path: &str,
 		canceller: CancellationToken,
-	) -> Result<Box<dyn TransactionBuilder>>;
+		config: ConfigMap,
+	) -> impl Future<Output = Result<TransactionBuilderParts<Self::RouterState>>> + Send;
+
+	/// Create a new transaction builder for the datastore (WASM: no `Send` bound on the future).
+	#[cfg(target_family = "wasm")]
+	fn new_transaction_builder(
+		&self,
+		path: &str,
+		canceller: CancellationToken,
+		config: ConfigMap,
+	) -> impl Future<Output = Result<TransactionBuilderParts<Self::RouterState>>>;
 
 	/// Validate a datastore path string.
 	fn path_valid(v: &str) -> Result<String>;
+
+	/// Returns the stable datastore node id used for live-query ownership metadata.
+	///
+	/// Composers that run SurrealDB inside a clustered product should return a deterministic
+	/// value so remote writers can route notifications back to the node that owns each
+	/// subscriber connection.
+	fn datastore_node_id(&self) -> Option<[u8; 16]> {
+		None
+	}
+
+	/// Creates the broker that receives buffered live-query notifications after commit.
+	///
+	/// The default broker is local-only and preserves community behaviour. Clustered composers
+	/// can return a broker that forwards remote targets without changing transaction results on
+	/// delivery failure.
+	fn live_query_broker(&self, channel: Sender<PublicNotification>) -> Arc<dyn MessageBroker> {
+		crate::dbs::LocalMessageBroker::new(channel)
+	}
+
+	/// Public HTTP endpoint this datastore should publish for cross-node messaging.
+	///
+	/// Clustered composers surface their local node's endpoint here so the [`Datastore`]
+	/// can record it on the `Node` catalog row, making it discoverable by peer nodes
+	/// (e.g. for the live-query relay). Returns `None` in single-node and shared-backend
+	/// deployments that don't expose a cross-node messaging endpoint.
+	fn http_endpoint(&self) -> Option<String> {
+		None
+	}
 }
 
 pub mod requirements {
@@ -328,23 +551,29 @@ pub enum DatastoreFlavor {
 
 impl TransactionBuilderFactoryRequirements for CommunityComposer {}
 
-#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 impl TransactionBuilderFactory for CommunityComposer {
+	type RouterState = ();
+
 	#[allow(unused_variables)]
 	async fn new_transaction_builder(
 		&self,
 		path: &str,
 		_canceller: CancellationToken,
-	) -> Result<Box<dyn TransactionBuilder>> {
+		config: ConfigMap,
+	) -> Result<TransactionBuilderParts<Self::RouterState>> {
 		// Extract query parameters from the path before scheme extraction
-		let (raw_path, query_string) = match path.split_once('?') {
+		let (raw_path, config_string) = match path.split_once('?') {
 			Some((p, q)) => (p, Some(q)),
 			None => (path, None),
 		};
 
-		// Parse any query parameters into a map
-		let params = query_string.map(super::config::parse_query_params).unwrap_or_default();
+		let config = if let Some(config_string) = config_string {
+			config.join(
+				ConfigMap::from_config_string(config_string).map_keys(|x| format!("datastore_{x}")),
+			)
+		} else {
+			config
+		};
 
 		// Extract the scheme and path components
 		let (flavour, path) = match raw_path.split_once("://").or_else(|| raw_path.split_once(':'))
@@ -378,16 +607,34 @@ impl TransactionBuilderFactory for CommunityComposer {
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
+
+					// Persist path comes from the URL path; do not inject an empty
+					// string or `parse_key_with` logs a spurious DATASTORE_PERSIST warning.
+					let config = if path.is_empty() {
+						config
+					} else {
+						config.with_key_value("datastore_persist", path)
+					};
 					// Parse SurrealMX configuration from URL path and query parameters
-					let config = super::config::MemoryConfig::from_path_and_params(&path, &params)
-						.map_err(Error::Kvs)?;
+					let config = config.load();
 					// Initialise the storage engine
 					let v = super::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem)?;
 					info!(target: TARGET, "Started kvs store in {flavour}");
-					Ok(Box::<DatastoreFlavor>::new(v))
+					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
+						v,
+					)))
 				}
 				#[cfg(not(feature = "kv-mem"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
+			}
+			// The `file:` scheme has been removed. Catch it here so users
+			// with legacy paths get a targeted message instead of the
+			// generic fallback below.
+			("file", _) => {
+				bail!(Error::Kvs(crate::kvs::Error::Datastore(
+					"The `file://` scheme is no longer supported; use `rocksdb://` or `surrealkv://` instead"
+						.into()
+				)));
 			}
 			// Initiate a RocksDB datastore
 			(flavour @ "rocksdb", path) => {
@@ -396,14 +643,15 @@ impl TransactionBuilderFactory for CommunityComposer {
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Parse RocksDB-specific configuration from query parameters
-					let config =
-						super::config::RocksDbConfig::from_params(&params).map_err(Error::Kvs)?;
+					let config = config.load();
 					// Initialise the storage engine
 					let v = super::rocksdb::Datastore::new(&path, config)
 						.await
 						.map(DatastoreFlavor::RocksDB)?;
 					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok(Box::<DatastoreFlavor>::new(v))
+					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
+						v,
+					)))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -415,14 +663,15 @@ impl TransactionBuilderFactory for CommunityComposer {
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Parse SurrealKV-specific configuration from query parameters
-					let config =
-						super::config::SurrealKvConfig::from_params(&params).map_err(Error::Kvs)?;
+					let config = config.load();
 					// Initialise the storage engine
 					let v = super::surrealkv::Datastore::new(&path, config)
 						.await
 						.map(DatastoreFlavor::SurrealKV)?;
 					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok(Box::<DatastoreFlavor>::new(v))
+					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
+						v,
+					)))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -434,7 +683,9 @@ impl TransactionBuilderFactory for CommunityComposer {
 					let v =
 						super::indxdb::Datastore::new(&path).await.map(DatastoreFlavor::IndxDB)?;
 					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok(Box::<DatastoreFlavor>::new(v))
+					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
+						v,
+					)))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -443,9 +694,16 @@ impl TransactionBuilderFactory for CommunityComposer {
 			(flavour @ "tikv", path) => {
 				#[cfg(feature = "kv-tikv")]
 				{
-					let v = super::tikv::Datastore::new(&path).await.map(DatastoreFlavor::TiKV)?;
+					// Parse TiKV-specific configuration from env vars
+					// (SURREAL_TIKV_*) and query parameters.
+					let tikv_config = config.load();
+					let v = super::tikv::Datastore::new(&path, tikv_config)
+						.await
+						.map(DatastoreFlavor::TiKV)?;
 					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok(Box::<DatastoreFlavor>::new(v))
+					Ok(TransactionBuilderParts::without_router_state(Box::<DatastoreFlavor>::new(
+						v,
+					)))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
 				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
@@ -478,8 +736,6 @@ impl TransactionBuilderFactory for CommunityComposer {
 
 impl TransactionBuilderRequirements for DatastoreFlavor {}
 
-#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 impl TransactionBuilder for DatastoreFlavor {
 	#[allow(
 		unreachable_code,
@@ -487,40 +743,40 @@ impl TransactionBuilder for DatastoreFlavor {
 		unused_variables,
 		reason = "Some variables are unused when no backends are enabled."
 	)]
-	async fn new_transaction(
+	fn new_transaction(
 		&self,
 		write: bool,
 		lock: bool,
-	) -> Result<(Box<dyn Transactable>, bool)> {
-		//-> Pin<Box<dyn Future<Output = Result<(Box<dyn api::Transaction>, bool)>> + Send + 'a>> {
-		//Box::pin(async move {
-		Ok(match self {
-			#[cfg(feature = "kv-mem")]
-			Self::Mem(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, true)
-			}
-			#[cfg(feature = "kv-rocksdb")]
-			Self::RocksDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, true)
-			}
-			#[cfg(feature = "kv-indxdb")]
-			Self::IndxDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, true)
-			}
-			#[cfg(feature = "kv-tikv")]
-			Self::TiKV(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, false)
-			}
-			#[cfg(feature = "kv-surrealkv")]
-			Self::SurrealKV(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, true)
-			}
-			_ => unreachable!(),
+	) -> BoxFut<'_, Result<(Box<dyn Transactable>, bool)>> {
+		Box::pin(async move {
+			Ok(match self {
+				#[cfg(feature = "kv-mem")]
+				Self::Mem(v) => {
+					let tx = v.transaction(write, lock).await?;
+					(tx, true)
+				}
+				#[cfg(feature = "kv-rocksdb")]
+				Self::RocksDB(v) => {
+					let tx = v.transaction(write, lock).await?;
+					(tx, true)
+				}
+				#[cfg(feature = "kv-indxdb")]
+				Self::IndxDB(v) => {
+					let tx = v.transaction(write, lock).await?;
+					(tx, true)
+				}
+				#[cfg(feature = "kv-tikv")]
+				Self::TiKV(v) => {
+					let tx = v.transaction(write, lock).await?;
+					(tx, false)
+				}
+				#[cfg(feature = "kv-surrealkv")]
+				Self::SurrealKV(v) => {
+					let tx = v.transaction(write, lock).await?;
+					(tx, true)
+				}
+				_ => unreachable!(),
+			})
 		})
 	}
 
@@ -546,20 +802,35 @@ impl TransactionBuilder for DatastoreFlavor {
 		}
 	}
 
-	async fn shutdown(&self) -> Result<()> {
+	fn shutdown(&self) -> BoxFut<'_, Result<()>> {
+		Box::pin(async move {
+			match self {
+				#[cfg(feature = "kv-mem")]
+				Self::Mem(v) => Ok(v.shutdown().await?),
+				#[cfg(feature = "kv-rocksdb")]
+				Self::RocksDB(v) => Ok(v.shutdown().await?),
+				#[cfg(feature = "kv-indxdb")]
+				Self::IndxDB(v) => Ok(v.shutdown().await?),
+				#[cfg(feature = "kv-tikv")]
+				Self::TiKV(v) => Ok(v.shutdown().await?),
+				#[cfg(feature = "kv-surrealkv")]
+				Self::SurrealKV(v) => Ok(v.shutdown().await?),
+				#[allow(unreachable_patterns)]
+				_ => unreachable!(),
+			}
+		})
+	}
+
+	#[allow(
+		unused_variables,
+		reason = "type_id is only consumed when a backend feature is enabled"
+	)]
+	fn extension(&self, type_id: TypeId) -> Option<Arc<dyn Any + Send + Sync>> {
 		match self {
-			#[cfg(feature = "kv-mem")]
-			Self::Mem(v) => Ok(v.shutdown().await?),
-			#[cfg(feature = "kv-rocksdb")]
-			Self::RocksDB(v) => Ok(v.shutdown().await?),
-			#[cfg(feature = "kv-indxdb")]
-			Self::IndxDB(v) => Ok(v.shutdown().await?),
 			#[cfg(feature = "kv-tikv")]
-			Self::TiKV(v) => Ok(v.shutdown().await?),
-			#[cfg(feature = "kv-surrealkv")]
-			Self::SurrealKV(v) => Ok(v.shutdown().await?),
+			Self::TiKV(v) if type_id == TypeId::of::<super::tikv::TikvOpsHandle>() => Some(v.ops_handle()),
 			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
+			_ => None,
 		}
 	}
 }
@@ -594,6 +865,35 @@ impl Datastore {
 	pub fn builder() -> Builder {
 		Builder::new()
 	}
+
+	async fn retry_index_operation_conflict(
+		err: &anyhow::Error,
+		operation: impl Into<String>,
+	) -> bool {
+		if is_retryable_transaction_conflict(err) {
+			let operation = operation.into();
+			debug!(
+				target: TARGET,
+				operation = %operation,
+				error = %err,
+				"retryable index operation conflict, retrying"
+			);
+			sleep(Duration::from_millis(100)).await;
+			true
+		} else {
+			false
+		}
+	}
+
+	async fn cancel_and_retry_index_operation_conflict(
+		txn: &Transaction,
+		err: &anyhow::Error,
+		operation: impl Into<String>,
+	) -> bool {
+		let _ = txn.cancel().await;
+		Self::retry_index_operation_conflict(err, operation).await
+	}
+
 	/// Creates a new datastore instance
 	///
 	/// # Examples
@@ -649,6 +949,15 @@ impl Datastore {
 		self.transaction_factory.collect_u64_metric(metric)
 	}
 
+	/// The currently installed observer. Cheap to clone; internal handle is
+	/// an `Arc`.
+	///
+	/// Exposed so higher layers (server, SDK) can emit transport-layer events
+	/// such as session connect/disconnect that the core engine never sees.
+	pub fn observer(&self) -> &Arc<dyn ExecutionObserver> {
+		&self.observer
+	}
+
 	/// Create a new datastore with the same persistent data (inner), with
 	/// flushed cache. Simulating a server restart
 	pub fn restart(self) -> Self {
@@ -659,25 +968,75 @@ impl Datastore {
 			dynamic_configuration: DynamicConfiguration::default(),
 			slow_log: self.slow_log,
 			transaction_timeout: self.transaction_timeout,
-			capabilities: self.capabilities.clone(),
-			notification_channel: self.notification_channel,
-			index_stores: Default::default(),
+			capabilities: Arc::clone(&self.capabilities),
+			live_query_broker: self.live_query_broker,
+			http_endpoint: self.http_endpoint,
+			index_stores: IndexStores::new(
+				self.config.hnsw_cache_size,
+				self.config.diskann_cache_size,
+			),
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
-			#[cfg(feature = "jwks")]
-			jwks_cache: Arc::new(Default::default()),
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
-			cache: Arc::new(DatastoreCache::new()),
+			cache: Arc::new(DatastoreCache::new(self.config.datastore_cache_size)),
+			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			buckets: self.buckets,
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
+			async_event_trigger: self.async_event_trigger,
 			#[cfg(feature = "surrealism")]
-			surrealism_cache: Arc::new(SurrealismCache::new()),
+			surrealism_cache: Arc::new(SurrealismCache::new(self.config.surrealism_cache_size)),
 			#[cfg(feature = "surrealism")]
 			lazy_surrealism: self.lazy_surrealism,
-			async_event_trigger: self.async_event_trigger,
 			#[cfg(feature = "http")]
 			http_client: self.http_client,
+			observer: self.observer,
+			config: self.config,
+		}
+	}
+
+	/// Create a test-only datastore facade that shares the same durable KV engine
+	/// while resetting process-local state.
+	///
+	/// This lets unit tests model two SurrealDB compute nodes connected to the
+	/// same storage backend without starting an external service. The cloned
+	/// facade deliberately reuses the transaction factory, but gets its own node
+	/// id, index builder, index stores, datastore cache, sequences, and other
+	/// process-local caches. Tests that exercise cluster liveness should call
+	/// [`Self::insert_node`] for both the original datastore and the fork.
+	#[cfg(test)]
+	pub(crate) fn fork_for_test_with_node_id(&self, id: Uuid) -> Self {
+		let transaction_factory = self.transaction_factory.clone();
+		Self {
+			id,
+			auth_enabled: self.auth_enabled,
+			dynamic_configuration: self.dynamic_configuration.clone(),
+			slow_log: self.slow_log.clone(),
+			transaction_timeout: self.transaction_timeout,
+			capabilities: Arc::clone(&self.capabilities),
+			live_query_broker: self.live_query_broker.clone(),
+			http_endpoint: self.http_endpoint.clone(),
+			index_stores: IndexStores::new(
+				self.config.hnsw_cache_size,
+				self.config.diskann_cache_size,
+			),
+			index_builder: IndexBuilder::new(transaction_factory.clone()),
+			#[cfg(storage)]
+			temporary_directory: self.temporary_directory.clone(),
+			cache: Arc::new(DatastoreCache::new(self.config.datastore_cache_size)),
+			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			buckets: self.buckets.clone(),
+			sequences: Sequences::new(transaction_factory.clone(), id),
+			transaction_factory,
+			async_event_trigger: Arc::clone(&self.async_event_trigger),
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: Arc::new(SurrealismCache::new(self.config.surrealism_cache_size)),
+			#[cfg(feature = "surrealism")]
+			lazy_surrealism: self.lazy_surrealism,
+			#[cfg(feature = "http")]
+			http_client: Arc::clone(&self.http_client),
+			observer: Arc::clone(&self.observer),
+			config: Arc::clone(&self.config),
 		}
 	}
 
@@ -696,6 +1055,27 @@ impl Datastore {
 	/// Get the configured transaction timeout, if any
 	pub(crate) fn transaction_timeout(&self) -> Option<Duration> {
 		self.transaction_timeout
+	}
+
+	/// Returns the broker used to flush live-query notifications after commit.
+	pub(crate) fn live_query_broker(&self) -> Option<Arc<dyn MessageBroker>> {
+		self.live_query_broker.clone()
+	}
+
+	/// Looks up the public HTTP endpoint that the cluster member with `node_id`
+	/// has published on its `Node` catalog row.
+	///
+	/// Returns `Ok(None)` when the row exists but no endpoint is set, or when
+	/// no such node has registered. Used by clustered live-query relays to
+	/// resolve the target node's address at delivery time without consulting
+	/// any in-memory cluster topology.
+	pub async fn lookup_node_endpoint(&self, node_id: Uuid) -> Result<Option<String>> {
+		let txn = self.transaction(Read, Optimistic).await?;
+		let key = crate::key::root::nd::Nd::new(node_id);
+		let res = txn.get(&key, None).await?;
+		// Always cancel a read transaction; we don't write through it.
+		let _ = txn.cancel().await;
+		Ok(res.and_then(|node: Node| node.http_endpoint))
 	}
 
 	#[cfg(storage)]
@@ -760,8 +1140,8 @@ impl Datastore {
 	}
 
 	#[cfg(feature = "jwks")]
-	pub(crate) fn jwks_cache(&self) -> &Arc<RwLock<JwksCache>> {
-		&self.jwks_cache
+	pub(crate) fn cache(&self) -> &Arc<DatastoreCache> {
+		&self.cache
 	}
 
 	pub(super) fn clock_now(&self) -> Timestamp {
@@ -771,7 +1151,7 @@ impl Datastore {
 	// Used for testing live queries
 	#[cfg(test)]
 	pub(crate) fn get_cache(&self) -> Arc<DatastoreCache> {
-		self.cache.clone()
+		Arc::clone(&self.cache)
 	}
 
 	// Initialise the cluster and run bootstrap utilities
@@ -871,10 +1251,10 @@ impl Datastore {
 				pass,
 				INITIAL_USER_ROLE.to_owned(),
 			);
-			let opt = Options::new(self.id, self.dynamic_configuration.clone())
+			let opt = Options::new(&CommonConfig::default())
 				.with_auth(Arc::new(Auth::for_root(Role::Owner)));
 			let mut ctx = self.setup_ctx()?;
-			ctx.set_transaction(txn.clone());
+			ctx.set_transaction(Arc::clone(&txn));
 			let ctx = ctx.freeze();
 			let mut stack = TreeStack::new();
 			let res = stack.enter(|stk| stm.compute(stk, &ctx, &opt, None)).finish().await;
@@ -910,7 +1290,12 @@ impl Datastore {
 		};
 
 		// Execute the SQL statement
-		self.execute(&sql, &Session::owner(), Some(vars.into())).await?;
+		self.execute(
+			&sql,
+			&Session::owner(),
+			Some(vars.into_iter().collect::<std::collections::BTreeMap<_, _>>().into()),
+		)
+		.await?;
 		// Everything ok
 		Ok(())
 	}
@@ -931,10 +1316,81 @@ impl Datastore {
 	pub async fn shutdown(&self) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore shutdown operations");
-		// Delete this datastore from the cluster
-		self.delete_node().await?;
+		// Archive this datastore in the cluster, but don't let a blocked
+		// metadata transaction prevent storage engine shutdown.
+		let _ = archive_node_for_shutdown(
+			NODE_DELETE_TIMEOUT,
+			self.delete_node_with_timeout(NODE_DELETE_TIMEOUT).await,
+		);
 		// Run any storage engine shutdown tasks
 		self.transaction_factory.builder.shutdown().await
+	}
+
+	/// Drop every version of every key in the half-open range `[start, end)`
+	/// **outside** any user transaction.
+	///
+	/// Routes through the backend's [`TransactionBuilder::extension`] hook.
+	/// Backends other than TiKV treat this as a no-op. Callers are
+	/// responsible for ensuring the data is already logically inaccessible
+	/// (typically by running this only after a committed catalog-clearing
+	/// transaction).
+	pub async fn unsafe_destroy_range(&self, start: Vec<u8>, end: Vec<u8>) -> Result<()> {
+		#[cfg(feature = "kv-tikv")]
+		if let Some(ops) = self.tikv_ops() {
+			return ops.unsafe_destroy_range(start, end).await.map_err(Into::into);
+		}
+		let _ = (start, end);
+		Ok(())
+	}
+
+	/// Advance the MVCC garbage-collection safepoint by `lifetime`.
+	///
+	/// Routes through the backend's [`TransactionBuilder::extension`] hook;
+	/// no-op on backends other than TiKV. Background tasks call this on
+	/// `EngineOptions::tikv_gc_interval` and shutdown runs one final
+	/// advisory pass.
+	pub async fn run_mvcc_gc(&self, lifetime: Duration) -> Result<()> {
+		#[cfg(feature = "kv-tikv")]
+		if let Some(ops) = self.tikv_ops() {
+			return ops.run_mvcc_gc(lifetime).await.map_err(Into::into);
+		}
+		let _ = lifetime;
+		Ok(())
+	}
+
+	/// Resolve stale transactional locks left by crashed clients.
+	///
+	/// Routes through the backend's [`TransactionBuilder::extension`] hook;
+	/// no-op on backends other than TiKV. Background tasks call this on
+	/// `EngineOptions::tikv_lock_cleanup_interval`.
+	pub async fn run_lock_cleanup(&self, lifetime: Duration) -> Result<()> {
+		#[cfg(feature = "kv-tikv")]
+		if let Some(ops) = self.tikv_ops() {
+			return ops.run_lock_cleanup(lifetime).await.map_err(Into::into);
+		}
+		let _ = lifetime;
+		Ok(())
+	}
+
+	/// Number of in-flight transactions tracked by the backend, when
+	/// available. `None` indicates the backend does not track this.
+	pub fn in_flight_transaction_count(&self) -> Option<usize> {
+		#[cfg(feature = "kv-tikv")]
+		if let Some(ops) = self.tikv_ops() {
+			return Some(ops.in_flight_transaction_count());
+		}
+		None
+	}
+
+	/// Resolve the TiKV operational extension handle, if the backend is
+	/// TiKV. Returns `None` for every other flavour.
+	#[cfg(feature = "kv-tikv")]
+	fn tikv_ops(&self) -> Option<Arc<super::tikv::TikvOpsHandle>> {
+		let ext = self
+			.transaction_factory
+			.builder
+			.extension(TypeId::of::<super::tikv::TikvOpsHandle>())?;
+		ext.downcast::<super::tikv::TikvOpsHandle>().ok()
 	}
 
 	// --------------------------------------------------
@@ -967,7 +1423,7 @@ impl Datastore {
 				return;
 			}
 		};
-		ctx.set_transaction(txn.clone());
+		ctx.set_transaction(Arc::clone(&txn));
 		let ctx = ctx.freeze();
 
 		let nss = match txn.all_ns(None).await {
@@ -1044,8 +1500,8 @@ impl Datastore {
 
 		let mut join_set = tokio::task::JoinSet::new();
 		for lookup in lookups {
-			let ctx = ctx.clone();
-			let load_sem = load_sem.clone();
+			let ctx = Arc::clone(&ctx);
+			let load_sem = Arc::clone(&load_sem);
 			join_set.spawn(async move {
 				let _permit = load_sem
 					.acquire_owned()
@@ -1181,7 +1637,7 @@ impl Datastore {
 			if remaining.is_zero() {
 				break;
 			}
-			let tempo = Duration::from_secs(thread_rng().gen_range(0..10)).min(remaining);
+			let tempo = Duration::from_secs(rand::rng().random_range(0..10)).min(remaining);
 			sleep(tempo).await;
 			attempt += 1;
 		}
@@ -1193,13 +1649,15 @@ impl Datastore {
 		bail!(Error::Internal(format!("{task} failed after {attempt} attempts due to timeout")));
 	}
 
-	/// Inserts a node for the first time into the cluster.
+	/// Registers this node's cluster membership entry with a fresh heartbeat.
 	///
-	/// This function should be run at server or database startup.
-	///
-	/// This function ensures that this node is entered into the cluster
-	/// membership entries. This function must be run at server or database
-	/// startup, in order to write the initial entry and timestamp to storage.
+	/// Must be run at server or database startup. The write is idempotent:
+	/// the entry at `Nd::new(self.id)` is owned by this node, so the call
+	/// upserts the row whether or not a previous lifetime of the same node
+	/// id left a record behind. This supports deployments where the node id
+	/// is stable across restarts (e.g. a stateful cluster member reusing
+	/// its durable storage) without forcing the operator to clean up state
+	/// between runs.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn insert_node(&self) -> Result<()> {
 		// Log when this method is run
@@ -1210,23 +1668,8 @@ impl Datastore {
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::Nd::new(self.id);
 		let now = self.clock_now();
-		let node = Node::new(self.id, now, false);
-		let res = run!(txn, txn.put(&key, &node).await);
-		match res {
-			Err(e) => {
-				if matches!(
-					e.downcast_ref::<Error>(),
-					Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
-				) {
-					Err(anyhow::Error::new(Error::ClAlreadyExists {
-						id: self.id.to_string(),
-					}))
-				} else {
-					Err(e)
-				}
-			}
-			x => x,
-		}
+		let node = Node::new_with_endpoint(self.id, now, false, self.http_endpoint.clone());
+		run!(txn, txn.set(&key, &node).await)
 	}
 
 	/// Updates an already existing node in the cluster.
@@ -1246,8 +1689,48 @@ impl Datastore {
 		let txn = self.transaction(Write, Optimistic).await?;
 		let key = crate::key::root::nd::new(self.id);
 		let now = self.clock_now();
-		let node = Node::new(self.id, now, false);
+		let node = Node::new_with_endpoint(self.id, now, false, self.http_endpoint.clone());
 		run!(txn, txn.replace(&key, &node).await)
+	}
+
+	/// Updates this node, bounding each step and explicitly cancelling any
+	/// open write transaction before returning on timeout or cancellation.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self, canceller))]
+	pub async fn update_node_with_timeout(
+		&self,
+		timeout_duration: Duration,
+		canceller: &CancellationToken,
+	) -> Result<()> {
+		trace!(target: TARGET, id = %self.id, timeout = ?timeout_duration, "Updating node in the cluster with timeout");
+
+		let deadline = Instant::now() + timeout_duration;
+
+		await_node_step(deadline, timeout_duration, Some(canceller), async {
+			crate::sys::refresh().await;
+			Ok(())
+		})
+		.await?;
+
+		let txn = await_node_step(
+			deadline,
+			timeout_duration,
+			Some(canceller),
+			self.transaction(Write, Optimistic),
+		)
+		.await?;
+		let key = crate::key::root::nd::new(self.id);
+		let now = self.clock_now();
+		let node = Node::new_with_endpoint(self.id, now, false, self.http_endpoint.clone());
+
+		await_node_tx_step(
+			&txn,
+			deadline,
+			timeout_duration,
+			Some(canceller),
+			txn.replace(&key, &node),
+		)
+		.await?;
+		await_node_tx_step(&txn, deadline, timeout_duration, Some(canceller), txn.commit()).await
 	}
 
 	/// Deletes a node from the cluster.
@@ -1267,6 +1750,26 @@ impl Datastore {
 		let val = catch!(txn, txn.get_node(self.id).await);
 		let node = val.as_ref().archive();
 		run!(txn, txn.replace(&key, &node).await)
+	}
+
+	/// Archives this node, bounding each step and explicitly cancelling any
+	/// open write transaction before returning on timeout.
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn delete_node_with_timeout(&self, timeout_duration: Duration) -> Result<()> {
+		trace!(target: TARGET, id = %self.id, timeout = ?timeout_duration, "Archiving node in the cluster with timeout");
+
+		let deadline = Instant::now() + timeout_duration;
+		let txn =
+			await_node_step(deadline, timeout_duration, None, self.transaction(Write, Optimistic))
+				.await?;
+		let key = crate::key::root::nd::new(self.id);
+		let val = await_node_tx_step(&txn, deadline, timeout_duration, None, txn.get_node(self.id))
+			.await?;
+		let node = val.as_ref().archive();
+
+		await_node_tx_step(&txn, deadline, timeout_duration, None, txn.replace(&key, &node))
+			.await?;
+		await_node_tx_step(&txn, deadline, timeout_duration, None, txn.commit()).await
 	}
 
 	/// Expires nodes which have timedout from the cluster.
@@ -1351,13 +1854,13 @@ impl Datastore {
 				// Scan the live queries for this node
 				while let Some(rng) = next {
 					// Fetch the next batch of keys and values
-					let res = catch!(txn, txn.batch_keys_vals(rng, *NORMAL_FETCH_SIZE, None).await);
+					let res = catch!(txn, txn.batch_keys_vals(rng, NORMAL_BATCH_SIZE, None).await);
 					next = res.next;
 					for (k, v) in res.result.iter() {
 						// Decode the data for this live query
-						let val: NodeLiveQuery = KVValue::kv_decode_value(v.clone())?;
+						let val: NodeLiveQuery = KVValue::kv_decode_value(v, ())?;
 						// Get the key for this node live query
-						let nlq = catch!(txn, crate::key::node::lq::Lq::decode_key(k.clone()));
+						let nlq = catch!(txn, crate::key::node::lq::Lq::decode_key(k));
 						// Check that the node for this query is archived
 						if archived.contains(&nlq.nd) {
 							// Get the key for this table live query
@@ -1451,12 +1954,12 @@ impl Datastore {
 					let txn = self.transaction(Write, Optimistic).await?;
 					while let Some(rng) = next {
 						// Fetch the next batch of keys and values
-						let max = *NORMAL_FETCH_SIZE;
+						let max = NORMAL_BATCH_SIZE;
 						let res = catch!(txn, txn.batch_keys_vals(rng, max, None).await);
 						next = res.next;
 						for (k, v) in res.result.iter() {
 							// Decode the LIVE query statement
-							let stm: SubscriptionDefinition = KVValue::kv_decode_value(v.clone())?;
+							let stm: SubscriptionDefinition = KVValue::kv_decode_value(v, ())?;
 							// Get the node id and the live query id
 							let (nid, lid) = (stm.node, stm.id);
 							// Check that the node for this query is archived
@@ -1573,6 +2076,13 @@ impl Datastore {
 	// Indexing functions
 	// --------------------------------------------------
 
+	fn ensure_not_cancelled(canceller: &CancellationToken) -> Result<()> {
+		if canceller.is_cancelled() {
+			bail!(Error::QueryCancelled);
+		}
+		Ok(())
+	}
+
 	/// Processes the index compaction queue.
 	///
 	/// This method is called periodically by the index compaction thread to
@@ -1598,35 +2108,40 @@ impl Datastore {
 	/// # Arguments
 	/// * `dbs` - The shared datastore instance, cloned into each compaction task
 	/// * `interval` - The interval between compaction runs, used to calculate the lease duration
+	/// * `canceller` - Token checked before starting each lease, batch, and compaction unit
 	///
 	/// # Returns
 	/// A tuple `(iterations, errors)` where `iterations` is the number of
 	/// compaction batches processed and `errors` is the total number of
 	/// individual index compaction failures across all batches.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(dbs, canceller))]
 	pub async fn index_compaction(
 		dbs: Arc<Datastore>,
 		interval: Duration,
+		canceller: CancellationToken,
 	) -> Result<(usize, usize)> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Attempting index compaction process");
 		// Create a new lease handler
-		let lh = LeaseHandler::new(
+		let lh = LeaseHandler::new_with_canceller(
 			dbs.sequences.clone(),
 			dbs.id,
 			dbs.transaction_factory.clone(),
 			TaskLeaseType::IndexCompaction,
 			interval * 2,
+			canceller.clone(),
 		)?;
 		let mut count_iteration = 0;
 		let mut count_error = 0;
 		// We continue without interruptions while there are keys and the lease
-		loop {
+		'compaction: loop {
+			Self::ensure_not_cancelled(&canceller)?;
 			// Attempt to acquire a lease for the IndexCompaction task
 			// If we don't get the lease, another node is handling this task
 			if !lh.has_lease().await? {
 				return Ok((count_iteration, count_error));
 			}
+			Self::ensure_not_cancelled(&canceller)?;
 			// Output function invocation details to logs
 			trace!(target: TARGET, "Running index compaction process");
 			// Read the compaction queue in a short-lived read transaction
@@ -1639,6 +2154,7 @@ impl Datastore {
 				let _ = txn.cancel().await;
 				res?
 			};
+			Self::ensure_not_cancelled(&canceller)?;
 			if items.is_empty() {
 				return Ok((count_iteration, count_error));
 			}
@@ -1646,25 +2162,94 @@ impl Datastore {
 			let keys: Vec<Key> = items.iter().map(|(k, _)| k.clone()).collect();
 			// Process compaction for each index
 			count_iteration += 1;
-			count_error += Self::index_compaction_loop(dbs.clone(), &lh, items).await?;
+			count_error +=
+				Self::index_compaction_loop(Arc::clone(&dbs), &lh, items, canceller.clone())
+					.await?;
 			// Delete the processed queue entries in a separate write
 			// transaction. This avoids conflicts with concurrent user
 			// transactions that may enqueue new compaction requests.
 			// Failed indexes are not re-enqueued here; the next user
 			// write to the affected index will naturally trigger a new
 			// compaction request.
-			let txn = dbs.transaction(Write, Optimistic).await?;
-			for k in &keys {
-				if let Err(e) = txn.del(k).await {
-					warn!(target: TARGET, "Failed to delete compaction queue entry: {e}");
+			loop {
+				let txn = dbs.transaction(Write, Optimistic).await?;
+				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
+					let _ = txn.cancel().await;
+					return Err(e);
 				}
-			}
-			if let Err(e) = txn.commit().await {
-				warn!(target: TARGET, "Failed to commit compaction queue cleanup: {e}");
+				for k in &keys {
+					if let Err(e) = txn.del(k).await {
+						warn!(target: TARGET, "Failed to delete compaction queue entry: {e}");
+					}
+				}
+				if let Err(e) = Self::ensure_not_cancelled(&canceller) {
+					let _ = txn.cancel().await;
+					return Err(e);
+				}
+				#[cfg(test)]
+				if let Err(e) = maybe_inject_retryable_conflict(
+					RetryableConflictSite::IndexCompactionQueueCleanup,
+					dbs.id,
+				) {
+					if Self::cancel_and_retry_index_operation_conflict(
+						&txn,
+						&e,
+						"Retryable conflict committing compaction queue cleanup, retrying",
+					)
+					.await
+					{
+						continue;
+					}
+					warn!(target: TARGET, "Failed to commit compaction queue cleanup: {e}");
+					break 'compaction;
+				}
+				if let Err(e) = txn.commit().await {
+					if Self::cancel_and_retry_index_operation_conflict(
+						&txn,
+						&e,
+						"Retryable conflict committing compaction queue cleanup, retrying",
+					)
+					.await
+					{
+						continue;
+					}
+					warn!(target: TARGET, "Failed to commit compaction queue cleanup: {e}");
+					break 'compaction;
+				}
 				break;
 			}
 		}
 		Ok((count_iteration, count_error))
+	}
+
+	#[cfg(not(target_family = "wasm"))]
+	async fn await_index_compaction_handle(
+		ikb: &IndexKeyBase,
+		handle: &mut tokio::task::JoinHandle<Result<()>>,
+		canceller: &CancellationToken,
+	) {
+		match handle.await {
+			Ok(Ok(())) => {}
+			Ok(Err(e))
+				if canceller.is_cancelled()
+					&& matches!(e.downcast_ref::<Error>(), Some(Error::QueryCancelled)) => {}
+			Ok(Err(e)) => {
+				warn!("Index compaction {ikb} fails while awaiting cancellation: {e}");
+			}
+			Err(e) => {
+				warn!("Index compaction {ikb} join fails while awaiting cancellation: {e}");
+			}
+		}
+	}
+
+	#[cfg(not(target_family = "wasm"))]
+	async fn await_index_compaction_handles(
+		handles: &mut Vec<(IndexKeyBase, tokio::task::JoinHandle<Result<()>>)>,
+		canceller: &CancellationToken,
+	) {
+		while let Some((ikb, mut handle)) = handles.pop() {
+			Self::await_index_compaction_handle(&ikb, &mut handle, canceller).await;
+		}
 	}
 
 	/// Compacts each distinct index found in the queue items.
@@ -1680,26 +2265,47 @@ impl Datastore {
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
 		items: Vec<(Key, Val)>,
+		canceller: CancellationToken,
 	) -> Result<usize> {
-		let mut concurrent_compactions = HashMap::new();
+		let mut compacted_indexes = HashMap::new();
 		for (k, _) in items {
+			Self::ensure_not_cancelled(&canceller)?;
 			lh.try_maintain_lease().await?;
 			let ic = IndexCompactionKey::decode_key(&k)?;
 			let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
-			if let Entry::Vacant(e) = concurrent_compactions.entry(ikb.clone()) {
-				let dbs = dbs.clone();
-				let jh = spawn(async move {
-					let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
-					catch!(txn, dbs.process_index_compaction(txn.clone(), &ikb).await);
-					catch!(txn, txn.commit().await);
-					Ok(())
-				});
-				e.insert(jh);
+			if let Entry::Vacant(e) = compacted_indexes.entry(ikb) {
+				e.insert(());
 			}
 		}
 		let mut error_count = 0;
-		for (ikb, jh) in concurrent_compactions {
-			if let Err(e) = jh.await? {
+		let mut handles: Vec<(IndexKeyBase, tokio::task::JoinHandle<Result<()>>)> =
+			Vec::with_capacity(compacted_indexes.len());
+		for (ikb, _) in compacted_indexes {
+			if let Err(e) = Self::ensure_not_cancelled(&canceller) {
+				Self::await_index_compaction_handles(&mut handles, &canceller).await;
+				return Err(e);
+			}
+			let dbs = Arc::clone(&dbs);
+			let canceller = canceller.clone();
+			let task_ikb = ikb.clone();
+			let jh = spawn(async move { dbs.process_index_compaction(&task_ikb, canceller).await });
+			handles.push((ikb, jh));
+		}
+		while let Some((ikb, mut jh)) = handles.pop() {
+			let res = tokio::select! {
+				biased;
+				_ = canceller.cancelled() => {
+					Self::await_index_compaction_handle(&ikb, &mut jh, &canceller).await;
+					Self::await_index_compaction_handles(&mut handles, &canceller).await;
+					bail!(Error::QueryCancelled);
+				}
+				res = &mut jh => res?,
+			};
+			if let Err(e) = res {
+				if canceller.is_cancelled() {
+					Self::await_index_compaction_handles(&mut handles, &canceller).await;
+					return Err(e);
+				}
 				error_count += 1;
 				warn!("Index compaction {ikb} fails: {e}");
 			}
@@ -1721,24 +2327,24 @@ impl Datastore {
 		dbs: Arc<Datastore>,
 		lh: &LeaseHandler,
 		items: Vec<(Key, Val)>,
+		canceller: CancellationToken,
 	) -> Result<usize> {
 		let mut seen = HashSet::new();
 		let mut error_count = 0;
 		for (k, _) in items {
+			Self::ensure_not_cancelled(&canceller)?;
 			lh.try_maintain_lease().await?;
 			let ic = IndexCompactionKey::decode_key(&k)?;
 			let ikb = IndexKeyBase::new(ic.ns, ic.db, ic.tb.as_ref().clone(), ic.ix);
 			if !seen.insert(ikb.clone()) {
 				continue;
 			}
-			let res: Result<()> = async {
-				let txn = Arc::new(dbs.transaction(Write, Optimistic).await?);
-				catch!(txn, dbs.process_index_compaction(txn.clone(), &ikb).await);
-				catch!(txn, txn.commit().await);
-				Ok(())
-			}
-			.await;
+			let res: Result<()> =
+				async { dbs.process_index_compaction(&ikb, canceller.clone()).await }.await;
 			if let Err(e) = res {
+				if canceller.is_cancelled() {
+					return Err(e);
+				}
 				error_count += 1;
 				warn!("Index compaction {ikb} fails: {e}");
 			}
@@ -1750,29 +2356,39 @@ impl Datastore {
 	///
 	/// Looks up the index definition identified by `ikb` and dispatches to
 	/// the appropriate compaction implementation based on the index type:
-	/// full-text, count, or HNSW. Indexes that are being removed
+	/// full-text, count, HNSW, or DiskANN. Indexes that are being removed
 	/// (`prepare_remove`), not found, or of an unsupported type are silently
 	/// skipped with a trace log.
 	async fn process_index_compaction(
 		&self,
-		txn: Arc<Transaction>,
 		ikb: &IndexKeyBase,
+		canceller: CancellationToken,
 	) -> Result<()> {
-		match txn.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None).await? {
+		Self::ensure_not_cancelled(&canceller)?;
+		let ix = {
+			let txn = self.transaction(Read, Optimistic).await?;
+			let res =
+				txn.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None).await;
+			let _ = txn.cancel().await;
+			res?
+		};
+		Self::ensure_not_cancelled(&canceller)?;
+		match ix {
 			Some(ix) if !ix.prepare_remove => match &ix.index {
 				Index::FullText(p) => {
-					IndexOperation::index_fulltext_compaction(&self.index_stores, ikb, &txn, p)
-						.await?;
+					self.process_fulltext_compaction(ikb, p, &canceller).await?;
 				}
 				Index::Count(_) => {
-					IndexOperation::index_count_compaction(ikb, &txn).await?;
+					self.process_count_compaction(ikb, &canceller).await?;
 				}
-				Index::Hnsw(p) => {
-					let mut ctx = self.setup_ctx()?;
-					ctx.set_transaction(txn.clone());
-					let ctx = ctx.freeze();
-					IndexOperation::index_hnsw_compaction(&ctx, &self.index_stores, ikb, &ix, p)
-						.await?;
+				Index::Hnsw(_) => {
+					// HNSW compaction owns its pending-key allocation and pending-range
+					// drain semantics separately from full-text/count compaction.
+					self.process_hnsw_compaction(ikb, &canceller).await?;
+				}
+				#[cfg(diskann)]
+				Index::DiskAnn(_) => {
+					self.process_diskann_compaction(ikb, &canceller).await?;
 				}
 				_ => {
 					trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ikb);
@@ -1784,6 +2400,499 @@ impl Datastore {
 		}
 		Ok(())
 	}
+
+	/// Runs HNSW compaction as bounded read-plan/write-apply batches.
+	///
+	/// Pending entries are captured in a read transaction and conditionally
+	/// deleted in a short write transaction before graph mutation. If a write
+	/// fails after local graph mutation may have started, the cached HNSW index
+	/// is evicted so later use reloads persisted state.
+	async fn process_hnsw_compaction(
+		&self,
+		ikb: &IndexKeyBase,
+		canceller: &CancellationToken,
+	) -> Result<()> {
+		loop {
+			Self::ensure_not_cancelled(canceller)?;
+			let prepared = {
+				let txn = Arc::new(self.transaction(Read, Optimistic).await?);
+				let res: Result<
+					Option<(
+						crate::catalog::TableId,
+						crate::idx::trees::hnsw::index::HnswCompactionPlan,
+					)>,
+				> = async {
+					let Some(tb) = txn.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? else {
+						return Ok(None);
+					};
+					match txn
+						.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
+						.await?
+					{
+						Some(ix) if !ix.prepare_remove && matches!(&ix.index, Index::Hnsw(_)) => {
+							let mut ctx = self.setup_ctx()?;
+							ctx.set_transaction(Arc::clone(&txn));
+							let ctx = ctx.freeze();
+							let plan = IndexOperation::prepare_hnsw_compaction(&ctx, ikb).await?;
+							Ok(Some((tb.table_id, plan)))
+						}
+						_ => Ok(None),
+					}
+				}
+				.await;
+				let _ = txn.cancel().await;
+				res?
+			};
+			let Some((tb, plan)) = prepared else {
+				return Ok(());
+			};
+			if !plan.has_work() {
+				return Ok(());
+			}
+			let has_more = plan.has_more();
+			Self::ensure_not_cancelled(canceller)?;
+
+			let txn = Arc::new(self.transaction(Write, Optimistic).await?);
+			let res: Result<bool> = async {
+				match txn
+					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
+					.await?
+				{
+					Some(ix) if !ix.prepare_remove => match &ix.index {
+						Index::Hnsw(p) => {
+							let mut ctx = self.setup_ctx()?;
+							ctx.set_transaction(Arc::clone(&txn));
+							let ctx = ctx.freeze();
+							IndexOperation::apply_hnsw_compaction(
+								&ctx,
+								&self.index_stores,
+								ikb,
+								&ix,
+								p,
+								plan,
+							)
+							.await
+						}
+						_ => Ok(false),
+					},
+					_ => Ok(false),
+				}
+			}
+			.await;
+			match res {
+				Ok(true) => {
+					if let Err(e) = Self::ensure_not_cancelled(canceller) {
+						let _ = txn.cancel().await;
+						if let Err(evict) =
+							self.index_stores.remove_hnsw_index(tb, ikb.clone()).await
+						{
+							warn!(target: TARGET, "Failed to evict HNSW index after compaction cancellation: {evict}");
+						}
+						return Err(e);
+					}
+					#[cfg(test)]
+					if let Err(e) = maybe_inject_retryable_conflict(
+						RetryableConflictSite::HnswCompaction,
+						self.id,
+					) {
+						let _ = txn.cancel().await;
+						if let Err(evict) =
+							self.index_stores.remove_hnsw_index(tb, ikb.clone()).await
+						{
+							warn!(target: TARGET, "Failed to evict HNSW index after compaction commit error: {evict}");
+						}
+						if Self::retry_index_operation_conflict(
+							&e,
+							format!(
+								"Retryable conflict committing HNSW compaction for {ikb}, retrying"
+							),
+						)
+						.await
+						{
+							continue;
+						}
+						return Err(e);
+					}
+					if let Err(e) = txn.commit().await {
+						let _ = txn.cancel().await;
+						if let Err(evict) =
+							self.index_stores.remove_hnsw_index(tb, ikb.clone()).await
+						{
+							warn!(target: TARGET, "Failed to evict HNSW index after compaction commit error: {evict}");
+						}
+						if Self::retry_index_operation_conflict(
+							&e,
+							format!(
+								"Retryable conflict committing HNSW compaction for {ikb}, retrying"
+							),
+						)
+						.await
+						{
+							continue;
+						}
+						return Err(e);
+					}
+				}
+				Ok(false) => {
+					let _ = txn.cancel().await;
+					return Ok(());
+				}
+				Err(e) => {
+					let _ = txn.cancel().await;
+					if let Err(evict) = self.index_stores.remove_hnsw_index(tb, ikb.clone()).await {
+						warn!(target: TARGET, "Failed to evict HNSW index after compaction error: {evict}");
+					}
+					if Self::retry_index_operation_conflict(
+						&e,
+						format!("Retryable conflict applying HNSW compaction for {ikb}, retrying"),
+					)
+					.await
+					{
+						continue;
+					}
+					return Err(e);
+				}
+			}
+			Self::ensure_not_cancelled(canceller)?;
+			if !has_more {
+				return Ok(());
+			}
+			// Defense-in-depth: every match arm above either commits (Ok(true))
+			// or cancels (Ok(false)/Err) the tx, so by here `closed()` should
+			// always be true. Catch any future regression where a `?` between
+			// the match and this point bypasses finalization. No-op today.
+			if !txn.closed() {
+				let _ = txn.cancel().await;
+			}
+		}
+	}
+
+	#[cfg(diskann)]
+	/// Runs DiskANN compaction as bounded read-plan/write-apply batches.
+	async fn process_diskann_compaction(
+		&self,
+		ikb: &IndexKeyBase,
+		canceller: &CancellationToken,
+	) -> Result<()> {
+		loop {
+			Self::ensure_not_cancelled(canceller)?;
+			let prepared = {
+				let txn = Arc::new(self.transaction(Read, Optimistic).await?);
+				let res: Result<
+					Option<(
+						crate::catalog::TableId,
+						crate::idx::trees::diskann::index::DiskAnnCompactionPlan,
+					)>,
+				> = async {
+					let Some(tb) = txn.get_tb(ikb.ns(), ikb.db(), ikb.table(), None).await? else {
+						return Ok(None);
+					};
+					match txn
+						.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
+						.await?
+					{
+						Some(ix)
+							if !ix.prepare_remove && matches!(&ix.index, Index::DiskAnn(_)) =>
+						{
+							let mut ctx = self.setup_ctx()?;
+							ctx.set_transaction(Arc::clone(&txn));
+							let ctx = ctx.freeze();
+							let plan =
+								IndexOperation::prepare_diskann_compaction(&ctx, ikb).await?;
+							Ok(Some((tb.table_id, plan)))
+						}
+						_ => Ok(None),
+					}
+				}
+				.await;
+				let _ = txn.cancel().await;
+				res?
+			};
+			let Some((_tb, plan)) = prepared else {
+				return Ok(());
+			};
+			if !plan.requires_apply() {
+				return Ok(());
+			}
+			let has_more = plan.has_more();
+			Self::ensure_not_cancelled(canceller)?;
+
+			let txn = Arc::new(self.transaction(Write, Optimistic).await?);
+			let res: Result<bool> = async {
+				match txn
+					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
+					.await?
+				{
+					Some(ix) if !ix.prepare_remove => match &ix.index {
+						Index::DiskAnn(p) => {
+							let mut ctx = self.setup_ctx()?;
+							ctx.set_transaction(Arc::clone(&txn));
+							let ctx = ctx.freeze();
+							IndexOperation::apply_diskann_compaction(
+								&ctx,
+								&self.index_stores,
+								ikb,
+								&ix,
+								p,
+								plan,
+							)
+							.await
+						}
+						_ => Ok(false),
+					},
+					_ => Ok(false),
+				}
+			}
+			.await;
+			// `apply_diskann_compaction` normally owns the transaction's
+			// lifecycle (commits on success, cancels on apply failure while
+			// holding the graph write lock — closing the #7318 race). A few
+			// pre-apply paths inside `IndexOperation::apply_diskann_compaction`
+			// (missing table or catalog lookup errors) can return without
+			// finalizing the tx, so we add an idempotent safety net here:
+			// cancel only if the tx is still open. Cancel on an already-closed
+			// tx returns `TransactionFinished` and is harmlessly discarded.
+			if !txn.closed() {
+				let _ = txn.cancel().await;
+			}
+			match res {
+				Ok(true) => {}
+				Ok(false) => return Ok(()),
+				Err(e) => return Err(e),
+			}
+			Self::ensure_not_cancelled(canceller)?;
+			if !has_more {
+				return Ok(());
+			}
+		}
+	}
+
+	/// Runs full-text compaction as a read-plan followed by a guarded write.
+	///
+	/// This avoids holding a mutable range scan over `!dc`/`!tt`; deltas
+	/// committed after the read snapshot remain for a later compaction.
+	async fn process_fulltext_compaction(
+		&self,
+		ikb: &IndexKeyBase,
+		p: &crate::catalog::FullTextParams,
+		canceller: &CancellationToken,
+	) -> Result<()> {
+		loop {
+			Self::ensure_not_cancelled(canceller)?;
+			let plan = {
+				let txn = self.transaction(Read, Optimistic).await?;
+				let res = IndexOperation::prepare_fulltext_compaction(
+					&self.index_stores,
+					ikb,
+					&txn,
+					p,
+					&self.config.file_allowlist,
+				)
+				.await;
+				let _ = txn.cancel().await;
+				res?
+			};
+			if !plan.has_work() {
+				return Ok(());
+			}
+			let has_more = plan.has_more();
+			Self::ensure_not_cancelled(canceller)?;
+
+			let txn = self.transaction(Write, Optimistic).await?;
+			let res = async {
+				match txn
+					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
+					.await?
+				{
+					Some(ix) if !ix.prepare_remove => match &ix.index {
+						Index::FullText(p) => {
+							IndexOperation::apply_fulltext_compaction(
+								&self.index_stores,
+								ikb,
+								&txn,
+								p,
+								&self.config.file_allowlist,
+								plan,
+							)
+							.await
+						}
+						_ => Ok(false),
+					},
+					_ => Ok(false),
+				}
+			}
+			.await;
+			match res {
+				Ok(true) => {
+					if let Err(e) = Self::ensure_not_cancelled(canceller) {
+						let _ = txn.cancel().await;
+						return Err(e);
+					}
+					#[cfg(test)]
+					if let Err(e) = maybe_inject_retryable_conflict(
+						RetryableConflictSite::FullTextCompaction,
+						self.id,
+					) {
+						if Self::cancel_and_retry_index_operation_conflict(
+							&txn,
+							&e,
+							format!(
+								"Retryable conflict committing full-text compaction for {ikb}, retrying"
+							),
+						)
+						.await
+						{
+							continue;
+						}
+						return Err(e);
+					}
+					if let Err(e) = txn.commit().await {
+						if Self::cancel_and_retry_index_operation_conflict(
+							&txn,
+							&e,
+							format!(
+								"Retryable conflict committing full-text compaction for {ikb}, retrying"
+							),
+						)
+						.await
+						{
+							continue;
+						}
+						return Err(e);
+					}
+				}
+				Ok(false) => {
+					let _ = txn.cancel().await;
+					return Ok(());
+				}
+				Err(e) => {
+					let _ = txn.cancel().await;
+					if Self::retry_index_operation_conflict(
+						&e,
+						format!(
+							"Retryable conflict applying full-text compaction for {ikb}, retrying"
+						),
+					)
+					.await
+					{
+						continue;
+					}
+					return Err(e);
+				}
+			}
+			Self::ensure_not_cancelled(canceller)?;
+			if !has_more {
+				return Ok(());
+			}
+			// Defense-in-depth: every match arm above either commits (Ok(true))
+			// or cancels (Ok(false)/Err) the tx, so by here `closed()` should
+			// always be true. Catch any future regression where a `?` between
+			// the match and this point bypasses finalization. No-op today.
+			if !txn.closed() {
+				let _ = txn.cancel().await;
+			}
+		}
+	}
+
+	/// Runs count-index compaction as a read-plan followed by a guarded write.
+	///
+	/// The write phase deletes only keys captured in the plan, so concurrent
+	/// `!iu` deltas are preserved and included by later reads/compactions.
+	async fn process_count_compaction(
+		&self,
+		ikb: &IndexKeyBase,
+		canceller: &CancellationToken,
+	) -> Result<()> {
+		loop {
+			Self::ensure_not_cancelled(canceller)?;
+			let plan = {
+				let txn = self.transaction(Read, Optimistic).await?;
+				let res = IndexOperation::prepare_count_compaction(ikb, &txn).await;
+				let _ = txn.cancel().await;
+				res?
+			};
+			if !plan.has_work() {
+				return Ok(());
+			}
+			let has_more = plan.has_more();
+			Self::ensure_not_cancelled(canceller)?;
+
+			let txn = self.transaction(Write, Optimistic).await?;
+			let res = async {
+				match txn
+					.get_tb_index_by_id(ikb.ns(), ikb.db(), ikb.table(), ikb.index(), None)
+					.await?
+				{
+					Some(ix) if !ix.prepare_remove && matches!(&ix.index, Index::Count(_)) => {
+						IndexOperation::apply_count_compaction(ikb, &txn, plan).await
+					}
+					_ => Ok(false),
+				}
+			}
+			.await;
+			match res {
+				Ok(true) => {
+					if let Err(e) = Self::ensure_not_cancelled(canceller) {
+						let _ = txn.cancel().await;
+						return Err(e);
+					}
+					#[cfg(test)]
+					if let Err(e) = maybe_inject_retryable_conflict(
+						RetryableConflictSite::CountCompaction,
+						self.id,
+					) {
+						if Self::cancel_and_retry_index_operation_conflict(
+							&txn,
+							&e,
+							format!(
+								"Retryable conflict committing count compaction for {ikb}, retrying"
+							),
+						)
+						.await
+						{
+							continue;
+						}
+						return Err(e);
+					}
+					if let Err(e) = txn.commit().await {
+						if Self::cancel_and_retry_index_operation_conflict(
+							&txn,
+							&e,
+							format!(
+								"Retryable conflict committing count compaction for {ikb}, retrying"
+							),
+						)
+						.await
+						{
+							continue;
+						}
+						return Err(e);
+					}
+				}
+				Ok(false) => {
+					let _ = txn.cancel().await;
+					return Ok(());
+				}
+				Err(e) => {
+					let _ = txn.cancel().await;
+					if Self::retry_index_operation_conflict(
+						&e,
+						format!("Retryable conflict applying count compaction for {ikb}, retrying"),
+					)
+					.await
+					{
+						continue;
+					}
+					return Err(e);
+				}
+			}
+			Self::ensure_not_cancelled(canceller)?;
+			if !has_more {
+				return Ok(());
+			}
+		}
+	}
+
 	/// Process queued async events using a distributed lease to coordinate batches.
 	/// Once a batch starts it runs to completion even if the lease expires, so
 	/// brief overlap is possible.
@@ -1845,6 +2954,11 @@ impl Datastore {
 	pub(crate) fn transaction_factory(&self) -> &TransactionFactory {
 		&self.transaction_factory
 	}
+
+	#[cfg(test)]
+	pub(crate) fn index_builder(&self) -> &IndexBuilder {
+		&self.index_builder
+	}
 	pub fn async_event_trigger(&self) -> &Arc<Notify> {
 		&self.async_event_trigger
 	}
@@ -1895,10 +3009,28 @@ impl Datastore {
 		vars: Option<PublicVariables>,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities)
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities, &self.config)
 			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST
 		self.process(ast, sess, vars).await
+	}
+
+	/// Execute a SurrealQL query with an externally-owned cancellation
+	/// handle. See [`Self::process_with_transaction_and_cancel`] for the
+	/// cancellation semantics.
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn execute_with_cancel(
+		&self,
+		txt: &str,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		cancel: CancelHandle,
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
+		// Parse the SQL query text
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities, &self.config)
+			.map_err(|e| TypesError::validation(e.to_string(), None))?;
+		// Process the AST
+		self.process_with_cancel(ast, sess, vars, cancel).await
 	}
 
 	/// Execute a query with an existing transaction
@@ -1911,10 +3043,29 @@ impl Datastore {
 		tx: Arc<Transaction>,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities)
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities, &self.config)
 			.map_err(|e| TypesError::validation(e.to_string(), None))?;
 		// Process the AST with the transaction
 		self.process_with_transaction(ast, sess, vars, tx).await
+	}
+
+	/// Execute a query with an existing transaction and an externally-owned
+	/// cancellation handle. See [`Self::process_with_transaction_and_cancel`]
+	/// for the cancellation semantics.
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn execute_with_transaction_and_cancel(
+		&self,
+		txt: &str,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		tx: Arc<Transaction>,
+		cancel: CancelHandle,
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
+		// Parse the SQL query text
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities, &self.config)
+			.map_err(|e| TypesError::validation(e.to_string(), None))?;
+		// Process the AST with the transaction
+		self.process_with_transaction_and_cancel(ast, sess, vars, tx, cancel).await
 	}
 
 	/// Process an AST with an existing transaction
@@ -1925,6 +3076,46 @@ impl Datastore {
 		sess: &Session,
 		vars: Option<PublicVariables>,
 		tx: Arc<Transaction>,
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
+		self.process_with_transaction_inner(ast, sess, vars, tx, None).await
+	}
+
+	/// Process an AST with an existing transaction and an externally-owned
+	/// cancellation handle. When the handle is tripped the executor's
+	/// `Context::done` walks short-circuit with `Reason::Canceled` at the
+	/// next yield point (statement boundary, iterator hot loop check, etc.)
+	/// and the transaction is finalised on the executor's normal error path.
+	/// Bare-await sites (e.g. `SLEEP`) `select!` against the handle's
+	/// awaitable view, so they are also interrupted instead of running to
+	/// completion.
+	///
+	/// Used by the WebSocket RPC layer so a client disconnect cancels the
+	/// in-flight query without waiting for it to run to completion. The
+	/// caller owns the [`CancelHandle`] and is responsible for tripping it.
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn process_with_transaction_and_cancel(
+		&self,
+		ast: Ast,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		tx: Arc<Transaction>,
+		cancel: CancelHandle,
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
+		self.process_with_transaction_inner(ast, sess, vars, tx, Some(cancel)).await
+	}
+
+	/// Shared body for [`Self::process_with_transaction`] and
+	/// [`Self::process_with_transaction_and_cancel`]. The two public
+	/// variants exist to keep the non-cancel API stable for SDK / embedded
+	/// callers; `cancel: None` reproduces the pre-cancellation behaviour
+	/// exactly.
+	async fn process_with_transaction_inner(
+		&self,
+		ast: Ast,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		tx: Arc<Transaction>,
+		cancel: Option<CancelHandle>,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		// Check if the session has expired
 		if sess.expired() {
@@ -1956,6 +3147,16 @@ impl Datastore {
 				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})?;
 
+		// Install the external cancellation handle if one was supplied.
+		// The executor checks `Context::done` between statements and in
+		// iterator hot loops, so flipping the flag mid-query causes the
+		// next yield to return `Error::QueryCancelled` and the executor's
+		// error path finalises the transaction cleanly. Bare-await sites
+		// (`SLEEP`) `select!` against the handle's awaitable view.
+		if let Some(cancel) = cancel {
+			ctx.set_cancellation(&cancel);
+		}
+
 		// Start an execution context
 		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
 
@@ -1964,15 +3165,24 @@ impl Datastore {
 			ctx.attach_variables(vars.into()).map_err(crate::err::into_types_error)?;
 		}
 
+		// Propagate the resolved tenant identity onto the externally-supplied
+		// transaction so the emitted [`crate::observe::TransactionEvent`]
+		// carries the active session's namespace, database, user, etc.
+		if let Some(identity) = ctx.tenant_identity() {
+			tx.set_tenant_identity(Arc::clone(identity));
+		}
+
 		// Set the transaction in the context
 		ctx.set_transaction(tx);
 
 		// Process all statements with the transaction
-		Executor::execute_plan_with_transaction(ctx.freeze(), opt, ast.into()).await.map_err(|e| {
-			e.downcast::<Error>()
-				.map(crate::err::into_types_error)
-				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
-		})
+		Executor::execute_plan_with_transaction(self, ctx.freeze(), opt, ast.into()).await.map_err(
+			|e| {
+				e.downcast::<Error>()
+					.map(crate::err::into_types_error)
+					.unwrap_or_else(|e| TypesError::internal(e.to_string()))
+			},
+		)
 	}
 
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
@@ -2089,7 +3299,21 @@ impl Datastore {
 		vars: Option<PublicVariables>,
 	) -> std::result::Result<Vec<QueryResult>, TypesError> {
 		//TODO: Insert planner here.
-		self.process_plan(ast.into(), sess, vars).await
+		self.process_plan_inner(ast.into(), sess, vars, None).await
+	}
+
+	/// Execute a pre-parsed SQL query with an externally-owned cancellation
+	/// handle. See [`Self::process_with_transaction_and_cancel`] for the
+	/// cancellation semantics.
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn process_with_cancel(
+		&self,
+		ast: Ast,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		cancel: CancelHandle,
+	) -> std::result::Result<Vec<QueryResult>, TypesError> {
+		self.process_plan_inner(ast.into(), sess, vars, Some(cancel)).await
 	}
 
 	pub(crate) async fn process_plan(
@@ -2097,6 +3321,16 @@ impl Datastore {
 		plan: LogicalPlan,
 		sess: &Session,
 		vars: Option<PublicVariables>,
+	) -> Result<Vec<QueryResult>, TypesError> {
+		self.process_plan_inner(plan, sess, vars, None).await
+	}
+
+	async fn process_plan_inner(
+		&self,
+		plan: LogicalPlan,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		cancel: Option<CancelHandle>,
 	) -> Result<Vec<QueryResult>, TypesError> {
 		// Check if the session has expired
 		if sess.expired() {
@@ -2128,6 +3362,12 @@ impl Datastore {
 				.map(crate::err::into_types_error)
 				.unwrap_or_else(|e| TypesError::internal(e.to_string()))
 		})?;
+
+		// Install the external cancellation flag if one was supplied. See
+		// [`Self::process_with_transaction_and_cancel`].
+		if let Some(cancel) = cancel {
+			ctx.set_cancellation(&cancel);
+		}
 
 		// Start an execution context
 		ctx.attach_session(sess).map_err(crate::err::into_types_error)?;
@@ -2169,18 +3409,24 @@ impl Datastore {
 		if let Some(timeout) = self.dynamic_configuration.get_query_timeout() {
 			ctx.add_timeout(timeout)?;
 		}
-		// Setup the notification channel
-		ctx.add_notifications(self.notification_channel.as_ref());
 
 		let txn_type = if val.read_only() {
 			TransactionType::Read
 		} else {
 			TransactionType::Write
 		};
-		// Start a new transaction
-		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
+		// Start a new transaction. Tenant identity is attached up-front so the
+		// emitted [`crate::observe::TransactionEvent`] carries the session's
+		// namespace, database, user, etc.
+		let txn = self
+			.transaction(txn_type, Optimistic)
+			.await?
+			.with_tenant_identity(Some(Arc::new(crate::observe::TenantIdentity::from_session(
+				sess,
+			))))
+			.enclose();
 		// Store the transaction
-		ctx.set_transaction(txn.clone());
+		ctx.set_transaction(Arc::clone(&txn));
 
 		// Start an execution context
 		ctx.attach_session(sess)?;
@@ -2246,17 +3492,18 @@ impl Datastore {
 		sess: &Session,
 		chn: Sender<Vec<u8>>,
 		cfg: export::Config,
-	) -> Result<impl Future<Output = Result<()>> + use<>> {
+	) -> Result<impl Future<Output = Result<()>> + 'static> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Retrieve the provided NS and DB
 		let (ns, db) = crate::iam::check::check_ns_db(sess)?;
 		// Create a new readonly transaction
 		let txn = self.transaction(Read, Optimistic).await?;
+		let batch_size = self.config.export_batch_size;
 		// Return an async export job
 		Ok(async move {
 			// Process the export
-			let res = txn.export(&ns, &db, cfg, chn).await;
+			let res = txn.export(&ns, &db, cfg, batch_size, chn).await;
 			txn.cancel().await?;
 			res
 		})
@@ -2264,6 +3511,7 @@ impl Datastore {
 
 	/// Checks the required permissions level for this session
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self, sess))]
+	#[allow(clippy::needless_pass_by_value)] // Public API: ergonomic for callers passing `ResourceKind::X.on_db(ns, db)` inline.
 	pub fn check(&self, sess: &Session, action: Action, resource: Resource) -> Result<()> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
@@ -2277,33 +3525,34 @@ impl Datastore {
 	}
 
 	pub fn setup_options(&self, sess: &Session) -> Options {
-		Options::new(self.id, self.dynamic_configuration.clone())
+		Options::new(&self.config)
 			.with_ns(sess.ns())
 			.with_db(sess.db())
-			.with_live(sess.live())
-			.with_auth(sess.au.clone())
-			.with_auth_enabled(self.auth_enabled)
+			.with_auth(Arc::clone(&sess.au))
 	}
 
 	pub fn setup_ctx(&self) -> Result<Context> {
-		let mut ctx = Context::from_ds(
+		let ctx = Context::from_ds(
+			self.id,
+			self.auth_enabled,
+			self.dynamic_configuration.clone(),
 			self.dynamic_configuration.get_query_timeout(),
 			self.slow_log.clone(),
-			self.capabilities.clone(),
+			Arc::clone(&self.capabilities),
 			self.index_stores.clone(),
 			self.index_builder.clone(),
 			self.sequences.clone(),
-			self.cache.clone(),
+			Arc::clone(&self.cache),
+			Arc::clone(&self.function_registry),
 			#[cfg(feature = "http")]
-			self.http_client.clone(),
+			Arc::clone(&self.http_client),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
+			Arc::clone(&self.config),
 			#[cfg(feature = "surrealism")]
-			self.surrealism_cache.clone(),
+			Arc::clone(&self.surrealism_cache),
 		)?;
-		// Setup the notification channel
-		ctx.add_notifications(self.notification_channel.as_ref());
 		Ok(ctx)
 	}
 
@@ -2318,6 +3567,67 @@ impl Datastore {
 		} else {
 			Ok(())
 		}
+	}
+
+	/// SECURITY: `USE NS` implicitly creates the namespace when it does
+	/// not exist. `DEFINE NAMESPACE` requires `Edit` on `Namespace`@`Root`,
+	/// so the same authorization must gate the materialization step in
+	/// `USE`. Returns `true` if the caller may proceed with
+	/// `get_or_add_ns` — either because the namespace already exists
+	/// (in which case the call is a no-op lookup) or because the caller
+	/// has the necessary authorization. Returns `false` when the
+	/// namespace does not exist *and* the caller lacks permission;
+	/// callers that still want to set the session context for a later
+	/// authenticated step (the typical pre-signin RPC `USE` pattern)
+	/// can do so without triggering creation. See `SECURITY_GUIDE.md`
+	/// section 3.
+	pub(crate) async fn should_materialize_ns_on_use(
+		&self,
+		tx: &Transaction,
+		auth: &Auth,
+		ns: &str,
+	) -> Result<bool> {
+		if tx.get_ns_by_name(ns, None).await?.is_some() {
+			return Ok(true);
+		}
+		if !self.auth_enabled && auth.is_anon() {
+			return Ok(true);
+		}
+		Ok(auth.is_allowed(Action::Edit, &ResourceKind::Namespace.on_root()).is_ok())
+	}
+
+	/// SECURITY: counterpart to [`Self::should_materialize_ns_on_use`]
+	/// for the database half of `USE`. Implicit creation requires the
+	/// same authorization as `DEFINE DATABASE` (`Edit` on `Database`@`Ns`),
+	/// AND the parent namespace must already exist or the caller must
+	/// also be authorized to create it — `ensure_ns_db` is
+	/// `get_or_add_db_upwards(..., upwards = true)` and will silently
+	/// `get_or_add_ns` the parent when it is missing
+	/// (`kvs/tx.rs::get_or_add_db_upwards`). Without the second check a
+	/// namespace-level Editor on a stale token (the namespace was
+	/// dropped after the token was issued) could recreate the parent
+	/// namespace as a side effect of `USE NS dropped DB anything`.
+	pub(crate) async fn should_materialize_db_on_use(
+		&self,
+		tx: &Transaction,
+		auth: &Auth,
+		ns: &str,
+		db: &str,
+	) -> Result<bool> {
+		if tx.get_db_by_name(ns, db, None).await?.is_some() {
+			return Ok(true);
+		}
+		if !self.auth_enabled && auth.is_anon() {
+			return Ok(true);
+		}
+		// Block the upwards-create side effect: if the parent namespace
+		// is missing and the caller can't create namespaces, refuse.
+		if tx.get_ns_by_name(ns, None).await?.is_none()
+			&& auth.is_allowed(Action::Edit, &ResourceKind::Namespace.on_root()).is_err()
+		{
+			return Ok(false);
+		}
+		Ok(auth.is_allowed(Action::Edit, &ResourceKind::Database.on_ns(ns)).is_ok())
 	}
 
 	pub async fn process_use(
@@ -2337,22 +3647,54 @@ impl Datastore {
 		};
 
 		let query_result = QueryResultBuilder::started_now();
+		// SECURITY: `process_use` may be called before the caller has
+		// authenticated (e.g. SDKs that call `use` before `signin`). To
+		// preserve that pattern without re-opening the bypass that this
+		// guard closes, we set the session context but only commit
+		// implicit `DEFINE NAMESPACE` / `DEFINE DATABASE`-equivalent
+		// creation when the caller has authorization for it. Callers
+		// without permission end up with a session that targets a
+		// resource that may not exist; downstream operations surface a
+		// clean `NsNotFound` / `DbNotFound` rather than a silently
+		// auto-created namespace they should not have been able to
+		// create. See `SECURITY_GUIDE.md` section 3.
+		let map_internal = |err: anyhow::Error| TypesError::internal(err.to_string());
 		match (namespace, database) {
 			(Some(ns), Some(db)) => {
 				let tx = new_tx().await?;
-				tx.ensure_ns_db(ctx, &ns, &db)
+				let create_ns = self
+					.should_materialize_ns_on_use(&tx, &session.au, &ns)
 					.await
-					.map_err(|err| TypesError::internal(err.to_string()))?;
-				commit_tx(tx).await?;
+					.map_err(map_internal)?;
+				let create_db = create_ns
+					&& self
+						.should_materialize_db_on_use(&tx, &session.au, &ns, &db)
+						.await
+						.map_err(map_internal)?;
+				if create_db {
+					tx.ensure_ns_db(ctx, &ns, &db).await.map_err(map_internal)?;
+					commit_tx(tx).await?;
+				} else if create_ns {
+					tx.get_or_add_ns(ctx, &ns).await.map_err(map_internal)?;
+					commit_tx(tx).await?;
+				} else {
+					let _ = tx.cancel().await;
+				}
 				session.ns = Some(ns);
 				session.db = Some(db);
 			}
 			(Some(ns), None) => {
 				let tx = new_tx().await?;
-				tx.get_or_add_ns(ctx, &ns)
+				let create_ns = self
+					.should_materialize_ns_on_use(&tx, &session.au, &ns)
 					.await
-					.map_err(|err| TypesError::internal(err.to_string()))?;
-				commit_tx(tx).await?;
+					.map_err(map_internal)?;
+				if create_ns {
+					tx.get_or_add_ns(ctx, &ns).await.map_err(map_internal)?;
+					commit_tx(tx).await?;
+				} else {
+					let _ = tx.cancel().await;
+				}
 				session.ns = Some(ns);
 			}
 			(None, Some(db)) => {
@@ -2363,10 +3705,16 @@ impl Datastore {
 					));
 				};
 				let tx = new_tx().await?;
-				tx.ensure_ns_db(ctx, &ns, &db)
+				let create_db = self
+					.should_materialize_db_on_use(&tx, &session.au, &ns, &db)
 					.await
-					.map_err(|err| TypesError::internal(err.to_string()))?;
-				commit_tx(tx).await?;
+					.map_err(map_internal)?;
+				if create_db {
+					tx.ensure_ns_db(ctx, &ns, &db).await.map_err(map_internal)?;
+					commit_tx(tx).await?;
+				} else {
+					let _ = tx.cancel().await;
+				}
 				session.db = Some(db);
 			}
 			(None, None) => {
@@ -2385,7 +3733,8 @@ impl Datastore {
 
 	/// Get a db model by name.
 	///
-	/// TODO: This should not be public, but it is used in `surrealdb/src/api/engine/local/mod.rs`.
+	/// TODO: This should not be public, but it is used by callers outside the
+	/// `surrealdb-core` crate (the SDK's local engine and the server's ML route).
 	pub async fn get_db_model(
 		&self,
 		ns: &str,
@@ -2404,7 +3753,8 @@ impl Datastore {
 
 	/// Invoke an API handler.
 	///
-	/// TODO: This should not need to be public, but it is used in `src/net/api.rs`.
+	/// TODO: This should not need to be public, but it is used by the server's
+	/// HTTP API route (outside the `surrealdb-core` crate).
 	pub async fn invoke_api_handler(
 		&self,
 		ns: &str,
@@ -2420,7 +3770,7 @@ impl Datastore {
 		let apis = tx.all_db_apis(db.namespace_id, db.database_id, None).await?;
 		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
-		let res = match ApiDefinition::find_definition(apis.as_ref(), segments, req.method) {
+		let res = match ApiDefinition::find_definition(apis.as_ref(), &segments, req.method) {
 			Some((api, params)) => {
 				debug!(
 					request_id = %req.request_id,
@@ -2445,10 +3795,7 @@ impl Datastore {
 					"No API definition found for path"
 				);
 				tx.cancel().await?;
-				return Ok(ApiResponse::from_error(
-					ApiError::NotFound.into(),
-					req.request_id.clone(),
-				));
+				return Ok(ApiResponse::from_error(ApiError::NotFound, req.request_id.clone()));
 			}
 		};
 
@@ -2483,10 +3830,10 @@ impl Datastore {
 		crate::obs::put(&path, data).await?;
 		// Insert the model in to the database
 		let model = DefineModelStatement {
-			name: name.to_string(),
-			version: version.to_string(),
-			comment: Expr::Literal(Literal::String(description.to_string())),
-			hash,
+			name: name.to_string().into(),
+			version: version.to_string().into(),
+			comment: Expr::Literal(Literal::String(description.into())),
+			hash: hash.into(),
 			kind: Default::default(),
 			permissions: Default::default(),
 		};
@@ -2501,14 +3848,314 @@ impl Datastore {
 
 		Ok(())
 	}
+
+	pub fn config(&self) -> Arc<CommonConfig> {
+		Arc::clone(&self.config)
+	}
+
+	#[cfg(feature = "http")]
+	pub fn http_client(&self) -> Arc<HttpClient> {
+		Arc::clone(&self.http_client)
+	}
+
+	/// Builds a [`NodeEndpointResolver`] backed by this datastore's catalog. Used by the
+	/// builder to hand a resolver to clustered message brokers after the datastore is
+	/// fully constructed.
+	///
+	/// Only available on non-WASM targets: the underlying transaction types are not
+	/// `Send + Sync` under the WASM single-threaded model, and cross-node delivery
+	/// (the only consumer) doesn't apply to in-browser datastores.
+	#[cfg(not(target_family = "wasm"))]
+	pub(crate) fn endpoint_resolver(&self) -> Arc<dyn crate::dbs::NodeEndpointResolver> {
+		Arc::new(CatalogNodeEndpointResolver {
+			transaction_factory: self.transaction_factory.clone(),
+			sequences: self.sequences.clone(),
+		})
+	}
+}
+
+/// Catalog-backed [`NodeEndpointResolver`] handed to clustered brokers post-construction.
+///
+/// Holds clones of the transaction factory and sequences (both cheap `Arc`-based clones) so
+/// it can open read transactions independently of the [`Datastore`] struct, avoiding any
+/// reference cycle between the broker and the datastore.
+#[cfg(not(target_family = "wasm"))]
+#[derive(Clone)]
+struct CatalogNodeEndpointResolver {
+	transaction_factory: TransactionFactory,
+	sequences: Sequences,
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl std::fmt::Debug for CatalogNodeEndpointResolver {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.debug_struct("CatalogNodeEndpointResolver").finish_non_exhaustive()
+	}
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl crate::dbs::NodeEndpointResolver for CatalogNodeEndpointResolver {
+	fn resolve(
+		&self,
+		target_node: [u8; 16],
+	) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<String>> + Send + '_>> {
+		Box::pin(async move {
+			let uuid = Uuid::from_bytes(target_node);
+			let txn = self
+				.transaction_factory
+				.transaction(Read, Optimistic, self.sequences.clone())
+				.await
+				.ok()?;
+			let key = crate::key::root::nd::Nd::new(uuid);
+			let node: Option<Node> = txn.get(&key, None).await.ok()?;
+			let _ = txn.cancel().await;
+			node.and_then(|n| n.http_endpoint)
+		})
+	}
 }
 
 #[cfg(test)]
 mod test {
+	use std::collections::BTreeMap;
+	use std::future::pending;
+
 	use super::*;
+	use crate::catalog::providers::{
+		CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider,
+	};
 	use crate::iam::verify::verify_root_creds;
+	use crate::kvs::testing::{
+		RetryableConflictSite, inject_retryable_conflict, retryable_conflict_count,
+	};
 	use crate::types::{PublicValue, PublicVariables};
 	use crate::val::TableName;
+
+	async fn new_index_compaction_test_ds() -> Result<(Datastore, Session)> {
+		let ds = Datastore::new("memory").await?;
+		let session = Session::owner().with_ns("test").with_db("test");
+		let txn = ds.transaction(Write, Pessimistic).await?;
+		txn.ensure_ns_db(None, "test", "test").await?;
+		txn.commit().await?;
+		Ok((ds, session))
+	}
+
+	async fn execute_all(ds: &Datastore, session: &Session, sql: &str) -> Result<()> {
+		for result in ds.execute(sql, session, None).await? {
+			result.result?;
+		}
+		Ok(())
+	}
+
+	async fn index_key_base(ds: &Datastore, table: &str, index: &str) -> Result<IndexKeyBase> {
+		let txn = ds.transaction(Read, Optimistic).await?;
+		let ns = txn.get_ns_by_name("test", None).await?.unwrap();
+		let db = txn.get_db_by_name("test", "test", None).await?.unwrap();
+		let table = TableName::from(table);
+		let ix =
+			txn.get_tb_index(ns.namespace_id, db.database_id, &table, index, None).await?.unwrap();
+		txn.cancel().await?;
+		Ok(IndexKeyBase::new(ns.namespace_id, db.database_id, table, ix.index_id))
+	}
+
+	async fn assert_index_compaction_commit_retry(
+		site: RetryableConflictSite,
+		table: &str,
+		index: &str,
+		sql: &str,
+	) -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, sql).await?;
+		let ikb = index_key_base(&ds, table, index).await?;
+		let node_id = ds.id();
+		let _guard = inject_retryable_conflict(site, node_id);
+
+		ds.process_index_compaction(&ikb, CancellationToken::new()).await?;
+
+		assert_eq!(retryable_conflict_count(site, node_id), 0);
+		Ok(())
+	}
+
+	const COUNT_COMPACTION_SQL: &str = "
+		DEFINE TABLE user SCHEMALESS;
+		DEFINE INDEX count_idx ON user COUNT;
+		CREATE user:1 SET name = 'one' RETURN NONE;
+		CREATE user:2 SET name = 'two' RETURN NONE;
+	";
+
+	const FULLTEXT_COMPACTION_SQL: &str = "
+		DEFINE ANALYZER simple TOKENIZERS blank FILTERS lowercase;
+		DEFINE TABLE doc SCHEMALESS;
+		DEFINE INDEX ft_idx ON doc FIELDS text FULLTEXT ANALYZER simple BM25 HIGHLIGHTS;
+		CREATE doc:1 SET text = 'alpha beta' RETURN NONE;
+		CREATE doc:2 SET text = 'beta gamma' RETURN NONE;
+	";
+
+	const HNSW_COMPACTION_SQL: &str = "
+		DEFINE TABLE vec SCHEMALESS;
+		DEFINE INDEX hnsw_idx ON vec FIELDS vector HNSW DIMENSION 2 DIST EUCLIDEAN TYPE F32 EFC 16 M 4;
+		CREATE vec:1 SET vector = [1, 2] RETURN NONE;
+		CREATE vec:2 SET vector = [2, 3] RETURN NONE;
+	";
+
+	#[tokio::test]
+	async fn count_index_compaction_retries_commit_conflict() -> Result<()> {
+		assert_index_compaction_commit_retry(
+			RetryableConflictSite::CountCompaction,
+			"user",
+			"count_idx",
+			COUNT_COMPACTION_SQL,
+		)
+		.await
+	}
+
+	#[tokio::test]
+	async fn fulltext_index_compaction_retries_commit_conflict() -> Result<()> {
+		assert_index_compaction_commit_retry(
+			RetryableConflictSite::FullTextCompaction,
+			"doc",
+			"ft_idx",
+			FULLTEXT_COMPACTION_SQL,
+		)
+		.await
+	}
+
+	#[tokio::test]
+	async fn hnsw_index_compaction_retries_commit_conflict() -> Result<()> {
+		assert_index_compaction_commit_retry(
+			RetryableConflictSite::HnswCompaction,
+			"vec",
+			"hnsw_idx",
+			HNSW_COMPACTION_SQL,
+		)
+		.await
+	}
+
+	#[tokio::test]
+	async fn index_compaction_retries_queue_cleanup_commit_conflict() -> Result<()> {
+		let (ds, session) = new_index_compaction_test_ds().await?;
+		execute_all(&ds, &session, COUNT_COMPACTION_SQL).await?;
+		let site = RetryableConflictSite::IndexCompactionQueueCleanup;
+		let node_id = ds.id();
+		let _guard = inject_retryable_conflict(site, node_id);
+
+		let (_, errors) = Datastore::index_compaction(
+			Arc::new(ds),
+			Duration::from_secs(1),
+			CancellationToken::new(),
+		)
+		.await?;
+
+		assert_eq!(errors, 0);
+		assert_eq!(retryable_conflict_count(site, node_id), 0);
+		Ok(())
+	}
+
+	#[tokio::test]
+	async fn archive_node_for_shutdown_reports_success() {
+		let outcome = archive_node_for_shutdown(Duration::from_secs(60), Ok(()));
+
+		assert_eq!(outcome, ShutdownNodeDeleteOutcome::Archived);
+	}
+
+	#[tokio::test]
+	async fn archive_node_for_shutdown_reports_failure() {
+		let outcome = archive_node_for_shutdown(
+			Duration::from_secs(60),
+			Err(anyhow::anyhow!("delete failed")),
+		);
+
+		assert_eq!(outcome, ShutdownNodeDeleteOutcome::Failed);
+	}
+
+	#[tokio::test]
+	async fn archive_node_for_shutdown_reports_timeout() {
+		let outcome = archive_node_for_shutdown(
+			Duration::from_millis(1),
+			Err(anyhow::Error::new(Error::QueryTimedout(Duration::from_millis(1).into()))),
+		);
+
+		assert_eq!(outcome, ShutdownNodeDeleteOutcome::TimedOut);
+	}
+
+	#[tokio::test]
+	async fn node_tx_step_cancels_after_timeout() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let txn = ds.transaction(Write, Optimistic).await.unwrap();
+		let timeout_duration = Duration::from_millis(10);
+
+		let err = await_node_tx_step(
+			&txn,
+			Instant::now() + timeout_duration,
+			timeout_duration,
+			None,
+			pending::<Result<()>>(),
+		)
+		.await
+		.unwrap_err();
+
+		assert!(matches!(err.downcast_ref::<Error>(), Some(Error::QueryTimedout(_))));
+		assert!(txn.closed());
+	}
+
+	#[tokio::test]
+	async fn node_tx_step_cancels_after_cancellation() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let txn = ds.transaction(Write, Optimistic).await.unwrap();
+		let canceller = CancellationToken::new();
+		canceller.cancel();
+
+		let err = await_node_tx_step(
+			&txn,
+			Instant::now() + Duration::from_secs(60),
+			Duration::from_secs(60),
+			Some(&canceller),
+			pending::<Result<()>>(),
+		)
+		.await
+		.unwrap_err();
+
+		assert!(matches!(err.downcast_ref::<Error>(), Some(Error::QueryCancelled)));
+		assert!(txn.closed());
+	}
+
+	#[tokio::test]
+	async fn node_tx_step_cancels_after_error() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let txn = ds.transaction(Write, Optimistic).await.unwrap();
+
+		let err = await_node_tx_step(
+			&txn,
+			Instant::now() + Duration::from_secs(60),
+			Duration::from_secs(60),
+			None,
+			async { Err::<(), _>(anyhow::anyhow!("step failed")) },
+		)
+		.await
+		.unwrap_err();
+
+		assert_eq!(err.to_string(), "step failed");
+		assert!(txn.closed());
+	}
+
+	#[tokio::test]
+	async fn node_tx_step_success_leaves_transaction_open() {
+		let ds = Datastore::new("memory").await.unwrap();
+		let txn = ds.transaction(Write, Optimistic).await.unwrap();
+
+		await_node_tx_step(
+			&txn,
+			Instant::now() + Duration::from_secs(60),
+			Duration::from_secs(60),
+			None,
+			async { Ok::<_, anyhow::Error>(()) },
+		)
+		.await
+		.unwrap();
+
+		assert!(!txn.closed());
+		txn.commit().await.unwrap();
+		assert!(txn.closed());
+	}
 
 	#[tokio::test]
 	async fn test_setup_superuser() {
@@ -2584,11 +4231,9 @@ mod test {
 			.await
 			.unwrap();
 
-		let opt = Options::new(dbs.id(), DynamicConfiguration::default())
+		let opt = Options::new(&dbs.config())
 			.with_ns(Some("test".into()))
 			.with_db(Some("test".into()))
-			.with_live(false)
-			.with_auth_enabled(false)
 			.with_max_computation_depth(u32::MAX);
 
 		// Create a default context
@@ -2596,7 +4241,7 @@ mod test {
 		// Start a new transaction
 		let txn = dbs.transaction(TransactionType::Read, Optimistic).await?.enclose();
 		// Store the transaction
-		ctx.set_transaction(txn.clone());
+		ctx.set_transaction(Arc::clone(&txn));
 		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value
@@ -2614,8 +4259,7 @@ mod test {
 
 	#[tokio::test]
 	async fn cross_transaction_caching_uuids_updated() -> Result<()> {
-		// TODO: Put `15_000` in a global somewhere.
-		let (send, _recv) = crate::channel::bounded(15_000);
+		let (send, _recv) = crate::channel::bounded(crate::cnf::NOTIFICATIONS_CHANNEL_SIZE);
 		let ds = Datastore::builder()
 			.with_capabilities(Capabilities::all())
 			.with_notify(send)
@@ -2696,7 +4340,8 @@ mod test {
 		KILL $lqid;
 	"
 			.to_owned();
-			let vars = PublicVariables::from(map! { "lqid".to_string() => lqid });
+			let vars =
+				PublicVariables::from(BTreeMap::from_iter(map! { "lqid".to_string() => lqid }));
 			let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
 			assert_eq!(res.len(), 5);
 			res.remove(0).result.unwrap();

@@ -51,9 +51,8 @@ struct ShutdownSignal {
 
 impl GarbageCollector {
 	/// Create a new garbage collector that advances the GC watermark every 60 seconds.
-	pub fn new(db: Pin<Arc<OptimisticTransactionDB>>, retention_ns: u64) -> Result<Self> {
-		// Compute the retention period in milliseconds
-		let retention_millis = retention_ns / 1_000_000;
+	pub fn new(db: Pin<Arc<OptimisticTransactionDB>>, retention: Duration) -> Result<Self> {
+		let retention_millis = retention.as_millis().try_into().unwrap_or(u64::MAX);
 		// Log the version garbage collector configuration options
 		info!(target: TARGET, "Version garbage collector: enabled (retention={}ms, interval={}s)",
 			retention_millis,
@@ -66,7 +65,7 @@ impl GarbageCollector {
 			mutex: Mutex::new(()),
 		});
 		// Clone the shutdown notifier
-		let signal = notify.clone();
+		let signal = Arc::clone(&notify);
 		// Spawn the background garbage collector thread
 		let handle = thread::Builder::new()
 			.name("rocksdb-garbage-collector".to_string())

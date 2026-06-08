@@ -12,7 +12,7 @@ use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Object, Value};
 
 /// A node in the cluster
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub struct Node {
 	/// The id of the node
@@ -21,6 +21,11 @@ pub struct Node {
 	pub heartbeat: Timestamp,
 	/// Whether the node is garbage collected
 	pub gc: bool,
+	/// Public HTTP endpoint at which other cluster members can reach this node
+	/// for cross-node messaging (live-query relay, etc.). `None` when not
+	/// configured — single-node and shared-backend deployments leave this empty.
+	#[revision(start = 2)]
+	pub http_endpoint: Option<String>,
 }
 
 impl_kv_value_revisioned!(Node);
@@ -32,6 +37,23 @@ impl Node {
 			id,
 			heartbeat: hb,
 			gc,
+			http_endpoint: None,
+		}
+	}
+
+	/// Create a new Node entry with a public HTTP endpoint for cross-node
+	/// messaging.
+	pub fn new_with_endpoint(
+		id: Uuid,
+		hb: Timestamp,
+		gc: bool,
+		http_endpoint: Option<String>,
+	) -> Self {
+		Self {
+			id,
+			heartbeat: hb,
+			gc,
+			http_endpoint,
 		}
 	}
 	/// Mark this node as archived
@@ -72,11 +94,12 @@ impl ToSql for Node {
 
 impl InfoStructure for Node {
 	fn structure(self) -> Value {
-		Value::Object(Object(map! {
-			"id".to_string() => Value::Uuid(self.id.into()),
-			"seen".to_string() => self.heartbeat.structure(),
-			"active".to_string() => Value::Bool(!self.gc),
-		}))
+		let object = map! {
+			"id" => Value::Uuid(self.id.into()),
+			"seen" => self.heartbeat.structure(),
+			"active" => Value::Bool(!self.gc),
+		};
+		Value::Object(Object::from(object))
 	}
 }
 

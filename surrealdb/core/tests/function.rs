@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
@@ -3249,7 +3251,7 @@ async fn function_vector_angle() -> Result<()> {
 	)
 	.await?
 	.expect_vals(&["1.5707963267948966", "0.36774908225917935", "1.7128722906354115"])?
-	.expect_value(Value::Number(Number::NAN))?;
+	.expect_value(&Value::Number(Number::NAN))?;
 
 	check_test_is_error(
 		r#"
@@ -3846,6 +3848,63 @@ pub async fn function_http_get_from_script() -> Result<()> {
 
 	server.verify().await;
 
+	Ok(())
+}
+
+/// Verifies that a port-specific deny rule in `deny_net` is enforced when an
+/// HTTP redirect lands on that port.
+#[cfg(feature = "http")]
+#[tokio::test]
+pub async fn function_http_redirect_to_denied_port_blocked() -> Result<()> {
+	use std::str::FromStr;
+
+	use surrealdb_core::dbs::capabilities::{NetTarget, Targets};
+	use surrealdb_core::kvs::Datastore;
+	use wiremock::matchers::{method, path};
+	use wiremock::{Mock, MockServer, ResponseTemplate};
+
+	// Server B — the redirect target; must never receive a request.
+	let denied_server = MockServer::start().await;
+	Mock::given(method("GET"))
+		.and(path("/internal"))
+		.respond_with(ResponseTemplate::new(200).set_body_string("internal data"))
+		.expect(0)
+		.mount(&denied_server)
+		.await;
+	let denied_port = denied_server.address().port();
+
+	// Server A — returns a 302 pointing at server B.
+	let redirect_server = MockServer::start().await;
+	Mock::given(method("GET"))
+		.and(path("/start"))
+		.respond_with(
+			ResponseTemplate::new(302)
+				.insert_header("location", format!("http://127.0.0.1:{denied_port}/internal")),
+		)
+		.expect(1)
+		.mount(&redirect_server)
+		.await;
+	let redirect_port = redirect_server.address().port();
+
+	// Allow all outbound connections, but deny the specific port on server B.
+	let deny_target = format!("127.0.0.1:{denied_port}");
+	let caps = surrealdb_core::dbs::capabilities::Capabilities::all().without_network_targets(
+		Targets::Some([NetTarget::from_str(&deny_target).unwrap()].into()),
+	);
+
+	let ds = Datastore::builder().with_capabilities(caps).build_with_path("memory").await?;
+	let session = surrealdb_core::dbs::Session::owner().with_ns("test").with_db("test");
+	ds.execute("DEFINE NS test; DEFINE DB test", &surrealdb_core::dbs::Session::owner(), None)
+		.await?;
+
+	let query = format!("RETURN http::get('http://127.0.0.1:{redirect_port}/start')");
+	let mut res = ds.execute(&query, &session, None).await?;
+	// The redirect to the denied port must be blocked.
+	assert!(res.remove(0).result.is_err(), "Expected redirect to denied port to be blocked");
+
+	// Verify server A was reached (initial request) but server B was not (redirect blocked).
+	redirect_server.verify().await;
+	denied_server.verify().await;
 	Ok(())
 }
 

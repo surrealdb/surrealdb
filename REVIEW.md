@@ -3,7 +3,7 @@
 ## Always check
 
 - **Performance**: flag allocations in hot paths, unnecessary clones, recursion without stack guards, and blocking work on async tasks. This is a database, performance and memory usage regressions matter.
-- **Security**: credentials and tokens must not appear in logs or error messages. New endpoints and operations must enforce authentication and authorization checks. User input must be validated before reaching the storage layer.
+- **Security**: credentials and tokens must not appear in logs or error messages. New endpoints and operations must enforce authentication and authorization checks. User input must be validated before reaching the storage layer. See [SECURITY_GUIDE.md](SECURITY_GUIDE.md) for detailed invariants and review triggers per subsystem.
 - **Error handling**: errors must not be silently swallowed. No `.unwrap_or_default()` in non-test code, no `let _ =` on fallible calls without justification. Datastore errors should propagate through `crate::err::Error` before wrapping in `anyhow`.
 - **Concurrency**: background tasks must have cancellation paths tied to their owners. Lock ordering must be documented when multiple locks are held. No `.await` while holding synchronous locks.
 - **Revisioned structs**: changes to types that derive `Revision` must be backwards compatible.

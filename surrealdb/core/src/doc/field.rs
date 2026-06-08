@@ -39,18 +39,21 @@ fn clean_none(v: &mut Value) -> bool {
 }
 
 impl Document {
-	/// Ensures that any remaining fields on a
-	/// SCHEMAFULL table are cleaned up and removed.
-	/// If a field is defined as FLEX, then any
-	/// nested fields or array values are untouched.
-	pub(super) async fn cleanup_table_fields(
-		&mut self,
-		ctx: &FrozenContext,
-		opt: &Options,
-		_stm: &Statement<'_>,
-	) -> Result<()> {
+	/// Removes undefined fields from SCHEMAFULL tables and cleans all NONE values.
+	///
+	/// For records in SCHEMAFULL tables, this function will:
+	/// - Remove fields not explicitly defined via DEFINE FIELD
+	/// - Leaves special fields (`id`, `in`, `out`) in place
+	/// - Leaves fields with FLEXIBLE modifier untouched
+	/// - Leaves nested fields under TYPE any untouched
+	/// - Leaves literal type fields untouched
+	///
+	/// For all records, this function will:
+	/// - Recursively remove all NONE values from the document
+	/// - Leaves array elements which are NONE untouched
+	pub(super) fn cleanup_table_fields(&mut self) -> Result<()> {
 		// Get the table
-		let tb = Arc::clone(self.tb().await?);
+		let tb = self.doc_ctx.tb()?;
 		// This table is schemafull
 		if tb.schemafull {
 			// Prune unspecified fields from the document that are not defined via
@@ -61,34 +64,35 @@ impl Document {
 
 			// First pass: collect all explicitly defined field names
 			let mut explicit_field_names = HashSet::new();
-			for fd in self.fd(ctx, opt).await?.iter() {
+			for fd in self.doc_ctx.fd()?.iter() {
 				explicit_field_names.insert(fd.name.clone());
 			}
 
-			// Loop through all field definitions
-			for fd in self.fd(ctx, opt).await?.iter() {
-				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
-				let is_any = fd.field_kind.as_ref().is_some_and(Kind::is_any);
-
-				// Check if the kind contains object (including option<object>, array<object>, etc.)
-				fn kind_contains_object(kind: &Kind) -> bool {
-					match kind {
-						Kind::Object => true,
-						Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
-						Kind::Array(inner, _) | Kind::Set(inner, _) => kind_contains_object(inner),
-						Kind::Literal(KindLiteral::Object(_)) => true,
-						Kind::Literal(KindLiteral::Array(x)) => x.iter().any(kind_contains_object),
-						_ => false,
-					}
+			// Check if the kind contains object (including option<object>, array<object>, etc.)
+			fn kind_contains_object(kind: &Kind) -> bool {
+				match kind {
+					Kind::Object => true,
+					Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
+					Kind::Array(inner, _) | Kind::Set(inner, _) => kind_contains_object(inner),
+					Kind::Literal(KindLiteral::Object(_)) => true,
+					Kind::Literal(KindLiteral::Array(x)) => x.iter().any(kind_contains_object),
+					_ => false,
 				}
-				let contains_object = fd.field_kind.as_ref().is_some_and(kind_contains_object);
+			}
 
+			// Loop through all field definitions
+			for fd in self.doc_ctx.fd()?.iter() {
+				// Check if the field type is an any
+				let is_any = fd.field_kind.as_ref().is_some_and(Kind::is_any);
+				// Check if the field type is a literal
+				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
+				// Check if the field type contains an object
+				let contains_object = fd.field_kind.as_ref().is_some_and(kind_contains_object);
 				// In SCHEMAFULL tables:
-				// - TYPE any: allows nested (inherent)
-				// - TYPE containing object without FLEXIBLE: strict (does NOT allow arbitrary
-				//   nested)
+				// - TYPE any: allows nested
+				// - TYPE literal: literal types allow nested
 				// - TYPE containing object with FLEXIBLE: allows nested
-				// - Literal types: allow nested
+				// - TYPE containing object without FLEXIBLE: does NOT allow nested
 				let allows_nested = is_any || is_literal || (contains_object && fd.flexible);
 
 				for k in self.current.doc.as_ref().each(&fd.name) {
@@ -146,7 +150,7 @@ impl Document {
 							!tb.schemafull,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
-								table: tb.name.clone().into_string(),
+								table: tb.name.as_str().to_string(),
 								field: current_doc_field_idiom.clone(),
 							}
 						);
@@ -162,7 +166,7 @@ impl Document {
 							!tb.schemafull,
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
-								table: tb.name.clone().into_string(),
+								table: tb.name.as_str().to_string(),
 								field: current_doc_field_idiom.clone(),
 							}
 						);
@@ -181,10 +185,22 @@ impl Document {
 		Ok(())
 	}
 
-	/// Processes `DEFINE FIELD` statements which
-	/// have been defined on the table for this
-	/// record. These fields are executed for
-	/// every matching field in the input document.
+	/// Processes all DEFINE FIELD statements for each matching field in the document.
+	///
+	/// Applies field-level logic in the following order:
+	/// - READONLY keyword - prevents modification of readonly fields
+	/// - DEFAULT clause - applies default values for missing fields on new records
+	/// - TYPE clause - validates the field value against the field type
+	/// - VALUE clause - sets or processes the field value
+	/// - ASSERT clause - validates field constraints
+	/// - REFERENCE clause - manages foreign key references
+	/// - PERMISSIONS clause - enforces field-level permissions
+	///
+	/// Certain fields have special behaviors:
+	/// - `id` field: readonly after creation, and enforced for existing records
+	/// - Optional fields: child fields are skipped when parent is NONE and type allows it
+	/// - READONLY fields: reverted to old value when omitted within CONTENT clause
+	/// - COMPUTED fields: any value is removed, as computed fields are processed later
 	pub(super) async fn process_table_fields(
 		&mut self,
 		stk: &mut Stk,
@@ -205,7 +221,8 @@ impl Document {
 		// will be skipped, as the parent object is optional
 		let mut skip: Option<&Idiom> = None;
 		// Loop through all field statements
-		for fd in self.fd(ctx, opt).await?.iter() {
+		for fd in self.doc_ctx.fd()?.iter() {
+			// Limit auth
 			let opt = AuthLimit::try_from(&fd.auth_limit)?.limit_opt(opt);
 			// Check if we should skip this field
 			let skipped = match skip {
@@ -241,24 +258,21 @@ impl Document {
 						continue;
 					}
 				}
-				// If the field is READONLY then we
-				// will check that the field has not
-				// been modified. If it has just been
-				// omitted then we reset it, otherwise
+				// If the field is READONLY then we need to check
+				// that the field has not been modified. If it has
+				// just been omitted then we reset it, otherwise
 				// we throw a field readonly error.
 				//
-				// Check if we are updating the
-				// document, and check if the new
-				// field value is now different to
-				// the old field value in any way.
+				// Check if we are updating the document, and check
+				// if the new field value is now different to the
+				// old field value in any way.
 				if fd.readonly && !self.is_new() {
 					if val.ne(&*old) {
 						// Check the data clause type
 						match stm.data() {
-							// If the field is NONE, we assume
-							// that the field was ommitted when
-							// using a CONTENT clause, and we
-							// revert the value to the old value.
+							// If the field is NONE, and a CONTENT clause was
+							// used, then we assume that the field was omitted
+							// and we revert the value to the old value.
 							Some(Data::ContentExpression(_)) if val.is_none() => {
 								self.current
 									.doc
@@ -267,10 +281,9 @@ impl Document {
 									.await?;
 								continue;
 							}
-							// If the field has been modified
-							// and the user didn't use a CONTENT
-							// clause, then this should not be
-							// allowed, and we throw an error.
+							// If the field has been modified and the user
+							// didn't use a CONTENT clause, then this should
+							// not be allowed, and we throw an error.
 							_ => {
 								bail!(Error::FieldReadonly {
 									field: fd.name.clone(),
@@ -279,16 +292,15 @@ impl Document {
 							}
 						}
 					}
-					// If this field was not modified then
-					// we can continue without needing to
-					// process the field in any other way.
+					// If this field was not modified then we can continue
+					// without needing to process the field in any other way.
 					continue;
 				}
 				// Generate the field context
 				let mut field = FieldEditContext {
 					context: None,
 					doc: self,
-					rid: rid.clone(),
+					rid: Arc::clone(&rid),
 					def: fd,
 					stk,
 					ctx,
@@ -298,8 +310,9 @@ impl Document {
 				};
 				// Skip this field?
 				if !skipped {
+					// Check if this is a COMPUTED field
 					if field.def.computed.is_some() {
-						// The value will be computed by the `COMPUTED` clause, so we set it to NONE
+						// The value will be computed later, so we set it to NONE
 						val = Value::None;
 					} else {
 						// Process any DEFAULT clause
@@ -337,14 +350,26 @@ impl Document {
 					if val.is_none() && fd.field_kind.as_ref().is_some_and(Kind::can_be_none) {
 						skip = Some(&fd.name);
 					}
-					// Set the new value of the field, or delete it if empty
+					// Write the processed value back. `put` on a NONE
+					// preserves array element positions; `cut` would
+					// shrink the array, dropping nullable items the
+					// caller meant to keep.
 					self.current.doc.to_mut().put(&k, val);
 				}
 			}
 		}
+		// Note: COMPUTED fields are NOT evaluated here. Storing
+		// computed values at write time produces incorrect behaviour
+		// for selective projections — a computed field that the read
+		// did not request must not be evaluated (issue #7094). The
+		// `output_document!` macro on the read side invokes
+		// `Document::compute_fields(needed_roots = ...)` after
+		// reduction and only evaluates the closure of computed fields
+		// the projection actually consumes.
 		// Carry on
 		Ok(())
 	}
+
 	/// Processes reference clauses for all REFERENCE fields on this table.
 	/// Called after permission checks succeed so that reference keys are
 	/// only written for operations that are actually permitted.
@@ -361,7 +386,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id()?;
 		// Loop through all field statements
-		for fd in self.fd(ctx, opt).await?.iter() {
+		for fd in self.doc_ctx.fd()?.iter() {
 			// Only process reference fields
 			if fd.reference.is_none() {
 				continue;
@@ -378,7 +403,7 @@ impl Document {
 				let mut field = FieldEditContext {
 					context: None,
 					doc: self,
-					rid: rid.clone(),
+					rid: Arc::clone(&rid),
 					def: fd,
 					stk,
 					ctx,
@@ -411,7 +436,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id()?;
 		// Loop through all field statements
-		for fd in self.fd(ctx, opt).await?.iter() {
+		for fd in self.doc_ctx.fd()?.iter() {
 			// Only process reference fields
 			if fd.reference.is_none() {
 				continue;
@@ -431,7 +456,7 @@ impl Document {
 				let mut field = FieldEditContext {
 					context: None,
 					doc: self,
-					rid: rid.clone(),
+					rid: Arc::clone(&rid),
 					def: fd,
 					stk,
 					ctx,
@@ -525,6 +550,7 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any DEFAULT clause for the field definition
 	async fn process_default_clause(&mut self, val: Value) -> Result<Value> {
 		// This field has a value specified
@@ -553,15 +579,15 @@ impl FieldEditContext<'_> {
 			// Configure the context
 			let ctx = match self.context.take() {
 				Some(mut ctx) => {
-					ctx.add_value("after", now.clone());
+					ctx.add_value("after", Arc::clone(&now));
 					ctx.add_value("value", now);
 					ctx
 				}
 				None => {
 					let mut ctx = Context::new_child(self.ctx);
-					ctx.add_value("before", self.old.clone());
-					ctx.add_value("input", self.user_input.clone());
-					ctx.add_value("after", now.clone());
+					ctx.add_value("before", Arc::clone(&self.old));
+					ctx.add_value("input", Arc::clone(&self.user_input));
+					ctx.add_value("after", Arc::clone(&now));
 					ctx.add_value("value", now);
 					ctx
 				}
@@ -579,6 +605,7 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any VALUE clause for the field definition
 	async fn process_value_clause(&mut self, val: Value) -> Result<Value> {
 		// Check for a VALUE clause
@@ -590,15 +617,15 @@ impl FieldEditContext<'_> {
 			// Configure the context
 			let ctx = match self.context.take() {
 				Some(mut ctx) => {
-					ctx.add_value("after", now.clone());
+					ctx.add_value("after", Arc::clone(&now));
 					ctx.add_value("value", now);
 					ctx
 				}
 				None => {
 					let mut ctx = Context::new_child(self.ctx);
-					ctx.add_value("before", self.old.clone());
-					ctx.add_value("input", self.user_input.clone());
-					ctx.add_value("after", now.clone());
+					ctx.add_value("before", Arc::clone(&self.old));
+					ctx.add_value("input", Arc::clone(&self.user_input));
+					ctx.add_value("after", Arc::clone(&now));
 					ctx.add_value("value", now);
 					ctx
 				}
@@ -616,6 +643,7 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any ASSERT clause for the field definition
 	async fn process_assert_clause(&mut self, val: Value) -> Result<Value> {
 		// If the field TYPE is optional, and the
@@ -633,16 +661,16 @@ impl FieldEditContext<'_> {
 			// Configure the context
 			let ctx = match self.context.take() {
 				Some(mut ctx) => {
-					ctx.add_value("after", now.clone());
-					ctx.add_value("value", now.clone());
+					ctx.add_value("after", Arc::clone(&now));
+					ctx.add_value("value", Arc::clone(&now));
 					ctx
 				}
 				None => {
 					let mut ctx = Context::new_child(self.ctx);
-					ctx.add_value("before", self.old.clone());
-					ctx.add_value("input", self.user_input.clone());
-					ctx.add_value("after", now.clone());
-					ctx.add_value("value", now.clone());
+					ctx.add_value("before", Arc::clone(&self.old));
+					ctx.add_value("input", Arc::clone(&self.user_input));
+					ctx.add_value("after", Arc::clone(&now));
+					ctx.add_value("value", Arc::clone(&now));
 					ctx
 				}
 			};
@@ -667,10 +695,11 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any PERMISSIONS clause for the field definition
 	async fn process_permissions_clause(&mut self, val: Value) -> Result<Value> {
 		// Check for a PERMISSIONS clause
-		if self.opt.check_perms(Action::Edit)? {
+		if self.ctx.check_perms(self.opt, Action::Edit)? {
 			// Get the permission clause
 			let perms = if self.doc.is_new() {
 				&self.def.create_permission
@@ -708,15 +737,15 @@ impl FieldEditContext<'_> {
 					// Configure the context
 					let ctx = match self.context.take() {
 						Some(mut ctx) => {
-							ctx.add_value("after", now.clone());
+							ctx.add_value("after", Arc::clone(&now));
 							ctx.add_value("value", now);
 							ctx
 						}
 						None => {
 							let mut ctx = Context::new_child(self.ctx);
-							ctx.add_value("before", self.old.clone());
-							ctx.add_value("input", self.user_input.clone());
-							ctx.add_value("after", now.clone());
+							ctx.add_value("before", Arc::clone(&self.old));
+							ctx.add_value("input", Arc::clone(&self.user_input));
+							ctx.add_value("after", Arc::clone(&now));
 							ctx.add_value("value", now);
 							ctx
 						}
@@ -749,6 +778,7 @@ impl FieldEditContext<'_> {
 		// Return the original value
 		Ok(val)
 	}
+
 	/// Process any REFERENCE clause for the field definition
 	async fn process_reference_clause(&mut self, val: &Value) -> Result<()> {
 		// Is there a `REFERENCE` clause?
@@ -822,7 +852,6 @@ impl FieldEditContext<'_> {
 				}
 			}
 		}
-
 		Ok(())
 	}
 }

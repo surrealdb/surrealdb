@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Computed fields that dereference $this.id must not infinite-loop via document re-fetch. Covers object-keyed, string-keyed, and cross-record cases to verify cycle detection only activates for self-referential fetches."
+reason = "Computed fields that dereference $this.id must not infinite-loop via document re-fetch. Covers object-keyed, string-keyed, and cross-record cases to verify cycle detection only activates for self-referential fetches. Object-keyed `id.<field>` resolves directly off the RecordId key component (no document fetch), so cycle detection never fires for those paths; string- and array-keyed ids still fall through to the cycle-protected document re-fetch."
 
 # Test 1 [idx 0-3]
 
@@ -11,10 +11,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ foo: NONE, id: test1:{ prop: 1 } }]"
+value = "[{ foo: 1, id: test1:{ prop: 1 } }]"
 
 [[test.results]]
-value = "[{ foo: NONE, id: test1:{ prop: 1 } }]"
+value = "[{ foo: 1, id: test1:{ prop: 1 } }]"
 
 # Test 2 [idx 4-8]
 
@@ -116,10 +116,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: test7:{ a: { b: 99 } }, nested: NONE }]"
+value = "[{ id: test7:{ a: { b: 99 } }, nested: { b: 99 } }]"
 
 [[test.results]]
-value = "[{ id: test7:{ a: { b: 99 } }, nested: NONE }]"
+value = "[{ id: test7:{ a: { b: 99 } }, nested: { b: 99 } }]"
 
 # Test 8 [idx 35-40]
 
@@ -180,9 +180,10 @@ value = "[{ echo_x: 10, echo_y: 20, id: test10:v, x: 10, y: 20 }]"
 */
 
 -- =============================================================================
--- 1. Basic self-reference: computed field reads a key-only property via $this.id
+-- 1. Basic key-only access: computed field reads a key-only property via $this.id
 --    The document has no `prop` field — `prop` lives in the RecordId key.
---    Cycle detection returns raw stored data, so foo = NONE.
+--    Object-keyed `id.prop` resolves directly off the key component (no
+--    document fetch, no cycle detection involved), so foo = 1.
 -- [ idx 0-3 ]
 -- =============================================================================
 DEFINE TABLE test1;
@@ -248,8 +249,9 @@ SELECT * FROM test6;
 
 -- =============================================================================
 -- 7. Computed field reading a nested object-keyed RecordId property
---    The key is { a: { b: 99 } }, computed accesses $this.id.a — cycle
---    detection fires, raw record has no `a` field → NONE.
+--    The key is { a: { b: 99 } }; $this.id.a resolves directly off the key
+--    component, returning the nested object { b: 99 } — no document fetch,
+--    no cycle detection.
 -- [idx 31-34]
 -- =============================================================================
 DEFINE TABLE test7;

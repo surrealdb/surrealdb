@@ -36,4 +36,5 @@ cd tests
 python3 -m venv venv
 source venv/bin/activate
 cd ..
-pip install --no-cache-dir .
+pip install --no-cache-dir --require-hashes -r requirements.txt
+pip install --no-cache-dir --no-deps .

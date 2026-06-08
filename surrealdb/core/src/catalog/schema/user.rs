@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use revision::revisioned;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::base::Base;
@@ -12,7 +13,7 @@ use crate::val::{Array, Value};
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct UserDefinition {
-	pub name: String,
+	pub name: Strand,
 	pub hash: String,
 	pub code: String,
 	pub roles: Vec<String>,
@@ -51,7 +52,7 @@ impl UserDefinition {
 			comment: self
 				.comment
 				.clone()
-				.map(|c| sql::Expr::Literal(sql::Literal::String(c)))
+				.map(|c| sql::Expr::Literal(sql::Literal::String(c.into())))
 				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 		}
 	}
@@ -66,14 +67,14 @@ impl ToSql for &UserDefinition {
 impl InfoStructure for UserDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => Value::from(self.name),
-			"hash".to_string() => self.hash.into(),
-			"roles".to_string() => Array::from(self.roles.into_iter().map(Value::from).collect::<Vec<_>>()).into(),
-			"duration".to_string() => Value::from(map! {
-				"token".to_string() => self.token_duration.map(Value::from).unwrap_or(Value::None),
-				"session".to_string() => self.session_duration.map(Value::from).unwrap_or(Value::None),
+			"name" => Value::String(self.name.clone()),
+			"hash" => self.hash.into(),
+			"roles" => Array::from(self.roles.into_iter().map(Value::from).collect::<Vec<_>>()).into(),
+			"duration" => Value::from(map! {
+				"token" => self.token_duration.map(Value::from).unwrap_or(Value::None),
+				"session" => self.session_duration.map(Value::from).unwrap_or(Value::None),
 			}),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"comment", if let Some(v) = self.comment => v.into(),
 		})
 	}
 }

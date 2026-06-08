@@ -6,6 +6,8 @@ mod export;
 mod fix;
 mod import;
 mod isready;
+#[cfg(feature = "mcp")]
+pub(crate) mod mcp;
 mod ml;
 #[cfg(feature = "surrealism")]
 mod module;
@@ -32,9 +34,11 @@ use export::ExportCommandArguments;
 use fix::FixCommandArguments;
 use import::ImportCommandArguments;
 use isready::IsReadyCommandArguments;
+#[cfg(feature = "mcp")]
+use mcp::McpCommandArguments;
 use ml::MlCommand;
 #[cfg(feature = "surrealism")]
-use module::ModuleCommand;
+use module::ModuleCommandArgs;
 use semver::Version;
 #[cfg(feature = "cli")]
 use sql::SqlCommandArguments;
@@ -176,11 +180,13 @@ enum Commands {
 	#[cfg(feature = "cli")]
 	#[command(about = "Start an SQL REPL in your terminal with pipe support")]
 	Sql(SqlCommandArguments),
+	#[cfg(feature = "mcp")]
+	#[command(about = "Start the MCP server over stdio for AI assistant integration")]
+	Mcp(McpCommandArguments),
 	#[command(subcommand, about = "Manage SurrealML models within an existing database")]
 	Ml(MlCommand),
 	#[cfg(feature = "surrealism")]
-	#[command(subcommand, about = "Manage and execute WASM modules", name = "module")]
-	Module(ModuleCommand),
+	Module(ModuleCommandArgs),
 	#[command(
 		about = "Check if the SurrealDB server is ready to accept connections",
 		visible_alias = "isready"
@@ -208,7 +214,7 @@ pub enum LogFileRotation {
 }
 
 impl LogFileRotation {
-	pub fn as_str(&self) -> &'static str {
+	pub fn as_str(self) -> &'static str {
 		match self {
 			LogFileRotation::Daily => "daily",
 			LogFileRotation::Hourly => "hourly",
@@ -231,7 +237,11 @@ impl LogFileRotation {
 ///   - `RouterFactory` (constructs the HTTP router, allowing embedders to customize server routes)
 ///   - `ConfigCheck` (validates configuration before initialization)
 pub async fn init<
-	C: TransactionBuilderFactory + RouterFactory + ConfigCheck + BucketStoreProvider,
+	C: TransactionBuilderFactory
+		+ RouterFactory
+		+ ConfigCheck
+		+ BucketStoreProvider
+		+ crate::observe::ObservabilityProvider,
 >(
 	composer: C,
 ) -> ExitCode {
@@ -284,17 +294,24 @@ pub async fn init<
 		.with_file_name(Some(args.log_file_name.clone()))
 		.with_file_format(args.log_file_format)
 		.with_file_rotation(Some(args.log_file_rotation.as_str().to_string()));
-	// Extract the telemetry log guards
-	let guards = telemetry.init().expect("Unable to configure logs");
+	// Initialise telemetry: install the tracing subscriber and receive
+	// the log guards plus the `ObservabilityRuntime` that carries every
+	// provider observers register against.
+	let crate::telemetry::TelemetryHandles {
+		guards,
+		runtime,
+	} = telemetry.init().expect("Unable to configure logs");
 	// After version warning we can run the respective command
 	let output = match args.command {
-		Commands::Start(args) => start::init::<C>(composer, args).await,
+		Commands::Start(args) => start::init::<C>(composer, args, runtime.clone()).await,
 		Commands::Import(args) => import::init(args).await,
 		Commands::Export(args) => export::init(args).await,
 		Commands::Version(args) => version::init(args).await,
 		Commands::Upgrade(args) => upgrade::init(args).await,
 		#[cfg(feature = "cli")]
 		Commands::Sql(args) => sql::init(args).await,
+		#[cfg(feature = "mcp")]
+		Commands::Mcp(args) => mcp::init::<C>(composer, args, runtime.clone()).await,
 		Commands::Ml(args) => ml::init(args).await,
 		#[cfg(feature = "surrealism")]
 		Commands::Module(args) => module::init(args).await,
@@ -303,6 +320,10 @@ pub async fn init<
 		Commands::Fix(args) => fix::init::<C>(args).await,
 		Commands::V2(args) => v2::init(args).await,
 	};
+	// Flush every provider's batch processor so audit / slow-query
+	// records and metric exports are written before the runtime is
+	// dropped.
+	runtime.shutdown();
 	// Save the flamegraph and profile
 	#[cfg(feature = "performance-profiler")]
 	if let Ok(report) = guard.report().build() {
@@ -345,8 +366,9 @@ pub async fn init<
 ///
 /// # Returns
 /// - `Ok(Some(version))` - A newer version is available
-/// - `Ok(None)` - No upgrade needed (current version is up-to-date or newer)
-/// - `Err(e)` - An error occurred during version checking or parsing
+/// - `Ok(None)` - No upgrade needed (current is up-to-date or newer), or the fetch failed (e.g.
+///   offline) and we couldn't confirm
+/// - `Err(e)` - Failed to parse the current or fetched version string
 async fn check_upgrade<C: VersionClient>(client: &C, pkg_version: &str) -> Result<Option<Version>> {
 	match client.fetch("latest").await {
 		Ok(version) => {
@@ -358,9 +380,8 @@ async fn check_upgrade<C: VersionClient>(client: &C, pkg_version: &str) -> Resul
 			}
 		}
 		_ => {
-			// Request failed, check against date
-			// TODO: We don't have an "expiry" set per-version, so this is a
-			// todo It would return Err(None) if the version is too old
+			// Request failed (e.g. offline) — fail open: don't warn about an
+			// upgrade when we couldn't confirm one is available.
 		}
 	}
 	Ok(None)

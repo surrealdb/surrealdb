@@ -36,8 +36,8 @@ where
 	}
 
 	#[inline]
-	pub(super) fn get_edges(&self, node: &ElementId) -> Option<&S> {
-		self.nodes.get(node)
+	pub(super) fn get_edges(&self, node: ElementId) -> Option<&S> {
+		self.nodes.get(&node)
 	}
 
 	pub(super) fn add_empty_node(&mut self, node: ElementId) -> bool {
@@ -67,11 +67,11 @@ where
 		self.nodes.insert(node, new_edges);
 	}
 
-	pub(super) fn remove_node_and_bidirectional_edges(&mut self, node: &ElementId) -> Option<S> {
-		if let Some(edges) = self.nodes.remove(node) {
+	pub(super) fn remove_node_and_bidirectional_edges(&mut self, node: ElementId) -> Option<S> {
+		if let Some(edges) = self.nodes.remove(&node) {
 			for edge in edges.iter() {
 				if let Some(edges_to_node) = self.nodes.get_mut(edge) {
-					edges_to_node.remove(node);
+					edges_to_node.remove(&node);
 				}
 			}
 			Some(edges)
@@ -101,8 +101,8 @@ where
 
 	/// Serializes a single node's edge list into a byte buffer.
 	/// Returns `None` if the node does not exist in the graph.
-	pub(super) fn node_to_val(&self, node: &ElementId) -> Option<Vec<u8>> {
-		self.nodes.get(node).map(|edges| {
+	pub(super) fn node_to_val(&self, node: ElementId) -> Option<Vec<u8>> {
+		self.nodes.get(&node).map(|edges| {
 			let mut buf = Vec::with_capacity(2 + edges.len() * 8);
 			buf.extend_from_slice(&(edges.len() as u16).to_be_bytes());
 			for &e in edges.iter() {
@@ -151,7 +151,7 @@ where
 		for (n, e) in g {
 			let edges: HashSet<ElementId> = e.into_iter().collect();
 			let n_edges: Option<HashSet<ElementId>> =
-				self.get_edges(&n).map(|e| e.iter().copied().collect());
+				self.get_edges(n).map(|e| e.iter().copied().collect());
 			assert_eq!(n_edges, Some(edges), "{n:?}");
 		}
 	}
@@ -210,7 +210,7 @@ mod tests {
 		g.check(vec![(0, vec![1, 2]), (1, vec![0, 2, 3]), (2, vec![0, 1, 3]), (3, vec![0])]);
 
 		// Remove a node
-		let res = g.remove_node_and_bidirectional_edges(&2);
+		let res = g.remove_node_and_bidirectional_edges(2);
 		assert_eq!(
 			res.map(|v| {
 				let mut v: Vec<ElementId> = v.iter().copied().collect();
@@ -222,7 +222,7 @@ mod tests {
 		g.check(vec![(0, vec![1]), (1, vec![0, 3]), (3, vec![0])]);
 
 		// Remove again
-		let res = g.remove_node_and_bidirectional_edges(&2);
+		let res = g.remove_node_and_bidirectional_edges(2);
 		assert!(res.is_none());
 
 		// Set a non existing node
@@ -284,7 +284,7 @@ mod tests {
 		g.add_node_and_bidirectional_edges(1, e);
 
 		// Serialize node 1
-		let val = g.node_to_val(&1).unwrap();
+		let val = g.node_to_val(1).unwrap();
 
 		// Load into a new graph
 		let mut g2 = UndirectedGraph::<ArraySet<10>>::new(10);
@@ -292,7 +292,7 @@ mod tests {
 
 		// Check the loaded node has the same edges
 		let edges: Vec<ElementId> = {
-			let mut v: Vec<ElementId> = g2.get_edges(&1).unwrap().iter().copied().collect();
+			let mut v: Vec<ElementId> = g2.get_edges(1).unwrap().iter().copied().collect();
 			v.sort();
 			v
 		};

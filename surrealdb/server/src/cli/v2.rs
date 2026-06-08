@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail, ensure};
 use bytes::Bytes;
 use clap::Args;
 use futures::{Stream, TryStreamExt};
-use rand::distributions::DistString;
+use rand::distr::SampleString;
 use semver::Version;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -117,7 +117,7 @@ pub async fn download_v2(
 	path: &Path,
 	version: &Version,
 ) -> Result<Option<PathBuf>> {
-	let rand = rand::distributions::Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
+	let rand = rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 16);
 	let temp_path = std::env::temp_dir().join(format!("surreal-{}", rand));
 
 	let suffix = file_platform_suffix()?;

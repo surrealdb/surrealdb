@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
@@ -16,9 +17,9 @@ use crate::val::Value;
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineModelStatement {
 	pub kind: DefineKind,
-	pub hash: String,
-	pub name: String,
-	pub version: String,
+	pub hash: Strand,
+	pub name: Strand,
+	pub version: Strand,
 	pub comment: Expr,
 	pub permissions: Permission,
 }
@@ -34,7 +35,7 @@ impl DefineModelStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Model, Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
@@ -44,7 +45,7 @@ impl DefineModelStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::MlAlreadyExists {
-							name: model.name.clone(),
+							name: model.name.to_string(),
 						});
 					}
 				}

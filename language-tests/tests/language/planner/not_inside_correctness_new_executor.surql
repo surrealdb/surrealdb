@@ -9,10 +9,11 @@ reason = "Verify NOT (field INSIDE [...]) is NOT expanded into index lookups and
 value = "'OK'"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 2}
-    TableScan [ctx: Db] [table: items, direction: Forward, predicate: ! val INSIDE [1, 2]] {rows: 2}
+value = """
+'SelectProject [ctx: Db] [projections: *] {rows: 2}
+    TableScan [ctx: Db] [table: items, direction: Forward, predicate: ! val INSIDE [1, 2], pre_decode_filter: yes] {rows: 2}
 
-Total rows: 2''''
+Total rows: 2'"""
 
 [[test.results]]
 value = "[{ id: items:3, val: 3 }, { id: items:4, val: 4 }]"

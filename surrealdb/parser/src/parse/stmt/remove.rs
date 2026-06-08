@@ -395,3 +395,34 @@ impl Parse for ast::RemoveBucket {
 		})
 	}
 }
+
+impl Parse for ast::RemoveConfig {
+	async fn parse(parser: &mut Parser<'_, '_>) -> ParseResult<Self> {
+		let remove = parser.expect(T![REMOVE])?;
+		let _ = parser.expect(T![CONFIG])?;
+
+		let if_exists = if parser.eat(T![IF])?.is_some() {
+			let _ = parser.expect(T![EXISTS])?;
+			true
+		} else {
+			false
+		};
+
+		let expect = "`API`, `GRAPHQL`, or `DEFAULT`";
+		let peek = parser.peek_expect(expect)?;
+		let kind = match peek.token {
+			T![API] => ast::RemoveConfigKind::Api,
+			T![GRAPHQL] => ast::RemoveConfigKind::Graphql,
+			T![DEFAULT] => ast::RemoveConfigKind::Default,
+			_ => return Err(parser.unexpected(expect)),
+		};
+		let _ = parser.next();
+
+		let span = parser.span_since(remove.span);
+		Ok(ast::RemoveConfig {
+			if_exists,
+			kind,
+			span,
+		})
+	}
+}

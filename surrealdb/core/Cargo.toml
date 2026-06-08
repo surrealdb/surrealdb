@@ -43,7 +43,7 @@ scripting = ["dep:js"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml-core"]
 jwks = ["dep:reqwest"]
-surrealism = ["dep:surrealism-runtime"]
+surrealism = ["dep:surrealism-runtime", "dep:async-trait"]
 allocator = ["dep:jemallocator", "dep:mimalloc"]
 arbitrary = [
     "dep:arbitrary",
@@ -53,9 +53,9 @@ arbitrary = [
     "geo-types/arbitrary",
     "uuid/arbitrary",
     "surrealdb-types/arbitrary",
+    "surrealdb-strand/arbitrary",
 ]
 allocation-tracking = []
-trace-doc-ops = []
 
 # GraphQL support
 graphql = ["dep:async-graphql"]
@@ -66,6 +66,7 @@ features = ["kv-mem", "kv-rocksdb", "http", "scripting", "graphql"]
 targets = []
 
 [dependencies]
+surrealdb-strand = { workspace = true }
 
 # External surreal crates
 surrealmx = { workspace = true, optional = true }
@@ -73,6 +74,7 @@ surrealkv = { workspace = true, optional = true }
 surrealml-core = { workspace = true, optional = true }
 
 affinitypool = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
 dmp.workspace = true
 indxdb = { workspace = true, optional = true }
 js = { workspace = true, features = [
@@ -88,9 +90,10 @@ js = { workspace = true, features = [
 ], optional = true }
 lexicmp.workspace = true
 reblessive = { workspace = true, features = ["tree"] }
-revision.workspace = true
+revision = { workspace = true }
 storekey.workspace = true
 surrealdb-types = { workspace = true }
+surrealdb-collections = { workspace = true }
 vart.workspace = true
 
 # External KV stores
@@ -108,7 +111,6 @@ async-stream.workspace = true
 async-graphql = { workspace = true, default-features = false, features = [
     "dynamic-schema",
 ], optional = true }
-async-trait.workspace = true
 base64.workspace = true
 bcrypt.workspace = true
 blake3.workspace = true
@@ -128,6 +130,7 @@ hex.workspace = true
 humantime.workspace = true
 ipnet.workspace = true
 md-5.workspace = true
+memchr.workspace = true
 ndarray.workspace = true
 ndarray-stats.workspace = true
 num_cpus.workspace = true
@@ -141,6 +144,7 @@ pin-project-lite.workspace = true
 quick_cache.workspace = true
 radix_trie = { workspace = true, features = ["serde"] }
 rand.workspace = true
+rand_core.workspace = true
 rayon.workspace = true
 regex.workspace = true
 roaring = { workspace = true, features = ["serde"] }
@@ -174,6 +178,7 @@ reqwest = { workspace = true, default-features = false, features = [
 ], optional = true }
 tempfile = { workspace = true, optional = true }
 headers = "0.4.1"
+half.workspace = true
 mime = "0.3.17"
 
 # WASM DEPENDENCY CONFIGURATION
@@ -190,6 +195,17 @@ tokio-util.workspace = true
 uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures.workspace = true
 wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
+
+# DISKANN DEPENDENCY CONFIGURATION
+# DiskANN (Microsoft's `diskann` crate) is 64-bit-only by design: its `IntoUsize`
+# trait is implemented only for `target_pointer_width = "64"` and panics on other
+# widths. Restrict the dependency to non-WASM 64-bit targets so `surrealdb-core` still
+# compiles on 32-bit targets (i686, armv7, …); HNSW remains the portable vector index
+# there. The matching source gate is the `diskann` cfg set in build.rs.
+[target.'cfg(all(not(target_family = "wasm"), target_pointer_width = "64"))'.dependencies]
+diskann.workspace = true
+diskann-utils.workspace = true
+diskann-vector.workspace = true
 
 # NON-WASM DEPENDENCY CONFIGURATION
 # Note: surrealism-runtime is only available on non-WASM targets
@@ -262,8 +278,9 @@ name = "functions"
 harness = false
 
 [[bench]]
-name = "scanner"
+name = "rocksdb_cursor"
 harness = false
+required-features = ["kv-rocksdb"]
 
 [[bench]]
 name = "import_load"

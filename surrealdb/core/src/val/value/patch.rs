@@ -1,11 +1,11 @@
-use anyhow::{Result, ensure};
+use anyhow::{Result, bail, ensure};
 use surrealdb_types::ToSql;
 
 use crate::err::Error;
 use crate::expr::Operation;
 use crate::expr::operation::PatchError;
 use crate::expr::part::Part;
-use crate::val::Value;
+use crate::val::{Strand, Value};
 
 impl Value {
 	pub(crate) fn patch(&mut self, ops: Value) -> Result<()> {
@@ -16,10 +16,10 @@ impl Value {
 			.map_err(Error::InvalidPatch)
 			.map_err(anyhow::Error::new)?
 		{
-			let to_parts = |path: Vec<String>| {
+			let to_parts = |path: Vec<Strand>| {
 				path.into_iter()
 					.map(|p| {
-						if let Ok(i) = p.parse::<i64>() {
+						if let Ok(i) = p.as_str().parse::<i64>() {
 							Part::index_int(i)
 						} else {
 							Part::Field(p)
@@ -36,31 +36,36 @@ impl Value {
 				} => {
 					// Split the last path part from the path
 					if let Some((last, left)) = path.split_last() {
-						if let Ok(x) = last.parse::<usize>() {
+						if let Ok(x) = last.as_str().parse::<usize>() {
 							let path =
 								left.iter().map(|x| Part::Field(x.clone())).collect::<Vec<_>>();
 
-							// TODO: Fix behavior on overload.
 							match this.pick(&path) {
 								Value::Array(mut v) => {
-									if v.len() > x {
-										v.insert(x, value);
-										this.put(&path, Value::Array(v));
-									} else {
-										v.push(value);
-										this.put(&path, Value::Array(v));
+									// RFC 6902 §4.1: the index for `add` MUST NOT
+									// be greater than the number of elements in
+									// the array. `insert(len, _)` is the spec's
+									// append form; anything beyond is rejected.
+									if x > v.len() {
+										bail!(Error::InvalidPatch(PatchError {
+											message: format!(
+												"index {x} is out of bounds for array of length {len}",
+												len = v.len(),
+											),
+										}));
 									}
+									v.insert(x, value);
+									this.put(&path, Value::Array(v));
 								}
 								_ => this.put(&path, value),
 							}
 							continue;
 						}
 
-						if last == "-" {
+						if last.as_str() == "-" {
 							let path =
 								left.iter().map(|x| Part::Field(x.clone())).collect::<Vec<_>>();
 
-							// TODO: Fix behavior on overload.
 							match this.pick(&path) {
 								Value::Array(mut v) => {
 									v.push(value);
@@ -103,7 +108,7 @@ impl Value {
 						&& let Value::String(v) = this.pick(&path)
 					{
 						let dmp = dmp::new();
-						let pch = dmp.patch_from_text(p).map_err(|e| {
+						let pch = dmp.patch_from_text(p.into_string()).map_err(|e| {
 							Error::InvalidPatch(PatchError {
 								message: format!("{e:?}"),
 							})
@@ -165,6 +170,7 @@ impl Value {
 
 #[cfg(test)]
 mod tests {
+	use crate::expr::Operation;
 	use crate::syn;
 
 	macro_rules! parse_val {
@@ -270,6 +276,31 @@ mod tests {
 	}
 
 	#[tokio::test]
+	async fn patch_add_array_index_append_at_length() {
+		// RFC 6902 §4.1: an index equal to the array length appends.
+		let mut val = parse_val!("{ list: ['a', 'b'] }");
+		let ops = parse_val!("[{ op: 'add', path: '/list/2', value: 'c' }]");
+		let res = parse_val!("{ list: ['a', 'b', 'c'] }");
+		val.patch(ops).unwrap();
+		assert_eq!(res, val);
+	}
+
+	#[tokio::test]
+	async fn patch_add_array_index_out_of_bounds_errors() {
+		// RFC 6902 §4.1: an index greater than the array length is invalid.
+		let mut val = parse_val!("{ list: ['a', 'b'] }");
+		let ops = parse_val!("[{ op: 'add', path: '/list/5', value: 'c' }]");
+		let err = val.patch(ops).unwrap_err();
+		let msg = err.to_string();
+		assert!(
+			msg.contains("index 5 is out of bounds for array of length 2"),
+			"unexpected error message: {msg}"
+		);
+		// The value must be unchanged when a patch op fails.
+		assert_eq!(val, parse_val!("{ list: ['a', 'b'] }"));
+	}
+
+	#[tokio::test]
 	async fn patch_replace_embedded() {
 		let mut val = parse_val!("{ test: { other: null, something: 123 }, temp: true }");
 		let ops = parse_val!("[{ op: 'replace', path: '/test/other', value: 'text' }]");
@@ -336,5 +367,42 @@ mod tests {
 		assert!(val.patch(ops).is_err());
 		// It is important to test if patches applied even if test operation fails
 		assert_eq!(val, should);
+	}
+
+	#[tokio::test]
+	async fn patch_change_root() {
+		// Issue 7239: empty-path patch ops must target the root value.
+		let mut val = parse_val!("'Hello'");
+		let ops = parse_val!(
+			"[{ op: 'change', path: '', value: '@@ -1,5 +1,12 @@\n Hello\n+ there!\n' }]"
+		);
+		val.patch(ops).unwrap();
+		assert_eq!(val, parse_val!("'Hello there!'"));
+	}
+
+	#[tokio::test]
+	async fn patch_replace_root() {
+		let mut val = parse_val!("1");
+		let ops = parse_val!("[{ op: 'replace', path: '', value: 2 }]");
+		val.patch(ops).unwrap();
+		assert_eq!(val, parse_val!("2"));
+	}
+
+	#[tokio::test]
+	async fn patch_diff_roundtrip_string_root() {
+		let mut start = parse_val!("'Hello'");
+		let after = parse_val!("'Hello there!'");
+		let ops = Operation::operations_to_value(start.diff(&after));
+		start.patch(ops).unwrap();
+		assert_eq!(start, after);
+	}
+
+	#[tokio::test]
+	async fn patch_diff_roundtrip_number_root() {
+		let mut start = parse_val!("1");
+		let after = parse_val!("2");
+		let ops = Operation::operations_to_value(start.diff(&after));
+		start.patch(ops).unwrap();
+		assert_eq!(start, after);
 	}
 }

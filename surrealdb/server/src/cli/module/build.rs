@@ -248,6 +248,7 @@ fn optimize_component(wasm_bytes: &[u8]) -> Result<Vec<u8>> {
 	for payload in wasmparser::Parser::new(0).parse_all(wasm_bytes) {
 		let payload = payload.prefix_err(|| "Failed to parse WASM component")?;
 
+		#[allow(clippy::collapsible_match)]
 		match &payload {
 			wasmparser::Payload::Version {
 				encoding,

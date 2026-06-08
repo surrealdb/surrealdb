@@ -38,7 +38,7 @@ impl super::Routine for Create {
 			// Spawn one task for each operation
 			let mut tasks = JoinSet::default();
 			for _ in 0..num_ops {
-				let ds = ds.clone();
+				let ds = Arc::clone(&ds);
 				let session = session.clone();
 				let table_name = self.table_name.clone();
 

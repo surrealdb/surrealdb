@@ -28,6 +28,7 @@ deny.toml @surrealdb/security
 # Code for fuzzing configuration
 /fuzz/ @surrealdb/security
 SECURITY.md @surrealdb/security
+SECURITY_GUIDE.md @surrealdb/security
 
 # AI instruction files (attack surface for prompt injection via PRs)
 CLAUDE.md @surrealdb/security
@@ -38,3 +39,12 @@ COPILOT.md @surrealdb/security
 
 # KV Storage Interface
 /surrealdb/core/src/kvs/ @surrealdb/kv
+
+# Observability allowlists — additions change what appears on the
+# unauthenticated `/metrics` endpoint and therefore require security review.
+/surrealdb/server/src/observe/public.rs @surrealdb/security
+/surrealdb/server/src/observe/safe.rs @surrealdb/security
+/surrealdb/server/src/observe/handler.rs @surrealdb/security
+/surrealdb/server/src/observe/session.rs @surrealdb/security
+/surrealdb/server/src/observe/provider.rs @surrealdb/security
+/doc/OBSERVABILITY.md @surrealdb/security

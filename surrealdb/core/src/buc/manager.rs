@@ -4,17 +4,19 @@ use anyhow::{Result, bail};
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
 
-use crate::buc::BucketStoreProvider;
 use crate::buc::store::prefixed::PrefixedStore;
 use crate::buc::store::{ObjectKey, ObjectStore};
+use crate::buc::{BucketStoreProvider, Config};
 use crate::catalog::providers::BucketProvider;
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::cnf::{GLOBAL_BUCKET, GLOBAL_BUCKET_ENFORCED};
 use crate::err::Error;
 use crate::kvs::Transaction;
 
-/// Type alias for the concurrent map of bucket connections.
-type BucketConnections = Arc<DashMap<BucketConnectionKey, Arc<dyn ObjectStore>>>;
+struct Inner {
+	connections: DashMap<BucketConnectionKey, Arc<dyn ObjectStore>>,
+	provider: Box<dyn BucketStoreProvider>,
+	config: Config,
+}
 
 /// Manages bucket storage connections with caching.
 ///
@@ -26,28 +28,26 @@ type BucketConnections = Arc<DashMap<BucketConnectionKey, Arc<dyn ObjectStore>>>
 /// Connections are cached by namespace, database, and bucket name to avoid
 /// redundant connection establishment.
 #[derive(Clone)]
-pub(crate) struct BucketsManager {
-	buckets: BucketConnections,
-	provider: Arc<dyn BucketStoreProvider>,
-}
+pub(crate) struct BucketsManager(Arc<Inner>);
 
 impl BucketsManager {
 	/// Creates a new `BucketsManager` with the given storage provider.
 	///
 	/// # Arguments
 	/// * `provider` - The bucket store provider used to create new connections
-	pub(crate) fn new(provider: Arc<dyn BucketStoreProvider>) -> Self {
-		Self {
-			buckets: Default::default(),
+	pub(crate) fn new(provider: Box<dyn BucketStoreProvider>, config: Config) -> Self {
+		BucketsManager(Arc::new(Inner {
+			connections: DashMap::new(),
 			provider,
-		}
+			config,
+		}))
 	}
 
 	/// Clears all cached bucket connections.
 	///
 	/// This is typically called during datastore restart to ensure fresh connections.
 	pub(crate) fn clear(&self) {
-		self.buckets.clear();
+		self.0.connections.clear();
 	}
 
 	/// Connects to a bucket storage backend.
@@ -61,10 +61,10 @@ impl BucketsManager {
 		readonly: bool,
 	) -> Result<Arc<dyn ObjectStore>> {
 		// Check if the global bucket is enforced
-		if !global && *GLOBAL_BUCKET_ENFORCED {
+		if !global && self.0.config.only_global {
 			bail!(Error::GlobalBucketEnforced);
 		}
-		self.provider.connect(url, global, readonly).await
+		self.0.provider.connect(url, global, readonly, self.0.config.clone()).await
 	}
 
 	/// Connects to a global bucket with automatic namespacing.
@@ -79,12 +79,12 @@ impl BucketsManager {
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>> {
 		// Obtain the URL for the global bucket
-		let Some(ref url) = *GLOBAL_BUCKET else {
+		let Some(ref url) = self.0.config.global_bucket else {
 			bail!(Error::NoGlobalBucket);
 		};
 
 		// Connect to the global bucket
-		let global = self.provider.connect(url, true, false).await?;
+		let global = self.0.provider.connect(url, true, false, self.0.config.clone()).await?;
 
 		// Create a prefixstore for the specified bucket
 		let key = ObjectKey::new(format!("/{ns}/{db}/{bu}"));
@@ -111,8 +111,8 @@ impl BucketsManager {
 	) -> Result<Arc<dyn ObjectStore>> {
 		// Attempt to obtain an existing bucket connection
 		let key = BucketConnectionKey::new(ns, db, bu);
-		match self.buckets.entry(key) {
-			Entry::Occupied(e) => Ok(e.get().clone()),
+		match self.0.connections.entry(key) {
+			Entry::Occupied(e) => Ok(Arc::clone(e.get())),
 			Entry::Vacant(e) => {
 				// Obtain the bucket definition
 				let bd = tx.expect_db_bucket(ns, db, bu).await?;
@@ -123,7 +123,7 @@ impl BucketsManager {
 					self.connect_global(ns, db, bu).await?
 				};
 				// Persist the bucket connection
-				e.insert(store.clone());
+				e.insert(Arc::clone(&store));
 				Ok(store)
 			}
 		}
@@ -157,7 +157,7 @@ impl BucketsManager {
 
 		// Persist the store to cache
 		let key = BucketConnectionKey::new(ns, db, bu);
-		self.buckets.insert(key, store);
+		self.0.connections.insert(key, store);
 		Ok(())
 	}
 }

@@ -478,6 +478,11 @@ impl Accumulator for WelfordAccumulator {
 	}
 
 	fn finalize(&self) -> Result<Value> {
+		// Match the scalar `math::stddev`: an empty group has no defined
+		// deviation. A single element has deviation 0.
+		if self.count == 0 {
+			return Ok(Value::Number(Number::Float(f64::NAN)));
+		}
 		let stddev = self.sample_variance().sqrt();
 		Ok(Value::Number(Number::Float(stddev)))
 	}
@@ -543,6 +548,11 @@ impl Accumulator for VarianceAccumulator {
 	}
 
 	fn finalize(&self) -> Result<Value> {
+		// Match the scalar `math::variance`: NaN for an empty group, 0 for
+		// a single element.
+		if self.welford.count == 0 {
+			return Ok(Value::Number(Number::Float(f64::NAN)));
+		}
 		let variance = self.welford.sample_variance();
 		Ok(Value::Number(Number::Float(variance)))
 	}
@@ -647,6 +657,8 @@ impl Accumulator for MedianAccumulator {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::Strand;
+
 	use super::*;
 
 	// Helper to extract f64 from Value
@@ -855,10 +867,11 @@ mod tests {
 
 	#[test]
 	fn stddev_zero_items() {
+		// Empty group has no defined deviation; matches scalar `math::stddev`.
 		let func = MathStddev;
 		let acc = func.create_accumulator();
 		let result = acc.finalize().unwrap();
-		assert_eq!(as_float(&result), 0.0);
+		assert!(as_float(&result).is_nan());
 	}
 
 	#[test]
@@ -917,10 +930,11 @@ mod tests {
 
 	#[test]
 	fn variance_zero_items() {
+		// Empty group has no defined variance; matches scalar `math::variance`.
 		let func = MathVariance;
 		let acc = func.create_accumulator();
 		let result = acc.finalize().unwrap();
-		assert_eq!(as_float(&result), 0.0);
+		assert!(as_float(&result).is_nan());
 	}
 
 	#[test]
@@ -1055,7 +1069,7 @@ mod tests {
 		let values = vec![
 			Value::Number(Number::Int(5)),
 			Value::None,
-			Value::String("test".into()),
+			Value::String(Strand::new_static("test")),
 			Value::Number(Number::Int(3)),
 		];
 		acc.update_batch(&values).unwrap();

@@ -56,7 +56,7 @@ impl Inner {
 		match self.priority_list.entry(dist) {
 			Entry::Vacant(e) => {
 				let mut h = HashSet::new();
-				h.insert(thg.clone());
+				h.insert(Arc::clone(&thg));
 				e.insert(h);
 				self.docs.insert(thg);
 			}
@@ -88,12 +88,12 @@ impl Inner {
 			let dl = docs.len();
 			if dl > left {
 				for doc_id in docs.iter().take(left) {
-					result.insert(doc_id.clone(), *dist);
+					result.insert(Arc::clone(doc_id), *dist);
 				}
 				break;
 			}
 			for doc_id in docs {
-				result.insert(doc_id.clone(), *dist);
+				result.insert(Arc::clone(doc_id), *dist);
 			}
 			left -= dl;
 			// We don't expect anymore result, we can leave

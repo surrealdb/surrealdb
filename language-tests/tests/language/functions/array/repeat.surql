@@ -14,7 +14,7 @@ value = "[NONE, NONE, NONE]"
 value = "[]"
 
 [[test.results]]
-error = "Incorrect arguments for function array::repeat(). Expected argument 2 to be a positive number"
+error = 'Failed to compute: "array::repeat(-256)", as the operation results in a negative value.'
 
 [[test.results]]
 error = "Incorrect arguments for function array::repeat(). Output must not exceed 1048576 bytes."

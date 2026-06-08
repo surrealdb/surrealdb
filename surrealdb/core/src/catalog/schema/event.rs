@@ -1,4 +1,5 @@
 use revision::revisioned;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::auth::AuthLimit;
@@ -13,7 +14,7 @@ use crate::val::{TableName, Value};
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct EventDefinition {
-	pub(crate) name: String,
+	pub(crate) name: Strand,
 	pub(crate) target_table: TableName,
 	pub(crate) when: Expr,
 	pub(crate) then: Vec<Expr>,
@@ -57,17 +58,22 @@ impl EventDefinition {
 impl_kv_value_revisioned!(EventDefinition);
 
 impl EventDefinition {
-	pub fn to_sql_definition(&self) -> sql::DefineEventStatement {
+	/// Returns true if the event is asynchronous.
+	pub(crate) fn is_async(&self) -> bool {
+		matches!(self.kind, EventKind::Async { .. })
+	}
+
+	pub(crate) fn to_sql_definition(&self) -> sql::DefineEventStatement {
 		sql::DefineEventStatement {
 			kind: DefineKind::Default,
 			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
-			target_table: sql::Expr::Table(self.target_table.clone().into_string()),
+			target_table: sql::Expr::Table(self.target_table.clone()),
 			when: self.when.clone().into(),
 			then: self.then.iter().cloned().map(Into::into).collect(),
 			comment: self
 				.comment
 				.clone()
-				.map(|v| sql::Expr::Literal(sql::Literal::String(v)))
+				.map(|v| sql::Expr::Literal(sql::Literal::String(v.into())))
 				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 			event_kind: self.kind.clone(),
 		}
@@ -97,20 +103,20 @@ impl EventDefinition {
 impl InfoStructure for EventDefinition {
 	fn structure(self) -> Value {
 		let mut map = map! {
-			"name".to_string() => self.name.into(),
-			"what".to_string() => self.target_table.into(),
-			"when".to_string() => self.when.structure(),
-			"then".to_string() => self.then.into_iter().map(|x| x.structure()).collect(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"name" => self.name.into(),
+			"what" => self.target_table.into(),
+			"when" => self.when.structure(),
+			"then" => self.then.into_iter().map(|x| x.structure()).collect(),
+			"comment", if let Some(v) = self.comment => v.into(),
 		};
 		if let EventKind::Async {
 			retry,
 			max_depth,
 		} = &self.kind
 		{
-			map.insert("async".to_string(), Value::Bool(true));
-			map.insert("retry".to_string(), (*retry).into());
-			map.insert("maxdepth".to_string(), (*max_depth).into());
+			map.insert("async", Value::Bool(true));
+			map.insert("retry", (*retry).into());
+			map.insert("maxdepth", (*max_depth).into());
 		}
 		Value::from(map)
 	}

@@ -2,6 +2,7 @@ use std::fmt;
 use std::time::Duration;
 
 use revision::revisioned;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::schema::base::Base;
@@ -14,7 +15,7 @@ use crate::val::Value;
 /// The type of access methods available
 #[revisioned(revision = 1)]
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub enum AccessType {
+pub(crate) enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
 	Bearer(BearerAccess),
@@ -48,23 +49,23 @@ impl InfoStructure for AccessType {
 	fn structure(self) -> Value {
 		match self {
 			AccessType::Jwt(v) => Value::from(map! {
-				"kind".to_string() => "JWT".into(),
-				"jwt".to_string() => v.structure(),
+				"kind" => "JWT".into(),
+				"jwt" => v.structure(),
 			}),
 			AccessType::Record(v) => Value::from(map! {
-				"kind".to_string() => "RECORD".into(),
-				"jwt".to_string() => v.jwt.structure(),
-				"signup".to_string(), if let Some(v) = v.signup => v.structure(),
-				"signin".to_string(), if let Some(v) = v.signin => v.structure(),
-				"refresh".to_string(), if v.bearer.is_some() => true.into(),
+				"kind" => "RECORD".into(),
+				"jwt" => v.jwt.structure(),
+				"signup", if let Some(v) = v.signup => v.structure(),
+				"signin", if let Some(v) = v.signin => v.structure(),
+				"refresh", if v.bearer.is_some() => true.into(),
 			}),
 			AccessType::Bearer(ac) => Value::from(map! {
-				"kind".to_string() => "BEARER".into(),
-				"subject".to_string() => match ac.subject {
+				"kind" => "BEARER".into(),
+				"subject" => match ac.subject {
 					BearerAccessSubject::Record => "RECORD".into(),
 					BearerAccessSubject::User => "USER".into(),
 				},
-				"jwt".to_string() => ac.jwt.structure(),
+				"jwt" => ac.jwt.structure(),
 			}),
 		}
 	}
@@ -114,27 +115,27 @@ pub struct JwtAccess {
 impl InfoStructure for JwtAccess {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"verify".to_string() => match self.verify {
+			"verify" => match self.verify {
 				JwtAccessVerify::Jwks(v) => Value::from(map!{
-					"url".to_string() => v.url.into(),
+					"url" => v.url.into(),
 				}),
 				JwtAccessVerify::Key(v) => {
 					if v.alg.is_symmetric(){
 						Value::from(map!{
-							"alg".to_string() => v.alg.to_string().into(),
-							"key".to_string() => "[REDACTED]".into(),
+							"alg" => v.alg.to_string().into(),
+							"key" => "[REDACTED]".into(),
 						})
 					}else{
 						Value::from(map!{
-							"alg".to_string() => v.alg.to_string().into(),
-							"key".to_string() => v.key.into(),
+							"alg" => v.alg.to_string().into(),
+							"key" => v.key.into(),
 						})
 					}
 				},
 			},
-			"issuer".to_string(), if let Some(v) = self.issue => Value::from(map!{
-				"alg".to_string() => v.alg.to_string().into(),
-				"key".to_string() => "[REDACTED]".into(),
+			"issuer", if let Some(v) = self.issue => Value::from(map!{
+				"alg" => v.alg.to_string().into(),
+				"key" => "[REDACTED]".into(),
 			}),
 		})
 	}
@@ -221,7 +222,7 @@ impl ToSql for Algorithm {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AccessDefinition {
-	pub(crate) name: String,
+	pub(crate) name: Strand,
 	pub(crate) access_type: AccessType,
 	pub(crate) base: Base,
 	pub(crate) authenticate: Option<Expr>,
@@ -271,7 +272,7 @@ impl AccessDefinition {
 			comment: self
 				.comment
 				.clone()
-				.map(|c| sql::Expr::Literal(sql::Literal::String(c)))
+				.map(|c| sql::Expr::Literal(sql::Literal::String(c.into())))
 				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 			base: sql::Base::from(crate::expr::Base::from(self.base.clone())),
 		}
@@ -345,15 +346,15 @@ impl BearerAccess {
 impl InfoStructure for AccessDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.into(),
-			"authenticate".to_string(), if let Some(v) = self.authenticate => v.structure(),
-			"duration".to_string() => Value::from(map!{
-				"session".to_string() => self.session_duration.map(Value::from).unwrap_or(Value::None),
-				"grant".to_string(), if self.access_type.can_issue_grants() => self.grant_duration.map(Value::from).unwrap_or(Value::None),
-				"token".to_string(), if self.access_type.can_issue_tokens() => self.token_duration.map(Value::from).unwrap_or(Value::None),
+			"name" => Value::String(self.name.clone()),
+			"authenticate", if let Some(v) = self.authenticate => v.structure(),
+			"duration" => Value::from(map!{
+				"session" => self.session_duration.map(Value::from).unwrap_or(Value::None),
+				"grant", if self.access_type.can_issue_grants() => self.grant_duration.map(Value::from).unwrap_or(Value::None),
+				"token", if self.access_type.can_issue_tokens() => self.token_duration.map(Value::from).unwrap_or(Value::None),
 			}),
-			"kind".to_string() => self.access_type.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"kind" => self.access_type.structure(),
+			"comment", if let Some(v) = self.comment => v.into(),
 		})
 	}
 }
@@ -368,7 +369,7 @@ impl ToSql for AccessDefinition {
 impl From<AccessType> for crate::expr::AccessType {
 	fn from(v: AccessType) -> Self {
 		match v {
-			AccessType::Record(v) => Self::Record(v.into()),
+			AccessType::Record(v) => Self::Record(Box::new(v.into())),
 			AccessType::Jwt(v) => Self::Jwt(v.into()),
 			AccessType::Bearer(v) => Self::Bearer(v.into()),
 		}
@@ -378,7 +379,7 @@ impl From<AccessType> for crate::expr::AccessType {
 impl From<crate::expr::AccessType> for AccessType {
 	fn from(v: crate::expr::AccessType) -> Self {
 		match v {
-			crate::expr::AccessType::Record(v) => AccessType::Record(v.into()),
+			crate::expr::AccessType::Record(v) => AccessType::Record((*v).into()),
 			crate::expr::AccessType::Jwt(v) => AccessType::Jwt(v.into()),
 			crate::expr::AccessType::Bearer(v) => AccessType::Bearer(v.into()),
 		}
@@ -447,7 +448,7 @@ impl From<JwtAccessVerifyKey> for crate::expr::access_type::JwtAccessVerifyKey {
 	fn from(v: JwtAccessVerifyKey) -> Self {
 		Self {
 			alg: v.alg.into(),
-			key: crate::expr::Expr::Literal(crate::expr::Literal::String(v.key)),
+			key: crate::expr::Expr::Literal(crate::expr::Literal::String(v.key.into())),
 		}
 	}
 }
@@ -457,7 +458,7 @@ impl From<crate::expr::access_type::JwtAccessVerifyKey> for JwtAccessVerifyKey {
 		Self {
 			alg: v.alg.into(),
 			key: match v.key {
-				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s,
+				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s.into_string(),
 				_ => v.key.to_sql(),
 			},
 		}
@@ -467,7 +468,7 @@ impl From<crate::expr::access_type::JwtAccessVerifyKey> for JwtAccessVerifyKey {
 impl From<JwtAccessVerifyJwks> for crate::expr::access_type::JwtAccessVerifyJwks {
 	fn from(v: JwtAccessVerifyJwks) -> Self {
 		Self {
-			url: crate::expr::Expr::Literal(crate::expr::Literal::String(v.url)),
+			url: crate::expr::Expr::Literal(crate::expr::Literal::String(v.url.into())),
 		}
 	}
 }
@@ -476,7 +477,7 @@ impl From<crate::expr::access_type::JwtAccessVerifyJwks> for JwtAccessVerifyJwks
 	fn from(v: crate::expr::access_type::JwtAccessVerifyJwks) -> Self {
 		Self {
 			url: match v.url {
-				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s,
+				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s.into_string(),
 				_ => v.url.to_sql(),
 			},
 		}
@@ -487,7 +488,7 @@ impl From<JwtAccessIssue> for crate::expr::access_type::JwtAccessIssue {
 	fn from(v: JwtAccessIssue) -> Self {
 		Self {
 			alg: v.alg.into(),
-			key: crate::expr::Expr::Literal(crate::expr::Literal::String(v.key)),
+			key: crate::expr::Expr::Literal(crate::expr::Literal::String(v.key.into())),
 		}
 	}
 }
@@ -497,7 +498,7 @@ impl From<crate::expr::access_type::JwtAccessIssue> for JwtAccessIssue {
 		Self {
 			alg: v.alg.into(),
 			key: match v.key {
-				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s,
+				crate::expr::Expr::Literal(crate::expr::Literal::String(s)) => s.into_string(),
 				_ => v.key.to_sql(),
 			},
 		}

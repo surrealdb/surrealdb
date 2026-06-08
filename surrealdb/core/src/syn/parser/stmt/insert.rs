@@ -21,7 +21,7 @@ impl Parser<'_> {
 					Expr::Param(param)
 				}
 				_ => {
-					let table = self.parse_ident()?;
+					let table = self.parse_ident_str()?.into();
 					Expr::Table(table)
 				}
 			};

@@ -1,13 +1,16 @@
+use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use async_trait::async_trait;
+use surrealdb_strand::Strand;
 use surrealdb_types::ToSql;
 
 use crate::dbs::Capabilities;
 use crate::exec::context::SessionInfo;
-use crate::exec::{AccessMode, ContextLevel, ExecOperator, ExecutionContext, SendSyncRequirement};
+use crate::exec::{
+	AccessMode, BoxFut, ContextLevel, ExecOperator, ExecutionContext, SendSyncRequirement,
+};
 use crate::expr::FlowResult;
 use crate::expr::idiom::Idiom;
 use crate::kvs::Transaction;
@@ -87,7 +90,7 @@ pub struct EvalContext<'a> {
 
 	/// Block-local parameters (LET bindings within current block scope).
 	/// These shadow global parameters with the same name.
-	pub local_params: Option<&'a HashMap<String, Value>>,
+	pub local_params: Option<&'a HashMap<Strand, Value>>,
 
 	/// Active recursion context for RepeatRecurse evaluation.
 	/// Set by evaluate_recurse_iterative when the inner path contains .@ markers.
@@ -255,9 +258,9 @@ impl<'a> EvalContext<'a> {
 	}
 }
 
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
-pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
+type ProjectionEvalFut<'a> = BoxFut<'a, FlowResult<Option<Vec<(Idiom, Value)>>>>;
+
+pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug + 'static {
 	fn name(&self) -> &'static str;
 
 	/// The minimum context level required to evaluate this expression.
@@ -272,7 +275,7 @@ pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	/// RETURN) propagating through the physical expression layer. Regular errors
 	/// are wrapped in `ControlFlow::Err`. The `?` operator works on `anyhow::Result`
 	/// via the existing `From<anyhow::Error> for ControlFlow` impl.
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value>;
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>>;
 
 	/// Returns the access mode for this expression.
 	///
@@ -299,16 +302,18 @@ pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	///
 	/// Control flow: uses `?` propagation, so the first ControlFlow signal
 	/// (BREAK/CONTINUE/RETURN/Err) aborts the batch -- matching current operator behavior.
-	async fn evaluate_batch(
-		&self,
-		ctx: EvalContext<'_>,
-		values: &[Value],
-	) -> FlowResult<Vec<Value>> {
-		let mut results = Vec::with_capacity(values.len());
-		for value in values {
-			results.push(self.evaluate(ctx.with_value_and_doc(value)).await?);
-		}
-		Ok(results)
+	fn evaluate_batch<'a>(
+		&'a self,
+		ctx: EvalContext<'a>,
+		values: &'a [Value],
+	) -> BoxFut<'a, FlowResult<Vec<Value>>> {
+		Box::pin(async move {
+			let mut results = Vec::with_capacity(values.len());
+			for value in values {
+				results.push(self.evaluate(ctx.with_value_and_doc(value)).await?);
+			}
+			Ok(results)
+		})
 	}
 
 	/// Evaluate this expression as a projection function, returning field bindings.
@@ -317,11 +322,8 @@ pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	/// Returns a list of (Idiom, Value) pairs that become fields in the output object.
 	///
 	/// The default implementation returns None, indicating this is not a projection function.
-	async fn evaluate_projection(
-		&self,
-		_ctx: EvalContext<'_>,
-	) -> FlowResult<Option<Vec<(Idiom, Value)>>> {
-		Ok(None)
+	fn evaluate_projection<'a>(&'a self, _ctx: EvalContext<'a>) -> ProjectionEvalFut<'a> {
+		Box::pin(async move { Ok(None) })
 	}
 
 	/// Returns references to child physical expressions for tree traversal.
@@ -370,6 +372,16 @@ pub trait PhysicalExpr: ToSql + SendSyncRequirement + Debug {
 	fn try_simple_field(&self) -> Option<&str> {
 		None
 	}
+
+	/// Borrow as [`Any`] for downcasting to a concrete expression type.
+	fn as_any(&self) -> &dyn Any;
+}
+
+impl dyn PhysicalExpr {
+	/// Downcast a [`PhysicalExpr`] trait object to a concrete implementation.
+	pub(crate) fn downcast_ref<T: PhysicalExpr>(&self) -> Option<&T> {
+		self.as_any().downcast_ref::<T>()
+	}
 }
 
 #[cfg(test)]
@@ -411,11 +423,11 @@ mod tests {
 
 		let obj = Value::Object(Object::from_iter([(
 			"key1".to_string(),
-			Value::String("value1".to_string()),
+			Value::String(Strand::new_static("value1")),
 		)]));
 
-		let result = evaluate_index(&obj, &Value::String("key1".to_string())).unwrap();
-		assert_eq!(result, Value::String("value1".to_string()));
+		let result = evaluate_index(&obj, &Value::String(Strand::new_static("key1"))).unwrap();
+		assert_eq!(result, Value::String(Strand::new_static("value1")));
 	}
 
 	// =========================================================================

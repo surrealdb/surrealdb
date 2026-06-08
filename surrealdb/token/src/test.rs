@@ -1,8 +1,9 @@
-use super::*;
 use logos::Logos;
 
+use super::*;
+
 fn assert_tokens(source: &str, expect: &[BaseTokenKind]) {
-	let tokens: Vec<_> = BaseTokenKind::lexer(source.as_bytes()).map(|x| x.unwrap()).collect();
+	let tokens: Vec<_> = BaseTokenKind::lexer(source).map(|x| x.unwrap()).collect();
 	assert_eq!(tokens, expect)
 }
 
@@ -23,6 +24,21 @@ impl_test!(basic_ident: "hello_world" => &[BaseTokenKind::Ident]);
 impl_test!(kw_select_lower: "select" => &[BaseTokenKind::KwSelect]);
 impl_test!(kw_select_upper: "SELECT" => &[BaseTokenKind::KwSelect]);
 impl_test!(kw_select_mixed: "SeLeCt" => &[BaseTokenKind::KwSelect]);
+
+#[test]
+fn ann_keywords_are_identifier_compatible() {
+	let cases = [
+		("alpha", BaseTokenKind::KwAlpha),
+		("degree", BaseTokenKind::KwDegree),
+		("diskann", BaseTokenKind::KwDiskann),
+		("l_build", BaseTokenKind::KwLBuild),
+	];
+
+	for (source, kind) in cases {
+		assert_tokens(source, &[kind]);
+		assert!(kind.is_identifier(), "{source} should be identifier-compatible");
+	}
+}
 
 impl_test!(basic_number: "1" => &[BaseTokenKind::Int]);
 
@@ -64,23 +80,3 @@ impl_test!(whitespace_intersperse_2: r#"
 1
 -- bla
 "# => &[BaseTokenKind::Int]);
-
-fn assert_returns_utf8_error(source: &[u8]) {
-	assert!(std::str::from_utf8(source).is_err());
-	let mut tokens = Vec::new();
-	for t in BaseTokenKind::lexer(source) {
-		match t {
-			Err(LexError::InvalidUtf8(..)) => return,
-			t => {
-				tokens.push(t);
-			}
-		}
-	}
-	panic!("Source did not return a utf8 error: {:?}", tokens)
-}
-
-#[test]
-fn no_invalid_utf8() {
-	assert_returns_utf8_error(&[b'"', 129, b'"']);
-	assert_returns_utf8_error(&[b'h', b'e', b'l', b'l', b'o', 0b11101111]);
-}

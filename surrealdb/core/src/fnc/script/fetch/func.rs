@@ -30,7 +30,7 @@ pub async fn fetch<'js>(
 
 	// Check if the url is allowed to be fetched.
 	let query_ctx = if let Some(query_ctx) = ctx.userdata::<QueryContext<'js>>() {
-		query_ctx.context.clone()
+		Arc::clone(query_ctx.context)
 	} else {
 		panic!(
 			"Trying to fetch a URL but no QueryContext is present. QueryContext is required for checking if the URL is allowed to be fetched."
@@ -56,6 +56,7 @@ pub async fn fetch<'js>(
 				HttpClient::new_with_redirect_policy(
 					cap.allow_net.clone(),
 					cap.allow_net.clone(),
+					&query_ctx.config,
 					|attempt| attempt.error("unexpected redirect"),
 				)
 				.map_err(|e| {
@@ -72,6 +73,7 @@ pub async fn fetch<'js>(
 				HttpClient::new_with_redirect_policy(
 					cap.allow_net.clone(),
 					cap.allow_net.clone(),
+					&query_ctx.config,
 					|attempt| attempt.stop(),
 				)
 				.map_err(|e| {
@@ -107,8 +109,10 @@ pub async fn fetch<'js>(
 			}
 			BodyKind::Blob(mime) => {
 				if let Ok(x) = HeaderValue::from_bytes(mime.as_bytes()) {
-					// TODO: Not according to spec, figure out the specific Mime -> Content-Type
-					// -> Mime conversion process.
+					// `or_insert_with` matches the spec's "set Content-Type
+					// only if absent" rule for Blob bodies. The Blob's MIME
+					// is passed through verbatim instead of being round-tripped
+					// through the MIME-type grammar the spec requires.
 					headers.entry(CONTENT_TYPE).or_insert_with(|| x);
 				}
 			}

@@ -33,6 +33,18 @@ value = "[{ count: 2 }]"
 
 [[test.results]]
 value = "[{ c: 3 }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ count: 2 }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ count: 3 }]"
 */
 
 -- Define the COUNT index before inserting data so deltas are tracked from the start
@@ -53,3 +65,11 @@ SELECT count() FROM item WHERE status = "inactive" GROUP ALL;
 
 -- Test: count with alias and matching WHERE
 SELECT count() AS c FROM item WHERE status = "active" GROUP ALL;
+
+-- Test: predicate-only UPDATEs must update the COUNT WHERE index even though
+-- COUNT indexes have no indexed field values.
+UPDATE item:a SET status = "inactive" RETURN NONE;
+SELECT count() FROM item WHERE status = "active" GROUP ALL;
+
+UPDATE item:d SET status = "active" RETURN NONE;
+SELECT count() FROM item WHERE status = "active" GROUP ALL;

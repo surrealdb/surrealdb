@@ -1,10 +1,9 @@
 #![cfg(test)]
 
-use std::env;
 use std::path::Path;
+use std::{env, fmt};
 
 use ast::Query;
-use common::fmt_from_fn;
 
 use crate::Config;
 
@@ -15,6 +14,23 @@ enum ResultMode {
 	Accept,
 	Overwrite,
 	Fail,
+}
+
+fn assert_parses(source: &str) {
+	if let Err(e) = crate::Parser::enter_parse::<Query>(
+		source,
+		Config {
+			depth_limit: 1000,
+			generate_warnings: true,
+			feature_bearer_access: true,
+			feature_surrealism: true,
+			quirk_redefine: false,
+			quirk_block_first_no_semi: false,
+			quirk_delete_permission_field: false,
+		},
+	) {
+		panic!("failed to parse `{source}`:\n{}", e.render_char_buffer().write_to_string());
+	}
 }
 
 fn walk_dir<F: FnMut(&Path)>(path: &Path, f: &mut F) {
@@ -29,6 +45,25 @@ fn walk_dir<F: FnMut(&Path)>(path: &Path, f: &mut F) {
 			walk_dir(&path, f);
 		}
 	}
+}
+
+#[test]
+fn ann_keywords_parse_as_identifiers() {
+	for source in [
+		"SELECT alpha FROM alpha;",
+		"SELECT degree FROM degree;",
+		"SELECT diskann FROM diskann;",
+		"SELECT l_build FROM l_build;",
+	] {
+		assert_parses(source);
+	}
+}
+
+#[test]
+fn ann_keywords_keep_diskann_index_syntax() {
+	assert_parses(
+		"DEFINE INDEX pts_embedding_diskann ON pts FIELDS embedding DISKANN DIMENSION 4 DEGREE 16 L_BUILD 64 ALPHA 1.2 TYPE F32 DIST EUCLIDEAN;",
+	);
 }
 
 /// Text tests, implements a small language-test like testing suite where we test the parser
@@ -66,12 +101,15 @@ fn text_test() {
 				generate_warnings: true,
 				feature_bearer_access: true,
 				feature_surrealism: true,
+				quirk_redefine: false,
+				quirk_block_first_no_semi: false,
+				quirk_delete_permission_field: false,
 			},
 		);
 
 		let found = match res {
 			Ok((node, ast)) => {
-				fmt_from_fn(|fmt| ast::vis::visualize_ast(&node, &ast, fmt)).to_string()
+				fmt::from_fn(|fmt| ast::vis::visualize_ast(&node, &ast, fmt)).to_string()
 			}
 			Err(e) => {
 				format!("ERROR:{}", e.render_char_buffer().write_to_string())
@@ -120,28 +158,31 @@ fn text_test() {
 const IGNORE_TESTS: &[&str] = &[
 	"language/control_flow/transaction/cancel_behaviour.surql",
 	"language/control_flow/transaction/commit_behaviour.surql",
-	"language/statements/define/field/permissions_full_2.0.surql",
-	"language/statements/remove/config/api.surql",
-	"language/statements/remove/config/default.surql",
-	"language/statements/remove/config/graphql.surql",
-	"language/statements/remove/config/not_exists.surql",
-	"language/statements/select/fetch/objects.surql",
-	"language/statements/alter/alter_param.surql",
-	"language/statements/alter/alter_user.surql",
-	"language/statements/alter/alter_function.surql",
-	"language/statements/alter/alter_event.surql",
-	"language/statements/alter/alter_config.surql",
-	"language/statements/alter/alter_bucket.surql",
-	"language/statements/alter/alter_api.surql",
-	"language/statements/alter/alter_analyzer.surql",
-	"language/statements/alter/alter_access.surql",
 	"language/graph/edge_clauses.surql",
-	"reproductions/alter_auth_limit_escalation.surql",
 	"reproductions/7169_from_only_in_graph_lookup.surql",
+	// The new parser doesn't yet support `INFO FOR NAMESPACE VERSION …`
+	// (only `INFO FOR DATABASE VERSION …`); the legacy parser used by the
+	// language-test harness does.
+	"language/statements/info/version_clause.surql",
 ];
 
 #[test]
 fn all_language_tests() {
+	// Parsing the full language-tests corpus can recurse deeply; the default test thread stack (~2
+	// MiB) overflows on some toolchains. Match surplus headroom used by other DB test harnesses.
+	const STACK: usize = 32 * 1024 * 1024;
+	std::thread::Builder::new()
+		.name("all_language_tests".to_string())
+		.stack_size(STACK)
+		.spawn(|| {
+			all_language_tests_impl();
+		})
+		.expect("spawn all_language_tests thread")
+		.join()
+		.expect("all_language_tests thread panicked");
+}
+
+fn all_language_tests_impl() {
 	let mut failed = 0;
 	let mut successfull = 0;
 	let tests_path = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -170,6 +211,9 @@ fn all_language_tests() {
 				generate_warnings: true,
 				feature_bearer_access: true,
 				feature_surrealism: true,
+				quirk_redefine: true,
+				quirk_block_first_no_semi: true,
+				quirk_delete_permission_field: true,
 			},
 		);
 

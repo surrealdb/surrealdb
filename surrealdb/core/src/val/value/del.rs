@@ -13,9 +13,11 @@ use crate::val::Value;
 impl Value {
 	/// Asynchronous method for deleting a field from a `Value`
 	///
-	/// Was marked recursive
-	///
-	/// TODO: Document exact behavior with respect to this.
+	/// Walks `path` against `self`, descending into matching `Object`/`Array`
+	/// children. At the final `Part` the matched field, element, or filtered
+	/// subset is removed; `Part::All` clears the entire container. Missing keys,
+	/// out-of-range indices, and paths that descend into a non-container value
+	/// are all no-ops.
 	pub(crate) async fn del(
 		&mut self,
 		stk: &mut Stk,
@@ -43,10 +45,10 @@ impl Value {
 					},
 					Part::Field(f) => match path.len() {
 						1 => {
-							v.remove(&**f);
+							v.remove(f);
 							Ok(())
 						}
-						_ => match v.get_mut(&**f) {
+						_ => match v.get_mut(f) {
 							Some(v) if !v.is_nullish() => {
 								stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
 							}
@@ -123,7 +125,7 @@ impl Value {
 								let futs = v
 									.iter_mut()
 									.map(|v| scope.run(|stk| v.del(stk, ctx, opt, path)));
-								try_join_all_buffered(futs)
+								try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
 							})
 							.await?;
 							Ok(())
@@ -228,13 +230,16 @@ impl Value {
 						if let Value::Number(i) =
 							stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?
 						{
+							let Some(idx) = i.as_array_index() else {
+								return Ok(());
+							};
 							if path.len() == 1 {
-								if v.len() > i.to_usize() {
-									v.remove(i.to_usize());
+								if v.len() > idx {
+									v.remove(idx);
 								}
 								Ok(())
 							} else {
-								match v.get_mut(i.to_usize()) {
+								match v.get_mut(idx) {
 									Some(v) => {
 										stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
 									}
@@ -249,7 +254,7 @@ impl Value {
 						stk.scope(|scope| {
 							let futs =
 								v.iter_mut().map(|v| scope.run(|stk| v.del(stk, ctx, opt, path)));
-							try_join_all_buffered(futs)
+							try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
 						})
 						.await?;
 						Ok(())

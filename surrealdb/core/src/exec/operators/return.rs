@@ -6,7 +6,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
@@ -39,9 +38,6 @@ impl ReturnPlan {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for ReturnPlan {
 	fn name(&self) -> &'static str {
 		"Return"
@@ -64,7 +60,7 @@ impl ExecOperator for ReturnPlan {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let inner = self.inner.clone();
+		let inner = Arc::clone(&self.inner);
 		let ctx = ctx.clone();
 
 		// Check if inner plan is scalar (like `RETURN 1 + 2`) vs query (like `RETURN SELECT
@@ -76,7 +72,12 @@ impl ExecOperator for ReturnPlan {
 		Ok(Box::pin(futures::stream::once(async move {
 			// Execute inner plan and collect values
 			let mut stream = match inner.execute(&ctx) {
-				Ok(s) => buffer_stream(s, inner.access_mode(), inner.cardinality_hint()),
+				Ok(s) => buffer_stream(
+					s,
+					inner.access_mode(),
+					inner.cardinality_hint(),
+					ctx.root().ctx.config.operator_buffer_size,
+				),
 				Err(ctrl) => return Err(ctrl),
 			};
 

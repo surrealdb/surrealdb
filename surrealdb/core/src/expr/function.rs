@@ -117,7 +117,7 @@ impl Function {
 				let opt = AuthLimit::try_from(&val.auth_limit)?.limit_opt(opt);
 
 				// Check permissions
-				if opt.check_perms(Action::View)? {
+				if ctx.check_perms(&opt, Action::View)? {
 					check_perms(stk, ctx, &opt, doc, &name, &val.permissions).await?;
 				}
 				// Validate the arguments
@@ -147,7 +147,7 @@ impl Function {
 				let result =
 					stk.run(|stk| val.block.compute(stk, &ctx, &opt, doc)).await.catch_return()?;
 				// Validate the return value
-				validate_return(name, val.returns.as_ref(), result)
+				validate_return(name.as_str(), val.returns.as_ref(), result)
 			}
 			Function::Module(module, sub) => {
 				let mod_name = format!("mod::{module}");
@@ -162,7 +162,7 @@ impl Function {
 				let val = ctx.tx().get_db_module(ns, db, mod_name.as_str(), opt.version).await?;
 
 				// Check permissions
-				if opt.check_perms(Action::View)? {
+				if ctx.check_perms(opt, Action::View)? {
 					check_perms(stk, ctx, opt, doc, &mod_name, &val.permissions).await?;
 				}
 
@@ -177,7 +177,7 @@ impl Function {
 				let result = executable.run(stk, ctx, opt, doc, args, sub.as_deref()).await?;
 
 				// Validate the return value
-				validate_return(fnc_name, signature.returns.as_ref(), result)
+				validate_return(fnc_name.as_str(), signature.returns.as_ref(), result)
 			}
 			Function::Silo {
 				org,
@@ -199,7 +199,7 @@ impl Function {
 				let val = ctx.tx().get_db_module(ns, db, mod_name.as_str(), opt.version).await?;
 
 				// Check permissions
-				if opt.check_perms(Action::View)? {
+				if ctx.check_perms(opt, Action::View)? {
 					check_perms(stk, ctx, opt, doc, &mod_name, &val.permissions).await?;
 				}
 
@@ -214,13 +214,11 @@ impl Function {
 				let result = executable.run(stk, ctx, opt, doc, args, sub.as_deref()).await?;
 
 				// Validate the return value
-				validate_return(fnc_name, signature.returns.as_ref(), result)
+				validate_return(fnc_name.as_str(), signature.returns.as_ref(), result)
 			}
 		}
 	}
 }
-
-///TODO(3.0): Remove after proper first class function support?
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct FunctionCall {
@@ -244,8 +242,6 @@ impl ToSql for FunctionCall {
 
 impl FunctionCall {
 	/// Process this type returning a computed simple Value
-	///
-	/// Was marked recursive
 	#[instrument(level = "trace", name = "FunctionCall::compute", skip_all)]
 	pub(crate) async fn compute(
 		&self,
@@ -329,12 +325,12 @@ fn validate_args(name: &str, args: &[Value], sig: &[Kind]) -> FlowResult<()> {
 	Ok(())
 }
 
-fn validate_return(name: String, return_kind: Option<&Kind>, result: Value) -> FlowResult<Value> {
+fn validate_return(name: &str, return_kind: Option<&Kind>, result: Value) -> FlowResult<Value> {
 	match return_kind {
 		Some(kind) => result
 			.coerce_to_kind(kind)
 			.map_err(|e| Error::ReturnCoerce {
-				name: name.clone(),
+				name: name.to_string(),
 				error: Box::new(e),
 			})
 			.map_err(anyhow::Error::new)

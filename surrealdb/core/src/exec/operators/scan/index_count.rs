@@ -24,14 +24,13 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use tracing::instrument;
 
 use crate::catalog::{DatabaseId, Index, NamespaceId, Permission};
 use crate::err::Error;
 use crate::exec::index::access_path::{BTreeAccess, IndexRef};
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical, should_check_perms,
+	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
 	validate_record_user_access,
 };
 use crate::exec::{
@@ -100,9 +99,6 @@ impl IndexCountScan {
 		self
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for IndexCountScan {
 	fn name(&self) -> &'static str {
 		"IndexCountScan"
@@ -205,7 +201,8 @@ impl ExecOperator for IndexCountScan {
 					Some(def) => def.permissions.select.clone(),
 					None => Permission::None,
 				};
-				convert_permission_to_physical(&catalog_perm, ctx.ctx()).await
+				convert_permission_to_physical_runtime(&catalog_perm, ctx.ctx())
+					.await
 					.context("Failed to convert permission")?
 			} else {
 				PhysicalPermission::Allow
@@ -329,26 +326,25 @@ pub(crate) async fn sum_index_count_deltas(
 	tb: &TableName,
 	ix: crate::catalog::IndexId,
 ) -> Result<usize, ControlFlow> {
-	use futures::StreamExt;
-
 	let range =
 		IndexCountKey::range(ns, db, tb, ix).context("Failed to compute index count key range")?;
-	let key_stream = txn.stream_keys(
-		range,
-		None, // no version
-		None, // no limit
-		0,    // no skip
-		crate::idx::planner::ScanDirection::Forward,
-	);
-	futures::pin_mut!(key_stream);
-
+	let mut cursor = txn
+		.open_keys_cursor(range, crate::idx::planner::ScanDirection::Forward, 0, None)
+		.await
+		.context("Failed to open index-count cursor")?;
 	let mut count: i64 = 0;
-	while let Some(batch_result) = key_stream.next().await {
+	loop {
 		if ctx.cancellation().is_cancelled() {
 			return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
 		}
-		let keys = batch_result.context("Failed to scan index count keys")?;
-		for key in &keys {
+		let batch = cursor
+			.next_batch(crate::kvs::ScanLimit::Count(crate::kvs::NORMAL_BATCH_SIZE))
+			.await
+			.context("Failed to scan index count keys")?;
+		if batch.is_empty() {
+			break;
+		}
+		for key in &batch {
 			let iu = IndexCountKey::decode_key(key).context("Failed to decode index count key")?;
 			if iu.pos {
 				count += iu.count as i64;
@@ -373,40 +369,37 @@ async fn count_with_filter_fallback(
 	permission: &PhysicalPermission,
 	predicate: &Arc<dyn PhysicalExpr>,
 ) -> Result<usize, ControlFlow> {
-	use futures::StreamExt;
-
 	use crate::exec::permission::PhysicalPermission;
 
 	let txn = ctx.txn();
 	let beg = record::prefix(ns_id, db_id, table_name)?;
 	let end = record::suffix(ns_id, db_id, table_name)?;
 
-	let kv_stream = txn.stream_keys_vals(
-		beg..end,
-		version,
-		None, // no limit
-		0,    // no skip
-		crate::idx::planner::ScanDirection::Forward,
-		false, // no prefetch for count scans
-	);
-	futures::pin_mut!(kv_stream);
-
+	let mut cursor = txn
+		.open_vals_cursor(beg..end, crate::idx::planner::ScanDirection::Forward, 0, version)
+		.await
+		.context("Failed to open scan cursor")?;
 	let mut count = 0usize;
-	while let Some(result) = kv_stream.next().await {
+	loop {
 		if ctx.cancellation().is_cancelled() {
 			return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
 		}
-		let entries = result.context("Failed to scan record")?;
-		for (key, val) in entries {
-			let decoded_key = crate::key::record::RecordKey::decode_key(&key)
+		let batch = cursor
+			.next_batch(crate::kvs::ScanLimit::Count(crate::kvs::NORMAL_BATCH_SIZE))
+			.await
+			.context("Failed to scan record")?;
+		if batch.is_empty() {
+			break;
+		}
+		for (key, val) in &batch {
+			let decoded_key = crate::key::record::RecordKey::decode_key(key)
 				.context("Failed to decode record key")?;
 			let rid_val = crate::val::RecordId {
 				table: decoded_key.tb.into_owned(),
 				key: decoded_key.id,
 			};
-			let mut record = crate::catalog::Record::kv_decode_value(val)
+			let record = crate::catalog::Record::kv_decode_value(val, rid_val)
 				.context("Failed to deserialize record")?;
-			record.data.def(rid_val);
 			let value = record.data;
 
 			// Check per-record permission first.

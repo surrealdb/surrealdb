@@ -9,6 +9,8 @@
 //! - `BucketsManager` - Manages bucket connections and caching
 //! - [`store`] - Object store trait and implementations
 
+use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::Arc;
 
 mod controller;
@@ -16,31 +18,50 @@ use anyhow::{Result, bail};
 pub(crate) use controller::BucketController;
 pub use controller::BucketOperation;
 
-use crate::CommunityComposer;
 use crate::buc::store::ObjectStore;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::buc::store::file::FileStore;
 use crate::buc::store::memory::MemoryStore;
 use crate::err::Error;
+use crate::iam::file::extract_allowed_paths;
+use crate::{CommunityComposer, cnf};
 
-pub(crate) mod manager;
+pub mod manager;
 pub mod store;
 
-/// Marker trait for bucket store provider requirements.
-///
-/// This trait defines platform-specific requirements for bucket store providers.
-/// On non-WASM targets, providers must be `Send + Sync + 'static` to support
-/// concurrent access across threads.
-#[cfg(target_family = "wasm")]
-pub trait BucketStoreProviderRequirements {}
+#[derive(Clone, Debug, Default)]
+pub struct Config {
+	bucket_list: Vec<PathBuf>,
+	only_global: bool,
+	global_bucket: Option<String>,
+}
+
+impl cnf::Config for Config {
+	fn parse(&mut self, map: &cnf::ConfigMap) {
+		map.parse_key_with("bucket_folder_allowlist", &mut self.bucket_list, |x| {
+			Some(extract_allowed_paths(x, false, "bucket folder"))
+		})
+		.parse_key_with("global_bucket", &mut self.global_bucket, |x| Some(Some(x.to_owned())))
+		.parse_key("global_bucket_enforced", &mut self.only_global);
+	}
+}
+
+#[cfg(test)]
+impl Config {
+	/// Test-only helper for building a `Config` with a custom bucket allowlist
+	/// without going through the `cnf::Config` parser.
+	pub(crate) fn for_test(bucket_list: Vec<PathBuf>) -> Self {
+		Self {
+			bucket_list,
+			..Self::default()
+		}
+	}
+}
 
 /// Marker trait for bucket store provider requirements.
-///
-/// This trait defines platform-specific requirements for bucket store providers.
-/// On non-WASM targets, providers must be `Send + Sync + 'static` to support
-/// concurrent access across threads.
-#[cfg(not(target_family = "wasm"))]
 pub trait BucketStoreProviderRequirements: Send + Sync + 'static {}
+
+type BoxFuture<'a, R> = Pin<Box<dyn Future<Output = R> + 'a + Send + Sync>>;
 
 /// Trait for creating connections to bucket storage backends.
 ///
@@ -48,8 +69,6 @@ pub trait BucketStoreProviderRequirements: Send + Sync + 'static {}
 /// [`ObjectStore`] instances. The community edition supports `memory://` and
 /// `file://` backends, while enterprise editions may support additional backends
 /// like S3, GCS, or Azure Blob Storage.
-#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 pub trait BucketStoreProvider: BucketStoreProviderRequirements {
 	/// Connect to a bucket storage backend.
 	///
@@ -61,33 +80,38 @@ pub trait BucketStoreProvider: BucketStoreProviderRequirements {
 	/// # Returns
 	/// An `Arc<dyn ObjectStore>` on success, or an error if the URL is invalid
 	/// or the backend is not supported.
-	async fn connect(
+	fn connect<'a>(
 		&self,
-		url: &str,
+		url: &'a str,
 		global: bool,
 		readonly: bool,
-	) -> Result<Arc<dyn ObjectStore>>;
+		config: Config,
+	) -> BoxFuture<'a, Result<Arc<dyn ObjectStore>>>;
 }
 
 impl BucketStoreProviderRequirements for CommunityComposer {}
-#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+
 impl BucketStoreProvider for CommunityComposer {
-	async fn connect(
+	fn connect<'a>(
 		&self,
-		url: &str,
+		url: &'a str,
 		_global: bool,
 		_readonly: bool,
-	) -> Result<Arc<dyn ObjectStore>> {
-		if MemoryStore::parse_url(url) {
-			return Ok(Arc::new(MemoryStore::new()));
-		}
+		config: Config,
+	) -> BoxFuture<'a, Result<Arc<dyn ObjectStore>>> {
+		Box::pin(async {
+			#[cfg(target_arch = "wasm32")]
+			let _ = config;
+			if MemoryStore::parse_url(url) {
+				return Ok(Arc::new(MemoryStore::new()) as Arc<dyn ObjectStore>);
+			}
 
-		#[cfg(not(target_arch = "wasm32"))]
-		if let Some(opts) = FileStore::parse_url(url).await? {
-			return Ok(Arc::new(FileStore::new(opts)));
-		}
+			#[cfg(not(target_arch = "wasm32"))]
+			if let Some(opts) = FileStore::parse_url(url, &config).await? {
+				return Ok(Arc::new(FileStore::new(opts, config)) as Arc<dyn ObjectStore>);
+			}
 
-		bail!(Error::UnsupportedBackend)
+			bail!(Error::UnsupportedBackend)
+		})
 	}
 }

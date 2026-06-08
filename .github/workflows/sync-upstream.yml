@@ -1,0 +1,88 @@
+# Sync main from surrealdb/surrealdb into this repo's main.
+# Runs every 30 minutes and can be triggered manually via workflow_dispatch.
+
+name: Sync from upstream
+
+run-name: "Sync surrealdb/surrealdb main → main${{ github.event_name == 'workflow_dispatch' && ' (manual)' || '' }}"
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-sync-main
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    name: Sync main from surrealdb/surrealdb
+    if: github.repository != 'surrealdb/surrealdb'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: main
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Pull upstream main
+        id: pull
+        run: |
+          git remote add upstream https://github.com/surrealdb/surrealdb.git
+          git fetch upstream main
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "Already up to date"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git merge upstream/main --no-edit --log
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+
+      - name: Push to origin main
+        if: steps.pull.outputs.updated == 'true'
+        run: git push origin main
+
+      - name: Notify on merge failure
+        if: failure() && steps.pull.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh issue list --label "upstream-sync" --state open --json number --jq 'length' | grep -qv '^0$'; then
+            echo "An open upstream sync failure issue already exists, skipping"
+            exit 0
+          fi
+          gh issue create \
+            --title "Upstream sync failed: merge conflict with surrealdb/surrealdb main" \
+            --label "upstream-sync" \
+            --body "## Upstream sync failed
+
+          The automated sync from \`surrealdb/surrealdb\` main failed during [run #${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+
+          This is likely due to a merge conflict between this repository's \`main\` branch and the upstream \`main\` branch.
+
+          To resolve this, manually merge the upstream changes:
+          \`\`\`
+          git clone git@github.com:${{ github.repository }}.git
+          cd $(basename ${{ github.repository }})
+          git remote add upstream https://github.com/surrealdb/surrealdb.git
+          git fetch upstream main
+          git merge upstream/main --log
+          # resolve conflicts
+          git push origin main
+          \`\`\`"

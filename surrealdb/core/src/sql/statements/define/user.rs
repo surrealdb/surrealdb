@@ -1,13 +1,13 @@
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, SaltString};
-use rand::Rng;
-use rand::distributions::Alphanumeric;
-use rand::rngs::OsRng;
+use rand::distr::{Alphanumeric, SampleString};
+use rand_core::OsRng;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::fmt::{CoverStmts, EscapeKwFreeIdent, QuoteStr};
 use crate::sql::{Base, Expr, Literal};
+use crate::types::PublicDuration;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -39,7 +39,9 @@ impl Default for DefineUserStatement {
 			base: Base::Root,
 			pass_type: PassType::Unset,
 			roles: vec![],
-			token_duration: Expr::Literal(Literal::None),
+			// Tokens default to a 1-hour expiry when DURATION FOR TOKEN is
+			// omitted. Sessions default to no expiry.
+			token_duration: Expr::Literal(Literal::Duration(PublicDuration::from_secs(3600))),
 			session_duration: Expr::Literal(Literal::None),
 			comment: Expr::Literal(Literal::None),
 		}
@@ -99,11 +101,7 @@ impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement 
 				.to_string(),
 		};
 
-		let code = rand::thread_rng()
-			.sample_iter(&Alphanumeric)
-			.take(128)
-			.map(char::from)
-			.collect::<String>();
+		let code = Alphanumeric.sample_string(&mut rand::rng(), 128);
 
 		Self {
 			kind: v.kind.into(),

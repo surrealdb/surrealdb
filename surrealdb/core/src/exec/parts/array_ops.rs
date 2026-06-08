@@ -1,10 +1,9 @@
 //! Array operation parts -- `[*]`, `...`, `[$]`, `[~]`.
 
-use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, ContextLevel};
+use crate::exec::{AccessMode, BoxFut, ContextLevel};
 use crate::expr::FlowResult;
 use crate::val::Value;
 
@@ -21,12 +20,13 @@ const PARALLEL_BATCH_THRESHOLD: usize = 2;
 /// When applied to an array of RecordIds (e.g., from `->edge->target.*`), fetches each record.
 #[derive(Debug, Clone)]
 pub struct AllPart;
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for AllPart {
 	fn name(&self) -> &'static str {
 		"All"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -34,30 +34,34 @@ impl PhysicalExpr for AllPart {
 		ContextLevel::Database
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.unwrap_or(&Value::NONE);
-		evaluate_all(value, ctx).await
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			let value = ctx.current_value.unwrap_or(&Value::NONE);
+			evaluate_all(value, ctx).await
+		})
 	}
 
 	/// Parallel batch evaluation for `[*]` / `.*`.
 	///
 	/// When applied to arrays of RecordIds, this triggers record fetches.
 	/// Parallelizing across rows lets multiple fetches proceed concurrently.
-	async fn evaluate_batch(
-		&self,
-		ctx: EvalContext<'_>,
-		values: &[Value],
-	) -> FlowResult<Vec<Value>> {
-		if values.len() < PARALLEL_BATCH_THRESHOLD {
-			let mut results = Vec::with_capacity(values.len());
-			for value in values {
-				results.push(self.evaluate(ctx.with_value(value)).await?);
+	fn evaluate_batch<'a>(
+		&'a self,
+		ctx: EvalContext<'a>,
+		values: &'a [Value],
+	) -> BoxFut<'a, FlowResult<Vec<Value>>> {
+		Box::pin(async move {
+			if values.len() < PARALLEL_BATCH_THRESHOLD {
+				let mut results = Vec::with_capacity(values.len());
+				for value in values {
+					results.push(self.evaluate(ctx.with_value(value)).await?);
+				}
+				return Ok(results);
 			}
-			return Ok(results);
-		}
-		let futures: Vec<_> =
-			values.iter().map(|value| self.evaluate(ctx.with_value(value))).collect();
-		futures::future::try_join_all(futures).await
+			let futures: Vec<_> =
+				values.iter().map(|value| self.evaluate(ctx.with_value(value))).collect();
+			futures::future::try_join_all(futures).await
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -79,8 +83,14 @@ pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> FlowRes
 			if has_record_ids {
 				let mut results = Vec::with_capacity(arr.len());
 				for item in arr.iter() {
-					let fetched = Box::pin(evaluate_all(item, ctx.clone())).await?;
-					results.push(fetched);
+					// Match legacy `val/value/get.rs`: under `.*`, only RecordId
+					// elements trigger a fetch; everything else passes through
+					// unchanged.
+					let processed = match item {
+						Value::RecordId(_) => Box::pin(evaluate_all(item, ctx.clone())).await?,
+						_ => item.clone(),
+					};
+					results.push(processed);
 				}
 				Ok(Value::Array(results.into()))
 			} else {
@@ -95,7 +105,10 @@ pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> FlowRes
 				crate::exec::operators::fetch::fetch_record(ctx.exec_ctx, rid).await
 			}
 		}
-		other => Ok(Value::Array(vec![other.clone()].into())),
+		// Anything else (NONE, NULL, scalars, geometries) returns NONE, matching the
+		// legacy compute path. Issue #7143: previously this wrapped the value in a
+		// single-element array, so `none.*` produced `[NONE]` instead of `NONE`.
+		_ => Ok(Value::None),
 	}
 }
 
@@ -108,21 +121,24 @@ pub(crate) async fn evaluate_all(value: &Value, ctx: EvalContext<'_>) -> FlowRes
 /// Also inserted by the planner between consecutive lookups.
 #[derive(Debug, Clone)]
 pub struct FlattenPart;
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for FlattenPart {
 	fn name(&self) -> &'static str {
 		"Flatten"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Root
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.unwrap_or(&Value::NONE);
-		Ok(evaluate_flatten(value)?)
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			let value = ctx.current_value.unwrap_or(&Value::NONE);
+			Ok(evaluate_flatten(value)?)
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -160,24 +176,27 @@ pub(crate) fn evaluate_flatten(value: &Value) -> anyhow::Result<Value> {
 /// First element - `[$]` or `.first()`.
 #[derive(Debug, Clone)]
 pub struct FirstPart;
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for FirstPart {
 	fn name(&self) -> &'static str {
 		"First"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Root
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.cloned().unwrap_or(Value::None);
-		match value {
-			Value::Array(arr) => Ok(arr.first().cloned().unwrap_or(Value::None)),
-			other => Ok(other),
-		}
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			let value = ctx.current_value.cloned().unwrap_or(Value::None);
+			match value {
+				Value::Array(arr) => Ok(arr.first().cloned().unwrap_or(Value::None)),
+				other => Ok(other),
+			}
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -198,24 +217,27 @@ impl ToSql for FirstPart {
 /// Last element - `[~]` or `.last()`.
 #[derive(Debug, Clone)]
 pub struct LastPart;
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for LastPart {
 	fn name(&self) -> &'static str {
 		"Last"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> ContextLevel {
 		ContextLevel::Root
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.cloned().unwrap_or(Value::None);
-		match value {
-			Value::Array(arr) => Ok(arr.last().cloned().unwrap_or(Value::None)),
-			other => Ok(other),
-		}
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			let value = ctx.current_value.cloned().unwrap_or(Value::None);
+			match value {
+				Value::Array(arr) => Ok(arr.last().cloned().unwrap_or(Value::None)),
+				other => Ok(other),
+			}
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {

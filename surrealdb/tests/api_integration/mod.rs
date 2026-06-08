@@ -462,11 +462,20 @@ mod mem {
 
 	#[test_log::test(tokio::test)]
 	async fn credentials_activate_authentication() {
-		let config = Config::new().user(Root {
+		let root = Root {
 			username: ROOT_USER.to_string(),
 			password: ROOT_PASS.to_string(),
-		});
+		};
+		let config = Config::new().user(root.clone());
 		let db = Surreal::new::<Mem>(config).await.unwrap();
+		// Pre-provision the namespace and database as root so the anonymous
+		// path below exercises a "create record" denial rather than the
+		// implicit "create namespace" denial that `USE` now enforces (matching
+		// the authorization required by `DEFINE NAMESPACE` / `DEFINE
+		// DATABASE`).
+		db.signin(root).await.unwrap();
+		db.use_ns("namespace").use_db("database").await.unwrap();
+		db.invalidate().await.unwrap();
 		db.use_ns("namespace").use_db("database").await.unwrap();
 		let res = db.create(Resource::from("item:foo")).await;
 		let err = res.unwrap_err();

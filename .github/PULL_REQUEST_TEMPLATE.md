@@ -1,10 +1,10 @@
 Thank you for submitting this pull request. We really appreciate you spending the time to work on SurrealDB. 🚀 🎉
 
-Before proceeding, please add any of the following labels that apply:
+<!-- Before proceeding, please add any of the following labels that apply:
 
 * `breaking-change` if this PR includes a breaking change. This label is not needed for bug fixes, which change output in line with a user's original expectations.
 * `needs-documentation` if documentation is needed to explain the change made in the PR.
-* `Modifies env vars or commands` if any changes are made to environment variables or command flags.
+* `Modifies env vars or commands` if any changes are made to environment variables or command flags. -->
 
 ## What is the motivation?
 
@@ -35,6 +35,8 @@ No details provided.
 - Does it process user input that reaches the query engine or storage layer?
 - Could error messages or logs expose internal details?
 - Are resource limits enforced for any new user-controlled operations?
+
+See SECURITY_GUIDE.md for the security invariants reviewers will check.
 
 If there are no security implications, briefly state why (e.g. "documentation-only change").
 If there are security implications, or you're uncertain, please assign the `security-review` label to this PR

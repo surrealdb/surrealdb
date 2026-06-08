@@ -2,11 +2,11 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 
-use futures::stream::Stream;
-
-use super::api::{ScanLimit, Transactable};
+use super::api::{
+	GetMultiResult, KeysResult, ScanCursorKeys, ScanCursorVals, ScanLimit, ScanResult, Transactable,
+};
 use super::batch::Batch;
-use super::scanner::{Direction, Scanner};
+use super::direction::Direction;
 use super::{IntoBytes, Key, Result, Val};
 use crate::kvs::timestamp::{BoxTimeStamp, BoxTimeStampImpl};
 
@@ -126,7 +126,7 @@ impl Transactor {
 
 	/// Fetch many keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getm<K>(&self, keys: Vec<K>, version: Option<u64>) -> Result<Vec<Option<Val>>>
+	pub async fn getm<K>(&self, keys: Vec<K>, version: Option<u64>) -> Result<GetMultiResult>
 	where
 		K: IntoBytes + Debug,
 	{
@@ -139,7 +139,7 @@ impl Transactor {
 	/// This function fetches all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getp<K>(&self, key: K, version: Option<u64>) -> Result<Vec<(Key, Val)>>
+	pub async fn getp<K>(&self, key: K, version: Option<u64>) -> Result<ScanResult>
 	where
 		K: IntoBytes + Debug,
 	{
@@ -152,7 +152,7 @@ impl Transactor {
 	/// This function fetches all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getr<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<Vec<(Key, Val)>>
+	pub async fn getr<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<ScanResult>
 	where
 		K: IntoBytes + Debug,
 	{
@@ -317,7 +317,9 @@ impl Transactor {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single
-	/// request to the underlying datastore.
+	/// request to the underlying datastore. The returned [`KeysResult`] also
+	/// reports the total key bytes scanned, accumulated by the backend during
+	/// the same iteration that produced the keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn keys<K>(
 		&self,
@@ -325,14 +327,14 @@ impl Transactor {
 		limit: ScanLimit,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<Vec<Key>>
+	) -> Result<KeysResult>
 	where
 		K: IntoBytes + Debug,
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
 		if beg > end {
-			return Ok(vec![]);
+			return Ok(KeysResult::default());
 		}
 		self.inner.keys(beg..end, limit, skip, version).await
 	}
@@ -340,7 +342,9 @@ impl Transactor {
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single
-	/// request to the underlying datastore.
+	/// request to the underlying datastore. The returned [`KeysResult`] also
+	/// reports the total key bytes scanned, accumulated by the backend during
+	/// the same iteration that produced the keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn keysr<K>(
 		&self,
@@ -348,14 +352,14 @@ impl Transactor {
 		limit: ScanLimit,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<Vec<Key>>
+	) -> Result<KeysResult>
 	where
 		K: IntoBytes + Debug,
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
 		if beg > end {
-			return Ok(vec![]);
+			return Ok(KeysResult::default());
 		}
 		self.inner.keysr(beg..end, limit, skip, version).await
 	}
@@ -363,7 +367,9 @@ impl Transactor {
 	/// Retrieve a specific range of key-value pairs from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single
-	/// request to the underlying datastore.
+	/// request to the underlying datastore. The returned [`ScanResult`] also
+	/// reports the total value bytes scanned, accumulated by the backend
+	/// during the same iteration that produced the values.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn scan<K>(
 		&self,
@@ -371,14 +377,14 @@ impl Transactor {
 		limit: ScanLimit,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>>
+	) -> Result<ScanResult>
 	where
 		K: IntoBytes + Debug,
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
 		if beg > end {
-			return Ok(vec![]);
+			return Ok(ScanResult::default());
 		}
 		self.inner.scan(beg..end, limit, skip, version).await
 	}
@@ -386,7 +392,9 @@ impl Transactor {
 	/// Retrieve a specific range of key-value pairs from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single
-	/// request to the underlying datastore.
+	/// request to the underlying datastore. The returned [`ScanResult`] also
+	/// reports the total value bytes scanned, accumulated by the backend
+	/// during the same iteration that produced the values.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn scanr<K>(
 		&self,
@@ -394,14 +402,14 @@ impl Transactor {
 		limit: ScanLimit,
 		skip: u32,
 		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>>
+	) -> Result<ScanResult>
 	where
 		K: IntoBytes + Debug,
 	{
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
 		if beg > end {
-			return Ok(vec![]);
+			return Ok(ScanResult::default());
 		}
 		self.inner.scanr(beg..end, limit, skip, version).await
 	}
@@ -418,6 +426,52 @@ impl Transactor {
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
 		self.inner.count(beg..end, version).await
+	}
+
+	// --------------------------------------------------
+	// Cursor functions
+	// --------------------------------------------------
+
+	/// Open a stateful keys-only scan cursor over a range.
+	///
+	/// The cursor lives for the duration of one logical scan (e.g. an
+	/// outer table walk or one prefix of a graph-edge traversal). Each
+	/// `next_batch` call advances the same underlying iterator instead of
+	/// re-seeking from scratch, which is the primary cost on RocksDB
+	/// paged scans. `skip` is applied once on the first batch. See
+	/// [`ScanCursorKeys`].
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn open_keys_cursor<'a, K>(
+		&'a self,
+		rng: Range<K>,
+		dir: Direction,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Box<dyn ScanCursorKeys + 'a>>
+	where
+		K: IntoBytes + Debug,
+	{
+		let beg = rng.start.into_vec();
+		let end = rng.end.into_vec();
+		self.inner.open_keys_cursor(beg..end, dir, skip, version).await
+	}
+
+	/// Open a stateful key+value scan cursor over a range. See
+	/// [`Self::open_keys_cursor`] for the rationale.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub async fn open_vals_cursor<'a, K>(
+		&'a self,
+		rng: Range<K>,
+		dir: Direction,
+		skip: u32,
+		version: Option<u64>,
+	) -> Result<Box<dyn ScanCursorVals + 'a>>
+	where
+		K: IntoBytes + Debug,
+	{
+		let beg = rng.start.into_vec();
+		let end = rng.end.into_vec();
+		self.inner.open_vals_cursor(beg..end, dir, skip, version).await
 	}
 
 	// --------------------------------------------------
@@ -460,86 +514,6 @@ impl Transactor {
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
 		self.inner.batch_keys_vals(beg..end, batch, version).await
-	}
-
-	// --------------------------------------------------
-	// Stream functions
-	// --------------------------------------------------
-
-	/// Retrieve a stream of key batches over a specific range in the datastore.
-	///
-	/// This function returns a stream that yields batches of keys. The scanner:
-	/// - Fetches an initial batch of up to 500 items
-	/// - Fetches subsequent batches of up to 16 MiB (local) or 4 MiB (remote)
-	/// - Prefetches the next batch while the current batch is being processed
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub fn stream_keys<K>(
-		&self,
-		rng: Range<K>,
-		version: Option<u64>,
-		limit: Option<usize>,
-		skip: u32,
-		dir: Direction,
-	) -> impl Stream<Item = Result<Vec<Key>>> + '_
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		let mut scanner = Scanner::<Key>::new(self, beg..end, limit, dir);
-		// Set the version
-		if let Some(v) = version {
-			scanner = scanner.version(v);
-		}
-		// Set the skip
-		if skip > 0 {
-			scanner = scanner.skip(skip);
-		}
-		// Return the stream
-		scanner
-	}
-
-	/// Retrieve a stream of key-value batches over a specific range in the datastore.
-	///
-	/// This function returns a stream that yields batches of key-value pairs. The scanner:
-	/// - Fetches an initial batch of up to 500 items (or 1000 when `prefetch` is enabled)
-	/// - Fetches subsequent batches of up to 16 MiB (local) or 4 MiB (remote)
-	/// - When `prefetch` is true, prefetches the next batch while the current batch is being
-	///   processed, and uses a larger initial batch size (500 items)
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub fn stream_keys_vals<K>(
-		&self,
-		rng: Range<K>,
-		version: Option<u64>,
-		limit: Option<usize>,
-		skip: u32,
-		dir: Direction,
-		prefetch: bool,
-	) -> impl Stream<Item = Result<Vec<(Key, Val)>>> + '_
-	where
-		K: IntoBytes + Debug,
-	{
-		let beg = rng.start.into_vec();
-		let end = rng.end.into_vec();
-		let mut scanner = Scanner::<(Key, Val)>::new(self, beg..end, limit, dir);
-		// Set the version
-		if let Some(v) = version {
-			scanner = scanner.version(v);
-		}
-		// Set the skip
-		if skip > 0 {
-			scanner = scanner.skip(skip);
-		}
-		// Enable prefetching and larger initial batch for full scans.
-		// The scanner default is already NORMAL_FETCH_SIZE (500); when
-		// prefetching is active we double it to amortise the overlap cost.
-		if prefetch {
-			scanner = scanner
-				.prefetch(true)
-				.initial_batch_size(ScanLimit::Count(*crate::cnf::NORMAL_FETCH_SIZE * 2));
-		}
-		// Return the stream
-		scanner
 	}
 
 	// --------------------------------------------------

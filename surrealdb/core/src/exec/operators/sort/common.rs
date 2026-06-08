@@ -100,6 +100,34 @@ pub fn compare_keys(keys_a: &[Value], keys_b: &[Value], order_by: &[OrderByField
 	Ordering::Equal
 }
 
+/// Compare two pre-extracted key tuples using `SortKey` directions / modes.
+///
+/// Mirrors [`compare_keys`] for the `SortKey`-keyed sort path. Used by
+/// `ExternalSortByKey`, which serialises pre-extracted keys to disk alongside
+/// each row, then merges them back.
+#[cfg(all(storage, not(target_family = "wasm")))]
+pub fn compare_keys_by_sort_key(
+	keys_a: &[Value],
+	keys_b: &[Value],
+	sort_keys: &[SortKey],
+) -> Ordering {
+	for (i, key) in sort_keys.iter().enumerate() {
+		let a = &keys_a[i];
+		let b = &keys_b[i];
+
+		let ordering = compare_values(a, b, key.collate, key.numeric);
+		let ordering = match key.direction {
+			SortDirection::Asc => ordering,
+			SortDirection::Desc => ordering.reverse(),
+		};
+
+		if ordering != Ordering::Equal {
+			return ordering;
+		}
+	}
+	Ordering::Equal
+}
+
 /// Compare two records using SortKey specifications.
 ///
 /// This extracts values from records using FieldPath (which supports

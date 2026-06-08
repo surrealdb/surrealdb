@@ -17,7 +17,7 @@ use crate::val::{
 
 /// Returns the type of the value as a string.
 pub fn type_of((val,): (Value,)) -> Result<Value> {
-	Ok(Value::String(val.kind_of().to_string()))
+	Ok(Value::String(val.kind_of().into()))
 }
 
 pub fn array((val,): (Value,)) -> Result<Value> {
@@ -140,8 +140,29 @@ pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value>
 	match (arg1, arg2) {
 		// Empty table name
 		(Value::String(arg1), _) if arg1.is_empty() => bail!(Error::TbInvalid {
-			value: arg1,
+			value: arg1.into_string(),
 		}),
+
+		// SECURITY: the legacy two-argument form `type::record(<value>, "table")`
+		// used to validate that the value's record id belonged to the supplied
+		// table. The current `type::record(table, key)` semantic flips the
+		// roles, so a SIGNIN clause like `SELECT * FROM type::record($id, "user")`
+		// no longer rejects an `$id` whose table is not `user` — it just builds
+		// `<$id>:user`. When `$id` is already a record id, preserve the old
+		// validation: error if the record's table doesn't match the constraint
+		// string. Other shapes fall through to the new semantic.
+		(Value::RecordId(rid), Some(Value::String(constraint))) => {
+			if rid.table.as_str() != constraint.as_str() {
+				bail!(Error::IdInvalid {
+					value: format!(
+						"{}: expected a record in table '{}'",
+						Value::RecordId(rid).into_raw_string(),
+						constraint
+					),
+				});
+			}
+			Ok(Value::RecordId(rid))
+		}
 
 		// Handle second argument
 		(arg1, Some(arg2)) => Ok(Value::RecordId(RecordId {
@@ -174,10 +195,13 @@ pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value>
 							value: arg2.into_raw_string(),
 						}
 					);
-					RecordIdKey::String(s)
+					RecordIdKey::String(s.into())
 				}
 			},
-			table: TableName::new(arg1.into_raw_string()),
+			table: match arg1 {
+				Value::String(s) => TableName::from(s),
+				other => TableName::new(other.into_raw_string()),
+			},
 		})),
 
 		(arg1, None) => arg1
@@ -308,6 +332,8 @@ pub mod is {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::Strand;
+
 	use crate::err::Error;
 	use crate::fnc::args::Optional;
 	use crate::val::Value;
@@ -315,8 +341,8 @@ mod tests {
 	#[test]
 	fn is_array() {
 		let value = super::is::array((vec![
-			Value::String("hello".to_owned()),
-			Value::String("world".to_owned()),
+			Value::String(Strand::new_static("hello")),
+			Value::String(Strand::new_static("world")),
 		]
 		.into(),))
 		.unwrap();

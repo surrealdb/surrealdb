@@ -7,7 +7,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::err::Error;
@@ -45,9 +44,6 @@ impl UnwrapExactlyOne {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for UnwrapExactlyOne {
 	fn name(&self) -> &'static str {
 		"UnwrapExactlyOne"
@@ -87,6 +83,7 @@ impl ExecOperator for UnwrapExactlyOne {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.root().ctx.config.operator_buffer_size,
 		);
 		let none_on_empty = self.none_on_empty;
 

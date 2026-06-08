@@ -76,7 +76,7 @@ impl AlterApiStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
-		opt.is_allowed(Action::Edit, ResourceKind::Api, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Api, Base::Db)?;
 		let (_, _) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let txn = ctx.tx();

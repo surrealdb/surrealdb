@@ -1,6 +1,5 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 use std::hash;
 use std::iter::once;
 
@@ -137,18 +136,16 @@ impl Geometry {
 
 	/// Get the GeoJSON object representation for this geometry
 	pub fn as_object(&self) -> Object {
-		let mut obj = BTreeMap::<String, Value>::new();
-		obj.insert("type".into(), self.as_type().into());
+		let mut obj = Object::default();
+		obj.insert("type", self.as_type().into());
 		obj.insert(
 			match self {
 				Self::Collection(_) => "geometries",
 				_ => "coordinates",
-			}
-			.into(),
+			},
 			self.as_coordinates(),
 		);
-
-		obj.into()
+		obj
 	}
 
 	#[cfg_attr(not(feature = "scripting"), expect(dead_code))]
@@ -984,20 +981,20 @@ mod test {
 
 	use super::Geometry;
 
-	fn round_trip(geom: Geometry) {
-		let enc = storekey::encode_vec(&geom).unwrap();
+	fn round_trip(geom: &Geometry) {
+		let enc = storekey::encode_vec(geom).unwrap();
 		let dec = storekey::decode_borrow(&enc).unwrap();
-		assert_eq!(geom, dec)
+		assert_eq!(geom, &dec)
 	}
 
 	#[test]
 	fn encode_decode() {
-		round_trip(Geometry::Point(Point::new(0.0, f64::INFINITY)));
-		round_trip(Geometry::Line(LineString::new(vec![
+		round_trip(&Geometry::Point(Point::new(0.0, f64::INFINITY)));
+		round_trip(&Geometry::Line(LineString::new(vec![
 			Coord::from((0.0, f64::INFINITY)),
 			Coord::from((f64::NEG_INFINITY, 1.0)),
 		])));
-		round_trip(Geometry::Polygon(Polygon::new(
+		round_trip(&Geometry::Polygon(Polygon::new(
 			LineString::new(vec![
 				Coord::from((0.0, f64::INFINITY)),
 				Coord::from((f64::NEG_INFINITY, 1.0)),
@@ -1007,18 +1004,18 @@ mod test {
 				LineString::new(vec![Coord::from((5.0, 6.0)), Coord::from((7.0, 8.0))]),
 			],
 		)));
-		round_trip(Geometry::MultiPoint(MultiPoint::new(vec![
+		round_trip(&Geometry::MultiPoint(MultiPoint::new(vec![
 			Point::from((0.0, f64::INFINITY)),
 			Point::from((f64::NEG_INFINITY, 1.0)),
 		])));
-		round_trip(Geometry::MultiLine(MultiLineString::new(vec![
+		round_trip(&Geometry::MultiLine(MultiLineString::new(vec![
 			LineString::new(vec![
 				Coord::from((0.0, f64::INFINITY)),
 				Coord::from((f64::NEG_INFINITY, 1.0)),
 			]),
 			LineString::new(vec![Coord::from((1.0, 2.0)), Coord::from((3.0, 4.0))]),
 		])));
-		round_trip(Geometry::MultiPolygon(MultiPolygon::new(vec![
+		round_trip(&Geometry::MultiPolygon(MultiPolygon::new(vec![
 			Polygon::new(
 				LineString::new(vec![
 					Coord::from((0.0, f64::INFINITY)),

@@ -85,7 +85,7 @@ pub async fn process_api_request_with_stack(
 				method = ?req.method,
 				"No matching handler or fallback for API request"
 			);
-			let res = ApiResponse::from_error(ApiError::NotFound.into(), req.request_id.clone());
+			let res = ApiResponse::from_error(ApiError::NotFound, req.request_id.clone());
 			return Ok(res);
 		}
 	};
@@ -95,7 +95,7 @@ pub async fn process_api_request_with_stack(
 	let global = global_entry.as_ref().map(|v| v.try_as_api()).transpose()?;
 
 	// Check permissions
-	if opt.check_perms(Action::Edit)? {
+	if ctx.check_perms(opt, Action::Edit)? {
 		let permissions: Vec<&Permission> = method_config
 			.map(|config| &config.permissions)
 			.into_iter()
@@ -111,10 +111,8 @@ pub async fn process_api_request_with_stack(
 						request_id = %req.request_id,
 						"API request denied by PERMISSIONS NONE"
 					);
-					let res = ApiResponse::from_error(
-						ApiError::PermissionDenied.into(),
-						req.request_id.clone(),
-					);
+					let res =
+						ApiResponse::from_error(ApiError::PermissionDenied, req.request_id.clone());
 					return Ok(res);
 				}
 				Permission::Full => (),
@@ -133,7 +131,7 @@ pub async fn process_api_request_with_stack(
 							"API request denied by PERMISSIONS WHERE clause"
 						);
 						let res = ApiResponse::from_error(
-							ApiError::PermissionDenied.into(),
+							ApiError::PermissionDenied,
 							req.request_id.clone(),
 						);
 						return Ok(res);
@@ -274,7 +272,7 @@ fn create_middleware_closure(
 					Err(_e) => {
 						return Box::pin(std::future::ready(Err(
 							ApiError::MiddlewareRequestParseFailure {
-								middleware: def.name,
+								middleware: def.name.to_string(),
 							}
 							.into(),
 						)));
@@ -282,18 +280,21 @@ fn create_middleware_closure(
 				};
 
 			// Parse function name - use ctx parameter directly
-			let function: crate::expr::Function =
-				match function_with_capabilities(&def.name, ctx.get_capabilities().as_ref()) {
-					Ok(f) => f.into(),
-					Err(_e) => {
-						return Box::pin(std::future::ready(Err(
-							ApiError::MiddlewareFunctionNotFound {
-								function: def.name.clone(),
-							}
-							.into(),
-						)));
-					}
-				};
+			let function: crate::expr::Function = match function_with_capabilities(
+				def.name.as_str(),
+				ctx.get_capabilities().as_ref(),
+				&ctx.config,
+			) {
+				Ok(f) => f.into(),
+				Err(_e) => {
+					return Box::pin(std::future::ready(Err(
+						ApiError::MiddlewareFunctionNotFound {
+							function: def.name.to_string(),
+						}
+						.into(),
+					)));
+				}
+			};
 
 			// Enforce request ID in request headers & object (prevent user modification)
 			req.request_id.clone_from(&request_id);

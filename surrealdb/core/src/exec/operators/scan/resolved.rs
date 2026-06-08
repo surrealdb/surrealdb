@@ -13,10 +13,9 @@ use std::sync::Arc;
 
 use super::pipeline::{FieldState, build_field_state_raw, filter_field_state_for_projection};
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
-use crate::ctx::FrozenContext;
 use crate::err::Error;
 use crate::exec::permission::{PhysicalPermission, convert_permission_to_physical};
-use crate::kvs::Transaction;
+use crate::exec::planner::Planner;
 use crate::val::TableName;
 
 /// Plan-time resolved table metadata that replaces runtime KV lookups.
@@ -69,9 +68,15 @@ impl ResolvedTableContext {
 /// into the field state. Since the planner doesn't have auth context, this
 /// should be `true` (conservative) -- the operator will skip permission
 /// evaluation at runtime if it determines checks aren't needed.
+///
+/// `planner` provides the transaction, ns/db context, and the
+/// [`crate::exec::planner::CycleGuard`] used to break compile-time cycles
+/// for self-referential permissions / computed fields. The caller (the
+/// only legitimate one is `try_resolve_table_ctx`) is responsible for
+/// pushing `(ns_id, db_id, table_name)` onto the guard *before* invoking
+/// this function.
 pub(crate) async fn resolve_table_context(
-	txn: &Transaction,
-	ctx: &FrozenContext,
+	planner: &Planner<'_>,
 	ns: &str,
 	db: &str,
 	ns_id: NamespaceId,
@@ -79,6 +84,10 @@ pub(crate) async fn resolve_table_context(
 	table_name: &TableName,
 ) -> Result<Option<ResolvedTableContext>, Error> {
 	use crate::catalog::providers::TableProvider;
+
+	let txn = planner.txn().ok_or_else(|| {
+		Error::Internal("resolve_table_context requires a planner with txn".into())
+	})?;
 
 	// Look up table definition
 	let table_def = match txn
@@ -90,18 +99,22 @@ pub(crate) async fn resolve_table_context(
 		None => return Ok(None),
 	};
 
-	// Pre-compile SELECT permission at plan time
+	// Pre-compile SELECT permission and field state at plan time. Inner
+	// subqueries inherit the planner's `CycleGuard` via
+	// `planner.physical_expr(...)` → SELECT planning →
+	// `try_resolve_table_ctx` → guard check. A self-referential permission
+	// like `WHERE (SELECT FROM same_table) != NONE` will fall back to
+	// runtime resolution for the inner subtree only; the outer `table_def`
+	// here is fully resolved.
 	let select_permission =
-		convert_permission_to_physical(&table_def.permissions.select, ctx).await?;
+		convert_permission_to_physical(&table_def.permissions.select, planner).await?;
 
-	// Build field state with permissions enabled (conservative -- the operator
-	// will skip permission evaluation if should_check_perms returns false).
-	let field_state = build_field_state_raw(txn, ctx, ns_id, db_id, table_name, true, None)
+	let field_state = build_field_state_raw(planner, ns_id, db_id, table_name, true, None)
 		.await
 		.map_err(|cf| match cf {
-		crate::expr::ControlFlow::Err(e) => Error::Internal(e.to_string()),
-		_ => Error::Internal("Unexpected control flow in field state resolution".into()),
-	})?;
+			crate::expr::ControlFlow::Err(e) => Error::Internal(e.to_string()),
+			_ => Error::Internal("Unexpected control flow in field state resolution".into()),
+		})?;
 
 	Ok(Some(ResolvedTableContext {
 		table_def,

@@ -3,22 +3,34 @@ use std::ops::Deref;
 use anyhow::Result;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
+use tracing::instrument;
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt, Value};
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::{Base, Expr, FlowResultExt, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::val::Duration;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct AlterSequenceStatement {
-	pub name: String,
+	pub name: Expr,
 	pub if_exists: bool,
 	pub timeout: Option<Expr>,
+}
+
+impl Default for AlterSequenceStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			if_exists: false,
+			timeout: None,
+		}
+	}
 }
 
 impl AlterSequenceStatement {
@@ -31,13 +43,14 @@ impl AlterSequenceStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Sequence, Base::Db)?;
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "sequence name").await?;
 		// Get the NS and DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the sequence definition
-		let mut sq = match txn.get_db_sequence(ns, db, &self.name, None).await {
+		let mut sq = match txn.get_db_sequence(ns, db, &name, None).await {
 			Ok(tb) => tb.deref().clone(),
 			Err(e) => {
 				if self.if_exists && matches!(e.downcast_ref(), Some(Error::SeqNotFound { .. })) {
@@ -62,7 +75,7 @@ impl AlterSequenceStatement {
 			}
 		}
 		// Set the sequence definition
-		let key = Sq::new(ns, db, &self.name);
+		let key = Sq::new(ns, db, &name);
 		txn.set(&key, &sq).await?;
 		// Clear the cache
 		txn.clear_cache();

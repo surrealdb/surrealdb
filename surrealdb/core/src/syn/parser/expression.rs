@@ -370,7 +370,6 @@ impl Parser<'_> {
 	}
 
 	fn expr_is_range(expr: &Expr) -> bool {
-		//TODO(EXPR): Prefix and Postfix range
 		match expr {
 			Expr::Binary {
 				op,
@@ -642,7 +641,7 @@ impl Parser<'_> {
 						break;
 					}
 				}
-				PostfixOperator::MethodCall(name, args)
+				PostfixOperator::MethodCall(name.into_string(), args)
 			}
 			// should be unreachable as we previously check if the token was a postfix op.
 			x => unreachable!("found non-operator token {x:?}"),

@@ -3,7 +3,7 @@ use std::fmt::Display;
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Tokenizer {
 	Blank,
@@ -36,6 +36,19 @@ impl ToSql for Tokenizer {
 				Self::Punct => "PUNCT",
 			}
 		)
+	}
+}
+
+/// Writes tokenizer keywords separated by commas (no spaces), as in `TOKENIZERS BLANK,CAMEL`.
+pub(crate) fn write_tokenizers_sql<I>(f: &mut String, sql_fmt: SqlFormat, tokenizers: I)
+where
+	I: IntoIterator<Item = Tokenizer>,
+{
+	for (i, t) in tokenizers.into_iter().enumerate() {
+		if i > 0 {
+			f.push(',');
+		}
+		t.fmt_sql(f, sql_fmt);
 	}
 }
 

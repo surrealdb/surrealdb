@@ -45,71 +45,61 @@ pub mod from {
 	use crate::err::Error;
 	use crate::val::{Duration, Value};
 
-	pub fn days((val,): (i64,)) -> Result<Value> {
-		// TODO: Deal with truncation:
-		let val = val as u64;
+	fn to_unsigned(name: &str, val: i64) -> Result<u64> {
+		u64::try_from(val).map_err(|_| {
+			anyhow::Error::new(Error::ArithmeticNegativeOverflow(format!("{name}({val})")))
+		})
+	}
 
-		Duration::from_days(val)
+	pub fn days((val,): (i64,)) -> Result<Value> {
+		let n = to_unsigned("duration::from_days", val)?;
+		Duration::from_days(n)
 			.map(|x| x.into())
-			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from_days({val})")))
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from_days({n})")))
 			.map_err(anyhow::Error::new)
 	}
 
 	pub fn hours((val,): (i64,)) -> Result<Value> {
-		// TODO: Deal with truncation:
-		let val = val as u64;
-
-		Duration::from_hours(val)
+		let n = to_unsigned("duration::from_hours", val)?;
+		Duration::from_hours(n)
 			.map(|x| x.into())
-			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from_hours({val})")))
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from_hours({n})")))
 			.map_err(anyhow::Error::new)
 	}
 
 	pub fn micros((val,): (i64,)) -> Result<Value> {
-		// TODO: Deal with truncation:
-		let val = val as u64;
-
-		Ok(Duration::from_micros(val).into())
+		let n = to_unsigned("duration::from_micros", val)?;
+		Ok(Duration::from_micros(n).into())
 	}
 
 	pub fn millis((val,): (i64,)) -> Result<Value> {
-		// TODO: Deal with truncation:
-		let val = val as u64;
-
-		Ok(Duration::from_millis(val).into())
+		let n = to_unsigned("duration::from_millis", val)?;
+		Ok(Duration::from_millis(n).into())
 	}
 
 	pub fn mins((val,): (i64,)) -> Result<Value> {
-		// TODO: Deal with truncation:
-		let val = val as u64;
-
-		Duration::from_mins(val)
+		let n = to_unsigned("duration::from_mins", val)?;
+		Duration::from_mins(n)
 			.map(|x| x.into())
-			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from_mins({val})")))
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from_mins({n})")))
 			.map_err(anyhow::Error::new)
 	}
 
 	pub fn nanos((val,): (i64,)) -> Result<Value> {
-		// TODO: Deal with truncation:
-		let val = val as u64;
-
-		Ok(Duration::from_nanos(val).into())
+		let n = to_unsigned("duration::from_nanos", val)?;
+		Ok(Duration::from_nanos(n).into())
 	}
 
 	pub fn secs((val,): (i64,)) -> Result<Value> {
-		// TODO: Deal with truncation:
-		let val = val as u64;
-
-		Ok(Duration::from_secs(val).into())
+		let n = to_unsigned("duration::from_secs", val)?;
+		Ok(Duration::from_secs(n).into())
 	}
 
 	pub fn weeks((val,): (i64,)) -> Result<Value> {
-		// TODO: Deal with truncation:
-		let val = val as u64;
-
-		Duration::from_weeks(val)
+		let n = to_unsigned("duration::from_weeks", val)?;
+		Duration::from_weeks(n)
 			.map(|x| x.into())
-			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from_weeks({val})")))
+			.ok_or_else(|| Error::ArithmeticOverflow(format!("duration::from_weeks({n})")))
 			.map_err(anyhow::Error::new)
 	}
 }

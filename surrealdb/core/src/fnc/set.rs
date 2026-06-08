@@ -57,7 +57,7 @@ pub fn remove((mut set, value): (Set, Value)) -> Result<Value> {
 
 /// Return the union of two sets (A ∪ B)
 pub fn union((set1, set2): (Set, Set)) -> Result<Value> {
-	Ok(set1.union(set2).into())
+	Ok(set1.union(&set2).into())
 }
 
 /// Return the intersection of two sets (A ∩ B)
@@ -67,12 +67,12 @@ pub fn intersect((set1, set2): (Set, Set)) -> Result<Value> {
 
 /// Return the symmetric difference of two sets (A △ B)
 pub fn difference((set1, set2): (Set, Set)) -> Result<Value> {
-	Ok(set1.symmetric_difference(set2).into())
+	Ok(set1.symmetric_difference(&set2).into())
 }
 
 /// Return the relative complement (A \ B)
 pub fn complement((set1, set2): (Set, Set)) -> Result<Value> {
-	Ok(set1.complement(set2).into())
+	Ok(set1.complement(&set2).into())
 }
 
 /// Get the number of elements in the set

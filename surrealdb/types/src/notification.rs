@@ -24,6 +24,13 @@ pub enum Action {
 	Delete,
 	/// The live query was killed.
 	Killed,
+	/// The live query WHERE clause or projection raised an evaluation error.
+	///
+	/// The `result` field of the accompanying [`Notification`] carries the error
+	/// message as a string. This allows subscribers to diagnose a broken query
+	/// (e.g. a WHERE clause that always throws `InvalidFunctionArguments`) rather
+	/// than silently receiving no notifications.
+	Error,
 }
 
 impl Display for Action {
@@ -33,6 +40,7 @@ impl Display for Action {
 			Action::Update => write!(f, "UPDATE"),
 			Action::Delete => write!(f, "DELETE"),
 			Action::Killed => write!(f, "KILLED"),
+			Action::Error => write!(f, "ERROR"),
 		}
 	}
 }
@@ -46,6 +54,7 @@ impl FromStr for Action {
 			"UPDATE" => Ok(Action::Update),
 			"DELETE" => Ok(Action::Delete),
 			"KILLED" => Ok(Action::Killed),
+			"ERROR" => Ok(Action::Error),
 			_ => Err(crate::Error::validation(format!("Invalid action: {s}"), None)),
 		}
 	}

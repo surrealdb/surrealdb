@@ -23,9 +23,7 @@ impl Value {
 		match (self, other) {
 			// Current path part is an object
 			(Value::Object(a), Value::Object(b)) => match p {
-				Part::Field(f) => {
-					compare_optional(a.get(&**f), b.get(&**f), path, collate, numeric)
-				}
+				Part::Field(f) => compare_optional(a.get(f), b.get(f), path, collate, numeric),
 				_ => None,
 			},
 			// Current path part is an array
@@ -88,11 +86,11 @@ impl Value {
 			(a, b) => match p {
 				Part::Field(f) => match (a, b) {
 					// If one is an Object and the other is not, treat non-Object as missing field
-					(Value::Object(a), _) => match a.get(&**f) {
+					(Value::Object(a), _) => match a.get(f) {
 						Some(a) => a.compare(&Value::None, path.next(), collate, numeric),
 						None => Some(Ordering::Equal),
 					},
-					(_, Value::Object(b)) => match b.get(&**f) {
+					(_, Value::Object(b)) => match b.get(f) {
 						Some(b) => Value::None.compare(b, path.next(), collate, numeric),
 						None => Some(Ordering::Equal),
 					},

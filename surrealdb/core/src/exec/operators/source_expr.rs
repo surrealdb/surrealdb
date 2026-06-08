@@ -11,7 +11,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::context::{ContextLevel, ExecutionContext};
@@ -45,9 +44,6 @@ impl SourceExpr {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for SourceExpr {
 	fn name(&self) -> &'static str {
 		"SourceExpr"
@@ -77,7 +73,7 @@ impl ExecOperator for SourceExpr {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let expr = self.expr.clone();
+		let expr = Arc::clone(&self.expr);
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {

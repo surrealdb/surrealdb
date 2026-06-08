@@ -1,0 +1,28 @@
+[package]
+name = "surrealdb-collections"
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+publish = true
+version.workspace = true
+description = "Sorted vec-backed map and set types for SurrealDB (internal API)."
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "README.md"
+documentation = "https://docs.rs/surrealdb-collections/"
+
+[dependencies]
+revision.workspace = true
+storekey.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+
+[lints]
+workspace = true
+
+[[bench]]
+name = "collections"
+harness = false

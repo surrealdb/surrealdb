@@ -16,10 +16,10 @@ surrealdb = { workspace = true, features = ["kv-mem"] }
 surrealdb-types.workspace = true
 
 anyhow.workspace = true
-clap = { version = "4.5.54", features = ["derive"] }
-tokio = { version = "1.49.0", features = ["full"] }
+clap = { version = "4.6.1", features = ["derive"] }
+tokio = { version = "1.52.1", features = ["full"] }
 tracing-perfetto = "0.1.5"
-tracing-subscriber = "0.3.22"
+tracing-subscriber = "0.3.23"
 chrono.workspace = true
 
 [lints]

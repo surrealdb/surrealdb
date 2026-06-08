@@ -15,6 +15,7 @@ pub(crate) struct FnSignatureParts {
 	pub tuple_pattern: proc_macro2::TokenStream,
 	pub result_type: proc_macro2::TokenStream,
 	pub is_result: bool,
+	pub is_async: bool,
 }
 
 /// Derive the wire name from a pattern binding, falling back to positional
@@ -129,5 +130,6 @@ pub(crate) fn extract_fn_signature(sig: &syn::Signature) -> syn::Result<FnSignat
 		tuple_pattern,
 		result_type,
 		is_result,
+		is_async: sig.asyncness.is_some(),
 	})
 }

@@ -12,7 +12,7 @@
 //!   that the given token type is next and if not returns a parser error.
 //! - Whenever a limited set of tokens can be next it is common to match the token kind and then
 //!   have a catch all arm which calles the macro `unexpected!`. This macro will raise an parse
-//!   error with information about the type of token it recieves and what it expected.
+//!   error with information about the type of token it receives and what it expected.
 //! - If a single token can be optionally next use [`Parser::eat`] this function returns a bool
 //!   depending on if the given tokenkind was eaten.
 //! - If a closing delimiting token is expected use `Parser::expect_closing_delimiter`. This
@@ -125,8 +125,10 @@ pub struct ParserSettings {
 	/// `foo:0bar`. This would be rejected by normal identifier rules as most
 	/// identifiers can't start with a number.
 	pub flexible_record_id: bool,
-	/// Disallow a query to have objects deeper that limit.
+	/// Disallow a query to have objects deeper than the limit.
 	/// Arrays also count towards objects. So `[{foo: [] }]` would be 3 deep.
+	/// Type annotation nesting depth (e.g. `array<option<array<int>>>` in
+	/// `DEFINE FIELD TYPE`, cast expressions, etc.) also counts against this limit.
 	pub object_recursion_limit: usize,
 	/// Disallow a query from being deeper than the give limit.
 	/// A query recurses when a statement contains another statement within
@@ -526,8 +528,8 @@ impl StatementStream {
 	/// updates the line and column offset after consuming bytes.
 	fn accumulate_line_col(&mut self, bytes: &[u8]) {
 		// The parser should have ensured that bytes is a valid utf-8 string.
-		// TODO: Maybe change this to unsafe cast once we have more convidence in the
-		// parsers correctness.
+		// TODO: Maybe change this to unsafe cast once we have more confidence in the
+		// parser's correctness.
 		let (line_num, remaining) = std::str::from_utf8(bytes)
 			.expect("parser validated utf8")
 			.lines()

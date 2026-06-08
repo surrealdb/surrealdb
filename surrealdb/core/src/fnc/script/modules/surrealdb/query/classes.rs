@@ -29,7 +29,9 @@ impl QueryVariables {
 		static INVALID_ERROR: &str = "Query argument was neither sequence<[String,SurValue]> or record<ByteString, SurValue>";
 		let mut res = Self::new();
 
-		// TODO Set and Map,
+		// Only a `sequence<[String, SurValue]>` (array of key/value pairs) or a
+		// `record<String, SurValue>` (object) are accepted here. JS `Set` and
+		// `Map` iterable inputs are not supported.
 		if let Some(array) = val.as_array() {
 			// a sequence<sequence<String>>;
 			for v in array.iter::<Array>() {

@@ -107,7 +107,7 @@ impl Parser<'_> {
 		if let Some(t!(":")) = self.peek_whitespace1().map(|x| x.kind) {
 			self.parse_record_id(stk).await.map(|x| Expr::Literal(Literal::RecordId(x)))
 		} else {
-			self.parse_ident().map(Expr::Table)
+			self.parse_ident_str().map(|x| Expr::Table(x.into()))
 		}
 	}
 }

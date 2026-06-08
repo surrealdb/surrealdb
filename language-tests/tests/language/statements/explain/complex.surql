@@ -9,65 +9,73 @@ reason = "Test EXPLAIN with complex queries that combine multiple planner operat
 value = "'OK'"
 
 [[test.results]]
-value = ''''Limit [ctx: Db] [limit: 2]
+value = """
+'Limit [ctx: Db] [limit: 2]
     SortTopK [ctx: Db] [order_by: revenue DESC, limit: 2]
         Aggregate [ctx: Db] [by: category]
             TableScan [ctx: Db] [table: product, direction: Forward]
-''''
+'"""
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
+value = """
+'SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 5]
         SortTopKByKey [ctx: Db] [sort_keys: rating DESC, limit: 5]
             Split [ctx: Db] [on: tags]
-                TableScan [ctx: Db] [table: product, direction: Forward, predicate: price < 50]
-''''
+                TableScan [ctx: Db] [table: product, direction: Forward, predicate: price < 50, pre_decode_filter: yes]
+'"""
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: name, price, rating]
+value = """
+"SelectProject [ctx: Db] [projections: name, price, rating]
     Limit [ctx: Db] [limit: 1, offset: 0]
         SortTopKByKey [ctx: Db] [sort_keys: price ASC, limit: 1]
             Filter [ctx: Db] [predicate: brand = 'Acme']
                 IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward]
-"'''
+""""
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: id, name]
+value = """
+'SelectProject [ctx: Db] [projections: id, name]
     FullTextScan [ctx: Db] [index: idx_ft_name, query: Widget]
-"'''
+'"""
 
 [[test.results]]
-value = '''"Aggregate [ctx: Db] [mode: GROUP ALL]
+value = """
+"Aggregate [ctx: Db] [mode: GROUP ALL]
     IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward]
-"'''
+""""
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *]
+value = """
+'SelectProject [ctx: Db] [projections: *]
     Limit [ctx: Db] [limit: 5]
         SortTopKByKey [ctx: Db] [sort_keys: id ASC, limit: 5]
-            Union [ctx: Db]
+            Union [ctx: Db] [inputs: 2]
                 TableScan [ctx: Db] [table: product, direction: Forward]
                 TableScan [ctx: Db] [table: review, direction: Forward]
-''''
+'"""
 
 [[test.results]]
-value = ''''ProjectValue [ctx: Db] [expr: name]
-    TableScan [ctx: Db] [table: product, direction: Forward, predicate: rating >= 4f, limit: 3]
-''''
+value = """
+'ProjectValue [ctx: Db] [expr: name]
+    TableScan [ctx: Db] [table: product, direction: Forward, predicate: rating >= 4f, limit: 3, pre_decode_filter: yes]
+'"""
 
 [[test.results]]
-value = '''"SelectProject [ctx: Db] [projections: *]
+value = """
+"SelectProject [ctx: Db] [projections: *]
     Filter [ctx: Db] [predicate: tags = ['sale']]
         SelectProject [ctx: Db] [projections: *]
             Filter [ctx: Db] [predicate: category = 'electronics']
-                Union [ctx: Db]
+                Union [ctx: Db] [inputs: 2]
                     SelectProject [ctx: Db] [projections: *]
                         Filter [ctx: Db] [predicate: rating >= 4f]
-                            Union [ctx: Db]
+                            Union [ctx: Db] [inputs: 2]
                                 TableScan [ctx: Db] [table: product, direction: Forward]
                                 TableScan [ctx: Db] [table: review, direction: Forward]
                     IndexScan [ctx: Db] [index: idx_category, access: = 'electronics', direction: Forward]
-"'''
+""""
 */
 
 -- Setup schema with indexes and realistic data

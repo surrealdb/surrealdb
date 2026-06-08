@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, CombineAccessModes, ContextLevel, ExecOperator};
+use crate::exec::{AccessMode, BoxFut, CombineAccessModes, ContextLevel, ExecOperator};
+use crate::expr::FlowResult;
 use crate::val::Value;
 
 // ============================================================================
@@ -50,13 +50,26 @@ impl IdiomExpr {
 			parts,
 		}
 	}
-}
 
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
+	/// Static object field path using only `Field` parts (e.g. `a.b`).
+	pub(crate) fn try_static_object_field_path(&self) -> Option<Vec<String>> {
+		if self.start_expr.is_some() || self.parts.is_empty() {
+			return None;
+		}
+		let mut path = Vec::with_capacity(self.parts.len());
+		for p in &self.parts {
+			path.push(p.try_simple_field()?.to_owned());
+		}
+		Some(path)
+	}
+}
 impl PhysicalExpr for IdiomExpr {
 	fn name(&self) -> &'static str {
 		"IdiomExpr"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -67,29 +80,31 @@ impl PhysicalExpr for IdiomExpr {
 		start_ctx.max(parts_ctx)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> crate::expr::FlowResult<Value> {
-		// Fast path: single-part idiom without a start expression (e.g., simple
-		// field access like `age`). Delegates directly to the part's evaluate,
-		// which can work with a reference to current_value and avoids cloning
-		// the entire record into an owned Value for evaluate_parts_with_continuation.
-		if self.start_expr.is_none() && self.parts.len() == 1 {
-			return self.parts[0].evaluate(ctx).await;
-		}
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			// Fast path: single-part idiom without a start expression (e.g., simple
+			// field access like `age`). Delegates directly to the part's evaluate,
+			// which can work with a reference to current_value and avoids cloning
+			// the entire record into an owned Value for evaluate_parts_with_continuation.
+			if self.start_expr.is_none() && self.parts.len() == 1 {
+				return self.parts[0].evaluate(ctx).await;
+			}
 
-		// Determine the base value for the idiom evaluation.
-		// If we have a start expression (e.g. `(INFO FOR KV).namespaces`), evaluate
-		// it first to produce the base value. Otherwise use the current row value.
-		let value = if let Some(ref start) = self.start_expr {
-			start.evaluate(ctx.clone()).await?
-		} else {
-			// Use the current value if available, otherwise NONE.
-			// This matches legacy SurrealQL behavior where undefined identifiers
-			// evaluate to NONE, and allows control-flow expressions like
-			// `a[({BREAK})]` to work in contexts without a row value (e.g. FOR loops).
-			ctx.current_value.cloned().unwrap_or(Value::None)
-		};
+			// Determine the base value for the idiom evaluation.
+			// If we have a start expression (e.g. `(INFO FOR KV).namespaces`), evaluate
+			// it first to produce the base value. Otherwise use the current row value.
+			let value = if let Some(ref start) = self.start_expr {
+				start.evaluate(ctx.clone()).await?
+			} else {
+				// Use the current value if available, otherwise NONE.
+				// This matches legacy SurrealQL behavior where undefined identifiers
+				// evaluate to NONE, and allows control-flow expressions like
+				// `a[({BREAK})]` to work in contexts without a row value (e.g. FOR loops).
+				ctx.current_value.cloned().unwrap_or(Value::None)
+			};
 
-		evaluate_parts_with_continuation(&self.parts, value, ctx).await
+			evaluate_parts_with_continuation(&self.parts, value, ctx).await
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {

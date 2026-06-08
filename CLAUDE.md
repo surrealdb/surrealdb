@@ -11,6 +11,7 @@ SurrealDB is a multi-model database built in Rust supporting document, graph, re
 ```
 surrealdb/           # Main SDK crate
 surrealdb/core/      # Core database engine (query execution, storage)
+surrealdb/mcp/       # Model Context Protocol server (stdio + HTTP)
 surrealdb/server/    # HTTP, WebSocket, gRPC server
 surrealdb/types/     # Public types and derive macros
 surrealism/          # Surrealism (WASM plugin system) crates
@@ -98,6 +99,12 @@ Located in `surrealdb/tests/` and `tests/`. Follow standard Rust testing convent
 
 ## Documentation References
 
+Before changing code that touches authentication, sessions, permissions, RPC/HTTP
+transport, the SurrealQL parser, function execution, storage keys, or import/export,
+consult `SECURITY_GUIDE.md` and confirm the relevant invariants still hold.
+
+- Security model and review invariants: `SECURITY_GUIDE.md`
+- General code review checklist: `REVIEW.md`
 - SurrealQL docs: https://surrealdb.com/docs
 - SurrealDB University: https://surrealdb.com/learn
 - Detailed cursor rules: `.cursor/rules/`

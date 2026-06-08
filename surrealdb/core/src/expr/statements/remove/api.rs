@@ -35,7 +35,7 @@ impl RemoveApiStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Api, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Api, Base::Db)?;
 		// Compute the name
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "api name").await?;
 		// Get the transaction

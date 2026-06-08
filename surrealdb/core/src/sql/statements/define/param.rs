@@ -1,3 +1,4 @@
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
@@ -8,7 +9,7 @@ use crate::sql::{Expr, Literal, Permission};
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineParamStatement {
 	pub kind: DefineKind,
-	pub name: String,
+	pub name: Strand,
 	pub value: Expr,
 	pub comment: Expr,
 	pub permissions: Permission,
@@ -22,7 +23,13 @@ impl ToSql for DefineParamStatement {
 			DefineKind::Overwrite => write_sql!(f, fmt, " OVERWRITE"),
 			DefineKind::IfNotExists => write_sql!(f, fmt, " IF NOT EXISTS"),
 		}
-		write_sql!(f, fmt, " ${} VALUE {}", EscapeKwFreeIdent(&self.name), CoverStmts(&self.value));
+		write_sql!(
+			f,
+			fmt,
+			" ${} VALUE {}",
+			EscapeKwFreeIdent(self.name.as_str()),
+			CoverStmts(&self.value)
+		);
 		if !matches!(self.comment, Expr::Literal(Literal::None)) {
 			write_sql!(f, fmt, " COMMENT {}", CoverStmts(&self.comment));
 		}

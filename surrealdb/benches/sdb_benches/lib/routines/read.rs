@@ -34,7 +34,7 @@ impl super::Routine for Read {
 			// Spawn one task for each operation
 			let mut tasks = JoinSet::default();
 			for task_id in 0..num_ops {
-				let ds = ds.clone();
+				let ds = Arc::clone(&ds);
 				let session = session.clone();
 				let table_name = self.table_name.clone();
 
@@ -77,7 +77,7 @@ impl super::Routine for Read {
 			// Spawn one task for each operation
 			let mut tasks = JoinSet::default();
 			for task_id in 0..num_ops {
-				let ds = ds.clone();
+				let ds = Arc::clone(&ds);
 				let session = session.clone();
 				let table_name = self.table_name.clone();
 

@@ -58,6 +58,7 @@ impl Value {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::Strand;
 
 	use super::*;
 	use crate::expr::idiom::Idiom;
@@ -96,7 +97,7 @@ mod tests {
 			res,
 			Value::from(RecordId {
 				table: "test".into(),
-				key: RecordIdKey::String("tobie".to_owned())
+				key: RecordIdKey::String(Strand::new_static("tobie"))
 			})
 		);
 	}
@@ -118,7 +119,7 @@ mod tests {
 			res,
 			Value::from(RecordId {
 				table: "test".into(),
-				key: RecordIdKey::String("jaime".to_owned())
+				key: RecordIdKey::String(Strand::new_static("jaime"))
 			})
 		);
 	}

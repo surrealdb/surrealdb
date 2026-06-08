@@ -31,7 +31,7 @@ impl Record {
 
 	#[qjs(get)]
 	pub fn tb(&self) -> String {
-		self.value.table.clone().into_string()
+		self.value.table.as_str().to_string()
 	}
 
 	#[qjs(get)]

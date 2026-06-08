@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::ToSql;
 
@@ -39,9 +38,6 @@ impl SleepPlan {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for SleepPlan {
 	fn name(&self) -> &'static str {
 		"Sleep"
@@ -74,7 +70,7 @@ impl ExecOperator for SleepPlan {
 		let ctx = ctx.clone();
 
 		Ok(Box::pin(stream::once(async move {
-			ctx.is_allowed(Action::Edit, ResourceKind::Table, &Base::Root)?;
+			ctx.is_allowed(Action::Edit, ResourceKind::Table, Base::Root)?;
 
 			// Cap the sleep duration to the context timeout (if any),
 			// matching the legacy SleepStatement::compute timeout behavior.

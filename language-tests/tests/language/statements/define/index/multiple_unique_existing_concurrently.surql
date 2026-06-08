@@ -31,7 +31,7 @@ value = "NONE"
 value = "{ events: {  }, fields: {  }, indexes: { test: 'DEFINE INDEX test ON user FIELDS account, email UNIQUE' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = '''{ building: { error: "Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`", status: 'error' } }'''
+match = '''$result.building.status == 'error' AND $result.building.error == "Database index `test` already contains ['apple', 'test@surrealdb.com'], with record `user:1`"'''
 
 
 */

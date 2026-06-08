@@ -34,7 +34,7 @@ impl DefineModuleStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Module, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Module, Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists

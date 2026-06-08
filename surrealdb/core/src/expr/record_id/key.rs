@@ -2,6 +2,7 @@ use std::ops::Bound;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::FrozenContext;
@@ -31,7 +32,7 @@ impl RecordIdKeyGen {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum RecordIdKeyLit {
 	Number(i64),
-	String(String),
+	String(Strand),
 	Uuid(Uuid),
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
@@ -133,7 +134,7 @@ impl From<crate::types::PublicRecordIdKey> for RecordIdKeyLit {
 	fn from(value: crate::types::PublicRecordIdKey) -> Self {
 		match value {
 			crate::types::PublicRecordIdKey::Number(x) => Self::Number(x),
-			crate::types::PublicRecordIdKey::String(x) => Self::String(x),
+			crate::types::PublicRecordIdKey::String(x) => Self::String(x.into()),
 			crate::types::PublicRecordIdKey::Uuid(x) => Self::Uuid(x.into()),
 			crate::types::PublicRecordIdKey::Array(x) => {
 				Self::Array(x.into_iter().map(Expr::from_public_value).collect())
@@ -141,7 +142,7 @@ impl From<crate::types::PublicRecordIdKey> for RecordIdKeyLit {
 			crate::types::PublicRecordIdKey::Object(x) => Self::Object(
 				x.into_iter()
 					.map(|(k, v)| ObjectEntry {
-						key: k,
+						key: k.into(),
 						value: Expr::from_public_value(v),
 					})
 					.collect(),

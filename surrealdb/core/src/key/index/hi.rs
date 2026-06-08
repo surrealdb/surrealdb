@@ -26,10 +26,13 @@ pub(crate) struct Hi<'a> {
 
 impl crate::kvs::KVKey for Hi<'_> {
 	type ValueType = u64;
+
 	fn encode_key(&self) -> ::anyhow::Result<Vec<u8>> {
 		Ok(::storekey::encode_vec_format::<IndexFormat, _>(self)
 			.map_err(|_| crate::err::Error::Unencodable)?)
 	}
+
+	fn value_context(&self) {}
 }
 
 impl<'a> Hi<'a> {
@@ -60,13 +63,15 @@ impl<'a> Hi<'a> {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::Strand;
+
 	use super::*;
 	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {
 		let tb = TableName::from("testtb");
-		let id = RecordIdKey::String("testid".into());
+		let id = RecordIdKey::String(Strand::new_static("testid"));
 		let val = Hi::new(NamespaceId(1), DatabaseId(2), &tb, IndexId(3), &id);
 		let enc = Hi::encode_key(&val).unwrap();
 		assert_eq!(

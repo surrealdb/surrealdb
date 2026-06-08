@@ -24,7 +24,7 @@ impl Arity {
 
 	/// Combine the arity from multiple arugments to calculate the combined
 	/// arity.
-	pub fn combine(self, other: Self) -> Arity {
+	pub fn combine(self, other: &Self) -> Arity {
 		Arity {
 			lower: self.lower + other.lower,
 			upper: self.upper.and_then(|a| other.upper.map(|b| a + b)),
@@ -249,7 +249,7 @@ macro_rules! impl_tuple {
 			fn arity() -> Arity{
 				Arity::base()
 				$(
-					.combine($T::arity())
+					.combine(&$T::arity())
 				)*
 			}
 

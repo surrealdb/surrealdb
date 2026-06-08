@@ -1,6 +1,7 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeKwFreeIdent;
+use crate::val::TableName;
 
 /// The type of records stored by a table
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -26,7 +27,7 @@ impl ToSql for TableType {
 						if idx != 0 {
 							f.push_str(" | ");
 						}
-						write_sql!(f, sql_fmt, "{}", EscapeKwFreeIdent(k))
+						write_sql!(f, sql_fmt, "{}", EscapeKwFreeIdent(k.as_str()))
 					}
 				}
 				if !rel.to.is_empty() {
@@ -35,7 +36,7 @@ impl ToSql for TableType {
 						if idx != 0 {
 							f.push_str(" | ");
 						}
-						write_sql!(f, sql_fmt, "{}", EscapeKwFreeIdent(k))
+						write_sql!(f, sql_fmt, "{}", EscapeKwFreeIdent(k.as_str()))
 					}
 				}
 				if rel.enforced {
@@ -73,9 +74,9 @@ impl From<crate::catalog::TableType> for TableType {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Relation {
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
-	pub from: Vec<String>,
+	pub from: Vec<TableName>,
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
-	pub to: Vec<String>,
+	pub to: Vec<TableName>,
 	pub enforced: bool,
 }
 

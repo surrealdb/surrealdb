@@ -1,10 +1,10 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
-use crate::fmt::{EscapeKwFreeIdent, EscapeKwIdent, QuoteStr};
-use crate::sql::{ChangeFeed, Permissions, TableType};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, QuoteStr};
+use crate::sql::{ChangeFeed, Expr, Literal, Permissions, TableType};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 /// AST node for `ALTER TABLE`.
 ///
@@ -19,7 +19,7 @@ use crate::sql::{ChangeFeed, Permissions, TableType};
 /// Note: `COMPACT` is parsed and preserved on the expression side, however it is
 /// currently not rendered by this node's `ToSql` implementation.
 pub struct AlterTableStatement {
-	pub name: String,
+	pub name: Expr,
 	pub if_exists: bool,
 	pub schemafull: AlterKind<()>,
 	pub permissions: Option<Permissions>,
@@ -30,13 +30,28 @@ pub struct AlterTableStatement {
 	pub compact: bool,
 }
 
+impl Default for AlterTableStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			if_exists: false,
+			schemafull: AlterKind::None,
+			permissions: None,
+			changefeed: AlterKind::None,
+			comment: AlterKind::None,
+			kind: None,
+			compact: false,
+		}
+	}
+}
+
 impl ToSql for AlterTableStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		write_sql!(f, fmt, "ALTER TABLE");
 		if self.if_exists {
 			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write_sql!(f, fmt, " {}", EscapeKwIdent(&self.name, &["IF"]));
+		write_sql!(f, fmt, " {}", CoverStmts(&self.name));
 		if let Some(kind) = &self.kind {
 			write_sql!(f, fmt, " TYPE");
 			match &kind {
@@ -115,7 +130,7 @@ impl From<AlterTableStatement> for crate::expr::statements::alter::AlterTableSta
 impl From<crate::expr::statements::alter::AlterTableStatement> for AlterTableStatement {
 	fn from(v: crate::expr::statements::alter::AlterTableStatement) -> Self {
 		AlterTableStatement {
-			name: v.name.into_string(),
+			name: v.name.into(),
 			if_exists: v.if_exists,
 			schemafull: v.schemafull.into(),
 			permissions: v.permissions.map(Into::into),

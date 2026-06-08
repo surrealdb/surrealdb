@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
-use dashmap::DashMap;
+use parking_lot::Mutex;
 
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cf::TableMutations;
@@ -18,45 +20,45 @@ pub struct ChangeKey {
 	pub tb: TableName,
 }
 
-/// Writer is a helper for writing table mutations to a transaction.
-pub struct Writer {
+/// Changefeed is a per-transaction buffer of table mutations that are
+/// persisted to the database at commit time.
+pub struct Changefeed {
 	/// The buffer of table mutations to be written to the database.
-	buffer: DashMap<ChangeKey, TableMutations>,
+	buffer: Mutex<HashMap<ChangeKey, TableMutations>>,
 }
 
-// Writer is a helper for writing table mutations to a transaction.
-impl Writer {
-	/// Create a new changefeed writer
+impl Changefeed {
+	/// Create a new changefeed buffer
 	pub(crate) fn new() -> Self {
 		Self {
-			buffer: DashMap::new(),
+			buffer: Mutex::new(HashMap::new()),
 		}
 	}
 
 	/// Record a table definition modification
-	pub(crate) fn changefeed_buffer_table_change(
+	pub(crate) fn buffer_table_change(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableName,
 		dt: &TableDefinition,
 	) {
-		// Get or create the entry for the change key
-		let mut entry = self
-			.buffer
+		// Acquire the buffer lock
+		let mut buffer = self.buffer.lock();
+		// Get or create the entry for the change key and push the table change
+		buffer
 			.entry(ChangeKey {
 				ns,
 				db,
 				tb: tb.clone(),
 			})
-			.or_insert_with(|| TableMutations::new(tb.clone()));
-		// Push the table change to the entry
-		entry.push_table_change(dt.to_owned());
+			.or_insert_with(|| TableMutations::new(tb.clone()))
+			.push_table_change(dt.to_owned());
 	}
 
 	/// Record a record modification or deletion
 	#[expect(clippy::too_many_arguments)]
-	pub(crate) fn changefeed_buffer_record_change(
+	pub(crate) fn buffer_record_change(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -66,42 +68,36 @@ impl Writer {
 		current: CursorRecord,
 		store_difference: bool,
 	) {
-		// Get or create the entry for the change key
-		let mut entry = self
-			.buffer
+		// Acquire the buffer lock
+		let mut buffer = self.buffer.lock();
+		// Get or create the entry for the change key and push the record change
+		buffer
 			.entry(ChangeKey {
 				ns,
 				db,
 				tb: tb.clone(),
 			})
-			.or_insert_with(|| TableMutations::new(tb.clone()));
-		// Push the record change to the entry
-		entry.push_record_change(id, previous, current, store_difference);
+			.or_insert_with(|| TableMutations::new(tb.clone()))
+			.push_record_change(id, previous, current, store_difference);
 	}
 
 	// get returns all the mutations buffered for this transaction.
 	// The timestamp will be provided at commit time.
 	pub(crate) fn changes(&self) -> Result<Vec<PreparedWrite>> {
-		// Get the length once
-		let len = self.buffer.len();
+		// Acquire the buffer lock
+		let buffer = self.buffer.lock();
 		// For zero-length changes, return early
-		if len == 0 {
+		if buffer.is_empty() {
 			return Ok(Vec::new());
 		}
 		// Create a new change result set
-		let mut res = Vec::with_capacity(len);
+		let mut res = Vec::with_capacity(buffer.len());
 		// Iterate over the buffered mutations
-		for entry in self.buffer.iter() {
-			// Deconstruct the change key
-			let ChangeKey {
-				ns,
-				db,
-				tb,
-			} = entry.key();
+		for (key, mutations) in buffer.iter() {
 			// Encode the value
-			let value = entry.value().kv_encode_value()?;
+			let value = mutations.kv_encode_value()?;
 			// Push the prepared write to the result (timestamp will be added at commit time)
-			res.push((*ns, *db, tb.clone(), value))
+			res.push((key.ns, key.db, key.tb.clone(), value));
 		}
 		// Return the prepared writes
 		Ok(res)
@@ -111,13 +107,15 @@ impl Writer {
 	// The timestamp will be provided at commit time.
 	pub(crate) fn clear(&self) {
 		// Clear the internal buffer
-		self.buffer.clear();
+		self.buffer.lock().clear();
 	}
 }
 
 #[cfg(test)]
 mod tests {
 	use std::time::Duration;
+
+	use surrealdb_strand::Strand;
 
 	use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 	use crate::catalog::{
@@ -153,7 +151,7 @@ mod tests {
 		let tx1 = ds.transaction(Write, Optimistic).await.unwrap();
 		let record_a = RecordId {
 			table: tb_name.clone(),
-			key: RecordIdKey::String("A".to_owned()),
+			key: RecordIdKey::String(Strand::new_static("A")),
 		};
 		let value_a: Value = "a".into();
 		let previous = Value::None;
@@ -171,7 +169,7 @@ mod tests {
 		let tx2 = ds.transaction(Write, Optimistic).await.unwrap();
 		let record_c = RecordId {
 			table: tb_name.clone(),
-			key: RecordIdKey::String("C".to_owned()),
+			key: RecordIdKey::String(Strand::new_static("C")),
 		};
 		let value_c: Value = "c".into();
 		tx2.changefeed_buffer_record_change(
@@ -188,7 +186,7 @@ mod tests {
 		let tx3 = ds.transaction(Write, Optimistic).await.unwrap();
 		let record_b = RecordId {
 			table: tb_name.clone(),
-			key: RecordIdKey::String("B".to_owned()),
+			key: RecordIdKey::String(Strand::new_static("B")),
 		};
 		let value_b: Value = "b".into();
 		tx3.changefeed_buffer_record_change(
@@ -202,7 +200,7 @@ mod tests {
 		);
 		let record_c2 = RecordId {
 			table: tb_name.clone(),
-			key: RecordIdKey::String("C".to_owned()),
+			key: RecordIdKey::String(Strand::new_static("C")),
 		};
 		let value_c2: Value = "c2".into();
 		tx3.changefeed_buffer_record_change(
@@ -315,7 +313,7 @@ mod tests {
 	) -> RecordId {
 		let record_id = RecordId {
 			table: tb.name.clone(),
-			key: RecordIdKey::String(id),
+			key: RecordIdKey::String(id.into()),
 		};
 		let value_a: Value = "a".into();
 		let previous = Value::None.into();
@@ -338,13 +336,13 @@ mod tests {
 		let table_id = TableId(3);
 		let ns_def = NamespaceDefinition {
 			namespace_id,
-			name: NS.to_string(),
+			name: NS.into(),
 			comment: None,
 		};
 		let db_def = DatabaseDefinition {
 			namespace_id,
 			database_id,
-			name: DB.to_string(),
+			name: DB.into(),
 			changefeed: Some(ChangeFeed {
 				expiry: Duration::from_secs(10),
 				store_diff,

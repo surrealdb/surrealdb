@@ -55,12 +55,12 @@ pub fn add_auth_mutations(
 	let mut mutation = mutation;
 
 	if has_signin {
-		let kvs = datastore.clone();
+		let kvs = Arc::clone(datastore);
 		let ns_name = ns.to_string();
 		let db_name = db.to_string();
 		mutation = mutation.field(
 			Field::new("signIn", TypeRef::named_nn(TypeRef::STRING), move |ctx| {
-				let kvs = kvs.clone();
+				let kvs = Arc::clone(&kvs);
 				let ns_name = ns_name.clone();
 				let db_name = db_name.clone();
 				FieldFuture::new(async move {
@@ -115,12 +115,12 @@ pub fn add_auth_mutations(
 	}
 
 	if has_signup {
-		let kvs = datastore.clone();
+		let kvs = Arc::clone(datastore);
 		let ns_name = ns.to_string();
 		let db_name = db.to_string();
 		mutation = mutation.field(
 			Field::new("signUp", TypeRef::named_nn(TypeRef::STRING), move |ctx| {
-				let kvs = kvs.clone();
+				let kvs = Arc::clone(&kvs);
 				let ns_name = ns_name.clone();
 				let db_name = db_name.clone();
 				FieldFuture::new(async move {

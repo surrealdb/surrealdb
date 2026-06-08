@@ -11,6 +11,7 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::index::retire_durable_index;
 use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -40,7 +41,7 @@ impl RemoveIndexStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Index, Base::Db)?;
 		// Compute the name
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "index name").await?;
 		// Compute the what
@@ -64,8 +65,22 @@ impl RemoveIndexStatement {
 		};
 		// Get the table definition
 		let tb = txn.expect_tb(ns, db, &table_name).await?;
-		// Clear the index store cache
-		ctx.get_index_stores().index_removed(ctx.get_index_builder(), ns, db, &tb, &ix).await?;
+		// Clear process-local index wrappers immediately, then retire durable
+		// build state in the same transaction that removes the catalog
+		// definition. The builder abort is deferred until this transaction
+		// commits so rollback/cancel keeps an in-flight build alive.
+		ctx.get_index_stores().index_removed(ns, db, &tb, &ix).await?;
+		if let Some(index_builder) = ctx.get_index_builder() {
+			txn.register_index_builder_abort_after_commit(
+				index_builder.clone(),
+				ns,
+				db,
+				table_name.clone(),
+				ix.index_id,
+			)
+			.await;
+		}
+		retire_durable_index(&txn, ns, db, &table_name, ix.index_id).await?;
 		// Delete the index data.
 		txn.del_tb_index(ns, db, &table_name, &name).await?;
 		// Refresh the table cache for indexes
@@ -78,10 +93,6 @@ impl RemoveIndexStatement {
 			},
 		)
 		.await?;
-		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &table_name);
-		}
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

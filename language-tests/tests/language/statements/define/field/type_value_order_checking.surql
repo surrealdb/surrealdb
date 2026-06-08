@@ -23,7 +23,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Cannot perform multiplication with 'NONE' and '2'"
+error = "Cannot perform multiplication with 'none' and 'int'"
 
 [[test.results]]
 value = "[{ can_be_number: 123456789, id: test:admin, must_be_number: 8, unchecked_number: 123456789, version: 123456789 }]"

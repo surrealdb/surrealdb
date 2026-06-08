@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 #![allow(clippy::unwrap_used)]
 
 use surrealdb_core::iam::Level;
@@ -213,9 +214,19 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				// Permissions clause doesn't allow to query the table
 				assert_eq!(res.unwrap(), Value::Array(Array::new()), "{}", msg);
 			} else {
-				// Not allowed to create a table
+				// Not allowed to create a record. `USE` no longer auto-creates
+				// the target namespace/database when the session lacks the
+				// `Edit` authorization that `DEFINE NAMESPACE` / `DEFINE
+				// DATABASE` requires (SECURITY_GUIDE §3), so downstream
+				// `CREATE` on a previously-unprovisioned target surfaces a
+				// `NotFound` error here instead of the older `NotAllowed`.
+				// Both satisfy the test's intent that the session cannot
+				// reach the record-level write.
 				let err = res.unwrap_err();
-				assert!(err.is_not_allowed(), "{msg}: expected NotAllowed, got {err}")
+				assert!(
+					err.is_not_allowed() || err.is_not_found(),
+					"{msg}: expected NotAllowed or NotFound, got {err}"
+				)
 			}
 		}
 

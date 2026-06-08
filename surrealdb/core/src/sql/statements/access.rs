@@ -1,3 +1,4 @@
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{EscapeIdent, EscapeKwFreeIdent};
@@ -38,7 +39,7 @@ impl From<crate::expr::statements::access::AccessStatement> for AccessStatement 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementGrant {
-	pub ac: String,
+	pub ac: Strand,
 	pub base: Option<Base>,
 	pub subject: Subject,
 }
@@ -66,9 +67,9 @@ impl From<crate::expr::statements::access::AccessStatementGrant> for AccessState
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementShow {
-	pub ac: String,
+	pub ac: Strand,
 	pub base: Option<Base>,
-	pub gr: Option<String>,
+	pub gr: Option<Strand>,
 	pub cond: Option<Cond>,
 }
 
@@ -97,9 +98,9 @@ impl From<crate::expr::statements::access::AccessStatementShow> for AccessStatem
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementRevoke {
-	pub ac: String,
+	pub ac: Strand,
 	pub base: Option<Base>,
-	pub gr: Option<String>,
+	pub gr: Option<Strand>,
 	pub cond: Option<Cond>,
 }
 
@@ -128,7 +129,7 @@ impl From<crate::expr::statements::access::AccessStatementRevoke> for AccessStat
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AccessStatementPurge {
-	pub ac: String,
+	pub ac: Strand,
 	pub base: Option<Base>,
 	pub kind: PurgeKind,
 	pub grace: PublicDuration,
@@ -188,7 +189,7 @@ impl From<crate::expr::statements::access::PurgeKind> for PurgeKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Subject {
 	Record(RecordIdLit),
-	User(String),
+	User(Strand),
 }
 
 impl From<Subject> for crate::expr::statements::access::Subject {
@@ -213,24 +214,24 @@ impl ToSql for AccessStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Self::Grant(stmt) => {
-				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac));
+				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(stmt.ac.as_str()));
 				if let Some(ref v) = stmt.base {
 					write_sql!(f, fmt, " ON {v}");
 				}
 				write_sql!(f, fmt, " GRANT");
 				match &stmt.subject {
-					Subject::User(x) => write_sql!(f, fmt, " FOR USER {}", EscapeIdent(&x)),
+					Subject::User(x) => write_sql!(f, fmt, " FOR USER {}", EscapeIdent(x.as_str())),
 					Subject::Record(x) => write_sql!(f, fmt, " FOR RECORD {}", x),
 				}
 			}
 			Self::Show(stmt) => {
-				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac));
+				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(stmt.ac.as_str()));
 				if let Some(ref v) = stmt.base {
 					write_sql!(f, fmt, " ON {v}");
 				}
 				write_sql!(f, fmt, " SHOW");
 				match &stmt.gr {
-					Some(v) => write_sql!(f, fmt, " GRANT {}", EscapeKwFreeIdent(v)),
+					Some(v) => write_sql!(f, fmt, " GRANT {}", EscapeKwFreeIdent(v.as_str())),
 					None => match &stmt.cond {
 						Some(v) => write_sql!(f, fmt, " {v}"),
 						None => write_sql!(f, fmt, " ALL"),
@@ -238,13 +239,13 @@ impl ToSql for AccessStatement {
 				};
 			}
 			Self::Revoke(stmt) => {
-				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac));
+				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(stmt.ac.as_str()));
 				if let Some(ref v) = stmt.base {
 					write_sql!(f, fmt, " ON {v}");
 				}
 				write_sql!(f, fmt, " REVOKE");
 				match &stmt.gr {
-					Some(v) => write_sql!(f, fmt, " GRANT {}", EscapeKwFreeIdent(v)),
+					Some(v) => write_sql!(f, fmt, " GRANT {}", EscapeKwFreeIdent(v.as_str())),
 					None => match &stmt.cond {
 						Some(v) => write_sql!(f, fmt, " {v}"),
 						None => write_sql!(f, fmt, " ALL"),
@@ -252,7 +253,7 @@ impl ToSql for AccessStatement {
 				};
 			}
 			Self::Purge(stmt) => {
-				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac));
+				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(stmt.ac.as_str()));
 				if let Some(ref v) = stmt.base {
 					write_sql!(f, fmt, " ON {v}");
 				}

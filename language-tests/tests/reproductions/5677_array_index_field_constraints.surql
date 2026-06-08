@@ -13,7 +13,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-match = "$error = /Couldn't coerce value for field `some_data` of `device:.*`: Expected `number` but found `'not correct'` when coercing an element of `array<number>`/"
+match = "$error = /Couldn't coerce value for field `some_data` of `device:.*`: Expected `number` but found `'not correct'` when coercing element at index 0 of `array<number>`/"
 error = true
 
 [[test.results]]

@@ -378,6 +378,7 @@ implement_visitor! {
 	}
 
 	fn visit_alter_user(this, a: &AlterUserStatement){
+		this.visit_expr(&a.name)?;
 		Ok(())
 	}
 
@@ -399,6 +400,7 @@ implement_visitor! {
 	}
 
 	fn visit_alter_access(this, a: &AlterAccessStatement){
+		this.visit_expr(&a.name)?;
 		match a.authenticate {
 			AlterKind::None |
 			AlterKind::Drop => {},
@@ -420,6 +422,7 @@ implement_visitor! {
 	}
 
 	fn visit_alter_table(this, a: &AlterTableStatement){
+		this.visit_expr(&a.name)?;
 		if let Some(p) = a.permissions.as_ref(){
 			this.visit_permissions(p)?;
 		}
@@ -427,6 +430,8 @@ implement_visitor! {
 	}
 
 	fn visit_alter_event(this, a: &AlterEventStatement){
+		this.visit_expr(&a.name)?;
+		this.visit_expr(&a.what)?;
 		match a.when {
 			AlterKind::None |
 			AlterKind::Drop => {},
@@ -445,10 +450,16 @@ implement_visitor! {
 	}
 
 	fn visit_alter_index(this, a: &AlterIndexStatement){
+		this.visit_expr(&a.name)?;
+		this.visit_expr(&a.table)?;
 		Ok(())
 	}
 
 	fn visit_alter_sequence(this, a: &AlterSequenceStatement){
+		this.visit_expr(&a.name)?;
+		if let Some(ref t) = a.timeout {
+			this.visit_expr(t)?;
+		}
 		Ok(())
 	}
 
@@ -463,6 +474,7 @@ implement_visitor! {
 	}
 
 	fn visit_alter_bucket(this, a: &AlterBucketStatement){
+		this.visit_expr(&a.name)?;
 		if let Some(ref p) = a.permissions {
 			this.visit_permission(p)?;
 		}
@@ -475,6 +487,7 @@ implement_visitor! {
 	}
 
 	fn visit_alter_analyzer(this, a: &AlterAnalyzerStatement){
+		this.visit_expr(&a.name)?;
 		Ok(())
 	}
 
@@ -486,7 +499,8 @@ implement_visitor! {
 	}
 
 	fn visit_alter_field(this, a: &AlterFieldStatement){
-		this.visit_idiom(&a.name)?;
+		this.visit_expr(&a.name)?;
+		this.visit_expr(&a.what)?;
 
 		match a.value {
 			AlterKind::None |
@@ -1888,6 +1902,7 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_alter_user(this, a: &mut AlterUserStatement){
+		this.visit_mut_expr(&mut a.name)?;
 		Ok(())
 	}
 
@@ -1909,6 +1924,7 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_alter_access(this, a: &mut AlterAccessStatement){
+		this.visit_mut_expr(&mut a.name)?;
 		match a.authenticate {
 			AlterKind::None |
 			AlterKind::Drop => {},
@@ -1930,6 +1946,7 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_alter_table(this, a: &mut AlterTableStatement){
+		this.visit_mut_expr(&mut a.name)?;
 		if let Some(p) = a.permissions.as_mut(){
 			this.visit_mut_permissions(p)?;
 		}
@@ -1937,6 +1954,8 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_alter_event(this, a: &mut AlterEventStatement){
+		this.visit_mut_expr(&mut a.name)?;
+		this.visit_mut_expr(&mut a.what)?;
 		match a.when {
 			AlterKind::None |
 			AlterKind::Drop => {},
@@ -1955,6 +1974,8 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_alter_index(this, a: &mut AlterIndexStatement){
+		this.visit_mut_expr(&mut a.name)?;
+		this.visit_mut_expr(&mut a.table)?;
 		Ok(())
 	}
 
@@ -1969,6 +1990,7 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_alter_bucket(this, a: &mut AlterBucketStatement){
+		this.visit_mut_expr(&mut a.name)?;
 		if let Some(ref mut p) = a.permissions {
 			this.visit_mut_permission(p)?;
 		}
@@ -1981,6 +2003,7 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_alter_analyzer(this, a: &mut AlterAnalyzerStatement){
+		this.visit_mut_expr(&mut a.name)?;
 		Ok(())
 	}
 
@@ -1992,11 +2015,16 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_alter_sequence(this, a: &mut AlterSequenceStatement){
+		this.visit_mut_expr(&mut a.name)?;
+		if let Some(ref mut t) = a.timeout {
+			this.visit_mut_expr(t)?;
+		}
 		Ok(())
 	}
 
 	fn visit_mut_alter_field(this, a: &mut AlterFieldStatement){
-		this.visit_mut_idiom(&mut a.name)?;
+		this.visit_mut_expr(&mut a.name)?;
+		this.visit_mut_expr(&mut a.what)?;
 
 		match a.value {
 			AlterKind::None |
@@ -2461,8 +2489,7 @@ implement_visitor_mut! {
 	fn visit_mut_config_inner(this, d: &mut ConfigInner){
 		match d {
 			ConfigInner::GraphQL(graph_qlconfig) => {
-				// TODO: Reintroduce once graphql is fixed.
-				//this.visit_mut_graphql_config(graph_qlconfig)?;
+				this.visit_mut_graphql_config(graph_qlconfig)?;
 			},
 			ConfigInner::Api(api_config) => {
 				this.visit_mut_api_config(api_config)?;
@@ -2471,6 +2498,10 @@ implement_visitor_mut! {
 				this.visit_mut_default_config(default_config)?;
 			},
 		}
+		Ok(())
+	}
+
+	fn visit_mut_graphql_config(this, d: &mut GraphQLConfig){
 		Ok(())
 	}
 

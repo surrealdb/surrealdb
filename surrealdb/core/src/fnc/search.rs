@@ -251,8 +251,8 @@ pub async fn rrf(
 		}
 		// Add the document ID back (was removed during processing) and the computed RRF
 		// score
-		obj.insert("id".to_string(), doc.1);
-		obj.insert("rrf_score".to_string(), Value::Number(Number::Float(doc.0)));
+		obj.insert("id", doc.1);
+		obj.insert("rrf_score", Value::Number(Number::Float(doc.0)));
 		result_array.push(Value::Object(obj));
 		if ctx.is_done(Some(count)).await? {
 			return Ok(Value::None);
@@ -526,8 +526,8 @@ pub async fn linear(
 			obj.append(&mut o.0);
 		}
 		// Add the document ID and the computed linear score
-		obj.insert("id".to_string(), doc.1);
-		obj.insert("linear_score".to_string(), Value::Number(Number::Float(doc.0)));
+		obj.insert("id", doc.1);
+		obj.insert("linear_score", Value::Number(Number::Float(doc.0)));
 		result_array.push(Value::Object(obj));
 		if ctx.is_done(Some(count)).await? {
 			return Ok(Value::None);

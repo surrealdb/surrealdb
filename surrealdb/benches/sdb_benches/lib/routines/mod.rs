@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use criterion::Bencher;
 use criterion::measurement::WallTime;
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 
@@ -14,8 +14,8 @@ mod read;
 pub(super) use read::*;
 
 fn rand_id() -> String {
-	let mut rng = rand::thread_rng();
-	(0..20).map(|_| *surrealdb_core::cnf::ID_CHARS.choose(&mut rng).unwrap_or(&'0')).collect()
+	let mut rng = rand::rng();
+	(0..20).map(|_| *surrealdb_core::cnf::ID_CHARS[..].choose(&mut rng).unwrap_or(&'0')).collect()
 }
 
 /// Routine trait for the benchmark routines.
@@ -33,11 +33,11 @@ pub(super) trait Routine {
 /// Execute the setup, benchmark the `run` function, and execute the cleanup.
 pub(super) fn bench_routine<R>(
 	b: &mut Bencher<'_, WallTime>,
-	ds: Arc<Datastore>,
-	routine: R,
+	ds: &Arc<Datastore>,
+	routine: &R,
 	num_ops: usize,
 ) where
-	R: Routine,
+	R: Routine + ?Sized,
 {
 	// Run the runtime and return the duration, accounting for the number of
 	// operations on each run
@@ -47,15 +47,15 @@ pub(super) fn bench_routine<R>(
 		let session = Session::owner().with_ns("test").with_db("test");
 		for _ in 0..iters {
 			// Setup
-			routine.setup(ds.clone(), session.clone(), num_ops);
+			routine.setup(Arc::clone(ds), session.clone(), num_ops);
 
 			// Run and time the routine
 			let now = web_time::Instant::now();
-			routine.run(ds.clone(), session.clone(), num_ops);
+			routine.run(Arc::clone(ds), session.clone(), num_ops);
 			total += now.elapsed();
 
 			// Cleanup the database
-			routine.cleanup(ds.clone(), session.clone(), num_ops);
+			routine.cleanup(Arc::clone(ds), session.clone(), num_ops);
 		}
 
 		total.div_f32(num_ops as f32)

@@ -40,6 +40,7 @@ pub(crate) enum Statement<'a> {
 	Show(&'a ShowStatement),
 	Select {
 		stmt: &'a SelectStatement,
+		/// Fields to omit from the result.
 		omit: Vec<Idiom>,
 		/// Rewritten condition with optimizations (e.g., count(->edge) > 0 -> LIMIT 1).
 		/// When present, this replaces `stmt.cond` for evaluation.
@@ -172,6 +173,24 @@ impl Statement<'_> {
 	/// Check if this is a DELETE statement
 	pub(crate) fn is_delete(&self) -> bool {
 		matches!(self, Statement::Delete(_))
+	}
+
+	/// Check if this statement mutates the document storage. CREATE,
+	/// UPSERT, UPDATE, RELATE, DELETE, and INSERT all do; SELECT, LIVE,
+	/// SHOW, and ACCESS do not. Used by the planner to decide whether to
+	/// populate the read-only [`crate::doc::NsDbTbCtx`] or the mutating
+	/// [`crate::doc::NsDbTbMutCtx`] when building the per-table catalog
+	/// context.
+	pub(crate) fn is_mutation(&self) -> bool {
+		matches!(
+			self,
+			Statement::Create(_)
+				| Statement::Upsert(_)
+				| Statement::Update(_)
+				| Statement::Relate(_)
+				| Statement::Delete(_)
+				| Statement::Insert(_)
+		)
 	}
 
 	/// Returns whether the document retrieval for
@@ -433,6 +452,14 @@ impl Statement<'_> {
 		}
 	}
 
+	/// Returns any ON DUPLICATE KEY clause if specified
+	pub(crate) fn update(&self) -> Option<&Data> {
+		match self {
+			Statement::Insert(v) => v.update.as_ref(),
+			_ => None,
+		}
+	}
+
 	/// Returns any OMIT fields if specified
 	pub(crate) fn omit(&self) -> &[Idiom] {
 		match self {
@@ -444,17 +471,26 @@ impl Statement<'_> {
 		}
 	}
 
+	/// Returns whether this statement has an ONLY clause
 	pub(crate) fn is_only(&self) -> bool {
 		match self {
 			Statement::Create(v) => v.only,
 			Statement::Delete(v) => v.only,
 			Statement::Relate(v) => v.only,
+			Statement::Upsert(v) => v.only,
+			Statement::Update(v) => v.only,
 			Statement::Select {
 				stmt,
 				..
 			} => stmt.only,
-			Statement::Upsert(v) => v.only,
-			Statement::Update(v) => v.only,
+			_ => false,
+		}
+	}
+
+	/// Returns whether this statement has an IGNORE clause
+	pub(crate) fn is_ignore(&self) -> bool {
+		match self {
+			Statement::Insert(v) => v.ignore,
 			_ => false,
 		}
 	}

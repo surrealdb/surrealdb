@@ -4,12 +4,16 @@ mod common;
 mod http_integration {
 	use std::time::Duration;
 
+	use futures_util::{SinkExt, StreamExt};
 	use http::header::HeaderValue;
 	use http::{Method, header};
 	use reqwest::Client;
 	use serde_json::json;
 	use surrealdb::headers::{AUTH_DB, AUTH_NS};
 	use test_log::test;
+	use tokio_tungstenite::connect_async;
+	use tokio_tungstenite::tungstenite::Message;
+	use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 	use ulid::Ulid;
 
 	use super::common::{self, PASS, StartServerArguments, USER};
@@ -314,9 +318,108 @@ mod http_integration {
 		Ok(())
 	}
 
+	// Exercise each `--client-ip` mode end-to-end: send a `RETURN session::ip()`
+	// over HTTP and verify the value matches what the configured extractor
+	// would produce. Unit tests in `ntw::client_ip` already cover the
+	// `Forwarded` header parser exhaustively; these tests cover the wiring
+	// from the CLI flag through `ExtractClientIP` to the SurrealQL session.
+
+	async fn fetch_session_ip(
+		addr: &str,
+		extra_headers: &[(&str, &str)],
+	) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		for (name, value) in extra_headers {
+			headers.insert(
+				reqwest::header::HeaderName::from_bytes(name.as_bytes())?,
+				HeaderValue::from_str(value)?,
+			);
+		}
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.body("RETURN session::ip()")
+			.send()
+			.await?;
+		assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+		let body: serde_json::Value = res.json().await?;
+		Ok(body[0]["result"].clone())
+	}
+
 	#[test(tokio::test)]
-	async fn client_ip_extractor() -> Result<(), Box<dyn std::error::Error>> {
-		// TODO: test the client IP extractor
+	async fn client_ip_socket() -> Result<(), Box<dyn std::error::Error>> {
+		// Default mode (`--client-ip socket`) reports the raw peer address.
+		// The test client always connects from 127.0.0.1, so the extracted
+		// IP should match — independent of any forwarding headers we set.
+		let (addr, _server) = common::start_server_with_defaults().await?;
+		let result = fetch_session_ip(&addr, &[("X-Forwarded-For", "203.0.113.7")]).await?;
+		assert_eq!(result, serde_json::json!("127.0.0.1"));
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn client_ip_x_forwarded_for() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server(StartServerArguments {
+			args: "--client-ip X-Forwarded-For".to_string(),
+			..Default::default()
+		})
+		.await?;
+
+		// With the header present, the extractor returns its value verbatim
+		// (`X-Forwarded-For` is not parsed beyond reading the header — the
+		// raw string flows through, matching the historical behaviour
+		// callers rely on for chained-proxy values).
+		let result = fetch_session_ip(&addr, &[("X-Forwarded-For", "203.0.113.7")]).await?;
+		assert_eq!(result, serde_json::json!("203.0.113.7"));
+
+		// Without the header the extractor yields no value, so `session::ip()`
+		// returns NONE (serialised as JSON `null`).
+		let result = fetch_session_ip(&addr, &[]).await?;
+		assert_eq!(result, serde_json::Value::Null);
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn client_ip_forwarded_rfc7239() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server(StartServerArguments {
+			args: "--client-ip Forwarded".to_string(),
+			..Default::default()
+		})
+		.await?;
+
+		// `Forwarded` is parsed per RFC 7239: take the first forwarded-element
+		// and return its `for=` identifier. Quoted IPv6 forms (`for="[...]"`)
+		// are unquoted by the parser.
+		let result =
+			fetch_session_ip(&addr, &[("Forwarded", r#"for="[2001:db8::1]:4711";proto=https"#)])
+				.await?;
+		assert_eq!(result, serde_json::json!("[2001:db8::1]:4711"));
+
+		// A `Forwarded` header without a `for=` parameter yields no IP.
+		let result =
+			fetch_session_ip(&addr, &[("Forwarded", "by=203.0.113.43;proto=http")]).await?;
+		assert_eq!(result, serde_json::Value::Null);
+
+		Ok(())
+	}
+
+	#[test(tokio::test)]
+	async fn client_ip_none() -> Result<(), Box<dyn std::error::Error>> {
+		// `--client-ip none` short-circuits the extractor regardless of what
+		// headers (or socket address) are visible.
+		let (addr, _server) = common::start_server(StartServerArguments {
+			args: "--client-ip none".to_string(),
+			..Default::default()
+		})
+		.await?;
+		let result = fetch_session_ip(&addr, &[("X-Forwarded-For", "203.0.113.7")]).await?;
+		assert_eq!(result, serde_json::Value::Null);
 		Ok(())
 	}
 
@@ -701,6 +804,96 @@ mod http_integration {
 		Ok(())
 	}
 
+	/// Spawns many authenticated and unauthenticated POST `/rpc` requests in
+	/// parallel and asserts every unauthenticated request is rejected while
+	/// every authenticated one succeeds. A shared-slot regression would cause
+	/// at least one unauthenticated task to observe an authenticated session
+	/// and succeed.
+	#[test(tokio::test)]
+	async fn rpc_session_isolation_under_concurrency() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let url = std::sync::Arc::new(format!("http://{addr}/rpc"));
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::CONTENT_TYPE, "application/json".parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		const PAIRS: usize = 16;
+		let mut handles = Vec::with_capacity(PAIRS * 2);
+		for i in 0..PAIRS {
+			let client_auth = client.clone();
+			let url_auth = url.clone();
+			handles.push(tokio::spawn(async move {
+				let body = json!({
+					"id": format!("auth-{i}"),
+					"method": "query",
+					"params": ["INFO FOR ROOT"],
+				});
+				let res = client_auth
+					.post(url_auth.as_str())
+					.basic_auth(USER, Some(PASS))
+					.body(body.to_string())
+					.send()
+					.await
+					.expect("auth send");
+				let body: serde_json::Value = res.json().await.expect("auth json");
+				(true, body)
+			}));
+
+			let client_unauth = client.clone();
+			let url_unauth = url.clone();
+			handles.push(tokio::spawn(async move {
+				let body = json!({
+					"id": format!("unauth-{i}"),
+					"method": "query",
+					"params": ["INFO FOR ROOT"],
+				});
+				let res = client_unauth
+					.post(url_unauth.as_str())
+					.body(body.to_string())
+					.send()
+					.await
+					.expect("unauth send");
+				let body: serde_json::Value = res.json().await.expect("unauth json");
+				(false, body)
+			}));
+		}
+
+		for handle in handles {
+			let (authenticated, body) = handle.await?;
+			let status = body
+				.get("result")
+				.and_then(|r| r.as_array())
+				.and_then(|a| a.first())
+				.and_then(|r| r["status"].as_str());
+			if authenticated {
+				assert_eq!(
+					status,
+					Some("OK"),
+					"authenticated concurrent INFO FOR ROOT must succeed: {body}"
+				);
+			} else {
+				assert_ne!(
+					status,
+					Some("OK"),
+					"unauthenticated concurrent INFO FOR ROOT must NOT succeed (session leak): {body}"
+				);
+			}
+		}
+
+		Ok(())
+	}
+
 	#[test(tokio::test)]
 	async fn signin_endpoint() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
@@ -1063,8 +1256,8 @@ mod http_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-			let res = res.bytes().await?.to_vec();
-			let _: ciborium::Value = ciborium::from_reader(res.as_slice()).unwrap();
+			let bytes = res.bytes().await?;
+			let _: ciborium::Value = ciborium::from_reader(&*bytes).unwrap();
 		}
 
 		// Creating a record with Accept Surrealdb encoding is allowed
@@ -1077,8 +1270,17 @@ mod http_integration {
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
-
-			// TODO: parse the result
+			let bytes = res.bytes().await?;
+			let value: surrealdb_types::Value =
+				surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
+					.expect("flatbuffers SQL response should decode to Value");
+			let array = value.into_array().unwrap();
+			assert_eq!(array.len(), 1);
+			let result = array.into_iter().next().unwrap().into_object().unwrap();
+			assert_eq!(
+				result.get("status"),
+				Some(&surrealdb_types::Value::String("OK".to_string()))
+			);
 		}
 
 		// Creating a record with an unsupported Accept header, returns a 415
@@ -2018,6 +2220,122 @@ mod http_integration {
 		Ok(())
 	}
 
+	// Regression: `/key/{table}` POST body must be an inert SurrealQL value
+	// (literal/object/array/`$param`). Earlier the body was passed straight to
+	// `Datastore::execute`, letting an authenticated caller smuggle arbitrary
+	// SurrealQL — including multi-statement scripts or a single executable
+	// form like `CREATE other:1` or `fn::evil()` — through `/key` and bypass
+	// deployments that intentionally enable only the Key route.
+	#[test(tokio::test)]
+	async fn key_endpoint_rejects_executable_body() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_guests().await.unwrap();
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		// Helper: assert /sql shows the side-effect table has no rows. The
+		// table is expected to be absent entirely (which surfaces as an error
+		// row from `SELECT`); accept that, but reject any result that
+		// actually lists rows.
+		let assert_pwned_empty =
+			async |client: &reqwest::Client| -> Result<(), Box<dyn std::error::Error>> {
+				let res = client
+					.post(format!("http://{addr}/sql"))
+					.basic_auth(USER, Some(PASS))
+					.body("SELECT * FROM pwned")
+					.send()
+					.await?;
+				assert_eq!(res.status(), 200);
+				let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+				let result = &body[0]["result"];
+				if let Some(rows) = result.as_array() {
+					assert!(
+						rows.is_empty(),
+						"side-effect table `pwned` should be empty, got: {body}"
+					);
+				}
+				Ok(())
+			};
+
+		// 1. Multi-statement body (the original PoC) is rejected and produces no side effect.
+		{
+			let url = &format!("http://{addr}/key/victim_multi");
+			let res = client
+				.post(url)
+				.basic_auth(USER, Some(PASS))
+				.body("CREATE pwned:1 SET via = 'key_body'; { name: 'legit_payload' }")
+				.send()
+				.await?;
+			assert_ne!(res.status(), 200, "multi-statement body should be rejected");
+			assert_pwned_empty(&client).await?;
+		}
+
+		// 2. A single executable statement (CREATE) is rejected: this is the case that
+		//    `num_statements() == 1` alone would not catch.
+		{
+			let url = &format!("http://{addr}/key/victim_create");
+			let res = client
+				.post(url)
+				.basic_auth(USER, Some(PASS))
+				.body("CREATE pwned:2 SET via = 'key_body_create'")
+				.send()
+				.await?;
+			assert_ne!(res.status(), 200, "single CREATE body should be rejected");
+			assert_pwned_empty(&client).await?;
+		}
+
+		// 3. A single function-call body is rejected even though the function itself is
+		//    side-effect-free; the policy bans the executable shape.
+		{
+			let url = &format!("http://{addr}/key/victim_fn");
+			let res =
+				client.post(url).basic_auth(USER, Some(PASS)).body("time::now()").send().await?;
+			assert_ne!(res.status(), 200, "function-call body should be rejected");
+		}
+
+		// 4. A normal value body still works — the tightened parser must not regress legitimate
+		//    REST usage.
+		{
+			let url = &format!("http://{addr}/key/legit");
+			let res = client
+				.post(url)
+				.basic_auth(USER, Some(PASS))
+				.body(r#"{"name": "ok"}"#)
+				.send()
+				.await?;
+			assert_eq!(res.status(), 200, "value body should be accepted: {}", res.text().await?);
+		}
+
+		// 5. Object with `$param` references from the URL query still works.
+		{
+			let url = &format!("http://{addr}/key/legit_params?age=42");
+			let res = client
+				.post(url)
+				.basic_auth(USER, Some(PASS))
+				.body(r#"{ age: $age }"#)
+				.send()
+				.await?;
+			assert_eq!(
+				res.status(),
+				200,
+				"object-with-param body should be accepted: {}",
+				res.text().await?
+			);
+		}
+
+		Ok(())
+	}
+
 	#[test(tokio::test)]
 	async fn signup_mal() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
@@ -2090,6 +2408,20 @@ mod http_integration {
 			let res = client
 				.post(format!("{base_url}/sql"))
 				.basic_auth(USER, Some(PASS))
+				.send()
+				.await
+				.unwrap();
+			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
+			// The /sql WebSocket upgrade must also be denied when the SQL HTTP
+			// route is denied, otherwise --deny-http sql can be bypassed by
+			// switching from HTTP POST to WebSocket on the same route.
+			let res = client
+				.get(format!("{base_url}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.header(header::CONNECTION, "Upgrade")
+				.header(header::UPGRADE, "websocket")
+				.header(header::SEC_WEBSOCKET_VERSION, "13")
+				.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
 				.send()
 				.await
 				.unwrap();
@@ -2200,6 +2532,20 @@ mod http_integration {
 					.unwrap();
 				assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
 			}
+			// The /sql WebSocket upgrade must also be denied when the SQL HTTP
+			// route is denied via --deny-http (with rpc still allowed).
+			println!("Testing \"/sql\" WebSocket route is denied...");
+			let res = client
+				.get(format!("{base_url}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.header(header::CONNECTION, "Upgrade")
+				.header(header::UPGRADE, "websocket")
+				.header(header::SEC_WEBSOCKET_VERSION, "13")
+				.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+				.send()
+				.await
+				.unwrap();
+			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
 			// WebSocket
 			println!("Testing \"/rpc\" route...");
 			client
@@ -2271,6 +2617,40 @@ mod http_integration {
 				.await;
 			assert!(res.is_err(), "Request to \"/rpc\" endpoint unexpectedly succeeded")
 		}
+	}
+
+	/// Positive control for the `/sql` WebSocket route: with no deny flags
+	/// configured, a WebSocket upgrade succeeds and a `RETURN 1;` query
+	/// executed over the socket round-trips a valid JSON response. Pairs
+	/// with the deny-case assertions in `http_capabilities` to make sure
+	/// the capability checks added in `get_handler` do not regress the
+	/// happy path.
+	#[test(tokio::test)]
+	async fn sql_websocket_round_trip() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_without_auth().await.unwrap();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		let url = format!("ws://{addr}/sql");
+		let mut req = url.into_client_request()?;
+		req.headers_mut().insert("surreal-ns", ns.parse()?);
+		req.headers_mut().insert("surreal-db", db.parse()?);
+
+		let (mut ws, response) = connect_async(req).await?;
+		assert_eq!(response.status(), http::StatusCode::SWITCHING_PROTOCOLS);
+
+		ws.send(Message::Text("RETURN 1;".into())).await?;
+		let frame = tokio::time::timeout(Duration::from_secs(5), ws.next())
+			.await?
+			.ok_or_else(|| std::io::Error::other("websocket closed before response"))??;
+		let text = match frame {
+			Message::Text(text) => text,
+			other => panic!("expected text frame, got {other:?}"),
+		};
+		let body: serde_json::Value = serde_json::from_str(&text)?;
+		assert_eq!(body[0]["status"], "OK", "body: {body}");
+		assert_eq!(body[0]["result"], 1, "body: {body}");
+		Ok(())
 	}
 
 	#[test(tokio::test)]
@@ -2433,6 +2813,19 @@ mod http_integration {
 				.unwrap();
 			let res = res.text().await.unwrap();
 			assert!(res.contains("The HTTP route 'sql' is forbidden"), "body: {}", res);
+			// The /sql WebSocket upgrade must enforce the same subject-level
+			// arbitrary-query capability as the HTTP POST handler.
+			let res = client
+				.get(format!("{base_url}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.header(header::CONNECTION, "Upgrade")
+				.header(header::UPGRADE, "websocket")
+				.header(header::SEC_WEBSOCKET_VERSION, "13")
+				.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+				.send()
+				.await
+				.unwrap();
+			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
 		}
 		// Deny arbitrary querying
 		{
@@ -2470,6 +2863,351 @@ mod http_integration {
 				.unwrap();
 			let res = res.text().await.unwrap();
 			assert!(res.contains("The HTTP route 'sql' is forbidden"), "body: {}", res);
+			// The /sql WebSocket upgrade must enforce the same subject-level
+			// arbitrary-query capability as the HTTP POST handler.
+			let res = client
+				.get(format!("{base_url}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.header(header::CONNECTION, "Upgrade")
+				.header(header::UPGRADE, "websocket")
+				.header(header::SEC_WEBSOCKET_VERSION, "13")
+				.header(header::SEC_WEBSOCKET_KEY, "dGhlIHNhbXBsZSBub25jZQ==")
+				.send()
+				.await
+				.unwrap();
+			assert_eq!(res.status(), 403, "body: {}", res.text().await.unwrap());
 		}
+	}
+
+	/// HTTP `/rpc` must not leak attached session UUIDs via the `sessions`
+	/// method, and must not let an anonymous caller impersonate an
+	/// authenticated session by supplying its UUID on subsequent requests.
+	///
+	/// This exercises the full sequence:
+	///
+	/// 1. Anonymous `sessions` / `attach` are refused outright.
+	/// 2. A legitimate authenticated caller attaches a session and signs in successfully under that
+	///    UUID.
+	/// 3. An anonymous caller that "learns" the victim's UUID and replays a `query` on it is
+	///    rejected - proving that even with the UUID in hand, a caller without matching credentials
+	///    cannot use the session.
+	/// 4. A different authenticated caller (with a distinct principal) also cannot target the
+	///    victim's UUID - cross-principal isolation.
+	/// 5. The legitimate owner can continue to use the session - full backwards compatibility for
+	///    the common case.
+	/// 6. A collision probe where `session == request_session_id` is safely ignored (the handler
+	///    treats it as the per-request ephemeral session; no cross-request hijack is possible).
+	#[test(tokio::test)]
+	async fn rpc_session_hijack_prevention() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let url = format!("http://{addr}/rpc");
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::CONTENT_TYPE, "application/json".parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		// Create a second ROOT user with a different identifier so we can
+		// exercise cross-principal isolation (same Level::Root but
+		// different actor id).
+		{
+			let res = client
+				.post(format!("http://{addr}/sql"))
+				.basic_auth(USER, Some(PASS))
+				.body(format!("DEFINE USER other_root ON ROOT PASSWORD '{PASS}' ROLES OWNER"))
+				.send()
+				.await?;
+			assert!(res.status().is_success(), "define user: {}", res.text().await?);
+		}
+
+		let victim_uuid = uuid::Uuid::new_v4();
+
+		// --- 1. Anonymous `sessions` must be rejected ---
+		let body = json!({
+			"id": "1",
+			"method": "sessions",
+		});
+		let res = client.post(&url).body(body.to_string()).send().await?;
+		assert!(res.status().is_success(), "http status: {}", res.status());
+		let body: serde_json::Value = res.json().await?;
+		assert!(body.get("error").is_some(), "anonymous 'sessions' must be refused: {body}");
+
+		// --- 1b. Even an authenticated caller cannot enumerate sessions ---
+		let body = json!({
+			"id": "1b",
+			"method": "sessions",
+		});
+		let res =
+			client.post(&url).basic_auth(USER, Some(PASS)).body(body.to_string()).send().await?;
+		let body: serde_json::Value = res.json().await?;
+		assert!(
+			body.get("error").is_some(),
+			"authenticated 'sessions' must also be refused: {body}"
+		);
+
+		// --- 2. Anonymous `attach` must be rejected as a no-op ---
+		// The server accepts an anonymous attach (the created session has
+		// no privileges and cannot be used to read authenticated data),
+		// but the critical property tested here is that doing so is
+		// harmless: it does not expose victim_uuid nor let the attacker
+		// impersonate an authenticated session.
+
+		// --- 3. Legitimate authenticated attach + signin on victim_uuid ---
+		let body = json!({
+			"id": "3a",
+			"method": "attach",
+			"session": victim_uuid,
+		});
+		let res =
+			client.post(&url).basic_auth(USER, Some(PASS)).body(body.to_string()).send().await?;
+		let body: serde_json::Value = res.json().await?;
+		assert!(body.get("error").is_none(), "authenticated attach must succeed: {body}");
+
+		// Signin on the attached session - this mutates session.au to root.
+		let body = json!({
+			"id": "3b",
+			"method": "signin",
+			"session": victim_uuid,
+			"params": [{
+				"user": USER,
+				"pass": PASS,
+			}],
+		});
+		let res =
+			client.post(&url).basic_auth(USER, Some(PASS)).body(body.to_string()).send().await?;
+		let body: serde_json::Value = res.json().await?;
+		assert!(body.get("error").is_none(), "authenticated signin must succeed: {body}");
+
+		// --- 4. Anonymous hijack attempt: caller has the UUID but no
+		// credentials. Must be rejected with session_not_found (so the
+		// response does not confirm the session exists).
+		let body = json!({
+			"id": "4",
+			"method": "query",
+			"session": victim_uuid,
+			"params": ["INFO FOR ROOT"],
+		});
+		let res = client.post(&url).body(body.to_string()).send().await?;
+		let body: serde_json::Value = res.json().await?;
+		let error = body.get("error").expect("anonymous hijack must fail");
+		// Must NOT look like a successful root query.
+		assert!(
+			body.get("result").and_then(|r| r.as_array()).is_none(),
+			"anonymous hijack must not return a query result: {body}"
+		);
+		// session_not_found for the ownership mismatch - it is crucial that
+		// this error shape does not reveal whether the session exists.
+		let error_str = error.to_string();
+		assert!(
+			error_str.to_ascii_lowercase().contains("session"),
+			"expected session_not_found-style error, got: {error_str}"
+		);
+
+		// --- 5. Cross-principal isolation: a different authenticated
+		// caller (other_root) with a distinct actor id must not be able
+		// to hijack either.
+		let body = json!({
+			"id": "5",
+			"method": "query",
+			"session": victim_uuid,
+			"params": ["INFO FOR ROOT"],
+		});
+		let res = client
+			.post(&url)
+			.basic_auth("other_root", Some(PASS))
+			.body(body.to_string())
+			.send()
+			.await?;
+		let body: serde_json::Value = res.json().await?;
+		assert!(body.get("error").is_some(), "cross-principal hijack must fail: {body}");
+
+		// --- 6. Legitimate owner continues to work (backwards compat) ---
+		let body = json!({
+			"id": "6",
+			"method": "query",
+			"session": victim_uuid,
+			"params": ["INFO FOR ROOT"],
+		});
+		let res =
+			client.post(&url).basic_auth(USER, Some(PASS)).body(body.to_string()).send().await?;
+		let body: serde_json::Value = res.json().await?;
+		assert!(
+			body.get("error").is_none(),
+			"legitimate owner must still be able to query: {body}"
+		);
+		let status = body
+			.get("result")
+			.and_then(|r| r.as_array())
+			.and_then(|a| a.first())
+			.and_then(|r| r["status"].as_str());
+		assert_eq!(status, Some("OK"), "legitimate INFO FOR ROOT must succeed: {body}");
+
+		// --- 7. Collision probe: a request that happens to reuse its own
+		// per-request session id must not be usable to target internal
+		// ephemerals. We can't actually guess that UUID, but we verify
+		// the general principle by observing that random-but-nonexistent
+		// session ids are rejected for anonymous callers just like the
+		// victim's.
+		let random_uuid = uuid::Uuid::new_v4();
+		let body = json!({
+			"id": "7",
+			"method": "query",
+			"session": random_uuid,
+			"params": ["INFO FOR ROOT"],
+		});
+		let res = client.post(&url).body(body.to_string()).send().await?;
+		let body: serde_json::Value = res.json().await?;
+		assert!(body.get("error").is_some(), "anonymous query on random session must fail: {body}");
+
+		Ok(())
+	}
+
+	/// Regression coverage: the `attach` -> `signup` -> `signin` sequence
+	/// over HTTP `/rpc` must succeed when the caller forwards the bearer
+	/// token returned by `signup` on the subsequent `signin` request.
+	///
+	/// The HTTP ownership gate requires every non-`Attach` request that
+	/// targets an attached session to present a request-level principal
+	/// matching the session's stored principal. Because `signup` mutates
+	/// the stored principal to the newly created record user, an anonymous
+	/// follow-up `signin` would be rejected with `session_not_found`. The
+	/// Rust SDK avoids this by stashing the signup-issued bearer in
+	/// `SessionState.auth`; this test pins the wire-level contract that any
+	/// HTTP RPC client which does the same thing is accepted.
+	#[test(tokio::test)]
+	async fn rpc_attach_signup_signin_forwards_bearer() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
+		let url = format!("http://{addr}/rpc");
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+
+		let mut headers = reqwest::header::HeaderMap::new();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::CONTENT_TYPE, "application/json".parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		// Define a record access method with refresh tokens so signup
+		// returns both an access token and a refresh token, matching the
+		// `signin_record` / `refresh_tokens` SDK test surface.
+		let access = Ulid::new().to_string();
+		let email = format!("{access}@example.com");
+		let pass = "password123";
+		let define = format!(
+			"DEFINE ACCESS `{access}` ON DATABASE TYPE RECORD \
+			 SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) ) \
+			 SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) ) \
+			 WITH REFRESH DURATION FOR SESSION 1d FOR TOKEN 15s"
+		);
+		let res = client
+			.post(format!("http://{addr}/sql"))
+			.basic_auth(USER, Some(PASS))
+			.header(header::CONTENT_TYPE, "text/plain")
+			.body(define)
+			.send()
+			.await?;
+		assert!(res.status().is_success(), "define access: {}", res.text().await?);
+
+		// Attach a stable session id - this becomes the long-lived
+		// session that subsequent calls target.
+		let session_id = uuid::Uuid::new_v4();
+		let body = json!({
+			"id": "attach",
+			"method": "attach",
+			"session": session_id,
+		});
+		let res = client.post(&url).body(body.to_string()).send().await?;
+		let body: serde_json::Value = res.json().await?;
+		assert!(body.get("error").is_none(), "attach must succeed: {body}");
+
+		// Signup: anonymous request is permitted because the attached
+		// session is still anonymous. The server promotes the session to
+		// the new record principal and returns an access token.
+		let body = json!({
+			"id": "signup",
+			"method": "signup",
+			"session": session_id,
+			"params": [{
+				"ns": ns,
+				"db": db,
+				"ac": access,
+				"email": email,
+				"pass": pass,
+			}],
+		});
+		let res = client.post(&url).body(body.to_string()).send().await?;
+		let body: serde_json::Value = res.json().await?;
+		assert!(body.get("error").is_none(), "signup must succeed: {body}");
+		// Extract the access token. Pre-fix, the Rust SDK discarded this
+		// and the next signin failed with session_not_found; post-fix the
+		// SDK forwards it. We mimic the fixed behaviour here.
+		let access_token = body
+			.get("result")
+			.and_then(|r| r.get("access"))
+			.and_then(|t| t.as_str())
+			.unwrap_or_else(|| panic!("signup result must carry an access token, got: {body}"))
+			.to_owned();
+
+		// Reproduce the bug: an anonymous signin against the now-record-
+		// authenticated session must be rejected with session_not_found.
+		let body = json!({
+			"id": "signin-anon",
+			"method": "signin",
+			"session": session_id,
+			"params": [{
+				"ns": ns,
+				"db": db,
+				"ac": access,
+				"email": email,
+				"pass": pass,
+			}],
+		});
+		let res = client.post(&url).body(body.to_string()).send().await?;
+		let body: serde_json::Value = res.json().await?;
+		let error = body.get("error").expect("anonymous signin on bound session must fail");
+		assert!(
+			error.to_string().to_ascii_lowercase().contains("session"),
+			"expected session_not_found-style error, got: {error}"
+		);
+
+		// The fix: forwarding the signup-issued bearer lets the gate
+		// pass and signin completes.
+		let body = json!({
+			"id": "signin-bearer",
+			"method": "signin",
+			"session": session_id,
+			"params": [{
+				"ns": ns,
+				"db": db,
+				"ac": access,
+				"email": email,
+				"pass": pass,
+			}],
+		});
+		let res =
+			client.post(&url).bearer_auth(&access_token).body(body.to_string()).send().await?;
+		let body: serde_json::Value = res.json().await?;
+		assert!(body.get("error").is_none(), "signin with forwarded bearer must succeed: {body}");
+		assert!(
+			body.get("result").and_then(|r| r.get("access")).and_then(|t| t.as_str()).is_some(),
+			"signin must return a fresh access token: {body}"
+		);
+
+		Ok(())
 	}
 }

@@ -1,9 +1,9 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
-use crate::fmt::{CoverStmts, EscapeKwFreeIdent, QuoteStr};
+use crate::fmt::{CoverStmts, QuoteStr};
 use crate::sql::reference::Reference;
-use crate::sql::{Expr, Idiom, Kind, Permissions};
+use crate::sql::{Expr, Kind, Literal, Permissions};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -45,12 +45,11 @@ impl From<AlterDefault> for crate::expr::statements::alter::AlterDefault {
 	}
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterFieldStatement {
-	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::local_idiom))]
-	pub name: Idiom,
-	pub what: String,
+	pub name: Expr,
+	pub what: Expr,
 	pub if_exists: bool,
 	pub kind: AlterKind<Kind>,
 	pub flexible: AlterKind<()>,
@@ -63,13 +62,32 @@ pub struct AlterFieldStatement {
 	pub reference: AlterKind<Reference>,
 }
 
+impl Default for AlterFieldStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			what: Expr::Literal(Literal::None),
+			if_exists: false,
+			kind: AlterKind::None,
+			flexible: AlterKind::None,
+			readonly: AlterKind::None,
+			value: AlterKind::None,
+			assert: AlterKind::None,
+			default: AlterDefault::None,
+			permissions: None,
+			comment: AlterKind::None,
+			reference: AlterKind::None,
+		}
+	}
+}
+
 impl ToSql for AlterFieldStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		write_sql!(f, fmt, "ALTER FIELD");
 		if self.if_exists {
 			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write_sql!(f, fmt, " {} ON {}", self.name, EscapeKwFreeIdent(&self.what));
+		write_sql!(f, fmt, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what));
 		match self.kind {
 			AlterKind::Set(ref x) => write_sql!(f, fmt, " TYPE {x}"),
 			AlterKind::Drop => write_sql!(f, fmt, " DROP TYPE"),
@@ -143,7 +161,7 @@ impl From<crate::expr::statements::alter::AlterFieldStatement> for AlterFieldSta
 	fn from(v: crate::expr::statements::alter::AlterFieldStatement) -> Self {
 		AlterFieldStatement {
 			name: v.name.into(),
-			what: v.what.into_string(),
+			what: v.what.into(),
 			if_exists: v.if_exists,
 			kind: v.kind.into(),
 			flexible: v.flexible.into(),

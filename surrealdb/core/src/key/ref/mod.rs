@@ -303,12 +303,14 @@ impl<'a> Ref<'a> {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_strand::Strand;
+
 	use super::*;
 
 	#[test]
 	fn key() {
-		let binding = RecordIdKey::String("testid".into());
-		let other_binding = RecordIdKey::String("otherid".into());
+		let binding = RecordIdKey::String(Strand::new_static("testid"));
+		let other_binding = RecordIdKey::String(Strand::new_static("otherid"));
 		let tb: TableName = "testtb".into();
 		let ft: TableName = "othertb".into();
 		let val = Ref::new_impl(

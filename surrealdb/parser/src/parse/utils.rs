@@ -4,7 +4,7 @@ use common::span::Span;
 use token::BaseTokenKind;
 
 use super::{Parse, ParseResult, ParseSync, Parser};
-use crate::parse::ParseError;
+use crate::parse::{ParseError, ParserSettings};
 
 impl<T: ParseSync> ParseSync for Spanned<T> {
 	fn parse_sync(parser: &mut Parser) -> ParseResult<Self> {
@@ -201,7 +201,9 @@ pub async fn parse_unordered_clause<'src, 'ast, T, F>(
 where
 	F: AsyncFnOnce(&mut Parser<'src, 'ast>) -> ParseResult<T>,
 {
-	if let Some((_, last_span)) = store {
+	if let Some((_, last_span)) = store
+		&& !parser.settings.contains(ParserSettings::QUIRK_REDEFINE)
+	{
 		return Err(redefined_error(parser, start, *last_span));
 	}
 
@@ -225,7 +227,9 @@ pub fn parse_unordered_clause_sync<'src, 'ast, T, F>(
 where
 	F: FnOnce(&mut Parser<'src, 'ast>) -> ParseResult<T>,
 {
-	if let Some((_, last_span)) = store {
+	if let Some((_, last_span)) = store
+		&& !parser.settings.contains(ParserSettings::QUIRK_REDEFINE)
+	{
 		return Err(redefined_error(parser, start, *last_span));
 	}
 

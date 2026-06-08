@@ -5,7 +5,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::stream;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -36,9 +35,6 @@ impl ExprPlan {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for ExprPlan {
 	fn name(&self) -> &'static str {
 		"Expr"
@@ -69,7 +65,7 @@ impl ExecOperator for ExprPlan {
 	}
 
 	fn execute(&self, ctx: &ExecutionContext) -> FlowResult<ValueBatchStream> {
-		let expr = self.expr.clone();
+		let expr = Arc::clone(&self.expr);
 		let ctx = ctx.clone();
 
 		Ok(Box::pin(stream::once(async move {

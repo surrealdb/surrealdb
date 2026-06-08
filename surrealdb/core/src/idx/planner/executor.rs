@@ -10,7 +10,7 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, Distance, Index, IndexDefinition, NamespaceId};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
-use crate::doc::{CursorDoc, NsDbTbCtx};
+use crate::doc::{CursorDoc, DocumentContext};
 use crate::err::Error;
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
 use crate::expr::{Cond, Expr, FlowResultExt as _, Idiom};
@@ -30,6 +30,8 @@ use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::planner::{IterationStage, ScanDirection};
+#[cfg(diskann)]
+use crate::idx::trees::store::diskann::SharedDiskAnnIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
 use crate::val::{Array, Number, Object, RecordId, TableName, Value};
 
@@ -66,6 +68,8 @@ pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
 enum PerIndexReferenceIndex {
 	FullText(FullTextIndex),
 	Hnsw(SharedHnswIndex),
+	#[cfg(diskann)]
+	DiskAnn(SharedDiskAnnIndex),
 }
 
 /// Execution-time entry per expression. Associates a parsed expression with
@@ -73,6 +77,8 @@ enum PerIndexReferenceIndex {
 enum PerExpressionEntry {
 	FullText(FullTextEntry),
 	Hnsw(HnswEntry),
+	#[cfg(diskann)]
+	DiskAnn(DiskAnnEntry),
 	KnnBruteForce(KnnBruteForceEntry),
 }
 
@@ -122,7 +128,7 @@ impl InnerQueryExecutor {
 	#[expect(clippy::mutable_key_type)]
 	#[expect(clippy::too_many_arguments)]
 	pub(super) async fn new(
-		doc_ctx: &NsDbTbCtx,
+		doc_ctx: &DocumentContext,
 		stk: &mut Stk,
 		ctx: &FrozenContext,
 		opt: &Options,
@@ -142,31 +148,36 @@ impl InnerQueryExecutor {
 			let index_reference = io.index_reference();
 			match &index_reference.index {
 				Index::FullText(p) => {
-					let fulltext_entry: Option<FullTextEntry> = match ir_map
-						.entry(index_reference.clone())
-					{
-						Entry::Occupied(e) => {
-							if let PerIndexReferenceIndex::FullText(fti) = e.get() {
-								FullTextEntry::new(stk, ctx, opt, fti, io).await?
-							} else {
-								None
+					let fulltext_entry: Option<FullTextEntry> =
+						match ir_map.entry(index_reference.clone()) {
+							Entry::Occupied(e) => {
+								if let PerIndexReferenceIndex::FullText(fti) = e.get() {
+									FullTextEntry::new(stk, ctx, opt, fti, io).await?
+								} else {
+									None
+								}
 							}
-						}
-						Entry::Vacant(e) => {
-							let ix: &IndexDefinition = e.key();
-							let ikb = IndexKeyBase::new(
-								doc_ctx.ns.namespace_id,
-								doc_ctx.db.database_id,
-								ix.table_name.clone(),
-								ix.index_id,
-							);
-							let ft = FullTextIndex::new(ctx.get_index_stores(), &ctx.tx(), ikb, p)
+							Entry::Vacant(e) => {
+								let ix: &IndexDefinition = e.key();
+								let ikb = IndexKeyBase::new(
+									doc_ctx.ns().namespace_id,
+									doc_ctx.db().database_id,
+									ix.table_name.clone(),
+									ix.index_id,
+								);
+								let ft = FullTextIndex::new(
+									ctx.get_index_stores(),
+									&ctx.tx(),
+									ikb,
+									p,
+									&ctx.config.file_allowlist,
+								)
 								.await?;
-							let fte = FullTextEntry::new(stk, ctx, opt, &ft, io).await?;
-							e.insert(PerIndexReferenceIndex::FullText(ft));
-							fte
-						}
-					};
+								let fte = FullTextEntry::new(stk, ctx, opt, &ft, io).await?;
+								e.insert(PerIndexReferenceIndex::FullText(ft));
+								fte
+							}
+						};
 					if let Some(e) = fulltext_entry {
 						if let Matches(
 							_,
@@ -197,7 +208,7 @@ impl InnerQueryExecutor {
 											stk,
 											ctx,
 											opt,
-											hi.clone(),
+											Arc::clone(hi),
 											a,
 											*k,
 											*ef,
@@ -213,16 +224,16 @@ impl InnerQueryExecutor {
 								let tb = ctx
 									.tx()
 									.expect_tb(
-										doc_ctx.ns.namespace_id,
-										doc_ctx.db.database_id,
+										doc_ctx.ns().namespace_id,
+										doc_ctx.db().database_id,
 										&index_reference.table_name,
 									)
 									.await?;
 								let hi = ctx
 									.get_index_stores()
 									.get_index_hnsw(
-										doc_ctx.ns.namespace_id,
-										doc_ctx.db.database_id,
+										doc_ctx.ns().namespace_id,
+										doc_ctx.db().database_id,
 										ctx,
 										tb.table_id,
 										index_reference,
@@ -236,7 +247,7 @@ impl InnerQueryExecutor {
 									stk,
 									ctx,
 									opt,
-									hi.clone(),
+									Arc::clone(&hi),
 									a,
 									*k,
 									*ef,
@@ -249,6 +260,71 @@ impl InnerQueryExecutor {
 						};
 						if let Some(he) = he {
 							exp_entries.insert(exp, PerExpressionEntry::Hnsw(he));
+						}
+					}
+				}
+				#[cfg(diskann)]
+				Index::DiskAnn(p) => {
+					if let IndexOperator::Ann(a, k, ef) = io.op() {
+						let de = match ir_map.entry(index_reference.clone()) {
+							Entry::Occupied(e) => {
+								if let PerIndexReferenceIndex::DiskAnn(di) = e.get() {
+									Some(
+										DiskAnnEntry::new(
+											stk,
+											ctx,
+											opt,
+											Arc::clone(di),
+											a,
+											*k,
+											*ef,
+											knn_condition.clone(),
+										)
+										.await?,
+									)
+								} else {
+									None
+								}
+							}
+							Entry::Vacant(e) => {
+								let tb = ctx
+									.tx()
+									.expect_tb(
+										doc_ctx.ns().namespace_id,
+										doc_ctx.db().database_id,
+										&index_reference.table_name,
+									)
+									.await?;
+								let di = ctx
+									.get_index_stores()
+									.get_index_diskann(
+										doc_ctx.ns().namespace_id,
+										doc_ctx.db().database_id,
+										tb.table_id,
+										index_reference,
+										p,
+									)
+									.await?;
+								// Ensure the local DiskANN index is up to date with the KVS
+								di.check_state().await?;
+								// Now we can execute the request
+								let entry = DiskAnnEntry::new(
+									stk,
+									ctx,
+									opt,
+									Arc::clone(&di),
+									a,
+									*k,
+									*ef,
+									knn_condition.clone(),
+								)
+								.await?;
+								e.insert(PerIndexReferenceIndex::DiskAnn(di));
+								Some(entry)
+							}
+						};
+						if let Some(de) = de {
+							exp_entries.insert(exp, PerExpressionEntry::DiskAnn(de));
 						}
 					}
 				}
@@ -314,7 +390,7 @@ impl QueryExecutor {
 		let mut result = KnnBruteForceResult::with_capacity(self.0.knn_bruteforce_len);
 		for (exp, entry) in self.0.exp_entries.iter() {
 			if let PerExpressionEntry::KnnBruteForce((p, _, _, _)) = entry {
-				result.insert(exp.clone(), p.build().await);
+				result.insert(Arc::clone(exp), p.build().await);
 			}
 		}
 		result
@@ -394,6 +470,10 @@ impl QueryExecutor {
 				..
 			} => self.new_fulltext_index_iterator(irf, io.clone()).await,
 			Index::Hnsw(_) => Ok(self.new_hnsw_index_ann_iterator(irf)),
+			#[cfg(diskann)]
+			Index::DiskAnn(_) => Ok(self.new_diskann_index_ann_iterator(irf)),
+			#[cfg(not(diskann))]
+			Index::DiskAnn(_) => Err(anyhow::anyhow!("DISKANN indexes require a 64-bit, non-WASM platform")),
 		}
 	}
 
@@ -496,7 +576,7 @@ impl QueryExecutor {
 				return Ok(Some(Self::new_index_range_iterator(ir, ns, db, ix, from, to, sc)?));
 			}
 			Index::Uniq => {
-				return Ok(Some(Self::new_unique_range_iterator(ir, ns, db, ix, from, to, sc)?));
+				return Ok(Some(Self::new_unique_range_iterator(ir, ns, db, ix, &from, &to, sc)?));
 			}
 			_ => {}
 		}
@@ -527,8 +607,8 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ix: &IndexDefinition,
-		from: RangeValue,
-		to: RangeValue,
+		from: &RangeValue,
+		to: &RangeValue,
 		sc: ScanDirection,
 	) -> Result<RecordIterator> {
 		Ok(match sc {
@@ -643,7 +723,7 @@ impl QueryExecutor {
 		{
 			let hits = fti.new_hits_iterator(&fte.0.qt, *operator);
 			let it = MatchesThingIterator::new(ir, hits);
-			return Ok(Some(RecordIterator::FullTextMatches(it)));
+			return Ok(Some(RecordIterator::FullTextMatches(Box::new(it))));
 		}
 		Ok(None)
 	}
@@ -653,6 +733,17 @@ impl QueryExecutor {
 			&& let Some(PerExpressionEntry::Hnsw(he)) = self.0.exp_entries.get(exp)
 		{
 			let it = KnnIterator::new(ir, he.res.clone());
+			return Some(RecordIterator::Knn(it));
+		}
+		None
+	}
+
+	#[cfg(diskann)]
+	fn new_diskann_index_ann_iterator(&self, ir: IteratorRef) -> Option<RecordIterator> {
+		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir)
+			&& let Some(PerExpressionEntry::DiskAnn(de)) = self.0.exp_entries.get(exp)
+		{
+			let it = KnnIterator::new(ir, de.res.clone());
 			return Some(RecordIterator::Knn(it));
 		}
 		None
@@ -888,6 +979,36 @@ impl HnswEntry {
 	) -> Result<Self> {
 		let cond_filter = cond.map(|cond| (opt, cond));
 		let res = h.knn_search(ctx, stk, v, n as usize, ef as usize, cond_filter).await?;
+		Ok(Self {
+			res,
+		})
+	}
+}
+
+#[cfg(diskann)]
+/// Execution-time DiskANN KNN results for one expression.
+#[derive(Clone)]
+pub(super) struct DiskAnnEntry {
+	/// Ordered KNN iterator results materialized during planning/execution setup.
+	res: VecDeque<KnnIteratorResult>,
+}
+
+#[cfg(diskann)]
+impl DiskAnnEntry {
+	/// Executes one DiskANN KNN lookup and stores the iterator-ready result queue.
+	#[expect(clippy::too_many_arguments)]
+	async fn new(
+		stk: &mut Stk,
+		ctx: &FrozenContext,
+		opt: &Options,
+		d: SharedDiskAnnIndex,
+		v: &[Number],
+		n: u32,
+		l: u32,
+		cond: Option<Arc<Cond>>,
+	) -> Result<Self> {
+		let cond_filter = cond.map(|cond| (opt, cond));
+		let res = d.knn_search(ctx, stk, v, n as usize, l as usize, cond_filter).await?;
 		Ok(Self {
 			res,
 		})

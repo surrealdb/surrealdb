@@ -1,5 +1,6 @@
 use chrono::offset::TimeZone;
 use chrono::{NaiveDate, Offset, Utc};
+use surrealdb_strand::Strand;
 
 use crate::catalog::EventKind;
 use crate::sql::access::AccessDuration;
@@ -11,7 +12,7 @@ use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
 use crate::sql::field::Selector;
 use crate::sql::filter::Filter;
-use crate::sql::index::{Distance, FullTextParams, HnswParams, VectorType};
+use crate::sql::index::{DiskAnnParams, Distance, FullTextParams, HnswParams, VectorType};
 use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::lookup::{LookupKind, LookupSubject};
@@ -53,7 +54,7 @@ use crate::types::{PublicDatetime, PublicDuration, PublicUuid};
 use crate::val::range::TypedRange;
 
 fn ident_field(name: &str) -> Expr {
-	Expr::Idiom(Idiom(vec![Part::Field(name.to_string())]))
+	Expr::Idiom(Idiom(vec![Part::Field(name.into())]))
 }
 
 #[test]
@@ -133,22 +134,22 @@ fn parse_create() {
 		res,
 		Expr::Create(Box::new(CreateStatement {
 			only: true,
-			what: vec![Expr::Table("foo".to_owned())],
+			what: vec![Expr::Table("foo".into())],
 			data: Some(Data::SetExpression(vec![
 				Assignment {
-					place: Idiom(vec![Part::Field("bar".to_owned())]),
+					place: Idiom(vec![Part::Field(Strand::new_static("bar"))]),
 					operator: AssignOperator::Assign,
 					value: Expr::Literal(Literal::Integer(3))
 				},
 				Assignment {
-					place: Idiom(vec![Part::Field("foo".to_owned())]),
+					place: Idiom(vec![Part::Field(Strand::new_static("foo"))]),
 					operator: AssignOperator::Extend,
 					value: ident_field("baz")
 				},
 			])),
 			output: Some(Output::Fields(Fields::Value(Box::new(Selector {
 				expr: ident_field("foo"),
-				alias: Some(Idiom(vec![Part::Field("bar".to_string())])),
+				alias: Some(Idiom(vec![Part::Field(Strand::new_static("bar"))])),
 			})))),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
 		})),
@@ -168,7 +169,7 @@ fn parse_define_namespace() {
 			kind: DefineKind::Default,
 			id: None,
 			name: Expr::Idiom(Idiom::field("a".to_string())),
-			comment: Expr::Literal(Literal::String("test".to_string())),
+			comment: Expr::Literal(Literal::String(Strand::new_static("test"))),
 		})))
 	);
 
@@ -201,7 +202,7 @@ fn parse_define_database() {
 			id: None,
 			name: Expr::Idiom(Idiom::field("a".to_string())),
 			strict: false,
-			comment: Expr::Literal(Literal::String("test".to_string())),
+			comment: Expr::Literal(Literal::String(Strand::new_static("test"))),
 			changefeed: Some(ChangeFeed {
 				expiry: PublicDuration::from_secs(60 * 10),
 				store_diff: true,
@@ -242,7 +243,7 @@ fn parse_define_function() {
 		res,
 		Expr::Define(Box::new(DefineStatement::Function(DefineFunctionStatement {
 			kind: DefineKind::Default,
-			name: "foo::bar".to_owned(),
+			name: "foo::bar".into(),
 			args: vec![
 				("a".to_owned(), Kind::Number),
 				("b".to_owned(), Kind::Array(Box::new(Kind::Bool), Some(3)))
@@ -251,9 +252,11 @@ fn parse_define_function() {
 				what: ident_field("a"),
 				fetch: None,
 			}))]),
-			comment: Expr::Literal(Literal::String("test".to_string())),
+			comment: Expr::Literal(Literal::String(Strand::new_static("test"))),
 			permissions: Permission::Full,
 			returns: None,
+			graphql_alias: None,
+			graphql_deprecated: None,
 		})))
 	)
 }
@@ -280,7 +283,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.pass_type, PassType::Password("hunter2".to_owned()));
 		assert_eq!(stmt.roles, vec!["Viewer".to_string()]);
-		assert_eq!(stmt.comment, Expr::Literal(Literal::String("*******".to_string())));
+		assert_eq!(stmt.comment, Expr::Literal(Literal::String(Strand::new_static("*******"))));
 		assert_eq!(
 			stmt.token_duration,
 			Expr::Literal(Literal::Duration(PublicDuration::from_hours(1).unwrap()))
@@ -307,7 +310,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.base, Base::Root);
 		assert_eq!(stmt.pass_type, PassType::Hash("hunter2".to_owned()));
 		assert_eq!(stmt.roles, vec!["Viewer".to_string()]);
-		assert_eq!(stmt.comment, Expr::Literal(Literal::String("*******".to_string())));
+		assert_eq!(stmt.comment, Expr::Literal(Literal::String(Strand::new_static("*******"))));
 		assert_eq!(
 			stmt.token_duration,
 			Expr::Literal(Literal::Duration(PublicDuration::from_hours(1).unwrap()))
@@ -446,7 +449,7 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 					issue: None,
 				}),
@@ -457,7 +460,7 @@ fn parse_define_access_jwt_key() {
 					token: Expr::Literal(Literal::Duration(PublicDuration::from_hours(1).unwrap())),
 					session: Expr::Literal(Literal::None),
 				},
-				comment: Expr::Literal(Literal::String("bar".to_string())),
+				comment: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 			}))),
 		)
 	}
@@ -473,11 +476,11 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::EdDSA,
-						key: Expr::Literal(Literal::String("bar".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 					}),
 				}),
 				authenticate: None,
@@ -503,11 +506,11 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::EdDSA,
-						key: Expr::Literal(Literal::String("bar".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 					}),
 				}),
 				authenticate: Some(Expr::Literal(Literal::Bool(true))),
@@ -537,11 +540,11 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::Hs256,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Hs256,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 				}),
 				authenticate: None,
@@ -567,11 +570,11 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::Hs256,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Hs256,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 				}),
 				authenticate: None,
@@ -596,11 +599,11 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::Hs256,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Hs256,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 				}),
 				authenticate: None,
@@ -649,7 +652,7 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 					issue: None,
 				}),
@@ -660,7 +663,7 @@ fn parse_define_access_jwt_key() {
 					token: Expr::Literal(Literal::Duration(PublicDuration::from_hours(1).unwrap())),
 					session: Expr::Literal(Literal::None),
 				},
-				comment: Expr::Literal(Literal::String("bar".to_string())),
+				comment: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 			}))),
 		)
 	}
@@ -681,7 +684,7 @@ fn parse_define_access_jwt_key() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: Algorithm::EdDSA,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 					issue: None,
 				}),
@@ -692,7 +695,7 @@ fn parse_define_access_jwt_key() {
 					token: Expr::Literal(Literal::Duration(PublicDuration::from_hours(1).unwrap())),
 					session: Expr::Literal(Literal::None),
 				},
-				comment: Expr::Literal(Literal::String("bar".to_string())),
+				comment: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 			}))),
 		)
 	}
@@ -712,7 +715,7 @@ fn parse_define_access_jwt_jwks() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
 						url: Expr::Literal(Literal::String(
-							"http://example.com/.well-known/jwks.json".to_string()
+							"http://example.com/.well-known/jwks.json".into()
 						)),
 					}),
 					issue: None,
@@ -724,7 +727,7 @@ fn parse_define_access_jwt_jwks() {
 					token: Expr::Literal(Literal::Duration(PublicDuration::from_hours(1).unwrap())),
 					session: Expr::Literal(Literal::None),
 				},
-				comment: Expr::Literal(Literal::String("bar".to_string())),
+				comment: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 			}))),
 		)
 	}
@@ -740,12 +743,12 @@ fn parse_define_access_jwt_jwks() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
 						url: Expr::Literal(Literal::String(
-							"http://example.com/.well-known/jwks.json".to_string()
+							"http://example.com/.well-known/jwks.json".into()
 						)),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Hs384,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 				}),
 				authenticate: None,
@@ -771,12 +774,12 @@ fn parse_define_access_jwt_jwks() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
 						url: Expr::Literal(Literal::String(
-							"http://example.com/.well-known/jwks.json".to_string()
+							"http://example.com/.well-known/jwks.json".into()
 						)),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Hs384,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 				}),
 				authenticate: None,
@@ -801,12 +804,12 @@ fn parse_define_access_jwt_jwks() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
 						url: Expr::Literal(Literal::String(
-							"http://example.com/.well-known/jwks.json".to_string()
+							"http://example.com/.well-known/jwks.json".into()
 						)),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Ps256,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 				}),
 				authenticate: None,
@@ -832,12 +835,12 @@ fn parse_define_access_jwt_jwks() {
 				access_type: AccessType::Jwt(JwtAccess {
 					verify: JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
 						url: Expr::Literal(Literal::String(
-							"http://example.com/.well-known/jwks.json".to_string()
+							"http://example.com/.well-known/jwks.json".into()
 						)),
 					}),
 					issue: Some(JwtAccessIssue {
 						alg: Algorithm::Ps256,
-						key: Expr::Literal(Literal::String("foo".to_string())),
+						key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 					}),
 				}),
 				authenticate: None,
@@ -886,7 +889,7 @@ fn parse_define_access_record() {
 				session: Expr::Literal(Literal::None),
 			}
 		);
-		assert_eq!(stmt.comment, Expr::Literal(Literal::String("bar".to_string())));
+		assert_eq!(stmt.comment, Expr::Literal(Literal::String(Strand::new_static("bar"))));
 		match stmt.access_type {
 			AccessType::Record(ac) => {
 				assert_eq!(ac.signup, None);
@@ -1037,23 +1040,23 @@ fn parse_define_access_record() {
 				kind: DefineKind::Default,
 				name: Expr::Idiom(Idiom::field("a".to_string())),
 				base: Base::Db,
-				access_type: AccessType::Record(RecordAccess {
+				access_type: AccessType::Record(Box::new(RecordAccess {
 					signup: None,
 					signin: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Hs384,
-							key: Expr::Literal(Literal::String("foo".to_string())),
+							key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Hs384,
 							// Issuer key matches verification key by default in symmetric
 							// algorithms.
-							key: Expr::Literal(Literal::String("foo".to_string())),
+							key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 						}),
 					},
 					bearer: None,
-				}),
+				})),
 				authenticate: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(PublicDuration::from_days(30).unwrap())),
@@ -1076,21 +1079,21 @@ fn parse_define_access_record() {
 				kind: DefineKind::Default,
 				name: Expr::Idiom(Idiom::field("a".to_string())),
 				base: Base::Db,
-				access_type: AccessType::Record(RecordAccess {
+				access_type: AccessType::Record(Box::new(RecordAccess {
 					signup: None,
 					signin: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Ps512,
-							key: Expr::Literal(Literal::String("foo".to_string())),
+							key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Ps512,
-							key: Expr::Literal(Literal::String("bar".to_string())),
+							key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 						}),
 					},
 					bearer: None,
-				}),
+				})),
 				authenticate: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(PublicDuration::from_days(30).unwrap())),
@@ -1118,17 +1121,17 @@ fn parse_define_access_record() {
 				kind: DefineKind::Default,
 				name: Expr::Idiom(Idiom::field("a".to_string())),
 				base: Base::Db,
-				access_type: AccessType::Record(RecordAccess {
+				access_type: AccessType::Record(Box::new(RecordAccess {
 					signup: None,
 					signin: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Ps512,
-							key: Expr::Literal(Literal::String("foo".to_string())),
+							key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Ps512,
-							key: Expr::Literal(Literal::String("bar".to_string())),
+							key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 						}),
 					},
 					bearer: Some(BearerAccess {
@@ -1137,15 +1140,15 @@ fn parse_define_access_record() {
 						jwt: JwtAccess {
 							verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 								alg: Algorithm::Ps512,
-								key: Expr::Literal(Literal::String("foo".to_string())),
+								key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 							}),
 							issue: Some(JwtAccessIssue {
 								alg: Algorithm::Ps512,
-								key: Expr::Literal(Literal::String("bar".to_string())),
+								key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 							}),
 						},
 					}),
-				}),
+				})),
 				authenticate: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(PublicDuration::from_days(10).unwrap())),
@@ -1172,17 +1175,17 @@ fn parse_define_access_record() {
 				kind: DefineKind::Default,
 				name: Expr::Idiom(Idiom::field("a".to_string())),
 				base: Base::Db,
-				access_type: AccessType::Record(RecordAccess {
+				access_type: AccessType::Record(Box::new(RecordAccess {
 					signup: None,
 					signin: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Ps512,
-							key: Expr::Literal(Literal::String("foo".to_string())),
+							key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Ps512,
-							key: Expr::Literal(Literal::String("bar".to_string())),
+							key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 						}),
 					},
 					bearer: Some(BearerAccess {
@@ -1191,15 +1194,15 @@ fn parse_define_access_record() {
 						jwt: JwtAccess {
 							verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 								alg: Algorithm::Ps512,
-								key: Expr::Literal(Literal::String("foo".to_string())),
+								key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 							}),
 							issue: Some(JwtAccessIssue {
 								alg: Algorithm::Ps512,
-								key: Expr::Literal(Literal::String("bar".to_string())),
+								key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 							}),
 						},
 					}),
-				}),
+				})),
 				authenticate: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(PublicDuration::from_days(10).unwrap())),
@@ -1222,21 +1225,21 @@ fn parse_define_access_record() {
 				kind: DefineKind::Default,
 				name: Expr::Idiom(Idiom::field("a".to_string())),
 				base: Base::Db,
-				access_type: AccessType::Record(RecordAccess {
+				access_type: AccessType::Record(Box::new(RecordAccess {
 					signup: None,
 					signin: None,
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Rs256,
-							key: Expr::Literal(Literal::String("foo".to_string())),
+							key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Rs256,
-							key: Expr::Literal(Literal::String("bar".to_string())),
+							key: Expr::Literal(Literal::String(Strand::new_static("bar"))),
 						}),
 					},
 					bearer: None,
-				}),
+				})),
 				authenticate: None,
 				duration: AccessDuration {
 					grant: Expr::Literal(Literal::Duration(PublicDuration::from_days(30).unwrap())),
@@ -1312,7 +1315,7 @@ fn parse_define_access_bearer() {
 				session: Expr::Literal(Literal::None),
 			}
 		);
-		assert_eq!(stmt.comment, Expr::Literal(Literal::String("foo".to_string())));
+		assert_eq!(stmt.comment, Expr::Literal(Literal::String(Strand::new_static("foo"))));
 		match stmt.access_type {
 			AccessType::Bearer(ac) => {
 				assert_eq!(ac.subject, BearerAccessSubject::User);
@@ -1351,7 +1354,7 @@ fn parse_define_access_bearer() {
 				session: Expr::Literal(Literal::None),
 			}
 		);
-		assert_eq!(stmt.comment, Expr::Literal(Literal::String("foo".to_string())));
+		assert_eq!(stmt.comment, Expr::Literal(Literal::String(Strand::new_static("foo"))));
 		match stmt.access_type {
 			AccessType::Bearer(ac) => {
 				assert_eq!(ac.subject, BearerAccessSubject::User);
@@ -1390,7 +1393,7 @@ fn parse_define_access_bearer() {
 				session: Expr::Literal(Literal::None),
 			}
 		);
-		assert_eq!(stmt.comment, Expr::Literal(Literal::String("foo".to_string())));
+		assert_eq!(stmt.comment, Expr::Literal(Literal::String(Strand::new_static("foo"))));
 		match stmt.access_type {
 			AccessType::Bearer(ac) => {
 				assert_eq!(ac.subject, BearerAccessSubject::User);
@@ -1428,7 +1431,7 @@ fn parse_define_access_bearer() {
 				session: Expr::Literal(Literal::None),
 			}
 		);
-		assert_eq!(stmt.comment, Expr::Literal(Literal::String("foo".to_string())));
+		assert_eq!(stmt.comment, Expr::Literal(Literal::String(Strand::new_static("foo"))));
 		match stmt.access_type {
 			AccessType::Bearer(ac) => {
 				assert_eq!(ac.subject, BearerAccessSubject::Record);
@@ -1473,13 +1476,13 @@ fn parse_define_access_bearer() {
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Hs384,
-							key: Expr::Literal(Literal::String("foo".to_string())),
+							key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Hs384,
 							// Issuer key matches verification key by default in symmetric
 							// algorithms.
-							key: Expr::Literal(Literal::String("foo".to_string())),
+							key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 						}),
 					},
 				}),
@@ -1512,13 +1515,13 @@ fn parse_define_access_bearer() {
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::Hs384,
-							key: Expr::Literal(Literal::String("foo".to_string())),
+							key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 						}),
 						issue: Some(JwtAccessIssue {
 							alg: Algorithm::Hs384,
 							// Issuer key matches verification key by default in symmetric
 							// algorithms.
-							key: Expr::Literal(Literal::String("foo".to_string())),
+							key: Expr::Literal(Literal::String(Strand::new_static("foo"))),
 						}),
 					},
 				}),
@@ -1546,14 +1549,14 @@ fn parse_define_param() {
 		res,
 		Expr::Define(Box::new(DefineStatement::Param(DefineParamStatement {
 			kind: DefineKind::Default,
-			name: "a".to_owned(),
+			name: "a".into(),
 			value: Expr::Literal(Literal::Object(vec![
 				ObjectEntry {
-					key: "a".to_string(),
+					key: "a".into(),
 					value: Expr::Literal(Literal::Integer(1))
 				},
 				ObjectEntry {
-					key: "b".to_string(),
+					key: "b".into(),
 					value: Expr::Literal(Literal::Integer(3))
 				},
 			])),
@@ -1573,7 +1576,7 @@ fn parse_define_table() {
 		Expr::Define(Box::new(DefineStatement::Table(DefineTableStatement {
 			kind: DefineKind::Default,
 			id: None,
-			name: Expr::Table("name".to_string()),
+			name: Expr::Table("name".into()),
 			drop: true,
 			full: true,
 			view: Some(crate::sql::View {
@@ -1581,9 +1584,11 @@ fn parse_define_table() {
 					expr: ident_field("foo"),
 					alias: None,
 				})],),
-				what: vec!["bar".to_string()],
+				what: vec!["bar".into()],
 				cond: None,
-				group: Some(Groups(vec![Group(Idiom(vec![Part::Field("foo".to_string())]))]))
+				group: Some(Groups(vec![Group(Idiom(vec![Part::Field(Strand::new_static(
+					"foo"
+				))]))]))
 			}),
 			permissions: Permissions {
 				select: Permission::Specific(Expr::Binary {
@@ -1602,6 +1607,8 @@ fn parse_define_table() {
 			comment: Expr::Literal(Literal::None),
 
 			table_type: TableType::Normal,
+			graphql_alias: None,
+			graphql_deprecated: None,
 		})))
 	);
 }
@@ -1620,7 +1627,7 @@ fn parse_define_event() {
 		Expr::Define(Box::new(DefineStatement::Event(DefineEventStatement {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field("event".to_string())),
-			target_table: Expr::Table("table".to_string()),
+			target_table: Expr::Table("table".into()),
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: Expr::Literal(Literal::None),
@@ -1640,19 +1647,19 @@ fn parse_define_field() {
 
 		assert_eq!(
 			res,
-			Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
+			Expr::Define(Box::new(DefineStatement::Field(Box::new(DefineFieldStatement {
 				kind: DefineKind::Default,
 				name: Expr::Idiom(Idiom(vec![
-					Part::Field("foo".to_string()),
+					Part::Field(Strand::new_static("foo")),
 					Part::All,
 					Part::All,
 					Part::Flatten,
 				])),
-				what: Expr::Table("bar".to_string()),
+				what: Expr::Table("bar".into()),
 				field_kind: Some(Kind::Either(vec![
 					Kind::None,
 					Kind::Number,
-					Kind::Array(Box::new(Kind::Record(vec!["foo".to_string()])), Some(10))
+					Kind::Array(Box::new(Kind::Record(vec!["foo".into()])), Some(10))
 				])),
 				flexible: false,
 				readonly: false,
@@ -1668,7 +1675,9 @@ fn parse_define_field() {
 				comment: Expr::Literal(Literal::None),
 				reference: None,
 				computed: None,
-			})))
+				graphql_alias: None,
+				graphql_deprecated: None,
+			}))))
 		)
 	}
 
@@ -1695,10 +1704,10 @@ fn parse_define_index() {
 		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field("index".to_string())),
-			what: Expr::Table("table".to_string()),
-			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())])),],
+			what: Expr::Table("table".into()),
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("a"))])),],
 			index: Index::FullText(FullTextParams {
-				az: "ana".to_owned(),
+				az: "ana".into(),
 				hl: true,
 				sc: Scoring::Bm {
 					k1: 0.1,
@@ -1721,8 +1730,8 @@ fn parse_define_index() {
 		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field("index".to_string())),
-			what: Expr::Table("table".to_string()),
-			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
+			what: Expr::Table("table".into()),
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("a"))]))],
 			index: Index::Uniq,
 			comment: Expr::Literal(Literal::None),
 			concurrently: false
@@ -1736,8 +1745,8 @@ fn parse_define_index() {
 		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field("index".to_string())),
-			what: Expr::Table("table".to_string()),
-			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
+			what: Expr::Table("table".into()),
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("a"))]))],
 			index: Index::Hnsw(HnswParams {
 				dimension: 128,
 				distance: Distance::Manhattan,
@@ -1753,6 +1762,142 @@ fn parse_define_index() {
 			comment: Expr::Literal(Literal::None),
 			concurrently: false
 		})))
+	);
+
+	let res = syn::parse_with(
+		r#"DEFINE INDEX index ON TABLE table FIELDS a DISKANN DIMENSION 128"#.as_bytes(),
+		async |parser, stk| parser.parse_expr_inherit(stk).await,
+	)
+	.unwrap();
+	assert_eq!(
+		res,
+		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
+			kind: DefineKind::Default,
+			name: Expr::Idiom(Idiom::field("index".to_string())),
+			what: Expr::Table("table".into()),
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("a"))]))],
+			index: Index::DiskAnn(DiskAnnParams {
+				dimension: 128,
+				distance: Distance::Euclidean,
+				vector_type: VectorType::F32,
+				degree: 64,
+				l_build: 100,
+				alpha: 1.2.into(),
+				use_hashed_vector: false,
+			}),
+			comment: Expr::Literal(Literal::None),
+			concurrently: false
+		})))
+	);
+
+	let res = syn::parse_with(
+		r#"DEFINE INDEX index ON TABLE table FIELDS a DISKANN DIMENSION 128 DEGREE 32 L_BUILD 88 ALPHA 1.4 TYPE F32 DISTANCE COSINE HASHED_VECTOR"#.as_bytes(),
+		async |parser, stk| parser.parse_expr_inherit(stk).await,
+	)
+	.unwrap();
+	assert_eq!(
+		res,
+		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
+			kind: DefineKind::Default,
+			name: Expr::Idiom(Idiom::field("index".to_string())),
+			what: Expr::Table("table".into()),
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("a"))]))],
+			index: Index::DiskAnn(DiskAnnParams {
+				dimension: 128,
+				distance: Distance::Cosine,
+				vector_type: VectorType::F32,
+				degree: 32,
+				l_build: 88,
+				alpha: 1.4.into(),
+				use_hashed_vector: true,
+			}),
+			comment: Expr::Literal(Literal::None),
+			concurrently: false
+		})))
+	);
+
+	let res = syn::parse_with(
+		r#"DEFINE INDEX index ON TABLE table FIELDS a DISKANN DIMENSION 128 TYPE F16 DISTANCE COSINE_NORMALIZED"#.as_bytes(),
+		async |parser, stk| parser.parse_expr_inherit(stk).await,
+	)
+	.unwrap();
+	assert_eq!(
+		res,
+		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
+			kind: DefineKind::Default,
+			name: Expr::Idiom(Idiom::field("index".to_string())),
+			what: Expr::Table("table".into()),
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("a"))]))],
+			index: Index::DiskAnn(DiskAnnParams {
+				dimension: 128,
+				distance: Distance::CosineNormalized,
+				vector_type: VectorType::F16,
+				degree: 64,
+				l_build: 100,
+				alpha: 1.2.into(),
+				use_hashed_vector: false,
+			}),
+			comment: Expr::Literal(Literal::None),
+			concurrently: false
+		})))
+	);
+
+	let res = syn::parse_with(
+		r#"DEFINE INDEX index ON TABLE table FIELDS a DISKANN DIMENSION 128 TYPE U8 DISTANCE INNER_PRODUCT"#.as_bytes(),
+		async |parser, stk| parser.parse_expr_inherit(stk).await,
+	)
+	.unwrap();
+	assert_eq!(
+		res,
+		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
+			kind: DefineKind::Default,
+			name: Expr::Idiom(Idiom::field("index".to_string())),
+			what: Expr::Table("table".into()),
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("a"))]))],
+			index: Index::DiskAnn(DiskAnnParams {
+				dimension: 128,
+				distance: Distance::InnerProduct,
+				vector_type: VectorType::U8,
+				degree: 64,
+				l_build: 100,
+				alpha: 1.2.into(),
+				use_hashed_vector: false,
+			}),
+			comment: Expr::Literal(Literal::None),
+			concurrently: false
+		})))
+	);
+
+	assert!(
+		syn::parse_with(
+			r#"DEFINE INDEX index ON TABLE table FIELDS a DISKANN DIMENSION 128 TYPE I64"#
+				.as_bytes(),
+			async |parser, stk| parser.parse_expr_inherit(stk).await,
+		)
+		.is_err()
+	);
+	assert!(
+		syn::parse_with(
+			r#"DEFINE INDEX index ON TABLE table FIELDS a DISKANN DIMENSION 128 DISTANCE MANHATTAN"#
+				.as_bytes(),
+			async |parser, stk| parser.parse_expr_inherit(stk).await,
+		)
+		.is_err()
+	);
+	assert!(
+		syn::parse_with(
+			r#"DEFINE INDEX index ON TABLE table FIELDS a DISKANN DIMENSION 128 TYPE U8 DISTANCE COSINE_NORMALIZED"#
+				.as_bytes(),
+			async |parser, stk| parser.parse_expr_inherit(stk).await,
+		)
+		.is_err()
+	);
+	assert!(
+		syn::parse_with(
+			r#"DEFINE INDEX index ON TABLE table FIELDS a,b DISKANN DIMENSION 128"#.as_bytes(),
+			async |parser, stk| parser.parse_expr_inherit(stk).await,
+		)
+		.is_err()
 	);
 }
 
@@ -1779,7 +1924,7 @@ fn parse_define_analyzer() {
 				Filter::Uppercase,
 			]),
 			comment: Expr::Literal(Literal::None),
-			function: Some("foo::bar".to_owned()),
+			function: Some("foo::bar".into()),
 		}))),
 	)
 }
@@ -1791,7 +1936,7 @@ fn parse_delete() {
 		res,
 		Expr::Delete(Box::new(DeleteStatement {
 			only: true,
-			what: vec![Expr::Mock(Mock::Range("foo".to_string(), TypedRange::from_range(32..64)))],
+			what: vec![Expr::Mock(Mock::Range("foo".into(), TypedRange::from_range(32..64)))],
 			with: Some(With::Index(vec!["index".to_string(), "index_2".to_string()])),
 			cond: Some(Cond(Expr::Literal(Literal::Integer(2)))),
 			output: Some(Output::After),
@@ -1810,13 +1955,13 @@ fn parse_delete_2() {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
 				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
-					table: "a".to_owned(),
-					key: RecordIdKeyLit::String("b".to_owned()),
+					table: "a".into(),
+					key: RecordIdKeyLit::String("b".into()),
 				}))),
-				Part::Graph(Lookup {
+				Part::Graph(Box::new(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
 					..Default::default()
-				}),
+				})),
 				Part::Last,
 				Part::Where(Expr::Literal(Literal::Bool(true))),
 			]))],
@@ -1847,7 +1992,7 @@ pub fn parse_for() {
 						expr: ident_field("foo"),
 						alias: None
 					})],),
-					what: vec![Expr::Table("bar".to_string())],
+					what: vec![Expr::Table("bar".into())],
 					omit: vec![],
 					only: false,
 					with: None,
@@ -1959,7 +2104,7 @@ fn parse_info() {
 	.unwrap();
 	assert_eq!(
 		res,
-		Expr::Info(Box::new(InfoStatement::Tb(Expr::Table("table".to_string()), false, None)))
+		Expr::Info(Box::new(InfoStatement::Tb(Expr::Table("table".into()), false, None)))
 	);
 
 	let res = syn::parse_with("INFO FOR USER user".as_bytes(), async |parser, stk| {
@@ -2000,7 +2145,7 @@ fn parse_show() {
 	assert_eq!(
 		res,
 		TopLevelExpr::Show(ShowStatement {
-			table: Some("foo".to_owned()),
+			table: Some("foo".into()),
 			since: ShowSince::Versionstamp(1),
 			limit: Some(10)
 		})
@@ -2170,12 +2315,18 @@ fn parse_insert() {
 			ignore: true,
 			update: Some(Data::UpdateExpression(vec![
 				Assignment {
-					place: Idiom(vec![Part::Field("a".to_owned()), Part::Field("b".to_owned()),]),
+					place: Idiom(vec![
+						Part::Field(Strand::new_static("a")),
+						Part::Field(Strand::new_static("b")),
+					]),
 					operator: crate::sql::AssignOperator::Extend,
 					value: Expr::Literal(Literal::Null)
 				},
 				Assignment {
-					place: Idiom(vec![Part::Field("c".to_owned()), Part::Field("d".to_owned()),]),
+					place: Idiom(vec![
+						Part::Field(Strand::new_static("c")),
+						Part::Field(Strand::new_static("d")),
+					]),
 					operator: crate::sql::AssignOperator::Add,
 					value: Expr::Literal(Literal::None)
 				},
@@ -2197,15 +2348,15 @@ fn parse_insert_select() {
 	assert_eq!(
 		res,
 		Expr::Insert(Box::new(InsertStatement {
-			into: Some(Expr::Table("bar".to_owned())),
+			into: Some(Expr::Table("bar".into())),
 			data: Data::SingleExpression(Expr::Select(Box::new(SelectStatement {
 				fields: Fields::Select(vec![Field::Single(Selector {
-					expr: Expr::Idiom(Idiom(vec![Part::Field("foo".to_owned())])),
+					expr: Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("foo"))])),
 					alias: None
 				})],),
 				omit: vec![],
 				only: false,
-				what: vec![Expr::Table("baz".to_owned())],
+				what: vec![Expr::Table("baz".into())],
 				with: None,
 				cond: None,
 				split: None,
@@ -2285,20 +2436,20 @@ fn parse_live() {
 	assert_eq!(
 		stmt.fields,
 		LiveFields::Select(Fields::Select(vec![Field::Single(Selector {
-			expr: Expr::Idiom(Idiom(vec![Part::Field("foo".to_owned())])),
+			expr: Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("foo"))])),
 			alias: None,
 		})],))
 	);
-	assert_eq!(stmt.what, Expr::Table("table".to_owned()));
+	assert_eq!(stmt.what, Expr::Table("table".into()));
 	assert_eq!(stmt.cond, Some(Cond(Expr::Literal(Literal::Bool(true)))));
 	assert_eq!(
 		stmt.fetch,
 		Some(Fetchs(vec![
 			Fetch(Expr::Idiom(Idiom(vec![
-				Part::Field("a".to_owned()),
-				Part::Where(Expr::Idiom(Idiom(vec![Part::Field("foo".to_owned())]))),
+				Part::Field(Strand::new_static("a")),
+				Part::Where(Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("foo"))]))),
 			]))),
-			Fetch(Expr::Idiom(Idiom(vec![Part::Field("b".to_owned())]))),
+			Fetch(Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("b"))]))),
 		])),
 	)
 }
@@ -2312,7 +2463,7 @@ fn parse_option() {
 	assert_eq!(
 		res,
 		TopLevelExpr::Option(OptionStatement {
-			name: "value".to_owned(),
+			name: "value".into(),
 			what: true
 		})
 	)
@@ -2345,8 +2496,8 @@ fn parse_relate() {
 		Expr::Relate(Box::new(RelateStatement {
 			only: true,
 			through: Expr::Literal(Literal::RecordId(RecordIdLit {
-				table: "a".to_owned(),
-				key: RecordIdKeyLit::String("b".to_owned()),
+				table: "a".into(),
+				key: RecordIdKeyLit::String("b".into()),
 			})),
 			from: Expr::Literal(Literal::Array(vec![
 				Expr::Literal(Literal::Integer(1)),
@@ -2354,13 +2505,13 @@ fn parse_relate() {
 			])),
 			to: Expr::Create(Box::new(CreateStatement {
 				only: false,
-				what: vec![Expr::Table("foo".to_owned())],
+				what: vec![Expr::Table("foo".into())],
 				data: None,
 				output: None,
 				timeout: Expr::Literal(Literal::None),
 			})),
 			data: Some(Data::SetExpression(vec![Assignment {
-				place: Idiom(vec![Part::Field("a".to_owned())]),
+				place: Idiom(vec![Part::Field(Strand::new_static("a"))]),
 				operator: AssignOperator::Add,
 				value: Expr::Literal(Literal::Integer(1))
 			}])),
@@ -2379,7 +2530,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Namespace(RemoveNamespaceStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field("ns".to_string())])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("ns"))])),
 			if_exists: false,
 			expunge: false,
 		})))
@@ -2392,7 +2543,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Database(RemoveDatabaseStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field("database".to_string())])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("database"))])),
 			if_exists: false,
 			expunge: false,
 		})))
@@ -2405,7 +2556,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Function(RemoveFunctionStatement {
-			name: "foo::bar".to_owned(),
+			name: "foo::bar".into(),
 			if_exists: false,
 		})))
 	);
@@ -2417,7 +2568,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Function(RemoveFunctionStatement {
-			name: "foo::bar".to_owned(),
+			name: "foo::bar".into(),
 			if_exists: false,
 		})))
 	);
@@ -2430,7 +2581,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Access(RemoveAccessStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field("foo".to_string())])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("foo"))])),
 			base: Base::Db,
 			if_exists: false,
 		})))
@@ -2443,7 +2594,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Param(RemoveParamStatement {
-			name: "foo".to_owned(),
+			name: "foo".into(),
 			if_exists: false,
 		})))
 	);
@@ -2455,7 +2606,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Table(RemoveTableStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field("foo".to_string())])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("foo"))])),
 			if_exists: false,
 			expunge: false,
 		})))
@@ -2469,8 +2620,8 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Event(RemoveEventStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field("foo".to_string())])),
-			what: Expr::Idiom(Idiom(vec![Part::Field("bar".to_string())])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("foo"))])),
+			what: Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("bar"))])),
 			if_exists: false,
 		})))
 	);
@@ -2484,11 +2635,11 @@ fn parse_remove() {
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Field(RemoveFieldStatement {
 			name: Expr::Idiom(Idiom(vec![
-				Part::Field("foo".to_string()),
-				Part::Field("bar".to_string()),
+				Part::Field(Strand::new_static("foo")),
+				Part::Field(Strand::new_static("bar")),
 				Part::Value(Expr::Literal(Literal::Integer(10)))
 			])),
-			what: Expr::Idiom(Idiom(vec![Part::Field("bar".to_string())])),
+			what: Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("bar"))])),
 			if_exists: false,
 		})))
 	);
@@ -2500,8 +2651,8 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Index(RemoveIndexStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field("foo".to_string())])),
-			what: Expr::Idiom(Idiom(vec![Part::Field("bar".to_string())])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("foo"))])),
+			what: Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("bar"))])),
 			if_exists: false,
 		})))
 	);
@@ -2513,7 +2664,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::Analyzer(RemoveAnalyzerStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field("foo".to_string())])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("foo"))])),
 			if_exists: false,
 		})))
 	);
@@ -2525,7 +2676,7 @@ fn parse_remove() {
 	assert_eq!(
 		res,
 		Expr::Remove(Box::new(RemoveStatement::User(RemoveUserStatement {
-			name: Expr::Idiom(Idiom(vec![Part::Field("foo".to_string())])),
+			name: Expr::Idiom(Idiom(vec![Part::Field(Strand::new_static("foo"))])),
 			base: Base::Db,
 			if_exists: false,
 		})))
@@ -2589,32 +2740,32 @@ fn parse_update() {
 		Expr::Update(Box::new(UpdateStatement {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
-				Part::Field("a".to_owned()),
-				Part::Graph(Lookup {
+				Part::Field(Strand::new_static("a")),
+				Part::Graph(Box::new(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
 					what: vec![LookupSubject::Table {
-						table: "b".to_owned(),
+						table: "b".into(),
 						referencing_field: None
 					}],
 					..Default::default()
-				})
+				}))
 			]))],
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Bool(true)))),
 			data: Some(Data::UnsetExpression(vec![
-				Idiom(vec![Part::Field("foo".to_owned()), Part::Flatten]),
+				Idiom(vec![Part::Field(Strand::new_static("foo")), Part::Flatten]),
 				Idiom(vec![
-					Part::Field("a".to_owned()),
-					Part::Graph(Lookup {
+					Part::Field(Strand::new_static("a")),
+					Part::Graph(Box::new(Lookup {
 						kind: LookupKind::Graph(Dir::Out),
 						what: vec![LookupSubject::Table {
-							table: "b".to_owned(),
+							table: "b".into(),
 							referencing_field: None
 						}],
 						..Default::default()
-					})
+					}))
 				]),
-				Idiom(vec![Part::Field("c".to_owned()), Part::All])
+				Idiom(vec![Part::Field(Strand::new_static("c")), Part::All])
 			])),
 			output: Some(Output::Diff),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
@@ -2631,32 +2782,32 @@ fn parse_upsert() {
 		Expr::Upsert(Box::new(UpsertStatement {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
-				Part::Field("a".to_owned()),
-				Part::Graph(Lookup {
+				Part::Field(Strand::new_static("a")),
+				Part::Graph(Box::new(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
 					what: vec![LookupSubject::Table {
-						table: "b".to_owned(),
+						table: "b".into(),
 						referencing_field: None
 					}],
 					..Default::default()
-				})
+				}))
 			]))],
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Bool(true)))),
 			data: Some(Data::UnsetExpression(vec![
-				Idiom(vec![Part::Field("foo".to_owned()), Part::Flatten]),
+				Idiom(vec![Part::Field(Strand::new_static("foo")), Part::Flatten]),
 				Idiom(vec![
-					Part::Field("a".to_owned()),
-					Part::Graph(Lookup {
+					Part::Field(Strand::new_static("a")),
+					Part::Graph(Box::new(Lookup {
 						kind: LookupKind::Graph(Dir::Out),
 						what: vec![LookupSubject::Table {
-							table: "b".to_owned(),
+							table: "b".into(),
 							referencing_field: None
 						}],
 						..Default::default()
-					})
+					}))
 				]),
-				Idiom(vec![Part::Field("c".to_owned()), Part::All])
+				Idiom(vec![Part::Field(Strand::new_static("c")), Part::All])
 			])),
 			output: Some(Output::Diff),
 			timeout: Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))),
@@ -2678,9 +2829,9 @@ fn parse_access_grant() {
 		assert_eq!(
 			res,
 			TopLevelExpr::Access(Box::new(AccessStatement::Grant(AccessStatementGrant {
-				ac: "a".to_owned(),
+				ac: "a".into(),
 				base: Some(Base::Ns),
-				subject: access::Subject::User("b".to_owned()),
+				subject: access::Subject::User("b".into()),
 			})))
 		);
 	}
@@ -2695,11 +2846,11 @@ fn parse_access_grant() {
 		assert_eq!(
 			res,
 			TopLevelExpr::Access(Box::new(AccessStatement::Grant(AccessStatementGrant {
-				ac: "a".to_owned(),
+				ac: "a".into(),
 				base: Some(Base::Ns),
 				subject: access::Subject::Record(RecordIdLit {
-					table: "b".to_owned(),
-					key: RecordIdKeyLit::String("c".to_owned()),
+					table: "b".into(),
+					key: RecordIdKeyLit::String("c".into()),
 				}),
 			})))
 		);
@@ -2719,7 +2870,7 @@ fn parse_access_show() {
 		assert_eq!(
 			res,
 			TopLevelExpr::Access(Box::new(AccessStatement::Show(AccessStatementShow {
-				ac: "a".to_owned(),
+				ac: "a".into(),
 				base: Some(Base::Db),
 				gr: None,
 				cond: None,
@@ -2737,9 +2888,9 @@ fn parse_access_show() {
 		assert_eq!(
 			res,
 			TopLevelExpr::Access(Box::new(AccessStatement::Show(AccessStatementShow {
-				ac: "a".to_owned(),
+				ac: "a".into(),
 				base: Some(Base::Db),
-				gr: Some("b".to_owned()),
+				gr: Some("b".into()),
 				cond: None,
 			})))
 		);
@@ -2755,7 +2906,7 @@ fn parse_access_show() {
 		assert_eq!(
 			res,
 			TopLevelExpr::Access(Box::new(AccessStatement::Show(AccessStatementShow {
-				ac: "a".to_owned(),
+				ac: "a".into(),
 				base: Some(Base::Db),
 				gr: None,
 				cond: Some(Cond(Expr::Literal(Literal::Bool(true)))),
@@ -2777,7 +2928,7 @@ fn parse_access_revoke() {
 		assert_eq!(
 			res,
 			TopLevelExpr::Access(Box::new(AccessStatement::Revoke(AccessStatementRevoke {
-				ac: "a".to_owned(),
+				ac: "a".into(),
 				base: Some(Base::Db),
 				gr: None,
 				cond: None,
@@ -2795,9 +2946,9 @@ fn parse_access_revoke() {
 		assert_eq!(
 			res,
 			TopLevelExpr::Access(Box::new(AccessStatement::Revoke(AccessStatementRevoke {
-				ac: "a".to_owned(),
+				ac: "a".into(),
 				base: Some(Base::Db),
-				gr: Some("b".to_owned()),
+				gr: Some("b".into()),
 				cond: None,
 			})))
 		);
@@ -2813,7 +2964,7 @@ fn parse_access_revoke() {
 		assert_eq!(
 			res,
 			TopLevelExpr::Access(Box::new(AccessStatement::Revoke(AccessStatementRevoke {
-				ac: "a".to_owned(),
+				ac: "a".into(),
 				base: Some(Base::Db),
 				gr: None,
 				cond: Some(Cond(Expr::Literal(Literal::Bool(true)))),
@@ -2835,7 +2986,7 @@ fn parse_access_purge() {
 		assert_eq!(
 			res,
 			TopLevelExpr::Access(Box::new(AccessStatement::Purge(AccessStatementPurge {
-				ac: "a".to_owned(),
+				ac: "a".into(),
 				base: Some(Base::Db),
 				kind: PurgeKind::Both,
 				grace: PublicDuration::from_millis(0),
@@ -2853,7 +3004,7 @@ fn parse_access_purge() {
 		assert_eq!(
 			res,
 			TopLevelExpr::Access(Box::new(AccessStatement::Purge(AccessStatementPurge {
-				ac: "a".to_owned(),
+				ac: "a".into(),
 				base: Some(Base::Db),
 				kind: PurgeKind::Expired,
 				grace: PublicDuration::from_millis(0),
@@ -2871,7 +3022,7 @@ fn parse_access_purge() {
 		assert_eq!(
 			res,
 			TopLevelExpr::Access(Box::new(AccessStatement::Purge(AccessStatementPurge {
-				ac: "a".to_owned(),
+				ac: "a".into(),
 				base: Some(Base::Db),
 				kind: PurgeKind::Revoked,
 				grace: PublicDuration::from_millis(0),
@@ -2889,7 +3040,7 @@ fn parse_access_purge() {
 		assert_eq!(
 			res,
 			TopLevelExpr::Access(Box::new(AccessStatement::Purge(AccessStatementPurge {
-				ac: "a".to_owned(),
+				ac: "a".into(),
 				base: Some(Base::Db),
 				kind: PurgeKind::Expired,
 				grace: PublicDuration::from_days(90).unwrap(),
@@ -2907,7 +3058,7 @@ fn parse_access_purge() {
 		assert_eq!(
 			res,
 			TopLevelExpr::Access(Box::new(AccessStatement::Purge(AccessStatementPurge {
-				ac: "a".to_owned(),
+				ac: "a".into(),
 				base: Some(Base::Db),
 				kind: PurgeKind::Revoked,
 				grace: PublicDuration::from_days(90).unwrap(),
@@ -2925,7 +3076,7 @@ fn parse_access_purge() {
 		assert_eq!(
 			res,
 			TopLevelExpr::Access(Box::new(AccessStatement::Purge(AccessStatementPurge {
-				ac: "a".to_owned(),
+				ac: "a".into(),
 				base: Some(Base::Db),
 				kind: PurgeKind::Both,
 				grace: PublicDuration::from_days(90).unwrap(),

@@ -404,7 +404,7 @@ where
 	match result {
 		Ok(DbResult::Query(results)) => {
 			if let Some(command) = pending.command {
-				session_state.replay.push(command);
+				super::record_replayable(&session_state.replay, command);
 			}
 			if let Err(err) = pending.response_channel.send(Ok(results)).await {
 				tracing::error!("Failed to send query results to channel: {err:?}");
@@ -415,14 +415,14 @@ where
 		}
 		Ok(DbResult::Other(mut value)) => {
 			if let Some(command) = pending.command {
-				session_state.replay.push(command.clone());
 				if let Command::Authenticate {
 					token,
 					..
-				} = command
+				} = &command
 				{
-					value = token.into_value();
+					value = token.clone().into_value();
 				}
+				super::record_replayable(&session_state.replay, command);
 			}
 			let result = QueryResultBuilder::started_now().finish_with_result(Ok(value));
 			if let Err(err) = pending.response_channel.send(Ok(vec![result])).await {
@@ -596,7 +596,7 @@ async fn handle_session_initial<M, S, E>(
 	session_state.replay.push(Command::Attach {
 		session_id,
 	});
-	sessions.insert(session_id, Ok(session_state.clone()));
+	sessions.insert(session_id, Ok(Arc::clone(&session_state)));
 
 	if let Err(error) = replay_session::<M, S, E>(session_id, &session_state, sink).await {
 		sessions.insert(session_id, Err(SessionError::Remote(error.to_string())));
@@ -624,7 +624,7 @@ async fn handle_session_clone<M, S, E>(
 				};
 			}
 			let session_state = Arc::new(session_state);
-			sessions.insert(new, Ok(session_state.clone()));
+			sessions.insert(new, Ok(Arc::clone(&session_state)));
 
 			if let Err(error) = replay_session::<M, S, E>(new, &session_state, sink).await {
 				sessions.insert(new, Err(SessionError::Remote(error.to_string())));
@@ -657,6 +657,28 @@ async fn handle_session_drop<M, S, E>(
 		replay_session::<M, S, E>(session_id, &session_state, sink).await.ok();
 	}
 	sessions.remove(&session_id);
+}
+
+/// Dispatch a session-lifecycle event to the appropriate handler.
+async fn handle_session<M, S, E>(
+	session_id: crate::SessionId,
+	sessions: &HashMap<Uuid, Result<Arc<SessionState>, SessionError>>,
+	sink: &RwLock<S>,
+) where
+	M: WsMessage,
+	S: Sink<M, Error = E> + Unpin,
+	E: std::fmt::Debug,
+{
+	match session_id {
+		crate::SessionId::Initial(id) => {
+			handle_session_initial::<M, S, E>(id, sessions, sink).await
+		}
+		crate::SessionId::Clone {
+			old,
+			new,
+		} => handle_session_clone::<M, S, E>(old, new, sessions, sink).await,
+		crate::SessionId::Drop(id) => handle_session_drop::<M, S, E>(id, sessions, sink).await,
+	}
 }
 
 /// Clear all pending requests on connection reset.
@@ -735,7 +757,7 @@ impl Surreal<Client> {
 		address: impl IntoEndpoint<P, Client = Client>,
 	) -> Connect<Client, ()> {
 		Connect {
-			surreal: self.inner.clone().into(),
+			surreal: Arc::clone(&self.inner).into(),
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,

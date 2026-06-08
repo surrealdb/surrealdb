@@ -8,7 +8,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{self, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId};
+use crate::catalog::{self, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, Permission};
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::visit::MutVisitor;
@@ -22,6 +22,7 @@ use crate::idx::planner::executor::{
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
 use crate::kvs::Transaction;
+use crate::kvs::index::filter_online_indexes;
 use crate::val::{Array, Number, TableName, Value};
 
 pub(super) struct Tree {
@@ -87,6 +88,12 @@ struct TreeBuilder<'a> {
 	leaf_nodes_with_index_count: usize,
 	all_and: Option<bool>,
 	all_and_groups: HashMap<GroupRef, bool>,
+	/// Set when planning encounters an idiom that resolves to a field whose
+	/// SELECT permission is not `Full`. Used to disable index fast paths
+	/// (in particular the count-only `Iterate Index Count` and dedicated
+	/// `Index::Count` indexes) that would otherwise leak the cardinality of
+	/// values the current user cannot read.
+	cond_touches_restricted_field: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -127,6 +134,7 @@ impl<'a> TreeBuilder<'a> {
 			all_and_groups: Default::default(),
 			leaf_nodes_count: 0,
 			leaf_nodes_with_index_count: 0,
+			cond_touches_restricted_field: false,
 		}
 	}
 
@@ -170,12 +178,25 @@ impl<'a> TreeBuilder<'a> {
 		} else {
 			let mut cond = cond.0.clone();
 			let _ = KnnConditionRewriter(&self.knn_expressions).visit_mut_expr(&mut cond);
-			Some(Cond(cond))
+			if matches!(cond, Expr::Literal(Literal::Bool(true))) {
+				None
+			} else {
+				Some(Cond(cond))
+			}
 		};
 		Ok(())
 	}
 
 	async fn eval_count(&mut self, table: &TableName) -> Result<()> {
+		// SECURITY: a dedicated `Index::Count` index materialises the count
+		// of rows that match its stored condition. If the user's WHERE clause
+		// (which must equal the index's stored condition for the index to be
+		// chosen here) references a field with restrictive SELECT permissions,
+		// returning the materialised count would leak the cardinality of
+		// values the user is not allowed to read.
+		if self.cond_touches_restricted_field {
+			return Ok(());
+		}
 		if let Some(f) = self.ctx.fields
 			&& f.is_count_all_only()
 			&& let Some(g) = self.ctx.group
@@ -258,7 +279,7 @@ impl<'a> TreeBuilder<'a> {
 				self.check_leaf_node_with_index(io.as_ref());
 				let re = ResolvedExpression {
 					group,
-					exp: exp.clone(),
+					exp: Arc::clone(&exp),
 					io,
 					left,
 					right,
@@ -340,22 +361,29 @@ impl<'a> TreeBuilder<'a> {
 	async fn resolve_idiom(&mut self, i: &Idiom) -> Result<Node> {
 		let tx = self.ctx.ctx.tx();
 		let schema = self.lazy_load_schema_resolver(&tx, self.table).await?;
+		// SECURITY: record when this idiom is governed by a field with a
+		// non-`Full` SELECT permission so the planner can reject index fast
+		// paths whose stored condition is the user's WHERE clause (e.g. a
+		// dedicated `Index::Count` index).
+		if self.ctx.is_perm && Self::idiom_touches_restricted_field(i, schema.fields.as_ref()) {
+			self.cond_touches_restricted_field = true;
+		}
 		let i = Arc::new(i.clone());
 		// Try to detect if it matches an index
 		let n = {
 			let irs = self.resolve_indexes(self.table, &i, &schema);
 			if !irs.is_empty() {
-				Node::IndexedField(i.clone(), irs)
+				Node::IndexedField(Arc::clone(&i), irs)
 			} else if let Some(ro) =
 				self.resolve_record_field(&tx, schema.fields.as_ref(), &i).await?
 			{
 				// Try to detect an indexed record field
-				Node::RecordField(i.clone(), ro)
+				Node::RecordField(Arc::clone(&i), ro)
 			} else {
-				Node::NonIndexedField(i.clone())
+				Node::NonIndexedField(Arc::clone(&i))
 			}
 		};
-		self.resolved_idioms.insert(i.clone(), n.clone());
+		self.resolved_idioms.insert(Arc::clone(&i), n.clone());
 		Ok(n)
 	}
 
@@ -372,6 +400,18 @@ impl<'a> TreeBuilder<'a> {
 				continue;
 			}
 			if let Some(idiom_index) = ix.cols.iter().position(|p| p.eq(i)) {
+				// SECURITY: when permissions are being enforced, refuse to use
+				// an index whose columns reference a field with a restrictive
+				// SELECT permission. Otherwise the index-only `Iterate Index
+				// Count` / `Iterate Index Keys` fast paths would short-circuit
+				// the document-level field reduction and let a record user
+				// learn the existence or cardinality of values they are not
+				// allowed to read.
+				if self.ctx.is_perm
+					&& !Self::index_columns_select_full(&ix.cols, schema.fields.as_ref())
+				{
+					continue;
+				}
 				let ixr = schema.new_reference(idx);
 				// Check if the WITH clause allows the index to be used
 				if self.check_allowed_by_with_indexes(&ixr) {
@@ -386,6 +426,33 @@ impl<'a> TreeBuilder<'a> {
 			self.idioms_indexes.insert(t.to_owned(), HashMap::from([(i, irs.clone())]));
 		}
 		irs
+	}
+
+	/// Returns false when any column of `cols` is governed by a field
+	/// definition with a non-`Full` SELECT permission. An ancestor field
+	/// definition (a field whose name is a prefix of the indexed column) also
+	/// governs the column, since reducing the ancestor implicitly reduces all
+	/// of its descendants.
+	fn index_columns_select_full(cols: &[Idiom], fields: &[catalog::FieldDefinition]) -> bool {
+		for col in cols {
+			if Self::idiom_touches_restricted_field(col, fields) {
+				return false;
+			}
+		}
+		true
+	}
+
+	/// Returns true when the idiom (or any of its ancestor field paths) is
+	/// governed by a field definition with a non-`Full` SELECT permission.
+	fn idiom_touches_restricted_field(idiom: &Idiom, fields: &[catalog::FieldDefinition]) -> bool {
+		for field in fields {
+			if idiom.starts_with(field.name.0.as_slice())
+				&& !matches!(field.select_permission, Permission::Full)
+			{
+				return true;
+			}
+		}
+		false
 	}
 
 	/// Check if the index is allowed by the WITH clause
@@ -431,13 +498,13 @@ impl<'a> TreeBuilder<'a> {
 				for table in tables {
 					let schema = self.lazy_load_schema_resolver(tx, table).await?;
 					let remote_irs = self.resolve_indexes(table, &remote_field, &schema);
-					remotes.push((remote_field.clone(), remote_irs));
+					remotes.push((Arc::clone(&remote_field), remote_irs));
 				}
 				let ro = RecordOptions {
 					locals,
 					remotes: Arc::new(remotes),
 				};
-				self.idioms_record_options.insert(idiom.clone(), ro.clone());
+				self.idioms_record_options.insert(Arc::clone(idiom), ro.clone());
 				return Ok(Some(ro));
 			}
 		}
@@ -495,7 +562,7 @@ impl<'a> TreeBuilder<'a> {
 			if let Some((index_reference, _)) = self.lookup_join_index_ref(local_irs) {
 				let io = IndexOption::new(
 					index_reference,
-					Some(id.clone()),
+					Some(Arc::clone(id)),
 					p,
 					IndexOperator::Join(remote_ios),
 				);
@@ -525,13 +592,14 @@ impl<'a> TreeBuilder<'a> {
 					..
 				} if *col == 0 => Self::eval_matches_operator(op, n),
 				Index::Hnsw(h) if *col == 0 => self.eval_hnsw_knn(e, op, n, h)?,
+				Index::DiskAnn(d) if *col == 0 => self.eval_diskann_knn(e, op, n, d)?,
 				_ => None,
 			};
 			if res.is_none()
 				&& let Some(op) = op
 			{
-				let io = IndexOption::new(index_reference.clone(), Some(id.clone()), p, op);
-				self.index_map.options.push((e.clone(), io.clone()));
+				let io = IndexOption::new(index_reference.clone(), Some(Arc::clone(id)), p, op);
+				self.index_map.options.push((Arc::clone(e), io.clone()));
 				res = Some(io);
 			}
 		}
@@ -578,8 +646,37 @@ impl<'a> TreeBuilder<'a> {
 
 		if let Node::Computed(v) = n {
 			let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
-			self.knn_expressions.insert(exp.clone());
+			self.knn_expressions.insert(Arc::clone(exp));
 			return Ok(Some(IndexOperator::Ann(vec, k, ef)));
+		}
+
+		Ok(None)
+	}
+
+	/// Matches a KNN expression against a DiskANN index and records the query vector expression.
+	fn eval_diskann_knn(
+		&mut self,
+		exp: &Arc<Expr>,
+		op: &BinaryOperator,
+		n: &Node,
+		diskann: &catalog::DiskAnnParams,
+	) -> Result<Option<IndexOperator>> {
+		let BinaryOperator::NearestNeighbor(nn) = op else {
+			return Ok(None);
+		};
+
+		let (k, l) = match &**nn {
+			NearestNeighbor::Approximate(k, l) => (*k, *l),
+			NearestNeighbor::K(k, d) if *d == diskann.distance => {
+				(*k, (*k).max(diskann.l_build as u32))
+			}
+			_ => return Ok(None),
+		};
+
+		if let Node::Computed(v) = n {
+			let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
+			self.knn_expressions.insert(Arc::clone(exp));
+			return Ok(Some(IndexOperator::Ann(vec, k, l)));
 		}
 
 		Ok(None)
@@ -607,9 +704,11 @@ impl<'a> TreeBuilder<'a> {
 
 		if let Node::Computed(v) = val {
 			let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
-			self.knn_expressions.insert(exp.clone());
-			self.knn_brute_force_expressions
-				.insert(exp.clone(), KnnBruteForceExpression::new(*k, id.clone(), vec, d.clone()));
+			self.knn_expressions.insert(Arc::clone(exp));
+			self.knn_brute_force_expressions.insert(
+				Arc::clone(exp),
+				KnnBruteForceExpression::new(*k, id.clone(), vec, d.clone()),
+			);
 		}
 		Ok(())
 	}
@@ -623,6 +722,7 @@ impl<'a> TreeBuilder<'a> {
 		col: IdiomCol,
 	) -> Option<IndexOperator> {
 		if let Some(v) = n.is_computed() {
+			#[allow(clippy::collapsible_match)]
 			match (op, v, p) {
 				(BinaryOperator::Equal | BinaryOperator::ExactEqual, v, _) => {
 					let iop = IndexOperator::Equality(v);
@@ -800,6 +900,13 @@ impl SchemaCache {
 		version: Option<u64>,
 	) -> Result<Self> {
 		let indexes = tx.all_tb_indexes(ns, db, table, version).await?;
+		let indexes = if version.is_none() {
+			// Schema analysis for live queries must only consider indexes whose
+			// durable build state has made them queryable.
+			filter_online_indexes(tx, ns, db, indexes).await?
+		} else {
+			indexes
+		};
 		let fields = tx.all_tb_fields(ns, db, table, version).await?;
 		Ok(Self {
 			indexes,
@@ -808,7 +915,7 @@ impl SchemaCache {
 	}
 
 	fn new_reference(&self, idx: usize) -> IndexReference {
-		IndexReference::new(self.indexes.clone(), idx)
+		IndexReference::new(Arc::clone(&self.indexes), idx)
 	}
 }
 
@@ -834,7 +941,7 @@ pub(super) enum Node {
 impl Node {
 	pub(super) fn is_computed(&self) -> Option<Arc<Value>> {
 		if let Self::Computed(v) = self {
-			Some(v.clone())
+			Some(Arc::clone(v))
 		} else {
 			None
 		}
@@ -872,7 +979,7 @@ pub(super) enum IdiomPosition {
 
 impl IdiomPosition {
 	// Reverses the operator for non-commutative operators
-	fn transform(&self, op: &BinaryOperator) -> BinaryOperator {
+	fn transform(self, op: &BinaryOperator) -> BinaryOperator {
 		match self {
 			IdiomPosition::Left => op.clone(),
 			IdiomPosition::Right => match op {

@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::future::IntoFuture;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use futures::StreamExt;
@@ -172,7 +173,11 @@ where
 						)
 						.await
 						.map(|rx| {
-							Stream::new(client.inner.clone().into(), live_query_id.into(), Some(rx))
+							Stream::new(
+								Arc::clone(&client.inner).into(),
+								live_query_id.into(),
+								Some(rx),
+							)
 						});
 						indexed_results.live_queries.insert(index, live_stream);
 						indexed_results
@@ -313,14 +318,14 @@ impl IndexedResults {
 	/// Returns a mutable reference to the `Ok` value at the given index.
 	/// If the result is an error, the entry is removed and the error is returned.
 	/// Returns `Ok(None)` if no entry exists at the index.
-	pub(crate) fn try_get_value_mut(&mut self, index: &usize) -> Result<Option<&mut Value>> {
-		if matches!(self.results.get(index), Some((_, Err(_)))) {
-			let Some((_, Err(err))) = self.results.swap_remove(index) else {
+	pub(crate) fn try_get_value_mut(&mut self, index: usize) -> Result<Option<&mut Value>> {
+		if matches!(self.results.get(&index), Some((_, Err(_)))) {
+			let Some((_, Err(err))) = self.results.swap_remove(&index) else {
 				unreachable!()
 			};
 			return Err(err);
 		}
-		match self.results.get_mut(index) {
+		match self.results.get_mut(&index) {
 			Some((_, Ok(val))) => Ok(Some(val)),
 			_ => Ok(None),
 		}

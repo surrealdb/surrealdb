@@ -4,7 +4,7 @@
   inherit target;
 
   features = with util.features;
-    [ default storage-tikv ];
+    [ default ];
 
   buildSpec = with pkgs;
     let crossCompiling = !util.isNative target;
@@ -14,7 +14,7 @@
 
       nativeBuildInputs = [ pkg-config ];
 
-      buildInputs = [ openssl onnxruntime stdenv.cc.cc.lib ];
+      buildInputs = [ openssl stdenv.cc.cc.lib ];
 
       LIBCLANG_PATH = "${llvmPackages.libclang.lib}/lib";
 
@@ -23,6 +23,10 @@
 
       CARGO_BUILD_TARGET = target;
 
-      ONNXRUNTIME_LIB_PATH = "${onnxruntime.outPath}/lib/libonnxruntime.so";
+      # GNU ld loads all object files into memory at once during the final link,
+      # which OOMs on the 7 GB GitHub runner. lld (already available via llvm in
+      # depsBuildBuild) streams object files instead, dramatically reducing peak
+      # link memory.
+      RUSTFLAGS = "-C link-arg=-fuse-ld=lld";
     };
 }

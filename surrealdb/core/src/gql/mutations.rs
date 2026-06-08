@@ -4,11 +4,12 @@
 //! table in the schema, along with the corresponding input types.
 //!
 //! - Single mutations: `create{Table}`, `update{Table}`, `upsert{Table}`, `delete{Table}`
-//! - Bulk mutations: `createMany{Table}`, `updateMany{Table}`, `upsertMany{Table}`,
-//!   `deleteMany{Table}`
+//! - Bulk mutations: `create{TablePlural}`, `update{TablePlural}`, `upsert{TablePlural}`,
+//!   `delete{TablePlural}` — pluralised via the shared naming helpers, overridden by `GRAPHQL
+//!   <alias>` on the table.
 //! - For relation tables, `create{Table}` uses RELATE instead of CREATE
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use async_graphql::dynamic::indexmap::IndexMap;
@@ -16,13 +17,13 @@ use async_graphql::dynamic::{
 	Field, FieldFuture, FieldValue, InputObject, InputValue, Object, Type, TypeRef,
 };
 use async_graphql::{Name, Value as GqlValue};
-use surrealdb_types::ToSql;
+use surrealdb_strand::Strand;
 
 use super::error::{GqlError, resolver_error};
 use super::schema::{
 	SchemaContext, gql_to_sql_kind_with_scope, kind_to_type_with_enum_prefix, unwrap_type,
 };
-use super::tables::{CachedRecord, cond_from_filter};
+use super::tables::{CachedRecord, cond_from_filter, idiom_to_gql_name};
 use super::utils::{GqlValueUtils, execute_plan};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{FieldDefinition, TableDefinition, TableType};
@@ -73,7 +74,14 @@ fn gql_input_to_sql_object(
 	skip_fields: &[&str],
 	tb_name: &str,
 ) -> Result<SurObject, GqlError> {
-	let mut map = BTreeMap::new();
+	// Collect into `BTreeMap<Strand, _>` rather than
+	// `BTreeMap<String, _>` so the final `SurObject::from(map)`
+	// resolves to the zero-cost `From<BTreeMap<Strand, Value>> for
+	// Object` impl (`Self(v)`). Going via `String` would allocate a
+	// `String` per key here and then reallocate each into a `Strand`
+	// again inside `From<BTreeMap<String, Value>>`. See the sibling
+	// converters in `gql/schema.rs` for the same pattern.
+	let mut map: BTreeMap<Strand, Value> = BTreeMap::new();
 	for (key, val) in input {
 		let key_str = key.as_str();
 		if skip_fields.contains(&key_str) {
@@ -82,18 +90,31 @@ fn gql_input_to_sql_object(
 		if matches!(val, GqlValue::Null) {
 			continue;
 		}
-		let kind = fds
-			.iter()
-			.find(|fd| {
-				fd.name.0.len() == 1 && matches!(&fd.name.0[0], Part::Field(n) if n == key_str)
+		// Match by GraphQL alias (#4537) or naming-convention rewrite (#4552)
+		// first, then by the raw SurrealQL idiom name. The storage key always
+		// comes from the field definition so the underlying record uses the
+		// SurrealQL field name regardless of the alias on the input.
+		let matched = fds.iter().find(|fd| {
+			if fd.name.0.len() != 1 {
+				return false;
+			}
+			if super::naming::field_gql_name(fd) == key_str {
+				return true;
+			}
+			matches!(&fd.name.0[0], Part::Field(n) if n == key_str)
+		});
+		let storage_key: String = matched
+			.and_then(|fd| match &fd.name.0[0] {
+				Part::Field(n) => Some(n.as_str().to_owned()),
+				_ => None,
 			})
-			.and_then(|fd| fd.field_kind.clone())
-			.unwrap_or(Kind::Any);
+			.unwrap_or_else(|| key_str.to_owned());
+		let kind = matched.and_then(|fd| fd.field_kind.clone()).unwrap_or(Kind::Any);
 		let enum_scope = format!("{tb_name}_{key_str}");
 		let sql_val = gql_to_sql_kind_with_scope(val, kind, Some(&enum_scope))?;
-		map.insert(key_str.to_string(), sql_val);
+		map.insert(storage_key.into(), sql_val);
 	}
-	Ok(SurObject(map))
+	Ok(SurObject::from(map))
 }
 
 /// Map a field's `Kind` to a GraphQL `TypeRef` suitable for mutation input types.
@@ -120,15 +141,32 @@ fn kind_to_input_type_ref(
 				TypeRef::NonNull(Box::new(ty))
 			});
 		}
+		// `array<record<T>>` — same reasoning: the inner Object output type is
+		// not a valid input. Map to `[ID!]` (or `[ID!]!` when non-optional).
+		Kind::Array(inner, _) if matches!(**inner, Kind::Record(_)) => {
+			let inner_ty = TypeRef::NonNull(Box::new(TypeRef::named(TypeRef::ID)));
+			let list_ty = TypeRef::List(Box::new(inner_ty));
+			return Ok(if optional {
+				list_ty
+			} else {
+				TypeRef::NonNull(Box::new(list_ty))
+			});
+		}
 		Kind::Either(ks) => {
 			// Strip None/Null variants to see what's underneath
 			let non_none: Vec<&Kind> =
 				ks.iter().filter(|k| !matches!(k, Kind::None | Kind::Null)).collect();
-			if non_none.len() == 1
-				&& let Kind::Record(_) = non_none[0]
-			{
-				// option<record<T>> -> nullable ID
-				return Ok(TypeRef::named(TypeRef::ID));
+			if non_none.len() == 1 {
+				match non_none[0] {
+					// option<record<T>> -> nullable ID
+					Kind::Record(_) => return Ok(TypeRef::named(TypeRef::ID)),
+					// option<array<record<T>>> -> nullable [ID!]
+					Kind::Array(inner, _) if matches!(**inner, Kind::Record(_)) => {
+						let inner_ty = TypeRef::NonNull(Box::new(TypeRef::named(TypeRef::ID)));
+						return Ok(TypeRef::List(Box::new(inner_ty)));
+					}
+					_ => {}
+				}
 			}
 		}
 		_ => {}
@@ -183,22 +221,57 @@ fn generate_input_types(
 		if fd.name.0.len() > 1 {
 			continue;
 		}
-		let fd_name = fd.name.to_sql();
-		// Skip `in` and `out` for relation tables (already added above)
-		if is_relation && (fd_name == "in" || fd_name == "out") {
+		// Skip `in` and `out` for relation tables (already added above). Use
+		// the raw idiom name for this check since both the alias and the
+		// idiom must avoid clashing with the relation-fixed fields.
+		let raw_name = idiom_to_gql_name(&fd.name);
+		if is_relation && (raw_name == "in" || raw_name == "out") {
 			continue;
 		}
+		// Skip server-managed fields — `COMPUTED` is re-evaluated on every
+		// write and `READONLY` rejects writes entirely. Advertising them as
+		// settable in `Create*Input` / `Update*Input` / `Upsert*Input` would
+		// mislead schema introspection (the user-supplied value is silently
+		// dropped at SurrealQL evaluation time).
+		if fd.computed.is_some() || fd.readonly {
+			continue;
+		}
+		// GraphQL-safe input field name — honours `GRAPHQL <alias>` (#4537)
+		// and the active naming convention (#4552). The mutation resolver
+		// translates the input key back to the SurrealQL field name when
+		// building the SET clause (see `gql_input_to_sql_object`).
+		let fd_name = super::naming::field_gql_name(fd);
+
+		// Carry the field's `COMMENT` plus `GRAPHQL_DEPRECATED "reason"` into
+		// the description so introspection surfaces deprecation on input
+		// fields too. async-graphql 7.2.1 doesn't expose the `@deprecated`
+		// directive setter on dynamic `InputValue`, so we encode the reason
+		// inline (see `naming::description_with_deprecation`).
+		let fd_desc = super::naming::description_with_deprecation(
+			fd.comment.as_deref(),
+			fd.graphql_deprecated.as_deref(),
+		);
 
 		// For create and upsert: use the field's input type (preserving non-null)
 		let enum_scope = format!("{}_{}", tb_name, fd_name);
 		let create_type = kind_to_input_type_ref(kind.clone(), types, Some(&enum_scope))?;
-		create_input = create_input.field(InputValue::new(&fd_name, create_type.clone()));
-		upsert_input = upsert_input.field(InputValue::new(&fd_name, create_type));
+		let mut create_iv = InputValue::new(&fd_name, create_type.clone());
+		let mut upsert_iv = InputValue::new(&fd_name, create_type);
+		if let Some(ref d) = fd_desc {
+			create_iv = create_iv.description(d);
+			upsert_iv = upsert_iv.description(d);
+		}
+		create_input = create_input.field(create_iv);
+		upsert_input = upsert_input.field(upsert_iv);
 
 		// For update: all fields are optional (strip NonNull)
 		let update_type =
 			unwrap_type(kind_to_input_type_ref(kind.clone(), types, Some(&enum_scope))?);
-		update_input = update_input.field(InputValue::new(&fd_name, update_type));
+		let mut update_iv = InputValue::new(&fd_name, update_type);
+		if let Some(ref d) = fd_desc {
+			update_iv = update_iv.description(d);
+		}
+		update_input = update_input.field(update_iv);
 	}
 
 	types.push(Type::InputObject(create_input));
@@ -213,8 +286,12 @@ fn generate_input_types(
 /// Groups the per-table parameters that are passed to every mutation field
 /// builder, replacing scattered arguments with a single reference.
 struct MutationTableContext {
-	/// The capitalized table name (e.g., "Person").
+	/// PascalCased base used in mutation field names (e.g., "Store" →
+	/// `createStore` / `updateStore`). Apollo-style; aliases override.
 	cap_name: String,
+	/// Pluralised PascalCased base used in bulk mutation field names
+	/// (e.g., "Stores" → `createStores`).
+	cap_plural_name: String,
 	/// The table name as a string (e.g., "person").
 	tb_name_str: String,
 	/// The table name.
@@ -227,6 +304,21 @@ struct MutationTableContext {
 	kvs: Arc<Datastore>,
 	/// The filter type name for this table (e.g., "_filter_person").
 	table_filter_name: String,
+	/// Optional `GRAPHQL_DEPRECATED "reason"` set on the table — prepended to
+	/// every mutation description for this table so introspection surfaces
+	/// the deprecation alongside the auto-generated text. async-graphql 7.2.1
+	/// doesn't expose a public setter for the `@deprecated` directive on
+	/// dynamic fields; switch to that once it does.
+	graphql_deprecated: Option<String>,
+}
+
+impl MutationTableContext {
+	fn describe(&self, base: String) -> String {
+		match self.graphql_deprecated.as_deref() {
+			Some(reason) => format!("[Deprecated: {reason}]\n\n{base}"),
+			None => base,
+		}
+	}
 }
 
 /// Process all tables and generate the Mutation root object with mutation fields.
@@ -237,25 +329,67 @@ pub async fn process_mutations(
 ) -> Result<Object, GqlError> {
 	let mut mutation = Object::new("Mutation");
 
+	// Collision check: aliases (#4537) + Apollo capitalisation must produce
+	// unique mutation field names for every (verb, table) pair. Two tables
+	// aliased to the same name would otherwise blow up async-graphql at
+	// build time with an opaque error.
+	{
+		let mut seen: HashMap<String, String> = HashMap::new();
+		for tb in tbs.iter() {
+			if tb.view.is_some() {
+				continue;
+			}
+			let cap = super::naming::mutation_cap_name(tb);
+			let cap_plural = super::naming::mutation_cap_plural_name(tb);
+			let mut names = Vec::with_capacity(8);
+			for verb in ["create", "update", "upsert", "delete"] {
+				names.push(format!("{verb}{cap}"));
+				names.push(format!("{verb}{cap_plural}"));
+			}
+			for name in names {
+				if let Some(prior) = seen.get(&name) {
+					return Err(super::error::schema_error(format!(
+						"GraphQL naming collision on mutation `{}` — both `{}` and `{}` \
+						 produce the same mutation field. Set an explicit `GRAPHQL_ALIAS` \
+						 on one of them.",
+						name, prior, tb.name
+					)));
+				}
+				seen.insert(name, tb.name.as_str().to_owned());
+			}
+		}
+	}
+
 	for tb in tbs.iter() {
+		// Pre-computed table views (`DEFINE TABLE x AS SELECT ... FROM y`) are
+		// materialised by the SurrealQL engine from upstream tables — direct
+		// writes are rejected at execution time. Skip mutation generation so
+		// the GraphQL surface doesn't advertise nonsense create/update/delete
+		// fields for views.
+		if tb.view.is_some() {
+			continue;
+		}
+
 		let tb_name = tb.name.clone();
-		let tb_name_str = tb_name.clone().into_string();
+		let tb_name_str = tb_name.as_str().to_string();
 		let is_relation = matches!(tb.table_type, TableType::Relation(_));
 
 		let fds = schema_ctx.tx.all_tb_fields(schema_ctx.ns, schema_ctx.db, &tb.name, None).await?;
 
-		// Generate input types
+		// Generate input types — fields are camelCased / aliased via the
+		// shared `naming` helpers (see GitHub issues #4537 and #4552).
 		let (create_input_name, update_input_name, upsert_input_name) =
 			generate_input_types(&tb_name_str, &fds, is_relation, types)?;
-
 		let ctx = MutationTableContext {
-			cap_name: capitalize_first(&tb_name_str),
+			cap_name: super::naming::mutation_cap_name(tb),
+			cap_plural_name: super::naming::mutation_cap_plural_name(tb),
 			table_filter_name: format!("_filter_{tb_name_str}"),
 			tb_name_str,
 			tb_name,
 			is_relation,
 			fds,
-			kvs: schema_ctx.datastore.clone(),
+			kvs: Arc::clone(schema_ctx.datastore),
+			graphql_deprecated: tb.graphql_deprecated.clone(),
 		};
 
 		// --- Single-record mutations ---
@@ -279,8 +413,8 @@ pub async fn process_mutations(
 // ---------------------------------------------------------------------------
 
 fn add_create_field(mutation: Object, tc: &MutationTableContext, input_name: &str) -> Object {
-	let fds = tc.fds.clone();
-	let kvs = tc.kvs.clone();
+	let fds = Arc::clone(&tc.fds);
+	let kvs = Arc::clone(&tc.kvs);
 	let tb_name = tc.tb_name.clone();
 	let is_relation = tc.is_relation;
 	mutation.field(
@@ -288,8 +422,8 @@ fn add_create_field(mutation: Object, tc: &MutationTableContext, input_name: &st
 			format!("create{}", tc.cap_name),
 			TypeRef::named(tc.tb_name_str.as_str()),
 			move |ctx| {
-				let fds = fds.clone();
-				let kvs = kvs.clone();
+				let fds = Arc::clone(&fds);
+				let kvs = Arc::clone(&kvs);
 				let tb_name = tb_name.clone();
 				FieldFuture::new(async move {
 					let sess = ctx.data::<Arc<Session>>()?;
@@ -305,22 +439,22 @@ fn add_create_field(mutation: Object, tc: &MutationTableContext, input_name: &st
 				})
 			},
 		)
-		.description(format!("Create a new `{}` record", tc.tb_name_str))
+		.description(tc.describe(format!("Create a new `{}` record", tc.tb_name_str)))
 		.argument(InputValue::new("data", TypeRef::named_nn(input_name))),
 	)
 }
 
 fn add_update_field(mutation: Object, tc: &MutationTableContext, input_name: &str) -> Object {
-	let fds = tc.fds.clone();
-	let kvs = tc.kvs.clone();
+	let fds = Arc::clone(&tc.fds);
+	let kvs = Arc::clone(&tc.kvs);
 	let tb_name = tc.tb_name.clone();
 	mutation.field(
 		Field::new(
 			format!("update{}", tc.cap_name),
 			TypeRef::named(tc.tb_name_str.as_str()),
 			move |ctx| {
-				let fds = fds.clone();
-				let kvs = kvs.clone();
+				let fds = Arc::clone(&fds);
+				let kvs = Arc::clone(&kvs);
 				let tb_name = tb_name.clone();
 				FieldFuture::new(async move {
 					let sess = ctx.data::<Arc<Session>>()?;
@@ -357,23 +491,23 @@ fn add_update_field(mutation: Object, tc: &MutationTableContext, input_name: &st
 				})
 			},
 		)
-		.description(format!("Update an existing `{}` record", tc.tb_name_str))
+		.description(tc.describe(format!("Update an existing `{}` record", tc.tb_name_str)))
 		.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
 		.argument(InputValue::new("data", TypeRef::named_nn(input_name))),
 	)
 }
 
 fn add_upsert_field(mutation: Object, tc: &MutationTableContext, input_name: &str) -> Object {
-	let fds = tc.fds.clone();
-	let kvs = tc.kvs.clone();
+	let fds = Arc::clone(&tc.fds);
+	let kvs = Arc::clone(&tc.kvs);
 	let tb_name = tc.tb_name.clone();
 	mutation.field(
 		Field::new(
 			format!("upsert{}", tc.cap_name),
 			TypeRef::named(tc.tb_name_str.as_str()),
 			move |ctx| {
-				let fds = fds.clone();
-				let kvs = kvs.clone();
+				let fds = Arc::clone(&fds);
+				let kvs = Arc::clone(&kvs);
 				let tb_name = tb_name.clone();
 				FieldFuture::new(async move {
 					let sess = ctx.data::<Arc<Session>>()?;
@@ -410,21 +544,23 @@ fn add_upsert_field(mutation: Object, tc: &MutationTableContext, input_name: &st
 				})
 			},
 		)
-		.description(format!("Upsert a `{}` record (create or update)", tc.tb_name_str))
+		.description(
+			tc.describe(format!("Upsert a `{}` record (create or update)", tc.tb_name_str)),
+		)
 		.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
 		.argument(InputValue::new("data", TypeRef::named_nn(input_name))),
 	)
 }
 
 fn add_delete_field(mutation: Object, tc: &MutationTableContext) -> Object {
-	let kvs = tc.kvs.clone();
+	let kvs = Arc::clone(&tc.kvs);
 	let tb_name = tc.tb_name.clone();
 	mutation.field(
 		Field::new(
 			format!("delete{}", tc.cap_name),
 			TypeRef::named_nn(TypeRef::BOOLEAN),
 			move |ctx| {
-				let kvs = kvs.clone();
+				let kvs = Arc::clone(&kvs);
 				let tb_name = tb_name.clone();
 				FieldFuture::new(async move {
 					let sess = ctx.data::<Arc<Session>>()?;
@@ -451,7 +587,7 @@ fn add_delete_field(mutation: Object, tc: &MutationTableContext) -> Object {
 				})
 			},
 		)
-		.description(format!("Delete a `{}` record by ID", tc.tb_name_str))
+		.description(tc.describe(format!("Delete a `{}` record by ID", tc.tb_name_str)))
 		.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
 	)
 }
@@ -461,17 +597,17 @@ fn add_delete_field(mutation: Object, tc: &MutationTableContext) -> Object {
 // ---------------------------------------------------------------------------
 
 fn add_create_many_field(mutation: Object, tc: &MutationTableContext, input_name: &str) -> Object {
-	let fds = tc.fds.clone();
-	let kvs = tc.kvs.clone();
+	let fds = Arc::clone(&tc.fds);
+	let kvs = Arc::clone(&tc.kvs);
 	let tb_name = tc.tb_name.clone();
 	let is_relation = tc.is_relation;
 	mutation.field(
 		Field::new(
-			format!("createMany{}", tc.cap_name),
+			format!("create{}", tc.cap_plural_name),
 			TypeRef::named_nn_list_nn(tc.tb_name_str.as_str()),
 			move |ctx| {
-				let fds = fds.clone();
-				let kvs = kvs.clone();
+				let fds = Arc::clone(&fds);
+				let kvs = Arc::clone(&kvs);
 				let tb_name = tb_name.clone();
 				FieldFuture::new(async move {
 					let sess = ctx.data::<Arc<Session>>()?;
@@ -512,22 +648,22 @@ fn add_create_many_field(mutation: Object, tc: &MutationTableContext, input_name
 				})
 			},
 		)
-		.description(format!("Create multiple `{}` records", tc.tb_name_str))
+		.description(tc.describe(format!("Create multiple `{}` records", tc.tb_name_str)))
 		.argument(InputValue::new("data", TypeRef::named_nn_list_nn(input_name))),
 	)
 }
 
 fn add_update_many_field(mutation: Object, tc: &MutationTableContext, input_name: &str) -> Object {
-	let fds = tc.fds.clone();
-	let kvs = tc.kvs.clone();
+	let fds = Arc::clone(&tc.fds);
+	let kvs = Arc::clone(&tc.kvs);
 	let tb_name = tc.tb_name.clone();
 	mutation.field(
 		Field::new(
-			format!("updateMany{}", tc.cap_name),
+			format!("update{}", tc.cap_plural_name),
 			TypeRef::named_nn_list_nn(tc.tb_name_str.as_str()),
 			move |ctx| {
-				let fds = fds.clone();
-				let kvs = kvs.clone();
+				let fds = Arc::clone(&fds);
+				let kvs = Arc::clone(&kvs);
 				let tb_name = tb_name.clone();
 				FieldFuture::new(async move {
 					let sess = ctx.data::<Arc<Session>>()?;
@@ -563,23 +699,25 @@ fn add_update_many_field(mutation: Object, tc: &MutationTableContext, input_name
 				})
 			},
 		)
-		.description(format!("Update multiple `{}` records matching a filter", tc.tb_name_str))
+		.description(
+			tc.describe(format!("Update multiple `{}` records matching a filter", tc.tb_name_str)),
+		)
 		.argument(InputValue::new("where", TypeRef::named(tc.table_filter_name.as_str())))
 		.argument(InputValue::new("data", TypeRef::named_nn(input_name))),
 	)
 }
 
 fn add_upsert_many_field(mutation: Object, tc: &MutationTableContext, input_name: &str) -> Object {
-	let fds = tc.fds.clone();
-	let kvs = tc.kvs.clone();
+	let fds = Arc::clone(&tc.fds);
+	let kvs = Arc::clone(&tc.kvs);
 	let tb_name = tc.tb_name.clone();
 	mutation.field(
 		Field::new(
-			format!("upsertMany{}", tc.cap_name),
+			format!("upsert{}", tc.cap_plural_name),
 			TypeRef::named_nn_list_nn(tc.tb_name_str.as_str()),
 			move |ctx| {
-				let fds = fds.clone();
-				let kvs = kvs.clone();
+				let fds = Arc::clone(&fds);
+				let kvs = Arc::clone(&kvs);
 				let tb_name = tb_name.clone();
 				FieldFuture::new(async move {
 					let sess = ctx.data::<Arc<Session>>()?;
@@ -615,23 +753,25 @@ fn add_upsert_many_field(mutation: Object, tc: &MutationTableContext, input_name
 				})
 			},
 		)
-		.description(format!("Upsert multiple `{}` records matching a filter", tc.tb_name_str))
+		.description(
+			tc.describe(format!("Upsert multiple `{}` records matching a filter", tc.tb_name_str)),
+		)
 		.argument(InputValue::new("where", TypeRef::named(tc.table_filter_name.as_str())))
 		.argument(InputValue::new("data", TypeRef::named_nn(input_name))),
 	)
 }
 
 fn add_delete_many_field(mutation: Object, tc: &MutationTableContext) -> Object {
-	let fds = tc.fds.clone();
-	let kvs = tc.kvs.clone();
+	let fds = Arc::clone(&tc.fds);
+	let kvs = Arc::clone(&tc.kvs);
 	let tb_name = tc.tb_name.clone();
 	mutation.field(
 		Field::new(
-			format!("deleteMany{}", tc.cap_name),
+			format!("delete{}", tc.cap_plural_name),
 			TypeRef::named_nn(TypeRef::INT),
 			move |ctx| {
-				let fds = fds.clone();
-				let kvs = kvs.clone();
+				let fds = Arc::clone(&fds);
+				let kvs = Arc::clone(&kvs);
 				let tb_name = tb_name.clone();
 				FieldFuture::new(async move {
 					let sess = ctx.data::<Arc<Session>>()?;
@@ -662,10 +802,10 @@ fn add_delete_many_field(mutation: Object, tc: &MutationTableContext) -> Object 
 				})
 			},
 		)
-		.description(format!(
+		.description(tc.describe(format!(
 			"Delete multiple `{}` records matching a filter, returns count",
 			tc.tb_name_str
-		))
+		)))
 		.argument(InputValue::new("where", TypeRef::named(tc.table_filter_name.as_str()))),
 	)
 }
@@ -695,7 +835,9 @@ fn parse_where_arg(
 	tb_name: &str,
 ) -> Result<Option<Cond>, GqlError> {
 	match args.get("where") {
-		Some(GqlValue::Object(o)) if !o.is_empty() => Ok(Some(cond_from_filter(o, fds, tb_name)?)),
+		Some(GqlValue::Object(o)) if !o.is_empty() => {
+			Ok(Some(cond_from_filter(o, fds, tb_name, &[])?))
+		}
 		_ => Ok(None),
 	}
 }

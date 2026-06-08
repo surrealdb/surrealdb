@@ -11,6 +11,7 @@ use surrealdb::engine::any::{self, connect};
 use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
 use surrealdb::{IndexedResults, Notification, Stats};
+use surrealdb_core::cnf::CommonConfig;
 use surrealdb_core::dbs::Capabilities as CoreCapabilities;
 use surrealdb_types::{SurrealValue, ToSql, Value, object};
 
@@ -199,7 +200,11 @@ pub async fn init(
 			continue;
 		}
 		// Complete the request
-		match surrealdb_core::syn::parse_with_capabilities(&line, &capabilities) {
+		match surrealdb_core::syn::parse_with_capabilities(
+			&line,
+			&capabilities,
+			&CommonConfig::default(),
+		) {
 			Ok(mut query) => {
 				let init_length = query.num_statements();
 				let vars = query.get_let_statements();
@@ -268,7 +273,7 @@ pub async fn init(
 	Ok(())
 }
 
-fn pretty_print_json(value: JsonValue) -> String {
+fn pretty_print_json(value: &JsonValue) -> String {
 	let pretty_print = |value: &JsonValue| -> Result<String> {
 		let mut buf = Vec::new();
 		let mut serializer =
@@ -276,7 +281,7 @@ fn pretty_print_json(value: JsonValue) -> String {
 		value.serialize(&mut serializer)?;
 		Ok(String::from_utf8(buf)?)
 	};
-	match pretty_print(&value) {
+	match pretty_print(value) {
 		Ok(v) => v,
 		// Fall back to the default print if the JSON value is not valid UTF-8 or if the serializer
 		// fails
@@ -351,7 +356,7 @@ fn process(
 				}
 				// Yes prettify the JSON response
 				(true, true) => {
-					let output = pretty_print_json(data.into_json_value());
+					let output = pretty_print_json(&data.into_json_value());
 					format!(
 						"-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}"
 					)
@@ -389,7 +394,7 @@ fn process(
 			.into_iter()
 			.enumerate()
 			.map(|(index, (stats, value))| {
-				let output = pretty_print_json(value.into_json_value());
+				let output = pretty_print_json(&value.into_json_value());
 				let query_num = index + 1;
 				let execution_time = stats.execution_time.unwrap_or_default();
 				format!("-- Query {query_num} (execution time: {execution_time:?}\n{output:#}",)
@@ -435,7 +440,11 @@ impl Validator for InputValidator<'_> {
 		} else if input.is_empty() {
 			Valid(None) // Ignore empty lines
 		} else {
-			match surrealdb_core::syn::parse_with_capabilities(input, self.capabilities) {
+			match surrealdb_core::syn::parse_with_capabilities(
+				input,
+				self.capabilities,
+				&Default::default(),
+			) {
 				Err(e) => Invalid(Some(format!(" --< {e}"))),
 				_ => Valid(None),
 			}

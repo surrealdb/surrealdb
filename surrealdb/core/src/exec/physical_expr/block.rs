@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
@@ -20,10 +20,10 @@ use crate::ctx::FrozenContext;
 use crate::dbs::NewPlannerStrategy;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::exec::AccessMode;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
 use crate::exec::plan_or_compute::{block_required_context, legacy_compute};
 use crate::exec::planner::expr_to_physical_expr;
+use crate::exec::{AccessMode, BoxFut};
 use crate::expr::{Block, ControlFlow, Expr, FlowResult};
 use crate::val::Value;
 
@@ -52,10 +52,10 @@ pub struct BlockPhysicalExpr {
 /// This creates a child context that adds local block params on top.
 fn create_planning_context(
 	exec_ctx: &crate::exec::ExecutionContext,
-	local_params: &HashMap<String, Value>,
+	local_params: &HashMap<Strand, Value>,
 ) -> FrozenContext {
 	if local_params.is_empty() {
-		return exec_ctx.ctx().clone();
+		return Arc::clone(exec_ctx.ctx());
 	}
 
 	// Create a child context that adds local params (shadowing global params)
@@ -82,19 +82,20 @@ fn get_legacy_context<'a>(
 	let frozen = if let Some(ctx) = cached_ctx.take() {
 		ctx
 	} else {
-		exec_ctx.ctx().clone()
+		Arc::clone(exec_ctx.ctx())
 	};
 
-	*cached_ctx = Some(frozen.clone());
+	*cached_ctx = Some(Arc::clone(&frozen));
 
 	Ok((options, frozen))
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for BlockPhysicalExpr {
 	fn name(&self) -> &'static str {
 		"Block"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
@@ -102,41 +103,43 @@ impl PhysicalExpr for BlockPhysicalExpr {
 		block_required_context(&self.block)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		// Empty block returns NONE
-		if self.block.0.is_empty() {
-			return Ok(Value::None);
-		}
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			// Empty block returns NONE
+			if self.block.0.is_empty() {
+				return Ok(Value::None);
+			}
 
-		// Track block-local parameters (from LET statements)
-		let mut local_params: HashMap<String, Value> = HashMap::new();
+			// Track block-local parameters (from LET statements)
+			let mut local_params: HashMap<Strand, Value> = HashMap::new();
 
-		// Track the result of the last expression
-		let mut result = Value::None;
+			// Track the result of the last expression
+			let mut result = Value::None;
 
-		// Track updated execution context (for LET bindings)
-		let mut current_exec_ctx = ctx.exec_ctx.clone();
+			// Track updated execution context (for LET bindings)
+			let mut current_exec_ctx = ctx.exec_ctx.clone();
 
-		// Track a mutable frozen context for legacy compute fallback
-		let mut legacy_ctx: Option<FrozenContext> = None;
+			// Track a mutable frozen context for legacy compute fallback
+			let mut legacy_ctx: Option<FrozenContext> = None;
 
-		// Store the current value for $this - used in legacy compute fallback
-		let current_value_for_legacy = ctx.current_value.cloned();
+			// Store the current value for $this - used in legacy compute fallback
+			let current_value_for_legacy = ctx.current_value.cloned();
 
-		for expr in self.block.0.iter() {
-			result = self
-				.evaluate_block_entry(
-					expr,
-					&ctx,
-					&mut local_params,
-					&mut current_exec_ctx,
-					&mut legacy_ctx,
-					current_value_for_legacy.as_ref(),
-				)
-				.await?;
-		}
+			for expr in self.block.0.iter() {
+				result = self
+					.evaluate_block_entry(
+						expr,
+						&ctx,
+						&mut local_params,
+						&mut current_exec_ctx,
+						&mut legacy_ctx,
+						current_value_for_legacy.as_ref(),
+					)
+					.await?;
+			}
 
-		Ok(result)
+			Ok(result)
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -160,7 +163,7 @@ impl BlockPhysicalExpr {
 		&self,
 		expr: &Expr,
 		ctx: &EvalContext<'_>,
-		local_params: &mut HashMap<String, Value>,
+		local_params: &mut HashMap<Strand, Value>,
 		current_exec_ctx: &mut crate::exec::ExecutionContext,
 		legacy_ctx: &mut Option<FrozenContext>,
 		current_value_for_legacy: Option<&Value>,
@@ -170,7 +173,7 @@ impl BlockPhysicalExpr {
 				// Check for protected parameter names
 				if PROTECTED_PARAM_NAMES.contains(&set_stmt.name.as_str()) {
 					return Err(Error::InvalidParam {
-						name: set_stmt.name.clone(),
+						name: set_stmt.name.to_string(),
 					}
 					.into());
 				}
@@ -205,8 +208,18 @@ impl BlockPhysicalExpr {
 						})));
 					}
 					Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
-						if let Error::PlannerUnimplemented(msg) = &e {
-							tracing::warn!("PlannerUnimplemented fallback in block (LET): {msg}");
+						match &e {
+							Error::PlannerUnimplemented(msg) => {
+								tracing::warn!(
+									"PlannerUnimplemented fallback in block (LET): {msg}"
+								);
+							}
+							Error::PlannerUnsupported(msg) => {
+								tracing::debug!(
+									"PlannerUnsupported fallback in block (LET): {msg}",
+								);
+							}
+							_ => {}
 						}
 						let (opt, frozen) = get_legacy_context(current_exec_ctx, legacy_ctx)?;
 						let doc =
@@ -221,7 +234,7 @@ impl BlockPhysicalExpr {
 				// Apply type coercion if specified
 				let value = if let Some(kind) = &set_stmt.kind {
 					value.coerce_to_kind(kind).map_err(|e| Error::SetCoerce {
-						name: set_stmt.name.clone(),
+						name: set_stmt.name.to_string(),
 						error: Box::new(e),
 					})?
 				} else {
@@ -229,14 +242,14 @@ impl BlockPhysicalExpr {
 				};
 
 				// Store in local params and update execution context
-				local_params.insert(set_stmt.name.clone(), value.clone());
-				*current_exec_ctx =
-					current_exec_ctx.with_param(set_stmt.name.clone(), value.clone());
+				let name: Strand = set_stmt.name.clone();
+				local_params.insert(name.clone(), value.clone());
+				*current_exec_ctx = current_exec_ctx.with_param(name.clone(), value.clone());
 
 				// Update the legacy context with the new parameter
 				if let Some(ctx) = legacy_ctx {
 					let mut new_ctx = crate::ctx::Context::new_child(ctx);
-					new_ctx.add_value(set_stmt.name.clone(), Arc::new(value));
+					new_ctx.add_value(name, Arc::new(value));
 					*ctx = new_ctx.freeze();
 				}
 
@@ -273,8 +286,18 @@ impl BlockPhysicalExpr {
 						})))
 					}
 					Err(e @ (Error::PlannerUnsupported(_) | Error::PlannerUnimplemented(_))) => {
-						if let Error::PlannerUnimplemented(msg) = &e {
-							tracing::warn!("PlannerUnimplemented fallback in block (expr): {msg}");
+						match &e {
+							Error::PlannerUnimplemented(msg) => {
+								tracing::warn!(
+									"PlannerUnimplemented fallback in block (expr): {msg}"
+								);
+							}
+							Error::PlannerUnsupported(msg) => {
+								tracing::debug!(
+									"PlannerUnsupported fallback in block (expr): {msg}",
+								);
+							}
+							_ => {}
 						}
 						let (opt, frozen) = get_legacy_context(current_exec_ctx, legacy_ctx)?;
 						let doc =

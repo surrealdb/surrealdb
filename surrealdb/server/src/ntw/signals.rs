@@ -37,7 +37,7 @@ pub fn graceful_shutdown(
 			// Clone the state
 			let http_handle = http_handle.clone();
 			let canceller = canceller.clone();
-			let state = state.clone();
+			let state = Arc::clone(&state);
 			// Spawn a background task
 			tokio::spawn(async move {
 				// Stop accepting new HTTP connections
@@ -65,7 +65,7 @@ pub fn graceful_shutdown(
 				// Close all HTTP connections immediately
 				http_handle.shutdown();
 				// Close all WebSocket connections immediately
-				rpc::shutdown(state);
+				rpc::shutdown(&state);
 				// Cancel the cancellation token
 				canceller.cancel();
 				// Flush all telemetry data
@@ -82,7 +82,7 @@ pub fn graceful_shutdown(
 				// Close all HTTP connections immediately
 				http_handle.shutdown();
 				// Close all WebSocket connections immediately
-				rpc::shutdown(state);
+				rpc::shutdown(&state);
 				// Cancel the cancellation token
 				canceller.cancel();
 				// Flush all telemetry data

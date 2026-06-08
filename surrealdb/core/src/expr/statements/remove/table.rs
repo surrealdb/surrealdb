@@ -2,10 +2,11 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use uuid::Uuid;
 
+use super::retire_table_indexes;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{TableDefinition, ViewDefinition};
 use crate::ctx::FrozenContext;
-use crate::dbs::Options;
+use crate::dbs::{Options, RoutedNotification};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
@@ -41,7 +42,7 @@ impl RemoveTableStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Table, Base::Db)?;
 		// Compute the name
 		let name =
 			TableName::new(expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?);
@@ -61,9 +62,6 @@ impl RemoveTableStatement {
 			}
 			.into());
 		};
-		// Remove the index stores
-		ctx.get_index_stores().table_removed(ctx.get_index_builder(), &txn, ns, db, &tb).await?;
-
 		// Get the foreign tables
 		let fts = txn.all_tb_views(ns, db, &name, None).await?;
 
@@ -86,6 +84,9 @@ impl RemoveTableStatement {
 
 		// Get the live queries
 		let lvs = txn.all_tb_lives(ns, db, &name, None).await?;
+		// Retire index state before deleting the table definition. Durable
+		// cleanup is transactional; local builder aborts are deferred until commit.
+		retire_table_indexes(ctx, &txn, ns, db, &tb).await?;
 
 		// Delete the definition
 		if self.expunge {
@@ -134,25 +135,27 @@ impl RemoveTableStatement {
 				.await?;
 			}
 		}
-		if let Some(sender) = opt.broker.as_ref() {
+		if let Some(sender) = ctx.broker() {
 			for lv in lvs.iter() {
 				sender
-					.send(PublicNotification::new(
-						lv.id.into(),
-						None,
-						PublicAction::Killed,
-						PublicValue::None,
-						PublicValue::None,
+					.send(RoutedNotification::new(
+						lv.node,
+						PublicNotification::new(
+							lv.id.into(),
+							None,
+							PublicAction::Killed,
+							PublicValue::None,
+							PublicValue::None,
+						),
 					))
 					.await;
 			}
 		}
-		// Clear the cache
+		// Refresh the table cache for lives
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &name);
-			cache.clear();
+			cache.set_live_queries_version(ns, db, &name);
 		}
-		// Clear the cache
+		// Clear the transaction cache
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)

@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 #[cfg(storage)]
@@ -10,13 +9,14 @@ use std::time::Duration;
 #[cfg(feature = "surrealism")]
 use anyhow::Context as _;
 use anyhow::{Result, bail};
-use async_channel::Sender;
+use surrealdb_strand::Strand;
 #[cfg(feature = "surrealism")]
 use surrealism_runtime::package::{SurrealismPackage, UnpackOptions};
 #[cfg(feature = "surrealism")]
 use surrealism_runtime::runtime::Runtime;
 #[cfg(feature = "http")]
 use url::Url;
+use uuid::Uuid;
 use web_time::Instant;
 
 use crate::buc::manager::BucketsManager;
@@ -25,7 +25,9 @@ use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider};
 use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
-use crate::cnf::PROTECTED_PARAM_NAMES;
+use crate::cnf::dynamic::DynamicConfiguration;
+use crate::cnf::{CommonConfig, PROTECTED_PARAM_NAMES};
+use crate::ctx::cancel::CancelHandle;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 #[cfg(feature = "surrealism")]
@@ -34,11 +36,15 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::NetTarget;
 #[cfg(all(feature = "http", feature = "surrealism"))]
 use crate::dbs::capabilities::Targets;
-use crate::dbs::{Capabilities, NewPlannerStrategy, Options, Session, Variables};
+use crate::dbs::{
+	Capabilities, MessageBroker, NewPlannerStrategy, Options, Session, StatementCounters, Variables,
+};
 use crate::err::Error;
 use crate::exec::function::FunctionRegistry;
+use crate::expr::Base;
 #[cfg(feature = "http")]
 use crate::http::HttpClient;
+use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
@@ -51,13 +57,16 @@ use crate::mem::ALLOC;
 use crate::sql::expression::convert_public_value_to_internal;
 #[cfg(feature = "surrealism")]
 use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup, SurrealismCachedModule};
-#[cfg(feature = "surrealism")]
-use crate::surrealism::host::module_allow_net_targets;
-use crate::types::{PublicNotification, PublicVariables};
+use crate::types::PublicVariables;
 use crate::val::Value;
 
 pub type FrozenContext = Arc<Context>;
 
+/// Ambient state for one query batch: datastore handles, cancellation, capabilities,
+/// and **request-wide** configuration (node id, auth enabled, dynamic config, live/broker).
+///
+/// Stored behind [`FrozenContext`] (`Arc<Context>`) with optional parent links for scoped
+/// deadlines, planner state, and parameters. Per-statement toggles live on [`Options`], not here.
 pub struct Context {
 	// An optional parent context.
 	parent: Option<FrozenContext>,
@@ -67,12 +76,17 @@ pub struct Context {
 	// that exceed a given duration threshold. This configuration is propagated
 	// from the datastore into the context for the lifetime of a request.
 	slow_log: Option<SlowLog>,
-	// Whether or not this context is cancelled.
+	// Whether or not this context is cancelled. Fast hot-path view checked
+	// by [`Self::done`] at every executor yield.
 	cancelled: Arc<AtomicBool>,
+	// Awaitable view of the external cancellation signal, when one was
+	// installed via [`Self::set_cancellation`]. Used by sites that bare-await
+	// an external timer (e.g. `SLEEP`) so they can `select!` against the
+	// cancel instead of running to completion. `None` for contexts without
+	// an external cancel source (embedded callers, internal use).
+	cancel_token: Option<tokio_util::sync::CancellationToken>,
 	// A collection of read only values stored in this context.
-	values: HashMap<Cow<'static, str>, Arc<Value>>,
-	// Stores the notification channel if available
-	notifications: Option<Sender<PublicNotification>>,
+	values: HashMap<Strand, Arc<Value>>,
 	// An optional query planner
 	query_planner: Option<Arc<QueryPlanner>>,
 	// An optional query executor
@@ -107,6 +121,17 @@ pub struct Context {
 	new_planner_strategy: NewPlannerStrategy,
 	// When true, EXPLAIN ANALYZE omits elapsed durations for deterministic test output
 	redact_volatile_explain_attrs: bool,
+	// Per-statement counters, shared with the executor so it can read the
+	// number of rows affected by the running DML statement when emitting
+	// the corresponding `StatementEvent`. Replaced by the executor before
+	// each top-level statement; `None` outside an active statement.
+	statement_counters: Option<Arc<StatementCounters>>,
+	// Pre-resolved tenant identity (namespace, database, user, session id,
+	// client ip) derived from the active session at `attach_session` time.
+	// Read by the executor and the transaction layer to populate the
+	// `*Ctx` half of every emitted [`crate::observe`] event without
+	// re-walking the session value tree on every emit.
+	tenant_identity: Option<Arc<crate::observe::TenantIdentity>>,
 	// Matches context for index functions (search::highlight, search::score, etc.)
 	matches_context: Option<Arc<crate::exec::function::MatchesContext>>,
 	// KNN context for index functions (vector::distance::knn)
@@ -114,6 +139,18 @@ pub struct Context {
 	/// Client for making http requests.
 	#[cfg(feature = "http")]
 	http_client: Arc<HttpClient>,
+	/// Stable node id for this datastore instance (live routing, queue keys, etc.).
+	node_id: Uuid,
+	/// Whether authentication is required for non-anonymous access (datastore boot flag).
+	pub(crate) auth_enabled: bool,
+	/// Runtime-adjustable configuration (e.g. global query timeout).
+	dynamic_configuration: DynamicConfiguration,
+	/// Whether this session may use realtime (`LIVE` / `KILL LIVE`).
+	live: bool,
+	/// Optional broker for cross-node live query notifications.
+	broker: Option<Arc<dyn MessageBroker>>,
+	// Executor config
+	pub config: Arc<CommonConfig>,
 }
 
 impl Debug for Context {
@@ -136,12 +173,15 @@ impl Context {
 			deadline: None,
 			slow_log: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
-			notifications: None,
+			cancel_token: None,
 			query_planner: None,
 			query_executor: None,
 			iteration_stage: None,
-			capabilities: parent.capabilities.clone(),
-			index_stores: IndexStores::default(),
+			capabilities: Arc::clone(&parent.capabilities),
+			index_stores: IndexStores::new(
+				parent.config.hnsw_cache_size,
+				parent.config.diskann_cache_size,
+			),
 			cache: None,
 			index_builder: None,
 			sequences: None,
@@ -152,13 +192,21 @@ impl Context {
 			buckets: None,
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: None,
-			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			function_registry: Arc::clone(&parent.function_registry),
 			new_planner_strategy: NewPlannerStrategy::default(),
 			redact_volatile_explain_attrs: false,
+			statement_counters: None,
 			matches_context: None,
 			knn_context: None,
+			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
-			http_client: parent.http_client.clone(),
+			http_client: Arc::clone(&parent.http_client),
+			tenant_identity: None,
+			node_id: parent.node_id,
+			auth_enabled: parent.auth_enabled,
+			dynamic_configuration: parent.dynamic_configuration.clone(),
+			live: parent.live,
+			broker: parent.broker.clone(),
 		}
 	}
 
@@ -166,9 +214,9 @@ impl Context {
 	pub(crate) fn new_child(parent: &FrozenContext) -> Self {
 		Self::new_child_with_capabilities(
 			parent,
-			parent.capabilities.clone(),
+			Arc::clone(&parent.capabilities),
 			#[cfg(feature = "http")]
-			parent.http_client.clone(),
+			Arc::clone(&parent.http_client),
 		)
 	}
 
@@ -185,7 +233,7 @@ impl Context {
 			deadline: parent.deadline,
 			slow_log: parent.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
-			notifications: parent.notifications.clone(),
+			cancel_token: None,
 			query_planner: parent.query_planner.clone(),
 			query_executor: parent.query_executor.clone(),
 			iteration_stage: parent.iteration_stage.clone(),
@@ -198,17 +246,25 @@ impl Context {
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
 			isolated: false,
-			parent: Some(parent.clone()),
+			parent: Some(Arc::clone(parent)),
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
-			function_registry: parent.function_registry.clone(),
-			new_planner_strategy: parent.new_planner_strategy.clone(),
+			function_registry: Arc::clone(&parent.function_registry),
+			new_planner_strategy: parent.new_planner_strategy,
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
+			statement_counters: parent.statement_counters.clone(),
 			matches_context: parent.matches_context.clone(),
 			knn_context: parent.knn_context.clone(),
+			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
 			http_client,
+			tenant_identity: parent.tenant_identity.clone(),
+			node_id: parent.node_id,
+			auth_enabled: parent.auth_enabled,
+			dynamic_configuration: parent.dynamic_configuration.clone(),
+			live: parent.live,
+			broker: parent.broker.clone(),
 		}
 	}
 
@@ -221,11 +277,11 @@ impl Context {
 			deadline: parent.deadline,
 			slow_log: parent.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
-			notifications: parent.notifications.clone(),
+			cancel_token: None,
 			query_planner: parent.query_planner.clone(),
 			query_executor: parent.query_executor.clone(),
 			iteration_stage: parent.iteration_stage.clone(),
-			capabilities: parent.capabilities.clone(),
+			capabilities: Arc::clone(&parent.capabilities),
 			index_stores: parent.index_stores.clone(),
 			cache: parent.cache.clone(),
 			index_builder: parent.index_builder.clone(),
@@ -234,17 +290,25 @@ impl Context {
 			temporary_directory: parent.temporary_directory.clone(),
 			transaction: parent.transaction.clone(),
 			isolated: true,
-			parent: Some(parent.clone()),
+			parent: Some(Arc::clone(parent)),
 			buckets: parent.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
-			function_registry: parent.function_registry.clone(),
-			new_planner_strategy: parent.new_planner_strategy.clone(),
+			function_registry: Arc::clone(&parent.function_registry),
+			new_planner_strategy: parent.new_planner_strategy,
 			redact_volatile_explain_attrs: parent.redact_volatile_explain_attrs,
+			statement_counters: parent.statement_counters.clone(),
 			matches_context: parent.matches_context.clone(),
 			knn_context: parent.knn_context.clone(),
+			config: Arc::clone(&parent.config),
 			#[cfg(feature = "http")]
-			http_client: parent.http_client.clone(),
+			http_client: Arc::clone(&parent.http_client),
+			tenant_identity: parent.tenant_identity.clone(),
+			node_id: parent.node_id,
+			auth_enabled: parent.auth_enabled,
+			dynamic_configuration: parent.dynamic_configuration.clone(),
+			live: parent.live,
+			broker: parent.broker.clone(),
 		}
 	}
 
@@ -257,18 +321,28 @@ impl Context {
 	/// This is used by the streaming executor to give the operator pipeline
 	/// its own `Arc<Context>` that won't interfere with the executor's
 	/// `Arc::get_mut` requirements between statements.
+	///
+	/// The cancellation flag and awaitable token are **cloned** from the
+	/// source rather than allocated fresh. Without this, any operator that
+	/// bridges back into legacy `Context::done` / `is_done` checks — e.g.
+	/// the streaming-exec KNN operator calling into
+	/// `idx::trees::hnsw::knn_search` / `idx::trees::diskann::knn_search`,
+	/// whose inner loops poll `frozen_ctx.is_done(Some(count))` — would
+	/// observe the snapshot's local (never-tripped) flag instead of the
+	/// connection-level cancel handle installed on the source root, and
+	/// would not abort on WebSocket disconnect.
 	pub(crate) fn snapshot(from: &FrozenContext) -> Self {
 		Self {
 			// Flatten all values from the parent chain into this context
 			values: from.collect_values(HashMap::default()),
 			deadline: from.deadline,
 			slow_log: from.slow_log.clone(),
-			cancelled: Arc::new(AtomicBool::new(false)),
-			notifications: from.notifications.clone(),
+			cancelled: Arc::clone(&from.cancelled),
+			cancel_token: from.cancel_token.clone(),
 			query_planner: from.query_planner.clone(),
 			query_executor: from.query_executor.clone(),
 			iteration_stage: from.iteration_stage.clone(),
-			capabilities: from.capabilities.clone(),
+			capabilities: Arc::clone(&from.capabilities),
 			index_stores: from.index_stores.clone(),
 			cache: from.cache.clone(),
 			index_builder: from.index_builder.clone(),
@@ -281,33 +355,49 @@ impl Context {
 			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
-			function_registry: from.function_registry.clone(),
-			new_planner_strategy: from.new_planner_strategy.clone(),
+			function_registry: Arc::clone(&from.function_registry),
+			new_planner_strategy: from.new_planner_strategy,
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
+			statement_counters: from.statement_counters.clone(),
 			matches_context: from.matches_context.clone(),
 			knn_context: from.knn_context.clone(),
+			config: Arc::clone(&from.config),
 			#[cfg(feature = "http")]
-			http_client: from.http_client.clone(),
+			http_client: Arc::clone(&from.http_client),
+			tenant_identity: from.tenant_identity.clone(),
+			node_id: from.node_id,
+			auth_enabled: from.auth_enabled,
+			dynamic_configuration: from.dynamic_configuration.clone(),
+			live: from.live,
+			broker: from.broker.clone(),
 		}
 	}
 
 	/// Create a new context from a frozen parent context.
 	/// This context is not linked to the parent context,
 	/// and won't be cancelled if the parent is cancelled.
+	///
+	/// `index_builder` is intentionally cleared: the only caller is the
+	/// background index `Building` task, which lives inside the
+	/// `IndexBuilder`'s HashMap. Cloning the back-reference would form an
+	/// `Arc<RwLock<HashMap<.., Arc<Building>>>>` cycle that pins the
+	/// `Datastore` (and its storage handles, ~7 file descriptors per RocksDB
+	/// instance, ~3 per SurrealKV) until process exit — see issue
+	/// surrealdb/surrealdb#7304.
 	pub(crate) fn new_concurrent(from: &FrozenContext) -> Self {
 		Self {
 			values: HashMap::default(),
 			deadline: None,
 			slow_log: from.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
-			notifications: from.notifications.clone(),
+			cancel_token: None,
 			query_planner: from.query_planner.clone(),
 			query_executor: from.query_executor.clone(),
 			iteration_stage: from.iteration_stage.clone(),
-			capabilities: from.capabilities.clone(),
+			capabilities: Arc::clone(&from.capabilities),
 			index_stores: from.index_stores.clone(),
 			cache: from.cache.clone(),
-			index_builder: from.index_builder.clone(),
+			index_builder: None,
 			sequences: from.sequences.clone(),
 			#[cfg(storage)]
 			temporary_directory: from.temporary_directory.clone(),
@@ -317,19 +407,30 @@ impl Context {
 			buckets: from.buckets.clone(),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
-			function_registry: from.function_registry.clone(),
-			new_planner_strategy: from.new_planner_strategy.clone(),
+			function_registry: Arc::clone(&from.function_registry),
+			new_planner_strategy: from.new_planner_strategy,
 			redact_volatile_explain_attrs: from.redact_volatile_explain_attrs,
+			statement_counters: from.statement_counters.clone(),
 			matches_context: from.matches_context.clone(),
 			knn_context: from.knn_context.clone(),
+			config: Arc::clone(&from.config),
 			#[cfg(feature = "http")]
-			http_client: from.http_client.clone(),
+			http_client: Arc::clone(&from.http_client),
+			tenant_identity: from.tenant_identity.clone(),
+			node_id: from.node_id,
+			auth_enabled: from.auth_enabled,
+			dynamic_configuration: from.dynamic_configuration.clone(),
+			live: from.live,
+			broker: from.broker.clone(),
 		}
 	}
 
 	/// Creates a new context from a configured datastore.
 	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn from_ds(
+		node_id: Uuid,
+		auth_enabled: bool,
+		dynamic_configuration: DynamicConfiguration,
 		time_out: Option<Duration>,
 		slow_log: Option<SlowLog>,
 		capabilities: Arc<Capabilities>,
@@ -337,19 +438,21 @@ impl Context {
 		index_builder: IndexBuilder,
 		sequences: Sequences,
 		cache: Arc<DatastoreCache>,
+		function_registry: Arc<FunctionRegistry>,
 		#[cfg(feature = "http")] http_client: Arc<HttpClient>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: BucketsManager,
+		config: Arc<CommonConfig>,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
 	) -> Result<Context> {
-		let planner_strategy = capabilities.planner_strategy().clone();
+		let planner_strategy = *capabilities.planner_strategy();
 		let mut ctx = Self {
 			values: HashMap::default(),
 			parent: None,
 			deadline: None,
 			slow_log,
 			cancelled: Arc::new(AtomicBool::new(false)),
-			notifications: None,
+			cancel_token: None,
 			query_planner: None,
 			query_executor: None,
 			iteration_stage: None,
@@ -365,13 +468,21 @@ impl Context {
 			buckets: Some(buckets),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Some(surrealism_cache),
-			function_registry: Arc::new(FunctionRegistry::with_builtins()),
+			function_registry,
 			new_planner_strategy: planner_strategy,
 			redact_volatile_explain_attrs: false,
+			statement_counters: None,
 			matches_context: None,
 			knn_context: None,
+			config,
 			#[cfg(feature = "http")]
 			http_client,
+			tenant_identity: None,
+			node_id,
+			auth_enabled,
+			dynamic_configuration,
+			live: false,
+			broker: None,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -388,12 +499,12 @@ impl Context {
 			deadline: None,
 			slow_log: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
-			notifications: None,
+			cancel_token: None,
 			query_planner: None,
 			query_executor: None,
 			iteration_stage: None,
 			capabilities: Arc::new(Capabilities::default()),
-			index_stores: IndexStores::default(),
+			index_stores: IndexStores::new(256 * 1024 * 1024, 256 * 1024 * 1024),
 			cache: None,
 			index_builder: None,
 			sequences: None,
@@ -407,16 +518,25 @@ impl Context {
 			function_registry: Arc::new(FunctionRegistry::with_builtins()),
 			new_planner_strategy: NewPlannerStrategy::default(),
 			redact_volatile_explain_attrs: false,
+			statement_counters: None,
 			matches_context: None,
 			knn_context: None,
+			config: Default::default(),
 			#[cfg(feature = "http")]
 			http_client: Arc::new(
 				HttpClient::new(
 					crate::dbs::capabilities::Targets::All,
 					crate::dbs::capabilities::Targets::None,
+					&Default::default(),
 				)
 				.expect("http client to be created"),
 			),
+			tenant_identity: None,
+			node_id: Uuid::nil(),
+			auth_enabled: true,
+			dynamic_configuration: DynamicConfiguration::default(),
+			live: false,
+			broker: None,
 		}
 	}
 
@@ -431,6 +551,87 @@ impl Context {
 			fail!("Tried to unfreeze a Context with multiple references")
 		};
 		Ok(x)
+	}
+
+	#[inline]
+	pub fn node_id(&self) -> Uuid {
+		self.node_id
+	}
+
+	#[inline]
+	pub(crate) fn auth_enabled(&self) -> bool {
+		self.auth_enabled
+	}
+
+	pub(crate) fn dynamic_configuration(&self) -> &DynamicConfiguration {
+		&self.dynamic_configuration
+	}
+
+	/// Whether this session may open `LIVE` queries or `KILL LIVE` (from [`Session::live`]
+	/// applied in [`Context::attach_session`]).
+	pub(crate) fn realtime(&self) -> Result<()> {
+		if !self.live {
+			bail!(Error::RealtimeDisabled);
+		}
+		Ok(())
+	}
+
+	pub(crate) fn broker(&self) -> Option<&Arc<dyn MessageBroker>> {
+		self.broker.as_ref()
+	}
+
+	pub(crate) fn set_broker(&mut self, broker: Option<Arc<dyn MessageBroker>>) {
+		self.broker = broker;
+	}
+
+	/// IAM check using auth from [`Options`] and the datastore auth toggle on this context.
+	pub fn is_allowed(
+		&self,
+		opt: &Options,
+		action: Action,
+		res: ResourceKind,
+		base: Base,
+	) -> Result<()> {
+		let res = match base {
+			Base::Root => res.on_root(),
+			Base::Ns => res.on_ns(opt.ns()?),
+			Base::Db => {
+				let (ns, db) = opt.ns_db()?;
+				res.on_db(ns, db)
+			}
+		};
+
+		if !self.auth_enabled && opt.auth.is_anon() {
+			return Ok(());
+		}
+
+		opt.auth.is_allowed(action, &res)
+	}
+
+	/// Table-level permission check frequency (mirrors former [`Options::check_perms`]).
+	pub fn check_perms(&self, opt: &Options, action: Action) -> Result<bool> {
+		if !opt.perms {
+			return Ok(false);
+		}
+		if !self.auth_enabled && opt.auth.is_anon() {
+			return Ok(false);
+		}
+		match action {
+			Action::Edit => {
+				let allowed = opt.auth.has_editor_role();
+				let (ns, db) = opt.ns_db()?;
+				let db_in_actor_level =
+					opt.auth.is_root() || opt.auth.is_ns_check(ns) || opt.auth.is_db_check(ns, db);
+				Ok(!allowed || !db_in_actor_level)
+			}
+			Action::View => {
+				let allowed = opt.auth.has_viewer_role();
+				let (ns, db) = opt.ns_db()?;
+				let db_in_actor_level =
+					opt.auth.is_root() || opt.auth.is_ns_check(ns) || opt.auth.is_db_check(ns, db);
+				Ok(!allowed || !db_in_actor_level)
+			}
+		}
 	}
 
 	/// Get the namespace id for the current context.
@@ -505,7 +706,7 @@ impl Context {
 	/// with the same key.
 	pub(crate) fn add_value<K>(&mut self, key: K, value: Arc<Value>)
 	where
-		K: Into<Cow<'static, str>>,
+		K: Into<Strand>,
 	{
 		self.values.insert(key.into(), value);
 	}
@@ -515,7 +716,7 @@ impl Context {
 	pub(crate) fn add_values<T, K, V>(&mut self, iter: T)
 	where
 		T: IntoIterator<Item = (K, V)>,
-		K: Into<Cow<'static, str>>,
+		K: Into<Strand>,
 		V: Into<Arc<Value>>,
 	{
 		self.values.extend(iter.into_iter().map(|(k, v)| (k.into(), v.into())))
@@ -524,8 +725,44 @@ impl Context {
 	/// Add cancellation to the context. The value that is returned will cancel
 	/// the context and it's children once called.
 	pub(crate) fn add_cancel(&mut self) -> Canceller {
-		let cancelled = self.cancelled.clone();
+		let cancelled = Arc::clone(&self.cancelled);
 		Canceller::new(cancelled)
+	}
+
+	/// Install an externally-owned cancellation handle on this context.
+	/// Child contexts allocate their own `cancelled` flag but walk up the
+	/// parent chain in [`Self::done`], so installing the handle on the
+	/// root is enough for the entire execution tree to observe it.
+	///
+	/// Stores both views of the handle:
+	///
+	/// * The `AtomicBool` flag is moved into `self.cancelled` so the executor's hot-path `done`
+	///   walk fires `Reason::Canceled` at the next yield point.
+	/// * The `CancellationToken` is retained on `self.cancel_token` so bare-await sites (e.g.
+	///   `SLEEP`) can `select!` against it via [`Self::cancel_token`].
+	///
+	/// Used by the RPC layer so that a WebSocket disconnect cancels
+	/// in-flight queries cleanly, including ones blocked inside an
+	/// external timer.
+	pub(crate) fn set_cancellation(&mut self, handle: &CancelHandle) {
+		self.cancelled = handle.flag();
+		self.cancel_token = Some(handle.token());
+	}
+
+	/// Awaitable cancellation token installed by [`Self::set_cancellation`].
+	/// Walks up the parent chain so any child context can observe a
+	/// connection-level cancel without needing its own copy.
+	///
+	/// Returns `None` for contexts without an external cancel source
+	/// (embedded callers, internal use). Callers SHOULD treat `None` as
+	/// "no awaitable cancel" rather than failing — the `AtomicBool` view
+	/// is the primary cancel mechanism; this is the awaitable companion
+	/// for `select!`-based races.
+	pub(crate) fn cancel_token(&self) -> Option<tokio_util::sync::CancellationToken> {
+		if let Some(token) = &self.cancel_token {
+			return Some(token.clone());
+		}
+		self.parent.as_ref().and_then(|p| p.cancel_token())
 	}
 
 	/// Add a deadline to the context. If the current deadline is sooner than
@@ -550,12 +787,6 @@ impl Context {
 		}
 	}
 
-	/// Add the LIVE query notification channel to the context, so that we
-	/// can send notifications to any subscribers.
-	pub(crate) fn add_notifications(&mut self, chn: Option<&Sender<PublicNotification>>) {
-		self.notifications = chn.cloned()
-	}
-
 	pub(crate) fn set_query_planner(&mut self, qp: QueryPlanner) {
 		self.query_planner = Some(Arc::new(qp));
 	}
@@ -575,6 +806,21 @@ impl Context {
 
 	pub(crate) fn set_transaction(&mut self, txn: Arc<Transaction>) {
 		self.transaction = Some(txn);
+	}
+
+	/// Install the per-statement counter set on this context. Called by the
+	/// executor before each top-level statement so the iterator can record
+	/// the actual number of records affected -- including for DML
+	/// statements with `RETURN NONE`, where the post-RETURN value would
+	/// otherwise be empty.
+	pub(crate) fn set_statement_counters(&mut self, counters: Option<Arc<StatementCounters>>) {
+		self.statement_counters = counters;
+	}
+
+	/// The per-statement counter set, if one is currently installed. Read
+	/// from the iterator's record-result path.
+	pub(crate) fn statement_counters(&self) -> Option<&Arc<StatementCounters>> {
+		self.statement_counters.as_ref()
 	}
 
 	pub(crate) fn tx(&self) -> Arc<Transaction> {
@@ -598,14 +844,6 @@ impl Context {
 	/// The executor consults this to decide whether to emit slow-query log lines.
 	pub(crate) fn slow_log(&self) -> Option<&SlowLog> {
 		self.slow_log.as_ref()
-	}
-
-	pub(crate) fn notifications(&self) -> Option<Sender<PublicNotification>> {
-		self.notifications.clone()
-	}
-
-	pub(crate) fn has_notifications(&self) -> bool {
-		self.notifications.is_some()
 	}
 
 	pub(crate) fn get_query_planner(&self) -> Option<&QueryPlanner> {
@@ -772,8 +1010,8 @@ impl Context {
 	/// unless this context is isolated.
 	pub(crate) fn collect_values(
 		&self,
-		map: HashMap<Cow<'static, str>, Arc<Value>>,
-	) -> HashMap<Cow<'static, str>, Arc<Value>> {
+		map: HashMap<Strand, Arc<Value>>,
+	) -> HashMap<Strand, Arc<Value>> {
 		let mut map = if !self.isolated
 			&& let Some(p) = &self.parent
 		{
@@ -782,7 +1020,7 @@ impl Context {
 			map
 		};
 		self.values.iter().for_each(|(k, v)| {
-			map.insert(k.clone(), v.clone());
+			map.insert(k.clone(), Arc::clone(v));
 		});
 		map
 	}
@@ -793,7 +1031,7 @@ impl Context {
 		crate::ctx::cancellation::Cancellation::new(
 			self.deadline.map(|(deadline, _)| deadline),
 			std::iter::successors(Some(self), |ctx| ctx.parent.as_ref().map(|c| c.as_ref()))
-				.map(|ctx| ctx.cancelled.clone())
+				.map(|ctx| Arc::clone(&ctx.cancelled))
 				.collect(),
 		)
 	}
@@ -801,12 +1039,13 @@ impl Context {
 	/// Attach a session to the context and add any session variables to the
 	/// context.
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
+		self.live = session.live();
 		self.add_values(session.values());
 		// Only override the planner strategy if the session explicitly sets a
 		// non-default value (e.g. language tests). Otherwise the capability-level
 		// strategy (set via from_ds) is preserved.
 		if session.new_planner_strategy != NewPlannerStrategy::default() {
-			self.new_planner_strategy = session.new_planner_strategy.clone();
+			self.new_planner_strategy = session.new_planner_strategy;
 		}
 		// Propagate duration redaction flag from session.
 		if session.redact_volatile_explain_attrs {
@@ -815,7 +1054,16 @@ impl Context {
 		if !session.variables.is_empty() {
 			self.attach_variables(session.variables.clone().into())?;
 		}
+		// Pre-resolve the tenant identity so emit sites do not need to
+		// re-walk the session value tree on every event dispatch.
+		self.tenant_identity =
+			Some(Arc::new(crate::observe::TenantIdentity::from_session(session)));
 		Ok(())
+	}
+
+	/// Pre-resolved tenant identity for the active session.
+	pub(crate) fn tenant_identity(&self) -> Option<&Arc<crate::observe::TenantIdentity>> {
+		self.tenant_identity.as_ref()
 	}
 
 	/// Attach variables to the context.
@@ -823,7 +1071,7 @@ impl Context {
 		for (name, val) in vars {
 			if PROTECTED_PARAM_NAMES.contains(&name.as_str()) {
 				return Err(Error::InvalidParam {
-					name,
+					name: name.into_string(),
 				});
 			}
 			self.add_value(name, Arc::new(val));
@@ -849,7 +1097,7 @@ impl Context {
 
 	/// Get the capabilities for this context
 	pub(crate) fn get_capabilities(&self) -> Arc<Capabilities> {
-		self.capabilities.clone()
+		Arc::clone(&self.capabilities)
 	}
 
 	/// Get the function registry for this context
@@ -1004,7 +1252,7 @@ impl Context {
 
 	#[cfg(feature = "surrealism")]
 	pub(crate) fn get_surrealism_cache(&self) -> Option<Arc<SurrealismCache>> {
-		self.surrealism_cache.as_ref().map(|sc| sc.clone())
+		self.surrealism_cache.as_ref().map(Arc::clone)
 	}
 
 	#[cfg(feature = "surrealism")]
@@ -1021,6 +1269,14 @@ impl Context {
 		let Some(cache) = self.get_surrealism_cache() else {
 			bail!("Surrealism cache is not available");
 		};
+		let max_pool_size = self.config.surrealism_max_pool_size;
+		let max_memory = self.config.surrealism_max_memory;
+		let max_execution_time =
+			self.config.surrealism_max_execution_time.map(Duration::from_millis);
+		let max_kv_entries = self.config.surrealism_max_kv_entries;
+		let max_kv_value_bytes = self.config.surrealism_max_kv_value_bytes;
+		#[cfg(feature = "http")]
+		let config = Arc::clone(&self.config);
 
 		cache
 			.get_or_insert_with(&lookup, async || {
@@ -1047,35 +1303,29 @@ impl Context {
 					#[cfg(not(storage))]
 					temp_base: None,
 					temp_prefix: &temp_prefix,
-					max_fs_bytes: *crate::cnf::SURREALISM_MAX_FS_BYTES,
+					max_fs_bytes: self.config.surrealism_max_fs_bytes,
 				};
 				let package =
 					SurrealismPackage::from_reader(std::io::Cursor::new(surli), &unpack_opts)?;
 
 				self.get_capabilities()
-					.validate_surrealism_capabilities(package.config.capabilities.clone())?;
+					.validate_surrealism_capabilities(&package.config.capabilities)?;
 
 				let org = package.config.meta.organisation.clone();
 				let name = package.config.meta.name.clone();
 
-				let server_pool_size = *crate::cnf::SURREALISM_MAX_POOL_SIZE;
-				let server_max_memory = *crate::cnf::SURREALISM_MAX_MEMORY;
-				let server_max_execution_time =
-					crate::cnf::SURREALISM_MAX_EXECUTION_TIME.map(std::time::Duration::from_millis);
-				let server_max_kv_entries = *crate::cnf::SURREALISM_MAX_KV_ENTRIES;
-				let server_max_kv_value_bytes = *crate::cnf::SURREALISM_MAX_KV_VALUE_BYTES;
-
 				#[cfg(feature = "http")]
-				let module_net_targets = module_allow_net_targets(&package.config.capabilities);
+				let module_net_targets =
+					crate::surrealism::host::module_allow_net_targets(&package.config.capabilities);
 
 				let runtime = tokio::task::spawn_blocking(move || {
 					Runtime::new(
 						package,
-						server_pool_size,
-						server_max_memory,
-						server_max_execution_time,
-						server_max_kv_entries,
-						server_max_kv_value_bytes,
+						max_pool_size,
+						max_memory,
+						max_execution_time,
+						max_kv_entries,
+						max_kv_value_bytes,
 					)
 				})
 				.await
@@ -1087,7 +1337,7 @@ impl Context {
 				#[cfg(feature = "http")]
 				let client = if module_net_targets.is_empty() {
 					Arc::new(
-						HttpClient::new(Targets::None, Targets::All)
+						HttpClient::new(Targets::None, Targets::All, &config)
 							.context("Failed to create http client for WASM module")?,
 					)
 				} else {
@@ -1096,6 +1346,7 @@ impl Context {
 						HttpClient::new(
 							allow,
 							self.capabilities.denied_network_targets_ref().clone(),
+							&config,
 						)
 						.context("Failed to create http client for WASM module")?,
 					)
@@ -1113,7 +1364,7 @@ impl Context {
 
 	#[cfg(feature = "http")]
 	pub(crate) fn http_client(&self) -> Arc<HttpClient> {
-		self.http_client.clone()
+		Arc::clone(&self.http_client)
 	}
 
 	#[cfg(feature = "surrealism")]
@@ -1134,14 +1385,59 @@ mod tests {
 	#[cfg(feature = "http")]
 	use url::Url;
 
+	use crate::cnf::CommonConfig;
 	#[cfg(all(feature = "allocation-tracking", feature = "allocator"))]
 	use crate::cnf::MEMORY_THRESHOLD;
 	use crate::ctx::Context;
 	use crate::ctx::reason::Reason;
 	#[cfg(feature = "http")]
 	use crate::dbs::Capabilities;
+	use crate::dbs::Options;
 	#[cfg(feature = "http")]
 	use crate::dbs::capabilities::{NetTarget, Targets};
+	use crate::expr::Base;
+	use crate::iam::{Action, Auth, ResourceKind, Role};
+
+	#[test]
+	fn is_allowed_respects_context_auth_toggle_and_base() {
+		let config = CommonConfig::default();
+
+		// Auth disabled: anonymous allowed without IAM; still needs valid NS/DB for bases.
+		{
+			let mut ctx = Context::new_test();
+			ctx.auth_enabled = false;
+
+			let empty = Options::new(&config);
+			ctx.is_allowed(&empty, Action::View, ResourceKind::Any, Base::Ns).unwrap_err();
+			ctx.is_allowed(&empty, Action::View, ResourceKind::Any, Base::Db).unwrap_err();
+			let db_only = Options::new(&config).with_db(Some("db".into()));
+			ctx.is_allowed(&db_only, Action::View, ResourceKind::Any, Base::Db).unwrap_err();
+
+			ctx.is_allowed(&empty, Action::View, ResourceKind::Any, Base::Root).unwrap();
+			let ns = Options::new(&config).with_ns(Some("ns".into()));
+			ctx.is_allowed(&ns, Action::View, ResourceKind::Any, Base::Ns).unwrap();
+			let ns_db = Options::new(&config).with_ns(Some("ns".into())).with_db(Some("db".into()));
+			ctx.is_allowed(&ns_db, Action::View, ResourceKind::Any, Base::Db).unwrap();
+		}
+
+		// Auth enabled: root owner still needs NS/DB set for NS/Db bases.
+		{
+			let mut ctx = Context::new_test();
+			ctx.auth_enabled = true;
+
+			let opts = Options::new(&config).with_auth(Auth::for_root(Role::Owner).into());
+			ctx.is_allowed(&opts, Action::View, ResourceKind::Any, Base::Ns).unwrap_err();
+			ctx.is_allowed(&opts, Action::View, ResourceKind::Any, Base::Db).unwrap_err();
+			let db_only = opts.clone().with_db(Some("db".into()));
+			ctx.is_allowed(&db_only, Action::View, ResourceKind::Any, Base::Db).unwrap_err();
+
+			ctx.is_allowed(&opts, Action::View, ResourceKind::Any, Base::Root).unwrap();
+			let ns = opts.with_ns(Some("ns".into()));
+			ctx.is_allowed(&ns, Action::View, ResourceKind::Any, Base::Ns).unwrap();
+			let ns_db = ns.with_db(Some("db".into()));
+			ctx.is_allowed(&ns_db, Action::View, ResourceKind::Any, Base::Db).unwrap();
+		}
+	}
 
 	#[cfg(feature = "http")]
 	#[tokio::test]
@@ -1267,6 +1563,46 @@ mod tests {
 		let result = ctx.is_done(Some(1)).await;
 		assert!(result.is_ok());
 		assert_eq!(result.unwrap(), true);
+	}
+
+	/// `Context::snapshot` is called by the streaming executor at
+	/// `dbs::Executor::execute_operator_plan` and produces a ctx with
+	/// `parent: None`. Operators that bridge back into legacy
+	/// `Context::done` / `is_done` checks (HNSW/DiskANN KNN search inner
+	/// loops, etc.) read the snapshot's own `cancelled` flag — without
+	/// parent walk to fall back to. If `snapshot` allocated a fresh
+	/// `Arc<AtomicBool>` instead of sharing the source's, those legacy
+	/// checks would never observe a connection-level cancel installed
+	/// via `set_cancellation`, and a WS disconnect during e.g. a KNN
+	/// search would not abort the operation — the read loop's drain
+	/// would block until the search finished.
+	#[tokio::test]
+	async fn test_snapshot_preserves_external_cancellation() {
+		use crate::ctx::CancelHandle;
+
+		let handle = CancelHandle::new();
+		let mut ctx = Context::new_test();
+		ctx.set_cancellation(&handle);
+		let root = ctx.freeze();
+		let snap = Context::snapshot(&root).freeze();
+		assert_eq!(
+			snap.is_done(Some(1)).await.unwrap(),
+			false,
+			"snapshot reports done before cancel was tripped"
+		);
+
+		handle.trip();
+		assert_eq!(
+			snap.is_done(Some(1)).await.unwrap(),
+			true,
+			"snapshot did not observe external cancel after trip — legacy `is_done` on \
+			 streaming-exec snapshot would silently miss WebSocket disconnect"
+		);
+		assert!(
+			snap.cancel_token().is_some(),
+			"snapshot lost the awaitable cancel token — bare-await sites reached via \
+			 the snapshot (legacy SLEEP fallback, etc.) could not `select!` against cancel"
+		);
 	}
 
 	/// Test documenting the expected behavior when memory threshold is exceeded.

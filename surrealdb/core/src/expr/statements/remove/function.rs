@@ -1,4 +1,5 @@
 use anyhow::Result;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::providers::DatabaseProvider;
@@ -10,7 +11,7 @@ use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct RemoveFunctionStatement {
-	pub name: String,
+	pub name: Strand,
 	pub if_exists: bool,
 }
 
@@ -18,7 +19,7 @@ impl RemoveFunctionStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Function, Base::Db)?;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the definition

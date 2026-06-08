@@ -1,4 +1,5 @@
 use rust_decimal::Decimal;
+use surrealdb_strand::Strand;
 
 use crate::sql::Param;
 use crate::sql::language::Language;
@@ -44,7 +45,7 @@ impl TokenValue for Param {
 				span.offset += 1;
 				span.len -= 1;
 				let ident = parser.unescape_ident_span(span)?;
-				Ok(Param::new(ident.to_owned()))
+				Ok(Param::new(ident))
 			}
 			_ => unexpected!(parser, peek, "a parameter"),
 		}
@@ -274,8 +275,8 @@ impl Parser<'_> {
 		}
 	}
 
-	pub(crate) fn parse_ident(&mut self) -> ParseResult<String> {
-		self.parse_ident_str().map(|x| x.to_owned())
+	pub(crate) fn parse_ident(&mut self) -> ParseResult<Strand> {
+		self.parse_ident_str().map(Into::into)
 	}
 
 	pub(crate) fn parse_ident_str(&mut self) -> ParseResult<&str> {
@@ -348,7 +349,7 @@ mod test {
 			assert_eq!(
 				r.expressions,
 				vec![sql::TopLevelExpr::Expr(sql::Expr::Idiom(sql::Idiom(vec![Part::Field(
-					ident.to_owned()
+					ident.into()
 				)])))]
 			)
 		}

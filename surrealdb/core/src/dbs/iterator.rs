@@ -8,14 +8,13 @@ use surrealdb_types::ToSql;
 
 use crate::catalog::Record;
 use crate::catalog::providers::TableProvider;
-use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::ctx::{Canceller, Context, FrozenContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
 use crate::dbs::store::{MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
-use crate::doc::{CursorDoc, Document, DocumentContext, IgnoreError, NsDbCtx, NsDbTbCtx};
+use crate::doc::{CursorDoc, Document, DocumentContext, IgnoreError, NsDbCtx};
 use crate::err::Error;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
 use crate::expr::order::Ordering;
@@ -40,29 +39,46 @@ pub(crate) enum Iterable {
 	/// data from storage. This is used in CREATE statements
 	/// where we attempt to write data without first checking
 	/// if the record exists, throwing an error on failure.
-	Defer(NsDbTbCtx, RecordId),
+	///
+	/// Always carries a [`DocumentContext::NsDbTbMutCtx`] — CREATE is
+	/// always a write.
+	Defer(DocumentContext, RecordId),
 	/// An iterable whose Record ID needs to be generated
 	/// before processing. This is used in CREATE statements
 	/// when generating a new id, or generating an id based
 	/// on the id field which is specified within the data.
-	GenerateRecordId(NsDbTbCtx, TableName),
+	///
+	/// Always carries a [`DocumentContext::NsDbTbMutCtx`] — CREATE is
+	/// always a write.
+	GenerateRecordId(DocumentContext, TableName),
 	/// An iterable which needs to fetch the data of a
 	/// specific record before processing the document.
-	RecordId(NsDbTbCtx, RecordId),
+	///
+	/// Carries [`DocumentContext::NsDbTbMutCtx`] for write statements
+	/// (UPDATE / UPSERT / DELETE / RELATE / INSERT) and
+	/// [`DocumentContext::NsDbTbCtx`] for SELECT.
+	RecordId(DocumentContext, RecordId),
 	/// An iterable which needs to fetch the related edges
-	/// of a record before processing each document.
+	/// of a record before processing each document. Always read-only
+	/// (graph and reference traversals only surface inside SELECT).
 	Lookup {
-		doc_ctx: NsDbTbCtx,
+		doc_ctx: DocumentContext,
 		kind: LookupKind,
 		from: RecordId,
 		what: Vec<ComputedLookupSubject>,
 	},
 	/// An iterable which needs to iterate over the records
 	/// in a table before processing each document.
-	Table(NsDbTbCtx, TableName, RecordStrategy, ScanDirection),
+	///
+	/// Carries [`DocumentContext::NsDbTbMutCtx`] for write statements
+	/// (UPDATE / DELETE / UPSERT without a specific id) and
+	/// [`DocumentContext::NsDbTbCtx`] for SELECT.
+	Table(DocumentContext, TableName, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
-	Range(NsDbTbCtx, TableName, RecordIdKeyRange, RecordStrategy, ScanDirection),
+	///
+	/// Carries the same variant as [`Iterable::Table`].
+	Range(DocumentContext, TableName, RecordIdKeyRange, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
@@ -73,7 +89,10 @@ pub(crate) enum Iterable {
 	///   record fetch will be done. This can be NONE in a scenario like: `INSERT INTO test {
 	///   there_is: 'no id set' }`
 	/// - The value for the record
-	Mergeable(NsDbTbCtx, TableName, Option<RecordIdKey>, Value),
+	///
+	/// Always carries a [`DocumentContext::NsDbTbMutCtx`] — INSERT is
+	/// always a write.
+	Mergeable(DocumentContext, TableName, Option<RecordIdKey>, Value),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in RELATE statements. The optional value
@@ -82,39 +101,64 @@ pub(crate) enum Iterable {
 	///
 	/// The first field is the rid from which we create, the second is the rid
 	/// which is the relation itself and the third is the target of the
-	/// relation
-	Relatable(NsDbTbCtx, RecordId, RelateThrough, RecordId, Option<Value>),
+	/// relation.
+	///
+	/// Always carries a [`DocumentContext::NsDbTbMutCtx`] — RELATE is
+	/// always a write.
+	Relatable(DocumentContext, RecordId, RelateThrough, RecordId, Option<Value>),
 	/// An iterable which iterates over an index range for a
 	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
 	/// When the 3rd argument is true, we iterate over keys only.
-	Index(NsDbTbCtx, TableName, IteratorRef, RecordStrategy),
+	///
+	/// Carries the same variant as [`Iterable::Table`].
+	Index(DocumentContext, TableName, IteratorRef, RecordStrategy),
 }
 
-/// Operable
+/// Represents the primary record data being operated on during statement execution.
+///
+/// This enum is part of the query processing pipeline, carrying the actual record data
+/// from the iterator to the document processor. Each variant is tailored to a specific
+/// statement type's data requirements:
+///
+/// - **`Value`**: Standard operations (SELECT, CREATE, UPDATE, etc.) with a single record
+/// - **`Insert`**: INSERT statements that separate the record from the insert value
+/// - **`Relate`**: RELATE statements that track source, relation, and target records
+/// - **`Count`**: COUNT queries that only need an aggregated count value
+///
+/// `Operable` is paired with [`Workable`] to provide complete context to the document
+/// processor. While `Operable` contains the primary record data, `Workable` provides
+/// supplementary information like relationship endpoints or insert values for `$input`.
 #[derive(Debug)]
 pub(crate) enum Operable {
-	/// CREATE person CONTENT { name: 'John Doe' }
-	Value(Arc<Record>),
-	/// Record is the record we're operating on (eg. )
-	/// Second argument is `ON DUPLICATE KEY` value.
-	Insert(Arc<Record>, Arc<Value>),
-	/// 1. RecordId
-	/// 2. Record
-	/// 3. Relation RecordId
-	/// 4. For update operations if it doesn't exist (TODO: This may be true, maybe not)
-	Relate(RecordId, Arc<Record>, RecordId, Option<Arc<Value>>),
-
+	/// Used for COUNT queries to represent aggregated count results.
+	/// The usize value is the total count from the query.
 	Count(usize),
-}
-
-/// Workable is used in the Document to get additional information specific to an insert statement
-/// or relate statement.
-#[derive(Debug)]
-pub(crate) enum Workable {
-	Normal,
-	Insert(Arc<Value>),
-	Relate(RecordId, RecordId, Option<Arc<Value>>),
+	/// Used for SELECT, CREATE, UPSERT, UPDATE, and DELETE statements.
+	/// Arguments in order:
+	/// 1. The first argument is the initial document being operated on
+	/// - For existing records: the current data fetched from storage
+	/// - For new records: an empty record that gets populated via the statement's data clause
+	/// - For dynamic or computed values: the value wrapped in a Record
+	Value(Arc<Record>),
+	/// Used for INSERT statements.
+	/// Arguments in order:
+	/// 1. Insertion record: the record being inserted or updated (empty or fetched from storage)
+	/// 2. Insertion value: The specific unique content for inserting
+	/// - INSERT INTO thing { ... X ... };
+	/// - INSERT INTO thing [{ ... X ... }, { ... Y ... }];
+	/// - INSERT INTO thing (...) VALUES (... X ...), (... Y ...);
+	Insert(Arc<Record>, Arc<Value>),
+	/// Used for RELATE and INSERT RELATION statements.
+	/// Arguments in order:
+	/// 1. Relation record: The edge record being created or updated (empty or fetched from storage)
+	/// 2. Record ID source: The 'from' side of the relation (e.g., person:tobie)
+	/// 3. Record ID target: The 'to' side of the relation (e.g., post:123)
+	/// 4. Insertion value: The specific unique content for inserting
+	/// - INSERT RELATION INTO likes { ... X ... };
+	/// - INSERT RELATION INTO likes [{ ... X ... }, { ... Y ... }];
+	/// - INSERT RELATION INTO likes (id, in, out, desc) VALUES (... X ...), (... Y ...);
+	Relate(Arc<Record>, RecordId, RecordId, Option<Arc<Value>>),
 }
 
 #[derive(Debug)]
@@ -208,27 +252,16 @@ impl Iterator {
 				self.prepare_table(ctx, opt, stk, planner, stm_ctx, doc_ctx, table_name).await?
 			}
 			Expr::Idiom(x) => {
-				// TODO: This needs to be structured better.
-				// match against what previously would be an edge.
-				if x.len() != 2 {
-					return self
-						.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, val)
-						.await;
-				}
-
-				let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0] else {
-					return self
-						.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, val)
-						.await;
-				};
-
-				let Part::Lookup(ref lookup) = x[1] else {
-					return self
-						.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, val)
-						.await;
-				};
-
-				if lookup.alias.is_none()
+				// `<record-id>-><lookup>` (e.g. `person:1->knows`) is the only
+				// idiom shape with a dedicated fast-path here — every other
+				// idiom (including any lookup with `WHERE` / `LIMIT` / `ORDER`
+				// etc.) goes through `prepare_computed`, which evaluates the
+				// expression and ingests the resulting record IDs. Keep this
+				// in sync with `prepare_array`'s identical match below.
+				if x.len() == 2
+					&& let Part::Start(Expr::Literal(Literal::RecordId(ref from))) = x[0]
+					&& let Part::Lookup(ref lookup) = x[1]
+					&& lookup.alias.is_none()
 					&& lookup.cond.is_none()
 					&& lookup.group.is_none()
 					&& lookup.limit.is_none()
@@ -237,8 +270,6 @@ impl Iterator {
 					&& lookup.start.is_none()
 					&& lookup.expr.is_none()
 				{
-					// TODO: Do we support `RETURN a:b` here? What do we do when it is not of the
-					// right type?
 					let from = match from.compute(stk, ctx, opt, doc).await {
 						Ok(x) => x,
 						Err(ControlFlow::Err(e)) => return Err(e),
@@ -248,7 +279,6 @@ impl Iterator {
 					for s in lookup.what.iter() {
 						what.push(s.compute(stk, ctx, opt, doc).await?);
 					}
-					// idiom matches the Edges pattern.
 					self.prepare_lookup(
 						ctx,
 						opt,
@@ -259,6 +289,9 @@ impl Iterator {
 						what,
 					)
 					.await?;
+				} else {
+					self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, doc_ctx, val)
+						.await?;
 				}
 			}
 			Expr::Literal(Literal::Array(array)) => {
@@ -297,16 +330,15 @@ impl Iterator {
 				.await?
 		};
 
-		let fields = ctx
-			.tx()
-			.all_tb_fields(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, table, opt.version)
-			.await?;
-		let doc_ctx = NsDbTbCtx {
-			ns: Arc::clone(&doc_ctx.ns),
-			db: Arc::clone(&doc_ctx.db),
+		let doc_ctx = DocumentContext::initialise(
+			ctx,
+			doc_ctx,
 			tb,
-			fields,
-		};
+			table,
+			opt.version,
+			stm_ctx.stm.is_mutation(),
+		)
+		.await?;
 
 		// We add the iterable only if we have a permission
 		let granted_perms = planner.check_table_permission(stm_ctx, table).await?;
@@ -358,17 +390,15 @@ impl Iterator {
 				)
 				.await?
 		};
-		let fields = ctx
-			.tx()
-			.all_tb_fields(doc_ctx.ns.namespace_id, doc_ctx.db.database_id, &rid.table, opt.version)
-			.await?;
-
-		let doc_ctx = NsDbTbCtx {
-			ns: Arc::clone(&doc_ctx.ns),
-			db: Arc::clone(&doc_ctx.db),
+		let doc_ctx = DocumentContext::initialise(
+			ctx,
+			doc_ctx,
 			tb,
-			fields,
-		};
+			&rid.table,
+			opt.version,
+			stm_ctx.stm.is_mutation(),
+		)
+		.await?;
 
 		if rid.key.is_range() {
 			return self.prepare_range(planner, stm_ctx, doc_ctx, rid).await;
@@ -421,21 +451,15 @@ impl Iterator {
 					})
 				})?
 		};
-		let fields = ctx
-			.tx()
-			.all_tb_fields(
-				doc_ctx.ns.namespace_id,
-				doc_ctx.db.database_id,
-				mock.table(),
-				opt.version,
-			)
-			.await?;
-		let doc_ctx = NsDbTbCtx {
-			ns: Arc::clone(&doc_ctx.ns),
-			db: Arc::clone(&doc_ctx.db),
+		let doc_ctx = DocumentContext::initialise(
+			ctx,
+			doc_ctx,
 			tb,
-			fields,
-		};
+			mock.table(),
+			opt.version,
+			stm_ctx.stm.is_mutation(),
+		)
+		.await?;
 
 		// Add the records to the iterator
 		for (count, rid) in mock.clone().into_iter().enumerate() {
@@ -471,11 +495,11 @@ impl Iterator {
 			// recreate the expression for the error.
 			let value = expr::Idiom(vec![
 				expr::Part::Start(Expr::Literal(Literal::RecordId(from.into_literal()))),
-				expr::Part::Lookup(Lookup {
+				expr::Part::Lookup(Box::new(Lookup {
 					kind,
 					what: what.into_iter().map(|x| x.into_literal()).collect(),
 					..Default::default()
-				}),
+				})),
 			])
 			.to_sql();
 
@@ -503,21 +527,15 @@ impl Iterator {
 			)
 			.await?
 		};
-		let fields = txn
-			.all_tb_fields(
-				doc_ctx.ns.namespace_id,
-				doc_ctx.db.database_id,
-				&from.table,
-				opt.version,
-			)
-			.await?;
-
-		let doc_ctx = NsDbTbCtx {
-			ns: Arc::clone(&doc_ctx.ns),
-			db: Arc::clone(&doc_ctx.db),
+		let doc_ctx = DocumentContext::initialise(
+			ctx,
+			doc_ctx,
 			tb,
-			fields,
-		};
+			&from.table,
+			opt.version,
+			stm.is_mutation(),
+		)
+		.await?;
 
 		// Add the record to the iterator
 		self.ingest(Iterable::Lookup {
@@ -535,7 +553,7 @@ impl Iterator {
 		&mut self,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
-		doc_ctx: NsDbTbCtx,
+		doc_ctx: DocumentContext,
 		rid: RecordId,
 	) -> Result<()> {
 		// We add the iterable only if we have a permission
@@ -718,13 +736,7 @@ impl Iterator {
 		// Process the query START clause
 		self.setup_start(stk, &cancel_ctx, opt, stm).await?;
 		// Prepare the results with possible optimisations on groups
-		self.results = self.results.prepare(
-			#[cfg(storage)]
-			ctx,
-			stm,
-			self.start,
-			self.limit,
-		)?;
+		self.results = self.results.prepare(ctx, stm, self.start, self.limit)?;
 
 		// Extract the expected behaviour depending on the presence of EXPLAIN with or
 		// without FULL
@@ -908,7 +920,7 @@ impl Iterator {
 		// With ORDER BY, only safe if iterator is a sorted index matching ORDER
 		if let Some(Iterable::Index(_doc_ctx, _, irf, _)) = self.entries.first()
 			&& let Some(qp) = ctx.get_query_planner()
-			&& qp.is_order(irf)
+			&& qp.is_order(*irf)
 		{
 			return true;
 		}
@@ -944,7 +956,7 @@ impl Iterator {
 		if self.entries.len() == 1
 			&& let Some(Iterable::Index(_doc_ctx, _, irf, _)) = self.entries.first()
 			&& let Some(qp) = ctx.get_query_planner()
-			&& qp.is_order(irf)
+			&& qp.is_order(*irf)
 		{
 			return true;
 		}
@@ -1018,6 +1030,13 @@ impl Iterator {
 			for split in splits.iter() {
 				// Get the query result
 				let res = self.results.take().await?;
+				// Re-initialise the collector before pushing split-expanded
+				// values back. Some collectors (notably `FileCollector` under
+				// TEMPFILES) consume their writer in `take()` and can't be
+				// re-pushed; `prepare()` returns a fresh collector of the
+				// same shape so subsequent splits and the final `take()`
+				// still see the same on-disk vs in-memory configuration.
+				self.results = self.results.prepare(ctx, stm, self.start, self.limit)?;
 				// Loop over each value
 				for obj in &res {
 					// Get the value at the path
@@ -1086,7 +1105,7 @@ impl Iterator {
 						// Check if we should use the priority queue optimization
 						if let Some(limit) = self.limit {
 							let effective_limit = self.start.unwrap_or(0) + limit;
-							if effective_limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE {
+							if effective_limit <= ctx.config.max_order_limit_priority_queue_size {
 								let mut res = MemoryOrderedLimit::new(
 									effective_limit as usize,
 									orders.clone(),
@@ -1192,63 +1211,83 @@ impl Iterator {
 		stm: &Statement<'_>,
 		pro: Processable,
 	) -> Result<()> {
-		let rs = pro.record_strategy;
-		// Extract the value
-		let res = Self::extract_value(stk, ctx, opt, stm, pro).await;
-		// Process the result
-		self.result(stk, ctx, opt, rs, res).await;
-		// Everything ok
-		Ok(())
-	}
-
-	#[instrument(level = "trace", name = "Iterator::extract_value", skip_all)]
-	async fn extract_value(
-		stk: &mut Stk,
-		ctx: &FrozenContext,
-		opt: &Options,
-		stm: &Statement<'_>,
-		pro: Processable,
-	) -> Result<Value, IgnoreError> {
-		// Check if this is a count all
-		let count_all = stm.expr().is_some_and(Fields::is_count_all_only);
-		if count_all {
-			if let Operable::Count(count) = pro.val {
-				return Ok(count.into());
-			}
-			if matches!(pro.record_strategy, RecordStrategy::KeysOnly) {
-				return Ok(map! { "count".to_string() => Value::from(1) }.into());
-			}
-		}
-		// Otherwise, we process the document
-		stk.run(|stk| Document::process(stk, ctx, opt, stm, pro)).await
-	}
-
-	/// Accept a processed record result
-	async fn result(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &FrozenContext,
-		opt: &Options,
-		rs: RecordStrategy,
-		res: Result<Value, IgnoreError>,
-	) {
 		// yield
 		yield_now!();
-		// Process the result
+		// Check current context
+		if ctx.is_done(None).await? {
+			return Ok(());
+		}
+		// Get the record strategy
+		let rs = pro.record_strategy;
+		// Extract the value
+		let res = {
+			// Check if this is a count all
+			let is_count_all = stm.expr().is_some_and(Fields::is_count_all_only);
+			// Check if this is a count() with a GROUP ALL
+			if is_count_all && let Operable::Count(count) = pro.val {
+				Ok(Value::from(count))
+			}
+			// Check if this is a count() over specific fields
+			else if is_count_all && matches!(pro.record_strategy, RecordStrategy::KeysOnly) {
+				Ok(Value::from(map! { "count".to_string() => Value::from(1) }))
+			}
+			// Otherwise process the document value
+			else {
+				stk.run(|stk| async {
+					// Setup a new document
+					let mut doc = Document::new(pro);
+					// Process the statement
+					let res: Result<Value, IgnoreError> = match stm {
+						Statement::Select {
+							stmt,
+							omit,
+							..
+						} => doc.select(stk, ctx, opt, stmt, omit).await,
+						Statement::Create(_) => doc.create(stk, ctx, opt, stm).await,
+						Statement::Upsert(_) => doc.upsert(stk, ctx, opt, stm).await,
+						Statement::Update(_) => doc.update(stk, ctx, opt, stm).await,
+						Statement::Relate(_) => doc.relate(stk, ctx, opt, stm).await,
+						Statement::Delete(_) => doc.delete(stk, ctx, opt, stm).await,
+						Statement::Insert(_) => doc.insert(stk, ctx, opt, stm).await,
+						stm => {
+							return Err(IgnoreError::from(anyhow::Error::new(Error::unreachable(
+								format_args!("Unexpected statement type: {stm:?}"),
+							))));
+						}
+					};
+					// Bump the per-statement affected-row counter when a real
+					// KV write happened. The flag is set inside
+					// `store_record_data` / `purge` after the KV op succeeds,
+					// so pre-mutation `Ignore` paths and `set_record` no-ops
+					// leave it `false` and never inflate the count. Skip the
+					// bump on hard errors — the surrounding transaction will
+					// be rolled back. SELECT never sets `mutated`.
+					if doc.mutated
+						&& !matches!(res, Err(IgnoreError::Error(_)))
+						&& let Some(counters) = ctx.statement_counters()
+					{
+						counters.record_affected();
+					}
+					res
+				})
+				.await
+			}
+		};
+		// Handle the result
 		match res {
 			Err(IgnoreError::Ignore) => {
-				return;
+				return Ok(());
 			}
 			Err(IgnoreError::Error(e)) => {
 				self.error = Some(e);
 				self.canceller.cancel();
-				return;
+				return Ok(());
 			}
 			Ok(v) => {
 				if let Err(e) = self.results.push(stk, ctx, opt, rs, v).await {
 					self.error = Some(e);
 					self.canceller.cancel();
-					return;
+					return Ok(());
 				}
 			}
 		}
@@ -1261,5 +1300,7 @@ impl Iterator {
 		{
 			self.canceller.cancel()
 		}
+		// Everything ok
+		Ok(())
 	}
 }

@@ -2,6 +2,7 @@
 use std::collections::HashMap;
 
 use reblessive::tree::Stk;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 #[cfg(feature = "ml")]
 use surrealml_core::errors::error::SurrealError;
@@ -32,8 +33,8 @@ pub fn get_model_path(ns: &str, db: &str, name: &str, version: &str, hash: &str)
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Model {
-	pub name: String,
-	pub version: String,
+	pub name: Strand,
+	pub version: Strand,
 }
 
 impl ToSql for Model {
@@ -75,13 +76,13 @@ impl Model {
 			get_model_path(ns, db, &self.name, &self.version, &val.hash)
 		};
 		// Check permissions
-		if opt.check_perms(Action::View)? {
+		if ctx.check_perms(opt, Action::View)? {
 			match &val.permissions {
 				Permission::Full => (),
 				Permission::None => {
 					return Err(ControlFlow::from(anyhow::Error::new(
 						Error::FunctionPermissions {
-							name: self.name.clone(),
+							name: self.name.to_string(),
 						},
 					)));
 				}
@@ -92,7 +93,7 @@ impl Model {
 					if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
 						return Err(ControlFlow::from(anyhow::Error::new(
 							Error::FunctionPermissions {
-								name: self.name.clone(),
+								name: self.name.to_string(),
 							},
 						)));
 					}
@@ -116,7 +117,7 @@ impl Model {
 				// Compute the model function arguments
 				let mut args = v
 					.into_iter()
-					.map(|(k, v)| Ok((k, v.coerce_to::<f64>()? as f32)))
+					.map(|(k, v)| Ok((k.into_string(), v.coerce_to::<f64>()? as f32)))
 					.collect::<std::result::Result<HashMap<String, f32>, CoerceError>>()
 					.map_err(|_| Error::InvalidFunctionArguments {
 						name: format!("ml::{}<{}>", self.name, self.version),

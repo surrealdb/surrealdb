@@ -24,7 +24,7 @@ impl AlterDatabaseStatement {
 	/// - If `compact` is true, compacts the underlying storage for the current namespace+database.
 	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> anyhow::Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Database, Base::Ns)?;
 		// Extract ids
 		let (namespace_id, database_id) = ctx.expect_ns_db_ids(opt).await?;
 		// Do we request compacting?

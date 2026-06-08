@@ -6,10 +6,9 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use surrealdb_types::ToSql;
 
-use super::common::fetch_and_filter_records_batch;
+use super::common::{fetch_and_filter_records_batch, resolve_version_stamp};
 use super::pipeline::{build_field_state, eval_limit_expr};
 use super::resolved::ResolvedTableContext;
 use crate::err::Error;
@@ -19,7 +18,7 @@ use crate::exec::index::iterator::{
 	IndexEqualIterator, IndexRangeIterator, UniqueEqualIterator, UniqueRangeIterator,
 };
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical, should_check_perms,
+	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
 	validate_record_user_access,
 };
 use crate::exec::{
@@ -62,6 +61,12 @@ pub struct IndexScan {
 	/// Outer `None` = sub-operator mode (parent handles fields).
 	/// `Some(None)` = all fields, `Some(Some(set))` = specific fields.
 	pub(crate) needed_fields: Option<Option<HashSet<String>>>,
+	/// Full WHERE predicate as a streaming physical expression. Unlike
+	/// [`TableScan`](super::TableScan), index seeks only narrow candidates;
+	/// this predicate is evaluated on fetched rows to enforce any conditions
+	/// beyond what the indexer proved (matching `DynamicScan`'s unified
+	/// outer pipeline behaviour).
+	pub(crate) where_predicate: Option<Arc<dyn PhysicalExpr>>,
 	/// Per-batch size ceiling when LIMIT wasn't pushed (due to a residual
 	/// filter preventing direct pushdown).  The scan reads batches of at
 	/// most this many entries, enabling faster early termination from the
@@ -84,6 +89,7 @@ impl IndexScan {
 		start: Option<Arc<dyn PhysicalExpr>>,
 		version: Option<Arc<dyn PhysicalExpr>>,
 		needed_fields: Option<Option<HashSet<String>>>,
+		where_predicate: Option<Arc<dyn PhysicalExpr>>,
 	) -> Self {
 		Self {
 			index_ref,
@@ -95,6 +101,7 @@ impl IndexScan {
 			version,
 			resolved: None,
 			needed_fields,
+			where_predicate,
 			batch_ceiling: None,
 			metrics: Arc::new(OperatorMetrics::new()),
 		}
@@ -118,9 +125,6 @@ impl IndexScan {
 		self
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for IndexScan {
 	fn name(&self) -> &'static str {
 		"IndexScan"
@@ -165,9 +169,10 @@ impl ExecOperator for IndexScan {
 			} => {
 				let prefix_str = prefix.iter().map(|v| v.to_sql()).collect::<Vec<_>>().join(", ");
 				if let Some((op, val)) = range {
-					format!("[{}] {:?} {}", prefix_str, op, val.to_sql())
+					let val_sql = val.to_sql();
+					format!("[{prefix_str}] {op:?} {val_sql}")
 				} else {
-					format!("[{}]", prefix_str)
+					format!("[{prefix_str}]")
 				}
 			}
 			// FullText and KNN should use dedicated operators
@@ -181,7 +186,7 @@ impl ExecOperator for IndexScan {
 			}
 		};
 		let mut attrs = vec![
-			("index".to_string(), self.index_ref.name.clone()),
+			("index".to_string(), self.index_ref.name.to_string()),
 			("access".to_string(), access_str),
 			("direction".to_string(), format!("{:?}", self.direction)),
 		];
@@ -205,6 +210,9 @@ impl ExecOperator for IndexScan {
 		}
 		if let Some(ref start) = self.start {
 			mode = mode.combine(start.access_mode());
+		}
+		if let Some(ref pred) = self.where_predicate {
+			mode = mode.combine(pred.access_mode());
 		}
 		mode
 	}
@@ -330,6 +338,7 @@ impl ExecOperator for IndexScan {
 		let version_expr = self.version.clone();
 		let resolved = self.resolved.clone();
 		let needed_fields = self.needed_fields.clone();
+		let where_predicate = self.where_predicate.clone();
 		let ctx = ctx.clone();
 
 		let stream = async_stream::try_stream! {
@@ -366,19 +375,10 @@ impl ExecOperator for IndexScan {
 				None => u32::MAX, // next_batch caps at INDEX_BATCH_SIZE internally
 			};
 
-			// Evaluate VERSION expression
-			let version: Option<u64> = match &version_expr {
-				Some(expr) => {
-					let eval_ctx = crate::exec::EvalContext::from_exec_ctx(&ctx);
-					let v = expr.evaluate(eval_ctx).await?;
-					Some(
-						v.cast_to::<crate::val::Datetime>()
-							.map_err(|e| anyhow::anyhow!("{e}"))?
-							.to_version_stamp(txn.timestamp_impl().as_ref())?,
-					)
-				}
-				None => ctx.version_stamp(),
-			};
+			// Resolve VERSION timestamp; see [`resolve_version_stamp`] for
+			// why we prefer the stamp already set by the enclosing
+			// `VersionScope` over re-evaluating `version_expr` here.
+			let version: Option<u64> = resolve_version_stamp(&ctx, version_expr.as_ref()).await?;
 
 			// Early exit if limit is 0
 			if limit_val == Some(0) {
@@ -395,7 +395,8 @@ impl ExecOperator for IndexScan {
 					.context("Failed to get table")?;
 
 				if let Some(def) = &table_def {
-					convert_permission_to_physical(&def.permissions.select, ctx.ctx()).await
+					convert_permission_to_physical_runtime(&def.permissions.select, ctx.ctx())
+						.await
 						.context("Failed to convert permission")?
 				} else {
 					Err(ControlFlow::Err(anyhow::Error::new(Error::TbNotFound {
@@ -432,7 +433,7 @@ impl ExecOperator for IndexScan {
 			// to avoid double-checking.
 			let mut pipeline = super::pipeline::ScanPipeline::new(
 				PhysicalPermission::Allow,
-				None,
+				where_predicate,
 				field_state,
 				check_perms,
 				limit_val,

@@ -86,18 +86,18 @@ macro_rules! lazy_env_parse {
 	};
 }
 
-/// Creates a new b-tree map of key-value pairs.
+/// Creates a new [`VecMap`] of key-value pairs.
 ///
-/// This macro creates a new map, clones the items
-/// from the secondary map, and inserts additional
-/// items to the new map.
+/// Clones items from the optional secondary map first, then applies conditional
+/// entries. Duplicate keys keep the last value (same as repeated [`VecMap::insert`]).
+/// Uses batch construction so key order in the source does not trigger quadratic cost.
 #[macro_export]
 macro_rules! map {
     ($($k:expr_2021 $(, if let $grant:pat = $check:expr_2021)? $(, if $guard:expr_2021)? => $v:expr_2021),* $(,)? $( => $x:expr_2021 )?) => {{
-        let mut m = ::std::collections::BTreeMap::new();
-    	$(m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)?
-		$( $(if let $grant = $check)? $(if $guard)? { m.insert($k, $v); };)+
-        m
+        let mut pairs: ::std::vec::Vec<_> = ::std::vec::Vec::new();
+    	$(pairs.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)?
+		$( $(if let $grant = $check)? $(if $guard)? { pairs.push(($k, $v)); };)+
+        pairs.into_iter().collect::<$crate::VecMap<_, _>>()
     }};
 }
 
@@ -112,15 +112,14 @@ macro_rules! map_opt {
 	};
 }
 
-/// Extends a b-tree map of key-value pairs.
-///
-/// This macro extends the supplied map, by cloning
-/// the items from the secondary map into it.
+/// Merges two sorted maps into one [`VecMap`]. Values from the second map win when keys overlap.
 #[macro_export]
 macro_rules! mrg {
-	($($m:expr_2021, $x:expr_2021)+) => {{
-		$($m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)+
-		$($m)+
+	($m:expr_2021, $x:expr_2021) => {{
+		let mut pairs: ::std::vec::Vec<_> =
+			$m.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+		pairs.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));
+		pairs.into_iter().collect::<$crate::VecMap<_, _>>()
 	}};
 }
 

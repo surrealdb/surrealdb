@@ -1,10 +1,9 @@
 //! Field access part -- `foo` in `obj.foo`.
 
-use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, ContextLevel};
+use crate::exec::{AccessMode, BoxFut, ContextLevel};
 use crate::expr::FlowResult;
 use crate::val::Value;
 
@@ -19,12 +18,13 @@ const PARALLEL_BATCH_THRESHOLD: usize = 2;
 pub struct FieldPart {
 	pub name: String,
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for FieldPart {
 	fn name(&self) -> &'static str {
 		"Field"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -33,31 +33,35 @@ impl PhysicalExpr for FieldPart {
 		ContextLevel::Database
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		let value = ctx.current_value.unwrap_or(&Value::NONE);
-		evaluate_field(value, &self.name, ctx).await
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			let value = ctx.current_value.unwrap_or(&Value::NONE);
+			evaluate_field(value, &self.name, ctx).await
+		})
 	}
 
 	/// Parallel batch evaluation for field access.
 	///
 	/// Field access on RecordIds triggers record fetches, which are I/O-bound.
 	/// Parallelizing across rows lets multiple fetches proceed concurrently.
-	async fn evaluate_batch(
-		&self,
-		ctx: EvalContext<'_>,
-		values: &[Value],
-	) -> FlowResult<Vec<Value>> {
-		if values.len() < PARALLEL_BATCH_THRESHOLD {
-			// Small batches: avoid parallelism overhead
-			let mut results = Vec::with_capacity(values.len());
-			for value in values {
-				results.push(self.evaluate(ctx.with_value(value)).await?);
+	fn evaluate_batch<'a>(
+		&'a self,
+		ctx: EvalContext<'a>,
+		values: &'a [Value],
+	) -> BoxFut<'a, FlowResult<Vec<Value>>> {
+		Box::pin(async move {
+			if values.len() < PARALLEL_BATCH_THRESHOLD {
+				// Small batches: avoid parallelism overhead
+				let mut results = Vec::with_capacity(values.len());
+				for value in values {
+					results.push(self.evaluate(ctx.with_value(value)).await?);
+				}
+				return Ok(results);
 			}
-			return Ok(results);
-		}
-		let futures: Vec<_> =
-			values.iter().map(|value| self.evaluate(ctx.with_value(value))).collect();
-		futures::future::try_join_all(futures).await
+			let futures: Vec<_> =
+				values.iter().map(|value| self.evaluate(ctx.with_value(value))).collect();
+			futures::future::try_join_all(futures).await
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {
@@ -89,6 +93,24 @@ pub(crate) async fn evaluate_field(
 		Value::Object(obj) => Ok(obj.get(name).cloned().unwrap_or(Value::None)),
 
 		Value::RecordId(rid) => {
+			// SECURITY: when the record-id key is an Object and the field
+			// name resolves to one of its components, return the immutable
+			// key component directly. Falling through to `fetch_record`
+			// runs `SELECT *` with permissions disabled and re-binds
+			// `id.tenant` to the row's `tenant` document field — letting
+			// permission predicates like
+			// `WHERE id.tenant = $token.tenant` be spoofed (Codex finding
+			// c67c7232), and during UPDATE the same self-fetch returns the
+			// already-stored new value for both `o` and `n` in
+			// `store_index_data`, leaving stale indexes (Codex finding
+			// 9c442c96). When the requested name is not a key component,
+			// keep the existing remote-fetch semantics (`record:foo.id`
+			// returns the rid itself via the standard `id` projection).
+			if let crate::val::RecordIdKey::Object(obj) = &rid.key
+				&& obj.contains_key(name)
+			{
+				return Ok(obj.get(name).cloned().unwrap_or(Value::None));
+			}
 			// When we are already computing fields for this record, fetch the
 			// raw stored data without re-evaluating computed fields. Otherwise
 			// a computed field like `{ return $this.id.prop }` would re-enter

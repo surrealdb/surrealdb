@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 mod helpers;
 
 use std::time::Duration;

@@ -73,7 +73,7 @@ impl<'a> BucketController<'a> {
 	/// Checks if the bucket allows writes, and if not, return an
 	/// `Error::ReadonlyBucket`
 	fn require_writeable(&self) -> Result<()> {
-		ensure!(!self.bucket.readonly, err::Error::ReadonlyBucket(self.bucket.name.clone()));
+		ensure!(!self.bucket.readonly, err::Error::ReadonlyBucket(self.bucket.name.to_string()));
 		Ok(())
 	}
 
@@ -89,7 +89,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.put(key, payload)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -108,7 +108,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.put_if_not_exists(key, payload)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -122,7 +122,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.head(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -136,7 +136,7 @@ impl<'a> BucketController<'a> {
 			.store
 			.get(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?
 		{
 			Some(v) => v,
 			None => return Ok(None),
@@ -155,7 +155,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.delete(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -170,7 +170,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.copy(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -189,7 +189,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.copy_if_not_exists(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -205,7 +205,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.rename(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -224,7 +224,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.rename_if_not_exists(key, &target)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))?;
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))?;
 
 		Ok(())
 	}
@@ -235,7 +235,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.exists(key)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -248,7 +248,7 @@ impl<'a> BucketController<'a> {
 		self.store
 			.list(opts)
 			.await
-			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.clone(), e))
+			.map_err(|e| err::Error::ObjectStoreFailure(self.bucket.name.to_string(), e))
 			.map_err(anyhow::Error::new)
 	}
 
@@ -268,12 +268,12 @@ impl<'a> BucketController<'a> {
 		key: Option<&ObjectKey>,
 		target: Option<&ObjectKey>,
 	) -> Result<()> {
-		if self.opt.check_perms(op.into())? {
+		if self.ctx.check_perms(self.opt, op.into())? {
 			// Guest and Record users are not allowed to list files in buckets
 			ensure!(
 				!op.is_list(),
 				err::Error::BucketPermissions {
-					name: self.bucket.name.clone(),
+					name: self.bucket.name.to_string(),
 					op,
 				}
 			);
@@ -281,7 +281,7 @@ impl<'a> BucketController<'a> {
 			match &self.bucket.permissions {
 				Permission::None => {
 					bail!(err::Error::BucketPermissions {
-						name: self.bucket.name.clone(),
+						name: self.bucket.name.to_string(),
 						op,
 					})
 				}
@@ -297,7 +297,7 @@ impl<'a> BucketController<'a> {
 						ctx.add_value(
 							"file",
 							Value::File(File {
-								bucket: self.bucket.name.clone(),
+								bucket: self.bucket.name.to_string(),
 								key: key.to_string(),
 							})
 							.into(),
@@ -307,7 +307,7 @@ impl<'a> BucketController<'a> {
 						ctx.add_value(
 							"target",
 							Value::File(File {
-								bucket: self.bucket.name.clone(),
+								bucket: self.bucket.name.to_string(),
 								key: target.to_string(),
 							})
 							.into(),
@@ -324,7 +324,7 @@ impl<'a> BucketController<'a> {
 					ensure!(
 						res.is_truthy(),
 						err::Error::BucketPermissions {
-							name: self.bucket.name.clone(),
+							name: self.bucket.name.to_string(),
 							op,
 						}
 					);

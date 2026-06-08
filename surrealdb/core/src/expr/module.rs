@@ -1,3 +1,6 @@
+#[cfg(feature = "surrealism")]
+use std::sync::Arc;
+
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
@@ -328,7 +331,7 @@ async fn run_on_runtime(
 		ctx,
 		opt,
 		doc,
-		runtime.kv_store().clone(),
+		Arc::clone(runtime.kv_store()),
 		module_name,
 		#[cfg(feature = "http")]
 		client,

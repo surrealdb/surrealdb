@@ -13,6 +13,23 @@ SurrealQL (Expr) ──► Planner ──► ExecOperator tree ──► ValueBa
 3. Each operator returns a `ValueBatchStream` — an async stream of `ValueBatch` (Vec\<Value\>)
 4. If the planner returns `PlannerUnsupported`/`PlannerUnimplemented`, execution falls back to `Expr::compute()` via `plan_or_compute`.
 
+## Predicate processing layers
+
+```mermaid
+flowchart TD
+    KV[Raw KV bytes] --> PDF{PreDecodeFilter}
+    PDF -->|Reject| Skip[Skip decode]
+    PDF -->|Otherwise| Decode[decode_record]
+    Decode --> Pipe[filter_and_process_batch]
+    Pipe --> Out[Emit row]
+```
+
+1. **`pre_decode_filter/`** — Plan-time: compile a supported WHERE shape into a byte-level tree for [`PreDecodeFilter`]. Execute-time (KV table / record-id range scans): may reject rows from raw bytes **before** full record decode. Outcomes other than reject always fall through — see module rustdoc.
+2. **Scan pipeline** (`operators/scan/pipeline.rs`) — After decode, `filter_and_process_batch` evaluates the pushed-down WHERE [`PhysicalExpr`] (`scan_predicate`) per surviving row, **authoritatively**, after table permission filtering, computed fields, and field-level SELECT permissions (documented order in that function).
+3. **`ExpressionRegistry` + `Compute`** — For SELECT without GROUP BY, deduplicates complex expressions shared by ORDER BY and projection; runs **post-WHERE** on decoded values.
+
+Index access paths may strip conjuncts from the logical WHERE at plan time (`strip_index_conditions`, etc.); that is separate from both layers above.
+
 ## Core Traits
 
 | Trait | Purpose |
@@ -44,18 +61,17 @@ SurrealQL (Expr) ──► Planner ──► ExecOperator tree ──► ValueBa
 | `mod.rs` | Core traits (`ExecOperator`, `ValueBatch`, `ValueBatchStream`), WASM-compat helpers |
 | `planner.rs` | Entry point: `Planner::plan()` converts `Expr` → `Arc<dyn ExecOperator>` |
 | `context.rs` | `ExecutionContext` hierarchy, `SessionInfo`, `ContextLevel`, `Parameters` |
-| `physical_expr.rs` | `PhysicalExpr` trait, `EvalContext` |
 | `access_mode.rs` | `AccessMode` enum and combine logic |
 | `cardinality.rs` | `CardinalityHint` for buffering decisions |
 | `ordering.rs` | `OutputOrdering` for sort elimination |
 | `buffer.rs` | Stream buffering strategies based on cardinality and access mode |
 | `metrics.rs` | `OperatorMetrics` and `monitor_stream` for EXPLAIN ANALYZE |
 | `expression_registry.rs` | Expression deduplication for SELECT pipelines |
+| `pre_decode_filter/` | Pre-decode [`PreDecodeFilter`] on revision-encoded KV bytes (reject-only; scan operators) |
 | `field_path.rs` | Pure field paths (no execution, used for sort/extraction metadata) |
 | `index.rs` | Index analysis and access path selection |
 | `permission.rs` | Permission resolution for tables/fields |
 | `plan_or_compute.rs` | Fallback bridge: try streaming planner, fall back to legacy `compute()` |
-| `parts.rs` | Physical part expressions for idiom evaluation |
 
 ### `planner/` — Query Planning
 

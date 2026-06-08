@@ -106,15 +106,15 @@ impl Parser<'_> {
 					t!("mod") => {
 						self.pop_peek();
 						expected_whitespace!(self, t!("::"));
-						let name = self.parse_ident()?;
+						let name = self.parse_ident()?.into_string();
 						ModuleName::Module(name)
 					}
 					t!("silo") => {
 						self.pop_peek();
 						expected_whitespace!(self, t!("::"));
-						let organisation = self.parse_ident()?;
+						let organisation = self.parse_ident()?.into_string();
 						expected_whitespace!(self, t!("::"));
-						let package = self.parse_ident()?;
+						let package = self.parse_ident()?.into_string();
 						expected_whitespace!(self, t!("<"));
 						let major = self.parse_version_digits()?;
 						expected_whitespace!(self, t!("."));
@@ -164,7 +164,7 @@ impl Parser<'_> {
 				let name = self.next_token_value::<Param>()?;
 
 				RemoveStatement::Param(RemoveParamStatement {
-					name: name.into_string(),
+					name: name.into_strand(),
 					if_exists,
 				})
 			}

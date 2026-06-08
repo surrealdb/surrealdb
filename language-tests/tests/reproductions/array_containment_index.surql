@@ -34,7 +34,7 @@ value = "[{ name: 'Climate Org' }, { name: 'Green Edu' }]"
 value = "[{ name: 'Education Org' }, { name: 'Green Edu' }]"
 
 [[test.results]]
-value = """{ attributes: { projections: 'name' }, children: [{ attributes: { predicate: "mission_topic_tags CONTAINS 'climate'" }, children: [{ attributes: { access: "= 'climate'", direction: 'Forward', index: 'org_topics' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', expressions: [{ role: 'predicate', sql: "mission_topic_tags CONTAINS 'climate'" }], operator: 'Filter' }], context: 'Db', operator: 'SelectProject' }"""
+value = """{ attributes: { projections: 'name' }, children: [{ attributes: { access: "= 'climate'", direction: 'Forward', index: 'org_topics' }, context: 'Db', operator: 'IndexScan' }], context: 'Db', operator: 'SelectProject' }"""
 */
 
 -- Define index on array field elements

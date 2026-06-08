@@ -46,7 +46,7 @@ impl DefineSequenceStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Sequence, Base::Db)?;
 		// Compute name
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "sequence name").await?;
 		// Compute timeout
@@ -100,7 +100,7 @@ impl DefineSequenceStatement {
 		};
 
 		let sq = SequenceDefinition {
-			name: name.clone(),
+			name: name.clone().into(),
 			batch,
 			start: stk
 				.run(|stk| self.start.compute(stk, ctx, opt, doc))

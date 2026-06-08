@@ -105,7 +105,7 @@ impl FunctionRegistry {
 			Arc::new(builtin::aggregates::CountField)
 		} else {
 			// Use Count for count with no arguments
-			self.aggregates.get("count").expect("count should be registered").clone()
+			Arc::clone(self.aggregates.get("count").expect("count should be registered"))
 		}
 	}
 

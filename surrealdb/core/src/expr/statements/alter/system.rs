@@ -34,7 +34,7 @@ impl AlterSystemStatement {
 		doc: Option<&CursorDoc>,
 	) -> anyhow::Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Any, &Base::Root)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Any, Base::Root)?;
 		// Are we doing compaction?
 		if self.compact {
 			ctx.tx().compact::<Key>(None).await?;
@@ -47,10 +47,10 @@ impl AlterSystemStatement {
 					.await
 					.catch_return()?
 					.cast_to::<Duration>()?;
-				opt.dynamic_configuration().set_query_timeout(Some(timeout.0));
+				ctx.dynamic_configuration().set_query_timeout(Some(timeout.0));
 			}
 			AlterKind::Drop => {
-				opt.dynamic_configuration().set_query_timeout(None);
+				ctx.dynamic_configuration().set_query_timeout(None);
 			}
 		}
 		Ok(Value::None)

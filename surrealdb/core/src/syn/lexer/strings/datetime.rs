@@ -57,9 +57,9 @@ impl Lexer<'_> {
 
 		// remove limit as the this section is limited by the number of characters.
 		let year = Self::parse_datetime_digits(&mut reader, 4..=6, 0..=usize::MAX)?;
-		Self::expect_seperator(&mut reader, b'-')?;
+		Self::expect_separator(&mut reader, b'-')?;
 		let month = Self::parse_datetime_digits(&mut reader, 2..=2, 1..=12)?;
-		Self::expect_seperator(&mut reader, b'-')?;
+		Self::expect_separator(&mut reader, b'-')?;
 		let day = Self::parse_datetime_digits(&mut reader, 2..=2, 1..=31)?;
 
 		let year = if neg {
@@ -78,7 +78,7 @@ impl Lexer<'_> {
 			Some(x) => {
 				let c = reader.convert_to_char(x)?;
 				let span = reader.span_since(before);
-				bail!("Unexpected character `{c}`, expected time seperator `T`", @span)
+				bail!("Unexpected character `{c}`, expected time separator `T`", @span)
 			}
 			None => {
 				let time = NaiveTime::default();
@@ -100,9 +100,9 @@ impl Lexer<'_> {
 		let time_start = reader.offset();
 
 		let hour = Self::parse_datetime_digits(&mut reader, 2..=2, 0..=24)?;
-		Self::expect_seperator(&mut reader, b':')?;
+		Self::expect_separator(&mut reader, b':')?;
 		let minute = Self::parse_datetime_digits(&mut reader, 2..=2, 0..=59)?;
-		Self::expect_seperator(&mut reader, b':')?;
+		Self::expect_separator(&mut reader, b':')?;
 		let second = Self::parse_datetime_digits(&mut reader, 2..=2, 0..=60)?;
 
 		let nanos = if reader.eat(b'.') {
@@ -110,11 +110,7 @@ impl Lexer<'_> {
 			let mut number = 0u32;
 			let mut count = 0;
 
-			loop {
-				let Some(d) = reader.peek() else {
-					break;
-				};
-
+			while let Some(d) = reader.peek() {
 				if !d.is_ascii_digit() {
 					break;
 				}
@@ -161,7 +157,7 @@ impl Lexer<'_> {
 		let timezone = match reader.next() {
 			Some(x @ (b'-' | b'+')) => {
 				let hour = Self::parse_datetime_digits(&mut reader, 2..=2, 0..=23)?;
-				Self::expect_seperator(&mut reader, b':')?;
+				Self::expect_separator(&mut reader, b':')?;
 				let minutes = Self::parse_datetime_digits(&mut reader, 2..=2, 0..=59)?;
 
 				// The range checks on the digits ensure that the offset can't exceed 23:59 so
@@ -196,7 +192,7 @@ impl Lexer<'_> {
 		Ok(PublicDatetime::from(datetime))
 	}
 
-	fn expect_seperator(reader: &mut BytesReader, sep: u8) -> Result<(), SyntaxError> {
+	fn expect_separator(reader: &mut BytesReader, sep: u8) -> Result<(), SyntaxError> {
 		match reader.peek() {
 			Some(x) if x == sep => {
 				reader.next();
@@ -208,7 +204,7 @@ impl Lexer<'_> {
 				let c = reader.convert_to_char(x)?;
 				let span = reader.span_since(before);
 				bail!(
-					"Unexpected character `{c}`, expected datetime seperator characters `{}`",
+					"Unexpected character `{c}`, expected datetime separator characters `{}`",
 					sep as char,
 					@span
 				)
@@ -217,7 +213,7 @@ impl Lexer<'_> {
 				let before = reader.offset();
 				let span = reader.span_since(before);
 				bail!(
-					"Expected end of string, expected datetime seperator character `{}`",
+					"Expected end of string, expected datetime separator character `{}`",
 					sep as char,
 					@span
 				);

@@ -1,11 +1,12 @@
 use reblessive::Stk;
+use surrealdb_strand::Strand;
 
 use crate::catalog::{ApiMethod, EventDefinition, EventKind};
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
 use crate::sql::filter::Filter;
-use crate::sql::index::{Distance, HnswParams, VectorType};
+use crate::sql::index::{DiskAnnParams, Distance, HnswParams, VectorType};
 use crate::sql::kind::KindLiteral;
 use crate::sql::statements::define::config::api::{ApiConfig, Middleware};
 use crate::sql::statements::define::config::defaults::DefaultConfig;
@@ -30,9 +31,16 @@ use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
-use crate::types::PublicDuration;
 #[cfg(feature = "surrealism")]
 use crate::types::PublicFile;
+
+/// Returns whether an identifier token matches a keyword-like option name.
+///
+/// DiskANN options such as `DEGREE`, `L_BUILD`, and `ALPHA` are parsed as identifiers in this
+/// parser, so matching them case-insensitively keeps the syntax aligned with regular keywords.
+fn is_identifier_token(parser: &Parser<'_>, token: Token, ident: &str) -> bool {
+	token.kind == TokenKind::Identifier && parser.span_str(token.span).eq_ignore_ascii_case(ident)
+}
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -53,9 +61,10 @@ impl Parser<'_> {
 			t!("EVENT") => {
 				stk.run(|stk| self.parse_define_event(stk)).await.map(DefineStatement::Event)
 			}
-			t!("FIELD") => {
-				stk.run(|stk| self.parse_define_field(stk)).await.map(DefineStatement::Field)
-			}
+			t!("FIELD") => stk
+				.run(|stk| self.parse_define_field(stk))
+				.await
+				.map(|s| DefineStatement::Field(Box::new(s))),
 			t!("INDEX") => {
 				stk.run(|stk| self.parse_define_index(stk)).await.map(DefineStatement::Index)
 			}
@@ -187,6 +196,8 @@ impl Parser<'_> {
 			returns,
 			comment: Expr::Literal(Literal::None),
 			permissions: Permission::default(),
+			graphql_alias: None,
+			graphql_deprecated: None,
 		};
 
 		loop {
@@ -198,6 +209,14 @@ impl Parser<'_> {
 				t!("PERMISSIONS") => {
 					self.pop_peek();
 					res.permissions = stk.run(|ctx| self.parse_permission_value(ctx)).await?;
+				}
+				t!("GRAPHQL_ALIAS") => {
+					self.pop_peek();
+					res.graphql_alias = Some(self.parse_string_lit()?);
+				}
+				t!("GRAPHQL_DEPRECATED") => {
+					self.pop_peek();
+					res.graphql_deprecated = Some(self.parse_string_lit()?);
 				}
 				_ => break,
 			}
@@ -241,7 +260,7 @@ impl Parser<'_> {
 
 		let name = if self.eat(t!("mod")) {
 			expected!(self, t!("::"));
-			let name = self.parse_ident()?;
+			let name = self.parse_ident()?.into_string();
 			expected!(self, t!("AS"));
 			Some(name)
 		} else {
@@ -253,9 +272,9 @@ impl Parser<'_> {
 			t!("silo") => {
 				self.pop_peek();
 				expected!(self, t!("::"));
-				let organisation = self.parse_ident()?;
+				let organisation = self.parse_ident()?.into_string();
 				expected!(self, t!("::"));
-				let package = self.parse_ident()?;
+				let package = self.parse_ident()?.into_string();
 				expected!(self, t!("<"));
 				let major = self.next_token_value::<u32>()?;
 				expected!(self, t!("."));
@@ -328,12 +347,8 @@ impl Parser<'_> {
 			kind,
 			name,
 			base,
-			// Safety: "Viewer" does not contain a null byte
-			roles: vec!["Viewer".to_owned()], /* New users get
-			                                   * the viewer role
-			                                   * by default */
-			// TODO: Move out of the parser
-			token_duration: Expr::Literal(Literal::Duration(PublicDuration::from_secs(3600))), /* defaults to 1 hour. */
+			// New users get the viewer role by default.
+			roles: vec!["Viewer".to_owned()],
 			..DefineUserStatement::default()
 		};
 
@@ -362,7 +377,7 @@ impl Parser<'_> {
 					let mut roles = Vec::new();
 					loop {
 						let token = self.peek();
-						let role = self.parse_ident()?;
+						let role = self.parse_ident()?.into_string();
 						// NOTE(gguillemas): This hardcoded list is a temporary fix in order
 						// to avoid making breaking changes to the DefineUserStatement structure
 						// while still providing parsing feedback to users referencing unexistent
@@ -504,7 +519,7 @@ impl Parser<'_> {
 								}
 								self.eat(t!(","));
 							}
-							res.access_type = AccessType::Record(ac);
+							res.access_type = AccessType::Record(Box::new(ac));
 						}
 						t!("BEARER") => {
 							self.pop_peek();
@@ -591,7 +606,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value::<Param>()?.into_string();
+		let name = self.next_token_value::<Param>()?.into_strand();
 
 		let mut res = DefineParamStatement {
 			name,
@@ -707,6 +722,14 @@ impl Parser<'_> {
 						}
 						_ => unexpected!(self, peek, "`SELECT`"),
 					}
+				}
+				t!("GRAPHQL_ALIAS") => {
+					self.pop_peek();
+					res.graphql_alias = Some(self.parse_string_lit()?);
+				}
+				t!("GRAPHQL_DEPRECATED") => {
+					self.pop_peek();
+					res.graphql_deprecated = Some(self.parse_string_lit()?);
 				}
 				_ => break,
 			}
@@ -1002,6 +1025,14 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.computed = Some(stk.run(|stk| self.parse_expr_field(stk)).await?);
 				}
+				t!("GRAPHQL_ALIAS") => {
+					self.pop_peek();
+					res.graphql_alias = Some(self.parse_string_lit()?);
+				}
+				t!("GRAPHQL_DEPRECATED") => {
+					self.pop_peek();
+					res.graphql_deprecated = Some(self.parse_string_lit()?);
+				}
 				_ => break,
 			}
 		}
@@ -1068,7 +1099,7 @@ impl Parser<'_> {
 						match self.peek_kind() {
 							t!("ANALYZER") => {
 								self.pop_peek();
-								analyzer = Some(self.parse_ident()).transpose()?;
+								analyzer = Some(self.parse_ident()?.into_string());
 							}
 							t!("BM25") => {
 								self.pop_peek();
@@ -1094,7 +1125,7 @@ impl Parser<'_> {
 						}
 					}
 					res.index = Index::FullText(crate::sql::index::FullTextParams {
-						az: analyzer.unwrap_or_else(|| "like".to_owned()),
+						az: analyzer.unwrap_or_else(|| "like".to_owned()).into(),
 						sc: scoring.unwrap_or_else(Default::default),
 						hl,
 					});
@@ -1182,6 +1213,119 @@ impl Parser<'_> {
 						use_hashed_vector,
 					});
 				}
+				token
+					if {
+						let span = self.peek().span;
+						is_identifier_token(
+							self,
+							Token {
+								kind: token,
+								span,
+							},
+							"DISKANN",
+						)
+					} =>
+				{
+					self.pop_peek();
+					expected!(self, t!("DIMENSION"));
+					let dimension = self.next_token_value()?;
+					let mut distance = Distance::Euclidean;
+					let mut vector_type = VectorType::F32;
+					let mut degree = 64;
+					let mut l_build = 100;
+					let mut alpha = 1.2.into();
+					let mut use_hashed_vector = false;
+					loop {
+						let peek = self.peek();
+						match peek.kind {
+							t!("DISTANCE") => {
+								self.pop_peek();
+								distance = self.parse_distance()?;
+							}
+							t!("TYPE") => {
+								self.pop_peek();
+								vector_type = self.parse_vector_type()?;
+							}
+							kind if is_identifier_token(
+								self,
+								Token {
+									kind,
+									span: peek.span,
+								},
+								"DEGREE",
+							) =>
+							{
+								self.pop_peek();
+								degree = self.next_token_value()?;
+							}
+							kind if is_identifier_token(
+								self,
+								Token {
+									kind,
+									span: peek.span,
+								},
+								"L_BUILD",
+							) =>
+							{
+								self.pop_peek();
+								l_build = self.next_token_value()?;
+							}
+							kind if is_identifier_token(
+								self,
+								Token {
+									kind,
+									span: peek.span,
+								},
+								"ALPHA",
+							) =>
+							{
+								self.pop_peek();
+								alpha = self.next_token_value()?;
+							}
+							t!("HASHED_VECTOR") => {
+								self.pop_peek();
+								use_hashed_vector = true;
+							}
+							_ => {
+								break;
+							}
+						}
+					}
+					if !matches!(
+						distance,
+						Distance::Euclidean
+							| Distance::Cosine | Distance::InnerProduct
+							| Distance::CosineNormalized
+					) {
+						bail!("Invalid DISTANCE for DISKANN index", @self.recent_span() => "DISKANN supports EUCLIDEAN, COSINE, INNER_PRODUCT, and COSINE_NORMALIZED")
+					}
+					if !matches!(
+						vector_type,
+						VectorType::F32 | VectorType::F16 | VectorType::I8 | VectorType::U8
+					) {
+						bail!("Invalid TYPE for DISKANN index", @self.recent_span() => "DISKANN supports TYPE F32, F16, I8, and U8")
+					}
+					if matches!(distance, Distance::CosineNormalized)
+						&& matches!(vector_type, VectorType::I8 | VectorType::U8)
+					{
+						bail!("Invalid TYPE for DISKANN COSINE_NORMALIZED index", @self.recent_span() => "DISKANN COSINE_NORMALIZED supports TYPE F32 and F16 only")
+					}
+					if degree == 0 {
+						bail!("Invalid value for DISKANN parameter `DEGREE`", @self.recent_span() => "`DEGREE` must be greater than 0")
+					}
+					if l_build == 0 {
+						bail!("Invalid value for DISKANN parameter `L_BUILD`", @self.recent_span() => "`L_BUILD` must be greater than 0")
+					}
+					res.index = Index::DiskAnn(DiskAnnParams {
+						dimension,
+						distance,
+						vector_type,
+						degree,
+						l_build,
+						alpha,
+						use_hashed_vector,
+					});
+				}
 				t!("CONCURRENTLY") => {
 					self.pop_peek();
 					res.concurrently = true;
@@ -1199,7 +1343,7 @@ impl Parser<'_> {
 					bail!("Cannot create a count index with fields", @field_span);
 				}
 			}
-			(field_span, Index::FullText(_) | Index::Hnsw(_)) => {
+			(field_span, Index::FullText(_) | Index::Hnsw(_) | Index::DiskAnn(_)) => {
 				if res.cols.len() != 1 {
 					if let Some(field_span) = field_span {
 						bail!("Expected one column, found {}", res.cols.len(), @field_span);
@@ -1320,13 +1464,13 @@ impl Parser<'_> {
 					self.pop_peek();
 					expected!(self, t!("fn"));
 					expected!(self, t!("::"));
-					let mut ident = self.parse_ident()?;
+					let mut ident = self.parse_ident()?.into_string();
 					while self.eat(t!("::")) {
-						let value = self.parse_ident()?;
+						let value = self.parse_ident()?.into_string();
 						ident.push_str("::");
 						ident.push_str(&value);
 					}
-					res.function = Some(ident);
+					res.function = Some(ident.into());
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
@@ -1495,7 +1639,8 @@ impl Parser<'_> {
 					let mut middleware = Vec::new();
 
 					loop {
-						let name = self.parse_function_name().await?.to_string();
+						let f = self.parse_function_name().await?;
+						let name = f.to_string().into();
 
 						expected!(self, t!("("));
 						let args = self.parse_function_args(stk).await?;
@@ -1566,14 +1711,23 @@ impl Parser<'_> {
 
 					let next = self.next();
 					match next.kind {
+						t!("INCLUDE") => {
+							tmp_fncs = Some(FunctionsConfig::Include(
+								self.parse_graphql_function_configs()?,
+							))
+						}
+						t!("EXCLUDE") => {
+							tmp_fncs = Some(FunctionsConfig::Exclude(
+								self.parse_graphql_function_configs()?,
+							))
+						}
 						t!("NONE") => {
 							tmp_fncs = Some(FunctionsConfig::None);
 						}
 						t!("AUTO") => {
 							tmp_fncs = Some(FunctionsConfig::Auto);
 						}
-						//TODO: Actually implement INCLUDE and EXCLUDE
-						_ => unexpected!(self, next, "`NONE`, `AUTO`"),
+						_ => unexpected!(self, next, "`NONE`, `AUTO`, `INCLUDE` or `EXCLUDE`"),
 					}
 				}
 				TokenKind::Identifier => {
@@ -1619,13 +1773,29 @@ impl Parser<'_> {
 		loop {
 			match self.peek_kind() {
 				x if Self::kind_is_identifier(x) => {
-					let name = self.parse_ident()?;
+					let name = self.parse_ident()?.into();
 					acc.push(TableConfig {
 						name,
 					});
 				}
 				_ => unexpected!(self, self.next(), "a table config"),
 			}
+			if !self.eat(t!(",")) {
+				break;
+			}
+		}
+		Ok(acc)
+	}
+
+	/// Parses a comma-separated list of `fn::name[::part]*` references for a
+	/// GraphQL `FUNCTIONS INCLUDE`/`EXCLUDE` clause. The leading `fn::` token is
+	/// required (matching how custom functions are referenced everywhere else
+	/// in the language) and is stripped before storage so the catalog continues
+	/// to hold the bare function name.
+	fn parse_graphql_function_configs(&mut self) -> ParseResult<Vec<Strand>> {
+		let mut acc = vec![];
+		loop {
+			acc.push(self.parse_custom_function_name()?);
 			if !self.eat(t!(",")) {
 				break;
 			}
@@ -1658,10 +1828,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_tables(&mut self) -> ParseResult<Vec<String>> {
-		let mut names = vec![self.parse_ident()?];
+	pub fn parse_tables(&mut self) -> ParseResult<Vec<crate::val::TableName>> {
+		let mut names = vec![self.parse_ident_str()?.into()];
 		while self.eat(t!("|")) {
-			names.push(self.parse_ident()?);
+			names.push(self.parse_ident_str()?.into());
 		}
 		Ok(names)
 	}

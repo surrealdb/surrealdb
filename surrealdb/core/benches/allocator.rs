@@ -636,8 +636,8 @@ fn bench_mixed_workload(c: &mut Criterion) {
 		b.iter(|| {
 			running.store(true, Ordering::Release);
 
-			let alloc_allocator = allocator.clone();
-			let alloc_running = running.clone();
+			let alloc_allocator = Arc::clone(&allocator);
+			let alloc_running = Arc::clone(&running);
 			let alloc_handle = std::thread::spawn(move || {
 				(0..alloc_threads).into_par_iter().for_each(|_| {
 					for i in 0..ops_per_alloc_thread {
@@ -650,8 +650,8 @@ fn bench_mixed_workload(c: &mut Criterion) {
 				});
 			});
 
-			let query_allocator = allocator.clone();
-			let query_running = running.clone();
+			let query_allocator = Arc::clone(&allocator);
+			let query_running = Arc::clone(&running);
 			let query_handle = std::thread::spawn(move || {
 				(0..query_threads).into_par_iter().for_each(|_| {
 					while query_running.load(Ordering::Acquire) {
@@ -673,8 +673,8 @@ fn bench_mixed_workload(c: &mut Criterion) {
 		b.iter(|| {
 			running.store(true, Ordering::Release);
 
-			let alloc_allocator = allocator.clone();
-			let alloc_running = running.clone();
+			let alloc_allocator = Arc::clone(&allocator);
+			let alloc_running = Arc::clone(&running);
 			let alloc_handle = std::thread::spawn(move || {
 				(0..alloc_threads).into_par_iter().for_each(|_| {
 					for i in 0..ops_per_alloc_thread {
@@ -687,8 +687,8 @@ fn bench_mixed_workload(c: &mut Criterion) {
 				});
 			});
 
-			let query_allocator = allocator.clone();
-			let query_running = running.clone();
+			let query_allocator = Arc::clone(&allocator);
+			let query_running = Arc::clone(&running);
 			let query_handle = std::thread::spawn(move || {
 				(0..query_threads).into_par_iter().for_each(|_| {
 					while query_running.load(Ordering::Acquire) {
@@ -710,8 +710,8 @@ fn bench_mixed_workload(c: &mut Criterion) {
 		b.iter(|| {
 			running.store(true, Ordering::Release);
 
-			let alloc_allocator = allocator.clone();
-			let alloc_running = running.clone();
+			let alloc_allocator = Arc::clone(&allocator);
+			let alloc_running = Arc::clone(&running);
 			let alloc_handle = std::thread::spawn(move || {
 				(0..alloc_threads).into_par_iter().for_each(|_| {
 					for i in 0..ops_per_alloc_thread {
@@ -724,8 +724,8 @@ fn bench_mixed_workload(c: &mut Criterion) {
 				});
 			});
 
-			let query_allocator = allocator.clone();
-			let query_running = running.clone();
+			let query_allocator = Arc::clone(&allocator);
+			let query_running = Arc::clone(&running);
 			let query_handle = std::thread::spawn(move || {
 				(0..query_threads).into_par_iter().for_each(|_| {
 					while query_running.load(Ordering::Acquire) {
@@ -747,8 +747,8 @@ fn bench_mixed_workload(c: &mut Criterion) {
 		b.iter(|| {
 			running.store(true, Ordering::Release);
 
-			let alloc_allocator = allocator.clone();
-			let alloc_running = running.clone();
+			let alloc_allocator = Arc::clone(&allocator);
+			let alloc_running = Arc::clone(&running);
 			let alloc_handle = std::thread::spawn(move || {
 				(0..alloc_threads).into_par_iter().for_each(|_| {
 					for i in 0..ops_per_alloc_thread {
@@ -761,8 +761,8 @@ fn bench_mixed_workload(c: &mut Criterion) {
 				});
 			});
 
-			let query_allocator = allocator.clone();
-			let query_running = running.clone();
+			let query_allocator = Arc::clone(&allocator);
+			let query_running = Arc::clone(&running);
 			let query_handle = std::thread::spawn(move || {
 				(0..query_threads).into_par_iter().for_each(|_| {
 					while query_running.load(Ordering::Acquire) {

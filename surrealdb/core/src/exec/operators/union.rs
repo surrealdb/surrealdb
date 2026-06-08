@@ -7,7 +7,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::stream::{self, StreamExt};
 
 use crate::exec::{
@@ -41,12 +40,13 @@ impl Union {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for Union {
 	fn name(&self) -> &'static str {
 		"Union"
+	}
+
+	fn attrs(&self) -> Vec<(String, String)> {
+		vec![("inputs".to_string(), self.inputs.len().to_string())]
 	}
 
 	fn required_context(&self) -> ContextLevel {
@@ -77,6 +77,7 @@ impl ExecOperator for Union {
 				self.inputs[0].execute(ctx)?,
 				self.inputs[0].access_mode(),
 				self.inputs[0].cardinality_hint(),
+				ctx.root().ctx.config.operator_buffer_size,
 			);
 			return Ok(monitor_stream(stream, "Union", &self.metrics));
 		}
@@ -118,6 +119,7 @@ impl ExecOperator for Union {
 								stream,
 								inputs[i].access_mode(),
 								inputs[i].cardinality_hint(),
+								ctx.root().ctx.config.operator_buffer_size,
 							))
 						}
 						Err(e) => return Some((Err(e), (inputs, ctx, idx, None))),

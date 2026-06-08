@@ -163,3 +163,143 @@ impl<T: ErrorTrait> fmt::Display for TypedError<T> {
 		Display::fmt(self.0.deref(), f)
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use std::fmt;
+	use std::sync::atomic::{AtomicUsize, Ordering};
+
+	use super::{Error, TypedError};
+
+	const SENTINEL: u64 = 0xDEAD_BEEF_CAFE_BABE;
+
+	/// Error type for regression tests covering the `Error`/`TypedError` ownership-transfer
+	/// paths (`erase`, `downcast`, `into_inner`).
+	///
+	/// Holds a `Box<u64>` so any double-free of the inner allocation also corrupts the heap
+	/// (caught by the system allocator and tools like Miri/ASan), and increments a counter on
+	/// `Drop` so the tests can assert that the inner value is dropped exactly once across each
+	/// conversion path.
+	struct DropCounted {
+		value: Box<u64>,
+		counter: &'static AtomicUsize,
+	}
+
+	impl DropCounted {
+		fn new(counter: &'static AtomicUsize) -> Self {
+			DropCounted {
+				value: Box::new(SENTINEL),
+				counter,
+			}
+		}
+	}
+
+	impl fmt::Debug for DropCounted {
+		fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+			write!(f, "DropCounted({:#x})", *self.value)
+		}
+	}
+
+	impl fmt::Display for DropCounted {
+		fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+			write!(f, "drop-counted error: {:#x}", *self.value)
+		}
+	}
+
+	impl std::error::Error for DropCounted {}
+
+	impl Drop for DropCounted {
+		fn drop(&mut self) {
+			self.counter.fetch_add(1, Ordering::SeqCst);
+		}
+	}
+
+	/// Unrelated error type used to exercise the `downcast` failure branch.
+	#[derive(Debug)]
+	struct OtherType;
+
+	impl fmt::Display for OtherType {
+		fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+			f.write_str("OtherType")
+		}
+	}
+
+	impl std::error::Error for OtherType {}
+
+	#[test]
+	fn error_new_format_then_drop_runs_once() {
+		static COUNTER: AtomicUsize = AtomicUsize::new(0);
+		{
+			let err = Error::new(DropCounted::new(&COUNTER));
+			let debug = format!("{:?}", err);
+			let display = format!("{}", err);
+			assert!(debug.contains("DropCounted"), "unexpected debug: {debug}");
+			assert!(display.contains("drop-counted error"), "unexpected display: {display}",);
+			assert_eq!(COUNTER.load(Ordering::SeqCst), 0, "value dropped early");
+		}
+		assert_eq!(COUNTER.load(Ordering::SeqCst), 1, "expected exactly one drop");
+	}
+
+	#[test]
+	fn error_downcast_then_into_inner_drops_once() {
+		static COUNTER: AtomicUsize = AtomicUsize::new(0);
+		{
+			let err = Error::new(DropCounted::new(&COUNTER));
+			let typed: TypedError<DropCounted> =
+				err.downcast::<DropCounted>().expect("downcast should succeed");
+			assert_eq!(*typed.value, SENTINEL);
+			let inner = typed.into_inner();
+			assert_eq!(*inner.value, SENTINEL);
+		}
+		assert_eq!(COUNTER.load(Ordering::SeqCst), 1, "expected exactly one drop");
+	}
+
+	#[test]
+	fn error_into_inner_drops_once() {
+		static COUNTER: AtomicUsize = AtomicUsize::new(0);
+		{
+			let err = Error::new(DropCounted::new(&COUNTER));
+			let inner = err.into_inner::<DropCounted>().expect("into_inner should succeed");
+			assert_eq!(*inner.value, SENTINEL);
+		}
+		assert_eq!(COUNTER.load(Ordering::SeqCst), 1, "expected exactly one drop");
+	}
+
+	#[test]
+	fn error_downcast_failure_preserves_original() {
+		static COUNTER: AtomicUsize = AtomicUsize::new(0);
+		{
+			let err = Error::new(DropCounted::new(&COUNTER));
+			let err =
+				err.downcast::<OtherType>().expect_err("downcast to unrelated type should fail");
+			let _ = format!("{:?}", err);
+			let _ = format!("{}", err);
+			assert_eq!(COUNTER.load(Ordering::SeqCst), 0, "value dropped during failed downcast",);
+		}
+		assert_eq!(COUNTER.load(Ordering::SeqCst), 1, "expected exactly one drop");
+	}
+
+	#[test]
+	fn typed_error_erase_then_drop_runs_once() {
+		static COUNTER: AtomicUsize = AtomicUsize::new(0);
+		{
+			let typed = TypedError::new(DropCounted::new(&COUNTER));
+			let err: Error = typed.erase();
+			let _ = format!("{:?}", err);
+		}
+		assert_eq!(COUNTER.load(Ordering::SeqCst), 1, "expected exactly one drop");
+	}
+
+	#[test]
+	fn typed_error_erase_then_downcast_into_inner_drops_once() {
+		static COUNTER: AtomicUsize = AtomicUsize::new(0);
+		{
+			let typed = TypedError::new(DropCounted::new(&COUNTER));
+			let err = typed.erase();
+			let typed_back = err.downcast::<DropCounted>().expect("downcast should succeed");
+			let inner = typed_back.into_inner();
+			assert_eq!(*inner.value, SENTINEL);
+		}
+		assert_eq!(COUNTER.load(Ordering::SeqCst), 1, "expected exactly one drop");
+	}
+}

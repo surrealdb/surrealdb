@@ -8,12 +8,11 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, ContextLevel};
+use crate::exec::{AccessMode, BoxFut, ContextLevel};
 use crate::expr::{ControlFlow, FlowResult};
 use crate::val::Value;
 
@@ -54,33 +53,36 @@ pub struct ControlFlowExpr {
 	/// Inner expression for THROW/RETURN (None for BREAK/CONTINUE)
 	pub(crate) inner: Option<Arc<dyn PhysicalExpr>>,
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for ControlFlowExpr {
 	fn name(&self) -> &'static str {
 		"ControlFlow"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> ContextLevel {
 		self.inner.as_ref().map_or(ContextLevel::Root, |e| e.required_context())
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		match self.kind {
-			ControlFlowKind::Break => Err(ControlFlow::Break),
-			ControlFlowKind::Continue => Err(ControlFlow::Continue),
-			ControlFlowKind::Throw => {
-				let inner = self.inner.as_ref().expect("THROW must have inner expression");
-				let value = inner.evaluate(ctx).await?;
-				Err(ControlFlow::Err(anyhow::Error::new(Error::Thrown(value.to_raw_string()))))
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			match self.kind {
+				ControlFlowKind::Break => Err(ControlFlow::Break),
+				ControlFlowKind::Continue => Err(ControlFlow::Continue),
+				ControlFlowKind::Throw => {
+					let inner = self.inner.as_ref().expect("THROW must have inner expression");
+					let value = inner.evaluate(ctx).await?;
+					Err(ControlFlow::Err(anyhow::Error::new(Error::Thrown(value.to_raw_string()))))
+				}
+				ControlFlowKind::Return => {
+					let inner = self.inner.as_ref().expect("RETURN must have inner expression");
+					let value = inner.evaluate(ctx).await?;
+					Err(ControlFlow::Return(value))
+				}
 			}
-			ControlFlowKind::Return => {
-				let inner = self.inner.as_ref().expect("RETURN must have inner expression");
-				let value = inner.evaluate(ctx).await?;
-				Err(ControlFlow::Return(value))
-			}
-		}
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {

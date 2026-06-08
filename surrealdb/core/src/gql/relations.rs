@@ -17,10 +17,10 @@ pub(crate) struct RelationInfo {
 	pub table_name: TableName,
 	/// Tables the relation originates from (the `IN` / `FROM` clause).
 	/// Empty if no `IN` clause was specified.
-	pub from_tables: Vec<String>,
+	pub from_tables: Vec<TableName>,
 	/// Tables the relation points to (the `OUT` / `TO` clause).
 	/// Empty if no `OUT` clause was specified.
-	pub to_tables: Vec<String>,
+	pub to_tables: Vec<TableName>,
 }
 
 /// The direction of a relation from the perspective of the table the field is added to.

@@ -3,6 +3,7 @@ use core::f64;
 use anyhow::{Result, bail, ensure};
 use surrealdb_types::ToSql;
 
+use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::err::Error;
 use crate::fnc::util;
 use crate::fnc::util::math::bottom::Bottom;
@@ -84,6 +85,17 @@ pub fn fixed((arg, p): (Number, i64)) -> Result<Value> {
 		Error::InvalidFunctionArguments {
 			name: String::from("math::fixed"),
 			message: String::from("The second argument must be an integer greater than 0."),
+		}
+	);
+	// Bound the intermediate `format!` allocation in `Number::fixed`.
+	ensure!(
+		p <= *GENERATION_ALLOCATION_LIMIT as i64,
+		Error::InvalidFunctionArguments {
+			name: String::from("math::fixed"),
+			message: format!(
+				"The second argument must not exceed {}.",
+				*GENERATION_ALLOCATION_LIMIT
+			),
 		}
 	);
 	Ok(arg.fixed(p as usize).into())

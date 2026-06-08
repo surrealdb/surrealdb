@@ -1,4 +1,5 @@
 use revision::revisioned;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::Permission;
@@ -10,10 +11,10 @@ use crate::sql::statements::define::DefineKind;
 use crate::sql::{self, DefineFunctionStatement};
 use crate::val::Value;
 
-#[revisioned(revision = 2)]
+#[revisioned(revision = 3)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FunctionDefinition {
-	pub(crate) name: String,
+	pub(crate) name: Strand,
 	pub(crate) args: Vec<(String, Kind)>,
 	pub(crate) block: Block,
 	pub(crate) comment: Option<String>,
@@ -22,6 +23,15 @@ pub struct FunctionDefinition {
 	/// The auth limit of the API.
 	#[revision(start = 2, default_fn = "default_auth_limit")]
 	pub(crate) auth_limit: AuthLimit,
+	/// Optional alias used as the GraphQL Query field name. See GitHub issue
+	/// #4537. `Option<String>::default()` already returns `None`.
+	#[revision(start = 3)]
+	pub(crate) graphql_alias: Option<String>,
+
+	/// Reason emitted on the GraphQL `@deprecated` directive of the
+	/// auto-generated Query field for this function.
+	#[revision(start = 3)]
+	pub(crate) graphql_deprecated: Option<String>,
 }
 
 // This was pushed in after the first beta, so we need to add auth_limit to structs in a
@@ -46,8 +56,10 @@ impl FunctionDefinition {
 			comment: self
 				.comment
 				.clone()
-				.map(|x| sql::Expr::Literal(sql::Literal::String(x)))
+				.map(|x| sql::Expr::Literal(sql::Literal::String(x.into())))
 				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
+			graphql_alias: self.graphql_alias.clone(),
+			graphql_deprecated: self.graphql_deprecated.clone(),
 		}
 	}
 }
@@ -55,16 +67,18 @@ impl FunctionDefinition {
 impl InfoStructure for FunctionDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.into(),
-			"args".to_string() => self.args
+			"name" => self.name.into(),
+			"args" => self.args
 				.into_iter()
 				.map(|(n, k)| vec![n.into(), k.to_sql().into()].into())
 				.collect::<Vec<Value>>()
 				.into(),
-			"block".to_string() => self.block.to_sql().into(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.to_sql().into(),
-			"returns".to_string(), if let Some(v) = self.returns => v.to_sql().into(),
+			"block" => self.block.to_sql().into(),
+			"permissions" => self.permissions.structure(),
+			"comment", if let Some(v) = self.comment => v.to_sql().into(),
+			"returns", if let Some(v) = self.returns => v.to_sql().into(),
+			"graphql_alias", if let Some(v) = self.graphql_alias => v.into(),
+			"graphql_deprecated", if let Some(v) = self.graphql_deprecated => v.into(),
 		})
 	}
 }

@@ -3,10 +3,12 @@ use std::fmt::Display;
 use std::hash;
 
 use rust_decimal::Decimal;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{EscapeKwFreeIdent, EscapeObjectKey, Float, Fmt, QuoteStr};
 use crate::types::PublicDuration;
+use crate::val::TableName;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -127,9 +129,9 @@ pub enum Kind {
 	/// Regular expression type.
 	Regex,
 	/// A table type.
-	Table(Vec<String>),
+	Table(Vec<TableName>),
 	/// A record type.
-	Record(Vec<String>),
+	Record(Vec<TableName>),
 	/// A geometry type.
 	Geometry(Vec<GeometryKind>),
 	/// An either type.
@@ -201,12 +203,8 @@ impl From<Kind> for crate::expr::Kind {
 			Kind::String => crate::expr::Kind::String,
 			Kind::Uuid => crate::expr::Kind::Uuid,
 			Kind::Regex => crate::expr::Kind::Regex,
-			Kind::Table(tables) => {
-				crate::expr::Kind::Table(tables.into_iter().map(Into::into).collect())
-			}
-			Kind::Record(tables) => {
-				crate::expr::Kind::Record(tables.into_iter().map(Into::into).collect())
-			}
+			Kind::Table(tables) => crate::expr::Kind::Table(tables),
+			Kind::Record(tables) => crate::expr::Kind::Record(tables),
 			Kind::Geometry(geometries) => {
 				crate::expr::Kind::Geometry(geometries.into_iter().map(Into::into).collect())
 			}
@@ -244,12 +242,8 @@ impl From<crate::expr::Kind> for Kind {
 			crate::expr::Kind::String => Kind::String,
 			crate::expr::Kind::Uuid => Kind::Uuid,
 			crate::expr::Kind::Regex => Kind::Regex,
-			crate::expr::Kind::Table(tables) => {
-				Kind::Table(tables.into_iter().map(Into::into).collect())
-			}
-			crate::expr::Kind::Record(tables) => {
-				Kind::Record(tables.into_iter().map(Into::into).collect())
-			}
+			crate::expr::Kind::Table(tables) => Kind::Table(tables),
+			crate::expr::Kind::Record(tables) => Kind::Record(tables),
 			crate::expr::Kind::Geometry(geometries) => {
 				Kind::Geometry(geometries.into_iter().map(Into::into).collect())
 			}
@@ -386,7 +380,7 @@ impl ToSql for Kind {
 						f,
 						fmt,
 						"table<{}>",
-						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x)))
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x.as_str())))
 					);
 				}
 			}
@@ -398,7 +392,7 @@ impl ToSql for Kind {
 						f,
 						fmt,
 						"record<{}>",
-						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x)))
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x.as_str())))
 					);
 				}
 			}
@@ -441,13 +435,13 @@ impl ToSql for Kind {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum KindLiteral {
-	String(String),
+	String(Strand),
 	Integer(i64),
 	Float(f64),
 	Decimal(Decimal),
 	Duration(PublicDuration),
 	Array(Vec<Kind>),
-	Object(BTreeMap<String, Kind>),
+	Object(BTreeMap<Strand, Kind>),
 	Bool(bool),
 }
 
@@ -629,13 +623,13 @@ impl From<KindLiteral> for crate::types::PublicKindLiteral {
 			KindLiteral::Integer(i) => crate::types::PublicKindLiteral::Integer(i),
 			KindLiteral::Float(f) => crate::types::PublicKindLiteral::Float(f),
 			KindLiteral::Decimal(d) => crate::types::PublicKindLiteral::Decimal(d),
-			KindLiteral::String(s) => crate::types::PublicKindLiteral::String(s),
+			KindLiteral::String(s) => crate::types::PublicKindLiteral::String(s.into_string()),
 			KindLiteral::Duration(d) => crate::types::PublicKindLiteral::Duration(d),
 			KindLiteral::Array(a) => {
 				crate::types::PublicKindLiteral::Array(a.into_iter().map(Into::into).collect())
 			}
 			KindLiteral::Object(o) => crate::types::PublicKindLiteral::Object(
-				o.into_iter().map(|(k, v)| (k, v.into())).collect(),
+				o.into_iter().map(|(k, v)| (k.into_string(), v.into())).collect(),
 			),
 		}
 	}
@@ -648,13 +642,13 @@ impl From<crate::types::PublicKindLiteral> for KindLiteral {
 			crate::types::PublicKindLiteral::Integer(i) => Self::Integer(i),
 			crate::types::PublicKindLiteral::Float(f) => Self::Float(f),
 			crate::types::PublicKindLiteral::Decimal(d) => Self::Decimal(d),
-			crate::types::PublicKindLiteral::String(s) => Self::String(s),
+			crate::types::PublicKindLiteral::String(s) => Self::String(s.into()),
 			crate::types::PublicKindLiteral::Duration(d) => Self::Duration(d),
 			crate::types::PublicKindLiteral::Array(a) => {
 				Self::Array(a.into_iter().map(Into::into).collect())
 			}
 			crate::types::PublicKindLiteral::Object(o) => {
-				Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect())
+				Self::Object(o.into_iter().map(|(k, v)| (k.into(), v.into())).collect())
 			}
 		}
 	}
@@ -685,10 +679,10 @@ mod tests {
 	#[case::range(Kind::Range, "range")]
 	#[case::function(Kind::Function(None, None), "function")]
 	#[case::table_empty(Kind::Table(vec![]), "table")]
-	#[case::table_single(Kind::Table(vec!["users".to_string()]), "table<users>")]
-	#[case::table_multiple(Kind::Table(vec!["users".to_string(), "posts".to_string()]), "table<users | posts>")]
+	#[case::table_single(Kind::Table(vec!["users".into()]), "table<users>")]
+	#[case::table_multiple(Kind::Table(vec!["users".into(), "posts".into()]), "table<users | posts>")]
 	#[case::record_empty(Kind::Record(vec![]), "record")]
-	#[case::record_single(Kind::Record(vec!["users".to_string()]), "record<users>")]
+	#[case::record_single(Kind::Record(vec!["users".into()]), "record<users>")]
 	#[case::geometry_empty(Kind::Geometry(vec![]), "geometry")]
 	#[case::geometry_single(Kind::Geometry(vec![GeometryKind::Point]), "geometry<point>")]
 	#[case::set_any(Kind::Set(Box::new(Kind::Any), None), "set")]
@@ -720,8 +714,8 @@ mod tests {
 	#[case::uuid(Kind::Uuid)]
 	#[case::regex(Kind::Regex)]
 	#[case::range(Kind::Range)]
-	#[case::table(Kind::Table(vec!["users".to_string()]))]
-	#[case::record(Kind::Record(vec!["users".to_string()]))]
+	#[case::table(Kind::Table(vec!["users".into()]))]
+	#[case::record(Kind::Record(vec!["users".into()]))]
 	#[case::geometry(Kind::Geometry(vec![GeometryKind::Point]))]
 	#[case::set(Kind::Set(Box::new(Kind::String), None))]
 	#[case::array(Kind::Array(Box::new(Kind::String), None))]
@@ -750,8 +744,8 @@ mod tests {
 	#[case::uuid(Kind::Uuid)]
 	#[case::regex(Kind::Regex)]
 	#[case::range(Kind::Range)]
-	#[case::table(Kind::Table(vec!["users".to_string()]))]
-	#[case::record(Kind::Record(vec!["users".to_string()]))]
+	#[case::table(Kind::Table(vec!["users".into()]))]
+	#[case::record(Kind::Record(vec!["users".into()]))]
 	#[case::geometry(Kind::Geometry(vec![GeometryKind::Point]))]
 	#[case::set(Kind::Set(Box::new(Kind::String), None))]
 	#[case::array(Kind::Array(Box::new(Kind::String), None))]
@@ -765,8 +759,8 @@ mod tests {
 
 	#[rstest]
 	#[case::any(Kind::Any)]
-	#[case::table(Kind::Table(vec!["users".to_string()]))]
-	#[case::record(Kind::Record(vec!["users".to_string()]))]
+	#[case::table(Kind::Table(vec!["users".into()]))]
+	#[case::record(Kind::Record(vec!["users".into()]))]
 	#[case::geometry(Kind::Geometry(vec![GeometryKind::Point]))]
 	fn test_kind_flatten(#[case] kind: Kind) {
 		let flattened = kind.clone().flatten();
@@ -776,8 +770,7 @@ mod tests {
 
 	#[test]
 	fn test_kind_either() {
-		let kinds =
-			vec![Kind::Table(vec!["users".to_string()]), Kind::Table(vec!["posts".to_string()])];
+		let kinds = vec![Kind::Table(vec!["users".into()]), Kind::Table(vec!["posts".into()])];
 		let either = Kind::either(kinds);
 		assert!(matches!(either, Kind::Either(_)));
 		if let Kind::Either(inner) = either {

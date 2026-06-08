@@ -3,6 +3,6 @@ use crate::val::{RecordId, Value};
 
 impl Value {
 	pub(crate) fn def(&mut self, val: RecordId) {
-		self.put(&*ID, val.into())
+		self.put(&ID, val.into())
 	}
 }

@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 
+use surrealdb_strand::Strand;
+
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::FrozenContext;
 use crate::expr::Param;
@@ -39,7 +41,7 @@ impl Visitor for ParameterCapturePass<'_, '_> {
 		if !PROTECTED_PARAM_NAMES.contains(&param.as_str())
 			&& let Some(v) = self.context.value(param.as_str())
 		{
-			self.captures.0.entry(param.clone().into_string()).or_insert_with(|| v.clone());
+			self.captures.0.entry(param.as_str().into()).or_insert_with(|| v.clone());
 		}
 		Ok(())
 	}
@@ -47,7 +49,7 @@ impl Visitor for ParameterCapturePass<'_, '_> {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[repr(transparent)]
-pub(crate) struct Variables(pub(crate) BTreeMap<String, Value>);
+pub(crate) struct Variables(pub(crate) BTreeMap<Strand, Value>);
 
 impl Variables {
 	/// Create a new empty variables map.
@@ -58,14 +60,14 @@ impl Variables {
 
 	/// Insert a new variable into the map.
 	#[allow(dead_code)]
-	pub fn insert(&mut self, key: String, value: Value) {
-		self.0.insert(key, value);
+	pub fn insert(&mut self, key: impl Into<Strand>, value: Value) {
+		self.0.insert(key.into(), value);
 	}
 }
 
 impl IntoIterator for Variables {
-	type Item = (String, Value);
-	type IntoIter = std::collections::btree_map::IntoIter<String, Value>;
+	type Item = (Strand, Value);
+	type IntoIter = std::collections::btree_map::IntoIter<Strand, Value>;
 
 	#[inline]
 	fn into_iter(self) -> Self::IntoIter {
@@ -73,20 +75,32 @@ impl IntoIterator for Variables {
 	}
 }
 
+impl FromIterator<(Strand, Value)> for Variables {
+	fn from_iter<T: IntoIterator<Item = (Strand, Value)>>(iter: T) -> Self {
+		Self(iter.into_iter().collect())
+	}
+}
+
 impl FromIterator<(String, Value)> for Variables {
 	fn from_iter<T: IntoIterator<Item = (String, Value)>>(iter: T) -> Self {
-		Self(iter.into_iter().collect())
+		Self(iter.into_iter().map(|(k, v)| (k.into(), v)).collect())
 	}
 }
 
 impl From<Object> for Variables {
 	fn from(obj: Object) -> Self {
-		Self(obj.0)
+		Self(obj.0.into_iter().collect())
 	}
 }
 
 impl From<BTreeMap<String, Value>> for Variables {
 	fn from(map: BTreeMap<String, Value>) -> Self {
+		Self(map.into_iter().map(|(k, v)| (k.into(), v)).collect())
+	}
+}
+
+impl From<BTreeMap<Strand, Value>> for Variables {
+	fn from(map: BTreeMap<Strand, Value>) -> Self {
 		Self(map)
 	}
 }
@@ -96,7 +110,7 @@ impl From<PublicVariables> for Variables {
 		let mut map = BTreeMap::new();
 		for (key, val) in vars {
 			let internal_val = convert_public_value_to_internal(val);
-			map.insert(key, internal_val);
+			map.insert(key.into(), internal_val);
 		}
 		Self(map)
 	}

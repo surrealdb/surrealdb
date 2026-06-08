@@ -20,7 +20,7 @@ pub fn get_session(model_bytes: Vec<u8>) -> Result<Session, SurrealError> {
 	let mut builder = safe_eject!(Session::builder(), SurrealErrorStatus::Unknown);
 
 	#[cfg(not(feature = "gpu"))]
-	let builder = safe_eject!(Session::builder(), SurrealErrorStatus::Unknown);
+	let mut builder = safe_eject!(Session::builder(), SurrealErrorStatus::Unknown);
 
 	#[cfg(feature = "gpu")]
 	{

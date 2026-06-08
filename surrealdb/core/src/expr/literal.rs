@@ -3,6 +3,7 @@ use std::hash::{Hash, Hasher};
 
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::FrozenContext;
@@ -12,6 +13,12 @@ use crate::expr::{Expr, FlowResult, RecordIdLit};
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, Regex, Uuid, Value,
 };
+
+// Note: Literal uses `Strand` (not `String`) for the inner value of
+// `Literal::String` so that converting between `Value` and `Expr` via
+// `into_literal()` is a zero-cost move rather than a heap allocation.
+// `Literal` is not revisioned, so there is no on-disk compatibility
+// concern with changing the inner type.
 
 /// A literal value, should be computed to get an actual value.
 ///
@@ -31,11 +38,9 @@ pub(crate) enum Literal {
 	Bool(bool),
 	Float(f64),
 	Integer(i64),
-	//TODO: Possibly remove wrapper.
 	Decimal(Decimal),
-	String(String),
+	String(Strand),
 	Bytes(Bytes),
-	//TODO: Possibly remove wrapper.
 	Regex(Regex),
 	RecordId(RecordIdLit),
 	Array(Vec<Expr>),
@@ -117,10 +122,10 @@ impl Literal {
 					let v = stk.run(|stk| i.value.compute(stk, ctx, opt, doc)).await?;
 					map.insert(i.key.clone(), v);
 				}
-				Value::Object(Object(map))
+				Value::Object(Object::from(map))
 			}
 			Literal::Duration(duration) => Value::Duration(*duration),
-			Literal::Datetime(datetime) => Value::Datetime(datetime.clone()),
+			Literal::Datetime(datetime) => Value::Datetime(*datetime),
 			Literal::Uuid(uuid) => Value::Uuid(*uuid),
 			Literal::Geometry(geometry) => Value::Geometry(geometry.clone()),
 			Literal::File(file) => Value::File(file.clone()),
@@ -192,7 +197,7 @@ impl ToSql for Literal {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct ObjectEntry {
-	pub key: String,
+	pub key: Strand,
 	pub value: Expr,
 }
 

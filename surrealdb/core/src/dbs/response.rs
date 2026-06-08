@@ -353,9 +353,9 @@ mod tests {
 			panic!("Expected object");
 		};
 
-		assert_eq!(obj.get("status"), Some(&Value::String("ERR".into())));
-		assert_eq!(obj.get("result"), Some(&Value::String("Token expired".into())));
-		assert_eq!(obj.get("kind"), Some(&Value::String("NotAllowed".into())));
+		assert_eq!(obj.get("status"), Some(&Value::String("ERR".to_string())));
+		assert_eq!(obj.get("result"), Some(&Value::String("Token expired".to_string())));
+		assert_eq!(obj.get("kind"), Some(&Value::String("NotAllowed".to_string())));
 
 		// `details` must contain the inner NotAllowedError, NOT a duplicate of ErrorDetails
 		let Some(Value::Object(details)) = obj.get("details") else {
@@ -363,7 +363,7 @@ mod tests {
 		};
 		assert_eq!(
 			details.get("kind"),
-			Some(&Value::String("Auth".into())),
+			Some(&Value::String("Auth".to_string())),
 			"details.kind should be the inner variant, not a duplicate of the top-level kind"
 		);
 	}
@@ -413,7 +413,7 @@ mod tests {
 		let Value::Object(ref obj) = val else {
 			panic!("Expected object");
 		};
-		assert_eq!(obj.get("kind"), Some(&Value::String("Internal".into())));
+		assert_eq!(obj.get("kind"), Some(&Value::String("Internal".to_string())));
 		assert!(!obj.contains_key("details"), "Internal errors should have no details");
 
 		let parsed = QueryResult::from_value(val).expect("round-trip should succeed");
@@ -438,13 +438,13 @@ mod tests {
 	fn query_result_ok_round_trip() {
 		let qr = QueryResult {
 			time: Duration::from_millis(10),
-			result: Ok(Value::String("hello".into())),
+			result: Ok(Value::String("hello".to_string())),
 			query_type: QueryType::Other,
 		};
 		let val = qr.into_value();
 		let parsed = QueryResult::from_value(val).expect("round-trip should succeed");
 
 		let v = parsed.result.unwrap();
-		assert_eq!(v, Value::String("hello".into()));
+		assert_eq!(v, Value::String("hello".to_string()));
 	}
 }

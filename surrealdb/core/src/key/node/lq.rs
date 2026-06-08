@@ -62,8 +62,8 @@ impl Lq {
 		}
 	}
 
-	pub fn decode_key(k: Vec<u8>) -> anyhow::Result<Self> {
-		Ok(storekey::decode_borrow(k.as_slice())?)
+	pub fn decode_key(k: &[u8]) -> anyhow::Result<Self> {
+		Ok(storekey::decode_borrow(k)?)
 	}
 }
 

@@ -2,8 +2,9 @@ use std::sync::atomic::{AtomicU8, Ordering};
 
 use rocksdb::{Env, Options, SstFileManager};
 
-use super::{TARGET, cnf};
+use super::TARGET;
 use crate::kvs::Result;
+use crate::kvs::rocksdb::RocksDbConfig;
 
 const MAX_PERCENTAGE_USAGE: u8 = 80;
 
@@ -82,9 +83,9 @@ pub(super) struct DiskSpaceManager {
 
 impl DiskSpaceManager {
 	/// Pre-configure the disk space manager
-	pub(super) fn configure(opts: &mut Options) -> Result<bool> {
+	pub(super) fn configure(opts: &mut Options, config: &RocksDbConfig) -> Result<bool> {
 		// Get the maximum allowed space usage in bytes
-		let limit = *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE;
+		let limit = config.sst_max_allowed_space_usage;
 		// Check if the maximum allowed space usage is configured
 		if limit > 0 {
 			// Disk space manager is enabled so we configure it
@@ -117,9 +118,9 @@ impl DiskSpaceManager {
 	/// implements application-level space management at the transaction level.
 	/// This approach provides more graceful degradation and allows deletions to
 	/// free space even when the limit is reached.
-	pub(super) fn new(opts: &mut Options) -> Result<Self> {
+	pub(super) fn new(opts: &mut Options, config: &RocksDbConfig) -> Result<Self> {
 		// Get the maximum allowed space usage in bytes
-		let limit = *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE;
+		let limit = config.sst_max_allowed_space_usage;
 		// Create a new environment
 		let env = Env::new()?;
 		// Create a new SST file manager

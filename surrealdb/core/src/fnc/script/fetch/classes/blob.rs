@@ -74,6 +74,20 @@ fn normalize_type(mut ty: String) -> String {
 	}
 }
 
+/// Derives a Blob's MIME type from a header map's `Content-Type` values.
+///
+/// Per the Fetch spec the values are combined and normalized as in the Blob
+/// constructor; an absent or non-printable value yields an empty type.
+pub(super) fn content_type_from_headers(headers: &reqwest::header::HeaderMap) -> String {
+	let combined = headers
+		.get_all(reqwest::header::CONTENT_TYPE)
+		.iter()
+		.filter_map(|x| x.to_str().ok())
+		.collect::<Vec<_>>()
+		.join(", ");
+	normalize_type(combined)
+}
+
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]
 pub struct Blob {

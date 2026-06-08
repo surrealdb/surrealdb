@@ -9,22 +9,25 @@ reason = "Test EXPLAIN ANALYZE with basic SELECT queries - executes and shows me
 value = "'OK'"
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 3}
+value = """
+'SelectProject [ctx: Db] [projections: *] {rows: 3}
     TableScan [ctx: Db] [table: item, direction: Forward] {rows: 3}
 
-Total rows: 3''''
+Total rows: 3'"""
 
 [[test.results]]
-value = ''''SelectProject [ctx: Db] [projections: *] {rows: 2}
-    TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15] {rows: 2}
+value = """
+'SelectProject [ctx: Db] [projections: *] {rows: 2}
+    TableScan [ctx: Db] [table: item, direction: Forward, predicate: score > 15, pre_decode_filter: yes] {rows: 2}
 
-Total rows: 2''''
+Total rows: 2'"""
 
 [[test.results]]
-value = ''''ProjectValue [ctx: Db] [expr: name] {rows: 3}
+value = """
+'ProjectValue [ctx: Db] [expr: name] {rows: 3}
     TableScan [ctx: Db] [table: item, direction: Forward] {rows: 3}
 
-Total rows: 3''''
+Total rows: 3'"""
 */
 
 -- Setup test data

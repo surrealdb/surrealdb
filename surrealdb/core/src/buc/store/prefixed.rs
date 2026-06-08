@@ -48,6 +48,9 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 		key: &'a ObjectKey,
 		data: Bytes,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+		if let Err(e) = key.check_no_traversal() {
+			return Box::pin(async move { Err(e) });
+		}
 		let full_key = self.prefix.join(key);
 
 		Box::pin(async move { self.store.put(&full_key, data).await })
@@ -58,6 +61,9 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 		key: &'a ObjectKey,
 		data: Bytes,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+		if let Err(e) = key.check_no_traversal() {
+			return Box::pin(async move { Err(e) });
+		}
 		let full_key = self.prefix.join(key);
 
 		Box::pin(async move { self.store.put_if_not_exists(&full_key, data).await })
@@ -67,6 +73,9 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 		&'a self,
 		key: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<Option<Bytes>, String>> + Send + 'a>> {
+		if let Err(e) = key.check_no_traversal() {
+			return Box::pin(async move { Err(e) });
+		}
 		let full_key = self.prefix.join(key);
 
 		Box::pin(async move { self.store.get(&full_key).await })
@@ -76,6 +85,9 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 		&'a self,
 		key: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<Option<ObjectMeta>, String>> + Send + 'a>> {
+		if let Err(e) = key.check_no_traversal() {
+			return Box::pin(async move { Err(e) });
+		}
 		let full_key = self.prefix.join(key);
 
 		Box::pin(async move {
@@ -90,6 +102,9 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 		&'a self,
 		key: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+		if let Err(e) = key.check_no_traversal() {
+			return Box::pin(async move { Err(e) });
+		}
 		let full_key = self.prefix.join(key);
 
 		Box::pin(async move { self.store.delete(&full_key).await })
@@ -99,6 +114,9 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 		&'a self,
 		key: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<bool, String>> + Send + 'a>> {
+		if let Err(e) = key.check_no_traversal() {
+			return Box::pin(async move { Err(e) });
+		}
 		let full_key = self.prefix.join(key);
 
 		Box::pin(async move { self.store.exists(&full_key).await })
@@ -109,6 +127,9 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 		key: &'a ObjectKey,
 		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+		if let Err(e) = key.check_no_traversal().and_then(|_| target.check_no_traversal()) {
+			return Box::pin(async move { Err(e) });
+		}
 		let full_key = self.prefix.join(key);
 		let full_target = self.prefix.join(target);
 
@@ -120,6 +141,9 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 		key: &'a ObjectKey,
 		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+		if let Err(e) = key.check_no_traversal().and_then(|_| target.check_no_traversal()) {
+			return Box::pin(async move { Err(e) });
+		}
 		let full_key = self.prefix.join(key);
 		let full_target = self.prefix.join(target);
 
@@ -131,6 +155,9 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 		key: &'a ObjectKey,
 		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+		if let Err(e) = key.check_no_traversal().and_then(|_| target.check_no_traversal()) {
+			return Box::pin(async move { Err(e) });
+		}
 		let full_key = self.prefix.join(key);
 		let full_target = self.prefix.join(target);
 
@@ -142,6 +169,9 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 		key: &'a ObjectKey,
 		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
+		if let Err(e) = key.check_no_traversal().and_then(|_| target.check_no_traversal()) {
+			return Box::pin(async move { Err(e) });
+		}
 		let full_key = self.prefix.join(key);
 		let full_target = self.prefix.join(target);
 
@@ -152,6 +182,11 @@ impl<T: ObjectStore> ObjectStore for PrefixedStore<T> {
 		&'a self,
 		opts: &'a ListOptions,
 	) -> Pin<Box<dyn Future<Output = Result<Vec<ObjectMeta>, String>> + Send + 'a>> {
+		if let Some(ref req_prefix) = opts.prefix
+			&& let Err(e) = req_prefix.check_no_traversal()
+		{
+			return Box::pin(async move { Err(e) });
+		}
 		Box::pin(async move {
 			// Combine the store's prefix with the request prefix
 			let prefix = match opts.prefix {

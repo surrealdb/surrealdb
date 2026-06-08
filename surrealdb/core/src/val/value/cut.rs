@@ -11,10 +11,10 @@ impl Value {
 				Value::Object(v) => match p {
 					Part::Field(f) => match path.len() {
 						1 => {
-							v.remove(&**f);
+							v.remove(f);
 						}
 						_ => {
-							if let Some(v) = v.get_mut(&**f) {
+							if let Some(v) = v.get_mut(f) {
 								v.cut(path.next())
 							}
 						}

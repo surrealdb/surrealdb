@@ -164,9 +164,9 @@ impl Closure {
 					})
 				}
 
-				for ((name, kind), val) in arg_spec.iter().zip(args.into_iter()) {
+				for ((name, kind), val) in arg_spec.iter().zip(args) {
 					if let Ok(val) = val.coerce_to_kind(kind) {
-						ctx.add_value(name.clone().into_string(), val.into());
+						ctx.add_value(name.as_str(), val.into());
 					} else {
 						bail!(Error::InvalidFunctionArguments {
 							name: "ANONYMOUS".to_string(),
@@ -296,5 +296,24 @@ impl SerializeRevisioned for Closure {
 impl DeserializeRevisioned for Closure {
 	fn deserialize_revisioned<R: std::io::Read>(_reader: &mut R) -> Result<Self, revision::Error> {
 		Err(revision::Error::Conversion("Closures cannot be deserialized from disk".to_string()))
+	}
+}
+
+impl revision::SkipRevisioned for Closure {
+	fn skip_revisioned<R: std::io::Read>(_reader: &mut R) -> Result<(), revision::Error> {
+		Err(revision::Error::Conversion("Closures cannot be skipped on the wire".to_string()))
+	}
+}
+
+impl revision::WalkRevisioned for Closure {
+	type Walker<'r, R: revision::BorrowedReader + 'r> = revision::LeafWalker<'r, Closure, R>;
+
+	fn walk_revisioned<'r, R: revision::BorrowedReader>(
+		reader: &'r mut R,
+	) -> Result<Self::Walker<'r, R>, revision::Error> {
+		// Closures never appear on the wire; expose a leaf walker whose
+		// `decode`/`skip` invariably error so callers walking from outer
+		// types fail fast rather than silently advancing.
+		Ok(revision::LeafWalker::new(reader))
 	}
 }

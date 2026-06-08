@@ -22,7 +22,8 @@ pub struct ApiResponse {
 
 impl ApiResponse {
 	/// Builds an API response from an error, exposing status and message for known API errors.
-	pub(crate) fn from_error(e: anyhow::Error, request_id: String) -> Self {
+	pub(crate) fn from_error(e: impl Into<anyhow::Error>, request_id: String) -> Self {
+		let e = e.into();
 		let (status, body) = if let Some(api_error) = e.downcast_ref::<ApiError>() {
 			(api_error.status_code(), api_error.to_string())
 		} else {
@@ -41,7 +42,8 @@ impl ApiResponse {
 	/// middleware). Known API errors (validation, not found, etc.) are converted with correct
 	/// status and message. Internal/unknown errors are masked as 500 with no body to avoid leaking
 	/// implementation details.
-	pub(crate) fn from_error_secure(e: anyhow::Error, request_id: String) -> Self {
+	pub(crate) fn from_error_secure(e: impl Into<anyhow::Error>, request_id: String) -> Self {
+		let e = e.into();
 		if let Some(api_error) = e.downcast_ref::<ApiError>() {
 			Self {
 				status: api_error.status_code(),

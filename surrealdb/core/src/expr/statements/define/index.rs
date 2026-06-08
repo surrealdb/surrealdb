@@ -13,8 +13,10 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
-use crate::expr::{Base, Expr, FlowResultExt, Literal, Part};
+use crate::expr::{Base, Expr, FlowResultExt, Idiom, Literal, Part};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::Transaction;
+use crate::kvs::index::{IndexBuilder, retire_durable_index};
 use crate::val::{TableName, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -53,7 +55,7 @@ impl DefineIndexStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Index, Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 
@@ -67,9 +69,9 @@ impl DefineIndexStatement {
 		let tb = txn.get_or_add_tb(Some(ctx), ns, db, &table_name, None).await?;
 
 		// Check if the definition exists
-		let index_id = if let Some(ix) =
-			txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &name, None).await?
-		{
+		let existing =
+			txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &name, None).await?;
+		if existing.is_some() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -81,16 +83,7 @@ impl DefineIndexStatement {
 				DefineKind::Overwrite => {}
 				DefineKind::IfNotExists => return Ok(Value::None),
 			}
-			// Clear the index store cache
-			ctx.get_index_stores()
-				.index_removed(ctx.get_index_builder(), tb.namespace_id, tb.database_id, &tb, &ix)
-				.await?;
-			ix.index_id
-		} else {
-			ctx.try_get_sequences()?
-				.next_index_id(Some(ctx), tb.namespace_id, tb.database_id, tb.name.clone())
-				.await?
-		};
+		}
 
 		// Compute columns
 		let cols = exprs_to_fields(stk, ctx, opt, doc, self.cols.as_slice()).await?;
@@ -131,7 +124,7 @@ impl DefineIndexStatement {
 				// Sub-fields of computed fields cannot be indexed
 				if f.computed.is_some() {
 					bail!(Error::ComputedFieldCannotBeIndexed {
-						field: first.clone(),
+						field: first.as_str().to_owned(),
 						index: name
 					});
 				}
@@ -150,10 +143,68 @@ impl DefineIndexStatement {
 			.catch_return()?
 			.cast_to()?;
 
+		if let Some(ix) = existing.as_ref()
+			&& self.kind == DefineKind::Default
+			&& opt.import
+			&& import_replay_can_reuse_index(ix, &table_name, &cols, &self.index)
+		{
+			// Import replays are idempotent when the physical index definition
+			// already matches. Preserve data and durable build state while still
+			// allowing metadata such as comments to be refreshed.
+			let index_def = IndexDefinition {
+				index_id: ix.index_id,
+				name: name.into(),
+				table_name,
+				cols,
+				index: self.index.clone(),
+				comment,
+				prepare_remove: false,
+			};
+			txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
+			refresh_table_index_cache(ctx, &txn, ns, db, &tb).await?;
+			return Ok(Value::None);
+		}
+
+		let index_id = if let Some(ix) = existing.as_ref() {
+			// Clear process-local index wrappers without aborting the current
+			// durable builder here. Durable state and catalog entries are
+			// retired atomically in this schema transaction below, and the
+			// process-local builder abort is deferred until commit.
+			ctx.get_index_stores().index_removed(tb.namespace_id, tb.database_id, &tb, ix).await?;
+			if let Some(index_builder) = ctx.get_index_builder() {
+				txn.register_index_builder_abort_after_commit(
+					index_builder.clone(),
+					tb.namespace_id,
+					tb.database_id,
+					tb.name.clone(),
+					ix.index_id,
+				)
+				.await;
+			}
+			retire_durable_index(&txn, tb.namespace_id, tb.database_id, &tb.name, ix.index_id)
+				.await?;
+			txn.del_tb_index(tb.namespace_id, tb.database_id, &tb.name, &name).await?;
+			if self.kind == DefineKind::Overwrite || opt.import {
+				// Destructive replacements get a fresh internal id so durable
+				// state and generation-scoped queues for the retired index
+				// cannot be mistaken for the new definition. Import replays only
+				// reach this branch when the physical definition changed.
+				ctx.try_get_sequences()?
+					.next_index_id(Some(ctx), tb.namespace_id, tb.database_id, tb.name.clone())
+					.await?
+			} else {
+				ix.index_id
+			}
+		} else {
+			ctx.try_get_sequences()?
+				.next_index_id(Some(ctx), tb.namespace_id, tb.database_id, tb.name.clone())
+				.await?
+		};
+
 		// Process the statement
 		let index_def = IndexDefinition {
 			index_id,
-			name,
+			name: name.clone().into(),
 			table_name,
 			cols: cols.clone(),
 			index: self.index.clone(),
@@ -162,30 +213,67 @@ impl DefineIndexStatement {
 		};
 		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
 
-		// Refresh the table cache
-		txn.put_tb(
-			ns,
-			db,
-			&TableDefinition {
-				cache_indexes_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
-			},
+		refresh_table_index_cache(ctx, &txn, ns, db, &tb).await?;
+		let index_builder =
+			ctx.get_index_builder().ok_or_else(|| Error::unreachable("No Index Builder"))?;
+		txn.register_uncommitted_index_build_cleanup(
+			index_builder.clone(),
+			index_builder.transaction_factory(),
+			tb.namespace_id,
+			tb.database_id,
+			tb.name.clone(),
+			index_id,
+		)
+		.await;
+		// Process the index
+		run_indexing_with_builder(
+			index_builder,
+			ctx,
+			opt,
+			tb.table_id,
+			index_def.into(),
+			!self.concurrently,
 		)
 		.await?;
-
-		// Clear the cache
-		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(tb.namespace_id, tb.database_id, &tb.name);
-		}
-		// Clear the cache
-		txn.clear_cache();
-		// Process the index
-		run_indexing(ctx, opt, tb.table_id, index_def.into(), !self.concurrently).await?;
 
 		// Ok all good
 		Ok(Value::None)
 	}
 }
+
+fn import_replay_can_reuse_index(
+	ix: &IndexDefinition,
+	table_name: &TableName,
+	cols: &[Idiom],
+	index: &Index,
+) -> bool {
+	!ix.prepare_remove
+		&& &ix.table_name == table_name
+		&& ix.cols.as_slice() == cols
+		&& &ix.index == index
+}
+
+async fn refresh_table_index_cache(
+	_ctx: &FrozenContext,
+	txn: &Transaction,
+	ns: &str,
+	db: &str,
+	tb: &TableDefinition,
+) -> Result<()> {
+	txn.put_tb(
+		ns,
+		db,
+		&TableDefinition {
+			cache_indexes_ts: Uuid::now_v7(),
+			..tb.clone()
+		},
+	)
+	.await?;
+
+	txn.clear_cache();
+	Ok(())
+}
+
 pub(in crate::expr::statements) async fn run_indexing(
 	ctx: &FrozenContext,
 	opt: &Options,
@@ -193,11 +281,20 @@ pub(in crate::expr::statements) async fn run_indexing(
 	ix: Arc<IndexDefinition>,
 	blocking: bool,
 ) -> Result<()> {
-	let rcv = ctx
-		.get_index_builder()
-		.ok_or_else(|| Error::unreachable("No Index Builder"))?
-		.build(ctx, opt.clone(), tb, ix, blocking)
-		.await?;
+	let index_builder =
+		ctx.get_index_builder().ok_or_else(|| Error::unreachable("No Index Builder"))?;
+	run_indexing_with_builder(index_builder, ctx, opt, tb, ix, blocking).await
+}
+
+async fn run_indexing_with_builder(
+	index_builder: &IndexBuilder,
+	ctx: &FrozenContext,
+	opt: &Options,
+	tb: TableId,
+	ix: Arc<IndexDefinition>,
+	blocking: bool,
+) -> Result<()> {
+	let rcv = index_builder.build(ctx, opt.clone(), tb, ix, blocking).await?;
 	if let Some(rcv) = rcv {
 		rcv.await.map_err(|_| Error::IndexingBuildingCancelled {
 			reason: "Channel shutdown".to_string(),

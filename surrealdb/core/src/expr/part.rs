@@ -2,9 +2,9 @@ use std::cmp::Ordering;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -23,13 +23,13 @@ pub(crate) enum Part {
 	Flatten,
 	Last,
 	First,
-	Field(String),
+	Field(Strand),
 	Where(Expr),
-	Lookup(Lookup),
+	Lookup(Box<Lookup>),
 	Value(Expr),
-	/// TODO: Remove, start and move it out of part to elimite invalid state.
+	/// TODO: Remove, start and move it out of part to eliminate invalid state.
 	Start(Expr),
-	Method(String, Vec<Expr>),
+	Method(Strand, Vec<Expr>),
 	Destructure(Vec<DestructurePart>),
 	Optional,
 	Recurse(Recurse, Option<Idiom>, Option<RecurseInstruction>),
@@ -136,7 +136,7 @@ impl Part {
 			Part::Start(v) => v.to_raw_string(),
 			Part::Field(v) => {
 				let mut s = ".".to_string();
-				EscapeKwFreeIdent(v).fmt_sql(&mut s, SqlFormat::SingleLine);
+				EscapeKwFreeIdent(v.as_str()).fmt_sql(&mut s, SqlFormat::SingleLine);
 				s
 			}
 			_ => self.to_sql(),
@@ -227,7 +227,7 @@ pub enum RecursionPlan {
 		// The destructure parts
 		parts: Vec<DestructurePart>,
 		// Which field contains the repeat symbol
-		field: String,
+		field: Strand,
 		// Path before the repeat symbol
 		before: Vec<Part>,
 		// The recursion plan
@@ -256,7 +256,7 @@ impl<'a> RecursionPlan {
 							self.compute_inner(stk, ctx, opt, doc, rec)
 						})
 					});
-					try_join_all_buffered(futs)
+					try_join_all_buffered(futs, ctx.config.max_concurrent_tasks)
 				})
 				.await
 				.map(Into::into),
@@ -417,19 +417,19 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum DestructurePart {
-	All(String),
-	Field(String),
-	Aliased(String, Idiom),
-	Destructure(String, Vec<DestructurePart>),
+	All(Strand),
+	Field(Strand),
+	Aliased(Strand, Idiom),
+	Destructure(Strand, Vec<DestructurePart>),
 }
 
 impl DestructurePart {
 	pub(crate) fn field(&self) -> &str {
 		match self {
-			DestructurePart::All(v) => v,
-			DestructurePart::Field(v) => v,
-			DestructurePart::Aliased(v, _) => v,
-			DestructurePart::Destructure(v, _) => v,
+			DestructurePart::All(v) => v.as_str(),
+			DestructurePart::Field(v) => v.as_str(),
+			DestructurePart::Aliased(v, _) => v.as_str(),
+			DestructurePart::Destructure(v, _) => v.as_str(),
 		}
 	}
 
@@ -462,34 +462,6 @@ impl ToSql for DestructurePart {
 pub enum Recurse {
 	Fixed(u32),
 	Range(Option<u32>, Option<u32>),
-}
-
-impl TryInto<(u32, Option<u32>)> for Recurse {
-	type Error = anyhow::Error;
-
-	fn try_into(self) -> Result<(u32, Option<u32>)> {
-		let v = match self {
-			Recurse::Fixed(v) => (v, Some(v)),
-			Recurse::Range(min, max) => {
-				let min = min.unwrap_or(1);
-				(min, max)
-			}
-		};
-
-		match v {
-			(min, _) if min < 1 => Err(anyhow::Error::new(Error::InvalidBound {
-				found: min.to_string(),
-				expected: "at least 1".into(),
-			})),
-			(_, Some(max)) if max > (*IDIOM_RECURSION_LIMIT as u32) => {
-				Err(anyhow::Error::new(Error::InvalidBound {
-					found: max.to_string(),
-					expected: format!("{} at most", *IDIOM_RECURSION_LIMIT),
-				}))
-			}
-			v => Ok(v),
-		}
-	}
 }
 
 impl ToSql for Recurse {

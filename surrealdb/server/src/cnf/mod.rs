@@ -53,6 +53,26 @@ pub static HTTP_MAX_API_BODY_SIZE: LazyLock<usize> =
 pub static HTTP_MAX_RPC_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_RPC_BODY_SIZE", usize, 4 << 20);
 
+/// The maximum number of explicitly attached sessions the HTTP transport
+/// will retain at once (default: 16384).
+///
+/// The HTTP `/rpc` session map is process-global (there is no per-connection
+/// scope as with WebSocket), so an uncapped map is a denial-of-service target
+/// for anonymous callers. This cap bounds total memory attributable to
+/// attached HTTP sessions. Ephemeral per-request sessions do not count
+/// against this cap.
+pub static HTTP_MAX_ATTACHED_SESSIONS: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_HTTP_MAX_ATTACHED_SESSIONS", usize, 16384);
+
+/// The maximum number of explicitly attached sessions a single WebSocket
+/// connection may hold at once (default: 256).
+///
+/// WebSocket session maps are per-connection - dropping the connection
+/// cleans them up - so this cap primarily bounds resource use by a single
+/// misbehaving or malicious client within one connection.
+pub static WEBSOCKET_MAX_ATTACHED_SESSIONS: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_ATTACHED_SESSIONS", usize, 256);
+
 /// The maximum HTTP body size of the HTTP /key endpoints (default: 16 KiB)
 pub static HTTP_MAX_KEY_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_KEY_BODY_SIZE", usize, 16 << 10);
@@ -68,6 +88,16 @@ pub static HTTP_MAX_SIGNIN_BODY_SIZE: LazyLock<usize> =
 /// The maximum HTTP body size of the HTTP /import endpoint (default: 4 GiB)
 pub static HTTP_MAX_IMPORT_BODY_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_IMPORT_BODY_SIZE", usize, 4 << 30);
+
+/// The maximum HTTP body size of the HTTP /mcp endpoint (default: 4 MiB)
+///
+/// Sized to comfortably hold typical MCP JSON-RPC payloads (initialize
+/// handshakes, tool calls with structured parameter objects) without
+/// allowing a malicious client to allocate unbounded memory before the
+/// MCP layer's per-tool argument and key caps kick in.
+#[cfg(feature = "mcp")]
+pub static HTTP_MAX_MCP_BODY_SIZE: LazyLock<usize> =
+	lazy_env_parse!(bytes, "SURREAL_HTTP_MAX_MCP_BODY_SIZE", usize, 4 << 20);
 
 /// Specifies the frequency with which ping messages are sent to the client
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
@@ -141,7 +171,15 @@ pub static GQL_SUBSCRIPTION_CHANNEL_CAPACITY: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_GQL_SUBSCRIPTION_CHANNEL_CAPACITY", usize, 1024);
 
 /// The number of runtime worker threads to start (default: the number of CPU
-/// cores, minimum 4)
+/// cores, minimum 4).
+///
+/// `dbs::init` injects this resolved value into the datastore config via
+/// `Datastore::builder().with_runtime_worker_threads(...)`, so the rocksdb
+/// inline-blocking permit cap is sized from the actual runtime worker
+/// count. The same default lives in
+/// `surrealdb_core::kvs::rocksdb::cnf::default_runtime_worker_threads` as
+/// a safety net for embedded callers that don't go through the server.
+/// Keep the two definitions in lockstep — if one moves, move the other.
 pub static RUNTIME_WORKER_THREADS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_RUNTIME_WORKER_THREADS", usize, || {
 		std::cmp::max(4, num_cpus::get())
@@ -166,10 +204,6 @@ pub static RUNTIME_MAX_BLOCKING_THREADS: LazyLock<usize> =
 pub static TELEMETRY_PROVIDER: LazyLock<String> =
 	lazy_env_parse!("SURREAL_TELEMETRY_PROVIDER", String);
 
-/// If set then use this as value for the namespace label when sending telemetry
-pub static TELEMETRY_NAMESPACE: LazyLock<Option<String>> =
-	lazy_env_parse!("SURREAL_TELEMETRY_NAMESPACE", Option<String>);
-
 /// Whether to disable sending traces to the OpenTelemetry collector (default:
 /// false)
 pub static TELEMETRY_DISABLE_TRACING: LazyLock<bool> =
@@ -179,6 +213,46 @@ pub static TELEMETRY_DISABLE_TRACING: LazyLock<bool> =
 /// false)
 pub static TELEMETRY_DISABLE_METRICS: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_TELEMETRY_DISABLE_METRICS", bool);
+
+/// Whether to expose a Prometheus `/metrics` endpoint on the main HTTP port
+/// (default: true).
+///
+/// When enabled:
+/// - Unauthenticated scrapes receive the subset of metrics named in
+///   [`crate::observe::public::PUBLIC_METRICS`].
+/// - Requests carrying a root-level session receive the full community registry plus the extended
+///   registry when a composer extension has contributed one.
+///
+/// Multi-tenant deployments (e.g. Spectron) that do not want to expose any
+/// workload signals should set this to `false` and, if scraping is needed,
+/// front the server with an auth-aware reverse proxy.
+pub static METRICS_ENABLED: LazyLock<bool> = lazy_env_parse!("SURREAL_METRICS_ENABLED", bool, true);
+
+/// Threshold (in milliseconds) at which a completed statement is also
+/// recorded against the `surrealdb.slow_query.total` counter, in addition
+/// to its usual `surrealdb.statement.duration` histogram entry.
+///
+/// Mirrors the cutoff used by `--slow-log-threshold` so dashboards and the
+/// slow-query log surface the same set of statements without operators
+/// having to maintain two thresholds. Default: `1000` (1 second). Set to
+/// `0` to disable the counter entirely; the histogram remains.
+pub static SLOW_QUERY_METRIC_THRESHOLD_MS: LazyLock<u64> =
+	lazy_env_parse!("SURREAL_SLOW_QUERY_METRIC_THRESHOLD_MS", u64, 1000);
+
+/// Cadence (in seconds) at which the cached process snapshot used by the
+/// `surrealdb.process.{memory,cpu_percent}` observable gauges is refreshed.
+///
+/// A background task runs while metrics are enabled (Prometheus and / or
+/// OTLP) and calls
+/// [`surrealdb_core::observe::refresh_process_snapshot`] on this cadence
+/// so OTLP-only deployments do not see flat-lined process metrics
+/// between exports. The default of `5` seconds gives stable CPU%
+/// readings (sysinfo computes CPU% as a delta since the last refresh,
+/// so very short intervals amplify scheduler jitter) while keeping the
+/// per-refresh overhead well under 0.05% of one core. Operators
+/// running tighter or looser metric pipelines can override.
+pub static PROCESS_METRICS_REFRESH_INTERVAL: LazyLock<u64> =
+	lazy_env_parse!("SURREAL_PROCESS_METRICS_REFRESH_INTERVAL", u64, 5);
 
 /// The version identifier of this build
 pub static PKG_VERSION: LazyLock<String> = LazyLock::new(|| {

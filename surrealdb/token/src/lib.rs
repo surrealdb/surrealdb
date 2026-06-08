@@ -23,6 +23,8 @@ mod escaped;
 mod js_function;
 mod record_id_key;
 mod regex;
+#[cfg(test)]
+mod test;
 mod uuid;
 mod version;
 

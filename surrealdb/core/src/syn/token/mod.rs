@@ -173,7 +173,7 @@ pub enum Operator {
 }
 
 impl Operator {
-	fn as_str(&self) -> &'static str {
+	fn as_str(self) -> &'static str {
 		match self {
 			Operator::Not => "!",
 			Operator::Add => "+",
@@ -232,8 +232,10 @@ pub enum Delim {
 pub enum DistanceKind {
 	Chebyshev,
 	Cosine,
+	CosineNormalized,
 	Euclidean,
 	Hamming,
+	InnerProduct,
 	Jaccard,
 	Manhattan,
 	Minkowski,
@@ -241,12 +243,14 @@ pub enum DistanceKind {
 }
 
 impl DistanceKind {
-	pub fn as_str(&self) -> &'static str {
+	pub fn as_str(self) -> &'static str {
 		match self {
 			DistanceKind::Chebyshev => "CHEBYSHEV",
 			DistanceKind::Cosine => "COSINE",
+			DistanceKind::CosineNormalized => "COSINE_NORMALIZED",
 			DistanceKind::Euclidean => "EUCLIDEAN",
 			DistanceKind::Hamming => "HAMMING",
+			DistanceKind::InnerProduct => "INNER_PRODUCT",
 			DistanceKind::Jaccard => "JACCARD",
 			DistanceKind::Manhattan => "MANHATTAN",
 			DistanceKind::Minkowski => "MINKOWSKI",
@@ -258,26 +262,32 @@ impl DistanceKind {
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 pub enum VectorTypeKind {
 	F64,
+	F16,
 	F32,
 	I64,
 	I32,
 	I16,
+	I8,
+	U8,
 }
 
 impl VectorTypeKind {
-	pub fn as_str(&self) -> &'static str {
+	pub fn as_str(self) -> &'static str {
 		match self {
 			Self::F64 => "F64",
+			Self::F16 => "F16",
 			Self::F32 => "F32",
 			Self::I64 => "I64",
 			Self::I32 => "I32",
 			Self::I16 => "I16",
+			Self::I8 => "I8",
+			Self::U8 => "U8",
 		}
 	}
 }
 
 impl Algorithm {
-	pub fn as_str(&self) -> &'static str {
+	pub fn as_str(self) -> &'static str {
 		match self {
 			Self::EdDSA => "EDDSA",
 			Self::Es256 => "ES256",
@@ -325,7 +335,7 @@ pub enum StringKind {
 }
 
 impl StringKind {
-	pub fn as_str(&self) -> &'static str {
+	pub fn as_str(self) -> &'static str {
 		match self {
 			StringKind::Plain | StringKind::PlainDouble => "a strand",
 			StringKind::RecordId | StringKind::RecordIdDouble => "a record-id strand",
@@ -399,12 +409,17 @@ pub enum TokenKind {
 
 impl fmt::Display for TokenKind {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.write_str(self.as_str())
+		f.write_str((*self).as_str())
 	}
 }
 
 /// An assertion statically checking the size of TokenKind.
-const _TOKEN_KIND_SIZE_ASSERT: [(); 2] = [(); std::mem::size_of::<TokenKind>()];
+///
+/// `TokenKind::Keyword` carries a `Keyword` enum that grew past 256 variants,
+/// so the inner repr is now `u16` and the whole `TokenKind` ends up at 4 bytes
+/// (1 discriminant + alignment + `u16` payload). If you adjust the `Keyword`
+/// repr keep this assertion in sync.
+const _TOKEN_KIND_SIZE_ASSERT: [(); 4] = [(); std::mem::size_of::<TokenKind>()];
 
 impl TokenKind {
 	pub fn has_data(&self) -> bool {
@@ -429,8 +444,8 @@ impl TokenKind {
 		}
 	}
 
-	pub fn as_str(&self) -> &'static str {
-		match *self {
+	pub fn as_str(self) -> &'static str {
+		match self {
 			TokenKind::Keyword(x) => x.as_str(),
 			TokenKind::Operator(x) => x.as_str(),
 			TokenKind::Algorithm(x) => Self::algorithm_as_str(x),

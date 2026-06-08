@@ -4,15 +4,32 @@ mod info;
 mod init_cmd;
 mod run;
 mod sig;
+mod version;
 
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::Subcommand;
+use clap::{Parser, Subcommand};
+
+use self::version::MODULE_RELEASE;
 
 /// Module command arguments
+#[derive(Debug, Parser)]
+#[command(
+	name = "module",
+	display_name = "Surrealism command-line interface",
+	about = "Manage and execute WASM modules",
+	version = MODULE_RELEASE.as_str(),
+	arg_required_else_help = true,
+)]
+pub struct ModuleCommandArgs {
+	#[command(subcommand)]
+	command: ModuleCommand,
+}
+
+/// Module subcommands
 #[derive(Debug, Subcommand)]
-pub enum ModuleCommand {
+enum ModuleCommand {
 	/// Initialize a new Surrealism module project
 	Init {
 		/// Non-interactive mode (requires --org)
@@ -79,6 +96,9 @@ pub enum ModuleCommand {
 		#[arg(value_name = "SOURCE_PATH")]
 		path: Option<PathBuf>,
 	},
+
+	/// Output the Surrealism version information
+	Version,
 }
 
 /// Custom parser for `surrealdb_types::Value`
@@ -87,8 +107,12 @@ pub(super) fn parse_value(s: &str) -> Result<surrealdb_types::Value, String> {
 }
 
 /// Initialize the module subcommand
-pub async fn init(cmd: ModuleCommand) -> Result<()> {
-	match cmd {
+pub async fn init(
+	ModuleCommandArgs {
+		command,
+	}: ModuleCommandArgs,
+) -> Result<()> {
+	match command {
 		ModuleCommand::Init {
 			headless,
 			org,
@@ -112,5 +136,6 @@ pub async fn init(cmd: ModuleCommand) -> Result<()> {
 			out,
 			path,
 		} => build::init(path, out, debug).await,
+		ModuleCommand::Version => version::init().await,
 	}
 }

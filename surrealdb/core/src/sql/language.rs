@@ -27,7 +27,7 @@ pub enum Language {
 }
 
 impl Language {
-	pub fn as_str(&self) -> &'static str {
+	pub fn as_str(self) -> &'static str {
 		match self {
 			Self::Arabic => "ARABIC",
 			Self::Danish => "DANISH",

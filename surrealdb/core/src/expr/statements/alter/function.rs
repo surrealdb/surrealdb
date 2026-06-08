@@ -1,6 +1,7 @@
 use std::ops::Deref;
 
 use anyhow::Result;
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::AlterKind;
@@ -14,7 +15,7 @@ use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct AlterFunctionStatement {
-	pub name: String,
+	pub name: Strand,
 	pub if_exists: bool,
 	pub args: AlterKind<Vec<(String, Kind)>>,
 	pub block: AlterKind<Block>,
@@ -26,7 +27,7 @@ pub(crate) struct AlterFunctionStatement {
 impl AlterFunctionStatement {
 	#[instrument(level = "trace", name = "AlterFunctionStatement::compute", skip_all)]
 	pub(crate) async fn compute(&self, ctx: &FrozenContext, opt: &Options) -> Result<Value> {
-		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
+		ctx.is_allowed(opt, Action::Edit, ResourceKind::Function, Base::Db)?;
 		let (_, _) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let txn = ctx.tx();

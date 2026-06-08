@@ -12,9 +12,44 @@ use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 use process::SurrealProcess;
 use protocol::{ProxyObject, ProxyValue};
-use semver::Version;
+use semver::{Prerelease, Version, VersionReq};
 use surrealdb_core::kvs::Datastore;
 use tokio::task::JoinSet;
+
+/// Check a [`VersionReq`] against a [`Version`] while ignoring the semver
+/// "do not match pre-release versions unless explicitly named" rule — but
+/// only when the requirement itself has no prerelease.
+///
+/// Standard semver matches `>=3.0.1` against `3.0.5` (true) but rejects
+/// `3.1.0-beta.1` even though numerically `3.1.0-beta.1 > 3.0.1`. The rule
+/// exists so a `cargo` dependency on `>=3.0.1` does not silently pull in
+/// `4.0.0-rc1`. For upgrade tests we want the opposite: a test gated by
+/// `importing-version = ">=3.0.1"` to skip 3.0.0 means it should *also*
+/// run on every later 3.x.y release, including pre-release tags like
+/// `3.1.0-beta.1`. We achieve that by first trying the requirement as-is,
+/// then retrying against the version with its pre-release identifier
+/// stripped (so `3.1.0-beta.1` is compared as `3.1.0`).
+///
+/// When the requirement itself carries a prerelease tag (e.g.
+/// `>=3.1.0-beta.3`), the strip-and-retry fallback is **not** applied —
+/// the user is explicitly anchoring to a specific prerelease, and we
+/// must not silently promote `3.1.0-beta.1` to `3.1.0` (which would
+/// erroneously satisfy `>=3.1.0-beta.3`). This makes the field usable as
+/// a "starting at" gate for features introduced in a specific prerelease.
+fn version_matches(req: &VersionReq, version: &Version) -> bool {
+	if req.matches(version) {
+		return true;
+	}
+	if version.pre.is_empty() {
+		return false;
+	}
+	if req.comparators.iter().any(|c| !c.pre.is_empty()) {
+		return false;
+	}
+	let mut stripped = version.clone();
+	stripped.pre = Prerelease::EMPTY;
+	req.matches(&stripped)
+}
 
 use crate::cli::{ColorMode, DsVersion, ResultsMode, UpgradeBackend};
 use crate::format::Progress;
@@ -99,9 +134,32 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 
 	let mut actual_version = HashMap::new();
 	println!("Preparing used versions of surrealdb");
-	for v in all_versions {
-		let actual = binaries::actual_version(v.clone()).await?;
-		binaries::prepare(v.clone(), config.download_permission).await?;
+	// `actual_version` resolution is cheap (string parse for tagged versions,
+	// a single `cargo metadata` call for path-versions) so we do it serially.
+	let mut resolved = Vec::with_capacity(all_versions.len());
+	for v in &all_versions {
+		resolved.push((v.clone(), binaries::actual_version(v.clone()).await?));
+	}
+
+	// `prepare()` may download tens of megabytes per version. When the user
+	// has waived the interactive prompt we can fan the downloads out in
+	// parallel; otherwise stay serial so prompts don't clobber each other.
+	if config.download_permission {
+		let mut prepares = JoinSet::new();
+		for (v, _) in &resolved {
+			let v = v.clone();
+			prepares.spawn(async move { binaries::prepare(v, true).await });
+		}
+		while let Some(r) = prepares.join_next().await {
+			r.context("prepare() task panicked")??;
+		}
+	} else {
+		for (v, _) in &resolved {
+			binaries::prepare(v.clone(), false).await?;
+		}
+	}
+
+	for (v, actual) in resolved {
 		actual_version.insert(v, actual);
 	}
 
@@ -126,13 +184,13 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 					let to_v = actual_version.get(to).unwrap();
 
 					if let Some(ver_req) = x.test.config.parsed.test.version.as_ref()
-						&& !ver_req.matches(to_v)
+						&& !version_matches(ver_req, to_v)
 					{
 						continue;
 					}
 
 					if let Some(ver_req) = x.test.config.parsed.test.importing_version.as_ref()
-						&& !ver_req.matches(from_v)
+						&& !version_matches(ver_req, from_v)
 					{
 						continue;
 					}
@@ -143,7 +201,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 							.test
 							.version
 							.as_ref()
-							.map(|x| !x.matches(from_v))
+							.map(|req| !version_matches(req, from_v))
 							.unwrap_or(false)
 					}) {
 						continue;
@@ -454,9 +512,15 @@ async fn run_task_inner(
 		.await?;
 	}
 
-	let BoolOr::Bool(false) = run.case.test.config.parsed.env.capabilities else {
-		bail!("Setting capabilities are not supported for upgrade tests")
-	};
+	// We can't push a `[env.capabilities]` config into a spawned binary, so
+	// reject only the explicit-`Value` variant; the implicit `Bool(_)` default
+	// is a no-op.
+	if let BoolOr::Value(_) = run.case.test.config.parsed.env.capabilities {
+		bail!(
+			"Explicit `[env.capabilities]` configuration is not supported for upgrade tests; \
+			the spawned binary uses its default capabilities"
+		)
+	}
 
 	let namespace = run
 		.case

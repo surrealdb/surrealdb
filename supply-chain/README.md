@@ -8,6 +8,8 @@ Our main goal with supply chain security is to mitigate the impact of attackers 
 
 Currently, supply chain security is implemented through a basic configuration of [`cargo-vet`](https://mozilla.github.io/cargo-vet/index.html) for the main SurrealDB repository. This tool is executed as part of the CI process. Ownership of the configuration files for this tool is assigned to **@surrealdb/security** group in the [`.github/CODEOWNERS`](https://github.com/surrealdb/surrealdb/blob/main/.github/CODEOWNERS) file.
 
+For a human-readable list of **crates.io user IDs** referenced in [`audits.toml`](./audits.toml) trusted entries, see [`publishers.md`](./publishers.md). That table is documentation only; `cargo vet` does not load it.
+
 ### Security Compromises
 
 At this stage, the following compromises are made due to lack of dedicated resources to audit dependencies:

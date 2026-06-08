@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -8,7 +9,9 @@ use rand::Rng;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::channel::Receiver;
+use surrealdb_core::cnf::ConfigMap;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
+use surrealdb_core::observe::ExecutionObserver;
 use surrealdb_types::Notification;
 use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
@@ -35,6 +38,12 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_TRANSACTION_TIMEOUT", long)]
 	#[arg(value_parser = super::cli::validator::duration)]
 	transaction_timeout: Option<Duration>,
+	#[arg(
+		help = "The maximum duration that each built-in startup datastore operation can retry for"
+	)]
+	#[arg(env = "SURREAL_STARTUP_OPERATION_TIMEOUT", long, default_value = "60s")]
+	#[arg(value_parser = super::cli::validator::duration)]
+	startup_operation_timeout: Duration,
 	#[arg(help = "Whether to allow unauthenticated access", help_heading = "Authentication")]
 	#[arg(env = "SURREAL_UNAUTHENTICATED", long = "unauthenticated")]
 	#[arg(default_value_t = false)]
@@ -574,11 +583,11 @@ impl DbsCapabilities {
 	}
 
 	pub fn into_cli_capabilities(self) -> Capabilities {
-		merge_capabilities(SdkCapabilities::all().into(), self)
+		merge_capabilities(SdkCapabilities::all().into(), &self)
 	}
 }
 
-fn merge_capabilities(initial: Capabilities, caps: DbsCapabilities) -> Capabilities {
+fn merge_capabilities(initial: Capabilities, caps: &DbsCapabilities) -> Capabilities {
 	initial
 		.with_scripting(caps.get_scripting())
 		.with_guest_access(caps.get_allow_guests())
@@ -599,34 +608,32 @@ fn merge_capabilities(initial: Capabilities, caps: DbsCapabilities) -> Capabilit
 
 impl From<DbsCapabilities> for Capabilities {
 	fn from(caps: DbsCapabilities) -> Self {
-		merge_capabilities(Default::default(), caps)
+		merge_capabilities(Default::default(), &caps)
 	}
 }
 
-/// Retry an async operation until it succeeds or a timeout is reached.
+/// Retry an async operation until it succeeds or the configured timeout is reached.
 /// This is required for operations that rely on remote or distributed KV store
 /// that may not be immediately available.
-///
-/// # Parameters
-/// - `operation_name`: Name of the operation for logging purposes
-/// - `f`: The async function to retry
-///
-/// # Returns
-/// The result of the operation if successful within the timeout
-async fn retry_with_timeout<F, Fut, T, E>(operation_name: &str, f: F) -> Result<T, anyhow::Error>
+async fn retry_with_timeout<F, Fut, T, E>(
+	operation_name: &str,
+	timeout_duration: Duration,
+	f: F,
+) -> Result<T, anyhow::Error>
 where
 	F: Fn() -> Fut,
 	Fut: Future<Output = Result<T, E>>,
 	E: std::fmt::Display + std::fmt::Debug,
 {
-	retry_with_timeout_check(operation_name, f, |_| false).await
+	retry_with_timeout_check(operation_name, timeout_duration, f, |_| false).await
 }
 
-/// Retry an async operation until it succeeds, a timeout is reached, or a
-/// permanent (non-transient) error is detected.
+/// Retry an async operation until it succeeds, the configured timeout is reached,
+/// or a permanent error is detected.
 ///
 /// # Parameters
 /// - `operation_name`: Name of the operation for logging purposes
+/// - `timeout_duration`: Total retry budget for this operation
 /// - `f`: The async function to retry
 /// - `is_permanent`: Predicate that returns `true` if an error is permanent and should not be
 ///   retried (e.g. storage version mismatch)
@@ -635,6 +642,7 @@ where
 /// The result of the operation if successful within the timeout
 async fn retry_with_timeout_check<F, Fut, T, E, P>(
 	operation_name: &str,
+	timeout_duration: Duration,
 	f: F,
 	is_permanent: P,
 ) -> Result<T, anyhow::Error>
@@ -644,7 +652,6 @@ where
 	E: std::fmt::Display + std::fmt::Debug,
 	P: Fn(&E) -> bool,
 {
-	let timeout_duration = Duration::from_secs(60);
 	let start = Instant::now();
 	let mut attempt = 0;
 
@@ -695,7 +702,7 @@ where
 				// Jitter adds randomness (0.5 to 1.5x) to prevent thundering herd
 				let base_backoff = Duration::from_millis(100 * 2u64.pow((attempt - 1).min(5)));
 				let base_backoff = base_backoff.min(Duration::from_secs(5));
-				let jitter = rand::thread_rng().gen_range(0.5..=1.5);
+				let jitter = rand::rng().random_range(0.5..=1.5);
 				let backoff = base_backoff.mul_f64(jitter);
 				sleep(backoff).await;
 			}
@@ -727,10 +734,12 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	composer: C,
 	opt: &Config,
 	canceller: CancellationToken,
+	observer: Arc<dyn ExecutionObserver>,
 	#[cfg_attr(not(storage), allow(unused_variables))] StartCommandDbsOptions {
 		strict_mode,
 		query_timeout,
 		transaction_timeout,
+		startup_operation_timeout,
 		unauthenticated,
 		capabilities,
 		temporary_directory,
@@ -741,9 +750,10 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		default_namespace,
 		default_database,
 		no_defaults,
+		#[cfg_attr(not(feature = "surrealism"), allow(unused_variables))]
 		lazy_surrealism,
 	}: StartCommandDbsOptions,
-) -> Result<(Datastore, Receiver<Notification>)> {
+) -> Result<(Datastore, Receiver<Notification>, C::RouterState)> {
 	// Warn about the strict mode flag being unused.
 	if let Some(true) = strict_mode {
 		warn!(
@@ -758,6 +768,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	if let Some(v) = transaction_timeout {
 		debug!("Maximum transaction processing timeout is {v:?}");
 	}
+	debug!("Startup operation timeout is {startup_operation_timeout:?}");
 	// Log whether authentication is disabled
 	if unauthenticated {
 		warn!(
@@ -784,16 +795,25 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
 
-	let (send, recv) = surrealdb_core::channel::bounded(15_000);
+	let (send, recv) =
+		surrealdb_core::channel::bounded(surrealdb_core::cnf::NOTIFICATIONS_CHANNEL_SIZE);
 
+	let config = ConfigMap::from_env();
 	// Parse and setup the desired kv datastore
 	let builder = Datastore::builder()
+		.with_config(config)
+		// Mirror the tokio runtime worker count the server built itself
+		// with (see `cnf::RUNTIME_WORKER_THREADS`) into the datastore
+		// config so the RocksDB engine sizes its inline-blocking permit
+		// cap from the actual executor width.
+		.with_runtime_worker_threads(*crate::cnf::RUNTIME_WORKER_THREADS)
 		.with_query_timeout(query_timeout)
 		.with_transaction_timeout(transaction_timeout)
 		.with_auth(!unauthenticated)
 		.with_capabilities(capabilities)
 		.with_notify(send)
-		.with_shutdown_cancel(canceller);
+		.with_shutdown_cancel(canceller)
+		.with_observer(observer);
 
 	#[cfg(storage)]
 	let builder = builder.with_temporary_directory(temporary_directory);
@@ -807,13 +827,15 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 	#[cfg(feature = "surrealism")]
 	let builder = builder.with_lazy_surrealism(lazy_surrealism);
 
-	let dbs = builder.build_with_factory_path::<C>(&opt.path, composer).await?;
+	let (dbs, router_state) =
+		builder.build_with_factory_path_and_router_state::<C>(&opt.path, composer).await?;
 	// Ensure the storage version is up to date to prevent corruption.
 	// OutdatedStorageVersion is a permanent condition (the data on disk is from
 	// an older version), so retrying it would waste time and delay pod restarts
 	// in Kubernetes environments where operators need fast failure feedback.
 	let (_, is_new) = retry_with_timeout_check(
 		"check_version",
+		startup_operation_timeout,
 		|| async { dbs.check_version().await },
 		|e| e.to_string().contains("out-of-date"),
 	)
@@ -823,7 +845,7 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		let default_namespace = default_namespace.unwrap_or_else(|| "main".to_string());
 		let default_database = default_database.unwrap_or_else(|| "main".to_string());
 		// Initialise defaults
-		retry_with_timeout("initialise_defaults", || async {
+		retry_with_timeout("initialise_defaults", startup_operation_timeout, || async {
 			dbs.initialise_defaults(&default_namespace, &default_database).await
 		})
 		.await?;
@@ -835,37 +857,171 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		// Read the full file contents
 		let sql = fs::read_to_string(file)?;
 		// Execute the SurrealQL file
-		retry_with_timeout("startup", || async { dbs.startup(&sql, &Session::owner()).await })
-			.await?;
+		retry_with_timeout("startup", startup_operation_timeout, || async {
+			dbs.startup(&sql, &Session::owner()).await
+		})
+		.await?;
 	}
 	// Setup initial server auth credentials
 	if let (Some(user), Some(pass)) = (opt.user.as_ref(), opt.pass.as_ref()) {
 		// Log the initialisation of credentials
 		info!(target: TARGET, user = %user, "Initialising credentials");
 		// Initialise the credentials
-		retry_with_timeout("initialise_credentials", || async {
+		retry_with_timeout("initialise_credentials", startup_operation_timeout, || async {
 			dbs.initialise_credentials(user, pass).await
 		})
 		.await?;
 	}
 	// Bootstrap the datastore
-	retry_with_timeout("Insert node", || async { dbs.insert_node().await }).await?;
-	retry_with_timeout("Expire nodes", || async { dbs.expire_nodes().await }).await?;
-	retry_with_timeout("Remove nodes", || async { dbs.remove_nodes().await }).await?;
+	retry_with_timeout("Insert node", startup_operation_timeout, || async {
+		dbs.insert_node().await
+	})
+	.await?;
+	retry_with_timeout("Expire nodes", startup_operation_timeout, || async {
+		dbs.expire_nodes().await
+	})
+	.await?;
+	retry_with_timeout("Remove nodes", startup_operation_timeout, || async {
+		dbs.remove_nodes().await
+	})
+	.await?;
 	// All ok
-	Ok((dbs, recv))
+	Ok((dbs, recv, router_state))
 }
 
 #[cfg(test)]
 mod tests {
+	use std::ffi::OsString;
 	use std::str::FromStr;
+	use std::sync::Arc;
+	use std::sync::atomic::{AtomicUsize, Ordering};
 
+	use clap::Parser;
+	use serial_test::serial;
 	use surrealdb_types::ToSql;
 	use test_log::test;
 	use wiremock::matchers::{method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
 
 	use super::*;
+
+	const STARTUP_OPERATION_TIMEOUT_ENV: &str = "SURREAL_STARTUP_OPERATION_TIMEOUT";
+
+	struct EnvGuard {
+		key: &'static str,
+		old: Option<OsString>,
+	}
+
+	impl EnvGuard {
+		fn set(key: &'static str, value: &str) -> Self {
+			let old = std::env::var_os(key);
+			// SAFETY: These tests mutate a single process environment variable and are
+			// serialized so no other test in this module observes the temporary value.
+			unsafe {
+				std::env::set_var(key, value);
+			}
+			Self {
+				key,
+				old,
+			}
+		}
+
+		fn remove(key: &'static str) -> Self {
+			let old = std::env::var_os(key);
+			// SAFETY: These tests mutate a single process environment variable and are
+			// serialized so no other test in this module observes the temporary value.
+			unsafe {
+				std::env::remove_var(key);
+			}
+			Self {
+				key,
+				old,
+			}
+		}
+	}
+
+	impl Drop for EnvGuard {
+		fn drop(&mut self) {
+			// SAFETY: The guard restores the serialized test's temporary environment change.
+			unsafe {
+				match &self.old {
+					Some(value) => std::env::set_var(self.key, value),
+					None => std::env::remove_var(self.key),
+				}
+			}
+		}
+	}
+
+	#[derive(Parser, Debug)]
+	struct TestCli {
+		#[command(flatten)]
+		dbs: StartCommandDbsOptions,
+	}
+
+	#[test]
+	#[serial]
+	fn startup_operation_timeout_defaults_to_sixty_seconds() {
+		let _guard = EnvGuard::remove(STARTUP_OPERATION_TIMEOUT_ENV);
+		let cli = TestCli::try_parse_from(["surrealdb"]).unwrap();
+		assert_eq!(cli.dbs.startup_operation_timeout, Duration::from_secs(60));
+	}
+
+	#[test]
+	fn startup_operation_timeout_can_be_set_from_cli() {
+		let cli =
+			TestCli::try_parse_from(["surrealdb", "--startup-operation-timeout", "10m"]).unwrap();
+		assert_eq!(cli.dbs.startup_operation_timeout, Duration::from_secs(10 * 60));
+	}
+
+	#[test]
+	#[serial]
+	fn startup_operation_timeout_can_be_set_from_env() {
+		let _guard = EnvGuard::set(STARTUP_OPERATION_TIMEOUT_ENV, "75s");
+		let cli = TestCli::try_parse_from(["surrealdb"]).unwrap();
+		assert_eq!(cli.dbs.startup_operation_timeout, Duration::from_secs(75));
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn startup_retry_times_out_attempt_without_retrying() {
+		let attempts = Arc::new(AtomicUsize::new(0));
+
+		let err = retry_with_timeout("test operation", Duration::from_millis(10), || {
+			let attempts = Arc::clone(&attempts);
+			async move {
+				attempts.fetch_add(1, Ordering::SeqCst);
+				sleep(Duration::from_millis(50)).await;
+				Ok::<_, &'static str>(())
+			}
+		})
+		.await
+		.unwrap_err();
+
+		assert!(err.to_string().contains("timed out after 1 attempts"));
+		assert_eq!(attempts.load(Ordering::SeqCst), 1);
+	}
+
+	#[test(tokio::test(flavor = "multi_thread"))]
+	async fn startup_retry_returns_permanent_errors_immediately() {
+		let attempts = Arc::new(AtomicUsize::new(0));
+
+		let err = retry_with_timeout_check(
+			"test operation",
+			Duration::from_millis(100),
+			|| {
+				let attempts = Arc::clone(&attempts);
+				async move {
+					attempts.fetch_add(1, Ordering::SeqCst);
+					Err::<(), _>("permanent")
+				}
+			},
+			|e| *e == "permanent",
+		)
+		.await
+		.unwrap_err();
+
+		assert_eq!(err.to_string(), "permanent");
+		assert_eq!(attempts.load(Ordering::SeqCst), 1);
+	}
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn test_capabilities() {
@@ -1333,6 +1489,7 @@ mod tests {
 	fn test_dbs_capabilities_target_all() {
 		let caps = DbsCapabilities {
 			allow_all: false,
+			#[cfg(feature = "scripting")]
 			allow_scripting: false,
 			allow_guests: false,
 			allow_funcs: None,
@@ -1342,6 +1499,7 @@ mod tests {
 			allow_rpc: None,
 			allow_http: None,
 			deny_all: false,
+			#[cfg(feature = "scripting")]
 			deny_scripting: false,
 			deny_guests: false,
 			deny_funcs: None,

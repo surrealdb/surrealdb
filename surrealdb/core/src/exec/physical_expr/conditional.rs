@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
-use crate::exec::{AccessMode, CombineAccessModes};
+use crate::exec::{AccessMode, BoxFut, CombineAccessModes};
 use crate::expr::FlowResult;
 use crate::val::Value;
 
@@ -16,12 +15,13 @@ pub struct IfElseExpr {
 	/// Optional ELSE branch (final fallback)
 	pub(crate) otherwise: Option<Arc<dyn PhysicalExpr>>,
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl PhysicalExpr for IfElseExpr {
 	fn name(&self) -> &'static str {
 		"IfElse"
+	}
+
+	fn as_any(&self) -> &dyn std::any::Any {
+		self
 	}
 
 	fn required_context(&self) -> crate::exec::ContextLevel {
@@ -41,23 +41,25 @@ impl PhysicalExpr for IfElseExpr {
 		branches_ctx.max(otherwise_ctx)
 	}
 
-	async fn evaluate(&self, ctx: EvalContext<'_>) -> FlowResult<Value> {
-		// Evaluate each condition in order
-		for (condition, value) in &self.branches {
-			let cond_result = condition.evaluate(ctx.clone()).await?;
-			// Check if condition is truthy
-			if cond_result.is_truthy() {
-				return value.evaluate(ctx).await;
+	fn evaluate<'a>(&'a self, ctx: EvalContext<'a>) -> BoxFut<'a, FlowResult<Value>> {
+		Box::pin(async move {
+			// Evaluate each condition in order
+			for (condition, value) in &self.branches {
+				let cond_result = condition.evaluate(ctx.clone()).await?;
+				// Check if condition is truthy
+				if cond_result.is_truthy() {
+					return value.evaluate(ctx).await;
+				}
 			}
-		}
 
-		// No condition was true, evaluate the else branch if present
-		if let Some(otherwise) = &self.otherwise {
-			otherwise.evaluate(ctx).await
-		} else {
-			// No else branch, return NONE
-			Ok(Value::None)
-		}
+			// No condition was true, evaluate the else branch if present
+			if let Some(otherwise) = &self.otherwise {
+				otherwise.evaluate(ctx).await
+			} else {
+				// No else branch, return NONE
+				Ok(Value::None)
+			}
+		})
 	}
 
 	fn access_mode(&self) -> AccessMode {

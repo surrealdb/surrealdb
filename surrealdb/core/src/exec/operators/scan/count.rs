@@ -17,14 +17,13 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use tracing::instrument;
 
 use crate::catalog::{DatabaseId, Index, NamespaceId, Permission};
 use crate::err::Error;
 use crate::exec::operators::scan::index_count::sum_index_count_deltas;
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical, should_check_perms,
+	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
 	validate_record_user_access,
 };
 use crate::exec::{
@@ -73,9 +72,6 @@ impl CountScan {
 		}
 	}
 }
-
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
 impl ExecOperator for CountScan {
 	fn name(&self) -> &'static str {
 		"CountScan"
@@ -185,7 +181,8 @@ impl ExecOperator for CountScan {
 					Some(def) => def.permissions.select.clone(),
 					None => Permission::None,
 				};
-				convert_permission_to_physical(&catalog_perm, ctx.ctx()).await
+				convert_permission_to_physical_runtime(&catalog_perm, ctx.ctx())
+					.await
 					.context("Failed to convert permission")?
 			} else {
 				PhysicalPermission::Allow
@@ -377,8 +374,6 @@ async fn count_with_perm_fallback(
 	version: Option<u64>,
 	permission: &PhysicalPermission,
 ) -> Result<usize, ControlFlow> {
-	use futures::StreamExt;
-
 	let txn = ctx.txn();
 
 	// Determine key range
@@ -406,33 +401,33 @@ async fn count_with_perm_fallback(
 		(beg, end)
 	};
 
-	// Stream keys+values to check permissions
-	let kv_stream = txn.stream_keys_vals(
-		beg..end,
-		version,
-		None, // no limit
-		0,    // no skip
-		crate::idx::planner::ScanDirection::Forward,
-		false, // no prefetch for count scans
-	);
-	futures::pin_mut!(kv_stream);
-
+	// Walk the cursor batch-by-batch, decoding records inline from
+	// borrowed bytes — no per-row `Vec<u8>` allocation.
+	let mut cursor = txn
+		.open_vals_cursor(beg..end, crate::idx::planner::ScanDirection::Forward, 0, version)
+		.await
+		.context("Failed to open scan cursor")?;
 	let mut count = 0usize;
-	while let Some(result) = kv_stream.next().await {
+	loop {
 		if ctx.cancellation().is_cancelled() {
 			return Err(ControlFlow::Err(anyhow::anyhow!(Error::QueryCancelled)));
 		}
-		let entries = result.context("Failed to scan record")?;
-		for (key, val) in entries {
-			let decoded_key = crate::key::record::RecordKey::decode_key(&key)
+		let batch = cursor
+			.next_batch(crate::kvs::ScanLimit::Count(crate::kvs::NORMAL_BATCH_SIZE))
+			.await
+			.context("Failed to scan record")?;
+		if batch.is_empty() {
+			break;
+		}
+		for (key, val) in &batch {
+			let decoded_key = crate::key::record::RecordKey::decode_key(key)
 				.context("Failed to decode record key")?;
 			let rid_val = crate::val::RecordId {
 				table: decoded_key.tb.into_owned(),
 				key: decoded_key.id,
 			};
-			let mut record = crate::catalog::Record::kv_decode_value(val)
+			let record = crate::catalog::Record::kv_decode_value(val, rid_val)
 				.context("Failed to deserialize record")?;
-			record.data.def(rid_val);
 			let value = record.data;
 
 			// Check per-record permission

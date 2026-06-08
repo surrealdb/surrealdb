@@ -153,7 +153,7 @@ pub fn implement_host_functions(
 			let vars_vec = surrealdb_types::decode_string_key_values(&vars_bytes)
 				.map_err(stringify)?;
 			let vars = surrealdb_types::Object::from_iter(vars_vec.into_iter());
-			let config = store.data().config.clone();
+			let config = Arc::clone(&store.data().config);
 			let val = store.data_mut().context.sql(&config, query, vars).await.map_err(stringify)?;
 			surrealdb_types::encode(&val).map_err(stringify)
 		}
@@ -162,7 +162,7 @@ pub fn implement_host_functions(
 	register_host_fn!(host, "run",
 		|store, (fnc: String, version: Option<String>, args_bytes: Vec<u8>)| -> Result<Vec<u8>> {
 			let args = surrealdb_types::decode_value_list(&args_bytes).map_err(stringify)?;
-			let config = store.data().config.clone();
+			let config = Arc::clone(&store.data().config);
 			let val = store.data_mut().context.run(&config, fnc, version, args).await.map_err(stringify)?;
 			surrealdb_types::encode(&val).map_err(stringify)
 		}

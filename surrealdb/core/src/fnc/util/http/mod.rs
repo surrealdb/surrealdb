@@ -13,16 +13,18 @@ pub(crate) fn uri_is_valid(uri: &str) -> bool {
 	reqwest::Url::parse(uri).is_ok()
 }
 
-fn encode_body(req: RequestBuilder, body: PublicValue) -> Result<RequestBuilder> {
-	let res = match body {
+fn encode_body(req: RequestBuilder, body: PublicValue) -> RequestBuilder {
+	match body {
 		PublicValue::Bytes(v) => req.body(v.into_inner()),
 		PublicValue::String(v) => req.body(v),
-		//TODO: Improve the handling here. We should check if this value can be send as a json
-		//value.
+		// Any other non-nullish value is sent as a JSON body. `into_json_value` is a
+		// total conversion that handles every value variant, so this never fails: types
+		// without a native JSON representation (for example record ids, ranges and
+		// durations) are sent as their string form.
 		_ if !body.is_nullish() => req.json(&body.into_json_value()),
+		// `NONE`/`NULL` bodies are sent without a request body.
 		_ => req,
-	};
-	Ok(res)
+	}
 }
 
 async fn decode_response(res: Response) -> Result<PublicValue> {
@@ -88,7 +90,7 @@ async fn request(
 
 	if let Some(b) = body {
 		// Submit the request body
-		req = encode_body(req, b)?;
+		req = encode_body(req, b);
 	}
 
 	// Send the request and wait

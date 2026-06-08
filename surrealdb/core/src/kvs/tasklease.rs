@@ -3,10 +3,11 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use anyhow::{Result, bail};
 use chrono::{DateTime, Duration, Utc};
-use rand::{Rng, thread_rng};
+use rand::Rng;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
 use tracing::trace;
 use uuid::Uuid;
 use web_time::Instant;
@@ -119,6 +120,8 @@ pub struct LeaseHandler {
 	task_type: TaskLeaseType,
 	/// How long each acquired lease should remain valid
 	lease_duration: Duration,
+	/// Optional task cancellation token checked before retries and lease operations
+	canceller: Option<CancellationToken>,
 	/// Unix timestamp (seconds) of the last lease maintenance check
 	last_maintain_check: Arc<AtomicI64>,
 	/// Maintenance period in seconds used to throttle lease checks
@@ -153,15 +156,60 @@ impl LeaseHandler {
 		task_type: TaskLeaseType,
 		lease_duration: std::time::Duration,
 	) -> Result<Self> {
+		Self::new_inner(sequences, node, tf, task_type, lease_duration, None)
+	}
+
+	/// Creates a lease handler that stops retrying and maintaining leases when cancelled.
+	pub(super) fn new_with_canceller(
+		sequences: Sequences,
+		node: Uuid,
+		tf: TransactionFactory,
+		task_type: TaskLeaseType,
+		lease_duration: std::time::Duration,
+		canceller: CancellationToken,
+	) -> Result<Self> {
+		Self::new_inner(sequences, node, tf, task_type, lease_duration, Some(canceller))
+	}
+
+	fn new_inner(
+		sequences: Sequences,
+		node: Uuid,
+		tf: TransactionFactory,
+		task_type: TaskLeaseType,
+		lease_duration: std::time::Duration,
+		canceller: Option<CancellationToken>,
+	) -> Result<Self> {
 		Ok(Self {
 			sequences,
 			node,
 			tf,
 			task_type,
 			lease_duration: Duration::from_std(lease_duration)?.max(Duration::seconds(8)),
+			canceller,
 			last_maintain_check: Arc::new(AtomicI64::new(0)),
 			maintain_period: ((lease_duration.as_secs() / 8) as i64).max(1),
 		})
+	}
+
+	fn ensure_not_cancelled(&self) -> Result<()> {
+		if let Some(canceller) = &self.canceller
+			&& canceller.is_cancelled()
+		{
+			bail!(Error::QueryCancelled);
+		}
+		Ok(())
+	}
+
+	async fn sleep_or_cancelled(&self, duration: std::time::Duration) -> Result<()> {
+		if let Some(canceller) = &self.canceller {
+			tokio::select! {
+				_ = sleep(duration) => Ok(()),
+				_ = canceller.cancelled() => bail!(Error::QueryCancelled),
+			}
+		} else {
+			sleep(duration).await;
+			Ok(())
+		}
 	}
 
 	/// Attempts to acquire or check a lease for a specific task type.
@@ -176,6 +224,7 @@ impl LeaseHandler {
 	/// * `Ok(false)` - If another node owns the lease
 	/// * `Err` - If the operation timed out or encountered other errors
 	pub(super) async fn has_lease(&self) -> Result<bool> {
+		self.ensure_not_cancelled()?;
 		// Initial backoff time in milliseconds
 		let mut tempo = 4;
 		// Maximum backoff time in milliseconds before giving up
@@ -185,16 +234,20 @@ impl LeaseHandler {
 		// We use exponential backoff with a maximum limit to prevent infinite retries
 		let start = Instant::now();
 		while tempo < MAX_BACKOFF {
+			self.ensure_not_cancelled()?;
 			match self.check_lease().await {
 				Ok(r) => return Ok(r),
+				Err(e) if matches!(e.downcast_ref::<Error>(), Some(Error::QueryCancelled)) => {
+					return Err(e);
+				}
 				Err(e) => {
 					trace!("Tolerated error while getting a lease for {:?}: {e}", self.task_type);
 				}
 			}
 			// Apply exponential backoff with full jitter to reduce contention
 			// This randomizes sleep time between 1 and current tempo value
-			let sleep_ms = thread_rng().gen_range(1..=tempo);
-			sleep(std::time::Duration::from_millis(sleep_ms)).await;
+			let sleep_ms = rand::rng().random_range(1..=tempo);
+			self.sleep_or_cancelled(std::time::Duration::from_millis(sleep_ms)).await?;
 			// Double the backoff time for next iteration
 			tempo *= 2;
 		}
@@ -249,6 +302,7 @@ impl LeaseHandler {
 	/// }
 	/// ```
 	pub(crate) async fn try_maintain_lease(&self) -> Result<bool> {
+		self.ensure_not_cancelled()?;
 		let now = Utc::now();
 		let now_ts = now.timestamp();
 		let last = self.last_maintain_check.load(Ordering::Relaxed);
@@ -260,6 +314,7 @@ impl LeaseHandler {
 		{
 			// Check and potentially renew the lease, returning ownership status.
 			// Callers can use this information to decide whether to continue or stop processing.
+			self.ensure_not_cancelled()?;
 			return self.check_lease().await;
 		}
 		Ok(true)
@@ -281,6 +336,7 @@ impl LeaseHandler {
 	/// * `Ok(false)` - If another node owns the lease
 	/// * `Err` - If database operations fail
 	async fn check_lease(&self) -> Result<bool> {
+		self.ensure_not_cancelled()?;
 		let now = Utc::now();
 		// First check if there's already a valid lease
 		if let Some((current_lease, lease_status)) = self.read_lease(now).await? {
@@ -317,10 +373,15 @@ impl LeaseHandler {
 	/// * `Ok(None)` - If no lease exists for this task type
 	/// * `Err` - If database operations fail
 	async fn read_lease(&self, current: DateTime<Utc>) -> Result<Option<(TaskLease, LeaseStatus)>> {
+		self.ensure_not_cancelled()?;
 		let tx = self
 			.tf
 			.transaction(TransactionType::Read, LockType::Optimistic, self.sequences.clone())
 			.await?;
+		if let Err(e) = self.ensure_not_cancelled() {
+			let _ = tx.cancel().await;
+			return Err(e);
+		}
 		self.get_lease(&tx, current).await
 	}
 
@@ -380,29 +441,44 @@ impl LeaseHandler {
 	/// * `Ok(false)` - If another node owns a valid lease or acquired it during our attempt
 	/// * `Err` - Only if database operations fail (network errors, transaction failures, etc.)
 	async fn acquire_new_lease(&self, current: DateTime<Utc>) -> Result<bool> {
+		self.ensure_not_cancelled()?;
 		let tx = self
 			.tf
 			.transaction(TransactionType::Write, LockType::Optimistic, self.sequences.clone())
 			.await?;
+		if let Err(e) = self.ensure_not_cancelled() {
+			let _ = tx.cancel().await;
+			return Err(e);
+		}
 
 		// Re-check within the write transaction: if another node owns a non-expired lease,
 		// return early without attempting to write. This avoids unnecessary write attempts
 		// when the lease state changed between the initial read and this write transaction.
-		let previous_lease = if let Some((current_lease, current_status)) =
-			self.get_lease(&tx, current).await?
-		{
-			if current_lease.owner != self.node && !matches!(current_status, LeaseStatus::Expired) {
-				return Ok(false);
+		let previous_lease = match self.get_lease(&tx, current).await {
+			Ok(Some((current_lease, current_status))) => {
+				if current_lease.owner != self.node
+					&& !matches!(current_status, LeaseStatus::Expired)
+				{
+					let _ = tx.cancel().await;
+					return Ok(false);
+				}
+				Some(current_lease)
 			}
-			Some(current_lease)
-		} else {
-			None
+			Ok(None) => None,
+			Err(e) => {
+				let _ = tx.cancel().await;
+				return Err(e);
+			}
 		};
 
 		let new_lease = TaskLease {
 			owner: self.node,
 			expiration: current + self.lease_duration,
 		};
+		if let Err(e) = self.ensure_not_cancelled() {
+			let _ = tx.cancel().await;
+			return Err(e);
+		}
 
 		// Use putc() (conditional put) to atomically write the lease ONLY if the current value
 		// matches what we read earlier. This prevents race conditions:
@@ -544,7 +620,11 @@ mod tests {
 		// Async event trigger
 		let async_event_trigger = Arc::new(Notify::new());
 		// Create a transaction factory with the specified datastore flavor
-		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(
+			async_event_trigger,
+			Box::new(flavor),
+			Arc::new(Default::default()),
+		);
 		// Create a sequence generator for the transaction factory
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 		// Set test to run for 3 seconds
@@ -590,7 +670,7 @@ mod tests {
 	#[tokio::test(flavor = "multi_thread")]
 	async fn task_lease_concurrency_memory() {
 		// Create a new memory configuration
-		let config = crate::kvs::config::MemoryConfig::default();
+		let config = crate::kvs::mem::MemoryConfig::default();
 		// Create a new in-memory datastore
 		let flavor =
 			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
@@ -612,7 +692,7 @@ mod tests {
 		// Create a temporary directory for the RocksDB datastore
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		// Create a new RocksDB configuration
-		let config = crate::kvs::config::RocksDbConfig::default();
+		let config = crate::kvs::rocksdb::RocksDbConfig::default();
 		// Create a new RocksDB datastore in the temporary directory
 		let flavor = crate::kvs::rocksdb::Datastore::new(&path, config)
 			.await
@@ -634,9 +714,11 @@ mod tests {
 	#[tokio::test(flavor = "multi_thread")]
 	async fn task_lease_concurrency_surrealkv() {
 		// Create a temporary directory for the SurrealKV datastore
+
+		use temp_dir::TempDir;
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		// Create a new SurrealKV configuration
-		let config = crate::kvs::config::SurrealKvConfig::default();
+		let config = crate::kvs::surrealkv::SurrealKvConfig::default();
 		// Create a new SurrealKV datastore
 		let flavor = crate::kvs::surrealkv::Datastore::new(&path, config)
 			.await
@@ -658,14 +740,18 @@ mod tests {
 	#[tokio::test]
 	async fn test_lease_renewal_behavior() {
 		// Create a new memory configuration
-		let config = crate::kvs::config::MemoryConfig::default();
+		let config = crate::kvs::mem::MemoryConfig::default();
 		// Create an in-memory datastore
 		let flavor =
 			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
 		// Create an async event trigger
 		let async_event_trigger = Arc::new(Notify::new());
 		// Create the transaction factory
-		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(
+			async_event_trigger,
+			Box::new(flavor),
+			Arc::new(Default::default()),
+		);
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Set lease duration to 10 seconds
@@ -735,11 +821,15 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_another_node_rejected_while_lease_valid() {
-		let config = crate::kvs::config::MemoryConfig::default();
+		let config = crate::kvs::mem::MemoryConfig::default();
 		let flavor =
 			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(
+			async_event_trigger,
+			Box::new(flavor),
+			Arc::new(Default::default()),
+		);
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		let lease_duration = Duration::from_secs(60);
@@ -788,11 +878,15 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_min_lease_duration_floor() {
-		let config = crate::kvs::config::MemoryConfig::default();
+		let config = crate::kvs::mem::MemoryConfig::default();
 		let flavor =
 			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(
+			async_event_trigger,
+			Box::new(flavor),
+			Arc::new(Default::default()),
+		);
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Create a handler with a 1-second lease duration (below the 8-second floor)
@@ -831,11 +925,15 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_different_task_types_are_independent() {
-		let config = crate::kvs::config::MemoryConfig::default();
+		let config = crate::kvs::mem::MemoryConfig::default();
 		let flavor =
 			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(
+			async_event_trigger,
+			Box::new(flavor),
+			Arc::new(Default::default()),
+		);
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		let lease_duration = Duration::from_secs(60);
@@ -884,11 +982,15 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_try_maintain_lease_throttling() {
-		let config = crate::kvs::config::MemoryConfig::default();
+		let config = crate::kvs::mem::MemoryConfig::default();
 		let flavor =
 			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(
+			async_event_trigger,
+			Box::new(flavor),
+			Arc::new(Default::default()),
+		);
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Use a 60-second lease so maintain_period = 60/8 = 7 seconds
@@ -947,11 +1049,15 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_lease_expiration_and_takeover() {
-		let config = crate::kvs::config::MemoryConfig::default();
+		let config = crate::kvs::mem::MemoryConfig::default();
 		let flavor =
 			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(
+			async_event_trigger,
+			Box::new(flavor),
+			Arc::new(Default::default()),
+		);
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Use the minimum lease duration (8 seconds due to the floor)
@@ -1016,11 +1122,15 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_try_maintain_lease_reports_lost_lease() {
-		let config = crate::kvs::config::MemoryConfig::default();
+		let config = crate::kvs::mem::MemoryConfig::default();
 		let flavor =
 			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(
+			async_event_trigger,
+			Box::new(flavor),
+			Arc::new(Default::default()),
+		);
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		// Use minimum lease duration (clamped to 8 seconds)
@@ -1077,11 +1187,15 @@ mod tests {
 	#[cfg(feature = "kv-mem")]
 	#[tokio::test]
 	async fn test_initial_lease_acquisition_from_empty_state() {
-		let config = crate::kvs::config::MemoryConfig::default();
+		let config = crate::kvs::mem::MemoryConfig::default();
 		let flavor =
 			crate::kvs::mem::Datastore::new(config).await.map(DatastoreFlavor::Mem).unwrap();
 		let async_event_trigger = Arc::new(Notify::new());
-		let tf = TransactionFactory::new(async_event_trigger, Box::new(flavor));
+		let tf = TransactionFactory::new(
+			async_event_trigger,
+			Box::new(flavor),
+			Arc::new(Default::default()),
+		);
 		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		let node_id = Uuid::new_v4();

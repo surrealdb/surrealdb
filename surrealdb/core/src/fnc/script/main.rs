@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::time::Duration;
 
 use anyhow::Result;
 use js::prelude::*;
@@ -9,7 +8,6 @@ use web_time::Instant;
 use super::modules::surrealdb::query::QueryContext;
 use super::modules::{loader, resolver};
 use super::{classes, fetch, globals, modules};
-use crate::cnf::{SCRIPTING_MAX_MEMORY_LIMIT, SCRIPTING_MAX_STACK_SIZE};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -58,18 +56,16 @@ pub async fn run(
 	// Scripting functions are pretty heavy so make the increase pretty heavy.
 	let opt = opt.dive(4)?;
 
-	//TODO: Maybe check memory usage?
-
 	let instant_start = Instant::now();
-	let time_limit = Duration::from_millis(*crate::cnf::SCRIPTING_MAX_TIME_LIMIT as u64);
+	let time_limit = context.config.scripting_max_time_limit;
 
 	// Create a JavaScript context
 	let run = js::AsyncRuntime::new()
 		.map_err(|e| anyhow::anyhow!("Failed to create JavaScript runtime: {}", e))?;
 	// Explicitly set max stack size to 256 KiB
-	run.set_max_stack_size(*SCRIPTING_MAX_STACK_SIZE).await;
+	run.set_max_stack_size(context.config.scripting_max_stack_size).await;
 	// Explicitly set max memory size to 2 MB
-	run.set_memory_limit(*SCRIPTING_MAX_MEMORY_LIMIT).await;
+	run.set_memory_limit(context.config.scripting_max_memory_limit).await;
 	// Ensure scripts are cancelled with context
 	let cancellation = context.cancellation();
 	let handler = Box::new(move || cancellation.is_done() || instant_start.elapsed() > time_limit);

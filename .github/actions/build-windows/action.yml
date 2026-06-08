@@ -48,6 +48,42 @@ runs:
       uses: ./.github/actions/setup-environment
       with:
         targets: ${{ inputs.arch }}
+        # Persist the sccache disk cache as a single Swatinem entry instead of letting
+        # sccache fill the 10 GiB repo GHA cache with hundreds of individual crate entries.
+        cache-directories: 'C:\sccache'
+        save-cache: 'true'
+
+    - name: Configure sccache for Windows
+      shell: bash
+      run: |
+        # sccache-action starts the daemon before we can configure it, so stop it and
+        # restart it with the correct settings for this runner.
+        #
+        # SCCACHE_GHA_ENABLED=false / SCCACHE_DIR: switch from the GHA cache backend
+        # (which stores one entry per crate and quickly exhausts the shared 10 GiB repo
+        # cache, causing silent write failures) to a local disk cache that Swatinem
+        # saves as a single compressed GHA entry between runs.
+        #
+        # SCCACHE_CACHE_SIZE: cap disk usage so the Swatinem-managed entry stays small.
+        #
+        # SCCACHE_IDLE_TIMEOUT=0: the default 600 s idle timeout shuts the daemon down
+        # while surrealdb-core is still compiling (~16 min, the last crate to build).
+        #
+        # SCCACHE_MAX_FRAME_LENGTH=2 GiB: on warm runs sccache sends cached .rlib
+        # contents back to the client over its IPC channel; the surrealdb-core .rlib
+        # exceeds tokio_util's default 8 MiB LengthDelimitedCodec frame limit.
+        sccache --stop-server || true
+        export SCCACHE_GHA_ENABLED=false
+        export SCCACHE_DIR='C:\sccache'
+        export SCCACHE_CACHE_SIZE='2G'
+        export SCCACHE_IDLE_TIMEOUT=0
+        export SCCACHE_MAX_FRAME_LENGTH=2147483648
+        sccache --start-server
+        echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
+        echo "SCCACHE_DIR=C:\\sccache" >> "$GITHUB_ENV"
+        echo "SCCACHE_CACHE_SIZE=2G" >> "$GITHUB_ENV"
+        echo "SCCACHE_IDLE_TIMEOUT=0" >> "$GITHUB_ENV"
+        echo "SCCACHE_MAX_FRAME_LENGTH=2147483648" >> "$GITHUB_ENV"
 
     - name: Output package versions
       shell: bash

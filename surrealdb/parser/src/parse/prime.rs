@@ -1,13 +1,13 @@
 use std::ops::Bound;
 
-use ast::{Builtin, Expr, ObjectEntry, Point, Spanned};
+use ast::{AstSpan, Builtin, Expr, ObjectEntry, Point, Spanned};
 use common::source_error::{AnnotationKind, Level};
 use common::span::Span;
 use token::{BaseTokenKind, T};
 
 use crate::parse::range::{TryRange, parse_prefix_range_sync, try_parse_infix_range_sync};
 use crate::parse::utils::parse_delimited_list;
-use crate::parse::{ParseError, ParseResult, Parser};
+use crate::parse::{ParseError, ParseResult, Parser, ParserSettings};
 use crate::{Parse, ParseSync};
 
 impl ParseSync for ast::Mock {
@@ -127,6 +127,56 @@ impl Parse for ast::Object {
 	}
 }
 
+fn expect_close_block(
+	parser: &mut Parser<'_, '_>,
+	open: Span,
+	last_statement: Span,
+) -> ParseResult<()> {
+	if parser.eat(BaseTokenKind::CloseBrace)?.is_none() {
+		return Err(parser.with_error(|p| {
+			if p.eof() {
+				Level::Error
+					.title("Unexpected end of query, expected closing delimiter }")
+					.snippet(
+						p.snippet()
+							.annotate(
+								AnnotationKind::Primary.span(p.eof_span()).label("Missing } here"),
+							)
+							.annotate(
+								AnnotationKind::Context
+									.span(open)
+									.label("Expected this delimiter to close"),
+							),
+					)
+					.to_diagnostic()
+			} else {
+				let span = p.peek_span();
+				Level::Error
+					.title(format!(
+						"Unexpected token `{}`, expected closing delimiter }}",
+						p.slice(span),
+					))
+					.snippet(
+						p.snippet()
+							.annotate(AnnotationKind::Primary.span(span).label("Missing } here"))
+							.annotate(
+								AnnotationKind::Context
+									.span(open)
+									.label("Expected this delimiter to close"),
+							)
+							.annotate(
+								AnnotationKind::Context
+									.span(last_statement)
+									.label("Maybe forgot a `;` after the last expression?"),
+							),
+					)
+					.to_diagnostic()
+			}
+		}));
+	}
+	Ok(())
+}
+
 /// Parse a prime expression that starts with `{`:
 pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 	let start = parser.expect(BaseTokenKind::OpenBrace)?;
@@ -209,8 +259,11 @@ pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 				parser.push_list(expr, &mut head, &mut tail);
 
 				if parser.eat(T![;])?.is_none() {
-					let _ =
-						parser.expect_closing_delimiter(BaseTokenKind::CloseBrace, start.span)?;
+					expect_close_block(
+						parser,
+						start.span,
+						tail.expect("we should have already parsed a value").ast_span(parser),
+					)?;
 					break;
 				}
 			}
@@ -247,8 +300,31 @@ pub async fn parse_object_like(parser: &mut Parser<'_, '_>) -> ParseResult<Expr>
 			Ok(Expr::Set(obj))
 		}
 		_ => {
-			// block with a single expression
-			let _ = parser.expect_closing_delimiter(BaseTokenKind::CloseBrace, start.span)?;
+			if parser.settings.contains(ParserSettings::QUIRK_FIRST_SEMICOLON_BLOCK) {
+				loop {
+					while parser.eat(T![;])?.is_some() {}
+
+					if parser.eat(BaseTokenKind::CloseBrace)?.is_some() {
+						break;
+					}
+
+					let expr = parser.parse_enter().await?;
+					parser.push_list(expr, &mut head, &mut tail);
+
+					if parser.eat(T![;])?.is_none() {
+						let _ = parser
+							.expect_closing_delimiter(BaseTokenKind::CloseBrace, start.span)?;
+						break;
+					}
+				}
+			} else {
+				// block with a single expression
+				expect_close_block(
+					parser,
+					start.span,
+					tail.expect("we should have already parsed a value").ast_span(parser),
+				)?;
+			}
 
 			let span = parser.span_since(start.span);
 			let obj = parser.push(ast::Block {
@@ -548,9 +624,9 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 		BaseTokenKind::String => Ok(Expr::String(parser.parse_sync()?)),
 		BaseTokenKind::RecordIdString => {
 			let _ = parser.next();
-			// TODO: Remove `to_owned` call.
-			let str = parser.unescape_str(peek)?.to_owned();
-			match parser.sub_parse::<ast::RecordId>(&str).await {
+			let mut unescape_buffer = String::new();
+			let str = parser.unescape_str(peek, &mut unescape_buffer)?;
+			match parser.sub_parse::<ast::RecordId>(str).await {
 				Ok(x) => {
 					let p = parser.push(x);
 					Ok(Expr::RecordId(p))
@@ -676,6 +752,7 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				T![SEQUENCE] => parser.parse().await.map(Expr::RemoveSequence),
 				T![USER] => parser.parse().await.map(Expr::RemoveUser),
 				T![ACCESS] => parser.parse().await.map(Expr::RemoveAccess),
+				T![CONFIG] => parser.parse().await.map(Expr::RemoveConfig),
 				_ => {
 					let _ = parser.next();
 					Err(parser.unexpected(expected))
@@ -693,9 +770,18 @@ pub async fn parse_prime(parser: &mut Parser<'_, '_>) -> ParseResult<Expr> {
 				T![NAMESPACE] => parser.parse().await.map(Expr::AlterNamespace),
 				T![DATABASE] => parser.parse().await.map(Expr::AlterDatabase),
 				T![TABLE] => parser.parse().await.map(Expr::AlterTable),
+				T![EVENT] => parser.parse().await.map(Expr::AlterEvent),
+				T![PARAM] => parser.parse().await.map(Expr::AlterParam),
 				T![FIELD] => parser.parse().await.map(Expr::AlterField),
 				T![INDEX] => parser.parse().await.map(Expr::AlterIndex),
 				T![SEQUENCE] => parser.parse().await.map(Expr::AlterSequence),
+				T![BUCKET] => parser.parse().await.map(Expr::AlterBucket),
+				T![ANALYZER] => parser.parse().await.map(Expr::AlterAnalyzer),
+				T![FUNCTION] => parser.parse().await.map(Expr::AlterFunction),
+				T![USER] => parser.parse().await.map(Expr::AlterUser),
+				T![ACCESS] => parser.parse().await.map(Expr::AlterAccess),
+				T![API] => parser.parse().await.map(Expr::AlterApi),
+				T![CONFIG] => parser.parse().await.map(Expr::AlterConfig),
 				_ => {
 					let _ = parser.next();
 					Err(parser.unexpected(expected))

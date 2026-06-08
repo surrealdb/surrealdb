@@ -162,11 +162,7 @@ name = "hash_trie_btree"
 harness = false
 
 [[bench]]
-name = "index_hnsw"
-harness = false
-
-[[bench]]
-name = "move_vs_clone"
+name = "index_ann"
 harness = false
 
 [[bench]]

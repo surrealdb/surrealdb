@@ -5,10 +5,10 @@
 //! to each group. This is a pipeline-breaking operator: the entire
 //! input stream must be consumed before any output is produced.
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 
 use crate::exec::function::{Accumulator, AggregateFunction};
@@ -84,8 +84,13 @@ pub struct AggregateField {
 
 impl AggregateField {
 	/// Create a new AggregateField from an output name string.
-	/// If the name contains dots and represents a simple field path (no special characters),
-	/// it will be split into path components for nested object construction.
+	///
+	/// The name is treated as an opaque flat key. Callers that need a
+	/// nested output path (e.g. for `AS foo.bar`) must supply the path
+	/// components directly via [`AggregateField::with_output_path`] —
+	/// typically by walking the parsed alias idiom's [`crate::expr::part::Part`]s
+	/// so that `AS foo.bar` nests as `[foo, bar]` while
+	/// `` AS `foo.bar` `` stays a single flat key `"foo.bar"`.
 	pub fn new(
 		name: String,
 		is_group_key: bool,
@@ -93,11 +98,29 @@ impl AggregateField {
 		aggregate_expr_info: Option<AggregateExprInfo>,
 		fallback_expr: Option<Arc<dyn PhysicalExpr>>,
 	) -> Self {
-		let output_path = if name.contains('.') && !name.contains(['[', '(', ' ']) {
-			name.split('.').map(|s| s.to_string()).collect()
-		} else {
-			vec![name]
-		};
+		Self::with_output_path(
+			vec![name],
+			is_group_key,
+			group_key_index,
+			aggregate_expr_info,
+			fallback_expr,
+		)
+	}
+
+	/// Create a new AggregateField from a pre-built nested output path.
+	///
+	/// Used when the output path was derived structurally from the parsed
+	/// alias idiom, preserving the distinction between multi-part aliases
+	/// (`AS foo.bar` → `["foo", "bar"]`) and single-part aliases whose
+	/// identifier happens to contain a dot (`` AS `foo.bar` `` →
+	/// `["foo.bar"]`).
+	pub fn with_output_path(
+		output_path: Vec<String>,
+		is_group_key: bool,
+		group_key_index: Option<usize>,
+		aggregate_expr_info: Option<AggregateExprInfo>,
+		fallback_expr: Option<Arc<dyn PhysicalExpr>>,
+	) -> Self {
 		Self {
 			output_path,
 			is_group_key,
@@ -179,8 +202,117 @@ struct GroupState {
 	first_values: Vec<Value>,
 }
 
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
+// ---------------------------------------------------------------------------
+// Hash-keyed group map
+// ---------------------------------------------------------------------------
+//
+// `GroupMap` replaces what used to be a `BTreeMap<GroupKey, GroupState>`. The
+// old shape deep-cloned the per-row group-by values into the BTree key on
+// every row, even when the row's group already existed in the map; for a
+// `1M-row × 100-group` query that's ~1M clones into the map plus the per-row
+// `Ord` comparisons during navigation.
+//
+// `GroupMap` hashes the row's group-by values *in place* (no clone), probes a
+// bucket, and only clones to build a canonical [`GroupKey`] on a cache miss
+// (one per actual group). Output is sorted by [`GroupKey`] at finalize so
+// downstream observers see the same key-sorted ordering the old BTreeMap
+// produced. Spill-to-disk for high-cardinality groups is a future change.
+struct GroupMap {
+	buckets: HashMap<u64, Vec<(GroupKey, GroupState)>>,
+}
+
+impl GroupMap {
+	fn new() -> Self {
+		Self {
+			buckets: HashMap::new(),
+		}
+	}
+
+	fn is_empty(&self) -> bool {
+		self.buckets.is_empty()
+	}
+
+	/// Look up the state for the row's group key, creating it if absent.
+	///
+	/// `group_key_columns[expr_idx][row_idx]` is the pre-evaluated value for
+	/// group-by expression `expr_idx` at row `row_idx`. We hash + compare
+	/// against those references without cloning; only on miss do we build an
+	/// owned [`GroupKey`] for the new entry.
+	fn entry_for_row<F>(
+		&mut self,
+		group_key_columns: &[Vec<Value>],
+		row_idx: usize,
+		create: F,
+	) -> &mut GroupState
+	where
+		F: FnOnce() -> GroupState,
+	{
+		let hash = hash_values(group_key_columns.iter().map(|col| &col[row_idx]));
+		let bucket = self.buckets.entry(hash).or_default();
+		let matches = |(k, _): &(GroupKey, _)| -> bool {
+			k.len() == group_key_columns.len()
+				&& k.iter().zip(group_key_columns).all(|(stored, col)| *stored == col[row_idx])
+		};
+		match bucket.iter().position(matches) {
+			Some(idx) => &mut bucket[idx].1,
+			None => {
+				let new_key: GroupKey =
+					group_key_columns.iter().map(|col| col[row_idx].clone()).collect();
+				bucket.push((new_key, create()));
+				&mut bucket.last_mut().expect("just pushed").1
+			}
+		}
+	}
+
+	/// Look up (or create) the state for the empty group key (GROUP ALL case).
+	fn entry_for_empty<F>(&mut self, create: F) -> &mut GroupState
+	where
+		F: FnOnce() -> GroupState,
+	{
+		let hash = hash_values(std::iter::empty::<&Value>());
+		let bucket = self.buckets.entry(hash).or_default();
+		match bucket.iter().position(|(k, _)| k.is_empty()) {
+			Some(idx) => &mut bucket[idx].1,
+			None => {
+				bucket.push((Vec::new(), create()));
+				&mut bucket.last_mut().expect("just pushed").1
+			}
+		}
+	}
+
+	/// Insert a group directly (used by the GROUP ALL empty-input fallback).
+	fn insert(&mut self, key: GroupKey, state: GroupState) {
+		let hash = hash_values(key.iter());
+		self.buckets.entry(hash).or_default().push((key, state));
+	}
+
+	/// Drain the map into a Vec sorted by [`GroupKey`].
+	///
+	/// Matches the key-sorted iteration order the old `BTreeMap` provided
+	/// without paying the per-row `Ord` comparisons; total cost is
+	/// `O(g log g)` where `g` is the group count.
+	fn into_sorted(self) -> Vec<(GroupKey, GroupState)> {
+		let mut all: Vec<(GroupKey, GroupState)> = self.buckets.into_values().flatten().collect();
+		all.sort_by(|a, b| a.0.cmp(&b.0));
+		all
+	}
+}
+
+/// Hash a sequence of [`Value`] references into a single `u64`.
+///
+/// Used for `GroupKey` bucket lookup. Deterministic within a process
+/// (`DefaultHasher` uses a fixed seed).
+fn hash_values<'a, I>(values: I) -> u64
+where
+	I: IntoIterator<Item = &'a Value>,
+{
+	let mut hasher = std::collections::hash_map::DefaultHasher::new();
+	for v in values {
+		v.hash(&mut hasher);
+	}
+	hasher.finish()
+}
+
 impl ExecOperator for Aggregate {
 	fn name(&self) -> &'static str {
 		"Aggregate"
@@ -308,6 +440,7 @@ impl ExecOperator for Aggregate {
 			self.input.execute(ctx)?,
 			self.input.access_mode(),
 			self.input.cardinality_hint(),
+			ctx.root().ctx.config.operator_buffer_size,
 		);
 		let group_by_exprs = self.group_by_exprs.clone();
 		let aggregates = self.aggregates.clone();
@@ -338,8 +471,10 @@ impl ExecOperator for Aggregate {
 				}
 			}
 
-			// Accumulate all values into groups
-			let mut groups: BTreeMap<GroupKey, GroupState> = BTreeMap::new();
+			// Accumulate all values into groups. See `GroupMap` for the
+			// hash-keyed bucket design that avoids per-row clones of
+			// group-by values into the map key.
+			let mut groups = GroupMap::new();
 
 			// Consume all input batches
 			futures::pin_mut!(input_stream);
@@ -418,7 +553,7 @@ impl ExecOperator for Aggregate {
 				if group_by_exprs.is_empty() {
 					// GROUP ALL fast path: single group, pass entire columns
 					// to update_batch to avoid per-row virtual dispatch.
-					let state = groups.entry(vec![]).or_insert_with(|| {
+					let state = groups.entry_for_empty(|| {
 						create_group_state(&aggregates, &evaluated_extra_args)
 					});
 
@@ -455,17 +590,15 @@ impl ExecOperator for Aggregate {
 						}
 					}
 				} else {
-					// GROUP BY: per-row dispatch to separate groups
+					// GROUP BY: per-row dispatch to separate groups. The
+					// hash-keyed `GroupMap` looks up by reference and only
+					// clones the group-by values on a cache miss.
 					for (row_idx, value) in batch.values.iter().enumerate() {
-						// Build group key from pre-computed columns
-						let key: GroupKey = group_key_columns
-							.iter()
-							.map(|col| col[row_idx].clone())
-							.collect();
-
-						let state = groups.entry(key).or_insert_with(|| {
-							create_group_state(&aggregates, &evaluated_extra_args)
-						});
+						let state = groups.entry_for_row(
+							&group_key_columns,
+							row_idx,
+							|| create_group_state(&aggregates, &evaluated_extra_args),
+						);
 
 						for (field_idx, agg) in aggregates.iter().enumerate() {
 							if agg.is_group_key {
@@ -514,13 +647,16 @@ impl ExecOperator for Aggregate {
 					.unwrap_or(true);
 				if !perms_active {
 					let state = create_group_state(&aggregates, &evaluated_extra_args);
-					groups.insert(vec![], state);
+					groups.insert(Vec::new(), state);
 				}
 			}
 
-			// Now compute final results for each group
-			let mut results = Vec::with_capacity(groups.len());
-			for (group_key, state) in groups {
+			// Now compute final results for each group. Drain the hash-keyed
+			// map into a Vec sorted by GroupKey so output matches the old
+			// BTreeMap ordering.
+			let sorted_groups = groups.into_sorted();
+			let mut results = Vec::with_capacity(sorted_groups.len());
+			for (group_key, state) in sorted_groups {
 				let result = compute_group_result_async(
 					&group_key,
 					state,

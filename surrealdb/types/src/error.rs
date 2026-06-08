@@ -342,28 +342,17 @@ impl Error {
 		self
 	}
 
-	/// Build an [`Error`] from an [`anyhow::Error`], preserving the complete source chain.
+	/// Build an [`Error`] from an [`anyhow::Error`], surfacing only the outermost message.
 	///
-	/// The outer error message is used as the top-level message and each source is attached as a
-	/// nested `cause`, making debugging easier for consumers that inspect chained errors.
+	/// SECURITY: do not copy the anyhow source chain to clients. Inner chain messages
+	/// frequently contain raw field/computed values, storage-engine details, and other
+	/// internal context that was attached by intermediate `?` / `with_context` callers
+	/// without any redaction. Boundary call sites that want to attach an explicit,
+	/// reviewed cause can use `with_cause` directly.
 	#[doc(hidden)]
+	#[allow(clippy::needless_pass_by_value)] // Public API: callers pass owned `anyhow::Error`.
 	pub fn from_anyhow_with_chain(error: anyhow::Error) -> Self {
-		let chain: Vec<String> = error.chain().map(|e| e.to_string()).collect();
-		if chain.is_empty() {
-			return Self::internal("unknown error".to_string());
-		}
-
-		let mut built: Option<Error> = None;
-		for message in chain.into_iter().rev() {
-			let mut current = Self::internal(message);
-			if let Some(cause) = built {
-				current = current.with_cause(cause);
-			}
-			built = Some(current);
-		}
-
-		// Safe: we return early when `chain` is empty.
-		built.expect("non-empty anyhow error chain")
+		Self::internal(error.to_string())
 	}
 
 	/// Returns the kind string for this error (e.g. "NotAllowed", "Internal").
@@ -628,6 +617,7 @@ impl ErrorDetails {
 			"AlreadyExists" => Self::AlreadyExists(None),
 			"Connection" => Self::Connection(None),
 			"Thrown" => Self::Thrown,
+			"Context" => Self::Context,
 			// Unknown kinds fall back to Internal (forward compat)
 			_ => Self::Internal,
 		}
@@ -658,6 +648,7 @@ impl ErrorDetails {
 				ConnectionError::from_value(value).map(|v| ErrorDetails::Connection(Some(v)))
 			}
 			"Thrown" => Ok(Self::Thrown),
+			"Context" => Ok(Self::Context),
 			_ => Ok(Self::Internal),
 		}
 	}

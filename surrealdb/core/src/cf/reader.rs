@@ -74,7 +74,7 @@ pub async fn read(
 			continue;
 		}
 		// Decode the byte array into a vector of operations
-		let tb_muts = TableMutations::kv_decode_value(v)?;
+		let tb_muts = TableMutations::kv_decode_value(&v, ())?;
 		// Get the timestamp of the changefeed entry
 		match current_ts {
 			Some(ref x) => {

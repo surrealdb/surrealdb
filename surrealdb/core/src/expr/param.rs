@@ -4,6 +4,7 @@ use std::str;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::FlowResultExt as _;
@@ -18,11 +19,11 @@ use crate::iam::Action;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub(crate) struct Param(String);
+pub(crate) struct Param(Strand);
 
 impl Revisioned for Param {
 	fn revision() -> u16 {
-		String::revision()
+		Strand::revision()
 	}
 }
 
@@ -46,29 +47,45 @@ impl DeserializeRevisioned for Param {
 	}
 }
 
-impl Param {
-	/// Create a new identifier
-	///
-	/// This function checks if the string has a null byte, returns None if it
-	/// has.
-	pub fn new(str: String) -> Self {
-		Self(str)
+impl revision::SkipRevisioned for Param {
+	fn skip_revisioned<R: std::io::Read>(r: &mut R) -> std::result::Result<(), revision::Error> {
+		<Strand as revision::SkipRevisioned>::skip_revisioned(r)
 	}
+}
 
-	// Convert into a string.
-	pub fn into_string(self) -> String {
+impl revision::WalkRevisioned for Param {
+	type Walker<'r, R: revision::BorrowedReader + 'r> = revision::LeafWalker<'r, Param, R>;
+
+	fn walk_revisioned<'r, R: revision::BorrowedReader>(
+		reader: &'r mut R,
+	) -> std::result::Result<Self::Walker<'r, R>, revision::Error> {
+		Ok(revision::LeafWalker::new(reader))
+	}
+}
+
+impl revision::LengthPrefixedBytes for Param {}
+
+impl Param {
+	/// Convert into the underlying `Strand`.
+	pub fn into_strand(self) -> Strand {
 		self.0
 	}
 
 	/// returns the identifier section of the parameter,
 	/// i.e. `$foo` without the `$` so: `foo`
 	pub fn as_str(&self) -> &str {
-		&self.0
+		self.0.as_str()
 	}
 }
 
 impl From<String> for Param {
 	fn from(v: String) -> Self {
+		Self(v.into())
+	}
+}
+
+impl From<Strand> for Param {
+	fn from(v: Strand) -> Self {
 		Self(v)
 	}
 }
@@ -91,7 +108,7 @@ impl Param {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Find the variable by name
-		match self.0.as_str() {
+		match self.as_str() {
 			// This is a special param
 			"this" | "self" => match doc {
 				// The base document exists
@@ -127,7 +144,7 @@ impl Param {
 						}
 					};
 
-					if opt.check_perms(Action::View)? {
+					if ctx.check_perms(opt, Action::View)? {
 						match &val.permissions {
 							Permission::Full => (),
 							Permission::None => {
@@ -163,6 +180,37 @@ impl Param {
 impl ToSql for Param {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push('$');
-		EscapeKwFreeIdent(&self.0).fmt_sql(f, fmt);
+		EscapeKwFreeIdent(self.as_str()).fmt_sql(f, fmt);
+	}
+}
+
+#[cfg(test)]
+mod length_prefixed_bytes_tests {
+	use revision::{DeserializeRevisioned, SerializeRevisioned, SkipRevisioned, WalkRevisioned};
+
+	use super::Param;
+
+	#[test]
+	fn param_with_bytes_matches_serialize() {
+		let param = Param::from("my_var".to_string());
+		let mut bytes = Vec::new();
+		param.serialize_revisioned(&mut bytes).unwrap();
+		let mut r = bytes.as_slice();
+		let walker = Param::walk_revisioned(&mut r).unwrap();
+		let observed = walker.with_bytes(|raw| raw.to_vec()).unwrap();
+		assert_eq!(observed.as_slice(), b"my_var");
+		assert!(r.is_empty());
+	}
+
+	#[test]
+	fn param_skip_leaves_reader_consumed_like_decode() {
+		let param = Param::from("skip_me".to_string());
+		let mut bytes = Vec::new();
+		param.serialize_revisioned(&mut bytes).unwrap();
+		let mut skip_reader = bytes.as_slice();
+		Param::skip_revisioned(&mut skip_reader).unwrap();
+		assert!(skip_reader.is_empty());
+		let roundtrip = Param::deserialize_revisioned(&mut bytes.as_slice()).unwrap();
+		assert_eq!(roundtrip, param);
 	}
 }

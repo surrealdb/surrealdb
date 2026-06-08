@@ -1,3 +1,7 @@
+#![allow(clippy::needless_pass_by_value)]
+
+use std::io::{Read, Write};
+use std::net::{SocketAddr, TcpStream};
 use std::sync::OnceLock;
 
 use anyhow::Result;
@@ -234,6 +238,75 @@ fn kv_set_value(key: String, value: i64) -> Result<()> {
 #[surrealism]
 fn kv_get_value(key: String) -> Result<Option<i64>> {
 	surrealism::kv::get(&key)
+}
+
+/// Echo the input asynchronously, demonstrating async fn support.
+#[surrealism]
+async fn async_echo(input: String) -> String {
+	input
+}
+
+/// Async function that can return an error.
+#[surrealism]
+async fn async_result(should_fail: bool) -> Result<String> {
+	if should_fail {
+		anyhow::bail!("async failure")
+	} else {
+		Ok("async success".to_string())
+	}
+}
+
+/// Fetch a Pokémon's name from a small JSON API by Pokémon name or Pokédex ID.
+/// Requires `allow_net = ["127.0.0.1"]` in surrealism.toml.
+#[surrealism]
+async fn fetch_pokemon(api_base: String, name: String) -> Result<String> {
+	surrealism::tokio::task::yield_now().await;
+
+	let url =
+		format!("{}/pokemon/{}", api_base.trim_end_matches('/'), name.trim_start_matches('/'));
+	let url = reqwest::Url::parse(&url).map_err(|e| anyhow::anyhow!("Invalid API URL: {e}"))?;
+	let host = url.host_str().ok_or_else(|| anyhow::anyhow!("API URL missing host"))?;
+	let port =
+		url.port_or_known_default().ok_or_else(|| anyhow::anyhow!("API URL missing port"))?;
+	let socket_addr: SocketAddr = format!("{host}:{port}")
+		.parse()
+		.map_err(|e| anyhow::anyhow!("Invalid API socket address: {e}"))?;
+	// Reqwest's native wasip2 connector currently goes through socket2, so
+	// keep the transport minimal while validating WASI socket access.
+	let mut stream =
+		TcpStream::connect(socket_addr).map_err(|e| anyhow::anyhow!("HTTP connect failed: {e}"))?;
+	let path = if let Some(query) = url.query() {
+		format!("{}?{query}", url.path())
+	} else {
+		url.path().to_string()
+	};
+	write!(
+		stream,
+		"GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nAccept: application/json\r\nConnection: close\r\n\r\n"
+	)
+	.map_err(|e| anyhow::anyhow!("HTTP request write failed: {e}"))?;
+	let mut response = String::new();
+	stream
+		.read_to_string(&mut response)
+		.map_err(|e| anyhow::anyhow!("HTTP response read failed: {e}"))?;
+	let (headers, body) = response
+		.split_once("\r\n\r\n")
+		.ok_or_else(|| anyhow::anyhow!("HTTP response missing headers"))?;
+	let status = headers
+		.lines()
+		.next()
+		.and_then(|line| line.split_whitespace().nth(1))
+		.and_then(|code| code.parse::<u16>().ok())
+		.ok_or_else(|| anyhow::anyhow!("HTTP response missing status"))?;
+	if !(200..300).contains(&status) {
+		anyhow::bail!("Pokémon API returned {status}");
+	}
+	let json: serde_json::Value =
+		serde_json::from_str(body).map_err(|e| anyhow::anyhow!("Failed to parse JSON: {e}"))?;
+	json["name"]
+		.as_str()
+		.map(|s| s.to_string())
+		.ok_or_else(|| anyhow::anyhow!("Pokémon API response missing 'name' field"))
 }
 
 // ---------------------------------------------------------------------------

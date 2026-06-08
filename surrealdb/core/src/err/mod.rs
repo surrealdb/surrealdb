@@ -41,6 +41,16 @@ pub fn anyhow_to_types_error(error: anyhow::Error) -> surrealdb_types::Error {
 	}
 }
 
+/// Returns true if an [`anyhow::Error`] contains a core query-cancellation error.
+pub fn is_query_cancelled(error: &anyhow::Error) -> bool {
+	matches!(error.downcast_ref::<Error>(), Some(Error::QueryCancelled))
+}
+
+/// Returns true if an [`anyhow::Error`] contains a core query-timeout error.
+pub fn is_query_timedout(error: &anyhow::Error) -> bool {
+	matches!(error.downcast_ref::<Error>(), Some(Error::QueryTimedout(_)))
+}
+
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)]
@@ -158,7 +168,7 @@ pub(crate) enum Error {
 	},
 
 	/// The wrong quantity or magnitude of arguments was given for the specified
-	/// function
+	/// method
 	#[error("Incorrect arguments for method {name}(). {message}")]
 	InvalidMethodArguments {
 		name: String,
@@ -333,6 +343,16 @@ pub(crate) enum Error {
 	#[error("The analyzer '{name}' does not exist")]
 	AzNotFound {
 		name: String,
+	},
+
+	/// The analyzer cannot be removed because it is referenced by an index
+	#[error(
+		"The analyzer '{name}' is in use by index '{index}' on table '{table}' and cannot be removed"
+	)]
+	AzInUse {
+		name: String,
+		table: String,
+		index: String,
 	},
 
 	/// The requested api does not exist

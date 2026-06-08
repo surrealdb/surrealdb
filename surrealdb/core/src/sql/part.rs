@@ -1,3 +1,4 @@
+use surrealdb_strand::Strand;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
@@ -9,12 +10,12 @@ pub(crate) enum Part {
 	Flatten,
 	Last,
 	First,
-	Field(String),
+	Field(Strand),
 	Where(Expr),
-	Graph(Lookup),
+	Graph(Box<Lookup>),
 	Value(Expr),
 	Start(Expr),
-	Method(String, Vec<Expr>),
+	Method(Strand, Vec<Expr>),
 	Destructure(Vec<DestructurePart>),
 	Optional,
 	Recurse(Recurse, Option<Idiom>, Option<RecurseInstruction>),
@@ -31,7 +32,7 @@ impl From<Part> for crate::expr::Part {
 			Part::First => Self::First,
 			Part::Field(ident) => Self::Field(ident),
 			Part::Where(value) => Self::Where(value.into()),
-			Part::Graph(graph) => Self::Lookup(graph.into()),
+			Part::Graph(graph) => Self::Lookup(Box::new((*graph).into())),
 			Part::Value(value) => Self::Value(value.into()),
 			Part::Start(value) => Self::Start(value.into()),
 			Part::Method(method, values) => {
@@ -61,7 +62,7 @@ impl From<crate::expr::Part> for Part {
 			crate::expr::Part::First => Self::First,
 			crate::expr::Part::Field(ident) => Self::Field(ident),
 			crate::expr::Part::Where(value) => Self::Where(value.into()),
-			crate::expr::Part::Lookup(graph) => Self::Graph(graph.into()),
+			crate::expr::Part::Lookup(graph) => Self::Graph(Box::new((*graph).into())),
 			crate::expr::Part::Value(value) => Self::Value(value.into()),
 			crate::expr::Part::Start(value) => Self::Start(value.into()),
 			crate::expr::Part::Method(method, values) => {
@@ -89,7 +90,7 @@ impl ToSql for Part {
 			Part::Last => f.push_str("[$]"),
 			Part::First => f.push_str("[0]"),
 			Part::Start(v) => v.fmt_sql(f, fmt),
-			Part::Field(v) => write_sql!(f, fmt, ".{}", EscapeKwFreeIdent(v)),
+			Part::Field(v) => write_sql!(f, fmt, ".{}", EscapeKwFreeIdent(v.as_str())),
 			Part::Flatten => f.push('…'),
 			Part::Where(v) => write_sql!(f, fmt, "[WHERE {v}]"),
 			Part::Graph(v) => v.fmt_sql(f, fmt),
@@ -99,7 +100,7 @@ impl ToSql for Part {
 					f,
 					fmt,
 					".{}({})",
-					EscapeKwFreeIdent(v),
+					EscapeKwFreeIdent(v.as_str()),
 					Fmt::comma_separated(a.iter().map(CoverStmts))
 				)
 			}
@@ -145,20 +146,28 @@ impl ToSql for Part {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DestructurePart {
-	All(String),
-	Field(String),
-	Aliased(String, Idiom),
-	Destructure(String, Vec<DestructurePart>),
+	All(Strand),
+	Field(Strand),
+	Aliased(Strand, Idiom),
+	Destructure(Strand, Vec<DestructurePart>),
 }
 
 impl ToSql for DestructurePart {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			DestructurePart::All(fd) => write_sql!(f, fmt, "{}.*", EscapeKwFreeIdent(fd)),
-			DestructurePart::Field(fd) => write_sql!(f, fmt, "{}", EscapeKwFreeIdent(fd)),
-			DestructurePart::Aliased(fd, v) => write_sql!(f, fmt, "{}: {v}", EscapeKwFreeIdent(fd)),
+			DestructurePart::All(fd) => write_sql!(f, fmt, "{}.*", EscapeKwFreeIdent(fd.as_str())),
+			DestructurePart::Field(fd) => write_sql!(f, fmt, "{}", EscapeKwFreeIdent(fd.as_str())),
+			DestructurePart::Aliased(fd, v) => {
+				write_sql!(f, fmt, "{}: {v}", EscapeKwFreeIdent(fd.as_str()))
+			}
 			DestructurePart::Destructure(fd, d) => {
-				write_sql!(f, fmt, "{}{}", EscapeKwFreeIdent(fd), Part::Destructure(d.clone()))
+				write_sql!(
+					f,
+					fmt,
+					"{}{}",
+					EscapeKwFreeIdent(fd.as_str()),
+					Part::Destructure(d.clone())
+				)
 			}
 		}
 	}

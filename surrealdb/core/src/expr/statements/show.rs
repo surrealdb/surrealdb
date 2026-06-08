@@ -32,7 +32,7 @@ impl ShowStatement {
 		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::View, ResourceKind::Table, &Base::Db)?;
+		ctx.is_allowed(opt, Action::View, ResourceKind::Table, Base::Db)?;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Process the show query

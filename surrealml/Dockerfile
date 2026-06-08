@@ -1,8 +1,7 @@
 # Use an official Rust image
 FROM rust:1.88-slim@sha256:38bc5a86d998772d4aec2348656ed21438d20fcdce2795b56ca434cf21430d89
 
-# Install necessary tools
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     build-essential \
     libssl-dev \
@@ -12,20 +11,21 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     lsb-release \
     vim \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y python3 python3-pip
+RUN useradd -m -u 1000 appuser \
+    && chown -R appuser:appuser /usr/local/cargo /usr/local/rustup
 
-# Set the working directory
 WORKDIR /app
 
-# Copy the project files into the container
-COPY . .
+COPY --chown=appuser:appuser . .
 
-# Clean and build the Rust project
+USER appuser
+
 RUN cargo clean
 RUN cargo build
 RUN cp ./target/debug/libc_wrapper.so c-wrapper/tests/test_utils/libc_wrapper.so
 
-# Run the tests
 CMD ["cargo", "test"]

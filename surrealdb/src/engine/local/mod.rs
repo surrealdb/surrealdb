@@ -162,7 +162,7 @@ use std::task::{Poll, ready};
 #[cfg(not(target_family = "wasm"))]
 use std::{future::Future, path::PathBuf};
 
-use async_channel::Sender;
+use async_channel::{Receiver, Sender};
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use futures::StreamExt;
 #[cfg(not(target_family = "wasm"))]
@@ -404,7 +404,7 @@ impl Surreal<Db> {
 	/// static client
 	pub fn connect<P>(&self, address: impl IntoEndpoint<P, Client = Db>) -> Connect<Db, ()> {
 		Connect {
-			surreal: self.inner.clone().into(),
+			surreal: Arc::clone(&self.inner).into(),
 			address: address.into_endpoint(),
 			capacity: 0,
 			response_type: PhantomData,
@@ -445,6 +445,42 @@ impl RouterState {
 	/// Handle a session being dropped.
 	fn handle_session_drop(&self, session_id: Uuid) {
 		self.sessions.remove(&session_id);
+	}
+
+	/// Dispatch a session-lifecycle event to the appropriate handler.
+	async fn handle_session(&self, session_id: crate::SessionId) {
+		match session_id {
+			crate::SessionId::Initial(id) => self.handle_session_initial(id),
+			crate::SessionId::Clone {
+				old,
+				new,
+			} => self.handle_session_clone(old, new).await,
+			crate::SessionId::Drop(id) => self.handle_session_drop(id),
+		}
+	}
+
+	/// Resolve the session a route targets, after first applying any
+	/// session-lifecycle events that were enqueued before it.
+	///
+	/// Session lifecycle (`Initial`/`Clone`/`Drop`) travels on a channel that is
+	/// separate from the route channel, so a freshly registered or cloned session
+	/// may not have been applied yet when its first query arrives. Receiving the
+	/// route establishes a happens-before with the sender, so a lifecycle event
+	/// enqueued before the query is now observable and a single non-blocking drain
+	/// pass is sufficient — without it the lookup can spuriously miss and return
+	/// [`SessionError::NotFound`] for a session that is in fact registered.
+	async fn resolve_route_session(
+		&self,
+		session_rx: &Receiver<crate::SessionId>,
+		session_id: Uuid,
+	) -> SessionResult {
+		while let Ok(event) = session_rx.try_recv() {
+			self.handle_session(event).await;
+		}
+		match self.sessions.get(&session_id) {
+			Some(result) => result,
+			None => Err(SessionError::NotFound(session_id)),
+		}
 	}
 }
 
@@ -527,7 +563,7 @@ async fn export_ml(
 		return Err(crate::Error::not_found("Model not found".to_string(), None));
 	};
 	// Export the file data in to the store
-	let mut data = surrealdb_core::obs::stream(model.hash.clone())
+	let mut data = surrealdb_core::obs::stream(model.hash.to_string())
 		.await
 		.map_err(|e| crate::Error::internal(e.to_string()))?;
 	// Process all stream values
@@ -918,7 +954,7 @@ async fn router(
 			let query_result = QueryResultBuilder::started_now();
 			let (tx, rx) = crate::channel::bounded(1);
 
-			let kvs = kvs.clone();
+			let kvs = Arc::clone(kvs);
 			let session = state.session.read().await.clone();
 			tokio::spawn(async move {
 				let export = async {
@@ -947,7 +983,7 @@ async fn router(
 			let query_result = QueryResultBuilder::started_now();
 			let (tx, rx) = crate::channel::bounded(1);
 
-			let kvs = kvs.clone();
+			let kvs = Arc::clone(kvs);
 			let session = state.session.read().await.clone();
 			tokio::spawn(async move {
 				let export = async {
@@ -1170,5 +1206,92 @@ async fn router(
 			let query_result = QueryResultBuilder::started_now();
 			Ok(vec![query_result.finish()])
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	#[cfg(feature = "kv-mem")]
+	use std::sync::Arc;
+
+	#[cfg(feature = "kv-mem")]
+	use surrealdb_core::kvs::Datastore;
+	#[cfg(feature = "kv-mem")]
+	use uuid::Uuid;
+
+	#[cfg(feature = "kv-mem")]
+	use super::RouterState;
+	#[cfg(feature = "kv-mem")]
+	use crate::SessionId;
+	#[cfg(feature = "kv-mem")]
+	use crate::types::HashMap;
+
+	#[cfg(feature = "kv-mem")]
+	async fn new_state() -> RouterState {
+		let kvs = Datastore::new("memory").await.unwrap();
+		RouterState {
+			kvs: Arc::new(kvs),
+			sessions: HashMap::new(),
+		}
+	}
+
+	/// Focused check that the `handle_session` dispatcher maps a `Clone` event to
+	/// a registered session. Does not exercise the router's route arm — see
+	/// `resolve_route_session_drains_pending_events` for that.
+	#[cfg(feature = "kv-mem")]
+	#[test_log::test(tokio::test)]
+	async fn handle_session_clone_registers_new_session() {
+		let state = new_state().await;
+		let old = Uuid::new_v4();
+		let new = Uuid::new_v4();
+
+		state.handle_session(SessionId::Initial(old)).await;
+		state
+			.handle_session(SessionId::Clone {
+				old,
+				new,
+			})
+			.await;
+
+		assert!(
+			matches!(state.sessions.get(&new), Some(Ok(_))),
+			"cloned session should be registered after dispatch"
+		);
+	}
+
+	/// Regression for the cold-start race, driving the *actual* production path:
+	/// `resolve_route_session` is exactly what the router's `route` arm calls.
+	/// Session-lifecycle events sit unprocessed in the session channel while a
+	/// route for the freshly cloned session arrives — the cross-channel ordering
+	/// the real engine hits. This fails (resolves to `NotFound`) if the internal
+	/// drain is removed, i.e. if the fix is reverted in `native.rs`/`wasm.rs`.
+	#[cfg(feature = "kv-mem")]
+	#[test_log::test(tokio::test)]
+	async fn resolve_route_session_drains_pending_events() {
+		let state = new_state().await;
+		let old = Uuid::new_v4();
+		let new = Uuid::new_v4();
+
+		// Queue the lifecycle events without applying them, exactly as when a
+		// clone's registration races its first query across the two channels.
+		let (tx, rx) = async_channel::unbounded::<SessionId>();
+		tx.try_send(SessionId::Initial(old)).unwrap();
+		tx.try_send(SessionId::Clone {
+			old,
+			new,
+		})
+		.unwrap();
+
+		// Sanity: the cloned session is not registered until the events drain.
+		assert!(state.sessions.get(&new).is_none());
+
+		// Drive the real route-resolution path the router uses.
+		let resolved = state.resolve_route_session(&rx, new).await;
+
+		assert!(
+			resolved.is_ok(),
+			"route resolution must drain pending session events and register the \
+			 cloned session before the lookup"
+		);
 	}
 }
