@@ -170,6 +170,18 @@ pub fn new<'a>(
 	Ref::new_impl(ns, db, tb, id, ft, ff, fk)
 }
 
+pub fn dbprefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
+	let mut k = crate::key::database::all::new(ns, db).encode_key()?;
+	k.extend_from_slice(b"*\x00");
+	Ok(k)
+}
+
+pub fn dbsuffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
+	let mut k = crate::key::database::all::new(ns, db).encode_key()?;
+	k.extend_from_slice(b"*\xff");
+	Ok(k)
+}
+
 pub fn prefix(
 	ns: NamespaceId,
 	db: DatabaseId,

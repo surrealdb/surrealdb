@@ -15,6 +15,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
+use crate::expr::statements::DefineFieldStatement;
 use crate::expr::{Base, Expr, Kind, Literal};
 use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::val::{TableName, Value};
@@ -97,6 +98,7 @@ impl AlterFieldStatement {
 				.into());
 			}
 		};
+		let previous = df.clone();
 
 		match self.kind {
 			AlterKind::Set(ref k) => df.field_kind = Some(k.clone()),
@@ -165,6 +167,8 @@ impl AlterFieldStatement {
 		// Recompute auth_limit from the current principal to prevent privilege escalation
 		df.auth_limit = AuthLimit::new_from_auth(opt.auth.as_ref()).into();
 
+		DefineFieldStatement::validate_reference_options(&df)?;
+
 		let key = crate::key::table::fd::new(ns, db, &what, &name);
 		txn.set(&key, &df).await?;
 		// Refresh the table cache
@@ -183,6 +187,12 @@ impl AlterFieldStatement {
 			},
 		)
 		.await?;
+		if matches!(self.reference, AlterKind::Set(_) | AlterKind::Drop)
+			|| matches!(self.kind, AlterKind::Set(_) | AlterKind::Drop)
+		{
+			DefineFieldStatement::reconcile_reference_keys(ctx, ns, db, Some(&previous), &df)
+				.await?;
+		}
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good

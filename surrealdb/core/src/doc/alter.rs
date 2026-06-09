@@ -373,6 +373,10 @@ impl Document {
 			None => Ok(None),
 		}
 	}
+
+	pub(super) fn input_writes_path(&self, path: &[Part]) -> bool {
+		self.input_data.as_ref().is_some_and(|data| data.writes_path(path))
+	}
 }
 
 /// The result of evaluating a statement's data clause once, cached on the
@@ -434,6 +438,22 @@ impl ComputedData {
 		}
 	}
 
+	pub(super) fn writes_path(&self, path: &[Part]) -> bool {
+		// Detect explicit user intent from the data clause instead of comparing final values.
+		// A no-op rewrite should be able to repair missing reference keys, while unrelated
+		// writes must remain diff-only so ON DELETE IGNORE cleanup is not undone.
+		match self {
+			ComputedData::Patch(v) => patch_writes_path(v, path),
+			ComputedData::Merge(v) | ComputedData::Replace(v) | ComputedData::Content(v) => {
+				!v.pick(path).is_none()
+			}
+			ComputedData::Unset(paths) => paths.iter().any(|p| p.0.as_slice().starts_with(path)),
+			ComputedData::Set(assignments) => {
+				assignments.iter().any(|a| a.place.0.as_slice().starts_with(path))
+			}
+		}
+	}
+
 	/// Asynchronously materialize the synthetic input value used by `$input`
 	/// in DEFINE EVENT and DEFINE FIELD VALUE / ASSERT expressions. For SET
 	/// this applies the assignments to an empty object so compound operators
@@ -459,6 +479,59 @@ impl ComputedData {
 			}
 		}
 	}
+}
+
+fn patch_writes_path(value: &Value, path: &[Part]) -> bool {
+	let Some(Part::Field(field)) = path.first() else {
+		return false;
+	};
+	let Value::Array(ops) = value else {
+		return false;
+	};
+	// JSON Patch paths use RFC 6901 pointers rather than SurrealQL idioms. Reference fields are
+	// constrained to root-level fields, so checking the first pointer segment is enough and avoids
+	// duplicating the patch evaluator just to classify user intent.
+	ops.iter().any(|op| {
+		let Value::Object(op) = op else {
+			return false;
+		};
+		let Some(Value::String(pointer)) = op.get("path") else {
+			return false;
+		};
+		json_pointer_touches_field(pointer.as_str(), field.as_str())
+	})
+}
+
+fn json_pointer_touches_field(pointer: &str, field: &str) -> bool {
+	if pointer.is_empty() {
+		return true;
+	}
+	let Some(pointer) = pointer.strip_prefix('/') else {
+		return false;
+	};
+	let first = pointer.split('/').next().unwrap_or_default();
+	json_pointer_unescape(first) == field
+}
+
+fn json_pointer_unescape(segment: &str) -> String {
+	let mut out = String::with_capacity(segment.len());
+	let mut chars = segment.chars();
+	while let Some(ch) = chars.next() {
+		if ch == '~' {
+			match chars.next() {
+				Some('0') => out.push('~'),
+				Some('1') => out.push('/'),
+				Some(next) => {
+					out.push('~');
+					out.push(next);
+				}
+				None => out.push('~'),
+			}
+		} else {
+			out.push(ch);
+		}
+	}
+	out
 }
 
 /// A single pre-evaluated assignment from a `SET …` / `ON DUPLICATE KEY

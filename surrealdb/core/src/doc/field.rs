@@ -399,6 +399,10 @@ impl Document {
 			for (k, val) in self.current.doc.as_ref().walk(&fd.name) {
 				// Get the initial value for diff comparison
 				let old = Arc::new(self.initial.doc.as_ref().pick(&k));
+				// Explicit rewrites are allowed to repair missing durable
+				// reference keys. Unrelated writes stay diff-only so they
+				// don't recreate keys removed by ON DELETE IGNORE.
+				let rewrite = self.is_new() || self.input_writes_path(&k);
 
 				let mut field = FieldEditContext {
 					context: None,
@@ -412,7 +416,7 @@ impl Document {
 					user_input: Value::None.into(),
 				};
 
-				field.process_reference_clause(&val).await?;
+				field.process_reference_clause(&val, rewrite).await?;
 			}
 		}
 
@@ -466,7 +470,7 @@ impl Document {
 				};
 
 				// Pass an empty value to delete all the existing references
-				field.process_reference_clause(&Value::None).await?;
+				field.process_reference_clause(&Value::None, false).await?;
 			}
 		}
 
@@ -780,16 +784,9 @@ impl FieldEditContext<'_> {
 	}
 
 	/// Process any REFERENCE clause for the field definition
-	async fn process_reference_clause(&mut self, val: &Value) -> Result<()> {
+	async fn process_reference_clause(&mut self, val: &Value, rewrite: bool) -> Result<()> {
 		// Is there a `REFERENCE` clause?
 		if self.def.reference.is_some() {
-			// Check if the value has actually changed
-			let old = self.old.as_ref();
-			if old == val {
-				// Nothing changed
-				return Ok(());
-			}
-
 			// Create a vector to store the actions
 			let mut actions = vec![];
 
@@ -806,14 +803,22 @@ impl FieldEditContext<'_> {
 				}
 			}
 
-			let old = collect_rids(old);
+			let old = collect_rids(self.old.as_ref());
 			let new = collect_rids(val);
 
 			for rid in old.difference(&new) {
 				actions.push(RefAction::Delete(rid));
 			}
 
-			for rid in new.difference(&old) {
+			// Explicit rewrites set every current reference so a user can repair missing durable
+			// keys by writing the same value again. For unrelated writes, keep the old diff-only
+			// behavior to avoid recreating keys intentionally removed by ON DELETE IGNORE.
+			let set: Vec<_> = if rewrite {
+				new.iter().collect()
+			} else {
+				new.difference(&old).collect()
+			};
+			for rid in set {
 				actions.push(RefAction::Set(rid));
 			}
 

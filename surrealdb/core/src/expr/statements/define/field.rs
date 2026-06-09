@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
@@ -21,8 +22,9 @@ use crate::expr::{
 	Base, Expr, FlowResultExt, Idiom, Kind, KindLiteral, Literal, Part, RecordIdKeyLit,
 };
 use crate::iam::{Action, AuthLimit, ResourceKind};
-use crate::kvs::Transaction;
-use crate::val::{TableName, Value};
+use crate::idx::planner::ScanDirection;
+use crate::kvs::{KVValue, NORMAL_BATCH_SIZE, ScanLimit, Transaction};
+use crate::val::{RecordId, TableName, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) enum DefineDefault {
@@ -176,7 +178,7 @@ impl DefineFieldStatement {
 		self.validate_computed_cycles(ns, db, ctx.tx(), &definition).await?;
 
 		// Validate reference options
-		self.validate_reference_options(&definition)?;
+		Self::validate_reference_options(&definition)?;
 
 		// Disallow mismatched types
 		self.disallow_mismatched_types(ctx, ns, db, &definition).await?;
@@ -198,7 +200,8 @@ impl DefineFieldStatement {
 		// path silently overwrites the first.
 		let fd = definition.name.to_raw_string();
 		// Check if the definition exists
-		if let Some(fd) = txn.get_tb_field(ns, db, &tb.name, &fd, None).await? {
+		let previous = txn.get_tb_field(ns, db, &tb.name, &fd, None).await?;
+		if let Some(fd) = previous.as_ref() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -282,10 +285,181 @@ impl DefineFieldStatement {
 		// Process possible recursive defitions
 		self.process_recursive_definitions(ns, db, Arc::clone(&txn), &definition).await?;
 
+		// Reconcile durable reference keys with the new schema contract.
+		Self::reconcile_reference_keys(ctx, ns, db, previous.as_deref(), &definition).await?;
+
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
+	}
+
+	pub(crate) async fn backfill_reference_keys(
+		ctx: &FrozenContext,
+		ns: NamespaceId,
+		db: DatabaseId,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		if definition.reference.is_none() {
+			return Ok(());
+		}
+
+		fn collect_rids(value: &Value) -> HashSet<&RecordId> {
+			match value {
+				Value::Array(array) => array.iter().filter_map(Value::as_record).collect(),
+				Value::Set(set) => set.iter().filter_map(Value::as_record).collect(),
+				Value::RecordId(rid) => HashSet::from([rid]),
+				_ => HashSet::new(),
+			}
+		}
+
+		let txn = ctx.tx();
+		let beg = crate::key::record::prefix(ns, db, &definition.table)?;
+		let end = crate::key::record::suffix(ns, db, &definition.table)?;
+		let field = definition.name.to_sql();
+		// Existing schemaless records can contain record IDs outside the newly declared TYPE.
+		// Filter during backfill so the schema change does not create out-of-contract reverse
+		// references that later cleanup cannot reason about from the field definition.
+		let allowed_target_tables = Self::reference_target_tables(definition);
+		let mut next = Some(beg..end);
+
+		while let Some(range) = next {
+			let batch = txn.batch_keys_vals(range, NORMAL_BATCH_SIZE, None).await?;
+			next = batch.next;
+
+			for (key, value) in batch.result {
+				let record_key = crate::key::record::RecordKey::decode_key(&key)?;
+				let origin = RecordId {
+					table: record_key.tb.as_ref().clone(),
+					key: record_key.id.clone(),
+				};
+				let record = catalog::Record::kv_decode_value(&value, origin.clone())?;
+				let value = record.data.pick(&definition.name);
+
+				for target in collect_rids(&value) {
+					if allowed_target_tables
+						.as_ref()
+						.is_some_and(|tables| !tables.contains(&target.table))
+					{
+						continue;
+					}
+					let key = crate::key::r#ref::new(
+						ns,
+						db,
+						&target.table,
+						&target.key,
+						&origin.table,
+						&field,
+						&origin.key,
+					);
+					txn.set(&key, &()).await?;
+				}
+			}
+		}
+
+		Ok(())
+	}
+
+	pub(crate) async fn delete_reference_keys(
+		ctx: &FrozenContext,
+		ns: NamespaceId,
+		db: DatabaseId,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		if definition.reference.is_none() {
+			return Ok(());
+		}
+
+		let txn = ctx.tx();
+		let field = definition.name.to_sql();
+		let range = crate::key::r#ref::dbprefix(ns, db)?..crate::key::r#ref::dbsuffix(ns, db)?;
+		// Reference keys are ordered by target record before origin table and field. When the
+		// schema changes, old durable keys may live under target tables that are no longer allowed
+		// by the new field type, so cleanup must scan the database reference-key range and filter
+		// by the previous origin table/field. Use the same cursor/yield pattern as record delete
+		// reference purging so large schema migrations make progress in bounded batches.
+		let mut cursor = txn.open_keys_cursor(range, ScanDirection::Forward, 0, None).await?;
+
+		loop {
+			let batch = cursor.next_batch(ScanLimit::Count(NORMAL_BATCH_SIZE)).await?;
+			if batch.is_empty() {
+				break;
+			}
+			let keys: Vec<Vec<u8>> = batch.iter().map(|key| key.to_vec()).collect();
+
+			for key in keys {
+				yield_now!();
+				let Ok(reference) = crate::key::r#ref::Ref::decode_key(&key) else {
+					continue;
+				};
+				if reference.ft.as_ref() == definition.table && reference.ff.as_ref() == field {
+					txn.del(&key).await?;
+				}
+			}
+		}
+
+		Ok(())
+	}
+
+	fn reference_target_tables(
+		definition: &catalog::FieldDefinition,
+	) -> Option<HashSet<TableName>> {
+		// None means the declared kind is unconstrained for target table purposes, e.g. `record`.
+		// Some(empty) means the kind contains no valid target tables, which causes backfill to
+		// skip every record ID instead of guessing.
+		fn collect(kind: &Kind, tables: &mut HashSet<TableName>) -> bool {
+			match kind {
+				Kind::None => true,
+				Kind::Record(record_tables) => {
+					if record_tables.is_empty() {
+						return false;
+					}
+					tables.extend(record_tables.iter().cloned());
+					true
+				}
+				Kind::Either(kinds) => kinds.iter().all(|kind| collect(kind, tables)),
+				Kind::Array(kind, _) | Kind::Set(kind, _) => collect(kind, tables),
+				Kind::Literal(KindLiteral::Array(kinds)) => {
+					kinds.iter().all(|kind| collect(kind, tables))
+				}
+				_ => true,
+			}
+		}
+
+		let kind = definition.field_kind.as_ref()?;
+		let mut tables = HashSet::new();
+		collect(kind, &mut tables).then_some(tables)
+	}
+
+	pub(crate) async fn reconcile_reference_keys(
+		ctx: &FrozenContext,
+		ns: NamespaceId,
+		db: DatabaseId,
+		previous: Option<&catalog::FieldDefinition>,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		if let Some(previous) = previous {
+			// Rebuild only when the durable key shape can change. The ON DELETE strategy lives in
+			// the field definition and is consulted when a target record is deleted; it does not
+			// affect reference-key bytes, so rebuilding on strategy-only changes is wasted work.
+			let origin_changed =
+				previous.table != definition.table || previous.name != definition.name;
+			let target_type_changed = previous.field_kind != definition.field_kind;
+			let reference_presence_changed =
+				previous.reference.is_some() != definition.reference.is_some();
+			let key_shape_changed =
+				origin_changed || target_type_changed || reference_presence_changed;
+
+			if previous.reference.is_some()
+				&& (definition.reference.is_none() || origin_changed || target_type_changed)
+			{
+				Self::delete_reference_keys(ctx, ns, db, previous).await?;
+			}
+			if definition.reference.is_some() && !key_shape_changed {
+				return Ok(());
+			}
+		}
+		Self::backfill_reference_keys(ctx, ns, db, definition).await
 	}
 
 	pub(crate) async fn process_recursive_definitions(
@@ -519,12 +693,9 @@ impl DefineFieldStatement {
 		Ok(())
 	}
 
-	pub(crate) fn validate_reference_options(
-		&self,
-		definition: &catalog::FieldDefinition,
-	) -> Result<()> {
+	pub(crate) fn validate_reference_options(definition: &catalog::FieldDefinition) -> Result<()> {
 		// If a reference is defined, the field must be a record
-		if self.reference.is_some() {
+		if definition.reference.is_some() {
 			ensure!(
 				definition.name.len() == 1,
 				Error::ReferenceNestedField(definition.name.to_sql())
@@ -541,7 +712,7 @@ impl DefineFieldStatement {
 				}
 			}
 
-			let is_record_id = match self.field_kind.as_ref() {
+			let is_record_id = match definition.field_kind.as_ref() {
 				Some(Kind::Either(kinds)) => kinds.iter().all(|k| valid(k, true)),
 				Some(Kind::Array(kind, _)) | Some(Kind::Set(kind, _)) => match kind.as_ref() {
 					Kind::Either(kinds) => kinds.iter().all(|k| valid(k, true)),
@@ -558,7 +729,7 @@ impl DefineFieldStatement {
 			ensure!(
 				is_record_id,
 				Error::ReferenceTypeConflict(
-					self.field_kind.as_ref().unwrap_or(&Kind::Any).to_sql()
+					definition.field_kind.as_ref().unwrap_or(&Kind::Any).to_sql()
 				)
 			);
 		}
