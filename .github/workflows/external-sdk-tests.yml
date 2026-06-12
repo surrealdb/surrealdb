@@ -1,7 +1,7 @@
 name: External SDK tests
 
 # Exercise external SDK repos against a freshly built surreal binary.
-# Most jobs use Depot runners; sdk-php uses ubuntu-latest because
+# Compile jobs use larger runners; sdk-php uses ubuntu-latest because
 # shivammathur/setup-php expects a stock GitHub-hosted image. Not in PR required checks.
 
 on:
@@ -25,6 +25,18 @@ defaults:
 permissions:
   contents: read
 
+# sccache → S3 backend (drop-in for the former Depot Cache). See ci.yml for
+# the rationale. Only the `build` job compiles Rust / uses sccache; the env is
+# inert elsewhere. Empty on fork PRs → sccache falls back to a local cache.
+env:
+  SCCACHE_BUCKET: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+  SCCACHE_REGION: us-east-1
+  SCCACHE_S3_KEY_PREFIX: ${{ github.repository }}
+  SCCACHE_IDLE_TIMEOUT: "0"
+  # Dedicated bucket-scoped creds, not the release-publishing AMAZON_* keys.
+  AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
+
 jobs:
   # ----------------------------------------
   # Server build (shared by SDK matrices)
@@ -36,12 +48,13 @@ jobs:
       matrix:
         include:
           - name: amd64
-            runner: depot-ubuntu-24.04-8
             target: x86_64-unknown-linux-gnu
           - name: arm64
-            runner: depot-ubuntu-24.04-arm-8
             target: aarch64-unknown-linux-gnu
-    runs-on: ${{ matrix.runner }}
+    # Compiles PR-authored code. arm64 uses the self-hosted runner only for
+    # trusted contexts; untrusted fork PRs fall back to a GitHub-hosted arm
+    # runner so fork code never runs on self-hosted org infrastructure.
+    runs-on: ${{ (matrix.name == 'amd64' && 'ubuntu-latest-8-cores') || ((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'runner-arm64-2xlarge' || 'ubuntu-24.04-arm') }}
     steps:
 
       - name: Checkout sources
@@ -52,7 +65,6 @@ jobs:
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Build binary
         run: cargo build --target ${{ matrix.target }}
@@ -65,7 +77,7 @@ jobs:
 
   sdk-javascript:
     name: SDK - JavaScript (${{ matrix.version }}, ${{ matrix.protocol }})
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     needs: build
     permissions:
       contents: read
@@ -121,7 +133,7 @@ jobs:
 
   sdk-golang:
     name: SDK - Golang (${{ matrix.version }}, ${{ matrix.protocol }})
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     needs: build
     strategy:
       fail-fast: false
@@ -183,7 +195,7 @@ jobs:
 
   sdk-python:
     name: SDK - Python (${{ matrix.version }}, ${{ matrix.protocol }})
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     needs: build
     strategy:
       fail-fast: false
@@ -316,7 +328,7 @@ jobs:
 
   sdk-dotnet:
     name: SDK - .NET (${{ matrix.version }})
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     needs: build
     strategy:
       fail-fast: false
@@ -398,7 +410,7 @@ jobs:
 
   sdk-output:
     name: SDK test summary
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     if: always()
     needs:
       - sdk-javascript

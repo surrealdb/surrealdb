@@ -6,10 +6,6 @@ inputs:
     description: 'Whether to save the cargo cache'
     required: false
     default: 'false'
-  depot-runner:
-    description: 'Pass through to setup-environment'
-    required: false
-    default: 'false'
 
 runs:
   using: 'composite'
@@ -20,7 +16,6 @@ runs:
         save-cache: ${{ inputs.save-cache }}
         targets: wasm32-wasip2
         free-disk-space: 'false'
-        depot-runner: ${{ inputs.depot-runner }}
 
     - name: Install wasm32-wasip2 target
       shell: bash

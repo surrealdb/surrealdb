@@ -29,6 +29,23 @@ defaults:
 permissions:
   contents: read
 
+# sccache → S3 backend (a drop-in replacement for the former Depot Cache).
+# Set at workflow level so the values are in the environment when the
+# sccache-action daemon starts (it reads its backend config at start time).
+# Fork PRs have no secrets, so SCCACHE_BUCKET is empty there and sccache
+# transparently falls back to a local cache — builds still succeed, just
+# without the shared cache (the same behaviour forks had under Depot).
+env:
+  SCCACHE_BUCKET: ${{ secrets.AWS_S3_SCCACHE_BUCKET_NAME }}
+  SCCACHE_REGION: us-east-1
+  SCCACHE_S3_KEY_PREFIX: ${{ github.repository }} # scope cache to this repo
+  SCCACHE_IDLE_TIMEOUT: "0" # don't let the daemon exit mid-compile
+  # Dedicated, least-privilege creds scoped to ONLY the sccache bucket/prefix —
+  # NOT the AMAZON_* keys that publish releases to download.surrealdb.com, which
+  # must never be exposed to compile/test jobs that run dependency build scripts.
+  AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
+
 jobs:
   # ----------------------------------------
   # Server build
@@ -40,12 +57,15 @@ jobs:
       matrix:
         include:
           - name: amd64
-            runner: depot-ubuntu-24.04-8
             target: x86_64-unknown-linux-gnu
           - name: arm64
-            runner: depot-ubuntu-24.04-arm-8
             target: aarch64-unknown-linux-gnu
-    runs-on: ${{ matrix.runner }}
+    # This job compiles PR-authored code (build.rs, proc-macros). amd64 always
+    # runs on an ephemeral GitHub-hosted runner. arm64 uses the persistent
+    # self-hosted runner ONLY for trusted contexts (push / merge_group / a
+    # same-repo PR); untrusted fork PRs fall back to a GitHub-hosted arm runner,
+    # so fork code never executes on self-hosted org infrastructure.
+    runs-on: ${{ (matrix.name == 'amd64' && 'ubuntu-latest-8-cores') || ((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'runner-arm64-2xlarge' || 'ubuntu-24.04-arm') }}
     steps:
 
       - name: Checkout sources
@@ -56,7 +76,6 @@ jobs:
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Build binary
         run: cargo build --target ${{ matrix.target }}
@@ -73,7 +92,7 @@ jobs:
 
   format:
     name: Check format
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
 
       - name: Checkout sources
@@ -93,7 +112,6 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           enable-sccache: 'false'
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -103,7 +121,7 @@ jobs:
 
   clippy:
     name: Check clippy
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     steps:
 
       - name: Checkout sources
@@ -115,7 +133,6 @@ jobs:
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -126,7 +143,7 @@ jobs:
   clippy-release:
     name: Check clippy (release)
     if: github.ref == 'refs/heads/main'
-    runs-on: depot-ubuntu-24.04-16
+    runs-on: [runner-amd64-2xlarge]
     steps:
 
       - name: Checkout sources
@@ -138,7 +155,6 @@ jobs:
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -149,7 +165,7 @@ jobs:
   check-release:
     name: Check workspace (release)
     if: github.ref == 'refs/heads/main'
-    runs-on: depot-ubuntu-24.04-16
+    runs-on: [runner-amd64-2xlarge]
     steps:
 
       - name: Checkout sources
@@ -160,7 +176,6 @@ jobs:
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -171,7 +186,7 @@ jobs:
   check-msrv:
     name: Check workspace (MSRV)
     if: github.ref == 'refs/heads/main'
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     env:
       msrv: "1.95" # This should be updated if the MSRV is updated.
     steps:
@@ -186,7 +201,6 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           enable-sccache: 'false'
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Install cargo-make
         run: cargo +${{ env.msrv }} install --debug --locked cargo-make
@@ -196,7 +210,7 @@ jobs:
 
   check-wasm:
     name: Check Wasm
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     steps:
 
       - name: Checkout sources
@@ -208,7 +222,6 @@ jobs:
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -218,7 +231,7 @@ jobs:
 
   check-revision:
     name: Check revision
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
 
       - name: Checkout sources
@@ -230,7 +243,6 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           enable-sccache: 'false'
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Install revision-lock
         run: cargo install revision-lock --version 0.2.0 --locked
@@ -240,7 +252,7 @@ jobs:
 
   check-docs:
     name: Check docs
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     steps:
 
       - name: Checkout sources
@@ -251,7 +263,6 @@ jobs:
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -261,7 +272,7 @@ jobs:
 
   feature-check:
     name: Check feature combinations
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     # Only run on main branch to avoid slowing down PR CI
     if: github.ref == 'refs/heads/main'
     steps:
@@ -275,7 +286,6 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           enable-sccache: 'false'
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -288,7 +298,7 @@ jobs:
 
   unused-deps:
     name: Check unused dependencies
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
 
       - name: Checkout sources
@@ -300,7 +310,6 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           enable-sccache: 'false'
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -317,7 +326,11 @@ jobs:
 
   integration-tests:
     name: Integration tests
-    runs-on: depot-ubuntu-24.04-16
+    # GitHub-hosted (not the self-hosted 2xlarge) because this job runs the
+    # `ml_integration` tests, which initialize ONNX Runtime at runtime — that
+    # works on the stock Ubuntu image (as it did on Depot) but fails on the
+    # self-hosted runner ("Failed to initialize ORT API").
+    runs-on: ubuntu-latest-8-cores
     steps:
 
       - name: Checkout sources
@@ -328,7 +341,6 @@ jobs:
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -348,7 +360,11 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: depot-ubuntu-24.04-16
+    # Runs the full workspace test suite — i.e. executes PR-authored test code,
+    # build scripts, and proc-macros. Use the persistent self-hosted runner only
+    # for trusted contexts; untrusted fork PRs fall back to an ephemeral
+    # GitHub-hosted runner so fork code never runs on self-hosted org infra.
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'runner-amd64-2xlarge' || 'ubuntu-latest-8-cores' }}
     steps:
 
       - name: Checkout sources
@@ -358,7 +374,6 @@ jobs:
         uses: ./.github/actions/test-workspace
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          depot-runner: 'true'
 
   # ----------------------------------------
   # Storage engine tests
@@ -366,7 +381,7 @@ jobs:
 
   kvs-engines:
     name: KVS - ${{ matrix.engine }} engine
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     strategy:
       fail-fast: false
       matrix:
@@ -380,9 +395,11 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          cache-key: kvs-${{ matrix.engine }}
+          # With cache-targets:false Swatinem caches only Cargo deps (registry/git),
+          # which are engine-independent — so all engines share one cache key instead
+          # of saving four near-identical caches.
+          cache-key: kvs
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -403,7 +420,7 @@ jobs:
 
   sdk-build:
     name: Test SDK build
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     steps:
 
       - name: Checkout sources
@@ -414,7 +431,6 @@ jobs:
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Build local
         working-directory: tests/sdk/local
@@ -426,7 +442,7 @@ jobs:
 
   sdk-engines:
     name: Rust SDK - ${{ matrix.engine }} engine
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     strategy:
       fail-fast: false
       matrix:
@@ -440,9 +456,9 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          cache-key: sdk-${{ matrix.engine }}
+          # Engine-independent deps (see kvs-engines) — one shared cache key.
+          cache-key: sdk
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -463,7 +479,7 @@ jobs:
 
   lang-tests:
     name: SurrealQL tests - ${{ matrix.engine }}
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     strategy:
       fail-fast: false
       matrix:
@@ -478,9 +494,9 @@ jobs:
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: language-tests
-          cache-key: lang-${{ matrix.engine }}
+          # Engine-independent deps (see kvs-engines) — one shared cache key.
+          cache-key: lang
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -518,7 +534,7 @@ jobs:
 
   lang-upgrade-tests:
     name: SurrealQL upgrade tests - ${{ matrix.engine }}
-    runs-on: depot-ubuntu-24.04-8
+    runs-on: ubuntu-latest-8-cores
     strategy:
       fail-fast: false
       matrix:
@@ -538,9 +554,9 @@ jobs:
           workspaces: |
             language-tests
             .
-          cache-key: lang-upgrade-${{ matrix.engine }}
+          # Engine-independent deps (see kvs-engines) — one shared cache key.
+          cache-key: lang-upgrade
           free-disk-space: 'false'
-          depot-runner: 'true'
 
       - name: Resolve upgrade version chain
         id: vers
@@ -577,7 +593,7 @@ jobs:
 
   required-checks:
     name: Required checks
-    runs-on: depot-ubuntu-24.04
+    runs-on: ubuntu-latest
     if: success() || failure()
     needs:
       # Server build

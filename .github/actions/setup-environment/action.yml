@@ -38,10 +38,6 @@ inputs:
     description: 'Whether to compile via sccache (RUSTC_WRAPPER)'
     required: false
     default: 'true'
-  depot-runner:
-    description: 'If true, do not enable SCCACHE_GHA_ENABLED (Depot runners use Depot Cache for sccache)'
-    required: false
-    default: 'false'
 
 runs:
   using: 'composite'
@@ -100,6 +96,25 @@ runs:
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
 
+    - name: Configure AWS creds for sccache
+      if: inputs.enable-sccache == 'true'
+      shell: bash
+      run: |
+        # Materialize the AWS credentials the CLI resolves (static env keys, a
+        # profile, or an instance role's STS session token) into env vars that
+        # the sccache S3 backend can read. Must run before sccache-action starts
+        # the daemon below, since the daemon reads its creds at start time.
+        # env-no-export emits bare NAME=VALUE lines (the plain `env` format emits
+        # `export NAME=VALUE`, which $GITHUB_ENV cannot parse).
+        # Skipped on fork PRs (no SCCACHE_BUCKET) → sccache falls back to local.
+        # Non-fatal: if no creds resolve (e.g. the dedicated SCCACHE_AWS_* secrets
+        # aren't set yet), don't fail the job — the sccache probe below then finds
+        # the backend unreachable and compiles uncached.
+        if [[ -n "$SCCACHE_BUCKET" ]]; then
+          aws configure export-credentials --format env-no-export >> "$GITHUB_ENV" \
+            || echo "::warning title=sccache::no AWS credentials resolved; compiling without the cache"
+        fi
+
     - name: Setup sccache
       if: inputs.enable-sccache == 'true'
       uses: mozilla-actions/sccache-action@1583d6b38d7be47f593cb472781bbb21cab4321e # v0.0.10
@@ -108,10 +123,19 @@ runs:
       if: inputs.enable-sccache == 'true'
       shell: bash
       run: |
-        echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+        # The sccache S3 backend (SCCACHE_BUCKET + AWS_* creds) is configured at
+        # the workflow level and read when the server starts. Probe it by starting
+        # the server explicitly: only enable RUSTC_WRAPPER if the backend is
+        # actually reachable. If it isn't — missing S3 perms, a bucket outage, or
+        # a fork PR with no creds — compile *uncached* rather than failing every
+        # rustc invocation (sccache treats a backend it can't read as fatal).
         echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
-        if [[ '${{ inputs.depot-runner }}' != 'true' ]]; then
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+        sccache --stop-server >/dev/null 2>&1 || true
+        if sccache --start-server; then
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "sccache backend reachable — compiler cache enabled"
+        else
+          echo "::warning title=sccache disabled::sccache server failed to start (cache backend unreachable); compiling without the cache"
         fi
 
     - name: Setup cache
