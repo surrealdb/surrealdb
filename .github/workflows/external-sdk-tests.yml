@@ -1,8 +1,8 @@
 name: External SDK tests
 
 # Exercise external SDK repos against a freshly built surreal binary.
-# Compile jobs use larger runners; sdk-php uses ubuntu-latest because
-# shivammathur/setup-php expects a stock GitHub-hosted image. Not in PR required checks.
+# All jobs run on the stock GitHub-hosted ubuntu-24.04 image (arm64 build steps
+# use the native ubuntu-24.04-arm-4-cores). Not in PR required checks.
 
 on:
   workflow_dispatch:
@@ -49,12 +49,14 @@ jobs:
         include:
           - name: amd64
             target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04-4-cores
           - name: arm64
             target: aarch64-unknown-linux-gnu
-    # Compiles PR-authored code. arm64 uses the self-hosted runner only for
-    # trusted contexts; untrusted fork PRs fall back to a GitHub-hosted arm
-    # runner so fork code never runs on self-hosted org infrastructure.
-    runs-on: ${{ (matrix.name == 'amd64' && 'ubuntu-latest-8-cores') || ((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'runner-arm64-2xlarge' || 'ubuntu-24.04-arm') }}
+            runner: ubuntu-24.04-arm-4-cores
+    # Compiles PR-authored code. Both arches run on ephemeral GitHub-hosted
+    # runners (amd64 on ubuntu-24.04, arm64 on the native ubuntu-24.04-arm-4-cores), so
+    # PR code never runs on self-hosted org infrastructure.
+    runs-on: ${{ matrix.runner }}
     steps:
 
       - name: Checkout sources
@@ -64,7 +66,7 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          free-disk-space: 'false'
+          free-disk-space: 'true'
 
       - name: Build binary
         run: cargo build --target ${{ matrix.target }}
@@ -77,7 +79,7 @@ jobs:
 
   sdk-javascript:
     name: SDK - JavaScript (${{ matrix.version }}, ${{ matrix.protocol }})
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-24.04-4-cores
     needs: build
     permissions:
       contents: read
@@ -133,7 +135,7 @@ jobs:
 
   sdk-golang:
     name: SDK - Golang (${{ matrix.version }}, ${{ matrix.protocol }})
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-24.04-4-cores
     needs: build
     strategy:
       fail-fast: false
@@ -195,7 +197,7 @@ jobs:
 
   sdk-python:
     name: SDK - Python (${{ matrix.version }}, ${{ matrix.protocol }})
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-24.04-4-cores
     needs: build
     strategy:
       fail-fast: false
@@ -267,7 +269,7 @@ jobs:
 
   sdk-php:
     name: SDK - PHP (${{ matrix.version }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-4-cores
     needs: build
     strategy:
       fail-fast: false
@@ -328,7 +330,7 @@ jobs:
 
   sdk-dotnet:
     name: SDK - .NET (${{ matrix.version }})
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-24.04-4-cores
     needs: build
     strategy:
       fail-fast: false
@@ -410,7 +412,7 @@ jobs:
 
   sdk-output:
     name: SDK test summary
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-24.04-4-cores
     if: always()
     needs:
       - sdk-javascript

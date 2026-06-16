@@ -686,7 +686,6 @@ dependencies = [
 category = "CI - WORKSPACE TESTS"
 description = "Run workspace library tests"
 command = "cargo"
-env = { CARGO_BUILD_JOBS = "8" }
 args = [
     "nextest",
     "run",

@@ -6,6 +6,10 @@ inputs:
     description: 'Whether to save the cargo cache'
     required: false
     default: 'false'
+  free-disk-space:
+    description: 'Whether to free disk space before building (needed on standard GitHub-hosted runners)'
+    required: false
+    default: 'false'
 
 runs:
   using: 'composite'
@@ -15,7 +19,7 @@ runs:
       with:
         save-cache: ${{ inputs.save-cache }}
         targets: wasm32-wasip2
-        free-disk-space: 'false'
+        free-disk-space: ${{ inputs.free-disk-space }}
 
     - name: Install wasm32-wasip2 target
       shell: bash

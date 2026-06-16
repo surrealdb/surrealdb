@@ -7,7 +7,7 @@ on:
   push:
     branches:
       - main
-      - 'releases/*'
+      - "releases/*"
   pull_request:
     types:
       - opened
@@ -40,9 +40,6 @@ env:
   SCCACHE_REGION: us-east-1
   SCCACHE_S3_KEY_PREFIX: ${{ github.repository }} # scope cache to this repo
   SCCACHE_IDLE_TIMEOUT: "0" # don't let the daemon exit mid-compile
-  # Dedicated, least-privilege creds scoped to ONLY the sccache bucket/prefix —
-  # NOT the AMAZON_* keys that publish releases to download.surrealdb.com, which
-  # must never be exposed to compile/test jobs that run dependency build scripts.
   AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
 
@@ -53,21 +50,17 @@ jobs:
 
   build:
     name: Build binary (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
         include:
           - name: amd64
             target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest-4-cores
           - name: arm64
             target: aarch64-unknown-linux-gnu
-    # This job compiles PR-authored code (build.rs, proc-macros). amd64 always
-    # runs on an ephemeral GitHub-hosted runner. arm64 uses the persistent
-    # self-hosted runner ONLY for trusted contexts (push / merge_group / a
-    # same-repo PR); untrusted fork PRs fall back to a GitHub-hosted arm runner,
-    # so fork code never executes on self-hosted org infrastructure.
-    runs-on: ${{ (matrix.name == 'amd64' && 'ubuntu-latest-8-cores') || ((github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'runner-arm64-2xlarge' || 'ubuntu-24.04-arm') }}
+            runner: ubuntu-latest-arm-4-cores
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -75,7 +68,7 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          free-disk-space: 'false'
+          free-disk-space: "true"
 
       - name: Build binary
         run: cargo build --target ${{ matrix.target }}
@@ -92,9 +85,8 @@ jobs:
 
   format:
     name: Check format
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-4-cores
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -110,8 +102,8 @@ jobs:
           toolchain: ${{ steps.info.outputs.toolchain }}
           components: rustfmt
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          enable-sccache: 'false'
-          free-disk-space: 'false'
+          enable-sccache: "false"
+          free-disk-space: "true"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -121,9 +113,8 @@ jobs:
 
   clippy:
     name: Check clippy
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-latest-4-cores
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -132,7 +123,7 @@ jobs:
         with:
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          free-disk-space: 'false'
+          free-disk-space: "true"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -143,9 +134,8 @@ jobs:
   clippy-release:
     name: Check clippy (release)
     if: github.ref == 'refs/heads/main'
-    runs-on: [runner-amd64-2xlarge]
+    runs-on: ubuntu-latest-4-cores
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -154,7 +144,7 @@ jobs:
         with:
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          free-disk-space: 'false'
+          free-disk-space: "true"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -165,9 +155,8 @@ jobs:
   check-release:
     name: Check workspace (release)
     if: github.ref == 'refs/heads/main'
-    runs-on: [runner-amd64-2xlarge]
+    runs-on: ubuntu-latest-4-cores
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -175,7 +164,7 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          free-disk-space: 'false'
+          free-disk-space: "true"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -186,11 +175,10 @@ jobs:
   check-msrv:
     name: Check workspace (MSRV)
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-latest-4-cores
     env:
       msrv: "1.95" # This should be updated if the MSRV is updated.
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -199,8 +187,8 @@ jobs:
         with:
           toolchain: ${{ env.msrv }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          enable-sccache: 'false'
-          free-disk-space: 'false'
+          enable-sccache: "false"
+          free-disk-space: "true"
 
       - name: Install cargo-make
         run: cargo +${{ env.msrv }} install --debug --locked cargo-make
@@ -210,9 +198,8 @@ jobs:
 
   check-wasm:
     name: Check Wasm
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-latest-4-cores
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -221,7 +208,7 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          free-disk-space: 'false'
+          free-disk-space: "true"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -231,9 +218,8 @@ jobs:
 
   check-revision:
     name: Check revision
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-4-cores
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -241,8 +227,8 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          enable-sccache: 'false'
-          free-disk-space: 'false'
+          enable-sccache: "false"
+          free-disk-space: "true"
 
       - name: Install revision-lock
         run: cargo install revision-lock --version 0.2.0 --locked
@@ -252,9 +238,8 @@ jobs:
 
   check-docs:
     name: Check docs
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-latest-4-cores
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -262,7 +247,7 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          free-disk-space: 'false'
+          free-disk-space: "true"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -272,11 +257,9 @@ jobs:
 
   feature-check:
     name: Check feature combinations
-    runs-on: ubuntu-latest-8-cores
-    # Only run on main branch to avoid slowing down PR CI
+    runs-on: ubuntu-latest-4-cores
     if: github.ref == 'refs/heads/main'
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -284,8 +267,8 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          enable-sccache: 'false'
-          free-disk-space: 'false'
+          enable-sccache: "false"
+          free-disk-space: "true"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -298,9 +281,8 @@ jobs:
 
   unused-deps:
     name: Check unused dependencies
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-4-cores
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -308,8 +290,8 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          enable-sccache: 'false'
-          free-disk-space: 'false'
+          enable-sccache: "false"
+          free-disk-space: "true"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -326,13 +308,10 @@ jobs:
 
   integration-tests:
     name: Integration tests
-    # GitHub-hosted (not the self-hosted 2xlarge) because this job runs the
-    # `ml_integration` tests, which initialize ONNX Runtime at runtime — that
-    # works on the stock Ubuntu image (as it did on Depot) but fails on the
-    # self-hosted runner ("Failed to initialize ORT API").
-    runs-on: ubuntu-latest-8-cores
+    # Runs the `ml_integration` tests, which initialize ONNX Runtime at runtime;
+    # that works on the stock GitHub-hosted Ubuntu image.
+    runs-on: ubuntu-latest-4-cores
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -340,7 +319,7 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          free-disk-space: 'false'
+          free-disk-space: "true"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -360,13 +339,10 @@ jobs:
 
   test:
     name: Test workspace
-    # Runs the full workspace test suite — i.e. executes PR-authored test code,
-    # build scripts, and proc-macros. Use the persistent self-hosted runner only
-    # for trusted contexts; untrusted fork PRs fall back to an ephemeral
-    # GitHub-hosted runner so fork code never runs on self-hosted org infra.
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'runner-amd64-2xlarge' || 'ubuntu-latest-8-cores' }}
+    # Runs on an ephemeral GitHub-hosted runner so PR code never runs on
+    # self-hosted org infra.
+    runs-on: ubuntu-latest-4-cores
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -374,6 +350,7 @@ jobs:
         uses: ./.github/actions/test-workspace
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
+          free-disk-space: "true"
 
   # ----------------------------------------
   # Storage engine tests
@@ -381,13 +358,12 @@ jobs:
 
   kvs-engines:
     name: KVS - ${{ matrix.engine }} engine
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-latest-4-cores
     strategy:
       fail-fast: false
       matrix:
         engine: [mem, rocksdb, surrealkv, tikv]
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -395,11 +371,8 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          # With cache-targets:false Swatinem caches only Cargo deps (registry/git),
-          # which are engine-independent — so all engines share one cache key instead
-          # of saving four near-identical caches.
           cache-key: kvs
-          free-disk-space: 'false'
+          free-disk-space: "true"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -420,9 +393,8 @@ jobs:
 
   sdk-build:
     name: Test SDK build
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-latest-4-cores
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -430,7 +402,7 @@ jobs:
         uses: ./.github/actions/setup-environment
         with:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
-          free-disk-space: 'false'
+          free-disk-space: "true"
 
       - name: Build local
         working-directory: tests/sdk/local
@@ -442,13 +414,12 @@ jobs:
 
   sdk-engines:
     name: Rust SDK - ${{ matrix.engine }} engine
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-latest-4-cores
     strategy:
       fail-fast: false
       matrix:
         engine: [any, ws, http, mem, rocksdb, surrealkv, tikv]
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -458,7 +429,7 @@ jobs:
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           # Engine-independent deps (see kvs-engines) — one shared cache key.
           cache-key: sdk
-          free-disk-space: 'false'
+          free-disk-space: "true"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -479,13 +450,12 @@ jobs:
 
   lang-tests:
     name: SurrealQL tests - ${{ matrix.engine }}
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-latest-4-cores
     strategy:
       fail-fast: false
       matrix:
         engine: [mem, surrealkv, rocksdb, tikv]
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -496,7 +466,7 @@ jobs:
           workspaces: language-tests
           # Engine-independent deps (see kvs-engines) — one shared cache key.
           cache-key: lang
-          free-disk-space: 'false'
+          free-disk-space: "true"
 
       - name: Install tools
         uses: ./.github/actions/install-tools
@@ -534,13 +504,12 @@ jobs:
 
   lang-upgrade-tests:
     name: SurrealQL upgrade tests - ${{ matrix.engine }}
-    runs-on: ubuntu-latest-8-cores
+    runs-on: ubuntu-latest-4-cores
     strategy:
       fail-fast: false
       matrix:
         engine: [surrealkv, rocksdb]
     steps:
-
       - name: Checkout sources
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -556,7 +525,7 @@ jobs:
             .
           # Engine-independent deps (see kvs-engines) — one shared cache key.
           cache-key: lang-upgrade
-          free-disk-space: 'false'
+          free-disk-space: "true"
 
       - name: Resolve upgrade version chain
         id: vers
@@ -593,7 +562,7 @@ jobs:
 
   required-checks:
     name: Required checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-4-cores
     if: success() || failure()
     needs:
       # Server build
@@ -622,7 +591,6 @@ jobs:
       - lang-tests
       - lang-upgrade-tests
     steps:
-
       - name: Check for failures
         run: |
           echo "Checking results of all required jobs..."
