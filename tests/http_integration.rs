@@ -1481,6 +1481,45 @@ mod http_integration {
 	}
 
 	#[test(tokio::test)]
+	async fn parse_json_params_type_endpoint_sql() -> Result<(), Box<dyn std::error::Error>> {
+		let (addr, _server) = common::start_server_with_guests().await.unwrap();
+		let params = "Data=%7B%22Settings%22%3A%7B%22testing%22%3A%22hello%22%7D%7D";
+		let url = &format!("http://{addr}/sql?{params}");
+
+		// Prepare HTTP client
+		let mut headers = reqwest::header::HeaderMap::new();
+		let ns = Ulid::new().to_string();
+		let db = Ulid::new().to_string();
+		headers.insert("surreal-ns", ns.parse()?);
+		headers.insert("surreal-db", db.parse()?);
+		headers.insert(header::ACCEPT, "application/json".parse()?);
+		let client = reqwest::Client::builder()
+			.connect_timeout(Duration::from_millis(10))
+			.default_headers(headers)
+			.build()?;
+
+		// Create namespace and database
+		ensure_namespace_and_database(&client, &addr, &ns, &db).await?;
+
+		{
+			// Passing the Params
+			let res = client
+				.post(url)
+				.basic_auth(USER, Some(PASS))
+				.body("RETURN type::of($Data)")
+				.send()
+				.await?;
+
+			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
+
+			// Verifying the Params type
+			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
+			assert_eq!(body[0]["result"].as_str().unwrap(), "object");
+		}
+		Ok(())
+	}
+
+	#[test(tokio::test)]
 	async fn key_endpoint_select_all() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_guests().await.unwrap();
 		let table_name = "table";
