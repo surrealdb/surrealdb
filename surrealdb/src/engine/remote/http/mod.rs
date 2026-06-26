@@ -252,12 +252,19 @@ impl RouterState {
 
 	/// Handle a session being dropped.
 	async fn handle_session_drop(&self, session_id: Uuid) {
-		if self.sessions.get(&session_id).is_some() {
-			let session_state = SessionState::default();
-			session_state.replay.push(Command::Detach {
+		// Reuse the session's stored auth/headers so the teardown `Detach` is
+		// authenticated. The server gates `Detach` and silently ignores an
+		// anonymous one, leaking the attached session (issue #7384).
+		if let Some(Ok(existing)) = self.sessions.get(&session_id) {
+			let detach_state = SessionState {
+				headers: RwLock::new(existing.headers.read().await.clone()),
+				auth: RwLock::new(existing.auth.read().await.clone()),
+				replay: boxcar::Vec::new(),
+			};
+			detach_state.replay.push(Command::Detach {
 				session_id,
 			});
-			self.replay_session(session_id, &session_state).await.ok();
+			self.replay_session(session_id, &detach_state).await.ok();
 		}
 		self.sessions.remove(&session_id);
 	}
