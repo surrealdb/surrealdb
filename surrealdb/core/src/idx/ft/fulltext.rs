@@ -40,6 +40,16 @@ use crate::idx::{IndexKeyBase, bump_compaction_generation, read_compaction_gener
 use crate::key::index::tt::Tt;
 use crate::kvs::{COUNT_BATCH_SIZE, Key, Transaction, impl_kv_value_revisioned};
 use crate::val::{RecordId, Value};
+
+/// Upper bound on the number of uncompacted `!tt` delta keys scanned per query term in
+/// [`FullTextIndex::extract_querying_terms`]. Normal operation keeps the per-term delta range
+/// tiny (postings live in the compacted bitmap), so this cap is never reached. It is a guard
+/// against a pathological, uncompacted backlog — sustained concurrent writes outpacing the
+/// single index compactor — where an unbounded scan would clone the whole delta keyspace into
+/// a transient map on every query and OOM the engine. Residual deltas beyond the cap are folded
+/// in by the next compaction pass.
+const MAX_TERM_DELTA_SCAN: u32 = 1_000_000;
+
 #[revisioned(revision = 1)]
 #[derive(Debug, Default, PartialEq)]
 /// Represents a term occurrence within a document
@@ -466,7 +476,15 @@ impl FullTextIndex {
 		for term in &unique_terms {
 			let (beg, end) = self.ikb.new_tt_term_range(term)?;
 			let mut deltas: HashMap<DocId, i64> = HashMap::new();
-			for k in tx.keys(beg..end, u32::MAX, 0, None).await? {
+			// Cap the per-term delta scan. Under normal operation the compacted bitmap
+			// (phase 2 below) holds the bulk of postings and the uncompacted `!tt` delta
+			// range per term is tiny, so this bound is never reached. It only engages when
+			// a pathological backlog builds up — e.g. sustained concurrent writes outpacing
+			// the single index compactor — where an unbounded `u32::MAX` scan would clone
+			// the entire delta keyspace into a transient map on every query term and drive
+			// the engine into an OOM. Bounding it keeps query memory flat; the residual
+			// deltas are folded in by the next compaction pass.
+			for k in tx.keys(beg..end, MAX_TERM_DELTA_SCAN, 0, None).await? {
 				let tt = Tt::decode_key(&k)?;
 				let entry = deltas.entry(tt.doc_id).or_default();
 				if tt.add {

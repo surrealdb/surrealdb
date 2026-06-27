@@ -62,7 +62,12 @@ impl Default for EngineOptions {
 			node_membership_check_interval: Duration::from_secs(15),
 			node_membership_cleanup_interval: Duration::from_secs(300),
 			changefeed_gc_interval: Duration::from_secs(30),
-			index_compaction_interval: Duration::from_secs(5),
+			// Drain the index-delta backlog more aggressively. The previous 5s default lets
+			// deltas accumulate between passes under write-heavy workloads (each indexed write
+			// appends `!tt`/`!dc`/pending entries that the single compactor folds in); a tighter
+			// interval keeps the uncompacted keyspace — and the per-query delta scans over it —
+			// small. Overridable via SURREAL_INDEX_COMPACTION_INTERVAL.
+			index_compaction_interval: Duration::from_secs(1),
 			event_processing_interval: Duration::from_secs(5),
 			tikv_gc_interval: Duration::from_secs(600),
 			tikv_gc_lifetime: Duration::from_secs(600),
