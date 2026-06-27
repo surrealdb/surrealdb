@@ -50,6 +50,10 @@ impl Document {
 		}
 		// Get the record id
 		let rid = self.id()?;
+		// Pace this record's indexed writes when resident memory is over the backpressure ceiling,
+		// giving the index compactor time to drain the pending-delta backlog instead of letting RSS
+		// climb to OOM under a sustained write burst. No-op unless SURREAL_RSS_BACKPRESSURE_BYTES is set.
+		crate::mem::pressure::pace_indexed_write().await;
 		// Loop through all index statements
 		for ix in ixs.iter() {
 			// Decommissioned indexes are ignored
