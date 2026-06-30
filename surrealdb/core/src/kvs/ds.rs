@@ -10,6 +10,10 @@ use std::fmt::{self, Display};
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(test)]
+use std::sync::{LazyLock, Mutex};
 use std::task::{Poll, ready};
 use std::time::Duration;
 
@@ -100,6 +104,21 @@ pub use builder::Builder;
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
 const NODE_DELETE_TIMEOUT: Duration = Duration::from_secs(60);
+
+#[cfg(test)]
+static ML_IMPORT_AFTER_OBJECT_PUT_PATH: LazyLock<Mutex<Option<String>>> =
+	LazyLock::new(|| Mutex::new(None));
+#[cfg(test)]
+static ML_IMPORT_AFTER_OBJECT_PUT_REACHED: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static ML_IMPORT_AFTER_OBJECT_PUT_NOTIFY: LazyLock<Notify> = LazyLock::new(Notify::new);
+#[cfg(test)]
+static ML_IMPORT_ARTIFACT_CLEANUP_PATH: LazyLock<Mutex<Option<String>>> =
+	LazyLock::new(|| Mutex::new(None));
+#[cfg(test)]
+static ML_IMPORT_ARTIFACT_CLEANUP_COMPLETED: AtomicBool = AtomicBool::new(false);
+#[cfg(test)]
+static ML_IMPORT_ARTIFACT_CLEANUP_NOTIFY: LazyLock<Notify> = LazyLock::new(Notify::new);
 
 /// The role assigned to the initial user created when starting the server with
 /// credentials for the first time
@@ -198,6 +217,169 @@ fn archive_node_for_shutdown(
 			ShutdownNodeDeleteOutcome::Failed
 		}
 	}
+}
+
+#[cfg(test)]
+async fn maybe_pause_ml_import_after_object_put(path: &str) {
+	let should_pause = {
+		let path_guard = ML_IMPORT_AFTER_OBJECT_PUT_PATH
+			.lock()
+			.expect("ml import object-put pause path lock should not be poisoned");
+		path_guard.as_deref() == Some(path)
+	};
+	if !should_pause {
+		return;
+	}
+
+	ML_IMPORT_AFTER_OBJECT_PUT_REACHED.store(true, Ordering::SeqCst);
+	ML_IMPORT_AFTER_OBJECT_PUT_NOTIFY.notify_waiters();
+
+	loop {
+		let should_continue = {
+			let path_guard = ML_IMPORT_AFTER_OBJECT_PUT_PATH
+				.lock()
+				.expect("ml import object-put pause path lock should not be poisoned");
+			path_guard.as_deref() == Some(path)
+		};
+		if !should_continue {
+			return;
+		}
+		ML_IMPORT_AFTER_OBJECT_PUT_NOTIFY.notified().await;
+	}
+}
+
+#[cfg(test)]
+fn maybe_notify_ml_import_artifact_cleanup(path: &str) {
+	let should_notify = {
+		let path_guard = ML_IMPORT_ARTIFACT_CLEANUP_PATH
+			.lock()
+			.expect("ml import artifact cleanup path lock should not be poisoned");
+		path_guard.as_deref() == Some(path)
+	};
+	if should_notify {
+		ML_IMPORT_ARTIFACT_CLEANUP_COMPLETED.store(true, Ordering::SeqCst);
+		ML_IMPORT_ARTIFACT_CLEANUP_NOTIFY.notify_waiters();
+	}
+}
+
+#[derive(Clone)]
+struct MlModelArtifactCleanupInfo {
+	transaction_factory: TransactionFactory,
+	sequences: Sequences,
+	ns: String,
+	db: String,
+	name: String,
+	version: String,
+	hash: String,
+	path: String,
+}
+
+struct MlModelArtifactCleanup {
+	info: Option<MlModelArtifactCleanupInfo>,
+}
+
+impl MlModelArtifactCleanup {
+	fn new(info: MlModelArtifactCleanupInfo) -> Self {
+		Self {
+			info: Some(info),
+		}
+	}
+
+	fn disarm(&mut self) {
+		self.info = None;
+	}
+
+	async fn cleanup_now(&mut self) -> Result<()> {
+		let Some(info) = self.info.clone() else {
+			return Ok(());
+		};
+		self.disarm();
+		cleanup_ml_model_artifact_if_unreferenced(info).await
+	}
+}
+
+impl Drop for MlModelArtifactCleanup {
+	fn drop(&mut self) {
+		let Some(info) = self.info.take() else {
+			return;
+		};
+		let path = info.path.clone();
+		let Ok(handle) = tokio::runtime::Handle::try_current() else {
+			trace!(
+				target: TARGET,
+				path,
+				"Cannot schedule ML model artifact cleanup because no Tokio runtime is available"
+			);
+			return;
+		};
+		handle.spawn(async move {
+			if let Err(err) = cleanup_ml_model_artifact_if_unreferenced(info).await {
+				warn!(
+					target: TARGET,
+					error = %err,
+					path,
+					"Failed to cleanup ML model artifact after cancelled import"
+				);
+			}
+		});
+	}
+}
+
+async fn cleanup_ml_model_artifact_if_unreferenced(info: MlModelArtifactCleanupInfo) -> Result<()> {
+	#[cfg(test)]
+	let path = info.path.clone();
+	let result = cleanup_ml_model_artifact_if_unreferenced_inner(info).await;
+	#[cfg(test)]
+	maybe_notify_ml_import_artifact_cleanup(&path);
+	result
+}
+
+async fn cleanup_ml_model_artifact_if_unreferenced_inner(
+	info: MlModelArtifactCleanupInfo,
+) -> Result<()> {
+	if !ml_model_artifact_has_catalog_reference(&info).await? {
+		crate::obs::del(&info.path).await?;
+	}
+	Ok(())
+}
+
+async fn ml_model_artifact_has_catalog_reference(
+	info: &MlModelArtifactCleanupInfo,
+) -> Result<bool> {
+	let tx = info.transaction_factory.transaction(Read, Optimistic, info.sequences.clone()).await?;
+	let lookup = async {
+		let db = tx.expect_db_by_name(&info.ns, &info.db).await?;
+		tx.get_db_model(db.namespace_id, db.database_id, &info.name, &info.version, None).await
+	}
+	.await;
+	let cancel = tx.cancel().await;
+
+	let model = match lookup {
+		Ok(model) => model,
+		Err(e)
+			if matches!(
+				e.downcast_ref::<Error>(),
+				Some(Error::NsNotFound { .. }) | Some(Error::DbNotFound { .. })
+			) =>
+		{
+			cancel?;
+			return Ok(false);
+		}
+		Err(e) => {
+			if let Err(cancel_err) = cancel {
+				warn!(
+					target: TARGET,
+					error = %cancel_err,
+					path = %info.path.as_str(),
+					"Failed to cancel ML model artifact reference lookup transaction"
+				);
+			}
+			return Err(e);
+		}
+	};
+
+	cancel?;
+	Ok(model.is_some_and(|model| model.hash.as_str() == info.hash))
 }
 
 /// The underlying datastore instance which stores the dataset.
@@ -3828,6 +4010,18 @@ impl Datastore {
 		let path = get_model_path(ns, db, name, version, &hash);
 		// Insert the file data in to the store
 		crate::obs::put(&path, data).await?;
+		let mut cleanup = MlModelArtifactCleanup::new(MlModelArtifactCleanupInfo {
+			transaction_factory: self.transaction_factory.clone(),
+			sequences: self.sequences.clone(),
+			ns: ns.clone(),
+			db: db.clone(),
+			name: name.to_string(),
+			version: version.to_string(),
+			hash: hash.clone(),
+			path: path.clone(),
+		});
+		#[cfg(test)]
+		maybe_pause_ml_import_after_object_put(&path).await;
 		// Insert the model in to the database
 		let model = DefineModelStatement {
 			name: name.to_string().into(),
@@ -3844,7 +4038,19 @@ impl Datastore {
 			))))],
 		};
 
-		self.process_plan(q, session, None).await.map_err(|e| anyhow::anyhow!(e))?;
+		let result = self.process_plan(q, session, None).await.map_err(|e| anyhow::anyhow!(e));
+		if let Err(err) = result {
+			if let Err(cleanup_err) = cleanup.cleanup_now().await {
+				warn!(
+					target: TARGET,
+					error = %cleanup_err,
+					path,
+					"Failed to cleanup ML model artifact after failed import"
+				);
+			}
+			return Err(err);
+		}
+		cleanup.disarm();
 
 		Ok(())
 	}
@@ -3957,6 +4163,65 @@ mod test {
 		Ok(IndexKeyBase::new(ns.namespace_id, db.database_id, table, ix.index_id))
 	}
 
+	struct MlImportAfterObjectPutPauseGuard;
+
+	impl MlImportAfterObjectPutPauseGuard {
+		fn new(path: String) -> Self {
+			ML_IMPORT_AFTER_OBJECT_PUT_REACHED.store(false, Ordering::SeqCst);
+			*ML_IMPORT_AFTER_OBJECT_PUT_PATH
+				.lock()
+				.expect("ml import object-put pause path lock should not be poisoned") = Some(path);
+			Self
+		}
+	}
+
+	impl Drop for MlImportAfterObjectPutPauseGuard {
+		fn drop(&mut self) {
+			*ML_IMPORT_AFTER_OBJECT_PUT_PATH
+				.lock()
+				.expect("ml import object-put pause path lock should not be poisoned") = None;
+			ML_IMPORT_AFTER_OBJECT_PUT_NOTIFY.notify_waiters();
+		}
+	}
+
+	struct MlImportArtifactCleanupNotifyGuard;
+
+	impl MlImportArtifactCleanupNotifyGuard {
+		fn new(path: String) -> Self {
+			ML_IMPORT_ARTIFACT_CLEANUP_COMPLETED.store(false, Ordering::SeqCst);
+			*ML_IMPORT_ARTIFACT_CLEANUP_PATH
+				.lock()
+				.expect("ml import artifact cleanup path lock should not be poisoned") = Some(path);
+			Self
+		}
+	}
+
+	impl Drop for MlImportArtifactCleanupNotifyGuard {
+		fn drop(&mut self) {
+			*ML_IMPORT_ARTIFACT_CLEANUP_PATH
+				.lock()
+				.expect("ml import artifact cleanup path lock should not be poisoned") = None;
+		}
+	}
+
+	async fn wait_for_ml_import_after_object_put() {
+		loop {
+			if ML_IMPORT_AFTER_OBJECT_PUT_REACHED.load(Ordering::SeqCst) {
+				return;
+			}
+			ML_IMPORT_AFTER_OBJECT_PUT_NOTIFY.notified().await;
+		}
+	}
+
+	async fn wait_for_ml_import_artifact_cleanup() {
+		loop {
+			if ML_IMPORT_ARTIFACT_CLEANUP_COMPLETED.load(Ordering::SeqCst) {
+				return;
+			}
+			ML_IMPORT_ARTIFACT_CLEANUP_NOTIFY.notified().await;
+		}
+	}
+
 	async fn assert_index_compaction_commit_retry(
 		site: RetryableConflictSite,
 		table: &str,
@@ -4028,6 +4293,60 @@ mod test {
 			HNSW_COMPACTION_SQL,
 		)
 		.await
+	}
+
+	#[tokio::test]
+	async fn ml_import_cancel_after_object_put_cleans_up_artifact() -> Result<()> {
+		let ds = Arc::new(Datastore::new("memory").await?);
+		let session = Session::owner().with_ns("test").with_db("test");
+		let txn = ds.transaction(Write, Pessimistic).await?;
+		txn.ensure_ns_db(None, "test", "test").await?;
+		txn.commit().await?;
+
+		let name = format!("ml_import_cleanup_{}", Uuid::new_v4().simple());
+		let version = "1.0.0".to_string();
+		let data = b"ml import cancellation cleanup regression payload".to_vec();
+		let hash = crate::obs::hash(&data);
+		let path = get_model_path("test", "test", &name, &version, &hash);
+		let _ = crate::obs::del(&path).await;
+
+		let _pause_guard = MlImportAfterObjectPutPauseGuard::new(path.clone());
+		let _cleanup_guard = MlImportArtifactCleanupNotifyGuard::new(path.clone());
+		let ds_for_task = Arc::clone(&ds);
+		let session_for_task = session.clone();
+		let name_for_task = name.clone();
+		let version_for_task = version.clone();
+		let data_for_task = data.clone();
+		let handle = tokio::spawn(async move {
+			ds_for_task
+				.put_ml_model(
+					&session_for_task,
+					&name_for_task,
+					&version_for_task,
+					"ml import cancellation cleanup regression",
+					data_for_task,
+				)
+				.await
+		});
+
+		tokio::time::timeout(Duration::from_secs(5), wait_for_ml_import_after_object_put())
+			.await
+			.expect("put_ml_model did not reach the post-object-put cancellation window");
+
+		handle.abort();
+		let join_error = handle.await.expect_err("put_ml_model task should have been aborted");
+		assert!(join_error.is_cancelled());
+		tokio::time::timeout(Duration::from_secs(5), wait_for_ml_import_artifact_cleanup())
+			.await
+			.expect("cancelled put_ml_model did not cleanup the uploaded artifact");
+
+		let artifact = crate::obs::get(&path).await;
+		assert!(artifact.is_err(), "model artifact should be removed after aborted import");
+
+		let model = ds.get_db_model("test", "test", &name, &version).await?;
+		assert!(model.is_none(), "model metadata should not be committed after abort");
+
+		Ok(())
 	}
 
 	#[tokio::test]
