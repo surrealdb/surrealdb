@@ -61,7 +61,7 @@ use std::sync::Arc;
 
 use surrealdb_types::ToSql;
 
-use super::common::{eval_buffered, is_recursion_target};
+use super::common::{RecursionBounds, eval_buffered, is_recursion_target};
 use crate::exec::FlowResult;
 use crate::exec::parts::{evaluate_physical_path, is_final};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
@@ -76,11 +76,12 @@ use crate::val::Value;
 pub(crate) async fn evaluate_recurse_path(
 	start: &Value,
 	path: &[Arc<dyn PhysicalExpr>],
-	min_depth: u32,
-	max_depth: u32,
+	bounds: RecursionBounds,
 	inclusive: bool,
 	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
+	let min_depth = bounds.min;
+	let max_depth = bounds.cap();
 	let mut completed_paths: Vec<Value> = Vec::new();
 	let mut active_paths: Vec<Vec<Value>> = if inclusive {
 		vec![vec![start.clone()]]
@@ -165,6 +166,15 @@ pub(crate) async fn evaluate_recurse_path(
 
 		active_paths = next_paths;
 		depth += 1;
+	}
+
+	// Unbounded recursion truncated at the system limit with paths still
+	// active: hard error, matching legacy (see `RecursionBounds`).
+	if bounds.errors_on_limit() && !active_paths.is_empty() {
+		return Err(crate::err::Error::IdiomRecursionLimitExceeded {
+			limit: bounds.system_limit,
+		}
+		.into());
 	}
 
 	// Add remaining active paths that reached max depth

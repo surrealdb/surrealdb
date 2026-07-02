@@ -59,7 +59,7 @@ use std::sync::Arc;
 
 use surrealdb_types::ToSql;
 
-use super::common::is_recursion_target;
+use super::common::{RecursionBounds, is_recursion_target};
 use crate::exec::FlowResult;
 use crate::exec::parts::{clean_iteration, evaluate_physical_path, get_final, is_final};
 use crate::exec::physical_expr::{EvalContext, PhysicalExpr};
@@ -74,12 +74,11 @@ use crate::val::Value;
 pub(crate) async fn evaluate_recurse_default(
 	start: &Value,
 	path: &[Arc<dyn PhysicalExpr>],
-	min_depth: u32,
-	max_depth: u32,
-	user_specified_max: bool,
+	bounds: RecursionBounds,
 	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
-	let system_limit = ctx.exec_ctx.ctx().config.idiom_recursion_limit;
+	let min_depth = bounds.min;
+	let max_depth = bounds.cap();
 	let mut current = start.clone();
 	let mut depth = 0u32;
 
@@ -117,9 +116,9 @@ pub(crate) async fn evaluate_recurse_default(
 	}
 
 	// Exhausted depth limit without resolving
-	if !user_specified_max && depth >= system_limit {
+	if bounds.errors_on_limit() && depth >= bounds.system_limit {
 		return Err(crate::err::Error::IdiomRecursionLimitExceeded {
-			limit: system_limit,
+			limit: bounds.system_limit,
 		}
 		.into());
 	}

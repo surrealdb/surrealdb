@@ -59,7 +59,7 @@ use std::sync::Arc;
 
 use surrealdb_types::ToSql;
 
-use super::common::{eval_buffered, is_recursion_target};
+use super::common::{RecursionBounds, eval_buffered, is_recursion_target};
 use crate::exec::FlowResult;
 use crate::exec::parts::recurse::value_hash;
 use crate::exec::parts::{evaluate_physical_path, is_final};
@@ -76,11 +76,12 @@ pub(crate) async fn evaluate_recurse_shortest(
 	start: &Value,
 	target: &Value,
 	path: &[Arc<dyn PhysicalExpr>],
-	min_depth: u32,
-	max_depth: u32,
+	bounds: RecursionBounds,
 	inclusive: bool,
 	ctx: EvalContext<'_>,
 ) -> FlowResult<Value> {
+	let min_depth = bounds.min;
+	let max_depth = bounds.cap();
 	let mut seen = std::collections::HashSet::new();
 
 	let initial_path = if inclusive {
@@ -147,6 +148,15 @@ pub(crate) async fn evaluate_recurse_shortest(
 		}
 
 		depth += 1;
+	}
+
+	// Unbounded recursion truncated at the system limit with the queue still
+	// non-empty: hard error, matching legacy (see `RecursionBounds`).
+	if bounds.errors_on_limit() && !queue.is_empty() {
+		return Err(crate::err::Error::IdiomRecursionLimitExceeded {
+			limit: bounds.system_limit,
+		}
+		.into());
 	}
 
 	// Target not found within max_depth.
