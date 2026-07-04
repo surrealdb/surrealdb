@@ -1279,7 +1279,8 @@ impl<'ctx> Planner<'ctx> {
 			if fields.is_empty() {
 				inner
 			} else {
-				Arc::new(Fetch::new(inner, fields)) as Arc<dyn ExecOperator>
+				let (fields_sql, physical_fields) = self.convert_fetch_idioms(fields).await?;
+				Arc::new(Fetch::new(inner, fields_sql, physical_fields)) as Arc<dyn ExecOperator>
 			}
 		} else {
 			inner

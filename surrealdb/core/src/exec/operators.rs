@@ -53,6 +53,7 @@ pub use distinct::Distinct;
 pub use explain::{AnalyzePlan, ExplainPlan};
 pub use expr::ExprPlan;
 pub use fetch::Fetch;
+pub(crate) use fetch::FetchStep;
 pub use filter::Filter;
 pub use foreach::ForeachPlan;
 #[cfg_attr(not(feature = "gql"), allow(unused_imports))]
