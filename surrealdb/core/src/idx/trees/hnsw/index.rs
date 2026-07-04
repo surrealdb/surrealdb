@@ -9,11 +9,10 @@ use tokio::sync::RwLock;
 
 use crate::catalog::{Distance, HnswParams, TableId, VectorType};
 use crate::ctx::{Context, FrozenContext};
-use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::Cond;
 use crate::idx::planner::ScanDirection;
 use crate::idx::planner::iterators::KnnIteratorResult;
+use crate::idx::trees::KnnCondFilter;
 use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::filter::HnswTruthyDocumentFilter;
@@ -558,23 +557,22 @@ impl HnswIndex {
 		pt: &[Number],
 		k: usize,
 		ef: usize,
-		cond_filter: Option<(&Options, Arc<Cond>)>,
+		cond_filter: Option<KnnCondFilter<'_>>,
 	) -> Result<VecDeque<KnnIteratorResult>> {
 		let compaction_generation =
 			read_compaction_generation(&ctx.tx(), &self.ikb.new_hg_key()).await?;
 		// Build a filter if required
-		let mut filter = if let Some((opt, cond)) = cond_filter {
-			Some(HnswTruthyDocumentFilter::new(
-				opt,
+		let mut filter = cond_filter.map(|f| {
+			HnswTruthyDocumentFilter::new(
+				f.opt,
 				self.ikb.clone(),
 				self.table_id,
 				self.vector_cache.clone(),
-				cond,
+				f.cond,
 				compaction_generation,
-			))
-		} else {
-			None
-		};
+				f.select_gate,
+			)
+		});
 		// Extract the vector
 		let vector: SharedVector = Vector::try_from_vector(self.vector_type, pt)?.into();
 		vector.check_dimension(self.dim)?;

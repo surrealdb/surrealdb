@@ -30,6 +30,7 @@ use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::planner::{IterationStage, ScanDirection};
+use crate::idx::trees::KnnCondFilter;
 #[cfg(diskann)]
 use crate::idx::trees::store::diskann::SharedDiskAnnIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
@@ -977,7 +978,11 @@ impl HnswEntry {
 		ef: u32,
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self> {
-		let cond_filter = cond.map(|cond| (opt, cond));
+		let cond_filter = cond.map(|cond| KnnCondFilter {
+			opt,
+			cond,
+			select_gate: None,
+		});
 		let res = h.knn_search(ctx, stk, v, n as usize, ef as usize, cond_filter).await?;
 		Ok(Self {
 			res,
@@ -1007,7 +1012,11 @@ impl DiskAnnEntry {
 		l: u32,
 		cond: Option<Arc<Cond>>,
 	) -> Result<Self> {
-		let cond_filter = cond.map(|cond| (opt, cond));
+		let cond_filter = cond.map(|cond| KnnCondFilter {
+			opt,
+			cond,
+			select_gate: None,
+		});
 		let res = d.knn_search(ctx, stk, v, n as usize, l as usize, cond_filter).await?;
 		Ok(Self {
 			res,

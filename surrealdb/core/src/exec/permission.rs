@@ -204,11 +204,14 @@ pub(crate) async fn check_permission_for_value(
 /// Evaluate a catalog SELECT [`Permission`] against a [`CursorDoc`] using the
 /// legacy compute path. Returns `true` when access is allowed.
 ///
-/// Used by KNN truthy-document filters (HNSW, DiskANN) where the table's
-/// SELECT permission must be checked per candidate before the
+/// Used by KNN truthy-document filters (HNSW, DiskANN) when the search is
+/// driven by the legacy executor (`idx/planner/executor.rs`), where the
+/// table's SELECT permission must be checked per candidate before the
 /// caller-supplied WHERE condition runs. Without this gate, a caller can
 /// probe restricted fields by crafting a WHERE on them and observing the
-/// resulting count / order / timing.
+/// resulting count / order / timing. The streaming executor's `KnnScan`
+/// supplies a pre-resolved [`CachedTableSelect::Physical`] gate instead, so
+/// this compute path is never reached from a successfully planned query.
 ///
 /// `Specific` expressions are evaluated with `opt.new_with_perms(false)` so
 /// the permission expression itself doesn't recurse into permission checks
@@ -236,14 +239,24 @@ pub(crate) async fn evaluate_table_select_for_doc(
 
 /// Cached resolution of a table's SELECT permission check, for callers that
 /// need to evaluate the permission per candidate row (e.g. KNN truthy-doc
-/// filters). Resolve once per filter via [`resolve_cached_table_select`],
-/// then check each candidate via [`check_cached_table_select_for_doc`].
+/// filters). On the legacy path, resolve once per filter via
+/// [`resolve_cached_table_select`]; on the streaming path, the operator
+/// pre-seeds a [`CachedTableSelect::Physical`] gate. Either way, check each
+/// candidate via [`check_cached_table_select_for_doc`].
 #[derive(Clone)]
 pub(crate) enum CachedTableSelect {
 	/// Permission checks are bypassed (auth disabled / privileged session).
 	Skip,
-	/// Permission must be evaluated against each candidate document.
+	/// Permission must be evaluated against each candidate document via the
+	/// legacy compute path.
 	Apply(Permission),
+	/// Permission was pre-resolved by the streaming executor and must be
+	/// evaluated against each candidate document via
+	/// [`check_permission_for_value`] under the given execution context.
+	/// Callers pass the same [`PhysicalPermission`] that filters the fetched
+	/// batch after the search, so the in-search and post-search checks cannot
+	/// disagree.
+	Physical(PhysicalPermission, ExecutionContext),
 }
 
 /// Resolve a table's SELECT permission for caching across per-row checks in
@@ -276,6 +289,12 @@ pub(crate) async fn check_cached_table_select_for_doc(
 		CachedTableSelect::Apply(p) => {
 			evaluate_table_select_for_doc(stk, ctx, opt, p, cursor_doc).await
 		}
+		CachedTableSelect::Physical(p, exec_ctx) => {
+			// The candidate value carries its canonical `id` (spliced in from
+			// the storage key on decode), so id-referencing permissions see
+			// the same document here as in the post-search batch check.
+			Ok(check_permission_for_value(p, cursor_doc.doc.as_ref(), None, exec_ctx).await?)
+		}
 	}
 }
 
@@ -283,7 +302,9 @@ pub(crate) async fn check_cached_table_select_for_doc(
 /// then return a reference to it. Subsequent calls reuse the cached value
 /// without re-fetching the table definition. Shared between the HNSW and
 /// DiskANN truthy-doc filters, both of which resolve the permission once per
-/// filter and reuse it for every candidate.
+/// filter and reuse it for every candidate. A slot pre-seeded with a
+/// [`CachedTableSelect::Physical`] gate (streaming executor) is returned
+/// as-is without touching the transaction.
 pub(crate) async fn ensure_cached_table_select<'a>(
 	ctx: &FrozenContext,
 	opt: &Options,

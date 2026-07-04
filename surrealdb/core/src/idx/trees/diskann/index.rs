@@ -37,11 +37,10 @@ use tokio::sync::RwLock;
 
 use crate::catalog::{DiskAnnParams, Distance, TableId, VectorType};
 use crate::ctx::{Context, FrozenContext};
-use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::Cond;
 use crate::idx::planner::ScanDirection;
 use crate::idx::planner::iterators::KnnIteratorResult;
+use crate::idx::trees::KnnCondFilter;
 use crate::idx::trees::diskann::cache::DiskAnnCache;
 use crate::idx::trees::diskann::docs::{DiskAnnDocs, DiskAnnVecDocs};
 use crate::idx::trees::diskann::filter::DiskAnnTruthyDocumentFilter;
@@ -1222,19 +1221,20 @@ impl DiskAnnIndex {
 		pt: &[Number],
 		k: usize,
 		ef: usize,
-		cond_filter: Option<(&Options, Arc<Cond>)>,
+		cond_filter: Option<KnnCondFilter<'_>>,
 	) -> Result<VecDeque<KnnIteratorResult>> {
 		let pending_state = Self::read_pending_state(&ctx.tx(), &self.ikb).await?;
 		let compaction_generation =
 			read_compaction_generation(&ctx.tx(), &self.ikb.new_dg_key()).await?;
-		let mut filter = cond_filter.map(|(opt, cond)| {
+		let mut filter = cond_filter.map(|f| {
 			DiskAnnTruthyDocumentFilter::new(
-				opt,
+				f.opt,
 				self.ikb.clone(),
 				self.table_id,
 				self.cache.clone(),
 				compaction_generation,
-				cond,
+				f.cond,
+				f.select_gate,
 			)
 		});
 		let vector = Vector::try_from_vector(self.vector_type, pt)?;

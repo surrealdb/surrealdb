@@ -17,8 +17,8 @@ use crate::catalog::Index;
 use crate::err::Error;
 use crate::exec::index::access_path::IndexRef;
 use crate::exec::permission::{
-	PhysicalPermission, convert_permission_to_physical_runtime, should_check_perms,
-	validate_record_user_access,
+	CachedTableSelect, PhysicalPermission, convert_permission_to_physical_runtime,
+	should_check_perms, validate_record_user_access,
 };
 use crate::exec::{
 	AccessMode, CardinalityHint, ContextLevel, ExecOperator, ExecutionContext, FlowResult,
@@ -26,6 +26,7 @@ use crate::exec::{
 };
 use crate::expr::{Cond, ControlFlow, ControlFlowExt};
 use crate::iam::Action;
+use crate::idx::trees::KnnCondFilter;
 use crate::kvs::CachePolicy;
 use crate::val::Number;
 
@@ -65,7 +66,10 @@ pub struct KnnScan {
 	/// this safe lives at that chokepoint, which applies the table's SELECT
 	/// permission to each candidate BEFORE invoking the cond — so hidden
 	/// rows are skipped pre-cond and a record user cannot use the cond to
-	/// probe their field values. Preserve that ordering when touching
+	/// probe their field values. On this path the gate is the operator's own
+	/// resolved `PhysicalPermission`, handed down via
+	/// `KnnCondFilter::select_gate` — the same object that filters the
+	/// fetched batch after the search. Preserve that ordering when touching
 	/// `is_record_truthy`; see the SECURITY note there for the threat model.
 	pub(crate) residual_cond: Option<Cond>,
 	/// Projection-aware field set for computed-field materialization.
@@ -249,6 +253,23 @@ impl ExecOperator for KnnScan {
 				None => super::pipeline::FieldState::empty(),
 			};
 
+			// Pushed-down residual WHERE: gate every candidate inside the ANN
+			// search on the same physical SELECT permission that filters the
+			// fetched batch below, so hidden rows are skipped before the cond
+			// can probe them and never consume top-K slots (see the
+			// `residual_cond` docs for the threat model).
+			let cond_filter = match (residual_cond, ctx.options()) {
+				(Some(cond), Some(opt)) => Some(KnnCondFilter {
+					opt,
+					cond: Arc::new(cond),
+					select_gate: Some(CachedTableSelect::Physical(
+						select_permission.clone(),
+						ctx.clone(),
+					)),
+				}),
+				_ => None,
+			};
+
 			// Get the ANN parameters from the index definition
 			let index_def = index_ref.definition();
 			let knn_results = match &index_def.index {
@@ -272,11 +293,6 @@ impl ExecOperator for KnnScan {
 						.check_state(frozen_ctx)
 						.await
 						.context("Failed to check HNSW index state")?;
-
-					let cond_filter = match (residual_cond.clone(), ctx.options()) {
-						(Some(cond), Some(opt)) => Some((opt, Arc::new(cond))),
-						_ => None,
-					};
 
 					let mut stack = TreeStack::new();
 					stack
@@ -315,11 +331,6 @@ impl ExecOperator for KnnScan {
 						.context("Failed to get DiskANN index")?;
 
 					diskann_index.check_state().await.context("Failed to check DiskANN index state")?;
-
-					let cond_filter = match (residual_cond.clone(), ctx.options()) {
-						(Some(cond), Some(opt)) => Some((opt, Arc::new(cond))),
-						_ => None,
-					};
 
 					let mut stack = TreeStack::new();
 					stack
