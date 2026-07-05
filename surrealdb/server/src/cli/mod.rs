@@ -251,13 +251,6 @@ pub async fn init<
 	// Print debug mode warning
 	#[cfg(debug_assertions)]
 	println!("{DEBUG_BUILD_WARNING}");
-	// Start a new CPU profiler
-	#[cfg(feature = "performance-profiler")]
-	let guard = pprof::ProfilerGuardBuilder::default()
-		.frequency(1000)
-		.blocklist(&["libc", "libgcc", "pthread", "vdso"])
-		.build()
-		.unwrap();
 	// Parse the CLI arguments
 	let args = Cli::parse();
 	// After parsing arguments, we check the version online
@@ -333,23 +326,6 @@ pub async fn init<
 	// records and metric exports are written before the runtime is
 	// dropped.
 	runtime.shutdown();
-	// Save the flamegraph and profile
-	#[cfg(feature = "performance-profiler")]
-	if let Ok(report) = guard.report().build() {
-		// Import necessary traits
-		use std::io::Write;
-
-		use pprof::protos::Message;
-		// Output a flamegraph
-		let file = std::fs::File::create("flamegraph.svg").unwrap();
-		report.flamegraph(file).unwrap();
-		// Output a pprof
-		let mut file = std::fs::File::create("profile.pb").unwrap();
-		let profile = report.pprof().unwrap();
-		let mut content = Vec::new();
-		profile.encode(&mut content).unwrap();
-		file.write_all(&content).unwrap();
-	};
 	// Error and exit the program
 	let res = if let Err(e) = output {
 		// Output any error

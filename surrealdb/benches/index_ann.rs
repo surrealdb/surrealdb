@@ -3,16 +3,12 @@
 
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::os::raw::c_int;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use criterion::measurement::WallTime;
-use criterion::profiler::Profiler;
 use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use flate2::read::GzDecoder;
-use pprof::ProfilerGuard;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_types::{RecordId, RecordIdKey, ToSql, Value};
@@ -37,39 +33,6 @@ const QUERYING_SOURCE: &str =
 	concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/data/hnsw-random-5000-20-euclidean.gz");
 const SAMPLE_SIZE_ENV: &str = "SURREALDB_ANN_BENCH_SAMPLE_SIZE";
 const MEASUREMENT_SECS_ENV: &str = "SURREALDB_ANN_BENCH_MEASUREMENT_SECS";
-
-/// Criterion profiler that writes a `flamegraph.svg` beside profiled benchmark output.
-struct PprofFlamegraphProfiler {
-	frequency: c_int,
-	active_profiler: Option<ProfilerGuard<'static>>,
-}
-
-impl PprofFlamegraphProfiler {
-	fn new(frequency: c_int) -> Self {
-		Self {
-			frequency,
-			active_profiler: None,
-		}
-	}
-}
-
-impl Profiler for PprofFlamegraphProfiler {
-	fn start_profiling(&mut self, _: &str, _: &Path) {
-		self.active_profiler = Some(ProfilerGuard::new(self.frequency).unwrap());
-	}
-
-	fn stop_profiling(&mut self, _: &str, benchmark_dir: &Path) {
-		std::fs::create_dir_all(benchmark_dir).unwrap();
-
-		let output_path = benchmark_dir.join("flamegraph.svg");
-		let output_file = File::create(&output_path)
-			.unwrap_or_else(|_| panic!("failed to create {}", output_path.display()));
-
-		if let Some(profiler) = self.active_profiler.take() {
-			profiler.report().build().unwrap().flamegraph(output_file).unwrap();
-		}
-	}
-}
 
 /// ANN index implementation under benchmark.
 #[derive(Clone, Copy)]
@@ -370,7 +333,7 @@ async fn knn_lookup_objects_db(ds: &Datastore, session: &Session, selects: &[Str
 
 criterion_group! {
 	name = benches;
-	config = Criterion::default().with_profiler(PprofFlamegraphProfiler::new(100));
+	config = Criterion::default();
 	targets = bench_hnsw_with_db, bench_diskann_with_db, bench_db_without_index
 }
 criterion_main!(benches);

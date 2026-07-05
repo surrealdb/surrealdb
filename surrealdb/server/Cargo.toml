@@ -35,7 +35,6 @@ jwks = ["surrealdb-core/jwks"]
 # Restricts TLS to FIPS-approved cipher suites at runtime.
 fips = ["rustls/fips"]
 ml = ["surrealdb/ml"]
-performance-profiler = ["dep:pprof"]
 scripting = ["surrealdb-core/scripting"]
 surrealism = [
     "surrealdb-core/surrealism",
@@ -157,10 +156,6 @@ web-time.workspace = true
 
 # Optional crates
 dialoguer = { workspace = true, optional = true }
-pprof = { workspace = true, features = [
-    "flamegraph",
-    "prost-codec",
-], optional = true }
 surrealdb-mcp = { workspace = true, optional = true }
 surrealism-runtime = { workspace = true, optional = true }
 wasm-encoder = { workspace = true, optional = true }

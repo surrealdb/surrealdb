@@ -13,6 +13,7 @@ on:
       - surrealdb/Cargo.toml
       - build.rs
       - surrealdb/build.rs
+      - deny.toml
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock
@@ -28,6 +29,7 @@ on:
       - surrealdb/Cargo.toml
       - build.rs
       - surrealdb/build.rs
+      - deny.toml
       - supply-chain/audits.toml
       - supply-chain/config.toml
       - supply-chain/imports.lock

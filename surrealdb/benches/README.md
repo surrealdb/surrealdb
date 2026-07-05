@@ -43,10 +43,10 @@ $ cargo make bench-sdk-rocksdb
 
 ## Profiling
 
-Some of the benchmarks support CPU profiling:
+For CPU profiling and flamegraphs, use the language-tests benchmark harness,
+which records profiles with `samply` (see `language-tests/README.md` >
+Benchmarking):
 
 ```console
-cargo make bench --profile-time=5
+cargo make bench -- <bench-filter> --profile
 ```
-
-Once complete, check the `target/criterion/**/profile/flamegraph.svg` files.

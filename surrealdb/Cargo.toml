@@ -122,7 +122,6 @@ env_logger.workspace = true
 flate2.workspace = true
 parking_lot.workspace = true
 web-time.workspace = true
-pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 rand.workspace = true
 rayon.workspace = true
 regex.workspace = true
