@@ -95,9 +95,28 @@ impl<'a> IndexAnalyzer<'a> {
 			return None;
 		}
 
-		// Flatten OR branches from the condition tree
+		self.or_union_from_expr(&cond.0, direction).map(|(path, _)| path)
+	}
+
+	/// Build a multi-index union `AccessPath` from a single OR expression.
+	///
+	/// Flattens the OR into branches, analyzes each independently, and — if
+	/// EVERY branch has at least one index candidate — combines the best
+	/// candidate from each into an `AccessPath::Union`. Returns the union
+	/// together with its *effective score*: the minimum branch score. An OR
+	/// reads the union of all branches' rows, so it is only as selective as
+	/// its least-selective branch, and the min lets the caller compare the
+	/// union against a single-index driver on the same scale as
+	/// [`IndexCandidate::score`]. Returns `None` if any branch lacks an index
+	/// candidate (the caller must fall back to a table scan).
+	fn or_union_from_expr(
+		&self,
+		or_expr: &Expr,
+		direction: ScanDirection,
+	) -> Option<(AccessPath, u32)> {
+		// Flatten OR branches from the expression tree
 		let mut branches = Vec::new();
-		Self::flatten_or(&cond.0, &mut branches);
+		Self::flatten_or(or_expr, &mut branches);
 
 		// Need at least 2 branches for a union to make sense
 		if branches.len() < 2 {
@@ -106,6 +125,7 @@ impl<'a> IndexAnalyzer<'a> {
 
 		// Analyze each branch independently
 		let mut branch_paths = Vec::with_capacity(branches.len());
+		let mut min_score = u32::MAX;
 		for branch_expr in branches {
 			let branch_cond = Cond(branch_expr.clone());
 			let candidates = self.analyze(Some(&branch_cond), None);
@@ -113,6 +133,7 @@ impl<'a> IndexAnalyzer<'a> {
 				// This branch has no index — cannot use union
 				return None;
 			}
+			let branch_score = candidates.iter().map(|c| c.score()).max().unwrap_or(0);
 			let path = select_access_path(candidates, self.with_hints, direction);
 			match path {
 				AccessPath::TableScan => {
@@ -126,29 +147,110 @@ impl<'a> IndexAnalyzer<'a> {
 					// and would error otherwise.
 					continue;
 				}
-				_ => branch_paths.push(path),
+				_ => {
+					branch_paths.push(path);
+					min_score = min_score.min(branch_score);
+				}
 			}
 		}
 
 		// If every branch turned out to be empty the whole OR is empty.
 		if branch_paths.is_empty() {
-			return Some(AccessPath::EmptyScan);
+			return Some((AccessPath::EmptyScan, u32::MAX));
 		}
 
 		// A single surviving branch is a degenerate union — return it
 		// directly rather than wrapping in `AccessPath::Union(...)`
 		// (the planner's union dispatch expects ≥ 2 sub-paths).
 		if branch_paths.len() == 1 {
-			return branch_paths.into_iter().next();
+			return branch_paths.into_iter().next().map(|p| (p, min_score));
 		}
 
 		// OR branches are independent predicates that may both hold
 		// on the same row, so the union can emit the same record
 		// from multiple branches — dedupe required.
-		Some(AccessPath::Union {
-			paths: branch_paths,
-			dedupe: true,
-		})
+		Some((
+			AccessPath::Union {
+				paths: branch_paths,
+				dedupe: true,
+			},
+			min_score,
+		))
+	}
+
+	/// Try to build a multi-index union from an OR nested inside an AND.
+	///
+	/// [`Self::try_or_union`] only fires when the *whole* WHERE clause is an
+	/// OR. When the OR is one conjunct of an AND — e.g.
+	/// `type = $t AND (title @1@ $q OR body @2@ $q)` — the single-index
+	/// analyzer drives from the other conjunct (`type`) and evaluates the OR
+	/// as a per-row residual filter, which is catastrophic for full-text
+	/// matches (every `type` row is re-scored against the FT index).
+	///
+	/// This walks the top-level AND conjuncts and, for each conjunct that is
+	/// itself an OR of independently-indexable predicates, builds the union.
+	/// The union covers only that OR; the remaining conjuncts are enforced by
+	/// the residual `Filter` the SELECT planner installs above the
+	/// `UnionIndexScan` (mixed-index unions are never stripped by
+	/// `strip_union_index_conditions`, so the full WHERE stays as residual).
+	///
+	/// Returns the best such union (the one whose weakest branch is most
+	/// selective) with its effective score, so the caller can compare it
+	/// against the chosen single-index driver and only switch when the union
+	/// is heuristically better. Skipped under explicit `WITH` hints — the
+	/// user has already pinned the plan.
+	pub fn try_and_nested_or_union(
+		&self,
+		cond: Option<&Cond>,
+		direction: ScanDirection,
+	) -> Option<(AccessPath, u32)> {
+		let cond = cond?;
+
+		// Respect explicit index hints; leave the pinned plan alone.
+		if self.with_hints.is_some() {
+			return None;
+		}
+
+		// A KNN (nearest-neighbour) operator must be consumed by a KnnScan:
+		// it is stripped from the WHERE before residual filtering and cannot
+		// be evaluated as a per-row residual (unlike a MATCHES `@@`, which is
+		// correct — if slower — as a filter). Substituting a higher-scoring OR
+		// union here would demote the KNN to a residual that no longer
+		// restricts rows to the neighbour set, returning rows outside it. Leave
+		// any KNN query to drive from its KnnScan.
+		if Self::expr_contains_knn(&cond.0) {
+			return None;
+		}
+
+		// Only meaningful for a conjunction. A top-level OR is already
+		// handled by `try_or_union`.
+		let mut conjuncts = Vec::new();
+		Self::flatten_and(&cond.0, &mut conjuncts);
+		if conjuncts.len() < 2 {
+			return None;
+		}
+
+		// Among the OR conjuncts that form a valid union, keep the one whose
+		// weakest branch is the most selective (highest effective score).
+		let mut best: Option<(AccessPath, u32)> = None;
+		for conjunct in conjuncts {
+			if !matches!(
+				conjunct,
+				Expr::Binary {
+					op: BinaryOperator::Or,
+					..
+				}
+			) {
+				continue;
+			}
+			if let Some((path, score)) = self.or_union_from_expr(conjunct, direction)
+				&& best.as_ref().is_none_or(|(_, best_score)| score > *best_score)
+			{
+				best = Some((path, score));
+			}
+		}
+
+		best
 	}
 
 	/// Maximum number of array elements to expand for `field IN [...]`.
@@ -450,6 +552,50 @@ impl<'a> IndexAnalyzer<'a> {
 			_ => {
 				branches.push(expr);
 			}
+		}
+	}
+
+	/// Flatten nested AND expressions into a list of conjuncts.
+	///
+	/// `A AND B AND C` (parsed as `(A AND B) AND C`) becomes `[A, B, C]`.
+	/// Non-AND nodes (including OR sub-trees) are returned as single
+	/// conjuncts so the caller can inspect them.
+	fn flatten_and<'b>(expr: &'b Expr, conjuncts: &mut Vec<&'b Expr>) {
+		match expr {
+			Expr::Binary {
+				left,
+				op: BinaryOperator::And,
+				right,
+			} => {
+				Self::flatten_and(left, conjuncts);
+				Self::flatten_and(right, conjuncts);
+			}
+			_ => {
+				conjuncts.push(expr);
+			}
+		}
+	}
+
+	/// Returns `true` if the expression tree contains a KNN (nearest-neighbour)
+	/// operator. Such an operator is consumed by a `KnnScan` and stripped from
+	/// the WHERE before residual filtering, so it must not be left behind as a
+	/// residual by an index substitution (see `try_and_nested_or_union`).
+	fn expr_contains_knn(expr: &Expr) -> bool {
+		match expr {
+			Expr::Binary {
+				left,
+				op,
+				right,
+			} => {
+				matches!(op, BinaryOperator::NearestNeighbor(_))
+					|| Self::expr_contains_knn(left)
+					|| Self::expr_contains_knn(right)
+			}
+			Expr::Prefix {
+				expr: inner,
+				..
+			} => Self::expr_contains_knn(inner),
+			_ => false,
 		}
 	}
 
@@ -1579,7 +1725,7 @@ mod tests {
 	use surrealdb_strand::Strand;
 
 	use super::*;
-	use crate::catalog::{Index, IndexDefinition, IndexId};
+	use crate::catalog::{FullTextParams, Index, IndexDefinition, IndexId, Scoring};
 	use crate::expr::order::Ordering;
 	use crate::expr::with::With;
 	use crate::expr::{Cond, Expr, Idiom};
@@ -1609,6 +1755,22 @@ mod tests {
 
 	fn idx_uniq(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
 		idx_def(id, name, cols, Index::Uniq)
+	}
+
+	fn idx_ft(id: u32, name: &str, cols: &[&str]) -> IndexDefinition {
+		idx_def(
+			id,
+			name,
+			cols,
+			Index::FullText(FullTextParams {
+				analyzer: "simple".into(),
+				highlight: false,
+				scoring: Scoring::Bm {
+					k1: 1.2,
+					b: 0.75,
+				},
+			}),
+		)
 	}
 
 	fn analyzer<'a>(defs: Vec<IndexDefinition>, with: Option<&'a With>) -> IndexAnalyzer<'a> {
@@ -2232,6 +2394,101 @@ mod tests {
 				.try_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
 				.expect("union path");
 			assert!(matches!(path, AccessPath::EmptyScan));
+		}
+
+		#[test]
+		fn nested_or_in_and_builds_ft_union() {
+			// `type = 'doc' AND (title @@ 'q' OR body @@ 'q')`: the OR of two
+			// full-text matches nested inside the AND must still form a union
+			// over the two FT indexes. `try_or_union` alone misses it because
+			// the top level is an AND, not an OR.
+			let defs = vec![
+				idx_basic(1, "ix_type", &["type"]),
+				idx_ft(2, "ft_title", &["title"]),
+				idx_ft(3, "ft_body", &["body"]),
+			];
+			let a = analyzer(defs, None);
+			let cond = parse_cond("type = 'doc' AND (title @@ 'q' OR body @@ 'q')");
+			let (path, score) = a
+				.try_and_nested_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
+				.expect("nested OR union");
+			match path {
+				AccessPath::Union {
+					paths,
+					dedupe,
+				} => {
+					assert_eq!(paths.len(), 2, "one branch per FT match");
+					assert!(dedupe, "a row may match both FT branches");
+				}
+				other => panic!("expected Union, got {other:?}"),
+			}
+			// Effective score is the min branch score. Both branches are
+			// full-text (800), which outranks the non-unique `type` equality
+			// (500), so the SELECT planner switches to the union.
+			assert_eq!(score, 800, "min branch score is the FT score");
+		}
+
+		#[test]
+		fn nested_or_skipped_under_with_index_hint() {
+			// WITH INDEX pins the plan; the nested-OR optimisation must bow out.
+			let with = With::Index(vec!["ft_title".to_string(), "ft_body".to_string()]);
+			let defs = vec![
+				idx_basic(1, "ix_type", &["type"]),
+				idx_ft(2, "ft_title", &["title"]),
+				idx_ft(3, "ft_body", &["body"]),
+			];
+			let a = analyzer(defs, Some(&with));
+			let cond = parse_cond("type = 'doc' AND (title @@ 'q' OR body @@ 'q')");
+			assert!(
+				a.try_and_nested_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
+					.is_none(),
+				"WITH INDEX hint disables the nested-OR union"
+			);
+		}
+
+		#[test]
+		fn nested_or_unindexed_branch_no_union() {
+			// One OR branch (`note @@ 'q'`) has no FT index → the OR cannot be
+			// unioned, so no nested-OR union is offered (the SELECT planner
+			// keeps driving from the `type` equality and filters the OR).
+			let defs = vec![idx_basic(1, "ix_type", &["type"]), idx_ft(2, "ft_title", &["title"])];
+			let a = analyzer(defs, None);
+			let cond = parse_cond("type = 'doc' AND (title @@ 'q' OR note @@ 'q')");
+			assert!(
+				a.try_and_nested_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
+					.is_none(),
+				"an unindexed OR branch defeats the union"
+			);
+		}
+
+		#[test]
+		fn and_without_or_conjunct_no_union() {
+			// A pure conjunction has no OR conjunct to drive a union.
+			let defs = vec![idx_basic(1, "ix_a", &["a"]), idx_basic(2, "ix_b", &["b"])];
+			let a = analyzer(defs, None);
+			let cond = parse_cond("a = 1 AND b = 2");
+			assert!(
+				a.try_and_nested_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
+					.is_none(),
+				"no OR conjunct means no nested-OR union"
+			);
+		}
+
+		#[test]
+		fn nested_or_skipped_when_knn_present() {
+			// A KNN operator must drive from its KnnScan (it is stripped from
+			// the WHERE, not evaluated as a residual). Even though the email OR
+			// would otherwise union (unique index, score 1000 > KNN's 800), the
+			// presence of the KNN operator must disable the substitution so the
+			// nearest-neighbour restriction is not silently dropped.
+			let defs = vec![idx_uniq(1, "ix_email", &["email"])];
+			let a = analyzer(defs, None);
+			let cond = parse_cond("vec <|2,100|> [0.0, 0.0] AND (email = 'a' OR email = 'b')");
+			assert!(
+				a.try_and_nested_or_union(Some(&cond), crate::idx::planner::ScanDirection::Forward)
+					.is_none(),
+				"a KNN operator in the condition must disable the nested-OR union"
+			);
 		}
 	}
 

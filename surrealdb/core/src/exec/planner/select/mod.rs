@@ -2566,6 +2566,16 @@ impl<'ctx> Planner<'ctx> {
 			if let Some(path) = analyzer.try_or_union(analysis_cond, direction) {
 				return Ok(Some((path, direction)));
 			}
+			// A nested OR conjunct can be the only indexable part of an AND
+			// when every sibling conjunct is unindexed (e.g. an unindexed
+			// `category = $c AND (title @1@ $q OR body @2@ $q)`). `analyze`
+			// ignores OR subtrees, so there is no single-index candidate and
+			// we reach here before the score-gated check further below. With
+			// no single-index driver the union always beats the table-scan
+			// fallback, so take it unconditionally.
+			if let Some((path, _)) = analyzer.try_and_nested_or_union(analysis_cond, direction) {
+				return Ok(Some((path, direction)));
+			}
 			// Try expanding IN operators into union of equality lookups
 			if let Some(path) = analyzer.try_in_expansion(analysis_cond, direction) {
 				return Ok(Some((path, direction)));
@@ -2576,6 +2586,11 @@ impl<'ctx> Planner<'ctx> {
 			}
 			return Ok(Some((AccessPath::TableScan, direction)));
 		}
+
+		// Score of the best single-index driver, captured before
+		// `select_access_path` consumes `candidates`. Used below to decide
+		// whether a nested-OR multi-index union would be a better driver.
+		let best_single_score = candidates.iter().map(|c| c.score()).max().unwrap_or(0);
 
 		let path = select_access_path(candidates, with, direction);
 
@@ -2619,6 +2634,25 @@ impl<'ctx> Planner<'ctx> {
 		// LIMIT queries.  IN expansion is only helpful in the
 		// candidates.is_empty() fallback above when no index covers
 		// ORDER BY at all.
+
+		// When the WHERE clause is a conjunction and one conjunct is a pure
+		// OR whose every branch is independently indexable, consider driving
+		// from that OR's multi-index union and applying the remaining
+		// conjuncts as a residual filter. Without this, a nested OR of
+		// full-text matches like `type = $t AND (title @1@ $q OR body @2@ $q)`
+		// drives from the low-selectivity `type` equality and evaluates the
+		// OR as a per-row filter — re-scoring the FT index for every `type`
+		// row. Switch only when the union's weakest branch is more selective
+		// than the chosen single-index driver (higher score); this keeps a
+		// selective unique/compound equality (or an ORDER BY-covering scan,
+		// which carries the +100 order bonus) as the driver.
+		if with.is_none()
+			&& let Some((union_path, union_score)) =
+				analyzer.try_and_nested_or_union(analysis_cond, direction)
+			&& union_score > best_single_score
+		{
+			return Ok(Some((union_path, direction)));
+		}
 
 		Ok(Some((path, direction)))
 	}
