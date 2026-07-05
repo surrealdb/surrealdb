@@ -60,12 +60,18 @@ impl Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(config: MemoryConfig) -> Result<Datastore> {
-		info!(
-			target: TARGET,
-			"Versioning enabled: {} with retention period: {}ns",
-			config.versioned,
-			config.retention_ns
-		);
+		if config.versioned {
+			if config.retention_ns > 0 {
+				info!(
+					target: TARGET,
+					"Versioning enabled with retention period: {}ns", config.retention_ns
+				);
+			} else {
+				info!(target: TARGET, "Versioning enabled with unlimited retention");
+			}
+		} else {
+			info!(target: TARGET, "Versioning disabled");
+		}
 		#[cfg(not(target_family = "wasm"))]
 		match &config.persist_path {
 			Some(path) => {
@@ -76,9 +82,13 @@ impl Datastore {
 			}
 			None => info!(target: TARGET, "Storage mode: in-memory only (no persist path)"),
 		}
-		// Create new configuration options
+		// Create new configuration options. The background GC worker is the
+		// only place surrealmx reclaims superseded MVCC versions and delete
+		// tombstones (there is no inline GC on the commit path), so it must
+		// run unless versioning is enabled with unlimited (zero) retention,
+		// in which case every version is retained forever.
 		let opts = DatabaseOptions {
-			enable_gc: config.retention_ns > 0,
+			enable_gc: !config.versioned || config.retention_ns > 0,
 			enable_cleanup: true,
 			..Default::default()
 		};
@@ -906,5 +916,69 @@ impl ScanCursorVals for MemValsCursor<'_> {
 			}
 			Ok(stats)
 		})
+	}
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod tests {
+	use super::*;
+
+	/// Number of stored version entries for `key`, including delete
+	/// tombstones.
+	fn stored_versions(db: &Database, key: &str) -> usize {
+		let tx = db.transaction(false);
+		let end = format!("{key}\0");
+		tx.scan_all_versions(key..end.as_str(), None, None).expect("scan_all_versions failed").len()
+	}
+
+	/// Poll until `check` passes or roughly ten seconds elapse. The background
+	/// GC worker ticks every 500ms, so a healthy datastore converges within a
+	/// tick or two of the relevant commit.
+	async fn eventually(mut check: impl FnMut() -> bool) -> bool {
+		for _ in 0..200 {
+			if check() {
+				return true;
+			}
+			tokio::time::sleep(Duration::from_millis(50)).await;
+		}
+		false
+	}
+
+	/// A non-versioned (zero-retention) datastore must reclaim superseded
+	/// MVCC versions and delete tombstones. surrealmx reclaims versions only
+	/// on its background GC worker — there is no inline GC on the commit
+	/// path — so this pins the worker being enabled for such datastores.
+	#[tokio::test]
+	async fn non_versioned_datastore_reclaims_superseded_versions() {
+		let ds = Datastore::new(MemoryConfig::default()).await.unwrap();
+		// Write an initial version of both keys, then supersede one and
+		// tombstone the other. Each transaction is dropped after commit so
+		// its registered snapshot does not hold back the GC watermark.
+		{
+			let mut tx = ds.db.transaction(true);
+			tx.set("updated", "one").unwrap();
+			tx.set("deleted", "one").unwrap();
+			tx.commit().unwrap();
+		}
+		{
+			let mut tx = ds.db.transaction(true);
+			tx.set("updated", "two").unwrap();
+			tx.del("deleted").unwrap();
+			tx.commit().unwrap();
+		}
+		// The superseded version is reclaimed, leaving only the live one.
+		assert!(
+			eventually(|| stored_versions(&ds.db, "updated") == 1).await,
+			"superseded version was not reclaimed by the background GC worker"
+		);
+		// The tombstoned version chain is reclaimed entirely.
+		assert!(
+			eventually(|| stored_versions(&ds.db, "deleted") == 0).await,
+			"delete tombstone was not reclaimed by the background GC worker"
+		);
+		// Reclamation must not touch the live state.
+		let tx = ds.db.transaction(false);
+		assert_eq!(tx.get("updated").unwrap().as_deref(), Some(&b"two"[..]));
+		assert_eq!(tx.get("deleted").unwrap(), None);
 	}
 }
