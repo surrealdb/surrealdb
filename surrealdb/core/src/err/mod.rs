@@ -784,7 +784,10 @@ pub(crate) enum Error {
 
 	/// Network target is not allowed
 	#[error("Access to network target '{0}' is not allowed")]
-	#[cfg_attr(not(feature = "http"), expect(dead_code))]
+	#[cfg_attr(
+		not(any(feature = "http", all(not(target_family = "wasm"), feature = "jwks"))),
+		expect(dead_code)
+	)]
 	NetTargetNotAllowed(String),
 
 	//
