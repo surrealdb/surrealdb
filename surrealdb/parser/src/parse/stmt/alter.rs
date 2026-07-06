@@ -977,6 +977,7 @@ impl Parse for ast::AlterUser {
 		let base = parser.parse_sync()?;
 
 		let mut secret = None;
+		let mut scram = None;
 		let mut comment = None;
 		let mut roles = None;
 		let mut session_duration = None;
@@ -1012,6 +1013,16 @@ impl Parse for ast::AlterUser {
 					let _ = parser.next();
 					parse_unordered_clause_sync(parser, &mut secret, peek.span, |parser| {
 						parser.parse_sync().map(ast::UserSecret::PassWord)
+					})?;
+				}
+				T![PASSSCRAM] => {
+					let _ = parser.next();
+					// Syntax only: captured verbatim, not semantically validated here
+					// (this parser resolves no literals and cannot reach core's
+					// `ScramCredential`). Lowering this AST to an executable statement
+					// MUST validate via `from_verifier_string`, as the `syn` parser does.
+					parse_unordered_clause_sync(parser, &mut scram, peek.span, |parser| {
+						parser.parse_sync::<ast::NodeId<ast::StringLit>>()
 					})?;
 				}
 				T![ROLES] => {
@@ -1091,6 +1102,7 @@ impl Parse for ast::AlterUser {
 			base,
 			span,
 			secret: secret.map(|x| x.0),
+			scram: scram.map(|x| x.0),
 			roles: roles.map(|x| x.0),
 			token_duration: token_duration.map(|x| x.0),
 			session_duration: session_duration.map(|x| x.0),

@@ -505,6 +505,8 @@ pub enum BaseTokenKind {
 	KwParam,
 	#[regex(r"(?i)PASSHASH")]
 	KwPasshash,
+	#[regex(r"(?i)PASSSCRAM")]
+	KwPassscram,
 	#[regex(r"(?i)PASSWORD")]
 	KwPassword,
 	#[regex(r"(?i)PATCH")]
@@ -1050,6 +1052,7 @@ impl BaseTokenKind {
 			BaseTokenKind::KwParallel => "keyword `PARALLEL`",
 			BaseTokenKind::KwParam => "keyword `PARAM`",
 			BaseTokenKind::KwPasshash => "keyword `PASSHASH`",
+			BaseTokenKind::KwPassscram => "keyword `PASSSCRAM`",
 			BaseTokenKind::KwPassword => "keyword `PASSWORD`",
 			BaseTokenKind::KwPatch => "keyword `PATCH`",
 			BaseTokenKind::KwPath => "keyword `PATH`",
@@ -1369,6 +1372,7 @@ impl BaseTokenKind {
 				| Self::KwParallel
 				| Self::KwParam
 				| Self::KwPasshash
+				| Self::KwPassscram
 				| Self::KwPassword
 				| Self::KwPatch
 				| Self::KwPath

@@ -243,7 +243,8 @@ use crate::val::{Datetime, TableName, Value};
 	session_duration: Some(Duration::from_secs(123)),
 	comment: Some("comment".to_string()),
 	base: crate::catalog::schema::base::Base::Root,
-}, 40)]
+	scram: None,
+}, 41)]
 fn test_serialize_deserialize<T>(#[case] original: T, #[case] expected_encoded_size: usize)
 where
 	T: KVValue<KeyContext = ()> + std::fmt::Debug + PartialEq,

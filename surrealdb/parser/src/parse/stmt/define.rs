@@ -2097,6 +2097,7 @@ impl Parse for ast::DefineUser {
 
 		let mut comment = None;
 		let mut secret = None;
+		let mut scram = None;
 		let mut roles = None;
 		let mut token_duration = None;
 		let mut session_duration = None;
@@ -2120,6 +2121,19 @@ impl Parse for ast::DefineUser {
 					let _ = parser.next();
 					parse_unordered_clause_sync(parser, &mut secret, peek.span, |parser| {
 						parser.parse_sync().map(UserSecret::PassHash)
+					})?;
+				}
+				T![PASSSCRAM] => {
+					let _ = parser.next();
+					// Syntax only: the verifier string is captured verbatim and NOT
+					// semantically validated here (this parser resolves no literals and
+					// depends on neither `surrealdb-core` nor its `ScramCredential`).
+					// When this AST is lowered to an executable statement, the lowering
+					// MUST validate via `iam::scram::ScramCredential::from_verifier_string`
+					// — the `syn` parser validates eagerly and the core `From` impls
+					// assume a validated verifier.
+					parse_unordered_clause_sync(parser, &mut scram, peek.span, |parser| {
+						parser.parse_sync::<NodeId<ast::StringLit>>()
 					})?;
 				}
 				T![ROLES] => {
@@ -2174,6 +2188,7 @@ impl Parse for ast::DefineUser {
 			base,
 			comment: comment.map(|x| x.0),
 			secret: secret.map(|x| x.0),
+			scram: scram.map(|x| x.0),
 			roles: roles.map(|x| x.0),
 			session_duration: session_duration.map(|x| x.0),
 			token_duration: token_duration.map(|x| x.0),

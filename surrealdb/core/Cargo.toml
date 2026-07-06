@@ -130,6 +130,7 @@ geo = { workspace = true, features = ["use-serde"] }
 geo-types = { workspace = true }
 http.workspace = true
 hex.workspace = true
+hmac.workspace = true
 humantime.workspace = true
 ipnet.workspace = true
 md-5.workspace = true
@@ -158,6 +159,7 @@ serde = { workspace = true, features = ["derive", "rc"] }
 serde_json.workspace = true
 sha1.workspace = true
 sha2.workspace = true
+stringprep.workspace = true
 strsim.workspace = true
 subtle.workspace = true
 sysinfo.workspace = true

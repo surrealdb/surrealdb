@@ -221,6 +221,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("PARALLEL") => TokenKind::Keyword(Keyword::Parallel),
 	UniCase::ascii("PARAM") => TokenKind::Keyword(Keyword::Param),
 	UniCase::ascii("PASSHASH") => TokenKind::Keyword(Keyword::Passhash),
+	UniCase::ascii("PASSSCRAM") => TokenKind::Keyword(Keyword::Passscram),
 	UniCase::ascii("PASSWORD") => TokenKind::Keyword(Keyword::Password),
 	UniCase::ascii("PATCH") => TokenKind::Keyword(Keyword::Patch),
 	UniCase::ascii("PERMISSIONS") => TokenKind::Keyword(Keyword::Permissions),

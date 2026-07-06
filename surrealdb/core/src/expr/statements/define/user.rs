@@ -1,14 +1,11 @@
 use anyhow::{Result, bail};
-use argon2::Argon2;
-use argon2::password_hash::{PasswordHasher, SaltString};
 use rand::distr::{Alphanumeric, SampleString};
-use rand_core::OsRng;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, UserProvider};
-use crate::catalog::{self, UserDefinition};
+use crate::catalog::{self, ScramCredential, UserDefinition};
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -29,6 +26,9 @@ pub(crate) struct DefineUserStatement {
 	pub roles: Vec<String>,
 	pub duration: UserDuration,
 	pub comment: Expr,
+	/// SCRAM-SHA-256 verifier material, derived alongside `hash` from a plaintext
+	/// password (or supplied via `PASSSCRAM`). `None` for PASSHASH-only users.
+	pub scram: Option<ScramCredential>,
 }
 
 impl Default for DefineUserStatement {
@@ -42,6 +42,7 @@ impl Default for DefineUserStatement {
 			roles: vec![],
 			duration: UserDuration::default(),
 			comment: Expr::Literal(Literal::None),
+			scram: None,
 		}
 	}
 }
@@ -52,14 +53,12 @@ impl DefineUserStatement {
 			kind: DefineKind::Default,
 			base,
 			name: Expr::Idiom(Idiom::field(user)),
-			hash: Argon2::default()
-				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
-				.expect("password hashing should not fail")
-				.to_string(),
+			hash: crate::iam::hash_password(pass),
 			code: Alphanumeric.sample_string(&mut rand::rng(), 128),
 			roles: vec![role],
 			duration: UserDuration::default(),
 			comment: Expr::Literal(Literal::None),
+			scram: Some(ScramCredential::generate(pass)),
 		}
 	}
 
@@ -98,6 +97,7 @@ impl DefineUserStatement {
 			session_duration,
 			comment,
 			base: self.base.into(),
+			scram: self.scram.clone(),
 		})
 	}
 
@@ -124,6 +124,7 @@ impl DefineUserStatement {
 				.as_ref()
 				.map(|x| Expr::Idiom(Idiom::field(x.clone())))
 				.unwrap_or(Expr::Literal(Literal::None)),
+			scram: def.scram.clone(),
 		}
 	}
 

@@ -15,6 +15,7 @@ pub mod issue;
 #[cfg(feature = "jwks")]
 pub mod jwks;
 pub mod reset;
+pub mod scram;
 pub mod signin;
 pub mod signup;
 pub mod token;
@@ -23,6 +24,22 @@ pub mod verify;
 pub use self::auth::*;
 pub use self::entities::*;
 use crate::catalog;
+
+/// Derive an Argon2id hash of a plaintext password for storage.
+///
+/// Centralizes the hashing so every place that turns a `PASSWORD` clause into
+/// stored credentials (DEFINE/ALTER USER conversions and the root-user
+/// bootstrap) agrees on the algorithm, parameters, and salt policy.
+pub(crate) fn hash_password(password: &str) -> String {
+	use argon2::Argon2;
+	use argon2::password_hash::{PasswordHasher, SaltString};
+	use rand_core::OsRng;
+
+	Argon2::default()
+		.hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
+		.expect("password hashing should not fail")
+		.to_string()
+}
 
 #[derive(Error, Debug)]
 #[non_exhaustive]

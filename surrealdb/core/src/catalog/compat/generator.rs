@@ -493,6 +493,11 @@ fn user_fixtures() -> TypeFixtures {
 				description: "user with database-level base",
 				bytes: fix::user_db_base().kv_encode_value().unwrap(),
 			},
+			Fixture {
+				name: "USER_WITH_SCRAM",
+				description: "user with SCRAM-SHA-256 verifier material",
+				bytes: fix::user_with_scram().kv_encode_value().unwrap(),
+			},
 		],
 	}
 }
@@ -1102,6 +1107,26 @@ fn generator_v3_1_1() {
 	run_generator("v3_1_1", "3.1.1");
 }
 
+/// Generate fixture bytes for the 3.3.0 wire format snapshot. Run with:
+///
+/// ```text
+/// cargo test -p surrealdb-core --lib \
+///     catalog::compat::generator::generator_v3_3_0 -- --ignored --nocapture
+/// ```
+///
+/// Copy the output into `v3_3_0.rs`, then paste the printed hash into
+/// the assertion in `test_v3_3_0_remains_unchanged` below.
+///
+/// 3.3.0 bumps `UserDefinition` to revision 2, adding the optional `scram`
+/// SCRAM-SHA-256 verifier field. Every `USER_*` fixture is re-encoded under
+/// the new revision (and a new `USER_WITH_SCRAM` fixture is added); every
+/// other fixture is byte-identical to 3.1.1.
+#[test]
+#[ignore]
+fn generator_v3_3_0() {
+	run_generator("v3_3_0", "3.3.0");
+}
+
 #[test]
 fn test_v3_0_0_beta_1_remains_unchanged() {
 	use sha2::{Digest, Sha256};
@@ -1175,4 +1200,24 @@ fn test_v3_1_1_remains_unchanged() {
 	let hash = Sha256::digest(v3_1_1);
 	let hash_str = hex::encode(hash);
 	assert_eq!(hash_str, "f7d260a6bbd3d9efba605f550b009c1c6ad3a82fab79578bf3611b1acc8802ae");
+}
+
+#[test]
+fn test_v3_3_0_remains_unchanged() {
+	use sha2::{Digest, Sha256};
+
+	// Read the v3_3_0.rs file, hash it and assert on the hash.
+	//
+	// v3_3_0 captures the wire format after `UserDefinition` was bumped to
+	// revision 2, adding the optional `scram` SCRAM-SHA-256 verifier field.
+	// The `USER_*` fixtures are re-encoded under the new revision and a new
+	// `USER_WITH_SCRAM` fixture is added; every other fixture is
+	// byte-identical to 3.1.1.
+	//
+	// NEVER modify v3_3_0.rs after commit; if a real format change ships,
+	// capture a new version snapshot rather than rotating this hash.
+	let v3_3_0 = include_bytes!("v3_3_0.rs");
+	let hash = Sha256::digest(v3_3_0);
+	let hash_str = hex::encode(hash);
+	assert_eq!(hash_str, "0093297cce5017b779683c3ab8a11c1785a6d1eb91d5f7bed7789de6af4a4b2b");
 }

@@ -155,6 +155,7 @@ keyword! {
 	Parallel => "PARALLEL",
 	Param => "PARAM",
 	Passhash => "PASSHASH",
+	Passscram => "PASSSCRAM",
 	Password => "PASSWORD",
 	Patch => "PATCH",
 	Permissions => "PERMISSIONS",

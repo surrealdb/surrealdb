@@ -837,6 +837,16 @@ impl Parser<'_> {
 						self.parse_string_lit()?,
 					));
 				}
+				t!("PASSSCRAM") => {
+					let token = self.pop_peek();
+					let verifier = self.parse_string_lit()?;
+					// Validate here so downstream conversions stay infallible.
+					if let Err(e) = crate::catalog::ScramCredential::from_verifier_string(&verifier)
+					{
+						bail!("Invalid SCRAM verifier: {e}", @token.span => "Expected a valid `SCRAM-SHA-256$...` verifier string");
+					}
+					res.scram = Some(verifier);
+				}
 				t!("ROLES") => {
 					self.pop_peek();
 					let mut roles = vec![self.parse_ident()?.into_string()];

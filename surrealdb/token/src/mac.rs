@@ -562,6 +562,9 @@ macro_rules! T {
 	(PASSHASH) => {
 		$crate::BaseTokenKind::KwPasshash
 	};
+	(PASSSCRAM) => {
+		$crate::BaseTokenKind::KwPassscram
+	};
 	(PASSWORD) => {
 		$crate::BaseTokenKind::KwPassword
 	};

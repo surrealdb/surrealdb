@@ -8,6 +8,7 @@ use tracing::instrument;
 
 use super::AlterKind;
 use crate::catalog;
+use crate::catalog::ScramCredential;
 use crate::catalog::providers::UserProvider;
 use crate::ctx::FrozenContext;
 use crate::dbs::Options;
@@ -24,6 +25,10 @@ pub(crate) struct AlterUserStatement {
 	pub base: Base,
 	pub if_exists: bool,
 	pub hash: Option<String>,
+	/// SCRAM verifier change. Outer `Option`: whether the SCRAM field is being
+	/// changed at all; inner `Option`: the new value (`None` clears it — e.g.
+	/// when the password is set via `PASSHASH`, invalidating any prior verifier).
+	pub scram: Option<Option<ScramCredential>>,
 	pub roles: AlterKind<Vec<String>>,
 	pub token_duration: AlterKind<Option<Duration>>,
 	pub session_duration: AlterKind<Option<Duration>>,
@@ -37,6 +42,7 @@ impl Default for AlterUserStatement {
 			base: Base::Root,
 			if_exists: false,
 			hash: None,
+			scram: None,
 			roles: AlterKind::None,
 			token_duration: AlterKind::None,
 			session_duration: AlterKind::None,
@@ -67,6 +73,9 @@ impl AlterUserStatement {
 	fn apply(&self, user: &mut catalog::UserDefinition) {
 		if let Some(ref h) = self.hash {
 			user.hash.clone_from(h);
+		}
+		if let Some(ref s) = self.scram {
+			user.scram.clone_from(s);
 		}
 		match self.roles {
 			AlterKind::Set(ref v) => user.roles.clone_from(v),

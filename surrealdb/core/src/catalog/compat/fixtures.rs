@@ -1165,6 +1165,7 @@ pub fn user_basic() -> UserDefinition {
 		session_duration: None,
 		comment: None,
 		base: Base::Root,
+		scram: None,
 	}
 }
 
@@ -1179,6 +1180,7 @@ pub fn user_with_durations() -> UserDefinition {
 		session_duration: Some(Duration::from_secs(86400)),
 		comment: Some("API service account".to_string()),
 		base: Base::Ns,
+		scram: None,
 	}
 }
 
@@ -1193,6 +1195,26 @@ pub fn user_db_base() -> UserDefinition {
 		session_duration: None,
 		comment: Some("Database-level user".to_string()),
 		base: Base::Db,
+		scram: None,
+	}
+}
+
+/// User with SCRAM-SHA-256 verifier material (revision 2)
+pub fn user_with_scram() -> UserDefinition {
+	UserDefinition {
+		name: "scram_user".into(),
+		hash: "$argon2id$v=19$m=65536,t=3,p=4$hash".to_string(),
+		code: "".to_string(),
+		roles: vec!["owner".to_string()],
+		token_duration: None,
+		session_duration: None,
+		comment: None,
+		base: Base::Root,
+		scram: Some(crate::catalog::ScramCredential::generate_with(
+			"pencil",
+			b"0123456789abcdef",
+			4096,
+		)),
 	}
 }
 

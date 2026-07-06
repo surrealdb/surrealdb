@@ -100,6 +100,9 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineUserStatement {
 			name,
 			base,
 			pass_type,
+			// A SCRAM verifier must be a valid `SCRAM-SHA-256$...` string, which
+			// arbitrary bytes won't satisfy; leave it unset for fuzzing.
+			scram: None,
 			token_duration: u.arbitrary()?,
 			session_duration: u.arbitrary()?,
 			roles,

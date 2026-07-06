@@ -1,10 +1,8 @@
-use argon2::Argon2;
-use argon2::password_hash::{PasswordHasher, SaltString};
 use rand::distr::{Alphanumeric, SampleString};
-use rand_core::OsRng;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
+use crate::catalog::ScramCredential;
 use crate::fmt::{CoverStmts, EscapeKwFreeIdent, QuoteStr};
 use crate::sql::{Base, Expr, Literal};
 use crate::types::PublicDuration;
@@ -24,6 +22,11 @@ pub(crate) struct DefineUserStatement {
 	pub name: Expr,
 	pub base: Base,
 	pub pass_type: PassType,
+	/// Optional SCRAM-SHA-256 verifier string (`SCRAM-SHA-256$...`). Additive:
+	/// it may coexist with `PASSHASH`, which is how export/import round-trips
+	/// both the Argon2 hash and the SCRAM verifier. When `PASSWORD` is given and
+	/// this is `None`, the verifier is derived from the plaintext.
+	pub scram: Option<String>,
 	pub roles: Vec<String>,
 	pub token_duration: Expr,
 	pub session_duration: Expr,
@@ -38,6 +41,7 @@ impl Default for DefineUserStatement {
 			name: Expr::Literal(Literal::None),
 			base: Base::Root,
 			pass_type: PassType::Unset,
+			scram: None,
 			roles: vec![],
 			// Tokens default to a 1-hour expiry when DURATION FOR TOKEN is
 			// omitted. Sessions default to no expiry.
@@ -63,6 +67,10 @@ impl ToSql for DefineUserStatement {
 			PassType::Unset => {}
 			PassType::Hash(ref x) => write_sql!(f, fmt, " PASSHASH {}", QuoteStr(x)),
 			PassType::Password(ref x) => write_sql!(f, fmt, " PASSWORD {}", QuoteStr(x)),
+		}
+
+		if let Some(ref x) = self.scram {
+			write_sql!(f, fmt, " PASSSCRAM {}", QuoteStr(x));
 		}
 
 		write_sql!(f, fmt, " ROLES ");
@@ -91,14 +99,28 @@ impl ToSql for DefineUserStatement {
 #[allow(clippy::fallible_impl_from)]
 impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement {
 	fn from(v: DefineUserStatement) -> Self {
+		// An explicit PASSSCRAM verifier takes precedence (import/round-trip);
+		// otherwise derive from the plaintext password when one is provided.
+		// The verifier is validated at parse time (both DEFINE USER parsers call
+		// `from_verifier_string` and bail on error), so `expect` upholds that
+		// invariant loudly instead of silently dropping a bad verifier — the same
+		// way the Argon2 hashing treats its impossible failure.
+		let scram = if let Some(ref s) = v.scram {
+			Some(
+				ScramCredential::from_verifier_string(s)
+					.expect("PASSSCRAM verifier must be validated at parse time"),
+			)
+		} else if let PassType::Password(ref p) = v.pass_type {
+			Some(ScramCredential::generate(p))
+		} else {
+			None
+		};
+
 		let hash = match v.pass_type {
 			PassType::Unset => String::new(),
 			PassType::Hash(x) => x,
 			// TODO: Move out of AST.
-			PassType::Password(p) => Argon2::default()
-				.hash_password(p.as_bytes(), &SaltString::generate(&mut OsRng))
-				.expect("password hashing should not fail")
-				.to_string(),
+			PassType::Password(p) => crate::iam::hash_password(&p),
 		};
 
 		let code = Alphanumeric.sample_string(&mut rand::rng(), 128);
@@ -109,6 +131,7 @@ impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement 
 			base: v.base.into(),
 			hash,
 			code,
+			scram,
 			roles: v.roles,
 			duration: crate::expr::user::UserDuration {
 				token: v.token_duration.into(),
@@ -126,6 +149,7 @@ impl From<crate::expr::statements::DefineUserStatement> for DefineUserStatement 
 			name: v.name.into(),
 			base: v.base.into(),
 			pass_type: PassType::Hash(v.hash),
+			scram: v.scram.as_ref().map(|c| c.to_verifier_string()),
 			roles: v.roles,
 			token_duration: v.duration.token.into(),
 			session_duration: v.duration.session.into(),

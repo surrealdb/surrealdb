@@ -1155,6 +1155,9 @@ ast_type! {
 		pub name: NodeId<Expr>,
 		pub base: Base,
 		pub secret: Option<UserSecret>,
+		/// SCRAM-SHA-256 verifier string (`PASSSCRAM`). Additive: may coexist with
+		/// a `PASSHASH`/`PASSWORD` secret.
+		pub scram: Option<NodeId<StringLit>>,
 		pub roles: Option<NodeListId<Ident>>,
 		pub session_duration: Option<NodeId<Expr>>,
 		pub token_duration: Option<NodeId<Expr>>,
@@ -1529,6 +1532,8 @@ ast_type! {
 		pub name: NodeId<Expr>,
 		pub base: Base,
 		pub secret: Option<UserSecret>,
+		/// SCRAM-SHA-256 verifier string (`PASSSCRAM`).
+		pub scram: Option<NodeId<StringLit>>,
 		pub roles: Option<NodeListId<Ident>>,
 		pub session_duration: Option<AlterKind<Spanned<Duration>>>,
 		pub token_duration: Option<AlterKind<Spanned<Duration>>>,

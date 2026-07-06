@@ -1453,6 +1453,10 @@ criteria = "safe-to-deploy"
 version = "0.6.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.stringprep]]
+version = "0.1.5"
+criteria = "safe-to-deploy"
+
 [[exemptions.symlink]]
 version = "0.1.0"
 criteria = "safe-to-deploy"
@@ -1587,6 +1591,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.unicode-ident]]
 version = "1.0.24"
+criteria = "safe-to-deploy"
+
+[[exemptions.unicode-properties]]
+version = "0.1.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.untrusted]]

@@ -1152,6 +1152,7 @@ mod tests {
 					"$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
 						.to_string(),
 				),
+				scram: None,
 				roles: vec!["nonexistent".to_owned()],
 				token_duration: Expr::Literal(Literal::None),
 				session_duration: Expr::Literal(Literal::None),

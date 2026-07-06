@@ -1,7 +1,7 @@
 use reblessive::Stk;
 use surrealdb_strand::Strand;
 
-use crate::catalog::{ApiMethod, EventDefinition, EventKind};
+use crate::catalog::{ApiMethod, EventDefinition, EventKind, ScramCredential};
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
@@ -371,6 +371,16 @@ impl Parser<'_> {
 						bail!("Unexpected token `PASSHASH`", @token.span => "Can't set both a passhash and a password");
 					}
 					res.pass_type = PassType::Hash(self.parse_string_lit()?);
+				}
+				t!("PASSSCRAM") => {
+					let token = self.pop_peek();
+					let verifier = self.parse_string_lit()?;
+					// Validate the verifier string here so downstream conversions
+					// (the infallible `From` impls) never have to.
+					if let Err(e) = ScramCredential::from_verifier_string(&verifier) {
+						bail!("Invalid SCRAM verifier: {e}", @token.span => "Expected a valid `SCRAM-SHA-256$...` verifier string");
+					}
+					res.scram = Some(verifier);
 				}
 				t!("ROLES") => {
 					self.pop_peek();
