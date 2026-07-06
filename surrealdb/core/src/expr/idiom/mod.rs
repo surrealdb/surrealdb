@@ -306,7 +306,12 @@ impl SerializeRevisioned for Idiom {
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		SerializeRevisioned::serialize_revisioned(&self.to_raw_string(), writer)
+		// Persist idioms via their canonical SQL form (like `Expr` does), not
+		// `to_raw_string()`. The SQL printer escapes identifiers that collide with
+		// reserved keywords (e.g. a field named `function`), so the value round-trips
+		// through `Idiom::from_str` below. `to_raw_string()` uses `EscapeKwFreeIdent`,
+		// which leaves such names bare and makes the stored schema unreadable.
+		SerializeRevisioned::serialize_revisioned(&self.to_sql(), writer)
 	}
 }
 
