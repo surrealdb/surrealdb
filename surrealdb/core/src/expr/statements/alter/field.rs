@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 use tracing::instrument;
@@ -15,6 +15,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
+use crate::expr::statements::define::kind_contains_object;
 use crate::expr::{Base, Expr, Kind, Literal};
 use crate::iam::{Action, AuthLimit, ResourceKind};
 use crate::val::{TableName, Value};
@@ -174,6 +175,23 @@ impl AlterFieldStatement {
 		// TYPEs — validated against the fully-resolved definition. Without this,
 		// ALTER FIELD silently bypassed the restrictions DEFINE FIELD enforces.
 		crate::expr::statements::define::validate_id_field_restrictions(&df)?;
+
+		if df.flexible {
+			ensure!(
+				df.field_kind.as_ref().is_some_and(kind_contains_object),
+				Error::Thrown("FLEXIBLE can only be used with types containing object".into())
+			);
+			let Some(tb) = txn.get_tb(ns, db, &what, None).await? else {
+				return Err(Error::TbNotFound {
+					name: what.clone(),
+				}
+				.into());
+			};
+			ensure!(
+				tb.schemafull,
+				Error::Thrown("FLEXIBLE can only be used in SCHEMAFULL tables".into())
+			);
+		}
 
 		let key = crate::key::table::fd::new(ns, db, &what, &name);
 		txn.set(&key, &df).await?;

@@ -4,7 +4,6 @@ use crate::sql::access_type::{BearerAccess, BearerAccessSubject};
 use crate::sql::arbitrary::{
 	self, arb_group, arb_opt, arb_order, arb_splits, arb_vec1, atleast_one, insert_data,
 };
-use crate::sql::kind::KindLiteral;
 use crate::sql::statements::SetStatement;
 use crate::sql::statements::alter::{
 	AlterDatabaseStatement, AlterIndexStatement, AlterKind, AlterNamespaceStatement,
@@ -251,19 +250,8 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineFieldStatement {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
 		let field_kind = u.arbitrary()?;
 
-		fn contains_object(kind: &Kind) -> bool {
-			match kind {
-				Kind::Object => true,
-				Kind::Either(kinds) => kinds.iter().any(contains_object),
-				Kind::Array(inner, _) | Kind::Set(inner, _) => contains_object(inner),
-				Kind::Literal(KindLiteral::Object(_)) => true,
-				Kind::Literal(KindLiteral::Array(x)) => x.iter().any(contains_object),
-				_ => false,
-			}
-		}
-
 		let flexible = if let Some(kind) = &field_kind
-			&& contains_object(kind)
+			&& crate::expr::statements::define::kind_contains_object(&kind.clone().into())
 		{
 			u.arbitrary()?
 		} else {

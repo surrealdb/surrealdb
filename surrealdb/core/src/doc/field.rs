@@ -13,7 +13,8 @@ use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
-use crate::expr::kind::{Kind, KindLiteral};
+use crate::expr::kind::Kind;
+use crate::expr::statements::define::kind_contains_object;
 use crate::iam::{Action, AuthLimit};
 use crate::val::value::every::ArrayBehaviour;
 use crate::val::{RecordId, Value};
@@ -65,18 +66,6 @@ impl Document {
 			let mut explicit_field_names = HashSet::new();
 			for fd in self.doc_ctx.fd()?.iter() {
 				explicit_field_names.insert(fd.name.clone());
-			}
-
-			// Check if the kind contains object (including option<object>, array<object>, etc.)
-			fn kind_contains_object(kind: &Kind) -> bool {
-				match kind {
-					Kind::Object => true,
-					Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
-					Kind::Array(inner, _) | Kind::Set(inner, _) => kind_contains_object(inner),
-					Kind::Literal(KindLiteral::Object(_)) => true,
-					Kind::Literal(KindLiteral::Array(x)) => x.iter().any(kind_contains_object),
-					_ => false,
-				}
 			}
 
 			// Loop through all field definitions

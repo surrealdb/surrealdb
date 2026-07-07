@@ -1,6 +1,7 @@
 use reblessive::Stk;
 
 use crate::catalog::{ApiMethod, EventDefinition, EventKind};
+use crate::expr::statements::define::kind_contains_object;
 use crate::sql::TableType;
 use crate::sql::filter::Filter;
 use crate::sql::statements::alter::field::AlterDefault;
@@ -430,6 +431,16 @@ impl Parser<'_> {
 				t!("TYPE") => {
 					self.pop_peek();
 					res.kind = AlterKind::Set(stk.run(|stk| self.parse_inner_kind(stk)).await?);
+					if self.eat(t!("FLEXIBLE")) {
+						if !matches!(&res.kind, AlterKind::Set(k) if kind_contains_object(&k.clone().into()))
+						{
+							bail!(
+								"FLEXIBLE can only be used with types containing object",
+								@self.last_span
+							);
+						}
+						res.flexible = AlterKind::Set(());
+					}
 				}
 				t!("FLEXIBLE") => {
 					self.pop_peek();

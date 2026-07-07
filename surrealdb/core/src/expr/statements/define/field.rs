@@ -25,6 +25,19 @@ use crate::idx::planner::ScanDirection;
 use crate::kvs::{NORMAL_BATCH_SIZE, Transaction};
 use crate::val::{TableName, Value};
 
+/// Returns true if this type contains an `object` anywhere (including literal
+/// object types, `array<object>` and `option<object>`).
+pub(crate) fn kind_contains_object(kind: &Kind) -> bool {
+	match kind {
+		Kind::Object => true,
+		Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
+		Kind::Array(inner, _) | Kind::Set(inner, _) => kind_contains_object(inner),
+		Kind::Literal(KindLiteral::Object(_)) => true,
+		Kind::Literal(KindLiteral::Array(kinds)) => kinds.iter().any(kind_contains_object),
+		_ => false,
+	}
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) enum DefineDefault {
 	#[default]
@@ -350,6 +363,7 @@ impl DefineFieldStatement {
 				{
 					FieldDefinition {
 						field_kind: Some(cur_kind),
+						flexible: existing.flexible || definition.flexible,
 						..existing.clone()
 					}
 				} else {
@@ -357,6 +371,7 @@ impl DefineFieldStatement {
 						name: name.clone(),
 						table: definition.table.clone(),
 						field_kind: Some(cur_kind),
+						flexible: definition.flexible,
 						..Default::default()
 					}
 				};
@@ -628,6 +643,11 @@ impl DefineFieldStatement {
 		definition: &catalog::FieldDefinition,
 	) -> Result<()> {
 		if self.flexible {
+			ensure!(
+				self.field_kind.as_ref().is_some_and(kind_contains_object),
+				Error::Thrown("FLEXIBLE can only be used with types containing object".into())
+			);
+
 			// Get the table definition
 			let txn = ctx.tx();
 			let Some(tb) = txn.get_tb(ns, db, &definition.table, None).await? else {

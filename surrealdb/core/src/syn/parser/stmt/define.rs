@@ -2,12 +2,12 @@ use reblessive::Stk;
 use surrealdb_strand::Strand;
 
 use crate::catalog::{ApiMethod, EventDefinition, EventKind, ScramCredential};
+use crate::expr::statements::define::kind_contains_object;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
 use crate::sql::filter::Filter;
 use crate::sql::index::{DiskAnnParams, Distance, HnswParams, VectorType};
-use crate::sql::kind::KindLiteral;
 use crate::sql::statements::define::config::api::{ApiConfig, Middleware};
 use crate::sql::statements::define::config::defaults::DefaultConfig;
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
@@ -22,7 +22,7 @@ use crate::sql::statements::define::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, DefineModuleStatement, Expr, Index, Kind, Literal, Param, Permission, Permissions,
+	AccessType, DefineModuleStatement, Expr, Index, Literal, Param, Permission, Permissions,
 	Scoring, TableType, access_type, table_type,
 };
 #[cfg(feature = "surrealism")]
@@ -969,31 +969,20 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.field_kind = Some(stk.run(|ctx| self.parse_inner_kind(ctx)).await?);
 
-					// Check if FLEXIBLE follows TYPE
+					// FLEXIBLE is a field clause: relax SCHEMAFULL object field checking for
+					// every object reachable in this field's type (including nested
+					// `array<object>` arms). It does not change the stored `Kind`.
 					if self.eat(t!("FLEXIBLE")) {
-						// Validate that the field_kind contains an object
-						fn kind_contains_object(kind: &Kind) -> bool {
-							match kind {
-								Kind::Object => true,
-								Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
-								Kind::Array(inner, _) | Kind::Set(inner, _) => {
-									kind_contains_object(inner)
-								}
-								Kind::Literal(KindLiteral::Object(_)) => true,
-								Kind::Literal(KindLiteral::Array(x)) => {
-									x.iter().any(kind_contains_object)
-								}
-								_ => false,
-							}
+						if !res
+							.field_kind
+							.as_ref()
+							.is_some_and(|k| kind_contains_object(&k.clone().into()))
+						{
+							bail!(
+								"FLEXIBLE can only be used with types containing object",
+								@self.last_span
+							);
 						}
-
-						let is_valid_for_flexible =
-							res.field_kind.as_ref().is_some_and(kind_contains_object);
-
-						if !is_valid_for_flexible {
-							bail!("FLEXIBLE can only be used with types containing object", @self.last_span);
-						}
-
 						res.flexible = true;
 					}
 				}
