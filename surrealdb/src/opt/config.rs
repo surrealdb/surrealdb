@@ -1,5 +1,5 @@
 #[cfg(storage)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[cfg(storage)]
@@ -125,7 +125,7 @@ impl Config {
 	pub fn bucket_folder_allowlist<I, P>(mut self, paths: I) -> Self
 	where
 		I: IntoIterator<Item = P>,
-		P: AsRef<std::path::Path>,
+		P: AsRef<Path>,
 	{
 		self.datastore_config =
 			with_path_allowlist(self.datastore_config, "bucket_folder_allowlist", paths);
@@ -137,7 +137,7 @@ impl Config {
 	pub fn file_allowlist<I, P>(mut self, paths: I) -> Self
 	where
 		I: IntoIterator<Item = P>,
-		P: AsRef<std::path::Path>,
+		P: AsRef<Path>,
 	{
 		self.datastore_config = with_path_allowlist(self.datastore_config, "file_allowlist", paths);
 		self
@@ -178,14 +178,22 @@ impl Config {
 fn with_path_allowlist<I, P>(config: ConfigMap, key: &str, paths: I) -> ConfigMap
 where
 	I: IntoIterator<Item = P>,
-	P: AsRef<std::path::Path>,
+	P: AsRef<Path>,
 {
-	let value = paths
+	config.with_key_value(key, path_allowlist_value(paths))
+}
+
+#[cfg(storage)]
+fn path_allowlist_value<I, P>(paths: I) -> String
+where
+	I: IntoIterator<Item = P>,
+	P: AsRef<Path>,
+{
+	paths
 		.into_iter()
 		.map(|path| path.as_ref().to_string_lossy().into_owned())
 		.collect::<Vec<_>>()
-		.join(path_allowlist_delimiter());
-	config.with_key_value(key, value)
+		.join(path_allowlist_delimiter())
 }
 
 #[cfg(storage)]
