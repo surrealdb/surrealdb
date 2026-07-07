@@ -247,19 +247,10 @@ categories.workspace = true
 license-file.workspace = true
 
 [features]
+# Inherit the shared default feature set from `surrealdb-server` so the two
+# crates don't duplicate the list. The binary only adds `cli` on top.
 default = [
-    "allocator",
-    "allocation-tracking",
-    "storage-mem",
-    "storage-surrealkv",
-    "storage-rocksdb",
-    "storage-tikv",
-    "scripting",
-    "http",
-    "surrealism",
-    "graphql",
-    "gql",
-    "mcp",
+    "surrealdb-server/default",
     "cli",
 ]
 

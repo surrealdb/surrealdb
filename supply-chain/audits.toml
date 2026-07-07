@@ -297,6 +297,12 @@ user-id = 267 # Tony Arcieri (tarcieri)
 start = "2021-04-26"
 end = "2026-05-06"
 
+[[trusted.crossbeam-epoch]]
+criteria = "safe-to-deploy"
+user-id = 33035 # Taiki Endo (taiki-e)
+start = "2020-10-12"
+end = "2027-07-07"
+
 [[trusted.cxx]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)

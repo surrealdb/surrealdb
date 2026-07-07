@@ -16,18 +16,23 @@ categories.workspace = true
 # Public features
 allocation-tracking = ["surrealdb-core/allocation-tracking"]
 allocator = ["surrealdb-core/allocator"]
+# Shared default feature set, inherited by the `surreal` binary crate via
+# `surrealdb-server/default` so the two crates don't duplicate the list.
+# The binary additionally enables `cli` on top of this set.
 default = [
     "allocator",
     "allocation-tracking",
     "storage-mem",
     "storage-surrealkv",
     "storage-rocksdb",
+    "storage-tikv",
+    "jwks",
     "scripting",
     "http",
     "surrealism",
     "graphql",
     "gql",
-    "cli",
+    "mcp",
 ]
 http = ["surrealdb-core/http"]
 jwks = ["surrealdb-core/jwks"]
