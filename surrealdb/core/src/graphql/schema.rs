@@ -956,12 +956,15 @@ pub(crate) fn graphql_to_sql_kind_with_scope(
 		Kind::Any => match val {
 			GraphqlValue::String(s) => {
 				use Kind::*;
+				// Detect the temporal/uuid formats the datastore cannot coerce
+				// from a plain string, so nested `datetime`/`duration`/`uuid`
+				// subfields inside `object`-typed fields still work. These
+				// checks are format-guarded and never match a plain string
+				// like "9000" or "10:00". Any other string is kept verbatim —
+				// GraphQL input strings are data, not embedded SurrealQL, so we
+				// must not re-parse them (doing so turned "9000" into the
+				// integer 9000 and broke coercion against `TYPE string`).
 				any_try_kinds!(val, Datetime, Duration, Uuid);
-				if let Ok(expr) = syn::expr_legacy_strand(s.as_str())
-					&& let Ok(out) = convert_static_expr(expr.into())
-				{
-					return Ok(out);
-				}
 				Ok(SurValue::String(s.as_str().into()))
 			}
 			GraphqlValue::Null => Ok(SurValue::Null),

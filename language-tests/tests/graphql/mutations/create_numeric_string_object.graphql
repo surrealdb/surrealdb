@@ -1,0 +1,28 @@
+/**
+[env]
+imports = ["../_schema.surql"]
+
+[test]
+reason = "Numeric- and time-looking strings inside an object-typed field stay strings and are not re-parsed as SurrealQL literals"
+
+[[test.results]]
+value = "{ createPerson: { address: { city: '10:00', country: '9000' }, id: 'person:num', name: 'Num' } }"
+*/
+mutation {
+	createPerson(data: {
+		id: "num",
+		name: "Num",
+		age: 1,
+		active: true,
+		score: 1.0,
+		tags: [],
+		address: { city: "10:00", country: "9000" }
+	}) {
+		id
+		name
+		address {
+			city
+			country
+		}
+	}
+}
